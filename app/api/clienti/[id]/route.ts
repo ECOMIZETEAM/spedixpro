@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -7,7 +7,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
-  const { data: cliente } = await supabase.from('clienti').select('*').eq('id', id).eq('master_id', utente?.master_id).single()
+  const { data: cliente } = await supabase
+    .from('clienti')
+    .select('*, listini_clienti(id,nome)')
+    .eq('id', id)
+    .eq('master_id', utente?.master_id)
+    .single()
   if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 404 })
   return NextResponse.json(cliente)
 }
