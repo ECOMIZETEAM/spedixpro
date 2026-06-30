@@ -127,10 +127,11 @@ export async function spediamoproCreateShipment(
   }
 ): Promise<{
   id: number
-  trackingCode: string
-  trackingUrl: string
+  trackingCode: string | null
+  trackingUrl: string | null
   totalPrice: number
-  code: string
+  code: string | null
+  raw: any
 }> {
   const token = await getSpediamoproToken(authcode)
 
@@ -161,12 +162,20 @@ export async function spediamoproCreateShipment(
     throw new Error(details || json.error?.message || 'SpediamoPro create shipment failed')
   }
 
+  const d = json.data || json
+
+  // I nomi esatti dei campi possono variare — proviamo diverse possibilità note
+  const trackingCode = d.trackingCode || d.tracking_code || d.barcode || d.parcelBarcode || d.code || null
+  const trackingUrl = d.trackingUrl || d.tracking_url || null
+  const totalPrice = d.totalPrice ?? d.total_price ?? params.quotation.totalPrice ?? 0
+
   return {
-    id: json.data.id,
-    trackingCode: json.data.trackingCode,
-    trackingUrl: json.data.trackingUrl,
-    totalPrice: json.data.totalPrice,
-    code: json.data.code,
+    id: d.id,
+    trackingCode,
+    trackingUrl,
+    totalPrice,
+    code: d.code || null,
+    raw: json, // risposta grezza completa per debug
   }
 }
 
@@ -175,6 +184,9 @@ export async function spediamoproGetLabel(authcode: string, shipmentId: number):
   const res = await fetch(`${BASE_URL}/shipments/${shipmentId}/labels`, {
     headers: { 'Authorization': `Bearer ${token}` },
   })
-  if (!res.ok) throw new Error('SpediamoPro label download failed')
+  if (!res.ok) {
+    const errText = await res.text()
+    throw new Error(`SpediamoPro label download failed: ${errText}`)
+  }
   return Buffer.from(await res.arrayBuffer())
 }
