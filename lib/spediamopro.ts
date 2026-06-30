@@ -206,14 +206,18 @@ export async function spediamoproWaitForTracking(authcode: string, shipmentId: n
   return null
 }
 
-export async function spediamoproGetLabel(authcode: string, shipmentId: number): Promise<Buffer> {
+export async function spediamoproGetLabel(authcode: string, shipmentId: number, maxAttempts = 5, delayMs = 2000): Promise<Buffer> {
   const token = await getSpediamoproToken(authcode)
-  const res = await fetch(`${BASE_URL}/shipments/${shipmentId}/labels`, {
-    headers: { 'Authorization': `Bearer ${token}` },
-  })
-  if (!res.ok) {
-    const errText = await res.text()
-    throw new Error(`SpediamoPro label download failed: ${errText}`)
+  let lastError = ''
+  for (let i = 0; i < maxAttempts; i++) {
+    const res = await fetch(`${BASE_URL}/shipments/${shipmentId}/labels`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    if (res.ok) {
+      return Buffer.from(await res.arrayBuffer())
+    }
+    lastError = await res.text()
+    if (i < maxAttempts - 1) await new Promise(r => setTimeout(r, delayMs))
   }
-  return Buffer.from(await res.arrayBuffer())
+  throw new Error(`SpediamoPro label download failed: ${lastError}`)
 }
