@@ -179,6 +179,33 @@ export async function spediamoproCreateShipment(
   }
 }
 
+export async function spediamoproGetShipment(authcode: string, shipmentId: number): Promise<any> {
+  const token = await getSpediamoproToken(authcode)
+  const res = await fetch(`${BASE_URL}/shipments/${shipmentId}`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    const errText = await res.text()
+    throw new Error(`SpediamoPro get shipment failed: ${errText}`)
+  }
+  return res.json()
+}
+
+export async function spediamoproWaitForTracking(authcode: string, shipmentId: number, maxAttempts = 4, delayMs = 1500): Promise<string | null> {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const json = await spediamoproGetShipment(authcode, shipmentId)
+      const d = json.data || json
+      const tracking = d.parcels?.[0]?.tracking || d.trackingCode || null
+      if (tracking) return tracking
+    } catch (e) {
+      console.error('Polling tracking error:', e)
+    }
+    if (i < maxAttempts - 1) await new Promise(r => setTimeout(r, delayMs))
+  }
+  return null
+}
+
 export async function spediamoproGetLabel(authcode: string, shipmentId: number): Promise<Buffer> {
   const token = await getSpediamoproToken(authcode)
   const res = await fetch(`${BASE_URL}/shipments/${shipmentId}/labels`, {

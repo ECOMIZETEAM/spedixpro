@@ -4,6 +4,7 @@ import {
   spediamoproGetQuotation,
   spediamoproCreateShipment,
   spediamoproGetLabel,
+  spediamoproWaitForTracking,
   kgToGrams, cmToMm, euroToCents, centsToEuro
 } from '@/lib/spediamopro'
 
@@ -180,8 +181,12 @@ export async function POST(req: NextRequest) {
         externalReference: body.notes || undefined,
       })
 
-      // Fallback: se non c'è trackingCode, usa l'ID della spedizione SpediamoPro come numero
-      const numeroFinale = shipment.trackingCode || `SP-${shipment.id}`
+      // Fallback: se non c'è trackingCode, prova a recuperarlo con polling (può arrivare dopo qualche secondo)
+      let trackingReale = shipment.trackingCode
+      if (!trackingReale) {
+        trackingReale = await spediamoproWaitForTracking(cred.authcode, shipment.id)
+      }
+      const numeroFinale = trackingReale || shipment.code || `SP-${shipment.id}`
 
       let etichettaUrl: string | null = null
       try {
