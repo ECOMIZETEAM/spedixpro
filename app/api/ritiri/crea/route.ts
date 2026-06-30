@@ -13,7 +13,6 @@ export async function POST(req: NextRequest) {
   const masterId = utente.master_id
   const clienteId = utente.ruolo === 'cliente' ? utente.cliente_id : (body.clienteId || null)
 
-  // Trova il corriere spedisci.online del master
   const { data: corriere } = await supabase
     .from('corrieri').select('id,credenziali').eq('master_id', masterId).eq('tipo', 'spedisci').single()
 
@@ -29,6 +28,38 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Data ritiro obbligatoria' }, { status: 400 })
   }
 
+  // *** FIX: recupera un contractCode VALIDO chiamando prima /shipping/rates ***
+  // Il campo "codice_contratto" salvato nel DB è cifrato e non utilizzabile direttamente.
+  const ratesRes = await fetch(`${baseUrl}/shipping/rates`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      packages: [{
+        length: body.lunghezza || 20, width: body.larghezza || 15, height: body.altezza || 10,
+        weight: body.pesoTotale || 1,
+      }],
+      shipFrom: {
+        name: body.mittNome, company: body.mittNome, street1: body.mittIndirizzo,
+        city: body.mittCitta, state: body.mittProvincia || '', postalCode: body.mittCap,
+        country: 'IT', phone: body.mittTelefono || null, email: body.mittEmail || null,
+      },
+      shipTo: {
+        name: body.mittNome, company: '', street1: body.mittIndirizzo,
+        city: body.mittCitta, state: body.mittProvincia || '', postalCode: body.mittCap,
+        country: 'IT', phone: null, email: null,
+      },
+      notes: '', insuranceValue: 0, codValue: 0, accessoriServices: [],
+    }),
+  })
+
+  const rates = await ratesRes.json()
+  if (!Array.isArray(rates) || !rates.length) {
+    return NextResponse.json({ error: 'Impossibile recuperare un contratto valido per il ritiro' }, { status: 400 })
+  }
+
+  const contractCode = body.contractCode || rates[0].contractCode
+  const carrierCode = rates[0].carrierCode
+
   const packagesDetails = [{
     weight: String(body.pesoTotale || 1),
     length: body.lunghezza || undefined,
@@ -38,7 +69,8 @@ export async function POST(req: NextRequest) {
   }]
 
   const payload: any = {
-    contractCode: body.contractCode || cred.codice_contratto || '',
+    contractCode,
+    carrierCode,
     pickupDate: body.dataRitiro,
     pickupTime: body.orarioRitiro || undefined,
     specialInstruction: body.istruzioni || undefined,
@@ -63,10 +95,10 @@ export async function POST(req: NextRequest) {
 
   const text = await res.text()
   let r: any
-  try { r = JSON.parse(text) } catch { r = { error: text } }
+  try { r = JSON.parse(text) } catch { r = { error: text.substring(0, 300) } }
 
   if (!res.ok || r.error) {
-    return NextResponse.json({ error: r?.error || text }, { status: 400 })
+    return NextResponse.json({ error: r?.error || text.substring(0, 300) }, { status: 400 })
   }
 
   const { data: nuovoRitiro, error: insertError } = await supabase.from('ritiri').insert({
@@ -74,7 +106,7 @@ export async function POST(req: NextRequest) {
     cliente_id: clienteId,
     corriere_id: corriere.id,
     pickup_id: r.pickupId || null,
-    contract_code: payload.contractCode,
+    contract_code: contractCode,
     mitt_nome: body.mittNome,
     mitt_indirizzo: body.mittIndirizzo,
     mitt_citta: body.mittCitta,
