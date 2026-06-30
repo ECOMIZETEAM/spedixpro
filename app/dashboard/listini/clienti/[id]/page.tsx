@@ -1,4 +1,4 @@
-﻿import { createServerSupabase } from '@/lib/supabase'
+import { createServerSupabase } from '@/lib/supabase'
 import { redirect } from 'next/navigation'
 import ListinoEditor from './ListinoEditor'
 
@@ -41,12 +41,16 @@ export default async function ModificaListinoPage({
   const { data: fasceEsistenti } = await supabase.from('listini_clienti_fasce').select('*').eq('listino_id', id).eq('corriere_id', corriereSelezionato?.id||'').order('peso_max')
   const { data: supplementiEsistenti } = await supabase.from('listini_clienti_supplementi').select('*').eq('listino_id', id).eq('corriere_id', corriereSelezionato?.id||'')
   const { data: clientiAssegnati } = await supabase.from('clienti').select('id,ragione_sociale,email').eq('listino_cliente_id', id)
+  // Fattore volume del corriere selezionato (per-corriere)
+  const { data: aggSel } = await supabase.from('listini_clienti_corrieri').select('fattore_volume').eq('listino_id', id).eq('corriere_id', corriereSelezionato?.id||'').maybeSingle()
+  const fattoreCorriere = (aggSel?.fattore_volume != null) ? aggSel.fattore_volume : (listino.fattore_volume ?? 5000)
   return (
     <ListinoEditor
       listino={listino}
       corrieri={corrieri||[]}
       corrieriDisponibili={corrieriDisponibiliDaAggiungere||[]}
       corriereSelezionatoId={corriereSelezionato?.id||''}
+      fattoreCorriere={fattoreCorriere}
       zone={zone||[]}
       fasceEsistenti={fasceEsistenti||[]}
       supplementiEsistenti={supplementiEsistenti||[]}

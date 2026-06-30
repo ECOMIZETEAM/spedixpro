@@ -10,6 +10,7 @@ interface Props {
   corriereSelezionatoId?: string
   supplementiEsistenti?: any[]
   corrieriDisponibili?: Corriere[]
+  fattoreCorriere?: number
 }
 
 const fattori = [
@@ -60,7 +61,7 @@ function buildServiziDa(supplementi: any[], tipo: string, fallback: {nome:string
   })
 }
 
-export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili }: Props) {
+export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere }: Props) {
   const [aggiungendoContratto, setAggiungendoContratto] = useState(false)
   const [nuovoContrattoId, setNuovoContrattoId] = useState('')
   const [aggiungendoSaving, setAggiungendoSaving] = useState(false)
@@ -77,7 +78,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   }
   const [nome, setNome] = useState<string>(listino.nome ?? '')
   const [corriereId, setCorriereId] = useState<string>(corriereSelezionatoId || corrieri[0]?.id || '')
-  const [fattore, setFattore] = useState<number>(Number(listino.fattore_volume) || 5000)
+  const [fattore, setFattore] = useState<number>(Number(fattoreCorriere ?? listino.fattore_volume) || 5000)
   const [fasce, setFasce] = useState<Fascia[]>(() => buildFasceInit(fasceEsistenti))
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')

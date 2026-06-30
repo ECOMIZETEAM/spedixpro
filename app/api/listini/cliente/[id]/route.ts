@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{id:string}> }) {
@@ -9,8 +9,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
   const body = await req.json()
   const { nome, corriere_id, fattore_volume, fasce, supplementi } = body
 
-  // Aggiorna nome e fattore listino
-  await supabase.from('listini_clienti').update({ nome, fattore_volume }).eq('id', id)
+  // Aggiorna solo il nome sul listino
+  await supabase.from('listini_clienti').update({ nome }).eq('id', id)
+  // Fattore volume per-corriere: salvato sulla riga di aggancio listino+corriere
+  if (corriere_id) {
+    await supabase.from('listini_clienti_corrieri').update({ fattore_volume }).eq('listino_id', id).eq('corriere_id', corriere_id)
+  }
 
   // Cancella SOLO le fasce di questo contratto (non tocca gli altri corrieri già configurati)
   await supabase.from('listini_clienti_fasce').delete().eq('listino_id', id).eq('corriere_id', corriere_id)
@@ -136,5 +140,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{id:st
   const { data: fasce } = await fasceQuery.order('peso_max')
   const { data: supplementi } = await supplQuery
 
-  return NextResponse.json({ listino, fasce: fasce||[], supplementi: supplementi||[] })
+  // Fattore volume del corriere selezionato (dalla riga di aggancio)
+  let fattoreCorriere = listino?.fattore_volume ?? 5000
+  if (corriereId) {
+    const { data: agg } = await supabase.from('listini_clienti_corrieri').select('fattore_volume').eq('listino_id', id).eq('corriere_id', corriereId).maybeSingle()
+    if (agg?.fattore_volume != null) fattoreCorriere = agg.fattore_volume
+  }
+
+  return NextResponse.json({ listino, fattoreCorriere, fasce: fasce||[], supplementi: supplementi||[] })
 }
