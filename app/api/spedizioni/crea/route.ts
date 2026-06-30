@@ -24,7 +24,18 @@ export async function POST(req: NextRequest) {
 
   let corriereRecord: any = null
 
-  if (cliente.listino_cliente_id) {
+  // *** FIX: usa il corriere_id passato dal frontend (tariffa selezionata) ***
+  if (body._corriere_id) {
+    const { data: c } = await supabase
+      .from('corrieri').select('id,tipo,credenziali,nome_contratto')
+      .eq('id', body._corriere_id)
+      .eq('master_id', masterId)
+      .single()
+    corriereRecord = c
+  }
+
+  // Fallback: primo corriere del listino (compatibilità)
+  if (!corriereRecord && cliente.listino_cliente_id) {
     const { data: fascia } = await supabase
       .from('listini_clienti_fasce')
       .select('corrieri(id,tipo,credenziali,nome_contratto)')

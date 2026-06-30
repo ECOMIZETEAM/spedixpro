@@ -1,9 +1,9 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
 interface Cliente { id:string; ragione_sociale:string; so_indirizzo:string|null;so_citta:string|null; so_provincia:string|null; so_cap:string|null; email:string; telefono:string|null }
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string;zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; corriere_nome?:string }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string;zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; corriere_nome?:string; _corriere_id?:string; _corriere_tipo?:string; _spediamopro_quotation?:any }
 interface Collo { lunghezza:string; larghezza:string; altezza:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -18,6 +18,7 @@ const CARRIERS: Record<string,{nome:string,colore:string}> = {
   brt:{nome:'BRT',colore:'#e2001a'},
   poste:{nome:'Poste Italiane',colore:'#ffcc00'},
   dhl:{nome:'DHL Express',colore:'#ffcc00'},
+  spediamopro:{nome:'SpediamoPro',colore:'#f97316'},
 }
 
 export default function NuovaSpedizionePage() {
@@ -103,6 +104,9 @@ export default function NuovaSpedizionePage() {
       body: JSON.stringify({
         clienteId, carrierCode:selected.carrierCode, contractCode:selected.contractCode,
         totalPrice:selected.total_price,
+        _corriere_id: selected._corriere_id,
+        _corriere_tipo: selected._corriere_tipo,
+        _spediamopro_quotation: selected._spediamopro_quotation,
         packages: buildPackages(),
         colliDettaglio: colli,
         shipFrom:{name:mitt.nome,company:mitt.nome,street1:mitt.indirizzo,street2:'',city:mitt.citta,state:mitt.provincia,postalCode:mitt.cap,country:'IT',phone:mitt.telefono,email:mitt.email},
@@ -197,8 +201,6 @@ export default function NuovaSpedizionePage() {
           <div style={card}>
             <div style={cardH}>Dati Spedizione</div>
             <div style={cardB}>
-
-              {/* Riga 1: Colli, Peso, Contrassegno, Assicurazione */}
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'8px',marginBottom:'14px'}}>
                 <div>
                   <label style={lbl}>Colli</label>
@@ -224,7 +226,6 @@ export default function NuovaSpedizionePage() {
                 </div>
               </div>
 
-              {/* Tabella colli con misure */}
               <div style={{marginBottom:'14px'}}>
                 <div style={{display:'grid',gridTemplateColumns:'32px 1fr 1fr 1fr',gap:'6px',marginBottom:'6px'}}>
                   <div style={{...lbl,marginBottom:0}}>#</div>
@@ -234,9 +235,7 @@ export default function NuovaSpedizionePage() {
                 </div>
                 {colli.map((c,i)=>(
                   <div key={i} style={{display:'grid',gridTemplateColumns:'32px 1fr 1fr 1fr',gap:'6px',marginBottom:'6px',alignItems:'center'}}>
-                    <div style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600',textAlign:'center'}}>
-                      📦{i+1}
-                    </div>
+                    <div style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600',textAlign:'center'}}>📦{i+1}</div>
                     <input type="number" value={c.lunghezza} placeholder="es. 30"
                       onChange={e=>aggiornaCollo(i,'lunghezza',e.target.value)} style={inp}/>
                     <input type="number" value={c.larghezza} placeholder="es. 20"
@@ -253,13 +252,11 @@ export default function NuovaSpedizionePage() {
                 </div>
               )}
 
-              {/* Contenuto */}
               <div style={{marginBottom:'10px'}}>
                 <label style={lbl}>Contenuto</label>
                 <input value={contenuto} onChange={e=>setContenuto(e.target.value)} style={inp}/>
               </div>
 
-              {/* Tipo contenuto, Valore merce */}
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'}}>
                 <div>
                   <label style={lbl}>Tipo contenuto</label>
@@ -290,13 +287,14 @@ export default function NuovaSpedizionePage() {
             <div style={cardB}>
               {!tariffe.length&&!loading && <div style={{textAlign:'center',color:'#1a1a1a',fontSize:'13px',padding:'12px 0'}}>Compila i dati e clicca "Seleziona Corriere"</div>}
               {tariffe.map((r,i)=>{
-                const c = CARRIERS[r.carrierCode]||{nome:r.corriere_nome||r.carrierCode.toUpperCase(),colore:'#666'}
-                const isSel = selected?.total_price===r.total_price&&selected?.zona===r.zona
+                const chiave = r._corriere_tipo || r.carrierCode
+                const c = CARRIERS[chiave]||{nome:r.corriere_nome||chiave.toUpperCase(),colore:'#666'}
+                const isSel = selected?._corriere_id===r._corriere_id && selected?.zona===r.zona
                 return (
                   <div key={i} onClick={()=>setSelected(r)}
                     style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px',border:`2px solid ${isSel?'#f97316':'#e8e8e8'}`,borderRadius:'8px',marginBottom:'8px',cursor:'pointer',background:isSel?'#fffbeb':'#fff'}}>
                     <div style={{width:'48px',height:'30px',border:'1px solid #e8e8e8',borderRadius:'5px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                      <span style={{fontSize:'8px',fontWeight:'900',color:c.colore,textTransform:'uppercase'}}>{r.carrierCode}</span>
+                      <span style={{fontSize:'8px',fontWeight:'900',color:c.colore,textTransform:'uppercase'}}>{chiave}</span>
                     </div>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontWeight:'700',color:'#1a1a1a',fontSize:'13px'}}>{c.nome}</div>
