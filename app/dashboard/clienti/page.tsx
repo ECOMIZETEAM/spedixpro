@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
 
 export default function ClientiPage() {
@@ -59,6 +59,8 @@ export default function ClientiPage() {
                     </td>
                     <td style={{padding:'10px 14px'}}>
                       <div style={{display:'flex',gap:'6px'}}>
+                        <a href={`/api/clienti/${c.id}/impersona`} title="Accedi come cliente" target="_blank" rel="noopener noreferrer"
+                          style={{padding:'5px 8px',background:'#fff7ed',color:'#f97316',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #fed7aa'}}>🔑</a>
                         <a href={`/dashboard/clienti/${c.id}`} title="Profilo"
                           style={{padding:'5px 8px',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #bfdbfe'}}>🔵</a>
                         <a href={`/dashboard/clienti/${c.id}/modifica`} title="Modifica"
