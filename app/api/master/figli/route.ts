@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -8,18 +9,17 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
   const parentId = searchParams.get('parent_id')
-
   if (!parentId) return NextResponse.json({ error: 'parent_id richiesto' }, { status: 400 })
 
-  // Master figli diretti
-  const { data: masterFigli } = await supabase
+  const admin = createAdminSupabase()
+
+  const { data: masterFigli } = await admin
     .from('masters')
     .select('id,nome,email,attivo,created_at')
     .eq('parent_master_id', parentId)
     .order('nome')
 
-  // Clienti diretti di questo master
-  const { data: clientiDiretti } = await supabase
+  const { data: clientiDiretti } = await admin
     .from('clienti')
     .select('id,ragione_sociale,email,attivo')
     .eq('master_id', parentId)
