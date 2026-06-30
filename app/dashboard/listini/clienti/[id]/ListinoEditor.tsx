@@ -62,6 +62,10 @@ function buildServiziDa(supplementi: any[], tipo: string, fallback: {nome:string
 }
 
 export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere }: Props) {
+  const isCorriere = tipoListino === 'corriere'
+  const apiSalva = isCorriere ? '/api/listini/corriere' : '/api/listini/cliente'
+  const apiAggancio = isCorriere ? '/api/listini/corriere-corrieri' : '/api/listini/cliente-corrieri'
+  const basePagina = isCorriere ? '/dashboard/listini/corrieri' : '/dashboard/listini/clienti'
   const [aggiungendoContratto, setAggiungendoContratto] = useState(false)
   const [nuovoContrattoId, setNuovoContrattoId] = useState('')
   const [aggiungendoSaving, setAggiungendoSaving] = useState(false)
@@ -69,12 +73,12 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   async function confermaAggiungiContratto() {
     if (!nuovoContrattoId) return
     setAggiungendoSaving(true)
-    await fetch('/api/listini/cliente-corrieri', {
+    await fetch(apiAggancio, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ listinoId: listino.id, corriereId: nuovoContrattoId })
     })
-    window.location.href = `/dashboard/listini/clienti/${listino.id}?corriere=${nuovoContrattoId}`
+    window.location.href = `${basePagina}/${listino.id}?corriere=${nuovoContrattoId}`
   }
   const [nome, setNome] = useState<string>(listino.nome ?? '')
   const [corriereId, setCorriereId] = useState<string>(corriereSelezionatoId || corrieri[0]?.id || '')
@@ -225,7 +229,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
             <label style={{fontSize:'11.5px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Corriere</label>
             <select value={corriereId} onChange={e=>{
               setCorriereId(e.target.value)
-              window.location.href = `/dashboard/listini/clienti/${listino.id}?corriere=${e.target.value}`
+              window.location.href = `${basePagina}/${listino.id}?corriere=${e.target.value}`
             }} style={{...inp,width:'100%',padding:'8px 11px'}}>
               {corrieri.map(c=><option key={c.id} value={c.id}>{c.nome_contratto}</option>)}
             </select>
