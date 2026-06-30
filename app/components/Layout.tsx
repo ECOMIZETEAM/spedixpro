@@ -14,7 +14,10 @@ const NAV = [
     { label: 'Lista Contrassegni', href: '/dashboard/contrassegni' },
     { label: 'Distinte Contrassegni', href: '/dashboard/contrassegni/distinte' },
   ]},
-  { label: 'Ritiri', href: '/dashboard/ritiri', icon: '↩' },
+  { label: 'Ritiri', href: '/dashboard/ritiri', icon: '↩', sub: [
+    { label: 'Nuovo Ritiro', href: '/dashboard/ritiri/nuovo' },
+    { label: 'Elenco Ritiri', href: '/dashboard/ritiri/elenco' },
+  ]},
   { label: 'Distinte', href: '/dashboard/distinte', icon: '≡' },
   { label: 'Resi', href: '/dashboard/resi', icon: '↺', sub: [
     { label: 'Scansiona Resi', href: '/dashboard/resi/scansiona' },
