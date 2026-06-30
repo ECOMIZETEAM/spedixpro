@@ -9,6 +9,10 @@ const cardTitle = {fontSize:'13px',fontWeight:'700' as const,color:'#1a1a1a',mar
 
 export default function NuovoRitiroPage() {
   const router = useRouter()
+  const [spedizioni, setSpedizioni] = useState<any[]>([])
+  const [selezionate, setSelezionate] = useState<Set<string>>(new Set())
+  const [loadingSped, setLoadingSped] = useState(true)
+
   const [mittNome, setMittNome] = useState('')
   const [mittIndirizzo, setMittIndirizzo] = useState('')
   const [mittCitta, setMittCitta] = useState('')
@@ -17,13 +21,7 @@ export default function NuovoRitiroPage() {
   const [mittTelefono, setMittTelefono] = useState('')
   const [mittEmail, setMittEmail] = useState('')
 
-  const [colli, setColli] = useState('1')
-  const [pesoTotale, setPesoTotale] = useState('1')
-  const [lunghezza, setLunghezza] = useState('')
-  const [larghezza, setLarghezza] = useState('')
-  const [altezza, setAltezza] = useState('')
   const [contenuto, setContenuto] = useState('')
-
   const [dataRitiro, setDataRitiro] = useState('')
   const [orarioRitiro, setOrarioRitiro] = useState('pomeriggio')
   const [istruzioni, setIstruzioni] = useState('')
@@ -32,6 +30,11 @@ export default function NuovoRitiroPage() {
   const [errore, setErrore] = useState('')
 
   useEffect(() => {
+    fetch('/api/spedizioni/ritirabili').then(r => r.json()).then(d => {
+      setSpedizioni(Array.isArray(d) ? d : [])
+      setLoadingSped(false)
+    }).catch(() => setLoadingSped(false))
+
     fetch('/api/master').then(r => r.json()).then(d => {
       if (d?.nome) setMittNome(d.nome)
       if (d?.indirizzo_operativo) setMittIndirizzo(d.indirizzo_operativo)
@@ -47,7 +50,17 @@ export default function NuovoRitiroPage() {
     setDataRitiro(oggi.toISOString().split('T')[0])
   }, [])
 
+  function toggleSpedizione(id: string) {
+    setSelezionate(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   async function creaRitiro() {
+    if (!selezionate.size) { setErrore('Seleziona almeno una spedizione da ritirare'); return }
     if (!mittNome || !mittIndirizzo || !mittCitta || !mittCap) { setErrore('Compila tutti i dati mittente'); return }
     if (!dataRitiro) { setErrore('Seleziona una data di ritiro'); return }
     setSaving(true); setErrore('')
@@ -55,12 +68,9 @@ export default function NuovoRitiroPage() {
     const res = await fetch('/api/ritiri/crea', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        spedizioneIds: Array.from(selezionate),
         mittNome, mittIndirizzo, mittCitta, mittProvincia, mittCap, mittPaese: 'IT',
         mittTelefono, mittEmail,
-        colli: parseInt(colli) || 1, pesoTotale: parseFloat(pesoTotale) || 1,
-        lunghezza: lunghezza ? parseFloat(lunghezza) : undefined,
-        larghezza: larghezza ? parseFloat(larghezza) : undefined,
-        altezza: altezza ? parseFloat(altezza) : undefined,
         contenuto, dataRitiro, orarioRitiro, istruzioni,
       })
     })
@@ -75,12 +85,36 @@ export default function NuovoRitiroPage() {
     <div>
       <div style={{ marginBottom: '20px' }}>
         <h1 style={{ fontSize: '20px', fontWeight: '700', color: '#1a1a1a', margin: 0 }}>Nuovo Ritiro</h1>
-        <p style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>Richiedi al corriere il ritiro dei tuoi colli pronti</p>
+        <p style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>Seleziona le spedizioni pronte e richiedi il ritiro al corriere</p>
       </div>
 
       {errore && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '10px 14px', marginBottom: '16px', fontSize: '13px', color: '#dc2626' }}>⚠️ {errore}</div>}
 
       <div style={{ maxWidth: '780px' }}>
+
+        <div style={card}>
+          <div style={cardTitle}>📦 Seleziona Spedizioni da Ritirare ({selezionate.size} selezionate)</div>
+          {loadingSped ? (
+            <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>Caricamento spedizioni...</div>
+          ) : !spedizioni.length ? (
+            <div style={{ textAlign: 'center', color: '#999', padding: '20px', fontSize: '13px' }}>
+              Nessuna spedizione in lavorazione da ritirare. Crea prima una spedizione.
+            </div>
+          ) : (
+            <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+              {spedizioni.map(s => (
+                <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 4px', borderBottom: '1px solid #f5f5f5', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={selezionate.has(s.id)} onChange={() => toggleSpedizione(s.id)} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: '600', fontSize: '13px', color: '#1a1a1a' }}>{s.numero}</div>
+                    <div style={{ fontSize: '11px', color: '#999' }}>{s.dest_nome} → {s.dest_citta} · {s.colli} collo/i · {s.peso_reale}kg</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div style={card}>
           <div style={cardTitle}>📍 Dati Mittente</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
@@ -99,23 +133,6 @@ export default function NuovoRitiroPage() {
         </div>
 
         <div style={card}>
-          <div style={cardTitle}>📦 Dati Spedizione</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-            <div><label style={lbl}>Colli</label><input type="number" min="1" value={colli} onChange={e => setColli(e.target.value)} style={inp} /></div>
-            <div><label style={lbl}>Peso totale (kg)</label><input type="number" min="0.1" step="0.1" value={pesoTotale} onChange={e => setPesoTotale(e.target.value)} style={inp} /></div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-            <div><label style={lbl}>Lunghezza (cm)</label><input type="number" value={lunghezza} onChange={e => setLunghezza(e.target.value)} style={inp} placeholder="opzionale" /></div>
-            <div><label style={lbl}>Larghezza (cm)</label><input type="number" value={larghezza} onChange={e => setLarghezza(e.target.value)} style={inp} placeholder="opzionale" /></div>
-            <div><label style={lbl}>Altezza (cm)</label><input type="number" value={altezza} onChange={e => setAltezza(e.target.value)} style={inp} placeholder="opzionale" /></div>
-          </div>
-          <div>
-            <label style={lbl}>Contenuto</label>
-            <input value={contenuto} onChange={e => setContenuto(e.target.value)} style={inp} placeholder="es. Materiale elettronico" />
-          </div>
-        </div>
-
-        <div style={card}>
           <div style={cardTitle}>📅 Data e Orario Ritiro</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
             <div>
@@ -129,6 +146,10 @@ export default function NuovoRitiroPage() {
                 <option value="pomeriggio">Pomeriggio</option>
               </select>
             </div>
+          </div>
+          <div style={{ marginBottom: '14px' }}>
+            <label style={lbl}>Contenuto</label>
+            <input value={contenuto} onChange={e => setContenuto(e.target.value)} style={inp} placeholder="es. Materiale elettronico" />
           </div>
           <div>
             <label style={lbl}>Istruzioni per il corriere</label>

@@ -112,6 +112,7 @@ export async function POST(req: NextRequest) {
       etichetta_url: etichetteUrls[i] || etichetteUrls[0] || null,
     }))
 
+    // *** FIX: salviamo contractCode e carrierCode dentro raw_response per riusarli nei ritiri ***
     const { error: insertError } = await supabase.from('spedizioni').insert({
       master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id, numero,
       mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
@@ -125,7 +126,9 @@ export async function POST(req: NextRequest) {
       contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
       tracking_number: r.trackingNumber || null,
       etichetta_url: etichetteUrls[0] || (r.labelData ? `data:application/pdf;base64,${r.labelData}` : null),
-      colli_dettaglio: colliDettaglio, raw_response: r, stato: 'in_lavorazione',
+      colli_dettaglio: colliDettaglio,
+      raw_response: { ...r, _carrierCode: rate.carrierCode, _contractCode: rate.contractCode },
+      stato: 'in_lavorazione',
       costo_spedizione: costoCorrente, costo_totale: costoCliente,
       note: body.notes || null, contenuto: body.contenuto || null,
     })
@@ -160,7 +163,6 @@ export async function POST(req: NextRequest) {
         province: body.shipTo.state?.substring(0, 2).toUpperCase(),
         country: (body.shipTo.country || 'IT').toUpperCase(),
       }
-      // SpediamoPro vuole probabilmente email come stringa sempre presente (anche vuota) non undefined
       if (body.shipTo.phone) consignee.phone = body.shipTo.phone
       if (body.shipTo.email) consignee.email = body.shipTo.email.substring(0, 50)
 
@@ -181,7 +183,6 @@ export async function POST(req: NextRequest) {
         externalReference: body.notes || undefined,
       })
 
-      // Fallback: se non c'è trackingCode, prova a recuperarlo con polling (può arrivare dopo qualche secondo)
       let trackingReale = shipment.trackingCode
       if (!trackingReale) {
         trackingReale = await spediamoproWaitForTracking(cred.authcode, shipment.id)
@@ -220,7 +221,7 @@ export async function POST(req: NextRequest) {
       })
 
       if (insertError) {
-        return NextResponse.json({ error: `Spedizione creata su SpediamoPro (${numeroFinale}) ma errore DB: ${insertError.message}`, numero: numeroFinale, debug_raw: shipment.raw }, { status: 500 })
+        return NextResponse.json({ error: `Spedizione creata su SpediamoPro (${numeroFinale}) ma errore DB: ${insertError.message}`, numero: numeroFinale }, { status: 500 })
       }
 
       return NextResponse.json({
