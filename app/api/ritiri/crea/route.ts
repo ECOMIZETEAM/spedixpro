@@ -57,7 +57,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Impossibile recuperare un contratto valido per il ritiro' }, { status: 400 })
   }
 
-  const contractCode = body.contractCode || rates[0].contractCode
   const carrierCode = rates[0].carrierCode
 
   const packagesDetails = [{
@@ -69,7 +68,6 @@ export async function POST(req: NextRequest) {
   }]
 
   const payload: any = {
-    contractCode,
     carrierCode,
     pickupDate: body.dataRitiro,
     pickupTime: body.orarioRitiro || undefined,
@@ -87,8 +85,6 @@ export async function POST(req: NextRequest) {
     packagesDetails,
   }
 
-  console.log('[RITIRO] Payload pickup/create:', JSON.stringify(payload))
-
   const res = await fetch(`${baseUrl}/pickup/create`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
@@ -96,13 +92,11 @@ export async function POST(req: NextRequest) {
   })
 
   const text = await res.text()
-  console.log('[RITIRO] Risposta pickup/create status:', res.status, 'body:', text.substring(0, 500))
-
   let r: any
   try { r = JSON.parse(text) } catch { r = { error: text.substring(0, 300) } }
 
   if (!res.ok || r.error) {
-    return NextResponse.json({ error: r?.error || `Errore ${res.status}: ${text.substring(0, 200)}` }, { status: 400 })
+    return NextResponse.json({ error: r?.error || text.substring(0, 300) }, { status: 400 })
   }
 
   const { data: nuovoRitiro, error: insertError } = await supabase.from('ritiri').insert({
@@ -110,7 +104,7 @@ export async function POST(req: NextRequest) {
     cliente_id: clienteId,
     corriere_id: corriere.id,
     pickup_id: r.pickupId || null,
-    contract_code: contractCode,
+    contract_code: carrierCode,
     mitt_nome: body.mittNome,
     mitt_indirizzo: body.mittIndirizzo,
     mitt_citta: body.mittCitta,
