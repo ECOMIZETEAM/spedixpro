@@ -61,7 +61,7 @@ function buildServiziDa(supplementi: any[], tipo: string, fallback: {nome:string
   })
 }
 
-export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere }: Props) {
+export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere }: Props) {
   const isCorriere = tipoListino === 'corriere'
   const apiSalva = isCorriere ? '/api/listini/corriere' : '/api/listini/cliente'
   const apiAggancio = isCorriere ? '/api/listini/corriere-corrieri' : '/api/listini/cliente-corrieri'
@@ -88,13 +88,9 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   const [msg, setMsg] = useState('')
   const [tab, setTab] = useState('pesi')
 
-  // Assicurazione: righe con valore_max, prezzo_fisso, perc, calcolo_su
   const [righeAssic, setRigheAssic] = useState<RigaSuppl[]>(() => buildRigheDa(supplementiEsistenti||[], 'assicurazione', [rigaVuota()]))
-
-  // Contrassegni: righe con valore_max, prezzo_fisso, perc_valore, calcolo_su
   const [righeContr, setRigheContr] = useState<RigaSuppl[]>(() => buildRigheDa(supplementiEsistenti||[], 'contrassegno', [rigaVuota(), rigaVuota()]))
 
-  // Servizi accessori
   const [serviziAccessori, setServiziAccessori] = useState(() => buildServiziDa(supplementiEsistenti||[], 'accessorio', [
     {nome:'Reverse A Domicilio', prezzo:0, perc:0},
     {nome:'Andata & Ritorno', prezzo:0, perc:0},
@@ -104,7 +100,6 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     {nome:'Consegna su appuntamento', prezzo:0, perc:0},
   ]))
 
-  // Giacenze
   const [giacenzeServizi, setGiacenzeServizi] = useState(() => buildServiziDa(supplementiEsistenti||[], 'giacenza', [
     {nome:'Riconsegna', prezzo:0, perc:0},
     {nome:'Riconsegna al nuovo destinatario', prezzo:0, perc:0},
@@ -119,7 +114,6 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     return r ? Number(r.valore) || 0 : 0
   })
 
-  // Ritiro
   const [ritiroPrezzo, setRitiroPrezzo] = useState(() => {
     const r = (supplementiEsistenti||[]).find(s => s.tipo === 'ritiro')
     return r ? Number(r.valore) || 0 : 0
