@@ -12,7 +12,6 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
 
-  // Solo un master (non un cliente) può creare un nuovo master
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   if (!utente?.master_id || utente.ruolo === 'cliente') {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
@@ -25,12 +24,13 @@ export async function POST(req: NextRequest) {
   if (!email) return NextResponse.json({ error: 'Email obbligatoria' }, { status: 400 })
   if (!nome) return NextResponse.json({ error: 'Nome obbligatorio' }, { status: 400 })
 
-  // Verifica email non già usata
-  const { data: existingMaster } = await supabase.from('masters').select('id').eq('email', email).single()
+  // *** Usa il client ADMIN per bypassare RLS — il controllo autorizzazione è già fatto sopra ***
+  const admin = createAdminSupabase()
+
+  const { data: existingMaster } = await admin.from('masters').select('id').eq('email', email).single()
   if (existingMaster) return NextResponse.json({ error: 'Email già registrata come master' }, { status: 400 })
 
-  // Crea il nuovo record master, figlio del master corrente
-  const { data: nuovoMaster, error: masterError } = await supabase.from('masters').insert({
+  const { data: nuovoMaster, error: masterError } = await admin.from('masters').insert({
     nome,
     slug: nome.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
     email,
@@ -45,33 +45,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: masterError?.message || 'Errore creazione master' }, { status: 400 })
   }
 
-  // Crea l'utente Auth per il nuovo master
   const password = generaPassword()
   try {
-    const admin = createAdminSupabase()
     const { data: authUser, error: authError } = await admin.auth.admin.createUser({
       email, password, email_confirm: true,
     })
 
     if (authError || !authUser?.user) {
-      // Rollback: elimina il master se non riusciamo a creare l'utente
-      await supabase.from('masters').delete().eq('id', nuovoMaster.id)
+      await admin.from('masters').delete().eq('id', nuovoMaster.id)
       return NextResponse.json({ error: authError?.message || 'Errore creazione utente auth' }, { status: 400 })
     }
 
-    await supabase.from('utenti').insert({
+    await admin.from('utenti').insert({
       id: authUser.user.id,
       ruolo: 'master',
-      master_id: nuovoMaster.id, // il SUO id, non quello del padre
+      master_id: nuovoMaster.id,
       nome,
       attivo: true,
     })
   } catch (e: any) {
-    await supabase.from('masters').delete().eq('id', nuovoMaster.id)
+    await admin.from('masters').delete().eq('id', nuovoMaster.id)
     return NextResponse.json({ error: e.message || 'Errore creazione utente' }, { status: 400 })
   }
 
-  // Invia email con credenziali (riusa la stessa funzione email dei clienti, se compatibile)
   try {
     const { inviaCredenzialiCliente } = await import('@/lib/email')
     await inviaCredenzialiCliente({
@@ -82,5 +78,5 @@ export async function POST(req: NextRequest) {
     console.error('Errore invio email master:', e)
   }
 
-  return NextResponse.json({ id: nuovoMaster.id, password_debug: password })
+  return NextResponse.json({ id: nuovoMaster.id })
 }
