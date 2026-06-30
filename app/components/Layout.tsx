@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState } from 'react'
 import { usePathname } from 'next/navigation'
 
@@ -30,6 +30,9 @@ const NAV = [
   { label: 'Clienti', href: '/dashboard/clienti', icon: '⊙', sub: [
     { label: 'Nuovo Cliente', href: '/dashboard/clienti/nuovo' },
     { label: 'Elenco Clienti', href: '/dashboard/clienti' },
+    { label: 'Nuovo Master', href: '/dashboard/clienti/master/nuovo' },
+    { label: 'Elenco Master', href: '/dashboard/clienti/master' },
+    { label: 'Gerarchia', href: '/dashboard/clienti/gerarchia' },
   ]},
   { label: 'Autisti e Consegne', href: '/dashboard/autisti', icon: '⊡' },
   { label: 'Consumabili', href: '/dashboard/consumabili', icon: '▣', sub: [
