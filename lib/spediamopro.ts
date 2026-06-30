@@ -191,12 +191,12 @@ export async function spediamoproGetShipment(authcode: string, shipmentId: numbe
   return res.json()
 }
 
-export async function spediamoproWaitForTracking(authcode: string, shipmentId: number, maxAttempts = 4, delayMs = 1500): Promise<string | null> {
+export async function spediamoproWaitForTracking(authcode: string, shipmentId: number, maxAttempts = 10, delayMs = 2000): Promise<string | null> {
   for (let i = 0; i < maxAttempts; i++) {
     try {
       const json = await spediamoproGetShipment(authcode, shipmentId)
       const d = json.data || json
-      const tracking = d.parcels?.[0]?.tracking || d.trackingCode || null
+      const tracking = d.trackingCode || d.parcels?.[0]?.tracking || null
       if (tracking) return tracking
     } catch (e) {
       console.error('Polling tracking error:', e)
