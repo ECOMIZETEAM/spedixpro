@@ -165,7 +165,7 @@ export async function spediamoproCreateShipment(
   const d = json.data || json
 
   // I nomi esatti dei campi possono variare — proviamo diverse possibilità note
-  const trackingCode = d.trackingCode || d.tracking_code || d.barcode || d.parcelBarcode || d.code || null
+  const trackingCode = d.trackingCode || d.tracking_code || d.parcels?.[0]?.tracking || null
   const trackingUrl = d.trackingUrl || d.tracking_url || null
   const totalPrice = d.totalPrice ?? d.total_price ?? params.quotation.totalPrice ?? 0
 
