@@ -18,7 +18,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Seleziona almeno una spedizione da ritirare' }, { status: 400 })
   }
 
-  // Recupera le spedizioni selezionate per ottenere contractCode/carrierCode reali
   const { data: spedizioni } = await supabase
     .from('spedizioni')
     .select('id,raw_response,corriere_id,colli,peso_reale')
@@ -33,9 +32,10 @@ export async function POST(req: NextRequest) {
   const raw = primaSped.raw_response as any
   const contractCode = raw?._contractCode
   const carrierCode = raw?._carrierCode
+  const shipmentId = raw?.shipmentId
 
-  if (!contractCode || !carrierCode) {
-    return NextResponse.json({ error: 'Impossibile recuperare il contratto dalla spedizione selezionata. Riprova con una spedizione creata dopo l\'ultimo aggiornamento.' }, { status: 400 })
+  if (!carrierCode) {
+    return NextResponse.json({ error: 'Impossibile recuperare il corriere dalla spedizione.' }, { status: 400 })
   }
 
   const { data: corriere } = await supabase
@@ -56,15 +56,10 @@ export async function POST(req: NextRequest) {
   const colliTotali = spedizioni.reduce((sum, s) => sum + (s.colli || 1), 0)
   const pesoTotale = spedizioni.reduce((sum, s) => sum + (parseFloat(String(s.peso_reale)) || 1), 0)
 
-  const packagesDetails = [{
-    weight: String(pesoTotale || 1),
-    description: body.contenuto || undefined,
-  }]
-
+  // Costruiamo il payload con shipmentId come riferimento principale
   const payload: any = {
-    contractCode,
     carrierCode,
-    shipmentId: primaSped.id,
+    contractCode,   // lo passiamo sempre (è quello cifrato che spedisci ci ha dato)
     pickupDate: body.dataRitiro,
     pickupTime: body.orarioRitiro || undefined,
     specialInstruction: body.istruzioni || undefined,
@@ -78,7 +73,14 @@ export async function POST(req: NextRequest) {
       phone: body.mittTelefono || undefined,
       email: body.mittEmail || undefined,
     },
-    packagesDetails,
+    packagesDetails: [{
+      weight: String(pesoTotale || 1),
+    }],
+  }
+
+  // Aggiungi shipmentId se presente — potrebbe essere il parametro chiave
+  if (shipmentId) {
+    payload.shipmentId = shipmentId
   }
 
   console.log('[RITIRO] Payload pickup/create:', JSON.stringify(payload))
@@ -90,7 +92,7 @@ export async function POST(req: NextRequest) {
   })
 
   const text = await res.text()
-  console.log('[RITIRO] Risposta pickup/create status:', res.status, 'body:', text.substring(0, 500))
+  console.log('[RITIRO] Risposta pickup/create status:', res.status, 'body:', text.substring(0, 1000))
 
   let r: any
   try { r = JSON.parse(text) } catch { r = { error: text.substring(0, 300) } }
@@ -104,7 +106,7 @@ export async function POST(req: NextRequest) {
     cliente_id: clienteId,
     corriere_id: corriere.id,
     pickup_id: r.pickupId || null,
-    contract_code: contractCode,
+    contract_code: contractCode || carrierCode,
     mitt_nome: body.mittNome,
     mitt_indirizzo: body.mittIndirizzo,
     mitt_citta: body.mittCitta,
