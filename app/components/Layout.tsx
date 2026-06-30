@@ -10,7 +10,7 @@ const NAV = [
     { label: 'Rettifica Costi', href: '/dashboard/spedizioni/rettifica' },
     { label: 'Spedizioni Cancellate', href: '/dashboard/spedizioni/cancellate' },
   ]},
-  { label: 'Contrassegni', href: '/dashboard/contrassegni', icon: '💰', sub: [
+  { label: 'Contrassegni', href: '/dashboard/contrassegni', icon: '¤', sub: [
     { label: 'Lista Contrassegni', href: '/dashboard/contrassegni' },
     { label: 'Distinte Contrassegni', href: '/dashboard/contrassegni/distinte' },
   ]},
