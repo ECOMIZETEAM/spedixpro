@@ -29,8 +29,14 @@ const NAV: NavItem[] = [
   { id: 'resi', label: 'Resi', icon: '↺', href: '/cliente/resi' },
   { id: 'fatture', label: 'Fatture', icon: '◻', href: '/cliente/fatture' },
   { id: 'reports', label: 'Reports', icon: '◈', href: '/cliente/reports' },
-  { id: 'listino', label: 'Il mio Listino', icon: '€', href: '/cliente/listino' },
-  { id: 'account', label: 'Mio Account', icon: '⊙', href: '/cliente/account' },
+  {
+    id: 'account', label: 'Mio Account', icon: '⊙',
+    sub: [
+      { label: 'Listino Prezzi', href: '/cliente/listino' },
+      { label: 'Lista Movimenti', href: '/cliente/movimenti' },
+      { label: 'Dati Account', href: '/cliente/account' },
+    ],
+  },
   { id: 'impostazioni', label: 'Impostazioni', icon: '◉', href: '/cliente/impostazioni' },
 ]
 
