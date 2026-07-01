@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; costo_contrassegno?:string }
 interface Collo { lunghezza:string; larghezza:string; altezza:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -291,8 +291,19 @@ export default function NuovaSpedizioneCliente() {
                       <div style={{fontSize:'11px',color:'#999',marginTop:'1px'}}>{r.peso_fatturato}kg · zona {r.zona}{parseFloat(r.peso_volume)>r.peso_reale?' (vol.)':''}</div>
                     </div>
                     <div style={{textAlign:'right',flexShrink:0}}>
-                      <div style={{fontSize:'18px',fontWeight:'800',color:'#f97316'}}>€ {r.total_price}</div>
-                      <div style={{fontSize:'10px',color:'#bbb',marginTop:'1px'}}>iva esclusa</div>
+                      {Number(r.costo_contrassegno||0) > 0 ? (
+                        <>
+                          <div style={{fontSize:'11px',color:'#666'}}>Spedizione: € {r.prezzo_spedizione||r.total_price}</div>
+                          <div style={{fontSize:'11px',color:'#666'}}>Contrassegno: € {r.costo_contrassegno}</div>
+                          <div style={{fontSize:'18px',fontWeight:'800',color:'#f97316',marginTop:'2px'}}>Totale € {r.total_price}</div>
+                          <div style={{fontSize:'10px',color:'#bbb',marginTop:'1px'}}>iva esclusa</div>
+                        </>
+                      ) : (
+                        <>
+                          <div style={{fontSize:'18px',fontWeight:'800',color:'#f97316'}}>€ {r.total_price}</div>
+                          <div style={{fontSize:'10px',color:'#bbb',marginTop:'1px'}}>iva esclusa</div>
+                        </>
+                      )}
                     </div>
                   </div>
                 )
