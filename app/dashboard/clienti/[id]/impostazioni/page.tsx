@@ -37,7 +37,7 @@ const ADMIN_FIELDS = [
   {key:'vieta_cancellazione', label:'Vieta cancellazione Spedizione', desc:'Se attivo, il cliente NON puo cancellare le spedizioni.'},
 ]
 
-const DEF_SETT: Record<string,string> = { contrassegno:'si', inserimento_ritiri:'predefinito', autogenera_distinta:'predefinito' }
+const DEF_SETT: Record<string,string> = { contrassegno:'si', inserimento_ritiri:'predefinito', autogenera_distinta:'predefinito', formato_stampa:'A4' }
 const CAMPI_CONTRATTO: {key:string,label:string,opts:[string,string][]}[] = [
   {key:'contrassegno', label:'Contrassegno', opts:[['si','Si'],['no','No']]},
   {key:'inserimento_ritiri', label:'Inserimento ritiri', opts:[['predefinito','Predefinito'],['si','Si'],['no','No']]},
@@ -61,6 +61,16 @@ function Toggle({on, onToggle}:{on:boolean,onToggle:()=>void}) {
   )
 }
 
+function formatiPerCorriere(nome:string): [string,string][] {
+  const n = (nome||'').toUpperCase()
+  if (n.includes('SDA')) return [['A4','A4'],['A6','A6'],['ZPL','ZPL']]
+  if (n.includes('DELIVERY BUSINESS') || n.includes('POSTE')) return [['A4','A4'],['10x11','10x11'],['ZPL','ZPL']]
+  if (n.includes('BRT')) return [['A4','A4'],['A6','A6'],['ZPL','ZPL']]
+  if (n.includes('GLS')) return [['A4','A4'],['A6','A6'],['ZPL','ZPL']]
+  if (n.includes('DHL')) return [['A4','A4'],['10x15','10x15'],['ZPL','ZPL']]
+  if (n.includes('SPEDIAMO') || n.includes('SPEDISCI')) return [['A4','A4'],['A6','A6'],['ZPL','ZPL']]
+  return [['A4','A4'],['A6','A6']]
+}
 export default function ImpostazioniClientePage() {
   const { id } = useParams()
   const [cliente, setCliente] = useState<any>(null)
@@ -257,6 +267,26 @@ export default function ImpostazioniClientePage() {
             <input type="number" step="0.1" value={imp('peso_minimo')} onChange={e=>setImp('peso_minimo', e.target.value===''?'':Number(e.target.value))} style={inpWide} /></div>
         </div>
 
+        <div style={card}>
+          <div style={cardHead}>Formato di stampa per contratto</div>
+          {contratti.filter(c=>c.abilitato).length===0 ? (
+            <div style={{padding:'24px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessun contratto attivo</div>
+          ) : contratti.filter(c=>c.abilitato).map(c => (
+            <div key={c.id} style={rowFull}>
+              <span style={{display:'flex',alignItems:'center',gap:'12px'}}>
+                {iconaCorriere(c.nome_contratto) ? (
+                  <img src={iconaCorriere(c.nome_contratto)!} alt="" style={{width:'64px',height:'40px',objectFit:'contain',border:'1px solid #eee',borderRadius:'6px',background:'#fff',padding:'3px'}} />
+                ) : (
+                  <span style={{width:'64px',height:'40px',borderRadius:'6px',background:'#f0f0f0',display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:'11px',color:'#999'}}>-</span>
+                )}
+                <span style={lblStrong}>{c.nome_contratto}</span>
+              </span>
+              <select value={gSet(c,'formato_stampa')} onChange={e=>setContrattoSetting(c.id,'formato_stampa',e.target.value)} style={selWide}>
+                {formatiPerCorriere(c.nome_contratto).map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
         <div style={{display:'flex',justifyContent:'flex-end'}}>
           <button onClick={salvaAdmin} disabled={saving}
             style={{background:'#f97316',color:'#fff',border:'none',padding:'12px 32px',borderRadius:'6px',fontSize:'14px',fontWeight:'700',cursor:'pointer',opacity:saving?0.7:1}}>
