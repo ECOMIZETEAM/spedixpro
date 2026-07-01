@@ -25,6 +25,14 @@ export async function POST(req: NextRequest) {
 
   if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
 
+  // Mappa impostazioni per-contratto del cliente (contrassegno abilitato o no)
+  const codRichiesto = Number(body.codValue || 0) > 0
+  const { data: abil } = await supabase
+    .from('clienti_corrieri_abilitati').select('corriere_id, settings').eq('cliente_id', clienteId)
+  const contrassegnoOff = new Set(
+    (abil || []).filter((a:any) => a.settings && a.settings.contrassegno === 'no').map((a:any) => a.corriere_id)
+  )
+
   const masterId = cliente.master_id
   const pkg = body.packages?.[0]
   const pesoReale = parseFloat(pkg?.weight || 1)
@@ -147,6 +155,7 @@ export async function POST(req: NextRequest) {
   for (const [corriereId, fasceDelCorriere] of fascePerCorriere) {
     const fasciaGiusta = trovaFascia(fasceDelCorriere, pesoFatturato)
     if (!fasciaGiusta) continue
+    if (codRichiesto && contrassegnoOff.has(corriereId)) continue
 
     const corriere = (fasciaGiusta as any).corrieri
 
