@@ -101,9 +101,9 @@ export default function CorrieriPage() {
             <div key={c.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 18px',borderBottom:'1px solid #f5f5f5'}}>
               <div style={{display:'flex',alignItems:'center',gap:'12px'}}>
                 {iconaCorriere(c.nome_contratto) ? (
-                  <img src={iconaCorriere(c.nome_contratto)!} alt="" style={{width:'54px',height:'34px',objectFit:'contain',border:'1px solid #eee',borderRadius:'5px',background:'#fff',padding:'2px'}}/>
+                  <img src={iconaCorriere(c.nome_contratto)!} alt="" style={{width:'96px',height:'58px',objectFit:'contain',border:'1px solid #eee',borderRadius:'6px',background:'#fff'}}/>
                 ) : (
-                  <div style={{width:'54px',height:'34px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'5px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'9px',fontWeight:'700',color:'#333',textTransform:'uppercase'}}>{c.tipo}</div>
+                  <div style={{width:'96px',height:'58px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'6px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'10px',fontWeight:'700',color:'#333',textTransform:'uppercase'}}>{c.tipo}</div>
                 )}
                 <div>
                   <div style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>{c.nome_contratto}</div>
