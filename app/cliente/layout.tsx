@@ -1,5 +1,6 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { redirect } from 'next/navigation'
+import ClienteNav from './ClienteNav'
 
 export default async function ClienteLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createServerSupabase()
@@ -8,23 +9,6 @@ export default async function ClienteLayout({ children }: { children: React.Reac
   const { data: utente } = await supabase.from('utenti').select('cliente_id,ruolo').eq('id', user.id).single()
   if (!utente?.cliente_id) redirect('/cliente')
   const { data: cliente } = await supabase.from('clienti').select('ragione_sociale,credito').eq('id', utente.cliente_id).single()
-
-  const nav = [
-    { label:'Dashboard', href:'/cliente/dashboard', icon:'⊞' },
-    { label:'Spedizioni', href:'/cliente/spedizioni', icon:'◫', sub:[
-      { label:'Nuova Spedizione', href:'/cliente/spedizioni/nuova' },
-      { label:'Elenco Spedizioni', href:'/cliente/spedizioni' },
-    ]},
-    { label:'Importa Ordini', href:'/cliente/importa', icon:'↓' },
-    { label:'Ritiri', href:'/cliente/ritiri', icon:'↩' },
-    { label:'Resi', href:'/cliente/resi', icon:'↺' },
-    { label:'Fatture', href:'/cliente/fatture', icon:'◻' },
-    { label:'Reports', href:'/cliente/reports', icon:'◈' },
-    { label:'Il mio Listino', href:'/cliente/listino', icon:'€' },
-    { label:'Mio Account', href:'/cliente/account', icon:'⊙' },
-    { label:'Integrazioni', href:'/cliente/integrazioni', icon:'⊡' },
-    { label:'Impostazioni', href:'/cliente/impostazioni', icon:'◉' },
-  ]
 
   return (
     <div style={{display:'flex',minHeight:'100vh',background:'#f5f5f5',fontFamily:'"Inter",-apple-system,sans-serif'}}>
@@ -44,16 +28,10 @@ export default async function ClienteLayout({ children }: { children: React.Reac
             </div>
           </div>
         </div>
-        <nav style={{flex:1,padding:'6px 0'}}>
-          {nav.map(item => (
-            <div key={item.href}>
-              <a href={item.href} style={{display:'flex',alignItems:'center',gap:'8px',padding:'7px 16px',color:'#777',fontSize:'12.5px',textDecoration:'none'}}>
-                <span style={{fontSize:'11px',width:'14px',opacity:.6}}>{item.icon}</span>
-                {item.label}
-              </a>
-            </div>
-          ))}
-        </nav>
+
+        {/* Navigazione (client component: highlight sezione attiva + dropdown) */}
+        <ClienteNav />
+
         <div style={{borderTop:'1px solid #2a2a2a',padding:'6px 0'}}>
           <a href="/api/auth/logout" style={{display:'flex',alignItems:'center',gap:'8px',padding:'7px 16px',color:'#555',fontSize:'12.5px',textDecoration:'none'}}>
             <span style={{fontSize:'11px'}}>→</span> Esci
