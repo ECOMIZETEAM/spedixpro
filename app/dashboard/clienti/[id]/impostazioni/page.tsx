@@ -6,6 +6,26 @@ const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',ov
 const cardHead = {padding:'14px 18px',borderBottom:'1px solid #f0f0f0',fontSize:'14px',fontWeight:'700' as const,color:'#1a1a1a'}
 const sel = {padding:'7px 12px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',minWidth:'80px'}
 
+function iconaCorriere(nome:string): string | null {
+  const n = (nome||'').toUpperCase()
+  const regole: [string,string][] = [
+    ['DELIVERY BUSINESS','poste_delivery_business'],
+    ['POSTE','poste_delivery_business'],
+    ['SDA','sda'], ['GLS','gls'], ['BRT','brt'],
+    ['SPEDISCI','spedisci'], ['TNT','tnt'],
+    ['DHL ECONNECT','dhl_econnect'], ['ECONNECT','dhl_econnect'], ['DHL','dhl'],
+    ['FEDEX','fedex'], ['UPS','ups'], ['HERMES','hermes'], ['NEXIVE','nexive'],
+    ['LICCARDI','liccardi'], ['SAILPOST','sailpost'], ['BDM','bdm'], ['NSSA','nssa'],
+    ['HR PARCEL','hrp'], ['HRP','hrp'], ['PALLETWAYS','palletways'],
+    ['CORREOS EXPRESS','correos_express'], ['CORREOS','correos'],
+    ['INPOST','inpost'], ['SPRING','spring'], ['PAACK','paack'], ['SPEEDY','speedy'],
+    ['AMAZON','amazon_shipping'], ['CTT','ctt_express'], ['AIPACK','aipack'], ['ALT','alt'],
+    ['GTECH','gtechgroup'],
+  ]
+  for (const [chiave,file] of regole) { if (n.includes(chiave)) return `/corrieri/${file}.png` }
+  return null
+}
+
 const ADMIN_FIELDS = [
   {key:'attivo', label:'Account Attivo', desc:'Attiva / Disattiva profilo cliente.'},
   {key:'prezzi_in_distinta', label:'Prezzi in distinta', desc:'Visualizza / Nascondi i prezzi nella distinta di spedizione PDF.'},
