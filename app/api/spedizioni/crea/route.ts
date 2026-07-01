@@ -17,8 +17,10 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
 
   const clienteId = utente?.ruolo === 'cliente' ? utente.cliente_id : body.clienteId
-  const { data: cliente } = await supabase.from('clienti').select('master_id,ragione_sociale,listino_cliente_id').eq('id', clienteId).single()
+  const { data: cliente } = await supabase.from('clienti').select('master_id,ragione_sociale,listino_cliente_id,vieta_inserimento').eq('id', clienteId).single()
   if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
+
+  if (utente?.ruolo === 'cliente' && cliente.vieta_inserimento === true) return NextResponse.json({ error: 'Inserimento spedizioni non consentito per questo cliente.' }, { status: 403 })
 
   const masterId = cliente.master_id
 
