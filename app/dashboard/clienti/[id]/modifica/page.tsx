@@ -88,7 +88,6 @@ export default function ModificaClientePage() {
               <select value={form.tipo_contratto||'credito_scalare'} onChange={e=>set('tipo_contratto', e.target.value)} style={inp}>
                 <option value="credito_scalare">Credito a scalare</option>
                 <option value="fattura_mensile">Fattura mensile</option>
-                <option value="pagamento_anticipato">Pagamento anticipato</option>
               </select>
             </div>
           </div>
