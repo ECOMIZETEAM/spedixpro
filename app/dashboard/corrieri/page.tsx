@@ -129,8 +129,8 @@ export default function CorrieriPage() {
           <div style={{padding:'16px',display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'12px'}}>
             {DISPONIBILI.map((c,i) => (
               <a key={i} href={'/dashboard/corrieri/aggiungi?tipo='+c.tipo}
-                style={{border:'1px solid #e8e8e8',borderRadius:'8px',padding:'18px 10px',textAlign:'center',textDecoration:'none',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:'8px',background:'#fafafa',minHeight:'90px'}}>
-                <img src={'/corrieri/'+c.icona+'.png'} alt={c.nome} style={{width:'80px',height:'46px',objectFit:'contain'}}/>
+                style={{border:'1px solid #e8e8e8',borderRadius:'8px',textDecoration:'none',display:'block',overflow:'hidden',background:'#fff'}}>
+                <img src={'/corrieri/'+c.icona+'.png'} alt={c.nome} style={{width:'100%',height:'90px',objectFit:'contain',display:'block'}}/>
               </a>
             ))}
           </div>
