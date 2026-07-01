@@ -210,24 +210,26 @@ export default function ImportaOrdiniPage() {
     const targets = ordini.filter(o => sel.has(o.id) && (o.stato === 'da_spedire' || o.stato === 'errore'))
     if (!targets.length) { setMsg({ type: 'err', text: 'Nessun ordine spedibile selezionato' }); return }
 
-    // Mittente dal profilo cliente
+    // Mittente dal profilo cliente (route dedicata)
     setMsg(null)
-    let c: any
+    let mitt: any
     try {
-      const info = await fetch('/api/cliente/info').then(r => r.json())
-      c = info?.cliente
+      const res = await fetch('/api/cliente/mittente')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || 'Errore')
+      mitt = data.mittente
     } catch {
       setMsg({ type: 'err', text: 'Impossibile leggere i dati del mittente' }); return
     }
     const shipFrom = {
-      name: c?.ragione_sociale || '', company: c?.ragione_sociale || '',
-      street1: c?.so_indirizzo || '', street2: '',
-      city: c?.so_citta || '', state: c?.so_provincia || '',
-      postalCode: c?.so_cap || '', country: 'IT',
-      phone: c?.telefono || '', email: c?.email || '',
+      name: mitt?.nome || '', company: mitt?.nome || '',
+      street1: mitt?.indirizzo || '', street2: '',
+      city: mitt?.citta || '', state: mitt?.provincia || '',
+      postalCode: mitt?.cap || '', country: 'IT',
+      phone: mitt?.telefono || '', email: mitt?.email || '',
     }
     if (!shipFrom.street1 || !shipFrom.city || !shipFrom.state || !shipFrom.postalCode) {
-      setMsg({ type: 'err', text: 'Completa l\'indirizzo mittente (Mio Account) prima di spedire' })
+      setMsg({ type: 'err', text: 'Indirizzo mittente mancante: compila l\'indirizzo del cliente in Mio Account, poi riprova' })
       return
     }
 
