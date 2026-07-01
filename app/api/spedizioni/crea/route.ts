@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   // *** FIX: usa il corriere_id passato dal frontend (tariffa selezionata) ***
   if (body._corriere_id) {
     const { data: c } = await supabase
-      .from('corrieri').select('id,tipo,credenziali,nome_contratto')
+      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo')
       .eq('id', body._corriere_id)
       .eq('master_id', masterId)
       .single()
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
   if (!corriereRecord && cliente.listino_cliente_id) {
     const { data: fascia } = await supabase
       .from('listini_clienti_fasce')
-      .select('corrieri(id,tipo,credenziali,nome_contratto)')
+      .select('corrieri(id,tipo,credenziali,nome_contratto,attivo)')
       .eq('listino_id', cliente.listino_cliente_id)
       .limit(1)
       .single()
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
 
   if (!corriereRecord) {
     const { data: c } = await supabase
-      .from('corrieri').select('id,tipo,credenziali,nome_contratto')
+      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo')
       .eq('master_id', masterId).eq('tipo', 'spedisci')
       .limit(1)
       .single()
@@ -55,6 +55,8 @@ export async function POST(req: NextRequest) {
   }
 
   if (!corriereRecord) return NextResponse.json({ error: 'Nessun corriere configurato' }, { status: 400 })
+
+  if (corriereRecord.attivo === false) return NextResponse.json({ error: 'Corriere in pausa: spedizione non consentita.' }, { status: 400 })
 
   const cred = corriereRecord.credenziali as Record<string, string>
 
