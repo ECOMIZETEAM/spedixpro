@@ -46,6 +46,11 @@ export default function ClientiPage() {
 
   return (
     <div>
+      <style>{`
+        .cli-act{color:#9aa0a6;font-size:16px;line-height:1;text-decoration:none;transition:color .12s;cursor:pointer}
+        .cli-act:hover{color:#f97316}
+      `}</style>
+
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'20px'}}>
         <div>
           <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Clienti</h1>
@@ -108,7 +113,7 @@ export default function ClientiPage() {
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
               <thead>
                 <tr style={{background:'#fafafa'}}>
-                  {['Nr.#','Società','Tipo Contratto','Listino','Stato','Azioni'].map(h=>(
+                  {['Nr.#','Società','Tipo Contratto','Listino','Credito','Stato','Azioni'].map(h=>(
                     <th key={h} style={{textAlign:'left',padding:'9px 14px',fontSize:'11px',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.5px',color:'#1a1a1a',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap'}}>{h}</th>
                   ))}
                 </tr>
@@ -122,23 +127,24 @@ export default function ClientiPage() {
                       <div style={{fontSize:'11px',color:'#1a1a1a'}}>{c.email}</div>
                       {c.telefono && <div style={{fontSize:'11px',color:'#1a1a1a'}}>{c.telefono}</div>}
                     </td>
-                    <td style={{padding:'10px 14px',color:'#1a1a1a',fontSize:'12px'}}>{c.tipo_contratto?.replace(/_/g,' ')||'—'}</td>
-                    <td style={{padding:'10px 14px',color:'#1a1a1a',fontSize:'12px'}}>{c.listino_cliente_id ? <span style={{color:'#f97316',fontWeight:'600'}}>Assegnato</span> : '—'}</td>
+                    <td style={{padding:'10px 14px',color:'#1a1a1a',fontSize:'12px',textTransform:'capitalize'}}>{c.tipo_contratto?.replace(/_/g,' ')||'—'}</td>
+                    <td style={{padding:'10px 14px',fontSize:'12px'}}>
+                      {c.listini_clienti?.nome
+                        ? <span style={{color:'#f97316',fontWeight:'600'}}>{c.listini_clienti.nome}</span>
+                        : (c.listino_cliente_id ? <span style={{color:'#f97316',fontWeight:'600'}}>Assegnato</span> : <span style={{color:'#1a1a1a'}}>—</span>)}
+                    </td>
+                    <td style={{padding:'10px 14px',color:'#1a1a1a',fontSize:'12px',fontWeight:'600',whiteSpace:'nowrap'}}>€ {Number(c.credito||0).toFixed(2)}</td>
                     <td style={{padding:'10px 14px'}}>
                       <span style={{background:c.attivo?'#f0fdf4':'#fef2f2',color:c.attivo?'#16a34a':'#dc2626',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'500'}}>
                         {c.attivo?'Attivo':'Inattivo'}
                       </span>
                     </td>
                     <td style={{padding:'10px 14px'}}>
-                      <div style={{display:'flex',gap:'6px'}}>
-                        <a href={`/api/clienti/${c.id}/impersona`} title="Accedi come cliente" target="_blank" rel="noopener noreferrer"
-                          style={{padding:'5px 8px',background:'#fff7ed',color:'#f97316',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #fed7aa'}}>🔑</a>
-                        <a href={`/dashboard/clienti/${c.id}`} title="Profilo"
-                          style={{padding:'5px 8px',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #bfdbfe'}}>🔵</a>
-                        <a href={`/dashboard/clienti/${c.id}/modifica`} title="Modifica"
-                          style={{padding:'5px 8px',background:'#f0fdf4',color:'#16a34a',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #bbf7d0'}}>✏️</a>
-                        <a href={`/dashboard/clienti/${c.id}/impostazioni`} title="Impostazioni"
-                          style={{padding:'5px 8px',background:'#fffbeb',color:'#d97706',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #fde68a'}}>⚙️</a>
+                      <div style={{display:'flex',gap:'14px',alignItems:'center'}}>
+                        <a href={`/api/clienti/${c.id}/impersona`} title="Accedi come cliente" target="_blank" rel="noopener noreferrer" className="cli-act">↪</a>
+                        <a href={`/dashboard/clienti/${c.id}`} title="Credito e movimenti" className="cli-act">▤</a>
+                        <a href={`/dashboard/clienti/${c.id}/modifica`} title="Modifica dati" className="cli-act">✎</a>
+                        <a href={`/dashboard/clienti/${c.id}/impostazioni`} title="Impostazioni" className="cli-act">⚙</a>
                       </div>
                     </td>
                   </tr>
