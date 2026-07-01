@@ -56,6 +56,8 @@ export default function CorrieriPage() {
   const [loading, setLoading] = useState(true)
   const [confermaElimina, setConfermaElimina] = useState<string | null>(null)
   const [eliminando, setEliminando] = useState(false)
+  const [popup, setPopup] = useState<any>(null)
+  const [salvandoPopup, setSalvandoPopup] = useState(false)
 
   useEffect(() => {
     fetch('/api/corrieri/lista').then(r => r.json()).then(d => {
@@ -83,6 +85,33 @@ export default function CorrieriPage() {
     }
   }
 
+  function apriImpostazioni(c:any) {
+    setPopup({
+      id: c.id, nome_contratto: c.nome_contratto,
+      multicollo: c.multicollo !== false,
+      inserimento_ritiri: c.inserimento_ritiri !== false,
+      mittente: (c.settings && c.settings.mittente) || 'cliente',
+    })
+  }
+
+  async function salvaImpostazioni() {
+    if (!popup) return
+    setSalvandoPopup(true)
+    await fetch('/api/corrieri/'+popup.id, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        multicollo: popup.multicollo,
+        inserimento_ritiri: popup.inserimento_ritiri,
+        settings: { mittente: popup.mittente },
+      })
+    })
+    setCorrieri(prev => prev.map(c => c.id === popup.id ? { ...c, multicollo: popup.multicollo, inserimento_ritiri: popup.inserimento_ritiri, settings: { ...(c.settings||{}), mittente: popup.mittente } } : c))
+    setSalvandoPopup(false)
+    setPopup(null)
+  }
+
+  const selStyle = {width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
+
   return (
     <div>
       <div style={{marginBottom:'20px'}}>
@@ -98,27 +127,30 @@ export default function CorrieriPage() {
           ) : !corrieri.length ? (
             <div style={{padding:'30px',textAlign:'center',color:'#1a1a1a',fontSize:'13px'}}>Nessun contratto — aggiungine uno</div>
           ) : corrieri.map(c => (
-            <div key={c.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 18px',borderBottom:'1px solid #f5f5f5'}}>
-              <div style={{display:'flex',alignItems:'center',gap:'12px'}}>
+            <div key={c.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 18px',borderBottom:'1px solid #f5f5f5',gap:'10px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'12px',flex:1,minWidth:0}}>
                 {iconaCorriere(c.nome_contratto) ? (
-                  <img src={iconaCorriere(c.nome_contratto)!} alt="" style={{width:'96px',height:'58px',objectFit:'contain',border:'1px solid #eee',borderRadius:'6px',background:'#fff'}}/>
+                  <img src={iconaCorriere(c.nome_contratto)!} alt="" style={{width:'96px',height:'58px',objectFit:'contain',border:'1px solid #eee',borderRadius:'6px',background:'#fff',flexShrink:0}}/>
                 ) : (
-                  <div style={{width:'96px',height:'58px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'6px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'10px',fontWeight:'700',color:'#333',textTransform:'uppercase'}}>{c.tipo}</div>
+                  <div style={{width:'96px',height:'58px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'6px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'10px',fontWeight:'700',color:'#333',textTransform:'uppercase',flexShrink:0}}>{c.tipo}</div>
                 )}
-                <div>
+                <div style={{minWidth:0}}>
                   <div style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>{c.nome_contratto}</div>
-                  <div style={{fontSize:'11px',color:'#1a1a1a'}}>L{c.livello}</div>
+                  <div style={{display:'flex',alignItems:'center',gap:'6px',marginTop:'4px'}}>
+                    <span style={{background:c.attivo?'#f0fdf4':'#fef2f2',color:c.attivo?'#16a34a':'#dc2626',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>{c.attivo?'Attivo':'In pausa'}</span>
+                    <span style={{background:'#fff7ed',color:'#f97316',padding:'2px 8px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>L{c.livello}</span>
+                  </div>
                 </div>
               </div>
-              <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'6px',flexShrink:0}}>
                 <button onClick={() => toggleAttivo(c.id, c.attivo)}
-                  style={{background:c.attivo?'#f0fdf4':'#fef2f2',color:c.attivo?'#16a34a':'#dc2626',padding:'3px 10px',borderRadius:'4px',fontSize:'11px',fontWeight:'600',border:'none',cursor:'pointer'}}>
-                  {c.attivo?'● Attivo':'⏸ In pausa'}
+                  style={{background:c.attivo?'#fef2f2':'#f0fdf4',color:c.attivo?'#dc2626':'#16a34a',padding:'5px 10px',borderRadius:'6px',fontSize:'11px',fontWeight:'600',border:'none',cursor:'pointer'}}>
+                  {c.attivo?'|| In pausa':'▶ Riattiva'}
                 </button>
-                <a href={'/dashboard/corrieri/aggiungi?tipo='+c.tipo+'&id='+c.id} title="Modifica"
-                  style={{padding:'4px 10px',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',fontSize:'11px',textDecoration:'none',border:'1px solid #bfdbfe'}}>Modifica</a>
+                <button onClick={() => apriImpostazioni(c)} title="Impostazioni"
+                  style={{padding:'5px 10px',background:'#eff6ff',color:'#2563eb',borderRadius:'6px',fontSize:'11px',border:'1px solid #bfdbfe',cursor:'pointer'}}>⚙ Impostazioni</button>
                 <button onClick={() => setConfermaElimina(c.id)} title="Elimina"
-                  style={{padding:'4px 10px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'11px',border:'1px solid #fecaca',cursor:'pointer'}}>Elimina</button>
+                  style={{padding:'5px 9px',background:'#fef2f2',color:'#dc2626',borderRadius:'6px',fontSize:'11px',border:'1px solid #fecaca',cursor:'pointer'}}>Elimina</button>
               </div>
             </div>
           ))}
@@ -137,6 +169,44 @@ export default function CorrieriPage() {
         </div>
       </div>
 
+      {popup && (
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'20px'}}>
+          <div style={{background:'#fff',borderRadius:'12px',width:'100%',maxWidth:'560px',overflow:'hidden'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'18px 22px',borderBottom:'1px solid #f0f0f0'}}>
+              {iconaCorriere(popup.nome_contratto) && <img src={iconaCorriere(popup.nome_contratto)!} alt="" style={{width:'54px',height:'32px',objectFit:'contain'}}/>}
+              <div style={{fontSize:'15px',fontWeight:'700',color:'#1a1a1a'}}>{popup.nome_contratto} — Impostazioni</div>
+            </div>
+            <div style={{padding:'22px'}}>
+              <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',marginBottom:'14px'}}>Impostazioni Generale</div>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'16px',marginBottom:'14px'}}>
+                <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>Multicollo</label>
+                <select value={popup.multicollo?'si':'no'} onChange={e=>setPopup({...popup,multicollo:e.target.value==='si'})} style={{...selStyle,maxWidth:'260px'}}>
+                  <option value="si">Si</option><option value="no">No</option>
+                </select>
+              </div>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'16px',marginBottom:'20px'}}>
+                <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>Inserimento ritiri</label>
+                <select value={popup.inserimento_ritiri?'si':'no'} onChange={e=>setPopup({...popup,inserimento_ritiri:e.target.value==='si'})} style={{...selStyle,maxWidth:'260px'}}>
+                  <option value="si">Si</option><option value="no">No</option>
+                </select>
+              </div>
+              <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',margin:'20px 0 14px',paddingTop:'16px',borderTop:'1px solid #f0f0f0'}}>Mittente predefinito</div>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'16px'}}>
+                <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>Dati mittente</label>
+                <select value={popup.mittente} onChange={e=>setPopup({...popup,mittente:e.target.value})} style={{...selStyle,maxWidth:'260px'}}>
+                  <option value="cliente">Cliente</option>
+                  <option value="azienda">Azienda (fisso)</option>
+                </select>
+              </div>
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between',padding:'16px 22px',borderTop:'1px solid #f0f0f0'}}>
+              <button onClick={()=>setPopup(null)} style={{padding:'9px 20px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'8px',fontSize:'13px',fontWeight:'600',color:'#1a1a1a',cursor:'pointer'}}>Chiudi</button>
+              <button onClick={salvaImpostazioni} disabled={salvandoPopup} style={{padding:'9px 22px',background:'#f97316',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'700',cursor:'pointer',opacity:salvandoPopup?0.7:1}}>{salvandoPopup?'Salvataggio...':'Salva'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {confermaElimina && (
         <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}}>
           <div style={{background:'#fff',borderRadius:'10px',padding:'28px',maxWidth:'380px',textAlign:'center'}}>
@@ -144,14 +214,8 @@ export default function CorrieriPage() {
             <div style={{fontSize:'15px',fontWeight:'700',color:'#1a1a1a',marginBottom:'8px'}}>Sei sicuro di voler eliminare?</div>
             <div style={{fontSize:'13px',color:'#666',marginBottom:'20px'}}>Tutti i dati di questo contratto andranno persi. Questa azione non e reversibile.</div>
             <div style={{display:'flex',gap:'10px',justifyContent:'center'}}>
-              <button onClick={() => setConfermaElimina(null)} disabled={eliminando}
-                style={{padding:'9px 20px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',fontWeight:'600',color:'#1a1a1a',cursor:'pointer'}}>
-                Annulla
-              </button>
-              <button onClick={confermaEliminazione} disabled={eliminando}
-                style={{padding:'9px 20px',background:'#dc2626',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',color:'#fff',cursor:'pointer',opacity:eliminando?0.7:1}}>
-                {eliminando?'Eliminazione...':'Si, elimina'}
-              </button>
+              <button onClick={() => setConfermaElimina(null)} disabled={eliminando} style={{padding:'9px 20px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',fontWeight:'600',color:'#1a1a1a',cursor:'pointer'}}>Annulla</button>
+              <button onClick={confermaEliminazione} disabled={eliminando} style={{padding:'9px 20px',background:'#dc2626',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',color:'#fff',cursor:'pointer',opacity:eliminando?0.7:1}}>{eliminando?'Eliminazione...':'Si, elimina'}</button>
             </div>
           </div>
         </div>
