@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 
@@ -49,7 +49,7 @@ export default function ClienteProfiloPage() {
               {cliente.pec&&<div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>PEC</div><div>{cliente.pec}</div></div>}
               {cliente.rappresentante_legale&&<div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>RAPPRESENTANTE LEGALE</div><div>{cliente.rappresentante_legale}</div></div>}
               {cliente.telefono&&<div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>TELEFONO</div><div>{cliente.telefono}</div></div>}
-              <div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>LISTINO PREZZI</div><div style={{color:cliente.listino_cliente_id?'#f97316':'#bbb'}}>{cliente.listino_cliente_id?'Assegnato':'— nessun listino —'}</div></div>
+              <div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>LISTINO PREZZI</div><div style={{color:cliente.listino_cliente_id?'#f97316':'#bbb',fontWeight:'600'}}>{cliente.listini_clienti?.nome || (cliente.listino_cliente_id?'Assegnato':'— nessun listino —')}</div></div>
               <div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>TIPO CONTRATTO</div><div>{cliente.tipo_contratto?.replace(/_/g,' ')||'—'}</div></div>
             </div>
           </div>

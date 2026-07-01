@@ -127,10 +127,11 @@ export async function spediamoproCreateShipment(
   }
 ): Promise<{
   id: number
-  trackingCode: string
-  trackingUrl: string
+  trackingCode: string | null
+  trackingUrl: string | null
   totalPrice: number
-  code: string
+  code: string | null
+  raw: any
 }> {
   const token = await getSpediamoproToken(authcode)
 
@@ -161,20 +162,62 @@ export async function spediamoproCreateShipment(
     throw new Error(details || json.error?.message || 'SpediamoPro create shipment failed')
   }
 
+  const d = json.data || json
+
+  // I nomi esatti dei campi possono variare — proviamo diverse possibilità note
+  const trackingCode = d.trackingCode || d.tracking_code || d.parcels?.[0]?.tracking || null
+  const trackingUrl = d.trackingUrl || d.tracking_url || null
+  const totalPrice = d.totalPrice ?? d.total_price ?? params.quotation.totalPrice ?? 0
+
   return {
-    id: json.data.id,
-    trackingCode: json.data.trackingCode,
-    trackingUrl: json.data.trackingUrl,
-    totalPrice: json.data.totalPrice,
-    code: json.data.code,
+    id: d.id,
+    trackingCode,
+    trackingUrl,
+    totalPrice,
+    code: d.code || null,
+    raw: json, // risposta grezza completa per debug
   }
 }
 
-export async function spediamoproGetLabel(authcode: string, shipmentId: number): Promise<Buffer> {
+export async function spediamoproGetShipment(authcode: string, shipmentId: number): Promise<any> {
   const token = await getSpediamoproToken(authcode)
-  const res = await fetch(`${BASE_URL}/shipments/${shipmentId}/labels`, {
+  const res = await fetch(`${BASE_URL}/shipments/${shipmentId}`, {
     headers: { 'Authorization': `Bearer ${token}` },
   })
-  if (!res.ok) throw new Error('SpediamoPro label download failed')
-  return Buffer.from(await res.arrayBuffer())
+  if (!res.ok) {
+    const errText = await res.text()
+    throw new Error(`SpediamoPro get shipment failed: ${errText}`)
+  }
+  return res.json()
+}
+
+export async function spediamoproWaitForTracking(authcode: string, shipmentId: number, maxAttempts = 10, delayMs = 2000): Promise<string | null> {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const json = await spediamoproGetShipment(authcode, shipmentId)
+      const d = json.data || json
+      const tracking = d.trackingCode || d.parcels?.[0]?.tracking || null
+      if (tracking) return tracking
+    } catch (e) {
+      console.error('Polling tracking error:', e)
+    }
+    if (i < maxAttempts - 1) await new Promise(r => setTimeout(r, delayMs))
+  }
+  return null
+}
+
+export async function spediamoproGetLabel(authcode: string, shipmentId: number, maxAttempts = 5, delayMs = 2000): Promise<Buffer> {
+  const token = await getSpediamoproToken(authcode)
+  let lastError = ''
+  for (let i = 0; i < maxAttempts; i++) {
+    const res = await fetch(`${BASE_URL}/shipments/${shipmentId}/labels`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    if (res.ok) {
+      return Buffer.from(await res.arrayBuffer())
+    }
+    lastError = await res.text()
+    if (i < maxAttempts - 1) await new Promise(r => setTimeout(r, delayMs))
+  }
+  throw new Error(`SpediamoPro label download failed: ${lastError}`)
 }

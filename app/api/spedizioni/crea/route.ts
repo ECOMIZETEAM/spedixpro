@@ -4,6 +4,7 @@ import {
   spediamoproGetQuotation,
   spediamoproCreateShipment,
   spediamoproGetLabel,
+  spediamoproWaitForTracking,
   kgToGrams, cmToMm, euroToCents, centsToEuro
 } from '@/lib/spediamopro'
 
@@ -21,10 +22,20 @@ export async function POST(req: NextRequest) {
 
   const masterId = cliente.master_id
 
-  // ─── Trova corriere reale da usare ────────────────────────────────────────
   let corriereRecord: any = null
 
-  if (cliente.listino_cliente_id) {
+  // *** FIX: usa il corriere_id passato dal frontend (tariffa selezionata) ***
+  if (body._corriere_id) {
+    const { data: c } = await supabase
+      .from('corrieri').select('id,tipo,credenziali,nome_contratto')
+      .eq('id', body._corriere_id)
+      .eq('master_id', masterId)
+      .single()
+    corriereRecord = c
+  }
+
+  // Fallback: primo corriere del listino (compatibilità)
+  if (!corriereRecord && cliente.listino_cliente_id) {
     const { data: fascia } = await supabase
       .from('listini_clienti_fasce')
       .select('corrieri(id,tipo,credenziali,nome_contratto)')
@@ -112,6 +123,7 @@ export async function POST(req: NextRequest) {
       etichetta_url: etichetteUrls[i] || etichetteUrls[0] || null,
     }))
 
+    // *** FIX: salviamo contractCode e carrierCode dentro raw_response per riusarli nei ritiri ***
     const { error: insertError } = await supabase.from('spedizioni').insert({
       master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id, numero,
       mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
@@ -125,7 +137,9 @@ export async function POST(req: NextRequest) {
       contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
       tracking_number: r.trackingNumber || null,
       etichetta_url: etichetteUrls[0] || (r.labelData ? `data:application/pdf;base64,${r.labelData}` : null),
-      colli_dettaglio: colliDettaglio, raw_response: r, stato: 'in_lavorazione',
+      colli_dettaglio: colliDettaglio,
+      raw_response: { ...r, _carrierCode: rate.carrierCode, _contractCode: rate.contractCode },
+      stato: 'in_lavorazione',
       costo_spedizione: costoCorrente, costo_totale: costoCliente,
       note: body.notes || null, contenuto: body.contenuto || null,
     })
@@ -152,16 +166,17 @@ export async function POST(req: NextRequest) {
         phone: body.shipFrom.phone || undefined,
         email: body.shipFrom.email?.substring(0, 50) || undefined,
       }
-      const consignee = {
+      const consignee: any = {
         name: body.shipTo.name?.substring(0, 35),
         address: body.shipTo.street1?.substring(0, 35),
         postalCode: body.shipTo.postalCode,
         city: body.shipTo.city?.substring(0, 35),
         province: body.shipTo.state?.substring(0, 2).toUpperCase(),
         country: (body.shipTo.country || 'IT').toUpperCase(),
-        phone: body.shipTo.phone || undefined,
-        email: body.shipTo.email?.substring(0, 50) || undefined,
       }
+      if (body.shipTo.phone) consignee.phone = body.shipTo.phone
+      if (body.shipTo.email) consignee.email = body.shipTo.email.substring(0, 50)
+
       const parcels = [{
         weight: kgToGrams(pesoReale),
         length: cmToMm(pkg?.length || 10), width: cmToMm(pkg?.width || 10), height: cmToMm(pkg?.height || 10),
@@ -179,6 +194,12 @@ export async function POST(req: NextRequest) {
         externalReference: body.notes || undefined,
       })
 
+      let trackingReale = shipment.trackingCode
+      if (!trackingReale) {
+        trackingReale = await spediamoproWaitForTracking(cred.authcode, shipment.id)
+      }
+      const numeroFinale = trackingReale || shipment.code || `SP-${shipment.id}`
+
       let etichettaUrl: string | null = null
       try {
         const labelBuffer = await spediamoproGetLabel(cred.authcode, shipment.id)
@@ -192,7 +213,7 @@ export async function POST(req: NextRequest) {
 
       const { error: insertError } = await supabase.from('spedizioni').insert({
         master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id,
-        numero: shipment.trackingCode,
+        numero: numeroFinale,
         mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
         mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
         mitt_email: body.shipFrom.email || null, mitt_telefono: body.shipFrom.phone || null,
@@ -202,7 +223,7 @@ export async function POST(req: NextRequest) {
         colli: packages.length, peso_reale: pesoReale,
         lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
         contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
-        tracking_number: shipment.trackingCode,
+        tracking_number: numeroFinale,
         etichetta_url: etichettaUrl,
         raw_response: { ...shipment, _quotation: quotation },
         stato: 'in_lavorazione',
@@ -211,11 +232,11 @@ export async function POST(req: NextRequest) {
       })
 
       if (insertError) {
-        return NextResponse.json({ error: `Spedizione creata su SpediamoPro (${shipment.trackingCode}) ma errore DB: ${insertError.message}`, numero: shipment.trackingCode }, { status: 500 })
+        return NextResponse.json({ error: `Spedizione creata su SpediamoPro (${numeroFinale}) ma errore DB: ${insertError.message}`, numero: numeroFinale }, { status: 500 })
       }
 
       return NextResponse.json({
-        numero: shipment.trackingCode, tracking: shipment.trackingCode, costo: costoCorrente.toFixed(2),
+        numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2),
       })
     } catch (err: any) {
       console.error('SpediamoPro error:', err)

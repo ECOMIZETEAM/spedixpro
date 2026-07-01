@@ -129,36 +129,58 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Nessuna fascia prezzo per zona ${zonaNome}` }, { status: 400 })
   }
 
-  const fasciaGiusta = trovaFascia(fasceZona, pesoFatturato)
-  if (!fasciaGiusta) {
-    return NextResponse.json({ error: `Nessuna fascia per ${pesoFatturato.toFixed(2)}kg` }, { status: 400 })
+  // *** FIX: raggruppa le fasce per corriere, trova la fascia giusta PER OGNI corriere ***
+  const fascePerCorriere = new Map<string, any[]>()
+  for (const f of fasceZona) {
+    const corriereId = (f.corrieri as any)?.id
+    if (!corriereId) continue
+    if (!fascePerCorriere.has(corriereId)) fascePerCorriere.set(corriereId, [])
+    fascePerCorriere.get(corriereId)!.push(f)
   }
 
-  const corriere = (fasciaGiusta as any).corrieri
-
-  // Se SpediamoPro, dobbiamo ottenere la quotation reale per poterla accettare dopo
-  let spediamoproQuotation = null
-  if (corriere?.tipo === 'spediamopro') {
-    const quote = await quotaCorriere(corriere, pesoFatturato)
-    spediamoproQuotation = quote?._spediamopro_quotation || null
+  if (!fascePerCorriere.size) {
+    return NextResponse.json({ error: `Nessuna fascia prezzo per zona ${zonaNome}` }, { status: 400 })
   }
 
-  return NextResponse.json([{
-    carrierCode: corriere?.tipo || 'sda',
-    contractCode: '',
-    weight_price: Number(fasciaGiusta.prezzo).toFixed(2),
-    total_price: Number(fasciaGiusta.prezzo).toFixed(2),
-    fuel: '0.00',
-    zona: zonaNome,
-    peso_reale: pesoReale,
-    peso_volume: pesoVolume.toFixed(2),
-    peso_fatturato: pesoFatturato.toFixed(2),
-    corriere_nome: corriere?.nome_contratto || 'Corriere',
-    listino_fascia: `fino a ${fasciaGiusta.peso_max}kg`,
-    _corriere_tipo: corriere?.tipo,
-    _corriere_id: corriere?.id,
-    _spediamopro_quotation: spediamoproQuotation,
-  }])
+  const risultati: any[] = []
+
+  for (const [corriereId, fasceDelCorriere] of fascePerCorriere) {
+    const fasciaGiusta = trovaFascia(fasceDelCorriere, pesoFatturato)
+    if (!fasciaGiusta) continue
+
+    const corriere = (fasciaGiusta as any).corrieri
+
+    let spediamoproQuotation = null
+    if (corriere?.tipo === 'spediamopro') {
+      const quote = await quotaCorriere(corriere, pesoFatturato)
+      spediamoproQuotation = quote?._spediamopro_quotation || null
+      // Se la quotazione live fallisce, salta questo corriere invece di mostrare un risultato rotto
+      if (!quote) continue
+    }
+
+    risultati.push({
+      carrierCode: corriere?.tipo || 'sda',
+      contractCode: '',
+      weight_price: Number(fasciaGiusta.prezzo).toFixed(2),
+      total_price: Number(fasciaGiusta.prezzo).toFixed(2),
+      fuel: '0.00',
+      zona: zonaNome,
+      peso_reale: pesoReale,
+      peso_volume: pesoVolume.toFixed(2),
+      peso_fatturato: pesoFatturato.toFixed(2),
+      corriere_nome: corriere?.nome_contratto || 'Corriere',
+      listino_fascia: `fino a ${fasciaGiusta.peso_max}kg`,
+      _corriere_tipo: corriere?.tipo,
+      _corriere_id: corriere?.id,
+      _spediamopro_quotation: spediamoproQuotation,
+    })
+  }
+
+  if (!risultati.length) {
+    return NextResponse.json({ error: `Nessuna tariffa disponibile per ${pesoFatturato.toFixed(2)}kg in zona ${zonaNome}` }, { status: 400 })
+  }
+
+  return NextResponse.json(risultati)
 }
 
 function trovaFascia(fasce: any[], peso: number) {

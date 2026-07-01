@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState } from 'react'
 import { usePathname } from 'next/navigation'
 
@@ -10,11 +10,14 @@ const NAV = [
     { label: 'Rettifica Costi', href: '/dashboard/spedizioni/rettifica' },
     { label: 'Spedizioni Cancellate', href: '/dashboard/spedizioni/cancellate' },
   ]},
-  { label: 'Contrassegni', href: '/dashboard/contrassegni', icon: '💰', sub: [
+  { label: 'Contrassegni', href: '/dashboard/contrassegni', icon: '¤', sub: [
     { label: 'Lista Contrassegni', href: '/dashboard/contrassegni' },
     { label: 'Distinte Contrassegni', href: '/dashboard/contrassegni/distinte' },
   ]},
-  { label: 'Ritiri', href: '/dashboard/ritiri', icon: '↩' },
+  { label: 'Ritiri', href: '/dashboard/ritiri', icon: '↩', sub: [
+    { label: 'Nuovo Ritiro', href: '/dashboard/ritiri/nuovo' },
+    { label: 'Elenco Ritiri', href: '/dashboard/ritiri/elenco' },
+  ]},
   { label: 'Distinte', href: '/dashboard/distinte', icon: '≡' },
   { label: 'Resi', href: '/dashboard/resi', icon: '↺', sub: [
     { label: 'Scansiona Resi', href: '/dashboard/resi/scansiona' },
@@ -30,6 +33,9 @@ const NAV = [
   { label: 'Clienti', href: '/dashboard/clienti', icon: '⊙', sub: [
     { label: 'Nuovo Cliente', href: '/dashboard/clienti/nuovo' },
     { label: 'Elenco Clienti', href: '/dashboard/clienti' },
+    { label: 'Nuovo Master', href: '/dashboard/clienti/master/nuovo' },
+    { label: 'Elenco Master', href: '/dashboard/clienti/master' },
+    { label: 'Gerarchia', href: '/dashboard/clienti/gerarchia' },
   ]},
   { label: 'Autisti e Consegne', href: '/dashboard/autisti', icon: '⊡' },
   { label: 'Consumabili', href: '/dashboard/consumabili', icon: '▣', sub: [

@@ -1,7 +1,7 @@
-﻿import { createServerSupabase } from '@/lib/supabase'
+import { createServerSupabase } from '@/lib/supabase'
 import { redirect } from 'next/navigation'
 
-async function salvaCorreiere(formData: FormData) {
+async function salvaCorriere(formData: FormData) {
   'use server'
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -10,6 +10,7 @@ async function salvaCorreiere(formData: FormData) {
   if (!utente?.master_id) redirect('/dashboard/corrieri')
 
   const tipo = formData.get('tipo') as string
+  const corriereId = formData.get('corriere_id') as string
   const credenziali: Record<string,string> = {}
   const settings: Record<string,string> = {}
 
@@ -35,14 +36,26 @@ async function salvaCorreiere(formData: FormData) {
     credenziali.password = formData.get('password') as string || ''
   }
 
-  const { error } = await supabase.from('corrieri').insert({
-    master_id: utente.master_id,
-    tipo, nome_contratto: formData.get('nome_contratto') as string,
-    credenziali, settings, multicollo: true, inserimento_ritiri: true, attivo: true, livello: 1,
-  })
+  if (corriereId) {
+    // *** MODIFICA: aggiorna il corriere esistente ***
+    const { error } = await supabase.from('corrieri').update({
+      nome_contratto: formData.get('nome_contratto') as string,
+      credenziali, settings,
+    }).eq('id', corriereId).eq('master_id', utente.master_id)
 
-  if (error) redirect(`/dashboard/corrieri?error=${encodeURIComponent(error.message)}`)
-  redirect('/dashboard/corrieri?success=corriere_aggiunto')
+    if (error) redirect(`/dashboard/corrieri?error=${encodeURIComponent(error.message)}`)
+    redirect('/dashboard/corrieri?success=corriere_aggiornato')
+  } else {
+    // CREAZIONE: nuovo corriere
+    const { error } = await supabase.from('corrieri').insert({
+      master_id: utente.master_id,
+      tipo, nome_contratto: formData.get('nome_contratto') as string,
+      credenziali, settings, multicollo: true, inserimento_ritiri: true, attivo: true, livello: 1,
+    })
+
+    if (error) redirect(`/dashboard/corrieri?error=${encodeURIComponent(error.message)}`)
+    redirect('/dashboard/corrieri?success=corriere_aggiunto')
+  }
 }
 
 const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,string,string][],extra?:string}> = {
@@ -101,80 +114,72 @@ const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,str
   },
 }
 
-export default async function AggiungCorriereePage({ searchParams }: { searchParams: Promise<{tipo?:string}> }) {
+export default async function AggiungiCorrierePage({ searchParams }: { searchParams: Promise<{tipo?:string,id?:string}> }) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/')
-  const { tipo } = await searchParams
+  const { tipo, id } = await searchParams
   const config = CONFIGS[tipo||'spedisci'] || CONFIGS['spedisci']
 
+  // Se c'è un id, carica i dati esistenti per la modifica
+  let corriereEsistente: any = null
+  if (id) {
+    const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+    const { data: c } = await supabase.from('corrieri').select('*').eq('id', id).eq('master_id', utente?.master_id).single()
+    corriereEsistente = c
+  }
+
+  const credenzialiEsistenti = corriereEsistente?.credenziali || {}
+  const settingsEsistenti = corriereEsistente?.settings || {}
+
   return (
-    <div style={{display:'flex',minHeight:'100vh',background:'#f0f4f8',fontFamily:'Segoe UI,system-ui,sans-serif'}}>
-      <aside style={{width:'230px',background:'#0f1623',flexShrink:0,display:'flex',flexDirection:'column'}}>
-        <div style={{padding:'20px 18px',borderBottom:'1px solid rgba(255,255,255,.06)',display:'flex',alignItems:'center',gap:'10px'}}>
-          <div style={{width:'36px',height:'36px',background:'linear-gradient(135deg,#3b82f6,#1d4ed8)',borderRadius:'9px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'18px'}}>📦</div>
-          <div><div style={{fontSize:'17px',fontWeight:'800',color:'#fff'}}>Spedix<span style={{color:'#60a5fa'}}>Pro</span></div></div>
+    <div>
+      <div style={{marginBottom:'20px',fontSize:'13px',color:'#666'}}>
+        ← <a href="/dashboard/corrieri" style={{color:'#f97316',textDecoration:'none'}}>Corrieri</a> / {corriereEsistente ? 'Modifica' : 'Aggiungi'} {config.titolo}
+      </div>
+
+      <h1 style={{fontSize:'20px',fontWeight:'800',color:'#1a1a1a',marginBottom:'20px'}}>🚛 {corriereEsistente ? 'Modifica' : 'Aggiungi'} {config.titolo}</h1>
+
+      <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'8px',padding:'12px 16px',marginBottom:'20px',fontSize:'13px',color:'#1d4ed8',maxWidth:'520px'}}>
+        💡 {config.info}
+      </div>
+
+      <div style={{maxWidth:'520px',background:'#fff',borderRadius:'10px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
+        <div style={{padding:'14px 18px',background:'#fafafa',borderBottom:'1px solid #e8e8e8',fontSize:'13.5px',fontWeight:'700',color:'#1a1a1a'}}>
+          Credenziali {config.titolo}
         </div>
-        <nav style={{padding:'8px 0',flex:1}}>
-          {[['📊','Dashboard','/dashboard'],['📦','Spedizioni','/dashboard/spedizioni'],['👥','Clienti','/dashboard/clienti'],['🚛','Corrieri','/dashboard/corrieri'],['💶','Listini','/dashboard/listini'],['🧾','Fatture','/dashboard/fatture'],['⚙️','Impostazioni','/dashboard/impostazioni']].map(([ico,lbl,href]) => (
-            <a key={String(href)} href={String(href)} style={{display:'flex',alignItems:'center',gap:'10px',padding:'9px 18px',color:String(href)==='/dashboard/corrieri'?'#60a5fa':'#64748b',fontSize:'13px',textDecoration:'none',background:String(href)==='/dashboard/corrieri'?'rgba(59,130,246,.15)':'transparent',borderRight:String(href)==='/dashboard/corrieri'?'3px solid #3b82f6':'3px solid transparent'}}>
-              <span style={{fontSize:'15px',width:'20px',textAlign:'center'}}>{ico}</span>{lbl}
-            </a>
-          ))}
-        </nav>
-        <div style={{borderTop:'1px solid rgba(255,255,255,.05)',padding:'10px 0'}}>
-          <a href="/api/auth/logout" style={{display:'flex',alignItems:'center',gap:'10px',padding:'9px 18px',color:'#64748b',fontSize:'13px',textDecoration:'none'}}><span>🚪</span>Esci</a>
-        </div>
-      </aside>
-
-      <div style={{flex:1,display:'flex',flexDirection:'column'}}>
-        <header style={{background:'#1a2235',height:'54px',display:'flex',alignItems:'center',padding:'0 24px',borderBottom:'1px solid rgba(255,255,255,.06)'}}>
-          <div style={{color:'#94a3b8',fontSize:'13px'}}>← <a href="/dashboard/corrieri" style={{color:'#60a5fa',textDecoration:'none'}}>Corrieri</a> / Aggiungi {config.titolo}</div>
-        </header>
-
-        <main style={{flex:1,padding:'24px'}}>
-          <h1 style={{fontSize:'20px',fontWeight:'800',color:'#1e293b',marginBottom:'20px'}}>🚛 Aggiungi {config.titolo}</h1>
-
-          <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'8px',padding:'12px 16px',marginBottom:'20px',fontSize:'13px',color:'#1d4ed8',maxWidth:'520px'}}>
-            💡 {config.info}
-          </div>
-
-          <div style={{maxWidth:'520px',background:'#fff',borderRadius:'10px',border:'1px solid #e2e8f0',overflow:'hidden'}}>
-            <div style={{padding:'14px 18px',background:'#f8fafc',borderBottom:'1px solid #e2e8f0',fontSize:'13.5px',fontWeight:'700',color:'#1e293b'}}>
-              Credenziali {config.titolo}
+        <form action={salvaCorriere} style={{padding:'20px',display:'flex',flexDirection:'column',gap:'14px'}}>
+          <input type="hidden" name="tipo" value={tipo||'spedisci'}/>
+          {corriereEsistente && <input type="hidden" name="corriere_id" value={corriereEsistente.id}/>}
+          {config.campi.map(([name,label,placeholder,inputType]) => (
+            <div key={name}>
+              <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>{label}</label>
+              <input name={name} type={inputType} placeholder={placeholder} required
+                defaultValue={name === 'nome_contratto' ? (corriereEsistente?.nome_contratto || '') : (credenzialiEsistenti[name] || '')}
+                style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box'}}/>
             </div>
-            <form action={salvaCorreiere} style={{padding:'20px',display:'flex',flexDirection:'column',gap:'14px'}}>
-              <input type="hidden" name="tipo" value={tipo||'spedisci'}/>
-              {config.campi.map(([name,label,placeholder,inputType]) => (
-                <div key={name}>
-                  <label style={{fontSize:'11.5px',fontWeight:'600',color:'#64748b',display:'block',marginBottom:'4px'}}>{label}</label>
-                  <input name={name} type={inputType} placeholder={placeholder} required
-                    style={{width:'100%',padding:'9px 12px',border:'1px solid #e2e8f0',borderRadius:'7px',fontSize:'13px',color:'#1e293b',background:'#fff',boxSizing:'border-box'}}/>
-                </div>
-              ))}
-              {tipo === 'gls' && (
-                <div>
-                  <label style={{fontSize:'11.5px',fontWeight:'600',color:'#64748b',display:'block',marginBottom:'4px'}}>Tipo Collo</label>
-                  <select name="tipo_collo" style={{width:'100%',padding:'9px 12px',border:'1px solid #e2e8f0',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
-                    <option>Normale</option><option>Fragile</option>
-                  </select>
-                </div>
-              )}
-              {tipo === 'sda' && (
-                <div>
-                  <label style={{fontSize:'11.5px',fontWeight:'600',color:'#64748b',display:'block',marginBottom:'4px'}}>Tipo Contratto</label>
-                  <select name="tipo_contratto_sda" style={{width:'100%',padding:'9px 12px',border:'1px solid #e2e8f0',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
-                    <option value="ZERO_TRE">ZERO TRE</option><option value="STANDARD">STANDARD</option>
-                  </select>
-                </div>
-              )}
-              <div style={{display:'flex',gap:'10px',justifyContent:'flex-end',marginTop:'8px'}}>
-                <a href="/dashboard/corrieri" style={{padding:'9px 18px',background:'#f1f5f9',border:'1px solid #e2e8f0',borderRadius:'8px',fontSize:'13px',fontWeight:'600',color:'#64748b',textDecoration:'none'}}>Annulla</a>
-                <button type="submit" style={{padding:'9px 22px',background:'#2563eb',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>💾 Salva Contratto</button>
-              </div>
-            </form>
+          ))}
+          {tipo === 'gls' && (
+            <div>
+              <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Tipo Collo</label>
+              <select name="tipo_collo" defaultValue={settingsEsistenti.tipo_collo || 'Normale'} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
+                <option>Normale</option><option>Fragile</option>
+              </select>
+            </div>
+          )}
+          {tipo === 'sda' && (
+            <div>
+              <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Tipo Contratto</label>
+              <select name="tipo_contratto_sda" defaultValue={settingsEsistenti.tipo_contratto || 'ZERO_TRE'} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
+                <option value="ZERO_TRE">ZERO TRE</option><option value="STANDARD">STANDARD</option>
+              </select>
+            </div>
+          )}
+          <div style={{display:'flex',gap:'10px',justifyContent:'flex-end',marginTop:'8px'}}>
+            <a href="/dashboard/corrieri" style={{padding:'9px 18px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'8px',fontSize:'13px',fontWeight:'600',color:'#666',textDecoration:'none'}}>Annulla</a>
+            <button type="submit" style={{padding:'9px 22px',background:'#f97316',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>💾 {corriereEsistente ? 'Salva Modifiche' : 'Salva Contratto'}</button>
           </div>
-        </main>
+        </form>
       </div>
     </div>
   )

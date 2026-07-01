@@ -7,7 +7,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.redirect(new URL('/', req.url))
 
-  // Verifica che chi richiede sia un master (non un cliente che impersona altri)
   const { data: utente } = await supabase.from('utenti').select('ruolo,master_id').eq('id', user.id).single()
   if (!utente || utente.ruolo === 'cliente') {
     return NextResponse.redirect(new URL('/dashboard', req.url))
@@ -15,7 +14,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const { id } = await params
 
-  // Verifica che il cliente appartenga a questo master
   const { data: cliente } = await supabase
     .from('clienti').select('id,email,master_id').eq('id', id).single()
 
@@ -25,7 +23,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const admin = createAdminSupabase()
 
-  // Genera un magic link per il cliente — non serve la password
+  // *** FIX: logout esplicito della sessione master prima di impersonare ***
+  await supabase.auth.signOut()
+
   const { data: linkData, error } = await admin.auth.admin.generateLink({
     type: 'magiclink',
     email: cliente.email,
@@ -35,7 +35,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.redirect(new URL('/dashboard/clienti?error=impersonazione_fallita', req.url))
   }
 
-  // Estrai il token hash dal link generato e verifica direttamente la sessione
   const tokenHash = linkData.properties?.hashed_token
   if (!tokenHash) {
     return NextResponse.redirect(new URL('/dashboard/clienti?error=token_mancante', req.url))
@@ -50,6 +49,5 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.redirect(new URL('/dashboard/clienti?error=sessione_non_creata', req.url))
   }
 
-  // Sessione del cliente attiva — reindirizza al portale cliente
   return NextResponse.redirect(new URL('/cliente/dashboard', req.url))
 }

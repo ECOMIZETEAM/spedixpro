@@ -1,9 +1,17 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+
+const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'12.5px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
+const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#999',display:'block' as const,marginBottom:'4px',textTransform:'uppercase' as const,letterSpacing:'0.4px'}
 
 export default function ClientiPage() {
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+
+  const [search, setSearch] = useState('')
+  const [filtroStato, setFiltroStato] = useState('tutti')
+  const [filtroContratto, setFiltroContratto] = useState('tutti')
+  const [filtroListino, setFiltroListino] = useState('tutti')
 
   useEffect(() => {
     fetch('/api/clienti/lista')
@@ -12,24 +20,88 @@ export default function ClientiPage() {
       .catch(() => setLoading(false))
   }, [])
 
+  const tipiContratto = useMemo(() => {
+    const set = new Set(clienti.map(c => c.tipo_contratto).filter(Boolean))
+    return Array.from(set)
+  }, [clienti])
+
+  const clientiFiltrati = useMemo(() => {
+    return clienti.filter(c => {
+      if (filtroStato === 'attivo' && !c.attivo) return false
+      if (filtroStato === 'inattivo' && c.attivo) return false
+      if (filtroContratto !== 'tutti' && c.tipo_contratto !== filtroContratto) return false
+      if (filtroListino === 'assegnato' && !c.listino_cliente_id) return false
+      if (filtroListino === 'non_assegnato' && c.listino_cliente_id) return false
+      if (search.trim()) {
+        const s = search.toLowerCase()
+        const match = c.ragione_sociale?.toLowerCase().includes(s)
+          || c.email?.toLowerCase().includes(s)
+          || c.telefono?.includes(s)
+          || c.codice_cliente?.toLowerCase().includes(s)
+        if (!match) return false
+      }
+      return true
+    })
+  }, [clienti, search, filtroStato, filtroContratto, filtroListino])
+
   return (
     <div>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'20px'}}>
         <div>
           <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Clienti</h1>
-          <p style={{color:'#1a1a1a',fontSize:'13px',marginTop:'4px'}}>{clienti.length} clienti totali</p>
+          <p style={{color:'#666',fontSize:'13px',marginTop:'4px'}}>{clientiFiltrati.length} di {clienti.length} clienti</p>
         </div>
         <a href="/dashboard/clienti/nuovo" style={{background:'#f97316',color:'#fff',padding:'8px 18px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>+ Nuovo Cliente</a>
+      </div>
+
+      {/* FILTRI */}
+      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',padding:'18px',marginBottom:'16px'}}>
+        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'12px',display:'flex',alignItems:'center',gap:'6px'}}>
+          <span>▽</span> Filtri
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(4, 1fr)',gap:'12px'}}>
+          <div>
+            <label style={lbl}>Status account</label>
+            <select value={filtroStato} onChange={e => setFiltroStato(e.target.value)} style={inp}>
+              <option value="tutti">Tutti</option>
+              <option value="attivo">Attivo</option>
+              <option value="inattivo">Inattivo</option>
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Tipo Contratto</label>
+            <select value={filtroContratto} onChange={e => setFiltroContratto(e.target.value)} style={inp}>
+              <option value="tutti">Tutti</option>
+              {tipiContratto.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Listino</label>
+            <select value={filtroListino} onChange={e => setFiltroListino(e.target.value)} style={inp}>
+              <option value="tutti">Tutti</option>
+              <option value="assegnato">Assegnato</option>
+              <option value="non_assegnato">Non assegnato</option>
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>🔍 Cerca</label>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Nome, email, telefono..." style={inp} />
+          </div>
+        </div>
       </div>
 
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
         {loading ? (
           <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a'}}><div style={{fontSize:'14px'}}>Caricamento...</div></div>
-        ) : !clienti.length ? (
+        ) : !clientiFiltrati.length ? (
           <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a'}}>
             <div style={{fontSize:'40px',marginBottom:'12px'}}>👥</div>
-            <div style={{fontSize:'14px',fontWeight:'500',color:'#1a1a1a'}}>Nessun cliente</div>
-            <a href="/dashboard/clienti/nuovo" style={{display:'inline-block',marginTop:'12px',background:'#f97316',color:'#fff',padding:'8px 18px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>Crea il primo</a>
+            <div style={{fontSize:'14px',fontWeight:'500',color:'#1a1a1a'}}>
+              {clienti.length ? 'Nessun cliente corrisponde ai filtri' : 'Nessun cliente'}
+            </div>
+            {!clienti.length && (
+              <a href="/dashboard/clienti/nuovo" style={{display:'inline-block',marginTop:'12px',background:'#f97316',color:'#fff',padding:'8px 18px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>Crea il primo</a>
+            )}
           </div>
         ) : (
           <div style={{overflowX:'auto'}}>
@@ -42,7 +114,7 @@ export default function ClientiPage() {
                 </tr>
               </thead>
               <tbody>
-                {clienti.map(c => (
+                {clientiFiltrati.map(c => (
                   <tr key={c.id} style={{borderBottom:'1px solid #f5f5f5'}}>
                     <td style={{padding:'10px 14px',color:'#1a1a1a',fontSize:'12px'}}>{c.codice_cliente}</td>
                     <td style={{padding:'10px 14px'}}>

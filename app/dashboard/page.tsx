@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
 
@@ -16,12 +16,12 @@ export default function Dashboard() {
   const STATI_COLORS: Record<string,string> = {
     'in_lavorazione':'#f97316',
     'spedita':'#9ca3af',
-    'in_transito':'#6ee7b7',
-    'in_consegna':'#3b82f6',
-    'consegnata':'#eab308',
-    'in_giacenza':'#22c55e',
+    'in_transito':'#fdba74',
+    'in_consegna':'#1a1a1a',
+    'consegnata':'#22c55e',
+    'in_giacenza':'#fb923c',
     'reso_mittente':'#ef4444',
-    'non_consegnato':'#8b5cf6',
+    'non_consegnato':'#6b7280',
     'in_attesa_istruzioni':'#374151',
   }
 
@@ -46,59 +46,67 @@ export default function Dashboard() {
   const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const}
   const cardH = {padding:'12px 18px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700' as const,color:'#1a1a1a'}
 
+  // KPI card monocromatiche: nero per il principale, arancione per accento, bianco/grigio per gli altri
+  const kpiCardDark = {background:'#1a1a1a',borderRadius:'8px',padding:'14px 18px',color:'#fff',display:'flex',alignItems:'center',gap:'14px'}
+  const kpiCardLight = {background:'#fff',border:'1px solid #e8e8e8',borderRadius:'8px',padding:'14px'}
+  const kpiIconDark = {width:'44px',height:'44px',background:'rgba(249,115,22,0.15)',borderRadius:'8px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'20px',flexShrink:0,color:'#f97316'}
+  const kpiIconLight = {width:'36px',height:'36px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'7px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'16px',marginBottom:'8px',color:'#f97316'}
+  const kpiLabel = {fontSize:'10px',fontWeight:'700' as const,textTransform:'uppercase' as const,letterSpacing:'0.6px',color:'#999',lineHeight:1.3}
+  const kpiValue = {fontSize:'26px',fontWeight:'800' as const,marginTop:'4px',lineHeight:1,color:'#1a1a1a'}
+
   return (
     <div style={{display:'flex',flexDirection:'column' as const,gap:'16px'}}>
 
       {/* Saluto */}
       <div>
         <h1 style={{fontSize:'18px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Ciao, {data.masterNome}</h1>
-        <p style={{color:'#1a1a1a',fontSize:'12px',margin:'4px 0 0'}}>{new Date().toLocaleDateString('it-IT',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
+        <p style={{color:'#999',fontSize:'12px',margin:'4px 0 0'}}>{new Date().toLocaleDateString('it-IT',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
       </div>
 
       {/* KPI */}
       <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr 1fr',gap:'12px'}}>
 
-        {/* Spedizioni mese */}
-        <div style={{background:'#29abe2',borderRadius:'8px',padding:'14px 18px',color:'#fff',display:'flex',alignItems:'center',gap:'14px'}}>
-          <div style={{width:'44px',height:'44px',background:'rgba(255,255,255,0.2)',borderRadius:'8px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'22px',flexShrink:0}}>📦</div>
+        {/* Spedizioni mese — card scura principale */}
+        <div style={kpiCardDark}>
+          <div style={kpiIconDark}>📦</div>
           <div style={{flex:1,minWidth:0}}>
-            <div style={{fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,letterSpacing:'0.6px',opacity:0.8,marginBottom:'3px'}}>
+            <div style={{fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,letterSpacing:'0.6px',color:'#999',marginBottom:'3px'}}>
               SPEDIZIONI {new Date().toLocaleString('it-IT',{month:'short'}).toUpperCase()}
             </div>
-            <div style={{fontSize:'20px',fontWeight:'800',lineHeight:1}}>{data.spedizioniMese?.toLocaleString()} <span style={{fontSize:'13px',opacity:0.7}}>/ {data.limiteMese?.toLocaleString()}</span></div>
-            <div style={{background:'rgba(255,255,255,0.25)',borderRadius:'4px',height:'4px',marginTop:'8px'}}>
-              <div style={{background:'#fff',borderRadius:'4px',height:'4px',width:`${Math.min(100,(data.spedizioniMese/data.limiteMese)*100)}%`,transition:'width 0.5s'}}/>
+            <div style={{fontSize:'20px',fontWeight:'800',lineHeight:1,color:'#fff'}}>{data.spedizioniMese?.toLocaleString()} <span style={{fontSize:'13px',color:'#999'}}>/ {data.limiteMese?.toLocaleString()}</span></div>
+            <div style={{background:'rgba(255,255,255,0.12)',borderRadius:'4px',height:'4px',marginTop:'8px'}}>
+              <div style={{background:'#f97316',borderRadius:'4px',height:'4px',width:`${Math.min(100,(data.spedizioniMese/data.limiteMese)*100)}%`,transition:'width 0.5s'}}/>
             </div>
-            <div style={{fontSize:'10px',marginTop:'3px',opacity:0.75}}>{((data.spedizioniMese/data.limiteMese)*100).toFixed(3)}%</div>
+            <div style={{fontSize:'10px',marginTop:'3px',color:'#777'}}>{((data.spedizioniMese/data.limiteMese)*100).toFixed(3)}%</div>
           </div>
         </div>
 
         {/* Spedite oggi */}
-        <div style={{background:'#29abe2',borderRadius:'8px',padding:'14px',color:'#fff'}}>
-          <div style={{width:'36px',height:'36px',background:'rgba(255,255,255,0.2)',borderRadius:'7px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'18px',marginBottom:'8px'}}>🚚</div>
-          <div style={{fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,opacity:0.8,lineHeight:1.3}}>SPEDIZIONI SPEDITE<br/><span style={{opacity:0.65}}>(OGGI)</span></div>
-          <div style={{fontSize:'26px',fontWeight:'800',marginTop:'4px',lineHeight:1}}>{data.spediteOggi}</div>
+        <div style={kpiCardLight}>
+          <div style={kpiIconLight}>🚚</div>
+          <div style={kpiLabel}>SPEDIZIONI SPEDITE<br/><span style={{color:'#bbb'}}>(OGGI)</span></div>
+          <div style={kpiValue}>{data.spediteOggi}</div>
         </div>
 
         {/* Da spedire */}
-        <div style={{background:'#5cb85c',borderRadius:'8px',padding:'14px',color:'#fff'}}>
-          <div style={{width:'36px',height:'36px',background:'rgba(255,255,255,0.2)',borderRadius:'7px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'18px',marginBottom:'8px'}}>📋</div>
-          <div style={{fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,opacity:0.8,lineHeight:1.3}}>DA SPEDIRE<br/><span style={{opacity:0.65}}>(ULTIMI 30 GG)</span></div>
-          <div style={{fontSize:'26px',fontWeight:'800',marginTop:'4px',lineHeight:1}}>{data.daSpedire}</div>
+        <div style={kpiCardLight}>
+          <div style={kpiIconLight}>📋</div>
+          <div style={kpiLabel}>DA SPEDIRE<br/><span style={{color:'#bbb'}}>(ULTIMI 30 GG)</span></div>
+          <div style={kpiValue}>{data.daSpedire}</div>
         </div>
 
         {/* In lavorazione */}
-        <div style={{background:'#d9534f',borderRadius:'8px',padding:'14px',color:'#fff'}}>
-          <div style={{width:'36px',height:'36px',background:'rgba(255,255,255,0.2)',borderRadius:'7px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'18px',marginBottom:'8px'}}>⚙️</div>
-          <div style={{fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,opacity:0.8,lineHeight:1.3}}>IN LAVORAZIONE<br/><span style={{opacity:0.65}}>(ULTIMI 30 GG)</span></div>
-          <div style={{fontSize:'26px',fontWeight:'800',marginTop:'4px',lineHeight:1}}>{data.inLavorazione}</div>
+        <div style={kpiCardLight}>
+          <div style={kpiIconLight}>⚙️</div>
+          <div style={kpiLabel}>IN LAVORAZIONE<br/><span style={{color:'#bbb'}}>(ULTIMI 30 GG)</span></div>
+          <div style={kpiValue}>{data.inLavorazione}</div>
         </div>
 
         {/* Clienti */}
-        <div style={{background:'#f0ad4e',borderRadius:'8px',padding:'14px',color:'#fff'}}>
-          <div style={{width:'36px',height:'36px',background:'rgba(255,255,255,0.2)',borderRadius:'7px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'18px',marginBottom:'8px'}}>👥</div>
-          <div style={{fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,opacity:0.8,lineHeight:1.3}}>CLIENTI<br/><span style={{opacity:0.65}}>REGISTRATI</span></div>
-          <div style={{fontSize:'26px',fontWeight:'800',marginTop:'4px',lineHeight:1}}>{data.totClienti}</div>
+        <div style={kpiCardLight}>
+          <div style={kpiIconLight}>👥</div>
+          <div style={kpiLabel}>CLIENTI<br/><span style={{color:'#bbb'}}>REGISTRATI</span></div>
+          <div style={kpiValue}>{data.totClienti}</div>
         </div>
       </div>
 
