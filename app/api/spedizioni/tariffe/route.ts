@@ -201,11 +201,15 @@ export async function POST(req: NextRequest) {
       if (!quote) continue
     }
 
+    if (calcolaContrassegno(corriereId, Number(fasciaGiusta.prezzo)) === null) continue
+
     risultati.push({
       carrierCode: corriere?.tipo || 'sda',
       contractCode: '',
       weight_price: Number(fasciaGiusta.prezzo).toFixed(2),
-      total_price: Number(fasciaGiusta.prezzo).toFixed(2),
+      prezzo_spedizione: Number(fasciaGiusta.prezzo).toFixed(2),
+      costo_contrassegno: (calcolaContrassegno(corriereId, Number(fasciaGiusta.prezzo)) ?? 0).toFixed(2),
+      total_price: (Number(fasciaGiusta.prezzo) + (calcolaContrassegno(corriereId, Number(fasciaGiusta.prezzo)) ?? 0)).toFixed(2),
       fuel: '0.00',
       zona: zonaNome,
       peso_reale: pesoReale,
