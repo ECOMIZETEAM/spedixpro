@@ -2,23 +2,93 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 
+function fmtEuro(n: number) {
+  return `€ ${Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+function fmtImporto(n: number) {
+  const v = Number(n || 0)
+  const seg = v > 0 ? '+' : v < 0 ? '−' : ''
+  const abs = Math.abs(v).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return `${seg} € ${abs}`
+}
+function fmtData(iso: string) {
+  const d = new Date(iso)
+  return `${d.toLocaleDateString('it-IT')} ${d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`
+}
+
 export default function ClienteProfiloPage() {
   const { id } = useParams()
   const [cliente, setCliente] = useState<any>(null)
   const [spedizioni, setSpedizioni] = useState<any[]>([])
+  const [movimenti, setMovimenti] = useState<any[]>([])
+  const [saldo, setSaldo] = useState(0)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    fetch(`/api/clienti/${id}`).then(r=>r.json()).then(d => {
-      setCliente(d); setLoading(false)
+  // Popup ricarica
+  const [showRicarica, setShowRicarica] = useState(false)
+  const [importo, setImporto] = useState('')
+  const [conferma, setConferma] = useState('')
+  const [descrizione, setDescrizione] = useState('Accredito credito a scalare')
+  const [saving, setSaving] = useState(false)
+  const [errore, setErrore] = useState<string | null>(null)
+
+  function caricaCliente() {
+    fetch(`/api/clienti/${id}`).then(r => r.json()).then(d => { setCliente(d); setLoading(false) })
+  }
+  function caricaMovimenti() {
+    fetch(`/api/movimenti/lista?clienteId=${id}`).then(r => r.json()).then(d => {
+      if (d && !d.error) { setMovimenti(d.movimenti || []); setSaldo(Number(d.saldo || 0)) }
     })
-    fetch(`/api/spedizioni/lista?clienteId=${id}`).then(r=>r.json()).then(d => {
-      setSpedizioni(Array.isArray(d) ? d.slice(0,10) : [])
+  }
+
+  useEffect(() => {
+    caricaCliente()
+    caricaMovimenti()
+    fetch(`/api/spedizioni/lista?clienteId=${id}`).then(r => r.json()).then(d => {
+      setSpedizioni(Array.isArray(d) ? d.slice(0, 10) : [])
     })
   }, [id])
 
+  function apriRicarica() {
+    setImporto(''); setConferma(''); setDescrizione('Accredito credito a scalare')
+    setErrore(null); setShowRicarica(true)
+  }
+
+  async function salvaRicarica() {
+    setErrore(null)
+    const imp = parseFloat(importo.replace(',', '.'))
+    const conf = parseFloat(conferma.replace(',', '.'))
+    if (!isFinite(imp) || imp === 0) { setErrore('Inserisci un importo diverso da 0 (usa il − per togliere credito)'); return }
+    if (imp !== conf) { setErrore('L\'importo e la conferma non coincidono'); return }
+    if (!descrizione.trim()) { setErrore('Inserisci una descrizione'); return }
+
+    setSaving(true)
+    try {
+      const res = await fetch('/api/movimenti/crea', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clienteId: id,
+          tipo: imp > 0 ? 'ricarica' : 'rettifica',
+          descrizione: descrizione.trim(),
+          importo: imp,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setErrore(data.error || 'Errore durante la ricarica'); setSaving(false); return }
+      setShowRicarica(false)
+      setSaving(false)
+      caricaCliente()
+      caricaMovimenti()
+    } catch {
+      setErrore('Errore di rete'); setSaving(false)
+    }
+  }
+
   if (loading) return <div style={{padding:'40px',textAlign:'center',color:'#1a1a1a'}}>Caricamento...</div>
   if (!cliente || cliente.error) return <div style={{padding:'40px',textAlign:'center',color:'#dc2626'}}>Cliente non trovato</div>
+
+  const creditoView = Number(cliente.credito ?? saldo ?? 0)
 
   return (
     <div>
@@ -32,7 +102,7 @@ export default function ClienteProfiloPage() {
           <span style={{background:cliente.attivo?'#f0fdf4':'#fef2f2',color:cliente.attivo?'#16a34a':'#dc2626',padding:'4px 12px',borderRadius:'20px',fontSize:'12px',fontWeight:'600'}}>
             {cliente.attivo?'Attivo':'Inattivo'}
           </span>
-          <span style={{fontSize:'13px',color:'#1a1a1a'}}>Credito: <strong style={{color:'#f97316'}}>€ {Number(cliente.credito||0).toFixed(2)}</strong></span>
+          <span style={{fontSize:'13px',color:'#1a1a1a'}}>Credito: <strong style={{color:'#f97316'}}>{fmtEuro(creditoView)}</strong></span>
           <a href={`/dashboard/clienti/${id}/modifica`} style={{padding:'8px 16px',background:'#f97316',color:'#fff',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>✏️ Modifica Anagrafica</a>
           <a href={`/dashboard/clienti/${id}/impostazioni`} style={{padding:'8px 16px',background:'#1a1a1a',color:'#fff',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>⚙️ Impostazioni</a>
         </div>
@@ -70,24 +140,54 @@ export default function ClienteProfiloPage() {
 
           <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
             <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Movimenti</div>
-            <div style={{padding:'40px',textAlign:'center',color:'#1a1a1a'}}>
-              <div style={{fontSize:'32px',marginBottom:'8px'}}>📊</div>
-              <div style={{fontSize:'13px'}}>Nessun movimento</div>
-            </div>
+            {!movimenti.length ? (
+              <div style={{padding:'40px',textAlign:'center',color:'#1a1a1a'}}>
+                <div style={{fontSize:'32px',marginBottom:'8px'}}>📊</div>
+                <div style={{fontSize:'13px'}}>Nessun movimento</div>
+              </div>
+            ) : (
+              <div style={{overflowX:'auto'}}>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
+                  <thead>
+                    <tr style={{background:'#fafafa'}}>
+                      <th style={{textAlign:'left',padding:'9px 16px',fontSize:'11px',fontWeight:'700',color:'#888',textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1px solid #f0f0f0'}}>Data e ora</th>
+                      <th style={{textAlign:'left',padding:'9px 16px',fontSize:'11px',fontWeight:'700',color:'#888',textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1px solid #f0f0f0'}}>Movimento</th>
+                      <th style={{textAlign:'right',padding:'9px 16px',fontSize:'11px',fontWeight:'700',color:'#888',textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1px solid #f0f0f0'}}>Importo</th>
+                      <th style={{textAlign:'right',padding:'9px 16px',fontSize:'11px',fontWeight:'700',color:'#888',textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1px solid #f0f0f0'}}>Saldo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {movimenti.map((m:any) => {
+                      const positivo = Number(m.importo) > 0
+                      return (
+                        <tr key={m.id}>
+                          <td style={{padding:'10px 16px',color:'#666',fontSize:'12px',borderBottom:'1px solid #f5f5f5',whiteSpace:'nowrap'}}>{fmtData(m.created_at)}</td>
+                          <td style={{padding:'10px 16px',color:'#1a1a1a',borderBottom:'1px solid #f5f5f5'}}>{m.descrizione}</td>
+                          <td style={{padding:'10px 16px',textAlign:'right',fontWeight:'600',borderBottom:'1px solid #f5f5f5',color:positivo?'#15803d':'#b91c1c',whiteSpace:'nowrap'}}>{fmtImporto(Number(m.importo))}</td>
+                          <td style={{padding:'10px 16px',textAlign:'right',color:'#1a1a1a',borderBottom:'1px solid #f5f5f5',whiteSpace:'nowrap'}}>{fmtEuro(Number(m.saldo_dopo))}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
 
         <div style={{display:'flex',flexDirection:'column',gap:'16px'}}>
           <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
             <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700',color:'#1a1a1a',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-              <span>Credito & Movimenti</span>
-              <button style={{background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',padding:'4px 12px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>+ Ricarica</button>
+              <span>Credito &amp; Movimenti</span>
+              <button onClick={apriRicarica} style={{background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',padding:'4px 12px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>+ Ricarica</button>
             </div>
             <div style={{padding:'20px',textAlign:'center'}}>
-              <div style={{fontSize:'32px',fontWeight:'800',color:'#f97316'}}>€ {Number(cliente.credito||0).toFixed(2)}</div>
+              <div style={{fontSize:'32px',fontWeight:'800',color:'#f97316'}}>{fmtEuro(creditoView)}</div>
               <div style={{fontSize:'12px',color:'#1a1a1a',marginTop:'4px'}}>credito disponibile</div>
             </div>
-            <div style={{borderTop:'1px solid #f0f0f0',padding:'12px 16px',textAlign:'center',color:'#1a1a1a',fontSize:'12px'}}>Nessun movimento</div>
+            <div style={{borderTop:'1px solid #f0f0f0',padding:'12px 16px',textAlign:'center',color:'#1a1a1a',fontSize:'12px'}}>
+              {movimenti.length ? `${movimenti.length} movimenti · ultimo ${fmtData(movimenti[0].created_at)}` : 'Nessun movimento'}
+            </div>
           </div>
 
           <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
@@ -106,6 +206,44 @@ export default function ClienteProfiloPage() {
           </div>
         </div>
       </div>
+
+      {/* POPUP RICARICA */}
+      {showRicarica && (
+        <div onClick={()=>!saving&&setShowRicarica(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'10px',width:'520px',maxWidth:'94vw',overflow:'hidden'}}>
+            <div style={{padding:'14px 20px',borderBottom:'1px solid #eee',fontSize:'15px',fontWeight:'700',color:'#1a1a1a'}}>
+              👤 Cliente: {cliente.ragione_sociale}
+            </div>
+            <div style={{padding:'20px'}}>
+              {errore && <div style={{marginBottom:'14px',padding:'10px 12px',borderRadius:'8px',background:'#fef2f2',border:'1px solid #fecaca',color:'#b91c1c',fontSize:'13px'}}>{errore}</div>}
+              <div style={{display:'grid',gridTemplateColumns:'150px 1fr',gap:'12px',alignItems:'center'}}>
+                <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a',textAlign:'right'}}>Importo</label>
+                <div style={{position:'relative'}}>
+                  <input value={importo} onChange={e=>setImporto(e.target.value)} placeholder="0.00" inputMode="decimal"
+                    style={{width:'100%',padding:'9px 34px 9px 12px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'14px',textAlign:'right',boxSizing:'border-box',color:'#1a1a1a',background:'#fff'}}/>
+                  <span style={{position:'absolute',right:'12px',top:'50%',transform:'translateY(-50%)',color:'#888',fontSize:'14px'}}>€</span>
+                </div>
+
+                <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a',textAlign:'right'}}>Conferma l'importo</label>
+                <div style={{position:'relative'}}>
+                  <input value={conferma} onChange={e=>setConferma(e.target.value)} placeholder="0.00" inputMode="decimal"
+                    style={{width:'100%',padding:'9px 34px 9px 12px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'14px',textAlign:'right',boxSizing:'border-box',color:'#1a1a1a',background:'#fff'}}/>
+                  <span style={{position:'absolute',right:'12px',top:'50%',transform:'translateY(-50%)',color:'#888',fontSize:'14px'}}>€</span>
+                </div>
+
+                <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a',textAlign:'right'}}>Descrizione</label>
+                <input value={descrizione} onChange={e=>setDescrizione(e.target.value)}
+                  style={{width:'100%',padding:'9px 12px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'14px',boxSizing:'border-box',color:'#1a1a1a',background:'#fff'}}/>
+              </div>
+              <div style={{marginTop:'8px',fontSize:'11px',color:'#999'}}>Suggerimento: scrivi <strong>200</strong> per accreditare, <strong>-200</strong> per addebitare/togliere credito.</div>
+            </div>
+            <div style={{padding:'14px 20px',borderTop:'1px solid #eee',display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+              <button onClick={()=>setShowRicarica(false)} disabled={saving} style={{padding:'8px 16px',background:'#f2f2f2',color:'#1a1a1a',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'600',cursor:'pointer'}}>Annulla</button>
+              <button onClick={salvaRicarica} disabled={saving} style={{padding:'8px 20px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer',opacity:saving?0.6:1}}>{saving?'Salvataggio…':'Ricarica'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
