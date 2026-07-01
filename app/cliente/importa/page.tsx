@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-const ACCENT = '#f97316' // arancione portale (allineato all'avatar/credito)
+const ACCENT = '#f97316'
 
 type Ordine = {
   id: string
@@ -17,6 +17,10 @@ type Ordine = {
   peso: number | null
   colli: number
   contrassegno: number
+  contenuto: string | null
+  note: string | null
+  rif_mittente: string | null
+  rif_destinatario: string | null
   order_id: string | null
   totale_ordine: number | null
   fonte: string
@@ -44,6 +48,14 @@ const td: React.CSSProperties = {
   fontSize: '13px', color: '#333', padding: '11px 12px', borderBottom: '1px solid #f2f2f2',
   whiteSpace: 'nowrap',
 }
+const lbl: React.CSSProperties = {
+  display: 'block', fontSize: '11px', fontWeight: 600, color: '#888',
+  textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '4px',
+}
+const inp: React.CSSProperties = {
+  width: '100%', boxSizing: 'border-box', padding: '8px 10px', fontSize: '13px',
+  border: '1px solid #ddd', borderRadius: '6px', color: '#1a1a1a', outline: 'none',
+}
 
 export default function ImportaOrdiniPage() {
   const [ordini, setOrdini] = useState<Ordine[]>([])
@@ -52,6 +64,12 @@ export default function ImportaOrdiniPage() {
   const [uploading, setUploading] = useState(false)
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Modal modifica
+  const [editing, setEditing] = useState<Ordine | null>(null)
+  const [form, setForm] = useState<any>({})
+  const [saving, setSaving] = useState(false)
+  const [formErr, setFormErr] = useState<string | null>(null)
 
   async function loadOrdini() {
     setLoading(true)
@@ -136,7 +154,40 @@ export default function ImportaOrdiniPage() {
     URL.revokeObjectURL(url)
   }
 
+  // ── Modifica ────────────────────────────────────────────────────────────
+  function openEdit(o: Ordine) {
+    setEditing(o)
+    setForm({ ...o })
+    setFormErr(null)
+  }
+  function closeEdit() { setEditing(null); setFormErr(null) }
+  function setF(k: string, v: any) { setForm((prev: any) => ({ ...prev, [k]: v })) }
+
+  async function saveEdit() {
+    if (!editing) return
+    for (const k of ['destinatario', 'indirizzo', 'cap', 'localita', 'provincia']) {
+      if (!String(form[k] ?? '').trim()) { setFormErr('Compila tutti i campi obbligatori (*)'); return }
+    }
+    setSaving(true)
+    setFormErr(null)
+    try {
+      const res = await fetch('/api/ordini/modifica', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: editing.id, ...form }),
+      })
+      const data = await res.json()
+      if (res.ok) { closeEdit(); loadOrdini() }
+      else setFormErr(data.error || 'Errore salvataggio')
+    } catch {
+      setFormErr('Errore di rete')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const allChecked = ordini.length > 0 && sel.size === ordini.length
+  const modificabile = (o: Ordine) => o.stato === 'da_spedire' || o.stato === 'errore'
 
   return (
     <div>
@@ -256,6 +307,7 @@ export default function ImportaOrdiniPage() {
                   <th style={th}>Contrassegno</th>
                   <th style={th}>Order ID</th>
                   <th style={th}>Stato</th>
+                  <th style={{ ...th, width: '60px', textAlign: 'center' }}>Azioni</th>
                 </tr>
               </thead>
               <tbody>
@@ -286,6 +338,20 @@ export default function ImportaOrdiniPage() {
                           {s.t}
                         </span>
                       </td>
+                      <td style={{ ...td, textAlign: 'center' }}>
+                        {modificabile(o) ? (
+                          <button
+                            onClick={() => openEdit(o)}
+                            title="Modifica ordine"
+                            style={{
+                              background: '#fff', border: '1px solid #e5e5e5', borderRadius: '6px',
+                              padding: '4px 8px', fontSize: '13px', cursor: 'pointer', color: '#555',
+                            }}
+                          >
+                            ✎
+                          </button>
+                        ) : '—'}
+                      </td>
                     </tr>
                   )
                 })}
@@ -294,6 +360,117 @@ export default function ImportaOrdiniPage() {
           </div>
         )}
       </div>
+
+      {/* Modal Modifica */}
+      {editing && (
+        <div
+          onClick={closeEdit}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 50,
+            display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', overflowY: 'auto',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#fff', borderRadius: '10px', width: '100%', maxWidth: '640px',
+              boxShadow: '0 20px 60px rgba(0,0,0,.25)',
+            }}
+          >
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: '15px', fontWeight: 700, color: '#1a1a1a' }}>Modifica ordine</div>
+              <button onClick={closeEdit} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#999', cursor: 'pointer', lineHeight: 1 }}>×</button>
+            </div>
+
+            <div style={{ padding: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={lbl}>Destinatario *</label>
+                <input style={inp} value={form.destinatario ?? ''} onChange={e => setF('destinatario', e.target.value)} />
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={lbl}>Indirizzo *</label>
+                <input style={inp} value={form.indirizzo ?? ''} onChange={e => setF('indirizzo', e.target.value)} />
+              </div>
+              <div>
+                <label style={lbl}>CAP *</label>
+                <input style={inp} value={form.cap ?? ''} onChange={e => setF('cap', e.target.value)} />
+              </div>
+              <div>
+                <label style={lbl}>Località *</label>
+                <input style={inp} value={form.localita ?? ''} onChange={e => setF('localita', e.target.value)} />
+              </div>
+              <div>
+                <label style={lbl}>Provincia *</label>
+                <input style={inp} value={form.provincia ?? ''} onChange={e => setF('provincia', e.target.value)} maxLength={4} />
+              </div>
+              <div>
+                <label style={lbl}>Country</label>
+                <input style={inp} value={form.country ?? ''} onChange={e => setF('country', e.target.value)} maxLength={2} />
+              </div>
+              <div>
+                <label style={lbl}>Telefono</label>
+                <input style={inp} value={form.telefono ?? ''} onChange={e => setF('telefono', e.target.value)} />
+              </div>
+              <div>
+                <label style={lbl}>Email destinatario</label>
+                <input style={inp} value={form.email_destinatario ?? ''} onChange={e => setF('email_destinatario', e.target.value)} />
+              </div>
+              <div>
+                <label style={lbl}>Peso (kg)</label>
+                <input style={inp} type="number" step="0.1" value={form.peso ?? ''} onChange={e => setF('peso', e.target.value)} />
+              </div>
+              <div>
+                <label style={lbl}>Colli</label>
+                <input style={inp} type="number" min="1" value={form.colli ?? ''} onChange={e => setF('colli', e.target.value)} />
+              </div>
+              <div>
+                <label style={lbl}>Contrassegno (€)</label>
+                <input style={inp} type="number" step="0.01" value={form.contrassegno ?? ''} onChange={e => setF('contrassegno', e.target.value)} />
+              </div>
+              <div>
+                <label style={lbl}>Totale ordine (€)</label>
+                <input style={inp} type="number" step="0.01" value={form.totale_ordine ?? ''} onChange={e => setF('totale_ordine', e.target.value)} />
+              </div>
+              <div>
+                <label style={lbl}>Order ID</label>
+                <input style={inp} value={form.order_id ?? ''} onChange={e => setF('order_id', e.target.value)} />
+              </div>
+              <div>
+                <label style={lbl}>Rif. mittente</label>
+                <input style={inp} value={form.rif_mittente ?? ''} onChange={e => setF('rif_mittente', e.target.value)} />
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={lbl}>Contenuto</label>
+                <input style={inp} value={form.contenuto ?? ''} onChange={e => setF('contenuto', e.target.value)} />
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={lbl}>Note</label>
+                <input style={inp} value={form.note ?? ''} onChange={e => setF('note', e.target.value)} />
+              </div>
+
+              {formErr && (
+                <div style={{ gridColumn: '1 / -1', color: '#b91c1c', fontSize: '12.5px' }}>{formErr}</div>
+              )}
+            </div>
+
+            <div style={{ padding: '14px 20px', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                onClick={closeEdit}
+                style={{ background: '#fff', color: '#555', border: '1px solid #ddd', borderRadius: '8px', padding: '9px 16px', fontSize: '13px', cursor: 'pointer' }}
+              >
+                Annulla
+              </button>
+              <button
+                onClick={saveEdit}
+                disabled={saving}
+                style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '13px', fontWeight: 600, cursor: saving ? 'default' : 'pointer', opacity: saving ? .6 : 1 }}
+              >
+                {saving ? 'Salvataggio…' : 'Salva'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
