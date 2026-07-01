@@ -22,35 +22,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato'}, { status: 401 })
-  const { data: utente } = await
-cd "C:\Users\Acer-Swift 3\Desktop\spedixpro_completo\spedixpro"
-$path = Join-Path (Get-Location) "app\api\clienti\[id]\route.ts"
-
-$nuovo = @'
-import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabase } from '@/lib/supabase'
-
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params
-  const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Non autenticato'}, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
-  const { data: cliente } = await supabase
-    .from('clienti')
-    .select('*, listini_clienti(id,nome)')
-    .eq('id', id)
-    .eq('master_id', utente?.master_id)
-    .single()
-  if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 404 })
-  return NextResponse.json(cliente)
-}
-
-export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params
-  const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Non autenticato'}, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
   const body = await req.json()
   const { resetPassword, email_conferma, ...datiCliente } = body
