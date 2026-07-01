@@ -29,6 +29,8 @@ type Ordine = {
   created_at: string
 }
 
+type Corriere = { id: string; nome: string; tipo: string }
+
 const STATO: Record<string, { t: string; c: string; bg: string }> = {
   da_spedire: { t: 'Da spedire', c: '#b45309', bg: '#fef3c7' },
   spedito:    { t: 'Spedito',    c: '#15803d', bg: '#dcfce7' },
@@ -71,6 +73,12 @@ export default function ImportaOrdiniPage() {
   const [saving, setSaving] = useState(false)
   const [formErr, setFormErr] = useState<string | null>(null)
 
+  // Spedizione
+  const [corrieri, setCorrieri] = useState<Corriere[]>([])
+  const [filtro, setFiltro] = useState<string>('min') // 'min' | corriere_id
+  const [spedendo, setSpedendo] = useState(false)
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
+
   async function loadOrdini() {
     setLoading(true)
     try {
@@ -85,7 +93,15 @@ export default function ImportaOrdiniPage() {
     }
   }
 
-  useEffect(() => { loadOrdini() }, [])
+  async function loadCorrieri() {
+    try {
+      const res = await fetch('/api/cliente/corrieri')
+      const data = await res.json()
+      if (res.ok) setCorrieri(data.corrieri || [])
+    } catch { /* silente */ }
+  }
+
+  useEffect(() => { loadOrdini(); loadCorrieri() }, [])
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -186,6 +202,114 @@ export default function ImportaOrdiniPage() {
     }
   }
 
+  // ── Spedisci selezionati ──────────────────────────────────────────────────
+  async function spedisciSelezionati() {
+    if (!sel.size || spedendo) return
+
+    // Ordini spedibili tra quelli selezionati
+    const targets = ordini.filter(o => sel.has(o.id) && (o.stato === 'da_spedire' || o.stato === 'errore'))
+    if (!targets.length) { setMsg({ type: 'err', text: 'Nessun ordine spedibile selezionato' }); return }
+
+    // Mittente dal profilo cliente
+    setMsg(null)
+    let c: any
+    try {
+      const info = await fetch('/api/cliente/info').then(r => r.json())
+      c = info?.cliente
+    } catch {
+      setMsg({ type: 'err', text: 'Impossibile leggere i dati del mittente' }); return
+    }
+    const shipFrom = {
+      name: c?.ragione_sociale || '', company: c?.ragione_sociale || '',
+      street1: c?.so_indirizzo || '', street2: '',
+      city: c?.so_citta || '', state: c?.so_provincia || '',
+      postalCode: c?.so_cap || '', country: 'IT',
+      phone: c?.telefono || '', email: c?.email || '',
+    }
+    if (!shipFrom.street1 || !shipFrom.city || !shipFrom.state || !shipFrom.postalCode) {
+      setMsg({ type: 'err', text: 'Completa l\'indirizzo mittente (Mio Account) prima di spedire' })
+      return
+    }
+
+    setSpedendo(true)
+    setProgress({ done: 0, total: targets.length })
+    let ok = 0, ko = 0
+
+    for (let i = 0; i < targets.length; i++) {
+      const o = targets[i]
+      try {
+        const packages = [{ length: 20, width: 15, height: 10, weight: o.peso || 1 }]
+        const shipTo = {
+          name: o.destinatario, company: '',
+          street1: o.indirizzo, street2: '',
+          city: o.localita, state: o.provincia,
+          postalCode: o.cap, country: o.country || 'IT',
+          phone: o.telefono || '', email: o.email_destinatario || '',
+        }
+
+        // 1) Tariffe
+        const tRes = await fetch('/api/spedizioni/tariffe', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ packages, shipFrom, shipTo, codValue: o.contrassegno || 0, insuranceValue: 0, notes: o.note || '' }),
+        })
+        const tariffe = await tRes.json()
+        if (!Array.isArray(tariffe) || !tariffe.length) {
+          throw new Error(tariffe?.error || 'Nessuna tariffa disponibile')
+        }
+
+        // 2) Scelta corriere
+        let scelta: any
+        if (filtro === 'min') {
+          scelta = tariffe.reduce((a: any, b: any) =>
+            parseFloat(b.total_price) < parseFloat(a.total_price) ? b : a)
+        } else {
+          scelta = tariffe.find((t: any) => String(t._corriere_id) === String(filtro))
+          if (!scelta) throw new Error('Corriere selezionato non disponibile per questo ordine')
+        }
+        const corriereId = scelta._corriere_id
+        if (!corriereId) throw new Error('Corriere non identificato (listino senza corriere)')
+
+        // 3) Crea spedizione
+        const cRes = await fetch('/api/spedizioni/crea', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            _corriere_id: corriereId,
+            totalPrice: scelta.total_price,
+            packages,
+            shipFrom, shipTo,
+            notes: o.note || '', insuranceValue: 0, codValue: o.contrassegno || 0,
+            contenuto: o.contenuto || '',
+          }),
+        })
+        const cData = await cRes.json()
+        if (!cRes.ok || cData.error) throw new Error(cData?.error || 'Errore creazione spedizione')
+
+        // 4) Marca come spedito
+        await fetch('/api/ordini/aggiorna-stato', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: o.id, stato: 'spedito', numero: cData.numero }),
+        })
+        ok++
+      } catch (e: any) {
+        await fetch('/api/ordini/aggiorna-stato', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: o.id, stato: 'errore', errore: String(e?.message || e) }),
+        })
+        ko++
+      }
+      setProgress({ done: i + 1, total: targets.length })
+    }
+
+    setSpedendo(false)
+    setProgress(null)
+    setSel(new Set())
+    await loadOrdini()
+    setMsg({
+      type: ko ? 'err' : 'ok',
+      text: `Spedizioni completate: ${ok} riuscite${ko ? `, ${ko} in errore (vedi colonna Stato)` : ''}`,
+    })
+  }
+
   const allChecked = ordini.length > 0 && sel.size === ordini.length
   const modificabile = (o: Ordine) => o.stato === 'da_spedire' || o.stato === 'errore'
 
@@ -255,29 +379,48 @@ export default function ImportaOrdiniPage() {
       <div style={card}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
           <div style={{ fontSize: '13px', color: '#666' }}>
-            {sel.size > 0 ? `${sel.size} selezionati` : `${ordini.length} ordini`}
+            {spedendo && progress
+              ? `Spedizione ${progress.done}/${progress.total} in corso…`
+              : (sel.size > 0 ? `${sel.size} selezionati` : `${ordini.length} ordini`)}
           </div>
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               onClick={eliminaSelezionati}
-              disabled={!sel.size}
+              disabled={!sel.size || spedendo}
               style={{
-                background: '#fff', color: sel.size ? '#b91c1c' : '#bbb',
-                border: `1px solid ${sel.size ? '#fecaca' : '#eee'}`, borderRadius: '8px',
-                padding: '8px 14px', fontSize: '13px', cursor: sel.size ? 'pointer' : 'default',
+                background: '#fff', color: sel.size && !spedendo ? '#b91c1c' : '#bbb',
+                border: `1px solid ${sel.size && !spedendo ? '#fecaca' : '#eee'}`, borderRadius: '8px',
+                padding: '8px 14px', fontSize: '13px', cursor: sel.size && !spedendo ? 'pointer' : 'default',
               }}
             >
               Elimina selezionati
             </button>
+
+            <span style={{ fontSize: '12.5px', color: '#666' }}>Spedisci con:</span>
+            <select
+              value={filtro}
+              onChange={e => setFiltro(e.target.value)}
+              disabled={spedendo}
+              style={{ ...inp, width: 'auto', minWidth: '200px', padding: '8px 10px' }}
+            >
+              <option value="min">Prezzo minore (automatico)</option>
+              {corrieri.map(c => (
+                <option key={c.id} value={c.id}>{c.nome}</option>
+              ))}
+            </select>
+
             <button
-              disabled
-              title="Disponibile a breve — richiede indirizzo mittente e calcolo tariffe"
+              onClick={spedisciSelezionati}
+              disabled={!sel.size || spedendo}
               style={{
-                background: '#f3f4f6', color: '#9ca3af', border: '1px solid #eee',
-                borderRadius: '8px', padding: '8px 14px', fontSize: '13px', cursor: 'not-allowed',
+                background: sel.size && !spedendo ? ACCENT : '#f3f4f6',
+                color: sel.size && !spedendo ? '#fff' : '#9ca3af',
+                border: 'none', borderRadius: '8px', padding: '8px 16px',
+                fontSize: '13px', fontWeight: 600,
+                cursor: sel.size && !spedendo ? 'pointer' : 'not-allowed',
               }}
             >
-              Spedisci selezionati
+              {spedendo ? 'Spedizione in corso…' : 'Spedisci selezionati'}
             </button>
           </div>
         </div>
@@ -316,7 +459,7 @@ export default function ImportaOrdiniPage() {
                   return (
                     <tr key={o.id} style={{ background: sel.has(o.id) ? '#fff7ed' : '#fff' }}>
                       <td style={td}>
-                        <input type="checkbox" checked={sel.has(o.id)} onChange={() => toggle(o.id)} />
+                        <input type="checkbox" checked={sel.has(o.id)} onChange={() => toggle(o.id)} disabled={spedendo} />
                       </td>
                       <td style={{ ...td, fontWeight: 600, color: '#1a1a1a' }}>
                         {o.destinatario}
@@ -331,10 +474,13 @@ export default function ImportaOrdiniPage() {
                       <td style={td}>{o.contrassegno ? `€ ${Number(o.contrassegno).toFixed(2)}` : '—'}</td>
                       <td style={td}>{o.order_id || '—'}</td>
                       <td style={td}>
-                        <span style={{
-                          fontSize: '11.5px', fontWeight: 600, padding: '3px 9px', borderRadius: '999px',
-                          color: s.c, background: s.bg,
-                        }}>
+                        <span
+                          title={o.stato === 'errore' && o.errore ? o.errore : undefined}
+                          style={{
+                            fontSize: '11.5px', fontWeight: 600, padding: '3px 9px', borderRadius: '999px',
+                            color: s.c, background: s.bg, cursor: o.stato === 'errore' ? 'help' : 'default',
+                          }}
+                        >
                           {s.t}
                         </span>
                       </td>
@@ -343,9 +489,10 @@ export default function ImportaOrdiniPage() {
                           <button
                             onClick={() => openEdit(o)}
                             title="Modifica ordine"
+                            disabled={spedendo}
                             style={{
                               background: '#fff', border: '1px solid #e5e5e5', borderRadius: '6px',
-                              padding: '4px 8px', fontSize: '13px', cursor: 'pointer', color: '#555',
+                              padding: '4px 8px', fontSize: '13px', cursor: spedendo ? 'default' : 'pointer', color: '#555',
                             }}
                           >
                             ✎
