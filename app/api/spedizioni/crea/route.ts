@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { registraMovimento } from '@/lib/movimenti'
 import {
   spediamoproGetQuotation,
   spediamoproCreateShipment,
@@ -17,10 +18,22 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
 
   const clienteId = utente?.ruolo === 'cliente' ? utente.cliente_id : body.clienteId
-  const { data: cliente } = await supabase.from('clienti').select('master_id,ragione_sociale,listino_cliente_id,vieta_inserimento').eq('id', clienteId).single()
+  const { data: cliente } = await supabase.from('clienti').select('master_id,ragione_sociale,listino_cliente_id,vieta_inserimento,tipo_contratto,credito').eq('id', clienteId).single()
   if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
 
   if (utente?.ruolo === 'cliente' && cliente.vieta_inserimento === true) return NextResponse.json({ error: 'Inserimento spedizioni non consentito per questo cliente.' }, { status: 403 })
+
+  // ── Blocco credito insufficiente (solo clienti "credito a scalare") ──────────
+  // Il costo a carico del cliente è il prezzo di listino (body.totalPrice).
+  const costoPreventivo = parseFloat(body.totalPrice) || 0
+  if (cliente.tipo_contratto === 'credito_scalare' && costoPreventivo > 0) {
+    const creditoAttuale = Number(cliente.credito || 0)
+    if (creditoAttuale < costoPreventivo) {
+      return NextResponse.json({
+        error: `Credito insufficiente: disponibili € ${creditoAttuale.toFixed(2)}, spedizione € ${costoPreventivo.toFixed(2)}.`,
+      }, { status: 402 })
+    }
+  }
 
   const masterId = cliente.master_id
 
@@ -68,6 +81,26 @@ export async function POST(req: NextRequest) {
   const packages = body.packages || [{ length: 20, width: 15, height: 10, weight: 1 }]
   const pkg = packages[0]
   const pesoReale = parseFloat(pkg?.weight || 1)
+
+  // Helper: registra la detrazione del credito dopo una spedizione riuscita.
+  // Non deve mai far fallire la spedizione (è già creata sul corriere + DB).
+  async function addebitaCredito(spedizioneId: string | null, numeroSped: string, costo: number) {
+    if (!(costo > 0)) return
+    try {
+      await registraMovimento(supabase, {
+        masterId,
+        clienteId,
+        tipo: 'spedizione',
+        descrizione: `${numeroSped} - ${body.shipTo?.name || ''}`.trim(),
+        riferimento: numeroSped,
+        importo: -Math.abs(costo),
+        spedizioneId,
+        createdBy: user!.id,
+      })
+    } catch (e) {
+      console.error('Errore registrazione movimento spedizione:', e)
+    }
+  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // SPEDISCI.ONLINE
@@ -128,7 +161,7 @@ export async function POST(req: NextRequest) {
     }))
 
     // *** FIX: salviamo contractCode e carrierCode dentro raw_response per riusarli nei ritiri ***
-    const { error: insertError } = await supabase.from('spedizioni').insert({
+    const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
       master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id, numero,
       mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
       mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
@@ -146,11 +179,14 @@ export async function POST(req: NextRequest) {
       stato: 'in_lavorazione',
       costo_spedizione: costoCorrente, costo_totale: costoCliente,
       note: body.notes || null, contenuto: body.contenuto || null,
-    })
+    }).select('id').single()
 
     if (insertError) {
       return NextResponse.json({ error: `Spedizione creata su corriere (${numero}) ma errore DB: ${insertError.message}`, numero }, { status: 500 })
     }
+
+    // Detrazione credito (movimento -costo cliente)
+    await addebitaCredito(inserted?.id || null, numero, costoCliente)
 
     return NextResponse.json({ numero, tracking: r.trackingNumber, costo: r.shipmentCost })
   }
@@ -215,7 +251,7 @@ export async function POST(req: NextRequest) {
       const costoCorrente = centsToEuro(shipment.totalPrice)
       const costoCliente = parseFloat(body.totalPrice) || costoCorrente
 
-      const { error: insertError } = await supabase.from('spedizioni').insert({
+      const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
         master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id,
         numero: numeroFinale,
         mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
@@ -233,11 +269,14 @@ export async function POST(req: NextRequest) {
         stato: 'in_lavorazione',
         costo_spedizione: costoCorrente, costo_totale: costoCliente,
         note: body.notes || null, contenuto: body.contenuto || null,
-      })
+      }).select('id').single()
 
       if (insertError) {
         return NextResponse.json({ error: `Spedizione creata su SpediamoPro (${numeroFinale}) ma errore DB: ${insertError.message}`, numero: numeroFinale }, { status: 500 })
       }
+
+      // Detrazione credito (movimento -costo cliente)
+      await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
 
       return NextResponse.json({
         numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2),
