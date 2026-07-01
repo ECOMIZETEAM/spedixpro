@@ -33,6 +33,40 @@ export async function POST(req: NextRequest) {
     (abil || []).filter((a:any) => a.settings && a.settings.contrassegno === 'no').map((a:any) => a.corriere_id)
   )
 
+  // Scaglioni contrassegno per corriere (dal listino del cliente)
+  const codImporto = Number(body.codValue || 0)
+  const scaglioniContrPerCorriere = new Map<string, any[]>()
+  if (cliente.listino_cliente_id && codImporto > 0) {
+    const { data: suppl } = await supabase
+      .from('listini_clienti_supplementi')
+      .select('corriere_id, descrizione, valore, tipo_calcolo')
+      .eq('listino_id', cliente.listino_cliente_id).eq('tipo', 'contrassegno')
+    for (const s of (suppl || [])) {
+      let d:any = null; try { d = JSON.parse(s.descrizione) } catch {}
+      const scal = {
+        valore_max: parseFloat(d?.valore_max ?? '') || 0,
+        prezzo_fisso: parseFloat(d?.prezzo_fisso ?? s.valore ?? '') || 0,
+        perc: parseFloat(d?.perc ?? '') || 0,
+        calcolo_su: d?.calcolo_su || s.tipo_calcolo || 'totale',
+      }
+      if (!scaglioniContrPerCorriere.has(s.corriere_id)) scaglioniContrPerCorriere.set(s.corriere_id, [])
+      scaglioniContrPerCorriere.get(s.corriere_id)!.push(scal)
+    }
+    for (const arr of scaglioniContrPerCorriere.values()) arr.sort((a,b)=>a.valore_max - b.valore_max)
+  }
+
+  function calcolaContrassegno(corriereId: string, prezzoSped: number): number | null {
+    if (codImporto <= 0) return 0
+    const scal = scaglioniContrPerCorriere.get(corriereId)
+    if (!scal || !scal.length) return 0
+    const s = scal.find(x => codImporto <= x.valore_max)
+    if (!s) return null // importo oltre il massimo → corriere non disponibile
+    let base = prezzoSped
+    if (s.calcolo_su === 'valore_merce') base = Number(body.valoreMerce || 0)
+    else if (s.calcolo_su === 'nolo') base = prezzoSped
+    return s.prezzo_fisso + (s.perc/100) * base
+  }
+
   const masterId = cliente.master_id
   const pkg = body.packages?.[0]
   const pesoReale = parseFloat(pkg?.weight || 1)
