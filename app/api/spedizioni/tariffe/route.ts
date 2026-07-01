@@ -69,7 +69,8 @@ export async function POST(req: NextRequest) {
 
   const masterId = cliente.master_id
   const pkg = body.packages?.[0]
-  const pesoReale = parseFloat(pkg?.weight || 1)
+  const tuttiColli = Array.isArray(body.packages) && body.packages.length ? body.packages : [pkg]
+  const pesoReale = tuttiColli.reduce((s:number,p:any) => s + (parseFloat(p?.weight) || 0), 0) || 1
   const provincia = (body.shipTo?.state || '').toUpperCase().trim()
   const zonaNome = ZONE_MAP[provincia] || 'Italia'
 
@@ -147,8 +148,8 @@ export async function POST(req: NextRequest) {
   const fattore = parseFloat(listino?.fattore_volume) || 5000
 
   let pesoVolume = 0
-  if (pkg?.length && pkg?.width && pkg?.height) {
-    pesoVolume = (pkg.length * pkg.width * pkg.height) / fattore
+  for (const p of tuttiColli) {
+    if (p?.length && p?.width && p?.height) pesoVolume += (p.length * p.width * p.height) / fattore
   }
   const pesoFatturato = Math.max(pesoReale, pesoVolume)
 
