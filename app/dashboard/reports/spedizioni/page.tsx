@@ -171,8 +171,7 @@ export default function ReportSpedizioniPage() {
             <select value={filtri.tipoContratto} onChange={e=>setF('tipoContratto',e.target.value)} style={sel}>
               <option value="">Tutti</option>
               <option value="credito_scalare">Credito a scalare</option>
-              <option value="postpagato">Postpagato</option>
-              <option value="prepagato">Prepagato</option>
+              <option value="fattura_mensile">Fattura mensile</option>
             </select>
           </div>
           <div><label style={lbl}>Vettore</label>

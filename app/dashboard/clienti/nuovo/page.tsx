@@ -93,8 +93,7 @@ export default function NuovoClientePage() {
               <div><label style={lbl}>Tipo Contratto</label>
                 <select value={form.tipo_contratto} onChange={e=>set('tipo_contratto',e.target.value)} style={inp}>
                   <option value="credito_scalare">Credito a scalare</option>
-                  <option value="postpagato">Postpagato</option>
-                  <option value="prepagato">Prepagato</option>
+                  <option value="fattura_mensile">Fattura mensile</option>
                 </select>
               </div>
               <div><label style={lbl}>Aliquota IVA</label>
