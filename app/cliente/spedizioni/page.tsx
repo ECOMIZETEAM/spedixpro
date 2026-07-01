@@ -69,7 +69,7 @@ export default function SpedizioniClientePage() {
                       <td style={{padding:'10px 14px',fontWeight:'600',color:'#1a1a1a'}}>€ {Number(s.costo_totale||0).toFixed(2)}</td>
                       <td style={{padding:'10px 14px'}}>
                         <div style={{display:'flex',gap:'6px'}}>
-                          <a href={`/cliente/spedizioni/${s.id}/etichetta`} target="_blank" style={{padding:'4px 10px',background:'#f5f5f5',color:'#333',borderRadius:'4px',fontSize:'12px',textDecoration:'none',border:'1px solid #e8e8e8'}} title="Etichetta">🖨️</a>
+                          <a href={`/api/spedizioni/etichetta?id=${s.id}`} target="_blank" rel="noopener noreferrer" style={{padding:'4px 10px',background:'#f5f5f5',color:'#333',borderRadius:'4px',fontSize:'12px',textDecoration:'none',border:'1px solid #e8e8e8'}} title="Etichetta">🖨️</a>
                         </div>
                       </td>
                     </tr>
