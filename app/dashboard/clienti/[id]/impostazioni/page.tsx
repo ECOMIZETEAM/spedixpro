@@ -92,7 +92,14 @@ export default function ImpostazioniClientePage() {
             <div style={{padding:'30px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessun contratto associato al listino del cliente</div>
           ) : contratti.map(c => (
             <div key={c.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 18px',borderBottom:'1px solid #f5f5f5'}}>
-              <span style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>{c.nome_contratto}</span>
+              <span style={{display:'flex',alignItems:'center',gap:'10px'}}>
+                {iconaCorriere(c.nome_contratto) ? (
+                  <img src={iconaCorriere(c.nome_contratto)!} alt="" style={{width:'40px',height:'40px',objectFit:'contain',border:'1px solid #eee',borderRadius:'6px',background:'#fff',padding:'3px'}} />
+                ) : (
+                  <span style={{width:'40px',height:'40px',borderRadius:'6px',background:'#f0f0f0',display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:'11px',color:'#999'}}>—</span>
+                )}
+                <span style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>{c.nome_contratto}</span>
+              </span>
               <button onClick={()=>toggleContratto(c.id, !c.abilitato)}
                 style={{position:'relative',width:'46px',height:'24px',borderRadius:'12px',border:'none',cursor:'pointer',background:c.abilitato?'#f97316':'#d1d5db',transition:'background .2s'}}>
                 <span style={{position:'absolute',top:'2px',left:c.abilitato?'24px':'2px',width:'20px',height:'20px',borderRadius:'50%',background:'#fff',transition:'left .2s'}}></span>
