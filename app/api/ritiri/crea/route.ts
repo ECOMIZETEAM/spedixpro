@@ -9,20 +9,32 @@ export async function POST(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
 
-  const body = await req.json()
+  let body: any
+  try {
+    body = await req.json()
+  } catch (e) {
+    return NextResponse.json({ error: 'Body JSON non valido' }, { status: 400 })
+  }
+
+  console.log('[RITIRO] Body ricevuto:', JSON.stringify(body))
+
   const masterId = utente.master_id
   const clienteId = utente.ruolo === 'cliente' ? utente.cliente_id : (body.clienteId || null)
 
   const spedizioneIds = body.spedizioneIds as string[]
+  console.log('[RITIRO] spedizioneIds:', JSON.stringify(spedizioneIds))
+
   if (!spedizioneIds?.length) {
     return NextResponse.json({ error: 'Seleziona almeno una spedizione da ritirare' }, { status: 400 })
   }
 
-  const { data: spedizioni } = await supabase
+  const { data: spedizioni, error: sError } = await supabase
     .from('spedizioni')
     .select('id,raw_response,corriere_id,colli,peso_reale')
     .in('id', spedizioneIds)
     .eq('master_id', masterId)
+
+  console.log('[RITIRO] Spedizioni trovate:', spedizioni?.length, 'errore:', sError?.message)
 
   if (!spedizioni?.length) {
     return NextResponse.json({ error: 'Spedizioni non trovate' }, { status: 400 })
@@ -33,6 +45,8 @@ export async function POST(req: NextRequest) {
   const contractCode = raw?._contractCode
   const carrierCode = raw?._carrierCode
   const shipmentId = raw?.shipmentId
+
+  console.log('[RITIRO] contractCode presente:', !!contractCode, 'carrierCode:', carrierCode, 'shipmentId:', shipmentId)
 
   if (!carrierCode) {
     return NextResponse.json({ error: 'Impossibile recuperare il corriere dalla spedizione.' }, { status: 400 })
@@ -56,10 +70,9 @@ export async function POST(req: NextRequest) {
   const colliTotali = spedizioni.reduce((sum, s) => sum + (s.colli || 1), 0)
   const pesoTotale = spedizioni.reduce((sum, s) => sum + (parseFloat(String(s.peso_reale)) || 1), 0)
 
-  // Costruiamo il payload con shipmentId come riferimento principale
   const payload: any = {
+    contractCode,
     carrierCode,
-    contractCode,   // lo passiamo sempre (è quello cifrato che spedisci ci ha dato)
     pickupDate: body.dataRitiro,
     pickupTime: body.orarioRitiro || undefined,
     specialInstruction: body.istruzioni || undefined,
@@ -73,15 +86,10 @@ export async function POST(req: NextRequest) {
       phone: body.mittTelefono || undefined,
       email: body.mittEmail || undefined,
     },
-    packagesDetails: [{
-      weight: String(pesoTotale || 1),
-    }],
+    packagesDetails: [{ weight: String(pesoTotale || 1) }],
   }
 
-  // Aggiungi shipmentId se presente — potrebbe essere il parametro chiave
-  if (shipmentId) {
-    payload.shipmentId = shipmentId
-  }
+  if (shipmentId) payload.shipmentId = shipmentId
 
   console.log('[RITIRO] Payload pickup/create:', JSON.stringify(payload))
 
