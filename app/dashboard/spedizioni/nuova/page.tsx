@@ -373,11 +373,11 @@ export default function NuovaSpedizionePage() {
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'14px'}}>
                   <div>
                     <label style={{display:'block',fontSize:'12px',color:'#000',marginBottom:'4px',fontWeight:'600'}}>Servizi accessori</label>
-                    <input style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px'}} placeholder="—" disabled />
+                    <input style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#000',WebkitTextFillColor:'#000',opacity:1}} placeholder="—" disabled />
                   </div>
                   <div>
                     <label style={{display:'block',fontSize:'12px',color:'#000',marginBottom:'4px',fontWeight:'600'}}>Modalità di incasso contrassegno</label>
-                    <select style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px'}} defaultValue="contante"><option value="contante">CONTANTE</option></select>
+                    <select style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#000'}} defaultValue="contante"><option value="contante">CONTANTE</option></select>
                   </div>
                 </div>
                 <div style={{fontSize:'15px',fontWeight:'700',color:'#1a1a1a',marginBottom:'8px'}}>Costi</div>
