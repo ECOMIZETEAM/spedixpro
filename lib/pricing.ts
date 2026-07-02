@@ -113,7 +113,10 @@ export async function calcolaPrezzoListino(
     : Array.from(fascePerCorriere.entries())
 
   for (const [cId, fasceDelCorriere] of entries) {
-    const fascia = trovaFascia(fasceDelCorriere, pesoFatturato)
+    const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
+    const usaPesoReale = !!settsC.agevolazione_peso_reale && entroMisureAgevolate
+    const pesoPerFascia = usaPesoReale ? pesoReale : pesoFatturato
+    const fascia = trovaFascia(fasceDelCorriere, pesoPerFascia)
     if (!fascia) continue
     const prezzo = Number(fascia.prezzo)
     if (!isFinite(prezzo)) continue
