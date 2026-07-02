@@ -78,7 +78,7 @@ export default function NuovoRitiroPage() {
     setSaving(false)
 
     if (data.error) { setErrore(data.error); return }
-    router.push('/dashboard/ritiri/elenco?success=' + (data.pickupId || ''))
+    router.push('/cliente/ritiri?success=' + (data.pickupId || ''))
   }
 
   return (
