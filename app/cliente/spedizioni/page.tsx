@@ -38,7 +38,6 @@ export default function SpedizioniPage() {
   const [filtri, setFiltri] = useState(FILTRI_DEFAULT)
 
   useEffect(() => {
-    fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[]))
     caricaTutte()
   }, [])
 
