@@ -72,10 +72,10 @@ export default function NuovaSpedizioneCliente() {
   }, [peso, numColli, colli, contrassegno, assicurazione])
 
   useEffect(() => {
-    fetch('/api/cliente/info').then(r=>r.json()).then(d => {
-      if (!d.cliente) return
-      setClienteData(d.cliente)
-      setMitt({nome:d.cliente.ragione_sociale||'',indirizzo:d.cliente.so_indirizzo||'',citta:d.cliente.so_citta||'',provincia:d.cliente.so_provincia||'',cap:d.cliente.so_cap||'',email:d.cliente.email||'',telefono:d.cliente.telefono||''})
+    fetch('/api/cliente/dati').then(r=>r.json()).then(c => {
+      if (!c || c.error) return
+      setClienteData(c)
+      setMitt({nome:c.ragione_sociale||'',indirizzo:c.so_indirizzo||'',citta:c.so_citta||'',provincia:c.so_provincia||'',cap:c.so_cap||'',email:c.email||'',telefono:c.telefono||''})
     })
   }, [])
 
