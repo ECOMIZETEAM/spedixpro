@@ -13,7 +13,6 @@ function normalizzaOrario(v: any): string | null {
   }
   if (s.includes('matt')) return '09:00'
   if (s.includes('pome')) return '14:00'
-  if (s.includes('sera')) return '17:00'
   return null
 }
 
@@ -22,7 +21,6 @@ function fasciaOraria(v: any): { from: string; to: string } {
   const s = String(v || '').trim().toLowerCase()
   if (s.includes('matt')) return { from: '09:00', to: '13:00' }
   if (s.includes('pome')) return { from: '14:00', to: '18:00' }
-  if (s.includes('sera')) return { from: '17:00', to: '19:00' }
   const hhmm = normalizzaOrario(v)
   if (hhmm) {
     const h = parseInt(hhmm.split(':')[0], 10)

@@ -47,6 +47,9 @@ export default function NuovaSpedizionePage() {
   const [dest, setDest] = useState({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',paese:'IT',email:'',telefono:'',note:'',rif:'',ordine:''})
   const [suggComuni, setSuggComuni] = useState<any[]>([])
   const [showSugg, setShowSugg] = useState(false)
+  const [richiediRitiro, setRichiediRitiro] = useState(false)
+  const [ritiroData, setRitiroData] = useState(new Date().toISOString().split('T')[0])
+  const [ritiroOrario, setRitiroOrario] = useState('mattina')
   const [numColli, setNumColli] = useState(1)
   const [colli, setColli] = useState<Collo[]>([{lunghezza:'',larghezza:'',altezza:''}])
   const [peso, setPeso] = useState('1')
@@ -139,8 +142,23 @@ export default function NuovaSpedizionePage() {
       })
     })
     const data = await res.json()
+    if (data.error) { setCreating(false); setErrore(data.error); return }
+    if (richiediRitiro && data.spedizioneId) {
+      try {
+        await fetch('/api/ritiri/crea', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            clienteId,
+            spedizioneIds:[data.spedizioneId],
+            mittNome:mitt.nome, mittIndirizzo:mitt.indirizzo, mittCitta:mitt.citta,
+            mittProvincia:mitt.provincia, mittCap:mitt.cap, mittPaese:'IT',
+            mittTelefono:mitt.telefono, mittEmail:mitt.email,
+            dataRitiro:ritiroData, orarioRitiro:ritiroOrario,
+          })
+        })
+      } catch {}
+    }
     setCreating(false)
-    if (data.error) { setErrore(data.error); return }
     router.push('/dashboard/spedizioni?success='+data.numero)
   }
 
@@ -238,6 +256,23 @@ export default function NuovaSpedizionePage() {
                 <div><label style={lbl}>Rif. Ordine</label><input value={dest.ordine} onChange={e=>setDest({...dest,ordine:e.target.value})} style={inp}/></div>
               </div>
               <div><label style={lbl}>Note</label><input value={dest.note} onChange={e=>setDest({...dest,note:e.target.value})} style={inp}/></div>
+              <div style={{marginTop:'12px',padding:'10px 12px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px'}}>
+                <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',fontWeight:'600',color:'#1a1a1a',cursor:'pointer'}}>
+                  <input type="checkbox" checked={richiediRitiro} onChange={e=>setRichiediRitiro(e.target.checked)} style={{width:'16px',height:'16px',cursor:'pointer'}}/>
+                  📦 Richiedi ritiro con questa spedizione
+                </label>
+                {richiediRitiro && (
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginTop:'10px'}}>
+                    <div><label style={lbl}>Data ritiro</label><input type="date" value={ritiroData} onChange={e=>setRitiroData(e.target.value)} style={inp}/></div>
+                    <div><label style={lbl}>Orario</label>
+                      <select value={ritiroOrario} onChange={e=>setRitiroOrario(e.target.value)} style={inp}>
+                        <option value="mattina">Mattina</option>
+                        <option value="pomeriggio">Pomeriggio</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
