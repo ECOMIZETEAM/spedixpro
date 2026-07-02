@@ -218,7 +218,7 @@ export default function NuovaSpedizionePage() {
         <div style={{display:'flex',flexDirection:'column',gap:'16px'}}>
 
           {/* DATI SPEDIZIONE */}
-          <div style={card}>
+          {vista==='dati' && (<div style={card}>
             <div style={cardH}>Dati Spedizione</div>
             <div style={cardB}>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'8px',marginBottom:'14px'}}>
