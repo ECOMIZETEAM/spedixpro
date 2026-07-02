@@ -334,10 +334,7 @@ export default function NuovaSpedizionePage() {
               )}
             </div>
           </div>)}
-        </div>
-      </div>
-
-      {vista==='contratto' && (
+          {vista==='contratto' && (
         <div style={card}>
           <div style={{...cardH,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
             <span>Seleziona contratto</span>
@@ -398,6 +395,9 @@ export default function NuovaSpedizionePage() {
           </div>
         </div>
       )}
+        </div>
+      </div>
+
 
     </div>
   )
