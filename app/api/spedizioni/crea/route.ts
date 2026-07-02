@@ -209,7 +209,7 @@ export async function POST(req: NextRequest) {
       numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
     })
 
-    return NextResponse.json({ numero, tracking: r.trackingNumber, costo: r.shipmentCost })
+    return NextResponse.json({ numero, tracking: r.trackingNumber, costo: r.shipmentCost, spedizioneId: inserted?.id || null })
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -307,7 +307,7 @@ export async function POST(req: NextRequest) {
       })
 
       return NextResponse.json({
-        numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2),
+        numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2), spedizioneId: inserted?.id || null,
       })
     } catch (err: any) {
       console.error('SpediamoPro error:', err)
