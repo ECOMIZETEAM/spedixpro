@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
@@ -22,7 +22,6 @@ export default function GiacenzePage() {
   })
 
   useEffect(() => {
-    fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[]))
     carica()
   }, [])
 
@@ -33,7 +32,7 @@ export default function GiacenzePage() {
     if (filtri.stato) params.set('stato', filtri.stato)
     if (filtri.dal) params.set('dal', filtri.dal)
     if (filtri.al) params.set('al', filtri.al)
-    const res = await fetch(`/api/giacenze?${params}`)
+    const res = await fetch(`/api/cliente/giacenze?${params}`)
     const data = await res.json()
     setGiacenze(Array.isArray(data) ? data : [])
     setLoading(false)
@@ -64,7 +63,7 @@ export default function GiacenzePage() {
   async function svincola() {
     if (!modal) return
     setElaborando(true)
-    const res = await fetch('/api/giacenze', {
+    const res = await fetch('/api/cliente/giacenze', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ spedizioneId: modal.id, istruzioni, azione: 'svincola' })
@@ -265,7 +264,7 @@ export default function GiacenzePage() {
                       {elaborando?'Svincolo in corso...':'✅ Svincola'}
                     </button>
                     <button onClick={async()=>{
-                      await fetch('/api/giacenze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spedizioneId:modal.id,azione:'chiudi'})})
+                      await fetch('/api/cliente/giacenze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spedizioneId:modal.id,azione:'chiudi'})})
                       setModal(null); carica()
                     }} style={{padding:'10px 16px',background:'#f5f5f5',color:'#1a1a1a',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',fontWeight:'600',cursor:'pointer'}}>
                       Chiudi giacenza
