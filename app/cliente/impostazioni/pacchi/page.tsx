@@ -38,6 +38,11 @@ export default function PacchiCliente() {
     await fetch('/api/cliente/pacchi?id='+id, { method:'DELETE' })
     carica()
   }
+  async function setPredefinito(p:any) {
+    if (p.predefinito) return
+    await fetch('/api/cliente/pacchi', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id:p.id, nome:p.nome, peso:p.peso, lunghezza:p.lunghezza, larghezza:p.larghezza, altezza:p.altezza, predefinito:true }) })
+    carica()
+  }
   const th = {textAlign:'left' as const,padding:'12px 14px',fontSize:'12px',fontWeight:'700' as const,color:'#1a1a1a',borderBottom:'1px solid #e8e8e8'}
   const td = {padding:'12px 14px',fontSize:'13px',color:'#1a1a1a',borderBottom:'1px solid #f5f5f5'}
   return (
@@ -64,7 +69,7 @@ export default function PacchiCliente() {
                   <td style={{...td,color:'#2563eb'}}>{p.nome}</td>
                   <td style={{...td,color:'#2563eb'}}>{Number(p.peso).toFixed(2)}</td>
                   <td style={{...td,color:'#2563eb'}}>{p.lunghezza} X {p.larghezza} X {p.altezza}</td>
-                  <td style={td}>{p.predefinito ? '★' : '☆'}</td>
+                  <td style={td}><span onClick={()=>setPredefinito(p)} title={p.predefinito?'Predefinito':'Imposta come predefinito'} style={{cursor:'pointer',fontSize:'18px',color:p.predefinito?'#f59e0b':'#cbd5e1'}}>{p.predefinito ? '★' : '☆'}</span></td>
                   <td style={td}>
                     <button onClick={()=>elimina(p.id)} style={{background:'#dc2626',color:'#fff',border:'none',padding:'6px 10px',borderRadius:'6px',cursor:'pointer',marginRight:'8px'}}>🗑</button>
                     <button onClick={()=>apri(p)} style={{background:'transparent',color:'#2563eb',border:'none',cursor:'pointer',fontSize:'13px'}}>Edit</button>
