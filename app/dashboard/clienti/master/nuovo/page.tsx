@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
 const inp = {width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -11,9 +11,16 @@ export default function NuovoMasterPage() {
   const [email, setEmail] = useState('')
   const [telefono, setTelefono] = useState('')
   const [piva, setPiva] = useState('')
+  const [parentListinoId, setParentListinoId] = useState('')
+  const [tipoContratto, setTipoContratto] = useState('credito_scalare')
+  const [listini, setListini] = useState<any[]>([])
   const [saving, setSaving] = useState(false)
   const [errore, setErrore] = useState('')
   const [successo, setSuccesso] = useState('')
+
+  useEffect(() => {
+    fetch('/api/listini/lista').then(r => r.json()).then(d => setListini(Array.isArray(d) ? d : [])).catch(() => {})
+  }, [])
 
   async function crea() {
     if (!nome.trim() || !email.trim()) { setErrore('Nome e email sono obbligatori'); return }
@@ -21,7 +28,7 @@ export default function NuovoMasterPage() {
 
     const res = await fetch('/api/master/crea', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nome, email, telefono, piva })
+      body: JSON.stringify({ nome, email, telefono, piva, parent_listino_id: parentListinoId || null, tipo_contratto: tipoContratto })
     })
     const data = await res.json()
     setSaving(false)
@@ -52,7 +59,7 @@ export default function NuovoMasterPage() {
           <label style={lbl}>Email *</label>
           <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="franco@email.com" style={inp} />
         </div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'20px'}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'16px'}}>
           <div>
             <label style={lbl}>Telefono</label>
             <input value={telefono} onChange={e => setTelefono(e.target.value)} style={inp} />
@@ -63,8 +70,26 @@ export default function NuovoMasterPage() {
           </div>
         </div>
 
-        <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'6px',padding:'10px 14px',marginBottom:'20px',fontSize:'12px',color:'#1d4ed8'}}>
-          💡 Il nuovo master avrà accesso al dashboard completo, ma potrà gestire solo i propri clienti, corrieri e listini — non potrà vedere o modificare i tuoi.
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'20px'}}>
+          <div>
+            <label style={lbl}>Listino assegnato</label>
+            <select value={parentListinoId} onChange={e => setParentListinoId(e.target.value)} style={inp}>
+              <option value="">— nessuno (userà corrieri propri) —</option>
+              {listini.map((l:any) => <option key={l.id} value={l.id}>{l.nome}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Tipo Contratto</label>
+            <select value={tipoContratto} onChange={e => setTipoContratto(e.target.value)} style={inp}>
+              <option value="credito_scalare">Credito a scalare</option>
+              <option value="fattura_mensile">Fattura mensile</option>
+            </select>
+          </div>
+        </div>
+
+        <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'6px',padding:'10px 14px',marginBottom:'20px',fontSize:'12px',color:'#1d4ed8',lineHeight:1.5}}>
+          💡 Il nuovo master avrà accesso al dashboard completo, ma potrà gestire solo i propri clienti, corrieri e listini — non potrà vedere o modificare i tuoi.<br/>
+          Il <strong>Listino assegnato</strong> è il prezzo che <strong>tu</strong> applichi a questo master quando spedisce col tuo contratto. Lascialo vuoto se il master userà solo corrieri propri (API sue).
         </div>
 
         <button onClick={crea} disabled={saving}

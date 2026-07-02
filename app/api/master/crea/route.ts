@@ -30,6 +30,15 @@ export async function POST(req: NextRequest) {
   const { data: existingMaster } = await admin.from('masters').select('id').eq('email', email).single()
   if (existingMaster) return NextResponse.json({ error: 'Email già registrata come master' }, { status: 400 })
 
+  // Listino ereditato: dev'essere un listino del PADRE (chi sta creando)
+  let parentListinoId: string | null = null
+  if (body.parent_listino_id) {
+    const { data: listinoValido } = await admin
+      .from('listini_clienti').select('id').eq('id', body.parent_listino_id).eq('master_id', utente.master_id).single()
+    if (listinoValido) parentListinoId = listinoValido.id
+  }
+  const tipoContratto = body.tipo_contratto === 'fattura_mensile' ? 'fattura_mensile' : 'credito_scalare'
+
   const { data: nuovoMaster, error: masterError } = await admin.from('masters').insert({
     nome,
     slug: nome.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
@@ -37,12 +46,14 @@ export async function POST(req: NextRequest) {
     telefono: body.telefono || null,
     piva: body.piva || null,
     parent_master_id: utente.master_id,
+    parent_listino_id: parentListinoId,
+    tipo_contratto: tipoContratto,
     is_super_master: false,
     attivo: true,
   }).select().single()
 
   if (masterError || !nuovoMaster) {
-    return NextResponse.json({ error: masterError?.message || 'Errore creazione master' }, { status: 400 })
+    return NextResponse.json({ error: masterError?.message || 'Errore creazione master' }, { status:400 })
   }
 
   const password = generaPassword()
