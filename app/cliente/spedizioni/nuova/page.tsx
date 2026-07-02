@@ -348,7 +348,7 @@ export default function NuovaSpedizioneCliente() {
                 </button>
               )}
             </div>
-          </div>
+          </div>)}
         </div>
       </div>
 
