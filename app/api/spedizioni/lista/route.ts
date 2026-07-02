@@ -1,6 +1,5 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -16,9 +15,7 @@ export async function GET(req: NextRequest) {
   const destCap = p.get('dest_cap')
   const contenuto = p.get('contenuto')
   const contrassegno = p.get('contrassegno')
-
   let query = supabase.from('spedizioni').select('*,clienti(ragione_sociale)').order('created_at', { ascending: false }).limit(200)
-
   if (clienteId) {
     query = query.eq('cliente_id', clienteId).eq('master_id', utente?.master_id)
   } else if (utente?.ruolo === 'cliente') {
@@ -26,8 +23,10 @@ export async function GET(req: NextRequest) {
   } else {
     query = query.eq('master_id', utente?.master_id)
   }
-
+  // Filtro stato: se richiesto uno stato preciso lo applico; se non richiesto,
+  // escludo le annullate (che vivono nella pagina "Spedizioni Cancellate").
   if (stato && stato !== 'tutti') query = query.eq('stato', stato)
+  else query = query.neq('stato', 'annullata')
   if (dal) query = query.gte('created_at', dal)
   if (al) query = query.lte('created_at', al)
   if (numero) query = query.ilike('numero', `%${numero}%`)
@@ -36,7 +35,6 @@ export async function GET(req: NextRequest) {
   if (contenuto) query = query.ilike('contenuto', `%${contenuto}%`)
   if (contrassegno === 'si') query = query.gt('contrassegno', 0)
   if (contrassegno === 'no') query = query.eq('contrassegno', 0)
-
   const { data: spedizioni, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json(spedizioni || [])
