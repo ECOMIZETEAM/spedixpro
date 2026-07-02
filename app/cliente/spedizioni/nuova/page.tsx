@@ -159,7 +159,7 @@ export default function NuovaSpedizioneCliente() {
 
       {errore && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>⚠️ {errore}</div>}
 
-      <div style={{display:'grid',gridTemplateColumns:'1fr 400px',gap:'16px',alignItems:'start'}}>
+      <div style={{display: vista==='dati'?'grid':'none',gridTemplateColumns:'1fr 400px',gap:'16px',alignItems:'start'}}>
 
         {/* COLONNA SINISTRA */}
         <div style={{display:'flex',flexDirection:'column',gap:'16px'}}>
