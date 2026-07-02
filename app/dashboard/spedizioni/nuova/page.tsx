@@ -328,9 +328,6 @@ export default function NuovaSpedizionePage() {
                 ))}
               </div>
 
-              kg</strong>
-                </div>
-              )}
 
               <div style={{marginBottom:'10px'}}>
                 <label style={lbl}>Contenuto</label>
