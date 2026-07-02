@@ -347,11 +347,11 @@ export default function NuovaSpedizionePage() {
           <div style={cardB}>
             {tariffe.map((r,i)=>{
               const chiave = r._corriere_tipo || r.carrierCode
-              const c = CARRIERS[chiave]||{nome:r.corriere_nome||chiave.toUpperCase(),colore:'#666'}
+              const c = CARRIERS[chiave]||{nome:r.corriere_nome||chiave.toUpperCase(),colore:'#000'}
               const isSel = selected?._corriere_id===r._corriere_id && selected?.zona===r.zona
               return (
                 <div key={i} onClick={()=>setSelected(r)}
-                  style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px',border:`2px solid ${isSel?'#f97316':'#e8e8e8'}`,borderRadius:'8px',marginBottom:'8px',cursor:'pointer',background:isSel?'#fffbeb':'#fff'}}>
+                  style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px',border:`2px solid ${isSel?'#f97316':'#000'}`,borderRadius:'8px',marginBottom:'8px',cursor:'pointer',background:isSel?'#fffbeb':'#fff'}}>
                   {iconaCorriere(r.corriere_nome||chiave) ? (
                     <img src={iconaCorriere(r.corriere_nome||chiave)!} alt="" style={{width:'56px',height:'34px',objectFit:'contain',border:'1px solid #000',borderRadius:'5px',background:'#fff',padding:'2px',flexShrink:0}}/>
                   ) : (
