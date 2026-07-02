@@ -241,8 +241,14 @@ export default function IntegrazioniPage() {
                       opacity: p.attivo ? 1 : 0.55,
                     }}
                   >
-                    <div style={{ width: '38px', height: '38px', borderRadius: '9px', background: p.colore + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 800, color: p.colore }}>
-                      {p.nome.slice(0, 2).toUpperCase()}
+                    <div style={{ width: '48px', height: '48px', borderRadius: '9px', background: '#fff', border: '1px solid #eee', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                      <img
+                        src={`https://logo.clearbit.com/${p.dominio}?size=80`}
+                        alt={p.nome}
+                        style={{ maxWidth: '80%', maxHeight: '80%', objectFit: 'contain' }}
+                        onError={(e) => { const t = e.currentTarget; t.style.display = 'none'; const s = t.nextElementSibling as HTMLElement; if (s) s.style.display = 'flex' }}
+                      />
+                      <span style={{ display: 'none', width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 800, color: p.colore }}>{p.nome.slice(0, 2).toUpperCase()}</span>
                     </div>
                     <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#1a1a1a' }}>{p.nome}</div>
                     {!p.attivo && (
