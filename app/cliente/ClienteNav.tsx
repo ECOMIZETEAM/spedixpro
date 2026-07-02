@@ -53,10 +53,18 @@ const NAV: NavItem[] = [
     sub: [
       { label: 'Listino Prezzi', href: '/cliente/listino' },
       { label: 'Lista Movimenti', href: '/cliente/movimenti' },
-      { label: 'Dati Account', href: '/cliente/account' },
     ],
   },
-  { id: 'impostazioni', label: 'Impostazioni', icon: '◉', href: '/cliente/impostazioni' },
+  {
+    id: 'impostazioni', label: 'Impostazioni', icon: '◉',
+    sub: [
+      { label: 'Pacchi', href: '/cliente/impostazioni/pacchi' },
+      { label: 'Stampa e Notifiche', href: '/cliente/impostazioni/stampa-notifiche' },
+      { label: 'Cambia Password', href: '/cliente/impostazioni/cambia-password' },
+      { label: 'API Key', href: '/cliente/impostazioni/api-key' },
+      { label: 'Logo', href: '/cliente/impostazioni/logo' },
+    ],
+  },
 ]
 
 export default function ClienteNav() {
