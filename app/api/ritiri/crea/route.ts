@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
 
   const { data: nuovoRitiro, error: insertError } = await supabase.from('ritiri').insert({
     master_id: masterId, cliente_id: clienteId, corriere_id: corriere.id,
-    tracking_ritiro: r.pickupId || null,
+    tracking_ritiro: r.pickupId || null, cod_ritiro: r.pickupId || null,
     mitt_nome: body.mittNome, mitt_indirizzo: body.mittIndirizzo, mitt_citta: body.mittCitta,
     mitt_provincia: body.mittProvincia || null, mitt_cap: body.mittCap,
     mitt_telefono: body.mittTelefono || null,

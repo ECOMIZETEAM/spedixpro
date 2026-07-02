@@ -62,7 +62,7 @@ export default function ElencoRitiriPage() {
                   const stato = STATO_LABELS[r.stato] || STATO_LABELS.richiesto
                   return (
                     <tr key={r.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                      <td style={{ padding: '10px 14px', fontWeight: '600', color: '#1a1a1a' }}>{r.pickup_id || '—'}</td>
+                      <td style={{ padding: '10px 14px', fontWeight: '600', color: '#1a1a1a' }}>{r.cod_ritiro || r.tracking_ritiro || '—'}</td>
                       <td style={{ padding: '10px 14px' }}>
                         <div style={{ fontWeight: '600', color: '#1a1a1a' }}>{r.mitt_nome}</div>
                         <div style={{ fontSize: '11px', color: '#999' }}>{r.mitt_citta} ({r.mitt_provincia})</div>
