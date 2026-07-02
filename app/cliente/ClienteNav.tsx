@@ -29,7 +29,13 @@ const NAV: NavItem[] = [
       { label: 'Negozi collegati', href: '/cliente/integrazioni' },
     ],
   },
-  { id: 'ritiri', label: 'Ritiri', icon: '↩', href: '/cliente/ritiri' },
+  {
+    id: 'ritiri', label: 'Ritiri', icon: '↩',
+    sub: [
+      { label: 'Nuovo Ritiro', href: '/cliente/ritiri/nuovo' },
+      { label: 'Elenco Ritiri', href: '/cliente/ritiri' },
+    ],
+  },
   { id: 'resi', label: 'Resi', icon: '↺', href: '/cliente/resi' },
   { id: 'fatture', label: 'Fatture', icon: '◻', href: '/cliente/fatture' },
   { id: 'reports', label: 'Reports', icon: '◈', href: '/cliente/reports' },
