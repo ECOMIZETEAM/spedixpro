@@ -72,7 +72,7 @@ function formatiPerCorriere(nome:string): [string,string][] {
   return [['A4','A4'],['A6','A6']]
 }
 export default function ImpostazioniClientePage() {
-  const { id } = useParams()
+  const id = ''
   const [cliente, setCliente] = useState<any>(null)
   const [contratti, setContratti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -80,8 +80,8 @@ export default function ImpostazioniClientePage() {
   const [msg, setMsg] = useState('')
 
   useEffect(() => {
-    fetch(`/api/clienti/${id}`).then(r=>r.json()).then(d => { setCliente(d); setLoading(false) })
-    fetch(`/api/clienti/${id}/corrieri-abilitati`).then(r=>r.json()).then(d => setContratti(Array.isArray(d)?d:[]))
+    fetch('/api/cliente/dati').then(r=>r.json()).then(d => { setCliente(d); setLoading(false) })
+    fetch('/api/cliente/corrieri-abilitati').then(r=>r.json()).then(d => setContratti(Array.isArray(d)?d:[]))
   }, [id])
 
   function setAdmin(key:string, value:boolean) { setCliente((prev:any) => ({ ...prev, [key]: value })) }
@@ -93,7 +93,7 @@ export default function ImpostazioniClientePage() {
 
   async function salvaAdmin() {
     setSaving(true); setMsg('')
-    const res = await fetch(`/api/clienti/${id}`, {
+    const res = await fetch('/api/cliente/dati', {
       method:'PUT', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ ...cliente, impostazioni: { ...DEF_IMP, ...((cliente && cliente.impostazioni)||{}) } })
     })
@@ -106,7 +106,7 @@ export default function ImpostazioniClientePage() {
 
   async function toggleContratto(corriereId:string, abilitato:boolean) {
     setContratti(prev => prev.map(c => c.id===corriereId ? {...c, abilitato} : c))
-    await fetch(`/api/clienti/${id}/corrieri-abilitati`, {
+    await fetch('/api/cliente/corrieri-abilitati', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ corriereId, abilitato })
     })
@@ -116,7 +116,7 @@ export default function ImpostazioniClientePage() {
     const contratto = contratti.find(c => c.id === corriereId)
     const s = { ...DEF_SETT, ...((contratto && contratto.settings)||{}), [key]: value }
     setContratti(prev => prev.map(c => c.id===corriereId ? {...c, settings:s} : c))
-    await fetch(`/api/clienti/${id}/corrieri-abilitati`, {
+    await fetch('/api/cliente/corrieri-abilitati', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ corriereId, settings: s })
     })
@@ -130,7 +130,7 @@ export default function ImpostazioniClientePage() {
   return (
     <div>
       <div style={{marginBottom:'20px'}}>
-        <a href={`/dashboard/clienti/${id}`} style={{fontSize:'12px',color:'#f97316',textDecoration:'none'}}>{'<'} {cliente.ragione_sociale}</a>
+        <a href={'/cliente/dashboard'} style={{fontSize:'12px',color:'#f97316',textDecoration:'none'}}>{'<'} {cliente.ragione_sociale}</a>
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:'4px 0 0'}}>Impostazioni</h1>
       </div>
 
