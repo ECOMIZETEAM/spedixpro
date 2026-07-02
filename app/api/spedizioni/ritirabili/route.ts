@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
   // Solo spedizioni spedisci.online hanno contractCode/carrierCode utilizzabile per ritiro
-  const ritirabili = (spedizioni || []).filter((s: any) => s.corrieri?.tipo === 'spedisci')
+  const ritirabili = (spedizioni || []).filter((s: any) => (s.corrieri?.tipo === 'spedisci' || s.corrieri?.tipo === 'spediamopro'))
 
   return NextResponse.json(ritirabili)
 }
