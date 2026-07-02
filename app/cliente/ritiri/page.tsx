@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
@@ -19,7 +19,6 @@ export default function RitiriPage() {
   })
 
   useEffect(() => {
-    fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[]))
     carica()
   }, [])
 
@@ -59,7 +58,7 @@ export default function RitiriPage() {
     <div>
       <div style={{marginBottom:'16px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Lista Ritiri</h1>
-        <a href="/dashboard/ritiri/nuovo"
+        <a href="/cliente/ritiri/nuovo"
           style={{padding:'8px 18px',background:'#f97316',color:'#fff',borderRadius:'6px',fontSize:'13px',fontWeight:'700',textDecoration:'none'}}>
           + Nuovo Ritiro
         </a>
@@ -153,7 +152,7 @@ export default function RitiriPage() {
                       <input type="checkbox" checked={selectedIds.includes(r.id)} onChange={()=>toggleSelect(r.id)}/>
                     </td>
                     <td style={{padding:'9px 12px'}}>
-                      <a href={'/dashboard/ritiri/'+r.id}
+                      <a href={'/cliente/ritiri/'+r.id}
                         style={{color:'#2563eb',fontWeight:'600',fontSize:'12px',textDecoration:'none'}}>
                         {r.cod_ritiro||'—'}
                       </a>
