@@ -63,11 +63,13 @@ export default function NuovaSpedizioneCliente() {
   }
 
   function buildPackages() {
+    const n = Math.max(1, colli.length)
+    const pesoPerCollo = (+peso || 0) / n
     return colli.map(c => ({
       length: +c.lunghezza||20,
       width: +c.larghezza||15,
       height: +c.altezza||10,
-      weight: +peso
+      weight: pesoPerCollo
     }))
   }
 
