@@ -161,6 +161,7 @@ export default function NuovaSpedizioneCliente() {
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 400px',gap:'16px',alignItems:'start'}}>
 
+        {vista==='dati' && (<>
         {/* COLONNA SINISTRA */}
         <div style={{display:'flex',flexDirection:'column',gap:'16px'}}>
 
