@@ -368,7 +368,7 @@ export default function NuovaSpedizioneCliente() {
               )}
               {tariffe.map((r,i)=>{
                 const carrier = CARRIER_LABELS[r.carrierCode]||{nome:r.carrierCode.toUpperCase(),colore:'#666'}
-                const isSelected = selected?.total_price===r.total_price&&selected?.zona===r.zona
+                const isSelected = selected?.carrierCode===r.carrierCode&&selected?.contractCode===r.contractCode&&selected?.zona===r.zona
                 return (
                   <div key={i} onClick={()=>setSelected(r)}
                     style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px',border:`2px solid ${isSelected?'#f97316':'#e8e8e8'}`,borderRadius:'8px',marginBottom:'8px',cursor:'pointer',background:isSelected?'#fffbeb':'#fff',transition:'all .15s'}}>
@@ -422,7 +422,7 @@ export default function NuovaSpedizioneCliente() {
           <div style={cardB}>
             {tariffe.map((r,i)=>{
               const carrier = CARRIER_LABELS[r.carrierCode]||{nome:r.carrierCode.toUpperCase(),colore:'#666'}
-              const isSelected = selected?.total_price===r.total_price&&selected?.zona===r.zona
+              const isSelected = selected?.carrierCode===r.carrierCode&&selected?.contractCode===r.contractCode&&selected?.zona===r.zona
               return (
                 <div key={i} onClick={()=>setSelected(r)}
                   style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px',border:`2px solid ${isSelected?'#f97316':'#e8e8e8'}`,borderRadius:'8px',marginBottom:'8px',cursor:'pointer',background:isSelected?'#fffbeb':'#fff'}}>
