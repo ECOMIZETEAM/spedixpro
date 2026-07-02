@@ -16,6 +16,7 @@ const NAV: NavItem[] = [
     sub: [
       { label: 'Nuova Spedizione', href: '/cliente/spedizioni/nuova' },
       { label: 'Elenco Spedizioni', href: '/cliente/spedizioni' },
+      { label: 'Spedizioni Cancellate', href: '/cliente/spedizioni/cancellate' },
     ],
   },
   {
