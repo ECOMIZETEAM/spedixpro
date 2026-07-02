@@ -55,6 +55,7 @@ export default function NuovaSpedizioneCliente() {
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
   const [errore, setErrore] = useState('')
+  const [vista, setVista] = useState<'dati'|'contratto'>('dati')
 
   // Se il cliente modifica un dato che cambia il prezzo mentre la lista e' visibile,
   // azzera le tariffe: dovra' ricliccare "Seleziona Corriere" per vedere il prezzo aggiornato.
@@ -120,6 +121,7 @@ export default function NuovaSpedizioneCliente() {
     if (data.error) { setErrore(data.error); return }
     if (!Array.isArray(data)||!data.length) { setErrore('Nessuna tariffa disponibile'); return }
     setTariffe(data)
+    setVista('contratto')
   }
 
   async function creaSpedizione() {
@@ -159,7 +161,7 @@ export default function NuovaSpedizioneCliente() {
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 400px',gap:'16px',alignItems:'start'}}>
 
-        {/* COLONNA SINISTRA */}
+        {vista==='dati' && (
         <div style={{display:'flex',flexDirection:'column',gap:'16px'}}>
 
           {/* MITTENTE */}
@@ -286,6 +288,7 @@ export default function NuovaSpedizioneCliente() {
               </div>
             </div>
           </div>
+        )}
 
           {/* CORRIERI E COSTI */}
           <div style={card}>
