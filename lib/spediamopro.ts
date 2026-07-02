@@ -221,3 +221,53 @@ export async function spediamoproGetLabel(authcode: string, shipmentId: number, 
   }
   throw new Error(`SpediamoPro label download failed: ${lastError}`)
 }
+
+// ── Pickup / Ritiro ──
+export interface SpediamoproPickupContact {
+  name: string
+  address: string
+  postalCode: string
+  city: string
+  country: string
+  phone?: string
+  email?: string
+  province?: string
+  at?: string
+}
+
+export async function spediamoproCreatePickup(
+  authcode: string,
+  params: {
+    contactInfo: SpediamoproPickupContact
+    date: string
+    from: string
+    to: string
+    shipments: number[]
+    courier: string
+  }
+): Promise<{ id: number; code: string; status: number; raw: any }> {
+  const token = await getSpediamoproToken(authcode)
+  const res = await fetch(`${BASE_URL}/pickups`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      contactInfo: params.contactInfo,
+      date: params.date,
+      from: params.from,
+      to: params.to,
+      shipments: params.shipments,
+      courier: params.courier,
+    }),
+  })
+  const text = await res.text()
+  if (!res.ok) {
+    throw new Error(`SpediamoPro pickup failed (${res.status}): ${text.substring(0, 300)}`)
+  }
+  let json: any
+  try { json = JSON.parse(text) } catch { json = {} }
+  const d = json?.data || {}
+  return { id: d.id, code: d.code, status: d.status, raw: json }
+}
