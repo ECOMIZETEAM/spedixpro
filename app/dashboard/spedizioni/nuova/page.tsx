@@ -58,6 +58,7 @@ export default function NuovaSpedizionePage() {
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
   const [errore, setErrore] = useState('')
+  const [vista, setVista] = useState<'dati'|'contratto'>('dati')
 
   useEffect(() => { fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[])) }, [])
 
