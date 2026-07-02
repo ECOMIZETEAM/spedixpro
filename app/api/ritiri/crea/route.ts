@@ -136,14 +136,12 @@ export async function POST(req: NextRequest) {
 
   const { data: nuovoRitiro, error: insertError } = await supabase.from('ritiri').insert({
     master_id: masterId, cliente_id: clienteId, corriere_id: corriere.id,
-    pickup_id: r.pickupId || null, contract_code: contractCode,
+    tracking_ritiro: r.pickupId || null,
     mitt_nome: body.mittNome, mitt_indirizzo: body.mittIndirizzo, mitt_citta: body.mittCitta,
-    mitt_provincia: body.mittProvincia || null, mitt_cap: body.mittCap, mitt_paese: body.mittPaese || 'IT',
-    mitt_telefono: body.mittTelefono || null, mitt_email: body.mittEmail || null,
-    colli: colliTotali, peso_totale: pesoTotale, contenuto: body.contenuto || null,
-    data_ritiro: body.dataRitiro, orario_ritiro: pickupTime || body.orarioRitiro || null,
-    istruzioni: body.istruzioni || null, stato: 'richiesto',
-    raw_response: { ...r, _spedizioni: spedizioneIds },
+    mitt_provincia: body.mittProvincia || null, mitt_cap: body.mittCap,
+    mitt_telefono: body.mittTelefono || null,
+    colli: colliTotali, peso: pesoTotale, contenuto: body.contenuto || null,
+    data_ritiro: body.dataRitiro, stato: 'richiesto',
   }).select().single()
 
   if (insertError) {
