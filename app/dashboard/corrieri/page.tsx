@@ -91,6 +91,7 @@ export default function CorrieriPage() {
       multicollo: c.multicollo !== false,
       inserimento_ritiri: c.inserimento_ritiri !== false,
       mittente: (c.settings && c.settings.mittente) || 'cliente',
+      agevolazione_peso_reale: !!(c.settings && c.settings.agevolazione_peso_reale),
     })
   }
 
@@ -102,7 +103,7 @@ export default function CorrieriPage() {
       body: JSON.stringify({
         multicollo: popup.multicollo,
         inserimento_ritiri: popup.inserimento_ritiri,
-        settings: { mittente: popup.mittente },
+        settings: { mittente: popup.mittente, agevolazione_peso_reale: popup.agevolazione_peso_reale },
       })
     })
     setCorrieri(prev => prev.map(c => c.id === popup.id ? { ...c, multicollo: popup.multicollo, inserimento_ritiri: popup.inserimento_ritiri, settings: { ...(c.settings||{}), mittente: popup.mittente } } : c))
