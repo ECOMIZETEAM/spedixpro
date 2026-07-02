@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
 interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; costo_contrassegno?:string; costo_assicurazione?:string; corriere_nome?:string }
@@ -55,6 +55,17 @@ export default function NuovaSpedizioneCliente() {
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
   const [errore, setErrore] = useState('')
+
+  // Ricalcolo automatico del prezzo quando cambiano contrassegno/assicurazione
+  // (solo se la lista tariffe e' gia' stata mostrata almeno una volta)
+  const primoRender = useRef(true)
+  useEffect(() => {
+    if (primoRender.current) { primoRender.current = false; return }
+    if (!tariffe.length) return
+    const timer = setTimeout(() => { calcolaTariffe() }, 600)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contrassegno, assicurazione])
 
   useEffect(() => {
     fetch('/api/cliente/info').then(r=>r.json()).then(d => {
