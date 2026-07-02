@@ -42,6 +42,8 @@ export default function NuovaSpedizioneCliente() {
   const [clienteData, setClienteData] = useState<any>(null)
   const [mitt, setMitt] = useState({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',email:'',telefono:''})
   const [dest, setDest] = useState({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',paese:'IT',email:'',telefono:'',note:''})
+  const [suggComuni, setSuggComuni] = useState<any[]>([])
+  const [showSugg, setShowSugg] = useState(false)
   const [numColli, setNumColli] = useState(1)
   const [colli, setColli] = useState<Collo[]>([{lunghezza:'',larghezza:'',altezza:''}])
   const [peso, setPeso] = useState('1')
@@ -200,7 +202,32 @@ export default function NuovaSpedizioneCliente() {
               </div>
               <div style={{marginBottom:'12px'}}><label style={lbl}>Indirizzo *</label><input value={dest.indirizzo} onChange={e=>setDest({...dest,indirizzo:e.target.value})} placeholder="Via Roma 1" style={inp}/></div>
               <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'8px',marginBottom:'12px'}}>
-                <div><label style={lbl}>Città *</label><input value={dest.citta} onChange={e=>setDest({...dest,citta:e.target.value})} placeholder="Roma" style={inp}/></div>
+                <div style={{position:'relative'}}>
+                  <label style={lbl}>Città *</label>
+                  <input value={dest.citta} autoComplete="off"
+                    onChange={async e=>{
+                      const v=e.target.value
+                      setDest(d=>({...d,citta:v}))
+                      if(v.trim().length>=2){
+                        try{ const r=await fetch('/api/comuni?q='+encodeURIComponent(v)); const j=await r.json(); setSuggComuni(Array.isArray(j)?j:[]); setShowSugg(true) }catch{ setSuggComuni([]) }
+                      } else { setSuggComuni([]); setShowSugg(false) }
+                    }}
+                    onFocus={()=>{ if(suggComuni.length) setShowSugg(true) }}
+                    onBlur={()=>setTimeout(()=>setShowSugg(false),200)}
+                    placeholder="Roma" style={inp}/>
+                  {showSugg && suggComuni.length>0 && (
+                    <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:50,background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',maxHeight:'220px',overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}}>
+                      {suggComuni.map((c:any,i:number)=>(
+                        <div key={i} onMouseDown={()=>{ setDest(d=>({...d,citta:c.nome,provincia:c.sigla,cap:c.cap})); setShowSugg(false) }}
+                          style={{padding:'7px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
+                          onMouseEnter={e=>(e.currentTarget.style.background='#f9fafb')}
+                          onMouseLeave={e=>(e.currentTarget.style.background='#fff')}>
+                          {c.nome} <span style={{color:'#999'}}>({c.sigla}) - {c.cap}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <div><label style={lbl}>Prov. *</label><input value={dest.provincia} onChange={e=>setDest({...dest,provincia:e.target.value})} placeholder="RM" style={inp}/></div>
                 <div><label style={lbl}>CAP *</label><input value={dest.cap} onChange={e=>setDest({...dest,cap:e.target.value})} placeholder="00100" style={inp}/></div>
               </div>
