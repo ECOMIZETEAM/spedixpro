@@ -41,6 +41,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     fattura_auto: datiCliente.fattura_auto||false,
     metodo_pagamento: datiCliente.metodo_pagamento||null,
     diritto_fisso: datiCliente.diritto_fisso||false,
+    agente: datiCliente.agente||null,
     ritiro_tipo: datiCliente.ritiro_tipo||null, ritiro_fascia: datiCliente.ritiro_fascia||null,
     rimborso_freq: datiCliente.rimborso_freq||null, rimborso_tipo: datiCliente.rimborso_tipo||null,
     iban: datiCliente.iban||null, abi: datiCliente.abi||null, cab: datiCliente.cab||null,
