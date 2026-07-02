@@ -46,6 +46,7 @@ const NAV = [
     { label: 'Elenco Fatture', href: '/dashboard/fatture' },
     { label: 'Nuova Fattura', href: '/dashboard/fatture/nuova' },
   ]},
+  { label: 'Lista Movimenti', href: '/dashboard/movimenti', icon: '≣' },
   { label: 'Reports & SMS', href: '/dashboard/reports', icon: '◈', sub: [
     { label: 'Report Spedizioni', href: '/dashboard/reports/spedizioni' },
     { label: 'Report Giacenze', href: '/dashboard/reports/giacenze' },
