@@ -55,6 +55,40 @@ export async function POST(req: NextRequest) {
     for (const arr of scaglioniContrPerCorriere.values()) arr.sort((a,b)=>a.valore_max - b.valore_max)
   }
 
+  // Scaglioni assicurazione per corriere (stessa dinamica del contrassegno)
+  const assicImporto = Number(body.insuranceValue || 0)
+  const scaglioniAssicPerCorriere = new Map<string, any[]>()
+  if (cliente.listino_cliente_id && assicImporto > 0) {
+    const { data: supplA } = await supabase
+      .from('listini_clienti_supplementi')
+      .select('corriere_id, descrizione, valore, tipo_calcolo')
+      .eq('listino_id', cliente.listino_cliente_id).eq('tipo', 'assicurazione')
+    for (const s of (supplA || [])) {
+      let d:any = null; try { d = JSON.parse(s.descrizione) } catch {}
+      const scal = {
+        valore_max: parseFloat(d?.valore_max ?? '') || 0,
+        prezzo_fisso: parseFloat(d?.prezzo_fisso ?? s.valore ?? '') || 0,
+        perc: parseFloat(d?.perc ?? '') || 0,
+        calcolo_su: d?.calcolo_su || s.tipo_calcolo || 'totale',
+      }
+      if (!scaglioniAssicPerCorriere.has(s.corriere_id)) scaglioniAssicPerCorriere.set(s.corriere_id, [])
+      scaglioniAssicPerCorriere.get(s.corriere_id)!.push(scal)
+    }
+    for (const arr of scaglioniAssicPerCorriere.values()) arr.sort((a,b)=>a.valore_max - b.valore_max)
+  }
+
+  function calcolaAssicurazione(corriereId: string, prezzoSped: number): number | null {
+    if (assicImporto <= 0) return 0
+    const scal = scaglioniAssicPerCorriere.get(corriereId)
+    if (!scal || !scal.length) return 0
+    const s = scal.find(x => assicImporto <= x.valore_max)
+    if (!s) return null
+    let base = prezzoSped
+    if (s.calcolo_su === 'valore_merce') base = Number(body.valoreMerce || 0)
+    else if (s.calcolo_su === 'nolo') base = prezzoSped
+    return s.prezzo_fisso + (s.perc/100) * base
+  }
+
   function calcolaContrassegno(corriereId: string, prezzoSped: number): number | null {
     if (codImporto <= 0) return 0
     const scal = scaglioniContrPerCorriere.get(corriereId)
