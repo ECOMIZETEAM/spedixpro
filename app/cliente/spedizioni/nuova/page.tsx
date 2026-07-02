@@ -409,9 +409,8 @@ export default function NuovaSpedizioneCliente() {
         </div>
       </div>
 
-          </div>
-        </div>
       )}
+        </div>
 
     </div>
   )
