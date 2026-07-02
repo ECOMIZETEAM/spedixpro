@@ -10,7 +10,6 @@ type NavItem = { id: string; label: string; icon: string; href?: string; sub?: S
 
 // ── Voci del menu (modifica qui per aggiungere/rinominare) ──────────────────
 const NAV: NavItem[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: '⊞', href: '/cliente/dashboard' },
   {
     id: 'spedizioni', label: 'Spedizioni', icon: '◫',
     sub: [
