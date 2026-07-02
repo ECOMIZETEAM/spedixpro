@@ -350,6 +350,68 @@ export default function NuovaSpedizioneCliente() {
           </div>
         </div>
       </div>
+
+      {vista==='contratto' && (
+        <div style={card}>
+          <div style={{...cardH,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <span>Seleziona contratto</span>
+            <button onClick={()=>{setVista('dati');setTariffe([]);setSelected(null)}}
+              style={{background:'#eef2f7',color:'#334155',border:'1px solid #d7dee8',padding:'6px 14px',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>
+              Modifica dati Spedizione
+            </button>
+          </div>
+          <div style={cardB}>
+            {tariffe.map((r,i)=>{
+              const carrier = CARRIER_LABELS[r.carrierCode]||{nome:r.carrierCode.toUpperCase(),colore:'#666'}
+              const isSelected = selected?.total_price===r.total_price&&selected?.zona===r.zona
+              return (
+                <div key={i} onClick={()=>setSelected(r)}
+                  style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px',border:`2px solid ${isSelected?'#f97316':'#e8e8e8'}`,borderRadius:'8px',marginBottom:'8px',cursor:'pointer',background:isSelected?'#fffbeb':'#fff'}}>
+                  {iconaCorriere(r.corriere_nome||r.carrierCode||carrier.nome) ? (
+                    <img src={iconaCorriere(r.corriere_nome||r.carrierCode||carrier.nome)!} alt="" style={{width:'56px',height:'34px',objectFit:'contain',border:'1px solid #e8e8e8',borderRadius:'5px',background:'#fff',padding:'2px',flexShrink:0}}/>
+                  ) : (
+                    <div style={{width:'48px',height:'30px',border:'1px solid #e8e8e8',borderRadius:'5px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                      <span style={{fontSize:'8px',fontWeight:'900',color:carrier.colore,textTransform:'uppercase'}}>{r.carrierCode.toUpperCase()}</span>
+                    </div>
+                  )}
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:'700',color:'#1a1a1a',fontSize:'14px'}}>{r.corriere_nome||carrier.nome}</div>
+                    <div style={{fontSize:'11px',color:'#999',marginTop:'1px'}}>{r.peso_fatturato}kg · zona {r.zona}</div>
+                  </div>
+                  <div style={{fontSize:'18px',fontWeight:'800',color:'#f97316',flexShrink:0}}>€ {r.total_price}</div>
+                </div>
+              )
+            })}
+
+            {selected && (
+              <div style={{marginTop:'8px',borderTop:'1px solid #eee',paddingTop:'14px'}}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'14px'}}>
+                  <div>
+                    <label style={lbl}>Servizi accessori</label>
+                    <input style={inp} placeholder="—" disabled />
+                  </div>
+                  <div>
+                    <label style={lbl}>Modalità di incasso contrassegno</label>
+                    <select style={inp} defaultValue="contante"><option value="contante">CONTANTE</option></select>
+                  </div>
+                </div>
+                <div style={{fontSize:'15px',fontWeight:'700',color:'#1a1a1a',marginBottom:'8px'}}>Costi</div>
+                <div style={{border:'1px solid #eee',borderRadius:'8px',overflow:'hidden',marginBottom:'14px'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',background:'#fafafa',fontSize:'13px'}}><span>Costo spedizione</span><span>€ {selected.prezzo_spedizione||selected.total_price}</span></div>
+                  {Number(selected.costo_contrassegno||0)>0 && <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',fontSize:'13px'}}><span>Costo Contrassegno</span><span>€ {selected.costo_contrassegno}</span></div>}
+                  {Number(selected.costo_assicurazione||0)>0 && <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',background:'#fafafa',fontSize:'13px'}}><span>Costo Assicurazione</span><span>€ {selected.costo_assicurazione}</span></div>}
+                  <div style={{display:'flex',justifyContent:'space-between',padding:'11px 14px',borderTop:'1px solid #eee',fontSize:'14px',fontWeight:'800',color:'#f97316'}}><span>Costo Totale</span><span>€ {selected.total_price}</span></div>
+                </div>
+                <button onClick={creaSpedizione} disabled={creating}
+                  style={{width:'100%',padding:'12px',background:'#1a1a1a',color:'#fff',border:'none',borderRadius:'7px',fontSize:'13.5px',fontWeight:'700',cursor:'pointer',opacity:creating?0.7:1}}>
+                  {creating?'Creazione in corso...':'✓ Crea Spedizione — € '+selected.total_price}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
