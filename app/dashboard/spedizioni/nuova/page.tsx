@@ -333,7 +333,7 @@ export default function NuovaSpedizionePage() {
                 </button>
               )}
             </div>
-          </div>
+          </div>)}
         </div>
       </div>
 
