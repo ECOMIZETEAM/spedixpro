@@ -243,7 +243,7 @@ export default function IntegrazioniPage() {
                   >
                     <div style={{ width: '48px', height: '48px', borderRadius: '9px', background: '#fff', border: '1px solid #eee', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                       <img
-                        src={`https://logo.clearbit.com/${p.dominio}?size=80`}
+                        src={`https://www.google.com/s2/favicons?domain=${p.dominio}&sz=128`}
                         alt={p.nome}
                         style={{ maxWidth: '80%', maxHeight: '80%', objectFit: 'contain' }}
                         onError={(e) => { const t = e.currentTarget; t.style.display = 'none'; const s = t.nextElementSibling as HTMLElement; if (s) s.style.display = 'flex' }}
