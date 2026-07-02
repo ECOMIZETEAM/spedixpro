@@ -35,13 +35,13 @@ export default function NuovoRitiroPage() {
       setLoadingSped(false)
     }).catch(() => setLoadingSped(false))
 
-    fetch('/api/master').then(r => r.json()).then(d => {
+    fetch('/api/cliente/profilo').then(r => r.json()).then(d => {
       if (d?.nome) setMittNome(d.nome)
       if (d?.indirizzo_operativo) setMittIndirizzo(d.indirizzo_operativo)
       if (d?.citta_operativo) setMittCitta(d.citta_operativo)
       if (d?.provincia_operativo) setMittProvincia(d.provincia_operativo)
       if (d?.cap_operativo) setMittCap(d.cap_operativo)
-      if (d?.telefono_operativo) setMittTelefono(d.telefono_operativo)
+      if (d?.telefono) setMittTelefono(d.telefono)
       if (d?.email) setMittEmail(d.email)
     }).catch(() => {})
 
