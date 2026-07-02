@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
@@ -20,12 +20,11 @@ export default function ReportSpedizioniPage() {
   })
 
   useEffect(() => {
-    fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[]))
     caricaReports()
   }, [])
 
   async function caricaReports() {
-    const res = await fetch('/api/reports/lista?tipo=spedizioni')
+    const res = await fetch('/api/cliente/reports/lista?tipo=spedizioni')
     const data = await res.json()
     setReports(Array.isArray(data) ? data : [])
   }
@@ -42,7 +41,7 @@ export default function ReportSpedizioniPage() {
     if (filtri.contrassegno) params.set('contrassegno', filtri.contrassegno)
     if (filtri.provincia) params.set('provincia', filtri.provincia)
 
-    const res = await fetch(`/api/reports/spedizioni?${params}`)
+    const res = await fetch(`/api/cliente/reports/spedizioni?${params}`)
     const spedizioni = await res.json()
 
     if (!spedizioni.length) { alert('Nessuna spedizione trovata con i filtri selezionati'); setGenerating(false); return }
@@ -141,7 +140,7 @@ export default function ReportSpedizioniPage() {
     }
 
     // Salva nel registro report
-    await fetch('/api/reports/spedizioni', {
+    await fetch('/api/cliente/reports/spedizioni', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ formato: filtri.formato, filtri })
