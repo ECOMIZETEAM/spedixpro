@@ -72,7 +72,7 @@ const NAV = [
   ]},
 ]
 
-export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string } }) {
+export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null } }) {
   const path = usePathname()
   const [openMenus, setOpenMenus] = useState<Record<string,boolean>>(() => {
     const init: Record<string,boolean> = {}
@@ -96,11 +96,17 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
 
         {/* Logo */}
         <a href="/dashboard" style={{padding:'16px 18px',borderBottom:'1px solid rgba(255,255,255,0.06)',display:'flex',alignItems:'center',gap:'10px',textDecoration:'none'}}>
-          <div style={{width:'32px',height:'32px',background:'#f97316',borderRadius:'7px',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:'900',fontSize:'16px',color:'#fff',flexShrink:0}}>S</div>
-          <div>
-            <div style={{fontSize:'15px',fontWeight:'800',color:'#fff',letterSpacing:'-0.3px',lineHeight:1}}>SpedixPro</div>
-            <div style={{fontSize:'9px',color:'#4a7090',textTransform:'uppercase',letterSpacing:'1px',marginTop:'2px'}}>Control Center</div>
-          </div>
+          {user?.brandLogo ? (
+            <img src={user.brandLogo} alt="Logo" style={{maxHeight:'40px',maxWidth:'170px',objectFit:'contain'}}/>
+          ) : (
+            <>
+              <div style={{width:'32px',height:'32px',background:'#f97316',borderRadius:'7px',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:'900',fontSize:'16px',color:'#fff',flexShrink:0}}>{(user?.brandNome || 'S').substring(0,1).toUpperCase()}</div>
+              <div>
+                <div style={{fontSize:'15px',fontWeight:'800',color:'#fff',letterSpacing:'-0.3px',lineHeight:1}}>{user?.brandNome || 'SpedixPro'}</div>
+                <div style={{fontSize:'9px',color:'#4a7090',textTransform:'uppercase',letterSpacing:'1px',marginTop:'2px'}}>Control Center</div>
+              </div>
+            </>
+          )}
         </a>
 
         {/* User */}
