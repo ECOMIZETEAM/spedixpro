@@ -32,7 +32,7 @@ function iconaCorriere(nome:string): string | null {
     ['CORREOS EXPRESS','correos_express'], ['CORREOS','correos'],
     ['INPOST','inpost'], ['SPRING','spring'], ['PAACK','paack'],['SPEEDY','speedy'],
     ['AMAZON','amazon_shipping'], ['CTT','ctt_express'], ['AIPACK','aipack'], ['ALT','alt'],
-    ['GTECH','gtechgroup'], ['SPEDIAMO','spedisci'],
+    ['GTECH','gtechgroup'], ['SPEDIAMOPRO','spedisci'], ['SPEDIAMO','spedisci'], ['SPEDISCI','spedisci'],
   ]
   for (const [chiave,file] of regole) { if (n.includes(chiave)) return `/corrieri/${file}.png` }
   return null
@@ -299,8 +299,8 @@ export default function NuovaSpedizioneCliente() {
                 return (
                   <div key={i} onClick={()=>setSelected(r)}
                     style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px',border:`2px solid ${isSelected?'#f97316':'#e8e8e8'}`,borderRadius:'8px',marginBottom:'8px',cursor:'pointer',background:isSelected?'#fffbeb':'#fff',transition:'all .15s'}}>
-                    {iconaCorriere(r.corriere_nome||carrier.nome) ? (
-                      <img src={iconaCorriere(r.corriere_nome||carrier.nome)!} alt="" style={{width:'56px',height:'34px',objectFit:'contain',border:'1px solid #e8e8e8',borderRadius:'5px',background:'#fff',padding:'2px',flexShrink:0}}/>
+                    {iconaCorriere(r.corriere_nome||r.carrierCode||carrier.nome) ? (
+                      <img src={iconaCorriere(r.corriere_nome||r.carrierCode||carrier.nome)!} alt="" style={{width:'56px',height:'34px',objectFit:'contain',border:'1px solid #e8e8e8',borderRadius:'5px',background:'#fff',padding:'2px',flexShrink:0}}/>
                     ) : (
                       <div style={{width:'48px',height:'30px',border:'1px solid #e8e8e8',borderRadius:'5px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
                         <span style={{fontSize:'8px',fontWeight:'900',color:carrier.colore,textTransform:'uppercase'}}>{r.carrierCode.toUpperCase()}</span>
