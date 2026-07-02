@@ -7,6 +7,7 @@ export async function GET(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('cliente_id').eq('id', user.id).single()
   const clienteId = utente?.cliente_id
   if (!clienteId) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
+  const { data: cliente } = await supabase.from('clienti').select('ragione_sociale').eq('id', clienteId).single()
   const id = req.nextUrl.searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
   const { data: distinta } = await supabase
@@ -14,8 +15,10 @@ export async function GET(req: NextRequest) {
   if (!distinta) return NextResponse.json({ error: 'Distinta non trovata' }, { status: 404 })
   const { data: speds } = await supabase
     .from('spedizioni')
-    .select('numero,rif_mittente,rif_destinatario,dest_nome,dest_indirizzo,dest_cap,dest_citta,dest_provincia,dest_telefono,peso_reale,peso_fatturato,peso_volume,colli,contrassegno,assicurazione,costo_totale')
+    .select('numero,rif_destinatario,rif_ordine,dest_nome,dest_indirizzo,dest_cap,dest_citta,dest_provincia,dest_telefono,peso_reale,peso_fatturato,peso_volume,colli,contrassegno,assicurazione,costo_totale')
     .eq('distinta_id', id)
     .order('numero', { ascending: true })
-  return NextResponse.json({ distinta, spedizioni: speds || [] })
+  const rifMittente = cliente?.ragione_sociale || ''
+  const spedizioni = (speds || []).map(s => ({ ...s, rif_mittente: rifMittente }))
+  return NextResponse.json({ distinta, spedizioni })
 }
