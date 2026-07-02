@@ -36,7 +36,7 @@ const NAV: NavItem[] = [
       { label: 'Elenco Ritiri', href: '/cliente/ritiri' },
     ],
   },
-  { id: 'resi', label: 'Resi', icon: '↺', href: '/cliente/resi' },
+  { id: 'resi', label: 'Resi', icon: '↺', href: '/cliente/resi/distinte' },
   { id: 'fatture', label: 'Fatture', icon: '◻', href: '/cliente/fatture' },
   { id: 'reports', label: 'Reports', icon: '◈', href: '/cliente/reports' },
   {
