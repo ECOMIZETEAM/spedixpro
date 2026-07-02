@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { registraMovimento } from '@/lib/movimenti'
+import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import {
   spediamoproGetQuotation,
   spediamoproCreateShipment,
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest) {
   // *** FIX: usa il corriere_id passato dal frontend (tariffa selezionata) ***
   if (body._corriere_id) {
     const { data: c } = await supabase
-      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo')
+      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id')
       .eq('id', body._corriere_id)
       .eq('master_id', masterId)
       .single()
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest) {
   if (!corriereRecord && cliente.listino_cliente_id) {
     const { data: fascia } = await supabase
       .from('listini_clienti_fasce')
-      .select('corrieri(id,tipo,credenziali,nome_contratto,attivo)')
+      .select('corrieri(id,tipo,credenziali,nome_contratto,attivo,master_id)')
       .eq('listino_id', cliente.listino_cliente_id)
       .limit(1)
       .single()
@@ -62,7 +63,7 @@ export async function POST(req: NextRequest) {
 
   if (!corriereRecord) {
     const { data: c } = await supabase
-      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo')
+      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id')
       .eq('master_id', masterId).eq('tipo', 'spedisci')
       .limit(1)
       .single()
@@ -100,6 +101,19 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       console.error('Errore registrazione movimento spedizione:', e)
     }
+  }
+
+  // ── Blocco a monte: verifica il credito dei MASTER della catena (prezzo da listino
+  //    ereditato). Se un master "credito_scalare" è a secco, tutta la catena è bloccata.
+  //    Il proprietario del corriere non viene bloccato qui (costo API noto solo dopo). ──
+  const catenaCheck = await verificaCreditoCatena(supabase, {
+    masterDirettoId: masterId,
+    corriereOwnerId: corriereRecord.master_id,
+    provincia: body.shipTo.state,
+    packages,
+  })
+  if (!catenaCheck.ok) {
+    return NextResponse.json({ error: catenaCheck.errore }, { status: 402 })
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -187,6 +201,13 @@ export async function POST(req: NextRequest) {
 
     // Detrazione credito (movimento -costo cliente)
     await addebitaCredito(inserted?.id || null, numero, costoCliente)
+
+    // Addebito a cascata sui master della catena (proprietario paga costo reale API)
+    await addebitaCatena(supabase, {
+      masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
+      costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
+      numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
+    })
 
     return NextResponse.json({ numero, tracking: r.trackingNumber, costo: r.shipmentCost })
   }
@@ -277,6 +298,13 @@ export async function POST(req: NextRequest) {
 
       // Detrazione credito (movimento -costo cliente)
       await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
+
+      // Addebito a cascata sui master della catena (proprietario paga costo reale API)
+      await addebitaCatena(supabase, {
+        masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
+        costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
+        numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
+      })
 
       return NextResponse.json({
         numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2),
