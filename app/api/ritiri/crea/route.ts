@@ -1,6 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 
+function normalizzaOrario(v: any): string | null {
+  if (!v) return null
+  const s = String(v).trim().toLowerCase()
+  const m = s.match(/^(\d{1,2}):(\d{2})$/)
+  if (m) {
+    const h = Math.min(23, Math.max(0, parseInt(m[1], 10)))
+    const min = Math.min(59, Math.max(0, parseInt(m[2], 10)))
+    return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
+  }
+  if (s.includes('matt')) return '09:00'
+  if (s.includes('pome')) return '14:00'
+  if (s.includes('sera')) return '17:00'
+  return null
+}
+
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -70,12 +85,12 @@ export async function POST(req: NextRequest) {
   const colliTotali = spedizioni.reduce((sum, s) => sum + (s.colli || 1), 0)
   const pesoTotale = spedizioni.reduce((sum, s) => sum + (parseFloat(String(s.peso_reale)) || 1), 0)
 
+  const pickupTime = normalizzaOrario(body.orarioRitiro)
+
   const payload: any = {
     contractCode,
     carrierCode,
     pickupDate: body.dataRitiro,
-    pickupTime: body.orarioRitiro || undefined,
-    specialInstruction: body.istruzioni || undefined,
     shipFrom: {
       name: body.mittNome,
       street1: body.mittIndirizzo,
@@ -88,7 +103,8 @@ export async function POST(req: NextRequest) {
     },
     packagesDetails: [{ weight: String(pesoTotale || 1) }],
   }
-
+  if (pickupTime) payload.pickupTime = pickupTime
+  if (body.istruzioni) payload.specialInstruction = body.istruzioni
   if (shipmentId) payload.shipmentId = shipmentId
 
   console.log('[RITIRO] Payload pickup/create:', JSON.stringify(payload))
@@ -127,7 +143,7 @@ export async function POST(req: NextRequest) {
     peso_totale: pesoTotale,
     contenuto: body.contenuto || null,
     data_ritiro: body.dataRitiro,
-    orario_ritiro: body.orarioRitiro || null,
+    orario_ritiro: pickupTime || body.orarioRitiro || null,
     istruzioni: body.istruzioni || null,
     stato: 'richiesto',
     raw_response: { ...r, _spedizioni: spedizioneIds },
