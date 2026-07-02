@@ -294,7 +294,7 @@ export default function NuovaSpedizionePage() {
                 </div>
               </div>
             </div>
-          </div>
+          </div>)}
 
           {/* CORRIERI E COSTI */}
           {vista==='dati' && (<div style={card}>
