@@ -38,7 +38,16 @@ const NAV: NavItem[] = [
   },
   { id: 'resi', label: 'Resi', icon: '↺', href: '/cliente/resi/distinte' },
   { id: 'fatture', label: 'Fatture', icon: '◻', href: '/cliente/fatture' },
-  { id: 'reports', label: 'Reports', icon: '◈', href: '/cliente/reports' },
+  {
+    id: 'reports', label: 'Reports', icon: '◈',
+    sub: [
+      { label: 'Report Spedizioni', href: '/cliente/reports/spedizioni' },
+      { label: 'Report Distinte', href: '/cliente/reports/distinte' },
+      { label: 'Report Contrassegni', href: '/cliente/reports/contrassegni' },
+      { label: 'Report Consumabili', href: '/cliente/reports/consumabili' },
+      { label: 'Report Rettifiche', href: '/cliente/reports/rettifiche' },
+    ],
+  },
   {
     id: 'account', label: 'Mio Account', icon: '⊙',
     sub: [
