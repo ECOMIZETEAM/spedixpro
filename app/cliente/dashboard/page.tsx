@@ -1,77 +1,131 @@
-import { createServerSupabase } from '@/lib/supabase'
-import { redirect } from 'next/navigation'
-
-export default async function ClienteDashboard() {
-  const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/cliente')
-  const { data: utente } = await supabase.from('utenti').select('cliente_id').eq('id', user.id).single()
-  if (!utente?.cliente_id) redirect('/cliente')
-  const { data: spedizioni } = await supabase.from('spedizioni').select('*').eq('cliente_id', utente.cliente_id).order('created_at',{ascending:false}).limit(20)
-
-  const stats = {
-    totali: spedizioni?.length||0,
-    inLav: spedizioni?.filter(s=>s.stato==='in_lavorazione').length||0,
-    spedite: spedizioni?.filter(s=>s.stato==='spedita'||s.stato==='in_transito').length||0,
-    consegnate: spedizioni?.filter(s=>s.stato==='consegnata').length||0,
+'use client'
+import { useState, useEffect } from 'react'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
+export default function ClienteDashboard() {
+  const [data, setData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    fetch('/api/cliente/dashboard').then(r=>r.json()).then(d=>{setData(d);setLoading(false)}).catch(()=>setLoading(false))
+  }, [])
+  if (loading) return <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a',fontSize:'14px'}}>Caricamento...</div>
+  if (!data) return <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a'}}>Errore caricamento</div>
+  const STATI_COLORS: Record<string,string> = {
+    'in_lavorazione':'#f97316','spedita':'#9ca3af','in_transito':'#fdba74','in_consegna':'#1a1a1a',
+    'consegnata':'#22c55e','in_giacenza':'#fb923c','reso_mittente':'#ef4444','non_consegnato':'#6b7280','in_attesa_istruzioni':'#374151',
   }
-
+  const STATI_LABELS: Record<string,string> = {
+    'in_lavorazione':'In Lavorazione','spedita':'Spedita','in_transito':'In transito','in_consegna':'In Consegna',
+    'consegnata':'Consegnata','in_giacenza':'In Giacenza','reso_mittente':'Reso al mittente','non_consegnato':'Non consegnato','in_attesa_istruzioni':'In attesa di istruzioni',
+  }
+  const pieData = Object.entries(data.statiUltimi30 || {}).map(([stato, count]) => ({
+    name: STATI_LABELS[stato] || stato.replace(/_/g,' '), value: count as number, color: STATI_COLORS[stato]||'#e5e7eb'
+  })).filter(d => d.value > 0)
+  const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const}
+  const cardH = {padding:'12px 18px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700' as const,color:'#1a1a1a'}
+  const kpiCardDark = {background:'#1a1a1a',borderRadius:'8px',padding:'14px 18px',color:'#fff',display:'flex',alignItems:'center',gap:'14px'}
+  const kpiCardLight = {background:'#fff',border:'1px solid #e8e8e8',borderRadius:'8px',padding:'14px'}
+  const kpiIconDark = {width:'44px',height:'44px',background:'rgba(249,115,22,0.15)',borderRadius:'8px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'20px',flexShrink:0,color:'#f97316'}
+  const kpiIconLight = {width:'36px',height:'36px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'7px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'16px',marginBottom:'8px',color:'#f97316'}
+  const kpiLabel = {fontSize:'10px',fontWeight:'700' as const,textTransform:'uppercase' as const,letterSpacing:'0.6px',color:'#999',lineHeight:1.3}
+  const kpiValue = {fontSize:'26px',fontWeight:'800' as const,marginTop:'4px',lineHeight:1,color:'#1a1a1a'}
   return (
-    <div>
-      <div style={{marginBottom:'20px'}}>
-        <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Dashboard</h1>
-        <p style={{color:'#999',fontSize:'13px',marginTop:'4px'}}>{new Date().toLocaleDateString('it-IT',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
+    <div style={{display:'flex',flexDirection:'column' as const,gap:'16px'}}>
+      <div>
+        <h1 style={{fontSize:'18px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Ciao, {data.clienteNome}</h1>
+        <p style={{color:'#999',fontSize:'12px',margin:'4px 0 0'}}>{new Date().toLocaleDateString('it-IT',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
       </div>
-
-      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'16px',marginBottom:'24px'}}>
-        {[{l:'Totali',v:stats.totali,c:'#1a1a1a'},{l:'In Lavorazione',v:stats.inLav,c:'#d97706'},{l:'In Transito',v:stats.spedite,c:'#2563eb'},{l:'Consegnate',v:stats.consegnate,c:'#16a34a'}].map(k=>(
-          <div key={k.l} style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',padding:'20px'}}>
-            <div style={{fontSize:'28px',fontWeight:'800',color:k.c,lineHeight:1}}>{k.v}</div>
-            <div style={{fontSize:'11.5px',color:'#999',marginTop:'6px',textTransform:'uppercase',letterSpacing:'0.5px'}}>{k.l}</div>
+      <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr 1fr',gap:'12px'}}>
+        <div style={kpiCardDark}>
+          <div style={kpiIconDark}>📦</div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,letterSpacing:'0.6px',color:'#999',marginBottom:'3px'}}>SPEDIZIONI {new Date().toLocaleString('it-IT',{month:'short'}).toUpperCase()}</div>
+            <div style={{fontSize:'20px',fontWeight:'800',lineHeight:1,color:'#fff'}}>{data.spedizioniMese?.toLocaleString()} <span style={{fontSize:'13px',color:'#999'}}>/ {data.limiteMese?.toLocaleString()}</span></div>
+            <div style={{background:'rgba(255,255,255,0.12)',borderRadius:'4px',height:'4px',marginTop:'8px'}}>
+              <div style={{background:'#f97316',borderRadius:'4px',height:'4px',width:`${Math.min(100,(data.spedizioniMese/data.limiteMese)*100)}%`,transition:'width 0.5s'}}/>
+            </div>
+            <div style={{fontSize:'10px',marginTop:'3px',color:'#777'}}>{((data.spedizioniMese/data.limiteMese)*100).toFixed(3)}%</div>
           </div>
-        ))}
-      </div>
-
-      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
-        <div style={{padding:'14px 20px',borderBottom:'1px solid #f0f0f0',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-          <span style={{fontSize:'13.5px',fontWeight:'600',color:'#1a1a1a'}}>Ultime Spedizioni</span>
-          <a href="/cliente/spedizioni/nuova" style={{background:'#f97316',color:'#fff',padding:'7px 16px',borderRadius:'6px',fontSize:'12px',fontWeight:'600',textDecoration:'none'}}>+ Nuova Spedizione</a>
         </div>
-        {!spedizioni?.length ? (
-          <div style={{padding:'40px',textAlign:'center',color:'#bbb',fontSize:'13px'}}>
-            Nessuna spedizione — <a href="/cliente/spedizioni/nuova" style={{color:'#f97316',textDecoration:'none',fontWeight:'500'}}>crea la prima</a>
+        <div style={kpiCardLight}>
+          <div style={kpiIconLight}>🚚</div>
+          <div style={kpiLabel}>SPEDIZIONI SPEDITE<br/><span style={{color:'#bbb'}}>(OGGI)</span></div>
+          <div style={kpiValue}>{data.spediteOggi}</div>
+        </div>
+        <div style={kpiCardLight}>
+          <div style={kpiIconLight}>📋</div>
+          <div style={kpiLabel}>DA SPEDIRE<br/><span style={{color:'#bbb'}}>(ULTIMI 30 GG)</span></div>
+          <div style={kpiValue}>{data.daSpedire}</div>
+        </div>
+        <div style={kpiCardLight}>
+          <div style={kpiIconLight}>⚙️</div>
+          <div style={kpiLabel}>IN LAVORAZIONE<br/><span style={{color:'#bbb'}}>(ULTIMI 30 GG)</span></div>
+          <div style={kpiValue}>{data.inLavorazione}</div>
+        </div>
+        <div style={kpiCardLight}>
+          <div style={kpiIconLight}>💰</div>
+          <div style={kpiLabel}>CREDITO<br/><span style={{color:'#bbb'}}>DISPONIBILE</span></div>
+          <div style={{...kpiValue,color:Number(data.credito)>0?'#16a34a':'#dc2626'}}>€ {Number(data.credito||0).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
+        </div>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px'}}>
+        <div style={card}>
+          <div style={cardH}>Statistiche</div>
+          <div style={{padding:'16px'}}>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={data.statsMensili||[]} margin={{top:0,right:0,left:-20,bottom:0}}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f5f5f5"/>
+                <XAxis dataKey="mese" tick={{fontSize:10,fill:'#bbb'}} axisLine={false} tickLine={false}/>
+                <YAxis tick={{fontSize:10,fill:'#bbb'}} axisLine={false} tickLine={false}/>
+                <Tooltip contentStyle={{borderRadius:'6px',border:'1px solid #e8e8e8',fontSize:'12px'}} formatter={(v:any)=>[v.toLocaleString(),'Spedizioni']}/>
+                <Bar dataKey="totale" fill="#f97316" name="Totale Spedizioni" radius={[3,3,0,0]}/>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
-        ) : (
-          <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
+        </div>
+        <div style={card}>
+          <div style={cardH}>Statistiche (ultimi 30 gg)</div>
+          <div style={{padding:'16px'}}>
+            {pieData.length ? (
+              <ResponsiveContainer width="100%" height={200}>
+                <PieChart>
+                  <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} dataKey="value" strokeWidth={2}>
+                    {pieData.map((entry,i) => <Cell key={i} fill={entry.color} stroke="#fff"/>)}
+                  </Pie>
+                  <Legend iconSize={10} wrapperStyle={{fontSize:'11px',color:'#1a1a1a'}}/>
+                  <Tooltip contentStyle={{borderRadius:'6px',border:'1px solid #e8e8e8',fontSize:'12px'}}/>
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div style={{padding:'40px',textAlign:'center',color:'#1a1a1a',fontSize:'13px'}}>Nessun dato disponibile</div>
+            )}
+          </div>
+        </div>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr',gap:'16px'}}>
+        <div style={card}>
+          <div style={cardH}>Statistiche Spedizioni</div>
+          <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
             <thead>
               <tr style={{background:'#fafafa'}}>
-                {['N. Spedizione','Destinatario','Città','Data','Stato','Totale',''].map(h=>(
-                  <th key={h} style={{textAlign:'left',padding:'8px 16px',fontSize:'11px',fontWeight:'600',textTransform:'uppercase',color:'#bbb',borderBottom:'1px solid #f0f0f0'}}>{h}</th>
+                {['#','Mese','Totale Spedizioni','Totale €'].map(h=>(
+                  <th key={h} style={{textAlign:'left' as const,padding:'8px 14px',fontSize:'11px',fontWeight:'600',color:'#1a1a1a',borderBottom:'1px solid #f0f0f0'}}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {spedizioni.map(s=>(
-                <tr key={s.id} style={{borderBottom:'1px solid #f5f5f5'}}>
-                  <td style={{padding:'10px 16px',fontWeight:'600',color:'#f97316',fontSize:'12.5px'}}>{s.numero}</td>
-                  <td style={{padding:'10px 16px',color:'#333',fontWeight:'500'}}>{s.dest_nome}</td>
-                  <td style={{padding:'10px 16px',color:'#999',fontSize:'12px'}}>{s.dest_citta} ({s.dest_provincia})</td>
-                  <td style={{padding:'10px 16px',color:'#999',fontSize:'12px',whiteSpace:'nowrap'}}>{new Date(s.created_at).toLocaleDateString('it-IT')}</td>
-                  <td style={{padding:'10px 16px'}}>
-                    <span style={{background:s.stato==='consegnata'?'#f0fdf4':s.stato==='in_lavorazione'?'#fffbeb':'#eff6ff',color:s.stato==='consegnata'?'#16a34a':s.stato==='in_lavorazione'?'#d97706':'#2563eb',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'500'}}>
-                      {s.stato.replace(/_/g,' ')}
-                    </span>
-                  </td>
-                  <td style={{padding:'10px 16px',fontWeight:'600',color:'#1a1a1a'}}>€ {Number(s.costo_totale||0).toFixed(2)}</td>
-                  <td style={{padding:'10px 16px'}}>
-                    <a href={`/dashboard/spedizioni/${s.id}/etichetta`} target="_blank"
-                      style={{padding:'4px 10px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'4px',fontSize:'11px',color:'#333',textDecoration:'none'}}>🖨️</a>
-                  </td>
+              {!(data.statsMensili||[]).length ? (
+                <tr><td colSpan={4} style={{padding:'30px',textAlign:'center' as const,color:'#1a1a1a',fontSize:'12px'}}>Nessun dato</td></tr>
+              ) : (data.statsMensili||[]).map((s:any,i:number)=>(
+                <tr key={i} style={{borderBottom:'1px solid #f5f5f5'}}>
+                  <td style={{padding:'8px 14px',color:'#1a1a1a',fontSize:'12px'}}>{i+1}</td>
+                  <td style={{padding:'8px 14px',color:'#1a1a1a',fontWeight:'500'}}>{s.mese}</td>
+                  <td style={{padding:'8px 14px',color:'#1a1a1a',fontWeight:'600'}}>{s.totale?.toLocaleString()}</td>
+                  <td style={{padding:'8px 14px',color:'#f97316',fontWeight:'700'}}>€ {Number(s.importo||0).toLocaleString('it-IT',{minimumFractionDigits:2})}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        )}
+        </div>
       </div>
     </div>
   )
