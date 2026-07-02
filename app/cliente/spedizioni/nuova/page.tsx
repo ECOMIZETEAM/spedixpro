@@ -121,6 +121,7 @@ export default function NuovaSpedizioneCliente() {
     if (data.error) { setErrore(data.error); return }
     if (!Array.isArray(data)||!data.length) { setErrore('Nessuna tariffa disponibile'); return }
     setTariffe(data)
+    if (Array.isArray(data) && data.length===1) setSelected(data[0])
     setVista('contratto')
   }
 
