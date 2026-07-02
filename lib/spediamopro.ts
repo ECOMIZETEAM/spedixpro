@@ -271,3 +271,23 @@ export async function spediamoproCreatePickup(
   const d = json?.data || {}
   return { id: d.id, code: d.code, status: d.status, raw: json }
 }
+
+export async function spediamoproGetPickup(authcode: string, pickupId: number): Promise<any> {
+  const token = await getSpediamoproToken(authcode)
+  const res = await fetch(`${BASE_URL}/pickups/${pickupId}`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  })
+  if (!res.ok) return null
+  const json = await res.json()
+  return json?.data || null
+}
+
+// Recupera il code (CP...) del pickup, con qualche tentativo (a volte non è immediato)
+export async function spediamoproWaitPickupCode(authcode: string, pickupId: number, maxAttempts = 4, delayMs = 1500): Promise<string | null> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const d = await spediamoproGetPickup(authcode, pickupId)
+    if (d?.code) return d.code
+    if (i < maxAttempts - 1) await new Promise(r => setTimeout(r, delayMs))
+  }
+  return null
+}

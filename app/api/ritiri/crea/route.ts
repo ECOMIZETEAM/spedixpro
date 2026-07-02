@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { spediamoproCreatePickup } from '@/lib/spediamopro'
+import { spediamoproCreatePickup, spediamoproWaitPickupCode } from '@/lib/spediamopro'
 
 function normalizzaOrario(v: any): string | null {
   if (!v) return null
@@ -123,9 +123,14 @@ export async function POST(req: NextRequest) {
         shipments: shipmentIds,
         courier: courierCode,
       })
-      console.log('[RITIRO][SPEDIAMOPRO] pickup creato:', pk.code, 'id:', pk.id)
+      // Il POST non restituisce sempre il code (CP...): lo recupero con una GET
+      let codicePickup = pk.code
+      if (!codicePickup && pk.id) {
+        codicePickup = await spediamoproWaitPickupCode(cred.authcode, pk.id)
+      }
+      console.log('[RITIRO][SPEDIAMOPRO] pickup creato:', codicePickup, 'id:', pk.id)
 
-      const { data: nuovoRitiro, error: insErr } = await salvaRitiro(pk.code || String(pk.id))
+      const { data: nuovoRitiro, error: insErr } = await salvaRitiro(codicePickup || String(pk.id))
       if (insErr) {
         return NextResponse.json({ error: `Ritiro creato (${pk.code}) ma errore DB: ${insErr.message}` }, { status: 500 })
       }
