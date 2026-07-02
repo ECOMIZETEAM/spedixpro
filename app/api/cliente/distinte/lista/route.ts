@@ -9,7 +9,7 @@ export async function GET() {
   if (!clienteId) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
   const { data: distinte } = await supabase
     .from('distinte')
-    .select('id,numero,data,stato,totale_colli,totale_peso,corriere_id,created_at,corrieri(nome,nome_contratto)')
+    .select('id,numero,data,stato,totale_colli,totale_peso,corriere_id,created_at,corrieri(nome_contratto,tipo)')
     .eq('cliente_id', clienteId)
     .order('created_at', { ascending: false })
     .limit(300)
@@ -26,7 +26,7 @@ export async function GET() {
     const costo = (speds || []).reduce((a, s) => a + (Number(s.costo_totale) || 0), 0)
     result.push({
       id: d.id, numero: d.numero, data: d.data || d.created_at, stato: d.stato,
-      vettore: (d.corrieri?.nome) || (d.corrieri?.nome_contratto) || '', contratto: (d.corrieri?.nome_contratto) || '',
+      vettore: (d.corrieri?.tipo) || (d.corrieri?.nome_contratto) || '', contratto: (d.corrieri?.nome_contratto) || '',
       spedizioni: nSped, colli: colli || d.totale_colli || 0, contrassegni, peso: peso || Number(d.totale_peso) || 0, costo,
     })
   }
