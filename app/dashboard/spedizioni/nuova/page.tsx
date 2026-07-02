@@ -297,7 +297,7 @@ export default function NuovaSpedizionePage() {
           </div>
 
           {/* CORRIERI E COSTI */}
-          <div style={card}>
+          {vista==='dati' && (<div style={card}>
             <div style={{...cardH,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
               <span>Corrieri e Costi</span>
               <button onClick={calcolaTariffe} disabled={loading} style={{background:'#f97316',color:'#fff',border:'none',padding:'5px 14px',borderRadius:'5px',fontSize:'12px',fontWeight:'600',cursor:'pointer',opacity:loading?0.7:1}}>
