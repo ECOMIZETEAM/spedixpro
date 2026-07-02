@@ -5,12 +5,21 @@ export default function ContrassegniCliente() {
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
   const [busy, setBusy] = useState('')
+  const [perPagina, setPerPagina] = useState(10)
+  const [pagina, setPagina] = useState(1)
+  const [dal, setDal] = useState('')
+  const [al, setAl] = useState('')
   useEffect(() => { carica() }, [])
   function carica() {
     setLoading(true)
     fetch('/api/cliente/contrassegni/lista').then(r=>r.json()).then(d=>{setDistinte(Array.isArray(d)?d:[]);setLoading(false)}).catch(()=>setLoading(false))
   }
-  const visibili = distinte.filter(d => !cerca || String(d.numero||'').toLowerCase().includes(cerca.toLowerCase()))
+  let filtrate = distinte.filter(d => !cerca || String(d.numero||'').toLowerCase().includes(cerca.toLowerCase()))
+  if (dal) filtrate = filtrate.filter(d => new Date(d.dataCreazione) >= new Date(dal))
+  if (al) filtrate = filtrate.filter(d => new Date(d.dataCreazione) <= new Date(al+'T23:59:59'))
+  const totPagine = Math.max(1, Math.ceil(filtrate.length / perPagina))
+  const paginaCorr = Math.min(pagina, totPagine)
+  const visibili = filtrate.slice((paginaCorr-1)*perPagina, paginaCorr*perPagina)
   async function dettaglio(id:string){ const r = await fetch('/api/cliente/contrassegni/dettaglio?id='+id); return await r.json() }
   async function stampa(id:string, numero:string) {
     setBusy(id+'-pdf')
@@ -57,25 +66,52 @@ export default function ContrassegniCliente() {
     } catch(e){ alert('Errore esportazione') }
     setBusy('')
   }
+  const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const,marginBottom:'16px'}
   const th = {textAlign:'left' as const,padding:'10px 12px',fontSize:'11px',fontWeight:'700' as const,color:'#1a1a1a',borderBottom:'1px solid #e8e8e8',whiteSpace:'nowrap' as const}
   const td = {padding:'10px 12px',fontSize:'12px',color:'#1a1a1a',borderBottom:'1px solid #f5f5f5',whiteSpace:'nowrap' as const}
-  const linkBtn = {border:'none',background:'transparent',color:'#2563eb',cursor:'pointer',fontSize:'12px',marginRight:'8px',textDecoration:'underline'}
-  const stateStyle = (s:string) => s==='pagata' ? {bg:'#f0fdf4',c:'#16a34a',t:'Pagata'} : {bg:'#fffbeb',c:'#d97706',t:'In lavorazione'}
+  const linkBtn = {border:'none',background:'transparent',color:'#2563eb',cursor:'pointer',fontSize:'12px',marginRight:'8px'}
+  function badgeStato(s:string){
+    const map:Record<string,{bg:string,c:string,t:string}> = {
+      pagata:{bg:'#16a34a',c:'#fff',t:'Pagata'}, in_lavorazione:{bg:'#f59e0b',c:'#fff',t:'In lavorazione'}, compensata:{bg:'#e5e7eb',c:'#374151',t:'compensata'},
+    }
+    return map[s] || {bg:'#e5e7eb',c:'#374151',t:s||''}
+  }
   return (
     <div>
       <div style={{marginBottom:'16px'}}>
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Contrassegni</h1>
       </div>
-      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
+      <div style={card}>
+        <div style={{padding:'12px 18px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Filtri</div>
+        <div style={{padding:'16px',display:'flex',gap:'16px',alignItems:'end',flexWrap:'wrap'}}>
+          <div>
+            <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Data distinta (dal)</label>
+            <input type="date" value={dal} onChange={e=>setDal(e.target.value)} style={{padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a'}}/>
+          </div>
+          <div>
+            <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>al</label>
+            <input type="date" value={al} onChange={e=>setAl(e.target.value)} style={{padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a'}}/>
+          </div>
+        </div>
+      </div>
+      <div style={card}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',display:'flex',alignItems:'center',gap:'8px'}}>
           <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Distinte di pagamento contrassegni</span>
-          <input value={cerca} onChange={e=>setCerca(e.target.value)} placeholder="Cerca..." style={{marginLeft:'auto',padding:'6px 12px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a'}}/>
+          <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:'8px'}}>
+            <span style={{fontSize:'12px',color:'#666'}}>Mostra</span>
+            <select value={perPagina} onChange={e=>{setPerPagina(Number(e.target.value));setPagina(1)}} style={{padding:'5px 8px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a'}}>
+              <option value={10}>10</option><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option>
+            </select>
+            <span style={{fontSize:'12px',color:'#666'}}>elementi</span>
+            <input value={cerca} onChange={e=>{setCerca(e.target.value);setPagina(1)}} placeholder="Cerca..." style={{marginLeft:'12px',padding:'6px 12px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a'}}/>
+          </div>
         </div>
         {loading ? (
           <div style={{padding:'40px',textAlign:'center',color:'#999',fontSize:'13px'}}>Caricamento...</div>
         ) : !visibili.length ? (
           <div style={{padding:'40px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessuna distinta contrassegni disponibile</div>
         ) : (
+          <>
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead>
@@ -84,13 +120,13 @@ export default function ContrassegniCliente() {
                 </tr>
               </thead>
               <tbody>
-                {visibili.map(d=>{ const st=stateStyle(d.stato); return (
+                {visibili.map(d=>{ const st=badgeStato(d.stato); return (
                   <tr key={d.id}>
                     <td style={td}>{d.numero}</td>
                     <td style={td}>{new Date(d.dataCreazione).toLocaleDateString('it-IT')} {new Date(d.dataCreazione).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</td>
                     <td style={td}>€ {Number(d.totale||0).toFixed(2)}</td>
                     <td style={td}>{d.metodoPagamento||''}</td>
-                    <td style={td}><span style={{background:st.bg,color:st.c,padding:'3px 10px',borderRadius:'12px',fontSize:'11px',fontWeight:'700'}}>{st.t}</span></td>
+                    <td style={td}><span style={{background:st.bg,color:st.c,padding:'3px 10px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>{st.t}</span></td>
                     <td style={td}>{d.dataPagamento?new Date(d.dataPagamento).toLocaleDateString('it-IT'):''}</td>
                     <td style={td}>
                       <button style={linkBtn} onClick={()=>stampa(d.id,d.numero)} disabled={busy===d.id+'-pdf'}>🖨 Stampa</button>
@@ -102,6 +138,15 @@ export default function ContrassegniCliente() {
               </tbody>
             </table>
           </div>
+          <div style={{padding:'12px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:'12px',color:'#666'}}>
+            <span>Risultati da {(paginaCorr-1)*perPagina+1} a {Math.min(paginaCorr*perPagina, filtrate.length)} di {filtrate.length} elementi</span>
+            <div style={{display:'flex',gap:'6px'}}>
+              <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 12px',border:'1px solid #d1d5db',borderRadius:'6px',background:'#fff',cursor:'pointer',fontSize:'12px'}}>Precedente</button>
+              <span style={{padding:'5px 12px',background:'#2563eb',color:'#fff',borderRadius:'6px'}}>{paginaCorr}</span>
+              <button onClick={()=>setPagina(p=>Math.min(totPagine,p+1))} disabled={paginaCorr>=totPagine} style={{padding:'5px 12px',border:'1px solid #d1d5db',borderRadius:'6px',background:'#fff',cursor:'pointer',fontSize:'12px'}}>Successivo</button>
+            </div>
+          </div>
+          </>
         )}
       </div>
     </div>
