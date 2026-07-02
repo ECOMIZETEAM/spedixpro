@@ -18,10 +18,13 @@ export async function POST(req: NextRequest) {
     master_id: utente?.master_id, nome_file: nomeFile, n_tot_spedizioni: righe.length,
   }).select().single()
   const rettificheToInsert: any[] = []
-  for (const riga of righe) {
+  for (const rigaRaw of righe) {
+    // normalizzo le chiavi: rimuovo spazi e porto in minuscolo
+    const riga: any = {}
+    for (const k in rigaRaw) { riga[String(k).trim().toLowerCase()] = (rigaRaw as any)[k] }
     nProcessate++
-    const ldv = String(riga['LDV'] || riga['N. Spedizione'] || riga['Numero'] || riga['ldv'] || riga['Ldv'] || '').trim()
-    const pesoReale = parseFloat(String(riga['Peso reale'] || riga['peso_reale'] || riga['PesoReale'] || riga['Peso'] || riga['peso'] || 0))
+    const ldv = String(riga['ldv'] || riga['n. spedizione'] || riga['numero'] || '').trim()
+    const pesoReale = parseFloat(String(riga['peso reale'] || riga['peso_reale'] || riga['pesoreale'] || riga['peso'] || riga['peso volume'] || riga['pesovolume'] || 0))
     if (!ldv) { nScartati++; continue }
     const { data: spedizione } = await supabase.from('spedizioni')
       .select('id,cliente_id,peso_reale,peso_fatturato,peso_volume,costo_totale,costo_spedizione,numero,dest_provincia,corriere_id')
