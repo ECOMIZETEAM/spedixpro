@@ -56,16 +56,14 @@ export default function NuovaSpedizioneCliente() {
   const [creating, setCreating] = useState(false)
   const [errore, setErrore] = useState('')
 
-  // Ricalcolo automatico del prezzo quando cambiano contrassegno/assicurazione
-  // (solo se la lista tariffe e' gia' stata mostrata almeno una volta)
+  // Se il cliente modifica un dato che cambia il prezzo mentre la lista e' visibile,
+  // azzera le tariffe: dovra' ricliccare "Seleziona Corriere" per vedere il prezzo aggiornato.
   const primoRender = useRef(true)
   useEffect(() => {
     if (primoRender.current) { primoRender.current = false; return }
-    if (!tariffe.length) return
-    const timer = setTimeout(() => { calcolaTariffe() }, 600)
-    return () => clearTimeout(timer)
+    if (tariffe.length) { setTariffe([]); setSelected(null) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contrassegno, assicurazione])
+  }, [peso, numColli, colli, contrassegno, assicurazione])
 
   useEffect(() => {
     fetch('/api/cliente/info').then(r=>r.json()).then(d => {
