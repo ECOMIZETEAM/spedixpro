@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; costo_contrassegno?:string }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; costo_contrassegno?:string; corriere_nome?:string }
 interface Collo { lunghezza:string; larghezza:string; altezza:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -19,6 +19,24 @@ const CARRIER_LABELS: Record<string,{nome:string,colore:string}> = {
   dhl:{nome:'DHL Express',colore:'#ffcc00'},
 }
 
+
+function iconaCorriere(nome:string): string | null {
+  const n = (nome||'').toUpperCase()
+  const regole: [string,string][] = [
+    ['DELIVERY BUSINESS','poste_delivery_business'],['POSTE','poste_delivery_business'],
+    ['SDA','sda'], ['GLS','gls'], ['BRT','brt'], ['SPEDISCI','spedisci'], ['TNT','tnt'],
+    ['DHL ECONNECT','dhl_econnect'], ['ECONNECT','dhl_econnect'], ['DHL','dhl'],
+    ['FEDEX','fedex'], ['UPS','ups'], ['HERMES','hermes'], ['NEXIVE','nexive'],
+    ['LICCARDI','liccardi'], ['SAILPOST','sailpost'], ['BDM','bdm'], ['NSSA','nssa'],
+    ['HR PARCEL','hrp'], ['HRP','hrp'], ['PALLETWAYS','palletways'],
+    ['CORREOS EXPRESS','correos_express'], ['CORREOS','correos'],
+    ['INPOST','inpost'], ['SPRING','spring'], ['PAACK','paack'],['SPEEDY','speedy'],
+    ['AMAZON','amazon_shipping'], ['CTT','ctt_express'], ['AIPACK','aipack'], ['ALT','alt'],
+    ['GTECH','gtechgroup'], ['SPEDIAMO','spedisci'],
+  ]
+  for (const [chiave,file] of regole) { if (n.includes(chiave)) return `/corrieri/${file}.png` }
+  return null
+}
 export default function NuovaSpedizioneCliente() {
   const router = useRouter()
   const [clienteData, setClienteData] = useState<any>(null)
@@ -285,9 +303,13 @@ export default function NuovaSpedizioneCliente() {
                 return (
                   <div key={i} onClick={()=>setSelected(r)}
                     style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px',border:`2px solid ${isSelected?'#f97316':'#e8e8e8'}`,borderRadius:'8px',marginBottom:'8px',cursor:'pointer',background:isSelected?'#fffbeb':'#fff',transition:'all .15s'}}>
-                    <div style={{width:'48px',height:'30px',border:'1px solid #e8e8e8',borderRadius:'5px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                      <span style={{fontSize:'8px',fontWeight:'900',color:carrier.colore,textTransform:'uppercase'}}>{r.carrierCode.toUpperCase()}</span>
-                    </div>
+                    {iconaCorriere(r.corriere_nome||carrier.nome) ? (
+                      <img src={iconaCorriere(r.corriere_nome||carrier.nome)!} alt="" style={{width:'56px',height:'34px',objectFit:'contain',border:'1px solid #e8e8e8',borderRadius:'5px',background:'#fff',padding:'2px',flexShrink:0}}/>
+                    ) : (
+                      <div style={{width:'48px',height:'30px',border:'1px solid #e8e8e8',borderRadius:'5px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                        <span style={{fontSize:'8px',fontWeight:'900',color:carrier.colore,textTransform:'uppercase'}}>{r.carrierCode.toUpperCase()}</span>
+                      </div>
+                    )}
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontWeight:'700',color:'#1a1a1a',fontSize:'13px'}}>{carrier.nome}</div>
                       <div style={{fontSize:'11px',color:'#999',marginTop:'1px'}}>{r.peso_fatturato}kg · zona {r.zona}{parseFloat(r.peso_volume)>r.peso_reale?' (vol.)':''}</div>
