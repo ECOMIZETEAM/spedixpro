@@ -2,6 +2,24 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
+function iconaCorriere(nome:string): string | null {
+  const n = (nome||'').toUpperCase()
+  const regole: [string,string][] = [
+    ['DELIVERY BUSINESS','poste_delivery_business'],['POSTE','poste_delivery_business'],
+    ['SDA','sda'], ['GLS','gls'], ['BRT','brt'], ['TNT','tnt'],
+    ['DHL ECONNECT','dhl_econnect'], ['ECONNECT','dhl_econnect'], ['DHL','dhl'],
+    ['FEDEX','fedex'], ['UPS','ups'], ['HERMES','hermes'], ['NEXIVE','nexive'],
+    ['LICCARDI','liccardi'], ['SAILPOST','sailpost'], ['BDM','bdm'], ['NSSA','nssa'],
+    ['HR PARCEL','hrp'], ['HRP','hrp'], ['PALLETWAYS','palletways'],
+    ['CORREOS EXPRESS','correos_express'], ['CORREOS','correos'],
+    ['INPOST','inpost'], ['SPRING','spring'], ['PAACK','paack'],['SPEEDY','speedy'],
+    ['AMAZON','amazon_shipping'], ['CTT','ctt_express'], ['AIPACK','aipack'], ['ALT','alt'],
+    ['GTECH','gtechgroup'], ['SPEDIAMOPRO','spedisci'], ['SPEDIAMO','spedisci'], ['SPEDISCI','spedisci'],
+  ]
+  for (const [chiave,file] of regole) { if (n.includes(chiave)) return `/corrieri/${file}.png` }
+  return null
+}
+
 interface Cliente { id:string; ragione_sociale:string; so_indirizzo:string|null;so_citta:string|null; so_provincia:string|null; so_cap:string|null; email:string; telefono:string|null }
 interface Tariffa { carrierCode:string; contractCode:string; total_price:string;zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; corriere_nome?:string; _corriere_id?:string; _corriere_tipo?:string; _spediamopro_quotation?:any }
 interface Collo { lunghezza:string; larghezza:string; altezza:string }
@@ -293,9 +311,9 @@ export default function NuovaSpedizionePage() {
                 return (
                   <div key={i} onClick={()=>setSelected(r)}
                     style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px',border:`2px solid ${isSel?'#f97316':'#e8e8e8'}`,borderRadius:'8px',marginBottom:'8px',cursor:'pointer',background:isSel?'#fffbeb':'#fff'}}>
-                    <div style={{width:'48px',height:'30px',border:'1px solid #e8e8e8',borderRadius:'5px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                      <span style={{fontSize:'8px',fontWeight:'900',color:c.colore,textTransform:'uppercase'}}>{chiave}</span>
-                    </div>
+                    {iconaCorriere(r.corriere_nome||chiave) && <img src={iconaCorriere(r.corriere_nome||chiave)!} alt="" style={{width:'56px',height:'34px',objectFit:'contain',border:'1px solid #e8e8e8',borderRadius:'5px',background:'#fff',padding:'2px',flexShrink:0}}/>}
+                    {!iconaCorriere(r.corriere_nome||chiave) && (<div style={{width:'48px',height:'30px',border:'1px solid #e8e8e8',borderRadius:'5px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                      <span style={{fontSize:'8px',fontWeight:'900',color:c.colore,textTransform:'uppercase'}}>{chiave}</span></div>)}
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontWeight:'700',color:'#1a1a1a',fontSize:'13px'}}>{c.nome}</div>
                       <div style={{fontSize:'11px',color:'#1a1a1a',marginTop:'1px'}}>{r.peso_fatturato}kg · {r.zona}{parseFloat(r.peso_volume)>r.peso_reale?' (vol.)':''}</div>
