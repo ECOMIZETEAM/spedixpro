@@ -113,6 +113,7 @@ export default function NuovaSpedizionePage() {
     if (data.error) { setErrore(data.error); return }
     if (!Array.isArray(data)||!data.length) { setErrore('Nessuna tariffa disponibile'); return }
     setTariffe(data)
+    setVista('contratto')
   }
 
   async function creaSpedizione() {
