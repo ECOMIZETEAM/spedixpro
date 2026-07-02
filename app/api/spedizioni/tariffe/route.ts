@@ -186,10 +186,16 @@ export async function POST(req: NextRequest) {
     if (p?.length && p?.width && p?.height) pesoVolume += (p.length * p.width * p.height) / fattore
   }
   const pesoFatturato = Math.max(pesoReale, pesoVolume)
+  const entroMisureAgevolate = tuttiColli.every((p: any) => {
+    const L = Number(p?.length)||0, W = Number(p?.width)||0, H = Number(p?.height)||0
+    if (!L && !W && !H) return true
+    const dims = [L, W, H].sort((a,b)=>b-a); const lim = [50, 32, 28]
+    return dims[0] <= lim[0] && dims[1] <= lim[1] && dims[2] <= lim[2]
+  })
 
   const { data: fasce } = await supabase
     .from('listini_clienti_fasce')
-    .select('*, zone(id,nome), corrieri(id,tipo,nome_contratto,credenziali)')
+    .select('*, zone(id,nome), corrieri(id,tipo,nome_contratto,credenziali,settings)')
     .eq('listino_id', cliente.listino_cliente_id)
     .order('peso_max', { ascending: true })
 
@@ -222,7 +228,9 @@ export async function POST(req: NextRequest) {
   const risultati: any[] = []
 
   for (const [corriereId, fasceDelCorriere] of fascePerCorriere) {
-    const fasciaGiusta = trovaFascia(fasceDelCorriere, pesoFatturato)
+    const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
+    const pesoPerFascia = (!!settsC.agevolazione_peso_reale && entroMisureAgevolate) ? pesoReale : pesoFatturato
+    const fasciaGiusta = trovaFascia(fasceDelCorriere, pesoPerFascia)
     if (!fasciaGiusta) continue
     if (codRichiesto && contrassegnoOff.has(corriereId)) continue
 
