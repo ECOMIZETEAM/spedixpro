@@ -136,65 +136,6 @@ export default function ImpostazioniClientePage() {
 
       {msg && <div style={{background:msg.startsWith('Errore')?'#fef2f2':'#f0fdf4',border:`1px solid ${msg.startsWith('Errore')?'#fecaca':'#bbf7d0'}`,borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:msg.startsWith('Errore')?'#dc2626':'#15803d'}}>{msg}</div>}
 
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'20px',alignItems:'start'}}>
-        <div style={card}>
-          <div style={cardHead}>Contratti abilitati</div>
-          {!contratti.length ? (
-            <div style={{padding:'30px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessun contratto associato al listino del cliente</div>
-          ) : contratti.map(c => (
-            <div key={c.id} style={{borderBottom:'1px solid #f5f5f5'}}>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 18px'}}>
-                <span style={{display:'flex',alignItems:'center',gap:'10px'}}>
-                  {iconaCorriere(c.nome_contratto) ? (
-                    <img src={iconaCorriere(c.nome_contratto)!} alt="" style={{width:'40px',height:'40px',objectFit:'contain',border:'1px solid #eee',borderRadius:'6px',background:'#fff',padding:'3px'}} />
-                  ) : (
-                    <span style={{width:'40px',height:'40px',borderRadius:'6px',background:'#f0f0f0',display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:'11px',color:'#999'}}>-</span>
-                  )}
-                  <span style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>{c.nome_contratto}</span>
-                </span>
-                <button onClick={()=>toggleContratto(c.id, !c.abilitato)}
-                  style={{position:'relative',width:'46px',height:'24px',borderRadius:'12px',border:'none',cursor:'pointer',background:c.abilitato?'#f97316':'#d1d5db',transition:'background .2s'}}>
-                  <span style={{position:'absolute',top:'2px',left:c.abilitato?'24px':'2px',width:'20px',height:'20px',borderRadius:'50%',background:'#fff',transition:'left .2s'}}></span>
-                </button>
-              </div>
-              {c.abilitato && (
-                <div style={{padding:'2px 18px 16px',background:'#fafafa'}}>
-                  <div style={{fontSize:'11px',fontWeight:'700',color:'#f97316',textTransform:'uppercase',letterSpacing:'.5px',margin:'8px 0 10px'}}>Impostazioni contratto</div>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'10px 14px'}}>
-                    {CAMPI_CONTRATTO.map(f => (
-                      <div key={f.key} style={{display:'flex',flexDirection:'column',gap:'4px'}}>
-                        <label style={{fontSize:'11.5px',fontWeight:'600',color:'#555'}}>{f.label}</label>
-                        <select value={gSet(c,f.key)} onChange={e=>setContrattoSetting(c.id,f.key,e.target.value)} style={selSmall}>
-                          {f.opts.map(([v,l]) => <option key={v} value={v}>{l}</option>)}
-                        </select>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <div style={card}>
-          <div style={cardHead}>Impostazioni Admin</div>
-          <div style={{padding:'8px 0'}}>
-            {ADMIN_FIELDS.map(f => (
-              <div key={f.key} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'16px',padding:'12px 18px',borderBottom:'1px solid #f5f5f5'}}>
-                <div>
-                  <div style={lblStrong}>{f.label}</div>
-                  <div style={{fontSize:'11.5px',color:'#888',marginTop:'2px'}}>{f.desc}</div>
-                </div>
-                <select value={cliente[f.key]?'si':'no'} onChange={e=>setAdmin(f.key, e.target.value==='si')} style={sel}>
-                  <option value="si">Si</option>
-                  <option value="no">No</option>
-                </select>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
       <div style={{marginTop:'20px',display:'flex',flexDirection:'column',gap:'20px'}}>
 
         <div style={card}>
