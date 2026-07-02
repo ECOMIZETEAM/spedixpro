@@ -162,8 +162,7 @@ export default function NuovaSpedizionePage() {
     router.push('/dashboard/spedizioni?success='+data.numero)
   }
 
-  const pesoVol0 = colli[0]?.lunghezza&&colli[0]?.larghezza&&colli[0]?.altezza
-    ? ((+colli[0].lunghezza * +colli[0].larghezza * +colli[0].altezza)/5000).toFixed(2) : null
+  
 
   return (
     <div>
