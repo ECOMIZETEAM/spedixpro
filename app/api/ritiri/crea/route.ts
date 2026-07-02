@@ -30,6 +30,12 @@ function fasciaOraria(v: any): { from: string; to: string } {
   return { from: '09:00', to: '18:00' }
 }
 
+function pulisciTelefono(v: any): string | undefined {
+  if (!v) return undefined
+  const d = String(v).replace(/[^0-9]/g, '')  // solo cifre (toglie +, spazi, trattini)
+  return d || undefined
+}
+
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -111,7 +117,7 @@ export async function POST(req: NextRequest) {
           postalCode: body.mittCap,
           city: body.mittCitta,
           country: body.mittPaese || 'IT',
-          phone: body.mittTelefono || undefined,
+          phone: pulisciTelefono(body.mittTelefono),
           email: body.mittEmail || undefined,
           province: body.mittProvincia || undefined,
         },
@@ -152,7 +158,7 @@ export async function POST(req: NextRequest) {
   const shipFrom = {
     name: body.mittNome, company: body.mittNome, street1: body.mittIndirizzo, street2: '',
     city: body.mittCitta, state: body.mittProvincia || '', postalCode: body.mittCap,
-    country: body.mittPaese || 'IT', phone: body.mittTelefono || null, email: body.mittEmail || 'noreply@spedixpro.it',
+    country: body.mittPaese || 'IT', phone: pulisciTelefono(body.mittTelefono) || null, email: body.mittEmail || 'noreply@spedixpro.it',
   }
 
   let contractCode: string | null = null
