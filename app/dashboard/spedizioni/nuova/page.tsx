@@ -372,6 +372,16 @@ export default function NuovaSpedizionePage() {
 
             {selected && (
               <div style={{marginTop:'8px',borderTop:'1px solid #eee',paddingTop:'14px'}}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'14px'}}>
+                  <div>
+                    <label style={{display:'block',fontSize:'12px',color:'#666',marginBottom:'4px',fontWeight:'600'}}>Servizi accessori</label>
+                    <input style={{width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px'}} placeholder="—" disabled />
+                  </div>
+                  <div>
+                    <label style={{display:'block',fontSize:'12px',color:'#666',marginBottom:'4px',fontWeight:'600'}}>Modalità di incasso contrassegno</label>
+                    <select style={{width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px'}} defaultValue="contante"><option value="contante">CONTANTE</option></select>
+                  </div>
+                </div>
                 <div style={{fontSize:'15px',fontWeight:'700',color:'#1a1a1a',marginBottom:'8px'}}>Costi</div>
                 <div style={{border:'1px solid #eee',borderRadius:'8px',overflow:'hidden',marginBottom:'14px'}}>
                   <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',background:'#fafafa',fontSize:'13px'}}><span>Costo spedizione</span><span>€ {selected.prezzo_spedizione||selected.total_price}</span></div>
