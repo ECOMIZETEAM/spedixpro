@@ -17,19 +17,19 @@ type Integrazione = {
 }
 
 // Piattaforme del popup — solo Shopify attivo, resto "Prossimamente"
-const PLATFORMS: { id: string; nome: string; attivo: boolean; colore: string }[] = [
-  { id: 'shopify',     nome: 'Shopify',      attivo: true,  colore: '#95BF47' },
-  { id: 'woocommerce', nome: 'WooCommerce',  attivo: false, colore: '#96588a' },
-  { id: 'prestashop',  nome: 'PrestaShop',   attivo: false, colore: '#df0067' },
-  { id: 'amazon',      nome: 'Amazon',       attivo: false, colore: '#ff9900' },
-  { id: 'ebay',        nome: 'eBay',         attivo: false, colore: '#e53238' },
-  { id: 'magento',     nome: 'Magento',      attivo: false, colore: '#f46f25' },
-  { id: 'wix',         nome: 'Wix',          attivo: false, colore: '#000000' },
-  { id: 'bigcommerce', nome: 'BigCommerce',  attivo: false, colore: '#121118' },
-  { id: 'squarespace', nome: 'Squarespace',  attivo: false, colore: '#000000' },
-  { id: 'tiktok',      nome: 'TikTok Shop',  attivo: false, colore: '#000000' },
-  { id: 'storeden',    nome: 'Storeden',     attivo: false, colore: '#e2001a' },
-  { id: 'manomano',    nome: 'ManoMano',     attivo: false, colore: '#00817d' },
+const PLATFORMS: { id: string; nome: string; attivo: boolean; colore: string; dominio: string }[] = [
+  { id: 'shopify',     nome: 'Shopify',      attivo: true,  colore: '#95BF47', dominio: 'shopify.com' },
+  { id: 'woocommerce', nome: 'WooCommerce',  attivo: false, colore: '#96588a', dominio: 'woocommerce.com' },
+  { id: 'prestashop',  nome: 'PrestaShop',   attivo: false, colore: '#df0067', dominio: 'prestashop.com' },
+  { id: 'amazon',      nome: 'Amazon',       attivo: false, colore: '#ff9900', dominio: 'amazon.com' },
+  { id: 'ebay',        nome: 'eBay',         attivo: false, colore: '#e53238', dominio: 'ebay.com' },
+  { id: 'magento',     nome: 'Magento',      attivo: false, colore: '#f46f25', dominio: 'magento.com' },
+  { id: 'wix',         nome: 'Wix',          attivo: false, colore: '#000000', dominio: 'wix.com' },
+  { id: 'bigcommerce', nome: 'BigCommerce',  attivo: false, colore: '#121118', dominio: 'bigcommerce.com' },
+  { id: 'squarespace', nome: 'Squarespace',  attivo: false, colore: '#000000', dominio: 'squarespace.com' },
+  { id: 'tiktok',      nome: 'TikTok Shop',  attivo: false, colore: '#000000', dominio: 'tiktok.com' },
+  { id: 'storeden',    nome: 'Storeden',     attivo: false, colore: '#e2001a', dominio: 'storeden.com' },
+  { id: 'manomano',    nome: 'ManoMano',     attivo: false, colore: '#00817d', dominio: 'manomano.com' },
 ]
 
 const STATO: Record<string, { t: string; c: string; bg: string }> = {
