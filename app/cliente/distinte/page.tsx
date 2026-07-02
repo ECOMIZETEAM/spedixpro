@@ -1,0 +1,129 @@
+'use client'
+import { useState, useEffect } from 'react'
+export default function ListaDistinteCliente() {
+  const [distinte, setDistinte] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [cerca, setCerca] = useState('')
+  const [busy, setBusy] = useState('')
+  useEffect(() => { carica() }, [])
+  function carica() {
+    setLoading(true)
+    fetch('/api/cliente/distinte/lista').then(r=>r.json()).then(d=>{setDistinte(Array.isArray(d)?d:[]);setLoading(false)}).catch(()=>setLoading(false))
+  }
+  const visibili = distinte.filter(d => !cerca || d.numero?.toLowerCase().includes(cerca.toLowerCase()) || (d.contratto||'').toLowerCase().includes(cerca.toLowerCase()))
+  async function stampa(id:string, numero:string) {
+    setBusy(id+'-pdf')
+    try {
+      const res = await fetch('/api/cliente/distinte/dettaglio?id='+id)
+      const { distinta, spedizioni } = await res.json()
+      const { default: jsPDF } = await import('jspdf')
+      const { default: autoTable } = await import('jspdf-autotable')
+      const QRCode = (await import('qrcode')).default
+      const doc = new jsPDF()
+      const dataStr = new Date(distinta.data||distinta.created_at).toLocaleDateString('it-IT')
+      doc.setFontSize(15)
+      doc.text('Distinta N. '+numero+' del '+dataStr, 105, 16, {align:'center'})
+      autoTable(doc, {
+        startY: 26, styles:{fontSize:7,cellPadding:2}, headStyles:{fillColor:[255,255,255],textColor:[0,0,0],fontStyle:'bold',lineWidth:0.1},
+        head: [['Spedizioni','Rif. Mittente','Destinatario','Rif.Dest.','Telefono','Peso','PesoVol.','Colli','Contr.','Assicurazione','Prezzo']],
+        body: (spedizioni||[]).map((s:any)=>[
+          s.numero||'', s.rif_mittente||'',
+          [s.dest_nome,s.dest_indirizzo,[s.dest_cap,s.dest_citta,s.dest_provincia].filter(Boolean).join(', ')].filter(Boolean).join(', '),
+          s.rif_destinatario||'', s.dest_telefono||'',
+          String(s.peso_reale||''), String(s.peso_volume||''), String(s.colli||1),
+          Number(s.contrassegno||0).toFixed(2)+' €', Number(s.assicurazione||0).toFixed(2)+' €', Number(s.costo_totale||0).toFixed(2)+' €',
+        ]),
+      })
+      const totSped = (spedizioni||[]).length
+      const totColli = (spedizioni||[]).reduce((a:number,s:any)=>a+(Number(s.colli)||0),0)
+      const totContr = (spedizioni||[]).reduce((a:number,s:any)=>a+(Number(s.contrassegno)||0),0)
+      const subtot = (spedizioni||[]).reduce((a:number,s:any)=>a+(Number(s.costo_totale)||0),0)
+      const iva = subtot*0.22
+      let y = (doc as any).lastAutoTable.finalY + 10
+      doc.setFontSize(10)
+      doc.setFont('helvetica','bold')
+      doc.text('Totale Spedizioni: '+totSped, 14, y); y+=6
+      doc.text('Totale Colli: '+totColli, 14, y); y+=8
+      doc.text('Totale Contrassegni: '+totContr.toFixed(2)+' €', 14, y); y+=8
+      doc.text('SubTotale: '+subtot.toFixed(2)+' €', 14, y); y+=6
+      doc.text('Iva (22.00%): '+iva.toFixed(2)+' €', 14, y); y+=6
+      doc.text('------------------------------', 14, y); y+=6
+      doc.text('Totale: '+(subtot+iva).toFixed(2)+' €', 14, y); y+=10
+      try {
+        const qrUrl = await QRCode.toDataURL('DISTINTA:'+numero)
+        doc.addImage(qrUrl, 'PNG', 14, y, 30, 30)
+      } catch {}
+      doc.save('distinta_'+numero+'.pdf')
+    } catch(e) { alert('Errore stampa PDF') }
+    setBusy('')
+  }
+  async function esporta(id:string, numero:string) {
+    setBusy(id+'-xlsx')
+    try {
+      const res = await fetch('/api/cliente/distinte/dettaglio?id='+id)
+      const { spedizioni } = await res.json()
+      const { utils, writeFile } = await import('xlsx')
+      const rows = (spedizioni||[]).map((s:any)=>({
+        Spedizione:s.numero, Destinatario:s.dest_nome, Citta:s.dest_citta, CAP:s.dest_cap, Provincia:s.dest_provincia,
+        Peso:s.peso_reale, Colli:s.colli, Contrassegno:s.contrassegno, Prezzo:s.costo_totale,
+      }))
+      const ws = utils.json_to_sheet(rows)
+      const wb = utils.book_new()
+      utils.book_append_sheet(wb, ws, 'Distinta')
+      writeFile(wb, 'distinta_'+numero+'.xlsx')
+    } catch(e) { alert('Errore esportazione') }
+    setBusy('')
+  }
+  const th = {textAlign:'left' as const,padding:'10px 12px',fontSize:'11px',fontWeight:'700' as const,color:'#1a1a1a',borderBottom:'1px solid #e8e8e8',whiteSpace:'nowrap' as const}
+  const td = {padding:'10px 12px',fontSize:'12px',color:'#1a1a1a',borderBottom:'1px solid #f5f5f5',whiteSpace:'nowrap' as const}
+  const btn = {padding:'6px 9px',border:'none',borderRadius:'6px',fontSize:'12px',cursor:'pointer',marginRight:'4px'}
+  return (
+    <div>
+      <div style={{marginBottom:'16px'}}>
+        <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Distinte Spedizioni</h1>
+      </div>
+      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
+        <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',display:'flex',alignItems:'center',gap:'8px'}}>
+          <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Lista Distinte</span>
+          <input value={cerca} onChange={e=>setCerca(e.target.value)} placeholder="Cerca..." style={{marginLeft:'auto',padding:'6px 12px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a'}}/>
+        </div>
+        {loading ? (
+          <div style={{padding:'40px',textAlign:'center',color:'#999',fontSize:'13px'}}>Caricamento...</div>
+        ) : !visibili.length ? (
+          <div style={{padding:'40px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessuna distinta creata</div>
+        ) : (
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead>
+                <tr style={{background:'#fafafa'}}>
+                  <th style={th}>Nr</th><th style={th}>Vettore</th><th style={th}>Contratto</th><th style={th}>Data</th>
+                  <th style={th}>Spedizioni</th><th style={th}>Colli</th><th style={th}>Contrassegni</th><th style={th}>Peso totale</th><th style={th}>Costo totale</th><th style={th}>Stampa/Esporta/Conferma</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibili.map(d=>(
+                  <tr key={d.id}>
+                    <td style={{...td}}><span style={{background:'#2563eb',color:'#fff',padding:'4px 10px',borderRadius:'6px',fontWeight:'700',fontSize:'12px'}}>{d.numero}</span></td>
+                    <td style={td}>{d.vettore}</td>
+                    <td style={td}>{d.contratto}</td>
+                    <td style={td}>{new Date(d.data).toLocaleDateString('it-IT')}</td>
+                    <td style={td}>{d.spedizioni}</td>
+                    <td style={td}>{d.colli}</td>
+                    <td style={td}>{Number(d.contrassegni||0).toFixed(2)} €</td>
+                    <td style={td}>{Number(d.peso||0)} kg</td>
+                    <td style={td}>{Number(d.costo||0).toFixed(2)} €</td>
+                    <td style={td}>
+                      <button onClick={()=>stampa(d.id,d.numero)} disabled={busy===d.id+'-pdf'} title="Stampa PDF" style={{...btn,background:'#6b7280',color:'#fff'}}>{busy===d.id+'-pdf'?'...':'🖨'}</button>
+                      <button onClick={()=>esporta(d.id,d.numero)} disabled={busy===d.id+'-xlsx'} title="Esporta Excel" style={{...btn,background:'#e5e7eb',color:'#1a1a1a'}}>{busy===d.id+'-xlsx'?'...':'⬇'}</button>
+                      <button title="Conferma" style={{...btn,background:'#06b6d4',color:'#fff'}}>✈</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
