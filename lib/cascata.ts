@@ -129,3 +129,44 @@ export async function addebitaCatena(
     }
   }
 }
+
+export async function rimborsaCatena(
+  supabase: any,
+  params: {
+    masterDirettoId: string
+    corriereOwnerId: string
+    costoSpedizione: number
+    provincia: string
+    packages: any[]
+    numero: string
+    destNome: string
+    spedizioneId: string | null
+    createdBy: string | null
+  }
+): Promise<void> {
+  const { catena } = await costruisciCatena(supabase, {
+    masterDirettoId: params.masterDirettoId,
+    corriereOwnerId: params.corriereOwnerId,
+    costoSpedizione: params.costoSpedizione,
+    provincia: params.provincia,
+    packages: params.packages,
+  })
+
+  for (const liv of catena) {
+    if (!(liv.prezzo > 0)) continue
+    try {
+      await registraMovimentoMaster(supabase, {
+        masterOwnerId: liv.masterId,
+        masterTargetId: liv.masterId,
+        tipo: 'rimborso',
+        descrizione: `Rimborso ${params.numero} - ${params.destNome || ''}`.trim(),
+        riferimento: params.numero,
+        importo: Math.abs(liv.prezzo),
+        spedizioneId: params.spedizioneId,
+        createdBy: params.createdBy,
+      })
+    } catch (e) {
+      console.error(`Errore rimborso cascata su master ${liv.masterId}:`, e)
+    }
+  }
+}
