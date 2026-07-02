@@ -74,10 +74,18 @@ export async function calcolaPrezzoListino(
     if (p?.length && p?.width && p?.height) pesoVolume += (p.length * p.width * p.height) / fattore
   }
   const pesoFatturato = Math.max(pesoReale, pesoVolume)
+  // agevolazione peso reale: valida solo se OGNI pacco e' entro 50x28x32 cm
+  const entroMisureAgevolate = packages.every((p: any) => {
+    const L = Number(p?.length)||0, W = Number(p?.width)||0, H = Number(p?.height)||0
+    if (!L && !W && !H) return true
+    const dims = [L, W, H].sort((a,b)=>b-a)
+    const lim = [50, 32, 28]
+    return dims[0] <= lim[0] && dims[1] <= lim[1] && dims[2] <= lim[2]
+  })
 
   const { data: fasce } = await supabase
     .from('listini_clienti_fasce')
-    .select('*, zone(id,nome), corrieri(id,tipo,nome_contratto)')
+    .select('*, zone(id,nome), corrieri(id,tipo,nome_contratto,settings)')
     .eq('listino_id', listinoId)
     .order('peso_max', { ascending: true })
 
@@ -105,7 +113,10 @@ export async function calcolaPrezzoListino(
     : Array.from(fascePerCorriere.entries())
 
   for (const [cId, fasceDelCorriere] of entries) {
-    const fascia = trovaFascia(fasceDelCorriere, pesoFatturato)
+    const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
+    const usaPesoReale = !!settsC.agevolazione_peso_reale && entroMisureAgevolate
+    const pesoPerFascia = usaPesoReale ? pesoReale : pesoFatturato
+    const fascia = trovaFascia(fasceDelCorriere, pesoPerFascia)
     if (!fascia) continue
     const prezzo = Number(fascia.prezzo)
     if (!isFinite(prezzo)) continue

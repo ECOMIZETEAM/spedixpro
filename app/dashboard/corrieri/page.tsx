@@ -91,6 +91,7 @@ export default function CorrieriPage() {
       multicollo: c.multicollo !== false,
       inserimento_ritiri: c.inserimento_ritiri !== false,
       mittente: (c.settings && c.settings.mittente) || 'cliente',
+      agevolazione_peso_reale: !!(c.settings && c.settings.agevolazione_peso_reale),
     })
   }
 
@@ -102,7 +103,7 @@ export default function CorrieriPage() {
       body: JSON.stringify({
         multicollo: popup.multicollo,
         inserimento_ritiri: popup.inserimento_ritiri,
-        settings: { mittente: popup.mittente },
+        settings: { mittente: popup.mittente, agevolazione_peso_reale: popup.agevolazione_peso_reale },
       })
     })
     setCorrieri(prev => prev.map(c => c.id === popup.id ? { ...c, multicollo: popup.multicollo, inserimento_ritiri: popup.inserimento_ritiri, settings: { ...(c.settings||{}), mittente: popup.mittente } } : c))
@@ -177,7 +178,7 @@ export default function CorrieriPage() {
               <div style={{fontSize:'15px',fontWeight:'700',color:'#1a1a1a'}}>{popup.nome_contratto} — Impostazioni</div>
             </div>
             <div style={{padding:'22px'}}>
-              <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',marginBottom:'14px'}}>Impostazioni Generale</div>
+              <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',marginBottom:'14px'}}>Agevolazione peso</div><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'16px',marginBottom:'14px'}}><label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>Agevolazione peso reale (&le; 50&times;28&times;32 cm)</label><select value={popup.agevolazione_peso_reale?'si':'no'} onChange={e=>setPopup({...popup,agevolazione_peso_reale:e.target.value==='si'})} style={{...selStyle,maxWidth:'260px'}}><option value="no">No</option><option value="si">Si</option></select></div><div style={{borderTop:'1px solid #eee',margin:'4px 0 18px'}}></div><div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',marginBottom:'14px'}}>Impostazioni Generale</div>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'16px',marginBottom:'14px'}}>
                 <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>Multicollo</label>
                 <select value={popup.multicollo?'si':'no'} onChange={e=>setPopup({...popup,multicollo:e.target.value==='si'})} style={{...selStyle,maxWidth:'260px'}}>
