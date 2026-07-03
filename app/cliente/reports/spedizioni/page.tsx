@@ -82,7 +82,9 @@ export default function ReportSpedizioniPage() {
       const ws = utils.json_to_sheet(rows)
       const wb = utils.book_new()
       utils.book_append_sheet(wb, ws, 'Spedizioni')
-      writeFile(wb, `report_spedizioni_${filtri.dal}_${filtri.al}.${formato === 'xlsx' ? 'xlsx' : 'csv'}`)
+      const XLSX = await import('xlsx')
+      const b64 = XLSX.write(wb, { bookType: formato === 'csv' ? 'csv' : 'xlsx', type: 'base64' })
+      await salvaReport(b64, 'report_spedizioni_' + filtri.dal + '_' + filtri.al + '.' + (formato === 'xlsx' ? 'xlsx' : 'csv'), formato)
     } else if (formato === 'pdf') {
       const { default: jsPDF } = await import('jspdf')
       const { default: autoTable } = await import('jspdf-autotable')
