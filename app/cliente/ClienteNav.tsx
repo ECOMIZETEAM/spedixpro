@@ -1,7 +1,7 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 const ACCENT = '#f97316'
 
@@ -9,7 +9,7 @@ type SubItem = { label: string; href: string }
 type NavItem = { id: string; label: string; icon: string; href?: string; sub?: SubItem[] }
 
 // ── Voci del menu (modifica qui per aggiungere/rinominare) ──────────────────
-const NAV: NavItem[] = [
+const NAV_BASE: NavItem[] = [
   {
     id: 'spedizioni', label: 'Spedizioni', icon: '◫',
     sub: [
@@ -69,6 +69,20 @@ const NAV: NavItem[] = [
 
 export default function ClienteNav() {
   const pathname = usePathname() || ''
+  // Sottovoci dinamiche "Ordini {Piattaforma}" per ogni integrazione attiva del cliente
+  const [integrazioni, setIntegrazioni] = useState<any[]>([])
+  useEffect(() => {
+    fetch('/api/integrazioni/lista').then(r=>r.json()).then(d=>{
+      setIntegrazioni(Array.isArray(d)?d.filter((i:any)=>i.stato==='attivo'):[])
+    }).catch(()=>{})
+  }, [])
+  const NOMI_PIATT: Record<string,string> = { shopify:'Shopify', prestashop:'PrestaShop', woocommerce:'WooCommerce' }
+  const piattAttive = Array.from(new Set(integrazioni.map((i:any)=>i.piattaforma)))
+  const NAV: NavItem[] = NAV_BASE.map(sec => {
+    if (sec.id !== 'importa') return sec
+    const extra = piattAttive.map((p:string)=> ({ label: 'Ordini '+(NOMI_PIATT[p]||p), href: '/cliente/ordini/'+p }))
+    return { ...sec, sub: [ ...(sec.sub||[]), ...extra ] }
+  })
 
   // Href attivo = il prefisso più lungo che combacia col path corrente
   // (gestisce correttamente /spedizioni vs /spedizioni/nuova)
