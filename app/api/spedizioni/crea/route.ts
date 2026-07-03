@@ -81,6 +81,10 @@ export async function POST(req: NextRequest) {
 
   const packages = body.packages || [{ length: 20, width: 15, height: 10, weight: 1 }]
   // *** Controllo misure massime del corriere (settings.misure_max) ***
+  // *** Controllo multicollo ***
+  if (packages.length > 1 && (corriereRecord as any)?.multicollo === false) {
+    return NextResponse.json({ error: 'Il contratto non prevede la funzione multicollo' }, { status: 400 })
+  }
   const mmax = (corriereRecord as any)?.settings?.misure_max
   if (mmax && (mmax.lunghezza || mmax.larghezza || mmax.altezza)) {
     const maxL = parseFloat(mmax.lunghezza) || Infinity
