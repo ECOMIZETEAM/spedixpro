@@ -285,7 +285,7 @@ export default function ReportSpedizioniPage() {
                 <td style={{padding:'9px 14px',color:'#1a1a1a',fontSize:'12px'}}>{r.size||'—'}</td>
                 <td style={{padding:'9px 14px',color:'#16a34a',fontSize:'12px',fontWeight:'500'}}>{r.stato}</td>
                 <td style={{padding:'9px 14px'}}>
-                  <span style={{color:'#f97316',fontWeight:'600',fontSize:'13px',cursor:'pointer'}} onClick={generaReport}>Scarica</span>
+                  <a href={r.file_url} target="_blank" rel="noopener noreferrer" download style={{color:'#f97316',fontWeight:'600',fontSize:'13px',cursor:'pointer',textDecoration:'none'}}>Scarica</a>
                 </td>
               </tr>
             ))}
