@@ -42,6 +42,7 @@ export async function POST(req: NextRequest) {
   let totaleReso = 0
   let totaleReso = 0
   let totaleReso = 0
+  let totaleReso = 0
   for (const v of (voci || [])) {
     await supabase.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
     // recupero i costi reali per calcolare il costo reso (netto supplementi)
