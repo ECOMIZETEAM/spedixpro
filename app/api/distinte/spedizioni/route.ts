@@ -33,9 +33,10 @@ export async function POST(req: NextRequest) {
   const { spedizioniIds, clienteId, corriereId } = body
   if (!spedizioniIds?.length) return NextResponse.json({ error: 'Nessuna spedizione selezionata' }, { status: 400 })
   const { data: speds } = await supabase.from('spedizioni')
-    .select('id,colli,peso_reale').in('id', spedizioniIds).eq('master_id', utente?.master_id)
+    .select('id,colli,peso_reale,costo_totale').in('id', spedizioniIds).eq('master_id', utente?.master_id)
   const totaleColli = (speds || []).reduce((s: number, x: any) => s + Number(x.colli || 1), 0)
   const totalePeso = (speds || []).reduce((s: number, x: any) => s + Number(x.peso_reale || 0), 0)
+  const prezzoTotale = (speds || []).reduce((s: number, x: any) => s + Number(x.costo_totale || 0), 0)
   const { data: ultima } = await supabase.from('distinte')
     .select('numero').eq('master_id', utente?.master_id).order('created_at', { ascending: false }).limit(1).single()
   let numeroInt = 1000
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest) {
   const { data: distinta, error } = await supabase.from('distinte').insert({
     master_id: utente?.master_id, cliente_id: clienteId || null, corriere_id: corriereId || null,
     numero: numeroDistinta, data: new Date().toISOString().split('T')[0], stato: 'chiusa',
-    totale_colli: totaleColli, totale_peso: totalePeso,
+    totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: (speds||[]).length, prezzo_totale: prezzoTotale,
   }).select().single()
   if (error || !distinta) return NextResponse.json({ error: error?.message || 'Errore' }, { status: 400 })
   await supabase.from('spedizioni').update({ distinta_id: distinta.id }).in('id', spedizioniIds)
