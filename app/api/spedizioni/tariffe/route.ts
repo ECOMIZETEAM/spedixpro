@@ -10,6 +10,13 @@ const ZONE_MAP: Record<string,string> = {
   AG:'Sicilia',CL:'Sicilia',CT:'Sicilia',EN:'Sicilia',ME:'Sicilia',PA:'Sicilia',RG:'Sicilia',SR:'Sicilia',TP:'Sicilia',
   CS:'Calabria',CZ:'Calabria',KR:'Calabria',RC:'Calabria',VV:'Calabria',
 }
+const PAESI: Record<string,string> = {
+  IT:'Italia', DE:'Germania', FR:'Francia', ES:'Spagna', BE:'Belgio', IE:'Irlanda',
+  DK:'Danimarca', LU:'Lussemburgo', MC:'Monaco', NL:'Paesi Bassi', PT:'Portogallo',
+  AT:'Austria', FI:'Finlandia', SE:'Svezia', SI:'Slovenia', CZ_C:'Rep. Ceca',
+  HR:'Croazia', GR:'Grecia', PL:'Polonia', SK:'Slovacchia', HU:'Ungheria',
+  BG:'Bulgaria', EE:'Estonia', LV:'Lettonia', LT:'Lituania', RO:'Romania', GB:'Regno Unito',
+}
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -176,7 +183,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json([{
       carrierCode: quote.carrierCode, contractCode: quote.contractCode,
       weight_price: quote.weight_price, total_price: quote.total_price,
-      fuel: '0.00', zona: zonaNome, peso_reale: pesoReale,
+      fuel: '0.00', zona: isEstero ? (PAESI[paeseDest] || paeseDest) : zonaNome, peso_reale: pesoReale,
       peso_volume: '0.00', peso_fatturato: pesoReale.toFixed(2),
       corriere_nome: corriere.nome_contratto, listino_fascia: 'Tariffa live',
       _spediamopro_quotation: quote._spediamopro_quotation,
@@ -272,7 +279,7 @@ export async function POST(req: NextRequest) {
       costo_assicurazione: (calcolaAssicurazione(corriereId, Number(fasciaGiusta.prezzo)) ?? 0).toFixed(2),
       total_price: (Number(fasciaGiusta.prezzo) + (calcolaContrassegno(corriereId, Number(fasciaGiusta.prezzo)) ?? 0) + (calcolaAssicurazione(corriereId, Number(fasciaGiusta.prezzo)) ?? 0)).toFixed(2),
       fuel: '0.00',
-      zona: zonaNome,
+      zona: isEstero ? (PAESI[paeseDest] || paeseDest) : zonaNome,
       peso_reale: pesoReale,
       peso_volume: pesoVolume.toFixed(2),
       peso_fatturato: pesoFatturato.toFixed(2),
