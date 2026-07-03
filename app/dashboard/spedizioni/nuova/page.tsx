@@ -101,7 +101,8 @@ export default function NuovaSpedizionePage() {
 
   async function calcolaTariffe() {
     if (!clienteId) { setErrore('Seleziona un cliente'); return }
-    if (!dest.nome||!dest.indirizzo||!dest.citta||!dest.cap||!dest.provincia) { setErrore('Compila tutti i dati destinatario inclusa la provincia'); return }
+    if (!dest.nome||!dest.indirizzo||!dest.citta||!dest.cap) { setErrore('Compila tutti i dati destinatario'); return }
+    if (dest.paese==='IT' && !dest.provincia) { setErrore('La provincia è obbligatoria per le spedizioni in Italia'); return }
     setErrore(''); setLoading(true); setTariffe([]); setSelected(null)
     const res = await fetch('/api/spedizioni/tariffe', {
       method:'POST', headers:{'Content-Type':'application/json'},
