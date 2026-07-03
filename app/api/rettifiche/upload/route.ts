@@ -32,6 +32,9 @@ export async function POST(req: NextRequest) {
       .or(`numero.ilike.%${ldv}%,tracking_number.ilike.%${ldv}%`)
       .limit(1).single()
     if (!spedizione) { nScartati++; continue }
+    // anti-duplicato: se esiste gia una rettifica per questa spedizione, salta
+    const { data: giaEsiste } = await supabase.from('rettifiche').select('id').eq('spedizione_id', spedizione.id).limit(1)
+    if (giaEsiste && giaEsiste.length > 0) { nScartati++; continue }
     nTrovate++
     const pesoIniziale = Number(spedizione.peso_fatturato || spedizione.peso_reale || 0)
     const costoIniziale = Number(spedizione.costo_totale || 0)
