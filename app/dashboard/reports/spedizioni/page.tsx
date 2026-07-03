@@ -97,7 +97,7 @@ export default function ReportSpedizioniPage() {
       doc.text(`Totale: ${spedizioni.length} spedizioni`, 14, 22)
       autoTable(doc, {
         startY: 28,
-        head: [['N. Spedizione','Cliente','Destinatario','Città','Peso','Colli','Contrassegno','Data','Stato','Totale €']],
+        head: [['N. Spedizione','Cliente','Destinatario','Città','Peso','Colli','Contrassegno','Data','Stato','Prezzo Cliente €','Prezzo Corriere €']],
         body: spedizioni.map((s: any) => [
           s.numero, s.clienti?.ragione_sociale||s.mitt_nome, s.dest_nome,
           `${s.dest_citta} (${s.dest_provincia})`, `${s.peso_reale}kg`, s.colli,
