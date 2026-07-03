@@ -15,8 +15,12 @@ export default function InviaNotifica() {
   }
 
   function format(cmd: string, val?: string) {
-    document.execCommand(cmd, false, val)
     editorRef.current?.focus()
+    if (cmd === 'formatBlock' && val) {
+      document.execCommand('formatBlock', false, '<' + val + '>')
+    } else {
+      document.execCommand(cmd, false, val)
+    }
   }
 
   async function invia() {
