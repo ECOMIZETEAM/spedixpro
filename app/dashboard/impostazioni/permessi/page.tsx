@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 
 type Perm = { k: string; l: string; o: boolean; a: boolean }
 type Gruppo = { t: string; p: Perm[] }
@@ -151,7 +151,7 @@ export default function PermessiPage() {
   }
 
   const cellCenter: React.CSSProperties = { textAlign: 'center', verticalAlign: 'middle' }
-  const badge = (txt: string, bg: string): React.CSSProperties => ({ background: bg, color: '#fff', padding: '3px 12px', borderRadius: 4, fontSize: 12, fontWeight: 700, display: 'inline-block' })
+  const badge = (_txt: string, bg: string): React.CSSProperties => ({ background: bg, color: '#fff', padding: '3px 12px', borderRadius: 4, fontSize: 12, fontWeight: 700, display: 'inline-block' })
 
   return (
     <div style={{ padding: 24, background: '#eef1f4', minHeight: '100vh' }}>
@@ -182,7 +182,7 @@ export default function PermessiPage() {
             </thead>
             <tbody>
               {GRUPPI.map(g => (
-                <>
+                <React.Fragment key={g.t}>
                   <tr key={g.t} style={{ background: '#f4f6f8' }}>
                     <td colSpan={4} style={{ padding: '10px 20px', fontWeight: 700, color: '#2f80c7' }}>
                       <span style={{ display: 'inline-block', width: 10, height: 10, background: '#2f80c7', borderRadius: 2, marginRight: 8 }} />{g.t}
@@ -205,7 +205,7 @@ export default function PermessiPage() {
                       </td>
                     </tr>
                   ))}
-                </>
+                </React.Fragment>
               ))}
             </tbody>
           </table>
