@@ -70,6 +70,14 @@ export async function POST(req: NextRequest) {
         credito_residuo: nuovoCreditoResiduo,
         data_acquisto: new Date().toISOString().split('T')[0],
       })
+      // scrivo anche in 'movimenti' per la Lista Movimenti
+      await supabase.from('movimenti').insert({
+        master_id: utente?.master_id, cliente_id: clienteId,
+        tipo: 'rettifica',
+        descrizione: Rettifica  ( Peso inserito:  Kg - peso scansione:  Kg ),
+        importo: -diff, saldo_dopo: nuovoCreditoResiduo,
+        spedizione_id: r.spedizione_id || null,
+      })
     }
 
     // Aggiorna costo spedizioni
