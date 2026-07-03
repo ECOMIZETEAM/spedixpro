@@ -39,7 +39,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{id:s
   return new NextResponse(pdfBuffer, {
     headers: {
       'Content-Type': mimeType,
-      'Content-Disposition': `inline; filename="etichetta-${sped.numero}.${ext}"`,
+      'Content-Disposition': `attachment; filename="etichetta-${sped.numero}.${ext}"`,
     }
   })
 }
