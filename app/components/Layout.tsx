@@ -87,8 +87,12 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
     return init
   })
 
-  function toggleMenu(href: string) {
+  function toggleMenu(href: string, el?: HTMLElement) {
+    const staAprendo = !openMenus[href]
     setOpenMenus(prev => ({ ...prev, [href]: !prev[href] }))
+    if (staAprendo && el) {
+      setTimeout(() => { el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 80)
+    }
   }
 
   return (
@@ -137,7 +141,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
               <div key={item.href}>
                 {hasSub ? (
                   <div
-                    onClick={() => toggleMenu(item.href)}
+                    onClick={(e) => toggleMenu(item.href, e.currentTarget as HTMLElement)}
                     style={{
                       display:'flex',alignItems:'center',gap:'9px',
                       padding:'8px 18px',cursor:'pointer',
