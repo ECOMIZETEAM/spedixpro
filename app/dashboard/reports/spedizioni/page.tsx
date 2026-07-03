@@ -109,35 +109,21 @@ export default function ReportSpedizioniPage() {
         headStyles: { fillColor: [249, 115, 22] },
       })
       // Riepilogo subtotale/IVA/totale
-      const subtotale = spedizioni.reduce((acc: number, s: any) => acc + Number(s.costo_totale||0), 0)
-      const iva = subtotale * 0.22
-      const totale = subtotale + iva
+      const totCliente = spedizioni.reduce((acc: number, s: any) => acc + Number(s.costo_totale||0), 0)
+      const totCorriere = spedizioni.reduce((acc: number, s: any) => acc + Number(s.prezzo_corriere||0), 0)
       const finalY = (doc as any).lastAutoTable.finalY + 20
       const pageW = doc.internal.pageSize.getWidth()
       const col1 = pageW - 120
       const col2 = pageW - 20
-      // Linea separatore
       doc.setDrawColor(200,200,200)
       doc.line(col1 - 10, finalY - 4, col2, finalY - 4)
-      // Subtotale
-      doc.setFontSize(9)
-      doc.setTextColor(100,100,100)
-      doc.setFont('helvetica','normal')
-      doc.text('SUBTOTALE', col1, finalY)
-      doc.text(`€ ${subtotale.toFixed(2)}`, col2, finalY, {align:'right'})
-      // IVA
-      doc.text('Iva (22%)', col1, finalY + 10)
-      doc.text(`€ ${iva.toFixed(2)}`, col2, finalY + 10, {align:'right'})
-      // Linea verde totale
-      doc.setDrawColor(34,197,94)
-      doc.setLineWidth(0.8)
-      doc.line(col1 - 10, finalY + 16, col2, finalY + 16)
-      // Totale verde
-      doc.setFontSize(11)
-      doc.setTextColor(22,163,74)
+      doc.setFontSize(10)
+      doc.setTextColor(30,30,30)
       doc.setFont('helvetica','bold')
-      doc.text('TOTALE', col1, finalY + 24)
-      doc.text(`€ ${totale.toFixed(2)}`, col2, finalY + 24, {align:'right'})
+      doc.text('TOTALE PREZZO CLIENTE', col1, finalY)
+      doc.text(`EUR `, col2, finalY, {align:'right'})
+      doc.text('TOTALE PREZZO CORRIERE', col1, finalY + 10)
+      doc.text(`EUR `, col2, finalY + 10, {align:'right'})
       const pdfB64 = doc.output('datauristring')
       await salvaReport(pdfB64, 'report_spedizioni_' + filtri.dal + '_' + filtri.al + '.pdf', 'pdf')
     } else if (formato === 'zip') {
