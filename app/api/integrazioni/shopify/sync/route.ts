@@ -75,6 +75,25 @@ export async function POST(req: NextRequest) {
     }
   } catch {}
 
+  // Fallback: storefront pubblico /products.json (nessuno scope richiesto).
+  // Utile finche' read_products non e' autorizzato. Non funziona su negozi con password storefront.
+  if (!prodottiImg.size) {
+    try {
+      const rpub = await fetch(`https://${shop}/products.json?limit=250`)
+      if (rpub.ok) {
+        const dpub = await rpub.json()
+        for (const p of dpub.products || []) {
+          const img = p.images?.[0]?.src || p.image?.src
+          if (img) prodottiImg.set(String(p.id), img)
+        }
+        if (prodottiImg.size) imgErr = imgErr ? imgErr + ' (recuperate da storefront pubblico)' : ''
+      } else if (imgErr) {
+        imgErr += ' + storefront ' + rpub.status
+      }
+    } catch {}
+  }
+
+
   // Mappa e salva (upsert per non duplicare)
   let importati = 0
   for (const o of ordini) {
