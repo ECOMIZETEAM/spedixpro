@@ -80,6 +80,19 @@ export async function POST(req: NextRequest) {
   if (!body.shipFrom?.state?.trim()) return NextResponse.json({ error: 'Provincia mittente obbligatoria' }, { status: 400 })
 
   const packages = body.packages || [{ length: 20, width: 15, height: 10, weight: 1 }]
+  // *** Controllo misure massime del corriere (settings.misure_max) ***
+  const mmax = (corriereRecord as any)?.settings?.misure_max
+  if (mmax && (mmax.lunghezza || mmax.larghezza || mmax.altezza)) {
+    const maxL = parseFloat(mmax.lunghezza) || Infinity
+    const maxW = parseFloat(mmax.larghezza) || Infinity
+    const maxH = parseFloat(mmax.altezza) || Infinity
+    for (const pk of packages) {
+      const L = parseFloat(pk?.length) || 0, W = parseFloat(pk?.width) || 0, H = parseFloat(pk?.height) || 0
+      if (L > maxL || W > maxW || H > maxH) {
+        return NextResponse.json({ error: 'Volume troppo alto. Misure massime consentite: ' + (mmax.lunghezza||'-') + ' x ' + (mmax.larghezza||'-') + ' x ' + (mmax.altezza||'-') + ' cm' }, { status: 400 })
+      }
+    }
+  }
   const pkg = packages[0]
   const pesoReale = parseFloat(pkg?.weight || 1)
 
