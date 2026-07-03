@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState, useEffect, useRef } from 'react'
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -24,8 +24,12 @@ export default function ScansionaResiPage() {
     setSearching(false)
     if (data.error) { setErrore(data.error); return }
     const giaIn = distinta.find(d => d.id === data.id)
-    if (giaIn) { setErrore('Spedizione già aggiunta alla distinta'); return }
-    setSpedizioneFound(data)
+    if (giaIn) { setErrore('Spedizione gia aggiunta alla distinta'); return }
+    // aggiungo automaticamente alla distinta
+    setDistinta(prev => [...prev, { ...data, data_scansione: new Date().toISOString() }])
+    setSpedizioneFound(null)
+    setLdv('')
+    inputRef.current?.focus()
   }
 
   function aggiungiInDistinta() {
