@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 
 export async function GET(req: NextRequest) {
@@ -39,8 +39,15 @@ export async function POST(req: NextRequest) {
     stato: 'chiusa',
   }).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  for (const spId of spedizioniIds) {
-    await supabase.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', spId)
+  for (const v of (voci || [])) {
+    await supabase.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
+    // movimento nella Lista Movimenti del cliente
+    await supabase.from('movimenti').insert({
+      master_id: utente?.master_id, cliente_id: clienteId,
+      tipo: 'reso',
+      descrizione: `Reso ${v.numero}`,
+      importo: 0, spedizione_id: v.id,
+    })
   }
   return NextResponse.json({ id: distinta.id, numero })
 }
