@@ -27,6 +27,9 @@ export default function DistinteContrassegniPage() {
     fetch('/api/contrassegni/cod-files').then(r=>r.json()).then(d=>setCodFiles(d||[]))
   }, [])
 
+  // ricarica le distinte quando cambiano i filtri
+  useEffect(() => { carica() }, [filtri])
+
   async function carica() {
     setLoading(true)
     const params = new URLSearchParams()
