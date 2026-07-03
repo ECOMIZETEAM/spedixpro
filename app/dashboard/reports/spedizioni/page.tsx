@@ -275,7 +275,7 @@ export default function ReportSpedizioniPage() {
                 <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:'600'}}>{reports.length - i}</td>
                 <td style={{padding:'9px 14px',color:'#1a1a1a',fontSize:'12px'}}>{new Date(r.created_at).toLocaleString('it-IT')}</td>
                 <td style={{padding:'9px 14px',color:'#f97316',fontSize:'12px'}}>
-                  {Object.entries(r.filtri||{}).filter(([,v])=>v).map(([k,v])=>`${k}=${v}`).join('\n').split('\n').map((f,i)=><div key={i}>{f}</div>)}
+                  {String(r.filtri||'').split(' ').map((f: string, i: number)=><div key={i}>{f}</div>)}
                 </td>
                 <td style={{padding:'9px 14px'}}>
                   <span style={{background:'#e0f2fe',color:'#0369a1',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>{r.formato}</span>
