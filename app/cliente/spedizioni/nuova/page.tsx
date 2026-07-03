@@ -61,6 +61,7 @@ export default function NuovaSpedizioneCliente() {
   const [creating, setCreating] = useState(false)
   const [errore, setErrore] = useState('')
   const [vista, setVista] = useState<'dati'|'contratto'>('dati')
+  const [successo, setSuccesso] = useState<{numero:string,id:string}|null>(null)
   useEffect(() => {
     setTariffe([]); setSelected(null); setVista('dati')
   }, [dest, mitt, peso, colli, numColli, contrassegno, assicurazione])
@@ -110,8 +111,8 @@ export default function NuovaSpedizioneCliente() {
   }
 
   async function calcolaTariffe() {
-    if (!dest.nome||!dest.indirizzo||!dest.citta||!dest.cap) {
-      setErrore('Compila tutti i dati del destinatario'); return
+    if (!dest.nome||!dest.indirizzo||!dest.citta||!dest.cap||!dest.email||!dest.telefono) {
+      setErrore('Compila tutti i dati del destinatario (inclusi email e telefono)'); return
     }
     if (dest.paese==='IT' && !dest.provincia) {
       setErrore('La provincia è obbligatoria per le spedizioni in Italia'); return
@@ -136,6 +137,20 @@ export default function NuovaSpedizioneCliente() {
     setVista('contratto')
   }
 
+  async function scaricaEtichetta(id:string) {
+    try {
+      const res = await fetch('/dashboard/spedizioni/'+id+'/etichetta')
+      if (!res.ok) { alert('Errore: etichetta non generata'); return }
+      const blob = await res.blob()
+      const ct = res.headers.get('content-type')||''
+      const ext = ct.includes('gif')?'gif':ct.includes('png')?'png':'pdf'
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = 'etichetta_'+id+'.'+ext
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch { alert('Errore durante il download etichetta') }
+  }
   async function creaSpedizione() {
     if (!selected) return
     setCreating(true)
@@ -170,7 +185,7 @@ export default function NuovaSpedizioneCliente() {
       } catch {}
     }
     setCreating(false)
-    router.push('/cliente/spedizioni?success='+data.numero)
+    setSuccesso({numero:data.numero||'—', id:data.spedizioneId||''})
   }
 
   const pesoVol0 = colli[0]?.lunghezza&&colli[0]?.larghezza&&colli[0]?.altezza
@@ -184,6 +199,12 @@ export default function NuovaSpedizioneCliente() {
       </div>
 
       {errore && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>⚠️ {errore}</div>}
+      {successo && <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'12px 16px',marginBottom:'16px',fontSize:'14px',color:'#166534',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px'}}>
+        <span>✓ Spedizione <strong>{successo.numero}</strong> generata con successo</span>
+        {successo.id
+          ? <button onClick={()=>scaricaEtichetta(successo.id)} style={{background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',borderRadius:'6px',padding:'6px 12px',fontSize:'14px',cursor:'pointer',fontWeight:'600'}} title="Scarica etichetta">🖨️ Scarica LDV</button>
+          : <span style={{color:'#dc2626',fontSize:'13px'}}>⚠️ Etichetta non generata</span>}
+      </div>}
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 400px',gap:'16px',alignItems:'start'}}>
 
