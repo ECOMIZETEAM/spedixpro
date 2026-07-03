@@ -141,7 +141,7 @@ export default function DistinteContrassegniPage() {
           {!codFiles.length ? (
             <div style={{padding:'20px',textAlign:'center' as const,color:'#1a1a1a',fontSize:'13px'}}>Nessun file caricato</div>
           ) : (
-            <div style={{overflowX:'auto' as const}}>
+            <div style={{overflowX:'auto' as const, maxHeight:'300px', overflowY:'auto' as const}}>
               <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'11px'}}>
                 <thead><tr style={{background:'#f9fafb'}}>
                   {['File','Data','Righe','Sped.','COD file','COD sist.','COD da pag.','COD dist.','Err.'].map(h=>(
