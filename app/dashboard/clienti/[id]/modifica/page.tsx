@@ -13,6 +13,8 @@ const PROVINCE = ['AG','AL','AN','AO','AR','AP','AT','AV','BA','BT','BL','BN','B
 export default function ModificaClientePage() {
   const { id } = useParams()
   const router = useRouter()
+  const [staffList, setStaffList] = useState<any[]>([])
+  useEffect(() => { fetch('/api/staff').then(r=>r.json()).then((d:any[])=>{ const ruoliOk=['agente','operatore','admin']; const arr=(Array.isArray(d)?d:[]).filter(u=>ruoliOk.includes((u.ruolo||'').toLowerCase())).map(u=>({...u, _nome:((u.nome||'')+' '+(u.cognome||'')).trim()})).filter(u=>u._nome).sort((a,b)=>a._nome.localeCompare(b._nome)); setStaffList(arr) }).catch(()=>setStaffList([])) }, [])
   const [cliente, setCliente] = useState<any>(null)
   const [listini, setListini] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
