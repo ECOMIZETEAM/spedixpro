@@ -125,9 +125,11 @@ async function apriTracking(s: any) {
     setEliminando(null)
     if (res.ok && j.success) {
       setNotifica('Spedizione cancellata')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
       caricaTutte()
     } else {
       setNotifica('Impossibile eliminare la spedizione. Hai bisogno del permesso per eseguire questa azione!')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     }
     setTimeout(() => setNotifica(''), 4000)
   }
@@ -137,7 +139,7 @@ async function apriTracking(s: any) {
   return (
     <div>
       {notifica && (
-        <div style={{position:'fixed',top:'20px',right:'20px',zIndex:9999,background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:'8px',padding:'12px 18px',fontSize:'13px',fontWeight:'700',boxShadow:'0 4px 12px rgba(0,0,0,0.15)'}}>{notifica}</div>
+        <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>⚠️ {notifica}</div>
       )}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'16px'}}>
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Lista Spedizioni</h1>
