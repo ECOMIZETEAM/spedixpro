@@ -77,7 +77,8 @@ export default function ReportSpedizioniPage() {
         'Assicurazione (€)': s.assicurazione,
         'Data': new Date(s.created_at).toLocaleDateString('it-IT'),
         'Stato': s.stato,
-        'Totale (€)': s.costo_totale,
+        'Prezzo Cliente (€)': s.costo_totale,
+        'Prezzo Corriere (€)': s.prezzo_corriere != null ? s.prezzo_corriere : '',
         'Tracking': s.tracking_number,
       }))
       const ws = utils.json_to_sheet(rows)
