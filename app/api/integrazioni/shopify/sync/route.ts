@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { getValidShopifyToken } from '@/lib/shopify'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -29,8 +30,11 @@ export async function POST(req: NextRequest) {
 
   const cred = integr.credenziali as any
   const shop = cred?.shop
-  const token = cred?.access_token
-  if (!shop || !token) return NextResponse.json({ error: 'Credenziali Shopify mancanti' }, { status: 400 })
+  // Ottiene un token valido (rifresca automaticamente se scaduto - token expiring)
+  const tk = await getValidShopifyToken(integr)
+  if (tk.error || !tk.token) return NextResponse.json({ error: tk.error || 'Token non disponibile' }, { status: 400 })
+  const token = tk.token
+  if (!shop) return NextResponse.json({ error: 'Credenziali Shopify mancanti' }, { status: 400 })
 
   // Legge ordini NON evasi da Shopify (tutti gli stati di pagamento)
   let ordini: any[] = []

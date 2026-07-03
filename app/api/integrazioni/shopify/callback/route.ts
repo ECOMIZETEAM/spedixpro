@@ -53,18 +53,26 @@ export async function GET(req: NextRequest) {
   }
   await supabase.from('shopify_oauth_state').delete().eq('state', state)
 
-  // Scambia code -> access token
+  // Scambia code -> access token (expiring=1: token con scadenza + refresh token,
+  // obbligatorio per le app pubbliche create dopo il 1 aprile 2026)
   let token = ''
   let scope = ''
+  let refreshToken = ''
+  let expiresAt: number | null = null
+  let refreshExpiresAt: number | null = null
   try {
     const r = await fetch(`https://${shop}/admin/oauth/access_token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: apiKey, client_secret: apiSecret, code }),
+      body: JSON.stringify({ client_id: apiKey, client_secret: apiSecret, code, expiring: '1' }),
     })
     const d = await r.json()
     token = d.access_token
     scope = d.scope || ''
+    refreshToken = d.refresh_token || ''
+    const now = Date.now()
+    if (d.expires_in) expiresAt = now + Number(d.expires_in) * 1000
+    if (d.refresh_token_expires_in) refreshExpiresAt = now + Number(d.refresh_token_expires_in) * 1000
     if (!token) throw new Error('nessun access_token ricevuto')
   } catch (e: any) {
     return NextResponse.json({ error: 'Scambio token fallito: ' + (e?.message || e) }, { status: 502 })
@@ -78,7 +86,7 @@ export async function GET(req: NextRequest) {
     piattaforma: 'shopify',
     nome_negozio: shop,
     identificativo: shop,
-    credenziali: { access_token: token, scope, shop },
+    credenziali: { access_token: token, scope, shop, refresh_token: refreshToken, expires_at: expiresAt, refresh_expires_at: refreshExpiresAt },
     stato: 'attivo',
     errore: null,
   }
@@ -102,7 +110,7 @@ export async function GET(req: NextRequest) {
   // CASO B: nessun cliente identificato (install da Shopify).
   // Salva il negozio autorizzato in pending e manda al login SpedixPro.
   await supabase.from('shopify_pending').upsert(
-    { shop, access_token: token, scope },
+    { shop, access_token: token, scope, refresh_token: refreshToken, expires_at: expiresAt, refresh_expires_at: refreshExpiresAt },
     { onConflict: 'shop' }
   )
   return NextResponse.redirect(`${appUrl}/cliente?shopify_pending=${encodeURIComponent(shop)}`)
