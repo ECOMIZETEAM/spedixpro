@@ -20,7 +20,7 @@ type Integrazione = {
 const PLATFORMS: { id: string; nome: string; attivo: boolean; colore: string; dominio: string }[] = [
   { id: 'shopify',     nome: 'Shopify',      attivo: true,  colore: '#95BF47', dominio: 'shopify.com' },
   { id: 'woocommerce', nome: 'WooCommerce',  attivo: false, colore: '#96588a', dominio: 'woocommerce.com' },
-  { id: 'prestashop',  nome: 'PrestaShop',   attivo: false, colore: '#df0067', dominio: 'prestashop.com' },
+  { id: 'prestashop',  nome: 'PrestaShop',   attivo: true,  colore: '#df0067', dominio: 'prestashop.com' },
   { id: 'amazon',      nome: 'Amazon',       attivo: false, colore: '#ff9900', dominio: 'amazon.com' },
   { id: 'ebay',        nome: 'eBay',         attivo: false, colore: '#e53238', dominio: 'ebay.com' },
   { id: 'magento',     nome: 'Magento',      attivo: false, colore: '#f46f25', dominio: 'magento.com' },
@@ -49,7 +49,8 @@ export default function IntegrazioniPage() {
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
 
   const [modal, setModal] = useState(false)
-  const [step, setStep] = useState<'platforms' | 'shopify'>('platforms')
+  const [step, setStep] = useState<'platforms' | 'shopify' | 'prestashop'>('platforms')
+  const [psForm, setPsForm] = useState({ nome_negozio: '', url: '', webservice_key: '' })
   const [shop, setShop] = useState('')
   const [connecting, setConnecting] = useState(false)
 
@@ -74,6 +75,7 @@ export default function IntegrazioniPage() {
   function pickPlatform(id: string, attivo: boolean) {
     if (!attivo) return
     if (id === 'shopify') setStep('shopify')
+    if (id === 'prestashop') setStep('prestashop')
   }
 
   function connectShopify() {
@@ -85,6 +87,24 @@ export default function IntegrazioniPage() {
     setConnecting(true)
     // Avvia l'OAuth Shopify (la route install arriva nel blocco successivo)
     window.location.href = `/api/integrazioni/shopify/install?shop=${encodeURIComponent(d)}`
+  }
+  async function connettiPrestashop() {
+    if (!psForm.url || !psForm.webservice_key) { setMsg({ type: 'err', text: 'URL e Webservice Key obbligatori' }); return }
+    setConnecting(true)
+    try {
+      const res = await fetch('/api/integrazioni/prestashop/connetti', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(psForm),
+      })
+      const d = await res.json()
+      setConnecting(false)
+      if (d.error) { setMsg({ type: 'err', text: d.error }); return }
+      setMsg({ type: 'ok', text: 'PrestaShop collegato con successo' })
+      setPsForm({ nome_negozio: '', url: '', webservice_key: '' })
+      setModal(false); load()
+    } catch {
+      setConnecting(false); setMsg({ type: 'err', text: 'Errore di connessione' })
+    }
   }
 
   async function rimuovi(id: string, nome: string) {
@@ -220,7 +240,7 @@ export default function IntegrazioniPage() {
           >
             <div style={{ padding: '16px 20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: '15px', fontWeight: 700, color: '#1a1a1a' }}>
-                {step === 'platforms' ? 'Seleziona piattaforma' : 'Collega Shopify'}
+                {step === 'platforms' ? 'Seleziona piattaforma' : step === 'prestashop' ? 'Collega PrestaShop' : 'Collega Shopify'}
               </div>
               <button onClick={closeModal} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#999', cursor: 'pointer', lineHeight: 1 }}>×</button>
             </div>
@@ -257,7 +277,7 @@ export default function IntegrazioniPage() {
                   </button>
                 ))}
               </div>
-            ) : (
+            ) : step === 'shopify' ? (
               <div style={{ padding: '20px' }}>
                 <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '6px' }}>
                   Dominio del tuo negozio Shopify
@@ -288,6 +308,20 @@ export default function IntegrazioniPage() {
                   >
                     {connecting ? 'Reindirizzamento…' : 'Collega'}
                   </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: '20px' }}>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '6px' }}>Nome sito (opzionale)</label>
+                <input value={psForm.nome_negozio} onChange={e => setPsForm(v => ({ ...v, nome_negozio: e.target.value }))} placeholder="Il mio negozio" style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none', marginBottom: '12px' }} />
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '6px' }}>URL sito *</label>
+                <input value={psForm.url} onChange={e => setPsForm(v => ({ ...v, url: e.target.value }))} placeholder="https://ilmionegozio.com" style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none', marginBottom: '12px' }} />
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '6px' }}>Webservice Key *</label>
+                <input value={psForm.webservice_key} onChange={e => setPsForm(v => ({ ...v, webservice_key: e.target.value }))} placeholder="Chiave API PrestaShop" style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none' }} />
+                <p style={{ fontSize: '12px', color: '#999', marginTop: '8px', lineHeight: 1.5 }}>La Webservice Key si genera in PrestaShop: Parametri Avanzati &rarr; Webservice &rarr; Aggiungi nuova chiave.</p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '18px' }}>
+                  <button onClick={() => setStep('platforms')} style={{ background: '#fff', color: '#555', border: '1px solid #ddd', borderRadius: '8px', padding: '9px 16px', fontSize: '13px', cursor: 'pointer' }}>&larr; Indietro</button>
+                  <button onClick={connettiPrestashop} disabled={connecting} style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '8px', padding: '9px 20px', fontSize: '13px', fontWeight: 600, cursor: connecting ? 'default' : 'pointer', opacity: connecting ? .6 : 1 }}>{connecting ? 'Verifica…' : 'Collega'}</button>
                 </div>
               </div>
             )}
