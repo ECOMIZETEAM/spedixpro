@@ -1,5 +1,6 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { calcolaPrezzoCorriere } from '@/lib/pricing'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -29,7 +30,21 @@ export async function GET(req: NextRequest) {
   if (provincia) query = query.eq('dest_provincia', provincia)
 
   const { data: spedizioni } = await query
-  return NextResponse.json(spedizioni || [])
+  // calcolo il prezzo corriere per ogni spedizione
+  const conPrezzoCorriere = []
+  for (const s of (spedizioni || [])) {
+    let pc: number | null = null
+    if (s.corriere_id) {
+      pc = await calcolaPrezzoCorriere(supabase, {
+        corriereId: s.corriere_id, masterId: utente?.master_id, provincia: s.dest_provincia || '',
+        pesoReale: Number(s.peso_reale) || 1,
+        packages: [{ length: s.lunghezza, width: s.larghezza, height: s.altezza }],
+        contrassegno: Number(s.contrassegno) || 0, assicurazione: Number(s.assicurazione) || 0,
+      })
+    }
+    conPrezzoCorriere.push({ ...s, prezzo_corriere: pc })
+  }
+  return NextResponse.json(conPrezzoCorriere)
 }
 
 export async function POST(req: NextRequest) {
