@@ -124,6 +124,7 @@ export default function NuovoClientePage() {
               </div>
               <div><label style={lbl}>Agente</label>
                 <select value={form.agente} onChange={e=>set('agente',e.target.value)} style={inp}>
+                  {staffList.map((u:any)=>(<option key={u.id} value={u._nome}>{u._nome}</option>))}
                   <option value="">Seleziona...</option>
                 </select>
               </div>
