@@ -4,6 +4,12 @@ import { createServerClient } from '@supabase/ssr'
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
+  // La pagina di login cliente (/cliente esatto) resta accessibile senza sessione,
+  // altrimenti loop di redirect (ERR_TOO_MANY_REDIRECTS) quando si apre l'app da Shopify.
+  if (pathname === '/cliente') {
+    return NextResponse.next()
+  }
+
   // Applichiamo il controllo solo alle aree protette
   const isDashboard = pathname.startsWith('/dashboard')
   const isCliente = pathname.startsWith('/cliente')
