@@ -136,7 +136,8 @@ export default function ReportSpedizioniPage() {
       doc.setFont('helvetica','bold')
       doc.text('TOTALE', col1, finalY + 24)
       doc.text(`€ ${totale.toFixed(2)}`, col2, finalY + 24, {align:'right'})
-      doc.save(`report_spedizioni_${filtri.dal}_${filtri.al}.pdf`)
+      const pdfB64 = doc.output('datauristring')
+      await salvaReport(pdfB64, 'report_spedizioni_' + filtri.dal + '_' + filtri.al + '.pdf', 'pdf')
     } else if (formato === 'zip') {
       const { default: JSZip } = await import('jszip' as any)
       const zip = new JSZip()
