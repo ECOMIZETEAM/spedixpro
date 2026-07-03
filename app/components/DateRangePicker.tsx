@@ -95,7 +95,7 @@ export default function DateRangePicker({ dal, al, onChange }: Props) {
           <div style={{ fontWeight:'700', color:'#1a1a1a', fontSize:'13px' }}>{MESI[m]} {anno}</div>
           {!isSx ? <button onClick={()=>{ setMeseDx(new Date(anno,m+1,1)); setMeseSx(new Date(anno,m,1)) }} style={navBtn}>›</button> : <span style={{width:'22px'}}></span>}
         </div>
-        <table style={{ borderCollapse:'collapse' }}>
+        <table style={{ borderCollapse:'separate', borderSpacing:'2px', tableLayout:'fixed', width:'224px' }}>
           <thead><tr>{GIORNI.map(g => <th key={g} style={{ width:'30px', height:'26px', fontSize:'11px', color:'#1a1a1a', fontWeight:'600' }}>{g}</th>)}</tr></thead>
           <tbody>
             {Array.from({length: Math.ceil(celle.length/7)}).map((_, r) => (
