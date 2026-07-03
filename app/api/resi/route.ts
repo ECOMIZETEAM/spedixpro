@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 
 export async function GET(req: NextRequest) {
@@ -14,5 +14,8 @@ export async function GET(req: NextRequest) {
     .or(`numero.eq.${ldv},tracking_number.eq.${ldv}`)
     .single()
   if (!spedizione) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
+  // anti-duplicato: se gia in reso, non riprenderla
+  if (spedizione.stato === 'reso_mittente') return NextResponse.json({ error: 'Spedizione gia messa in reso e addebitata' }, { status: 400 })
+  const { data: giaReso } = await supabase.from('distinte_contrassegni_righe').select('id').eq('spedizione_id', spedizione.id).limit(1)
   return NextResponse.json(spedizione)
 }
