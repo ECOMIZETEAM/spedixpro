@@ -114,6 +114,7 @@ export async function POST(req: NextRequest) {
   if (isEstero) {
     const { data: zc } = await supabase.from('zone_cap').select('zona_id').eq('paese', paeseDest)
     zoneEsteroIds = (zc || []).map((r: any) => r.zona_id).filter(Boolean)
+    console.log('[TARIFFE] zoneEsteroIds trovate:', JSON.stringify(zoneEsteroIds), 'per paese', paeseDest)
   }
 
   // ─── Costruisce una quotazione per un dato corriere ──────────────────────
@@ -214,6 +215,7 @@ export async function POST(req: NextRequest) {
   let fasceZona
   if (isEstero) {
     fasceZona = fasce.filter(f => zoneEsteroIds.includes((f.zone as any)?.id))
+    console.log('[TARIFFE] fasce totali:', fasce.length, 'fasce estero filtrate:', fasceZona.length, 'zoneIds:', JSON.stringify(zoneEsteroIds), 'zone nelle fasce:', JSON.stringify(fasce.slice(0,3).map((f:any)=>({id:f.zone?.id,nome:f.zone?.nome}))))
     if (!fasceZona.length) {
       return NextResponse.json({ error: `Nessuna tariffa disponibile per spedizioni verso ${paeseDest}` }, { status: 400 })
     }
