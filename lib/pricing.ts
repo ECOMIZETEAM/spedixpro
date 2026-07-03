@@ -137,3 +137,87 @@ export async function calcolaPrezzoListino(
     fascia_peso_max: miglior.pesoMax,
   }
 }
+
+
+// Calcola il prezzo che il MASTER paga al CORRIERE (listino corriere) per una spedizione.
+export async function calcolaPrezzoCorriere(
+  supabase: any,
+  params: {
+    corriereId: string
+    masterId: string
+    provincia: string
+    pesoReale: number
+    packages?: any[]
+    contrassegno?: number
+    assicurazione?: number
+  }
+): Promise<number | null> {
+  const { corriereId, masterId, provincia } = params
+  const zonaNome = zonaDaProvincia(provincia)
+
+  const { data: listino } = await supabase
+    .from('listini_corrieri')
+    .select('id,fattore_volume')
+    .eq('master_id', masterId)
+    .eq('corriere_id', corriereId)
+    .eq('attivo', true)
+    .limit(1)
+    .single()
+  if (!listino?.id) return null
+  const fattore = parseFloat(listino.fattore_volume) || 5000
+
+  const packages = Array.isArray(params.packages) && params.packages.length ? params.packages : []
+  let pesoVolume = 0
+  for (const p of packages) {
+    if (p?.length && p?.width && p?.height) pesoVolume += (p.length * p.width * p.height) / fattore
+  }
+  const pesoReale = Number(params.pesoReale) || 1
+  const pesoFatturato = Math.max(pesoReale, pesoVolume)
+
+  const { data: fasce } = await supabase
+    .from('listini_corrieri_fasce')
+    .select('*, zone(id,nome)')
+    .eq('listino_id', listino.id)
+    .order('peso_max', { ascending: true })
+  if (!fasce?.length) return null
+
+  let fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
+  if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
+  if (!fasceZona.length) return null
+
+  const finoA = fasceZona.filter((f: any) => f.tipo !== 'oltre').sort((a: any, b: any) => a.peso_max - b.peso_max)
+  const oltre = fasceZona.find((f: any) => f.tipo === 'oltre')
+  let prezzo = 0
+  let trovata = false
+  for (const f of finoA) {
+    if (pesoFatturato <= parseFloat(f.peso_max)) { prezzo = parseFloat(f.prezzo); trovata = true; break }
+  }
+  if (!trovata) {
+    if (oltre && finoA.length) {
+      const ultima = finoA[finoA.length - 1]
+      const kgExtra = pesoFatturato - parseFloat(ultima.peso_max)
+      prezzo = parseFloat(ultima.prezzo) + Math.ceil(kgExtra / parseFloat(oltre.peso_max)) * parseFloat(oltre.prezzo)
+    } else if (finoA.length) {
+      prezzo = parseFloat(finoA[finoA.length - 1].prezzo)
+    } else return null
+  }
+
+  const { data: suppl } = await supabase
+    .from('listini_corrieri_supplementi')
+    .select('tipo,valore,tipo_calcolo')
+    .eq('listino_id', listino.id)
+
+  const cod = Number(params.contrassegno) || 0
+  const ass = Number(params.assicurazione) || 0
+  for (const s of (suppl || [])) {
+    const v = parseFloat(s.valore) || 0
+    if (s.tipo === 'contrassegno' && cod > 0) {
+      prezzo += s.tipo_calcolo === 'percentuale' ? cod * v / 100 : v
+    }
+    if (s.tipo === 'assicurazione' && ass > 0) {
+      prezzo += s.tipo_calcolo === 'percentuale' ? ass * v / 100 : v
+    }
+  }
+
+  return Math.round(prezzo * 100) / 100
+}
