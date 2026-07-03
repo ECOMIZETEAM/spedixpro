@@ -73,6 +73,9 @@ const NAV = [
     { label: 'Zone di Consegna', href: '/dashboard/listini/zone' },
     { label: 'Cambia Password', href: '/dashboard/impostazioni/password' },
   ]},
+  { label: 'Centro Notifiche', href: '/dashboard/notifiche', icon: '🔔', sub: [
+    { label: 'Invia Notifica', href: '/dashboard/notifiche/invia' },
+  ]},
 ]
 
 export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null } }) {
