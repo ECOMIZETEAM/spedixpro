@@ -59,6 +59,21 @@ export default function RettificaCostiPage() {
     if (fileRef.current) fileRef.current.value = ''
   }
 
+  async function cancellaRettifiche() {
+    if (!selectedIds.length) { alert('Seleziona almeno una rettifica'); return }
+    if (!confirm('Cancellare le ' + selectedIds.length + ' rettifiche selezionate? Non verra scalato alcun credito.')) return
+    const res = await fetch('/api/rettifiche', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rettificaIds: selectedIds })
+    })
+    const data = await res.json()
+    if (data.success) {
+      setSelectedIds([])
+      await caricaFiles()
+      await caricaRettifiche(fileSelezionato || undefined)
+    } else { alert('Errore: ' + (data.error || 'cancellazione fallita')) }
+  }
   async function confermaRettifiche() {
     if (!selectedIds.length) { alert('Seleziona almeno una rettifica'); return }
     if (!confirm('Confermi le ' + selectedIds.length + ' rettifiche selezionate? Il credito verrà scalato ai clienti.')) return
