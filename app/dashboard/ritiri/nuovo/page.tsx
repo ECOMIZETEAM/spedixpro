@@ -12,6 +12,7 @@ export default function NuovoRitiroPage() {
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [selezionate, setSelezionate] = useState<Set<string>>(new Set())
   const [loadingSped, setLoadingSped] = useState(true)
+  const [cercaLdv, setCercaLdv] = useState('')
 
   const [mittNome, setMittNome] = useState('')
   const [mittIndirizzo, setMittIndirizzo] = useState('')
@@ -37,11 +38,11 @@ export default function NuovoRitiroPage() {
 
     fetch('/api/master').then(r => r.json()).then(d => {
       if (d?.nome) setMittNome(d.nome)
-      if (d?.indirizzo_operativo) setMittIndirizzo(d.indirizzo_operativo)
-      if (d?.citta_operativo) setMittCitta(d.citta_operativo)
-      if (d?.provincia_operativo) setMittProvincia(d.provincia_operativo)
-      if (d?.cap_operativo) setMittCap(d.cap_operativo)
-      if (d?.telefono_operativo) setMittTelefono(d.telefono_operativo)
+      if (d?.indirizzo || d?.indirizzo_operativo) setMittIndirizzo(d.indirizzo || d.indirizzo_operativo)
+      if (d?.citta || d?.citta_operativo) setMittCitta(d.citta || d.citta_operativo)
+      if (d?.provincia || d?.provincia_operativo) setMittProvincia(d.provincia || d.provincia_operativo)
+      if (d?.cap || d?.cap_operativo) setMittCap(d.cap || d.cap_operativo)
+      if (d?.telefono || d?.telefono_operativo) setMittTelefono(d.telefono || d.telefono_operativo)
       if (d?.email) setMittEmail(d.email)
     }).catch(() => {})
 
@@ -102,8 +103,9 @@ export default function NuovoRitiroPage() {
               Nessuna spedizione in lavorazione da ritirare. Crea prima una spedizione.
             </div>
           ) : (
-            <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-              {spedizioni.map(s => (
+            <div><div style={{ padding: '8px 4px' }}><input type="text" value={cercaLdv} onChange={e=>setCercaLdv(e.target.value)} placeholder="Cerca LDV / numero spedizione..." style={{ width: '100%', padding: '8px 11px', border: '1px solid #e8e8e8', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box', color: '#1a1a1a' }} /></div>
+              <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+              {spedizioni.filter(s => !cercaLdv || String(s.numero||'').toLowerCase().includes(cercaLdv.toLowerCase())).map(s => (
                 <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 4px', borderBottom: '1px solid #f5f5f5', cursor: 'pointer' }}>
                   <input type="checkbox" checked={selezionate.has(s.id)} onChange={() => toggleSpedizione(s.id)} />
                   <div style={{ flex: 1 }}>
@@ -112,6 +114,7 @@ export default function NuovoRitiroPage() {
                   </div>
                 </label>
               ))}
+            </div>
             </div>
           )}
         </div>

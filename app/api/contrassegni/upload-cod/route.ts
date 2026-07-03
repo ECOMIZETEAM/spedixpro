@@ -24,6 +24,9 @@ export async function POST(req: NextRequest) {
       .ilike('numero', `%${ldv}%`)
       .limit(1).single()
     if (!spedizione || !spedizione.cliente_id) { errori++; continue }
+    // anti-duplicato: se questa spedizione e gia in una distinta, salta
+    const { data: giaInDistinta } = await supabase.from('distinte_contrassegni_righe').select('id').eq('spedizione_id', spedizione.id).limit(1)
+    if (giaInDistinta && giaInDistinta.length > 0) { continue }
     spedizioniProcessate++
     codSistema += Number(spedizione.contrassegno || 0)
     if (spedizione.stato_contrassegno !== 'pagato') codDaPagare += importoCod

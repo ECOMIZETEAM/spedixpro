@@ -18,7 +18,10 @@ const NAV = [
     { label: 'Nuovo Ritiro', href: '/dashboard/ritiri/nuovo' },
     { label: 'Elenco Ritiri', href: '/dashboard/ritiri/elenco' },
   ]},
-  { label: 'Distinte', href: '/dashboard/distinte', icon: '≡' },
+  { label: 'Distinte', icon: '≡', sub: [
+    { label: 'Crea Distinta', href: '/dashboard/distinte/crea' },
+    { label: 'Elenco Distinte', href: '/dashboard/distinte/elenco' },
+  ]},
   { label: 'Resi', href: '/dashboard/resi', icon: '↺', sub: [
     { label: 'Scansiona Resi', href: '/dashboard/resi/scansiona' },
     { label: 'Elenco Distinte Resi', href: '/dashboard/resi/distinte' },

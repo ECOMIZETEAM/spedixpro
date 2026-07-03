@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState, useEffect, useRef } from 'react'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
@@ -26,6 +26,9 @@ export default function DistinteContrassegniPage() {
     carica()
     fetch('/api/contrassegni/cod-files').then(r=>r.json()).then(d=>setCodFiles(d||[]))
   }, [])
+
+  // ricarica le distinte quando cambiano i filtri
+  useEffect(() => { carica() }, [filtri])
 
   async function carica() {
     setLoading(true)
@@ -66,6 +69,45 @@ export default function DistinteContrassegniPage() {
     if (fileRef.current) fileRef.current.value = ''
   }
 
+  function estraiRighe(d: any) {
+    return (d.distinte_contrassegni_righe || []).map((r: any) => ({
+      numero: r.numero_spedizione || '',
+      mittente: r.spedizioni?.mitt_nome || '',
+      destinatario: r.spedizioni?.dest_nome || r.spedizioni?.rif_destinatario || '',
+      data: r.spedizioni?.created_at ? new Date(r.spedizioni.created_at).toLocaleDateString('it-IT') : '',
+      iniziale: Number(r.importo_cod || 0),
+      rimborsato: Number(r.importo_cod || 0),
+    }))
+  }
+  async function stampaPDF(d: any) {
+    const { default: jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+    const doc = new jsPDF()
+    const righe = estraiRighe(d)
+    const dataDist = d.created_at ? new Date(d.created_at).toLocaleDateString('it-IT') : ''
+    doc.setFontSize(15); doc.setFont('helvetica','bold')
+    doc.text('Distinta contrassegni N. ' + d.numero + ' del ' + dataDist, 105, 20, { align: 'center' })
+    doc.setFontSize(11); doc.setFont('helvetica','normal')
+    doc.text('Cliente ' + (d.clienti?.ragione_sociale || ''), 14, 32)
+    autoTable(doc, {
+      startY: 40,
+      head: [['Spedizioni','Rif. Mittente','Destinatario','Data Spedizione','Contr. iniziale','Contr. rimborsato']],
+      body: righe.map((r: any) => [r.numero, r.mittente, r.destinatario, r.data, r.iniziale.toFixed(2) + ' €', r.rimborsato.toFixed(2) + ' €']),
+      styles: { fontSize: 9 }, headStyles: { fillColor: [255,255,255], textColor: [0,0,0], fontStyle: 'bold' },
+    })
+    const endY = (doc as any).lastAutoTable.finalY + 12
+    doc.setFont('helvetica','bold'); doc.setFontSize(11)
+    doc.text('Totale iniziale contrassegni: ' + Number(d.totale_iniziale||0).toFixed(2) + ' €', 14, endY)
+    doc.text('Totale contrassegni rimborsati: ' + Number(d.totale_rimborsato||0).toFixed(2) + ' €', 14, endY + 8)
+    doc.save('Distinta_contrassegni_' + d.numero + '.pdf')
+  }
+  async function esportaExcel(d: any) {
+    const { utils, writeFile } = await import('xlsx')
+    const righe = estraiRighe(d)
+    const ws = utils.json_to_sheet(righe.map((r: any) => ({ Spedizioni: r.numero, 'Rif. Mittente': r.mittente, Destinatario: r.destinatario, 'Data Spedizione': r.data, 'Contr. iniziale': r.iniziale, 'Contr. rimborsato': r.rimborsato })))
+    const wb = utils.book_new(); utils.book_append_sheet(wb, ws, 'Distinta ' + d.numero)
+    writeFile(wb, 'Distinta_contrassegni_' + d.numero + '.xlsx')
+  }
   async function confermaPagamento() {
     if (!metodoPagamento) { alert('Seleziona il tipo di pagamento'); return }
     setConfermando(true)
@@ -102,7 +144,7 @@ export default function DistinteContrassegniPage() {
           {!codFiles.length ? (
             <div style={{padding:'20px',textAlign:'center' as const,color:'#1a1a1a',fontSize:'13px'}}>Nessun file caricato</div>
           ) : (
-            <div style={{overflowX:'auto' as const}}>
+            <div style={{overflowX:'auto' as const, maxHeight:'300px', overflowY:'auto' as const}}>
               <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'11px'}}>
                 <thead><tr style={{background:'#f9fafb'}}>
                   {['File','Data','Righe','Sped.','COD file','COD sist.','COD da pag.','COD dist.','Err.'].map(h=>(
@@ -189,8 +231,8 @@ export default function DistinteContrassegniPage() {
                   <td style={{padding:'9px 14px',fontWeight:'700',color:'#f97316'}}>{d.numero}</td>
                   <td style={{padding:'9px 14px',color:d.stato==='pagata'?'#f97316':'#1a1a1a',fontWeight:'500'}}>{d.clienti?.ragione_sociale||'—'}</td>
                   <td style={{padding:'9px 14px',color:'#1a1a1a',fontSize:'12px'}}>{new Date(d.created_at).toLocaleString('it-IT')}</td>
-                  <td style={{padding:'9px 14px',fontWeight:'600'}}>€ {Number(d.totale_iniziale).toFixed(2)}</td>
-                  <td style={{padding:'9px 14px',fontWeight:'600'}}>€ {Number(d.totale_rimborsato).toFixed(2)}</td>
+                  <td style={{padding:'9px 14px',fontWeight:'600',color:'#1a1a1a'}}>€ {Number(d.totale_iniziale).toFixed(2)}</td>
+                  <td style={{padding:'9px 14px',fontWeight:'600',color:'#1a1a1a'}}>€ {Number(d.totale_rimborsato).toFixed(2)}</td>
                   <td style={{padding:'9px 14px'}}>
                     {d.metodo_pagamento && <span style={{background:'#e0f2fe',color:'#0369a1',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>{d.metodo_pagamento.toUpperCase()}</span>}
                   </td>
@@ -208,8 +250,8 @@ export default function DistinteContrassegniPage() {
                           ✓ Pagata
                         </button>
                       )}
-                      <button style={{padding:'4px 10px',background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',borderRadius:'4px',fontSize:'11px',fontWeight:'600',cursor:'pointer'}}>🖨️ Stampa</button>
-                      <button style={{padding:'4px 10px',background:'#f0fdf4',color:'#15803d',border:'1px solid #86efac',borderRadius:'4px',fontSize:'11px',fontWeight:'600',cursor:'pointer'}}>📊 Excel</button>
+                      <button onClick={()=>stampaPDF(d)} style={{padding:'4px 10px',background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',borderRadius:'4px',fontSize:'11px',fontWeight:'600',cursor:'pointer'}}>🖨️ Stampa</button>
+                      <button onClick={()=>esportaExcel(d)} style={{padding:'4px 10px',background:'#f0fdf4',color:'#15803d',border:'1px solid #86efac',borderRadius:'4px',fontSize:'11px',fontWeight:'600',cursor:'pointer'}}>📊 Excel</button>
                     </div>
                   </td>
                 </tr>
