@@ -102,7 +102,7 @@ export default function NuovoRitiroPage() {
               Nessuna spedizione in lavorazione da ritirare. Crea prima una spedizione.
             </div>
           ) : (
-            <div style={{ padding: '8px 4px' }}><input type="text" value={cercaLdv} onChange={e=>setCercaLdv(e.target.value)} placeholder="Cerca LDV / numero spedizione..." style={{ width: '100%', padding: '8px 11px', border: '1px solid #e8e8e8', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }} /></div>
+            <div><div style={{ padding: '8px 4px' }}><input type="text" value={cercaLdv} onChange={e=>setCercaLdv(e.target.value)} placeholder="Cerca LDV / numero spedizione..." style={{ width: '100%', padding: '8px 11px', border: '1px solid #e8e8e8', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }} /></div>
               <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
               {spedizioni.filter(s => !cercaLdv || String(s.numero||'').toLowerCase().includes(cercaLdv.toLowerCase())).map(s => (
                 <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 4px', borderBottom: '1px solid #f5f5f5', cursor: 'pointer' }}>
@@ -113,6 +113,7 @@ export default function NuovoRitiroPage() {
                   </div>
                 </label>
               ))}
+            </div>
             </div>
           )}
         </div>
