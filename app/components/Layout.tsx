@@ -87,8 +87,14 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
     return init
   })
 
-  function toggleMenu(href: string) {
-    setOpenMenus(prev => ({ ...prev, [href]: !prev[href] }))
+  function toggleMenu(href: string, el?: HTMLElement) {
+    setOpenMenus(prev => {
+      const nuovo = { ...prev, [href]: !prev[href] }
+      if (!prev[href] && el) {
+        setTimeout(() => { el.scrollIntoView({ behavior: 'smooth', block: 'nardo' as any }); const nav = el.closest('nav'); if (nav) { const r = el.getBoundingClientRect(); } }, 60)
+      }
+      return nuovo
+    })
   }
 
   return (
