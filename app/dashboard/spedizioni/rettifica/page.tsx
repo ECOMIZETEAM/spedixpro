@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState, useEffect, useRef } from 'react'
 
 export default function RettificaCostiPage() {
@@ -118,7 +118,7 @@ export default function RettificaCostiPage() {
           {!files.length ? (
             <div style={{padding:'20px',textAlign:'center' as const,color:'#1a1a1a',fontSize:'13px'}}>Nessun file caricato</div>
           ) : (
-            <div style={{overflowX:'auto' as const}}>
+            <div style={{overflowX:'auto' as const, maxHeight:'340px', overflowY:'auto' as const}}>
               <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
                 <thead><tr style={{background:'#f9fafb'}}>
                   {['#','File','Data caricamento','N. Tot Spedizioni','N. processate','N. trovate','N. scartati','N. da rettificare'].map(h=>(

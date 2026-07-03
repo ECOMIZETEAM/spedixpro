@@ -162,8 +162,7 @@ export default function NuovaSpedizionePage() {
     router.push('/dashboard/spedizioni?success='+data.numero)
   }
 
-  const pesoVol0 = colli[0]?.lunghezza&&colli[0]?.larghezza&&colli[0]?.altezza
-    ? ((+colli[0].lunghezza * +colli[0].larghezza * +colli[0].altezza)/5000).toFixed(2) : null
+  
 
   return (
     <div>
@@ -329,11 +328,6 @@ export default function NuovaSpedizionePage() {
                 ))}
               </div>
 
-              {pesoVol0 && (
-                <div style={{background:'#f5f5f5',borderRadius:'5px',padding:'6px 10px',fontSize:'11.5px',color:'#1a1a1a',marginBottom:'14px'}}>
-                  Collo 1 — Peso vol.: <strong>{pesoVol0}kg</strong> · Fatturato: <strong>{Math.max(+peso,+pesoVol0).toFixed(2)}kg</strong>
-                </div>
-              )}
 
               <div style={{marginBottom:'10px'}}>
                 <label style={lbl}>Contenuto</label>
