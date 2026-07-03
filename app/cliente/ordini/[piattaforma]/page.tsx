@@ -55,6 +55,7 @@ export default function OrdiniPage() {
 
   const [spedisciCon, setSpedisciCon] = useState('auto')
   const [sms, setSms] = useState('no')
+  const [corrieri, setCorrieri] = useState<any[]>([])
 
   async function carica() {
     setLoading(true)
@@ -68,6 +69,7 @@ export default function OrdiniPage() {
     setLoading(false)
   }
   useEffect(()=>{ carica() }, [piattaforma])
+  useEffect(()=>{ fetch('/api/cliente/corrieri').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d?.corrieri)?d.corrieri:[])).catch(()=>{}) }, [])
 
   async function sincronizza() {
     const attiva = integrazioni.find((i:any)=>i.stato==='attivo')
@@ -230,6 +232,7 @@ export default function OrdiniPage() {
           <span style={{fontSize:'13px',fontWeight:700,color:'#6b7280'}}>Spedisci con:</span>
           <select value={spedisciCon} onChange={e=>setSpedisciCon(e.target.value)} style={{...inp,width:'auto',minWidth:'260px'}}>
             <option value="auto">Assegnazione automatica (prezzo minore)</option>
+            {corrieri.map((c:any)=><option key={c.id} value={c.id}>{c.nome}</option>)}
           </select>
           <span style={{fontSize:'13px',fontWeight:700,color:'#6b7280'}}>Notifiche SMS</span>
           <select value={sms} onChange={e=>setSms(e.target.value)} style={{...inp,width:'auto',minWidth:'80px'}}>

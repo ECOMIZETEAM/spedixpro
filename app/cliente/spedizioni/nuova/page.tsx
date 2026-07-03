@@ -202,6 +202,14 @@ export default function NuovaSpedizioneCliente() {
         })
       } catch {}
     }
+    if (daOrdine) {
+      try {
+        await fetch('/api/ordini/segna-spedito', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ ordine_id: daOrdine, spedizione_id: data.spedizioneId||null })
+        })
+      } catch {}
+    }
     setCreating(false)
     setSuccesso({numero:data.numero||'—', id:data.spedizioneId||''})
   }
