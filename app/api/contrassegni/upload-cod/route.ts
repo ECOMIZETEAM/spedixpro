@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 
 export async function POST(req: NextRequest) {
@@ -15,9 +15,11 @@ export async function POST(req: NextRequest) {
   let codDaPagare = 0
   let errori = 0
 
-  for (const riga of righe) {
-    const ldv = riga.ldv || riga.LDV || riga['Lettera di Vettura'] || riga['N. Spedizione']
-    const importoCod = parseFloat(riga.importo || riga.ImportoCOD || riga['Importo COD'] || riga['Contrassegno'] || 0)
+  for (const rigaRaw of righe) {
+    const riga: any = {}
+    for (const kk in rigaRaw) { riga[String(kk).trim().toLowerCase()] = (rigaRaw as any)[kk] }
+    const ldv = riga['ldv'] || riga['lettera di vettura'] || riga['n. spedizione'] || riga['numero']
+    const importoCod = parseFloat(riga['importo'] || riga['importocod'] || riga['importo cod'] || riga['contrassegno'] || 0)
     if (!ldv) { errori++; continue }
     codFile += importoCod
 
