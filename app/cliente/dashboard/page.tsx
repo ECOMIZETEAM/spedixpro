@@ -4,7 +4,9 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 export default function ClienteDashboard() {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [notifiche, setNotifiche] = useState<any[]>([])
   useEffect(() => {
+    fetch('/api/notifiche/mie').then(r=>r.json()).then(d=>setNotifiche(Array.isArray(d)?d:[])).catch(()=>{})
     fetch('/api/cliente/dashboard').then(r=>r.json()).then(d=>{setData(d);setLoading(false)}).catch(()=>setLoading(false))
   }, [])
   if (loading) return <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a',fontSize:'14px'}}>Caricamento...</div>
