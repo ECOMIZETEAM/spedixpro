@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
@@ -12,6 +12,8 @@ const PROVINCE = ['AG','AL','AN','AO','AR','AP','AT','AV','BA','BT','BL','BN','B
 
 export default function NuovoClientePage() {
   const router = useRouter()
+  const [staffList, setStaffList] = useState<any[]>([])
+  useEffect(() => { fetch('/api/staff').then(r=>r.json()).then((d:any[])=>{ const ruoliOk=['agente','operatore','admin']; const arr=(Array.isArray(d)?d:[]).filter(u=>ruoliOk.includes((u.ruolo||'').toLowerCase())).map(u=>({...u, _nome:((u.nome||'')+' '+(u.cognome||'')).trim()})).filter(u=>u._nome).sort((a,b)=>a._nome.localeCompare(b._nome)); setStaffList(arr) }).catch(()=>setStaffList([])) }, [])
   const [saving, setSaving] = useState(false)
   const [errore, setErrore] = useState('')
   const [listini, setListini] = useState<any[]>([])
