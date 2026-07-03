@@ -134,6 +134,7 @@ export async function spediamoproCreateShipment(
   raw: any
 }> {
   const token = await getSpediamoproToken(authcode)
+  console.log('[ACCEPT] courierService:', JSON.stringify(params.quotation.courierService), 'service:', params.quotation.service)
 
   const res = await fetch(`${BASE_URL}/quotations/accept`, {
     method: 'POST',
