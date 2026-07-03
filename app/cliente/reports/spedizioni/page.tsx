@@ -32,6 +32,17 @@ export default function ReportSpedizioniPage() {
 
   const setF = (k: string, v: string) => setFiltri(f => ({...f, [k]: v}))
 
+  async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
+    const filtriTxt = 'dalla_data=' + (filtri.dal||'') + ' alla_data=' + (filtri.al||'')
+    const r = await fetch('/api/reports/salva', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo: 'spedizioni', filtri: filtriTxt, formato, fileBase64, nomeFile })
+    })
+    const j = await r.json()
+    if (!j.success) { alert('Errore salvataggio report: ' + (j.error||'')); return }
+    const lista = await fetch('/api/reports/lista?tipo=spedizioni').then(x=>x.json())
+    setReports(Array.isArray(lista) ? lista : [])
+  }
   async function generaReport() {
     setGenerating(true)
     const params = new URLSearchParams()
