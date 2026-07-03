@@ -55,6 +55,7 @@ export async function POST(req: NextRequest) {
 
   // Recupera immagini prodotti (una sola chiamata per tutti i product_id)
   const prodottiImg = new Map<string, string>()
+  let imgErr = ''
   try {
     const ids = Array.from(new Set(
       ordini.flatMap((o: any) => (o.line_items || []).map((li: any) => li.product_id).filter(Boolean))
@@ -64,6 +65,7 @@ export async function POST(req: NextRequest) {
       const rp = await fetch(`https://${shop}/admin/api/${API_VERSION}/products.json?ids=${batch}&fields=id,image`, {
         headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
       })
+      if (!rp.ok) { imgErr = 'products.json HTTP '+rp.status }
       if (rp.ok) {
         const dp = await rp.json()
         for (const p of dp.products || []) {
@@ -118,5 +120,5 @@ export async function POST(req: NextRequest) {
     .update({ ultimo_sync: new Date().toISOString(), ordini_totali: ordini.length })
     .eq('id', integrazioneId)
 
-  return NextResponse.json({ ok: true, letti: ordini.length, importati })
+  return NextResponse.json({ ok: true, letti: ordini.length, importati, immagini: prodottiImg.size, img_errore: imgErr || undefined })
 }

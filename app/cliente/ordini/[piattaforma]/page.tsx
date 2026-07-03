@@ -83,7 +83,7 @@ export default function OrdiniPage() {
       })
       const d = await res.json()
       if (d.error) setMsg('Errore: '+d.error)
-      else setMsg('Sincronizzati '+d.importati+' ordini (letti '+d.letti+')')
+      else setMsg('Sincronizzati '+d.importati+' ordini (letti '+d.letti+', immagini '+(d.immagini??0)+(d.img_errore?', ERR img: '+d.img_errore:'')+')')
       carica()
     } catch { setMsg('Errore di connessione') }
     setSincronizzando(false)
@@ -187,12 +187,16 @@ export default function OrdiniPage() {
         }).then(r=>r.json()).catch(()=>null)
         if (!Array.isArray(tarRes) || !tarRes.length) { errori.push(num+': nessuna tariffa'); continue }
         let t = null
-        if (spedisciCon && spedisciCon!=='auto') t = tarRes.find((x:any)=>x.corriere_id===spedisciCon || x._corriere_id===spedisciCon)
+        if (spedisciCon && spedisciCon!=='auto') {
+          t = tarRes.find((x:any)=>x.corriere_id===spedisciCon || x._corriere_id===spedisciCon)
+          if (!t) { errori.push(num+': corriere scelto non disponibile per questa destinazione'); continue }
+        }
         if (!t) t = tarRes[0]
         const creaRes = await fetch('/api/spedizioni/crea', {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({
             clienteId:cli.id, carrierCode:t.carrierCode, contractCode:t.contractCode, totalPrice:t.total_price,
+            _corriere_id: t._corriere_id || t.corriere_id || null, _spediamopro_quotation: t._spediamopro_quotation || null,
             packages, colliDettaglio:[{lunghezza:'20',larghezza:'15',altezza:'10'}],
             shipFrom, shipTo, notes:'', insuranceValue:0, codValue:0,
             contenuto: arts.map((a:any)=>a.nome).join(', ').slice(0,100), tipoContenuto:'Merce destinata alla vendita', valoreMerce:String(o.totale||'')
