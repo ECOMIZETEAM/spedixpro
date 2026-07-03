@@ -63,6 +63,7 @@ export default function NuovoRitiroPage() {
     if (!selezionate.size) { setErrore('Seleziona almeno una spedizione da ritirare'); return }
     if (!mittNome || !mittIndirizzo || !mittCitta || !mittCap) { setErrore('Compila tutti i dati mittente'); return }
     if (!dataRitiro) { setErrore('Seleziona una data di ritiro'); return }
+    { const gg = new Date(dataRitiro + 'T00:00:00').getDay(); if (gg === 0 || gg === 6) { setErrore('I ritiri non sono disponibili nei giorni festivi o nel weekend. Scegli un giorno lavorativo (lun-ven).'); return } }
     setSaving(true); setErrore('')
 
     const res = await fetch('/api/ritiri/crea', {
@@ -138,6 +139,9 @@ export default function NuovoRitiroPage() {
             <div>
               <label style={lbl}>Data Ritiro *</label>
               <input type="date" value={dataRitiro} onChange={e => setDataRitiro(e.target.value)} style={inp} />
+              {dataRitiro && [0,6].includes(new Date(dataRitiro + 'T00:00:00').getDay()) && (
+                <div style={{marginTop:'6px',fontSize:'12px',color:'#dc2626',fontWeight:'600'}}>⚠️ Sabato e domenica i ritiri non sono disponibili. Scegli un giorno lavorativo.</div>
+              )}
             </div>
             <div>
               <label style={lbl}>Fascia Orario</label>
