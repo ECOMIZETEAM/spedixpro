@@ -97,6 +97,7 @@ export default function OrdiniPage() {
       provincia: d.provincia||'', cap: d.cap||'', paese: d.paese||'IT',
       email: d.email||'', telefono: d.telefono||'',
     })
+    if (spedisciCon && spedisciCon !== 'auto') qs.set('corriere', spedisciCon)
     router.push('/cliente/spedizioni/nuova?'+qs.toString())
   }
 

@@ -63,12 +63,14 @@ export default function NuovaSpedizioneCliente() {
   const [vista, setVista] = useState<'dati'|'contratto'>('dati')
   const [successo, setSuccesso] = useState<{numero:string,id:string}|null>(null)
   const [daOrdine, setDaOrdine] = useState('')
+  const [corrierePref, setCorrierePref] = useState('')
 
   // Precompilazione da ordine ecommerce (query param ?da_ordine=&nome=&...)
   useEffect(() => {
     const q = new URLSearchParams(window.location.search)
     if (!q.get('da_ordine') && !q.get('nome')) return
     setDaOrdine(q.get('da_ordine') || '')
+    setCorrierePref(q.get('corriere') || '')
     setDest(d => ({...d,
       nome: q.get('nome') || d.nome,
       indirizzo: q.get('indirizzo') || d.indirizzo,
@@ -151,13 +153,16 @@ export default function NuovaSpedizioneCliente() {
     if (data.error) { setErrore(data.error); return }
     if (!Array.isArray(data)||!data.length) { setErrore('Nessuna tariffa disponibile'); return }
     setTariffe(data)
-    if (Array.isArray(data) && data.length) setSelected(data[0])
+    if (Array.isArray(data) && data.length) {
+      const pref = corrierePref ? data.find((t:any)=>t.corriere_id===corrierePref || t._corriere_id===corrierePref) : null
+      setSelected(pref || data[0])
+    }
     setVista('contratto')
   }
 
   async function scaricaEtichetta(id:string) {
     try {
-      const res = await fetch('/dashboard/spedizioni/'+id+'/etichetta')
+      const res = await fetch('/api/spedizioni/etichetta?id='+id)
       if (!res.ok) { alert('Errore: etichetta non generata'); return }
       const blob = await res.blob()
       const ct = res.headers.get('content-type')||''
