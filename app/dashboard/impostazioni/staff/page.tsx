@@ -18,6 +18,8 @@ export default function StaffPage() {
   useEffect(() => { carica() }, [])
 
   const filtrati = utenti.filter(u => {
+    const r = (u.ruolo||'').toLowerCase()
+    if (r === 'cliente' || r === 'master') return false
     if (!cerca) return true
     const t = cerca.toLowerCase()
     return (u.nome||'').toLowerCase().includes(t) || (u.email||'').toLowerCase().includes(t) || (u.ruolo||'').toLowerCase().includes(t)
@@ -59,7 +61,7 @@ export default function StaffPage() {
         </div>
         <div style={{ overflowX:'auto' }}>
           <table style={{ width:'100%', borderCollapse:'collapse' }}>
-            <thead><tr>{['Nome','Email','Telefono','Role','Ultimo accesso','Azioni'].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+            <thead><tr>{['Nome','Email','Telefono','Ruolo','Ultimo accesso','Azioni'].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
             <tbody>
               {loading ? (
                 <tr><td colSpan={6} style={{ ...td, textAlign:'center', color:'#999' }}>Caricamento...</td></tr>
@@ -74,7 +76,7 @@ export default function StaffPage() {
                   <td style={{ ...td, whiteSpace:'nowrap' }}>{u.ultimo_accesso ? new Date(u.ultimo_accesso).toLocaleString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-'}</td>
                   <td style={td}>
                     <div style={{ display:'flex', gap:'6px' }}>
-                      <a href={'/dashboard/impostazioni/staff/modifica/' + u.id} style={{ padding:'6px 10px', background:'#0ea5e9', color:'#fff', borderRadius:'5px', fontSize:'13px', textDecoration:'none' }} title="Modifica">&#8635;</a>
+                      
                       <button onClick={()=>elimina(u.id)} style={{ padding:'6px 10px', background:'#dc2626', color:'#fff', border:'none', borderRadius:'5px', fontSize:'13px', cursor:'pointer' }} title="Elimina">&#128465;</button>
                     </div>
                   </td>
