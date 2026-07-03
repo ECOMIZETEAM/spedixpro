@@ -309,8 +309,7 @@ async function apriTracking(s: any) {
                         <div style={{display:'flex',gap:'4px'}}>
                           <a href={`/cliente/spedizioni/${s.id}/etichetta`} target="_blank" download
                             style={{padding:'4px 8px',background:'#eff6ff',color:'#1d4ed8',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #bfdbfe'}} title="Etichetta">🖨️</a>
-                          <button onClick={()=>apriTracking(s)}
-                            style={{padding:'4px 8px',background:'#f0fdf4',color:'#15803d',borderRadius:'4px',fontSize:'14px',border:'1px solid #86efac',cursor:'pointer'}} title="Tracking">📍</button>
+                  
                           <button onClick={()=>elimina(s.id,s.numero)} disabled={eliminando===s.id}
                             style={{padding:'4px 8px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'14px',border:'1px solid #fecaca',cursor:'pointer',opacity:eliminando===s.id?0.5:1}} title="Elimina">🗑️</button>
                         </div>
