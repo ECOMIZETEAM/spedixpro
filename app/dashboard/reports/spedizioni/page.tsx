@@ -103,7 +103,7 @@ export default function ReportSpedizioniPage() {
           `${s.dest_citta} (${s.dest_provincia})`, `${s.peso_reale}kg`, s.colli,
           Number(s.contrassegno)>0?`€${s.contrassegno}`:'—',
           new Date(s.created_at).toLocaleDateString('it-IT'),
-          s.stato.replace(/_/g,' '), `€${Number(s.costo_totale).toFixed(2)}`
+          s.stato.replace(/_/g,' '), `EUR ${Number(s.costo_totale).toFixed(2)}`, (s.prezzo_corriere != null ? `EUR ${Number(s.prezzo_corriere).toFixed(2)}` : '-')
         ]),
         styles: { fontSize: 7 },
         headStyles: { fillColor: [249, 115, 22] },
