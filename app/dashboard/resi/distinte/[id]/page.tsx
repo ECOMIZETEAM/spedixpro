@@ -13,7 +13,32 @@ export default function DettaglioDistintaReso() {
     fetch('/api/resi/distinte/' + id).then(r => r.json()).then(d => { setDist(d); setLoading(false) })
   }, [id])
 
-  function stampa() { window.open('/api/resi/distinte/' + id + '/pdf', '_blank') }
+  async function stampa() {
+    const { default: jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+    const doc = new jsPDF()
+    const vv = Array.isArray(dist.voci) ? dist.voci : []
+    const dataD = dist.created_at ? new Date(dist.created_at).toLocaleDateString('it-IT') : ''
+    doc.setFontSize(15); doc.setFont('helvetica','bold')
+    doc.text('N Dist. reso ' + dist.numero + ' del ' + dataD, 105, 18, { align: 'center' })
+    let totale = 0
+    const body = vv.map((v: any) => {
+      const cr = Number(v.costo_reso || v.costo_totale || 0); totale += cr
+      return [v.numero || '', v.mitt_nome || '', (v.dest_nome || '') + ', ' + (v.dest_citta || ''), Number(v.peso_reale || v.peso || 0).toFixed(0), '0', v.colli || 1, Number(v.contrassegno || 0).toFixed(2) + ' €', cr.toFixed(2) + ' €']
+    })
+    autoTable(doc, {
+      startY: 28,
+      head: [['Spedizioni','Rif. Mittente','Destinatario','Peso','PesoVol.','Colli','Contr.','Costo Reso']],
+      body,
+      styles: { fontSize: 9, cellPadding: 2 },
+      headStyles: { fillColor: [255,255,255], textColor: [0,0,0], fontStyle: 'bold' },
+    })
+    const endY = (doc as any).lastAutoTable.finalY + 12
+    doc.setFont('helvetica','bold'); doc.setFontSize(11)
+    doc.text('Totale Spedizioni: ' + vv.length, 14, endY)
+    doc.text('Costo totale resi: ' + totale.toFixed(2), 14, endY + 7)
+    doc.save('Distinta_reso_' + dist.numero + '.pdf')
+  }
 
   const th = { padding: '10px 12px', textAlign: 'left' as const, fontSize: '12px', fontWeight: '700', color: '#1a1a1a', borderBottom: '2px solid #e5e7eb', whiteSpace: 'nowrap' as const }
   const td = { padding: '10px 12px', fontSize: '13px', color: '#1a1a1a', borderBottom: '1px solid #f0f0f0' }
