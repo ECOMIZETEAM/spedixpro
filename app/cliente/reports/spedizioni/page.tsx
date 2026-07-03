@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import DateRangePicker from '@/app/components/DateRangePicker'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -31,6 +32,17 @@ export default function ReportSpedizioniPage() {
 
   const setF = (k: string, v: string) => setFiltri(f => ({...f, [k]: v}))
 
+  async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
+    const filtriTxt = 'dalla_data=' + (filtri.dal||'') + ' alla_data=' + (filtri.al||'')
+    const r = await fetch('/api/reports/salva', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo: 'spedizioni', filtri: filtriTxt, formato, fileBase64, nomeFile })
+    })
+    const j = await r.json()
+    if (!j.success) { alert('Errore salvataggio report: ' + (j.error||'')); return }
+    const lista = await fetch('/api/reports/lista?tipo=spedizioni').then(x=>x.json())
+    setReports(Array.isArray(lista) ? lista : [])
+  }
   async function generaReport() {
     setGenerating(true)
     const params = new URLSearchParams()
@@ -70,7 +82,9 @@ export default function ReportSpedizioniPage() {
       const ws = utils.json_to_sheet(rows)
       const wb = utils.book_new()
       utils.book_append_sheet(wb, ws, 'Spedizioni')
-      writeFile(wb, `report_spedizioni_${filtri.dal}_${filtri.al}.${formato === 'xlsx' ? 'xlsx' : 'csv'}`)
+      const XLSX = await import('xlsx')
+      const b64 = XLSX.write(wb, { bookType: formato === 'csv' ? 'csv' : 'xlsx', type: 'base64' })
+      await salvaReport(b64, 'report_spedizioni_' + filtri.dal + '_' + filtri.al + '.' + (formato === 'xlsx' ? 'xlsx' : 'csv'), formato)
     } else if (formato === 'pdf') {
       const { default: jsPDF } = await import('jspdf')
       const { default: autoTable } = await import('jspdf-autotable')
@@ -122,7 +136,8 @@ export default function ReportSpedizioniPage() {
       doc.setFont('helvetica','bold')
       doc.text('TOTALE', col1, finalY + 24)
       doc.text(`€ ${totale.toFixed(2)}`, col2, finalY + 24, {align:'right'})
-      doc.save(`report_spedizioni_${filtri.dal}_${filtri.al}.pdf`)
+      const pdfB64 = doc.output('datauristring')
+      await salvaReport(pdfB64, 'report_spedizioni_' + filtri.dal + '_' + filtri.al + '.pdf', 'pdf')
     } else if (formato === 'zip') {
       const { default: JSZip } = await import('jszip' as any)
       const zip = new JSZip()
@@ -191,11 +206,7 @@ export default function ReportSpedizioniPage() {
         {/* Riga 2 */}
         <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr',gap:'12px',marginBottom:'12px'}}>
           <div><label style={lbl}>Data</label>
-            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-              <input type="date" value={filtri.dal} onChange={e=>setF('dal',e.target.value)} style={inp}/>
-              <span style={{color:'#1a1a1a'}}>—</span>
-              <input type="date" value={filtri.al} onChange={e=>setF('al',e.target.value)} style={inp}/>
-            </div>
+            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} />
           </div>
           <div><label style={lbl}>Agente</label>
             <select value={filtri.agente} onChange={e=>setF('agente',e.target.value)} style={sel}>
@@ -260,7 +271,7 @@ export default function ReportSpedizioniPage() {
                 <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:'600'}}>{reports.length - i}</td>
                 <td style={{padding:'9px 14px',color:'#1a1a1a',fontSize:'12px'}}>{new Date(r.created_at).toLocaleString('it-IT')}</td>
                 <td style={{padding:'9px 14px',color:'#f97316',fontSize:'12px'}}>
-                  {Object.entries(r.filtri||{}).filter(([,v])=>v).map(([k,v])=>`${k}=${v}`).join('\n').split('\n').map((f,i)=><div key={i}>{f}</div>)}
+                  {String(r.filtri||'').split(' ').map((f: string, i: number)=><div key={i}>{f}</div>)}
                 </td>
                 <td style={{padding:'9px 14px'}}>
                   <span style={{background:'#e0f2fe',color:'#0369a1',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>{r.formato}</span>
@@ -269,7 +280,7 @@ export default function ReportSpedizioniPage() {
                 <td style={{padding:'9px 14px',color:'#1a1a1a',fontSize:'12px'}}>{r.size||'—'}</td>
                 <td style={{padding:'9px 14px',color:'#16a34a',fontSize:'12px',fontWeight:'500'}}>{r.stato}</td>
                 <td style={{padding:'9px 14px'}}>
-                  <span style={{color:'#f97316',fontWeight:'600',fontSize:'13px',cursor:'pointer'}} onClick={generaReport}>Scarica</span>
+                  <a href={r.file_url} target="_blank" rel="noopener noreferrer" download style={{color:'#f97316',fontWeight:'600',fontSize:'13px',cursor:'pointer',textDecoration:'none'}}>Scarica</a>
                 </td>
               </tr>
             ))}
