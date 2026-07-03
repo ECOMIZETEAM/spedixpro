@@ -51,6 +51,7 @@ export default function CreaDistintaPage() {
 
   async function creaDistinta() {
     if (!selezionate.size) { alert('Seleziona almeno una spedizione'); return }
+    if (!corriereId) { alert('Seleziona un Contratto: ogni distinta deve essere di un solo contratto'); return }
     setCreando(true)
     const res = await fetch('/api/distinte/spedizioni', {
       method: 'POST',
