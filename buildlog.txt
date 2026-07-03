@@ -11,15 +11,15 @@
 
 ÔÜá The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
   Creating an optimized production build ...
-Ô£ô Compiled successfully in 26.9s
+Ô£ô Compiled successfully in 38.1s
   Skipping validation of types
-  Finished TypeScript config validation in 105ms ...
+  Finished TypeScript config validation in 211ms ...
   Collecting page data using 7 workers ...
-  Generating static pages using 7 workers (0/163) ...
-  Generating static pages using 7 workers (40/163) 
-  Generating static pages using 7 workers (81/163) 
-  Generating static pages using 7 workers (122/163) 
-Ô£ô Generating static pages using 7 workers (163/163) in 1761ms
+  Generating static pages using 7 workers (0/164) ...
+  Generating static pages using 7 workers (41/164) 
+  Generating static pages using 7 workers (82/164) 
+  Generating static pages using 7 workers (123/164) 
+Ô£ô Generating static pages using 7 workers (164/164) in 2.7s
   Finalizing page optimization ...
 
 Route (app)
@@ -101,6 +101,7 @@ Route (app)
 Ôö£ ãÆ /api/movimenti/crea
 Ôö£ ãÆ /api/movimenti/lista
 Ôö£ ãÆ /api/notifiche
+Ôö£ ãÆ /api/notifiche/mie
 Ôö£ ãÆ /api/ordini/aggiorna-stato
 Ôö£ ãÆ /api/ordini/elimina
 Ôö£ ãÆ /api/ordini/importa

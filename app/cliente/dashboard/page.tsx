@@ -4,7 +4,9 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 export default function ClienteDashboard() {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [notifiche, setNotifiche] = useState<any[]>([])
   useEffect(() => {
+    fetch('/api/notifiche/mie').then(r=>r.json()).then(d=>setNotifiche(Array.isArray(d)?d:[])).catch(()=>{})
     fetch('/api/cliente/dashboard').then(r=>r.json()).then(d=>{setData(d);setLoading(false)}).catch(()=>setLoading(false))
   }, [])
   if (loading) return <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a',fontSize:'14px'}}>Caricamento...</div>
@@ -34,6 +36,20 @@ export default function ClienteDashboard() {
         <h1 style={{fontSize:'18px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Ciao, {data.clienteNome}</h1>
         <p style={{color:'#999',fontSize:'12px',margin:'4px 0 0'}}>{new Date().toLocaleDateString('it-IT',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
       </div>
+      {notifiche.length > 0 && (
+        <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
+          {notifiche.map((n:any)=>(
+            <div key={n.id} style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'8px',padding:'14px 18px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'6px'}}>
+                <span style={{fontSize:'16px'}}>🔔</span>
+                <span style={{fontWeight:'700',color:'#1e3a8a',fontSize:'15px'}}>{n.oggetto}</span>
+                <span style={{marginLeft:'auto',fontSize:'11px',color:'#64748b'}}>{new Date(n.created_at).toLocaleDateString('it-IT')}</span>
+              </div>
+              <div style={{color:'#1e293b',fontSize:'13px'}} dangerouslySetInnerHTML={{__html: n.messaggio || ''}} />
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr 1fr',gap:'12px'}}>
         <div style={kpiCardDark}>
           <div style={kpiIconDark}>📦</div>

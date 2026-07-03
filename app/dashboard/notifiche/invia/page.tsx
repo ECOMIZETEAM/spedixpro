@@ -62,6 +62,16 @@ export default function InviaNotifica() {
 
           <div style={{ fontWeight:'700', color:'#1a1a1a', marginBottom:'10px', fontSize:'14px' }}>Messaggio</div>
           <div style={{ display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'8px' }}>
+            <select onChange={e=>{ format('formatBlock', e.target.value); e.target.selectedIndex=0 }} style={{ ...btnTool, cursor:'pointer' }}>
+              <option value="">Normal text</option>
+              <option value="h1">Heading 1</option>
+              <option value="h2">Heading 2</option>
+              <option value="h3">Heading 3</option>
+              <option value="h4">Heading 4</option>
+              <option value="h5">Heading 5</option>
+              <option value="h6">Heading 6</option>
+              <option value="p">Paragrafo</option>
+            </select>
             <button onClick={()=>format('bold')} style={{ ...btnTool, fontWeight:'700' }}>Bold</button>
             <button onClick={()=>format('italic')} style={{ ...btnTool, fontStyle:'italic' }}>Italic</button>
             <button onClick={()=>format('underline')} style={{ ...btnTool, textDecoration:'underline' }}>Underline</button>
