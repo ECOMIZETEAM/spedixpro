@@ -27,6 +27,7 @@ const FILTRI_DEFAULT = {
 export default function SpedizioniPage() {
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [spedizioniFiltrate, setSpedizioniFiltrate] = useState<any[]>([])
+  const [notifica, setNotifica] = useState<string>('')
   const [corrieri, setCorrieri] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -119,15 +120,25 @@ async function apriTracking(s: any) {
   async function elimina(id: string, numero: string) {
     if (!confirm(`Eliminare la spedizione ${numero}?`)) return
     setEliminando(id)
-    await fetch(`/api/spedizioni/elimina?id=${id}`, { method: 'DELETE' })
+    const res = await fetch(`/api/spedizioni/elimina?id=${id}`, { method: 'DELETE' })
+    const j = await res.json().catch(() => ({}))
     setEliminando(null)
-    caricaTutte()
+    if (res.ok && j.success) {
+      setNotifica('Spedizione cancellata')
+      caricaTutte()
+    } else {
+      setNotifica('Impossibile eliminare la spedizione. Hai bisogno del permesso per eseguire questa azione!')
+    }
+    setTimeout(() => setNotifica(''), 4000)
   }
 
   const btnFiltri = {padding:'7px 18px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700' as const,cursor:'pointer',whiteSpace:'nowrap' as const}
 
   return (
     <div>
+      {notifica && (
+        <div style={{position:'fixed',top:'20px',right:'20px',zIndex:9999,background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:'8px',padding:'12px 18px',fontSize:'13px',fontWeight:'700',boxShadow:'0 4px 12px rgba(0,0,0,0.15)'}}>{notifica}</div>
+      )}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'16px'}}>
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Lista Spedizioni</h1>
         <a href="/dashboard/spedizioni/nuova" style={{background:'#f97316',color:'#fff',padding:'8px 18px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>+ Nuova Spedizione</a>
