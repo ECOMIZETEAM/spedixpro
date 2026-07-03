@@ -14,12 +14,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{id:s
 
   // Caso SpediamoPro (o altri): etichetta già salvata come data URI in etichetta_url
   let pdfBuffer: Buffer | null = null
-
+  let mimeType = 'application/pdf'
   if (labelData) {
     pdfBuffer = Buffer.from(labelData, 'base64')
-  } else if (sped.etichetta_url && sped.etichetta_url.startsWith('data:application/pdf;base64,')) {
-    const base64Part = sped.etichetta_url.split(',')[1]
-    if (base64Part) pdfBuffer = Buffer.from(base64Part, 'base64')
+  } else if (sped.etichetta_url) {
+    const m = sped.etichetta_url.match(/^data:(application\/pdf|image\/[\w.+-]+);base64,(.+)$/s)
+    if (m) {
+      mimeType = m[1]
+      pdfBuffer = Buffer.from(m[2], 'base64')
+    }
   }
 
   if (!pdfBuffer) {
@@ -32,10 +35,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{id:s
     `, { headers: { 'Content-Type': 'text/html' } })
   }
 
+  const ext = mimeType === 'application/pdf' ? 'pdf' : (mimeType.split('/')[1] || 'bin')
   return new NextResponse(pdfBuffer, {
     headers: {
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `inline; filename="etichetta-${sped.numero}.pdf"`,
+      'Content-Type': mimeType,
+      'Content-Disposition': `inline; filename="etichetta-${sped.numero}.${ext}"`,
     }
   })
 }

@@ -264,7 +264,13 @@ export async function POST(req: NextRequest) {
       let etichettaUrl: string | null = null
       try {
         const labelBuffer = await spediamoproGetLabel(cred.authcode, shipment.id)
-        etichettaUrl = `data:application/pdf;base64,${labelBuffer.toString('base64')}`
+        // Rilevo il formato reale dai primi byte (UPS restituisce GIF, altri PDF)
+        const head = labelBuffer.subarray(0, 4).toString('latin1')
+        const mime = head.startsWith('%PDF') ? 'application/pdf'
+          : head.startsWith('GIF8') ? 'image/gif'
+          : (head.charCodeAt(0) === 0x89 && head.startsWith('\x89PNG'.substring(0,4))) ? 'image/png'
+          : 'application/pdf'
+        etichettaUrl = `data:${mime};base64,${labelBuffer.toString('base64')}`
       } catch (labelErr) {
         console.error('SpediamoPro label error:', labelErr)
       }
