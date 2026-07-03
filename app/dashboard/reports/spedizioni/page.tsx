@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
@@ -32,6 +32,18 @@ export default function ReportSpedizioniPage() {
 
   const setF = (k: string, v: string) => setFiltri(f => ({...f, [k]: v}))
 
+  async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
+    const filtriTxt = 'dalla_data=' + (filtri.dal||'') + ' alla_data=' + (filtri.al||'')
+    const r = await fetch('/api/reports/salva', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo: 'spedizioni', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
+    })
+    const j = await r.json()
+    if (!j.success) { alert('Errore salvataggio report: ' + (j.error||'')); return }
+    const lista = await fetch('/api/reports/lista?tipo=spedizioni').then(x=>x.json())
+    setReports(Array.isArray(lista) ? lista : [])
+    alert('Report generato! Lo trovi nella lista qui sotto, clicca Scarica.')
+  }
   async function generaReport() {
     setGenerating(true)
     const params = new URLSearchParams()
@@ -71,7 +83,8 @@ export default function ReportSpedizioniPage() {
       const ws = utils.json_to_sheet(rows)
       const wb = utils.book_new()
       utils.book_append_sheet(wb, ws, 'Spedizioni')
-      writeFile(wb, `report_spedizioni_${filtri.dal}_${filtri.al}.${formato === 'xlsx' ? 'xlsx' : 'csv'}`)
+      const b64 = utils.book_append_sheet ? XLSXwrite(wb, formato) : ''
+      await salvaReport(b64, 'report_spedizioni_' + filtri.dal + '_' + filtri.al + '.' + (formato === 'xlsx' ? 'xlsx' : 'csv'), formato)
     } else if (formato === 'pdf') {
       const { default: jsPDF } = await import('jspdf')
       const { default: autoTable } = await import('jspdf-autotable')
