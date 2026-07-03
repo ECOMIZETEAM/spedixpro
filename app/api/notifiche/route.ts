@@ -36,3 +36,18 @@ export async function GET(req: NextRequest) {
     .limit(100)
   return NextResponse.json(data || [])
 }
+
+export async function DELETE(req: NextRequest) {
+  const supabase = await createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
+  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const id = req.nextUrl.searchParams.get('id')
+  if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
+  const { error } = await supabase.from('notifiche')
+    .delete()
+    .eq('id', id)
+    .eq('master_id', utente?.master_id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  return NextResponse.json({ success: true })
+}
