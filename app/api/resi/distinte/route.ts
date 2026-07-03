@@ -39,18 +39,25 @@ export async function POST(req: NextRequest) {
     stato: 'chiusa',
   }).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  let totaleReso = 0
+  let totaleReso = 0
+  let totaleReso = 0
+  let totaleReso = 0
   for (const v of (voci || [])) {
     await supabase.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
-    // movimento nella Lista Movimenti del cliente
+    // recupero i costi reali per calcolare il costo reso (netto supplementi)
+    const { data: sp } = await supabase.from('spedizioni').select('costo_totale,contrassegno,assicurazione').eq('id', v.id).single()
+    const costoReso = Number(sp?.costo_totale || 0) - Number(sp?.contrassegno || 0) - Number(sp?.assicurazione || 0)
     await supabase.from('movimenti').insert({
       master_id: utente?.master_id, cliente_id: clienteId,
       tipo: 'reso',
       descrizione: `Reso ${v.numero}`,
-      importo: -Number(v.costo_reso || v.costo_totale || 0), spedizione_id: v.id,
+      importo: -costoReso, spedizione_id: v.id,
     })
+    totaleReso += costoReso
   }
   const { data: cliRec } = await supabase.from('clienti').select('credito').eq('id', clienteId).single()
-  const nuovoCredito = Number(cliRec?.credito || 0) - Number(totale || 0)
+  const nuovoCredito = Number(cliRec?.credito || 0) - totaleReso
   await supabase.from('clienti').update({ credito: nuovoCredito }).eq('id', clienteId)
   return NextResponse.json({ id: distinta.id, numero })
 }
