@@ -256,9 +256,15 @@ export async function POST(req: NextRequest) {
 
     let spediamoproQuotation = null
     if (corriere?.tipo === 'spediamopro') {
-      const quote = await quotaCorriere(corriere, pesoFatturato)
+      console.log('[TARIFFE] pre-quota spediamopro corriere:', corriere.id, 'authcode?', !!corriere.credenziali?.authcode, 'service_id:', corriere.credenziali?.service_id)
+      let quote = null
+      try {
+        quote = await quotaCorriere(corriere, pesoFatturato)
+      } catch (eq: any) {
+        console.log('[TARIFFE] ERRORE quotaCorriere:', eq?.message)
+      }
+      console.log('[TARIFFE] post-quota:', quote ? 'OK '+quote.total_price : 'NULL')
       spediamoproQuotation = quote?._spediamopro_quotation || null
-      // Se la quotazione live fallisce, salta questo corriere invece di mostrare un risultato rotto
       if (!quote) continue
     }
 
