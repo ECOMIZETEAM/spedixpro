@@ -113,14 +113,26 @@ export async function POST(req: NextRequest) {
   const tuttiColli = Array.isArray(body.packages) && body.packages.length ? body.packages : [pkg]
   const pesoReale = tuttiColli.reduce((s:number,p:any) => s + (parseFloat(p?.weight) || 0), 0) || 1
   const provincia = (body.shipTo?.state || '').toUpperCase().trim()
+  const capDest = (body.shipTo?.postalCode || '').trim()
   const paeseDest = (body.shipTo?.country || 'IT').toUpperCase().trim()
   const isEstero = paeseDest !== 'IT'
   const zonaNome = ZONE_MAP[provincia] || 'Italia'
-  let zoneEsteroIds: string[] = []
-  if (isEstero) {
-    const { data: zc } = await supabase.from('zone_cap').select('zona_id').eq('paese', paeseDest)
-    zoneEsteroIds = (zc || []).map((r: any) => r.zona_id).filter(Boolean)
+  // Zona da zone_cap: match per paese, con priorita CAP esatto > provincia > jolly.
+  // Vale sia per Italia che estero. Fallback a ZONE_MAP piu sotto se nessun match.
+  let zoneMatchIds: string[] = []
+  {
+    const { data: zc } = await supabase.from('zone_cap').select('zona_id,provincia,cap').eq('paese', paeseDest)
+    const righe = zc || []
+    // 1) CAP esatto
+    let match = righe.filter((r: any) => r.cap && r.cap !== '*' && r.cap === capDest)
+    // 2) provincia (cap jolly)
+    if (!match.length) match = righe.filter((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*'))
+    // 3) jolly totale (paese, provincia * cap *) -> tipico estero
+    if (!match.length) match = righe.filter((r: any) => (!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*'))
+    zoneMatchIds = match.map((r: any) => r.zona_id).filter(Boolean)
   }
+  // Compat: manteniamo zoneEsteroIds usato piu sotto nel filtro fasce
+  let zoneEsteroIds: string[] = zoneMatchIds
 
   // ─── Costruisce una quotazione per un dato corriere ──────────────────────
   async function quotaCorriere(corriere: any, pesoFatt: number): Promise<any> {
@@ -218,13 +230,17 @@ export async function POST(req: NextRequest) {
   }
 
   let fasceZona
+  // 1) Prova zone_cap (match per CAP/provincia/paese) - vale Italia ed estero
+  fasceZona = zoneMatchIds.length ? fasce.filter(f => zoneMatchIds.includes((f.zone as any)?.id)) : []
   if (isEstero) {
-    fasceZona = fasce.filter(f => zoneEsteroIds.includes((f.zone as any)?.id))
     if (!fasceZona.length) {
       return NextResponse.json({ error: `Nessuna tariffa disponibile per spedizioni verso ${paeseDest}` }, { status: 400 })
     }
   } else {
-    fasceZona = fasce.filter(f => (f.zone as any)?.nome === zonaNome)
+    // 2) Fallback ZONE_MAP per l'Italia se zone_cap non ha dato risultati
+    if (!fasceZona.length) {
+      fasceZona = fasce.filter(f => (f.zone as any)?.nome === zonaNome)
+    }
     if (!fasceZona.length) {
       fasceZona = fasce.filter(f => (f.zone as any)?.nome === 'Italia')
     }
