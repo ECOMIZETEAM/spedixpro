@@ -53,6 +53,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Errore chiamata Shopify: ' + (e?.message || e) }, { status: 502 })
   }
 
+  // Recupera immagini prodotti (una sola chiamata per tutti i product_id)
+  const prodottiImg = new Map<string, string>()
+  try {
+    const ids = Array.from(new Set(
+      ordini.flatMap((o: any) => (o.line_items || []).map((li: any) => li.product_id).filter(Boolean))
+    ))
+    for (let i = 0; i < ids.length; i += 50) {
+      const batch = ids.slice(i, i + 50).join(',')
+      const rp = await fetch(`https://${shop}/admin/api/${API_VERSION}/products.json?ids=${batch}&fields=id,image`, {
+        headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
+      })
+      if (rp.ok) {
+        const dp = await rp.json()
+        for (const p of dp.products || []) {
+          if (p.image?.src) prodottiImg.set(String(p.id), p.image.src)
+        }
+      }
+    }
+  } catch {}
+
   // Mappa e salva (upsert per non duplicare)
   let importati = 0
   for (const o of ordini) {
@@ -69,6 +89,7 @@ export async function POST(req: NextRequest) {
     }
     const articoli = (o.line_items || []).map((li: any) => ({
       nome: li.title, quantita: li.quantity, grammi: li.grams || 0, sku: li.sku || '',
+      immagine: li.product_id ? (prodottiImg.get(String(li.product_id)) || null) : null,
     }))
     const payload: any = {
       cliente_id: utente.cliente_id,
