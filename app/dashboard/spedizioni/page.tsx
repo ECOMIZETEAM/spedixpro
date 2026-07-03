@@ -151,11 +151,13 @@ async function apriTracking(s: any) {
           <div><label style={lbl}>Vettore</label>
             <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
               <option value="">Tutti</option>
+              {Array.from(new Set(corrieri.map((c:any)=>String(c.nome_contratto||'').split(' ')[0]))).filter(Boolean).map((v:any)=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Contratto</label>
             <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={sel}>
               <option value="">Tutti</option>
+              {corrieri.filter((c:any)=>!filtri.vettore || String(c.nome_contratto||'').split(' ')[0]===filtri.vettore).map((c:any)=><option key={c.id} value={c.id}>{c.nome_contratto}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Stato</label>
