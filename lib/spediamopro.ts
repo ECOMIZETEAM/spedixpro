@@ -148,6 +148,7 @@ export async function spediamoproCreateShipment(
         firstAvailablePickupDate: params.quotation.firstAvailablePickupDate,
         priceBreakdown: params.quotation.priceBreakdown,
       },
+      labelFormat: (params.quotation.courierService?.courier || '').toLowerCase() === 'ups' ? 1 : 0,
       cashOnDeliveryAmount: params.cashOnDeliveryAmount || null,
       insuredAmount: params.insuredAmount || null,
       externalReference: params.externalReference || null,
