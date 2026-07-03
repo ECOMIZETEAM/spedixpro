@@ -42,7 +42,6 @@ export default function ReportSpedizioniPage() {
     if (!j.success) { alert('Errore salvataggio report: ' + (j.error||'')); return }
     const lista = await fetch('/api/reports/lista?tipo=spedizioni').then(x=>x.json())
     setReports(Array.isArray(lista) ? lista : [])
-    alert('Report generato! Lo trovi nella lista qui sotto, clicca Scarica.')
   }
   async function generaReport() {
     setGenerating(true)
