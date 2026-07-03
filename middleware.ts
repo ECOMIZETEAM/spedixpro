@@ -19,6 +19,7 @@ export async function middleware(req: NextRequest) {
   }
 
   let response = NextResponse.next({ request: { headers: req.headers } })
+  response.headers.set('x-pathname', pathname)
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

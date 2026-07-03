@@ -5,9 +5,12 @@ import ClienteNav from './ClienteNav'
 export default async function ClienteLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/cliente')
+  // Se non loggato, mostra solo il contenuto (es. la pagina di login /cliente) SENZA
+  // reindirizzare: il layout avvolge anche il login, e un redirect qui creerebbe un loop.
+  // Le pagine interne restano protette dal middleware.
+  if (!user) return <>{children}</>
   const { data: utente } = await supabase.from('utenti').select('cliente_id,ruolo').eq('id', user.id).single()
-  if (!utente?.cliente_id) redirect('/cliente')
+  if (!utente?.cliente_id) return <>{children}</>
   const { data: cliente } = await supabase.from('clienti').select('ragione_sociale,credito').eq('id', utente.cliente_id).single()
 
   return (
