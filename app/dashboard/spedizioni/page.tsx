@@ -27,6 +27,7 @@ const FILTRI_DEFAULT = {
 export default function SpedizioniPage() {
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [spedizioniFiltrate, setSpedizioniFiltrate] = useState<any[]>([])
+  const [notifica, setNotifica] = useState<string>('')
   const [corrieri, setCorrieri] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -119,9 +120,16 @@ async function apriTracking(s: any) {
   async function elimina(id: string, numero: string) {
     if (!confirm(`Eliminare la spedizione ${numero}?`)) return
     setEliminando(id)
-    await fetch(`/api/spedizioni/elimina?id=${id}`, { method: 'DELETE' })
+    const res = await fetch(`/api/spedizioni/elimina?id=${id}`, { method: 'DELETE' })
+    const j = await res.json().catch(() => ({}))
     setEliminando(null)
-    caricaTutte()
+    if (res.ok && j.success) {
+      setNotifica('Spedizione cancellata')
+      caricaTutte()
+    } else {
+      setNotifica('Impossibile eliminare la spedizione. Hai bisogno del permesso per eseguire questa azione!')
+    }
+    setTimeout(() => setNotifica(''), 4000)
   }
 
   const btnFiltri = {padding:'7px 18px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700' as const,cursor:'pointer',whiteSpace:'nowrap' as const}
