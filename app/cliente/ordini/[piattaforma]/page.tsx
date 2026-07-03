@@ -97,6 +97,7 @@ export default function OrdiniPage() {
       provincia: d.provincia||'', cap: d.cap||'', paese: d.paese||'IT',
       email: d.email||'', telefono: d.telefono||'',
     })
+    if (spedisciCon && spedisciCon !== 'auto') qs.set('corriere', spedisciCon)
     router.push('/cliente/spedizioni/nuova?'+qs.toString())
   }
 
@@ -264,6 +265,7 @@ export default function OrdiniPage() {
                 <Th k="data">Data e Ora</Th>
                 <Th k="numero_ordine">ID Ordine</Th>
                 <Th k="destinatario">Destinatario</Th>
+                <Th>Articoli</Th>
                 <Th k="stato_pagamento">Stato pagamento</Th>
                 <Th k="stato">Stato evasione</Th>
                 <Th k="totale" right>Totale</Th>
@@ -273,7 +275,7 @@ export default function OrdiniPage() {
               </tr></thead>
               <tbody>
                 {pagina.length===0 ? (
-                  <tr><td colSpan={10} style={{...td,textAlign:'center',color:'#999',padding:'40px'}}>Nessun dato disponibile nella tabella</td></tr>
+                  <tr><td colSpan={11} style={{...td,textAlign:'center',color:'#999',padding:'40px'}}>Nessun dato disponibile nella tabella</td></tr>
                 ) : pagina.map((o:any)=>{
                   const d = o.destinatario||{}; const cp = coloriPag(o.stato_pagamento)
                   return (
@@ -282,6 +284,19 @@ export default function OrdiniPage() {
                     <td style={{...td,color:'#6b7280',whiteSpace:'nowrap'}}>{fmtData(getData(o))}</td>
                     <td style={{...td,fontWeight:600}}>{o.numero_ordine}</td>
                     <td style={td}>{d.nome||'—'}<div style={{fontSize:'11px',color:'#999'}}>{d.citta}{d.provincia?' ('+d.provincia+')':''} {d.paese||''}</div></td>
+                    <td style={{...td,maxWidth:'240px'}}>
+                      {(Array.isArray(o.articoli)?o.articoli:[]).map((a:any,i:number)=>(
+                        <div key={i} style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px'}}>
+                          {a.immagine
+                            ? <img src={a.immagine} alt="" style={{width:'32px',height:'32px',objectFit:'cover',borderRadius:'6px',border:'1px solid #e8e8e8',flexShrink:0}}/>
+                            : <div style={{width:'32px',height:'32px',borderRadius:'6px',border:'1px solid #e8e8e8',background:'#f9fafb',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'14px',flexShrink:0}}>📦</div>}
+                          <div style={{minWidth:0}}>
+                            <div style={{fontSize:'12px',color:'#1a1a1a',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.quantita}× {a.nome}</div>
+                            {a.sku && <div style={{fontSize:'10px',color:'#999'}}>SKU: {a.sku}</div>}
+                          </div>
+                        </div>
+                      ))}
+                    </td>
                     <td style={td}><span style={{fontSize:'11px',fontWeight:600,padding:'3px 9px',borderRadius:'999px',background:cp.bg,color:cp.fg}}>{labelPag(o.stato_pagamento)}</span></td>
                     <td style={td}><span style={{fontSize:'11px',fontWeight:600,padding:'3px 9px',borderRadius:'999px',background:o.stato==='spedito'?'#dcfce7':'#fef3c7',color:o.stato==='spedito'?'#166534':'#92400e'}}>{o.stato==='spedito'?'Spedito':'Da spedire'}</span></td>
                     <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>{o.totale?Number(o.totale).toFixed(2):'—'} {o.valuta||''}</td>
