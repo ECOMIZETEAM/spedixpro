@@ -1,5 +1,5 @@
 'use client'
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 const GRUPPI = ['Cliente', 'Amministratore', 'Operatore', 'Agente']
 
@@ -9,6 +9,14 @@ export default function InviaNotifica() {
   const [inviando, setInviando] = useState(false)
   const [msg, setMsg] = useState('')
   const editorRef = useRef<HTMLDivElement>(null)
+  const [lista, setLista] = useState<any[]>([])
+  async function caricaLista() { const r = await fetch('/api/notifiche'); const j = await r.json(); setLista(Array.isArray(j)?j:[]) }
+  useEffect(() => { caricaLista() }, [])
+  async function eliminaNotifica(id: string) {
+    if (!confirm('Eliminare questa notifica? Non sarà più visibile.')) return
+    await fetch('/api/notifiche?id=' + id, { method: 'DELETE' })
+    caricaLista()
+  }
 
   function toggleGruppo(g: string) {
     setGruppi(prev => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g])
