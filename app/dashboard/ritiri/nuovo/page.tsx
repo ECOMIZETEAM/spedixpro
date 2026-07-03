@@ -38,11 +38,11 @@ export default function NuovoRitiroPage() {
 
     fetch('/api/master').then(r => r.json()).then(d => {
       if (d?.nome) setMittNome(d.nome)
-      if (d?.indirizzo_operativo) setMittIndirizzo(d.indirizzo_operativo)
-      if (d?.citta_operativo) setMittCitta(d.citta_operativo)
-      if (d?.provincia_operativo) setMittProvincia(d.provincia_operativo)
-      if (d?.cap_operativo) setMittCap(d.cap_operativo)
-      if (d?.telefono_operativo) setMittTelefono(d.telefono_operativo)
+      if (d?.indirizzo || d?.indirizzo_operativo) setMittIndirizzo(d.indirizzo || d.indirizzo_operativo)
+      if (d?.citta || d?.citta_operativo) setMittCitta(d.citta || d.citta_operativo)
+      if (d?.provincia || d?.provincia_operativo) setMittProvincia(d.provincia || d.provincia_operativo)
+      if (d?.cap || d?.cap_operativo) setMittCap(d.cap || d.cap_operativo)
+      if (d?.telefono || d?.telefono_operativo) setMittTelefono(d.telefono || d.telefono_operativo)
       if (d?.email) setMittEmail(d.email)
     }).catch(() => {})
 
