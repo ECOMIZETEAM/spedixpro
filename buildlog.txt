@@ -11,3 +11,212 @@
 
 ÔÜá The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
   Creating an optimized production build ...
+Ô£ô Compiled successfully in 40s
+  Skipping validation of types
+  Finished TypeScript config validation in 142ms ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/160) ...
+  Generating static pages using 7 workers (40/160) 
+  Generating static pages using 7 workers (80/160) 
+  Generating static pages using 7 workers (120/160) 
+Ô£ô Generating static pages using 7 workers (160/160) in 3.1s
+  Finalizing page optimization ...
+
+Route (app)
+Ôöî Ôùï /
+Ôö£ Ôùï /_not-found
+Ôö£ ãÆ /api/auth/cliente-login
+Ôö£ ãÆ /api/auth/login
+Ôö£ ãÆ /api/auth/logout
+Ôö£ ãÆ /api/cliente/contrassegni/dettaglio
+Ôö£ ãÆ /api/cliente/contrassegni/lista
+Ôö£ ãÆ /api/cliente/corrieri
+Ôö£ ãÆ /api/cliente/corrieri-abilitati
+Ôö£ ãÆ /api/cliente/dashboard
+Ôö£ ãÆ /api/cliente/dati
+Ôö£ ãÆ /api/cliente/distinte/aperte
+Ôö£ ãÆ /api/cliente/distinte/crea
+Ôö£ ãÆ /api/cliente/distinte/dettaglio
+Ôö£ ãÆ /api/cliente/distinte/lista
+Ôö£ ãÆ /api/cliente/giacenze
+Ôö£ ãÆ /api/cliente/mittente
+Ôö£ ãÆ /api/cliente/pacchi
+Ôö£ ãÆ /api/cliente/profilo
+Ôö£ ãÆ /api/cliente/reports/consumabili
+Ôö£ ãÆ /api/cliente/reports/contrassegni
+Ôö£ ãÆ /api/cliente/reports/distinte
+Ôö£ ãÆ /api/cliente/reports/lista
+Ôö£ ãÆ /api/cliente/reports/rettifiche
+Ôö£ ãÆ /api/cliente/reports/spedizioni
+Ôö£ ãÆ /api/cliente/resi/distinte
+Ôö£ ãÆ /api/clienti/[id]
+Ôö£ ãÆ /api/clienti/[id]/corrieri
+Ôö£ ãÆ /api/clienti/[id]/corrieri-abilitati
+Ôö£ ãÆ /api/clienti/[id]/impersona
+Ôö£ ãÆ /api/clienti/crea
+Ôö£ ãÆ /api/clienti/lista
+Ôö£ ãÆ /api/comuni
+Ôö£ ãÆ /api/consumabili
+Ôö£ ãÆ /api/contrassegni
+Ôö£ ãÆ /api/contrassegni/cod-files
+Ôö£ ãÆ /api/contrassegni/distinte
+Ôö£ ãÆ /api/contrassegni/distinte/[id]
+Ôö£ ãÆ /api/contrassegni/upload-cod
+Ôö£ ãÆ /api/corrieri/[id]
+Ôö£ ãÆ /api/corrieri/lista
+Ôö£ ãÆ /api/dashboard
+Ôö£ ãÆ /api/distinte
+Ôö£ ãÆ /api/distinte/chiusura-automatica
+Ôö£ ãÆ /api/distinte/conferma
+Ôö£ ãÆ /api/distinte/contratti
+Ôö£ ãÆ /api/distinte/dettaglio
+Ôö£ ãÆ /api/distinte/spedizioni
+Ôö£ ãÆ /api/giacenze
+Ôö£ ãÆ /api/integrazioni/elimina
+Ôö£ ãÆ /api/integrazioni/lista
+Ôö£ ãÆ /api/integrazioni/shopify/callback
+Ôö£ ãÆ /api/integrazioni/shopify/install
+Ôö£ ãÆ /api/integrazioni/shopify/webhooks/app-uninstalled
+Ôö£ ãÆ /api/integrazioni/shopify/webhooks/compliance
+Ôö£ ãÆ /api/integrazioni/shopify/webhooks/customers-data-request
+Ôö£ ãÆ /api/integrazioni/shopify/webhooks/customers-redact
+Ôö£ ãÆ /api/integrazioni/shopify/webhooks/shop-redact
+Ôö£ ãÆ /api/listini/cliente-corrieri
+Ôö£ ãÆ /api/listini/cliente/[id]
+Ôö£ ãÆ /api/listini/corriere-corrieri
+Ôö£ ãÆ /api/listini/corriere/[id]
+Ôö£ ãÆ /api/listini/corrieri
+Ôö£ ãÆ /api/listini/corrieri-corrieri
+Ôö£ ãÆ /api/listini/corrieri/[id]
+Ôö£ ãÆ /api/listini/crea
+Ôö£ ãÆ /api/listini/lista
+Ôö£ ãÆ /api/master
+Ôö£ ãÆ /api/master/crea
+Ôö£ ãÆ /api/master/figli
+Ôö£ ãÆ /api/master/gerarchia
+Ôö£ ãÆ /api/master/logo
+Ôö£ ãÆ /api/master/root
+Ôö£ ãÆ /api/movimenti/crea
+Ôö£ ãÆ /api/movimenti/lista
+Ôö£ ãÆ /api/ordini/aggiorna-stato
+Ôö£ ãÆ /api/ordini/elimina
+Ôö£ ãÆ /api/ordini/importa
+Ôö£ ãÆ /api/ordini/lista
+Ôö£ ãÆ /api/ordini/modifica
+Ôö£ ãÆ /api/reports/lista
+Ôö£ ãÆ /api/reports/salva
+Ôö£ ãÆ /api/reports/spedizioni
+Ôö£ ãÆ /api/resi
+Ôö£ ãÆ /api/resi/distinte
+Ôö£ ãÆ /api/resi/distinte/[id]
+Ôö£ ãÆ /api/rettifiche
+Ôö£ ãÆ /api/rettifiche/files
+Ôö£ ãÆ /api/rettifiche/upload
+Ôö£ ãÆ /api/ritiri
+Ôö£ ãÆ /api/ritiri/crea
+Ôö£ ãÆ /api/ritiri/lista
+Ôö£ ãÆ /api/spedizioni/cancellate
+Ôö£ ãÆ /api/spedizioni/crea
+Ôö£ ãÆ /api/spedizioni/elimina
+Ôö£ ãÆ /api/spedizioni/etichetta
+Ôö£ ãÆ /api/spedizioni/etichette-bulk
+Ôö£ ãÆ /api/spedizioni/lista
+Ôö£ ãÆ /api/spedizioni/ritirabili
+Ôö£ ãÆ /api/spedizioni/tariffe
+Ôö£ ãÆ /api/spedizioni/tracking
+Ôö£ ãÆ /api/zone
+Ôö£ ãÆ /api/zone/[id]
+Ôö£ ãÆ /api/zone/[id]/cap
+Ôö£ ãÆ /cliente
+Ôö£ ãÆ /cliente/contrassegni
+Ôö£ ãÆ /cliente/dashboard
+Ôö£ ãÆ /cliente/distinte
+Ôö£ ãÆ /cliente/distinte/nuova
+Ôö£ ãÆ /cliente/fatture
+Ôö£ ãÆ /cliente/importa
+Ôö£ ãÆ /cliente/impostazioni
+Ôö£ ãÆ /cliente/impostazioni/pacchi
+Ôö£ ãÆ /cliente/impostazioni/stampa-notifiche
+Ôö£ ãÆ /cliente/integrazioni
+Ôö£ ãÆ /cliente/listino
+Ôö£ ãÆ /cliente/movimenti
+Ôö£ ãÆ /cliente/reports
+Ôö£ ãÆ /cliente/reports/consumabili
+Ôö£ ãÆ /cliente/reports/contrassegni
+Ôö£ ãÆ /cliente/reports/distinte
+Ôö£ ãÆ /cliente/reports/rettifiche
+Ôö£ ãÆ /cliente/reports/spedizioni
+Ôö£ ãÆ /cliente/resi
+Ôö£ ãÆ /cliente/resi/distinte
+Ôö£ ãÆ /cliente/ritiri
+Ôö£ ãÆ /cliente/ritiri/nuovo
+Ôö£ ãÆ /cliente/spedizioni
+Ôö£ ãÆ /cliente/spedizioni/cancellate
+Ôö£ ãÆ /cliente/spedizioni/giacenze
+Ôö£ ãÆ /cliente/spedizioni/nuova
+Ôö£ ãÆ /dashboard
+Ôö£ ãÆ /dashboard/autisti
+Ôö£ ãÆ /dashboard/clienti
+Ôö£ ãÆ /dashboard/clienti/[id]
+Ôö£ ãÆ /dashboard/clienti/[id]/impostazioni
+Ôö£ ãÆ /dashboard/clienti/[id]/modifica
+Ôö£ ãÆ /dashboard/clienti/gerarchia
+Ôö£ ãÆ /dashboard/clienti/master
+Ôö£ ãÆ /dashboard/clienti/master/nuovo
+Ôö£ ãÆ /dashboard/clienti/nuovo
+Ôö£ ãÆ /dashboard/consumabili
+Ôö£ ãÆ /dashboard/consumabili/aggiungi
+Ôö£ ãÆ /dashboard/consumabili/storia
+Ôö£ ãÆ /dashboard/contrassegni
+Ôö£ ãÆ /dashboard/contrassegni/distinte
+Ôö£ ãÆ /dashboard/corrieri
+Ôö£ ãÆ /dashboard/corrieri/aggiungi
+Ôö£ ãÆ /dashboard/distinte
+Ôö£ ãÆ /dashboard/distinte/crea
+Ôö£ ãÆ /dashboard/distinte/elenco
+Ôö£ ãÆ /dashboard/fatture
+Ôö£ ãÆ /dashboard/impostazioni
+Ôö£ ãÆ /dashboard/impostazioni/filiale
+Ôö£ ãÆ /dashboard/impostazioni/logo
+Ôö£ ãÆ /dashboard/listini
+Ôö£ ãÆ /dashboard/listini/clienti/[id]
+Ôö£ ãÆ /dashboard/listini/clienti/nuovo
+Ôö£ ãÆ /dashboard/listini/corrieri/[id]
+Ôö£ ãÆ /dashboard/listini/corrieri/nuovo
+Ôö£ ãÆ /dashboard/listini/gestione-zone
+Ôö£ ãÆ /dashboard/movimenti
+Ôö£ ãÆ /dashboard/reports
+Ôö£ ãÆ /dashboard/reports/consumabili
+Ôö£ ãÆ /dashboard/reports/contrassegni
+Ôö£ ãÆ /dashboard/reports/distinte
+Ôö£ ãÆ /dashboard/reports/fatture
+Ôö£ ãÆ /dashboard/reports/giacenze
+Ôö£ ãÆ /dashboard/reports/resi
+Ôö£ ãÆ /dashboard/reports/rettifiche
+Ôö£ ãÆ /dashboard/reports/ritiri
+Ôö£ ãÆ /dashboard/reports/sms-clienti
+Ôö£ ãÆ /dashboard/reports/spedizioni
+Ôö£ ãÆ /dashboard/reports/storico-sms
+Ôö£ ãÆ /dashboard/resi
+Ôö£ ãÆ /dashboard/resi/distinte
+Ôö£ ãÆ /dashboard/resi/distinte/[id]
+Ôö£ ãÆ /dashboard/resi/scansiona
+Ôö£ ãÆ /dashboard/ritiri
+Ôö£ ãÆ /dashboard/ritiri/elenco
+Ôö£ ãÆ /dashboard/ritiri/nuovo
+Ôö£ ãÆ /dashboard/spedizioni
+Ôö£ ãÆ /dashboard/spedizioni/[id]/etichetta
+Ôö£ ãÆ /dashboard/spedizioni/cancellate
+Ôö£ ãÆ /dashboard/spedizioni/giacenze
+Ôö£ ãÆ /dashboard/spedizioni/nuova
+Ôö£ ãÆ /dashboard/spedizioni/rettifica
+Ôö£ ãÆ /dashboard/tracking
+Ôö£ ãÆ /dashboard/zone
+Ôöö Ôùï /privacy
+
+
+ãÆ Proxy (Middleware)
+
+Ôùï  (Static)   prerendered as static content
+ãÆ  (Dynamic)  server-rendered on demand
+
