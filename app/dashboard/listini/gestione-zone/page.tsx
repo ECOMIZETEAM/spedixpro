@@ -11,6 +11,9 @@ export default function GestioneZonePage() {
   const [modalSposta, setModalSposta] = useState<any>(null)
   const [formNuova, setFormNuova] = useState({nome:'',descrizione:'',con_fuel:false})
   const [formMod, setFormMod] = useState({nome:'',descrizione:'',con_fuel:false})
+  const [regioni, setRegioni] = useState<any[]>([])
+  const [formRegione, setFormRegione] = useState({paese:'IT',provincia:'',cap:'*',citta:'*'})
+  const [savingReg, setSavingReg] = useState(false)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => { load() }, [])
@@ -38,6 +41,25 @@ export default function GestioneZonePage() {
     setSaving(true)
     await fetch('/api/zone/'+modalModifica.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(formMod)})
     setModalModifica(null); setSaving(false); load()
+  }
+  async function caricaRegioni(zonaId:string) {
+    const r = await fetch('/api/zone/'+zonaId+'/cap').then(r=>r.json()).catch(()=>[])
+    setRegioni(Array.isArray(r)?r:[])
+  }
+  async function aggiungiRegione() {
+    if(!modalModifica) return
+    setSavingReg(true)
+    const res = await fetch('/api/zone/'+modalModifica.id+'/cap',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(formRegione)})
+    const d = await res.json()
+    setSavingReg(false)
+    if(d?.error){ alert(d.error); return }
+    setFormRegione({paese:'IT',provincia:'',cap:'*',citta:'*'})
+    caricaRegioni(modalModifica.id)
+  }
+  async function eliminaRegione(capId:string) {
+    if(!modalModifica) return
+    await fetch('/api/zone/'+modalModifica.id+'/cap?capId='+capId,{method:'DELETE'})
+    caricaRegioni(modalModifica.id)
   }
 
   async function elimina(id:string,nome:string) {
@@ -99,7 +121,7 @@ export default function GestioneZonePage() {
                       <td style={{padding:'10px 12px',color:'#1a1a1a',fontSize:'12px',maxWidth:'500px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{z.descrizione||'—'}</td>
                       <td style={{padding:'10px 12px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
-                          <button onClick={()=>{setModalModifica(z);setFormMod({nome:z.nome,descrizione:z.descrizione||'',con_fuel:z.con_fuel||false})}} style={ibtn('#16a34a','#fff','#86efac')}>✏️</button>
+                          <button onClick={()=>{setModalModifica(z);setFormMod({nome:z.nome,descrizione:z.descrizione||'',con_fuel:z.con_fuel||false});setRegioni([]);caricaRegioni(z.id)}} style={ibtn('#16a34a','#fff','#86efac')}>✏️</button>
                           <button onClick={()=>esporta(z)} style={ibtn('#fff','#1a1a1a','#d1d5db')}>⬇</button>
                           <label style={{...ibtn('#fff','#1a1a1a','#d1d5db'),cursor:'pointer'}}>
                             ⬆<input type="file" accept=".csv" style={{display:'none'}} onChange={async e=>{
@@ -154,6 +176,43 @@ export default function GestioneZonePage() {
               <div style={{marginBottom:'12px'}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Nome</label><input value={formMod.nome} onChange={e=>setFormMod(f=>({...f,nome:e.target.value}))} style={inp}/></div>
               <div style={{marginBottom:'12px'}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Descrizione</label><textarea value={formMod.descrizione} onChange={e=>setFormMod(f=>({...f,descrizione:e.target.value}))} rows={5} style={{...inp,resize:'vertical' as const}}/></div>
               <div style={{marginBottom:'16px',display:'flex',alignItems:'center',gap:'8px'}}><input type="checkbox" checked={formMod.con_fuel} onChange={e=>setFormMod(f=>({...f,con_fuel:e.target.checked}))} id="fm"/><label htmlFor="fm" style={{fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>Applica supplemento Fuel</label></div>
+              <div style={{marginBottom:'8px',paddingTop:'12px',borderTop:'1px solid #e5e7eb'}}>
+                <label style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',display:'block',marginBottom:'8px'}}>Regioni (Paese / Provincia / CAP / Città)</label>
+                <div style={{maxHeight:'180px',overflowY:'auto' as const,marginBottom:'10px',border:'1px solid #e8e8e8',borderRadius:'6px'}}>
+                  {regioni.length===0 ? (
+                    <div style={{padding:'14px',textAlign:'center' as const,color:'#999',fontSize:'12px'}}>Nessuna regione. Aggiungine una qui sotto.</div>
+                  ) : (
+                    <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
+                      <thead><tr style={{background:'#f9fafb'}}>
+                        <th style={{padding:'6px 8px',textAlign:'left' as const,color:'#666'}}>Paese</th>
+                        <th style={{padding:'6px 8px',textAlign:'left' as const,color:'#666'}}>Prov.</th>
+                        <th style={{padding:'6px 8px',textAlign:'left' as const,color:'#666'}}>CAP</th>
+                        <th style={{padding:'6px 8px',textAlign:'left' as const,color:'#666'}}>Città</th>
+                        <th></th>
+                      </tr></thead>
+                      <tbody>
+                        {regioni.map((r:any)=>(
+                          <tr key={r.id} style={{borderTop:'1px solid #f0f0f0'}}>
+                            <td style={{padding:'6px 8px',color:'#1a1a1a'}}>{r.paese}</td>
+                            <td style={{padding:'6px 8px',color:'#1a1a1a'}}>{r.provincia}</td>
+                            <td style={{padding:'6px 8px',color:'#1a1a1a'}}>{r.cap}</td>
+                            <td style={{padding:'6px 8px',color:'#1a1a1a'}}>{r.citta}</td>
+                            <td style={{padding:'6px 8px',textAlign:'right' as const}}><button onClick={()=>eliminaRegione(r.id)} style={{background:'none',border:'none',cursor:'pointer',color:'#dc2626',fontSize:'14px'}}>🗑</button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr auto',gap:'6px',alignItems:'end'}}>
+                  <div><label style={{fontSize:'11px',color:'#666',display:'block',marginBottom:'2px'}}>Paese</label><input value={formRegione.paese} onChange={e=>setFormRegione(f=>({...f,paese:e.target.value}))} placeholder="IT" style={{...inp,padding:'6px 8px',fontSize:'12px'}}/></div>
+                  <div><label style={{fontSize:'11px',color:'#666',display:'block',marginBottom:'2px'}}>Provincia</label><input value={formRegione.provincia} onChange={e=>setFormRegione(f=>({...f,provincia:e.target.value}))} placeholder="* o RM" style={{...inp,padding:'6px 8px',fontSize:'12px'}}/></div>
+                  <div><label style={{fontSize:'11px',color:'#666',display:'block',marginBottom:'2px'}}>CAP</label><input value={formRegione.cap} onChange={e=>setFormRegione(f=>({...f,cap:e.target.value}))} placeholder="*" style={{...inp,padding:'6px 8px',fontSize:'12px'}}/></div>
+                  <div><label style={{fontSize:'11px',color:'#666',display:'block',marginBottom:'2px'}}>Città</label><input value={formRegione.citta} onChange={e=>setFormRegione(f=>({...f,citta:e.target.value}))} placeholder="*" style={{...inp,padding:'6px 8px',fontSize:'12px'}}/></div>
+                  <button onClick={aggiungiRegione} disabled={savingReg} style={{padding:'7px 12px',background:'#16a34a',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer',whiteSpace:'nowrap' as const}}>+ Aggiungi</button>
+                </div>
+                <div style={{fontSize:'11px',color:'#999',marginTop:'6px'}}>Usa <b>*</b> per "qualsiasi". Es: Paese IT, Provincia RM, CAP * = tutta la provincia di Roma. Paese DE, Provincia *, CAP * = tutta la Germania.</div>
+              </div>
               <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
                 <button onClick={()=>setModalModifica(null)} style={{padding:'8px 16px',background:'#f5f5f5',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:'pointer',color:'#1a1a1a'}}>Annulla</button>
                 <button onClick={salvaMod} disabled={saving} style={{padding:'8px 24px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>Salva</button>
