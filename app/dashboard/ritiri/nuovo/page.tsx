@@ -12,6 +12,7 @@ export default function NuovoRitiroPage() {
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [selezionate, setSelezionate] = useState<Set<string>>(new Set())
   const [loadingSped, setLoadingSped] = useState(true)
+  const [cercaLdv, setCercaLdv] = useState('')
 
   const [mittNome, setMittNome] = useState('')
   const [mittIndirizzo, setMittIndirizzo] = useState('')
@@ -103,7 +104,7 @@ export default function NuovoRitiroPage() {
             </div>
           ) : (
             <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-              {spedizioni.map(s => (
+              {spedizioni.filter(s => !cercaLdv || String(s.numero||'').toLowerCase().includes(cercaLdv.toLowerCase())).map(s => (
                 <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 4px', borderBottom: '1px solid #f5f5f5', cursor: 'pointer' }}>
                   <input type="checkbox" checked={selezionate.has(s.id)} onChange={() => toggleSpedizione(s.id)} />
                   <div style={{ flex: 1 }}>
