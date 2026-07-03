@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
 
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',background:'#fff',color:'#1a1a1a'}
@@ -94,7 +94,7 @@ export default function DistinteResiPage() {
                     <div style={{display:'flex',gap:'6px'}}>
                       <button onClick={()=>window.open(`/dashboard/resi/distinte/${d.id}`,'_blank')}
                         style={{padding:'5px 12px',background:'#eff6ff',color:'#1d4ed8',border:'1px solid #93c5fd',borderRadius:'5px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>👁 Visualizza</button>
-                      <button onClick={()=>window.open(`/api/resi/distinte/${d.id}/pdf`,'_blank')}
+                      <button onClick={()=>window.open(`/dashboard/resi/distinte/${d.id}`,'_blank')}
                         style={{padding:'5px 12px',background:'#f0fdf4',color:'#15803d',border:'1px solid #86efac',borderRadius:'5px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>⬇ Scarica</button>
                     </div>
                   </td>
