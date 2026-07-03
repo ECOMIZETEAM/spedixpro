@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 
 export async function GET(req: NextRequest) {
@@ -47,16 +47,10 @@ export async function POST(req: NextRequest) {
     if (totaleDiff <= 0) continue
 
     // Recupera credito residuo attuale
-    const { data: lastMov } = await supabase.from('movimenti_clienti')
-      .select('credito_residuo')
-      .eq('cliente_id', clienteId)
-      .eq('master_id', utente?.master_id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single()
-
-    const creditoAttuale = Number(lastMov?.credito_residuo || 0)
+    const { data: cliRec } = await supabase.from('clienti').select('credito').eq('id', clienteId).single()
+    const creditoAttuale = Number(cliRec?.credito || 0)
     const nuovoCreditoResiduo = creditoAttuale - totaleDiff
+    await supabase.from('clienti').update({ credito: nuovoCreditoResiduo }).eq('id', clienteId)
 
     // Crea movimento per ogni rettifica
     for (const r of retts) {
