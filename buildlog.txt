@@ -11,15 +11,15 @@
 
 ÔÜá The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
   Creating an optimized production build ...
-Ô£ô Compiled successfully in 38.1s
+Ô£ô Compiled successfully in 31.5s
   Skipping validation of types
-  Finished TypeScript config validation in 211ms ...
+  Finished TypeScript config validation in 103ms ...
   Collecting page data using 7 workers ...
   Generating static pages using 7 workers (0/164) ...
   Generating static pages using 7 workers (41/164) 
   Generating static pages using 7 workers (82/164) 
   Generating static pages using 7 workers (123/164) 
-Ô£ô Generating static pages using 7 workers (164/164) in 2.7s
+Ô£ô Generating static pages using 7 workers (164/164) in 1949ms
   Finalizing page optimization ...
 
 Route (app)
@@ -78,6 +78,7 @@ Route (app)
 Ôö£ ãÆ /api/integrazioni/shopify/callback
 Ôö£ ãÆ /api/integrazioni/shopify/install
 Ôö£ ãÆ /api/integrazioni/shopify/rivendica
+Ôö£ ãÆ /api/integrazioni/shopify/sync
 Ôö£ ãÆ /api/integrazioni/shopify/webhooks/app-uninstalled
 Ôö£ ãÆ /api/integrazioni/shopify/webhooks/compliance
 Ôö£ ãÆ /api/integrazioni/shopify/webhooks/customers-data-request
@@ -144,6 +145,7 @@ Route (app)
 Ôö£ ãÆ /cliente/integrazioni
 Ôö£ ãÆ /cliente/listino
 Ôö£ ãÆ /cliente/movimenti
+Ôö£ ãÆ /cliente/ordini/[piattaforma]
 Ôö£ ãÆ /cliente/reports
 Ôö£ ãÆ /cliente/reports/consumabili
 Ôö£ ãÆ /cliente/reports/contrassegni

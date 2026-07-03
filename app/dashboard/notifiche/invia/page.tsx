@@ -15,8 +15,12 @@ export default function InviaNotifica() {
   }
 
   function format(cmd: string, val?: string) {
-    document.execCommand(cmd, false, val)
     editorRef.current?.focus()
+    if (cmd === 'formatBlock' && val) {
+      document.execCommand('formatBlock', false, '<' + val + '>')
+    } else {
+      document.execCommand(cmd, false, val)
+    }
   }
 
   async function invia() {
@@ -62,7 +66,7 @@ export default function InviaNotifica() {
 
           <div style={{ fontWeight:'700', color:'#1a1a1a', marginBottom:'10px', fontSize:'14px' }}>Messaggio</div>
           <div style={{ display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'8px' }}>
-            <select onChange={e=>{ format('formatBlock', e.target.value); e.target.selectedIndex=0 }} style={{ ...btnTool, cursor:'pointer' }}>
+            <select onChange={e=>{ const v = e.target.value; e.target.selectedIndex=0; if(v) format('formatBlock', v) }} style={{ ...btnTool, cursor:'pointer' }}>
               <option value="">Normal text</option>
               <option value="h1">Heading 1</option>
               <option value="h2">Heading 2</option>
@@ -72,13 +76,13 @@ export default function InviaNotifica() {
               <option value="h6">Heading 6</option>
               <option value="p">Paragrafo</option>
             </select>
-            <button onClick={()=>format('bold')} style={{ ...btnTool, fontWeight:'700' }}>Bold</button>
-            <button onClick={()=>format('italic')} style={{ ...btnTool, fontStyle:'italic' }}>Italic</button>
-            <button onClick={()=>format('underline')} style={{ ...btnTool, textDecoration:'underline' }}>Underline</button>
-            <button onClick={()=>format('insertUnorderedList')} style={btnTool}>&bull; Lista</button>
-            <button onClick={()=>format('insertOrderedList')} style={btnTool}>1. Lista</button>
-            <button onClick={()=>format('justifyLeft')} style={btnTool}>&larr;</button>
-            <button onClick={()=>format('justifyCenter')} style={btnTool}>&harr;</button>
+            <button onMouseDown={(e)=>{e.preventDefault();format('bold')}} style={{ ...btnTool, fontWeight:'700' }}>Bold</button>
+            <button onMouseDown={(e)=>{e.preventDefault();format('italic')}} style={{ ...btnTool, fontStyle:'italic' }}>Italic</button>
+            <button onMouseDown={(e)=>{e.preventDefault();format('underline')}} style={{ ...btnTool, textDecoration:'underline' }}>Underline</button>
+            <button onMouseDown={(e)=>{e.preventDefault();format('insertUnorderedList')}} style={btnTool}>&bull; Lista</button>
+            <button onMouseDown={(e)=>{e.preventDefault();format('insertOrderedList')}} style={btnTool}>1. Lista</button>
+            <button onMouseDown={(e)=>{e.preventDefault();format('justifyLeft')}} style={btnTool}>&larr;</button>
+            <button onMouseDown={(e)=>{e.preventDefault();format('justifyCenter')}} style={btnTool}>&harr;</button>
             <button onClick={()=>{ const url = prompt('URL immagine:'); if (url) format('insertImage', url) }} style={btnTool}>Img</button>
           </div>
           <div ref={editorRef} contentEditable suppressContentEditableWarning style={{ minHeight:'180px', border:'1px solid #d1d5db', borderRadius:'6px', padding:'12px', fontSize:'14px', color:'#1a1a1a', outline:'none' }} />
