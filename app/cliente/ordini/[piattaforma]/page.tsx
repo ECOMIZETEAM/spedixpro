@@ -22,7 +22,8 @@ export default function OrdiniPage() {
       fetch('/api/integrazioni/lista').then(r=>r.json()).catch(()=>[]),
     ])
     setOrdini(Array.isArray(ord)?ord:[])
-    const mia = (Array.isArray(integr)?integr:[]).find((i:any)=>i.piattaforma===piattaforma && i.stato==='attivo')
+    const listaIntegr = Array.isArray(integr) ? integr : (integr?.integrazioni || [])
+    const mia = listaIntegr.find((i:any)=>i.piattaforma===piattaforma && i.stato==='attivo')
     setIntegrazioneId(mia?.id || '')
     setLoading(false)
   }

@@ -73,7 +73,8 @@ export default function ClienteNav() {
   const [integrazioni, setIntegrazioni] = useState<any[]>([])
   useEffect(() => {
     fetch('/api/integrazioni/lista').then(r=>r.json()).then(d=>{
-      setIntegrazioni(Array.isArray(d)?d.filter((i:any)=>i.stato==='attivo'):[])
+      const lista = Array.isArray(d) ? d : (d?.integrazioni || [])
+      setIntegrazioni(lista.filter((i:any)=>i.stato==='attivo'))
     }).catch(()=>{})
   }, [])
   const NOMI_PIATT: Record<string,string> = { shopify:'Shopify', prestashop:'PrestaShop', woocommerce:'WooCommerce' }
