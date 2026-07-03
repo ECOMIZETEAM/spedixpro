@@ -106,7 +106,14 @@ export async function POST(req: NextRequest) {
   const tuttiColli = Array.isArray(body.packages) && body.packages.length ? body.packages : [pkg]
   const pesoReale = tuttiColli.reduce((s:number,p:any) => s + (parseFloat(p?.weight) || 0), 0) || 1
   const provincia = (body.shipTo?.state || '').toUpperCase().trim()
+  const paeseDest = (body.shipTo?.country || 'IT').toUpperCase().trim()
+  const isEstero = paeseDest !== 'IT'
   const zonaNome = ZONE_MAP[provincia] || 'Italia'
+  let zoneEsteroIds: string[] = []
+  if (isEstero) {
+    const { data: zc } = await supabase.from('zone_cap').select('zona_id').eq('paese', paeseDest)
+    zoneEsteroIds = (zc || []).map((r: any) => r.zona_id).filter(Boolean)
+  }
 
   // ─── Costruisce una quotazione per un dato corriere ──────────────────────
   async function quotaCorriere(corriere: any, pesoFatt: number): Promise<any> {
@@ -203,13 +210,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Listino vuoto — configura le fasce prezzi' }, { status: 400 })
   }
 
-  let fasceZona = fasce.filter(f => (f.zone as any)?.nome === zonaNome)
-  if (!fasceZona.length) {
-    fasceZona = fasce.filter(f => (f.zone as any)?.nome === 'Italia')
-  }
-
-  if (!fasceZona.length) {
-    return NextResponse.json({ error: `Nessuna fascia prezzo per zona ${zonaNome}` }, { status: 400 })
+  let fasceZona
+  if (isEstero) {
+    fasceZona = fasce.filter(f => zoneEsteroIds.includes((f.zone as any)?.id))
+    if (!fasceZona.length) {
+      return NextResponse.json({ error: `Nessuna tariffa disponibile per spedizioni verso ${paeseDest}` }, { status: 400 })
+    }
+  } else {
+    fasceZona = fasce.filter(f => (f.zone as any)?.nome === zonaNome)
+    if (!fasceZona.length) {
+      fasceZona = fasce.filter(f => (f.zone as any)?.nome === 'Italia')
+    }
+    if (!fasceZona.length) {
+      return NextResponse.json({ error: `Nessuna fascia prezzo per zona ${zonaNome}` }, { status: 400 })
+    }
   }
 
   // *** FIX: raggruppa le fasce per corriere, trova la fascia giusta PER OGNI corriere ***
