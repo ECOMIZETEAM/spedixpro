@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fulfillSpedizioniShopify } from '@/lib/shopify'
+import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 
 export async function GET(req: NextRequest) {
   const auth = req.headers.get('authorization')
@@ -45,7 +46,7 @@ export async function GET(req: NextRequest) {
     const numeroDistinta = String(numeroInt + 1)
     const { data: distinta } = await supabase.from('distinte').insert({
       master_id: masterId, cliente_id: clienteId, corriere_id: corriereId,
-      numero: numeroDistinta, data: new Date().toISOString().split('T')[0], stato: 'chiusa',
+      numero: numeroDistinta, data: new Date().toISOString().split('T')[0], stato: 'chiusa', confermata_vettore: true, data_conferma: new Date().toISOString(),
       totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: righe.length, prezzo_totale: prezzoTotale,
     }).select().single()
     if (distinta?.id) {
@@ -53,6 +54,7 @@ export async function GET(req: NextRequest) {
       distinteCreate++
       // Tracking a Shopify per gli ordini ecommerce collegati (best-effort)
       try { await fulfillSpedizioniShopify(supabase, righe.map(r => r.id)) } catch {}
+      try { await chiudiBorderoSpedisci(supabase, distinta.id) } catch {}
     }
   }
   return NextResponse.json({ success: true, distinteCreate, spedizioniChiuse: speds.length })

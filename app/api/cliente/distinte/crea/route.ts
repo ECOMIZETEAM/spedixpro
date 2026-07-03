@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { fulfillSpedizioniShopify } from '@/lib/shopify'
+import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest) {
   const oggi = new Date().toISOString().slice(0, 10)
   const { data: distinta, error: errIns } = await supabase
     .from('distinte')
-    .insert({ master_id: masterId, cliente_id: clienteId, corriere_id: corriereId, numero, data: oggi, stato: 'chiusa', totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: valide.length })
+    .insert({ master_id: masterId, cliente_id: clienteId, corriere_id: corriereId, numero, data: oggi, stato: 'chiusa', totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: valide.length, confermata_vettore: true, data_conferma: new Date().toISOString() })
     .select('id,numero')
     .single()
   if (errIns || !distinta) return NextResponse.json({ error: 'Errore creazione distinta' }, { status: 500 })
@@ -38,5 +39,7 @@ export async function POST(req: NextRequest) {
   // Distinta chiusa: rimanda il tracking a Shopify per gli ordini ecommerce collegati (best-effort)
   let fulfillEsiti: any[] = []
   try { fulfillEsiti = await fulfillSpedizioniShopify(supabase, validIds) } catch {}
+  // Chiusura borderò su spedisci.online (best-effort, solo corrieri tipo spedisci)
+  try { await chiudiBorderoSpedisci(supabase, distinta.id) } catch {}
   return NextResponse.json({ ok: true, distintaId: distinta.id, numero: distinta.numero, totali: { colli: totaleColli, peso: totalePeso, spedizioni: validIds.length }, fulfill: fulfillEsiti })
 }
