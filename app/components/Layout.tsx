@@ -141,7 +141,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
               <div key={item.href}>
                 {hasSub ? (
                   <div
-                    onClick={() => toggleMenu(item.href)}
+                    onClick={(e) => toggleMenu(item.href, e.currentTarget as HTMLElement)}
                     style={{
                       display:'flex',alignItems:'center',gap:'9px',
                       padding:'8px 18px',cursor:'pointer',
