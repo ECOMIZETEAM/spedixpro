@@ -58,6 +58,8 @@ export default function SpedizioniPage() {
     let filtered = [...spedizioni]
     if (filtri.clienteId) filtered = filtered.filter(s => s.cliente_id === filtri.clienteId)
     if (filtri.stato) filtered = filtered.filter(s => s.stato === filtri.stato)
+    if (filtri.contratto) filtered = filtered.filter(s => s.corriere_id === filtri.contratto)
+    if (filtri.vettore) filtered = filtered.filter(s => String(s.corrieri?.nome_contratto||'').split(' ')[0] === filtri.vettore)
     if (filtri.numero) filtered = filtered.filter(s => s.numero?.toLowerCase().includes(filtri.numero.toLowerCase()))
     if (filtri.id_ordine) filtered = filtered.filter(s => (s.note||'').toLowerCase().includes(filtri.id_ordine.toLowerCase()))
     if (filtri.dal) filtered = filtered.filter(s => new Date(s.created_at) >= new Date(filtri.dal))
