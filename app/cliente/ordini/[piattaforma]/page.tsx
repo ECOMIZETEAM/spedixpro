@@ -83,7 +83,7 @@ export default function OrdiniPage() {
       })
       const d = await res.json()
       if (d.error) setMsg('Errore: '+d.error)
-      else setMsg('Sincronizzati '+d.importati+' ordini (letti '+d.letti+')')
+      else setMsg('Sincronizzati '+d.importati+' ordini (letti '+d.letti+', immagini '+(d.immagini??0)+(d.img_errore?', ERR img: '+d.img_errore:'')+')')
       carica()
     } catch { setMsg('Errore di connessione') }
     setSincronizzando(false)
@@ -158,11 +158,62 @@ export default function OrdiniPage() {
   function ordina(k:string){ setSort(s=> s&&s.k===k ? {k,d:(s.d===1?-1:1) as 1|-1} : {k,d:1}) }
   function frecc(k:string){ if(!sort||sort.k!==k) return '↕'; return sort.d===1?'↑':'↓' }
 
-  function spedisciSelezionati(){
+  const [spedendo, setSpedendo] = useState(false)
+
+  async function spedisciSelezionati(){
     const ids = Object.keys(sel).filter(id=>sel[id])
     if (ids.length===0){ setMsg('Seleziona almeno un ordine'); return }
-    if (ids.length===1){ const o = ordini.find(x=>x.id===ids[0]); if(o) creaSpedizione(o); return }
-    setMsg('Spedizione multipla ('+ids.length+' ordini) in arrivo — per ora usa "Crea spedizione" sulla singola riga')
+    setSpedendo(true)
+    let okCount = 0; const errori: string[] = []
+    try {
+      const cli = await fetch('/api/cliente/dati').then(r=>r.json())
+      if (!cli || cli.error) { setMsg('Errore: dati cliente non disponibili'); setSpedendo(false); return }
+      const shipFrom = { name:cli.ragione_sociale||'', company:cli.ragione_sociale||'', street1:cli.so_indirizzo||'', street2:'', city:cli.so_citta||'', state:cli.so_provincia||'', postalCode:cli.so_cap||'', country:'IT', phone:cli.telefono||'', email:cli.email||'' }
+      for (const id of ids) {
+        const o = ordini.find(x=>x.id===id)
+        if (!o || o.stato==='spedito') continue
+        const d = o.destinatario || {}
+        const num = o.numero_ordine || id
+        setMsg('Spedizione ordine '+num+'… ('+(okCount+1)+'/'+ids.length+')')
+        if (!d.nome || !d.indirizzo || !d.citta || !d.cap) { errori.push(num+': destinatario incompleto'); continue }
+        const arts = Array.isArray(o.articoli)?o.articoli:[]
+        const grammi = arts.reduce((s:number,a:any)=>s+(Number(a.grammi)||0)*(Number(a.quantita)||1),0)
+        const peso = Math.max(1, grammi/1000)
+        const packages = [{ length:20, width:15, height:10, weight:peso }]
+        const shipTo = { name:d.nome, company:'', street1:d.indirizzo, street2:'', city:d.citta, state:d.provincia||'', postalCode:d.cap, country:d.paese||'IT', phone:d.telefono||'', email:d.email||'' }
+        const tarRes = await fetch('/api/spedizioni/tariffe', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ clienteId:cli.id, packages, shipFrom, shipTo, notes:'', insuranceValue:0, codValue:0 })
+        }).then(r=>r.json()).catch(()=>null)
+        if (!Array.isArray(tarRes) || !tarRes.length) { errori.push(num+': nessuna tariffa'); continue }
+        let t = null
+        if (spedisciCon && spedisciCon!=='auto') {
+          t = tarRes.find((x:any)=>x.corriere_id===spedisciCon || x._corriere_id===spedisciCon)
+          if (!t) { errori.push(num+': corriere scelto non disponibile per questa destinazione'); continue }
+        }
+        if (!t) t = tarRes[0]
+        const creaRes = await fetch('/api/spedizioni/crea', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            clienteId:cli.id, carrierCode:t.carrierCode, contractCode:t.contractCode, totalPrice:t.total_price,
+            _corriere_id: t._corriere_id || t.corriere_id || null, _spediamopro_quotation: t._spediamopro_quotation || null,
+            packages, colliDettaglio:[{lunghezza:'20',larghezza:'15',altezza:'10'}],
+            shipFrom, shipTo, notes:'', insuranceValue:0, codValue:0,
+            contenuto: arts.map((a:any)=>a.nome).join(', ').slice(0,100), tipoContenuto:'Merce destinata alla vendita', valoreMerce:String(o.totale||'')
+          })
+        }).then(r=>r.json()).catch(()=>null)
+        if (!creaRes || creaRes.error) { errori.push(num+': '+(creaRes?.error||'errore creazione')); continue }
+        await fetch('/api/ordini/segna-spedito', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ ordine_id:id, spedizione_id:creaRes.spedizioneId||null })
+        }).catch(()=>{})
+        okCount++
+      }
+    } catch { errori.push('errore imprevisto') }
+    setSel({})
+    setMsg('Spedite '+okCount+' spedizioni'+(errori.length?' — Errori: '+errori.join(' | '):''))
+    setSpedendo(false)
+    carica()
   }
   function cancellaSelezionati(){
     const ids = Object.keys(sel).filter(id=>sel[id])
@@ -240,7 +291,7 @@ export default function OrdiniPage() {
             <option value="no">No</option><option value="si">Sì</option>
           </select>
           <div style={{flex:1}}/>
-          <button onClick={spedisciSelezionati} style={{background:'#2563eb',color:'#fff',border:'none',borderRadius:'8px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>Spedisci selezionati{nSel>0?' ('+nSel+')':''}</button>
+          <button onClick={spedisciSelezionati} disabled={spedendo} style={{opacity:spedendo?.6:1,background:'#2563eb',color:'#fff',border:'none',borderRadius:'8px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>Spedisci selezionati{nSel>0?' ('+nSel+')':''}</button>
           <button onClick={cancellaSelezionati} style={{background:'#dc2626',color:'#fff',border:'none',borderRadius:'8px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>Cancella selezionati</button>
         </div>
 

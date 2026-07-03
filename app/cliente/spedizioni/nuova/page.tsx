@@ -182,6 +182,7 @@ export default function NuovaSpedizioneCliente() {
       body: JSON.stringify({
         clienteId: clienteData?.id,
         carrierCode:selected.carrierCode, contractCode:selected.contractCode,
+        _corriere_id: (selected as any)._corriere_id || (selected as any).corriere_id || null, _spediamopro_quotation: (selected as any)._spediamopro_quotation || null,
         totalPrice:selected.total_price,
         packages: buildPackages(),
         colliDettaglio: colli,

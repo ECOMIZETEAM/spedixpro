@@ -311,6 +311,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Nessuna tariffa disponibile per ${pesoFatturato.toFixed(2)}kg in zona ${zonaNome}` }, { status: 400 })
   }
 
+  risultati.sort((a,b)=>Number(a.total_price)-Number(b.total_price))
   return NextResponse.json(risultati)
 }
 
