@@ -64,6 +64,11 @@ export default function NuovaSpedizionePage() {
   const [creating, setCreating] = useState(false)
   const [errore, setErrore] = useState('')
   const [vista, setVista] = useState<'dati'|'contratto'>('dati')
+  // Reset tariffe/corrieri quando cambiano dati destinatario/mittente/spedizione:
+  // costringe a ricalcolare "Seleziona Corriere" sui nuovi dati (no tariffe stale)
+  useEffect(() => {
+    setTariffe([]); setSelected(null); setVista('dati')
+  }, [dest, mitt, clienteId, peso, colli, numColli, contrassegno, assicurazione])
 
   useEffect(() => { fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[])) }, [])
 
