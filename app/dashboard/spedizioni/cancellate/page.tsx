@@ -68,7 +68,7 @@ export default function SpedizioniCancellatePage() {
                     <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.dest_cap}</td>
                     <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.peso_reale}kg</td>
                     <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.colli}</td>
-                    <td style={{padding:'9px 12px',color:'#666',fontSize:'12px',whiteSpace:'nowrap'}}>{new Date(s.created_at).toLocaleDateString('it-IT')} {new Date(s.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</td>
+                    <td style={{padding:'9px 12px',color:'#666',fontSize:'12px',whiteSpace:'nowrap'}}>{new Date(s.updated_at || s.created_at).toLocaleDateString('it-IT')} {new Date(s.updated_at || s.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</td>
                     <td style={{padding:'9px 12px',fontWeight:'700',color:'#1a1a1a'}}>€ {Number(s.costo_totale||0).toFixed(2)}</td>
                   </tr>
                 ))}
