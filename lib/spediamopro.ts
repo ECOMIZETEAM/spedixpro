@@ -134,7 +134,6 @@ export async function spediamoproCreateShipment(
   raw: any
 }> {
   const token = await getSpediamoproToken(authcode)
-  console.log('[ACCEPT] courierService:', JSON.stringify(params.quotation.courierService), 'service:', params.quotation.service)
 
   const res = await fetch(`${BASE_URL}/quotations/accept`, {
     method: 'POST',
@@ -149,7 +148,7 @@ export async function spediamoproCreateShipment(
         firstAvailablePickupDate: params.quotation.firstAvailablePickupDate,
         priceBreakdown: params.quotation.priceBreakdown,
       },
-      labelFormat: (params.quotation.courierService?.courier || '').toLowerCase() === 'ups' ? 1 : 0,
+      labelFormat: [9,19].includes(Number(params.quotation.service)) ? 1 : 0,
       cashOnDeliveryAmount: params.cashOnDeliveryAmount || null,
       insuredAmount: params.insuredAmount || null,
       externalReference: params.externalReference || null,
