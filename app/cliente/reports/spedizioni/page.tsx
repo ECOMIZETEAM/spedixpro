@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import DateRangePicker from '@/app/components/DateRangePicker'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -191,11 +192,7 @@ export default function ReportSpedizioniPage() {
         {/* Riga 2 */}
         <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr',gap:'12px',marginBottom:'12px'}}>
           <div><label style={lbl}>Data</label>
-            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-              <input type="date" value={filtri.dal} onChange={e=>setF('dal',e.target.value)} style={inp}/>
-              <span style={{color:'#1a1a1a'}}>—</span>
-              <input type="date" value={filtri.al} onChange={e=>setF('al',e.target.value)} style={inp}/>
-            </div>
+            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} />
           </div>
           <div><label style={lbl}>Agente</label>
             <select value={filtri.agente} onChange={e=>setF('agente',e.target.value)} style={sel}>
