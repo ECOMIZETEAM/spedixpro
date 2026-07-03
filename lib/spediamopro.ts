@@ -99,7 +99,8 @@ export async function spediamoproGetQuotation(
 
   const json = await res.json()
   if (!res.ok || json.error) {
-    throw new Error(json.error?.message || 'SpediamoPro quotations failed')
+    const details = json.error?.details?.map((d: any) => `${d.source}: ${d.message}`).join(', ')
+    throw new Error(details || json.error?.message || 'SpediamoPro quotations failed')
   }
 
   const quotes: SpediamoproQuotation[] = json.data
