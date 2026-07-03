@@ -110,11 +110,9 @@ export async function POST(req: NextRequest) {
   const isEstero = paeseDest !== 'IT'
   const zonaNome = ZONE_MAP[provincia] || 'Italia'
   let zoneEsteroIds: string[] = []
-  console.log('[TARIFFE] country ricevuto:', JSON.stringify(body.shipTo?.country), 'paeseDest:', paeseDest, 'isEstero:', isEstero)
   if (isEstero) {
     const { data: zc } = await supabase.from('zone_cap').select('zona_id').eq('paese', paeseDest)
     zoneEsteroIds = (zc || []).map((r: any) => r.zona_id).filter(Boolean)
-    console.log('[TARIFFE] zoneEsteroIds trovate:', JSON.stringify(zoneEsteroIds), 'per paese', paeseDest)
   }
 
   // ─── Costruisce una quotazione per un dato corriere ──────────────────────
@@ -157,7 +155,6 @@ export async function POST(req: NextRequest) {
           _spediamopro_quotation: quote,
         }
       } catch (e: any) {
-        console.log('[TARIFFE] spediamoproGetQuotation ERRORE:', e?.message, 'service:', cred.service_id, 'consignee country:', body.shipTo.country)
         return null
       }
     }
@@ -216,7 +213,6 @@ export async function POST(req: NextRequest) {
   let fasceZona
   if (isEstero) {
     fasceZona = fasce.filter(f => zoneEsteroIds.includes((f.zone as any)?.id))
-    console.log('[TARIFFE] fasce totali:', fasce.length, 'fasce estero filtrate:', fasceZona.length, 'zoneIds:', JSON.stringify(zoneEsteroIds), 'zone nelle fasce:', JSON.stringify(fasce.slice(0,3).map((f:any)=>({id:f.zone?.id,nome:f.zone?.nome}))))
     if (!fasceZona.length) {
       return NextResponse.json({ error: `Nessuna tariffa disponibile per spedizioni verso ${paeseDest}` }, { status: 400 })
     }
@@ -249,7 +245,6 @@ export async function POST(req: NextRequest) {
     const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
     const pesoPerFascia = (!!settsC.agevolazione_peso_reale && entroMisureAgevolate) ? pesoReale : pesoFatturato
     const fasciaGiusta = trovaFascia(fasceDelCorriere, pesoPerFascia)
-    console.log('[TARIFFE] fasciaGiusta:', fasciaGiusta ? fasciaGiusta.prezzo : 'NULL', 'peso:', pesoPerFascia)
     if (!fasciaGiusta) continue
     if (codRichiesto && contrassegnoOff.has(corriereId)) continue
 
@@ -257,14 +252,10 @@ export async function POST(req: NextRequest) {
 
     let spediamoproQuotation = null
     if (corriere?.tipo === 'spediamopro') {
-      console.log('[TARIFFE] pre-quota spediamopro corriere:', corriere.id, 'authcode?', !!corriere.credenziali?.authcode, 'service_id:', corriere.credenziali?.service_id)
       let quote = null
       try {
         quote = await quotaCorriere(corriere, pesoFatturato)
-      } catch (eq: any) {
-        console.log('[TARIFFE] ERRORE quotaCorriere:', eq?.message)
-      }
-      console.log('[TARIFFE] post-quota:', quote ? 'OK '+quote.total_price : 'NULL')
+      } catch {}
       spediamoproQuotation = quote?._spediamopro_quotation || null
       if (!quote) continue
     }
