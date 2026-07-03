@@ -307,7 +307,7 @@ async function apriTracking(s: any) {
                       <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>—</td>
                       <td style={{padding:'9px 12px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
-                          <a href={`/cliente/spedizioni/${s.id}/etichetta`} target="_blank"
+                          <a href={`/cliente/spedizioni/${s.id}/etichetta`} target="_blank" download
                             style={{padding:'4px 8px',background:'#eff6ff',color:'#1d4ed8',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #bfdbfe'}} title="Etichetta">🖨️</a>
                           <button onClick={()=>apriTracking(s)}
                             style={{padding:'4px 8px',background:'#f0fdf4',color:'#15803d',borderRadius:'4px',fontSize:'14px',border:'1px solid #86efac',cursor:'pointer'}} title="Tracking">📍</button>
