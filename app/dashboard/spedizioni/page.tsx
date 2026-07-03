@@ -137,7 +137,7 @@ async function apriTracking(s: any) {
   return (
     <div>
       {notifica && (
-        <div style={{position:'fixed',top:'20px',right:'20px',zIndex:9999,background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:'8px',padding:'12px 18px',fontSize:'13px',fontWeight:'700',boxShadow:'0 4px 12px rgba(0,0,0,0.15)'}}>{notifica}</div>
+        <div style={{background: notifica.startsWith('Spedizione cancellata') ? '#fee2e2' : '#fee2e2', color:'#dc2626', border:'2px solid #dc2626', borderRadius:'8px', padding:'14px 18px', fontSize:'14px', fontWeight:'700', marginBottom:'16px', textAlign:'center'}}>{notifica}</div>
       )}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'16px'}}>
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Lista Spedizioni</h1>
