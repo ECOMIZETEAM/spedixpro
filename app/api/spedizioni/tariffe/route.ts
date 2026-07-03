@@ -156,7 +156,8 @@ export async function POST(req: NextRequest) {
           corriere_id: corriere.id, corriere_tipo: 'spediamopro',
           _spediamopro_quotation: quote,
         }
-      } catch (e) {
+      } catch (e: any) {
+        console.log('[TARIFFE] spediamoproGetQuotation ERRORE:', e?.message, 'service:', cred.service_id, 'consignee country:', body.shipTo.country)
         return null
       }
     }
