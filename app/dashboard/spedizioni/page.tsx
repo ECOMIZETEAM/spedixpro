@@ -1,5 +1,6 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
+import DateRangePicker from '@/app/components/DateRangePicker'
 
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
@@ -172,11 +173,7 @@ async function apriTracking(s: any) {
             <input value={filtri.numero} onChange={e=>setF('numero',e.target.value)} style={inp}/>
           </div>
           <div><label style={lbl}>Data Spedizione:</label>
-            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-              <input type="date" value={filtri.dal} onChange={e=>setF('dal',e.target.value)} style={{...inp,width:'auto'}}/>
-              <span style={{color:'#1a1a1a'}}>-</span>
-              <input type="date" value={filtri.al} onChange={e=>setF('al',e.target.value)} style={{...inp,width:'auto'}}/>
-            </div>
+            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} />
           </div>
           <div><label style={lbl}>Contrassegno:</label>
             <select value={filtri.contrassegno} onChange={e=>setF('contrassegno',e.target.value)} style={sel}>
