@@ -64,6 +64,7 @@ export default function NuovaSpedizionePage() {
   const [creating, setCreating] = useState(false)
   const [errore, setErrore] = useState('')
   const [vista, setVista] = useState<'dati'|'contratto'>('dati')
+  const [successo, setSuccesso] = useState<{numero:string,id:string}|null>(null)
   // Reset tariffe/corrieri quando cambiano dati destinatario/mittente/spedizione:
   // costringe a ricalcolare "Seleziona Corriere" sui nuovi dati (no tariffe stale)
   useEffect(() => {
@@ -106,7 +107,7 @@ export default function NuovaSpedizionePage() {
 
   async function calcolaTariffe() {
     if (!clienteId) { setErrore('Seleziona un cliente'); return }
-    if (!dest.nome||!dest.indirizzo||!dest.citta||!dest.cap) { setErrore('Compila tutti i dati destinatario'); return }
+    if (!dest.nome||!dest.indirizzo||!dest.citta||!dest.cap||!dest.email||!dest.telefono) { setErrore('Compila tutti i dati destinatario (inclusi email e telefono)'); return }
     if (dest.paese==='IT' && !dest.provincia) { setErrore('La provincia è obbligatoria per le spedizioni in Italia'); return }
     setErrore(''); setLoading(true); setTariffe([]); setSelected(null)
     const res = await fetch('/api/spedizioni/tariffe', {
@@ -128,6 +129,20 @@ export default function NuovaSpedizionePage() {
     setVista('contratto')
   }
 
+  async function scaricaEtichetta(id:string) {
+    try {
+      const res = await fetch('/dashboard/spedizioni/'+id+'/etichetta')
+      if (!res.ok) { alert('Errore: etichetta non generata'); return }
+      const blob = await res.blob()
+      const ct = res.headers.get('content-type')||''
+      const ext = ct.includes('gif')?'gif':ct.includes('png')?'png':'pdf'
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = 'etichetta_'+id+'.'+ext
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch { alert('Errore durante il download etichetta') }
+  }
   async function creaSpedizione() {
     if (!selected) return
     setCreating(true)
@@ -165,7 +180,7 @@ export default function NuovaSpedizionePage() {
       } catch {}
     }
     setCreating(false)
-    router.push('/dashboard/spedizioni?success='+data.numero)
+    setSuccesso({numero:data.numero||'—', id:data.spedizioneId||''})
   }
 
   
@@ -178,6 +193,12 @@ export default function NuovaSpedizionePage() {
       </div>
 
       {errore && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>⚠️ {errore}</div>}
+      {successo && <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'12px 16px',marginBottom:'16px',fontSize:'14px',color:'#166534',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px'}}>
+        <span>✓ Spedizione <strong>{successo.numero}</strong> generata con successo</span>
+        {successo.id
+          ? <button onClick={()=>scaricaEtichetta(successo.id)} style={{background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',borderRadius:'6px',padding:'6px 12px',fontSize:'14px',cursor:'pointer',fontWeight:'600'}} title="Scarica etichetta">🖨️ Scarica LDV</button>
+          : <span style={{color:'#dc2626',fontSize:'13px'}}>⚠️ Etichetta non generata</span>}
+      </div>}
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 400px',gap:'16px',alignItems:'start'}}>
 
