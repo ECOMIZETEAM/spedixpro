@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 export default function CreaDistintaPage() {
   const [clienti, setClienti] = useState<any[]>([])
   const [corrieri, setCorrieri] = useState<any[]>([])
+  const [contratti, setContratti] = useState<any[]>([])
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [selezionate, setSelezionate] = useState<Set<string>>(new Set())
   const [clienteId, setClienteId] = useState('')
@@ -21,7 +22,21 @@ export default function CreaDistintaPage() {
     fetch('/api/corrieri/lista').then(r => r.json()).then(d => setCorrieri(Array.isArray(d) ? d : []))
   }, [])
 
+  useEffect(() => { caricaContratti() }, [clienteId, dal, al])
   useEffect(() => { caricaSpedizioni() }, [clienteId, corriereId, dal, al])
+  async function caricaContratti() {
+    const params = new URLSearchParams()
+    if (clienteId) params.set('clienteId', clienteId)
+    if (dal) params.set('dal', dal)
+    if (al) params.set('al', al)
+    const res = await fetch('/api/distinte/contratti?' + params.toString())
+    const d = await res.json()
+    const arr = Array.isArray(d) ? d : []
+    setContratti(arr)
+    // seleziono di default il primo contratto con LDV da chiudere
+    const primo = arr.find((c: any) => c.da_chiudere > 0)
+    if (primo) setCorriereId(primo.id)
+  }
 
   async function caricaSpedizioni() {
     setLoading(true)
@@ -101,8 +116,8 @@ export default function CreaDistintaPage() {
           <div>
             <label style={lbl}>Contratto</label>
             <select value={corriereId} onChange={e => setCorriereId(e.target.value)} style={inp}>
-              <option value="">Tutti i contratti</option>
-              {corrieri.map(c => <option key={c.id} value={c.id}>{c.nome_contratto}</option>)}
+              <option value="">Seleziona un contratto...</option>
+              {contratti.map(c => <option key={c.id} value={c.id}>{c.nome_contratto} ({c.da_chiudere})</option>)}
             </select>
           </div>
         </div>
