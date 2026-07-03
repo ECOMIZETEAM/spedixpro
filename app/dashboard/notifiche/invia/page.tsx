@@ -66,7 +66,7 @@ export default function InviaNotifica() {
 
           <div style={{ fontWeight:'700', color:'#1a1a1a', marginBottom:'10px', fontSize:'14px' }}>Messaggio</div>
           <div style={{ display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'8px' }}>
-            <select onChange={e=>{ format('formatBlock', e.target.value); e.target.selectedIndex=0 }} style={{ ...btnTool, cursor:'pointer' }}>
+            <select onChange={e=>{ const v = e.target.value; e.target.selectedIndex=0; if(v) format('formatBlock', v) }} style={{ ...btnTool, cursor:'pointer' }}>
               <option value="">Normal text</option>
               <option value="h1">Heading 1</option>
               <option value="h2">Heading 2</option>
