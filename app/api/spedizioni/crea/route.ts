@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
   // *** FIX: usa il corriere_id passato dal frontend (tariffa selezionata) ***
   if (body._corriere_id) {
     const { data: c } = await supabase
-      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id')
+      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id,settings')
       .eq('id', body._corriere_id)
       .eq('master_id', masterId)
       .single()
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
 
   if (!corriereRecord) {
     const { data: c } = await supabase
-      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id')
+      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id,settings')
       .eq('master_id', masterId).eq('tipo', 'spedisci')
       .limit(1)
       .single()
