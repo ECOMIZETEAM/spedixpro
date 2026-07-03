@@ -130,7 +130,6 @@ export async function POST(req: NextRequest) {
     // 3) jolly totale (paese, provincia * cap *) -> tipico estero
     if (!match.length) match = righe.filter((r: any) => (!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*'))
     zoneMatchIds = match.map((r: any) => r.zona_id).filter(Boolean)
-    console.log('[ZONA] capDest:', JSON.stringify(capDest), 'provincia:', JSON.stringify(provincia), 'paeseDest:', paeseDest, 'righe zonecap:', righe.length, 'match trovati:', match.length, 'zoneMatchIds:', JSON.stringify(zoneMatchIds))
   }
   // Compat: manteniamo zoneEsteroIds usato piu sotto nel filtro fasce
   let zoneEsteroIds: string[] = zoneMatchIds

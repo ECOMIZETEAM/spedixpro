@@ -8,7 +8,6 @@ export default async function ClienteLayout({ children }: { children: React.Reac
   // Se non loggato, mostra solo il contenuto (es. la pagina di login /cliente) SENZA
   // reindirizzare: il layout avvolge anche il login, e un redirect qui creerebbe un loop.
   // Le pagine interne restano protette dal middleware.
-  console.log('[LAYOUT] user:', user?.id || 'NULL')
   if (!user) return <>{children}</>
   const { data: utente } = await supabase.from('utenti').select('cliente_id,ruolo').eq('id', user.id).single()
   if (!utente?.cliente_id) return <>{children}</>
