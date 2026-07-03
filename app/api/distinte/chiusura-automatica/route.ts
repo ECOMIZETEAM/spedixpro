@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { fulfillSpedizioniShopify } from '@/lib/shopify'
 
 export async function GET(req: NextRequest) {
   const auth = req.headers.get('authorization')
@@ -50,6 +51,8 @@ export async function GET(req: NextRequest) {
     if (distinta?.id) {
       await supabase.from('spedizioni').update({ distinta_id: distinta.id }).in('id', righe.map(r => r.id))
       distinteCreate++
+      // Tracking a Shopify per gli ordini ecommerce collegati (best-effort)
+      try { await fulfillSpedizioniShopify(supabase, righe.map(r => r.id)) } catch {}
     }
   }
   return NextResponse.json({ success: true, distinteCreate, spedizioniChiuse: speds.length })

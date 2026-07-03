@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { fulfillSpedizioniShopify } from '@/lib/shopify'
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -34,5 +35,8 @@ export async function POST(req: NextRequest) {
   const validIds = valide.map(s => s.id)
   const { error: errUpd } = await supabase.from('spedizioni').update({ distinta_id: distinta.id }).in('id', validIds)
   if (errUpd) return NextResponse.json({ error: 'Errore aggancio spedizioni' }, { status: 500 })
-  return NextResponse.json({ ok: true, distintaId: distinta.id, numero: distinta.numero, totali: { colli: totaleColli, peso: totalePeso, spedizioni: validIds.length } })
+  // Distinta chiusa: rimanda il tracking a Shopify per gli ordini ecommerce collegati (best-effort)
+  let fulfillEsiti: any[] = []
+  try { fulfillEsiti = await fulfillSpedizioniShopify(supabase, validIds) } catch {}
+  return NextResponse.json({ ok: true, distintaId: distinta.id, numero: distinta.numero, totali: { colli: totaleColli, peso: totalePeso, spedizioni: validIds.length }, fulfill: fulfillEsiti })
 }
