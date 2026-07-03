@@ -10,19 +10,6 @@ const SCOPES = 'read_orders,read_assigned_fulfillment_orders,read_merchant_manag
 const SHOP_RE = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/
 
 export async function GET(req: NextRequest) {
-  const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.redirect(new URL('/cliente', req.url))
-
-  const { data: utente } = await supabase
-    .from('utenti').select('ruolo, cliente_id').eq('id', user.id).single()
-  if (utente?.ruolo !== 'cliente' || !utente?.cliente_id) {
-    return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
-  }
-  const { data: cliente } = await supabase
-    .from('clienti').select('master_id').eq('id', utente.cliente_id).single()
-  if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
-
   const shop = (new URL(req.url).searchParams.get('shop') || '').trim().toLowerCase()
   if (!SHOP_RE.test(shop)) {
     return NextResponse.json({ error: 'Dominio Shopify non valido' }, { status: 400 })
@@ -34,10 +21,29 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Configurazione Shopify mancante (variabili ambiente)' }, { status: 500 })
   }
 
-  // state anti-CSRF, collegato al cliente
+  // L'OAuth parte SUBITO (requisito app pubblica Shopify).
+  // Se un cliente SpedixPro e' gia' loggato, colleghiamo il negozio al volo:
+  // salviamo cliente_id/master_id nello state. Altrimenti restano null e il
+  // collegamento avverra' dopo il login (negozio in stato pending).
+  const supabase = await createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
+  let clienteId: string | null = null
+  let masterId: string | null = null
+  if (user) {
+    const { data: utente } = await supabase
+      .from('utenti').select('ruolo, cliente_id').eq('id', user.id).single()
+    if (utente?.ruolo === 'cliente' && utente?.cliente_id) {
+      clienteId = utente.cliente_id
+      const { data: cliente } = await supabase
+        .from('clienti').select('master_id').eq('id', utente.cliente_id).single()
+      masterId = cliente?.master_id || null
+    }
+  }
+
+  // state anti-CSRF (cliente_id/master_id opzionali)
   const state = crypto.randomBytes(24).toString('hex')
   const { error } = await supabase.from('shopify_oauth_state').insert({
-    state, cliente_id: utente.cliente_id, master_id: cliente.master_id, shop,
+    state, cliente_id: clienteId, master_id: masterId, shop,
   })
   if (error) {
     return NextResponse.json({ error: 'Errore avvio OAuth: ' + error.message }, { status: 500 })

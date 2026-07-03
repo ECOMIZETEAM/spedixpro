@@ -70,7 +70,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Scambio token fallito: ' + (e?.message || e) }, { status: 502 })
   }
 
-  // Salva / aggiorna l'integrazione (credenziali in chiaro, coerente con corrieri)
+  // CASO A: cliente gia' identificato -> integrazione attiva
+  if (st.cliente_id) {
   const payload: any = {
     master_id: st.master_id,
     cliente_id: st.cliente_id,
@@ -96,4 +97,13 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.redirect(`${appUrl}/cliente/integrazioni?connected=${encodeURIComponent(shop)}`)
+  }
+
+  // CASO B: nessun cliente identificato (install da Shopify).
+  // Salva il negozio autorizzato in pending e manda al login SpedixPro.
+  await supabase.from('shopify_pending').upsert(
+    { shop, access_token: token, scope },
+    { onConflict: 'shop' }
+  )
+  return NextResponse.redirect(`${appUrl}/cliente?shopify_pending=${encodeURIComponent(shop)}`)
 }

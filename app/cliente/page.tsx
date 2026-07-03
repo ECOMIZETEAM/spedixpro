@@ -19,6 +19,19 @@ export default function ClienteLogin() {
     const data = await res.json()
     setLoading(false)
     if (data.error) { setErrore(data.error); return }
+    // Se l'utente arriva da un'installazione Shopify (OAuth partito da Shopify),
+    // collega ora il negozio in attesa al suo account, poi vai alle integrazioni.
+    const pending = new URLSearchParams(window.location.search).get('shopify_pending')
+    if (pending) {
+      try {
+        await fetch('/api/integrazioni/shopify/rivendica', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ shop: pending })
+        })
+      } catch {}
+      router.push('/cliente/integrazioni?connected=' + encodeURIComponent(pending))
+      return
+    }
     router.push('/cliente/dashboard')
   }
 
