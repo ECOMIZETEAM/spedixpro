@@ -27,6 +27,7 @@ const FILTRI_DEFAULT = {
 export default function SpedizioniPage() {
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [spedizioniFiltrate, setSpedizioniFiltrate] = useState<any[]>([])
+  const [corrieri, setCorrieri] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
@@ -40,6 +41,7 @@ export default function SpedizioniPage() {
 
   useEffect(() => {
     fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[]))
+    fetch('/api/corrieri/lista').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d)?d:[]))
     caricaTutte()
   }, [])
 
