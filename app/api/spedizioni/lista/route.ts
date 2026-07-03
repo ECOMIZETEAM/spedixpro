@@ -15,7 +15,8 @@ export async function GET(req: NextRequest) {
   const destCap = p.get('dest_cap')
   const contenuto = p.get('contenuto')
   const contrassegno = p.get('contrassegno')
-  let query = supabase.from('spedizioni').select('*,clienti(ragione_sociale),corrieri(id,nome_contratto)').order('created_at', { ascending: false }).limit(200)
+  const ordinaPer = (stato === 'annullata') ? 'updated_at' : 'created_at'
+  let query = supabase.from('spedizioni').select('*,clienti(ragione_sociale),corrieri(id,nome_contratto)').order(ordinaPer, { ascending: false }).limit(200)
   if (clienteId) {
     query = query.eq('cliente_id', clienteId).eq('master_id', utente?.master_id)
   } else if (utente?.ruolo === 'cliente') {

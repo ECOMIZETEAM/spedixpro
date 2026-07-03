@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 
 export async function GET(req: NextRequest) {
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
     .select('*, clienti(ragione_sociale)')
     .eq('master_id', utente?.master_id)
     .eq('stato', 'annullata')
-    .order('created_at', { ascending: false })
+    .order('updated_at', { ascending: false })
     .limit(1000)
 
   if (clienteId) query = query.eq('cliente_id', clienteId)
