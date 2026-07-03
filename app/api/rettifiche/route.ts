@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
       await supabase.from('movimenti').insert({
         master_id: utente?.master_id, cliente_id: clienteId,
         tipo: 'rettifica',
-        descrizione: Rettifica  ( Peso inserito:  Kg - peso scansione:  Kg ),
+        descrizione: `Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso scansione: ${r.peso_reale} Kg )`,
         importo: -diff, saldo_dopo: nuovoCreditoResiduo,
         spedizione_id: r.spedizione_id || null,
       })
