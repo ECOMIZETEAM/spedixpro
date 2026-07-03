@@ -110,6 +110,7 @@ export async function POST(req: NextRequest) {
   const isEstero = paeseDest !== 'IT'
   const zonaNome = ZONE_MAP[provincia] || 'Italia'
   let zoneEsteroIds: string[] = []
+  console.log('[TARIFFE] country ricevuto:', JSON.stringify(body.shipTo?.country), 'paeseDest:', paeseDest, 'isEstero:', isEstero)
   if (isEstero) {
     const { data: zc } = await supabase.from('zone_cap').select('zona_id').eq('paese', paeseDest)
     zoneEsteroIds = (zc || []).map((r: any) => r.zona_id).filter(Boolean)
