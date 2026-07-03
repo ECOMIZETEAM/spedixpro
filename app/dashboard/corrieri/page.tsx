@@ -92,6 +92,9 @@ export default function CorrieriPage() {
       inserimento_ritiri: c.inserimento_ritiri !== false,
       mittente: (c.settings && c.settings.mittente) || 'cliente',
       agevolazione_peso_reale: !!(c.settings && c.settings.agevolazione_peso_reale),
+      misura_lunghezza: (c.settings && c.settings.misure_max && c.settings.misure_max.lunghezza) || '',
+      misura_larghezza: (c.settings && c.settings.misure_max && c.settings.misure_max.larghezza) || '',
+      misura_altezza: (c.settings && c.settings.misure_max && c.settings.misure_max.altezza) || '',
     })
   }
 
