@@ -62,6 +62,24 @@ export default function NuovaSpedizioneCliente() {
   const [errore, setErrore] = useState('')
   const [vista, setVista] = useState<'dati'|'contratto'>('dati')
   const [successo, setSuccesso] = useState<{numero:string,id:string}|null>(null)
+  const [daOrdine, setDaOrdine] = useState('')
+
+  // Precompilazione da ordine ecommerce (query param ?da_ordine=&nome=&...)
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search)
+    if (!q.get('da_ordine') && !q.get('nome')) return
+    setDaOrdine(q.get('da_ordine') || '')
+    setDest(d => ({...d,
+      nome: q.get('nome') || d.nome,
+      indirizzo: q.get('indirizzo') || d.indirizzo,
+      citta: q.get('citta') || d.citta,
+      provincia: q.get('provincia') || d.provincia,
+      cap: q.get('cap') || d.cap,
+      paese: q.get('paese') || d.paese,
+      email: q.get('email') || d.email,
+      telefono: q.get('telefono') || d.telefono,
+    }))
+  }, [])
   useEffect(() => {
     setTariffe([]); setSelected(null); setVista('dati')
   }, [dest, mitt, peso, colli, numColli, contrassegno, assicurazione])
