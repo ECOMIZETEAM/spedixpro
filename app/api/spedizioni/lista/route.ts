@@ -4,7 +4,13 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
+  let agenteClienteIds: string[] | null = null
+  if ((utente?.ruolo || '').toLowerCase() === 'agente') {
+    const nomeAg = (((utente as any)?.nome || '') + ' ' + ((utente as any)?.cognome || '')).trim()
+    const { data: cl } = await supabase.from('clienti').select('id').eq('master_id', utente?.master_id).eq('agente', nomeAg)
+    agenteClienteIds = (cl || []).map((c: any) => c.id)
+  }
   const p = req.nextUrl.searchParams
   const clienteId = p.get('clienteId')
   const stato = p.get('stato')
@@ -36,6 +42,7 @@ export async function GET(req: NextRequest) {
   if (contenuto) query = query.ilike('contenuto', `%${contenuto}%`)
   if (contrassegno === 'si') query = query.gt('contrassegno', 0)
   if (contrassegno === 'no') query = query.eq('contrassegno', 0)
+  if (agenteClienteIds !== null) query = query.in('cliente_id', agenteClienteIds.length ? agenteClienteIds : ['00000000-0000-0000-0000-000000000000'])
   const { data: spedizioni, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json(spedizioni || [])
