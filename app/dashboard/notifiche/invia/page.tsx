@@ -101,6 +101,29 @@ export default function InviaNotifica() {
           </div>
         </div>
       </div>
+      <div style={{ background:'#fff', borderRadius:'8px', boxShadow:'0 1px 4px rgba(0,0,0,0.08)', marginTop:'20px', overflow:'hidden' }}>
+        <div style={{ padding:'14px 22px', borderBottom:'1px solid #eee', fontSize:'16px', fontWeight:'700', color:'#374151' }}>Elenco Notifiche</div>
+        <div style={{ overflowX:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'13px' }}>
+            <thead><tr style={{ background:'#f9fafb', textAlign:'left' }}>
+              {['Data','Destinatari','Oggetto','Messaggio','Azioni'].map(h=><th key={h} style={{ padding:'10px 14px', color:'#374151', fontWeight:'700', borderBottom:'1px solid #eee' }}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {lista.length === 0 ? (
+                <tr><td colSpan={5} style={{ padding:'18px', textAlign:'center', color:'#999' }}>Nessuna notifica</td></tr>
+              ) : lista.map((n:any)=>(
+                <tr key={n.id} style={{ borderBottom:'1px solid #f1f5f9' }}>
+                  <td style={{ padding:'10px 14px', color:'#1a1a1a', whiteSpace:'nowrap' }}>{new Date(n.created_at).toLocaleDateString('it-IT')} {new Date(n.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</td>
+                  <td style={{ padding:'10px 14px', color:'#1a1a1a' }}>{(n.gruppi||[]).join(', ')}</td>
+                  <td style={{ padding:'10px 14px', color:'#1a1a1a', fontWeight:'600' }}>{n.oggetto}</td>
+                  <td style={{ padding:'10px 14px', color:'#555', maxWidth:'300px' }}><div dangerouslySetInnerHTML={{__html: n.messaggio || ''}} /></td>
+                  <td style={{ padding:'10px 14px' }}><button onClick={()=>eliminaNotifica(n.id)} style={{ padding:'5px 10px', background:'#fef2f2', color:'#dc2626', border:'1px solid #fecaca', borderRadius:'5px', fontSize:'12px', fontWeight:'700', cursor:'pointer' }}>Elimina</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   )
 }
