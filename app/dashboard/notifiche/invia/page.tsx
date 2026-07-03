@@ -44,6 +44,7 @@ export default function InviaNotifica() {
     setInviando(false)
     if (j.success) {
       setMsg('Notifica inviata con successo')
+      caricaLista()
       setOggetto(''); setGruppi([]); if (editorRef.current) editorRef.current.innerHTML = ''
     } else {
       setMsg('Errore: ' + (j.error || 'invio fallito'))
