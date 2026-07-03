@@ -248,6 +248,7 @@ export async function POST(req: NextRequest) {
     const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
     const pesoPerFascia = (!!settsC.agevolazione_peso_reale && entroMisureAgevolate) ? pesoReale : pesoFatturato
     const fasciaGiusta = trovaFascia(fasceDelCorriere, pesoPerFascia)
+    console.log('[TARIFFE] fasciaGiusta:', fasciaGiusta ? fasciaGiusta.prezzo : 'NULL', 'peso:', pesoPerFascia)
     if (!fasciaGiusta) continue
     if (codRichiesto && contrassegnoOff.has(corriereId)) continue
 
