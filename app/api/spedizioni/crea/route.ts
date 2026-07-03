@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
   // *** FIX: usa il corriere_id passato dal frontend (tariffa selezionata) ***
   if (body._corriere_id) {
     const { data: c } = await supabase
-      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id,settings')
+      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id,settings,multicollo')
       .eq('id', body._corriere_id)
       .eq('master_id', masterId)
       .single()
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
 
   if (!corriereRecord) {
     const { data: c } = await supabase
-      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id,settings')
+      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id,settings,multicollo')
       .eq('master_id', masterId).eq('tipo', 'spedisci')
       .limit(1)
       .single()
@@ -81,6 +81,10 @@ export async function POST(req: NextRequest) {
 
   const packages = body.packages || [{ length: 20, width: 15, height: 10, weight: 1 }]
   // *** Controllo misure massime del corriere (settings.misure_max) ***
+  // *** Controllo multicollo ***
+  if (packages.length > 1 && (corriereRecord as any)?.multicollo === false) {
+    return NextResponse.json({ error: 'Il contratto non prevede la funzione multicollo' }, { status: 400 })
+  }
   const mmax = (corriereRecord as any)?.settings?.misure_max
   if (mmax && (mmax.lunghezza || mmax.larghezza || mmax.altezza)) {
     const maxL = parseFloat(mmax.lunghezza) || Infinity
