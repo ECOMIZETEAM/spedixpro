@@ -53,7 +53,9 @@ export async function POST(req: NextRequest) {
       if (fascia) costoFinale = parseFloat(fascia.prezzo)
     }
     const differenza = costoIniziale - costoFinale
-    if (Math.abs(differenza) > 0.01) nDaRettificare++
+    // salta le rettifiche senza differenza reale (non le inserisce)
+    if (Math.abs(differenza) <= 0.01) { continue }
+    nDaRettificare++
     rettificheToInsert.push({
       master_id: utente?.master_id, file_id: fileRec?.id, spedizione_id: spedizione.id,
       numero_spedizione: spedizione.numero, cliente_id: spedizione.cliente_id,
