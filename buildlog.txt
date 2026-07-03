@@ -11,15 +11,15 @@
 
 ÔÜá The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
   Creating an optimized production build ...
-Ô£ô Compiled successfully in 35.3s
+Ô£ô Compiled successfully in 26.9s
   Skipping validation of types
-  Finished TypeScript config validation in 101ms ...
+  Finished TypeScript config validation in 105ms ...
   Collecting page data using 7 workers ...
-  Generating static pages using 7 workers (0/161) ...
-  Generating static pages using 7 workers (40/161) 
-  Generating static pages using 7 workers (80/161) 
-  Generating static pages using 7 workers (120/161) 
-Ô£ô Generating static pages using 7 workers (161/161) in 2.1s
+  Generating static pages using 7 workers (0/163) ...
+  Generating static pages using 7 workers (40/163) 
+  Generating static pages using 7 workers (81/163) 
+  Generating static pages using 7 workers (122/163) 
+Ô£ô Generating static pages using 7 workers (163/163) in 1761ms
   Finalizing page optimization ...
 
 Route (app)
@@ -100,6 +100,7 @@ Route (app)
 Ôö£ ãÆ /api/master/root
 Ôö£ ãÆ /api/movimenti/crea
 Ôö£ ãÆ /api/movimenti/lista
+Ôö£ ãÆ /api/notifiche
 Ôö£ ãÆ /api/ordini/aggiorna-stato
 Ôö£ ãÆ /api/ordini/elimina
 Ôö£ ãÆ /api/ordini/importa
@@ -187,6 +188,7 @@ Route (app)
 Ôö£ ãÆ /dashboard/listini/corrieri/nuovo
 Ôö£ ãÆ /dashboard/listini/gestione-zone
 Ôö£ ãÆ /dashboard/movimenti
+Ôö£ ãÆ /dashboard/notifiche/invia
 Ôö£ ãÆ /dashboard/reports
 Ôö£ ãÆ /dashboard/reports/consumabili
 Ôö£ ãÆ /dashboard/reports/contrassegni
