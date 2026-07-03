@@ -106,7 +106,7 @@ export default function CorrieriPage() {
       body: JSON.stringify({
         multicollo: popup.multicollo,
         inserimento_ritiri: popup.inserimento_ritiri,
-        settings: { mittente: popup.mittente, agevolazione_peso_reale: popup.agevolazione_peso_reale },
+        settings: { mittente: popup.mittente, agevolazione_peso_reale: popup.agevolazione_peso_reale, misure_max: { lunghezza: popup.misura_lunghezza||null, larghezza: popup.misura_larghezza||null, altezza: popup.misura_altezza||null } },
       })
     })
     setCorrieri(prev => prev.map(c => c.id === popup.id ? { ...c, multicollo: popup.multicollo, inserimento_ritiri: popup.inserimento_ritiri, settings: { ...(c.settings||{}), mittente: popup.mittente } } : c))
