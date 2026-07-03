@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 
 export async function GET(req: NextRequest) {
@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   const al = p.get('al')
 
   let query = supabase.from('distinte_contrassegni')
-    .select('*, clienti(ragione_sociale), distinte_contrassegni_righe(id)')
+    .select('*, clienti(ragione_sociale), distinte_contrassegni_righe(id,numero_spedizione,importo_cod,importo_sistema,spedizioni(dest_nome,rif_destinatario,mitt_nome,created_at))')
     .eq('master_id', utente?.master_id)
     .order('created_at', { ascending: false })
 
