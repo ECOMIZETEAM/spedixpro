@@ -116,8 +116,8 @@ export default function CreaDistintaPage() {
           <div>
             <label style={lbl}>Contratto</label>
             <select value={corriereId} onChange={e => setCorriereId(e.target.value)} style={inp}>
-              <option value="">Tutti i contratti</option>
-              {corrieri.map(c => <option key={c.id} value={c.id}>{c.nome_contratto}</option>)}
+              <option value="">Seleziona un contratto...</option>
+              {contratti.map(c => <option key={c.id} value={c.id}>{c.nome_contratto} ({c.da_chiudere})</option>)}
             </select>
           </div>
         </div>
