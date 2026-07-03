@@ -46,8 +46,11 @@ export async function POST(req: NextRequest) {
       master_id: utente?.master_id, cliente_id: clienteId,
       tipo: 'reso',
       descrizione: `Reso ${v.numero}`,
-      importo: 0, spedizione_id: v.id,
+      importo: -Number(v.costo_reso || v.costo_totale || 0), spedizione_id: v.id,
     })
   }
+  const { data: cliRec } = await supabase.from('clienti').select('credito').eq('id', clienteId).single()
+  const nuovoCredito = Number(cliRec?.credito || 0) - Number(totale || 0)
+  await supabase.from('clienti').update({ credito: nuovoCredito }).eq('id', clienteId)
   return NextResponse.json({ id: distinta.id, numero })
 }
