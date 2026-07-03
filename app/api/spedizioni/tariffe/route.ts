@@ -296,7 +296,7 @@ export async function POST(req: NextRequest) {
       costo_assicurazione: (calcolaAssicurazione(corriereId, Number(fasciaGiusta.prezzo)) ?? 0).toFixed(2),
       total_price: (Number(fasciaGiusta.prezzo) + (calcolaContrassegno(corriereId, Number(fasciaGiusta.prezzo)) ?? 0) + (calcolaAssicurazione(corriereId, Number(fasciaGiusta.prezzo)) ?? 0)).toFixed(2),
       fuel: '0.00',
-      zona: isEstero ? (PAESI[paeseDest] || paeseDest) : zonaNome,
+      zona: isEstero ? (PAESI[paeseDest] || paeseDest) : ((fasciaGiusta as any)?.zone?.nome || zonaNome),
       peso_reale: pesoReale,
       peso_volume: pesoVolume.toFixed(2),
       peso_fatturato: pesoFatturato.toFixed(2),
