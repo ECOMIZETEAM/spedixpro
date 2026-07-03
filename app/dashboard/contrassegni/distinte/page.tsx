@@ -228,8 +228,8 @@ export default function DistinteContrassegniPage() {
                   <td style={{padding:'9px 14px',fontWeight:'700',color:'#f97316'}}>{d.numero}</td>
                   <td style={{padding:'9px 14px',color:d.stato==='pagata'?'#f97316':'#1a1a1a',fontWeight:'500'}}>{d.clienti?.ragione_sociale||'—'}</td>
                   <td style={{padding:'9px 14px',color:'#1a1a1a',fontSize:'12px'}}>{new Date(d.created_at).toLocaleString('it-IT')}</td>
-                  <td style={{padding:'9px 14px',fontWeight:'600'}}>€ {Number(d.totale_iniziale).toFixed(2)}</td>
-                  <td style={{padding:'9px 14px',fontWeight:'600'}}>€ {Number(d.totale_rimborsato).toFixed(2)}</td>
+                  <td style={{padding:'9px 14px',fontWeight:'600',color:'#1a1a1a'}}>€ {Number(d.totale_iniziale).toFixed(2)}</td>
+                  <td style={{padding:'9px 14px',fontWeight:'600',color:'#1a1a1a'}}>€ {Number(d.totale_rimborsato).toFixed(2)}</td>
                   <td style={{padding:'9px 14px'}}>
                     {d.metodo_pagamento && <span style={{background:'#e0f2fe',color:'#0369a1',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>{d.metodo_pagamento.toUpperCase()}</span>}
                   </td>
