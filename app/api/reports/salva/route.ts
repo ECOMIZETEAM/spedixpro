@@ -6,7 +6,7 @@ export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,cliente_id,nome,email').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,cliente_id,nome,cognome').eq('id', user.id).single()
 
   const body = await req.json()
   const { tipo, filtri, formato, fileBase64, nomeFile, clienteId } = body
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     status: 'disponibile',
     file_url: fileUrl,
     file_path: path,
-    utente: utente?.nome || utente?.email || '',
+    utente: ((utente?.nome || '') + ' ' + (utente?.cognome || '')).trim() || 'Utente',
   }).select().single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
