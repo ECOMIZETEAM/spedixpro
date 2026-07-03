@@ -217,7 +217,7 @@ export default function NuovaSpedizionePage() {
                 <div><label style={lbl}>Nominativo *</label><input value={dest.nome} onChange={e=>setDest({...dest,nome:e.target.value})} placeholder="Mario Rossi" style={inp}/></div>
                 <div><label style={lbl}>Paese</label>
                   <select value={dest.paese} onChange={e=>setDest({...dest,paese:e.target.value})} style={inp}>
-                    <option value="IT">Italia</option><option value="DE">Germania</option><option value="FR">Francia</option><option value="ES">Spagna</option>
+                    <option value="IT">Italia</option><option value="AT">Austria</option><option value="BE">Belgio</option><option value="BG">Bulgaria</option><option value="HR">Croazia</option><option value="DK">Danimarca</option><option value="EE">Estonia</option><option value="FI">Finlandia</option><option value="FR">Francia</option><option value="DE">Germania</option><option value="GR">Grecia</option><option value="IE">Irlanda</option><option value="LV">Lettonia</option><option value="LT">Lituania</option><option value="LU">Lussemburgo</option><option value="MC">Monaco</option><option value="NL">Paesi Bassi</option><option value="PL">Polonia</option><option value="PT">Portogallo</option><option value="GB">Regno Unito</option><option value="CZ">Rep. Ceca</option><option value="RO">Romania</option><option value="SK">Slovacchia</option><option value="SI">Slovenia</option><option value="ES">Spagna</option><option value="SE">Svezia</option><option value="HU">Ungheria</option>
                   </select>
                 </div>
               </div>
