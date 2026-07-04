@@ -1,0 +1,7 @@
+=== 120 char PRIMA di reports.map (@13883) ===
+[,textAlign:'center' as const,color:'#1a1a1a',fontSize:'13px'}}>Nessun report generato</td></tr>\r\n            ) : reports.map((r:any, i:number) => (\r\n           ]
+
+=== 90 char attorno a </table> (@15337) ===
+=== apertura <table storico: 200 char prima di </table> ===
+posizione <table: 13142
+[i */}\r\n      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>\r\n        <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>\r\n          <thead>\r\n            <tr st]
