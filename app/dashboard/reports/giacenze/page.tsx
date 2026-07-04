@@ -82,6 +82,7 @@ export default function ReportGiacenzePage() {
 
   return (
     <div>
+      <div style={{background:'red',color:'#fff',padding:'20px',fontSize:'24px'}}>TEST VISIBILE QUI</div>
       <div style={{marginBottom:'16px'}}>
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Genera Report Giacenze</h1>
       </div>
