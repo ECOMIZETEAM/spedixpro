@@ -12,8 +12,6 @@ export default function StoriaPage() {
   const [clienteId, setClienteId] = useState('')
   const [dal, setDal] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0])
   const [al, setAl] = useState(() => new Date().toISOString().split('T')[0])
-  const [perPage, setPerPage] = useState(10)
-  const [pagina, setPagina] = useState(1)
 
   useEffect(() => {
     fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[]))
@@ -35,25 +33,11 @@ export default function StoriaPage() {
 
   const totale = movimenti.reduce((acc, m) => acc + parseFloat(m.totale||0), 0)
 
-  const totalePagine = Math.max(1, Math.ceil(movimenti.length / perPage))
-  const paginaCorr = Math.min(pagina, totalePagine)
-  const movimentiPaginati = movimenti.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
-
   return (
     <div>
       <div style={{marginBottom:'20px'}}>
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Storia Consumabili</h1>
         <p style={{color:'#1a1a1a',fontSize:'13px',marginTop:'4px'}}>{movimenti.length} movimenti trovati</p>
-        <span style={{display:'block',marginTop:'4px',fontSize:'12px',fontWeight:'400',color:'#666'}}>
-          Mostra{' '}
-          <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}}
-            style={{padding:'3px 6px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}}>
-            <option value={10}>10</option>
-            <option value={25}>25</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-          </select>{' '}elementi
-        </span>
       </div>
 
       {/* Filtri */}
@@ -96,7 +80,7 @@ export default function StoriaPage() {
               </tr>
             </thead>
             <tbody>
-              {movimentiPaginati.map((m:any) => (
+              {movimenti.map((m:any) => (
                 <tr key={m.id} style={{borderBottom:'1px solid #d1d5db'}}>
                   <td style={{padding:'9px 14px',color:'#1a1a1a',fontSize:'12px'}}>{new Date(m.data_acquisto).toLocaleDateString('it-IT')}</td>
                   <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:'500'}}>{m.clienti?.ragione_sociale||'—'}</td>
@@ -110,22 +94,6 @@ export default function StoriaPage() {
               ))}
             </tbody>
           </table>
-            {/* barra-paginazione */}
-            {totalePagine > 1 && (
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap',gap:'8px'}}>
-                <span style={{fontSize:'12px',color:'#666'}}>{(paginaCorr - 1) * perPage + 1}-{Math.min(paginaCorr * perPage, movimenti.length)} di {movimenti.length}</span>
-                <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
-                  <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr<=1?'default':'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
-                  {Array.from({length: totalePagine}, (_,i)=>i+1).filter(n => n===1 || n===totalePagine || Math.abs(n-paginaCorr)<=2).map((n,idx,arr)=>(
-                    <span key={n} style={{display:'flex',alignItems:'center'}}>
-                      {idx>0 && arr[idx-1] !== n-1 && <span style={{padding:'0 4px',color:'#bbb',fontSize:'12px'}}>…</span>}
-                      <button onClick={()=>setPagina(n)} style={{minWidth:'30px',padding:'5px 8px',border:'1px solid',borderColor:n===paginaCorr?'#f97316':'#d1d5db',borderRadius:'5px',background:n===paginaCorr?'#f97316':'#fff',color:n===paginaCorr?'#fff':'#1a1a1a',fontSize:'12px',fontWeight:n===paginaCorr?'700':'400',cursor:'pointer'}}>{n}</button>
-                    </span>
-                  ))}
-                  <button onClick={()=>setPagina(p=>Math.min(totalePagine,p+1))} disabled={paginaCorr>=totalePagine} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr>=totalePagine?'default':'pointer',color:paginaCorr>=totalePagine?'#ccc':'#1a1a1a'}}>Successivo</button>
-                </div>
-              </div>
-            )}
         )}
       </div>
     </div>
