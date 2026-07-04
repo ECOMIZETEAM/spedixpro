@@ -11,3 +11,20 @@
 
 ÔÜá The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
   Creating an optimized production build ...
+
+> Build error occurred
+Error: Turbopack build failed with 1 errors:
+./app/cliente/spedizioni/giacenze/page.tsx:217:16
+Expected '</', got 'ident'
+  215 |             </table>
+  216 |           </div>
+> 217 |           <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',gap:'...
+      |                ^^^^^
+  218 |             <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} ...
+  219 |             <span style={{fontSize:'12px',color:'#666'}}>Pagina {paginaCorr} di {totalePa...
+  220 |             <button onClick={()=>setPagina(p=>Math.min(totalePagine,p+1))} disabled={pagi...
+
+Parsing ecmascript source code failed
+
+
+    at <unknown> (./app/cliente/spedizioni/giacenze/page.tsx:217:16)
