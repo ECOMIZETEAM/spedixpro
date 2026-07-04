@@ -32,6 +32,8 @@ export default function SpedizioniPage() {
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [perPage, setPerPage] = useState(10)
+  const [pagina, setPagina] = useState(1)
   const [trackingModal, setTrackingModal] = useState<any>(null)
   const [trackingData, setTrackingData] = useState<any>(null)
   const [trackingLoading, setTrackingLoading] = useState(false)
@@ -76,6 +78,10 @@ export default function SpedizioniPage() {
       )
     : spedizioniFiltrate
 
+  const totalePagine = Math.max(1, Math.ceil(spedizioniVisibili.length / perPage))
+  const paginaCorr = Math.min(pagina, totalePagine)
+  const spedizioniPaginate = spedizioniVisibili.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
+
   const setF = (k: string, v: string) => setFiltri(f => ({...f, [k]: v}))
 
   function toggleSelect(id: string) {
@@ -83,8 +89,8 @@ export default function SpedizioniPage() {
   }
 
   function toggleAll() {
-    if (selectedIds.length===spedizioniVisibili.length) setSelectedIds([])
-    else setSelectedIds(spedizioniVisibili.map(s=>s.id))
+    if (selectedIds.length===spedizioniPaginate.length) setSelectedIds([])
+    else setSelectedIds(spedizioniPaginate.map(s=>s.id))
   }
 
     async function stampaSelezionati() {
@@ -243,6 +249,16 @@ async function apriTracking(s: any) {
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>📋 Spedizioni <span style={{color:'#1a1a1a',fontWeight:'400',fontSize:'12px'}}>({spedizioniVisibili.length} risultati)</span></span>
+          <span style={{marginLeft:'12px',fontSize:'12px',fontWeight:'400',color:'#666'}}>
+            Mostra{' '}
+            <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}}
+              style={{padding:'3px 6px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}}>
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>{' '}elementi
+          </span>
           <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
             <button onClick={stampaSelezionati} disabled={selectedIds.length===0}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#f97316':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
@@ -270,7 +286,7 @@ async function apriTracking(s: any) {
               <thead>
                 <tr style={{background:'#f9fafb'}}>
                   <th style={{padding:'9px 12px',borderBottom:'1px solid #d1d5db',width:'36px'}}>
-                    <input type="checkbox" checked={selectedIds.length===spedizioniVisibili.length&&spedizioniVisibili.length>0} onChange={toggleAll}/>
+                    <input type="checkbox" checked={selectedIds.length===spedizioniPaginate.length&&spedizioniPaginate.length>0} onChange={toggleAll}/>
                   </th>
                   {['N. Spedizione','Cliente','Destinatario','Peso','Colli','Contrassegno','Data e Ora','Stato','ID Ordine','Totale','Distinta N.','Azioni'].map(h=>(
                     <th key={h} style={{textAlign:'left' as const,padding:'9px 12px',fontSize:'11px',fontWeight:'700',textTransform:'uppercase' as const,letterSpacing:'0.4px',color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
@@ -278,7 +294,7 @@ async function apriTracking(s: any) {
                 </tr>
               </thead>
               <tbody>
-                {spedizioniVisibili.map(s => {
+                {spedizioniPaginate.map(s => {
                   const st = STATI[s.stato] || STATI['annullata']
                   const isSelected = selectedIds.includes(s.id)
                   return (
