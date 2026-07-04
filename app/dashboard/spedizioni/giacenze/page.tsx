@@ -225,6 +225,8 @@ export default function GiacenzePage() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
             {totalePagine > 0 && (
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap',gap:'8px'}}>
                 <span style={{fontSize:'12px',color:'#666'}}>{(paginaCorr - 1) * perPage + 1}-{Math.min(paginaCorr * perPage, giacenzeFiltrate.length)} di {giacenzeFiltrate.length}</span>
@@ -240,8 +242,6 @@ export default function GiacenzePage() {
                 </div>
               </div>
             )}
-          </div>
-        )}
       </div>
 
       {/* Modal Gestisci Giacenza */}
