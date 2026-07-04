@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 
 export async function POST(req: NextRequest) {
@@ -13,6 +13,9 @@ export async function POST(req: NextRequest) {
   const importo = parseFloat(prezzoUnitario) * parseInt(quantita)
   const totaleIva = importo * (parseFloat(iva) / 100)
   const totale = importo + totaleIva
+  const { data: cli } = await supabase.from('clienti').select('credito').eq('id', clienteId).single()
+  const creditoAttuale = Number(cli?.credito || 0)
+  const creditoResiduo = creditoAttuale - totale
   const { error } = await supabase.from('movimenti_clienti').insert({
     master_id: utente?.master_id,
     cliente_id: clienteId,
@@ -24,10 +27,12 @@ export async function POST(req: NextRequest) {
     importo,
     totale_iva: totaleIva,
     totale,
+    credito_residuo: creditoResiduo,
     vettore: vettore || null,
     data_acquisto: dataAcquisto,
   })
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  await supabase.from('clienti').update({ credito: creditoResiduo }).eq('id', clienteId)
   return NextResponse.json({ success: true })
 }
 
