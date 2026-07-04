@@ -14,8 +14,6 @@ export default function DistinteResiPage() {
   })
   const [al, setAl] = useState(() => new Date().toISOString().split('T')[0])
   const [clienteId, setClienteId] = useState('')
-  const [perPage, setPerPage] = useState(10)
-  const [pagina, setPagina] = useState(1)
 
   useEffect(() => {
     fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[]))
@@ -35,31 +33,17 @@ export default function DistinteResiPage() {
     setLoading(false)
   }
 
-  const totalePagine = Math.max(1, Math.ceil(distinte.length / perPage))
-  const paginaCorr = Math.min(pagina, totalePagine)
-  const distintePaginate = distinte.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
-
   return (
     <div>
       <div style={{marginBottom:'20px'}}>
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Elenco Distinte Resi</h1>
         <p style={{color:'#1a1a1a',fontSize:'13px',marginTop:'4px'}}>{distinte.length} distinte trovate</p>
-        <span style={{display:'block',marginTop:'4px',fontSize:'12px',fontWeight:'400',color:'#666'}}>
-          Mostra{' '}
-          <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}}
-            style={{padding:'3px 6px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}}>
-            <option value={10}>10</option>
-            <option value={25}>25</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-          </select>{' '}elementi
-        </span>
       </div>
 
       {/* Filtri */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'16px',marginBottom:'16px'}}>
         <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'12px',textTransform:'uppercase' as const,letterSpacing:'0.5px',display:'flex',alignItems:'center',gap:'6px'}}>
-          <span>{'\u25BC'}</span> Filtri
+          <span>▼</span> Filtri
         </div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'20px'}}>
           <div>
@@ -68,7 +52,7 @@ export default function DistinteResiPage() {
           </div>
           <div>
             <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'6px'}}>Cliente</label>
-            <select value={clienteId} onChange={e=>{setClienteId(e.target.value);setPagina(1)}}
+            <select value={clienteId} onChange={e=>setClienteId(e.target.value)}
               style={{...inp,width:'100%'}}>
               <option value="">Tutti</option>
               {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
@@ -96,40 +80,25 @@ export default function DistinteResiPage() {
             <tbody>
               {!distinte.length ? (
                 <tr><td colSpan={6} style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a',fontSize:'13px'}}>Nessuna distinta trovata</td></tr>
-              ) : distintePaginate.map((d:any) => (
+              ) : distinte.map((d:any) => (
                 <tr key={d.id} style={{borderBottom:'1px solid #d1d5db'}}>
                   <td style={{padding:'10px 14px',fontWeight:'700',color:'#1a1a1a'}}>{d.numero}</td>
-                  <td style={{padding:'10px 14px',color:'#1a1a1a'}}>{d.clienti?.ragione_sociale||'-'}</td>
+                  <td style={{padding:'10px 14px',color:'#1a1a1a'}}>{d.clienti?.ragione_sociale||'—'}</td>
                   <td style={{padding:'10px 14px',color:'#1a1a1a',fontSize:'12px'}}>{new Date(d.created_at).toLocaleString('it-IT')}</td>
                   <td style={{padding:'10px 14px',color:'#1a1a1a',fontWeight:'500'}}>{d.totale_ldv}</td>
-                  <td style={{padding:'10px 14px',fontWeight:'700',color:'#f97316'}}>{'\u20AC'} {Number(d.totale||0).toFixed(2)}</td>
+                  <td style={{padding:'10px 14px',fontWeight:'700',color:'#f97316'}}>€ {Number(d.totale||0).toFixed(2)}</td>
                   <td style={{padding:'10px 14px'}}>
                     <div style={{display:'flex',gap:'6px'}}>
                       <button onClick={()=>window.open(`/dashboard/resi/distinte/${d.id}`,'_blank')}
-                        style={{padding:'5px 12px',background:'#eff6ff',color:'#1d4ed8',border:'1px solid #93c5fd',borderRadius:'5px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>{'\uD83D\uDC41'} Visualizza</button>
+                        style={{padding:'5px 12px',background:'#eff6ff',color:'#1d4ed8',border:'1px solid #93c5fd',borderRadius:'5px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>👁 Visualizza</button>
                       <button onClick={()=>window.open(`/dashboard/resi/distinte/${d.id}`,'_blank')}
-                        style={{padding:'5px 12px',background:'#f0fdf4',color:'#15803d',border:'1px solid #86efac',borderRadius:'5px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>{'\u2B07'} Scarica</button>
+                        style={{padding:'5px 12px',background:'#f0fdf4',color:'#15803d',border:'1px solid #86efac',borderRadius:'5px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>⬇ Scarica</button>
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        )}
-        {!loading && totalePagine > 1 && (
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap',gap:'8px'}}>
-            <span style={{fontSize:'12px',color:'#666'}}>{(paginaCorr - 1) * perPage + 1}-{Math.min(paginaCorr * perPage, distinte.length)} di {distinte.length}</span>
-            <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
-              <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr<=1?'default':'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
-              {Array.from({length: totalePagine}, (_,i)=>i+1).filter(n => n===1 || n===totalePagine || Math.abs(n-paginaCorr)<=2).map((n,idx,arr)=>(
-                <span key={n} style={{display:'flex',alignItems:'center'}}>
-                  {idx>0 && arr[idx-1] !== n-1 && <span style={{padding:'0 4px',color:'#bbb',fontSize:'12px'}}>{'\u2026'}</span>}
-                  <button onClick={()=>setPagina(n)} style={{minWidth:'30px',padding:'5px 8px',border:'1px solid',borderColor:n===paginaCorr?'#f97316':'#d1d5db',borderRadius:'5px',background:n===paginaCorr?'#f97316':'#fff',color:n===paginaCorr?'#fff':'#1a1a1a',fontSize:'12px',fontWeight:n===paginaCorr?'700':'400',cursor:'pointer'}}>{n}</button>
-                </span>
-              ))}
-              <button onClick={()=>setPagina(p=>Math.min(totalePagine,p+1))} disabled={paginaCorr>=totalePagine} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr>=totalePagine?'default':'pointer',color:paginaCorr>=totalePagine?'#ccc':'#1a1a1a'}}>Successivo</button>
-            </div>
-          </div>
         )}
       </div>
     </div>
