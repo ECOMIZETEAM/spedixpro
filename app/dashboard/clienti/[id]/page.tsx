@@ -22,6 +22,7 @@ export default function ClienteProfiloPage() {
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [movimenti, setMovimenti] = useState<any[]>([])
   const [paginaMov, setPaginaMov] = useState(1)
+  const [cercaMov, setCercaMov] = useState('')
   const perPaginaMov = 10
   const [saldo, setSaldo] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -92,9 +93,12 @@ export default function ClienteProfiloPage() {
 
   const creditoView = Number(cliente.credito ?? saldo ?? 0)
 
-  const totPagineMov = Math.max(1, Math.ceil(movimenti.length / perPaginaMov))
+  const movimentiFiltrati = cercaMov
+    ? movimenti.filter((m:any) => (m.descrizione||'').toLowerCase().includes(cercaMov.toLowerCase()) || (m.riferimento||'').toLowerCase().includes(cercaMov.toLowerCase()))
+    : movimenti
+  const totPagineMov = Math.max(1, Math.ceil(movimentiFiltrati.length / perPaginaMov))
   const paginaCorrMov = Math.min(paginaMov, totPagineMov)
-  const movimentiPag = movimenti.slice((paginaCorrMov-1)*perPaginaMov, paginaCorrMov*perPaginaMov)
+  const movimentiPag = movimentiFiltrati.slice((paginaCorrMov-1)*perPaginaMov, paginaCorrMov*perPaginaMov)
 
   return (
     <div>
@@ -146,6 +150,10 @@ export default function ClienteProfiloPage() {
 
           <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
             <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Movimenti</div>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',gap:'8px',padding:'10px 16px',borderBottom:'1px solid #f0f0f0'}}>
+              <span style={{fontSize:'12.5px',color:'#666'}}>Cerca:</span>
+              <input value={cercaMov} onChange={e=>{setCercaMov(e.target.value);setPaginaMov(1)}} placeholder="Movimento o riferimento…" style={{padding:'7px 10px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',width:'240px',color:'#1a1a1a',background:'#fff'}}/>
+            </div>
             {!movimenti.length ? (
               <div style={{padding:'40px',textAlign:'center',color:'#1a1a1a'}}>
                 <div style={{fontSize:'32px',marginBottom:'8px'}}>📊</div>
