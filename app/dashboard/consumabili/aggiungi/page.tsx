@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
@@ -18,7 +18,7 @@ export default function AggiungiSpesaPage() {
     descrizione: '',
     prezzoUnitario: '',
     quantita: '1',
-    iva: '22',
+    iva: '0',
   })
 
   useEffect(() => {
