@@ -112,8 +112,8 @@ export default function RitiriPage() {
         <div style={{padding:'8px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
             <span style={{fontSize:'12px',color:'#1a1a1a'}}>Mostra</span>
-            <select style={{padding:'3px 8px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px'}}>
-              <option>10</option><option>25</option><option>50</option>
+            <select value={perPagina} onChange={e=>{setPerPagina(Number(e.target.value));setPagina(1)}} style={{padding:'3px 8px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px',color:'#1a1a1a'}}>
+              <option value={10}>10</option><option value={25}>25</option><option value={50}>50</option>
             </select>
             <span style={{fontSize:'12px',color:'#1a1a1a'}}>elementi</span>
           </div>
