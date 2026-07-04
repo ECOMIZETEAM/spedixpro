@@ -21,6 +21,8 @@ export default function ClienteProfiloPage() {
   const [cliente, setCliente] = useState<any>(null)
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [movimenti, setMovimenti] = useState<any[]>([])
+  const [paginaMov, setPaginaMov] = useState(1)
+  const perPaginaMov = 10
   const [saldo, setSaldo] = useState(0)
   const [loading, setLoading] = useState(true)
 
@@ -90,6 +92,10 @@ export default function ClienteProfiloPage() {
 
   const creditoView = Number(cliente.credito ?? saldo ?? 0)
 
+  const totPagineMov = Math.max(1, Math.ceil(movimenti.length / perPaginaMov))
+  const paginaCorrMov = Math.min(paginaMov, totPagineMov)
+  const movimentiPag = movimenti.slice((paginaCorrMov-1)*perPaginaMov, paginaCorrMov*perPaginaMov)
+
   return (
     <div>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'20px'}}>
@@ -157,7 +163,7 @@ export default function ClienteProfiloPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {movimenti.map((m:any) => {
+                    {movimentiPag.map((m:any) => {
                       const positivo = Number(m.importo) > 0
                       return (
                         <tr key={m.id}>
