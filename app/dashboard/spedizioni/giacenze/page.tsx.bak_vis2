@@ -225,7 +225,7 @@ export default function GiacenzePage() {
                 })}
               </tbody>
             </table>
-            {totalePagine > 0 && (
+            {totalePagine > 1 && (
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap',gap:'8px'}}>
                 <span style={{fontSize:'12px',color:'#666'}}>{(paginaCorr - 1) * perPage + 1}-{Math.min(paginaCorr * perPage, giacenzeFiltrate.length)} di {giacenzeFiltrate.length}</span>
                 <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
