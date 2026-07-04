@@ -133,7 +133,7 @@ export default function ClientiPage() {
                         ? <span style={{color:'#f97316',fontWeight:'600'}}>{c.listini_clienti.nome}</span>
                         : (c.listino_cliente_id ? <span style={{color:'#f97316',fontWeight:'600'}}>Assegnato</span> : <span style={{color:'#1a1a1a'}}>—</span>)}
                     </td>
-                    <td style={{padding:'10px 14px',color:'#1a1a1a',fontSize:'12px',fontWeight:'600',whiteSpace:'nowrap'}}>€ {Number(c.credito||0).toFixed(2)}</td>
+                    <td style={{padding:'10px 14px',color:Number(c.credito||0) < 0 ? '#dc2626' : '#16a34a',fontSize:'12px',fontWeight:'600',whiteSpace:'nowrap'}}>€ {Number(c.credito||0).toFixed(2)}</td>
                     <td style={{padding:'10px 14px',fontSize:'12px'}}>
                       {(c.contratti_attivi && c.contratti_attivi.length)
                         ? c.contratti_attivi.map((ct:any, i:number)=>(
