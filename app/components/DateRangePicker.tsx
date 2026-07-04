@@ -28,6 +28,7 @@ function inRange(d: Date, s: Date | null, e: Date | null) {
 export default function DateRangePicker({ dal, al, onChange }: Props) {
   const oggi = new Date()
   const [open, setOpen] = useState(false)
+  const [alignRight, setAlignRight] = useState(true)
   const [start, setStart] = useState<Date | null>(fromStr(dal) || oggi)
   const [end, setEnd] = useState<Date | null>(fromStr(al) || oggi)
   const [meseSx, setMeseSx] = useState(new Date(oggi.getFullYear(), oggi.getMonth()-1, 1))
@@ -124,14 +125,14 @@ export default function DateRangePicker({ dal, al, onChange }: Props) {
 
   return (
     <div ref={ref} style={{ position:'relative', display:'inline-block' }}>
-      <div onClick={()=>setOpen(!open)} style={{
+      <div onClick={(e)=>{ if(!open){ const r=(e.currentTarget as HTMLElement).getBoundingClientRect(); setAlignRight(r.left > window.innerWidth/2) } setOpen(!open) }} style={{
         padding:'7px 12px', border:'1px solid #d1d5db', borderRadius:'6px', fontSize:'13px',
         color:'#1a1a1a', background:'#fff', cursor:'pointer', display:'flex', alignItems:'center', gap:'8px', whiteSpace:'nowrap'
       }}>
         <span>📅</span><span style={{ color:'#1a1a1a' }}>{labelText}</span><span style={{ color:'#1a1a1a' }}>▾</span>
       </div>
       {open && (
-        <div style={{ position:'absolute', top:'40px', right:0, zIndex:1000, background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px', boxShadow:'0 8px 24px rgba(0,0,0,0.15)', display:'flex' }}>
+        <div style={{ position:'absolute', top:'40px', ...(alignRight ? { right:0 } : { left:0 }), zIndex:1000, background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px', boxShadow:'0 8px 24px rgba(0,0,0,0.15)', display:'flex' }}>
           <div style={{ display:'flex' }}>
             {calendario(meseSx, setMeseSx, true)}
             {calendario(meseDx, setMeseDx, false)}
