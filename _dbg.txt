@@ -1,4 +1,4 @@
-CHAR: 7015
+CHAR: 8636
 
 === useState ===
   const [clienti, setClienti] = useState<any[]>([])
@@ -9,18 +9,18 @@ CHAR: 7015
 ha 'const [reports': True
 
 === .map (25 char prima) ===
-[@1860] ...'    const rows = distinte'.map
-[@2695] ...'],
-        body: distinte'.map
-[@4144] ...'n>
+[@1921] ...'  const rows = spedizioni'.map
+[@3037] ...'
+        body: spedizioni'.map
+[@4771] ...'n>
               {clienti'.map
-[@5447] ...'ente','Status','Scarica']'.map
-[@5914] ...'>
+[@7068] ...'ente','Status','Scarica']'.map
+[@7535] ...'>
             ) : reports'.map
-[@6349] ...'ri||{}).filter(([,v])=>v)'.map
+[@7970] ...'ri||{}).filter(([,v])=>v)'.map
 
 === </table> ===
-[@6977]
+[@8598]
 
 === apertura tabella storico ===
 [<div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>\n        <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}]
