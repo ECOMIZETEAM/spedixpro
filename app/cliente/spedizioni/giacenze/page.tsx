@@ -134,6 +134,8 @@ export default function GiacenzePage() {
         </button>
       </div>
 
+      <div style={{marginBottom:'12px',fontSize:'12px',color:'#1a1a1a'}}>Mostra{' '}<select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}} style={{padding:'4px 8px',border:'1px solid #d1d5db',borderRadius:'5px',color:'#1a1a1a'}}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option></select>{' '}elementi</div>
+
       {/* Tabella */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
