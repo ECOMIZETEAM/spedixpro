@@ -182,7 +182,7 @@ export default function RettificaCostiPage() {
         <div style={{padding:'8px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
             <span style={{fontSize:'12px',color:'#1a1a1a'}}>Mostra</span>
-            <select style={{padding:'3px 8px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px'}}><option>50</option><option>100</option></select>
+            <select style={{padding:'3px 8px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}}><option>50</option><option>100</option></select>
             <span style={{fontSize:'12px',color:'#1a1a1a'}}>elementi</span>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
