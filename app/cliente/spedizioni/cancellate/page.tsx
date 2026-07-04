@@ -5,6 +5,8 @@ export default function SpedizioniCancellateClientePage() {
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
+  const [perPage, setPerPage] = useState(10)
+  const [pagina, setPagina] = useState(1)
 
   useEffect(() => {
     fetch('/api/spedizioni/lista?stato=annullata')
@@ -18,6 +20,9 @@ export default function SpedizioniCancellateClientePage() {
         s.numero?.toLowerCase().includes(cerca.toLowerCase()) ||
         s.dest_nome?.toLowerCase().includes(cerca.toLowerCase()))
     : spedizioni
+  const totalePagine = Math.max(1, Math.ceil(visibili.length / perPage))
+  const paginaCorr = Math.min(pagina, totalePagine)
+  const paginate = visibili.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
 
   return (
     <div>
@@ -56,7 +61,7 @@ export default function SpedizioniCancellateClientePage() {
                 </tr>
               </thead>
               <tbody>
-                {visibili.map(s => (
+                {paginate.map(s => (
                   <tr key={s.id} style={{borderBottom:'1px solid #f5f5f5'}}>
                     <td style={{padding:'10px 14px'}}><span style={{fontWeight:'600',color:'#f97316'}}>{s.numero}</span></td>
                     <td style={{padding:'10px 14px'}}>
