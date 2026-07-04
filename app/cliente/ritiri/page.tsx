@@ -12,7 +12,7 @@ export default function RitiriPage() {
   const [cerca, setCerca] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [pagina, setPagina] = useState(1)
-  const perPagina = 10
+  const [perPagina, setPerPagina] = useState(10)
   const [filtri, setFiltri] = useState({
     clienteId: '', vettore: '', codRitiro: '',
     dal: new Date().toISOString().split('T')[0],
