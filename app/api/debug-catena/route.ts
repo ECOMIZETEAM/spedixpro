@@ -1,38 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { calcolaPrezzoListino, zonaDaProvincia } from '@/lib/pricing'
+import { verificaCreditoCatena } from '@/lib/cascata'
 
-// DEBUG temporaneo: GET /api/debug-catena?listino=<id>&provincia=RM&peso=1
+// DEBUG: /api/debug-catena?provincia=RM&peso=1&corriere=<id>
+// Riproduce la verifica catena della creazione: masterDiretto=MASSIMO, owner=master del corriere.
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
 
   const p = req.nextUrl.searchParams
-  const listinoId = p.get('listino') || ''
   const provincia = p.get('provincia') || 'RM'
   const peso = parseFloat(p.get('peso') || '1')
+  const corriereId = p.get('corriere') || ''
+  const masterDiretto = p.get('master') || '0ac48b7e-f6b6-49fa-9929-bb9e31750c81' // MASSIMO
+  const packages = [{ weight: peso, length: 20, width: 15, height: 10 }]
 
-  const out: any = { listinoId, provincia, peso, zonaNome: zonaDaProvincia(provincia) }
+  const out: any = { provincia, peso, corriereId, masterDiretto, zonaNome: zonaDaProvincia(provincia) }
 
-  const { data: listino, error: e1 } = await supabase
-    .from('listini_clienti').select('id,nome,fattore_volume').eq('id', listinoId).single()
-  out.listino = listino || null
-  out.erroreListino = e1?.message || null
+  let corriereOwnerId = ''
+  if (corriereId) {
+    const { data: cor } = await supabase.from('corrieri').select('id,nome_contratto,tipo,master_id').eq('id', corriereId).maybeSingle()
+    out.corriere = cor || 'NON TROVATO'
+    corriereOwnerId = cor?.master_id || ''
+  }
+  out.corriereOwnerId = corriereOwnerId || 'MANCANTE'
 
-  const { data: fasce, error: e2 } = await supabase
-    .from('listini_clienti_fasce')
-    .select('*, zone(id,nome), corrieri(id,tipo,nome_contratto,settings)')
-    .eq('listino_id', listinoId)
-    .order('peso_max', { ascending: true })
-  out.erroreFasce = e2?.message || null
-  out.nFasce = fasce?.length || 0
-  out.zoneDistinte = Array.from(new Set((fasce||[]).map((f:any)=>(f.zone as any)?.nome ?? 'NULL')))
-  out.corriereNullSuFasce = (fasce||[]).filter((f:any)=>!(f.corrieri as any)?.id).length
-  out.esempioFascia = (fasce||[])[0] || null
+  const { data: mm } = await supabase.from('masters').select('id,nome,parent_master_id,parent_listino_id,credito,tipo_contratto').eq('id', masterDiretto).maybeSingle()
+  out.masterDirettoRec = mm || null
 
-  const ris = await calcolaPrezzoListino(supabase, { listinoId, provincia, packages: [{ weight: peso }] })
-  out.risultatoFinale = ris
+  if (mm?.parent_listino_id) {
+    out.prezzoListinoParent = await calcolaPrezzoListino(supabase, { listinoId: mm.parent_listino_id, provincia, packages })
+  }
 
+  if (corriereOwnerId) {
+    out.verificaCatena = await verificaCreditoCatena(supabase, {
+      masterDirettoId: masterDiretto, corriereOwnerId, provincia, packages, costoSpedizione: 0,
+    })
+  } else {
+    out.verificaCatena = 'saltata: passa ?corriere=<id> per eseguirla'
+  }
   return NextResponse.json(out)
 }
