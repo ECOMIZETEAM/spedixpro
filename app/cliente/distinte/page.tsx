@@ -106,7 +106,7 @@ export default function ListaDistinteCliente() {
                 </tr>
               </thead>
               <tbody>
-                {visibili.map(d=>(
+                {paginate.map(d=>(
                   <tr key={d.id}>
                     <td style={{...td}}><span style={{background:'#2563eb',color:'#fff',padding:'4px 10px',borderRadius:'6px',fontWeight:'700',fontSize:'12px'}}>{d.numero}</span></td>
                     <td style={td}>{d.vettore}</td>
