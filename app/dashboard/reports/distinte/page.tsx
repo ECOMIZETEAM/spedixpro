@@ -1,5 +1,6 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
+import DateRangePicker from '@/app/components/DateRangePicker'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -86,11 +87,8 @@ export default function ReportDistintePage() {
               {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
             </select>
           </div>
-          <div><label style={lbl}>Dalla Data</label>
-            <input type="date" value={filtri.dal} onChange={e=>setF('dal',e.target.value)} style={{...inp,width:'100%'}}/>
-          </div>
-          <div><label style={lbl}>Alla Data</label>
-            <input type="date" value={filtri.al} onChange={e=>setF('al',e.target.value)} style={{...inp,width:'100%'}}/>
+          <div><label style={lbl}>Data</label>
+            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} />
           </div>
           <div><label style={lbl}>Formato</label>
             <select value={filtri.formato} onChange={e=>setF('formato',e.target.value)} style={sel}>
