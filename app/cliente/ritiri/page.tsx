@@ -49,7 +49,7 @@ export default function RitiriPage() {
       )
     : ritiri
 
-  const totalePagine = Math.ceil(filtrati.length / perPagina)
+  const totalePagine = Math.max(1, Math.ceil(filtrati.length / perPagina))
   const paginati = filtrati.slice((pagina-1)*perPagina, pagina*perPagina)
 
   function toggleSelect(id:string) { setSelectedIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]) }
