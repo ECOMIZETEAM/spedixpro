@@ -20,8 +20,17 @@ export async function POST(req: NextRequest) {
   if (!ragioneSociale) return NextResponse.json({ error: 'Ragione sociale obbligatoria' }, { status: 400 })
   const { data: existing } = await supabase.from('clienti').select('id').eq('email', email).single()
   if (existing) return NextResponse.json({ error: 'Email già registrata' }, { status: 400 })
-  const { count } = await supabase.from('clienti').select('*', {count:'exact',head:true}).eq('master_id', utente.master_id)
-  const codice = `CLI-${String((count||0)+1).padStart(4,'0')}`
+  // Codice progressivo PER MASTER: prendo il massimo esistente e vado avanti
+  const { data: ultimi } = await supabase.from('clienti')
+    .select('codice_cliente').eq('master_id', utente.master_id)
+    .order('codice_cliente', { ascending: false }).limit(1)
+  let prossimo = 1
+  const ultimoCod = ultimi?.[0]?.codice_cliente
+  if (ultimoCod) {
+    const n = parseInt(String(ultimoCod).replace(/\D/g, ''), 10)
+    if (!isNaN(n)) prossimo = n + 1
+  }
+  const codice = `CLI-${String(prossimo).padStart(4, '0')}`
   const password = generaPassword()
   const { data: nuovoCliente, error } = await supabase.from('clienti').insert({
     master_id: utente.master_id,
