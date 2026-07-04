@@ -24,6 +24,8 @@ export default function ListaContrassegniPage() {
   const [loading, setLoading] = useState(true)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [cerca, setCerca] = useState('')
+  const [perPage, setPerPage] = useState(10)
+  const [pagina, setPagina] = useState(1)
   const [creandoDistinta, setCreandoDistinta] = useState(false)
   const [filtri, setFiltri] = useState({
     clienteId:'', vettore:'', contratto:'', statoSpedizione:'', statoContrassegno:'',
@@ -52,6 +54,9 @@ export default function ListaContrassegniPage() {
 
   const setF = (k:string,v:string) => setFiltri(f=>({...f,[k]:v}))
   const visibili = cerca ? spedizioni.filter(s => s.numero?.toLowerCase().includes(cerca.toLowerCase()) || s.dest_nome?.toLowerCase().includes(cerca.toLowerCase()) || s.clienti?.ragione_sociale?.toLowerCase().includes(cerca.toLowerCase())) : spedizioni
+  const totalePagine = Math.max(1, Math.ceil(visibili.length / perPage))
+  const paginaCorr = Math.min(pagina, totalePagine)
+  const visibiliPag = visibili.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
   function toggleSelect(id:string) { setSelectedIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]) }
   function toggleAll() { if (selectedIds.length===visibili.length) setSelectedIds([]); else setSelectedIds(visibili.map(s=>s.id)) }
 
@@ -135,7 +140,7 @@ export default function ListaContrassegniPage() {
         <div style={{padding:'10px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
             <span style={{fontSize:'12px',color:'#1a1a1a'}}>Mostra</span>
-            <select style={{padding:'3px 8px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px'}}><option>50</option><option>100</option></select>
+            <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}} style={{padding:'3px 8px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select>
             <span style={{fontSize:'12px',color:'#1a1a1a'}}>elementi</span>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
@@ -164,7 +169,7 @@ export default function ListaContrassegniPage() {
                 </tr>
               </thead>
               <tbody>
-                {visibili.map(s => {
+                {visibiliPag.map(s => {
                   const stSped = STATI_SPED[s.stato] || {bg:'#f5f5f5',color:'#1a1a1a',label:s.stato}
                   const stCod = STATI_COD[s.stato_contrassegno||'in_attesa'] || STATI_COD['in_attesa']
                   const isSelected = selectedIds.includes(s.id)
@@ -192,7 +197,18 @@ export default function ListaContrassegniPage() {
             </table>
           </div>
         )}
-        <div style={{padding:'10px 16px',borderTop:'1px solid #d1d5db',fontSize:'12px',color:'#1a1a1a'}}>Risultati: {visibili.length} elementi</div>
+        <div style={{padding:'10px 16px',borderTop:'1px solid #d1d5db',fontSize:'12px',color:'#1a1a1a',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'8px'}}>
+          <span>Risultati: {visibili.length} elementi</span>
+          {totalePagine > 0 && (
+            <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
+              <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr<=1?'default':'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
+              {Array.from({length: totalePagine}, (_,i)=>i+1).filter(n => n===1 || n===totalePagine || Math.abs(n-paginaCorr)<=2).map((n)=>(
+                <button key={n} onClick={()=>setPagina(n)} style={{minWidth:'30px',padding:'5px 8px',border:'1px solid',borderColor:n===paginaCorr?'#f97316':'#d1d5db',borderRadius:'5px',background:n===paginaCorr?'#f97316':'#fff',color:n===paginaCorr?'#fff':'#1a1a1a',fontSize:'12px',fontWeight:n===paginaCorr?'700':'400',cursor:'pointer'}}>{n}</button>
+              ))}
+              <button onClick={()=>setPagina(p=>Math.min(totalePagine,p+1))} disabled={paginaCorr>=totalePagine} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr>=totalePagine?'default':'pointer',color:paginaCorr>=totalePagine?'#ccc':'#1a1a1a'}}>Successivo</button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
