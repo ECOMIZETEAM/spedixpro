@@ -141,6 +141,12 @@ export default function ReportGiacenzePage() {
         </button>
       </div>
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+          <span style={{fontSize:'12px',color:'#666'}}>Mostra</span>
+          <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}} style={{padding:'4px 8px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select>
+          <span style={{fontSize:'12px',color:'#666'}}>elementi</span>
+        </div>
+        
         <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
           <thead><tr style={{background:'#f9fafb'}}>
             {['ID','Data','Filtri','Formato','Utente','Status','Scarica'].map(h=>(
