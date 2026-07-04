@@ -92,6 +92,7 @@ export default function ListaDistinteCliente() {
           <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Lista Distinte</span>
           <input value={cerca} onChange={e=>setCerca(e.target.value)} placeholder="Cerca..." style={{marginLeft:'auto',padding:'6px 12px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a'}}/>
         </div>
+        <div style={{padding:'10px 16px',fontSize:'12px',color:'#1a1a1a'}}>Mostra{' '}<select value={perPagina} onChange={e=>{setPerPagina(Number(e.target.value));setPagina(1)}} style={{padding:'4px 8px',border:'1px solid #d1d5db',borderRadius:'5px',color:'#1a1a1a'}}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option></select>{' '}elementi</div>
         {loading ? (
           <div style={{padding:'40px',textAlign:'center',color:'#999',fontSize:'13px'}}>Caricamento...</div>
         ) : !visibili.length ? (
