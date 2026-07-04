@@ -11,7 +11,7 @@ export default function ReportTable({ reports, onScarica }: { reports: any[], on
 
   return (
     <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #d1d5db', overflow: 'hidden' }}>
-      <div style={{ padding: '10px 16px', borderBottom: '1px solid #f0f0f0', fontSize: '12px', fontWeight: '400', color: '#666' }}>
+      <div style={{ padding:'12px 16px', background:'#ff0', border:'3px solid red', fontSize:'16px', fontWeight:'700', color:'#000' }}>
         Mostra{' '}
         <select value={perPage} onChange={e => { setPerPage(Number(e.target.value)); setPagina(1) }}
           style={{ padding: '3px 6px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px', color: '#1a1a1a', background: '#fff' }}>
