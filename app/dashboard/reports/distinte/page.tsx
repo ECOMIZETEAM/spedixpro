@@ -109,6 +109,11 @@ export default function ReportDistintePage() {
           {generating?'Generazione...':'Genera Report'}
         </button>
       </div>
+      <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'10px'}}>
+        <span style={{fontSize:'13px',color:'#1a1a1a'}}>Mostra</span>
+        <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}} style={{padding:'4px 8px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select>
+        <span style={{fontSize:'13px',color:'#1a1a1a'}}>elementi</span>
+      </div>
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
         <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
           <thead><tr style={{background:'#f9fafb'}}>
@@ -133,11 +138,7 @@ export default function ReportDistintePage() {
           </tbody>
         </table>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'8px',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap'}}>
-          <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-            <span style={{fontSize:'12px',color:'#666'}}>Mostra</span>
-            <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}} style={{padding:'4px 8px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select>
-            <span style={{fontSize:'12px',color:'#666'}}>elementi</span>
-          </div>
+          
           <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
             <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
             {Array.from({length: totalePagine}, (_,i)=>i+1).filter(n => n===1 || n===totalePagine || Math.abs(n-paginaCorr)<=2).map((n)=>(
