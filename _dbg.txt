@@ -1,0 +1,29 @@
+CHAR: 7015
+
+=== useState ===
+  const [clienti, setClienti] = useState<any[]>([])
+  const [reports, setReports] = useState<any[]>([])
+  const [generating, setGenerating] = useState(false)
+  const [filtri, setFiltri] = useState({
+
+ha 'const [reports': True
+
+=== .map (25 char prima) ===
+[@1860] ...'    const rows = distinte'.map
+[@2695] ...'],
+        body: distinte'.map
+[@4144] ...'n>
+              {clienti'.map
+[@5447] ...'ente','Status','Scarica']'.map
+[@5914] ...'>
+            ) : reports'.map
+[@6349] ...'ri||{}).filter(([,v])=>v)'.map
+
+=== </table> ===
+[@6977]
+
+=== apertura tabella storico ===
+[<div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>\n        <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}]
+
+=== render map reports ===
+[n report generato</td></tr>\n            ) : reports.map((r:any,i:number)=>(\n              <tr key={r.id} style={{borderB]
