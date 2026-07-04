@@ -26,6 +26,18 @@ export default function ReportDistintePage() {
 
   const setF = (k: string, v: string) => setFiltri(f => ({...f, [k]: v}))
 
+  async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
+    const filtriTxt = 'dalla_data=' + (filtri.dal||'') + ' alla_data=' + (filtri.al||'')
+    const r = await fetch('/api/reports/salva', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo: 'distinte', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
+    })
+    const j = await r.json()
+    if (!j.success) { alert('Errore salvataggio report: ' + (j.error||'')); return }
+    const lista = await fetch('/api/reports/lista?tipo=distinte').then(x=>x.json())
+    setReports(Array.isArray(lista) ? lista : [])
+  }
+
   async function generaReport() {
     setGenerating(true)
     const params = new URLSearchParams()
@@ -46,7 +58,8 @@ export default function ReportDistintePage() {
       const ws = utils.json_to_sheet(rows)
       const wb = utils.book_new()
       utils.book_append_sheet(wb, ws, 'Distinte')
-      writeFile(wb, `report_distinte_${filtri.dal}.${formato==='xlsx'?'xlsx':'csv'}`)
+      const XLSX = await import('xlsx'); const b64str = XLSX.write(wb, { bookType: formato==='csv'?'csv':'xlsx', type: 'base64' })
+      await salvaReport(b64str, `report_distinte_${filtri.dal}.${formato==='xlsx'?'xlsx':'csv'}`, formato)
     } else {
       const { default: jsPDF } = await import('jspdf')
       const { default: autoTable } = await import('jspdf-autotable')
@@ -64,14 +77,17 @@ export default function ReportDistintePage() {
         styles: { fontSize: 9 },
         headStyles: { fillColor: [249, 115, 22] },
       })
-      doc.save(`report_distinte_${filtri.dal}.pdf`)
+      const totDistinte = distinte.reduce((acc: number, d: any) => acc + Number(d.totale||0), 0)
+      const pageH = doc.internal.pageSize.getHeight()
+      const pageW = doc.internal.pageSize.getWidth()
+      let fy = (doc as any).lastAutoTable.finalY + 16
+      if (fy + 12 > pageH - 12) { doc.addPage(); fy = 24 }
+      doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(30,30,30)
+      doc.text('TOTALE', pageW - 80, fy)
+      doc.text(`EUR ${totDistinte.toFixed(2)}`, pageW - 14, fy, {align:'right'})
+      const pdfB64 = doc.output('datauristring')
+      await salvaReport(pdfB64, `report_distinte_${filtri.dal}.pdf`, 'pdf')
     }
-    await fetch('/api/reports/spedizioni', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ formato: filtri.formato, filtri, tipo: 'distinte' })
-    })
-    const d = await fetch('/api/reports/lista?tipo=distinte').then(r=>r.json())
-    setReports(d||[])
     setGenerating(false)
   }
 
@@ -132,7 +148,7 @@ export default function ReportDistintePage() {
                 <td style={{padding:'9px 14px'}}><span style={{background:'#e0f2fe',color:'#0369a1',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>{r.formato}</span></td>
                 <td style={{padding:'9px 14px'}}>{r.utente_nome}</td>
                 <td style={{padding:'9px 14px',color:'#16a34a',fontWeight:'500'}}>{r.stato}</td>
-                <td style={{padding:'9px 14px'}}><span style={{color:'#f97316',fontWeight:'600',cursor:'pointer'}} onClick={generaReport}>Scarica</span></td>
+                <td style={{padding:'9px 14px'}}><a href={r.file_url} target="_blank" rel="noopener noreferrer" download style={{color:'#f97316',fontWeight:'600',fontSize:'13px',cursor:'pointer',textDecoration:'none'}}>Scarica</a></td>
               </tr>
             ))}
           </tbody>
