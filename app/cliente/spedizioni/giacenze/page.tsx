@@ -215,11 +215,6 @@ export default function GiacenzePage() {
               </tbody>
             </table>
           </div>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',gap:'6px',padding:'12px 16px',borderTop:'1px solid #f0f0f0'}}>
-            <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'6px 12px',border:'1px solid #d1d5db',background:'#fff',borderRadius:'5px',fontSize:'12px',cursor:'pointer',color:'#1a1a1a',opacity:paginaCorr<=1?0.5:1}}>Precedente</button>
-            <span style={{fontSize:'12px',color:'#666'}}>Pagina {paginaCorr} di {totalePagine}</span>
-            <button onClick={()=>setPagina(p=>Math.min(totalePagine,p+1))} disabled={paginaCorr>=totalePagine} style={{padding:'6px 12px',border:'1px solid #d1d5db',background:'#fff',borderRadius:'5px',fontSize:'12px',cursor:'pointer',color:'#1a1a1a',opacity:paginaCorr>=totalePagine?0.5:1}}>Successivo</button>
-          </div>
           </>
         )}
       </div>
