@@ -123,9 +123,9 @@ export default function ReportSpedizioniPage() {
       doc.setTextColor(30,30,30)
       doc.setFont('helvetica','bold')
       doc.text('TOTALE PREZZO CLIENTE', col1, finalY)
-      doc.text(`EUR `, col2, finalY, {align:'right'})
+      doc.text(`EUR ${totCliente.toFixed(2)}`, col2, finalY, {align:'right'})
       doc.text('TOTALE PREZZO CORRIERE', col1, finalY + 10)
-      doc.text(`EUR `, col2, finalY + 10, {align:'right'})
+      doc.text(`EUR ${totCorriere.toFixed(2)}`, col2, finalY + 10, {align:'right'})
       const pdfB64 = doc.output('datauristring')
       await salvaReport(pdfB64, 'report_spedizioni_' + filtri.dal + '_' + filtri.al + '.pdf', 'pdf')
     } else if (formato === 'zip') {
