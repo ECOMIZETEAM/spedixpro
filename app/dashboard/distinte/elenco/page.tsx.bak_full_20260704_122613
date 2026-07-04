@@ -9,8 +9,6 @@ export default function ElencoDistintePage() {
   const [dal, setDal] = useState('')
   const [al, setAl] = useState('')
   const [selezionate, setSelezionate] = useState<Set<string>>(new Set())
-  const [perPage, setPerPage] = useState(10)
-  const [pagina, setPagina] = useState(1)
 
   useEffect(() => { carica() }, [dal, al])
 
@@ -86,10 +84,6 @@ export default function ElencoDistintePage() {
     String(d.numero || '').toLowerCase().includes(cerca.toLowerCase()) ||
     String(d.clienti?.ragione_sociale || '').toLowerCase().includes(cerca.toLowerCase()))
 
-  const totalePagine = Math.max(1, Math.ceil(filtrate.length / perPage))
-  const paginaCorr = Math.min(pagina, totalePagine)
-  const distintePaginate = filtrate.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
-
   const inp = { padding: '8px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', background: '#fff' } as const
   const th = { padding: '9px 12px', textAlign: 'left' as const, fontSize: '11px', fontWeight: '700', color: '#1a1a1a', borderBottom: '1px solid #d1d5db', whiteSpace: 'nowrap' as const }
   const td = { padding: '9px 12px', fontSize: '12px', color: '#1a1a1a' }
@@ -99,22 +93,12 @@ export default function ElencoDistintePage() {
     <div>
       <div style={{ marginBottom: '16px' }}>
         <h1 style={{ fontSize: '20px', fontWeight: '700', color: '#1a1a1a', margin: 0 }}>Lista Distinte</h1>
-        <span style={{display:'block',marginTop:'4px',fontSize:'12px',fontWeight:'400',color:'#666'}}>
-          Mostra{' '}
-          <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}}
-            style={{padding:'3px 6px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}}>
-            <option value={10}>10</option>
-            <option value={25}>25</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-          </select>{' '}elementi
-        </span>
       </div>
       <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #d1d5db', padding: '14px', marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div><div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Data</div><DateRangePicker dal={dal} al={al} onChange={(d1,d2)=>{setDal(d1);setAl(d2)}} /></div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
           <button onClick={confermaSelezionate} style={{ padding: '8px 14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }}>Conferma Selezionate</button>
-          <div><div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Cerca</div><input value={cerca} onChange={e => {setCerca(e.target.value);setPagina(1)}} placeholder="Numero o cliente..." style={{ ...inp, width: '220px' }} /></div>
+          <div><div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Cerca</div><input value={cerca} onChange={e => setCerca(e.target.value)} placeholder="Numero o cliente..." style={{ ...inp, width: '220px' }} /></div>
         </div>
       </div>
       <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #d1d5db', overflow: 'hidden' }}>
@@ -131,42 +115,27 @@ export default function ElencoDistintePage() {
                 <tr><td colSpan={10} style={{ ...td, textAlign: 'center', padding: '20px' }}>Caricamento...</td></tr>
               ) : !filtrate.length ? (
                 <tr><td colSpan={10} style={{ ...td, textAlign: 'center', padding: '20px' }}>Nessuna distinta creata</td></tr>
-              ) : distintePaginate.map(d => (
+              ) : filtrate.map(d => (
                 <tr key={d.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                   <td style={td}><input type="checkbox" checked={selezionate.has(d.id)} onChange={() => toggle(d.id)} /></td>
                   <td style={{ ...td, fontWeight: '700' }}>{d.numero}</td>
-                  <td style={td}>{d.clienti?.ragione_sociale || '-'}</td>
-                  <td style={td}>{d.corrieri?.nome_contratto || '-'}</td>
-                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{d.created_at ? new Date(d.created_at).toLocaleString('it-IT') : '-'}</td>
+                  <td style={td}>{d.clienti?.ragione_sociale || '—'}</td>
+                  <td style={td}>{d.corrieri?.nome_contratto || '—'}</td>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{d.created_at ? new Date(d.created_at).toLocaleString('it-IT') : '—'}</td>
                   <td style={td}>{d.totale_ldv || 0}</td>
-                  <td style={td}>{Number(d.prezzo_totale || 0).toFixed(2)} {'\u20AC'}</td>
+                  <td style={td}>{Number(d.prezzo_totale || 0).toFixed(2)} €</td>
                   <td style={td}>{d.confermata_vettore ? <span style={{ background: '#16a34a', color: '#fff', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>Confermati</span> : <span style={{ background: '#f59e0b', color: '#fff', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>In attesa</span>}</td>
-                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{d.data_conferma ? new Date(d.data_conferma).toLocaleString('it-IT') : '-'}</td>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{d.data_conferma ? new Date(d.data_conferma).toLocaleString('it-IT') : '—'}</td>
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                    <button style={bIco} onClick={() => stampaPDF(d)} title="Stampa PDF">{'\uD83D\uDDA8'}</button>
-                    <button style={{ ...bIco, background: '#15803d' }} onClick={() => esportaExcel(d)} title="Excel">{'\uD83D\uDCCA'}</button>
+                    <button style={bIco} onClick={() => stampaPDF(d)} title="Stampa PDF">🖨</button>
+                    <button style={{ ...bIco, background: '#15803d' }} onClick={() => esportaExcel(d)} title="Excel">📊</button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        {totalePagine > 1 && (
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap',gap:'8px'}}>
-            <span style={{fontSize:'12px',color:'#666'}}>{(paginaCorr - 1) * perPage + 1}-{Math.min(paginaCorr * perPage, filtrate.length)} di {filtrate.length}</span>
-            <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
-              <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr<=1?'default':'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
-              {Array.from({length: totalePagine}, (_,i)=>i+1).filter(n => n===1 || n===totalePagine || Math.abs(n-paginaCorr)<=2).map((n,idx,arr)=>(
-                <span key={n} style={{display:'flex',alignItems:'center'}}>
-                  {idx>0 && arr[idx-1] !== n-1 && <span style={{padding:'0 4px',color:'#bbb',fontSize:'12px'}}>{'\u2026'}</span>}
-                  <button onClick={()=>setPagina(n)} style={{minWidth:'30px',padding:'5px 8px',border:'1px solid',borderColor:n===paginaCorr?'#f97316':'#d1d5db',borderRadius:'5px',background:n===paginaCorr?'#f97316':'#fff',color:n===paginaCorr?'#fff':'#1a1a1a',fontSize:'12px',fontWeight:n===paginaCorr?'700':'400',cursor:'pointer'}}>{n}</button>
-                </span>
-              ))}
-              <button onClick={()=>setPagina(p=>Math.min(totalePagine,p+1))} disabled={paginaCorr>=totalePagine} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr>=totalePagine?'default':'pointer',color:paginaCorr>=totalePagine?'#ccc':'#1a1a1a'}}>Successivo</button>
-            </div>
-          </div>
-        )}
-        <div style={{ padding: '10px 16px', fontSize: '12px', color: '#1a1a1a', borderTop: '1px solid #f0f0f0' }}>Risultati: {filtrate.length} distinte</div>
+        <div style={{ padding: '10px 16px', fontSize: '12px', color: '#1a1a1a' }}>Risultati: {filtrate.length} distinte</div>
       </div>
     </div>
   )
