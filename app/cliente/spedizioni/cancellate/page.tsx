@@ -85,6 +85,7 @@ export default function SpedizioniCancellateClientePage() {
             <span style={{fontSize:'12px',color:'#666'}}>Pagina {paginaCorr} di {totalePagine}</span>
             <button onClick={()=>setPagina(p=>Math.min(totalePagine,p+1))} disabled={paginaCorr>=totalePagine} style={{padding:'6px 12px',border:'1px solid #d1d5db',background:'#fff',borderRadius:'5px',fontSize:'12px',cursor:'pointer',color:'#1a1a1a',opacity:paginaCorr>=totalePagine?0.5:1}}>Successivo</button>
           </div>
+          </div>
         )}
       </div>
     </div>
