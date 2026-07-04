@@ -11,8 +11,6 @@ export default function GiacenzePage() {
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
-  const [perPage, setPerPage] = useState(10)
-  const [pagina, setPagina] = useState(1)
   const [modal, setModal] = useState<any>(null)
   const [istruzioni, setIstruzioni] = useState('')
   const [elaborando, setElaborando] = useState(false)
@@ -60,11 +58,7 @@ export default function GiacenzePage() {
     const giorni = calcolaGiorni(g)
     const costoG = parseFloat(g.giacenza_costo_giornaliero || 0)
     const costoR = parseFloat(g.giacenza_costo_riconsegna || 0)
-    const totalePagine = Math.max(1, Math.ceil(giacenzeFiltrate.length / perPage))
-  const paginaCorr = Math.min(pagina, totalePagine)
-  const _pag = giacenzeFiltrate.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
-
-  return (costoG * giorni) + costoR
+    return (costoG * giorni) + costoR
   }
 
   async function svincola() {
@@ -155,12 +149,7 @@ export default function GiacenzePage() {
             <div style={{fontWeight:'500'}}>Nessuna giacenza trovata</div>
           </div>
         ) : (
-          <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'10px'}}>
-        <span style={{fontSize:'13px',color:'#1a1a1a'}}>Mostra</span>
-        <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}} style={{padding:'4px 8px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select>
-        <span style={{fontSize:'13px',color:'#1a1a1a'}}>elementi</span>
-      </div>
-      <div style={{overflowX:'auto' as const}}>
+          <div style={{overflowX:'auto' as const}}>
             <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
               <thead>
                 <tr style={{background:'#f9fafb'}}>
@@ -170,7 +159,7 @@ export default function GiacenzePage() {
                 </tr>
               </thead>
               <tbody>
-                {_pag.map(g => {
+                {giacenzeFiltrate.map(g => {
                   const stSt = statoStyle[g.giacenza_stato||'aperta'] || statoStyle['aperta']
                   const giorni = calcolaGiorni(g)
                   const costo = calcolaCosto(g)
@@ -217,13 +206,6 @@ export default function GiacenzePage() {
                 })}
               </tbody>
             </table>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:'6px',padding:'12px',borderTop:'1px solid #e5e7eb'}}>
-          <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
-          {Array.from({length: totalePagine},(_,i)=>i+1).filter(n=>n===1||n===totalePagine||Math.abs(n-paginaCorr)<=2).map((n)=>(
-            <button key={n} onClick={()=>setPagina(n)} style={{minWidth:'30px',padding:'5px 8px',border:'1px solid',borderColor:n===paginaCorr?'#f97316':'#d1d5db',borderRadius:'5px',background:n===paginaCorr?'#f97316':'#fff',color:n===paginaCorr?'#fff':'#1a1a1a',fontSize:'12px',cursor:'pointer'}}>{n}</button>
-          ))}
-          <button onClick={()=>setPagina(p=>Math.min(totalePagine,p+1))} disabled={paginaCorr>=totalePagine} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:'pointer',color:paginaCorr>=totalePagine?'#ccc':'#1a1a1a'}}>Successivo</button>
-        </div>
           </div>
         )}
       </div>
