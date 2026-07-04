@@ -5,12 +5,17 @@ export default function ListaDistinteCliente() {
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
   const [busy, setBusy] = useState('')
+  const [perPagina, setPerPagina] = useState(10)
+  const [pagina, setPagina] = useState(1)
   useEffect(() => { carica() }, [])
   function carica() {
     setLoading(true)
     fetch('/api/cliente/distinte/lista').then(r=>r.json()).then(d=>{setDistinte(Array.isArray(d)?d:[]);setLoading(false)}).catch(()=>setLoading(false))
   }
   const visibili = distinte.filter(d => !cerca || d.numero?.toLowerCase().includes(cerca.toLowerCase()) || (d.contratto||'').toLowerCase().includes(cerca.toLowerCase()))
+  const totPagine = Math.max(1, Math.ceil(visibili.length / perPagina))
+  const paginaCorr = Math.min(pagina, totPagine)
+  const paginate = visibili.slice((paginaCorr-1)*perPagina, paginaCorr*perPagina)
   async function stampa(id:string, numero:string) {
     setBusy(id+'-pdf')
     try {
