@@ -11,6 +11,8 @@ export default function GiacenzePage() {
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
+  const [perPage, setPerPage] = useState(10)
+  const [pagina, setPagina] = useState(1)
   const [modal, setModal] = useState<any>(null)
   const [istruzioni, setIstruzioni] = useState('')
   const [elaborando, setElaborando] = useState(false)
@@ -48,6 +50,9 @@ export default function GiacenzePage() {
         g.clienti?.ragione_sociale?.toLowerCase().includes(cerca.toLowerCase())
       )
     : giacenze
+  const totalePagine = Math.max(1, Math.ceil(giacenzeFiltrate.length / perPage))
+  const paginaCorr = Math.min(pagina, totalePagine)
+  const paginate = giacenzeFiltrate.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
 
   function calcolaGiorni(g: any) {
     const data = g.giacenza_data ? new Date(g.giacenza_data) : new Date(g.created_at)
@@ -159,7 +164,7 @@ export default function GiacenzePage() {
                 </tr>
               </thead>
               <tbody>
-                {giacenzeFiltrate.map(g => {
+                {paginate.map(g => {
                   const stSt = statoStyle[g.giacenza_stato||'aperta'] || statoStyle['aperta']
                   const giorni = calcolaGiorni(g)
                   const costo = calcolaCosto(g)
