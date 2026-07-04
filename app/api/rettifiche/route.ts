@@ -34,6 +34,12 @@ export async function POST(req: NextRequest) {
 
   if (!rettifiche?.length) return NextResponse.json({ error: 'Nessuna rettifica trovata' }, { status: 404 })
 
+  // Le rettifiche verso master (catena) non si confermano da qui: flusso dedicato in arrivo
+  const diCatena = rettifiche.filter(r => r.target_master_id || !r.cliente_id)
+  if (diCatena.length) {
+    return NextResponse.json({ error: diCatena.length + ' rettifiche sono verso un master della catena: la conferma master-to-master non è ancora attiva. Deselezionale per procedere con quelle dei clienti diretti.' }, { status: 400 })
+  }
+
   // Raggruppa per cliente
   const clientiMap: Record<string, any[]> = {}
   rettifiche.forEach(r => {
