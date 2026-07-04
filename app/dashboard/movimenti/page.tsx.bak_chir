@@ -35,8 +35,6 @@ export default function MovimentiMasterPage() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [cerca, setCerca] = useState('')
-  const [perPage, setPerPage] = useState(10)
-  const [pagina, setPagina] = useState(1)
 
   useEffect(() => {
     (async () => {
@@ -54,10 +52,6 @@ export default function MovimentiMasterPage() {
     ? movimenti.filter(m => m.descrizione?.toLowerCase().includes(cerca.toLowerCase()) || (m.riferimento||'').toLowerCase().includes(cerca.toLowerCase()))
     : movimenti
 
-  const totalePagine = Math.max(1, Math.ceil(visibili.length / perPage))
-  const paginaCorr = Math.min(pagina, totalePagine)
-  const _pag = visibili.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
-
   return (
     <div>
       <div style={{marginBottom:'20px'}}>
@@ -71,8 +65,6 @@ export default function MovimentiMasterPage() {
           <div style={{fontSize:'26px',fontWeight:700,color:saldo<0?'#b91c1c':'#15803d',marginTop:'4px'}}>{fmtEuro(saldo)}</div>
         </div>
         <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
-          <span style={{fontSize:'12.5px',color:'#666'}}>Mostra</span>
-          <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}} style={{padding:'6px 8px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select>
           <span style={{fontSize:'12.5px',color:'#666'}}>Cerca:</span>
           <input value={cerca} onChange={e=>setCerca(e.target.value)} placeholder="Movimento o riferimento…"
             style={{padding:'7px 10px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',width:'220px',color:'#1a1a1a',background:'#fff'}}/>
@@ -100,7 +92,7 @@ export default function MovimentiMasterPage() {
                 </tr>
               </thead>
               <tbody>
-                {_pag.map(m => {
+                {visibili.map(m => {
                   const positivo = Number(m.importo) > 0
                   return (
                     <tr key={m.id}>
@@ -113,15 +105,6 @@ export default function MovimentiMasterPage() {
                 })}
               </tbody>
             </table>
-            {totalePagine > 1 && (
-              <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',gap:'6px',padding:'14px 2px 4px'}}>
-                <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #ddd',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
-                {Array.from({length:totalePagine},(_, i)=>i+1).filter(n=>n===1||n===totalePagine||Math.abs(n-paginaCorr)<=2).map((n)=>(
-                  <button key={n} onClick={()=>setPagina(n)} style={{minWidth:'30px',padding:'5px 8px',border:'1px solid',borderColor:n===paginaCorr?'#f97316':'#ddd',borderRadius:'5px',background:n===paginaCorr?'#f97316':'#fff',color:n===paginaCorr?'#fff':'#1a1a1a',fontSize:'12px',cursor:'pointer'}}>{n}</button>
-                ))}
-                <button onClick={()=>setPagina(p=>Math.min(totalePagine,p+1))} disabled={paginaCorr>=totalePagine} style={{padding:'5px 10px',border:'1px solid #ddd',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:'pointer',color:paginaCorr>=totalePagine?'#ccc':'#1a1a1a'}}>Successivo</button>
-              </div>
-            )}
           </div>
         )}
       </div>
