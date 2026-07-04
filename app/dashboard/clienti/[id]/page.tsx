@@ -178,6 +178,16 @@ export default function ClienteProfiloPage() {
                 </table>
               </div>
             )}
+            <div style={{padding:'12px 16px',display:'flex',alignItems:'center',justifyContent:'flex-end',gap:'4px',borderTop:'1px solid #f0f0f0'}}>
+              <button onClick={()=>setPaginaMov(p=>Math.max(1,p-1))} disabled={paginaCorrMov<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorrMov<=1?'default':'pointer',color:paginaCorrMov<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
+              {Array.from({length: totPagineMov}, (_,i)=>i+1).filter(n => n===1 || n===totPagineMov || Math.abs(n-paginaCorrMov)<=2).map((n,idx,arr)=>(
+                <span key={n} style={{display:'flex',alignItems:'center'}}>
+                  {idx>0 && arr[idx-1] !== n-1 && <span style={{padding:'0 4px',color:'#bbb',fontSize:'12px'}}>…</span>}
+                  <button onClick={()=>setPaginaMov(n)} style={{minWidth:'30px',padding:'5px 8px',border:'1px solid',borderColor:n===paginaCorrMov?'#f97316':'#d1d5db',borderRadius:'5px',background:n===paginaCorrMov?'#f97316':'#fff',color:n===paginaCorrMov?'#fff':'#1a1a1a',fontSize:'12px',fontWeight:n===paginaCorrMov?'700':'400',cursor:'pointer'}}>{n}</button>
+                </span>
+              ))}
+              <button onClick={()=>setPaginaMov(p=>Math.min(totPagineMov,p+1))} disabled={paginaCorrMov>=totPagineMov} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorrMov>=totPagineMov?'default':'pointer',color:paginaCorrMov>=totPagineMov?'#ccc':'#1a1a1a'}}>Successivo</button>
+            </div>
           </div>
         </div>
 
