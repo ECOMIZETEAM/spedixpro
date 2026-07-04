@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import DateRangePicker from '@/app/components/DateRangePicker'
 
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',background:'#fff',color:'#1a1a1a'}
 
@@ -47,11 +48,7 @@ export default function DistinteResiPage() {
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'20px'}}>
           <div>
             <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'6px'}}>Data distinte</label>
-            <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
-              <input type="date" value={dal} onChange={e=>setDal(e.target.value)} style={inp}/>
-              <span style={{color:'#1a1a1a',fontWeight:'600'}}>—</span>
-              <input type="date" value={al} onChange={e=>setAl(e.target.value)} style={inp}/>
-            </div>
+            <DateRangePicker dal={dal} al={al} onChange={(d1,d2)=>{setDal(d1);setAl(d2)}} />
           </div>
           <div>
             <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'6px'}}>Cliente</label>
