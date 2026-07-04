@@ -113,7 +113,9 @@ export default function ReportSpedizioniPage() {
       // Riepilogo subtotale/IVA/totale
       const totCliente = spedizioni.reduce((acc: number, s: any) => acc + Number(s.costo_totale||0), 0)
       const totCorriere = spedizioni.reduce((acc: number, s: any) => acc + Number(s.prezzo_corriere||0), 0)
-      const finalY = (doc as any).lastAutoTable.finalY + 20
+      const pageH = doc.internal.pageSize.getHeight()
+      let finalY = (doc as any).lastAutoTable.finalY + 20
+      if (finalY + 20 > pageH - 15) { doc.addPage(); finalY = 30 }
       const pageW = doc.internal.pageSize.getWidth()
       const col1 = pageW - 120
       const col2 = pageW - 20
