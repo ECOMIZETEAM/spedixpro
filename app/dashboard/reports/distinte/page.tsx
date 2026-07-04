@@ -142,9 +142,9 @@ export default function ReportDistintePage() {
               <tr><td colSpan={7} style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a'}}>Nessun report generato</td></tr>
             ) : reportsPaginate.map((r:any,i:number)=>(
               <tr key={r.id} style={{borderBottom:'1px solid #d1d5db'}}>
-                <td style={{padding:'9px 14px',fontWeight:'600'}}>{reports.length-i}</td>
-                <td style={{padding:'9px 14px',fontSize:'12px'}}>{new Date(r.created_at).toLocaleString('it-IT')}</td>
-                <td style={{padding:'9px 14px',color:'#f97316',fontSize:'12px'}}>{Object.entries(r.filtri||{}).filter(([,v])=>v).map(([k,v])=>`${k}=${v}`).join(', ')}</td>
+                <td style={{padding:'9px 14px',fontWeight:'600',color:'#1a1a1a'}}>{reports.length-i}</td>
+                <td style={{padding:'9px 14px',fontSize:'12px',color:'#1a1a1a'}}>{new Date(r.created_at).toLocaleString('it-IT')}</td>
+                <td style={{padding:'9px 14px',color:'#1a1a1a',fontSize:'12px'}}>{String(r.filtri||'').split(' ').map((f: string, idx: number)=><div key={idx}>{f}</div>)}</td>
                 <td style={{padding:'9px 14px'}}><span style={{background:'#e0f2fe',color:'#0369a1',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>{r.formato}</span></td>
                 <td style={{padding:'9px 14px'}}>{r.utente_nome}</td>
                 <td style={{padding:'9px 14px',color:'#16a34a',fontWeight:'500'}}>{r.stato}</td>
