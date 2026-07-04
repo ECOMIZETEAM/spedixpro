@@ -22,9 +22,31 @@ export default function LogoPage() {
     const file = e.target.files?.[0]
     if (!file) return
     if (file.size > 2 * 1024 * 1024) { setMsg('Errore: il file supera i 2MB'); return }
-    setLogoFile(file)
+    if (!file.type.startsWith('image/')) { setMsg('Errore: il logo deve essere un\'immagine'); return }
+    // Ridimensiono a 300x90 mantenendo le proporzioni, centrato su sfondo trasparente
     const reader = new FileReader()
-    reader.onload = (ev) => setLogo(ev.target?.result as string)
+    reader.onload = (ev) => {
+      const img = new Image()
+      img.onload = () => {
+        const W = 300, H = 90
+        const canvas = document.createElement('canvas')
+        canvas.width = W; canvas.height = H
+        const ctx = canvas.getContext('2d')
+        if (!ctx) { setMsg('Errore: impossibile elaborare l\'immagine'); return }
+        ctx.clearRect(0, 0, W, H)
+        const scala = Math.min(W / img.width, H / img.height)
+        const nw = img.width * scala, nh = img.height * scala
+        const ox = (W - nw) / 2, oy = (H - nh) / 2
+        ctx.drawImage(img, ox, oy, nw, nh)
+        canvas.toBlob((blob) => {
+          if (!blob) { setMsg('Errore: elaborazione fallita'); return }
+          const finale = new File([blob], 'logo.png', { type: 'image/png' })
+          setLogoFile(finale)
+          setLogo(canvas.toDataURL('image/png'))
+        }, 'image/png')
+      }
+      img.src = ev.target?.result as string
+    }
     reader.readAsDataURL(file)
   }
 
