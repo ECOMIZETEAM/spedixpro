@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import DateRangePicker from '@/app/components/DateRangePicker'
 
 export default function ElencoDistintePage() {
   const [distinte, setDistinte] = useState<any[]>([])
@@ -94,8 +95,7 @@ export default function ElencoDistintePage() {
         <h1 style={{ fontSize: '20px', fontWeight: '700', color: '#1a1a1a', margin: 0 }}>Lista Distinte</h1>
       </div>
       <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #d1d5db', padding: '14px', marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <div><div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Dalla data</div><input type="date" value={dal} onChange={e => setDal(e.target.value)} style={inp} /></div>
-        <div><div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Alla data</div><input type="date" value={al} onChange={e => setAl(e.target.value)} style={inp} /></div>
+        <div><div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Data</div><DateRangePicker dal={dal} al={al} onChange={(d1,d2)=>{setDal(d1);setAl(d2)}} /></div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
           <button onClick={confermaSelezionate} style={{ padding: '8px 14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }}>Conferma Selezionate</button>
           <div><div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Cerca</div><input value={cerca} onChange={e => setCerca(e.target.value)} placeholder="Numero o cliente..." style={{ ...inp, width: '220px' }} /></div>
