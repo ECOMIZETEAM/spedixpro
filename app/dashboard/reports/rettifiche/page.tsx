@@ -116,10 +116,7 @@ export default function ReportRettifichePage() {
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'12px',marginBottom:'16px'}}>
           <div><label style={lbl}>Cliente</label>
             <select value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={sel}>
-              <option value=
-"
-"
->Seleziona cliente</option>
+              <option value="">Seleziona cliente</option>
               {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
             </select>
           </div>
@@ -128,45 +125,14 @@ export default function ReportRettifichePage() {
           </div>
           <div><label style={lbl}>Vettore</label>
             <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
-              <option value=
-"
-"
->Tutti</option>
-              <option value=
-"
-sda
-"
->SDA</option><option value=
-"
-gls
-"
->GLS</option>
-              <option value=
-"
-brt
-"
->BRT</option><option value=
-"
-poste
-"
->Poste Italiane</option>
+              <option value="">Tutti</option>
+              <option value="sda">SDA</option><option value="gls">GLS</option>
+              <option value="brt">BRT</option><option value="poste">Poste Italiane</option>
             </select>
           </div>
           <div><label style={lbl}>Formato</label>
             <select value={filtri.formato} onChange={e=>setF('formato',e.target.value)} style={sel}>
-              <option value=
-"
-PDF
-"
->PDF</option><option value=
-"
-XLSX
-"
->Excel</option><option value=
-"
-CSV
-"
->CSV</option>
+              <option value="PDF">PDF</option><option value="XLSX">Excel</option><option value="CSV">CSV</option>
             </select>
           </div>
         </div>
