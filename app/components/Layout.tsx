@@ -92,7 +92,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
 
   function toggleMenu(href: string, el?: HTMLElement) {
     const staAprendo = !openMenus[href]
-    setOpenMenus(prev => ({ ...prev, [href]: !prev[href] }))
+    setOpenMenus(prev => ({ [href]: !prev[href] }))
     if (staAprendo && el) {
       setTimeout(() => { el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 80)
     }
