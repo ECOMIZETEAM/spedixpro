@@ -137,6 +137,13 @@ export default function ContrassegniCliente() {
           </div>
           </>
         )}
+        <div style={{padding:'12px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:'12px',color:'#666'}}>
+          <span>Risultati da {(paginaCorr-1)*perPagina+1} a {Math.min(paginaCorr*perPagina, filtrate.length)} di {filtrate.length} elementi</span>
+          <div style={{display:'flex',gap:'6px'}}>
+            <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 12px',border:'1px solid #d1d5db',background:'#fff',borderRadius:'5px',fontSize:'12px',cursor:'pointer',color:'#1a1a1a',opacity:paginaCorr<=1?0.5:1}}>Precedente</button>
+            <button onClick={()=>setPagina(p=>Math.min(totPagine,p+1))} disabled={paginaCorr>=totPagine} style={{padding:'5px 12px',border:'1px solid #d1d5db',background:'#fff',borderRadius:'5px',fontSize:'12px',cursor:'pointer',color:'#1a1a1a',opacity:paginaCorr>=totPagine?0.5:1}}>Successivo</button>
+          </div>
+        </div>
       </div>
     </div>
   )
