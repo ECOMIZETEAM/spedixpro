@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
   for (const v of (voci || [])) {
     await supabase.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
     const { data: sp } = await supabase.from('spedizioni').select('costo_totale,contrassegno,assicurazione').eq('id', v.id).single()
-    const costoReso = Number(sp?.costo_totale || 0) - Number(sp?.contrassegno || 0) - Number(sp?.assicurazione || 0)
+    const costoReso = Math.max(0, Number(sp?.costo_totale || 0) - Number(sp?.contrassegno || 0) - Number(sp?.assicurazione || 0))
     saldoCorrente = saldoCorrente - costoReso
     totaleReso += costoReso
     await supabase.from('movimenti').insert({
