@@ -49,6 +49,8 @@ export default function MovimentiClientePage() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [cerca, setCerca] = useState('')
+  const [perPagina, setPerPagina] = useState(10)
+  const [pagina, setPagina] = useState(1)
 
   useEffect(() => {
     (async () => {
@@ -74,6 +76,9 @@ export default function MovimentiClientePage() {
         m.descrizione?.toLowerCase().includes(cerca.toLowerCase()) ||
         (m.riferimento || '').toLowerCase().includes(cerca.toLowerCase()))
     : movimenti
+  const totPagine = Math.max(1, Math.ceil(visibili.length / perPagina))
+  const paginaCorr = Math.min(pagina, totPagine)
+  const paginate = visibili.slice((paginaCorr-1)*perPagina, paginaCorr*perPagina)
 
   return (
     <div>
@@ -133,7 +138,7 @@ export default function MovimentiClientePage() {
                 </tr>
               </thead>
               <tbody>
-                {visibili.map(m => {
+                {paginate.map(m => {
                   const positivo = Number(m.importo) > 0
                   return (
                     <tr key={m.id}>
