@@ -250,7 +250,7 @@ async function apriTracking(s: any) {
         <div style={{padding:'12px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <div className="gruppo-titolo-selettore">
           <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>📋 Spedizioni <span style={{color:'#1a1a1a',fontWeight:'400',fontSize:'12px'}}>({spedizioniVisibili.length} risultati)</span></span>
-          <span style={{display:'block',marginTop:'6px',fontSize:'12px',fontWeight:'400',color:'#666'}}>
+          <span style={{display:'block',marginTop:'4px',fontSize:'12px',fontWeight:'400',color:'#666'}}>
             Mostra{' '}
             <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}}
               style={{padding:'3px 6px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}}>
