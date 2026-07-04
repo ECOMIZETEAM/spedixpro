@@ -86,7 +86,7 @@ export default function StoriaPage() {
             <div style={{fontSize:'32px',marginBottom:'8px'}}>📋</div>
             Nessun movimento trovato
           </div>
-        ) : (
+        ) : (<>
           <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
             <thead>
               <tr style={{background:'#f9fafb'}}>
@@ -126,7 +126,7 @@ export default function StoriaPage() {
                 </div>
               </div>
             )}
-        )}
+        </>)}
       </div>
     </div>
   )
