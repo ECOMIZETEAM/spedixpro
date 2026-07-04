@@ -124,13 +124,13 @@ export default function ClienteProfiloPage() {
             <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Profilo Azienda</div>
             <div style={{padding:'16px',display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',fontSize:'13px'}}>
               <div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>RAGIONE SOCIALE</div><div style={{fontWeight:'600',color:'#1a1a1a'}}>{cliente.ragione_sociale}</div></div>
-              {cliente.piva&&<div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>P.IVA</div><div>{cliente.piva}</div></div>}
+              {cliente.piva&&<div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>P.IVA</div><div style={{color:'#1a1a1a'}}>{cliente.piva}</div></div>}
               {cliente.cf&&<div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>CODICE FISCALE</div><div>{cliente.cf}</div></div>}
               {cliente.pec&&<div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>PEC</div><div>{cliente.pec}</div></div>}
-              {cliente.rappresentante_legale&&<div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>RAPPRESENTANTE LEGALE</div><div>{cliente.rappresentante_legale}</div></div>}
-              {cliente.telefono&&<div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>TELEFONO</div><div>{cliente.telefono}</div></div>}
+              {cliente.rappresentante_legale&&<div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>RAPPRESENTANTE LEGALE</div><div style={{color:'#1a1a1a'}}>{cliente.rappresentante_legale}</div></div>}
+              {cliente.telefono&&<div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>TELEFONO</div><div style={{color:'#1a1a1a'}}>{cliente.telefono}</div></div>}
               <div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>LISTINO PREZZI</div><div style={{color:cliente.listino_cliente_id?'#f97316':'#bbb',fontWeight:'600'}}>{cliente.listini_clienti?.nome || (cliente.listino_cliente_id?'Assegnato':'— nessun listino —')}</div></div>
-              <div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>TIPO CONTRATTO</div><div>{cliente.tipo_contratto?.replace(/_/g,' ')||'—'}</div></div>
+              <div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>TIPO CONTRATTO</div><div style={{color:'#1a1a1a'}}>{cliente.tipo_contratto?.replace(/_/g,' ')||'—'}</div></div>
             </div>
           </div>
 
