@@ -28,6 +28,7 @@ export default function SpedizioniPage() {
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [spedizioniFiltrate, setSpedizioniFiltrate] = useState<any[]>([])
   const [notifica, setNotifica] = useState<string>('')
+  const [corrieri, setCorrieri] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
@@ -42,6 +43,8 @@ export default function SpedizioniPage() {
   const [filtri, setFiltri] = useState(FILTRI_DEFAULT)
 
   useEffect(() => {
+    fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[]))
+    fetch('/api/corrieri/lista').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d)?d:[]))
     caricaTutte()
   }, [])
 
@@ -58,6 +61,8 @@ export default function SpedizioniPage() {
     let filtered = [...spedizioni]
     if (filtri.clienteId) filtered = filtered.filter(s => s.cliente_id === filtri.clienteId)
     if (filtri.stato) filtered = filtered.filter(s => s.stato === filtri.stato)
+    if (filtri.contratto) filtered = filtered.filter(s => s.corriere_id === filtri.contratto)
+    if (filtri.vettore) filtered = filtered.filter(s => String(s.corrieri?.nome_contratto||'').split(' ')[0] === filtri.vettore)
     if (filtri.numero) filtered = filtered.filter(s => s.numero?.toLowerCase().includes(filtri.numero.toLowerCase()))
     if (filtri.id_ordine) filtered = filtered.filter(s => (s.note||'').toLowerCase().includes(filtri.id_ordine.toLowerCase()))
     if (filtri.dal) filtered = filtered.filter(s => new Date(s.created_at) >= new Date(filtri.dal))
@@ -144,7 +149,7 @@ async function apriTracking(s: any) {
       )}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'16px'}}>
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Lista Spedizioni</h1>
-        <a href="/cliente/spedizioni/nuova" style={{background:'#f97316',color:'#fff',padding:'8px 18px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>+ Nuova Spedizione</a>
+        <a href="/dashboard/spedizioni/nuova" style={{background:'#f97316',color:'#fff',padding:'8px 18px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>+ Nuova Spedizione</a>
       </div>
 
       {/* FILTRI */}
@@ -167,11 +172,13 @@ async function apriTracking(s: any) {
           <div><label style={lbl}>Vettore</label>
             <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
               <option value="">Tutti</option>
+              {Array.from(new Set(corrieri.map((c:any)=>String(c.nome_contratto||'').split(' ')[0]))).filter(Boolean).map((v:any)=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Contratto</label>
             <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={sel}>
               <option value="">Tutti</option>
+              {corrieri.filter((c:any)=>!filtri.vettore || String(c.nome_contratto||'').split(' ')[0]===filtri.vettore).map((c:any)=><option key={c.id} value={c.id}>{c.nome_contratto}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Stato</label>
@@ -248,7 +255,6 @@ async function apriTracking(s: any) {
       {/* TABELLA */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-          <div className="gruppo-titolo-selettore">
           <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>📋 Spedizioni <span style={{color:'#1a1a1a',fontWeight:'400',fontSize:'12px'}}>({spedizioniVisibili.length} risultati)</span></span>
           <span style={{display:'block',marginTop:'6px',fontSize:'12px',fontWeight:'400',color:'#666'}}>
             Mostra{' '}
@@ -259,8 +265,7 @@ async function apriTracking(s: any) {
               <option value={50}>50</option>
               <option value={100}>100</option>
             </select>{' '}elementi
-            </span>
-          </div>
+          </span>
           <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
             <button onClick={stampaSelezionati} disabled={selectedIds.length===0}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#f97316':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
@@ -338,8 +343,7 @@ async function apriTracking(s: any) {
                       <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>—</td>
                       <td style={{padding:'9px 12px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
-                          <a href={`/dashboard/spedizioni/${s.id}/etichetta`} download
-                            style={{padding:'4px 8px',background:'#eff6ff',color:'#1d4ed8',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #bfdbfe'}} title="Etichetta">🖨️</a>
+                          <a href={`/dashboard/spedizioni/${s.id}/etichetta`} style={{padding:'4px 8px',background:'#eff6ff',color:'#1d4ed8',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #bfdbfe'}} title="Etichetta">🖨️</a>
                   
                           <button onClick={()=>elimina(s.id,s.numero)} disabled={eliminando===s.id}
                             style={{padding:'4px 8px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'14px',border:'1px solid #fecaca',cursor:'pointer',opacity:eliminando===s.id?0.5:1}} title="Elimina">🗑️</button>
