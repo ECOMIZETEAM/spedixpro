@@ -186,10 +186,7 @@ export default function ModificaClientePage() {
           <div style={sec}>
             <div style={sech}>Email Login Cliente</div>
             <div style={{padding:'16px',display:'flex',flexDirection:'column',gap:'12px'}}>
-              <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'6px',padding:'10px 12px',fontSize:'12px',color:'#1d4ed8',lineHeight:1.5}}>
-                L&apos;email di accesso non è modificabile da qui. Per cambiare la password usa la sezione Sicurezza qui sotto.
-              </div>
-              <div><label style={lbl}>Email</label><input value={form.email||''} disabled style={{...inp,background:'#f5f5f5',color:'#666'}}/></div>
+              <div><label style={lbl}>Email</label><input value={form.email||''} onChange={e=>set('email',e.target.value)} placeholder="email@esempio.it" style={{...inp,color:'#1a1a1a'}}/></div>
             </div>
           </div>
 
