@@ -131,7 +131,7 @@ export default function DateRangePicker({ dal, al, onChange }: Props) {
         <span>📅</span><span style={{ color:'#1a1a1a' }}>{labelText}</span><span style={{ color:'#1a1a1a' }}>▾</span>
       </div>
       {open && (
-        <div style={{ position:'absolute', top:'40px', left:0, zIndex:1000, background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px', boxShadow:'0 8px 24px rgba(0,0,0,0.15)', display:'flex' }}>
+        <div style={{ position:'absolute', top:'40px', right:0, zIndex:1000, background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px', boxShadow:'0 8px 24px rgba(0,0,0,0.15)', display:'flex' }}>
           <div style={{ display:'flex' }}>
             {calendario(meseSx, setMeseSx, true)}
             {calendario(meseDx, setMeseDx, false)}
