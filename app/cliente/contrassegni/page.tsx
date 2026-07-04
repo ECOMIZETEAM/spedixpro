@@ -82,7 +82,7 @@ export default function ContrassegniCliente() {
       <div style={{marginBottom:'16px'}}>
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Contrassegni</h1>
       </div>
-      <div style={card}>
+      <div style={{...card, overflow:'visible'}}>
         <div style={{padding:'12px 18px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Filtri</div>
         <div style={{padding:'16px',display:'flex',gap:'16px',alignItems:'end',flexWrap:'wrap'}}>
           <div>
