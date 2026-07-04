@@ -40,14 +40,28 @@ export async function POST(req: NextRequest) {
 
   let corriereRecord: any = null
 
-  // *** FIX: usa il corriere_id passato dal frontend (tariffa selezionata) ***
+  // Il corriere puo' appartenere a un master ANTENATO nella catena (contratti condivisi a discesa).
+  // RLS: lettura via admin; autorizzazione = check catena qui sotto.
+  const { createAdminSupabase } = await import('@/lib/supabase-admin')
+  const adminCrea = createAdminSupabase()
   if (body._corriere_id) {
-    const { data: c } = await supabase
+    const { data: c } = await adminCrea
       .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id,settings,multicollo')
       .eq('id', body._corriere_id)
-      .eq('master_id', masterId)
       .single()
-    corriereRecord = c
+    if (c) {
+      let cur: string | null = masterId
+      let legittimo = false
+      for (let i = 0; i < 20 && cur; i++) {
+        if (cur === c.master_id) { legittimo = true; break }
+        const { data: mm } = await adminCrea.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+        cur = mm?.parent_master_id || null
+      }
+      if (legittimo) corriereRecord = c
+    }
+    if (!corriereRecord) {
+      return NextResponse.json({ error: 'Corriere selezionato non disponibile per questo master.' }, { status: 400 })
+    }
   }
 
   // Fallback: primo corriere del listino (compatibilità)
