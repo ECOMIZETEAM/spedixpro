@@ -113,7 +113,7 @@ export default function ClientiPage() {
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
               <thead>
                 <tr style={{background:'#fafafa'}}>
-                  {['Nr.#','Società','Tipo Contratto','Listino','Credito','Stato','Azioni'].map(h=>(
+                  {['Nr.#','Società','Tipo Contratto','Listino','Credito','Contratti attivi','Stato','Azioni'].map(h=>(
                     <th key={h} style={{textAlign:'left',padding:'9px 14px',fontSize:'11px',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.5px',color:'#1a1a1a',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap'}}>{h}</th>
                   ))}
                 </tr>
@@ -134,6 +134,13 @@ export default function ClientiPage() {
                         : (c.listino_cliente_id ? <span style={{color:'#f97316',fontWeight:'600'}}>Assegnato</span> : <span style={{color:'#1a1a1a'}}>—</span>)}
                     </td>
                     <td style={{padding:'10px 14px',color:'#1a1a1a',fontSize:'12px',fontWeight:'600',whiteSpace:'nowrap'}}>€ {Number(c.credito||0).toFixed(2)}</td>
+                    <td style={{padding:'10px 14px',fontSize:'12px'}}>
+                      {(c.contratti_attivi && c.contratti_attivi.length)
+                        ? c.contratti_attivi.map((ct:any, i:number)=>(
+                            <div key={i} style={{marginBottom:'2px',color:'#1a1a1a'}}><span style={{fontWeight:'700'}}>{ct.tipo}</span> {ct.nome_contratto}</div>
+                          ))
+                        : <span style={{color:'#1a1a1a'}}>-</span>}
+                    </td>
                     <td style={{padding:'10px 14px'}}>
                       <span style={{background:c.attivo?'#f0fdf4':'#fef2f2',color:c.attivo?'#16a34a':'#dc2626',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'500'}}>
                         {c.attivo?'Attivo':'Inattivo'}
