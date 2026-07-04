@@ -25,7 +25,27 @@ export async function GET(req: NextRequest) {
     cur = mm?.parent_master_id || null
   }
   if (idx === -1) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
+
+  // target per la distinta: null se cliente diretto (idx 0), altrimenti il primo master sotto chi cerca
+  let targetMasterId: string | null = null
+  let targetMasterNome: string | null = null
+  if (idx > 0) {
+    // ricostruisco il percorso per prendere il livello idx-1
+    const percorso: string[] = []
+    let c2: string | null = spedizione.master_id
+    for (let i = 0; i < 20 && c2; i++) {
+      percorso.push(c2)
+      const { data: mm } = await adminDb.from('masters').select('parent_master_id').eq('id', c2).maybeSingle()
+      c2 = mm?.parent_master_id || null
+    }
+    const pos = percorso.indexOf(utente!.master_id)
+    if (pos > 0) {
+      targetMasterId = percorso[pos - 1]
+      const { data: tm } = await adminDb.from('masters').select('nome').eq('id', targetMasterId).maybeSingle()
+      targetMasterNome = tm?.nome || null
+    }
+  }
+  return NextResponse.json({ ...spedizione, target_master_id: targetMasterId, target_master_nome: targetMasterNome })
   // anti-duplicato: se gia in reso, non riprenderla
   if (spedizione.stato === 'reso_mittente') return NextResponse.json({ error: 'Spedizione gia messa in reso e addebitata' }, { status: 400 })
-  return NextResponse.json(spedizione)
 }

@@ -25,6 +25,11 @@ export default function ScansionaResiPage() {
     if (data.error) { setErrore(data.error); return }
     const giaIn = distinta.find(d => d.id === data.id)
     if (giaIn) { setErrore('Spedizione gia aggiunta alla distinta'); return }
+    if (distinta.length > 0) {
+      const g0 = distinta[0].target_master_id || distinta[0].cliente_id
+      const gN = data.target_master_id || data.cliente_id
+      if (g0 !== gN) { setErrore('Questa LDV appartiene a un altro cliente/master: chiudi prima la distinta corrente'); return }
+    }
     // aggiungo automaticamente alla distinta
     setDistinta(prev => [...prev, { ...data, data_scansione: new Date().toISOString() }])
     setSpedizioneFound(null)
@@ -44,13 +49,15 @@ export default function ScansionaResiPage() {
     if (!distinta.length) { setErrore('Aggiungi almeno una spedizione'); return }
     setSaving(true); setErrore('')
     const totale = distinta.reduce((acc, s) => acc + parseFloat(s.costo_totale || 0), 0)
-    const clienteId = distinta[0]?.cliente_id
+    const targetMasterId = distinta[0]?.target_master_id || null
+    const clienteId = targetMasterId ? null : distinta[0]?.cliente_id
     const res = await fetch('/api/resi/distinte', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         spedizioniIds: distinta.map(s => s.id),
         clienteId,
+        targetMasterId,
         totale,
         voci: distinta.map(s => ({
           id: s.id, numero: s.numero, mitt_nome: s.mitt_nome,
