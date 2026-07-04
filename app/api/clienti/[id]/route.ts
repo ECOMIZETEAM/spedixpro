@@ -13,7 +13,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .eq('id', id)
     .eq('master_id', utente?.master_id)
     .single()
-  if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 404 })
+  if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' },{ status: 404 })
   return NextResponse.json(cliente)
 }
 
@@ -25,11 +25,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
   const body = await req.json()
   const { resetPassword, email_conferma, ...datiCliente } = body
-  const { data: clienteOld } = await supabase.from('clienti').select('email').eq('id', id).eq('master_id', utente?.master_id).single()
-  const emailVecchia = clienteOld?.email || null
   const aggiornamento: any = {
     ragione_sociale: datiCliente.ragione_sociale,
-    email: datiCliente.email||null,
     piva: datiCliente.piva||null, cf: datiCliente.cf||null,
     pec: datiCliente.pec||null, cod_sdi: datiCliente.cod_sdi||null,
     rappresentante_legale: datiCliente.rappresentante_legale||null,
@@ -59,22 +56,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     gestione_logistica: datiCliente.gestione_logistica??false,
     updated_at: new Date().toISOString(),
   }
-  if (datiCliente.impostazioni !== undefined) aggiornamento.impostazioni = datiCliente.impostazioni
+  if (datiCliente.impostazioni !== undefined) aggiornamento.impostazioni =datiCliente.impostazioni
   const { data: cliente, error } = await supabase.from('clienti').update(aggiornamento)
     .eq('id', id).eq('master_id', utente?.master_id).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  // Aggiorna email in Auth se cambiata (nessuna email inviata al cliente)
-  if (cliente?.email && emailVecchia && cliente.email !== emailVecchia) {
-    try {
-      const { createAdminSupabase } = await import('@/lib/supabase-admin')
-      const adminAuth = createAdminSupabase()
-      const { data: authList } = await adminAuth.auth.admin.listUsers()
-      const authUser = authList?.users?.find((u: any) => u.email === emailVecchia)
-      if (authUser) {
-        await adminAuth.auth.admin.updateUserById(authUser.id, { email: cliente.email, email_confirm: true })
-      }
-    } catch(e) { console.error('Aggiorna email Auth error:', e) }
-  }
   if (resetPassword && cliente?.email) {
     try {
       const { createAdminSupabase } = await import('@/lib/supabase-admin')
@@ -86,7 +71,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (userToReset) {
         await adminClient.auth.admin.updateUserById(userToReset.id, { password: newPassword })
         const { inviaCredenzialiCliente } = await import('@/lib/email')
-        await inviaCredenzialiCliente({ email: cliente.email, nomeCliente: cliente.ragione_sociale, masterNome: 'SpedixPro', dominio: 'spedixpro.vercel.app', password: newPassword })
+        await inviaCredenzialiCliente({ email: cliente.email, nomeCliente:cliente.ragione_sociale, masterNome: 'SpedixPro', dominio: 'spedixpro.vercel.app', password: newPassword })
       }
     } catch(e) { console.error('Reset password error:', e) }
   }
