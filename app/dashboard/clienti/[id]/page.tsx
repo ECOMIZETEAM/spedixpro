@@ -151,7 +151,7 @@ export default function ClienteProfiloPage() {
           <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
             <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Movimenti</div>
             <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',gap:'8px',padding:'10px 16px',borderBottom:'1px solid #f0f0f0'}}>
-              <span style={{fontSize:'12.5px',color:'#666'}}>Cerca:</span>
+              <span style={{fontSize:'12.5px',color:'#1a1a1a'}}>Cerca:</span>
               <input value={cercaMov} onChange={e=>{setCercaMov(e.target.value);setPaginaMov(1)}} placeholder="Movimento o riferimento…" style={{padding:'7px 10px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',width:'240px',color:'#1a1a1a',background:'#fff'}}/>
             </div>
             {!movimenti.length ? (
@@ -164,10 +164,10 @@ export default function ClienteProfiloPage() {
                 <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
                   <thead>
                     <tr style={{background:'#fafafa'}}>
-                      <th style={{textAlign:'left',padding:'9px 16px',fontSize:'11px',fontWeight:'700',color:'#888',textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1px solid #f0f0f0'}}>Data e ora</th>
-                      <th style={{textAlign:'left',padding:'9px 16px',fontSize:'11px',fontWeight:'700',color:'#888',textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1px solid #f0f0f0'}}>Movimento</th>
-                      <th style={{textAlign:'right',padding:'9px 16px',fontSize:'11px',fontWeight:'700',color:'#888',textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1px solid #f0f0f0'}}>Importo</th>
-                      <th style={{textAlign:'right',padding:'9px 16px',fontSize:'11px',fontWeight:'700',color:'#888',textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1px solid #f0f0f0'}}>Saldo</th>
+                      <th style={{textAlign:'left',padding:'9px 16px',fontSize:'11px',fontWeight:'700',color:'#1a1a1a',textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1px solid #f0f0f0'}}>Data e ora</th>
+                      <th style={{textAlign:'left',padding:'9px 16px',fontSize:'11px',fontWeight:'700',color:'#1a1a1a',textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1px solid #f0f0f0'}}>Movimento</th>
+                      <th style={{textAlign:'right',padding:'9px 16px',fontSize:'11px',fontWeight:'700',color:'#1a1a1a',textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1px solid #f0f0f0'}}>Importo</th>
+                      <th style={{textAlign:'right',padding:'9px 16px',fontSize:'11px',fontWeight:'700',color:'#1a1a1a',textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1px solid #f0f0f0'}}>Saldo</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -175,7 +175,7 @@ export default function ClienteProfiloPage() {
                       const positivo = Number(m.importo) > 0
                       return (
                         <tr key={m.id}>
-                          <td style={{padding:'10px 16px',color:'#666',fontSize:'12px',borderBottom:'1px solid #f5f5f5',whiteSpace:'nowrap'}}>{fmtData(m.created_at)}</td>
+                          <td style={{padding:'10px 16px',color:'#1a1a1a',fontSize:'12px',borderBottom:'1px solid #f5f5f5',whiteSpace:'nowrap'}}>{fmtData(m.created_at)}</td>
                           <td style={{padding:'10px 16px',color:'#1a1a1a',borderBottom:'1px solid #f5f5f5'}}>{m.descrizione}</td>
                           <td style={{padding:'10px 16px',textAlign:'right',fontWeight:'600',borderBottom:'1px solid #f5f5f5',color:positivo?'#15803d':'#b91c1c',whiteSpace:'nowrap'}}>{fmtImporto(Number(m.importo))}</td>
                           <td style={{padding:'10px 16px',textAlign:'right',color:'#1a1a1a',borderBottom:'1px solid #f5f5f5',whiteSpace:'nowrap'}}>{fmtEuro(Number(m.saldo_dopo))}</td>
@@ -245,21 +245,21 @@ export default function ClienteProfiloPage() {
                 <div style={{position:'relative'}}>
                   <input value={importo} onChange={e=>setImporto(e.target.value)} placeholder="0.00" inputMode="decimal"
                     style={{width:'100%',padding:'9px 34px 9px 12px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'14px',textAlign:'right',boxSizing:'border-box',color:'#1a1a1a',background:'#fff'}}/>
-                  <span style={{position:'absolute',right:'12px',top:'50%',transform:'translateY(-50%)',color:'#888',fontSize:'14px'}}>€</span>
+                  <span style={{position:'absolute',right:'12px',top:'50%',transform:'translateY(-50%)',color:'#1a1a1a',fontSize:'14px'}}>€</span>
                 </div>
 
                 <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a',textAlign:'right'}}>Conferma l'importo</label>
                 <div style={{position:'relative'}}>
                   <input value={conferma} onChange={e=>setConferma(e.target.value)} placeholder="0.00" inputMode="decimal"
                     style={{width:'100%',padding:'9px 34px 9px 12px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'14px',textAlign:'right',boxSizing:'border-box',color:'#1a1a1a',background:'#fff'}}/>
-                  <span style={{position:'absolute',right:'12px',top:'50%',transform:'translateY(-50%)',color:'#888',fontSize:'14px'}}>€</span>
+                  <span style={{position:'absolute',right:'12px',top:'50%',transform:'translateY(-50%)',color:'#1a1a1a',fontSize:'14px'}}>€</span>
                 </div>
 
                 <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a',textAlign:'right'}}>Descrizione</label>
                 <input value={descrizione} onChange={e=>setDescrizione(e.target.value)}
                   style={{width:'100%',padding:'9px 12px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'14px',boxSizing:'border-box',color:'#1a1a1a',background:'#fff'}}/>
               </div>
-              <div style={{marginTop:'8px',fontSize:'11px',color:'#999'}}>Suggerimento: scrivi <strong>200</strong> per accreditare, <strong>-200</strong> per addebitare/togliere credito.</div>
+              <div style={{marginTop:'8px',fontSize:'11px',color:'#1a1a1a'}}>Suggerimento: scrivi <strong>200</strong> per accreditare, <strong>-200</strong> per addebitare/togliere credito.</div>
             </div>
             <div style={{padding:'14px 20px',borderTop:'1px solid #eee',display:'flex',justifyContent:'flex-end',gap:'10px'}}>
               <button onClick={()=>setShowRicarica(false)} disabled={saving} style={{padding:'8px 16px',background:'#f2f2f2',color:'#1a1a1a',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'600',cursor:'pointer'}}>Annulla</button>
