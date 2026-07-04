@@ -46,6 +46,14 @@ export async function GET(req: NextRequest) {
     }
   }
   return NextResponse.json({ ...spedizione, target_master_id: targetMasterId, target_master_nome: targetMasterNome })
-  // anti-duplicato: se gia in reso, non riprenderla
-  if (spedizione.stato === 'reso_mittente') return NextResponse.json({ error: 'Spedizione gia messa in reso e addebitata' }, { status: 400 })
+  // anti-duplicato PER LIVELLO: blocco solo se GIA' in una distinta reso del MIO master
+  // (la stessa LDV puo' legittimamente stare in una distinta di M1 verso M2 e in una di M2 verso il suo cliente)
+  const { data: giaMia } = await adminDb.from('distinte_resi')
+    .select('id')
+    .eq('master_id', utente!.master_id)
+    .contains('voci', JSON.stringify([{ id: spedizione.id }]))
+    .limit(1)
+  if (giaMia && giaMia.length > 0) {
+    return NextResponse.json({ error: 'Spedizione gia messa in reso e addebitata' }, { status: 400 })
+  }
 }
