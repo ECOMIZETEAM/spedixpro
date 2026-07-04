@@ -106,7 +106,7 @@ export default function ClienteNav() {
     NAV.forEach(i => { if (sectionActive(i)) init[i.id] = true })
     return init
   })
-  const toggle = (id: string) => setOpen(prev => ({ ...prev, [id]: !prev[id] }))
+  const toggle = (id: string) => setOpen(prev => ({ [id]: !prev[id] }))
 
   return (
     <nav style={{ flex: 1, padding: '6px 0' }}>
