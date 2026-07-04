@@ -13,8 +13,6 @@ export default function ElencoRitiriPage() {
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
-  const [perPage, setPerPage] = useState(10)
-  const [pagina, setPagina] = useState(1)
   const [filtri, setFiltri] = useState({
     clienteId: '', vettore: '', codRitiro: '',
     dal: '', al: '',
@@ -52,10 +50,6 @@ export default function ElencoRitiriPage() {
         r.mitt_nome?.toLowerCase().includes(cerca.toLowerCase()))
     : ritiri
 
-  const totalePagine = Math.max(1, Math.ceil(filtrati.length / perPage))
-  const paginaCorr = Math.min(pagina, totalePagine)
-  const ritiriPaginate = filtrati.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
-
   const STATO_LABELS: Record<string, { label: string; bg: string; color: string }> = {
     richiesto: { label: 'Richiesto', bg: '#fff7ed', color: '#f97316' },
     confermato: { label: 'Confermato', bg: '#eff6ff', color: '#2563eb' },
@@ -69,29 +63,19 @@ export default function ElencoRitiriPage() {
         <div>
           <h1 style={{ fontSize: '20px', fontWeight: '700', color: '#1a1a1a', margin: 0 }}>Elenco Ritiri</h1>
           <p style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>{filtrati.length} ritiri</p>
-          <span style={{display:'block',marginTop:'4px',fontSize:'12px',fontWeight:'400',color:'#666'}}>
-            Mostra{' '}
-            <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}}
-              style={{padding:'3px 6px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}}>
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-            </select>{' '}elementi
-          </span>
         </div>
         <a href="/dashboard/ritiri/nuovo" style={{ background: '#f97316', color: '#fff', padding: '8px 18px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', textDecoration: 'none' }}>+ Nuovo Ritiro</a>
       </div>
 
       {success && (
         <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '10px 14px', marginBottom: '16px', fontSize: '13px', color: '#15803d' }}>
-          {'\u2713'} Ritiro richiesto con successo! ID Pickup: <strong>{success}</strong>
+          ✓ Ritiro richiesto con successo! ID Pickup: <strong>{success}</strong>
         </div>
       )}
 
       {/* Filtri */}
       <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #d1d5db', padding: '14px 16px', marginBottom: '16px' }}>
-        <div style={{ fontSize: '12px', fontWeight: '700', color: '#1a1a1a', marginBottom: '10px' }}>{'\u25BC'} Filtri</div>
+        <div style={{ fontSize: '12px', fontWeight: '700', color: '#1a1a1a', marginBottom: '10px' }}>▼ Filtri</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr auto', gap: '12px', alignItems: 'end' }}>
           <div>
             <div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Cliente</div>
@@ -132,7 +116,7 @@ export default function ElencoRitiriPage() {
         <div style={{ padding: '8px 16px', borderBottom: '1px solid #e8e8e8', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ fontSize: '12px', color: '#1a1a1a' }}>Cerca:</span>
-            <input value={cerca} onChange={e => {setCerca(e.target.value);setPagina(1)}}
+            <input value={cerca} onChange={e => setCerca(e.target.value)}
               style={{ padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px', width: '180px', color: '#1a1a1a' }} placeholder="CP, mittente..." />
           </div>
         </div>
@@ -140,7 +124,7 @@ export default function ElencoRitiriPage() {
           <div style={{ padding: '60px', textAlign: 'center', color: '#1a1a1a' }}>Caricamento...</div>
         ) : !filtrati.length ? (
           <div style={{ padding: '60px', textAlign: 'center', color: '#1a1a1a' }}>
-            <div style={{ fontSize: '40px', marginBottom: '12px' }}>{'\uD83D\uDCE6'}</div>
+            <div style={{ fontSize: '40px', marginBottom: '12px' }}>📦</div>
             <div style={{ fontSize: '14px', fontWeight: '500' }}>Nessun ritiro trovato</div>
             <a href="/dashboard/ritiri/nuovo" style={{ display: 'inline-block', marginTop: '12px', background: '#f97316', color: '#fff', padding: '8px 18px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', textDecoration: 'none' }}>Crea il primo</a>
           </div>
@@ -155,16 +139,16 @@ export default function ElencoRitiriPage() {
                 </tr>
               </thead>
               <tbody>
-                {ritiriPaginate.map(r => {
+                {filtrati.map(r => {
                   const st = STATO_LABELS[r.stato] || { label: r.stato, bg: '#f3f4f6', color: '#6b7280' }
                   return (
                     <tr key={r.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                      <td style={{ padding: '10px 14px', fontWeight: '600', color: '#1a1a1a' }}>{r.cod_ritiro || r.tracking_ritiro || '-'}</td>
-                      <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>{r.clienti?.ragione_sociale || '-'}</td>
+                      <td style={{ padding: '10px 14px', fontWeight: '600', color: '#1a1a1a' }}>{r.cod_ritiro || r.tracking_ritiro || '—'}</td>
+                      <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>{r.clienti?.ragione_sociale || '—'}</td>
                       <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>{r.mitt_nome}</td>
                       <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>{r.colli}</td>
                       <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>{r.peso} kg</td>
-                      <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>{r.data_ritiro ? new Date(r.data_ritiro).toLocaleDateString('it-IT') : '-'}</td>
+                      <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>{r.data_ritiro ? new Date(r.data_ritiro).toLocaleDateString('it-IT') : '—'}</td>
                       <td style={{ padding: '10px 14px' }}>
                         <span style={{ background: st.bg, color: st.color, padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: '600' }}>{st.label}</span>
                       </td>
@@ -174,21 +158,6 @@ export default function ElencoRitiriPage() {
                 })}
               </tbody>
             </table>
-            {totalePagine > 1 && (
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap',gap:'8px'}}>
-                <span style={{fontSize:'12px',color:'#666'}}>{(paginaCorr - 1) * perPage + 1}-{Math.min(paginaCorr * perPage, filtrati.length)} di {filtrati.length}</span>
-                <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
-                  <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr<=1?'default':'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
-                  {Array.from({length: totalePagine}, (_,i)=>i+1).filter(n => n===1 || n===totalePagine || Math.abs(n-paginaCorr)<=2).map((n,idx,arr)=>(
-                    <span key={n} style={{display:'flex',alignItems:'center'}}>
-                      {idx>0 && arr[idx-1] !== n-1 && <span style={{padding:'0 4px',color:'#bbb',fontSize:'12px'}}>{'\u2026'}</span>}
-                      <button onClick={()=>setPagina(n)} style={{minWidth:'30px',padding:'5px 8px',border:'1px solid',borderColor:n===paginaCorr?'#f97316':'#d1d5db',borderRadius:'5px',background:n===paginaCorr?'#f97316':'#fff',color:n===paginaCorr?'#fff':'#1a1a1a',fontSize:'12px',fontWeight:n===paginaCorr?'700':'400',cursor:'pointer'}}>{n}</button>
-                    </span>
-                  ))}
-                  <button onClick={()=>setPagina(p=>Math.min(totalePagine,p+1))} disabled={paginaCorr>=totalePagine} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr>=totalePagine?'default':'pointer',color:paginaCorr>=totalePagine?'#ccc':'#1a1a1a'}}>Successivo</button>
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
