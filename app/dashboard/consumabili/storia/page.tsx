@@ -1,5 +1,6 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
+import DateRangePicker from '@/app/components/DateRangePicker'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'auto'}
@@ -51,11 +52,7 @@ export default function StoriaPage() {
           </div>
           <div>
             <label style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Periodo</label>
-            <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
-              <input type="date" value={dal} onChange={e=>setDal(e.target.value)} style={inp}/>
-              <span style={{color:'#1a1a1a'}}>—</span>
-              <input type="date" value={al} onChange={e=>setAl(e.target.value)} style={inp}/>
-            </div>
+            <DateRangePicker dal={dal} al={al} onChange={(d1,d2)=>{setDal(d1);setAl(d2)}} />
           </div>
         </div>
       </div>
