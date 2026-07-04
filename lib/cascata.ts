@@ -1,5 +1,6 @@
 import { calcolaPrezzoListino } from '@/lib/pricing'
 import { registraMovimentoMaster } from '@/lib/movimenti'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 
 export type LivelloCatena = {
   masterId: string
@@ -22,13 +23,17 @@ async function costruisciCatena(
 ): Promise<{ catena: LivelloCatena[]; errore?: string }> {
   const catena: LivelloCatena[] = []
   let currentId: string | null = params.masterDirettoId
+  // RLS: la catena e' cross-tenant per natura -> client admin (auth verificata a monte)
+  const adminDb = createAdminSupabase()
 
   for (let i = 0; i < 20 && currentId; i++) {
-    const { data: m } = await supabase
+    const { data: m } = await adminDb
       .from('masters')
       .select('id,nome,tipo_contratto,credito,parent_master_id,parent_listino_id')
       .eq('id', currentId).single()
-    if (!m) break
+    if (!m) {
+      return { catena, errore: 'Catena master non leggibile: impossibile verificare i livelli.' }
+    }
 
     const isProprietario = m.id === params.corriereOwnerId
     let prezzo = 0
@@ -39,7 +44,7 @@ async function costruisciCatena(
       if (!m.parent_listino_id) {
         return { catena, errore: `Il master "${m.nome}" non ha un listino assegnato dal livello superiore.` }
       }
-      const ris = await calcolaPrezzoListino(supabase, {
+      const ris = await calcolaPrezzoListino(adminDb, {
         listinoId: m.parent_listino_id,
         provincia: params.provincia,
         packages: params.packages,
@@ -103,6 +108,7 @@ export async function addebitaCatena(
     createdBy: string | null
   }
 ): Promise<void> {
+  const adminMov = createAdminSupabase()
   const { catena } = await costruisciCatena(supabase, {
     masterDirettoId: params.masterDirettoId,
     corriereOwnerId: params.corriereOwnerId,
@@ -114,7 +120,7 @@ export async function addebitaCatena(
   for (const liv of catena) {
     if (!(liv.prezzo > 0)) continue
     try {
-      await registraMovimentoMaster(supabase, {
+      await registraMovimentoMaster(adminMov, {
         masterOwnerId: liv.masterId,
         masterTargetId: liv.masterId,
         tipo: 'spedizione',
@@ -144,6 +150,7 @@ export async function rimborsaCatena(
     createdBy: string | null
   }
 ): Promise<void> {
+  const adminMov = createAdminSupabase()
   const { catena } = await costruisciCatena(supabase, {
     masterDirettoId: params.masterDirettoId,
     corriereOwnerId: params.corriereOwnerId,
@@ -155,7 +162,7 @@ export async function rimborsaCatena(
   for (const liv of catena) {
     if (!(liv.prezzo > 0)) continue
     try {
-      await registraMovimentoMaster(supabase, {
+      await registraMovimentoMaster(adminMov, {
         masterOwnerId: liv.masterId,
         masterTargetId: liv.masterId,
         tipo: 'rimborso',

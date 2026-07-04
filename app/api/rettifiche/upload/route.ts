@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { zonaDaProvincia, calcolaPrezzoListino } from '@/lib/pricing'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 
 function trovaFasciaLocale(fasce: any[], peso: number) {
   const finoA = fasce.filter(f => f.tipo !== 'oltre').sort((a,b)=>parseFloat(a.peso_max)-parseFloat(b.peso_max))
@@ -9,12 +10,12 @@ function trovaFasciaLocale(fasce: any[], peso: number) {
 }
 
 // Risale la catena dei master: [masterId, padre, nonno, ...]
-async function risaliCatena(supabase: any, masterId: string): Promise<string[]> {
+async function risaliCatena(adminDb: any, masterId: string): Promise<string[]> {
   const path: string[] = []
   let cur: string | null = masterId
   for (let i = 0; i < 20 && cur; i++) {
     path.push(cur)
-    const { data: m } = await supabase.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+    const { data: m } = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
     cur = m?.parent_master_id || null
   }
   return path
@@ -29,6 +30,8 @@ export async function POST(req: NextRequest) {
   if (!myMaster) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
   const body = await req.json()
   const { nomeFile, righe } = body
+  // RLS: match LDV su tutta la catena (discendenti) -> admin; l'autorizzazione e' il check catena stesso
+  const adminDb = createAdminSupabase()
 
   // ── Dedup del file per LDV: doppioni identici → uno; pesi diversi → anomalia ──
   const perLdv = new Map<string, number[]>()
@@ -58,14 +61,14 @@ export async function POST(req: NextRequest) {
   for (const { ldv, pesoReale } of daProcessare) {
     nProcessate++
     // Ricerca SENZA filtro master: decide la catena (solo discesa)
-    const { data: spedizione } = await supabase.from('spedizioni')
+    const { data: spedizione } = await adminDb.from('spedizioni')
       .select('id,cliente_id,master_id,peso_reale,peso_fatturato,peso_volume,costo_totale,costo_spedizione,numero,dest_provincia,corriere_id')
       .or(`numero.ilike.%${ldv}%,tracking_number.ilike.%${ldv}%`)
       .limit(1).single()
     if (!spedizione) { nScartati++; continue }
 
     // Chi carica deve essere il master della spedizione o un suo ANTENATO
-    const catena = await risaliCatena(supabase, spedizione.master_id)
+    const catena = await risaliCatena(adminDb, spedizione.master_id)
     const idx = catena.indexOf(myMaster)
     if (idx === -1) { nScartati++; continue }
 
@@ -106,14 +109,14 @@ export async function POST(req: NextRequest) {
     } else {
       // ── CATENA: la rettifica si ferma al primo master sotto di me ──
       const targetMasterId = catena[idx - 1]
-      const { data: tm } = await supabase.from('masters').select('parent_listino_id').eq('id', targetMasterId).maybeSingle()
+      const { data: tm } = await adminDb.from('masters').select('parent_listino_id').eq('id', targetMasterId).maybeSingle()
       if (!tm?.parent_listino_id) { nScartati++; continue }
       const pesoRicalcolo = pesoReale || pesoIniziale
-      const prezzoIni = await calcolaPrezzoListino(supabase, {
+      const prezzoIni = await calcolaPrezzoListino(adminDb, {
         listinoId: tm.parent_listino_id, provincia: spedizione.dest_provincia || '',
         packages: [{ weight: pesoIniziale || 1 }], corriereId: spedizione.corriere_id,
       })
-      const prezzoFin = await calcolaPrezzoListino(supabase, {
+      const prezzoFin = await calcolaPrezzoListino(adminDb, {
         listinoId: tm.parent_listino_id, provincia: spedizione.dest_provincia || '',
         packages: [{ weight: pesoRicalcolo }], corriereId: spedizione.corriere_id,
       })
