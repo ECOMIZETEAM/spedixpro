@@ -169,7 +169,6 @@ export default function ReportGiacenzePage() {
             ))}
           </tbody>
         </table>
-        <div style={{background:'red',color:'#fff',padding:'8px',fontWeight:'700',textAlign:'right'}}>QUI VA LA NUMERAZIONE - pagine: {totalePagine} - reports: {reports.length}</div>
         <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',gap:'6px',padding:'12px'}}>
           <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
           {Array.from({length: totalePagine}, (_,i)=>i+1).filter(n => n===1 || n===totalePagine || Math.abs(n-paginaCorr)<=2).map((n)=>(
