@@ -80,10 +80,17 @@ export default function SpedizioniCancellateClientePage() {
               </tbody>
             </table>
           </div>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',gap:'6px',padding:'12px 16px',borderTop:'1px solid #f0f0f0'}}>
-            <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'6px 12px',border:'1px solid #d1d5db',background:'#fff',borderRadius:'5px',fontSize:'12px',cursor:'pointer',color:'#1a1a1a',opacity:paginaCorr<=1?0.5:1}}>Precedente</button>
-            <span style={{fontSize:'12px',color:'#666'}}>Pagina {paginaCorr} di {totalePagine}</span>
-            <button onClick={()=>setPagina(p=>Math.min(totalePagine,p+1))} disabled={paginaCorr>=totalePagine} style={{padding:'6px 12px',border:'1px solid #d1d5db',background:'#fff',borderRadius:'5px',fontSize:'12px',cursor:'pointer',color:'#1a1a1a',opacity:paginaCorr>=totalePagine?0.5:1}}>Successivo</button>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',gap:'4px',padding:'12px 16px',borderTop:'1px solid #f0f0f0'}}>
+            <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr<=1?'default':'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
+            {Array.from({length: totalePagine}, (_,i)=>i+1)
+              .filter(n => n===1 || n===totalePagine || Math.abs(n-paginaCorr)<=2)
+              .map((n,idx,arr)=>(
+                <span key={n} style={{display:'flex',alignItems:'center'}}>
+                  {idx>0 && arr[idx-1] !== n-1 && <span style={{padding:'0 4px',color:'#bbb',fontSize:'12px'}}>…</span>}
+                  <button onClick={()=>setPagina(n)} style={{minWidth:'30px',padding:'5px 8px',border:'1px solid',borderColor:n===paginaCorr?'#f97316':'#d1d5db',borderRadius:'5px',background:n===paginaCorr?'#f97316':'#fff',color:n===paginaCorr?'#fff':'#1a1a1a',fontSize:'12px',fontWeight:n===paginaCorr?'700':'400',cursor:'pointer'}}>{n}</button>
+                </span>
+              ))}
+            <button onClick={()=>setPagina(p=>Math.min(totalePagine,p+1))} disabled={paginaCorr>=totalePagine} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr>=totalePagine?'default':'pointer',color:paginaCorr>=totalePagine?'#ccc':'#1a1a1a'}}>Successivo</button>
           </div>
           </div>
         )}
