@@ -9,6 +9,8 @@ const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'
 export default function ReportGiacenzePage() {
   const [clienti, setClienti] = useState<any[]>([])
   const [reports, setReports] = useState<any[]>([])
+  const [perPage, setPerPage] = useState(10)
+  const [pagina, setPagina] = useState(1)
   const [generating, setGenerating] = useState(false)
   const [filtri, setFiltri] = useState({
     dal: new Date().toISOString().split('T')[0],
@@ -80,9 +82,12 @@ export default function ReportGiacenzePage() {
     setGenerating(false)
   }
 
+  const totalePagine = Math.max(1, Math.ceil(reports.length / perPage))
+  const paginaCorr = Math.min(pagina, totalePagine)
+  const reportsPaginate = reports.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
+
   return (
     <div>
-      <div style={{background:'red',color:'#fff',padding:'20px',fontSize:'24px'}}>TEST VISIBILE QUI</div>
       <div style={{marginBottom:'16px'}}>
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Genera Report Giacenze</h1>
       </div>
@@ -145,7 +150,7 @@ export default function ReportGiacenzePage() {
           <tbody>
             {!reports.length ? (
               <tr><td colSpan={7} style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a'}}>Nessun report generato</td></tr>
-            ) : reports.map((r:any,i:number)=>(
+            ) : reportsPaginate.map((r:any,i:number)=>(
               <tr key={r.id} style={{borderBottom:'1px solid #d1d5db'}}>
                 <td style={{padding:'9px 14px',fontWeight:'600'}}>{reports.length-i}</td>
                 <td style={{padding:'9px 14px',fontSize:'12px'}}>{new Date(r.created_at).toLocaleString('it-IT')}</td>
@@ -158,6 +163,13 @@ export default function ReportGiacenzePage() {
             ))}
           </tbody>
         </table>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:'6px',padding:'12px'}}>
+          <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
+          {Array.from({length: totalePagine}, (_,i)=>i+1).filter(n => n===1 || n===totalePagine || Math.abs(n-paginaCorr)<=2).map((n)=>(
+            <button key={n} onClick={()=>setPagina(n)} style={{minWidth:'30px',padding:'5px 8px',border:'1px solid',borderColor:n===paginaCorr?'#f97316':'#d1d5db',borderRadius:'5px',background:n===paginaCorr?'#f97316':'#fff',color:n===paginaCorr?'#fff':'#1a1a1a',fontSize:'12px',cursor:'pointer'}}>{n}</button>
+          ))}
+          <button onClick={()=>setPagina(p=>Math.min(totalePagine,p+1))} disabled={paginaCorr>=totalePagine} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:'pointer',color:paginaCorr>=totalePagine?'#ccc':'#1a1a1a'}}>Successivo</button>
+        </div>
       </div>
     </div>
   )
