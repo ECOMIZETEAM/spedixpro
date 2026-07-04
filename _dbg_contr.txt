@@ -1,0 +1,30 @@
+CHAR TOTALI: 10387
+
+=== useState (tutti) ===
+  const [clienti, setClienti] = useState<any[]>([])
+  const [reports, setReports] = useState<any[]>([])
+  const [generating, setGenerating] = useState(false)
+  const [archivioZip, setArchivioZip] = useState(false)
+  const [filtri, setFiltri] = useState({
+
+=== nome array report (cerco 'setReports' e 'reports') ===
+ha 'const [reports': True
+
+=== .map (25 char prima) ===
+[@2682] ...'],
+      body: spedizioni'.map
+[@4834] ...'n>
+              {clienti'.map
+[@8819] ...'ente','Status','Scarica']'.map
+[@9286] ...'>
+            ) : reports'.map
+[@9721] ...'ri||{}).filter(([,v])=>v)'.map
+
+=== </table> posizioni ===
+[@10349]
+
+=== apertura tabella storico (dopo 'Genera Report') ===
+[<div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>\n        <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}]
+
+=== render map reports (contesto) ===
+[n report generato</td></tr>\n            ) : reports.map((r:any,i:number)=>(\n              <tr key={r.id} style={{borderB]
