@@ -113,6 +113,7 @@ export default function MovimentiClientePage() {
 
       {/* Tabella */}
       <div style={card}>
+        <div style={{padding:'10px 16px',fontSize:'12px',color:'#1a1a1a'}}>Mostra{' '}<select value={perPagina} onChange={e=>{setPerPagina(Number(e.target.value));setPagina(1)}} style={{padding:'4px 8px',border:'1px solid #d1d5db',borderRadius:'5px',color:'#1a1a1a'}}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option></select>{' '}elementi</div>
         {err && (
           <div style={{ marginBottom: '12px', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c' }}>
             {err}
