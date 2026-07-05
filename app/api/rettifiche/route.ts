@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
   const fileId = req.nextUrl.searchParams.get('fileId')
   let query = supabase.from('rettifiche')
-    .select('*, clienti(ragione_sociale)')
+    .select('*, clienti(ragione_sociale), masters:target_master_id(nome)')
     .eq('master_id', utente?.master_id)
     .eq('confermata', false)
     .order('created_at', { ascending: false })
