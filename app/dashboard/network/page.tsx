@@ -35,11 +35,25 @@ export default function NetworkRicevutiPage() {
       })
       const d = await res.json()
       if (d.error) setMsg('Errore: ' + d.error)
-      else if (d.nDaRettificare > 0) setMsg('✓ ' + r.numero_spedizione + ': rettifica creata verso il tuo cliente/master — confermala dalla pagina Rettifiche')
+      else if (d.nDaRettificare > 0) {
+        await decidi(r, 'propagata', true)
+        setMsg('✓ ' + r.numero_spedizione + ': rettifica creata verso il tuo cliente/master — confermala dalla pagina Rettifiche')
+      }
       else if (d.nTrovate > 0) setMsg(r.numero_spedizione + ': nessuna differenza col tuo listino (o gia propagata)')
       else setMsg(r.numero_spedizione + ': LDV non agganciata (' + (d.nScartati||0) + ' scartate)')
     } catch { setMsg('Errore di connessione') }
     setPropagando('')
+  }
+
+  async function decidi(r: any, decisione: string | null, silenzioso = false) {
+    try {
+      await fetch('/api/network/rettifiche', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ rettifica_id: r.id, decisione })
+      })
+      if (!silenzioso) setMsg(decisione === 'assorbita' ? ('✓ ' + r.numero_spedizione + ': assorbita — resta a tuo carico, i tuoi clienti non vengono toccati') : 'Aggiornata')
+      carica()
+    } catch { if (!silenzioso) setMsg('Errore di connessione') }
   }
 
   const tabs: [typeof tab, string, number][] = [
@@ -88,11 +102,21 @@ export default function NetworkRicevutiPage() {
                         {r.confermata?'Addebitata':'In attesa'}
                       </span>
                     </td>
-                    <td style={{...td,textAlign:'right'}}>
-                      <button onClick={()=>propaga(r)} disabled={propagando===r.id}
-                        style={{background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',borderRadius:'6px',padding:'5px 10px',fontSize:'12px',fontWeight:600,cursor:'pointer',opacity:propagando===r.id?.6:1}}>
-                        {propagando===r.id?'…':'↓ Propaga ai miei clienti'}
-                      </button>
+                    <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>
+                      {r.propagazione === 'propagata' ? (
+                        <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#dbeafe',color:'#1d4ed8'}}>↓ Propagata</span>
+                      ) : r.propagazione === 'assorbita' ? (
+                        <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#dcfce7',color:'#166534'}}>✓ Assorbita da me</span>
+                      ) : (<>
+                        <button onClick={()=>propaga(r)} disabled={propagando===r.id}
+                          style={{background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',borderRadius:'6px',padding:'5px 10px',fontSize:'12px',fontWeight:600,cursor:'pointer',opacity:propagando===r.id?.6:1,marginRight:'6px'}}>
+                          {propagando===r.id?'…':'↓ Propaga'}
+                        </button>
+                        <button onClick={()=>decidi(r, 'assorbita')}
+                          style={{background:'#f0fdf4',color:'#166534',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'5px 10px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>
+                          ✓ La assorbo io
+                        </button>
+                      </>)}
                     </td>
                   </tr>
                 ))}

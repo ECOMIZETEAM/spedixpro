@@ -17,7 +17,7 @@ export async function GET(_req: NextRequest) {
 
   const [rett, cod, movs] = await Promise.all([
     adminDb.from('rettifiche')
-      .select('id,numero_spedizione,peso_iniziale,peso_reale,costo_iniziale,costo_finale,differenza,confermata,stato,created_at,masters:master_id(nome)')
+      .select('id,numero_spedizione,peso_iniziale,peso_reale,costo_iniziale,costo_finale,differenza,confermata,stato,propagazione,created_at,masters:master_id(nome)')
       .eq('target_master_id', mio)
       .order('created_at', { ascending: false }).limit(200),
     adminDb.from('distinte_contrassegni')
