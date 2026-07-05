@@ -1,0 +1,150 @@
+'use client'
+import { useState, useEffect } from 'react'
+
+const ACCENT = '#f97316'
+const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const}
+const th = {padding:'9px 12px',fontSize:'11px',fontWeight:700 as const,textTransform:'uppercase' as const,color:'#666',textAlign:'left' as const,whiteSpace:'nowrap' as const}
+const td = {padding:'9px 12px',fontSize:'12.5px',color:'#1a1a1a',borderTop:'1px solid #f0f0f0'}
+
+export default function NetworkRicevutiPage() {
+  const [tab, setTab] = useState<'rettifiche'|'contrassegni'|'movimenti'>('rettifiche')
+  const [dati, setDati] = useState<any>({rettifiche:[],contrassegni:[],movimenti:[]})
+  const [loading, setLoading] = useState(true)
+  const [msg, setMsg] = useState('')
+  const [propagando, setPropagando] = useState<string>('')
+
+  async function carica() {
+    setLoading(true)
+    const d = await fetch('/api/network/ricevuti').then(r=>r.json()).catch(()=>null)
+    if (d && !d.error) setDati(d)
+    setLoading(false)
+  }
+  useEffect(()=>{ carica() }, [])
+
+  // Propaga una rettifica ricevuta ai MIEI clienti/sub-master: riusa l'upload
+  // (stessa LDV + peso reale -> il mio upload la smista col MIO listino)
+  async function propaga(r: any) {
+    setPropagando(r.id); setMsg('')
+    try {
+      const res = await fetch('/api/rettifiche/upload', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          nomeFile: 'Propagazione ' + r.numero_spedizione,
+          righe: [{ 'LDV': r.numero_spedizione, 'Peso Reale': r.peso_reale }],
+        })
+      })
+      const d = await res.json()
+      if (d.error) setMsg('Errore: ' + d.error)
+      else if (d.nDaRettificare > 0) setMsg('✓ ' + r.numero_spedizione + ': rettifica creata verso il tuo cliente/master — confermala dalla pagina Rettifiche')
+      else if (d.nTrovate > 0) setMsg(r.numero_spedizione + ': nessuna differenza col tuo listino (o gia propagata)')
+      else setMsg(r.numero_spedizione + ': LDV non agganciata (' + (d.nScartati||0) + ' scartate)')
+    } catch { setMsg('Errore di connessione') }
+    setPropagando('')
+  }
+
+  const tabs: [typeof tab, string, number][] = [
+    ['rettifiche', 'Rettifiche ricevute', dati.rettifiche.length],
+    ['contrassegni', 'Rimesse COD ricevute', dati.contrassegni.length],
+    ['movimenti', 'Addebiti subiti', dati.movimenti.length],
+  ]
+
+  return (
+    <div>
+      <div style={{marginBottom:'20px'}}>
+        <h1 style={{fontSize:'20px',fontWeight:700,color:'#1a1a1a',margin:0}}>Dal mio network</h1>
+        <p style={{color:'#999',fontSize:'13px',marginTop:'4px'}}>Rettifiche, rimesse contrassegni e addebiti ricevuti dal livello superiore</p>
+      </div>
+
+      <div style={{display:'flex',gap:'8px',marginBottom:'16px'}}>
+        {tabs.map(([k, label, n]) => (
+          <button key={k} onClick={()=>setTab(k)} style={{background:tab===k?ACCENT:'#fff',color:tab===k?'#fff':'#1a1a1a',border:'1px solid '+(tab===k?ACCENT:'#e8e8e8'),borderRadius:'8px',padding:'8px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>
+            {label} ({n})
+          </button>
+        ))}
+      </div>
+
+      {msg && <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'8px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#1d4ed8'}}>{msg}</div>}
+
+      <div style={card}>
+        {loading ? <div style={{padding:'40px',textAlign:'center',color:'#999'}}>Caricamento…</div> : (
+          <>
+          {tab==='rettifiche' && (
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead><tr style={{background:'#f9fafb'}}>
+                <th style={th}>Data</th><th style={th}>Da</th><th style={th}>LDV</th><th style={th}>Peso dich. → reale</th><th style={th}>Costo → ricalcolo</th><th style={th}>Differenza</th><th style={th}>Stato</th><th style={th}></th>
+              </tr></thead>
+              <tbody>
+                {dati.rettifiche.length===0 ? <tr><td colSpan={8} style={{...td,textAlign:'center',color:'#999',padding:'32px'}}>Nessuna rettifica ricevuta</td></tr> :
+                dati.rettifiche.map((r:any)=>(
+                  <tr key={r.id}>
+                    <td style={td}>{new Date(r.created_at).toLocaleDateString('it-IT')}</td>
+                    <td style={td}>{r.masters?.nome||'—'}</td>
+                    <td style={{...td,fontWeight:600}}>{r.numero_spedizione}</td>
+                    <td style={td}>{r.peso_iniziale} → {r.peso_reale} kg</td>
+                    <td style={td}>€ {Number(r.costo_iniziale).toFixed(2)} → € {Number(r.costo_finale).toFixed(2)}</td>
+                    <td style={{...td,fontWeight:700,color:Number(r.differenza)<0?'#dc2626':'#16a34a'}}>€ {Number(r.differenza).toFixed(2)}</td>
+                    <td style={td}>
+                      <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:r.confermata?'#fee2e2':'#fef3c7',color:r.confermata?'#991b1b':'#92400e'}}>
+                        {r.confermata?'Addebitata':'In attesa'}
+                      </span>
+                    </td>
+                    <td style={{...td,textAlign:'right'}}>
+                      <button onClick={()=>propaga(r)} disabled={propagando===r.id}
+                        style={{background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',borderRadius:'6px',padding:'5px 10px',fontSize:'12px',fontWeight:600,cursor:'pointer',opacity:propagando===r.id?.6:1}}>
+                        {propagando===r.id?'…':'↓ Propaga ai miei clienti'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {tab==='contrassegni' && (
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead><tr style={{background:'#f9fafb'}}>
+                <th style={th}>Data</th><th style={th}>Da</th><th style={th}>Distinta</th><th style={th}>LDV incluse</th><th style={th}>Totale dovuto</th><th style={th}>Stato</th>
+              </tr></thead>
+              <tbody>
+                {dati.contrassegni.length===0 ? <tr><td colSpan={6} style={{...td,textAlign:'center',color:'#999',padding:'32px'}}>Nessuna rimessa ricevuta</td></tr> :
+                dati.contrassegni.map((c:any)=>(
+                  <tr key={c.id}>
+                    <td style={td}>{new Date(c.created_at).toLocaleDateString('it-IT')}</td>
+                    <td style={td}>{c.masters?.nome||'—'}</td>
+                    <td style={{...td,fontWeight:600}}>#{c.numero}</td>
+                    <td style={td}>{(c.distinte_contrassegni_righe||[]).map((x:any)=>x.numero_spedizione).join(', ')||'—'}</td>
+                    <td style={{...td,fontWeight:700,color:'#16a34a'}}>€ {Number(c.totale_rimborsato ?? c.totale_iniziale).toFixed(2)}</td>
+                    <td style={td}>
+                      <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:c.stato==='pagata'?'#dcfce7':'#fef3c7',color:c.stato==='pagata'?'#166534':'#92400e'}}>
+                        {c.stato==='pagata'?('Pagata'+(c.data_pagamento?' il '+new Date(c.data_pagamento).toLocaleDateString('it-IT'):'')):'Da ricevere'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {tab==='movimenti' && (
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead><tr style={{background:'#f9fafb'}}>
+                <th style={th}>Data</th><th style={th}>Tipo</th><th style={th}>Descrizione</th><th style={th}>Importo</th><th style={th}>Saldo dopo</th>
+              </tr></thead>
+              <tbody>
+                {dati.movimenti.length===0 ? <tr><td colSpan={5} style={{...td,textAlign:'center',color:'#999',padding:'32px'}}>Nessun addebito subito</td></tr> :
+                dati.movimenti.map((m:any)=>(
+                  <tr key={m.id}>
+                    <td style={td}>{new Date(m.created_at).toLocaleDateString('it-IT')} {new Date(m.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</td>
+                    <td style={td}><span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#fee2e2',color:'#991b1b',textTransform:'capitalize'}}>{m.tipo}</span></td>
+                    <td style={td}>{m.descrizione}</td>
+                    <td style={{...td,fontWeight:700,color:Number(m.importo)<0?'#dc2626':'#16a34a'}}>€ {Number(m.importo).toFixed(2)}</td>
+                    <td style={td}>€ {Number(m.saldo_dopo).toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
