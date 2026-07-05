@@ -26,6 +26,7 @@ const NAV = [
     { label: 'Scansiona Resi', href: '/dashboard/resi/scansiona' },
     { label: 'Elenco Distinte Resi', href: '/dashboard/resi/distinte' },
   ]},
+  { label: 'Dal mio network', href: '/dashboard/network', icon: '🌐' },
   { label: 'Tracking Interno', href: '/dashboard/tracking', icon: '◎' },
   { label: 'Listini Prezzi', href: '/dashboard/listini', icon: '€', sub: [
     { label: 'Nuovo Listino', href: '/dashboard/listini/clienti/nuovo' },
