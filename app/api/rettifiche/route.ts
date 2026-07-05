@@ -34,15 +34,33 @@ export async function POST(req: NextRequest) {
 
   if (!rettifiche?.length) return NextResponse.json({ error: 'Nessuna rettifica trovata' }, { status: 404 })
 
-  // Le rettifiche verso master (catena) non si confermano da qui: flusso dedicato in arrivo
-  const diCatena = rettifiche.filter(r => r.target_master_id || !r.cliente_id)
+  // Rettifiche verso master della catena: addebito/accredito diretto al master target.
+  // Segno CORRETTO: differenza = costo_iniziale - costo_finale -> negativa = addebito, positiva = accredito.
+  const diCatena = rettifiche.filter(r => r.target_master_id)
+  const diClienti = rettifiche.filter(r => !r.target_master_id && r.cliente_id)
   if (diCatena.length) {
-    return NextResponse.json({ error: diCatena.length + ' rettifiche sono verso un master della catena: la conferma master-to-master non è ancora attiva. Deselezionale per procedere con quelle dei clienti diretti.' }, { status: 400 })
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { registraMovimentoMaster } = await import('@/lib/movimenti')
+    const adminDb = createAdminSupabase()
+    for (const r of diCatena) {
+      const diff = Number(r.differenza || 0)
+      if (Math.abs(diff) <= 0.005) continue
+      try {
+        await registraMovimentoMaster(adminDb, {
+          masterOwnerId: utente?.master_id, masterTargetId: r.target_master_id,
+          tipo: 'rettifica',
+          descrizione: `Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso scansione: ${r.peso_reale} Kg )`,
+          importo: diff,
+          spedizioneId: r.spedizione_id || null, createdBy: user.id,
+        })
+      } catch (e) { console.error('Errore rettifica master:', e) }
+    }
+    await supabase.from('rettifiche').update({ confermata: true, stato: 'confermata' }).in('id', diCatena.map(r => r.id))
   }
 
   // Raggruppa per cliente
   const clientiMap: Record<string, any[]> = {}
-  rettifiche.forEach(r => {
+  diClienti.forEach(r => {
     if (!clientiMap[r.cliente_id]) clientiMap[r.cliente_id] = []
     clientiMap[r.cliente_id].push(r)
   })
