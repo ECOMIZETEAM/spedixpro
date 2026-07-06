@@ -14,8 +14,10 @@ export async function GET() {
 
   const admin = createAdminSupabase()
   const { data: m } = await admin.from('masters')
-    .select('abbonamento_piano,abbonamento_limite,abbonamento_prezzo,abbonamento_mese,abbonamento_attivato_il,credito')
+    .select('parent_master_id,abbonamento_piano,abbonamento_limite,abbonamento_prezzo,abbonamento_mese,abbonamento_attivato_il,credito')
     .eq('id', utente.master_id).single()
+
+  const isRoot = !m?.parent_master_id  // il master principale: illimitato e gratis, mai bloccato
 
   const now = new Date()
   const inizioMese = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
@@ -23,14 +25,31 @@ export async function GET() {
     .select('*', { count: 'exact', head: true })
     .eq('master_id', utente.master_id).gte('created_at', inizioMese).neq('stato', 'annullata')
 
+  // Se sono il ROOT (M1): elenco degli abbonamenti da incassare dalla mia rete
+  let pagamenti: any[] = []
+  if (isRoot) {
+    const { data: pag } = await admin.from('abbonamenti_pagamenti')
+      .select('id,master_id,piano,mese,importo,pagato,pagato_il,created_at')
+      .eq('root_id', utente.master_id).order('created_at', { ascending: false }).limit(300)
+    const ids = [...new Set((pag || []).map(p => p.master_id))]
+    const { data: nomi } = ids.length
+      ? await admin.from('masters').select('id,nome').in('id', ids)
+      : { data: [] as any[] }
+    const nomeById = new Map((nomi || []).map((n: any) => [n.id, n.nome]))
+    pagamenti = (pag || []).map(p => ({ ...p, master_nome: nomeById.get(p.master_id) || 'Master' }))
+  }
+
   return NextResponse.json({
-    attivo: !!m?.abbonamento_piano,
-    piano: m?.abbonamento_piano || null,
+    attivo: isRoot || !!m?.abbonamento_piano,
+    illimitato: isRoot,
+    piano: isRoot ? 'illimitato' : (m?.abbonamento_piano || null),
     limite: m?.abbonamento_limite || 0,
     prezzo: Number(m?.abbonamento_prezzo || 0),
     spedizioni_mese: count || 0,
     credito: Number(m?.credito || 0),
     piani: PIANI_ENTERPRISE,
+    isRoot,
+    pagamenti,
   })
 }
 
@@ -88,6 +107,10 @@ export async function POST(req: NextRequest) {
         masterOwnerId: rootId, masterTargetId: rootId,
         tipo: 'abbonamento_incasso', descrizione: `Abbonamento ${nuovo.nome} da ${m?.nome || 'master'}`,
         importo: Math.abs(importo), createdBy: user.id,
+      })
+      // registro il pagamento da incassare (il root lo segnerà "pagato" quando arriva il bonifico)
+      await admin.from('abbonamenti_pagamenti').insert({
+        master_id: payer, root_id: rootId, piano: nuovo.id, mese, importo, pagato: false,
       })
     } catch (e) {
       console.error('Errore addebito/accredito abbonamento:', e)

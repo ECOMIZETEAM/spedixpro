@@ -73,11 +73,15 @@ export default function Dashboard() {
             <div style={{fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,letterSpacing:'0.6px',color:'#999',marginBottom:'3px'}}>
               SPEDIZIONI {new Date().toLocaleString('it-IT',{month:'short'}).toUpperCase()}
             </div>
-            <div style={{fontSize:'20px',fontWeight:'800',lineHeight:1,color:'#fff'}}>{data.spedizioniMese?.toLocaleString()} <span style={{fontSize:'13px',color:'#999'}}>/ {data.limiteMese?.toLocaleString()}</span></div>
-            <div style={{background:'rgba(255,255,255,0.12)',borderRadius:'4px',height:'4px',marginTop:'8px'}}>
-              <div style={{background:'#f97316',borderRadius:'4px',height:'4px',width:`${Math.min(100,(data.spedizioniMese/data.limiteMese)*100)}%`,transition:'width 0.5s'}}/>
-            </div>
-            <div style={{fontSize:'10px',marginTop:'3px',color:'#777'}}>{((data.spedizioniMese/data.limiteMese)*100).toFixed(3)}%</div>
+            <div style={{fontSize:'20px',fontWeight:'800',lineHeight:1,color:'#fff'}}>{data.spedizioniMese?.toLocaleString()} <span style={{fontSize:'13px',color:'#999'}}>/ {data.illimitato ? '∞' : data.limiteMese?.toLocaleString()}</span></div>
+            {data.illimitato ? (
+              <div style={{fontSize:'10px',marginTop:'8px',color:'#f97316',fontWeight:700}}>Illimitato</div>
+            ) : (<>
+              <div style={{background:'rgba(255,255,255,0.12)',borderRadius:'4px',height:'4px',marginTop:'8px'}}>
+                <div style={{background:'#f97316',borderRadius:'4px',height:'4px',width:`${Math.min(100,(data.spedizioniMese/data.limiteMese)*100)}%`,transition:'width 0.5s'}}/>
+              </div>
+              <div style={{fontSize:'10px',marginTop:'3px',color:'#777'}}>{((data.spedizioniMese/data.limiteMese)*100).toFixed(3)}%</div>
+            </>)}
           </div>
         </div>
 

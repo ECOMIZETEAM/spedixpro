@@ -33,6 +33,9 @@ export async function GET() {
           masterOwnerId: rootId, masterTargetId: rootId, tipo: 'abbonamento_incasso',
           descrizione: `Canone ${mese} da ${m.nome || 'master'}`, importo: Math.abs(prezzo), createdBy: null,
         })
+        await admin.from('abbonamenti_pagamenti').insert({
+          master_id: m.id, root_id: rootId, piano: m.abbonamento_piano, mese, importo: prezzo, pagato: false,
+        })
       } catch (e) { console.error('Errore rinnovo abbonamento master', m.id, e); continue }
     }
     await admin.from('masters').update({ abbonamento_mese: mese }).eq('id', m.id)

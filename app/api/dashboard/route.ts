@@ -60,6 +60,7 @@ export async function GET() {
     spedizioniMese: spedizioniMese||0,
     limiteMese: limitePiano,
     abbonamentoAttivo,
+    illimitato: isRoot,
     spediteOggi: spediteOggi||0,
     daSpedire: daSpedire||0,
     inLavorazione: inLavorazione||0,
