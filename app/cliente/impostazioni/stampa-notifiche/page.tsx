@@ -55,7 +55,7 @@ const DEF_IMP: Record<string,any> = {
 
 function Toggle({on, onToggle}:{on:boolean,onToggle:()=>void}) {
   return (
-    <button onClick={onToggle} style={{display:'inline-flex',alignItems:'center',justifyContent:on?'flex-start':'flex-end',width:'58px',height:'26px',borderRadius:'13px',border:'none',cursor:'pointer',background:on?'#2563eb':'#e5e7eb',padding:'0 8px',color:on?'#fff':'#6b7280',fontSize:'10px',fontWeight:'700'}}>
+    <button onClick={onToggle} style={{display:'inline-flex',alignItems:'center',justifyContent:on?'flex-start':'flex-end',width:'58px',height:'26px',borderRadius:'13px',border:'none',cursor:'pointer',background:on?'#f97316':'#e5e7eb',padding:'0 8px',color:on?'#fff':'#6b7280',fontSize:'10px',fontWeight:'700'}}>
       {on?'ON':'OFF'}
     </button>
   )

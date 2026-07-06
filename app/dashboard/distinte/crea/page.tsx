@@ -130,7 +130,7 @@ export default function CreaDistintaPage() {
             <button style={btnSel} onClick={() => selezionaN(100)}>Seleziona 100</button>
           </div>
           <button onClick={creaDistinta} disabled={creando || !selezionate.size}
-            style={{ padding: '8px 18px', background: selezionate.size ? '#2563eb' : '#93c5fd', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: '700', cursor: selezionate.size ? 'pointer' : 'not-allowed' }}>
+            style={{ padding: '8px 18px', background: selezionate.size ? '#f97316' : '#fdba74', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: '700', cursor: selezionate.size ? 'pointer' : 'not-allowed' }}>
             Crea Distinta ({selezionate.size})
           </button>
         </div>
@@ -155,7 +155,7 @@ export default function CreaDistintaPage() {
               ) : filtrate.map(s => (
                 <tr key={s.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                   <td style={{ padding: '9px 10px' }}><input type="checkbox" checked={selezionate.has(s.id)} onChange={() => toggle(s.id)} /></td>
-                  <td style={{ padding: '9px 10px', color: '#2563eb', fontWeight: '600' }}>{s.numero}</td>
+                  <td style={{ padding: '9px 10px', color: '#f97316', fontWeight: '600' }}>{s.numero}</td>
                   <td style={{ padding: '9px 10px', color: '#1a1a1a' }}>{s.mitt_nome || '—'}</td>
                   <td style={{ padding: '9px 10px', color: '#1a1a1a' }}>{s.dest_nome || '—'}</td>
                   <td style={{ padding: '9px 10px', color: '#1a1a1a' }}>{s.dest_citta || '—'}</td>

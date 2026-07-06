@@ -236,7 +236,7 @@ export default function OrdiniPage() {
         </button>
       </div>
 
-      {msg && <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'8px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#1d4ed8'}}>{msg}</div>}
+      {msg && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#ea580c'}}>{msg}</div>}
 
       <div style={{...card, marginBottom:'20px'}}>
         <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'16px'}}>▾ Filtri</div>
@@ -291,7 +291,7 @@ export default function OrdiniPage() {
             <option value="no">No</option><option value="si">Sì</option>
           </select>
           <div style={{flex:1}}/>
-          <button onClick={spedisciSelezionati} disabled={spedendo} style={{opacity:spedendo?.6:1,background:'#2563eb',color:'#fff',border:'none',borderRadius:'8px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>Spedisci selezionati{nSel>0?' ('+nSel+')':''}</button>
+          <button onClick={spedisciSelezionati} disabled={spedendo} style={{opacity:spedendo?.6:1,background:'#f97316',color:'#fff',border:'none',borderRadius:'8px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>Spedisci selezionati{nSel>0?' ('+nSel+')':''}</button>
           <button onClick={cancellaSelezionati} style={{background:'#dc2626',color:'#fff',border:'none',borderRadius:'8px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>Cancella selezionati</button>
         </div>
 
@@ -355,7 +355,7 @@ export default function OrdiniPage() {
                     <td style={{...td,color:'#6b7280'}}>{o.spedizione_id?String(o.spedizione_id).slice(0,8):'—'}</td>
                     <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>
                       {o.stato!=='spedito'
-                        ? <button onClick={()=>creaSpedizione(o)} style={{background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>Crea spedizione</button>
+                        ? <button onClick={()=>creaSpedizione(o)} style={{background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>Crea spedizione</button>
                         : <span style={{color:'#166534',fontSize:'12px',fontWeight:600}}>✓ Spedito</span>}
                     </td>
                   </tr>)

@@ -116,12 +116,12 @@ export default function ResiDistinteCliente() {
               <tbody>
                 {visibili.map(d=>(
                   <tr key={d.id}>
-                    <td style={td}><span style={{background:'#2563eb',color:'#fff',padding:'4px 10px',borderRadius:'6px',fontWeight:'700',fontSize:'12px'}}>{d.numero}</span></td>
+                    <td style={td}><span style={{background:'#f97316',color:'#fff',padding:'4px 10px',borderRadius:'6px',fontWeight:'700',fontSize:'12px'}}>{d.numero}</span></td>
                     <td style={td}>{new Date(d.created_at).toLocaleDateString('it-IT')} {new Date(d.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</td>
                     <td style={td}>{d.totale_ldv||0}</td>
                     <td style={td}>€ {Number(d.totale||0).toFixed(2)}</td>
                     <td style={td}>
-                      <button onClick={()=>stampa(d)} disabled={busy===d.id+'-pdf'} title="Stampa PDF" style={{padding:'6px 10px',border:'none',borderRadius:'6px',background:'#2563eb',color:'#fff',cursor:'pointer',marginRight:'6px',fontSize:'12px'}}>{busy===d.id+'-pdf'?'...':'🖨'}</button>
+                      <button onClick={()=>stampa(d)} disabled={busy===d.id+'-pdf'} title="Stampa PDF" style={{padding:'6px 10px',border:'none',borderRadius:'6px',background:'#f97316',color:'#fff',cursor:'pointer',marginRight:'6px',fontSize:'12px'}}>{busy===d.id+'-pdf'?'...':'🖨'}</button>
                       <button onClick={()=>esporta(d)} disabled={busy===d.id+'-xlsx'} title="Esporta Excel" style={{padding:'6px 10px',border:'1px solid #d1d5db',borderRadius:'6px',background:'#fff',color:'#1a1a1a',cursor:'pointer',fontSize:'12px'}}>{busy===d.id+'-xlsx'?'...':'⬇'}</button>
                     </td>
                   </tr>
@@ -133,7 +133,7 @@ export default function ResiDistinteCliente() {
             <span>Risultati da {(paginaCorr-1)*perPagina+1} a {Math.min(paginaCorr*perPagina, filtrate.length)} di {filtrate.length} elementi</span>
             <div style={{display:'flex',gap:'6px'}}>
               <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 12px',border:'1px solid #d1d5db',borderRadius:'6px',background:'#fff',cursor:'pointer',fontSize:'12px'}}>Precedente</button>
-              <span style={{padding:'5px 12px',background:'#2563eb',color:'#fff',borderRadius:'6px'}}>{paginaCorr}</span>
+              <span style={{padding:'5px 12px',background:'#f97316',color:'#fff',borderRadius:'6px'}}>{paginaCorr}</span>
               <button onClick={()=>setPagina(p=>Math.min(totPagine,p+1))} disabled={paginaCorr>=totPagine} style={{padding:'5px 12px',border:'1px solid #d1d5db',borderRadius:'6px',background:'#fff',cursor:'pointer',fontSize:'12px'}}>Successivo</button>
             </div>
           </div>

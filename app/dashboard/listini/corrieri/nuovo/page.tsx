@@ -212,7 +212,7 @@ export default function ListinoCorrierePage() {
         <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
           {!aggiungendoContratto && corrieriDisponibili.length > 0 && (
             <button onClick={()=>setAggiungendoContratto(true)}
-              style={{background:'none',border:'1px solid #d1d5db',color:'#2563eb',padding:'8px 16px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',cursor:'pointer'}}>
+              style={{background:'none',border:'1px solid #d1d5db',color:'#f97316',padding:'8px 16px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',cursor:'pointer'}}>
               + Aggiungi contratto
             </button>
           )}

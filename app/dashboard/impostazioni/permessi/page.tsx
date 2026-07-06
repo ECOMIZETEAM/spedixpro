@@ -198,10 +198,10 @@ export default function PermessiPage() {
                         <input type="checkbox" checked disabled readOnly style={{ width: 17, height: 17, accentColor: '#9aa4ad', cursor: 'not-allowed' }} />
                       </td>
                       <td style={cellCenter}>
-                        <input type="checkbox" checked={!!op[x.k]} onChange={e => setOp({ ...op, [x.k]: e.target.checked })} style={{ width: 17, height: 17, accentColor: '#2563eb', cursor: 'pointer' }} />
+                        <input type="checkbox" checked={!!op[x.k]} onChange={e => setOp({ ...op, [x.k]: e.target.checked })} style={{ width: 17, height: 17, accentColor: '#f97316', cursor: 'pointer' }} />
                       </td>
                       <td style={cellCenter}>
-                        <input type="checkbox" checked={!!ag[x.k]} onChange={e => setAg({ ...ag, [x.k]: e.target.checked })} style={{ width: 17, height: 17, accentColor: '#2563eb', cursor: 'pointer' }} />
+                        <input type="checkbox" checked={!!ag[x.k]} onChange={e => setAg({ ...ag, [x.k]: e.target.checked })} style={{ width: 17, height: 17, accentColor: '#f97316', cursor: 'pointer' }} />
                       </td>
                     </tr>
                   ))}
@@ -213,7 +213,7 @@ export default function PermessiPage() {
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
-        <button onClick={salva} disabled={saving || loading} style={{ background: saving ? '#7fa8e0' : '#2563eb', color: '#fff', border: 'none', padding: '12px 28px', borderRadius: 6, fontSize: 15, fontWeight: 600, cursor: saving ? 'default' : 'pointer' }}>
+        <button onClick={salva} disabled={saving || loading} style={{ background: saving ? '#7fa8e0' : '#f97316', color: '#fff', border: 'none', padding: '12px 28px', borderRadius: 6, fontSize: 15, fontWeight: 600, cursor: saving ? 'default' : 'pointer' }}>
           {saving ? 'Salvataggio...' : 'Salva permessi'}
         </button>
       </div>

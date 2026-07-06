@@ -140,7 +140,7 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
 
       <h1 style={{fontSize:'20px',fontWeight:'800',color:'#1a1a1a',marginBottom:'20px'}}>🚛 {corriereEsistente ? 'Modifica' : 'Aggiungi'} {config.titolo}</h1>
 
-      <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'8px',padding:'12px 16px',marginBottom:'20px',fontSize:'13px',color:'#1d4ed8',maxWidth:'520px'}}>
+      <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'12px 16px',marginBottom:'20px',fontSize:'13px',color:'#ea580c',maxWidth:'520px'}}>
         💡 {config.info}
       </div>
 

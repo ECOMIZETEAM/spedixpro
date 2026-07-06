@@ -86,7 +86,7 @@ export default function CreaDistintaCliente() {
                 {visibili.map(s=>(
                   <tr key={s.id} style={{background:selected.includes(s.id)?'#fff7ed':'#fff'}}>
                     <td style={td}><input type="checkbox" checked={selected.includes(s.id)} onChange={()=>toggle(s.id)}/></td>
-                    <td style={{...td,color:'#2563eb',fontWeight:'600'}}>{s.numero||'—'}</td>
+                    <td style={{...td,color:'#f97316',fontWeight:'600'}}>{s.numero||'—'}</td>
                     <td style={td}>{s.dest_nome}</td>
                     <td style={td}>{s.dest_citta}</td>
                     <td style={td}>{s.dest_cap}</td>

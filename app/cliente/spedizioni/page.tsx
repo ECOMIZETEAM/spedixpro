@@ -8,7 +8,7 @@ const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'
 
 const STATI: Record<string,{bg:string,color:string,label:string}> = {
   in_lavorazione:{bg:'#fffbeb',color:'#d97706',label:'In Lavorazione'},
-  spedita:{bg:'#eff6ff',color:'#2563eb',label:'Spedita'},
+  spedita:{bg:'#fff7ed',color:'#f97316',label:'Spedita'},
   in_transito:{bg:'#f0fdf4',color:'#16a34a',label:'In transito'},
   in_consegna:{bg:'#ecfdf5',color:'#059669',label:'In Consegna'},
   consegnata:{bg:'#f0fdf4',color:'#16a34a',label:'Consegnata'},
@@ -339,7 +339,7 @@ async function apriTracking(s: any) {
                       <td style={{padding:'9px 12px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
                           <a href={`/dashboard/spedizioni/${s.id}/etichetta`} download
-                            style={{padding:'4px 8px',background:'#eff6ff',color:'#1d4ed8',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #bfdbfe'}} title="Etichetta">🖨️</a>
+                            style={{padding:'4px 8px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #fed7aa'}} title="Etichetta">🖨️</a>
                   
                           <button onClick={()=>elimina(s.id,s.numero)} disabled={eliminando===s.id}
                             style={{padding:'4px 8px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'14px',border:'1px solid #fecaca',cursor:'pointer',opacity:eliminando===s.id?0.5:1}} title="Elimina">🗑️</button>

@@ -55,7 +55,7 @@ export default function InviaNotifica() {
 
   return (
     <div style={{ maxWidth:'900px' }}>
-      <div style={{ borderTop:'3px solid #2563eb', background:'#fff', borderRadius:'8px', boxShadow:'0 1px 4px rgba(0,0,0,0.08)', overflow:'hidden' }}>
+      <div style={{ borderTop:'3px solid #f97316', background:'#fff', borderRadius:'8px', boxShadow:'0 1px 4px rgba(0,0,0,0.08)', overflow:'hidden' }}>
         <div style={{ padding:'16px 22px', borderBottom:'1px solid #eee', fontSize:'18px', color:'#374151' }}>Notifica</div>
         <div style={{ padding:'22px' }}>
           {msg && <div style={{ marginBottom:'16px', padding:'10px 14px', borderRadius:'6px', fontSize:'13px', background: msg.startsWith('Notifica inviata') ? '#f0fdf4' : '#fef2f2', color: msg.startsWith('Notifica inviata') ? '#15803d' : '#dc2626', border: '1px solid ' + (msg.startsWith('Notifica inviata') ? '#86efac' : '#fecaca') }}>{msg}</div>}
@@ -97,7 +97,7 @@ export default function InviaNotifica() {
           <div ref={editorRef} contentEditable suppressContentEditableWarning style={{ minHeight:'180px', border:'1px solid #d1d5db', borderRadius:'6px', padding:'12px', fontSize:'14px', color:'#1a1a1a', outline:'none' }} />
 
           <div style={{ display:'flex', justifyContent:'flex-end', marginTop:'18px' }}>
-            <button onClick={invia} disabled={inviando} style={{ padding:'9px 28px', background:'#2563eb', color:'#fff', border:'none', borderRadius:'6px', fontSize:'14px', fontWeight:'700', cursor: inviando ? 'default' : 'pointer', opacity: inviando ? 0.6 : 1 }}>{inviando ? 'Invio...' : 'Invia'}</button>
+            <button onClick={invia} disabled={inviando} style={{ padding:'9px 28px', background:'#f97316', color:'#fff', border:'none', borderRadius:'6px', fontSize:'14px', fontWeight:'700', cursor: inviando ? 'default' : 'pointer', opacity: inviando ? 0.6 : 1 }}>{inviando ? 'Invio...' : 'Invia'}</button>
           </div>
         </div>
       </div>

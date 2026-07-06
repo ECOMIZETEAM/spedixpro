@@ -106,7 +106,7 @@ export default function DistinteResiPage() {
                   <td style={{padding:'10px 14px'}}>
                     <div style={{display:'flex',gap:'6px'}}>
                       <button onClick={()=>window.open(`/dashboard/resi/distinte/${d.id}`,'_blank')}
-                        style={{padding:'5px 12px',background:'#eff6ff',color:'#1d4ed8',border:'1px solid #93c5fd',borderRadius:'5px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>{'\uD83D\uDC41'} Visualizza</button>
+                        style={{padding:'5px 12px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fdba74',borderRadius:'5px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>{'\uD83D\uDC41'} Visualizza</button>
                       <button onClick={()=>window.open(`/dashboard/resi/distinte/${d.id}`,'_blank')}
                         style={{padding:'5px 12px',background:'#f0fdf4',color:'#15803d',border:'1px solid #86efac',borderRadius:'5px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>{'\u2B07'} Scarica</button>
                     </div>

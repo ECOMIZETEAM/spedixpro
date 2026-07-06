@@ -100,7 +100,7 @@ export default function ReportRettificheCliente() {
           </div>
         </div>
       </div>
-      <button onClick={genera} disabled={generating} style={{padding:'10px 22px',border:'none',borderRadius:'6px',background:'#2563eb',color:'#fff',fontSize:'14px',fontWeight:'700',cursor:'pointer',opacity:generating?0.6:1}}>
+      <button onClick={genera} disabled={generating} style={{padding:'10px 22px',border:'none',borderRadius:'6px',background:'#f97316',color:'#fff',fontSize:'14px',fontWeight:'700',cursor:'pointer',opacity:generating?0.6:1}}>
         {generating ? 'Generazione...' : 'Genera Report'}
       </button>
     </div>

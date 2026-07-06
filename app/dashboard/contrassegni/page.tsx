@@ -7,7 +7,7 @@ const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fo
 
 const STATI_SPED: Record<string,{bg:string,color:string,label:string}> = {
   in_lavorazione:{bg:'#fffbeb',color:'#d97706',label:'In Lavorazione'},
-  spedita:{bg:'#eff6ff',color:'#2563eb',label:'Spedita'},
+  spedita:{bg:'#fff7ed',color:'#f97316',label:'Spedita'},
   consegnata:{bg:'#f0fdf4',color:'#16a34a',label:'Consegnata'},
   in_transito:{bg:'#f0fdf4',color:'#16a34a',label:'In transito'},
   in_consegna:{bg:'#ecfdf5',color:'#059669',label:'In Consegna'},

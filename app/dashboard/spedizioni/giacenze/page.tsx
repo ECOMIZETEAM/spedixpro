@@ -215,7 +215,7 @@ export default function GiacenzePage() {
                       <td style={{padding:'9px 12px'}}>
                         {g.giacenza_stato!=='chiusa' && (
                           <button onClick={()=>{setModal(g);setIstruzioni('');setEsito(null)}}
-                            style={{padding:'4px 10px',background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',borderRadius:'4px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>
+                            style={{padding:'4px 10px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'4px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>
                             ✏️ Gestisci
                           </button>
                         )}

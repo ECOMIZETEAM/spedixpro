@@ -108,7 +108,7 @@ export default function DateRangePicker({ dal, al, onChange }: Props) {
                   return (
                     <td key={i} onClick={()=>clickGiorno(d)} style={{
                       width:'30px', height:'28px', textAlign:'center', fontSize:'12px', cursor:'pointer', borderRadius:'4px',
-                      background: sel ? '#2563eb' : range ? '#dbeafe' : 'transparent',
+                      background: sel ? '#f97316' : range ? '#ffedd5' : 'transparent',
                       color: sel ? '#fff' : '#1a1a1a', fontWeight: sel ? '700' : '400'
                     }}>{d.getDate()}</td>
                   )
@@ -143,7 +143,7 @@ export default function DateRangePicker({ dal, al, onChange }: Props) {
             ))}
             <div style={{ marginTop:'auto', display:'flex', gap:'6px', paddingTop:'8px' }}>
               <button onClick={()=>setOpen(false)} style={{ ...presetBtn, flex:1, textAlign:'center' as const }}>Annulla</button>
-              <button onClick={applica} style={{ flex:1, padding:'6px', background:'#2563eb', color:'#fff', border:'none', borderRadius:'5px', fontSize:'12px', fontWeight:'700', cursor:'pointer' }}>Applica</button>
+              <button onClick={applica} style={{ flex:1, padding:'6px', background:'#f97316', color:'#fff', border:'none', borderRadius:'5px', fontSize:'12px', fontWeight:'700', cursor:'pointer' }}>Applica</button>
             </div>
           </div>
         </div>

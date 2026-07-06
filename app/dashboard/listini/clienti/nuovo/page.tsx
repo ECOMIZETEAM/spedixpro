@@ -126,7 +126,7 @@ function ModificaListino({listino, corriereIds, corrieri, router}: any) {
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Modifica Listino</h1>
       </div>
 
-      <div style={{background:'#2563eb',color:'#fff',borderRadius:'6px',padding:'12px 16px',marginBottom:'16px',fontSize:'13px',fontWeight:'600'}}>
+      <div style={{background:'#f97316',color:'#fff',borderRadius:'6px',padding:'12px 16px',marginBottom:'16px',fontSize:'13px',fontWeight:'600'}}>
         Il nuovo listino è stato creato!
       </div>
 
@@ -135,7 +135,7 @@ function ModificaListino({listino, corriereIds, corrieri, router}: any) {
           <span style={{fontSize:'16px',fontWeight:'700',color:'#1a1a1a'}}>{listino?.nome}</span>
           {!aggiungendo && corrieriDisponibili.length > 0 && (
             <button onClick={()=>setAggiungendo(true)}
-              style={{background:'none',border:'none',color:'#2563eb',fontSize:'13px',fontWeight:'600',cursor:'pointer'}}>
+              style={{background:'none',border:'none',color:'#f97316',fontSize:'13px',fontWeight:'600',cursor:'pointer'}}>
               + Aggiungi contratto
             </button>
           )}

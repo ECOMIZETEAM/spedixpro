@@ -87,7 +87,7 @@ export default function NuovoMasterPage() {
           </div>
         </div>
 
-        <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'6px',padding:'10px 14px',marginBottom:'20px',fontSize:'12px',color:'#1d4ed8',lineHeight:1.5}}>
+        <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px 14px',marginBottom:'20px',fontSize:'12px',color:'#ea580c',lineHeight:1.5}}>
           💡 Il nuovo master avrà accesso al dashboard completo, ma potrà gestire solo i propri clienti, corrieri e listini — non potrà vedere o modificare i tuoi.<br/>
           Il <strong>Listino assegnato</strong> è il prezzo che <strong>tu</strong> applichi a questo master quando spedisce col tuo contratto. Lascialo vuoto se il master userà solo corrieri propri (API sue).
         </div>

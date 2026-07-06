@@ -32,7 +32,7 @@ const cardB = {padding:'16px'}
 
 const CARRIERS: Record<string,{nome:string,colore:string}> = {
   sda:{nome:'SDA Express',colore:'#e31837'},
-  gls:{nome:'GLS Express',colore:'#004b93'},
+  gls:{nome:'GLS Express',colore:'#f97316'},
   brt:{nome:'BRT',colore:'#e2001a'},
   poste:{nome:'Poste Italiane',colore:'#ffcc00'},
   dhl:{nome:'DHL Express',colore:'#ffcc00'},
@@ -198,7 +198,7 @@ export default function NuovaSpedizionePage() {
       {successo && <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'12px 16px',marginBottom:'16px',fontSize:'14px',color:'#166534',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px'}}>
         <span>✓ Spedizione <strong>{successo.numero}</strong> generata con successo</span>
         {successo.id
-          ? <button onClick={()=>scaricaEtichetta(successo.id)} style={{background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',borderRadius:'6px',padding:'6px 12px',fontSize:'14px',cursor:'pointer',fontWeight:'600'}} title="Scarica etichetta">🖨️ Scarica LDV</button>
+          ? <button onClick={()=>scaricaEtichetta(successo.id)} style={{background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'6px 12px',fontSize:'14px',cursor:'pointer',fontWeight:'600'}} title="Scarica etichetta">🖨️ Scarica LDV</button>
           : <span style={{color:'#dc2626',fontSize:'13px'}}>⚠️ Etichetta non generata</span>}
       </div>}
 

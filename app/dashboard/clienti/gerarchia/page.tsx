@@ -6,7 +6,7 @@ interface Cliente { id: string; ragione_sociale: string; email: string; master_i
 
 const LIVELLO_COLORI = [
   { bg: '#fff7ed', text: '#f97316', border: '#fed7aa' }, // root
-  { bg: '#eff6ff', text: '#2563eb', border: '#bfdbfe' }, // livello 1
+  { bg: '#fff7ed', text: '#f97316', border: '#fed7aa' }, // livello 1
   { bg: '#f0fdf4', text: '#16a34a', border: '#bbf7d0' }, // livello 2
   { bg: '#fdf4ff', text: '#a21caf', border: '#f0abfc' }, // livello 3
   { bg: '#fefce8', text: '#ca8a04', border: '#fde68a' }, // livello 4+

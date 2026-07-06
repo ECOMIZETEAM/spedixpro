@@ -50,7 +50,7 @@ export default function StoricoCreditoSmsPage() {
           </thead>
           <tbody>
             {!storicofiltrato.length ? (
-              <tr><td colSpan={4} style={{padding:'20px 14px',color:'#3b82f6',fontSize:'13px'}}>Nessun dato disponibile nella tabella</td></tr>
+              <tr><td colSpan={4} style={{padding:'20px 14px',color:'#f97316',fontSize:'13px'}}>Nessun dato disponibile nella tabella</td></tr>
             ) : storicoPaginate.map((s:any,i:number)=>(
               <tr key={i} style={{borderBottom:'1px solid #d1d5db'}}>
                 <td style={{padding:'9px 14px',color:'#1a1a1a',fontSize:'12px'}}>{s.data}</td>

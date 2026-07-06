@@ -8,7 +8,7 @@ const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'
 
 const STATI: Record<string,{bg:string,color:string,label:string}> = {
   in_lavorazione:{bg:'#fffbeb',color:'#d97706',label:'In Lavorazione'},
-  spedita:{bg:'#eff6ff',color:'#2563eb',label:'Spedita'},
+  spedita:{bg:'#fff7ed',color:'#f97316',label:'Spedita'},
   in_transito:{bg:'#f0fdf4',color:'#16a34a',label:'In transito'},
   in_consegna:{bg:'#ecfdf5',color:'#059669',label:'In Consegna'},
   consegnata:{bg:'#f0fdf4',color:'#16a34a',label:'Consegnata'},

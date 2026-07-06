@@ -185,7 +185,7 @@ export default function NuovoClientePage() {
           <div style={sec}>
             <div style={sech}>Email Login Cliente</div>
             <div style={{padding:'16px',display:'flex',flexDirection:'column',gap:'12px'}}>
-              <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'6px',padding:'10px 12px',fontSize:'12px',color:'#1d4ed8',lineHeight:1.5}}>
+              <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px 12px',fontSize:'12px',color:'#ea580c',lineHeight:1.5}}>
                 L&apos;email deve essere un indirizzo email valido. Verrà inviata una email con il link di accesso e la password provvisoria.
               </div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>

@@ -109,7 +109,7 @@ export default function ListaDistinteCliente() {
               <tbody>
                 {paginate.map(d=>(
                   <tr key={d.id}>
-                    <td style={{...td}}><span style={{background:'#2563eb',color:'#fff',padding:'4px 10px',borderRadius:'6px',fontWeight:'700',fontSize:'12px'}}>{d.numero}</span></td>
+                    <td style={{...td}}><span style={{background:'#f97316',color:'#fff',padding:'4px 10px',borderRadius:'6px',fontWeight:'700',fontSize:'12px'}}>{d.numero}</span></td>
                     <td style={td}>{d.vettore}</td>
                     <td style={td}>{d.contratto}</td>
                     <td style={td}>{new Date(d.data).toLocaleDateString('it-IT')}</td>

@@ -93,7 +93,7 @@ export default function ElencoDistintePage() {
   const inp = { padding: '8px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', background: '#fff' } as const
   const th = { padding: '9px 12px', textAlign: 'left' as const, fontSize: '11px', fontWeight: '700', color: '#1a1a1a', borderBottom: '1px solid #d1d5db', whiteSpace: 'nowrap' as const }
   const td = { padding: '9px 12px', fontSize: '12px', color: '#1a1a1a' }
-  const bIco = { padding: '5px 9px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '12px', cursor: 'pointer', marginLeft: '4px' } as const
+  const bIco = { padding: '5px 9px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '12px', cursor: 'pointer', marginLeft: '4px' } as const
 
   return (
     <div>

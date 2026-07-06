@@ -39,10 +39,10 @@ export default function ClienteDashboard() {
       {notifiche.length > 0 && (
         <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
           {notifiche.map((n:any)=>(
-            <div key={n.id} style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'8px',padding:'14px 18px'}}>
+            <div key={n.id} style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'14px 18px'}}>
               <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'6px'}}>
                 <span style={{fontSize:'16px'}}>🔔</span>
-                <span style={{fontWeight:'700',color:'#1e3a8a',fontSize:'15px'}}>{n.oggetto}</span>
+                <span style={{fontWeight:'700',color:'#9a3412',fontSize:'15px'}}>{n.oggetto}</span>
                 <span style={{marginLeft:'auto',fontSize:'11px',color:'#64748b'}}>{new Date(n.created_at).toLocaleDateString('it-IT')}</span>
               </div>
               <div style={{color:'#1e293b',fontSize:'13px'}} dangerouslySetInnerHTML={{__html: n.messaggio || ''}} />

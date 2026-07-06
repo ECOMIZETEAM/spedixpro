@@ -150,7 +150,7 @@ export default function RitiriPage() {
                     </td>
                     <td style={{padding:'9px 12px'}}>
                       <a href={'/cliente/ritiri/'+r.id}
-                        style={{color:'#2563eb',fontWeight:'600',fontSize:'12px',textDecoration:'none'}}>
+                        style={{color:'#f97316',fontWeight:'600',fontSize:'12px',textDecoration:'none'}}>
                         {r.cod_ritiro||'—'}
                       </a>
                     </td>

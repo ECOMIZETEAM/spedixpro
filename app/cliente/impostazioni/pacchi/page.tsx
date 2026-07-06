@@ -50,7 +50,7 @@ export default function PacchiCliente() {
       <h1 style={{fontSize:'22px',fontWeight:'400',color:'#1a1a1a',margin:'0 0 20px'}}>Lista pacchi predefiniti</h1>
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
         <div style={{padding:'16px',display:'flex',justifyContent:'flex-end'}}>
-          <button onClick={()=>apri(null)} style={{background:'#2563eb',color:'#fff',border:'none',padding:'9px 16px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',cursor:'pointer'}}>🔗 Aggiungi pacco (peso/misure)</button>
+          <button onClick={()=>apri(null)} style={{background:'#f97316',color:'#fff',border:'none',padding:'9px 16px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',cursor:'pointer'}}>🔗 Aggiungi pacco (peso/misure)</button>
         </div>
         {loading ? (
           <div style={{padding:'40px',textAlign:'center',color:'#999',fontSize:'13px'}}>Caricamento...</div>
@@ -66,13 +66,13 @@ export default function PacchiCliente() {
                 <tr><td colSpan={5} style={{padding:'30px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessun pacco predefinito. Aggiungine uno.</td></tr>
               ) : pacchi.map(p=>(
                 <tr key={p.id}>
-                  <td style={{...td,color:'#2563eb'}}>{p.nome}</td>
-                  <td style={{...td,color:'#2563eb'}}>{Number(p.peso).toFixed(2)}</td>
-                  <td style={{...td,color:'#2563eb'}}>{p.lunghezza} X {p.larghezza} X {p.altezza}</td>
+                  <td style={{...td,color:'#f97316'}}>{p.nome}</td>
+                  <td style={{...td,color:'#f97316'}}>{Number(p.peso).toFixed(2)}</td>
+                  <td style={{...td,color:'#f97316'}}>{p.lunghezza} X {p.larghezza} X {p.altezza}</td>
                   <td style={td}><span onClick={()=>setPredefinito(p)} title={p.predefinito?'Predefinito':'Imposta come predefinito'} style={{cursor:'pointer',fontSize:'18px',color:p.predefinito?'#f59e0b':'#cbd5e1'}}>{p.predefinito ? '★' : '☆'}</span></td>
                   <td style={td}>
                     <button onClick={()=>elimina(p.id)} style={{background:'#dc2626',color:'#fff',border:'none',padding:'6px 10px',borderRadius:'6px',cursor:'pointer',marginRight:'8px'}}>🗑</button>
-                    <button onClick={()=>apri(p)} style={{background:'transparent',color:'#2563eb',border:'none',cursor:'pointer',fontSize:'13px'}}>Edit</button>
+                    <button onClick={()=>apri(p)} style={{background:'transparent',color:'#f97316',border:'none',cursor:'pointer',fontSize:'13px'}}>Edit</button>
                   </td>
                 </tr>
               ))}
@@ -98,7 +98,7 @@ export default function PacchiCliente() {
             </div>
             <div style={{display:'flex',gap:'10px',marginTop:'20px',justifyContent:'flex-end'}}>
               <button onClick={()=>setModal(false)} style={{padding:'9px 18px',border:'1px solid #d1d5db',borderRadius:'6px',background:'#fff',cursor:'pointer',fontSize:'13px',color:'#1a1a1a'}}>Annulla</button>
-              <button onClick={salva} disabled={saving} style={{padding:'9px 18px',border:'none',borderRadius:'6px',background:'#2563eb',color:'#fff',cursor:'pointer',fontSize:'13px',fontWeight:'600',opacity:saving?0.6:1}}>{saving?'Salvataggio...':'Salva'}</button>
+              <button onClick={salva} disabled={saving} style={{padding:'9px 18px',border:'none',borderRadius:'6px',background:'#f97316',color:'#fff',cursor:'pointer',fontSize:'13px',fontWeight:'600',opacity:saving?0.6:1}}>{saving?'Salvataggio...':'Salva'}</button>
             </div>
           </div>
         </div>

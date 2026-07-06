@@ -31,7 +31,7 @@ export default function CreaAccount() {
 
   return (
     <div style={{ maxWidth:'620px', margin:'0 auto' }}>
-      <div style={{ borderTop:'3px solid #2563eb', background:'#fff', borderRadius:'8px', boxShadow:'0 1px 4px rgba(0,0,0,0.08)', padding:'28px' }}>
+      <div style={{ borderTop:'3px solid #f97316', background:'#fff', borderRadius:'8px', boxShadow:'0 1px 4px rgba(0,0,0,0.08)', padding:'28px' }}>
         <div style={{ display:'flex', justifyContent:'center', marginBottom:'20px' }}>
           <div style={{ width:'90px', height:'90px', borderRadius:'50%', background:'#e0f2fe', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'44px' }}>👤</div>
         </div>

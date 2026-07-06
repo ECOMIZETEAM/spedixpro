@@ -1,22 +1,26 @@
 export default function Home() {
   return (
-    <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',background:'#0f1623'}}>
-      <div style={{background:'#1a2235',padding:'40px',borderRadius:'14px',width:'380px',boxShadow:'0 20px 60px rgba(0,0,0,.4)'}}>
+    <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#f5f5f5',fontFamily:'system-ui,sans-serif'}}>
+      <div style={{background:'#fff',borderRadius:'12px',padding:'40px',width:'380px',boxShadow:'0 2px 16px rgba(0,0,0,.08)'}}>
         <div style={{textAlign:'center',marginBottom:'32px'}}>
-          <div style={{fontSize:'32px',marginBottom:'8px'}}>📦</div>
-          <h1 style={{color:'#fff',fontSize:'22px',fontWeight:'800',margin:'0'}}>Spedix<span style={{color:'#60a5fa'}}>Pro</span></h1>
-          <p style={{color:'#475569',fontSize:'13px',marginTop:'4px'}}>Control Center</p>
+          <div style={{fontSize:'22px',fontWeight:'800',color:'#1a1a1a'}}>Spedix<span style={{color:'#f97316'}}>Pro</span></div>
+          <div style={{fontSize:'13px',color:'#999',marginTop:'4px'}}>Control Center</div>
         </div>
-        <form action="/api/auth/login" method="POST">
-          <div style={{marginBottom:'16px'}}>
-            <label style={{color:'#94a3b8',fontSize:'12px',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.5px'}}>Email</label>
-            <input name="email" type="email" required style={{width:'100%',marginTop:'6px',padding:'10px 12px',background:'#0f1623',border:'1px solid #334155',borderRadius:'8px',color:'#fff',fontSize:'14px',outline:'none',boxSizing:'border-box'}} placeholder="admin@ecomize.it"/>
+        <form action="/api/auth/login" method="POST" style={{display:'flex',flexDirection:'column',gap:'14px'}}>
+          <div>
+            <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Email</label>
+            <input name="email" type="email" required placeholder="admin@ecomize.it"
+              style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',boxSizing:'border-box'}}/>
           </div>
-          <div style={{marginBottom:'24px'}}>
-            <label style={{color:'#94a3b8',fontSize:'12px',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.5px'}}>Password</label>
-            <input name="password" type="password" required style={{width:'100%',marginTop:'6px',padding:'10px 12px',background:'#0f1623',border:'1px solid #334155',borderRadius:'8px',color:'#fff',fontSize:'14px',outline:'none',boxSizing:'border-box'}} placeholder="••••••••"/>
+          <div>
+            <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Password</label>
+            <input name="password" type="password" required placeholder="••••••••"
+              style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',boxSizing:'border-box'}}/>
           </div>
-          <button type="submit" style={{width:'100%',padding:'11px',background:'#2563eb',color:'#fff',border:'none',borderRadius:'8px',fontSize:'14px',fontWeight:'700',cursor:'pointer'}}>Accedi</button>
+          <button type="submit"
+            style={{background:'#f97316',color:'#fff',border:'none',padding:'11px',borderRadius:'6px',fontSize:'14px',fontWeight:'700',cursor:'pointer'}}>
+            Accedi
+          </button>
         </form>
       </div>
     </div>

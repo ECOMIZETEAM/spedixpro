@@ -41,7 +41,7 @@ export default function StaffPage() {
   return (
     <div>
       <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:'14px' }}>
-        <a href="/dashboard/impostazioni/staff/crea" style={{ padding:'9px 18px', background:'#2563eb', color:'#fff', borderRadius:'6px', fontSize:'13px', fontWeight:'700', textDecoration:'none' }}>+ Crea account</a>
+        <a href="/dashboard/impostazioni/staff/crea" style={{ padding:'9px 18px', background:'#f97316', color:'#fff', borderRadius:'6px', fontSize:'13px', fontWeight:'700', textDecoration:'none' }}>+ Crea account</a>
       </div>
       <div style={{ background:'#fff', borderRadius:'8px', boxShadow:'0 1px 4px rgba(0,0,0,0.08)', overflow:'hidden' }}>
         <div style={{ padding:'16px 20px', borderBottom:'1px solid #eee', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'12px' }}>
@@ -90,7 +90,7 @@ export default function StaffPage() {
           <div style={{ display:'flex', gap:'4px' }}>
             <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={pagina<=1} style={{ padding:'6px 12px', border:'1px solid #d1d5db', background:'#fff', borderRadius:'5px', fontSize:'13px', cursor:'pointer', color:'#1a1a1a', opacity: pagina<=1?0.5:1 }}>Precedente</button>
             {Array.from({length: numPagine}).map((_,i)=>(
-              <button key={i} onClick={()=>setPagina(i+1)} style={{ padding:'6px 12px', border:'1px solid #d1d5db', background: pagina===i+1?'#2563eb':'#fff', color: pagina===i+1?'#fff':'#1a1a1a', borderRadius:'5px', fontSize:'13px', cursor:'pointer' }}>{i+1}</button>
+              <button key={i} onClick={()=>setPagina(i+1)} style={{ padding:'6px 12px', border:'1px solid #d1d5db', background: pagina===i+1?'#f97316':'#fff', color: pagina===i+1?'#fff':'#1a1a1a', borderRadius:'5px', fontSize:'13px', cursor:'pointer' }}>{i+1}</button>
             ))}
             <button onClick={()=>setPagina(p=>Math.min(numPagine,p+1))} disabled={pagina>=numPagine} style={{ padding:'6px 12px', border:'1px solid #d1d5db', background:'#fff', borderRadius:'5px', fontSize:'13px', cursor:'pointer', color:'#1a1a1a', opacity: pagina>=numPagine?0.5:1 }}>Successivo</button>
           </div>

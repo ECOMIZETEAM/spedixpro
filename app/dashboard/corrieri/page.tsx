@@ -152,7 +152,7 @@ export default function CorrieriPage() {
                   {c.attivo?'|| In pausa':'▶ Riattiva'}
                 </button>
                 <button onClick={() => apriImpostazioni(c)} title="Impostazioni"
-                  style={{padding:'5px 10px',background:'#eff6ff',color:'#2563eb',borderRadius:'6px',fontSize:'11px',border:'1px solid #bfdbfe',cursor:'pointer'}}>⚙ Impostazioni</button>
+                  style={{padding:'5px 10px',background:'#fff7ed',color:'#f97316',borderRadius:'6px',fontSize:'11px',border:'1px solid #fed7aa',cursor:'pointer'}}>⚙ Impostazioni</button>
                 <button onClick={() => setConfermaElimina(c.id)} title="Elimina"
                   style={{padding:'5px 9px',background:'#fef2f2',color:'#dc2626',borderRadius:'6px',fontSize:'11px',border:'1px solid #fecaca',cursor:'pointer'}}>Elimina</button>
               </div>

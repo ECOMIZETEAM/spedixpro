@@ -70,7 +70,7 @@ export default function ContrassegniCliente() {
   const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const,marginBottom:'16px'}
   const th = {textAlign:'left' as const,padding:'10px 12px',fontSize:'11px',fontWeight:'700' as const,color:'#1a1a1a',borderBottom:'1px solid #e8e8e8',whiteSpace:'nowrap' as const}
   const td = {padding:'10px 12px',fontSize:'12px',color:'#1a1a1a',borderBottom:'1px solid #f5f5f5',whiteSpace:'nowrap' as const}
-  const linkBtn = {border:'none',background:'transparent',color:'#2563eb',cursor:'pointer',fontSize:'12px',marginRight:'8px'}
+  const linkBtn = {border:'none',background:'transparent',color:'#f97316',cursor:'pointer',fontSize:'12px',marginRight:'8px'}
   function badgeStato(s:string){
     const map:Record<string,{bg:string,c:string,t:string}> = {
       pagata:{bg:'#16a34a',c:'#fff',t:'Pagata'}, in_lavorazione:{bg:'#f59e0b',c:'#fff',t:'In lavorazione'}, compensata:{bg:'#e5e7eb',c:'#374151',t:'compensata'},

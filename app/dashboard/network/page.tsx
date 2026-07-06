@@ -77,7 +77,7 @@ export default function NetworkRicevutiPage() {
         ))}
       </div>
 
-      {msg && <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'8px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#1d4ed8'}}>{msg}</div>}
+      {msg && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#ea580c'}}>{msg}</div>}
 
       <div style={card}>
         {loading ? <div style={{padding:'40px',textAlign:'center',color:'#999'}}>Caricamento…</div> : (
@@ -104,12 +104,12 @@ export default function NetworkRicevutiPage() {
                     </td>
                     <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>
                       {r.propagazione === 'propagata' ? (
-                        <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#dbeafe',color:'#1d4ed8'}}>↓ Propagata</span>
+                        <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#ffedd5',color:'#ea580c'}}>↓ Propagata</span>
                       ) : r.propagazione === 'assorbita' ? (
                         <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#dcfce7',color:'#166534'}}>✓ Assorbita da me</span>
                       ) : (<>
                         <button onClick={()=>propaga(r)} disabled={propagando===r.id}
-                          style={{background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',borderRadius:'6px',padding:'5px 10px',fontSize:'12px',fontWeight:600,cursor:'pointer',opacity:propagando===r.id?.6:1,marginRight:'6px'}}>
+                          style={{background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'5px 10px',fontSize:'12px',fontWeight:600,cursor:'pointer',opacity:propagando===r.id?.6:1,marginRight:'6px'}}>
                           {propagando===r.id?'…':'↓ Propaga'}
                         </button>
                         <button onClick={()=>decidi(r, 'assorbita')}

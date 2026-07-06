@@ -58,7 +58,7 @@ export default function ElencoRitiriPage() {
 
   const STATO_LABELS: Record<string, { label: string; bg: string; color: string }> = {
     richiesto: { label: 'Richiesto', bg: '#fff7ed', color: '#f97316' },
-    confermato: { label: 'Confermato', bg: '#eff6ff', color: '#2563eb' },
+    confermato: { label: 'Confermato', bg: '#fff7ed', color: '#f97316' },
     completato: { label: 'Completato', bg: '#f0fdf4', color: '#16a34a' },
     annullato: { label: 'Annullato', bg: '#fef2f2', color: '#dc2626' },
   }

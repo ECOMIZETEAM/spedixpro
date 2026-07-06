@@ -49,7 +49,7 @@ function NodoAlbero({ masterId, nome, isRoot }: { masterId: string; nome: string
           <a href={`/api/master/${masterId}/impersona`} target="_blank" rel="noopener noreferrer"
             onClick={e => e.stopPropagation()}
             title="Accedi come questo master"
-            style={{ marginLeft: 'auto', fontSize: '11px', fontWeight: 700, color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '5px', padding: '3px 8px', textDecoration: 'none' }}>
+            style={{ marginLeft: 'auto', fontSize: '11px', fontWeight: 700, color: '#ea580c', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '5px', padding: '3px 8px', textDecoration: 'none' }}>
             ↪ Accedi
           </a>
         )}

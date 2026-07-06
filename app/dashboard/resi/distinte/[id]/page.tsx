@@ -58,7 +58,7 @@ export default function DettaglioDistintaReso() {
       <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #d1d5db', overflow: 'hidden' }}>
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #d1d5db', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontSize: '13px', fontWeight: '700', color: '#1a1a1a' }}>Lettere di vettura</div>
-          <button onClick={stampa} style={{ padding: '7px 14px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}>Stampa Distinta</button>
+          <button onClick={stampa} style={{ padding: '7px 14px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}>Stampa Distinta</button>
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
