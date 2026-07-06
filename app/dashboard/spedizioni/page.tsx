@@ -38,6 +38,7 @@ export default function SpedizioniPage() {
   const [notifica, setNotifica] = useState<string>('')
   const [corrieri, setCorrieri] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
+  const [staff, setStaff] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -53,6 +54,7 @@ export default function SpedizioniPage() {
   useEffect(() => {
     fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[]))
     fetch('/api/corrieri/lista').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d)?d:[]))
+    fetch('/api/staff').then(r=>r.json()).then(d=>setStaff(Array.isArray(d)?d.filter((u:any)=>{const ru=(u.ruolo||'').toLowerCase();return ru!=='cliente'&&ru!=='master'}):[]))
     caricaTutte()
   }, [])
 
@@ -80,6 +82,7 @@ export default function SpedizioniPage() {
     if (filtri.stato_contrassegni==='da_pagare') filtered = filtered.filter(s => Number(s.contrassegno)>0 && s.stato_contrassegno!=='in_distinta' && s.stato_contrassegno!=='pagato')
     if (filtri.stato_contrassegni==='in_attesa') filtered = filtered.filter(s => s.stato_contrassegno==='in_distinta')
     if (filtri.stato_contrassegni==='pagato') filtered = filtered.filter(s => s.stato_contrassegno==='pagato')
+    if (filtri.agente) filtered = filtered.filter(s => (s.clienti?.agente||'') === filtri.agente)
     if (filtri.dest_citta) filtered = filtered.filter(s => s.dest_citta?.toLowerCase().includes(filtri.dest_citta.toLowerCase()))
     if (filtri.dest_cap) filtered = filtered.filter(s => s.dest_cap?.includes(filtri.dest_cap))
     if (filtri.contenuto) filtered = filtered.filter(s => s.contenuto?.toLowerCase().includes(filtri.contenuto.toLowerCase()))
@@ -256,6 +259,7 @@ async function apriTracking(s: any) {
           <div><label style={lbl}>Agente</label>
             <select value={filtri.agente} onChange={e=>setF('agente',e.target.value)} style={sel}>
               <option value="">Tutti</option>
+              {staff.map((u:any)=>{const nome=[u.nome,u.cognome].filter(Boolean).join(' ');return <option key={u.id} value={nome}>{nome||u.email||u.id}</option>})}
             </select>
           </div>
           <div>
