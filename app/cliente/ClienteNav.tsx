@@ -101,14 +101,21 @@ export default function ClienteNav() {
   const sectionActive = (item: NavItem) =>
     leafActive(item.href) || (item.sub?.some(s => leafActive(s.href)) ?? false)
 
-  // Tutte le sezioni aperte di default: le sotto-voci sono sempre visibili.
+  // Come il master: all'avvio apre solo la sezione attiva.
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     const init: Record<string, boolean> = {}
-    NAV.forEach(i => { if (i.sub?.length) init[i.id] = true })
+    NAV.forEach(i => { if (i.sub?.length && sectionActive(i)) init[i.id] = true })
     return init
   })
-  // Toggle additivo: aprire/chiudere una sezione non tocca le altre.
-  const toggle = (id: string) => setOpen(prev => ({ ...prev, [id]: !prev[id] }))
+  // Come il master: apre una sola tendina alla volta (chiude le altre) e, se la si apre,
+  // la porta in vista con lo scroll cosi si vede per intero senza scendere a mano.
+  const toggle = (id: string, el?: HTMLElement) => {
+    const staAprendo = !open[id]
+    setOpen(prev => ({ [id]: !prev[id] }))
+    if (staAprendo && el) {
+      setTimeout(() => { el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 80)
+    }
+  }
 
   return (
     <nav style={{ flex: 1, padding: '6px 0' }}>
@@ -138,7 +145,7 @@ export default function ClienteNav() {
               <button
                 type="button"
                 className="spx-item"
-                onClick={() => toggle(item.id)}
+                onClick={(e) => toggle(item.id, e.currentTarget as HTMLElement)}
                 style={{
                   justifyContent: 'space-between',
                   ...(active ? { color: ACCENT, fontWeight: 600 } : {}),
