@@ -2,6 +2,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { redirect } from 'next/navigation'
 import DashboardLayout from '../components/Layout'
 import { getPermessiUtente } from '@/lib/permessi'
+import AbbonamentoGate from './AbbonamentoGate'
 export default async function Layout({ children }: { children: React.ReactNode }) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -25,6 +26,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
       isFull: perm?.isFull ?? true,
       permessi: perm?.permessi || {},
     }}>
+      {(utente?.ruolo === 'master' || utente?.ruolo === 'admin') && <AbbonamentoGate />}
       {children}
     </DashboardLayout>
   )

@@ -4,6 +4,10 @@
     {
       "path": "/api/distinte/chiusura-automatica",
       "schedule": "0 21 * * *"
+    },
+    {
+      "path": "/api/abbonamento/rinnovo-mensile",
+      "schedule": "0 6 1 * *"
     }
   ]
 }

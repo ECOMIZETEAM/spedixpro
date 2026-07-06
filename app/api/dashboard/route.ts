@@ -6,9 +6,13 @@ export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,masters(nome)').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,masters(nome,parent_master_id,abbonamento_piano,abbonamento_limite)').eq('id', user.id).single()
   const masterId = utente?.master_id
-  const masterNome = (utente as any)?.masters?.nome || 'Master'
+  const masterRec: any = (utente as any)?.masters || {}
+  const masterNome = masterRec?.nome || 'Master'
+  const isRoot = !masterRec?.parent_master_id                 // il master principale è esente
+  const abbonamentoAttivo = isRoot || !!masterRec?.abbonamento_piano
+  const limitePiano = Number(masterRec?.abbonamento_limite || 0) || 50000
 
   const now = new Date()
   const inizioMese = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
@@ -54,7 +58,8 @@ export async function GET() {
     masterNome,
     totClienti: totClienti||0,
     spedizioniMese: spedizioniMese||0,
-    limiteMese: 50000,
+    limiteMese: limitePiano,
+    abbonamentoAttivo,
     spediteOggi: spediteOggi||0,
     daSpedire: daSpedire||0,
     inLavorazione: inLavorazione||0,

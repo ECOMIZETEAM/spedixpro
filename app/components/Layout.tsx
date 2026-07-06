@@ -56,6 +56,7 @@ const NAV: NavItem[] = [
     { label: 'Nuova Fattura', href: '/dashboard/fatture/nuova', perm: 'admin.invoice.create' },
   ]},
   { label: 'Lista Movimenti', href: '/dashboard/movimenti', icon: '≣' },
+  { label: 'Abbonamento', href: '/dashboard/abbonamento', icon: '★' },
   { label: 'Reports & SMS', href: '/dashboard/reports', icon: '◈', sub: [
     { label: 'Report Spedizioni', href: '/dashboard/reports/spedizioni', perm: 'admin.reports.shippings' },
     { label: 'Report Giacenze', href: '/dashboard/reports/giacenze', perm: 'admin.reports.stocks' },
