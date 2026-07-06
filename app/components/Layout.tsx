@@ -2,67 +2,72 @@
 import { useState } from 'react'
 import { usePathname } from 'next/navigation'
 
-const NAV = [
+// perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
+// always: sempre visibile a chiunque abbia accesso al portale.
+type NavSub = { label: string, href: string, perm?: string, always?: boolean }
+type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, sub?: NavSub[] }
+
+const NAV: NavItem[] = [
   { label: 'Spedizioni', href: '/dashboard/spedizioni', icon: '◫', sub: [
-    { label: 'Nuova Spedizione', href: '/dashboard/spedizioni/nuova' },
-    { label: 'Elenco Spedizioni', href: '/dashboard/spedizioni' },
-    { label: 'Giacenze', href: '/dashboard/spedizioni/giacenze' },
-    { label: 'Rettifica Costi', href: '/dashboard/spedizioni/rettifica' },
-    { label: 'Spedizioni Cancellate', href: '/dashboard/spedizioni/cancellate' },
+    { label: 'Nuova Spedizione', href: '/dashboard/spedizioni/nuova', perm: 'admin.shippings.create' },
+    { label: 'Elenco Spedizioni', href: '/dashboard/spedizioni', perm: 'admin.shippings.index' },
+    { label: 'Giacenze', href: '/dashboard/spedizioni/giacenze', perm: 'admin.stocks.index' },
+    { label: 'Rettifica Costi', href: '/dashboard/spedizioni/rettifica', perm: 'admin.shippings.weight_corrections.index' },
+    { label: 'Spedizioni Cancellate', href: '/dashboard/spedizioni/cancellate', perm: 'admin.shippings.cancelled.index' },
   ]},
   { label: 'Contrassegni', href: '/dashboard/contrassegni', icon: '¤', sub: [
-    { label: 'Lista Contrassegni', href: '/dashboard/contrassegni' },
-    { label: 'Distinte Contrassegni', href: '/dashboard/contrassegni/distinte' },
+    { label: 'Lista Contrassegni', href: '/dashboard/contrassegni', perm: 'admin.cod.index' },
+    { label: 'Distinte Contrassegni', href: '/dashboard/contrassegni/distinte', perm: 'admin.codlists.index' },
   ]},
   { label: 'Ritiri', href: '/dashboard/ritiri', icon: '↩', sub: [
-    { label: 'Nuovo Ritiro', href: '/dashboard/ritiri/nuovo' },
-    { label: 'Elenco Ritiri', href: '/dashboard/ritiri/elenco' },
+    { label: 'Nuovo Ritiro', href: '/dashboard/ritiri/nuovo', perm: 'admin.pickups.index' },
+    { label: 'Elenco Ritiri', href: '/dashboard/ritiri/elenco', perm: 'admin.pickups.index' },
   ]},
   { label: 'Distinte', icon: '≡', sub: [
-    { label: 'Crea Distinta', href: '/dashboard/distinte/crea' },
-    { label: 'Elenco Distinte', href: '/dashboard/distinte/elenco' },
+    { label: 'Crea Distinta', href: '/dashboard/distinte/crea', perm: 'admin.shippinglists.create' },
+    { label: 'Elenco Distinte', href: '/dashboard/distinte/elenco', perm: 'admin.shippinglists.index' },
   ]},
   { label: 'Resi', href: '/dashboard/resi', icon: '↺', sub: [
-    { label: 'Scansiona Resi', href: '/dashboard/resi/scansiona' },
-    { label: 'Elenco Distinte Resi', href: '/dashboard/resi/distinte' },
+    { label: 'Scansiona Resi', href: '/dashboard/resi/scansiona', perm: 'admin.renderlist.scan' },
+    { label: 'Elenco Distinte Resi', href: '/dashboard/resi/distinte', perm: 'admin.renderlist.index' },
   ]},
-  { label: 'Dal mio network', href: '/dashboard/network', icon: '🌐' },
-  { label: 'Tracking Interno', href: '/dashboard/tracking', icon: '◎' },
+  { label: 'Dal mio network', href: '/dashboard/network', icon: '🌐', perm: 'admin.interno.deliveries.in' },
+  { label: 'Tracking Interno', href: '/dashboard/tracking', icon: '◎', perm: 'admin.interno.deliveries.out' },
   { label: 'Listini Prezzi', href: '/dashboard/listini', icon: '€', sub: [
-    { label: 'Nuovo Listino', href: '/dashboard/listini/clienti/nuovo' },
-    { label: 'Listini Clienti', href: '/dashboard/listini' },
-    { label: 'Listino Corrieri', href: '/dashboard/listini/corrieri/nuovo' },
-    { label: 'Gestione Zone', href: '/dashboard/zone' },
+    { label: 'Nuovo Listino', href: '/dashboard/listini/clienti/nuovo', perm: 'admin.pricelists.create' },
+    { label: 'Listini Clienti', href: '/dashboard/listini', perm: 'admin.pricelists.index' },
+    { label: 'Listino Corrieri', href: '/dashboard/listini/corrieri/nuovo', perm: 'admin.pricelists.vector' },
+    { label: 'Gestione Zone', href: '/dashboard/zone', perm: 'admin.pricelists.zones.index' },
   ]},
   { label: 'Clienti', href: '/dashboard/clienti', icon: '⊙', sub: [
-    { label: 'Nuovo Cliente', href: '/dashboard/clienti/nuovo' },
-    { label: 'Elenco Clienti', href: '/dashboard/clienti' },
+    { label: 'Nuovo Cliente', href: '/dashboard/clienti/nuovo', perm: 'admin.clients.create' },
+    { label: 'Elenco Clienti', href: '/dashboard/clienti', perm: 'admin.clients.index' },
     { label: 'Nuovo Master', href: '/dashboard/clienti/master/nuovo' },
     { label: 'Elenco Master', href: '/dashboard/clienti/master' },
     { label: 'Gerarchia', href: '/dashboard/clienti/gerarchia' },
   ]},
-  { label: 'Autisti e Consegne', href: '/dashboard/autisti', icon: '⊡' },
+  { label: 'Autisti e Consegne', href: '/dashboard/autisti', icon: '⊡', perm: 'admin.drivers.index' },
   { label: 'Consumabili', href: '/dashboard/consumabili', icon: '▣', sub: [
-    { label: 'Aggiungi Spesa', href: '/dashboard/consumabili/aggiungi' },
-    { label: 'Storia', href: '/dashboard/consumabili/storia' },
+    { label: 'Aggiungi Spesa', href: '/dashboard/consumabili/aggiungi', perm: 'admin.consumables.create' },
+    { label: 'Storia', href: '/dashboard/consumabili/storia', perm: 'admin.consumables.index' },
   ]},
   { label: 'Fatture', href: '/dashboard/fatture', icon: '◻', sub: [
-    { label: 'Elenco Fatture', href: '/dashboard/fatture' },
-    { label: 'Nuova Fattura', href: '/dashboard/fatture/nuova' },
+    { label: 'Elenco Fatture', href: '/dashboard/fatture', perm: 'admin.invoice.index' },
+    { label: 'Nuova Fattura', href: '/dashboard/fatture/nuova', perm: 'admin.invoice.create' },
   ]},
   { label: 'Lista Movimenti', href: '/dashboard/movimenti', icon: '≣' },
   { label: 'Reports & SMS', href: '/dashboard/reports', icon: '◈', sub: [
-    { label: 'Report Spedizioni', href: '/dashboard/reports/spedizioni' },
-    { label: 'Report Giacenze', href: '/dashboard/reports/giacenze' },
-    { label: 'Report Distinte', href: '/dashboard/reports/distinte' },
-    { label: 'Report Contrassegni', href: '/dashboard/reports/contrassegni' },
-    { label: 'Report Ritiri', href: '/dashboard/reports/ritiri' },
-    { label: 'Report Rettifiche', href: '/dashboard/reports/rettifiche' },
-    { label: 'Report Consumabili', href: '/dashboard/reports/consumabili' },
-    { label: 'Report Fatture', href: '/dashboard/reports/fatture' },
-    { label: 'Report Resi', href: '/dashboard/reports/resi' },
-    { label: 'Report SMS Clienti', href: '/dashboard/reports/sms-clienti' },
-    { label: 'Storico Credito SMS', href: '/dashboard/reports/storico-sms' },
+    { label: 'Report Spedizioni', href: '/dashboard/reports/spedizioni', perm: 'admin.reports.shippings' },
+    { label: 'Report Giacenze', href: '/dashboard/reports/giacenze', perm: 'admin.reports.stocks' },
+    { label: 'Report Distinte', href: '/dashboard/reports/distinte', perm: 'admin.reports.shippinglists' },
+    { label: 'Report Contrassegni', href: '/dashboard/reports/contrassegni', perm: 'admin.reports.cod' },
+    { label: 'Report Ritiri', href: '/dashboard/reports/ritiri', perm: 'admin.reports.pickups' },
+    { label: 'Report Rettifiche', href: '/dashboard/reports/rettifiche', perm: 'admin.reports.priceupdates' },
+    { label: 'Report Consumabili', href: '/dashboard/reports/consumabili', perm: 'admin.reports.consumables' },
+    { label: 'Report Fatture', href: '/dashboard/reports/fatture', perm: 'admin.reports.invoices' },
+    { label: 'Report Resi', href: '/dashboard/reports/resi', perm: 'admin.reports.rendershippings' },
+    { label: 'Report SMS Clienti', href: '/dashboard/reports/sms-clienti', perm: 'admin.reports.sms.clients' },
+    { label: 'Storico Credito SMS', href: '/dashboard/reports/storico-sms', perm: 'admin.reports.sms.admin' },
   ]},
   { label: 'Impostazioni', href: '/dashboard/impostazioni', icon: '◉', sub: [
     { label: 'Azienda', href: '/dashboard/impostazioni' },
@@ -72,19 +77,38 @@ const NAV = [
     { label: 'Staff', href: '/dashboard/impostazioni/staff' },
     { label: 'Permessi', href: '/dashboard/impostazioni/permessi' },
     { label: 'Zone di Consegna', href: '/dashboard/listini/zone' },
-    { label: 'Cambia Password', href: '/dashboard/impostazioni/password' },
+    { label: 'Cambia Password', href: '/dashboard/impostazioni/password', always: true },
   ]},
-  { label: 'Centro Notifiche', href: '/dashboard/notifiche', icon: '🔔', sub: [
-    { label: 'Invia Notifica', href: '/dashboard/notifiche/invia' },
+  { label: 'Centro Notifiche', href: '/dashboard/notifiche', icon: '🔔', perm: 'admin.notification', sub: [
+    { label: 'Invia Notifica', href: '/dashboard/notifiche/invia', perm: 'admin.notification' },
   ]},
 ]
 
-export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null } }) {
+export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, permessi?: Record<string, boolean> } }) {
   const path = usePathname()
+  const isFull = user?.isFull ?? true
+  const permessi = user?.permessi || {}
+
+  // Un elemento e visibile se: admin/master (isFull), oppure marcato always,
+  // oppure ha una chiave permesso attiva. Senza perm e non-full = nascosto (solo admin).
+  const puoVedere = (x: { perm?: string, always?: boolean }) =>
+    isFull || x.always === true || (!!x.perm && permessi[x.perm] === true)
+
+  const navVisibile = NAV.map(item => {
+    if (item.sub && item.sub.length) {
+      const sub = item.sub.filter(puoVedere)
+      // Il genitore compare se ha almeno un sotto-elemento visibile
+      // (o se e esso stesso esplicitamente permesso).
+      if (sub.length === 0 && !(isFull || puoVedere(item))) return null
+      if (sub.length === 0) return null
+      return { ...item, sub }
+    }
+    return puoVedere(item) ? item : null
+  }).filter(Boolean) as NavItem[]
   const [openMenus, setOpenMenus] = useState<Record<string,boolean>>(() => {
     const init: Record<string,boolean> = {}
     NAV.forEach(item => {
-      if (item.sub && (path === item.href || path.startsWith(item.href + '/'))) {
+      if (item.sub && item.href && (path === item.href || path.startsWith(item.href + '/'))) {
         init[item.href] = true
       }
     })
@@ -136,16 +160,17 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
 
         {/* Nav */}
         <nav style={{flex:1,padding:'8px 0',overflowY:'auto'}}>
-          {NAV.map(item => {
-            const isActive = path === item.href || path.startsWith(item.href + '/')
+          {navVisibile.map(item => {
+            const key = item.href || item.label
+            const isActive = !!item.href && (path === item.href || path.startsWith(item.href + '/'))
             const hasSub = item.sub && item.sub.length > 0
-            const isOpen = openMenus[item.href]
+            const isOpen = openMenus[key]
 
             return (
-              <div key={item.href}>
+              <div key={key}>
                 {hasSub ? (
                   <div
-                    onClick={(e) => toggleMenu(item.href, e.currentTarget as HTMLElement)}
+                    onClick={(e) => toggleMenu(key, e.currentTarget as HTMLElement)}
                     style={{
                       display:'flex',alignItems:'center',gap:'9px',
                       padding:'8px 18px',cursor:'pointer',
