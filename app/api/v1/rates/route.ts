@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { autenticaApiKey } from '@/lib/api-auth'
-import { calcolaPrezzoListino } from '@/lib/pricing'
+import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
 // API pubblica MoovExpress — tariffa per il contratto della API key.
@@ -27,7 +27,16 @@ export async function POST(req: NextRequest) {
   })
   if (!ris) return NextResponse.json({ error: 'Nessuna tariffa disponibile per questa destinazione/peso' }, { status: 400 })
 
+  const cod = Number(body.codValue || 0)
+  const ass = Number(body.insuranceValue || 0)
+  const supp = await calcolaSupplementiCliente(admin, {
+    listinoId: cliente.listino_cliente_id, corriereId: ctx.corriereId,
+    contrassegno: cod, assicurazione: ass, valoreMerce: Number(body.valoreMerce || 0), nolo: ris.prezzo,
+  })
+  if (!supp.disponibile) return NextResponse.json({ error: 'Importo contrassegno/assicurazione oltre il massimo consentito per questo contratto' }, { status: 400 })
+
   const { data: corr } = await admin.from('corrieri').select('nome_contratto,tipo').eq('id', ctx.corriereId).single()
+  const totale = Math.round((ris.prezzo + supp.contrassegno + supp.assicurazione) * 100) / 100
 
   return NextResponse.json({
     contratto: corr?.nome_contratto || null,
@@ -35,8 +44,10 @@ export async function POST(req: NextRequest) {
     peso_reale: ris.peso_reale,
     peso_volume: ris.peso_volume,
     peso_fatturato: ris.peso_fatturato,
-    prezzo: ris.prezzo,
+    nolo: ris.prezzo,
+    contrassegno: supp.contrassegno,
+    assicurazione: supp.assicurazione,
+    prezzo: totale,
     valuta: 'EUR',
-    note: 'Prezzo di trasporto (nolo). Contrassegno/assicurazione vengono aggiunti alla creazione.',
   })
 }

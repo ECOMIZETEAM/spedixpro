@@ -267,6 +267,56 @@ export async function calcolaPrezzoCorriere(
 }
 
 
+// Calcola i supplementi contrassegno/assicurazione a carico del CLIENTE per un
+// contratto, con la STESSA logica a scaglioni del portale (tariffe/route.ts).
+// Ritorna le fee da aggiungere al nolo; disponibile=false se l'importo COD/assic
+// supera il massimo scaglione (il contratto non copre quell'importo).
+export async function calcolaSupplementiCliente(
+  supabase: any,
+  params: { listinoId: string; corriereId: string; contrassegno?: number; assicurazione?: number; valoreMerce?: number; nolo: number }
+): Promise<{ contrassegno: number; assicurazione: number; disponibile: boolean }> {
+  const cod = Number(params.contrassegno) || 0
+  const ass = Number(params.assicurazione) || 0
+  const valoreMerce = Number(params.valoreMerce) || 0
+  const nolo = Number(params.nolo) || 0
+  if (cod <= 0 && ass <= 0) return { contrassegno: 0, assicurazione: 0, disponibile: true }
+
+  const { data: suppl } = await supabase
+    .from('listini_clienti_supplementi')
+    .select('tipo, descrizione, valore, tipo_calcolo')
+    .eq('listino_id', params.listinoId)
+    .eq('corriere_id', params.corriereId)
+    .in('tipo', ['contrassegno', 'assicurazione'])
+
+  const scaglioni = (tipo: string) => (suppl || [])
+    .filter((s: any) => s.tipo === tipo)
+    .map((s: any) => {
+      let d: any = null; try { d = JSON.parse(s.descrizione) } catch {}
+      return {
+        valore_max: parseFloat(d?.valore_max ?? '') || 0,
+        prezzo_fisso: parseFloat(d?.prezzo_fisso ?? s.valore ?? '') || 0,
+        perc: parseFloat(d?.perc ?? '') || 0,
+        calcolo_su: d?.calcolo_su || s.tipo_calcolo || 'totale',
+      }
+    })
+    .sort((a: any, b: any) => a.valore_max - b.valore_max)
+
+  const applica = (tipo: string, importo: number): number | null => {
+    if (importo <= 0) return 0
+    const scal = scaglioni(tipo)
+    if (!scal.length) return 0
+    const s = scal.find((x: any) => importo <= x.valore_max)
+    if (!s) return null // oltre il massimo -> contratto non disponibile per quell'importo
+    const base = s.calcolo_su === 'valore_merce' ? valoreMerce : nolo
+    return s.prezzo_fisso + (s.perc / 100) * base
+  }
+
+  const feeCod = applica('contrassegno', cod)
+  const feeAss = applica('assicurazione', ass)
+  if (feeCod === null || feeAss === null) return { contrassegno: 0, assicurazione: 0, disponibile: false }
+  return { contrassegno: feeCod, assicurazione: feeAss, disponibile: true }
+}
+
 // Versione BATCH: precarica UNA volta i listini/fasce/supplementi/zone_cap del master
 // e ritorna una funzione che calcola il prezzo corriere per una spedizione in memoria,
 // senza query per riga. Risultato identico a calcolaPrezzoCorriere (usato dai report).

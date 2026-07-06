@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { autenticaApiKey } from '@/lib/api-auth'
-import { calcolaPrezzoListino } from '@/lib/pricing'
+import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
 import { registraMovimento } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import {
@@ -49,7 +49,15 @@ export async function POST(req: NextRequest) {
     packages, corriereId: ctx.corriereId,
   })
   if (!ris) return NextResponse.json({ error: 'Nessuna tariffa disponibile per questa destinazione/peso' }, { status: 400 })
-  const costoCliente = ris.prezzo
+
+  // Supplementi contrassegno/assicurazione dal listino cliente (stessa logica del portale)
+  const supp = await calcolaSupplementiCliente(admin, {
+    listinoId: cliente.listino_cliente_id, corriereId: ctx.corriereId,
+    contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+    valoreMerce: Number(body.valoreMerce || 0), nolo: ris.prezzo,
+  })
+  if (!supp.disponibile) return NextResponse.json({ error: 'Importo contrassegno/assicurazione oltre il massimo consentito per questo contratto' }, { status: 400 })
+  const costoCliente = Math.round((ris.prezzo + supp.contrassegno + supp.assicurazione) * 100) / 100
 
   // Blocco credito (clienti a scalare)
   if (cliente.tipo_contratto === 'credito_scalare' && costoCliente > 0 && Number(cliente.credito || 0) < costoCliente) {
