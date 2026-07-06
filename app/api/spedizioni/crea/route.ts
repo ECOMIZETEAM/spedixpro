@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { registraMovimento } from '@/lib/movimenti'
+import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
+import { calcolaPrezzoCorriere } from '@/lib/pricing'
 import {
   spediamoproGetQuotation,
   spediamoproCreateShipment,
@@ -18,25 +19,32 @@ export async function POST(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
   const body = await req.json()
 
-  const clienteId = utente?.ruolo === 'cliente' ? utente.cliente_id : body.clienteId
-  const { data: cliente } = await supabase.from('clienti').select('master_id,ragione_sociale,listino_cliente_id,vieta_inserimento,tipo_contratto,credito').eq('id', clienteId).single()
-  if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
+  // Spedizione propria del master (nessun cliente): il costo e' il listino corriere.
+  const isProprio = utente?.ruolo !== 'cliente' && body.clienteId === '__proprio__'
 
-  if (utente?.ruolo === 'cliente' && cliente.vieta_inserimento === true) return NextResponse.json({ error: 'Inserimento spedizioni non consentito per questo cliente.' }, { status: 403 })
+  const clienteId = utente?.ruolo === 'cliente' ? utente.cliente_id : (isProprio ? null : body.clienteId)
+  let cliente: any = null
+  if (!isProprio) {
+    const { data } = await supabase.from('clienti').select('master_id,ragione_sociale,listino_cliente_id,vieta_inserimento,tipo_contratto,credito').eq('id', clienteId).single()
+    cliente = data
+    if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
 
-  // ── Blocco credito insufficiente (solo clienti "credito a scalare") ──────────
-  // Il costo a carico del cliente è il prezzo di listino (body.totalPrice).
-  const costoPreventivo = parseFloat(body.totalPrice) || 0
-  if (cliente.tipo_contratto === 'credito_scalare' && costoPreventivo > 0) {
-    const creditoAttuale = Number(cliente.credito || 0)
-    if (creditoAttuale < costoPreventivo) {
-      return NextResponse.json({
-        error: `Credito insufficiente: disponibili € ${creditoAttuale.toFixed(2)}, spedizione € ${costoPreventivo.toFixed(2)}.`,
-      }, { status: 402 })
+    if (utente?.ruolo === 'cliente' && cliente.vieta_inserimento === true) return NextResponse.json({ error: 'Inserimento spedizioni non consentito per questo cliente.' }, { status: 403 })
+
+    // ── Blocco credito insufficiente (solo clienti "credito a scalare") ──────────
+    // Il costo a carico del cliente è il prezzo di listino (body.totalPrice).
+    const costoPreventivo = parseFloat(body.totalPrice) || 0
+    if (cliente.tipo_contratto === 'credito_scalare' && costoPreventivo > 0) {
+      const creditoAttuale = Number(cliente.credito || 0)
+      if (creditoAttuale < costoPreventivo) {
+        return NextResponse.json({
+          error: `Credito insufficiente: disponibili € ${creditoAttuale.toFixed(2)}, spedizione € ${costoPreventivo.toFixed(2)}.`,
+        }, { status: 402 })
+      }
     }
   }
 
-  const masterId = cliente.master_id
+  const masterId = isProprio ? utente!.master_id : cliente.master_id
 
   let corriereRecord: any = null
 
@@ -65,7 +73,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Fallback: primo corriere del listino (compatibilità)
-  if (!corriereRecord && cliente.listino_cliente_id) {
+  if (!corriereRecord && cliente?.listino_cliente_id) {
     const { data: fascia } = await supabase
       .from('listini_clienti_fasce')
       .select('corrieri(id,tipo,credenziali,nome_contratto,attivo,master_id)')
@@ -114,9 +122,39 @@ export async function POST(req: NextRequest) {
   const pkg = packages[0]
   const pesoReale = parseFloat(pkg?.weight || 1)
 
+  // Spedizione propria del master: prezzo dal listino corriere (server-side, non ci fidiamo del body).
+  let costoMaster = 0
+  if (isProprio) {
+    costoMaster = (await calcolaPrezzoCorriere(adminCrea, {
+      corriereId: corriereRecord.id, masterId,
+      provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+      pesoReale, packages,
+      contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+    })) ?? (parseFloat(body.totalPrice) || 0)
+  }
+
   // Helper: registra la detrazione del credito dopo una spedizione riuscita.
   // Non deve mai far fallire la spedizione (è già creata sul corriere + DB).
   async function addebitaCredito(spedizioneId: string | null, numeroSped: string, costo: number) {
+    // Spedizione propria del master: addebito al master col prezzo del listino corriere.
+    if (isProprio) {
+      if (!(costoMaster > 0)) return
+      try {
+        await registraMovimentoMaster(adminCrea, {
+          masterOwnerId: masterId,
+          masterTargetId: masterId,
+          tipo: 'spedizione',
+          descrizione: `${numeroSped} - ${body.shipTo?.name || ''}`.trim(),
+          riferimento: numeroSped,
+          importo: -Math.abs(costoMaster),
+          spedizioneId,
+          createdBy: user!.id,
+        })
+      } catch (e) {
+        console.error('Errore movimento spedizione propria master:', e)
+      }
+      return
+    }
     if (!(costo > 0)) return
     try {
       await registraMovimento(supabase, {
@@ -137,16 +175,18 @@ export async function POST(req: NextRequest) {
   // ── Blocco a monte: verifica il credito dei MASTER della catena (prezzo da listino
   //    ereditato). Se un master "credito_scalare" è a secco, tutta la catena è bloccata.
   //    Il proprietario del corriere non viene bloccato qui (costo API noto solo dopo). ──
-  const catenaCheck = await verificaCreditoCatena(supabase, {
-    masterDirettoId: masterId,
-    corriereOwnerId: corriereRecord.master_id,
-    provincia: body.shipTo.state,
-    packages,
-    cap: body.shipTo.postalCode,
-    paese: body.shipTo.country || 'IT',
-  })
-  if (!catenaCheck.ok) {
-    return NextResponse.json({ error: catenaCheck.errore }, { status: 402 })
+  if (!isProprio) {
+    const catenaCheck = await verificaCreditoCatena(supabase, {
+      masterDirettoId: masterId,
+      corriereOwnerId: corriereRecord.master_id,
+      provincia: body.shipTo.state,
+      packages,
+      cap: body.shipTo.postalCode,
+      paese: body.shipTo.country || 'IT',
+    })
+    if (!catenaCheck.ok) {
+      return NextResponse.json({ error: catenaCheck.errore }, { status: 402 })
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -186,7 +226,7 @@ export async function POST(req: NextRequest) {
     if (!res.ok || r.error) return NextResponse.json({ error: r?.error || text }, { status: 400 })
 
     const numero = r.trackingNumber
-    const costoCliente = parseFloat(body.totalPrice) || parseFloat(r.shipmentCost) || 0
+    const costoCliente = isProprio ? costoMaster : (parseFloat(body.totalPrice) || parseFloat(r.shipmentCost) || 0)
     const costoCorrente = parseFloat(r.shipmentCost) || 0
 
     let etichetteUrls: string[] = []
@@ -232,16 +272,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Spedizione creata su corriere (${numero}) ma errore DB: ${insertError.message}`, numero }, { status: 500 })
     }
 
-    // Detrazione credito (movimento -costo cliente)
+    // Detrazione credito (movimento -costo cliente, oppure -listino corriere se spedizione propria)
     await addebitaCredito(inserted?.id || null, numero, costoCliente)
 
-    // Addebito a cascata sui master della catena (proprietario paga costo reale API)
-    await addebitaCatena(supabase, {
-      masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
-      costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
-      cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
-      numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
-    })
+    // Addebito a cascata sui master della catena (solo se c'e' un cliente; il proprietario paga costo reale API)
+    if (!isProprio) {
+      await addebitaCatena(supabase, {
+        masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
+        costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
+        cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+        numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
+      })
+    }
 
     return NextResponse.json({ numero, tracking: r.trackingNumber, costo: r.shipmentCost, spedizioneId: inserted?.id || null })
   }
@@ -310,7 +352,7 @@ export async function POST(req: NextRequest) {
       }
 
       const costoCorrente = centsToEuro(shipment.totalPrice)
-      const costoCliente = parseFloat(body.totalPrice) || costoCorrente
+      const costoCliente = isProprio ? costoMaster : (parseFloat(body.totalPrice) || costoCorrente)
 
       const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
         master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id,
@@ -336,16 +378,18 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: `Spedizione creata su SpediamoPro (${numeroFinale}) ma errore DB: ${insertError.message}`, numero: numeroFinale }, { status: 500 })
       }
 
-      // Detrazione credito (movimento -costo cliente)
+      // Detrazione credito (movimento -costo cliente, oppure -listino corriere se spedizione propria)
       await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
 
-      // Addebito a cascata sui master della catena (proprietario paga costo reale API)
-      await addebitaCatena(supabase, {
-        masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
-        costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
-        cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
-        numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
-      })
+      // Addebito a cascata sui master della catena (solo se c'e' un cliente)
+      if (!isProprio) {
+        await addebitaCatena(supabase, {
+          masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
+          costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
+          cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+          numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
+        })
+      }
 
       return NextResponse.json({
         numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2), spedizioneId: inserted?.id || null,

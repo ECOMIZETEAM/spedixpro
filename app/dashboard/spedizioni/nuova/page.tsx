@@ -90,8 +90,10 @@ export default function NuovaSpedizionePage() {
   }
 
   function selezionaCliente(id:string) {
+    // Spedizione propria del master: nessun cliente, mittente da compilare a mano.
+    if (id==='__proprio__') { setClienteId(id); return }
     const c = clienti.find(x=>x.id===id)
-    if (!c) return
+    if (!c) { setClienteId(''); return }
     setClienteId(id)
     setMitt({nome:c.ragione_sociale,indirizzo:c.so_indirizzo||'',citta:c.so_citta||'',provincia:c.so_provincia||'',cap:c.so_cap||'',email:c.email||'',telefono:c.telefono||''})
   }
@@ -213,6 +215,7 @@ export default function NuovaSpedizionePage() {
                 <label style={lbl}>Cliente *</label>
                 <select value={clienteId} onChange={e=>selezionaCliente(e.target.value)} style={inp}>
                   <option value="">— seleziona cliente —</option>
+                  <option value="__proprio__">— Spedizione propria (nessun cliente) —</option>
                   {clienti.map(c=><option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
                 </select>
               </div>
