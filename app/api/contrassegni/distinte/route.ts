@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   const al = p.get('al')
 
   let query = supabase.from('distinte_contrassegni')
-    .select('*, clienti(ragione_sociale), target_master:masters!target_master_id(nome), distinte_contrassegni_righe(id,numero_spedizione,importo_cod,importo_sistema,spedizioni(dest_nome,rif_destinatario,mitt_nome,created_at))')
+    .select('*, clienti(ragione_sociale), distinte_contrassegni_righe(id,numero_spedizione,importo_cod,importo_sistema,spedizioni(dest_nome,rif_destinatario,mitt_nome,created_at))')
     .eq('master_id', utente?.master_id)
     .order('created_at', { ascending: false })
 
@@ -23,7 +23,15 @@ export async function GET(req: NextRequest) {
   if (al) query = query.lte('created_at', al + 'T23:59:59')
 
   const { data } = await query
-  return NextResponse.json(data || [])
+  const distinte = data || []
+  const masterIds = [...new Set(distinte.map((d:any)=>d.target_master_id).filter(Boolean))]
+  if (masterIds.length) {
+    const { data: masters } = await supabase.from('masters').select('id,nome').in('id', masterIds)
+    const mMap: Record<string,any> = {}
+    ;(masters||[]).forEach((m:any)=>{ mMap[m.id] = m })
+    distinte.forEach((d:any)=>{ if (d.target_master_id && mMap[d.target_master_id]) d.target_master = { nome: mMap[d.target_master_id].nome } })
+  }
+  return NextResponse.json(distinte)
 }
 
 export async function POST(req: NextRequest) {
