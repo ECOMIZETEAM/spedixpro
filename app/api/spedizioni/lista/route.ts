@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Solo colonne leggere (SPED_COLS): esclusi etichetta_url/raw_response/colli_dettaglio.
-  let query = db.from('spedizioni').select(`${SPED_COLS},clienti(ragione_sociale),corrieri(id,nome_contratto)`).order(ordinaPer, { ascending: false }).limit(200)
+  let query = db.from('spedizioni').select(`${SPED_COLS},clienti(ragione_sociale,agente),corrieri(id,nome_contratto)`).order(ordinaPer, { ascending: false }).limit(200)
   if (clienteId) {
     query = query.eq('cliente_id', clienteId).eq('master_id', utente?.master_id)
   } else if (utente?.ruolo === 'cliente') {

@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   const provincia = p.get('provincia')
 
   let query = supabase.from('spedizioni')
-    .select(`${SPED_COLS}, clienti(ragione_sociale), corrieri(id,nome_contratto)`)
+    .select(`${SPED_COLS}, clienti(ragione_sociale,agente), corrieri(id,nome_contratto)`)
     .eq('master_id', utente?.master_id)
     .order('created_at', { ascending: false })
     .limit(5000)

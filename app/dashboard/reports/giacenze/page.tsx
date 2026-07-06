@@ -9,6 +9,7 @@ const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'
 export default function ReportGiacenzePage() {
   const [clienti, setClienti] = useState<any[]>([])
   const [corrieri, setCorrieri] = useState<any[]>([])
+  const [staff, setStaff] = useState<any[]>([])
   const [reports, setReports] = useState<any[]>([])
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
@@ -22,6 +23,7 @@ export default function ReportGiacenzePage() {
   useEffect(() => {
     fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[]))
     fetch('/api/corrieri/lista').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d)?d:[]))
+    fetch('/api/staff').then(r=>r.json()).then(d=>setStaff(Array.isArray(d)?d.filter((u:any)=>{const ru=(u.ruolo||'').toLowerCase();return ru!=='cliente'&&ru!=='master'}):[]))
     fetch('/api/reports/lista?tipo=giacenze').then(r=>r.json()).then(d=>setReports(d||[]))
   }, [])
 
@@ -51,6 +53,8 @@ export default function ReportGiacenzePage() {
     let spedizioni = await res.json()
     // Filtro vettore client-side (stessa logica della lista spedizioni)
     if (filtri.vettore) spedizioni = spedizioni.filter((s:any) => String(s.corrieri?.nome_contratto||'').split(' ')[0] === filtri.vettore)
+    // Filtro agente: match sul campo agente del cliente (= "Nome Cognome")
+    if (filtri.agente) spedizioni = spedizioni.filter((s:any) => (s.clienti?.agente||'') === filtri.agente)
 
     if (!spedizioni.length) { alert('Nessuna giacenza trovata'); setGenerating(false); return }
 
@@ -144,6 +148,7 @@ export default function ReportGiacenzePage() {
           <div><label style={lbl}>Agente</label>
             <select value={filtri.agente} onChange={e=>setF('agente',e.target.value)} style={sel}>
               <option value="">Tutti</option>
+              {staff.map((u:any)=>{const nome=[u.nome,u.cognome].filter(Boolean).join(' ');return <option key={u.id} value={nome}>{nome||u.email||u.id}</option>})}
             </select>
           </div>
           <div><label style={lbl}>Formato</label>
