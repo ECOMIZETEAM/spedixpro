@@ -22,7 +22,10 @@ export async function GET(req: NextRequest) {
   const contenuto = p.get('contenuto')
   const contrassegno = p.get('contrassegno')
   const ordinaPer = (stato === 'annullata') ? 'updated_at' : 'created_at'
-  let query = supabase.from('spedizioni').select('*,clienti(ragione_sociale),corrieri(id,nome_contratto)').order(ordinaPer, { ascending: false }).limit(200)
+  // Solo colonne leggere: si escludono etichetta_url, raw_response, colli_dettaglio
+  // (blob base64/JSON ~300KB/riga, non usati dalla lista) per non gonfiare il payload.
+  const COLONNE = 'id,master_id,cliente_id,corriere_id,numero,mitt_nome,mitt_indirizzo,mitt_citta,mitt_provincia,mitt_cap,mitt_paese,mitt_email,mitt_telefono,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_email,dest_telefono,notifica_sms,note,rif_destinatario,rif_ordine,colli,peso_reale,peso_volume,peso_fatturato,lunghezza,larghezza,altezza,contenuto,tipo_contenuto,valore_merce,codice_taric,contrassegno,assicurazione,tracking_number,stato,costo_spedizione,costo_totale,fatturato,richiedi_ritiro,data_ritiro,intervallo_ritiro,distinta_id,id_ordine_esterno,canale,created_at,updated_at,stato_contrassegno,distinta_contrassegno_id,cancellata_il,cancellata_da,giacenza_stato,giacenza_data,giacenza_istruzioni,giacenza_costo_giornaliero,giacenza_costo_riconsegna,giacenza_giorni,giacenza_addebito_effettuato,clienti(ragione_sociale),corrieri(id,nome_contratto)'
+  let query = supabase.from('spedizioni').select(COLONNE).order(ordinaPer, { ascending: false }).limit(200)
   if (clienteId) {
     query = query.eq('cliente_id', clienteId).eq('master_id', utente?.master_id)
   } else if (utente?.ruolo === 'cliente') {
