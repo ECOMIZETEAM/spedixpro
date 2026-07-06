@@ -1,8 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
+import DateRangePicker from '@/app/components/DateRangePicker'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
-const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
 const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
 
 export default function ReportContrassegniPage() {
@@ -137,19 +137,11 @@ export default function ReportContrassegniPage() {
         </div>
         <div style={{marginBottom:'10px'}}>
           <label style={lbl}>Data inserimento Spedizione</label>
-          <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-            <input type="date" value={filtri.dalSpedizione} onChange={e=>setF('dalSpedizione',e.target.value)} style={inp}/>
-            <span style={{color:'#1a1a1a'}}>—</span>
-            <input type="date" value={filtri.alSpedizione} onChange={e=>setF('alSpedizione',e.target.value)} style={inp}/>
-          </div>
+          <DateRangePicker dal={filtri.dalSpedizione} al={filtri.alSpedizione} onChange={(dal,al)=>setFiltri(f=>({...f,dalSpedizione:dal,alSpedizione:al}))} />
         </div>
         <div style={{marginBottom:'14px'}}>
           <label style={lbl}>Data esito contrassegno</label>
-          <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-            <input type="date" value={filtri.dalEsito} onChange={e=>setF('dalEsito',e.target.value)} style={inp}/>
-            <span style={{color:'#1a1a1a'}}>—</span>
-            <input type="date" value={filtri.alEsito} onChange={e=>setF('alEsito',e.target.value)} style={inp}/>
-          </div>
+          <DateRangePicker dal={filtri.dalEsito} al={filtri.alEsito} onChange={(dal,al)=>setFiltri(f=>({...f,dalEsito:dal,alEsito:al}))} />
         </div>
         <div style={{marginBottom:'16px',display:'flex',alignItems:'center',gap:'8px'}}>
           <input type="checkbox" checked={archivioZip} onChange={e=>setArchivioZip(e.target.checked)} id="zip"/>
