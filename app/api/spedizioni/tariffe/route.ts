@@ -5,6 +5,7 @@ import {
   kgToGrams, cmToMm, euroToCents, centsToEuro
 } from '@/lib/spediamopro'
 import { trovaZoneMatch } from '@/lib/zone-match'
+import { calcolaPrezzoCorriere } from '@/lib/pricing'
 
 const ZONE_MAP: Record<string,string> = {
   CA:'Sardegna',CI:'Sardegna',VS:'Sardegna',NU:'Sardegna',OG:'Sardegna',OT:'Sardegna',OR:'Sardegna',SS:'Sardegna',
@@ -26,6 +27,51 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json()
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+
+  // ─── SPEDIZIONE PROPRIA DEL MASTER (nessun cliente) → tariffe da LISTINO CORRIERE ───
+  // Il master paga il prezzo del proprio listino corriere per la zona/fascia.
+  const isProprio = utente?.ruolo !== 'cliente' && body.clienteId === '__proprio__'
+  if (isProprio) {
+    const masterIdP = utente!.master_id
+    const colliP = Array.isArray(body.packages) && body.packages.length ? body.packages : [body.packages?.[0] || { weight: 1 }]
+    const pesoRealeP = colliP.reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
+    const provinciaP = (body.shipTo?.state || '').toUpperCase().trim()
+    const capP = (body.shipTo?.postalCode || '').trim()
+    const paeseP = (body.shipTo?.country || 'IT').toUpperCase().trim()
+    const isEsteroP = paeseP !== 'IT'
+
+    const { data: listiniCorr } = await supabase
+      .from('listini_corrieri')
+      .select('corriere_id, corrieri(id,tipo,nome_contratto,attivo)')
+      .eq('master_id', masterIdP).eq('attivo', true)
+
+    const risultati: any[] = []
+    for (const lc of (listiniCorr || [])) {
+      const corr: any = (lc as any).corrieri
+      if (!corr || corr.attivo === false) continue
+      const prezzo = await calcolaPrezzoCorriere(supabase, {
+        corriereId: (lc as any).corriere_id, masterId: masterIdP,
+        provincia: provinciaP, cap: capP, paese: paeseP,
+        pesoReale: pesoRealeP, packages: colliP,
+        contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+      })
+      if (prezzo == null) continue
+      risultati.push({
+        carrierCode: corr.tipo || 'sda', contractCode: '',
+        weight_price: prezzo.toFixed(2), prezzo_spedizione: prezzo.toFixed(2),
+        costo_contrassegno: '0.00', costo_assicurazione: '0.00',
+        total_price: prezzo.toFixed(2), fuel: '0.00',
+        zona: isEsteroP ? (PAESI[paeseP] || paeseP) : (ZONE_MAP[provinciaP] || 'Italia'),
+        peso_reale: pesoRealeP, peso_volume: '0.00', peso_fatturato: pesoRealeP.toFixed(2),
+        corriere_nome: corr.nome_contratto || 'Corriere', listino_fascia: 'Listino corriere',
+        _corriere_tipo: corr.tipo, _corriere_id: corr.id,
+      })
+    }
+    if (!risultati.length) return NextResponse.json({ error: 'Nessuna tariffa dal listino corriere per questa destinazione' }, { status: 400 })
+    risultati.sort((a, b) => Number(a.total_price) - Number(b.total_price))
+    return NextResponse.json(risultati)
+  }
+
   const clienteId = utente?.ruolo === 'cliente' ? utente.cliente_id : body.clienteId
 
   const { data: cliente } = await supabase

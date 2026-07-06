@@ -5,9 +5,8 @@ import * as XLSX from 'xlsx'
 export default function ZonePage() {
   const [corrieri, setCorrieri] = useState<any[]>([])
   const [zone, setZone] = useState<any[]>([])
-  const [tab, setTab] = useState('')
   const [loading, setLoading] = useState(true)
-  const [modalNuova, setModalNuova] = useState(false)
+  const [modalNuovaCorr, setModalNuovaCorr] = useState<string|null>(null)
   const [modalModifica, setModalModifica] = useState<any>(null)
   const [modalSposta, setModalSposta] = useState<any>(null)
   const [formNuova, setFormNuova] = useState({nome:'',descrizione:'',con_fuel:false})
@@ -27,17 +26,14 @@ export default function ZonePage() {
     const z = await fetch('/api/zone').then(r=>r.json()).catch(()=>[])
     setCorrieri(Array.isArray(c)?c:[])
     setZone(Array.isArray(z)?z:[])
-    if(Array.isArray(c)&&c.length) setTab(c[0].id)
     setLoading(false)
   }
 
-  const zoneTab = zone.filter(z=>z.corriere_id===tab)
-  const corrTab = corrieri.find(c=>c.id===tab)
-
   async function salvaZona() {
+    if(!modalNuovaCorr) return
     setSaving(true)
-    await fetch('/api/zone',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...formNuova,corriereId:tab})})
-    setFormNuova({nome:'',descrizione:'',con_fuel:false}); setModalNuova(false); setSaving(false); load()
+    await fetch('/api/zone',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...formNuova,corriereId:modalNuovaCorr})})
+    setFormNuova({nome:'',descrizione:'',con_fuel:false}); setModalNuovaCorr(null); setSaving(false); load()
   }
 
   async function salvaMod() {
@@ -104,10 +100,11 @@ export default function ZonePage() {
       country_id: r.paese, province: r.provincia, cap: r.cap, city: r.citta,
     }))
     if(!righe.length) righe.push({country_id:'IT',province:'*',cap:'*',city:'*'})
+    const corr = corrieri.find(c=>c.id===z.corriere_id)
     const ws = XLSX.utils.json_to_sheet(righe, {header:['country_id','province','cap','city']})
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Zona')
-    const nomeCorr = (corrTab?.nome_contratto||'Corriere').replace(/[\\/:*?"<>|]/g,'')
+    const nomeCorr = (corr?.nome_contratto||'Corriere').replace(/[\\/:*?"<>|]/g,'')
     const nomeZona = (z.nome||'zona').replace(/[\\/:*?"<>|]/g,'')
     XLSX.writeFile(wb, `${nomeCorr}_${nomeZona}.xlsx`)
   }
@@ -153,7 +150,6 @@ export default function ZonePage() {
   }
 
   const inp={padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',width:'100%',boxSizing:'border-box' as const}
-  const tbtn=(id:string)=>({padding:'8px 16px',background:'none',border:'none',cursor:'pointer',fontSize:'13px',fontWeight:tab===id?'700' as const:'400' as const,color:tab===id?'#f97316':'#1a1a1a',borderBottom:tab===id?'2px solid #f97316':'2px solid transparent',whiteSpace:'nowrap' as const})
   const ibtn=(bg:string,color:string,border:string)=>({width:'28px',height:'28px',background:bg,color,border:`1px solid ${border}`,borderRadius:'4px',cursor:'pointer',fontSize:'13px',display:'inline-flex' as const,alignItems:'center' as const,justifyContent:'center' as const})
 
   if(loading) return <div style={{padding:'40px',textAlign:'center' as const,color:'#666'}}>Caricamento...</div>
@@ -161,75 +157,80 @@ export default function ZonePage() {
   return (
     <div>
       <div style={{marginBottom:'16px'}}><h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Gestione Zone</h1></div>
-      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
-        <div style={{display:'flex',borderBottom:'1px solid #d1d5db',padding:'0 16px',overflowX:'auto' as const}}>
-          {corrieri.map(c=><button key={c.id} style={tbtn(c.id)} onClick={()=>setTab(c.id)}>{c.nome_contratto}</button>)}
-        </div>
-        {tab && (
-          <div style={{padding:'16px'}}>
-            <div style={{display:'flex',alignItems:'center',gap:'12px',marginBottom:'16px'}}>
-              <div style={{width:'60px',height:'36px',background:'#f97316',borderRadius:'4px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'10px',fontWeight:'700',color:'#fff'}}>{corrTab?.tipo?.toUpperCase()||'CORR'}</div>
-              <span style={{fontSize:'16px',fontWeight:'700',color:'#1a1a1a'}}>{corrTab?.nome_contratto}</span>
-            </div>
-            <div style={{display:'flex',gap:'8px',marginBottom:'16px'}}>
-              <button onClick={()=>setModalNuova(true)} style={{background:'none',border:'none',color:'#f97316',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>+Aggiungi zona</button>
-              <button onClick={load} style={{padding:'6px 14px',background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',cursor:'pointer',color:'#1a1a1a'}}>🔄 Sync Zones</button>
-            </div>
-            {!zoneTab.length ? (
-              <div style={{padding:'40px',textAlign:'center' as const,color:'#666',fontSize:'13px'}}>Nessuna zona configurata</div>
-            ) : (
-              <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
-                <thead><tr>
-                  {['Nome','Opzioni','Paese (Pr) CAP Città','Modifica/Esporta/Importa/Sposta',''].map(h=>(
-                    <th key={h} style={{textAlign:'left' as const,padding:'9px 12px',fontSize:'11px',fontWeight:'700',color:'#1a1a1a',borderBottom:'1px solid #d1d5db'}}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {zoneTab.map((z:any)=>(
-                    <tr key={z.id} style={{borderBottom:'1px solid #e5e7eb'}}>
-                      <td style={{padding:'10px 12px',fontWeight:'600',color:'#f97316'}}>{z.nome}</td>
-                      <td style={{padding:'10px 12px'}}>
-                        {z.con_fuel&&<span style={{background:'#f97316',color:'#fff',padding:'2px 8px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>Fuel</span>}
-                      </td>
-                      <td style={{padding:'10px 12px',color:'#1a1a1a',fontSize:'12px',maxWidth:'500px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}} title={riepilogoRegioni(z)}>{riepilogoRegioni(z)}</td>
-                      <td style={{padding:'10px 12px'}}>
-                        <div style={{display:'flex',gap:'4px'}}>
-                          <button onClick={()=>{setModalModifica(z);setFormMod({nome:z.nome,descrizione:z.descrizione||'',con_fuel:z.con_fuel||false});setRegioni([]);setEditReg(null);caricaRegioni(z.id)}} style={ibtn('#16a34a','#fff','#86efac')}>✏️</button>
-                          <button onClick={()=>esporta(z)} title="Esporta zona (XLSX)" style={ibtn('#fff','#1a1a1a','#d1d5db')}>⬇</button>
-                          <label title="Importa regioni (XLSX spedisci.online)" style={{...ibtn('#fff','#1a1a1a','#d1d5db'),cursor:importing===z.id?'wait':'pointer',opacity:importing===z.id?0.5:1}}>
-                            {importing===z.id?'…':'⬆'}<input type="file" accept=".xlsx,.xls,.csv" disabled={!!importing} style={{display:'none'}} onChange={async e=>{
-                              const f=e.target.files?.[0]; e.target.value=''; if(!f)return
-                              await importaXlsx(z.id, f)
-                            }}/>
-                          </label>
-                          <button onClick={()=>setModalSposta(z)} style={ibtn('#fff','#1a1a1a','#d1d5db')}>↪</button>
-                        </div>
-                      </td>
-                      <td style={{padding:'10px 8px'}}>
-                        <button onClick={()=>elimina(z.id,z.nome)} style={{background:'none',border:'none',color:'#dc2626',fontSize:'16px',cursor:'pointer'}}>🗑️</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
-      </div>
 
-      {modalNuova&&(
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}} onClick={()=>setModalNuova(false)}>
+      {!corrieri.length && (
+        <div style={{padding:'40px',textAlign:'center' as const,color:'#666',fontSize:'13px',background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db'}}>Nessun corriere configurato</div>
+      )}
+
+      {corrieri.map((c:any)=>{
+        const zoneC = zone.filter(z=>z.corriere_id===c.id)
+        return (
+          <div key={c.id} style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden',marginBottom:'20px'}}>
+            <div style={{padding:'16px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'12px',marginBottom:'16px'}}>
+                <div style={{width:'60px',height:'36px',background:'#f97316',borderRadius:'4px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'10px',fontWeight:'700',color:'#fff'}}>{c?.tipo?.toUpperCase()||'CORR'}</div>
+                <span style={{fontSize:'16px',fontWeight:'700',color:'#1a1a1a'}}>{c?.nome_contratto}</span>
+              </div>
+              <div style={{display:'flex',gap:'8px',marginBottom:'16px'}}>
+                <button onClick={()=>{setFormNuova({nome:'',descrizione:'',con_fuel:false});setModalNuovaCorr(c.id)}} style={{background:'none',border:'none',color:'#f97316',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>+Aggiungi zona</button>
+                <button onClick={load} style={{padding:'6px 14px',background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',cursor:'pointer',color:'#1a1a1a'}}>🔄 Sync Zones</button>
+              </div>
+              {!zoneC.length ? (
+                <div style={{padding:'30px',textAlign:'center' as const,color:'#666',fontSize:'13px'}}>Nessuna zona configurata</div>
+              ) : (
+                <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
+                  <thead><tr>
+                    {['Nome','Opzioni','Paese (Pr) CAP Città','Modifica/Esporta/Importa/Sposta',''].map(h=>(
+                      <th key={h} style={{textAlign:'left' as const,padding:'9px 12px',fontSize:'11px',fontWeight:'700',color:'#1a1a1a',borderBottom:'1px solid #d1d5db'}}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {zoneC.map((z:any)=>(
+                      <tr key={z.id} style={{borderBottom:'1px solid #e5e7eb'}}>
+                        <td style={{padding:'10px 12px',fontWeight:'600',color:'#f97316'}}>{z.nome}</td>
+                        <td style={{padding:'10px 12px'}}>
+                          {z.con_fuel&&<span style={{background:'#f97316',color:'#fff',padding:'2px 8px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>Fuel</span>}
+                        </td>
+                        <td style={{padding:'10px 12px',color:'#1a1a1a',fontSize:'12px',maxWidth:'500px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}} title={riepilogoRegioni(z)}>{riepilogoRegioni(z)}</td>
+                        <td style={{padding:'10px 12px'}}>
+                          <div style={{display:'flex',gap:'4px'}}>
+                            <button onClick={()=>{setModalModifica(z);setFormMod({nome:z.nome,descrizione:z.descrizione||'',con_fuel:z.con_fuel||false});setRegioni([]);setEditReg(null);caricaRegioni(z.id)}} style={ibtn('#16a34a','#fff','#86efac')}>✏️</button>
+                            <button onClick={()=>esporta(z)} title="Esporta zona (XLSX)" style={ibtn('#fff','#1a1a1a','#d1d5db')}>⬇</button>
+                            <label title="Importa regioni (XLSX spedisci.online)" style={{...ibtn('#fff','#1a1a1a','#d1d5db'),cursor:importing===z.id?'wait':'pointer',opacity:importing===z.id?0.5:1}}>
+                              {importing===z.id?'…':'⬆'}<input type="file" accept=".xlsx,.xls,.csv" disabled={!!importing} style={{display:'none'}} onChange={async e=>{
+                                const f=e.target.files?.[0]; e.target.value=''; if(!f)return
+                                await importaXlsx(z.id, f)
+                              }}/>
+                            </label>
+                            <button onClick={()=>setModalSposta(z)} style={ibtn('#fff','#1a1a1a','#d1d5db')}>↪</button>
+                          </div>
+                        </td>
+                        <td style={{padding:'10px 8px'}}>
+                          <button onClick={()=>elimina(z.id,z.nome)} style={{background:'none',border:'none',color:'#dc2626',fontSize:'16px',cursor:'pointer'}}>🗑️</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )
+      })}
+
+      {modalNuovaCorr&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}} onClick={()=>setModalNuovaCorr(null)}>
           <div style={{background:'#fff',borderRadius:'8px',width:'500px'}} onClick={e=>e.stopPropagation()}>
             <div style={{padding:'14px 20px',borderBottom:'1px solid #e5e7eb',display:'flex',justifyContent:'space-between'}}>
-              <span style={{fontWeight:'700',color:'#1a1a1a'}}>Aggiungi Zona</span>
-              <button onClick={()=>setModalNuova(false)} style={{background:'none',border:'none',cursor:'pointer',fontSize:'18px'}}>✕</button>
+              <span style={{fontWeight:'700',color:'#1a1a1a'}}>Aggiungi Zona — {corrieri.find(c=>c.id===modalNuovaCorr)?.nome_contratto||''}</span>
+              <button onClick={()=>setModalNuovaCorr(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:'18px'}}>✕</button>
             </div>
             <div style={{padding:'20px'}}>
               <div style={{marginBottom:'12px'}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Nome</label><input value={formNuova.nome} onChange={e=>setFormNuova(f=>({...f,nome:e.target.value}))} style={inp} placeholder="es. SARDEGNA"/></div>
-              <div style={{marginBottom:'12px'}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Descrizione</label><textarea value={formNuova.descrizione} onChange={e=>setFormNuova(f=>({...f,descrizione:e.target.value}))} rows={4} style={{...inp,resize:'vertical' as const}} placeholder="es. IT (CA) ** · IT (CI) ** ..."/></div>
+              <div style={{marginBottom:'12px'}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Descrizione</label><textarea value={formNuova.descrizione} onChange={e=>setFormNuova(f=>({...f,descrizione:e.target.value}))} rows={4} style={{...inp,resize:'vertical' as const}} placeholder="opzionale"/></div>
               <div style={{marginBottom:'16px',display:'flex',alignItems:'center',gap:'8px'}}><input type="checkbox" checked={formNuova.con_fuel} onChange={e=>setFormNuova(f=>({...f,con_fuel:e.target.checked}))} id="fn"/><label htmlFor="fn" style={{fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>Applica supplemento Fuel</label></div>
               <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
-                <button onClick={()=>setModalNuova(false)} style={{padding:'8px 16px',background:'#f5f5f5',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:'pointer',color:'#1a1a1a'}}>Annulla</button>
+                <button onClick={()=>setModalNuovaCorr(null)} style={{padding:'8px 16px',background:'#f5f5f5',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:'pointer',color:'#1a1a1a'}}>Annulla</button>
                 <button onClick={salvaZona} disabled={saving} style={{padding:'8px 24px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>Aggiungi</button>
               </div>
             </div>
@@ -319,7 +320,7 @@ export default function ZonePage() {
             </div>
             <div style={{padding:'20px'}}>
               <div style={{display:'flex',flexDirection:'column' as const,gap:'8px'}}>
-                {corrieri.filter(c=>c.id!==tab).map(c=>(
+                {corrieri.filter(c=>c.id!==modalSposta.corriere_id).map(c=>(
                   <button key={c.id} onClick={()=>sposta(modalSposta.id,c.id)} style={{padding:'10px 14px',background:'#f9fafb',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:'pointer',color:'#1a1a1a',textAlign:'left' as const}}>{c.nome_contratto}</button>
                 ))}
               </div>
