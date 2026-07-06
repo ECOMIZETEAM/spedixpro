@@ -17,8 +17,21 @@ export default function ZonePage() {
   const [saving, setSaving] = useState(false)
   const [editReg, setEditReg] = useState<any>(null)
   const [importing, setImporting] = useState('')
+  const [brand, setBrand] = useState('')
 
   useEffect(() => { load() }, [])
+
+  // Brand = prima parola del nome contratto (BRT, SDA, Poste, UPS…)
+  const brandKey = (c:any) => ((c?.nome_contratto||'').trim().split(/\s+/)[0]||'').toUpperCase()
+  const brands:{key:string,label:string}[] = []
+  const _seen = new Set<string>()
+  for(const c of corrieri){ const k=brandKey(c); if(k && !_seen.has(k)){ _seen.add(k); brands.push({key:k, label:(c.nome_contratto||'').trim().split(/\s+/)[0]}) } }
+
+  useEffect(() => {
+    if(!corrieri.length) return
+    const keys = brands.map(b=>b.key)
+    if(!brand || !keys.includes(brand)) setBrand(keys[0]||'')
+  }, [corrieri])
 
   async function load() {
     setLoading(true)
@@ -151,6 +164,7 @@ export default function ZonePage() {
 
   const inp={padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',width:'100%',boxSizing:'border-box' as const}
   const ibtn=(bg:string,color:string,border:string)=>({width:'28px',height:'28px',background:bg,color,border:`1px solid ${border}`,borderRadius:'4px',cursor:'pointer',fontSize:'13px',display:'inline-flex' as const,alignItems:'center' as const,justifyContent:'center' as const})
+  const brandBtn=(k:string)=>({padding:'8px 18px',background:'none',border:'none',cursor:'pointer',fontSize:'14px',fontWeight:brand===k?'700' as const:'500' as const,color:brand===k?'#f97316':'#1a1a1a',borderBottom:brand===k?'3px solid #f97316':'3px solid transparent',whiteSpace:'nowrap' as const})
 
   if(loading) return <div style={{padding:'40px',textAlign:'center' as const,color:'#666'}}>Caricamento...</div>
 
@@ -162,7 +176,13 @@ export default function ZonePage() {
         <div style={{padding:'40px',textAlign:'center' as const,color:'#666',fontSize:'13px',background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db'}}>Nessun corriere configurato</div>
       )}
 
-      {corrieri.map((c:any)=>{
+      {brands.length>0 && (
+        <div style={{display:'flex',gap:'4px',borderBottom:'1px solid #d1d5db',marginBottom:'20px',overflowX:'auto' as const}}>
+          {brands.map(b=><button key={b.key} style={brandBtn(b.key)} onClick={()=>setBrand(b.key)}>{b.label}</button>)}
+        </div>
+      )}
+
+      {corrieri.filter((c:any)=>brandKey(c)===brand).map((c:any)=>{
         const zoneC = zone.filter(z=>z.corriere_id===c.id)
         return (
           <div key={c.id} style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden',marginBottom:'20px'}}>
