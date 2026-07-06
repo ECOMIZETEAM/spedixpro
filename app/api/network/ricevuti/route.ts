@@ -21,7 +21,7 @@ export async function GET(_req: NextRequest) {
       .eq('target_master_id', mio)
       .order('created_at', { ascending: false }).limit(200),
     adminDb.from('distinte_contrassegni')
-      .select('id,numero,totale_iniziale,totale_rimborsato,metodo_pagamento,stato,data_pagamento,created_at,masters:master_id(nome),distinte_contrassegni_righe(numero_spedizione,importo_cod)')
+      .select('id,numero,totale_iniziale,totale_rimborsato,metodo_pagamento,stato,data_pagamento,accettata_target,created_at,masters:master_id(nome),distinte_contrassegni_righe(numero_spedizione,importo_cod)')
       .eq('target_master_id', mio)
       .order('created_at', { ascending: false }).limit(100),
     adminDb.from('movimenti')

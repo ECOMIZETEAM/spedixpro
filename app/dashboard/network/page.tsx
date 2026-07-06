@@ -12,6 +12,7 @@ export default function NetworkRicevutiPage() {
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
   const [propagando, setPropagando] = useState<string>('')
+  const [accettando, setAccettando] = useState<string>('')
 
   async function carica() {
     setLoading(true)
@@ -54,6 +55,22 @@ export default function NetworkRicevutiPage() {
       if (!silenzioso) setMsg(decisione === 'assorbita' ? ('✓ ' + r.numero_spedizione + ': assorbita — resta a tuo carico, i tuoi clienti non vengono toccati') : 'Aggiornata')
       carica()
     } catch { if (!silenzioso) setMsg('Errore di connessione') }
+  }
+
+  // Accetta una rimessa contrassegni ricevuta: crea le distinte verso i miei clienti
+  async function accettaContrassegno(c: any) {
+    setAccettando(c.id); setMsg('')
+    try {
+      const res = await fetch('/api/network/contrassegni/accetta', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ distintaId: c.id })
+      })
+      const d = await res.json()
+      if (d.error) setMsg('Errore: ' + d.error)
+      else setMsg('✓ Rimessa #' + c.numero + ' accettata — create ' + (d.distinteCreate||0) + ' distinte verso i tuoi clienti (le trovi in Contrassegni › Distinte)')
+      carica()
+    } catch { setMsg('Errore di connessione') }
+    setAccettando('')
   }
 
   const tabs: [typeof tab, string, number][] = [
@@ -126,10 +143,10 @@ export default function NetworkRicevutiPage() {
           {tab==='contrassegni' && (
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead><tr style={{background:'#f9fafb'}}>
-                <th style={th}>Data</th><th style={th}>Da</th><th style={th}>Distinta</th><th style={th}>LDV incluse</th><th style={th}>Totale dovuto</th><th style={th}>Stato</th>
+                <th style={th}>Data</th><th style={th}>Da</th><th style={th}>Distinta</th><th style={th}>LDV incluse</th><th style={th}>Totale dovuto</th><th style={th}>Stato</th><th style={th}></th>
               </tr></thead>
               <tbody>
-                {dati.contrassegni.length===0 ? <tr><td colSpan={6} style={{...td,textAlign:'center',color:'#999',padding:'32px'}}>Nessuna rimessa ricevuta</td></tr> :
+                {dati.contrassegni.length===0 ? <tr><td colSpan={7} style={{...td,textAlign:'center',color:'#999',padding:'32px'}}>Nessuna rimessa ricevuta</td></tr> :
                 dati.contrassegni.map((c:any)=>(
                   <tr key={c.id}>
                     <td style={td}>{new Date(c.created_at).toLocaleDateString('it-IT')}</td>
@@ -141,6 +158,16 @@ export default function NetworkRicevutiPage() {
                       <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:c.stato==='pagata'?'#dcfce7':'#fef3c7',color:c.stato==='pagata'?'#166534':'#92400e'}}>
                         {c.stato==='pagata'?('Pagata'+(c.data_pagamento?' il '+new Date(c.data_pagamento).toLocaleDateString('it-IT'):'')):'Da ricevere'}
                       </span>
+                    </td>
+                    <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>
+                      {c.accettata_target ? (
+                        <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#dcfce7',color:'#166534'}}>✓ Accettata</span>
+                      ) : (
+                        <button onClick={()=>accettaContrassegno(c)} disabled={accettando===c.id}
+                          style={{background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'5px 10px',fontSize:'12px',fontWeight:600,cursor:'pointer',opacity:accettando===c.id?.6:1}}>
+                          {accettando===c.id?'…':'✓ Accetta e carica'}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
