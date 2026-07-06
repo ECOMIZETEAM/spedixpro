@@ -72,6 +72,9 @@ export default function SpedizioniPage() {
     if (filtri.al) filtered = filtered.filter(s => new Date(s.created_at) <= new Date(filtri.al+'T23:59:59'))
     if (filtri.contrassegno==='si') filtered = filtered.filter(s => Number(s.contrassegno)>0)
     if (filtri.contrassegno==='no') filtered = filtered.filter(s => Number(s.contrassegno)===0)
+    if (filtri.stato_contrassegni==='da_pagare') filtered = filtered.filter(s => Number(s.contrassegno)>0 && s.stato_contrassegno!=='in_distinta' && s.stato_contrassegno!=='pagato')
+    if (filtri.stato_contrassegni==='in_attesa') filtered = filtered.filter(s => s.stato_contrassegno==='in_distinta')
+    if (filtri.stato_contrassegni==='pagato') filtered = filtered.filter(s => s.stato_contrassegno==='pagato')
     if (filtri.dest_citta) filtered = filtered.filter(s => s.dest_citta?.toLowerCase().includes(filtri.dest_citta.toLowerCase()))
     if (filtri.dest_cap) filtered = filtered.filter(s => s.dest_cap?.includes(filtri.dest_cap))
     if (filtri.contenuto) filtered = filtered.filter(s => s.contenuto?.toLowerCase().includes(filtri.contenuto.toLowerCase()))
@@ -211,8 +214,9 @@ async function apriTracking(s: any) {
           <div><label style={lbl}>Stato Contrassegni:</label>
             <select value={filtri.stato_contrassegni} onChange={e=>setF('stato_contrassegni',e.target.value)} style={sel}>
               <option value="">Qualsiasi</option>
-              <option value="pagato">Pagato</option>
               <option value="da_pagare">Da pagare</option>
+              <option value="in_attesa">In attesa</option>
+              <option value="pagato">Pagato</option>
             </select>
           </div>
           <div><label style={lbl}>Assicurazione:</label>
