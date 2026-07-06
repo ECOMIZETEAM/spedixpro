@@ -28,6 +28,18 @@ export default function ReportContrassegniPage() {
 
   const setF = (k: string, v: string) => setFiltri(f => ({...f, [k]: v}))
 
+  async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
+    const filtriTxt = 'dalla_data=' + (filtri.dalSpedizione||'') + ' alla_data=' + (filtri.alSpedizione||'')
+    const r = await fetch('/api/reports/salva', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo: 'contrassegni', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
+    })
+    const j = await r.json()
+    if (!j.success) { alert('Errore salvataggio report: ' + (j.error||'')); return }
+    const lista = await fetch('/api/reports/lista?tipo=contrassegni').then(x=>x.json())
+    setReports(Array.isArray(lista) ? lista : [])
+  }
+
   async function generaReport() {
     setGenerating(true)
     const params = new URLSearchParams()
@@ -60,25 +72,19 @@ export default function ReportContrassegniPage() {
       styles: { fontSize: 7 },
       headStyles: { fillColor: [249, 115, 22] },
     })
+    // Non scarico subito: salvo il report nel registro (come Report Spedizioni),
+    // il download avviene poi dalla lista tramite il link "Scarica".
+    const nomeBase = `report_contrassegni_${filtri.dalSpedizione}_${filtri.alSpedizione}`
     if (archivioZip) {
       const { default: JSZip } = await import('jszip' as any)
       const zip = new JSZip()
       const pdfBytes = doc.output('arraybuffer')
       zip.file('report_contrassegni.pdf', pdfBytes)
-      const blob = await zip.generateAsync({type:'blob'})
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url; a.download = `report_contrassegni_${filtri.dalSpedizione}.zip`
-      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      const zipB64 = await zip.generateAsync({ type: 'base64' })
+      await salvaReport('data:application/zip;base64,' + zipB64, nomeBase + '.zip', 'zip')
     } else {
-      doc.save(`report_contrassegni_${filtri.dalSpedizione}.pdf`)
+      await salvaReport(doc.output('datauristring'), nomeBase + '.pdf', 'pdf')
     }
-    await fetch('/api/reports/spedizioni', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ formato: archivioZip?'ZIP':'PDF', filtri, tipo: 'contrassegni' })
-    })
-    const d = await fetch('/api/reports/lista?tipo=contrassegni').then(r=>r.json())
-    setReports(d||[])
     setGenerating(false)
   }
 
@@ -171,11 +177,13 @@ export default function ReportContrassegniPage() {
               <tr key={r.id} style={{borderBottom:'1px solid #d1d5db'}}>
                 <td style={{padding:'9px 14px',fontWeight:'600'}}>{reports.length-i}</td>
                 <td style={{padding:'9px 14px',fontSize:'12px'}}>{new Date(r.created_at).toLocaleString('it-IT')}</td>
-                <td style={{padding:'9px 14px',color:'#f97316',fontSize:'12px'}}>{Object.entries(r.filtri||{}).filter(([,v])=>v).map(([k,v])=>`${k}=${v}`).join(', ')}</td>
+                <td style={{padding:'9px 14px',color:'#f97316',fontSize:'12px'}}>{String(r.filtri||'').split(' ').map((f:string,idx:number)=><div key={idx}>{f}</div>)}</td>
                 <td style={{padding:'9px 14px'}}><span style={{background:'#e0f2fe',color:'#0369a1',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>{r.formato}</span></td>
-                <td style={{padding:'9px 14px'}}>{r.utente_nome}</td>
-                <td style={{padding:'9px 14px',color:'#16a34a',fontWeight:'500'}}>{r.stato}</td>
-                <td style={{padding:'9px 14px'}}><span style={{color:'#f97316',fontWeight:'600',cursor:'pointer'}} onClick={generaReport}>Scarica</span></td>
+                <td style={{padding:'9px 14px'}}>{r.utente}</td>
+                <td style={{padding:'9px 14px',color:'#16a34a',fontWeight:'500'}}>{r.status}</td>
+                <td style={{padding:'9px 14px'}}>{r.file_url
+                  ? <a href={r.file_url} target="_blank" rel="noopener noreferrer" download style={{color:'#f97316',fontWeight:'600',fontSize:'13px',cursor:'pointer',textDecoration:'none'}}>Scarica</a>
+                  : <span style={{color:'#999',fontSize:'13px'}}>—</span>}</td>
               </tr>
             ))}
           </tbody>

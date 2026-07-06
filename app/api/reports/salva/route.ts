@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
 
   const contentType = formato === 'pdf' ? 'application/pdf'
     : formato === 'csv' ? 'text/csv'
+    : formato === 'zip' ? 'application/zip'
     : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
   const { error: upErr } = await admin.storage.from('reports').upload(path, buffer, { contentType, upsert: true })
