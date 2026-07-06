@@ -265,3 +265,112 @@ export async function calcolaPrezzoCorriere(
 
   return Math.round(prezzo * 100) / 100
 }
+
+
+// Versione BATCH: precarica UNA volta i listini/fasce/supplementi/zone_cap del master
+// e ritorna una funzione che calcola il prezzo corriere per una spedizione in memoria,
+// senza query per riga. Risultato identico a calcolaPrezzoCorriere (usato dai report).
+export async function creaCalcolatoreCorriere(
+  supabase: any,
+  masterId: string
+): Promise<(s: any) => number | null> {
+  const { data: listini } = await supabase
+    .from('listini_corrieri').select('id,corriere_id,fattore_volume')
+    .eq('master_id', masterId).eq('attivo', true)
+  const listinoPerCorriere = new Map<string, { id: string; fattore: number }>()
+  const listinoIds: string[] = []
+  for (const l of listini || []) {
+    listinoPerCorriere.set(l.corriere_id, { id: l.id, fattore: parseFloat(l.fattore_volume) || 5000 })
+    listinoIds.push(l.id)
+  }
+
+  const { data: fasce } = listinoIds.length
+    ? await supabase.from('listini_corrieri_fasce').select('listino_id,peso_max,prezzo,tipo,zona_id,zone(id,nome)').in('listino_id', listinoIds)
+    : { data: [] }
+  const fascePerListino = new Map<string, any[]>()
+  for (const f of fasce || []) {
+    if (!fascePerListino.has(f.listino_id)) fascePerListino.set(f.listino_id, [])
+    fascePerListino.get(f.listino_id)!.push(f)
+  }
+
+  const { data: suppl } = listinoIds.length
+    ? await supabase.from('listini_corrieri_supplementi').select('listino_id,tipo,valore,tipo_calcolo,descrizione').in('listino_id', listinoIds)
+    : { data: [] }
+  const supplPerListino = new Map<string, any[]>()
+  for (const s of suppl || []) {
+    if (!supplPerListino.has(s.listino_id)) supplPerListino.set(s.listino_id, [])
+    supplPerListino.get(s.listino_id)!.push(s)
+  }
+
+  const zonaIds = Array.from(new Set((fasce || []).map((f: any) => f.zone?.id).filter(Boolean)))
+  const { data: zc } = zonaIds.length
+    ? await supabase.from('zone_cap').select('zona_id,paese,provincia,cap').in('zona_id', zonaIds)
+    : { data: [] }
+  const zcByPaese = new Map<string, any[]>()
+  for (const r of zc || []) {
+    const k = (r.paese || '').toUpperCase()
+    if (!zcByPaese.has(k)) zcByPaese.set(k, [])
+    zcByPaese.get(k)!.push(r)
+  }
+
+  function matchZona(paese: string, provincia: string, cap: string, cand: string[]): string[] {
+    const rows = (zcByPaese.get((paese || 'IT').toUpperCase()) || []).filter((r: any) => cand.includes(r.zona_id))
+    let m = rows.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap)
+    if (!m.length) m = rows.filter((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*'))
+    if (!m.length) m = rows.filter((r: any) => (!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*'))
+    return Array.from(new Set(m.map((r: any) => r.zona_id)))
+  }
+
+  return function prezzoCorriereRow(s: any): number | null {
+    const lc = listinoPerCorriere.get(s.corriere_id)
+    if (!lc) return null
+    const fasceList = fascePerListino.get(lc.id) || []
+    if (!fasceList.length) return null
+
+    const L = Number(s.lunghezza) || 0, W = Number(s.larghezza) || 0, H = Number(s.altezza) || 0
+    const pesoVolume = (L && W && H) ? (L * W * H) / lc.fattore : 0
+    const pesoReale = Number(s.peso_reale) || 1
+    const pesoFatturato = Math.max(pesoReale, pesoVolume)
+
+    const provincia = (s.dest_provincia || '').toUpperCase().trim()
+    const cap = (s.dest_cap || '').trim()
+    const paese = (s.dest_paese || 'IT').toUpperCase().trim()
+    const cand = fasceList.map((f: any) => f.zone?.id).filter(Boolean)
+    const ids = matchZona(paese, provincia, cap, cand)
+    const zonaNome = zonaDaProvincia(provincia)
+    let fz = ids.length ? fasceList.filter((f: any) => ids.includes(f.zone?.id)) : []
+    if (!fz.length) fz = fasceList.filter((f: any) => f.zone?.nome === zonaNome)
+    if (!fz.length) fz = fasceList.filter((f: any) => f.zone?.nome === 'Italia')
+    if (!fz.length) return null
+
+    const finoA = fz.filter((f: any) => f.tipo !== 'oltre').sort((a: any, b: any) => a.peso_max - b.peso_max)
+    const oltre = fz.find((f: any) => f.tipo === 'oltre')
+    let prezzo = 0, trovata = false
+    for (const f of finoA) { if (pesoFatturato <= parseFloat(f.peso_max)) { prezzo = parseFloat(f.prezzo); trovata = true; break } }
+    if (!trovata) {
+      if (oltre && finoA.length) {
+        const u = finoA[finoA.length - 1]
+        prezzo = parseFloat(u.prezzo) + Math.ceil((pesoFatturato - parseFloat(u.peso_max)) / parseFloat(oltre.peso_max)) * parseFloat(oltre.prezzo)
+      } else if (finoA.length) { prezzo = parseFloat(finoA[finoA.length - 1].prezzo) }
+      else return null
+    }
+
+    const nolo = prezzo
+    const supplList = supplPerListino.get(lc.id) || []
+    const cod = Number(s.contrassegno) || 0, ass = Number(s.assicurazione) || 0
+    const applica = (tipo: string, importo: number): number => {
+      if (importo <= 0) return 0
+      const scal = supplList.filter((x: any) => x.tipo === tipo).map((x: any) => {
+        let d: any = null; try { d = JSON.parse(x.descrizione) } catch {}
+        return { vm: parseFloat(d?.valore_max ?? '') || 0, pf: parseFloat(d?.prezzo_fisso ?? x.valore ?? '') || 0, pc: parseFloat(d?.perc ?? '') || 0, cs: d?.calcolo_su || x.tipo_calcolo || 'totale' }
+      }).sort((a: any, b: any) => a.vm - b.vm)
+      if (!scal.length) return 0
+      const sc = scal.find((x: any) => importo <= x.vm) || scal[scal.length - 1]
+      const base = sc.cs === 'valore_merce' ? 0 : nolo
+      return sc.pf + (sc.pc / 100) * base
+    }
+    prezzo += applica('contrassegno', cod)
+    prezzo += applica('assicurazione', ass)
+    return Math.round(prezzo * 100) / 100
+  }
+}

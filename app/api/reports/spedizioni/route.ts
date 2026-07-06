@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { calcolaPrezzoCorriere } from '@/lib/pricing'
+import { creaCalcolatoreCorriere } from '@/lib/pricing'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
 
 export async function GET(req: NextRequest) {
@@ -31,21 +31,13 @@ export async function GET(req: NextRequest) {
   if (provincia) query = query.eq('dest_provincia', provincia)
 
   const { data: spedizioni } = await query
-  // calcolo il prezzo corriere per ogni spedizione
-  const conPrezzoCorriere = []
-  for (const s of (spedizioni || [])) {
-    let pc: number | null = null
-    if (s.corriere_id) {
-      pc = await calcolaPrezzoCorriere(supabase, {
-        corriereId: s.corriere_id, masterId: utente?.master_id, provincia: s.dest_provincia || '',
-        cap: s.dest_cap || '', paese: s.dest_paese || 'IT',
-        pesoReale: Number(s.peso_reale) || 1,
-        packages: [{ length: s.lunghezza, width: s.larghezza, height: s.altezza }],
-        contrassegno: Number(s.contrassegno) || 0, assicurazione: Number(s.assicurazione) || 0,
-      })
-    }
-    conPrezzoCorriere.push({ ...s, prezzo_corriere: pc })
-  }
+  // Prezzo corriere: precarico listini/fasce/zone UNA volta, poi calcolo in memoria
+  // (stesso risultato di calcolaPrezzoCorriere, ma senza ~query-per-riga).
+  const calcCorriere = await creaCalcolatoreCorriere(supabase, utente?.master_id)
+  const conPrezzoCorriere = (spedizioni || []).map((s: any) => ({
+    ...s,
+    prezzo_corriere: s.corriere_id ? calcCorriere(s) : null,
+  }))
   return NextResponse.json(conPrezzoCorriere)
 }
 
