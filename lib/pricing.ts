@@ -232,20 +232,36 @@ export async function calcolaPrezzoCorriere(
 
   const { data: suppl } = await supabase
     .from('listini_corrieri_supplementi')
-    .select('tipo,valore,tipo_calcolo')
+    .select('tipo,valore,tipo_calcolo,descrizione')
     .eq('listino_id', listino.id)
 
   const cod = Number(params.contrassegno) || 0
   const ass = Number(params.assicurazione) || 0
-  for (const s of (suppl || [])) {
-    const v = parseFloat(s.valore) || 0
-    if (s.tipo === 'contrassegno' && cod > 0) {
-      prezzo += s.tipo_calcolo === 'percentuale' ? cod * v / 100 : v
-    }
-    if (s.tipo === 'assicurazione' && ass > 0) {
-      prezzo += s.tipo_calcolo === 'percentuale' ? ass * v / 100 : v
-    }
+  const nolo = prezzo // base per il calcolo percentuale (prima di aggiungere i supplementi)
+
+  // Scaglioni contrassegno/assicurazione, stesso formato del listino cliente:
+  // descrizione = { valore_max, prezzo_fisso, perc, calcolo_su }
+  function applicaScaglione(tipo: string, importo: number): number {
+    if (importo <= 0) return 0
+    const scal = (suppl || [])
+      .filter((s: any) => s.tipo === tipo)
+      .map((s: any) => {
+        let d: any = null; try { d = JSON.parse(s.descrizione) } catch {}
+        return {
+          valore_max: parseFloat(d?.valore_max ?? '') || 0,
+          prezzo_fisso: parseFloat(d?.prezzo_fisso ?? s.valore ?? '') || 0,
+          perc: parseFloat(d?.perc ?? '') || 0,
+          calcolo_su: d?.calcolo_su || s.tipo_calcolo || 'totale',
+        }
+      })
+      .sort((a: any, b: any) => a.valore_max - b.valore_max)
+    if (!scal.length) return 0
+    const s = scal.find((x: any) => importo <= x.valore_max) || scal[scal.length - 1]
+    const base = s.calcolo_su === 'valore_merce' ? 0 : nolo
+    return s.prezzo_fisso + (s.perc / 100) * base
   }
+  prezzo += applicaScaglione('contrassegno', cod)
+  prezzo += applicaScaglione('assicurazione', ass)
 
   return Math.round(prezzo * 100) / 100
 }
