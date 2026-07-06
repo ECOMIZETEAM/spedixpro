@@ -27,6 +27,7 @@ const NAV_BASE: NavItem[] = [
     sub: [
       { label: 'Da file CSV', href: '/cliente/importa' },
       { label: 'Negozi collegati', href: '/cliente/integrazioni' },
+      { label: 'API / Sviluppatori', href: '/cliente/integrazioni/api' },
     ],
   },
   {
