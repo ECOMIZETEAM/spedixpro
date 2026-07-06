@@ -30,6 +30,7 @@ export default function ReportContrassegniPage() {
 
   async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
     const filtriTxt = 'dalla_data=' + (filtri.dalSpedizione||'') + ' alla_data=' + (filtri.alSpedizione||'')
+      + (filtri.statoContrassegni ? ' stato=' + filtri.statoContrassegni : '')
     const r = await fetch('/api/reports/salva', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tipo: 'contrassegni', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
@@ -48,8 +49,12 @@ export default function ReportContrassegniPage() {
     if (filtri.alSpedizione) params.set('al', filtri.alSpedizione + 'T23:59:59')
     params.set('contrassegno', 'si')
     const res = await fetch(`/api/spedizioni/lista?${params}`)
-    const spedizioni = await res.json()
-    if (!spedizioni.length) { alert('Nessuna spedizione con contrassegno trovata'); setGenerating(false); return }
+    let spedizioni = await res.json()
+    // Filtro per stato contrassegno (stessa logica della lista spedizioni)
+    if (filtri.statoContrassegni === 'da_pagare') spedizioni = spedizioni.filter((s:any) => Number(s.contrassegno)>0 && s.stato_contrassegno!=='in_distinta' && s.stato_contrassegno!=='pagato')
+    else if (filtri.statoContrassegni === 'in_attesa') spedizioni = spedizioni.filter((s:any) => s.stato_contrassegno==='in_distinta')
+    else if (filtri.statoContrassegni === 'pagato') spedizioni = spedizioni.filter((s:any) => s.stato_contrassegno==='pagato')
+    if (!spedizioni.length) { alert('Nessuna spedizione con contrassegno trovata per i filtri selezionati'); setGenerating(false); return }
     const { default: jsPDF } = await import('jspdf')
     const { default: autoTable } = await import('jspdf-autotable')
     const doc = new jsPDF({ orientation: 'landscape' })
@@ -128,8 +133,9 @@ export default function ReportContrassegniPage() {
           <div><label style={lbl}>Stato Contrassegni</label>
             <select value={filtri.statoContrassegni} onChange={e=>setF('statoContrassegni',e.target.value)} style={sel}>
               <option value="">Tutti</option>
-              <option value="pagato">Pagato</option>
               <option value="da_pagare">Da pagare</option>
+              <option value="in_attesa">In attesa</option>
+              <option value="pagato">Pagato</option>
             </select>
           </div>
           <div><label style={lbl}>Periodo di rimborso</label>
