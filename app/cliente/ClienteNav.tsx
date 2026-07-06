@@ -121,17 +121,18 @@ export default function ClienteNav() {
     <nav style={{ flex: 1, padding: '6px 0' }}>
       <style>{`
         .spx-item{
-          display:flex;align-items:center;gap:8px;padding:8px 16px;
+          display:flex;align-items:center;gap:9px;padding:8px 18px;
           font-size:12.5px;text-decoration:none;cursor:pointer;
-          border:none;background:transparent;width:100%;text-align:left;
-          color:#777;font-family:inherit;
+          background:transparent;width:100%;text-align:left;
+          color:#8aabb8;font-family:inherit;
+          border:none;border-left:3px solid transparent;
         }
-        .spx-item:hover{background:#242424;color:#d4d4d4}
+        .spx-item:hover{color:#fff}
         .spx-sub{
-          display:block;padding:6px 16px 6px 38px;font-size:12px;
-          text-decoration:none;color:#666;border-left:2px solid transparent;
+          display:block;padding:7px 18px 7px 44px;font-size:12px;
+          text-decoration:none;color:#6b9ab8;border-left:3px solid transparent;
         }
-        .spx-sub:hover{background:#202020;color:#d4d4d4}
+        .spx-sub:hover{color:#fff}
       `}</style>
 
       {NAV.map(item => {
@@ -148,7 +149,7 @@ export default function ClienteNav() {
                 onClick={(e) => toggle(item.id, e.currentTarget as HTMLElement)}
                 style={{
                   justifyContent: 'space-between',
-                  ...(active ? { color: ACCENT, fontWeight: 600 } : {}),
+                  ...(active ? { color: '#fff', fontWeight: 600, background: 'rgba(249,115,22,0.12)', borderLeft: `3px solid ${ACCENT}` } : {}),
                 }}
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -162,7 +163,7 @@ export default function ClienteNav() {
               </button>
 
               {isOpen && (
-                <div style={{ padding: '2px 0 6px' }}>
+                <div style={{ padding: '2px 0 6px', background: 'rgba(0,0,0,0.25)' }}>
                   {item.sub!.map(s => {
                     const sActive = leafActive(s.href)
                     return (
@@ -172,8 +173,8 @@ export default function ClienteNav() {
                         className="spx-sub"
                         style={sActive ? {
                           color: ACCENT, fontWeight: 600,
-                          background: 'rgba(249,115,22,.12)',
-                          borderLeft: `2px solid ${ACCENT}`,
+                          background: 'rgba(249,115,22,0.08)',
+                          borderLeft: `3px solid ${ACCENT}`,
                         } : {}}
                       >
                         {s.label}
@@ -192,7 +193,7 @@ export default function ClienteNav() {
             key={item.id}
             href={item.href}
             className="spx-item"
-            style={active ? { background: ACCENT, color: '#fff', fontWeight: 600 } : {}}
+            style={active ? { background: 'rgba(249,115,22,0.12)', color: '#fff', fontWeight: 600, borderLeft: `3px solid ${ACCENT}` } : {}}
           >
             <span style={{ fontSize: '11px', width: '14px', opacity: active ? 1 : 0.55 }}>{item.icon}</span>
             {item.label}
