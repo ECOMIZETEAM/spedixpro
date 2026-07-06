@@ -1,5 +1,6 @@
 ﻿'use client'
 import { useState, useEffect } from 'react'
+import * as XLSX from 'xlsx'
 
 export default function GestioneZonePage() {
   const [corrieri, setCorrieri] = useState<any[]>([])
@@ -15,6 +16,8 @@ export default function GestioneZonePage() {
   const [formRegione, setFormRegione] = useState({paese:'IT',provincia:'',cap:'*',citta:'*'})
   const [savingReg, setSavingReg] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [editReg, setEditReg] = useState<any>(null)
+  const [importing, setImporting] = useState('')
 
   useEffect(() => { load() }, [])
 
@@ -48,12 +51,33 @@ export default function GestioneZonePage() {
   }
   async function aggiungiRegione() {
     if(!modalModifica) return
+    // Multi-CAP: il campo CAP accetta piu valori separati da virgola/spazio/a-capo
+    const caps = (formRegione.cap||'*').split(/[\s,;]+/).map(c=>c.trim()).filter(Boolean)
+    const lista = caps.length ? caps : ['*']
     setSavingReg(true)
-    const res = await fetch('/api/zone/'+modalModifica.id+'/cap',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(formRegione)})
+    if(lista.length>1){
+      const rows = lista.map(c=>({paese:formRegione.paese,provincia:formRegione.provincia,cap:c,citta:formRegione.citta}))
+      const res = await fetch('/api/zone/'+modalModifica.id+'/cap',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows})})
+      const d = await res.json()
+      setSavingReg(false)
+      if(d?.error){ alert(d.error); return }
+    } else {
+      const res = await fetch('/api/zone/'+modalModifica.id+'/cap',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...formRegione,cap:lista[0]})})
+      const d = await res.json()
+      setSavingReg(false)
+      if(d?.error){ alert(d.error); return }
+    }
+    setFormRegione({paese:'IT',provincia:'',cap:'*',citta:'*'})
+    caricaRegioni(modalModifica.id)
+  }
+  async function salvaEditRegione() {
+    if(!modalModifica || !editReg) return
+    setSavingReg(true)
+    const res = await fetch('/api/zone/'+modalModifica.id+'/cap',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(editReg)})
     const d = await res.json()
     setSavingReg(false)
     if(d?.error){ alert(d.error); return }
-    setFormRegione({paese:'IT',provincia:'',cap:'*',citta:'*'})
+    setEditReg(null)
     caricaRegioni(modalModifica.id)
   }
   async function eliminaRegione(capId:string) {
@@ -72,11 +96,49 @@ export default function GestioneZonePage() {
     setModalSposta(null); load()
   }
 
-  function esporta(z:any) {
-    const csv='nome,descrizione,con_fuel\n'+`"${z.nome}","${z.descrizione||''}",${z.con_fuel||false}`
-    const a=document.createElement('a')
-    a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}))
-    a.download=`zona_${z.nome}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a)
+  // Export XLSX nel formato spedisci.online: colonne country_id / province / cap / city,
+  // una riga per regione della zona.
+  async function esporta(z:any) {
+    const regs:any[] = await fetch('/api/zone/'+z.id+'/cap').then(r=>r.json()).catch(()=>[])
+    const righe = (Array.isArray(regs)?regs:[]).map((r:any)=>({
+      country_id: r.paese, province: r.provincia, cap: r.cap, city: r.citta,
+    }))
+    if(!righe.length) righe.push({country_id:'IT',province:'*',cap:'*',city:'*'})
+    const ws = XLSX.utils.json_to_sheet(righe, {header:['country_id','province','cap','city']})
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Zona')
+    const nomeCorr = (corrTab?.nome_contratto||'Corriere').replace(/[\\/:*?"<>|]/g,'')
+    const nomeZona = (z.nome||'zona').replace(/[\\/:*?"<>|]/g,'')
+    XLSX.writeFile(wb, `${nomeCorr}_${nomeZona}.xlsx`)
+  }
+
+  // Import XLSX (formato spedisci.online): legge country_id/province/cap/city e
+  // sostituisce le regioni della zona.
+  async function importaXlsx(zonaId:string, file:File) {
+    setImporting(zonaId)
+    try {
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf)
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const dati:any[] = XLSX.utils.sheet_to_json(ws, {defval:''})
+      const rows = dati.map((r:any)=>{
+        // accetta sia le intestazioni spedisci.online sia varianti italiane
+        const paese = r.country_id ?? r.paese ?? r.Paese ?? r.COUNTRY_ID ?? ''
+        const provincia = r.province ?? r.provincia ?? r.Provincia ?? r.PROVINCE ?? '*'
+        const cap = r.cap ?? r.CAP ?? r.zip ?? '*'
+        const citta = r.city ?? r.citta ?? r.Citta ?? r.CITY ?? '*'
+        return {paese:String(paese).trim(),provincia:String(provincia).trim(),cap:String(cap).trim(),citta:String(citta).trim()}
+      }).filter(r=>r.paese)
+      if(!rows.length){ alert('Nessuna riga valida nel file (attese colonne country_id/province/cap/city).'); setImporting(''); return }
+      const res = await fetch('/api/zone/'+zonaId+'/cap',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows,replace:true})})
+      const d = await res.json()
+      if(d?.error){ alert(d.error); setImporting(''); return }
+      alert(`Importate ${d.inserite} regioni nella zona.`)
+      if(modalModifica?.id===zonaId) caricaRegioni(zonaId)
+    } catch(e:any){
+      alert('Errore lettura file: '+(e?.message||e))
+    }
+    setImporting('')
   }
 
   const inp={padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',width:'100%',boxSizing:'border-box' as const}
@@ -121,13 +183,12 @@ export default function GestioneZonePage() {
                       <td style={{padding:'10px 12px',color:'#1a1a1a',fontSize:'12px',maxWidth:'500px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{z.descrizione||'—'}</td>
                       <td style={{padding:'10px 12px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
-                          <button onClick={()=>{setModalModifica(z);setFormMod({nome:z.nome,descrizione:z.descrizione||'',con_fuel:z.con_fuel||false});setRegioni([]);caricaRegioni(z.id)}} style={ibtn('#16a34a','#fff','#86efac')}>✏️</button>
-                          <button onClick={()=>esporta(z)} style={ibtn('#fff','#1a1a1a','#d1d5db')}>⬇</button>
-                          <label style={{...ibtn('#fff','#1a1a1a','#d1d5db'),cursor:'pointer'}}>
-                            ⬆<input type="file" accept=".csv" style={{display:'none'}} onChange={async e=>{
-                              const f=e.target.files?.[0];if(!f)return
-                              const t=await f.text();const l=t.split('\n')[1]
-                              if(l){const cols=l.split(',');await fetch('/api/zone/'+z.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({descrizione:cols[1]?.replace(/"/g,'')})});load()}
+                          <button onClick={()=>{setModalModifica(z);setFormMod({nome:z.nome,descrizione:z.descrizione||'',con_fuel:z.con_fuel||false});setRegioni([]);setEditReg(null);caricaRegioni(z.id)}} style={ibtn('#16a34a','#fff','#86efac')}>✏️</button>
+                          <button onClick={()=>esporta(z)} title="Esporta zona (XLSX)" style={ibtn('#fff','#1a1a1a','#d1d5db')}>⬇</button>
+                          <label title="Importa regioni (XLSX spedisci.online)" style={{...ibtn('#fff','#1a1a1a','#d1d5db'),cursor:importing===z.id?'wait':'pointer',opacity:importing===z.id?0.5:1}}>
+                            {importing===z.id?'…':'⬆'}<input type="file" accept=".xlsx,.xls,.csv" disabled={!!importing} style={{display:'none'}} onChange={async e=>{
+                              const f=e.target.files?.[0]; e.target.value=''; if(!f)return
+                              await importaXlsx(z.id, f)
                             }}/>
                           </label>
                           <button onClick={()=>setModalSposta(z)} style={ibtn('#fff','#1a1a1a','#d1d5db')}>↪</button>
@@ -192,13 +253,29 @@ export default function GestioneZonePage() {
                       </tr></thead>
                       <tbody>
                         {regioni.map((r:any)=>(
-                          <tr key={r.id} style={{borderTop:'1px solid #f0f0f0'}}>
-                            <td style={{padding:'6px 8px',color:'#1a1a1a'}}>{r.paese}</td>
-                            <td style={{padding:'6px 8px',color:'#1a1a1a'}}>{r.provincia}</td>
-                            <td style={{padding:'6px 8px',color:'#1a1a1a'}}>{r.cap}</td>
-                            <td style={{padding:'6px 8px',color:'#1a1a1a'}}>{r.citta}</td>
-                            <td style={{padding:'6px 8px',textAlign:'right' as const}}><button onClick={()=>eliminaRegione(r.id)} style={{background:'none',border:'none',cursor:'pointer',color:'#dc2626',fontSize:'14px'}}>🗑</button></td>
-                          </tr>
+                          editReg?.capId===r.id ? (
+                            <tr key={r.id} style={{borderTop:'1px solid #f0f0f0',background:'#fffdf5'}}>
+                              <td style={{padding:'4px 6px'}}><input value={editReg.paese} onChange={e=>setEditReg((v:any)=>({...v,paese:e.target.value}))} style={{...inp,padding:'4px 6px',fontSize:'12px'}}/></td>
+                              <td style={{padding:'4px 6px'}}><input value={editReg.provincia} onChange={e=>setEditReg((v:any)=>({...v,provincia:e.target.value}))} style={{...inp,padding:'4px 6px',fontSize:'12px'}}/></td>
+                              <td style={{padding:'4px 6px'}}><input value={editReg.cap} onChange={e=>setEditReg((v:any)=>({...v,cap:e.target.value}))} style={{...inp,padding:'4px 6px',fontSize:'12px'}}/></td>
+                              <td style={{padding:'4px 6px'}}><input value={editReg.citta} onChange={e=>setEditReg((v:any)=>({...v,citta:e.target.value}))} style={{...inp,padding:'4px 6px',fontSize:'12px'}}/></td>
+                              <td style={{padding:'4px 6px',textAlign:'right' as const,whiteSpace:'nowrap' as const}}>
+                                <button onClick={salvaEditRegione} disabled={savingReg} title="Salva" style={{background:'none',border:'none',cursor:'pointer',color:'#16a34a',fontSize:'14px'}}>✔</button>
+                                <button onClick={()=>setEditReg(null)} title="Annulla" style={{background:'none',border:'none',cursor:'pointer',color:'#666',fontSize:'14px'}}>✕</button>
+                              </td>
+                            </tr>
+                          ) : (
+                            <tr key={r.id} style={{borderTop:'1px solid #f0f0f0'}}>
+                              <td style={{padding:'6px 8px',color:'#1a1a1a'}}>{r.paese}</td>
+                              <td style={{padding:'6px 8px',color:'#1a1a1a'}}>{r.provincia}</td>
+                              <td style={{padding:'6px 8px',color:'#1a1a1a'}}>{r.cap}</td>
+                              <td style={{padding:'6px 8px',color:'#1a1a1a'}}>{r.citta}</td>
+                              <td style={{padding:'6px 8px',textAlign:'right' as const,whiteSpace:'nowrap' as const}}>
+                                <button onClick={()=>setEditReg({capId:r.id,paese:r.paese,provincia:r.provincia,cap:r.cap,citta:r.citta})} title="Modifica" style={{background:'none',border:'none',cursor:'pointer',color:'#16a34a',fontSize:'13px'}}>✏️</button>
+                                <button onClick={()=>eliminaRegione(r.id)} title="Elimina" style={{background:'none',border:'none',cursor:'pointer',color:'#dc2626',fontSize:'14px'}}>🗑</button>
+                              </td>
+                            </tr>
+                          )
                         ))}
                       </tbody>
                     </table>
@@ -211,7 +288,7 @@ export default function GestioneZonePage() {
                   <div><label style={{fontSize:'11px',color:'#666',display:'block',marginBottom:'2px'}}>Città</label><input value={formRegione.citta} onChange={e=>setFormRegione(f=>({...f,citta:e.target.value}))} placeholder="*" style={{...inp,padding:'6px 8px',fontSize:'12px'}}/></div>
                   <button onClick={aggiungiRegione} disabled={savingReg} style={{padding:'7px 12px',background:'#16a34a',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer',whiteSpace:'nowrap' as const}}>+ Aggiungi</button>
                 </div>
-                <div style={{fontSize:'11px',color:'#999',marginTop:'6px'}}>Usa <b>*</b> per "qualsiasi". Es: Paese IT, Provincia RM, CAP * = tutta la provincia di Roma. Paese DE, Provincia *, CAP * = tutta la Germania.</div>
+                <div style={{fontSize:'11px',color:'#999',marginTop:'6px'}}>Usa <b>*</b> per "qualsiasi". Es: Paese IT, Provincia RM, CAP * = tutta la provincia di Roma. Paese DE, Provincia *, CAP * = tutta la Germania. Nel campo CAP puoi inserire <b>più valori</b> separati da virgola o spazio.</div>
               </div>
               <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
                 <button onClick={()=>setModalModifica(null)} style={{padding:'8px 16px',background:'#f5f5f5',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:'pointer',color:'#1a1a1a'}}>Annulla</button>

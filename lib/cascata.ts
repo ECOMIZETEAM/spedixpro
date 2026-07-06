@@ -19,6 +19,8 @@ async function costruisciCatena(
     costoSpedizione: number
     provincia: string
     packages: any[]
+    cap?: string
+    paese?: string
   }
 ): Promise<{ catena: LivelloCatena[]; errore?: string }> {
   const catena: LivelloCatena[] = []
@@ -48,6 +50,8 @@ async function costruisciCatena(
         listinoId: m.parent_listino_id,
         provincia: params.provincia,
         packages: params.packages,
+        cap: params.cap,
+        paese: params.paese,
       })
       if (!ris) return { catena, errore: `Nessuna tariffa nel listino del master "${m.nome}".` }
       prezzo = ris.prezzo
@@ -75,6 +79,8 @@ export async function verificaCreditoCatena(
     provincia: string
     packages: any[]
     costoSpedizione?: number
+    cap?: string
+    paese?: string
   }
 ): Promise<{ ok: boolean; errore?: string }> {
   const { catena, errore } = await costruisciCatena(supabase, {
@@ -83,6 +89,8 @@ export async function verificaCreditoCatena(
     costoSpedizione: params.costoSpedizione || 0,
     provincia: params.provincia,
     packages: params.packages,
+    cap: params.cap,
+    paese: params.paese,
   })
   if (errore) return { ok: false, errore }
 
@@ -106,6 +114,8 @@ export async function addebitaCatena(
     destNome: string
     spedizioneId: string | null
     createdBy: string | null
+    cap?: string
+    paese?: string
   }
 ): Promise<void> {
   const adminMov = createAdminSupabase()
@@ -115,6 +125,8 @@ export async function addebitaCatena(
     costoSpedizione: params.costoSpedizione,
     provincia: params.provincia,
     packages: params.packages,
+    cap: params.cap,
+    paese: params.paese,
   })
 
   for (const liv of catena) {
@@ -148,6 +160,8 @@ export async function rimborsaCatena(
     destNome: string
     spedizioneId: string | null
     createdBy: string | null
+    cap?: string
+    paese?: string
   }
 ): Promise<void> {
   const adminMov = createAdminSupabase()
@@ -157,6 +171,8 @@ export async function rimborsaCatena(
     costoSpedizione: params.costoSpedizione,
     provincia: params.provincia,
     packages: params.packages,
+    cap: params.cap,
+    paese: params.paese,
   })
 
   for (const liv of catena) {
