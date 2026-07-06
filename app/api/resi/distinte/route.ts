@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraMovimentoMaster } from '@/lib/movimenti'
+import { calcolaPrezzoListino } from '@/lib/pricing'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -60,33 +61,53 @@ export async function POST(req: NextRequest) {
   }
   const { count } = await supabase.from('distinte_resi').select('*', {count:'exact',head:true}).eq('master_id', utente?.master_id)
   const numero = (count||0) + 1
+  const { data: cliRec } = await supabase.from('clienti').select('credito,listino_cliente_id').eq('id', clienteId).single()
+  let saldoCorrente = Number(cliRec?.credito || 0)
+  let totaleReso = 0
+  const movRows: any[] = []
+  for (const v of (voci || [])) {
+    await supabase.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
+    const { data: sp } = await supabase.from('spedizioni')
+      .select('costo_totale,dest_provincia,dest_cap,dest_paese,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id')
+      .eq('id', v.id).single()
+
+    // ── Reso = solo NOLO: prezzo fascia del listino cliente (senza contrassegno/assicurazione) ──
+    let costoReso = 0
+    if (cliRec?.listino_cliente_id) {
+      const packages = (Array.isArray(sp?.colli_dettaglio) && sp!.colli_dettaglio.length)
+        ? sp!.colli_dettaglio.map((c: any) => ({ weight: sp!.peso_reale || 1, length: c.lunghezza, width: c.larghezza, height: c.altezza }))
+        : [{ weight: sp?.peso_reale || 1, length: sp?.lunghezza, width: sp?.larghezza, height: sp?.altezza }]
+      const ris = await calcolaPrezzoListino(adminDb, {
+        listinoId: cliRec.listino_cliente_id,
+        provincia: sp?.dest_provincia || '', cap: sp?.dest_cap || '', paese: sp?.dest_paese || 'IT',
+        packages, corriereId: sp?.corriere_id,
+      })
+      costoReso = ris?.prezzo || 0
+    }
+    // fallback (cliente senza listino / non calcolabile): usa il costo totale, mai negativo
+    if (!(costoReso > 0)) costoReso = Math.max(0, Number(sp?.costo_totale || 0))
+
+    saldoCorrente = saldoCorrente - costoReso
+    totaleReso += costoReso
+    movRows.push({
+      master_id: utente?.master_id, cliente_id: clienteId,
+      tipo: 'reso', descrizione: `Reso ${v.numero}`,
+      importo: -costoReso, saldo_dopo: saldoCorrente, spedizione_id: v.id,
+    })
+  }
+
   const { data: distinta, error } = await supabase.from('distinte_resi').insert({
     master_id: utente?.master_id,
     cliente_id: clienteId,
     numero,
     totale_ldv: spedizioniIds.length,
-    totale,
+    totale: totaleReso, // solo nolo (coerente con l'addebito)
     voci,
     stato: 'chiusa',
   }).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  let totaleReso = 0
-  const { data: cliRec } = await supabase.from('clienti').select('credito').eq('id', clienteId).single()
-  let saldoCorrente = Number(cliRec?.credito || 0)
-  for (const v of (voci || [])) {
-    await supabase.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
-    const { data: sp } = await supabase.from('spedizioni').select('costo_totale,contrassegno,assicurazione').eq('id', v.id).single()
-    const costoReso = Math.max(0, Number(sp?.costo_totale || 0) - Number(sp?.contrassegno || 0) - Number(sp?.assicurazione || 0))
-    saldoCorrente = saldoCorrente - costoReso
-    totaleReso += costoReso
-    await supabase.from('movimenti').insert({
-      master_id: utente?.master_id, cliente_id: clienteId,
-      tipo: 'reso',
-      descrizione: `Reso ${v.numero}`,
-      importo: -costoReso, saldo_dopo: saldoCorrente, spedizione_id: v.id,
-    })
-  }
-  const nuovoCredito = saldoCorrente
-  await supabase.from('clienti').update({ credito: nuovoCredito }).eq('id', clienteId)
+
+  for (const m of movRows) await supabase.from('movimenti').insert(m)
+  await supabase.from('clienti').update({ credito: saldoCorrente }).eq('id', clienteId)
   return NextResponse.json({ id: distinta.id, numero })
 }
