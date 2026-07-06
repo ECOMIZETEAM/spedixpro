@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase-browser'
 
 // Cambio password self-service per l'utente loggato (master / staff / cliente).
 // Cambia la password dell'account della sessione corrente: stessa email, nuova password.
