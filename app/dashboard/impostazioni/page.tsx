@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
 
 const inp = {padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',width:'100%',boxSizing:'border-box' as const}
@@ -30,12 +30,19 @@ export default function ImpostazioniPage() {
 
   async function salva() {
     setSaving(true)
-    await fetch('/api/master', {
-      method:'PUT', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(dati)
-    })
-    setSaving(false); setSaved(true)
-    setTimeout(()=>setSaved(false), 3000)
+    try {
+      const res = await fetch('/api/master', {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(dati)
+      })
+      const out = await res.json().catch(()=>({}))
+      if (!res.ok || out?.error) { alert('Errore nel salvataggio: ' + (out?.error || res.status)); return }
+      setSaved(true); setTimeout(()=>setSaved(false), 3000)
+    } catch(e:any) {
+      alert('Errore di rete nel salvataggio')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const tabStyle = (t:string) => ({
