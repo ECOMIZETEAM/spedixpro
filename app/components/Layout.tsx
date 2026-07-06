@@ -100,7 +100,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   }
 
   return (
-    <div style={{display:'flex',minHeight:'100vh',background:'#f5f5f5',fontFamily:'"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
+    <div style={{display:'flex',minHeight:'100vh',background:'#f5f5f5',fontFamily:'var(--font-geist-sans),system-ui,sans-serif'}}>
 
       {/* SIDEBAR */}
       <aside style={{width:'220px',background:'#1a1a1a',display:'flex',flexDirection:'column',flexShrink:0,height:'100vh',position:'sticky',top:0,overflowY:'auto'}}>

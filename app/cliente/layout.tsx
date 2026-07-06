@@ -14,7 +14,7 @@ export default async function ClienteLayout({ children }: { children: React.Reac
   const { data: cliente } = await supabase.from('clienti').select('ragione_sociale,credito').eq('id', utente.cliente_id).single()
 
   return (
-    <div style={{display:'flex',minHeight:'100vh',background:'#f5f5f5',fontFamily:'"Inter",-apple-system,sans-serif'}}>
+    <div style={{display:'flex',minHeight:'100vh',background:'#f5f5f5',fontFamily:'var(--font-geist-sans),system-ui,sans-serif'}}>
       <aside style={{width:'200px',background:'#1a1a1a',flexShrink:0,display:'flex',flexDirection:'column',position:'sticky',top:0,height:'100vh',overflowY:'auto'}}>
         <a href="/cliente/dashboard" style={{padding:'18px',borderBottom:'1px solid #2a2a2a',display:'block',textDecoration:'none'}}>
           <div style={{fontSize:'16px',fontWeight:'800',color:'#fff'}}>Spedix<span style={{color:'#f97316'}}>Pro</span></div>

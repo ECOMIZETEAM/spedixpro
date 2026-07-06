@@ -36,7 +36,7 @@ export default function ClienteLogin() {
   }
 
   return (
-    <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#f5f5f5',fontFamily:'system-ui,sans-serif'}}>
+    <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#f5f5f5',fontFamily:'var(--font-geist-sans),system-ui,sans-serif'}}>
       <div style={{background:'#fff',borderRadius:'12px',padding:'40px',width:'380px',boxShadow:'0 2px 16px rgba(0,0,0,.08)'}}>
         <div style={{textAlign:'center' as const,marginBottom:'32px'}}>
           <div style={{fontSize:'22px',fontWeight:'800',color:'#1a1a1a'}}>Spedix<span style={{color:'#f97316'}}>Pro</span></div>
