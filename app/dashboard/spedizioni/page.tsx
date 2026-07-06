@@ -319,6 +319,7 @@ async function apriTracking(s: any) {
                       <td style={{padding:'9px 12px',fontSize:'12px'}}>
                         <div style={{fontWeight:'500',color:'#1a1a1a'}}>{s.mitt_nome}</div>
                         {s.clienti?.ragione_sociale&&<div style={{fontSize:'11px',color:'#1a1a1a'}}>{s.clienti.ragione_sociale}</div>}
+                        {s.master_rete&&<div style={{fontSize:'10px',fontWeight:'700',color:'#f97316',marginTop:'2px'}}>▸ {s.master_rete}</div>}
                       </td>
                       <td style={{padding:'9px 12px'}}>
                         <div style={{color:'#1a1a1a',fontWeight:'500'}}>{s.dest_nome}</div>
