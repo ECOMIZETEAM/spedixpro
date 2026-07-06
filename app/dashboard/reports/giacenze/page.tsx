@@ -8,6 +8,7 @@ const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'
 
 export default function ReportGiacenzePage() {
   const [clienti, setClienti] = useState<any[]>([])
+  const [corrieri, setCorrieri] = useState<any[]>([])
   const [reports, setReports] = useState<any[]>([])
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
@@ -20,6 +21,7 @@ export default function ReportGiacenzePage() {
 
   useEffect(() => {
     fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[]))
+    fetch('/api/corrieri/lista').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d)?d:[]))
     fetch('/api/reports/lista?tipo=giacenze').then(r=>r.json()).then(d=>setReports(d||[]))
   }, [])
 
@@ -46,7 +48,9 @@ export default function ReportGiacenzePage() {
     params.set('stato', 'in_giacenza')
 
     const res = await fetch(`/api/spedizioni/lista?${params}`)
-    const spedizioni = await res.json()
+    let spedizioni = await res.json()
+    // Filtro vettore client-side (stessa logica della lista spedizioni)
+    if (filtri.vettore) spedizioni = spedizioni.filter((s:any) => String(s.corrieri?.nome_contratto||'').split(' ')[0] === filtri.vettore)
 
     if (!spedizioni.length) { alert('Nessuna giacenza trovata'); setGenerating(false); return }
 
@@ -123,8 +127,7 @@ export default function ReportGiacenzePage() {
           <div><label style={lbl}>Vettore</label>
             <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
               <option value="">Tutti</option>
-              <option value="sda">SDA</option><option value="gls">GLS</option>
-              <option value="brt">BRT</option><option value="poste">Poste Italiane</option>
+              {Array.from(new Set(corrieri.map((c:any)=>String(c.nome_contratto||'').split(' ')[0]))).filter(Boolean).map((v:any)=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Contratto</label>

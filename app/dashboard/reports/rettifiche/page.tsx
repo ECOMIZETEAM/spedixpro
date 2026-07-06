@@ -8,6 +8,7 @@ const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'
 
 export default function ReportRettifichePage() {
   const [clienti, setClienti] = useState<any[]>([])
+  const [corrieri, setCorrieri] = useState<any[]>([])
   const [reports, setReports] = useState<any[]>([])
   const [generating, setGenerating] = useState(false)
   const [filtri, setFiltri] = useState({
@@ -19,6 +20,7 @@ export default function ReportRettifichePage() {
 
   useEffect(() => {
     fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[]))
+    fetch('/api/corrieri/lista').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d)?d:[]))
     fetch('/api/reports/lista?tipo=rettifiche').then(r=>r.json()).then(d=>setReports(d||[]))
   }, [])
 
@@ -44,6 +46,7 @@ export default function ReportRettifichePage() {
       params.set('clienteId', filtri.clienteId)
       if (filtri.dal) params.set('dal', filtri.dal)
       if (filtri.al) params.set('al', filtri.al)
+      if (filtri.vettore) params.set('vettore', filtri.vettore)
       const res = await fetch('/api/reports/rettifiche?' + params.toString())
       const { righe, master, cliente } = await res.json()
       if (!righe || !righe.length) { alert('Nessuna rettifica trovata nel periodo'); setGenerating(false); return }
@@ -126,8 +129,7 @@ export default function ReportRettifichePage() {
           <div><label style={lbl}>Vettore</label>
             <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
               <option value="">Tutti</option>
-              <option value="sda">SDA</option><option value="gls">GLS</option>
-              <option value="brt">BRT</option><option value="poste">Poste Italiane</option>
+              {Array.from(new Set(corrieri.map((c:any)=>String(c.nome_contratto||'').split(' ')[0]))).filter(Boolean).map((v:any)=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Formato</label>

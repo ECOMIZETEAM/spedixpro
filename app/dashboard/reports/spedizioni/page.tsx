@@ -10,6 +10,7 @@ const STATI = ['in_lavorazione','spedita','in_transito','in_consegna','consegnat
 
 export default function ReportSpedizioniPage() {
   const [clienti, setClienti] = useState<any[]>([])
+  const [corrieri, setCorrieri] = useState<any[]>([])
   const [reports, setReports] = useState<any[]>([])
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
@@ -24,6 +25,7 @@ export default function ReportSpedizioniPage() {
 
   useEffect(() => {
     fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[]))
+    fetch('/api/corrieri/lista').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d)?d:[]))
     caricaReports()
   }, [])
 
@@ -57,7 +59,9 @@ export default function ReportSpedizioniPage() {
     if (filtri.provincia) params.set('provincia', filtri.provincia)
 
     const res = await fetch(`/api/reports/spedizioni?${params}`)
-    const spedizioni = await res.json()
+    let spedizioni = await res.json()
+    // Filtro vettore client-side (stessa logica della lista spedizioni)
+    if (filtri.vettore) spedizioni = spedizioni.filter((s:any) => String(s.corrieri?.nome_contratto||'').split(' ')[0] === filtri.vettore)
 
     if (!spedizioni.length) { alert('Nessuna spedizione trovata con i filtri selezionati'); setGenerating(false); return }
 
@@ -187,9 +191,7 @@ export default function ReportSpedizioniPage() {
           <div><label style={lbl}>Vettore</label>
             <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
               <option value="">Tutti</option>
-              <option value="sda">SDA</option><option value="gls">GLS</option>
-              <option value="brt">BRT</option><option value="poste">Poste Italiane</option>
-              <option value="dhl">DHL</option>
+              {Array.from(new Set(corrieri.map((c:any)=>String(c.nome_contratto||'').split(' ')[0]))).filter(Boolean).map((v:any)=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Contratto</label>
