@@ -13,7 +13,10 @@ export async function GET(req: NextRequest) {
     agenteClienteIds = (cl || []).map((c: any) => c.id)
   }
   const p = req.nextUrl.searchParams
-  const clienteId = p.get('clienteId')
+  const clienteIdRaw = p.get('clienteId')
+  // "m:<masterId>" = selezione di un sotto-master agganciato (trattato come cliente)
+  const masterSel = clienteIdRaw && clienteIdRaw.startsWith('m:') ? clienteIdRaw.slice(2) : null
+  const clienteId = masterSel ? null : clienteIdRaw
   const stato = p.get('stato')
   const dal = p.get('dal')
   const al = p.get('al')
@@ -29,9 +32,24 @@ export async function GET(req: NextRequest) {
   //    discende la spedizione). Es: io->MASSIMO->GIOVANNI: le spedizioni di Giovanni
   //    le vedo sotto "MASSIMO" (la mia prima linea). ──
   const ruolo = (utente?.ruolo || '').toLowerCase()
-  const isMasterRete = ruolo !== 'cliente' && ruolo !== 'agente' && !clienteId && agenteClienteIds === null
+  const isMasterRete = ruolo !== 'cliente' && ruolo !== 'agente' && !clienteIdRaw && agenteClienteIds === null
   let db: any = supabase
   let masterIds: string[] | null = null
+  let subtreeSel: string[] | null = null  // sotto-albero del sotto-master selezionato
+
+  // Selezione di un sotto-master agganciato: mostro le spedizioni del suo sotto-albero
+  if (masterSel && ruolo !== 'cliente' && ruolo !== 'agente' && utente?.master_id) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const adminDb = createAdminSupabase()
+    const mieiDiscendenti = await sottoAlberoMasterIds(adminDb, utente.master_id)
+    if (mieiDiscendenti.includes(masterSel)) {   // autorizzazione: dev'essere un mio discendente
+      subtreeSel = await sottoAlberoMasterIds(adminDb, masterSel)
+      db = adminDb
+    } else {
+      subtreeSel = ['00000000-0000-0000-0000-000000000000']  // non autorizzato -> vuoto
+    }
+  }
   const primaLineaId = new Map<string, string>()  // master discendente -> id del figlio diretto (prima linea)
   const nomeMaster = new Map<string, string>()     // master id -> nome
   if (isMasterRete && utente?.master_id) {
@@ -57,7 +75,9 @@ export async function GET(req: NextRequest) {
 
   // Solo colonne leggere (SPED_COLS): esclusi etichetta_url/raw_response/colli_dettaglio.
   let query = db.from('spedizioni').select(`${SPED_COLS},clienti(ragione_sociale,agente),corrieri(id,nome_contratto)`).order(ordinaPer, { ascending: false }).limit(200)
-  if (clienteId) {
+  if (subtreeSel) {
+    query = query.in('master_id', subtreeSel)
+  } else if (clienteId) {
     query = query.eq('cliente_id', clienteId).eq('master_id', utente?.master_id)
   } else if (utente?.ruolo === 'cliente') {
     query = query.eq('cliente_id', utente.cliente_id)
@@ -84,11 +104,16 @@ export async function GET(req: NextRequest) {
   // master_rete = nome della MIA prima linea per le spedizioni dei sotto-master (null per le mie)
   const rows = (spedizioni || []).map((s: any) => {
     let master_rete: string | null = null
-    if (s.master_id && s.master_id !== utente?.master_id) {
+    let master_rete_id: string | null = null
+    if (masterSel) {
+      // Vista filtrata su un sotto-master: la prima linea sono io -> il sotto-master selezionato
+      master_rete_id = masterSel
+    } else if (s.master_id && s.master_id !== utente?.master_id) {
       const flId = primaLineaId.get(s.master_id)
       master_rete = flId ? (nomeMaster.get(flId) || null) : null
+      master_rete_id = flId || null
     }
-    return { ...s, master_rete }
+    return { ...s, master_rete, master_rete_id }
   })
   return NextResponse.json(rows)
 }

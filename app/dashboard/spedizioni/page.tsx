@@ -52,7 +52,7 @@ export default function SpedizioniPage() {
   const [filtri, setFiltri] = useState(FILTRI_DEFAULT)
 
   useEffect(() => {
-    fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[]))
+    fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
     fetch('/api/corrieri/lista').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d)?d:[]))
     fetch('/api/staff').then(r=>r.json()).then(d=>setStaff(Array.isArray(d)?d.filter((u:any)=>{const ru=(u.ruolo||'').toLowerCase();return ru!=='cliente'&&ru!=='master'}):[]))
     caricaTutte()
@@ -69,7 +69,14 @@ export default function SpedizioniPage() {
 
   function applicaFiltri() {
     let filtered = [...spedizioni]
-    if (filtri.clienteId) filtered = filtered.filter(s => s.cliente_id === filtri.clienteId)
+    if (filtri.clienteId) {
+      if (filtri.clienteId.startsWith('m:')) {
+        const mid = filtri.clienteId.slice(2)
+        filtered = filtered.filter(s => s.master_rete_id === mid)   // sotto-master agganciato
+      } else {
+        filtered = filtered.filter(s => s.cliente_id === filtri.clienteId)
+      }
+    }
     if (filtri.stato) filtered = filtered.filter(s => s.stato === filtri.stato)
     if (filtri.contratto) filtered = filtered.filter(s => s.corriere_id === filtri.contratto)
     if (filtri.vettore) filtered = filtered.filter(s => String(s.corrieri?.nome_contratto||'').split(' ')[0] === filtri.vettore)

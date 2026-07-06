@@ -9,19 +9,37 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id,nome').eq('id', user.id).single()
   const p = req.nextUrl.searchParams
-  const clienteId = p.get('clienteId')
+  const clienteIdRaw = p.get('clienteId')
+  // "m:<masterId>" = sotto-master agganciato (trattato come cliente)
+  const masterSel = clienteIdRaw && clienteIdRaw.startsWith('m:') ? clienteIdRaw.slice(2) : null
+  const clienteId = masterSel ? null : clienteIdRaw
   const stato = p.get('stato')
   const dal = p.get('dal')
   const al = p.get('al')
   const contrassegno = p.get('contrassegno')
   const provincia = p.get('provincia')
 
-  let query = supabase.from('spedizioni')
+  // Sotto-master selezionato: uso il client admin e filtro sul suo sotto-albero
+  let db: any = supabase
+  let subtreeSel: string[] | null = null
+  if (masterSel && utente?.master_id) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const adminDb = createAdminSupabase()
+    const mieiDiscendenti = await sottoAlberoMasterIds(adminDb, utente.master_id)
+    subtreeSel = mieiDiscendenti.includes(masterSel)
+      ? await sottoAlberoMasterIds(adminDb, masterSel)
+      : ['00000000-0000-0000-0000-000000000000']
+    db = adminDb
+  }
+
+  let query = db.from('spedizioni')
     .select(`${SPED_COLS}, clienti(ragione_sociale,agente), corrieri(id,nome_contratto)`)
-    .eq('master_id', utente?.master_id)
     .order('created_at', { ascending: false })
     .limit(5000)
 
+  if (subtreeSel) query = query.in('master_id', subtreeSel)
+  else query = query.eq('master_id', utente?.master_id)
   if (clienteId) query = query.eq('cliente_id', clienteId)
   if (stato) query = query.eq('stato', stato)
   if (dal) query = query.gte('created_at', dal)
