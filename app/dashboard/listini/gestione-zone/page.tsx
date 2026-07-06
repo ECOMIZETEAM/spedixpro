@@ -68,7 +68,7 @@ export default function GestioneZonePage() {
       if(d?.error){ alert(d.error); return }
     }
     setFormRegione({paese:'IT',provincia:'',cap:'*',citta:'*'})
-    caricaRegioni(modalModifica.id)
+    caricaRegioni(modalModifica.id); load()
   }
   async function salvaEditRegione() {
     if(!modalModifica || !editReg) return
@@ -78,12 +78,12 @@ export default function GestioneZonePage() {
     setSavingReg(false)
     if(d?.error){ alert(d.error); return }
     setEditReg(null)
-    caricaRegioni(modalModifica.id)
+    caricaRegioni(modalModifica.id); load()
   }
   async function eliminaRegione(capId:string) {
     if(!modalModifica) return
     await fetch('/api/zone/'+modalModifica.id+'/cap?capId='+capId,{method:'DELETE'})
-    caricaRegioni(modalModifica.id)
+    caricaRegioni(modalModifica.id); load()
   }
 
   async function elimina(id:string,nome:string) {
@@ -135,10 +135,21 @@ export default function GestioneZonePage() {
       if(d?.error){ alert(d.error); setImporting(''); return }
       alert(`Importate ${d.inserite} regioni nella zona.`)
       if(modalModifica?.id===zonaId) caricaRegioni(zonaId)
+      load()
     } catch(e:any){
       alert('Errore lettura file: '+(e?.message||e))
     }
     setImporting('')
+  }
+
+  // Riepilogo regioni per la colonna "Paese (Pr) CAP Città" (come spedisci.online)
+  function riepilogoRegioni(z:any):string {
+    const regs:any[] = Array.isArray(z?.zone_cap) ? z.zone_cap : []
+    if(!regs.length) return z?.descrizione || '—'
+    const fmt=(r:any)=>`${r.paese} (${r.provincia}) ${r.cap} ${r.citta}`
+    const max=15
+    const parts=regs.map(fmt)
+    return parts.length>max ? parts.slice(0,max).join(' · ')+' · ……' : parts.join(' · ')
   }
 
   const inp={padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',width:'100%',boxSizing:'border-box' as const}
@@ -180,7 +191,7 @@ export default function GestioneZonePage() {
                       <td style={{padding:'10px 12px'}}>
                         {z.con_fuel&&<span style={{background:'#f97316',color:'#fff',padding:'2px 8px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>Fuel</span>}
                       </td>
-                      <td style={{padding:'10px 12px',color:'#1a1a1a',fontSize:'12px',maxWidth:'500px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{z.descrizione||'—'}</td>
+                      <td style={{padding:'10px 12px',color:'#1a1a1a',fontSize:'12px',maxWidth:'500px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}} title={riepilogoRegioni(z)}>{riepilogoRegioni(z)}</td>
                       <td style={{padding:'10px 12px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
                           <button onClick={()=>{setModalModifica(z);setFormMod({nome:z.nome,descrizione:z.descrizione||'',con_fuel:z.con_fuel||false});setRegioni([]);setEditReg(null);caricaRegioni(z.id)}} style={ibtn('#16a34a','#fff','#86efac')}>✏️</button>

@@ -6,7 +6,7 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
-  const { data } = await supabase.from('zone').select('*, corrieri(nome_contratto,tipo)').eq('master_id', utente?.master_id).order('nome')
+  const { data } = await supabase.from('zone').select('*, corrieri(nome_contratto,tipo), zone_cap(paese,provincia,cap,citta)').eq('master_id', utente?.master_id).order('nome')
   return NextResponse.json(data || [])
 }
 
