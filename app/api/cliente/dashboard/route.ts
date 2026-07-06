@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { SPED_COLS } from '@/lib/spedizioni-cols'
 export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -25,7 +26,7 @@ export async function GET() {
     supabase.from('spedizioni').select('*',{count:'exact',head:true}).eq('cliente_id', clienteId).gte('created_at', fa30gg).eq('stato','in_lavorazione'),
     supabase.from('spedizioni').select('*',{count:'exact',head:true}).eq('cliente_id', clienteId).gte('created_at', fa30gg).in('stato',['in_lavorazione','spedita']),
     supabase.from('spedizioni').select('stato,created_at,costo_totale').eq('cliente_id', clienteId).gte('created_at', new Date(now.getFullYear()-1, now.getMonth(), 1).toISOString()),
-    supabase.from('spedizioni').select('*').eq('cliente_id', clienteId).order('created_at',{ascending:false}).limit(10),
+    supabase.from('spedizioni').select(SPED_COLS).eq('cliente_id', clienteId).order('created_at',{ascending:false}).limit(10),
   ])
   const statsMensili: Record<string,{totale:number,importo:number}> = {}
   for (const s of tutteSpedizioni||[]) {

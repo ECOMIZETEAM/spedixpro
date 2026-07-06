@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { calcolaPrezzoCorriere } from '@/lib/pricing'
+import { SPED_COLS } from '@/lib/spedizioni-cols'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
   const provincia = p.get('provincia')
 
   let query = supabase.from('spedizioni')
-    .select('*, clienti(ragione_sociale)')
+    .select(`${SPED_COLS}, clienti(ragione_sociale)`)
     .eq('master_id', utente?.master_id)
     .order('created_at', { ascending: false })
     .limit(5000)
