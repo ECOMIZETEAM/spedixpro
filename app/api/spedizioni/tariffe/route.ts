@@ -4,6 +4,7 @@ import {
   spediamoproGetQuotation,
   kgToGrams, cmToMm, euroToCents, centsToEuro
 } from '@/lib/spediamopro'
+import { trovaZoneMatch } from '@/lib/zone-match'
 
 const ZONE_MAP: Record<string,string> = {
   CA:'Sardegna',CI:'Sardegna',VS:'Sardegna',NU:'Sardegna',OG:'Sardegna',OT:'Sardegna',OR:'Sardegna',SS:'Sardegna',
@@ -117,22 +118,6 @@ export async function POST(req: NextRequest) {
   const paeseDest = (body.shipTo?.country || 'IT').toUpperCase().trim()
   const isEstero = paeseDest !== 'IT'
   const zonaNome = ZONE_MAP[provincia] || 'Italia'
-  // Zona da zone_cap: match per paese, con priorita CAP esatto > provincia > jolly.
-  // Vale sia per Italia che estero. Fallback a ZONE_MAP piu sotto se nessun match.
-  let zoneMatchIds: string[] = []
-  {
-    const { data: zc } = await supabase.from('zone_cap').select('zona_id,provincia,cap').eq('paese', paeseDest)
-    const righe = zc || []
-    // 1) CAP esatto
-    let match = righe.filter((r: any) => r.cap && r.cap !== '*' && r.cap === capDest)
-    // 2) provincia (cap jolly)
-    if (!match.length) match = righe.filter((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*'))
-    // 3) jolly totale (paese, provincia * cap *) -> tipico estero
-    if (!match.length) match = righe.filter((r: any) => (!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*'))
-    zoneMatchIds = match.map((r: any) => r.zona_id).filter(Boolean)
-  }
-  // Compat: manteniamo zoneEsteroIds usato piu sotto nel filtro fasce
-  let zoneEsteroIds: string[] = zoneMatchIds
 
   // ─── Costruisce una quotazione per un dato corriere ──────────────────────
   async function quotaCorriere(corriere: any, pesoFatt: number): Promise<any> {
@@ -228,6 +213,13 @@ export async function POST(req: NextRequest) {
   if (!fasce?.length) {
     return NextResponse.json({ error: 'Listino vuoto — configura le fasce prezzi' }, { status: 400 })
   }
+
+  // Match zona via zone_cap (CAP esatto > provincia > jolly), ristretto alle zone del listino
+  const zoneMatchIds = await trovaZoneMatch(
+    supabase,
+    { paese: paeseDest, provincia, cap: capDest },
+    fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean)
+  )
 
   let fasceZona
   // 1) Prova zone_cap (match per CAP/provincia/paese) - vale Italia ed estero

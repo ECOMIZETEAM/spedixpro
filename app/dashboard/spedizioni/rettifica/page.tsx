@@ -221,7 +221,7 @@ export default function RettificaCostiPage() {
                       <td style={{padding:'8px 10px'}}>
                         {isDaRett && <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(r.id)}/>}
                       </td>
-                      <td style={{padding:'8px 10px',color:'#1a1a1a',fontWeight:'500',fontSize:'12px'}}>{r.clienti?.ragione_sociale||'—'}</td>
+                      <td style={{padding:'8px 10px',color:'#1a1a1a',fontWeight:'500',fontSize:'12px'}}>{r.clienti?.ragione_sociale || (r.masters?.nome ? ('🏢 ' + r.masters.nome) : '—')}</td>
                       <td style={{padding:'8px 10px',color:'#f97316',fontWeight:'600'}}>{r.numero_spedizione}</td>
                       <td style={{padding:'8px 10px',color:'#1a1a1a'}}>{Number(r.peso_iniziale).toFixed(2)}</td>
                       <td style={{padding:'8px 10px',color:'#1a1a1a'}}>{Number(r.peso_volume_iniziale).toFixed(2)}</td>

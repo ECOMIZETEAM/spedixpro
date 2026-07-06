@@ -37,6 +37,7 @@ export async function GET(req: NextRequest) {
     if (s.corriere_id) {
       pc = await calcolaPrezzoCorriere(supabase, {
         corriereId: s.corriere_id, masterId: utente?.master_id, provincia: s.dest_provincia || '',
+        cap: s.dest_cap || '', paese: s.dest_paese || 'IT',
         pesoReale: Number(s.peso_reale) || 1,
         packages: [{ length: s.lunghezza, width: s.larghezza, height: s.altezza }],
         contrassegno: Number(s.contrassegno) || 0, assicurazione: Number(s.assicurazione) || 0,

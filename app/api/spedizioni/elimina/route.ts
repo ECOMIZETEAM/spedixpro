@@ -13,7 +13,7 @@ export async function DELETE(req: NextRequest) {
 
   // Carico la spedizione (costo, cliente, numero, destinatario, stato, corriere, provincia, colli)
   const { data: sped } = await supabase.from('spedizioni')
-    .select('id,master_id,cliente_id,numero,dest_nome,dest_provincia,costo_totale,costo_spedizione,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,stato')
+    .select('id,master_id,cliente_id,numero,dest_nome,dest_provincia,dest_cap,dest_paese,costo_totale,costo_spedizione,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,stato')
     .eq('id', spedizioneId).single()
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 
@@ -81,6 +81,8 @@ export async function DELETE(req: NextRequest) {
         corriereOwnerId: corriere.master_id,
         costoSpedizione: Number(sped.costo_spedizione || 0),
         provincia: sped.dest_provincia || '',
+        cap: sped.dest_cap || '',
+        paese: sped.dest_paese || 'IT',
         packages,
         numero: sped.numero,
         destNome: sped.dest_nome || '',

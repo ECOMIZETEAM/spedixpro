@@ -12,6 +12,8 @@ export async function GET(req: NextRequest) {
 
   const p = req.nextUrl.searchParams
   const provincia = p.get('provincia') || 'RM'
+  const cap = p.get('cap') || ''
+  const paese = p.get('paese') || 'IT'
   const peso = parseFloat(p.get('peso') || '1')
   const corriereId = p.get('corriere') || ''
   const masterDiretto = p.get('master') || '0ac48b7e-f6b6-49fa-9929-bb9e31750c81' // MASSIMO
@@ -31,12 +33,12 @@ export async function GET(req: NextRequest) {
   out.masterDirettoRec = mm || null
 
   if (mm?.parent_listino_id) {
-    out.prezzoListinoParent = await calcolaPrezzoListino(supabase, { listinoId: mm.parent_listino_id, provincia, packages })
+    out.prezzoListinoParent = await calcolaPrezzoListino(supabase, { listinoId: mm.parent_listino_id, provincia, cap, paese, packages })
   }
 
   if (corriereOwnerId) {
     out.verificaCatena = await verificaCreditoCatena(supabase, {
-      masterDirettoId: masterDiretto, corriereOwnerId, provincia, packages, costoSpedizione: 0,
+      masterDirettoId: masterDiretto, corriereOwnerId, provincia, cap, paese, packages, costoSpedizione: 0,
     })
   } else {
     out.verificaCatena = 'saltata: passa ?corriere=<id> per eseguirla'

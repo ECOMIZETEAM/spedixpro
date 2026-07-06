@@ -9,6 +9,8 @@
 // Usato dal ledger a cascata (STEP 4.5) per sapere quanto paga ogni master
 // della catena col proprio listino ereditato.
 
+import { trovaZoneMatch } from '@/lib/zone-match'
+
 const ZONE_MAP: Record<string, string> = {
   CA:'Sardegna',CI:'Sardegna',VS:'Sardegna',NU:'Sardegna',OG:'Sardegna',OT:'Sardegna',OR:'Sardegna',SS:'Sardegna',
   AG:'Sicilia',CL:'Sicilia',CT:'Sicilia',EN:'Sicilia',ME:'Sicilia',PA:'Sicilia',RG:'Sicilia',SR:'Sicilia',TP:'Sicilia',
@@ -57,6 +59,8 @@ export async function calcolaPrezzoListino(
     provincia: string
     packages: any[]
     corriereId?: string | null
+    cap?: string
+    paese?: string
   }
 ): Promise<RisultatoPrezzo> {
   const { listinoId, provincia } = params
@@ -91,7 +95,18 @@ export async function calcolaPrezzoListino(
 
   if (!fasce?.length) return null
 
-  let fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
+  // 1) Match via zone_cap (CAP esatto > provincia > jolly), ristretto alle zone del listino.
+  const candidateZonaIds = fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean)
+  const zoneMatchIds = await trovaZoneMatch(
+    supabase,
+    { paese: params.paese, provincia, cap: params.cap },
+    candidateZonaIds
+  )
+  let fasceZona = zoneMatchIds.length
+    ? fasce.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id))
+    : []
+  // 2) Fallback ZONE_MAP per nome zona (compatibilita' listini senza zone_cap).
+  if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
   if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
   if (!fasceZona.length) return null
 
@@ -127,9 +142,11 @@ export async function calcolaPrezzoListino(
 
   if (!miglior) return null
 
+  const zonaRisolta = (fasceZona[0]?.zone as any)?.nome || zonaNome
+
   return {
     prezzo: Math.round(miglior.prezzo * 100) / 100,
-    zona: zonaNome,
+    zona: zonaRisolta,
     peso_reale: pesoReale,
     peso_volume: Math.round(pesoVolume * 100) / 100,
     peso_fatturato: Math.round(pesoFatturato * 100) / 100,
@@ -150,6 +167,8 @@ export async function calcolaPrezzoCorriere(
     packages?: any[]
     contrassegno?: number
     assicurazione?: number
+    cap?: string
+    paese?: string
   }
 ): Promise<number | null> {
   const { corriereId, masterId, provincia } = params
@@ -181,7 +200,16 @@ export async function calcolaPrezzoCorriere(
     .order('peso_max', { ascending: true })
   if (!fasce?.length) return null
 
-  let fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
+  const candidateZonaIds = fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean)
+  const zoneMatchIds = await trovaZoneMatch(
+    supabase,
+    { paese: params.paese, provincia, cap: params.cap },
+    candidateZonaIds
+  )
+  let fasceZona = zoneMatchIds.length
+    ? fasce.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id))
+    : []
+  if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
   if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
   if (!fasceZona.length) return null
 

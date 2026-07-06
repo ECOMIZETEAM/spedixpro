@@ -142,6 +142,8 @@ export async function POST(req: NextRequest) {
     corriereOwnerId: corriereRecord.master_id,
     provincia: body.shipTo.state,
     packages,
+    cap: body.shipTo.postalCode,
+    paese: body.shipTo.country || 'IT',
   })
   if (!catenaCheck.ok) {
     return NextResponse.json({ error: catenaCheck.errore }, { status: 402 })
@@ -237,6 +239,7 @@ export async function POST(req: NextRequest) {
     await addebitaCatena(supabase, {
       masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
       costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
+      cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
       numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
     })
 
@@ -340,6 +343,7 @@ export async function POST(req: NextRequest) {
       await addebitaCatena(supabase, {
         masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
         costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
+        cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
         numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
       })
 
