@@ -45,8 +45,12 @@ export async function POST(req: NextRequest) {
   if (!ruoliValidi.includes((ruolo||'').toLowerCase())) return NextResponse.json({ error: 'Ruolo non valido' }, { status: 400 })
 
   const admin = createAdminSupabase()
-  // creo l'utente auth e invio email per impostare la password
-  const { data: created, error: authErr } = await admin.auth.admin.inviteUserByEmail(email.trim())
+  // creo l'utente auth e invio email per impostare la password.
+  // redirectTo = pagina dove l'invitato imposta la password ed entra nel portale.
+  const origin = req.headers.get('origin') || req.nextUrl.origin
+  const { data: created, error: authErr } = await admin.auth.admin.inviteUserByEmail(email.trim(), {
+    redirectTo: `${origin}/imposta-password`,
+  })
   if (authErr) return NextResponse.json({ error: authErr.message }, { status: 400 })
   const newId = created?.user?.id
   if (!newId) return NextResponse.json({ error: 'Creazione utente fallita' }, { status: 400 })
