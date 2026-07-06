@@ -27,7 +27,6 @@ const NAV_BASE: NavItem[] = [
     sub: [
       { label: 'Da file CSV', href: '/cliente/importa' },
       { label: 'Negozi collegati', href: '/cliente/integrazioni' },
-      { label: 'API / Sviluppatori', href: '/cliente/integrazioni/api' },
     ],
   },
   {
@@ -102,12 +101,14 @@ export default function ClienteNav() {
   const sectionActive = (item: NavItem) =>
     leafActive(item.href) || (item.sub?.some(s => leafActive(s.href)) ?? false)
 
+  // Tutte le sezioni aperte di default: le sotto-voci sono sempre visibili.
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     const init: Record<string, boolean> = {}
-    NAV.forEach(i => { if (sectionActive(i)) init[i.id] = true })
+    NAV.forEach(i => { if (i.sub?.length) init[i.id] = true })
     return init
   })
-  const toggle = (id: string) => setOpen(prev => ({ [id]: !prev[id] }))
+  // Toggle additivo: aprire/chiudere una sezione non tocca le altre.
+  const toggle = (id: string) => setOpen(prev => ({ ...prev, [id]: !prev[id] }))
 
   return (
     <nav style={{ flex: 1, padding: '6px 0' }}>

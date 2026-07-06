@@ -10,7 +10,6 @@ export default function ApiKeysPage() {
   const [loading, setLoading] = useState(true)
   const [creando, setCreando] = useState('')
   const [msg, setMsg] = useState('')
-  const [nuovaKey, setNuovaKey] = useState<any>(null)
 
   const base = typeof window !== 'undefined' ? window.location.origin : 'https://moovexpress.com'
 
@@ -35,7 +34,6 @@ export default function ApiKeysPage() {
     const d = await res.json()
     setCreando('')
     if (d.error) { setMsg('Errore: '+d.error); return }
-    setNuovaKey(d)
     carica()
   }
   async function revoca(id:string) {
@@ -52,21 +50,11 @@ export default function ApiKeysPage() {
   return (
     <div>
       <div style={{marginBottom:'20px'}}>
-        <h1 style={{fontSize:'20px',fontWeight:700,color:'#1a1a1a',margin:0}}>API / Sviluppatori</h1>
+        <h1 style={{fontSize:'20px',fontWeight:700,color:'#1a1a1a',margin:0}}>API Key</h1>
         <p style={{color:'#999',fontSize:'13px',marginTop:'4px'}}>Genera una chiave API per collegare un tuo contratto a un altro gestionale.</p>
       </div>
 
       {msg && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px',marginBottom:'14px',fontSize:'13px',color:'#ea580c'}}>{msg}</div>}
-
-      {nuovaKey && (
-        <div style={{...card, borderColor:ACCENT, marginBottom:'16px', background:'#fff7ed'}}>
-          <div style={{fontWeight:700,color:'#1a1a1a',marginBottom:'6px'}}>✅ Nuova API key creata — copiala ora, non sarà più mostrata per intero</div>
-          <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
-            <code style={{flex:1,background:'#fff',border:'1px solid #fed7aa',borderRadius:'6px',padding:'9px 12px',fontSize:'13px',color:'#1a1a1a',wordBreak:'break-all'}}>{nuovaKey.chiave}</code>
-            <button onClick={()=>copia(nuovaKey.chiave)} style={{background:ACCENT,color:'#fff',border:'none',borderRadius:'6px',padding:'9px 14px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>Copia</button>
-          </div>
-        </div>
-      )}
 
       <div style={{...card, marginBottom:'16px'}}>
         <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'8px'}}>Come si usa</div>
@@ -95,9 +83,10 @@ export default function ApiKeysPage() {
               </div>
               {ks.map((k:any)=>(
                 <div key={k.id} style={{display:'flex',alignItems:'center',gap:'8px',padding:'8px 0',borderTop:'1px solid #f0f0f0'}}>
-                  <code style={{flex:1,fontSize:'12.5px',color:'#666'}}>{k.chiave ? (k.chiave.slice(0,14)+'••••••••'+k.chiave.slice(-4)) : '—'}</code>
-                  <span style={{fontSize:'11px',color:'#999'}}>{k.last_used_at?('usata il '+new Date(k.last_used_at).toLocaleDateString('it-IT')):'mai usata'}</span>
-                  <button onClick={()=>revoca(k.id)} style={{background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:'6px',padding:'5px 10px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>Revoca</button>
+                  <code style={{flex:1,fontSize:'12.5px',color:'#1a1a1a',wordBreak:'break-all',background:'#f9fafb',border:'1px solid #eee',borderRadius:'4px',padding:'6px 8px'}}>{k.chiave}</code>
+                  <button onClick={()=>copia(k.chiave)} style={{background:ACCENT,color:'#fff',border:'none',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>Copia</button>
+                  <span style={{fontSize:'11px',color:'#999',whiteSpace:'nowrap'}}>{k.last_used_at?('usata '+new Date(k.last_used_at).toLocaleDateString('it-IT')):'mai usata'}</span>
+                  <button onClick={()=>revoca(k.id)} style={{background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:'6px',padding:'6px 10px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>Revoca</button>
                 </div>
               ))}
             </div>
