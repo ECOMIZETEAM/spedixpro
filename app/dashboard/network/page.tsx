@@ -67,7 +67,7 @@ export default function NetworkRicevutiPage() {
       })
       const d = await res.json()
       if (d.error) setMsg('Errore: ' + d.error)
-      else setMsg('✓ Rimessa #' + c.numero + ' accettata — create ' + (d.distinteCreate||0) + ' distinte verso i tuoi clienti (le trovi in Contrassegni › Distinte)')
+      else setMsg('✓ Rimessa #' + c.numero + ' accettata — create ' + (d.distinteCreate||0) + ' distinte verso i tuoi clienti' + (d.giaCaricate ? ' ('+d.giaCaricate+' già caricate, saltate)' : '') + ' (le trovi in Contrassegni › Distinte)')
       carica()
     } catch { setMsg('Errore di connessione') }
     setAccettando('')

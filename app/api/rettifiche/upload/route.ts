@@ -72,8 +72,9 @@ export async function POST(req: NextRequest) {
     const idx = catena.indexOf(myMaster)
     if (idx === -1) { nScartati++; continue }
 
-    // Anti-duplicato storico
-    const { data: giaEsiste } = await supabase.from('rettifiche').select('id').eq('spedizione_id', spedizione.id).eq('confermata', true).limit(1)
+    // Anti-duplicato: salta se esiste già una rettifica CONFERMATA o IN ATTESA per la spedizione
+    // (prima bloccava solo le confermate → si potevano creare doppioni "da_rettificare")
+    const { data: giaEsiste } = await supabase.from('rettifiche').select('id').eq('spedizione_id', spedizione.id).or('confermata.eq.true,stato.eq.da_rettificare').limit(1)
     if (giaEsiste && giaEsiste.length > 0) { nScartati++; continue }
     nTrovate++
 

@@ -39,15 +39,21 @@ export async function POST(req: NextRequest) {
 
   // Le spedizioni corrispondenti che sono MIE (del mio master)
   const { data: spedizioni } = await admin.from('spedizioni')
-    .select('id,cliente_id,contrassegno,numero')
+    .select('id,cliente_id,contrassegno,numero,stato_contrassegno,distinta_contrassegno_id')
     .in('numero', numeri)
     .eq('master_id', mio)
     .gt('contrassegno', 0)
   if (!spedizioni?.length) return NextResponse.json({ error: 'Spedizioni non trovate' }, { status: 404 })
 
+  // ANTI-DUPLICATO: escludo quelle già in una distinta contrassegni (già caricate)
+  const daCaricare = spedizioni.filter((s: any) =>
+    !s.distinta_contrassegno_id && s.stato_contrassegno !== 'in_distinta' && s.stato_contrassegno !== 'pagato'
+  )
+  const giaCaricate = spedizioni.length - daCaricare.length
+
   // Raggruppa per cliente e crea una distinta contrassegni per ciascun cliente
   const clientiMap: Record<string, any[]> = {}
-  for (const s of spedizioni) {
+  for (const s of daCaricare) {
     if (!s.cliente_id) continue
     if (!clientiMap[s.cliente_id]) clientiMap[s.cliente_id] = []
     clientiMap[s.cliente_id].push(s)
@@ -84,5 +90,5 @@ export async function POST(req: NextRequest) {
     .update({ accettata_target: true, accettata_target_at: new Date().toISOString() })
     .eq('id', distintaId)
 
-  return NextResponse.json({ success: true, distinteCreate: create })
+  return NextResponse.json({ success: true, distinteCreate: create, giaCaricate })
 }
