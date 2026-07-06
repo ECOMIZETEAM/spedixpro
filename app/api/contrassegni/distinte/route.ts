@@ -26,7 +26,9 @@ export async function GET(req: NextRequest) {
   const distinte = data || []
   const masterIds = [...new Set(distinte.map((d:any)=>d.target_master_id).filter(Boolean))]
   if (masterIds.length) {
-    const { data: masters } = await supabase.from('masters').select('id,nome').in('id', masterIds)
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const adminC = createAdminSupabase()
+    const { data: masters } = await adminC.from('masters').select('id,nome').in('id', masterIds)
     const mMap: Record<string,any> = {}
     ;(masters||[]).forEach((m:any)=>{ mMap[m.id] = m })
     distinte.forEach((d:any)=>{ if (d.target_master_id && mMap[d.target_master_id]) d.target_master = { nome: mMap[d.target_master_id].nome } })
