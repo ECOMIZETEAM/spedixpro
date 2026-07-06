@@ -61,7 +61,9 @@ export async function POST(req: NextRequest) {
     const adminClient = createAdminSupabase()
     const { data: authUser } = await adminClient.auth.admin.createUser({ email, password, email_confirm: true })
     if (authUser?.user) {
-      await supabase.from('utenti').insert({ id: authUser.user.id, ruolo: 'cliente', master_id: utente.master_id, cliente_id: nuovoCliente.id, nome: ragioneSociale, attivo: true })
+      // client ADMIN: la riga utenti è di un altro utente, l'RLS bloccherebbe il client utente-scoped
+      const { error: uErr } = await adminClient.from('utenti').insert({ id: authUser.user.id, ruolo: 'cliente', master_id: utente.master_id, cliente_id: nuovoCliente.id, nome: ragioneSociale, attivo: true })
+      if (uErr) console.error('Errore creazione riga utenti cliente:', uErr)
     }
   } catch(e) { console.error('Auth error:', e) }
   try {
