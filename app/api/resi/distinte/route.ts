@@ -9,14 +9,18 @@ export async function GET(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
-  const clienteId = req.nextUrl.searchParams.get('cliente_id')
+  const clienteIdRaw = req.nextUrl.searchParams.get('cliente_id')
+  // "m:<masterId>" = sotto-master agganciato: le sue distinte hanno target_master_id
+  const masterSel = clienteIdRaw && clienteIdRaw.startsWith('m:') ? clienteIdRaw.slice(2) : null
+  const clienteId = masterSel ? null : clienteIdRaw
   const dal = req.nextUrl.searchParams.get('dal')
   const al = req.nextUrl.searchParams.get('al')
   let query = supabase.from('distinte_resi')
     .select('*, clienti(ragione_sociale)')
     .eq('master_id', utente?.master_id)
     .order('created_at', { ascending: false })
-  if (clienteId) query = query.eq('cliente_id', clienteId)
+  if (masterSel) query = query.eq('target_master_id', masterSel)
+  else if (clienteId) query = query.eq('cliente_id', clienteId)
   if (dal) query = query.gte('created_at', dal)
   if (al) query = query.lte('created_at', al)
   const { data } = await query

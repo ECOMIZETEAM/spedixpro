@@ -19,7 +19,7 @@ export default function ReportRettifichePage() {
   })
 
   useEffect(() => {
-    fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[]))
+    fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
     fetch('/api/corrieri/lista').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d)?d:[]))
     fetch('/api/reports/lista?tipo=rettifiche').then(r=>r.json()).then(d=>setReports(d||[]))
   }, [])

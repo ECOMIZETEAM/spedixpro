@@ -7,7 +7,10 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
   const p = req.nextUrl.searchParams
-  const clienteId = p.get('clienteId')
+  const clienteIdRaw = p.get('clienteId')
+  // "m:<masterId>" = sotto-master agganciato: le sue distinte hanno target_master_id
+  const masterSel = clienteIdRaw && clienteIdRaw.startsWith('m:') ? clienteIdRaw.slice(2) : null
+  const clienteId = masterSel ? null : clienteIdRaw
   const stato = p.get('stato')
   const dal = p.get('dal')
   const al = p.get('al')
@@ -17,7 +20,8 @@ export async function GET(req: NextRequest) {
     .eq('master_id', utente?.master_id)
     .order('created_at', { ascending: false })
 
-  if (clienteId) query = query.eq('cliente_id', clienteId)
+  if (masterSel) query = query.eq('target_master_id', masterSel)
+  else if (clienteId) query = query.eq('cliente_id', clienteId)
   if (stato) query = query.eq('stato', stato)
   if (dal) query = query.gte('created_at', dal)
   if (al) query = query.lte('created_at', al + 'T23:59:59')
