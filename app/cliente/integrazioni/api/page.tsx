@@ -75,7 +75,8 @@ export default function ApiKeysPage() {
           Autenticazione: header <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>Authorization: Bearer &lt;api_key&gt;</code><br/>
           Tariffa: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>POST {base}/api/v1/rates</code><br/>
           Crea spedizione: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>POST {base}/api/v1/shipments</code> — body <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>{'{ packages, shipFrom, shipTo, codValue?, insuranceValue? }'}</code><br/>
-          Stato: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>GET {base}/api/v1/shipments/&#123;id&#125;</code> · Etichetta LDV: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>GET {base}/api/v1/shipments/&#123;id&#125;/label</code>
+          Stato: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>GET {base}/api/v1/shipments/&#123;id&#125;</code> · Etichetta LDV: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>GET {base}/api/v1/shipments/&#123;id&#125;/label</code><br/>
+          Annulla (solo se non ancora affidata al corriere): <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>DELETE {base}/api/v1/shipments/&#123;id&#125;</code>
         </div>
       </div>
 
