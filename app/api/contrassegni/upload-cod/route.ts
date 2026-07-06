@@ -97,6 +97,15 @@ export async function POST(req: NextRequest) {
     if (distinta?.id) {
       codInDistinte += totale
       await supabase.from('distinte_contrassegni_righe').insert(righeDist.map(r => ({ ...r, distinta_id: distinta.id })))
+      // Segna le spedizioni come "in distinta" -> badge contrassegno arancione
+      // (non tocco quelle gia' pagate)
+      const spedIds = righeDist.map(r => r.spedizione_id).filter(Boolean)
+      if (spedIds.length) {
+        await supabase.from('spedizioni')
+          .update({ stato_contrassegno: 'in_distinta', distinta_contrassegno_id: distinta.id })
+          .in('id', spedIds)
+          .neq('stato_contrassegno', 'pagato')
+      }
     }
   }
 

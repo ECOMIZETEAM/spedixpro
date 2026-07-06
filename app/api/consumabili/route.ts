@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { registraMovimento } from '@/lib/movimenti'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -13,26 +14,18 @@ export async function POST(req: NextRequest) {
   const importo = parseFloat(prezzoUnitario) * parseInt(quantita)
   const totaleIva = importo * (parseFloat(iva) / 100)
   const totale = importo + totaleIva
-  const { data: cli } = await supabase.from('clienti').select('credito').eq('id', clienteId).single()
-  const creditoAttuale = Number(cli?.credito || 0)
-  const creditoResiduo = creditoAttuale - totale
-  const { error } = await supabase.from('movimenti_clienti').insert({
-    master_id: utente?.master_id,
-    cliente_id: clienteId,
-    tipo: 'addebito',
-    descrizione,
-    prezzo_unitario: parseFloat(prezzoUnitario),
-    quantita: parseInt(quantita),
-    iva: parseFloat(iva),
-    importo,
-    totale_iva: totaleIva,
-    totale,
-    credito_residuo: creditoResiduo,
-    vettore: vettore || null,
-    data_acquisto: dataAcquisto,
-  })
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  await supabase.from('clienti').update({ credito: creditoResiduo }).eq('id', clienteId)
+  try {
+    await registraMovimento(supabase, {
+      masterId: utente?.master_id,
+      clienteId,
+      tipo: 'rettifica',
+      descrizione,
+      importo: -totale,
+      riferimento: vettore || null,
+    })
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message || 'Errore movimento' }, { status: 400 })
+  }
   return NextResponse.json({ success: true })
 }
 

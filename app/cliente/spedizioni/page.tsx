@@ -18,6 +18,14 @@ const STATI: Record<string,{bg:string,color:string,label:string}> = {
   non_consegnato:{bg:'#fef2f2',color:'#dc2626',label:'Non consegnato'},
 }
 
+// Colore badge contrassegno in base allo stato di pagamento:
+// grigio = da pagare, arancione = distinta caricata, verde = pagato
+function codBadgeStyle(stato?: string) {
+  if (stato === 'pagato') return { background:'#dcfce7', color:'#166534' }   // verde
+  if (stato === 'in_distinta') return { background:'#ffedd5', color:'#c2410c' } // arancione
+  return { background:'#e5e7eb', color:'#4b5563' }                            // grigio
+}
+
 const FILTRI_DEFAULT = {
   clienteId:'', negozio:'', vettore:'', contratto:'', stato:'', id_ordine:'',
   numero:'', dal:'', al:'', contrassegno:'', stato_contrassegni:'',
@@ -321,7 +329,7 @@ async function apriTracking(s: any) {
                       <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.colli}</td>
                       <td style={{padding:'9px 12px',color:'#1a1a1a'}}>
                         {Number(s.contrassegno)>0
-                          ? <span style={{background:'#fef9c3',color:'#854d0e',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{Number(s.contrassegno).toFixed(2)}</span>
+                          ? <span style={{...codBadgeStyle(s.stato_contrassegno),padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{Number(s.contrassegno).toFixed(2)}</span>
                           : '—'}
                       </td>
                       <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px',whiteSpace:'nowrap' as const}}>
