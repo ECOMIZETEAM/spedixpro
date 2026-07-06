@@ -7,8 +7,8 @@ const th = {padding:'9px 12px',fontSize:'11px',fontWeight:700 as const,textTrans
 const td = {padding:'9px 12px',fontSize:'12.5px',color:'#1a1a1a',borderTop:'1px solid #f0f0f0'}
 
 export default function NetworkRicevutiPage() {
-  const [tab, setTab] = useState<'rettifiche'|'contrassegni'|'movimenti'>('rettifiche')
-  const [dati, setDati] = useState<any>({rettifiche:[],contrassegni:[],movimenti:[]})
+  const [tab, setTab] = useState<'rettifiche'|'contrassegni'|'resi'>('rettifiche')
+  const [dati, setDati] = useState<any>({rettifiche:[],contrassegni:[],resi:[]})
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
   const [propagando, setPropagando] = useState<string>('')
@@ -57,6 +57,22 @@ export default function NetworkRicevutiPage() {
     } catch { if (!silenzioso) setMsg('Errore di connessione') }
   }
 
+  // Accetta un reso ricevuto: propaga (distinte reso verso clienti e/o sotto-master)
+  async function accettaReso(r: any) {
+    setAccettando(r.id); setMsg('')
+    try {
+      const res = await fetch('/api/network/resi/accetta', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ distintaId: r.id })
+      })
+      const d = await res.json()
+      if (d.error) setMsg('Errore: ' + d.error)
+      else setMsg('✓ Reso #' + r.numero + ' accettato — create ' + (d.distinteCreate||0) + ' distinte reso' + (d.giaCaricate ? ' ('+d.giaCaricate+' già in reso, saltate)' : '') + ' (verso i tuoi clienti/sotto-master)')
+      carica()
+    } catch { setMsg('Errore di connessione') }
+    setAccettando('')
+  }
+
   // Accetta una rimessa contrassegni ricevuta: crea le distinte verso i miei clienti
   async function accettaContrassegno(c: any) {
     setAccettando(c.id); setMsg('')
@@ -76,14 +92,14 @@ export default function NetworkRicevutiPage() {
   const tabs: [typeof tab, string, number][] = [
     ['rettifiche', 'Rettifiche ricevute', dati.rettifiche.length],
     ['contrassegni', 'Rimesse COD ricevute', dati.contrassegni.length],
-    ['movimenti', 'Addebiti subiti', dati.movimenti.length],
+    ['resi', 'Resi ricevuti', dati.resi.length],
   ]
 
   return (
     <div>
       <div style={{marginBottom:'20px'}}>
         <h1 style={{fontSize:'20px',fontWeight:700,color:'#1a1a1a',margin:0}}>Dal mio network</h1>
-        <p style={{color:'#999',fontSize:'13px',marginTop:'4px'}}>Rettifiche, rimesse contrassegni e addebiti ricevuti dal livello superiore</p>
+        <p style={{color:'#999',fontSize:'13px',marginTop:'4px'}}>Rettifiche, rimesse contrassegni e resi ricevuti dal livello superiore — accetta e propaga alla tua rete/clienti</p>
       </div>
 
       <div style={{display:'flex',gap:'8px',marginBottom:'16px'}}>
@@ -174,20 +190,30 @@ export default function NetworkRicevutiPage() {
               </tbody>
             </table>
           )}
-          {tab==='movimenti' && (
+          {tab==='resi' && (
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead><tr style={{background:'#f9fafb'}}>
-                <th style={th}>Data</th><th style={th}>Tipo</th><th style={th}>Descrizione</th><th style={th}>Importo</th><th style={th}>Saldo dopo</th>
+                <th style={th}>Data</th><th style={th}>Da</th><th style={th}>Distinta</th><th style={th}>LDV incluse</th><th style={th}>Totale</th><th style={th}></th>
               </tr></thead>
               <tbody>
-                {dati.movimenti.length===0 ? <tr><td colSpan={5} style={{...td,textAlign:'center',color:'#999',padding:'32px'}}>Nessun addebito subito</td></tr> :
-                dati.movimenti.map((m:any)=>(
-                  <tr key={m.id}>
-                    <td style={td}>{new Date(m.created_at).toLocaleDateString('it-IT')} {new Date(m.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</td>
-                    <td style={td}><span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#fee2e2',color:'#991b1b',textTransform:'capitalize'}}>{m.tipo}</span></td>
-                    <td style={td}>{m.descrizione}</td>
-                    <td style={{...td,fontWeight:700,color:Number(m.importo)<0?'#dc2626':'#16a34a'}}>€ {Number(m.importo).toFixed(2)}</td>
-                    <td style={td}>€ {Number(m.saldo_dopo).toFixed(2)}</td>
+                {dati.resi.length===0 ? <tr><td colSpan={6} style={{...td,textAlign:'center',color:'#999',padding:'32px'}}>Nessun reso ricevuto</td></tr> :
+                dati.resi.map((r:any)=>(
+                  <tr key={r.id}>
+                    <td style={td}>{new Date(r.created_at).toLocaleDateString('it-IT')}</td>
+                    <td style={td}>{r.masters?.nome||'—'}</td>
+                    <td style={{...td,fontWeight:600}}>#{r.numero}</td>
+                    <td style={td}>{(Array.isArray(r.voci)?r.voci:[]).map((x:any)=>x.numero).join(', ')||('—')}</td>
+                    <td style={{...td,fontWeight:700,color:'#dc2626'}}>€ {Number(r.totale||0).toFixed(2)}</td>
+                    <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>
+                      {r.accettata_target ? (
+                        <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#dcfce7',color:'#166534'}}>✓ Accettato</span>
+                      ) : (
+                        <button onClick={()=>accettaReso(r)} disabled={accettando===r.id}
+                          style={{background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'5px 10px',fontSize:'12px',fontWeight:600,cursor:'pointer',opacity:accettando===r.id?.6:1}}>
+                          {accettando===r.id?'…':'✓ Accetta e propaga'}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

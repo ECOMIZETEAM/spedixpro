@@ -15,7 +15,7 @@ export async function GET(_req: NextRequest) {
   const mio = utente.master_id
   const adminDb = createAdminSupabase()
 
-  const [rett, cod, movs] = await Promise.all([
+  const [rett, cod, resi] = await Promise.all([
     adminDb.from('rettifiche')
       .select('id,numero_spedizione,peso_iniziale,peso_reale,costo_iniziale,costo_finale,differenza,confermata,stato,propagazione,created_at,masters:master_id(nome)')
       .eq('target_master_id', mio)
@@ -24,16 +24,15 @@ export async function GET(_req: NextRequest) {
       .select('id,numero,totale_iniziale,totale_rimborsato,metodo_pagamento,stato,data_pagamento,accettata_target,created_at,masters:master_id(nome),distinte_contrassegni_righe(numero_spedizione,importo_cod)')
       .eq('target_master_id', mio)
       .order('created_at', { ascending: false }).limit(100),
-    adminDb.from('movimenti')
-      .select('id,tipo,descrizione,importo,saldo_dopo,created_at,spedizione_id')
-      .eq('master_target_id', mio)
-      .in('tipo', ['reso', 'rettifica'])
-      .order('created_at', { ascending: false }).limit(200),
+    adminDb.from('distinte_resi')
+      .select('id,numero,totale,totale_ldv,stato,accettata_target,created_at,voci,masters:master_id(nome)')
+      .eq('target_master_id', mio)
+      .order('created_at', { ascending: false }).limit(100),
   ])
 
   return NextResponse.json({
     rettifiche: rett.data || [],
     contrassegni: cod.data || [],
-    movimenti: movs.data || [],
+    resi: resi.data || [],
   })
 }
