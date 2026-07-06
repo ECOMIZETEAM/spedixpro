@@ -71,7 +71,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (userToReset) {
         await adminClient.auth.admin.updateUserById(userToReset.id, { password: newPassword })
         const { inviaCredenzialiCliente } = await import('@/lib/email')
-        await inviaCredenzialiCliente({ email: cliente.email, nomeCliente:cliente.ragione_sociale, masterNome: 'SpedixPro', dominio: 'spedixpro.vercel.app', password: newPassword })
+        await inviaCredenzialiCliente({ email: cliente.email, nomeCliente:cliente.ragione_sociale, masterNome: 'MoovExpress', dominio: 'spedixpro.vercel.app', password: newPassword })
       }
     } catch(e) { console.error('Reset password error:', e) }
   }

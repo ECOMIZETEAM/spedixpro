@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
   }
 
   // L'OAuth parte SUBITO (requisito app pubblica Shopify).
-  // Se un cliente SpedixPro e' gia' loggato, colleghiamo il negozio al volo:
+  // Se un cliente MoovExpress e' gia' loggato, colleghiamo il negozio al volo:
   // salviamo cliente_id/master_id nello state. Altrimenti restano null e il
   // collegamento avverra' dopo il login (negozio in stato pending).
   const supabase = await createServerSupabase()

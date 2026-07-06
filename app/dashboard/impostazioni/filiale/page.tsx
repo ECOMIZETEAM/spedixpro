@@ -24,7 +24,7 @@ export default function FilialePage() {
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'24px'}}>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'16px'}}>
           <div><label style={lbl}>Nome Filiale / Azienda</label>
-            <input value={filiale.nome} onChange={e=>setF('nome',e.target.value)} style={inp} placeholder="es. SpedixPro SRL"/>
+            <input value={filiale.nome} onChange={e=>setF('nome',e.target.value)} style={inp} placeholder="es. MoovExpress SRL"/>
           </div>
           <div><label style={lbl}>Partita IVA</label>
             <input value={filiale.piva} onChange={e=>setF('piva',e.target.value)} style={inp} placeholder="IT12345678901"/>
@@ -35,7 +35,7 @@ export default function FilialePage() {
             <input value={filiale.cf} onChange={e=>setF('cf',e.target.value)} style={inp} placeholder="RSSMRA80A01H501Z"/>
           </div>
           <div><label style={lbl}>Sito Web</label>
-            <input value={filiale.sito} onChange={e=>setF('sito',e.target.value)} style={inp} placeholder="www.spedixpro.it"/>
+            <input value={filiale.sito} onChange={e=>setF('sito',e.target.value)} style={inp} placeholder="www.moovexpress.com"/>
           </div>
         </div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'16px',marginBottom:'16px'}}>
@@ -57,7 +57,7 @@ export default function FilialePage() {
             <input value={filiale.telefono} onChange={e=>setF('telefono',e.target.value)} style={inp} placeholder="+39 06 12345678"/>
           </div>
           <div><label style={lbl}>Email</label>
-            <input value={filiale.email} onChange={e=>setF('email',e.target.value)} style={inp} placeholder="info@spedixpro.it"/>
+            <input value={filiale.email} onChange={e=>setF('email',e.target.value)} style={inp} placeholder="info@moovexpress.com"/>
           </div>
         </div>
         {saved && (

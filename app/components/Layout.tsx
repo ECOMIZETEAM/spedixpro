@@ -113,7 +113,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
             <>
               <div style={{width:'32px',height:'32px',background:'#f97316',borderRadius:'7px',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:'900',fontSize:'16px',color:'#fff',flexShrink:0}}>{(user?.brandNome || 'S').substring(0,1).toUpperCase()}</div>
               <div>
-                <div style={{fontSize:'15px',fontWeight:'800',color:'#fff',letterSpacing:'-0.3px',lineHeight:1}}>{user?.brandNome || 'SpedixPro'}</div>
+                <div style={{fontSize:'15px',fontWeight:'800',color:'#fff',letterSpacing:'-0.3px',lineHeight:1}}>{user?.brandNome || 'MoovExpress'}</div>
                 <div style={{fontSize:'9px',color:'#4a7090',textTransform:'uppercase',letterSpacing:'1px',marginTop:'2px'}}>Control Center</div>
               </div>
             </>

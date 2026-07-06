@@ -291,7 +291,7 @@ export default function IntegrazioniPage() {
                   style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none' }}
                 />
                 <p style={{ fontSize: '12px', color: '#999', marginTop: '8px', lineHeight: 1.5 }}>
-                  Lo trovi nell'URL del tuo admin Shopify. Ti reindirizzeremo a Shopify per autorizzare SpedixPro,
+                  Lo trovi nell'URL del tuo admin Shopify. Ti reindirizzeremo a Shopify per autorizzare MoovExpress,
                   poi tornerai qui col negozio collegato.
                 </p>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '18px' }}>

@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
   const shipFrom = {
     name: body.mittNome, company: body.mittNome, street1: body.mittIndirizzo, street2: '',
     city: body.mittCitta, state: body.mittProvincia || '', postalCode: body.mittCap,
-    country: body.mittPaese || 'IT', phone: pulisciTelefono(body.mittTelefono) || null, email: body.mittEmail || 'noreply@spedixpro.it',
+    country: body.mittPaese || 'IT', phone: pulisciTelefono(body.mittTelefono) || null, email: body.mittEmail || 'noreply@moovexpress.com',
   }
 
   let contractCode: string | null = null
@@ -169,7 +169,7 @@ export async function POST(req: NextRequest) {
       shipTo: {
         name: primaSped.dest_nome || 'Destinatario', company: '', street1: primaSped.dest_indirizzo || '', street2: '',
         city: primaSped.dest_citta || '', state: primaSped.dest_provincia || '', postalCode: primaSped.dest_cap || '',
-        country: primaSped.dest_paese || 'IT', phone: null, email: primaSped.dest_email || 'noreply@spedixpro.it',
+        country: primaSped.dest_paese || 'IT', phone: null, email: primaSped.dest_email || 'noreply@moovexpress.com',
       },
       notes: 'pickup', insuranceValue: 0, codValue: 0, accessoriServices: [],
     }

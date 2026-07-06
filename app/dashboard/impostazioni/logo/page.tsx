@@ -134,7 +134,7 @@ export default function LogoPage() {
                 </div>
               ) : (
                 <div style={{textAlign:'center' as const,color:'#1a1a1a'}}>
-                  <div style={{fontSize:'18px',fontWeight:'800',marginBottom:'4px'}}>{nome || 'SpedixPro'}</div>
+                  <div style={{fontSize:'18px',fontWeight:'800',marginBottom:'4px'}}>{nome || 'MoovExpress'}</div>
                   <div style={{fontSize:'12px'}}>Nessun logo — verrà mostrato il nome</div>
                 </div>
               )}

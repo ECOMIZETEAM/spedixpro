@@ -17,7 +17,7 @@ export default async function ClienteLayout({ children }: { children: React.Reac
     <div style={{display:'flex',minHeight:'100vh',background:'#f5f5f5',fontFamily:'var(--font-geist-sans),system-ui,sans-serif'}}>
       <aside style={{width:'200px',background:'#1a1a1a',flexShrink:0,display:'flex',flexDirection:'column',position:'sticky',top:0,height:'100vh',overflowY:'auto'}}>
         <a href="/cliente/dashboard" style={{padding:'18px',borderBottom:'1px solid #2a2a2a',display:'block',textDecoration:'none'}}>
-          <div style={{fontSize:'16px',fontWeight:'800',color:'#fff'}}>Spedix<span style={{color:'#f97316'}}>Pro</span></div>
+          <div style={{fontSize:'16px',fontWeight:'800',color:'#fff'}}>Moov<span style={{color:'#f97316'}}>Express</span></div>
           <div style={{fontSize:'9px',color:'#555',marginTop:'2px',textTransform:'uppercase',letterSpacing:'1px'}}>Portale Cliente</div>
         </a>
         <div style={{padding:'8px 0',borderBottom:'1px solid #2a2a2a'}}>

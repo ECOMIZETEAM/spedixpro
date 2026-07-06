@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
   try {
     const { inviaCredenzialiCliente } = await import('@/lib/email')
     await inviaCredenzialiCliente({
-      email, nomeCliente: nome, masterNome: 'SpedixPro',
+      email, nomeCliente: nome, masterNome: 'MoovExpress',
       dominio: 'spedixpro.vercel.app', password,
     })
   } catch (e) {

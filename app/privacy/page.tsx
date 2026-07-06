@@ -1,6 +1,6 @@
 export const metadata = {
-  title: 'Privacy Policy — SpedixPro',
-  description: 'Informativa sul trattamento dei dati personali di SpedixPro.',
+  title: 'Privacy Policy — MoovExpress',
+  description: 'Informativa sul trattamento dei dati personali di MoovExpress.',
 }
 
 export default function PrivacyPage() {
@@ -18,7 +18,7 @@ export default function PrivacyPage() {
     <div style={{ background: '#fff', minHeight: '100vh' }}>
       <div style={box}>
         <h1 style={h1}>Privacy Policy</h1>
-        <div style={small}>SpedixPro — Ultimo aggiornamento: 1 luglio 2026</div>
+        <div style={small}>MoovExpress — Ultimo aggiornamento: 1 luglio 2026</div>
 
         <h2 style={h2}>1. Titolare del trattamento</h2>
         <p style={p}>
@@ -28,22 +28,22 @@ export default function PrivacyPage() {
           <a href="mailto:ecomizelogistics@gmail.com" style={{ color: '#f97316' }}>ecomizelogistics@gmail.com</a>.
         </p>
 
-        <h2 style={h2}>2. Cosa fa SpedixPro</h2>
+        <h2 style={h2}>2. Cosa fa MoovExpress</h2>
         <p style={p}>
-          SpedixPro è una piattaforma di gestione delle spedizioni. Consente ai propri utenti (i "commercianti")
+          MoovExpress è una piattaforma di gestione delle spedizioni. Consente ai propri utenti (i "commercianti")
           di collegare i propri canali di vendita — tra cui negozi Shopify — per importare gli ordini e generare
           le relative spedizioni con i corrieri.
         </p>
 
         <h2 style={h2}>3. Dati che trattiamo</h2>
-        <p style={p}>Quando un commerciante collega il proprio negozio, SpedixPro accede in lettura ai dati degli ordini necessari a generare le spedizioni, in particolare:</p>
+        <p style={p}>Quando un commerciante collega il proprio negozio, MoovExpress accede in lettura ai dati degli ordini necessari a generare le spedizioni, in particolare:</p>
         <ul>
           <li style={li}>Dati del destinatario dell'ordine: nome, indirizzo di spedizione, CAP, città, provincia, paese, telefono ed email (quando disponibili).</li>
           <li style={li}>Dettagli dell'ordine: numero ordine, articoli e relativi SKU, quantità, peso, importo, eventuale contrassegno.</li>
           <li style={li}>Stato di evasione dell'ordine (da spedire, spedito, ecc.).</li>
         </ul>
         <p style={p}>
-          SpedixPro <strong>non</strong> richiede né tratta dati anagrafici dei clienti del negozio al di fuori
+          MoovExpress <strong>non</strong> richiede né tratta dati anagrafici dei clienti del negozio al di fuori
           delle informazioni contenute nell'ordine e necessarie alla spedizione.
         </p>
 

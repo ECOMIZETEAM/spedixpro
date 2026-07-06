@@ -165,7 +165,7 @@ export default function ImportaOrdiniPage() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'template_ordini_spedixpro.csv'
+    a.download = 'template_ordini_moovexpress.csv'
     a.click()
     URL.revokeObjectURL(url)
   }

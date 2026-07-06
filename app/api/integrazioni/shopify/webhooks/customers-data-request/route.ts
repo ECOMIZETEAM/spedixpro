@@ -5,7 +5,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 // GDPR: richiesta dei dati di un cliente.
-// SpedixPro non conserva PII del cliente separatamente dagli ordini importati,
+// MoovExpress non conserva PII del cliente separatamente dagli ordini importati,
 // quindi non c'e' un profilo cliente da esportare: rispondiamo con ack 200.
 export async function POST(req: NextRequest) {
   const raw = await req.text()

@@ -108,7 +108,7 @@ export async function GET(req: NextRequest) {
   }
 
   // CASO B: nessun cliente identificato (install da Shopify).
-  // Salva il negozio autorizzato in pending e manda al login SpedixPro.
+  // Salva il negozio autorizzato in pending e manda al login MoovExpress.
   await supabase.from('shopify_pending').upsert(
     { shop, access_token: token, scope, refresh_token: refreshToken, expires_at: expiresAt, refresh_expires_at: refreshExpiresAt },
     { onConflict: 'shop' }

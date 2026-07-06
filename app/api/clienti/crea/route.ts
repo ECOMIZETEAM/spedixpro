@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
   } catch(e) { console.error('Auth error:', e) }
   try {
     const master = (utente as any).masters
-    await inviaCredenzialiCliente({ email, nomeCliente: ragioneSociale, masterNome: master?.nome||'SpedixPro', dominio: 'spedixpro.vercel.app', password })
+    await inviaCredenzialiCliente({ email, nomeCliente: ragioneSociale, masterNome: master?.nome||'MoovExpress', dominio: 'spedixpro.vercel.app', password })
   } catch(e) { console.error('Email error:', e) }
   return NextResponse.json({ id: nuovoCliente.id, codice })
 }
