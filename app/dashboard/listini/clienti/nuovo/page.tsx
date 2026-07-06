@@ -1,6 +1,7 @@
 ﻿'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { logoCorriere } from '@/lib/corriere-logo'
 
 export default function NuovoListinoPage() {
   const router = useRouter()
@@ -163,10 +164,14 @@ function ModificaListino({listino, corriereIds, corrieri, router}: any) {
         {corrieriSelezionati.map((c:any)=>(
           <div key={c.id} style={{padding:'14px 20px',borderBottom:'1px solid #e5e7eb',display:'flex',alignItems:'center',gap:'14px',cursor:'pointer'}}
             onClick={()=>router.push('/dashboard/listini/clienti/' + listino?.id + '?corriere=' + c.id)}>
-            <div style={{width:'60px',height:'36px',background:'#ffd700',borderRadius:'4px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'10px',fontWeight:'700',color:'#1a1a1a',textAlign:'center' as const,padding:'2px'}}>
-              {c.tipo?.toUpperCase()||'CORR'}
-            </div>
-            <span style={{fontSize:'14px',fontWeight:'600',color:'#2563eb'}}>{c.nome_contratto||c.nome}</span>
+            {logoCorriere(c.nome_contratto||c.nome) ? (
+              <img src={logoCorriere(c.nome_contratto||c.nome)!} alt={c.nome_contratto||c.nome||''} style={{height:'34px',maxWidth:'80px',objectFit:'contain' as const}}/>
+            ) : (
+              <div style={{width:'60px',height:'36px',background:'#1a1a1a',borderRadius:'4px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'11px',fontWeight:'700',color:'#fff',textAlign:'center' as const,padding:'2px'}}>
+                {(c.nome_contratto||c.nome||'').trim().split(/\s+/)[0]?.toUpperCase()||'—'}
+              </div>
+            )}
+            <span style={{fontSize:'14px',fontWeight:'600',color:'#1a1a1a'}}>{c.nome_contratto||c.nome}</span>
           </div>
         ))}
 

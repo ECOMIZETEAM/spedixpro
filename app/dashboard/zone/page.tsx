@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import * as XLSX from 'xlsx'
+import { logoCorriere } from '@/lib/corriere-logo'
 
 export default function ZonePage() {
   const [corrieri, setCorrieri] = useState<any[]>([])
@@ -188,7 +189,11 @@ export default function ZonePage() {
           <div key={c.id} style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden',marginBottom:'20px'}}>
             <div style={{padding:'16px'}}>
               <div style={{display:'flex',alignItems:'center',gap:'12px',marginBottom:'16px'}}>
-                <div style={{width:'60px',height:'36px',background:'#f97316',borderRadius:'4px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'10px',fontWeight:'700',color:'#fff'}}>{c?.tipo?.toUpperCase()||'CORR'}</div>
+                {logoCorriere(c?.nome_contratto) ? (
+                  <img src={logoCorriere(c?.nome_contratto)!} alt={c?.nome_contratto||''} style={{height:'34px',maxWidth:'80px',objectFit:'contain' as const}}/>
+                ) : (
+                  <div style={{width:'60px',height:'36px',background:'#1a1a1a',borderRadius:'4px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'11px',fontWeight:'700',color:'#fff'}}>{(c?.nome_contratto||'').trim().split(/\s+/)[0]?.toUpperCase()||'—'}</div>
+                )}
                 <span style={{fontSize:'16px',fontWeight:'700',color:'#1a1a1a'}}>{c?.nome_contratto}</span>
               </div>
               <div style={{display:'flex',gap:'8px',marginBottom:'16px'}}>

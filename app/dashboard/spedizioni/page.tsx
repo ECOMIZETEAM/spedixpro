@@ -271,7 +271,7 @@ async function apriTracking(s: any) {
           <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
             <button onClick={stampaSelezionati} disabled={selectedIds.length===0}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#f97316':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
-              🖨️ Stampa Selezionati{selectedIds.length>0?` (${selectedIds.length})`:''}
+              ⬇ Scarica Selezionati{selectedIds.length>0?` (${selectedIds.length})`:''}
             </button>
             <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
               <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Cerca:</span>
@@ -345,7 +345,7 @@ async function apriTracking(s: any) {
                       <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>—</td>
                       <td style={{padding:'9px 12px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
-                          <a href={`/dashboard/spedizioni/${s.id}/etichetta`} style={{padding:'4px 8px',background:'#eff6ff',color:'#1d4ed8',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #bfdbfe'}} title="Etichetta">🖨️</a>
+                          <a href={`/dashboard/spedizioni/${s.id}/etichetta`} download style={{padding:'4px 8px',background:'#fff7ed',color:'#f97316',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #fed7aa'}} title="Scarica LDV">⬇</a>
                   
                           <button onClick={()=>elimina(s.id,s.numero)} disabled={eliminando===s.id}
                             style={{padding:'4px 8px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'14px',border:'1px solid #fecaca',cursor:'pointer',opacity:eliminando===s.id?0.5:1}} title="Elimina">🗑️</button>
