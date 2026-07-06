@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+import DateRangePicker from '@/app/components/DateRangePicker'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -177,11 +178,7 @@ export default function DistinteContrassegniPage() {
         <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr',gap:'12px',alignItems:'end'}}>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Data distinta</div>
-            <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
-              <input type="date" value={filtri.dal} onChange={e=>setF('dal',e.target.value)} style={inp}/>
-              <span>—</span>
-              <input type="date" value={filtri.al} onChange={e=>setF('al',e.target.value)} style={inp}/>
-            </div>
+            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal:string,al:string)=>setFiltri(f=>({...f,dal,al}))} />
           </div>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Cliente</div>
@@ -211,7 +208,7 @@ export default function DistinteContrassegniPage() {
         </div>
         <div style={{padding:'8px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',gap:'8px'}}>
           <span style={{fontSize:'12px',color:'#1a1a1a'}}>Mostra</span>
-          <select style={{padding:'3px 8px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px'}}><option>10</option><option>25</option><option>50</option></select>
+          <select style={{padding:'3px 8px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px',color:'#1a1a1a'}}><option>10</option><option>25</option><option>50</option></select>
           <span style={{fontSize:'12px',color:'#1a1a1a'}}>elementi</span>
         </div>
         {loading ? (
