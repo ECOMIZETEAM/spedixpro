@@ -45,16 +45,15 @@ export async function POST(req: NextRequest) {
   if (!ruoliValidi.includes((ruolo||'').toLowerCase())) return NextResponse.json({ error: 'Ruolo non valido' }, { status: 400 })
 
   const admin = createAdminSupabase()
-  // Genero l'utente + link d'invito (SENZA la mail Supabase) e lo invio via Resend.
-  const origin = req.headers.get('origin') || req.nextUrl.origin
-  const { data: linkData, error: authErr } = await admin.auth.admin.generateLink({
-    type: 'invite', email: email.trim(),
-    options: { redirectTo: `${origin}/imposta-password` },
+  // Creo l'utente con password diretta (mostrata a schermo). L'email di credenziali
+  // parte comunque via Resend: quando il dominio è verificato arriva da sola.
+  const password = generaPassword()
+  const { data: created, error: authErr } = await admin.auth.admin.createUser({
+    email: email.trim(), password, email_confirm: true,
   })
   if (authErr) return NextResponse.json({ error: authErr.message }, { status: 400 })
-  const newId = linkData?.user?.id
-  const actionLink = linkData?.properties?.action_link
-  if (!newId || !actionLink) return NextResponse.json({ error: 'Creazione invito fallita' }, { status: 400 })
+  const newId = created?.user?.id
+  if (!newId) return NextResponse.json({ error: 'Creazione utente fallita' }, { status: 400 })
 
   const { error: insErr } = await admin.from('utenti').insert({
     id: newId,
@@ -65,14 +64,19 @@ export async function POST(req: NextRequest) {
   })
   if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 })
 
-  // invio invito via Resend (con il nome del master)
+  // email credenziali (best-effort, funziona quando Resend è verificato)
   const { data: masterRec } = await admin.from('masters').select('nome').eq('id', me.master_id).single()
   try {
-    const { inviaInvitoStaff } = await import('@/lib/email')
-    await inviaInvitoStaff({ email: email.trim(), nome: nome.trim(), link: actionLink, masterNome: masterRec?.nome || 'MoovExpress' })
-  } catch (e) { console.error('Errore invio invito staff:', e) }
+    const { inviaCredenzialiCliente } = await import('@/lib/email')
+    await inviaCredenzialiCliente({ email: email.trim(), nomeCliente: nome.trim(), masterNome: masterRec?.nome || 'MoovExpress', dominio: 'moovexpress.com', password })
+  } catch (e) { console.error('Errore invio credenziali staff:', e) }
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({ success: true, email: email.trim(), password })
+}
+
+function generaPassword(len = 10): string {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+  return 'Mv' + Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
 }
 
 export async function DELETE(req: NextRequest) {
