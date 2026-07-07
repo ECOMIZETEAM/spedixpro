@@ -185,7 +185,7 @@ export default function GiacenzePage() {
                   return (
                     <tr key={g.id} style={{borderBottom:'1px solid #d1d5db'}}>
                       <td style={{padding:'9px 12px'}}>
-                        <a href={`#`} style={{fontWeight:'700',color:'#f97316',fontSize:'13px',textDecoration:'none'}}>{g.numero}</a>
+                        <a href={`/dashboard/spedizioni/giacenze/${g.id}`} style={{fontWeight:'700',color:'#f97316',fontSize:'13px',textDecoration:'none'}}>{g.numero}</a>
                       </td>
                       <td style={{padding:'9px 12px',fontSize:'12px'}}>
                         <div style={{fontWeight:'500',color:'#1a1a1a'}}>{g.mitt_nome}</div>
@@ -214,10 +214,10 @@ export default function GiacenzePage() {
                       </td>
                       <td style={{padding:'9px 12px'}}>
                         {g.giacenza_stato!=='chiusa' && (
-                          <button onClick={()=>{setModal(g);setIstruzioni('');setEsito(null)}}
-                            style={{padding:'4px 10px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'4px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>
+                          <a href={`/dashboard/spedizioni/giacenze/${g.id}`}
+                            style={{display:'inline-block',padding:'4px 10px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'4px',fontSize:'12px',fontWeight:'600',cursor:'pointer',textDecoration:'none'}}>
                             ✏️ Gestisci
-                          </button>
+                          </a>
                         )}
                       </td>
                     </tr>

@@ -84,8 +84,13 @@ export default function GiacenzePage() {
 
   const statoStyle: Record<string,{bg:string,color:string}> = {
     aperta: {bg:'#dc2626',color:'#fff'},
+    in_gestione: {bg:'#f59e0b',color:'#fff'},
     svincolata: {bg:'#16a34a',color:'#fff'},
     chiusa: {bg:'#6b7280',color:'#fff'},
+  }
+  const statoLabel: Record<string,string> = {
+    aperta:'Aperta - In attesa di istruzioni', in_gestione:'In gestione - In attesa svincolo',
+    svincolata:'Svincolata', chiusa:'Chiusa',
   }
 
   return (
@@ -97,13 +102,7 @@ export default function GiacenzePage() {
       {/* Filtri */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
         <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'10px'}}>▼ Filtri</div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr',gap:'10px',marginBottom:'10px'}}>
-          <div><label style={lbl}>Cliente</label>
-            <select value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={sel}>
-              <option value="">Tutti i Clienti</option>
-              {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
-            </select>
-          </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'10px',marginBottom:'10px'}}>
           <div><label style={lbl}>Vettore</label>
             <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
               <option value="">Tutti</option>
@@ -174,7 +173,7 @@ export default function GiacenzePage() {
                   return (
                     <tr key={g.id} style={{borderBottom:'1px solid #d1d5db'}}>
                       <td style={{padding:'9px 12px'}}>
-                        <a href={`#`} style={{fontWeight:'700',color:'#f97316',fontSize:'13px',textDecoration:'none'}}>{g.numero}</a>
+                        <a href={`/cliente/spedizioni/giacenze/${g.id}`} style={{fontWeight:'700',color:'#f97316',fontSize:'13px',textDecoration:'none'}}>{g.numero}</a>
                       </td>
                       <td style={{padding:'9px 12px',fontSize:'12px'}}>
                         <div style={{fontWeight:'500',color:'#1a1a1a'}}>{g.mitt_nome}</div>
@@ -198,15 +197,15 @@ export default function GiacenzePage() {
                       </td>
                       <td style={{padding:'9px 12px'}}>
                         <span style={{background:stSt.bg,color:stSt.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600',whiteSpace:'nowrap' as const}}>
-                          {g.giacenza_stato==='aperta'?'Aperta - In attesa di istruzioni':g.giacenza_stato==='svincolata'?'Svincolata':'Chiusa'}
+                          {statoLabel[g.giacenza_stato||'aperta']||'Aperta - In attesa di istruzioni'}
                         </span>
                       </td>
                       <td style={{padding:'9px 12px'}}>
                         {g.giacenza_stato!=='chiusa' && (
-                          <button onClick={()=>{setModal(g);setIstruzioni('');setEsito(null)}}
-                            style={{padding:'4px 10px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'4px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>
+                          <a href={`/cliente/spedizioni/giacenze/${g.id}`}
+                            style={{display:'inline-block',padding:'4px 10px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'4px',fontSize:'12px',fontWeight:'600',cursor:'pointer',textDecoration:'none'}}>
                             ✏️ Gestisci
-                          </button>
+                          </a>
                         )}
                       </td>
                     </tr>
