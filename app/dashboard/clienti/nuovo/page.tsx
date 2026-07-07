@@ -16,6 +16,8 @@ export default function NuovoClientePage() {
   useEffect(() => { fetch('/api/staff').then(r=>r.json()).then((d:any[])=>{ const ruoliOk=['agente','operatore','admin']; const arr=(Array.isArray(d)?d:[]).filter(u=>ruoliOk.includes((u.ruolo||'').toLowerCase())).map(u=>({...u, _nome:((u.nome||'')+' '+(u.cognome||'')).trim()})).filter(u=>u._nome).sort((a,b)=>a._nome.localeCompare(b._nome)); setStaffList(arr) }).catch(()=>setStaffList([])) }, [])
   const [saving, setSaving] = useState(false)
   const [errore, setErrore] = useState('')
+  const [estraendo, setEstraendo] = useState(false)
+  const [visuraOk, setVisuraOk] = useState('')
   const [listini, setListini] = useState<any[]>([])
   const [form, setForm] = useState({
     ragione_sociale:'',piva:'',cf:'',pec:'',cod_sdi:'',rappresentante_legale:'',telefono:'',
@@ -34,6 +36,44 @@ export default function NuovoClientePage() {
   }, [])
 
   const set = (k: string, v: any) => setForm(f => ({...f, [k]: v}))
+
+  // Carica il PDF della visura camerale e compila i campi automaticamente (via AI)
+  async function caricaVisura(file: File) {
+    setErrore(''); setVisuraOk(''); setEstraendo(true)
+    try {
+      const b64 = await new Promise<string>((res, rej) => {
+        const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej; r.readAsDataURL(file)
+      })
+      const resp = await fetch('/api/clienti/estrai-visura', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pdfBase64: b64 })
+      })
+      const j = await resp.json()
+      if (j.error) { setErrore(j.error); setEstraendo(false); return }
+      const d = j.dati || {}
+      const prov = String(d.provincia || '').toUpperCase().slice(0, 2)
+      setForm(f => ({ ...f,
+        ragione_sociale: d.ragione_sociale || f.ragione_sociale,
+        piva: String(d.piva || '').replace(/^IT/i, '') || f.piva,
+        cf: d.cf || f.cf,
+        pec: d.pec || f.pec,
+        cod_sdi: d.cod_sdi || f.cod_sdi,
+        rappresentante_legale: d.rappresentante_legale || f.rappresentante_legale,
+        telefono: d.telefono || f.telefono,
+        sl_indirizzo: d.indirizzo || f.sl_indirizzo,
+        sl_citta: d.citta || f.sl_citta,
+        sl_provincia: prov || f.sl_provincia,
+        sl_cap: d.cap || f.sl_cap,
+        so_indirizzo: d.indirizzo || f.so_indirizzo,
+        so_citta: d.citta || f.so_citta,
+        so_provincia: prov || f.so_provincia,
+        so_cap: d.cap || f.so_cap,
+      }))
+      setVisuraOk('Dati compilati dalla visura. Controlla e completa i campi mancanti.')
+    } catch {
+      setErrore('Impossibile leggere il PDF della visura')
+    }
+    setEstraendo(false)
+  }
 
   async function salva() {
     if (!form.ragione_sociale) { setErrore('Ragione sociale obbligatoria'); return }
@@ -66,6 +106,22 @@ export default function NuovoClientePage() {
       </div>
 
       {errore && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>⚠️ {errore}</div>}
+
+      {/* Compilazione automatica da visura camerale */}
+      <div style={{background:'#fff',border:'2px dashed #f97316',borderRadius:'10px',padding:'18px 20px',marginBottom:'18px',display:'flex',alignItems:'center',gap:'16px',flexWrap:'wrap' as const}}>
+        <div style={{width:'52px',height:'52px',borderRadius:'12px',background:'#fff7ed',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'26px',flexShrink:0}}>📄</div>
+        <div style={{flex:1,minWidth:'220px'}}>
+          <div style={{fontSize:'15px',fontWeight:'700',color:'#1a1a1a'}}>Inserisci la visura camerale</div>
+          <div style={{fontSize:'12.5px',color:'#666',marginTop:'3px',lineHeight:1.4}}>Carica il PDF della visura e compiliamo automaticamente i dati aziendali (ragione sociale, P.IVA, indirizzo, PEC…).</div>
+          {visuraOk && <div style={{fontSize:'12px',color:'#16a34a',marginTop:'7px',fontWeight:600}}>✓ {visuraOk}</div>}
+        </div>
+        <label style={{padding:'11px 22px',background:estraendo?'#fbbf24':'#f97316',color:'#fff',borderRadius:'8px',fontSize:'13px',fontWeight:'700',cursor:estraendo?'default':'pointer',whiteSpace:'nowrap' as const,flexShrink:0}}>
+          {estraendo ? '⏳ Lettura in corso...' : '⬆ Carica visura PDF'}
+          <input type="file" accept="application/pdf" disabled={estraendo}
+            onChange={e=>{ const f=e.target.files?.[0]; if(f) caricaVisura(f); e.currentTarget.value='' }}
+            style={{display:'none'}}/>
+        </label>
+      </div>
 
       <div style={{display:'grid',gridTemplateColumns:'340px 1fr',gap:'20px',alignItems:'start'}}>
 
