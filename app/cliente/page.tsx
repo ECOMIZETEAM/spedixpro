@@ -46,7 +46,7 @@ export default function ClienteLogin() {
         <form onSubmit={accedi} style={{display:'flex',flexDirection:'column' as const,gap:'14px'}}>
           <div>
             <label style={{fontSize:'11.5px',fontWeight:'600' as const,color:'#666',display:'block' as const,marginBottom:'4px'}}>Email</label>
-            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} required placeholder="tua@email.com"
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} required placeholder="Inserisci la tua email"
               style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',boxSizing:'border-box' as const}}/>
           </div>
           <div>

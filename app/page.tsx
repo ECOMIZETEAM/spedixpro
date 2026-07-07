@@ -9,7 +9,7 @@ export default function Home() {
         <form action="/api/auth/login" method="POST" style={{display:'flex',flexDirection:'column',gap:'14px'}}>
           <div>
             <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Email</label>
-            <input name="email" type="email" required placeholder="admin@ecomize.it"
+            <input name="email" type="email" required placeholder="Inserisci la tua email"
               style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',boxSizing:'border-box'}}/>
           </div>
           <div>
