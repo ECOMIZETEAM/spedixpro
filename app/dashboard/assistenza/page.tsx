@@ -25,6 +25,7 @@ export default function AssistenzaPage() {
   const [perPage, setPerPage] = useState(25)
   const [pagina, setPagina] = useState(1)
   const [sezione, setSezione] = useState<'ticket' | 'pod'>('ticket')
+  const [dragPod, setDragPod] = useState(false)
   const isPod = sezione === 'pod'
 
   async function caricaPod(id: string, file: File) {
@@ -201,14 +202,19 @@ export default function AssistenzaPage() {
               <div style={{ background: '#f9fafb', border: '1px solid #eee', borderRadius: '8px', padding: '12px 14px', fontSize: '13px', color: '#1a1a1a', whiteSpace: 'pre-wrap' }}>{sel.messaggio}</div>
 
               {sel.categoria === 'pod' && (
-                <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', padding: '12px 14px' }}>
+                <div
+                  onDragOver={e => { e.preventDefault(); setDragPod(true) }}
+                  onDragLeave={() => setDragPod(false)}
+                  onDrop={async e => { e.preventDefault(); setDragPod(false); const f = e.dataTransfer.files?.[0]; if (f && f.type === 'application/pdf') { await caricaPod(sel.id, f); setSel(null) } }}
+                  style={{ background: dragPod ? '#dbeafe' : '#f0f9ff', border: dragPod ? '2px dashed #2563eb' : '2px dashed #bae6fd', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px' }}>Prova di consegna (POD) — LDV {sel.oggetto}</div>
-                  {sel.pod_url && <div style={{ marginBottom: '8px' }}><a href={sel.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD caricata</a></div>}
-                  <label style={{ display: 'inline-block', padding: '8px 14px', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>
-                    {sel.pod_url ? 'Sostituisci PDF POD' : '⬆ Carica PDF della POD'}
+                  {sel.pod_url && <div style={{ marginBottom: '10px' }}><a href={sel.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD caricata</a></div>}
+                  <div style={{ fontSize: '12.5px', color: '#555', marginBottom: '10px' }}>📎 Trascina qui il PDF della POD, oppure</div>
+                  <label style={{ display: 'inline-block', padding: '8px 16px', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>
+                    {sel.pod_url ? 'Sostituisci PDF' : 'Scegli PDF'}
                     <input type="file" accept="application/pdf" onChange={async e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) { await caricaPod(sel.id, f); setSel(null) } }} style={{ display: 'none' }} />
                   </label>
-                  <div style={{ fontSize: '11px', color: '#666', marginTop: '7px' }}>Caricando il PDF, il cliente riceve la notifica e potrà scaricare la POD dalla sua LDV.</div>
+                  <div style={{ fontSize: '11px', color: '#666', marginTop: '9px' }}>Caricando il PDF, il cliente riceve la notifica e potrà scaricare la POD dalla sua LDV.</div>
                 </div>
               )}
 
