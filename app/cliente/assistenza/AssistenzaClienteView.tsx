@@ -85,7 +85,7 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
         <div style={{ marginBottom: '12px' }}><label style={lbl}>LDV</label><input value={nuovo.oggetto} onChange={e => setNuovo(n => ({ ...n, oggetto: e.target.value }))} placeholder="Numero LDV della spedizione" style={inp} /></div>
 
         {!isPod && <>
-          <div style={{ marginBottom: '12px' }}><label style={lbl}>Messaggio</label><textarea value={nuovo.messaggio} onChange={e => setNuovo(n => ({ ...n, messaggio: e.target.value }))} rows={4} placeholder="Descrivi il problema o la richiesta…" style={{ ...inp, resize: 'vertical' as const }} /></div>
+          <div style={{ marginBottom: '12px' }}><label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>Messaggio <span style={{ color: '#dc2626', fontWeight: 700 }}>fornire imballo e contenuto obbligatorio</span></label><textarea value={nuovo.messaggio} onChange={e => setNuovo(n => ({ ...n, messaggio: e.target.value }))} rows={4} placeholder="Descrivi il problema o la richiesta…" style={{ ...inp, resize: 'vertical' as const }} /></div>
           <div style={{ marginBottom: '14px' }}>
             <label style={lbl}>Allegati (foto/PDF)</label>
             <div
