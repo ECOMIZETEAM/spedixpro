@@ -25,7 +25,7 @@ interface Tariffa { carrierCode:string; contractCode:string; total_price:string;
 interface Collo { lunghezza:string; larghezza:string; altezza:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
-const lbl = {fontSize:'11.5px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
+const lbl = {fontSize:'11.5px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px',whiteSpace:'nowrap' as const}
 const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const}
 const cardH = {padding:'12px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700' as const,color:'#1a1a1a'}
 const cardB = {padding:'16px'}
@@ -456,7 +456,7 @@ export default function NuovaSpedizionePage() {
 
             {selected && (
               <div style={{marginTop:'8px',borderTop:'1px solid #000',paddingTop:'14px'}}>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'14px'}}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'14px',alignItems:'end' as const}}>
                   <div>
                     <label style={{display:'block',fontSize:'12px',color:'#000',marginBottom:'4px',fontWeight:'600'}}>Servizi accessori</label>
                     <input style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#000',WebkitTextFillColor:'#000',opacity:1}} placeholder="—" disabled />

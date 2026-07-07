@@ -503,7 +503,7 @@ export default function NuovaSpedizioneCliente() {
 
             {selected && (
               <div style={{marginTop:'8px',borderTop:'1px solid #eee',paddingTop:'14px'}}>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'14px'}}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'14px',alignItems:'end' as const}}>
                   <div>
                     <label style={lbl}>Servizi accessori</label>
                     <input style={inp} placeholder="—" disabled />
