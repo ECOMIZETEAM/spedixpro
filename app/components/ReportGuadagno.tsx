@@ -23,28 +23,43 @@ export default function ReportGuadagno() {
   const lbl = PERIODI.find(p => p.v === periodo)?.l.toLowerCase()
 
   return (
-    <div style={{ background: '#1a1a1a', borderRadius: '8px', overflow: 'hidden', color: '#fff' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-        <span style={{ fontSize: '13px', fontWeight: 700 }}>💰 Report Guadagno</span>
+    <div style={{ background: '#fff', borderRadius: '10px', border: '1px solid #e8e8e8', overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 18px', borderBottom: '1px solid #f0f0f0', gap: '12px', flexWrap: 'wrap' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 700, color: '#1a1a1a' }}>
+          <span style={{ width: '26px', height: '26px', borderRadius: '7px', background: '#dcfce7', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>💰</span>
+          Report Guadagno
+        </span>
         <select value={periodo} onChange={e => setPeriodo(e.target.value)}
-          style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.15)', background: '#0b1220', color: '#fff', fontSize: '12px', cursor: 'pointer' }}>
-          {PERIODI.map(p => <option key={p.v} value={p.v} style={{ color: '#111' }}>{p.l}</option>)}
+          style={{ padding: '7px 12px', borderRadius: '7px', border: '1px solid #d1d5db', background: '#fff', color: '#1a1a1a', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+          {PERIODI.map(p => <option key={p.v} value={p.v} style={{ color: '#1a1a1a' }}>{p.l}</option>)}
         </select>
       </div>
-      <div style={{ padding: '18px', display: 'flex', alignItems: 'center', gap: '28px', flexWrap: 'wrap' }}>
-        <div>
-          <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '.6px', color: '#999' }}>Guadagno {lbl}</div>
-          <div style={{ fontSize: '30px', fontWeight: 800, color: '#22c55e', marginTop: '4px', lineHeight: 1 }}>{loading ? '…' : eur(d?.guadagno || 0)}</div>
+
+      {/* Tiles */}
+      <div style={{ padding: '18px', display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr', gap: '14px' }}>
+        {/* Guadagno */}
+        <div style={{ background: 'linear-gradient(135deg,#ecfdf5 0%,#f0fdf4 100%)', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '16px 18px' }}>
+          <div style={{ fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', color: '#059669' }}>Guadagno {lbl}</div>
+          <div style={{ fontSize: '32px', fontWeight: 800, color: '#16a34a', marginTop: '6px', lineHeight: 1 }}>{loading ? '…' : eur(d?.guadagno || 0)}</div>
         </div>
-        <div style={{ display: 'flex', gap: '24px', fontSize: '12px' }}>
-          <div>
-            <div style={{ color: '#999' }}>Incassato spedizioni</div>
-            <div style={{ fontWeight: 700, marginTop: '3px' }}>{loading ? '…' : eur(d?.ricavi || 0)}</div>
+
+        {/* Incassato */}
+        <div style={{ background: '#f9fafb', border: '1px solid #eef0f2', borderRadius: '10px', padding: '16px 18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+            <span style={{ width: '24px', height: '24px', borderRadius: '6px', background: '#eff6ff', color: '#2563eb', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px' }}>↑</span>
+            <span style={{ fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: '#8a8a8a' }}>Incassato</span>
           </div>
-          <div>
-            <div style={{ color: '#999' }}>Costo spedizioni</div>
-            <div style={{ fontWeight: 700, marginTop: '3px', color: '#f97316' }}>{loading ? '…' : eur(d?.costi || 0)}</div>
+          <div style={{ fontSize: '20px', fontWeight: 800, color: '#1a1a1a', marginTop: '8px', lineHeight: 1 }}>{loading ? '…' : eur(d?.ricavi || 0)}</div>
+        </div>
+
+        {/* Costo */}
+        <div style={{ background: '#f9fafb', border: '1px solid #eef0f2', borderRadius: '10px', padding: '16px 18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+            <span style={{ width: '24px', height: '24px', borderRadius: '6px', background: '#fff7ed', color: '#f97316', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px' }}>📦</span>
+            <span style={{ fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: '#8a8a8a' }}>Costo spedizioni</span>
           </div>
+          <div style={{ fontSize: '20px', fontWeight: 800, color: '#1a1a1a', marginTop: '8px', lineHeight: 1 }}>{loading ? '…' : eur(d?.costi || 0)}</div>
         </div>
       </div>
     </div>
