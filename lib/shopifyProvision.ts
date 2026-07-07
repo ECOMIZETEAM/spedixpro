@@ -34,13 +34,22 @@ async function onboardingListinoId(admin: any, masterId: string): Promise<string
 
 // Crea (o riusa) un cliente MoovExpress per un negozio Shopify installato dallo store.
 // Idempotente: se il negozio è già collegato, ritorna il cliente esistente.
+// Email di login (auto-generata dal dominio del negozio): serve solo per l'auto-login
+// via magic-link — il merchant non la digita mai. Unica per negozio (niente collisioni).
+function emailDaShop(shop: string): string {
+  return `${shop.replace('.myshopify.com', '')}@shopify.moovexpress.app`
+}
+
 export async function provisionShopifyCliente(
   admin: any, shop: string, token: string
-): Promise<{ clienteId: string; masterId: string } | { error: string }> {
-  // già collegato?
+): Promise<{ clienteId: string; masterId: string; email: string } | { error: string }> {
+  // già collegato? riuso il cliente e la sua email di login
   const { data: integr } = await admin.from('integrazioni')
-    .select('cliente_id,master_id').eq('piattaforma', 'shopify').eq('identificativo', shop).maybeSingle()
-  if (integr?.cliente_id) return { clienteId: integr.cliente_id, masterId: integr.master_id }
+    .select('cliente_id,master_id,clienti(email)').eq('piattaforma', 'shopify').eq('identificativo', shop).maybeSingle()
+  if (integr?.cliente_id) {
+    const email = (integr as any)?.clienti?.email || emailDaShop(shop)
+    return { clienteId: integr.cliente_id, masterId: integr.master_id, email }
+  }
 
   const masterId = await onboardingMasterId(admin)
   if (!masterId) return { error: 'Master di destinazione non trovato' }
@@ -48,6 +57,7 @@ export async function provisionShopifyCliente(
   const info = await fetchShopInfo(shop, token)
   const nome = info?.name || shop.replace('.myshopify.com', '')
   const addr = info?.billingAddress || {}
+  const email = emailDaShop(shop)
 
   // codice cliente progressivo per master
   const { data: ultimi } = await admin.from('clienti')
@@ -61,7 +71,7 @@ export async function provisionShopifyCliente(
   const { data: nuovo, error } = await admin.from('clienti').insert({
     master_id: masterId,
     ragione_sociale: nome,
-    email: null,                                    // si autentica via Shopify: nessun login MoovExpress
+    email,
     telefono: addr.phone || null,
     sl_paese: addr.country || 'Italia', sl_indirizzo: addr.address1 || null,
     sl_citta: addr.city || null, sl_provincia: addr.provinceCode || addr.province || null, sl_cap: addr.zip || null,
@@ -73,5 +83,22 @@ export async function provisionShopifyCliente(
   }).select('id').single()
   if (error || !nuovo) return { error: error?.message || 'Errore creazione cliente' }
 
-  return { clienteId: nuovo.id, masterId }
+  // utente di login del merchant (per portarlo nel portale già loggato)
+  try {
+    const { data: authUser } = await admin.auth.admin.createUser({
+      email, password: cryptoRandom(), email_confirm: true,
+    })
+    if (authUser?.user) {
+      await admin.from('utenti').insert({
+        id: authUser.user.id, ruolo: 'cliente', master_id: masterId,
+        cliente_id: nuovo.id, nome, attivo: true,
+      })
+    }
+  } catch (e) { console.error('Errore creazione utente merchant Shopify:', e) }
+
+  return { clienteId: nuovo.id, masterId, email }
+}
+
+function cryptoRandom(): string {
+  return 'Sh0p!' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { provisionShopifyCliente } from '@/lib/shopifyProvision'
+import { loginMerchantERedirect } from '@/lib/shopifyLogin'
 import crypto from 'crypto'
 
 export const runtime = 'nodejs'
@@ -111,11 +112,11 @@ export async function GET(req: NextRequest) {
 
   // CASO B: install dallo store senza cliente identificato -> AUTO-CREAZIONE.
   // Creo (o riuso) un cliente MoovExpress sotto il master di onboarding (default root),
-  // collego il negozio e rientro nell'app embedded dentro l'admin Shopify.
+  // collego il negozio e porto il merchant nel portale GIÀ LOGGATO (modello redirect).
   const admin = createAdminSupabase()
   const prov = await provisionShopifyCliente(admin, shop, token)
   if ('error' in prov) {
-    return NextResponse.redirect(`${appUrl}/shopify?error=${encodeURIComponent(prov.error)}`)
+    return NextResponse.redirect(`${appUrl}/cliente?error=${encodeURIComponent(prov.error)}`)
   }
   const payload: any = {
     master_id: prov.masterId, cliente_id: prov.clienteId, piattaforma: 'shopify',
@@ -128,6 +129,6 @@ export async function GET(req: NextRequest) {
   if (existing?.id) await admin.from('integrazioni').update(payload).eq('id', existing.id)
   else await admin.from('integrazioni').insert(payload)
 
-  // rientro nell'app embedded (admin Shopify)
-  return NextResponse.redirect(`https://${shop}/admin/apps/${apiKey}`)
+  // login automatico nel portale MoovExpress
+  return loginMerchantERedirect(req, prov.email, '/cliente/dashboard')
 }
