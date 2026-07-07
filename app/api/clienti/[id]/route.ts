@@ -7,6 +7,21 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato'}, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+
+  // Sotto-master agganciato (id = "m:<masterId>"): mostrato come una scheda cliente
+  if (id.startsWith('m:')) {
+    const targetId = id.slice(2)
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const { data: m } = await admin.from('masters').select('*').eq('id', targetId).eq('parent_master_id', utente?.master_id).single()
+    if (!m) return NextResponse.json({ error: 'Sotto-master non trovato' }, { status: 404 })
+    return NextResponse.json({
+      ...m, id: 'm:' + m.id, ragione_sociale: m.nome || '—',
+      codice_cliente: 'SUB-MASTER', is_master: true,
+      listino_cliente_id: (m as any).parent_listino_id || null, listini_clienti: null,
+    })
+  }
+
   const { data: cliente } = await supabase
     .from('clienti')
     .select('*, listini_clienti(id,nome)')
@@ -25,6 +40,24 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
   const body = await req.json()
   const { resetPassword, email_conferma, ...datiCliente } = body
+
+  // Modifica di un sotto-master (id = "m:<masterId>"): aggiorna la tabella masters
+  if (id.startsWith('m:')) {
+    const targetId = id.slice(2)
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const { data: m } = await admin.from('masters').select('id,parent_master_id').eq('id', targetId).single()
+    if (!m || m.parent_master_id !== utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    const { error } = await admin.from('masters').update({
+      nome: datiCliente.ragione_sociale, telefono: datiCliente.telefono || null,
+      piva: datiCliente.piva || null, attivo: datiCliente.attivo ?? true,
+      tipo_contratto: datiCliente.tipo_contratto || null,
+      parent_listino_id: datiCliente.listino_cliente_id || null,
+    }).eq('id', targetId)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    return NextResponse.json({ success: true })
+  }
+
   const aggiornamento: any = {
     ragione_sociale: datiCliente.ragione_sociale,
     piva: datiCliente.piva||null, cf: datiCliente.cf||null,

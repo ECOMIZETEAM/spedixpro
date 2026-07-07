@@ -37,6 +37,21 @@ export async function GET(req: NextRequest) {
   } else {
     clienteId = req.nextUrl.searchParams.get('clienteId')
     if (!clienteId) return NextResponse.json({ error: 'clienteId mancante' }, { status: 400 })
+
+    // Sotto-master (clienteId = "m:<masterId>"): movimenti tra master + saldo del sotto-master
+    if (clienteId.startsWith('m:')) {
+      const targetId = clienteId.slice(2)
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const admin = createAdminSupabase()
+      const { data: sub } = await admin.from('masters').select('id,parent_master_id,credito,nome').eq('id', targetId).single()
+      if (!sub || sub.parent_master_id !== utente?.master_id) {
+        return NextResponse.json({ error: 'Sotto-master non trovato o non autorizzato' }, { status: 403 })
+      }
+      const { data: movimenti } = await admin.from('movimenti').select('*')
+        .eq('master_target_id', targetId).order('created_at', { ascending: false }).limit(300)
+      return NextResponse.json({ movimenti: movimenti || [], saldo: Number(sub.credito || 0), cliente: sub.nome || null })
+    }
+
     const { data: cli } = await supabase
       .from('clienti').select('id, master_id').eq('id', clienteId).single()
     if (!cli || cli.master_id !== utente?.master_id) {
