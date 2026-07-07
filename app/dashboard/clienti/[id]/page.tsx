@@ -34,6 +34,7 @@ export default function ClienteProfiloPage() {
   const [descrizione, setDescrizione] = useState('Accredito credito a scalare')
   const [saving, setSaving] = useState(false)
   const [errore, setErrore] = useState<string | null>(null)
+  const [successo, setSuccesso] = useState<string | null>(null)
 
   function caricaCliente() {
     fetch(`/api/clienti/${id}`).then(r => r.json()).then(d => { setCliente(d); setLoading(false) })
@@ -83,6 +84,10 @@ export default function ClienteProfiloPage() {
       setSaving(false)
       caricaCliente()
       caricaMovimenti()
+      // Notifica verde in alto + scroll su per mostrarla
+      setSuccesso('✓ Credito caricato con successo')
+      if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
+      setTimeout(() => setSuccesso(null), 5000)
     } catch {
       setErrore('Errore di rete'); setSaving(false)
     }
@@ -102,6 +107,11 @@ export default function ClienteProfiloPage() {
 
   return (
     <div>
+      {successo && (
+        <div style={{background:'#16a34a',color:'#fff',padding:'12px 18px',borderRadius:'8px',marginBottom:'16px',fontSize:'14px',fontWeight:'700',display:'flex',alignItems:'center',gap:'8px',boxShadow:'0 2px 8px rgba(22,163,74,0.25)'}}>
+          {successo}
+        </div>
+      )}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'20px'}}>
         <div>
           <a href="/dashboard/clienti" style={{fontSize:'12px',color:'#f97316',textDecoration:'none'}}>← Clienti</a>
