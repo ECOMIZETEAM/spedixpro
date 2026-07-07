@@ -24,6 +24,13 @@ export default function AssistenzaPage() {
   const [cerca, setCerca] = useState('')             // ricerca per LDV
   const [perPage, setPerPage] = useState(25)
   const [pagina, setPagina] = useState(1)
+  const [sezione, setSezione] = useState<'ticket' | 'pod'>('ticket')
+  const isPod = sezione === 'pod'
+
+  async function caricaPod(id: string, file: File) {
+    const b64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej; r.readAsDataURL(file) })
+    await aggiorna(id, { podBase64: b64 })
+  }
 
   async function carica(silent = false) {
     if (!silent) setLoading(true)
@@ -57,12 +64,14 @@ export default function AssistenzaPage() {
     setApri(false); setNuovo({ oggetto: '', messaggio: '' }); carica()
   }
 
-  // Ricerca per LDV (oggetto) o nome di chi ha aperto + paginazione
-  const filtrati = ricevuti.filter(t => {
-    if (!cerca.trim()) return true
-    const q = cerca.trim().toLowerCase()
-    return String(t.oggetto || '').toLowerCase().includes(q) || String(t.aperto_da || '').toLowerCase().includes(q)
-  })
+  // Filtro per sezione (ticket/pod) + ricerca per LDV o nome + paginazione
+  const filtrati = ricevuti
+    .filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod'))
+    .filter(t => {
+      if (!cerca.trim()) return true
+      const q = cerca.trim().toLowerCase()
+      return String(t.oggetto || '').toLowerCase().includes(q) || String(t.aperto_da || '').toLowerCase().includes(q)
+    })
   const totalePagine = Math.max(1, Math.ceil(filtrati.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
   const visibili = filtrati.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
@@ -75,15 +84,22 @@ export default function AssistenzaPage() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px', flexWrap: 'wrap', gap: '10px' }}>
         <div>
           <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Assistenza Clienti</h1>
-          <p style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>Ticket aperti dai tuoi clienti e dai sotto-master della tua rete.</p>
+          <p style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>{isPod ? 'Richieste POD dei tuoi clienti e sotto-master: carica il PDF della prova di consegna.' : 'Ticket aperti dai tuoi clienti e dai sotto-master della tua rete.'}</p>
         </div>
-        <button onClick={() => { setApri(true); setMsg('') }} style={{ padding: '9px 18px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>+ Apri un ticket</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <select value={sezione} onChange={e => { setSezione(e.target.value as any); setPagina(1); setCerca('') }}
+            style={{ padding: '9px 14px', borderRadius: '8px', border: '1px solid #d1d5db', background: '#fff', color: '#1a1a1a', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
+            <option value="ticket">Ticket</option>
+            <option value="pod">Richiesta POD</option>
+          </select>
+          {!isPod && <button onClick={() => { setApri(true); setMsg('') }} style={{ padding: '9px 18px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>+ Apri un ticket</button>}
+        </div>
       </div>
 
       {/* TICKET RICEVUTI */}
       <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', overflow: 'hidden', marginBottom: '20px' }}>
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>Ticket ricevuti</span>
+          <span style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>{isPod ? 'Richieste POD ricevute' : 'Ticket ricevuti'}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <input value={cerca} onChange={e => { setCerca(e.target.value); setPagina(1) }} placeholder="🔎 Cerca LDV…"
               style={{ padding: '7px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', minWidth: '200px' }} />
@@ -183,6 +199,19 @@ export default function AssistenzaPage() {
                 <Badge stato={sel.stato} />
               </div>
               <div style={{ background: '#f9fafb', border: '1px solid #eee', borderRadius: '8px', padding: '12px 14px', fontSize: '13px', color: '#1a1a1a', whiteSpace: 'pre-wrap' }}>{sel.messaggio}</div>
+
+              {sel.categoria === 'pod' && (
+                <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', padding: '12px 14px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px' }}>Prova di consegna (POD) — LDV {sel.oggetto}</div>
+                  {sel.pod_url && <div style={{ marginBottom: '8px' }}><a href={sel.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD caricata</a></div>}
+                  <label style={{ display: 'inline-block', padding: '8px 14px', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>
+                    {sel.pod_url ? 'Sostituisci PDF POD' : '⬆ Carica PDF della POD'}
+                    <input type="file" accept="application/pdf" onChange={async e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) { await caricaPod(sel.id, f); setSel(null) } }} style={{ display: 'none' }} />
+                  </label>
+                  <div style={{ fontSize: '11px', color: '#666', marginTop: '7px' }}>Caricando il PDF, il cliente riceve la notifica e potrà scaricare la POD dalla sua LDV.</div>
+                </div>
+              )}
+
               <div>
                 <label style={{ fontSize: '12px', fontWeight: 600, color: '#1a1a1a', display: 'block', marginBottom: '5px' }}>Risposta / nota</label>
                 <textarea value={risposta} onChange={e => setRisposta(e.target.value)} rows={3} placeholder="Scrivi una risposta al cliente…" style={{ width: '100%', padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'vertical' }} />

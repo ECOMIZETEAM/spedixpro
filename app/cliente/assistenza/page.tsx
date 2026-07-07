@@ -12,6 +12,7 @@ function Badge({ stato }: { stato: string }) {
 }
 
 export default function AssistenzaClientePage() {
+  const [sezione, setSezione] = useState<'ticket' | 'pod'>('ticket')
   const [miei, setMiei] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [nuovo, setNuovo] = useState({ oggetto: '', messaggio: '' })
@@ -20,7 +21,9 @@ export default function AssistenzaClientePage() {
   const [cerca, setCerca] = useState('')
   const [perPage, setPerPage] = useState(25)
   const [pagina, setPagina] = useState(1)
-  const [nuoviIds, setNuoviIds] = useState<Set<string>>(new Set())  // ticket con aggiornamento (notifica)
+  const [nuoviIds, setNuoviIds] = useState<Set<string>>(new Set())
+
+  const isPod = sezione === 'pod'
 
   async function carica(silent = false) {
     if (!silent) setLoading(true)
@@ -30,7 +33,7 @@ export default function AssistenzaClientePage() {
     const nonLetti = lista.filter((t: any) => t.aperto_letto === false).map((t: any) => t.id)
     if (nonLetti.length) {
       setNuoviIds(prev => { const s = new Set(prev); nonLetti.forEach((id: string) => s.add(id)); return s })
-      fetch('/api/assistenza/segna-letti', { method: 'POST' })   // marca letti -> azzera il badge nel menu
+      fetch('/api/assistenza/segna-letti', { method: 'POST' })
     }
     if (!silent) setLoading(false)
   }
@@ -41,17 +44,21 @@ export default function AssistenzaClientePage() {
   }, [])
 
   async function invia() {
-    if (!nuovo.oggetto.trim() || !nuovo.messaggio.trim()) { setMsg({ t: 'err', x: 'Compila oggetto e messaggio' }); return }
+    if (!nuovo.oggetto.trim()) { setMsg({ t: 'err', x: 'Inserisci la LDV' }); return }
+    if (!isPod && !nuovo.messaggio.trim()) { setMsg({ t: 'err', x: 'Inserisci il messaggio' }); return }
     setSalvando(true); setMsg(null)
-    const r = await fetch('/api/assistenza/apri', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(nuovo) })
+    const r = await fetch('/api/assistenza/apri', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...nuovo, categoria: sezione }) })
     const j = await r.json()
     setSalvando(false)
     if (j.error) { setMsg({ t: 'err', x: j.error }); return }
-    setNuovo({ oggetto: '', messaggio: '' }); setMsg({ t: 'ok', x: 'Richiesta inviata! La vedrai qui sotto con lo stato di avanzamento.' })
+    setNuovo({ oggetto: '', messaggio: '' })
+    setMsg({ t: 'ok', x: isPod ? 'Richiesta POD inviata! La trovi qui sotto.' : 'Richiesta inviata! La trovi qui sotto con lo stato.' })
     carica()
   }
 
-  const filtrati = miei.filter(t => !cerca.trim() || String(t.oggetto || '').toLowerCase().includes(cerca.trim().toLowerCase()))
+  const filtrati = miei
+    .filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod'))
+    .filter(t => !cerca.trim() || String(t.oggetto || '').toLowerCase().includes(cerca.trim().toLowerCase()))
   const totalePagine = Math.max(1, Math.ceil(filtrati.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
   const visibili = filtrati.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
@@ -63,23 +70,33 @@ export default function AssistenzaClientePage() {
 
   return (
     <div>
-      <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: '0 0 4px' }}>Assistenza</h1>
-      <p style={{ color: '#666', fontSize: '13px', marginBottom: '18px' }}>Apri una richiesta di assistenza: la seguiremo fino alla risoluzione.</p>
-
-      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '18px', marginBottom: '20px', maxWidth: '640px' }}>
-        <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a', marginBottom: '14px' }}>Nuova richiesta</div>
-        {msg && <div style={{ padding: '9px 12px', borderRadius: '6px', marginBottom: '12px', fontSize: '12.5px', color: '#fff', background: msg.t === 'ok' ? '#16a34a' : '#dc2626' }}>{msg.x}</div>}
-        <div style={{ marginBottom: '12px' }}><label style={lbl}>LDV</label><input value={nuovo.oggetto} onChange={e => setNuovo(n => ({ ...n, oggetto: e.target.value }))} placeholder="Numero LDV della spedizione" style={inp} /></div>
-        <div style={{ marginBottom: '14px' }}><label style={lbl}>Messaggio</label><textarea value={nuovo.messaggio} onChange={e => setNuovo(n => ({ ...n, messaggio: e.target.value }))} rows={4} placeholder="Descrivi il problema o la richiesta…" style={{ ...inp, resize: 'vertical' as const }} /></div>
-        <button disabled={salvando} onClick={invia} style={{ padding: '10px 22px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Invio…' : 'Invia richiesta'}</button>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '18px' }}>
+        <div>
+          <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: '0 0 4px' }}>Assistenza</h1>
+          <p style={{ color: '#666', fontSize: '13px', margin: 0 }}>{isPod ? 'Richiedi la POD (prova di consegna) di una spedizione.' : 'Apri una richiesta di assistenza: la seguiremo fino alla risoluzione.'}</p>
+        </div>
+        <select value={sezione} onChange={e => { setSezione(e.target.value as any); setPagina(1); setCerca(''); setMsg(null); setNuovo({ oggetto: '', messaggio: '' }) }}
+          style={{ padding: '9px 14px', borderRadius: '8px', border: '1px solid #d1d5db', background: '#fff', color: '#1a1a1a', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
+          <option value="ticket">Ticket</option>
+          <option value="pod">Richiesta POD</option>
+        </select>
       </div>
 
+      {/* Form nuova richiesta */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '18px', marginBottom: '20px', maxWidth: '640px' }}>
+        <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a', marginBottom: '14px' }}>{isPod ? 'Nuova richiesta POD' : 'Nuova richiesta'}</div>
+        {msg && <div style={{ padding: '9px 12px', borderRadius: '6px', marginBottom: '12px', fontSize: '12.5px', color: '#fff', background: msg.t === 'ok' ? '#16a34a' : '#dc2626' }}>{msg.x}</div>}
+        <div style={{ marginBottom: '12px' }}><label style={lbl}>LDV</label><input value={nuovo.oggetto} onChange={e => setNuovo(n => ({ ...n, oggetto: e.target.value }))} placeholder="Numero LDV della spedizione" style={inp} /></div>
+        <div style={{ marginBottom: '14px' }}><label style={lbl}>{isPod ? 'Note (facoltativo)' : 'Messaggio'}</label><textarea value={nuovo.messaggio} onChange={e => setNuovo(n => ({ ...n, messaggio: e.target.value }))} rows={isPod ? 2 : 4} placeholder={isPod ? 'Eventuali note…' : 'Descrivi il problema o la richiesta…'} style={{ ...inp, resize: 'vertical' as const }} /></div>
+        <button disabled={salvando} onClick={invia} style={{ padding: '10px 22px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Invio…' : (isPod ? 'Inoltra richiesta POD' : 'Invia richiesta')}</button>
+      </div>
+
+      {/* Lista */}
       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>Le mie richieste</span>
+          <span style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>{isPod ? 'Le mie richieste POD' : 'Le mie richieste'}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <input value={cerca} onChange={e => { setCerca(e.target.value); setPagina(1) }} placeholder="🔎 Cerca LDV…"
-              style={{ padding: '7px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', minWidth: '190px' }} />
+            <input value={cerca} onChange={e => { setCerca(e.target.value); setPagina(1) }} placeholder="🔎 Cerca LDV…" style={{ padding: '7px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', minWidth: '190px' }} />
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#666' }}>
               Mostra
               <select value={perPage} onChange={e => { setPerPage(Number(e.target.value)); setPagina(1) }} style={{ padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: '5px', fontSize: '12px', color: '#1a1a1a', background: '#fff' }}>
@@ -90,7 +107,7 @@ export default function AssistenzaClientePage() {
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr style={{ background: '#f9fafb' }}>{['Data', 'LDV', 'Stato', 'Risposta'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ background: '#f9fafb' }}>{['Data', 'LDV', 'Stato', isPod ? 'POD' : 'Risposta'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
             <tbody>
               {loading ? (
                 <tr><td colSpan={4} style={{ ...td, textAlign: 'center', color: '#999' }}>Caricamento…</td></tr>
@@ -104,10 +121,16 @@ export default function AssistenzaClientePage() {
                       {t.oggetto}
                       {nuoviIds.has(t.id) && <span style={{ background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px' }}>● Aggiornato</span>}
                     </div>
-                    <div style={{ fontSize: '11.5px', color: '#888', marginTop: '2px' }}>{t.messaggio}</div>
+                    {!isPod && <div style={{ fontSize: '11.5px', color: '#888', marginTop: '2px' }}>{t.messaggio}</div>}
                   </td>
                   <td style={td}><Badge stato={t.stato} /></td>
-                  <td style={{ ...td, color: '#555', fontSize: '12.5px' }}>{t.risposta || '—'}</td>
+                  <td style={{ ...td, fontSize: '12.5px' }}>
+                    {isPod ? (
+                      t.pod_url
+                        ? <a href={t.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD</a>
+                        : <span style={{ color: '#999' }}>In attesa…</span>
+                    ) : (t.risposta || '—')}
+                  </td>
                 </tr>
               ))}
             </tbody>

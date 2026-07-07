@@ -14,14 +14,16 @@ export async function POST(req: NextRequest) {
   if (!masterId) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
 
   const body = await req.json()
+  const categoria = body?.categoria === 'pod' ? 'pod' : 'ticket'
   const oggetto = String(body?.oggetto || '').trim()
-  const messaggio = String(body?.messaggio || '').trim()
-  if (!oggetto || !messaggio) return NextResponse.json({ error: 'Oggetto e messaggio sono obbligatori' }, { status: 400 })
+  // per la POD il messaggio è facoltativo (basta la LDV)
+  const messaggio = String(body?.messaggio || '').trim() || (categoria === 'pod' ? 'Richiesta POD' : '')
+  if (!oggetto || !messaggio) return NextResponse.json({ error: categoria === 'pod' ? 'Inserisci la LDV' : 'Oggetto e messaggio sono obbligatori' }, { status: 400 })
 
   const admin = createAdminSupabase()
   const ruolo = (utente?.ruolo || '').toLowerCase()
 
-  const record: any = { oggetto, messaggio, stato: 'aperto' }
+  const record: any = { oggetto, messaggio, stato: 'aperto', categoria }
 
   if (ruolo === 'cliente') {
     if (!utente?.cliente_id) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })

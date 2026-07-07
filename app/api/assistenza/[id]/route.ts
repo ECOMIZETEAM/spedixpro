@@ -25,6 +25,20 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (body?.stato && ['aperto', 'in_lavorazione', 'risolto'].includes(body.stato)) upd.stato = body.stato
   if (typeof body?.risposta === 'string') upd.risposta = body.risposta
 
+  // Caricamento PDF della POD (base64) -> storage -> pod_url
+  if (typeof body?.podBase64 === 'string' && body.podBase64) {
+    try {
+      const b64 = body.podBase64.split(',').pop() || body.podBase64
+      const buffer = Buffer.from(b64, 'base64')
+      const path = `pod/${masterId}/${Date.now()}_${id}.pdf`
+      const { error: upErr } = await admin.storage.from('reports').upload(path, buffer, { contentType: 'application/pdf', upsert: true })
+      if (!upErr) {
+        const { data: pub } = admin.storage.from('reports').getPublicUrl(path)
+        if (pub?.publicUrl) upd.pod_url = pub.publicUrl
+      }
+    } catch { /* ignora: la POD resta non caricata */ }
+  }
+
   const { error } = await admin.from('tickets').update(upd).eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ success: true })
