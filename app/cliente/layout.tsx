@@ -1,6 +1,9 @@
 import { createServerSupabase } from '@/lib/supabase'
-import { redirect } from 'next/navigation'
 import ClienteNav from './ClienteNav'
+
+// Mai in cache: dipende dalla sessione (senza questo, Vercel può servire una
+// versione statica "senza utente" → sidebar assente).
+export const dynamic = 'force-dynamic'
 
 export default async function ClienteLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createServerSupabase()
