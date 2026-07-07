@@ -60,10 +60,10 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
   const body = await req.json()
-  const { listinoId, corriereId, fasce, supplementi, fattore_volume } = body
+  const { listinoId, corriereId, fasce, supplementi, fattore_volume, solo_peso_reale } = body
   if (!listinoId || !corriereId) return NextResponse.json({ error: 'Dati mancanti' }, { status: 400 })
 
-  await supabase.from('listini_corrieri').update({ fattore_volume }).eq('id', listinoId)
+  await supabase.from('listini_corrieri').update({ fattore_volume, solo_peso_reale: !!solo_peso_reale }).eq('id', listinoId)
 
   // Cancella le fasce/supplementi di questo corriere in TUTTI i listini del master
   // (potevano essere sparse sotto listino_id diversi): evita duplicati/orfani e le riconsolida.

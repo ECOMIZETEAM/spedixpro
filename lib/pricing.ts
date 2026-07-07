@@ -180,11 +180,12 @@ export async function calcolaPrezzoCorriere(
   // quindi in TUTTI i listini del master, filtrando per corriere_id.
   const { data: listini } = await supabase
     .from('listini_corrieri')
-    .select('id,fattore_volume')
+    .select('id,fattore_volume,solo_peso_reale')
     .eq('master_id', masterId)
   if (!listini?.length) return null
   const listinoIds = listini.map((l: any) => l.id)
   const fattore = parseFloat(listini[0].fattore_volume) || 5000
+  const soloPesoReale = listini.some((l: any) => l.solo_peso_reale)
 
   const packages = Array.isArray(params.packages) && params.packages.length ? params.packages : []
   let pesoVolume = 0
@@ -192,7 +193,7 @@ export async function calcolaPrezzoCorriere(
     if (p?.length && p?.width && p?.height) pesoVolume += (p.length * p.width * p.height) / fattore
   }
   const pesoReale = Number(params.pesoReale) || 1
-  const pesoFatturato = Math.max(pesoReale, pesoVolume)
+  const pesoFatturato = soloPesoReale ? pesoReale : Math.max(pesoReale, pesoVolume)
 
   const { data: fasce } = await supabase
     .from('listini_corrieri_fasce')

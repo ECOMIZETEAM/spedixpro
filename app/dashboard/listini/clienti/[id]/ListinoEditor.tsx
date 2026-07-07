@@ -18,6 +18,7 @@ const fattori = [
   {label:'250 kg/m³ (4000)',value:4000},{label:'200 kg/m³ (5000)',value:5000},
   {label:'166.66 kg/m³ (6000)',value:6000},{label:'150 kg/m³ (6666)',value:6666},
   {label:'125 kg/m³ (8000)',value:8000},{label:'100 kg/m³ (10000)',value:10000},
+  {label:'Peso reale (no volumetrico)',value:0},
 ]
 
 function buildFasceInit(fasceEsistenti: any[]): Fascia[] {
@@ -231,13 +232,9 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
           </div>
           <div>
             <label style={{fontSize:'11.5px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Fattore Peso/Volume (kg/m³)</label>
-            <select value={fattore} disabled={soloPesoReale} onChange={e=>setFattore(Number(e.target.value))} style={{...inp,width:'100%',padding:'8px 11px',opacity:soloPesoReale?0.5:1}}>
+            <select value={soloPesoReale ? 0 : fattore} onChange={e=>{const v=Number(e.target.value); if(v===0){setSoloPesoReale(true)}else{setSoloPesoReale(false);setFattore(v)}}} style={{...inp,width:'100%',padding:'8px 11px'}}>
               {fattori.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}
             </select>
-            <label style={{display:'flex',alignItems:'center',gap:'7px',marginTop:'8px',fontSize:'12px',color:'#1a1a1a',cursor:'pointer'}}>
-              <input type="checkbox" checked={soloPesoReale} onChange={e=>setSoloPesoReale(e.target.checked)}/>
-              Solo peso reale (ignora il volumetrico)
-            </label>
             {soloPesoReale && <div style={{fontSize:'11px',color:'#f97316',marginTop:'3px'}}>Il cliente paga sempre sul peso reale, anche con misure grandi.</div>}
           </div>
         </div>

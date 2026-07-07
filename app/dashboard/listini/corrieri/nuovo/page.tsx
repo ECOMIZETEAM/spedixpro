@@ -9,6 +9,7 @@ const fattori = [
   {label:'250 kg/m³ (4000)',value:4000},{label:'200 kg/m³ (5000)',value:5000},
   {label:'166.66 kg/m³ (6000)',value:6000},{label:'150 kg/m³ (6666)',value:6666},
   {label:'125 kg/m³ (8000)',value:8000},{label:'100 kg/m³ (10000)',value:10000},
+  {label:'Peso reale (no volumetrico)',value:0},
 ]
 
 type RigaSuppl = { valore_max:string; prezzo_fisso:string; perc:string; calcolo_su:string }
@@ -77,6 +78,7 @@ export default function ListinoCorrierePage() {
   const [msg, setMsg] = useState('')
   const [tab, setTab] = useState('pesi')
   const [fattore, setFattore] = useState(5000)
+  const [soloPesoReale, setSoloPesoReale] = useState(false)
 
   const [aggiungendoContratto, setAggiungendoContratto] = useState(false)
   const [nuovoContrattoId, setNuovoContrattoId] = useState('')
@@ -117,6 +119,7 @@ export default function ListinoCorrierePage() {
     setCorrieriDisponibili(data.corrieriDisponibili || [])
     setCorriereId(data.corriereSelezionatoId || '')
     setFattore(Number(data.listino?.fattore_volume) || 5000)
+    setSoloPesoReale(!!data.listino?.solo_peso_reale)
     setFasce(buildFasceInit(data.fasce || []))
     // Zone reali definite in Gestione Zone per il corriere selezionato (colonne prezzi)
     const zTutte = await fetch('/api/zone').then(r => r.json()).catch(() => [])
@@ -189,7 +192,7 @@ export default function ListinoCorrierePage() {
 
     const res = await fetch('/api/listini/corrieri', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ listinoId: listino.id, corriereId, fasce: fasceArr, supplementi, fattore_volume: fattore })
+      body: JSON.stringify({ listinoId: listino.id, corriereId, fasce: fasceArr, supplementi, fattore_volume: fattore, solo_peso_reale: soloPesoReale })
     })
     const data = await res.json()
     setSaving(false)
@@ -268,9 +271,10 @@ export default function ListinoCorrierePage() {
               </div>
               <div>
                 <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Fattore Peso/Volume (kg/m³)</label>
-                <select value={fattore} onChange={e=>setFattore(Number(e.target.value))} style={{...inp,width:'100%',padding:'8px 10px'}}>
+                <select value={soloPesoReale ? 0 : fattore} onChange={e=>{const v=Number(e.target.value); if(v===0){setSoloPesoReale(true)}else{setSoloPesoReale(false);setFattore(v)}}} style={{...inp,width:'100%',padding:'8px 10px'}}>
                   {fattori.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}
                 </select>
+                {soloPesoReale && <div style={{fontSize:'11px',color:'#f97316',marginTop:'3px'}}>Si paga sempre sul peso reale, il volumetrico viene ignorato.</div>}
               </div>
             </div>
           </div>
