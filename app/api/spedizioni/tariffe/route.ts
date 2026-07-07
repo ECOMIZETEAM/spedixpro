@@ -140,27 +140,27 @@ export async function POST(req: NextRequest) {
     for (const arr of scaglioniAssicPerCorriere.values()) arr.sort((a,b)=>a.valore_max - b.valore_max)
   }
 
-  function calcolaAssicurazione(corriereId: string, prezzoSped: number): number | null {
+  // Base percentuale: 'totale' = intero importo del supplemento; 'differenza' = importo
+  // meno il massimo della PRIMA fascia (es. franchigia 500€ → % solo sull'eccedenza).
+  function calcolaAssicurazione(corriereId: string, _prezzoSped: number): number | null {
     if (assicImporto <= 0) return 0
     const scal = scaglioniAssicPerCorriere.get(corriereId)
     if (!scal || !scal.length) return 0
     const s = scal.find(x => assicImporto <= x.valore_max)
     if (!s) return null
-    let base = prezzoSped
-    if (s.calcolo_su === 'valore_merce') base = Number(body.valoreMerce || 0)
-    else if (s.calcolo_su === 'nolo') base = prezzoSped
+    const primaFasciaMax = Number(scal[0]?.valore_max) || 0
+    const base = s.calcolo_su === 'differenza' ? Math.max(0, assicImporto - primaFasciaMax) : assicImporto
     return s.prezzo_fisso + (s.perc/100) * base
   }
 
-  function calcolaContrassegno(corriereId: string, prezzoSped: number): number | null {
+  function calcolaContrassegno(corriereId: string, _prezzoSped: number): number | null {
     if (codImporto <= 0) return 0
     const scal = scaglioniContrPerCorriere.get(corriereId)
     if (!scal || !scal.length) return 0
     const s = scal.find(x => codImporto <= x.valore_max)
     if (!s) return null // importo oltre il massimo → corriere non disponibile
-    let base = prezzoSped
-    if (s.calcolo_su === 'valore_merce') base = Number(body.valoreMerce || 0)
-    else if (s.calcolo_su === 'nolo') base = prezzoSped
+    const primaFasciaMax = Number(scal[0]?.valore_max) || 0
+    const base = s.calcolo_su === 'differenza' ? Math.max(0, codImporto - primaFasciaMax) : codImporto
     return s.prezzo_fisso + (s.perc/100) * base
   }
 

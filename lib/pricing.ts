@@ -261,7 +261,9 @@ export async function calcolaPrezzoCorriere(
       .sort((a: any, b: any) => a.valore_max - b.valore_max)
     if (!scal.length) return 0
     const s = scal.find((x: any) => importo <= x.valore_max) || scal[scal.length - 1]
-    const base = s.calcolo_su === 'valore_merce' ? 0 : nolo
+    // 'totale' = intero importo; 'differenza' = importo meno il massimo della prima fascia
+    const primaFasciaMax = Number(scal[0]?.valore_max) || 0
+    const base = s.calcolo_su === 'differenza' ? Math.max(0, importo - primaFasciaMax) : importo
     return s.prezzo_fisso + (s.perc / 100) * base
   }
   prezzo += applicaScaglione('contrassegno', cod)
@@ -311,7 +313,9 @@ export async function calcolaSupplementiCliente(
     if (!scal.length) return 0
     const s = scal.find((x: any) => importo <= x.valore_max)
     if (!s) return null // oltre il massimo -> contratto non disponibile per quell'importo
-    const base = s.calcolo_su === 'valore_merce' ? valoreMerce : nolo
+    // 'totale' = intero importo del supplemento; 'differenza' = importo meno il massimo della prima fascia
+    const primaFasciaMax = Number(scal[0]?.valore_max) || 0
+    const base = s.calcolo_su === 'differenza' ? Math.max(0, importo - primaFasciaMax) : importo
     return s.prezzo_fisso + (s.perc / 100) * base
   }
 
@@ -420,7 +424,9 @@ export async function creaCalcolatoreCorriere(
       }).sort((a: any, b: any) => a.vm - b.vm)
       if (!scal.length) return 0
       const sc = scal.find((x: any) => importo <= x.vm) || scal[scal.length - 1]
-      const base = sc.cs === 'valore_merce' ? 0 : nolo
+      // 'totale' = intero importo; 'differenza' = importo meno il massimo della prima fascia
+      const primaFasciaMax = Number(scal[0]?.vm) || 0
+      const base = sc.cs === 'differenza' ? Math.max(0, importo - primaFasciaMax) : importo
       return sc.pf + (sc.pc / 100) * base
     }
     prezzo += applica('contrassegno', cod)

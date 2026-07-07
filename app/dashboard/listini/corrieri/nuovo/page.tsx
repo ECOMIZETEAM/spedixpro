@@ -363,8 +363,7 @@ export default function ListinoCorrierePage() {
                         <td style={{padding:'6px 8px'}}>
                           <select value={r.calcolo_su} onChange={e=>setRigaAssic(i,'calcolo_su',e.target.value)} style={{...inp,width:'120px'}}>
                             <option value="totale">totale</option>
-                            <option value="valore_merce">valore merce</option>
-                            <option value="nolo">nolo</option>
+                            <option value="differenza">differenza</option>
                           </select>
                         </td>
                         <td style={{padding:'6px 8px',textAlign:'center' as const}}>
@@ -397,8 +396,7 @@ export default function ListinoCorrierePage() {
                         <td style={{padding:'6px 8px'}}>
                           <select value={r.calcolo_su} onChange={e=>setRigaContr(i,'calcolo_su',e.target.value)} style={{...inp,width:'120px'}}>
                             <option value="totale">totale</option>
-                            <option value="valore_merce">valore merce</option>
-                            <option value="nolo">nolo</option>
+                            <option value="differenza">differenza</option>
                           </select>
                         </td>
                         <td style={{padding:'6px 8px',textAlign:'center' as const}}>
