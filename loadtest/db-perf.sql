@@ -34,6 +34,50 @@ returns json language sql stable as $$
   );
 $$;
 
+-- 2b) FUNZIONI STATISTICHE DASHBOARD (aggregazione mensile + stati 30gg nel DB,
+--     invece di scaricare le righe grezze: PostgREST le limita a 1000 → totali falsati).
+create or replace function dashboard_statistiche_master(p_master uuid)
+returns json language sql stable as $$
+  select json_build_object(
+    'mensili', (
+      select coalesce(json_agg(row_to_json(t)), '[]'::json) from (
+        select to_char(date_trunc('month', created_at), 'Mon YY') as mese,
+               count(*) as totale, coalesce(sum(costo_totale),0) as importo
+        from spedizioni
+        where master_id = p_master and created_at >= date_trunc('month', now()) - interval '12 months'
+        group by date_trunc('month', created_at) order by date_trunc('month', created_at)
+      ) t
+    ),
+    'stati30', (
+      select coalesce(json_object_agg(stato, n), '{}'::json) from (
+        select stato, count(*) n from spedizioni
+        where master_id = p_master and created_at >= now() - interval '30 days' group by stato
+      ) s
+    )
+  );
+$$;
+
+create or replace function dashboard_statistiche_cliente(p_cliente uuid)
+returns json language sql stable as $$
+  select json_build_object(
+    'mensili', (
+      select coalesce(json_agg(row_to_json(t)), '[]'::json) from (
+        select to_char(date_trunc('month', created_at), 'Mon YY') as mese,
+               count(*) as totale, coalesce(sum(costo_totale),0) as importo
+        from spedizioni
+        where cliente_id = p_cliente and created_at >= date_trunc('month', now()) - interval '12 months'
+        group by date_trunc('month', created_at) order by date_trunc('month', created_at)
+      ) t
+    ),
+    'stati30', (
+      select coalesce(json_object_agg(stato, n), '{}'::json) from (
+        select stato, count(*) n from spedizioni
+        where cliente_id = p_cliente and created_at >= now() - interval '30 days' group by stato
+      ) s
+    )
+  );
+$$;
+
 -- 3) SEED / CLEANUP per il load test a volume (righe marcate 'LOADTEST-%').
 --    Esempio: select seed_spedizioni_test(50000, '<cliente_id>', '<corriere_id>');
 --    Pulizia: select cleanup_spedizioni_test();
