@@ -28,7 +28,7 @@ export default function ReportGuadagno() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 18px', borderBottom: '1px solid #f0f0f0', gap: '12px', flexWrap: 'wrap' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 700, color: '#1a1a1a' }}>
           <span style={{ width: '26px', height: '26px', borderRadius: '7px', background: '#dcfce7', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>💰</span>
-          Report Guadagno
+          Report Guadagno Spedizioni
         </span>
         <select value={periodo} onChange={e => setPeriodo(e.target.value)}
           style={{ padding: '7px 12px', borderRadius: '7px', border: '1px solid #d1d5db', background: '#fff', color: '#1a1a1a', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
