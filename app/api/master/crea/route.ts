@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
     const { inviaCredenzialiCliente } = await import('@/lib/email')
     await inviaCredenzialiCliente({
       email, nomeCliente: nome, masterNome: 'MoovExpress',
-      dominio: 'spedixpro.vercel.app', password,
+      dominio: 'moovexpress.com', password,
     })
   } catch (e) {
     console.error('Errore invio email master:', e)

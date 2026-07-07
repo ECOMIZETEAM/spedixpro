@@ -45,15 +45,16 @@ export async function POST(req: NextRequest) {
   if (!ruoliValidi.includes((ruolo||'').toLowerCase())) return NextResponse.json({ error: 'Ruolo non valido' }, { status: 400 })
 
   const admin = createAdminSupabase()
-  // creo l'utente auth e invio email per impostare la password.
-  // redirectTo = pagina dove l'invitato imposta la password ed entra nel portale.
+  // Genero l'utente + link d'invito (SENZA la mail Supabase) e lo invio via Resend.
   const origin = req.headers.get('origin') || req.nextUrl.origin
-  const { data: created, error: authErr } = await admin.auth.admin.inviteUserByEmail(email.trim(), {
-    redirectTo: `${origin}/imposta-password`,
+  const { data: linkData, error: authErr } = await admin.auth.admin.generateLink({
+    type: 'invite', email: email.trim(),
+    options: { redirectTo: `${origin}/imposta-password` },
   })
   if (authErr) return NextResponse.json({ error: authErr.message }, { status: 400 })
-  const newId = created?.user?.id
-  if (!newId) return NextResponse.json({ error: 'Creazione utente fallita' }, { status: 400 })
+  const newId = linkData?.user?.id
+  const actionLink = linkData?.properties?.action_link
+  if (!newId || !actionLink) return NextResponse.json({ error: 'Creazione invito fallita' }, { status: 400 })
 
   const { error: insErr } = await admin.from('utenti').insert({
     id: newId,
@@ -63,6 +64,14 @@ export async function POST(req: NextRequest) {
     attivo: true,
   })
   if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 })
+
+  // invio invito via Resend (con il nome del master)
+  const { data: masterRec } = await admin.from('masters').select('nome').eq('id', me.master_id).single()
+  try {
+    const { inviaInvitoStaff } = await import('@/lib/email')
+    await inviaInvitoStaff({ email: email.trim(), nome: nome.trim(), link: actionLink, masterNome: masterRec?.nome || 'MoovExpress' })
+  } catch (e) { console.error('Errore invio invito staff:', e) }
+
   return NextResponse.json({ success: true })
 }
 
