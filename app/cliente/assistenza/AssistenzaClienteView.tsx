@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
+import { fileToAllegato } from '@/app/components/fileAllegato'
 
 const STATI: Record<string, { label: string; bg: string; color: string }> = {
   aperto: { label: 'Aperto', bg: '#fff7ed', color: '#ea580c' },
@@ -10,10 +11,6 @@ function Badge({ stato }: { stato: string }) {
   const s = STATI[stato] || STATI.aperto
   return <span style={{ background: s.bg, color: s.color, padding: '3px 10px', borderRadius: '5px', fontSize: '11.5px', fontWeight: 700, whiteSpace: 'nowrap' }}>{s.label}</span>
 }
-function fileToObj(file: File): Promise<any> {
-  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res({ nome: file.name, tipo: file.type || 'application/octet-stream', dati: r.result as string }); r.onerror = rej; r.readAsDataURL(file) })
-}
-
 export default function AssistenzaClienteView({ categoria }: { categoria: 'ticket' | 'pod' }) {
   const isPod = categoria === 'pod'
   const [miei, setMiei] = useState<any[]>([])
@@ -45,7 +42,7 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
 
   async function aggiungiFile(list: FileList | File[]) {
     const arr = Array.from(list).slice(0, 10)
-    const objs = await Promise.all(arr.map(fileToObj))
+    const objs = await Promise.all(arr.map(fileToAllegato))
     setFiles(f => [...f, ...objs].slice(0, 10))
   }
 
