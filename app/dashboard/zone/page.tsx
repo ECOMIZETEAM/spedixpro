@@ -10,6 +10,8 @@ export default function ZonePage() {
   const [modalNuovaCorr, setModalNuovaCorr] = useState<string|null>(null)
   const [modalModifica, setModalModifica] = useState<any>(null)
   const [modalSposta, setModalSposta] = useState<any>(null)
+  const [modalCopia, setModalCopia] = useState<any>(null)   // corriere di origine da cui copiare le zone
+  const [copiando, setCopiando] = useState(false)
   const [formNuova, setFormNuova] = useState({nome:'',descrizione:'',con_fuel:false})
   const [formMod, setFormMod] = useState({nome:'',descrizione:'',con_fuel:false})
   const [regioni, setRegioni] = useState<any[]>([])
@@ -110,6 +112,17 @@ export default function ZonePage() {
     setModalSposta(null); load()
   }
 
+  async function copiaZone(fromCorr:any, toId:string) {
+    setCopiando(true)
+    const res = await fetch('/api/zone/copia',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fromCorriereId:fromCorr.id,toCorriereId:toId})})
+    const d = await res.json().catch(()=>({}))
+    setCopiando(false)
+    if(!res.ok || d?.error){ alert(d?.error||'Errore durante la copia'); return }
+    setModalCopia(null)
+    alert(`Copiate ${d.create} zone`+(d.saltate?` (${d.saltate} già presenti, saltate)`:'')+'.')
+    load()
+  }
+
   // Export XLSX nel formato spedisci.online: colonne country_id / province / cap / city,
   // una riga per regione della zona.
   async function esporta(z:any) {
@@ -203,6 +216,7 @@ export default function ZonePage() {
               <div style={{display:'flex',gap:'8px',marginBottom:'16px'}}>
                 <button onClick={()=>{setFormNuova({nome:'',descrizione:'',con_fuel:false});setModalNuovaCorr(c.id)}} style={{background:'none',border:'none',color:'#f97316',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>+Aggiungi zona</button>
                 <button onClick={load} style={{padding:'6px 14px',background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',cursor:'pointer',color:'#1a1a1a'}}>🔄 Sync Zones</button>
+                {zoneC.length>0 && <button onClick={()=>setModalCopia(c)} style={{padding:'6px 14px',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'6px',fontSize:'12px',cursor:'pointer',color:'#2563eb',fontWeight:'600'}}>⧉ Copia zone su altro corriere</button>}
               </div>
               {!zoneC.length ? (
                 <div style={{padding:'30px',textAlign:'center' as const,color:'#666',fontSize:'13px'}}>Nessuna zona configurata</div>
@@ -335,6 +349,27 @@ export default function ZonePage() {
                 <button onClick={()=>setModalModifica(null)} style={{padding:'8px 16px',background:'#f5f5f5',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:'pointer',color:'#1a1a1a'}}>Annulla</button>
                 <button onClick={salvaMod} disabled={saving} style={{padding:'8px 24px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>Salva</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalCopia&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}} onClick={()=>!copiando&&setModalCopia(null)}>
+          <div style={{background:'#fff',borderRadius:'8px',width:'440px',maxWidth:'95vw'}} onClick={e=>e.stopPropagation()}>
+            <div style={{padding:'14px 20px',borderBottom:'1px solid #e5e7eb',display:'flex',justifyContent:'space-between'}}>
+              <span style={{fontWeight:'700',color:'#1a1a1a'}}>Copia zone da {modalCopia.nome_contratto}</span>
+              <button onClick={()=>setModalCopia(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:'18px'}}>✕</button>
+            </div>
+            <div style={{padding:'20px'}}>
+              <div style={{fontSize:'12.5px',color:'#666',marginBottom:'12px'}}>Scegli il corriere su cui copiare tutte le zone (con i CAP) di <b>{modalCopia.nome_contratto}</b>. Le zone con lo stesso nome già presenti vengono saltate.</div>
+              <div style={{display:'flex',flexDirection:'column' as const,gap:'8px'}}>
+                {corrieri.filter(c=>c.id!==modalCopia.id).map(c=>(
+                  <button key={c.id} disabled={copiando} onClick={()=>copiaZone(modalCopia,c.id)} style={{padding:'10px 14px',background:'#f9fafb',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:copiando?'wait':'pointer',color:'#1a1a1a',textAlign:'left' as const,opacity:copiando?0.6:1}}>{c.nome_contratto}</button>
+                ))}
+                {corrieri.filter(c=>c.id!==modalCopia.id).length===0 && <div style={{fontSize:'12px',color:'#999',textAlign:'center' as const,padding:'10px'}}>Nessun altro corriere disponibile</div>}
+              </div>
+              <button onClick={()=>setModalCopia(null)} disabled={copiando} style={{marginTop:'12px',padding:'8px',background:'#f5f5f5',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:'pointer',color:'#1a1a1a',width:'100%'}}>Annulla</button>
             </div>
           </div>
         </div>
