@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
         pesoReale: pesoRealeP, packages: colliP,
         contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
       })
-      if (prezzo == null) continue
+      if (prezzo == null || prezzo <= 0) continue   // nessun listino/fascia per questa zona o prezzo 0 -> non mostrare
       risultati.push({
         carrierCode: corr.tipo || 'sda', contractCode: '',
         weight_price: prezzo.toFixed(2), prezzo_spedizione: prezzo.toFixed(2),
@@ -316,6 +316,7 @@ export async function POST(req: NextRequest) {
     const pesoPerFascia = (!!settsC.agevolazione_peso_reale && entroMisureAgevolate) ? pesoReale : pesoFatturato
     const fasciaGiusta = trovaFascia(fasceDelCorriere, pesoPerFascia)
     if (!fasciaGiusta) continue
+    if (Number(fasciaGiusta.prezzo) <= 0) continue   // prezzo 0 per questa zona/peso -> non mostrare il corriere
     if (codRichiesto && contrassegnoOff.has(corriereId)) continue
 
     const corriere = (fasciaGiusta as any).corrieri
