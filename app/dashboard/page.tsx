@@ -197,7 +197,9 @@ export default function Dashboard() {
       </div>
 
       {/* Report Guadagno (giornaliero/settimanale/mensile/annuale) */}
-      <ReportGuadagno />
+      <ReportGuadagno titolo="Report Guadagno Spedizioni" endpoint="/api/reports/guadagno" />
+      <ReportGuadagno titolo="Report Guadagno Rettifiche" endpoint="/api/reports/guadagno-rettifiche" />
+      <ReportGuadagno titolo="Report Guadagno Supplementi" endpoint="/api/reports/guadagno-supplementi" />
     </div>
   )
 }
