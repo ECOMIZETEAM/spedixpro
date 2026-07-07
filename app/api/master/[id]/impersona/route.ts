@@ -1,10 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabase } from '@/lib/supabase'
+import { createServerClient } from '@supabase/ssr'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
 // Impersona un master DISCENDENTE (solo discesa nella catena).
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const supabase = await createServerSupabase()
+  // La response di redirect porta i cookie della nuova sessione (sidebar subito).
+  const okRedirect = NextResponse.redirect(new URL('/dashboard', req.url))
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return req.cookies.getAll() },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => okRedirect.cookies.set(name, value, options))
+        },
+      },
+    }
+  )
+
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.redirect(new URL('/', req.url))
 
@@ -53,5 +67,5 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (verifyError || !sessionData.session) {
     return NextResponse.redirect(new URL('/dashboard/clienti/master?error=sessione_non_creata', req.url))
   }
-  return NextResponse.redirect(new URL('/dashboard', req.url))
+  return okRedirect
 }
