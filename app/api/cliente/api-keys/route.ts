@@ -39,6 +39,11 @@ export async function POST(req: NextRequest) {
     .select('corriere_id').eq('listino_id', cliente.listino_cliente_id).eq('corriere_id', corriereId).maybeSingle()
   if (!agg) return NextResponse.json({ error: 'Contratto non disponibile per questo cliente' }, { status: 403 })
 
+  // UNA sola chiave per contratto: se esiste già, non se ne genera un'altra (va revocata prima)
+  const { data: esistente } = await admin.from('api_keys')
+    .select('id').eq('cliente_id', utente.cliente_id).eq('corriere_id', corriereId).maybeSingle()
+  if (esistente) return NextResponse.json({ error: 'Esiste già una API key per questo contratto. Revocala prima di generarne una nuova.' }, { status: 400 })
+
   const chiave = generaApiKey()
   const { data, error } = await admin.from('api_keys').insert({
     master_id: cliente.master_id, cliente_id: utente.cliente_id, corriere_id: corriereId, chiave, nome, attivo: true,

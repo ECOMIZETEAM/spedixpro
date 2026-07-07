@@ -98,24 +98,18 @@ export default function ApiKeysPage() {
       <div style={{display:'flex',flexDirection:'column',gap:'12px'}}>
         {contratti.length===0 && <div style={{...card,textAlign:'center',color:'#666',fontSize:'13px'}}>Nessun contratto disponibile.</div>}
         {contratti.map((c:any)=>{
-          const ks = keysPerCorriere(c.id)
+          const haChiave = keysPerCorriere(c.id).length > 0
           return (
-            <div key={c.id} style={card}>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom: ks.length?'10px':'0'}}>
-                <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>{c.nome_contratto}</div>
+            <div key={c.id} style={{...card, display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+              <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>{c.nome_contratto}</div>
+              {haChiave ? (
+                <span style={{fontSize:'12.5px',fontWeight:700,color:'#16a34a'}}>✓ Chiave attiva</span>
+              ) : (
                 <button onClick={()=>genera(c.id, c.nome_contratto)} disabled={creando===c.id}
                   style={{background:'#fff7ed',color:ACCENT,border:'1px solid #fed7aa',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',opacity:creando===c.id?.6:1}}>
                   {creando===c.id?'…':'+ Genera API key'}
                 </button>
-              </div>
-              {ks.map((k:any)=>(
-                <div key={k.id} style={{display:'flex',alignItems:'center',gap:'8px',padding:'8px 0',borderTop:'1px solid #f0f0f0'}}>
-                  <code style={{flex:1,fontSize:'12.5px',color:'#1a1a1a',wordBreak:'break-all',background:'#f9fafb',border:'1px solid #eee',borderRadius:'4px',padding:'6px 8px'}}>{k.chiave}</code>
-                  <button onClick={()=>copia(k.chiave)} style={{background:ACCENT,color:'#fff',border:'none',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>Copia</button>
-                  <span style={{fontSize:'11px',color:'#999',whiteSpace:'nowrap'}}>{k.last_used_at?('usata '+new Date(k.last_used_at).toLocaleDateString('it-IT')):'mai usata'}</span>
-                  <button onClick={()=>revoca(k.id)} style={{background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:'6px',padding:'6px 10px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>Revoca</button>
-                </div>
-              ))}
+              )}
             </div>
           )
         })}
