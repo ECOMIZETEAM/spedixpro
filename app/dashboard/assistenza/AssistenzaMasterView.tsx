@@ -27,11 +27,19 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   const [pagina, setPagina] = useState(1)
   const [dragPod, setDragPod] = useState(false)
   const [viewImg, setViewImg] = useState<string | null>(null)   // lightbox foto allegate
+  const [podFile, setPodFile] = useState<{ nome: string; dati: string } | null>(null)  // PDF POD caricato ma non ancora inviato
 
-  async function caricaPod(id: string, file: File): Promise<boolean> {
-    if (file.type !== 'application/pdf') { setMsg('Il file della POD deve essere un PDF'); return false }
+  // 1) Carica il PDF dentro la modale (anteprima), senza inviare
+  async function caricaPodDentro(file: File) {
+    if (file.type !== 'application/pdf') { setMsg('Il file della POD deve essere un PDF'); return }
+    setMsg('')
     const b64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej; r.readAsDataURL(file) })
-    return await aggiorna(id, { podBase64: b64 })
+    setPodFile({ nome: file.name, dati: b64 })
+  }
+  // 2) Invia la POD caricata al cliente (chiude in automatico = risolto)
+  async function inviaPod(id: string): Promise<boolean> {
+    if (!podFile) { setMsg('Prima carica il PDF della POD'); return false }
+    return await aggiorna(id, { podBase64: podFile.dati })
   }
 
   async function carica(silent = false) {
@@ -45,6 +53,10 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
     const t = setInterval(() => carica(true), 15000)  // aggiornamento automatico ogni 15s
     return () => clearInterval(t)
   }, [])
+  useEffect(() => { setPodFile(null) }, [sel?.id])   // reset PDF caricato quando cambia/chiude il ticket
+
+  // Riconosce un allegato immagine anche se manca il content-type corretto
+  const isImg = (a: any) => String(a?.tipo || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|heic|heif|bmp|avif)(\?|$)/i.test(String(a?.nome || a?.url || ''))
 
   async function aggiorna(id: string, campi: any): Promise<boolean> {
     setSalvando(true)
@@ -209,7 +221,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px' }}>Allegati ({sel.allegati.length})</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                     {sel.allegati.map((a: any, i: number) => (
-                      String(a.tipo || '').startsWith('image/')
+                      isImg(a)
                         ? <img key={i} src={a.url} alt={a.nome} onClick={() => setViewImg(a.url)} title="Clicca per ingrandire" style={{ width: '90px', height: '90px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #e5e7eb', cursor: 'zoom-in' }} />
                         : <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', textDecoration: 'none' }}>
                             <div style={{ width: '90px', height: '90px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', borderRadius: '8px', border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: '11px', color: '#2563eb', textAlign: 'center', padding: '4px' }}><span style={{ fontSize: '24px' }}>📄</span><span style={{ maxWidth: '80px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.nome}</span></div>
@@ -223,16 +235,31 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                 <div
                   onDragOver={e => { e.preventDefault(); setDragPod(true) }}
                   onDragLeave={() => setDragPod(false)}
-                  onDrop={async e => { e.preventDefault(); setDragPod(false); const f = e.dataTransfer.files?.[0]; if (f) { if (await caricaPod(sel.id, f)) setSel(null) } }}
-                  style={{ background: dragPod ? '#dbeafe' : '#f0f9ff', border: dragPod ? '2px dashed #2563eb' : '2px dashed #bae6fd', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px' }}>Prova di consegna (POD) — LDV {sel.oggetto}</div>
-                  {sel.pod_url && <div style={{ marginBottom: '10px' }}><a href={sel.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD caricata</a></div>}
-                  <div style={{ fontSize: '12.5px', color: '#555', marginBottom: '10px' }}>📎 Trascina qui il PDF della POD, oppure</div>
-                  <label style={{ display: 'inline-block', padding: '8px 16px', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>
-                    {sel.pod_url ? 'Sostituisci PDF' : 'Scegli PDF'}
-                    <input type="file" accept="application/pdf" onChange={async e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) { if (await caricaPod(sel.id, f)) setSel(null) } }} style={{ display: 'none' }} />
-                  </label>
-                  <div style={{ fontSize: '11px', color: '#666', marginTop: '9px' }}>Caricando il PDF la richiesta si chiude in automatico (risolta) e il cliente riceve la notifica per scaricare la POD.</div>
+                  onDrop={e => { e.preventDefault(); setDragPod(false); const f = e.dataTransfer.files?.[0]; if (f) caricaPodDentro(f) }}
+                  style={{ background: dragPod ? '#dbeafe' : '#f0f9ff', border: dragPod ? '2px dashed #2563eb' : '2px dashed #bae6fd', borderRadius: '8px', padding: '16px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px', textAlign: 'center' }}>Prova di consegna (POD) — LDV {sel.oggetto}</div>
+                  {sel.pod_url && !podFile && <div style={{ marginBottom: '10px', textAlign: 'center' }}><a href={sel.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD già inviata</a></div>}
+
+                  {podFile ? (
+                    // PDF caricato dentro: anteprima + invio
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '12.5px', color: '#1a1a1a', fontWeight: 600 }}>📄 {podFile.nome}</div>
+                      <iframe src={podFile.dati} title="Anteprima POD" style={{ width: '100%', height: '320px', border: '1px solid #cbd5e1', borderRadius: '8px', background: '#fff' }} />
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+                        <button disabled={salvando} onClick={async () => { if (await inviaPod(sel.id)) { setPodFile(null); setSel(null) } }} style={{ padding: '10px 18px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Invio…' : '✓ Invia al cliente'}</button>
+                        <button disabled={salvando} onClick={() => setPodFile(null)} style={{ padding: '10px 16px', background: '#fff', color: '#1a1a1a', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>Rimuovi</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '12.5px', color: '#555', marginBottom: '10px' }}>📎 Trascina qui il PDF della POD, oppure</div>
+                      <label style={{ display: 'inline-block', padding: '8px 16px', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>
+                        {sel.pod_url ? 'Sostituisci PDF' : 'Scegli PDF'}
+                        <input type="file" accept="application/pdf" onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) caricaPodDentro(f) }} style={{ display: 'none' }} />
+                      </label>
+                      <div style={{ fontSize: '11px', color: '#666', marginTop: '9px' }}>Carica il PDF: lo vedi qui in anteprima, poi premi “Invia al cliente”. All'invio la richiesta si chiude (risolta) e il cliente riceve la notifica.</div>
+                    </div>
+                  )}
                 </div>
               )}
 
