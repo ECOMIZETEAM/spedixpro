@@ -15,27 +15,20 @@ export async function GET() {
   const limitePiano = Number(masterRec?.abbonamento_limite || 0) || 50000
 
   const now = new Date()
-  const inizioMese = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-  const oggi = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
   const fa30gg = new Date(now.getTime() - 30*24*60*60*1000).toISOString()
 
+  // Un'unica funzione DB restituisce tutti i contatori (esatti) in una sola query,
+  // invece di 5 count separati: a regime taglia drasticamente il carico sul DB.
   const [
-    { count: totClienti },
-    { count: spedizioniMese },
-    { count: spediteOggi },
-    { count: daSpedire },
-    { count: inLavorazione },
+    { data: contatori },
     { data: tutteSpedizioni },
     { data: ultimeSpedizioni },
   ] = await Promise.all([
-    supabase.from('clienti').select('*',{count:'exact',head:true}).eq('master_id', masterId),
-    supabase.from('spedizioni').select('*',{count:'exact',head:true}).eq('master_id', masterId).gte('created_at', inizioMese),
-    supabase.from('spedizioni').select('*',{count:'exact',head:true}).eq('master_id', masterId).gte('created_at', oggi).eq('stato','spedita'),
-    supabase.from('spedizioni').select('*',{count:'exact',head:true}).eq('master_id', masterId).gte('created_at', fa30gg).eq('stato','in_lavorazione'),
-    supabase.from('spedizioni').select('*',{count:'exact',head:true}).eq('master_id', masterId).gte('created_at', fa30gg).in('stato',['in_lavorazione','spedita']),
+    supabase.rpc('dashboard_contatori_master', { p_master: masterId }),
     supabase.from('spedizioni').select('stato,created_at,costo_totale').eq('master_id', masterId).gte('created_at', new Date(now.getFullYear()-1, now.getMonth(), 1).toISOString()),
     supabase.from('spedizioni').select(SPED_COLS).eq('master_id', masterId).order('created_at',{ascending:false}).limit(10),
   ])
+  const c: any = contatori || {}
 
   // Statistiche mensili
   const statsMensili: Record<string,{totale:number,importo:number}> = {}
@@ -56,14 +49,14 @@ export async function GET() {
 
   return NextResponse.json({
     masterNome,
-    totClienti: totClienti||0,
-    spedizioniMese: spedizioniMese||0,
+    totClienti: c.totClienti||0,
+    spedizioniMese: c.spedizioniMese||0,
     limiteMese: limitePiano,
     abbonamentoAttivo,
     illimitato: isRoot,
-    spediteOggi: spediteOggi||0,
-    daSpedire: daSpedire||0,
-    inLavorazione: inLavorazione||0,
+    spediteOggi: c.spediteOggi||0,
+    daSpedire: c.daSpedire||0,
+    inLavorazione: c.inLavorazione||0,
     statsMensili: Object.entries(statsMensili).map(([mese,v])=>({mese,...v})),
     statiUltimi30,
     ultimeSpedizioni: ultimeSpedizioni||[],
