@@ -45,14 +45,22 @@ function NodoAlbero({ masterId, nome, isRoot }: { masterId: string; nome: string
         <span style={{ fontSize: '14px' }}>{isRoot ? '👑' : '🏢'}</span>
         <span style={{ fontWeight: '700', fontSize: '13px', color: '#1a1a1a' }}>{nome}</span>
         {isRoot && <span style={{ fontSize: '10px', color: '#f97316', fontWeight: '700', background: '#fff7ed', padding: '2px 6px', borderRadius: '4px' }}>ROOT</span>}
-        {!isRoot && (
-          <a href={`/api/master/${masterId}/impersona`} target="_blank" rel="noopener noreferrer"
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
+          <a href={`/dashboard/clienti/master/${masterId}`}
             onClick={e => e.stopPropagation()}
-            title="Accedi come questo master"
-            style={{ marginLeft: 'auto', fontSize: '11px', fontWeight: 700, color: '#ea580c', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '5px', padding: '3px 8px', textDecoration: 'none' }}>
-            ↪ Accedi
+            title="Modifica anagrafica / accesso"
+            style={{ fontSize: '11px', fontWeight: 700, color: '#1a1a1a', background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: '5px', padding: '3px 8px', textDecoration: 'none' }}>
+            ✎ Modifica
           </a>
-        )}
+          {!isRoot && (
+            <a href={`/api/master/${masterId}/impersona`} target="_blank" rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              title="Accedi come questo master"
+              style={{ fontSize: '11px', fontWeight: 700, color: '#ea580c', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '5px', padding: '3px 8px', textDecoration: 'none' }}>
+              ↪ Accedi
+            </a>
+          )}
+        </span>
       </div>
 
       {espanso && (
