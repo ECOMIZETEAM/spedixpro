@@ -70,7 +70,7 @@ export default function RadioWidget() {
   if (!visibile) {
     return (
       <button onClick={apri} title="Apri radio" style={{
-        position: 'fixed', top: '58px', right: '18px', zIndex: 60,
+        position: 'fixed', bottom: '18px', right: '18px', zIndex: 60,
         display: 'flex', alignItems: 'center', gap: '6px',
         background: '#1a1a1a', color: '#f97316', border: '1px solid rgba(249,115,22,0.4)',
         borderRadius: '20px', padding: '6px 12px', fontSize: '12px', fontWeight: 700,
@@ -82,7 +82,7 @@ export default function RadioWidget() {
   const barre = [0, 1, 2, 3, 4]
   return (
     <div style={{
-      position: 'fixed', top: '58px', right: '18px', zIndex: 60, width: '250px',
+      position: 'fixed', bottom: '18px', right: '18px', zIndex: 60, width: '250px',
       background: 'linear-gradient(160deg,#1f2937 0%,#111827 100%)', color: '#fff',
       borderRadius: '14px', border: '1px solid rgba(255,255,255,0.08)',
       boxShadow: '0 12px 30px rgba(0,0,0,0.35)', overflow: 'hidden',
