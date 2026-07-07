@@ -45,9 +45,13 @@ export default function ZonePage() {
 
   async function salvaZona() {
     if(!modalNuovaCorr) return
+    if(!formNuova.nome.trim()){ alert('Inserisci il nome della zona'); return }
     setSaving(true)
-    await fetch('/api/zone',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...formNuova,corriereId:modalNuovaCorr})})
-    setFormNuova({nome:'',descrizione:'',con_fuel:false}); setModalNuovaCorr(null); setSaving(false); load()
+    const res = await fetch('/api/zone',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...formNuova,corriereId:modalNuovaCorr})})
+    const d = await res.json().catch(()=>({}))
+    setSaving(false)
+    if(!res.ok || d?.error){ alert(d?.error || 'Errore durante il salvataggio della zona'); return }
+    setFormNuova({nome:'',descrizione:'',con_fuel:false}); setModalNuovaCorr(null); load()
   }
 
   async function salvaMod() {
