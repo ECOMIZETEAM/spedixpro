@@ -32,6 +32,7 @@ const NAV: NavItem[] = [
     { label: 'Elenco Distinte Resi', href: '/dashboard/resi/distinte', perm: 'admin.renderlist.index' },
   ]},
   { label: 'Dal mio network', href: '/dashboard/network', icon: '🌐', perm: 'admin.interno.deliveries.in' },
+  { label: 'Assistenza Clienti', href: '/dashboard/assistenza', icon: '🎧', always: true },
   { label: 'Tracking Interno', href: '/dashboard/tracking', icon: '◎', perm: 'admin.interno.deliveries.out' },
   { label: 'Listini Prezzi', href: '/dashboard/listini', icon: '€', sub: [
     { label: 'Nuovo Listino', href: '/dashboard/listini/clienti/nuovo', perm: 'admin.pricelists.create' },

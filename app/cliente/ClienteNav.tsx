@@ -38,6 +38,7 @@ const NAV_BASE: NavItem[] = [
   },
   { id: 'resi', label: 'Resi', icon: '↺', href: '/cliente/resi/distinte' },
   { id: 'fatture', label: 'Fatture', icon: '◻', href: '/cliente/fatture' },
+  { id: 'assistenza', label: 'Assistenza', icon: '🎧', href: '/cliente/assistenza' },
   {
     id: 'reports', label: 'Reports', icon: '◈',
     sub: [
