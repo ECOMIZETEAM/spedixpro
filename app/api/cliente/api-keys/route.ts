@@ -11,8 +11,10 @@ export async function GET() {
   const { data: utente } = await supabase.from('utenti').select('cliente_id').eq('id', user.id).single()
   if (!utente?.cliente_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const admin = createAdminSupabase()
+  // niente join corrieri(...) — la relazione FK non è vista da PostgREST e faceva
+  // fallire la query (lista sempre vuota). Il nome contratto lo risolve il frontend.
   const { data } = await admin.from('api_keys')
-    .select('id,corriere_id,nome,chiave,attivo,last_used_at,created_at,corrieri(nome_contratto)')
+    .select('id,corriere_id,nome,chiave,attivo,last_used_at,created_at')
     .eq('cliente_id', utente.cliente_id)
     .order('created_at', { ascending: false })
   return NextResponse.json(data || [])
