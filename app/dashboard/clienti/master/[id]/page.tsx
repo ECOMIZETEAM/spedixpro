@@ -17,18 +17,21 @@ export default function ModificaMasterPage() {
   const [nuovaEmail, setNuovaEmail] = useState('')
   const [nuovaPassword, setNuovaPassword] = useState('')
   const [passwordMostrata, setPasswordMostrata] = useState('')
+  const [listini, setListini] = useState<any[]>([])
 
   useEffect(() => {
     fetch(`/api/master/${id}`).then(r=>r.json()).then(d=>{
       if (d.error) { setErrore(d.error); setLoading(false); return }
       setM(d); setLoading(false)
     }).catch(()=>{ setErrore('Errore caricamento'); setLoading(false) })
+    fetch('/api/listini/lista').then(r=>r.json()).then(d=>setListini(Array.isArray(d)?d:[])).catch(()=>{})
   }, [id])
 
   async function salva() {
     setSaving(true); setErrore(''); setMsg(''); setPasswordMostrata('')
     const body: any = {
       nome: m.nome, telefono: m.telefono, piva: m.piva, tipo_contratto: m.tipo_contratto,
+      parent_listino_id: m.parent_listino_id || null,
     }
     if (nuovaEmail.trim()) body.nuova_email = nuovaEmail.trim()
     if (nuovaPassword.trim()) body.nuova_password = nuovaPassword.trim()
@@ -66,6 +69,13 @@ export default function ModificaMasterPage() {
           <input style={inp} value={m.telefono||''} onChange={e=>setM({...m,telefono:e.target.value})}/></div>
         <div style={{marginBottom:'12px'}}><label style={lbl}>P.IVA</label>
           <input style={inp} value={m.piva||''} onChange={e=>setM({...m,piva:e.target.value})}/></div>
+        <div style={{marginBottom:'12px'}}><label style={lbl}>Listino assegnato</label>
+          <select style={inp} value={m.parent_listino_id||''} onChange={e=>setM({...m,parent_listino_id:e.target.value})}>
+            <option value="">— nessuno (userà corrieri propri) —</option>
+            {listini.map((l:any)=><option key={l.id} value={l.id}>{l.nome}</option>)}
+          </select>
+          <div style={{fontSize:'11px',color:'#999',marginTop:'4px'}}>Il prezzo che TU applichi a questo master quando spedisce col tuo contratto.</div>
+        </div>
         <div><label style={lbl}>Tipo contratto</label>
           <select style={inp} value={m.tipo_contratto||'credito_scalare'} onChange={e=>setM({...m,tipo_contratto:e.target.value})}>
             <option value="credito_scalare">Credito a scalare</option>

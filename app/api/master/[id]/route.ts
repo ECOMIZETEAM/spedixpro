@@ -35,7 +35,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!(await puoGestire(admin, utente, id))) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const { data: m } = await admin.from('masters')
-    .select('id,nome,email,telefono,piva,tipo_contratto,parent_master_id').eq('id', id).single()
+    .select('id,nome,email,telefono,piva,tipo_contratto,parent_master_id,parent_listino_id').eq('id', id).single()
   if (!m) return NextResponse.json({ error: 'Master non trovato' }, { status: 404 })
 
   const authId = await authUserIdDelMaster(admin, id)
@@ -65,6 +65,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if ('telefono' in body) upd.telefono = body.telefono || null
   if ('piva' in body) upd.piva = body.piva || null
   if (body.tipo_contratto === 'credito_scalare' || body.tipo_contratto === 'fattura_mensile') upd.tipo_contratto = body.tipo_contratto
+  if ('parent_listino_id' in body) upd.parent_listino_id = body.parent_listino_id || null
 
   // cambio email (aggiorna auth + anagrafica)
   const nuovaEmail = (body.nuova_email || '').toLowerCase().trim()
