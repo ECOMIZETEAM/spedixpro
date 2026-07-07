@@ -196,10 +196,13 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Report Guadagno (giornaliero/settimanale/mensile/annuale) */}
-      <ReportGuadagno titolo="Report Guadagno Spedizioni" endpoint="/api/reports/guadagno" />
-      <ReportGuadagno titolo="Report Guadagno Rettifiche" endpoint="/api/reports/guadagno-rettifiche" />
-      <ReportGuadagno titolo="Report Guadagno Supplementi" endpoint="/api/reports/guadagno-supplementi" />
+      {/* Report Guadagno — compatti, in fila */}
+      <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginTop:'2px'}}>Report Guadagno</div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'14px'}}>
+        <ReportGuadagno titolo="Spedizioni" endpoint="/api/reports/guadagno" />
+        <ReportGuadagno titolo="Rettifiche" endpoint="/api/reports/guadagno-rettifiche" />
+        <ReportGuadagno titolo="Supplementi" endpoint="/api/reports/guadagno-supplementi" />
+      </div>
     </div>
   )
 }
