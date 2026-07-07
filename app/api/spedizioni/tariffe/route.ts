@@ -40,13 +40,22 @@ export async function POST(req: NextRequest) {
     const paeseP = (body.shipTo?.country || 'IT').toUpperCase().trim()
     const isEsteroP = paeseP !== 'IT'
 
-    const { data: listiniCorr } = await supabase
-      .from('listini_corrieri')
-      .select('corriere_id, corrieri(id,tipo,nome_contratto,attivo)')
-      .eq('master_id', masterIdP).eq('attivo', true)
+    // Corrieri da quotare = quelli che hanno delle fasce prezzo nei listini del master
+    // (indipendentemente da quale listino_id: l'editor salva sotto un listino unico).
+    const { data: listiniM } = await supabase.from('listini_corrieri').select('id').eq('master_id', masterIdP)
+    const listinoIdsM = (listiniM || []).map((l: any) => l.id)
+    let corrieriDaQuotare: any[] = []
+    if (listinoIdsM.length) {
+      const { data: fasceCorr } = await supabase.from('listini_corrieri_fasce').select('corriere_id').in('listino_id', listinoIdsM)
+      const ids = [...new Set((fasceCorr || []).map((f: any) => f.corriere_id).filter(Boolean))]
+      if (ids.length) {
+        const { data: cs } = await supabase.from('corrieri').select('id,tipo,nome_contratto,attivo').in('id', ids)
+        corrieriDaQuotare = (cs || []).map((c: any) => ({ corriere_id: c.id, corrieri: c }))
+      }
+    }
 
     const risultati: any[] = []
-    for (const lc of (listiniCorr || [])) {
+    for (const lc of corrieriDaQuotare) {
       const corr: any = (lc as any).corrieri
       if (!corr || corr.attivo === false) continue
       const prezzo = await calcolaPrezzoCorriere(supabase, {

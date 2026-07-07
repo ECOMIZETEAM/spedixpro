@@ -174,16 +174,16 @@ export async function calcolaPrezzoCorriere(
   const { corriereId, masterId, provincia } = params
   const zonaNome = zonaDaProvincia(provincia)
 
-  const { data: listino } = await supabase
+  // Le fasce del listino corriere possono essere salvate sotto uno qualsiasi dei
+  // listini del master (l'editor usa un listino unico + corriere_id). Cerchiamo
+  // quindi in TUTTI i listini del master, filtrando per corriere_id.
+  const { data: listini } = await supabase
     .from('listini_corrieri')
     .select('id,fattore_volume')
     .eq('master_id', masterId)
-    .eq('corriere_id', corriereId)
-    .eq('attivo', true)
-    .limit(1)
-    .single()
-  if (!listino?.id) return null
-  const fattore = parseFloat(listino.fattore_volume) || 5000
+  if (!listini?.length) return null
+  const listinoIds = listini.map((l: any) => l.id)
+  const fattore = parseFloat(listini[0].fattore_volume) || 5000
 
   const packages = Array.isArray(params.packages) && params.packages.length ? params.packages : []
   let pesoVolume = 0
@@ -196,7 +196,8 @@ export async function calcolaPrezzoCorriere(
   const { data: fasce } = await supabase
     .from('listini_corrieri_fasce')
     .select('*, zone(id,nome)')
-    .eq('listino_id', listino.id)
+    .in('listino_id', listinoIds)
+    .eq('corriere_id', corriereId)
     .order('peso_max', { ascending: true })
   if (!fasce?.length) return null
 
@@ -233,7 +234,8 @@ export async function calcolaPrezzoCorriere(
   const { data: suppl } = await supabase
     .from('listini_corrieri_supplementi')
     .select('tipo,valore,tipo_calcolo,descrizione')
-    .eq('listino_id', listino.id)
+    .in('listino_id', listinoIds)
+    .eq('corriere_id', corriereId)
 
   const cod = Number(params.contrassegno) || 0
   const ass = Number(params.assicurazione) || 0
