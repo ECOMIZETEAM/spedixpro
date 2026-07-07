@@ -39,9 +39,16 @@ export async function POST(req: NextRequest) {
   }
   const tipoContratto = body.tipo_contratto === 'fattura_mensile' ? 'fattura_mensile' : 'credito_scalare'
 
+  // Slug univoco: dal nome, con suffisso -2, -3… se già esiste (evita il vincolo unique)
+  const baseSlug = (nome.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')) || 'master'
+  const { data: slugSimili } = await admin.from('masters').select('slug').ilike('slug', baseSlug + '%')
+  const slugEsistenti = new Set((slugSimili || []).map((m: any) => m.slug))
+  let slug = baseSlug
+  if (slugEsistenti.has(slug)) { let n = 2; while (slugEsistenti.has(`${baseSlug}-${n}`)) n++; slug = `${baseSlug}-${n}` }
+
   const { data: nuovoMaster, error: masterError } = await admin.from('masters').insert({
     nome,
-    slug: nome.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
+    slug,
     email,
     telefono: body.telefono || null,
     piva: body.piva || null,
