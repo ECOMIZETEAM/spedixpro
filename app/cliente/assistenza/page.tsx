@@ -20,14 +20,25 @@ export default function AssistenzaClientePage() {
   const [cerca, setCerca] = useState('')
   const [perPage, setPerPage] = useState(25)
   const [pagina, setPagina] = useState(1)
+  const [nuoviIds, setNuoviIds] = useState<Set<string>>(new Set())  // ticket con aggiornamento (notifica)
 
-  async function carica() {
-    setLoading(true)
+  async function carica(silent = false) {
+    if (!silent) setLoading(true)
     const d = await fetch('/api/assistenza/lista').then(r => r.json())
-    setMiei(d.miei || [])
-    setLoading(false)
+    const lista = d.miei || []
+    setMiei(lista)
+    const nonLetti = lista.filter((t: any) => t.aperto_letto === false).map((t: any) => t.id)
+    if (nonLetti.length) {
+      setNuoviIds(prev => { const s = new Set(prev); nonLetti.forEach((id: string) => s.add(id)); return s })
+      fetch('/api/assistenza/segna-letti', { method: 'POST' })   // marca letti -> azzera il badge nel menu
+    }
+    if (!silent) setLoading(false)
   }
-  useEffect(() => { carica() }, [])
+  useEffect(() => {
+    carica()
+    const t = setInterval(() => carica(true), 15000)
+    return () => clearInterval(t)
+  }, [])
 
   async function invia() {
     if (!nuovo.oggetto.trim() || !nuovo.messaggio.trim()) { setMsg({ t: 'err', x: 'Compila oggetto e messaggio' }); return }
@@ -88,7 +99,13 @@ export default function AssistenzaClientePage() {
               ) : visibili.map(t => (
                 <tr key={t.id}>
                   <td style={{ ...td, whiteSpace: 'nowrap', fontSize: '12px' }}>{new Date(t.created_at).toLocaleDateString('it-IT')}</td>
-                  <td style={td}><div style={{ fontWeight: 600 }}>{t.oggetto}</div><div style={{ fontSize: '11.5px', color: '#888', marginTop: '2px' }}>{t.messaggio}</div></td>
+                  <td style={td}>
+                    <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {t.oggetto}
+                      {nuoviIds.has(t.id) && <span style={{ background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px' }}>● Aggiornato</span>}
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: '#888', marginTop: '2px' }}>{t.messaggio}</div>
+                  </td>
                   <td style={td}><Badge stato={t.stato} /></td>
                   <td style={{ ...td, color: '#555', fontSize: '12.5px' }}>{t.risposta || '—'}</td>
                 </tr>

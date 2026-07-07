@@ -20,7 +20,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!t) return NextResponse.json({ error: 'Ticket non trovato' }, { status: 404 })
   if (t.owner_master_id !== masterId) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
-  const upd: any = { updated_at: new Date().toISOString() }
+  // Ogni modifica del master è un aggiornamento non ancora letto da chi ha aperto -> notifica
+  const upd: any = { updated_at: new Date().toISOString(), aperto_letto: false }
   if (body?.stato && ['aperto', 'in_lavorazione', 'risolto'].includes(body.stato)) upd.stato = body.stato
   if (typeof body?.risposta === 'string') upd.risposta = body.risposta
 

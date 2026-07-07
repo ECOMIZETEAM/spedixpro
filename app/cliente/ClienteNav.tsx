@@ -78,6 +78,12 @@ export default function ClienteNav() {
       setIntegrazioni(lista.filter((i:any)=>i.stato==='attivo'))
     }).catch(()=>{})
   }, [])
+  // Badge notifiche assistenza (aggiornamenti ai propri ticket)
+  const [ticketBadge, setTicketBadge] = useState(0)
+  useEffect(() => {
+    const load = () => fetch('/api/assistenza/non-letti').then(r=>r.json()).then(d=>setTicketBadge(d.count||0)).catch(()=>{})
+    load(); const t = setInterval(load, 30000); return () => clearInterval(t)
+  }, [pathname])
   const NOMI_PIATT: Record<string,string> = { shopify:'Shopify', prestashop:'PrestaShop', woocommerce:'WooCommerce' }
   const piattAttive = Array.from(new Set(integrazioni.map((i:any)=>i.piattaforma)))
   const NAV: NavItem[] = NAV_BASE.map(sec => {
@@ -197,7 +203,10 @@ export default function ClienteNav() {
             style={active ? { background: 'rgba(249,115,22,0.12)', color: '#fff', fontWeight: 600, borderLeft: `3px solid ${ACCENT}` } : {}}
           >
             <span style={{ fontSize: '11px', width: '14px', opacity: active ? 1 : 0.55 }}>{item.icon}</span>
-            {item.label}
+            <span style={{ flex: 1 }}>{item.label}</span>
+            {item.id === 'assistenza' && ticketBadge > 0 && (
+              <span style={{ background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, minWidth: '17px', height: '17px', borderRadius: '9px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{ticketBadge}</span>
+            )}
           </a>
         )
       })}

@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 
 // perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
@@ -117,6 +117,13 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
     return init
   })
 
+  // Badge notifiche assistenza (ticket nuovi / aggiornamenti)
+  const [ticketBadge, setTicketBadge] = useState(0)
+  useEffect(() => {
+    const load = () => fetch('/api/assistenza/non-letti').then(r => r.json()).then(d => setTicketBadge(d.count || 0)).catch(() => {})
+    load(); const t = setInterval(load, 30000); return () => clearInterval(t)
+  }, [path])
+
   function toggleMenu(href: string, el?: HTMLElement) {
     const staAprendo = !openMenus[href]
     setOpenMenus(prev => ({ [href]: !prev[href] }))
@@ -199,6 +206,9 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                   }}>
                     <span style={{fontSize:'13px',width:'16px',textAlign:'center',opacity:.8}}>{item.icon}</span>
                     <span style={{flex:1}}>{item.label}</span>
+                    {item.href === '/dashboard/assistenza' && ticketBadge > 0 && (
+                      <span style={{background:'#dc2626',color:'#fff',fontSize:'10px',fontWeight:700,minWidth:'17px',height:'17px',borderRadius:'9px',display:'inline-flex',alignItems:'center',justifyContent:'center',padding:'0 5px'}}>{ticketBadge}</span>
+                    )}
                   </a>
                 )}
 

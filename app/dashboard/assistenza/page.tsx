@@ -25,13 +25,17 @@ export default function AssistenzaPage() {
   const [perPage, setPerPage] = useState(25)
   const [pagina, setPagina] = useState(1)
 
-  async function carica() {
-    setLoading(true)
+  async function carica(silent = false) {
+    if (!silent) setLoading(true)
     const d = await fetch('/api/assistenza/lista').then(r => r.json())
     setRicevuti(d.ricevuti || []); setMiei(d.miei || [])
-    setLoading(false)
+    if (!silent) setLoading(false)
   }
-  useEffect(() => { carica() }, [])
+  useEffect(() => {
+    carica()
+    const t = setInterval(() => carica(true), 15000)  // aggiornamento automatico ogni 15s
+    return () => clearInterval(t)
+  }, [])
 
   async function aggiorna(id: string, campi: any): Promise<boolean> {
     setSalvando(true)
@@ -185,7 +189,7 @@ export default function AssistenzaPage() {
               </div>
               {msg && <div style={{ fontSize: '12px', color: '#dc2626' }}>{msg}</div>}
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { risposta })) setSel(null) }} style={{ padding: '9px 16px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: '#1a1a1a' }}>Salva risposta</button>
+                <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { risposta, stato: sel.stato === 'aperto' ? 'in_lavorazione' : sel.stato })) setSel(null) }} style={{ padding: '9px 16px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: '#1a1a1a' }}>Salva risposta</button>
                 <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'in_lavorazione', risposta })) setSel(null) }} style={{ padding: '9px 16px', border: 'none', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>In lavorazione</button>
                 <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'risolto', risposta })) setSel(null) }} style={{ padding: '9px 16px', border: 'none', background: '#16a34a', color: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Segna risolto</button>
               </div>
