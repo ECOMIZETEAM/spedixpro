@@ -62,12 +62,24 @@ export async function POST(req: NextRequest) {
   // 1) Estrae il testo dal PDF (in locale, gratis)
   let testo = ''
   try {
-    const { PDFParse } = (await import('pdf-parse')) as any
-    const parser = new PDFParse({ data: new Uint8Array(buffer) })
-    const parsed = await parser.getText()
-    testo = parsed?.text || ''
-  } catch {
-    return NextResponse.json({ error: 'Impossibile leggere il PDF' }, { status: 400 })
+    // pdfjs-dist (build legacy): solo estrazione testo, nessun rendering -> nessun canvas
+    const mod: any = await import('pdfjs-dist/legacy/build/pdf.js')
+    const pdfjs = mod.getDocument ? mod : (mod.default || mod)
+    const doc = await pdfjs.getDocument({
+      data: new Uint8Array(buffer),
+      isEvalSupported: false,
+      useSystemFonts: false,
+      disableFontFace: true,
+    }).promise
+    const parti: string[] = []
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i)
+      const tc = await page.getTextContent()
+      parti.push((tc.items || []).map((it: any) => (it.str || '')).join(' '))
+    }
+    testo = parti.join('\n')
+  } catch (e: any) {
+    return NextResponse.json({ error: 'Impossibile leggere il PDF: ' + (e?.message || 'errore') }, { status: 400 })
   }
   if (!testo.trim()) {
     return NextResponse.json({ error: 'Il PDF non contiene testo leggibile (potrebbe essere una scansione/immagine). Inserisci i dati manualmente.' }, { status: 400 })
