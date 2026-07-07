@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import AssistenzaTicketButton from '@/app/components/AssistenzaTicketButton'
 
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
@@ -373,6 +374,7 @@ async function apriTracking(s: any) {
                   
                           <button onClick={()=>elimina(s.id,s.numero)} disabled={eliminando===s.id}
                             style={{padding:'4px 8px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'14px',border:'1px solid #fecaca',cursor:'pointer',opacity:eliminando===s.id?0.5:1}} title="Elimina">🗑️</button>
+                          <AssistenzaTicketButton ldv={s.numero} />
                         </div>
                       </td>
                     </tr>
