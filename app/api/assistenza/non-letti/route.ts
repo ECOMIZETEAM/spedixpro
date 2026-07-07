@@ -2,28 +2,30 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
-// Conteggio per il badge di notifica nel menu.
-// - Cliente / sotto-master: aggiornamenti non letti sui propri ticket.
-// - Master: ticket ricevuti ancora "aperti" (nuovi da gestire) + propri aggiornamenti non letti.
+// Conteggio notifiche separato per Ticket e POD.
+// - Cliente/sotto-master: aggiornamenti non letti sui propri ticket/pod.
+// - Master: ticket/pod ricevuti ancora "aperti" + propri aggiornamenti non letti.
 export async function GET(_req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ count: 0 })
+  if (!user) return NextResponse.json({ count: 0, ticket: 0, pod: 0 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
   const admin = createAdminSupabase()
   const ruolo = (utente?.ruolo || '').toLowerCase()
+  const cat = (r: any) => (r.categoria === 'pod' ? 'pod' : 'ticket')
 
-  const cnt = async (q: any) => (await q).count || 0
+  let ticket = 0, pod = 0
 
   if (ruolo === 'cliente') {
-    const count = await cnt(admin.from('tickets').select('id', { count: 'exact', head: true })
-      .eq('cliente_id', utente?.cliente_id).eq('aperto_letto', false))
-    return NextResponse.json({ count })
+    const { data } = await admin.from('tickets').select('categoria').eq('cliente_id', utente?.cliente_id).eq('aperto_letto', false)
+    for (const r of (data || [])) { if (cat(r) === 'pod') pod++; else ticket++ }
+  } else if (utente?.master_id) {
+    const [{ data: ric }, { data: miei }] = await Promise.all([
+      admin.from('tickets').select('categoria').eq('owner_master_id', utente.master_id).eq('stato', 'aperto'),
+      admin.from('tickets').select('categoria').eq('aperto_master_id', utente.master_id).eq('aperto_letto', false),
+    ])
+    for (const r of [...(ric || []), ...(miei || [])]) { if (cat(r) === 'pod') pod++; else ticket++ }
   }
 
-  const [nuovi, mieiNonLetti] = await Promise.all([
-    cnt(admin.from('tickets').select('id', { count: 'exact', head: true }).eq('owner_master_id', utente?.master_id).eq('stato', 'aperto')),
-    cnt(admin.from('tickets').select('id', { count: 'exact', head: true }).eq('aperto_master_id', utente?.master_id).eq('aperto_letto', false)),
-  ])
-  return NextResponse.json({ count: nuovi + mieiNonLetti })
+  return NextResponse.json({ count: ticket + pod, ticket, pod })
 }

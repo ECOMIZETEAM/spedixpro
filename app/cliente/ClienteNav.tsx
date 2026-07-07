@@ -38,7 +38,13 @@ const NAV_BASE: NavItem[] = [
   },
   { id: 'resi', label: 'Resi', icon: '↺', href: '/cliente/resi/distinte' },
   { id: 'fatture', label: 'Fatture', icon: '◻', href: '/cliente/fatture' },
-  { id: 'assistenza', label: 'Assistenza', icon: '🎧', href: '/cliente/assistenza' },
+  {
+    id: 'assistenza', label: 'Assistenza', icon: '🎧',
+    sub: [
+      { label: 'Ticket', href: '/cliente/assistenza' },
+      { label: 'POD', href: '/cliente/assistenza/pod' },
+    ],
+  },
   {
     id: 'reports', label: 'Reports', icon: '◈',
     sub: [
@@ -79,11 +85,12 @@ export default function ClienteNav() {
     }).catch(()=>{})
   }, [])
   // Badge notifiche assistenza (aggiornamenti ai propri ticket)
-  const [ticketBadge, setTicketBadge] = useState(0)
+  const [ticketBadge, setTicketBadge] = useState<{ count: number; ticket: number; pod: number }>({ count: 0, ticket: 0, pod: 0 })
   useEffect(() => {
-    const load = () => fetch('/api/assistenza/non-letti').then(r=>r.json()).then(d=>setTicketBadge(d.count||0)).catch(()=>{})
+    const load = () => fetch('/api/assistenza/non-letti').then(r=>r.json()).then(d=>setTicketBadge({ count: d.count||0, ticket: d.ticket||0, pod: d.pod||0 })).catch(()=>{})
     load(); const t = setInterval(load, 30000); return () => clearInterval(t)
   }, [pathname])
+  const badgeStyle = { background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, minWidth: '17px', height: '17px', borderRadius: '9px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' } as const
   const NOMI_PIATT: Record<string,string> = { shopify:'Shopify', prestashop:'PrestaShop', woocommerce:'WooCommerce' }
   const piattAttive = Array.from(new Set(integrazioni.map((i:any)=>i.piattaforma)))
   const NAV: NavItem[] = NAV_BASE.map(sec => {
@@ -163,28 +170,33 @@ export default function ClienteNav() {
                   <span style={{ fontSize: '11px', width: '14px', opacity: active ? 1 : 0.55 }}>{item.icon}</span>
                   {item.label}
                 </span>
-                <span style={{
-                  fontSize: '9px', opacity: 0.7,
-                  transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .12s',
-                }}>▶</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {item.id === 'assistenza' && !isOpen && ticketBadge.count > 0 && <span style={badgeStyle}>{ticketBadge.count}</span>}
+                  <span style={{
+                    fontSize: '9px', opacity: 0.7,
+                    transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .12s',
+                  }}>▶</span>
+                </span>
               </button>
 
               {isOpen && (
                 <div style={{ padding: '2px 0 6px', background: 'rgba(0,0,0,0.25)' }}>
                   {item.sub!.map(s => {
                     const sActive = leafActive(s.href)
+                    const sBadge = s.href === '/cliente/assistenza' ? ticketBadge.ticket : s.href === '/cliente/assistenza/pod' ? ticketBadge.pod : 0
                     return (
                       <a
                         key={s.href}
                         href={s.href}
                         className="spx-sub"
-                        style={sActive ? {
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px', ...(sActive ? {
                           color: ACCENT, fontWeight: 600,
                           background: 'rgba(249,115,22,0.08)',
                           borderLeft: `3px solid ${ACCENT}`,
-                        } : {}}
+                        } : {}) }}
                       >
-                        {s.label}
+                        <span style={{ flex: 1 }}>{s.label}</span>
+                        {sBadge > 0 && <span style={badgeStyle}>{sBadge}</span>}
                       </a>
                     )
                   })}

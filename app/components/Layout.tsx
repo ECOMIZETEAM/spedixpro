@@ -32,7 +32,10 @@ const NAV: NavItem[] = [
     { label: 'Elenco Distinte Resi', href: '/dashboard/resi/distinte', perm: 'admin.renderlist.index' },
   ]},
   { label: 'Dal mio network', href: '/dashboard/network', icon: '🌐', perm: 'admin.interno.deliveries.in' },
-  { label: 'Assistenza Clienti', href: '/dashboard/assistenza', icon: '🎧', always: true },
+  { label: 'Assistenza Clienti', icon: '🎧', always: true, sub: [
+    { label: 'Ticket', href: '/dashboard/assistenza', always: true },
+    { label: 'POD', href: '/dashboard/assistenza/pod', always: true },
+  ]},
   { label: 'Tracking Interno', href: '/dashboard/tracking', icon: '◎', perm: 'admin.interno.deliveries.out' },
   { label: 'Listini Prezzi', href: '/dashboard/listini', icon: '€', sub: [
     { label: 'Nuovo Listino', href: '/dashboard/listini/clienti/nuovo', perm: 'admin.pricelists.create' },
@@ -110,19 +113,22 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   const [openMenus, setOpenMenus] = useState<Record<string,boolean>>(() => {
     const init: Record<string,boolean> = {}
     NAV.forEach(item => {
-      if (item.sub && item.href && (path === item.href || path.startsWith(item.href + '/'))) {
-        init[item.href] = true
-      }
+      if (!item.sub) return
+      const key = item.href || item.label
+      const match = (item.href && (path === item.href || path.startsWith(item.href + '/'))) ||
+        item.sub.some(s => s.href && (path === s.href || path.startsWith(s.href + '/')))
+      if (match) init[key] = true
     })
     return init
   })
 
   // Badge notifiche assistenza (ticket nuovi / aggiornamenti)
-  const [ticketBadge, setTicketBadge] = useState(0)
+  const [ticketBadge, setTicketBadge] = useState<{ count: number; ticket: number; pod: number }>({ count: 0, ticket: 0, pod: 0 })
   useEffect(() => {
-    const load = () => fetch('/api/assistenza/non-letti').then(r => r.json()).then(d => setTicketBadge(d.count || 0)).catch(() => {})
+    const load = () => fetch('/api/assistenza/non-letti').then(r => r.json()).then(d => setTicketBadge({ count: d.count || 0, ticket: d.ticket || 0, pod: d.pod || 0 })).catch(() => {})
     load(); const t = setInterval(load, 30000); return () => clearInterval(t)
   }, [path])
+  const badgeStyle = { background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, minWidth: '17px', height: '17px', borderRadius: '9px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' } as const
 
   function toggleMenu(href: string, el?: HTMLElement) {
     const staAprendo = !openMenus[href]
@@ -192,6 +198,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                     }}>
                     <span style={{fontSize:'13px',width:'16px',textAlign:'center',opacity:.8}}>{item.icon}</span>
                     <span style={{flex:1}}>{item.label}</span>
+                    {item.label === 'Assistenza Clienti' && !isOpen && ticketBadge.count > 0 && <span style={badgeStyle}>{ticketBadge.count}</span>}
                     <span style={{fontSize:'10px',color:'#4a7090',transition:'transform 0.2s',display:'inline-block',transform:isOpen?'rotate(90deg)':'rotate(0deg)'}}>▶</span>
                   </div>
                 ) : (
@@ -215,9 +222,11 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                 {/* Submenu */}
                 {hasSub && isOpen && (
                   <div style={{background:'rgba(0,0,0,0.25)'}}>
-                    {item.sub?.map(sub => (
+                    {item.sub?.map(sub => {
+                      const subBadge = sub.href === '/dashboard/assistenza' ? ticketBadge.ticket : sub.href === '/dashboard/assistenza/pod' ? ticketBadge.pod : 0
+                      return (
                       <a key={sub.href} href={sub.href} style={{
-                        display:'block',
+                        display:'flex',alignItems:'center',gap:'8px',
                         padding:'7px 18px 7px 44px',
                         color: path === sub.href ? '#f97316' : '#6b9ab8',
                         fontSize:'12px',textDecoration:'none',
@@ -225,9 +234,10 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                         fontWeight: path === sub.href ? '600' : '400',
                         background: path === sub.href ? 'rgba(249,115,22,0.08)' : 'transparent',
                       }}>
-                        {sub.label}
+                        <span style={{flex:1}}>{sub.label}</span>
+                        {subBadge > 0 && <span style={badgeStyle}>{subBadge}</span>}
                       </a>
-                    ))}
+                    )})}
                   </div>
                 )}
               </div>
