@@ -5,7 +5,7 @@ const API_VERSION = '2026-04'
 // Restituisce un access token Shopify valido per l'integrazione data.
 // Se il token e' scaduto (o sta per scadere), lo rifresca col refresh token
 // e aggiorna le credenziali salvate. Ritorna { token } oppure { error }.
-export async function getValidShopifyToken(integrazione: any): Promise<{ token?: string; error?: string }> {
+export async function getValidShopifyToken(integrazione: any, db?: any): Promise<{ token?: string; error?: string }> {
   const cred = (integrazione?.credenziali || {}) as any
   const shop = cred.shop
   const token = cred.access_token
@@ -49,7 +49,7 @@ export async function getValidShopifyToken(integrazione: any): Promise<{ token?:
       expires_at: d.expires_in ? n + Number(d.expires_in) * 1000 : null,
       refresh_expires_at: d.refresh_token_expires_in ? n + Number(d.refresh_token_expires_in) * 1000 : cred.refresh_expires_at,
     }
-    const supabase = await createServerSupabase()
+    const supabase = db || await createServerSupabase()
     await supabase.from('integrazioni').update({ credenziali: newCred }).eq('id', integrazione.id)
     return { token: d.access_token }
   } catch (e: any) {
