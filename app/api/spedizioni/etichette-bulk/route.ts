@@ -6,15 +6,26 @@ export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
   const body = await req.json()
   const { ids } = body
   if (!ids?.length) return NextResponse.json({ error: 'Nessun ID' }, { status: 400 })
 
-  const { data: spedizioni } = await supabase.from('spedizioni')
-    .select('id,numero,etichetta_url,colli_dettaglio')
-    .in('id', ids)
-    .eq('master_id', utente?.master_id)
+  const ruolo = (utente?.ruolo || '').toLowerCase()
+  const cols = 'id,numero,etichetta_url,colli_dettaglio'
+  let spedizioni: any[] | null = null
+  if (ruolo === 'cliente') {
+    const { data } = await supabase.from('spedizioni').select(cols).in('id', ids).eq('cliente_id', utente?.cliente_id)
+    spedizioni = data
+  } else {
+    // Master: includi anche le spedizioni dei sotto-master della rete (stessa logica della lista)
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const admin = createAdminSupabase()
+    const subtree = utente?.master_id ? await sottoAlberoMasterIds(admin, utente.master_id) : []
+    const { data } = await admin.from('spedizioni').select(cols).in('id', ids).in('master_id', subtree.length ? subtree : ['00000000-0000-0000-0000-000000000000'])
+    spedizioni = data
+  }
 
   const pdfMerged = await PDFDocument.create()
 
