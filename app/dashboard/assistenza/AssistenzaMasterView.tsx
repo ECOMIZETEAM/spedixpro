@@ -26,10 +26,12 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   const [perPage, setPerPage] = useState(25)
   const [pagina, setPagina] = useState(1)
   const [dragPod, setDragPod] = useState(false)
+  const [viewImg, setViewImg] = useState<string | null>(null)   // lightbox foto allegate
 
-  async function caricaPod(id: string, file: File) {
+  async function caricaPod(id: string, file: File): Promise<boolean> {
+    if (file.type !== 'application/pdf') { setMsg('Il file della POD deve essere un PDF'); return false }
     const b64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej; r.readAsDataURL(file) })
-    await aggiorna(id, { podBase64: b64 })
+    return await aggiorna(id, { podBase64: b64 })
   }
 
   async function carica(silent = false) {
@@ -46,12 +48,16 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
 
   async function aggiorna(id: string, campi: any): Promise<boolean> {
     setSalvando(true)
-    const r = await fetch('/api/assistenza/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(campi) })
-    const j = await r.json()
-    setSalvando(false)
-    if (j.error) { setMsg(j.error); return false }
-    await carica()
-    return true
+    try {
+      const r = await fetch('/api/assistenza/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(campi) })
+      const j = await r.json().catch(() => ({}))
+      setSalvando(false)
+      if (!r.ok || j.error) { setMsg(j.error || (r.status === 413 ? 'PDF troppo grande: caricane uno più leggero (max ~4 MB).' : 'Errore durante il salvataggio (' + r.status + ')')); return false }
+      await carica()
+      return true
+    } catch (e: any) {
+      setSalvando(false); setMsg('Errore di rete: ' + (e?.message || 'riprova')); return false
+    }
   }
 
   async function inviaTicket() {
@@ -130,7 +136,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   <td style={td}>
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       <button onClick={() => { setSel(t); setRisposta(t.risposta || ''); setMsg('') }} style={{ padding: '5px 10px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer', color: '#1a1a1a' }}>Apri</button>
-                      {t.stato !== 'in_lavorazione' && t.stato !== 'risolto' && (
+                      {!isPod && t.stato !== 'in_lavorazione' && t.stato !== 'risolto' && (
                         <button onClick={() => aggiorna(t.id, { stato: 'in_lavorazione' })} style={{ padding: '5px 10px', border: 'none', background: '#2563eb', color: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer' }}>In lavorazione</button>
                       )}
                       {t.stato !== 'risolto' && (
@@ -203,11 +209,11 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px' }}>Allegati ({sel.allegati.length})</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                     {sel.allegati.map((a: any, i: number) => (
-                      <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', textDecoration: 'none' }}>
-                        {String(a.tipo || '').startsWith('image/')
-                          ? <img src={a.url} alt={a.nome} style={{ width: '90px', height: '90px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #e5e7eb' }} />
-                          : <div style={{ width: '90px', height: '90px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', borderRadius: '8px', border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: '11px', color: '#2563eb', textAlign: 'center', padding: '4px' }}><span style={{ fontSize: '24px' }}>📄</span><span style={{ maxWidth: '80px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.nome}</span></div>}
-                      </a>
+                      String(a.tipo || '').startsWith('image/')
+                        ? <img key={i} src={a.url} alt={a.nome} onClick={() => setViewImg(a.url)} title="Clicca per ingrandire" style={{ width: '90px', height: '90px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #e5e7eb', cursor: 'zoom-in' }} />
+                        : <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', textDecoration: 'none' }}>
+                            <div style={{ width: '90px', height: '90px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', borderRadius: '8px', border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: '11px', color: '#2563eb', textAlign: 'center', padding: '4px' }}><span style={{ fontSize: '24px' }}>📄</span><span style={{ maxWidth: '80px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.nome}</span></div>
+                          </a>
                     ))}
                   </div>
                 </div>
@@ -217,31 +223,39 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                 <div
                   onDragOver={e => { e.preventDefault(); setDragPod(true) }}
                   onDragLeave={() => setDragPod(false)}
-                  onDrop={async e => { e.preventDefault(); setDragPod(false); const f = e.dataTransfer.files?.[0]; if (f && f.type === 'application/pdf') { await caricaPod(sel.id, f); setSel(null) } }}
+                  onDrop={async e => { e.preventDefault(); setDragPod(false); const f = e.dataTransfer.files?.[0]; if (f) { if (await caricaPod(sel.id, f)) setSel(null) } }}
                   style={{ background: dragPod ? '#dbeafe' : '#f0f9ff', border: dragPod ? '2px dashed #2563eb' : '2px dashed #bae6fd', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px' }}>Prova di consegna (POD) — LDV {sel.oggetto}</div>
                   {sel.pod_url && <div style={{ marginBottom: '10px' }}><a href={sel.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD caricata</a></div>}
                   <div style={{ fontSize: '12.5px', color: '#555', marginBottom: '10px' }}>📎 Trascina qui il PDF della POD, oppure</div>
                   <label style={{ display: 'inline-block', padding: '8px 16px', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>
                     {sel.pod_url ? 'Sostituisci PDF' : 'Scegli PDF'}
-                    <input type="file" accept="application/pdf" onChange={async e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) { await caricaPod(sel.id, f); setSel(null) } }} style={{ display: 'none' }} />
+                    <input type="file" accept="application/pdf" onChange={async e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) { if (await caricaPod(sel.id, f)) setSel(null) } }} style={{ display: 'none' }} />
                   </label>
-                  <div style={{ fontSize: '11px', color: '#666', marginTop: '9px' }}>Caricando il PDF, il cliente riceve la notifica e potrà scaricare la POD dalla sua LDV.</div>
+                  <div style={{ fontSize: '11px', color: '#666', marginTop: '9px' }}>Caricando il PDF la richiesta si chiude in automatico (risolta) e il cliente riceve la notifica per scaricare la POD.</div>
                 </div>
               )}
 
-              <div>
+              {!isPod && <div>
                 <label style={{ fontSize: '12px', fontWeight: 600, color: '#1a1a1a', display: 'block', marginBottom: '5px' }}>Risposta / nota</label>
                 <textarea value={risposta} onChange={e => setRisposta(e.target.value)} rows={3} placeholder="Scrivi una risposta al cliente…" style={{ width: '100%', padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'vertical' }} />
-              </div>
+              </div>}
               {msg && <div style={{ fontSize: '12px', color: '#dc2626' }}>{msg}</div>}
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { risposta, stato: sel.stato === 'aperto' ? 'in_lavorazione' : sel.stato })) setSel(null) }} style={{ padding: '9px 16px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: '#1a1a1a' }}>Salva risposta</button>
-                <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'in_lavorazione', risposta })) setSel(null) }} style={{ padding: '9px 16px', border: 'none', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>In lavorazione</button>
-                <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'risolto', risposta })) setSel(null) }} style={{ padding: '9px 16px', border: 'none', background: '#16a34a', color: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Segna risolto</button>
+                {!isPod && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { risposta, stato: sel.stato === 'aperto' ? 'in_lavorazione' : sel.stato })) setSel(null) }} style={{ padding: '9px 16px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: '#1a1a1a' }}>Salva risposta</button>}
+                {!isPod && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'in_lavorazione', risposta })) setSel(null) }} style={{ padding: '9px 16px', border: 'none', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>In lavorazione</button>}
+                {sel.stato !== 'risolto' && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'risolto', risposta: isPod ? undefined : risposta })) setSel(null) }} style={{ padding: '9px 16px', border: 'none', background: '#16a34a', color: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Segna risolto</button>}
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* LIGHTBOX FOTO ALLEGATE */}
+      {viewImg && (
+        <div onClick={() => setViewImg(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: '30px', cursor: 'zoom-out' }}>
+          <button onClick={() => setViewImg(null)} style={{ position: 'absolute', top: '18px', right: '22px', background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', borderRadius: '50%', width: '38px', height: '38px', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+          <img src={viewImg} alt="" onClick={e => e.stopPropagation()} style={{ maxWidth: '95%', maxHeight: '92vh', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 10px 40px rgba(0,0,0,0.5)', cursor: 'default' }} />
         </div>
       )}
 

@@ -25,18 +25,23 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (body?.stato && ['aperto', 'in_lavorazione', 'risolto'].includes(body.stato)) upd.stato = body.stato
   if (typeof body?.risposta === 'string') upd.risposta = body.risposta
 
-  // Caricamento PDF della POD (base64) -> storage -> pod_url
+  // Caricamento PDF della POD (base64) -> storage -> pod_url.
+  // Caricare la POD chiude in automatico la richiesta (stato = risolto).
   if (typeof body?.podBase64 === 'string' && body.podBase64) {
     try {
       const b64 = body.podBase64.split(',').pop() || body.podBase64
       const buffer = Buffer.from(b64, 'base64')
+      if (!buffer.length) return NextResponse.json({ error: 'File POD vuoto o non valido' }, { status: 400 })
       const path = `pod/${masterId}/${Date.now()}_${id}.pdf`
       const { error: upErr } = await admin.storage.from('reports').upload(path, buffer, { contentType: 'application/pdf', upsert: true })
-      if (!upErr) {
-        const { data: pub } = admin.storage.from('reports').getPublicUrl(path)
-        if (pub?.publicUrl) upd.pod_url = pub.publicUrl
-      }
-    } catch { /* ignora: la POD resta non caricata */ }
+      if (upErr) return NextResponse.json({ error: 'Upload POD fallito: ' + upErr.message }, { status: 400 })
+      const { data: pub } = admin.storage.from('reports').getPublicUrl(path)
+      if (!pub?.publicUrl) return NextResponse.json({ error: 'URL POD non generato' }, { status: 400 })
+      upd.pod_url = pub.publicUrl
+      upd.stato = 'risolto'   // POD inviata = richiesta risolta
+    } catch (e: any) {
+      return NextResponse.json({ error: 'Errore caricamento POD: ' + (e?.message || 'sconosciuto') }, { status: 400 })
+    }
   }
 
   const { error } = await admin.from('tickets').update(upd).eq('id', id)
