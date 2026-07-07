@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
+import { provisionShopifyCliente } from '@/lib/shopifyProvision'
 import crypto from 'crypto'
 
 export const runtime = 'nodejs'
@@ -107,11 +109,25 @@ export async function GET(req: NextRequest) {
   return NextResponse.redirect(`${appUrl}/cliente/integrazioni?connected=${encodeURIComponent(shop)}`)
   }
 
-  // CASO B: nessun cliente identificato (install da Shopify).
-  // Salva il negozio autorizzato in pending e manda al login MoovExpress.
-  await supabase.from('shopify_pending').upsert(
-    { shop, access_token: token, scope, refresh_token: refreshToken, expires_at: expiresAt, refresh_expires_at: refreshExpiresAt },
-    { onConflict: 'shop' }
-  )
-  return NextResponse.redirect(`${appUrl}/cliente?shopify_pending=${encodeURIComponent(shop)}`)
+  // CASO B: install dallo store senza cliente identificato -> AUTO-CREAZIONE.
+  // Creo (o riuso) un cliente MoovExpress sotto il master di onboarding (default root),
+  // collego il negozio e rientro nell'app embedded dentro l'admin Shopify.
+  const admin = createAdminSupabase()
+  const prov = await provisionShopifyCliente(admin, shop, token)
+  if ('error' in prov) {
+    return NextResponse.redirect(`${appUrl}/shopify?error=${encodeURIComponent(prov.error)}`)
+  }
+  const payload: any = {
+    master_id: prov.masterId, cliente_id: prov.clienteId, piattaforma: 'shopify',
+    nome_negozio: shop, identificativo: shop,
+    credenziali: { access_token: token, scope, shop, refresh_token: refreshToken, expires_at: expiresAt, refresh_expires_at: refreshExpiresAt },
+    stato: 'attivo', errore: null,
+  }
+  const { data: existing } = await admin.from('integrazioni').select('id')
+    .eq('piattaforma', 'shopify').eq('identificativo', shop).maybeSingle()
+  if (existing?.id) await admin.from('integrazioni').update(payload).eq('id', existing.id)
+  else await admin.from('integrazioni').insert(payload)
+
+  // rientro nell'app embedded (admin Shopify)
+  return NextResponse.redirect(`https://${shop}/admin/apps/${apiKey}`)
 }
