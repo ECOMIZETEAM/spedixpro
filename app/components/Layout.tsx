@@ -1,7 +1,6 @@
 'use client'
 import { useState } from 'react'
 import { usePathname } from 'next/navigation'
-import RadioWidget from './RadioWidget'
 
 // perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
 // always: sempre visibile a chiunque abbia accesso al portale.
@@ -258,9 +257,6 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
           {children}
         </main>
       </div>
-
-      {/* Radio flottante (in alto a destra) — chiudibile */}
-      <RadioWidget />
     </div>
   )
 }

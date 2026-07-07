@@ -1,7 +1,6 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { redirect } from 'next/navigation'
 import ClienteNav from './ClienteNav'
-import RadioWidget from '@/app/components/RadioWidget'
 
 export default async function ClienteLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createServerSupabase()
@@ -56,9 +55,6 @@ export default async function ClienteLayout({ children }: { children: React.Reac
           {children}
         </main>
       </div>
-
-      {/* Radio flottante (in alto a destra) — chiudibile */}
-      <RadioWidget />
     </div>
   )
 }
