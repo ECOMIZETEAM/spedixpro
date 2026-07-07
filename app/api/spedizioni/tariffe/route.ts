@@ -244,14 +244,15 @@ export async function POST(req: NextRequest) {
 
   // ─── LISTINO CLIENTE → prezzo da DB + corriere reale da fascia ───────────
   const { data: listino } = await supabase
-    .from('listini_clienti').select('fattore_volume').eq('id', cliente.listino_cliente_id).single()
+    .from('listini_clienti').select('fattore_volume,solo_peso_reale').eq('id', cliente.listino_cliente_id).single()
   const fattore = parseFloat(listino?.fattore_volume) || 5000
 
   let pesoVolume = 0
   for (const p of tuttiColli) {
     if (p?.length && p?.width && p?.height) pesoVolume += (p.length * p.width * p.height) / fattore
   }
-  const pesoFatturato = Math.max(pesoReale, pesoVolume)
+  // Se il listino è "solo peso reale", il volumetrico viene ignorato: si paga sempre sul peso reale.
+  const pesoFatturato = listino?.solo_peso_reale ? pesoReale : Math.max(pesoReale, pesoVolume)
   const entroMisureAgevolate = tuttiColli.every((p: any) => {
     const L = Number(p?.length)||0, W = Number(p?.width)||0, H = Number(p?.height)||0
     if (!L && !W && !H) return true

@@ -7,10 +7,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { id } = await params
   const body = await req.json()
-  const { nome, corriere_id, fattore_volume, fasce, supplementi } = body
+  const { nome, corriere_id, fattore_volume, fasce, supplementi, solo_peso_reale } = body
 
-  // Aggiorna solo il nome sul listino
-  await supabase.from('listini_clienti').update({ nome }).eq('id', id)
+  // Aggiorna nome + flag "solo peso reale" (il cliente paga sempre sul peso reale)
+  await supabase.from('listini_clienti').update({ nome, solo_peso_reale: !!solo_peso_reale }).eq('id', id)
   // Fattore volume per-corriere: salvato sulla riga di aggancio listino+corriere
   if (corriere_id) {
     await supabase.from('listini_clienti_corrieri').update({ fattore_volume }).eq('listino_id', id).eq('corriere_id', corriere_id)

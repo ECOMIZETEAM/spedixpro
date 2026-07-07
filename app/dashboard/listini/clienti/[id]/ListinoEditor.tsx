@@ -83,6 +83,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   const [nome, setNome] = useState<string>(listino.nome ?? '')
   const [corriereId, setCorriereId] = useState<string>(corriereSelezionatoId || corrieri[0]?.id || '')
   const [fattore, setFattore] = useState<number>(Number(fattoreCorriere ?? listino.fattore_volume) || 5000)
+  const [soloPesoReale, setSoloPesoReale] = useState<boolean>(!!(listino as any).solo_peso_reale)
   const [fasce, setFasce] = useState<Fascia[]>(() => buildFasceInit(fasceEsistenti))
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
@@ -139,7 +140,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       const res = await fetch(`/api/listini/cliente/${listino.id}`, {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
-          nome, corriere_id: corriereId, fattore_volume: fattore,
+          nome, corriere_id: corriereId, fattore_volume: fattore, solo_peso_reale: soloPesoReale,
           fasce: fasce.map(f => ({...f, prezzi: Object.fromEntries(Object.entries(f.prezzi).map(([k,v]) => [k, parseFloat(v)||0]))})),
           supplementi: {
             assicurazione: righeAssic,
@@ -230,9 +231,14 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
           </div>
           <div>
             <label style={{fontSize:'11.5px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Fattore Peso/Volume (kg/m³)</label>
-            <select value={fattore} onChange={e=>setFattore(Number(e.target.value))} style={{...inp,width:'100%',padding:'8px 11px'}}>
+            <select value={fattore} disabled={soloPesoReale} onChange={e=>setFattore(Number(e.target.value))} style={{...inp,width:'100%',padding:'8px 11px',opacity:soloPesoReale?0.5:1}}>
               {fattori.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}
             </select>
+            <label style={{display:'flex',alignItems:'center',gap:'7px',marginTop:'8px',fontSize:'12px',color:'#1a1a1a',cursor:'pointer'}}>
+              <input type="checkbox" checked={soloPesoReale} onChange={e=>setSoloPesoReale(e.target.checked)}/>
+              Solo peso reale (ignora il volumetrico)
+            </label>
+            {soloPesoReale && <div style={{fontSize:'11px',color:'#f97316',marginTop:'3px'}}>Il cliente paga sempre sul peso reale, anche con misure grandi.</div>}
           </div>
         </div>
       </div>

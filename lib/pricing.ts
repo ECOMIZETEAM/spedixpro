@@ -69,7 +69,7 @@ export async function calcolaPrezzoListino(
   const zonaNome = zonaDaProvincia(provincia)
 
   const { data: listino } = await supabase
-    .from('listini_clienti').select('fattore_volume').eq('id', listinoId).single()
+    .from('listini_clienti').select('fattore_volume,solo_peso_reale').eq('id', listinoId).single()
   const fattore = parseFloat(listino?.fattore_volume) || 5000
 
   const pesoReale = packages.reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
@@ -77,7 +77,8 @@ export async function calcolaPrezzoListino(
   for (const p of packages) {
     if (p?.length && p?.width && p?.height) pesoVolume += (p.length * p.width * p.height) / fattore
   }
-  const pesoFatturato = Math.max(pesoReale, pesoVolume)
+  // "solo peso reale": ignora il volumetrico, si paga sempre sul peso reale
+  const pesoFatturato = listino?.solo_peso_reale ? pesoReale : Math.max(pesoReale, pesoVolume)
   // agevolazione peso reale: valida solo se OGNI pacco e' entro 50x28x32 cm
   const entroMisureAgevolate = packages.every((p: any) => {
     const L = Number(p?.length)||0, W = Number(p?.width)||0, H = Number(p?.height)||0
