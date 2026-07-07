@@ -7,24 +7,29 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ listino: null, corrieri: [], fasce: [], supplementi: [] })
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
 
-  // Trova o crea il listino unico per questo master
-  let { data: listino } = await supabase.from('listini_corrieri')
-    .select('*').eq('master_id', utente?.master_id).order('created_at').limit(1).single()
-
+  // Tutti i listini del master. Il canonico (dove si salva) è il più vecchio scelto
+  // in modo DETERMINISTICO (created_at, poi id) così non cambia tra una richiesta e l'altra.
+  const { data: listiniMaster } = await supabase.from('listini_corrieri')
+    .select('*').eq('master_id', utente?.master_id)
+    .order('created_at', { ascending: true, nullsFirst: true }).order('id', { ascending: true })
+  let listino = (listiniMaster || [])[0]
   if (!listino) {
     const { data: nuovoListino } = await supabase.from('listini_corrieri').insert({
       master_id: utente?.master_id, nome: 'Listino Corrieri',
     }).select().single()
     listino = nuovoListino
   }
+  const masterListinoIds = [...new Set([...(listiniMaster || []).map((l: any) => l.id), listino?.id].filter(Boolean))]
 
   const { searchParams } = new URL(req.url)
   const corriereId = searchParams.get('corriere')
 
   const { data: corrieriAssegnati } = await supabase.from('listini_corrieri_corrieri')
     .select('corriere_id, corrieri(id,nome_contratto,tipo)')
-    .eq('listino_id', listino?.id)
-  const corrieri = (corrieriAssegnati||[]).map((r:any) => r.corrieri).filter(Boolean)
+    .in('listino_id', masterListinoIds)
+  const _mappaCorr = new Map<string, any>()
+  for (const r of (corrieriAssegnati || [])) { const c = (r as any).corrieri; if (c && !_mappaCorr.has(c.id)) _mappaCorr.set(c.id, c) }
+  const corrieri = [..._mappaCorr.values()]
 
   const { data: tuttiICorrieri } = await supabase.from('corrieri').select('id,nome_contratto').eq('master_id', utente?.master_id)
   const corrieriDisponibili = (tuttiICorrieri||[]).filter(c => !corrieri.some((x:any) => x.id === c.id))
@@ -35,10 +40,10 @@ export async function GET(req: NextRequest) {
   let supplementi: any[] = []
   if (corriereSelezionato) {
     const { data: f } = await supabase.from('listini_corrieri_fasce')
-      .select('*').eq('listino_id', listino?.id).eq('corriere_id', corriereSelezionato.id).order('peso_max')
+      .select('*').in('listino_id', masterListinoIds).eq('corriere_id', corriereSelezionato.id).order('peso_max')
     fasce = f || []
     const { data: s } = await supabase.from('listini_corrieri_supplementi')
-      .select('*').eq('listino_id', listino?.id).eq('corriere_id', corriereSelezionato.id)
+      .select('*').in('listino_id', masterListinoIds).eq('corriere_id', corriereSelezionato.id)
     supplementi = s || []
   }
 
@@ -53,15 +58,19 @@ export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
+  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
   const body = await req.json()
   const { listinoId, corriereId, fasce, supplementi, fattore_volume } = body
   if (!listinoId || !corriereId) return NextResponse.json({ error: 'Dati mancanti' }, { status: 400 })
 
   await supabase.from('listini_corrieri').update({ fattore_volume }).eq('id', listinoId)
 
-  // Cancella SOLO le fasce/supplementi di questo contratto
-  await supabase.from('listini_corrieri_fasce').delete().eq('listino_id', listinoId).eq('corriere_id', corriereId)
-  await supabase.from('listini_corrieri_supplementi').delete().eq('listino_id', listinoId).eq('corriere_id', corriereId)
+  // Cancella le fasce/supplementi di questo corriere in TUTTI i listini del master
+  // (potevano essere sparse sotto listino_id diversi): evita duplicati/orfani e le riconsolida.
+  const { data: listiniMaster } = await supabase.from('listini_corrieri').select('id').eq('master_id', utente?.master_id)
+  const masterListinoIds = [...new Set([...(listiniMaster || []).map((l: any) => l.id), listinoId].filter(Boolean))]
+  await supabase.from('listini_corrieri_fasce').delete().in('listino_id', masterListinoIds).eq('corriere_id', corriereId)
+  await supabase.from('listini_corrieri_supplementi').delete().in('listino_id', masterListinoIds).eq('corriere_id', corriereId)
 
   // Reinserisci fasce
   if (fasce?.length) {
