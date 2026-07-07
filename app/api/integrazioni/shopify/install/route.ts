@@ -6,7 +6,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 // Scope allineati a quelli impostati sulla app Shopify (Partner Dashboard)
-const SCOPES = 'read_orders,read_assigned_fulfillment_orders,read_merchant_managed_fulfillment_orders,read_third_party_fulfillment_orders'
+const SCOPES = 'read_orders,read_assigned_fulfillment_orders,read_merchant_managed_fulfillment_orders,read_third_party_fulfillment_orders,write_assigned_fulfillment_orders,write_merchant_managed_fulfillment_orders,write_third_party_fulfillment_orders'
 const SHOP_RE = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/
 
 export async function GET(req: NextRequest) {
