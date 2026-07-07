@@ -149,3 +149,24 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{id:st
 
   return NextResponse.json({ listino, fattoreCorriere, fasce: fasce||[], supplementi: supplementi||[] })
 }
+
+// Elimina un listino cliente (con i suoi figli). Bloccato se un cliente lo usa.
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{id:string}> }) {
+  const supabase = await createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
+  const { id } = await params
+
+  const { count } = await supabase.from('clienti')
+    .select('*', { count: 'exact', head: true }).eq('listino_cliente_id', id)
+  if ((count || 0) > 0) {
+    return NextResponse.json({ error: `Listino usato da ${count} cliente/i: riassegnali a un altro listino prima di eliminarlo.` }, { status: 400 })
+  }
+
+  await supabase.from('listini_clienti_fasce').delete().eq('listino_id', id)
+  await supabase.from('listini_clienti_supplementi').delete().eq('listino_id', id)
+  await supabase.from('listini_clienti_corrieri').delete().eq('listino_id', id)
+  const { error } = await supabase.from('listini_clienti').delete().eq('id', id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  return NextResponse.json({ ok: true })
+}

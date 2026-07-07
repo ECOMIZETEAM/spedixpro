@@ -4,13 +4,25 @@ import { useState, useEffect } from 'react'
 export default function ListiniPage() {
   const [listini, setListini] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [eliminando, setEliminando] = useState('')
 
-  useEffect(() => {
+  function carica() {
     fetch('/api/listini/lista')
       .then(r => r.json())
       .then(d => { setListini(Array.isArray(d) ? d : []); setLoading(false) })
       .catch(() => setLoading(false))
-  }, [])
+  }
+  useEffect(() => { carica() }, [])
+
+  async function elimina(id: string, nome: string) {
+    if (!confirm(`Eliminare il listino "${nome}"? L'operazione è irreversibile.`)) return
+    setEliminando(id)
+    const res = await fetch(`/api/listini/cliente/${id}`, { method: 'DELETE' })
+    const d = await res.json().catch(() => ({}))
+    setEliminando('')
+    if (d?.error) { alert(d.error); return }
+    setListini(prev => prev.filter(l => l.id !== id))
+  }
 
   return (
     <div>
@@ -49,7 +61,13 @@ export default function ListiniPage() {
                   <td style={{padding:'10px 14px',color:'#1a1a1a'}}>{l.fasce_count||'—'}</td>
                   <td style={{padding:'10px 14px',color:'#1a1a1a',fontSize:'12px'}}>{new Date(l.created_at).toLocaleDateString('it-IT')}</td>
                   <td style={{padding:'10px 14px'}}>
-                    <a href={`/dashboard/listini/clienti/${l.id}`} style={{padding:'4px 10px',background:'#f5f5f5',color:'#333',borderRadius:'4px',fontSize:'12px',textDecoration:'none',border:'1px solid #e8e8e8'}}>✏️ Modifica</a>
+                    <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
+                      <a href={`/dashboard/listini/clienti/${l.id}`} style={{padding:'4px 10px',background:'#f5f5f5',color:'#333',borderRadius:'4px',fontSize:'12px',textDecoration:'none',border:'1px solid #e8e8e8'}}>✏️ Modifica</a>
+                      <button onClick={()=>elimina(l.id, l.nome)} disabled={eliminando===l.id} title="Elimina listino"
+                        style={{padding:'4px 10px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'12px',border:'1px solid #fecaca',cursor:'pointer',opacity:eliminando===l.id?0.5:1}}>
+                        {eliminando===l.id?'…':'🗑 Elimina'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
