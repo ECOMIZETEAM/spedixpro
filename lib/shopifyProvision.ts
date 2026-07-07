@@ -22,6 +22,16 @@ async function onboardingMasterId(admin: any): Promise<string | null> {
   return data?.[0]?.id || null
 }
 
+// Listino di default collegato ai nuovi clienti Shopify.
+// Priorità: env SHOPIFY_ONBOARDING_LISTINO_ID → "Listino Standard Shopify" del master.
+async function onboardingListinoId(admin: any, masterId: string): Promise<string | null> {
+  if (process.env.SHOPIFY_ONBOARDING_LISTINO_ID) return process.env.SHOPIFY_ONBOARDING_LISTINO_ID
+  const { data } = await admin.from('listini_clienti')
+    .select('id').eq('master_id', masterId).eq('attivo', true)
+    .ilike('nome', '%standard shopify%').limit(1)
+  return data?.[0]?.id || null
+}
+
 // Crea (o riusa) un cliente MoovExpress per un negozio Shopify installato dallo store.
 // Idempotente: se il negozio è già collegato, ritorna il cliente esistente.
 export async function provisionShopifyCliente(
@@ -55,7 +65,7 @@ export async function provisionShopifyCliente(
     telefono: addr.phone || null,
     sl_paese: addr.country || 'Italia', sl_indirizzo: addr.address1 || null,
     sl_citta: addr.city || null, sl_provincia: addr.provinceCode || addr.province || null, sl_cap: addr.zip || null,
-    listino_cliente_id: process.env.SHOPIFY_ONBOARDING_LISTINO_ID || null,
+    listino_cliente_id: await onboardingListinoId(admin, masterId),
     tipo_contratto: 'credito_scalare',
     aliquota_iva: '22',
     codice_cliente: codice,
