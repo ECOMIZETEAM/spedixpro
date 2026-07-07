@@ -50,7 +50,7 @@ export default function AssistenzaClientePage() {
       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '18px', marginBottom: '20px', maxWidth: '640px' }}>
         <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a', marginBottom: '14px' }}>Nuova richiesta</div>
         {msg && <div style={{ padding: '9px 12px', borderRadius: '6px', marginBottom: '12px', fontSize: '12.5px', color: '#fff', background: msg.t === 'ok' ? '#16a34a' : '#dc2626' }}>{msg.x}</div>}
-        <div style={{ marginBottom: '12px' }}><label style={lbl}>Oggetto</label><input value={nuovo.oggetto} onChange={e => setNuovo(n => ({ ...n, oggetto: e.target.value }))} placeholder="Es. Problema con una spedizione" style={inp} /></div>
+        <div style={{ marginBottom: '12px' }}><label style={lbl}>LDV</label><input value={nuovo.oggetto} onChange={e => setNuovo(n => ({ ...n, oggetto: e.target.value }))} placeholder="Numero LDV della spedizione" style={inp} /></div>
         <div style={{ marginBottom: '14px' }}><label style={lbl}>Messaggio</label><textarea value={nuovo.messaggio} onChange={e => setNuovo(n => ({ ...n, messaggio: e.target.value }))} rows={4} placeholder="Descrivi il problema o la richiesta…" style={{ ...inp, resize: 'vertical' as const }} /></div>
         <button disabled={salvando} onClick={invia} style={{ padding: '10px 22px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Invio…' : 'Invia richiesta'}</button>
       </div>
@@ -59,7 +59,7 @@ export default function AssistenzaClientePage() {
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>Le mie richieste</div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr style={{ background: '#f9fafb' }}>{['Data', 'Oggetto', 'Stato', 'Risposta'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ background: '#f9fafb' }}>{['Data', 'LDV', 'Stato', 'Risposta'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
             <tbody>
               {loading ? (
                 <tr><td colSpan={4} style={{ ...td, textAlign: 'center', color: '#999' }}>Caricamento…</td></tr>

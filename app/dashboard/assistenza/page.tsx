@@ -21,6 +21,9 @@ export default function AssistenzaPage() {
   const [apri, setApri] = useState(false)            // modale nuovo ticket
   const [nuovo, setNuovo] = useState({ oggetto: '', messaggio: '' })
   const [msg, setMsg] = useState('')
+  const [cerca, setCerca] = useState('')             // ricerca per LDV
+  const [perPage, setPerPage] = useState(25)
+  const [pagina, setPagina] = useState(1)
 
   async function carica() {
     setLoading(true)
@@ -30,14 +33,14 @@ export default function AssistenzaPage() {
   }
   useEffect(() => { carica() }, [])
 
-  async function aggiorna(id: string, campi: any) {
+  async function aggiorna(id: string, campi: any): Promise<boolean> {
     setSalvando(true)
     const r = await fetch('/api/assistenza/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(campi) })
     const j = await r.json()
     setSalvando(false)
-    if (j.error) { setMsg(j.error); return }
+    if (j.error) { setMsg(j.error); return false }
     await carica()
-    if (sel) setSel((s: any) => ({ ...s, ...campi }))
+    return true
   }
 
   async function inviaTicket() {
@@ -49,6 +52,16 @@ export default function AssistenzaPage() {
     if (j.error) { setMsg(j.error); return }
     setApri(false); setNuovo({ oggetto: '', messaggio: '' }); carica()
   }
+
+  // Ricerca per LDV (oggetto) o nome di chi ha aperto + paginazione
+  const filtrati = ricevuti.filter(t => {
+    if (!cerca.trim()) return true
+    const q = cerca.trim().toLowerCase()
+    return String(t.oggetto || '').toLowerCase().includes(q) || String(t.aperto_da || '').toLowerCase().includes(q)
+  })
+  const totalePagine = Math.max(1, Math.ceil(filtrati.length / perPage))
+  const paginaCorr = Math.min(pagina, totalePagine)
+  const visibili = filtrati.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
 
   const th = { textAlign: 'left' as const, padding: '10px 14px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' as const, color: '#1a1a1a', borderBottom: '1px solid #e5e7eb', whiteSpace: 'nowrap' as const }
   const td = { padding: '11px 14px', fontSize: '13px', color: '#1a1a1a', borderBottom: '1px solid #f1f5f9', verticalAlign: 'middle' as const }
@@ -65,18 +78,30 @@ export default function AssistenzaPage() {
 
       {/* TICKET RICEVUTI */}
       <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', overflow: 'hidden', marginBottom: '20px' }}>
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>Ticket ricevuti</div>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>Ticket ricevuti</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <input value={cerca} onChange={e => { setCerca(e.target.value); setPagina(1) }} placeholder="🔎 Cerca LDV…"
+              style={{ padding: '7px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', minWidth: '200px' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#666' }}>
+              Mostra
+              <select value={perPage} onChange={e => { setPerPage(Number(e.target.value)); setPagina(1) }} style={{ padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: '5px', fontSize: '12px', color: '#1a1a1a', background: '#fff' }}>
+                <option value={10}>10</option><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option>
+              </select>
+            </div>
+          </div>
+        </div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr style={{ background: '#f9fafb' }}>
-              {['Data', 'Da', 'Oggetto', 'Stato', 'Azioni'].map(h => <th key={h} style={th}>{h}</th>)}
+              {['Data', 'Da', 'LDV', 'Stato', 'Azioni'].map(h => <th key={h} style={th}>{h}</th>)}
             </tr></thead>
             <tbody>
               {loading ? (
                 <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: '#999' }}>Caricamento…</td></tr>
-              ) : !ricevuti.length ? (
-                <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: '#999' }}>Nessun ticket ricevuto</td></tr>
-              ) : ricevuti.map(t => (
+              ) : !filtrati.length ? (
+                <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: '#999' }}>{cerca ? 'Nessun ticket per questa LDV' : 'Nessun ticket ricevuto'}</td></tr>
+              ) : visibili.map(t => (
                 <tr key={t.id}>
                   <td style={{ ...td, whiteSpace: 'nowrap', fontSize: '12px' }}>{new Date(t.created_at).toLocaleDateString('it-IT')} {new Date(t.created_at).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</td>
                   <td style={td}>
@@ -101,6 +126,21 @@ export default function AssistenzaPage() {
             </tbody>
           </table>
         </div>
+        {filtrati.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '12px 16px', borderTop: '1px solid #eee', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '12px', color: '#666' }}>{(paginaCorr - 1) * perPage + 1}-{Math.min(paginaCorr * perPage, filtrati.length)} di {filtrati.length}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+              <button onClick={() => setPagina(p => Math.max(1, p - 1))} disabled={paginaCorr <= 1} style={{ padding: '5px 10px', border: '1px solid #d1d5db', borderRadius: '5px', background: '#fff', fontSize: '12px', cursor: paginaCorr <= 1 ? 'default' : 'pointer', color: paginaCorr <= 1 ? '#ccc' : '#1a1a1a' }}>Precedente</button>
+              {Array.from({ length: totalePagine }, (_, i) => i + 1).filter(n => n === 1 || n === totalePagine || Math.abs(n - paginaCorr) <= 2).map((n, idx, arr) => (
+                <span key={n} style={{ display: 'flex', alignItems: 'center' }}>
+                  {idx > 0 && arr[idx - 1] !== n - 1 && <span style={{ padding: '0 4px', color: '#bbb', fontSize: '12px' }}>…</span>}
+                  <button onClick={() => setPagina(n)} style={{ minWidth: '30px', padding: '5px 8px', border: '1px solid', borderColor: n === paginaCorr ? '#f97316' : '#d1d5db', borderRadius: '5px', background: n === paginaCorr ? '#f97316' : '#fff', color: n === paginaCorr ? '#fff' : '#1a1a1a', fontSize: '12px', fontWeight: n === paginaCorr ? 700 : 400, cursor: 'pointer' }}>{n}</button>
+                </span>
+              ))}
+              <button onClick={() => setPagina(p => Math.min(totalePagine, p + 1))} disabled={paginaCorr >= totalePagine} style={{ padding: '5px 10px', border: '1px solid #d1d5db', borderRadius: '5px', background: '#fff', fontSize: '12px', cursor: paginaCorr >= totalePagine ? 'default' : 'pointer', color: paginaCorr >= totalePagine ? '#ccc' : '#1a1a1a' }}>Successivo</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* I MIEI TICKET (aperti alla linea superiore) */}
@@ -109,7 +149,7 @@ export default function AssistenzaPage() {
           <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>I miei ticket</div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr style={{ background: '#f9fafb' }}>{['Data', 'Oggetto', 'Stato', 'Risposta'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <thead><tr style={{ background: '#f9fafb' }}>{['Data', 'LDV', 'Stato', 'Risposta'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
               <tbody>
                 {miei.map(t => (
                   <tr key={t.id}>
@@ -145,9 +185,9 @@ export default function AssistenzaPage() {
               </div>
               {msg && <div style={{ fontSize: '12px', color: '#dc2626' }}>{msg}</div>}
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <button disabled={salvando} onClick={() => aggiorna(sel.id, { risposta })} style={{ padding: '9px 16px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: '#1a1a1a' }}>Salva risposta</button>
-                <button disabled={salvando} onClick={() => aggiorna(sel.id, { stato: 'in_lavorazione' })} style={{ padding: '9px 16px', border: 'none', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>In lavorazione</button>
-                <button disabled={salvando} onClick={() => aggiorna(sel.id, { stato: 'risolto', risposta })} style={{ padding: '9px 16px', border: 'none', background: '#16a34a', color: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Segna risolto</button>
+                <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { risposta })) setSel(null) }} style={{ padding: '9px 16px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: '#1a1a1a' }}>Salva risposta</button>
+                <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'in_lavorazione', risposta })) setSel(null) }} style={{ padding: '9px 16px', border: 'none', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>In lavorazione</button>
+                <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'risolto', risposta })) setSel(null) }} style={{ padding: '9px 16px', border: 'none', background: '#16a34a', color: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Segna risolto</button>
               </div>
             </div>
           </div>
@@ -160,8 +200,8 @@ export default function AssistenzaPage() {
           <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: '10px', width: '480px', maxWidth: '100%' }}>
             <div style={{ padding: '16px 20px', borderBottom: '1px solid #eee', fontSize: '15px', fontWeight: 700, color: '#1a1a1a' }}>Apri un ticket</div>
             <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div><label style={{ fontSize: '12px', fontWeight: 600, color: '#1a1a1a', display: 'block', marginBottom: '5px' }}>Oggetto</label>
-                <input value={nuovo.oggetto} onChange={e => setNuovo(n => ({ ...n, oggetto: e.target.value }))} style={{ width: '100%', padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box' }} /></div>
+              <div><label style={{ fontSize: '12px', fontWeight: 600, color: '#1a1a1a', display: 'block', marginBottom: '5px' }}>LDV</label>
+                <input value={nuovo.oggetto} onChange={e => setNuovo(n => ({ ...n, oggetto: e.target.value }))} placeholder="Numero LDV" style={{ width: '100%', padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box' }} /></div>
               <div><label style={{ fontSize: '12px', fontWeight: 600, color: '#1a1a1a', display: 'block', marginBottom: '5px' }}>Messaggio</label>
                 <textarea value={nuovo.messaggio} onChange={e => setNuovo(n => ({ ...n, messaggio: e.target.value }))} rows={4} style={{ width: '100%', padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'vertical' }} /></div>
               {msg && <div style={{ fontSize: '12px', color: '#dc2626' }}>{msg}</div>}
