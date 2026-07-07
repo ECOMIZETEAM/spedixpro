@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { getValidShopifyToken } from '@/lib/shopify'
+import { getValidShopifyToken, shopifyGraphQL } from '@/lib/shopify'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-const API_VERSION = '2026-04'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -36,95 +34,65 @@ export async function POST(req: NextRequest) {
   const token = tk.token
   if (!shop) return NextResponse.json({ error: 'Credenziali Shopify mancanti' }, { status: 400 })
 
-  // Legge ordini NON evasi da Shopify (tutti gli stati di pagamento)
-  let ordini: any[] = []
+  // Legge ordini NON evasi da Shopify via GraphQL Admin API (con immagini inline).
+  // Paginazione fino a ~300 ordini per sync.
+  const ordini: any[] = []
   try {
-    const apiUrl = `https://${shop}/admin/api/${API_VERSION}/orders.json?status=open&fulfillment_status=unfulfilled&limit=100`
-    const r = await fetch(apiUrl, {
-      headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
-    })
-    if (!r.ok) {
-      const t = await r.text()
-      return NextResponse.json({ error: `Shopify ha risposto ${r.status}: ${t.slice(0,200)}` }, { status: 502 })
+    let cursor: string | null = null
+    for (let page = 0; page < 3; page++) {
+      const data: any = await shopifyGraphQL(shop, token, `
+        query($cursor: String){
+          orders(first: 100, after: $cursor, query: "status:open fulfillment_status:unfulfilled", sortKey: CREATED_AT){
+            edges { node {
+              legacyResourceId name email phone displayFinancialStatus
+              totalPriceSet { shopMoney { amount currencyCode } }
+              shippingAddress { name address1 address2 city province provinceCode zip country countryCodeV2 phone }
+              lineItems(first: 100){ edges { node { title quantity sku image { url } } } }
+            } }
+            pageInfo { hasNextPage endCursor }
+          }
+        }`, { cursor })
+      const conn = data?.orders
+      for (const e of (conn?.edges || [])) ordini.push(e.node)
+      if (!conn?.pageInfo?.hasNextPage) break
+      cursor = conn.pageInfo.endCursor
     }
-    const d = await r.json()
-    ordini = d.orders || []
   } catch (e: any) {
     return NextResponse.json({ error: 'Errore chiamata Shopify: ' + (e?.message || e) }, { status: 502 })
   }
 
-  // Recupera immagini prodotti (una sola chiamata per tutti i product_id)
-  const prodottiImg = new Map<string, string>()
-  let imgErr = ''
-  try {
-    const ids = Array.from(new Set(
-      ordini.flatMap((o: any) => (o.line_items || []).map((li: any) => li.product_id).filter(Boolean))
-    ))
-    for (let i = 0; i < ids.length; i += 50) {
-      const batch = ids.slice(i, i + 50).join(',')
-      const rp = await fetch(`https://${shop}/admin/api/${API_VERSION}/products.json?ids=${batch}&fields=id,image`, {
-        headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
-      })
-      if (!rp.ok) { imgErr = 'products.json HTTP '+rp.status }
-      if (rp.ok) {
-        const dp = await rp.json()
-        for (const p of dp.products || []) {
-          if (p.image?.src) prodottiImg.set(String(p.id), p.image.src)
-        }
-      }
-    }
-  } catch {}
-
-  // Fallback: storefront pubblico /products.json (nessuno scope richiesto).
-  // Utile finche' read_products non e' autorizzato. Non funziona su negozi con password storefront.
-  if (!prodottiImg.size) {
-    try {
-      const rpub = await fetch(`https://${shop}/products.json?limit=250`)
-      if (rpub.ok) {
-        const dpub = await rpub.json()
-        for (const p of dpub.products || []) {
-          const img = p.images?.[0]?.src || p.image?.src
-          if (img) prodottiImg.set(String(p.id), img)
-        }
-        if (prodottiImg.size) imgErr = imgErr ? imgErr + ' (recuperate da storefront pubblico)' : ''
-      } else if (imgErr) {
-        imgErr += ' + storefront ' + rpub.status
-      }
-    } catch {}
-  }
-
-
   // Mappa e salva (upsert per non duplicare)
   let importati = 0
   for (const o of ordini) {
-    const ship = o.shipping_address || o.billing_address || {}
+    const ship = o.shippingAddress || {}
     const destinatario = {
-      nome: ship.name || `${ship.first_name || ''} ${ship.last_name || ''}`.trim(),
+      nome: ship.name || '',
       indirizzo: [ship.address1, ship.address2].filter(Boolean).join(' '),
       citta: ship.city || '',
-      provincia: ship.province_code || ship.province || '',
+      provincia: ship.provinceCode || ship.province || '',
       cap: ship.zip || '',
-      paese: ship.country_code || 'IT',
-      email: o.email || o.contact_email || '',
+      paese: ship.countryCodeV2 || 'IT',
+      email: o.email || '',
       telefono: ship.phone || o.phone || '',
     }
-    const articoli = (o.line_items || []).map((li: any) => ({
-      nome: li.title, quantita: li.quantity, grammi: li.grams || 0, sku: li.sku || '',
-      immagine: li.product_id ? (prodottiImg.get(String(li.product_id)) || null) : null,
+    const articoli = (o.lineItems?.edges || []).map((e: any) => ({
+      nome: e.node.title, quantita: e.node.quantity, grammi: 0, sku: e.node.sku || '',
+      immagine: e.node.image?.url || null,
     }))
+    const money = o.totalPriceSet?.shopMoney
     const payload: any = {
       cliente_id: utente.cliente_id,
       master_id: utente.master_id,
       integrazione_id: integrazioneId,
       piattaforma: 'shopify',
-      ordine_esterno_id: String(o.id),
-      numero_ordine: o.name || String(o.order_number || ''),
+      ordine_esterno_id: String(o.legacyResourceId),
+      numero_ordine: o.name || '',
       cliente_nome: destinatario.nome,
       destinatario,
       articoli,
-      totale: o.total_price ? Number(o.total_price) : null,
-      valuta: o.currency || 'EUR',
-      stato_pagamento: o.financial_status || '',
+      totale: money?.amount ? Number(money.amount) : null,
+      valuta: money?.currencyCode || 'EUR',
+      stato_pagamento: (o.displayFinancialStatus || '').toLowerCase(),
       raw: o,
     }
     const { error } = await supabase.from('ordini_ecommerce').upsert(payload, {
@@ -139,5 +107,5 @@ export async function POST(req: NextRequest) {
     .update({ ultimo_sync: new Date().toISOString(), ordini_totali: ordini.length })
     .eq('id', integrazioneId)
 
-  return NextResponse.json({ ok: true, letti: ordini.length, importati, immagini: prodottiImg.size, img_errore: imgErr || undefined })
+  return NextResponse.json({ ok: true, letti: ordini.length, importati })
 }

@@ -59,6 +59,19 @@ export async function getValidShopifyToken(integrazione: any): Promise<{ token?:
 
 export { API_VERSION }
 
+// Helper per la GraphQL Admin API (obbligatoria per le app pubbliche).
+export async function shopifyGraphQL(shop: string, token: string, query: string, variables?: any): Promise<any> {
+  const r = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
+    method: 'POST',
+    headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, variables: variables || {} }),
+  })
+  const d = await r.json().catch(() => null)
+  if (!r.ok) throw new Error(`GraphQL HTTP ${r.status}`)
+  if (d?.errors) throw new Error('GraphQL: ' + JSON.stringify(d.errors).slice(0, 200))
+  return d?.data
+}
+
 // Rimanda il tracking a Shopify (fulfillment) per le spedizioni date.
 // Chiamata alla CHIUSURA DISTINTA. Best-effort: mai bloccante, salva esito per ordine.
 // supabase: client gia' pronto (server o admin - nel cron passare l'admin).
@@ -90,29 +103,25 @@ export async function fulfillSpedizioniShopify(supabase: any, spedizioneIds: str
       if (!integr || !shop) { await segna('errore', 'integrazione non trovata'); continue }
       const tk = await getValidShopifyToken(integr)
       if (tk.error || !tk.token) { await segna('errore', tk.error || 'token non disponibile'); continue }
-      const hdr = { 'X-Shopify-Access-Token': tk.token, 'Content-Type': 'application/json' }
-      // 1) fulfillment orders dell'ordine
-      const rFo = await fetch(`https://${shop}/admin/api/${API_VERSION}/orders/${ordine.ordine_esterno_id}/fulfillment_orders.json`, { headers: hdr })
-      if (!rFo.ok) { await segna('errore', 'fulfillment_orders HTTP ' + rFo.status); continue }
-      const dFo = await rFo.json()
-      const aperti = (dFo.fulfillment_orders || []).filter((f: any) => ['open', 'in_progress', 'scheduled'].includes(f.status))
+      // 1) fulfillment orders aperti dell'ordine (GraphQL)
+      const gid = `gid://shopify/Order/${ordine.ordine_esterno_id}`
+      const dFo = await shopifyGraphQL(shop, tk.token,
+        `query($id: ID!){ order(id:$id){ fulfillmentOrders(first:10){ edges{ node{ id status } } } } }`,
+        { id: gid })
+      const aperti = ((dFo?.order?.fulfillmentOrders?.edges) || [])
+        .map((e: any) => e.node)
+        .filter((f: any) => ['OPEN', 'IN_PROGRESS', 'SCHEDULED'].includes(f.status))
       if (!aperti.length) { await segna('ok', 'gia evaso su Shopify'); continue }
-      // 2) crea fulfillment con tracking su tutti i fulfillment orders aperti
-      const rF = await fetch(`https://${shop}/admin/api/${API_VERSION}/fulfillments.json`, {
-        method: 'POST', headers: hdr,
-        body: JSON.stringify({
-          fulfillment: {
-            notify_customer: true,
-            tracking_info: { number: tracking, company },
-            line_items_by_fulfillment_order: aperti.map((f: any) => ({ fulfillment_order_id: f.id })),
-          },
-        }),
-      })
-      if (!rF.ok) {
-        const t = await rF.text()
-        await segna('errore', 'fulfillment HTTP ' + rF.status + ': ' + t.slice(0, 150))
-        continue
-      }
+      // 2) crea fulfillment con tracking su tutti i fulfillment orders aperti (GraphQL)
+      const dF = await shopifyGraphQL(shop, tk.token,
+        `mutation($f: FulfillmentV2Input!){ fulfillmentCreateV2(fulfillment:$f){ fulfillment{ id status } userErrors{ field message } } }`,
+        { f: {
+            notifyCustomer: true,
+            trackingInfo: { number: tracking, company },
+            lineItemsByFulfillmentOrder: aperti.map((f: any) => ({ fulfillmentOrderId: f.id })),
+        } })
+      const errs = dF?.fulfillmentCreateV2?.userErrors || []
+      if (errs.length) { await segna('errore', errs.map((e: any) => e.message).join('; ').slice(0, 150)); continue }
       await segna('ok', null)
     } catch (e: any) {
       await segna('errore', String(e?.message || e).slice(0, 150))
