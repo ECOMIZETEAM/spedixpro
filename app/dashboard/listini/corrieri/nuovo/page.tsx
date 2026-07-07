@@ -83,6 +83,7 @@ export default function ListinoCorrierePage() {
   const [aggiungendoSaving, setAggiungendoSaving] = useState(false)
 
   const [fasce, setFasce] = useState<Fascia[]>([])
+  const [zoneCorr, setZoneCorr] = useState<any[]>([])   // zone reali del corriere selezionato
   const [righeAssic, setRigheAssic] = useState<RigaSuppl[]>([rigaVuota()])
   const [righeContr, setRigheContr] = useState<RigaSuppl[]>([rigaVuota(), rigaVuota()])
   const [serviziAccessori, setServiziAccessori] = useState([
@@ -117,6 +118,9 @@ export default function ListinoCorrierePage() {
     setCorriereId(data.corriereSelezionatoId || '')
     setFattore(Number(data.listino?.fattore_volume) || 5000)
     setFasce(buildFasceInit(data.fasce || []))
+    // Zone reali definite in Gestione Zone per il corriere selezionato (colonne prezzi)
+    const zTutte = await fetch('/api/zone').then(r => r.json()).catch(() => [])
+    setZoneCorr((Array.isArray(zTutte) ? zTutte : []).filter((z: any) => z.corriere_id === (data.corriereSelezionatoId || '')))
     setRigheAssic(buildRigheDa(data.supplementi||[], 'assicurazione', [rigaVuota()]))
     setRigheContr(buildRigheDa(data.supplementi||[], 'contrassegno', [rigaVuota(), rigaVuota()]))
     setServiziAccessori(prev => buildServiziDa(data.supplementi||[], 'accessorio', prev))
@@ -281,14 +285,19 @@ export default function ListinoCorrierePage() {
 
             {tab==='pesi' && (
               <div>
+                {!zoneCorr.length && (
+                  <div style={{padding:'12px 14px',marginBottom:'12px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',fontSize:'12.5px',color:'#9a3412'}}>
+                    Nessuna zona definita per questo corriere. Vai su <b>Gestione Zone</b> e crea le zone (es. ITALIA, SICILIA, SARDEGNA…): compariranno qui come colonne prezzo.
+                  </div>
+                )}
                 <div style={{overflowX:'auto' as const}}>
                   <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
                     <thead>
                       <tr style={{background:'#f9fafb'}}>
                         <th style={{padding:'8px 10px',borderBottom:'1px solid #d1d5db',color:'#1a1a1a',fontWeight:'700',textAlign:'left' as const}}>Peso (kg)</th>
                         <th style={{padding:'8px 6px',borderBottom:'1px solid #d1d5db',color:'#1a1a1a',fontWeight:'700'}}></th>
-                        {ZONE_DEFAULT.map(z=>(
-                          <th key={z} style={{padding:'8px 8px',borderBottom:'1px solid #d1d5db',color:'#1a1a1a',fontWeight:'700',textAlign:'center' as const,whiteSpace:'nowrap' as const}}>{z} €</th>
+                        {zoneCorr.map(z=>(
+                          <th key={z.id} style={{padding:'8px 8px',borderBottom:'1px solid #d1d5db',color:'#1a1a1a',fontWeight:'700',textAlign:'center' as const,whiteSpace:'nowrap' as const}}>{z.nome} €</th>
                         ))}
                         <th style={{padding:'8px 6px',borderBottom:'1px solid #d1d5db',color:'#1a1a1a',fontWeight:'700',textAlign:'center' as const}}>Fuel %</th>
                         <th style={{padding:'8px 6px',borderBottom:'1px solid #d1d5db',width:'36px'}}></th>
@@ -309,9 +318,9 @@ export default function ListinoCorrierePage() {
                               <span style={{fontSize:'11px',color:'#666'}}>kg</span>
                             </div>
                           </td>
-                          {ZONE_DEFAULT.map(z=>(
-                            <td key={z} style={{padding:'4px 4px',textAlign:'center' as const}}>
-                              <input type="number" step="0.01" value={f.prezzi[z]||''} onChange={e=>setFasciaPrezzo(i,z,e.target.value)} style={{...inp,width:'70px',textAlign:'right' as const}} placeholder="0.00"/>
+                          {zoneCorr.map(z=>(
+                            <td key={z.id} style={{padding:'4px 4px',textAlign:'center' as const}}>
+                              <input type="number" step="0.01" value={f.prezzi[z.id]||''} onChange={e=>setFasciaPrezzo(i,z.id,e.target.value)} style={{...inp,width:'70px',textAlign:'right' as const}} placeholder="0.00"/>
                             </td>
                           ))}
                           <td style={{padding:'4px 6px',textAlign:'center' as const}}>
