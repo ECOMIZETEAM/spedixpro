@@ -77,7 +77,13 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px', flexWrap: 'wrap', gap: '10px' }}>
         <h1 style={{ fontSize: '22px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Giacenza — {sped.numero}</h1>
-        <a href={tornaHref} style={{ fontSize: '13px', color: '#2563eb', textDecoration: 'none' }}>← Torna alle giacenze</a>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          {isMaster && sped.giacenza_stato !== 'chiusa' && (
+            <button disabled={salvando} onClick={() => { if (confirm('Chiudere la giacenza? Non sarà più gestibile.')) azione({ azione: 'chiudi' }) }}
+              style={{ padding: '7px 14px', background: '#6b7280', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Chiudi giacenza</button>
+          )}
+          <a href={tornaHref} style={{ fontSize: '13px', color: '#2563eb', textDecoration: 'none' }}>← Torna alle giacenze</a>
+        </div>
       </div>
 
       {msg && <div style={{ padding: '10px 14px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', color: '#fff', background: msg.t === 'ok' ? '#16a34a' : '#dc2626' }}>{msg.x}</div>}

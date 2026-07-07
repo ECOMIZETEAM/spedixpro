@@ -168,11 +168,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     await admin.from('giacenza_richieste').update({ stato: 'confermata', confermata_da: nomeUtente, confermata_at: new Date().toISOString() }).eq('id', rich.id)
+    // La spedizione resta nella lista giacenze come "svincolata" (verde: svincolo confermato).
+    // Non tocco spedizioni.stato cosi la riga non sparisce dall'elenco giacenze.
     await admin.from('spedizioni').update({
       giacenza_stato: 'svincolata', giacenza_istruzioni: istr, giacenza_addebito_effettuato: true,
-      stato: rich.operazione === 'reso' ? 'reso' : 'in_consegna',
     }).eq('id', id)
     return NextResponse.json({ success: true, addebito: totale })
+  }
+
+  // 5) Chiudi giacenza (solo master) -> non piu gestibile
+  if (azione === 'chiudi') {
+    if (ruolo !== 'master') return NextResponse.json({ error: 'Solo il master puo chiudere la giacenza' }, { status: 403 })
+    await admin.from('spedizioni').update({ giacenza_stato: 'chiusa' }).eq('id', id)
+    return NextResponse.json({ success: true })
   }
 
   return NextResponse.json({ error: 'Azione non valida' }, { status: 400 })

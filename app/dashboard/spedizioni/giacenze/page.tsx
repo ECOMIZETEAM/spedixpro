@@ -86,8 +86,13 @@ export default function GiacenzePage() {
 
   const statoStyle: Record<string,{bg:string,color:string}> = {
     aperta: {bg:'#dc2626',color:'#fff'},
+    in_gestione: {bg:'#f59e0b',color:'#fff'},
     svincolata: {bg:'#16a34a',color:'#fff'},
     chiusa: {bg:'#6b7280',color:'#fff'},
+  }
+  const statoLabel: Record<string,string> = {
+    aperta:'In attesa di istruzioni', in_gestione:'In gestione',
+    svincolata:'In gestione - Svincolo confermato', chiusa:'Chiusa',
   }
 
   return (
@@ -124,8 +129,9 @@ export default function GiacenzePage() {
           <div><label style={lbl}>Stato</label>
             <select value={filtri.stato} onChange={e=>setF('stato',e.target.value)} style={sel}>
               <option value="">Tutte</option>
-              <option value="aperta">Aperta</option>
-              <option value="svincolata">Svincolata</option>
+              <option value="aperta">In attesa di istruzioni</option>
+              <option value="in_gestione">In gestione</option>
+              <option value="svincolata">Svincolo confermato</option>
               <option value="chiusa">Chiusa</option>
             </select>
           </div>
@@ -209,7 +215,7 @@ export default function GiacenzePage() {
                       </td>
                       <td style={{padding:'9px 12px'}}>
                         <span style={{background:stSt.bg,color:stSt.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600',whiteSpace:'nowrap' as const}}>
-                          {g.giacenza_stato==='aperta'?'Aperta - In attesa di istruzioni':g.giacenza_stato==='svincolata'?'Svincolata':'Chiusa'}
+                          {statoLabel[g.giacenza_stato||'aperta']||'In attesa di istruzioni'}
                         </span>
                       </td>
                       <td style={{padding:'9px 12px'}}>

@@ -89,8 +89,8 @@ export default function GiacenzePage() {
     chiusa: {bg:'#6b7280',color:'#fff'},
   }
   const statoLabel: Record<string,string> = {
-    aperta:'Aperta - In attesa di istruzioni', in_gestione:'In gestione - In attesa svincolo',
-    svincolata:'Svincolata', chiusa:'Chiusa',
+    aperta:'In attesa di istruzioni', in_gestione:'In gestione',
+    svincolata:'In gestione - Svincolo confermato', chiusa:'Chiusa',
   }
 
   return (
@@ -121,8 +121,9 @@ export default function GiacenzePage() {
           <div><label style={lbl}>Stato</label>
             <select value={filtri.stato} onChange={e=>setF('stato',e.target.value)} style={sel}>
               <option value="">Tutte</option>
-              <option value="aperta">Aperta</option>
-              <option value="svincolata">Svincolata</option>
+              <option value="aperta">In attesa di istruzioni</option>
+              <option value="in_gestione">In gestione</option>
+              <option value="svincolata">Svincolo confermato</option>
               <option value="chiusa">Chiusa</option>
             </select>
           </div>
