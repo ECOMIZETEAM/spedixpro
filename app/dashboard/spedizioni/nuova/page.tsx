@@ -44,6 +44,7 @@ export default function NuovaSpedizionePage() {
   const [clienti, setClienti] = useState<Cliente[]>([])
   const [clienteId, setClienteId] = useState('')
   const [mitt, setMitt] = useState({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',email:'',telefono:''})
+  const [mittAzienda, setMittAzienda] = useState<typeof mitt|null>(null)   // dati azienda da Impostazioni (mittente predefinito)
   const [dest, setDest] = useState({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',paese:'IT',email:'',telefono:'',note:'',rif:'',ordine:''})
   const [suggComuni, setSuggComuni] = useState<any[]>([])
   const [showSugg, setShowSugg] = useState(false)
@@ -73,6 +74,26 @@ export default function NuovaSpedizionePage() {
 
   useEffect(() => { fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[])) }, [])
 
+  // Mittente predefinito dai dati aziendali (Impostazioni Azienda). Usa l'indirizzo
+  // operativo se presente, altrimenti la sede legale.
+  useEffect(() => {
+    fetch('/api/master').then(r=>r.json()).then(d=>{
+      if (!d || d.error) return
+      const m = {
+        nome: d.ragione_sociale||'',
+        indirizzo: d.indirizzo_operativo||d.indirizzo||'',
+        citta: d.citta_operativo||d.citta||'',
+        provincia: d.provincia_operativo||d.provincia||'',
+        cap: d.cap_operativo||d.cap||'',
+        email: d.email_sede||d.email_supporto||'',
+        telefono: d.telefono_operativo||d.telefono||'',
+      }
+      setMittAzienda(m)
+      // Pre-compila solo se il mittente è ancora vuoto (nessun cliente selezionato)
+      setMitt(prev => (prev.nome||prev.indirizzo||prev.citta) ? prev : m)
+    }).catch(()=>{})
+  }, [])
+
   function aggiornaNumColli(n: number) {
     const num = Math.max(1, n)
     setNumColli(num)
@@ -90,8 +111,8 @@ export default function NuovaSpedizionePage() {
   }
 
   function selezionaCliente(id:string) {
-    // Spedizione propria del master: nessun cliente, mittente da compilare a mano.
-    if (id==='__proprio__') { setClienteId(id); return }
+    // Spedizione propria del master: mittente dai dati aziendali (Impostazioni Azienda).
+    if (id==='__proprio__') { setClienteId(id); if (mittAzienda) setMitt(mittAzienda); return }
     const c = clienti.find(x=>x.id===id)
     if (!c) { setClienteId(''); return }
     setClienteId(id)
