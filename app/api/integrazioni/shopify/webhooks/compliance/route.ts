@@ -34,6 +34,8 @@ export async function POST(req: NextRequest) {
           .eq('identificativo', shop)
         const ids = (ints || []).map((i: any) => i.id)
         if (ids.length) {
+          // ordini_ecommerce = tabella attuale (con i dati cliente); ordini_importati = legacy
+          await supabase.from('ordini_ecommerce').delete().in('integrazione_id', ids)
           await supabase.from('ordini_importati').delete().in('integrazione_id', ids)
           await supabase.from('integrazioni').delete().in('id', ids)
         }
