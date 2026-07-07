@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
+import ReportGuadagno from '@/app/components/ReportGuadagno'
 
 export default function Dashboard() {
   const [data, setData] = useState<any>(null)
@@ -194,6 +195,9 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
+
+      {/* Report Guadagno (giornaliero/settimanale/mensile/annuale) */}
+      <ReportGuadagno />
     </div>
   )
 }
