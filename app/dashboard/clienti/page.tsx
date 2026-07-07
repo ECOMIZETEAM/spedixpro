@@ -13,12 +13,43 @@ export default function ClientiPage() {
   const [filtroContratto, setFiltroContratto] = useState('tutti')
   const [filtroListino, setFiltroListino] = useState('tutti')
 
-  useEffect(() => {
-    fetch('/api/clienti/lista')
+  // Ricarica credito sotto-master
+  const [ric, setRic] = useState<any>(null)
+  const [ricImporto, setRicImporto] = useState('')
+  const [ricDesc, setRicDesc] = useState('Ricarica credito')
+  const [ricSaving, setRicSaving] = useState(false)
+  const [ricErr, setRicErr] = useState('')
+  const [okMsg, setOkMsg] = useState('')
+
+  function carica() {
+    fetch('/api/clienti/lista?conMaster=1')
       .then(r => r.json())
       .then(d => { setClienti(Array.isArray(d) ? d : []); setLoading(false) })
       .catch(() => setLoading(false))
-  }, [])
+  }
+  useEffect(() => { carica() }, [])
+
+  async function salvaRicarica() {
+    setRicErr('')
+    const imp = parseFloat(ricImporto.replace(',', '.'))
+    if (!isFinite(imp) || imp === 0) { setRicErr('Inserisci un importo diverso da 0 (usa − per togliere)'); return }
+    if (!ricDesc.trim()) { setRicErr('Inserisci una descrizione'); return }
+    setRicSaving(true)
+    try {
+      const res = await fetch('/api/movimenti/crea', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clienteId: ric.id, tipo: imp > 0 ? 'ricarica' : 'rettifica', descrizione: ricDesc.trim(), importo: imp }),
+      })
+      const d = await res.json()
+      setRicSaving(false)
+      if (!res.ok || d?.error) { setRicErr(d?.error || 'Errore durante la ricarica'); return }
+      setRic(null); setRicImporto('')
+      setOkMsg('✓ Credito caricato con successo')
+      if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
+      setTimeout(() => setOkMsg(''), 5000)
+      carica()
+    } catch { setRicSaving(false); setRicErr('Errore di rete') }
+  }
 
   const tipiContratto = useMemo(() => {
     const set = new Set(clienti.map(c => c.tipo_contratto).filter(Boolean))
@@ -51,6 +82,9 @@ export default function ClientiPage() {
         .cli-act:hover{color:#f97316}
       `}</style>
 
+      {okMsg && (
+        <div style={{background:'#16a34a',color:'#fff',padding:'12px 18px',borderRadius:'8px',marginBottom:'16px',fontSize:'14px',fontWeight:'700',boxShadow:'0 2px 8px rgba(22,163,74,0.25)'}}>{okMsg}</div>
+      )}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'20px'}}>
         <div>
           <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Clienti</h1>
@@ -123,7 +157,10 @@ export default function ClientiPage() {
                   <tr key={c.id} style={{borderBottom:'1px solid #f5f5f5'}}>
                     <td style={{padding:'10px 14px',color:'#1a1a1a',fontSize:'12px'}}>{c.codice_cliente}</td>
                     <td style={{padding:'10px 14px'}}>
-                      <div style={{fontWeight:'600',color:'#1a1a1a'}}>{c.ragione_sociale}</div>
+                      <div style={{fontWeight:'600',color:'#1a1a1a',display:'flex',alignItems:'center',gap:'7px'}}>
+                        {c.ragione_sociale}
+                        {c.is_master && <span style={{background:'#eef2ff',color:'#4f46e5',padding:'1px 7px',borderRadius:'10px',fontSize:'10px',fontWeight:'700',whiteSpace:'nowrap'}}>Sotto-master</span>}
+                      </div>
                       <div style={{fontSize:'11px',color:'#1a1a1a'}}>{c.email}</div>
                       {c.telefono && <div style={{fontSize:'11px',color:'#1a1a1a'}}>{c.telefono}</div>}
                     </td>
@@ -147,12 +184,19 @@ export default function ClientiPage() {
                       </span>
                     </td>
                     <td style={{padding:'10px 14px'}}>
-                      <div style={{display:'flex',gap:'14px',alignItems:'center'}}>
-                        <a href={`/api/clienti/${c.id}/impersona`} title="Accedi come cliente" target="_blank" rel="noopener noreferrer" className="cli-act">↪</a>
-                        <a href={`/dashboard/clienti/${c.id}`} title="Credito e movimenti" className="cli-act">▤</a>
-                        <a href={`/dashboard/clienti/${c.id}/modifica`} title="Modifica dati" className="cli-act">✎</a>
-                        <a href={`/dashboard/clienti/${c.id}/impostazioni`} title="Impostazioni" className="cli-act">⚙</a>
-                      </div>
+                      {c.is_master ? (
+                        <div style={{display:'flex',gap:'14px',alignItems:'center'}}>
+                          <button onClick={()=>{setRic(c);setRicImporto('');setRicDesc('Ricarica credito');setRicErr('')}} title="Ricarica credito" className="cli-act" style={{background:'none',border:'none'}}>💰</button>
+                          <a href={`/api/master/${c.id.slice(2)}/impersona`} title="Accedi come sotto-master" target="_blank" rel="noopener noreferrer" className="cli-act">↪</a>
+                        </div>
+                      ) : (
+                        <div style={{display:'flex',gap:'14px',alignItems:'center'}}>
+                          <a href={`/api/clienti/${c.id}/impersona`} title="Accedi come cliente" target="_blank" rel="noopener noreferrer" className="cli-act">↪</a>
+                          <a href={`/dashboard/clienti/${c.id}`} title="Credito e movimenti" className="cli-act">▤</a>
+                          <a href={`/dashboard/clienti/${c.id}/modifica`} title="Modifica dati" className="cli-act">✎</a>
+                          <a href={`/dashboard/clienti/${c.id}/impostazioni`} title="Impostazioni" className="cli-act">⚙</a>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -161,6 +205,31 @@ export default function ClientiPage() {
           </div>
         )}
       </div>
+
+      {/* MODALE RICARICA SOTTO-MASTER */}
+      {ric && (
+        <div onClick={()=>!ricSaving&&setRic(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'20px'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'10px',width:'420px',maxWidth:'100%'}}>
+            <div style={{padding:'16px 20px',borderBottom:'1px solid #eee',fontSize:'15px',fontWeight:'700',color:'#1a1a1a'}}>Ricarica credito — {ric.ragione_sociale}</div>
+            <div style={{padding:'20px',display:'flex',flexDirection:'column',gap:'12px'}}>
+              <div style={{fontSize:'12.5px',color:'#666'}}>Credito attuale: <b style={{color:Number(ric.credito||0)<0?'#dc2626':'#16a34a'}}>€ {Number(ric.credito||0).toFixed(2)}</b></div>
+              <div>
+                <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Importo €</label>
+                <input value={ricImporto} onChange={e=>setRicImporto(e.target.value)} placeholder="es. 200 (o -200 per togliere)" style={inp}/>
+              </div>
+              <div>
+                <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Descrizione</label>
+                <input value={ricDesc} onChange={e=>setRicDesc(e.target.value)} style={inp}/>
+              </div>
+              {ricErr && <div style={{fontSize:'12px',color:'#dc2626'}}>{ricErr}</div>}
+              <div style={{display:'flex',justifyContent:'flex-end',gap:'8px',marginTop:'4px'}}>
+                <button onClick={()=>setRic(null)} disabled={ricSaving} style={{padding:'8px 16px',background:'#f2f2f2',color:'#1a1a1a',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'600',cursor:'pointer'}}>Annulla</button>
+                <button onClick={salvaRicarica} disabled={ricSaving} style={{padding:'8px 20px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer',opacity:ricSaving?0.6:1}}>{ricSaving?'Salvataggio…':'Ricarica'}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

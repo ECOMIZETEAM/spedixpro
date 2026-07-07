@@ -42,9 +42,16 @@ export async function GET(req: NextRequest) {
   if (conMaster && utente?.master_id) {
     // I sotto-master agganciati compaiono come pseudo-clienti (id = "m:<masterId>")
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const { masterFigliDiretti } = await import('@/lib/rete-masters')
-    const figli = await masterFigliDiretti(createAdminSupabase(), utente.master_id)
-    const masterOut = figli.map((m) => ({ id: 'm:' + m.id, ragione_sociale: m.nome, is_master: true, contratti_attivi: [] }))
+    const admin = createAdminSupabase()
+    const { data: figli } = await admin.from('masters')
+      .select('id,nome,email,telefono,credito,attivo,tipo_contratto')
+      .eq('parent_master_id', utente.master_id).order('nome', { ascending: true })
+    const masterOut = (figli || []).map((m: any) => ({
+      id: 'm:' + m.id, ragione_sociale: m.nome || '—', is_master: true,
+      email: m.email || '', telefono: m.telefono || '', credito: Number(m.credito || 0),
+      attivo: m.attivo !== false, tipo_contratto: m.tipo_contratto || null,
+      codice_cliente: 'SUB-MASTER', contratti_attivi: [],
+    }))
     return NextResponse.json([...clientiOut, ...masterOut])
   }
   return NextResponse.json(clientiOut)
