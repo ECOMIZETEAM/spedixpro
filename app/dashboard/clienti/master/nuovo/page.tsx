@@ -17,6 +17,7 @@ export default function NuovoMasterPage() {
   const [saving, setSaving] = useState(false)
   const [errore, setErrore] = useState('')
   const [successo, setSuccesso] = useState('')
+  const [credenziali, setCredenziali] = useState<any>(null)
 
   useEffect(() => {
     fetch('/api/listini/lista').then(r => r.json()).then(d => setListini(Array.isArray(d) ? d : [])).catch(() => {})
@@ -34,9 +35,29 @@ export default function NuovoMasterPage() {
     setSaving(false)
 
     if (data.error) { setErrore(data.error); return }
-    setSuccesso(`Master "${nome}" creato con successo! Le credenziali sono state inviate a ${email}.`)
-    setTimeout(() => router.push('/dashboard/clienti/master'), 2000)
+    setCredenziali({ email: data.email || email, password: data.password })
   }
+
+  if (credenziali) return (
+    <div style={{maxWidth:'560px',margin:'40px auto'}}>
+      <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'10px',padding:'24px'}}>
+        <div style={{fontSize:'16px',fontWeight:800,color:'#16a34a',marginBottom:'6px'}}>✓ Master creato</div>
+        <p style={{fontSize:'13px',color:'#555',margin:'0 0 16px'}}>Condividi queste credenziali con il master (le email automatiche partiranno quando il dominio sarà verificato).</p>
+        <div style={{background:'#fff',border:'1px solid #d1fae5',borderRadius:'8px',padding:'14px'}}>
+          <div style={{fontSize:'11px',color:'#999',textTransform:'uppercase',letterSpacing:'0.5px'}}>Email</div>
+          <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a',marginBottom:'10px',fontFamily:'monospace'}}>{credenziali.email}</div>
+          <div style={{fontSize:'11px',color:'#999',textTransform:'uppercase',letterSpacing:'0.5px'}}>Password</div>
+          <div style={{fontSize:'16px',fontWeight:700,color:'#f97316',fontFamily:'monospace'}}>{credenziali.password}</div>
+        </div>
+        <div style={{display:'flex',gap:'8px',marginTop:'16px'}}>
+          <button onClick={()=>{navigator.clipboard?.writeText(`Email: ${credenziali.email}\nPassword: ${credenziali.password}\nPortale: https://moovexpress.com`)}}
+            style={{background:'#16a34a',color:'#fff',border:'none',borderRadius:'6px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>Copia credenziali</button>
+          <button onClick={()=>router.push('/dashboard/clienti/master')}
+            style={{background:'#fff',color:'#1a1a1a',border:'1px solid #ddd',borderRadius:'6px',padding:'9px 16px',fontSize:'13px',fontWeight:600,cursor:'pointer'}}>Vai ai master</button>
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <div>

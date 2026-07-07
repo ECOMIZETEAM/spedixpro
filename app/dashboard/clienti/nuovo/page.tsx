@@ -12,6 +12,7 @@ const PROVINCE = ['AG','AL','AN','AO','AR','AP','AT','AV','BA','BT','BL','BN','B
 
 export default function NuovoClientePage() {
   const router = useRouter()
+  const [credenziali, setCredenziali] = useState<any>(null)
   const [staffList, setStaffList] = useState<any[]>([])
   useEffect(() => { fetch('/api/staff').then(r=>r.json()).then((d:any[])=>{ const ruoliOk=['agente','operatore','admin']; const arr=(Array.isArray(d)?d:[]).filter(u=>ruoliOk.includes((u.ruolo||'').toLowerCase())).map(u=>({...u, _nome:((u.nome||'')+' '+(u.cognome||'')).trim()})).filter(u=>u._nome).sort((a,b)=>a._nome.localeCompare(b._nome)); setStaffList(arr) }).catch(()=>setStaffList([])) }, [])
   const [saving, setSaving] = useState(false)
@@ -87,8 +88,30 @@ export default function NuovoClientePage() {
     const data = await res.json()
     setSaving(false)
     if (data.error) { setErrore(data.error); return }
-    router.push('/dashboard/clienti?success=1')
+    // mostro le credenziali a schermo (da condividere a mano finché Resend non è verificato)
+    setCredenziali({ email: data.email, password: data.password })
   }
+
+  if (credenziali) return (
+    <div style={{maxWidth:'560px',margin:'40px auto'}}>
+      <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'10px',padding:'24px'}}>
+        <div style={{fontSize:'16px',fontWeight:800,color:'#16a34a',marginBottom:'6px'}}>✓ Cliente creato</div>
+        <p style={{fontSize:'13px',color:'#555',margin:'0 0 16px'}}>Condividi queste credenziali con il cliente (le email automatiche partiranno quando il dominio sarà verificato).</p>
+        <div style={{background:'#fff',border:'1px solid #d1fae5',borderRadius:'8px',padding:'14px'}}>
+          <div style={{fontSize:'11px',color:'#999',textTransform:'uppercase',letterSpacing:'0.5px'}}>Email</div>
+          <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a',marginBottom:'10px',fontFamily:'monospace'}}>{credenziali.email}</div>
+          <div style={{fontSize:'11px',color:'#999',textTransform:'uppercase',letterSpacing:'0.5px'}}>Password</div>
+          <div style={{fontSize:'16px',fontWeight:700,color:'#f97316',fontFamily:'monospace'}}>{credenziali.password}</div>
+        </div>
+        <div style={{display:'flex',gap:'8px',marginTop:'16px'}}>
+          <button onClick={()=>{navigator.clipboard?.writeText(`Email: ${credenziali.email}\nPassword: ${credenziali.password}\nPortale: https://moovexpress.com/cliente`)}}
+            style={{background:'#16a34a',color:'#fff',border:'none',borderRadius:'6px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>Copia credenziali</button>
+          <button onClick={()=>router.push('/dashboard/clienti')}
+            style={{background:'#fff',color:'#1a1a1a',border:'1px solid #ddd',borderRadius:'6px',padding:'9px 16px',fontSize:'13px',fontWeight:600,cursor:'pointer'}}>Vai ai clienti</button>
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <div>

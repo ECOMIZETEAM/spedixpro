@@ -89,5 +89,5 @@ export async function POST(req: NextRequest) {
     console.error('Errore invio email master:', e)
   }
 
-  return NextResponse.json({ id: nuovoMaster.id })
+  return NextResponse.json({ id: nuovoMaster.id, email, password })
 }

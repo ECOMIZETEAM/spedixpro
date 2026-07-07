@@ -70,5 +70,5 @@ export async function POST(req: NextRequest) {
     const master = (utente as any).masters
     await inviaCredenzialiCliente({ email, nomeCliente: ragioneSociale, masterNome: master?.nome||'MoovExpress', dominio: 'moovexpress.com', password })
   } catch(e) { console.error('Email error:', e) }
-  return NextResponse.json({ id: nuovoCliente.id, codice })
+  return NextResponse.json({ id: nuovoCliente.id, codice, email, password })
 }
