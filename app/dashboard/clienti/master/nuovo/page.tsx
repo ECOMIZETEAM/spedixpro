@@ -11,6 +11,20 @@ export default function NuovoMasterPage() {
   const [email, setEmail] = useState('')
   const [telefono, setTelefono] = useState('')
   const [piva, setPiva] = useState('')
+  const [cf, setCf] = useState('')
+  const [pec, setPec] = useState('')
+  const [codSdi, setCodSdi] = useState('')
+  // Sede legale
+  const [slIndirizzo, setSlIndirizzo] = useState('')
+  const [slCitta, setSlCitta] = useState('')
+  const [slProvincia, setSlProvincia] = useState('')
+  const [slCap, setSlCap] = useState('')
+  // Sede operativa (usata come mittente quando spedisci per questo master)
+  const [soUgualeLegale, setSoUgualeLegale] = useState(true)
+  const [soIndirizzo, setSoIndirizzo] = useState('')
+  const [soCitta, setSoCitta] = useState('')
+  const [soProvincia, setSoProvincia] = useState('')
+  const [soCap, setSoCap] = useState('')
   const [parentListinoId, setParentListinoId] = useState('')
   const [tipoContratto, setTipoContratto] = useState('credito_scalare')
   const [listini, setListini] = useState<any[]>([])
@@ -27,9 +41,17 @@ export default function NuovoMasterPage() {
     if (!nome.trim() || !email.trim()) { setErrore('Nome e email sono obbligatori'); return }
     setSaving(true); setErrore(''); setSuccesso('')
 
+    const so = soUgualeLegale
+      ? { so_indirizzo: slIndirizzo, so_citta: slCitta, so_provincia: slProvincia, so_cap: slCap }
+      : { so_indirizzo: soIndirizzo, so_citta: soCitta, so_provincia: soProvincia, so_cap: soCap }
     const res = await fetch('/api/master/crea', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nome, email, telefono, piva, parent_listino_id: parentListinoId || null, tipo_contratto: tipoContratto })
+      body: JSON.stringify({
+        nome, email, telefono, piva, cf, pec, cod_sdi: codSdi,
+        sl_indirizzo: slIndirizzo, sl_citta: slCitta, sl_provincia: slProvincia, sl_cap: slCap,
+        ...so,
+        parent_listino_id: parentListinoId || null, tipo_contratto: tipoContratto,
+      })
     })
     const data = await res.json()
     setSaving(false)
@@ -90,6 +112,54 @@ export default function NuovoMasterPage() {
             <input value={piva} onChange={e => setPiva(e.target.value)} style={inp} />
           </div>
         </div>
+
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'12px',marginBottom:'16px'}}>
+          <div>
+            <label style={lbl}>Codice Fiscale</label>
+            <input value={cf} onChange={e => setCf(e.target.value)} style={inp} />
+          </div>
+          <div>
+            <label style={lbl}>PEC</label>
+            <input value={pec} onChange={e => setPec(e.target.value)} style={inp} />
+          </div>
+          <div>
+            <label style={lbl}>Codice SDI</label>
+            <input value={codSdi} onChange={e => setCodSdi(e.target.value)} style={inp} />
+          </div>
+        </div>
+
+        {/* Sede legale */}
+        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',margin:'8px 0 8px'}}>Sede legale</div>
+        <div style={{marginBottom:'12px'}}>
+          <label style={lbl}>Indirizzo (via)</label>
+          <input value={slIndirizzo} onChange={e => setSlIndirizzo(e.target.value)} placeholder="Via / Piazza e numero civico" style={inp} />
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'12px',marginBottom:'16px'}}>
+          <div><label style={lbl}>Città</label><input value={slCitta} onChange={e => setSlCitta(e.target.value)} style={inp} /></div>
+          <div><label style={lbl}>Provincia</label><input value={slProvincia} onChange={e => setSlProvincia(e.target.value.toUpperCase().slice(0,2))} placeholder="es. MI" style={inp} /></div>
+          <div><label style={lbl}>CAP</label><input value={slCap} onChange={e => setSlCap(e.target.value)} style={inp} /></div>
+        </div>
+
+        {/* Sede operativa (mittente) */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',margin:'8px 0 8px'}}>
+          <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a'}}>Sede operativa <span style={{fontWeight:400,color:'#999'}}>(mittente per le spedizioni)</span></div>
+          <label style={{fontSize:'12px',color:'#555',display:'flex',alignItems:'center',gap:'6px',cursor:'pointer'}}>
+            <input type="checkbox" checked={soUgualeLegale} onChange={e=>setSoUgualeLegale(e.target.checked)} /> uguale alla sede legale
+          </label>
+        </div>
+        {!soUgualeLegale && (
+          <>
+            <div style={{marginBottom:'12px'}}>
+              <label style={lbl}>Indirizzo (via)</label>
+              <input value={soIndirizzo} onChange={e => setSoIndirizzo(e.target.value)} placeholder="Via / Piazza e numero civico" style={inp} />
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'12px',marginBottom:'16px'}}>
+              <div><label style={lbl}>Città</label><input value={soCitta} onChange={e => setSoCitta(e.target.value)} style={inp} /></div>
+              <div><label style={lbl}>Provincia</label><input value={soProvincia} onChange={e => setSoProvincia(e.target.value.toUpperCase().slice(0,2))} placeholder="es. MI" style={inp} /></div>
+              <div><label style={lbl}>CAP</label><input value={soCap} onChange={e => setSoCap(e.target.value)} style={inp} /></div>
+            </div>
+          </>
+        )}
 
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'20px'}}>
           <div>
