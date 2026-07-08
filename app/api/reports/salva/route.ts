@@ -28,9 +28,11 @@ export async function POST(req: NextRequest) {
   const { data: pub } = admin.storage.from('reports').getPublicUrl(path)
   const fileUrl = pub?.publicUrl || ''
 
+  // Un sotto-master selezionato arriva come "m:<id>": non è un cliente_id valido (uuid) -> null
+  const clienteIdValido = (typeof clienteId === 'string' && clienteId.startsWith('m:')) ? null : (clienteId || utente?.cliente_id || null)
   const { data: rec, error } = await admin.from('reports_generati').insert({
     master_id: utente?.master_id,
-    cliente_id: clienteId || utente?.cliente_id || null,
+    cliente_id: clienteIdValido,
     tipo: tipo || 'spedizioni',
     filtri: filtri || '',
     formato: formato || 'pdf',
