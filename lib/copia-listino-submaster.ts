@@ -26,13 +26,6 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   const corriereIds = [...new Set(fasceSrc.map((f: any) => f.corriere_id).filter(Boolean))]
   const zonaIds = [...new Set(fasceSrc.map((f: any) => f.zona_id).filter(Boolean))]
 
-  // Se risincronizzo, svuoto fasce/suppl/link del sotto-master (tengo corrieri e zone, li rimappo per nome)
-  if (opts?.force && mieiIds.length) {
-    await admin.from('listini_corrieri_fasce').delete().in('listino_id', mieiIds)
-    await admin.from('listini_corrieri_supplementi').delete().in('listino_id', mieiIds)
-    await admin.from('listini_corrieri_corrieri').delete().in('listino_id', mieiIds)
-  }
-
   // 1) CORRIERI (contratti): uno per il sotto-master per ciascuno del padre (riuso per nome)
   const { data: corrSrc } = corriereIds.length ? await admin.from('corrieri').select('*').in('id', corriereIds) : { data: [] }
   const { data: corrMiei } = await admin.from('corrieri').select('id,nome_contratto').eq('master_id', subMasterId)
@@ -86,8 +79,16 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   }
   if (!subListinoId) return { ok: false, reason: 'errore creazione listino' }
 
-  // 4) LINK contratti attivati
   const subCorrIds = [...new Set(mapCorr.values())]
+
+  // Risincronizzazione: rimuovo SOLO le fasce/supplementi dei corrieri ereditati dal master
+  // (così i contratti aggiunti dal sotto-master restano intatti), poi li reinserisco aggiornati.
+  if (opts?.force && subCorrIds.length && mieiIds.length) {
+    await admin.from('listini_corrieri_fasce').delete().in('listino_id', mieiIds).in('corriere_id', subCorrIds)
+    await admin.from('listini_corrieri_supplementi').delete().in('listino_id', mieiIds).in('corriere_id', subCorrIds)
+  }
+
+  // 4) LINK contratti attivati
   const { data: linkEsist } = await admin.from('listini_corrieri_corrieri').select('corriere_id').eq('listino_id', subListinoId)
   const linkSet = new Set((linkEsist || []).map((l: any) => l.corriere_id))
   const nuoviLink = subCorrIds.filter((cid) => !linkSet.has(cid)).map((cid) => ({ listino_id: subListinoId, corriere_id: cid }))

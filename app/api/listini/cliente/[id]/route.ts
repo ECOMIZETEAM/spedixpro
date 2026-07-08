@@ -9,8 +9,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
   const body = await req.json()
   const { nome, corriere_id, fattore_volume, fasce, supplementi, solo_peso_reale } = body
 
-  // Aggiorna nome + flag "solo peso reale" (il cliente paga sempre sul peso reale)
-  await supabase.from('listini_clienti').update({ nome, solo_peso_reale: !!solo_peso_reale }).eq('id', id)
+  // Aggiorna nome + flag "solo peso reale" + fattore volume (usato anche per la copia ai sotto-master)
+  await supabase.from('listini_clienti').update({ nome, solo_peso_reale: !!solo_peso_reale, ...(fattore_volume !== undefined ? { fattore_volume } : {}) }).eq('id', id)
   // Fattore volume per-corriere: salvato sulla riga di aggancio listino+corriere
   if (corriere_id) {
     await supabase.from('listini_clienti_corrieri').update({ fattore_volume }).eq('listino_id', id).eq('corriere_id', corriere_id)
@@ -118,6 +118,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
       if (error) return NextResponse.json({ error: error.message }, { status: 400 })
     }
   }
+
+  // PROPAGAZIONE: aggiorna in automatico il Listino Corrieri dei sotto-master che hanno
+  // ereditato questo listino (parent_listino_id) — prezzi, supplementi, peso/volume.
+  try {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const { data: subs } = await admin.from('masters').select('id').eq('parent_listino_id', id)
+    if (subs?.length) {
+      const { copiaListinoAlSottoMaster } = await import('@/lib/copia-listino-submaster')
+      for (const s of subs) await copiaListinoAlSottoMaster(admin, s.id, { force: true })
+    }
+  } catch (e) { console.error('Propagazione listino ai sotto-master:', e) }
 
   return NextResponse.json({ ok: true })
 }
