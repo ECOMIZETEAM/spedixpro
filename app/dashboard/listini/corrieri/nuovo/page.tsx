@@ -108,12 +108,6 @@ export default function ListinoCorrierePage() {
   const [aperturaGiacenza, setAperturaGiacenza] = useState(0)
   const [ritiroPrezzo, setRitiroPrezzo] = useState(0)
   const [ritiroPercNolo, setRitiroPercNolo] = useState(0)
-  const [ereditato, setEreditato] = useState<any>(null)   // sotto-master: prezzi assegnati dal padre (pannello informativo)
-
-  useEffect(() => {
-    fetch('/api/listini/corrieri/ereditato').then(r=>r.json()).then(d=>{ if(d?.ereditato) setEreditato(d) }).catch(()=>{})
-  }, [])
-
   async function carica(corriereDaSelezionare?: string) {
     setLoading(true)
     const url = corriereDaSelezionare ? `/api/listini/corrieri?corriere=${corriereDaSelezionare}` : '/api/listini/corrieri'
@@ -212,50 +206,6 @@ export default function ListinoCorrierePage() {
     borderBottom:tab===t?'2px solid #f97316':'2px solid transparent',
     whiteSpace:'nowrap' as const
   })
-
-  // SOTTO-MASTER: vede (sola lettura) il Listino Corrieri assegnato dal master padre,
-  // con lo STESSO aspetto dell'editor (tabella peso × zona). Lo configura il master.
-  if (ereditato) {
-    const thS = {textAlign:'left' as const,padding:'8px 10px',fontSize:'11px',fontWeight:'700' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}
-    return (
-      <div>
-        <div style={{marginBottom:'16px'}}>
-          <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Listino Corrieri</h1>
-          <p style={{color:'#666',fontSize:'13px',marginTop:'4px'}}>Prezzi assegnati dal tuo master (<b>{ereditato.listinoNome}</b>) — sono i costi che paghi tu. La configurazione la gestisce il master.</p>
-        </div>
-        {!ereditato.corrieri?.length ? (
-          <div style={{padding:'40px',textAlign:'center' as const,color:'#666',background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db'}}>Il tuo master non ha ancora impostato prezzi nel listino assegnato.</div>
-        ) : ereditato.corrieri.map((c:any,ci:number)=>{
-          const zoneNames:string[] = Object.keys(c.zone)
-          const pesoMap = new Map<string,{peso_max:number,tipo:string}>()
-          for (const zn of zoneNames) for (const r of c.zone[zn]) pesoMap.set(`${r.tipo}_${r.peso_max}`, {peso_max:r.peso_max, tipo:r.tipo})
-          const pesoRows = [...pesoMap.values()].sort((a,b)=>a.peso_max-b.peso_max)
-          const prezzo = (zn:string,pr:{peso_max:number,tipo:string})=>{ const f=(c.zone[zn]||[]).find((r:any)=>r.peso_max===pr.peso_max && r.tipo===pr.tipo); return f?`€ ${Number(f.prezzo).toFixed(2)}`:'—' }
-          return (
-            <div key={ci} style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden',marginBottom:'16px'}}>
-              <div style={{padding:'12px 16px',borderBottom:'1px solid #eee',fontSize:'15px',fontWeight:'700',color:'#1a1a1a'}}>{c.corriere}</div>
-              <div style={{padding:'12px 16px',overflowX:'auto' as const}}>
-                <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12.5px'}}>
-                  <thead><tr style={{background:'#f9fafb'}}>
-                    <th style={thS}>Peso (kg)</th>
-                    {zoneNames.map(zn=><th key={zn} style={{...thS,textAlign:'center' as const}}>{zn}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {pesoRows.map((pr,ri)=>(
-                      <tr key={ri} style={{borderBottom:'1px solid #f1f5f9'}}>
-                        <td style={{padding:'8px 10px',fontWeight:'600',color:'#1a1a1a',whiteSpace:'nowrap' as const}}>{pr.tipo==='oltre'?'oltre':'fino a'} {pr.peso_max}</td>
-                        {zoneNames.map(zn=><td key={zn} style={{padding:'8px 10px',textAlign:'center' as const,color:'#1a1a1a'}}>{prezzo(zn,pr)}</td>)}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    )
-  }
 
   if (loading) {
     return <div style={{padding:'40px',textAlign:'center' as const,color:'#666'}}>Caricamento...</div>
