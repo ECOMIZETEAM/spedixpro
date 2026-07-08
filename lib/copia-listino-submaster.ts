@@ -1,3 +1,23 @@
+// Propaga a CASCATA le modifiche di un listino a tutta la rete sottostante:
+// - i sotto-master a cui è assegnato questo listino (parent_listino_id = listinoId)
+//   vengono ri-materializzati (copiaListinoAlSottoMaster force);
+// - poi, ricorsivamente, ogni loro discendente (così le modifiche scendono lungo la catena).
+// Idempotente. Ritorna quanti master sono stati aggiornati.
+export async function propagaListinoACascata(admin: any, listinoId: string): Promise<number> {
+  const { data: diretti } = await admin.from('masters').select('id').eq('parent_listino_id', listinoId)
+  const queue: string[] = (diretti || []).map((s: any) => s.id)
+  const visti = new Set<string>()
+  while (queue.length) {
+    const subId = queue.shift() as string
+    if (!subId || visti.has(subId)) continue
+    visti.add(subId)
+    try { await copiaListinoAlSottoMaster(admin, subId, { force: true }) } catch (e) { console.error('propaga sub', subId, e) }
+    const { data: figli } = await admin.from('masters').select('id').eq('parent_master_id', subId)
+    for (const f of (figli || [])) if (!visti.has(f.id)) queue.push(f.id)
+  }
+  return visti.size
+}
+
 // Copia il listino che il master padre ha ASSEGNATO al sotto-master
 // (masters.parent_listino_id, un listini_clienti) nella struttura PROPRIA del
 // sotto-master: corrieri (contratti attivati) + zone (+CAP) + listini_corrieri

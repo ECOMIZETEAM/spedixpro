@@ -154,8 +154,9 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       })
       const data = await res.json()
       if (data.error) { setMsg('Errore: '+data.error); setSaving(false); return }
-      setMsg('✓ Listino salvato!')
-      setTimeout(() => setMsg(''), 3000)
+      const prop = Number(data.propagati || 0)
+      setMsg(prop > 0 ? `✓ Listino salvato e propagato a ${prop} master collegati` : '✓ Listino salvato!')
+      setTimeout(() => setMsg(''), 4000)
     } catch { setMsg('Errore di rete') }
     setSaving(false)
   }

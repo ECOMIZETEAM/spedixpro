@@ -119,19 +119,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
     }
   }
 
-  // PROPAGAZIONE: aggiorna in automatico il Listino Corrieri dei sotto-master che hanno
-  // ereditato questo listino (parent_listino_id) — prezzi, supplementi, peso/volume.
+  // PROPAGAZIONE A CASCATA: appena salvo, aggiorno il Listino Corrieri dei sotto-master che
+  // hanno ereditato questo listino (parent_listino_id) — prezzi, supplementi, peso/volume — e
+  // così via lungo tutta la rete sottostante.
+  let propagati = 0
   try {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { propagaListinoACascata } = await import('@/lib/copia-listino-submaster')
     const admin = createAdminSupabase()
-    const { data: subs } = await admin.from('masters').select('id').eq('parent_listino_id', id)
-    if (subs?.length) {
-      const { copiaListinoAlSottoMaster } = await import('@/lib/copia-listino-submaster')
-      for (const s of subs) await copiaListinoAlSottoMaster(admin, s.id, { force: true })
-    }
+    propagati = await propagaListinoACascata(admin, id)
   } catch (e) { console.error('Propagazione listino ai sotto-master:', e) }
 
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, propagati })
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{id:string}> }) {
