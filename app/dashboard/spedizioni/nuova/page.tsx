@@ -36,7 +36,7 @@ const CARRIERS: Record<string,{nome:string,colore:string}> = {
   brt:{nome:'BRT',colore:'#e2001a'},
   poste:{nome:'Poste Italiane',colore:'#ffcc00'},
   dhl:{nome:'DHL Express',colore:'#ffcc00'},
-  spediamopro:{nome:'SpediamoPro',colore:'#f97316'},
+  spediamopro:{nome:'',colore:'#f97316'},
 }
 
 export default function NuovaSpedizionePage() {

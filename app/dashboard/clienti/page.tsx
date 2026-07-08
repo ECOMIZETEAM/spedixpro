@@ -140,7 +140,7 @@ export default function ClientiPage() {
                     <td style={{padding:'10px 14px',fontSize:'12px'}}>
                       {(c.contratti_attivi && c.contratti_attivi.length)
                         ? c.contratti_attivi.map((ct:any, i:number)=>(
-                            <div key={i} style={{marginBottom:'2px',color:'#1a1a1a'}}><span style={{fontWeight:'700'}}>{ct.tipo}</span> {ct.nome_contratto}</div>
+                            <div key={i} style={{marginBottom:'2px',color:'#1a1a1a'}}>{ct.tipo && !['spediamopro','spedisci'].includes(ct.tipo) && <span style={{fontWeight:'700'}}>{ct.tipo} </span>}{ct.nome_contratto}</div>
                           ))
                         : <span style={{color:'#1a1a1a'}}>-</span>}
                     </td>
