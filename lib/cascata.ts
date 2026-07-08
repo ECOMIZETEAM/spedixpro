@@ -1,4 +1,4 @@
-import { calcolaPrezzoListino, calcolaPrezzoCorriere } from '@/lib/pricing'
+import { calcolaPrezzoListino } from '@/lib/pricing'
 import { registraMovimentoMaster } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
@@ -21,11 +21,6 @@ async function costruisciCatena(
     packages: any[]
     cap?: string
     paese?: string
-    // Nome contratto del corriere usato: serve per trovare, su OGNI master della catena,
-    // il suo corriere equivalente e addebitare dal SUO listino corrieri.
-    corriereNome?: string
-    contrassegno?: number
-    assicurazione?: number
   }
 ): Promise<{ catena: LivelloCatena[]; errore?: string }> {
   const catena: LivelloCatena[] = []
@@ -46,43 +41,20 @@ async function costruisciCatena(
     let prezzo = 0
 
     if (isProprietario) {
-      // Il proprietario del corriere paga il costo reale dell'API.
       prezzo = Number(params.costoSpedizione || 0)
     } else {
-      // Addebito dal LISTINO CORRIERI del master stesso (il suo costo, contrassegno e
-      // assicurazione inclusi), coerente con quello che paga per le sue spedizioni proprie.
-      let calcolato = false
-      if (params.corriereNome) {
-        // Il corriere equivalente di QUESTO master (stesso nome contratto).
-        const { data: mCorr } = await adminDb.from('corrieri')
-          .select('id').eq('master_id', m.id).eq('nome_contratto', params.corriereNome).limit(1).maybeSingle()
-        if (mCorr?.id) {
-          const pesoReale = (params.packages || []).reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
-          const pz = await calcolaPrezzoCorriere(adminDb, {
-            corriereId: mCorr.id, masterId: m.id,
-            provincia: params.provincia, cap: params.cap, paese: params.paese,
-            pesoReale, packages: params.packages,
-            contrassegno: params.contrassegno, assicurazione: params.assicurazione,
-          })
-          if (pz != null) { prezzo = pz; calcolato = true }
-        }
+      if (!m.parent_listino_id) {
+        return { catena, errore: `Il master "${m.nome}" non ha un listino assegnato dal livello superiore.` }
       }
-      // Fallback (il master non ha un listino corrieri per questo contratto): comportamento
-      // precedente, dal listino CLIENTI che il padre gli ha assegnato (parent_listino_id).
-      if (!calcolato) {
-        if (!m.parent_listino_id) {
-          return { catena, errore: `Il master "${m.nome}" non ha un listino corrieri né un listino assegnato dal livello superiore.` }
-        }
-        const ris = await calcolaPrezzoListino(adminDb, {
-          listinoId: m.parent_listino_id,
-          provincia: params.provincia,
-          packages: params.packages,
-          cap: params.cap,
-          paese: params.paese,
-        })
-        if (!ris) return { catena, errore: `Nessuna tariffa nel listino del master "${m.nome}".` }
-        prezzo = ris.prezzo
-      }
+      const ris = await calcolaPrezzoListino(adminDb, {
+        listinoId: m.parent_listino_id,
+        provincia: params.provincia,
+        packages: params.packages,
+        cap: params.cap,
+        paese: params.paese,
+      })
+      if (!ris) return { catena, errore: `Nessuna tariffa nel listino del master "${m.nome}".` }
+      prezzo = ris.prezzo
     }
 
     catena.push({
@@ -109,9 +81,6 @@ export async function verificaCreditoCatena(
     costoSpedizione?: number
     cap?: string
     paese?: string
-    corriereNome?: string
-    contrassegno?: number
-    assicurazione?: number
   }
 ): Promise<{ ok: boolean; errore?: string }> {
   const { catena, errore } = await costruisciCatena(supabase, {
@@ -122,9 +91,6 @@ export async function verificaCreditoCatena(
     packages: params.packages,
     cap: params.cap,
     paese: params.paese,
-    corriereNome: params.corriereNome,
-    contrassegno: params.contrassegno,
-    assicurazione: params.assicurazione,
   })
   if (errore) return { ok: false, errore }
 
@@ -150,9 +116,6 @@ export async function addebitaCatena(
     createdBy: string | null
     cap?: string
     paese?: string
-    corriereNome?: string
-    contrassegno?: number
-    assicurazione?: number
   }
 ): Promise<void> {
   const adminMov = createAdminSupabase()
@@ -164,9 +127,6 @@ export async function addebitaCatena(
     packages: params.packages,
     cap: params.cap,
     paese: params.paese,
-    corriereNome: params.corriereNome,
-    contrassegno: params.contrassegno,
-    assicurazione: params.assicurazione,
   })
 
   for (const liv of catena) {
@@ -202,9 +162,6 @@ export async function rimborsaCatena(
     createdBy: string | null
     cap?: string
     paese?: string
-    corriereNome?: string
-    contrassegno?: number
-    assicurazione?: number
   }
 ): Promise<void> {
   const adminMov = createAdminSupabase()
@@ -216,9 +173,6 @@ export async function rimborsaCatena(
     packages: params.packages,
     cap: params.cap,
     paese: params.paese,
-    corriereNome: params.corriereNome,
-    contrassegno: params.contrassegno,
-    assicurazione: params.assicurazione,
   })
 
   for (const liv of catena) {

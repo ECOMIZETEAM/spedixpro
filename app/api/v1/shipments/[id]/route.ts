@@ -31,7 +31,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const { id } = await params
   const admin = createAdminSupabase()
   const { data: sped } = await admin.from('spedizioni')
-    .select('id,master_id,cliente_id,numero,dest_nome,dest_provincia,dest_cap,dest_paese,costo_totale,costo_spedizione,contrassegno,assicurazione,corriere_id,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,stato')
+    .select('id,master_id,cliente_id,numero,dest_nome,dest_provincia,dest_cap,dest_paese,costo_totale,costo_spedizione,corriere_id,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,stato')
     .eq('id', id).maybeSingle()
   if (!sped || sped.cliente_id !== ctx.clienteId) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
   if (sped.stato === 'annullata') return NextResponse.json({ success: true, already: true })
@@ -57,7 +57,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   }
   // Rimborso a cascata ai master (speculare all'addebito in creazione)
   try {
-    const { data: corriere } = await admin.from('corrieri').select('master_id,nome_contratto').eq('id', sped.corriere_id).single()
+    const { data: corriere } = await admin.from('corrieri').select('master_id').eq('id', sped.corriere_id).single()
     if (corriere?.master_id) {
       const packages = (Array.isArray(sped.colli_dettaglio) && sped.colli_dettaglio.length)
         ? sped.colli_dettaglio.map((c: any) => ({ weight: sped.peso_reale || 1, length: c.lunghezza, width: c.larghezza, height: c.altezza }))
@@ -66,7 +66,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         masterDirettoId: sped.master_id, corriereOwnerId: corriere.master_id,
         costoSpedizione: Number(sped.costo_spedizione || 0), provincia: sped.dest_provincia || '',
         cap: sped.dest_cap || '', paese: sped.dest_paese || 'IT', packages,
-        corriereNome: corriere.nome_contratto, contrassegno: Number(sped.contrassegno || 0), assicurazione: Number(sped.assicurazione || 0),
         numero: sped.numero, destNome: sped.dest_nome || '', spedizioneId: sped.id, createdBy: null,
       })
     }
