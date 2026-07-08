@@ -153,7 +153,7 @@ export async function calcolaPrezzoListino(
       let d:any = null; try { d = JSON.parse(sp.descrizione) } catch {}
       const soglia = Number(d?.soglia_kg) || 0
       const prezzoKg = Number(sp.valore) || 0
-      if (soglia > 0 && prezzoKg > 0 && pesoFatturato > soglia) sponda = (pesoFatturato - soglia) * prezzoKg
+      if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) sponda = pesoFatturato * prezzoKg
     }
   } catch {}
 
@@ -284,7 +284,7 @@ export async function calcolaPrezzoCorriere(
     let d: any = null; try { d = JSON.parse(spondaRow.descrizione) } catch {}
     const soglia = Number(d?.soglia_kg) || 0
     const prezzoKg = Number(spondaRow.valore) || 0
-    if (soglia > 0 && prezzoKg > 0 && pesoFatturato > soglia) prezzo += (pesoFatturato - soglia) * prezzoKg
+    if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) prezzo += pesoFatturato * prezzoKg
   }
 
   prezzo += applicaScaglione('contrassegno', cod)
@@ -455,7 +455,7 @@ export async function creaCalcolatoreCorriere(
       let sd: any = null; try { sd = JSON.parse(spRow.descrizione) } catch {}
       const soglia = Number(sd?.soglia_kg) || 0
       const prezzoKg = Number(spRow.valore) || 0
-      if (soglia > 0 && prezzoKg > 0 && pesoFatturato > soglia) prezzo += (pesoFatturato - soglia) * prezzoKg
+      if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) prezzo += pesoFatturato * prezzoKg
     }
     prezzo += applica('contrassegno', cod)
     prezzo += applica('assicurazione', ass)
@@ -562,7 +562,7 @@ export async function creaCalcolatoreListinoCliente(
       let sd: any = null; try { sd = JSON.parse(spRow.descrizione) } catch {}
       const soglia = Number(sd?.soglia_kg) || 0
       const prezzoKg = Number(spRow.valore) || 0
-      if (soglia > 0 && prezzoKg > 0 && pesoFatturato > soglia) prezzo += (pesoFatturato - soglia) * prezzoKg
+      if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) prezzo += pesoFatturato * prezzoKg
     }
     prezzo += applica('contrassegno', cod)
     prezzo += applica('assicurazione', ass)

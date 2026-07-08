@@ -157,8 +157,9 @@ export async function POST(req: NextRequest) {
   function calcolaSponda(corriereId: string, pesoFatt: number): number {
     const cfg = spondaPerCorriere.get(corriereId)
     if (!cfg) return 0
-    if (pesoFatt <= cfg.soglia) return 0
-    return Math.round((pesoFatt - cfg.soglia) * cfg.prezzoKg * 100) / 100
+    // La soglia è solo il trigger: da lì in su il prezzo/kg si applica sul TOTALE dei kg.
+    if (pesoFatt < cfg.soglia) return 0
+    return Math.round(pesoFatt * cfg.prezzoKg * 100) / 100
   }
 
   // Base percentuale: 'totale' = intero importo del supplemento; 'differenza' = importo

@@ -406,7 +406,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       {tab==='extra' && (
         <div style={{padding:'16px'}}>
           <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',marginBottom:'4px'}}>Sponda idraulica (supplemento peso)</div>
-          <div style={{fontSize:'12px',color:'#666',marginBottom:'14px'}}>Sopra la soglia si aggiunge un costo per ogni kg eccedente, sul peso fatturato (volume). Es: soglia 150kg, 0,03 €/kg → 200kg = +(200−150)×0,03 = +1,50 €.</div>
+          <div style={{fontSize:'12px',color:'#666',marginBottom:'14px'}}>La soglia è solo il trigger: da quel peso in su, il prezzo/kg si applica sul <b>totale dei kg</b> (peso fatturato). Es: soglia 200kg, 0,03 €/kg → 220kg = +220×0,03 = +6,60 €.</div>
           <div style={{display:'flex',gap:'20px',alignItems:'flex-end',flexWrap:'wrap' as const}}>
             <div>
               <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Soglia (kg)</label>
