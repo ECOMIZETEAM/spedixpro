@@ -48,6 +48,8 @@ export default function NuovaSpedizionePage() {
   const [dest, setDest] = useState({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',paese:'IT',email:'',telefono:'',note:'',rif:'',ordine:''})
   const [suggComuni, setSuggComuni] = useState<any[]>([])
   const [showSugg, setShowSugg] = useState(false)
+  const [suggDest, setSuggDest] = useState<any[]>([])   // rubrica destinatari
+  const [showSuggDest, setShowSuggDest] = useState(false)
   const [richiediRitiro, setRichiediRitiro] = useState(false)
   const [ritiroData, setRitiroData] = useState(new Date().toISOString().split('T')[0])
   const [ritiroOrario, setRitiroOrario] = useState('mattina')
@@ -259,7 +261,33 @@ export default function NuovaSpedizionePage() {
             <div style={cardH}>Dati Destinatario</div>
             <div style={cardB}>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'12px'}}>
-                <div><label style={lbl}>Nominativo *</label><input value={dest.nome} onChange={e=>setDest({...dest,nome:e.target.value})} placeholder="Mario Rossi" style={inp}/></div>
+                <div style={{position:'relative'}}>
+                  <label style={lbl}>Nominativo *</label>
+                  <input value={dest.nome} autoComplete="off"
+                    onChange={async e=>{
+                      const v=e.target.value
+                      setDest(d=>({...d,nome:v}))
+                      if(v.trim().length>=2){
+                        try{ const r=await fetch('/api/destinatari/cerca?q='+encodeURIComponent(v)+(clienteId?'&clienteId='+encodeURIComponent(clienteId):'')); const j=await r.json(); setSuggDest(Array.isArray(j)?j:[]); setShowSuggDest(true) }catch{ setSuggDest([]) }
+                      } else { setSuggDest([]); setShowSuggDest(false) }
+                    }}
+                    onFocus={()=>{ if(suggDest.length) setShowSuggDest(true) }}
+                    onBlur={()=>setTimeout(()=>setShowSuggDest(false),200)}
+                    placeholder="Mario Rossi" style={inp}/>
+                  {showSuggDest && suggDest.length>0 && (
+                    <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:50,background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',maxHeight:'240px',overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}}>
+                      {suggDest.map((c:any,i:number)=>(
+                        <div key={i} onMouseDown={()=>{ setDest(d=>({...d,nome:c.nome,indirizzo:c.indirizzo||d.indirizzo,citta:c.citta||d.citta,provincia:c.provincia||d.provincia,cap:c.cap||d.cap,paese:c.paese||d.paese,email:c.email||d.email,telefono:c.telefono||d.telefono})); setShowSuggDest(false) }}
+                          style={{padding:'8px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
+                          onMouseEnter={e=>(e.currentTarget.style.background='#f9fafb')}
+                          onMouseLeave={e=>(e.currentTarget.style.background='#fff')}>
+                          <div style={{fontWeight:600}}>{c.nome}</div>
+                          <div style={{color:'#999',fontSize:'11px'}}>{[c.indirizzo,c.citta,c.provincia&&`(${c.provincia})`,c.cap].filter(Boolean).join(' ')}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <div><label style={lbl}>Paese</label>
                   <select value={dest.paese} onChange={e=>setDest({...dest,paese:e.target.value})} style={inp}>
                     <option value="IT">Italia</option><option value="AT">Austria</option><option value="BE">Belgio</option><option value="BG">Bulgaria</option><option value="HR">Croazia</option><option value="DK">Danimarca</option><option value="EE">Estonia</option><option value="FI">Finlandia</option><option value="FR">Francia</option><option value="DE">Germania</option><option value="GR">Grecia</option><option value="IE">Irlanda</option><option value="LV">Lettonia</option><option value="LT">Lituania</option><option value="LU">Lussemburgo</option><option value="MC">Monaco</option><option value="NL">Paesi Bassi</option><option value="PL">Polonia</option><option value="PT">Portogallo</option><option value="GB">Regno Unito</option><option value="CZ">Rep. Ceca</option><option value="RO">Romania</option><option value="SK">Slovacchia</option><option value="SI">Slovenia</option><option value="ES">Spagna</option><option value="SE">Svezia</option><option value="HU">Ungheria</option>
