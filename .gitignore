@@ -10,3 +10,13 @@ node_modules/
 # File di backup locali
 *.bak_*
 tsconfig.tsbuildinfo
+.env*
+
+# File temporanei di debug / log / patch (non committare)
+_dbg*.txt
+_debug*.txt
+_patch*.ps1
+buildlog.txt
+build_log.txt
+npmlog*.txt
+blocco_contratto.txt
