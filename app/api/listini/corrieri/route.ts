@@ -7,34 +7,57 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ listino: null, corrieri: [], fasce: [], supplementi: [] })
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
 
-  // Tutti i listini del master. Il canonico (dove si salva) è il più vecchio scelto
-  // in modo DETERMINISTICO (created_at, poi id) così non cambia tra una richiesta e l'altra.
+  // Ogni corriere ha la SUA riga listini_corrieri (col suo fattore_volume, solo_peso_reale, fasce).
   const { data: listiniMaster } = await supabase.from('listini_corrieri')
     .select('*').eq('master_id', utente?.master_id)
     .order('created_at', { ascending: true, nullsFirst: true }).order('id', { ascending: true })
-  let listino = (listiniMaster || [])[0]
-  if (!listino) {
-    const { data: nuovoListino } = await supabase.from('listini_corrieri').insert({
-      master_id: utente?.master_id, nome: 'Listino Corrieri',
-    }).select().single()
-    listino = nuovoListino
-  }
-  const masterListinoIds = [...new Set([...(listiniMaster || []).map((l: any) => l.id), listino?.id].filter(Boolean))]
+  const masterListinoIds = [...new Set((listiniMaster || []).map((l: any) => l.id).filter(Boolean))]
+  const _inIds = masterListinoIds.length ? masterListinoIds : ['00000000-0000-0000-0000-000000000000']
 
   const { searchParams } = new URL(req.url)
   const corriereId = searchParams.get('corriere')
 
+  // Elenco corrieri del listino = UNIONE tra le righe listini_corrieri (fonte primaria, una per
+  // corriere) e la vecchia tabella di aggancio (storica/incompleta): così nessun contratto resta nascosto.
+  const _mappaCorr = new Map<string, any>()
+  for (const l of (listiniMaster || [])) { if (l.corriere_id) _mappaCorr.set(l.corriere_id, null) }
   const { data: corrieriAssegnati } = await supabase.from('listini_corrieri_corrieri')
     .select('corriere_id, corrieri(id,nome_contratto,tipo)')
-    .in('listino_id', masterListinoIds)
-  const _mappaCorr = new Map<string, any>()
-  for (const r of (corrieriAssegnati || [])) { const c = (r as any).corrieri; if (c && !_mappaCorr.has(c.id)) _mappaCorr.set(c.id, c) }
-  const corrieri = [..._mappaCorr.values()]
+    .in('listino_id', _inIds)
+  for (const r of (corrieriAssegnati || [])) { const c = (r as any).corrieri; if (c) _mappaCorr.set(c.id, c) }
+  // completa i nomi dei corrieri presenti solo come riga listino (non nell'aggancio)
+  const idsSenzaNome = [..._mappaCorr.entries()].filter(([, v]) => !v).map(([k]) => k)
+  if (idsSenzaNome.length) {
+    const { data: cc } = await supabase.from('corrieri').select('id,nome_contratto,tipo').in('id', idsSenzaNome)
+    for (const c of (cc || [])) _mappaCorr.set(c.id, c)
+  }
+  const corrieri = [..._mappaCorr.values()].filter(Boolean)
 
   const { data: tuttiICorrieri } = await supabase.from('corrieri').select('id,nome_contratto').eq('master_id', utente?.master_id)
   const corrieriDisponibili = (tuttiICorrieri||[]).filter(c => !corrieri.some((x:any) => x.id === c.id))
 
   const corriereSelezionato = corrieri.find((c:any) => c.id === corriereId) || corrieri[0]
+
+  // La riga del corriere selezionato è la fonte del SUO fattore/solo_peso_reale. Se manca, la creo
+  // (ereditando il fattore dalla riga più vecchia come default): da qui in poi è per-corriere.
+  let listino = (listiniMaster || []).find((l:any) => l.corriere_id === corriereSelezionato?.id) || null
+  if (!listino && corriereSelezionato) {
+    const base: any = (listiniMaster || [])[0]
+    const { data: nuovo } = await supabase.from('listini_corrieri').insert({
+      master_id: utente?.master_id, corriere_id: corriereSelezionato.id,
+      nome: base?.nome || 'Listino Corrieri',
+      fattore_volume: base?.fattore_volume ?? 5000, solo_peso_reale: false, attivo: true,
+    }).select().single()
+    listino = nuovo
+    if (listino?.id && !masterListinoIds.includes(listino.id)) masterListinoIds.push(listino.id)
+  }
+  if (!listino) {
+    // nessun corriere ancora nel listino: placeholder per non rompere il salvataggio
+    const { data: nuovo } = await supabase.from('listini_corrieri').insert({
+      master_id: utente?.master_id, nome: 'Listino Corrieri',
+    }).select().single()
+    listino = nuovo
+  }
 
   let fasce: any[] = []
   let supplementi: any[] = []
