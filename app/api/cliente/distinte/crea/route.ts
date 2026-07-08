@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { fulfillSpedizioniShopify } from '@/lib/shopify'
 import { fulfillSpedizioniWoo } from '@/lib/wooFulfill'
 import { fulfillSpedizioniPrestashop } from '@/lib/prestashopFulfill'
+import { fulfillSpedizioniEbay } from '@/lib/ebayFulfill'
 import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -43,6 +44,7 @@ export async function POST(req: NextRequest) {
   try { fulfillEsiti = await fulfillSpedizioniShopify(supabase, validIds) } catch {}
   try { await fulfillSpedizioniWoo(supabase, validIds) } catch {}
   try { await fulfillSpedizioniPrestashop(supabase, validIds) } catch {}
+  try { await fulfillSpedizioniEbay(supabase, validIds) } catch {}
   // Chiusura borderò su spedisci.online (best-effort, solo corrieri tipo spedisci)
   try { await chiudiBorderoSpedisci(supabase, distinta.id) } catch {}
   return NextResponse.json({ ok: true, distintaId: distinta.id, numero: distinta.numero, totali: { colli: totaleColli, peso: totalePeso, spedizioni: validIds.length }, fulfill: fulfillEsiti })

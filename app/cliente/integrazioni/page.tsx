@@ -22,7 +22,7 @@ const PLATFORMS: { id: string; nome: string; attivo: boolean; colore: string; do
   { id: 'woocommerce', nome: 'WooCommerce',  attivo: true,  colore: '#96588a', dominio: 'woocommerce.com' },
   { id: 'prestashop',  nome: 'PrestaShop',   attivo: true,  colore: '#df0067', dominio: 'prestashop.com' },
   { id: 'amazon',      nome: 'Amazon',       attivo: false, colore: '#ff9900', dominio: 'amazon.com' },
-  { id: 'ebay',        nome: 'eBay',         attivo: false, colore: '#e53238', dominio: 'ebay.com' },
+  { id: 'ebay',        nome: 'eBay',         attivo: true,  colore: '#e53238', dominio: 'ebay.com' },
   { id: 'magento',     nome: 'Magento',      attivo: false, colore: '#f46f25', dominio: 'magento.com' },
   { id: 'wix',         nome: 'Wix',          attivo: false, colore: '#000000', dominio: 'wix.com' },
   { id: 'bigcommerce', nome: 'BigCommerce',  attivo: false, colore: '#121118', dominio: 'bigcommerce.com' },
@@ -78,6 +78,7 @@ export default function IntegrazioniPage() {
     if (id === 'shopify') setStep('shopify')
     if (id === 'prestashop') setStep('prestashop')
     if (id === 'woocommerce') setStep('woocommerce')
+    if (id === 'ebay') { setConnecting(true); window.location.href = '/api/integrazioni/ebay/install' }
   }
 
   async function connettiWoo() {
