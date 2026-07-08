@@ -18,7 +18,7 @@ export default function CreaDistintaPage() {
   const [msg, setMsg] = useState('')
 
   useEffect(() => {
-    fetch('/api/clienti/lista').then(r => r.json()).then(d => setClienti(Array.isArray(d) ? d : []))
+    fetch('/api/clienti/lista?conMaster=1').then(r => r.json()).then(d => setClienti(Array.isArray(d) ? d : []))
     fetch('/api/corrieri/lista').then(r => r.json()).then(d => setCorrieri(Array.isArray(d) ? d : []))
   }, [])
 

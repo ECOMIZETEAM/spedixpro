@@ -22,7 +22,7 @@ export default function ElencoRitiriPage() {
 
   useEffect(() => {
     carica()
-    fetch('/api/clienti/lista').then(r => r.json()).then(d => {
+    fetch('/api/clienti/lista?conMaster=1').then(r => r.json()).then(d => {
       setClienti(Array.isArray(d) ? d : (d?.clienti || []))
     }).catch(() => {})
   }, [])

@@ -7,15 +7,28 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
   const p = req.nextUrl.searchParams
-  const clienteId = p.get('clienteId')
-  const vettore = p.get('vettore')
+  const clienteIdRaw = p.get('clienteId')
+  // "m:<masterId>" = sotto-master agganciato (trattato come cliente): i suoi ritiri
+  const masterSel = clienteIdRaw && clienteIdRaw.startsWith('m:') ? clienteIdRaw.slice(2) : null
+  const clienteId = masterSel ? null : clienteIdRaw
   const codRitiro = p.get('codRitiro')
   const dal = p.get('dal')
   const al = p.get('al')
 
-  let query = supabase.from('ritiri')
+  let db: any = supabase
+  let masterFilter: string[] = [utente?.master_id]
+  if (masterSel && utente?.master_id) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const admin = createAdminSupabase()
+    const mieiDiscendenti = await sottoAlberoMasterIds(admin, utente.master_id)
+    masterFilter = mieiDiscendenti.includes(masterSel) ? await sottoAlberoMasterIds(admin, masterSel) : ['00000000-0000-0000-0000-000000000000']
+    db = admin
+  }
+
+  let query = db.from('ritiri')
     .select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
-    .eq('master_id', utente?.master_id)
+    .in('master_id', masterFilter)
     .order('created_at', { ascending: false })
     .limit(500)
 

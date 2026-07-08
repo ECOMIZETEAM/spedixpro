@@ -19,7 +19,7 @@ export default function ReportConsumabiliPage() {
   })
 
   useEffect(() => {
-    fetch('/api/clienti/lista').then(r=>r.json()).then(d=>setClienti(d||[]))
+    fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
     fetch('/api/reports/lista?tipo=consumabili').then(r=>r.json()).then(d=>setReports(d||[]))
   }, [])
 

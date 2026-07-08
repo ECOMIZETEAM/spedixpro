@@ -7,13 +7,25 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
   const p = req.nextUrl.searchParams
-  const clienteId = p.get('clienteId')
+  const clienteIdRaw = p.get('clienteId')
+  const masterSel = clienteIdRaw && clienteIdRaw.startsWith('m:') ? clienteIdRaw.slice(2) : null
+  const clienteId = masterSel ? null : clienteIdRaw
   const corriereId = p.get('corriereId')
   const dal = p.get('dal')
   const al = p.get('al')
-  let query = supabase.from('spedizioni')
+  let db: any = supabase
+  let masterFilter: string[] = [utente?.master_id]
+  if (masterSel && utente?.master_id) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const admin = createAdminSupabase()
+    const mieiDiscendenti = await sottoAlberoMasterIds(admin, utente.master_id)
+    masterFilter = mieiDiscendenti.includes(masterSel) ? await sottoAlberoMasterIds(admin, masterSel) : ['00000000-0000-0000-0000-000000000000']
+    db = admin
+  }
+  let query = db.from('spedizioni')
     .select('id,numero,mitt_nome,dest_nome,dest_citta,dest_cap,dest_provincia,peso_reale,peso_fatturato,colli,created_at,cliente_id,corriere_id,clienti(ragione_sociale)')
-    .eq('master_id', utente?.master_id)
+    .in('master_id', masterFilter)
     .is('distinta_id', null)
     .order('created_at', { ascending: false })
   if (clienteId) query = query.eq('cliente_id', clienteId)
@@ -32,8 +44,12 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const { spedizioniIds, clienteId, corriereId } = body
   if (!spedizioniIds?.length) return NextResponse.json({ error: 'Nessuna spedizione selezionata' }, { status: 400 })
-  const { data: speds } = await supabase.from('spedizioni')
-    .select('id,colli,peso_reale,costo_totale').in('id', spedizioniIds).eq('master_id', utente?.master_id)
+  // Sotto-master (clienteId = "m:<id>"): le spedizioni sono sue -> admin, cliente_id distinta = null
+  const masterSel = typeof clienteId === 'string' && clienteId.startsWith('m:') ? clienteId.slice(2) : null
+  let db: any = supabase
+  if (masterSel) { const { createAdminSupabase } = await import('@/lib/supabase-admin'); db = createAdminSupabase() }
+  const spedQ = db.from('spedizioni').select('id,colli,peso_reale,costo_totale').in('id', spedizioniIds)
+  const { data: speds } = masterSel ? await spedQ : await spedQ.eq('master_id', utente?.master_id)
   const totaleColli = (speds || []).reduce((s: number, x: any) => s + Number(x.colli || 1), 0)
   const totalePeso = (speds || []).reduce((s: number, x: any) => s + Number(x.peso_reale || 0), 0)
   const prezzoTotale = (speds || []).reduce((s: number, x: any) => s + Number(x.costo_totale || 0), 0)
@@ -43,11 +59,11 @@ export async function POST(req: NextRequest) {
   if (ultima?.numero) { const n = parseInt(String(ultima.numero).replace(/\D/g, '')); if (!isNaN(n)) numeroInt = n }
   const numeroDistinta = String(numeroInt + 1)
   const { data: distinta, error } = await supabase.from('distinte').insert({
-    master_id: utente?.master_id, cliente_id: clienteId || null, corriere_id: corriereId || null,
+    master_id: utente?.master_id, cliente_id: masterSel ? null : (clienteId || null), corriere_id: corriereId || null,
     numero: numeroDistinta, data: new Date().toISOString().split('T')[0], stato: 'chiusa',
     totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: (speds||[]).length, prezzo_totale: prezzoTotale,
   }).select().single()
   if (error || !distinta) return NextResponse.json({ error: error?.message || 'Errore' }, { status: 400 })
-  await supabase.from('spedizioni').update({ distinta_id: distinta.id }).in('id', spedizioniIds)
+  await db.from('spedizioni').update({ distinta_id: distinta.id }).in('id', spedizioniIds)
   return NextResponse.json({ success: true, distintaId: distinta.id, numero: numeroDistinta })
 }

@@ -19,7 +19,7 @@ export default function ReportSmsClientiPage() {
   })
 
   useEffect(() => {
-    fetch('/api/clienti/lista').then(r=>r.json()).then(d=>{ setClienti(d||[]); if(d?.[0]) setFiltri(f=>({...f,clienteId:d[0].id})) })
+    fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>{ setClienti(d||[]); if(d?.[0]) setFiltri(f=>({...f,clienteId:d[0].id})) })
     fetch('/api/reports/lista?tipo=sms-clienti').then(r=>r.json()).then(d=>setReports(d||[]))
   }, [])
 
