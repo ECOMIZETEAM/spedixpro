@@ -44,24 +44,24 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
 
-  // Spedizione PER CONTO DI UN SOTTO-MASTER (clienteId = "m:<id>"): usa il suo Listino Corrieri
-  // (quello che gli hai assegnato, materializzato) e ne addebiterà il credito. Serve admin (RLS).
+  // Spedizione PER CONTO DI UN SOTTO-MASTER (clienteId = "m:<id>"): la trattiamo come un cliente,
+  // col LISTINO CHE GLI HAI ASSEGNATO (masters.parent_listino_id, di tua proprietà → sempre
+  // aggiornato: peso volume, contrassegni, sponda, misure massime dai TUOI corrieri).
   const subMatch = (typeof body.clienteId === 'string' && body.clienteId.startsWith('m:')) ? body.clienteId.slice(2) : null
-  let dbP: any = supabase
-  let masterSub: string | null = null
+  let subListinoId: string | null = null
   if (subMatch && utente?.ruolo !== 'cliente' && utente?.master_id) {
-    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const admin = createAdminSupabase()
-    const disc = await sottoAlberoMasterIds(admin, utente.master_id)
-    if (!disc.includes(subMatch)) return NextResponse.json({ error: 'Sotto-master non autorizzato' }, { status: 403 })
-    dbP = admin; masterSub = subMatch
+    const { data: sm } = await admin.from('masters').select('parent_master_id,parent_listino_id').eq('id', subMatch).maybeSingle()
+    if (!sm || sm.parent_master_id !== utente.master_id) return NextResponse.json({ error: 'Sotto-master non autorizzato' }, { status: 403 })
+    subListinoId = sm.parent_listino_id || null
+    if (!subListinoId) return NextResponse.json({ error: 'Il sotto-master non ha un listino assegnato. Assegnaglielo dalla scheda master.' }, { status: 400 })
   }
 
-  // ─── SPEDIZIONE PROPRIA DEL MASTER o PER UN SOTTO-MASTER → tariffe da LISTINO CORRIERE ───
-  const isProprio = (utente?.ruolo !== 'cliente' && body.clienteId === '__proprio__') || !!masterSub
+  // ─── SPEDIZIONE PROPRIA DEL MASTER → tariffe da LISTINO CORRIERE ───
+  const isProprio = utente?.ruolo !== 'cliente' && body.clienteId === '__proprio__'
   if (isProprio) {
-    const masterIdP = masterSub || utente!.master_id
+    const masterIdP = utente!.master_id
     const colliP = Array.isArray(body.packages) && body.packages.length ? body.packages : [body.packages?.[0] || { weight: 1 }]
     const pesoRealeP = colliP.reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
     const provinciaP = (body.shipTo?.state || '').toUpperCase().trim()
@@ -71,14 +71,14 @@ export async function POST(req: NextRequest) {
 
     // Corrieri da quotare = quelli che hanno delle fasce prezzo nei listini del master
     // (indipendentemente da quale listino_id: l'editor salva sotto un listino unico).
-    const { data: listiniM } = await dbP.from('listini_corrieri').select('id').eq('master_id', masterIdP)
+    const { data: listiniM } = await supabase.from('listini_corrieri').select('id').eq('master_id', masterIdP)
     const listinoIdsM = (listiniM || []).map((l: any) => l.id)
     let corrieriDaQuotare: any[] = []
     if (listinoIdsM.length) {
-      const { data: fasceCorr } = await dbP.from('listini_corrieri_fasce').select('corriere_id').in('listino_id', listinoIdsM)
+      const { data: fasceCorr } = await supabase.from('listini_corrieri_fasce').select('corriere_id').in('listino_id', listinoIdsM)
       const ids = [...new Set((fasceCorr || []).map((f: any) => f.corriere_id).filter(Boolean))]
       if (ids.length) {
-        const { data: cs } = await dbP.from('corrieri').select('id,tipo,nome_contratto,attivo,settings').in('id', ids)
+        const { data: cs } = await supabase.from('corrieri').select('id,tipo,nome_contratto,attivo,settings').in('id', ids)
         corrieriDaQuotare = (cs || []).map((c: any) => ({ corriere_id: c.id, corrieri: c }))
       }
     }
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
       const corr: any = (lc as any).corrieri
       if (!corr || corr.attivo === false) continue
       if (superaMisureMax(corr.settings, pesoRealeP, colliP)) continue   // fuori misura per il suo scaglione
-      const prezzo = await calcolaPrezzoCorriere(dbP, {
+      const prezzo = await calcolaPrezzoCorriere(supabase, {
         corriereId: (lc as any).corriere_id, masterId: masterIdP,
         provincia: provinciaP, cap: capP, paese: paeseP,
         pesoReale: pesoRealeP, packages: colliP,
@@ -113,9 +113,14 @@ export async function POST(req: NextRequest) {
 
   const clienteId = utente?.ruolo === 'cliente' ? utente.cliente_id : body.clienteId
 
-  const { data: cliente } = await supabase
-    .from('clienti').select('master_id,listino_cliente_id').eq('id', clienteId).single()
-
+  let cliente: any
+  if (subMatch) {
+    // Sotto-master trattato come cliente: listino = quello assegnato (di tua proprietà → query ok)
+    cliente = { master_id: utente!.master_id, listino_cliente_id: subListinoId }
+  } else {
+    const { data } = await supabase.from('clienti').select('master_id,listino_cliente_id').eq('id', clienteId).single()
+    cliente = data
+  }
   if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
 
   // Mappa impostazioni per-contratto del cliente (contrassegno abilitato o no)

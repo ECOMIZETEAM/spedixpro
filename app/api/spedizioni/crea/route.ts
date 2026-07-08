@@ -20,51 +20,47 @@ export async function POST(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
   const body = await req.json()
 
-  // Spedizione PER CONTO DI UN SOTTO-MASTER (clienteId = "m:<id>"): equivale a una spedizione
-  // propria del sotto-master (usa il suo Listino Corrieri = quello assegnato, materializzato,
-  // e ne addebita il credito). Consentita solo verso i propri discendenti.
+  // Spedizione PER CONTO DI UN SOTTO-MASTER (clienteId = "m:<id>"): trattato come un cliente,
+  // col LISTINO CHE GLI HAI ASSEGNATO (masters.parent_listino_id) → stesse identiche funzioni
+  // (peso volume, contrassegni, sponda, misure). Si addebita il credito del sotto-master.
   const subMatch = (typeof body.clienteId === 'string' && body.clienteId.startsWith('m:')) ? body.clienteId.slice(2) : null
   let masterSub: string | null = null
+  let subListino: string | null = null
+  let subCredito = 0, subTipo = ''
   if (subMatch && utente?.ruolo !== 'cliente' && utente?.master_id) {
-    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
     const { createAdminSupabase: _adm } = await import('@/lib/supabase-admin')
     const _a = _adm()
-    const disc = await sottoAlberoMasterIds(_a, utente.master_id)
-    if (!disc.includes(subMatch)) return NextResponse.json({ error: 'Sotto-master non autorizzato' }, { status: 403 })
-    masterSub = subMatch
-    const { data: sm } = await _a.from('masters').select('credito,tipo_contratto').eq('id', subMatch).single()
-    const costoPrev = parseFloat(body.totalPrice) || 0
-    if (sm && sm.tipo_contratto === 'credito_scalare' && costoPrev > 0 && Number(sm.credito||0) < costoPrev) {
-      return NextResponse.json({ error: `Credito insufficiente del sotto-master: disponibili € ${Number(sm.credito||0).toFixed(2)}, spedizione € ${costoPrev.toFixed(2)}.` }, { status: 402 })
-    }
+    const { data: sm } = await _a.from('masters').select('parent_master_id,parent_listino_id,credito,tipo_contratto').eq('id', subMatch).maybeSingle()
+    if (!sm || sm.parent_master_id !== utente.master_id) return NextResponse.json({ error: 'Sotto-master non autorizzato' }, { status: 403 })
+    if (!sm.parent_listino_id) return NextResponse.json({ error: 'Il sotto-master non ha un listino assegnato.' }, { status: 400 })
+    masterSub = subMatch; subListino = sm.parent_listino_id; subCredito = Number(sm.credito || 0); subTipo = sm.tipo_contratto || ''
   }
 
-  // Spedizione propria del master (nessun cliente) o per conto di un sotto-master: costo = listino corriere.
-  const isProprio = (utente?.ruolo !== 'cliente' && body.clienteId === '__proprio__') || !!masterSub
+  // Spedizione propria del master (nessun cliente): costo = listino corriere.
+  const isProprio = utente?.ruolo !== 'cliente' && body.clienteId === '__proprio__'
 
-  const clienteId = utente?.ruolo === 'cliente' ? utente.cliente_id : (isProprio ? null : body.clienteId)
+  const clienteId = utente?.ruolo === 'cliente' ? utente.cliente_id : ((isProprio || masterSub) ? null : body.clienteId)
   let cliente: any = null
-  if (!isProprio) {
+  if (masterSub) {
+    cliente = { master_id: utente!.master_id, listino_cliente_id: subListino, tipo_contratto: subTipo, credito: subCredito, ragione_sociale: 'Sotto-master' }
+  } else if (!isProprio) {
     const { data } = await supabase.from('clienti').select('master_id,ragione_sociale,listino_cliente_id,vieta_inserimento,tipo_contratto,credito').eq('id', clienteId).single()
     cliente = data
     if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
-
     if (utente?.ruolo === 'cliente' && cliente.vieta_inserimento === true) return NextResponse.json({ error: 'Inserimento spedizioni non consentito per questo cliente.' }, { status: 403 })
+  }
 
-    // ── Blocco credito insufficiente (solo clienti "credito a scalare") ──────────
-    // Il costo a carico del cliente è il prezzo di listino (body.totalPrice).
+  // ── Blocco credito insufficiente (clienti/sotto-master "credito a scalare") ──
+  if (cliente && cliente.tipo_contratto === 'credito_scalare') {
     const costoPreventivo = parseFloat(body.totalPrice) || 0
-    if (cliente.tipo_contratto === 'credito_scalare' && costoPreventivo > 0) {
-      const creditoAttuale = Number(cliente.credito || 0)
-      if (creditoAttuale < costoPreventivo) {
-        return NextResponse.json({
-          error: `Credito insufficiente: disponibili € ${creditoAttuale.toFixed(2)}, spedizione € ${costoPreventivo.toFixed(2)}.`,
-        }, { status: 402 })
-      }
+    if (costoPreventivo > 0 && Number(cliente.credito || 0) < costoPreventivo) {
+      return NextResponse.json({
+        error: `Credito insufficiente: disponibili € ${Number(cliente.credito || 0).toFixed(2)}, spedizione € ${costoPreventivo.toFixed(2)}.`,
+      }, { status: 402 })
     }
   }
 
-  const masterId = masterSub || (isProprio ? utente!.master_id : cliente.master_id)
+  const masterId = isProprio ? utente!.master_id : cliente.master_id
 
   let corriereRecord: any = null
 
@@ -172,6 +168,25 @@ export async function POST(req: NextRequest) {
         })
       } catch (e) {
         console.error('Errore movimento spedizione propria master:', e)
+      }
+      return
+    }
+    // Per conto di un sotto-master: addebito il CREDITO del sotto-master (come un cliente).
+    if (masterSub) {
+      if (!(costo > 0)) return
+      try {
+        await registraMovimentoMaster(adminCrea, {
+          masterOwnerId: masterId,       // il master che incassa (proprietario del listino)
+          masterTargetId: masterSub,     // il sotto-master a cui si scala il credito
+          tipo: 'spedizione',
+          descrizione: `${numeroSped} - ${body.shipTo?.name || ''}`.trim(),
+          riferimento: numeroSped,
+          importo: -Math.abs(costo),
+          spedizioneId,
+          createdBy: user!.id,
+        })
+      } catch (e) {
+        console.error('Errore movimento spedizione sotto-master:', e)
       }
       return
     }
