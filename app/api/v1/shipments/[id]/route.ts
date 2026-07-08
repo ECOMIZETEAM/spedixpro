@@ -57,7 +57,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   }
   // Rimborso a cascata ai master (speculare all'addebito in creazione)
   try {
-    const { data: corriere } = await admin.from('corrieri').select('master_id').eq('id', sped.corriere_id).single()
+    const { data: corriere } = await admin.from('corrieri').select('master_id,nome_contratto').eq('id', sped.corriere_id).single()
     if (corriere?.master_id) {
       const packages = (Array.isArray(sped.colli_dettaglio) && sped.colli_dettaglio.length)
         ? sped.colli_dettaglio.map((c: any) => ({ weight: sped.peso_reale || 1, length: c.lunghezza, width: c.larghezza, height: c.altezza }))
@@ -66,6 +66,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         masterDirettoId: sped.master_id, corriereOwnerId: corriere.master_id,
         costoSpedizione: Number(sped.costo_spedizione || 0), provincia: sped.dest_provincia || '',
         cap: sped.dest_cap || '', paese: sped.dest_paese || 'IT', packages,
+        corriereNome: corriere.nome_contratto,
         numero: sped.numero, destNome: sped.dest_nome || '', spedizioneId: sped.id, createdBy: null,
       })
     }

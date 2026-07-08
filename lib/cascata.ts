@@ -21,12 +21,31 @@ async function costruisciCatena(
     packages: any[]
     cap?: string
     paese?: string
+    // Nome contratto del corriere: i sotto-master rivendono con COPIE dello stesso corriere.
+    // Serve per (1) trovare il proprietario REALE del contratto e (2) prezzare il corriere giusto.
+    corriereNome?: string
   }
 ): Promise<{ catena: LivelloCatena[]; errore?: string }> {
   const catena: LivelloCatena[] = []
   let currentId: string | null = params.masterDirettoId
   // RLS: la catena e' cross-tenant per natura -> client admin (auth verificata a monte)
   const adminDb = createAdminSupabase()
+
+  // Proprietario REALE del contratto: il master più IN ALTO che possiede questo stesso corriere
+  // (stesso nome_contratto). Chi spedisce usa una COPIA del corriere, ma il costo reale dell'API
+  // lo paga il proprietario del contratto; i livelli sotto pagano il loro prezzo di rivendita.
+  let ownerReale = params.corriereOwnerId
+  if (params.corriereNome) {
+    let cur: string | null = params.corriereOwnerId
+    for (let i = 0; i < 20 && cur; i++) {
+      const { data: mm }: any = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+      const parent: string | null = mm?.parent_master_id || null
+      if (!parent) break
+      const { data: pc } = await adminDb.from('corrieri')
+        .select('id').eq('master_id', parent).eq('nome_contratto', params.corriereNome).limit(1).maybeSingle()
+      if (pc?.id) { ownerReale = parent; cur = parent } else break
+    }
+  }
 
   for (let i = 0; i < 20 && currentId; i++) {
     const { data: m } = await adminDb
@@ -37,17 +56,27 @@ async function costruisciCatena(
       return { catena, errore: 'Catena master non leggibile: impossibile verificare i livelli.' }
     }
 
-    const isProprietario = m.id === params.corriereOwnerId
+    const isProprietario = m.id === ownerReale
     let prezzo = 0
 
     if (isProprietario) {
+      // Il proprietario reale del contratto paga il costo reale dell'API.
       prezzo = Number(params.costoSpedizione || 0)
     } else {
       if (!m.parent_listino_id) {
         return { catena, errore: `Il master "${m.nome}" non ha un listino assegnato dal livello superiore.` }
       }
+      // Prezzo che QUESTO master paga al livello sopra: dal listino che il padre gli ha assegnato,
+      // per lo STESSO corriere (il corriere del padre con lo stesso nome contratto).
+      let corriereIdPadre: string | null = null
+      if (params.corriereNome && m.parent_master_id) {
+        const { data: pc } = await adminDb.from('corrieri')
+          .select('id').eq('master_id', m.parent_master_id).eq('nome_contratto', params.corriereNome).limit(1).maybeSingle()
+        corriereIdPadre = pc?.id || null
+      }
       const ris = await calcolaPrezzoListino(adminDb, {
         listinoId: m.parent_listino_id,
+        corriereId: corriereIdPadre,
         provincia: params.provincia,
         packages: params.packages,
         cap: params.cap,
@@ -81,6 +110,7 @@ export async function verificaCreditoCatena(
     costoSpedizione?: number
     cap?: string
     paese?: string
+    corriereNome?: string
   }
 ): Promise<{ ok: boolean; errore?: string }> {
   const { catena, errore } = await costruisciCatena(supabase, {
@@ -91,6 +121,7 @@ export async function verificaCreditoCatena(
     packages: params.packages,
     cap: params.cap,
     paese: params.paese,
+    corriereNome: params.corriereNome,
   })
   if (errore) return { ok: false, errore }
 
@@ -116,6 +147,7 @@ export async function addebitaCatena(
     createdBy: string | null
     cap?: string
     paese?: string
+    corriereNome?: string
   }
 ): Promise<void> {
   const adminMov = createAdminSupabase()
@@ -127,6 +159,7 @@ export async function addebitaCatena(
     packages: params.packages,
     cap: params.cap,
     paese: params.paese,
+    corriereNome: params.corriereNome,
   })
 
   for (const liv of catena) {
@@ -162,6 +195,7 @@ export async function rimborsaCatena(
     createdBy: string | null
     cap?: string
     paese?: string
+    corriereNome?: string
   }
 ): Promise<void> {
   const adminMov = createAdminSupabase()
@@ -173,6 +207,7 @@ export async function rimborsaCatena(
     packages: params.packages,
     cap: params.cap,
     paese: params.paese,
+    corriereNome: params.corriereNome,
   })
 
   for (const liv of catena) {

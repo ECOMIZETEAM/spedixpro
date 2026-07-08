@@ -65,7 +65,7 @@ export async function DELETE(req: NextRequest) {
   // Rimborso a cascata ai MASTER della catena (speculare all'addebito in creazione).
   try {
     const { data: corriere } = await supabase.from('corrieri')
-      .select('master_id').eq('id', sped.corriere_id).single()
+      .select('master_id,nome_contratto').eq('id', sped.corriere_id).single()
     if (corriere?.master_id) {
       // Ricostruisco i packages dalla spedizione per il calcolo prezzi intermedi
       let packages: any[] = []
@@ -84,6 +84,7 @@ export async function DELETE(req: NextRequest) {
         cap: sped.dest_cap || '',
         paese: sped.dest_paese || 'IT',
         packages,
+        corriereNome: corriere.nome_contratto,
         numero: sped.numero,
         destNome: sped.dest_nome || '',
         spedizioneId: sped.id,

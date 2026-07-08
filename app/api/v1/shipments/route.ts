@@ -67,6 +67,7 @@ export async function POST(req: NextRequest) {
   const catena = await verificaCreditoCatena(admin, {
     masterDirettoId: masterId, corriereOwnerId: corriere.master_id,
     provincia: body.shipTo.state, packages, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+    corriereNome: corriere.nome_contratto,
   })
   if (!catena.ok) return NextResponse.json({ error: catena.errore }, { status: 402 })
 
@@ -128,7 +129,7 @@ export async function POST(req: NextRequest) {
     if (costoCliente > 0) await registraMovimento(admin, { masterId, clienteId: ctx.clienteId, tipo: 'spedizione', descrizione: `${numero} - ${body.shipTo?.name||''}`.trim(), riferimento: numero, importo: -Math.abs(costoCliente), spedizioneId: inserted?.id || null, createdBy: null })
   } catch (e) { console.error('API mov cliente:', e) }
   try {
-    await addebitaCatena(admin, { masterDirettoId: masterId, corriereOwnerId: corriere.master_id, costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: null })
+    await addebitaCatena(admin, { masterDirettoId: masterId, corriereOwnerId: corriere.master_id, costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', corriereNome: corriere.nome_contratto, numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: null })
   } catch (e) { console.error('API cascata:', e) }
 
   return NextResponse.json({

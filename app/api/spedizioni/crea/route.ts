@@ -227,6 +227,7 @@ export async function POST(req: NextRequest) {
       packages,
       cap: body.shipTo.postalCode,
       paese: body.shipTo.country || 'IT',
+      corriereNome: corriereRecord.nome_contratto,
     })
     if (!catenaCheck.ok) {
       return NextResponse.json({ error: catenaCheck.errore }, { status: 402 })
@@ -343,6 +344,7 @@ export async function POST(req: NextRequest) {
         masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
         costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
         cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+        corriereNome: corriereRecord.nome_contratto,
         numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
       })
     }
@@ -458,6 +460,7 @@ export async function POST(req: NextRequest) {
           masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
           costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
           cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+          corriereNome: corriereRecord.nome_contratto,
           numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
         })
       }
