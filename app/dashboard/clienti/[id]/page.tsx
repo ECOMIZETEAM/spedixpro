@@ -123,7 +123,7 @@ export default function ClienteProfiloPage() {
             {cliente.attivo?'Attivo':'Inattivo'}
           </span>
           <span style={{fontSize:'13px',color:'#1a1a1a'}}>Credito: <strong style={{color:'#f97316'}}>{fmtEuro(creditoView)}</strong></span>
-          <a href={`/dashboard/clienti/${id}/modifica`} style={{padding:'8px 16px',background:'#f97316',color:'#fff',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>✏️ Modifica Anagrafica</a>
+          <a href={cliente.is_master ? `/dashboard/clienti/master/${String(id).slice(2)}` : `/dashboard/clienti/${id}/modifica`} style={{padding:'8px 16px',background:'#f97316',color:'#fff',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>✏️ Modifica Anagrafica</a>
           <a href={`/dashboard/clienti/${id}/impostazioni`} style={{padding:'8px 16px',background:'#1a1a1a',color:'#fff',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>⚙️ Impostazioni</a>
         </div>
       </div>

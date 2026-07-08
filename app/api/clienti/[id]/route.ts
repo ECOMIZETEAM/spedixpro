@@ -15,10 +15,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const admin = createAdminSupabase()
     const { data: m } = await admin.from('masters').select('*').eq('id', targetId).eq('parent_master_id', utente?.master_id).single()
     if (!m) return NextResponse.json({ error: 'Sotto-master non trovato' }, { status: 404 })
+    const mm = m as any
     return NextResponse.json({
       ...m, id: 'm:' + m.id, ragione_sociale: m.nome || '—',
       codice_cliente: 'SUB-MASTER', is_master: true,
-      listino_cliente_id: (m as any).parent_listino_id || null, listini_clienti: null,
+      listino_cliente_id: mm.parent_listino_id || null, listini_clienti: null,
+      // Dati fiscali/sedi mappati dai nomi-colonna di `masters` a quelli attesi dalla scheda cliente
+      cf: mm.codice_fiscale || null, cod_sdi: mm.codice_sdi || null,
+      sl_paese: mm.paese || null, sl_indirizzo: mm.indirizzo || null,
+      sl_citta: mm.citta || null, sl_provincia: mm.provincia || null, sl_cap: mm.cap || null,
+      so_paese: mm.paese_operativo || null, so_indirizzo: mm.indirizzo_operativo || null,
+      so_citta: mm.citta_operativo || null, so_provincia: mm.provincia_operativo || null, so_cap: mm.cap_operativo || null,
     })
   }
 

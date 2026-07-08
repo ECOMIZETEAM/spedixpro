@@ -153,8 +153,8 @@ export default function ClientiPage() {
                       <div style={{display:'flex',gap:'14px',alignItems:'center'}}>
                         {c.is_master ? (
                           <>
-                            <a href={`/dashboard/clienti/master/${String(c.id).slice(2)}`} title="Credito, movimenti e dati" className="cli-act">▤</a>
-                            <a href={`/dashboard/clienti/master/${String(c.id).slice(2)}`} title="Modifica dati" className="cli-act">✎</a>
+                            <a href={`/dashboard/clienti/${c.id}`} title="Credito, movimenti e dati" className="cli-act">▤</a>
+                            <a href={`/dashboard/clienti/master/${String(c.id).slice(2)}`} title="Modifica dati e accesso" className="cli-act">✎</a>
                             <a href={`/dashboard/clienti/${c.id}/impostazioni`} title="Impostazioni" className="cli-act">⚙</a>
                           </>
                         ) : (
