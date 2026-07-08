@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { creaCalcolatoreCorriere } from '@/lib/pricing'
+import { creaCalcolatoreCorriere, creaCalcolatoreListinoCliente } from '@/lib/pricing'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
 
 export async function GET(req: NextRequest) {
@@ -49,9 +49,20 @@ export async function GET(req: NextRequest) {
   if (provincia) query = query.eq('dest_provincia', provincia)
 
   const { data: spedizioni } = await query
-  // Prezzo corriere: precarico listini/fasce/zone UNA volta, poi calcolo in memoria
-  // (stesso risultato di calcolaPrezzoCorriere, ma senza ~query-per-riga).
-  const calcCorriere = await creaCalcolatoreCorriere(supabase, utente?.master_id)
+  // Prezzo corriere: precarico listini/fasce/zone UNA volta, poi calcolo in memoria.
+  // Se chi genera il report è un SOTTO-MASTER, il suo costo è il listino che il
+  // master padre gli ha assegnato (masters.parent_listino_id).
+  let calcCorriere: (s: any) => number | null
+  if (!masterSel) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const adminM = createAdminSupabase()
+    const { data: mioMaster } = await adminM.from('masters').select('parent_listino_id').eq('id', utente?.master_id).maybeSingle()
+    calcCorriere = mioMaster?.parent_listino_id
+      ? await creaCalcolatoreListinoCliente(adminM, mioMaster.parent_listino_id)
+      : await creaCalcolatoreCorriere(supabase, utente?.master_id)
+  } else {
+    calcCorriere = await creaCalcolatoreCorriere(supabase, utente?.master_id)
+  }
   const conPrezzoCorriere = (spedizioni || []).map((s: any) => ({
     ...s,
     prezzo_corriere: s.corriere_id ? calcCorriere(s) : null,
