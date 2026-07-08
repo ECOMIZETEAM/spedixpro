@@ -18,22 +18,27 @@ function verifica(raw: string, timestamp: string | null, signature: string | nul
   try { return crypto.timingSafeEqual(Buffer.from(v1), Buffer.from(expected)) } catch { return false }
 }
 
-// Mappa lo stato Spedisci.online (stringa localizzata) + il tipo evento allo stato interno.
-// Le scorciatoie per tipo evento hanno priorità; per il resto uso il mapper condiviso (lib/spedisci).
+// Mappa evento + stato Spedisci.online allo stato interno.
+// Eventi reali del pannello: tracking.update, shipment.created, stock.created (giacenza), invoice.created.
 function mapStato(event: string, statusStr: string): string | null {
-  if (event === 'tracking.delivered') return 'consegnata'
-  const m = mapStatoSpedisci(statusStr)
+  if (event === 'stock.created') return 'in_giacenza'   // Nuova giacenza
+  const m = mapStatoSpedisci(statusStr)                  // tracking.update porta la stringa di stato
   if (m) return m
-  if (event === 'tracking.exception') return 'non_consegnato'
-  return null   // shipment.created / stati non riconosciuti: non tocco
+  return null   // shipment.created / invoice.created / stati non riconosciuti: non tocco
 }
 
 export async function POST(req: NextRequest) {
   const raw = await req.text()
-  const secret = process.env.SPEDISCI_WEBHOOK_SECRET
-  if (!secret) return new NextResponse('Webhook non configurato', { status: 500 })
+  const admin = createAdminSupabase()
 
-  if (!verifica(raw, req.headers.get('webhook-timestamp'), req.headers.get('webhook-signature'), secret)) {
+  // Secret: dal DB (uno per ciascun account Spedisci) + fallback su env. Provo tutti finché uno verifica.
+  const { data: righe } = await admin.from('webhook_secrets').select('secret').eq('provider', 'spedisci')
+  const candidati = [...(righe || []).map((r: any) => r.secret), process.env.SPEDISCI_WEBHOOK_SECRET].filter(Boolean) as string[]
+  if (!candidati.length) return new NextResponse('Webhook non configurato', { status: 500 })
+
+  const ts = req.headers.get('webhook-timestamp')
+  const sig = req.headers.get('webhook-signature')
+  if (!candidati.some(sec => verifica(raw, ts, sig, sec))) {
     return new NextResponse('Unauthorized', { status: 401 })
   }
 
@@ -42,12 +47,11 @@ export async function POST(req: NextRequest) {
 
   const event = body?.event || ''
   const d = body?.data || {}
-  const tracking = d?.tracking_number
+  const tracking = d?.tracking_number || d?.tracking || d?.trackingNumber || d?.shipment?.tracking_number || d?.code
   if (!tracking) return new NextResponse('OK', { status: 200 })
 
-  const nuovo = mapStato(event, d?.status || '')
+  const nuovo = mapStato(event, d?.status || d?.stato || d?.description || '')
   if (nuovo) {
-    const admin = createAdminSupabase()
     const upd: any = { stato: nuovo }
     if (nuovo === 'in_giacenza') upd.giacenza_data = new Date().toISOString()
     // aggiorno tutte le spedizioni con quel tracking, ma non "declasso" quelle già consegnate/annullate
