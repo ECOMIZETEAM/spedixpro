@@ -73,6 +73,17 @@ function buildServiziDa(supplementi: any[], tipo: string, fallback: {nome:string
   })
 }
 
+// Servizi accessori (EXTRA): voci personalizzabili per corriere. A differenza di buildServiziDa
+// NON filtra su una lista fissa: carica TUTTE le voci salvate (nomi custom inclusi).
+function buildAccessoriDa(supplementi: any[], fallback: {nome:string;prezzo:number;perc:number}[]) {
+  const righe = (supplementi||[]).filter(s => s.tipo === 'accessorio')
+  if (!righe.length) return fallback
+  return righe.map(r => {
+    const d = parseDescr(r.descrizione)
+    return { nome: r.nome ?? d?.nome ?? '', prezzo: Number(d?.prezzo ?? r.valore ?? 0), perc: Number(d?.perc ?? 0) }
+  })
+}
+
 export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere }: Props) {
   const isCorriere = tipoListino === 'corriere'
   const apiAggancio = isCorriere ? '/api/listini/corriere-corrieri' : '/api/listini/cliente-corrieri'
@@ -102,7 +113,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
 
   const [righeAssic, setRigheAssic] = useState<RigaSuppl[]>(() => buildRigheDa(supplementiEsistenti||[], 'assicurazione', [rigaVuota()]))
   const [righeContr, setRigheContr] = useState<RigaSuppl[]>(() => buildRigheDa(supplementiEsistenti||[], 'contrassegno', [rigaVuota(), rigaVuota()]))
-  const [serviziAccessori, setServiziAccessori] = useState(() => buildServiziDa(supplementiEsistenti||[], 'accessorio', [
+  const [serviziAccessori, setServiziAccessori] = useState(() => buildAccessoriDa(supplementiEsistenti||[], [
     {nome:'Reverse A Domicilio',prezzo:0,perc:0},
     {nome:'Andata & Ritorno',prezzo:0,perc:0},
     {nome:'Reverse PuntoPoste',prezzo:0,perc:0},
@@ -333,25 +344,29 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
         </div>
       )}
 
-      {/* SERVIZI ACCESSORI */}
+      {/* SERVIZI ACCESSORI (EXTRA) — voci personalizzabili per corriere */}
       {tab==='servizi' && (
         <div style={{padding:'16px'}}>
-          <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px',maxWidth:'700px'}}>
+          <div style={{fontSize:'12px',color:'#666',marginBottom:'12px'}}>Extra che il cliente può aggiungere alla spedizione (variano per corriere). Il nome è modificabile: aggiungi le voci che ti servono (es. Consegna al piano).</div>
+          <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px',maxWidth:'760px'}}>
             <thead><tr style={{background:'#fafafa'}}>
               <th style={{textAlign:'left' as const,padding:'9px 12px',fontWeight:'700',color:'#1a1a1a',borderBottom:'1px solid #d1d5db'}}>Servizio</th>
               <th style={{textAlign:'left' as const,padding:'9px 12px',fontWeight:'700',color:'#1a1a1a',borderBottom:'1px solid #d1d5db'}}>Prezzo <span style={{color:'#666',fontWeight:'400'}}>€</span></th>
               <th style={{textAlign:'left' as const,padding:'9px 12px',fontWeight:'700',color:'#1a1a1a',borderBottom:'1px solid #d1d5db'}}>+% del valore della spedizione</th>
+              <th style={{width:'40px',borderBottom:'1px solid #d1d5db'}}></th>
             </tr></thead>
             <tbody>
               {serviziAccessori.map((s,i)=>(
                 <tr key={i} style={{borderBottom:'1px solid #e5e7eb'}}>
-                  <td style={{padding:'8px 12px',color:'#f97316',fontWeight:'500'}}>{s.nome}</td>
+                  <td style={{padding:'8px 12px'}}><input value={s.nome||''} onChange={e=>setServiziAccessori(prev=>prev.map((x,idx)=>idx===i?{...x,nome:e.target.value}:x))} style={{...inp,width:'260px',color:'#f97316',fontWeight:'500'}} placeholder="Nome servizio (es. Consegna al piano)"/></td>
                   <td style={{padding:'8px 12px'}}><input type="number" step="0.01" value={s.prezzo||''} onChange={e=>setServiziAccessori(prev=>prev.map((x,idx)=>idx===i?{...x,prezzo:parseFloat(e.target.value)||0}:x))} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="0"/></td>
                   <td style={{padding:'8px 12px'}}><input type="number" step="0.01" value={s.perc||''} onChange={e=>setServiziAccessori(prev=>prev.map((x,idx)=>idx===i?{...x,perc:parseFloat(e.target.value)||0}:x))} style={{...inp,width:'200px',textAlign:'right' as const}} placeholder="0"/></td>
+                  <td style={{padding:'8px 12px',textAlign:'center' as const}}><button onClick={()=>setServiziAccessori(prev=>prev.filter((_,idx)=>idx!==i))} title="Rimuovi voce" style={{background:'none',border:'none',color:'#dc2626',fontSize:'16px',cursor:'pointer',lineHeight:1,padding:0}}>×</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <button onClick={()=>setServiziAccessori(prev=>[...prev,{nome:'',prezzo:0,perc:0}])} style={{marginTop:'10px',background:'none',border:'none',color:'#f97316',fontSize:'13px',fontWeight:'600',cursor:'pointer',padding:0}}>+ Aggiungi servizio</button>
         </div>
       )}
 
