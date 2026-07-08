@@ -1,4 +1,4 @@
-import { calcolaPrezzoListino } from '@/lib/pricing'
+import { calcolaPrezzoListino, calcolaPrezzoCorriere } from '@/lib/pricing'
 import { registraMovimentoMaster } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
@@ -24,6 +24,8 @@ async function costruisciCatena(
     // Nome contratto del corriere: i sotto-master rivendono con COPIE dello stesso corriere.
     // Serve per (1) trovare il proprietario REALE del contratto e (2) prezzare il corriere giusto.
     corriereNome?: string
+    contrassegno?: number
+    assicurazione?: number
   }
 ): Promise<{ catena: LivelloCatena[]; errore?: string }> {
   const catena: LivelloCatena[] = []
@@ -59,31 +61,39 @@ async function costruisciCatena(
     const isProprietario = m.id === ownerReale
     let prezzo = 0
 
-    if (isProprietario) {
-      // Il proprietario reale del contratto paga il costo reale dell'API.
-      prezzo = Number(params.costoSpedizione || 0)
-    } else {
-      if (!m.parent_listino_id) {
-        return { catena, errore: `Il master "${m.nome}" non ha un listino assegnato dal livello superiore.` }
+    // Ogni master (a QUALSIASI livello) paga il SUO Listino Corrieri per questo corriere:
+    // è il costo che vede nella sua lista movimenti.
+    let calcolato = false
+    if (params.corriereNome) {
+      const { data: mCorr }: any = await adminDb.from('corrieri')
+        .select('id').eq('master_id', m.id).eq('nome_contratto', params.corriereNome).limit(1).maybeSingle()
+      if (mCorr?.id) {
+        const pesoReale = (params.packages || []).reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
+        const pz = await calcolaPrezzoCorriere(adminDb, {
+          corriereId: mCorr.id, masterId: m.id,
+          provincia: params.provincia, cap: params.cap, paese: params.paese,
+          pesoReale, packages: params.packages,
+          contrassegno: params.contrassegno, assicurazione: params.assicurazione,
+        })
+        if (pz != null) { prezzo = pz; calcolato = true }
       }
-      // Prezzo che QUESTO master paga al livello sopra: dal listino che il padre gli ha assegnato,
-      // per lo STESSO corriere (il corriere del padre con lo stesso nome contratto).
-      let corriereIdPadre: string | null = null
-      if (params.corriereNome && m.parent_master_id) {
-        const { data: pc } = await adminDb.from('corrieri')
-          .select('id').eq('master_id', m.parent_master_id).eq('nome_contratto', params.corriereNome).limit(1).maybeSingle()
-        corriereIdPadre = pc?.id || null
+    }
+    // Fallback se il master non ha il listino corrieri per questo contratto:
+    // il proprietario reale usa il costo reale dell'API; gli altri il listino assegnato dal padre.
+    if (!calcolato) {
+      if (isProprietario) {
+        prezzo = Number(params.costoSpedizione || 0)
+      } else {
+        if (!m.parent_listino_id) {
+          return { catena, errore: `Il master "${m.nome}" non ha un listino corrieri né un listino assegnato.` }
+        }
+        const ris = await calcolaPrezzoListino(adminDb, {
+          listinoId: m.parent_listino_id, provincia: params.provincia,
+          packages: params.packages, cap: params.cap, paese: params.paese,
+        })
+        if (!ris) return { catena, errore: `Nessuna tariffa nel listino del master "${m.nome}".` }
+        prezzo = ris.prezzo
       }
-      const ris = await calcolaPrezzoListino(adminDb, {
-        listinoId: m.parent_listino_id,
-        corriereId: corriereIdPadre,
-        provincia: params.provincia,
-        packages: params.packages,
-        cap: params.cap,
-        paese: params.paese,
-      })
-      if (!ris) return { catena, errore: `Nessuna tariffa nel listino del master "${m.nome}".` }
-      prezzo = ris.prezzo
     }
 
     catena.push({
