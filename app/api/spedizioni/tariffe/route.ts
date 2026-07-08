@@ -213,7 +213,8 @@ export async function POST(req: NextRequest) {
   function calcolaContrassegno(corriereId: string, _prezzoSped: number): number | null {
     if (codImporto <= 0) return 0
     const scal = scaglioniContrPerCorriere.get(corriereId)
-    if (!scal || !scal.length) return 0
+    // COD richiesto ma NESSUNA tariffa contrassegno configurata sul listino → corriere non disponibile.
+    if (!scal || !scal.length) return null
     const s = scal.find(x => codImporto <= x.valore_max)
     if (!s) return null // importo oltre il massimo → corriere non disponibile
     const primaFasciaMax = Number(scal[0]?.valore_max) || 0
@@ -368,6 +369,7 @@ export async function POST(req: NextRequest) {
   }
 
   const risultati: any[] = []
+  let esclusiContrassegno = 0, esclusiAssic = 0
 
   for (const [corriereId, fasceDelCorriere] of fascePerCorriere) {
     const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
@@ -391,8 +393,8 @@ export async function POST(req: NextRequest) {
       if (!quote) continue
     }
 
-    if (calcolaContrassegno(corriereId, Number(fasciaGiusta.prezzo)) === null) continue
-    if (calcolaAssicurazione(corriereId, Number(fasciaGiusta.prezzo)) === null) continue
+    if (calcolaContrassegno(corriereId, Number(fasciaGiusta.prezzo)) === null) { if (codRichiesto) esclusiContrassegno++; continue }
+    if (calcolaAssicurazione(corriereId, Number(fasciaGiusta.prezzo)) === null) { if (assicImporto > 0) esclusiAssic++; continue }
 
     const sponda = calcolaSponda(corriereId, pesoFatturato)
     const prezzoSped = Number(fasciaGiusta.prezzo) + sponda
@@ -419,6 +421,8 @@ export async function POST(req: NextRequest) {
   }
 
   if (!risultati.length) {
+    if (esclusiContrassegno > 0) return NextResponse.json({ error: 'Nessun corriere disponibile per il contrassegno richiesto: configura la tariffa contrassegno sul listino (tab Contrassegni) o riduci l\'importo.' }, { status: 400 })
+    if (esclusiAssic > 0) return NextResponse.json({ error: 'Nessun corriere disponibile per l\'assicurazione richiesta: configura la tariffa assicurazione sul listino o riduci il valore.' }, { status: 400 })
     return NextResponse.json({ error: `Nessuna tariffa disponibile per ${pesoFatturato.toFixed(2)}kg in zona ${zonaNome}` }, { status: 400 })
   }
 
