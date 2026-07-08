@@ -72,7 +72,9 @@ export default function ClienteProfiloPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          clienteId: id,
+          // Uso l'id fornito dall'API (sempre ben formato, es. "m:<uuid>" per i sotto-master),
+          // NON quello dell'URL dove i due punti diventano %3A e romperebbero il ramo m:.
+          clienteId: cliente?.id || id,
           tipo: imp > 0 ? 'ricarica' : 'rettifica',
           descrizione: descrizione.trim(),
           importo: imp,
