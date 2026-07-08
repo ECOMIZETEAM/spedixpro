@@ -68,6 +68,34 @@ export async function POST(req: NextRequest) {
   const { data: cli } = await supabase
     .from('clienti').select('id, master_id').eq('id', clienteId).single()
   if (!cli || cli.master_id !== utente.master_id) {
+    // Fallback robusto: l'id potrebbe essere quello di un SOTTO-MASTER della rete inviato
+    // SENZA il prefisso m: (bug frontend). Se è un master discendente, lo tratto come sotto-master.
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const { data: sub } = await admin.from('masters').select('id,parent_master_id').eq('id', clienteId).maybeSingle()
+    if (sub) {
+      let cur: string | null = sub.parent_master_id || null
+      let autorizzato = false
+      for (let i = 0; i < 20 && cur; i++) {
+        if (cur === utente.master_id) { autorizzato = true; break }
+        const { data: p } = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+        cur = p?.parent_master_id || null
+      }
+      if (autorizzato) {
+        try {
+          const { registraMovimentoMaster } = await import('@/lib/movimenti')
+          const { saldo } = await registraMovimentoMaster(admin, {
+            masterOwnerId: utente.master_id, masterTargetId: clienteId,
+            tipo, descrizione: String(descrizione).trim(),
+            riferimento: riferimento ? String(riferimento).trim() : null,
+            importo, createdBy: user.id,
+          })
+          return NextResponse.json({ ok: true, saldo })
+        } catch (e: any) {
+          return NextResponse.json({ error: e?.message || 'Errore ricarica sotto-master' }, { status: 500 })
+        }
+      }
+    }
     return NextResponse.json({ error: 'Cliente non trovato o non autorizzato' }, { status: 403 })
   }
 

@@ -63,6 +63,24 @@ export async function GET(req: NextRequest) {
     const { data: cli } = await supabase
       .from('clienti').select('id, master_id').eq('id', clienteId).single()
     if (!cli || cli.master_id !== utente?.master_id) {
+      // Fallback: id di un SOTTO-MASTER inviato senza prefisso m: → ne mostro movimenti/saldo
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const admin = createAdminSupabase()
+      const { data: sub } = await admin.from('masters').select('id,parent_master_id,credito,nome').eq('id', clienteId).maybeSingle()
+      if (sub) {
+        let cur: string | null = sub.parent_master_id || null
+        let autorizzato = false
+        for (let i = 0; i < 20 && cur; i++) {
+          if (cur === utente?.master_id) { autorizzato = true; break }
+          const { data: p } = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+          cur = p?.parent_master_id || null
+        }
+        if (autorizzato) {
+          const { data: movimenti } = await admin.from('movimenti').select('*')
+            .eq('master_target_id', clienteId).order('created_at', { ascending: false }).limit(300)
+          return NextResponse.json({ movimenti: movimenti || [], saldo: Number(sub.credito || 0), cliente: sub.nome || null })
+        }
+      }
       return NextResponse.json({ error: 'Cliente non trovato o non autorizzato' }, { status: 403 })
     }
   }
