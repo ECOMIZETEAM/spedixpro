@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fulfillSpedizioniShopify } from '@/lib/shopify'
+import { fulfillSpedizioniWoo } from '@/lib/wooFulfill'
 import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 
 export async function GET(req: NextRequest) {
@@ -54,6 +55,7 @@ export async function GET(req: NextRequest) {
       distinteCreate++
       // Tracking a Shopify per gli ordini ecommerce collegati (best-effort)
       try { await fulfillSpedizioniShopify(supabase, righe.map(r => r.id)) } catch {}
+      try { await fulfillSpedizioniWoo(supabase, righe.map(r => r.id)) } catch {}
       try { await chiudiBorderoSpedisci(supabase, distinta.id) } catch {}
     }
   }

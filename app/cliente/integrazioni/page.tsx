@@ -19,7 +19,7 @@ type Integrazione = {
 // Piattaforme del popup — solo Shopify attivo, resto "Prossimamente"
 const PLATFORMS: { id: string; nome: string; attivo: boolean; colore: string; dominio: string }[] = [
   { id: 'shopify',     nome: 'Shopify',      attivo: true,  colore: '#95BF47', dominio: 'shopify.com' },
-  { id: 'woocommerce', nome: 'WooCommerce',  attivo: false, colore: '#96588a', dominio: 'woocommerce.com' },
+  { id: 'woocommerce', nome: 'WooCommerce',  attivo: true,  colore: '#96588a', dominio: 'woocommerce.com' },
   { id: 'prestashop',  nome: 'PrestaShop',   attivo: true,  colore: '#df0067', dominio: 'prestashop.com' },
   { id: 'amazon',      nome: 'Amazon',       attivo: false, colore: '#ff9900', dominio: 'amazon.com' },
   { id: 'ebay',        nome: 'eBay',         attivo: false, colore: '#e53238', dominio: 'ebay.com' },
@@ -49,8 +49,9 @@ export default function IntegrazioniPage() {
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
 
   const [modal, setModal] = useState(false)
-  const [step, setStep] = useState<'platforms' | 'shopify' | 'prestashop'>('platforms')
+  const [step, setStep] = useState<'platforms' | 'shopify' | 'prestashop' | 'woocommerce'>('platforms')
   const [psForm, setPsForm] = useState({ nome_negozio: '', url: '', webservice_key: '' })
+  const [wooForm, setWooForm] = useState({ nome_negozio: '', url: '', consumer_key: '', consumer_secret: '' })
   const [shop, setShop] = useState('')
   const [connecting, setConnecting] = useState(false)
 
@@ -76,6 +77,26 @@ export default function IntegrazioniPage() {
     if (!attivo) return
     if (id === 'shopify') setStep('shopify')
     if (id === 'prestashop') setStep('prestashop')
+    if (id === 'woocommerce') setStep('woocommerce')
+  }
+
+  async function connettiWoo() {
+    if (!wooForm.url || !wooForm.consumer_key || !wooForm.consumer_secret) { setMsg({ type: 'err', text: 'URL, Consumer Key e Secret obbligatori' }); return }
+    setConnecting(true)
+    try {
+      const res = await fetch('/api/integrazioni/woocommerce/connetti', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(wooForm),
+      })
+      const d = await res.json()
+      setConnecting(false)
+      if (d.error) { setMsg({ type: 'err', text: d.error }); return }
+      setMsg({ type: 'ok', text: 'WooCommerce collegato con successo' })
+      setWooForm({ nome_negozio: '', url: '', consumer_key: '', consumer_secret: '' })
+      setModal(false); load()
+    } catch {
+      setConnecting(false); setMsg({ type: 'err', text: 'Errore di connessione' })
+    }
   }
 
   function connectShopify() {
@@ -240,7 +261,7 @@ export default function IntegrazioniPage() {
           >
             <div style={{ padding: '16px 20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: '15px', fontWeight: 700, color: '#1a1a1a' }}>
-                {step === 'platforms' ? 'Seleziona piattaforma' : step === 'prestashop' ? 'Collega PrestaShop' : 'Collega Shopify'}
+                {step === 'platforms' ? 'Seleziona piattaforma' : step === 'prestashop' ? 'Collega PrestaShop' : step === 'woocommerce' ? 'Collega WooCommerce' : 'Collega Shopify'}
               </div>
               <button onClick={closeModal} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#999', cursor: 'pointer', lineHeight: 1 }}>×</button>
             </div>
@@ -308,6 +329,22 @@ export default function IntegrazioniPage() {
                   >
                     {connecting ? 'Reindirizzamento…' : 'Collega'}
                   </button>
+                </div>
+              </div>
+            ) : step === 'woocommerce' ? (
+              <div style={{ padding: '20px' }}>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '6px' }}>Nome sito (opzionale)</label>
+                <input value={wooForm.nome_negozio} onChange={e => setWooForm(v => ({ ...v, nome_negozio: e.target.value }))} placeholder="Il mio negozio" style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none', marginBottom: '12px' }} />
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '6px' }}>URL sito *</label>
+                <input value={wooForm.url} onChange={e => setWooForm(v => ({ ...v, url: e.target.value }))} placeholder="https://ilmionegozio.com" style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none', marginBottom: '12px' }} />
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '6px' }}>Consumer Key *</label>
+                <input value={wooForm.consumer_key} onChange={e => setWooForm(v => ({ ...v, consumer_key: e.target.value }))} placeholder="ck_..." style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none', marginBottom: '12px' }} />
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '6px' }}>Consumer Secret *</label>
+                <input value={wooForm.consumer_secret} onChange={e => setWooForm(v => ({ ...v, consumer_secret: e.target.value }))} placeholder="cs_..." style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none' }} />
+                <p style={{ fontSize: '12px', color: '#999', marginTop: '8px', lineHeight: 1.5 }}>Le chiavi API si generano in WooCommerce: Impostazioni &rarr; Avanzate &rarr; API REST &rarr; Aggiungi chiave (permessi Lettura/Scrittura).</p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '18px' }}>
+                  <button onClick={() => setStep('platforms')} style={{ background: '#fff', color: '#555', border: '1px solid #ddd', borderRadius: '8px', padding: '9px 16px', fontSize: '13px', cursor: 'pointer' }}>&larr; Indietro</button>
+                  <button onClick={connettiWoo} disabled={connecting} style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '8px', padding: '9px 20px', fontSize: '13px', fontWeight: 600, cursor: connecting ? 'default' : 'pointer', opacity: connecting ? .6 : 1 }}>{connecting ? 'Verifica…' : 'Collega'}</button>
                 </div>
               </div>
             ) : (
