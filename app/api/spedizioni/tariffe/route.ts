@@ -370,6 +370,7 @@ export async function POST(req: NextRequest) {
 
   const risultati: any[] = []
   let esclusiContrassegno = 0, esclusiAssic = 0, esclusiMisura = 0, esclusiFascia = 0, esclusiQuota = 0
+  let ultimoErroreQuota = ''
 
   for (const [corriereId, fasceDelCorriere] of fascePerCorriere) {
     const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
@@ -388,7 +389,7 @@ export async function POST(req: NextRequest) {
       let quote = null
       try {
         quote = await quotaCorriere(corriere, pesoFatturato)
-      } catch {}
+      } catch (e: any) { ultimoErroreQuota = String(e?.message || '') }
       spediamoproQuotation = quote?._spediamopro_quotation || null
       if (!quote) { esclusiQuota++; continue }   // il corriere non ha tariffe per queste misure/peso
     }
@@ -424,7 +425,12 @@ export async function POST(req: NextRequest) {
     const pf = pesoFatturato.toFixed(2)
     if (esclusiFascia > 0) return NextResponse.json({ error: `Peso fatturato ${pf}kg (reale ${pesoReale.toFixed(2)}kg / volume ${pesoVolume.toFixed(2)}kg) oltre l'ultima fascia del listino. Aggiungi una fascia "oltre X ogni" nel listino per coprire i pesi/misure maggiori.` }, { status: 400 })
     if (esclusiMisura > 0) return NextResponse.json({ error: `Le misure del collo superano le misure massime consentite dal corriere per questo peso (Impostazioni corriere → Misure massime).` }, { status: 400 })
-    if (esclusiQuota > 0) return NextResponse.json({ error: `Il corriere non offre tariffe per queste misure/peso (${pf}kg): riduci le dimensioni o usa un altro contratto.` }, { status: 400 })
+    if (esclusiQuota > 0) {
+      const dett = /province|provincia|state/i.test(ultimoErroreQuota)
+        ? ' Manca la PROVINCIA del mittente o del destinatario: completa l\'indirizzo (provincia obbligatoria per l\'Italia).'
+        : ultimoErroreQuota ? ` Dettaglio corriere: ${ultimoErroreQuota.slice(0, 200)}` : ''
+      return NextResponse.json({ error: `Il corriere ha rifiutato la spedizione (${pf}kg).${dett}` }, { status: 400 })
+    }
     if (esclusiContrassegno > 0) return NextResponse.json({ error: 'Nessun corriere disponibile per il contrassegno richiesto: configura la tariffa contrassegno sul listino (tab Contrassegni) o riduci l\'importo.' }, { status: 400 })
     if (esclusiAssic > 0) return NextResponse.json({ error: 'Nessun corriere disponibile per l\'assicurazione richiesta: configura la tariffa assicurazione sul listino o riduci il valore.' }, { status: 400 })
     return NextResponse.json({ error: `Nessuna tariffa disponibile per ${pf}kg in zona ${zonaNome}` }, { status: 400 })
