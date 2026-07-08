@@ -413,8 +413,8 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
               <input type="number" step="1" value={spondaSoglia||''} onChange={e=>setSpondaSoglia(parseFloat(e.target.value)||0)} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="150"/>
             </div>
             <div>
-              <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Prezzo per kg eccedente (€)</label>
-              <input type="number" step="0.01" value={spondaPrezzoKg||''} onChange={e=>setSpondaPrezzoKg(parseFloat(e.target.value)||0)} style={{...inp,width:'160px',textAlign:'right' as const}} placeholder="0.03"/>
+              <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Prezzo per kg (€)</label>
+              <input type="number" step="any" value={spondaPrezzoKg||''} onChange={e=>setSpondaPrezzoKg(parseFloat(e.target.value)||0)} style={{...inp,width:'180px',textAlign:'right' as const}} placeholder="0.0400334448"/>
             </div>
           </div>
           <div style={{fontSize:'11px',color:'#999',marginTop:'10px'}}>Lascia 0 per disattivare la sponda su questo contratto.</div>
