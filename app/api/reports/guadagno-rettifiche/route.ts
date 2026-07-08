@@ -71,8 +71,8 @@ export async function GET(req: NextRequest) {
       cliOrig = (await calcolaPrezzoListino(admin, { ...base, packages: pkg(pesoOrig) }))?.prezzo || 0
       cliCorr = (await calcolaPrezzoListino(admin, { ...base, packages: pkg(pesoCorr) }))?.prezzo || 0
     }
-    const corrOrig = calcCorr({ ...s, peso_reale: pesoOrig }) || 0
-    const corrCorr = calcCorr({ ...s, peso_reale: pesoCorr }) || 0
+    const corrOrig = calcCorr({ ...s, peso_reale: pesoOrig })?.totale || 0
+    const corrCorr = calcCorr({ ...s, peso_reale: pesoCorr })?.totale || 0
 
     ricavo += (cliCorr - cliOrig)     // extra addebitato al cliente
     costo += (corrCorr - corrOrig)    // extra pagato al corriere

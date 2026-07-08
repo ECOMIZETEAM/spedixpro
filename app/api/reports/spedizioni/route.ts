@@ -52,10 +52,19 @@ export async function GET(req: NextRequest) {
   // Prezzo corriere: precarico listini/fasce/zone UNA volta, poi calcolo in memoria
   // (stesso risultato di calcolaPrezzoCorriere, ma senza ~query-per-riga).
   const calcCorriere = await creaCalcolatoreCorriere(supabase, utente?.master_id)
-  const conPrezzoCorriere = (spedizioni || []).map((s: any) => ({
-    ...s,
-    prezzo_corriere: s.corriere_id ? calcCorriere(s) : null,
-  }))
+  const conPrezzoCorriere = (spedizioni || []).map((s: any) => {
+    const dett = s.corriere_id ? calcCorriere(s) : null
+    // Lato cliente: nolo = costo_spedizione salvato; le fee combinate = totale - nolo
+    const noloCliente = Number(s.costo_spedizione || 0)
+    const totCliente = Number(s.costo_totale || 0)
+    return {
+      ...s,
+      prezzo_corriere: dett ? dett.totale : null,
+      dett_corriere: dett || null,          // { totale, nolo, sponda, contrassegno, assicurazione }
+      cli_nolo: noloCliente,
+      cli_supplementi: Math.max(0, Math.round((totCliente - noloCliente) * 100) / 100),
+    }
+  })
   return NextResponse.json(conPrezzoCorriere)
 }
 

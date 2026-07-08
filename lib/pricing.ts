@@ -49,6 +49,15 @@ export type RisultatoPrezzo = {
   fascia_peso_max: number | null
 } | null
 
+// Dettaglio prezzo scorporato (per i report): nolo + sponda + fee contrassegno/assicurazione.
+export type DettaglioPrezzo = {
+  totale: number
+  nolo: number
+  sponda: number
+  contrassegno: number
+  assicurazione: number
+}
+
 // Calcola il prezzo di trasporto per un listino dato.
 // Se corriereId è passato, usa le fasce di quel corriere; altrimenti prende
 // il primo corriere disponibile per la zona (il più economico non è garantito:
@@ -352,7 +361,7 @@ export async function calcolaSupplementiCliente(
 export async function creaCalcolatoreCorriere(
   supabase: any,
   masterId: string
-): Promise<(s: any) => number | null> {
+): Promise<(s: any) => DettaglioPrezzo | null> {
   const { data: listini } = await supabase
     .from('listini_corrieri').select('id,corriere_id,fattore_volume')
     .eq('master_id', masterId).eq('attivo', true)
@@ -400,7 +409,7 @@ export async function creaCalcolatoreCorriere(
     return Array.from(new Set(m.map((r: any) => r.zona_id)))
   }
 
-  return function prezzoCorriereRow(s: any): number | null {
+  return function prezzoCorriereRow(s: any): DettaglioPrezzo | null {
     const lc = listinoPerCorriere.get(s.corriere_id)
     if (!lc) return null
     const fasceList = fascePerListino.get(lc.id) || []
@@ -449,17 +458,20 @@ export async function creaCalcolatoreCorriere(
       const base = sc.cs === 'differenza' ? Math.max(0, importo - primaFasciaMax) : importo
       return sc.pf + (sc.pc / 100) * base
     }
-    // Sponda: sopra soglia_kg, +prezzo_kg € per ogni kg oltre la soglia (peso fatturato).
+    // Sponda: la soglia è solo il trigger, poi prezzo/kg sul TOTALE dei kg (peso fatturato).
+    const noloBase = prezzo
+    let spondaAmt = 0
     const spRow = supplList.find((x: any) => x.tipo === 'sponda')
     if (spRow) {
       let sd: any = null; try { sd = JSON.parse(spRow.descrizione) } catch {}
       const soglia = Number(sd?.soglia_kg) || 0
       const prezzoKg = Number(spRow.valore) || 0
-      if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) prezzo += pesoFatturato * prezzoKg
+      if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) spondaAmt = pesoFatturato * prezzoKg
     }
-    prezzo += applica('contrassegno', cod)
-    prezzo += applica('assicurazione', ass)
-    return Math.round(prezzo * 100) / 100
+    const feeContr = applica('contrassegno', cod)
+    const feeAss = applica('assicurazione', ass)
+    const _r2 = (n: number) => Math.round(n * 100) / 100
+    return { totale: _r2(noloBase + spondaAmt + feeContr + feeAss), nolo: _r2(noloBase), sponda: _r2(spondaAmt), contrassegno: _r2(feeContr), assicurazione: _r2(feeAss) }
   }
 }
 
@@ -469,7 +481,7 @@ export async function creaCalcolatoreCorriere(
 export async function creaCalcolatoreListinoCliente(
   supabase: any,
   listinoId: string
-): Promise<(s: any) => number | null> {
+): Promise<(s: any) => DettaglioPrezzo | null> {
   if (!listinoId) return () => null
   const { data: listino } = await supabase.from('listini_clienti').select('fattore_volume,solo_peso_reale').eq('id', listinoId).single()
   const fattore = parseFloat(listino?.fattore_volume) || 5000
@@ -511,7 +523,7 @@ export async function creaCalcolatoreListinoCliente(
     return Array.from(new Set(m.map((r: any) => r.zona_id)))
   }
 
-  return function prezzoListinoRow(s: any): number | null {
+  return function prezzoListinoRow(s: any): DettaglioPrezzo | null {
     const fasceList = fascePerCorriere.get(s.corriere_id) || []
     if (!fasceList.length) return null
 
@@ -556,16 +568,19 @@ export async function creaCalcolatoreListinoCliente(
       const base = sc.cs === 'differenza' ? Math.max(0, importo - primaFasciaMax) : importo
       return sc.pf + (sc.pc / 100) * base
     }
-    // Sponda: sopra soglia_kg, +prezzo_kg € per ogni kg oltre la soglia (peso fatturato).
+    // Sponda: la soglia è solo il trigger, poi prezzo/kg sul TOTALE dei kg (peso fatturato).
+    const noloBase = prezzo
+    let spondaAmt = 0
     const spRow = supplList.find((x: any) => x.tipo === 'sponda')
     if (spRow) {
       let sd: any = null; try { sd = JSON.parse(spRow.descrizione) } catch {}
       const soglia = Number(sd?.soglia_kg) || 0
       const prezzoKg = Number(spRow.valore) || 0
-      if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) prezzo += pesoFatturato * prezzoKg
+      if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) spondaAmt = pesoFatturato * prezzoKg
     }
-    prezzo += applica('contrassegno', cod)
-    prezzo += applica('assicurazione', ass)
-    return Math.round(prezzo * 100) / 100
+    const feeContr = applica('contrassegno', cod)
+    const feeAss = applica('assicurazione', ass)
+    const _r2 = (n: number) => Math.round(n * 100) / 100
+    return { totale: _r2(noloBase + spondaAmt + feeContr + feeAss), nolo: _r2(noloBase), sponda: _r2(spondaAmt), contrassegno: _r2(feeContr), assicurazione: _r2(feeAss) }
   }
 }

@@ -88,7 +88,13 @@ export default function ReportSpedizioniPage() {
         'Data': new Date(s.created_at).toLocaleDateString('it-IT'),
         'Stato': s.stato,
         'Prezzo Cliente (€)': s.costo_totale,
+        'Cli. Nolo (€)': s.cli_nolo ?? '',
+        'Cli. Supplementi (€)': s.cli_supplementi ?? '',
         'Prezzo Corriere (€)': s.prezzo_corriere != null ? s.prezzo_corriere : '',
+        'Corr. Nolo (€)': s.dett_corriere ? s.dett_corriere.nolo : '',
+        'Corr. Contrassegno (€)': s.dett_corriere ? s.dett_corriere.contrassegno : '',
+        'Corr. Assicurazione (€)': s.dett_corriere ? s.dett_corriere.assicurazione : '',
+        'Corr. Sponda (€)': s.dett_corriere ? s.dett_corriere.sponda : '',
         'Tracking': s.tracking_number,
       }))
       const ws = utils.json_to_sheet(rows)
@@ -107,14 +113,17 @@ export default function ReportSpedizioniPage() {
       doc.text(`Totale: ${spedizioni.length} spedizioni`, 14, 22)
       autoTable(doc, {
         startY: 28,
-        head: [['N. Spedizione','Cliente','Destinatario','Città','Peso','Colli','Contrassegno','Data','Stato','Prezzo Cliente €','Prezzo Corriere €']],
-        body: spedizioni.map((s: any) => [
-          s.numero, s.clienti?.ragione_sociale||s.mitt_nome, s.dest_nome,
-          `${s.dest_citta} (${s.dest_provincia})`, `${s.peso_reale}kg`, s.colli,
-          Number(s.contrassegno)>0?`€${s.contrassegno}`:'—',
-          new Date(s.created_at).toLocaleDateString('it-IT'),
-          s.stato.replace(/_/g,' '), `EUR ${Number(s.costo_totale).toFixed(2)}`, (s.prezzo_corriere != null ? `EUR ${Number(s.prezzo_corriere).toFixed(2)}` : '-')
-        ]),
+        head: [['N. Spedizione','Cliente','Destinatario','Città','Peso','Stato','Prezzo Cliente €','Prezzo Corriere €','Nolo','Contr.','Assic.','Sponda']],
+        body: spedizioni.map((s: any) => {
+          const d = s.dett_corriere
+          return [
+            s.numero, s.clienti?.ragione_sociale||s.mitt_nome, s.dest_nome,
+            `${s.dest_citta} (${s.dest_provincia})`, `${s.peso_reale}kg`,
+            s.stato.replace(/_/g,' '), `€${Number(s.costo_totale).toFixed(2)}`,
+            (s.prezzo_corriere != null ? `€${Number(s.prezzo_corriere).toFixed(2)}` : '-'),
+            d?`€${d.nolo.toFixed(2)}`:'-', d?`€${d.contrassegno.toFixed(2)}`:'-', d?`€${d.assicurazione.toFixed(2)}`:'-', d?`€${d.sponda.toFixed(2)}`:'-',
+          ]
+        }),
         styles: { fontSize: 7 },
         headStyles: { fillColor: [249, 115, 22] },
       })
@@ -141,9 +150,10 @@ export default function ReportSpedizioniPage() {
     } else if (formato === 'zip') {
       const { default: JSZip } = await import('jszip' as any)
       const zip = new JSZip()
-      const csv = ['N. Spedizione,Cliente,Destinatario,Città,Peso,Colli,Contrassegno,Data,Stato,Prezzo Cliente,Prezzo Corriere']
+      const csv = ['N. Spedizione,Cliente,Destinatario,Città,Peso,Colli,Contrassegno,Data,Stato,Prezzo Cliente,Cli. Nolo,Cli. Supplementi,Prezzo Corriere,Corr. Nolo,Corr. Contrassegno,Corr. Assicurazione,Corr. Sponda']
       spedizioni.forEach((s: any) => {
-        csv.push(`${s.numero},${s.clienti?.ragione_sociale||s.mitt_nome},${s.dest_nome},${s.dest_citta},${s.peso_reale},${s.colli},${s.contrassegno},${new Date(s.created_at).toLocaleDateString('it-IT')},${s.stato},${s.costo_totale},${s.prezzo_corriere != null ? s.prezzo_corriere : ""}`)
+        const d = s.dett_corriere
+        csv.push(`${s.numero},${s.clienti?.ragione_sociale||s.mitt_nome},${s.dest_nome},${s.dest_citta},${s.peso_reale},${s.colli},${s.contrassegno},${new Date(s.created_at).toLocaleDateString('it-IT')},${s.stato},${s.costo_totale},${s.cli_nolo??''},${s.cli_supplementi??''},${s.prezzo_corriere != null ? s.prezzo_corriere : ""},${d?d.nolo:''},${d?d.contrassegno:''},${d?d.assicurazione:''},${d?d.sponda:''}`)
       })
       zip.file('spedizioni.csv', csv.join('\n'))
       const blob = await zip.generateAsync({type:'blob'})
