@@ -1,5 +1,6 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { spediamoproSearchStocks, spediamoproReleaseStock } from '@/lib/spediamopro'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -54,7 +55,7 @@ export async function POST(req: NextRequest) {
 
   // Carica spedizione
   const { data: spedizione } = await supabase.from('spedizioni')
-    .select('*, clienti(ragione_sociale), corrieri(credenziali,nome_contratto)')
+    .select('*, clienti(ragione_sociale), corrieri(credenziali,nome_contratto,tipo)')
     .eq('id', spedizioneId).eq('master_id', utente?.master_id).single()
   if (!spedizione) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 
@@ -66,9 +67,24 @@ export async function POST(req: NextRequest) {
   const costoTotale = (costoGiornaliero * giorni) + costoRiconsegna
 
   if (azione === 'svincola') {
-    // Chiama API corriere per svincolare
+    // Chiama l'API del corriere per svincolare
     const cred = spedizione.corrieri?.credenziali as Record<string,string>
-    if (cred?.master_domain && cred?.password) {
+    const tipoCorr = spedizione.corrieri?.tipo
+    if (tipoCorr === 'spediamopro' && cred?.authcode) {
+      // SpediamoPro: cerca lo stock attivo della spedizione e lo rilascia
+      try {
+        const raw: any = spedizione.raw_response || {}
+        const spid = raw.id || raw?.raw?.data?.id
+        const code = raw.code || raw?.raw?.data?.code || spedizione.tracking_number
+        const stocks = await spediamoproSearchStocks(cred.authcode, String(code))
+        const attivo = (stocks || []).find((st: any) => Number(st.status) === 1 && (!spid || Number(st.shipmentId) === Number(spid)))
+        if (attivo?.id) {
+          // releaseAction 1 = riconsegna allo stesso indirizzo (default). instructions opzionale.
+          await spediamoproReleaseStock(cred.authcode, Number(attivo.id), 1, istruzioni ? { instructions: istruzioni } : {})
+        }
+      } catch (e) { console.error('Errore svincolo SpediamoPro:', e) }
+    } else if (cred?.master_domain && cred?.password) {
+      // Spedisci.online: delivery-instructions
       try {
         await fetch(`https://${cred.master_domain}/api/v2/shipping/delivery-instructions/${spedizione.tracking_number}`, {
           method: 'POST',

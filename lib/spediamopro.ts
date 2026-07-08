@@ -292,3 +292,51 @@ export async function spediamoproWaitPickupCode(authcode: string, pickupId: numb
   }
   return null
 }
+
+// ── Tracking ──
+export async function spediamoproGetTracking(authcode: string, shipmentId: number): Promise<{ status: number | null; trackingCode: string | null; events: any[]; shipmentCode: string | null }> {
+  const token = await getSpediamoproToken(authcode)
+  const res = await fetch(`${BASE_URL}/shipments/${shipmentId}/tracking`, { headers: { Authorization: `Bearer ${token}` } })
+  const text = await res.text()
+  if (!res.ok) throw new Error(`SpediamoPro tracking (${res.status}): ${text.slice(0, 150)}`)
+  const d = (() => { try { return JSON.parse(text)?.data || {} } catch { return {} } })()
+  return { status: d.status ?? null, trackingCode: d.trackingCode || null, events: d.events || [], shipmentCode: d.shipmentCode || null }
+}
+
+// ── Stock / Giacenza ──
+export async function spediamoproSearchStocks(authcode: string, search: string): Promise<any[]> {
+  const token = await getSpediamoproToken(authcode)
+  const res = await fetch(`${BASE_URL}/stocks/search`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ search }),
+  })
+  const text = await res.text()
+  if (!res.ok) throw new Error(`SpediamoPro stocks (${res.status}): ${text.slice(0, 150)}`)
+  const d = (() => { try { return JSON.parse(text) } catch { return {} } })()
+  return Array.isArray(d?.data) ? d.data : (d?.data?.items || d?.items || (Array.isArray(d) ? d : []))
+}
+
+// Svincolo giacenza: releaseAction 1=riconsegna stesso indirizzo, 3=reso mittente, 4=ritira in sede, ecc.
+export async function spediamoproReleaseStock(authcode: string, stockId: number, releaseAction = 1, extra: any = {}): Promise<any> {
+  const token = await getSpediamoproToken(authcode)
+  const res = await fetch(`${BASE_URL}/stocks/${stockId}/release`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ releaseAction, ...extra }),
+  })
+  const text = await res.text()
+  if (!res.ok) throw new Error(`SpediamoPro release (${res.status}): ${text.slice(0, 150)}`)
+  try { return JSON.parse(text) } catch { return {} }
+}
+
+// Mappa lo status SpediamoPro (0-13) allo stato interno. Lo status 11 (eccezione)
+// è gestito a parte dal chiamante (controlla gli stock → giacenza / non_consegnato).
+export function mapStatoSpediamopro(status: number | null): string | null {
+  switch (Number(status)) {
+    case 0: return 'annullata'
+    case 4: case 5: case 6: case 13: return 'in_lavorazione'
+    case 7: return 'spedita'
+    case 8: return 'in_transito'
+    case 9: return 'in_consegna'
+    case 10: case 12: return 'consegnata'
+    case 11: return 'eccezione'
+    default: return null
+  }
+}

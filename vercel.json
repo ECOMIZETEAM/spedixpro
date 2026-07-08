@@ -8,6 +8,10 @@
     {
       "path": "/api/abbonamento/rinnovo-mensile",
       "schedule": "0 6 1 * *"
+    },
+    {
+      "path": "/api/tracking/aggiorna",
+      "schedule": "0 */4 * * *"
     }
   ]
 }
