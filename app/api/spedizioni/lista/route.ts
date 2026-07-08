@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
+import { creaCalcolatoreListinoCliente } from '@/lib/pricing'
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -101,6 +102,25 @@ export async function GET(req: NextRequest) {
   if (agenteClienteIds !== null) query = query.in('cliente_id', agenteClienteIds.length ? agenteClienteIds : ['00000000-0000-0000-0000-000000000000'])
   const { data: spedizioni, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+
+  // Costo da mostrare = il PREZZO CLIENTE che ti paga il tuo DIRETTO:
+  // - spedizione propria (master_id = io): il prezzo del cliente diretto (costo_totale).
+  // - spedizione della rete: il prezzo del MIO listino cliente verso il figlio diretto
+  //   (prima linea), per quel corriere = quello che lui paga a me.
+  const parentListinoOf = new Map<string, string | null>()  // figlio diretto -> parent_listino_id
+  const nomeToMioCorr = new Map<string, string>()            // nome contratto -> mio corriere id
+  const calcPerListino = new Map<string, (s: any) => any>()  // listino_id -> calcolatore batch
+  const targetIds = new Set<string>()
+  for (const fl of primaLineaId.values()) targetIds.add(fl)
+  if (isMasterRete && targetIds.size && (spedizioni || []).length) {
+    const { data: tms } = await db.from('masters').select('id,parent_listino_id').in('id', Array.from(targetIds))
+    for (const t of (tms || [])) parentListinoOf.set(t.id, (t as any).parent_listino_id || null)
+    const { data: miei } = await db.from('corrieri').select('id,nome_contratto').eq('master_id', utente?.master_id)
+    for (const c of (miei || [])) nomeToMioCorr.set(c.nome_contratto, c.id)
+    const listini = Array.from(new Set(Array.from(parentListinoOf.values()).filter(Boolean))) as string[]
+    for (const lid of listini) calcPerListino.set(lid, await creaCalcolatoreListinoCliente(db, lid))
+  }
+
   // master_rete = nome della MIA prima linea per le spedizioni dei sotto-master (null per le mie)
   const rows = (spedizioni || []).map((s: any) => {
     let master_rete: string | null = null
@@ -113,7 +133,20 @@ export async function GET(req: NextRequest) {
       master_rete = flId ? (nomeMaster.get(flId) || null) : null
       master_rete_id = flId || null
     }
-    return { ...s, master_rete, master_rete_id }
+    // Sulle spedizioni di rete: prezzo del mio listino cliente verso il figlio diretto (prima
+    // linea) per quel corriere. Sulle mie spedizioni resta il prezzo del cliente (costo_totale).
+    let costo_mostrato = Number(s.costo_totale || 0)
+    if (!masterSel && master_rete_id) {
+      const listinoId = parentListinoOf.get(master_rete_id)
+      const nome = (s.corrieri as any)?.nome_contratto
+      const mioCorr = nome ? nomeToMioCorr.get(nome) : null
+      const calc = listinoId ? calcPerListino.get(listinoId) : null
+      if (calc && mioCorr) {
+        const ris = calc({ ...s, corriere_id: mioCorr })
+        if (ris && ris.totale != null) costo_mostrato = ris.totale
+      }
+    }
+    return { ...s, master_rete, master_rete_id, costo_mostrato }
   })
   return NextResponse.json(rows)
 }

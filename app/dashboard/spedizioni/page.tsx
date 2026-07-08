@@ -364,7 +364,7 @@ async function apriTracking(s: any) {
                       </td>
                       <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.note||'—'}</td>
                       <td style={{padding:'9px 12px',fontWeight:'700',color:'#1a1a1a'}}>
-                        € {Number(s.costo_totale||0).toFixed(2)}
+                        € {Number(s.costo_mostrato ?? s.costo_totale ?? 0).toFixed(2)}
                         {Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}}>R</span>}
                       </td>
                       <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>—</td>
