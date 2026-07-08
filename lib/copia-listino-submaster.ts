@@ -74,9 +74,12 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   }
 
   // 3) LISTINO CORRIERI del sotto-master (riuso il primo, altrimenti creo)
+  // listini_corrieri.corriere_id è NOT NULL: uso il primo corriere mappato.
+  const primoCorr = [...mapCorr.values()][0]
+  if (!primoCorr) return { ok: false, reason: 'nessun corriere da copiare' }
   let subListinoId = mieiIds[0]
   if (!subListinoId) {
-    const { data: nl } = await admin.from('listini_corrieri').insert({ master_id: subMasterId, nome: listinoSrc?.nome || 'Listino Corrieri', fattore_volume: listinoSrc?.fattore_volume || 5000, solo_peso_reale: !!listinoSrc?.solo_peso_reale, attivo: true }).select('id').single()
+    const { data: nl } = await admin.from('listini_corrieri').insert({ master_id: subMasterId, corriere_id: primoCorr, nome: listinoSrc?.nome || 'Listino Corrieri', fattore_volume: listinoSrc?.fattore_volume || 5000, solo_peso_reale: !!listinoSrc?.solo_peso_reale, attivo: true }).select('id').single()
     subListinoId = nl?.id
   } else {
     await admin.from('listini_corrieri').update({ fattore_volume: listinoSrc?.fattore_volume || 5000, solo_peso_reale: !!listinoSrc?.solo_peso_reale }).eq('id', subListinoId)
