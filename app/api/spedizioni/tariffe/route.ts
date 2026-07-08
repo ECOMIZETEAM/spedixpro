@@ -125,11 +125,22 @@ export async function POST(req: NextRequest) {
 
   // Mappa impostazioni per-contratto del cliente (contrassegno abilitato o no)
   const codRichiesto = Number(body.codValue || 0) > 0
-  const { data: abil } = await supabase
-    .from('clienti_corrieri_abilitati').select('corriere_id, settings').eq('cliente_id', clienteId)
+  // Stato per-contratto: cliente = clienti_corrieri_abilitati; sotto-master = masters_corrieri_abilitati (admin).
+  let abil: any[] = []
+  if (subMatch) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const { data } = await admin.from('masters_corrieri_abilitati').select('corriere_id, abilitato, settings').eq('master_id', subMatch)
+    abil = data || []
+  } else {
+    const { data } = await supabase.from('clienti_corrieri_abilitati').select('corriere_id, abilitato, settings').eq('cliente_id', clienteId)
+    abil = data || []
+  }
   const contrassegnoOff = new Set(
-    (abil || []).filter((a:any) => a.settings && a.settings.contrassegno === 'no').map((a:any) => a.corriere_id)
+    abil.filter((a:any) => a.settings && a.settings.contrassegno === 'no').map((a:any) => a.corriere_id)
   )
+  // Contratti DISABILITATI dal padre/master → esclusi dalle tariffe.
+  const disabilitati = new Set(abil.filter((a:any) => a.abilitato === false).map((a:any) => a.corriere_id))
 
   // Scaglioni contrassegno per corriere (dal listino del cliente)
   const codImporto = Number(body.codValue || 0)
@@ -373,6 +384,7 @@ export async function POST(req: NextRequest) {
   let ultimoErroreQuota = ''
 
   for (const [corriereId, fasceDelCorriere] of fascePerCorriere) {
+    if (disabilitati.has(corriereId)) continue   // contratto disattivato per questo cliente/sotto-master
     const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
     // Limite misure per scaglione di PESO REALE: se un collo eccede, il corriere non è disponibile.
     if (superaMisureMax(settsC, pesoReale, tuttiColli)) { esclusiMisura++; continue }

@@ -6,8 +6,28 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{id:st
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato'}, { status: 401 })
-  // Sotto-master: gestisce i propri corrieri nel suo listino -> qui nessun contratto cliente
-  if (id.startsWith('m:')) return NextResponse.json([])
+  // Sotto-master: contratti dal LISTINO ASSEGNATO (parent_listino_id) + stato da masters_corrieri_abilitati.
+  if (id.startsWith('m:')) {
+    const subId = id.slice(2)
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+    const { data: sm } = await admin.from('masters').select('parent_master_id,parent_listino_id').eq('id', subId).maybeSingle()
+    if (!sm || sm.parent_master_id !== utente?.master_id) return NextResponse.json([])
+    if (!sm.parent_listino_id) return NextResponse.json([])
+    const { data: agganciM } = await admin.from('listini_clienti_corrieri')
+      .select('corriere_id, corrieri(id,nome_contratto,tipo)').eq('listino_id', sm.parent_listino_id)
+    const contrattiM = (agganciM || []).map((r:any) => r.corrieri).filter(Boolean)
+    const { data: statiM } = await admin.from('masters_corrieri_abilitati')
+      .select('corriere_id, abilitato, settings').eq('master_id', subId)
+    const abilM = new Map((statiM||[]).map((s:any) => [s.corriere_id, s.abilitato]))
+    const settM = new Map((statiM||[]).map((s:any) => [s.corriere_id, s.settings || {}]))
+    return NextResponse.json(contrattiM.map((c:any) => ({
+      id: c.id, nome_contratto: c.nome_contratto, tipo: c.tipo,
+      abilitato: abilM.has(c.id) ? abilM.get(c.id) : true,
+      settings: settM.has(c.id) ? settM.get(c.id) : {},
+    })))
+  }
   const { data: cliente } = await supabase.from('clienti').select('listino_cliente_id').eq('id', id).single()
   if (!cliente?.listino_cliente_id) return NextResponse.json([])
   const { data: agganci } = await supabase.from('listini_clienti_corrieri')
@@ -31,9 +51,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato'}, { status: 401 })
-  if (id.startsWith('m:')) return NextResponse.json({ ok: true })   // sotto-master: nessun contratto cliente
   const { corriereId, abilitato, settings } = await req.json()
   if (!corriereId) return NextResponse.json({ error: 'corriereId mancante' }, { status: 400 })
+  // Sotto-master: salva su masters_corrieri_abilitati (autorizza il padre diretto).
+  if (id.startsWith('m:')) {
+    const subId = id.slice(2)
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+    const { data: sm } = await admin.from('masters').select('parent_master_id').eq('id', subId).maybeSingle()
+    if (!sm || sm.parent_master_id !== utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    const payloadM: any = { master_id: subId, corriere_id: corriereId }
+    if (abilitato !== undefined) payloadM.abilitato = abilitato
+    if (settings !== undefined) payloadM.settings = settings
+    const { error } = await admin.from('masters_corrieri_abilitati').upsert(payloadM, { onConflict: 'master_id,corriere_id' })
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    return NextResponse.json({ ok: true })
+  }
   const payload: any = { cliente_id: id, corriere_id: corriereId }
   if (abilitato !== undefined) payload.abilitato = abilitato
   if (settings !== undefined) payload.settings = settings
