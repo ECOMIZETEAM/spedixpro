@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { logoCorriere } from '@/lib/corriere-logo'
+import { setFlash } from '@/lib/flash'
 
 interface Zona { id: string; nome: string }
 interface Corriere { id: string; nome_contratto: string }
@@ -171,10 +172,10 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       const data = await res.json()
       if (data.error) { setMsg('Errore: '+data.error); setSaving(false); return }
       const prop = Number(data.propagati || 0)
-      setMsg(prop > 0 ? `✓ Listino salvato e propagato a ${prop} master collegati` : '✓ Listino salvato!')
-      setTimeout(() => setMsg(''), 4000)
-    } catch { setMsg('Errore di rete') }
-    setSaving(false)
+      // Salva il banner e ricarica: la pagina torna coi dati salvati e mostra la conferma in alto
+      setFlash(prop > 0 ? `✓ Listino salvato e propagato a ${prop} master collegati` : '✓ Listino salvato!')
+      window.location.reload()
+    } catch { setMsg('Errore di rete'); setSaving(false) }
   }
 
   function apriContratto(cId: string) {

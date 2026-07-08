@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
+import FlashBanner from './FlashBanner'
 
 // perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
 // always: sempre visibile a chiunque abbia accesso al portale.
@@ -280,6 +281,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
 
         {/* CONTENT */}
         <main style={{flex:1,padding:'24px',overflowY:'auto'}}>
+          <FlashBanner />
           {children}
         </main>
       </div>
