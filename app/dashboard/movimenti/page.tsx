@@ -9,6 +9,7 @@ type Movimento = {
   importo: number
   saldo_dopo: number
   created_at: string
+  corriere?: string | null
 }
 
 const card: React.CSSProperties = { background:'#fff', borderRadius:'8px', border:'1px solid #e8e8e8', padding:'20px' }
@@ -35,6 +36,7 @@ export default function MovimentiMasterPage() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [cerca, setCerca] = useState('')
+  const [corriereFiltro, setCorriereFiltro] = useState('')
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
 
@@ -50,9 +52,16 @@ export default function MovimentiMasterPage() {
     })()
   }, [])
 
-  const visibili = cerca
-    ? movimenti.filter(m => m.descrizione?.toLowerCase().includes(cerca.toLowerCase()) || (m.riferimento||'').toLowerCase().includes(cerca.toLowerCase()))
-    : movimenti
+  const corrieri = Array.from(new Set(movimenti.map(m => m.corriere).filter(Boolean))) as string[]
+  const visibili = movimenti.filter(m => {
+    if (corriereFiltro && m.corriere !== corriereFiltro) return false
+    if (cerca) {
+      const c = cerca.toLowerCase()
+      if (!(m.descrizione?.toLowerCase().includes(c) || (m.riferimento||'').toLowerCase().includes(c))) return false
+    }
+    return true
+  })
+  const totaleFiltrato = visibili.reduce((s, m) => s + Number(m.importo || 0), 0)
 
   const totalePagine = Math.max(1, Math.ceil(visibili.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
@@ -66,11 +75,22 @@ export default function MovimentiMasterPage() {
       </div>
 
       <div style={{...card,marginBottom:'16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px'}}>
-        <div>
-          <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>Credito disponibile</div>
-          <div style={{fontSize:'26px',fontWeight:700,color:saldo<0?'#b91c1c':'#15803d',marginTop:'4px'}}>{fmtEuro(saldo)}</div>
+        <div style={{display:'flex',gap:'28px',flexWrap:'wrap'}}>
+          <div>
+            <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>Credito disponibile</div>
+            <div style={{fontSize:'26px',fontWeight:700,color:saldo<0?'#b91c1c':'#15803d',marginTop:'4px'}}>{fmtEuro(saldo)}</div>
+          </div>
+          <div>
+            <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>Totale movimenti{corriereFiltro?` · ${corriereFiltro}`:''}</div>
+            <div style={{fontSize:'26px',fontWeight:700,color:totaleFiltrato<0?'#b91c1c':'#15803d',marginTop:'4px'}}>{fmtImporto(totaleFiltrato)}</div>
+          </div>
         </div>
-        <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}}>
+          <span style={{fontSize:'12.5px',color:'#666'}}>Corriere</span>
+          <select value={corriereFiltro} onChange={e=>{setCorriereFiltro(e.target.value);setPagina(1)}} style={{padding:'6px 8px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',maxWidth:'200px'}}>
+            <option value="">Tutti i corrieri</option>
+            {corrieri.map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
           <span style={{fontSize:'12.5px',color:'#666'}}>Mostra</span>
           <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}} style={{padding:'6px 8px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select>
           <span style={{fontSize:'12.5px',color:'#666'}}>Cerca:</span>

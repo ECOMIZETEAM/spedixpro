@@ -23,8 +23,24 @@ export async function GET(req: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     const { data: m } = await supabase
       .from('masters').select('credito, nome').eq('id', utente.master_id).single()
+
+    // Corriere di ogni movimento di spedizione: movimento -> spedizione_id -> corriere (nome contratto).
+    // Le spedizioni possono essere di sotto-master (cross-master) -> lettura via admin.
+    const movs = movimenti || []
+    const spedIds = Array.from(new Set(movs.map((mv: any) => mv.spedizione_id).filter(Boolean)))
+    const nomePerSped = new Map<string, string | null>()
+    if (spedIds.length) {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const admin = createAdminSupabase()
+      const { data: speds } = await admin.from('spedizioni').select('id,corrieri(nome_contratto)').in('id', spedIds)
+      for (const s of (speds || [])) nomePerSped.set(s.id, (s.corrieri as any)?.nome_contratto || null)
+    }
+    const movimentiOut = movs.map((mv: any) => ({
+      ...mv,
+      corriere: mv.spedizione_id ? (nomePerSped.get(mv.spedizione_id) || null) : null,
+    }))
     return NextResponse.json({
-      movimenti: movimenti || [],
+      movimenti: movimentiOut,
       saldo: Number(m?.credito || 0),
       cliente: m?.nome || null,
     })
