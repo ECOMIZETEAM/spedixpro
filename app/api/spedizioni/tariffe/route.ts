@@ -369,15 +369,15 @@ export async function POST(req: NextRequest) {
   }
 
   const risultati: any[] = []
-  let esclusiContrassegno = 0, esclusiAssic = 0
+  let esclusiContrassegno = 0, esclusiAssic = 0, esclusiMisura = 0, esclusiFascia = 0, esclusiQuota = 0
 
   for (const [corriereId, fasceDelCorriere] of fascePerCorriere) {
     const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
     // Limite misure per scaglione di PESO REALE: se un collo eccede, il corriere non è disponibile.
-    if (superaMisureMax(settsC, pesoReale, tuttiColli)) continue
+    if (superaMisureMax(settsC, pesoReale, tuttiColli)) { esclusiMisura++; continue }
     const pesoPerFascia = (!!settsC.agevolazione_peso_reale && entroMisureAgevolate) ? pesoReale : pesoFatturato
     const fasciaGiusta = trovaFascia(fasceDelCorriere, pesoPerFascia)
-    if (!fasciaGiusta) continue
+    if (!fasciaGiusta) { esclusiFascia++; continue }   // peso oltre l'ultima fascia e nessuna "oltre X ogni"
     if (Number(fasciaGiusta.prezzo) <= 0) continue   // prezzo 0 per questa zona/peso -> non mostrare il corriere
     if (codRichiesto && contrassegnoOff.has(corriereId)) continue
 
@@ -390,7 +390,7 @@ export async function POST(req: NextRequest) {
         quote = await quotaCorriere(corriere, pesoFatturato)
       } catch {}
       spediamoproQuotation = quote?._spediamopro_quotation || null
-      if (!quote) continue
+      if (!quote) { esclusiQuota++; continue }   // il corriere non ha tariffe per queste misure/peso
     }
 
     if (calcolaContrassegno(corriereId, Number(fasciaGiusta.prezzo)) === null) { if (codRichiesto) esclusiContrassegno++; continue }
@@ -421,9 +421,13 @@ export async function POST(req: NextRequest) {
   }
 
   if (!risultati.length) {
+    const pf = pesoFatturato.toFixed(2)
+    if (esclusiFascia > 0) return NextResponse.json({ error: `Peso fatturato ${pf}kg (reale ${pesoReale.toFixed(2)}kg / volume ${pesoVolume.toFixed(2)}kg) oltre l'ultima fascia del listino. Aggiungi una fascia "oltre X ogni" nel listino per coprire i pesi/misure maggiori.` }, { status: 400 })
+    if (esclusiMisura > 0) return NextResponse.json({ error: `Le misure del collo superano le misure massime consentite dal corriere per questo peso (Impostazioni corriere → Misure massime).` }, { status: 400 })
+    if (esclusiQuota > 0) return NextResponse.json({ error: `Il corriere non offre tariffe per queste misure/peso (${pf}kg): riduci le dimensioni o usa un altro contratto.` }, { status: 400 })
     if (esclusiContrassegno > 0) return NextResponse.json({ error: 'Nessun corriere disponibile per il contrassegno richiesto: configura la tariffa contrassegno sul listino (tab Contrassegni) o riduci l\'importo.' }, { status: 400 })
     if (esclusiAssic > 0) return NextResponse.json({ error: 'Nessun corriere disponibile per l\'assicurazione richiesta: configura la tariffa assicurazione sul listino o riduci il valore.' }, { status: 400 })
-    return NextResponse.json({ error: `Nessuna tariffa disponibile per ${pesoFatturato.toFixed(2)}kg in zona ${zonaNome}` }, { status: 400 })
+    return NextResponse.json({ error: `Nessuna tariffa disponibile per ${pf}kg in zona ${zonaNome}` }, { status: 400 })
   }
 
   risultati.sort((a,b)=>Number(a.total_price)-Number(b.total_price))
