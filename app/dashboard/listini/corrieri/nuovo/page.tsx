@@ -108,7 +108,7 @@ export default function ListinoCorrierePage() {
   const [aperturaGiacenza, setAperturaGiacenza] = useState(0)
   const [ritiroPrezzo, setRitiroPrezzo] = useState(0)
   const [ritiroPercNolo, setRitiroPercNolo] = useState(0)
-  const [ereditato, setEreditato] = useState<any>(null)   // sotto-master: prezzi assegnati dal padre (read-only)
+  const [ereditato, setEreditato] = useState<any>(null)   // sotto-master: prezzi assegnati dal padre (pannello informativo)
 
   useEffect(() => {
     fetch('/api/listini/corrieri/ereditato').then(r=>r.json()).then(d=>{ if(d?.ereditato) setEreditato(d) }).catch(()=>{})
@@ -212,47 +212,6 @@ export default function ListinoCorrierePage() {
     borderBottom:tab===t?'2px solid #f97316':'2px solid transparent',
     whiteSpace:'nowrap' as const
   })
-
-  // SOTTO-MASTER: mostra (sola lettura) i prezzi che il master padre ha assegnato
-  if (ereditato) {
-    return (
-      <div>
-        <div style={{marginBottom:'16px'}}>
-          <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Listino Corrieri</h1>
-          <p style={{color:'#666',fontSize:'13px',marginTop:'4px'}}>Prezzi assegnati dal tuo master — <b>{ereditato.listinoNome}</b>. Sono i costi che paghi tu (sola lettura).</p>
-        </div>
-        {!ereditato.corrieri?.length ? (
-          <div style={{padding:'40px',textAlign:'center' as const,color:'#666',background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db'}}>Il tuo master non ha ancora impostato prezzi nel listino assegnato.</div>
-        ) : ereditato.corrieri.map((c:any,ci:number)=>(
-          <div key={ci} style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden',marginBottom:'16px'}}>
-            <div style={{padding:'12px 16px',borderBottom:'1px solid #eee',fontSize:'15px',fontWeight:'700',color:'#1a1a1a'}}>{c.corriere}</div>
-            <div style={{padding:'12px 16px',overflowX:'auto' as const}}>
-              <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
-                <thead><tr style={{background:'#f9fafb'}}>
-                  <th style={{textAlign:'left' as const,padding:'8px 12px',color:'#1a1a1a',fontWeight:'700',borderBottom:'1px solid #e5e7eb'}}>Zona</th>
-                  <th style={{textAlign:'left' as const,padding:'8px 12px',color:'#1a1a1a',fontWeight:'700',borderBottom:'1px solid #e5e7eb'}}>Fasce di peso → prezzo</th>
-                </tr></thead>
-                <tbody>
-                  {Object.entries(c.zone).map(([zona,righe]:any,zi:number)=>(
-                    <tr key={zi} style={{borderBottom:'1px solid #f1f5f9'}}>
-                      <td style={{padding:'8px 12px',fontWeight:'600',color:'#f97316',whiteSpace:'nowrap' as const}}>{zona}</td>
-                      <td style={{padding:'8px 12px',color:'#1a1a1a'}}>
-                        {righe.sort((a:any,b:any)=>a.peso_max-b.peso_max).map((r:any,i:number)=>(
-                          <span key={i} style={{display:'inline-block',marginRight:'14px',whiteSpace:'nowrap' as const}}>
-                            {r.tipo==='oltre'?'oltre':'fino a'} <b>{r.peso_max}kg</b>: € {r.prezzo.toFixed(2)}
-                          </span>
-                        ))}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ))}
-      </div>
-    )
-  }
 
   if (loading) {
     return <div style={{padding:'40px',textAlign:'center' as const,color:'#666'}}>Caricamento...</div>
