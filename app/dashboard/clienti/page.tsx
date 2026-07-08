@@ -151,7 +151,7 @@ export default function ClientiPage() {
                     </td>
                     <td style={{padding:'10px 14px'}}>
                       <div style={{display:'flex',gap:'14px',alignItems:'center'}}>
-                        <a href={c.is_master ? `/api/master/${c.id.slice(2)}/impersona` : `/api/clienti/${c.id}/impersona`} title="Accedi" target="_blank" rel="noopener noreferrer" className="cli-act">↪</a>
+                        {!c.is_master && <a href={`/api/clienti/${c.id}/impersona`} title="Accedi" target="_blank" rel="noopener noreferrer" className="cli-act">↪</a>}
                         <a href={`/dashboard/clienti/${c.id}`} title="Credito e movimenti" className="cli-act">▤</a>
                         <a href={`/dashboard/clienti/${c.id}/modifica`} title="Modifica dati" className="cli-act">✎</a>
                         <a href={`/dashboard/clienti/${c.id}/impostazioni`} title="Impostazioni" className="cli-act">⚙</a>
