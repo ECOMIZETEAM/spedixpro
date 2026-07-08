@@ -397,7 +397,8 @@ export async function POST(req: NextRequest) {
     if (calcolaContrassegno(corriereId, Number(fasciaGiusta.prezzo)) === null) { if (codRichiesto) esclusiContrassegno++; continue }
     if (calcolaAssicurazione(corriereId, Number(fasciaGiusta.prezzo)) === null) { if (assicImporto > 0) esclusiAssic++; continue }
 
-    const sponda = calcolaSponda(corriereId, pesoFatturato)
+    // Sponda e peso fatturato usano il peso EFFETTIVO (reale se agevolazione attiva ed entro misure, altrimenti volumetrico).
+    const sponda = calcolaSponda(corriereId, pesoPerFascia)
     const prezzoSped = Number(fasciaGiusta.prezzo) + sponda
     risultati.push({
       carrierCode: corriere?.tipo || 'sda',
@@ -412,7 +413,7 @@ export async function POST(req: NextRequest) {
       zona: isEstero ? (PAESI[paeseDest] || paeseDest) : ((fasciaGiusta as any)?.zone?.nome || zonaNome),
       peso_reale: pesoReale,
       peso_volume: pesoVolume.toFixed(2),
-      peso_fatturato: pesoFatturato.toFixed(2),
+      peso_fatturato: pesoPerFascia.toFixed(2),   // peso EFFETTIVO su cui è calcolato il prezzo (reale se agevolazione)
       corriere_nome: corriere?.nome_contratto || 'Corriere',
       listino_fascia: `fino a ${fasciaGiusta.peso_max}kg`,
       _corriere_tipo: corriere?.tipo,
