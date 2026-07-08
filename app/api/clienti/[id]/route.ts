@@ -55,6 +55,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       parent_listino_id: datiCliente.listino_cliente_id || null,
     }).eq('id', targetId)
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    // Se è stato assegnato un listino, copialo nel Listino Corrieri del sotto-master
+    if (datiCliente.listino_cliente_id) {
+      try {
+        const { copiaListinoAlSottoMaster } = await import('@/lib/copia-listino-submaster')
+        await copiaListinoAlSottoMaster(admin, targetId)
+      } catch (e) { console.error('Copia listino sotto-master (modifica):', e) }
+    }
     return NextResponse.json({ success: true })
   }
 

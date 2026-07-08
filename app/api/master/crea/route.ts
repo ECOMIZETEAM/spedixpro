@@ -81,6 +81,14 @@ export async function POST(req: NextRequest) {
       nome,
       attivo: true,
     })
+
+    // Copia il listino assegnato nel Listino Corrieri del sotto-master (contratti + prezzi)
+    if (parentListinoId) {
+      try {
+        const { copiaListinoAlSottoMaster } = await import('@/lib/copia-listino-submaster')
+        await copiaListinoAlSottoMaster(admin, nuovoMaster.id)
+      } catch (e) { console.error('Copia listino sotto-master:', e) }
+    }
   } catch (e: any) {
     await admin.from('masters').delete().eq('id', nuovoMaster.id)
     return NextResponse.json({ error: e.message || 'Errore creazione utente' }, { status: 400 })
