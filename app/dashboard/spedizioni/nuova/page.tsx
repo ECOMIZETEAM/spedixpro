@@ -38,6 +38,8 @@ const CARRIERS: Record<string,{nome:string,colore:string}> = {
   dhl:{nome:'DHL Express',colore:'#ffcc00'},
   spediamopro:{nome:'',colore:'#f97316'},
 }
+// Il provider tecnico non si mostra mai: codice interno SP / SO.
+const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':(t||'').toUpperCase()
 
 export default function NuovaSpedizionePage() {
   const router = useRouter()
@@ -281,7 +283,7 @@ export default function NuovaSpedizionePage() {
                           style={{padding:'8px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
                           onMouseEnter={e=>(e.currentTarget.style.background='#f9fafb')}
                           onMouseLeave={e=>(e.currentTarget.style.background='#fff')}>
-                          <div style={{fontWeight:600}}>{c.nome}</div>
+                          <div style={{fontWeight:600}}>{c.nome || r.corriere_nome || codiceProv(chiave)}</div>
                           <div style={{color:'#999',fontSize:'11px'}}>{[c.indirizzo,c.citta,c.provincia&&`(${c.provincia})`,c.cap].filter(Boolean).join(' ')}</div>
                         </div>
                       ))}
@@ -444,16 +446,16 @@ export default function NuovaSpedizionePage() {
               {!tariffe.length&&!loading && <div style={{textAlign:'center',color:'#1a1a1a',fontSize:'13px',padding:'12px 0'}}>Compila i dati e clicca "Seleziona Corriere"</div>}
               {tariffe.map((r,i)=>{
                 const chiave = r._corriere_tipo || r.carrierCode
-                const c = CARRIERS[chiave]||{nome:r.corriere_nome||chiave.toUpperCase(),colore:'#666'}
+                const c = CARRIERS[chiave]||{nome:r.corriere_nome||codiceProv(chiave),colore:'#666'}
                 const isSel = selected?._corriere_id===r._corriere_id && selected?.zona===r.zona
                 return (
                   <div key={i} onClick={()=>setSelected(r)}
                     style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px',border:`2px solid ${isSel?'#f97316':'#e8e8e8'}`,borderRadius:'8px',marginBottom:'8px',cursor:'pointer',background:isSel?'#fffbeb':'#fff'}}>
                     {iconaCorriere(r.corriere_nome||chiave) && <img src={iconaCorriere(r.corriere_nome||chiave)!} alt="" style={{width:'56px',height:'34px',objectFit:'contain',border:'1px solid #e8e8e8',borderRadius:'5px',background:'#fff',padding:'2px',flexShrink:0}}/>}
                     {!iconaCorriere(r.corriere_nome||chiave) && (<div style={{width:'48px',height:'30px',border:'1px solid #e8e8e8',borderRadius:'5px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                      <span style={{fontSize:'8px',fontWeight:'900',color:c.colore,textTransform:'uppercase'}}>{chiave}</span></div>)}
+                      <span style={{fontSize:'8px',fontWeight:'900',color:c.colore,textTransform:'uppercase'}}>{codiceProv(chiave)}</span></div>)}
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontWeight:'700',color:'#1a1a1a',fontSize:'13px'}}>{c.nome}</div>
+                      <div style={{fontWeight:'700',color:'#1a1a1a',fontSize:'13px'}}>{c.nome || r.corriere_nome || codiceProv(chiave)}</div>
                       <div style={{fontSize:'11px',color:'#1a1a1a',marginTop:'1px'}}>{r.peso_fatturato}kg · {r.zona}{parseFloat(r.peso_volume)>r.peso_reale?' (vol.)':''}</div>
                     </div>
                     <div style={{textAlign:'right',flexShrink:0}}>
@@ -482,7 +484,7 @@ export default function NuovaSpedizionePage() {
           <div style={cardB}>
             {tariffe.map((r,i)=>{
               const chiave = r._corriere_tipo || r.carrierCode
-              const c = CARRIERS[chiave]||{nome:r.corriere_nome||chiave.toUpperCase(),colore:'#000'}
+              const c = CARRIERS[chiave]||{nome:r.corriere_nome||codiceProv(chiave),colore:'#000'}
               const isSel = selected?._corriere_id===r._corriere_id && selected?.zona===r.zona
               return (
                 <div key={i} onClick={()=>setSelected(r)}
@@ -491,7 +493,7 @@ export default function NuovaSpedizionePage() {
                     <img src={iconaCorriere(r.corriere_nome||chiave)!} alt="" style={{width:'56px',height:'34px',objectFit:'contain',border:'1px solid #000',borderRadius:'5px',background:'#fff',padding:'2px',flexShrink:0}}/>
                   ) : (
                     <div style={{width:'48px',height:'30px',border:'1px solid #000',borderRadius:'5px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                      <span style={{fontSize:'8px',fontWeight:'900',color:c.colore,textTransform:'uppercase'}}>{chiave}</span>
+                      <span style={{fontSize:'8px',fontWeight:'900',color:c.colore,textTransform:'uppercase'}}>{codiceProv(chiave)}</span>
                     </div>
                   )}
                   <div style={{flex:1,minWidth:0}}>

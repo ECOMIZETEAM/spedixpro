@@ -20,6 +20,22 @@ const PAESI: Record<string,string> = {
   BG:'Bulgaria', EE:'Estonia', LV:'Lettonia', LT:'Lituania', RO:'Romania', GB:'Regno Unito',
 }
 
+// True se un collo supera le misure massime del corriere per il suo scaglione di PESO REALE.
+// La spedizione va quindi esclusa da quel corriere. Vuoto/incompleto = nessun limite.
+function superaMisureMax(settings: any, pesoReale: number, colli: any[]): boolean {
+  const sc = settings?.misure_scaglioni
+  const lim = (sc && sc.soglia_kg != null && sc.soglia_kg !== '')
+    ? (pesoReale > Number(sc.soglia_kg) ? sc.sopra : sc.sotto)
+    : settings?.misure_max
+  const L = Number(lim?.lunghezza) || 0, W = Number(lim?.larghezza) || 0, H = Number(lim?.altezza) || 0
+  if (!(L > 0 && W > 0 && H > 0)) return false
+  const limits = [L, W, H].sort((a, b) => b - a)
+  return (colli || []).some((c: any) => {
+    const dims = [Number(c.length) || 0, Number(c.width) || 0, Number(c.height) || 0].sort((a, b) => b - a)
+    return dims[0] > limits[0] || dims[1] > limits[1] || dims[2] > limits[2]
+  })
+}
+
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -62,7 +78,7 @@ export async function POST(req: NextRequest) {
       const { data: fasceCorr } = await dbP.from('listini_corrieri_fasce').select('corriere_id').in('listino_id', listinoIdsM)
       const ids = [...new Set((fasceCorr || []).map((f: any) => f.corriere_id).filter(Boolean))]
       if (ids.length) {
-        const { data: cs } = await dbP.from('corrieri').select('id,tipo,nome_contratto,attivo').in('id', ids)
+        const { data: cs } = await dbP.from('corrieri').select('id,tipo,nome_contratto,attivo,settings').in('id', ids)
         corrieriDaQuotare = (cs || []).map((c: any) => ({ corriere_id: c.id, corrieri: c }))
       }
     }
@@ -71,6 +87,7 @@ export async function POST(req: NextRequest) {
     for (const lc of corrieriDaQuotare) {
       const corr: any = (lc as any).corrieri
       if (!corr || corr.attivo === false) continue
+      if (superaMisureMax(corr.settings, pesoRealeP, colliP)) continue   // fuori misura per il suo scaglione
       const prezzo = await calcolaPrezzoCorriere(dbP, {
         corriereId: (lc as any).corriere_id, masterId: masterIdP,
         provincia: provinciaP, cap: capP, paese: paeseP,
@@ -350,21 +367,7 @@ export async function POST(req: NextRequest) {
   for (const [corriereId, fasceDelCorriere] of fascePerCorriere) {
     const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
     // Limite misure per scaglione di PESO REALE: se un collo eccede, il corriere non è disponibile.
-    {
-      const sc = settsC?.misure_scaglioni
-      const lim = (sc && sc.soglia_kg != null && sc.soglia_kg !== '')
-        ? (pesoReale > Number(sc.soglia_kg) ? sc.sopra : sc.sotto)
-        : settsC?.misure_max
-      const L = Number(lim?.lunghezza)||0, W = Number(lim?.larghezza)||0, H = Number(lim?.altezza)||0
-      if (L > 0 && W > 0 && H > 0) {
-        const limits = [L, W, H].sort((a,b)=>b-a)
-        const eccede = (tuttiColli||[]).some((c:any)=>{
-          const dims = [Number(c.length)||0, Number(c.width)||0, Number(c.height)||0].sort((a,b)=>b-a)
-          return dims[0] > limits[0] || dims[1] > limits[1] || dims[2] > limits[2]
-        })
-        if (eccede) continue
-      }
-    }
+    if (superaMisureMax(settsC, pesoReale, tuttiColli)) continue
     const pesoPerFascia = (!!settsC.agevolazione_peso_reale && entroMisureAgevolate) ? pesoReale : pesoFatturato
     const fasciaGiusta = trovaFascia(fasceDelCorriere, pesoPerFascia)
     if (!fasciaGiusta) continue

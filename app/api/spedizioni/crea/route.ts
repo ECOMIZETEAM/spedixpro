@@ -8,6 +8,7 @@ import {
   spediamoproCreateShipment,
   spediamoproGetLabel,
   spediamoproWaitForTracking,
+  spediamoproCancelShipment,
   kgToGrams, cmToMm, euroToCents, centsToEuro
 } from '@/lib/spediamopro'
 
@@ -288,7 +289,24 @@ export async function POST(req: NextRequest) {
     }).select('id').single()
 
     if (insertError) {
-      return NextResponse.json({ error: `Spedizione creata su corriere (${numero}) ma errore DB: ${insertError.message}`, numero }, { status: 500 })
+      // COMPENSAZIONE: annulla sul corriere per non lasciare spedizioni orfane.
+      let annullata = false
+      try {
+        const shipId = (r as any).shipmentId || (r as any).id
+        if (shipId) {
+          const del = await fetch(`${baseUrl}/shipping/delete`, {
+            method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ shipment_ids: [shipId] }),
+          })
+          annullata = del.ok
+        }
+      } catch {}
+      return NextResponse.json({
+        error: annullata
+          ? `Spedizione non registrata (errore DB) e annullata sul corriere. Riprova. Dettaglio: ${insertError.message}`
+          : `Errore DB e impossibile annullare sul corriere (rif. ${numero}): contatta l'assistenza. ${insertError.message}`,
+        numero, annullataSuCorriere: annullata,
+      }, { status: 500 })
     }
 
     // Detrazione credito (movimento -costo cliente, oppure -listino corriere se spedizione propria)
@@ -394,7 +412,15 @@ export async function POST(req: NextRequest) {
       }).select('id').single()
 
       if (insertError) {
-        return NextResponse.json({ error: `Spedizione creata su SpediamoPro (${numeroFinale}) ma errore DB: ${insertError.message}`, numero: numeroFinale }, { status: 500 })
+        // COMPENSAZIONE: se non riusciamo a registrarla noi, annulliamo la spedizione sul corriere
+        // così non restano "orfane" (create sul corriere ma non su MoovExpress).
+        const annullata = await spediamoproCancelShipment(cred.authcode, shipment.id)
+        return NextResponse.json({
+          error: annullata
+            ? `Spedizione non registrata (errore DB) e annullata sul corriere. Riprova. Dettaglio: ${insertError.message}`
+            : `Errore DB e impossibile annullare sul corriere (rif. ${numeroFinale}): contatta l'assistenza. ${insertError.message}`,
+          numero: numeroFinale, annullataSuCorriere: annullata,
+        }, { status: 500 })
       }
 
       // Detrazione credito (movimento -costo cliente, oppure -listino corriere se spedizione propria)

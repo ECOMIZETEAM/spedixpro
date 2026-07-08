@@ -293,6 +293,19 @@ export async function spediamoproWaitPickupCode(authcode: string, pickupId: numb
   return null
 }
 
+// Annulla una spedizione SpediamoPro (compensazione se il salvataggio DB fallisce → niente orfani).
+export async function spediamoproCancelShipment(authcode: string, shipmentId: number): Promise<boolean> {
+  try {
+    const token = await getSpediamoproToken(authcode)
+    const res = await fetch(`${BASE_URL}/shipments/${shipmentId}/cancel`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+    return res.ok
+  } catch { return false }
+}
+
 // ── Tracking ──
 export async function spediamoproGetTracking(authcode: string, shipmentId: number): Promise<{ status: number | null; trackingCode: string | null; events: any[]; shipmentCode: string | null }> {
   const token = await getSpediamoproToken(authcode)

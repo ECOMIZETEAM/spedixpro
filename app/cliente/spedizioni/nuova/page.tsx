@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
+const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':(t||'').toUpperCase()
 interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; costo_contrassegno?:string; costo_assicurazione?:string; corriere_nome?:string }
 interface Collo { lunghezza:string; larghezza:string; altezza:string }
 
@@ -426,7 +427,7 @@ export default function NuovaSpedizioneCliente() {
                 </div>
               )}
               {tariffe.map((r,i)=>{
-                const carrier = CARRIER_LABELS[r.carrierCode]||{nome:r.carrierCode.toUpperCase(),colore:'#666'}
+                const carrier = CARRIER_LABELS[r.carrierCode]||{nome:r.corriere_nome||codiceProv(r.carrierCode),colore:'#666'}
                 const isSelected = ((selected as any)?._corriere_id && (r as any)?._corriere_id) ? ((selected as any)._corriere_id===(r as any)._corriere_id && selected?.zona===r.zona) : (selected?.carrierCode===r.carrierCode&&selected?.contractCode===r.contractCode&&selected?.zona===r.zona)
                 return (
                   <div key={i} onClick={()=>setSelected(r)}
@@ -435,11 +436,11 @@ export default function NuovaSpedizioneCliente() {
                       <img src={iconaCorriere(r.corriere_nome||r.carrierCode||carrier.nome)!} alt="" style={{width:'56px',height:'34px',objectFit:'contain',border:'1px solid #e8e8e8',borderRadius:'5px',background:'#fff',padding:'2px',flexShrink:0}}/>
                     ) : (
                       <div style={{width:'48px',height:'30px',border:'1px solid #e8e8e8',borderRadius:'5px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                        <span style={{fontSize:'8px',fontWeight:'900',color:carrier.colore,textTransform:'uppercase'}}>{r.carrierCode.toUpperCase()}</span>
+                        <span style={{fontSize:'8px',fontWeight:'900',color:carrier.colore,textTransform:'uppercase'}}>{codiceProv(r.carrierCode)}</span>
                       </div>
                     )}
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontWeight:'700',color:'#1a1a1a',fontSize:'13px'}}>{carrier.nome}</div>
+                      <div style={{fontWeight:'700',color:'#1a1a1a',fontSize:'13px'}}>{r.corriere_nome || carrier.nome || codiceProv(r.carrierCode)}</div>
                       <div style={{fontSize:'11px',color:'#999',marginTop:'1px'}}>{r.peso_fatturato}kg · zona {r.zona}{parseFloat(r.peso_volume)>r.peso_reale?' (vol.)':''}</div>
                     </div>
                     <div style={{textAlign:'right',flexShrink:0}}>
@@ -480,7 +481,7 @@ export default function NuovaSpedizioneCliente() {
           </div>
           <div style={cardB}>
             {tariffe.map((r,i)=>{
-              const carrier = CARRIER_LABELS[r.carrierCode]||{nome:r.carrierCode.toUpperCase(),colore:'#666'}
+              const carrier = CARRIER_LABELS[r.carrierCode]||{nome:r.corriere_nome||codiceProv(r.carrierCode),colore:'#666'}
               const isSelected = ((selected as any)?._corriere_id && (r as any)?._corriere_id) ? ((selected as any)._corriere_id===(r as any)._corriere_id && selected?.zona===r.zona) : (selected?.carrierCode===r.carrierCode&&selected?.contractCode===r.contractCode&&selected?.zona===r.zona)
               return (
                 <div key={i} onClick={()=>setSelected(r)}
@@ -489,7 +490,7 @@ export default function NuovaSpedizioneCliente() {
                     <img src={iconaCorriere(r.corriere_nome||r.carrierCode||carrier.nome)!} alt="" style={{width:'56px',height:'34px',objectFit:'contain',border:'1px solid #e8e8e8',borderRadius:'5px',background:'#fff',padding:'2px',flexShrink:0}}/>
                   ) : (
                     <div style={{width:'48px',height:'30px',border:'1px solid #e8e8e8',borderRadius:'5px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                      <span style={{fontSize:'8px',fontWeight:'900',color:carrier.colore,textTransform:'uppercase'}}>{r.carrierCode.toUpperCase()}</span>
+                      <span style={{fontSize:'8px',fontWeight:'900',color:carrier.colore,textTransform:'uppercase'}}>{codiceProv(r.carrierCode)}</span>
                     </div>
                   )}
                   <div style={{flex:1,minWidth:0}}>
