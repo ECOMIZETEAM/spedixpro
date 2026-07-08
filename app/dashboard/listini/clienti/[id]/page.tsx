@@ -35,6 +35,9 @@ export default async function ModificaListinoPage({
   }
 
   const { data: tuttiICorrieri } = await supabase.from('corrieri').select('id,nome_contratto').eq('master_id', utente?.master_id)
+  // Mostra solo i corrieri POSSEDUTI dal master (no residui estranei da duplicazioni).
+  const posseduti = new Set((tuttiICorrieri||[]).map((c:any) => c.id))
+  corrieri = corrieri.filter((c:any) => posseduti.has(c.id))
   const corrieriDisponibiliDaAggiungere = (tuttiICorrieri||[]).filter(c => !corrieri.some((x:any) => x.id === c.id))
   const corriereSelezionato = corrieri?.find((c:any) => c.id === corriereQuery) || corrieri?.[0]
   const { data: zone } = await supabase.from('zone').select('id,nome').eq('master_id', utente?.master_id).eq('corriere_id', corriereSelezionato?.id||'').order('nome')
