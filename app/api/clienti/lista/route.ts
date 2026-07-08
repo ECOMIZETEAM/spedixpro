@@ -44,13 +44,18 @@ export async function GET(req: NextRequest) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const admin = createAdminSupabase()
     const { data: figli } = await admin.from('masters')
-      .select('id,nome,email,telefono,credito,attivo,tipo_contratto')
+      .select('id,nome,email,telefono,credito,attivo,tipo_contratto,indirizzo,citta,provincia,cap,indirizzo_operativo,citta_operativo,provincia_operativo,cap_operativo')
       .eq('parent_master_id', utente.master_id).order('nome', { ascending: true })
     const masterOut = (figli || []).map((m: any) => ({
       id: 'm:' + m.id, ragione_sociale: m.nome || '—', is_master: true,
       email: m.email || '', telefono: m.telefono || '', credito: Number(m.credito || 0),
       attivo: m.attivo !== false, tipo_contratto: m.tipo_contratto || null,
       codice_cliente: 'SUB-MASTER', contratti_attivi: [],
+      // Indirizzo per il mittente quando spedisci per suo conto (sede operativa, fallback legale)
+      so_indirizzo: m.indirizzo_operativo || m.indirizzo || '',
+      so_citta: m.citta_operativo || m.citta || '',
+      so_provincia: m.provincia_operativo || m.provincia || '',
+      so_cap: m.cap_operativo || m.cap || '',
     }))
     return NextResponse.json([...clientiOut, ...masterOut])
   }

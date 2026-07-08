@@ -19,8 +19,27 @@ export async function POST(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
   const body = await req.json()
 
-  // Spedizione propria del master (nessun cliente): il costo e' il listino corriere.
-  const isProprio = utente?.ruolo !== 'cliente' && body.clienteId === '__proprio__'
+  // Spedizione PER CONTO DI UN SOTTO-MASTER (clienteId = "m:<id>"): equivale a una spedizione
+  // propria del sotto-master (usa il suo Listino Corrieri = quello assegnato, materializzato,
+  // e ne addebita il credito). Consentita solo verso i propri discendenti.
+  const subMatch = (typeof body.clienteId === 'string' && body.clienteId.startsWith('m:')) ? body.clienteId.slice(2) : null
+  let masterSub: string | null = null
+  if (subMatch && utente?.ruolo !== 'cliente' && utente?.master_id) {
+    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const { createAdminSupabase: _adm } = await import('@/lib/supabase-admin')
+    const _a = _adm()
+    const disc = await sottoAlberoMasterIds(_a, utente.master_id)
+    if (!disc.includes(subMatch)) return NextResponse.json({ error: 'Sotto-master non autorizzato' }, { status: 403 })
+    masterSub = subMatch
+    const { data: sm } = await _a.from('masters').select('credito,tipo_contratto').eq('id', subMatch).single()
+    const costoPrev = parseFloat(body.totalPrice) || 0
+    if (sm && sm.tipo_contratto === 'credito_scalare' && costoPrev > 0 && Number(sm.credito||0) < costoPrev) {
+      return NextResponse.json({ error: `Credito insufficiente del sotto-master: disponibili € ${Number(sm.credito||0).toFixed(2)}, spedizione € ${costoPrev.toFixed(2)}.` }, { status: 402 })
+    }
+  }
+
+  // Spedizione propria del master (nessun cliente) o per conto di un sotto-master: costo = listino corriere.
+  const isProprio = (utente?.ruolo !== 'cliente' && body.clienteId === '__proprio__') || !!masterSub
 
   const clienteId = utente?.ruolo === 'cliente' ? utente.cliente_id : (isProprio ? null : body.clienteId)
   let cliente: any = null
@@ -44,7 +63,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const masterId = isProprio ? utente!.master_id : cliente.master_id
+  const masterId = masterSub || (isProprio ? utente!.master_id : cliente.master_id)
 
   let corriereRecord: any = null
 

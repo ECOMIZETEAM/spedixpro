@@ -28,11 +28,24 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
 
-  // ─── SPEDIZIONE PROPRIA DEL MASTER (nessun cliente) → tariffe da LISTINO CORRIERE ───
-  // Il master paga il prezzo del proprio listino corriere per la zona/fascia.
-  const isProprio = utente?.ruolo !== 'cliente' && body.clienteId === '__proprio__'
+  // Spedizione PER CONTO DI UN SOTTO-MASTER (clienteId = "m:<id>"): usa il suo Listino Corrieri
+  // (quello che gli hai assegnato, materializzato) e ne addebiterà il credito. Serve admin (RLS).
+  const subMatch = (typeof body.clienteId === 'string' && body.clienteId.startsWith('m:')) ? body.clienteId.slice(2) : null
+  let dbP: any = supabase
+  let masterSub: string | null = null
+  if (subMatch && utente?.ruolo !== 'cliente' && utente?.master_id) {
+    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const disc = await sottoAlberoMasterIds(admin, utente.master_id)
+    if (!disc.includes(subMatch)) return NextResponse.json({ error: 'Sotto-master non autorizzato' }, { status: 403 })
+    dbP = admin; masterSub = subMatch
+  }
+
+  // ─── SPEDIZIONE PROPRIA DEL MASTER o PER UN SOTTO-MASTER → tariffe da LISTINO CORRIERE ───
+  const isProprio = (utente?.ruolo !== 'cliente' && body.clienteId === '__proprio__') || !!masterSub
   if (isProprio) {
-    const masterIdP = utente!.master_id
+    const masterIdP = masterSub || utente!.master_id
     const colliP = Array.isArray(body.packages) && body.packages.length ? body.packages : [body.packages?.[0] || { weight: 1 }]
     const pesoRealeP = colliP.reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
     const provinciaP = (body.shipTo?.state || '').toUpperCase().trim()
@@ -42,14 +55,14 @@ export async function POST(req: NextRequest) {
 
     // Corrieri da quotare = quelli che hanno delle fasce prezzo nei listini del master
     // (indipendentemente da quale listino_id: l'editor salva sotto un listino unico).
-    const { data: listiniM } = await supabase.from('listini_corrieri').select('id').eq('master_id', masterIdP)
+    const { data: listiniM } = await dbP.from('listini_corrieri').select('id').eq('master_id', masterIdP)
     const listinoIdsM = (listiniM || []).map((l: any) => l.id)
     let corrieriDaQuotare: any[] = []
     if (listinoIdsM.length) {
-      const { data: fasceCorr } = await supabase.from('listini_corrieri_fasce').select('corriere_id').in('listino_id', listinoIdsM)
+      const { data: fasceCorr } = await dbP.from('listini_corrieri_fasce').select('corriere_id').in('listino_id', listinoIdsM)
       const ids = [...new Set((fasceCorr || []).map((f: any) => f.corriere_id).filter(Boolean))]
       if (ids.length) {
-        const { data: cs } = await supabase.from('corrieri').select('id,tipo,nome_contratto,attivo').in('id', ids)
+        const { data: cs } = await dbP.from('corrieri').select('id,tipo,nome_contratto,attivo').in('id', ids)
         corrieriDaQuotare = (cs || []).map((c: any) => ({ corriere_id: c.id, corrieri: c }))
       }
     }
@@ -58,7 +71,7 @@ export async function POST(req: NextRequest) {
     for (const lc of corrieriDaQuotare) {
       const corr: any = (lc as any).corrieri
       if (!corr || corr.attivo === false) continue
-      const prezzo = await calcolaPrezzoCorriere(supabase, {
+      const prezzo = await calcolaPrezzoCorriere(dbP, {
         corriereId: (lc as any).corriere_id, masterId: masterIdP,
         provincia: provinciaP, cap: capP, paese: paeseP,
         pesoReale: pesoRealeP, packages: colliP,
