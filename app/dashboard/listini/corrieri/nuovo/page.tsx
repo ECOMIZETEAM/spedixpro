@@ -216,7 +216,7 @@ export default function ListinoCorrierePage() {
       <div style={{marginBottom:'16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap' as const,gap:'10px'}}>
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Listino Corrieri</h1>
         <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
-          {!aggiungendoContratto && corrieriDisponibili.length > 0 && (
+          {!aggiungendoContratto && (
             <button onClick={()=>setAggiungendoContratto(true)}
               style={{background:'none',border:'1px solid #d1d5db',color:'#f97316',padding:'8px 16px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',cursor:'pointer'}}>
               + Aggiungi contratto
@@ -230,18 +230,25 @@ export default function ListinoCorrierePage() {
       </div>
 
       {aggiungendoContratto && (
-        <div style={{marginBottom:'16px',padding:'12px 14px',background:'#f9fafb',border:'1px solid #d1d5db',borderRadius:'6px',display:'flex',alignItems:'center',gap:'10px'}}>
-          <select value={nuovoContrattoId} onChange={e=>setNuovoContrattoId(e.target.value)}
-            style={{padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',flex:1}}>
-            <option value="">Seleziona contratto da aggiungere...</option>
-            {corrieriDisponibili.map((c:any)=>(
-              <option key={c.id} value={c.id}>{c.nome_contratto}</option>
-            ))}
-          </select>
-          <button onClick={confermaAggiungiContratto} disabled={aggiungendoSaving || !nuovoContrattoId}
-            style={{padding:'7px 16px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer',opacity:(aggiungendoSaving||!nuovoContrattoId)?0.6:1}}>
-            {aggiungendoSaving?'Aggiungo...':'Aggiungi'}
-          </button>
+        <div style={{marginBottom:'16px',padding:'12px 14px',background:'#f9fafb',border:'1px solid #d1d5db',borderRadius:'6px',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap' as const}}>
+          {corrieriDisponibili.length > 0 ? (
+            <>
+              <select value={nuovoContrattoId} onChange={e=>setNuovoContrattoId(e.target.value)}
+                style={{padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',flex:1,minWidth:'200px'}}>
+                <option value="">Seleziona contratto da aggiungere...</option>
+                {corrieriDisponibili.map((c:any)=>(
+                  <option key={c.id} value={c.id}>{c.nome_contratto}</option>
+                ))}
+              </select>
+              <button onClick={confermaAggiungiContratto} disabled={aggiungendoSaving || !nuovoContrattoId}
+                style={{padding:'7px 16px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer',opacity:(aggiungendoSaving||!nuovoContrattoId)?0.6:1}}>
+                {aggiungendoSaving?'Aggiungo...':'Aggiungi'}
+              </button>
+            </>
+          ) : (
+            <span style={{flex:1,fontSize:'12.5px',color:'#666',minWidth:'200px'}}>Non hai altri corrieri da attivare. Collega prima un tuo corriere.</span>
+          )}
+          <a href="/dashboard/corrieri" style={{padding:'7px 14px',background:'#fff',border:'1px solid #f97316',color:'#f97316',borderRadius:'6px',fontSize:'12px',fontWeight:'700',textDecoration:'none',whiteSpace:'nowrap' as const}}>+ Collega un tuo corriere</a>
           <button onClick={()=>{setAggiungendoContratto(false);setNuovoContrattoId('')}}
             style={{padding:'7px 16px',background:'#f5f5f5',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',cursor:'pointer',color:'#1a1a1a'}}>
             Annulla
