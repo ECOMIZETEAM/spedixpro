@@ -20,6 +20,15 @@ export async function POST(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
   const body = await req.json()
 
+  // Extra/servizi accessori scelti per questa spedizione (li paga il cliente): [{nome, importo}].
+  // L'importo è già incluso in body.totalPrice (calcolato lato frontend dal listino); qui salviamo
+  // il dettaglio per riga così il report può riportarlo voce per voce.
+  const serviziAccessori = Array.isArray(body.serviziAccessori)
+    ? body.serviziAccessori
+        .map((s:any) => ({ nome: String(s?.nome || '').slice(0,120), importo: Math.round((Number(s?.importo)||0)*100)/100 }))
+        .filter((s:any) => s.nome && s.importo)
+    : null
+
   // Spedizione PER CONTO DI UN SOTTO-MASTER (clienteId = "m:<id>"): trattato come un cliente,
   // col LISTINO CHE GLI HAI ASSEGNATO (masters.parent_listino_id) → stesse identiche funzioni
   // (peso volume, contrassegni, sponda, misure). Si addebita il credito del sotto-master.
@@ -300,6 +309,7 @@ export async function POST(req: NextRequest) {
       raw_response: { ...r, _carrierCode: rate.carrierCode, _contractCode: rate.contractCode },
       stato: 'in_lavorazione',
       costo_spedizione: costoCorrente, costo_totale: costoCliente,
+      servizi_accessori: serviziAccessori,
       note: body.notes || null, contenuto: body.contenuto || null,
     }).select('id').single()
 
@@ -423,6 +433,7 @@ export async function POST(req: NextRequest) {
         raw_response: { ...shipment, _quotation: quotation },
         stato: 'in_lavorazione',
         costo_spedizione: costoCorrente, costo_totale: costoCliente,
+        servizi_accessori: serviziAccessori,
         note: body.notes || null, contenuto: body.contenuto || null,
       }).select('id').single()
 

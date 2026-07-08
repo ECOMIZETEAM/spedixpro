@@ -90,6 +90,8 @@ export default function ReportSpedizioniPage() {
         'Prezzo Cliente (€)': s.costo_totale,
         'Cli. Nolo (€)': s.cli_nolo ?? '',
         'Cli. Supplementi (€)': s.cli_supplementi ?? '',
+        'Extra (servizi accessori)': (s.servizi_accessori||[]).map((e:any)=>`${e.nome}: € ${Number(e.importo||0).toFixed(2)}`).join('; '),
+        'Tot. Extra (€)': (s.servizi_accessori||[]).reduce((a:number,e:any)=>a+Number(e.importo||0),0) || '',
         'Prezzo Corriere (€)': s.prezzo_corriere != null ? s.prezzo_corriere : '',
         'Corr. Nolo (€)': s.dett_corriere ? s.dett_corriere.nolo : '',
         'Corr. Contrassegno (€)': s.dett_corriere ? s.dett_corriere.contrassegno : '',
@@ -113,7 +115,7 @@ export default function ReportSpedizioniPage() {
       doc.text(`Totale: ${spedizioni.length} spedizioni`, 14, 22)
       autoTable(doc, {
         startY: 28,
-        head: [['N. Spedizione','Cliente','Destinatario','Città','Peso','Stato','Prezzo Cliente €','Prezzo Corriere €','Nolo','Contr.','Assic.','Sponda']],
+        head: [['N. Spedizione','Cliente','Destinatario','Città','Peso','Stato','Prezzo Cliente €','Prezzo Corriere €','Nolo','Contr.','Assic.','Sponda','Extra']],
         body: spedizioni.map((s: any) => {
           const d = s.dett_corriere
           return [
@@ -122,6 +124,7 @@ export default function ReportSpedizioniPage() {
             s.stato.replace(/_/g,' '), `€${Number(s.costo_totale).toFixed(2)}`,
             (s.prezzo_corriere != null ? `€${Number(s.prezzo_corriere).toFixed(2)}` : '-'),
             d?`€${d.nolo.toFixed(2)}`:'-', d?`€${d.contrassegno.toFixed(2)}`:'-', d?`€${d.assicurazione.toFixed(2)}`:'-', d?`€${d.sponda.toFixed(2)}`:'-',
+            (s.servizi_accessori||[]).map((e:any)=>`${e.nome} €${Number(e.importo||0).toFixed(2)}`).join('\n') || '-',
           ]
         }),
         styles: { fontSize: 7 },
@@ -150,10 +153,11 @@ export default function ReportSpedizioniPage() {
     } else if (formato === 'zip') {
       const { default: JSZip } = await import('jszip' as any)
       const zip = new JSZip()
-      const csv = ['N. Spedizione,Cliente,Destinatario,Città,Peso,Colli,Contrassegno,Data,Stato,Prezzo Cliente,Cli. Nolo,Cli. Supplementi,Prezzo Corriere,Corr. Nolo,Corr. Contrassegno,Corr. Assicurazione,Corr. Sponda']
+      const csv = ['N. Spedizione,Cliente,Destinatario,Città,Peso,Colli,Contrassegno,Data,Stato,Prezzo Cliente,Cli. Nolo,Cli. Supplementi,Prezzo Corriere,Corr. Nolo,Corr. Contrassegno,Corr. Assicurazione,Corr. Sponda,Extra']
       spedizioni.forEach((s: any) => {
         const d = s.dett_corriere
-        csv.push(`${s.numero},${s.clienti?.ragione_sociale||s.mitt_nome},${s.dest_nome},${s.dest_citta},${s.peso_reale},${s.colli},${s.contrassegno},${new Date(s.created_at).toLocaleDateString('it-IT')},${s.stato},${s.costo_totale},${s.cli_nolo??''},${s.cli_supplementi??''},${s.prezzo_corriere != null ? s.prezzo_corriere : ""},${d?d.nolo:''},${d?d.contrassegno:''},${d?d.assicurazione:''},${d?d.sponda:''}`)
+        const extra = (s.servizi_accessori||[]).map((e:any)=>`${e.nome}: €${Number(e.importo||0).toFixed(2)}`).join('; ')
+        csv.push(`${s.numero},${s.clienti?.ragione_sociale||s.mitt_nome},${s.dest_nome},${s.dest_citta},${s.peso_reale},${s.colli},${s.contrassegno},${new Date(s.created_at).toLocaleDateString('it-IT')},${s.stato},${s.costo_totale},${s.cli_nolo??''},${s.cli_supplementi??''},${s.prezzo_corriere != null ? s.prezzo_corriere : ""},${d?d.nolo:''},${d?d.contrassegno:''},${d?d.assicurazione:''},${d?d.sponda:''},"${extra}"`)
       })
       zip.file('spedizioni.csv', csv.join('\n'))
       const blob = await zip.generateAsync({type:'blob'})

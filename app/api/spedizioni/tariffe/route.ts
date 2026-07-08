@@ -208,6 +208,25 @@ export async function POST(req: NextRequest) {
     return Math.round(pesoFatt * cfg.prezzoKg * 100) / 100
   }
 
+  // Extra / servizi accessori per corriere (dal listino cliente): opzioni che il cliente
+  // può aggiungere alla spedizione. Solo elencati qui; l'importo scelto si somma in creazione.
+  const accessoriPerCorriere = new Map<string, {nome:string,prezzo:number,perc:number}[]>()
+  if (cliente.listino_cliente_id) {
+    const { data: supplX } = await supabase
+      .from('listini_clienti_supplementi')
+      .select('corriere_id, nome, descrizione, valore')
+      .eq('listino_id', cliente.listino_cliente_id).eq('tipo', 'accessorio')
+    for (const s of (supplX || [])) {
+      let d:any = null; try { d = JSON.parse(s.descrizione) } catch {}
+      const nome = s.nome || d?.nome || ''
+      const prezzo = Number(d?.prezzo ?? s.valore ?? 0) || 0
+      const perc = Number(d?.perc ?? 0) || 0
+      if (!nome || (prezzo <= 0 && perc <= 0)) continue
+      if (!accessoriPerCorriere.has(s.corriere_id)) accessoriPerCorriere.set(s.corriere_id, [])
+      accessoriPerCorriere.get(s.corriere_id)!.push({ nome, prezzo, perc })
+    }
+  }
+
   // Base percentuale: 'totale' = intero importo del supplemento; 'differenza' = importo
   // meno il massimo della PRIMA fascia (es. franchigia 500€ → % solo sull'eccedenza).
   function calcolaAssicurazione(corriereId: string, _prezzoSped: number): number | null {
@@ -428,6 +447,7 @@ export async function POST(req: NextRequest) {
       peso_fatturato: pesoPerFascia.toFixed(2),   // peso EFFETTIVO su cui è calcolato il prezzo (reale se agevolazione)
       corriere_nome: corriere?.nome_contratto || 'Corriere',
       listino_fascia: `fino a ${fasciaGiusta.peso_max}kg`,
+      accessori_disponibili: accessoriPerCorriere.get(corriereId) || [],
       _corriere_tipo: corriere?.tipo,
       _corriere_id: corriere?.id,
       _spediamopro_quotation: spediamoproQuotation,

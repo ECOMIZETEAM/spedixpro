@@ -21,7 +21,7 @@ function iconaCorriere(nome:string): string | null {
 }
 
 interface Cliente { id:string; ragione_sociale:string; so_indirizzo:string|null;so_citta:string|null; so_provincia:string|null; so_cap:string|null; email:string; telefono:string|null }
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string;zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; corriere_nome?:string; _corriere_id?:string; _corriere_tipo?:string; _spediamopro_quotation?:any }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string;zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; corriere_nome?:string; prezzo_spedizione?:string; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; _corriere_id?:string; _corriere_tipo?:string; _spediamopro_quotation?:any }
 interface Collo { lunghezza:string; larghezza:string; altezza:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -65,6 +65,15 @@ export default function NuovaSpedizionePage() {
   const [assicurazione, setAssicurazione] = useState('0')
   const [tariffe, setTariffe] = useState<Tariffa[]>([])
   const [selected, setSelected] = useState<Tariffa|null>(null)
+  // Extra / servizi accessori scelti sul corriere selezionato (li paga il cliente)
+  const [extraNomi, setExtraNomi] = useState<string[]>([])
+  useEffect(() => { setExtraNomi([]) }, [selected?._corriere_id])
+  const accDisponibili = (selected?.accessori_disponibili || [])
+  const extraScelti = accDisponibili
+    .filter(a => extraNomi.includes(a.nome))
+    .map(a => ({ nome: a.nome, importo: Math.round((Number(a.prezzo||0) + (Number(a.perc||0)/100)*(Number(valoreMerce)||0))*100)/100 }))
+  const extraTot = extraScelti.reduce((s,e)=>s+e.importo, 0)
+  const totaleConExtra = selected ? (Number(selected.total_price||0) + extraTot) : 0
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
   const [errore, setErrore] = useState('')
@@ -178,7 +187,8 @@ export default function NuovaSpedizionePage() {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
         clienteId, carrierCode:selected.carrierCode, contractCode:selected.contractCode,
-        totalPrice:selected.total_price,
+        totalPrice: totaleConExtra.toFixed(2),
+        serviziAccessori: extraScelti,
         _corriere_id: selected._corriere_id,
         _corriere_tipo: selected._corriere_tipo,
         _spediamopro_quotation: selected._spediamopro_quotation,
@@ -511,7 +521,22 @@ export default function NuovaSpedizionePage() {
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'14px',alignItems:'end' as const}}>
                   <div>
                     <label style={{display:'block',fontSize:'12px',color:'#000',marginBottom:'4px',fontWeight:'600'}}>Servizi accessori</label>
-                    <input style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#000',WebkitTextFillColor:'#000',opacity:1}} placeholder="—" disabled />
+                    {accDisponibili.length === 0 ? (
+                      <div style={{padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#888'}}>Nessun extra per questo corriere</div>
+                    ) : (
+                      <div style={{border:'1px solid #000',borderRadius:'6px',padding:'6px 10px',display:'flex',flexDirection:'column',gap:'4px'}}>
+                        {accDisponibili.map((a,i)=>{
+                          const imp = Math.round((Number(a.prezzo||0)+(Number(a.perc||0)/100)*(Number(valoreMerce)||0))*100)/100
+                          return (
+                            <label key={i} style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'#000',cursor:'pointer'}}>
+                              <input type="checkbox" checked={extraNomi.includes(a.nome)} onChange={()=>setExtraNomi(prev=>prev.includes(a.nome)?prev.filter(n=>n!==a.nome):[...prev,a.nome])} />
+                              <span style={{flex:1}}>{a.nome}</span>
+                              <span style={{fontWeight:600}}>€ {imp.toFixed(2)}</span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label style={{display:'block',fontSize:'12px',color:'#000',marginBottom:'4px',fontWeight:'600'}}>Modalità di incasso contrassegno</label>
@@ -523,11 +548,12 @@ export default function NuovaSpedizionePage() {
                   <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',background:'#fff',fontSize:'13px',color:'#000'}}><span>Costo spedizione</span><span>€ {selected.prezzo_spedizione||selected.total_price}</span></div>
                   {Number(selected.costo_contrassegno||0)>0 && <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',fontSize:'13px',color:'#000'}}><span>Costo Contrassegno</span><span>€ {selected.costo_contrassegno}</span></div>}
                   {Number(selected.costo_assicurazione||0)>0 && <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',background:'#fff',fontSize:'13px',color:'#000'}}><span>Costo Assicurazione</span><span>€ {selected.costo_assicurazione}</span></div>}
-                  <div style={{display:'flex',justifyContent:'space-between',padding:'11px 14px',borderTop:'1px solid #000',fontSize:'14px',fontWeight:'800',color:'#f97316'}}><span>Costo Totale</span><span>€ {selected.total_price}</span></div>
+                  {extraScelti.map((e,i)=>(<div key={i} style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',fontSize:'13px',color:'#000'}}><span>{e.nome}</span><span>€ {e.importo.toFixed(2)}</span></div>))}
+                  <div style={{display:'flex',justifyContent:'space-between',padding:'11px 14px',borderTop:'1px solid #000',fontSize:'14px',fontWeight:'800',color:'#f97316'}}><span>Costo Totale</span><span>€ {totaleConExtra.toFixed(2)}</span></div>
                 </div>
                 <button onClick={creaSpedizione} disabled={creating}
                   style={{width:'100%',padding:'12px',background:'#1a1a1a',color:'#fff',border:'none',borderRadius:'7px',fontSize:'13.5px',fontWeight:'700',cursor:'pointer',opacity:creating?0.7:1}}>
-                  {creating?'Creazione...':'✓ Crea Spedizione — € '+selected.total_price}
+                  {creating?'Creazione...':'✓ Crea Spedizione — € '+totaleConExtra.toFixed(2)}
                 </button>
               </div>
             )}
