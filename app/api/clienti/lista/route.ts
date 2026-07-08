@@ -46,11 +46,21 @@ export async function GET(req: NextRequest) {
     const { data: figli } = await admin.from('masters')
       .select('id,nome,email,telefono,credito,attivo,tipo_contratto,indirizzo,citta,provincia,cap,indirizzo_operativo,citta_operativo,provincia_operativo,cap_operativo')
       .eq('parent_master_id', utente.master_id).order('nome', { ascending: true })
+    // Contratti attivi del sotto-master = i suoi corrieri (come per i clienti col loro listino)
+    const figliIds = (figli || []).map((m: any) => m.id)
+    const corrPerSub = new Map<string, any[]>()
+    if (figliIds.length) {
+      const { data: corrFigli } = await admin.from('corrieri').select('master_id,nome_contratto,tipo').in('master_id', figliIds)
+      for (const c of (corrFigli || [])) {
+        if (!corrPerSub.has(c.master_id)) corrPerSub.set(c.master_id, [])
+        corrPerSub.get(c.master_id)!.push({ nome_contratto: c.nome_contratto, tipo: c.tipo })
+      }
+    }
     const masterOut = (figli || []).map((m: any) => ({
       id: 'm:' + m.id, ragione_sociale: m.nome || '—', is_master: true,
       email: m.email || '', telefono: m.telefono || '', credito: Number(m.credito || 0),
       attivo: m.attivo !== false, tipo_contratto: m.tipo_contratto || null,
-      codice_cliente: 'SUB-MASTER', contratti_attivi: [],
+      codice_cliente: 'SUB-MASTER', contratti_attivi: corrPerSub.get(m.id) || [],
       // Indirizzo per il mittente quando spedisci per suo conto (sede operativa, fallback legale)
       so_indirizzo: m.indirizzo_operativo || m.indirizzo || '',
       so_citta: m.citta_operativo || m.citta || '',
