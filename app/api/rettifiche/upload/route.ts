@@ -6,7 +6,15 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 function trovaFasciaLocale(fasce: any[], peso: number) {
   const finoA = fasce.filter(f => f.tipo !== 'oltre').sort((a,b)=>parseFloat(a.peso_max)-parseFloat(b.peso_max))
   for (const f of finoA) { if (peso <= parseFloat(f.peso_max)) return f }
-  return finoA.length ? finoA[finoA.length-1] : null
+  const oltre = fasce.find(f => f.tipo === 'oltre')
+  if (oltre && finoA.length) {
+    const ultima = finoA[finoA.length-1]
+    const kgExtra = peso - parseFloat(ultima.peso_max)
+    const prezzoExtra = Math.ceil(kgExtra / parseFloat(oltre.peso_max)) * parseFloat(oltre.prezzo)
+    return { ...ultima, prezzo: parseFloat(ultima.prezzo) + prezzoExtra }
+  }
+  // Peso oltre l'ultima fascia e nessuna "oltre X ogni": nessun prezzo.
+  return null
 }
 
 // Risale la catena dei master: [masterId, padre, nonno, ...]
