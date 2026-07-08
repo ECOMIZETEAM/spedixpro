@@ -13,7 +13,7 @@ export async function DELETE(req: NextRequest) {
 
   // Carico la spedizione (costo, cliente, numero, destinatario, stato, corriere, provincia, colli)
   const { data: sped } = await supabase.from('spedizioni')
-    .select('id,master_id,cliente_id,numero,dest_nome,dest_provincia,dest_cap,dest_paese,costo_totale,costo_spedizione,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,stato')
+    .select('id,master_id,cliente_id,numero,dest_nome,dest_provincia,dest_cap,dest_paese,costo_totale,costo_spedizione,contrassegno,assicurazione,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,stato')
     .eq('id', spedizioneId).single()
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 
@@ -65,7 +65,7 @@ export async function DELETE(req: NextRequest) {
   // Rimborso a cascata ai MASTER della catena (speculare all'addebito in creazione).
   try {
     const { data: corriere } = await supabase.from('corrieri')
-      .select('master_id').eq('id', sped.corriere_id).single()
+      .select('master_id,nome_contratto').eq('id', sped.corriere_id).single()
     if (corriere?.master_id) {
       // Ricostruisco i packages dalla spedizione per il calcolo prezzi intermedi
       let packages: any[] = []
@@ -84,6 +84,9 @@ export async function DELETE(req: NextRequest) {
         cap: sped.dest_cap || '',
         paese: sped.dest_paese || 'IT',
         packages,
+        corriereNome: corriere.nome_contratto,
+        contrassegno: Number(sped.contrassegno || 0),
+        assicurazione: Number(sped.assicurazione || 0),
         numero: sped.numero,
         destNome: sped.dest_nome || '',
         spedizioneId: sped.id,
