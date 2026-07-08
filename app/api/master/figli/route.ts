@@ -7,6 +7,9 @@ export async function GET(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
 
+  const { puoGestireRete } = await import('@/lib/permessi')
+  if (!(await puoGestireRete())) return NextResponse.json({ error: 'Gestione rete non abilitata per questo account' }, { status: 403 })
+
   const { searchParams } = new URL(req.url)
   const parentId = searchParams.get('parent_id')
   if (!parentId) return NextResponse.json({ error: 'parent_id richiesto' }, { status: 400 })

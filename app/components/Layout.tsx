@@ -4,7 +4,8 @@ import { usePathname } from 'next/navigation'
 
 // perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
 // always: sempre visibile a chiunque abbia accesso al portale.
-type NavSub = { label: string, href: string, perm?: string, always?: boolean }
+// rete: visibile solo ai master che possono gestire la propria rete di sotto-master.
+type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean }
 type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, sub?: NavSub[] }
 
 const NAV: NavItem[] = [
@@ -46,9 +47,9 @@ const NAV: NavItem[] = [
   { label: 'Clienti', href: '/dashboard/clienti', icon: '⊙', sub: [
     { label: 'Nuovo Cliente', href: '/dashboard/clienti/nuovo', perm: 'admin.clients.create' },
     { label: 'Elenco Clienti', href: '/dashboard/clienti', perm: 'admin.clients.index' },
-    { label: 'Nuovo Master', href: '/dashboard/clienti/master/nuovo' },
-    { label: 'Elenco Master', href: '/dashboard/clienti/master' },
-    { label: 'Gerarchia', href: '/dashboard/clienti/gerarchia' },
+    { label: 'Nuovo Master', href: '/dashboard/clienti/master/nuovo', rete: true },
+    { label: 'Elenco Master', href: '/dashboard/clienti/master', rete: true },
+    { label: 'Gerarchia', href: '/dashboard/clienti/gerarchia', rete: true },
   ]},
   { label: 'Autisti e Consegne', href: '/dashboard/autisti', icon: '⊡', perm: 'admin.drivers.index' },
   { label: 'Consumabili', href: '/dashboard/consumabili', icon: '▣', sub: [
@@ -89,15 +90,19 @@ const NAV: NavItem[] = [
   ]},
 ]
 
-export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, permessi?: Record<string, boolean> } }) {
+export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, gestioneRete?: boolean, permessi?: Record<string, boolean> } }) {
   const path = usePathname()
   const isFull = user?.isFull ?? true
+  const gestioneRete = user?.gestioneRete ?? false
   const permessi = user?.permessi || {}
 
   // Un elemento e visibile se: admin/master (isFull), oppure marcato always,
   // oppure ha una chiave permesso attiva. Senza perm e non-full = nascosto (solo admin).
-  const puoVedere = (x: { perm?: string, always?: boolean }) =>
-    isFull || x.always === true || (!!x.perm && permessi[x.perm] === true)
+  // Le voci "rete" (gestione sotto-master) richiedono in più il flag gestioneRete.
+  const puoVedere = (x: { perm?: string, always?: boolean, rete?: boolean }) => {
+    if (x.rete && !gestioneRete) return false
+    return isFull || x.always === true || (!!x.perm && permessi[x.perm] === true)
+  }
 
   const navVisibile = NAV.map(item => {
     if (item.sub && item.sub.length) {

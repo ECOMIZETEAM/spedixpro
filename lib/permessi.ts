@@ -44,6 +44,7 @@ export type PermessiUtente = {
   masterId: string | null
   nome: string
   isFull: boolean            // admin/master: tutto permesso
+  gestioneRete: boolean      // può gestire la propria rete di sotto-master (menu/pagine/API Master)
   permessi: Record<string, boolean>
 }
 
@@ -56,8 +57,16 @@ export async function getPermessiUtente(): Promise<PermessiUtente | null> {
   const ruolo = (u.ruolo || '').toLowerCase()
   const nome = ((u.nome || '') + ' ' + (u.cognome || '')).trim()
   const isFull = ruolo === 'admin' || ruolo === 'master'
+
+  // Gestione rete/sotto-master: consentita solo ai master col flag gestione_rete.
+  let gestioneRete = false
+  if (u.master_id) {
+    const { data: m } = await supabase.from('masters').select('gestione_rete').eq('id', u.master_id).maybeSingle()
+    gestioneRete = !!(m && (m as any).gestione_rete)
+  }
+
   if (isFull) {
-    return { ruolo, masterId: u.master_id || null, nome, isFull: true, permessi: {} }
+    return { ruolo, masterId: u.master_id || null, nome, isFull: true, gestioneRete, permessi: {} }
   }
   let permessi: Record<string, boolean> = { ...(PERMESSI_DEFAULT[ruolo] || {}) }
   if (u.master_id) {
@@ -67,7 +76,13 @@ export async function getPermessiUtente(): Promise<PermessiUtente | null> {
       permessi = { ...permessi, ...salvati }
     }
   }
-  return { ruolo, masterId: u.master_id || null, nome, isFull: false, permessi }
+  return { ruolo, masterId: u.master_id || null, nome, isFull: false, gestioneRete, permessi }
+}
+
+// Helper server-side per proteggere pagine/API della gestione rete.
+export async function puoGestireRete(): Promise<boolean> {
+  const p = await getPermessiUtente()
+  return !!p?.gestioneRete
 }
 
 export function haPermesso(p: PermessiUtente | null, chiave: string): boolean {

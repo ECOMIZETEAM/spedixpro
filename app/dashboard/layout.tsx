@@ -24,6 +24,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
       ruolo: utente?.ruolo || 'master',
       brandLogo, brandNome,
       isFull: perm?.isFull ?? true,
+      gestioneRete: perm?.gestioneRete ?? false,
       permessi: perm?.permessi || {},
     }}>
       {(utente?.ruolo === 'master' || utente?.ruolo === 'admin') && <AbbonamentoGate />}

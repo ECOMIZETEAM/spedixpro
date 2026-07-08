@@ -26,6 +26,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!utente || utente.ruolo !== 'master') {
     return NextResponse.redirect(new URL('/dashboard', req.url))
   }
+  // Solo i master abilitati alla gestione rete possono impersonare un sotto-master.
+  const { puoGestireRete } = await import('@/lib/permessi')
+  if (!(await puoGestireRete())) {
+    return NextResponse.redirect(new URL('/dashboard', req.url))
+  }
 
   const { id } = await params
   const admin = createAdminSupabase()
