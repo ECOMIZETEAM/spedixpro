@@ -18,6 +18,19 @@ export default function ModificaMasterPage() {
   const [nuovaPassword, setNuovaPassword] = useState('')
   const [passwordMostrata, setPasswordMostrata] = useState('')
   const [listini, setListini] = useState<any[]>([])
+  // Credito del sotto-master (gestito come un cliente, via API m:)
+  const [saldo, setSaldo] = useState(0)
+  const [impCredito, setImpCredito] = useState('')
+  const [descCredito, setDescCredito] = useState('Ricarica credito')
+  const [savingCredito, setSavingCredito] = useState(false)
+  const [msgCredito, setMsgCredito] = useState('')
+  const [errCredito, setErrCredito] = useState('')
+
+  function caricaCredito() {
+    fetch(`/api/movimenti/lista?clienteId=m:${id}`).then(r=>r.json()).then(d=>{
+      if (d && !d.error) setSaldo(Number(d.saldo||0))
+    }).catch(()=>{})
+  }
 
   useEffect(() => {
     fetch(`/api/master/${id}`).then(r=>r.json()).then(d=>{
@@ -25,7 +38,25 @@ export default function ModificaMasterPage() {
       setM(d); setLoading(false)
     }).catch(()=>{ setErrore('Errore caricamento'); setLoading(false) })
     fetch('/api/listini/lista').then(r=>r.json()).then(d=>setListini(Array.isArray(d)?d:[])).catch(()=>{})
+    caricaCredito()
   }, [id])
+
+  async function salvaCredito() {
+    setErrCredito(''); setMsgCredito('')
+    const imp = parseFloat(String(impCredito).replace(',','.'))
+    if (!isFinite(imp) || imp === 0) { setErrCredito('Inserisci un importo diverso da 0 (usa il − per togliere)'); return }
+    if (!descCredito.trim()) { setErrCredito('Inserisci una descrizione'); return }
+    setSavingCredito(true)
+    try {
+      const res = await fetch('/api/movimenti/crea', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ clienteId: `m:${id}`, tipo: imp>0?'ricarica':'rettifica', descrizione: descCredito.trim(), importo: imp })
+      })
+      const d = await res.json(); setSavingCredito(false)
+      if (d.error) { setErrCredito(d.error); return }
+      setSaldo(Number(d.saldo ?? saldo)); setImpCredito(''); setMsgCredito('✓ Credito aggiornato')
+    } catch { setErrCredito('Errore di rete'); setSavingCredito(false) }
+  }
 
   async function salva() {
     setSaving(true); setErrore(''); setMsg(''); setPasswordMostrata('')
@@ -81,6 +112,26 @@ export default function ModificaMasterPage() {
             <option value="credito_scalare">Credito a scalare</option>
             <option value="fattura_mensile">Fattura mensile</option>
           </select></div>
+      </div>
+
+      {/* Credito */}
+      <div style={card}>
+        <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'14px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <span>Credito</span>
+          <span style={{fontSize:'16px',fontWeight:800,color:saldo<0?'#dc2626':'#16a34a'}}>€ {saldo.toFixed(2)}</span>
+        </div>
+        {errCredito && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'8px 12px',marginBottom:'10px',fontSize:'12.5px',color:'#dc2626'}}>{errCredito}</div>}
+        {msgCredito && <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'8px 12px',marginBottom:'10px',fontSize:'12.5px',color:'#16a34a'}}>{msgCredito}</div>}
+        <div style={{display:'grid',gridTemplateColumns:'150px 1fr',gap:'10px',alignItems:'end'}}>
+          <div><label style={lbl}>Importo (€)</label>
+            <input style={inp} inputMode="decimal" value={impCredito} onChange={e=>setImpCredito(e.target.value)} placeholder="es. 200 o -50"/></div>
+          <div><label style={lbl}>Descrizione</label>
+            <input style={inp} value={descCredito} onChange={e=>setDescCredito(e.target.value)}/></div>
+        </div>
+        <div style={{fontSize:'11px',color:'#999',margin:'6px 0 12px'}}>Scrivi <b>200</b> per aggiungere, <b>-50</b> per togliere credito.</div>
+        <button onClick={salvaCredito} disabled={savingCredito}
+          style={{background:'#16a34a',color:'#fff',border:'none',borderRadius:'6px',padding:'9px 18px',fontSize:'13px',fontWeight:700,cursor:'pointer',opacity:savingCredito?0.6:1}}>
+          {savingCredito?'Salvo...':'Applica al credito'}</button>
       </div>
 
       {/* Accesso */}

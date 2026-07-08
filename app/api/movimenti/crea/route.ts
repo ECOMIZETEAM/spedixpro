@@ -38,7 +38,16 @@ export async function POST(req: NextRequest) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const admin = createAdminSupabase()
     const { data: sub } = await admin.from('masters').select('id,parent_master_id').eq('id', targetMasterId).single()
-    if (!sub || sub.parent_master_id !== utente.master_id) {
+    // Autorizzato se il mio master è un ANTENATO del sotto-master (figlio diretto o più in basso
+    // nella rete), coerente con accesso/impersona che risalgono la catena parent_master_id.
+    let cur: string | null = sub?.parent_master_id || null
+    let autorizzato = false
+    for (let i = 0; i < 20 && cur; i++) {
+      if (cur === utente.master_id) { autorizzato = true; break }
+      const { data: p } = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+      cur = p?.parent_master_id || null
+    }
+    if (!sub || !autorizzato) {
       return NextResponse.json({ error: 'Sotto-master non trovato o non autorizzato' }, { status: 403 })
     }
     try {
