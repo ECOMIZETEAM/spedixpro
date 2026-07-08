@@ -14,10 +14,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
   const piattaforma = new URL(req.url).searchParams.get('piattaforma') || 'shopify'
+  // Colonne esplicite: escludo 'raw' (JSON completo dell'ordine, pesante e inutile in lista)
   const { data: ordini } = await supabase
-    .from('ordini_ecommerce').select('*')
+    .from('ordini_ecommerce')
+    .select('id,integrazione_id,piattaforma,ordine_esterno_id,numero_ordine,cliente_nome,destinatario,articoli,totale,valuta,stato_pagamento,spedizione_id,fulfillment_stato,fulfillment_errore,created_at')
     .eq('cliente_id', utente.cliente_id)
     .eq('piattaforma', piattaforma)
     .order('created_at', { ascending: false })
+    .limit(300)
   return NextResponse.json(ordini || [])
 }
