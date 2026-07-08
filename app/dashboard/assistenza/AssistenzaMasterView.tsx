@@ -46,6 +46,8 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
     if (!silent) setLoading(true)
     const d = await fetch('/api/assistenza/lista').then(r => r.json())
     setRicevuti(d.ricevuti || []); setMiei(d.miei || [])
+    // Segna letti gli aggiornamenti sui ticket che ho aperto io -> la notifica sparisce
+    if ((d.miei || []).some((t: any) => t.aperto_letto === false)) fetch('/api/assistenza/segna-letti', { method: 'POST' })
     if (!silent) setLoading(false)
   }
   useEffect(() => {
