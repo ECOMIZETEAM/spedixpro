@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { spediamoproGetTracking, spediamoproSearchStocks, mapStatoSpediamopro } from '@/lib/spediamopro'
+import { spedisciTrackingStati, mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -21,29 +22,49 @@ export async function GET() {
   let aggiornate = 0, errori = 0
   for (const s of (spedizioni || [])) {
     const corr: any = (s as any).corrieri
-    if (corr?.tipo !== 'spediamopro') continue   // Spedisci.online: da aggiungere
-    const raw: any = s.raw_response || {}
-    const spid = raw.id || raw?.raw?.data?.id
-    const authcode = (corr.credenziali as any)?.authcode
-    if (!spid || !authcode) continue
+    const tipo = corr?.tipo
+    const cred: any = corr?.credenziali || {}
 
     try {
-      const tr = await spediamoproGetTracking(authcode, Number(spid))
-      let nuovo = mapStatoSpediamopro(tr.status)
+      let nuovo: string | null = null
+      let nuovoTracking: string | null = null
 
-      if (nuovo === 'eccezione') {
-        // distinguo giacenza (stock attivo) da altre eccezioni
-        try {
-          const stocks = await spediamoproSearchStocks(authcode, tr.shipmentCode || raw.code || String(spid))
-          const attivo = (stocks || []).find((st: any) => Number(st.status) === 1 && Number(st.shipmentId) === Number(spid))
-          nuovo = attivo ? 'in_giacenza' : 'non_consegnato'
-        } catch { nuovo = 'non_consegnato' }
+      if (tipo === 'spediamopro') {
+        const raw: any = s.raw_response || {}
+        const spid = raw.id || raw?.raw?.data?.id
+        const authcode = cred?.authcode
+        if (!spid || !authcode) continue
+
+        const tr = await spediamoproGetTracking(authcode, Number(spid))
+        nuovo = mapStatoSpediamopro(tr.status)
+        if (nuovo === 'eccezione') {
+          // distinguo giacenza (stock attivo) da altre eccezioni
+          try {
+            const stocks = await spediamoproSearchStocks(authcode, tr.shipmentCode || raw.code || String(spid))
+            const attivo = (stocks || []).find((st: any) => Number(st.status) === 1 && Number(st.shipmentId) === Number(spid))
+            nuovo = attivo ? 'in_giacenza' : 'non_consegnato'
+          } catch { nuovo = 'non_consegnato' }
+        }
+        if (tr.trackingCode) nuovoTracking = tr.trackingCode
+
+      } else if (tipo === 'spedisci') {
+        if (!s.tracking_number || !cred?.master_domain || !cred?.password) continue
+        // Polling: nessuna configurazione richiesta lato Spedisci (il webhook resta un bonus real-time).
+        const { stati } = await spedisciTrackingStati(cred, s.tracking_number)
+        // mappo tutti gli eventi e scelgo lo stato "più avanzato" (ordine non garantito)
+        for (const str of stati) {
+          const m = mapStatoSpedisci(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
+
+      } else {
+        continue
       }
 
       const upd: any = {}
       if (nuovo && nuovo !== s.stato) upd.stato = nuovo
       if (nuovo === 'in_giacenza' && !s.giacenza_data) upd.giacenza_data = new Date().toISOString()
-      if (tr.trackingCode && tr.trackingCode !== s.tracking_number) upd.tracking_number = tr.trackingCode
+      if (nuovoTracking && nuovoTracking !== s.tracking_number) upd.tracking_number = nuovoTracking
 
       if (Object.keys(upd).length) {
         await admin.from('spedizioni').update(upd).eq('id', s.id)

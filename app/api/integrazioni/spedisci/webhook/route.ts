@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { mapStatoSpedisci } from '@/lib/spedisci'
 import crypto from 'crypto'
 
 export const runtime = 'nodejs'
@@ -18,15 +19,12 @@ function verifica(raw: string, timestamp: string | null, signature: string | nul
 }
 
 // Mappa lo stato Spedisci.online (stringa localizzata) + il tipo evento allo stato interno.
+// Le scorciatoie per tipo evento hanno priorità; per il resto uso il mapper condiviso (lib/spedisci).
 function mapStato(event: string, statusStr: string): string | null {
-  const s = (statusStr || '').toLowerCase()
-  if (event === 'tracking.delivered' || s.includes('consegnat') || s.includes('deliver')) return 'consegnata'
-  if (s.includes('giacenz') || s.includes('stock') || s.includes('deposit')) return 'in_giacenza'
-  if (s.includes('reso') || s.includes('return to sender') || s.includes('al mittente')) return 'reso_mittente'
-  if (s.includes('in consegna') || s.includes('out for delivery') || s.includes('distribuzione')) return 'in_consegna'
-  if (s.includes('transit') || s.includes('transito') || s.includes('arrivat') || s.includes('hub') || s.includes('partenz') || s.includes('viaggio')) return 'in_transito'
-  if (s.includes('presa in carico') || s.includes('spedit') || s.includes('accettat') || s.includes('ritirat') || s.includes('partita') || s.includes('picked')) return 'spedita'
-  if (event === 'tracking.exception' || s.includes('mancata') || s.includes('fallit') || s.includes('exception') || s.includes('rifiut') || s.includes('problema')) return 'non_consegnato'
+  if (event === 'tracking.delivered') return 'consegnata'
+  const m = mapStatoSpedisci(statusStr)
+  if (m) return m
+  if (event === 'tracking.exception') return 'non_consegnato'
   return null   // shipment.created / stati non riconosciuti: non tocco
 }
 

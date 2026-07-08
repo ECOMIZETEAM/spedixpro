@@ -1,3 +1,54 @@
+// Mappa una stringa di stato Spedisci.online (localizzata IT/EN) allo stato interno.
+// Usata sia dal webhook real-time sia dal polling del cron.
+export function mapStatoSpedisci(statusStr: string): string | null {
+  const s = (statusStr || '').toLowerCase()
+  if (!s) return null
+  if (s.includes('consegnat') || s.includes('deliver')) return 'consegnata'
+  if (s.includes('giacenz') || s.includes('stock') || s.includes('deposit') || s.includes('giacenza')) return 'in_giacenza'
+  if (s.includes('reso') || s.includes('return to sender') || s.includes('al mittente') || s.includes('rientro')) return 'reso_mittente'
+  if (s.includes('in consegna') || s.includes('out for delivery') || s.includes('distribuzione') || s.includes('in distribuzione')) return 'in_consegna'
+  if (s.includes('transit') || s.includes('transito') || s.includes('arrivat') || s.includes('hub') || s.includes('partenz') || s.includes('viaggio') || s.includes('smistament')) return 'in_transito'
+  if (s.includes('presa in carico') || s.includes('spedit') || s.includes('accettat') || s.includes('ritirat') || s.includes('partita') || s.includes('picked') || s.includes('lavorazione')) return 'spedita'
+  if (s.includes('mancata') || s.includes('fallit') || s.includes('exception') || s.includes('rifiut') || s.includes('problema') || s.includes('indirizzo errato') || s.includes('anomal')) return 'non_consegnato'
+  return null
+}
+
+// Ranking per scegliere lo stato "più avanzato" tra più eventi (ordine non garantito).
+const _RANK: Record<string, number> = {
+  spedita: 1, in_transito: 2, in_consegna: 3, in_giacenza: 4,
+  non_consegnato: 5, reso_mittente: 6, consegnata: 7,
+}
+export function prioritaStato(stato: string | null): number {
+  return stato ? (_RANK[stato] || 0) : 0
+}
+
+// Interroga il tracking Spedisci e restituisce tutte le stringhe di stato candidate
+// (stato top-level + descrizioni/stati dei singoli eventi) + il raw della risposta.
+export async function spedisciTrackingStati(
+  cred: { master_domain?: string; password?: string },
+  tracking: string
+): Promise<{ stati: string[]; raw: any; ok: boolean }> {
+  const res = await fetch(`https://${cred.master_domain}/api/v2/shipping/tracking/${tracking}`, {
+    headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
+  })
+  const text = await res.text()
+  let data: any
+  try { data = JSON.parse(text) } catch { data = { raw_text: text } }
+
+  const eventi: any[] = data?.events || data?.tracking || data?.trackingEvents || data?.eventi
+    || (Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []))
+  const stati: string[] = []
+  for (const k of ['status', 'stato', 'current_status', 'state']) {
+    if (typeof data?.[k] === 'string') stati.push(data[k])
+  }
+  for (const ev of (eventi || [])) {
+    for (const k of ['status', 'description', 'descrizione', 'stato', 'state', 'message', 'event', 'text', 'nota']) {
+      if (typeof ev?.[k] === 'string') stati.push(ev[k])
+    }
+  }
+  return { stati, raw: data, ok: res.ok }
+}
+
 // Chiusura borderò (Close Day) su spedisci.online per una distinta.
 // Best-effort: mai bloccante. Salva bordero_id/bordero_pdf sulla distinta.
 // Solo per corrieri di tipo 'spedisci'. shipmentId e _contractCode da raw_response.
