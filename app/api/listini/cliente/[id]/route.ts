@@ -112,6 +112,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
         })
       }
     }
+    // Sponda: sopra "soglia_kg" si aggiunge "prezzo_kg" € per ogni kg oltre la soglia (peso fatturato).
+    if (supplementi.sponda) {
+      const soglia_kg = Number(supplementi.sponda.soglia_kg) || 0
+      const prezzo_kg = Number(supplementi.sponda.prezzo_kg) || 0
+      if (prezzo_kg > 0 && soglia_kg > 0) {
+        righeSupplementi.push({
+          listino_id: id, corriere_id, tipo: 'sponda',
+          nome: 'Sponda', valore: prezzo_kg,
+          tipo_calcolo: 'per_kg', descrizione: JSON.stringify({ soglia_kg }),
+        })
+      }
+    }
 
     if (righeSupplementi.length) {
       const { error } = await supabase.from('listini_clienti_supplementi').insert(righeSupplementi)

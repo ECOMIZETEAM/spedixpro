@@ -118,6 +118,8 @@ export default function ListinoCorrierePage() {
   const [aperturaGiacenza, setAperturaGiacenza] = useState(0)
   const [ritiroPrezzo, setRitiroPrezzo] = useState(0)
   const [ritiroPercNolo, setRitiroPercNolo] = useState(0)
+  const [spondaSoglia, setSpondaSoglia] = useState(150)
+  const [spondaPrezzoKg, setSpondaPrezzoKg] = useState(0)
 
   async function carica(corriereDaSelezionare?: string) {
     setLoading(true); setErrore(''); setMsg('')
@@ -144,6 +146,10 @@ export default function ListinoCorrierePage() {
     setRitiroPrezzo(ritiroRiga ? Number(ritiroRiga.valore)||0 : 0)
     const ritiroDescr = ritiroRiga ? parseDescr(ritiroRiga.descrizione) : null
     setRitiroPercNolo(ritiroDescr?.perc_nolo ? Number(ritiroDescr.perc_nolo)||0 : 0)
+    const spondaRiga = (data.supplementi||[]).find((s:any) => s.tipo === 'sponda')
+    const spondaDescr = spondaRiga ? parseDescr(spondaRiga.descrizione) : null
+    setSpondaSoglia(spondaDescr?.soglia_kg ? Number(spondaDescr.soglia_kg)||150 : 150)
+    setSpondaPrezzoKg(spondaRiga ? Number(spondaRiga.valore)||0 : 0)
     setLoading(false); setPronto(true)
   }
 
@@ -202,6 +208,7 @@ export default function ListinoCorrierePage() {
       servizi: serviziAccessori,
       giacenze: { servizi: giacenzeServizi, apertura: aperturaGiacenza },
       ritiro: { prezzo: ritiroPrezzo, perc_nolo: ritiroPercNolo },
+      sponda: { soglia_kg: spondaSoglia, prezzo_kg: spondaPrezzoKg },
     }
 
     const res = await fetch('/api/listini/corrieri', {
@@ -242,7 +249,7 @@ export default function ListinoCorrierePage() {
 
       {/* Tabs */}
       <div style={{display:'flex',borderBottom:'1px solid #d1d5db',padding:'0 16px',overflowX:'auto' as const}}>
-        {[['pesi','Pesi / Zone'],['assicurazione','Assicurazione'],['contrassegni','Contrassegni'],['servizi','Servizi accessori'],['giacenze','Giacenze'],['ritiro','Ritiro']].map(([k,l])=>(
+        {[['pesi','Pesi / Zone'],['assicurazione','Assicurazione'],['contrassegni','Contrassegni'],['servizi','Servizi accessori'],['giacenze','Giacenze'],['ritiro','Ritiro'],['extra','Extra']].map(([k,l])=>(
           <button key={k} style={tabStyle(k)} onClick={()=>setTab(k)}>{l}</button>
         ))}
       </div>
@@ -434,6 +441,24 @@ export default function ListinoCorrierePage() {
               </tr>
             </tbody>
           </table>
+        </div>
+      )}
+
+      {tab==='extra' && (
+        <div style={{padding:'16px'}}>
+          <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',marginBottom:'4px'}}>Sponda idraulica (supplemento peso)</div>
+          <div style={{fontSize:'12px',color:'#666',marginBottom:'14px'}}>Sopra la soglia si aggiunge un costo per ogni kg eccedente, calcolato sul peso fatturato (volume). Es: soglia 150kg, 0,03 €/kg → spedizione da 200kg = +(200−150)×0,03 = +1,50 €.</div>
+          <div style={{display:'flex',gap:'20px',alignItems:'flex-end',flexWrap:'wrap' as const}}>
+            <div>
+              <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Soglia (kg)</label>
+              <input type="number" step="1" value={spondaSoglia||''} onChange={e=>setSpondaSoglia(parseFloat(e.target.value)||0)} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="150"/>
+            </div>
+            <div>
+              <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Prezzo per kg eccedente (€)</label>
+              <input type="number" step="0.01" value={spondaPrezzoKg||''} onChange={e=>setSpondaPrezzoKg(parseFloat(e.target.value)||0)} style={{...inp,width:'160px',textAlign:'right' as const}} placeholder="0.03"/>
+            </div>
+          </div>
+          <div style={{fontSize:'11px',color:'#999',marginTop:'10px'}}>Lascia 0 per disattivare la sponda su questo contratto.</div>
         </div>
       )}
     </div>

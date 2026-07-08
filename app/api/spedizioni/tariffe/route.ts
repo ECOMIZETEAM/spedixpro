@@ -140,6 +140,27 @@ export async function POST(req: NextRequest) {
     for (const arr of scaglioniAssicPerCorriere.values()) arr.sort((a,b)=>a.valore_max - b.valore_max)
   }
 
+  // Sponda idraulica: sopra soglia_kg si aggiunge prezzo_kg € per ogni kg oltre la soglia (peso fatturato).
+  const spondaPerCorriere = new Map<string, { soglia: number; prezzoKg: number }>()
+  if (cliente.listino_cliente_id) {
+    const { data: supplS } = await supabase
+      .from('listini_clienti_supplementi')
+      .select('corriere_id, descrizione, valore')
+      .eq('listino_id', cliente.listino_cliente_id).eq('tipo', 'sponda')
+    for (const s of (supplS || [])) {
+      let d:any = null; try { d = JSON.parse(s.descrizione) } catch {}
+      const soglia = Number(d?.soglia_kg) || 0
+      const prezzoKg = Number(s.valore) || 0
+      if (soglia > 0 && prezzoKg > 0) spondaPerCorriere.set(s.corriere_id, { soglia, prezzoKg })
+    }
+  }
+  function calcolaSponda(corriereId: string, pesoFatt: number): number {
+    const cfg = spondaPerCorriere.get(corriereId)
+    if (!cfg) return 0
+    if (pesoFatt <= cfg.soglia) return 0
+    return Math.round((pesoFatt - cfg.soglia) * cfg.prezzoKg * 100) / 100
+  }
+
   // Base percentuale: 'totale' = intero importo del supplemento; 'differenza' = importo
   // meno il massimo della PRIMA fascia (es. franchigia 500€ → % solo sull'eccedenza).
   function calcolaAssicurazione(corriereId: string, _prezzoSped: number): number | null {
@@ -335,14 +356,17 @@ export async function POST(req: NextRequest) {
     if (calcolaContrassegno(corriereId, Number(fasciaGiusta.prezzo)) === null) continue
     if (calcolaAssicurazione(corriereId, Number(fasciaGiusta.prezzo)) === null) continue
 
+    const sponda = calcolaSponda(corriereId, pesoFatturato)
+    const prezzoSped = Number(fasciaGiusta.prezzo) + sponda
     risultati.push({
       carrierCode: corriere?.tipo || 'sda',
       contractCode: '',
       weight_price: Number(fasciaGiusta.prezzo).toFixed(2),
-      prezzo_spedizione: Number(fasciaGiusta.prezzo).toFixed(2),
-      costo_contrassegno: (calcolaContrassegno(corriereId, Number(fasciaGiusta.prezzo)) ?? 0).toFixed(2),
-      costo_assicurazione: (calcolaAssicurazione(corriereId, Number(fasciaGiusta.prezzo)) ?? 0).toFixed(2),
-      total_price: (Number(fasciaGiusta.prezzo) + (calcolaContrassegno(corriereId, Number(fasciaGiusta.prezzo)) ?? 0) + (calcolaAssicurazione(corriereId, Number(fasciaGiusta.prezzo)) ?? 0)).toFixed(2),
+      prezzo_spedizione: prezzoSped.toFixed(2),
+      costo_sponda: sponda.toFixed(2),
+      costo_contrassegno: (calcolaContrassegno(corriereId, prezzoSped) ?? 0).toFixed(2),
+      costo_assicurazione: (calcolaAssicurazione(corriereId, prezzoSped) ?? 0).toFixed(2),
+      total_price: (prezzoSped + (calcolaContrassegno(corriereId, prezzoSped) ?? 0) + (calcolaAssicurazione(corriereId, prezzoSped) ?? 0)).toFixed(2),
       fuel: '0.00',
       zona: isEstero ? (PAESI[paeseDest] || paeseDest) : ((fasciaGiusta as any)?.zone?.nome || zonaNome),
       peso_reale: pesoReale,

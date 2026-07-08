@@ -146,6 +146,14 @@ export async function POST(req: NextRequest) {
         righeSupplementi.push({ listino_id: listinoId, corriere_id: corriereId, tipo: 'ritiro', nome: 'Ritiro', valore: Number(prezzo)||0, tipo_calcolo: 'fisso', descrizione: JSON.stringify({perc_nolo}) })
       }
     }
+    // Sponda: sopra "soglia_kg" si aggiunge "prezzo_kg" € per ogni kg oltre la soglia (sul peso fatturato).
+    if (supplementi.sponda) {
+      const soglia_kg = Number(supplementi.sponda.soglia_kg) || 0
+      const prezzo_kg = Number(supplementi.sponda.prezzo_kg) || 0
+      if (prezzo_kg > 0 && soglia_kg > 0) {
+        righeSupplementi.push({ listino_id: listinoId, corriere_id: corriereId, tipo: 'sponda', nome: 'Sponda', valore: prezzo_kg, tipo_calcolo: 'per_kg', descrizione: JSON.stringify({ soglia_kg }) })
+      }
+    }
   }
   if (righeSupplementi.length) {
     const { error } = await supabase.from('listini_corrieri_supplementi').insert(righeSupplementi)

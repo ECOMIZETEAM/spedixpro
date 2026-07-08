@@ -125,6 +125,15 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     const d = r ? parseDescr(r.descrizione) : null
     return d?.perc_nolo ? Number(d.perc_nolo) || 0 : 0
   })
+  const [spondaSoglia, setSpondaSoglia] = useState(() => {
+    const r = (supplementiEsistenti||[]).find(s => s.tipo === 'sponda')
+    const d = r ? parseDescr(r.descrizione) : null
+    return d?.soglia_kg ? Number(d.soglia_kg) || 150 : 150
+  })
+  const [spondaPrezzoKg, setSpondaPrezzoKg] = useState(() => {
+    const r = (supplementiEsistenti||[]).find(s => s.tipo === 'sponda')
+    return r ? Number(r.valore) || 0 : 0
+  })
 
   function aggiungiFascia() { setFasce(prev => [...prev, { tipo:'fino_a', peso:0, prezzi:{} }]) }
   function rimuoviFascia(idx: number) { setFasce(prev => prev.filter((_,i) => i !== idx)) }
@@ -149,6 +158,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
             servizi: serviziAccessori,
             giacenze: { servizi: giacenzeServizi, apertura: aperturaGiacenza },
             ritiro: { prezzo: ritiroPrezzo, perc_nolo: ritiroPercNolo },
+            sponda: { soglia_kg: spondaSoglia, prezzo_kg: spondaPrezzoKg },
           }
         })
       })
@@ -244,7 +254,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       {/* Tabs */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden',marginBottom:'16px'}}>
         <div style={{display:'flex',borderBottom:'1px solid #d1d5db',padding:'0 16px',overflowX:'auto' as const}}>
-          {[['pesi','Pesi / Zone'],['assicurazione','Assicurazione'],['contrassegni','Contrassegni'],['servizi','Servizi accessori'],['giacenze','Giacenze'],['ritiro','Ritiro']].map(([k,l])=>(
+          {[['pesi','Pesi / Zone'],['assicurazione','Assicurazione'],['contrassegni','Contrassegni'],['servizi','Servizi accessori'],['giacenze','Giacenze'],['ritiro','Ritiro'],['extra','Extra']].map(([k,l])=>(
             <button key={k} style={tabStyle(k)} onClick={()=>setTab(k)}>{l}</button>
           ))}
           <div style={{marginLeft:'auto',display:'flex',alignItems:'center'}}>
@@ -437,6 +447,25 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
                 </tr>
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* EXTRA — Sponda idraulica */}
+        {tab==='extra' && (
+          <div style={{padding:'16px'}}>
+            <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',marginBottom:'4px'}}>Sponda idraulica (supplemento peso)</div>
+            <div style={{fontSize:'12px',color:'#666',marginBottom:'14px'}}>Sopra la soglia si aggiunge un costo per ogni kg eccedente, sul peso fatturato (volume). Es: soglia 150kg, 0,03 €/kg → 200kg = +(200−150)×0,03 = +1,50 €.</div>
+            <div style={{display:'flex',gap:'20px',alignItems:'flex-end',flexWrap:'wrap' as const}}>
+              <div>
+                <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Soglia (kg)</label>
+                <input type="number" step="1" value={spondaSoglia||''} onChange={e=>setSpondaSoglia(parseFloat(e.target.value)||0)} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="150"/>
+              </div>
+              <div>
+                <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Prezzo per kg eccedente (€)</label>
+                <input type="number" step="0.01" value={spondaPrezzoKg||''} onChange={e=>setSpondaPrezzoKg(parseFloat(e.target.value)||0)} style={{...inp,width:'160px',textAlign:'right' as const}} placeholder="0.03"/>
+              </div>
+            </div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'10px'}}>Lascia 0 per disattivare la sponda su questo contratto.</div>
           </div>
         )}
       </div>
