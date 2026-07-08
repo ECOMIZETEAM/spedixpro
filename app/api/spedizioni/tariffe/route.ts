@@ -378,5 +378,6 @@ function trovaFascia(fasce: any[], peso: number) {
       return { ...ultima, prezzo: parseFloat(ultima.prezzo) + prezzoExtra }
     }
   }
-  return finoA[finoA.length - 1] || null
+  // Peso oltre l'ultima fascia e nessuna fascia "oltre X ogni": corriere non disponibile.
+  return null
 }

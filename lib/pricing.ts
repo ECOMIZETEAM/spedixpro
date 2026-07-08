@@ -35,7 +35,8 @@ function trovaFascia(fasce: any[], peso: number) {
       return { ...ultima, prezzo: parseFloat(ultima.prezzo) + prezzoExtra }
     }
   }
-  return finoA[finoA.length - 1] || null
+  // Peso oltre l'ultima fascia e nessuna fascia "oltre X ogni": nessun prezzo.
+  return null
 }
 
 export type RisultatoPrezzo = {
@@ -228,9 +229,7 @@ export async function calcolaPrezzoCorriere(
       const ultima = finoA[finoA.length - 1]
       const kgExtra = pesoFatturato - parseFloat(ultima.peso_max)
       prezzo = parseFloat(ultima.prezzo) + Math.ceil(kgExtra / parseFloat(oltre.peso_max)) * parseFloat(oltre.prezzo)
-    } else if (finoA.length) {
-      prezzo = parseFloat(finoA[finoA.length - 1].prezzo)
-    } else return null
+    } else return null   // peso oltre l'ultima fascia e nessuna "oltre": nessun prezzo
   }
 
   const { data: suppl } = await supabase
@@ -409,8 +408,7 @@ export async function creaCalcolatoreCorriere(
       if (oltre && finoA.length) {
         const u = finoA[finoA.length - 1]
         prezzo = parseFloat(u.prezzo) + Math.ceil((pesoFatturato - parseFloat(u.peso_max)) / parseFloat(oltre.peso_max)) * parseFloat(oltre.prezzo)
-      } else if (finoA.length) { prezzo = parseFloat(finoA[finoA.length - 1].prezzo) }
-      else return null
+      } else return null   // peso oltre l'ultima fascia e nessuna "oltre": nessun prezzo
     }
 
     const nolo = prezzo
@@ -511,8 +509,7 @@ export async function creaCalcolatoreListinoCliente(
       if (oltre && finoA.length) {
         const u = finoA[finoA.length - 1]
         prezzo = parseFloat(u.prezzo) + Math.ceil((pesoFatturato - parseFloat(u.peso_max)) / parseFloat(oltre.peso_max)) * parseFloat(oltre.prezzo)
-      } else if (finoA.length) { prezzo = parseFloat(finoA[finoA.length - 1].prezzo) }
-      else return null
+      } else return null   // peso oltre l'ultima fascia e nessuna "oltre": nessun prezzo
     }
 
     const supplList = supplPerCorriere.get(s.corriere_id) || []
