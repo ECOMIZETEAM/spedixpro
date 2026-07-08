@@ -1,5 +1,6 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { spediamoproGetTracking } from '@/lib/spediamopro'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -19,10 +20,42 @@ export async function GET(req: NextRequest) {
   if (!corriere) return NextResponse.json({ error: 'Corriere non trovato' }, { status: 404 })
 
   const cred = corriere.credenziali as Record<string,string>
-  const baseUrl = `https://${cred.master_domain}/api/v2`
+  const base = {
+    numero: spedizione.numero,
+    tracking_number: spedizione.tracking_number,
+    corriere: corriere.nome_contratto,
+    cliente: cliente?.ragione_sociale || null,
+    contenuto: spedizione.contenuto,
+    mitt_nome: spedizione.mitt_nome,
+    destinatario: {
+      nome: spedizione.dest_nome,
+      indirizzo: spedizione.dest_indirizzo,
+      citta: spedizione.dest_citta,
+      provincia: spedizione.dest_provincia,
+      telefono: spedizione.dest_telefono,
+      email: spedizione.dest_email,
+    },
+    colli_dettaglio: spedizione.colli_dettaglio || [],
+  }
 
   try {
-    const res = await fetch(`${baseUrl}/shipping/tracking/${spedizione.tracking_number}`, {
+    // SpediamoPro: usa authcode + shipmentId (non master_domain). Eventi: {at, title, description}.
+    if (corriere.tipo === 'spediamopro') {
+      const raw: any = spedizione.raw_response || {}
+      const spid = raw.id || raw?.raw?.data?.id
+      const authcode = cred?.authcode
+      if (!spid || !authcode) return NextResponse.json({ ...base, eventi: [], error: 'Tracking non disponibile per questa spedizione' })
+      const tr = await spediamoproGetTracking(authcode, Number(spid))
+      const eventi = (tr.events || []).map((e: any) => ({
+        date: e.at || e.date || '',
+        description: [e.title, e.description].filter(Boolean).join(' — ') || 'Evento',
+        location: '',
+      })).reverse()   // più recente in alto
+      return NextResponse.json({ ...base, eventi, status_code: 200, raw: tr })
+    }
+
+    // Spedisci.online: endpoint per master_domain con Bearer.
+    const res = await fetch(`https://${cred.master_domain}/api/v2/shipping/tracking/${spedizione.tracking_number}`, {
       headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' }
     })
     const text = await res.text()
@@ -30,26 +63,12 @@ export async function GET(req: NextRequest) {
     try { data = JSON.parse(text) } catch { data = { raw_text: text } }
 
     return NextResponse.json({
-      numero: spedizione.numero,
-      tracking_number: spedizione.tracking_number,
-      corriere: corriere.nome_contratto,
-      cliente: cliente?.ragione_sociale || null,
-      contenuto: spedizione.contenuto,
-      mitt_nome: spedizione.mitt_nome,
-      destinatario: {
-        nome: spedizione.dest_nome,
-        indirizzo: spedizione.dest_indirizzo,
-        citta: spedizione.dest_citta,
-        provincia: spedizione.dest_provincia,
-        telefono: spedizione.dest_telefono,
-        email: spedizione.dest_email,
-      },
-      colli_dettaglio: spedizione.colli_dettaglio || [],
+      ...base,
       eventi: data.events || data.tracking || data.trackingEvents || (Array.isArray(data) ? data : []),
       status_code: res.status,
       raw: data
     })
   } catch(e: any) {
-    return NextResponse.json({ error: e.message, tracking_number: spedizione.tracking_number }, { status: 500 })
+    return NextResponse.json({ ...base, eventi: [], error: e.message, tracking_number: spedizione.tracking_number }, { status: 200 })
   }
 }

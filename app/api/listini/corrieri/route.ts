@@ -31,9 +31,11 @@ export async function GET(req: NextRequest) {
     const { data: cc } = await supabase.from('corrieri').select('id,nome_contratto,tipo').in('id', idsSenzaNome)
     for (const c of (cc || [])) _mappaCorr.set(c.id, c)
   }
-  const corrieri = [..._mappaCorr.values()].filter(Boolean)
-
   const { data: tuttiICorrieri } = await supabase.from('corrieri').select('id,nome_contratto').eq('master_id', utente?.master_id)
+  const posseduti = new Set((tuttiICorrieri || []).map((c:any) => c.id))
+  // Mostra SOLO i corrieri realmente POSSEDUTI dal master: no righe/agganci "estranei"
+  // (residui di duplicazioni/ereditarietà che puntano a corrieri di altri master).
+  const corrieri = [..._mappaCorr.values()].filter(Boolean).filter((c:any) => posseduti.has(c.id))
   const corrieriDisponibili = (tuttiICorrieri||[]).filter(c => !corrieri.some((x:any) => x.id === c.id))
 
   const corriereSelezionato = corrieri.find((c:any) => c.id === corriereId) || corrieri[0]
