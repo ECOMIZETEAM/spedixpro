@@ -48,12 +48,21 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const admin = createAdminSupabase()
     const { data: m } = await admin.from('masters').select('id,parent_master_id').eq('id', targetId).single()
     if (!m || m.parent_master_id !== utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
-    const { error } = await admin.from('masters').update({
-      nome: datiCliente.ragione_sociale, telefono: datiCliente.telefono || null,
-      piva: datiCliente.piva || null, attivo: datiCliente.attivo ?? true,
-      tipo_contratto: datiCliente.tipo_contratto || null,
-      parent_listino_id: datiCliente.listino_cliente_id || null,
-    }).eq('id', targetId)
+    // Aggiorno solo i campi presenti nel body (così Anagrafica e Impostazioni non si sovrascrivono a vicenda)
+    const upd: any = {}
+    if (datiCliente.ragione_sociale !== undefined) upd.nome = datiCliente.ragione_sociale
+    if (datiCliente.telefono !== undefined) upd.telefono = datiCliente.telefono || null
+    if (datiCliente.piva !== undefined) upd.piva = datiCliente.piva || null
+    if (datiCliente.attivo !== undefined) upd.attivo = datiCliente.attivo ?? true
+    if (datiCliente.tipo_contratto !== undefined) upd.tipo_contratto = datiCliente.tipo_contratto || null
+    if (datiCliente.listino_cliente_id !== undefined) upd.parent_listino_id = datiCliente.listino_cliente_id || null
+    // Stesse impostazioni del cliente (colonne aggiunte a masters)
+    if (datiCliente.impostazioni !== undefined) upd.impostazioni = datiCliente.impostazioni
+    if (datiCliente.prezzi_in_distinta !== undefined) upd.prezzi_in_distinta = datiCliente.prezzi_in_distinta
+    if (datiCliente.visualizza_fatture !== undefined) upd.visualizza_fatture = datiCliente.visualizza_fatture
+    if (datiCliente.vieta_inserimento !== undefined) upd.vieta_inserimento = datiCliente.vieta_inserimento
+    if (datiCliente.vieta_cancellazione !== undefined) upd.vieta_cancellazione = datiCliente.vieta_cancellazione
+    const { error } = await admin.from('masters').update(upd).eq('id', targetId)
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
     // Se è stato assegnato un listino, copialo nel Listino Corrieri del sotto-master
     if (datiCliente.listino_cliente_id) {
