@@ -336,6 +336,22 @@ export async function POST(req: NextRequest) {
 
   for (const [corriereId, fasceDelCorriere] of fascePerCorriere) {
     const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
+    // Limite misure per scaglione di PESO REALE: se un collo eccede, il corriere non è disponibile.
+    {
+      const sc = settsC?.misure_scaglioni
+      const lim = (sc && sc.soglia_kg != null && sc.soglia_kg !== '')
+        ? (pesoReale > Number(sc.soglia_kg) ? sc.sopra : sc.sotto)
+        : settsC?.misure_max
+      const L = Number(lim?.lunghezza)||0, W = Number(lim?.larghezza)||0, H = Number(lim?.altezza)||0
+      if (L > 0 && W > 0 && H > 0) {
+        const limits = [L, W, H].sort((a,b)=>b-a)
+        const eccede = (tuttiColli||[]).some((c:any)=>{
+          const dims = [Number(c.length)||0, Number(c.width)||0, Number(c.height)||0].sort((a,b)=>b-a)
+          return dims[0] > limits[0] || dims[1] > limits[1] || dims[2] > limits[2]
+        })
+        if (eccede) continue
+      }
+    }
     const pesoPerFascia = (!!settsC.agevolazione_peso_reale && entroMisureAgevolate) ? pesoReale : pesoFatturato
     const fasciaGiusta = trovaFascia(fasceDelCorriere, pesoPerFascia)
     if (!fasciaGiusta) continue

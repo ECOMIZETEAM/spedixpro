@@ -92,24 +92,37 @@ export default function CorrieriPage() {
       inserimento_ritiri: c.inserimento_ritiri !== false,
       mittente: (c.settings && c.settings.mittente) || 'cliente',
       agevolazione_peso_reale: !!(c.settings && c.settings.agevolazione_peso_reale),
-      misura_lunghezza: (c.settings && c.settings.misure_max && c.settings.misure_max.lunghezza) || '',
-      misura_larghezza: (c.settings && c.settings.misure_max && c.settings.misure_max.larghezza) || '',
-      misura_altezza: (c.settings && c.settings.misure_max && c.settings.misure_max.altezza) || '',
+      // Misure massime a scaglioni di peso (sul PESO REALE, non volumetrico)
+      misura_soglia: (c.settings?.misure_scaglioni?.soglia_kg ?? '') || '',
+      sotto_l: (c.settings?.misure_scaglioni?.sotto?.lunghezza ?? c.settings?.misure_max?.lunghezza) || '',
+      sotto_w: (c.settings?.misure_scaglioni?.sotto?.larghezza ?? c.settings?.misure_max?.larghezza) || '',
+      sotto_h: (c.settings?.misure_scaglioni?.sotto?.altezza ?? c.settings?.misure_max?.altezza) || '',
+      sopra_l: (c.settings?.misure_scaglioni?.sopra?.lunghezza) || '',
+      sopra_w: (c.settings?.misure_scaglioni?.sopra?.larghezza) || '',
+      sopra_h: (c.settings?.misure_scaglioni?.sopra?.altezza) || '',
     })
   }
 
   async function salvaImpostazioni() {
     if (!popup) return
     setSalvandoPopup(true)
+    const scaglioni = {
+      soglia_kg: popup.misura_soglia !== '' ? Number(popup.misura_soglia) : null,
+      sotto: { lunghezza: popup.sotto_l||null, larghezza: popup.sotto_w||null, altezza: popup.sotto_h||null },
+      sopra: { lunghezza: popup.sopra_l||null, larghezza: popup.sopra_w||null, altezza: popup.sopra_h||null },
+    }
+    // misure_max (legacy) = tier "sotto" come default per i lettori vecchi
+    const misureMax = { lunghezza: popup.sotto_l||null, larghezza: popup.sotto_w||null, altezza: popup.sotto_h||null }
+    const nuoviSettings = (base:any) => ({ ...(base||{}), mittente: popup.mittente, agevolazione_peso_reale: popup.agevolazione_peso_reale, misure_max: misureMax, misure_scaglioni: scaglioni })
     await fetch('/api/corrieri/'+popup.id, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         multicollo: popup.multicollo,
         inserimento_ritiri: popup.inserimento_ritiri,
-        settings: { mittente: popup.mittente, agevolazione_peso_reale: popup.agevolazione_peso_reale, misure_max: { lunghezza: popup.misura_lunghezza||null, larghezza: popup.misura_larghezza||null, altezza: popup.misura_altezza||null } },
+        settings: nuoviSettings(null),
       })
     })
-    setCorrieri(prev => prev.map(c => c.id === popup.id ? { ...c, multicollo: popup.multicollo, inserimento_ritiri: popup.inserimento_ritiri, settings: { ...(c.settings||{}), mittente: popup.mittente, agevolazione_peso_reale: popup.agevolazione_peso_reale, misure_max: { lunghezza: popup.misura_lunghezza||null, larghezza: popup.misura_larghezza||null, altezza: popup.misura_altezza||null } } } : c))
+    setCorrieri(prev => prev.map(c => c.id === popup.id ? { ...c, multicollo: popup.multicollo, inserimento_ritiri: popup.inserimento_ritiri, settings: nuoviSettings(c.settings) } : c))
     setSalvandoPopup(false)
     setPopup(null)
   }
@@ -181,7 +194,25 @@ export default function CorrieriPage() {
               <div style={{fontSize:'15px',fontWeight:'700',color:'#1a1a1a'}}>{popup.nome_contratto} — Impostazioni</div>
             </div>
             <div style={{padding:'22px'}}>
-              <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',marginBottom:'14px'}}>Agevolazione peso</div><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'16px',marginBottom:'14px'}}><label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>Agevolazione peso reale (&le; 50&times;28&times;32 cm)</label><select value={popup.agevolazione_peso_reale?'si':'no'} onChange={e=>setPopup({...popup,agevolazione_peso_reale:e.target.value==='si'})} style={{...selStyle,maxWidth:'260px'}}><option value="no">No</option><option value="si">Si</option></select></div><div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',margin:'14px 0'}}>Misure massime (cm)</div><div style={{display:'flex',gap:'10px',marginBottom:'14px'}}><div style={{flex:1}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>Lunghezza</label><input type="number" value={popup.misura_lunghezza||''} onChange={e=>setPopup({...popup,misura_lunghezza:e.target.value})} style={{...selStyle,width:'100%'}}/></div><div style={{flex:1}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>Larghezza</label><input type="number" value={popup.misura_larghezza||''} onChange={e=>setPopup({...popup,misura_larghezza:e.target.value})} style={{...selStyle,width:'100%'}}/></div><div style={{flex:1}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>Altezza</label><input type="number" value={popup.misura_altezza||''} onChange={e=>setPopup({...popup,misura_altezza:e.target.value})} style={{...selStyle,width:'100%'}}/></div></div><div style={{borderTop:'1px solid #eee',margin:'4px 0 18px'}}></div><div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',marginBottom:'14px'}}>Impostazioni Generale</div>
+              <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',marginBottom:'14px'}}>Agevolazione peso</div><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'16px',marginBottom:'14px'}}><label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>Agevolazione peso reale (&le; 50&times;28&times;32 cm)</label><select value={popup.agevolazione_peso_reale?'si':'no'} onChange={e=>setPopup({...popup,agevolazione_peso_reale:e.target.value==='si'})} style={{...selStyle,maxWidth:'260px'}}><option value="no">No</option><option value="si">Si</option></select></div><div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',margin:'14px 0 4px'}}>Misure massime per peso (cm)</div>
+              <div style={{fontSize:'11.5px',color:'#888',marginBottom:'12px'}}>Limiti diversi in base al <b>peso reale</b> dichiarato dal cliente (non il volumetrico). Una spedizione oltre i limiti del suo scaglione non mostrerà questo corriere. Lascia vuoto per nessun limite.</div>
+              <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'14px'}}>
+                <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>Soglia di peso</label>
+                <input type="number" value={popup.misura_soglia||''} onChange={e=>setPopup({...popup,misura_soglia:e.target.value})} placeholder="es. 30" style={{...selStyle,width:'110px'}}/>
+                <span style={{fontSize:'12px',color:'#666'}}>kg</span>
+              </div>
+              <div style={{fontSize:'12px',fontWeight:'700',color:'#f97316',marginBottom:'8px'}}>Sotto la soglia (peso ≤ {popup.misura_soglia||'…'} kg)</div>
+              <div style={{display:'flex',gap:'10px',marginBottom:'14px'}}>
+                <div style={{flex:1}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>Lunghezza</label><input type="number" value={popup.sotto_l||''} onChange={e=>setPopup({...popup,sotto_l:e.target.value})} style={{...selStyle,width:'100%'}}/></div>
+                <div style={{flex:1}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>Larghezza</label><input type="number" value={popup.sotto_w||''} onChange={e=>setPopup({...popup,sotto_w:e.target.value})} style={{...selStyle,width:'100%'}}/></div>
+                <div style={{flex:1}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>Altezza</label><input type="number" value={popup.sotto_h||''} onChange={e=>setPopup({...popup,sotto_h:e.target.value})} style={{...selStyle,width:'100%'}}/></div>
+              </div>
+              <div style={{fontSize:'12px',fontWeight:'700',color:'#f97316',marginBottom:'8px'}}>Sopra la soglia (peso &gt; {popup.misura_soglia||'…'} kg)</div>
+              <div style={{display:'flex',gap:'10px',marginBottom:'14px'}}>
+                <div style={{flex:1}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>Lunghezza</label><input type="number" value={popup.sopra_l||''} onChange={e=>setPopup({...popup,sopra_l:e.target.value})} style={{...selStyle,width:'100%'}}/></div>
+                <div style={{flex:1}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>Larghezza</label><input type="number" value={popup.sopra_w||''} onChange={e=>setPopup({...popup,sopra_w:e.target.value})} style={{...selStyle,width:'100%'}}/></div>
+                <div style={{flex:1}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>Altezza</label><input type="number" value={popup.sopra_h||''} onChange={e=>setPopup({...popup,sopra_h:e.target.value})} style={{...selStyle,width:'100%'}}/></div>
+              </div><div style={{borderTop:'1px solid #eee',margin:'4px 0 18px'}}></div><div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',marginBottom:'14px'}}>Impostazioni Generale</div>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'16px',marginBottom:'14px'}}>
                 <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>Multicollo</label>
                 <select value={popup.multicollo?'si':'no'} onChange={e=>setPopup({...popup,multicollo:e.target.value==='si'})} style={{...selStyle,maxWidth:'260px'}}>
