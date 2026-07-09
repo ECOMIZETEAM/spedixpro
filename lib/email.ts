@@ -14,6 +14,26 @@ function wrap(inner: string): string {
   </div>`
 }
 
+// Email di prova (verifica dominio/mittente Resend). Ritorna esito + id Resend o errore.
+export async function inviaEmailTest(to: string): Promise<{ ok: boolean; from: string; id?: string | null; error?: string }> {
+  try {
+    const r: any = await resend.emails.send({
+      from: FROM,
+      to,
+      subject: 'Test email — MoovExpress ✅',
+      html: wrap(`
+        <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">✅ Email di prova riuscita</h2>
+        <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 12px">Se stai leggendo questa email, l'invio dal dominio <strong>moovexpress.com</strong> tramite Resend funziona correttamente.</p>
+        <p style="color:#999;font-size:12px;margin-top:16px">Mittente: ${FROM}</p>
+      `),
+    })
+    if (r?.error) return { ok: false, from: FROM, error: r.error?.message || JSON.stringify(r.error) }
+    return { ok: true, from: FROM, id: r?.data?.id || null }
+  } catch (err: any) {
+    return { ok: false, from: FROM, error: String(err?.message || err) }
+  }
+}
+
 // Email credenziali (clienti e master): email + password + link portale
 export async function inviaCredenzialiCliente({
   email, nomeCliente, masterNome, dominio, password
