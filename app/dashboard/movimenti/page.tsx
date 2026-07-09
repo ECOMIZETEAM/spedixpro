@@ -39,6 +39,35 @@ export default function MovimentiMasterPage() {
   const [corriereFiltro, setCorriereFiltro] = useState('')
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
+  // Portali esterni (solo E&A): credito residuo per portale + ricariche
+  const [portali, setPortali] = useState<any>(null)
+  const [ricariche, setRicariche] = useState<any[]>([])
+  const [formImporto, setFormImporto] = useState<{ spediamopro: string; spedisci: string }>({ spediamopro: '', spedisci: '' })
+  const [savingP, setSavingP] = useState('')
+
+  async function caricaPortali() {
+    try {
+      const r = await fetch('/api/portali/ricariche')
+      const d = await r.json()
+      if (d?.abilitato) { setPortali(d.portali); setRicariche(d.ricariche || []) }
+      else { setPortali(null); setRicariche([]) }
+    } catch {}
+  }
+  async function aggiungiRicarica(portale: 'spediamopro' | 'spedisci') {
+    const imp = parseFloat(String(formImporto[portale] || '').replace(',', '.'))
+    if (!isFinite(imp) || imp === 0) return
+    setSavingP(portale)
+    try {
+      await fetch('/api/portali/ricariche', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ portale, importo: imp }) })
+      setFormImporto(f => ({ ...f, [portale]: '' }))
+      await caricaPortali()
+    } finally { setSavingP('') }
+  }
+  async function eliminaRicarica(id: string) {
+    if (typeof window !== 'undefined' && !window.confirm('Eliminare questa ricarica?')) return
+    await fetch('/api/portali/ricariche?id=' + id, { method: 'DELETE' })
+    await caricaPortali()
+  }
 
   useEffect(() => {
     (async () => {
@@ -50,6 +79,7 @@ export default function MovimentiMasterPage() {
       } catch { setErr('Errore di rete') }
       finally { setLoading(false) }
     })()
+    caricaPortali()
   }, [])
 
   const corrieri = Array.from(new Set(movimenti.map(m => m.corriere).filter(Boolean))) as string[]
@@ -73,6 +103,44 @@ export default function MovimentiMasterPage() {
         <h1 style={{fontSize:'20px',fontWeight:700,color:'#1a1a1a',margin:0}}>Lista Movimenti</h1>
         <p style={{color:'#999',fontSize:'13px',marginTop:'4px'}}>Il tuo saldo e i costi delle spedizioni (a te addebitati dal corriere o dal livello superiore)</p>
       </div>
+
+      {portali && (
+        <div style={{...card, marginBottom:'16px'}}>
+          <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'4px'}}>Portali esterni — credito residuo</div>
+          <div style={{fontSize:'12px',color:'#999',marginBottom:'14px'}}>Ricariche fatte sui portali meno lo speso su MoovExpress con i loro contratti.</div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px'}}>
+            {(['spediamopro','spedisci'] as const).map(pt => {
+              const p = portali[pt] || { ricariche:0, speso:0, residuo:0 }
+              const label = pt==='spediamopro' ? 'SpediamoPro' : 'Spedisci.online (SDA)'
+              const lista = ricariche.filter((r:any) => r.portale===pt)
+              return (
+                <div key={pt} style={{border:'1px solid #eee',borderRadius:'8px',padding:'14px'}}>
+                  <div style={{fontSize:'12px',fontWeight:700,color:'#1a1a1a'}}>{label}</div>
+                  <div style={{fontSize:'24px',fontWeight:800,color:p.residuo<0?'#b91c1c':'#15803d',margin:'6px 0'}}>{fmtEuro(p.residuo)}</div>
+                  <div style={{fontSize:'12px',color:'#666'}}>Ricaricato {fmtEuro(p.ricariche)} · Speso {fmtEuro(p.speso)}</div>
+                  <div style={{display:'flex',gap:'6px',marginTop:'10px'}}>
+                    <input value={formImporto[pt]} onChange={e=>setFormImporto(f=>({...f,[pt]:e.target.value}))} placeholder="Importo ricarica €" inputMode="decimal"
+                      style={{flex:1,padding:'7px 10px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',minWidth:0}}/>
+                    <button onClick={()=>aggiungiRicarica(pt)} disabled={savingP===pt}
+                      style={{background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',padding:'7px 14px',fontSize:'13px',fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',opacity:savingP===pt?0.6:1}}>+ Aggiungi</button>
+                  </div>
+                  {lista.length>0 && (
+                    <div style={{marginTop:'10px',maxHeight:'150px',overflowY:'auto'}}>
+                      {lista.map((r:any)=>(
+                        <div key={r.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'8px',fontSize:'12px',padding:'4px 0',borderBottom:'1px solid #f5f5f5'}}>
+                          <span style={{color:'#666'}}>{new Date(r.created_at).toLocaleDateString('it-IT')}</span>
+                          <span style={{fontWeight:600,color:Number(r.importo)<0?'#b91c1c':'#15803d'}}>{fmtEuro(Number(r.importo))}</span>
+                          <button onClick={()=>eliminaRicarica(r.id)} title="Elimina" style={{background:'none',border:'none',color:'#dc2626',cursor:'pointer',fontSize:'15px',lineHeight:1}}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       <div style={{...card,marginBottom:'16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px'}}>
         <div style={{display:'flex',gap:'28px',flexWrap:'wrap'}}>
