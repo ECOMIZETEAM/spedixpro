@@ -122,7 +122,7 @@ export async function verificaCreditoCatena(
     paese?: string
     corriereNome?: string
   }
-): Promise<{ ok: boolean; errore?: string }> {
+): Promise<{ ok: boolean; errore?: string; masterInsufficiente?: string }> {
   const { catena, errore } = await costruisciCatena(supabase, {
     masterDirettoId: params.masterDirettoId,
     corriereOwnerId: params.corriereOwnerId,
@@ -137,7 +137,13 @@ export async function verificaCreditoCatena(
 
   for (const liv of catena) {
     if (liv.tipoContratto === 'credito_scalare' && liv.prezzo > 0 && liv.credito < liv.prezzo) {
-      return { ok: false, errore: `Credito insufficiente nella catena: "${liv.nome}" ha € ${liv.credito.toFixed(2)} ma servono € ${liv.prezzo.toFixed(2)}.` }
+      // masterInsufficiente = chi è a secco: il chiamante decide se mostrarne il dettaglio
+      // (solo al diretto interessato) o un generico "Credito insufficiente" ai livelli sotto.
+      return {
+        ok: false,
+        errore: `Credito insufficiente: "${liv.nome}" ha € ${liv.credito.toFixed(2)} ma servono € ${liv.prezzo.toFixed(2)}.`,
+        masterInsufficiente: liv.masterId,
+      }
     }
   }
   return { ok: true }

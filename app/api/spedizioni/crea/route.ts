@@ -232,8 +232,10 @@ export async function POST(req: NextRequest) {
       corriereNome: corriereRecord.nome_contratto,
     })
     if (!catenaCheck.ok) {
-      // Al CLIENTE non si mostrano credito/costo dei master sopra di lui: solo "Credito insufficiente".
-      const msg = utente?.ruolo === 'cliente' ? 'Credito insufficiente' : catenaCheck.errore
+      // Nessuno vede credito/costo dei master SOPRA di sé: mostro il dettaglio SOLO se il
+      // master a secco è il PROPRIO (utente.master_id). Clienti e livelli inferiori: generico.
+      const proprio = utente?.ruolo !== 'cliente' && catenaCheck.masterInsufficiente === utente?.master_id
+      const msg = proprio ? catenaCheck.errore : 'Credito insufficiente'
       return NextResponse.json({ error: msg }, { status: 402 })
     }
   }
