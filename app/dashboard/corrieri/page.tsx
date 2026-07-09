@@ -191,7 +191,7 @@ export default function CorrieriPage() {
 
       {popup && (
         <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'20px'}}>
-          <div style={{background:'#fff',borderRadius:'12px',width:'100%',maxWidth:'560px',overflow:'hidden'}}>
+          <div style={{background:'#fff',borderRadius:'12px',width:'100%',maxWidth:'560px',maxHeight:'88vh',overflowY:'auto',WebkitOverflowScrolling:'touch' as const}}>
             <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'18px 22px',borderBottom:'1px solid #f0f0f0'}}>
               {iconaCorriere(popup.nome_contratto) && <img src={iconaCorriere(popup.nome_contratto)!} alt="" style={{width:'54px',height:'32px',objectFit:'contain'}}/>}
               <div style={{fontSize:'15px',fontWeight:'700',color:'#1a1a1a'}}>{popup.nome_contratto} — Impostazioni</div>
@@ -245,7 +245,7 @@ export default function CorrieriPage() {
                 </select>
               </div>
             </div>
-            <div style={{display:'flex',justifyContent:'space-between',padding:'16px 22px',borderTop:'1px solid #f0f0f0'}}>
+            <div style={{display:'flex',justifyContent:'space-between',padding:'16px 22px',borderTop:'1px solid #f0f0f0',position:'sticky',bottom:0,background:'#fff',zIndex:2}}>
               <button onClick={()=>setPopup(null)} style={{padding:'9px 20px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'8px',fontSize:'13px',fontWeight:'600',color:'#1a1a1a',cursor:'pointer'}}>Chiudi</button>
               <button onClick={salvaImpostazioni} disabled={salvandoPopup} style={{padding:'9px 22px',background:'#f97316',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'700',cursor:'pointer',opacity:salvandoPopup?0.7:1}}>{salvandoPopup?'Salvataggio...':'Salva'}</button>
             </div>
