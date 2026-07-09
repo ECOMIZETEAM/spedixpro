@@ -14,16 +14,27 @@ export async function GET() {
   const abbonamentoAttivo = isRoot || !!masterRec?.abbonamento_piano
   const limitePiano = Number(masterRec?.abbonamento_limite || 0) || 50000
 
+  // Rete: la volumetria (piano + spedizioni recenti) considera TUTTO il sotto-albero del master.
+  const { createAdminSupabase } = await import('@/lib/supabase-admin')
+  const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+  const admin = createAdminSupabase()
+  const reteIds = masterId ? await sottoAlberoMasterIds(admin, masterId) : []
+  const inizioMese = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
+
   // Contatori + statistiche aggregati nel DB (una query ciascuno) invece di scaricare
   // le righe grezze: le liste PostgREST sono limitate a 1000 righe e falsavano i totali a volume.
   const [
     { data: contatori },
     { data: statistiche },
     { data: ultimeSpedizioni },
+    { count: spedMeseRete },
   ] = await Promise.all([
     supabase.rpc('dashboard_contatori_master', { p_master: masterId }),
     supabase.rpc('dashboard_statistiche_master', { p_master: masterId }),
-    supabase.from('spedizioni').select(SPED_COLS).eq('master_id', masterId).order('created_at',{ascending:false}).limit(10),
+    // Spedizioni recenti di tutta la rete (sé + discendenza), via admin per i permessi cross-master.
+    admin.from('spedizioni').select(SPED_COLS).in('master_id', reteIds.length ? reteIds : [masterId]).order('created_at',{ascending:false}).limit(10),
+    // Contatore piano (X/limite): conta le spedizioni del mese di TUTTA la rete.
+    admin.from('spedizioni').select('id',{count:'exact',head:true}).in('master_id', reteIds.length ? reteIds : [masterId]).gte('created_at', inizioMese).neq('stato','annullata'),
   ])
   const c: any = contatori || {}
   const st: any = statistiche || {}
@@ -31,7 +42,7 @@ export async function GET() {
   return NextResponse.json({
     masterNome,
     totClienti: c.totClienti||0,
-    spedizioniMese: c.spedizioniMese||0,
+    spedizioniMese: spedMeseRete||0,
     limiteMese: limitePiano,
     abbonamentoAttivo,
     illimitato: isRoot,

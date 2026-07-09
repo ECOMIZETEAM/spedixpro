@@ -21,14 +21,13 @@ export async function masterVedeReteCompleta(adminDb: any, masterId: string): Pr
   return !!(m.vede_rete_completa || m.is_super_master || m.parent_master_id === null)
 }
 
-// Master IDs che un master può VEDERE (liste/report/distinte/ritiri/ecc.):
-//  - privilegiato  -> tutto il sotto-albero
-//  - altrimenti    -> solo se stesso (rete privata)
+// Master IDs di cui un master vede la VOLUMETRIA (spedizioni/ritiri/contrassegni/giacenze/
+// distinte/report/contatori): SEMPRE tutto il proprio sotto-albero. Il giro d'affari della
+// rete sotto un master è suo e risale a lui a tutti i livelli.
+// La "rete privata" (flag vede_rete_completa) NON limita questi numeri: limita solo l'ACCESSO
+// GESTIONALE ai figli (impersona, gestione della loro rete/gerarchia).
 export async function masterIdsVisibili(adminDb: any, masterId: string): Promise<string[]> {
-  if (await masterVedeReteCompleta(adminDb, masterId)) {
-    return sottoAlberoMasterIds(adminDb, masterId)
-  }
-  return [masterId]
+  return sottoAlberoMasterIds(adminDb, masterId)
 }
 
 // Sotto-albero di un master: [masterId, figli, nipoti, ...] (id). Serve per filtrare

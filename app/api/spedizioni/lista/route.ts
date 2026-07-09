@@ -56,11 +56,10 @@ export async function GET(req: NextRequest) {
   if (isMasterRete && utente?.master_id) {
     const mine = utente.master_id
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const { masterVedeReteCompleta } = await import('@/lib/rete-masters')
     const adminDb = createAdminSupabase()
     masterIds = [mine]
-    // Rete privata: solo i master privilegiati (root/vede_rete_completa) vedono i sotto-master.
-    let frontier = (await masterVedeReteCompleta(adminDb, mine)) ? [mine] : []
+    // La volumetria della rete sotto un master risale sempre a lui (tutti i livelli).
+    let frontier = [mine]
     for (let i = 0; i < 12 && frontier.length; i++) {
       const { data: figli } = await adminDb.from('masters').select('id,nome,parent_master_id').in('parent_master_id', frontier)
       const nuovi: string[] = []
