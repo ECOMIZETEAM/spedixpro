@@ -13,7 +13,7 @@ export async function DELETE(req: NextRequest) {
 
   // Carico la spedizione (costo, cliente, numero, destinatario, stato, corriere, provincia, colli)
   const { data: sped } = await supabase.from('spedizioni')
-    .select('id,master_id,cliente_id,numero,dest_nome,dest_provincia,dest_cap,dest_paese,costo_totale,costo_spedizione,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,stato')
+    .select('id,master_id,cliente_id,numero,dest_nome,dest_provincia,dest_cap,dest_paese,costo_totale,costo_spedizione,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,stato,raw_response')
     .eq('id', spedizioneId).single()
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 
@@ -35,6 +35,42 @@ export async function DELETE(req: NextRequest) {
   // Se è già annullata, non rimborso di nuovo (idempotente)
   if (sped.stato === 'annullata') {
     return NextResponse.json({ success: true, already: true })
+  }
+
+  // Prima di cancellare dalla piattaforma, ANNULLA la spedizione sul CORRIERE
+  // (SpediamoPro: POST /shipments/{id}/cancel — Spedisci: POST /shipping/delete { increment_id }).
+  // Se il corriere non permette l'annullo (già affidata), NON si cancella dalla piattaforma.
+  {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const adminC = createAdminSupabase()
+    const { data: corr } = await adminC.from('corrieri').select('tipo,credenziali').eq('id', sped.corriere_id).single()
+    const cred = ((corr?.credenziali as any) || {}) as Record<string, string>
+    const raw = (sped.raw_response as any) || {}
+    try {
+      if (corr?.tipo === 'spediamopro') {
+        const shipmentId = Number(raw.id || raw.shipmentId)
+        if (shipmentId && cred.authcode) {
+          const { spediamoproCancelShipment } = await import('@/lib/spediamopro')
+          const ok = await spediamoproCancelShipment(cred.authcode, shipmentId)
+          if (!ok) return NextResponse.json({ error: 'Impossibile annullare la spedizione su SpediamoPro (forse è già stata affidata al corriere).' }, { status: 400 })
+        }
+      } else if (corr?.tipo === 'spedisci') {
+        const shipmentId = raw.shipmentId || raw.id
+        if (shipmentId && cred.master_domain) {
+          const res = await fetch(`https://${cred.master_domain}/api/v2/shipping/delete`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ increment_id: shipmentId }),
+          })
+          if (!res.ok) {
+            const t = await res.text().catch(() => '')
+            return NextResponse.json({ error: `Impossibile annullare la spedizione su Spedisci (${res.status}). ${t.slice(0, 150)}` }, { status: 400 })
+          }
+        }
+      }
+    } catch (e: any) {
+      return NextResponse.json({ error: `Errore annullando sul corriere: ${e?.message || e}` }, { status: 400 })
+    }
   }
 
   // Soft-delete: la spedizione diventa "annullata" (resta nel DB)
