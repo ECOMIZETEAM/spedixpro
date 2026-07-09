@@ -13,12 +13,28 @@ export default function ClientiPage() {
   const [filtroContratto, setFiltroContratto] = useState('tutti')
   const [filtroListino, setFiltroListino] = useState('tutti')
 
-  useEffect(() => {
+  const [daEliminare, setDaEliminare] = useState<any>(null)
+  const [eliminando, setEliminando] = useState(false)
+  const [errElim, setErrElim] = useState('')
+
+  function carica() {
     fetch('/api/clienti/lista?conMaster=1')
       .then(r => r.json())
       .then(d => { setClienti(Array.isArray(d) ? d : []); setLoading(false) })
       .catch(() => setLoading(false))
-  }, [])
+  }
+  useEffect(() => { carica() }, [])
+
+  async function confermaElimina() {
+    if (!daEliminare) return
+    setEliminando(true); setErrElim('')
+    try {
+      const res = await fetch(`/api/clienti/${daEliminare.id}`, { method: 'DELETE' })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) { setErrElim(d.error || 'Errore eliminazione'); setEliminando(false); return }
+      setDaEliminare(null); setEliminando(false); carica()
+    } catch { setErrElim('Errore di rete'); setEliminando(false) }
+  }
 
   const tipiContratto = useMemo(() => {
     const set = new Set(clienti.map(c => c.tipo_contratto).filter(Boolean))
@@ -165,6 +181,7 @@ export default function ClientiPage() {
                             <a href={`/dashboard/clienti/${c.id}`} title="Credito e movimenti" className="cli-act">▤</a>
                             <a href={`/dashboard/clienti/${c.id}/modifica`} title="Modifica dati" className="cli-act">✎</a>
                             <a href={`/dashboard/clienti/${c.id}/impostazioni`} title="Impostazioni" className="cli-act">⚙</a>
+                            <button onClick={()=>{setErrElim('');setDaEliminare(c)}} title="Elimina cliente" className="cli-act" style={{background:'none',border:'none',cursor:'pointer',color:'#dc2626',fontSize:'14px',padding:0}}>🗑</button>
                           </>
                         )}
                       </div>
@@ -176,6 +193,21 @@ export default function ClientiPage() {
           </div>
         )}
       </div>
+
+      {daEliminare && (
+        <div onClick={()=>!eliminando && setDaEliminare(null)} style={{position:'fixed',inset:0,background:'rgba(15,15,15,0.55)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',maxWidth:'420px',width:'100%',padding:'24px',boxShadow:'0 20px 60px rgba(0,0,0,.35)'}}>
+            <div style={{fontSize:'17px',fontWeight:800,color:'#1a1a1a',marginBottom:'8px'}}>Eliminare il cliente?</div>
+            <div style={{fontSize:'13.5px',color:'#555',marginBottom:'6px'}}>Stai per eliminare <b>{daEliminare.ragione_sociale}</b>. L'operazione è definitiva e rimuove anche il suo accesso al portale.</div>
+            <div style={{fontSize:'12px',color:'#999',marginBottom:'16px'}}>Se il cliente ha spedizioni registrate non potrà essere eliminato (potrai solo disattivarlo).</div>
+            {errElim && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px',fontSize:'12.5px',color:'#dc2626',marginBottom:'14px'}}>{errElim}</div>}
+            <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
+              <button onClick={()=>setDaEliminare(null)} disabled={eliminando} style={{background:'#fff',color:'#1a1a1a',border:'1px solid #ddd',borderRadius:'7px',padding:'9px 18px',fontSize:'13px',fontWeight:600,cursor:'pointer'}}>Annulla</button>
+              <button onClick={confermaElimina} disabled={eliminando} style={{background:'#dc2626',color:'#fff',border:'none',borderRadius:'7px',padding:'9px 18px',fontSize:'13px',fontWeight:700,cursor:'pointer',opacity:eliminando?0.7:1}}>{eliminando?'Eliminazione…':'Elimina definitivamente'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

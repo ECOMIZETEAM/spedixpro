@@ -133,3 +133,49 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
   return NextResponse.json({ success: true })
 }
+
+// Elimina un cliente DIRETTO del master. Bloccato se ha spedizioni (storico/fatturazione).
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  const supabase = await createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  const ruolo = (utente?.ruolo || '').toLowerCase()
+  if (!utente?.master_id || ruolo === 'cliente' || ruolo === 'agente') {
+    return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  }
+  if (id.startsWith('m:')) return NextResponse.json({ error: 'I sotto-master non si eliminano da qui' }, { status: 400 })
+
+  const { createAdminSupabase } = await import('@/lib/supabase-admin')
+  const admin = createAdminSupabase()
+
+  // Dev'essere un cliente DIRETTO di questo master.
+  const { data: cli } = await admin.from('clienti').select('id,master_id,email').eq('id', id).maybeSingle()
+  if (!cli || cli.master_id !== utente.master_id) {
+    return NextResponse.json({ error: 'Cliente non trovato o non è un tuo cliente diretto' }, { status: 403 })
+  }
+
+  // Blocco: se ha spedizioni non si elimina (protegge storico e movimenti).
+  const { count: nSped } = await admin.from('spedizioni').select('id', { count: 'exact', head: true }).eq('cliente_id', id)
+  if (nSped && nSped > 0) {
+    return NextResponse.json({ error: `Il cliente ha ${nSped} spedizioni registrate: non può essere eliminato. Puoi disattivarlo dalle sue impostazioni.` }, { status: 409 })
+  }
+
+  // Pulizia configurazione collegata (best-effort: tabelle non presenti non bloccano).
+  for (const t of ['clienti_corrieri_abilitati', 'ordini_importati', 'ordini_ecommerce', 'integrazioni', 'ritiri', 'movimenti']) {
+    try { await admin.from(t).delete().eq('cliente_id', id) } catch {}
+  }
+  // Login del cliente (auth + utenti).
+  try {
+    const { data: uCli } = await admin.from('utenti').select('id').eq('cliente_id', id)
+    for (const u of (uCli || [])) {
+      try { await admin.auth.admin.deleteUser((u as any).id) } catch {}
+      try { await admin.from('utenti').delete().eq('id', (u as any).id) } catch {}
+    }
+  } catch {}
+
+  const { error } = await admin.from('clienti').delete().eq('id', id)
+  if (error) return NextResponse.json({ error: `Impossibile eliminare: ${error.message}` }, { status: 400 })
+  return NextResponse.json({ success: true })
+}
