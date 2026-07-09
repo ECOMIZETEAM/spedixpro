@@ -33,8 +33,8 @@ const NAV: NavItem[] = [
     { label: 'Scansiona Resi', href: '/dashboard/resi/scansiona', perm: 'admin.renderlist.scan' },
     { label: 'Elenco Distinte Resi', href: '/dashboard/resi/distinte', perm: 'admin.renderlist.index' },
   ]},
-  { label: 'Dal mio network', href: '/dashboard/network', icon: '🌐', perm: 'admin.interno.deliveries.in' },
-  { label: 'Assistenza Clienti', icon: '🎧', always: true, sub: [
+  { label: 'Dal mio network', href: '/dashboard/network', icon: '⊛', perm: 'admin.interno.deliveries.in' },
+  { label: 'Assistenza Clienti', icon: '☏', always: true, sub: [
     { label: 'Ticket', href: '/dashboard/assistenza', always: true },
     { label: 'POD', href: '/dashboard/assistenza/pod', always: true },
   ]},
@@ -86,7 +86,7 @@ const NAV: NavItem[] = [
     { label: 'Zone di Consegna', href: '/dashboard/listini/zone' },
     { label: 'Cambia Password', href: '/dashboard/impostazioni/password', always: true },
   ]},
-  { label: 'Centro Notifiche', href: '/dashboard/notifiche', icon: '🔔', perm: 'admin.notification', sub: [
+  { label: 'Centro Notifiche', href: '/dashboard/notifiche', icon: '✦', perm: 'admin.notification', sub: [
     { label: 'Invia Notifica', href: '/dashboard/notifiche/invia', perm: 'admin.notification' },
   ]},
 ]
