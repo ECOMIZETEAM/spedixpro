@@ -249,7 +249,7 @@ export default function NuovaSpedizioneCliente() {
           : <span style={{color:'#dc2626',fontSize:'13px'}}>⚠️ Etichetta non generata</span>}
       </div>}
 
-      <div style={{display:'grid',gridTemplateColumns:'1fr 400px',gap:'16px',alignItems:'start'}}>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',alignItems:'start'}}>
 
         {/* COLONNA SINISTRA */}
         <div style={{display:'flex',flexDirection:'column',gap:'16px'}}>
@@ -268,9 +268,26 @@ export default function NuovaSpedizioneCliente() {
                 <div><label style={lbl}>Prov.</label><input value={mitt.provincia} onChange={e=>setMitt({...mitt,provincia:e.target.value})} style={inp}/></div>
                 <div><label style={lbl}>CAP</label><input value={mitt.cap} onChange={e=>setMitt({...mitt,cap:e.target.value})} style={inp}/></div>
               </div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'}}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'12px'}}>
                 <div><label style={lbl}>Email</label><input value={mitt.email} onChange={e=>setMitt({...mitt,email:e.target.value})} style={inp}/></div>
                 <div><label style={lbl}>Telefono</label><input value={mitt.telefono} onChange={e=>setMitt({...mitt,telefono:e.target.value})} style={inp}/></div>
+              </div>
+              <div style={{padding:'10px 12px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px'}}>
+                <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',fontWeight:'600',color:'#1a1a1a',cursor:'pointer'}}>
+                  <input type="checkbox" checked={richiediRitiro} onChange={e=>setRichiediRitiro(e.target.checked)} style={{width:'16px',height:'16px',cursor:'pointer'}}/>
+                  Richiedi ritiro a questo indirizzo
+                </label>
+                {richiediRitiro && (
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginTop:'10px'}}>
+                    <div><label style={lbl}>Data ritiro</label><input type="date" value={ritiroData} onChange={e=>setRitiroData(e.target.value)} style={inp}/></div>
+                    <div><label style={lbl}>Orario</label>
+                      <select value={ritiroOrario} onChange={e=>setRitiroOrario(e.target.value)} style={inp}>
+                        <option value="mattina">Mattina</option>
+                        <option value="pomeriggio">Pomeriggio</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -323,23 +340,6 @@ export default function NuovaSpedizioneCliente() {
                 <div><label style={lbl}>Telefono</label><input value={dest.telefono} onChange={e=>setDest({...dest,telefono:e.target.value})} style={inp}/></div>
               </div>
               <div><label style={lbl}>Note</label><input value={dest.note} onChange={e=>setDest({...dest,note:e.target.value})} style={inp}/></div>
-              <div style={{marginTop:'12px',padding:'10px 12px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px'}}>
-                <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',fontWeight:'600',color:'#1a1a1a',cursor:'pointer'}}>
-                  <input type="checkbox" checked={richiediRitiro} onChange={e=>setRichiediRitiro(e.target.checked)} style={{width:'16px',height:'16px',cursor:'pointer'}}/>
-                  📦 Richiedi ritiro con questa spedizione
-                </label>
-                {richiediRitiro && (
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginTop:'10px'}}>
-                    <div><label style={lbl}>Data ritiro</label><input type="date" value={ritiroData} onChange={e=>setRitiroData(e.target.value)} style={inp}/></div>
-                    <div><label style={lbl}>Orario</label>
-                      <select value={ritiroOrario} onChange={e=>setRitiroOrario(e.target.value)} style={inp}>
-                        <option value="mattina">Mattina</option>
-                        <option value="pomeriggio">Pomeriggio</option>
-                      </select>
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
           </div>
         </div>
@@ -384,7 +384,7 @@ export default function NuovaSpedizioneCliente() {
                 </div>
                 {colli.map((c,i)=>(
                   <div key={i} style={{display:'grid',gridTemplateColumns:'32px 1fr 1fr 1fr',gap:'6px',marginBottom:'6px',alignItems:'center'}}>
-                    <div style={{fontSize:'12px',color:'#999',fontWeight:'600',textAlign:'center'}}>📦{i+1}</div>
+                    <div style={{fontSize:'12px',color:'#999',fontWeight:'600',textAlign:'center'}}>{i+1}</div>
                     <input type="number" value={c.lunghezza} placeholder="es. 30"
                       onChange={e=>aggiornaCollo(i,'lunghezza',e.target.value)} style={inp}/>
                     <input type="number" value={c.larghezza} placeholder="es. 20"
