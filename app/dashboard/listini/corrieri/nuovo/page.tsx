@@ -37,7 +37,8 @@ function buildFasceInit(fasceEsistenti: any[]): Fascia[] {
     const kg = String(Number(f.peso_max))
     const tipo = f.tipo === 'oltre' ? 'oltre' : 'fino_a'
     const key = `${tipo}_${kg}`
-    if (!map.has(key)) map.set(key, { tipo, kg, prezzi: {}, fuel: '0' })
+    if (!map.has(key)) map.set(key, { tipo, kg, prezzi: {}, fuel: String(f.fuel ?? '0') })
+    if (f.fuel != null && Number(f.fuel) > 0) map.get(key)!.fuel = String(f.fuel)
     const zonaId = f.zona_id || 'MULTI'
     if (zonaId !== 'MULTI') map.get(key)!.prezzi[zonaId] = String(f.prezzo ?? '')
   }
@@ -198,7 +199,7 @@ export default function ListinoCorrierePage() {
       for (const [zona_id, prezzo] of Object.entries(f.prezzi)) {
         const p = parseFloat(String(prezzo))
         if (p > 0) {
-          fasceArr.push({ zona_id, peso_min: 0, peso_max, prezzo: p, tipo: f.tipo })
+          fasceArr.push({ zona_id, peso_min: 0, peso_max, prezzo: p, tipo: f.tipo, fuel: parseFloat(f.fuel) || 0 })
         }
       }
     }

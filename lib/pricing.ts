@@ -144,7 +144,8 @@ export async function calcolaPrezzoListino(
     const pesoPerFascia = usaPesoReale ? pesoReale : pesoFatturato
     const fascia = trovaFascia(fasceDelCorriere, pesoPerFascia)
     if (!fascia) continue
-    const prezzo = Number(fascia.prezzo)
+    const _fuelPct = Number((fascia as any).fuel) || 0
+    const prezzo = Number(fascia.prezzo) * (1 + _fuelPct / 100)
     if (!isFinite(prezzo)) continue
     if (!miglior || prezzo < miglior.prezzo) {
       miglior = { prezzo, corriereId: cId, pesoMax: parseFloat(fascia.peso_max) }
@@ -261,16 +262,20 @@ export async function calcolaPrezzoCorriere(
   const oltre = fasceZona.find((f: any) => f.tipo === 'oltre')
   let prezzo = 0
   let trovata = false
+  let fuelPct = 0
   for (const f of finoA) {
-    if (pesoFatturato <= parseFloat(f.peso_max)) { prezzo = parseFloat(f.prezzo); trovata = true; break }
+    if (pesoFatturato <= parseFloat(f.peso_max)) { prezzo = parseFloat(f.prezzo); fuelPct = Number(f.fuel) || 0; trovata = true; break }
   }
   if (!trovata) {
     if (oltre && finoA.length) {
       const ultima = finoA[finoA.length - 1]
       const kgExtra = pesoFatturato - parseFloat(ultima.peso_max)
       prezzo = parseFloat(ultima.prezzo) + Math.ceil(kgExtra / parseFloat(oltre.peso_max)) * parseFloat(oltre.prezzo)
+      fuelPct = Number(ultima.fuel) || 0
     } else return null   // peso oltre l'ultima fascia e nessuna "oltre": nessun prezzo
   }
+  // Fuel %: supplemento percentuale sul nolo di fascia.
+  if (fuelPct) prezzo = prezzo * (1 + fuelPct / 100)
 
   const { data: suppl } = await supabase
     .from('listini_corrieri_supplementi')
@@ -391,7 +396,7 @@ export async function creaCalcolatoreCorriere(
   }
 
   const { data: fasce } = listinoIds.length
-    ? await supabase.from('listini_corrieri_fasce').select('listino_id,peso_max,prezzo,tipo,zona_id,zone(id,nome)').in('listino_id', listinoIds)
+    ? await supabase.from('listini_corrieri_fasce').select('listino_id,peso_max,prezzo,tipo,zona_id,fuel,zone(id,nome)').in('listino_id', listinoIds)
     : { data: [] }
   const fascePerListino = new Map<string, any[]>()
   for (const f of fasce || []) {
@@ -451,14 +456,16 @@ export async function creaCalcolatoreCorriere(
 
     const finoA = fz.filter((f: any) => f.tipo !== 'oltre').sort((a: any, b: any) => a.peso_max - b.peso_max)
     const oltre = fz.find((f: any) => f.tipo === 'oltre')
-    let prezzo = 0, trovata = false
-    for (const f of finoA) { if (pesoFatturato <= parseFloat(f.peso_max)) { prezzo = parseFloat(f.prezzo); trovata = true; break } }
+    let prezzo = 0, trovata = false, fuelPct = 0
+    for (const f of finoA) { if (pesoFatturato <= parseFloat(f.peso_max)) { prezzo = parseFloat(f.prezzo); fuelPct = Number(f.fuel) || 0; trovata = true; break } }
     if (!trovata) {
       if (oltre && finoA.length) {
         const u = finoA[finoA.length - 1]
         prezzo = parseFloat(u.prezzo) + Math.ceil((pesoFatturato - parseFloat(u.peso_max)) / parseFloat(oltre.peso_max)) * parseFloat(oltre.prezzo)
+        fuelPct = Number(u.fuel) || 0
       } else return null   // peso oltre l'ultima fascia e nessuna "oltre": nessun prezzo
     }
+    if (fuelPct) prezzo = prezzo * (1 + fuelPct / 100)
 
     const nolo = prezzo
     const supplList = supplPerListino.get(lc.id) || []
@@ -506,7 +513,7 @@ export async function creaCalcolatoreListinoCliente(
   const soloPesoReale = !!listino?.solo_peso_reale
 
   const { data: fasce } = await supabase
-    .from('listini_clienti_fasce').select('corriere_id,zona_id,peso_max,prezzo,tipo,zone(id,nome)')
+    .from('listini_clienti_fasce').select('corriere_id,zona_id,peso_max,prezzo,tipo,fuel,zone(id,nome)')
     .eq('listino_id', listinoId)
   const fascePerCorriere = new Map<string, any[]>()
   for (const f of fasce || []) {
@@ -563,14 +570,16 @@ export async function creaCalcolatoreListinoCliente(
 
     const finoA = fz.filter((f: any) => f.tipo !== 'oltre').sort((a: any, b: any) => a.peso_max - b.peso_max)
     const oltre = fz.find((f: any) => f.tipo === 'oltre')
-    let prezzo = 0, trovata = false
-    for (const f of finoA) { if (pesoFatturato <= parseFloat(f.peso_max)) { prezzo = parseFloat(f.prezzo); trovata = true; break } }
+    let prezzo = 0, trovata = false, fuelPct = 0
+    for (const f of finoA) { if (pesoFatturato <= parseFloat(f.peso_max)) { prezzo = parseFloat(f.prezzo); fuelPct = Number(f.fuel) || 0; trovata = true; break } }
     if (!trovata) {
       if (oltre && finoA.length) {
         const u = finoA[finoA.length - 1]
         prezzo = parseFloat(u.prezzo) + Math.ceil((pesoFatturato - parseFloat(u.peso_max)) / parseFloat(oltre.peso_max)) * parseFloat(oltre.prezzo)
+        fuelPct = Number(u.fuel) || 0
       } else return null   // peso oltre l'ultima fascia e nessuna "oltre": nessun prezzo
     }
+    if (fuelPct) prezzo = prezzo * (1 + fuelPct / 100)
 
     const supplList = supplPerCorriere.get(s.corriere_id) || []
     const cod = Number(s.contrassegno) || 0, ass = Number(s.assicurazione) || 0

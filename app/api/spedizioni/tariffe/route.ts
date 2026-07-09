@@ -419,18 +419,23 @@ export async function POST(req: NextRequest) {
     if (calcolaAssicurazione(corriereId, Number(fasciaGiusta.prezzo)) === null) { if (assicImporto > 0) esclusiAssic++; continue }
 
     // Sponda e peso fatturato usano il peso EFFETTIVO (reale se agevolazione attiva ed entro misure, altrimenti volumetrico).
+    const nolo = Number(fasciaGiusta.prezzo)
+    const fuelPct = Number((fasciaGiusta as any).fuel) || 0
+    const costoFuel = nolo * fuelPct / 100
     const sponda = calcolaSponda(corriereId, pesoPerFascia)
-    const prezzoSped = Number(fasciaGiusta.prezzo) + sponda
+    const prezzoSped = nolo + costoFuel + sponda
     risultati.push({
       carrierCode: corriere?.tipo || 'sda',
       contractCode: '',
-      weight_price: Number(fasciaGiusta.prezzo).toFixed(2),
+      weight_price: nolo.toFixed(2),
       prezzo_spedizione: prezzoSped.toFixed(2),
       costo_sponda: sponda.toFixed(2),
+      costo_fuel: costoFuel.toFixed(2),
+      fuel_pct: fuelPct,
       costo_contrassegno: (calcolaContrassegno(corriereId, prezzoSped) ?? 0).toFixed(2),
       costo_assicurazione: (calcolaAssicurazione(corriereId, prezzoSped) ?? 0).toFixed(2),
       total_price: (prezzoSped + (calcolaContrassegno(corriereId, prezzoSped) ?? 0) + (calcolaAssicurazione(corriereId, prezzoSped) ?? 0)).toFixed(2),
-      fuel: '0.00',
+      fuel: costoFuel.toFixed(2),
       zona: isEstero ? (PAESI[paeseDest] || paeseDest) : ((fasciaGiusta as any)?.zone?.nome || zonaNome),
       peso_reale: pesoReale,
       peso_volume: pesoVolume.toFixed(2),

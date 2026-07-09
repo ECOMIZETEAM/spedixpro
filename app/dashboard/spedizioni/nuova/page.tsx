@@ -21,7 +21,7 @@ function iconaCorriere(nome:string): string | null {
 }
 
 interface Cliente { id:string; ragione_sociale:string; so_indirizzo:string|null;so_citta:string|null; so_provincia:string|null; so_cap:string|null; email:string; telefono:string|null }
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string;zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; corriere_nome?:string; prezzo_spedizione?:string; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; _corriere_id?:string; _corriere_tipo?:string; _spediamopro_quotation?:any }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string;zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; corriere_nome?:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; _corriere_id?:string; _corriere_tipo?:string; _spediamopro_quotation?:any }
 interface Collo { lunghezza:string; larghezza:string; altezza:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -545,7 +545,9 @@ export default function NuovaSpedizionePage() {
                 </div>
                 <div style={{fontSize:'15px',fontWeight:'700',color:'#1a1a1a',marginBottom:'8px'}}>Costi</div>
                 <div style={{border:'1px solid #000',borderRadius:'8px',overflow:'hidden',marginBottom:'14px'}}>
-                  <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',background:'#fff',fontSize:'13px',color:'#000'}}><span>Costo spedizione</span><span>€ {selected.prezzo_spedizione||selected.total_price}</span></div>
+                  <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',background:'#fff',fontSize:'13px',color:'#000'}}><span>Nolo</span><span>€ {selected.weight_price||selected.prezzo_spedizione||selected.total_price}</span></div>
+                  {Number(selected.costo_fuel||0)>0 && <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',fontSize:'13px',color:'#000'}}><span>Fuel{selected.fuel_pct?` (${selected.fuel_pct}%)`:''}</span><span>€ {selected.costo_fuel}</span></div>}
+                  {Number(selected.costo_sponda||0)>0 && <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',background:'#fff',fontSize:'13px',color:'#000'}}><span>Sponda</span><span>€ {selected.costo_sponda}</span></div>}
                   {Number(selected.costo_contrassegno||0)>0 && <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',fontSize:'13px',color:'#000'}}><span>Costo Contrassegno</span><span>€ {selected.costo_contrassegno}</span></div>}
                   {Number(selected.costo_assicurazione||0)>0 && <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',background:'#fff',fontSize:'13px',color:'#000'}}><span>Costo Assicurazione</span><span>€ {selected.costo_assicurazione}</span></div>}
                   {extraScelti.map((e,i)=>(<div key={i} style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',fontSize:'13px',color:'#000'}}><span>{e.nome}</span><span>€ {e.importo.toFixed(2)}</span></div>))}

@@ -5,7 +5,7 @@ import { setFlash } from '@/lib/flash'
 
 interface Zona { id: string; nome: string }
 interface Corriere { id: string; nome_contratto: string }
-interface Fascia { tipo: 'fino_a' | 'oltre'; peso: number; prezzi: Record<string, string> }
+interface Fascia { tipo: 'fino_a' | 'oltre'; peso: number; prezzi: Record<string, string>; fuel?: string }
 interface Props {
   listino: any; corrieri: Corriere[]; zone: Zona[]
   fasceEsistenti: any[]; clientiAssegnati: any[]; tipoListino: string
@@ -24,13 +24,14 @@ const fattori = [
 ]
 
 function buildFasceInit(fasceEsistenti: any[]): Fascia[] {
-  if (!fasceEsistenti?.length) return [2,5,10,20,30,50].map(p => ({ tipo:'fino_a', peso:p, prezzi:{} }))
+  if (!fasceEsistenti?.length) return [2,5,10,20,30,50].map(p => ({ tipo:'fino_a', peso:p, prezzi:{}, fuel:'' }))
   const map = new Map<string, Fascia>()
   for (const f of fasceEsistenti) {
     const peso = Number(f.peso_max); if (isNaN(peso)) continue
     const tipo = f.tipo === 'oltre' ? 'oltre' : 'fino_a'
     const key = `${tipo}_${peso}`
-    if (!map.has(key)) map.set(key, { tipo, peso, prezzi: {} })
+    if (!map.has(key)) map.set(key, { tipo, peso, prezzi: {}, fuel: String(f.fuel ?? '') })
+    if (f.fuel != null && Number(f.fuel) > 0) map.get(key)!.fuel = String(f.fuel)
     map.get(key)!.prezzi[f.zona_id] = String(f.prezzo ?? '')
   }
   return Array.from(map.values()).sort((a,b) => {
@@ -153,7 +154,8 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     return r ? Number(r.valore) || 0 : 0
   })
 
-  function aggiungiFascia() { setFasce(prev => [...prev, { tipo:'fino_a', peso:0, prezzi:{} }]) }
+  function aggiungiFascia() { setFasce(prev => [...prev, { tipo:'fino_a', peso:0, prezzi:{}, fuel:'' }]) }
+  function aggiornaFuel(idx: number, raw: string) { setFasce(prev => prev.map((f,i) => i===idx ? {...f, fuel: raw} : f)) }
   function rimuoviFascia(idx: number) { setFasce(prev => prev.filter((_,i) => i !== idx)) }
   function aggiornaTipo(idx: number, tipo: 'fino_a'|'oltre') { setFasce(prev => prev.map((f,i) => i===idx ? {...f, tipo} : f)) }
   function aggiornaPeso(idx: number, raw: string) { const peso = parseFloat(raw); setFasce(prev => prev.map((f,i) => i===idx ? {...f, peso: isNaN(peso)?0:peso} : f)) }
@@ -240,6 +242,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
                       {z.nome} €
                     </th>
                   ))}
+                  <th style={{padding:'9px 8px',textAlign:'center' as const,fontWeight:'600',color:'#1a1a1a',fontSize:'11.5px',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>Fuel %</th>
                   <th style={{padding:'9px 8px',borderBottom:'1px solid #d1d5db',width:'32px'}}></th>
                 </tr>
               </thead>
@@ -261,6 +264,9 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
                         <input type="number" value={fascia.prezzi[z.id]??''} onChange={e=>aggiornaPrezzo(idx,z.id,e.target.value)} placeholder="0.00" min="0" step="0.01" style={{...inp,width:'72px',textAlign:'right' as const}}/>
                       </td>
                     ))}
+                    <td style={{padding:'6px 6px',textAlign:'center' as const}}>
+                      <input type="number" value={fascia.fuel??''} onChange={e=>aggiornaFuel(idx,e.target.value)} placeholder="0" min="0" step="0.01" style={{...inp,width:'60px',textAlign:'right' as const}}/>
+                    </td>
                     <td style={{padding:'6px 8px',textAlign:'center' as const}}>
                       <button onClick={()=>rimuoviFascia(idx)} style={{width:'22px',height:'22px',borderRadius:'50%',background:'#fef2f2',border:'1px solid #fecaca',color:'#dc2626',cursor:'pointer',fontSize:'14px',display:'inline-flex',alignItems:'center',justifyContent:'center'}}>−</button>
                     </td>

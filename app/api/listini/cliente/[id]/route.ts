@@ -33,6 +33,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
           peso_max: fascia.peso,
           prezzo: Number(prezzo),
           tipo: fascia.tipo,
+          fuel: Number(fascia.fuel) || 0,
         })
       }
     }
