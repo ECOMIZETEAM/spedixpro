@@ -53,10 +53,27 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const targetId = id.slice(2)
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const admin = createAdminSupabase()
-    const { data: m } = await admin.from('masters').select('id,parent_master_id').eq('id', targetId).single()
+    const { data: m } = await admin.from('masters').select('id,parent_master_id,email').eq('id', targetId).single()
     if (!m || m.parent_master_id !== utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
     // Aggiorno solo i campi presenti nel body (così Anagrafica e Impostazioni non si sovrascrivono a vicenda)
     const upd: any = {}
+    // Cambio email di accesso del sotto-master (login = email su auth + utenti + masters)
+    const emVecchia = ((m as any).email || '').trim().toLowerCase()
+    const emNuova = (datiCliente.email || '').trim().toLowerCase()
+    if (emNuova && emNuova !== emVecchia) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emNuova)) return NextResponse.json({ error: 'Email non valida' }, { status: 400 })
+      const { data: giaUsata } = await admin.from('utenti').select('id,master_id').eq('email', emNuova).maybeSingle()
+      if (giaUsata && giaUsata.master_id !== targetId) return NextResponse.json({ error: 'Questa email è già usata da un altro account' }, { status: 409 })
+      const { data: uSub } = await admin.from('utenti').select('id').eq('master_id', targetId).eq('email', emVecchia)
+      let authErr: string | null = null
+      for (const u of (uSub || [])) {
+        const { error: e } = await admin.auth.admin.updateUserById((u as any).id, { email: emNuova, email_confirm: true })
+        if (e) authErr = e.message
+        else await admin.from('utenti').update({ email: emNuova }).eq('id', (u as any).id)
+      }
+      if (authErr) return NextResponse.json({ error: 'Impossibile aggiornare l\'email di accesso: ' + authErr }, { status: 400 })
+      upd.email = emNuova
+    }
     if (datiCliente.ragione_sociale !== undefined) upd.nome = datiCliente.ragione_sociale
     if (datiCliente.telefono !== undefined) upd.telefono = datiCliente.telefono || null
     if (datiCliente.piva !== undefined) upd.piva = datiCliente.piva || null
@@ -113,6 +130,33 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     updated_at: new Date().toISOString(),
   }
   if (datiCliente.impostazioni !== undefined) aggiornamento.impostazioni =datiCliente.impostazioni
+
+  // ── Cambio email di accesso (login) ────────────────────────────────
+  // L'email è anche lo username di login: se cambia va aggiornata su auth + utenti + clienti.
+  const { data: cliCorr } = await supabase.from('clienti').select('email').eq('id', id).eq('master_id', utente?.master_id).maybeSingle()
+  if (!cliCorr) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 404 })
+  const emailVecchia = (cliCorr.email || '').trim().toLowerCase()
+  const emailNuova = (datiCliente.email || '').trim().toLowerCase()
+  const cambioEmail = !!emailNuova && emailNuova !== emailVecchia
+  if (cambioEmail) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNuova)) return NextResponse.json({ error: 'Email non valida' }, { status: 400 })
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    // Non deve essere già usata da un altro account
+    const { data: giaUsata } = await admin.from('utenti').select('id,cliente_id').eq('email', emailNuova).maybeSingle()
+    if (giaUsata && giaUsata.cliente_id !== id) return NextResponse.json({ error: 'Questa email è già usata da un altro account' }, { status: 409 })
+    // Aggiorno l'utente auth collegato al cliente
+    const { data: uCli } = await admin.from('utenti').select('id').eq('cliente_id', id)
+    let authErr: string | null = null
+    for (const u of (uCli || [])) {
+      const { error: e } = await admin.auth.admin.updateUserById((u as any).id, { email: emailNuova, email_confirm: true })
+      if (e) authErr = e.message
+      else await admin.from('utenti').update({ email: emailNuova }).eq('id', (u as any).id)
+    }
+    if (authErr) return NextResponse.json({ error: 'Impossibile aggiornare l\'email di accesso: ' + authErr }, { status: 400 })
+    aggiornamento.email = emailNuova
+  }
+
   const { data: cliente, error } = await supabase.from('clienti').update(aggiornamento)
     .eq('id', id).eq('master_id', utente?.master_id).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
@@ -127,7 +171,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (userToReset) {
         await adminClient.auth.admin.updateUserById(userToReset.id, { password: newPassword })
         const { inviaCredenzialiCliente } = await import('@/lib/email')
-        await inviaCredenzialiCliente({ email: cliente.email, nomeCliente:cliente.ragione_sociale, masterNome: 'MoovExpress', dominio: 'spedixpro.vercel.app', password: newPassword })
+        await inviaCredenzialiCliente({ email: cliente.email, nomeCliente:cliente.ragione_sociale, masterNome: 'MoovExpress', dominio: 'moovexpress.com', password: newPassword })
       }
     } catch(e) { console.error('Reset password error:', e) }
   }

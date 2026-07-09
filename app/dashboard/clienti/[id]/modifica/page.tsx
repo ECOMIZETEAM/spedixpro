@@ -186,10 +186,12 @@ export default function ModificaClientePage() {
           <div style={sec}>
             <div style={sech}>Email Login Cliente</div>
             <div style={{padding:'16px',display:'flex',flexDirection:'column',gap:'12px'}}>
-              <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px 12px',fontSize:'12px',color:'#ea580c',lineHeight:1.5}}>
-                L&apos;email di accesso non è modificabile da qui. Per cambiare la password usa la sezione Sicurezza qui sotto.
-              </div>
-              <div><label style={lbl}>Email</label><input value={form.email||''} disabled style={{...inp,background:'#f5f5f5',color:'#666'}}/></div>
+              <div><label style={lbl}>Email di accesso</label><input type="email" value={form.email||''} onChange={e=>set('email',e.target.value)} placeholder="cliente@esempio.it" style={inp}/></div>
+              {(form.email||'').trim().toLowerCase() !== (cliente.email||'').trim().toLowerCase() && (
+                <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px 12px',fontSize:'12px',color:'#ea580c',lineHeight:1.5}}>
+                  Stai cambiando l&apos;email di accesso: al salvataggio il cliente dovrà usare la nuova email <b>{form.email}</b> per entrare. La password resta invariata (a meno che tu non la resetti qui sotto).
+                </div>
+              )}
             </div>
           </div>
 
@@ -251,7 +253,7 @@ export default function ModificaClientePage() {
           </div>
 
           <div style={sec}>
-            <div style={sech}>🔐 Sicurezza</div>
+            <div style={sech}>Sicurezza</div>
             <div style={{padding:'16px'}}>
               <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>
                 <input type="checkbox" checked={resetPassword} onChange={e=>setResetPassword(e.target.checked)} />
