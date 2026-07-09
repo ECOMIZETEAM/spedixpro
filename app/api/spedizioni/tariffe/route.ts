@@ -83,6 +83,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Nessun listino corrieri (con prezzi) assegnato al master → niente tariffe.
+    if (!corrieriDaQuotare.length) return NextResponse.json({ error: 'Nessun contratto attivo' }, { status: 400 })
+
     const risultati: any[] = []
     for (const lc of corrieriDaQuotare) {
       const corr: any = (lc as any).corrieri
@@ -308,26 +311,10 @@ export async function POST(req: NextRequest) {
     return null
   }
 
-  // ─── NESSUN LISTINO → tariffe live dal primo corriere disponibile ────────
+  // ─── NESSUN LISTINO ASSEGNATO → nessun prezzo, nessun corriere ───────────
+  // Finché non gli viene assegnato un listino con i suoi prezzi, non deve vedere tariffe.
   if (!cliente.listino_cliente_id) {
-    const { data: corrieri } = await supabase
-      .from('corrieri').select('id,tipo,credenziali,nome_contratto')
-      .eq('master_id', masterId)
-
-    if (!corrieri?.length) return NextResponse.json({ error: 'Nessun corriere configurato' }, { status: 400 })
-
-    const corriere = corrieri.find(c => c.tipo === 'spedisci') || corrieri[0]
-    const quote = await quotaCorriere(corriere, pesoReale)
-    if (!quote) return NextResponse.json({ error: 'Nessuna tariffa dal corriere' }, { status: 400 })
-
-    return NextResponse.json([{
-      carrierCode: quote.carrierCode, contractCode: quote.contractCode,
-      weight_price: quote.weight_price, total_price: quote.total_price,
-      fuel: '0.00', zona: isEstero ? (PAESI[paeseDest] || paeseDest) : zonaNome, peso_reale: pesoReale,
-      peso_volume: '0.00', peso_fatturato: pesoReale.toFixed(2),
-      corriere_nome: corriere.nome_contratto, listino_fascia: 'Tariffa live',
-      _spediamopro_quotation: quote._spediamopro_quotation,
-    }])
+    return NextResponse.json({ error: 'Nessun contratto attivo' }, { status: 400 })
   }
 
   // ─── LISTINO CLIENTE → prezzo da DB + corriere reale da fascia ───────────

@@ -57,6 +57,8 @@ export async function POST(req: NextRequest) {
     cliente = data
     if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
     if (utente?.ruolo === 'cliente' && cliente.vieta_inserimento === true) return NextResponse.json({ error: 'Inserimento spedizioni non consentito per questo cliente.' }, { status: 403 })
+    // Niente listino assegnato = niente contratto: non si può spedire.
+    if (!cliente.listino_cliente_id) return NextResponse.json({ error: 'Nessun contratto attivo' }, { status: 400 })
   }
 
   // ── Blocco credito insufficiente (clienti/sotto-master "credito a scalare") ──
