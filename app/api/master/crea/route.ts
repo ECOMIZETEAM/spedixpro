@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
     parent_listino_id: parentListinoId,
     tipo_contratto: tipoContratto,
     is_super_master: false,
+    gestione_rete: true,   // ogni master può creare/gestire la propria rete (gerarchia)
     attivo: true,
   }).select().single()
 
