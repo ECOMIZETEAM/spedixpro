@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
     provincia: body.shipTo.state, packages, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
     corriereNome: corriere.nome_contratto,
   })
-  if (!catena.ok) return NextResponse.json({ error: catena.errore }, { status: 402 })
+  if (!catena.ok) return NextResponse.json({ error: 'Credito insufficiente' }, { status: 402 })
 
   let numero = '', costoCorrente = 0, etichettaUrl: string | null = null, raw: any = null
 
