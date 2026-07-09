@@ -79,6 +79,55 @@ function generaPassword(len = 10): string {
   return 'Mv' + Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
 }
 
+// Reimposta password (+ resend credenziali) e/o cambia email di un account staff
+export async function PUT(req: NextRequest) {
+  const supabase = await createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
+  const { data: me } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  if (!me?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
+
+  const body = await req.json()
+  const { id, resetPassword, nuova_email } = body
+  if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
+
+  const admin = createAdminSupabase()
+  // Dev'essere uno staff del mio master
+  const { data: st } = await supabase.from('utenti').select('id,nome,master_id').eq('id', id).eq('master_id', me.master_id).maybeSingle()
+  if (!st) return NextResponse.json({ error: 'Account non trovato' }, { status: 404 })
+
+  // Email attuale (da auth)
+  let emailAttuale = ''
+  try { const { data: au } = await admin.auth.admin.getUserById(id); emailAttuale = au?.user?.email || '' } catch {}
+
+  // Cambio email di accesso
+  const emailNuova = (nuova_email || '').trim().toLowerCase()
+  if (emailNuova && emailNuova !== emailAttuale.toLowerCase()) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNuova)) return NextResponse.json({ error: 'Email non valida' }, { status: 400 })
+    const { error: eEm } = await admin.auth.admin.updateUserById(id, { email: emailNuova, email_confirm: true })
+    if (eEm) return NextResponse.json({ error: 'Impossibile aggiornare l\'email: ' + eEm.message }, { status: 400 })
+    emailAttuale = emailNuova
+  }
+
+  // Reset password + invio credenziali
+  let passwordImpostata: string | undefined
+  if (resetPassword) {
+    const password = generaPassword()
+    const { error: ePw } = await admin.auth.admin.updateUserById(id, { password })
+    if (ePw) return NextResponse.json({ error: 'Impossibile reimpostare la password: ' + ePw.message }, { status: 400 })
+    passwordImpostata = password
+    if (emailAttuale) {
+      try {
+        const { data: masterRec } = await admin.from('masters').select('nome').eq('id', me.master_id).single()
+        const { inviaCredenzialiCliente } = await import('@/lib/email')
+        await inviaCredenzialiCliente({ email: emailAttuale, nomeCliente: (st as any).nome || 'Collaboratore', masterNome: masterRec?.nome || 'MoovExpress', dominio: 'moovexpress.com', password })
+      } catch (e) { console.error('Errore invio credenziali staff (reset):', e) }
+    }
+  }
+
+  return NextResponse.json({ success: true, email: emailAttuale, ...(passwordImpostata ? { password: passwordImpostata } : {}) })
+}
+
 export async function DELETE(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
