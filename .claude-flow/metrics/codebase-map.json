@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-07-09T15:42:04.221Z",
+  "timestamp": "2026-07-09T17:39:17.180Z",
   "projectRoot": "/Users/lorenzoantonelli/Desktop/spedixpro",
   "structure": {
     "hasPackageJson": true,
@@ -7,5 +7,5 @@
     "hasClaudeConfig": true,
     "hasClaudeFlow": true
   },
-  "scannedAt": 1783611724221
+  "scannedAt": 1783618757180
 }

@@ -456,10 +456,14 @@ export async function POST(req: NextRequest) {
     if (esclusiFascia > 0) return NextResponse.json({ error: `Peso fatturato ${pf}kg (reale ${pesoReale.toFixed(2)}kg / volume ${pesoVolume.toFixed(2)}kg) oltre l'ultima fascia del listino. Aggiungi una fascia "oltre X ogni" nel listino per coprire i pesi/misure maggiori.` }, { status: 400 })
     if (esclusiMisura > 0) return NextResponse.json({ error: `Le misure del collo superano le misure massime consentite dal corriere per questo peso (Impostazioni corriere → Misure massime).` }, { status: 400 })
     if (esclusiQuota > 0) {
-      const dett = /province|provincia|state/i.test(ultimoErroreQuota)
+      // Messaggio pulito: mai il testo grezzo/nome del provider.
+      const t = (ultimoErroreQuota || '').toLowerCase()
+      const dett = /province|provincia|state/.test(t)
         ? ' Manca la PROVINCIA del mittente o del destinatario: completa l\'indirizzo (provincia obbligatoria per l\'Italia).'
-        : ultimoErroreQuota ? ` Dettaglio corriere: ${ultimoErroreQuota.slice(0, 200)}` : ''
-      return NextResponse.json({ error: `Il corriere ha rifiutato la spedizione (${pf}kg).${dett}` }, { status: 400 })
+        : /dimension|misur|measure|size|volume|lato|length|width|height|weight|peso|oversiz/.test(t)
+        ? ' Il collo è fuori misura o troppo pesante per questo corriere: verifica misure e peso.'
+        : ' Verifica misure, peso e indirizzo, oppure scegli un altro corriere.'
+      return NextResponse.json({ error: `Il corriere non può gestire questa spedizione (${pf}kg).${dett}` }, { status: 400 })
     }
     if (esclusiContrassegno > 0) return NextResponse.json({ error: 'Nessun corriere disponibile per il contrassegno richiesto: configura la tariffa contrassegno sul listino (tab Contrassegni) o riduci l\'importo.' }, { status: 400 })
     if (esclusiAssic > 0) return NextResponse.json({ error: 'Nessun corriere disponibile per l\'assicurazione richiesta: configura la tariffa assicurazione sul listino o riduci il valore.' }, { status: 400 })

@@ -12,6 +12,17 @@ import {
   kgToGrams, cmToMm, euroToCents, centsToEuro
 } from '@/lib/spediamopro'
 
+// Messaggio pulito quando il corriere rifiuta la spedizione: MAI il nome del provider
+// (SpediamoPro/Spedisci.online) né il testo grezzo dell'API. Deduce la causa dai keyword.
+function erroreCorrierePulito(raw: any): string {
+  const t = String(raw || '').toLowerCase()
+  if (/dimension|misur|measure|\bsize\b|volume|lato|length|width|height|weight|\bpeso\b|\bkg\b|oversiz|too (large|big|heavy)/.test(t))
+    return 'Collo non ammesso dal corriere: verifica misure e peso (potrebbe essere fuori misura).'
+  if (/provinc|state|postal|\bzip\b|address|indiriz|\bcap\b/.test(t))
+    return 'Indirizzo non valido: controlla provincia, CAP e indirizzo di mittente e destinatario.'
+  return 'Il corriere non può gestire questa spedizione: verifica misure, peso e indirizzo, oppure scegli un altro corriere.'
+}
+
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -260,7 +271,7 @@ export async function POST(req: NextRequest) {
     const text = await res.text()
     let r: any
     try { r = JSON.parse(text) } catch { r = { error: text } }
-    if (!res.ok || r.error) return NextResponse.json({ error: r?.error || text }, { status: 400 })
+    if (!res.ok || r.error) return NextResponse.json({ error: erroreCorrierePulito(r?.error || text) }, { status: 400 })
 
     const numero = r.trackingNumber
     const costoCliente = isProprio ? costoMaster : (parseFloat(body.totalPrice) || parseFloat(r.shipmentCost) || 0)
@@ -460,7 +471,7 @@ export async function POST(req: NextRequest) {
       })
     } catch (err: any) {
       console.error('SpediamoPro error:', err)
-      return NextResponse.json({ error: err.message || 'Errore SpediamoPro' }, { status: 400 })
+      return NextResponse.json({ error: erroreCorrierePulito(err?.message) }, { status: 400 })
     }
   }
 
