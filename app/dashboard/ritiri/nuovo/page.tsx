@@ -90,12 +90,66 @@ export default function NuovoRitiroPage() {
         <p style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>Seleziona le spedizioni pronte e richiedi il ritiro al corriere</p>
       </div>
 
-      {errore && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '10px 14px', marginBottom: '16px', fontSize: '13px', color: '#dc2626' }}>⚠️ {errore}</div>}
+      {errore && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '10px 14px', marginBottom: '16px', fontSize: '13px', color: '#dc2626' }}>{errore}</div>}
 
-      <div style={{ maxWidth: '780px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', alignItems: 'start' }}>
 
+        {/* SINISTRA: dati mittente + data/orario + invio */}
+        <div>
+          <div style={card}>
+            <div style={cardTitle}>Dati Mittente</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
+              <div><label style={lbl}>Rif. Mittente *</label><input value={mittNome} onChange={e => setMittNome(e.target.value)} style={inp} /></div>
+              <div><label style={lbl}>Telefono</label><input value={mittTelefono} onChange={e => setMittTelefono(e.target.value)} style={inp} /></div>
+            </div>
+            <div style={{ marginBottom: '14px' }}>
+              <label style={lbl}>Indirizzo *</label>
+              <input value={mittIndirizzo} onChange={e => setMittIndirizzo(e.target.value)} style={inp} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '14px' }}>
+              <div><label style={lbl}>Città *</label><input value={mittCitta} onChange={e => setMittCitta(e.target.value)} style={inp} /></div>
+              <div><label style={lbl}>Provincia</label><input value={mittProvincia} onChange={e => setMittProvincia(e.target.value)} style={inp} /></div>
+              <div><label style={lbl}>CAP *</label><input value={mittCap} onChange={e => setMittCap(e.target.value)} style={inp} /></div>
+            </div>
+          </div>
+
+          <div style={card}>
+            <div style={cardTitle}>Data e Orario Ritiro</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
+              <div>
+                <label style={lbl}>Data Ritiro *</label>
+                <input type="date" value={dataRitiro} onChange={e => setDataRitiro(e.target.value)} style={inp} />
+                {dataRitiro && [0,6].includes(new Date(dataRitiro + 'T00:00:00').getDay()) && (
+                  <div style={{marginTop:'6px',fontSize:'12px',color:'#dc2626',fontWeight:'600'}}>Sabato e domenica i ritiri non sono disponibili. Scegli un giorno lavorativo.</div>
+                )}
+              </div>
+              <div>
+                <label style={lbl}>Fascia Orario</label>
+                <select value={orarioRitiro} onChange={e => setOrarioRitiro(e.target.value)} style={inp}>
+                  <option value="mattina">Mattina</option>
+                  <option value="pomeriggio">Pomeriggio</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ marginBottom: '14px' }}>
+              <label style={lbl}>Contenuto</label>
+              <input value={contenuto} onChange={e => setContenuto(e.target.value)} style={inp} placeholder="es. Materiale elettronico" />
+            </div>
+            <div>
+              <label style={lbl}>Istruzioni per il corriere</label>
+              <input value={istruzioni} onChange={e => setIstruzioni(e.target.value)} style={inp} placeholder="es. Suonare il citofono" />
+            </div>
+          </div>
+
+          <button onClick={creaRitiro} disabled={saving}
+            style={{ width: '100%', background: '#f97316', color: '#fff', border: 'none', padding: '12px 32px', borderRadius: '6px', fontSize: '13.5px', fontWeight: '700', cursor: 'pointer', opacity: saving ? 0.7 : 1 }}>
+            {saving ? 'Richiesta in corso...' : 'Richiedi Ritiro'}
+          </button>
+        </div>
+
+        {/* DESTRA: selezione LDV */}
         <div style={card}>
-          <div style={cardTitle}>📦 Seleziona Spedizioni da Ritirare ({selezionate.size} selezionate)</div>
+          <div style={cardTitle}>Seleziona spedizioni da ritirare ({selezionate.size} selezionate)</div>
           {loadingSped ? (
             <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>Caricamento spedizioni...</div>
           ) : !spedizioni.length ? (
@@ -103,71 +157,25 @@ export default function NuovoRitiroPage() {
               Nessuna spedizione in lavorazione da ritirare. Crea prima una spedizione.
             </div>
           ) : (
-            <div><div style={{ padding: '8px 4px' }}><input type="text" value={cercaLdv} onChange={e=>setCercaLdv(e.target.value)} placeholder="Cerca LDV / numero spedizione..." style={{ width: '100%', padding: '8px 11px', border: '1px solid #e8e8e8', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box', color: '#1a1a1a' }} /></div>
-              <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-              {spedizioni.filter(s => !cercaLdv || String(s.numero||'').toLowerCase().includes(cercaLdv.toLowerCase())).map(s => (
-                <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 4px', borderBottom: '1px solid #f5f5f5', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={selezionate.has(s.id)} onChange={() => toggleSpedizione(s.id)} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: '600', fontSize: '13px', color: '#1a1a1a' }}>{s.numero}</div>
-                    <div style={{ fontSize: '11px', color: '#999' }}>{s.dest_nome} → {s.dest_citta} · {s.colli} collo/i · {s.peso_reale}kg</div>
-                  </div>
-                </label>
-              ))}
-            </div>
+            <div>
+              <input type="text" value={cercaLdv} onChange={e=>setCercaLdv(e.target.value)} placeholder="Cerca LDV / numero spedizione..." style={{ ...inp, marginBottom: '8px' }} />
+              <div style={{ maxHeight: '520px', overflowY: 'auto' }}>
+                {spedizioni.filter(s => !cercaLdv || String(s.numero||'').toLowerCase().includes(cercaLdv.toLowerCase())).map(s => {
+                  const sel = selezionate.has(s.id)
+                  return (
+                    <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 8px', borderRadius: '6px', border: `1px solid ${sel ? '#fed7aa' : '#f0f0f0'}`, background: sel ? '#fff7ed' : '#fff', marginBottom: '6px', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={sel} onChange={() => toggleSpedizione(s.id)} style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: '600', fontSize: '13px', color: '#1a1a1a' }}>{s.numero}</div>
+                        <div style={{ fontSize: '11px', color: '#999' }}>{s.dest_nome} → {s.dest_citta} · {s.colli} collo/i · {s.peso_reale}kg</div>
+                      </div>
+                    </label>
+                  )
+                })}
+              </div>
             </div>
           )}
         </div>
-
-        <div style={card}>
-          <div style={cardTitle}>📍 Dati Mittente</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-            <div><label style={lbl}>Rif. Mittente *</label><input value={mittNome} onChange={e => setMittNome(e.target.value)} style={inp} /></div>
-            <div><label style={lbl}>Telefono</label><input value={mittTelefono} onChange={e => setMittTelefono(e.target.value)} style={inp} /></div>
-          </div>
-          <div style={{ marginBottom: '14px' }}>
-            <label style={lbl}>Indirizzo *</label>
-            <input value={mittIndirizzo} onChange={e => setMittIndirizzo(e.target.value)} style={inp} />
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '14px' }}>
-            <div><label style={lbl}>Città *</label><input value={mittCitta} onChange={e => setMittCitta(e.target.value)} style={inp} /></div>
-            <div><label style={lbl}>Provincia</label><input value={mittProvincia} onChange={e => setMittProvincia(e.target.value)} style={inp} /></div>
-            <div><label style={lbl}>CAP *</label><input value={mittCap} onChange={e => setMittCap(e.target.value)} style={inp} /></div>
-          </div>
-        </div>
-
-        <div style={card}>
-          <div style={cardTitle}>📅 Data e Orario Ritiro</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-            <div>
-              <label style={lbl}>Data Ritiro *</label>
-              <input type="date" value={dataRitiro} onChange={e => setDataRitiro(e.target.value)} style={inp} />
-              {dataRitiro && [0,6].includes(new Date(dataRitiro + 'T00:00:00').getDay()) && (
-                <div style={{marginTop:'6px',fontSize:'12px',color:'#dc2626',fontWeight:'600'}}>⚠️ Sabato e domenica i ritiri non sono disponibili. Scegli un giorno lavorativo.</div>
-              )}
-            </div>
-            <div>
-              <label style={lbl}>Fascia Orario</label>
-              <select value={orarioRitiro} onChange={e => setOrarioRitiro(e.target.value)} style={inp}>
-                <option value="mattina">Mattina</option>
-                <option value="pomeriggio">Pomeriggio</option>
-              </select>
-            </div>
-          </div>
-          <div style={{ marginBottom: '14px' }}>
-            <label style={lbl}>Contenuto</label>
-            <input value={contenuto} onChange={e => setContenuto(e.target.value)} style={inp} placeholder="es. Materiale elettronico" />
-          </div>
-          <div>
-            <label style={lbl}>Istruzioni per il corriere</label>
-            <input value={istruzioni} onChange={e => setIstruzioni(e.target.value)} style={inp} placeholder="es. Suonare il citofono" />
-          </div>
-        </div>
-
-        <button onClick={creaRitiro} disabled={saving}
-          style={{ background: '#f97316', color: '#fff', border: 'none', padding: '11px 32px', borderRadius: '6px', fontSize: '13.5px', fontWeight: '700', cursor: 'pointer', opacity: saving ? 0.7 : 1 }}>
-          {saving ? 'Richiesta in corso...' : '✓ Richiedi Ritiro'}
-        </button>
       </div>
     </div>
   )
