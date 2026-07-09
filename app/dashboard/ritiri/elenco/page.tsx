@@ -160,7 +160,10 @@ export default function ElencoRitiriPage() {
                   return (
                     <tr key={r.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                       <td style={{ padding: '10px 14px', fontWeight: '600', color: '#1a1a1a' }}>{r.cod_ritiro || r.tracking_ritiro || '-'}</td>
-                      <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>{r.clienti?.ragione_sociale || '-'}</td>
+                      <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>
+                        {r.clienti?.ragione_sociale || '-'}
+                        {r.master_rete && <div style={{ fontSize: '11px', color: '#4f46e5', fontWeight: 600 }}>▸ {r.master_rete}</div>}
+                      </td>
                       <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>{r.mitt_nome}</td>
                       <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>{r.colli}</td>
                       <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>{r.peso} kg</td>
