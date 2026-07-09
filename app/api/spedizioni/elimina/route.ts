@@ -43,28 +43,31 @@ export async function DELETE(req: NextRequest) {
   // Già annullata → idempotente
   if (sped.stato === 'annullata') return NextResponse.json({ success: true, already: true })
 
-  // ── ANNULLA SUL CORRIERE PRIMA di eliminare da Moove. Se fallisce, NON elimino (niente orfani lato corriere). ──
-  const { data: corr } = await admin.from('corrieri').select('tipo,credenziali,nome_contratto').eq('id', sped.corriere_id).maybeSingle()
+  // ── ANNULLA SUL CORRIERE PRIMA di eliminare da Moove. Se il corriere non la annulla
+  //    (es. già affidata/spedita), NON si elimina da Moove → nessun orfano lato corriere. ──
+  const { data: corr } = await admin.from('corrieri').select('tipo,credenziali,nome_contratto,master_id').eq('id', sped.corriere_id).maybeSingle()
   if (corr) {
     const cred: any = corr.credenziali || {}
     const raw: any = sped.raw_response || {}
     if (corr.tipo === 'spediamopro') {
-      const spid = raw.id || raw?.data?.id || raw?.raw?.data?.id
+      const spid = raw.id || raw?.shipmentId || raw?.data?.id || raw?.raw?.data?.id
       if (spid && cred.authcode) {
         const ok = await spediamoproCancelShipment(cred.authcode, Number(spid))
-        if (!ok) return NextResponse.json({ error: 'Impossibile annullare la spedizione sul corriere. Non è stata eliminata (potrebbe essere già spedita/consegnata). Riprova o verifica sul corriere.' }, { status: 409 })
+        if (!ok) return NextResponse.json({ error: 'Impossibile annullare la spedizione sul corriere (forse è già stata affidata/spedita). Non è stata eliminata: verifica sul corriere.' }, { status: 409 })
       }
     } else if (corr.tipo === 'spedisci') {
       const shipId = raw.shipmentId || raw.id
-      let ok = false
-      try {
-        const del = await fetch(`https://${cred.master_domain}/api/v2/shipping/delete`, {
-          method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ shipment_ids: [shipId] }),
-        })
-        ok = del.ok
-      } catch {}
-      if (!ok) return NextResponse.json({ error: 'Impossibile annullare la spedizione sul corriere. Non è stata eliminata (potrebbe essere già spedita/consegnata). Riprova o verifica sul corriere.' }, { status: 409 })
+      if (shipId && cred.master_domain) {
+        let ok = false
+        try {
+          const del = await fetch(`https://${cred.master_domain}/api/v2/shipping/delete`, {
+            method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ shipment_ids: [shipId], increment_id: shipId }),
+          })
+          ok = del.ok
+        } catch {}
+        if (!ok) return NextResponse.json({ error: 'Impossibile annullare la spedizione sul corriere (forse è già stata affidata/spedita). Non è stata eliminata: verifica sul corriere.' }, { status: 409 })
+      }
     }
   }
 
@@ -93,32 +96,29 @@ export async function DELETE(req: NextRequest) {
 
   // Rimborso a cascata ai MASTER della catena (speculare all'addebito in creazione).
   try {
-    if (corr?.nome_contratto || sped.corriere_id) {
-      const { data: corriere } = await admin.from('corrieri').select('master_id,nome_contratto').eq('id', sped.corriere_id).single()
-      if (corriere?.master_id) {
-        let packages: any[] = []
-        if (Array.isArray(sped.colli_dettaglio) && sped.colli_dettaglio.length) {
-          packages = sped.colli_dettaglio.map((c: any) => ({
-            weight: sped.peso_reale || 1, length: c.lunghezza, width: c.larghezza, height: c.altezza,
-          }))
-        } else {
-          packages = [{ weight: sped.peso_reale || 1, length: sped.lunghezza, width: sped.larghezza, height: sped.altezza }]
-        }
-        await rimborsaCatena(admin, {
-          masterDirettoId: sped.master_id,
-          corriereOwnerId: corriere.master_id,
-          costoSpedizione: Number(sped.costo_spedizione || 0),
-          provincia: sped.dest_provincia || '',
-          cap: sped.dest_cap || '',
-          paese: sped.dest_paese || 'IT',
-          packages,
-          corriereNome: corriere.nome_contratto,
-          numero: sped.numero,
-          destNome: sped.dest_nome || '',
-          spedizioneId: sped.id,
-          createdBy: user.id,
-        })
+    if (corr?.master_id) {
+      let packages: any[] = []
+      if (Array.isArray(sped.colli_dettaglio) && sped.colli_dettaglio.length) {
+        packages = sped.colli_dettaglio.map((c: any) => ({
+          weight: sped.peso_reale || 1, length: c.lunghezza, width: c.larghezza, height: c.altezza,
+        }))
+      } else {
+        packages = [{ weight: sped.peso_reale || 1, length: sped.lunghezza, width: sped.larghezza, height: sped.altezza }]
       }
+      await rimborsaCatena(admin, {
+        masterDirettoId: sped.master_id,
+        corriereOwnerId: corr.master_id,
+        costoSpedizione: Number(sped.costo_spedizione || 0),
+        provincia: sped.dest_provincia || '',
+        cap: sped.dest_cap || '',
+        paese: sped.dest_paese || 'IT',
+        packages,
+        corriereNome: corr.nome_contratto,
+        numero: sped.numero,
+        destNome: sped.dest_nome || '',
+        spedizioneId: sped.id,
+        createdBy: user.id,
+      })
     }
   } catch (e) {
     console.error('Errore rimborso cascata master su annullo:', e)
