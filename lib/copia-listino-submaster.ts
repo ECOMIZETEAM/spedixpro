@@ -38,7 +38,7 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
     if (giaFasce?.length) return { ok: true, reason: 'gia configurato' }
   }
 
-  const { data: fasceSrc } = await admin.from('listini_clienti_fasce').select('corriere_id,zona_id,peso_max,prezzo,tipo').eq('listino_id', parentListinoId)
+  const { data: fasceSrc } = await admin.from('listini_clienti_fasce').select('corriere_id,zona_id,peso_max,prezzo,tipo,fuel').eq('listino_id', parentListinoId)
   if (!fasceSrc?.length) return { ok: false, reason: 'listino assegnato vuoto' }
   const { data: supplSrc } = await admin.from('listini_clienti_supplementi').select('corriere_id,tipo,nome,valore,tipo_calcolo,descrizione').eq('listino_id', parentListinoId)
   const { data: listinoSrc } = await admin.from('listini_clienti').select('nome,fattore_volume,solo_peso_reale').eq('id', parentListinoId).single()
@@ -115,7 +115,7 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   if (nuoviLink.length) await admin.from('listini_corrieri_corrieri').insert(nuoviLink)
 
   // 5) FASCE
-  const fasceIns = fasceSrc.map((f: any) => ({ listino_id: subListinoId, corriere_id: mapCorr.get(f.corriere_id) || null, zona_id: mapZona.get(f.zona_id) || null, peso_min: 0, peso_max: f.peso_max, prezzo: f.prezzo, tipo: f.tipo })).filter((f: any) => f.corriere_id && f.zona_id)
+  const fasceIns = fasceSrc.map((f: any) => ({ listino_id: subListinoId, corriere_id: mapCorr.get(f.corriere_id) || null, zona_id: mapZona.get(f.zona_id) || null, peso_min: 0, peso_max: f.peso_max, prezzo: f.prezzo, tipo: f.tipo, fuel: Number(f.fuel) || 0 })).filter((f: any) => f.corriere_id && f.zona_id)
   if (fasceIns.length) await admin.from('listini_corrieri_fasce').insert(fasceIns)
 
   // 6) SUPPLEMENTI (assicurazione, contrassegno, giacenze, ritiro, accessori)
