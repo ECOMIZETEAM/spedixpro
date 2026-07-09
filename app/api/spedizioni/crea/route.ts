@@ -163,25 +163,11 @@ export async function POST(req: NextRequest) {
   // Helper: registra la detrazione del credito dopo una spedizione riuscita.
   // Non deve mai far fallire la spedizione (è già creata sul corriere + DB).
   async function addebitaCredito(spedizioneId: string | null, numeroSped: string, costo: number) {
-    // Spedizione propria del master: addebito al master col prezzo del listino corriere.
-    if (isProprio) {
-      if (!(costoMaster > 0)) return
-      try {
-        await registraMovimentoMaster(adminCrea, {
-          masterOwnerId: masterId,
-          masterTargetId: masterId,
-          tipo: 'spedizione',
-          descrizione: `${numeroSped} - ${body.shipTo?.name || ''}`.trim(),
-          riferimento: numeroSped,
-          importo: -Math.abs(costoMaster),
-          spedizioneId,
-          createdBy: user!.id,
-        })
-      } catch (e) {
-        console.error('Errore movimento spedizione propria master:', e)
-      }
-      return
-    }
+    // Spedizione propria del master: NON addebito qui. Ci pensa addebitaCatena (sotto),
+    // che risale la catena fino al proprietario REALE del contratto e registra un
+    // movimento 'spedizione' per OGNI master del ramo (incluso questo). Così la
+    // spedizione risale correttamente in lista movimenti a tutta la catena.
+    if (isProprio) return
     // Per conto di un sotto-master: addebito il CREDITO del sotto-master (come un cliente).
     if (masterSub) {
       if (!(costo > 0)) return
@@ -344,16 +330,16 @@ export async function POST(req: NextRequest) {
     // Detrazione credito (movimento -costo cliente, oppure -listino corriere se spedizione propria)
     await addebitaCredito(inserted?.id || null, numero, costoCliente)
 
-    // Addebito a cascata sui master della catena (solo se c'e' un cliente; il proprietario paga costo reale API)
-    if (!isProprio) {
-      await addebitaCatena(supabase, {
-        masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
-        costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
-        cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
-        corriereNome: corriereRecord.nome_contratto,
-        numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
-      })
-    }
+    // Addebito a cascata sui master della catena. Vale ANCHE per la spedizione propria di
+    // un master: costruisciCatena risale dal master fino al proprietario reale del contratto
+    // e addebita ogni livello col suo prezzo (il proprietario paga il costo reale API).
+    await addebitaCatena(supabase, {
+      masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
+      costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
+      cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+      corriereNome: corriereRecord.nome_contratto,
+      numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
+    })
 
     return NextResponse.json({ numero, tracking: r.trackingNumber, costo: r.shipmentCost, spedizioneId: inserted?.id || null })
   }
@@ -460,16 +446,14 @@ export async function POST(req: NextRequest) {
       // Detrazione credito (movimento -costo cliente, oppure -listino corriere se spedizione propria)
       await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
 
-      // Addebito a cascata sui master della catena (solo se c'e' un cliente)
-      if (!isProprio) {
-        await addebitaCatena(supabase, {
-          masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
-          costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
-          cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
-          corriereNome: corriereRecord.nome_contratto,
-          numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
-        })
-      }
+      // Addebito a cascata sui master della catena (vale anche per la spedizione propria).
+      await addebitaCatena(supabase, {
+        masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
+        costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
+        cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+        corriereNome: corriereRecord.nome_contratto,
+        numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
+      })
 
       return NextResponse.json({
         numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2), spedizioneId: inserted?.id || null,

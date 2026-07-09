@@ -21,9 +21,13 @@ export async function GET() {
 
   const now = new Date()
   const inizioMese = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+  // Il piano conta le spedizioni di TUTTA la rete sotto questo master (sé + discendenza):
+  // ogni spedizione di un sotto-master consuma il contratto/piano dei master sopra.
+  const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+  const reteIds = await sottoAlberoMasterIds(admin, utente.master_id)
   const { count } = await admin.from('spedizioni')
     .select('*', { count: 'exact', head: true })
-    .eq('master_id', utente.master_id).gte('created_at', inizioMese).neq('stato', 'annullata')
+    .in('master_id', reteIds).gte('created_at', inizioMese).neq('stato', 'annullata')
 
   // Se sono il ROOT (M1): elenco degli abbonamenti da incassare dalla mia rete
   let pagamenti: any[] = []
