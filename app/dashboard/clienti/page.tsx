@@ -49,6 +49,8 @@ export default function ClientiPage() {
       <style>{`
         .cli-act{color:#9aa0a6;font-size:16px;line-height:1;text-decoration:none;transition:color .12s;cursor:pointer}
         .cli-act:hover{color:#f97316}
+        .lst-link{color:#f97316;font-weight:600;text-decoration:none;cursor:pointer}
+        .lst-link:hover{text-decoration:underline}
       `}</style>
 
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'20px'}}>
@@ -132,9 +134,9 @@ export default function ClientiPage() {
                     </td>
                     <td style={{padding:'10px 14px',color:'#1a1a1a',fontSize:'12px',textTransform:'capitalize'}}>{c.tipo_contratto?.replace(/_/g,' ')||'—'}</td>
                     <td style={{padding:'10px 14px',fontSize:'12px'}}>
-                      {c.listini_clienti?.nome
-                        ? <span style={{color:'#f97316',fontWeight:'600'}}>{c.listini_clienti.nome}</span>
-                        : (c.listino_cliente_id ? <span style={{color:'#f97316',fontWeight:'600'}}>Assegnato</span> : <span style={{color:'#1a1a1a'}}>—</span>)}
+                      {c.listino_cliente_id
+                        ? <a href={`/dashboard/listini/clienti/${c.listino_cliente_id}`} className="lst-link" title="Apri il listino su Listini Clienti">{c.listini_clienti?.nome || 'Assegnato'}</a>
+                        : <span style={{color:'#1a1a1a'}}>—</span>}
                     </td>
                     <td style={{padding:'10px 14px',color:Number(c.credito||0) < 0 ? '#dc2626' : '#16a34a',fontSize:'12px',fontWeight:'600',whiteSpace:'nowrap'}}>€ {Number(c.credito||0).toFixed(2)}</td>
                     <td style={{padding:'10px 14px',fontSize:'12px'}}>

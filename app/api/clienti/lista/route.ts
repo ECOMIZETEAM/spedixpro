@@ -44,10 +44,17 @@ export async function GET(req: NextRequest) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const admin = createAdminSupabase()
     const { data: figli } = await admin.from('masters')
-      .select('id,nome,email,telefono,credito,attivo,tipo_contratto,indirizzo,citta,provincia,cap,indirizzo_operativo,citta_operativo,provincia_operativo,cap_operativo')
+      .select('id,nome,email,telefono,credito,attivo,tipo_contratto,parent_listino_id,indirizzo,citta,provincia,cap,indirizzo_operativo,citta_operativo,provincia_operativo,cap_operativo')
       .eq('parent_master_id', utente.master_id).order('nome', { ascending: true })
     // Contratti attivi del sotto-master = i suoi corrieri (come per i clienti col loro listino)
     const figliIds = (figli || []).map((m: any) => m.id)
+    // Listino agganciato al sotto-master (parent_listino_id -> listini_clienti): nome per la colonna Listino
+    const subListinoIds = Array.from(new Set((figli || []).map((m: any) => m.parent_listino_id).filter(Boolean)))
+    const subListinoNomi = new Map<string, string>()
+    if (subListinoIds.length) {
+      const { data: ls } = await admin.from('listini_clienti').select('id,nome').in('id', subListinoIds)
+      for (const l of (ls || [])) subListinoNomi.set(l.id, l.nome)
+    }
     const corrPerSub = new Map<string, any[]>()
     if (figliIds.length) {
       const { data: corrFigli } = await admin.from('corrieri').select('master_id,nome_contratto,tipo').in('master_id', figliIds)
@@ -61,6 +68,9 @@ export async function GET(req: NextRequest) {
       email: m.email || '', telefono: m.telefono || '', credito: Number(m.credito || 0),
       attivo: m.attivo !== false, tipo_contratto: m.tipo_contratto || null,
       codice_cliente: 'SUB-MASTER', contratti_attivi: corrPerSub.get(m.id) || [],
+      // Listino agganciato (come per i clienti): id per il link + nome per la colonna
+      listino_cliente_id: m.parent_listino_id || null,
+      listini_clienti: m.parent_listino_id ? { nome: subListinoNomi.get(m.parent_listino_id) || null } : null,
       // Indirizzo per il mittente quando spedisci per suo conto (sede operativa, fallback legale)
       so_indirizzo: m.indirizzo_operativo || m.indirizzo || '',
       so_citta: m.citta_operativo || m.citta || '',
