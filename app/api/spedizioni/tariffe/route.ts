@@ -394,7 +394,10 @@ export async function POST(req: NextRequest) {
     const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
     // Limite misure per scaglione di PESO REALE: se un collo eccede, il corriere non è disponibile.
     if (superaMisureMax(settsC, pesoReale, tuttiColli)) { esclusiMisura++; continue }
-    const pesoPerFascia = (!!settsC.agevolazione_peso_reale && entroMisureAgevolate) ? pesoReale : pesoFatturato
+    // Peso su cui si tassa: reale se agevolazione misure (≤50x32x28) OPPURE "peso reale fino a X kg" (≤ soglia); altrimenti volumetrico.
+    const _prs = settsC?.peso_reale_soglia
+    const _usaRealeSoglia = !!_prs?.attivo && Number(_prs.kg) > 0 && pesoReale <= Number(_prs.kg)
+    const pesoPerFascia = ((!!settsC.agevolazione_peso_reale && entroMisureAgevolate) || _usaRealeSoglia) ? pesoReale : pesoFatturato
     const fasciaGiusta = trovaFascia(fasceDelCorriere, pesoPerFascia)
     if (!fasciaGiusta) { esclusiFascia++; continue }   // peso oltre l'ultima fascia e nessuna "oltre X ogni"
     if (Number(fasciaGiusta.prezzo) <= 0) continue   // prezzo 0 per questa zona/peso -> non mostrare il corriere

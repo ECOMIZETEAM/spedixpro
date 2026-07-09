@@ -92,6 +92,8 @@ export default function CorrieriPage() {
       inserimento_ritiri: c.inserimento_ritiri !== false,
       mittente: (c.settings && c.settings.mittente) || 'cliente',
       agevolazione_peso_reale: !!(c.settings && c.settings.agevolazione_peso_reale),
+      peso_reale_soglia_on: !!(c.settings?.peso_reale_soglia?.attivo),
+      peso_reale_soglia_kg: (c.settings?.peso_reale_soglia?.kg ?? 5) || 5,
       // Misure massime a scaglioni di peso (sul PESO REALE, non volumetrico)
       misura_soglia: (c.settings?.misure_scaglioni?.soglia_kg ?? '') || '',
       sotto_l: (c.settings?.misure_scaglioni?.sotto?.lunghezza ?? c.settings?.misure_max?.lunghezza) || '',
@@ -113,7 +115,8 @@ export default function CorrieriPage() {
     }
     // misure_max (legacy) = tier "sotto" come default per i lettori vecchi
     const misureMax = { lunghezza: popup.sotto_l||null, larghezza: popup.sotto_w||null, altezza: popup.sotto_h||null }
-    const nuoviSettings = (base:any) => ({ ...(base||{}), mittente: popup.mittente, agevolazione_peso_reale: popup.agevolazione_peso_reale, misure_max: misureMax, misure_scaglioni: scaglioni })
+    const pesoRealeSoglia = { attivo: !!popup.peso_reale_soglia_on, kg: Number(popup.peso_reale_soglia_kg) || 5 }
+    const nuoviSettings = (base:any) => ({ ...(base||{}), mittente: popup.mittente, agevolazione_peso_reale: popup.agevolazione_peso_reale, misure_max: misureMax, misure_scaglioni: scaglioni, peso_reale_soglia: pesoRealeSoglia })
     await fetch('/api/corrieri/'+popup.id, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -194,7 +197,15 @@ export default function CorrieriPage() {
               <div style={{fontSize:'15px',fontWeight:'700',color:'#1a1a1a'}}>{popup.nome_contratto} — Impostazioni</div>
             </div>
             <div style={{padding:'22px'}}>
-              <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',marginBottom:'14px'}}>Agevolazione peso</div><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'16px',marginBottom:'14px'}}><label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>Agevolazione peso reale (&le; 50&times;28&times;32 cm)</label><select value={popup.agevolazione_peso_reale?'si':'no'} onChange={e=>setPopup({...popup,agevolazione_peso_reale:e.target.value==='si'})} style={{...selStyle,maxWidth:'260px'}}><option value="no">No</option><option value="si">Si</option></select></div><div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',margin:'14px 0 4px'}}>Misure massime per peso (cm)</div>
+              <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',marginBottom:'14px'}}>Agevolazione peso</div><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'16px',marginBottom:'14px'}}><label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>Agevolazione peso reale (&le; 50&times;28&times;32 cm)</label><select value={popup.agevolazione_peso_reale?'si':'no'} onChange={e=>setPopup({...popup,agevolazione_peso_reale:e.target.value==='si'})} style={{...selStyle,maxWidth:'260px'}}><option value="no">No</option><option value="si">Si</option></select></div>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'16px',marginBottom:'6px'}}>
+                <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>Peso reale fino a
+                  <input type="number" value={popup.peso_reale_soglia_kg||''} onChange={e=>setPopup({...popup,peso_reale_soglia_kg:e.target.value})} style={{...selStyle,width:'70px',display:'inline-block',margin:'0 6px',padding:'4px 8px'}}/> kg
+                </label>
+                <select value={popup.peso_reale_soglia_on?'si':'no'} onChange={e=>setPopup({...popup,peso_reale_soglia_on:e.target.value==='si'})} style={{...selStyle,maxWidth:'120px'}}><option value="no">No</option><option value="si">Si</option></select>
+              </div>
+              <div style={{fontSize:'11.5px',color:'#888',marginBottom:'14px'}}>Se attivo: fino a quel peso reale si tassa sul <b>peso reale</b> (niente volumetrico); oltre, torna al peso volumetrico. Vale per il master e i suoi clienti.</div>
+              <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',margin:'14px 0 4px'}}>Misure massime per peso (cm)</div>
               <div style={{fontSize:'11.5px',color:'#888',marginBottom:'12px'}}>Limiti diversi in base al <b>peso reale</b> dichiarato dal cliente (non il volumetrico). Una spedizione oltre i limiti del suo scaglione non mostrerà questo corriere. Lascia vuoto per nessun limite.</div>
               <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'14px'}}>
                 <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>Soglia di peso</label>

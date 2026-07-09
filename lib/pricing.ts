@@ -220,7 +220,8 @@ export async function calcolaPrezzoCorriere(
   // Agevolazione peso reale: se il corriere ha il flag e OGNI collo è entro 50x32x28 cm,
   // si tassa sul peso reale (come nel preventivo cliente).
   const { data: corrSett } = await supabase.from('corrieri').select('settings').eq('id', corriereId).maybeSingle()
-  if (!soloPesoReale && corrSett?.settings?.agevolazione_peso_reale) {
+  const _sett: any = corrSett?.settings || {}
+  if (!soloPesoReale && _sett.agevolazione_peso_reale) {
     const entro = packages.every((p: any) => {
       const L = Number(p?.length)||0, W = Number(p?.width)||0, H = Number(p?.height)||0
       if (!L && !W && !H) return true
@@ -228,6 +229,11 @@ export async function calcolaPrezzoCorriere(
       return d[0] <= 50 && d[1] <= 32 && d[2] <= 28
     })
     if (entro) pesoFatturato = pesoReale
+  }
+  // "Peso reale fino a X kg": sotto la soglia si tassa sul peso reale, oltre torna al volumetrico.
+  const _prs = _sett.peso_reale_soglia
+  if (!soloPesoReale && _prs?.attivo && Number(_prs.kg) > 0 && pesoReale <= Number(_prs.kg)) {
+    pesoFatturato = pesoReale
   }
 
   const { data: fasce } = await supabase
