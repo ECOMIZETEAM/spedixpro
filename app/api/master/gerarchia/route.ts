@@ -15,14 +15,9 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminSupabase()
 
-  let currentId = utente.master_id
-  let rootId = currentId
-  for (let i = 0; i < 20; i++) {
-    const { data: m } = await admin.from('masters').select('parent_master_id').eq('id', currentId).single()
-    if (!m?.parent_master_id) { rootId = currentId; break }
-    currentId = m.parent_master_id
-    rootId = currentId
-  }
+  // Ogni master vede la gerarchia SOLO da sé stesso in giù (i suoi discendenti):
+  // il vertice della vista è il master corrente, mai i livelli superiori.
+  const rootId = utente.master_id
 
   const { data: allMasters } = await admin
     .from('masters')
