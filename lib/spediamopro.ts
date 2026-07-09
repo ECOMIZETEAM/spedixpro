@@ -293,8 +293,9 @@ export async function spediamoproWaitPickupCode(authcode: string, pickupId: numb
   return null
 }
 
-// Annulla una spedizione SpediamoPro (compensazione se il salvataggio DB fallisce → niente orfani).
-export async function spediamoproCancelShipment(authcode: string, shipmentId: number): Promise<boolean> {
+// Annulla una spedizione SpediamoPro. Ritorna { ok, error } — error = motivo del corriere
+// (es. già spedita / chiusa in distinta) da mostrare all'utente.
+export async function spediamoproCancelShipment(authcode: string, shipmentId: number): Promise<{ ok: boolean; error?: string }> {
   try {
     const token = await getSpediamoproToken(authcode)
     const res = await fetch(`${BASE_URL}/shipments/${shipmentId}/cancel`, {
@@ -302,8 +303,14 @@ export async function spediamoproCancelShipment(authcode: string, shipmentId: nu
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: '{}',
     })
-    return res.ok
-  } catch { return false }
+    if (res.ok) return { ok: true }
+    const text = await res.text().catch(() => '')
+    let msg = ''
+    try { msg = JSON.parse(text)?.error?.message || JSON.parse(text)?.message || '' } catch {}
+    return { ok: false, error: msg || text.slice(0, 200) || `HTTP ${res.status}` }
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message || e) }
+  }
 }
 
 // ── Tracking ──

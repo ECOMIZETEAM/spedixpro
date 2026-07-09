@@ -4,6 +4,13 @@ import { registraMovimento } from '@/lib/movimenti'
 import { rimborsaCatena } from '@/lib/cascata'
 import { spediamoproCancelShipment } from '@/lib/spediamopro'
 
+// Il corriere considera la spedizione GIÀ eliminata/inesistente → possiamo cancellarla anche da Moove.
+function giaEliminataSulCorriere(text: string, status?: number): boolean {
+  if (status === 404) return true
+  const t = (text || '').toLowerCase()
+  return /non trovat|not found|inesistent|does not exist|gi[àa] ?(elimin|annull|cancell)|already ?(delet|cancel|removed)|no longer exists/.test(t)
+}
+
 export async function DELETE(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -38,6 +45,11 @@ export async function DELETE(req: NextRequest) {
       }
     }
     if (!autorizzato) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    // Se cancello una MIA spedizione e il mio "vieta cancellazione" è ON → non posso nemmeno provarci.
+    if (sped.master_id === utente?.master_id) {
+      const { data: mio } = await admin.from('masters').select('vieta_cancellazione').eq('id', utente.master_id).maybeSingle()
+      if (mio?.vieta_cancellazione === true) return NextResponse.json({ error: 'Cancellazione spedizioni non consentita per questo account.' }, { status: 403 })
+    }
   }
 
   // Già annullata → idempotente
@@ -46,27 +58,37 @@ export async function DELETE(req: NextRequest) {
   // ── ANNULLA SUL CORRIERE PRIMA di eliminare da Moove. Se il corriere non la annulla
   //    (es. già affidata/spedita), NON si elimina da Moove → nessun orfano lato corriere. ──
   const { data: corr } = await admin.from('corrieri').select('tipo,credenziali,nome_contratto,master_id').eq('id', sped.corriere_id).maybeSingle()
+  const ERR_BLOCCO = 'Il corriere non consente l\'annullo: la spedizione risulta già spedita o chiusa in distinta. Non è stata eliminata.'
   if (corr) {
     const cred: any = corr.credenziali || {}
     const raw: any = sped.raw_response || {}
     if (corr.tipo === 'spediamopro') {
       const spid = raw.id || raw?.shipmentId || raw?.data?.id || raw?.raw?.data?.id
       if (spid && cred.authcode) {
-        const ok = await spediamoproCancelShipment(cred.authcode, Number(spid))
-        if (!ok) return NextResponse.json({ error: 'Impossibile annullare la spedizione sul corriere (forse è già stata affidata/spedita). Non è stata eliminata: verifica sul corriere.' }, { status: 409 })
+        const r = await spediamoproCancelShipment(cred.authcode, Number(spid))
+        // Se il corriere dice "già eliminata/non trovata" procediamo lo stesso; altrimenti blocchiamo col motivo.
+        if (!r.ok && !giaEliminataSulCorriere(r.error || '')) {
+          return NextResponse.json({ error: `${ERR_BLOCCO}${r.error ? ' (' + r.error.slice(0, 160) + ')' : ''}` }, { status: 409 })
+        }
       }
     } else if (corr.tipo === 'spedisci') {
       const shipId = raw.shipmentId || raw.id
-      if (shipId && cred.master_domain) {
-        let ok = false
+      if ((shipId || sped.tracking_number) && cred.master_domain) {
+        let status = 0, body = ''
         try {
           const del = await fetch(`https://${cred.master_domain}/api/v2/shipping/delete`, {
             method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ shipment_ids: [shipId], increment_id: shipId }),
+            body: JSON.stringify({ increment_id: shipId, trackingNumber: sped.tracking_number }),
           })
-          ok = del.ok
-        } catch {}
-        if (!ok) return NextResponse.json({ error: 'Impossibile annullare la spedizione sul corriere (forse è già stata affidata/spedita). Non è stata eliminata: verifica sul corriere.' }, { status: 409 })
+          status = del.status
+          body = await del.text().catch(() => '')
+        } catch (e: any) { body = String(e?.message || e) }
+        const ok = status >= 200 && status < 300
+        if (!ok && !giaEliminataSulCorriere(body, status)) {
+          let msg = ''
+          try { msg = JSON.parse(body)?.error || '' } catch {}
+          return NextResponse.json({ error: `${ERR_BLOCCO}${msg ? ' (' + String(msg).slice(0, 160) + ')' : ''}` }, { status: 409 })
+        }
       }
     }
   }

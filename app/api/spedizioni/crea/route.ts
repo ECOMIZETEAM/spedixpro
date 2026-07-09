@@ -448,7 +448,7 @@ export async function POST(req: NextRequest) {
       if (insertError) {
         // COMPENSAZIONE: se non riusciamo a registrarla noi, annulliamo la spedizione sul corriere
         // così non restano "orfane" (create sul corriere ma non su MoovExpress).
-        const annullata = await spediamoproCancelShipment(cred.authcode, shipment.id)
+        const annullata = (await spediamoproCancelShipment(cred.authcode, shipment.id)).ok
         return NextResponse.json({
           error: annullata
             ? `Spedizione non registrata (errore DB) e annullata sul corriere. Riprova. Dettaglio: ${insertError.message}`
