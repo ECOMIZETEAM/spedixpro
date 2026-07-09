@@ -65,5 +65,8 @@ export async function POST(req: NextRequest) {
   }).select().single()
   if (error || !distinta) return NextResponse.json({ error: error?.message || 'Errore' }, { status: 400 })
   await db.from('spedizioni').update({ distinta_id: distinta.id }).in('id', spedizioniIds)
+  // Chiusura borderò/distinta lato corriere (best-effort): Spedisci.online e SpediamoPro (bordereau).
+  try { const { chiudiBorderoSpedisci } = await import('@/lib/spedisci'); await chiudiBorderoSpedisci(db, distinta.id) } catch {}
+  try { const { chiudiBordereauSpediamopro } = await import('@/lib/spediamopro'); await chiudiBordereauSpediamopro(db, distinta.id) } catch {}
   return NextResponse.json({ success: true, distintaId: distinta.id, numero: numeroDistinta })
 }

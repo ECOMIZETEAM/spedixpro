@@ -5,6 +5,7 @@ import { fulfillSpedizioniWoo } from '@/lib/wooFulfill'
 import { fulfillSpedizioniPrestashop } from '@/lib/prestashopFulfill'
 import { fulfillSpedizioniEbay } from '@/lib/ebayFulfill'
 import { chiudiBorderoSpedisci } from '@/lib/spedisci'
+import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
 
 export async function GET(req: NextRequest) {
   const auth = req.headers.get('authorization')
@@ -61,6 +62,7 @@ export async function GET(req: NextRequest) {
       try { await fulfillSpedizioniPrestashop(supabase, righe.map(r => r.id)) } catch {}
       try { await fulfillSpedizioniEbay(supabase, righe.map(r => r.id)) } catch {}
       try { await chiudiBorderoSpedisci(supabase, distinta.id) } catch {}
+      try { await chiudiBordereauSpediamopro(supabase, distinta.id) } catch {}
     }
   }
   return NextResponse.json({ success: true, distinteCreate, spedizioniChiuse: speds.length })

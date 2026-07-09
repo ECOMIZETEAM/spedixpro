@@ -346,6 +346,70 @@ export async function spediamoproReleaseStock(authcode: string, stockId: number,
   try { return JSON.parse(text) } catch { return {} }
 }
 
+// ── Distinta / Bordereau ──
+// Su SpediamoPro la "distinta" è il BORDEREAU: GET /shipments/bordereaux?ids[]=... che
+// restituisce il PDF (o uno ZIP se più bordereaux). Non c'è un id borderò persistente:
+// è un documento generato on-demand dagli shipment id. Best-effort, mai bloccante.
+// Salva bordero_pdf (base64 data URI) sulla distinta.
+export async function chiudiBordereauSpediamopro(supabase: any, distintaId: string): Promise<any> {
+  try {
+    const { data: distinta } = await supabase
+      .from('distinte').select('id, corriere_id, bordero_pdf').eq('id', distintaId).maybeSingle()
+    if (!distinta || distinta.bordero_pdf) return { skip: true }
+
+    const { data: corriere } = await supabase
+      .from('corrieri').select('id, tipo, credenziali').eq('id', distinta.corriere_id).maybeSingle()
+    if (!corriere || corriere.tipo !== 'spediamopro') return { skip: true }
+    const authcode = (corriere.credenziali || {}).authcode
+    if (!authcode) return { errore: 'authcode spediamopro mancante' }
+
+    const { data: speds } = await supabase
+      .from('spedizioni').select('id, raw_response').eq('distinta_id', distintaId)
+
+    // Shipment id interni SpediamoPro dal raw_response (come per l'annullo).
+    const ids: number[] = []
+    for (const s of speds || []) {
+      const raw = (s.raw_response || {}) as any
+      const sid = raw.id ?? raw.shipmentId ?? raw?.data?.id ?? raw?.raw?.data?.id
+      if (sid != null && !isNaN(Number(sid))) ids.push(Number(sid))
+    }
+    const uniq = [...new Set(ids)]
+    if (!uniq.length) return { errore: 'nessuno shipment id SpediamoPro nelle spedizioni' }
+
+    const token = await getSpediamoproToken(authcode)
+    let pdf: string | null = null
+    let errore: string | null = null
+    // L'API accetta max 30 id per richiesta.
+    for (let i = 0; i < uniq.length; i += 30) {
+      const batch = uniq.slice(i, i + 30)
+      const qs = batch.map(id => `ids%5B%5D=${id}`).join('&')
+      const r = await fetch(`${BASE_URL}/shipments/bordereaux?${qs}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!r.ok) {
+        errore = 'HTTP ' + r.status + ': ' + (await r.text().catch(() => '')).slice(0, 150)
+        continue
+      }
+      const ct = r.headers.get('content-type') || ''
+      const buf = Buffer.from(await r.arrayBuffer())
+      const mime = ct.includes('zip') ? 'application/zip' : 'application/pdf'
+      if (!pdf && buf.length) pdf = `data:${mime};base64,` + buf.toString('base64')
+    }
+
+    await supabase.from('distinte').update({
+      bordero_id: pdf ? 'SP' : (errore ? 'ERRORE: ' + errore : null),
+      bordero_pdf: pdf,
+    }).eq('id', distintaId)
+
+    return { ok: !!pdf, errore }
+  } catch (e: any) {
+    try {
+      await supabase.from('distinte').update({ bordero_id: 'ERRORE: ' + String(e?.message || e).slice(0, 150) }).eq('id', distintaId)
+    } catch {}
+    return { errore: String(e?.message || e) }
+  }
+}
+
 // Mappa lo status SpediamoPro (0-13) allo stato interno. Lo status 11 (eccezione)
 // è gestito a parte dal chiamante (controlla gli stock → giacenza / non_consegnato).
 export function mapStatoSpediamopro(status: number | null): string | null {
