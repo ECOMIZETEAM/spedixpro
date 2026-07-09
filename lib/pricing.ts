@@ -126,9 +126,13 @@ export async function calcolaPrezzoListino(
   let fasceZona = zoneMatchIds.length
     ? fasce.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id))
     : []
-  // 2) Fallback ZONE_MAP per nome zona (compatibilita' listini senza zone_cap).
-  if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
-  if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
+  // 2) Fallback ZONE_MAP per nome zona (SOLO Italia; per l'estero niente fallback:
+  //    un corriere senza zona estera NON deve comparire per una destinazione estera).
+  const isEsteroL = (params.paese || 'IT').toUpperCase().trim() !== 'IT'
+  if (!isEsteroL) {
+    if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
+    if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
+  }
   if (!fasceZona.length) return null
 
   // Raggruppa per corriere
@@ -265,8 +269,12 @@ export async function calcolaPrezzoCorriereDettaglio(
   let fasceZona = zoneMatchIds.length
     ? fasce.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id))
     : []
-  if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
-  if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
+  // Per l'ESTERO niente fallback su Italia: mostra solo i corrieri con una zona estera.
+  const isEsteroC = (params.paese || 'IT').toUpperCase().trim() !== 'IT'
+  if (!isEsteroC) {
+    if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
+    if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
+  }
   if (!fasceZona.length) return null
 
   const finoA = fasceZona.filter((f: any) => f.tipo !== 'oltre').sort((a: any, b: any) => a.peso_max - b.peso_max)
@@ -481,8 +489,11 @@ export async function creaCalcolatoreCorriere(
     const ids = matchZona(paese, provincia, cap, cand)
     const zonaNome = zonaDaProvincia(provincia)
     let fz = ids.length ? fasceList.filter((f: any) => ids.includes(f.zone?.id)) : []
-    if (!fz.length) fz = fasceList.filter((f: any) => f.zone?.nome === zonaNome)
-    if (!fz.length) fz = fasceList.filter((f: any) => f.zone?.nome === 'Italia')
+    // Per l'ESTERO niente fallback su Italia.
+    if (paese === 'IT') {
+      if (!fz.length) fz = fasceList.filter((f: any) => f.zone?.nome === zonaNome)
+      if (!fz.length) fz = fasceList.filter((f: any) => f.zone?.nome === 'Italia')
+    }
     if (!fz.length) return null
 
     const finoA = fz.filter((f: any) => f.tipo !== 'oltre').sort((a: any, b: any) => a.peso_max - b.peso_max)
@@ -595,8 +606,11 @@ export async function creaCalcolatoreListinoCliente(
     const ids = matchZona(paese, provincia, cap, cand)
     const zonaNome = zonaDaProvincia(provincia)
     let fz = ids.length ? fasceList.filter((f: any) => ids.includes(f.zone?.id)) : []
-    if (!fz.length) fz = fasceList.filter((f: any) => f.zone?.nome === zonaNome)
-    if (!fz.length) fz = fasceList.filter((f: any) => f.zone?.nome === 'Italia')
+    // Per l'ESTERO niente fallback su Italia.
+    if (paese === 'IT') {
+      if (!fz.length) fz = fasceList.filter((f: any) => f.zone?.nome === zonaNome)
+      if (!fz.length) fz = fasceList.filter((f: any) => f.zone?.nome === 'Italia')
+    }
     if (!fz.length) return null
 
     const finoA = fz.filter((f: any) => f.tipo !== 'oltre').sort((a: any, b: any) => a.peso_max - b.peso_max)
