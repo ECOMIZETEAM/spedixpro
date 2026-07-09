@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
+import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { spediamoproCreatePickup, spediamoproWaitPickupCode } from '@/lib/spediamopro'
 
 function normalizzaOrario(v: any): string | null {
@@ -47,22 +49,29 @@ export async function POST(req: NextRequest) {
   let body: any
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Body JSON non valido' }, { status: 400 }) }
 
-  const masterId = utente.master_id
-  const clienteId = utente.ruolo === 'cliente' ? utente.cliente_id : (body.clienteId || null)
+  const isCliente = utente.ruolo === 'cliente'
+  const admin = createAdminSupabase()
+  // Master: può ritirare spedizioni di tutta la propria rete (sotto-albero). Cliente: solo le proprie.
+  const masterIdsAmmessi = isCliente ? [utente.master_id] : await sottoAlberoMasterIds(admin, utente.master_id)
 
   const spedizioneIds = body.spedizioneIds as string[]
   if (!spedizioneIds?.length) return NextResponse.json({ error: 'Seleziona almeno una spedizione da ritirare' }, { status: 400 })
 
-  const { data: spedizioni } = await supabase
+  let spedQuery = admin
     .from('spedizioni')
-    .select('id,raw_response,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_email')
-    .in('id', spedizioneIds).eq('master_id', masterId)
+    .select('id,raw_response,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_email,master_id,cliente_id')
+    .in('id', spedizioneIds).in('master_id', masterIdsAmmessi)
+  if (isCliente) spedQuery = spedQuery.eq('cliente_id', utente.cliente_id)
+  const { data: spedizioni } = await spedQuery
   if (!spedizioni?.length) return NextResponse.json({ error: 'Spedizioni non trovate' }, { status: 400 })
 
   const primaSped = spedizioni[0]
   const raw = primaSped.raw_response as any
+  // Il ritiro appartiene al master/cliente proprietario della spedizione (così risale nella rete)
+  const masterId = primaSped.master_id
+  const clienteId = primaSped.cliente_id || null
 
-  const { data: corriere } = await supabase.from('corrieri').select('id,tipo,credenziali').eq('id', primaSped.corriere_id).single()
+  const { data: corriere } = await admin.from('corrieri').select('id,tipo,credenziali').eq('id', primaSped.corriere_id).single()
   if (!corriere) return NextResponse.json({ error: 'Corriere non trovato' }, { status: 400 })
 
   const cred = corriere.credenziali as Record<string, string>
@@ -77,7 +86,7 @@ export async function POST(req: NextRequest) {
 
   // Funzione comune di salvataggio su DB
   async function salvaRitiro(pickupCode: string) {
-    return await supabase.from('ritiri').insert({
+    return await admin.from('ritiri').insert({
       master_id: masterId, cliente_id: clienteId, corriere_id: corriere!.id,
       tracking_ritiro: pickupCode || null, cod_ritiro: pickupCode || null,
       mitt_nome: body.mittNome, mitt_indirizzo: body.mittIndirizzo, mitt_citta: body.mittCitta,

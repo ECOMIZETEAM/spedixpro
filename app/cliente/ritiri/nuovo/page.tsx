@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 
 const inp = {width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -7,12 +7,17 @@ const lbl = {fontSize:'11.5px',fontWeight:'600' as const,color:'#666',display:'b
 const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',padding:'20px',marginBottom:'16px'}
 const cardTitle = {fontSize:'13px',fontWeight:'700' as const,color:'#1a1a1a',marginBottom:'16px'}
 
+function giornoOf(s: any): string { return String(s?.created_at || '').split('T')[0] }
+function giornoLabel(g: string): string { const [y,m,d] = g.split('-'); return d && m && y ? `${d}/${m}/${y}` : g }
+
 export default function NuovoRitiroPage() {
   const router = useRouter()
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [selezionate, setSelezionate] = useState<Set<string>>(new Set())
   const [loadingSped, setLoadingSped] = useState(true)
   const [cercaLdv, setCercaLdv] = useState('')
+  const [fCorriere, setFCorriere] = useState('')
+  const [fGiorno, setFGiorno] = useState('')
 
   const [mittNome, setMittNome] = useState('')
   const [mittIndirizzo, setMittIndirizzo] = useState('')
@@ -28,6 +33,7 @@ export default function NuovoRitiroPage() {
   const [istruzioni, setIstruzioni] = useState('')
 
   const [saving, setSaving] = useState(false)
+  const [progresso, setProgresso] = useState<{done:number,total:number}|null>(null)
   const [errore, setErrore] = useState('')
 
   useEffect(() => {
@@ -51,6 +57,22 @@ export default function NuovoRitiroPage() {
     setDataRitiro(oggi.toISOString().split('T')[0])
   }, [])
 
+  const optCorrieri = useMemo(() => {
+    const s2 = new Set<string>(); for (const s of spedizioni) if (s.corriere_nome) s2.add(s.corriere_nome)
+    return [...s2].sort()
+  }, [spedizioni])
+  const optGiorni = useMemo(() => {
+    const s2 = new Set<string>(); for (const s of spedizioni) { const g = giornoOf(s); if (g) s2.add(g) }
+    return [...s2].sort().reverse()
+  }, [spedizioni])
+
+  const filtrate = useMemo(() => spedizioni.filter(s => {
+    if (fCorriere && s.corriere_nome !== fCorriere) return false
+    if (fGiorno && giornoOf(s) !== fGiorno) return false
+    if (cercaLdv && !String(s.numero||'').toLowerCase().includes(cercaLdv.toLowerCase())) return false
+    return true
+  }), [spedizioni, fCorriere, fGiorno, cercaLdv])
+
   function toggleSpedizione(id: string) {
     setSelezionate(prev => {
       const next = new Set(prev)
@@ -59,37 +81,63 @@ export default function NuovoRitiroPage() {
       return next
     })
   }
+  function toggleTutte() {
+    const ids = filtrate.map(s => s.id)
+    const tutteSel = ids.length > 0 && ids.every(id => selezionate.has(id))
+    setSelezionate(prev => {
+      const next = new Set(prev)
+      if (tutteSel) ids.forEach(id => next.delete(id))
+      else ids.forEach(id => next.add(id))
+      return next
+    })
+  }
 
   async function creaRitiro() {
-    if (!selezionate.size) { setErrore('Seleziona almeno una spedizione da ritirare'); return }
+    const ids = Array.from(selezionate)
+    if (!ids.length) { setErrore('Seleziona almeno una spedizione da ritirare'); return }
     if (!mittNome || !mittIndirizzo || !mittCitta || !mittCap) { setErrore('Compila tutti i dati mittente'); return }
     if (!dataRitiro) { setErrore('Seleziona una data di ritiro'); return }
-    setSaving(true); setErrore('')
+    setSaving(true); setErrore(''); setProgresso({done:0,total:ids.length})
 
-    const res = await fetch('/api/ritiri/crea', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        spedizioneIds: Array.from(selezionate),
-        mittNome, mittIndirizzo, mittCitta, mittProvincia, mittCap, mittPaese: 'IT',
-        mittTelefono, mittEmail,
-        contenuto, dataRitiro, orarioRitiro, istruzioni,
-      })
-    })
-    const data = await res.json()
-    setSaving(false)
+    // Un ritiro DISTINTO per ogni LDV selezionata, con barra di progressione
+    const errori: string[] = []
+    for (let i = 0; i < ids.length; i++) {
+      try {
+        const res = await fetch('/api/ritiri/crea', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            spedizioneIds: [ids[i]],
+            mittNome, mittIndirizzo, mittCitta, mittProvincia, mittCap, mittPaese: 'IT',
+            mittTelefono, mittEmail,
+            contenuto, dataRitiro, orarioRitiro, istruzioni,
+          })
+        })
+        const data = await res.json()
+        if (data.error) { const s = spedizioni.find(x=>x.id===ids[i]); errori.push(`${s?.numero||ids[i]}: ${data.error}`) }
+      } catch (e: any) {
+        const s = spedizioni.find(x=>x.id===ids[i]); errori.push(`${s?.numero||ids[i]}: ${e?.message||'errore'}`)
+      }
+      setProgresso({done:i+1,total:ids.length})
+    }
 
-    if (data.error) { setErrore(data.error); return }
-    router.push('/cliente/ritiri?success=' + (data.pickupId || ''))
+    setSaving(false); setProgresso(null)
+    if (errori.length) {
+      setErrore(`Creati ${ids.length - errori.length}/${ids.length} ritiri. Errori:\n` + errori.join('\n'))
+      return
+    }
+    router.push('/cliente/ritiri?success=' + ids.length)
   }
+
+  const tutteSelezionate = filtrate.length > 0 && filtrate.every(s => selezionate.has(s.id))
 
   return (
     <div>
       <div style={{ marginBottom: '20px' }}>
         <h1 style={{ fontSize: '20px', fontWeight: '700', color: '#1a1a1a', margin: 0 }}>Nuovo Ritiro</h1>
-        <p style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>Seleziona le spedizioni pronte e richiedi il ritiro al corriere</p>
+        <p style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>Seleziona le spedizioni pronte e richiedi il ritiro al corriere. Ogni LDV genera un ritiro distinto.</p>
       </div>
 
-      {errore && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '10px 14px', marginBottom: '16px', fontSize: '13px', color: '#dc2626' }}>{errore}</div>}
+      {errore && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '10px 14px', marginBottom: '16px', fontSize: '13px', color: '#dc2626', whiteSpace: 'pre-line' }}>{errore}</div>}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', alignItems: 'start' }}>
 
@@ -137,15 +185,38 @@ export default function NuovoRitiroPage() {
             </div>
           </div>
 
+          {progresso && (
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '12px', fontWeight: '600', color: '#666', marginBottom: '6px' }}>Creazione ritiri {progresso.done}/{progresso.total}</div>
+              <div style={{ height: '8px', background: '#f0f0f0', borderRadius: '4px', overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${Math.round(progresso.done/progresso.total*100)}%`, background: '#f97316', transition: 'width .2s' }} />
+              </div>
+            </div>
+          )}
+
           <button onClick={creaRitiro} disabled={saving}
             style={{ width: '100%', background: '#f97316', color: '#fff', border: 'none', padding: '12px 32px', borderRadius: '6px', fontSize: '13.5px', fontWeight: '700', cursor: 'pointer', opacity: saving ? 0.7 : 1 }}>
-            {saving ? 'Richiesta in corso...' : 'Richiedi Ritiro'}
+            {saving ? `Creazione ${progresso?.done||0}/${progresso?.total||0}...` : `Richiedi Ritiro${selezionate.size ? ` (${selezionate.size})` : ''}`}
           </button>
         </div>
 
-        {/* DESTRA: selezione LDV */}
+        {/* DESTRA: selezione LDV con filtri */}
         <div style={card}>
           <div style={cardTitle}>Seleziona spedizioni da ritirare ({selezionate.size} selezionate)</div>
+
+          {!loadingSped && spedizioni.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+              <select value={fCorriere} onChange={e=>setFCorriere(e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
+                <option value="">Tutti i contratti</option>
+                {optCorrieri.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select value={fGiorno} onChange={e=>setFGiorno(e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
+                <option value="">Tutti i giorni</option>
+                {optGiorni.map(g => <option key={g} value={g}>{giornoLabel(g)}</option>)}
+              </select>
+            </div>
+          )}
+
           {loadingSped ? (
             <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>Caricamento spedizioni...</div>
           ) : !spedizioni.length ? (
@@ -155,15 +226,29 @@ export default function NuovoRitiroPage() {
           ) : (
             <div>
               <input type="text" value={cercaLdv} onChange={e=>setCercaLdv(e.target.value)} placeholder="Cerca LDV / numero spedizione..." style={{ ...inp, marginBottom: '8px' }} />
-              <div style={{ maxHeight: '520px', overflowY: 'auto' }}>
-                {spedizioni.filter(s => !cercaLdv || String(s.numero||'').toLowerCase().includes(cercaLdv.toLowerCase())).map(s => {
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '12px', color: '#999' }}>{filtrate.length} risultati</span>
+                {filtrate.length > 0 && (
+                  <button onClick={toggleTutte} style={{ background: 'none', border: 'none', color: '#f97316', fontSize: '12px', fontWeight: '600', cursor: 'pointer', padding: 0 }}>
+                    {tutteSelezionate ? 'Deseleziona tutte' : 'Seleziona tutte'}
+                  </button>
+                )}
+              </div>
+              <div style={{ maxHeight: '460px', overflowY: 'auto' }}>
+                {filtrate.length === 0 ? (
+                  <div style={{ textAlign: 'center', color: '#999', padding: '16px', fontSize: '13px' }}>Nessun risultato con questi filtri.</div>
+                ) : filtrate.map(s => {
                   const sel = selezionate.has(s.id)
                   return (
                     <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 8px', borderRadius: '6px', border: `1px solid ${sel ? '#fed7aa' : '#f0f0f0'}`, background: sel ? '#fff7ed' : '#fff', marginBottom: '6px', cursor: 'pointer' }}>
                       <input type="checkbox" checked={sel} onChange={() => toggleSpedizione(s.id)} style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: '600', fontSize: '13px', color: '#1a1a1a' }}>{s.numero}</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                          <span style={{ fontWeight: '600', fontSize: '13px', color: '#1a1a1a' }}>{s.numero}</span>
+                          <span style={{ fontSize: '11px', color: '#f97316', fontWeight: '600', whiteSpace: 'nowrap' }}>{s.corriere_nome}</span>
+                        </div>
                         <div style={{ fontSize: '11px', color: '#999' }}>{s.dest_nome} → {s.dest_citta} · {s.colli} collo/i · {s.peso_reale}kg</div>
+                        <div style={{ fontSize: '11px', color: '#bbb' }}>{giornoLabel(giornoOf(s))}</div>
                       </div>
                     </label>
                   )
