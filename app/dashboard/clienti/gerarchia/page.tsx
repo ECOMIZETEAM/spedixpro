@@ -1,177 +1,246 @@
 'use client'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 
 interface Master { id: string; nome: string; email: string; parent_master_id: string | null; attivo: boolean }
 interface Cliente { id: string; ragione_sociale: string; email: string; master_id: string; attivo: boolean }
 
-const LIVELLO_COLORI = [
-  { bg: '#fff7ed', text: '#f97316', border: '#fed7aa' }, // root
-  { bg: '#fff7ed', text: '#f97316', border: '#fed7aa' }, // livello 1
-  { bg: '#f0fdf4', text: '#16a34a', border: '#bbf7d0' }, // livello 2
-  { bg: '#fdf4ff', text: '#a21caf', border: '#f0abfc' }, // livello 3
-  { bg: '#fefce8', text: '#ca8a04', border: '#fde68a' }, // livello 4+
+// Palette per livello (niente blu: arancio → verde → viola → ambra)
+const LIV = [
+  { bg: '#fff7ed', text: '#ea580c', border: '#fed7aa', line: '#fdba74' }, // root
+  { bg: '#fff7ed', text: '#f97316', border: '#fed7aa', line: '#fed7aa' }, // liv 1
+  { bg: '#f0fdf4', text: '#16a34a', border: '#bbf7d0', line: '#bbf7d0' }, // liv 2
+  { bg: '#fdf4ff', text: '#a21caf', border: '#f0abfc', line: '#f0abfc' }, // liv 3
+  { bg: '#fefce8', text: '#ca8a04', border: '#fde68a', line: '#fde68a' }, // liv 4+
 ]
+const livOf = (d: number) => LIV[Math.min(d, LIV.length - 1)]
+const iniziali = (s: string) => (s || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?'
 
 export default function GerarchiaPage() {
   const [masters, setMasters] = useState<Master[]>([])
   const [clienti, setClienti] = useState<Cliente[]>([])
   const [rootId, setRootId] = useState('')
   const [loading, setLoading] = useState(true)
+
   const [search, setSearch] = useState('')
+  const [mostraClienti, setMostraClienti] = useState(true)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     fetch('/api/master/gerarchia').then(r => r.json()).then(d => {
-      setMasters(d.masters || [])
+      const ms: Master[] = d.masters || []
+      setMasters(ms)
       setClienti(d.clienti || [])
       setRootId(d.rootId || '')
+      setExpanded(new Set(ms.map(m => m.id))) // tutto espanso di default
       setLoading(false)
     })
   }, [])
 
-  function nomeMaster(id: string) {
-    return masters.find(m => m.id === id)?.nome || '—'
-  }
-
-  function profondita(id: string): number {
-    let curr = id, depth = 0
-    for (let i = 0; i < 20; i++) {
-      const m = masters.find(x => x.id === curr)
-      if (!m?.parent_master_id) break
-      curr = m.parent_master_id
-      depth++
+  // Indici
+  const figliMaster = useMemo(() => {
+    const m = new Map<string, Master[]>()
+    for (const x of masters) {
+      const k = x.parent_master_id || '__root__'
+      if (!m.has(k)) m.set(k, [])
+      m.get(k)!.push(x)
     }
-    return depth
-  }
+    for (const arr of m.values()) arr.sort((a, b) => a.nome.localeCompare(b.nome))
+    return m
+  }, [masters])
 
-  const righe = useMemo(() => {
-    const masterRighe = masters.map(m => ({
-      tipo: 'master' as const,
-      id: m.id,
-      nome: m.nome,
-      email: m.email,
-      attivo: m.attivo,
-      padreId: m.parent_master_id,
-      padre: m.parent_master_id ? nomeMaster(m.parent_master_id) : '—',
-      profondita: m.id === rootId ? 0 : profondita(m.id),
-    }))
-    const clienteRighe = clienti.map(c => ({
-      tipo: 'cliente' as const,
-      id: c.id,
-      nome: c.ragione_sociale,
-      email: c.email,
-      attivo: c.attivo,
-      padreId: c.master_id,
-      padre: nomeMaster(c.master_id),
-      profondita: profondita(c.master_id) + 1,
-    }))
-    const tutte = [...masterRighe, ...clienteRighe].sort((a, b) => {
-      if (a.profondita !== b.profondita) return a.profondita - b.profondita
-      if (a.padreId !== b.padreId) return (a.padreId || '').localeCompare(b.padreId || '')
-      return a.nome.localeCompare(b.nome)
-    })
+  const clientiDi = useMemo(() => {
+    const m = new Map<string, Cliente[]>()
+    for (const c of clienti) {
+      if (!m.has(c.master_id)) m.set(c.master_id, [])
+      m.get(c.master_id)!.push(c)
+    }
+    for (const arr of m.values()) arr.sort((a, b) => a.ragione_sociale.localeCompare(b.ragione_sociale))
+    return m
+  }, [clienti])
 
-    if (!search.trim()) return tutte
-    const s = search.toLowerCase()
-    return tutte.filter(r => r.nome.toLowerCase().includes(s) || r.email.toLowerCase().includes(s))
-  }, [masters, clienti, search, rootId])
+  const depthOf = useCallback((id: string): number => {
+    if (id === rootId) return 0
+    const byId = new Map(masters.map(m => [m.id, m]))
+    let curr = id, d = 0
+    for (let i = 0; i < 30; i++) {
+      const m = byId.get(curr)
+      if (!m?.parent_master_id) break
+      curr = m.parent_master_id; d++
+      if (curr === rootId) return d
+    }
+    return d
+  }, [masters, rootId])
+
+  const maxDepth = useMemo(() => Math.max(0, ...masters.map(m => depthOf(m.id))), [masters, depthOf])
 
   const stats = useMemo(() => ({
     totMaster: masters.length,
     totClienti: clienti.length,
-    maxProfondita: Math.max(0, ...masters.map(m => profondita(m.id))),
-  }), [masters, clienti])
+    livelli: maxDepth,
+  }), [masters, clienti, maxDepth])
+
+  // Ricerca: id che matchano + antenati da tenere visibili
+  const { matchSet, keepSet } = useMemo(() => {
+    const s = search.trim().toLowerCase()
+    if (!s) return { matchSet: new Set<string>(), keepSet: null as Set<string> | null }
+    const match = new Set<string>()
+    const keep = new Set<string>()
+    const byId = new Map(masters.map(m => [m.id, m]))
+    const risali = (masterId: string) => {
+      let curr: string | null = masterId
+      for (let i = 0; i < 30 && curr; i++) { keep.add(curr); curr = byId.get(curr)?.parent_master_id || null }
+    }
+    for (const m of masters) {
+      if (m.nome.toLowerCase().includes(s) || (m.email || '').toLowerCase().includes(s)) { match.add(m.id); risali(m.id) }
+    }
+    if (mostraClienti) for (const c of clienti) {
+      if (c.ragione_sociale.toLowerCase().includes(s) || (c.email || '').toLowerCase().includes(s)) { match.add(c.id); keep.add(c.id); risali(c.master_id) }
+    }
+    return { matchSet: match, keepSet: keep }
+  }, [search, masters, clienti, mostraClienti])
+
+  function toggle(id: string) {
+    setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  }
+  const espandiTutto = () => setExpanded(new Set(masters.map(m => m.id)))
+  const comprimiTutto = () => setExpanded(new Set())
+  const espandiFinoA = (liv: number) => setExpanded(new Set(masters.filter(m => depthOf(m.id) < liv).map(m => m.id)))
+
+  // Se sto cercando, forzo l'espansione dei rami che contengono match
+  const effExpanded = useMemo(() => {
+    if (!keepSet) return expanded
+    return new Set([...expanded, ...keepSet])
+  }, [expanded, keepSet])
+
+  const Highlight = ({ text }: { text: string }) => {
+    const s = search.trim()
+    if (!s) return <>{text}</>
+    const i = text.toLowerCase().indexOf(s.toLowerCase())
+    if (i < 0) return <>{text}</>
+    return <>{text.slice(0, i)}<mark style={{ background: '#fed7aa', color: '#9a3412', padding: '0 1px', borderRadius: '2px' }}>{text.slice(i, i + s.length)}</mark>{text.slice(i + s.length)}</>
+  }
+
+  function ClienteRow({ c }: { c: Cliente }) {
+    if (keepSet && !keepSet.has(c.id)) return null
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '7px 10px', borderRadius: '8px', margin: '2px 0' }}
+        onMouseEnter={e => (e.currentTarget.style.background = '#fafafa')} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+        <span style={{ width: '16px' }} />
+        <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: '#f4f4f5', color: '#71717a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', flexShrink: 0 }}>{iniziali(c.ragione_sociale)}</div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: '13px', color: '#1a1a1a', fontWeight: '500', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}><Highlight text={c.ragione_sociale} /></div>
+          <div style={{ fontSize: '11px', color: '#a1a1aa', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.email}</div>
+        </div>
+        <span style={{ fontSize: '10px', fontWeight: '600', color: '#71717a', background: '#f4f4f5', padding: '2px 7px', borderRadius: '5px' }}>Cliente</span>
+        <span title={c.attivo ? 'Attivo' : 'Inattivo'} style={{ width: '8px', height: '8px', borderRadius: '50%', background: c.attivo ? '#22c55e' : '#ef4444', flexShrink: 0 }} />
+      </div>
+    )
+  }
+
+  function MasterNode({ m }: { m: Master }) {
+    const d = depthOf(m.id)
+    const col = livOf(d)
+    const subMasters = figliMaster.get(m.id) || []
+    const subClienti = mostraClienti ? (clientiDi.get(m.id) || []) : []
+    const nFigli = subMasters.length + subClienti.length
+    const isOpen = effExpanded.has(m.id)
+    const isRoot = m.id === rootId
+
+    // Con ricerca attiva: mostro solo rami che portano a un match
+    const visSubMasters = keepSet ? subMasters.filter(s => keepSet.has(s.id)) : subMasters
+    const visClienti = keepSet ? subClienti.filter(c => keepSet.has(c.id)) : subClienti
+    const isMatch = matchSet.has(m.id)
+
+    return (
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 10px', borderRadius: '9px', margin: '2px 0', border: isMatch ? '1px solid #fed7aa' : '1px solid transparent', background: isMatch ? '#fff7ed' : 'transparent' }}
+          onMouseEnter={e => { if (!isMatch) e.currentTarget.style.background = '#fafafa' }} onMouseLeave={e => { if (!isMatch) e.currentTarget.style.background = 'transparent' }}>
+          <button onClick={() => toggle(m.id)} disabled={!nFigli}
+            style={{ width: '18px', height: '18px', flexShrink: 0, border: 'none', background: 'none', cursor: nFigli ? 'pointer' : 'default', color: nFigli ? '#a1a1aa' : 'transparent', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center', transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</button>
+          <div style={{ width: '32px', height: '32px', borderRadius: '9px', background: isRoot ? '#f97316' : col.bg, color: isRoot ? '#fff' : col.text, border: `1px solid ${isRoot ? '#f97316' : col.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '800', flexShrink: 0 }}>{iniziali(m.nome)}</div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+              <span style={{ fontSize: '13.5px', fontWeight: '700', color: '#1a1a1a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}><Highlight text={m.nome} /></span>
+              <span style={{ fontSize: '9px', fontWeight: '700', color: col.text, background: col.bg, border: `1px solid ${col.border}`, padding: '2px 6px', borderRadius: '4px', textTransform: 'uppercase', flexShrink: 0 }}>{isRoot ? 'ROOT' : `LIV. ${d}`}</span>
+            </div>
+            <div style={{ fontSize: '11px', color: '#a1a1aa', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.email}</div>
+          </div>
+          {nFigli > 0 && (
+            <span style={{ fontSize: '11px', color: '#71717a', whiteSpace: 'nowrap' }}>
+              {subMasters.length > 0 && <><b style={{ color: '#52525b' }}>{subMasters.length}</b> master</>}
+              {subMasters.length > 0 && subClienti.length > 0 && ' · '}
+              {subClienti.length > 0 && <><b style={{ color: '#52525b' }}>{subClienti.length}</b> clienti</>}
+            </span>
+          )}
+          <span title={m.attivo ? 'Attivo' : 'Inattivo'} style={{ width: '8px', height: '8px', borderRadius: '50%', background: m.attivo ? '#22c55e' : '#ef4444', flexShrink: 0 }} />
+        </div>
+        {isOpen && nFigli > 0 && (
+          <div style={{ marginLeft: '25px', paddingLeft: '10px', borderLeft: `1.5px solid ${col.line}` }}>
+            {visSubMasters.map(s => <MasterNode key={s.id} m={s} />)}
+            {visClienti.map(c => <ClienteRow key={c.id} c={c} />)}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const root = masters.find(m => m.id === rootId)
+  const statCard = (label: string, val: any) => (
+    <div style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '10px', padding: '13px 18px', flex: 1 }}>
+      <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
+      <div style={{ fontSize: '22px', fontWeight: '800', color: '#1a1a1a', marginTop: '2px' }}>{val}</div>
+    </div>
+  )
+
+  const chip = (attivo: boolean): React.CSSProperties => ({
+    padding: '6px 12px', borderRadius: '7px', fontSize: '12px', fontWeight: '600', cursor: 'pointer',
+    border: `1px solid ${attivo ? '#f97316' : '#e8e8e8'}`, background: attivo ? '#fff7ed' : '#fff', color: attivo ? '#ea580c' : '#666',
+  })
 
   return (
     <div>
-      <div style={{ marginBottom: '20px' }}>
-        <h1 style={{ fontSize: '20px', fontWeight: '700', color: '#1a1a1a', margin: 0 }}>Gerarchia Completa</h1>
-        <p style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>
-          Vista completa di tutti i master e clienti nell'albero, con ricerca
-        </p>
+      <div style={{ marginBottom: '18px' }}>
+        <h1 style={{ fontSize: '20px', fontWeight: '700', color: '#1a1a1a', margin: 0 }}>Gerarchia della Rete</h1>
+        <p style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>Albero completo di master, sotto-master e clienti — espandibile, con ricerca e filtri per livello</p>
       </div>
 
-      {/* Stats bar */}
       <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
-        <div style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '8px', padding: '12px 18px', flex: 1 }}>
-          <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Master Totali</div>
-          <div style={{ fontSize: '22px', fontWeight: '800', color: '#1a1a1a', marginTop: '2px' }}>{stats.totMaster}</div>
-        </div>
-        <div style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '8px', padding: '12px 18px', flex: 1 }}>
-          <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Clienti Totali</div>
-          <div style={{ fontSize: '22px', fontWeight: '800', color: '#1a1a1a', marginTop: '2px' }}>{stats.totClienti}</div>
-        </div>
-        <div style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '8px', padding: '12px 18px', flex: 1 }}>
-          <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Profondità Massima</div>
-          <div style={{ fontSize: '22px', fontWeight: '800', color: '#1a1a1a', marginTop: '2px' }}>{stats.maxProfondita} livelli</div>
-        </div>
+        {statCard('Master Totali', stats.totMaster)}
+        {statCard('Clienti Totali', stats.totClienti)}
+        {statCard('Profondità', `${stats.livelli} ${stats.livelli === 1 ? 'livello' : 'livelli'}`)}
       </div>
 
-      <div style={{ marginBottom: '16px' }}>
+      {/* Toolbar */}
+      <div style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '10px', padding: '14px 16px', marginBottom: '14px', display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
         <input
           value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="🔍 Cerca per nome o email..."
-          style={{ width: '100%', maxWidth: '420px', padding: '10px 16px', border: '1px solid #e8e8e8', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }}
+          placeholder="Cerca master o cliente per nome o email..."
+          style={{ flex: '1 1 260px', padding: '9px 14px', border: '1px solid #e8e8e8', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box', color: '#1a1a1a' }}
         />
+        <label style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12.5px', color: '#555', cursor: 'pointer', userSelect: 'none' }}>
+          <input type="checkbox" checked={mostraClienti} onChange={e => setMostraClienti(e.target.checked)} style={{ width: '15px', height: '15px', accentColor: '#f97316' }} />
+          Mostra clienti
+        </label>
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '11px', color: '#999', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '.5px', marginRight: '2px' }}>Livello</span>
+          <button style={chip(false)} onClick={espandiTutto}>Tutti</button>
+          {Array.from({ length: maxDepth + 1 }, (_, i) => (
+            <button key={i} style={chip(false)} onClick={() => espandiFinoA(i)}>{i === 0 ? 'Root' : `L${i}`}</button>
+          ))}
+          <button style={{ ...chip(false), color: '#999' }} onClick={comprimiTutto}>Comprimi</button>
+        </div>
       </div>
 
-      <div style={{ background: '#fff', borderRadius: '10px', border: '1px solid #e8e8e8', overflow: 'hidden' }}>
+      {/* Albero */}
+      <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e8e8e8', padding: '10px 14px', minHeight: '200px' }}>
         {loading ? (
           <div style={{ textAlign: 'center', color: '#999', padding: '50px' }}>Caricamento...</div>
+        ) : !root ? (
+          <div style={{ textAlign: 'center', color: '#999', padding: '50px' }}>Nessun dato disponibile</div>
+        ) : (keepSet && keepSet.size === 0) ? (
+          <div style={{ textAlign: 'center', color: '#999', padding: '50px' }}>Nessun risultato per "{search}"</div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-              <thead>
-                <tr style={{ background: '#fafafa' }}>
-                  {['', 'Nome', 'Email', 'Livello', 'Appartiene a', 'Stato'].map(h => (
-                    <th key={h} style={{ textAlign: 'left', padding: '11px 16px', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#999', borderBottom: '1px solid #f0f0f0' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {righe.map(r => {
-                  const colore = LIVELLO_COLORI[Math.min(r.profondita, LIVELLO_COLORI.length - 1)]
-                  const isMaster = r.tipo === 'master'
-                  return (
-                    <tr key={`${r.tipo}-${r.id}`} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                      <td style={{ padding: '12px 16px 12px 16px', width: '40px' }}>
-                        <div style={{
-                          width: '30px', height: '30px', borderRadius: '8px',
-                          background: colore.bg, border: `1px solid ${colore.border}`,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px',
-                        }}>
-                          {r.profondita === 0 ? '👑' : isMaster ? '🏢' : '👤'}
-                        </div>
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: `${r.profondita * 18}px` }}>
-                          {r.profondita > 0 && <span style={{ color: '#ddd', fontSize: '13px' }}>└</span>}
-                          <span style={{ fontWeight: isMaster ? '700' : '500', color: '#1a1a1a' }}>{r.nome}</span>
-                          {isMaster && r.profondita > 0 && (
-                            <span style={{ fontSize: '9px', fontWeight: '700', color: colore.text, background: colore.bg, border: `1px solid ${colore.border}`, padding: '2px 6px', borderRadius: '4px', textTransform: 'uppercase' }}>Master</span>
-                          )}
-                        </div>
-                      </td>
-                      <td style={{ padding: '12px 16px', color: '#666', fontSize: '12px' }}>{r.email}</td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <span style={{ fontSize: '11px', fontWeight: '600', color: colore.text, background: colore.bg, border: `1px solid ${colore.border}`, padding: '3px 9px', borderRadius: '5px' }}>
-                          {r.profondita === 0 ? 'ROOT' : `LIV. ${r.profondita}`}
-                        </span>
-                      </td>
-                      <td style={{ padding: '12px 16px', color: '#666', fontSize: '12px' }}>{r.padre}</td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <span style={{ background: r.attivo ? '#f0fdf4' : '#fef2f2', color: r.attivo ? '#16a34a' : '#dc2626', padding: '3px 9px', borderRadius: '5px', fontSize: '11px', fontWeight: '600' }}>
-                          {r.attivo ? '● Attivo' : '● Inattivo'}
-                        </span>
-                      </td>
-                    </tr>
-                  )
-                })}
-                {!righe.length && (
-                  <tr><td colSpan={6} style={{ textAlign: 'center', padding: '50px', color: '#999' }}>Nessun risultato</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <MasterNode m={root} />
         )}
       </div>
     </div>
