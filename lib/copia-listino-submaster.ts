@@ -1,3 +1,17 @@
+// Chiavi di IMPOSTAZIONI DI CONTRATTO che si propagano al sotto-master (NON il mittente,
+// che è specifico di ogni master). agevolazione peso, misure/volume massimo, scaglioni misure,
+// peso reale fino a X kg.
+const CONTRACT_SETTINGS_KEYS = ['agevolazione_peso_reale', 'misure_max', 'misure_scaglioni', 'peso_reale_soglia']
+function settingsContratto(src: any): any {
+  const out: any = {}
+  if (src && typeof src === 'object') {
+    for (const k of CONTRACT_SETTINGS_KEYS) {
+      if (src[k] !== undefined && src[k] !== null) out[k] = src[k]
+    }
+  }
+  return out
+}
+
 // Propaga a CASCATA le modifiche di un listino a tutta la rete sottostante:
 // - i sotto-master a cui è assegnato questo listino (parent_listino_id = listinoId)
 //   vengono ri-materializzati (copiaListinoAlSottoMaster force);
@@ -46,21 +60,29 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   const corriereIds = [...new Set(fasceSrc.map((f: any) => f.corriere_id).filter(Boolean))]
   const zonaIds = [...new Set(fasceSrc.map((f: any) => f.zona_id).filter(Boolean))]
 
-  // 1) CORRIERI (contratti): uno per il sotto-master per ciascuno del padre (riuso per nome)
+  // 1) CORRIERI (contratti): uno per il sotto-master per ciascuno del padre (riuso per nome).
+  //    Le IMPOSTAZIONI DI CONTRATTO (agevolazione peso, misure/volume massimo, scaglioni,
+  //    peso reale soglia) si PROPAGANO dal padre; il MITTENTE resta del sotto-master.
   const { data: corrSrc } = corriereIds.length ? await admin.from('corrieri').select('*').in('id', corriereIds) : { data: [] }
-  const { data: corrMiei } = await admin.from('corrieri').select('id,nome_contratto').eq('master_id', subMasterId)
-  const mappaCorrMio = new Map((corrMiei || []).map((c: any) => [(c.nome_contratto || '').trim().toLowerCase(), c.id]))
+  const { data: corrMiei } = await admin.from('corrieri').select('id,nome_contratto,settings').eq('master_id', subMasterId)
+  const mappaCorrMio = new Map((corrMiei || []).map((c: any) => [(c.nome_contratto || '').trim().toLowerCase(), c]))
   const mapCorr = new Map<string, string>()
   for (const c of (corrSrc || [])) {
     const key = (c.nome_contratto || '').trim().toLowerCase()
-    let subId = mappaCorrMio.get(key)
+    const esist: any = mappaCorrMio.get(key)
+    let subId = esist?.id
     if (!subId) {
+      // Nuovo: copio le impostazioni di contratto (senza mittente: lo imposta il sotto-master).
       const { data: nuovo } = await admin.from('corrieri').insert({
         master_id: subMasterId, nome_contratto: c.nome_contratto, tipo: c.tipo,
-        credenziali: c.credenziali ?? null, settings: c.settings ?? null, attivo: c.attivo ?? true,
+        credenziali: c.credenziali ?? null, settings: settingsContratto(c.settings), attivo: c.attivo ?? true,
       }).select('id').single()
       subId = nuovo?.id
-      if (subId) mappaCorrMio.set(key, subId)
+      if (subId) mappaCorrMio.set(key, { id: subId, settings: settingsContratto(c.settings) })
+    } else {
+      // Esistente: aggiorno le impostazioni di contratto, MANTENENDO il mittente del sotto-master.
+      const merged = { ...(esist.settings || {}), ...settingsContratto(c.settings) }
+      await admin.from('corrieri').update({ settings: merged }).eq('id', subId)
     }
     if (subId) mapCorr.set(c.id, subId)
   }
