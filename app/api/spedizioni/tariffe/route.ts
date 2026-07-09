@@ -5,7 +5,7 @@ import {
   kgToGrams, cmToMm, euroToCents, centsToEuro
 } from '@/lib/spediamopro'
 import { trovaZoneMatch } from '@/lib/zone-match'
-import { calcolaPrezzoCorriere } from '@/lib/pricing'
+import { calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
 
 const ZONE_MAP: Record<string,string> = {
   CA:'Sardegna',CI:'Sardegna',VS:'Sardegna',NU:'Sardegna',OG:'Sardegna',OT:'Sardegna',OR:'Sardegna',SS:'Sardegna',
@@ -91,18 +91,20 @@ export async function POST(req: NextRequest) {
       const corr: any = (lc as any).corrieri
       if (!corr || corr.attivo === false) continue
       if (superaMisureMax(corr.settings, pesoRealeP, colliP)) continue   // fuori misura per il suo scaglione
-      const prezzo = await calcolaPrezzoCorriere(supabase, {
+      const dett = await calcolaPrezzoCorriereDettaglio(supabase, {
         corriereId: (lc as any).corriere_id, masterId: masterIdP,
         provincia: provinciaP, cap: capP, paese: paeseP,
         pesoReale: pesoRealeP, packages: colliP,
         contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
       })
-      if (prezzo == null || prezzo <= 0) continue   // nessun listino/fascia per questa zona o prezzo 0 -> non mostrare
+      if (!dett || dett.totale <= 0) continue   // nessun listino/fascia per questa zona o prezzo 0 -> non mostrare
+      const prezzoSpedP = dett.nolo + dett.fuel + dett.sponda
       risultati.push({
         carrierCode: corr.tipo || 'sda', contractCode: '',
-        weight_price: prezzo.toFixed(2), prezzo_spedizione: prezzo.toFixed(2),
-        costo_contrassegno: '0.00', costo_assicurazione: '0.00',
-        total_price: prezzo.toFixed(2), fuel: '0.00',
+        weight_price: dett.nolo.toFixed(2), prezzo_spedizione: prezzoSpedP.toFixed(2),
+        costo_sponda: dett.sponda.toFixed(2), costo_fuel: dett.fuel.toFixed(2), fuel: dett.fuel.toFixed(2),
+        costo_contrassegno: dett.contrassegno.toFixed(2), costo_assicurazione: dett.assicurazione.toFixed(2),
+        total_price: dett.totale.toFixed(2),
         zona: isEsteroP ? (PAESI[paeseP] || paeseP) : (ZONE_MAP[provinciaP] || 'Italia'),
         peso_reale: pesoRealeP, peso_volume: '0.00', peso_fatturato: pesoRealeP.toFixed(2),
         corriere_nome: corr.nome_contratto || 'Corriere', listino_fascia: 'Listino corriere',

@@ -58,6 +58,16 @@ export type DettaglioPrezzo = {
   assicurazione: number
 }
 
+// Dettaglio del prezzo del LISTINO CORRIERE, scorporato in voci (per la spedizione propria del master).
+export type DettaglioCorriere = {
+  totale: number
+  nolo: number
+  fuel: number
+  sponda: number
+  contrassegno: number
+  assicurazione: number
+}
+
 // Calcola il prezzo di trasporto per un listino dato.
 // Se corriereId è passato, usa le fasce di quel corriere; altrimenti prende
 // il primo corriere disponibile per la zona (il più economico non è garantito:
@@ -181,8 +191,9 @@ export async function calcolaPrezzoListino(
 }
 
 
-// Calcola il prezzo che il MASTER paga al CORRIERE (listino corriere) per una spedizione.
-export async function calcolaPrezzoCorriere(
+// Calcola il prezzo che il MASTER paga al CORRIERE (listino corriere) per una spedizione,
+// scorporato in voci. calcolaPrezzoCorriere (sotto) ne ritorna solo il totale (compat).
+export async function calcolaPrezzoCorriereDettaglio(
   supabase: any,
   params: {
     corriereId: string
@@ -195,7 +206,7 @@ export async function calcolaPrezzoCorriere(
     cap?: string
     paese?: string
   }
-): Promise<number | null> {
+): Promise<DettaglioCorriere | null> {
   const { corriereId, masterId, provincia } = params
   const zonaNome = zonaDaProvincia(provincia)
 
@@ -274,8 +285,9 @@ export async function calcolaPrezzoCorriere(
       fuelPct = Number(ultima.fuel) || 0
     } else return null   // peso oltre l'ultima fascia e nessuna "oltre": nessun prezzo
   }
-  // Fuel %: supplemento percentuale sul nolo di fascia.
-  if (fuelPct) prezzo = prezzo * (1 + fuelPct / 100)
+  // Fuel %: supplemento percentuale sul nolo di fascia (scorporato).
+  const noloBase = prezzo
+  const fuelAmt = fuelPct ? noloBase * (fuelPct / 100) : 0
 
   const { data: suppl } = await supabase
     .from('listini_corrieri_supplementi')
@@ -285,7 +297,6 @@ export async function calcolaPrezzoCorriere(
 
   const cod = Number(params.contrassegno) || 0
   const ass = Number(params.assicurazione) || 0
-  const nolo = prezzo // base per il calcolo percentuale (prima di aggiungere i supplementi)
 
   // Scaglioni contrassegno/assicurazione, stesso formato del listino cliente:
   // descrizione = { valore_max, prezzo_fisso, perc, calcolo_su }
@@ -310,19 +321,39 @@ export async function calcolaPrezzoCorriere(
     const base = s.calcolo_su === 'differenza' ? Math.max(0, importo - primaFasciaMax) : importo
     return s.prezzo_fisso + (s.perc / 100) * base
   }
-  // Sponda: sopra soglia_kg, +prezzo_kg € per ogni kg oltre la soglia (peso fatturato).
+  // Sponda: sopra soglia_kg, +prezzo_kg € per ogni kg (peso fatturato).
+  let spondaAmt = 0
   const spondaRow = (suppl || []).find((s: any) => s.tipo === 'sponda')
   if (spondaRow) {
     let d: any = null; try { d = JSON.parse(spondaRow.descrizione) } catch {}
     const soglia = Number(d?.soglia_kg) || 0
     const prezzoKg = Number(spondaRow.valore) || 0
-    if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) prezzo += pesoFatturato * prezzoKg
+    if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) spondaAmt = pesoFatturato * prezzoKg
   }
+  const feeCod = applicaScaglione('contrassegno', cod)
+  const feeAss = applicaScaglione('assicurazione', ass)
 
-  prezzo += applicaScaglione('contrassegno', cod)
-  prezzo += applicaScaglione('assicurazione', ass)
+  const r2 = (n: number) => Math.round(n * 100) / 100
+  return {
+    totale: r2(noloBase + fuelAmt + spondaAmt + feeCod + feeAss),
+    nolo: r2(noloBase),
+    fuel: r2(fuelAmt),
+    sponda: r2(spondaAmt),
+    contrassegno: r2(feeCod),
+    assicurazione: r2(feeAss),
+  }
+}
 
-  return Math.round(prezzo * 100) / 100
+// Compat: ritorna solo il totale del listino corriere (usato da cascata, report, ecc.).
+export async function calcolaPrezzoCorriere(
+  supabase: any,
+  params: {
+    corriereId: string; masterId: string; provincia: string; pesoReale: number
+    packages?: any[]; contrassegno?: number; assicurazione?: number; cap?: string; paese?: string
+  }
+): Promise<number | null> {
+  const d = await calcolaPrezzoCorriereDettaglio(supabase, params)
+  return d ? d.totale : null
 }
 
 
