@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { registraMovimento } from '@/lib/movimenti'
-import { rimborsaCatena } from '@/lib/cascata'
+import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { spediamoproCancelShipment } from '@/lib/spediamopro'
 
 // Il corriere considera la spedizione GIÀ eliminata/inesistente → possiamo cancellarla anche da Moove.
@@ -97,53 +96,44 @@ export async function DELETE(req: NextRequest) {
   const { error: updErr } = await admin.from('spedizioni').update({ stato: 'annullata' }).eq('id', spedizioneId)
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 400 })
 
-  // Rimborso credito al CLIENTE (+ costo_totale). Best-effort.
-  const costoCliente = Number(sped.costo_totale || 0)
-  if (costoCliente > 0 && sped.cliente_id) {
-    try {
-      await registraMovimento(admin, {
-        masterId: sped.master_id,
-        clienteId: sped.cliente_id,
-        tipo: 'rimborso',
-        descrizione: `Rimborso ${sped.numero} - ${sped.dest_nome || ''}`.trim(),
-        riferimento: sped.numero,
-        importo: Math.abs(costoCliente),
-        spedizioneId: sped.id,
-        createdBy: user.id,
-      })
-    } catch (e) {
-      console.error('Errore rimborso credito su annullo:', e)
-    }
-  }
-
-  // Rimborso a cascata ai MASTER della catena (speculare all'addebito in creazione).
+  // ── RIMBORSO CREDITO: storno gli ADDEBITI REALI di questa spedizione. ──
+  // NON ricalcolo prezzo/cascata: per ogni movimento di addebito ('spedizione') legato a
+  // questa spedizione creo un rimborso dello STESSO identico importo. Così torna esattamente
+  // il credito speso, a OGNI livello (cliente + master della catena), a prescindere da come
+  // sono cambiati listino/cascata dopo la creazione.
   try {
-    if (corr?.master_id) {
-      let packages: any[] = []
-      if (Array.isArray(sped.colli_dettaglio) && sped.colli_dettaglio.length) {
-        packages = sped.colli_dettaglio.map((c: any) => ({
-          weight: sped.peso_reale || 1, length: c.lunghezza, width: c.larghezza, height: c.altezza,
-        }))
-      } else {
-        packages = [{ weight: sped.peso_reale || 1, length: sped.lunghezza, width: sped.larghezza, height: sped.altezza }]
+    // Idempotenza: se esistono già storni per questa spedizione, non li ricreo.
+    const { data: giaRimborsati } = await admin.from('movimenti')
+      .select('id').eq('spedizione_id', sped.id).eq('tipo', 'rimborso').limit(1)
+    if (!giaRimborsati?.length) {
+      const { data: addebiti } = await admin.from('movimenti')
+        .select('cliente_id,master_id,master_target_id,importo')
+        .eq('spedizione_id', sped.id).eq('tipo', 'spedizione')
+      const desc = `Rimborso ${sped.numero} - ${sped.dest_nome || ''}`.trim()
+      for (const a of (addebiti || [])) {
+        const importo = Math.abs(Number(a.importo || 0))
+        if (!(importo > 0)) continue
+        try {
+          if (a.cliente_id) {
+            await registraMovimento(admin, {
+              masterId: a.master_id, clienteId: a.cliente_id,
+              tipo: 'rimborso', descrizione: desc, riferimento: sped.numero,
+              importo, spedizioneId: sped.id, createdBy: user.id,
+            })
+          } else if (a.master_target_id) {
+            await registraMovimentoMaster(admin, {
+              masterOwnerId: a.master_id, masterTargetId: a.master_target_id,
+              tipo: 'rimborso', descrizione: desc, riferimento: sped.numero,
+              importo, spedizioneId: sped.id, createdBy: user.id,
+            })
+          }
+        } catch (e) {
+          console.error('Errore storno movimento su annullo:', e)
+        }
       }
-      await rimborsaCatena(admin, {
-        masterDirettoId: sped.master_id,
-        corriereOwnerId: corr.master_id,
-        costoSpedizione: Number(sped.costo_spedizione || 0),
-        provincia: sped.dest_provincia || '',
-        cap: sped.dest_cap || '',
-        paese: sped.dest_paese || 'IT',
-        packages,
-        corriereNome: corr.nome_contratto,
-        numero: sped.numero,
-        destNome: sped.dest_nome || '',
-        spedizioneId: sped.id,
-        createdBy: user.id,
-      })
     }
   } catch (e) {
-    console.error('Errore rimborso cascata master su annullo:', e)
+    console.error('Errore rimborso su annullo:', e)
   }
 
   return NextResponse.json({ success: true })

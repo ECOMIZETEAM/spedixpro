@@ -48,6 +48,7 @@ export async function GET(req: NextRequest) {
   const n = (x: any) => Number(x || 0)
   let ricaviClienti = 0, costoM = 0, ricaviSub = 0
   for (const m of (movM || [])) {
+    // addebito e rimborso si annullano da soli (storno esatto in annullo) -> annullate = netto 0
     if (m.cliente_id) ricaviClienti += -n(m.importo)            // incasso dai clienti diretti (addebito negativo -> ricavo)
     else if (m.master_target_id === M) costoM += -n(m.importo)  // costo di M verso il livello superiore/corriere
   }
