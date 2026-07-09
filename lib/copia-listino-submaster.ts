@@ -1,7 +1,7 @@
 // Chiavi di IMPOSTAZIONI DI CONTRATTO che si propagano al sotto-master (NON il mittente,
 // che è specifico di ogni master). agevolazione peso, misure/volume massimo, scaglioni misure,
 // peso reale fino a X kg.
-const CONTRACT_SETTINGS_KEYS = ['agevolazione_peso_reale', 'misure_max', 'misure_scaglioni', 'peso_reale_soglia']
+const CONTRACT_SETTINGS_KEYS = ['agevolazione_peso_reale', 'misure_max', 'misure_scaglioni', 'peso_reale_soglia', 'limite_combinato', 'peso_max_collo', 'colli_max']
 function settingsContratto(src: any): any {
   const out: any = {}
   if (src && typeof src === 'object') {

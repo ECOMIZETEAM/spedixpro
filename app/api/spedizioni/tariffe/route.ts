@@ -23,17 +23,46 @@ const PAESI: Record<string,string> = {
 // True se un collo supera le misure massime del corriere per il suo scaglione di PESO REALE.
 // La spedizione va quindi esclusa da quel corriere. Vuoto/incompleto = nessun limite.
 function superaMisureMax(settings: any, pesoReale: number, colli: any[]): boolean {
+  const arr = colli || []
+  // N. massimo colli
+  const colliMax = Number(settings?.colli_max) || 0
+  if (colliMax > 0 && arr.length > colliMax) return true
+  // Peso massimo per collo
+  const pesoMaxCollo = Number(settings?.peso_max_collo) || 0
+  if (pesoMaxCollo > 0 && arr.some((c: any) => (Number(c.weight) || Number(c.peso) || 0) > pesoMaxCollo)) return true
+  // Misura combinata: lato maggiore + 2×(somma degli altri due lati)  (formula UPS = lunghezza+perimetro)
+  const comb = Number(settings?.limite_combinato) || 0
+  if (comb > 0 && arr.some((c: any) => {
+    const d = [Number(c.length) || 0, Number(c.width) || 0, Number(c.height) || 0].sort((a, b) => b - a)
+    return (d[0] + 2 * (d[1] + d[2])) > comb
+  })) return true
+  // Misure massime per-lato (con scaglioni di peso)
   const sc = settings?.misure_scaglioni
   const lim = (sc && sc.soglia_kg != null && sc.soglia_kg !== '')
     ? (pesoReale > Number(sc.soglia_kg) ? sc.sopra : sc.sotto)
     : settings?.misure_max
   const L = Number(lim?.lunghezza) || 0, W = Number(lim?.larghezza) || 0, H = Number(lim?.altezza) || 0
-  if (!(L > 0 && W > 0 && H > 0)) return false
-  const limits = [L, W, H].sort((a, b) => b - a)
-  return (colli || []).some((c: any) => {
-    const dims = [Number(c.length) || 0, Number(c.width) || 0, Number(c.height) || 0].sort((a, b) => b - a)
-    return dims[0] > limits[0] || dims[1] > limits[1] || dims[2] > limits[2]
-  })
+  if (L > 0 && W > 0 && H > 0) {
+    const limits = [L, W, H].sort((a, b) => b - a)
+    if (arr.some((c: any) => {
+      const dims = [Number(c.length) || 0, Number(c.width) || 0, Number(c.height) || 0].sort((a, b) => b - a)
+      return dims[0] > limits[0] || dims[1] > limits[1] || dims[2] > limits[2]
+    })) return true
+  }
+  return false
+}
+
+// Testo indicazione limiti collo, chiaro e sintetico, dai settings del corriere.
+function descriviLimiti(settings: any): string {
+  if (!settings) return ''
+  const parts: string[] = []
+  const mm = settings.misure_max
+  if (mm && (Number(mm.lunghezza) > 0 || Number(mm.larghezza) > 0 || Number(mm.altezza) > 0))
+    parts.push(`max ${mm.lunghezza || '-'}×${mm.larghezza || '-'}×${mm.altezza || '-'} cm`)
+  if (Number(settings.limite_combinato) > 0) parts.push(`lato+2×(altri due) ≤ ${settings.limite_combinato} cm`)
+  if (Number(settings.peso_max_collo) > 0) parts.push(`${settings.peso_max_collo} kg/collo`)
+  if (Number(settings.colli_max) > 0) parts.push(`max ${settings.colli_max} colli`)
+  return parts.join(' · ')
 }
 
 export async function POST(req: NextRequest) {
@@ -107,7 +136,7 @@ export async function POST(req: NextRequest) {
         total_price: dett.totale.toFixed(2),
         zona: isEsteroP ? (PAESI[paeseP] || paeseP) : (ZONE_MAP[provinciaP] || 'Italia'),
         peso_reale: pesoRealeP, peso_volume: '0.00', peso_fatturato: pesoRealeP.toFixed(2),
-        corriere_nome: corr.nome_contratto || 'Corriere', listino_fascia: 'Listino corriere', misure_max: corr.settings?.misure_max || null,
+        corriere_nome: corr.nome_contratto || 'Corriere', listino_fascia: 'Listino corriere', limiti_collo: descriviLimiti(corr.settings),
         _corriere_tipo: corr.tipo, _corriere_id: corr.id,
       })
     }
@@ -443,7 +472,7 @@ export async function POST(req: NextRequest) {
       peso_volume: pesoVolume.toFixed(2),
       peso_fatturato: pesoPerFascia.toFixed(2),   // peso EFFETTIVO su cui è calcolato il prezzo (reale se agevolazione)
       corriere_nome: corriere?.nome_contratto || 'Corriere',
-      misure_max: settsC?.misure_max || null,   // limiti collo da mostrare come indicazione
+      limiti_collo: descriviLimiti(settsC),   // indicazione limiti collo (misure/combinata/peso/colli)
       listino_fascia: `fino a ${fasciaGiusta.peso_max}kg`,
       accessori_disponibili: accessoriPerCorriere.get(corriereId) || [],
       _corriere_tipo: corriere?.tipo,
