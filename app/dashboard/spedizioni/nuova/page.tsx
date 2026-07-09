@@ -21,7 +21,7 @@ function iconaCorriere(nome:string): string | null {
 }
 
 interface Cliente { id:string; ragione_sociale:string; so_indirizzo:string|null;so_citta:string|null; so_provincia:string|null; so_cap:string|null; email:string; telefono:string|null }
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string;zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; corriere_nome?:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; _corriere_id?:string; _corriere_tipo?:string; _spediamopro_quotation?:any }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string;zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; corriere_nome?:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; misure_max?:{lunghezza?:string;larghezza?:string;altezza?:string}|null; _corriere_id?:string; _corriere_tipo?:string; _spediamopro_quotation?:any }
 interface Collo { lunghezza:string; larghezza:string; altezza:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -510,6 +510,9 @@ export default function NuovaSpedizionePage() {
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontWeight:'700',color:'#1a1a1a',fontSize:'14px'}}>{r.corriere_nome||c.nome}</div>
                     <div style={{fontSize:'11px',color:'#000',marginTop:'1px'}}>{r.peso_fatturato}kg · zona {r.zona}</div>
+                    {r.misure_max && (Number(r.misure_max.lunghezza)>0||Number(r.misure_max.larghezza)>0||Number(r.misure_max.altezza)>0) && (
+                      <div style={{fontSize:'10.5px',color:'#b45309',marginTop:'2px'}}>Max collo {r.misure_max.lunghezza||'-'}×{r.misure_max.larghezza||'-'}×{r.misure_max.altezza||'-'} cm</div>
+                    )}
                   </div>
                   <div style={{fontSize:'18px',fontWeight:'800',color:'#f97316',flexShrink:0}}>€ {r.total_price}</div>
                 </div>

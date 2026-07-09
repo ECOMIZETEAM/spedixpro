@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
 const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':(t||'').toUpperCase()
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; _corriere_id?:string; corriere_nome?:string }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; misure_max?:{lunghezza?:string;larghezza?:string;altezza?:string}|null; _corriere_id?:string; corriere_nome?:string }
 interface Collo { lunghezza:string; larghezza:string; altezza:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -452,6 +452,9 @@ export default function NuovaSpedizioneCliente() {
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontWeight:'700',color:'#1a1a1a',fontSize:'13px'}}>{r.corriere_nome || carrier.nome || codiceProv(r.carrierCode)}</div>
                       <div style={{fontSize:'11px',color:'#999',marginTop:'1px'}}>{r.peso_fatturato}kg · zona {r.zona}{parseFloat(r.peso_volume)>r.peso_reale?' (vol.)':''}</div>
+                      {r.misure_max && (Number(r.misure_max.lunghezza)>0||Number(r.misure_max.larghezza)>0||Number(r.misure_max.altezza)>0) && (
+                        <div style={{fontSize:'10.5px',color:'#b45309',marginTop:'2px'}}>Max collo {r.misure_max.lunghezza||'-'}×{r.misure_max.larghezza||'-'}×{r.misure_max.altezza||'-'} cm</div>
+                      )}
                     </div>
                     <div style={{textAlign:'right',flexShrink:0}}>
                       {(Number(r.costo_contrassegno||0) > 0 || Number(r.costo_assicurazione||0) > 0) ? (

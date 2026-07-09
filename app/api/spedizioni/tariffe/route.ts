@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
         total_price: dett.totale.toFixed(2),
         zona: isEsteroP ? (PAESI[paeseP] || paeseP) : (ZONE_MAP[provinciaP] || 'Italia'),
         peso_reale: pesoRealeP, peso_volume: '0.00', peso_fatturato: pesoRealeP.toFixed(2),
-        corriere_nome: corr.nome_contratto || 'Corriere', listino_fascia: 'Listino corriere',
+        corriere_nome: corr.nome_contratto || 'Corriere', listino_fascia: 'Listino corriere', misure_max: corr.settings?.misure_max || null,
         _corriere_tipo: corr.tipo, _corriere_id: corr.id,
       })
     }
@@ -443,6 +443,7 @@ export async function POST(req: NextRequest) {
       peso_volume: pesoVolume.toFixed(2),
       peso_fatturato: pesoPerFascia.toFixed(2),   // peso EFFETTIVO su cui è calcolato il prezzo (reale se agevolazione)
       corriere_nome: corriere?.nome_contratto || 'Corriere',
+      misure_max: settsC?.misure_max || null,   // limiti collo da mostrare come indicazione
       listino_fascia: `fino a ${fasciaGiusta.peso_max}kg`,
       accessori_disponibili: accessoriPerCorriere.get(corriereId) || [],
       _corriere_tipo: corriere?.tipo,
