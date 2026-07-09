@@ -57,13 +57,18 @@ export default function NuovoMasterPage() {
     setSaving(false)
 
     if (data.error) { setErrore(data.error); return }
-    setCredenziali({ email: data.email || email, password: data.password })
+    setCredenziali({ email: data.email || email, password: data.password, avviso: data.avviso || null })
   }
 
   if (credenziali) return (
     <div style={{maxWidth:'560px',margin:'40px auto'}}>
       <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'10px',padding:'24px'}}>
         <div style={{fontSize:'16px',fontWeight:800,color:'#16a34a',marginBottom:'6px'}}>✓ Master creato</div>
+        {credenziali.avviso && (
+          <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'8px',padding:'12px',margin:'0 0 14px',fontSize:'12.5px',color:'#92400e',fontWeight:600}}>
+            ⚠️ {credenziali.avviso}
+          </div>
+        )}
         <p style={{fontSize:'13px',color:'#555',margin:'0 0 16px'}}>Condividi queste credenziali con il master (le email automatiche partiranno quando il dominio sarà verificato).</p>
         <div style={{background:'#fff',border:'1px solid #d1fae5',borderRadius:'8px',padding:'14px'}}>
           <div style={{fontSize:'11px',color:'#999',textTransform:'uppercase',letterSpacing:'0.5px'}}>Email</div>

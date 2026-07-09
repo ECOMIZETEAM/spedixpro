@@ -82,6 +82,7 @@ export async function POST(req: NextRequest) {
   }
 
   const password = generaPassword()
+  let avvisoListino: string | null = null
   try {
     const { data: authUser, error: authError } = await admin.auth.admin.createUser({
       email, password, email_confirm: true,
@@ -100,12 +101,27 @@ export async function POST(req: NextRequest) {
       attivo: true,
     })
 
-    // Copia il listino assegnato nel Listino Corrieri del sotto-master (contratti + prezzi)
+    // Copia il listino assegnato nel Listino Corrieri del sotto-master (contratti + prezzi).
+    // CRITICO per la cascata: un sotto-master senza listino blocca il calcolo costo lungo
+    // la catena (spedizioni/movimenti/rettifiche/resi/cod). Quindi verifichiamo l'esito.
     if (parentListinoId) {
       try {
         const { copiaListinoAlSottoMaster } = await import('@/lib/copia-listino-submaster')
-        await copiaListinoAlSottoMaster(admin, nuovoMaster.id)
-      } catch (e) { console.error('Copia listino sotto-master:', e) }
+        let res: any = await copiaListinoAlSottoMaster(admin, nuovoMaster.id)
+        if (!res?.ok) res = await copiaListinoAlSottoMaster(admin, nuovoMaster.id, { force: true })  // retry
+        // Verifica finale: devono esistere delle fasce nel Listino Corrieri del sotto-master.
+        const { data: liste } = await admin.from('listini_corrieri').select('id').eq('master_id', nuovoMaster.id)
+        const listeIds = (liste || []).map((l: any) => l.id)
+        const { count } = listeIds.length
+          ? await admin.from('listini_corrieri_fasce').select('id', { count: 'exact', head: true }).in('listino_id', listeIds)
+          : { count: 0 }
+        if (!count) avvisoListino = 'ATTENZIONE: il listino non è stato copiato (il sotto-master è senza prezzi). Verifica che il listino assegnato non sia vuoto e usa "Risincronizza listino".'
+      } catch (e: any) {
+        console.error('Copia listino sotto-master:', e)
+        avvisoListino = 'ATTENZIONE: errore nella copia del listino. Usa "Risincronizza listino" nell\'Elenco Master.'
+      }
+    } else {
+      avvisoListino = 'Nessun listino assegnato: il sotto-master non potrà spedire finché non gliene assegni uno.'
     }
   } catch (e: any) {
     await admin.from('masters').delete().eq('id', nuovoMaster.id)
@@ -122,5 +138,5 @@ export async function POST(req: NextRequest) {
     console.error('Errore invio email master:', e)
   }
 
-  return NextResponse.json({ id: nuovoMaster.id, email, password })
+  return NextResponse.json({ id: nuovoMaster.id, email, password, avviso: avvisoListino })
 }

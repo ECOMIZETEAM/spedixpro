@@ -17,7 +17,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const admin = createAdminSupabase()
   const { data: sub } = await admin.from('masters').select('id,parent_master_id').eq('id', id).single()
-  if (!sub || sub.parent_master_id !== utente.master_id) return NextResponse.json({ error: 'Sotto-master non trovato o non autorizzato' }, { status: 403 })
+  if (!sub) return NextResponse.json({ error: 'Sotto-master non trovato' }, { status: 404 })
+  // Autorizzato se l'utente è il padre diretto O un antenato del sotto-master.
+  let cur: string | null = sub.parent_master_id
+  let autorizzato = false
+  for (let i = 0; i < 20 && cur; i++) {
+    if (cur === utente.master_id) { autorizzato = true; break }
+    const { data: mm } = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+    cur = mm?.parent_master_id || null
+  }
+  if (!autorizzato) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const force = req.nextUrl.searchParams.get('force') === '1'
   const res = await copiaListinoAlSottoMaster(admin, id, { force })

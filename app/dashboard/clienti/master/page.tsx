@@ -20,6 +20,19 @@ function NodoAlbero({ masterId, nome, isRoot }: { masterId: string; nome: string
   const [masters, setMasters] = useState<NodoMaster[]>([])
   const [clienti, setClienti] = useState<NodoCliente[]>([])
   const [loading, setLoading] = useState(false)
+  const [sync, setSync] = useState('')
+
+  async function risincronizza(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!confirm(`Risincronizzare il listino di "${nome}"? Ricopia contratti e prezzi assegnati dal padre (le sue modifiche ai prezzi ereditati verranno sovrascritte).`)) return
+    setSync('...')
+    try {
+      const res = await fetch(`/api/master/${masterId}/sync-listino?force=1`, { method: 'POST' })
+      const d = await res.json()
+      if (d.error) { setSync('err'); alert('Errore: ' + d.error) }
+      else { setSync('ok'); alert(d.ok ? `Listino risincronizzato (${d.corrieri ?? 0} corrieri, ${d.fasce ?? 0} fasce).` : `Esito: ${d.reason || 'nessuna azione'}`) }
+    } catch { setSync('err'); alert('Errore di rete') }
+  }
 
   async function toggleEspandi() {
     if (!espanso && !caricato) {
@@ -52,6 +65,13 @@ function NodoAlbero({ masterId, nome, isRoot }: { masterId: string; nome: string
             style={{ fontSize: '11px', fontWeight: 700, color: '#1a1a1a', background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: '5px', padding: '3px 8px', textDecoration: 'none' }}>
             ✎ Modifica
           </a>
+          {!isRoot && (
+            <button onClick={risincronizza}
+              title="Ricopia il listino assegnato dal padre nel Listino Corrieri di questo master"
+              style={{ fontSize: '11px', fontWeight: 700, color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '5px', padding: '3px 8px', cursor: 'pointer' }}>
+              {sync === '...' ? '⟳…' : '⟳ Risincronizza'}
+            </button>
+          )}
           {!isRoot && (
             <a href={`/api/master/${masterId}/impersona`} target="_blank" rel="noopener noreferrer"
               onClick={e => e.stopPropagation()}
