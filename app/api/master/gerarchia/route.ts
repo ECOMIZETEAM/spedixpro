@@ -40,9 +40,16 @@ export async function GET(req: NextRequest) {
     return false
   }
 
-  const mastersAlbero = (allMasters || []).filter(m => m.id === rootId || isDescendant(m.id, rootId, allMasters || []))
+  // Rete privata: chi non ha visibilità completa vede solo sé + i figli DIRETTI (e solo i propri clienti),
+  // non l'intero albero coi clienti dei sotto-master.
+  const { masterVedeReteCompleta } = await import('@/lib/rete-masters')
+  const completa = await masterVedeReteCompleta(admin, rootId)
+  const mastersAlbero = completa
+    ? (allMasters || []).filter(m => m.id === rootId || isDescendant(m.id, rootId, allMasters || []))
+    : (allMasters || []).filter(m => m.id === rootId || m.parent_master_id === rootId)
   const idsAlbero = new Set(mastersAlbero.map(m => m.id))
-  const clientiAlbero = (allClienti || []).filter(c => idsAlbero.has(c.master_id) && !c.promosso_a_master_id)
+  const clientiAlbero = (allClienti || []).filter(c =>
+    (completa ? idsAlbero.has(c.master_id) : c.master_id === rootId) && !c.promosso_a_master_id)
 
   return NextResponse.json({
     rootId,

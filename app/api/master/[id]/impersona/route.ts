@@ -26,14 +26,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!utente || utente.ruolo !== 'master') {
     return NextResponse.redirect(new URL('/dashboard', req.url))
   }
-  // Solo i master abilitati alla gestione rete possono impersonare un sotto-master.
-  const { puoGestireRete } = await import('@/lib/permessi')
-  if (!(await puoGestireRete())) {
-    return NextResponse.redirect(new URL('/dashboard', req.url))
-  }
-
   const { id } = await params
   const admin = createAdminSupabase()
+  // Impersonare un sotto-master = "entrare" nella sua rete: consentito SOLO ai master
+  // con visibilità completa (root / vede_rete_completa). Rete privata per gli altri.
+  const { masterVedeReteCompleta } = await import('@/lib/rete-masters')
+  if (!utente.master_id || !(await masterVedeReteCompleta(admin, utente.master_id))) {
+    return NextResponse.redirect(new URL('/dashboard', req.url))
+  }
 
   // Verifica catena: risalgo dal target; il mio master deve essere un antenato
   let cur: string | null = id

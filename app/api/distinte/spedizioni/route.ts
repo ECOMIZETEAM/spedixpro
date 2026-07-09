@@ -17,9 +17,9 @@ export async function GET(req: NextRequest) {
   let masterFilter: string[] = [utente?.master_id]
   if (masterSel && utente?.master_id) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const { sottoAlberoMasterIds, masterIdsVisibili } = await import('@/lib/rete-masters')
     const admin = createAdminSupabase()
-    const mieiDiscendenti = await sottoAlberoMasterIds(admin, utente.master_id)
+    const mieiDiscendenti = await masterIdsVisibili(admin, utente.master_id)
     masterFilter = mieiDiscendenti.includes(masterSel) ? await sottoAlberoMasterIds(admin, masterSel) : ['00000000-0000-0000-0000-000000000000']
     db = admin
   }

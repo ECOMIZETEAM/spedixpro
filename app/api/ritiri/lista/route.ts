@@ -20,9 +20,9 @@ export async function GET(req: NextRequest) {
 
   // Master/admin: vede i ritiri di TUTTA la sua rete (sé + discendenza), risalendo la catena.
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
-  const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+  const { masterIdsVisibili } = await import('@/lib/rete-masters')
   const admin = createAdminSupabase()
-  const masterIds = await sottoAlberoMasterIds(admin, utente.master_id)
+  const masterIds = await masterIdsVisibili(admin, utente.master_id)
   const db = masterIds.length > 1 ? admin : supabase
   const { data: ritiri, error } = await db.from('ritiri').select('*, clienti(ragione_sociale)')
     .in('master_id', masterIds)

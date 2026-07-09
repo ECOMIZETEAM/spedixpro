@@ -31,9 +31,9 @@ export async function GET(req: NextRequest) {
 
   if (masterSel) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const { masterIdsVisibili } = await import('@/lib/rete-masters')
     const adminDb = createAdminSupabase()
-    const mieiDiscendenti = masterId ? await sottoAlberoMasterIds(adminDb, masterId) : []
+    const mieiDiscendenti = masterId ? await masterIdsVisibili(adminDb, masterId) : []
     if (!mieiDiscendenti.includes(masterSel)) {
       return NextResponse.json({ righe: [], master: master || {}, cliente: {} })
     }

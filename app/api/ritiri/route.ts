@@ -30,15 +30,15 @@ export async function GET(req: NextRequest) {
 
   // Master/admin: rete = sé + discendenza. Risale la catena ANCHE con "Tutti i clienti".
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
-  const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+  const { sottoAlberoMasterIds, masterIdsVisibili } = await import('@/lib/rete-masters')
   const admin = createAdminSupabase()
   let masterFilter: string[] = ['00000000-0000-0000-0000-000000000000']
   if (utente?.master_id) {
     if (masterSel) {
-      const mieiDiscendenti = await sottoAlberoMasterIds(admin, utente.master_id)
+      const mieiDiscendenti = await masterIdsVisibili(admin, utente.master_id)
       masterFilter = mieiDiscendenti.includes(masterSel) ? await sottoAlberoMasterIds(admin, masterSel) : ['00000000-0000-0000-0000-000000000000']
     } else {
-      masterFilter = await sottoAlberoMasterIds(admin, utente.master_id)
+      masterFilter = await masterIdsVisibili(admin, utente.master_id)
     }
   }
   const db: any = masterFilter.length > 1 ? admin : supabase

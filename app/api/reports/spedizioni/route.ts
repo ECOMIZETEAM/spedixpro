@@ -24,9 +24,9 @@ export async function GET(req: NextRequest) {
   let subtreeSel: string[] | null = null
   if (masterSel && utente?.master_id) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const { sottoAlberoMasterIds, masterIdsVisibili } = await import('@/lib/rete-masters')
     const adminDb = createAdminSupabase()
-    const mieiDiscendenti = await sottoAlberoMasterIds(adminDb, utente.master_id)
+    const mieiDiscendenti = await masterIdsVisibili(adminDb, utente.master_id)
     subtreeSel = mieiDiscendenti.includes(masterSel)
       ? await sottoAlberoMasterIds(adminDb, masterSel)
       : ['00000000-0000-0000-0000-000000000000']

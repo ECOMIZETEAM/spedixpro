@@ -41,9 +41,9 @@ export async function GET(req: NextRequest) {
   // Selezione di un sotto-master agganciato: mostro le spedizioni del suo sotto-albero
   if (masterSel && ruolo !== 'cliente' && ruolo !== 'agente' && utente?.master_id) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const { sottoAlberoMasterIds, masterIdsVisibili } = await import('@/lib/rete-masters')
     const adminDb = createAdminSupabase()
-    const mieiDiscendenti = await sottoAlberoMasterIds(adminDb, utente.master_id)
+    const mieiDiscendenti = await masterIdsVisibili(adminDb, utente.master_id)   // solo se privilegiato include i figli
     if (mieiDiscendenti.includes(masterSel)) {   // autorizzazione: dev'essere un mio discendente
       subtreeSel = await sottoAlberoMasterIds(adminDb, masterSel)
       db = adminDb
@@ -56,9 +56,11 @@ export async function GET(req: NextRequest) {
   if (isMasterRete && utente?.master_id) {
     const mine = utente.master_id
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { masterVedeReteCompleta } = await import('@/lib/rete-masters')
     const adminDb = createAdminSupabase()
     masterIds = [mine]
-    let frontier = [mine]
+    // Rete privata: solo i master privilegiati (root/vede_rete_completa) vedono i sotto-master.
+    let frontier = (await masterVedeReteCompleta(adminDb, mine)) ? [mine] : []
     for (let i = 0; i < 12 && frontier.length; i++) {
       const { data: figli } = await adminDb.from('masters').select('id,nome,parent_master_id').in('parent_master_id', frontier)
       const nuovi: string[] = []

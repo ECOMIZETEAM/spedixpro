@@ -20,9 +20,9 @@ export async function POST(req: NextRequest) {
   } else {
     // Master: includi anche le spedizioni dei sotto-master della rete (stessa logica della lista)
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const { masterIdsVisibili } = await import('@/lib/rete-masters')
     const admin = createAdminSupabase()
-    const subtree = utente?.master_id ? await sottoAlberoMasterIds(admin, utente.master_id) : []
+    const subtree = utente?.master_id ? await masterIdsVisibili(admin, utente.master_id) : []
     const { data } = await admin.from('spedizioni').select(cols).in('id', ids).in('master_id', subtree.length ? subtree : ['00000000-0000-0000-0000-000000000000'])
     spedizioni = data
   }
