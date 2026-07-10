@@ -4,6 +4,8 @@ import { fulfillSpedizioniShopify } from '@/lib/shopify'
 import { fulfillSpedizioniWoo } from '@/lib/wooFulfill'
 import { fulfillSpedizioniPrestashop } from '@/lib/prestashopFulfill'
 import { fulfillSpedizioniEbay } from '@/lib/ebayFulfill'
+import { fulfillSpedizioniTiktok } from '@/lib/tiktokFulfill'
+import { fulfillSpedizioniTemu } from '@/lib/temuFulfill'
 import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
 
@@ -61,6 +63,8 @@ export async function GET(req: NextRequest) {
       try { await fulfillSpedizioniWoo(supabase, righe.map(r => r.id)) } catch {}
       try { await fulfillSpedizioniPrestashop(supabase, righe.map(r => r.id)) } catch {}
       try { await fulfillSpedizioniEbay(supabase, righe.map(r => r.id)) } catch {}
+      try { await fulfillSpedizioniTiktok(supabase, righe.map(r => r.id)) } catch {}
+      try { await fulfillSpedizioniTemu(supabase, righe.map(r => r.id)) } catch {}
       try { await chiudiBorderoSpedisci(supabase, distinta.id) } catch {}
       try { await chiudiBordereauSpediamopro(supabase, distinta.id) } catch {}
     }

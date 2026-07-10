@@ -4,6 +4,8 @@ import { fulfillSpedizioniShopify } from '@/lib/shopify'
 import { fulfillSpedizioniWoo } from '@/lib/wooFulfill'
 import { fulfillSpedizioniPrestashop } from '@/lib/prestashopFulfill'
 import { fulfillSpedizioniEbay } from '@/lib/ebayFulfill'
+import { fulfillSpedizioniTiktok } from '@/lib/tiktokFulfill'
+import { fulfillSpedizioniTemu } from '@/lib/temuFulfill'
 import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
 export async function POST(req: NextRequest) {
@@ -46,6 +48,8 @@ export async function POST(req: NextRequest) {
   try { await fulfillSpedizioniWoo(supabase, validIds) } catch {}
   try { await fulfillSpedizioniPrestashop(supabase, validIds) } catch {}
   try { await fulfillSpedizioniEbay(supabase, validIds) } catch {}
+  try { await fulfillSpedizioniTiktok(supabase, validIds) } catch {}
+  try { await fulfillSpedizioniTemu(supabase, validIds) } catch {}
   // Chiusura borderò su spedisci.online (best-effort, solo corrieri tipo spedisci)
   try { await chiudiBorderoSpedisci(supabase, distinta.id) } catch {}
   try { await chiudiBordereauSpediamopro(supabase, distinta.id) } catch {}

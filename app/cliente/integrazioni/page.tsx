@@ -27,7 +27,8 @@ const PLATFORMS: { id: string; nome: string; attivo: boolean; colore: string; do
   { id: 'wix',         nome: 'Wix',          attivo: false, colore: '#000000', dominio: 'wix.com' },
   { id: 'bigcommerce', nome: 'BigCommerce',  attivo: false, colore: '#121118', dominio: 'bigcommerce.com' },
   { id: 'squarespace', nome: 'Squarespace',  attivo: false, colore: '#000000', dominio: 'squarespace.com' },
-  { id: 'tiktok',      nome: 'TikTok Shop',  attivo: false, colore: '#000000', dominio: 'tiktok.com' },
+  { id: 'tiktok',      nome: 'TikTok Shop',  attivo: true,  colore: '#000000', dominio: 'tiktokshop.com' },
+  { id: 'temu',        nome: 'Temu',         attivo: true,  colore: '#fb7701', dominio: 'temu.com' },
   { id: 'storeden',    nome: 'Storeden',     attivo: false, colore: '#e2001a', dominio: 'storeden.com' },
   { id: 'manomano',    nome: 'ManoMano',     attivo: false, colore: '#00817d', dominio: 'manomano.com' },
 ]
@@ -79,6 +80,8 @@ export default function IntegrazioniPage() {
     if (id === 'prestashop') setStep('prestashop')
     if (id === 'woocommerce') setStep('woocommerce')
     if (id === 'ebay') { setConnecting(true); window.location.href = '/api/integrazioni/ebay/install' }
+    if (id === 'tiktok') { setConnecting(true); window.location.href = '/api/integrazioni/tiktok/install' }
+    if (id === 'temu') { setConnecting(true); window.location.href = '/api/integrazioni/temu/install' }
   }
 
   async function connettiWoo() {
