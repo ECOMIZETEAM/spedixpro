@@ -49,11 +49,15 @@ export async function GET(req: NextRequest) {
   if (provincia) query = query.eq('dest_provincia', provincia)
 
   const { data: spedizioni } = await query
-  // Prezzo corriere: precarico listini/fasce/zone UNA volta, poi calcolo in memoria
-  // (stesso risultato di calcolaPrezzoCorriere, ma senza ~query-per-riga).
-  const calcCorriere = await creaCalcolatoreCorriere(supabase, utente?.master_id)
+  // Prezzo corriere = costo del corriere dal listino del MASTER PROPRIETARIO della spedizione
+  // (non del master che guarda il report): per le spedizioni di rete il corriere è del sotto-master.
+  // Precarico un calcolatore per ciascun master presente, così niente query-per-riga.
+  const masterIdsSped = [...new Set((spedizioni || []).map((s: any) => s.master_id).filter(Boolean))] as string[]
+  const calcPerMaster = new Map<string, (s: any) => any>()
+  for (const mid of masterIdsSped) { try { calcPerMaster.set(mid, await creaCalcolatoreCorriere(db, mid)) } catch {} }
   const conPrezzoCorriere = (spedizioni || []).map((s: any) => {
-    const dett = s.corriere_id ? calcCorriere(s) : null
+    const calc = calcPerMaster.get(s.master_id)
+    const dett = (s.corriere_id && calc) ? calc(s) : null
     // Lato cliente: nolo = costo_spedizione salvato; le fee combinate = totale - nolo
     const noloCliente = Number(s.costo_spedizione || 0)
     const totCliente = Number(s.costo_totale || 0)
