@@ -1,5 +1,9 @@
 export type TipoMovimento = 'ricarica' | 'spedizione' | 'rimborso' | 'reso' | 'rettifica'
 
+// Registra un movimento sul CREDITO di un cliente in modo ATOMICO (RPC lato DB:
+// UPDATE credito = credito + importo con RETURNING + INSERT movimento in un'unica
+// transazione). Elimina il lost-update e rende saldo_dopo sempre coerente anche
+// sotto forte concorrenza (migliaia di spedizioni simultanee).
 export async function registraMovimento(
   supabase: any,
   params: {
@@ -13,37 +17,24 @@ export async function registraMovimento(
     createdBy?: string | null
   }
 ): Promise<{ saldo: number }> {
-  const { masterId, clienteId, tipo, descrizione } = params
   const importo = Number(params.importo)
   if (!isFinite(importo)) throw new Error('Importo movimento non valido')
 
-  const { data: cli, error: cliErr } = await supabase
-    .from('clienti').select('credito').eq('id', clienteId).single()
-  if (cliErr || !cli) throw new Error('Cliente non trovato per il movimento')
-
-  const saldoPrima = Number(cli.credito || 0)
-  const saldoDopo = Math.round((saldoPrima + importo) * 100) / 100
-
-  const { error: movErr } = await supabase.from('movimenti').insert({
-    master_id: masterId,
-    cliente_id: clienteId,
-    tipo,
-    descrizione,
-    riferimento: params.riferimento ?? null,
-    importo,
-    saldo_dopo: saldoDopo,
-    spedizione_id: params.spedizioneId ?? null,
-    created_by: params.createdBy ?? null,
+  const { data, error } = await supabase.rpc('registra_movimento_cliente', {
+    p_master_id: params.masterId,
+    p_cliente_id: params.clienteId,
+    p_tipo: params.tipo,
+    p_descrizione: params.descrizione,
+    p_importo: importo,
+    p_riferimento: params.riferimento ?? null,
+    p_spedizione_id: params.spedizioneId ?? null,
+    p_created_by: params.createdBy ?? null,
   })
-  if (movErr) throw new Error('Errore inserimento movimento: ' + movErr.message)
-
-  const { error: updErr } = await supabase
-    .from('clienti').update({ credito: saldoDopo }).eq('id', clienteId)
-  if (updErr) throw new Error('Errore aggiornamento credito: ' + updErr.message)
-
-  return { saldo: saldoDopo }
+  if (error) throw new Error('Errore movimento: ' + error.message)
+  return { saldo: Number(data) }
 }
 
+// Idem per il CREDITO di un master (usato dalla fatturazione a cascata verso i master padre).
 export async function registraMovimentoMaster(
   supabase: any,
   params: {
@@ -57,34 +48,19 @@ export async function registraMovimentoMaster(
     createdBy?: string | null
   }
 ): Promise<{ saldo: number }> {
-  const { masterOwnerId, masterTargetId, tipo, descrizione } = params
   const importo = Number(params.importo)
   if (!isFinite(importo)) throw new Error('Importo movimento non valido')
 
-  const { data: m, error: mErr } = await supabase
-    .from('masters').select('credito').eq('id', masterTargetId).single()
-  if (mErr || !m) throw new Error('Master non trovato per il movimento')
-
-  const saldoPrima = Number(m.credito || 0)
-  const saldoDopo = Math.round((saldoPrima + importo) * 100) / 100
-
-  const { error: movErr } = await supabase.from('movimenti').insert({
-    master_id: masterOwnerId,
-    cliente_id: null,
-    master_target_id: masterTargetId,
-    tipo,
-    descrizione,
-    riferimento: params.riferimento ?? null,
-    importo,
-    saldo_dopo: saldoDopo,
-    spedizione_id: params.spedizioneId ?? null,
-    created_by: params.createdBy ?? null,
+  const { data, error } = await supabase.rpc('registra_movimento_master', {
+    p_master_owner_id: params.masterOwnerId,
+    p_master_target_id: params.masterTargetId,
+    p_tipo: params.tipo,
+    p_descrizione: params.descrizione,
+    p_importo: importo,
+    p_riferimento: params.riferimento ?? null,
+    p_spedizione_id: params.spedizioneId ?? null,
+    p_created_by: params.createdBy ?? null,
   })
-  if (movErr) throw new Error('Errore inserimento movimento master: ' + movErr.message)
-
-  const { error: updErr } = await supabase
-    .from('masters').update({ credito: saldoDopo }).eq('id', masterTargetId)
-  if (updErr) throw new Error('Errore aggiornamento credito master: ' + updErr.message)
-
-  return { saldo: saldoDopo }
+  if (error) throw new Error('Errore movimento master: ' + error.message)
+  return { saldo: Number(data) }
 }
