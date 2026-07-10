@@ -15,7 +15,6 @@ export default function ModificaMasterPage() {
   const [errore, setErrore] = useState('')
   const [msg, setMsg] = useState('')
   const [nuovaEmail, setNuovaEmail] = useState('')
-  const [nuovaPassword, setNuovaPassword] = useState('')
   const [resetPassword, setResetPassword] = useState(false)
   const [passwordMostrata, setPasswordMostrata] = useState('')
   const [listini, setListini] = useState<any[]>([])
@@ -36,7 +35,7 @@ export default function ModificaMasterPage() {
   useEffect(() => {
     fetch(`/api/master/${id}`).then(r=>r.json()).then(d=>{
       if (d.error) { setErrore(d.error); setLoading(false); return }
-      setM(d); setLoading(false)
+      setM(d); setNuovaEmail(d.login_email || ''); setLoading(false)
     }).catch(()=>{ setErrore('Errore caricamento'); setLoading(false) })
     fetch('/api/listini/lista').then(r=>r.json()).then(d=>setListini(Array.isArray(d)?d:[])).catch(()=>{})
     caricaCredito()
@@ -65,21 +64,15 @@ export default function ModificaMasterPage() {
       nome: m.nome, telefono: m.telefono, piva: m.piva, tipo_contratto: m.tipo_contratto,
       parent_listino_id: m.parent_listino_id || null,
     }
-    if (nuovaEmail.trim()) body.nuova_email = nuovaEmail.trim()
-    if (nuovaPassword.trim()) body.nuova_password = nuovaPassword.trim()
+    if (nuovaEmail.trim() && nuovaEmail.trim().toLowerCase() !== (m.login_email||'').trim().toLowerCase()) body.nuova_email = nuovaEmail.trim()
     if (resetPassword) body.resetPassword = true
     const res = await fetch(`/api/master/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
     const d = await res.json(); setSaving(false)
     if (d.error) { setErrore(d.error); return }
     setMsg(d.emailInviata ? '✓ Modifiche salvate — credenziali inviate via email' : '✓ Modifiche salvate')
     if (d.password) setPasswordMostrata(d.password)
-    if (nuovaEmail.trim()) { setM({...m, login_email: nuovaEmail.trim(), email: nuovaEmail.trim()}); setNuovaEmail('') }
-    setNuovaPassword(''); setResetPassword(false)
-  }
-
-  function generaPwd() {
-    const c='ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
-    setNuovaPassword('Mv'+Array.from({length:8},()=>c[Math.floor(Math.random()*c.length)]).join(''))
+    if (nuovaEmail.trim()) setM({...m, login_email: nuovaEmail.trim(), email: nuovaEmail.trim()})
+    setResetPassword(false)
   }
 
   if (loading) return <div style={{padding:'40px',textAlign:'center',color:'#666'}}>Caricamento...</div>
@@ -136,23 +129,19 @@ export default function ModificaMasterPage() {
           {savingCredito?'Salvo...':'Applica al credito'}</button>
       </div>
 
-      {/* Accesso */}
+      {/* Reset password — identico al cliente */}
       <div style={card}>
-        <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'14px'}}>Accesso</div>
-        <div style={{marginBottom:'12px'}}><label style={lbl}>Email di login attuale</label>
-          <input style={{...inp,background:'#f9fafb',color:'#666'}} value={m.login_email||''} disabled/></div>
-        <div style={{marginBottom:'16px'}}><label style={lbl}>Nuova email (lascia vuoto per non cambiare)</label>
-          <input style={inp} type="email" placeholder="nuova@email.it" value={nuovaEmail} onChange={e=>setNuovaEmail(e.target.value)}/></div>
-        <div><label style={lbl}>Nuova password (lascia vuoto per non cambiare)</label>
-          <div style={{display:'flex',gap:'8px'}}>
-            <input style={inp} value={nuovaPassword} onChange={e=>setNuovaPassword(e.target.value)} placeholder="min 8 caratteri" disabled={resetPassword}/>
-            <button onClick={generaPwd} type="button" disabled={resetPassword} style={{background:'#fff7ed',color:'#f97316',border:'1px solid #fed7aa',borderRadius:'6px',padding:'0 14px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',opacity:resetPassword?0.5:1}}>Genera</button>
-          </div>
-        </div>
+        <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'14px'}}>Reset password</div>
+        <input style={inp} type="email" placeholder="email@esempio.it" value={nuovaEmail} onChange={e=>setNuovaEmail(e.target.value)}/>
         <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'#1a1a1a',cursor:'pointer',marginTop:'12px'}}>
           <input type="checkbox" checked={resetPassword} onChange={e=>setResetPassword(e.target.checked)} style={{width:'15px',height:'15px',accentColor:'#f97316'}}/>
-          Resetta e invia nuova password via email al master
+          Resetta e invia nuova password
         </label>
+        {nuovaEmail.trim() && nuovaEmail.trim().toLowerCase() !== (m.login_email||'').trim().toLowerCase() && (
+          <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px 12px',fontSize:'12px',color:'#ea580c',lineHeight:1.5,marginTop:'12px'}}>
+            Cambierai l&apos;email di accesso: il master dovrà usare <b>{nuovaEmail}</b> per entrare.
+          </div>
+        )}
         {passwordMostrata && (
           <div style={{marginTop:'12px',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',padding:'12px'}}>
             <div style={{fontSize:'12px',fontWeight:700,color:'#16a34a',marginBottom:'6px'}}>✓ Password impostata — copiala e condividila</div>

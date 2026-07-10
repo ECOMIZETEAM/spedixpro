@@ -184,12 +184,16 @@ export default function ModificaClientePage() {
           </div>
 
           <div style={sec}>
-            <div style={sech}>Email Login Cliente</div>
+            <div style={sech}>Reset password</div>
             <div style={{padding:'16px',display:'flex',flexDirection:'column',gap:'12px'}}>
-              <div><label style={lbl}>Email di accesso</label><input type="email" value={form.email||''} onChange={e=>set('email',e.target.value)} placeholder="cliente@esempio.it" style={inp}/></div>
-              {(form.email||'').trim().toLowerCase() !== (cliente.email||'').trim().toLowerCase() && (
+              <input type="email" value={form.email||''} onChange={e=>set('email',e.target.value)} placeholder="email@esempio.it" style={inp}/>
+              <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>
+                <input type="checkbox" checked={resetPassword} onChange={e=>setResetPassword(e.target.checked)} style={{width:'15px',height:'15px',accentColor:'#f97316'}}/>
+                Resetta e invia nuova password
+              </label>
+              {(form.email||'').trim().toLowerCase() !== (cliente.email||'').trim().toLowerCase() && (form.email||'').trim() && (
                 <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px 12px',fontSize:'12px',color:'#ea580c',lineHeight:1.5}}>
-                  Stai cambiando l&apos;email di accesso: al salvataggio il cliente dovrà usare la nuova email <b>{form.email}</b> per entrare. La password resta invariata (a meno che tu non la resetti qui sotto).
+                  Cambierai l&apos;email di accesso: il cliente dovrà usare <b>{form.email}</b> per entrare.
                 </div>
               )}
             </div>
@@ -252,15 +256,6 @@ export default function ModificaClientePage() {
             </div>
           </div>
 
-          <div style={sec}>
-            <div style={sech}>Sicurezza</div>
-            <div style={{padding:'16px'}}>
-              <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>
-                <input type="checkbox" checked={resetPassword} onChange={e=>setResetPassword(e.target.checked)} />
-                Genera nuova password e invia via email al cliente
-              </label>
-            </div>
-          </div>
         </div>
       </div>
     </div>
