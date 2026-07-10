@@ -213,6 +213,18 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       try { await admin.from(t).delete().eq('master_id', subId) } catch {}
     }
     try { await admin.from('movimenti').delete().eq('master_target_id', subId) } catch {}
+
+    // I corrieri del sotto-master vengono rimossi in CASCADE dalla riga masters, ma prima
+    // vanno svuotate le tabelle figlie che li referenziano SENZA cascade (altrimenti la
+    // cancellazione del corriere fallisce: listini_corrieri_supplementi, fasce, zone, ecc.).
+    const { data: corr } = await admin.from('corrieri').select('id').eq('master_id', subId)
+    const corrIds = (corr || []).map((c: any) => c.id)
+    if (corrIds.length) {
+      for (const t of ['listini_corrieri_supplementi', 'listini_corrieri_fasce', 'listini_corrieri_corrieri', 'listini_clienti_supplementi', 'listini_clienti_corrieri', 'listini_clienti_fasce', 'listini_fasce', 'zone', 'distinte', 'ritiri']) {
+        try { await admin.from(t).delete().in('corriere_id', corrIds) } catch {}
+      }
+    }
+
     // Login del sotto-master (auth + utenti)
     try {
       const { data: uSub } = await admin.from('utenti').select('id').eq('master_id', subId)
