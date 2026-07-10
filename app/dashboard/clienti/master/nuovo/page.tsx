@@ -2,8 +2,12 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
-const inp = {width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
-const lbl = {fontSize:'11.5px',fontWeight:'600' as const,color:'#666',display:'block' as const,marginBottom:'4px'}
+const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
+const lbl = {fontSize:'11.5px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
+// Contenitori come il nuovo cliente: card con intestazione sottolineata
+const sec = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const,marginBottom:'16px',maxWidth:'620px'}
+const sech = {padding:'12px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700' as const,color:'#1a1a1a'}
+const secb = {padding:'16px',display:'flex' as const,flexDirection:'column' as const,gap:'12px'}
 
 export default function NuovoMasterPage() {
   const router = useRouter()
@@ -63,10 +67,10 @@ export default function NuovoMasterPage() {
   if (credenziali) return (
     <div style={{maxWidth:'560px',margin:'40px auto'}}>
       <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'10px',padding:'24px'}}>
-        <div style={{fontSize:'16px',fontWeight:800,color:'#16a34a',marginBottom:'6px'}}>✓ Master creato</div>
+        <div style={{fontSize:'16px',fontWeight:800,color:'#16a34a',marginBottom:'6px'}}>Master creato</div>
         {credenziali.avviso && (
           <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'8px',padding:'12px',margin:'0 0 14px',fontSize:'12.5px',color:'#92400e',fontWeight:600}}>
-            ⚠️ {credenziali.avviso}
+            {credenziali.avviso}
           </div>
         )}
         <p style={{fontSize:'13px',color:'#555',margin:'0 0 16px'}}>Condividi queste credenziali con il master (le email automatiche partiranno quando il dominio sarà verificato).</p>
@@ -95,104 +99,91 @@ export default function NuovoMasterPage() {
         </p>
       </div>
 
-      {errore && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>⚠️ {errore}</div>}
-      {successo && <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#16a34a'}}>✓ {successo}</div>}
+      {errore && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>{errore}</div>}
+      {successo && <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#16a34a'}}>{successo}</div>}
 
-      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',padding:'24px',maxWidth:'520px'}}>
-        <div style={{marginBottom:'16px'}}>
-          <label style={lbl}>Nome / Ragione Sociale *</label>
-          <input value={nome} onChange={e => setNome(e.target.value)} placeholder="es. Franco Logistics" style={inp} />
-        </div>
-        <div style={{marginBottom:'16px'}}>
-          <label style={lbl}>Email *</label>
-          <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="franco@email.com" style={inp} />
-        </div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'16px'}}>
-          <div>
-            <label style={lbl}>Telefono</label>
-            <input value={telefono} onChange={e => setTelefono(e.target.value)} style={inp} />
+      {/* Dati Master */}
+      <div style={sec}>
+        <div style={sech}>Dati Master</div>
+        <div style={secb}>
+          <div><label style={lbl}>Nome / Ragione Sociale *</label>
+            <input value={nome} onChange={e => setNome(e.target.value)} placeholder="es. Franco Logistics" style={inp} /></div>
+          <div><label style={lbl}>Email *</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="franco@email.com" style={inp} /></div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>
+            <div><label style={lbl}>Telefono</label><input value={telefono} onChange={e => setTelefono(e.target.value)} style={inp} /></div>
+            <div><label style={lbl}>P.IVA</label><input value={piva} onChange={e => setPiva(e.target.value)} style={inp} /></div>
           </div>
-          <div>
-            <label style={lbl}>P.IVA</label>
-            <input value={piva} onChange={e => setPiva(e.target.value)} style={inp} />
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'12px'}}>
+            <div><label style={lbl}>Codice Fiscale</label><input value={cf} onChange={e => setCf(e.target.value)} style={inp} /></div>
+            <div><label style={lbl}>PEC</label><input value={pec} onChange={e => setPec(e.target.value)} style={inp} /></div>
+            <div><label style={lbl}>Codice SDI</label><input value={codSdi} onChange={e => setCodSdi(e.target.value)} style={inp} /></div>
           </div>
         </div>
+      </div>
 
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'12px',marginBottom:'16px'}}>
-          <div>
-            <label style={lbl}>Codice Fiscale</label>
-            <input value={cf} onChange={e => setCf(e.target.value)} style={inp} />
-          </div>
-          <div>
-            <label style={lbl}>PEC</label>
-            <input value={pec} onChange={e => setPec(e.target.value)} style={inp} />
-          </div>
-          <div>
-            <label style={lbl}>Codice SDI</label>
-            <input value={codSdi} onChange={e => setCodSdi(e.target.value)} style={inp} />
+      {/* Sede legale */}
+      <div style={sec}>
+        <div style={sech}>Sede legale</div>
+        <div style={secb}>
+          <div><label style={lbl}>Indirizzo (via)</label>
+            <input value={slIndirizzo} onChange={e => setSlIndirizzo(e.target.value)} placeholder="Via / Piazza e numero civico" style={inp} /></div>
+          <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'12px'}}>
+            <div><label style={lbl}>Città</label><input value={slCitta} onChange={e => setSlCitta(e.target.value)} style={inp} /></div>
+            <div><label style={lbl}>Provincia</label><input value={slProvincia} onChange={e => setSlProvincia(e.target.value.toUpperCase().slice(0,2))} placeholder="es. MI" style={inp} /></div>
+            <div><label style={lbl}>CAP</label><input value={slCap} onChange={e => setSlCap(e.target.value)} style={inp} /></div>
           </div>
         </div>
+      </div>
 
-        {/* Sede legale */}
-        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',margin:'8px 0 8px'}}>Sede legale</div>
-        <div style={{marginBottom:'12px'}}>
-          <label style={lbl}>Indirizzo (via)</label>
-          <input value={slIndirizzo} onChange={e => setSlIndirizzo(e.target.value)} placeholder="Via / Piazza e numero civico" style={inp} />
-        </div>
-        <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'12px',marginBottom:'16px'}}>
-          <div><label style={lbl}>Città</label><input value={slCitta} onChange={e => setSlCitta(e.target.value)} style={inp} /></div>
-          <div><label style={lbl}>Provincia</label><input value={slProvincia} onChange={e => setSlProvincia(e.target.value.toUpperCase().slice(0,2))} placeholder="es. MI" style={inp} /></div>
-          <div><label style={lbl}>CAP</label><input value={slCap} onChange={e => setSlCap(e.target.value)} style={inp} /></div>
-        </div>
-
-        {/* Sede operativa (mittente) */}
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',margin:'8px 0 8px'}}>
-          <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a'}}>Sede operativa <span style={{fontWeight:400,color:'#999'}}>(mittente per le spedizioni)</span></div>
-          <label style={{fontSize:'12px',color:'#555',display:'flex',alignItems:'center',gap:'6px',cursor:'pointer'}}>
+      {/* Sede operativa (mittente) */}
+      <div style={sec}>
+        <div style={{...sech,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <span>Sede operativa <span style={{fontWeight:400,color:'#999'}}>(mittente per le spedizioni)</span></span>
+          <label style={{fontSize:'12px',color:'#555',fontWeight:400,display:'flex',alignItems:'center',gap:'6px',cursor:'pointer'}}>
             <input type="checkbox" checked={soUgualeLegale} onChange={e=>setSoUgualeLegale(e.target.checked)} /> uguale alla sede legale
           </label>
         </div>
         {!soUgualeLegale && (
-          <>
-            <div style={{marginBottom:'12px'}}>
-              <label style={lbl}>Indirizzo (via)</label>
-              <input value={soIndirizzo} onChange={e => setSoIndirizzo(e.target.value)} placeholder="Via / Piazza e numero civico" style={inp} />
-            </div>
-            <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'12px',marginBottom:'16px'}}>
+          <div style={secb}>
+            <div><label style={lbl}>Indirizzo (via)</label>
+              <input value={soIndirizzo} onChange={e => setSoIndirizzo(e.target.value)} placeholder="Via / Piazza e numero civico" style={inp} /></div>
+            <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'12px'}}>
               <div><label style={lbl}>Città</label><input value={soCitta} onChange={e => setSoCitta(e.target.value)} style={inp} /></div>
               <div><label style={lbl}>Provincia</label><input value={soProvincia} onChange={e => setSoProvincia(e.target.value.toUpperCase().slice(0,2))} placeholder="es. MI" style={inp} /></div>
               <div><label style={lbl}>CAP</label><input value={soCap} onChange={e => setSoCap(e.target.value)} style={inp} /></div>
             </div>
-          </>
+          </div>
         )}
-
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'20px'}}>
-          <div>
-            <label style={lbl}>Listino assegnato</label>
-            <select value={parentListinoId} onChange={e => setParentListinoId(e.target.value)} style={inp}>
-              <option value="">— nessuno (userà corrieri propri) —</option>
-              {listini.map((l:any) => <option key={l.id} value={l.id}>{l.nome}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={lbl}>Tipo Contratto</label>
-            <select value={tipoContratto} onChange={e => setTipoContratto(e.target.value)} style={inp}>
-              <option value="credito_scalare">Credito a scalare</option>
-              <option value="fattura_mensile">Fattura mensile</option>
-            </select>
-          </div>
-        </div>
-
-        <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px 14px',marginBottom:'20px',fontSize:'12px',color:'#ea580c',lineHeight:1.5}}>
-          💡 Il nuovo master avrà accesso al dashboard completo, ma potrà gestire solo i propri clienti, corrieri e listini — non potrà vedere o modificare i tuoi.<br/>
-          Il <strong>Listino assegnato</strong> è il prezzo che <strong>tu</strong> applichi a questo master quando spedisce col tuo contratto. Lascialo vuoto se il master userà solo corrieri propri (API sue).
-        </div>
-
-        <button onClick={crea} disabled={saving}
-          style={{background:'#f97316',color:'#fff',border:'none',padding:'10px 28px',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer',opacity:saving?0.7:1}}>
-          {saving ? 'Creazione...' : '+ Crea Master'}
-        </button>
       </div>
+
+      {/* Contratto */}
+      <div style={sec}>
+        <div style={sech}>Contratto</div>
+        <div style={secb}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>
+            <div><label style={lbl}>Listino assegnato</label>
+              <select value={parentListinoId} onChange={e => setParentListinoId(e.target.value)} style={inp}>
+                <option value="">— nessuno (userà corrieri propri) —</option>
+                {listini.map((l:any) => <option key={l.id} value={l.id}>{l.nome}</option>)}
+              </select></div>
+            <div><label style={lbl}>Tipo Contratto</label>
+              <select value={tipoContratto} onChange={e => setTipoContratto(e.target.value)} style={inp}>
+                <option value="credito_scalare">Credito a scalare</option>
+                <option value="fattura_mensile">Fattura mensile</option>
+              </select></div>
+          </div>
+          <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px 14px',fontSize:'12px',color:'#ea580c',lineHeight:1.5}}>
+            Il nuovo master avrà accesso al dashboard completo, ma potrà gestire solo i propri clienti, corrieri e listini — non i tuoi.<br/>
+            Il <strong>Listino assegnato</strong> è il prezzo che <strong>tu</strong> applichi a questo master quando spedisce col tuo contratto. Lascialo vuoto se userà solo corrieri propri.
+          </div>
+        </div>
+      </div>
+
+      <button onClick={crea} disabled={saving}
+        style={{background:'#f97316',color:'#fff',border:'none',padding:'10px 28px',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer',opacity:saving?0.7:1}}>
+        {saving ? 'Creazione...' : '+ Crea Master'}
+      </button>
     </div>
   )
 }
