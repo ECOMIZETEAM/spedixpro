@@ -37,11 +37,25 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const admin = createAdminSupabase()
 
+  // Account di accesso REALE del cliente (utenti -> auth.users): usiamo l'email effettiva
+  // del login, robusta anche se clienti.email è disallineata o non valida, e NON creiamo
+  // utenti fantasma. Se il cliente non ha un login valido, torniamo alla lista SENZA
+  // sloggare il master (altrimenti si finirebbe sulla pagina di login).
+  const { data: uCli } = await admin.from('utenti').select('id').eq('cliente_id', cliente.id).limit(1).maybeSingle()
+  let loginEmail: string | null = null
+  if (uCli?.id) {
+    const { data: au } = await admin.auth.admin.getUserById((uCli as any).id)
+    loginEmail = au?.user?.email || null
+  }
+  if (!loginEmail) {
+    return NextResponse.redirect(new URL('/dashboard/clienti?erroreAccesso=cliente_senza_login', req.url))
+  }
+
   // logout della sessione master, poi login come cliente (i cookie finiscono su okRedirect)
   await supabase.auth.signOut()
 
   const { data: linkData, error } = await admin.auth.admin.generateLink({
-    type: 'magiclink', email: cliente.email,
+    type: 'magiclink', email: loginEmail,
   })
   if (error || !linkData) {
     return NextResponse.redirect(new URL('/dashboard/clienti?error=impersonazione_fallita', req.url))

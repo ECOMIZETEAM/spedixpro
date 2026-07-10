@@ -16,6 +16,7 @@ export default function ClientiPage() {
   const [daEliminare, setDaEliminare] = useState<any>(null)
   const [eliminando, setEliminando] = useState(false)
   const [errElim, setErrElim] = useState('')
+  const [erroreAccesso, setErroreAccesso] = useState('')
 
   function carica() {
     fetch('/api/clienti/lista?conMaster=1')
@@ -23,7 +24,15 @@ export default function ClientiPage() {
       .then(d => { setClienti(Array.isArray(d) ? d : []); setLoading(false) })
       .catch(() => setLoading(false))
   }
-  useEffect(() => { carica() }, [])
+  useEffect(() => {
+    carica()
+    // Messaggio se l'accesso a un cliente è stato bloccato (cliente senza account di login)
+    const p = new URLSearchParams(window.location.search)
+    if (p.get('erroreAccesso') === 'cliente_senza_login') {
+      setErroreAccesso("Non è possibile accedere a questo cliente: non ha un account di accesso valido (email mancante o non valida). Correggi la sua email dalle impostazioni del cliente per abilitare l'accesso.")
+      window.history.replaceState(null, '', '/dashboard/clienti')
+    }
+  }, [])
 
   async function confermaElimina() {
     if (!daEliminare) return
@@ -76,6 +85,13 @@ export default function ClientiPage() {
         </div>
         <a href="/dashboard/clienti/nuovo" style={{background:'#f97316',color:'#fff',padding:'8px 18px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>+ Nuovo Cliente</a>
       </div>
+
+      {erroreAccesso && (
+        <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'12px 14px',marginBottom:'16px',fontSize:'13px',color:'#c2410c',display:'flex',alignItems:'flex-start',gap:'8px'}}>
+          <span>⚠️</span><span style={{flex:1}}>{erroreAccesso}</span>
+          <button onClick={()=>setErroreAccesso('')} style={{background:'none',border:'none',cursor:'pointer',color:'#c2410c',fontWeight:700}}>✕</button>
+        </div>
+      )}
 
       {/* FILTRI */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',padding:'18px',marginBottom:'16px'}}>
