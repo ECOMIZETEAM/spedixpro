@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { spediamoproGetTracking } from '@/lib/spediamopro'
+import { spediamoproGetTracking, mapStatoSpediamopro } from '@/lib/spediamopro'
+import { mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -11,9 +12,16 @@ export async function GET(req: NextRequest) {
   if (!spedizioneId) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
 
   const { data: spedizione } = await supabase.from('spedizioni')
-    .select('tracking_number,corriere_id,numero,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_telefono,dest_email,raw_response,colli_dettaglio,mitt_nome,cliente_id,contenuto')
+    .select('id,stato,tracking_number,corriere_id,numero,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_telefono,dest_email,raw_response,colli_dettaglio,mitt_nome,cliente_id,contenuto')
     .eq('id', spedizioneId).eq('master_id', utente?.master_id).single()
   if (!spedizione) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
+
+  // Aggiorna lo stato salvato dallo stato live del tracking (best-effort, non blocca la risposta).
+  const persistiStato = async (nuovo: string | null) => {
+    if (!nuovo || nuovo === 'eccezione' || nuovo === (spedizione as any).stato) return
+    if ((spedizione as any).stato === 'consegnata' || (spedizione as any).stato === 'annullata') return
+    try { await supabase.from('spedizioni').update({ stato: nuovo }).eq('id', spedizione.id) } catch {}
+  }
 
   const { data: cliente } = await supabase.from('clienti').select('ragione_sociale').eq('id', spedizione.cliente_id).single()
   const { data: corriere } = await supabase.from('corrieri').select('credenziali,tipo,nome_contratto').eq('id', spedizione.corriere_id).single()
@@ -46,6 +54,7 @@ export async function GET(req: NextRequest) {
       const authcode = cred?.authcode
       if (!spid || !authcode) return NextResponse.json({ ...base, eventi: [], error: 'Tracking non disponibile per questa spedizione' })
       const tr = await spediamoproGetTracking(authcode, Number(spid))
+      await persistiStato(mapStatoSpediamopro(tr.status))
       const eventi = (tr.events || []).map((e: any) => ({
         date: e.at || e.date || '',
         description: [e.title, e.description].filter(Boolean).join(' — ') || 'Evento',
@@ -62,9 +71,22 @@ export async function GET(req: NextRequest) {
     let data: any
     try { data = JSON.parse(text) } catch { data = { raw_text: text } }
 
+    const eventiSp = data.events || data.tracking || data.trackingEvents || (Array.isArray(data) ? data : [])
+    // Ricavo lo stato "più avanzato" dagli eventi e lo persisto (best-effort)
+    const candidati: string[] = []
+    for (const k of ['status', 'stato', 'current_status', 'state']) if (typeof data?.[k] === 'string') candidati.push(data[k])
+    for (const e of (Array.isArray(eventiSp) ? eventiSp : [])) {
+      for (const k of ['status', 'description', 'descrizione', 'stato', 'state', 'message', 'event', 'text', 'nota']) {
+        if (e && typeof e[k] === 'string') candidati.push(e[k])
+      }
+    }
+    let nuovo: string | null = null
+    for (const c of candidati) { const m = mapStatoSpedisci(c); if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m }
+    await persistiStato(nuovo)
+
     return NextResponse.json({
       ...base,
-      eventi: data.events || data.tracking || data.trackingEvents || (Array.isArray(data) ? data : []),
+      eventi: eventiSp,
       status_code: res.status,
       raw: data
     })

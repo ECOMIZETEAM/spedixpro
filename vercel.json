@@ -11,7 +11,7 @@
     },
     {
       "path": "/api/tracking/aggiorna",
-      "schedule": "0 */4 * * *"
+      "schedule": "0 * * * *"
     }
   ]
 }

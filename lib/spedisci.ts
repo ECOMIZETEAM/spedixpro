@@ -3,7 +3,7 @@
 export function mapStatoSpedisci(statusStr: string): string | null {
   const s = (statusStr || '').toLowerCase()
   if (!s) return null
-  if (s.includes('consegnat') || s.includes('deliver')) return 'consegnata'
+  if (s.includes('consegnat') || s.includes('delivered')) return 'consegnata'  // NB: 'delivered' (non 'deliver') per non catturare "out for delivery"
   if (s.includes('giacenz') || s.includes('stock') || s.includes('deposit') || s.includes('giacenza')) return 'in_giacenza'
   if (s.includes('reso') || s.includes('return to sender') || s.includes('al mittente') || s.includes('rientro')) return 'reso_mittente'
   if (s.includes('in consegna') || s.includes('out for delivery') || s.includes('distribuzione') || s.includes('in distribuzione')) return 'in_consegna'
