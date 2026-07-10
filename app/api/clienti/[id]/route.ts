@@ -189,10 +189,43 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!utente?.master_id || ruolo === 'cliente' || ruolo === 'agente') {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
-  if (id.startsWith('m:')) return NextResponse.json({ error: 'I sotto-master non si eliminano da qui' }, { status: 400 })
-
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
+
+  // ── Sotto-master (id = "m:<uuid>"): eliminabile come un cliente, con protezioni ──
+  if (id.startsWith('m:')) {
+    const subId = id.slice(2)
+    const { data: sub } = await admin.from('masters').select('id,parent_master_id').eq('id', subId).maybeSingle()
+    if (!sub || sub.parent_master_id !== utente.master_id) {
+      return NextResponse.json({ error: 'Sotto-master non trovato o non è un tuo sotto-master diretto' }, { status: 403 })
+    }
+    // Non eliminabile se ha account collegati (andrebbero orfani / cancellati a cascata) o storico spedizioni.
+    const { count: nSubM } = await admin.from('masters').select('id', { count: 'exact', head: true }).eq('parent_master_id', subId)
+    if (nSubM && nSubM > 0) return NextResponse.json({ error: `Ha ${nSubM} sotto-master collegati: rimuovili prima di eliminarlo.` }, { status: 409 })
+    const { count: nCli } = await admin.from('clienti').select('id', { count: 'exact', head: true }).eq('master_id', subId)
+    if (nCli && nCli > 0) return NextResponse.json({ error: `Ha ${nCli} clienti collegati: rimuovili prima di eliminarlo.` }, { status: 409 })
+    const { count: nSped } = await admin.from('spedizioni').select('id', { count: 'exact', head: true }).eq('master_id', subId)
+    if (nSped && nSped > 0) return NextResponse.json({ error: `Ha ${nSped} spedizioni registrate: non può essere eliminato. Puoi disattivarlo dalle sue impostazioni.` }, { status: 409 })
+
+    // Pulizia riferimenti che bloccherebbero l'eliminazione (FK senza cascade). Best-effort.
+    try { await admin.from('clienti').update({ promosso_a_master_id: null }).eq('promosso_a_master_id', subId) } catch {}
+    for (const t of ['movimenti', 'movimenti_clienti', 'movimenti_credito', 'ritiri', 'distinte', 'distinte_contrassegni', 'cod_files', 'spedizioni_margini']) {
+      try { await admin.from(t).delete().eq('master_id', subId) } catch {}
+    }
+    try { await admin.from('movimenti').delete().eq('master_target_id', subId) } catch {}
+    // Login del sotto-master (auth + utenti)
+    try {
+      const { data: uSub } = await admin.from('utenti').select('id').eq('master_id', subId)
+      for (const u of (uSub || [])) {
+        try { await admin.auth.admin.deleteUser((u as any).id) } catch {}
+        try { await admin.from('utenti').delete().eq('id', (u as any).id) } catch {}
+      }
+    } catch {}
+    // Contratti, listini, zone, permessi e notifiche del sotto-master vengono rimossi in CASCADE.
+    const { error } = await admin.from('masters').delete().eq('id', subId)
+    if (error) return NextResponse.json({ error: `Impossibile eliminare: ${error.message}` }, { status: 400 })
+    return NextResponse.json({ success: true })
+  }
 
   // Dev'essere un cliente DIRETTO di questo master.
   const { data: cli } = await admin.from('clienti').select('id,master_id,email').eq('id', id).maybeSingle()

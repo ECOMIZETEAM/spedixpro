@@ -174,6 +174,7 @@ export default function ClientiPage() {
                             <a href={`/dashboard/clienti/${c.id}`} title="Credito, movimenti e dati" className="cli-act">▤</a>
                             <a href={`/dashboard/clienti/master/${String(c.id).slice(2)}`} title="Modifica dati e accesso" className="cli-act">✎</a>
                             <a href={`/dashboard/clienti/${c.id}/impostazioni`} title="Impostazioni" className="cli-act">⚙</a>
+                            <button onClick={()=>{setErrElim('');setDaEliminare(c)}} title="Elimina sotto-master" className="cli-act" style={{background:'none',border:'none',cursor:'pointer',color:'#dc2626',fontSize:'14px',padding:0}}>🗑</button>
                           </>
                         ) : (
                           <>
@@ -197,9 +198,9 @@ export default function ClientiPage() {
       {daEliminare && (
         <div onClick={()=>!eliminando && setDaEliminare(null)} style={{position:'fixed',inset:0,background:'rgba(15,15,15,0.55)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
           <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',maxWidth:'420px',width:'100%',padding:'24px',boxShadow:'0 20px 60px rgba(0,0,0,.35)'}}>
-            <div style={{fontSize:'17px',fontWeight:800,color:'#1a1a1a',marginBottom:'8px'}}>Eliminare il cliente?</div>
+            <div style={{fontSize:'17px',fontWeight:800,color:'#1a1a1a',marginBottom:'8px'}}>{daEliminare.is_master ? 'Eliminare il sotto-master?' : 'Eliminare il cliente?'}</div>
             <div style={{fontSize:'13.5px',color:'#555',marginBottom:'6px'}}>Stai per eliminare <b>{daEliminare.ragione_sociale}</b>. L'operazione è definitiva e rimuove anche il suo accesso al portale.</div>
-            <div style={{fontSize:'12px',color:'#999',marginBottom:'16px'}}>Se il cliente ha spedizioni registrate non potrà essere eliminato (potrai solo disattivarlo).</div>
+            <div style={{fontSize:'12px',color:'#999',marginBottom:'16px'}}>{daEliminare.is_master ? 'Se il sotto-master ha clienti, sotto-master o spedizioni collegati non potrà essere eliminato (potrai solo disattivarlo).' : 'Se il cliente ha spedizioni registrate non potrà essere eliminato (potrai solo disattivarlo).'}</div>
             {errElim && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px',fontSize:'12.5px',color:'#dc2626',marginBottom:'14px'}}>{errElim}</div>}
             <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
               <button onClick={()=>setDaEliminare(null)} disabled={eliminando} style={{background:'#fff',color:'#1a1a1a',border:'1px solid #ddd',borderRadius:'7px',padding:'9px 18px',fontSize:'13px',fontWeight:600,cursor:'pointer'}}>Annulla</button>
