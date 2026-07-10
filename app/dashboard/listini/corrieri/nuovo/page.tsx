@@ -253,8 +253,9 @@ export default function ListinoCorrierePage() {
         </button>
       </div>
 
-      {/* Tabs */}
-      <div style={{display:'flex',borderBottom:'1px solid #d1d5db',padding:'0 16px',overflowX:'auto' as const}}>
+      {/* Tabs — sempre cliccabili anche in sola lettura (pointer-events:auto sovrascrive il blocco):
+          così si possono vedere Assicurazione/Contrassegni/Giacenze ecc., ma non modificarli. */}
+      <div style={{display:'flex',borderBottom:'1px solid #d1d5db',padding:'0 16px',overflowX:'auto' as const,pointerEvents:'auto' as const}}>
         {[['pesi','Pesi / Zone'],['assicurazione','Assicurazione'],['contrassegni','Contrassegni'],['servizi','Servizi accessori'],['giacenze','Giacenze'],['ritiro','Ritiro'],['extra','Extra']].map(([k,l])=>(
           <button key={k} style={tabStyle(k)} onClick={()=>setTab(k)}>{l}</button>
         ))}
