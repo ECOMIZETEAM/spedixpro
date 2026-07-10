@@ -86,7 +86,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   }
 
-  // reset password
+  // reset password MANUALE (password digitata a mano)
   let passwordImpostata: string | undefined
   const nuovaPassword = (body.nuova_password || '').trim()
   if (nuovaPassword) {
@@ -97,5 +97,27 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     passwordImpostata = nuovaPassword
   }
 
-  return NextResponse.json({ ok: true, ...(passwordImpostata ? { password: passwordImpostata } : {}) })
+  // reset CREDENZIALI (auto-genera nuova password e INVIA via email) — come per il cliente.
+  let emailInviata = false
+  if (body.resetPassword) {
+    if (!authId) return NextResponse.json({ error: 'Utente di login del master non trovato' }, { status: 400 })
+    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#'
+    const newPassword = Array.from({ length: 10 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+    const { error } = await admin.auth.admin.updateUserById(authId, { password: newPassword })
+    if (error) return NextResponse.json({ error: 'Password: ' + error.message }, { status: 400 })
+    passwordImpostata = newPassword
+    // email del master (nuova se cambiata, altrimenti quella di login)
+    let emailDest = nuovaEmail
+    if (!emailDest) { const { data: au } = await admin.auth.admin.getUserById(authId); emailDest = au?.user?.email || '' }
+    const { data: m } = await admin.from('masters').select('nome').eq('id', id).single()
+    if (emailDest) {
+      try {
+        const { inviaCredenzialiCliente } = await import('@/lib/email')
+        const res = await inviaCredenzialiCliente({ email: emailDest, nomeCliente: m?.nome || 'Master', masterNome: 'MoovExpress', dominio: 'moovexpress.com', password: newPassword })
+        emailInviata = !!(res as any)?.ok
+      } catch (e) { console.error('Invio credenziali master:', e) }
+    }
+  }
+
+  return NextResponse.json({ ok: true, emailInviata, ...(passwordImpostata ? { password: passwordImpostata } : {}) })
 }

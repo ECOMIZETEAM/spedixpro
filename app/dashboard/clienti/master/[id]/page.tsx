@@ -16,6 +16,7 @@ export default function ModificaMasterPage() {
   const [msg, setMsg] = useState('')
   const [nuovaEmail, setNuovaEmail] = useState('')
   const [nuovaPassword, setNuovaPassword] = useState('')
+  const [resetPassword, setResetPassword] = useState(false)
   const [passwordMostrata, setPasswordMostrata] = useState('')
   const [listini, setListini] = useState<any[]>([])
   // Credito del sotto-master (gestito come un cliente, via API m:)
@@ -66,13 +67,14 @@ export default function ModificaMasterPage() {
     }
     if (nuovaEmail.trim()) body.nuova_email = nuovaEmail.trim()
     if (nuovaPassword.trim()) body.nuova_password = nuovaPassword.trim()
+    if (resetPassword) body.resetPassword = true
     const res = await fetch(`/api/master/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
     const d = await res.json(); setSaving(false)
     if (d.error) { setErrore(d.error); return }
-    setMsg('✓ Modifiche salvate')
+    setMsg(d.emailInviata ? '✓ Modifiche salvate — credenziali inviate via email' : '✓ Modifiche salvate')
     if (d.password) setPasswordMostrata(d.password)
     if (nuovaEmail.trim()) { setM({...m, login_email: nuovaEmail.trim(), email: nuovaEmail.trim()}); setNuovaEmail('') }
-    setNuovaPassword('')
+    setNuovaPassword(''); setResetPassword(false)
   }
 
   function generaPwd() {
@@ -143,10 +145,14 @@ export default function ModificaMasterPage() {
           <input style={inp} type="email" placeholder="nuova@email.it" value={nuovaEmail} onChange={e=>setNuovaEmail(e.target.value)}/></div>
         <div><label style={lbl}>Nuova password (lascia vuoto per non cambiare)</label>
           <div style={{display:'flex',gap:'8px'}}>
-            <input style={inp} value={nuovaPassword} onChange={e=>setNuovaPassword(e.target.value)} placeholder="min 8 caratteri"/>
-            <button onClick={generaPwd} type="button" style={{background:'#fff7ed',color:'#f97316',border:'1px solid #fed7aa',borderRadius:'6px',padding:'0 14px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>Genera</button>
+            <input style={inp} value={nuovaPassword} onChange={e=>setNuovaPassword(e.target.value)} placeholder="min 8 caratteri" disabled={resetPassword}/>
+            <button onClick={generaPwd} type="button" disabled={resetPassword} style={{background:'#fff7ed',color:'#f97316',border:'1px solid #fed7aa',borderRadius:'6px',padding:'0 14px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',opacity:resetPassword?0.5:1}}>Genera</button>
           </div>
         </div>
+        <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'#1a1a1a',cursor:'pointer',marginTop:'12px'}}>
+          <input type="checkbox" checked={resetPassword} onChange={e=>setResetPassword(e.target.checked)} style={{width:'15px',height:'15px',accentColor:'#f97316'}}/>
+          Resetta e invia nuova password via email al master
+        </label>
         {passwordMostrata && (
           <div style={{marginTop:'12px',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',padding:'12px'}}>
             <div style={{fontSize:'12px',fontWeight:700,color:'#16a34a',marginBottom:'6px'}}>✓ Password impostata — copiala e condividila</div>
