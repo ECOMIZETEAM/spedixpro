@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { autenticaApiKey } from '@/lib/api-auth'
-import { registraMovimento } from '@/lib/movimenti'
-import { rimborsaCatena } from '@/lib/cascata'
 
 // Dettaglio/stato di una spedizione creata via API
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -23,8 +21,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   })
 }
 
-// Annulla una spedizione creata via API — SOLO se ancora "in_lavorazione"
-// (non ancora affidata al corriere). Rimborso credito cliente + cascata master.
+// Annulla una spedizione creata via API — SOLO se ancora "in_lavorazione".
+// Come la UI: va in ATTESA 48h (annullamento_pending); l'annullo al corriere + storno
+// avvengono dopo, via cron. Niente annullata immediata.
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
@@ -35,42 +34,23 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     .eq('id', id).maybeSingle()
   if (!sped || sped.cliente_id !== ctx.clienteId) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
   if (sped.stato === 'annullata') return NextResponse.json({ success: true, already: true })
+  if (sped.stato === 'annullamento_pending') return NextResponse.json({ success: true, pending: true })
 
   // REGOLA API: annullabile solo finché è in lavorazione (non ancora data al corriere).
   if (sped.stato !== 'in_lavorazione') {
     return NextResponse.json({ error: 'Spedizione già affidata al corriere: non annullabile via API' }, { status: 409 })
   }
 
-  const { error: updErr } = await admin.from('spedizioni').update({ stato: 'annullata' }).eq('id', id)
+  // STESSA regola della UI: la cancellazione va in ATTESA 48h (annullamento_pending), poi il cron
+  // invia l'annullo al corriere e fa lo storno. Niente annullata immediata (no bypass del pending).
+  const { error: updErr } = await admin.from('spedizioni').update({
+    stato: 'annullamento_pending',
+    stato_precedente: sped.stato,
+    annullamento_richiesto_at: new Date().toISOString(),
+    annullamento_da: null,
+    annullamento_errore: null,
+  }).eq('id', id)
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 400 })
 
-  // Rimborso credito al cliente (best-effort)
-  const costoCliente = Number(sped.costo_totale || 0)
-  if (costoCliente > 0 && sped.cliente_id) {
-    try {
-      await registraMovimento(admin, {
-        masterId: sped.master_id, clienteId: sped.cliente_id, tipo: 'rimborso',
-        descrizione: `Rimborso ${sped.numero} - ${sped.dest_nome || ''}`.trim(), riferimento: sped.numero,
-        importo: Math.abs(costoCliente), spedizioneId: sped.id, createdBy: null,
-      })
-    } catch (e) { console.error('API rimborso cliente:', e) }
-  }
-  // Rimborso a cascata ai master (speculare all'addebito in creazione)
-  try {
-    const { data: corriere } = await admin.from('corrieri').select('master_id,nome_contratto').eq('id', sped.corriere_id).single()
-    if (corriere?.master_id) {
-      const packages = (Array.isArray(sped.colli_dettaglio) && sped.colli_dettaglio.length)
-        ? sped.colli_dettaglio.map((c: any) => ({ weight: sped.peso_reale || 1, length: c.lunghezza, width: c.larghezza, height: c.altezza }))
-        : [{ weight: sped.peso_reale || 1, length: sped.lunghezza, width: sped.larghezza, height: sped.altezza }]
-      await rimborsaCatena(admin, {
-        masterDirettoId: sped.master_id, corriereOwnerId: corriere.master_id,
-        costoSpedizione: Number(sped.costo_spedizione || 0), provincia: sped.dest_provincia || '',
-        cap: sped.dest_cap || '', paese: sped.dest_paese || 'IT', packages,
-        corriereNome: corriere.nome_contratto,
-        numero: sped.numero, destNome: sped.dest_nome || '', spedizioneId: sped.id, createdBy: null,
-      })
-    }
-  } catch (e) { console.error('API rimborso cascata:', e) }
-
-  return NextResponse.json({ success: true, stato: 'annullata' })
+  return NextResponse.json({ success: true, stato: 'annullamento_pending', message: 'Annullamento programmato: verrà inviato al corriere tra 48 ore.' })
 }
