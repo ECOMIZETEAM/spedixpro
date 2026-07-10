@@ -72,6 +72,7 @@ const NAV_BASE: NavItem[] = [
       { label: 'Logo', href: '/cliente/impostazioni/logo' },
     ],
   },
+  { id: 'documentazione', label: 'Documentazione', icon: '📖', href: 'https://docs.moovexpress.com' },
 ]
 
 export default function ClienteNav() {
@@ -206,18 +207,20 @@ export default function ClienteNav() {
           )
         }
 
-        // Voce singola (leaf)
+        // Voce singola (leaf). Gli href esterni (http) aprono in nuova scheda.
+        const ext = item.href?.startsWith('http')
         return (
           <a
             key={item.id}
             href={item.href}
             className="spx-item"
+            {...(ext ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
             style={active ? { background: 'rgba(249,115,22,0.12)', color: '#fff', fontWeight: 600, borderLeft: `3px solid ${ACCENT}` } : {}}
           >
             <span style={{ fontSize: '11px', width: '14px', opacity: active ? 1 : 0.55 }}>{item.icon}</span>
             <span style={{ flex: 1 }}>{item.label}</span>
-            {item.id === 'assistenza' && ticketBadge > 0 && (
-              <span style={{ background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, minWidth: '17px', height: '17px', borderRadius: '9px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{ticketBadge}</span>
+            {item.id === 'assistenza' && ticketBadge.count > 0 && (
+              <span style={{ background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, minWidth: '17px', height: '17px', borderRadius: '9px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{ticketBadge.count}</span>
             )}
           </a>
         )

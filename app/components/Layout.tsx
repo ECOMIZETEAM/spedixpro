@@ -7,7 +7,7 @@ import FlashBanner from './FlashBanner'
 // always: sempre visibile a chiunque abbia accesso al portale.
 // rete: visibile solo ai master che possono gestire la propria rete di sotto-master.
 type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean }
-type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, sub?: NavSub[] }
+type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, external?: boolean, sub?: NavSub[] }
 
 const NAV: NavItem[] = [
   { label: 'Spedizioni', href: '/dashboard/spedizioni', icon: '◫', sub: [
@@ -89,6 +89,7 @@ const NAV: NavItem[] = [
   { label: 'Centro Notifiche', href: '/dashboard/notifiche', icon: '✦', perm: 'admin.notification', sub: [
     { label: 'Invia Notifica', href: '/dashboard/notifiche/invia', perm: 'admin.notification' },
   ]},
+  { label: 'Documentazione', href: 'https://docs.moovexpress.com', icon: '📖', always: true, external: true },
 ]
 
 export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, gestioneRete?: boolean, permessi?: Record<string, boolean> } }) {
@@ -208,7 +209,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                     <span style={{fontSize:'10px',color:'#4a7090',transition:'transform 0.2s',display:'inline-block',transform:isOpen?'rotate(90deg)':'rotate(0deg)'}}>▶</span>
                   </div>
                 ) : (
-                  <a href={item.href} style={{
+                  <a href={item.href} {...(item.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})} style={{
                     display:'flex',alignItems:'center',gap:'9px',
                     padding:'8px 18px',
                     color: isActive ? '#fff' : '#8aabb8',
@@ -219,8 +220,8 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                   }}>
                     <span style={{fontSize:'13px',width:'16px',textAlign:'center',opacity:.8}}>{item.icon}</span>
                     <span style={{flex:1}}>{item.label}</span>
-                    {item.href === '/dashboard/assistenza' && ticketBadge > 0 && (
-                      <span style={{background:'#dc2626',color:'#fff',fontSize:'10px',fontWeight:700,minWidth:'17px',height:'17px',borderRadius:'9px',display:'inline-flex',alignItems:'center',justifyContent:'center',padding:'0 5px'}}>{ticketBadge}</span>
+                    {item.href === '/dashboard/assistenza' && ticketBadge.count > 0 && (
+                      <span style={{background:'#dc2626',color:'#fff',fontSize:'10px',fontWeight:700,minWidth:'17px',height:'17px',borderRadius:'9px',display:'inline-flex',alignItems:'center',justifyContent:'center',padding:'0 5px'}}>{ticketBadge.count}</span>
                     )}
                   </a>
                 )}
