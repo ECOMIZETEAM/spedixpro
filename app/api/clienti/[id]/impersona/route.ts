@@ -30,7 +30,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const { id } = await params
   const { data: cliente } = await supabase
-    .from('clienti').select('id,email,master_id').eq('id', id).single()
+    .from('clienti').select('id,email,master_id,ragione_sociale').eq('id', id).single()
   if (!cliente || cliente.master_id !== utente.master_id) {
     return NextResponse.redirect(new URL('/dashboard/clienti?error=non_autorizzato', req.url))
   }
@@ -47,15 +47,35 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const { data: au } = await admin.auth.admin.getUserById((uCli as any).id)
     loginEmail = au?.user?.email || null
   }
+  // Nessun account di accesso: lo creiamo al volo se l'email del cliente è valida e libera,
+  // così ogni cliente con email valida è sempre accessibile (senza sloggare il master).
   if (!loginEmail) {
-    return NextResponse.redirect(new URL('/dashboard/clienti?erroreAccesso=cliente_senza_login', req.url))
+    const email = (cliente.email || '').trim().toLowerCase()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.redirect(new URL('/dashboard/clienti?erroreAccesso=cliente_email_non_valida', req.url))
+    }
+    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#'
+    const pwd = Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+    const { data: created, error: cErr } = await admin.auth.admin.createUser({ email, password: pwd, email_confirm: true })
+    if (cErr || !created?.user) {
+      // Tipicamente: email già usata da un altro account.
+      return NextResponse.redirect(new URL('/dashboard/clienti?erroreAccesso=cliente_email_occupata', req.url))
+    }
+    const { error: uErr } = await admin.from('utenti').insert({
+      id: created.user.id, ruolo: 'cliente', master_id: cliente.master_id,
+      cliente_id: cliente.id, nome: (cliente as any).ragione_sociale || 'Cliente', attivo: true,
+    })
+    if (uErr) {
+      return NextResponse.redirect(new URL('/dashboard/clienti?erroreAccesso=cliente_login_non_creato', req.url))
+    }
+    loginEmail = email
   }
 
   // logout della sessione master, poi login come cliente (i cookie finiscono su okRedirect)
   await supabase.auth.signOut()
 
   const { data: linkData, error } = await admin.auth.admin.generateLink({
-    type: 'magiclink', email: loginEmail,
+    type: 'magiclink', email: loginEmail as string,
   })
   if (error || !linkData) {
     return NextResponse.redirect(new URL('/dashboard/clienti?error=impersonazione_fallita', req.url))

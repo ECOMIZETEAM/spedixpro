@@ -26,10 +26,17 @@ export default function ClientiPage() {
   }
   useEffect(() => {
     carica()
-    // Messaggio se l'accesso a un cliente è stato bloccato (cliente senza account di login)
+    // Messaggio se l'accesso a un cliente è stato bloccato
     const p = new URLSearchParams(window.location.search)
-    if (p.get('erroreAccesso') === 'cliente_senza_login') {
-      setErroreAccesso("Non è possibile accedere a questo cliente: non ha un account di accesso valido (email mancante o non valida). Correggi la sua email dalle impostazioni del cliente per abilitare l'accesso.")
+    const code = p.get('erroreAccesso')
+    const msgs: Record<string, string> = {
+      cliente_email_non_valida: "Non è possibile accedere a questo cliente: la sua email non è valida. Correggi l'email dalle impostazioni del cliente per abilitare l'accesso.",
+      cliente_email_occupata: "Non è possibile creare l'accesso: l'email del cliente è già usata da un altro account. Assegnagli un'email diversa dalle sue impostazioni.",
+      cliente_login_non_creato: "Non è stato possibile creare l'accesso per questo cliente. Riprova o contatta l'assistenza.",
+      cliente_senza_login: "Questo cliente non ha un account di accesso valido.",
+    }
+    if (code && msgs[code]) {
+      setErroreAccesso(msgs[code])
       window.history.replaceState(null, '', '/dashboard/clienti')
     }
   }, [])
