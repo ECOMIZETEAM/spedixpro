@@ -89,7 +89,7 @@ export default function StaffPage() {
                   <td style={{ ...td, whiteSpace:'nowrap' }}>{u.ultimo_accesso ? new Date(u.ultimo_accesso).toLocaleString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-'}</td>
                   <td style={td}>
                     <div style={{ display:'flex', gap:'6px' }}>
-                      <button onClick={()=>reimposta(u)} disabled={resetting===u.id} style={{ padding:'6px 10px', background:'#fff7ed', color:'#ea580c', border:'1px solid #fed7aa', borderRadius:'5px', fontSize:'12px', fontWeight:'600', cursor:'pointer', opacity: resetting===u.id?0.6:1 }} title="Reimposta password e invia via email">{resetting===u.id?'...':'Reimposta password'}</button>
+                      <a href={`/dashboard/impostazioni/staff/${u.id}`} style={{ padding:'6px 12px', background:'#fff7ed', color:'#ea580c', border:'1px solid #fed7aa', borderRadius:'5px', fontSize:'12px', fontWeight:'600', cursor:'pointer', textDecoration:'none' }} title="Modifica dati e reset password">Modifica</a>
                       <button onClick={()=>elimina(u.id)} style={{ padding:'6px 10px', background:'#dc2626', color:'#fff', border:'none', borderRadius:'5px', fontSize:'13px', cursor:'pointer' }} title="Elimina">&#128465;</button>
                     </div>
                   </td>

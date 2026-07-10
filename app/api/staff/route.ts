@@ -125,7 +125,19 @@ export async function PUT(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ success: true, email: emailAttuale, ...(passwordImpostata ? { password: passwordImpostata } : {}) })
+  // Aggiornamento anagrafica (nome/cognome/ruolo/telefono/attivo)
+  const anagrafica: any = {}
+  if (typeof body.nome === 'string') anagrafica.nome = body.nome.trim()
+  if (typeof body.cognome === 'string') anagrafica.cognome = body.cognome.trim() || null
+  if (typeof body.telefono === 'string') anagrafica.telefono = body.telefono.trim() || null
+  if (body.ruolo && ['admin', 'operatore', 'agente'].includes(String(body.ruolo).toLowerCase())) anagrafica.ruolo = String(body.ruolo).toLowerCase()
+  if (typeof body.attivo === 'boolean') anagrafica.attivo = body.attivo
+  if (Object.keys(anagrafica).length) {
+    const { error } = await admin.from('utenti').update(anagrafica).eq('id', id).eq('master_id', me.master_id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  }
+
+  return NextResponse.json({ success: true, email: emailAttuale, emailInviata: !!passwordImpostata && !!emailAttuale, ...(passwordImpostata ? { password: passwordImpostata } : {}) })
 }
 
 export async function DELETE(req: NextRequest) {
