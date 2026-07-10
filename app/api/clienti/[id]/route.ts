@@ -192,39 +192,64 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
 
-  // ── Sotto-master (id = "m:<uuid>"): eliminabile come un cliente, con protezioni ──
+  // ── Sotto-master (id = "m:<uuid>"): eliminabile anche se ha spedizioni ──
+  // Il master GENITORE ASSORBE le spedizioni del sotto-master: restano registrate e
+  // continuano a contare per tutta la catena sopra (i movimenti degli altri master, che
+  // hanno master_id proprio, NON vengono toccati). Si rimuove solo lo strato/profilo del
+  // sotto-master. I suoi corrieri sono copie di quelli del genitore: le spedizioni vengono
+  // rimappate sul corriere gemello del genitore (stesso nome_contratto).
   if (id.startsWith('m:')) {
     const subId = id.slice(2)
     const { data: sub } = await admin.from('masters').select('id,parent_master_id').eq('id', subId).maybeSingle()
     if (!sub || sub.parent_master_id !== utente.master_id) {
       return NextResponse.json({ error: 'Sotto-master non trovato o non è un tuo sotto-master diretto' }, { status: 403 })
     }
-    // Non eliminabile se ha account collegati (andrebbero orfani / cancellati a cascata) o storico spedizioni.
+    const parentId = sub.parent_master_id
+    // I clienti / sotto-master collegati vanno gestiti prima (non li cancelliamo a cascata).
     const { count: nSubM } = await admin.from('masters').select('id', { count: 'exact', head: true }).eq('parent_master_id', subId)
     if (nSubM && nSubM > 0) return NextResponse.json({ error: `Ha ${nSubM} sotto-master collegati: rimuovili prima di eliminarlo.` }, { status: 409 })
     const { count: nCli } = await admin.from('clienti').select('id', { count: 'exact', head: true }).eq('master_id', subId)
     if (nCli && nCli > 0) return NextResponse.json({ error: `Ha ${nCli} clienti collegati: rimuovili prima di eliminarlo.` }, { status: 409 })
-    const { count: nSped } = await admin.from('spedizioni').select('id', { count: 'exact', head: true }).eq('master_id', subId)
-    if (nSped && nSped > 0) return NextResponse.json({ error: `Ha ${nSped} spedizioni registrate: non può essere eliminato. Puoi disattivarlo dalle sue impostazioni.` }, { status: 409 })
 
-    // Pulizia riferimenti che bloccherebbero l'eliminazione (FK senza cascade). Best-effort.
-    try { await admin.from('clienti').update({ promosso_a_master_id: null }).eq('promosso_a_master_id', subId) } catch {}
-    for (const t of ['movimenti', 'movimenti_clienti', 'movimenti_credito', 'ritiri', 'distinte', 'distinte_contrassegni', 'cod_files', 'spedizioni_margini']) {
-      try { await admin.from(t).delete().eq('master_id', subId) } catch {}
+    // Rimappa le spedizioni sul corriere gemello del genitore; i corrieri del sotto-master
+    // senza gemello passano al genitore (per non lasciare le spedizioni senza corriere).
+    const { data: subCorr } = await admin.from('corrieri').select('id,nome_contratto').eq('master_id', subId)
+    const { data: parCorr } = await admin.from('corrieri').select('id,nome_contratto').eq('master_id', parentId)
+    const parByNome = new Map((parCorr || []).map((c: any) => [c.nome_contratto, c.id]))
+    const corrGemelli: string[] = []  // corrieri del sotto-master rimpiazzati (eliminabili in cascade)
+    for (const c of (subCorr || [])) {
+      const twin = parByNome.get((c as any).nome_contratto)
+      if (twin) {
+        try { await admin.from('spedizioni').update({ corriere_id: twin }).eq('corriere_id', (c as any).id) } catch {}
+        corrGemelli.push((c as any).id)
+      } else {
+        try { await admin.from('corrieri').update({ master_id: parentId }).eq('id', (c as any).id) } catch {}
+      }
     }
-    try { await admin.from('movimenti').delete().eq('master_target_id', subId) } catch {}
+    // Il genitore assorbe le spedizioni; staccale dalle distinte del sotto-master.
+    try {
+      const { data: subDist } = await admin.from('distinte').select('id').eq('master_id', subId)
+      const distIds = (subDist || []).map((d: any) => d.id)
+      if (distIds.length) await admin.from('spedizioni').update({ distinta_id: null }).in('distinta_id', distIds)
+    } catch {}
+    try { await admin.from('spedizioni').update({ master_id: parentId }).eq('master_id', subId) } catch {}
 
-    // I corrieri del sotto-master vengono rimossi in CASCADE dalla riga masters, ma prima
-    // vanno svuotate le tabelle figlie che li referenziano SENZA cascade (altrimenti la
-    // cancellazione del corriere fallisce: listini_corrieri_supplementi, fasce, zone, ecc.).
-    const { data: corr } = await admin.from('corrieri').select('id').eq('master_id', subId)
-    const corrIds = (corr || []).map((c: any) => c.id)
-    if (corrIds.length) {
-      for (const t of ['listini_corrieri_supplementi', 'listini_corrieri_fasce', 'listini_corrieri_corrieri', 'listini_clienti_supplementi', 'listini_clienti_corrieri', 'listini_clienti_fasce', 'listini_fasce', 'zone', 'distinte', 'ritiri']) {
-        try { await admin.from(t).delete().in('corriere_id', corrIds) } catch {}
+    // Svuota le dipendenze SOLO dei corrieri rimpiazzati (verranno rimossi in cascade con la
+    // riga masters). Quelli passati al genitore mantengono i loro listini/fasce.
+    if (corrGemelli.length) {
+      for (const t of ['listini_corrieri_supplementi', 'listini_corrieri_fasce', 'listini_corrieri_corrieri', 'listini_clienti_supplementi', 'listini_clienti_corrieri', 'listini_clienti_fasce', 'listini_fasce', 'zone']) {
+        try { await admin.from(t).delete().in('corriere_id', corrGemelli) } catch {}
       }
     }
 
+    // Rimuove lo strato/ledger + operativi PROPRI del sotto-master (i movimenti degli altri
+    // master della catena restano: hanno master_id diverso).
+    try { await admin.from('clienti').update({ promosso_a_master_id: null }).eq('promosso_a_master_id', subId) } catch {}
+    try { await admin.from('movimenti').delete().eq('master_id', subId) } catch {}
+    try { await admin.from('movimenti').delete().eq('master_target_id', subId) } catch {}
+    for (const t of ['movimenti_clienti', 'movimenti_credito', 'spedizioni_margini', 'ritiri', 'distinte_contrassegni', 'distinte', 'cod_files']) {
+      try { await admin.from(t).delete().eq('master_id', subId) } catch {}
+    }
     // Login del sotto-master (auth + utenti)
     try {
       const { data: uSub } = await admin.from('utenti').select('id').eq('master_id', subId)
@@ -233,7 +258,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         try { await admin.from('utenti').delete().eq('id', (u as any).id) } catch {}
       }
     } catch {}
-    // Contratti, listini, zone, permessi e notifiche del sotto-master vengono rimossi in CASCADE.
+    // Profilo del sotto-master (cascade: corrieri rimpiazzati, listini, zone, permessi, notifiche).
     const { error } = await admin.from('masters').delete().eq('id', subId)
     if (error) return NextResponse.json({ error: `Impossibile eliminare: ${error.message}` }, { status: 400 })
     return NextResponse.json({ success: true })
