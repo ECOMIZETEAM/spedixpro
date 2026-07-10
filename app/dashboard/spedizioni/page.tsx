@@ -149,13 +149,13 @@ async function apriTracking(s: any) {
   }
 
   async function elimina(id: string, numero: string) {
-    if (!confirm(`Eliminare la spedizione ${numero}?`)) return
+    if (!confirm(`Cancellare la spedizione ${numero}?\nAndrà in "Spedizioni Cancellate" e la richiesta di annullo verrà inviata al corriere dopo 48 ore. Entro questo tempo potrai ripristinarla.`)) return
     setEliminando(id)
     const res = await fetch(`/api/spedizioni/elimina?id=${id}`, { method: 'DELETE' })
     const j = await res.json().catch(() => ({}))
     setEliminando(null)
     if (res.ok && j.success) {
-      setNotifica('Spedizione cancellata')
+      setNotifica(j.message || 'Spedizione spostata in attesa di annullo (48h). La trovi in Spedizioni Cancellate.')
       window.scrollTo({ top: 0, behavior: 'smooth' })
       caricaTutte()
     } else {

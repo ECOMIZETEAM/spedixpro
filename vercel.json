@@ -12,6 +12,10 @@
     {
       "path": "/api/tracking/aggiorna",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/spedizioni/annullamenti-cron",
+      "schedule": "30 * * * *"
     }
   ]
 }

@@ -1,19 +1,44 @@
 'use client'
 import { useState, useEffect } from 'react'
 
+function oreRestanti(richiestoAt: string): { txt: string; pronto: boolean } {
+  const scad = new Date(richiestoAt).getTime() + 48 * 60 * 60 * 1000
+  const diff = scad - Date.now()
+  if (diff <= 0) return { txt: 'invio in corso…', pronto: true }
+  const h = Math.floor(diff / 3600000)
+  const m = Math.floor((diff % 3600000) / 60000)
+  return { txt: `invio al corriere tra ${h}h ${m}m`, pronto: false }
+}
+
 export default function SpedizioniCancellateClientePage() {
   const [spedizioni, setSpedizioni] = useState<any[]>([])
+  const [pending, setPending] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
+  const [ripristinando, setRipristinando] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetch('/api/spedizioni/lista?stato=annullata')
-      .then(r => r.json())
-      .then(d => { setSpedizioni(Array.isArray(d) ? d : []); setLoading(false) })
-      .catch(() => setLoading(false))
-  }, [])
+  function carica() {
+    Promise.all([
+      fetch('/api/spedizioni/lista?stato=annullata').then(r => r.json()),
+      fetch('/api/spedizioni/lista?stato=annullamento_pending').then(r => r.json()),
+    ]).then(([ann, pen]) => {
+      setSpedizioni(Array.isArray(ann) ? ann : [])
+      setPending(Array.isArray(pen) ? pen : [])
+      setLoading(false)
+    }).catch(() => setLoading(false))
+  }
+  useEffect(() => { carica() }, [])
+
+  async function ripristina(id: string) {
+    if (!confirm('Ripristinare questa spedizione? Non verrà inviato nessun annullo al corriere.')) return
+    setRipristinando(id)
+    const res = await fetch(`/api/spedizioni/ripristina?id=${id}`, { method: 'POST' })
+    setRipristinando(null)
+    if (res.ok) carica()
+    else { const d = await res.json().catch(() => ({})); alert(d.error || 'Errore ripristino') }
+  }
 
   const visibili = cerca
     ? spedizioni.filter(s =>
@@ -33,9 +58,45 @@ export default function SpedizioniCancellateClientePage() {
         </div>
       </div>
 
+      {/* SEZIONE PENDING (in attesa di annullo, 48h) */}
+      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #fed7aa',overflow:'hidden',marginBottom:'16px'}}>
+        <div style={{padding:'12px 16px',borderBottom:'1px solid #fde4cf',background:'#fff7ed'}}>
+          <span style={{fontSize:'13px',fontWeight:'700',color:'#ea580c'}}>In attesa di annullo <span style={{color:'#9a3412',fontWeight:'400',fontSize:'12px'}}>({pending.length})</span></span>
+          <span style={{display:'block',marginTop:'2px',fontSize:'12px',color:'#9a3412'}}>La richiesta di annullo viene inviata al corriere dopo 48 ore. Entro questo tempo puoi ripristinare la spedizione.</span>
+        </div>
+        {loading ? (
+          <div style={{padding:'20px',textAlign:'center',color:'#bbb',fontSize:'13px'}}>Caricamento…</div>
+        ) : !pending.length ? (
+          <div style={{padding:'20px',textAlign:'center',color:'#bbb',fontSize:'13px'}}>Nessuna spedizione in attesa di annullo.</div>
+        ) : (
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
+              <tbody>
+                {pending.map(s => {
+                  const c = s.annullamento_richiesto_at ? oreRestanti(s.annullamento_richiesto_at) : { txt:'', pronto:false }
+                  return (
+                    <tr key={s.id} style={{borderBottom:'1px solid #fdece0'}}>
+                      <td style={{padding:'10px 16px'}}><span style={{fontWeight:'600',color:'#f97316'}}>{s.numero}</span></td>
+                      <td style={{padding:'10px 14px',color:'#333'}}>{s.dest_nome} · {s.dest_citta}</td>
+                      <td style={{padding:'10px 14px',color:'#ea580c',fontSize:'12px',whiteSpace:'nowrap'}}>{c.txt}</td>
+                      <td style={{padding:'10px 16px',textAlign:'right'}}>
+                        <button onClick={()=>ripristina(s.id)} disabled={ripristinando===s.id}
+                          style={{padding:'6px 12px',background:'#fff',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:'pointer',opacity:ripristinando===s.id?0.6:1}}>
+                          {ripristinando===s.id?'…':'Ripristina'}
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-          <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>🗑️ Cancellate <span style={{color:'#999',fontWeight:'400',fontSize:'12px'}}>({visibili.length})</span></span>
+          <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Annullate <span style={{color:'#999',fontWeight:'400',fontSize:'12px'}}>({visibili.length})</span></span>
           <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
             <span style={{fontSize:'12px',color:'#666'}}>Cerca:</span>
             <input value={cerca} onChange={e=>setCerca(e.target.value)} placeholder="N. spedizione o destinatario..."

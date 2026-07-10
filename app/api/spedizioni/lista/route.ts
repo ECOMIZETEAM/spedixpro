@@ -91,7 +91,7 @@ export async function GET(req: NextRequest) {
   // Filtro stato: se richiesto uno stato preciso lo applico; se non richiesto,
   // escludo le annullate (che vivono nella pagina "Spedizioni Cancellate").
   if (stato && stato !== 'tutti') query = query.eq('stato', stato)
-  else query = query.neq('stato', 'annullata')
+  else query = query.not('stato', 'in', '(annullata,annullamento_pending)')
   if (dal) query = query.gte('created_at', dal)
   if (al) query = query.lte('created_at', al)
   if (numero) query = query.ilike('numero', `%${numero}%`)

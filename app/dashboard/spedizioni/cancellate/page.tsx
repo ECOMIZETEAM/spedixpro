@@ -1,19 +1,44 @@
 'use client'
 import { useState, useEffect } from 'react'
 
+function oreRestanti(richiestoAt: string): { txt: string; pronto: boolean } {
+  const scad = new Date(richiestoAt).getTime() + 48 * 60 * 60 * 1000
+  const diff = scad - Date.now()
+  if (diff <= 0) return { txt: 'invio in corso…', pronto: true }
+  const h = Math.floor(diff / 3600000)
+  const m = Math.floor((diff % 3600000) / 60000)
+  return { txt: `invio al corriere tra ${h}h ${m}m`, pronto: false }
+}
+
 export default function SpedizioniCancellatePage() {
   const [spedizioni, setSpedizioni] = useState<any[]>([])
+  const [pending, setPending] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
+  const [ripristinando, setRipristinando] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetch('/api/spedizioni/lista?stato=annullata')
-      .then(r => r.json())
-      .then(d => { setSpedizioni(Array.isArray(d) ? d : []); setLoading(false) })
-      .catch(() => setLoading(false))
-  }, [])
+  function carica() {
+    Promise.all([
+      fetch('/api/spedizioni/lista?stato=annullata').then(r => r.json()),
+      fetch('/api/spedizioni/lista?stato=annullamento_pending').then(r => r.json()),
+    ]).then(([ann, pen]) => {
+      setSpedizioni(Array.isArray(ann) ? ann : [])
+      setPending(Array.isArray(pen) ? pen : [])
+      setLoading(false)
+    }).catch(() => setLoading(false))
+  }
+  useEffect(() => { carica() }, [])
+
+  async function ripristina(id: string) {
+    if (!confirm('Ripristinare questa spedizione? Non verrà inviato nessun annullo al corriere.')) return
+    setRipristinando(id)
+    const res = await fetch(`/api/spedizioni/ripristina?id=${id}`, { method: 'POST' })
+    setRipristinando(null)
+    if (res.ok) carica()
+    else { const d = await res.json().catch(() => ({})); alert(d.error || 'Errore ripristino') }
+  }
 
   const visibili = cerca
     ? spedizioni.filter(s =>
@@ -30,15 +55,52 @@ export default function SpedizioniCancellatePage() {
     <div>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'16px'}}>
         <div>
-          <a href="/dashboard/spedizioni" style={{fontSize:'12px',color:'#f97316',textDecoration:'none'}}>{'\u2190'} Lista Spedizioni</a>
+          <a href="/dashboard/spedizioni" style={{fontSize:'12px',color:'#f97316',textDecoration:'none'}}>{'←'} Lista Spedizioni</a>
           <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:'4px 0 0'}}>Spedizioni Cancellate</h1>
         </div>
+      </div>
+
+      {/* SEZIONE PENDING (in attesa di annullo, 48h) */}
+      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #fed7aa',overflow:'hidden',marginBottom:'16px'}}>
+        <div style={{padding:'12px 16px',borderBottom:'1px solid #fde4cf',background:'#fff7ed'}}>
+          <span style={{fontSize:'13px',fontWeight:'700',color:'#ea580c'}}>In attesa di annullo <span style={{color:'#9a3412',fontWeight:'400',fontSize:'12px'}}>({pending.length})</span></span>
+          <span style={{display:'block',marginTop:'2px',fontSize:'12px',color:'#9a3412'}}>La richiesta di annullo viene inviata al corriere dopo 48 ore. Entro questo tempo puoi ripristinare la spedizione.</span>
+        </div>
+        {loading ? (
+          <div style={{padding:'20px',textAlign:'center',color:'#999',fontSize:'13px'}}>Caricamento…</div>
+        ) : !pending.length ? (
+          <div style={{padding:'20px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessuna spedizione in attesa di annullo.</div>
+        ) : (
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
+              <tbody>
+                {pending.map(s => {
+                  const c = s.annullamento_richiesto_at ? oreRestanti(s.annullamento_richiesto_at) : { txt:'', pronto:false }
+                  return (
+                    <tr key={s.id} style={{borderBottom:'1px solid #fdece0'}}>
+                      <td style={{padding:'9px 16px',fontWeight:'700',color:'#1a1a1a'}}>{s.numero}</td>
+                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.clienti?.ragione_sociale || '-'}</td>
+                      <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.dest_nome} · {s.dest_citta}</td>
+                      <td style={{padding:'9px 12px',color:'#ea580c',fontSize:'12px',whiteSpace:'nowrap'}}>{c.txt}</td>
+                      <td style={{padding:'9px 16px',textAlign:'right'}}>
+                        <button onClick={()=>ripristina(s.id)} disabled={ripristinando===s.id}
+                          style={{padding:'6px 12px',background:'#fff',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:'pointer',opacity:ripristinando===s.id?0.6:1}}>
+                          {ripristinando===s.id?'…':'Ripristina'}
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <div>
-            <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>{'\uD83D\uDDD1\uFE0F'} Cancellate <span style={{color:'#666',fontWeight:'400',fontSize:'12px'}}>({visibili.length})</span></span>
+            <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Annullate <span style={{color:'#666',fontWeight:'400',fontSize:'12px'}}>({visibili.length})</span></span>
             <span style={{display:'block',marginTop:'4px',fontSize:'12px',fontWeight:'400',color:'#666'}}>
               Mostra{' '}
               <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}}
@@ -61,8 +123,7 @@ export default function SpedizioniCancellatePage() {
           <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a'}}>Caricamento...</div>
         ) : !visibili.length ? (
           <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a'}}>
-            <div style={{fontSize:'36px',marginBottom:'12px'}}>{'\uD83D\uDDD1\uFE0F'}</div>
-            <div style={{fontWeight:'500'}}>Nessuna spedizione cancellata</div>
+            <div style={{fontWeight:'500'}}>Nessuna spedizione annullata</div>
           </div>
         ) : (
           <div style={{overflowX:'auto'}}>
@@ -87,7 +148,7 @@ export default function SpedizioniCancellatePage() {
                     <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.peso_reale}kg</td>
                     <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.colli}</td>
                     <td style={{padding:'9px 12px',color:'#666',fontSize:'12px',whiteSpace:'nowrap'}}>{new Date(s.updated_at || s.created_at).toLocaleDateString('it-IT')} {new Date(s.updated_at || s.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</td>
-                    <td style={{padding:'9px 12px',fontWeight:'700',color:'#1a1a1a'}}>{'\u20AC'} {Number(s.costo_totale||0).toFixed(2)}</td>
+                    <td style={{padding:'9px 12px',fontWeight:'700',color:'#1a1a1a'}}>{'€'} {Number(s.costo_totale||0).toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -99,7 +160,7 @@ export default function SpedizioniCancellatePage() {
                   <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr<=1?'default':'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
                   {Array.from({length: totalePagine}, (_,i)=>i+1).filter(n => n===1 || n===totalePagine || Math.abs(n-paginaCorr)<=2).map((n,idx,arr)=>(
                     <span key={n} style={{display:'flex',alignItems:'center'}}>
-                      {idx>0 && arr[idx-1] !== n-1 && <span style={{padding:'0 4px',color:'#bbb',fontSize:'12px'}}>{'\u2026'}</span>}
+                      {idx>0 && arr[idx-1] !== n-1 && <span style={{padding:'0 4px',color:'#bbb',fontSize:'12px'}}>{'…'}</span>}
                       <button onClick={()=>setPagina(n)} style={{minWidth:'30px',padding:'5px 8px',border:'1px solid',borderColor:n===paginaCorr?'#f97316':'#d1d5db',borderRadius:'5px',background:n===paginaCorr?'#f97316':'#fff',color:n===paginaCorr?'#fff':'#1a1a1a',fontSize:'12px',fontWeight:n===paginaCorr?'700':'400',cursor:'pointer'}}>{n}</button>
                     </span>
                   ))}
