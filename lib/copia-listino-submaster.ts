@@ -130,11 +130,36 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
     await admin.from('listini_corrieri_supplementi').delete().in('listino_id', mieiIds).in('corriere_id', subCorrIds)
   }
 
-  // 4) LINK contratti attivati
+  // Fattore volume PER-CORRIERE ereditato dal padre (listini_clienti_corrieri.fattore_volume):
+  // va scritto su listini_corrieri_corrieri.fattore_volume del sotto-master, altrimenti l'editor
+  // cade sul default 5000 invece del valore assegnato (es. 4000).
+  const { data: pcSrc } = await admin.from('listini_clienti_corrieri').select('corriere_id,fattore_volume').eq('listino_id', parentListinoId)
+  const fattorePadrePerCorr = new Map<string, number>()
+  for (const r of (pcSrc || [])) if ((r as any).fattore_volume != null) fattorePadrePerCorr.set((r as any).corriere_id, Number((r as any).fattore_volume))
+  const fattoreListino = Number(listinoSrc?.fattore_volume) || 5000
+  const padrePerSub = new Map<string, string>()  // sub corriere id -> padre corriere id
+  for (const [padreCid, sCid] of mapCorr.entries()) padrePerSub.set(sCid, padreCid)
+  const fattoreSub = (subCid: string): number => {
+    const padreCid = padrePerSub.get(subCid)
+    const f = padreCid ? fattorePadrePerCorr.get(padreCid) : undefined
+    return (f != null) ? f : fattoreListino
+  }
+
+  // 4) LINK contratti attivati (con fattore_volume per-corriere ereditato dal padre)
   const { data: linkEsist } = await admin.from('listini_corrieri_corrieri').select('corriere_id').eq('listino_id', subListinoId)
   const linkSet = new Set((linkEsist || []).map((l: any) => l.corriere_id))
-  const nuoviLink = subCorrIds.filter((cid) => !linkSet.has(cid)).map((cid) => ({ listino_id: subListinoId, corriere_id: cid }))
+  const nuoviLink = subCorrIds.filter((cid) => !linkSet.has(cid)).map((cid) => ({ listino_id: subListinoId, corriere_id: cid, fattore_volume: fattoreSub(cid) }))
   if (nuoviLink.length) await admin.from('listini_corrieri_corrieri').insert(nuoviLink)
+  // Allineo il fattore anche sui link GIÀ esistenti (fix dei dati in essere sui sotto-master)
+  for (const cid of subCorrIds) {
+    if (linkSet.has(cid)) await admin.from('listini_corrieri_corrieri').update({ fattore_volume: fattoreSub(cid) }).eq('listino_id', subListinoId).eq('corriere_id', cid)
+  }
+  // Allineo anche le righe listini_corrieri PER-CORRIERE = la FONTE del calcolo prezzo (billing):
+  // ogni corriere del sotto-master eredita il fattore volume assegnato dal padre (no default 5000).
+  const soloPesoR = !!listinoSrc?.solo_peso_reale
+  for (const cid of subCorrIds) {
+    await admin.from('listini_corrieri').update({ fattore_volume: fattoreSub(cid), solo_peso_reale: soloPesoR }).eq('master_id', subMasterId).eq('corriere_id', cid)
+  }
 
   // 5) FASCE
   const fasceIns = fasceSrc.map((f: any) => ({ listino_id: subListinoId, corriere_id: mapCorr.get(f.corriere_id) || null, zona_id: mapZona.get(f.zona_id) || null, peso_min: 0, peso_max: f.peso_max, prezzo: f.prezzo, tipo: f.tipo, fuel: Number(f.fuel) || 0 })).filter((f: any) => f.corriere_id && f.zona_id)

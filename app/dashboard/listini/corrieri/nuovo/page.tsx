@@ -90,6 +90,7 @@ export default function ListinoCorrierePage() {
   const [tab, setTab] = useState('pesi')
   const [fattore, setFattore] = useState(5000)
   const [soloPesoReale, setSoloPesoReale] = useState(false)
+  const [soloLettura, setSoloLettura] = useState(false)  // listino assegnato dal master padre
 
   const [aggiungendoContratto, setAggiungendoContratto] = useState(false)
   const [nuovoContrattoId, setNuovoContrattoId] = useState('')
@@ -154,7 +155,10 @@ export default function ListinoCorrierePage() {
     setLoading(false); setPronto(true)
   }
 
-  useEffect(() => { carica() }, [])
+  useEffect(() => {
+    carica()
+    fetch('/api/listini/corrieri/ereditato').then(r => r.json()).then(d => setSoloLettura(!!d?.ereditato)).catch(() => {})
+  }, [])
 
   // Apre/chiude un contratto (accordion). Aprendone uno diverso, ne carica i dati.
   function toggleContratto(id: string) {
@@ -189,6 +193,7 @@ export default function ListinoCorrierePage() {
   function setRigaContr(i:number,k:keyof RigaSuppl,v:string) { setRigheContr(prev=>prev.map((r,idx)=>idx===i?{...r,[k]:v}:r)) }
 
   async function salva() {
+    if (soloLettura) { setErrore('Questo listino è assegnato dal tuo master: è in sola lettura e non può essere modificato.'); return }
     if (!corriereId) { setErrore('Seleziona un contratto'); return }
     if (!listino) { setErrore('Listino non trovato'); return }
     setSaving(true); setErrore('')
@@ -242,8 +247,8 @@ export default function ListinoCorrierePage() {
           {fattori.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}
         </select>
         {soloPesoReale && <span style={{fontSize:'11px',color:'#f97316'}}>Si paga sempre sul peso reale, il volumetrico viene ignorato.</span>}
-        <button onClick={salva} disabled={saving}
-          style={{marginLeft:'auto',padding:'9px 24px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer',opacity:saving?0.6:1}}>
+        <button onClick={salva} disabled={saving||soloLettura} title={soloLettura?'Listino assegnato dal master: sola lettura':''}
+          style={{marginLeft:'auto',padding:'9px 24px',background:soloLettura?'#e5e7eb':'#f97316',color:soloLettura?'#9ca3af':'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:soloLettura?'not-allowed':'pointer',opacity:saving?0.6:1}}>
           {saving?'Salvo...':'Salva'}
         </button>
       </div>
@@ -511,6 +516,7 @@ export default function ListinoCorrierePage() {
         </div>
       )}
 
+      {soloLettura&&<div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#ea580c',lineHeight:1.5}}>Questo Listino Corrieri ti è stato <b>assegnato dal tuo master</b>: è in <b>sola lettura</b>. Vedi i prezzi e le impostazioni (peso volume, giacenze, ecc.) applicati, ma non puoi modificarli — li gestisce il master sopra di te.</div>}
       {errore&&<div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>{errore}</div>}
       {msg&&<div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'10px',marginBottom:'16px',fontSize:'13px',color:'#16a34a'}}>{msg}</div>}
 

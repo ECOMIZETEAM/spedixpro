@@ -84,6 +84,16 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+
+  // Sola lettura per i SOTTO-MASTER: se il loro Listino Corrieri è assegnato dal padre
+  // (masters.parent_listino_id), non possono modificarlo — lo gestisce il master sopra.
+  {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const { data: m } = await admin.from('masters').select('parent_listino_id').eq('id', utente?.master_id).maybeSingle()
+    if (m?.parent_listino_id) return NextResponse.json({ error: 'Questo listino è assegnato dal tuo master: è in sola lettura e non può essere modificato.' }, { status: 403 })
+  }
+
   const body = await req.json()
   const { listinoId, corriereId, fasce, supplementi, fattore_volume, solo_peso_reale } = body
   if (!listinoId || !corriereId) return NextResponse.json({ error: 'Dati mancanti' }, { status: 400 })
