@@ -6,11 +6,11 @@ const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fo
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
 
 const STATI_SPED: Record<string,{bg:string,color:string,label:string}> = {
-  in_lavorazione:{bg:'#fffbeb',color:'#d97706',label:'In Lavorazione'},
-  spedita:{bg:'#fff7ed',color:'#f97316',label:'Spedita'},
+  in_lavorazione:{bg:'#fefce8',color:'#ca8a04',label:'In Lavorazione'},
+  spedita:{bg:'#f0f9ff',color:'#0284c7',label:'Spedita'},
   consegnata:{bg:'#f0fdf4',color:'#16a34a',label:'Consegnata'},
-  in_transito:{bg:'#f0fdf4',color:'#16a34a',label:'In transito'},
-  in_consegna:{bg:'#ecfdf5',color:'#059669',label:'In Consegna'},
+  in_transito:{bg:'#eff6ff',color:'#2563eb',label:'In transito'},
+  in_consegna:{bg:'#fff7ed',color:'#ea580c',label:'In Consegna'},
 }
 const STATI_COD: Record<string,{bg:string,color:string,label:string}> = {
   in_attesa:{bg:'#fff7ed',color:'#ea580c',label:'In attesa'},

@@ -8,15 +8,15 @@ const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fo
 const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'3px'}
 
 const STATI: Record<string,{bg:string,color:string,label:string}> = {
-  in_lavorazione:{bg:'#fffbeb',color:'#d97706',label:'In Lavorazione'},
-  spedita:{bg:'#fff7ed',color:'#f97316',label:'Spedita'},
-  in_transito:{bg:'#f0fdf4',color:'#16a34a',label:'In transito'},
-  in_consegna:{bg:'#ecfdf5',color:'#059669',label:'In Consegna'},
-  consegnata:{bg:'#f0fdf4',color:'#16a34a',label:'Consegnata'},
-  in_giacenza:{bg:'#faf5ff',color:'#7c3aed',label:'In Giacenza'},
-  reso_mittente:{bg:'#fef2f2',color:'#dc2626',label:'Reso al mittente'},
-  annullata:{bg:'#f5f5f5',color:'#1a1a1a',label:'Annullata'},
-  non_consegnato:{bg:'#fef2f2',color:'#dc2626',label:'Non consegnato'},
+  in_lavorazione:{bg:'#fefce8',color:'#ca8a04',label:'In Lavorazione'},   // giallo
+  spedita:{bg:'#f0f9ff',color:'#0284c7',label:'Spedita'},                 // celeste
+  in_transito:{bg:'#eff6ff',color:'#2563eb',label:'In transito'},         // blu
+  in_consegna:{bg:'#fff7ed',color:'#ea580c',label:'In Consegna'},         // arancio
+  consegnata:{bg:'#f0fdf4',color:'#16a34a',label:'Consegnata'},           // verde
+  in_giacenza:{bg:'#fef2f2',color:'#dc2626',label:'In Giacenza'},         // rosso
+  reso_mittente:{bg:'#f3f4f6',color:'#374151',label:'Reso al mittente'},  // grigio scuro
+  annullata:{bg:'#f5f5f5',color:'#6b7280',label:'Annullata'},             // grigio
+  non_consegnato:{bg:'#f3f4f6',color:'#6b7280',label:'Non consegnato'},   // grigio
 }
 
 // Colore badge contrassegno in base allo stato di pagamento:

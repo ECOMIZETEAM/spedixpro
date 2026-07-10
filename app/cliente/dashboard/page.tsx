@@ -12,8 +12,8 @@ export default function ClienteDashboard() {
   if (loading) return <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a',fontSize:'14px'}}>Caricamento...</div>
   if (!data) return <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a'}}>Errore caricamento</div>
   const STATI_COLORS: Record<string,string> = {
-    'in_lavorazione':'#f97316','spedita':'#9ca3af','in_transito':'#fdba74','in_consegna':'#1a1a1a',
-    'consegnata':'#22c55e','in_giacenza':'#fb923c','reso_mittente':'#ef4444','non_consegnato':'#6b7280','in_attesa_istruzioni':'#374151',
+    'in_lavorazione':'#ca8a04','spedita':'#0284c7','in_transito':'#2563eb','in_consegna':'#ea580c',
+    'consegnata':'#16a34a','in_giacenza':'#dc2626','reso_mittente':'#374151','non_consegnato':'#6b7280','in_attesa_istruzioni':'#374151',
   }
   const STATI_LABELS: Record<string,string> = {
     'in_lavorazione':'In Lavorazione','spedita':'Spedita','in_transito':'In transito','in_consegna':'In Consegna',
