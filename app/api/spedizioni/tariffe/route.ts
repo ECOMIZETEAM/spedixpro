@@ -258,7 +258,7 @@ export async function POST(req: NextRequest) {
       const nome = s.nome || d?.nome || ''
       const prezzo = Number(d?.prezzo ?? s.valore ?? 0) || 0
       const perc = Number(d?.perc ?? 0) || 0
-      if (!nome || (prezzo <= 0 && perc <= 0)) continue
+      if (!nome) continue   // accessorio offerto se ha un nome (anche gratis, costo 0); solo il vuoto = non offerto
       if (!accessoriPerCorriere.has(s.corriere_id)) accessoriPerCorriere.set(s.corriere_id, [])
       accessoriPerCorriere.get(s.corriere_id)!.push({ nome, prezzo, perc })
     }

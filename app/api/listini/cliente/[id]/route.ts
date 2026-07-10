@@ -49,7 +49,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
 
     if (Array.isArray(supplementi.assicurazione)) {
       for (const r of supplementi.assicurazione) {
-        if (Number(r.prezzo_fisso) > 0 || Number(r.perc) > 0) {
+        if (Number(r.valore_max) > 0) {   // scaglione attivo se ha un valore max (anche costo 0 = gratis); vuoto = non attivo
           righeSupplementi.push({
             listino_id: id, corriere_id, tipo: 'assicurazione',
             valore: Number(r.prezzo_fisso) || 0,
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
     }
     if (Array.isArray(supplementi.contrassegno)) {
       for (const r of supplementi.contrassegno) {
-        if (Number(r.prezzo_fisso) > 0 || Number(r.perc) > 0) {
+        if (Number(r.valore_max) > 0) {   // scaglione attivo se ha un valore max (anche costo 0 = gratis); vuoto = non attivo
           righeSupplementi.push({
             listino_id: id, corriere_id, tipo: 'contrassegno',
             valore: Number(r.prezzo_fisso) || 0,
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
     }
     if (Array.isArray(supplementi.servizi)) {
       for (const s of supplementi.servizi) {
-        if (Number(s.prezzo) > 0 || Number(s.perc) > 0) {
+        if (s.nome && String(s.nome).trim()) {   // accessorio attivo se ha un nome (anche gratis); vuoto = non attivo
           righeSupplementi.push({
             listino_id: id, corriere_id, tipo: 'accessorio',
             nome: s.nome, valore: Number(s.prezzo) || 0,
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
       const { servizi: giacenzeServizi, apertura } = supplementi.giacenze
       if (Array.isArray(giacenzeServizi)) {
         for (const s of giacenzeServizi) {
-          if (Number(s.prezzo) > 0 || Number(s.perc) > 0) {
+          if (s.nome && String(s.nome).trim()) {   // giacenza/servizio attivo se ha un nome (anche gratis); vuoto = non attivo
             righeSupplementi.push({
               listino_id: id, corriere_id, tipo: 'giacenza',
               nome: s.nome, valore: Number(s.prezzo) || 0,

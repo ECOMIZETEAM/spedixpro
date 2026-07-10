@@ -120,21 +120,21 @@ export async function POST(req: NextRequest) {
   if (supplementi) {
     if (Array.isArray(supplementi.assicurazione)) {
       for (const r of supplementi.assicurazione) {
-        if (Number(r.prezzo_fisso) > 0 || Number(r.perc) > 0) {
+        if (Number(r.valore_max) > 0) {   // scaglione attivo se ha un valore max (anche costo 0 = gratis); vuoto = non attivo
           righeSupplementi.push({ listino_id: listinoId, corriere_id: corriereId, tipo: 'assicurazione', valore: Number(r.prezzo_fisso)||0, tipo_calcolo: r.calcolo_su||'totale', descrizione: JSON.stringify(r) })
         }
       }
     }
     if (Array.isArray(supplementi.contrassegno)) {
       for (const r of supplementi.contrassegno) {
-        if (Number(r.prezzo_fisso) > 0 || Number(r.perc) > 0) {
+        if (Number(r.valore_max) > 0) {   // scaglione attivo se ha un valore max (anche costo 0 = gratis); vuoto = non attivo
           righeSupplementi.push({ listino_id: listinoId, corriere_id: corriereId, tipo: 'contrassegno', valore: Number(r.prezzo_fisso)||0, tipo_calcolo: r.calcolo_su||'totale', descrizione: JSON.stringify(r) })
         }
       }
     }
     if (Array.isArray(supplementi.servizi)) {
       for (const s of supplementi.servizi) {
-        if (Number(s.prezzo) > 0 || Number(s.perc) > 0) {
+        if (s.nome && String(s.nome).trim()) {   // accessorio attivo se ha un nome (anche costo 0 = gratis); vuoto = non attivo
           righeSupplementi.push({ listino_id: listinoId, corriere_id: corriereId, tipo: 'accessorio', nome: s.nome, valore: Number(s.prezzo)||0, tipo_calcolo: 'fisso', descrizione: JSON.stringify(s) })
         }
       }
@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
       const { servizi: giacenzeServizi, apertura } = supplementi.giacenze
       if (Array.isArray(giacenzeServizi)) {
         for (const s of giacenzeServizi) {
-          if (Number(s.prezzo) > 0 || Number(s.perc) > 0) {
+          if (s.nome && String(s.nome).trim()) {   // servizio attivo se ha un nome (anche costo 0 = gratis); vuoto = non attivo
             righeSupplementi.push({ listino_id: listinoId, corriere_id: corriereId, tipo: 'giacenza', nome: s.nome, valore: Number(s.prezzo)||0, tipo_calcolo: 'fisso', descrizione: JSON.stringify(s) })
           }
         }
