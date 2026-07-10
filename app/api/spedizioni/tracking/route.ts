@@ -1,5 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
+import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { spediamoproGetTracking, mapStatoSpediamopro } from '@/lib/spediamopro'
 import { mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
 
@@ -7,24 +9,32 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+  if (!utente?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
   const spedizioneId = req.nextUrl.searchParams.get('id')
   if (!spedizioneId) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
 
-  const { data: spedizione } = await supabase.from('spedizioni')
+  const admin = createAdminSupabase()
+  const isCliente = utente.ruolo === 'cliente'
+  // Master: vede il tracking di tutta la propria rete (sotto-albero). Cliente: solo le proprie.
+  const masterIds = isCliente ? [utente.master_id] : await sottoAlberoMasterIds(admin, utente.master_id)
+
+  let spedQuery = admin.from('spedizioni')
     .select('id,stato,tracking_number,corriere_id,numero,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_telefono,dest_email,raw_response,colli_dettaglio,mitt_nome,cliente_id,contenuto')
-    .eq('id', spedizioneId).eq('master_id', utente?.master_id).single()
+    .eq('id', spedizioneId).in('master_id', masterIds)
+  if (isCliente) spedQuery = spedQuery.eq('cliente_id', utente.cliente_id)
+  const { data: spedizione } = await spedQuery.single()
   if (!spedizione) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 
   // Aggiorna lo stato salvato dallo stato live del tracking (best-effort, non blocca la risposta).
   const persistiStato = async (nuovo: string | null) => {
     if (!nuovo || nuovo === 'eccezione' || nuovo === (spedizione as any).stato) return
     if ((spedizione as any).stato === 'consegnata' || (spedizione as any).stato === 'annullata') return
-    try { await supabase.from('spedizioni').update({ stato: nuovo }).eq('id', spedizione.id) } catch {}
+    try { await admin.from('spedizioni').update({ stato: nuovo }).eq('id', spedizione.id) } catch {}
   }
 
-  const { data: cliente } = await supabase.from('clienti').select('ragione_sociale').eq('id', spedizione.cliente_id).single()
-  const { data: corriere } = await supabase.from('corrieri').select('credenziali,tipo,nome_contratto').eq('id', spedizione.corriere_id).single()
+  const { data: cliente } = await admin.from('clienti').select('ragione_sociale').eq('id', spedizione.cliente_id).single()
+  const { data: corriere } = await admin.from('corrieri').select('credenziali,tipo,nome_contratto').eq('id', spedizione.corriere_id).single()
   if (!corriere) return NextResponse.json({ error: 'Corriere non trovato' }, { status: 404 })
 
   const cred = corriere.credenziali as Record<string,string>
