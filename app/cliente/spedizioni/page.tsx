@@ -54,6 +54,9 @@ export default function SpedizioniPage() {
     caricaTutte()
   }, [])
 
+  // Filtri reattivi: appena tocchi un filtro, la lista si aggiorna (niente bottone "Filtra")
+  useEffect(() => { applicaFiltri(); setPagina(1) }, [filtri, spedizioni])
+
   async function caricaTutte() {
     setLoading(true)
     const res = await fetch('/api/spedizioni/lista')
@@ -253,7 +256,7 @@ async function apriTracking(s: any) {
             </select>
           </div>
           <div>
-            <button onClick={applicaFiltri} style={btnFiltri}>▼ Filtra</button>
+            <button onClick={()=>setFiltri(FILTRI_DEFAULT)} style={btnFiltri}>Azzera filtri</button>
           </div>
         </div>
       </div>
