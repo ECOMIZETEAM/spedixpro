@@ -127,6 +127,9 @@ export async function POST(req: NextRequest) {
         contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
       })
       if (!dett || dett.totale <= 0) continue   // nessun listino/fascia per questa zona o prezzo 0 -> non mostrare
+      // Contrassegno/assicurazione oltre il valore massimo configurato -> corriere non disponibile
+      // (vale per il master come per il cliente, per tutti i corrieri).
+      if (dett.contrassegnoOltreMax || dett.assicurazioneOltreMax) continue
       const prezzoSpedP = dett.nolo + dett.fuel + dett.sponda
       risultati.push({
         carrierCode: corr.tipo || 'sda', contractCode: '',

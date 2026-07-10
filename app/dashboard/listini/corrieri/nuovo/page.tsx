@@ -475,7 +475,11 @@ export default function ListinoCorrierePage() {
   }
 
   return (
-    <div>
+    <div style={{position:'relative'}}>
+      {soloLettura && (
+        <div title="Listino assegnato dal master: sola lettura"
+          style={{position:'absolute',inset:0,zIndex:30,background:'rgba(243,244,246,0.35)',cursor:'not-allowed'}} />
+      )}
       <div style={{marginBottom:'16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap' as const,gap:'10px'}}>
         <div>
           <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Listino Corrieri</h1>

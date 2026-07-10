@@ -66,6 +66,8 @@ export type DettaglioCorriere = {
   sponda: number
   contrassegno: number
   assicurazione: number
+  contrassegnoOltreMax?: boolean   // COD richiesto oltre il max (o senza tariffa) -> corriere da escludere
+  assicurazioneOltreMax?: boolean  // assicurazione richiesta oltre il max -> corriere da escludere
 }
 
 // Calcola il prezzo di trasporto per un listino dato.
@@ -341,6 +343,21 @@ export async function calcolaPrezzoCorriereDettaglio(
   const feeCod = applicaScaglione('contrassegno', cod)
   const feeAss = applicaScaglione('assicurazione', ass)
 
+  // Massimo valore ammesso per tipo (il valore_max più alto tra gli scaglioni configurati).
+  function maxScaglione(tipo: string): { presente: boolean; max: number } {
+    const scal = (suppl || []).filter((s: any) => s.tipo === tipo)
+    let max = 0
+    for (const s of scal) { let d: any = null; try { d = JSON.parse(s.descrizione) } catch {}; const v = parseFloat(d?.valore_max ?? '') || 0; if (v > max) max = v }
+    return { presente: scal.length > 0, max }
+  }
+  // Contrassegno: se richiesto ma senza tariffa OPPURE oltre il max -> corriere non disponibile.
+  const scC = maxScaglione('contrassegno')
+  const contrassegnoOltreMax = cod > 0 && (!scC.presente || cod > scC.max)
+  // Assicurazione: se richiesta e c'è una tariffa ma l'importo supera il max -> non disponibile
+  // (senza tariffa resta offerta a costo 0, come per il cliente).
+  const scA = maxScaglione('assicurazione')
+  const assicurazioneOltreMax = ass > 0 && scA.presente && ass > scA.max
+
   const r2 = (n: number) => Math.round(n * 100) / 100
   return {
     totale: r2(noloBase + fuelAmt + spondaAmt + feeCod + feeAss),
@@ -349,6 +366,8 @@ export async function calcolaPrezzoCorriereDettaglio(
     sponda: r2(spondaAmt),
     contrassegno: r2(feeCod),
     assicurazione: r2(feeAss),
+    contrassegnoOltreMax,
+    assicurazioneOltreMax,
   }
 }
 
