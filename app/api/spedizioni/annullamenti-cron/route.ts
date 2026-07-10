@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { annullaSpedizioneSulCorriere, rimborsaAnnulloSpedizione } from '@/lib/annullaSpedizione'
+import { annullaSpedizioneSulCorriere, rimborsaAnnulloSpedizione, trovaOwnerContratto } from '@/lib/annullaSpedizione'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -21,9 +21,21 @@ export async function GET() {
     .order('annullamento_richiesto_at', { ascending: true })
     .limit(200)
 
-  let annullate = 0, rifiutate = 0, errori = 0
+  let annullate = 0, rifiutate = 0, manuali = 0, errori = 0
   for (const s of (pendenti || [])) {
     try {
+      // Il corriere della spedizione: Spedisci non è annullabile via API (contratto non nostro)
+      const { data: corr } = await admin.from('corrieri').select('tipo,nome_contratto,master_id').eq('id', (s as any).corriere_id).maybeSingle()
+      if (corr?.tipo === 'spedisci') {
+        // Coda manuale: instrada al DETENTORE del contratto (richiesta via assistenza WhatsApp).
+        const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
+        await admin.from('spedizioni').update({
+          stato: 'annullamento_manuale', annullamento_owner_id: ownerId, annullamento_errore: null,
+        }).eq('id', s.id)
+        manuali++
+        continue
+      }
+
       const esito = await annullaSpedizioneSulCorriere(admin, s as any)
       if (esito.ok) {
         await admin.from('spedizioni').update({ stato: 'annullata', annullamento_errore: null }).eq('id', s.id)
@@ -44,5 +56,5 @@ export async function GET() {
     }
   }
 
-  return NextResponse.json({ ok: true, esaminate: pendenti?.length || 0, annullate, rifiutate, errori })
+  return NextResponse.json({ ok: true, esaminate: pendenti?.length || 0, annullate, rifiutate, manuali, errori })
 }

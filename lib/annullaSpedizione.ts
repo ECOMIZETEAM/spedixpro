@@ -8,6 +8,22 @@ export function giaEliminataSulCorriere(text: string, status?: number): boolean 
   return /non trovat|not found|inesistent|does not exist|gi[àa] ?(elimin|annull|cancell)|already ?(delet|cancel|removed)|no longer exists/.test(t)
 }
 
+// Detentore REALE del contratto: il master più IN ALTO che possiede questo stesso corriere
+// (stesso nome_contratto). È chi deve richiedere l'annullo Spedisci via assistenza.
+export async function trovaOwnerContratto(admin: any, corriereMasterId: string, nomeContratto: string | null): Promise<string> {
+  let owner = corriereMasterId
+  if (!nomeContratto) return owner
+  let cur: string | null = corriereMasterId
+  for (let i = 0; i < 20 && cur; i++) {
+    const { data: mm }: any = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+    const parent: string | null = mm?.parent_master_id || null
+    if (!parent) break
+    const { data: pc } = await admin.from('corrieri').select('id').eq('master_id', parent).eq('nome_contratto', nomeContratto).limit(1).maybeSingle()
+    if (pc?.id) { owner = parent; cur = parent } else break
+  }
+  return owner
+}
+
 // Invia l'annullo al corriere (SpediamoPro/Spedisci). Ritorna ok=true se annullata (o già
 // inesistente sul corriere); ok=false col motivo se il corriere rifiuta (es. già spedita/chiusa).
 export async function annullaSpedizioneSulCorriere(

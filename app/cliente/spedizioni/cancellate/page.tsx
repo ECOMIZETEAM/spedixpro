@@ -13,6 +13,7 @@ function oreRestanti(richiestoAt: string): { txt: string; pronto: boolean } {
 export default function SpedizioniCancellateClientePage() {
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [pending, setPending] = useState<any[]>([])
+  const [manuali, setManuali] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
   const [perPage, setPerPage] = useState(10)
@@ -23,9 +24,11 @@ export default function SpedizioniCancellateClientePage() {
     Promise.all([
       fetch('/api/spedizioni/lista?stato=annullata').then(r => r.json()),
       fetch('/api/spedizioni/lista?stato=annullamento_pending').then(r => r.json()),
-    ]).then(([ann, pen]) => {
+      fetch('/api/spedizioni/lista?stato=annullamento_manuale').then(r => r.json()),
+    ]).then(([ann, pen, man]) => {
       setSpedizioni(Array.isArray(ann) ? ann : [])
       setPending(Array.isArray(pen) ? pen : [])
+      setManuali(Array.isArray(man) ? man : [])
       setLoading(false)
     }).catch(() => setLoading(false))
   }
@@ -61,12 +64,12 @@ export default function SpedizioniCancellateClientePage() {
       {/* SEZIONE PENDING (in attesa di annullo, 48h) */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #fed7aa',overflow:'hidden',marginBottom:'16px'}}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #fde4cf',background:'#fff7ed'}}>
-          <span style={{fontSize:'13px',fontWeight:'700',color:'#ea580c'}}>In attesa di annullo <span style={{color:'#9a3412',fontWeight:'400',fontSize:'12px'}}>({pending.length})</span></span>
+          <span style={{fontSize:'13px',fontWeight:'700',color:'#ea580c'}}>In attesa di annullo <span style={{color:'#9a3412',fontWeight:'400',fontSize:'12px'}}>({pending.length + manuali.length})</span></span>
           <span style={{display:'block',marginTop:'2px',fontSize:'12px',color:'#9a3412'}}>La richiesta di annullo viene inviata al corriere dopo 48 ore. Entro questo tempo puoi ripristinare la spedizione.</span>
         </div>
         {loading ? (
           <div style={{padding:'20px',textAlign:'center',color:'#bbb',fontSize:'13px'}}>Caricamento…</div>
-        ) : !pending.length ? (
+        ) : (!pending.length && !manuali.length) ? (
           <div style={{padding:'20px',textAlign:'center',color:'#bbb',fontSize:'13px'}}>Nessuna spedizione in attesa di annullo.</div>
         ) : (
           <div style={{overflowX:'auto'}}>
@@ -88,6 +91,13 @@ export default function SpedizioniCancellateClientePage() {
                     </tr>
                   )
                 })}
+                {manuali.map(s => (
+                  <tr key={s.id} style={{borderBottom:'1px solid #fdece0'}}>
+                    <td style={{padding:'10px 16px'}}><span style={{fontWeight:'600',color:'#f97316'}}>{s.numero}</span></td>
+                    <td style={{padding:'10px 14px',color:'#333'}}>{s.dest_nome} · {s.dest_citta}</td>
+                    <td style={{padding:'10px 14px',color:'#9a3412',fontSize:'12px',whiteSpace:'nowrap'}} colSpan={2}>In gestione con il corriere (assistenza)</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
