@@ -4,7 +4,10 @@ import { useRouter, useParams } from 'next/navigation'
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const lbl = {fontSize:'11.5px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
-const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',padding:'20px',maxWidth:'560px',marginBottom:'16px'}
+// Stile contenitori come il cliente: card con intestazione sottolineata
+const sec = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const,marginBottom:'16px',maxWidth:'560px'}
+const sech = {padding:'12px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700' as const,color:'#1a1a1a'}
+const secb = {padding:'16px',display:'flex' as const,flexDirection:'column' as const,gap:'12px'}
 
 export default function ModificaMasterPage() {
   const router = useRouter()
@@ -83,74 +86,80 @@ export default function ModificaMasterPage() {
       <div style={{marginBottom:'16px'}}>
         <h1 style={{fontSize:'20px',fontWeight:700,color:'#1a1a1a',margin:0}}>Modifica Master — {m.nome}</h1>
       </div>
-      {errore && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>⚠️ {errore}</div>}
+      {errore && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>{errore}</div>}
       {msg && <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#16a34a'}}>{msg}</div>}
 
       {/* Anagrafica */}
-      <div style={card}>
-        <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'14px'}}>Anagrafica</div>
-        <div style={{marginBottom:'12px'}}><label style={lbl}>Nome / Ragione sociale</label>
-          <input style={inp} value={m.nome||''} onChange={e=>setM({...m,nome:e.target.value})}/></div>
-        <div style={{marginBottom:'12px'}}><label style={lbl}>Telefono</label>
-          <input style={inp} value={m.telefono||''} onChange={e=>setM({...m,telefono:e.target.value})}/></div>
-        <div style={{marginBottom:'12px'}}><label style={lbl}>P.IVA</label>
-          <input style={inp} value={m.piva||''} onChange={e=>setM({...m,piva:e.target.value})}/></div>
-        <div style={{marginBottom:'12px'}}><label style={lbl}>Listino assegnato</label>
-          <select style={inp} value={m.parent_listino_id||''} onChange={e=>setM({...m,parent_listino_id:e.target.value})}>
-            <option value="">— nessuno (userà corrieri propri) —</option>
-            {listini.map((l:any)=><option key={l.id} value={l.id}>{l.nome}</option>)}
-          </select>
-          <div style={{fontSize:'11px',color:'#999',marginTop:'4px'}}>Il prezzo che TU applichi a questo master quando spedisce col tuo contratto.</div>
+      <div style={sec}>
+        <div style={sech}>Anagrafica</div>
+        <div style={secb}>
+          <div><label style={lbl}>Nome / Ragione sociale</label>
+            <input style={inp} value={m.nome||''} onChange={e=>setM({...m,nome:e.target.value})}/></div>
+          <div><label style={lbl}>Telefono</label>
+            <input style={inp} value={m.telefono||''} onChange={e=>setM({...m,telefono:e.target.value})}/></div>
+          <div><label style={lbl}>P.IVA</label>
+            <input style={inp} value={m.piva||''} onChange={e=>setM({...m,piva:e.target.value})}/></div>
+          <div><label style={lbl}>Listino assegnato</label>
+            <select style={inp} value={m.parent_listino_id||''} onChange={e=>setM({...m,parent_listino_id:e.target.value})}>
+              <option value="">— nessuno (userà corrieri propri) —</option>
+              {listini.map((l:any)=><option key={l.id} value={l.id}>{l.nome}</option>)}
+            </select>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'4px'}}>Il prezzo che TU applichi a questo master quando spedisce col tuo contratto.</div>
+          </div>
+          <div><label style={lbl}>Tipo contratto</label>
+            <select style={inp} value={m.tipo_contratto||'credito_scalare'} onChange={e=>setM({...m,tipo_contratto:e.target.value})}>
+              <option value="credito_scalare">Credito a scalare</option>
+              <option value="fattura_mensile">Fattura mensile</option>
+            </select></div>
         </div>
-        <div><label style={lbl}>Tipo contratto</label>
-          <select style={inp} value={m.tipo_contratto||'credito_scalare'} onChange={e=>setM({...m,tipo_contratto:e.target.value})}>
-            <option value="credito_scalare">Credito a scalare</option>
-            <option value="fattura_mensile">Fattura mensile</option>
-          </select></div>
       </div>
 
       {/* Credito */}
-      <div style={card}>
-        <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'14px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <div style={sec}>
+        <div style={{...sech,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <span>Credito</span>
           <span style={{fontSize:'16px',fontWeight:800,color:saldo<0?'#dc2626':'#16a34a'}}>€ {saldo.toFixed(2)}</span>
         </div>
-        {errCredito && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'8px 12px',marginBottom:'10px',fontSize:'12.5px',color:'#dc2626'}}>{errCredito}</div>}
-        {msgCredito && <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'8px 12px',marginBottom:'10px',fontSize:'12.5px',color:'#16a34a'}}>{msgCredito}</div>}
-        <div style={{display:'grid',gridTemplateColumns:'150px 1fr',gap:'10px',alignItems:'end'}}>
-          <div><label style={lbl}>Importo (€)</label>
-            <input style={inp} inputMode="decimal" value={impCredito} onChange={e=>setImpCredito(e.target.value)} placeholder="es. 200 o -50"/></div>
-          <div><label style={lbl}>Descrizione</label>
-            <input style={inp} value={descCredito} onChange={e=>setDescCredito(e.target.value)}/></div>
+        <div style={secb}>
+          {errCredito && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'8px 12px',fontSize:'12.5px',color:'#dc2626'}}>{errCredito}</div>}
+          {msgCredito && <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'8px 12px',fontSize:'12.5px',color:'#16a34a'}}>{msgCredito}</div>}
+          <div style={{display:'grid',gridTemplateColumns:'150px 1fr',gap:'10px',alignItems:'end'}}>
+            <div><label style={lbl}>Importo (€)</label>
+              <input style={inp} inputMode="decimal" value={impCredito} onChange={e=>setImpCredito(e.target.value)} placeholder="es. 200 o -50"/></div>
+            <div><label style={lbl}>Descrizione</label>
+              <input style={inp} value={descCredito} onChange={e=>setDescCredito(e.target.value)}/></div>
+          </div>
+          <div style={{fontSize:'11px',color:'#999',marginTop:'-4px'}}>Scrivi <b>200</b> per aggiungere, <b>-50</b> per togliere credito.</div>
+          <button onClick={salvaCredito} disabled={savingCredito}
+            style={{alignSelf:'flex-start',background:'#16a34a',color:'#fff',border:'none',borderRadius:'6px',padding:'9px 18px',fontSize:'13px',fontWeight:700,cursor:'pointer',opacity:savingCredito?0.6:1}}>
+            {savingCredito?'Salvo...':'Applica al credito'}</button>
         </div>
-        <div style={{fontSize:'11px',color:'#999',margin:'6px 0 12px'}}>Scrivi <b>200</b> per aggiungere, <b>-50</b> per togliere credito.</div>
-        <button onClick={salvaCredito} disabled={savingCredito}
-          style={{background:'#16a34a',color:'#fff',border:'none',borderRadius:'6px',padding:'9px 18px',fontSize:'13px',fontWeight:700,cursor:'pointer',opacity:savingCredito?0.6:1}}>
-          {savingCredito?'Salvo...':'Applica al credito'}</button>
       </div>
 
       {/* Reset password — identico al cliente */}
-      <div style={card}>
-        <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'14px'}}>Reset password</div>
-        <input style={inp} type="email" placeholder="email@esempio.it" value={nuovaEmail} onChange={e=>setNuovaEmail(e.target.value)}/>
-        <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'#1a1a1a',cursor:'pointer',marginTop:'12px'}}>
-          <input type="checkbox" checked={resetPassword} onChange={e=>setResetPassword(e.target.checked)} style={{width:'15px',height:'15px',accentColor:'#f97316'}}/>
-          Resetta e invia nuova password
-        </label>
-        {nuovaEmail.trim() && nuovaEmail.trim().toLowerCase() !== (m.login_email||'').trim().toLowerCase() && (
-          <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px 12px',fontSize:'12px',color:'#ea580c',lineHeight:1.5,marginTop:'12px'}}>
-            Cambierai l&apos;email di accesso: il master dovrà usare <b>{nuovaEmail}</b> per entrare.
-          </div>
-        )}
-        {passwordMostrata && (
-          <div style={{marginTop:'12px',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',padding:'12px'}}>
-            <div style={{fontSize:'12px',fontWeight:700,color:'#16a34a',marginBottom:'6px'}}>✓ Password impostata — copiala e condividila</div>
-            <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
-              <code style={{flex:1,fontFamily:'monospace',fontSize:'15px',fontWeight:700,color:'#f97316'}}>{passwordMostrata}</code>
-              <button onClick={()=>navigator.clipboard?.writeText(passwordMostrata)} style={{background:'#16a34a',color:'#fff',border:'none',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>Copia</button>
+      <div style={sec}>
+        <div style={sech}>Reset password</div>
+        <div style={secb}>
+          <input style={inp} type="email" placeholder="email@esempio.it" value={nuovaEmail} onChange={e=>setNuovaEmail(e.target.value)}/>
+          <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>
+            <input type="checkbox" checked={resetPassword} onChange={e=>setResetPassword(e.target.checked)} style={{width:'15px',height:'15px',accentColor:'#f97316'}}/>
+            Resetta e invia nuova password
+          </label>
+          {nuovaEmail.trim() && nuovaEmail.trim().toLowerCase() !== (m.login_email||'').trim().toLowerCase() && (
+            <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px 12px',fontSize:'12px',color:'#ea580c',lineHeight:1.5}}>
+              Cambierai l&apos;email di accesso: il master dovrà usare <b>{nuovaEmail}</b> per entrare.
             </div>
-          </div>
-        )}
+          )}
+          {passwordMostrata && (
+            <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',padding:'12px'}}>
+              <div style={{fontSize:'12px',fontWeight:700,color:'#16a34a',marginBottom:'6px'}}>Password impostata — copiala e condividila</div>
+              <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
+                <code style={{flex:1,fontFamily:'monospace',fontSize:'15px',fontWeight:700,color:'#f97316'}}>{passwordMostrata}</code>
+                <button onClick={()=>navigator.clipboard?.writeText(passwordMostrata)} style={{background:'#16a34a',color:'#fff',border:'none',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>Copia</button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <div style={{display:'flex',gap:'8px',maxWidth:'560px'}}>
