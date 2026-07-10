@@ -475,17 +475,13 @@ export default function ListinoCorrierePage() {
   }
 
   return (
-    <div style={{position:'relative'}}>
-      {soloLettura && (
-        <div title="Listino assegnato dal master: sola lettura"
-          style={{position:'absolute',inset:0,zIndex:30,background:'rgba(243,244,246,0.35)',cursor:'not-allowed'}} />
-      )}
+    <div>
       <div style={{marginBottom:'16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap' as const,gap:'10px'}}>
         <div>
           <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Listino Corrieri</h1>
           <p style={{fontSize:'12.5px',color:'#666',margin:'4px 0 0'}}>Clicca su un contratto per aprirne il listino. Le modifiche salvate vengono propagate ai master collegati.</p>
         </div>
-        {!aggiungendoContratto && (
+        {!aggiungendoContratto && !soloLettura && (
           <button onClick={()=>setAggiungendoContratto(true)}
             style={{background:'#f97316',border:'none',color:'#fff',padding:'9px 18px',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>
             + Aggiungi contratto
@@ -547,7 +543,8 @@ export default function ListinoCorrierePage() {
                   <span style={{fontSize:'18px',color:'#9ca3af',transform:aperto?'rotate(90deg)':'none',transition:'transform 0.15s'}}>›</span>
                 </div>
                 {aperto && (
-                  <div style={{borderTop:'1px solid #eee'}}>
+                  <div style={{borderTop:'1px solid #eee', ...(soloLettura ? {pointerEvents:'none' as const, opacity:0.92, userSelect:'none' as const} : {})}}
+                    title={soloLettura ? 'Assegnato dal master: sola lettura' : undefined}>
                     {loading ? (
                       <div style={{padding:'30px',textAlign:'center' as const,color:'#999',fontSize:'13px'}}>Caricamento…</div>
                     ) : editorContratto}
