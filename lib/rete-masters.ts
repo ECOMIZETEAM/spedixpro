@@ -47,3 +47,28 @@ export async function sottoAlberoMasterIds(adminDb: any, rootId: string): Promis
   }
   return ids
 }
+
+// Un Listino Corrieri è in SOLA LETTURA per il master se è un rivenditore PURO: ha un listino
+// assegnato dal padre (parent_listino_id) E tutti i suoi contratti sono già posseduti da un
+// antenato (li rivende soltanto). Se invece possiede almeno un contratto ORIGINALE (nome_contratto
+// che nessun antenato ha, es. E&A che detiene BRT/Poste/UPS), è il titolare e può modificare.
+export async function listinoCorrieriSolaLettura(adminDb: any, masterId: string): Promise<boolean> {
+  if (!masterId) return false
+  const { data: m } = await adminDb.from('masters').select('parent_master_id,parent_listino_id').eq('id', masterId).maybeSingle()
+  if (!m?.parent_listino_id) return false   // nessun listino assegnato → titolare, editabile
+  const { data: miei } = await adminDb.from('corrieri').select('nome_contratto').eq('master_id', masterId)
+  const mieiNomi = (miei || []).map((c: any) => (c.nome_contratto || '').trim().toLowerCase()).filter(Boolean)
+  if (!mieiNomi.length) return true   // nessun corriere proprio → solo rivendita
+  // Nomi contratto posseduti dagli ANTENATI (catena parent_master_id)
+  const antenati = new Set<string>()
+  let cur: string | null = m.parent_master_id
+  for (let i = 0; i < 20 && cur; i++) {
+    const { data: ac } = await adminDb.from('corrieri').select('nome_contratto').eq('master_id', cur)
+    for (const c of (ac || [])) { const n = (c.nome_contratto || '').trim().toLowerCase(); if (n) antenati.add(n) }
+    const { data: pm } = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+    cur = pm?.parent_master_id || null
+  }
+  // Possiede almeno un contratto originale (non di un antenato) → titolare → editabile
+  const possiedeOriginale = mieiNomi.some((n: string) => !antenati.has(n))
+  return !possiedeOriginale
+}

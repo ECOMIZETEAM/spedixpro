@@ -18,12 +18,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{id: s
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
 
-  // Sola lettura per i sotto-master con listino assegnato dal padre.
+  // Sola lettura solo per i rivenditori puri (non il titolare dei contratti).
   {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { listinoCorrieriSolaLettura } = await import('@/lib/rete-masters')
     const admin = createAdminSupabase()
-    const { data: m } = await admin.from('masters').select('parent_listino_id').eq('id', utente?.master_id).maybeSingle()
-    if (m?.parent_listino_id) return NextResponse.json({ error: 'Questo listino è assegnato dal tuo master: è in sola lettura e non può essere modificato.' }, { status: 403 })
+    if (await listinoCorrieriSolaLettura(admin, utente?.master_id)) return NextResponse.json({ error: 'Questo listino è assegnato dal tuo master: è in sola lettura e non può essere modificato.' }, { status: 403 })
   }
 
   const { id } = await params

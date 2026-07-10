@@ -85,13 +85,13 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
 
-  // Sola lettura per i SOTTO-MASTER: se il loro Listino Corrieri è assegnato dal padre
-  // (masters.parent_listino_id), non possono modificarlo — lo gestisce il master sopra.
+  // Sola lettura solo per i RIVENDITORI puri (contratti tutti ereditati da un antenato).
+  // Il titolare dei contratti (es. E&A) resta editabile anche con parent_listino_id.
   {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { listinoCorrieriSolaLettura } = await import('@/lib/rete-masters')
     const admin = createAdminSupabase()
-    const { data: m } = await admin.from('masters').select('parent_listino_id').eq('id', utente?.master_id).maybeSingle()
-    if (m?.parent_listino_id) return NextResponse.json({ error: 'Questo listino è assegnato dal tuo master: è in sola lettura e non può essere modificato.' }, { status: 403 })
+    if (await listinoCorrieriSolaLettura(admin, utente?.master_id)) return NextResponse.json({ error: 'Questo listino è assegnato dal tuo master: è in sola lettura e non può essere modificato.' }, { status: 403 })
   }
 
   const body = await req.json()

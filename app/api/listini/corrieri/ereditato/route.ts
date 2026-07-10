@@ -14,6 +14,9 @@ export async function GET(_req: NextRequest) {
   const admin = createAdminSupabase()
   const { data: m } = await admin.from('masters').select('parent_master_id,parent_listino_id').eq('id', utente.master_id).maybeSingle()
   if (!m?.parent_listino_id) return NextResponse.json({ ereditato: false })
+  // Solo i rivenditori puri sono in sola lettura; il titolare dei contratti (es. E&A) resta editabile.
+  const { listinoCorrieriSolaLettura } = await import('@/lib/rete-masters')
+  if (!(await listinoCorrieriSolaLettura(admin, utente.master_id))) return NextResponse.json({ ereditato: false })
 
   const listinoId = m.parent_listino_id
   const [{ data: fasce }, { data: suppl }, { data: listino }] = await Promise.all([
