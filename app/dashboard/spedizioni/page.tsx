@@ -50,6 +50,7 @@ export default function SpedizioniPage() {
   const [trackingLoading, setTrackingLoading] = useState(false)
   const [trackingTab, setTrackingTab] = useState<'tracking'|'colli'>('tracking')
   const [eliminando, setEliminando] = useState<string|null>(null)
+  const [eliminandoBulk, setEliminandoBulk] = useState(false)
   const [filtri, setFiltri] = useState(FILTRI_DEFAULT)
 
   useEffect(() => {
@@ -163,6 +164,37 @@ async function apriTracking(s: any) {
       window.scrollTo({ top: 0, behavior: 'smooth' })
     }
     setTimeout(() => setNotifica(''), 4000)
+  }
+
+  // Cancellazione MULTIPLA: riusa lo stesso endpoint della cancellazione singola,
+  // una spedizione alla volta, così valgono le identiche regole (le spedizioni gia'
+  // partite/affidate vengono bloccate dall'endpoint e riportate come non eliminabili).
+  async function eliminaSelezionate() {
+    if (!selectedIds.length) return
+    if (!confirm(`Eliminare ${selectedIds.length} spedizioni selezionate?\nLe spedizioni gia' partite non verranno eliminate. Le altre andranno in "Spedizioni Cancellate".`)) return
+    setEliminandoBulk(true)
+    const ids = [...selectedIds]
+    let ok = 0
+    const falliti: string[] = []
+    for (const id of ids) {
+      const numero = spedizioni.find(s => s.id === id)?.numero || id
+      try {
+        const res = await fetch(`/api/spedizioni/elimina?id=${id}`, { method: 'DELETE' })
+        const j = await res.json().catch(() => ({}))
+        if (res.ok && j.success) ok++
+        else falliti.push(numero)
+      } catch {
+        falliti.push(numero)
+      }
+    }
+    setEliminandoBulk(false)
+    setSelectedIds([])
+    let msg = `${ok} spedizioni eliminate`
+    if (falliti.length) msg += ` · ${falliti.length} non eliminabili (gia' partite o non consentite): ${falliti.slice(0, 8).join(', ')}${falliti.length > 8 ? '…' : ''}`
+    setNotifica(msg)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    caricaTutte()
+    setTimeout(() => setNotifica(''), 8000)
   }
 
   const btnFiltri = {padding:'7px 18px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700' as const,cursor:'pointer',whiteSpace:'nowrap' as const}
@@ -299,6 +331,10 @@ async function apriTracking(s: any) {
             <button onClick={stampaSelezionati} disabled={selectedIds.length===0}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#f97316':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
               ⬇ Scarica Selezionati{selectedIds.length>0?` (${selectedIds.length})`:''}
+            </button>
+            <button onClick={eliminaSelezionate} disabled={selectedIds.length===0||eliminandoBulk}
+              style={{padding:'6px 14px',background:selectedIds.length>0?'#dc2626':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0&&!eliminandoBulk?'pointer':'not-allowed',opacity:eliminandoBulk?0.6:1}}>
+              {eliminandoBulk?'Eliminazione…':`🗑️ Elimina Selezionate${selectedIds.length>0?` (${selectedIds.length})`:''}`}
             </button>
             <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
               <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Cerca:</span>
