@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { registraMovimento } from '@/lib/movimenti'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -70,37 +71,35 @@ export async function POST(req: NextRequest) {
     const totaleDiff = retts.reduce((acc, r) => acc + Math.abs(Number(r.differenza || 0)), 0)
     if (totaleDiff <= 0) continue
 
-    // Recupera credito residuo attuale
-    const { data: cliRec } = await supabase.from('clienti').select('credito').eq('id', clienteId).single()
-    const creditoAttuale = Number(cliRec?.credito || 0)
-    const nuovoCreditoResiduo = creditoAttuale - totaleDiff
-    await supabase.from('clienti').update({ credito: nuovoCreditoResiduo }).eq('id', clienteId)
-
-    // Crea movimento per ogni rettifica
+    // Crea movimento per ogni rettifica (addebito ATOMICO al credito via RPC, che
+    // ritorna il saldo aggiornato usato come credito_residuo nel registro fatturazione).
     for (const r of retts) {
       const diff = Math.abs(Number(r.differenza || 0))
       if (diff <= 0) continue
+      const descr = `Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso scansione: ${r.peso_reale} Kg )`
+      let saldo = 0
+      try {
+        // scala credito + scrive in 'movimenti' (Lista Movimenti) in un'unica transazione
+        const res = await registraMovimento(supabase, {
+          masterId: utente?.master_id, clienteId, tipo: 'rettifica',
+          descrizione: descr, importo: -diff, spedizioneId: r.spedizione_id || null, createdBy: user.id,
+        })
+        saldo = res.saldo
+      } catch (e) { console.error('Errore addebito rettifica cliente:', e); continue }
+      // registro fatturazione (movimenti_clienti) con lo snapshot del credito residuo
       await supabase.from('movimenti_clienti').insert({
         master_id: utente?.master_id,
         cliente_id: clienteId,
         tipo: 'rettifica',
-        descrizione: `Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso scansione: ${r.peso_reale} Kg )`,
+        descrizione: descr,
         prezzo_unitario: diff,
         quantita: 1,
         iva: 0,
         importo: diff,
         totale_iva: 0,
         totale: diff,
-        credito_residuo: nuovoCreditoResiduo,
+        credito_residuo: saldo,
         data_acquisto: new Date().toISOString().split('T')[0],
-      })
-      // scrivo anche in 'movimenti' per la Lista Movimenti
-      await supabase.from('movimenti').insert({
-        master_id: utente?.master_id, cliente_id: clienteId,
-        tipo: 'rettifica',
-        descrizione: `Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso scansione: ${r.peso_reale} Kg )`,
-        importo: -diff, saldo_dopo: nuovoCreditoResiduo,
-        spedizione_id: r.spedizione_id || null,
       })
     }
 

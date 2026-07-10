@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { registraMovimentoMaster } from '@/lib/movimenti'
+import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { calcolaPrezzoListino } from '@/lib/pricing'
 
 // Il master accetta un RESO ricevuto dalla rete e lo PROPAGA:
@@ -78,8 +78,7 @@ export async function POST(req: NextRequest) {
 
   // ── Gruppi CLIENTE: addebito nolo al cliente ──
   for (const [clienteId, arr] of Object.entries(clientGroups)) {
-    const { data: cli } = await admin.from('clienti').select('credito,listino_cliente_id').eq('id', clienteId).single()
-    let saldo = Number(cli?.credito || 0)
+    const { data: cli } = await admin.from('clienti').select('listino_cliente_id').eq('id', clienteId).single()
     let totale = 0
     const numero = await nextNum()
     const { data: dist } = await admin.from('distinte_resi').insert({
@@ -100,14 +99,18 @@ export async function POST(req: NextRequest) {
         costoReso = ris?.prezzo || 0
       }
       if (!(costoReso > 0)) costoReso = Math.max(0, Number(s.costo_totale || 0))
-      saldo -= costoReso; totale += costoReso
-      await admin.from('movimenti').insert({
-        master_id: mio, cliente_id: clienteId, tipo: 'reso', descrizione: `Reso ${s.numero}`,
-        importo: -costoReso, saldo_dopo: saldo, spedizione_id: s.id,
-      })
+      totale += costoReso
+      // Addebito atomico al credito del cliente (RPC transazionale)
+      if (costoReso > 0) {
+        try {
+          await registraMovimento(admin, {
+            masterId: mio, clienteId, tipo: 'reso', descrizione: `Reso ${s.numero}`,
+            importo: -costoReso, spedizioneId: s.id, createdBy: user.id,
+          })
+        } catch (e) { console.error('Errore addebito reso cliente:', e) }
+      }
     }
     await admin.from('distinte_resi').update({ totale }).eq('id', dist.id)
-    await admin.from('clienti').update({ credito: saldo }).eq('id', clienteId)
     create++
   }
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { registraMovimentoMaster } from '@/lib/movimenti'
+import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { calcolaPrezzoListino } from '@/lib/pricing'
 
 export async function GET(req: NextRequest) {
@@ -65,10 +65,9 @@ export async function POST(req: NextRequest) {
   }
   const { count } = await supabase.from('distinte_resi').select('*', {count:'exact',head:true}).eq('master_id', utente?.master_id)
   const numero = (count||0) + 1
-  const { data: cliRec } = await supabase.from('clienti').select('credito,listino_cliente_id').eq('id', clienteId).single()
-  let saldoCorrente = Number(cliRec?.credito || 0)
+  const { data: cliRec } = await supabase.from('clienti').select('listino_cliente_id').eq('id', clienteId).single()
   let totaleReso = 0
-  const movRows: any[] = []
+  const resoRows: { v: any; costoReso: number }[] = []
   for (const v of (voci || [])) {
     await supabase.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
     const { data: sp } = await supabase.from('spedizioni')
@@ -91,13 +90,8 @@ export async function POST(req: NextRequest) {
     // fallback (cliente senza listino / non calcolabile): usa il costo totale, mai negativo
     if (!(costoReso > 0)) costoReso = Math.max(0, Number(sp?.costo_totale || 0))
 
-    saldoCorrente = saldoCorrente - costoReso
     totaleReso += costoReso
-    movRows.push({
-      master_id: utente?.master_id, cliente_id: clienteId,
-      tipo: 'reso', descrizione: `Reso ${v.numero}`,
-      importo: -costoReso, saldo_dopo: saldoCorrente, spedizione_id: v.id,
-    })
+    resoRows.push({ v, costoReso })
   }
 
   const { data: distinta, error } = await supabase.from('distinte_resi').insert({
@@ -111,7 +105,16 @@ export async function POST(req: NextRequest) {
   }).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
-  for (const m of movRows) await supabase.from('movimenti').insert(m)
-  await supabase.from('clienti').update({ credito: saldoCorrente }).eq('id', clienteId)
+  // Addebito atomico del nolo al credito del cliente (RPC: update credito + movimento in transazione)
+  for (const { v, costoReso } of resoRows) {
+    if (!(costoReso > 0)) continue
+    try {
+      await registraMovimento(supabase, {
+        masterId: utente?.master_id, clienteId, tipo: 'reso',
+        descrizione: `Reso ${v.numero}`, importo: -costoReso,
+        spedizioneId: v.id, createdBy: user.id,
+      })
+    } catch (e) { console.error('Errore addebito reso cliente:', e) }
+  }
   return NextResponse.json({ id: distinta.id, numero })
 }
