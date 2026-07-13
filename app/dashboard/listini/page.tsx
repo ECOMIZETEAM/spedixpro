@@ -5,6 +5,18 @@ export default function ListiniPage() {
   const [listini, setListini] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [eliminando, setEliminando] = useState('')
+  const [duplicando, setDuplicando] = useState('')
+
+  async function duplica(id: string, nome: string) {
+    const nuovo = prompt(`Nome del nuovo listino (copia di "${nome}"):`, `${nome} (copia)`)
+    if (nuovo === null) return
+    setDuplicando(id)
+    const res = await fetch('/api/listini/duplica', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listinoId: id, nome: nuovo }) })
+    const d = await res.json().catch(() => ({}))
+    setDuplicando('')
+    if (d?.error) { alert(d.error); return }
+    carica()
+  }
 
   function carica() {
     fetch('/api/listini/lista')
@@ -63,6 +75,10 @@ export default function ListiniPage() {
                   <td style={{padding:'10px 14px'}}>
                     <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
                       <a href={`/dashboard/listini/clienti/${l.id}`} style={{padding:'4px 10px',background:'#f5f5f5',color:'#333',borderRadius:'4px',fontSize:'12px',textDecoration:'none',border:'1px solid #e8e8e8'}}>✏️ Modifica</a>
+                      <button onClick={()=>duplica(l.id, l.nome)} disabled={duplicando===l.id} title="Duplica listino"
+                        style={{padding:'4px 10px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'12px',border:'1px solid #fed7aa',cursor:'pointer',opacity:duplicando===l.id?0.5:1}}>
+                        {duplicando===l.id?'…':'⧉ Duplica'}
+                      </button>
                       <button onClick={()=>elimina(l.id, l.nome)} disabled={eliminando===l.id} title="Elimina listino"
                         style={{padding:'4px 10px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'12px',border:'1px solid #fecaca',cursor:'pointer',opacity:eliminando===l.id?0.5:1}}>
                         {eliminando===l.id?'…':'🗑 Elimina'}

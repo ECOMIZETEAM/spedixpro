@@ -112,6 +112,34 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   const [msg, setMsg] = useState('')
   const [tab, setTab] = useState('pesi')
 
+  // Copia singolo corriere in un altro listino (esistente o nuovo)
+  const [copia, setCopia] = useState<any>(null)
+  const [listiniList, setListiniList] = useState<any[]>([])
+  const [copiaModo, setCopiaModo] = useState<'esistente'|'nuovo'>('esistente')
+  const [copiaTarget, setCopiaTarget] = useState('')
+  const [copiaNome, setCopiaNome] = useState('')
+  const [copiaSaving, setCopiaSaving] = useState(false)
+  const [copiaErr, setCopiaErr] = useState('')
+  const [copiaOk, setCopiaOk] = useState('')
+  async function apriCopia(c: any) {
+    setCopia(c); setCopiaModo('esistente'); setCopiaTarget(''); setCopiaNome(''); setCopiaErr(''); setCopiaOk('')
+    try { const r = await fetch('/api/listini/lista'); const d = await r.json(); setListiniList((Array.isArray(d)?d:[]).filter((x:any)=>x.id!==listino.id)) } catch { setListiniList([]) }
+  }
+  async function confermaCopia() {
+    if (!copia) return
+    if (copiaModo==='esistente' && !copiaTarget) { setCopiaErr('Seleziona un listino di destinazione'); return }
+    if (copiaModo==='nuovo' && !copiaNome.trim()) { setCopiaErr('Inserisci il nome del nuovo listino'); return }
+    setCopiaSaving(true); setCopiaErr('')
+    const body: any = { sourceListinoId: listino.id, corriereId: copia.id }
+    if (copiaModo==='nuovo') body.nuovoNome = copiaNome.trim(); else body.targetListinoId = copiaTarget
+    const res = await fetch('/api/listini/duplica-corriere', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
+    const d = await res.json().catch(()=>({}))
+    setCopiaSaving(false)
+    if (d?.error) { setCopiaErr(d.error); return }
+    setCopiaOk('Corriere copiato con successo.')
+    setTimeout(()=>{ window.location.href = `${basePagina}/${d.id}` }, 900)
+  }
+
   const [righeAssic, setRigheAssic] = useState<RigaSuppl[]>(() => buildRigheDa(supplementiEsistenti||[], 'assicurazione', [rigaVuota()]))
   const [righeContr, setRigheContr] = useState<RigaSuppl[]>(() => buildRigheDa(supplementiEsistenti||[], 'contrassegno', [rigaVuota(), rigaVuota()]))
   const [serviziAccessori, setServiziAccessori] = useState(() => buildAccessoriDa(supplementiEsistenti||[], [
@@ -512,6 +540,10 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
                     <span style={{width:'40px',height:'40px',borderRadius:'8px',background:aperto?'#f97316':'#f3f4f6',color:aperto?'#fff':'#6b7280',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'12px',fontWeight:'700',flexShrink:0}}>{iniziali(c.nome_contratto)}</span>
                   )}
                   <span style={{flex:1,fontSize:'14px',fontWeight:'600',color:'#1a1a1a'}}>{c.nome_contratto}</span>
+                  {!isCorriere && (
+                    <button onClick={(e)=>{e.stopPropagation(); apriCopia(c)}} title="Copia questo corriere in un altro listino"
+                      style={{padding:'4px 10px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer',whiteSpace:'nowrap' as const}}>⧉ Copia</button>
+                  )}
                   <span style={{fontSize:'18px',color:'#9ca3af',transform:aperto?'rotate(90deg)':'none',transition:'transform 0.15s'}}>›</span>
                 </div>
                 {aperto && editorContratto}
@@ -537,6 +569,48 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
                 <a href={`/dashboard/clienti/${c.id}`} style={{fontSize:'12px',color:'#f97316',textDecoration:'none'}}>Apri →</a>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Popup COPIA CORRIERE */}
+      {copia && (
+        <div onClick={()=>!copiaSaving && setCopia(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',width:'440px',maxWidth:'92vw',boxShadow:'0 20px 60px rgba(0,0,0,.25)',overflow:'hidden'}}>
+            <div style={{padding:'16px 20px',borderBottom:'1px solid #eee',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <span style={{fontWeight:800,fontSize:'15px',color:'#1a1a1a'}}>Copia corriere</span>
+              <button onClick={()=>setCopia(null)} style={{background:'none',border:'none',fontSize:'20px',cursor:'pointer',color:'#999',lineHeight:1}}>×</button>
+            </div>
+            <div style={{padding:'20px'}}>
+              <div style={{fontSize:'13px',color:'#1a1a1a',marginBottom:'16px'}}>Copio <b>{copia.nome_contratto}</b> (fasce, zone e supplementi) in:</div>
+
+              <div style={{display:'flex',gap:'10px',marginBottom:'14px'}}>
+                <button onClick={()=>setCopiaModo('esistente')} style={{flex:1,padding:'9px',borderRadius:'8px',border:copiaModo==='esistente'?'2px solid #f97316':'1px solid #ddd',background:copiaModo==='esistente'?'#fff7ed':'#fff',color:'#1a1a1a',fontSize:'12.5px',fontWeight:700,cursor:'pointer'}}>Listino esistente</button>
+                <button onClick={()=>setCopiaModo('nuovo')} style={{flex:1,padding:'9px',borderRadius:'8px',border:copiaModo==='nuovo'?'2px solid #f97316':'1px solid #ddd',background:copiaModo==='nuovo'?'#fff7ed':'#fff',color:'#1a1a1a',fontSize:'12.5px',fontWeight:700,cursor:'pointer'}}>Nuovo listino</button>
+              </div>
+
+              {copiaModo==='esistente' ? (
+                <div>
+                  <label style={{fontSize:'12px',fontWeight:600,color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Listino di destinazione</label>
+                  <select value={copiaTarget} onChange={e=>setCopiaTarget(e.target.value)} style={{width:'100%',padding:'9px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}}>
+                    <option value="">Seleziona un listino…</option>
+                    {listiniList.map((l:any)=><option key={l.id} value={l.id}>{l.nome}</option>)}
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label style={{fontSize:'12px',fontWeight:600,color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Nome del nuovo listino</label>
+                  <input value={copiaNome} onChange={e=>setCopiaNome(e.target.value)} placeholder="Es. Listino Standard 2" style={{width:'100%',padding:'9px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}}/>
+                </div>
+              )}
+
+              {copiaErr && <div style={{marginTop:'12px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'9px 12px',fontSize:'12.5px',color:'#dc2626'}}>{copiaErr}</div>}
+              {copiaOk && <div style={{marginTop:'12px',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'9px 12px',fontSize:'12.5px',color:'#16a34a'}}>{copiaOk}</div>}
+            </div>
+            <div style={{padding:'14px 20px',borderTop:'1px solid #eee',display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+              <button onClick={()=>setCopia(null)} disabled={copiaSaving} style={{padding:'9px 16px',background:'#fff',color:'#1a1a1a',border:'1px solid #ddd',borderRadius:'7px',fontSize:'13px',cursor:'pointer'}}>Annulla</button>
+              <button onClick={confermaCopia} disabled={copiaSaving} style={{padding:'9px 20px',background:'#f97316',color:'#fff',border:'none',borderRadius:'7px',fontSize:'13px',fontWeight:700,cursor:'pointer',opacity:copiaSaving?0.7:1}}>{copiaSaving?'Copio…':'Copia'}</button>
+            </div>
           </div>
         </div>
       )}
