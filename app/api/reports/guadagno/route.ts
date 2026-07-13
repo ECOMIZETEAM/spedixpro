@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
 
   // movimenti sui libri del master M
   const { data: movM } = await admin.from('movimenti')
-    .select('master_target_id,cliente_id,importo,tipo,created_at')
+    .select('master_target_id,cliente_id,importo,tipo,created_at,spedizione_id')
     .eq('master_id', M).gte('created_at', dal).in('tipo', TIPI)
 
   // movimenti dei sotto-master diretti (per i loro pagamenti a cascata verso M)
@@ -67,6 +67,11 @@ export async function GET(req: NextRequest) {
   const ricavi = Math.round((ricaviClienti + ricaviSub) * 100) / 100
   const costi = Math.round(costoM * 100) / 100
   const guadagno = Math.round((ricavi - costi) * 100) / 100
+  // Numero di spedizioni del periodo (distinte) per la media per spedizione
+  const spedSet = new Set<string>()
+  for (const m of (movM || [])) if (m.tipo === 'spedizione' && m.spedizione_id) spedSet.add(m.spedizione_id)
+  const numSpedizioni = spedSet.size
+  const mediaSped = numSpedizioni > 0 ? Math.round((guadagno / numSpedizioni) * 100) / 100 : 0
   const r2 = (x: number) => Math.round(x * 100) / 100
   // Riempio TUTTI i punti del periodo (0 dove non ci sono movimenti) così il grafico è giorno-per-giorno
   const now = new Date()
@@ -83,5 +88,5 @@ export async function GET(req: NextRequest) {
     const v = perGiorno.get(k) || { ricavi: 0, costi: 0 }
     return { giorno: k, ricavi: r2(v.ricavi), costi: r2(v.costi), margine: r2(v.ricavi - v.costi) }
   })
-  return NextResponse.json({ guadagno, ricavi, costi, periodo, serie })
+  return NextResponse.json({ guadagno, ricavi, costi, periodo, serie, numSpedizioni, mediaSped })
 }

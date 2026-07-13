@@ -123,6 +123,27 @@ export async function GET(req: NextRequest) {
     for (const lid of listini) calcPerListino.set(lid, await creaCalcolatoreListinoCliente(db, lid))
   }
 
+  // Prezzi REALI dai MOVIMENTI (solo master): "quello che pago io" (mio movimento) e "quello che mi
+  // paga il diretto"; il margine e' la differenza. Non per cliente/agente.
+  const mineId = utente?.master_id
+  const costoMine = new Map<string, number>()
+  const costoTarget = new Map<string, number>()
+  const pagatoCliente = new Map<string, number>()
+  if (mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).length) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const adminMov = createAdminSupabase()
+    const spedIds = (spedizioni || []).map((s: any) => s.id)
+    for (let i = 0; i < spedIds.length; i += 500) {
+      const chunk = spedIds.slice(i, i + 500)
+      const { data: mvs } = await adminMov.from('movimenti').select('spedizione_id,master_target_id,cliente_id,importo').eq('tipo', 'spedizione').in('spedizione_id', chunk)
+      for (const mv of (mvs || [])) {
+        const imp = Math.abs(Number(mv.importo || 0))
+        if (mv.cliente_id) pagatoCliente.set(mv.spedizione_id, imp)
+        else if (mv.master_target_id) { if (mv.master_target_id === mineId) costoMine.set(mv.spedizione_id, imp); costoTarget.set(mv.spedizione_id + '|' + mv.master_target_id, imp) }
+      }
+    }
+  }
+
   // master_rete = nome della MIA prima linea per le spedizioni dei sotto-master (null per le mie)
   const rows = (spedizioni || []).map((s: any) => {
     let master_rete: string | null = null
@@ -148,7 +169,13 @@ export async function GET(req: NextRequest) {
         if (ris && ris.totale != null) costo_mostrato = ris.totale
       }
     }
-    return { ...s, master_rete, master_rete_id, costo_mostrato }
+    // Prezzi reali (movimenti): prezzo corriere = mio costo; prezzo cliente = quello che paga il diretto
+    const prezzo_corriere = costoMine.has(s.id) ? costoMine.get(s.id)! : null
+    let prezzo_cliente: number
+    if (s.master_id === mineId) prezzo_cliente = pagatoCliente.has(s.id) ? pagatoCliente.get(s.id)! : Number(s.costo_totale || 0)
+    else { const flId = primaLineaId.get(s.master_id); prezzo_cliente = (flId && costoTarget.has(s.id + '|' + flId)) ? costoTarget.get(s.id + '|' + flId)! : Number(s.costo_totale || 0) }
+    const margine = (prezzo_corriere != null) ? Math.round((prezzo_cliente - prezzo_corriere) * 100) / 100 : null
+    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine }
   })
   return NextResponse.json(rows)
 }

@@ -157,6 +157,28 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Tasso consegna + Top corriere + Top cliente */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'12px'}}>
+        <div style={kpiCardLight}>
+          <div style={{...kpiIconLight,background:'#f0fdf4',border:'1px solid #bbf7d0',color:'#16a34a'}}>📈</div>
+          <div style={kpiLabel}>TASSO DI CONSEGNA</div>
+          <div style={{...kpiValue,color:'#16a34a'}}>{Number(data.tassoConsegna||0).toFixed(1)}%</div>
+          <div style={{fontSize:'11px',color:'#999',marginTop:'4px'}}>{Number(data.consegnateTotali||0).toLocaleString()} consegnate su {Number(data.spedizioniTotali||0).toLocaleString()}</div>
+        </div>
+        <div style={kpiCardLight}>
+          <div style={{...kpiIconLight,background:'#eff6ff',border:'1px solid #bfdbfe',color:'#2563eb'}}>🚚</div>
+          <div style={kpiLabel}>TOP CORRIERE</div>
+          <div style={{...kpiValue,fontSize:'17px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{data.topCorriere?.nome || '—'}</div>
+          <div style={{fontSize:'11px',color:'#999',marginTop:'4px'}}>{data.topCorriere?.n ? `${Number(data.topCorriere.n).toLocaleString()} spedizioni` : 'nessun dato'}</div>
+        </div>
+        <div style={kpiCardLight}>
+          <div style={{...kpiIconLight,background:'#fff7ed',border:'1px solid #fed7aa',color:'#f97316'}}>🏆</div>
+          <div style={kpiLabel}>TOP CLIENTE</div>
+          <div style={{...kpiValue,fontSize:'17px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{data.topCliente?.nome || '—'}</div>
+          <div style={{fontSize:'11px',color:'#999',marginTop:'4px'}}>{data.topCliente?.n ? `${Number(data.topCliente.n).toLocaleString()} spedizioni` : 'nessun dato'}</div>
+        </div>
+      </div>
+
       {/* Grafici */}
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px'}}>
         <div style={card}>

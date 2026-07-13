@@ -397,7 +397,7 @@ async function apriTracking(s: any) {
                   <th style={{padding:'9px 12px',borderBottom:'1px solid #d1d5db',width:'36px'}}>
                     <input type="checkbox" checked={selectedIds.length===spedizioniPaginate.length&&spedizioniPaginate.length>0} onChange={toggleAll}/>
                   </th>
-                  {['N. Spedizione','Cliente','Destinatario','Peso','Colli','Contrassegno','Data e Ora','Stato','ID Ordine','Totale','Distinta N.','Azioni'].map(h=>(
+                  {['N. Spedizione','Cliente','Destinatario','Peso','Colli','Contrassegno','Data e Ora','Stato','ID Ordine','Prezzo Cliente','Prezzo Corriere','Margine','Distinta N.','Azioni'].map(h=>(
                     <th key={h} style={{textAlign:'left' as const,padding:'9px 12px',fontSize:'11px',fontWeight:'700',textTransform:'uppercase' as const,letterSpacing:'0.4px',color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
                   ))}
                 </tr>
@@ -440,10 +440,12 @@ async function apriTracking(s: any) {
                         {s.stato==='annullamento_pending' && <div style={{fontSize:'10px',color:'#ea580c',marginTop:'3px',whiteSpace:'nowrap' as const}}>invio corriere {oreAllAnnullo(s.annullamento_richiesto_at)}</div>}
                       </td>
                       <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.note||'—'}</td>
-                      <td style={{padding:'9px 12px',fontWeight:'700',color:'#1a1a1a'}}>
-                        € {Number(s.costo_mostrato ?? s.costo_totale ?? 0).toFixed(2)}
+                      <td style={{padding:'9px 12px',fontWeight:'700',color:'#1a1a1a',whiteSpace:'nowrap' as const}}>
+                        € {Number(s.prezzo_cliente ?? s.costo_mostrato ?? s.costo_totale ?? 0).toFixed(2)}
                         {Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}}>R</span>}
                       </td>
+                      <td style={{padding:'9px 12px',color:'#6b7280',fontSize:'12px',whiteSpace:'nowrap' as const}}>{s.prezzo_corriere!=null?`€ ${Number(s.prezzo_corriere).toFixed(2)}`:'—'}</td>
+                      <td style={{padding:'9px 12px',fontWeight:'700',fontSize:'12px',whiteSpace:'nowrap' as const,color:s.margine==null?'#9ca3af':(Number(s.margine)<0?'#dc2626':'#16a34a')}}>{s.margine!=null?`€ ${Number(s.margine).toFixed(2)}`:'—'}</td>
                       <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>—</td>
                       <td style={{padding:'9px 12px'}}>
                         <div style={{display:'flex',gap:'4px'}}>

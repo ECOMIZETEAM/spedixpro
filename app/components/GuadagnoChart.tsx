@@ -65,7 +65,12 @@ export default function GuadagnoChart() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#8a8a8a', fontWeight: 600 }}>
               <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#dc2626' }} /> Costi
             </div>
-            <div style={{ fontSize: '15px', fontWeight: 700, color: '#dc2626' }}>{loading ? '…' : eur(d?.costi || 0)}</div>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: '#dc2626' }}>{eur(d?.costi || 0)}</div>
+          </div>
+          <div style={{ borderLeft: '1px solid #eee', paddingLeft: '18px' }}>
+            <div style={{ fontSize: '11px', color: '#8a8a8a', fontWeight: 600 }}>Media / spedizione</div>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: Number(d?.mediaSped) < 0 ? '#dc2626' : '#16a34a' }}>{loading ? '…' : eur(d?.mediaSped || 0)}</div>
+            <div style={{ fontSize: '10px', color: '#999' }}>{loading ? '' : `${Number(d?.numSpedizioni || 0).toLocaleString()} sped.`}</div>
           </div>
         </div>
       </div>
