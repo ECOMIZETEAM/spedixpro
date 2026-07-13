@@ -88,10 +88,11 @@ export async function GET(req: NextRequest) {
   } else {
     query = query.eq('master_id', utente?.master_id)
   }
-  // Filtro stato: se richiesto uno stato preciso lo applico; se non richiesto,
-  // escludo le annullate (che vivono nella pagina "Spedizioni Cancellate").
+  // Filtro stato: se richiesto uno stato preciso lo applico; se non richiesto, mostro anche le
+  // spedizioni in annullamento_pending (restano in elenco, ripristinabili, finché non diventano
+  // annullate definitive). Escludo solo le annullate e la coda manuale (che vivono in "Cancellate").
   if (stato && stato !== 'tutti') query = query.eq('stato', stato)
-  else query = query.not('stato', 'in', '(annullata,annullamento_pending,annullamento_manuale)')
+  else query = query.not('stato', 'in', '(annullata,annullamento_manuale)')
   if (dal) query = query.gte('created_at', dal)
   if (al) query = query.lte('created_at', al)
   if (numero) query = query.ilike('numero', `%${numero}%`)

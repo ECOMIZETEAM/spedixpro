@@ -15,8 +15,18 @@ const STATI: Record<string,{bg:string,color:string,label:string}> = {
   consegnata:{bg:'#f0fdf4',color:'#16a34a',label:'Consegnata'},           // verde
   in_giacenza:{bg:'#fef2f2',color:'#dc2626',label:'In Giacenza'},         // rosso
   reso_mittente:{bg:'#f3f4f6',color:'#374151',label:'Reso al mittente'},  // grigio scuro
+  annullamento_pending:{bg:'#fff7ed',color:'#ea580c',label:'In annullamento'}, // arancio (48h, ripristinabile)
+  annullamento_manuale:{bg:'#fef2f2',color:'#b91c1c',label:'Annullo in corso'}, // rosso (coda corriere)
   annullata:{bg:'#f5f5f5',color:'#6b7280',label:'Annullata'},             // grigio
   non_consegnato:{bg:'#f3f4f6',color:'#6b7280',label:'Non consegnato'},   // grigio
+}
+
+function oreAllAnnullo(richiestoAt?: string): string {
+  if (!richiestoAt) return ''
+  const diff = new Date(richiestoAt).getTime() + 48*3600*1000 - Date.now()
+  if (diff <= 0) return 'invio in corso…'
+  const h = Math.floor(diff/3600000), m = Math.floor((diff%3600000)/60000)
+  return `tra ${h}h ${m}m`
 }
 
 // Colore badge contrassegno in base allo stato di pagamento:
@@ -149,8 +159,19 @@ async function apriTracking(s: any) {
     setTrackingData(data); setTrackingLoading(false)
   }
 
+  async function ripristina(id: string, numero: string) {
+    if (!confirm(`Ripristinare la spedizione ${numero}? Non verrà inviato alcun annullo al corriere.`)) return
+    setEliminando(id)
+    const res = await fetch(`/api/spedizioni/ripristina?id=${id}`, { method: 'POST' })
+    setEliminando(null)
+    if (res.ok) { setNotifica('Spedizione ripristinata.'); caricaTutte() }
+    else { const d = await res.json().catch(()=>({})); setNotifica(d.error || 'Errore durante il ripristino') }
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    setTimeout(() => setNotifica(''), 4000)
+  }
+
   async function elimina(id: string, numero: string) {
-    if (!confirm(`Cancellare la spedizione ${numero}?\nAndrà in "Spedizioni Cancellate" e la richiesta di annullo verrà inviata al corriere dopo 48 ore. Entro questo tempo potrai ripristinarla.`)) return
+    if (!confirm(`Cancellare la spedizione ${numero}?\nResta in elenco come "In annullamento" e potrai ripristinarla; la richiesta di annullo viene inviata al corriere dopo 48 ore.`)) return
     setEliminando(id)
     const res = await fetch(`/api/spedizioni/elimina?id=${id}`, { method: 'DELETE' })
     const j = await res.json().catch(() => ({}))
@@ -400,6 +421,7 @@ async function apriTracking(s: any) {
                       </td>
                       <td style={{padding:'9px 12px'}}>
                         <span style={{background:st.bg,color:st.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600',whiteSpace:'nowrap' as const}}>{st.label}</span>
+                        {s.stato==='annullamento_pending' && <div style={{fontSize:'10px',color:'#ea580c',marginTop:'3px',whiteSpace:'nowrap' as const}}>invio corriere {oreAllAnnullo(s.annullamento_richiesto_at)}</div>}
                       </td>
                       <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.note||'—'}</td>
                       <td style={{padding:'9px 12px',fontWeight:'700',color:'#1a1a1a'}}>
@@ -410,9 +432,14 @@ async function apriTracking(s: any) {
                       <td style={{padding:'9px 12px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
                           <a href={`/dashboard/spedizioni/${s.id}/etichetta`} download style={{padding:'4px 8px',background:'#fff7ed',color:'#f97316',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #fed7aa'}} title="Stampa etichetta">🖨️</a>
-                  
-                          <button onClick={()=>elimina(s.id,s.numero)} disabled={eliminando===s.id}
-                            style={{padding:'4px 8px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'14px',border:'1px solid #fecaca',cursor:'pointer',opacity:eliminando===s.id?0.5:1}} title="Elimina">🗑️</button>
+
+                          {s.stato==='annullamento_pending' ? (
+                            <button onClick={()=>ripristina(s.id,s.numero)} disabled={eliminando===s.id}
+                              style={{padding:'4px 10px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'12px',fontWeight:'700',border:'1px solid #fed7aa',cursor:'pointer',whiteSpace:'nowrap',opacity:eliminando===s.id?0.5:1}} title="Ripristina spedizione">↩︎ Ripristina</button>
+                          ) : (
+                            <button onClick={()=>elimina(s.id,s.numero)} disabled={eliminando===s.id}
+                              style={{padding:'4px 8px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'14px',border:'1px solid #fecaca',cursor:'pointer',opacity:eliminando===s.id?0.5:1}} title="Elimina">🗑️</button>
+                          )}
                           <AssistenzaTicketButton ldv={s.numero} />
                         </div>
                       </td>

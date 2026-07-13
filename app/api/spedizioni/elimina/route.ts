@@ -57,5 +57,5 @@ export async function DELETE(req: NextRequest) {
   }).eq('id', spedizioneId)
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 400 })
 
-  return NextResponse.json({ success: true, pending: true, message: 'Annullamento programmato: la richiesta verrà inviata al corriere tra 48 ore. Puoi ripristinarla entro questo tempo dalla sezione Spedizioni Cancellate.' })
+  return NextResponse.json({ success: true, pending: true, message: 'Annullamento programmato: la spedizione resta in elenco come "In annullamento" e puoi ripristinarla. La richiesta verrà inviata al corriere tra 48 ore.' })
 }
