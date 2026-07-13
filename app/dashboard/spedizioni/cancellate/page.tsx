@@ -62,23 +62,29 @@ export default function SpedizioniCancellatePage() {
   const ownerIds = new Set(codaOwner.map(s => s.id))
   const manualiAltri = manuali.filter(s => !ownerIds.has(s.id))  // manuali non miei (sola lettura)
 
-  // Elenco clienti presenti tra le annullate (per il filtro a tendina)
-  const clientiFiltro = Array.from(new Set(spedizioni.map(s => s.clienti?.ragione_sociale).filter(Boolean))).sort()
+  // Elenco clienti presenti in TUTTA la pagina (pending + manuali + annullate) per il filtro a tendina
+  const clientiFiltro = Array.from(new Set(
+    [...spedizioni, ...pending, ...manualiAltri, ...codaOwner].map(s => s.clienti?.ragione_sociale).filter(Boolean)
+  )).sort()
 
-  const visibili = spedizioni.filter(s => {
+  function passaFiltri(s: any) {
     if (filtroCliente && (s.clienti?.ragione_sociale || '') !== filtroCliente) return false
-    const data = new Date(s.updated_at || s.created_at)
+    const data = new Date(s.updated_at || s.created_at || s.annullamento_richiesto_at)
     if (dal && data < new Date(dal + 'T00:00:00')) return false
     if (al && data > new Date(al + 'T23:59:59')) return false
     if (cerca) {
       const q = cerca.toLowerCase()
-      return s.numero?.toLowerCase().includes(q) ||
+      return (s.numero?.toLowerCase().includes(q) ||
         s.dest_nome?.toLowerCase().includes(q) ||
         s.dest_citta?.toLowerCase().includes(q) ||
-        s.clienti?.ragione_sociale?.toLowerCase().includes(q)
+        s.clienti?.ragione_sociale?.toLowerCase().includes(q)) || false
     }
     return true
-  })
+  }
+  // I filtri agiscono su tutte le sezioni della pagina
+  const visibili = spedizioni.filter(passaFiltri)
+  const pendingVis = pending.filter(passaFiltri)
+  const manualiVis = manualiAltri.filter(passaFiltri)
   const filtriAttivi = !!(filtroCliente || dal || al || cerca)
 
   const totalePagine = Math.max(1, Math.ceil(visibili.length / perPage))
@@ -163,18 +169,18 @@ export default function SpedizioniCancellatePage() {
       {/* SEZIONE PENDING (in attesa di annullo, 48h) + annulli manuali in gestione */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #fed7aa',overflow:'hidden',marginBottom:'16px'}}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #fde4cf',background:'#fff7ed'}}>
-          <span style={{fontSize:'13px',fontWeight:'700',color:'#ea580c'}}>In attesa di annullo <span style={{color:'#9a3412',fontWeight:'400',fontSize:'12px'}}>({pending.length + manualiAltri.length})</span></span>
+          <span style={{fontSize:'13px',fontWeight:'700',color:'#ea580c'}}>In attesa di annullo <span style={{color:'#9a3412',fontWeight:'400',fontSize:'12px'}}>({pendingVis.length + manualiVis.length})</span></span>
           <span style={{display:'block',marginTop:'2px',fontSize:'12px',color:'#9a3412'}}>La richiesta di annullo viene inviata al corriere dopo 48 ore. Entro questo tempo puoi ripristinare la spedizione.</span>
         </div>
         {loading ? (
           <div style={{padding:'20px',textAlign:'center',color:'#999',fontSize:'13px'}}>Caricamento…</div>
-        ) : (!pending.length && !manualiAltri.length) ? (
+        ) : (!pendingVis.length && !manualiVis.length) ? (
           <div style={{padding:'20px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessuna spedizione in attesa di annullo.</div>
         ) : (
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
               <tbody>
-                {pending.map(s => {
+                {pendingVis.map(s => {
                   const c = s.annullamento_richiesto_at ? oreRestanti(s.annullamento_richiesto_at) : { txt:'', pronto:false }
                   return (
                     <tr key={s.id} style={{borderBottom:'1px solid #fdece0'}}>
@@ -191,7 +197,7 @@ export default function SpedizioniCancellatePage() {
                     </tr>
                   )
                 })}
-                {manualiAltri.map(s => (
+                {manualiVis.map(s => (
                   <tr key={s.id} style={{borderBottom:'1px solid #fdece0'}}>
                     <td style={{padding:'9px 16px',fontWeight:'700',color:'#1a1a1a'}}>{s.numero}</td>
                     <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.clienti?.ragione_sociale || '-'}</td>
