@@ -14,10 +14,12 @@ function estraiCampi(testoRaw: string) {
   let piva = grab(/partita\s*iva[^0-9]{0,12}(\d{11})/i)
   if (!piva) piva = grab(/\bIT[\s-]?(\d{11})\b/i)
   let cf = grab(/codice\s*fiscale[^0-9A-Z]{0,12}([0-9]{11}|[A-Z0-9]{16})/i)
+  // CF persona fisica (titolare di impresa individuale): il valore è dopo altre parole -> pattern diretto
+  if (!cf) cf = grab(/\b([A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z])\b/)
   if (!cf && piva) cf = piva // per le società di norma coincidono
 
   // Denominazione / ragione sociale — delimitata dal PROSSIMO campo noto per non "over-leggere".
-  let ragione = grab(/denominazione[:\s]+(.+?)(?=\s+(?:forma\s+giuridica|sigla|codice\s+fiscale|partita\s+iva|p\.?\s?iva|sede\s+legale|indirizzo|numero\s+rea|\brea\b|iscri|capitale|dati\s+anagrafici|stato\b|costituzion|attivit)\b|$)/i, oneLine)
+  let ragione = grab(/denominazione[:\s]+(.+?)(?=\s+(?:forma\s+giuridica|sigla|codice\s+fiscale|partita\s+iva|p\.?\s?iva|sede\b|indirizzo|numero\s+rea|\brea\b|iscri|capitale|dati\s+anagrafici|stato\b|costituzion|attivit|data\s+della\s+comunicazione|comunicazione\s+unica|titolare|domicilio)\b|$)/i, oneLine)
   if (!ragione) ragione = grab(/denominazione[:\s]+([^\n]{2,90})/i, testo)
   ragione = ragione.replace(/\s{2,}.*$/, '').replace(/[·•:;,\s]+$/, '').trim()
   if (ragione.length > 90) ragione = ragione.slice(0, 90).replace(/\s+\S*$/, '').trim()
@@ -26,9 +28,9 @@ function estraiCampi(testoRaw: string) {
   let pec = grab(/(?:pec|domicilio digitale)[^a-z0-9]{0,15}([a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,})/i)
   if (!pec) { const em = oneLine.match(/[a-z0-9._%+\-]+@(?:[a-z0-9.\-]*pec|legalmail|pec)[a-z0-9.\-]*\.[a-z]{2,}/i); pec = em ? em[0] : '' }
 
-  // Sede legale: es. "COMUNE (PR) VIA ROMA, 10 CAP 20100"
+  // Sede (legale per società, "Sede" per impresa individuale): es. "COMUNE (PR) VIA ROMA, 10 CAP 20100"
   let citta = '', prov = '', indirizzo = '', cap = ''
-  const sede = oneLine.match(/sede legale[^A-Za-zÀ-ù]*(?:indirizzo\s+)?([A-Za-zÀ-ù'’.\- ]+?)\s*\(([A-Z]{2})\)\s*(?:indirizzo\s+)?(.+?)\s*(?:cap\s*)?(\d{5})/i)
+  const sede = oneLine.match(/sede(?:\s+legale)?[^A-Za-zÀ-ù(]*(?:indirizzo\s+)?([A-Za-zÀ-ù'’.\- ]+?)\s*\(([A-Z]{2})\)\s*(?:indirizzo\s+)?(.+?)\s*(?:cap\s*)?(\d{5})/i)
   if (sede) {
     citta = sede[1].trim(); prov = sede[2]
     indirizzo = sede[3].replace(/\bcap\b/i, '').replace(/[,;]\s*$/, '').trim(); cap = sede[4]
@@ -39,8 +41,15 @@ function estraiCampi(testoRaw: string) {
     indirizzo = grab(/(?:indirizzo|via|viale|piazza|corso|largo)[:\s]+([^\n,;]+)/i)
   }
 
-  // Rappresentante legale / amministratore
-  const rappr = grab(/(?:amministratore unico|legale rappresentante|rappresentante legale|presidente del consiglio)[^A-Za-zÀ-ù]{0,25}([A-ZÀ-Ù][A-Za-zÀ-ù'’]+(?:\s+[A-ZÀ-Ù][A-Za-zÀ-ù'’]+){1,3})/i)
+  // Rappresentante legale / amministratore / titolare (impresa individuale). Il nome nelle
+  // visure è in MAIUSCOLO: trovo l'etichetta (case-insensitive) e poi il nome maiuscolo dopo.
+  let rappr = ''
+  const rLab = oneLine.match(/(?:amministratore\s+unico|legale\s+rappresentante|rappresentante\s+legale|presidente\s+del\s+consiglio|titolare(?:\s+di\s+impresa\s+individuale)?)/i)
+  if (rLab && rLab.index != null) {
+    const dopo = oneLine.slice(rLab.index + rLab[0].length, rLab.index + rLab[0].length + 60)
+    const nm = dopo.match(/([A-ZÀ-Ù][A-ZÀ-Ù'’]+(?:\s+[A-ZÀ-Ù][A-ZÀ-Ù'’]+){1,2})/)
+    rappr = nm ? nm[1].trim() : ''
+  }
 
   return {
     ragione_sociale: ragione, piva, cf, pec, cod_sdi: '',
