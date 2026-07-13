@@ -137,6 +137,19 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   }, [path])
   const badgeStyle = { background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, minWidth: '17px', height: '17px', borderRadius: '9px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' } as const
 
+  // ── Responsive: sidebar a scomparsa (drawer) su mobile ──
+  const [isMobile, setIsMobile] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 900)
+    check(); window.addEventListener('resize', check); return () => window.removeEventListener('resize', check)
+  }, [])
+  useEffect(() => { setDrawerOpen(false) }, [path])   // chiudi il drawer quando cambi pagina
+  const asideBase: React.CSSProperties = { width: '220px', background: '#1a1a1a', display: 'flex', flexDirection: 'column', height: '100vh', overflowY: 'auto', zIndex: 1000 }
+  const asideStyle: React.CSSProperties = isMobile
+    ? { ...asideBase, position: 'fixed', top: 0, left: 0, transform: drawerOpen ? 'translateX(0)' : 'translateX(-100%)', transition: 'transform 0.25s ease', boxShadow: drawerOpen ? '2px 0 20px rgba(0,0,0,0.35)' : 'none' }
+    : { ...asideBase, flexShrink: 0, position: 'sticky', top: 0 }
+
   function toggleMenu(href: string, el?: HTMLElement) {
     const staAprendo = !openMenus[href]
     setOpenMenus(prev => ({ [href]: !prev[href] }))
@@ -148,8 +161,11 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   return (
     <div style={{display:'flex',minHeight:'100vh',background:'#f5f5f5',fontFamily:'var(--font-geist-sans),system-ui,sans-serif'}}>
 
+      {/* Overlay (solo mobile, drawer aperto) */}
+      {isMobile && drawerOpen && <div onClick={()=>setDrawerOpen(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:999}} />}
+
       {/* SIDEBAR */}
-      <aside style={{width:'220px',background:'#1a1a1a',display:'flex',flexDirection:'column',flexShrink:0,height:'100vh',position:'sticky',top:0,overflowY:'auto'}}>
+      <aside style={asideStyle}>
 
         {/* Logo */}
         <a href="/dashboard" style={{padding:'16px 18px',borderBottom:'1px solid rgba(255,255,255,0.06)',display:'flex',alignItems:'center',gap:'10px',textDecoration:'none'}}>
@@ -263,8 +279,11 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
       <div style={{flex:1,display:'flex',flexDirection:'column',minWidth:0}}>
 
         {/* TOPBAR */}
-        <header style={{background:'#fff',height:'48px',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 24px',borderBottom:'1px solid #e8e8e8',flexShrink:0,position:'sticky',top:0,zIndex:10}}>
-          <div></div>
+        <header style={{background:'#fff',height:'48px',display:'flex',alignItems:'center',justifyContent:'space-between',padding:isMobile?'0 12px':'0 24px',borderBottom:'1px solid #e8e8e8',flexShrink:0,position:'sticky',top:0,zIndex:10}}>
+          <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+            {isMobile && <button onClick={()=>setDrawerOpen(true)} aria-label="Menu" style={{background:'none',border:'none',fontSize:'23px',cursor:'pointer',color:'#1a1a1a',padding:'2px 6px',lineHeight:1}}>☰</button>}
+            {isMobile && <span style={{fontSize:'14px',fontWeight:800,color:'#1a1a1a'}}>{user?.brandNome || 'MoovExpress'}</span>}
+          </div>
           <div style={{display:'flex',alignItems:'center',gap:'12px'}}>
             <div style={{position:'relative',cursor:'pointer'}}>
               <span style={{fontSize:'18px'}}>🔔</span>
@@ -281,7 +300,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
         </header>
 
         {/* CONTENT */}
-        <main style={{flex:1,padding:'24px',overflowY:'auto'}}>
+        <main style={{flex:1,padding:isMobile?'14px':'24px',overflowY:'auto'}}>
           <FlashBanner />
           {children}
         </main>
