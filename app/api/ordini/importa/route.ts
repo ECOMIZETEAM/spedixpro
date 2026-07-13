@@ -42,6 +42,7 @@ const AUX: Record<string, string[]> = {
   lineitem_qty:  ['lineitem_quantity', 'quantity', 'qty', 'quantita'],
   payment:       ['payment_method', 'metodo_pagamento'],
   shippingm:     ['shipping_method', 'metodo_spedizione'],
+  financial:     ['financial_status', 'payment_status', 'stato_pagamento'],
 }
 
 const REQUIRED = ['destinatario', 'indirizzo', 'cap', 'localita', 'provincia']
@@ -178,12 +179,16 @@ export async function POST(req: NextRequest) {
     // Contenuto = elenco prodotti dell'ordine (o colonna contenuto del nostro template)
     const contenuto = grp.items.length ? grp.items.join(', ') : (g(r, 'contenuto') || null)
 
-    // Contrassegno: dal nostro template, oppure dedotto dal metodo di pagamento/spedizione Shopify
+    // Contrassegno: dal nostro template, oppure dedotto per gli ordini in contrassegno.
+    // Regola: se il pagamento non è ancora incassato (pending/unpaid/authorized) o il metodo è
+    // esplicitamente COD, l'intero TOTALE dell'ordine va in contrassegno (da incassare alla consegna).
     let contrassegno = M.contrassegno ? (toNum(r[M.contrassegno!]) ?? 0) : 0
     const totale = M.totale_ordine ? toNum(r[M.totale_ordine!]) : null
-    if (!contrassegno) {
+    if (!contrassegno && totale) {
       const metodo = (A.payment ? String(r[A.payment] ?? '') : '') + ' ' + (A.shippingm ? String(r[A.shippingm] ?? '') : '')
-      if (isCod(metodo) && totale) contrassegno = totale
+      const fin = (A.financial ? String(r[A.financial] ?? '') : '').trim().toLowerCase()
+      const inAttesa = ['pending', 'unpaid', 'authorized', 'partially_paid', 'in attesa', 'non pagato'].includes(fin)
+      if (isCod(metodo) || inAttesa) contrassegno = totale
     }
 
     records.push({

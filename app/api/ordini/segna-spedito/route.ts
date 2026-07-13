@@ -18,11 +18,13 @@ export async function POST(req: NextRequest) {
   const spedizioneId = body.spedizione_id || null
   if (!ordineId) return NextResponse.json({ error: 'ordine_id mancante' }, { status: 400 })
 
-  const { error } = await supabase
-    .from('ordini_ecommerce')
+  // L'ordine puo' venire dalla sync API (ordini_ecommerce) o dall'import CSV (ordini_importati):
+  // aggiorno per id in entrambe, aggiorna solo la tabella che contiene davvero quell'id.
+  await supabase.from('ordini_ecommerce')
     .update({ stato: 'spedito', spedizione_id: spedizioneId })
-    .eq('id', ordineId)
-    .eq('cliente_id', utente.cliente_id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    .eq('id', ordineId).eq('cliente_id', utente.cliente_id)
+  await supabase.from('ordini_importati')
+    .update({ stato: 'spedito', spedizione_id: spedizioneId, errore: null })
+    .eq('id', ordineId).eq('cliente_id', utente.cliente_id)
   return NextResponse.json({ ok: true })
 }

@@ -82,7 +82,7 @@ export default function ImportaOrdiniPage() {
   async function loadOrdini() {
     setLoading(true)
     try {
-      const res = await fetch('/api/ordini/lista')
+      const res = await fetch('/api/ordini/importati')
       const data = await res.json()
       if (res.ok) setOrdini(data.ordini || [])
       else setMsg({ type: 'err', text: data.error || 'Errore nel caricamento' })
@@ -91,6 +91,27 @@ export default function ImportaOrdiniPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // Apre la Nuova Spedizione con i dati dell'ordine gia' compilati (matita = Modifica)
+  function apriInSpedizione(o: Ordine) {
+    const p = new URLSearchParams()
+    p.set('da_ordine', o.id)
+    p.set('nome', o.destinatario || '')
+    p.set('indirizzo', o.indirizzo || '')
+    p.set('citta', o.localita || '')
+    p.set('provincia', o.provincia || '')
+    p.set('cap', o.cap || '')
+    p.set('paese', o.country || 'IT')
+    if (o.email_destinatario) p.set('email', o.email_destinatario)
+    if (o.telefono) p.set('telefono', o.telefono)
+    if (o.peso) p.set('peso', String(o.peso))
+    if (o.colli) p.set('colli', String(o.colli))
+    if (o.contenuto) p.set('contenuto', o.contenuto)
+    if (o.contrassegno) p.set('contrassegno', String(o.contrassegno))
+    if (o.totale_ordine) p.set('valore', String(o.totale_ordine))
+    if (o.note) p.set('note', o.note)
+    window.location.href = '/cliente/spedizioni/nuova?' + p.toString()
   }
 
   async function loadCorrieri() {
@@ -114,7 +135,8 @@ export default function ImportaOrdiniPage() {
       const res = await fetch('/api/ordini/importa', { method: 'POST', body: fd })
       const data = await res.json()
       if (res.ok) {
-        const extra = data.scartati ? ` — ${data.scartati} righe scartate` : ''
+        const motivi = (data.errori || []).map((e: any) => e.motivo).filter(Boolean)
+        const extra = data.scartati ? ` — ${data.scartati} righe scartate${motivi.length ? ' (' + Array.from(new Set(motivi)).slice(0, 3).join('; ') + ')' : ''}` : ''
         setMsg({ type: 'ok', text: `${data.importati} ordini importati${extra}` })
         loadOrdini()
       } else {
@@ -490,8 +512,8 @@ export default function ImportaOrdiniPage() {
                       <td style={{ ...td, textAlign: 'center' }}>
                         {modificabile(o) ? (
                           <button
-                            onClick={() => openEdit(o)}
-                            title="Modifica ordine"
+                            onClick={() => apriInSpedizione(o)}
+                            title="Modifica e spedisci: apre la spedizione con i dati dell'ordine"
                             disabled={spedendo}
                             style={{
                               background: '#fff', border: '1px solid #e5e5e5', borderRadius: '6px',

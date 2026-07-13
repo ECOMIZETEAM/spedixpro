@@ -75,7 +75,7 @@ export default function NuovaSpedizioneCliente() {
   const [daOrdine, setDaOrdine] = useState('')
   const [corrierePref, setCorrierePref] = useState('')
 
-  // Precompilazione da ordine ecommerce (query param ?da_ordine=&nome=&...)
+  // Precompilazione da ordine ecommerce / import CSV (query param ?da_ordine=&nome=&...)
   useEffect(() => {
     const q = new URLSearchParams(window.location.search)
     if (!q.get('da_ordine') && !q.get('nome')) return
@@ -90,7 +90,15 @@ export default function NuovaSpedizioneCliente() {
       paese: q.get('paese') || d.paese,
       email: q.get('email') || d.email,
       telefono: q.get('telefono') || d.telefono,
+      note: q.get('note') || d.note,
     }))
+    // Dati collo / pagamento dell'ordine
+    if (q.get('peso')) setPeso(q.get('peso') as string)
+    if (q.get('colli')) { const n = Math.max(1, parseInt(q.get('colli') as string) || 1); aggiornaNumColli(n) }
+    if (q.get('contenuto')) setContenuto(q.get('contenuto') as string)
+    if (q.get('valore')) setValoreMerce(q.get('valore') as string)
+    // Contrassegno: se l'ordine e' in contrassegno (pagamento in attesa) arriva gia' valorizzato
+    if (q.get('contrassegno')) setContrassegno(q.get('contrassegno') as string)
   }, [])
   useEffect(() => {
     setTariffe([]); setSelected(null); setVista('dati')
