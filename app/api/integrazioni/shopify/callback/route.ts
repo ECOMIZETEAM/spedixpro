@@ -56,8 +56,8 @@ export async function GET(req: NextRequest) {
   }
   await supabase.from('shopify_oauth_state').delete().eq('state', state)
 
-  // Scambia code -> access token (expiring=1: token con scadenza + refresh token,
-  // obbligatorio per le app pubbliche create dopo il 1 aprile 2026)
+  // Scambia code -> access token OFFLINE (senza scadenza): e' il tipo corretto per
+  // un'app che sincronizza ordini in background, non richiede refresh e non si "rompe".
   let token = ''
   let scope = ''
   let refreshToken = ''
@@ -67,9 +67,12 @@ export async function GET(req: NextRequest) {
     const r = await fetch(`https://${shop}/admin/oauth/access_token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: apiKey, client_secret: apiSecret, code, expiring: '1' }),
+      body: JSON.stringify({ client_id: apiKey, client_secret: apiSecret, code }),
     })
-    const d = await r.json()
+    const raw = await r.text()
+    let d: any = null
+    try { d = JSON.parse(raw) } catch {}
+    if (!r.ok || !d) throw new Error(`HTTP ${r.status} — risposta non valida da Shopify`)
     token = d.access_token
     scope = d.scope || ''
     refreshToken = d.refresh_token || ''

@@ -20,9 +20,11 @@ export async function getValidShopifyToken(integrazione: any, db?: any): Promise
     return { token }
   }
 
-  // Scaduto o in scadenza: rifresca col refresh token
+  // Vecchi token a scadenza: provo a rinnovare col refresh token. Se non c'e' o il
+  // rinnovo fallisce, chiedo di ricollegare il negozio (i nuovi collegamenti usano
+  // token offline che non scadono, quindi questo ramo riguarda solo vecchie connessioni).
   if (!refreshToken) {
-    return { error: 'Token scaduto e nessun refresh token disponibile. Ricollega il negozio.' }
+    return { error: 'Sessione Shopify scaduta. Ricollega il negozio dalle Integrazioni.' }
   }
   const apiKey = process.env.SHOPIFY_API_KEY
   const apiSecret = process.env.SHOPIFY_API_SECRET
@@ -38,8 +40,12 @@ export async function getValidShopifyToken(integrazione: any, db?: any): Promise
         expiring: '1',
       }),
     })
-    const d = await r.json()
-    if (!d.access_token) return { error: 'Refresh token fallito: ' + JSON.stringify(d).slice(0, 200) }
+    const raw = await r.text()
+    let d: any = null
+    try { d = JSON.parse(raw) } catch {}
+    if (!r.ok || !d?.access_token) {
+      return { error: 'Sessione Shopify scaduta. Ricollega il negozio dalle Integrazioni.' }
+    }
 
     const n = Date.now()
     const newCred = {
