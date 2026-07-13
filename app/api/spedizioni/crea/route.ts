@@ -383,10 +383,11 @@ export async function POST(req: NextRequest) {
       if (body.shipTo.phone) consignee.phone = body.shipTo.phone
       if (body.shipTo.email) consignee.email = body.shipTo.email.substring(0, 50)
 
-      const parcels = [{
-        weight: kgToGrams(pesoReale),
-        length: cmToMm(pkg?.length || 10), width: cmToMm(pkg?.width || 10), height: cmToMm(pkg?.height || 10),
-      }]
+      // MULTICOLLO: un parcel per OGNI collo (prima si inviava solo il primo -> 1 sola etichetta)
+      const parcels = packages.map((p: any) => ({
+        weight: kgToGrams(parseFloat(p?.weight) || 1),
+        length: cmToMm(p?.length || 10), width: cmToMm(p?.width || 10), height: cmToMm(p?.height || 10),
+      }))
       const cashOnDeliveryAmount = body.codValue ? euroToCents(body.codValue) : undefined
       const insuredAmount = body.insuranceValue ? euroToCents(body.insuranceValue) : undefined
       const serviceId = cred.service_id || null
@@ -432,7 +433,7 @@ export async function POST(req: NextRequest) {
         dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_citta: body.shipTo.city,
         dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
         dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
-        colli: packages.length, peso_reale: pesoReale,
+        colli: packages.length, peso_reale: (packages.reduce((s:number,p:any)=>s+(parseFloat(p?.weight)||0),0) || pesoReale),
         lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
         contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
         tracking_number: numeroFinale,
