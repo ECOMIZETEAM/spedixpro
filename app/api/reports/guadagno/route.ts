@@ -33,31 +33,43 @@ export async function GET(req: NextRequest) {
 
   // movimenti sui libri del master M
   const { data: movM } = await admin.from('movimenti')
-    .select('master_target_id,cliente_id,importo,tipo')
+    .select('master_target_id,cliente_id,importo,tipo,created_at')
     .eq('master_id', M).gte('created_at', dal).in('tipo', TIPI)
 
   // movimenti dei sotto-master diretti (per i loro pagamenti a cascata verso M)
   let movSub: any[] = []
   if (subIds.size) {
     const { data } = await admin.from('movimenti')
-      .select('master_id,master_target_id,importo,tipo')
+      .select('master_id,master_target_id,importo,tipo,created_at')
       .in('master_id', Array.from(subIds)).gte('created_at', dal).in('tipo', TIPI)
     movSub = data || []
   }
 
   const n = (x: any) => Number(x || 0)
+  // Serie temporale: ricavi/costi per giorno (per mese/settimana/oggi) o per mese (annuale)
+  const perGiorno = new Map<string, { ricavi: number; costi: number }>()
+  const chiave = (iso: string) => periodo === 'annuale' ? iso.slice(0, 7) : iso.slice(0, 10)  // YYYY-MM oppure YYYY-MM-DD
+  const acc = (iso: string, campo: 'ricavi' | 'costi', v: number) => {
+    const k = chiave(iso); const cur = perGiorno.get(k) || { ricavi: 0, costi: 0 }
+    cur[campo] += v; perGiorno.set(k, cur)
+  }
+
   let ricaviClienti = 0, costoM = 0, ricaviSub = 0
   for (const m of (movM || [])) {
     // addebito e rimborso si annullano da soli (storno esatto in annullo) -> annullate = netto 0
-    if (m.cliente_id) ricaviClienti += -n(m.importo)            // incasso dai clienti diretti (addebito negativo -> ricavo)
-    else if (m.master_target_id === M) costoM += -n(m.importo)  // costo di M verso il livello superiore/corriere
+    if (m.cliente_id) { ricaviClienti += -n(m.importo); acc(m.created_at, 'ricavi', -n(m.importo)) }       // incasso dai clienti diretti
+    else if (m.master_target_id === M) { costoM += -n(m.importo); acc(m.created_at, 'costi', -n(m.importo)) } // costo di M
   }
   for (const m of movSub) {
-    if (m.master_id === m.master_target_id) ricaviSub += -n(m.importo)  // pagamento cascata del sotto-master verso M
+    if (m.master_id === m.master_target_id) { ricaviSub += -n(m.importo); acc(m.created_at, 'ricavi', -n(m.importo)) } // cascata sotto-master
   }
 
   const ricavi = Math.round((ricaviClienti + ricaviSub) * 100) / 100
   const costi = Math.round(costoM * 100) / 100
   const guadagno = Math.round((ricavi - costi) * 100) / 100
-  return NextResponse.json({ guadagno, ricavi, costi, periodo })
+  const r2 = (x: number) => Math.round(x * 100) / 100
+  const serie = Array.from(perGiorno.entries())
+    .sort((a, b) => a[0] < b[0] ? -1 : 1)
+    .map(([k, v]) => ({ giorno: k, ricavi: r2(v.ricavi), costi: r2(v.costi), margine: r2(v.ricavi - v.costi) }))
+  return NextResponse.json({ guadagno, ricavi, costi, periodo, serie })
 }

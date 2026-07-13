@@ -84,26 +84,18 @@ export default function ReportSpedizioniPage() {
         'Peso (kg)': s.peso_reale,
         'Colli': s.colli,
         'Contrassegno (€)': s.contrassegno,
-        'Assicurazione (€)': s.assicurazione,
         'Data': new Date(s.created_at).toLocaleDateString('it-IT'),
         'Stato': s.stato,
         'Prezzo Cliente (€)': s.costo_totale,
-        'Cli. Nolo (€)': s.cli_nolo ?? '',
-        'Cli. Supplementi (€)': s.cli_supplementi ?? '',
-        'Extra (servizi accessori)': (s.servizi_accessori||[]).map((e:any)=>`${e.nome}: € ${Number(e.importo||0).toFixed(2)}`).join('; '),
-        'Tot. Extra (€)': (s.servizi_accessori||[]).reduce((a:number,e:any)=>a+Number(e.importo||0),0) || '',
         'Prezzo Corriere (€)': s.prezzo_corriere != null ? s.prezzo_corriere : '',
-        'Corr. Nolo (€)': s.dett_corriere ? s.dett_corriere.nolo : '',
-        'Corr. Contrassegno (€)': s.dett_corriere ? s.dett_corriere.contrassegno : '',
-        'Corr. Assicurazione (€)': s.dett_corriere ? s.dett_corriere.assicurazione : '',
-        'Corr. Sponda (€)': s.dett_corriere ? s.dett_corriere.sponda : '',
+        'Margine (€)': s.prezzo_corriere != null ? Math.round((Number(s.costo_totale || 0) - Number(s.prezzo_corriere || 0)) * 100) / 100 : '',
         'Tracking': s.tracking_number,
       }))
-      // Riga totali: SOLO Prezzo Cliente e Prezzo Corriere (non le singole voci)
+      // Riga totali: SOLO Prezzo Cliente, Prezzo Corriere e Margine (non le singole voci)
       const totCli = spedizioni.reduce((a: number, s: any) => a + Number(s.costo_totale || 0), 0)
       const totCor = spedizioni.reduce((a: number, s: any) => a + Number(s.prezzo_corriere || 0), 0)
       rows.push({} as any)
-      rows.push({ 'Stato': 'TOTALE', 'Prezzo Cliente (€)': Math.round(totCli * 100) / 100, 'Prezzo Corriere (€)': Math.round(totCor * 100) / 100 } as any)
+      rows.push({ 'Stato': 'TOTALE', 'Prezzo Cliente (€)': Math.round(totCli * 100) / 100, 'Prezzo Corriere (€)': Math.round(totCor * 100) / 100, 'Margine (€)': Math.round((totCli - totCor) * 100) / 100 } as any)
       const ws = utils.json_to_sheet(rows)
       const wb = utils.book_new()
       utils.book_append_sheet(wb, ws, 'Spedizioni')
@@ -120,16 +112,16 @@ export default function ReportSpedizioniPage() {
       doc.text(`Totale: ${spedizioni.length} spedizioni`, 14, 22)
       autoTable(doc, {
         startY: 28,
-        head: [['N. Spedizione','Cliente','Destinatario','Città','Peso','Stato','Prezzo Cliente €','Prezzo Corriere €','Nolo','Contr.','Assic.','Sponda','Extra']],
+        head: [['N. Spedizione','Cliente','Destinatario','Città','Peso','Stato','Prezzo Cliente €','Prezzo Corriere €','Margine €']],
         body: spedizioni.map((s: any) => {
-          const d = s.dett_corriere
+          const cli = Number(s.costo_totale || 0)
+          const cor = s.prezzo_corriere != null ? Number(s.prezzo_corriere) : null
           return [
             s.numero, s.clienti?.ragione_sociale||s.mitt_nome, s.dest_nome,
             `${s.dest_citta} (${s.dest_provincia})`, `${s.peso_reale}kg`,
-            s.stato.replace(/_/g,' '), `€${Number(s.costo_totale).toFixed(2)}`,
-            (s.prezzo_corriere != null ? `€${Number(s.prezzo_corriere).toFixed(2)}` : '-'),
-            d?`€${d.nolo.toFixed(2)}`:'-', d?`€${d.contrassegno.toFixed(2)}`:'-', d?`€${d.assicurazione.toFixed(2)}`:'-', d?`€${d.sponda.toFixed(2)}`:'-',
-            (s.servizi_accessori||[]).map((e:any)=>`${e.nome} €${Number(e.importo||0).toFixed(2)}`).join('\n') || '-',
+            s.stato.replace(/_/g,' '), `€${cli.toFixed(2)}`,
+            (cor != null ? `€${cor.toFixed(2)}` : '-'),
+            (cor != null ? `€${(cli - cor).toFixed(2)}` : '-'),
           ]
         }),
         styles: { fontSize: 7 },
@@ -153,22 +145,25 @@ export default function ReportSpedizioniPage() {
       doc.text(`EUR ${totCliente.toFixed(2)}`, col2, finalY, {align:'right'})
       doc.text('TOTALE PREZZO CORRIERE', col1, finalY + 10)
       doc.text(`EUR ${totCorriere.toFixed(2)}`, col2, finalY + 10, {align:'right'})
+      doc.setTextColor((totCliente-totCorriere)<0?200:22, (totCliente-totCorriere)<0?38:163, (totCliente-totCorriere)<0?38:74)
+      doc.text('MARGINE', col1, finalY + 20)
+      doc.text(`EUR ${(totCliente - totCorriere).toFixed(2)}`, col2, finalY + 20, {align:'right'})
       const pdfB64 = doc.output('datauristring')
       await salvaReport(pdfB64, 'report_spedizioni_' + filtri.dal + '_' + filtri.al + '.pdf', 'pdf')
     } else if (formato === 'zip') {
       const { default: JSZip } = await import('jszip' as any)
       const zip = new JSZip()
-      const csv = ['N. Spedizione,Cliente,Destinatario,Città,Peso,Colli,Contrassegno,Data,Stato,Prezzo Cliente,Cli. Nolo,Cli. Supplementi,Prezzo Corriere,Corr. Nolo,Corr. Contrassegno,Corr. Assicurazione,Corr. Sponda,Extra']
+      const csv = ['N. Spedizione,Cliente,Destinatario,Città,Peso,Colli,Contrassegno,Data,Stato,Prezzo Cliente,Prezzo Corriere,Margine']
       spedizioni.forEach((s: any) => {
-        const d = s.dett_corriere
-        const extra = (s.servizi_accessori||[]).map((e:any)=>`${e.nome}: €${Number(e.importo||0).toFixed(2)}`).join('; ')
-        csv.push(`${s.numero},${s.clienti?.ragione_sociale||s.mitt_nome},${s.dest_nome},${s.dest_citta},${s.peso_reale},${s.colli},${s.contrassegno},${new Date(s.created_at).toLocaleDateString('it-IT')},${s.stato},${s.costo_totale},${s.cli_nolo??''},${s.cli_supplementi??''},${s.prezzo_corriere != null ? s.prezzo_corriere : ""},${d?d.nolo:''},${d?d.contrassegno:''},${d?d.assicurazione:''},${d?d.sponda:''},"${extra}"`)
+        const cli = Number(s.costo_totale || 0)
+        const cor = s.prezzo_corriere != null ? Number(s.prezzo_corriere) : null
+        csv.push(`${s.numero},${s.clienti?.ragione_sociale||s.mitt_nome},${s.dest_nome},${s.dest_citta},${s.peso_reale},${s.colli},${s.contrassegno},${new Date(s.created_at).toLocaleDateString('it-IT')},${s.stato},${cli},${cor != null ? cor : ''},${cor != null ? Math.round((cli - cor) * 100) / 100 : ''}`)
       })
-      // Riga totali: SOLO Prezzo Cliente e Prezzo Corriere
+      // Riga totali: SOLO Prezzo Cliente, Prezzo Corriere e Margine
       const totCli = spedizioni.reduce((a: number, s: any) => a + Number(s.costo_totale || 0), 0)
       const totCor = spedizioni.reduce((a: number, s: any) => a + Number(s.prezzo_corriere || 0), 0)
-      const rowT = Array(18).fill('')
-      rowT[8] = 'TOTALE'; rowT[9] = String(Math.round(totCli * 100) / 100); rowT[12] = String(Math.round(totCor * 100) / 100)
+      const rowT = Array(12).fill('')
+      rowT[8] = 'TOTALE'; rowT[9] = String(Math.round(totCli * 100) / 100); rowT[10] = String(Math.round(totCor * 100) / 100); rowT[11] = String(Math.round((totCli - totCor) * 100) / 100)
       csv.push(''); csv.push(rowT.join(','))
       zip.file('spedizioni.csv', csv.join('\n'))
       const blob = await zip.generateAsync({type:'blob'})
