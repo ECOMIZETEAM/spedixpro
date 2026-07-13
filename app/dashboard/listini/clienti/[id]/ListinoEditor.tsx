@@ -111,6 +111,11 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
   const [tab, setTab] = useState('pesi')
+  const [chiuso, setChiuso] = useState(false)   // collassa il corriere aperto senza cambiare pagina
+  function toggleContratto(cId: string) {
+    if (cId === corriereId) { setChiuso(x => !x); return }  // già aperto -> apri/chiudi
+    apriContratto(cId)                                       // altro corriere -> naviga e apri
+  }
 
   // Copia singolo corriere in un altro listino (esistente o nuovo)
   const [copia, setCopia] = useState<any>(null)
@@ -527,11 +532,11 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       ) : (
         <div style={{display:'flex',flexDirection:'column' as const,gap:'10px',marginBottom:'16px'}}>
           {corrieri.map(c=>{
-            const aperto = corriereId === c.id
+            const aperto = corriereId === c.id && !chiuso
             return (
               <div key={c.id} style={{background:'#fff',borderRadius:'10px',border:aperto?'1px solid #f97316':'1px solid #e5e7eb',overflow:'hidden',boxShadow:aperto?'0 1px 3px rgba(249,115,22,0.12)':'none'}}>
-                <div onClick={()=>apriContratto(c.id)}
-                  style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px 16px',cursor:aperto?'default':'pointer',userSelect:'none' as const,background:aperto?'#fff7ed':'#fff'}}>
+                <div onClick={()=>toggleContratto(c.id)}
+                  style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px 16px',cursor:'pointer',userSelect:'none' as const,background:aperto?'#fff7ed':'#fff'}}>
                   {logoCorriere(c.nome_contratto) ? (
                     <span style={{width:'56px',height:'40px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
                       <img src={logoCorriere(c.nome_contratto)!} alt={c.nome_contratto} style={{maxWidth:'56px',maxHeight:'40px',objectFit:'contain' as const}}/>
