@@ -37,3 +37,23 @@ body {
 h1 { font-size: var(--fs-h1); font-weight: var(--fw-h1); color: var(--c-text); }
 h2 { font-size: var(--fs-h2); font-weight: var(--fw-h2); color: var(--c-text); }
 h3 { font-size: var(--fs-h3); font-weight: var(--fw-h3); color: var(--c-text); }
+
+/* ─────────────────────────────────────────────────────────
+   MOBILE — la UI usa stili inline (niente classi), quindi qui
+   forziamo il comportamento responsive in modo trasversale:
+   - le griglie a più colonne si impilano a colonna singola
+   - la pagina non sfora mai in orizzontale
+   - le tabelle larghe scorrono dentro il loro contenitore
+   ───────────────────────────────────────────────────────── */
+html, body { max-width: 100%; overflow-x: hidden; }
+
+@media (max-width: 700px) {
+  /* Qualsiasi grid con colonne definite inline diventa una colonna sola */
+  [style*="grid-template-columns"] {
+    grid-template-columns: 1fr !important;
+  }
+  /* Le tabelle non impaginate restano leggibili scrollando in orizzontale */
+  table { display: block; overflow-x: auto; max-width: 100%; white-space: nowrap; }
+  /* Immagini e media non sforano il viewport */
+  img, video, canvas, svg { max-width: 100%; height: auto; }
+}
