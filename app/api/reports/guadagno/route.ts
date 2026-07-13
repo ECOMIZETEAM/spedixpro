@@ -68,8 +68,20 @@ export async function GET(req: NextRequest) {
   const costi = Math.round(costoM * 100) / 100
   const guadagno = Math.round((ricavi - costi) * 100) / 100
   const r2 = (x: number) => Math.round(x * 100) / 100
-  const serie = Array.from(perGiorno.entries())
-    .sort((a, b) => a[0] < b[0] ? -1 : 1)
-    .map(([k, v]) => ({ giorno: k, ricavi: r2(v.ricavi), costi: r2(v.costi), margine: r2(v.ricavi - v.costi) }))
+  // Riempio TUTTI i punti del periodo (0 dove non ci sono movimenti) così il grafico è giorno-per-giorno
+  const now = new Date()
+  const keys: string[] = []
+  if (periodo === 'annuale') {
+    for (let m = 0; m <= now.getUTCMonth(); m++) keys.push(`${now.getUTCFullYear()}-${String(m + 1).padStart(2, '0')}`)
+  } else {
+    const start = new Date(dal)
+    let t = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate())
+    const endT = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+    while (t <= endT) { keys.push(new Date(t).toISOString().slice(0, 10)); t += 86400000 }
+  }
+  const serie = keys.map(k => {
+    const v = perGiorno.get(k) || { ricavi: 0, costi: 0 }
+    return { giorno: k, ricavi: r2(v.ricavi), costi: r2(v.costi), margine: r2(v.ricavi - v.costi) }
+  })
   return NextResponse.json({ guadagno, ricavi, costi, periodo, serie })
 }
