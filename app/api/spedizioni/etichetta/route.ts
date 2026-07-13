@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="etichetta-${sped.numero || id}.pdf"`,
+        'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.pdf"`,
         'Cache-Control': 'private, max-age=0, no-store',
       },
     })
@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
       status: 200,
       headers: {
         'Content-Type': m[1],
-        'Content-Disposition': `inline; filename="${filename}"`,
+        'Content-Disposition': `attachment; filename="${filename}"`,
         'Cache-Control': 'private, max-age=0, no-store',
       },
     })
@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
         status: 200,
         headers: {
           'Content-Type': r.headers.get('content-type') || 'application/pdf',
-          'Content-Disposition': `inline; filename="${filename}"`,
+          'Content-Disposition': `attachment; filename="${filename}"`,
           'Cache-Control': 'private, max-age=0, no-store',
         },
       })
