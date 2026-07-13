@@ -73,7 +73,7 @@ export default function Dashboard() {
       </div>
 
       {/* KPI */}
-      <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr 1fr',gap:'12px'}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:'12px'}}>
 
         {/* Spedizioni mese — card scura principale */}
         <div style={kpiCardDark}>
@@ -124,7 +124,7 @@ export default function Dashboard() {
       </div>
 
       {/* KPI globali di tutta la rete (spedizioni proprie + improprie) */}
-      <div style={{display:'grid',gridTemplateColumns:'repeat(6, 1fr)',gap:'12px'}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:'12px'}}>
         <div style={kpiCardLight}>
           <div style={kpiIconLight}>📦</div>
           <div style={kpiLabel}>SPEDIZIONI<br/><span style={{color:'#bbb'}}>TOTALI RETE</span></div>
@@ -158,7 +158,7 @@ export default function Dashboard() {
       </div>
 
       {/* Tasso consegna + Top corriere + Top cliente */}
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'12px'}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:'12px'}}>
         <div style={kpiCardLight}>
           <div style={{...kpiIconLight,background:'#f0fdf4',border:'1px solid #bbf7d0',color:'#16a34a'}}>📈</div>
           <div style={kpiLabel}>TASSO DI CONSEGNA</div>
@@ -180,7 +180,7 @@ export default function Dashboard() {
       </div>
 
       {/* Grafici */}
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px'}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))',gap:'16px'}}>
         <div style={card}>
           <div style={cardH}>Statistiche</div>
           <div style={{padding:'16px'}}>
@@ -217,7 +217,7 @@ export default function Dashboard() {
       </div>
 
       {/* Tabelle */}
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px'}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))',gap:'16px'}}>
         <div style={card}>
           <div style={cardH}>Statistiche Spedizioni</div>
           <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
@@ -263,7 +263,7 @@ export default function Dashboard() {
       {/* Report Guadagno */}
       <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginTop:'2px'}}>Report Guadagno</div>
       <GuadagnoChart />
-      <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'14px'}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:'14px'}}>
         <ReportGuadagno titolo="Rettifiche" endpoint="/api/reports/guadagno-rettifiche" />
         <ReportGuadagno titolo="Supplementi" endpoint="/api/reports/guadagno-supplementi" />
       </div>

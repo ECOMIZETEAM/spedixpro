@@ -57,7 +57,7 @@ export default function ClienteDashboard() {
           ))}
         </div>
       )}
-      <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr 1fr',gap:'12px'}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:'12px'}}>
         <div style={kpiCardDark}>
           <div style={kpiIconDark}>📦</div>
           <div style={{flex:1,minWidth:0}}>
@@ -90,7 +90,7 @@ export default function ClienteDashboard() {
           <div style={{...kpiValue,color:Number(data.credito)>0?'#16a34a':'#dc2626'}}>€ {Number(data.credito||0).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
         </div>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(6, 1fr)',gap:'12px'}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:'12px'}}>
         <div style={kpiCardLight}>
           <div style={kpiIconLight}>📦</div>
           <div style={kpiLabel}>SPEDIZIONI<br/><span style={{color:'#bbb'}}>TOTALI</span></div>
@@ -122,7 +122,7 @@ export default function ClienteDashboard() {
           <div style={{...kpiValue,fontSize:'20px',color:Number(data.codDaIncassare)>0?'#ea580c':'#1a1a1a'}}>€ {Number(data.codDaIncassare||0).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
         </div>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px'}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:'16px'}}>
         <div style={card}>
           <div style={cardH}>Statistiche</div>
           <div style={{padding:'16px'}}>
