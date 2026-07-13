@@ -13,9 +13,11 @@ export const maxDuration = 300
 export async function GET() {
   const admin = createAdminSupabase()
 
+  // Escludo anche gli stati di annullamento: il tracking NON deve sovrascrivere una spedizione
+  // in attesa di annullo (altrimenti perde 'annullamento_pending' e il cron annulli non la trova).
   const { data: spedizioni } = await admin.from('spedizioni')
     .select('id,stato,raw_response,tracking_number,giacenza_data,corriere_id,corrieri(tipo,credenziali)')
-    .not('stato', 'in', '(consegnata,annullata)')
+    .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
     .order('updated_at', { ascending: true })
     .limit(300)
 

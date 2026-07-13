@@ -14,10 +14,14 @@ export async function GET() {
   const admin = createAdminSupabase()
   const soglia = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
 
+  // Mi baso sulla RICHIESTA di annullo (annullamento_richiesto_at), non solo sullo stato:
+  // così processo anche quelle il cui stato è stato riportato indietro da altri processi.
+  // Il ripristino (undo) azzera annullamento_richiesto_at, quindi le ripristinate sono escluse.
   const { data: pendenti } = await admin.from('spedizioni')
     .select('id,numero,dest_nome,corriere_id,raw_response,tracking_number,stato_precedente,annullamento_da')
-    .eq('stato', 'annullamento_pending')
+    .not('annullamento_richiesto_at', 'is', null)
     .lte('annullamento_richiesto_at', soglia)
+    .not('stato', 'in', '(annullata,annullamento_manuale)')
     .order('annullamento_richiesto_at', { ascending: true })
     .limit(200)
 
