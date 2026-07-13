@@ -27,9 +27,12 @@ export async function GET() {
     { data: kpi },
     { data: ultimeSpedizioni },
   ] = await Promise.all([
-    supabase.rpc('dashboard_contatori_master', { p_master: masterId }),
-    supabase.rpc('dashboard_statistiche_master', { p_master: masterId }),
-    supabase.rpc('dashboard_kpi_master', { p_master: masterId }),
+    // Via ADMIN (bypassa RLS): le RPC aggregano SOLO il sotto-albero del proprio master (p_master),
+    // quindi contano proprie + improprie della rete SOTTO. Con il client user-scoped l'RLS limitava
+    // alle sole proprie del master (0 per chi spedisce solo tramite i sotto-master, es. E&A).
+    admin.rpc('dashboard_contatori_master', { p_master: masterId }),
+    admin.rpc('dashboard_statistiche_master', { p_master: masterId }),
+    admin.rpc('dashboard_kpi_master', { p_master: masterId }),
     // Spedizioni recenti di tutta la rete (sé + discendenza), via admin per i permessi cross-master.
     admin.from('spedizioni').select(SPED_COLS).in('master_id', reteIds.length ? reteIds : [masterId]).order('created_at',{ascending:false}).limit(10),
   ])
