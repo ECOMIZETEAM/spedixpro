@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
   const clienteIds = clienti.map((c:any)=>c.id)
   let agganci: any[] = []
   let stati: any[] = []
+  let integrazioni: any[] = []
   if (listinoIds.length) {
     const r1 = await supabase.from('listini_clienti_corrieri').select('listino_id, corriere_id, corrieri(id,nome_contratto,tipo)').in('listino_id', listinoIds)
     agganci = r1.data || []
@@ -23,6 +24,19 @@ export async function GET(req: NextRequest) {
   if (clienteIds.length) {
     const r2 = await supabase.from('clienti_corrieri_abilitati').select('cliente_id, corriere_id, abilitato').in('cliente_id', clienteIds)
     stati = r2.data || []
+    const r3 = await supabase.from('integrazioni').select('cliente_id,piattaforma,nome_negozio,identificativo,stato,credenziali').in('cliente_id', clienteIds)
+    integrazioni = r3.data || []
+  }
+  // Negozi collegati per cliente (URL sicuro calcolato server-side, mai le credenziali)
+  const negoziMap = new Map<string, any[]>()
+  for (const it of integrazioni) {
+    if (!negoziMap.has(it.cliente_id)) negoziMap.set(it.cliente_id, [])
+    negoziMap.get(it.cliente_id)!.push({
+      piattaforma: (it.piattaforma || '').toLowerCase(),
+      nome: it.nome_negozio || it.identificativo || it.piattaforma,
+      stato: it.stato,
+      url: negozioUrl(it),
+    })
   }
   const abilMap = new Map(stati.map((s:any)=>[s.cliente_id + '|' + s.corriere_id, s.abilitato]))
   const perListino: any = {}
@@ -37,7 +51,7 @@ export async function GET(req: NextRequest) {
       const k = c.id + '|' + co.id
       return abilMap.has(k) ? abilMap.get(k) : true
     }).map((co:any)=>({ nome_contratto: co.nome_contratto, tipo: co.tipo }))
-    return { ...c, contratti_attivi: attivi }
+    return { ...c, contratti_attivi: attivi, negozi: negoziMap.get(c.id) || [] }
   })
   if (conMaster && utente?.master_id) {
     // I sotto-master agganciati compaiono come pseudo-clienti (id = "m:<masterId>")
@@ -80,4 +94,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json([...clientiOut, ...masterOut])
   }
   return NextResponse.json(clientiOut)
+}
+
+// Link "vai al negozio" per piattaforma. Non espone mai token/segreti.
+function negozioUrl(it: any): string | null {
+  const p = (it.piattaforma || '').toLowerCase()
+  const cred = (it.credenziali || {}) as any
+  const ident = it.identificativo || ''
+  const nome = it.nome_negozio || ''
+  const norm = (s: string) => (/^https?:\/\//i.test(s) ? s : `https://${s}`)
+  if (p === 'shopify') { const shop = cred.shop || ident || nome; return shop ? norm(shop) : null }
+  if (p === 'woocommerce' || p === 'prestashop') {
+    const u = cred.site_url || cred.url || cred.store_url || cred.shop_url || nome || ident
+    return u ? norm(u) : null
+  }
+  if (p === 'ebay') return 'https://www.ebay.it/sh/ovw'
+  if (p === 'amazon') return 'https://sellercentral.amazon.it/home'
+  if (p === 'tiktok') return 'https://seller.tiktokglobalshop.com'
+  if (p === 'temu') return 'https://seller.temu.com'
+  return null
 }

@@ -4,6 +4,38 @@ import { useState, useEffect, useMemo } from 'react'
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'12.5px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#999',display:'block' as const,marginBottom:'4px',textTransform:'uppercase' as const,letterSpacing:'0.4px'}
 
+// Negozi/marketplace collegati: colore brand + sigla, cliccabile verso lo shop
+const PIATTAFORME: Record<string,{bg:string,label:string,nome:string}> = {
+  shopify:     {bg:'#95BF47', label:'S', nome:'Shopify'},
+  woocommerce: {bg:'#7F54B3', label:'W', nome:'WooCommerce'},
+  prestashop:  {bg:'#DF0067', label:'P', nome:'PrestaShop'},
+  ebay:        {bg:'#E53238', label:'e', nome:'eBay'},
+  amazon:      {bg:'#232F3E', label:'a', nome:'Amazon'},
+  tiktok:      {bg:'#111111', label:'♪', nome:'TikTok Shop'},
+  temu:        {bg:'#FB7701', label:'T', nome:'Temu'},
+}
+function NegoziCollegati({ negozi }: { negozi: any[] }) {
+  if (!negozi || !negozi.length) return null
+  return (
+    <div style={{display:'flex',gap:'5px',marginTop:'6px',flexWrap:'wrap'}}>
+      {negozi.map((n:any, i:number) => {
+        const m = PIATTAFORME[n.piattaforma] || {bg:'#6b7280', label:'?', nome:n.piattaforma}
+        const off = n.stato && n.stato !== 'attivo'
+        const badge = (
+          <span title={`${m.nome} — ${n.nome}${off ? ' (non attivo)' : ''}`} style={{
+            width:'19px',height:'19px',borderRadius:'5px',background:m.bg,color:'#fff',
+            fontSize:'11px',fontWeight:800,display:'inline-flex',alignItems:'center',
+            justifyContent:'center',lineHeight:1,opacity:off?0.4:1,
+            cursor:n.url?'pointer':'default',boxShadow:'0 1px 2px rgba(0,0,0,.15)'}}>{m.label}</span>
+        )
+        return n.url
+          ? <a key={i} href={n.url} target="_blank" rel="noopener noreferrer" style={{textDecoration:'none'}} onClick={e=>e.stopPropagation()}>{badge}</a>
+          : <span key={i}>{badge}</span>
+      })}
+    </div>
+  )
+}
+
 export default function ClientiPage() {
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -170,6 +202,7 @@ export default function ClientiPage() {
                       </div>
                       <div style={{fontSize:'11px',color:'#1a1a1a'}}>{c.email}</div>
                       {c.telefono && <div style={{fontSize:'11px',color:'#1a1a1a'}}>{c.telefono}</div>}
+                      <NegoziCollegati negozi={c.negozi} />
                     </td>
                     <td style={{padding:'10px 14px',color:'#1a1a1a',fontSize:'12px',textTransform:'capitalize'}}>{c.tipo_contratto?.replace(/_/g,' ')||'—'}</td>
                     <td style={{padding:'10px 14px',fontSize:'12px'}}>
