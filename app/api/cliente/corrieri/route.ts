@@ -23,11 +23,16 @@ export async function GET() {
     .select('corrieri(id,nome_contratto,tipo)')
     .eq('listino_id', cliente.listino_cliente_id)
 
-  // Corrieri distinti presenti nel listino
+  // Corrieri disattivati dal master per questo cliente (default = attivo)
+  const { data: abil } = await supabase.from('clienti_corrieri_abilitati')
+    .select('corriere_id, abilitato').eq('cliente_id', utente.cliente_id)
+  const disattivati = new Set((abil || []).filter((a: any) => a.abilitato === false).map((a: any) => a.corriere_id))
+
+  // Corrieri distinti presenti nel listino, esclusi i disattivati
   const map = new Map<string, { id: string; nome: string; tipo: string }>()
   for (const f of fasce || []) {
     const c = (f as any).corrieri
-    if (c?.id && !map.has(c.id)) {
+    if (c?.id && !map.has(c.id) && !disattivati.has(c.id)) {
       map.set(c.id, { id: c.id, nome: c.nome_contratto || 'Corriere', tipo: c.tipo })
     }
   }

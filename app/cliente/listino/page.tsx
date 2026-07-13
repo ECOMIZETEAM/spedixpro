@@ -58,6 +58,12 @@ export default async function ClienteListinoPage({ searchParams }: { searchParam
     }
   }
 
+  // Corrieri DISATTIVATI dal master per questo cliente: nascosti dal listino (default = attivo).
+  const { data: abil } = await supabase.from('clienti_corrieri_abilitati')
+    .select('corriere_id, abilitato').eq('cliente_id', utente.cliente_id)
+  const disattivati = new Set((abil || []).filter((a: any) => a.abilitato === false).map((a: any) => a.corriere_id))
+  contratti = contratti.filter((c: any) => !disattivati.has(c.id))
+
   const { corriere: corriereSel } = await searchParams
   const sel = corriereSel ? contratti.find((c: any) => c.id === corriereSel) : null
 
