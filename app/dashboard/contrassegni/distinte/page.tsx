@@ -14,6 +14,8 @@ export default function DistinteContrassegniPage() {
   const [cerca, setCerca] = useState('')
   const [modalPagamento, setModalPagamento] = useState<any>(null)
   const [metodoPagamento, setMetodoPagamento] = useState('')
+  const [suddividi, setSuddividi] = useState(false)
+  const [righePag, setRighePag] = useState<{metodo:string,importo:string}[]>([{metodo:'',importo:''},{metodo:'',importo:''}])
   const [confermando, setConfermando] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const [filtri, setFiltri] = useState({
@@ -109,16 +111,33 @@ export default function DistinteContrassegniPage() {
     const wb = utils.book_new(); utils.book_append_sheet(wb, ws, 'Distinta ' + d.numero)
     writeFile(wb, 'Distinta_contrassegni_' + d.numero + '.xlsx')
   }
+  function chiudiModalPagamento() {
+    setModalPagamento(null); setMetodoPagamento(''); setSuddividi(false)
+    setRighePag([{metodo:'',importo:''},{metodo:'',importo:''}])
+  }
   async function confermaPagamento() {
-    if (!metodoPagamento) { alert('Seleziona il tipo di pagamento'); return }
+    const totale = Number(modalPagamento?.totale_iniziale || 0)
+    let payload: any
+    if (suddividi) {
+      const righe = righePag.map(r => ({ metodo: r.metodo, importo: Number(r.importo) }))
+        .filter(r => r.metodo && r.importo > 0)
+      if (!righe.length) { alert('Inserisci almeno una modalità con importo'); return }
+      const somma = Math.round(righe.reduce((s,r)=>s+r.importo,0)*100)/100
+      if (Math.abs(somma - totale) > 0.02) { alert(`La somma delle modalità (€${somma.toFixed(2)}) deve corrispondere al totale (€${totale.toFixed(2)})`); return }
+      payload = { pagamenti: righe }
+    } else {
+      if (!metodoPagamento) { alert('Seleziona il tipo di pagamento'); return }
+      payload = { metodoPagamento }
+    }
     setConfermando(true)
     const res = await fetch('/api/contrassegni/distinte/' + modalPagamento.id, {
       method:'PUT', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ metodoPagamento })
+      body: JSON.stringify(payload)
     })
     const data = await res.json()
     setConfermando(false)
-    if (data.success) { setModalPagamento(null); setMetodoPagamento(''); carica() }
+    if (data.success) { chiudiModalPagamento(); carica() }
+    else alert(data.error || 'Errore durante la conferma')
   }
 
   const distinteFiltrate = cerca
@@ -266,11 +285,11 @@ export default function DistinteContrassegniPage() {
       </div>
 
       {modalPagamento && (
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}} onClick={()=>setModalPagamento(null)}>
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}} onClick={chiudiModalPagamento}>
           <div style={{background:'#fff',borderRadius:'8px',width:'420px',overflow:'hidden'}} onClick={e=>e.stopPropagation()}>
             <div style={{padding:'14px 20px',borderBottom:'1px solid #d1d5db',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
               <span style={{fontWeight:'700',fontSize:'15px',color:'#1a1a1a'}}>Conferma pagamento distinta</span>
-              <button onClick={()=>setModalPagamento(null)} style={{background:'none',border:'none',fontSize:'18px',cursor:'pointer',color:'#1a1a1a'}}>✕</button>
+              <button onClick={chiudiModalPagamento} style={{background:'none',border:'none',fontSize:'18px',cursor:'pointer',color:'#1a1a1a'}}>✕</button>
             </div>
             <div style={{padding:'20px'}}>
               <div style={{fontSize:'13px',color:'#1a1a1a',lineHeight:1.9,marginBottom:'16px',background:'#f9fafb',borderRadius:'6px',padding:'12px'}}>
@@ -278,20 +297,63 @@ export default function DistinteContrassegniPage() {
                 <div><strong>Cliente:</strong> {modalPagamento.clienti?.ragione_sociale}</div>
                 <div><strong>Totale:</strong> € {Number(modalPagamento.totale_iniziale).toFixed(4)}</div>
               </div>
-              <div style={{marginBottom:'16px'}}>
-                <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Tipo pagamento</label>
-                <select value={metodoPagamento} onChange={e=>setMetodoPagamento(e.target.value)}
-                  style={{padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',width:'100%',color:'#1a1a1a'}}>
-                  <option value="">Seleziona...</option>
-                  <option value="contanti">Contanti</option>
-                  <option value="assegno">Assegno</option>
-                  <option value="sepa">SEPA</option>
-                  <option value="compensata">Compensata</option>
-                  <option value="bonifico">Bonifico</option>
-                </select>
-              </div>
+              <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'12.5px',color:'#1a1a1a',cursor:'pointer',marginBottom:'12px'}}>
+                <input type="checkbox" checked={suddividi} onChange={e=>setSuddividi(e.target.checked)} style={{width:'15px',height:'15px',accentColor:'#f97316'}}/>
+                Suddividi il pagamento in più modalità
+              </label>
+
+              {!suddividi ? (
+                <div style={{marginBottom:'16px'}}>
+                  <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Tipo pagamento</label>
+                  <select value={metodoPagamento} onChange={e=>setMetodoPagamento(e.target.value)}
+                    style={{padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',width:'100%',color:'#1a1a1a'}}>
+                    <option value="">Seleziona...</option>
+                    <option value="contanti">Contanti</option>
+                    <option value="assegno">Assegno</option>
+                    <option value="sepa">SEPA</option>
+                    <option value="compensata">Compensata</option>
+                    <option value="bonifico">Bonifico</option>
+                  </select>
+                </div>
+              ) : (
+                <div style={{marginBottom:'16px'}}>
+                  {righePag.map((r, i) => (
+                    <div key={i} style={{display:'flex',gap:'8px',marginBottom:'8px'}}>
+                      <select value={r.metodo} onChange={e=>setRighePag(p=>p.map((x,j)=>j===i?{...x,metodo:e.target.value}:x))}
+                        style={{padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',flex:1,color:'#1a1a1a'}}>
+                        <option value="">Modalità...</option>
+                        <option value="contanti">Contanti</option>
+                        <option value="assegno">Assegno</option>
+                        <option value="sepa">SEPA</option>
+                        <option value="compensata">Compensata</option>
+                        <option value="bonifico">Bonifico</option>
+                      </select>
+                      <input type="number" step="0.01" min="0" placeholder="€ importo" value={r.importo}
+                        onChange={e=>setRighePag(p=>p.map((x,j)=>j===i?{...x,importo:e.target.value}:x))}
+                        style={{padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',width:'110px',color:'#1a1a1a'}}/>
+                      {righePag.length > 2 && (
+                        <button onClick={()=>setRighePag(p=>p.filter((_,j)=>j!==i))}
+                          style={{padding:'0 10px',background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:'6px',fontSize:'14px',cursor:'pointer'}}>✕</button>
+                      )}
+                    </div>
+                  ))}
+                  <button onClick={()=>setRighePag(p=>[...p,{metodo:'',importo:''}])}
+                    style={{background:'none',border:'none',color:'#f97316',fontSize:'12px',fontWeight:'600',cursor:'pointer',padding:'2px 0'}}>+ Aggiungi modalità</button>
+                  {(() => {
+                    const somma = righePag.reduce((s,r)=>s+(Number(r.importo)||0),0)
+                    const tot = Number(modalPagamento.totale_iniziale||0)
+                    const resto = Math.round((tot - somma)*100)/100
+                    const ok = Math.abs(resto) <= 0.02
+                    return (
+                      <div style={{marginTop:'8px',fontSize:'12px',fontWeight:'600',color: ok ? '#16a34a' : '#dc2626'}}>
+                        Ripartito € {somma.toFixed(2)} / € {tot.toFixed(2)} {ok ? '✓' : `— residuo € ${resto.toFixed(2)}`}
+                      </div>
+                    )
+                  })()}
+                </div>
+              )}
               <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
-                <button onClick={()=>setModalPagamento(null)}
+                <button onClick={chiudiModalPagamento}
                   style={{padding:'8px 20px',background:'#f5f5f5',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:'pointer',color:'#1a1a1a'}}>
                   Chiudi
                 </button>

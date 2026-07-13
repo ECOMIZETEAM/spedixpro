@@ -17,6 +17,7 @@ export default function SpedizioniCancellatePage() {
   const [codaOwner, setCodaOwner] = useState<any[]>([]) // annulli Spedisci che DEVO richiedere io (detentore)
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
+  const [filtroCliente, setFiltroCliente] = useState('')
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
   const [ripristinando, setRipristinando] = useState<string | null>(null)
@@ -59,12 +60,20 @@ export default function SpedizioniCancellatePage() {
   const ownerIds = new Set(codaOwner.map(s => s.id))
   const manualiAltri = manuali.filter(s => !ownerIds.has(s.id))  // manuali non miei (sola lettura)
 
-  const visibili = cerca
-    ? spedizioni.filter(s =>
-        s.numero?.toLowerCase().includes(cerca.toLowerCase()) ||
-        s.dest_nome?.toLowerCase().includes(cerca.toLowerCase()) ||
-        s.clienti?.ragione_sociale?.toLowerCase().includes(cerca.toLowerCase()))
-    : spedizioni
+  // Elenco clienti presenti tra le annullate (per il filtro a tendina)
+  const clientiFiltro = Array.from(new Set(spedizioni.map(s => s.clienti?.ragione_sociale).filter(Boolean))).sort()
+
+  const visibili = spedizioni.filter(s => {
+    if (filtroCliente && (s.clienti?.ragione_sociale || '') !== filtroCliente) return false
+    if (cerca) {
+      const q = cerca.toLowerCase()
+      return s.numero?.toLowerCase().includes(q) ||
+        s.dest_nome?.toLowerCase().includes(q) ||
+        s.dest_citta?.toLowerCase().includes(q) ||
+        s.clienti?.ragione_sociale?.toLowerCase().includes(q)
+    }
+    return true
+  })
 
   const totalePagine = Math.max(1, Math.ceil(visibili.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
@@ -169,10 +178,20 @@ export default function SpedizioniCancellatePage() {
               </select>{' '}elementi
             </span>
           </div>
-          <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-            <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Cerca:</span>
-            <input value={cerca} onChange={e=>{setCerca(e.target.value);setPagina(1)}} placeholder="N. spedizione, cliente o destinatario..."
-              style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',width:'260px',color:'#1a1a1a',background:'#fff'}}/>
+          <div style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+              <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Cliente:</span>
+              <select value={filtroCliente} onChange={e=>{setFiltroCliente(e.target.value);setPagina(1)}}
+                style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff',maxWidth:'200px'}}>
+                <option value="">Tutti i clienti</option>
+                {clientiFiltro.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+              <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Cerca:</span>
+              <input value={cerca} onChange={e=>{setCerca(e.target.value);setPagina(1)}} placeholder="N. spedizione, destinatario, città..."
+                style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',width:'220px',color:'#1a1a1a',background:'#fff'}}/>
+            </div>
           </div>
         </div>
 
