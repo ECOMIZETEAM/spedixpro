@@ -19,11 +19,6 @@ export async function GET() {
   const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
   const admin = createAdminSupabase()
   const reteIds = masterId ? await sottoAlberoMasterIds(admin, masterId) : []
-  // Inizio mese in UTC (come date_trunc('month', now()) nelle RPC) così il contatore piano
-  // e le statistiche mensili contano lo STESSO insieme di spedizioni (niente più 98 vs 86).
-  const _now = new Date()
-  const inizioMese = new Date(Date.UTC(_now.getUTCFullYear(), _now.getUTCMonth(), 1)).toISOString()
-
   // Contatori + statistiche aggregati nel DB (una query ciascuno) invece di scaricare
   // le righe grezze: le liste PostgREST sono limitate a 1000 righe e falsavano i totali a volume.
   const [
@@ -31,16 +26,16 @@ export async function GET() {
     { data: statistiche },
     { data: kpi },
     { data: ultimeSpedizioni },
-    { count: spedMeseRete },
   ] = await Promise.all([
     supabase.rpc('dashboard_contatori_master', { p_master: masterId }),
     supabase.rpc('dashboard_statistiche_master', { p_master: masterId }),
     supabase.rpc('dashboard_kpi_master', { p_master: masterId }),
     // Spedizioni recenti di tutta la rete (sé + discendenza), via admin per i permessi cross-master.
     admin.from('spedizioni').select(SPED_COLS).in('master_id', reteIds.length ? reteIds : [masterId]).order('created_at',{ascending:false}).limit(10),
-    // Contatore piano (X/limite): conta le spedizioni del mese di TUTTA la rete.
-    admin.from('spedizioni').select('id',{count:'exact',head:true}).in('master_id', reteIds.length ? reteIds : [masterId]).gte('created_at', inizioMese).neq('stato','annullata'),
   ])
+  // Contatore piano (X/limite) = spedizioni del mese di TUTTA la rete, dalla STESSA RPC (subtree)
+  // così coincide con le altre statistiche (niente più discrepanze tipo 98 vs 86).
+  const spedMeseRete = (contatori as any)?.spedizioniMese || 0
   const c: any = contatori || {}
   const st: any = statistiche || {}
   const k: any = kpi || {}
