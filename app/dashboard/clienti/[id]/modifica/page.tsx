@@ -44,8 +44,8 @@ export default function ModificaClientePage() {
     const data = await res.json()
     setSaving(false)
     if (data.error) { setMsg('Errore: ' + data.error); return }
-    setMsg('✓ Anagrafica aggiornata!')
-    setTimeout(() => router.push(`/dashboard/clienti/${id}`), 1000)
+    setMsg(resetPassword && data.emailInviata ? '✓ Salvato — nuova password inviata via email' : '✓ Anagrafica aggiornata!')
+    setTimeout(() => router.push(`/dashboard/clienti/${id}`), 1200)
   }
 
   if (loading) return <div style={{padding:'40px',textAlign:'center',color:'#1a1a1a'}}>Caricamento...</div>

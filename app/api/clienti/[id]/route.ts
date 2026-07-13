@@ -160,22 +160,28 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const { data: cliente, error } = await supabase.from('clienti').update(aggiornamento)
     .eq('id', id).eq('master_id', utente?.master_id).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  if (resetPassword && cliente?.email) {
+  let emailInviata = false
+  if (resetPassword) {
     try {
       const { createAdminSupabase } = await import('@/lib/supabase-admin')
       const adminClient = createAdminSupabase()
-      const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#'
-      const newPassword = Array.from({length:10}, () => chars[Math.floor(Math.random()*chars.length)]).join('')
-      const { data: authUsers } = await adminClient.auth.admin.listUsers()
-      const userToReset = authUsers?.users?.find((u: any) => u.email === cliente.email)
-      if (userToReset) {
-        await adminClient.auth.admin.updateUserById(userToReset.id, { password: newPassword })
+      // Email di destinazione = quella NUOVA se cambiata in questo salvataggio, altrimenti l'attuale.
+      const emailFinale = (aggiornamento.email || emailVecchia || cliente?.email || '').trim()
+      // Utente di login del cliente: utenti.id == id auth. Niente listUsers (paginato + lag dopo il
+      // cambio email): uso l'id noto, così il reset non viene mai saltato.
+      const { data: uLogin } = await adminClient.from('utenti').select('id').eq('cliente_id', id).limit(1).maybeSingle()
+      if (uLogin?.id && emailFinale) {
+        const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+        const newPassword = 'Mv' + Array.from({length:9}, () => chars[Math.floor(Math.random()*chars.length)]).join('')
+        // email_confirm garantisce che l'email nuova sia quella attiva anche se il blocco sopra ha avuto lag
+        await adminClient.auth.admin.updateUserById(uLogin.id, { email: emailFinale, email_confirm: true, password: newPassword })
         const { inviaCredenzialiCliente } = await import('@/lib/email')
-        await inviaCredenzialiCliente({ email: cliente.email, nomeCliente:cliente.ragione_sociale, masterNome: 'MoovExpress', dominio: 'moovexpress.com', password: newPassword })
+        await inviaCredenzialiCliente({ email: emailFinale, nomeCliente: cliente?.ragione_sociale || '', masterNome: 'MoovExpress', dominio: 'moovexpress.com', password: newPassword })
+        emailInviata = true
       }
     } catch(e) { console.error('Reset password error:', e) }
   }
-  return NextResponse.json({ success: true })
+  return NextResponse.json({ success: true, emailInviata })
 }
 
 // Elimina un cliente DIRETTO del master. Bloccato se ha spedizioni (storico/fatturazione).
