@@ -6,8 +6,15 @@ export default function ClienteDashboard() {
   const [loading, setLoading] = useState(true)
   const [notifiche, setNotifiche] = useState<any[]>([])
   useEffect(() => {
-    fetch('/api/notifiche/mie').then(r=>r.json()).then(d=>setNotifiche(Array.isArray(d)?d:[])).catch(()=>{})
-    fetch('/api/cliente/dashboard').then(r=>r.json()).then(d=>{setData(d);setLoading(false)}).catch(()=>setLoading(false))
+    let vivo = true
+    fetch('/api/notifiche/mie').then(r=>r.json()).then(d=>{ if (vivo) setNotifiche(Array.isArray(d)?d:[]) }).catch(()=>{})
+    const carica = () => fetch('/api/cliente/dashboard', { cache: 'no-store' }).then(r=>r.json()).then(d=>{ if (vivo) { setData(d); setLoading(false) } }).catch(()=>{ if (vivo) setLoading(false) })
+    carica()
+    const t = setInterval(carica, 20000)
+    const onFocus = () => { if (document.visibilityState === 'visible') carica() }
+    document.addEventListener('visibilitychange', onFocus)
+    window.addEventListener('focus', onFocus)
+    return () => { vivo = false; clearInterval(t); document.removeEventListener('visibilitychange', onFocus); window.removeEventListener('focus', onFocus) }
   }, [])
   if (loading) return <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a',fontSize:'14px'}}>Caricamento...</div>
   if (!data) return <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a'}}>Errore caricamento</div>
@@ -81,6 +88,38 @@ export default function ClienteDashboard() {
           <div style={kpiIconLight}>💰</div>
           <div style={kpiLabel}>CREDITO<br/><span style={{color:'#bbb'}}>DISPONIBILE</span></div>
           <div style={{...kpiValue,color:Number(data.credito)>0?'#16a34a':'#dc2626'}}>€ {Number(data.credito||0).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
+        </div>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(6, 1fr)',gap:'12px'}}>
+        <div style={kpiCardLight}>
+          <div style={kpiIconLight}>📦</div>
+          <div style={kpiLabel}>SPEDIZIONI<br/><span style={{color:'#bbb'}}>TOTALI</span></div>
+          <div style={kpiValue}>{Number(data.spedizioniTotali||0).toLocaleString()}</div>
+        </div>
+        <div style={kpiCardLight}>
+          <div style={kpiIconLight}>💶</div>
+          <div style={kpiLabel}>SPESE<br/><span style={{color:'#bbb'}}>DEL MESE</span></div>
+          <div style={{...kpiValue,fontSize:'20px'}}>€ {Number(data.speseMese||0).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
+        </div>
+        <div style={kpiCardLight}>
+          <div style={{...kpiIconLight,background:'#f0fdf4',border:'1px solid #bbf7d0',color:'#16a34a'}}>✅</div>
+          <div style={kpiLabel}>CONSEGNATE<br/><span style={{color:'#bbb'}}>(MESE)</span></div>
+          <div style={kpiValue}>{Number(data.consegnateMese||0).toLocaleString()}</div>
+        </div>
+        <div style={kpiCardLight}>
+          <div style={{...kpiIconLight,background:'#eff6ff',border:'1px solid #bfdbfe',color:'#2563eb'}}>🚛</div>
+          <div style={kpiLabel}>IN TRANSITO</div>
+          <div style={kpiValue}>{Number(data.inTransito||0).toLocaleString()}</div>
+        </div>
+        <div style={kpiCardLight}>
+          <div style={{...kpiIconLight,background:'#fef2f2',border:'1px solid #fecaca',color:'#dc2626'}}>⏸️</div>
+          <div style={kpiLabel}>IN GIACENZA</div>
+          <div style={kpiValue}>{Number(data.inGiacenza||0).toLocaleString()}</div>
+        </div>
+        <div style={kpiCardLight}>
+          <div style={kpiIconLight}>💵</div>
+          <div style={kpiLabel}>CONTRASSEGNI<br/><span style={{color:'#bbb'}}>DA INCASSARE</span></div>
+          <div style={{...kpiValue,fontSize:'20px',color:Number(data.codDaIncassare)>0?'#ea580c':'#1a1a1a'}}>€ {Number(data.codDaIncassare||0).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
         </div>
       </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px'}}>

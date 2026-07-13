@@ -19,18 +19,23 @@ export async function GET() {
   const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
   const admin = createAdminSupabase()
   const reteIds = masterId ? await sottoAlberoMasterIds(admin, masterId) : []
-  const inizioMese = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
+  // Inizio mese in UTC (come date_trunc('month', now()) nelle RPC) così il contatore piano
+  // e le statistiche mensili contano lo STESSO insieme di spedizioni (niente più 98 vs 86).
+  const _now = new Date()
+  const inizioMese = new Date(Date.UTC(_now.getUTCFullYear(), _now.getUTCMonth(), 1)).toISOString()
 
   // Contatori + statistiche aggregati nel DB (una query ciascuno) invece di scaricare
   // le righe grezze: le liste PostgREST sono limitate a 1000 righe e falsavano i totali a volume.
   const [
     { data: contatori },
     { data: statistiche },
+    { data: kpi },
     { data: ultimeSpedizioni },
     { count: spedMeseRete },
   ] = await Promise.all([
     supabase.rpc('dashboard_contatori_master', { p_master: masterId }),
     supabase.rpc('dashboard_statistiche_master', { p_master: masterId }),
+    supabase.rpc('dashboard_kpi_master', { p_master: masterId }),
     // Spedizioni recenti di tutta la rete (sé + discendenza), via admin per i permessi cross-master.
     admin.from('spedizioni').select(SPED_COLS).in('master_id', reteIds.length ? reteIds : [masterId]).order('created_at',{ascending:false}).limit(10),
     // Contatore piano (X/limite): conta le spedizioni del mese di TUTTA la rete.
@@ -38,6 +43,7 @@ export async function GET() {
   ])
   const c: any = contatori || {}
   const st: any = statistiche || {}
+  const k: any = kpi || {}
 
   return NextResponse.json({
     masterNome,
@@ -49,6 +55,15 @@ export async function GET() {
     spediteOggi: c.spediteOggi||0,
     daSpedire: c.daSpedire||0,
     inLavorazione: c.inLavorazione||0,
+    // KPI globali di tutta la rete (proprie + improprie)
+    spedizioniTotali: k.spedizioniTotali||0,
+    fatturatoMese: Number(k.fatturatoMese||0),
+    consegnateMese: k.consegnateMese||0,
+    inTransito: k.inTransito||0,
+    inGiacenza: k.inGiacenza||0,
+    codDaRimettere: Number(k.codDaRimettere||0),
+    clientiTotali: k.clientiTotali||0,
+    sottomaster: k.sottomaster||0,
     statsMensili: st.mensili || [],
     statiUltimi30: st.stati30 || {},
     ultimeSpedizioni: ultimeSpedizioni||[],

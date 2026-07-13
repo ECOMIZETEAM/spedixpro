@@ -9,7 +9,14 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/dashboard').then(r=>r.json()).then(d=>{setData(d);setLoading(false)}).catch(()=>setLoading(false))
+    let vivo = true
+    const carica = () => fetch('/api/dashboard', { cache: 'no-store' }).then(r=>r.json()).then(d=>{ if (vivo) { setData(d); setLoading(false) } }).catch(()=>{ if (vivo) setLoading(false) })
+    carica()
+    const t = setInterval(carica, 20000)                                   // aggiorna ogni 20s
+    const onFocus = () => { if (document.visibilityState === 'visible') carica() }  // e al ritorno sulla pagina
+    document.addEventListener('visibilitychange', onFocus)
+    window.addEventListener('focus', onFocus)
+    return () => { vivo = false; clearInterval(t); document.removeEventListener('visibilitychange', onFocus); window.removeEventListener('focus', onFocus) }
   }, [])
 
   if (loading) return <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a',fontSize:'14px'}}>Caricamento...</div>
@@ -113,6 +120,40 @@ export default function Dashboard() {
           <div style={kpiIconLight}>👥</div>
           <div style={kpiLabel}>CLIENTI<br/><span style={{color:'#bbb'}}>REGISTRATI</span></div>
           <div style={kpiValue}>{data.totClienti}</div>
+        </div>
+      </div>
+
+      {/* KPI globali di tutta la rete (spedizioni proprie + improprie) */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(6, 1fr)',gap:'12px'}}>
+        <div style={kpiCardLight}>
+          <div style={kpiIconLight}>📦</div>
+          <div style={kpiLabel}>SPEDIZIONI<br/><span style={{color:'#bbb'}}>TOTALI RETE</span></div>
+          <div style={kpiValue}>{Number(data.spedizioniTotali||0).toLocaleString()}</div>
+        </div>
+        <div style={kpiCardLight}>
+          <div style={kpiIconLight}>💶</div>
+          <div style={kpiLabel}>VOLUME<br/><span style={{color:'#bbb'}}>DEL MESE</span></div>
+          <div style={{...kpiValue,fontSize:'20px'}}>€ {Number(data.fatturatoMese||0).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
+        </div>
+        <div style={kpiCardLight}>
+          <div style={{...kpiIconLight,background:'#f0fdf4',border:'1px solid #bbf7d0',color:'#16a34a'}}>✅</div>
+          <div style={kpiLabel}>CONSEGNATE<br/><span style={{color:'#bbb'}}>(MESE)</span></div>
+          <div style={kpiValue}>{Number(data.consegnateMese||0).toLocaleString()}</div>
+        </div>
+        <div style={kpiCardLight}>
+          <div style={{...kpiIconLight,background:'#eff6ff',border:'1px solid #bfdbfe',color:'#2563eb'}}>🚛</div>
+          <div style={kpiLabel}>IN TRANSITO</div>
+          <div style={kpiValue}>{Number(data.inTransito||0).toLocaleString()}</div>
+        </div>
+        <div style={kpiCardLight}>
+          <div style={{...kpiIconLight,background:'#fef2f2',border:'1px solid #fecaca',color:'#dc2626'}}>⏸️</div>
+          <div style={kpiLabel}>IN GIACENZA</div>
+          <div style={kpiValue}>{Number(data.inGiacenza||0).toLocaleString()}</div>
+        </div>
+        <div style={kpiCardLight}>
+          <div style={kpiIconLight}>💵</div>
+          <div style={kpiLabel}>CONTRASSEGNI<br/><span style={{color:'#bbb'}}>DA RIMETTERE</span></div>
+          <div style={{...kpiValue,fontSize:'20px',color:Number(data.codDaRimettere)>0?'#ea580c':'#1a1a1a'}}>€ {Number(data.codDaRimettere||0).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
         </div>
       </div>
 
