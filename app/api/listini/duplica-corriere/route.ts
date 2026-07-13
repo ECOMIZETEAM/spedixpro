@@ -13,8 +13,11 @@ export async function POST(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
 
-  const { sourceListinoId, corriereId, targetListinoId, nuovoNome } = await req.json()
+  const { sourceListinoId, corriereId, targetListinoId, nuovoNome, maggiorazione } = await req.json()
   if (!sourceListinoId || !corriereId) return NextResponse.json({ error: 'Parametri mancanti' }, { status: 400 })
+  // Maggiorazione % SOLO sui prezzi peso/zona (fasce), non su supplementi/contrassegno/assicurazione/giacenze
+  const magg = Number(maggiorazione) || 0
+  const applicaMagg = (p: any) => magg ? Math.round((Number(p || 0) * (1 + magg / 100)) * 100) / 100 : p
   if (!targetListinoId && !(nuovoNome && String(nuovoNome).trim())) {
     return NextResponse.json({ error: 'Scegli un listino esistente o un nome per il nuovo listino' }, { status: 400 })
   }
@@ -57,7 +60,7 @@ export async function POST(req: NextRequest) {
   // Fasce del corriere
   const { data: fasce } = await admin.from('listini_clienti_fasce')
     .select('zona_id,peso_min,peso_max,prezzo,tipo,fuel').eq('listino_id', sourceListinoId).eq('corriere_id', corriereId)
-  if (fasce?.length) await admin.from('listini_clienti_fasce').insert(fasce.map((f: any) => ({ ...f, listino_id: targetId, corriere_id: corriereId })))
+  if (fasce?.length) await admin.from('listini_clienti_fasce').insert(fasce.map((f: any) => ({ ...f, listino_id: targetId, corriere_id: corriereId, prezzo: applicaMagg(f.prezzo) })))
   // Supplementi del corriere
   const { data: sup } = await admin.from('listini_clienti_supplementi')
     .select('tipo,descrizione,valore,tipo_calcolo,nome').eq('listino_id', sourceListinoId).eq('corriere_id', corriereId)

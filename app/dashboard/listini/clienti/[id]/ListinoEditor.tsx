@@ -126,8 +126,9 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   const [copiaSaving, setCopiaSaving] = useState(false)
   const [copiaErr, setCopiaErr] = useState('')
   const [copiaOk, setCopiaOk] = useState('')
+  const [copiaMagg, setCopiaMagg] = useState('')
   async function apriCopia(c: any) {
-    setCopia(c); setCopiaModo('esistente'); setCopiaTarget(''); setCopiaNome(''); setCopiaErr(''); setCopiaOk('')
+    setCopia(c); setCopiaModo('esistente'); setCopiaTarget(''); setCopiaNome(''); setCopiaErr(''); setCopiaOk(''); setCopiaMagg('')
     try { const r = await fetch('/api/listini/lista'); const d = await r.json(); setListiniList((Array.isArray(d)?d:[]).filter((x:any)=>x.id!==listino.id)) } catch { setListiniList([]) }
   }
   async function confermaCopia() {
@@ -137,6 +138,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     setCopiaSaving(true); setCopiaErr('')
     const body: any = { sourceListinoId: listino.id, corriereId: copia.id }
     if (copiaModo==='nuovo') body.nuovoNome = copiaNome.trim(); else body.targetListinoId = copiaTarget
+    if (copiaMagg && Number(copiaMagg)) body.maggiorazione = Number(copiaMagg)
     const res = await fetch('/api/listini/duplica-corriere', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
     const d = await res.json().catch(()=>({}))
     setCopiaSaving(false)
@@ -608,6 +610,16 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
                   <input value={copiaNome} onChange={e=>setCopiaNome(e.target.value)} placeholder="Es. Listino Standard 2" style={{width:'100%',padding:'9px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}}/>
                 </div>
               )}
+
+              <div style={{marginTop:'14px'}}>
+                <label style={{fontSize:'12px',fontWeight:600,color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Maggiorazione % sui prezzi peso/zona <span style={{color:'#999',fontWeight:400}}>(opzionale)</span></label>
+                <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                  <input type="number" step="0.1" min="0" value={copiaMagg} onChange={e=>setCopiaMagg(e.target.value)} placeholder="0"
+                    style={{width:'110px',padding:'9px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}/>
+                  <span style={{fontSize:'13px',color:'#1a1a1a',fontWeight:600}}>%</span>
+                </div>
+                <div style={{fontSize:'11px',color:'#999',marginTop:'4px'}}>Aumenta solo i prezzi delle fasce peso/zona. Non tocca contrassegno, assicurazione, giacenze o altri supplementi.</div>
+              </div>
 
               {copiaErr && <div style={{marginTop:'12px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'9px 12px',fontSize:'12.5px',color:'#dc2626'}}>{copiaErr}</div>}
               {copiaOk && <div style={{marginTop:'12px',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'9px 12px',fontSize:'12.5px',color:'#16a34a'}}>{copiaOk}</div>}

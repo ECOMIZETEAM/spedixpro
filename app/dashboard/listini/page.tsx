@@ -10,8 +10,11 @@ export default function ListiniPage() {
   async function duplica(id: string, nome: string) {
     const nuovo = prompt(`Nome del nuovo listino (copia di "${nome}"):`, `${nome} (copia)`)
     if (nuovo === null) return
+    const maggStr = prompt('Maggiorazione % sui prezzi peso/zona (0 = nessuna). Non tocca contrassegno, assicurazione o giacenze:', '0')
+    if (maggStr === null) return
+    const maggiorazione = Number(String(maggStr).replace(',', '.')) || 0
     setDuplicando(id)
-    const res = await fetch('/api/listini/duplica', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listinoId: id, nome: nuovo }) })
+    const res = await fetch('/api/listini/duplica', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listinoId: id, nome: nuovo, maggiorazione }) })
     const d = await res.json().catch(() => ({}))
     setDuplicando('')
     if (d?.error) { alert(d.error); return }

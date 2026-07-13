@@ -10,8 +10,11 @@ export async function POST(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
 
-  const { listinoId, nome } = await req.json()
+  const { listinoId, nome, maggiorazione } = await req.json()
   if (!listinoId) return NextResponse.json({ error: 'listinoId mancante' }, { status: 400 })
+  // Maggiorazione % applicata SOLO ai prezzi peso/zona (fasce), non a supplementi/accessori/giacenze
+  const magg = Number(maggiorazione) || 0
+  const applicaMagg = (p: any) => magg ? Math.round((Number(p || 0) * (1 + magg / 100)) * 100) / 100 : p
 
   const admin = createAdminSupabase()
   const { data: src } = await admin.from('listini_clienti').select('*')
@@ -32,7 +35,7 @@ export async function POST(req: NextRequest) {
 
   const { data: fasce } = await admin.from('listini_clienti_fasce')
     .select('corriere_id,zona_id,peso_min,peso_max,prezzo,tipo,fuel').eq('listino_id', listinoId)
-  if (fasce?.length) await admin.from('listini_clienti_fasce').insert(fasce.map((f: any) => ({ ...f, listino_id: nid })))
+  if (fasce?.length) await admin.from('listini_clienti_fasce').insert(fasce.map((f: any) => ({ ...f, listino_id: nid, prezzo: applicaMagg(f.prezzo) })))
 
   const { data: sup } = await admin.from('listini_clienti_supplementi')
     .select('corriere_id,tipo,descrizione,valore,tipo_calcolo,nome').eq('listino_id', listinoId)
