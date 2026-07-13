@@ -121,6 +121,8 @@ export async function verificaCreditoCatena(
     cap?: string
     paese?: string
     corriereNome?: string
+    contrassegno?: number
+    assicurazione?: number
   }
 ): Promise<{ ok: boolean; errore?: string; masterInsufficiente?: string }> {
   const { catena, errore } = await costruisciCatena(supabase, {
@@ -132,6 +134,8 @@ export async function verificaCreditoCatena(
     cap: params.cap,
     paese: params.paese,
     corriereNome: params.corriereNome,
+    contrassegno: params.contrassegno,
+    assicurazione: params.assicurazione,
   })
   if (errore) return { ok: false, errore }
 
@@ -164,6 +168,8 @@ export async function addebitaCatena(
     cap?: string
     paese?: string
     corriereNome?: string
+    contrassegno?: number
+    assicurazione?: number
   }
 ): Promise<void> {
   const adminMov = createAdminSupabase()
@@ -176,6 +182,8 @@ export async function addebitaCatena(
     cap: params.cap,
     paese: params.paese,
     corriereNome: params.corriereNome,
+    contrassegno: params.contrassegno,
+    assicurazione: params.assicurazione,
   })
 
   for (const liv of catena) {
@@ -212,6 +220,8 @@ export async function rimborsaCatena(
     cap?: string
     paese?: string
     corriereNome?: string
+    contrassegno?: number
+    assicurazione?: number
   }
 ): Promise<void> {
   const adminMov = createAdminSupabase()
@@ -224,6 +234,8 @@ export async function rimborsaCatena(
     cap: params.cap,
     paese: params.paese,
     corriereNome: params.corriereNome,
+    contrassegno: params.contrassegno,
+    assicurazione: params.assicurazione,
   })
 
   for (const liv of catena) {

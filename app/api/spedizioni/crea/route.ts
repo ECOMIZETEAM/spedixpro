@@ -227,6 +227,7 @@ export async function POST(req: NextRequest) {
       cap: body.shipTo.postalCode,
       paese: body.shipTo.country || 'IT',
       corriereNome: corriereRecord.nome_contratto,
+      contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
     })
     if (!catenaCheck.ok) {
       // Nessuno vede credito/costo dei master SOPRA di sé: mostro il dettaglio SOLO se il
@@ -349,6 +350,7 @@ export async function POST(req: NextRequest) {
       costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
       cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
       corriereNome: corriereRecord.nome_contratto,
+      contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
       numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
     })
 
@@ -463,6 +465,7 @@ export async function POST(req: NextRequest) {
         costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
         cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
         corriereNome: corriereRecord.nome_contratto,
+        contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
         numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
       })
 
