@@ -72,9 +72,18 @@ export async function shopifyGraphQL(shop: string, token: string, query: string,
     headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
     body: JSON.stringify({ query, variables: variables || {} }),
   })
-  const d = await r.json().catch(() => null)
-  if (!r.ok) throw new Error(`GraphQL HTTP ${r.status}`)
-  if (d?.errors) throw new Error('GraphQL: ' + JSON.stringify(d.errors).slice(0, 200))
+  const raw = await r.text()
+  let d: any = null
+  try { d = JSON.parse(raw) } catch {}
+  if (r.status === 403 || r.status === 401) {
+    // Tipico su app appena create: dati cliente protetti non approvati o scope ordini mancante
+    throw new Error('Shopify ha negato l\'accesso agli ordini (HTTP ' + r.status + '). Verifica nel Partner Dashboard di aver richiesto e ottenuto l\'accesso ai "Protected customer data" e lo scope read_orders, poi ricollega il negozio.')
+  }
+  if (!r.ok) throw new Error(`Shopify HTTP ${r.status}: ${raw.slice(0, 150)}`)
+  if (d?.errors) {
+    const msg = Array.isArray(d.errors) ? d.errors.map((e: any) => e.message).join('; ') : JSON.stringify(d.errors)
+    throw new Error('Shopify: ' + String(msg).slice(0, 220))
+  }
   return d?.data
 }
 
