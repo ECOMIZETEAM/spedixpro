@@ -16,10 +16,11 @@ function estraiCampi(testoRaw: string) {
   let cf = grab(/codice\s*fiscale[^0-9A-Z]{0,12}([0-9]{11}|[A-Z0-9]{16})/i)
   if (!cf && piva) cf = piva // per le società di norma coincidono
 
-  // Denominazione / ragione sociale
-  let ragione = grab(/denominazione[:\s]+([^\n]+?)(?:\s{2,}|forma giuridica|codice fiscale|indirizzo|$)/i, testo)
-  if (!ragione) ragione = grab(/denominazione[:\s]+(.+)/i)
-  ragione = ragione.replace(/\s*(dati anagrafici|forma giuridica).*$/i, '').trim()
+  // Denominazione / ragione sociale — delimitata dal PROSSIMO campo noto per non "over-leggere".
+  let ragione = grab(/denominazione[:\s]+(.+?)(?=\s+(?:forma\s+giuridica|sigla|codice\s+fiscale|partita\s+iva|p\.?\s?iva|sede\s+legale|indirizzo|numero\s+rea|\brea\b|iscri|capitale|dati\s+anagrafici|stato\b|costituzion|attivit)\b|$)/i, oneLine)
+  if (!ragione) ragione = grab(/denominazione[:\s]+([^\n]{2,90})/i, testo)
+  ragione = ragione.replace(/\s{2,}.*$/, '').replace(/[·•:;,\s]+$/, '').trim()
+  if (ragione.length > 90) ragione = ragione.slice(0, 90).replace(/\s+\S*$/, '').trim()
 
   // PEC / domicilio digitale
   let pec = grab(/(?:pec|domicilio digitale)[^a-z0-9]{0,15}([a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,})/i)
@@ -27,7 +28,7 @@ function estraiCampi(testoRaw: string) {
 
   // Sede legale: es. "COMUNE (PR) VIA ROMA, 10 CAP 20100"
   let citta = '', prov = '', indirizzo = '', cap = ''
-  const sede = oneLine.match(/sede legale[^A-Za-zÀ-ù]*([A-Za-zÀ-ù'’.\- ]+?)\s*\(([A-Z]{2})\)\s*(.+?)\s*(?:cap\s*)?(\d{5})/i)
+  const sede = oneLine.match(/sede legale[^A-Za-zÀ-ù]*(?:indirizzo\s+)?([A-Za-zÀ-ù'’.\- ]+?)\s*\(([A-Z]{2})\)\s*(?:indirizzo\s+)?(.+?)\s*(?:cap\s*)?(\d{5})/i)
   if (sede) {
     citta = sede[1].trim(); prov = sede[2]
     indirizzo = sede[3].replace(/\bcap\b/i, '').replace(/[,;]\s*$/, '').trim(); cap = sede[4]
@@ -89,25 +90,30 @@ export async function POST(req: NextRequest) {
   if (process.env.ANTHROPIC_API_KEY) {
     try {
       const { default: Anthropic } = await import('@anthropic-ai/sdk')
-      const SCHEMA = {
-        type: 'object', additionalProperties: false,
-        properties: {
-          ragione_sociale: { type: 'string' }, piva: { type: 'string' }, cf: { type: 'string' },
-          pec: { type: 'string' }, cod_sdi: { type: 'string' }, rappresentante_legale: { type: 'string' },
-          telefono: { type: 'string' }, indirizzo: { type: 'string' }, citta: { type: 'string' },
-          provincia: { type: 'string' }, cap: { type: 'string' },
-        },
-        required: ['ragione_sociale', 'piva', 'cf', 'pec', 'cod_sdi', 'rappresentante_legale', 'telefono', 'indirizzo', 'citta', 'provincia', 'cap'],
-      }
       const client = new Anthropic()
+      const prompt = `Estrai i dati anagrafici da questa VISURA CAMERALE italiana e rispondi ESCLUSIVAMENTE con un oggetto JSON valido (nessun testo prima o dopo).
+Chiavi richieste (usa "" se il dato manca):
+{"ragione_sociale":"","piva":"","cf":"","pec":"","cod_sdi":"","rappresentante_legale":"","telefono":"","indirizzo":"","citta":"","provincia":"","cap":""}
+Regole:
+- "ragione_sociale": SOLO la denominazione dell'azienda con la forma giuridica (es. "MARIO ROSSI S.R.L."), niente altro testo.
+- Usa la SEDE LEGALE per "indirizzo", "citta", "provincia" (sigla di 2 lettere) e "cap".
+- "indirizzo": solo via/piazza e numero civico (es. "VIA ROMA 10"), senza città né CAP.
+- "piva": 11 cifre (senza "IT"). "cf": 11 cifre oppure 16 caratteri.
+- "pec": l'indirizzo PEC / domicilio digitale.
+- "rappresentante_legale": nome e cognome dell'amministratore / legale rappresentante.
+
+VISURA:
+${testo.slice(0, 30000)}`
       const msg = await client.messages.create({
-        model: 'claude-opus-4-8', max_tokens: 1024,
-        output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
-        messages: [{ role: 'user', content: 'Estrai i dati anagrafici da questa visura camerale (usa la SEDE LEGALE per indirizzo/citta/provincia/cap; stringa vuota se un dato manca):\n\n' + testo.slice(0, 30000) }],
-      } as any)
-      const block = (msg.content as any[]).find((b) => b.type === 'text')
-      const dati = JSON.parse(block?.text || '{}')
-      return NextResponse.json({ success: true, dati, fonte: 'ai' })
+        model: 'claude-haiku-4-5-20251001', max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }],
+      })
+      const txt = (msg.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('')
+      const m = txt.match(/\{[\s\S]*\}/)
+      if (m) {
+        const dati = JSON.parse(m[0])
+        return NextResponse.json({ success: true, dati, fonte: 'ai' })
+      }
     } catch {
       // se l'AI fallisce, ricado sulle regole locali
     }
