@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AssistenzaTicketButton from '@/app/components/AssistenzaTicketButton'
+import DettaglioSpedizione from '@/app/components/DettaglioSpedizione'
 
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
@@ -56,6 +57,7 @@ export default function SpedizioniPage() {
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
   const [trackingModal, setTrackingModal] = useState<any>(null)
+  const [dettaglio, setDettaglio] = useState<any>(null)
   const [trackingData, setTrackingData] = useState<any>(null)
   const [trackingLoading, setTrackingLoading] = useState(false)
   const [trackingTab, setTrackingTab] = useState<'tracking'|'colli'>('tracking')
@@ -118,11 +120,13 @@ export default function SpedizioniPage() {
   }
 
   const spedizioniVisibili = cerca
-    ? spedizioniFiltrate.filter(s =>
-        s.numero?.toLowerCase().includes(cerca.toLowerCase()) ||
-        s.dest_nome?.toLowerCase().includes(cerca.toLowerCase()) ||
-        s.tracking_number?.toLowerCase().includes(cerca.toLowerCase())
-      )
+    ? spedizioniFiltrate.filter(s => {
+        const q = cerca.toLowerCase()
+        return s.numero?.toLowerCase().includes(q) ||
+          s.dest_nome?.toLowerCase().includes(q) ||
+          s.mitt_nome?.toLowerCase().includes(q) ||
+          s.tracking_number?.toLowerCase().includes(q)
+      })
     : spedizioniFiltrate
 
   const totalePagine = Math.max(1, Math.ceil(spedizioniVisibili.length / perPage))
@@ -444,6 +448,7 @@ async function apriTracking(s: any) {
                       <td style={{padding:'9px 12px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
                           <a href={`/dashboard/spedizioni/${s.id}/etichetta`} download style={{padding:'4px 8px',background:'#fff7ed',color:'#f97316',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #fed7aa'}} title="Stampa etichetta">🖨️</a>
+                          <button onClick={()=>setDettaglio(s)} title="Vedi dettagli spedizione" style={{padding:'4px 8px',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',fontSize:'14px',border:'1px solid #bfdbfe',cursor:'pointer'}}>👁</button>
 
                           {s.stato==='annullamento_pending' ? (
                             <button onClick={()=>ripristina(s.id,s.numero)} disabled={eliminando===s.id}
@@ -582,6 +587,8 @@ async function apriTracking(s: any) {
           </div>
         </div>
       )}
+
+      {dettaglio && <DettaglioSpedizione s={dettaglio} onClose={()=>setDettaglio(null)} etichettaHref={`/dashboard/spedizioni/${dettaglio.id}/etichetta`} />}
     </div>
   )
 }
