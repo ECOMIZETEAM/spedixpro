@@ -31,11 +31,24 @@ export async function GET(req: NextRequest) {
     const { data: cc } = await supabase.from('corrieri').select('id,nome_contratto,tipo').in('id', idsSenzaNome)
     for (const c of (cc || [])) _mappaCorr.set(c.id, c)
   }
-  const { data: tuttiICorrieri } = await supabase.from('corrieri').select('id,nome_contratto').eq('master_id', utente?.master_id)
+  const { data: tuttiICorrieriRaw } = await supabase.from('corrieri').select('id,nome_contratto').eq('master_id', utente?.master_id)
+  // Corrieri SPENTI dal master PADRE per questo (sotto-)master: nascosti dal Listino Corrieri.
+  // In masters_corrieri_abilitati il corriere è quello del listino del padre -> confronto per NOME.
+  const { createAdminSupabase } = await import('@/lib/supabase-admin')
+  const _admin = createAdminSupabase()
+  const { data: _statiM } = await _admin.from('masters_corrieri_abilitati').select('corriere_id,abilitato').eq('master_id', utente?.master_id)
+  const _disId = new Set((_statiM || []).filter((s: any) => s.abilitato === false).map((s: any) => s.corriere_id))
+  let _disNomi = new Set<string>()
+  if (_disId.size) {
+    const { data: _dc } = await _admin.from('corrieri').select('nome_contratto').in('id', Array.from(_disId))
+    _disNomi = new Set((_dc || []).map((c: any) => (c.nome_contratto || '').trim().toLowerCase()))
+  }
+  const _spento = (c: any) => _disId.has(c.id) || _disNomi.has((c.nome_contratto || '').trim().toLowerCase())
+  const tuttiICorrieri = (tuttiICorrieriRaw || []).filter((c: any) => !_spento(c))
   const posseduti = new Set((tuttiICorrieri || []).map((c:any) => c.id))
-  // Mostra SOLO i corrieri realmente POSSEDUTI dal master: no righe/agganci "estranei"
-  // (residui di duplicazioni/ereditarietà che puntano a corrieri di altri master).
-  const corrieri = [..._mappaCorr.values()].filter(Boolean).filter((c:any) => posseduti.has(c.id))
+  // Mostra SOLO i corrieri realmente POSSEDUTI dal master e non spenti dal padre: no righe/agganci
+  // "estranei" (residui di duplicazioni/ereditarietà che puntano a corrieri di altri master).
+  const corrieri = [..._mappaCorr.values()].filter(Boolean).filter((c:any) => posseduti.has(c.id) && !_spento(c))
   const corrieriDisponibili = (tuttiICorrieri||[]).filter(c => !corrieri.some((x:any) => x.id === c.id))
 
   const corriereSelezionato = corrieri.find((c:any) => c.id === corriereId) || corrieri[0]
