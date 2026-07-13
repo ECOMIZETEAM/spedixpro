@@ -355,6 +355,18 @@ export async function POST(req: NextRequest) {
   const { data: listino } = await supabase
     .from('listini_clienti').select('fattore_volume,solo_peso_reale').eq('id', cliente.listino_cliente_id).single()
   const fattore = parseFloat(listino?.fattore_volume) || 5000
+  // Fattore volume PER-CORRIERE (override del default): il peso fatturato va calcolato col fattore
+  // del singolo corriere (come nel listino corriere), altrimenti il cliente paga su un peso diverso
+  // dal costo → margini falsati / sotto costo.
+  const { data: _aggCorrCli } = await supabase.from('listini_clienti_corrieri')
+    .select('corriere_id,fattore_volume').eq('listino_id', cliente.listino_cliente_id)
+  const fattorePerCorr = new Map<string, number>()
+  for (const a of (_aggCorrCli || [])) { const fv = parseFloat((a as any)?.fattore_volume); if ((a as any)?.corriere_id && fv > 0) fattorePerCorr.set((a as any).corriere_id, fv) }
+  const pesoFatturatoCon = (fatt: number) => {
+    let pv = 0
+    for (const p of tuttiColli) { if (p?.length && p?.width && p?.height) pv += (p.length * p.width * p.height) / fatt }
+    return { pesoVolume: pv, pesoFatturato: listino?.solo_peso_reale ? pesoReale : Math.max(pesoReale, pv) }
+  }
 
   let pesoVolume = 0
   for (const p of tuttiColli) {
@@ -426,12 +438,14 @@ export async function POST(req: NextRequest) {
   for (const [corriereId, fasceDelCorriere] of fascePerCorriere) {
     if (disabilitati.has(corriereId)) continue   // contratto disattivato per questo cliente/sotto-master
     const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
+    // Peso fatturato con il fattore volume DI QUESTO corriere (override per-corriere).
+    const { pesoVolume: pesoVolumeC, pesoFatturato: pesoFatturatoC } = pesoFatturatoCon(fattorePerCorr.get(corriereId) || fattore)
     // Limite misure per scaglione di PESO REALE: se un collo eccede, il corriere non è disponibile.
     if (superaMisureMax(settsC, pesoReale, tuttiColli)) { esclusiMisura++; continue }
     // Peso su cui si tassa: reale se agevolazione misure (≤50x32x28) OPPURE "peso reale fino a X kg" (≤ soglia); altrimenti volumetrico.
     const _prs = settsC?.peso_reale_soglia
     const _usaRealeSoglia = !!_prs?.attivo && Number(_prs.kg) > 0 && pesoReale <= Number(_prs.kg)
-    const pesoPerFascia = ((!!settsC.agevolazione_peso_reale && entroMisureAgevolate) || _usaRealeSoglia) ? pesoReale : pesoFatturato
+    const pesoPerFascia = ((!!settsC.agevolazione_peso_reale && entroMisureAgevolate) || _usaRealeSoglia) ? pesoReale : pesoFatturatoC
     const fasciaGiusta = trovaFascia(fasceDelCorriere, pesoPerFascia)
     if (!fasciaGiusta) { esclusiFascia++; continue }   // peso oltre l'ultima fascia e nessuna "oltre X ogni"
     if (Number(fasciaGiusta.prezzo) <= 0) continue   // prezzo 0 per questa zona/peso -> non mostrare il corriere
@@ -443,7 +457,7 @@ export async function POST(req: NextRequest) {
     if (corriere?.tipo === 'spediamopro') {
       let quote = null
       try {
-        quote = await quotaCorriere(corriere, pesoFatturato)
+        quote = await quotaCorriere(corriere, pesoFatturatoC)
       } catch (e: any) { ultimoErroreQuota = String(e?.message || '') }
       spediamoproQuotation = quote?._spediamopro_quotation || null
       if (!quote) { esclusiQuota++; continue }   // il corriere non ha tariffe per queste misure/peso
@@ -472,7 +486,7 @@ export async function POST(req: NextRequest) {
       fuel: costoFuel.toFixed(2),
       zona: isEstero ? (PAESI[paeseDest] || paeseDest) : ((fasciaGiusta as any)?.zone?.nome || zonaNome),
       peso_reale: pesoReale,
-      peso_volume: pesoVolume.toFixed(2),
+      peso_volume: pesoVolumeC.toFixed(2),
       peso_fatturato: pesoPerFascia.toFixed(2),   // peso EFFETTIVO su cui è calcolato il prezzo (reale se agevolazione)
       corriere_nome: corriere?.nome_contratto || 'Corriere',
       limiti_collo: descriviLimiti(settsC),   // indicazione limiti collo (misure/combinata/peso/colli)

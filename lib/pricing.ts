@@ -92,7 +92,14 @@ export async function calcolaPrezzoListino(
 
   const { data: listino } = await supabase
     .from('listini_clienti').select('fattore_volume,solo_peso_reale').eq('id', listinoId).single()
-  const fattore = parseFloat(listino?.fattore_volume) || 5000
+  let fattore = parseFloat(listino?.fattore_volume) || 5000
+  // Override PER-CORRIERE (come nel listino corriere): il peso fatturato deve usare lo stesso fattore.
+  if (params.corriereId) {
+    const { data: agg } = await supabase.from('listini_clienti_corrieri')
+      .select('fattore_volume').eq('listino_id', listinoId).eq('corriere_id', params.corriereId).maybeSingle()
+    const fv = parseFloat(agg?.fattore_volume)
+    if (fv > 0) fattore = fv
+  }
 
   const pesoReale = packages.reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
   let pesoVolume = 0
@@ -572,6 +579,11 @@ export async function creaCalcolatoreListinoCliente(
   const { data: listino } = await supabase.from('listini_clienti').select('fattore_volume,solo_peso_reale').eq('id', listinoId).single()
   const fattore = parseFloat(listino?.fattore_volume) || 5000
   const soloPesoReale = !!listino?.solo_peso_reale
+  // Fattore volume PER-CORRIERE (override del default del listino): stesso comportamento del
+  // listino corriere, così il peso fatturato coincide (altrimenti il report mostra margini falsati).
+  const { data: aggCorr } = await supabase.from('listini_clienti_corrieri').select('corriere_id,fattore_volume').eq('listino_id', listinoId)
+  const fattorePerCorr = new Map<string, number>()
+  for (const a of (aggCorr || [])) { const fv = parseFloat(a?.fattore_volume); if (a?.corriere_id && fv > 0) fattorePerCorr.set(a.corriere_id, fv) }
 
   const { data: fasce } = await supabase
     .from('listini_clienti_fasce').select('corriere_id,zona_id,peso_max,prezzo,tipo,fuel,zone(id,nome)')
@@ -614,7 +626,8 @@ export async function creaCalcolatoreListinoCliente(
     if (!fasceList.length) return null
 
     const L = Number(s.lunghezza) || 0, W = Number(s.larghezza) || 0, H = Number(s.altezza) || 0
-    const pesoVolume = (L && W && H) ? (L * W * H) / fattore : 0
+    const fattoreC = fattorePerCorr.get(s.corriere_id) || fattore   // per-corriere, fallback default
+    const pesoVolume = (L && W && H) ? (L * W * H) / fattoreC : 0
     const pesoReale = Number(s.peso_reale) || 1
     const pesoFatturato = soloPesoReale ? pesoReale : Math.max(pesoReale, pesoVolume)
 
