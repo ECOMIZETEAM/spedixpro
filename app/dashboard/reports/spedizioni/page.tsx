@@ -99,6 +99,11 @@ export default function ReportSpedizioniPage() {
         'Corr. Sponda (€)': s.dett_corriere ? s.dett_corriere.sponda : '',
         'Tracking': s.tracking_number,
       }))
+      // Riga totali: SOLO Prezzo Cliente e Prezzo Corriere (non le singole voci)
+      const totCli = spedizioni.reduce((a: number, s: any) => a + Number(s.costo_totale || 0), 0)
+      const totCor = spedizioni.reduce((a: number, s: any) => a + Number(s.prezzo_corriere || 0), 0)
+      rows.push({} as any)
+      rows.push({ 'Stato': 'TOTALE', 'Prezzo Cliente (€)': Math.round(totCli * 100) / 100, 'Prezzo Corriere (€)': Math.round(totCor * 100) / 100 } as any)
       const ws = utils.json_to_sheet(rows)
       const wb = utils.book_new()
       utils.book_append_sheet(wb, ws, 'Spedizioni')
@@ -159,6 +164,12 @@ export default function ReportSpedizioniPage() {
         const extra = (s.servizi_accessori||[]).map((e:any)=>`${e.nome}: €${Number(e.importo||0).toFixed(2)}`).join('; ')
         csv.push(`${s.numero},${s.clienti?.ragione_sociale||s.mitt_nome},${s.dest_nome},${s.dest_citta},${s.peso_reale},${s.colli},${s.contrassegno},${new Date(s.created_at).toLocaleDateString('it-IT')},${s.stato},${s.costo_totale},${s.cli_nolo??''},${s.cli_supplementi??''},${s.prezzo_corriere != null ? s.prezzo_corriere : ""},${d?d.nolo:''},${d?d.contrassegno:''},${d?d.assicurazione:''},${d?d.sponda:''},"${extra}"`)
       })
+      // Riga totali: SOLO Prezzo Cliente e Prezzo Corriere
+      const totCli = spedizioni.reduce((a: number, s: any) => a + Number(s.costo_totale || 0), 0)
+      const totCor = spedizioni.reduce((a: number, s: any) => a + Number(s.prezzo_corriere || 0), 0)
+      const rowT = Array(18).fill('')
+      rowT[8] = 'TOTALE'; rowT[9] = String(Math.round(totCli * 100) / 100); rowT[12] = String(Math.round(totCor * 100) / 100)
+      csv.push(''); csv.push(rowT.join(','))
       zip.file('spedizioni.csv', csv.join('\n'))
       const blob = await zip.generateAsync({type:'blob'})
       const url = URL.createObjectURL(blob)
