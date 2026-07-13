@@ -1,16 +1,16 @@
 client_id = "f7dfecdb8cb05f8874cd0db742121578"
-name = "SpedixPro"
-application_url = "https://spedixpro.vercel.app/cliente/integrazioni"
+name = "MoovExpress"
+application_url = "https://moovexpress.com/cliente/integrazioni"
 embedded = false
 
 [access_scopes]
-scopes = "read_orders,read_assigned_fulfillment_orders,read_merchant_managed_fulfillment_orders,read_third_party_fulfillment_orders"
+scopes = "read_orders,read_assigned_fulfillment_orders,read_merchant_managed_fulfillment_orders,read_third_party_fulfillment_orders,write_assigned_fulfillment_orders,write_merchant_managed_fulfillment_orders,write_third_party_fulfillment_orders"
 optional_scopes = [ ]
 use_legacy_install_flow = false
 
 [auth]
 redirect_urls = [
-  "https://spedixpro.vercel.app/api/integrazioni/shopify/callback"
+  "https://moovexpress.com/api/integrazioni/shopify/callback"
 ]
 
 [webhooks]
@@ -18,4 +18,4 @@ api_version = "2026-04"
 
 [[webhooks.subscriptions]]
 compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
-uri = "https://spedixpro.vercel.app/api/integrazioni/shopify/webhooks/compliance"
+uri = "https://moovexpress.com/api/integrazioni/shopify/webhooks/compliance"
