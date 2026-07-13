@@ -394,7 +394,7 @@ async function apriTracking(s: any) {
                       <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>—</td>
                       <td style={{padding:'9px 12px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
-                          <a href={`/dashboard/spedizioni/${s.id}/etichetta`} download
+                          <a href={`/api/spedizioni/etichetta?id=${s.id}`} target="_blank" rel="noopener noreferrer"
                             style={{padding:'4px 8px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #fed7aa'}} title="Etichetta">🖨️</a>
                           <button onClick={()=>setDettaglio(s)} title="Vedi dettagli spedizione" style={{padding:'4px 8px',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',fontSize:'14px',border:'1px solid #bfdbfe',cursor:'pointer'}}>👁</button>
                   
@@ -536,7 +536,7 @@ async function apriTracking(s: any) {
         </div>
       )}
 
-      {dettaglio && <DettaglioSpedizione s={dettaglio} onClose={()=>setDettaglio(null)} etichettaHref={`/dashboard/spedizioni/${dettaglio.id}/etichetta`} />}
+      {dettaglio && <DettaglioSpedizione s={dettaglio} onClose={()=>setDettaglio(null)} etichettaHref={`/api/spedizioni/etichetta?id=${dettaglio.id}`} />}
     </div>
   )
 }

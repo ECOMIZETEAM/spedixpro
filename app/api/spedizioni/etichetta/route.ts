@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
 
   const { data: sped } = await supabase
     .from('spedizioni')
-    .select('etichetta_url, colli_dettaglio, cliente_id, master_id, numero')
+    .select('etichetta_url, colli_dettaglio, cliente_id, master_id, numero, raw_response')
     .eq('id', id)
     .single()
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
@@ -30,6 +30,19 @@ export async function GET(req: NextRequest) {
     }
   } else if (utente?.master_id && sped.master_id !== utente.master_id) {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  }
+
+  // Caso spedisci.online: etichetta come labelData base64 dentro raw_response
+  const labelData = (sped.raw_response as any)?.labelData
+  if (labelData) {
+    return new NextResponse(Buffer.from(labelData, 'base64'), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `inline; filename="etichetta-${sped.numero || id}.pdf"`,
+        'Cache-Control': 'private, max-age=0, no-store',
+      },
+    })
   }
 
   // Sorgente etichetta: prima etichetta_url, poi primo collo con etichetta

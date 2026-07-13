@@ -9,6 +9,24 @@ import {
   spediamoproWaitForTracking, kgToGrams, cmToMm, euroToCents, centsToEuro,
 } from '@/lib/spediamopro'
 
+// GET /api/v1/shipments — elenca le spedizioni del cliente della API key (paginata).
+// Molti client "testano il collegamento" con una GET qui: senza questa si otteneva 405.
+export async function GET(req: NextRequest) {
+  const ctx = await autenticaApiKey(req)
+  if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
+  const admin = createAdminSupabase()
+  const url = new URL(req.url)
+  const limit = Math.min(200, Math.max(1, parseInt(url.searchParams.get('limit') || '50') || 50))
+  const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0') || 0)
+  const stato = url.searchParams.get('stato')
+  let q = admin.from('spedizioni')
+    .select('id,numero,tracking_number,stato,dest_nome,dest_citta,dest_provincia,dest_cap,dest_paese,colli,peso_reale,contrassegno,costo_totale,created_at', { count: 'exact' })
+    .eq('cliente_id', ctx.clienteId).order('created_at', { ascending: false }).range(offset, offset + limit - 1)
+  if (stato) q = q.eq('stato', stato)
+  const { data, count } = await q
+  return NextResponse.json({ shipments: data || [], count: count || 0, limit, offset })
+}
+
 // API pubblica MoovExpress — crea una spedizione sul contratto della API key.
 // Auth: Authorization: Bearer <api_key>
 // Body: { packages:[{weight,length,width,height}], shipFrom:{...}, shipTo:{...}, codValue?, insuranceValue?, notes?, contenuto? }
