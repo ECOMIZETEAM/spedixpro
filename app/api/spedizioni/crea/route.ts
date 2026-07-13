@@ -72,12 +72,20 @@ export async function POST(req: NextRequest) {
     if (!cliente.listino_cliente_id) return NextResponse.json({ error: 'Nessun contratto attivo' }, { status: 400 })
   }
 
-  // ── Blocco credito insufficiente (clienti/sotto-master "credito a scalare") ──
-  if (cliente && cliente.tipo_contratto === 'credito_scalare') {
+  // ── Blocco credito insufficiente ("credito a scalare"): vale per CLIENTE, SOTTO-MASTER e
+  //    MASTER su spedizione propria. Se il credito non copre il costo della spedizione, non si può
+  //    spedire (es. credito 2€ ma spedizione 3€). Il ROOT master (senza padre) è esente.
+  {
     const costoPreventivo = parseFloat(body.totalPrice) || 0
-    if (costoPreventivo > 0 && Number(cliente.credito || 0) < costoPreventivo) {
+    let tipoC = '', creditoC = 0, esente = false
+    if (cliente) { tipoC = cliente.tipo_contratto || ''; creditoC = Number(cliente.credito || 0) }
+    else if (isProprio) {
+      const { data: m } = await supabase.from('masters').select('tipo_contratto,credito,parent_master_id').eq('id', utente!.master_id).maybeSingle()
+      tipoC = (m as any)?.tipo_contratto || ''; creditoC = Number((m as any)?.credito || 0); esente = !(m as any)?.parent_master_id
+    }
+    if (!esente && tipoC === 'credito_scalare' && costoPreventivo > 0 && creditoC < costoPreventivo) {
       return NextResponse.json({
-        error: `Credito insufficiente: disponibili € ${Number(cliente.credito || 0).toFixed(2)}, spedizione € ${costoPreventivo.toFixed(2)}.`,
+        error: `Credito insufficiente: disponibili € ${creditoC.toFixed(2)}, spedizione € ${costoPreventivo.toFixed(2)}. Ricarica il credito per spedire.`,
       }, { status: 402 })
     }
   }
