@@ -93,8 +93,9 @@ export default function SpedizioniPage() {
       }
     }
     if (filtri.stato) filtered = filtered.filter(s => s.stato === filtri.stato)
-    if (filtri.contratto) filtered = filtered.filter(s => s.corriere_id === filtri.contratto)
-    if (filtri.vettore) filtered = filtered.filter(s => String(s.corrieri?.nome_contratto||'').split(' ')[0] === filtri.vettore)
+    // Match per NOME contratto (non per id): in rete i corrieri hanno id diversi ma stesso nome.
+    if (filtri.contratto) filtered = filtered.filter(s => String(s.corrieri?.nome_contratto||'') === filtri.contratto)
+    if (filtri.vettore) filtered = filtered.filter(s => String(s.corrieri?.nome_contratto||'').split(' ')[0].toUpperCase() === filtri.vettore)
     if (filtri.numero) filtered = filtered.filter(s => s.numero?.toLowerCase().includes(filtri.numero.toLowerCase()))
     if (filtri.id_ordine) filtered = filtered.filter(s => (s.note||'').toLowerCase().includes(filtri.id_ordine.toLowerCase()))
     if (filtri.dal) filtered = filtered.filter(s => new Date(s.created_at) >= new Date(filtri.dal))
@@ -108,6 +109,11 @@ export default function SpedizioniPage() {
     if (filtri.dest_citta) filtered = filtered.filter(s => s.dest_citta?.toLowerCase().includes(filtri.dest_citta.toLowerCase()))
     if (filtri.dest_cap) filtered = filtered.filter(s => s.dest_cap?.includes(filtri.dest_cap))
     if (filtri.contenuto) filtered = filtered.filter(s => s.contenuto?.toLowerCase().includes(filtri.contenuto.toLowerCase()))
+    if (filtri.assicurazione==='si') filtered = filtered.filter(s => Number(s.assicurazione)>0)
+    if (filtri.assicurazione==='no') filtered = filtered.filter(s => !(Number(s.assicurazione)>0))
+    if (filtri.fatturato==='si') filtered = filtered.filter(s => !!s.fatturato)
+    if (filtri.fatturato==='no') filtered = filtered.filter(s => !s.fatturato)
+    if (filtri.negozio) filtered = filtered.filter(s => String(s.canale||'') === filtri.negozio)
     setSpedizioniFiltrate(filtered)
   }
 
@@ -124,6 +130,11 @@ export default function SpedizioniPage() {
   const spedizioniPaginate = spedizioniVisibili.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
 
   const setF = (k: string, v: string) => setFiltri(f => ({...f, [k]: v}))
+
+  // Opzioni Vettore/Contratto dai corrieri REALMENTE presenti nelle spedizioni (così il filtro combacia sempre)
+  const vettoriPresenti = Array.from(new Set((spedizioni||[]).map((s:any)=>String(s.corrieri?.nome_contratto||'').split(' ')[0].toUpperCase()).filter(Boolean))).sort()
+  const contrattiPresenti = Array.from(new Set((spedizioni||[]).map((s:any)=>s.corrieri?.nome_contratto).filter(Boolean))).sort()
+  const negoziPresenti = Array.from(new Set((spedizioni||[]).map((s:any)=>s.canale).filter(Boolean))).sort()
 
   function toggleSelect(id: string) {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id])
@@ -245,18 +256,19 @@ async function apriTracking(s: any) {
           <div><label style={lbl}>Negozio</label>
             <select value={filtri.negozio} onChange={e=>setF('negozio',e.target.value)} style={sel}>
               <option value="">Tutti</option>
+              {negoziPresenti.map((n:any)=><option key={n} value={n}>{n}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Vettore</label>
             <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
               <option value="">Tutti</option>
-              {Array.from(new Set(corrieri.map((c:any)=>String(c.nome_contratto||'').split(' ')[0]))).filter(Boolean).map((v:any)=><option key={v} value={v}>{v}</option>)}
+              {vettoriPresenti.map((v:any)=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Contratto</label>
             <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={sel}>
               <option value="">Tutti</option>
-              {corrieri.filter((c:any)=>!filtri.vettore || String(c.nome_contratto||'').split(' ')[0]===filtri.vettore).map((c:any)=><option key={c.id} value={c.id}>{c.nome_contratto}</option>)}
+              {contrattiPresenti.filter((n:any)=>!filtri.vettore || String(n||'').split(' ')[0].toUpperCase()===filtri.vettore).map((n:any)=><option key={n} value={n}>{n}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Stato</label>

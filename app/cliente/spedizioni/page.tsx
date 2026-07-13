@@ -92,6 +92,13 @@ export default function SpedizioniPage() {
     if (filtri.dest_citta) filtered = filtered.filter(s => s.dest_citta?.toLowerCase().includes(filtri.dest_citta.toLowerCase()))
     if (filtri.dest_cap) filtered = filtered.filter(s => s.dest_cap?.includes(filtri.dest_cap))
     if (filtri.contenuto) filtered = filtered.filter(s => s.contenuto?.toLowerCase().includes(filtri.contenuto.toLowerCase()))
+    if (filtri.contratto) filtered = filtered.filter(s => String(s.corrieri?.nome_contratto||'') === filtri.contratto)
+    if (filtri.vettore) filtered = filtered.filter(s => String(s.corrieri?.nome_contratto||'').split(' ')[0].toUpperCase() === filtri.vettore)
+    if (filtri.assicurazione==='si') filtered = filtered.filter(s => Number(s.assicurazione)>0)
+    if (filtri.assicurazione==='no') filtered = filtered.filter(s => !(Number(s.assicurazione)>0))
+    if (filtri.fatturato==='si') filtered = filtered.filter(s => !!s.fatturato)
+    if (filtri.fatturato==='no') filtered = filtered.filter(s => !s.fatturato)
+    if (filtri.negozio) filtered = filtered.filter(s => String(s.canale||'') === filtri.negozio)
     setSpedizioniFiltrate(filtered)
   }
 
@@ -108,6 +115,11 @@ export default function SpedizioniPage() {
   const spedizioniPaginate = spedizioniVisibili.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
 
   const setF = (k: string, v: string) => setFiltri(f => ({...f, [k]: v}))
+
+  // Opzioni Vettore/Contratto/Negozio dai corrieri realmente presenti nelle spedizioni
+  const vettoriPresenti = Array.from(new Set((spedizioni||[]).map((s:any)=>String(s.corrieri?.nome_contratto||'').split(' ')[0].toUpperCase()).filter(Boolean))).sort()
+  const contrattiPresenti = Array.from(new Set((spedizioni||[]).map((s:any)=>s.corrieri?.nome_contratto).filter(Boolean))).sort()
+  const negoziPresenti = Array.from(new Set((spedizioni||[]).map((s:any)=>s.canale).filter(Boolean))).sort()
 
   function toggleSelect(id: string) {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id])
@@ -198,16 +210,19 @@ async function apriTracking(s: any) {
           <div><label style={lbl}>Negozio</label>
             <select value={filtri.negozio} onChange={e=>setF('negozio',e.target.value)} style={sel}>
               <option value="">Tutti</option>
+              {negoziPresenti.map((n:any)=><option key={n} value={n}>{n}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Vettore</label>
             <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
               <option value="">Tutti</option>
+              {vettoriPresenti.map((v:any)=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Contratto</label>
             <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={sel}>
               <option value="">Tutti</option>
+              {contrattiPresenti.filter((n:any)=>!filtri.vettore || String(n||'').split(' ')[0].toUpperCase()===filtri.vettore).map((n:any)=><option key={n} value={n}>{n}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Stato</label>
