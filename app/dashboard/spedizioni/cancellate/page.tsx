@@ -18,6 +18,8 @@ export default function SpedizioniCancellatePage() {
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
   const [filtroCliente, setFiltroCliente] = useState('')
+  const [dal, setDal] = useState('')
+  const [al, setAl] = useState('')
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
   const [ripristinando, setRipristinando] = useState<string | null>(null)
@@ -65,6 +67,9 @@ export default function SpedizioniCancellatePage() {
 
   const visibili = spedizioni.filter(s => {
     if (filtroCliente && (s.clienti?.ragione_sociale || '') !== filtroCliente) return false
+    const data = new Date(s.updated_at || s.created_at)
+    if (dal && data < new Date(dal + 'T00:00:00')) return false
+    if (al && data > new Date(al + 'T23:59:59')) return false
     if (cerca) {
       const q = cerca.toLowerCase()
       return s.numero?.toLowerCase().includes(q) ||
@@ -74,6 +79,7 @@ export default function SpedizioniCancellatePage() {
     }
     return true
   })
+  const filtriAttivi = !!(filtroCliente || dal || al || cerca)
 
   const totalePagine = Math.max(1, Math.ceil(visibili.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
@@ -85,6 +91,42 @@ export default function SpedizioniCancellatePage() {
         <div>
           <a href="/dashboard/spedizioni" style={{fontSize:'12px',color:'#f97316',textDecoration:'none'}}>{'←'} Lista Spedizioni</a>
           <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:'4px 0 0'}}>Spedizioni Cancellate</h1>
+        </div>
+      </div>
+
+      {/* FILTRI (sulla sezione Annullate) */}
+      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',padding:'14px 16px',marginBottom:'16px'}}>
+        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'10px',display:'flex',alignItems:'center',gap:'6px'}}>
+          <span>▽</span> Filtri
+        </div>
+        <div style={{display:'flex',gap:'12px',flexWrap:'wrap',alignItems:'flex-end'}}>
+          <div style={{minWidth:'180px',flex:'1 1 180px'}}>
+            <label style={{fontSize:'11px',fontWeight:'600',color:'#999',textTransform:'uppercase',letterSpacing:'0.4px',display:'block',marginBottom:'4px'}}>Cliente</label>
+            <select value={filtroCliente} onChange={e=>{setFiltroCliente(e.target.value);setPagina(1)}}
+              style={{padding:'8px 10px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',width:'100%',boxSizing:'border-box'}}>
+              <option value="">Tutti i clienti</option>
+              {clientiFiltro.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div style={{flex:'0 0 auto'}}>
+            <label style={{fontSize:'11px',fontWeight:'600',color:'#999',textTransform:'uppercase',letterSpacing:'0.4px',display:'block',marginBottom:'4px'}}>Dal</label>
+            <input type="date" value={dal} onChange={e=>{setDal(e.target.value);setPagina(1)}}
+              style={{padding:'7px 10px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}/>
+          </div>
+          <div style={{flex:'0 0 auto'}}>
+            <label style={{fontSize:'11px',fontWeight:'600',color:'#999',textTransform:'uppercase',letterSpacing:'0.4px',display:'block',marginBottom:'4px'}}>Al</label>
+            <input type="date" value={al} onChange={e=>{setAl(e.target.value);setPagina(1)}}
+              style={{padding:'7px 10px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}/>
+          </div>
+          <div style={{minWidth:'200px',flex:'1 1 200px'}}>
+            <label style={{fontSize:'11px',fontWeight:'600',color:'#999',textTransform:'uppercase',letterSpacing:'0.4px',display:'block',marginBottom:'4px'}}>Cerca</label>
+            <input value={cerca} onChange={e=>{setCerca(e.target.value);setPagina(1)}} placeholder="N. spedizione, destinatario, città..."
+              style={{padding:'8px 10px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',width:'100%',color:'#1a1a1a',background:'#fff',boxSizing:'border-box'}}/>
+          </div>
+          {filtriAttivi && (
+            <button onClick={()=>{setFiltroCliente('');setDal('');setAl('');setCerca('');setPagina(1)}}
+              style={{padding:'8px 14px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>Azzera</button>
+          )}
         </div>
       </div>
 
@@ -178,21 +220,7 @@ export default function SpedizioniCancellatePage() {
               </select>{' '}elementi
             </span>
           </div>
-          <div style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
-            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-              <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Cliente:</span>
-              <select value={filtroCliente} onChange={e=>{setFiltroCliente(e.target.value);setPagina(1)}}
-                style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff',maxWidth:'200px'}}>
-                <option value="">Tutti i clienti</option>
-                {clientiFiltro.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-              <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Cerca:</span>
-              <input value={cerca} onChange={e=>{setCerca(e.target.value);setPagina(1)}} placeholder="N. spedizione, destinatario, città..."
-                style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',width:'220px',color:'#1a1a1a',background:'#fff'}}/>
-            </div>
-          </div>
+          <span style={{fontSize:'12px',color:'#666'}}>{visibili.length} risultati</span>
         </div>
 
         {loading ? (
