@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import FlashBanner from './FlashBanner'
+import Moovy from './Moovy'
 
 // perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
 // always: sempre visibile a chiunque abbia accesso al portale.
@@ -305,6 +306,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
           {children}
         </main>
       </div>
+      <Moovy />
     </div>
   )
 }

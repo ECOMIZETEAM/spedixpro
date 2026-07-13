@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import ClienteNav from './ClienteNav'
+import Moovy from '../components/Moovy'
 
 export default function ClienteShell({ cliente, children }: { cliente: { ragione_sociale?: string | null; credito?: number | null }; children: React.ReactNode }) {
   const path = usePathname() || ''
@@ -67,6 +68,7 @@ export default function ClienteShell({ cliente, children }: { cliente: { ragione
           {children}
         </main>
       </div>
+      <Moovy />
     </div>
   )
 }
