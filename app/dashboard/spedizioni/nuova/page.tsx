@@ -133,11 +133,15 @@ export default function NuovaSpedizionePage() {
   }
 
   function buildPackages() {
+    // "Peso totale" = peso dell'intera spedizione, NON per collo: lo distribuisco equamente
+    // tra i colli così la somma dei pesi = il totale inserito (niente peso × numero colli).
+    const n = Math.max(1, colli.length)
+    const pesoPerCollo = (+peso || 0) / n
     return colli.map(c => ({
       length: +c.lunghezza||20,
       width: +c.larghezza||15,
       height: +c.altezza||10,
-      weight: +peso
+      weight: pesoPerCollo
     }))
   }
 
