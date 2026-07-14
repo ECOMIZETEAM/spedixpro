@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
+import { siglaProvincia } from '@/lib/province-it'
 
 export const runtime = 'nodejs'
 
@@ -204,7 +205,7 @@ export async function POST(req: NextRequest) {
       indirizzo: ind,
       cap,
       localita: loc,
-      provincia: prov.length <= 4 ? prov.toUpperCase() : prov,
+      provincia: siglaProvincia(prov),   // Amazon esporta il nome esteso ("Milano") -> sigla ("MI")
       country: (g(r, 'country').toUpperCase()) || 'IT',
       telefono: g(r, 'telefono') || null,
       email_destinatario: g(r, 'email_destinatario') || null,
