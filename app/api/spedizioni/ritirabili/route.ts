@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
+import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
 
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
 
   const admin = createAdminSupabase()
@@ -30,6 +31,8 @@ export async function GET(req: NextRequest) {
     .limit(1000)
 
   if (isCliente) query = query.eq('cliente_id', utente.cliente_id)
+  // Agente: solo spedizioni dei suoi clienti.
+  if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
 
   const { data: spedizioni, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
@@ -48,8 +51,8 @@ export async function GET(req: NextRequest) {
       for (const m of (ms || [])) mastMap.set(m.id, m.nome || '—')
     }
     if (cIds.length) {
-      const { data: cs } = await admin.from('clienti').select('id,nome,ragione_sociale').in('id', cIds)
-      for (const c of (cs || [])) cliMap.set(c.id, c.ragione_sociale || c.nome || '—')
+      const { data: cs } = await admin.from('clienti').select('id,ragione_sociale').in('id', cIds)
+      for (const c of (cs || [])) cliMap.set(c.id, c.ragione_sociale || '—')
     }
   }
 

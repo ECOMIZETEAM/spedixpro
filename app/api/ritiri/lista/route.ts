@@ -6,8 +6,19 @@ export async function GET(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
 
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
+
+  // Agente: solo i ritiri dei suoi clienti.
+  if ((utente.ruolo || '').toLowerCase() === 'agente') {
+    const { isAgente, clientiAgente, idClientiPerFiltro } = await import('@/lib/agente')
+    const ids = idClientiPerFiltro(await clientiAgente(supabase, utente))
+    const { data: ritiri, error } = await supabase.from('ritiri').select('*, clienti(ragione_sociale)')
+      .eq('master_id', utente.master_id).in('cliente_id', ids)
+      .order('created_at', { ascending: false })
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    return NextResponse.json(ritiri || [])
+  }
 
   // Cliente: solo i propri ritiri.
   if (utente.ruolo === 'cliente') {

@@ -36,6 +36,7 @@ export default function NuovoRitiroPage() {
   const [saving, setSaving] = useState(false)
   const [progresso, setProgresso] = useState<{done:number,total:number}|null>(null)
   const [errore, setErrore] = useState('')
+  const [clientiAddr, setClientiAddr] = useState<Map<string, any>>(new Map())
 
   useEffect(() => {
     fetch('/api/spedizioni/ritirabili').then(r => r.json()).then(d => {
@@ -56,7 +57,32 @@ export default function NuovoRitiroPage() {
     const oggi = new Date()
     oggi.setDate(oggi.getDate() + 1)
     setDataRitiro(oggi.toISOString().split('T')[0])
+
+    // Indirizzi dei clienti (e sotto-master) per l'auto-compilazione del mittente.
+    fetch('/api/clienti/lista?conMaster=1').then(r => r.json()).then((arr: any[]) => {
+      const m = new Map<string, any>()
+      for (const c of (Array.isArray(arr) ? arr : [])) m.set(String(c.id).replace(/^m:/, ''), c)
+      setClientiAddr(m)
+    }).catch(() => {})
   }, [])
+
+  // Seleziono un cliente nel filtro -> auto-compilo il mittente col SUO indirizzo (come Nuova Spedizione).
+  useEffect(() => {
+    if (!fCliente) return
+    const c = clientiAddr.get(fCliente)
+    if (!c) return
+    setMittNome(c.ragione_sociale || c.nome || '')
+    const ind = c.so_indirizzo || c.indirizzo_operativo || c.indirizzo
+    const cit = c.so_citta || c.citta_operativo || c.citta
+    const prov = c.so_provincia || c.provincia_operativo || c.provincia
+    const cap = c.so_cap || c.cap_operativo || c.cap
+    if (ind) setMittIndirizzo(ind)
+    if (cit) setMittCitta(cit)
+    if (prov) setMittProvincia(prov)
+    if (cap) setMittCap(cap)
+    if (c.telefono) setMittTelefono(c.telefono)
+    if (c.email) setMittEmail(c.email)
+  }, [fCliente, clientiAddr])
 
   // Opzioni per i filtri (calcolate sulle spedizioni caricate)
   const optClienti = useMemo(() => {

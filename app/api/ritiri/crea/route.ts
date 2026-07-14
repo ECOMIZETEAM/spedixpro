@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { spediamoproCreatePickup, spediamoproWaitPickupCode } from '@/lib/spediamopro'
+import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 
 function normalizzaOrario(v: any): string | null {
   if (!v) return null
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
 
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
 
   let body: any
@@ -75,6 +76,8 @@ export async function POST(req: NextRequest) {
     .select('id,raw_response,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_email,master_id,cliente_id')
     .in('id', spedizioneIds).in('master_id', masterIdsAmmessi)
   if (isCliente) spedQuery = spedQuery.eq('cliente_id', utente.cliente_id)
+  // Agente: può ritirare solo spedizioni dei suoi clienti.
+  if (isAgente(utente)) spedQuery = spedQuery.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
   const { data: spedizioni } = await spedQuery
   if (!spedizioni?.length) return NextResponse.json({ error: 'Spedizioni non trovate' }, { status: 400 })
 
