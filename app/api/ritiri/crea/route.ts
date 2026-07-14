@@ -38,6 +38,19 @@ function pulisciTelefono(v: any): string | undefined {
   return d || undefined
 }
 
+// Messaggio d'errore ritiro PULITO da mostrare all'utente: mai il nome del provider
+// (SpediamoPro/Spedisci) né il JSON/ID tecnici. Estrae il messaggio umano del corriere.
+function erroreRitiroPulito(raw: any): string {
+  const s = String(raw?.message ?? raw ?? '')
+  let msg = ''
+  const j = s.match(/\{[\s\S]*\}/)          // c'è un JSON del corriere?
+  if (j) { try { const o = JSON.parse(j[0]); msg = o?.error?.message || o?.message || (typeof o?.error === 'string' ? o.error : '') || '' } catch {} }
+  if (!msg) msg = s.replace(/^.*?failed[^:]*:\s*/i, '').replace(/\{[\s\S]*\}/, '').trim()
+  msg = msg.replace(/spediamo\s*pro/ig, '').replace(/spedisci(\.online)?/ig, '').replace(/\s{2,}/g, ' ').trim()
+  if (!msg || msg.startsWith('{') || /^\(?\d{3}\)?$/.test(msg)) msg = 'Ritiro non disponibile per questa spedizione.'
+  return msg
+}
+
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -153,7 +166,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ id: nuovoRitiro.id, pickupId: pk.code || pk.id })
     } catch (e: any) {
       console.log('[RITIRO][SPEDIAMOPRO] errore:', e?.message)
-      return NextResponse.json({ error: e?.message || 'Errore creazione ritiro SpediamoPro' }, { status: 400 })
+      return NextResponse.json({ error: erroreRitiroPulito(e) }, { status: 400 })
     }
   }
 
@@ -225,7 +238,7 @@ export async function POST(req: NextRequest) {
   let r: any
   try { r = JSON.parse(text) } catch { r = { error: text.substring(0, 300) } }
   if (!res.ok || r.error) {
-    return NextResponse.json({ error: r?.error || `Errore ${res.status}` }, { status: 400 })
+    return NextResponse.json({ error: erroreRitiroPulito(r?.error || `Errore ${res.status}`) }, { status: 400 })
   }
 
   const { data: nuovoRitiro, error: insertError } = await salvaRitiro(r.pickupId)
