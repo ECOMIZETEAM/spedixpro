@@ -7,11 +7,12 @@ export async function GET(_req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
-  const { data: me } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: me } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   if (!me?.master_id) return NextResponse.json([])
+  if ((me.ruolo || '').toLowerCase() === 'agente') return NextResponse.json([])   // l'agente non vede lo staff
 
   const { data: utenti } = await supabase.from('utenti')
-    .select('id,nome,cognome,telefono,ruolo,attivo,created_at')
+    .select('id,nome,cognome,telefono,ruolo,attivo,created_at,listino_agente_id')
     .eq('master_id', me.master_id)
     .order('nome', { ascending: true })
 
@@ -36,6 +37,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: me } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   if (!me?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
+  if ((me.ruolo || '').toLowerCase() === 'agente') return NextResponse.json({ error: 'Non consentito' }, { status: 403 })
 
   const body = await req.json()
   const { nome, ruolo, email } = body
@@ -84,8 +86,9 @@ export async function PUT(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: me } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: me } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   if (!me?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
+  if ((me.ruolo || '').toLowerCase() === 'agente') return NextResponse.json({ error: 'Non consentito' }, { status: 403 })
 
   const body = await req.json()
   const { id, resetPassword, nuova_email } = body
@@ -132,6 +135,16 @@ export async function PUT(req: NextRequest) {
   if (typeof body.telefono === 'string') anagrafica.telefono = body.telefono.trim() || null
   if (body.ruolo && ['admin', 'operatore', 'agente'].includes(String(body.ruolo).toLowerCase())) anagrafica.ruolo = String(body.ruolo).toLowerCase()
   if (typeof body.attivo === 'boolean') anagrafica.attivo = body.attivo
+  // Listino agente (costo dell'agente): un listino cliente di proprietà del master.
+  if ('listino_agente_id' in body) {
+    const lid = body.listino_agente_id || null
+    if (lid) {
+      const { data: lk } = await admin.from('listini_clienti').select('id').eq('id', lid).eq('master_id', me.master_id).maybeSingle()
+      anagrafica.listino_agente_id = lk?.id || null
+    } else {
+      anagrafica.listino_agente_id = null
+    }
+  }
   if (Object.keys(anagrafica).length) {
     const { error } = await admin.from('utenti').update(anagrafica).eq('id', id).eq('master_id', me.master_id)
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
@@ -144,7 +157,8 @@ export async function DELETE(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: me } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: me } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  if ((me?.ruolo || '').toLowerCase() === 'agente') return NextResponse.json({ error: 'Non consentito' }, { status: 403 })
   const id = req.nextUrl.searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
   const admin = createAdminSupabase()

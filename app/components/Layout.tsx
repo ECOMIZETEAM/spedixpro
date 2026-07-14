@@ -7,8 +7,8 @@ import Moovy from './Moovy'
 // perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
 // always: sempre visibile a chiunque abbia accesso al portale.
 // rete: visibile solo ai master che possono gestire la propria rete di sotto-master.
-type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean }
-type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, external?: boolean, sub?: NavSub[] }
+type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean, agente?: boolean }
+type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, external?: boolean, agente?: boolean, sub?: NavSub[] }
 
 const NAV: NavItem[] = [
   { label: 'Spedizioni', href: '/dashboard/spedizioni', icon: '◫', sub: [
@@ -40,6 +40,7 @@ const NAV: NavItem[] = [
     { label: 'POD', href: '/dashboard/assistenza/pod', always: true },
   ]},
   { label: 'Tracking Interno', href: '/dashboard/tracking', icon: '◎', perm: 'admin.interno.deliveries.out' },
+  { label: 'Il mio listino', href: '/dashboard/listini/mio', icon: '€', agente: true },
   { label: 'Listini Prezzi', href: '/dashboard/listini', icon: '€', sub: [
     { label: 'Nuovo Listino', href: '/dashboard/listini/clienti/nuovo', perm: 'admin.pricelists.create' },
     { label: 'Listini Clienti', href: '/dashboard/listini', perm: 'admin.pricelists.index' },
@@ -98,11 +99,13 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   const isFull = user?.isFull ?? true
   const gestioneRete = user?.gestioneRete ?? false
   const permessi = user?.permessi || {}
+  const ruolo = (user?.ruolo || '').toLowerCase()
 
   // Un elemento e visibile se: admin/master (isFull), oppure marcato always,
   // oppure ha una chiave permesso attiva. Senza perm e non-full = nascosto (solo admin).
   // Le voci "rete" (gestione sotto-master) richiedono in più il flag gestioneRete.
-  const puoVedere = (x: { perm?: string, always?: boolean, rete?: boolean }) => {
+  const puoVedere = (x: { perm?: string, always?: boolean, rete?: boolean, agente?: boolean }) => {
+    if (x.agente) return ruolo === 'agente'   // voce esclusiva dell'agente (mai al master)
     if (x.rete && !gestioneRete) return false
     return isFull || x.always === true || (!!x.perm && permessi[x.perm] === true)
   }

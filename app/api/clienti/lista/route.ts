@@ -56,8 +56,9 @@ export async function GET(req: NextRequest) {
     }).map((co:any)=>({ nome_contratto: co.nome_contratto, tipo: co.tipo }))
     return { ...c, contratti_attivi: attivi, negozi: negoziMap.get(c.id) || [] }
   })
-  if (conMaster && utente?.master_id) {
+  if (conMaster && utente?.master_id && !isAgente(utente)) {
     // I sotto-master agganciati compaiono come pseudo-clienti (id = "m:<masterId>")
+    // (mai per l'agente: non deve vedere la rete/sotto-master)
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const admin = createAdminSupabase()
     const { data: figli } = await admin.from('masters')

@@ -23,6 +23,8 @@ export default function ModificaStaffPage() {
   const [email, setEmail] = useState('')
   const [resetPassword, setResetPassword] = useState(false)
   const [passwordMostrata, setPasswordMostrata] = useState('')
+  const [listinoAgente, setListinoAgente] = useState('')
+  const [listini, setListini] = useState<any[]>([])
 
   useEffect(() => {
     fetch('/api/staff').then(r => r.json()).then((arr: any[]) => {
@@ -30,13 +32,15 @@ export default function ModificaStaffPage() {
       if (!s) { setErrore('Collaboratore non trovato'); setLoading(false); return }
       setNome(s.nome || ''); setCognome(s.cognome || ''); setTelefono(s.telefono || '')
       setRuolo((s.ruolo || 'operatore').toLowerCase()); setEmailOrig(s.email || ''); setEmail(s.email || '')
+      setListinoAgente(s.listino_agente_id || '')
       setLoading(false)
     }).catch(() => { setErrore('Errore caricamento'); setLoading(false) })
+    fetch('/api/listini/lista').then(r => r.json()).then((arr: any[]) => setListini(Array.isArray(arr) ? arr : [])).catch(() => {})
   }, [id])
 
   async function salva() {
     setSaving(true); setErrore(''); setMsg(''); setPasswordMostrata('')
-    const body: any = { id, nome, cognome, telefono, ruolo }
+    const body: any = { id, nome, cognome, telefono, ruolo, listino_agente_id: ruolo === 'agente' ? (listinoAgente || null) : null }
     if (email.trim() && email.trim().toLowerCase() !== emailOrig.trim().toLowerCase()) body.nuova_email = email.trim()
     if (resetPassword) body.resetPassword = true
     const res = await fetch('/api/staff', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -77,6 +81,16 @@ export default function ModificaStaffPage() {
                 <option value="agente">Agente</option>
               </select></div>
           </div>
+          {ruolo === 'agente' && (
+            <div>
+              <label style={lbl}>Listino agente (il suo costo)</label>
+              <select style={inp} value={listinoAgente} onChange={e=>setListinoAgente(e.target.value)}>
+                <option value="">— nessuno —</option>
+                {listini.map((l:any)=><option key={l.id} value={l.id}>{l.nome}</option>)}
+              </select>
+              <div style={{fontSize:'11px',color:'#8a8a8a',marginTop:'4px'}}>L&apos;agente lo vede in sola lettura in &quot;Il mio listino&quot;. Il suo margine = prezzo cliente − questo costo.</div>
+            </div>
+          )}
         </div>
       </div>
 
