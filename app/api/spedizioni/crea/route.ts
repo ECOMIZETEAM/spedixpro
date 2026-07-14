@@ -174,7 +174,9 @@ export async function POST(req: NextRequest) {
     }
   }
   const pkg = packages[0]
-  const pesoReale = parseFloat(pkg?.weight || 1)
+  // Peso reale = SOMMA di tutti i colli (multicollo), non solo il primo: il costo della spedizione
+  // propria (costoMaster) deve coincidere col movimento a cascata, che usa già la somma.
+  const pesoReale = packages.reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
 
   // Spedizione propria del master: prezzo dal listino corriere (server-side, non ci fidiamo del body).
   let costoMaster = 0
@@ -477,6 +479,7 @@ export async function POST(req: NextRequest) {
         dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
         dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
         colli: packages.length, peso_reale: (packages.reduce((s:number,p:any)=>s+(parseFloat(p?.weight)||0),0) || pesoReale),
+        peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
         lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
         contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
         tracking_number: numeroFinale,

@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
 
   const { data: sped } = await supabase
     .from('spedizioni')
-    .select('etichetta_url, colli_dettaglio, cliente_id, master_id, numero, raw_response')
+    .select('etichetta_url, colli_dettaglio, cliente_id, master_id, numero, raw_response, corriere_id')
     .eq('id', id)
     .single()
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
@@ -56,6 +56,28 @@ export async function GET(req: NextRequest) {
   if (!src && Array.isArray(sped.colli_dettaglio)) {
     src = (sped.colli_dettaglio as any[]).find(c => c?.etichetta_url)?.etichetta_url || null
   }
+
+  // Fallback SpediamoPro: se l'etichetta non è stata salvata alla creazione (es. non pronta subito
+  // per il multicollo), la scarichiamo ORA dall'API col shipment id, e la salviamo per le prossime.
+  if (!src) {
+    const shipId = (sped.raw_response as any)?.id || (sped.raw_response as any)?.shipmentId
+    if (shipId && (sped as any).corriere_id) {
+      const { data: corr } = await supabase.from('corrieri').select('tipo,credenziali').eq('id', (sped as any).corriere_id).maybeSingle()
+      const authcode = (corr?.credenziali as any)?.authcode
+      if (corr?.tipo === 'spediamopro' && authcode) {
+        try {
+          const { spediamoproGetLabel } = await import('@/lib/spediamopro')
+          const buf = await spediamoproGetLabel(authcode, Number(shipId))
+          const head = buf.subarray(0, 4).toString('latin1')
+          const mime = head.startsWith('%PDF') ? 'application/pdf' : head.startsWith('GIF8') ? 'image/gif' : 'application/pdf'
+          const ext = mime === 'image/gif' ? 'gif' : 'pdf'
+          try { const { createAdminSupabase } = await import('@/lib/supabase-admin'); await createAdminSupabase().from('spedizioni').update({ etichetta_url: `data:${mime};base64,${buf.toString('base64')}` }).eq('id', id) } catch {}
+          return new NextResponse(new Uint8Array(buf), { status: 200, headers: { 'Content-Type': mime, 'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.${ext}"`, 'Cache-Control': 'private, max-age=0, no-store' } })
+        } catch (e) { /* prosegue al 404 */ }
+      }
+    }
+  }
+
   if (!src) return NextResponse.json({ error: 'Etichetta non disponibile' }, { status: 404 })
 
   const filename = `etichetta-${sped.numero || id}.pdf`
