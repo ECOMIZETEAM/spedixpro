@@ -445,9 +445,11 @@ export async function POST(req: NextRequest) {
   // DIAGNOSTICA TEMPORANEA: mostra quali corrieri arrivano dalla query (null = nascosto da RLS),
   // quali passano il match zona e quanti gruppi risultano. Da rimuovere dopo la verifica.
   try {
-    const rawCorr = Array.from(new Set((fasce || []).map((f: any) => ((f.corrieri?.nome_contratto || '∅NULL') + '/' + (f.corrieri?.tipo || '-')))))
-    const zonaCorr = Array.from(new Set((fasceZona || []).map((f: any) => ((f.corrieri?.nome_contratto || '∅NULL') + '@' + (f.zone?.nome || '?')))))
-    console.log('[TAR-DIAG]', 'cliente=' + clienteId, 'cap=' + capDest, 'prov=' + provincia, 'peso=' + pesoReale, '| rawFasceCorrieri=' + JSON.stringify(rawCorr), '| fasceZona=' + JSON.stringify(zonaCorr), '| perCorriere=' + fascePerCorriere.size)
+    const rawZone = Array.from(new Set((fasce || []).map((f: any) => ((f.corrieri?.nome_contratto || '∅C') + '|zonaEmbed=' + (f.zone ? (f.zone.nome + ':' + String(f.zone.id).slice(0, 8)) : 'NULL') + '|zona_id=' + String((f as any).zona_id || '').slice(0, 8)))))
+    console.log('[TAR-DIAG2]', 'cliente=' + clienteId, 'cap=' + capDest, 'prov=' + provincia,
+      '| zoneMatchIds=' + JSON.stringify((zoneMatchIds || []).map((z: string) => String(z).slice(0, 8))),
+      '| rawZone=' + JSON.stringify(rawZone),
+      '| fasceZona=' + JSON.stringify(Array.from(new Set((fasceZona || []).map((f: any) => ((f.corrieri?.nome_contratto || '∅') + '@' + (f.zone?.nome || '?')))))))
   } catch {}
 
   const risultati: any[] = []
