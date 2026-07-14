@@ -53,6 +53,7 @@ const NAV_BASE: NavItem[] = [
       { label: 'Report Contrassegni', href: '/cliente/reports/contrassegni' },
       { label: 'Report Consumabili', href: '/cliente/reports/consumabili' },
       { label: 'Report Rettifiche', href: '/cliente/reports/rettifiche' },
+      { label: 'Report Marketplace', href: '/cliente/reports/marketplace' },
     ],
   },
   {
