@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
 
   // Funzione comune di salvataggio su DB
   async function salvaRitiro(pickupCode: string) {
-    return await admin.from('ritiri').insert({
+    const r = await admin.from('ritiri').insert({
       master_id: masterId, cliente_id: clienteId, corriere_id: corriere!.id,
       tracking_ritiro: pickupCode || null, cod_ritiro: pickupCode || null,
       mitt_nome: body.mittNome, mitt_indirizzo: body.mittIndirizzo, mitt_citta: body.mittCitta,
@@ -95,6 +95,9 @@ export async function POST(req: NextRequest) {
       colli: colliTotali, peso: pesoTotale, contenuto: body.contenuto || null,
       data_ritiro: body.dataRitiro, stato: 'richiesto',
     }).select().single()
+    // Marco le spedizioni come "messe in un ritiro" -> escono dai ritirabili (niente doppioni).
+    if (r.data?.id) { try { await admin.from('spedizioni').update({ ritiro_id: r.data.id }).in('id', spedizioneIds) } catch {} }
+    return r
   }
 
   // ══════════════════════════════════════════════════════

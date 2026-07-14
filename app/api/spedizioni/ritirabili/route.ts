@@ -17,11 +17,15 @@ export async function GET(req: NextRequest) {
   // Master: vede tutta la propria rete (sotto-albero). Cliente: solo le proprie.
   const masterIds = isCliente ? [utente.master_id] : await sottoAlberoMasterIds(admin, utente.master_id)
 
+  // Ritirabile = non ancora messa in un ritiro (ritiro_id null) e non consegnata/annullata.
+  // Prima filtravamo solo 'in_lavorazione', ma il tracking/marketplace sposta lo stato a
+  // 'spedita'/'in_transito' anche se il corriere NON l'ha ancora ritirata -> spariva dai ritirabili.
   let query = admin
     .from('spedizioni')
     .select('id,numero,dest_nome,dest_citta,colli,peso_reale,corriere_id,cliente_id,master_id,raw_response,created_at,corrieri(tipo,nome_contratto)')
     .in('master_id', masterIds)
-    .eq('stato', 'in_lavorazione')
+    .in('stato', ['in_lavorazione', 'spedita', 'in_transito'])
+    .is('ritiro_id', null)
     .order('created_at', { ascending: false })
     .limit(1000)
 
