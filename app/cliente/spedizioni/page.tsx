@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AssistenzaTicketButton from '@/app/components/AssistenzaTicketButton'
 import DettaglioSpedizione from '@/app/components/DettaglioSpedizione'
+import { fmtPeso } from '@/lib/peso'
 
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
@@ -386,7 +387,7 @@ async function apriTracking(s: any) {
                         <div style={{color:'#1a1a1a',fontWeight:'500'}}>{s.dest_nome}</div>
                         <div style={{color:'#1a1a1a',fontSize:'11px'}}>{s.dest_citta}, {s.dest_provincia}({s.dest_cap}), {s.dest_paese}</div>
                       </td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.peso_reale}kg</td>
+                      <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{fmtPeso(s)}</td>
                       <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.colli}</td>
                       <td style={{padding:'9px 12px',color:'#1a1a1a'}}>
                         {Number(s.contrassegno)>0
