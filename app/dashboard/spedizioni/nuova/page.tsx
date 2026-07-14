@@ -86,6 +86,8 @@ export default function NuovaSpedizionePage() {
   }, [dest, mitt, clienteId, peso, colli, numColli, contrassegno, assicurazione])
 
   useEffect(() => { fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[])) }, [])
+  const [isAgente, setIsAgente] = useState(false)
+  useEffect(() => { fetch('/api/permessi').then(r=>r.json()).then(d=>setIsAgente((d?.ruolo||'')==='agente')).catch(()=>{}) }, [])
 
   // Mittente predefinito dai dati aziendali (Impostazioni Azienda). Usa l'indirizzo
   // operativo se presente, altrimenti la sede legale.
@@ -255,7 +257,7 @@ export default function NuovaSpedizionePage() {
                 <label style={lbl}>Cliente *</label>
                 <select value={clienteId} onChange={e=>selezionaCliente(e.target.value)} style={inp}>
                   <option value="">— seleziona cliente —</option>
-                  <option value="__proprio__">— Spedizione propria (nessun cliente) —</option>
+                  {!isAgente && <option value="__proprio__">— Spedizione propria (nessun cliente) —</option>}
                   {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}{c.is_master?' — sotto-master':''}</option>)}
                 </select>
               </div>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { creaCalcolatoreListinoCliente } from '@/lib/pricing'
 
 // Report spedizioni dal punto di vista del MASTER LOGGATO (report margine):
 // - "Tutti" (nessun cliente selezionato) → tutta la sua rete (sotto-albero).
@@ -11,7 +12,7 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome,listino_agente_id').eq('id', user.id).single()
   const p = req.nextUrl.searchParams
   const clienteIdRaw = p.get('clienteId')
   const masterSel = clienteIdRaw && clienteIdRaw.startsWith('m:') ? clienteIdRaw.slice(2) : null
@@ -93,9 +94,16 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // AGENTE: il suo COSTO non è un movimento del master, ma il prezzo del suo LISTINO AGENTE.
+  const calcAgente = isAgente(utente) && (utente as any)?.listino_agente_id
+    ? await creaCalcolatoreListinoCliente(supabase, (utente as any).listino_agente_id)
+    : null
+
   const rows = (spedizioni || []).map((s: any) => {
-    // PREZZO CORRIERE = quello che ho pagato IO (mio movimento reale)
-    const prezzo_corriere: number | null = costoMine.has(s.id) ? costoMine.get(s.id)! : null
+    // PREZZO CORRIERE = quello che ho pagato IO (mio movimento reale). Per l'agente = suo listino.
+    const prezzo_corriere: number | null = calcAgente
+      ? (calcAgente(s)?.totale ?? null)
+      : (costoMine.has(s.id) ? costoMine.get(s.id)! : null)
     // PREZZO CLIENTE = quello che mi paga il DIRETTO:
     //  - spedizione propria del mio cliente -> quello che ha pagato il cliente (suo movimento)
     //  - spedizione di rete -> quello che paga il figlio di prima linea (suo movimento)

@@ -22,6 +22,7 @@ export async function GET() {
     .eq('listino_id', listinoId).order('peso_max', { ascending: true })
 
   const defFattore = parseFloat((listino as any)?.fattore_volume) || 5000
+  // Griglia come il listino corrieri del master: righe = fasce peso, colonne = zone.
   const perCorr = new Map<string, any>()
   for (const f of (fasce || [])) {
     const cid = (f as any).corriere_id
@@ -30,18 +31,26 @@ export async function GET() {
       perCorr.set(cid, {
         nome_contratto: (f as any).corrieri?.nome_contratto || 'Corriere',
         fattore: fattorePerCorr.get(cid) || defFattore,
-        righe: [] as any[],
+        zoneSet: new Set<string>(),
+        fasce: new Map<string, any>(),
       })
     }
-    perCorr.get(cid).righe.push({
-      zona: (f as any).zone?.nome || '—',
-      peso_max: (f as any).peso_max,
-      prezzo: (f as any).prezzo,
-      tipo: (f as any).tipo,
-      fuel: Number((f as any).fuel) || 0,
-    })
+    const e = perCorr.get(cid)
+    const zonaNome = (f as any).zone?.nome || '—'
+    e.zoneSet.add(zonaNome)
+    const key = (f as any).tipo + '|' + (f as any).peso_max
+    if (!e.fasce.has(key)) e.fasce.set(key, { peso_max: Number((f as any).peso_max), tipo: (f as any).tipo, fuel: Number((f as any).fuel) || 0, prezzi: {} as Record<string, number> })
+    e.fasce.get(key).prezzi[zonaNome] = Number((f as any).prezzo)
   }
-  const corrieri = Array.from(perCorr.values()).sort((a, b) => a.nome_contratto.localeCompare(b.nome_contratto))
+  const ordZona = (a: string, b: string) => (a === 'Italia' ? -1 : b === 'Italia' ? 1 : a.localeCompare(b))
+  const corrieri = Array.from(perCorr.values())
+    .sort((a, b) => a.nome_contratto.localeCompare(b.nome_contratto))
+    .map((c) => ({
+      nome_contratto: c.nome_contratto,
+      fattore: c.fattore,
+      zone: Array.from(c.zoneSet).sort(ordZona as any),
+      fasce: Array.from(c.fasce.values()).sort((a: any, b: any) => (a.tipo === 'oltre' ? 1 : 0) - (b.tipo === 'oltre' ? 1 : 0) || a.peso_max - b.peso_max),
+    }))
   return NextResponse.json({
     assegnato: true,
     nome: (listino as any)?.nome || 'Listino',

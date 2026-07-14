@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import { calcolaPrezzoCorriere, fattoreVolumeCliente, fattoreVolumeCorriere, calcolaPesoFatturato } from '@/lib/pricing'
-import { bloccaAgente } from '@/lib/agente'
+import { isAgente, nomeAgente } from '@/lib/agente'
 import {
   spediamoproGetQuotation,
   spediamoproCreateShipment,
@@ -29,9 +29,13 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
 
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
-  const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
   const body = await req.json()
+  // L'agente può creare spedizioni SOLO per i SUOI clienti: niente spedizione propria (__proprio__)
+  // né per sotto-master (m:); il cliente dev'essere assegnato a lui (verifica sotto).
+  if (isAgente(utente) && (body.clienteId === '__proprio__' || (typeof body.clienteId === 'string' && body.clienteId.startsWith('m:')))) {
+    return NextResponse.json({ error: 'Operazione non consentita.' }, { status: 403 })
+  }
 
   // Extra/servizi accessori scelti per questa spedizione (li paga il cliente): [{nome, importo}].
   // L'importo è già incluso in body.totalPrice (calcolato lato frontend dal listino); qui salviamo
@@ -66,9 +70,11 @@ export async function POST(req: NextRequest) {
   if (masterSub) {
     cliente = { master_id: utente!.master_id, listino_cliente_id: subListino, tipo_contratto: subTipo, credito: subCredito, ragione_sociale: 'Sotto-master' }
   } else if (!isProprio) {
-    const { data } = await supabase.from('clienti').select('master_id,ragione_sociale,listino_cliente_id,vieta_inserimento,tipo_contratto,credito').eq('id', clienteId).single()
+    const { data } = await supabase.from('clienti').select('master_id,ragione_sociale,listino_cliente_id,vieta_inserimento,tipo_contratto,credito,agente').eq('id', clienteId).single()
     cliente = data
     if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
+    // Agente: il cliente dev'essere assegnato a lui.
+    if (isAgente(utente) && (cliente.agente || '').trim() !== nomeAgente(utente)) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
     if (utente?.ruolo === 'cliente' && cliente.vieta_inserimento === true) return NextResponse.json({ error: 'Inserimento spedizioni non consentito per questo cliente.' }, { status: 403 })
     // Niente listino assegnato = niente contratto: non si può spedire.
     if (!cliente.listino_cliente_id) return NextResponse.json({ error: 'Nessun contratto attivo' }, { status: 400 })

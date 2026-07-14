@@ -23,7 +23,7 @@ export const PERMESSI_DEFAULT: Record<string, Record<string, boolean>> = {
   // AGENTE = SOLA LETTURA (view/index/download). Niente create/edit/delete/upload/confirm.
   // Vede solo i suoi clienti e i loro dati (lo scoping è applicato nelle API).
   agente: {
-    'admin.shippings.index': true, 'admin.shippings.create': false, 'admin.shippings.edit': false, 'admin.shippings.delete': false, 'admin.shippings.cancelled.index': true,
+    'admin.shippings.index': true, 'admin.shippings.create': true, 'admin.shippings.edit': false, 'admin.shippings.delete': false, 'admin.shippings.cancelled.index': true,
     'admin.stocks.index': true, 'admin.stocks.edit': false, 'admin.stocks.update': false,
     'admin.cod.index': true, 'admin.cod.update': false, 'admin.cod.excel': true, 'admin.cod.bulk_update': false, 'admin.codlists.index': true, 'admin.codlists.uploadfile': false,
     'admin.shippings.weight_corrections.index': true, 'admin.shippings.weight_corrections.uploadfile': false, 'admin.shippings.weight_corrections.confirm': false, 'admin.shippings.weight_corrections.delete': false,
@@ -35,7 +35,7 @@ export const PERMESSI_DEFAULT: Record<string, Record<string, boolean>> = {
     'admin.drivers.index': false, 'admin.drivers.create': false, 'admin.drivers.resetpassword': false, 'admin.drivers.delete': false, 'admin.drivers.collections': false, 'admin.drivers.pickuplists': false, 'admin.drivers.deliveries': false, 'admin.drivers.fleetmap': false,
     'admin.consumables.create': false, 'admin.consumables.index': false,
     'admin.invoice.create': false, 'admin.invoice.index': true,
-    'admin.reports.shippings': true, 'admin.reports.stocks': true, 'admin.reports.shippinglists': true, 'admin.reports.cod': true, 'admin.reports.pickups': false, 'admin.reports.priceupdates': true, 'admin.reports.consumables': false, 'admin.reports.invoices': true, 'admin.reports.rendershippings': false, 'admin.reports.sms.clients': false, 'admin.reports.sms.admin': false,
+    'admin.reports.shippings': true, 'admin.reports.stocks': true, 'admin.reports.shippinglists': true, 'admin.reports.cod': true, 'admin.reports.pickups': false, 'admin.reports.priceupdates': false, 'admin.reports.consumables': false, 'admin.reports.invoices': true, 'admin.reports.rendershippings': false, 'admin.reports.sms.clients': false, 'admin.reports.sms.admin': false,
     'admin.notification': false,
     'admin.interno.deliveries.out': false, 'admin.interno.deliveries.in': false, 'admin.interno.inbound.scan': false, 'admin.interno.outbound.scan': false, 'admin.interno.cod.sent': false, 'admin.interno.cod.received': false, 'admin.interno.codlists.index': false, 'admin.interno.codlists.generate': false, 'admin.interno.codlists.excelexport': false, 'admin.interno.stocks': false,
   },

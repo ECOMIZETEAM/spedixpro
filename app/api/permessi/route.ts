@@ -5,10 +5,10 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ permessi: {} })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
-  if (!utente?.master_id) return NextResponse.json({ permessi: {} })
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  if (!utente?.master_id) return NextResponse.json({ permessi: {}, ruolo: (utente?.ruolo || '') })
   const { data } = await supabase.from('master_permessi').select('permessi').eq('master_id', utente.master_id).maybeSingle()
-  return NextResponse.json({ permessi: data?.permessi || {} })
+  return NextResponse.json({ permessi: data?.permessi || {}, ruolo: (utente.ruolo || '').toLowerCase() })
 }
 
 export async function POST(req: NextRequest) {
