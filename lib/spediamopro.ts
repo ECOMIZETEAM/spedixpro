@@ -106,8 +106,18 @@ export async function spediamoproGetQuotation(
 
   const quotes: SpediamoproQuotation[] = json.data
   if (!quotes?.length) {
-    // Diagnostica multicollo: quali servizi torna SpediamoPro senza il filtro?
-    console.error('[SPEDIAMOPRO][quotation] nessuna tariffa — colli:', params.parcels.length, 'service richiesto:', serviceId, 'servizi disponibili:', JSON.stringify((json.data || []).map((q: any) => q.service)))
+    // Diagnostica multicollo: il filtro su un service ha dato 0. Riprovo SENZA filtro per vedere
+    // quali servizi (e corrieri) SpediamoPro offre davvero per questa spedizione multi-collo.
+    let disp: any[] = []
+    if (serviceId) {
+      try {
+        const bodyNoFilter: any = { ...body }; delete bodyNoFilter.services
+        const res2 = await fetch(`${BASE_URL}/quotations`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(bodyNoFilter) })
+        const j2 = await res2.json()
+        disp = (j2?.data || []).map((q: any) => ({ service: q.service, courier: q.courier ?? q.courierName ?? q.carrier ?? q.name, price: q.totalPrice }))
+      } catch {}
+    }
+    console.error('[SPEDIAMOPRO][quotation] nessuna tariffa — colli:', params.parcels.length, 'service richiesto:', serviceId, 'servizi SENZA filtro:', JSON.stringify(disp).substring(0, 700))
     throw new Error('Nessuna tariffa SpediamoPro disponibile per questo servizio')
   }
 
