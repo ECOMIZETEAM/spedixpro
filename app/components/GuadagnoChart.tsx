@@ -1,14 +1,16 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-
-const PERIODI = [
-  { v: 'settimanale', l: 'Settimana' },
-  { v: 'mensile', l: 'Mese' },
-  { v: 'annuale', l: 'Anno' },
-]
+import DateRangePicker from './DateRangePicker'
 
 const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+// default: mese corrente (dal 1° a oggi)
+function meseCorrente(): { dal: string; al: string } {
+  const oggi = new Date()
+  const str = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return { dal: str(new Date(oggi.getFullYear(), oggi.getMonth(), 1)), al: str(oggi) }
+}
 
 function fmtGiorno(g: string) {
   if (!g) return ''
@@ -21,15 +23,16 @@ function fmtGiorno(g: string) {
 }
 
 export default function GuadagnoChart() {
-  const [periodo, setPeriodo] = useState('mensile')
+  const [range, setRange] = useState(meseCorrente)
   const [d, setD] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (!range.dal || !range.al) return
     setLoading(true)
-    fetch('/api/reports/guadagno?periodo=' + periodo)
+    fetch(`/api/reports/guadagno?dal=${range.dal}&al=${range.al}`)
       .then(r => r.json()).then(x => { setD(x); setLoading(false) }).catch(() => setLoading(false))
-  }, [periodo])
+  }, [range.dal, range.al])
 
   const margine = Number(d?.guadagno || 0)
   const serie = (d?.serie || []).map((s: any) => ({ ...s, label: fmtGiorno(s.giorno) }))
@@ -42,10 +45,7 @@ export default function GuadagnoChart() {
           <span style={{ width: '26px', height: '26px', borderRadius: '7px', background: '#dcfce7', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>💰</span>
           Guadagno Spedizioni
         </span>
-        <select value={periodo} onChange={e => setPeriodo(e.target.value)}
-          style={{ padding: '5px 10px', borderRadius: '7px', border: '1px solid #d1d5db', background: '#fff', color: '#1a1a1a', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
-          {PERIODI.map(p => <option key={p.v} value={p.v}>{p.l}</option>)}
-        </select>
+        <DateRangePicker dal={range.dal} al={range.al} onChange={(dal, al) => setRange({ dal, al })} />
       </div>
 
       {/* KPI in fila: margine grande + fatturato/costi */}
