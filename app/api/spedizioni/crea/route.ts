@@ -429,7 +429,11 @@ export async function POST(req: NextRequest) {
       }))
       const cashOnDeliveryAmount = body.codValue ? euroToCents(body.codValue) : undefined
       const insuredAmount = body.insuranceValue ? euroToCents(body.insuranceValue) : undefined
-      const serviceId = cred.service_id || null
+      // Alcuni servizi SpediamoPro (es. BRT Express service 29) sono MONO-collo: con più colli
+      // non tornano tariffa. Se il corriere ha un service multicollo dedicato, con >1 collo lo usiamo.
+      const serviceId = (packages.length > 1 && cred.service_id_multicollo)
+        ? String(cred.service_id_multicollo)
+        : (cred.service_id || null)
 
       const quotation = await spediamoproGetQuotation(cred.authcode, serviceId, {
         parcels, sender, consignee, cashOnDeliveryAmount, insuredAmount

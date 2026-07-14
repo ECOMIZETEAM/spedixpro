@@ -121,7 +121,8 @@ export async function POST(req: NextRequest) {
     const parcels = [{ weight: kgToGrams(pesoReale), length: cmToMm(pkg?.length||10), width: cmToMm(pkg?.width||10), height: cmToMm(pkg?.height||10) }]
     const cod = body.codValue ? euroToCents(body.codValue) : undefined
     const ins = body.insuranceValue ? euroToCents(body.insuranceValue) : undefined
-    const quotation = await spediamoproGetQuotation(cred.authcode, cred.service_id || null, { parcels, sender, consignee, cashOnDeliveryAmount: cod, insuredAmount: ins })
+    const serviceIdV1 = (packages.length > 1 && cred.service_id_multicollo) ? String(cred.service_id_multicollo) : (cred.service_id || null)
+    const quotation = await spediamoproGetQuotation(cred.authcode, serviceIdV1, { parcels, sender, consignee, cashOnDeliveryAmount: cod, insuredAmount: ins })
     const shipment = await spediamoproCreateShipment(cred.authcode, { parcels, sender, consignee, quotation, cashOnDeliveryAmount: cod, insuredAmount: ins, externalReference: body.notes || undefined })
     let trk = shipment.trackingCode; if (!trk) trk = await spediamoproWaitForTracking(cred.authcode, shipment.id)
     numero = trk || shipment.code || `SP-${shipment.id}`; costoCorrente = centsToEuro(shipment.totalPrice)
