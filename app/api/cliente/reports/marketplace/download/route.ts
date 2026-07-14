@@ -57,49 +57,55 @@ export async function GET(req: NextRequest) {
     return true
   })
 
-  let intestazione: string
-  let corpo: string[]
-
   if (piatt === 'amazon') {
-    intestazione = ['order-id', 'order-item-id', 'quantity', 'ship-date', 'carrier-code', 'carrier-name', 'tracking-number', 'ship-method'].join(',')
-    corpo = filtrate.map((r: any) => {
+    // Il file "Conferma spedizione" di Amazon è delimitato da TAB (non virgole) e SENZA BOM:
+    // caricando un CSV, Amazon legge tutta l'intestazione come un'unica colonna -> errore.
+    const tab = (s: any) => String(s == null ? '' : s).replace(/[\t\r\n]+/g, ' ').trim()
+    const header = ['order-id', 'order-item-id', 'quantity', 'ship-date', 'carrier-code', 'carrier-name', 'tracking-number', 'ship-method'].join('\t')
+    const righeTsv = filtrate.map((r: any) => {
       const raw = r.raw || {}
       const sp = r.spedizioni || {}
       const car = carrierAmazon(sp.corrieri?.nome_contratto || '')
       const qty = raw.quantitypurchased || raw.quantity || r.colli || 1
-      const shipDate = (sp.created_at || '').replace(/\.\d+/, '').replace(/Z$/, '')   // ISO senza millisecondi
+      const shipDate = (sp.created_at || '').slice(0, 10)   // YYYY-MM-DD
       return [
-        cell(raw.orderid || r.order_id),
-        cell(raw.orderitemid || raw.order_item_id || ''),
-        cell(qty),
-        cell(shipDate),
-        cell(car.code),
-        cell(car.name),
-        cell(sp.tracking_number || ''),
-        cell('Standard'),
-      ].join(',')
+        tab(raw.orderid || r.order_id),
+        tab(raw.orderitemid || raw.order_item_id || ''),
+        tab(qty),
+        tab(shipDate),
+        tab(car.code),
+        tab(car.name),
+        tab(sp.tracking_number || ''),
+        tab('Standard'),
+      ].join('\t')
     })
-  } else {
-    // Shopify / altro: CSV generico ordine + tracking (utile come riferimento/fulfillment)
-    intestazione = ['order', 'tracking-number', 'carrier', 'ship-date', 'content'].join(',')
-    corpo = filtrate.map((r: any) => {
-      const sp = r.spedizioni || {}
-      return [
-        cell(r.order_id),
-        cell(sp.tracking_number || ''),
-        cell(sp.corrieri?.nome_contratto || ''),
-        cell((sp.created_at || '').slice(0, 10)),
-        cell(r.contenuto || ''),
-      ].join(',')
+    const txt = [header, ...righeTsv].join('\r\n')   // TAB-separated, niente BOM
+    return new NextResponse(txt, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Disposition': `attachment; filename="conferma-spedizione-amazon${data ? '-' + data : ''}.txt"`,
+        'Cache-Control': 'no-store',
+      },
     })
   }
 
-  const csv = '﻿' + [intestazione, ...corpo].join('\r\n')   // BOM per Excel/Amazon
-  const nomeFile = `tracking-${piatt}${data ? '-' + data : ''}.csv`
+  // Shopify / altro: CSV generico ordine + tracking (riferimento/fulfillment)
+  const intestazione = ['order', 'tracking-number', 'carrier', 'ship-date', 'content'].join(',')
+  const corpo = filtrate.map((r: any) => {
+    const sp = r.spedizioni || {}
+    return [
+      cell(r.order_id),
+      cell(sp.tracking_number || ''),
+      cell(sp.corrieri?.nome_contratto || ''),
+      cell((sp.created_at || '').slice(0, 10)),
+      cell(r.contenuto || ''),
+    ].join(',')
+  })
+  const csv = '﻿' + [intestazione, ...corpo].join('\r\n')   // BOM per Excel
   return new NextResponse(csv, {
     headers: {
       'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${nomeFile}"`,
+      'Content-Disposition': `attachment; filename="tracking-${piatt}${data ? '-' + data : ''}.csv"`,
       'Cache-Control': 'no-store',
     },
   })
