@@ -99,7 +99,12 @@ export async function POST(req: NextRequest) {
     })
     const rates = await ratesRes.json()
     if (!Array.isArray(rates) || !rates.length) return NextResponse.json({ error: 'Nessuna tariffa dal corriere' }, { status: 400 })
-    const rate = rates[0]
+    // Sceglie la tariffa del CONTRATTO di questo corriere (non la prima): sullo stesso account
+    // a valle possono coesistere più corrieri (GLS, Poste...) -> evita etichette col vettore sbagliato.
+    const rate = cred.codice_contratto
+      ? rates.find((r: any) => r.contractCode === cred.codice_contratto)
+      : rates[0]
+    if (!rate) return NextResponse.json({ error: 'Contratto non disponibile per questo corriere' }, { status: 400 })
     const res = await fetch(`${baseUrl}/shipping/create`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ carrierCode: rate.carrierCode, contractCode: rate.contractCode, label_format: 'PDF', packages, shipFrom: body.shipFrom, shipTo: body.shipTo, notes: body.notes || '', insuranceValue: body.insuranceValue || 0, codValue: body.codValue || 0, accessoriServices: [] }),

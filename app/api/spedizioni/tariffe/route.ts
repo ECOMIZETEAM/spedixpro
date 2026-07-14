@@ -320,7 +320,12 @@ export async function POST(req: NextRequest) {
       })
       const rates = await res.json()
       if (!Array.isArray(rates) || !rates.length) return null
-      const r = rates[0]
+      // Sceglie la tariffa del CONTRATTO di questo corriere (non la prima): sullo stesso
+      // account a valle possono coesistere più corrieri (GLS, Poste, SDA...).
+      const r = cred.codice_contratto
+        ? rates.find((x: any) => x.contractCode === cred.codice_contratto)
+        : rates[0]
+      if (!r) return null
       return {
         carrierCode: r.carrierCode, contractCode: r.contractCode,
         total_price: r.total_price, weight_price: r.weight_price,

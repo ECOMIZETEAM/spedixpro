@@ -189,7 +189,9 @@ export async function POST(req: NextRequest) {
     })
     const rates = await ratesRes.json()
     if (Array.isArray(rates) && rates.length) {
-      const match = rates.find((r: any) => r.carrierCode === carrierCode) || rates[0]
+      // Prima per codice_contratto (contratto esatto di questo corriere), poi per carrierCode
+      const match = (cred.codice_contratto && rates.find((r: any) => r.contractCode === cred.codice_contratto))
+        || rates.find((r: any) => r.carrierCode === carrierCode) || rates[0]
       contractCode = match?.contractCode || null
     }
   } catch (e: any) {

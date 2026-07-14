@@ -263,7 +263,13 @@ export async function POST(req: NextRequest) {
     })
     const rates = await ratesRes.json()
     if (!Array.isArray(rates) || !rates.length) return NextResponse.json({ error: 'Nessuna tariffa dal corriere' }, { status: 400 })
-    const rate = rates[0]
+    // IMPORTANTE: sullo stesso account a valle possono esserci PIÙ corrieri (es. GLS + Poste).
+    // Va scelta la tariffa del CONTRATTO di QUESTO corriere (codice_contratto), NON la prima:
+    // altrimenti una spedizione "Poste Delivery Express D" poteva stampare GLS/SDA (rates[0]).
+    const rate = cred.codice_contratto
+      ? rates.find((r: any) => r.contractCode === cred.codice_contratto)
+      : rates[0]
+    if (!rate) return NextResponse.json({ error: 'Contratto non disponibile per questo corriere (verifica il codice contratto)' }, { status: 400 })
 
     const res = await fetch(`${baseUrl}/shipping/create`, {
       method: 'POST',

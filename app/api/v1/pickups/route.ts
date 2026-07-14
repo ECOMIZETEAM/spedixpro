@@ -113,7 +113,7 @@ export async function POST(req: NextRequest) {
       }),
     })
     const rates = await ratesRes.json()
-    if (Array.isArray(rates) && rates.length) contractCode = (rates.find((r: any) => r.carrierCode === carrierCode) || rates[0])?.contractCode || null
+    if (Array.isArray(rates) && rates.length) contractCode = ((cred.codice_contratto && rates.find((r: any) => r.contractCode === cred.codice_contratto)) || rates.find((r: any) => r.carrierCode === carrierCode) || rates[0])?.contractCode || null
   } catch (e: any) { console.error('API pickup rates:', e?.message) }
   if (!contractCode) return NextResponse.json({ error: 'Impossibile recuperare il codice contratto per il ritiro' }, { status: 400 })
 
