@@ -397,6 +397,10 @@ export async function POST(req: NextRequest) {
   // ═══════════════════════════════════════════════════════════════════════════
   if (corriereRecord.tipo === 'spediamopro') {
     try {
+      // SpediamoPro valida telefono ed email: telefono solo cifre 6-15 (via spazi/trattini/+),
+      // email formato valido. Se non validi vengono OMESSI (altrimenti la creazione fallisce).
+      const telSp = (v: any): string | undefined => { const d = String(v || '').replace(/[^0-9]/g, ''); return (d.length >= 6 && d.length <= 15) ? d : undefined }
+      const emailSp = (v: any): string | undefined => { const e = String(v || '').trim(); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e.substring(0, 50) : undefined }
       const sender = {
         name: body.shipFrom.name?.substring(0, 35),
         address: body.shipFrom.street1?.substring(0, 35),
@@ -404,8 +408,8 @@ export async function POST(req: NextRequest) {
         city: body.shipFrom.city?.substring(0, 35),
         province: body.shipFrom.state?.substring(0, 2).toUpperCase(),
         country: 'IT',
-        phone: body.shipFrom.phone || undefined,
-        email: body.shipFrom.email?.substring(0, 50) || undefined,
+        phone: telSp(body.shipFrom.phone),
+        email: emailSp(body.shipFrom.email),
       }
       const consignee: any = {
         name: body.shipTo.name?.substring(0, 35),
@@ -415,8 +419,8 @@ export async function POST(req: NextRequest) {
         province: body.shipTo.state?.substring(0, 2).toUpperCase(),
         country: (body.shipTo.country || 'IT').toUpperCase(),
       }
-      if (body.shipTo.phone) consignee.phone = body.shipTo.phone
-      if (body.shipTo.email) consignee.email = body.shipTo.email.substring(0, 50)
+      const telDest = telSp(body.shipTo.phone); if (telDest) consignee.phone = telDest
+      const emailDest = emailSp(body.shipTo.email); if (emailDest) consignee.email = emailDest
 
       // MULTICOLLO: un parcel per OGNI collo (prima si inviava solo il primo -> 1 sola etichetta)
       const parcels = packages.map((p: any) => ({

@@ -100,11 +100,16 @@ export async function spediamoproGetQuotation(
   const json = await res.json()
   if (!res.ok || json.error) {
     const details = json.error?.details?.map((d: any) => `${d.source}: ${d.message}`).join(', ')
+    console.error('[SPEDIAMOPRO][quotation] fallita — colli:', params.parcels.length, 'service:', serviceId, 'risposta:', JSON.stringify(json).substring(0, 600))
     throw new Error(details || json.error?.message || 'SpediamoPro quotations failed')
   }
 
   const quotes: SpediamoproQuotation[] = json.data
-  if (!quotes?.length) throw new Error('Nessuna tariffa SpediamoPro disponibile per questo servizio')
+  if (!quotes?.length) {
+    // Diagnostica multicollo: quali servizi torna SpediamoPro senza il filtro?
+    console.error('[SPEDIAMOPRO][quotation] nessuna tariffa — colli:', params.parcels.length, 'service richiesto:', serviceId, 'servizi disponibili:', JSON.stringify((json.data || []).map((q: any) => q.service)))
+    throw new Error('Nessuna tariffa SpediamoPro disponibile per questo servizio')
+  }
 
   if (serviceId) {
     const exact = quotes.find(q => q.service === parseInt(serviceId))
