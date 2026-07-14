@@ -111,6 +111,9 @@ export type DettaglioCorriere = {
   sponda: number
   contrassegno: number
   assicurazione: number
+  peso_reale: number       // somma pesi reali dei colli
+  peso_volume: number      // somma volumetrici dei colli col fattore del corriere
+  peso_fatturato: number   // peso EFFETTIVO su cui è tassato (reale se agevolazione, altrimenti volumetrico)
   contrassegnoOltreMax?: boolean   // COD richiesto oltre il max (o senza tariffa) -> corriere da escludere
   assicurazioneOltreMax?: boolean  // assicurazione richiesta oltre il max -> corriere da escludere
 }
@@ -430,6 +433,9 @@ export async function calcolaPrezzoCorriereDettaglio(
     sponda: r2(spondaAmt),
     contrassegno: r2(feeCod),
     assicurazione: r2(feeAss),
+    peso_reale: r2(pesoReale),
+    peso_volume: r2(pesoVolume),
+    peso_fatturato: r2(pesoFatturato),
     contrassegnoOltreMax,
     assicurazioneOltreMax,
   }

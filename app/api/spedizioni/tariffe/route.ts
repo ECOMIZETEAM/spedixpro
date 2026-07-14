@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
         costo_contrassegno: dett.contrassegno.toFixed(2), costo_assicurazione: dett.assicurazione.toFixed(2),
         total_price: dett.totale.toFixed(2),
         zona: isEsteroP ? (PAESI[paeseP] || paeseP) : (ZONE_MAP[provinciaP] || 'Italia'),
-        peso_reale: pesoRealeP, peso_volume: '0.00', peso_fatturato: pesoRealeP.toFixed(2),
+        peso_reale: pesoRealeP, peso_volume: (dett.peso_volume || 0).toFixed(2), peso_fatturato: (dett.peso_fatturato || pesoRealeP).toFixed(2),
         corriere_nome: corr.nome_contratto || 'Corriere', listino_fascia: 'Listino corriere', limiti_collo: descriviLimiti(corr.settings, pesoRealeP),
         _corriere_tipo: corr.tipo, _corriere_id: corr.id,
       })
