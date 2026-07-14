@@ -161,7 +161,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   }
 
   return (
-    <div style={{display:'flex',minHeight:'100vh',background:'#f5f5f5',fontFamily:'var(--font-geist-sans),system-ui,sans-serif'}}>
+    <div style={{display:'flex',...(isMobile?{minHeight:'100vh'}:{height:'100vh',overflow:'hidden'}),background:'#f5f5f5',fontFamily:'var(--font-geist-sans),system-ui,sans-serif'}}>
 
       {/* Overlay (solo mobile, drawer aperto) */}
       {isMobile && drawerOpen && <div onClick={()=>setDrawerOpen(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:999}} />}
@@ -278,7 +278,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
       </aside>
 
       {/* MAIN */}
-      <div style={{flex:1,display:'flex',flexDirection:'column',minWidth:0}}>
+      <div style={{flex:1,display:'flex',flexDirection:'column',minWidth:0,minHeight:0}}>
 
         {/* TOPBAR */}
         <header style={{background:'#fff',height:'48px',display:'flex',alignItems:'center',justifyContent:'space-between',padding:isMobile?'0 12px':'0 24px',borderBottom:'1px solid #e8e8e8',flexShrink:0,position:'sticky',top:0,zIndex:10}}>
@@ -302,7 +302,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
         </header>
 
         {/* CONTENT */}
-        <main style={{flex:1,padding:isMobile?'14px':'24px',overflowY:'auto'}}>
+        <main style={{flex:1,minHeight:0,padding:isMobile?'14px':'24px',overflowY:'auto'}}>
           <FlashBanner />
           {children}
         </main>
