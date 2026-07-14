@@ -73,7 +73,13 @@ export async function GET(req: NextRequest) {
           const ext = mime === 'image/gif' ? 'gif' : 'pdf'
           try { const { createAdminSupabase } = await import('@/lib/supabase-admin'); await createAdminSupabase().from('spedizioni').update({ etichetta_url: `data:${mime};base64,${buf.toString('base64')}` }).eq('id', id) } catch {}
           return new NextResponse(new Uint8Array(buf), { status: 200, headers: { 'Content-Type': mime, 'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.${ext}"`, 'Cache-Control': 'private, max-age=0, no-store' } })
-        } catch (e) { /* prosegue al 404 */ }
+        } catch (e: any) {
+          // Etichetta non ancora generata dal corriere (tipico del multicollo appena creato).
+          const m = String(e?.message || '')
+          if (/etichetta associata|non ha un'etichetta|422/i.test(m)) {
+            return NextResponse.json({ error: 'Etichetta non ancora pronta dal corriere (spedizione in lavorazione). Riprova tra qualche minuto.' }, { status: 409 })
+          }
+        }
       }
     }
   }
