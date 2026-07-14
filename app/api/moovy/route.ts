@@ -119,7 +119,8 @@ export async function POST(req: Request) {
     }
   } catch { /* contesto opzionale */ }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const GROQ_KEY = process.env.GROQ_API_KEY
+  if (!GROQ_KEY) {
     return new Response('MOOVY non è configurato su questo ambiente.', { status: 503 })
   }
 
@@ -127,16 +128,42 @@ export async function POST(req: Request) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const { default: Anthropic } = await import('@anthropic-ai/sdk')
-        const client = new Anthropic()
-        const s = client.messages.stream({
-          model: 'claude-sonnet-5',
-          max_tokens: 1024,
-          system: systemPrompt(ruolo, contesto),
-          messages,
+        // Groq: API compatibile OpenAI, in streaming (SSE). Il system prompt va
+        // come primo messaggio con ruolo "system".
+        const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${GROQ_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'llama-3.3-70b-versatile',
+            temperature: 0.3,
+            max_tokens: 1024,
+            stream: true,
+            messages: [{ role: 'system', content: systemPrompt(ruolo, contesto) }, ...messages],
+          }),
         })
-        s.on('text', (t: string) => { try { controller.enqueue(encoder.encode(t)) } catch {} })
-        await s.finalMessage()
+        if (!resp.ok || !resp.body) throw new Error('groq ' + resp.status)
+
+        const reader = resp.body.getReader()
+        const dec = new TextDecoder()
+        let buf = ''
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += dec.decode(value, { stream: true })
+          const righe = buf.split('\n')
+          buf = righe.pop() || '' // l'ultima riga può essere parziale
+          for (const riga of righe) {
+            const l = riga.trim()
+            if (!l.startsWith('data:')) continue
+            const dati = l.slice(5).trim()
+            if (!dati || dati === '[DONE]') continue
+            try {
+              const j = JSON.parse(dati)
+              const t = j?.choices?.[0]?.delta?.content
+              if (t) controller.enqueue(encoder.encode(t))
+            } catch { /* frammento non-JSON: ignora */ }
+          }
+        }
       } catch {
         try { controller.enqueue(encoder.encode('\n\nMi dispiace, ho avuto un problema tecnico. Riprova tra poco o apri un Ticket dalla sezione Assistenza.')) } catch {}
       } finally {
