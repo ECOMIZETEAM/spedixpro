@@ -26,11 +26,20 @@ export async function trovaZoneMatch(
   const ids = Array.from(new Set(candidateZonaIds.filter(Boolean)))
   if (!ids.length) return []
 
+  // IMPORTANTE: scarichiamo SOLO le righe che i tier di match possono usare, cioè
+  //   - cap esatto della destinazione   (tier 1)
+  //   - cap jolly '*'                    (tier 2 provincia+cap*, e tier 3 jolly totale)
+  // Prima si scaricavano TUTTE le righe delle zone candidate: con listini grandi si
+  // superavano le 1000 righe (limite PostgREST) e alcune zone (es. il jolly "Italia" di
+  // un corriere) venivano troncate -> quel corriere spariva dalle tariffe. Filtrando sul
+  // cap il numero di righe resta minimo e non si tronca mai. (Nessuna riga usa cap NULL.)
+  const capFilter = Array.from(new Set([cap, '*'].filter((v) => v != null && v !== undefined))) as string[]
   const { data: zc } = await supabase
     .from('zone_cap')
     .select('zona_id,provincia,cap')
     .eq('paese', paese)
     .in('zona_id', ids)
+    .in('cap', capFilter)
   const righe = zc || []
 
   // 1) CAP esatto

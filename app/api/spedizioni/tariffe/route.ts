@@ -442,16 +442,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Nessuna fascia prezzo per zona ${zonaNome}` }, { status: 400 })
   }
 
-  // DIAGNOSTICA TEMPORANEA: mostra quali corrieri arrivano dalla query (null = nascosto da RLS),
-  // quali passano il match zona e quanti gruppi risultano. Da rimuovere dopo la verifica.
-  try {
-    const rawZone = Array.from(new Set((fasce || []).map((f: any) => ((f.corrieri?.nome_contratto || '∅C') + '|zonaEmbed=' + (f.zone ? (f.zone.nome + ':' + String(f.zone.id).slice(0, 8)) : 'NULL') + '|zona_id=' + String((f as any).zona_id || '').slice(0, 8)))))
-    console.log('[TAR-DIAG2]', 'cliente=' + clienteId, 'cap=' + capDest, 'prov=' + provincia,
-      '| zoneMatchIds=' + JSON.stringify((zoneMatchIds || []).map((z: string) => String(z).slice(0, 8))),
-      '| rawZone=' + JSON.stringify(rawZone),
-      '| fasceZona=' + JSON.stringify(Array.from(new Set((fasceZona || []).map((f: any) => ((f.corrieri?.nome_contratto || '∅') + '@' + (f.zone?.nome || '?')))))))
-  } catch {}
-
   const risultati: any[] = []
   let esclusiContrassegno = 0, esclusiAssic = 0, esclusiMisura = 0, esclusiFascia = 0, esclusiQuota = 0
   let ultimoErroreQuota = ''
@@ -541,9 +531,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Nessuna tariffa disponibile per ${pf}kg in zona ${zonaNome}` }, { status: 400 })
   }
 
-  try {
-    console.log('[TAR-DIAG]', 'cliente=' + clienteId, 'RISULTATI=' + JSON.stringify(risultati.map((r: any) => r.corriere_nome)), 'escl=' + JSON.stringify({ esclusiFascia, esclusiMisura, esclusiContrassegno, esclusiAssic, esclusiQuota }))
-  } catch {}
   risultati.sort((a,b)=>Number(a.total_price)-Number(b.total_price))
   return NextResponse.json(risultati)
 }
