@@ -375,6 +375,7 @@ export async function POST(req: NextRequest) {
   // SPEDIAMOPRO
   // ═══════════════════════════════════════════════════════════════════════════
   if (corriereRecord.tipo === 'spediamopro') {
+    let spCreatedId: number | null = null   // id della spedizione creata sul corriere: serve per annullarla se qualcosa fallisce dopo
     try {
       const sender = {
         name: body.shipFrom.name?.substring(0, 35),
@@ -414,6 +415,7 @@ export async function POST(req: NextRequest) {
         parcels, sender, consignee, quotation, cashOnDeliveryAmount, insuredAmount,
         externalReference: body.notes || undefined,
       })
+      spCreatedId = (shipment as any)?.id ?? null   // da qui in poi, se qualcosa fallisce, va annullata
 
       let trackingReale = shipment.trackingCode
       if (!trackingReale) {
@@ -489,6 +491,10 @@ export async function POST(req: NextRequest) {
       })
     } catch (err: any) {
       console.error('SpediamoPro error:', err)
+      // COMPENSAZIONE: se la spedizione era GIÀ stata creata (e ADDEBITATA) sul corriere ma poi
+      // qualcosa è fallito (es. timeout del tracking) prima del salvataggio, la annulliamo per non
+      // lasciare addebiti "orfani" (create sul corriere ma mai registrate su MoovExpress).
+      if (spCreatedId) { try { await spediamoproCancelShipment(cred.authcode, spCreatedId) } catch (e) { console.error('Compensazione annullo fallita:', e) } }
       return NextResponse.json({ error: erroreCorrierePulito(err?.message) }, { status: 400 })
     }
   }
