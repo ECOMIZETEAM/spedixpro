@@ -332,8 +332,8 @@ export async function POST(req: NextRequest) {
       try {
         const quote = await spediamoproGetQuotation(cred.authcode, cred.service_id || null, {
           parcels: [{ weight: kgToGrams(pesoFatt), length: cmToMm(pkg?.length || 10), width: cmToMm(pkg?.width || 10), height: cmToMm(pkg?.height || 10) }],
-          sender: { name: body.shipFrom.name, address: body.shipFrom.street1, postalCode: body.shipFrom.postalCode, city: body.shipFrom.city, province: body.shipFrom.state, country: 'IT', phone: body.shipFrom.phone, email: body.shipFrom.email },
-          consignee: { name: body.shipTo.name, address: body.shipTo.street1, postalCode: body.shipTo.postalCode, city: body.shipTo.city, province: isEstero ? (body.shipTo.state || body.shipTo.city || '-') : body.shipTo.state, country: body.shipTo.country || 'IT', phone: body.shipTo.phone, email: body.shipTo.email },
+          sender: { name: body.shipFrom.name, address: body.shipFrom.street1, postalCode: body.shipFrom.postalCode, city: body.shipFrom.city, province: (body.shipFrom.state || '').substring(0, 2).toUpperCase(), country: 'IT', phone: body.shipFrom.phone, email: body.shipFrom.email },
+          consignee: { name: body.shipTo.name, address: body.shipTo.street1, postalCode: body.shipTo.postalCode, city: body.shipTo.city, province: isEstero ? (body.shipTo.state || body.shipTo.city || '-') : (body.shipTo.state || '').substring(0, 2).toUpperCase(), country: body.shipTo.country || 'IT', phone: body.shipTo.phone, email: body.shipTo.email },
           cashOnDeliveryAmount: body.codValue ? euroToCents(body.codValue) : undefined,
           insuredAmount: body.insuranceValue ? euroToCents(body.insuranceValue) : undefined,
         })
@@ -461,12 +461,15 @@ export async function POST(req: NextRequest) {
 
     let spediamoproQuotation = null
     if (corriere?.tipo === 'spediamopro') {
-      let quote = null
+      // Quotazione live BEST-EFFORT: il prezzo mostrato viene dal LISTINO (DB), non da qui, e la
+      // creazione ri-quota comunque da capo. Se la quotazione live non risponde NON escludo il
+      // corriere — altrimenti il cliente non potrebbe spedire cose che invece SpediamoPro accetta
+      // (es. colli pesanti): il master infatti non chiama affatto questa quotazione e riesce.
+      // Il fuori-misura reale resta filtrato da superaMisureMax (limiti/scaglioni del corriere).
       try {
-        quote = await quotaCorriere(corriere, pesoFatturatoC)
+        const quote = await quotaCorriere(corriere, pesoFatturatoC)
+        spediamoproQuotation = quote?._spediamopro_quotation || null
       } catch (e: any) { ultimoErroreQuota = String(e?.message || '') }
-      spediamoproQuotation = quote?._spediamopro_quotation || null
-      if (!quote) { esclusiQuota++; continue }   // il corriere non ha tariffe per queste misure/peso
     }
 
     if (calcolaContrassegno(corriereId, Number(fasciaGiusta.prezzo)) === null) { if (codRichiesto) esclusiContrassegno++; continue }
