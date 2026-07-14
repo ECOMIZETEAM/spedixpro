@@ -402,11 +402,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Listino vuoto — configura le fasce prezzi' }, { status: 400 })
   }
 
-  // Match zona via zone_cap (CAP esatto > provincia > jolly), ristretto alle zone del listino
+  // Match zona via zone_cap (CAP esatto > provincia > jolly), ristretto alle zone del listino.
+  // Mappa zona->corriere così i tier si applicano PER CORRIERE (un CAP esatto di un corriere non
+  // deve escludere gli altri corrieri che coprono la destinazione a provincia/jolly).
+  const zonaCorr = new Map<string, string>()
+  for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid) zonaCorr.set(zid, cid) }
   const zoneMatchIds = await trovaZoneMatch(
     supabase,
     { paese: paeseDest, provincia, cap: capDest },
-    fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean)
+    fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean),
+    zonaCorr
   )
 
   let fasceZona

@@ -174,11 +174,16 @@ export async function calcolaPrezzoListino(
   if (!fasce?.length) return null
 
   // 1) Match via zone_cap (CAP esatto > provincia > jolly), ristretto alle zone del listino.
+  //    Mappa zona->corriere: i tier si applicano PER CORRIERE (il CAP esatto di un corriere non
+  //    deve escludere gli altri corrieri che coprono la destinazione a provincia/jolly).
   const candidateZonaIds = fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean)
+  const zonaCorr = new Map<string, string>()
+  for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid) zonaCorr.set(zid, cid) }
   const zoneMatchIds = await trovaZoneMatch(
     supabase,
     { paese: params.paese, provincia, cap: params.cap },
-    candidateZonaIds
+    candidateZonaIds,
+    zonaCorr
   )
   let fasceZona = zoneMatchIds.length
     ? fasce.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id))
