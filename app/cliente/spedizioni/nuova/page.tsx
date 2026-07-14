@@ -531,18 +531,25 @@ export default function NuovaSpedizioneCliente() {
                     {accDisponibili.length === 0 ? (
                       <div style={{...inp,color:'#888'}}>Nessun extra per questo corriere</div>
                     ) : (
-                      <div style={{border:'1px solid #ddd',borderRadius:'6px',padding:'6px 10px',display:'flex',flexDirection:'column',gap:'4px'}}>
-                        {accDisponibili.map((a,i)=>{
-                          const imp = Math.round((Number(a.prezzo||0)+(Number(a.perc||0)/100)*(Number(valoreMerce)||0))*100)/100
-                          return (
-                            <label key={i} style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'#000',cursor:'pointer'}}>
-                              <input type="checkbox" checked={extraNomi.includes(a.nome)} onChange={()=>setExtraNomi(prev=>prev.includes(a.nome)?prev.filter(n=>n!==a.nome):[...prev,a.nome])} />
-                              <span style={{flex:1}}>{a.nome}</span>
-                              <span style={{fontWeight:600}}>€ {imp.toFixed(2)}</span>
-                            </label>
-                          )
-                        })}
-                      </div>
+                      <>
+                        <select value="" onChange={e=>{ const n=e.target.value; if(n) setExtraNomi(prev=>prev.includes(n)?prev:[...prev,n]) }} style={inp}>
+                          <option value="">Aggiungi servizio…</option>
+                          {accDisponibili.filter(a=>!extraNomi.includes(a.nome)).map((a,i)=>{
+                            const imp = Math.round((Number(a.prezzo||0)+(Number(a.perc||0)/100)*(Number(valoreMerce)||0))*100)/100
+                            return <option key={i} value={a.nome}>{a.nome} — € {imp.toFixed(2)}</option>
+                          })}
+                        </select>
+                        {extraScelti.length>0 && (
+                          <div style={{display:'flex',flexWrap:'wrap',gap:'6px',marginTop:'8px'}}>
+                            {extraScelti.map((e,i)=>(
+                              <span key={i} style={{display:'inline-flex',alignItems:'center',gap:'6px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'20px',padding:'4px 10px',fontSize:'12px',color:'#1a1a1a'}}>
+                                {e.nome} · € {e.importo.toFixed(2)}
+                                <button onClick={()=>setExtraNomi(prev=>prev.filter(n=>n!==e.nome))} style={{border:'none',background:'none',cursor:'pointer',color:'#f97316',fontWeight:700,fontSize:'15px',lineHeight:1,padding:0}}>×</button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                   <div>
