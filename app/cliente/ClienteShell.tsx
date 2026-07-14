@@ -14,7 +14,8 @@ export default function ClienteShell({ cliente, children }: { cliente: { ragione
   }, [])
   useEffect(() => { setDrawerOpen(false) }, [path])
 
-  const asideBase: React.CSSProperties = { width: '200px', background: '#1a1a1a', display: 'flex', flexDirection: 'column', height: '100vh', overflowY: 'auto', zIndex: 1000 }
+  // overflow: hidden → scorre solo il <nav> di ClienteNav; brand/utente/Esci restano fissi
+  const asideBase: React.CSSProperties = { width: '200px', background: '#1a1a1a', display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', zIndex: 1000 }
   const asideStyle: React.CSSProperties = isMobile
     ? { ...asideBase, position: 'fixed', top: 0, left: 0, transform: drawerOpen ? 'translateX(0)' : 'translateX(-100%)', transition: 'transform 0.25s ease', boxShadow: drawerOpen ? '2px 0 20px rgba(0,0,0,0.35)' : 'none' }
     : { ...asideBase, flexShrink: 0, position: 'sticky', top: 0 }
@@ -27,11 +28,11 @@ export default function ClienteShell({ cliente, children }: { cliente: { ragione
       {isMobile && drawerOpen && <div onClick={() => setDrawerOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 999 }} />}
 
       <aside style={asideStyle}>
-        <a href="/cliente/dashboard" style={{ padding: '18px', borderBottom: '1px solid #2a2a2a', display: 'block', textDecoration: 'none' }}>
+        <a href="/cliente/dashboard" style={{ padding: '18px', borderBottom: '1px solid #2a2a2a', display: 'block', textDecoration: 'none', flexShrink: 0 }}>
           <div style={{ fontSize: '16px', fontWeight: '800', color: '#fff' }}>Moov<span style={{ color: '#f97316' }}>Express</span></div>
           <div style={{ fontSize: '9px', color: '#fff', marginTop: '2px', textTransform: 'uppercase', letterSpacing: '1px' }}>Portale Cliente</div>
         </a>
-        <div style={{ padding: '8px 0', borderBottom: '1px solid #2a2a2a' }}>
+        <div style={{ padding: '8px 0', borderBottom: '1px solid #2a2a2a', flexShrink: 0 }}>
           <div style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <div style={{ width: '28px', height: '28px', background: '#f97316', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '700', color: '#fff', flexShrink: 0 }}>
               {nome.substring(0, 2).toUpperCase()}
@@ -45,7 +46,7 @@ export default function ClienteShell({ cliente, children }: { cliente: { ragione
 
         <ClienteNav />
 
-        <div style={{ borderTop: '1px solid #2a2a2a', padding: '6px 0' }}>
+        <div style={{ borderTop: '1px solid #2a2a2a', padding: '6px 0', flexShrink: 0 }}>
           <a href="/api/auth/logout" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 16px', color: '#555', fontSize: '12.5px', textDecoration: 'none' }}>
             <span style={{ fontSize: '11px' }}>→</span> Esci
           </a>

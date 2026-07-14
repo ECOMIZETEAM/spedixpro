@@ -128,12 +128,12 @@ export default function ClienteNav() {
     const staAprendo = !open[id]
     setOpen(prev => ({ [id]: !prev[id] }))
     if (staAprendo && el) {
-      setTimeout(() => { el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 80)
+      setTimeout(() => { el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }, 80)
     }
   }
 
   return (
-    <nav style={{ flex: 1, padding: '6px 0' }}>
+    <nav style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '6px 0 16px' }}>
       <style>{`
         .spx-item{
           display:flex;align-items:center;gap:9px;padding:8px 18px;

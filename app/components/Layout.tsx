@@ -146,7 +146,8 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
     check(); window.addEventListener('resize', check); return () => window.removeEventListener('resize', check)
   }, [])
   useEffect(() => { setDrawerOpen(false) }, [path])   // chiudi il drawer quando cambi pagina
-  const asideBase: React.CSSProperties = { width: '220px', background: '#1a1a1a', display: 'flex', flexDirection: 'column', height: '100vh', overflowY: 'auto', zIndex: 1000 }
+  // overflow: hidden sull'aside → l'UNICO contenitore che scorre è il <nav> (logo/utente/Esci restano fissi)
+  const asideBase: React.CSSProperties = { width: '220px', background: '#1a1a1a', display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', zIndex: 1000 }
   const asideStyle: React.CSSProperties = isMobile
     ? { ...asideBase, position: 'fixed', top: 0, left: 0, transform: drawerOpen ? 'translateX(0)' : 'translateX(-100%)', transition: 'transform 0.25s ease', boxShadow: drawerOpen ? '2px 0 20px rgba(0,0,0,0.35)' : 'none' }
     : { ...asideBase, flexShrink: 0, position: 'sticky', top: 0 }
@@ -155,7 +156,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
     const staAprendo = !openMenus[href]
     setOpenMenus(prev => ({ [href]: !prev[href] }))
     if (staAprendo && el) {
-      setTimeout(() => { el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 80)
+      setTimeout(() => { el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }, 80)
     }
   }
 
@@ -169,7 +170,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
       <aside style={asideStyle}>
 
         {/* Logo */}
-        <a href="/dashboard" style={{padding:'16px 18px',borderBottom:'1px solid rgba(255,255,255,0.06)',display:'flex',alignItems:'center',gap:'10px',textDecoration:'none'}}>
+        <a href="/dashboard" style={{padding:'16px 18px',borderBottom:'1px solid rgba(255,255,255,0.06)',display:'flex',alignItems:'center',gap:'10px',textDecoration:'none',flexShrink:0}}>
           {user?.brandLogo ? (
             <div style={{width:'100%',aspectRatio:'300 / 90',display:'flex',alignItems:'center',justifyContent:'center'}}><img src={user.brandLogo} alt="Logo" style={{maxWidth:'100%',maxHeight:'100%',objectFit:'contain'}}/></div>
           ) : (
@@ -184,7 +185,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
         </a>
 
         {/* User */}
-        <div style={{padding:'12px 18px',borderBottom:'1px solid rgba(255,255,255,0.06)',display:'flex',alignItems:'center',gap:'10px'}}>
+        <div style={{padding:'12px 18px',borderBottom:'1px solid rgba(255,255,255,0.06)',display:'flex',alignItems:'center',gap:'10px',flexShrink:0}}>
           <div style={{width:'32px',height:'32px',background:'#f97316',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:'700',fontSize:'12px',color:'#fff',flexShrink:0}}>
             {user?.nome?.substring(0,2).toUpperCase() || 'DA'}
           </div>
@@ -198,7 +199,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
         </div>
 
         {/* Nav */}
-        <nav style={{flex:1,padding:'8px 0',overflowY:'auto'}}>
+        <nav style={{flex:1,minHeight:0,padding:'8px 0 16px',overflowY:'auto'}}>
           {navVisibile.map(item => {
             const key = item.href || item.label
             const isActive = !!item.href && (path === item.href || path.startsWith(item.href + '/'))
@@ -269,7 +270,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
           })}
         </nav>
 
-        <div style={{borderTop:'1px solid rgba(255,255,255,0.06)',padding:'8px 0'}}>
+        <div style={{borderTop:'1px solid rgba(255,255,255,0.06)',padding:'8px 0',flexShrink:0}}>
           <a href="/api/auth/logout" style={{display:'flex',alignItems:'center',gap:'9px',padding:'8px 18px',color:'#6b7280',fontSize:'12.5px',textDecoration:'none'}}>
             <span style={{fontSize:'13px'}}>⏻</span> Esci
           </a>
