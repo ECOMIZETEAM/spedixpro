@@ -113,7 +113,10 @@ export async function GET(req: NextRequest) {
       .limit(20000)
     const agg = new Map<string, { costo: number; n: number }>()
     for (const s of (sp || [])) {
-      if (String((s as any).stato).includes('annull')) continue   // annullate = riaccreditate = netto 0
+      // Escludo SOLO le 'annullata' (effettivamente cancellate + riaccreditate = netto 0).
+      // Le 'annullamento_pending'/'annullamento_manuale' NON sono ancora annullate sul corriere
+      // (nessun riaccredito): restano un COSTO reale e vanno contate.
+      if ((s as any).stato === 'annullata') continue
       const tipo = (s as any).corrieri?.tipo || 'altro'
       const cur = agg.get(tipo) || { costo: 0, n: 0 }
       cur.costo += Number((s as any).costo_spedizione || 0); cur.n++
