@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
 
   // Spedizioni dei suoi clienti nel periodo (escluse le annullate).
   const { data: speds } = await supabase.from('spedizioni')
-    .select('id,cliente_id,corriere_id,lunghezza,larghezza,altezza,peso_reale,dest_provincia,dest_cap,dest_paese,contrassegno,assicurazione,costo_totale,stato,created_at')
+    .select('id,cliente_id,corriere_id,lunghezza,larghezza,altezza,peso_reale,dest_provincia,dest_cap,dest_paese,contrassegno,assicurazione,costo_totale,costo_spedizione,stato,created_at')
     .in('cliente_id', clienteIds)
     .gte('created_at', dal).lte('created_at', alEnd)
     .not('stato', 'in', '(annullata)')
@@ -55,7 +55,10 @@ export async function GET(req: NextRequest) {
   let ricavi = 0, costi = 0
   for (const s of (speds || [])) {
     const ric = Number((s as any).costo_totale || 0)
-    const cos = calcCosto(s)?.totale || 0
+    // Costo agente dal listino agente; se quel corriere non è nel listino, uso il costo reale
+    // (costo_spedizione) invece di 0, altrimenti l'intero prezzo verrebbe contato come margine.
+    const cAg = calcCosto(s)?.totale
+    const cos = (cAg != null) ? cAg : Number((s as any).costo_spedizione || 0)
     ricavi += ric; costi += cos
     acc((s as any).created_at, 'ricavi', ric)
     acc((s as any).created_at, 'costi', cos)

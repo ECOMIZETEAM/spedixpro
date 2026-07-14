@@ -100,9 +100,10 @@ export async function GET(req: NextRequest) {
     : null
 
   const rows = (spedizioni || []).map((s: any) => {
-    // PREZZO CORRIERE = quello che ho pagato IO (mio movimento reale). Per l'agente = suo listino.
+    // PREZZO CORRIERE = quello che ho pagato IO (mio movimento reale). Per l'agente = suo listino;
+    // se il listino agente non copre quel corriere, ripiego sul costo reale (non 0, che gonfierebbe il margine).
     const prezzo_corriere: number | null = calcAgente
-      ? (calcAgente(s)?.totale ?? null)
+      ? (calcAgente(s)?.totale ?? (Number(s.costo_spedizione || 0) || null))
       : (costoMine.has(s.id) ? costoMine.get(s.id)! : null)
     // PREZZO CLIENTE = quello che mi paga il DIRETTO:
     //  - spedizione propria del mio cliente -> quello che ha pagato il cliente (suo movimento)
