@@ -7,41 +7,47 @@ export const runtime = 'nodejs'
 
 // Normalizza gli header: "Shipping Address1" -> "shipping_address1", "Località" -> "localita"
 function normHeader(s: string) {
-  return (s || '').toString().trim().toLowerCase()
+  return (s || '').toString()
+    .replace(/﻿/g, '')            // via il BOM (Amazon/Excel lo mettono davanti alla 1ª colonna)
+    .trim().toLowerCase()
     .replace(/[àá]/g, 'a').replace(/[èé]/g, 'e').replace(/[ìí]/g, 'i')
     .replace(/[òó]/g, 'o').replace(/[ùú]/g, 'u')
     .replace(/\s+/g, '_')
-    .replace(/[^\w]/g, '')
+    .replace(/[^\w]/g, '')              // i trattini (Amazon: "ship-postal-code") vengono rimossi -> "shippostalcode"
 }
 
 // Campo interno -> possibili header (normalizzati). Vince il primo presente nel file.
 // Copre il nostro template + export Shopify + varianti eBay/Amazon comuni.
+// NB: gli header vengono normalizzati con normHeader: gli spazi diventano "_"
+// (Shopify: "Shipping Address1" -> "shipping_address1") e i trattini VENGONO RIMOSSI
+// (Amazon: "ship-postal-code" -> "shippostalcode"). Perciò per Amazon servono le
+// forme CONCATENATE (senza separatore), che aggiungo qui accanto a quelle Shopify.
 const ALIAS: Record<string, string[]> = {
-  destinatario:       ['destinatario', 'shipping_name', 'ship_to_name', 'recipient_name', 'nome_destinatario', 'buyer_name', 'nome_e_cognome'],
-  indirizzo:          ['indirizzo', 'shipping_address1', 'ship_to_address_1', 'address1', 'indirizzo_spedizione', 'via'],
-  indirizzo2:         ['indirizzo2', 'shipping_address2', 'address2'],
-  cap:                ['cap', 'shipping_zip', 'ship_to_zip', 'zip', 'postal_code', 'cap_destinatario'],
-  localita:           ['localita', 'shipping_city', 'ship_to_city', 'city', 'citta', 'comune'],
-  provincia:          ['provincia', 'shipping_province', 'ship_to_state', 'state', 'province', 'shipping_province_name'],
-  country:            ['country', 'shipping_country', 'ship_to_country', 'paese', 'nazione'],
-  telefono:           ['telefono', 'shipping_phone', 'phone', 'buyer_phone', 'telefono_destinatario', 'cellulare'],
-  email_destinatario: ['email_destinatario', 'email', 'buyer_email', 'ship_to_email'],
+  destinatario:       ['destinatario', 'shipping_name', 'ship_to_name', 'recipient_name', 'recipientname', 'nome_destinatario', 'buyer_name', 'buyername', 'nome_e_cognome'],
+  indirizzo:          ['indirizzo', 'shipping_address1', 'ship_to_address_1', 'shipaddress1', 'address1', 'indirizzo_spedizione', 'via'],
+  indirizzo2:         ['indirizzo2', 'shipping_address2', 'shipaddress2', 'address2'],
+  cap:                ['cap', 'shipping_zip', 'ship_to_zip', 'shippostalcode', 'zip', 'postal_code', 'cap_destinatario'],
+  localita:           ['localita', 'shipping_city', 'ship_to_city', 'shipcity', 'city', 'citta', 'comune'],
+  provincia:          ['provincia', 'shipping_province', 'ship_to_state', 'shipstate', 'state', 'province', 'shipping_province_name'],
+  country:            ['country', 'shipping_country', 'ship_to_country', 'shipcountry', 'paese', 'nazione'],
+  telefono:           ['telefono', 'shipping_phone', 'phone', 'buyer_phone', 'buyerphonenumber', 'telefono_destinatario', 'cellulare'],
+  email_destinatario: ['email_destinatario', 'email', 'buyer_email', 'buyeremail', 'ship_to_email'],
   peso:               ['peso', 'weight', 'peso_kg'],
   colli:              ['colli', 'packages', 'pacchi'],
   contrassegno:       ['contrassegno', 'cod', 'cash_on_delivery'],
-  contenuto:          ['contenuto', 'lineitem_name', 'item_name', 'product_name', 'descrizione', 'articolo'],
+  contenuto:          ['contenuto', 'lineitem_name', 'item_name', 'product_name', 'productname', 'descrizione', 'articolo'],
   note:               ['note', 'notes', 'order_note', 'note_ordine'],
   rif_mittente:       ['rif_mittente', 'riferimento_mittente'],
   rif_destinatario:   ['rif_destinatario', 'riferimento_destinatario'],
-  order_id:           ['order_id', 'name', 'order_number', 'order', 'numero_ordine', 'ordine'],
-  totale_ordine:      ['totale_ordine', 'total', 'order_total', 'importo', 'totale'],
+  order_id:           ['order_id', 'orderid', 'name', 'order_number', 'order', 'numero_ordine', 'ordine'],
+  totale_ordine:      ['totale_ordine', 'total', 'order_total', 'importo', 'totale', 'item_price'],
 }
 // Colonne ausiliarie (non salvate ma usate per logica: line item, contrassegno, ecc.)
 const AUX: Record<string, string[]> = {
-  lineitem_name: ['lineitem_name', 'item_name', 'product_name'],
-  lineitem_qty:  ['lineitem_quantity', 'quantity', 'qty', 'quantita'],
+  lineitem_name: ['lineitem_name', 'item_name', 'product_name', 'productname'],
+  lineitem_qty:  ['lineitem_quantity', 'quantity', 'qty', 'quantita', 'quantity_purchased', 'quantitypurchased'],
   payment:       ['payment_method', 'metodo_pagamento'],
-  shippingm:     ['shipping_method', 'metodo_spedizione'],
+  shippingm:     ['shipping_method', 'metodo_spedizione', 'ship_service_level', 'shipservicelevel'],
   financial:     ['financial_status', 'payment_status', 'stato_pagamento'],
 }
 
