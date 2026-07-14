@@ -364,9 +364,9 @@ export default function ImportaOrdiniPage() {
         <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', justifyContent: 'space-between' }}>
           <div style={{ flex: '1 1 320px' }}>
             <div style={{ fontSize: '13px', fontWeight: 600, color: '#1a1a1a', marginBottom: '12px' }}>
-              1. Seleziona il file (CSV o Excel)
+              1. Seleziona il file (CSV, TXT o Excel)
             </div>
-            <input ref={fileRef} type="file" accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={onFile} style={{ display: 'none' }} />
+            <input ref={fileRef} type="file" accept=".csv,text/csv,.txt,.tsv,text/plain,text/tab-separated-values,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={onFile} style={{ display: 'none' }} />
             <button
               onClick={() => fileRef.current?.click()}
               disabled={uploading}
@@ -376,7 +376,7 @@ export default function ImportaOrdiniPage() {
                 cursor: uploading ? 'default' : 'pointer', opacity: uploading ? .6 : 1,
               }}
             >
-              {uploading ? 'Caricamento…' : 'Carica file CSV'}
+              {uploading ? 'Caricamento…' : 'Carica file'}
             </button>
             <button
               onClick={scaricaTemplate}
@@ -390,12 +390,12 @@ export default function ImportaOrdiniPage() {
           </div>
 
           <div style={{ flex: '1 1 320px', fontSize: '12.5px', color: '#666', lineHeight: 1.6 }}>
-            Puoi caricare direttamente l&apos;<b>export ordini di Shopify</b> (o file Excel di
-            eBay/Amazon): il sistema riconosce da solo le colonne e raggruppa gli ordini con più
-            prodotti.<br />
+            Puoi caricare direttamente l&apos;<b>export ordini di Shopify</b> o il file di{' '}
+            <b>Amazon</b> (il .txt originale, senza convertirlo): il sistema riconosce da solo le
+            colonne e il separatore, e raggruppa gli ordini con più prodotti.<br />
             In alternativa usa il nostro <b>template</b> — colonne obbligatorie:{' '}
             <b style={{ color: '#b45309' }}>destinatario, indirizzo, cap, localita, provincia</b>.<br />
-            Formati: <b>.csv</b> o <b>.xlsx</b>.
+            Formati: <b>.csv</b>, <b>.txt</b> (tab) o <b>.xlsx</b>.
           </div>
         </div>
       </div>
