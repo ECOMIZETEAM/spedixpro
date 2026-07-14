@@ -9,27 +9,49 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome,masters(nome,parent_master_id,abbonamento_piano,abbonamento_limite)').eq('id', user.id).single()
 
-  // ── AGENTE: dashboard confinata ai suoi clienti (nessun dato/rete/KPI del master) ──
+  // ── AGENTE: dashboard confinata ai SUOI clienti. Piano = quello del MASTER (riferimento),
+  //    conteggio = spedizioni dei suoi clienti. Nessun dato/rete/KPI del master. ──
   if (isAgente(utente)) {
     const ids = idClientiPerFiltro(await clientiAgente(supabase, utente))
     const nMiei = ids[0] === '00000000-0000-0000-0000-000000000000' ? 0 : ids.length
-    const cnt = async (stato: string) => {
-      const { count } = await supabase.from('spedizioni').select('*', { count: 'exact', head: true }).in('cliente_id', ids).eq('stato', stato)
-      return count || 0
-    }
-    const [inLavorazione, inTransito, inGiacenza, consegnate, { data: ultime }] = await Promise.all([
-      cnt('in_lavorazione'), cnt('in_transito'), cnt('in_giacenza'), cnt('consegnata'),
-      supabase.from('spedizioni').select(SPED_COLS).in('cliente_id', ids).order('created_at', { ascending: false }).limit(10),
+    const mRec: any = (utente as any)?.masters || {}
+    const isRootA = !mRec?.parent_master_id
+    const limitePianoA = Number(mRec?.abbonamento_limite || 0) || 50000
+    const abbonamentoAttivoA = isRootA || !!mRec?.abbonamento_piano
+    const { createAdminSupabase: _adminA } = await import('@/lib/supabase-admin')
+    const adminA = _adminA()
+    const oggi = new Date()
+    const inizioMese = new Date(oggi.getFullYear(), oggi.getMonth(), 1).toISOString()
+    const startOggi = new Date(oggi.getFullYear(), oggi.getMonth(), oggi.getDate()).toISOString()
+    const base = () => adminA.from('spedizioni').select('id', { count: 'exact', head: true }).in('cliente_id', ids)
+    const C = async (b: any) => (await b).count || 0
+    const [
+      inLavorazione, inTransito, inGiacenza, consegnateTotali, spedizioniTotali,
+      spedizioniMese, consegnateMese, spediteOggi,
+      { data: ultime }, { data: meseRows },
+    ] = await Promise.all([
+      C(base().eq('stato', 'in_lavorazione')),
+      C(base().eq('stato', 'in_transito')),
+      C(base().eq('stato', 'in_giacenza')),
+      C(base().eq('stato', 'consegnata')),
+      C(base().not('stato', 'in', '(annullata)')),
+      C(base().gte('created_at', inizioMese).not('stato', 'in', '(annullata)')),
+      C(base().eq('stato', 'consegnata').gte('created_at', inizioMese)),
+      C(base().gte('updated_at', startOggi).in('stato', ['spedita', 'in_transito', 'consegnata'])),
+      adminA.from('spedizioni').select(SPED_COLS).in('cliente_id', ids).order('created_at', { ascending: false }).limit(10),
+      adminA.from('spedizioni').select('costo_totale').in('cliente_id', ids).gte('created_at', inizioMese).not('stato', 'in', '(annullata)').limit(20000),
     ])
+    const fatturatoMese = (meseRows || []).reduce((s: number, x: any) => s + Number(x.costo_totale || 0), 0)
+    const tassoConsegna = spedizioniTotali > 0 ? Math.round((consegnateTotali / spedizioniTotali) * 1000) / 10 : 0
     return NextResponse.json({
       ruolo: 'agente',
       masterNome: (((utente as any)?.nome) || 'Agente'),
       totClienti: nMiei, clientiTotali: nMiei,
-      spedizioniMese: 0, limiteMese: 0, abbonamentoAttivo: true, illimitato: false,
-      spediteOggi: 0, daSpedire: inLavorazione, inLavorazione,
-      spedizioniTotali: 0, fatturatoMese: 0, consegnateMese: 0,
+      spedizioniMese, limiteMese: limitePianoA, abbonamentoAttivo: abbonamentoAttivoA, illimitato: isRootA,
+      spediteOggi, daSpedire: inLavorazione, inLavorazione,
+      spedizioniTotali, fatturatoMese: Math.round(fatturatoMese * 100) / 100, consegnateMese,
       inTransito, inGiacenza, codDaRimettere: 0, sottomaster: 0,
-      consegnateTotali: consegnate, tassoConsegna: 0, topCorriere: null, topCliente: null,
+      consegnateTotali, tassoConsegna, topCorriere: null, topCliente: null,
       statsMensili: [], statiUltimi30: {}, ultimeSpedizioni: ultime || [],
     })
   }
