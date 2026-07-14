@@ -53,10 +53,16 @@ function superaMisureMax(settings: any, pesoReale: number, colli: any[]): boolea
 }
 
 // Testo indicazione limiti collo, chiaro e sintetico, dai settings del corriere.
-function descriviLimiti(settings: any): string {
+// Rispetta gli scaglioni di peso: se sono configurate misure diverse sopra/sotto una
+// soglia (es. BRT: dimensioni max diverse sopra e sotto i 50 kg), mostra quelle che
+// si applicano al PESO REALE della spedizione in corso (come fa il controllo superaMisureMax).
+function descriviLimiti(settings: any, pesoReale?: number): string {
   if (!settings) return ''
   const parts: string[] = []
-  const mm = settings.misure_max
+  const sc = settings.misure_scaglioni
+  const mm = (sc && sc.soglia_kg != null && sc.soglia_kg !== '' && pesoReale != null)
+    ? (pesoReale > Number(sc.soglia_kg) ? sc.sopra : sc.sotto)
+    : settings.misure_max
   if (mm && (Number(mm.lunghezza) > 0 || Number(mm.larghezza) > 0 || Number(mm.altezza) > 0))
     parts.push(`max ${mm.lunghezza || '-'}×${mm.larghezza || '-'}×${mm.altezza || '-'} cm`)
   if (Number(settings.limite_combinato) > 0) parts.push(`lato+2×(altri due) ≤ ${settings.limite_combinato} cm`)
@@ -139,7 +145,7 @@ export async function POST(req: NextRequest) {
         total_price: dett.totale.toFixed(2),
         zona: isEsteroP ? (PAESI[paeseP] || paeseP) : (ZONE_MAP[provinciaP] || 'Italia'),
         peso_reale: pesoRealeP, peso_volume: '0.00', peso_fatturato: pesoRealeP.toFixed(2),
-        corriere_nome: corr.nome_contratto || 'Corriere', listino_fascia: 'Listino corriere', limiti_collo: descriviLimiti(corr.settings),
+        corriere_nome: corr.nome_contratto || 'Corriere', listino_fascia: 'Listino corriere', limiti_collo: descriviLimiti(corr.settings, pesoRealeP),
         _corriere_tipo: corr.tipo, _corriere_id: corr.id,
       })
     }
@@ -489,7 +495,7 @@ export async function POST(req: NextRequest) {
       peso_volume: pesoVolumeC.toFixed(2),
       peso_fatturato: pesoPerFascia.toFixed(2),   // peso EFFETTIVO su cui è calcolato il prezzo (reale se agevolazione)
       corriere_nome: corriere?.nome_contratto || 'Corriere',
-      limiti_collo: descriviLimiti(settsC),   // indicazione limiti collo (misure/combinata/peso/colli)
+      limiti_collo: descriviLimiti(settsC, pesoReale),   // indicazione limiti collo (scaglione applicabile al peso)
       listino_fascia: `fino a ${fasciaGiusta.peso_max}kg`,
       accessori_disponibili: accessoriPerCorriere.get(corriereId) || [],
       _corriere_tipo: corriere?.tipo,
