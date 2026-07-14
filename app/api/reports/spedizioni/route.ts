@@ -63,8 +63,12 @@ export async function GET(req: NextRequest) {
   else if (ruolo === 'cliente') query = query.eq('cliente_id', utente?.cliente_id)
   else if (reteIds && reteIds.length > 1) query = query.in('master_id', reteIds)
   else query = query.eq('master_id', mine)
-  // Agente: solo le spedizioni dei suoi clienti.
-  if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
+  // Agente: solo le spedizioni dei suoi clienti; escluse le annullate (rimborsate, margine 0)
+  // per coincidere con la dashboard "Il mio guadagno".
+  if (isAgente(utente)) {
+    query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
+    if (!stato) query = query.not('stato', 'in', '(annullata)')
+  }
   if (stato) query = query.eq('stato', stato)
   if (dal) query = query.gte('created_at', dal)
   if (al) query = query.lte('created_at', al)
@@ -109,7 +113,10 @@ export async function GET(req: NextRequest) {
     //  - spedizione propria del mio cliente -> quello che ha pagato il cliente (suo movimento)
     //  - spedizione di rete -> quello che paga il figlio di prima linea (suo movimento)
     let prezzo_cliente: number
-    if (s.master_id === mine) {
+    if (calcAgente) {
+      // Agente: costo cliente = quello che paga il cliente (costo_totale), come nella dashboard.
+      prezzo_cliente = Number(s.costo_totale || 0)
+    } else if (s.master_id === mine) {
       prezzo_cliente = pagatoCliente.has(s.id) ? pagatoCliente.get(s.id)! : Number(s.costo_totale || 0)
     } else {
       const flId = primaLineaId.get(s.master_id)
