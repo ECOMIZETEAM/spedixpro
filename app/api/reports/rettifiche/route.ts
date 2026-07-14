@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { calcolaPrezzoListino } from '@/lib/pricing'
+import { isAgente, clientiAgente } from '@/lib/agente'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ righe: [], master: {}, cliente: {} })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
   const masterId = utente?.master_id
   const p = req.nextUrl.searchParams
   const clienteIdRaw = p.get('clienteId')
@@ -16,6 +17,12 @@ export async function GET(req: NextRequest) {
   const masterSel = clienteIdRaw && clienteIdRaw.startsWith('m:') ? clienteIdRaw.slice(2) : null
   const clienteId = masterSel ? null : clienteIdRaw
   if (!clienteId && !masterSel) return NextResponse.json({ righe: [], master: {}, cliente: {} })
+  // Agente: niente rete (sotto-master) e solo un suo cliente.
+  if (isAgente(utente)) {
+    if (masterSel) return NextResponse.json({ righe: [], master: {}, cliente: {} })
+    const miei = await clientiAgente(supabase, utente)
+    if (!clienteId || !miei.includes(clienteId)) return NextResponse.json({ righe: [], master: {}, cliente: {} })
+  }
 
   const { data: master } = await supabase.from('masters')
     .select('nome,logo_url,indirizzo,cap,citta,provincia,email,email_sede,piva,partita_iva')

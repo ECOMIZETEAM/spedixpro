@@ -2,6 +2,7 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
+import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { spediamoproGetTracking, mapStatoSpediamopro } from '@/lib/spediamopro'
 import { mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
 
@@ -9,7 +10,7 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
   const spedizioneId = req.nextUrl.searchParams.get('id')
   if (!spedizioneId) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
@@ -23,6 +24,8 @@ export async function GET(req: NextRequest) {
     .select('id,stato,tracking_number,corriere_id,numero,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_telefono,dest_email,raw_response,colli_dettaglio,mitt_nome,cliente_id,contenuto')
     .eq('id', spedizioneId).in('master_id', masterIds)
   if (isCliente) spedQuery = spedQuery.eq('cliente_id', utente.cliente_id)
+  // Agente: solo tracking di un suo cliente.
+  if (isAgente(utente as any)) spedQuery = spedQuery.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente as any)))
   const { data: spedizione } = await spedQuery.single()
   if (!spedizione) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 

@@ -3,12 +3,13 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { calcolaPrezzoListino } from '@/lib/pricing'
+import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
   const clienteIdRaw = req.nextUrl.searchParams.get('cliente_id')
   // "m:<masterId>" = sotto-master agganciato: le sue distinte hanno target_master_id
   const masterSel = clienteIdRaw && clienteIdRaw.startsWith('m:') ? clienteIdRaw.slice(2) : null
@@ -19,6 +20,7 @@ export async function GET(req: NextRequest) {
     .select('*, clienti(ragione_sociale)')
     .eq('master_id', utente?.master_id)
     .order('created_at', { ascending: false })
+  if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
   if (masterSel) query = query.eq('target_master_id', masterSel)
   else if (clienteId) query = query.eq('cliente_id', clienteId)
   if (dal) query = query.gte('created_at', dal)
@@ -31,7 +33,8 @@ export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
   const body = await req.json()
   const { spedizioniIds, clienteId, targetMasterId, totale, voci } = body
   const adminDb = createAdminSupabase()

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { bloccaAgente } from '@/lib/agente'
 
 // Cancellazione LDV con ATTESA 48h: il master/cliente "cancella" la spedizione, che entra
 // in stato 'annullamento_pending' (esce dalle liste attive, appare nella sezione pending di
@@ -10,6 +11,7 @@ export async function DELETE(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+  const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
   const spedizioneId = req.nextUrl.searchParams.get('id')
   if (!spedizioneId) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
 

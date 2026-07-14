@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { bloccaAgente, isAgente, clientiAgente } from '@/lib/agente'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato'}, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
 
-  // Sotto-master agganciato (id = "m:<masterId>"): mostrato come una scheda cliente
+  // Sotto-master agganciato (id = "m:<masterId>"): mostrato come una scheda cliente.
+  // L'agente non vede la rete/sotto-master.
   if (id.startsWith('m:')) {
+    const _v = bloccaAgente(utente, 'Non disponibile per gli agenti.'); if (_v) return _v
     const targetId = id.slice(2)
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const admin = createAdminSupabase()
@@ -29,12 +32,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     })
   }
 
-  const { data: cliente } = await supabase
+  let qCli = supabase
     .from('clienti')
     .select('*, listini_clienti(id,nome)')
     .eq('id', id)
     .eq('master_id', utente?.master_id)
-    .single()
+  // Agente: può vedere SOLO un cliente a lui assegnato.
+  if (isAgente(utente)) qCli = qCli.eq('agente', (((utente?.nome)||'')+' '+((utente?.cognome)||'')).trim())
+  const { data: cliente } = await qCli.single()
   if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' },{ status: 404 })
   return NextResponse.json(cliente)
 }
@@ -44,7 +49,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato'}, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
   const body = await req.json()
   const { resetPassword, email_conferma, ...datiCliente } = body
 

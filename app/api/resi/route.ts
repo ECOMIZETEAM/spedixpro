@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { isAgente, clientiAgente } from '@/lib/agente'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
   const ldv = req.nextUrl.searchParams.get('ldv')
   if (!ldv) return NextResponse.json({ error: 'LDV obbligatoria' }, { status: 400 })
   // RLS + catena: cerco la LDV su tutta la discendenza (solo discesa)
@@ -16,6 +17,11 @@ export async function GET(req: NextRequest) {
     .or(`numero.eq.${ldv},tracking_number.eq.${ldv}`)
     .single()
   if (!spedizione) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
+  // Agente: solo spedizioni di un suo cliente.
+  if (isAgente(utente)) {
+    const miei = await clientiAgente(supabase, utente)
+    if (!spedizione.cliente_id || !miei.includes(spedizione.cliente_id)) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
+  }
   // chi cerca deve essere il master della spedizione o un suo antenato
   let cur: string | null = spedizione.master_id
   let idx = -1

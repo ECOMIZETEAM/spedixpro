@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { isAgente, nomeAgente } from '@/lib/agente'
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
   // ?conMaster=1 -> includi i sotto-master agganciati come se fossero clienti (per i filtri)
   const conMaster = req.nextUrl.searchParams.get('conMaster') === '1'
-  const { data } = await supabase.from('clienti')
+  let qCli = supabase.from('clienti')
     .select('id,ragione_sociale,so_indirizzo,so_citta,so_provincia,so_cap,sl_citta,email,telefono,piva,codice_cliente,attivo,listino_cliente_id,tipo_contratto,credito,listini_clienti(nome)')
     .eq('master_id', utente?.master_id)
-    .order('ragione_sociale')
+  // Agente: solo i clienti a lui assegnati.
+  if (isAgente(utente)) qCli = qCli.eq('agente', nomeAgente(utente))
+  const { data } = await qCli.order('ragione_sociale')
   const clienti = data || []
   const listinoIds = Array.from(new Set(clienti.map((c:any)=>c.listino_cliente_id).filter(Boolean)))
   const clienteIds = clienti.map((c:any)=>c.id)

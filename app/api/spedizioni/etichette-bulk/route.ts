@@ -1,12 +1,13 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { PDFDocument } from 'pdf-lib'
+import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
   const body = await req.json()
   const { ids } = body
   if (!ids?.length) return NextResponse.json({ error: 'Nessun ID' }, { status: 400 })
@@ -23,7 +24,10 @@ export async function POST(req: NextRequest) {
     const { masterIdsVisibili } = await import('@/lib/rete-masters')
     const admin = createAdminSupabase()
     const subtree = utente?.master_id ? await masterIdsVisibili(admin, utente.master_id) : []
-    const { data } = await admin.from('spedizioni').select(cols).in('id', ids).in('master_id', subtree.length ? subtree : ['00000000-0000-0000-0000-000000000000'])
+    let q = admin.from('spedizioni').select(cols + ',cliente_id').in('id', ids).in('master_id', subtree.length ? subtree : ['00000000-0000-0000-0000-000000000000'])
+    // Agente: solo etichette dei suoi clienti.
+    if (isAgente(utente as any)) q = q.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente as any)))
+    const { data } = await q
     spedizioni = data
   }
 

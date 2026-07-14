@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
   const p = req.nextUrl.searchParams
   const clienteIdRaw = p.get('clienteId')
   // "m:<masterId>" = sotto-master agganciato: le sue distinte hanno target_master_id
@@ -20,6 +21,7 @@ export async function GET(req: NextRequest) {
     .eq('master_id', utente?.master_id)
     .order('created_at', { ascending: false })
 
+  if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
   if (masterSel) query = query.eq('target_master_id', masterSel)
   else if (clienteId) query = query.eq('cliente_id', clienteId)
   if (stato) query = query.eq('stato', stato)
@@ -44,7 +46,8 @@ export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
   const body = await req.json()
   const { spedizioneIds } = body
   if (!spedizioneIds?.length) return NextResponse.json({ error: 'Nessuna spedizione' }, { status: 400 })

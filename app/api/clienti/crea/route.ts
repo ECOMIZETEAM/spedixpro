@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { inviaCredenzialiCliente } from '@/lib/email'
+import { bloccaAgente } from '@/lib/agente'
 
 function generaPassword(len = 10): string {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#'
@@ -11,7 +12,8 @@ export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id, masters(nome,slug)').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id, ruolo, masters(nome,slug)').eq('id', user.id).single()
+  const _bloccoAg = bloccaAgente(utente as any); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
   if (!utente?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
   const body = await req.json()
   const email = body.email?.toLowerCase().trim()

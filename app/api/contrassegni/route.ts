@@ -1,11 +1,12 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
   const p = req.nextUrl.searchParams
   const clienteIdRaw = p.get('clienteId')
   // "m:<masterId>" = sotto-master agganciato (trattato come cliente)
@@ -37,6 +38,8 @@ export async function GET(req: NextRequest) {
 
   if (subtreeSel) query = query.in('master_id', subtreeSel)
   else query = query.eq('master_id', utente?.master_id)
+  // Agente: solo contrassegni dei suoi clienti (copre anche l'eventuale ramo rete).
+  if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
   if (clienteId) query = query.eq('cliente_id', clienteId)
   if (stato) query = query.eq('stato', stato)
   if (statoContrassegno) query = query.eq('stato_contrassegno', statoContrassegno)

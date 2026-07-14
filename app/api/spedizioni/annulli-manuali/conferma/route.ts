@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { bloccaAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { rimborsaAnnulloSpedizione } from '@/lib/annullaSpedizione'
 
@@ -10,6 +11,7 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  const _bloccoAg = bloccaAgente(utente as any); if (_bloccoAg) return _bloccoAg   // agente = no scrittura / no rete
   if (!utente?.master_id || (utente.ruolo || '').toLowerCase() === 'cliente') return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const spedizioneId = req.nextUrl.searchParams.get('id') || (await req.json().catch(() => ({}))).id
   if (!spedizioneId) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })

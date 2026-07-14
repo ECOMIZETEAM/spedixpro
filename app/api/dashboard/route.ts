@@ -1,12 +1,38 @@
 ﻿import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
+import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 
 export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,masters(nome,parent_master_id,abbonamento_piano,abbonamento_limite)').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome,masters(nome,parent_master_id,abbonamento_piano,abbonamento_limite)').eq('id', user.id).single()
+
+  // ── AGENTE: dashboard confinata ai suoi clienti (nessun dato/rete/KPI del master) ──
+  if (isAgente(utente)) {
+    const ids = idClientiPerFiltro(await clientiAgente(supabase, utente))
+    const nMiei = ids[0] === '00000000-0000-0000-0000-000000000000' ? 0 : ids.length
+    const cnt = async (stato: string) => {
+      const { count } = await supabase.from('spedizioni').select('*', { count: 'exact', head: true }).in('cliente_id', ids).eq('stato', stato)
+      return count || 0
+    }
+    const [inLavorazione, inTransito, inGiacenza, consegnate, { data: ultime }] = await Promise.all([
+      cnt('in_lavorazione'), cnt('in_transito'), cnt('in_giacenza'), cnt('consegnata'),
+      supabase.from('spedizioni').select(SPED_COLS).in('cliente_id', ids).order('created_at', { ascending: false }).limit(10),
+    ])
+    return NextResponse.json({
+      masterNome: (((utente as any)?.nome) || 'Agente'),
+      totClienti: nMiei, clientiTotali: nMiei,
+      spedizioniMese: 0, limiteMese: 0, abbonamentoAttivo: true, illimitato: false,
+      spediteOggi: 0, daSpedire: inLavorazione, inLavorazione,
+      spedizioniTotali: 0, fatturatoMese: 0, consegnateMese: 0,
+      inTransito, inGiacenza, codDaRimettere: 0, sottomaster: 0,
+      consegnateTotali: consegnate, tassoConsegna: 0, topCorriere: null, topCliente: null,
+      statsMensili: [], statiUltimi30: {}, ultimeSpedizioni: ultime || [],
+    })
+  }
+
   const masterId = utente?.master_id
   const masterRec: any = (utente as any)?.masters || {}
   const masterNome = masterRec?.nome || 'Master'

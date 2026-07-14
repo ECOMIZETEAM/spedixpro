@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
+import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 
 // Report spedizioni dal punto di vista del MASTER LOGGATO (report margine):
 // - "Tutti" (nessun cliente selezionato) → tutta la sua rete (sotto-albero).
@@ -10,7 +11,7 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
   const p = req.nextUrl.searchParams
   const clienteIdRaw = p.get('clienteId')
   const masterSel = clienteIdRaw && clienteIdRaw.startsWith('m:') ? clienteIdRaw.slice(2) : null
@@ -61,6 +62,8 @@ export async function GET(req: NextRequest) {
   else if (ruolo === 'cliente') query = query.eq('cliente_id', utente?.cliente_id)
   else if (reteIds && reteIds.length > 1) query = query.in('master_id', reteIds)
   else query = query.eq('master_id', mine)
+  // Agente: solo le spedizioni dei suoi clienti.
+  if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
   if (stato) query = query.eq('stato', stato)
   if (dal) query = query.gte('created_at', dal)
   if (al) query = query.lte('created_at', al)

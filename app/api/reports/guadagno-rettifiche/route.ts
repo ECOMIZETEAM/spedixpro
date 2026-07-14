@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ guadagno: 0, ricavi: 0, costi: 0 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const M = utente?.master_id
-  if (!M || (utente?.ruolo || '').toLowerCase() === 'cliente') return NextResponse.json({ guadagno: 0, ricavi: 0, costi: 0 })
+  if (!M || ['cliente','agente'].includes((utente?.ruolo || '').toLowerCase())) return NextResponse.json({ guadagno: 0, ricavi: 0, costi: 0 })
 
   const periodo = req.nextUrl.searchParams.get('periodo') || 'mensile'
   const dal = dataDa(periodo)

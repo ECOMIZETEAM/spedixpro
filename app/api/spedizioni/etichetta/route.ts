@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { isAgente, clientiAgente } from '@/lib/agente'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -10,7 +11,7 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
 
   const { data: utente } = await supabase
-    .from('utenti').select('ruolo, cliente_id, master_id').eq('id', user.id).single()
+    .from('utenti').select('ruolo, cliente_id, master_id, nome, cognome').eq('id', user.id).single()
 
   const url = new URL(req.url)
   const id = url.searchParams.get('id')
@@ -30,6 +31,11 @@ export async function GET(req: NextRequest) {
     }
   } else if (utente?.master_id && sped.master_id !== utente.master_id) {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  }
+  // Agente: solo etichette di un suo cliente.
+  if (isAgente(utente as any)) {
+    const miei = await clientiAgente(supabase, utente as any)
+    if (!sped.cliente_id || !miei.includes(sped.cliente_id)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
 
   // Caso spedisci.online: etichetta come labelData base64 dentro raw_response

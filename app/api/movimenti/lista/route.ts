@@ -8,6 +8,9 @@ export async function GET(req: NextRequest) {
   const { data: utente } = await supabase
     .from('utenti').select('ruolo, cliente_id, master_id').eq('id', user.id).single()
 
+  // L'agente non vede movimenti/credito (dati del master).
+  if ((utente?.ruolo || '').toLowerCase() === 'agente') return NextResponse.json({ error: 'Non disponibile per gli agenti.' }, { status: 403 })
+
   const self = req.nextUrl.searchParams.get('self')
 
   if (self === '1') {

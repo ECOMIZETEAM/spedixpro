@@ -24,7 +24,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!user) return NextResponse.redirect(new URL('/', req.url))
 
   const { data: utente } = await supabase.from('utenti').select('ruolo,master_id').eq('id', user.id).single()
-  if (!utente || utente.ruolo === 'cliente') {
+  // Cliente e AGENTE non possono impersonare.
+  if (!utente || utente.ruolo === 'cliente' || (utente.ruolo || '').toLowerCase() === 'agente') {
     return NextResponse.redirect(new URL('/dashboard', req.url))
   }
 

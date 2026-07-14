@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { isAgente, clientiAgente, bloccaAgente } from '@/lib/agente'
 
 // Gestione di una singola giacenza (dettaglio "Gestisci").
 // Flusso a due attori: il cliente sceglie l'operazione (riconsegna / riconsegna a
 // nuovo destinatario / reso) e chiede lo svincolo; il master vede la richiesta,
 // puo' aggiungere costi manuali e conferma lo svincolo -> addebito + invio al corriere.
 
-type Ctx = { admin: any; sped: any; ruolo: 'cliente' | 'master'; masterId?: string; clienteId?: string; nomeUtente: string }
+type Ctx = { admin: any; sped: any; ruolo: 'cliente' | 'master'; agente?: boolean; masterId?: string; clienteId?: string; nomeUtente: string }
 
 // Mappa i nomi dei servizi giacenza del listino sulle 3 operazioni
 function chiaveServizio(nome: string): string | null {
@@ -57,7 +58,7 @@ async function contesto(req: NextRequest, id: string): Promise<Ctx | NextRespons
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
   const ruolo = (utente?.ruolo || '').toLowerCase() === 'cliente' ? 'cliente' : 'master'
   const admin = createAdminSupabase()
   const { data: sped } = await admin.from('spedizioni')
@@ -69,7 +70,12 @@ async function contesto(req: NextRequest, id: string): Promise<Ctx | NextRespons
   } else {
     if (sped.master_id !== utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
-  return { admin, sped, ruolo, masterId: utente?.master_id, clienteId: utente?.cliente_id, nomeUtente: utente?.nome || (ruolo === 'cliente' ? 'Cliente' : 'Master') }
+  // Agente: solo giacenze di un suo cliente.
+  if (isAgente(utente)) {
+    const miei = await clientiAgente(supabase, utente)
+    if (!sped.cliente_id || !miei.includes(sped.cliente_id)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  }
+  return { admin, sped, ruolo, agente: isAgente(utente), masterId: utente?.master_id, clienteId: utente?.cliente_id, nomeUtente: utente?.nome || (ruolo === 'cliente' ? 'Cliente' : 'Master') }
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -89,6 +95,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params
   const ctx = await contesto(req, id)
   if (ctx instanceof NextResponse) return ctx
+  if ((ctx as any).agente) return NextResponse.json({ error: 'Operazione non consentita: gli agenti hanno accesso in sola lettura.' }, { status: 403 })
   const { admin, sped, ruolo, masterId, nomeUtente } = ctx
   const body = await req.json()
   const azione = body?.azione
