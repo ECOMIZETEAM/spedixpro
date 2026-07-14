@@ -1,10 +1,9 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { PROVINCE_IT } from '@/lib/province-it'
 
 const inp = {padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',width:'100%',boxSizing:'border-box' as const}
 const lbl = {fontSize:'12px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
-
-const PROVINCE = ['AG','AL','AN','AO','AR','AP','AT','AV','BA','BT','BL','BN','BG','BI','BO','BZ','BS','BR','CA','CL','CB','CE','CT','CZ','CH','CO','CS','CR','KR','CN','EN','FM','FE','FI','FG','FC','FR','GE','GO','GR','IM','IS','SP','AQ','LT','LE','LC','LI','LO','LU','MC','MN','MS','MT','ME','MI','MO','MB','NA','NO','NU','OG','OT','OR','PD','PA','PR','PV','PG','PU','PE','PC','PI','PT','PN','PZ','PO','RG','RA','RC','RE','RI','RN','RO','SA','SS','SV','SI','SR','SO','TA','TE','TR','TO','TP','TN','TV','TS','UD','VA','VE','VB','VC','VR','VV','VI','VT']
 
 export default function ImpostazioniPage() {
   const [tab, setTab] = useState<'azienda'|'fatturazione'|'pagamento'|'sede'>('azienda')
@@ -93,7 +92,7 @@ export default function ImpostazioniPage() {
                 <div><label style={lbl}>Provincia</label>
                   <select value={dati.provincia} onChange={e=>setF('provincia',e.target.value)} style={{...inp}}>
                     <option value="">Seleziona</option>
-                    {PROVINCE.map(p=><option key={p} value={p}>{p}</option>)}
+                    {PROVINCE_IT.map(p=><option key={p.sigla} value={p.sigla}>{p.nome} ({p.sigla})</option>)}
                   </select>
                 </div>
               </div>
@@ -140,7 +139,7 @@ export default function ImpostazioniPage() {
                 <div><label style={lbl}>Provincia</label>
                   <select value={dati.provincia_fatturazione} onChange={e=>setF('provincia_fatturazione',e.target.value)} style={{...inp}}>
                     <option value="">Seleziona</option>
-                    {PROVINCE.map(p=><option key={p} value={p}>{p}</option>)}
+                    {PROVINCE_IT.map(p=><option key={p.sigla} value={p.sigla}>{p.nome} ({p.sigla})</option>)}
                   </select>
                 </div>
               </div>
@@ -180,7 +179,7 @@ export default function ImpostazioniPage() {
                 <div><label style={lbl}>Provincia</label>
                   <select value={dati.provincia_operativo} onChange={e=>setF('provincia_operativo',e.target.value)} style={{...inp}}>
                     <option value="">Seleziona</option>
-                    {PROVINCE.map(p=><option key={p} value={p}>{p}</option>)}
+                    {PROVINCE_IT.map(p=><option key={p.sigla} value={p.sigla}>{p.nome} ({p.sigla})</option>)}
                   </select>
                 </div>
               </div>

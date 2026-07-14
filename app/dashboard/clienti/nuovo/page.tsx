@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { PROVINCE_IT } from '@/lib/province-it'
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const lbl = {fontSize:'11.5px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
@@ -8,7 +9,6 @@ const sec = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',ove
 const sech = {padding:'12px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700' as const,color:'#1a1a1a'}
 const secb = {padding:'16px',display:'flex' as const,flexDirection:'column' as const,gap:'12px'}
 
-const PROVINCE = ['AG','AL','AN','AO','AR','AP','AT','AV','BA','BT','BL','BN','BG','BI','BO','BZ','BS','BR','CA','CL','CB','CI','CE','CT','CZ','CH','CO','CS','CR','KR','CN','EN','FM','FE','FI','FG','FC','FR','GE','GO','GR','IM','IS','SP','AQ','LT','LE','LC','LI','LO','LU','MC','MN','MS','MT','VS','ME','MI','MO','MB','NA','NO','NU','OG','OT','OR','PD','PA','PR','PV','PG','PU','PE','PC','PI','PT','PN','PZ','PO','RG','RA','RC','RE','RI','RN','RO','SA','SS','SV','SI','SR','SO','TA','TE','TR','TO','TP','TN','TV','TS','UD','VA','VE','VB','VC','VR','VV','VI','VT']
 
 export default function NuovoClientePage() {
   const router = useRouter()
@@ -232,7 +232,7 @@ export default function NuovoClientePage() {
                 <label style={lbl}>Provincia</label>
                 <select value={form.sl_provincia} onChange={e=>set('sl_provincia',e.target.value)} style={inp}>
                   <option value="">Seleziona provincia...</option>
-                  {PROVINCE.map(p=><option key={p} value={p}>{p}</option>)}
+                  {PROVINCE_IT.map(p=><option key={p.sigla} value={p.sigla}>{p.nome} ({p.sigla})</option>)}
                 </select>
               </div>
             </div>
@@ -255,7 +255,7 @@ export default function NuovoClientePage() {
                 <label style={lbl}>Provincia</label>
                 <select value={form.so_provincia} onChange={e=>set('so_provincia',e.target.value)} style={inp}>
                   <option value="">Seleziona provincia...</option>
-                  {PROVINCE.map(p=><option key={p} value={p}>{p}</option>)}
+                  {PROVINCE_IT.map(p=><option key={p.sigla} value={p.sigla}>{p.nome} ({p.sigla})</option>)}
                 </select>
               </div>
             </div>
