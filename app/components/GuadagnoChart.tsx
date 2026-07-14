@@ -75,6 +75,18 @@ export default function GuadagnoChart() {
         </div>
       </div>
 
+      {Array.isArray(d?.costiProvider) && d.costiProvider.length > 0 && (
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '12px' }}>
+          {d.costiProvider.map((p: any) => (
+            <div key={p.provider} style={{ border: '1px solid #e8e8e8', borderRadius: '8px', padding: '8px 12px', background: '#fafafa', minWidth: '150px' }}>
+              <div style={{ fontSize: '11px', color: '#8a8a8a', fontWeight: 600 }}>Costo {p.provider}</div>
+              <div style={{ fontSize: '17px', fontWeight: 800, color: '#dc2626' }}>{eur(p.costo)}</div>
+              <div style={{ fontSize: '10px', color: '#999' }}>{Number(p.n || 0).toLocaleString()} sped.</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div style={{ width: '100%', height: '230px' }}>
         {loading ? (
           <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: '13px' }}>Caricamento…</div>

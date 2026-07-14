@@ -98,5 +98,32 @@ export async function GET(req: NextRequest) {
     const v = perGiorno.get(k) || { ricavi: 0, costi: 0 }
     return { giorno: k, ricavi: r2(v.ricavi), costi: r2(v.costi), margine: r2(v.ricavi - v.costi) }
   })
-  return NextResponse.json({ guadagno, ricavi, costi, periodo, serie, numSpedizioni, mediaSped })
+
+  // ── SOLO per E&A MULTIEXPRESS: costo corriere diviso per provider (SpediamoPro / Spedisci.online).
+  //    Serve a verificare 1=1 col credito speso su ciascun account. Non compare per gli altri master. ──
+  const EA_MULTI_ID = 'a8d42a25-3711-4343-a6df-ee2ba9bbf08b'
+  let costiProvider: any = null
+  if (M === EA_MULTI_ID) {
+    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const sub = await sottoAlberoMasterIds(admin, M)
+    const { data: sp } = await admin.from('spedizioni')
+      .select('costo_spedizione, stato, corrieri(tipo)')
+      .in('master_id', sub.length ? sub : [M])
+      .gte('created_at', dal).lte('created_at', alEnd)
+      .limit(20000)
+    const agg = new Map<string, { costo: number; n: number }>()
+    for (const s of (sp || [])) {
+      if (String((s as any).stato).includes('annull')) continue   // annullate = riaccreditate = netto 0
+      const tipo = (s as any).corrieri?.tipo || 'altro'
+      const cur = agg.get(tipo) || { costo: 0, n: 0 }
+      cur.costo += Number((s as any).costo_spedizione || 0); cur.n++
+      agg.set(tipo, cur)
+    }
+    const LABEL: Record<string, string> = { spediamopro: 'SpediamoPro', spedisci: 'Spedisci.online' }
+    costiProvider = Array.from(agg.entries())
+      .map(([tipo, v]) => ({ provider: LABEL[tipo] || tipo, costo: r2(v.costo), n: v.n }))
+      .sort((a, b) => b.costo - a.costo)
+  }
+
+  return NextResponse.json({ guadagno, ricavi, costi, periodo, serie, numSpedizioni, mediaSped, costiProvider })
 }
