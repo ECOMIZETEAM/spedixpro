@@ -21,6 +21,51 @@ export function zonaDaProvincia(provincia: string): string {
   return ZONE_MAP[(provincia || '').toUpperCase().trim()] || 'Italia'
 }
 
+// Fattore volume EFFETTIVO per un corriere sul LISTINO CLIENTE (ricavo).
+// Override per-corriere in listini_clienti_corrieri, fallback default del listino, poi 5000.
+export async function fattoreVolumeCliente(supabase: any, listinoId: string, corriereId: string): Promise<number> {
+  if (!listinoId) return 5000
+  const { data: lk } = await supabase.from('listini_clienti').select('fattore_volume').eq('id', listinoId).maybeSingle()
+  let f = parseFloat(lk?.fattore_volume) || 5000
+  if (corriereId) {
+    const { data: ov } = await supabase.from('listini_clienti_corrieri')
+      .select('fattore_volume').eq('listino_id', listinoId).eq('corriere_id', corriereId).maybeSingle()
+    const fv = parseFloat(ov?.fattore_volume); if (fv > 0) f = fv
+  }
+  return f
+}
+
+// Fattore volume EFFETTIVO per un corriere sul LISTINO CORRIERE (costo del master).
+// Override per-corriere in listini_corrieri_corrieri, fallback default del listino "proprio", poi 5000.
+export async function fattoreVolumeCorriere(supabase: any, masterId: string, corriereId: string): Promise<number> {
+  const { data: listini } = await supabase.from('listini_corrieri')
+    .select('id,corriere_id,fattore_volume').eq('master_id', masterId)
+  if (!listini?.length) return 5000
+  const listinoIds = listini.map((l: any) => l.id)
+  const proprio = listini.find((l: any) => l.corriere_id === corriereId) || listini[0]
+  let f = parseFloat(proprio?.fattore_volume) || 5000
+  const { data: aggFv } = await supabase.from('listini_corrieri_corrieri')
+    .select('listino_id,fattore_volume').in('listino_id', listinoIds).eq('corriere_id', corriereId)
+  const rows = (aggFv || []).filter((a: any) => parseFloat(a?.fattore_volume) > 0)
+  const scelto = rows.find((a: any) => a.listino_id === proprio?.id) || rows[0]
+  const fv = parseFloat(scelto?.fattore_volume); if (fv > 0) f = fv
+  return f
+}
+
+// Peso fatturato (max tra reale e volumetrico) sul TOTALE dei colli, dato un fattore.
+export function calcolaPesoFatturato(packages: any[], fattore: number, soloPesoReale = false): { pesoReale: number; pesoVolume: number; pesoFatturato: number } {
+  const pks = Array.isArray(packages) ? packages : []
+  const pesoReale = pks.reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0)
+  let pesoVolume = 0
+  const f = fattore > 0 ? fattore : 5000
+  for (const p of pks) {
+    const L = parseFloat(p?.length) || 0, W = parseFloat(p?.width) || 0, H = parseFloat(p?.height) || 0
+    if (L && W && H) pesoVolume += (L * W * H) / f
+  }
+  const pesoFatturato = soloPesoReale ? pesoReale : Math.max(pesoReale, pesoVolume)
+  return { pesoReale, pesoVolume, pesoFatturato }
+}
+
 function trovaFascia(fasce: any[], peso: number) {
   const finoA = fasce.filter(f => f.tipo !== 'oltre').sort((a, b) => a.peso_max - b.peso_max)
   for (const f of finoA) {
@@ -228,11 +273,23 @@ export async function calcolaPrezzoCorriereDettaglio(
   // quindi in TUTTI i listini del master, filtrando per corriere_id.
   const { data: listini } = await supabase
     .from('listini_corrieri')
-    .select('id,fattore_volume,solo_peso_reale')
+    .select('id,corriere_id,fattore_volume,solo_peso_reale')
     .eq('master_id', masterId)
   if (!listini?.length) return null
   const listinoIds = listini.map((l: any) => l.id)
-  const fattore = parseFloat(listini[0].fattore_volume) || 5000
+  // Fattore volume PER-CORRIERE: l'editor lo salva in listini_corrieri_corrieri (per corriere),
+  // NON nel default del listino. Va letto da lì, altrimenti si conteggia 5000 anche se hai messo 4000.
+  const listinoProprio = listini.find((l: any) => l.corriere_id === corriereId) || listini[0]
+  let fattore = parseFloat(listinoProprio?.fattore_volume) || 5000
+  {
+    const { data: aggFv } = await supabase.from('listini_corrieri_corrieri')
+      .select('listino_id,fattore_volume').in('listino_id', listinoIds).eq('corriere_id', corriereId)
+    const rows = (aggFv || []).filter((a: any) => parseFloat(a?.fattore_volume) > 0)
+    // preferisci l'override sul listino "proprio" del corriere, altrimenti un qualsiasi override valido
+    const scelto = rows.find((a: any) => a.listino_id === listinoProprio?.id) || rows[0]
+    const fv = parseFloat(scelto?.fattore_volume)
+    if (fv > 0) fattore = fv
+  }
   const soloPesoReale = listini.some((l: any) => l.solo_peso_reale)
 
   const packages = Array.isArray(params.packages) && params.packages.length ? params.packages : []
@@ -453,11 +510,17 @@ export async function creaCalcolatoreCorriere(
   const { data: listini } = await supabase
     .from('listini_corrieri').select('id,corriere_id,fattore_volume')
     .eq('master_id', masterId).eq('attivo', true)
+  const listinoIds: string[] = (listini || []).map((l: any) => l.id)
+  // Fattore volume PER-CORRIERE: override salvato in listini_corrieri_corrieri (non nel default del listino).
+  const { data: aggFv } = listinoIds.length
+    ? await supabase.from('listini_corrieri_corrieri').select('corriere_id,fattore_volume').in('listino_id', listinoIds)
+    : { data: [] }
+  const overridePerCorr = new Map<string, number>()
+  for (const a of aggFv || []) { const fv = parseFloat(a?.fattore_volume); if (a?.corriere_id && fv > 0) overridePerCorr.set(a.corriere_id, fv) }
   const listinoPerCorriere = new Map<string, { id: string; fattore: number }>()
-  const listinoIds: string[] = []
   for (const l of listini || []) {
-    listinoPerCorriere.set(l.corriere_id, { id: l.id, fattore: parseFloat(l.fattore_volume) || 5000 })
-    listinoIds.push(l.id)
+    const fattore = overridePerCorr.get(l.corriere_id) || parseFloat(l.fattore_volume) || 5000
+    listinoPerCorriere.set(l.corriere_id, { id: l.id, fattore })
   }
 
   const { data: fasce } = listinoIds.length

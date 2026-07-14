@@ -9,11 +9,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
   const body = await req.json()
   const { nome, corriere_id, fattore_volume, fasce, supplementi, solo_peso_reale } = body
 
-  // Aggiorna nome + flag "solo peso reale" + fattore volume (usato anche per la copia ai sotto-master)
-  await supabase.from('listini_clienti').update({ nome, solo_peso_reale: !!solo_peso_reale, ...(fattore_volume !== undefined ? { fattore_volume } : {}) }).eq('id', id)
-  // Fattore volume per-corriere: salvato sulla riga di aggancio listino+corriere
-  if (corriere_id) {
-    await supabase.from('listini_clienti_corrieri').update({ fattore_volume }).eq('listino_id', id).eq('corriere_id', corriere_id)
+  // Aggiorna nome + flag "solo peso reale". Il fattore volume del DEFAULT del listino si tocca
+  // SOLO quando NON stiamo salvando un corriere specifico (altrimenti settando un corriere si
+  // sballa il default di tutti gli altri). Il valore per-corriere va solo sulla riga di aggancio.
+  await supabase.from('listini_clienti').update({
+    nome, solo_peso_reale: !!solo_peso_reale,
+    ...(!corriere_id && fattore_volume !== undefined ? { fattore_volume } : {}),
+  }).eq('id', id)
+  // Fattore volume per-corriere: salvato sulla riga di aggancio listino+corriere (upsert per sicurezza)
+  if (corriere_id && fattore_volume !== undefined) {
+    const { data: upd } = await supabase.from('listini_clienti_corrieri')
+      .update({ fattore_volume }).eq('listino_id', id).eq('corriere_id', corriere_id).select('listino_id')
+    if (!upd?.length) {
+      await supabase.from('listini_clienti_corrieri').insert({ listino_id: id, corriere_id, fattore_volume })
+    }
   }
 
   // Cancella SOLO le fasce di questo contratto (non tocca gli altri corrieri già configurati)

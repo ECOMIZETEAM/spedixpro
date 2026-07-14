@@ -10,8 +10,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
   const { nome, corriere_id, fattore_volume, fasce, supplementi } = body
 
   await supabase.from('listini_corrieri').update({ nome }).eq('id', id)
-  if (corriere_id) {
-    await supabase.from('listini_corrieri_corrieri').update({ fattore_volume }).eq('listino_id', id).eq('corriere_id', corriere_id)
+  if (corriere_id && fattore_volume !== undefined) {
+    const { data: upd } = await supabase.from('listini_corrieri_corrieri')
+      .update({ fattore_volume }).eq('listino_id', id).eq('corriere_id', corriere_id).select('listino_id')
+    if (!upd?.length) {
+      await supabase.from('listini_corrieri_corrieri').insert({ listino_id: id, corriere_id, fattore_volume })
+    }
   }
 
   await supabase.from('listini_corrieri_fasce').delete().eq('listino_id', id).eq('corriere_id', corriere_id)

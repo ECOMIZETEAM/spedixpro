@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
-import { calcolaPrezzoCorriere } from '@/lib/pricing'
+import { calcolaPrezzoCorriere, fattoreVolumeCliente, fattoreVolumeCorriere, calcolaPesoFatturato } from '@/lib/pricing'
 import {
   spediamoproGetQuotation,
   spediamoproCreateShipment,
@@ -179,6 +179,18 @@ export async function POST(req: NextRequest) {
     })) ?? (parseFloat(body.totalPrice) || 0)
   }
 
+  // Peso fatturato/volumetrico da SALVARE sulla spedizione (colonna Peso in elenco), col fattore
+  // volume EFFETTIVO per quel corriere: cliente/sotto-master -> listino cliente; propria -> listino corriere.
+  let pesoVolCalc = 0, pesoFattCalc = pesoReale
+  try {
+    const fattoreVol = isProprio
+      ? await fattoreVolumeCorriere(adminCrea, masterId, corriereRecord.id)
+      : await fattoreVolumeCliente(adminCrea, cliente?.listino_cliente_id, corriereRecord.id)
+    const pf = calcolaPesoFatturato(packages, fattoreVol)
+    pesoVolCalc = Math.round(pf.pesoVolume * 100) / 100
+    pesoFattCalc = Math.round(pf.pesoFatturato * 100) / 100
+  } catch {}
+
   // Helper: registra la detrazione del credito dopo una spedizione riuscita.
   // Non deve mai far fallire la spedizione (è già creata sul corriere + DB).
   async function addebitaCredito(spedizioneId: string | null, numeroSped: string, costo: number) {
@@ -320,6 +332,7 @@ export async function POST(req: NextRequest) {
       dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
       dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
       colli: packages.length, peso_reale: packages[0]?.weight || null,
+      peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
       lunghezza: packages[0]?.length || null, larghezza: packages[0]?.width || null, altezza: packages[0]?.height || null,
       contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
       tracking_number: r.trackingNumber || null,
