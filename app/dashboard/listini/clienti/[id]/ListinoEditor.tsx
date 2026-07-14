@@ -1,7 +1,26 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { logoCorriere } from '@/lib/corriere-logo'
 import { setFlash } from '@/lib/flash'
+
+// Input decimale che accetta virgola o punto e valori parziali (es. "0.", "0,5")
+// mentre scrivi, restituendo comunque il NUMERO al parent (nessuna modifica al salvataggio).
+function NumInput({ value, onChange, style, placeholder }: { value: number; onChange: (n: number) => void; style?: React.CSSProperties; placeholder?: string }) {
+  const [buf, setBuf] = useState<string | null>(null)
+  const shown = buf !== null ? buf : (!value ? '' : String(value))
+  return (
+    <input
+      type="text" inputMode="decimal" value={shown} placeholder={placeholder} style={style}
+      onChange={e => {
+        const v = e.target.value.replace(',', '.')
+        if (v !== '' && !/^\d*\.?\d*$/.test(v)) return   // solo cifre e un punto decimale
+        setBuf(v)
+        onChange(v === '' || v === '.' ? 0 : (parseFloat(v) || 0))
+      }}
+      onBlur={() => setBuf(null)}
+    />
+  )
+}
 
 interface Zona { id: string; nome: string }
 interface Corriere { id: string; nome_contratto: string }
@@ -103,11 +122,23 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     })
     window.location.href = `${basePagina}/${listino.id}?corriere=${nuovoContrattoId}`
   }
-  const [nome, setNome] = useState<string>(listino.nome ?? '')
   const corriereId = corriereSelezionatoId || corrieri[0]?.id || ''
-  const [fattore, setFattore] = useState<number>(Number(fattoreCorriere ?? listino.fattore_volume) || 5000)
-  const [soloPesoReale, setSoloPesoReale] = useState<boolean>(!!(listino as any).solo_peso_reale)
-  const [fasce, setFasce] = useState<Fascia[]>(() => buildFasceInit(fasceEsistenti))
+  // BOZZA in corso: se vai a vedere un altro listino e poi torni la ritrovi (navigazione);
+  // se invece RICARICHI la pagina (reload) riparte pulita dai dati salvati.
+  const bozzaKey = `bozza_listino:${listino.id}:${corriereId}`
+  const [bozza] = useState<any>(() => {
+    if (typeof window === 'undefined') return null
+    try {
+      const nav = (performance.getEntriesByType('navigation')[0] as any)?.type
+      if (nav === 'reload') { sessionStorage.removeItem(bozzaKey); return null }
+      const raw = sessionStorage.getItem(bozzaKey)
+      return raw ? JSON.parse(raw) : null
+    } catch { return null }
+  })
+  const [nome, setNome] = useState<string>(bozza?.nome ?? (listino.nome ?? ''))
+  const [fattore, setFattore] = useState<number>(bozza?.fattore ?? (Number(fattoreCorriere ?? listino.fattore_volume) || 5000))
+  const [soloPesoReale, setSoloPesoReale] = useState<boolean>(bozza?.soloPesoReale ?? !!(listino as any).solo_peso_reale)
+  const [fasce, setFasce] = useState<Fascia[]>(() => bozza?.fasce ?? buildFasceInit(fasceEsistenti))
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
   const [tab, setTab] = useState('pesi')
@@ -147,9 +178,9 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     setTimeout(()=>{ window.location.href = `${basePagina}/${d.id}` }, 900)
   }
 
-  const [righeAssic, setRigheAssic] = useState<RigaSuppl[]>(() => buildRigheDa(supplementiEsistenti||[], 'assicurazione', [rigaVuota()]))
-  const [righeContr, setRigheContr] = useState<RigaSuppl[]>(() => buildRigheDa(supplementiEsistenti||[], 'contrassegno', [rigaVuota(), rigaVuota()]))
-  const [serviziAccessori, setServiziAccessori] = useState(() => buildAccessoriDa(supplementiEsistenti||[], [
+  const [righeAssic, setRigheAssic] = useState<RigaSuppl[]>(() => bozza?.righeAssic ?? buildRigheDa(supplementiEsistenti||[], 'assicurazione', [rigaVuota()]))
+  const [righeContr, setRigheContr] = useState<RigaSuppl[]>(() => bozza?.righeContr ?? buildRigheDa(supplementiEsistenti||[], 'contrassegno', [rigaVuota(), rigaVuota()]))
+  const [serviziAccessori, setServiziAccessori] = useState(() => bozza?.serviziAccessori ?? buildAccessoriDa(supplementiEsistenti||[], [
     {nome:'Reverse A Domicilio',prezzo:0,perc:0},
     {nome:'Andata & Ritorno',prezzo:0,perc:0},
     {nome:'Reverse PuntoPoste',prezzo:0,perc:0},
@@ -157,7 +188,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     {nome:'Reverse Ufficio Postale',prezzo:0,perc:0},
     {nome:'Consegna su appuntamento',prezzo:0,perc:0},
   ]))
-  const [giacenzeServizi, setGiacenzeServizi] = useState(() => buildServiziDa(supplementiEsistenti||[], 'giacenza', [
+  const [giacenzeServizi, setGiacenzeServizi] = useState(() => bozza?.giacenzeServizi ?? buildServiziDa(supplementiEsistenti||[], 'giacenza', [
     {nome:'Riconsegna',prezzo:0,perc:0},
     {nome:'Riconsegna al nuovo destinatario',prezzo:0,perc:0},
     {nome:'Reso al mittente',prezzo:0,perc:100},
@@ -167,27 +198,39 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     {nome:'Consegna parziale e distruggi',prezzo:0,perc:0},
   ]))
   const [aperturaGiacenza, setAperturaGiacenza] = useState(() => {
+    if (bozza?.aperturaGiacenza != null) return bozza.aperturaGiacenza
     const r = (supplementiEsistenti||[]).find(s => s.tipo === 'giacenza_apertura')
     return r ? Number(r.valore) || 0 : 0
   })
   const [ritiroPrezzo, setRitiroPrezzo] = useState(() => {
+    if (bozza?.ritiroPrezzo != null) return bozza.ritiroPrezzo
     const r = (supplementiEsistenti||[]).find(s => s.tipo === 'ritiro')
     return r ? Number(r.valore) || 0 : 0
   })
   const [ritiroPercNolo, setRitiroPercNolo] = useState(() => {
+    if (bozza?.ritiroPercNolo != null) return bozza.ritiroPercNolo
     const r = (supplementiEsistenti||[]).find(s => s.tipo === 'ritiro')
     const d = r ? parseDescr(r.descrizione) : null
     return d?.perc_nolo ? Number(d.perc_nolo) || 0 : 0
   })
   const [spondaSoglia, setSpondaSoglia] = useState(() => {
+    if (bozza?.spondaSoglia != null) return bozza.spondaSoglia
     const r = (supplementiEsistenti||[]).find(s => s.tipo === 'sponda')
     const d = r ? parseDescr(r.descrizione) : null
     return d?.soglia_kg ? Number(d.soglia_kg) || 150 : 150
   })
   const [spondaPrezzoKg, setSpondaPrezzoKg] = useState(() => {
+    if (bozza?.spondaPrezzoKg != null) return bozza.spondaPrezzoKg
     const r = (supplementiEsistenti||[]).find(s => s.tipo === 'sponda')
     return r ? Number(r.valore) || 0 : 0
   })
+
+  // Salva la bozza in sessionStorage ad ogni modifica (persiste tra le navigazioni).
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(bozzaKey, JSON.stringify({ nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg }))
+    } catch {}
+  }, [bozzaKey, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg])
 
   function aggiungiFascia() { setFasce(prev => [...prev, { tipo:'fino_a', peso:0, prezzi:{}, fuel:'' }]) }
   function aggiornaFuel(idx: number, raw: string) { setFasce(prev => prev.map((f,i) => i===idx ? {...f, fuel: raw} : f)) }
@@ -221,6 +264,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       if (data.error) { setMsg('Errore: '+data.error); setSaving(false); return }
       const prop = Number(data.propagati || 0)
       // Salva il banner e ricarica: la pagina torna coi dati salvati e mostra la conferma in alto
+      try { sessionStorage.removeItem(bozzaKey) } catch {}   // salvato -> la bozza non serve più
       setFlash(prop > 0 ? `✓ Listino salvato e propagato a ${prop} master collegati` : '✓ Listino salvato!')
       window.location.reload()
     } catch { setMsg('Errore di rete'); setSaving(false) }
@@ -400,8 +444,8 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
               {serviziAccessori.map((s,i)=>(
                 <tr key={i} style={{borderBottom:'1px solid #e5e7eb'}}>
                   <td style={{padding:'8px 12px'}}><input value={s.nome||''} onChange={e=>setServiziAccessori(prev=>prev.map((x,idx)=>idx===i?{...x,nome:e.target.value}:x))} style={{...inp,width:'260px',color:'#f97316',fontWeight:'500'}} placeholder="Nome servizio (es. Consegna al piano)"/></td>
-                  <td style={{padding:'8px 12px'}}><input type="number" step="0.01" value={s.prezzo||''} onChange={e=>setServiziAccessori(prev=>prev.map((x,idx)=>idx===i?{...x,prezzo:parseFloat(e.target.value)||0}:x))} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="0"/></td>
-                  <td style={{padding:'8px 12px'}}><input type="number" step="0.01" value={s.perc||''} onChange={e=>setServiziAccessori(prev=>prev.map((x,idx)=>idx===i?{...x,perc:parseFloat(e.target.value)||0}:x))} style={{...inp,width:'200px',textAlign:'right' as const}} placeholder="0"/></td>
+                  <td style={{padding:'8px 12px'}}><NumInput value={s.prezzo} onChange={n=>setServiziAccessori(prev=>prev.map((x,idx)=>idx===i?{...x,prezzo:n}:x))} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="0"/></td>
+                  <td style={{padding:'8px 12px'}}><NumInput value={s.perc} onChange={n=>setServiziAccessori(prev=>prev.map((x,idx)=>idx===i?{...x,perc:n}:x))} style={{...inp,width:'200px',textAlign:'right' as const}} placeholder="0"/></td>
                   <td style={{padding:'8px 12px',textAlign:'center' as const}}><button onClick={()=>setServiziAccessori(prev=>prev.filter((_,idx)=>idx!==i))} title="Rimuovi voce" style={{background:'none',border:'none',color:'#dc2626',fontSize:'16px',cursor:'pointer',lineHeight:1,padding:0}}>×</button></td>
                 </tr>
               ))}
@@ -424,16 +468,15 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
               {giacenzeServizi.map((s,i)=>(
                 <tr key={i} style={{borderBottom:'1px solid #e5e7eb'}}>
                   <td style={{padding:'8px 12px',color:'#f97316',fontWeight:'500'}}>{s.nome}</td>
-                  <td style={{padding:'8px 12px'}}><input type="number" step="0.01" value={s.prezzo||''} onChange={e=>setGiacenzeServizi(prev=>prev.map((x,idx)=>idx===i?{...x,prezzo:parseFloat(e.target.value)||0}:x))} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="0"/></td>
-                  <td style={{padding:'8px 12px'}}><input type="number" step="0.01" value={s.perc||''} onChange={e=>setGiacenzeServizi(prev=>prev.map((x,idx)=>idx===i?{...x,perc:parseFloat(e.target.value)||0}:x))} style={{...inp,width:'200px',textAlign:'right' as const}} placeholder="0"/></td>
+                  <td style={{padding:'8px 12px'}}><NumInput value={s.prezzo} onChange={n=>setGiacenzeServizi(prev=>prev.map((x,idx)=>idx===i?{...x,prezzo:n}:x))} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="0"/></td>
+                  <td style={{padding:'8px 12px'}}><NumInput value={s.perc} onChange={n=>setGiacenzeServizi(prev=>prev.map((x,idx)=>idx===i?{...x,perc:n}:x))} style={{...inp,width:'200px',textAlign:'right' as const}} placeholder="0"/></td>
                 </tr>
               ))}
             </tbody>
           </table>
           <div style={{marginTop:'16px',display:'flex',alignItems:'center',gap:'12px',fontSize:'13px'}}>
             <label style={{color:'#1a1a1a',fontWeight:'600'}}>Apertura dossier giacenza: <span style={{color:'#dc2626'}}>*</span></label>
-            <input type="number" step="0.01" value={aperturaGiacenza||''} onChange={e=>setAperturaGiacenza(parseFloat(e.target.value)||0)}
-              style={{...inp,width:'80px',textAlign:'right' as const}} placeholder="0"/>
+            <NumInput value={aperturaGiacenza} onChange={setAperturaGiacenza} style={{...inp,width:'80px',textAlign:'right' as const}} placeholder="0"/>
           </div>
           <div style={{fontSize:'11px',color:'#f97316',marginTop:'4px'}}>* Il costo sarà addebitato solo nella fase di svincolo da parte del cliente</div>
         </div>
@@ -451,8 +494,8 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
             <tbody>
               <tr style={{borderBottom:'1px solid #e5e7eb'}}>
                 <td style={{padding:'8px 12px',color:'#f97316',fontWeight:'500'}}>Ritiro</td>
-                <td style={{padding:'8px 12px'}}><input type="number" step="0.01" value={ritiroPrezzo||''} onChange={e=>setRitiroPrezzo(parseFloat(e.target.value)||0)} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="0"/></td>
-                <td style={{padding:'8px 12px'}}><input type="number" step="0.01" value={ritiroPercNolo||''} onChange={e=>setRitiroPercNolo(parseFloat(e.target.value)||0)} style={{...inp,width:'200px',textAlign:'right' as const}} placeholder="0"/></td>
+                <td style={{padding:'8px 12px'}}><NumInput value={ritiroPrezzo} onChange={setRitiroPrezzo} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="0"/></td>
+                <td style={{padding:'8px 12px'}}><NumInput value={ritiroPercNolo} onChange={setRitiroPercNolo} style={{...inp,width:'200px',textAlign:'right' as const}} placeholder="0"/></td>
               </tr>
             </tbody>
           </table>
@@ -467,11 +510,11 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
           <div style={{display:'flex',gap:'20px',alignItems:'flex-end',flexWrap:'wrap' as const}}>
             <div>
               <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Soglia (kg)</label>
-              <input type="number" step="1" value={spondaSoglia||''} onChange={e=>setSpondaSoglia(parseFloat(e.target.value)||0)} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="150"/>
+              <NumInput value={spondaSoglia} onChange={setSpondaSoglia} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="150"/>
             </div>
             <div>
               <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Prezzo per kg (€)</label>
-              <input type="number" step="any" value={spondaPrezzoKg||''} onChange={e=>setSpondaPrezzoKg(parseFloat(e.target.value)||0)} style={{...inp,width:'180px',textAlign:'right' as const}} placeholder="0.0400334448"/>
+              <NumInput value={spondaPrezzoKg} onChange={setSpondaPrezzoKg} style={{...inp,width:'180px',textAlign:'right' as const}} placeholder="0.0400334448"/>
             </div>
           </div>
           <div style={{fontSize:'11px',color:'#999',marginTop:'10px'}}>Lascia 0 per disattivare la sponda su questo contratto.</div>
