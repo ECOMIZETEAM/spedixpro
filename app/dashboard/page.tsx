@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
 import ReportGuadagno from '@/app/components/ReportGuadagno'
 import GuadagnoChart from '@/app/components/GuadagnoChart'
+import GuadagnoAgente from '@/app/components/GuadagnoAgente'
 
 export default function Dashboard() {
   const [data, setData] = useState<any>(null)
@@ -260,13 +261,19 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Report Guadagno */}
-      <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginTop:'2px'}}>Report Guadagno</div>
-      <GuadagnoChart />
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:'14px'}}>
-        <ReportGuadagno titolo="Rettifiche" endpoint="/api/reports/guadagno-rettifiche" />
-        <ReportGuadagno titolo="Supplementi" endpoint="/api/reports/guadagno-supplementi" />
-      </div>
+      {/* Report Guadagno — l'agente vede il PROPRIO margine (prezzo cliente − suo costo) */}
+      {data?.ruolo === 'agente' ? (
+        <GuadagnoAgente />
+      ) : (
+        <>
+          <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginTop:'2px'}}>Report Guadagno</div>
+          <GuadagnoChart />
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:'14px'}}>
+            <ReportGuadagno titolo="Rettifiche" endpoint="/api/reports/guadagno-rettifiche" />
+            <ReportGuadagno titolo="Supplementi" endpoint="/api/reports/guadagno-supplementi" />
+          </div>
+        </>
+      )}
     </div>
   )
 }

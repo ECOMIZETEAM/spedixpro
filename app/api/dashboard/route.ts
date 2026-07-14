@@ -22,6 +22,7 @@ export async function GET() {
       supabase.from('spedizioni').select(SPED_COLS).in('cliente_id', ids).order('created_at', { ascending: false }).limit(10),
     ])
     return NextResponse.json({
+      ruolo: 'agente',
       masterNome: (((utente as any)?.nome) || 'Agente'),
       totClienti: nMiei, clientiTotali: nMiei,
       spedizioniMese: 0, limiteMese: 0, abbonamentoAttivo: true, illimitato: false,
@@ -70,6 +71,7 @@ export async function GET() {
   const k: any = kpi || {}
 
   return NextResponse.json({
+    ruolo: (utente as any)?.ruolo || 'master',
     masterNome,
     totClienti: c.totClienti||0,
     spedizioniMese: spedMeseRete||0,
