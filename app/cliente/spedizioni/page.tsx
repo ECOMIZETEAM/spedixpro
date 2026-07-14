@@ -62,16 +62,28 @@ export default function SpedizioniPage() {
   const [eliminando, setEliminando] = useState<string|null>(null)
   const [filtri, setFiltri] = useState(FILTRI_DEFAULT)
 
+  // Ricarica dal server al cambio di N. Spedizione / intervallo date.
+  // Cercando per N. Spedizione la ricerca va su TUTTO lo storico (ignora la data).
   useEffect(() => {
-    caricaTutte()
-  }, [])
+    const num = (filtri.numero || '').trim()
+    const t = setTimeout(() => { caricaTutte() }, num ? 350 : 0)
+    return () => clearTimeout(t)
+  }, [filtri.numero, filtri.dal, filtri.al])
 
   // Filtri reattivi: appena tocchi un filtro, la lista si aggiorna (niente bottone "Filtra")
   useEffect(() => { applicaFiltri(); setPagina(1) }, [filtri, spedizioni])
 
   async function caricaTutte() {
     setLoading(true)
-    const res = await fetch('/api/spedizioni/lista')
+    const q = new URLSearchParams()
+    const num = (filtri.numero || '').trim()
+    if (num) {
+      q.set('numero', num)   // ricerca su tutto lo storico, niente filtro data
+    } else {
+      if (filtri.dal) q.set('dal', filtri.dal)
+      if (filtri.al) q.set('al', filtri.al + 'T23:59:59')
+    }
+    const res = await fetch('/api/spedizioni/lista' + (q.toString() ? '?' + q.toString() : ''))
     const data = await res.json()
     setSpedizioni(Array.isArray(data) ? data : [])
     setSpedizioniFiltrate(Array.isArray(data) ? data : [])
@@ -84,8 +96,10 @@ export default function SpedizioniPage() {
     if (filtri.stato) filtered = filtered.filter(s => s.stato === filtri.stato)
     if (filtri.numero) filtered = filtered.filter(s => s.numero?.toLowerCase().includes(filtri.numero.toLowerCase()))
     if (filtri.id_ordine) filtered = filtered.filter(s => (s.note||'').toLowerCase().includes(filtri.id_ordine.toLowerCase()))
-    if (filtri.dal) filtered = filtered.filter(s => new Date(s.created_at) >= new Date(filtri.dal))
-    if (filtri.al) filtered = filtered.filter(s => new Date(s.created_at) <= new Date(filtri.al+'T23:59:59'))
+    if (!filtri.numero) {   // cercando per N. Spedizione si ignora la data
+      if (filtri.dal) filtered = filtered.filter(s => new Date(s.created_at) >= new Date(filtri.dal))
+      if (filtri.al) filtered = filtered.filter(s => new Date(s.created_at) <= new Date(filtri.al+'T23:59:59'))
+    }
     if (filtri.contrassegno==='si') filtered = filtered.filter(s => Number(s.contrassegno)>0)
     if (filtri.contrassegno==='no') filtered = filtered.filter(s => Number(s.contrassegno)===0)
     if (filtri.stato_contrassegni==='da_pagare') filtered = filtered.filter(s => Number(s.contrassegno)>0 && s.stato_contrassegno!=='in_distinta' && s.stato_contrassegno!=='pagato')
