@@ -677,6 +677,15 @@ export async function creaCalcolatoreListinoCliente(
     supplPerCorriere.get(s.corriere_id)!.push(s)
   }
 
+  // Impostazioni corriere (agevolazione peso reale + "peso reale fino a X kg"): il peso fatturato
+  // deve seguire la STESSA logica del preventivo, altrimenti il costo cade in una fascia diversa.
+  const corrIdsL = Array.from(fascePerCorriere.keys())
+  const { data: corrSettL } = corrIdsL.length
+    ? await supabase.from('corrieri').select('id,settings').in('id', corrIdsL)
+    : { data: [] }
+  const settPerCorrL = new Map<string, any>()
+  for (const c of (corrSettL || [])) settPerCorrL.set(c.id, (c as any).settings || {})
+
   const zonaIds = Array.from(new Set((fasce || []).map((f: any) => f.zone?.id).filter(Boolean)))
   const { data: zc } = zonaIds.length
     ? await supabase.from('zone_cap').select('zona_id,paese,provincia,cap').in('zona_id', zonaIds)
@@ -703,7 +712,20 @@ export async function creaCalcolatoreListinoCliente(
     const fattoreC = fattorePerCorr.get(s.corriere_id) || fattore   // per-corriere, fallback default
     const pesoVolume = (L && W && H) ? (L * W * H) / fattoreC : 0
     const pesoReale = Number(s.peso_reale) || 1
-    const pesoFatturato = soloPesoReale ? pesoReale : Math.max(pesoReale, pesoVolume)
+    // Agevolazione peso reale (come il preventivo): se il corriere ha il flag e il collo è entro
+    // 50×32×28 cm, oppure "peso reale fino a X kg" sotto soglia, si tassa sul PESO REALE.
+    const settC = settPerCorrL.get(s.corriere_id) || {}
+    let usaReale = false
+    if (!soloPesoReale) {
+      if (settC.agevolazione_peso_reale) {
+        const d = [L, W, H].sort((a: number, b: number) => b - a)
+        const entro = (!L && !W && !H) || (d[0] <= 50 && d[1] <= 32 && d[2] <= 28)
+        if (entro) usaReale = true
+      }
+      const prs = settC.peso_reale_soglia
+      if (prs?.attivo && Number(prs.kg) > 0 && pesoReale <= Number(prs.kg)) usaReale = true
+    }
+    const pesoFatturato = (soloPesoReale || usaReale) ? pesoReale : Math.max(pesoReale, pesoVolume)
 
     const provincia = (s.dest_provincia || '').toUpperCase().trim()
     const cap = (s.dest_cap || '').trim()
