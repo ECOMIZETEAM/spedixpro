@@ -30,22 +30,30 @@ export async function GET(req: NextRequest) {
     db = adminDb
   }
 
-  let query = db.from('spedizioni')
-    .select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
-    .gt('contrassegno', 0)
-    .order('created_at', { ascending: false })
-    .limit(500)
-
-  if (subtreeSel) query = query.in('master_id', subtreeSel)
-  else query = query.eq('master_id', utente?.master_id)
-  // Agente: solo contrassegni dei suoi clienti (copre anche l'eventuale ramo rete).
-  if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
-  if (clienteId) query = query.eq('cliente_id', clienteId)
-  if (stato) query = query.eq('stato', stato)
-  if (statoContrassegno) query = query.eq('stato_contrassegno', statoContrassegno)
-  if (dal) query = query.gte('created_at', dal)
-  if (al) query = query.lte('created_at', al + 'T23:59:59')
-
-  const { data } = await query
-  return NextResponse.json(data || [])
+  // Agente: solo contrassegni dei suoi clienti (calcolato una volta, fuori dal loop).
+  const agIds = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
+  const buildBase = () => {
+    let q = db.from('spedizioni')
+      .select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
+      .gt('contrassegno', 0)
+      .order('created_at', { ascending: false })
+    if (subtreeSel) q = q.in('master_id', subtreeSel)
+    else q = q.eq('master_id', utente?.master_id)
+    if (agIds) q = q.in('cliente_id', agIds)
+    if (clienteId) q = q.eq('cliente_id', clienteId)
+    if (stato) q = q.eq('stato', stato)
+    if (statoContrassegno) q = q.eq('stato_contrassegno', statoContrassegno)
+    if (dal) q = q.gte('created_at', dal)
+    if (al) q = q.lte('created_at', al + 'T23:59:59')
+    return q
+  }
+  // Carico TUTTI i contrassegni a blocchi (prima .limit(500) tagliava): sono spedizioni normali.
+  const data: any[] = []
+  for (let from = 0; from < 10000; from += 1000) {
+    const { data: batch } = await buildBase().range(from, from + 999)
+    if (!batch?.length) break
+    data.push(...batch)
+    if (batch.length < 1000) break
+  }
+  return NextResponse.json(data)
 }
