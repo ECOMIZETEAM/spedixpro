@@ -84,7 +84,7 @@ export default function ElencoDistintePage() {
 
   const filtrate = distinte.filter(d => !cerca ||
     String(d.numero || '').toLowerCase().includes(cerca.toLowerCase()) ||
-    String(d.clienti?.ragione_sociale || '').toLowerCase().includes(cerca.toLowerCase()))
+    String(d.cliente_label || d.clienti?.ragione_sociale || '').toLowerCase().includes(cerca.toLowerCase()))
 
   const totalePagine = Math.max(1, Math.ceil(filtrate.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
@@ -135,7 +135,7 @@ export default function ElencoDistintePage() {
                 <tr key={d.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                   <td style={td}><input type="checkbox" checked={selezionate.has(d.id)} onChange={() => toggle(d.id)} /></td>
                   <td style={{ ...td, fontWeight: '700' }}>{d.numero}</td>
-                  <td style={td}>{d.clienti?.ragione_sociale || '-'}</td>
+                  <td style={td}>{d.cliente_label || d.clienti?.ragione_sociale || '-'}</td>
                   <td style={td}>{d.corrieri?.nome_contratto || '-'}</td>
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>{d.created_at ? new Date(d.created_at).toLocaleString('it-IT') : '-'}</td>
                   <td style={td}>{d.totale_ldv || 0}</td>

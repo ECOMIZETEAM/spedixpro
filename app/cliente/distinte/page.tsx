@@ -30,30 +30,24 @@ export default function ListaDistinteCliente() {
       doc.text('Distinta N. '+numero+' del '+dataStr, 105, 16, {align:'center'})
       autoTable(doc, {
         startY: 26, styles:{fontSize:7,cellPadding:2}, headStyles:{fillColor:[255,255,255],textColor:[0,0,0],fontStyle:'bold',lineWidth:0.1},
-        head: [['Spedizioni','Rif. Mittente','Destinatario','Rif.Dest.','Telefono','Peso','PesoVol.','Colli','Contr.','Assicurazione','Prezzo']],
+        head: [['Spedizioni','Rif. Mittente','Destinatario','Rif.Dest.','Telefono','Peso','PesoVol.','Colli','Contr.','Assicurazione']],
         body: (spedizioni||[]).map((s:any)=>[
           s.numero||'', s.rif_mittente||'',
           [s.dest_nome,s.dest_indirizzo,[s.dest_cap,s.dest_citta,s.dest_provincia].filter(Boolean).join(', ')].filter(Boolean).join(', '),
           s.rif_destinatario||'', s.dest_telefono||'',
           String(s.peso_reale||''), String(s.peso_volume||''), String(s.colli||1),
-          Number(s.contrassegno||0).toFixed(2)+' €', Number(s.assicurazione||0).toFixed(2)+' €', Number(s.costo_totale||0).toFixed(2)+' €',
+          Number(s.contrassegno||0).toFixed(2)+' €', Number(s.assicurazione||0).toFixed(2)+' €',
         ]),
       })
       const totSped = (spedizioni||[]).length
       const totColli = (spedizioni||[]).reduce((a:number,s:any)=>a+(Number(s.colli)||0),0)
       const totContr = (spedizioni||[]).reduce((a:number,s:any)=>a+(Number(s.contrassegno)||0),0)
-      const subtot = (spedizioni||[]).reduce((a:number,s:any)=>a+(Number(s.costo_totale)||0),0)
-      const iva = subtot*0.22
       let y = (doc as any).lastAutoTable.finalY + 10
       doc.setFontSize(10)
       doc.setFont('helvetica','bold')
       doc.text('Totale Spedizioni: '+totSped, 14, y); y+=6
       doc.text('Totale Colli: '+totColli, 14, y); y+=8
-      doc.text('Totale Contrassegni: '+totContr.toFixed(2)+' €', 14, y); y+=8
-      doc.text('SubTotale: '+subtot.toFixed(2)+' €', 14, y); y+=6
-      doc.text('Iva (22.00%): '+iva.toFixed(2)+' €', 14, y); y+=6
-      doc.text('------------------------------', 14, y); y+=6
-      doc.text('Totale: '+(subtot+iva).toFixed(2)+' €', 14, y); y+=10
+      doc.text('Totale Contrassegni: '+totContr.toFixed(2)+' €', 14, y); y+=10
       try {
         const qrUrl = await QRCode.toDataURL('DISTINTA:'+numero)
         doc.addImage(qrUrl, 'PNG', 14, y, 30, 30)
@@ -70,7 +64,7 @@ export default function ListaDistinteCliente() {
       const { utils, writeFile } = await import('xlsx')
       const rows = (spedizioni||[]).map((s:any)=>({
         Spedizione:s.numero, Destinatario:s.dest_nome, Citta:s.dest_citta, CAP:s.dest_cap, Provincia:s.dest_provincia,
-        Peso:s.peso_reale, Colli:s.colli, Contrassegno:s.contrassegno, Prezzo:s.costo_totale,
+        Peso:s.peso_reale, Colli:s.colli, Contrassegno:s.contrassegno,
       }))
       const ws = utils.json_to_sheet(rows)
       const wb = utils.book_new()

@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
   if (ultima?.numero) { const n = parseInt(String(ultima.numero).replace(/\D/g, '')); if (!isNaN(n)) numeroInt = n }
   const numeroDistinta = String(numeroInt + 1)
   const { data: distinta, error } = await supabase.from('distinte').insert({
-    master_id: utente?.master_id, cliente_id: masterSel ? null : (clienteId || null), corriere_id: corriereId || null,
+    master_id: utente?.master_id, cliente_id: masterSel ? null : (clienteId || null), master_rete_id: masterSel || null, corriere_id: corriereId || null,
     numero: numeroDistinta, data: new Date().toISOString().split('T')[0], stato: 'chiusa',
     totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: (speds||[]).length, prezzo_totale: prezzoTotale,
   }).select().single()
