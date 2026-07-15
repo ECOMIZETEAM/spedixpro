@@ -121,9 +121,20 @@ export async function POST(req: NextRequest) {
     const parcels = [{ weight: kgToGrams(pesoReale), length: cmToMm(pkg?.length||10), width: cmToMm(pkg?.width||10), height: cmToMm(pkg?.height||10) }]
     const cod = body.codValue ? euroToCents(body.codValue) : undefined
     const ins = body.insuranceValue ? euroToCents(body.insuranceValue) : undefined
-    const serviceIdV1 = (packages.length > 1 && cred.service_id_multicollo) ? String(cred.service_id_multicollo) : (cred.service_id || null)
-    const quotation = await spediamoproGetQuotation(cred.authcode, serviceIdV1, { parcels, sender, consignee, cashOnDeliveryAmount: cod, insuredAmount: ins })
-    const shipment = await spediamoproCreateShipment(cred.authcode, { parcels, sender, consignee, quotation, cashOnDeliveryAmount: cod, insuredAmount: ins, externalReference: body.notes || undefined })
+    let serviceIdV1 = (packages.length > 1 && cred.service_id_multicollo) ? String(cred.service_id_multicollo) : (cred.service_id || null)
+    let quotation
+    try {
+      quotation = await spediamoproGetQuotation(cred.authcode, serviceIdV1, { parcels, sender, consignee, cashOnDeliveryAmount: cod, insuredAmount: ins })
+    } catch (qErr: any) {
+      // Fallback al servizio eccedenze/multicollo del corriere se lo standard non ha tariffa (es. colli lunghi).
+      const altService = cred.service_id_multicollo ? String(cred.service_id_multicollo) : null
+      if (altService && altService !== serviceIdV1 && /nessuna tariffa|no.*rate|not available/i.test(String(qErr?.message || ''))) {
+        serviceIdV1 = altService
+        quotation = await spediamoproGetQuotation(cred.authcode, serviceIdV1, { parcels, sender, consignee, cashOnDeliveryAmount: cod, insuredAmount: ins })
+      } else throw qErr
+    }
+    const externalRefV1 = (body.notes ? String(body.notes) : '').substring(0, 64) || undefined
+    const shipment = await spediamoproCreateShipment(cred.authcode, { parcels, sender, consignee, quotation, cashOnDeliveryAmount: cod, insuredAmount: ins, externalReference: externalRefV1 })
     let trk = shipment.trackingCode; if (!trk) trk = await spediamoproWaitForTracking(cred.authcode, shipment.id)
     numero = trk || shipment.code || `SP-${shipment.id}`; costoCorrente = centsToEuro(shipment.totalPrice)
     try { const lb = await spediamoproGetLabel(cred.authcode, shipment.id); etichettaUrl = `data:application/pdf;base64,${lb.toString('base64')}` } catch {}

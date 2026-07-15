@@ -433,17 +433,34 @@ export async function POST(req: NextRequest) {
       const insuredAmount = body.insuranceValue ? euroToCents(body.insuranceValue) : undefined
       // Alcuni servizi SpediamoPro (es. BRT Express service 29) sono MONO-collo: con più colli
       // non tornano tariffa. Se il corriere ha un service multicollo dedicato, con >1 collo lo usiamo.
-      const serviceId = (packages.length > 1 && cred.service_id_multicollo)
+      let serviceId = (packages.length > 1 && cred.service_id_multicollo)
         ? String(cred.service_id_multicollo)
         : (cred.service_id || null)
 
-      const quotation = await spediamoproGetQuotation(cred.authcode, serviceId, {
-        parcels, sender, consignee, cashOnDeliveryAmount, insuredAmount
-      })
+      let quotation
+      try {
+        quotation = await spediamoproGetQuotation(cred.authcode, serviceId, {
+          parcels, sender, consignee, cashOnDeliveryAmount, insuredAmount
+        })
+      } catch (qErr: any) {
+        // Alcuni colli (es. molto lunghi / eccedenze, oppure multicollo) non sono coperti dal
+        // servizio standard mono-collo del corriere ma lo sono dal suo servizio dedicato
+        // (eccedenze/multicollo). Se il servizio richiesto non ha tariffa, riprovo con quello.
+        const altService = cred.service_id_multicollo ? String(cred.service_id_multicollo) : null
+        if (altService && altService !== serviceId && /nessuna tariffa|no.*rate|not available/i.test(String(qErr?.message || ''))) {
+          serviceId = altService
+          quotation = await spediamoproGetQuotation(cred.authcode, serviceId, {
+            parcels, sender, consignee, cashOnDeliveryAmount, insuredAmount
+          })
+        } else throw qErr
+      }
+
+      // externalReference SpediamoPro: max 64 caratteri (altrimenti la creazione fallisce).
+      const externalRef = (body.notes ? String(body.notes) : '').substring(0, 64) || undefined
 
       const shipment = await spediamoproCreateShipment(cred.authcode, {
         parcels, sender, consignee, quotation, cashOnDeliveryAmount, insuredAmount,
-        externalReference: body.notes || undefined,
+        externalReference: externalRef,
       })
 
       let trackingReale = shipment.trackingCode
