@@ -434,37 +434,8 @@ export async function POST(req: NextRequest) {
     if (!tuttePerCorriere.has(cid)) tuttePerCorriere.set(cid, [])
     tuttePerCorriere.get(cid)!.push(f)
   }
-  // ZONE DISAGIATE (regola PER-CORRIERE): se il CAP di destinazione è elencato (cap-esatto) in una
-  // zona "disagiata/periferica" di un corriere del master, quel corriere può usare SOLO quella zona.
-  // Se il listino cliente non la prezza → il corriere NON compare: la tariffa per quella destinazione
-  // NON gli è stata assegnata, quindi niente ripiego su provincia (es. Calabria) né su "Italia".
-  // Il controllo è sull'INTERO set zone del master (anche zone NON presenti nel listino cliente),
-  // così vale anche quando il cliente/sotto-master non ha affatto la fascia disagiata.
-  const capDisagiataZona = new Map<string, string>()   // corriere_id -> zona_id disagiata che contiene il CAP
-  if (!isEstero && capDest) {
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const adminZ = createAdminSupabase()
-    const { data: zDis } = await adminZ
-      .from('zone')
-      .select('id,nome,corriere_id, zone_cap!inner(cap)')
-      .eq('master_id', masterId)
-      .in('corriere_id', Array.from(tuttePerCorriere.keys()))
-      .eq('zone_cap.cap', capDest)
-    for (const z of (zDis || [])) {
-      if (/disagiat|periferic/i.test(String((z as any).nome || '')))
-        capDisagiataZona.set((z as any).corriere_id, (z as any).id)
-    }
-  }
-
   const fascePerCorriere = new Map<string, any[]>()
   for (const [cid, fasceC] of tuttePerCorriere) {
-    const zonaDis = capDisagiataZona.get(cid)
-    if (zonaDis) {
-      // CAP disagiata per questo corriere: SOLO la zona disagiata, nessun ripiego a provincia/Italia.
-      const selD = fasceC.filter(f => (f.zone as any)?.id === zonaDis)
-      if (selD.length) fascePerCorriere.set(cid, selD)   // prezzata → ok; altrimenti corriere ESCLUSO
-      continue
-    }
     let sel = fasceC.filter(f => zoneMatchIds.includes((f.zone as any)?.id))   // 1) zone_cap del corriere
     // 2) fallback per nome SOLO Italia — MA NON per le destinazioni esclusive (isole minori): lì un
     //    corriere senza la zona speciale non deve agganciare via "Italia".

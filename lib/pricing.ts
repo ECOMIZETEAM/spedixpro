@@ -9,7 +9,7 @@
 // Usato dal ledger a cascata (STEP 4.5) per sapere quanto paga ogni master
 // della catena col proprio listino ereditato.
 
-import { trovaZoneMatch, trovaZoneMatchDett, isZonaEsclusiva, mappaCapDisagiata } from '@/lib/zone-match'
+import { trovaZoneMatch, trovaZoneMatchDett, isZonaEsclusiva } from '@/lib/zone-match'
 
 const ZONE_MAP: Record<string, string> = {
   CA:'Sardegna',CI:'Sardegna',VS:'Sardegna',NU:'Sardegna',OG:'Sardegna',OT:'Sardegna',OR:'Sardegna',SS:'Sardegna',SU:'Sardegna',
@@ -176,21 +176,10 @@ export async function calcolaPrezzoListino(
   // 1) Match via zone_cap (CAP esatto > provincia > jolly), ristretto alle zone del listino.
   //    Mappa zona->corriere: i tier si applicano PER CORRIERE (il CAP esatto di un corriere non
   //    deve escludere gli altri corrieri che coprono la destinazione a provincia/jolly).
-  const isEsteroL = (params.paese || 'IT').toUpperCase().trim() !== 'IT'
-  // DISAGIATA (per-corriere): i corrieri per cui il CAP è in una LORO zona disagiata usano SOLO
-  // quella zona (nessun ripiego su provincia/Italia); se il listino non la prezza → esclusi. Gli
-  // altri corrieri seguono il match normale. Controllo sul set COMPLETO zone del master.
-  const corriereIdsAll = Array.from(new Set(fasce.map((f: any) => (f.corrieri as any)?.id).filter(Boolean)))
-  const disMap = await mappaCapDisagiata(supabase, (listino as any)?.master_id, corriereIdsAll, params.paese, params.cap)
-  const disagiateFasce: any[] = []
-  for (const [cid, zid] of disMap) disagiateFasce.push(...fasce.filter((f: any) => (f.corrieri as any)?.id === cid && (f.zone as any)?.id === zid))
-  const fasceNormali = disMap.size ? fasce.filter((f: any) => !disMap.has((f.corrieri as any)?.id)) : fasce
-
-  // 1) Match via zone_cap (CAP esatto > provincia > jolly), ristretto alle zone del listino.
-  const candidateZonaIds = fasceNormali.map((f: any) => (f.zone as any)?.id).filter(Boolean)
+  const candidateZonaIds = fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean)
   const zonaCorr = new Map<string, string>()
-  for (const f of fasceNormali) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid) zonaCorr.set(zid, cid) }
-  const zoneEsclusive = new Set<string>(fasceNormali.filter((f: any) => isZonaEsclusiva((f.zone as any)?.nome)).map((f: any) => (f.zone as any)?.id).filter(Boolean))
+  for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid) zonaCorr.set(zid, cid) }
+  const zoneEsclusive = new Set<string>(fasce.filter((f: any) => isZonaEsclusiva((f.zone as any)?.nome)).map((f: any) => (f.zone as any)?.id).filter(Boolean))
   const { ids: zoneMatchIds, capEsclusivo } = await trovaZoneMatchDett(
     supabase,
     { paese: params.paese, provincia, cap: params.cap },
@@ -198,17 +187,17 @@ export async function calcolaPrezzoListino(
     zonaCorr,
     zoneEsclusive
   )
-  let fasceZonaNorm = zoneMatchIds.length
-    ? fasceNormali.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id))
+  let fasceZona = zoneMatchIds.length
+    ? fasce.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id))
     : []
   // 2) Fallback ZONE_MAP per nome zona (SOLO Italia; per l'estero niente fallback:
   //    un corriere senza zona estera NON deve comparire). NIENTE fallback per le destinazioni
   //    esclusive (isole minori): lì il corriere senza la zona speciale NON deve agganciare via "Italia".
+  const isEsteroL = (params.paese || 'IT').toUpperCase().trim() !== 'IT'
   if (!isEsteroL && !capEsclusivo) {
-    if (!fasceZonaNorm.length) fasceZonaNorm = fasceNormali.filter((f: any) => (f.zone as any)?.nome === zonaNome)
-    if (!fasceZonaNorm.length) fasceZonaNorm = fasceNormali.filter((f: any) => (f.zone as any)?.nome === 'Italia')
+    if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
+    if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
   }
-  const fasceZona = [...disagiateFasce, ...fasceZonaNorm]
   if (!fasceZona.length) return null
 
   // Raggruppa per corriere
@@ -349,28 +338,17 @@ export async function calcolaPrezzoCorriereDettaglio(
   if (!fasce?.length) return null
 
   const candidateZonaIds = fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean)
+  const zoneMatchIds = await trovaZoneMatch(
+    supabase,
+    { paese: params.paese, provincia, cap: params.cap },
+    candidateZonaIds
+  )
+  let fasceZona = zoneMatchIds.length ? fasce.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id)) : []
+  // Per l'ESTERO niente fallback su Italia: mostra solo i corrieri con una zona estera.
   const isEsteroC = (params.paese || 'IT').toUpperCase().trim() !== 'IT'
-  // Zona DISAGIATA esclusiva (per-corriere, set COMPLETO del master): se il CAP è disagiata per
-  // questo corriere, usa SOLO quella zona; se il listino non la prezza → niente tariffa (nessun
-  // ripiego su provincia/Italia). Vale per master, cliente, sotto-master, agente: stessa logica.
-  const disMap = await mappaCapDisagiata(supabase, masterId, [corriereId], params.paese, params.cap)
-  const zonaDis = disMap.get(corriereId)
-  let fasceZona: any[]
-  if (zonaDis) {
-    fasceZona = fasce.filter((f: any) => (f.zone as any)?.id === zonaDis)
-    if (!fasceZona.length) return null   // disagiata non prezzata su questo listino → corriere escluso
-  } else {
-    const zoneMatchIds = await trovaZoneMatch(
-      supabase,
-      { paese: params.paese, provincia, cap: params.cap },
-      candidateZonaIds
-    )
-    fasceZona = zoneMatchIds.length ? fasce.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id)) : []
-    // Per l'ESTERO niente fallback su Italia: mostra solo i corrieri con una zona estera.
-    if (!isEsteroC) {
-      if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
-      if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
-    }
+  if (!isEsteroC) {
+    if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
+    if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
   }
   if (!fasceZona.length) return null
 
