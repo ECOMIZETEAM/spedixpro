@@ -189,8 +189,10 @@ export async function POST(req: NextRequest) {
     country: body.mittPaese || 'IT', phone: pulisciTelefono(body.mittTelefono) || null, email: body.mittEmail || 'noreply@moovexpress.com',
   }
 
-  let contractCode: string | null = null
-  try {
+  // Riuso il contratto GIÀ usato per creare la spedizione (salvato in raw_response._contractCode):
+  // è quello giusto per il ritiro. Solo se manca ripiego sui rates (flusso legacy, fragile).
+  let contractCode: string | null = raw?._contractCode || null
+  if (!contractCode) try {
     const ratesBody = {
       packages: [{ length: primaSped.lunghezza || 20, width: primaSped.larghezza || 15, height: primaSped.altezza || 10, weight: pesoTotale || 1 }],
       shipFrom,
