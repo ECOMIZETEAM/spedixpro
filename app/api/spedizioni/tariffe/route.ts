@@ -418,37 +418,31 @@ export async function POST(req: NextRequest) {
     zonaCorr
   )
 
-  let fasceZona
-  // 1) Prova zone_cap (match per CAP/provincia/paese) - vale Italia ed estero
-  fasceZona = zoneMatchIds.length ? fasce.filter(f => zoneMatchIds.includes((f.zone as any)?.id)) : []
-  if (isEstero) {
-    if (!fasceZona.length) {
-      return NextResponse.json({ error: `Nessuna tariffa disponibile per spedizioni verso ${paeseDest}` }, { status: 400 })
-    }
-  } else {
-    // 2) Fallback ZONE_MAP per l'Italia se zone_cap non ha dato risultati
-    if (!fasceZona.length) {
-      fasceZona = fasce.filter(f => (f.zone as any)?.nome === zonaNome)
-    }
-    if (!fasceZona.length) {
-      fasceZona = fasce.filter(f => (f.zone as any)?.nome === 'Italia')
-    }
-    if (!fasceZona.length) {
-      return NextResponse.json({ error: `Nessuna fascia prezzo per zona ${zonaNome}` }, { status: 400 })
-    }
+  // Risoluzione zona PER CORRIERE (RIGIDA): ogni corriere trova la SUA zona per questa destinazione,
+  // indipendentemente dagli altri. Es. stessa destinazione = "Italia" su BRT e "Isola minore" su SDA:
+  // vengono mostrati ENTRAMBI, ognuno con la sua zona/fascia giusta.
+  //   1) match zone_cap del corriere (CAP esatto > provincia > jolly);
+  //   2) solo Italia: fallback alla SUA zona con nome = zonaNome (ZONE_MAP provincia), poi "Italia";
+  //   3) se il corriere non ha NESSUNA zona per la destinazione -> ESCLUSO (niente fascia inventata).
+  const tuttePerCorriere = new Map<string, any[]>()
+  for (const f of fasce) {
+    const cid = (f.corrieri as any)?.id
+    if (!cid) continue
+    if (!tuttePerCorriere.has(cid)) tuttePerCorriere.set(cid, [])
+    tuttePerCorriere.get(cid)!.push(f)
   }
-
-  // *** FIX: raggruppa le fasce per corriere, trova la fascia giusta PER OGNI corriere ***
   const fascePerCorriere = new Map<string, any[]>()
-  for (const f of fasceZona) {
-    const corriereId = (f.corrieri as any)?.id
-    if (!corriereId) continue
-    if (!fascePerCorriere.has(corriereId)) fascePerCorriere.set(corriereId, [])
-    fascePerCorriere.get(corriereId)!.push(f)
+  for (const [cid, fasceC] of tuttePerCorriere) {
+    let sel = fasceC.filter(f => zoneMatchIds.includes((f.zone as any)?.id))   // 1) zone_cap del corriere
+    if (!sel.length && !isEstero) {                                            // 2) fallback per nome SOLO Italia
+      sel = fasceC.filter(f => (f.zone as any)?.nome === zonaNome)
+      if (!sel.length) sel = fasceC.filter(f => (f.zone as any)?.nome === 'Italia')
+    }
+    if (sel.length) fascePerCorriere.set(cid, sel)   // altrimenti il corriere non copre la destinazione -> escluso
   }
 
   if (!fascePerCorriere.size) {
-    return NextResponse.json({ error: `Nessuna fascia prezzo per zona ${zonaNome}` }, { status: 400 })
+    return NextResponse.json({ error: isEstero ? `Nessuna tariffa disponibile per spedizioni verso ${paeseDest}` : `Nessuna fascia prezzo per zona ${zonaNome}` }, { status: 400 })
   }
 
   const risultati: any[] = []
