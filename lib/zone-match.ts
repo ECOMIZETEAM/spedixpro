@@ -12,7 +12,7 @@
 // Per evitare bleed cross-master, il match e' ristretto alle zone gia'
 // candidate (quelle presenti nelle fasce del listino in esame).
 
-export type DestZona = { paese?: string; provincia?: string; cap?: string }
+export type DestZona = { paese?: string; provincia?: string; cap?: string; citta?: string }
 
 // Versione dettagliata: ritorna le zone matchate e se il CAP appartiene (cap-esatto) a una
 // ZONA ESCLUSIVA (es. "Isole Minori"). Quando `capEsclusivo` e' true il jolly "resto Italia"
@@ -46,11 +46,26 @@ export async function trovaZoneMatchDett(
   const capFilter = Array.from(new Set([cap, '*'].filter((v) => v != null && v !== undefined))) as string[]
   const { data: zc } = await supabase
     .from('zone_cap')
-    .select('zona_id,provincia,cap')
+    .select('zona_id,provincia,cap,citta')
     .eq('paese', paese)
     .in('zona_id', ids)
     .in('cap', capFilter)
   let righe = zc || []
+
+  // CITTÀ-AWARE (CAP condivisi): alcuni CAP coprono più comuni con trattamento diverso
+  // (es. 25050 = Rodengo Saiano NORMALE e Monte Isola ISOLA; SpediamoPro distingue per città).
+  // Le righe cap-esatto con una città SPECIFICA valgono SOLO per quel comune: se la destinazione
+  // ha una città, scarto le righe cap-esatto di un comune DIVERSO, così il CAP non aggancia la
+  // zona speciale sbagliata. (Senza città o senza righe-con-città: comportamento invariato.)
+  const nrm = (s: any) => (s || '').toString().toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9]/g, '')
+  const dCitta = nrm((dest as any).citta)
+  const capExactConCitta = righe.some((r: any) => r.cap && r.cap !== '*' && r.cap === cap && r.citta && r.citta !== '*')
+  if (dCitta && capExactConCitta) {
+    righe = righe.filter((r: any) => {
+      const isCapExactSpecifica = r.cap && r.cap !== '*' && r.cap === cap && r.citta && r.citta !== '*'
+      return !isCapExactSpecifica || nrm(r.citta) === dCitta   // tieni se non è cap-esatto-specifica, o se la città combacia
+    })
+  }
 
   // Il CAP appartiene (cap-esatto) a una zona ESCLUSIVA? (es. Isole Minori)
   const capEsclusivo = !!cap && !!zoneEsclusive && zoneEsclusive.size > 0 &&

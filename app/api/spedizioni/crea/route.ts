@@ -188,7 +188,7 @@ export async function POST(req: NextRequest) {
       if (isProprio) {
         const dett = await calcolaPrezzoCorriereDettaglio(adminCrea, {
           corriereId: corriereRecord.id, masterId,
-          provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+          provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           pesoReale, packages, contrassegno: codReq, assicurazione: assReq,
         })
         if (dett?.contrassegnoOltreMax) return NextResponse.json({ error: 'Il contratto selezionato non prevede il contrassegno per questo importo.' }, { status: 400 })
@@ -208,7 +208,7 @@ export async function POST(req: NextRequest) {
   if (isProprio) {
     costoMaster = (await calcolaPrezzoCorriere(adminCrea, {
       corriereId: corriereRecord.id, masterId,
-      provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+      provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
       pesoReale, packages,
       contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
     })) ?? (parseFloat(body.totalPrice) || 0)
@@ -281,6 +281,7 @@ export async function POST(req: NextRequest) {
       packages,
       cap: body.shipTo.postalCode,
       paese: body.shipTo.country || 'IT',
+      citta: body.shipTo.city,
       corriereNome: corriereRecord.nome_contratto,
       contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
     })
@@ -410,7 +411,7 @@ export async function POST(req: NextRequest) {
     await addebitaCatena(supabase, {
       masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
       costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
-      cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+      cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
       corriereNome: corriereRecord.nome_contratto,
       contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
       numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
@@ -557,7 +558,7 @@ export async function POST(req: NextRequest) {
       await addebitaCatena(supabase, {
         masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
         costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
-        cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+        cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
         corriereNome: corriereRecord.nome_contratto,
         contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
         numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,

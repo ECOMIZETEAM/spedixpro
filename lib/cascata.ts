@@ -21,6 +21,7 @@ async function costruisciCatena(
     packages: any[]
     cap?: string
     paese?: string
+    citta?: string   // città destinazione: per i CAP condivisi (es. 25050 Rodengo Saiano vs Monte Isola)
     // Nome contratto del corriere: i sotto-master rivendono con COPIE dello stesso corriere.
     // Serve per (1) trovare il proprietario REALE del contratto e (2) prezzare il corriere giusto.
     corriereNome?: string
@@ -71,7 +72,7 @@ async function costruisciCatena(
         const pesoReale = (params.packages || []).reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
         const pz = await calcolaPrezzoCorriere(adminDb, {
           corriereId: mCorr.id, masterId: m.id,
-          provincia: params.provincia, cap: params.cap, paese: params.paese,
+          provincia: params.provincia, cap: params.cap, paese: params.paese, citta: params.citta,
           pesoReale, packages: params.packages,
           contrassegno: params.contrassegno, assicurazione: params.assicurazione,
         })
@@ -89,7 +90,7 @@ async function costruisciCatena(
         }
         const ris = await calcolaPrezzoListino(adminDb, {
           listinoId: m.parent_listino_id, provincia: params.provincia,
-          packages: params.packages, cap: params.cap, paese: params.paese,
+          packages: params.packages, cap: params.cap, paese: params.paese, citta: params.citta,
         })
         if (!ris) return { catena, errore: `Nessuna tariffa nel listino del master "${m.nome}".` }
         prezzo = ris.prezzo
@@ -120,6 +121,7 @@ export async function verificaCreditoCatena(
     costoSpedizione?: number
     cap?: string
     paese?: string
+    citta?: string
     corriereNome?: string
     contrassegno?: number
     assicurazione?: number
@@ -133,6 +135,7 @@ export async function verificaCreditoCatena(
     packages: params.packages,
     cap: params.cap,
     paese: params.paese,
+    citta: params.citta,
     corriereNome: params.corriereNome,
     contrassegno: params.contrassegno,
     assicurazione: params.assicurazione,
@@ -167,6 +170,7 @@ export async function addebitaCatena(
     createdBy: string | null
     cap?: string
     paese?: string
+    citta?: string
     corriereNome?: string
     contrassegno?: number
     assicurazione?: number
@@ -181,6 +185,7 @@ export async function addebitaCatena(
     packages: params.packages,
     cap: params.cap,
     paese: params.paese,
+    citta: params.citta,
     corriereNome: params.corriereNome,
     contrassegno: params.contrassegno,
     assicurazione: params.assicurazione,
@@ -219,6 +224,7 @@ export async function rimborsaCatena(
     createdBy: string | null
     cap?: string
     paese?: string
+    citta?: string
     corriereNome?: string
     contrassegno?: number
     assicurazione?: number
@@ -233,6 +239,7 @@ export async function rimborsaCatena(
     packages: params.packages,
     cap: params.cap,
     paese: params.paese,
+    citta: params.citta,
     corriereNome: params.corriereNome,
     contrassegno: params.contrassegno,
     assicurazione: params.assicurazione,

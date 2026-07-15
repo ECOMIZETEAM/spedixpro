@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
       if (superaMisureMax(corr.settings, pesoRealeP, colliP)) continue   // fuori misura per il suo scaglione
       const dett = await calcolaPrezzoCorriereDettaglio(supabase, {
         corriereId: (lc as any).corriere_id, masterId: masterIdP,
-        provincia: provinciaP, cap: capP, paese: paeseP,
+        provincia: provinciaP, cap: capP, paese: paeseP, citta: (body.shipTo?.city || ''),
         pesoReale: pesoRealeP, packages: colliP,
         contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
       })
@@ -415,7 +415,7 @@ export async function POST(req: NextRequest) {
   const zoneEsclusive = new Set<string>(fasce.filter((f: any) => isZonaEsclusiva((f.zone as any)?.nome)).map((f: any) => (f.zone as any)?.id).filter(Boolean))
   const { ids: zoneMatchIds, capEsclusivo } = await trovaZoneMatchDett(
     supabase,
-    { paese: paeseDest, provincia, cap: capDest },
+    { paese: paeseDest, provincia, cap: capDest, citta: (body.shipTo?.city || '') },
     fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean),
     zonaCorr,
     zoneEsclusive

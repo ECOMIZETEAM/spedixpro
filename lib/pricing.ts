@@ -182,7 +182,7 @@ export async function calcolaPrezzoListino(
   const zoneEsclusive = new Set<string>(fasce.filter((f: any) => isZonaEsclusiva((f.zone as any)?.nome)).map((f: any) => (f.zone as any)?.id).filter(Boolean))
   const { ids: zoneMatchIds, capEsclusivo } = await trovaZoneMatchDett(
     supabase,
-    { paese: params.paese, provincia, cap: params.cap },
+    { paese: params.paese, provincia, cap: params.cap, citta: (params as any).citta },
     candidateZonaIds,
     zonaCorr,
     zoneEsclusive
@@ -340,7 +340,7 @@ export async function calcolaPrezzoCorriereDettaglio(
   const candidateZonaIds = fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean)
   const zoneMatchIds = await trovaZoneMatch(
     supabase,
-    { paese: params.paese, provincia, cap: params.cap },
+    { paese: params.paese, provincia, cap: params.cap, citta: (params as any).citta },
     candidateZonaIds
   )
   let fasceZona = zoneMatchIds.length ? fasce.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id)) : []
