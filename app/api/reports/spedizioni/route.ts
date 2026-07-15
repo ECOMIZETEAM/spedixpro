@@ -124,21 +124,6 @@ export async function GET(req: NextRequest) {
     ? await creaCalcolatoreListinoCliente(supabase, (utente as any).listino_agente_id)
     : null
 
-  // MASTER: per i clienti che appartengono a un AGENTE con listino assegnato, il "prezzo cliente"
-  // del master = il LISTINO AGENTE (quello che l'agente paga a ME), NON il prezzo del cliente finale.
-  const clienteToListinoAg = new Map<string, string>()
-  const calcListinoAg = new Map<string, (s: any) => any>()
-  if (!calcAgente && isMaster) {
-    const { data: agenti } = await adminDb.from('utenti').select('nome,cognome,listino_agente_id').eq('master_id', mine).eq('ruolo', 'agente').not('listino_agente_id', 'is', null)
-    if (agenti?.length) {
-      const nomeToListino = new Map<string, string>()
-      for (const a of agenti) { const n = ((((a as any).nome) || '') + ' ' + (((a as any).cognome) || '')).trim(); if (n && (a as any).listino_agente_id) nomeToListino.set(n, (a as any).listino_agente_id) }
-      const { data: cls } = await adminDb.from('clienti').select('id,agente').eq('master_id', mine).not('agente', 'is', null)
-      for (const c of (cls || [])) { const lid = nomeToListino.get((((c as any).agente) || '').trim()); if (lid) clienteToListinoAg.set((c as any).id, lid) }
-      for (const lid of Array.from(new Set(clienteToListinoAg.values()))) calcListinoAg.set(lid, await creaCalcolatoreListinoCliente(adminDb, lid))
-    }
-  }
-
   // Fallback prezzo corriere (movimento mancante su spedizioni vecchie/rete): il MIO listino corriere.
   let calcMioCorr: ((s: any) => any) | null = null
   const nomeToMioCorr = new Map<string, string>()
@@ -195,11 +180,9 @@ export async function GET(req: NextRequest) {
         if (calc && mioCorr) { const r = calc({ ...s, corriere_id: mioCorr }); if (r && r.totale != null) prezzo_cliente = r.totale }
       }
     }
-    // Cliente di un AGENTE: verso il master il prezzo è quello del listino agente (non del cliente finale).
-    if (!calcAgente && s.cliente_id && clienteToListinoAg.has(s.cliente_id)) {
-      const p = calcListinoAg.get(clienteToListinoAg.get(s.cliente_id)!)?.(s)
-      if (p && p.totale != null) prezzo_cliente = p.totale
-    }
+    // NB: per i clienti di un AGENTE il master vede come "Prezzo Cliente" il prezzo del CLIENTE
+    // FINALE (costo_totale), coerente col report Guadagno (che somma i movimenti cliente = costo_totale).
+    // (Prima qui si sovrascriveva col listino agente: era incoerente col guadagno.)
     // Master SOPRA il proprietario del contratto (nessun mio costo né mio listino per quel corriere):
     // semplice passaggio -> prezzo corriere = prezzo cliente -> margine 0 (niente margine totale rete).
     if (prezzo_corriere == null && !calcAgente) prezzo_corriere = prezzo_cliente
