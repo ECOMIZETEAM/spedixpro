@@ -4,7 +4,7 @@ import {
   spediamoproGetQuotation,
   kgToGrams, cmToMm, euroToCents, centsToEuro
 } from '@/lib/spediamopro'
-import { trovaZoneMatch } from '@/lib/zone-match'
+import { trovaZoneMatchDett, isZonaEsclusiva } from '@/lib/zone-match'
 import { calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
 
 const ZONE_MAP: Record<string,string> = {
@@ -411,11 +411,14 @@ export async function POST(req: NextRequest) {
   // deve escludere gli altri corrieri che coprono la destinazione a provincia/jolly).
   const zonaCorr = new Map<string, string>()
   for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid) zonaCorr.set(zid, cid) }
-  const zoneMatchIds = await trovaZoneMatch(
+  // Zone "esclusive" (Isole Minori): se il CAP vi appartiene, il jolly "Italia" non lo copre.
+  const zoneEsclusive = new Set<string>(fasce.filter((f: any) => isZonaEsclusiva((f.zone as any)?.nome)).map((f: any) => (f.zone as any)?.id).filter(Boolean))
+  const { ids: zoneMatchIds, capEsclusivo } = await trovaZoneMatchDett(
     supabase,
     { paese: paeseDest, provincia, cap: capDest },
     fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean),
-    zonaCorr
+    zonaCorr,
+    zoneEsclusive
   )
 
   // Risoluzione zona PER CORRIERE (RIGIDA): ogni corriere trova la SUA zona per questa destinazione,
@@ -434,7 +437,9 @@ export async function POST(req: NextRequest) {
   const fascePerCorriere = new Map<string, any[]>()
   for (const [cid, fasceC] of tuttePerCorriere) {
     let sel = fasceC.filter(f => zoneMatchIds.includes((f.zone as any)?.id))   // 1) zone_cap del corriere
-    if (!sel.length && !isEstero) {                                            // 2) fallback per nome SOLO Italia
+    // 2) fallback per nome SOLO Italia — MA NON per le destinazioni esclusive (isole minori): lì un
+    //    corriere senza la zona speciale non deve agganciare via "Italia".
+    if (!sel.length && !isEstero && !capEsclusivo) {
       sel = fasceC.filter(f => (f.zone as any)?.nome === zonaNome)
       if (!sel.length) sel = fasceC.filter(f => (f.zone as any)?.nome === 'Italia')
     }

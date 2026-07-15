@@ -9,7 +9,7 @@
 // Usato dal ledger a cascata (STEP 4.5) per sapere quanto paga ogni master
 // della catena col proprio listino ereditato.
 
-import { trovaZoneMatch } from '@/lib/zone-match'
+import { trovaZoneMatch, trovaZoneMatchDett, isZonaEsclusiva } from '@/lib/zone-match'
 
 const ZONE_MAP: Record<string, string> = {
   CA:'Sardegna',CI:'Sardegna',VS:'Sardegna',NU:'Sardegna',OG:'Sardegna',OT:'Sardegna',OR:'Sardegna',SS:'Sardegna',SU:'Sardegna',
@@ -179,19 +179,22 @@ export async function calcolaPrezzoListino(
   const candidateZonaIds = fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean)
   const zonaCorr = new Map<string, string>()
   for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid) zonaCorr.set(zid, cid) }
-  const zoneMatchIds = await trovaZoneMatch(
+  const zoneEsclusive = new Set<string>(fasce.filter((f: any) => isZonaEsclusiva((f.zone as any)?.nome)).map((f: any) => (f.zone as any)?.id).filter(Boolean))
+  const { ids: zoneMatchIds, capEsclusivo } = await trovaZoneMatchDett(
     supabase,
     { paese: params.paese, provincia, cap: params.cap },
     candidateZonaIds,
-    zonaCorr
+    zonaCorr,
+    zoneEsclusive
   )
   let fasceZona = zoneMatchIds.length
     ? fasce.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id))
     : []
   // 2) Fallback ZONE_MAP per nome zona (SOLO Italia; per l'estero niente fallback:
-  //    un corriere senza zona estera NON deve comparire per una destinazione estera).
+  //    un corriere senza zona estera NON deve comparire). NIENTE fallback per le destinazioni
+  //    esclusive (isole minori): lì il corriere senza la zona speciale NON deve agganciare via "Italia".
   const isEsteroL = (params.paese || 'IT').toUpperCase().trim() !== 'IT'
-  if (!isEsteroL) {
+  if (!isEsteroL && !capEsclusivo) {
     if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
     if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
   }
