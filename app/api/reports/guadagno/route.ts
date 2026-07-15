@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { fetchAll } from '@/lib/fetch-all'
 
 // Guadagno del master = quanto incassa dai clienti diretti e dai sotto-master diretti
 // per le SPEDIZIONI, meno quanto il master paga al livello superiore/corriere.
@@ -37,18 +38,19 @@ export async function GET(req: NextRequest) {
   const { data: figli } = await admin.from('masters').select('id').eq('parent_master_id', M)
   const subIds = new Set((figli || []).map((f: any) => f.id))
 
-  // movimenti sui libri del master M
-  const { data: movM } = await admin.from('movimenti')
+  // movimenti sui libri del master M (TUTTI: senza range PostgREST taglierebbe a 1000 -> totali errati)
+  const movM = await fetchAll(() => admin.from('movimenti')
     .select('master_target_id,cliente_id,importo,tipo,created_at,spedizione_id')
     .eq('master_id', M).gte('created_at', dal).lte('created_at', alEnd).in('tipo', TIPI)
+    .order('created_at', { ascending: false }))
 
   // movimenti dei sotto-master diretti (per i loro pagamenti a cascata verso M)
   let movSub: any[] = []
   if (subIds.size) {
-    const { data } = await admin.from('movimenti')
+    movSub = await fetchAll(() => admin.from('movimenti')
       .select('master_id,master_target_id,importo,tipo,created_at')
       .in('master_id', Array.from(subIds)).gte('created_at', dal).lte('created_at', alEnd).in('tipo', TIPI)
-    movSub = data || []
+      .order('created_at', { ascending: false }))
   }
 
   const n = (x: any) => Number(x || 0)
@@ -106,11 +108,11 @@ export async function GET(req: NextRequest) {
   if (M === EA_MULTI_ID) {
     const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
     const sub = await sottoAlberoMasterIds(admin, M)
-    const { data: sp } = await admin.from('spedizioni')
+    const sp = await fetchAll(() => admin.from('spedizioni')
       .select('costo_spedizione, stato, corrieri(tipo)')
       .in('master_id', sub.length ? sub : [M])
       .gte('created_at', dal).lte('created_at', alEnd)
-      .limit(20000)
+      .order('created_at', { ascending: false }))
     const agg = new Map<string, { costo: number; n: number }>()
     for (const s of (sp || [])) {
       // Escludo SOLO le 'annullata' (effettivamente cancellate + riaccreditate = netto 0).

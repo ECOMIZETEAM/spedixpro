@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { fetchAll } from '@/lib/fetch-all'
 export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -7,12 +8,11 @@ export async function GET() {
   const { data: utente } = await supabase.from('utenti').select('cliente_id').eq('id', user.id).single()
   const clienteId = utente?.cliente_id
   if (!clienteId) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
-  const { data: distinte } = await supabase
+  const distinte = await fetchAll(() => supabase
     .from('distinte')
     .select('id,numero,data,stato,totale_colli,totale_peso,corriere_id,created_at,corrieri(nome_contratto,tipo)')
     .eq('cliente_id', clienteId)
-    .order('created_at', { ascending: false })
-    .limit(300)
+    .order('created_at', { ascending: false }))
   const result = []
   for (const d of distinte || []) {
     const { data: speds } = await supabase

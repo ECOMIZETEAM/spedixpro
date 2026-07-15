@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { fetchAll } from '@/lib/fetch-all'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -13,20 +14,19 @@ export async function GET(req: NextRequest) {
   const dal = p.get('dal')
   const al = p.get('al')
 
-  let query = supabase.from('spedizioni')
-    .select('*, clienti(ragione_sociale)')
-    .eq('master_id', utente?.master_id)
-    .eq('stato', 'annullata')
-    .order('updated_at', { ascending: false })
-    .limit(1000)
-
-  if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
-  if (clienteId) query = query.eq('cliente_id', clienteId)
-  if (numero) query = query.ilike('numero', '%' + numero + '%')
-  if (dal) query = query.gte('created_at', dal)
-  if (al) query = query.lte('created_at', al + 'T23:59:59')
-
-  const { data, error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  return NextResponse.json(data || [])
+  const agIds = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
+  const build = () => {
+    let q = supabase.from('spedizioni')
+      .select('*, clienti(ragione_sociale)')
+      .eq('master_id', utente?.master_id)
+      .eq('stato', 'annullata')
+      .order('updated_at', { ascending: false })
+    if (agIds) q = q.in('cliente_id', agIds)
+    if (clienteId) q = q.eq('cliente_id', clienteId)
+    if (numero) q = q.ilike('numero', '%' + numero + '%')
+    if (dal) q = q.gte('created_at', dal)
+    if (al) q = q.lte('created_at', al + 'T23:59:59')
+    return q
+  }
+  return NextResponse.json(await fetchAll(build))
 }

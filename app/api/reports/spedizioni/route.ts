@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
-import { creaCalcolatoreListinoCliente } from '@/lib/pricing'
+import { creaCalcolatoreListinoCliente, creaCalcolatoreCorriere } from '@/lib/pricing'
+import { fetchAll } from '@/lib/fetch-all'
 
 // Report spedizioni dal punto di vista del MASTER LOGGATO (report margine):
 // - "Tutti" (nessun cliente selezionato) → tutta la sua rete (sotto-albero).
@@ -77,14 +78,8 @@ export async function GET(req: NextRequest) {
     return q
   }
   // Report COMPLETO: carico a blocchi (il DB tronca a 1000/query), altrimenti i totali/margini
-  // sarebbero sbagliati per i master con molte spedizioni. Backstop a 20.000.
-  const spedizioni: any[] = []
-  for (let from = 0; from < 20000; from += 1000) {
-    const { data: batch } = await buildBase().range(from, from + 999)
-    if (!batch?.length) break
-    spedizioni.push(...batch)
-    if (batch.length < 1000) break
-  }
+  // sarebbero sbagliati per i master con molte spedizioni. Nessun limite pratico.
+  const spedizioni: any[] = await fetchAll(buildBase)
 
   // FONTE DI VERITÀ = i MOVIMENTI reali (quello che ogni livello ha effettivamente pagato).
   // Non ricalcolo i prezzi: un ricalcolo non replica agevolazioni misure/peso reale, fattore
@@ -127,12 +122,26 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Fallback prezzo corriere (movimento mancante su spedizioni vecchie/rete): il MIO listino corriere.
+  let calcMioCorr: ((s: any) => any) | null = null
+  const nomeToMioCorr = new Map<string, string>()
+  if (isMaster && !calcAgente && spedIds.length) {
+    try { calcMioCorr = await creaCalcolatoreCorriere(adminDb, mine as string) } catch { calcMioCorr = null }
+    const { data: miei } = await adminDb.from('corrieri').select('id,nome_contratto').eq('master_id', mine)
+    for (const c of (miei || [])) nomeToMioCorr.set((c as any).nome_contratto, (c as any).id)
+  }
+
   const rows = (spedizioni || []).map((s: any) => {
     // PREZZO CORRIERE = quello che ho pagato IO (mio movimento reale). Per l'agente = suo listino;
     // se il listino agente non copre quel corriere, ripiego sul costo reale (non 0, che gonfierebbe il margine).
-    const prezzo_corriere: number | null = calcAgente
+    let prezzo_corriere: number | null = calcAgente
       ? (calcAgente(s)?.totale ?? (Number(s.costo_spedizione || 0) || null))
       : (costoMine.has(s.id) ? costoMine.get(s.id)! : null)
+    if (prezzo_corriere == null && calcMioCorr && !calcAgente) {
+      const nome = (s.corrieri as any)?.nome_contratto
+      const mioCorr = (s.master_id === mine) ? s.corriere_id : (nome ? nomeToMioCorr.get(nome) : null)
+      if (mioCorr) { const r = calcMioCorr({ ...s, corriere_id: mioCorr }); if (r && r.totale != null) prezzo_corriere = r.totale }
+    }
     // PREZZO CLIENTE = quello che mi paga il DIRETTO:
     //  - spedizione propria del mio cliente -> quello che ha pagato il cliente (suo movimento)
     //  - spedizione di rete -> quello che paga il figlio di prima linea (suo movimento)

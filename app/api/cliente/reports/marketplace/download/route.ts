@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { piattaformaDa } from '../route'
+import { fetchAll } from '@/lib/fetch-all'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,15 +41,14 @@ export async function GET(req: NextRequest) {
   const piatt = (url.searchParams.get('piattaforma') || 'amazon').toLowerCase()
   const data = url.searchParams.get('data') || ''   // YYYY-MM-DD opzionale
 
-  const { data: righe } = await supabase
+  const righe = await fetchAll(() => supabase
     .from('ordini_importati')
     .select('order_id, contenuto, colli, raw, spedizioni!inner(tracking_number, created_at, corrieri(nome_contratto))')
     .eq('cliente_id', utente.cliente_id)
     .eq('stato', 'spedito')
     .is('integrazione_id', null)
     .not('spedizione_id', 'is', null)
-    .order('created_at', { ascending: false })
-    .limit(10000)
+    .order('created_at', { ascending: false }))
 
   // Filtro per piattaforma (dal raw) e data di spedizione
   const filtrate = (righe || []).filter((r: any) => {

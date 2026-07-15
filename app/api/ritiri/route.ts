@@ -1,5 +1,6 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { fetchAll } from '@/lib/fetch-all'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -17,15 +18,16 @@ export async function GET(req: NextRequest) {
 
   // Cliente: solo i propri ritiri.
   if (utente?.ruolo === 'cliente') {
-    let q = supabase.from('ritiri').select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
-      .eq('master_id', utente.master_id).eq('cliente_id', utente.cliente_id)
-      .order('created_at', { ascending: false }).limit(500)
-    if (codRitiro) q = q.ilike('cod_ritiro', '%' + codRitiro + '%')
-    if (dal) q = q.gte('created_at', dal)
-    if (al) q = q.lte('created_at', al + 'T23:59:59')
-    const { data, error } = await q
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-    return NextResponse.json(data || [])
+    const build = () => {
+      let q = supabase.from('ritiri').select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
+        .eq('master_id', utente.master_id).eq('cliente_id', utente.cliente_id)
+        .order('created_at', { ascending: false })
+      if (codRitiro) q = q.ilike('cod_ritiro', '%' + codRitiro + '%')
+      if (dal) q = q.gte('created_at', dal)
+      if (al) q = q.lte('created_at', al + 'T23:59:59')
+      return q
+    }
+    return NextResponse.json(await fetchAll(build))
   }
 
   // Master/admin: rete = sé + discendenza. Risale la catena ANCHE con "Tutti i clienti".
@@ -43,19 +45,18 @@ export async function GET(req: NextRequest) {
   }
   const db: any = masterFilter.length > 1 ? admin : supabase
 
-  let query = db.from('ritiri')
-    .select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
-    .in('master_id', masterFilter)
-    .order('created_at', { ascending: false })
-    .limit(500)
-
-  if (clienteId) query = query.eq('cliente_id', clienteId)
-  if (codRitiro) query = query.ilike('cod_ritiro', '%' + codRitiro + '%')
-  if (dal) query = query.gte('created_at', dal)
-  if (al) query = query.lte('created_at', al + 'T23:59:59')
-
-  const { data, error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  const build = () => {
+    let q = db.from('ritiri')
+      .select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
+      .in('master_id', masterFilter)
+      .order('created_at', { ascending: false })
+    if (clienteId) q = q.eq('cliente_id', clienteId)
+    if (codRitiro) q = q.ilike('cod_ritiro', '%' + codRitiro + '%')
+    if (dal) q = q.gte('created_at', dal)
+    if (al) q = q.lte('created_at', al + 'T23:59:59')
+    return q
+  }
+  const data = await fetchAll(build)
 
   // Etichetta col nome del sotto-master per i ritiri della rete (null per i miei).
   let out = data || []

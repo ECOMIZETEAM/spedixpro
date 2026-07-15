@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { fetchAll } from '@/lib/fetch-all'
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -26,13 +27,6 @@ export async function GET(req: NextRequest) {
     if (provincia) q = q.eq('dest_provincia', provincia)
     return q
   }
-  // Report COMPLETO a blocchi (il DB tronca a 1000/query). Backstop 20.000.
-  const data: any[] = []
-  for (let from = 0; from < 20000; from += 1000) {
-    const { data: batch } = await buildBase().range(from, from + 999)
-    if (!batch?.length) break
-    data.push(...batch)
-    if (batch.length < 1000) break
-  }
-  return NextResponse.json(data)
+  // Report COMPLETO a blocchi (il DB tronca a 1000/query). Nessun limite pratico.
+  return NextResponse.json(await fetchAll(buildBase))
 }

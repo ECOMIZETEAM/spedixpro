@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { fetchAll } from '@/lib/fetch-all'
 export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -17,13 +18,11 @@ export async function GET(req: NextRequest) {
     if (utente?.ruolo === 'cliente' || !utente?.master_id) {
       return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
     }
-    const { data: movimenti, error } = await supabase
+    const movimenti = await fetchAll(() => supabase
       .from('movimenti')
       .select('*')
       .eq('master_target_id', utente.master_id)
-      .order('created_at', { ascending: false })
-      .limit(300)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      .order('created_at', { ascending: false }))
     const { data: m } = await supabase
       .from('masters').select('credito, nome').eq('id', utente.master_id).single()
 
@@ -74,9 +73,9 @@ export async function GET(req: NextRequest) {
       if (!sub || !autorizzato) {
         return NextResponse.json({ error: 'Sotto-master non trovato o non autorizzato' }, { status: 403 })
       }
-      const { data: movimenti } = await admin.from('movimenti').select('*')
-        .eq('master_target_id', targetId).order('created_at', { ascending: false }).limit(300)
-      return NextResponse.json({ movimenti: movimenti || [], saldo: Number(sub.credito || 0), cliente: sub.nome || null })
+      const movimenti = await fetchAll(() => admin.from('movimenti').select('*')
+        .eq('master_target_id', targetId).order('created_at', { ascending: false }))
+      return NextResponse.json({ movimenti, saldo: Number(sub.credito || 0), cliente: sub.nome || null })
     }
 
     const { data: cli } = await supabase
@@ -95,21 +94,19 @@ export async function GET(req: NextRequest) {
           cur = p?.parent_master_id || null
         }
         if (autorizzato) {
-          const { data: movimenti } = await admin.from('movimenti').select('*')
-            .eq('master_target_id', clienteId).order('created_at', { ascending: false }).limit(300)
-          return NextResponse.json({ movimenti: movimenti || [], saldo: Number(sub.credito || 0), cliente: sub.nome || null })
+          const movimenti = await fetchAll(() => admin.from('movimenti').select('*')
+            .eq('master_target_id', clienteId).order('created_at', { ascending: false }))
+          return NextResponse.json({ movimenti, saldo: Number(sub.credito || 0), cliente: sub.nome || null })
         }
       }
       return NextResponse.json({ error: 'Cliente non trovato o non autorizzato' }, { status: 403 })
     }
   }
-  const { data: movimenti, error } = await supabase
+  const movimenti = await fetchAll(() => supabase
     .from('movimenti')
     .select('*')
     .eq('cliente_id', clienteId)
-    .order('created_at', { ascending: false })
-    .limit(300)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    .order('created_at', { ascending: false }))
   const { data: cli } = await supabase
     .from('clienti').select('credito, ragione_sociale').eq('id', clienteId).single()
   return NextResponse.json({

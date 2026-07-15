@@ -2,6 +2,7 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { fetchAll } from '@/lib/fetch-all'
 
 export async function GET() {
   const supabase = await createServerSupabase()
@@ -28,7 +29,7 @@ export async function GET() {
     const [
       inLavorazione, inTransito, inGiacenza, consegnateTotali, spedizioniTotali,
       spedizioniMese, consegnateMese, spediteOggi,
-      { data: ultime }, { data: meseRows },
+      { data: ultime }, meseRows,
     ] = await Promise.all([
       C(base().eq('stato', 'in_lavorazione')),
       C(base().eq('stato', 'in_transito')),
@@ -39,7 +40,8 @@ export async function GET() {
       C(base().eq('stato', 'consegnata').gte('created_at', inizioMese)),
       C(base().gte('updated_at', startOggi).in('stato', ['spedita', 'in_transito', 'consegnata'])),
       adminA.from('spedizioni').select(SPED_COLS).in('cliente_id', ids).order('created_at', { ascending: false }).limit(10),
-      adminA.from('spedizioni').select('costo_totale').in('cliente_id', ids).gte('created_at', inizioMese).not('stato', 'in', '(annullata)').limit(20000),
+      // Fatturato mese: TUTTE le righe (senza range PostgREST taglierebbe a 1000 -> totale errato).
+      fetchAll(() => adminA.from('spedizioni').select('costo_totale').in('cliente_id', ids).gte('created_at', inizioMese).not('stato', 'in', '(annullata)').order('created_at', { ascending: false })),
     ])
     const fatturatoMese = (meseRows || []).reduce((s: number, x: any) => s + Number(x.costo_totale || 0), 0)
     const tassoConsegna = spedizioniTotali > 0 ? Math.round((consegnateTotali / spedizioniTotali) * 1000) / 10 : 0

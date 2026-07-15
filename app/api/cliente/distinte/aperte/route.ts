@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { fetchAll } from '@/lib/fetch-all'
 export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -7,13 +8,12 @@ export async function GET() {
   const { data: utente } = await supabase.from('utenti').select('cliente_id').eq('id', user.id).single()
   const clienteId = utente?.cliente_id
   if (!clienteId) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
-  const { data: spedizioni } = await supabase
+  const spedizioni = await fetchAll(() => supabase
     .from('spedizioni')
     .select('id,numero,rif_destinatario,dest_nome,dest_citta,dest_cap,dest_provincia,peso_fatturato,peso_reale,colli,created_at,corriere_id,note,corrieri(nome_contratto)')
     .eq('cliente_id', clienteId)
     .is('distinta_id', null)
     .neq('stato', 'annullata')
-    .order('created_at', { ascending: false })
-    .limit(500)
-  return NextResponse.json(spedizioni || [])
+    .order('created_at', { ascending: false }))
+  return NextResponse.json(spedizioni)
 }

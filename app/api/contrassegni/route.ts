@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { fetchAll } from '@/lib/fetch-all'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -47,13 +48,6 @@ export async function GET(req: NextRequest) {
     if (al) q = q.lte('created_at', al + 'T23:59:59')
     return q
   }
-  // Carico TUTTI i contrassegni a blocchi (prima .limit(500) tagliava): sono spedizioni normali.
-  const data: any[] = []
-  for (let from = 0; from < 10000; from += 1000) {
-    const { data: batch } = await buildBase().range(from, from + 999)
-    if (!batch?.length) break
-    data.push(...batch)
-    if (batch.length < 1000) break
-  }
-  return NextResponse.json(data)
+  // Carico TUTTI i contrassegni (prima .limit(500) tagliava): sono spedizioni normali.
+  return NextResponse.json(await fetchAll(buildBase))
 }

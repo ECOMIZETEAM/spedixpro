@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { clientiAgente } from '@/lib/agente'
 import { creaCalcolatoreListinoCliente } from '@/lib/pricing'
+import { fetchAll } from '@/lib/fetch-all'
 
 // Guadagno dell'AGENTE = margine tra quello che paga il CLIENTE (costo_totale della spedizione)
 // e il COSTO dell'agente (prezzo dal LISTINO AGENTE assegnato dal master), sulle spedizioni
@@ -36,12 +37,12 @@ export async function GET(req: NextRequest) {
   }
 
   // Spedizioni dei suoi clienti nel periodo (escluse le annullate).
-  const { data: speds } = await supabase.from('spedizioni')
+  const speds = await fetchAll(() => supabase.from('spedizioni')
     .select('id,cliente_id,corriere_id,lunghezza,larghezza,altezza,peso_reale,dest_provincia,dest_cap,dest_paese,contrassegno,assicurazione,costo_totale,costo_spedizione,stato,created_at')
     .in('cliente_id', clienteIds)
     .gte('created_at', dal).lte('created_at', alEnd)
     .not('stato', 'in', '(annullata)')
-    .limit(20000)
+    .order('created_at', { ascending: false }))
 
   const calcCosto = await creaCalcolatoreListinoCliente(supabase, listinoAg)
 

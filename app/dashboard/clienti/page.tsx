@@ -44,6 +44,8 @@ export default function ClientiPage() {
   const [filtroStato, setFiltroStato] = useState('tutti')
   const [filtroContratto, setFiltroContratto] = useState('tutti')
   const [filtroListino, setFiltroListino] = useState('tutti')
+  const [pagina, setPagina] = useState(1)
+  const PER_PAGINA = 10
 
   const [daEliminare, setDaEliminare] = useState<any>(null)
   const [eliminando, setEliminando] = useState(false)
@@ -107,6 +109,12 @@ export default function ClientiPage() {
       return true
     })
   }, [clienti, search, filtroStato, filtroContratto, filtroListino])
+
+  // Paginazione 10/pagina. Torno a pagina 1 quando cambiano ricerca/filtri.
+  useEffect(() => { setPagina(1) }, [search, filtroStato, filtroContratto, filtroListino])
+  const totPagine = Math.max(1, Math.ceil(clientiFiltrati.length / PER_PAGINA))
+  const paginaCorr = Math.min(pagina, totPagine)
+  const clientiPagina = clientiFiltrati.slice((paginaCorr - 1) * PER_PAGINA, paginaCorr * PER_PAGINA)
 
   return (
     <div>
@@ -192,7 +200,7 @@ export default function ClientiPage() {
                 </tr>
               </thead>
               <tbody>
-                {clientiFiltrati.map(c => (
+                {clientiPagina.map(c => (
                   <tr key={c.id} style={{borderBottom:'1px solid #f5f5f5'}}>
                     <td style={{padding:'10px 14px',color:'#1a1a1a',fontSize:'12px'}}>{c.codice_cliente}</td>
                     <td style={{padding:'10px 14px'}}>
@@ -247,6 +255,16 @@ export default function ClientiPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {!loading && clientiFiltrati.length > PER_PAGINA && (
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderTop:'1px solid #f0f0f0',fontSize:'13px',color:'#555',flexWrap:'wrap',gap:'8px'}}>
+            <span>{(paginaCorr-1)*PER_PAGINA+1}–{Math.min(paginaCorr*PER_PAGINA, clientiFiltrati.length)} di {clientiFiltrati.length}</span>
+            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+              <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{background:'#fff',border:'1px solid #ddd',borderRadius:'6px',padding:'6px 12px',fontSize:'13px',fontWeight:600,cursor:paginaCorr<=1?'default':'pointer',color:paginaCorr<=1?'#bbb':'#1a1a1a'}}>‹ Prec.</button>
+              <span style={{padding:'0 6px',fontWeight:600,color:'#1a1a1a'}}>{paginaCorr} / {totPagine}</span>
+              <button onClick={()=>setPagina(p=>Math.min(totPagine,p+1))} disabled={paginaCorr>=totPagine} style={{background:'#fff',border:'1px solid #ddd',borderRadius:'6px',padding:'6px 12px',fontSize:'13px',fontWeight:600,cursor:paginaCorr>=totPagine?'default':'pointer',color:paginaCorr>=totPagine?'#bbb':'#1a1a1a'}}>Succ. ›</button>
+            </div>
           </div>
         )}
       </div>

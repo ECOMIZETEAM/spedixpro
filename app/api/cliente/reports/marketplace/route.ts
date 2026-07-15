@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { fetchAll } from '@/lib/fetch-all'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,15 +23,14 @@ export async function GET() {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
 
-  const { data: righe } = await supabase
+  const righe = await fetchAll(() => supabase
     .from('ordini_importati')
     .select('id, raw, spedizioni!inner(created_at)')
     .eq('cliente_id', utente.cliente_id)
     .eq('stato', 'spedito')
     .is('integrazione_id', null)                 // solo ordini caricati da FILE (non dai negozi collegati)
     .not('spedizione_id', 'is', null)
-    .order('created_at', { ascending: false })
-    .limit(5000)
+    .order('created_at', { ascending: false }))
 
   // Raggruppo per piattaforma + data di spedizione
   const mappa = new Map<string, { piattaforma: string; data: string; n: number }>()

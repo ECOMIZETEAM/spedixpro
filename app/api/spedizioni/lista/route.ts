@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
-import { creaCalcolatoreListinoCliente } from '@/lib/pricing'
+import { creaCalcolatoreListinoCliente, creaCalcolatoreCorriere } from '@/lib/pricing'
+import { fetchAll } from '@/lib/fetch-all'
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -100,15 +101,8 @@ export async function GET(req: NextRequest) {
     return q
   }
   // PostgREST tronca a 1000 righe/query: carico a blocchi finché ci sono, così l'elenco è COMPLETO
-  // (prima un .limit(200) nascondeva tutto oltre le 200). Backstop a 10.000 per sicurezza.
-  const spedizioni: any[] = []
-  for (let from = 0; from < 10000; from += 1000) {
-    const { data: batch, error } = await buildBase().range(from, from + 999)
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-    if (!batch?.length) break
-    spedizioni.push(...batch)
-    if (batch.length < 1000) break
-  }
+  // (prima un .limit(200) nascondeva tutto oltre le 200). Nessun limite pratico.
+  const spedizioni: any[] = await fetchAll(buildBase)
 
   // Costo da mostrare = il PREZZO CLIENTE che ti paga il tuo DIRETTO:
   // - spedizione propria (master_id = io): il prezzo del cliente diretto (costo_totale).
@@ -149,6 +143,18 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Fallback PREZZO CORRIERE quando manca il movimento (spedizioni vecchie / rete non tracciata):
+  // calcolo il MIO listino corriere (quello che pago io). Per le spedizioni di rete il corriere è
+  // del sotto-master -> lo rimappo al MIO corriere con lo stesso nome_contratto.
+  let calcMioCorr: ((s: any) => any) | null = null
+  if (mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).length) {
+    try { calcMioCorr = await creaCalcolatoreCorriere(db, mineId) } catch { calcMioCorr = null }
+    if (!nomeToMioCorr.size) {
+      const { data: miei } = await db.from('corrieri').select('id,nome_contratto').eq('master_id', mineId)
+      for (const c of (miei || [])) nomeToMioCorr.set((c as any).nome_contratto, (c as any).id)
+    }
+  }
+
   // master_rete = nome della MIA prima linea per le spedizioni dei sotto-master (null per le mie)
   const rows = (spedizioni || []).map((s: any) => {
     let master_rete: string | null = null
@@ -175,7 +181,14 @@ export async function GET(req: NextRequest) {
       }
     }
     // Prezzi reali (movimenti): prezzo corriere = mio costo; prezzo cliente = quello che paga il diretto
-    const prezzo_corriere = costoMine.has(s.id) ? costoMine.get(s.id)! : null
+    let prezzo_corriere: number | null = costoMine.has(s.id) ? costoMine.get(s.id)! : null
+    if (prezzo_corriere == null && calcMioCorr) {
+      // Fallback: prezzo del MIO listino corriere. Per le mie spedizioni uso il corriere così com'è;
+      // per la rete rimappo al mio corriere con lo stesso nome_contratto.
+      const nome = (s.corrieri as any)?.nome_contratto
+      const mioCorr = (s.master_id === mineId) ? s.corriere_id : (nome ? nomeToMioCorr.get(nome) : null)
+      if (mioCorr) { const r = calcMioCorr({ ...s, corriere_id: mioCorr }); if (r && r.totale != null) prezzo_corriere = r.totale }
+    }
     let prezzo_cliente: number
     if (s.master_id === mineId) prezzo_cliente = pagatoCliente.has(s.id) ? pagatoCliente.get(s.id)! : Number(s.costo_totale || 0)
     else { const flId = primaLineaId.get(s.master_id); prezzo_cliente = (flId && costoTarget.has(s.id + '|' + flId)) ? costoTarget.get(s.id + '|' + flId)! : Number(s.costo_totale || 0) }
