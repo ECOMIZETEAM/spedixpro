@@ -201,6 +201,7 @@ export async function POST(req: NextRequest) {
         perc: parseFloat(d?.perc ?? '') || 0,
         calcolo_su: d?.calcolo_su || s.tipo_calcolo || 'totale',
       }
+      if (!(scal.valore_max > 0)) continue   // valore_max 0/vuoto = scaglione inesistente (regola: =0 non valido)
       if (!scaglioniContrPerCorriere.has(s.corriere_id)) scaglioniContrPerCorriere.set(s.corriere_id, [])
       scaglioniContrPerCorriere.get(s.corriere_id)!.push(scal)
     }
@@ -223,6 +224,7 @@ export async function POST(req: NextRequest) {
         perc: parseFloat(d?.perc ?? '') || 0,
         calcolo_su: d?.calcolo_su || s.tipo_calcolo || 'totale',
       }
+      if (!(scal.valore_max > 0)) continue   // valore_max 0/vuoto = scaglione inesistente (regola: =0 non valido)
       if (!scaglioniAssicPerCorriere.has(s.corriere_id)) scaglioniAssicPerCorriere.set(s.corriere_id, [])
       scaglioniAssicPerCorriere.get(s.corriere_id)!.push(scal)
     }
@@ -275,7 +277,9 @@ export async function POST(req: NextRequest) {
   function calcolaAssicurazione(corriereId: string, _prezzoSped: number): number | null {
     if (assicImporto <= 0) return 0
     const scal = scaglioniAssicPerCorriere.get(corriereId)
-    if (!scal || !scal.length) return 0
+    // Assicurazione richiesta ma NESSUNA tariffa configurata sul listino → corriere non disponibile
+    // (regola uniforme come il contrassegno: servizio inesistente = non si può spedire).
+    if (!scal || !scal.length) return null
     const s = scal.find(x => assicImporto <= x.valore_max)
     if (!s) return null
     const primaFasciaMax = Number(scal[0]?.valore_max) || 0

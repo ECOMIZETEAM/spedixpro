@@ -416,19 +416,21 @@ export async function calcolaPrezzoCorriereDettaglio(
   const feeAss = applicaScaglione('assicurazione', ass)
 
   // Massimo valore ammesso per tipo (il valore_max più alto tra gli scaglioni configurati).
+  // Servizio "presente" SOLO se ha almeno uno scaglione con valore_max > 0 (regola uniforme:
+  // valore_max 0/vuoto = scaglione inesistente/non valido).
   function maxScaglione(tipo: string): { presente: boolean; max: number } {
     const scal = (suppl || []).filter((s: any) => s.tipo === tipo)
     let max = 0
     for (const s of scal) { let d: any = null; try { d = JSON.parse(s.descrizione) } catch {}; const v = parseFloat(d?.valore_max ?? '') || 0; if (v > max) max = v }
-    return { presente: scal.length > 0, max }
+    return { presente: max > 0, max }
   }
   // Contrassegno: se richiesto ma senza tariffa OPPURE oltre il max -> corriere non disponibile.
   const scC = maxScaglione('contrassegno')
   const contrassegnoOltreMax = cod > 0 && (!scC.presente || cod > scC.max)
-  // Assicurazione: se richiesta e c'è una tariffa ma l'importo supera il max -> non disponibile
-  // (senza tariffa resta offerta a costo 0, come per il cliente).
+  // Assicurazione: STESSA regola del contrassegno — se richiesta ma il servizio non esiste
+  // (nessuno scaglione valido) OPPURE l'importo supera il max -> corriere non disponibile.
   const scA = maxScaglione('assicurazione')
-  const assicurazioneOltreMax = ass > 0 && scA.presente && ass > scA.max
+  const assicurazioneOltreMax = ass > 0 && (!scA.presente || ass > scA.max)
 
   const r2 = (n: number) => Math.round(n * 100) / 100
   return {
@@ -495,8 +497,9 @@ export async function calcolaSupplementiCliente(
 
   const applica = (tipo: string, importo: number): number | null => {
     if (importo <= 0) return 0
-    const scal = scaglioni(tipo)
-    if (!scal.length) return 0
+    // Solo scaglioni validi (valore_max > 0): 0/vuoto = inesistente.
+    const scal = scaglioni(tipo).filter((x: any) => x.valore_max > 0)
+    if (!scal.length) return null   // servizio richiesto ma non configurato -> contratto non disponibile
     const s = scal.find((x: any) => importo <= x.valore_max)
     if (!s) return null // oltre il massimo -> contratto non disponibile per quell'importo
     // 'totale' = intero importo del supplemento; 'differenza' = importo meno il massimo della prima fascia

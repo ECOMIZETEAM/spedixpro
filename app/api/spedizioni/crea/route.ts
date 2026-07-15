@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
-import { calcolaPrezzoCorriere, fattoreVolumeCliente, fattoreVolumeCorriere, calcolaPesoFatturato } from '@/lib/pricing'
+import { calcolaPrezzoCorriere, calcolaPrezzoCorriereDettaglio, calcolaSupplementiCliente, fattoreVolumeCliente, fattoreVolumeCorriere, calcolaPesoFatturato } from '@/lib/pricing'
 import { isAgente, nomeAgente } from '@/lib/agente'
 import {
   spediamoproGetQuotation,
@@ -177,6 +177,31 @@ export async function POST(req: NextRequest) {
   // Peso reale = SOMMA di tutti i colli (multicollo), non solo il primo: il costo della spedizione
   // propria (costoMaster) deve coincidere col movimento a cascata, che usa già la somma.
   const pesoReale = packages.reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
+
+  // *** Blocco servizio contrassegno/assicurazione non previsto dal contratto ***
+  // Regola uniforme: se il servizio non esiste (valore_max 0/assente) o l'importo supera il
+  // massimo configurato, il corriere NON è disponibile e non si può spedire (master e cliente).
+  {
+    const codReq = Number(body.codValue || 0)
+    const assReq = Number(body.insuranceValue || 0)
+    if (codReq > 0 || assReq > 0) {
+      if (isProprio) {
+        const dett = await calcolaPrezzoCorriereDettaglio(adminCrea, {
+          corriereId: corriereRecord.id, masterId,
+          provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+          pesoReale, packages, contrassegno: codReq, assicurazione: assReq,
+        })
+        if (dett?.contrassegnoOltreMax) return NextResponse.json({ error: 'Il contratto selezionato non prevede il contrassegno per questo importo.' }, { status: 400 })
+        if (dett?.assicurazioneOltreMax) return NextResponse.json({ error: 'Il contratto selezionato non prevede l\'assicurazione per questo importo.' }, { status: 400 })
+      } else if (cliente?.listino_cliente_id) {
+        const sup = await calcolaSupplementiCliente(adminCrea, {
+          listinoId: cliente.listino_cliente_id, corriereId: corriereRecord.id,
+          contrassegno: codReq, assicurazione: assReq, valoreMerce: Number(body.valoreMerce || 0), nolo: 0,
+        })
+        if (!sup.disponibile) return NextResponse.json({ error: 'Il contratto non prevede il contrassegno o l\'assicurazione per questo importo. Rimuovili o scegli un altro corriere.' }, { status: 400 })
+      }
+    }
+  }
 
   // Spedizione propria del master: prezzo dal listino corriere (server-side, non ci fidiamo del body).
   let costoMaster = 0
