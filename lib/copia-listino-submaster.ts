@@ -106,10 +106,10 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   for (const z of (zoneSrc || [])) {
     const subCorr = mapCorr.get(z.corriere_id) || null
     const key = `${subCorr}|${(z.nome || '').trim().toLowerCase()}`
-    let subZid = mappaZonaMio.get(key)
+    let subZid: string | undefined = mappaZonaMio.get(key)
     if (!subZid) {
       const { data: nuovaZ } = await admin.from('zone').insert({ master_id: subMasterId, corriere_id: subCorr, nome: z.nome, descrizione: z.descrizione, con_fuel: z.con_fuel || false }).select('id').single()
-      subZid = nuovaZ?.id
+      subZid = (nuovaZ as any)?.id
       if (subZid) mappaZonaMio.set(key, subZid)
     }
     if (subZid) {
