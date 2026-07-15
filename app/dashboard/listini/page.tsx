@@ -8,6 +8,9 @@ export default function ListiniPage() {
   const [duplicando, setDuplicando] = useState('')
   const [cerca, setCerca] = useState('')
   const [pagina, setPagina] = useState(1)
+  const [dupModal, setDupModal] = useState<{ id: string; nome: string } | null>(null)
+  const [dupNome, setDupNome] = useState('')
+  const [dupMagg, setDupMagg] = useState('0')
 
   const PER_PAGINA = 10
   const filtrati = listini.filter(l => (l.nome || '').toLowerCase().includes(cerca.trim().toLowerCase()))
@@ -15,16 +18,21 @@ export default function ListiniPage() {
   const paginaSafe = Math.min(pagina, totalePagine)
   const visibili = filtrati.slice((paginaSafe - 1) * PER_PAGINA, paginaSafe * PER_PAGINA)
 
-  async function duplica(id: string, nome: string) {
-    const nuovo = prompt(`Nome del nuovo listino (copia di "${nome}"):`, `${nome} (copia)`)
-    if (nuovo === null) return
-    const maggStr = prompt('Maggiorazione % sui prezzi peso/zona (0 = nessuna). Non tocca contrassegno, assicurazione o giacenze:', '0')
-    if (maggStr === null) return
-    const maggiorazione = Number(String(maggStr).replace(',', '.')) || 0
-    setDuplicando(id)
-    const res = await fetch('/api/listini/duplica', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listinoId: id, nome: nuovo, maggiorazione }) })
+  function apriDuplica(id: string, nome: string) {
+    setDupNome(`${nome} (copia)`)
+    setDupMagg('0')
+    setDupModal({ id, nome })
+  }
+  async function confermaDuplica() {
+    if (!dupModal) return
+    const nome = dupNome.trim()
+    if (!nome) return
+    const maggiorazione = Number(String(dupMagg).replace(',', '.')) || 0
+    setDuplicando(dupModal.id)
+    const res = await fetch('/api/listini/duplica', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listinoId: dupModal.id, nome, maggiorazione }) })
     const d = await res.json().catch(() => ({}))
     setDuplicando('')
+    setDupModal(null)
     if (d?.error) { alert(d.error); return }
     carica()
   }
@@ -97,7 +105,7 @@ export default function ListiniPage() {
                   <td style={{padding:'10px 14px'}}>
                     <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
                       <a href={`/dashboard/listini/clienti/${l.id}`} style={{padding:'4px 10px',background:'#f5f5f5',color:'#333',borderRadius:'4px',fontSize:'12px',textDecoration:'none',border:'1px solid #e8e8e8'}}>✏️ Modifica</a>
-                      <button onClick={()=>duplica(l.id, l.nome)} disabled={duplicando===l.id} title="Duplica listino"
+                      <button onClick={()=>apriDuplica(l.id, l.nome)} disabled={duplicando===l.id} title="Duplica listino"
                         style={{padding:'4px 10px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'12px',border:'1px solid #fed7aa',cursor:'pointer',opacity:duplicando===l.id?0.5:1}}>
                         {duplicando===l.id?'…':'⧉ Duplica'}
                       </button>
@@ -127,6 +135,32 @@ export default function ListiniPage() {
           </div>
         )}
       </div>
+
+      {dupModal && (
+        <div onClick={()=>duplicando ? null : setDupModal(null)} style={{position:'fixed',inset:0,background:'rgba(15,15,15,0.55)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',maxWidth:'440px',width:'100%',padding:'24px',boxShadow:'0 20px 60px rgba(0,0,0,.35)'}}>
+            <div style={{fontSize:'17px',fontWeight:800,color:'#1a1a1a',marginBottom:'6px'}}>Duplica listino</div>
+            <div style={{fontSize:'13px',color:'#666',marginBottom:'18px'}}>Copia di <b>{dupModal.nome}</b></div>
+
+            <label style={{display:'block',fontSize:'12px',fontWeight:700,color:'#1a1a1a',marginBottom:'6px'}}>Nome del nuovo listino</label>
+            <input value={dupNome} onChange={e=>setDupNome(e.target.value)} autoFocus
+              style={{width:'100%',padding:'9px 12px',border:'1px solid #e2e2e2',borderRadius:'8px',fontSize:'14px',color:'#1a1a1a',outline:'none',marginBottom:'16px',boxSizing:'border-box'}}/>
+
+            <label style={{display:'block',fontSize:'12px',fontWeight:700,color:'#1a1a1a',marginBottom:'6px'}}>Maggiorazione % sui prezzi peso/zona</label>
+            <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'8px'}}>
+              <input type="number" step="0.01" value={dupMagg} onChange={e=>setDupMagg(e.target.value)} placeholder="0"
+                style={{width:'120px',padding:'9px 12px',border:'1px solid #e2e2e2',borderRadius:'8px',fontSize:'14px',color:'#1a1a1a',outline:'none'}}/>
+              <span style={{fontSize:'15px',fontWeight:700,color:'#1a1a1a'}}>%</span>
+            </div>
+            <div style={{fontSize:'12px',color:'#888',marginBottom:'20px'}}>Applica l'aumento SOLO alle fasce peso/zona. Non tocca contrassegno, assicurazione, giacenze o servizi. Lascia 0 per una copia identica.</div>
+
+            <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
+              <button onClick={()=>setDupModal(null)} disabled={!!duplicando} style={{background:'#fff',color:'#1a1a1a',border:'1px solid #ddd',borderRadius:'8px',padding:'9px 18px',fontSize:'13px',fontWeight:600,cursor:'pointer'}}>Annulla</button>
+              <button onClick={confermaDuplica} disabled={!!duplicando || !dupNome.trim()} style={{background:'#f97316',color:'#fff',border:'none',borderRadius:'8px',padding:'9px 20px',fontSize:'13px',fontWeight:700,cursor:'pointer',opacity:(duplicando||!dupNome.trim())?0.6:1}}>{duplicando?'Duplico…':'Duplica'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
