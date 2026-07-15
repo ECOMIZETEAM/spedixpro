@@ -104,3 +104,40 @@ export async function trovaZoneMatch(
 export function isZonaEsclusiva(nome: string | null | undefined): boolean {
   return /isole?\s*minori/i.test(String(nome || ''))
 }
+
+// Nomi di zona "disagiata/periferica": zone speciali a supplemento (es. "Zone Disagiate",
+// "Località Periferiche", "Cap Disagiati").
+export function isZonaDisagiata(nome: string | null | undefined): boolean {
+  return /disagiat|periferic/i.test(String(nome || ''))
+}
+
+// Regola DISAGIATA (per-corriere): restituisce, per i corrieri indicati, la zona disagiata del
+// master che contiene (CAP-esatto) il CAP di destinazione. Se un corriere è nella mappa, per
+// quella destinazione può usare SOLO quella zona: se il listino in esame non la prezza → NIENTE
+// tariffa (nessun ripiego su provincia/Italia: la tariffa disagiata non gli è stata assegnata).
+// Il controllo è sull'INTERO set zone del master (anche zone NON presenti nel listino in esame),
+// così vale anche quando il cliente/sotto-master non ha affatto la fascia disagiata.
+// Agisce SOLO sui CAP realmente elencati in una zona disagiata → zero impatto sui CAP normali.
+export async function mappaCapDisagiata(
+  supabase: any,
+  masterId: string | null | undefined,
+  corriereIds: string[],
+  paese: string | null | undefined,
+  cap: string | null | undefined
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const ids = Array.from(new Set((corriereIds || []).filter(Boolean)))
+  const c = (cap || '').trim()
+  if (!masterId || !ids.length || !c || (paese || 'IT').toUpperCase().trim() !== 'IT') return out
+  const { data } = await supabase
+    .from('zone')
+    .select('id,nome,corriere_id, zone_cap!inner(cap)')
+    .eq('master_id', masterId)
+    .in('corriere_id', ids)
+    .eq('zone_cap.cap', c)
+  for (const z of (data || [])) {
+    const cid = (z as any).corriere_id
+    if (isZonaDisagiata((z as any).nome) && cid && !out.has(cid)) out.set(cid, (z as any).id)
+  }
+  return out
+}
