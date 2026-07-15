@@ -88,17 +88,27 @@ export async function GET(req: NextRequest) {
   const costoMine = new Map<string, number>()      // spedId -> costo del master loggato (mio)
   const costoTarget = new Map<string, number>()    // "spedId|masterId" -> costo di quel master
   const pagatoCliente = new Map<string, number>()  // spedId -> pagato dal cliente diretto
-  for (let i = 0; i < spedIds.length; i += 500) {
-    const chunk = spedIds.slice(i, i + 500)
-    const { data: mvs } = await db.from('movimenti')
-      .select('spedizione_id,master_target_id,cliente_id,importo').eq('tipo', 'spedizione').in('spedizione_id', chunk)
-    for (const mv of (mvs || [])) {
-      const imp = Math.abs(Number(mv.importo || 0))
-      if (mv.cliente_id) pagatoCliente.set(mv.spedizione_id, imp)
-      else if (mv.master_target_id) {
-        if (mv.master_target_id === mine) costoMine.set(mv.spedizione_id, imp)
-        costoTarget.set(mv.spedizione_id + '|' + mv.master_target_id, imp)
+  const costoMinSped = new Map<string, number>()   // costo corriere REALE (movimento più profondo)
+  // Chunk piccoli (300 id) + paginazione: ogni spedizione ha più movimenti (uno per livello) e un
+  // chunk grande supererebbe le 1000 righe/query di PostgREST -> movimenti TRONCATI -> margini errati.
+  for (let i = 0; i < spedIds.length; i += 300) {
+    const chunk = spedIds.slice(i, i + 300)
+    for (let from = 0; ; from += 1000) {
+      const { data: mvs } = await db.from('movimenti')
+        .select('spedizione_id,master_target_id,cliente_id,importo').eq('tipo', 'spedizione')
+        .in('spedizione_id', chunk).range(from, from + 999)
+      if (!mvs?.length) break
+      for (const mv of mvs) {
+        const imp = Math.abs(Number(mv.importo || 0))
+        if (mv.cliente_id) pagatoCliente.set(mv.spedizione_id, imp)
+        else if (mv.master_target_id) {
+          if (mv.master_target_id === mine) costoMine.set(mv.spedizione_id, imp)
+          costoTarget.set(mv.spedizione_id + '|' + mv.master_target_id, imp)
+          const prev = costoMinSped.get(mv.spedizione_id)
+          if (prev === undefined || imp < prev) costoMinSped.set(mv.spedizione_id, imp)
+        }
       }
+      if (mvs.length < 1000) break
     }
   }
 
@@ -134,26 +144,31 @@ export async function GET(req: NextRequest) {
   const rows = (spedizioni || []).map((s: any) => {
     // PREZZO CORRIERE = quello che ho pagato IO (mio movimento reale). Per l'agente = suo listino;
     // se il listino agente non copre quel corriere, ripiego sul costo reale (non 0, che gonfierebbe il margine).
+    const hoMioCosto = !calcAgente && costoMine.has(s.id)
     let prezzo_corriere: number | null = calcAgente
       ? (calcAgente(s)?.totale ?? (Number(s.costo_spedizione || 0) || null))
-      : (costoMine.has(s.id) ? costoMine.get(s.id)! : null)
+      : (hoMioCosto ? costoMine.get(s.id)! : null)
     if (prezzo_corriere == null && calcMioCorr && !calcAgente) {
       const nome = (s.corrieri as any)?.nome_contratto
       const mioCorr = (s.master_id === mine) ? s.corriere_id : (nome ? nomeToMioCorr.get(nome) : null)
       if (mioCorr) { const r = calcMioCorr({ ...s, corriere_id: mioCorr }); if (r && r.totale != null) prezzo_corriere = r.totale }
     }
-    // PREZZO CLIENTE = quello che mi paga il DIRETTO:
-    //  - spedizione propria del mio cliente -> quello che ha pagato il cliente (suo movimento)
-    //  - spedizione di rete -> quello che paga il figlio di prima linea (suo movimento)
+    // Ultimo fallback: costo corriere REALE (movimento più profondo), per il master in cima che è
+    // sopra il proprietario del contratto e non è nella catena di addebito.
+    if (prezzo_corriere == null && !calcAgente && costoMinSped.has(s.id)) prezzo_corriere = costoMinSped.get(s.id)!
+    // PREZZO CLIENTE = quello che mi paga il DIRETTO. Se non sono nella catena (master in cima) mostro
+    // il prezzo del cliente FINALE (costo_totale).
     let prezzo_cliente: number
     if (calcAgente) {
       // Agente: costo cliente = quello che paga il cliente (costo_totale), come nella dashboard.
       prezzo_cliente = Number(s.costo_totale || 0)
     } else if (s.master_id === mine) {
       prezzo_cliente = pagatoCliente.has(s.id) ? pagatoCliente.get(s.id)! : Number(s.costo_totale || 0)
-    } else {
+    } else if (hoMioCosto) {
       const flId = primaLineaId.get(s.master_id)
       prezzo_cliente = (flId && costoTarget.has(s.id + '|' + flId)) ? costoTarget.get(s.id + '|' + flId)! : Number(s.costo_totale || 0)
+    } else {
+      prezzo_cliente = Number(s.costo_totale || 0)
     }
     // Cliente di un AGENTE: verso il master il prezzo è quello del listino agente (non del cliente finale).
     if (!calcAgente && s.cliente_id && clienteToListinoAg.has(s.cliente_id)) {
