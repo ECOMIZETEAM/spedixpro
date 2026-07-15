@@ -103,6 +103,21 @@ export async function GET(req: NextRequest) {
     ? await creaCalcolatoreListinoCliente(supabase, (utente as any).listino_agente_id)
     : null
 
+  // MASTER: per i clienti che appartengono a un AGENTE con listino assegnato, il "prezzo cliente"
+  // del master = il LISTINO AGENTE (quello che l'agente paga a ME), NON il prezzo del cliente finale.
+  const clienteToListinoAg = new Map<string, string>()
+  const calcListinoAg = new Map<string, (s: any) => any>()
+  if (!calcAgente && isMaster) {
+    const { data: agenti } = await adminDb.from('utenti').select('nome,cognome,listino_agente_id').eq('master_id', mine).eq('ruolo', 'agente').not('listino_agente_id', 'is', null)
+    if (agenti?.length) {
+      const nomeToListino = new Map<string, string>()
+      for (const a of agenti) { const n = ((((a as any).nome) || '') + ' ' + (((a as any).cognome) || '')).trim(); if (n && (a as any).listino_agente_id) nomeToListino.set(n, (a as any).listino_agente_id) }
+      const { data: cls } = await adminDb.from('clienti').select('id,agente').eq('master_id', mine).not('agente', 'is', null)
+      for (const c of (cls || [])) { const lid = nomeToListino.get((((c as any).agente) || '').trim()); if (lid) clienteToListinoAg.set((c as any).id, lid) }
+      for (const lid of Array.from(new Set(clienteToListinoAg.values()))) calcListinoAg.set(lid, await creaCalcolatoreListinoCliente(adminDb, lid))
+    }
+  }
+
   const rows = (spedizioni || []).map((s: any) => {
     // PREZZO CORRIERE = quello che ho pagato IO (mio movimento reale). Per l'agente = suo listino;
     // se il listino agente non copre quel corriere, ripiego sul costo reale (non 0, che gonfierebbe il margine).
@@ -121,6 +136,11 @@ export async function GET(req: NextRequest) {
     } else {
       const flId = primaLineaId.get(s.master_id)
       prezzo_cliente = (flId && costoTarget.has(s.id + '|' + flId)) ? costoTarget.get(s.id + '|' + flId)! : Number(s.costo_totale || 0)
+    }
+    // Cliente di un AGENTE: verso il master il prezzo è quello del listino agente (non del cliente finale).
+    if (!calcAgente && s.cliente_id && clienteToListinoAg.has(s.cliente_id)) {
+      const p = calcListinoAg.get(clienteToListinoAg.get(s.cliente_id)!)?.(s)
+      if (p && p.totale != null) prezzo_cliente = p.totale
     }
     return {
       ...s,
