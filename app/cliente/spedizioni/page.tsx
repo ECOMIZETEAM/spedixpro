@@ -96,7 +96,7 @@ export default function SpedizioniPage() {
     if (filtri.clienteId) filtered = filtered.filter(s => s.cliente_id === filtri.clienteId)
     if (filtri.stato) filtered = filtered.filter(s => s.stato === filtri.stato)
     if (filtri.numero) filtered = filtered.filter(s => s.numero?.toLowerCase().includes(filtri.numero.toLowerCase()))
-    if (filtri.id_ordine) filtered = filtered.filter(s => (s.note||'').toLowerCase().includes(filtri.id_ordine.toLowerCase()))
+    if (filtri.id_ordine) filtered = filtered.filter(s => (s.id_ordine||'').toLowerCase().includes(filtri.id_ordine.toLowerCase()))
     if (!filtri.numero) {   // cercando per N. Spedizione si ignora la data
       if (filtri.dal) filtered = filtered.filter(s => new Date(s.created_at) >= new Date(filtri.dal))
       if (filtri.al) filtered = filtered.filter(s => new Date(s.created_at) <= new Date(filtri.al+'T23:59:59'))
@@ -401,7 +401,7 @@ async function apriTracking(s: any) {
                         <span style={{background:st.bg,color:st.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600',whiteSpace:'nowrap' as const}}>{st.label}</span>
                         {s.stato==='annullamento_pending' && <div style={{fontSize:'10px',color:'#ea580c',marginTop:'3px',whiteSpace:'nowrap' as const}}>invio corriere {oreAllAnnullo(s.annullamento_richiesto_at)}</div>}
                       </td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.note||'—'}</td>
+                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.id_ordine||'—'}</td>
                       <td style={{padding:'9px 12px',fontWeight:'700',color:'#1a1a1a'}}>
                         € {Number(s.costo_totale||0).toFixed(2)}
                         {Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}}>R</span>}

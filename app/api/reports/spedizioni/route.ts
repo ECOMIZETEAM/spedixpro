@@ -91,25 +91,32 @@ export async function GET(req: NextRequest) {
   const costoMinSped = new Map<string, number>()   // costo corriere REALE (movimento più profondo)
   // Chunk piccoli (300 id) + paginazione: ogni spedizione ha più movimenti (uno per livello) e un
   // chunk grande supererebbe le 1000 righe/query di PostgREST -> movimenti TRONCATI -> margini errati.
+  // SOMMO 'spedizione' + 'rettifica' (signed): le rettifiche allineano il prezzo dopo una correzione.
+  const sumCliR = new Map<string, number>()
+  const sumTargetR = new Map<string, number>()
   for (let i = 0; i < spedIds.length; i += 300) {
     const chunk = spedIds.slice(i, i + 300)
     for (let from = 0; ; from += 1000) {
       const { data: mvs } = await db.from('movimenti')
-        .select('spedizione_id,master_target_id,cliente_id,importo').eq('tipo', 'spedizione')
+        .select('spedizione_id,master_target_id,cliente_id,importo').in('tipo', ['spedizione', 'rettifica'])
         .in('spedizione_id', chunk).range(from, from + 999)
       if (!mvs?.length) break
       for (const mv of mvs) {
-        const imp = Math.abs(Number(mv.importo || 0))
-        if (mv.cliente_id) pagatoCliente.set(mv.spedizione_id, imp)
-        else if (mv.master_target_id) {
-          if (mv.master_target_id === mine) costoMine.set(mv.spedizione_id, imp)
-          costoTarget.set(mv.spedizione_id + '|' + mv.master_target_id, imp)
-          const prev = costoMinSped.get(mv.spedizione_id)
-          if (prev === undefined || imp < prev) costoMinSped.set(mv.spedizione_id, imp)
-        }
+        const imp = Number(mv.importo || 0)   // SIGNED
+        if (mv.cliente_id) sumCliR.set(mv.spedizione_id, (sumCliR.get(mv.spedizione_id) || 0) + imp)
+        else if (mv.master_target_id) { const k = mv.spedizione_id + '|' + mv.master_target_id; sumTargetR.set(k, (sumTargetR.get(k) || 0) + imp) }
       }
       if (mvs.length < 1000) break
     }
+  }
+  for (const [spedId, s] of sumCliR) pagatoCliente.set(spedId, Math.round(Math.abs(s) * 100) / 100)
+  for (const [k, s] of sumTargetR) {
+    const [spedId, target] = k.split('|')
+    const amt = Math.round(Math.abs(s) * 100) / 100
+    costoTarget.set(k, amt)
+    if (target === mine) costoMine.set(spedId, amt)
+    const prev = costoMinSped.get(spedId)
+    if (prev === undefined || amt < prev) costoMinSped.set(spedId, amt)
   }
 
   // AGENTE: il suo COSTO non è un movimento del master, ma il prezzo del suo LISTINO AGENTE.

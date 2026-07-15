@@ -133,28 +133,34 @@ export async function GET(req: NextRequest) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const adminMov = createAdminSupabase()
     const spedIds = (spedizioni || []).map((s: any) => s.id)
-    // Chunk piccoli (300 id) + paginazione: ogni spedizione ha PIÙ movimenti (uno per livello della
-    // catena), quindi un chunk grande supererebbe le 1000 righe/query di PostgREST e i movimenti
-    // verrebbero TRONCATI -> prezzo cliente/corriere/margine a vuoto sulle reti grandi.
+    // SOMMO gli importi SIGNED di 'spedizione' + 'rettifica' (le rettifiche allineano il prezzo dopo
+    // una correzione: es. sotto costo). Charge = negativo, credito = positivo. Il totale addebitato è
+    // -(somma). Prima si leggeva solo 'spedizione' e si sovrascriveva -> le rettifiche non si vedevano.
+    const sumCli = new Map<string, number>()      // spedId -> somma signed (movimenti cliente)
+    const sumTarget = new Map<string, number>()   // spedId|target -> somma signed (movimenti master)
     for (let i = 0; i < spedIds.length; i += 300) {
       const chunk = spedIds.slice(i, i + 300)
       for (let from = 0; ; from += 1000) {
         const { data: mvs } = await adminMov.from('movimenti')
-          .select('spedizione_id,master_target_id,cliente_id,importo').eq('tipo', 'spedizione')
+          .select('spedizione_id,master_target_id,cliente_id,importo').in('tipo', ['spedizione', 'rettifica'])
           .in('spedizione_id', chunk).range(from, from + 999)
         if (!mvs?.length) break
         for (const mv of mvs) {
-          const imp = Math.abs(Number(mv.importo || 0))
-          if (mv.cliente_id) pagatoCliente.set(mv.spedizione_id, imp)
-          else if (mv.master_target_id) {
-            if (mv.master_target_id === mineId) costoMine.set(mv.spedizione_id, imp)
-            costoTarget.set(mv.spedizione_id + '|' + mv.master_target_id, imp)
-            const prev = costoMinSped.get(mv.spedizione_id)
-            if (prev === undefined || imp < prev) costoMinSped.set(mv.spedizione_id, imp)
-          }
+          const imp = Number(mv.importo || 0)   // SIGNED
+          if (mv.cliente_id) sumCli.set(mv.spedizione_id, (sumCli.get(mv.spedizione_id) || 0) + imp)
+          else if (mv.master_target_id) { const k = mv.spedizione_id + '|' + mv.master_target_id; sumTarget.set(k, (sumTarget.get(k) || 0) + imp) }
         }
         if (mvs.length < 1000) break
       }
+    }
+    for (const [spedId, s] of sumCli) pagatoCliente.set(spedId, Math.round(Math.abs(s) * 100) / 100)
+    for (const [k, s] of sumTarget) {
+      const [spedId, target] = k.split('|')
+      const amt = Math.round(Math.abs(s) * 100) / 100
+      costoTarget.set(k, amt)
+      if (target === mineId) costoMine.set(spedId, amt)
+      const prev = costoMinSped.get(spedId)
+      if (prev === undefined || amt < prev) costoMinSped.set(spedId, amt)
     }
   }
 
