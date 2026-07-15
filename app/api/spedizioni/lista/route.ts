@@ -170,6 +170,26 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // ID ORDINE reale = quello dell'ordine COLLEGATO: da CSV (ordini_importati.order_id) o dalle
+  // integrazioni (ordini_ecommerce.numero_ordine / ordine_esterno_id). Le colonne
+  // spedizioni.id_ordine_esterno/rif_ordine non sono popolate, quindi prima si mostrava la nota.
+  const idOrdine = new Map<string, string>()
+  if ((spedizioni || []).length) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const adminOrd = createAdminSupabase()
+    const ids = (spedizioni || []).map((s: any) => s.id)
+    for (let i = 0; i < ids.length; i += 300) {
+      const chunk = ids.slice(i, i + 300)
+      for (let from = 0; ; from += 1000) {
+        const { data: imp } = await adminOrd.from('ordini_importati').select('spedizione_id,order_id').in('spedizione_id', chunk).not('order_id', 'is', null).range(from, from + 999)
+        for (const o of (imp || [])) { const sid = (o as any).spedizione_id, v = (o as any).order_id; if (sid && v && !idOrdine.has(sid)) idOrdine.set(sid, String(v)) }
+        if (!imp?.length || imp.length < 1000) break
+      }
+      const { data: ecom } = await adminOrd.from('ordini_ecommerce').select('spedizione_id,numero_ordine,ordine_esterno_id').in('spedizione_id', chunk)
+      for (const o of (ecom || [])) { const sid = (o as any).spedizione_id, v = (o as any).numero_ordine || (o as any).ordine_esterno_id; if (sid && v && !idOrdine.has(sid)) idOrdine.set(sid, String(v)) }
+    }
+  }
+
   // master_rete = nome della MIA prima linea per le spedizioni dei sotto-master (null per le mie)
   const rows = (spedizioni || []).map((s: any) => {
     let master_rete: string | null = null
@@ -217,7 +237,8 @@ export async function GET(req: NextRequest) {
     }
     if (prezzo_corriere == null) prezzo_corriere = prezzo_cliente
     const margine = Math.round((prezzo_cliente - prezzo_corriere) * 100) / 100
-    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine }
+    const id_ordine = idOrdine.get(s.id) || (s as any).id_ordine_esterno || (s as any).rif_ordine || null
+    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, id_ordine }
   })
   return NextResponse.json(rows)
 }
