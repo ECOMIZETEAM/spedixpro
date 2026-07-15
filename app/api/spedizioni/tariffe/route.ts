@@ -451,7 +451,7 @@ export async function POST(req: NextRequest) {
   }
 
   const risultati: any[] = []
-  let esclusiContrassegno = 0, esclusiAssic = 0, esclusiMisura = 0, esclusiFascia = 0, esclusiQuota = 0
+  let esclusiContrassegno = 0, esclusiAssic = 0, esclusiMisura = 0, esclusiFascia = 0, esclusiQuota = 0, esclusiSottocosto = 0
   let ultimoErroreQuota = ''
 
   for (const [corriereId, fasceDelCorriere] of fascePerCorriere) {
@@ -494,6 +494,15 @@ export async function POST(req: NextRequest) {
     const costoFuel = nolo * fuelPct / 100
     const sponda = calcolaSponda(corriereId, pesoPerFascia)
     const prezzoSped = nolo + costoFuel + sponda
+    // VENDITA SOTTO COSTO: se la quota REALE del corriere (SpediamoPro) supera il prezzo che si
+    // farebbe pagare, NON mostrare il corriere (es. zona disagiata/isola non prezzata: il listino
+    // risolve una zona "normale" ma il corriere la tratta come disagiata). Il costo reale resta
+    // SOLO server-side: non viene MAI messo nella risposta (info riservata del master).
+    if (spediamoproQuotation && Number((spediamoproQuotation as any).totalPrice) > 0) {
+      const realCost = Number((spediamoproQuotation as any).totalPrice) / 100
+      const totCli = prezzoSped + (calcolaContrassegno(corriereId, prezzoSped) ?? 0) + (calcolaAssicurazione(corriereId, prezzoSped) ?? 0)
+      if (realCost > totCli + 0.01) { esclusiSottocosto++; continue }
+    }
     risultati.push({
       carrierCode: corriere?.tipo || 'sda',
       contractCode: '',
@@ -516,7 +525,8 @@ export async function POST(req: NextRequest) {
       accessori_disponibili: accessoriPerCorriere.get(corriereId) || [],
       _corriere_tipo: corriere?.tipo,
       _corriere_id: corriere?.id,
-      _spediamopro_quotation: spediamoproQuotation,
+      // NON esporre la quotazione SpediamoPro: contiene totalPrice/priceBreakdown = il COSTO REALE
+      // che paga il master (info riservata). La creazione ri-quota da sola, quindi qui non serve.
     })
   }
 
@@ -534,6 +544,7 @@ export async function POST(req: NextRequest) {
         : ' Verifica misure, peso e indirizzo, oppure scegli un altro corriere.'
       return NextResponse.json({ error: `Il corriere non può gestire questa spedizione (${pf}kg).${dett}` }, { status: 400 })
     }
+    if (esclusiSottocosto > 0) return NextResponse.json({ error: `Nessuna tariffa valida per questa destinazione (${zonaNome}): è una zona non prezzata nel listino per questo corriere (es. località disagiata/isola). Aggiungi la fascia corretta al listino per poter spedire.` }, { status: 400 })
     if (esclusiContrassegno > 0) return NextResponse.json({ error: 'Nessun corriere disponibile per il contrassegno richiesto: configura la tariffa contrassegno sul listino (tab Contrassegni) o riduci l\'importo.' }, { status: 400 })
     if (esclusiAssic > 0) return NextResponse.json({ error: 'Nessun corriere disponibile per l\'assicurazione richiesta: configura la tariffa assicurazione sul listino o riduci il valore.' }, { status: 400 })
     return NextResponse.json({ error: `Nessuna tariffa disponibile per ${pf}kg in zona ${zonaNome}` }, { status: 400 })
