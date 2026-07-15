@@ -1,3 +1,5 @@
+import { fetchAll } from '@/lib/fetch-all'
+
 // Chiavi di IMPOSTAZIONI DI CONTRATTO che si propagano al sotto-master (NON il mittente,
 // che è specifico di ogni master). agevolazione peso, misure/volume massimo, scaglioni misure,
 // peso reale fino a X kg.
@@ -87,8 +89,17 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
     if (subId) mapCorr.set(c.id, subId)
   }
 
-  // 2) ZONE (+CAP): una per il sotto-master per ciascuna del padre, mappando il corriere
-  const { data: zoneSrc } = zonaIds.length ? await admin.from('zone').select('id,nome,descrizione,con_fuel,corriere_id, zone_cap(paese,provincia,cap,citta)').in('id', zonaIds) : { data: [] }
+  // 2) ZONE (+CAP): una per il sotto-master per ciascuna del padre, mappando il corriere.
+  //    I CAP vengono SEMPRE sincronizzati col padre — anche sulle zone GIÀ esistenti — così quando
+  //    il padre aggiunge/toglie un CAP (es. una zona disagiata) la modifica PROPAGA a valle e non
+  //    resta solo sul padre. (Era il bug: i CAP si copiavano solo alla PRIMA creazione della zona,
+  //    quindi le aggiunte successive non scendevano -> a valle si prezzava la zona sbagliata.)
+  const { data: zoneSrc } = zonaIds.length ? await admin.from('zone').select('id,nome,descrizione,con_fuel,corriere_id').in('id', zonaIds) : { data: [] }
+  // CAP del padre per zona, caricati a parte (l'embed annidato si fermerebbe a 1000 righe).
+  const capSrcPerZona = new Map<string, any[]>()
+  for (const z of (zoneSrc || [])) {
+    capSrcPerZona.set(z.id, await fetchAll(() => admin.from('zone_cap').select('paese,provincia,cap,citta').eq('zona_id', z.id)))
+  }
   const { data: zoneMiei } = await admin.from('zone').select('id,nome,corriere_id').eq('master_id', subMasterId)
   const mappaZonaMio = new Map((zoneMiei || []).map((z: any) => [`${z.corriere_id}|${(z.nome || '').trim().toLowerCase()}`, z.id]))
   const mapZona = new Map<string, string>()
@@ -99,13 +110,17 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
     if (!subZid) {
       const { data: nuovaZ } = await admin.from('zone').insert({ master_id: subMasterId, corriere_id: subCorr, nome: z.nome, descrizione: z.descrizione, con_fuel: z.con_fuel || false }).select('id').single()
       subZid = nuovaZ?.id
-      if (subZid) {
-        mappaZonaMio.set(key, subZid)
-        const caps = (z as any).zone_cap || []
-        if (caps.length) await admin.from('zone_cap').insert(caps.map((cp: any) => ({ zona_id: subZid, paese: cp.paese, provincia: cp.provincia, cap: cp.cap, citta: cp.citta })))
-      }
+      if (subZid) mappaZonaMio.set(key, subZid)
     }
-    if (subZid) mapZona.set(z.id, subZid)
+    if (subZid) {
+      // Sincronizza i CAP col padre (propagazione): azzero e reinserisco quelli attuali del padre.
+      const caps = capSrcPerZona.get(z.id) || []
+      await admin.from('zone_cap').delete().eq('zona_id', subZid)
+      for (let i = 0; i < caps.length; i += 1000) {
+        await admin.from('zone_cap').insert(caps.slice(i, i + 1000).map((cp: any) => ({ zona_id: subZid, paese: cp.paese, provincia: cp.provincia, cap: cp.cap, citta: cp.citta })))
+      }
+      mapZona.set(z.id, subZid)
+    }
   }
 
   // 3) LISTINO CORRIERI del sotto-master (riuso il primo, altrimenti creo)
