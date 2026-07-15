@@ -68,14 +68,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const emNuova = (datiCliente.email || '').trim().toLowerCase()
     if (emNuova && emNuova !== emVecchia) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emNuova)) return NextResponse.json({ error: 'Email non valida' }, { status: 400 })
-      const { data: giaUsata } = await admin.from('utenti').select('id,master_id').eq('email', emNuova).maybeSingle()
-      if (giaUsata && giaUsata.master_id !== targetId) return NextResponse.json({ error: 'Questa email è già usata da un altro account' }, { status: 409 })
-      const { data: uSub } = await admin.from('utenti').select('id').eq('master_id', targetId).eq('email', emVecchia)
+      const { data: giaUsata } = await admin.from('masters').select('id').eq('email', emNuova).neq('id', targetId).maybeSingle()
+      if (giaUsata) return NextResponse.json({ error: 'Questa email è già usata da un altro account' }, { status: 409 })
+      // Login del sotto-master = utenti con ruolo 'master' (l'email vive su auth.users, non su utenti).
+      const { data: uSub } = await admin.from('utenti').select('id').eq('master_id', targetId).eq('ruolo', 'master')
       let authErr: string | null = null
       for (const u of (uSub || [])) {
         const { error: e } = await admin.auth.admin.updateUserById((u as any).id, { email: emNuova, email_confirm: true })
         if (e) authErr = e.message
-        else await admin.from('utenti').update({ email: emNuova }).eq('id', (u as any).id)
       }
       if (authErr) return NextResponse.json({ error: 'Impossibile aggiornare l\'email di accesso: ' + authErr }, { status: 400 })
       upd.email = emNuova
@@ -151,16 +151,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNuova)) return NextResponse.json({ error: 'Email non valida' }, { status: 400 })
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const admin = createAdminSupabase()
-    // Non deve essere già usata da un altro account
-    const { data: giaUsata } = await admin.from('utenti').select('id,cliente_id').eq('email', emailNuova).maybeSingle()
-    if (giaUsata && giaUsata.cliente_id !== id) return NextResponse.json({ error: 'Questa email è già usata da un altro account' }, { status: 409 })
-    // Aggiorno l'utente auth collegato al cliente
+    // Non deve essere già usata da un altro cliente (l'email login vive su auth.users, non su utenti).
+    const { data: giaUsata } = await admin.from('clienti').select('id').eq('email', emailNuova).neq('id', id).maybeSingle()
+    if (giaUsata) return NextResponse.json({ error: 'Questa email è già usata da un altro account' }, { status: 409 })
+    // Aggiorno l'email di accesso sull'utente auth collegato al cliente (se esiste un login).
     const { data: uCli } = await admin.from('utenti').select('id').eq('cliente_id', id)
     let authErr: string | null = null
     for (const u of (uCli || [])) {
       const { error: e } = await admin.auth.admin.updateUserById((u as any).id, { email: emailNuova, email_confirm: true })
       if (e) authErr = e.message
-      else await admin.from('utenti').update({ email: emailNuova }).eq('id', (u as any).id)
     }
     if (authErr) return NextResponse.json({ error: 'Impossibile aggiornare l\'email di accesso: ' + authErr }, { status: 400 })
     aggiornamento.email = emailNuova
@@ -176,14 +175,23 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       const adminClient = createAdminSupabase()
       // Email di destinazione = quella NUOVA se cambiata in questo salvataggio, altrimenti l'attuale.
       const emailFinale = (aggiornamento.email || emailVecchia || cliente?.email || '').trim()
-      // Utente di login del cliente: utenti.id == id auth. Niente listUsers (paginato + lag dopo il
-      // cambio email): uso l'id noto, così il reset non viene mai saltato.
-      const { data: uLogin } = await adminClient.from('utenti').select('id').eq('cliente_id', id).limit(1).maybeSingle()
+      const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+      const newPassword = 'Mv' + Array.from({length:9}, () => chars[Math.floor(Math.random()*chars.length)]).join('')
+      // Utente di login del cliente (utenti.id == id auth). Se NON esiste (cliente importato/creato
+      // senza accesso), lo CREO ora: così "reset password" vale anche come "attiva accesso".
+      let { data: uLogin } = await adminClient.from('utenti').select('id').eq('cliente_id', id).limit(1).maybeSingle()
+      let loginCreato = false
+      if (!uLogin?.id && emailFinale) {
+        const { data: authNew, error: cErr } = await adminClient.auth.admin.createUser({ email: emailFinale, password: newPassword, email_confirm: true })
+        if (cErr) return NextResponse.json({ error: 'Impossibile creare l\'accesso: ' + cErr.message }, { status: 400 })
+        if (authNew?.user?.id) {
+          await adminClient.from('utenti').insert({ id: authNew.user.id, ruolo: 'cliente', master_id: utente?.master_id, cliente_id: id, nome: cliente?.ragione_sociale || emailFinale, attivo: true })
+          uLogin = { id: authNew.user.id }; loginCreato = true
+        }
+      }
       if (uLogin?.id && emailFinale) {
-        const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
-        const newPassword = 'Mv' + Array.from({length:9}, () => chars[Math.floor(Math.random()*chars.length)]).join('')
-        // email_confirm garantisce che l'email nuova sia quella attiva anche se il blocco sopra ha avuto lag
-        await adminClient.auth.admin.updateUserById(uLogin.id, { email: emailFinale, email_confirm: true, password: newPassword })
+        // Se appena creato ha già email+password; altrimenti aggiorno email attiva + password.
+        if (!loginCreato) await adminClient.auth.admin.updateUserById(uLogin.id, { email: emailFinale, email_confirm: true, password: newPassword })
         const { inviaCredenzialiCliente } = await import('@/lib/email')
         await inviaCredenzialiCliente({ email: emailFinale, nomeCliente: cliente?.ragione_sociale || '', masterNome: 'MoovExpress', dominio: 'moovexpress.com', password: newPassword })
         emailInviata = true
