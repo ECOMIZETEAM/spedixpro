@@ -170,6 +170,33 @@ export default function SpedizioniPage() {
     else setSelectedIds(spedizioniPaginate.map(s=>s.id))
   }
 
+  const [stampandoId, setStampandoId] = useState('')
+  // Stampa SUBITO su Zebra (Browser Print). Se non disponibile, ripiego sul PDF.
+  async function stampaEtichetta(id: string) {
+    const url = `/api/spedizioni/etichetta?id=${id}`
+    setStampandoId(id)
+    try {
+      const { stampaEtichettaZebra } = await import('@/lib/zebra-print')
+      await stampaEtichettaZebra(url)
+      setNotifica('🖨️ Etichetta inviata alla stampante Zebra.')
+    } catch (e: any) {
+      setNotifica((e?.message || 'Stampa Zebra non disponibile') + ' — apro il PDF.')
+      window.open(url, '_blank')
+    } finally { setStampandoId('') }
+  }
+  async function stampaZebraSelezionati() {
+    if (!selectedIds.length) return
+    setNotifica('🖨️ Invio ' + selectedIds.length + ' etichette alla Zebra…')
+    try {
+      const { stampaEtichetteZebra } = await import('@/lib/zebra-print')
+      const urls = selectedIds.map(id => `/api/spedizioni/etichetta?id=${id}`)
+      const r = await stampaEtichetteZebra(urls)
+      setNotifica(`🖨️ Zebra: ${r.ok} stampate${r.errori ? ', ' + r.errori + ' errori' : ''}.`)
+    } catch (e: any) {
+      setNotifica((e?.message || 'Stampa Zebra non disponibile') + ' — scarico il PDF.')
+      await stampaSelezionati()
+    }
+  }
     async function stampaSelezionati() {
     if (!selectedIds.length) return
     const res = await fetch('/api/spedizioni/etichette-bulk', {
@@ -390,6 +417,10 @@ async function apriTracking(s: any) {
               style={{padding:'6px 14px',background:selectedIds.length>0?'#f97316':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
               ⬇ Scarica Selezionati{selectedIds.length>0?` (${selectedIds.length})`:''}
             </button>
+            <button onClick={stampaZebraSelezionati} disabled={selectedIds.length===0}
+              style={{padding:'6px 14px',background:selectedIds.length>0?'#111827':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
+              🖨️ Stampa Zebra{selectedIds.length>0?` (${selectedIds.length})`:''}
+            </button>
             <button onClick={eliminaSelezionate} disabled={selectedIds.length===0||eliminandoBulk}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#dc2626':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0&&!eliminandoBulk?'pointer':'not-allowed',opacity:eliminandoBulk?0.6:1}}>
               {eliminandoBulk?'Eliminazione…':`🗑️ Elimina Selezionate${selectedIds.length>0?` (${selectedIds.length})`:''}`}
@@ -470,7 +501,7 @@ async function apriTracking(s: any) {
                       <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>—</td>
                       <td style={{padding:'9px 12px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
-                          <a href={`/dashboard/spedizioni/${s.id}/etichetta`} download style={{padding:'4px 8px',background:'#fff7ed',color:'#f97316',borderRadius:'4px',fontSize:'14px',textDecoration:'none',border:'1px solid #fed7aa'}} title="Stampa etichetta">🖨️</a>
+                          <button onClick={()=>stampaEtichetta(s.id)} disabled={stampandoId===s.id} style={{padding:'4px 8px',background:'#fff7ed',color:'#f97316',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}} title="Stampa etichetta su Zebra">{stampandoId===s.id?'⏳':'🖨️'}</button>
                           <button onClick={()=>setDettaglio(s)} title="Vedi dettagli spedizione" style={{padding:'4px 8px',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',fontSize:'14px',border:'1px solid #bfdbfe',cursor:'pointer'}}>👁</button>
 
                           {s.stato==='annullamento_pending' ? (
