@@ -76,34 +76,39 @@ export async function GET(req: NextRequest) {
   }
 
   // Solo colonne leggere (SPED_COLS): esclusi etichetta_url/raw_response/colli_dettaglio.
-  let query = db.from('spedizioni').select(`${SPED_COLS},clienti(ragione_sociale,agente),corrieri(id,nome_contratto)`).order(ordinaPer, { ascending: false }).limit(200)
-  if (subtreeSel) {
-    query = query.in('master_id', subtreeSel)
-  } else if (clienteId) {
-    query = query.eq('cliente_id', clienteId).eq('master_id', utente?.master_id)
-  } else if (utente?.ruolo === 'cliente') {
-    query = query.eq('cliente_id', utente.cliente_id)
-  } else if (masterIds && masterIds.length > 1) {
-    query = query.in('master_id', masterIds)
-  } else {
-    query = query.eq('master_id', utente?.master_id)
+  // Costruisco una query FRESCA a ogni chiamata (i builder Supabase sono monouso).
+  const buildBase = () => {
+    let q = db.from('spedizioni').select(`${SPED_COLS},clienti(ragione_sociale,agente),corrieri(id,nome_contratto)`).order(ordinaPer, { ascending: false })
+    if (subtreeSel) q = q.in('master_id', subtreeSel)
+    else if (clienteId) q = q.eq('cliente_id', clienteId).eq('master_id', utente?.master_id)
+    else if (utente?.ruolo === 'cliente') q = q.eq('cliente_id', utente.cliente_id)
+    else if (masterIds && masterIds.length > 1) q = q.in('master_id', masterIds)
+    else q = q.eq('master_id', utente?.master_id)
+    // Filtro stato: se richiesto uno stato preciso lo applico; se non richiesto, mostro anche le
+    // spedizioni in annullamento_pending (ripristinabili). Escludo solo annullate e coda manuale.
+    if (stato && stato !== 'tutti') q = q.eq('stato', stato)
+    else q = q.not('stato', 'in', '(annullata,annullamento_manuale)')
+    if (dal) q = q.gte('created_at', dal)
+    if (al) q = q.lte('created_at', al)
+    if (numero) q = q.ilike('numero', `%${numero}%`)
+    if (destCitta) q = q.ilike('dest_citta', `%${destCitta}%`)
+    if (destCap) q = q.ilike('dest_cap', `%${destCap}%`)
+    if (contenuto) q = q.ilike('contenuto', `%${contenuto}%`)
+    if (contrassegno === 'si') q = q.gt('contrassegno', 0)
+    if (contrassegno === 'no') q = q.eq('contrassegno', 0)
+    if (agenteClienteIds !== null) q = q.in('cliente_id', agenteClienteIds.length ? agenteClienteIds : ['00000000-0000-0000-0000-000000000000'])
+    return q
   }
-  // Filtro stato: se richiesto uno stato preciso lo applico; se non richiesto, mostro anche le
-  // spedizioni in annullamento_pending (restano in elenco, ripristinabili, finché non diventano
-  // annullate definitive). Escludo solo le annullate e la coda manuale (che vivono in "Cancellate").
-  if (stato && stato !== 'tutti') query = query.eq('stato', stato)
-  else query = query.not('stato', 'in', '(annullata,annullamento_manuale)')
-  if (dal) query = query.gte('created_at', dal)
-  if (al) query = query.lte('created_at', al)
-  if (numero) query = query.ilike('numero', `%${numero}%`)
-  if (destCitta) query = query.ilike('dest_citta', `%${destCitta}%`)
-  if (destCap) query = query.ilike('dest_cap', `%${destCap}%`)
-  if (contenuto) query = query.ilike('contenuto', `%${contenuto}%`)
-  if (contrassegno === 'si') query = query.gt('contrassegno', 0)
-  if (contrassegno === 'no') query = query.eq('contrassegno', 0)
-  if (agenteClienteIds !== null) query = query.in('cliente_id', agenteClienteIds.length ? agenteClienteIds : ['00000000-0000-0000-0000-000000000000'])
-  const { data: spedizioni, error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  // PostgREST tronca a 1000 righe/query: carico a blocchi finché ci sono, così l'elenco è COMPLETO
+  // (prima un .limit(200) nascondeva tutto oltre le 200). Backstop a 10.000 per sicurezza.
+  const spedizioni: any[] = []
+  for (let from = 0; from < 10000; from += 1000) {
+    const { data: batch, error } = await buildBase().range(from, from + 999)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    if (!batch?.length) break
+    spedizioni.push(...batch)
+    if (batch.length < 1000) break
+  }
 
   // Costo da mostrare = il PREZZO CLIENTE che ti paga il tuo DIRETTO:
   // - spedizione propria (master_id = io): il prezzo del cliente diretto (costo_totale).
