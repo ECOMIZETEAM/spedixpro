@@ -51,10 +51,10 @@ export async function POST(req: NextRequest) {
     for (const v of (voci || [])) {
       await adminDb.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
       // prezzo pagato dal master figlio su quella LDV = movimento spedizione con master_target_id
-      const { data: mov } = await adminDb.from('movimenti')
+      const { data: movR } = await adminDb.from('movimenti')
         .select('importo').eq('spedizione_id', v.id).eq('master_target_id', targetMasterId)
-        .eq('tipo', 'spedizione').limit(1).maybeSingle()
-      const costoReso = Math.abs(Number(mov?.importo || 0))
+        .in('tipo', ['spedizione', 'rettifica'])
+      const costoReso = Math.abs((movR || []).reduce((a: number, m: any) => a + Number(m.importo || 0), 0))
       if (costoReso <= 0) continue
       try {
         await registraMovimentoMaster(adminDb, {

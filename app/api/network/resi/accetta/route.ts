@@ -126,9 +126,9 @@ export async function POST(req: NextRequest) {
     if (!dist) continue
     for (const s of arr) {
       await admin.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', s.id)
-      const { data: mov } = await admin.from('movimenti')
-        .select('importo').eq('spedizione_id', s.id).eq('master_target_id', flId).eq('tipo', 'spedizione').limit(1).maybeSingle()
-      const costoReso = Math.abs(Number(mov?.importo || 0))
+      const { data: movR } = await admin.from('movimenti')
+        .select('importo').eq('spedizione_id', s.id).eq('master_target_id', flId).in('tipo', ['spedizione', 'rettifica'])
+      const costoReso = Math.abs((movR || []).reduce((a: number, m: any) => a + Number(m.importo || 0), 0))
       if (costoReso <= 0) continue
       totale += costoReso
       try {
