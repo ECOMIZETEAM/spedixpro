@@ -12,6 +12,7 @@ export default function ZonePage() {
   const [modalSposta, setModalSposta] = useState<any>(null)
   const [modalCopia, setModalCopia] = useState<any>(null)   // corriere di origine da cui copiare le zone
   const [copiando, setCopiando] = useState(false)
+  const [syncing, setSyncing] = useState<string|null>(null)
   const [formNuova, setFormNuova] = useState({nome:'',descrizione:'',con_fuel:false})
   const [formMod, setFormMod] = useState({nome:'',descrizione:'',con_fuel:false})
   const [regioni, setRegioni] = useState<any[]>([])
@@ -43,6 +44,17 @@ export default function ZonePage() {
     setCorrieri(Array.isArray(c)?c:[])
     setZone(Array.isArray(z)?z:[])
     setLoading(false)
+  }
+
+  // Forza la propagazione di tutte le zone del corriere ai sotto-master (le modifiche singole
+  // propagano già da sole; questo è il "riallinea tutto adesso").
+  async function syncZone(corriereId:string) {
+    setSyncing(corriereId)
+    try {
+      const r = await fetch('/api/zone/sync-corriere',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({corriereId})}).then(r=>r.json())
+      alert(r?.ok ? `Zone propagate ai sotto-master (${r.zone_sincronizzate} zone).` : (r?.error||'Errore sync'))
+    } catch { alert('Errore durante la propagazione') }
+    setSyncing(null); await load()
   }
 
   async function salvaZona() {
@@ -174,7 +186,10 @@ export default function ZonePage() {
   function riepilogoRegioni(z:any):string {
     const regs:any[] = Array.isArray(z?.zone_cap) ? z.zone_cap : []
     if(!regs.length) return z?.descrizione || '—'
-    const fmt=(r:any)=>`${r.paese} (${r.provincia}) ${r.cap} ${r.citta}`
+    const fmt=(r:any)=>{
+      const citta = (r.citta==null || r.citta==='' || r.citta==='null') ? '' : ` ${r.citta}`
+      return `${r.paese} (${r.provincia}) ${r.cap}${citta}`
+    }
     const max=15
     const parts=regs.map(fmt)
     return parts.length>max ? parts.slice(0,max).join(' · ')+' · ……' : parts.join(' · ')
@@ -215,7 +230,7 @@ export default function ZonePage() {
               </div>
               <div style={{display:'flex',gap:'8px',marginBottom:'16px'}}>
                 <button onClick={()=>{setFormNuova({nome:'',descrizione:'',con_fuel:false});setModalNuovaCorr(c.id)}} style={{background:'none',border:'none',color:'#f97316',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>+Aggiungi zona</button>
-                <button onClick={load} style={{padding:'6px 14px',background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',cursor:'pointer',color:'#1a1a1a'}}>🔄 Sync Zones</button>
+                <button onClick={()=>syncZone(c.id)} disabled={syncing===c.id} style={{padding:'6px 14px',background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',cursor:syncing===c.id?'default':'pointer',color:'#1a1a1a'}}>{syncing===c.id?'⏳ Sincronizzo…':'🔄 Propaga ai sotto-master'}</button>
                 {zoneC.length>0 && <button onClick={()=>setModalCopia(c)} style={{padding:'6px 14px',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'6px',fontSize:'12px',cursor:'pointer',color:'#2563eb',fontWeight:'600'}}>⧉ Copia zone su altro corriere</button>}
               </div>
               {!zoneC.length ? (

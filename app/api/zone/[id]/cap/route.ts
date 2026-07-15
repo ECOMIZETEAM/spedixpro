@@ -27,12 +27,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     zona_id: id, paese, provincia, cap, citta,
   }).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  await propagaZona(id)
   return NextResponse.json(data)
+}
+
+// Propaga la zona (i suoi CAP) ai sotto-master, in automatico ad ogni modifica del proprietario.
+async function propagaZona(zonaId: string) {
+  try {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { sincronizzaZonaAiDiscendenti } = await import('@/lib/propaga-zona')
+    await sincronizzaZonaAiDiscendenti(createAdminSupabase(), zonaId)
+  } catch (e) { console.error('propaga zona ai sotto-master:', e) }
 }
 
 // PATCH: modifica una regione esistente (body: { capId, paese, provincia, cap, citta })
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await params
+  const { id } = await params
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
@@ -49,6 +59,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   const { data, error } = await supabase.from('zone_cap').update(patch).eq('id', capId).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  await propagaZona(id)
   return NextResponse.json(data)
 }
 
@@ -78,12 +89,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
   const { data, error } = await supabase.from('zone_cap').insert(puliti).select()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  await propagaZona(id)
   return NextResponse.json({ inserite: data?.length || 0 })
 }
 
 // DELETE: rimuove una regione (passando ?capId=...)
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await params
+  const { id } = await params
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
@@ -91,5 +103,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!capId) return NextResponse.json({ error: 'capId mancante' }, { status: 400 })
   const { error } = await supabase.from('zone_cap').delete().eq('id', capId)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  await propagaZona(id)
   return NextResponse.json({ ok: true })
 }
