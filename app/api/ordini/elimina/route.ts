@@ -18,13 +18,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Nessun ordine selezionato' }, { status: 400 })
   }
 
-  // Isolamento: elimina solo righe del cliente in sessione anche se arrivano id altrui
-  const { error } = await supabase
-    .from('ordini_importati')
-    .delete()
-    .eq('cliente_id', utente.cliente_id)
-    .in('id', ids)
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ ok: true, eliminati: ids.length })
+  // Isolamento: elimina solo righe del cliente in sessione anche se arrivano id altrui.
+  // Gli ordini possono stare in ordini_ecommerce (integrazioni: eBay/Shopify/…) o ordini_importati
+  // (import CSV): provo entrambe e conto quelli DAVVERO eliminati (prima diceva sempre "eliminati"
+  // ma cancellava solo da ordini_importati -> gli ordini eBay restavano).
+  const { data: delEcom, error: e1 } = await supabase.from('ordini_ecommerce')
+    .delete().eq('cliente_id', utente.cliente_id).in('id', ids).select('id')
+  const { data: delImp, error: e2 } = await supabase.from('ordini_importati')
+    .delete().eq('cliente_id', utente.cliente_id).in('id', ids).select('id')
+  if (e1 && e2) return NextResponse.json({ error: (e1?.message || e2?.message) }, { status: 500 })
+  const eliminati = (delEcom?.length || 0) + (delImp?.length || 0)
+  return NextResponse.json({ ok: eliminati > 0, eliminati })
 }
