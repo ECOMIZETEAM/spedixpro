@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.pdf"`,
+        'Content-Disposition': `inline; filename="etichetta-${sped.numero || id}.pdf"`,
         'Cache-Control': 'private, max-age=0, no-store',
       },
     })
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
           const mime = head.startsWith('%PDF') ? 'application/pdf' : head.startsWith('GIF8') ? 'image/gif' : 'application/pdf'
           const ext = mime === 'image/gif' ? 'gif' : 'pdf'
           try { const { createAdminSupabase } = await import('@/lib/supabase-admin'); await createAdminSupabase().from('spedizioni').update({ etichetta_url: `data:${mime};base64,${buf.toString('base64')}` }).eq('id', id) } catch {}
-          return new NextResponse(new Uint8Array(buf), { status: 200, headers: { 'Content-Type': mime, 'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.${ext}"`, 'Cache-Control': 'private, max-age=0, no-store' } })
+          return new NextResponse(new Uint8Array(buf), { status: 200, headers: { 'Content-Type': mime, 'Content-Disposition': `inline; filename="etichetta-${sped.numero || id}.${ext}"`, 'Cache-Control': 'private, max-age=0, no-store' } })
         } catch (e: any) {
           // Etichetta non ancora generata dal corriere (tipico del multicollo appena creato).
           const m = String(e?.message || '')
@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
       status: 200,
       headers: {
         'Content-Type': m[1],
-        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Disposition': `inline; filename="${filename}"`,
         'Cache-Control': 'private, max-age=0, no-store',
       },
     })
@@ -112,7 +112,7 @@ export async function GET(req: NextRequest) {
         status: 200,
         headers: {
           'Content-Type': r.headers.get('content-type') || 'application/pdf',
-          'Content-Disposition': `attachment; filename="${filename}"`,
+          'Content-Disposition': `inline; filename="${filename}"`,
           'Cache-Control': 'private, max-age=0, no-store',
         },
       })
