@@ -67,8 +67,11 @@ export async function GET(req: NextRequest) {
     else if (ruolo === 'cliente') q = q.eq('cliente_id', utente?.cliente_id)
     else if (reteIds && reteIds.length > 1) q = q.in('master_id', reteIds)
     else q = q.eq('master_id', mine)
-    // Agente: escluse le annullate (rimborsate, margine 0) per coincidere con "Il mio guadagno".
-    if (agIds) { q = q.in('cliente_id', agIds); if (!stato) q = q.not('stato', 'in', '(annullata)') }
+    if (agIds) q = q.in('cliente_id', agIds)
+    // Escludo le ANNULLATE (salvo filtro stato esplicito): sono rimborsate (addebito+rimborso = 0),
+    // quindi il widget "Report Guadagno" (basato sui movimenti) le netta a 0. Contarle qui riga-per-riga
+    // gonfiava i totali del report PDF e non coincideva col Guadagno. Ora report e Guadagno combaciano.
+    if (!stato) q = q.not('stato', 'in', '(annullata)')
     if (stato) q = q.eq('stato', stato)
     if (dal) q = q.gte('created_at', dal)
     if (al) q = q.lte('created_at', al)
