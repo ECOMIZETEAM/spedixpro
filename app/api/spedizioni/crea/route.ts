@@ -150,6 +150,13 @@ export async function POST(req: NextRequest) {
 
   if (corriereRecord.attivo === false) return NextResponse.json({ error: 'Corriere in pausa: spedizione non consentita.' }, { status: 400 })
 
+  // Contenuto OBBLIGATORIO per i servizi internazionali (es. Poste International Plus): serve alla
+  // dogana e senza il corriere rifiuta la creazione con un errore poco chiaro. Blocco qui con
+  // un messaggio pulito.
+  if (/international/i.test(String(corriereRecord.nome_contratto || '')) && !String(body.contenuto || '').trim()) {
+    return NextResponse.json({ error: 'Contenuto obbligatorio per questo servizio internazionale: indica la descrizione della merce.' }, { status: 400 })
+  }
+
   const cred = corriereRecord.credenziali as Record<string, string>
 
   if (!body.shipTo?.state?.trim()) return NextResponse.json({ error: 'Provincia destinatario obbligatoria' }, { status: 400 })

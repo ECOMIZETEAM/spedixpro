@@ -36,7 +36,7 @@ const ALIAS: Record<string, string[]> = {
   peso:               ['peso', 'weight', 'peso_kg'],
   colli:              ['colli', 'packages', 'pacchi'],
   contrassegno:       ['contrassegno', 'cod', 'cash_on_delivery'],
-  contenuto:          ['contenuto', 'lineitem_name', 'item_name', 'product_name', 'productname', 'descrizione', 'articolo'],
+  contenuto:          ['contenuto', 'sku', 'lineitem_sku', 'seller_sku', 'sellersku', 'lineitem_name', 'item_name', 'product_name', 'productname', 'descrizione', 'articolo'],
   note:               ['note', 'notes', 'order_note', 'note_ordine'],
   rif_mittente:       ['rif_mittente', 'riferimento_mittente'],
   rif_destinatario:   ['rif_destinatario', 'riferimento_destinatario'],
@@ -45,7 +45,7 @@ const ALIAS: Record<string, string[]> = {
 }
 // Colonne ausiliarie (non salvate ma usate per logica: line item, contrassegno, ecc.)
 const AUX: Record<string, string[]> = {
-  lineitem_name: ['lineitem_name', 'item_name', 'product_name', 'productname'],
+  lineitem_name: ['sku', 'lineitem_sku', 'seller_sku', 'sellersku', 'lineitem_name', 'item_name', 'product_name', 'productname'],
   lineitem_qty:  ['lineitem_quantity', 'quantity', 'qty', 'quantita', 'quantity_purchased', 'quantitypurchased'],
   payment:       ['payment_method', 'metodo_pagamento'],
   shippingm:     ['shipping_method', 'metodo_spedizione', 'ship_service_level', 'shipservicelevel'],
