@@ -480,19 +480,10 @@ export async function POST(req: NextRequest) {
         } else throw qErr
       }
 
-      // *** BLOCCO VENDITA SOTTO COSTO ***
-      // Il costo REALE del corriere (preventivo) non deve superare il prezzo che si fa pagare:
-      // altrimenti la spedizione parte in perdita (tipico: zona disagiata / isola non prezzata nel
-      // listino a valle). Controllo PRIMA di creare la spedizione sul corriere.
-      {
-        const realCost = centsToEuro(Number((quotation as any)?.totalPrice) || 0)
-        const prezzoFatto = isProprio ? Number(costoMaster || 0) : (parseFloat(body.totalPrice) || 0)
-        if (realCost > 0 && prezzoFatto > 0 && prezzoFatto < realCost - 0.01) {
-          return NextResponse.json({
-            error: `Impossibile spedire in perdita: il costo reale del corriere per questa destinazione è € ${realCost.toFixed(2)}, superiore al prezzo applicato (€ ${prezzoFatto.toFixed(2)}). Probabile zona disagiata o isola non prezzata nel listino: aggiorna il listino o scegli un altro corriere.`,
-          }, { status: 400 })
-        }
-      }
+      // NB: nessun blocco "vendita sotto costo" basato sul confronto costo-live vs prezzo listino:
+      // dava troppi falsi positivi (bloccava destinazioni legittime dove il listino è più basso del
+      // costo live). Il controllo sulle destinazioni disagiate è ora PER-ZONA (zone disagiate), non
+      // per confronto di prezzo.
 
       // externalReference SpediamoPro: max 64 caratteri (altrimenti la creazione fallisce).
       const externalRef = (body.notes ? String(body.notes) : '').substring(0, 64) || undefined

@@ -30,7 +30,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
     }
   } else if (utente?.master_id && sped.master_id !== utente.master_id) {
-    return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    // Il master vede le etichette di TUTTA la sua rete (sotto-albero), non solo le proprie:
+    // le spedizioni dei sotto-master hanno master_id = sotto-master. (Era il bug "non autorizzato".)
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const rete = await sottoAlberoMasterIds(createAdminSupabase(), utente.master_id)
+    if (!sped.master_id || !rete.includes(sped.master_id)) {
+      return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    }
   }
   // Agente: solo etichette di un suo cliente.
   if (isAgente(utente as any)) {

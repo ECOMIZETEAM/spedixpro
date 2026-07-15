@@ -187,8 +187,11 @@ export default function SpedizioniPage() {
       const blob = await r.blob()
       const ct = r.headers.get('content-type') || ''
       const ext = ct.includes('gif') ? 'gif' : ct.includes('png') ? 'png' : 'pdf'
+      // Nome file dal server (etichetta-{numero spedizione}); fallback all'id se assente.
+      const cd = r.headers.get('content-disposition') || ''
+      const fname = (cd.match(/filename="?([^"]+)"?/)?.[1]) || `etichetta-${id}.${ext}`
       const objUrl = URL.createObjectURL(blob)
-      const a = document.createElement('a'); a.href = objUrl; a.download = `etichetta-${id}.${ext}`
+      const a = document.createElement('a'); a.href = objUrl; a.download = fname
       document.body.appendChild(a); a.click(); a.remove()
       setTimeout(() => URL.revokeObjectURL(objUrl), 60000)
     } catch { setNotifica('Errore nel download etichetta') }
