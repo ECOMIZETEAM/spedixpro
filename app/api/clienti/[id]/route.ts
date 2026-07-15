@@ -94,11 +94,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (datiCliente.vieta_cancellazione !== undefined) upd.vieta_cancellazione = datiCliente.vieta_cancellazione
     const { error } = await admin.from('masters').update(upd).eq('id', targetId)
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-    // Se è stato assegnato un listino, copialo nel Listino Corrieri del sotto-master
+    // Se è stato (ri)assegnato un listino, RI-SINCRONIZZA subito il Listino Corrieri del sotto-master
+    // (force: sovrascrive il vecchio, altrimenti "già configurato" lo salterebbe e vedrebbe il vecchio)
+    // e propaga a cascata a tutta la sua discendenza. Così appena salvo l'assegnazione è già attiva.
     if (datiCliente.listino_cliente_id) {
       try {
-        const { copiaListinoAlSottoMaster } = await import('@/lib/copia-listino-submaster')
-        await copiaListinoAlSottoMaster(admin, targetId)
+        const { copiaListinoAlSottoMaster, propagaListinoACascata } = await import('@/lib/copia-listino-submaster')
+        await copiaListinoAlSottoMaster(admin, targetId, { force: true })
+        await propagaListinoACascata(admin, datiCliente.listino_cliente_id)
       } catch (e) { console.error('Copia listino sotto-master (modifica):', e) }
     }
     return NextResponse.json({ success: true })
