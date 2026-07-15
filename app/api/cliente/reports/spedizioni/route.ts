@@ -13,17 +13,26 @@ export async function GET(req: NextRequest) {
   const al = p.get('al')
   const contrassegno = p.get('contrassegno')
   const provincia = p.get('provincia')
-  let query = supabase.from('spedizioni')
-    .select('*, clienti(ragione_sociale)')
-    .eq('cliente_id', clienteId)
-    .order('created_at', { ascending: false })
-    .limit(5000)
-  if (stato) query = query.eq('stato', stato)
-  if (dal) query = query.gte('created_at', dal)
-  if (al) query = query.lte('created_at', al)
-  if (contrassegno === 'si') query = query.gt('contrassegno', 0)
-  if (contrassegno === 'no') query = query.eq('contrassegno', 0)
-  if (provincia) query = query.eq('dest_provincia', provincia)
-  const { data } = await query
-  return NextResponse.json(data || [])
+  const buildBase = () => {
+    let q = supabase.from('spedizioni')
+      .select('*, clienti(ragione_sociale)')
+      .eq('cliente_id', clienteId)
+      .order('created_at', { ascending: false })
+    if (stato) q = q.eq('stato', stato)
+    if (dal) q = q.gte('created_at', dal)
+    if (al) q = q.lte('created_at', al)
+    if (contrassegno === 'si') q = q.gt('contrassegno', 0)
+    if (contrassegno === 'no') q = q.eq('contrassegno', 0)
+    if (provincia) q = q.eq('dest_provincia', provincia)
+    return q
+  }
+  // Report COMPLETO a blocchi (il DB tronca a 1000/query). Backstop 20.000.
+  const data: any[] = []
+  for (let from = 0; from < 20000; from += 1000) {
+    const { data: batch } = await buildBase().range(from, from + 999)
+    if (!batch?.length) break
+    data.push(...batch)
+    if (batch.length < 1000) break
+  }
+  return NextResponse.json(data)
 }

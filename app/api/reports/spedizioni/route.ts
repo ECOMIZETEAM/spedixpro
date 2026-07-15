@@ -55,27 +55,36 @@ export async function GET(req: NextRequest) {
   const reteIds = isMaster && !clienteId && !masterSel ? [mine as string, ...primaLineaId.keys()] : null
   if (reteIds && reteIds.length > 1) db = adminDb
 
-  let query = db.from('spedizioni')
-    .select(`${SPED_COLS}, clienti(ragione_sociale,agente), corrieri(id,nome_contratto)`)
-    .order('created_at', { ascending: false }).limit(5000)
-  if (subtreeSel) query = query.in('master_id', subtreeSel)
-  else if (clienteId) query = query.eq('cliente_id', clienteId).eq('master_id', mine)
-  else if (ruolo === 'cliente') query = query.eq('cliente_id', utente?.cliente_id)
-  else if (reteIds && reteIds.length > 1) query = query.in('master_id', reteIds)
-  else query = query.eq('master_id', mine)
-  // Agente: solo le spedizioni dei suoi clienti; escluse le annullate (rimborsate, margine 0)
-  // per coincidere con la dashboard "Il mio guadagno".
-  if (isAgente(utente)) {
-    query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
-    if (!stato) query = query.not('stato', 'in', '(annullata)')
+  // Agente: solo i suoi clienti (calcolato una volta, fuori dal loop).
+  const agIds = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
+  const buildBase = () => {
+    let q = db.from('spedizioni')
+      .select(`${SPED_COLS}, clienti(ragione_sociale,agente), corrieri(id,nome_contratto)`)
+      .order('created_at', { ascending: false })
+    if (subtreeSel) q = q.in('master_id', subtreeSel)
+    else if (clienteId) q = q.eq('cliente_id', clienteId).eq('master_id', mine)
+    else if (ruolo === 'cliente') q = q.eq('cliente_id', utente?.cliente_id)
+    else if (reteIds && reteIds.length > 1) q = q.in('master_id', reteIds)
+    else q = q.eq('master_id', mine)
+    // Agente: escluse le annullate (rimborsate, margine 0) per coincidere con "Il mio guadagno".
+    if (agIds) { q = q.in('cliente_id', agIds); if (!stato) q = q.not('stato', 'in', '(annullata)') }
+    if (stato) q = q.eq('stato', stato)
+    if (dal) q = q.gte('created_at', dal)
+    if (al) q = q.lte('created_at', al)
+    if (contrassegno === 'si') q = q.gt('contrassegno', 0)
+    if (contrassegno === 'no') q = q.eq('contrassegno', 0)
+    if (provincia) q = q.eq('dest_provincia', provincia)
+    return q
   }
-  if (stato) query = query.eq('stato', stato)
-  if (dal) query = query.gte('created_at', dal)
-  if (al) query = query.lte('created_at', al)
-  if (contrassegno === 'si') query = query.gt('contrassegno', 0)
-  if (contrassegno === 'no') query = query.eq('contrassegno', 0)
-  if (provincia) query = query.eq('dest_provincia', provincia)
-  const { data: spedizioni } = await query
+  // Report COMPLETO: carico a blocchi (il DB tronca a 1000/query), altrimenti i totali/margini
+  // sarebbero sbagliati per i master con molte spedizioni. Backstop a 20.000.
+  const spedizioni: any[] = []
+  for (let from = 0; from < 20000; from += 1000) {
+    const { data: batch } = await buildBase().range(from, from + 999)
+    if (!batch?.length) break
+    spedizioni.push(...batch)
+    if (batch.length < 1000) break
+  }
 
   // FONTE DI VERITÀ = i MOVIMENTI reali (quello che ogni livello ha effettivamente pagato).
   // Non ricalcolo i prezzi: un ricalcolo non replica agevolazioni misure/peso reale, fattore
