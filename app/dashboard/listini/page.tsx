@@ -88,18 +88,23 @@ export default function ListiniPage() {
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
             <thead>
               <tr style={{background:'#fafafa'}}>
-                {['Nome Listino','Fasce','Creato il','Azioni'].map(h=>(
+                {['Nome Listino','Assegnato a','Fasce','Creato il','Azioni'].map(h=>(
                   <th key={h} style={{textAlign:'left',padding:'9px 14px',fontSize:'11px',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.5px',color:'#1a1a1a',borderBottom:'1px solid #f0f0f0'}}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {visibili.length === 0 && (
-                <tr><td colSpan={4} style={{padding:'40px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessun listino corrisponde a “{cerca}”.</td></tr>
+                <tr><td colSpan={5} style={{padding:'40px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessun listino corrisponde a “{cerca}”.</td></tr>
               )}
               {visibili.map(l => (
                 <tr key={l.id} style={{borderBottom:'1px solid #f5f5f5'}}>
                   <td style={{padding:'10px 14px',fontWeight:'600',color:'#1a1a1a'}}>{l.nome}</td>
+                  <td style={{padding:'10px 14px',fontSize:'12px',color:'#1a1a1a'}}>
+                    {Array.isArray(l.assegnati)&&l.assegnati.length
+                      ? <div style={{display:'flex',flexDirection:'column',gap:'2px'}}>{l.assegnati.map((n:string,i:number)=><span key={i}>{n}</span>)}</div>
+                      : <span style={{color:'#9ca3af'}}>Non assegnato</span>}
+                  </td>
                   <td style={{padding:'10px 14px',color:'#1a1a1a'}}>{l.fasce_count||'—'}</td>
                   <td style={{padding:'10px 14px',color:'#1a1a1a',fontSize:'12px'}}>{new Date(l.created_at).toLocaleDateString('it-IT')}</td>
                   <td style={{padding:'10px 14px'}}>
