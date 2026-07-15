@@ -177,10 +177,27 @@ export default function SpedizioniPage() {
   useEffect(() => {
     fetch('/api/master').then(r=>r.json()).then(d=>{ setZplOn(d?.impostazioni?.zpl_abilita === 'si') }).catch(()=>{})
   }, [])
-  // Stampa SUBITO su Zebra (Browser Print) se ZPL attivo; altrimenti apri/scarica il PDF.
+  // Scarica l'etichetta come file sul PC (PDF o immagine), con messaggio chiaro se non è pronta.
+  async function scaricaEtichetta(id: string) {
+    const url = `/api/spedizioni/etichetta?id=${id}`
+    setStampandoId(id)
+    try {
+      const r = await fetch(url)
+      if (!r.ok) { const j = await r.json().catch(()=>null); setNotifica(j?.error || 'Etichetta non disponibile'); return }
+      const blob = await r.blob()
+      const ct = r.headers.get('content-type') || ''
+      const ext = ct.includes('gif') ? 'gif' : ct.includes('png') ? 'png' : 'pdf'
+      const objUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = objUrl; a.download = `etichetta-${id}.${ext}`
+      document.body.appendChild(a); a.click(); a.remove()
+      setTimeout(() => URL.revokeObjectURL(objUrl), 60000)
+    } catch { setNotifica('Errore nel download etichetta') }
+    finally { setStampandoId(''); setTimeout(() => setNotifica(''), 4000) }
+  }
+  // Stampa SUBITO su Zebra (Browser Print) se ZPL attivo; altrimenti SCARICA il PDF sul PC.
   async function stampaEtichetta(id: string) {
     const url = `/api/spedizioni/etichetta?id=${id}`
-    if (!zplOn) { window.open(url, '_blank'); return }
+    if (!zplOn) { await scaricaEtichetta(id); return }
     setStampandoId(id)
     try {
       const { stampaEtichettaZebra } = await import('@/lib/zebra-print')
@@ -509,7 +526,7 @@ async function apriTracking(s: any) {
                       <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>—</td>
                       <td style={{padding:'9px 12px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
-                          <button onClick={()=>stampaEtichetta(s.id)} disabled={stampandoId===s.id} style={{padding:'4px 8px',background:'#fff7ed',color:'#f97316',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}} title={zplOn?'Stampa etichetta su Zebra (ZPL)':'Apri/scarica etichetta PDF'}>{stampandoId===s.id?'⏳':'🖨️'}</button>
+                          <button onClick={()=>stampaEtichetta(s.id)} disabled={stampandoId===s.id} style={{padding:'4px 8px',background:'#fff7ed',color:'#f97316',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}} title={zplOn?'Stampa etichetta su Zebra (ZPL)':'Scarica etichetta PDF'}>{stampandoId===s.id?'⏳':'🖨️'}</button>
                           <button onClick={()=>setDettaglio(s)} title="Vedi dettagli spedizione" style={{padding:'4px 8px',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',fontSize:'14px',border:'1px solid #bfdbfe',cursor:'pointer'}}>👁</button>
 
                           {s.stato==='annullamento_pending' ? (
