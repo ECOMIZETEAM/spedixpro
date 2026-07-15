@@ -205,12 +205,10 @@ export async function GET(req: NextRequest) {
       if (mioCorr) { const r = calcMioCorr({ ...s, corriere_id: mioCorr }); if (r && r.totale != null) prezzo_corriere = r.totale }
     }
     if (prezzo_corriere == null && costoMinSped.has(s.id)) prezzo_corriere = costoMinSped.get(s.id)!
-    // Prezzo cliente = quello che mi paga il DIRETTO. Se non sono nella catena di addebito (master in
-    // cima, sopra il proprietario del contratto) mostro il prezzo del cliente FINALE (costo_totale).
-    let prezzo_cliente: number
-    if (s.master_id === mineId) prezzo_cliente = pagatoCliente.has(s.id) ? pagatoCliente.get(s.id)! : Number(s.costo_totale || 0)
-    else if (hoMioCosto) { const flId = primaLineaId.get(s.master_id); prezzo_cliente = (flId && costoTarget.has(s.id + '|' + flId)) ? costoTarget.get(s.id + '|' + flId)! : Number(s.costo_totale || 0) }
-    else prezzo_cliente = Number(s.costo_totale || 0)
+    // Prezzo cliente = prezzo del LISTINO che HO ASSEGNATO al mio diretto (= costo_mostrato):
+    //  - spedizione del mio cliente diretto -> costo_totale (il prezzo del suo listino, quello che paga);
+    //  - spedizione di rete -> prezzo del mio listino verso il figlio di PRIMA LINEA (diretto sotto di me).
+    const prezzo_cliente = costo_mostrato
     const margine = (prezzo_corriere != null) ? Math.round((prezzo_cliente - prezzo_corriere) * 100) / 100 : null
     return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine }
   })

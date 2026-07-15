@@ -141,6 +141,17 @@ export async function GET(req: NextRequest) {
     for (const c of (miei || [])) nomeToMioCorr.set((c as any).nome_contratto, (c as any).id)
   }
 
+  // Prezzo cliente di RETE = prezzo del MIO listino verso il figlio di PRIMA LINEA (quello che gli ho
+  // assegnato), stesso corriere rimappato per nome. Deterministico dai listini (identico all'Elenco).
+  const parentListinoOf = new Map<string, string | null>()
+  const calcPerListino = new Map<string, (s: any) => any>()
+  if (isMaster && !calcAgente && primaLineaId.size) {
+    const flIds = Array.from(new Set(Array.from(primaLineaId.values())))
+    const { data: tms } = flIds.length ? await adminDb.from('masters').select('id,parent_listino_id').in('id', flIds) : { data: [] as any[] }
+    for (const t of (tms || [])) parentListinoOf.set(t.id, (t as any).parent_listino_id || null)
+    for (const lid of Array.from(new Set(Array.from(parentListinoOf.values()).filter(Boolean))) as string[]) calcPerListino.set(lid, await creaCalcolatoreListinoCliente(adminDb, lid))
+  }
+
   const rows = (spedizioni || []).map((s: any) => {
     // PREZZO CORRIERE = quello che ho pagato IO (mio movimento reale). Per l'agente = suo listino;
     // se il listino agente non copre quel corriere, ripiego sul costo reale (non 0, che gonfierebbe il margine).
@@ -156,19 +167,23 @@ export async function GET(req: NextRequest) {
     // Ultimo fallback: costo corriere REALE (movimento più profondo), per il master in cima che è
     // sopra il proprietario del contratto e non è nella catena di addebito.
     if (prezzo_corriere == null && !calcAgente && costoMinSped.has(s.id)) prezzo_corriere = costoMinSped.get(s.id)!
-    // PREZZO CLIENTE = quello che mi paga il DIRETTO. Se non sono nella catena (master in cima) mostro
-    // il prezzo del cliente FINALE (costo_totale).
+    // PREZZO CLIENTE = prezzo del LISTINO che HO ASSEGNATO al mio diretto:
+    //  - mio cliente diretto -> quello che paga (costo_totale);
+    //  - spedizione di rete -> prezzo del mio listino verso il figlio di PRIMA LINEA (diretto sotto di me).
     let prezzo_cliente: number
     if (calcAgente) {
       // Agente: costo cliente = quello che paga il cliente (costo_totale), come nella dashboard.
       prezzo_cliente = Number(s.costo_totale || 0)
     } else if (s.master_id === mine) {
       prezzo_cliente = pagatoCliente.has(s.id) ? pagatoCliente.get(s.id)! : Number(s.costo_totale || 0)
-    } else if (hoMioCosto) {
-      const flId = primaLineaId.get(s.master_id)
-      prezzo_cliente = (flId && costoTarget.has(s.id + '|' + flId)) ? costoTarget.get(s.id + '|' + flId)! : Number(s.costo_totale || 0)
     } else {
+      const flId = primaLineaId.get(s.master_id)
+      const listinoId = flId ? parentListinoOf.get(flId) : null
+      const nome = (s.corrieri as any)?.nome_contratto
+      const mioCorr = nome ? nomeToMioCorr.get(nome) : null
+      const calc = listinoId ? calcPerListino.get(listinoId) : null
       prezzo_cliente = Number(s.costo_totale || 0)
+      if (calc && mioCorr) { const r = calc({ ...s, corriere_id: mioCorr }); if (r && r.totale != null) prezzo_cliente = r.totale }
     }
     // Cliente di un AGENTE: verso il master il prezzo è quello del listino agente (non del cliente finale).
     if (!calcAgente && s.cliente_id && clienteToListinoAg.has(s.cliente_id)) {
