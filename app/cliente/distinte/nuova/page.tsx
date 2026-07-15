@@ -94,7 +94,7 @@ export default function CreaDistintaCliente() {
                     <td style={td}>{s.peso_fatturato||s.peso_reale||'—'}</td>
                     <td style={td}>{s.colli||1}</td>
                     <td style={td}>{new Date(s.created_at).toLocaleDateString('it-IT')}</td>
-                    <td style={td}>{s.note||''}</td>
+                    <td style={td}>{s.id_ordine||'—'}</td>
                   </tr>
                 ))}
               </tbody>

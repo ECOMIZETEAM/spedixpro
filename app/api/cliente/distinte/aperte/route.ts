@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
+import { mappaIdOrdine } from '@/lib/id-ordine'
 export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -15,5 +16,9 @@ export async function GET() {
     .is('distinta_id', null)
     .neq('stato', 'annullata')
     .order('created_at', { ascending: false }))
-  return NextResponse.json(spedizioni)
+  // ID Ordine reale (order_id CSV / numero ordine integrazioni)
+  const { createAdminSupabase } = await import('@/lib/supabase-admin')
+  const idOrd = await mappaIdOrdine(createAdminSupabase(), (spedizioni || []).map((s: any) => s.id))
+  const out = (spedizioni || []).map((s: any) => ({ ...s, id_ordine: idOrd.get(s.id) || null }))
+  return NextResponse.json(out)
 }
