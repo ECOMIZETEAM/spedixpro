@@ -46,6 +46,29 @@ export async function GET(req: NextRequest) {
 
   const calcCosto = await creaCalcolatoreListinoCliente(supabase, listinoAg)
 
+  // Prezzo cliente REALE = movimenti (spedizione + rettifica) del cliente, come nei report del
+  // master: le rettifiche allineano il prezzo dopo una correzione. Fallback al campo costo_totale.
+  // Uso adminDb: gli spedIds sono già dei SOLI clienti dell'agente (nessun leak).
+  const spedIds = (speds || []).map((s: any) => s.id)
+  const pagatoCliente = new Map<string, number>()
+  if (spedIds.length) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const sumCli = new Map<string, number>()
+    for (let i = 0; i < spedIds.length; i += 300) {
+      const chunk = spedIds.slice(i, i + 300)
+      for (let from = 0; ; from += 1000) {
+        const { data: mvs } = await admin.from('movimenti')
+          .select('spedizione_id,importo').in('tipo', ['spedizione', 'rettifica'])
+          .in('spedizione_id', chunk).not('cliente_id', 'is', null).range(from, from + 999)
+        if (!mvs?.length) break
+        for (const mv of mvs) sumCli.set((mv as any).spedizione_id, (sumCli.get((mv as any).spedizione_id) || 0) + Number((mv as any).importo || 0))
+        if (mvs.length < 1000) break
+      }
+    }
+    for (const [id, v] of sumCli) pagatoCliente.set(id, Math.round(Math.abs(v) * 100) / 100)
+  }
+
   const perGiorno = new Map<string, { ricavi: number; costi: number }>()
   const chiave = (iso: string) => perMese ? iso.slice(0, 7) : iso.slice(0, 10)
   const acc = (iso: string, campo: 'ricavi' | 'costi', v: number) => {
@@ -55,7 +78,7 @@ export async function GET(req: NextRequest) {
 
   let ricavi = 0, costi = 0
   for (const s of (speds || [])) {
-    const ric = Number((s as any).costo_totale || 0)
+    const ric = pagatoCliente.has((s as any).id) ? pagatoCliente.get((s as any).id)! : Number((s as any).costo_totale || 0)
     // Costo agente dal listino agente; se quel corriere non è nel listino, uso il costo reale
     // (costo_spedizione) invece di 0, altrimenti l'intero prezzo verrebbe contato come margine.
     const cAg = calcCosto(s)?.totale

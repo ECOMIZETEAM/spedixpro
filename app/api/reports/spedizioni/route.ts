@@ -97,7 +97,12 @@ export async function GET(req: NextRequest) {
   for (let i = 0; i < spedIds.length; i += 300) {
     const chunk = spedIds.slice(i, i + 300)
     for (let from = 0; ; from += 1000) {
-      const { data: mvs } = await db.from('movimenti')
+      // Movimenti via adminDb per TUTTI tranne il CLIENTE: all'agente serve per popolare
+      // pagatoCliente (RLS gli bloccherebbe i movimenti) e non gli restituisco i costi master
+      // (usa calcAgente per il costo). Per il CLIENTE resto su `db` (RLS): così i costi master
+      // (costoMine) NON gli arrivano.
+      const mvDb = ruolo === 'cliente' ? db : adminDb
+      const { data: mvs } = await mvDb.from('movimenti')
         .select('spedizione_id,master_target_id,cliente_id,importo').in('tipo', ['spedizione', 'rettifica'])
         .in('spedizione_id', chunk).range(from, from + 999)
       if (!mvs?.length) break
@@ -161,8 +166,9 @@ export async function GET(req: NextRequest) {
     //  - spedizione di rete -> prezzo del mio listino verso il figlio di PRIMA LINEA (diretto sotto di me).
     let prezzo_cliente: number
     if (calcAgente) {
-      // Agente: costo cliente = quello che paga il cliente (costo_totale), come nella dashboard.
-      prezzo_cliente = Number(s.costo_totale || 0)
+      // Agente: prezzo cliente = quello che il cliente ha REALMENTE pagato (movimenti spedizione +
+      // rettifica); fallback al campo costo_totale. Così le rettifiche valgono anche per l'agente.
+      prezzo_cliente = pagatoCliente.has(s.id) ? pagatoCliente.get(s.id)! : Number(s.costo_totale || 0)
     } else if (s.master_id === mine) {
       prezzo_cliente = pagatoCliente.has(s.id) ? pagatoCliente.get(s.id)! : Number(s.costo_totale || 0)
     } else {
