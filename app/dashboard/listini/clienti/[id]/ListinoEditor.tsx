@@ -364,6 +364,11 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       {/* ASSICURAZIONE */}
       {tab==='assicurazione' && (
         <div style={{padding:'16px'}}>
+          <div style={{marginBottom:'12px',padding:'9px 12px',borderRadius:'8px',fontSize:'12.5px',fontWeight:600,...(righeAssic.some(r=>Number(r.valore_max)>0)?{background:'#f0fdf4',border:'1px solid #bbf7d0',color:'#15803d'}:{background:'#fff7ed',border:'1px solid #fed7aa',color:'#c2410c'})}}>
+            {righeAssic.some(r=>Number(r.valore_max)>0)
+              ? '✓ Servizio ATTIVO — l\'assicurazione è disponibile fino al valore massimo impostato.'
+              : '⚠ Servizio NON attivo — valore massimo 0 o vuoto: il cliente non potrà spedire con assicurazione. Imposta un valore massimo maggiore di 0 per attivarlo.'}
+          </div>
           <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
             <thead><tr style={{background:'#fafafa'}}>
               <th style={{textAlign:'left' as const,padding:'8px 10px',fontWeight:'700',color:'#1a1a1a',borderBottom:'1px solid #d1d5db'}}>Valore massimo <span style={{color:'#666',fontWeight:'400'}}>€</span></th>
@@ -398,6 +403,11 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       {/* CONTRASSEGNI */}
       {tab==='contrassegni' && (
         <div style={{padding:'16px'}}>
+          <div style={{marginBottom:'12px',padding:'9px 12px',borderRadius:'8px',fontSize:'12.5px',fontWeight:600,...(righeContr.some(r=>Number(r.valore_max)>0)?{background:'#f0fdf4',border:'1px solid #bbf7d0',color:'#15803d'}:{background:'#fff7ed',border:'1px solid #fed7aa',color:'#c2410c'})}}>
+            {righeContr.some(r=>Number(r.valore_max)>0)
+              ? '✓ Servizio ATTIVO — il contrassegno è disponibile fino al valore massimo impostato.'
+              : '⚠ Servizio NON attivo — valore massimo 0 o vuoto: il cliente non potrà spedire in contrassegno. Imposta un valore massimo maggiore di 0 per attivarlo.'}
+          </div>
           <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
             <thead><tr style={{background:'#fafafa'}}>
               <th style={{textAlign:'left' as const,padding:'8px 10px',fontWeight:'700',color:'#1a1a1a',borderBottom:'1px solid #d1d5db'}}>Valore massimo <span style={{color:'#666',fontWeight:'400'}}>€</span></th>
