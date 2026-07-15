@@ -195,21 +195,28 @@ export async function GET(req: NextRequest) {
         if (ris && ris.totale != null) costo_mostrato = ris.totale
       }
     }
-    // Prezzo corriere = MIO costo reale (movimento). Se non sono nella catena di addebito uso in
-    // ordine: (a) il MIO listino corriere, (b) il costo corriere REALE (movimento più profondo).
-    const hoMioCosto = costoMine.has(s.id)
-    let prezzo_corriere: number | null = hoMioCosto ? costoMine.get(s.id)! : null
+    // PREZZO CLIENTE = quello che mi paga il mio DIRETTO (figlio di PRIMA LINEA sotto di me), MAI il
+    // livello finale. Fonte = il costo del figlio di prima linea (quello che ha pagato = quello che
+    // paga a me). Fallback: il mio listino verso di lui (costo_mostrato).
+    let prezzo_cliente: number
+    if (s.master_id === mineId) {
+      prezzo_cliente = pagatoCliente.has(s.id) ? pagatoCliente.get(s.id)! : Number(s.costo_totale || 0)
+    } else {
+      const flId = primaLineaId.get(s.master_id)
+      prezzo_cliente = (flId && costoTarget.has(s.id + '|' + flId)) ? costoTarget.get(s.id + '|' + flId)! : costo_mostrato
+    }
+    // PREZZO CORRIERE = MIO costo reale (movimento) o, se manca, il MIO listino corriere. Se sono
+    // SOPRA il proprietario del contratto (nessun mio costo né mio listino per quel corriere) è un
+    // semplice passaggio: prezzo corriere = prezzo cliente -> margine 0 (non guadagno su un contratto
+    // che non è mio, e NON mostro il margine totale della rete sotto).
+    let prezzo_corriere: number | null = costoMine.has(s.id) ? costoMine.get(s.id)! : null
     if (prezzo_corriere == null && calcMioCorr) {
       const nome = (s.corrieri as any)?.nome_contratto
       const mioCorr = (s.master_id === mineId) ? s.corriere_id : (nome ? nomeToMioCorr.get(nome) : null)
       if (mioCorr) { const r = calcMioCorr({ ...s, corriere_id: mioCorr }); if (r && r.totale != null) prezzo_corriere = r.totale }
     }
-    if (prezzo_corriere == null && costoMinSped.has(s.id)) prezzo_corriere = costoMinSped.get(s.id)!
-    // Prezzo cliente = prezzo del LISTINO che HO ASSEGNATO al mio diretto (= costo_mostrato):
-    //  - spedizione del mio cliente diretto -> costo_totale (il prezzo del suo listino, quello che paga);
-    //  - spedizione di rete -> prezzo del mio listino verso il figlio di PRIMA LINEA (diretto sotto di me).
-    const prezzo_cliente = costo_mostrato
-    const margine = (prezzo_corriere != null) ? Math.round((prezzo_cliente - prezzo_corriere) * 100) / 100 : null
+    if (prezzo_corriere == null) prezzo_corriere = prezzo_cliente
+    const margine = Math.round((prezzo_cliente - prezzo_corriere) * 100) / 100
     return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine }
   })
   return NextResponse.json(rows)
