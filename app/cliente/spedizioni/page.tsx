@@ -62,6 +62,12 @@ export default function SpedizioniPage() {
   const [trackingTab, setTrackingTab] = useState<'tracking'|'colli'>('tracking')
   const [eliminando, setEliminando] = useState<string|null>(null)
   const [filtri, setFiltri] = useState(FILTRI_DEFAULT)
+  // Stampa ZPL/Zebra SOLO se il cliente l'ha attivata in Impostazioni → Stampa (zpl_abilita).
+  // Altrimenti: PDF normale (scaricabile). Default OFF, così nessuno resta bloccato.
+  const [zplOn, setZplOn] = useState(false)
+  useEffect(() => {
+    fetch('/api/cliente/dati').then(r=>r.json()).then(d=>{ setZplOn(d?.impostazioni?.zpl_abilita === 'si') }).catch(()=>{})
+  }, [])
 
   // Ricarica dal server al cambio di N. Spedizione / intervallo date.
   // Cercando per N. Spedizione la ricerca va su TUTTO lo storico (ignora la data).
@@ -151,6 +157,8 @@ export default function SpedizioniPage() {
   const [stampandoId, setStampandoId] = useState('')
   async function stampaEtichetta(id: string) {
     const url = `/api/spedizioni/etichetta?id=${id}`
+    // Senza ZPL attivo: apri direttamente il PDF (scaricabile), niente Zebra.
+    if (!zplOn) { window.open(url, '_blank'); return }
     setStampandoId(id)
     try {
       const { stampaEtichettaZebra } = await import('@/lib/zebra-print')
@@ -163,6 +171,8 @@ export default function SpedizioniPage() {
   }
   async function stampaZebraSelezionati() {
     if (!selectedIds.length) return
+    // Senza ZPL attivo: PDF unico (scaricabile), niente Zebra.
+    if (!zplOn) { await stampaSelezionati(); return }
     setNotifica('🖨️ Invio ' + selectedIds.length + ' etichette alla Zebra…')
     try {
       const { stampaEtichetteZebra } = await import('@/lib/zebra-print')
@@ -436,7 +446,7 @@ async function apriTracking(s: any) {
                       <td style={{padding:'9px 12px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
                           <button onClick={()=>stampaEtichetta(s.id)} disabled={stampandoId===s.id}
-                            style={{padding:'4px 8px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}} title="Stampa etichetta su Zebra">{stampandoId===s.id?'⏳':'🖨️'}</button>
+                            style={{padding:'4px 8px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}} title={zplOn?'Stampa etichetta su Zebra (ZPL)':'Apri/scarica etichetta PDF'}>{stampandoId===s.id?'⏳':'🖨️'}</button>
                           <button onClick={()=>setDettaglio(s)} title="Vedi dettagli spedizione" style={{padding:'4px 8px',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',fontSize:'14px',border:'1px solid #bfdbfe',cursor:'pointer'}}>👁</button>
                   
                           {s.stato==='annullamento_pending' ? (

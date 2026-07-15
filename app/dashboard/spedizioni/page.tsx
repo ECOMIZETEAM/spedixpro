@@ -171,9 +171,16 @@ export default function SpedizioniPage() {
   }
 
   const [stampandoId, setStampandoId] = useState('')
-  // Stampa SUBITO su Zebra (Browser Print). Se non disponibile, ripiego sul PDF.
+  // Stampa ZPL/Zebra SOLO se attivata in Impostazioni (zpl_abilita). Altrimenti PDF normale
+  // (scaricabile). Default OFF così nessuno resta bloccato sul download.
+  const [zplOn, setZplOn] = useState(false)
+  useEffect(() => {
+    fetch('/api/master').then(r=>r.json()).then(d=>{ setZplOn(d?.impostazioni?.zpl_abilita === 'si') }).catch(()=>{})
+  }, [])
+  // Stampa SUBITO su Zebra (Browser Print) se ZPL attivo; altrimenti apri/scarica il PDF.
   async function stampaEtichetta(id: string) {
     const url = `/api/spedizioni/etichetta?id=${id}`
+    if (!zplOn) { window.open(url, '_blank'); return }
     setStampandoId(id)
     try {
       const { stampaEtichettaZebra } = await import('@/lib/zebra-print')
@@ -186,6 +193,7 @@ export default function SpedizioniPage() {
   }
   async function stampaZebraSelezionati() {
     if (!selectedIds.length) return
+    if (!zplOn) { await stampaSelezionati(); return }
     setNotifica('🖨️ Invio ' + selectedIds.length + ' etichette alla Zebra…')
     try {
       const { stampaEtichetteZebra } = await import('@/lib/zebra-print')
@@ -417,10 +425,10 @@ async function apriTracking(s: any) {
               style={{padding:'6px 14px',background:selectedIds.length>0?'#f97316':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
               ⬇ Scarica Selezionati{selectedIds.length>0?` (${selectedIds.length})`:''}
             </button>
-            <button onClick={stampaZebraSelezionati} disabled={selectedIds.length===0}
+            {zplOn && <button onClick={stampaZebraSelezionati} disabled={selectedIds.length===0}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#111827':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
               🖨️ Stampa Zebra{selectedIds.length>0?` (${selectedIds.length})`:''}
-            </button>
+            </button>}
             <button onClick={eliminaSelezionate} disabled={selectedIds.length===0||eliminandoBulk}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#dc2626':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0&&!eliminandoBulk?'pointer':'not-allowed',opacity:eliminandoBulk?0.6:1}}>
               {eliminandoBulk?'Eliminazione…':`🗑️ Elimina Selezionate${selectedIds.length>0?` (${selectedIds.length})`:''}`}
@@ -501,7 +509,7 @@ async function apriTracking(s: any) {
                       <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>—</td>
                       <td style={{padding:'9px 12px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
-                          <button onClick={()=>stampaEtichetta(s.id)} disabled={stampandoId===s.id} style={{padding:'4px 8px',background:'#fff7ed',color:'#f97316',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}} title="Stampa etichetta su Zebra">{stampandoId===s.id?'⏳':'🖨️'}</button>
+                          <button onClick={()=>stampaEtichetta(s.id)} disabled={stampandoId===s.id} style={{padding:'4px 8px',background:'#fff7ed',color:'#f97316',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}} title={zplOn?'Stampa etichetta su Zebra (ZPL)':'Apri/scarica etichetta PDF'}>{stampandoId===s.id?'⏳':'🖨️'}</button>
                           <button onClick={()=>setDettaglio(s)} title="Vedi dettagli spedizione" style={{padding:'4px 8px',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',fontSize:'14px',border:'1px solid #bfdbfe',cursor:'pointer'}}>👁</button>
 
                           {s.stato==='annullamento_pending' ? (
