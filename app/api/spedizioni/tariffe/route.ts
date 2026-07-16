@@ -423,22 +423,27 @@ export async function POST(req: NextRequest) {
   // (verrebbe venduto sotto costo come "Italia"), e comparirà un altro corriere che ha la zona.
   const corrIdsListino = Array.from(new Set(fasce.map((f: any) => (f.corrieri as any)?.id).filter(Boolean)))
   const esclMaster = await zoneEsclusiveMaster(supabase, corrIdsListino)
-  const zoneEsclusive = new Set<string>([
-    ...fasce.filter((f: any) => isZonaEsclusiva((f.zone as any)?.nome)).map((f: any) => (f.zone as any)?.id).filter(Boolean),
-    ...esclMaster,
-  ])
-  // Le zone esclusive del master vanno tra le candidate (per caricare le righe cap-esatto) ma NON
-  // nella mappa zona->corriere (zonaCorr): servono solo a far scattare capEsclusivo, non a matchare.
+  // Mappa zona_id -> corriere_id delle zone ESCLUSIVE: le fasce esclusive del cliente + le zone
+  // esclusive del MASTER (così l'esclusione scatta anche se il cliente non ha la fascia speciale).
+  // L'esclusione dal jolly "Italia" è PER-CORRIERE: un CAP disagiato per BRT NON tocca Poste.
+  const esclCorr = new Map<string, string>()
+  for (const f of fasce) {
+    const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id
+    if (zid && cid && isZonaEsclusiva((f.zone as any)?.nome)) esclCorr.set(zid, cid)
+  }
+  for (const z of esclMaster) esclCorr.set(z.id, z.corriere_id)
+  // Le zone esclusive del master vanno tra le candidate (per caricare le righe) ma NON nella mappa
+  // di MATCH (zonaCorr): servono solo all'esclusione per-corriere, non a creare tariffe.
   const candidateZonaIds = Array.from(new Set([
     ...fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean),
-    ...esclMaster,
+    ...esclMaster.map((z) => z.id),
   ]))
-  const { ids: zoneMatchIds, capEsclusivo } = await trovaZoneMatchDett(
+  const { ids: zoneMatchIds, corrieriEsclusi } = await trovaZoneMatchDett(
     supabase,
     { paese: paeseDest, provincia, cap: capDest, citta: (body.shipTo?.city || '') },
     candidateZonaIds,
     zonaCorr,
-    zoneEsclusive
+    esclCorr
   )
 
   // Risoluzione zona PER CORRIERE (RIGIDA): ogni corriere trova la SUA zona per questa destinazione,
@@ -457,9 +462,10 @@ export async function POST(req: NextRequest) {
   const fascePerCorriere = new Map<string, any[]>()
   for (const [cid, fasceC] of tuttePerCorriere) {
     let sel = fasceC.filter(f => zoneMatchIds.includes((f.zone as any)?.id))   // 1) zone_cap del corriere
-    // 2) fallback per nome SOLO Italia — MA NON per le destinazioni esclusive (isole minori): lì un
-    //    corriere senza la zona speciale non deve agganciare via "Italia".
-    if (!sel.length && !isEstero && !capEsclusivo) {
+    // 2) fallback per nome SOLO Italia — MA NON se la dest è esclusiva PER QUESTO corriere (isole/
+    //    disagiate/sardegna…): lì il corriere senza la zona speciale non deve agganciare via "Italia".
+    //    L'esclusione è per-corriere: un CAP disagiato per BRT non toglie il jolly a Poste.
+    if (!sel.length && !isEstero && !corrieriEsclusi.has(cid)) {
       sel = fasceC.filter(f => (f.zone as any)?.nome === zonaNome)
       if (!sel.length) sel = fasceC.filter(f => (f.zone as any)?.nome === 'Italia')
     }

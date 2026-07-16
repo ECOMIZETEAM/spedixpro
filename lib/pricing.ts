@@ -179,34 +179,35 @@ export async function calcolaPrezzoListino(
   const candidateZonaIds = fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean)
   const zonaCorr = new Map<string, string>()
   for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid) zonaCorr.set(zid, cid) }
-  const zoneEsclusive = new Set<string>(fasce.filter((f: any) => isZonaEsclusiva((f.zone as any)?.nome)).map((f: any) => (f.zone as any)?.id).filter(Boolean))
-  const { ids: zoneMatchIds, capEsclusivo } = await trovaZoneMatchDett(
+  // Mappa zona_id -> corriere_id delle zone ESCLUSIVE del listino: l'esclusione dal jolly "Italia"
+  // è PER-CORRIERE (un CAP disagiato per BRT non deve togliere il jolly a Poste).
+  const esclCorr = new Map<string, string>()
+  for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid && isZonaEsclusiva((f.zone as any)?.nome)) esclCorr.set(zid, cid) }
+  const { ids: zoneMatchIds, corrieriEsclusi } = await trovaZoneMatchDett(
     supabase,
     { paese: params.paese, provincia, cap: params.cap, citta: (params as any).citta },
     candidateZonaIds,
     zonaCorr,
-    zoneEsclusive
+    esclCorr
   )
-  let fasceZona = zoneMatchIds.length
-    ? fasce.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id))
-    : []
-  // 2) Fallback ZONE_MAP per nome zona (SOLO Italia; per l'estero niente fallback:
-  //    un corriere senza zona estera NON deve comparire). NIENTE fallback per le destinazioni
-  //    esclusive (isole minori): lì il corriere senza la zona speciale NON deve agganciare via "Italia".
+  // 2) Raggruppa per corriere; per OGNI corriere: match via zone_cap, poi fallback per nome "Italia"
+  //    SOLO se la dest NON è esclusiva PER QUESTO corriere (per-corriere) e non è estero.
   const isEsteroL = (params.paese || 'IT').toUpperCase().trim() !== 'IT'
-  if (!isEsteroL && !capEsclusivo) {
-    if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
-    if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
-  }
-  if (!fasceZona.length) return null
-
-  // Raggruppa per corriere
-  const fascePerCorriere = new Map<string, any[]>()
-  for (const f of fasceZona) {
+  const tuttePerCorr = new Map<string, any[]>()
+  for (const f of fasce) {
     const cId = (f.corrieri as any)?.id
     if (!cId) continue
-    if (!fascePerCorriere.has(cId)) fascePerCorriere.set(cId, [])
-    fascePerCorriere.get(cId)!.push(f)
+    if (!tuttePerCorr.has(cId)) tuttePerCorr.set(cId, [])
+    tuttePerCorr.get(cId)!.push(f)
+  }
+  const fascePerCorriere = new Map<string, any[]>()
+  for (const [cId, fasceC] of tuttePerCorr) {
+    let sel = fasceC.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id))
+    if (!sel.length && !isEsteroL && !corrieriEsclusi.has(cId)) {
+      sel = fasceC.filter((f: any) => (f.zone as any)?.nome === zonaNome)
+      if (!sel.length) sel = fasceC.filter((f: any) => (f.zone as any)?.nome === 'Italia')
+    }
+    if (sel.length) fascePerCorriere.set(cId, sel)
   }
   if (!fascePerCorriere.size) return null
 
@@ -246,7 +247,7 @@ export async function calcolaPrezzoListino(
     }
   } catch {}
 
-  const zonaRisolta = (fasceZona[0]?.zone as any)?.nome || zonaNome
+  const zonaRisolta = (fascePerCorriere.get(miglior.corriereId)?.[0]?.zone as any)?.nome || zonaNome
 
   return {
     prezzo: Math.round((miglior.prezzo + sponda) * 100) / 100,

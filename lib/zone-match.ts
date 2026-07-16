@@ -26,15 +26,17 @@ export async function trovaZoneMatchDett(
   // SEPARATAMENTE per ogni corriere: così il CAP esatto di UN corriere non sopprime il match a
   // provincia/jolly degli ALTRI corrieri (era il bug del "1 corriere su N" per certi CAP).
   zonaCorriere?: Map<string, string>,
-  // Insieme di zona_id "esclusive" (es. Isole Minori) tra le candidate.
-  zoneEsclusive?: Set<string>
-): Promise<{ ids: string[]; capEsclusivo: boolean }> {
+  // Mappa zona_id -> corriere_id delle zone ESCLUSIVE (Isole/Disagiate/Sardegna/…). L'esclusione
+  // dal jolly "Italia" è PER-CORRIERE: un CAP esclusivo per BRT NON deve toccare Poste. `capEsclusivo`
+  // resta come flag globale di compatibilità (true se almeno un corriere risulta escluso).
+  esclCorr?: Map<string, string>
+): Promise<{ ids: string[]; capEsclusivo: boolean; corrieriEsclusi: Set<string> }> {
   const paese = (dest.paese || 'IT').toUpperCase().trim()
   const provincia = (dest.provincia || '').toUpperCase().trim()
   const cap = (dest.cap || '').trim()
 
   const ids = Array.from(new Set(candidateZonaIds.filter(Boolean)))
-  if (!ids.length) return { ids: [], capEsclusivo: false }
+  if (!ids.length) return { ids: [], capEsclusivo: false, corrieriEsclusi: new Set() }
 
   // IMPORTANTE: scarichiamo SOLO le righe che i tier di match possono usare, cioè
   //   - cap esatto della destinazione   (tier 1)
@@ -67,19 +69,20 @@ export async function trovaZoneMatchDett(
     })
   }
 
-  // La destinazione appartiene a una zona ESCLUSIVA? Isole Minori/Disagiate/Livigno agganciano
-  // per CAP-ESATTO; Sardegna/Sicilia/Calabria per PROVINCIA (cap jolly). In entrambi i casi il
-  // jolly "resto Italia" non deve coprirla.
-  const matchEsclusivo = (r: any): boolean => zoneEsclusive!.has(r.zona_id) && (
-    (!!r.cap && r.cap !== '*' && r.cap === cap) ||
-    (!!r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*'))
-  )
-  const capEsclusivo = !!zoneEsclusive && zoneEsclusive.size > 0 && righe.some(matchEsclusivo)
-  // In tal caso il jolly totale ('*'/'*' = resto Italia) NON deve coprire la destinazione: tolgo
-  // quelle righe così un corriere senza la zona speciale (che aggancerebbe solo via jolly) resta escluso.
-  if (capEsclusivo) {
-    righe = righe.filter((r: any) => !((!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*')))
+  // Esclusione PER-CORRIERE: la destinazione è "esclusiva" per un corriere SOLO se appartiene a
+  // una zona esclusiva DI QUEL corriere (Isole/Disagiate/Livigno per CAP-ESATTO; Sardegna/Sicilia/
+  // Calabria per PROVINCIA). Così un CAP disagiato per BRT non toglie il jolly "Italia" a Poste.
+  const corrieriEsclusi = new Set<string>()
+  if (esclCorr && esclCorr.size) {
+    for (const r of righe) {
+      const cc = esclCorr.get(r.zona_id)
+      if (!cc) continue
+      const capMatch = !!r.cap && r.cap !== '*' && r.cap === cap
+      const provMatch = !!r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*')
+      if (capMatch || provMatch) corrieriEsclusi.add(cc)
+    }
   }
+  const capEsclusivo = corrieriEsclusi.size > 0   // flag globale (compat)
 
   // Applica i 3 tier (CAP esatto > provincia+cap* > jolly totale) su un insieme di righe.
   const pickTier = (rows: any[]): any[] => {
@@ -88,14 +91,17 @@ export async function trovaZoneMatchDett(
     if (!m.length) m = rows.filter((r: any) => (!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*'))  // 3) jolly
     return m
   }
+  // Toglie il jolly totale ('*'/'*' = resto Italia) da un insieme di righe.
+  const senzaJolly = (rows: any[]): any[] => rows.filter((r: any) => !((!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*')))
 
-  // Senza mappa corriere: comportamento globale (usato dove le zone candidate sono già di un
-  // solo corriere, es. listino corriere per-corriere).
+  // Senza mappa corriere: le candidate sono già di UN solo corriere → se la dest è esclusiva per
+  // quel corriere si toglie il jolly (comportamento globale, invariato).
   if (!zonaCorriere) {
-    return { ids: Array.from(new Set(pickTier(righe).map((r: any) => r.zona_id).filter(Boolean))), capEsclusivo }
+    const rr = capEsclusivo ? senzaJolly(righe) : righe
+    return { ids: Array.from(new Set(pickTier(rr).map((r: any) => r.zona_id).filter(Boolean))), capEsclusivo, corrieriEsclusi }
   }
 
-  // Con mappa: tier PER CORRIERE, così ogni corriere trova la SUA zona migliore in autonomia.
+  // Con mappa: tier PER CORRIERE; il jolly si toglie SOLO ai corrieri per cui la dest è esclusiva.
   const perCorr = new Map<string, any[]>()
   for (const r of righe) {
     const c = zonaCorriere.get(r.zona_id)
@@ -104,8 +110,11 @@ export async function trovaZoneMatchDett(
     perCorr.get(c)!.push(r)
   }
   const out = new Set<string>()
-  for (const rows of perCorr.values()) for (const r of pickTier(rows)) out.add(r.zona_id)
-  return { ids: Array.from(out), capEsclusivo }
+  for (const [c, rows] of perCorr) {
+    const rr = corrieriEsclusi.has(c) ? senzaJolly(rows) : rows
+    for (const r of pickTier(rr)) out.add(r.zona_id)
+  }
+  return { ids: Array.from(out), capEsclusivo, corrieriEsclusi }
 }
 
 // Compat: ritorna solo le zone matchate (usato dove il flag esclusivo non serve).
@@ -114,9 +123,9 @@ export async function trovaZoneMatch(
   dest: DestZona,
   candidateZonaIds: string[],
   zonaCorriere?: Map<string, string>,
-  zoneEsclusive?: Set<string>
+  esclCorr?: Map<string, string>
 ): Promise<string[]> {
-  return (await trovaZoneMatchDett(supabase, dest, candidateZonaIds, zonaCorriere, zoneEsclusive)).ids
+  return (await trovaZoneMatchDett(supabase, dest, candidateZonaIds, zonaCorriere, esclCorr)).ids
 }
 
 // Nomi di zona considerate "esclusive": una destinazione che vi appartiene NON è raggiungibile
@@ -136,17 +145,17 @@ export function isZonaDisagiata(nome: string | null | undefined): boolean {
   return /disagiat|periferic/i.test(String(nome || ''))
 }
 
-// Zone ESCLUSIVE (isole minori + disagiate) di un MASTER, per i corrieri indicati. Servono a
+// Zone ESCLUSIVE (isole/disagiate/sardegna/…) di un MASTER, per i corrieri indicati. Servono a
 // riconoscere una destinazione "esclusiva" ANCHE quando il listino in esame NON ha la fascia
-// speciale: così `capEsclusivo` scatta lo stesso e il corriere senza quella fascia NON aggancia
-// via "Italia" a prezzo pieno (verrebbe venduto sotto costo). Ritorna gli id-zona da aggiungere
-// sia alle candidate (per caricare le righe cap-esatto) sia all'insieme `zoneEsclusive`.
-// NB: NON vanno messe nella mappa zona->corriere del chiamante, così non creano match "gratis".
-export async function zoneEsclusiveMaster(supabase: any, corriereIds: string[]): Promise<string[]> {
+// speciale: così l'esclusione scatta lo stesso e il corriere senza quella fascia NON aggancia via
+// "Italia" a prezzo pieno (verrebbe venduto sotto costo). Ritorna le coppie {zona, corriere}: la
+// zona va tra le candidate (per caricare le righe) e nella mappa esclCorr (esclusione PER-CORRIERE).
+// NB: NON vanno messe nella mappa zona->corriere di MATCH, così non creano tariffe "gratis".
+export async function zoneEsclusiveMaster(supabase: any, corriereIds: string[]): Promise<Array<{ id: string; corriere_id: string }>> {
   const ids = Array.from(new Set((corriereIds || []).filter(Boolean)))
   if (!ids.length) return []
-  const { data } = await supabase.from('zone').select('id,nome').in('corriere_id', ids)
-  return (data || []).filter((z: any) => isZonaEsclusiva((z as any).nome)).map((z: any) => (z as any).id)
+  const { data } = await supabase.from('zone').select('id,nome,corriere_id').in('corriere_id', ids)
+  return (data || []).filter((z: any) => isZonaEsclusiva((z as any).nome)).map((z: any) => ({ id: (z as any).id, corriere_id: (z as any).corriere_id }))
 }
 
 // Regola DISAGIATA (per-corriere): restituisce, per i corrieri indicati, la zona disagiata del
