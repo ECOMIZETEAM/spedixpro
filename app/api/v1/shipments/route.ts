@@ -43,6 +43,13 @@ export async function POST(req: NextRequest) {
   if (!body.shipTo?.postalCode) return NextResponse.json({ error: 'CAP destinatario obbligatorio (shipTo.postalCode)' }, { status: 400 })
   if (!body.shipFrom?.name || !body.shipFrom?.postalCode) return NextResponse.json({ error: 'Mittente incompleto (shipFrom)' }, { status: 400 })
 
+  // "Presso" (c/o): seconda riga dell'indirizzo. Accetto `presso` e, come alias, `street2`
+  // (così chi arriva da altre piattaforme non deve cambiare payload). Su Spedisci finisce in
+  // street2; su SpediamoPro non esiste un campo dedicato -> viene accodato all'indirizzo.
+  const pressoFrom = String(body.shipFrom?.presso || body.shipFrom?.street2 || '').trim()
+  const pressoTo = String(body.shipTo?.presso || body.shipTo?.street2 || '').trim()
+  const conPresso = (via: string, presso: string) => (presso ? `${via} c/o ${presso}`.trim() : via)
+
   const { data: cliente } = await admin.from('clienti')
     .select('master_id,ragione_sociale,listino_cliente_id,tipo_contratto,credito').eq('id', ctx.clienteId).single()
   if (!cliente?.listino_cliente_id) return NextResponse.json({ error: 'Cliente senza listino' }, { status: 400 })
@@ -95,9 +102,12 @@ export async function POST(req: NextRequest) {
 
   if (corriere.tipo === 'spedisci') {
     const baseUrl = `https://${cred.master_domain}/api/v2`
+    // Spedisci ha la seconda riga indirizzo nativa: ci mappiamo il "presso".
+    const spedFrom = { ...body.shipFrom, street2: pressoFrom }
+    const spedTo = { ...body.shipTo, street2: pressoTo }
     const ratesRes = await fetch(`${baseUrl}/shipping/rates`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ packages, shipFrom: body.shipFrom, shipTo: body.shipTo, notes: body.notes || '', insuranceValue: body.insuranceValue || 0, codValue: body.codValue || 0, accessoriServices: [] }),
+      body: JSON.stringify({ packages, shipFrom: spedFrom, shipTo: spedTo, notes: body.notes || '', insuranceValue: body.insuranceValue || 0, codValue: body.codValue || 0, accessoriServices: [] }),
     })
     const rates = await ratesRes.json()
     if (!Array.isArray(rates) || !rates.length) return NextResponse.json({ error: 'Nessuna tariffa dal corriere' }, { status: 400 })
@@ -109,15 +119,17 @@ export async function POST(req: NextRequest) {
     if (!rate) return NextResponse.json({ error: 'Contratto non disponibile per questo corriere' }, { status: 400 })
     const res = await fetch(`${baseUrl}/shipping/create`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ carrierCode: rate.carrierCode, contractCode: rate.contractCode, label_format: 'PDF', packages, shipFrom: body.shipFrom, shipTo: body.shipTo, notes: body.notes || '', insuranceValue: body.insuranceValue || 0, codValue: body.codValue || 0, accessoriServices: [] }),
+      body: JSON.stringify({ carrierCode: rate.carrierCode, contractCode: rate.contractCode, label_format: 'PDF', packages, shipFrom: spedFrom, shipTo: spedTo, notes: body.notes || '', insuranceValue: body.insuranceValue || 0, codValue: body.codValue || 0, accessoriServices: [] }),
     })
     const text = await res.text(); try { raw = JSON.parse(text) } catch { raw = { error: text } }
     if (!res.ok || raw.error) return NextResponse.json({ error: raw?.error || text }, { status: 400 })
     numero = raw.trackingNumber; costoCorrente = parseFloat(raw.shipmentCost) || 0
     etichettaUrl = raw.labelData ? `data:application/pdf;base64,${raw.labelData}` : (Array.isArray(raw.labels) && raw.labels[0]?.labelData ? `data:application/pdf;base64,${raw.labels[0].labelData}` : null)
   } else if (corriere.tipo === 'spediamopro') {
-    const sender = { name: body.shipFrom.name?.substring(0,35), address: body.shipFrom.street1?.substring(0,35), postalCode: body.shipFrom.postalCode, city: body.shipFrom.city?.substring(0,35), province: body.shipFrom.state?.substring(0,2).toUpperCase(), country: 'IT', phone: body.shipFrom.phone || undefined, email: body.shipFrom.email?.substring(0,50) || undefined }
-    const consignee: any = { name: body.shipTo.name?.substring(0,35), address: body.shipTo.street1?.substring(0,35), postalCode: body.shipTo.postalCode, city: body.shipTo.city?.substring(0,35), province: body.shipTo.state?.substring(0,2).toUpperCase(), country: (body.shipTo.country||'IT').toUpperCase() }
+    // SpediamoPro non ha la seconda riga indirizzo: il "presso" viene accodato all'indirizzo
+    // (max 35 caratteri imposti dal corriere).
+    const sender = { name: body.shipFrom.name?.substring(0,35), address: conPresso(body.shipFrom.street1 || '', pressoFrom).substring(0,35), postalCode: body.shipFrom.postalCode, city: body.shipFrom.city?.substring(0,35), province: body.shipFrom.state?.substring(0,2).toUpperCase(), country: 'IT', phone: body.shipFrom.phone || undefined, email: body.shipFrom.email?.substring(0,50) || undefined }
+    const consignee: any = { name: body.shipTo.name?.substring(0,35), address: conPresso(body.shipTo.street1 || '', pressoTo).substring(0,35), postalCode: body.shipTo.postalCode, city: body.shipTo.city?.substring(0,35), province: body.shipTo.state?.substring(0,2).toUpperCase(), country: (body.shipTo.country||'IT').toUpperCase() }
     if (body.shipTo.phone) consignee.phone = body.shipTo.phone
     if (body.shipTo.email) consignee.email = body.shipTo.email.substring(0,50)
     // MULTICOLLO: un parcel per OGNI collo (prima si inviava un solo parcel col peso totale).
@@ -143,10 +155,10 @@ export async function POST(req: NextRequest) {
 
   const { data: inserted, error: insErr } = await admin.from('spedizioni').insert({
     master_id: masterId, cliente_id: ctx.clienteId, corriere_id: corriere.id, numero,
-    mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
+    mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_presso: pressoFrom || null, mitt_citta: body.shipFrom.city,
     mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
     mitt_email: body.shipFrom.email || null, mitt_telefono: body.shipFrom.phone || null,
-    dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_citta: body.shipTo.city,
+    dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_presso: pressoTo || null, dest_citta: body.shipTo.city,
     dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
     dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
     colli: packages.length, peso_reale: pesoReale,
