@@ -41,7 +41,7 @@ export async function GET() {
       C(base().gte('updated_at', startOggi).in('stato', ['spedita', 'in_transito', 'consegnata'])),
       adminA.from('spedizioni').select(SPED_COLS).in('cliente_id', ids).order('created_at', { ascending: false }).limit(10),
       // Fatturato mese: TUTTE le righe (senza range PostgREST taglierebbe a 1000 -> totale errato).
-      fetchAll(() => adminA.from('spedizioni').select('costo_totale').in('cliente_id', ids).gte('created_at', inizioMese).not('stato', 'in', '(annullata)').order('created_at', { ascending: false })),
+      fetchAll(() => adminA.from('spedizioni').select('costo_totale').in('cliente_id', ids).gte('created_at', inizioMese).not('stato', 'in', '(annullata)').order('created_at', { ascending: false }).order('id', { ascending: false })),
     ])
     const fatturatoMese = (meseRows || []).reduce((s: number, x: any) => s + Number(x.costo_totale || 0), 0)
     const tassoConsegna = spedizioniTotali > 0 ? Math.round((consegnateTotali / spedizioniTotali) * 1000) / 10 : 0

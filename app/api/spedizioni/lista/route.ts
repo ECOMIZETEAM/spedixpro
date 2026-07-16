@@ -79,7 +79,10 @@ export async function GET(req: NextRequest) {
   // Solo colonne leggere (SPED_COLS): esclusi etichetta_url/raw_response/colli_dettaglio.
   // Costruisco una query FRESCA a ogni chiamata (i builder Supabase sono monouso).
   const buildBase = () => {
-    let q = db.from('spedizioni').select(`${SPED_COLS},clienti(ragione_sociale,agente),corrieri(id,nome_contratto)`).order(ordinaPer, { ascending: false })
+    // 2° ordinamento su 'id' (tie-breaker DETERMINISTICO): senza, le righe con lo stesso valore di
+    // ordinaPer (es. created_at identico negli import in blocco) cambiano posizione tra le pagine
+    // (fetchAll >1000) → l'elenco "balla". Con l'id la paginazione è stabile e completa.
+    let q = db.from('spedizioni').select(`${SPED_COLS},clienti(ragione_sociale,agente),corrieri(id,nome_contratto)`).order(ordinaPer, { ascending: false }).order('id', { ascending: false })
     if (subtreeSel) q = q.in('master_id', subtreeSel)
     else if (clienteId) q = q.eq('cliente_id', clienteId).eq('master_id', utente?.master_id)
     else if (utente?.ruolo === 'cliente') q = q.eq('cliente_id', utente.cliente_id)
@@ -143,7 +146,7 @@ export async function GET(req: NextRequest) {
       for (let from = 0; ; from += 1000) {
         const { data: mvs } = await adminMov.from('movimenti')
           .select('spedizione_id,master_target_id,cliente_id,importo').in('tipo', ['spedizione', 'rettifica'])
-          .in('spedizione_id', chunk).range(from, from + 999)
+          .in('spedizione_id', chunk).order('id', { ascending: true }).range(from, from + 999)
         if (!mvs?.length) break
         for (const mv of mvs) {
           const imp = Number(mv.importo || 0)   // SIGNED
@@ -187,7 +190,7 @@ export async function GET(req: NextRequest) {
     for (let i = 0; i < ids.length; i += 300) {
       const chunk = ids.slice(i, i + 300)
       for (let from = 0; ; from += 1000) {
-        const { data: imp } = await adminOrd.from('ordini_importati').select('spedizione_id,order_id').in('spedizione_id', chunk).not('order_id', 'is', null).range(from, from + 999)
+        const { data: imp } = await adminOrd.from('ordini_importati').select('spedizione_id,order_id').in('spedizione_id', chunk).not('order_id', 'is', null).order('id', { ascending: true }).range(from, from + 999)
         for (const o of (imp || [])) { const sid = (o as any).spedizione_id, v = (o as any).order_id; if (sid && v && !idOrdine.has(sid)) idOrdine.set(sid, String(v)) }
         if (!imp?.length || imp.length < 1000) break
       }

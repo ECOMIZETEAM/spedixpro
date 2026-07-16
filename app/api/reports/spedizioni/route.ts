@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
   const buildBase = () => {
     let q = db.from('spedizioni')
       .select(`${SPED_COLS}, clienti(ragione_sociale,agente), corrieri(id,nome_contratto)`)
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
     if (subtreeSel) q = q.in('master_id', subtreeSel)
     else if (clienteId) q = q.eq('cliente_id', clienteId).eq('master_id', mine)
     else if (ruolo === 'cliente') q = q.eq('cliente_id', utente?.cliente_id)
@@ -107,7 +107,7 @@ export async function GET(req: NextRequest) {
       const mvDb = ruolo === 'cliente' ? db : adminDb
       const { data: mvs } = await mvDb.from('movimenti')
         .select('spedizione_id,master_target_id,cliente_id,importo').in('tipo', ['spedizione', 'rettifica'])
-        .in('spedizione_id', chunk).range(from, from + 999)
+        .in('spedizione_id', chunk).order('id', { ascending: true }).range(from, from + 999)
       if (!mvs?.length) break
       for (const mv of mvs) {
         const imp = Number(mv.importo || 0)   // SIGNED

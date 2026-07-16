@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
   const movM = await fetchAll(() => admin.from('movimenti')
     .select('master_target_id,cliente_id,importo,tipo,created_at,spedizione_id')
     .eq('master_id', M).gte('created_at', dal).lte('created_at', alEnd).in('tipo', TIPI)
-    .order('created_at', { ascending: false }))
+    .order('created_at', { ascending: false }).order('id', { ascending: false }))
 
   // movimenti dei sotto-master diretti (per i loro pagamenti a cascata verso M)
   let movSub: any[] = []
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
     movSub = await fetchAll(() => admin.from('movimenti')
       .select('master_id,master_target_id,importo,tipo,created_at')
       .in('master_id', Array.from(subIds)).gte('created_at', dal).lte('created_at', alEnd).in('tipo', TIPI)
-      .order('created_at', { ascending: false }))
+      .order('created_at', { ascending: false }).order('id', { ascending: false }))
   }
 
   const n = (x: any) => Number(x || 0)
@@ -115,7 +115,7 @@ export async function GET(req: NextRequest) {
       .select('costo_spedizione, stato, corrieri(tipo)')
       .in('master_id', sub.length ? sub : [M])
       .gte('created_at', dal).lte('created_at', alEnd)
-      .order('created_at', { ascending: false }))
+      .order('created_at', { ascending: false }).order('id', { ascending: false }))
     const agg = new Map<string, { costo: number; n: number }>()
     for (const s of (sp || [])) {
       // Escludo SOLO le 'annullata' (effettivamente cancellate + riaccreditate = netto 0).

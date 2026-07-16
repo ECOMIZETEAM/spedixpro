@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
       for (let from = 0; ; from += 1000) {
         const { data: mvs } = await admin.from('movimenti')
           .select('spedizione_id,importo').in('tipo', ['spedizione', 'rettifica'])
-          .in('spedizione_id', chunk).not('cliente_id', 'is', null).range(from, from + 999)
+          .in('spedizione_id', chunk).not('cliente_id', 'is', null).order('id', { ascending: true }).range(from, from + 999)
         if (!mvs?.length) break
         for (const mv of mvs) sumCli.set((mv as any).spedizione_id, (sumCli.get((mv as any).spedizione_id) || 0) + Number((mv as any).importo || 0))
         if (mvs.length < 1000) break
