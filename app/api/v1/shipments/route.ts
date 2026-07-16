@@ -123,9 +123,10 @@ export async function POST(req: NextRequest) {
     const parcels = packages.map((p: any) => ({ weight: kgToGrams(parseFloat(p?.weight)||1), length: cmToMm(p?.length||10), width: cmToMm(p?.width||10), height: cmToMm(p?.height||10) }))
     const cod = body.codValue ? euroToCents(body.codValue) : undefined
     const ins = body.insuranceValue ? euroToCents(body.insuranceValue) : undefined
-    // BRT ha due service (1-2 colli vs 3+): con più colli li passo entrambi e SpediamoPro sceglie.
-    const serviceIdV1 = (packages.length > 1 && cred.service_id_multicollo)
-      ? [cred.service_id_multicollo, cred.service_id].filter(Boolean).join(',')
+    // BRT ha due service BRTEXP: quale sia disponibile dipende da peso/misure e colli. Se il
+    // contratto ne ha un secondo, li passo SEMPRE entrambi e SpediamoPro sceglie il tier giusto.
+    const serviceIdV1 = cred.service_id_multicollo
+      ? [cred.service_id, cred.service_id_multicollo].filter(Boolean).join(',')
       : (cred.service_id || null)
     const quotation = await spediamoproGetQuotation(cred.authcode, serviceIdV1, { parcels, sender, consignee, cashOnDeliveryAmount: cod, insuredAmount: ins })
     const externalRefV1 = (body.notes ? String(body.notes) : '').substring(0, 64) || undefined

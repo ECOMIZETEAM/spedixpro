@@ -339,7 +339,12 @@ export async function POST(req: NextRequest) {
 
     if (corriere.tipo === 'spediamopro') {
       try {
-        const quote = await spediamoproGetQuotation(cred.authcode, cred.service_id || null, {
+        // Passo entrambi i service BRT (BRTEXP a fasce di peso/misure): senza, un collo pesante
+        // che ricade sul secondo tier non tornerebbe tariffa e BRT sparirebbe dal preventivo.
+        const serviceIdQ = cred.service_id_multicollo
+          ? [cred.service_id, cred.service_id_multicollo].filter(Boolean).join(',')
+          : (cred.service_id || null)
+        const quote = await spediamoproGetQuotation(cred.authcode, serviceIdQ, {
           parcels: [{ weight: kgToGrams(pesoFatt), length: cmToMm(pkg?.length || 10), width: cmToMm(pkg?.width || 10), height: cmToMm(pkg?.height || 10) }],
           sender: { name: body.shipFrom.name, address: body.shipFrom.street1, postalCode: body.shipFrom.postalCode, city: body.shipFrom.city, province: (body.shipFrom.state || '').substring(0, 2).toUpperCase(), country: 'IT', phone: body.shipFrom.phone, email: body.shipFrom.email },
           consignee: { name: body.shipTo.name, address: body.shipTo.street1, postalCode: body.shipTo.postalCode, city: body.shipTo.city, province: isEstero ? (body.shipTo.state || body.shipTo.city || '-') : (body.shipTo.state || '').substring(0, 2).toUpperCase(), country: body.shipTo.country || 'IT', phone: body.shipTo.phone, email: body.shipTo.email },

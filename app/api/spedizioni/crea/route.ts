@@ -445,7 +445,10 @@ export async function POST(req: NextRequest) {
         province: body.shipFrom.state?.substring(0, 2).toUpperCase(),
         country: 'IT',
         phone: telSp(body.shipFrom.phone),
-        email: emailSp(body.shipFrom.email),
+        // SpediamoPro (accept) ESIGE l'email del mittente come stringa: se l'anagrafica non ne ha
+        // una valida, usiamo un indirizzo di servizio così la creazione non fallisce (prima dava
+        // "sender.email should be of type string").
+        email: emailSp(body.shipFrom.email) || 'noreply@moovexpress.com',
       }
       const consignee: any = {
         name: body.shipTo.name?.substring(0, 35),
@@ -465,12 +468,13 @@ export async function POST(req: NextRequest) {
       }))
       const cashOnDeliveryAmount = body.codValue ? euroToCents(body.codValue) : undefined
       const insuredAmount = body.insuranceValue ? euroToCents(body.insuranceValue) : undefined
-      // BRT ha DUE service per lo STESSO contratto (entrambi BRTEXP): uno per 1-2 colli
-      // (service_id) e uno per 3+ colli (service_id_multicollo). SpediamoPro sceglie da solo
-      // quello applicabile alla fascia di colli, quindi con più colli glieli passo ENTRAMBI.
-      // (Prima si forzava solo il multicollo → con 2 colli tornava vuoto e la spedizione falliva.)
-      const serviceId = (packages.length > 1 && cred.service_id_multicollo)
-        ? [cred.service_id_multicollo, cred.service_id].filter(Boolean).join(',')
+      // BRT ha DUE service per lo STESSO contratto (entrambi BRTEXP): quale sia disponibile
+      // dipende da PESO/MISURE e numero colli (es. mono pesante o 3+ colli → service_id_multicollo;
+      // mono leggero / 1-2 colli → service_id). Non essendo prevedibile a priori, quando il contratto
+      // ha un secondo service li passo SEMPRE ENTRAMBI e SpediamoPro sceglie il tier applicabile.
+      // (Prima: mono usava solo service_id → col collo pesante tornava vuoto e falliva.)
+      const serviceId = cred.service_id_multicollo
+        ? [cred.service_id, cred.service_id_multicollo].filter(Boolean).join(',')
         : (cred.service_id || null)
 
       const quotation = await spediamoproGetQuotation(cred.authcode, serviceId, {
