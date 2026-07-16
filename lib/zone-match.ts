@@ -67,11 +67,16 @@ export async function trovaZoneMatchDett(
     })
   }
 
-  // Il CAP appartiene (cap-esatto) a una zona ESCLUSIVA? (es. Isole Minori)
-  const capEsclusivo = !!cap && !!zoneEsclusive && zoneEsclusive.size > 0 &&
-    righe.some((r: any) => r.cap && r.cap !== '*' && r.cap === cap && zoneEsclusive.has(r.zona_id))
-  // In tal caso il jolly totale ('*'/'*' = resto Italia) NON deve coprire il CAP: tolgo quelle
-  // righe così un corriere senza la zona speciale (che aggancerebbe solo via jolly) resta escluso.
+  // La destinazione appartiene a una zona ESCLUSIVA? Isole Minori/Disagiate/Livigno agganciano
+  // per CAP-ESATTO; Sardegna/Sicilia/Calabria per PROVINCIA (cap jolly). In entrambi i casi il
+  // jolly "resto Italia" non deve coprirla.
+  const matchEsclusivo = (r: any): boolean => zoneEsclusive!.has(r.zona_id) && (
+    (!!r.cap && r.cap !== '*' && r.cap === cap) ||
+    (!!r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*'))
+  )
+  const capEsclusivo = !!zoneEsclusive && zoneEsclusive.size > 0 && righe.some(matchEsclusivo)
+  // In tal caso il jolly totale ('*'/'*' = resto Italia) NON deve coprire la destinazione: tolgo
+  // quelle righe così un corriere senza la zona speciale (che aggancerebbe solo via jolly) resta escluso.
   if (capEsclusivo) {
     righe = righe.filter((r: any) => !((!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*')))
   }
@@ -114,13 +119,15 @@ export async function trovaZoneMatch(
   return (await trovaZoneMatchDett(supabase, dest, candidateZonaIds, zonaCorriere, zoneEsclusive)).ids
 }
 
-// Nomi di zona considerate "esclusive": un CAP che vi appartiene NON è raggiungibile via il
-// jolly "resto Italia". Serve a non far spedire un corriere che non ha quella zona assegnata.
-// Comprende le ISOLE MINORI e le ZONE DISAGIATE/PERIFERICHE: se il listino non prezza quella
-// zona speciale, il corriere NON compare per quella destinazione (niente ripiego su "Italia" a
-// prezzo pieno) — un altro corriere che ha la zona impostata la coprirà.
+// Nomi di zona considerate "esclusive": una destinazione che vi appartiene NON è raggiungibile
+// via il jolly "resto Italia". Serve a non far spedire un corriere che non ha quella zona
+// assegnata. Comprende: ISOLE MINORI, ZONE DISAGIATE/PERIFERICHE (match cap-esatto) e le zone
+// maggiori a supplemento SARDEGNA/SICILIA/CALABRIA/LIVIGNO (match per provincia o cap-esatto).
+// Se il listino non prezza quella zona speciale, il corriere NON compare per quella destinazione
+// (niente ripiego su "Italia" a prezzo pieno) — un altro corriere che ha la zona la coprirà.
 export function isZonaEsclusiva(nome: string | null | undefined): boolean {
-  return /isole?\s*minori/i.test(String(nome || '')) || isZonaDisagiata(nome)
+  const n = String(nome || '')
+  return /isole?\s*minori/i.test(n) || isZonaDisagiata(n) || /\b(sardegna|sicilia|calabria|livigno)\b/i.test(n)
 }
 
 // Nomi di zona "disagiata/periferica": zone speciali a supplemento (es. "Zone Disagiate",
