@@ -9,14 +9,18 @@ export async function GET(req: NextRequest) {
   if (!clienteId) return NextResponse.json([])
   const p = req.nextUrl.searchParams
   const stato = p.get('stato'); const dal = p.get('dal'); const al = p.get('al')
+  // Una giacenza resta in elenco ANCHE dopo lo svincolo: il cron sposta spedizioni.stato
+  // (es. in_giacenza -> non_consegnato), ma resta `giacenza_data` valorizzata e `giacenza_stato`
+  // (aperta/in_gestione/svincolata/chiusa). Quindi filtro per "è entrata in giacenza", non per lo
+  // stato corrente della spedizione. Data filtrata su giacenza_data (quando è entrata in giacenza).
   let query = supabase.from('spedizioni')
     .select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
     .eq('cliente_id', clienteId)
-    .eq('stato', 'in_giacenza')
-    .order('created_at', { ascending: false })
+    .not('giacenza_data', 'is', null)
+    .order('giacenza_data', { ascending: false })
   if (stato) query = query.eq('giacenza_stato', stato)
-  if (dal) query = query.gte('created_at', dal)
-  if (al) query = query.lte('created_at', al + 'T23:59:59')
+  if (dal) query = query.gte('giacenza_data', dal)
+  if (al) query = query.lte('giacenza_data', al + 'T23:59:59')
   const { data } = await query
   return NextResponse.json(data || [])
 }

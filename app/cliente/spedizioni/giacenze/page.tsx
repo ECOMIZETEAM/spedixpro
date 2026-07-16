@@ -19,7 +19,9 @@ export default function GiacenzePage() {
   const [esito, setEsito] = useState<any>(null)
   const [filtri, setFiltri] = useState({
     clienteId:'', vettore:'', contratto:'',
-    dal: new Date().toISOString().split('T')[0],
+    // Default AMPIO (ultimo anno): le giacenze aperte/svincolate vanno viste tutte, non solo di oggi.
+    // Il server filtra per giacenza_data (entrata in giacenza).
+    dal: new Date(Date.now() - 365*24*60*60*1000).toISOString().split('T')[0],
     al: new Date().toISOString().split('T')[0],
     stato:''
   })

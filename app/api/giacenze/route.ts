@@ -39,10 +39,13 @@ export async function GET(req: NextRequest) {
     if (subtreeSel.length > 1) db = adminDb
   }
 
+  // Filtro "è entrata in giacenza" (giacenza_data valorizzata), NON lo stato corrente: dopo lo
+  // svincolo il cron sposta spedizioni.stato (in_giacenza -> non_consegnato/in_consegna) ma la
+  // giacenza deve RESTARE in elenco (con giacenza_stato = svincolata/chiusa). Prima spariva.
   let query = db.from('spedizioni')
     .select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
-    .eq('stato', 'in_giacenza')
-    .order('created_at', { ascending: false })
+    .not('giacenza_data', 'is', null)
+    .order('giacenza_data', { ascending: false })
 
   if (subtreeSel) query = query.in('master_id', subtreeSel)
   else query = query.eq('master_id', utente?.master_id)
