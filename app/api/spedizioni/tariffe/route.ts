@@ -482,6 +482,15 @@ export async function POST(req: NextRequest) {
 
   for (const [corriereId, fasceDelCorriere] of fascePerCorriere) {
     if (disabilitati.has(corriereId)) continue   // contratto disattivato per questo cliente/sotto-master
+    // REGOLA "non vendi ciò che non compri": il MASTER del cliente deve avere LUI un prezzo (costo)
+    // per questa destinazione+corriere, altrimenti non lo compra da sopra e NON può assegnarlo al
+    // cliente → corriere escluso. (Gestione-zone è la fonte: se il master non ha la fascia per questa
+    // zona, per lui è come non avere il corriere.) Non tocca peso/agevolazioni/misure: è un gate a monte.
+    const _costoMaster = await calcolaPrezzoCorriereDettaglio(supabase, {
+      corriereId, masterId, provincia, cap: capDest, paese: paeseDest, citta: (body.shipTo?.city || ''),
+      pesoReale, packages: tuttiColli, contrassegno: 0, assicurazione: 0,
+    })
+    if (!_costoMaster || _costoMaster.totale <= 0) { esclusiQuota++; ultimoErroreQuota = 'listino master mancante per questa zona'; continue }
     const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
     // Peso fatturato con il fattore volume DI QUESTO corriere (override per-corriere).
     const { pesoVolume: pesoVolumeC, pesoFatturato: pesoFatturatoC } = pesoFatturatoCon(fattorePerCorr.get(corriereId) || fattore)
