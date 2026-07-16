@@ -21,7 +21,7 @@ export async function GET() {
   // quindi c'è ampio margine sotto maxDuration. NB: a volumi molto alti va spezzato in batch
   // con un campo "ultimo_check_tracking" (round-robin) — vedi TODO cron tracking scalabile.
   const { data: spedizioni } = await admin.from('spedizioni')
-    .select('id,stato,raw_response,tracking_number,giacenza_data,corriere_id,corrieri(tipo,credenziali)')
+    .select('id,numero,stato,raw_response,tracking_number,giacenza_data,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali)')
     .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
     .order('updated_at', { ascending: true })
     .limit(1000)
@@ -76,6 +76,19 @@ export async function GET() {
       if (Object.keys(upd).length) {
         await admin.from('spedizioni').update(upd).eq('id', s.id)
         aggiornate++
+      }
+
+      // ENTRATA in giacenza -> il cliente paga SUBITO l'apertura dossier (+ cascata rete), una volta.
+      // Il servizio (riconsegna/reso) sarà addebitato allo svincolo. Best-effort: non blocca il cron.
+      if (nuovo === 'in_giacenza' && !(s as any).giacenza_apertura_addebitata && !(s as any).giacenza_addebito_effettuato) {
+        try {
+          const { addebitaAperturaGiacenza } = await import('@/lib/giacenza-cascata')
+          await addebitaAperturaGiacenza({
+            id: s.id, numero: (s as any).numero, cliente_id: (s as any).cliente_id,
+            master_id: (s as any).master_id, corriere_id: s.corriere_id,
+            giacenza_apertura_addebitata: (s as any).giacenza_apertura_addebitata,
+          })
+        } catch (e) { console.error('Errore addebito apertura giacenza:', e) }
       }
     } catch { errori++ }
   }

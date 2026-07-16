@@ -5,7 +5,7 @@ import { isAgente, clientiAgente, bloccaAgente } from '@/lib/agente'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { spediamoproSearchStocks, spediamoproReleaseStock } from '@/lib/spediamopro'
 import { registraMovimento } from '@/lib/movimenti'
-import { addebitaGiacenzaCatena } from '@/lib/giacenza-cascata'
+import { addebitaServizioGiacenza } from '@/lib/giacenza-cascata'
 
 // Gestione di una singola giacenza (dettaglio "Gestisci").
 // Flusso a due attori: il cliente sceglie l'operazione (riconsegna / riconsegna a
@@ -199,33 +199,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       } catch (e) { console.error('Errore invio svincolo al corriere:', e) }
     }
 
-    // Addebito COME LE SPEDIZIONI: due voci separate che scalano il CREDITO (RPC atomica),
-    // + cascata su tutta la rete fino al detentore del contratto (ogni master paga il suo prezzo).
+    // SVINCOLO: si addebita SOLO il servizio scelto (riconsegna/reso/…). L'APERTURA è già stata
+    // addebitata all'ENTRATA in giacenza (dal cron). Cliente + cascata rete (solo servizio).
     if (!sped.giacenza_addebito_effettuato) {
-      const conApertura = rich.operazione !== 'reso'   // il reso non ha apertura dossier
-      const aperturaCli = conApertura ? (Number(rich.costo_apertura) || 0) : 0
       const servizioCli = Number(rich.costo_servizio) || 0
-      // CLIENTE — due voci
-      if (aperturaCli > 0) {
-        await registraMovimento(admin, { masterId: sped.master_id, clienteId: sped.cliente_id, tipo: 'giacenza',
-          descrizione: `Apertura giacenza ${sped.numero}`, riferimento: sped.numero, importo: -aperturaCli, spedizioneId: id })
-      }
-      if (servizioCli > 0) {
-        await registraMovimento(admin, { masterId: sped.master_id, clienteId: sped.cliente_id, tipo: 'giacenza',
-          descrizione: `${opLabel[rich.operazione] || rich.operazione} ${sped.numero}`, riferimento: sped.numero, importo: -servizioCli, spedizioneId: id })
-      }
-      // Eventuali costi manuali aggiunti dal master: una voce a parte.
+      await addebitaServizioGiacenza(
+        { id, numero: sped.numero, cliente_id: sped.cliente_id, master_id: sped.master_id, corriere_id: sped.corriere_id },
+        rich.operazione, servizioCli
+      )
+      // Eventuali costi manuali aggiunti dal master: una voce a parte al cliente.
       if (extra > 0) {
         await registraMovimento(admin, { masterId: sped.master_id, clienteId: sped.cliente_id, tipo: 'giacenza',
-          descrizione: `Costi giacenza ${sped.numero}`, riferimento: sped.numero, importo: -extra, spedizioneId: id })
-      }
-      // CASCATA RETE — ogni master fino al detentore, col suo prezzo giacenza (apertura + servizio).
-      if (sped.corrieri?.nome_contratto && sped.corrieri?.master_id) {
-        await addebitaGiacenzaCatena({
-          masterDirettoId: sped.master_id, corriereOwnerId: sped.corrieri.master_id,
-          corriereNome: sped.corrieri.nome_contratto, operazione: rich.operazione,
-          numero: sped.numero, spedizioneId: id, createdBy: null, conApertura,
-        })
+          descrizione: `Costi giacenza ${sped.numero}`, riferimento: sped.numero, importo: -Math.abs(extra), spedizioneId: id })
       }
     }
 
