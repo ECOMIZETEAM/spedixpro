@@ -4,6 +4,7 @@ import { autenticaApiKey } from '@/lib/api-auth'
 import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
 import { registraMovimento } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
+import { inviaWebhook } from '@/lib/webhooks'
 import {
   spediamoproGetQuotation, spediamoproCreateShipment, spediamoproGetLabel,
   spediamoproWaitForTracking, kgToGrams, cmToMm, euroToCents, centsToEuro,
@@ -165,6 +166,15 @@ export async function POST(req: NextRequest) {
   try {
     await addebitaCatena(admin, { masterDirettoId: masterId, corriereOwnerId: corriere.master_id, costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', corriereNome: corriere.nome_contratto, contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0), numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: null })
   } catch (e) { console.error('API cascata:', e) }
+
+  // Notifica ai webhook del cliente (best-effort: non blocca né fa fallire la creazione)
+  inviaWebhook({
+    clienteId: ctx.clienteId, corriereId: corriere.id, evento: 'shipment.created',
+    data: {
+      tracking_number: numero, carrier: corriere.nome_contratto, status: 'in_lavorazione',
+      location: body.shipTo?.city || '', events: [],
+    },
+  }).catch(() => {})
 
   return NextResponse.json({
     id: inserted?.id || null, tracking: numero, contratto: corriere.nome_contratto,
