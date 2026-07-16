@@ -9,7 +9,7 @@
 // Usato dal ledger a cascata (STEP 4.5) per sapere quanto paga ogni master
 // della catena col proprio listino ereditato.
 
-import { trovaZoneMatch, trovaZoneMatchDett, isZonaEsclusiva } from '@/lib/zone-match'
+import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
 
 const ZONE_MAP: Record<string, string> = {
   CA:'Sardegna',CI:'Sardegna',VS:'Sardegna',NU:'Sardegna',OG:'Sardegna',OT:'Sardegna',OR:'Sardegna',SS:'Sardegna',SU:'Sardegna',
@@ -338,16 +338,24 @@ export async function calcolaPrezzoCorriereDettaglio(
     .order('peso_max', { ascending: true })
   if (!fasce?.length) return null
 
-  const candidateZonaIds = fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean)
-  const zoneMatchIds = await trovaZoneMatch(
+  // Zone ESCLUSIVE del corriere (isole/disagiate/…), anche se questo listino NON le prezza: servono
+  // a NON far cadere su "Italia" una destinazione esclusiva (es. 30126 disagiata) quando manca la
+  // fascia speciale → il corriere semplicemente non copre quella destinazione (niente sotto-costo).
+  const esclZone = await zoneEsclusiveMaster(supabase, [corriereId])
+  const esclCorr = new Map<string, string>()
+  for (const z of esclZone) esclCorr.set(z.id, z.corriere_id)
+  const zonaCorr = new Map<string, string>()
+  const candidateZonaIds = Array.from(new Set<string>([...fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean), ...esclZone.map((z) => z.id)]))
+  for (const f of fasce) { const zid = (f.zone as any)?.id; if (zid) zonaCorr.set(zid, corriereId) }
+  const { ids: zoneMatchIds, corrieriEsclusi } = await trovaZoneMatchDett(
     supabase,
     { paese: params.paese, provincia, cap: params.cap, citta: (params as any).citta },
-    candidateZonaIds
+    candidateZonaIds, zonaCorr, esclCorr
   )
   let fasceZona = zoneMatchIds.length ? fasce.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id)) : []
-  // Per l'ESTERO niente fallback su Italia: mostra solo i corrieri con una zona estera.
+  // Per l'ESTERO niente fallback su Italia; e nemmeno se la dest è ESCLUSIVA per questo corriere.
   const isEsteroC = (params.paese || 'IT').toUpperCase().trim() !== 'IT'
-  if (!isEsteroC) {
+  if (!isEsteroC && !corrieriEsclusi.has(corriereId)) {
     if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
     if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
   }
