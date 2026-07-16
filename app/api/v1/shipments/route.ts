@@ -7,6 +7,7 @@ import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import {
   spediamoproGetQuotation, spediamoproCreateShipment, spediamoproGetLabel,
   spediamoproWaitForTracking, kgToGrams, cmToMm, euroToCents, centsToEuro,
+  normalizzaEtichetta,
 } from '@/lib/spediamopro'
 
 // GET /api/v1/shipments — elenca le spedizioni del cliente della API key (paginata).
@@ -118,26 +119,21 @@ export async function POST(req: NextRequest) {
     const consignee: any = { name: body.shipTo.name?.substring(0,35), address: body.shipTo.street1?.substring(0,35), postalCode: body.shipTo.postalCode, city: body.shipTo.city?.substring(0,35), province: body.shipTo.state?.substring(0,2).toUpperCase(), country: (body.shipTo.country||'IT').toUpperCase() }
     if (body.shipTo.phone) consignee.phone = body.shipTo.phone
     if (body.shipTo.email) consignee.email = body.shipTo.email.substring(0,50)
-    const parcels = [{ weight: kgToGrams(pesoReale), length: cmToMm(pkg?.length||10), width: cmToMm(pkg?.width||10), height: cmToMm(pkg?.height||10) }]
+    // MULTICOLLO: un parcel per OGNI collo (prima si inviava un solo parcel col peso totale).
+    const parcels = packages.map((p: any) => ({ weight: kgToGrams(parseFloat(p?.weight)||1), length: cmToMm(p?.length||10), width: cmToMm(p?.width||10), height: cmToMm(p?.height||10) }))
     const cod = body.codValue ? euroToCents(body.codValue) : undefined
     const ins = body.insuranceValue ? euroToCents(body.insuranceValue) : undefined
-    let serviceIdV1 = (packages.length > 1 && cred.service_id_multicollo) ? String(cred.service_id_multicollo) : (cred.service_id || null)
-    let quotation
-    try {
-      quotation = await spediamoproGetQuotation(cred.authcode, serviceIdV1, { parcels, sender, consignee, cashOnDeliveryAmount: cod, insuredAmount: ins })
-    } catch (qErr: any) {
-      // Fallback al servizio eccedenze/multicollo del corriere se lo standard non ha tariffa (es. colli lunghi).
-      const altService = cred.service_id_multicollo ? String(cred.service_id_multicollo) : null
-      if (altService && altService !== serviceIdV1 && /nessuna tariffa|no.*rate|not available/i.test(String(qErr?.message || ''))) {
-        serviceIdV1 = altService
-        quotation = await spediamoproGetQuotation(cred.authcode, serviceIdV1, { parcels, sender, consignee, cashOnDeliveryAmount: cod, insuredAmount: ins })
-      } else throw qErr
-    }
+    // BRT ha due service (1-2 colli vs 3+): con più colli li passo entrambi e SpediamoPro sceglie.
+    const serviceIdV1 = (packages.length > 1 && cred.service_id_multicollo)
+      ? [cred.service_id_multicollo, cred.service_id].filter(Boolean).join(',')
+      : (cred.service_id || null)
+    const quotation = await spediamoproGetQuotation(cred.authcode, serviceIdV1, { parcels, sender, consignee, cashOnDeliveryAmount: cod, insuredAmount: ins })
     const externalRefV1 = (body.notes ? String(body.notes) : '').substring(0, 64) || undefined
     const shipment = await spediamoproCreateShipment(cred.authcode, { parcels, sender, consignee, quotation, cashOnDeliveryAmount: cod, insuredAmount: ins, externalReference: externalRefV1 })
     let trk = shipment.trackingCode; if (!trk) trk = await spediamoproWaitForTracking(cred.authcode, shipment.id)
     numero = trk || shipment.code || `SP-${shipment.id}`; costoCorrente = centsToEuro(shipment.totalPrice)
-    try { const lb = await spediamoproGetLabel(cred.authcode, shipment.id); etichettaUrl = `data:application/pdf;base64,${lb.toString('base64')}` } catch {}
+    // ZIP multicollo → PDF unico; PDF/immagini mono-collo invariati. Se non pronta, resta null (riscaricata on-demand).
+    try { const lb = await spediamoproGetLabel(cred.authcode, shipment.id); const norm = await normalizzaEtichetta(lb); etichettaUrl = `data:${norm.mime};base64,${norm.buffer.toString('base64')}` } catch {}
     raw = { ...shipment, _quotation: quotation }
   } else {
     return NextResponse.json({ error: `Tipo contratto non supportato: ${corriere.tipo}` }, { status: 400 })

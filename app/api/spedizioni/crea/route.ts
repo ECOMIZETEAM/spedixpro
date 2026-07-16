@@ -8,6 +8,7 @@ import {
   spediamoproGetQuotation,
   spediamoproCreateShipment,
   spediamoproGetLabel,
+  normalizzaEtichetta,
   spediamoproWaitForTracking,
   spediamoproCancelShipment,
   kgToGrams, cmToMm, euroToCents, centsToEuro
@@ -464,29 +465,17 @@ export async function POST(req: NextRequest) {
       }))
       const cashOnDeliveryAmount = body.codValue ? euroToCents(body.codValue) : undefined
       const insuredAmount = body.insuranceValue ? euroToCents(body.insuranceValue) : undefined
-      // Alcuni servizi SpediamoPro (es. BRT Express service 29) sono MONO-collo: con più colli
-      // non tornano tariffa. Se il corriere ha un service multicollo dedicato, con >1 collo lo usiamo.
-      let serviceId = (packages.length > 1 && cred.service_id_multicollo)
-        ? String(cred.service_id_multicollo)
+      // BRT ha DUE service per lo STESSO contratto (entrambi BRTEXP): uno per 1-2 colli
+      // (service_id) e uno per 3+ colli (service_id_multicollo). SpediamoPro sceglie da solo
+      // quello applicabile alla fascia di colli, quindi con più colli glieli passo ENTRAMBI.
+      // (Prima si forzava solo il multicollo → con 2 colli tornava vuoto e la spedizione falliva.)
+      const serviceId = (packages.length > 1 && cred.service_id_multicollo)
+        ? [cred.service_id_multicollo, cred.service_id].filter(Boolean).join(',')
         : (cred.service_id || null)
 
-      let quotation
-      try {
-        quotation = await spediamoproGetQuotation(cred.authcode, serviceId, {
-          parcels, sender, consignee, cashOnDeliveryAmount, insuredAmount
-        })
-      } catch (qErr: any) {
-        // Alcuni colli (es. molto lunghi / eccedenze, oppure multicollo) non sono coperti dal
-        // servizio standard mono-collo del corriere ma lo sono dal suo servizio dedicato
-        // (eccedenze/multicollo). Se il servizio richiesto non ha tariffa, riprovo con quello.
-        const altService = cred.service_id_multicollo ? String(cred.service_id_multicollo) : null
-        if (altService && altService !== serviceId && /nessuna tariffa|no.*rate|not available/i.test(String(qErr?.message || ''))) {
-          serviceId = altService
-          quotation = await spediamoproGetQuotation(cred.authcode, serviceId, {
-            parcels, sender, consignee, cashOnDeliveryAmount, insuredAmount
-          })
-        } else throw qErr
-      }
+      const quotation = await spediamoproGetQuotation(cred.authcode, serviceId, {
+        parcels, sender, consignee, cashOnDeliveryAmount, insuredAmount
+      })
 
       // NB: nessun blocco "vendita sotto costo" basato sul confronto costo-live vs prezzo listino:
       // dava troppi falsi positivi (bloccava destinazioni legittime dove il listino è più basso del
@@ -510,14 +499,12 @@ export async function POST(req: NextRequest) {
       let etichettaUrl: string | null = null
       try {
         const labelBuffer = await spediamoproGetLabel(cred.authcode, shipment.id)
-        // Rilevo il formato reale dai primi byte (UPS restituisce GIF, altri PDF)
-        const head = labelBuffer.subarray(0, 4).toString('latin1')
-        const mime = head.startsWith('%PDF') ? 'application/pdf'
-          : head.startsWith('GIF8') ? 'image/gif'
-          : (head.charCodeAt(0) === 0x89 && head.startsWith('\x89PNG'.substring(0,4))) ? 'image/png'
-          : 'application/pdf'
-        etichettaUrl = `data:${mime};base64,${labelBuffer.toString('base64')}`
+        // Normalizzo: PDF/GIF/PNG invariati; ZIP multicollo → PDF unico multipagina (un collo per pagina).
+        const { buffer, mime } = await normalizzaEtichetta(labelBuffer)
+        etichettaUrl = `data:${mime};base64,${buffer.toString('base64')}`
       } catch (labelErr) {
+        // Tipico del multicollo: l'etichetta si genera in ritardo. Resta null e verrà
+        // riscaricata on-demand al primo download (vedi /api/spedizioni/etichetta).
         console.error('SpediamoPro label error:', labelErr)
       }
 

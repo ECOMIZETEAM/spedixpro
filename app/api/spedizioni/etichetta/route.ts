@@ -73,11 +73,10 @@ export async function GET(req: NextRequest) {
       const authcode = (corr?.credenziali as any)?.authcode
       if (corr?.tipo === 'spediamopro' && authcode) {
         try {
-          const { spediamoproGetLabel } = await import('@/lib/spediamopro')
-          const buf = await spediamoproGetLabel(authcode, Number(shipId))
-          const head = buf.subarray(0, 4).toString('latin1')
-          const mime = head.startsWith('%PDF') ? 'application/pdf' : head.startsWith('GIF8') ? 'image/gif' : 'application/pdf'
-          const ext = mime === 'image/gif' ? 'gif' : 'pdf'
+          const { spediamoproGetLabel, normalizzaEtichetta } = await import('@/lib/spediamopro')
+          const raw = await spediamoproGetLabel(authcode, Number(shipId))
+          // ZIP multicollo → PDF unico; PDF/GIF/PNG mono-collo invariati.
+          const { buffer: buf, mime, ext } = await normalizzaEtichetta(raw)
           try { const { createAdminSupabase } = await import('@/lib/supabase-admin'); await createAdminSupabase().from('spedizioni').update({ etichetta_url: `data:${mime};base64,${buf.toString('base64')}` }).eq('id', id) } catch {}
           return new NextResponse(new Uint8Array(buf), { status: 200, headers: { 'Content-Type': mime, 'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.${ext}"`, 'Cache-Control': 'private, max-age=0, no-store' } })
         } catch (e: any) {
@@ -93,21 +92,21 @@ export async function GET(req: NextRequest) {
 
   if (!src) return NextResponse.json({ error: 'Etichetta non disponibile' }, { status: 404 })
 
-  const filename = `etichetta-${sped.numero || id}.pdf`
-
-  // Caso 1: data URL base64
-  const m = src.match(/^data:(application\/pdf|image\/[\w.+-]+);base64,(.+)$/s)
+  // Caso 1: data URL base64 (PDF singolo/unito, immagini UPS, o ZIP di fallback)
+  const m = src.match(/^data:(application\/pdf|application\/zip|image\/[\w.+-]+);base64,(.+)$/s)
   if (m) {
+    const ext = m[1] === 'application/zip' ? 'zip' : m[1].startsWith('image/') ? m[1].split('/')[1] : 'pdf'
     const buf = Buffer.from(m[2], 'base64')
     return new NextResponse(buf, {
       status: 200,
       headers: {
         'Content-Type': m[1],
-        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.${ext}"`,
         'Cache-Control': 'private, max-age=0, no-store',
       },
     })
   }
+  const filename = `etichetta-${sped.numero || id}.pdf`
 
   // Caso 2: URL remoto → proxy
   if (/^https?:\/\//i.test(src)) {

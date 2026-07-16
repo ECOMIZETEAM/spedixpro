@@ -89,7 +89,13 @@ export async function spediamoproGetQuotation(
     insuredAmount: params.insuredAmount || null,
   }
 
-  if (serviceId) body.services = [parseInt(serviceId)]
+  // serviceId può essere un singolo id ("29") o più id separati da virgola ("28,29"):
+  // utile per BRT che ha due service per lo stesso contratto in base al numero di colli
+  // (1-2 colli vs 3+). Passandoli entrambi, SpediamoPro torna quello applicabile.
+  const wantedServices = serviceId
+    ? String(serviceId).split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))
+    : []
+  if (wantedServices.length) body.services = wantedServices
 
   const res = await fetch(`${BASE_URL}/quotations`, {
     method: 'POST',
@@ -121,8 +127,8 @@ export async function spediamoproGetQuotation(
     throw new Error('Nessuna tariffa SpediamoPro disponibile per questo servizio')
   }
 
-  if (serviceId) {
-    const exact = quotes.find(q => q.service === parseInt(serviceId))
+  if (wantedServices.length) {
+    const exact = quotes.find(q => wantedServices.includes(q.service))
     if (exact) return exact
   }
 
@@ -236,6 +242,46 @@ export async function spediamoproGetLabel(authcode: string, shipmentId: number, 
     if (i < maxAttempts - 1) await new Promise(r => setTimeout(r, delayMs))
   }
   throw new Error(`SpediamoPro label download failed: ${lastError}`)
+}
+
+/**
+ * Normalizza il buffer etichetta restituito da SpediamoPro in un formato servibile.
+ * - PDF singolo (mono-collo) → invariato (application/pdf)
+ * - GIF/PNG (es. UPS) → invariato
+ * - ZIP (MULTICOLLO: un PDF per collo) → i PDF vengono UNITI in un unico PDF multipagina,
+ *   così il cliente scarica/stampa un solo file con tutte le etichette dei colli.
+ * Non cambia nulla per il mono-collo: solo lo ZIP (prima servito erroneamente come PDF) viene gestito.
+ */
+export async function normalizzaEtichetta(buf: Buffer): Promise<{ buffer: Buffer; mime: string; ext: string }> {
+  const head = buf.subarray(0, 4).toString('latin1')
+  // ZIP → multicollo: unisco i PDF in uno solo
+  if (head.startsWith('PK\x03\x04') || head.startsWith('PK\x05\x06')) {
+    try {
+      const JSZip = (await import('jszip')).default
+      const { PDFDocument } = await import('pdf-lib')
+      const zip = await JSZip.loadAsync(buf)
+      const names = Object.keys(zip.files).filter(n => /\.pdf$/i.test(n) && !zip.files[n].dir).sort()
+      if (names.length) {
+        const merged = await PDFDocument.create()
+        for (const n of names) {
+          const b = await zip.files[n].async('nodebuffer')
+          try {
+            const src = await PDFDocument.load(b)
+            const pages = await merged.copyPages(src, src.getPageIndices())
+            pages.forEach(p => merged.addPage(p))
+          } catch { /* salta un PDF corrotto senza far fallire tutto */ }
+        }
+        if (merged.getPageCount() > 0) {
+          return { buffer: Buffer.from(await merged.save()), mime: 'application/pdf', ext: 'pdf' }
+        }
+      }
+    } catch { /* se l'unione fallisce, servo lo ZIP grezzo qui sotto */ }
+    return { buffer: buf, mime: 'application/zip', ext: 'zip' }
+  }
+  if (head.startsWith('GIF8')) return { buffer: buf, mime: 'image/gif', ext: 'gif' }
+  if (head.charCodeAt(0) === 0x89 && head.substring(1, 4) === 'PNG') return { buffer: buf, mime: 'image/png', ext: 'png' }
+  // default: PDF (mono-collo e caso storico)
+  return { buffer: buf, mime: 'application/pdf', ext: 'pdf' }
 }
 
 // ── Pickup / Ritiro ──
