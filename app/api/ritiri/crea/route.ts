@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
 
   let spedQuery = admin
     .from('spedizioni')
-    .select('id,raw_response,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_email,master_id,cliente_id')
+    .select('id,numero,tracking_number,raw_response,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_email,master_id,cliente_id')
     .in('id', spedizioneIds).in('master_id', masterIdsAmmessi)
   if (isCliente) spedQuery = spedQuery.eq('cliente_id', utente.cliente_id)
   // Agente: può ritirare solo spedizioni dei suoi clienti.
@@ -183,7 +183,12 @@ export async function POST(req: NextRequest) {
   // RAMO SPEDISCI.ONLINE (flusso esistente)
   // ══════════════════════════════════════════════════════
   const carrierCode = raw?._carrierCode
-  const shipmentId = raw?.shipmentId
+  // spedisci.online per il RITIRO vuole come "shipmentId" la LDV/tracking della spedizione
+  // (il numero che il portale chiede come "riferimento LDV"), NON l'id numerico interno.
+  // Con l'id numerico il ramo Poste (postedeliverybusiness) si APPENDE (spedisci interroga Poste
+  // e non torna più → timeout); con la LDV risolve all'istante. Verificato: GLS/SDA vanno bene
+  // con entrambi, Poste SOLO con la LDV. Fallback all'id numerico solo se la LDV manca del tutto.
+  const shipmentId = raw?.trackingNumber || primaSped.tracking_number || primaSped.numero || raw?.shipmentId
   if (!carrierCode) return NextResponse.json({ error: 'Impossibile recuperare il corriere dalla spedizione.' }, { status: 400 })
 
   const baseUrl = `https://${cred.master_domain}/api/v2`
