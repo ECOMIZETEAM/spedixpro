@@ -28,6 +28,15 @@ export async function GET(req: NextRequest) {
       ? await sottoAlberoMasterIds(adminDb, masterSel)
       : ['00000000-0000-0000-0000-000000000000']
     db = adminDb
+  } else if (utente?.master_id && !isAgente(utente) && utente?.ruolo !== 'cliente') {
+    // MASTER: le giacenze risalgono a TUTTA la rete (come Elenco Spedizioni/volumetria), non solo
+    // le proprie: prima si vedeva solo master_id === il mio, quindi le giacenze dei sotto-master
+    // (es. Ecomize LL) non comparivano.
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const adminDb = createAdminSupabase()
+    subtreeSel = await sottoAlberoMasterIds(adminDb, utente.master_id)
+    if (subtreeSel.length > 1) db = adminDb
   }
 
   let query = db.from('spedizioni')
@@ -41,8 +50,11 @@ export async function GET(req: NextRequest) {
   if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
   if (clienteId) query = query.eq('cliente_id', clienteId)
   if (stato) query = query.eq('giacenza_stato', stato)
-  if (dal) query = query.gte('created_at', dal)
-  if (al) query = query.lte('created_at', al + 'T23:59:59')
+  // Filtro per la data di ENTRATA in giacenza (giacenza_data), non per la data di spedizione
+  // (created_at): una giacenza può nascere oggi da una spedizione creata giorni fa, e col filtro
+  // su created_at (default oggi) non compariva. Fallback su created_at per righe legacy senza data.
+  if (dal) query = query.or(`giacenza_data.gte.${dal},and(giacenza_data.is.null,created_at.gte.${dal})`)
+  if (al) query = query.or(`giacenza_data.lte.${al}T23:59:59,and(giacenza_data.is.null,created_at.lte.${al}T23:59:59)`)
 
   const { data } = await query
   return NextResponse.json(data || [])
@@ -57,10 +69,17 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const { spedizioneId, istruzioni, azione } = body
 
-  // Carica spedizione
-  const { data: spedizione } = await supabase.from('spedizioni')
+  // Il master gestisce le giacenze di TUTTA la sua rete (non solo le proprie): autorizzo sul
+  // sotto-albero e uso l'admin per leggere/scrivere cross-master (come per la visibilità in GET).
+  const { createAdminSupabase } = await import('@/lib/supabase-admin')
+  const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+  const adminDb = createAdminSupabase()
+  const subtree = utente?.master_id ? await sottoAlberoMasterIds(adminDb, utente.master_id) : []
+
+  // Carica spedizione (deve appartenere alla mia rete)
+  const { data: spedizione } = await adminDb.from('spedizioni')
     .select('*, clienti(ragione_sociale), corrieri(credenziali,nome_contratto,tipo)')
-    .eq('id', spedizioneId).eq('master_id', utente?.master_id).single()
+    .eq('id', spedizioneId).in('master_id', subtree.length ? subtree : ['00000000-0000-0000-0000-000000000000']).single()
   if (!spedizione) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 
   // Calcola giorni giacenza e costi
@@ -98,18 +117,20 @@ export async function POST(req: NextRequest) {
       } catch(e) { console.error('Errore svincolo corriere:', e) }
     }
 
-    // Aggiorna stato spedizione
-    await supabase.from('spedizioni').update({
+    // Aggiorna stato spedizione (admin: può essere di un sotto-master della rete)
+    await adminDb.from('spedizioni').update({
       giacenza_stato: 'svincolata',
       giacenza_istruzioni: istruzioni,
       giacenza_giorni: giorni,
       stato: 'in_consegna'
     }).eq('id', spedizioneId)
 
-    // Addebita costi al cliente se > 0 e non già addebitato
+    // Addebita costi al cliente se > 0 e non già addebitato. L'addebito va al master PROPRIETARIO
+    // della spedizione (spedizione.master_id), non al master loggato: per le giacenze di rete il
+    // costo è del sotto-master/cliente a cui appartiene la spedizione.
     if (costoTotale > 0 && !spedizione.giacenza_addebito_effettuato) {
-      await supabase.from('movimenti_clienti').insert({
-        master_id: utente?.master_id,
+      await adminDb.from('movimenti_clienti').insert({
+        master_id: spedizione.master_id,
         cliente_id: spedizione.cliente_id,
         tipo: 'addebito',
         descrizione: `Giacenza spedizione ${spedizione.numero} (${giorni} giorni) + riconsegna`,
@@ -121,14 +142,14 @@ export async function POST(req: NextRequest) {
         totale: costoTotale * 1.22,
         data_acquisto: new Date().toISOString().split('T')[0],
       })
-      await supabase.from('spedizioni').update({ giacenza_addebito_effettuato: true }).eq('id', spedizioneId)
+      await adminDb.from('spedizioni').update({ giacenza_addebito_effettuato: true }).eq('id', spedizioneId)
     }
 
     return NextResponse.json({ success: true, costoAddebitato: costoTotale, giorni })
   }
 
   if (azione === 'chiudi') {
-    await supabase.from('spedizioni').update({ giacenza_stato: 'chiusa' }).eq('id', spedizioneId)
+    await adminDb.from('spedizioni').update({ giacenza_stato: 'chiusa' }).eq('id', spedizioneId)
     return NextResponse.json({ success: true })
   }
 
