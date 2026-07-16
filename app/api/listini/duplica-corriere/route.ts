@@ -57,13 +57,15 @@ export async function POST(req: NextRequest) {
     listino_id: targetId, corriere_id: corriereId,
     fattore_volume: cr?.fattore_volume ?? null, abilitato: cr?.abilitato ?? true,
   })
-  // Fasce del corriere
+  // Fasce del corriere (IDEMPOTENTE: pulisco il target prima, così non si duplica su ri-copia)
   const { data: fasce } = await admin.from('listini_clienti_fasce')
     .select('zona_id,peso_min,peso_max,prezzo,tipo,fuel').eq('listino_id', sourceListinoId).eq('corriere_id', corriereId)
+  await admin.from('listini_clienti_fasce').delete().eq('listino_id', targetId).eq('corriere_id', corriereId)
   if (fasce?.length) await admin.from('listini_clienti_fasce').insert(fasce.map((f: any) => ({ ...f, listino_id: targetId, corriere_id: corriereId, prezzo: applicaMagg(f.prezzo) })))
-  // Supplementi del corriere
+  // Supplementi del corriere (idem)
   const { data: sup } = await admin.from('listini_clienti_supplementi')
     .select('tipo,descrizione,valore,tipo_calcolo,nome').eq('listino_id', sourceListinoId).eq('corriere_id', corriereId)
+  await admin.from('listini_clienti_supplementi').delete().eq('listino_id', targetId).eq('corriere_id', corriereId)
   if (sup?.length) await admin.from('listini_clienti_supplementi').insert(sup.map((s: any) => ({ ...s, listino_id: targetId, corriere_id: corriereId })))
 
   return NextResponse.json({ id: targetId, creato, nome_corriere: corr.nome_contratto })
