@@ -15,11 +15,16 @@ export async function GET() {
 
   // Escludo anche gli stati di annullamento: il tracking NON deve sovrascrivere una spedizione
   // in attesa di annullo (altrimenti perde 'annullamento_pending' e il cron annulli non la trova).
+  // Copro TUTTE le spedizioni attive per giro (ordinate dalle meno aggiornate): con limit basso
+  // (era 300) e molte spedizioni attive, quelle "in coda" — comprese le nuove GIACENZE — non
+  // venivano mai raggiunte e non comparivano nella sezione Giacenze. Un giro da 300 impiega ~12s,
+  // quindi c'è ampio margine sotto maxDuration. NB: a volumi molto alti va spezzato in batch
+  // con un campo "ultimo_check_tracking" (round-robin) — vedi TODO cron tracking scalabile.
   const { data: spedizioni } = await admin.from('spedizioni')
     .select('id,stato,raw_response,tracking_number,giacenza_data,corriere_id,corrieri(tipo,credenziali)')
     .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
     .order('updated_at', { ascending: true })
-    .limit(300)
+    .limit(1000)
 
   let aggiornate = 0, errori = 0
   for (const s of (spedizioni || [])) {
