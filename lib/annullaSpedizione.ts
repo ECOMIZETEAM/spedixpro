@@ -71,8 +71,10 @@ export async function annullaSpedizioneSulCorriere(
   return { ok: true }
 }
 
-// Storno del credito speso per la spedizione: per ogni addebito reale ('spedizione') legato
-// alla LDV crea un rimborso dello STESSO importo, a OGNI livello (cliente + master catena).
+// Storno del credito speso per la spedizione: per ogni addebito reale ('spedizione' E 'rettifica')
+// legato alla LDV crea un rimborso dello STESSO importo, a OGNI livello (cliente + master catena).
+// Include le RETTIFICHE (correzioni di prezzo sotto-costo): all'annullo va rimborsato costo + rettifica,
+// altrimenti il livello resterebbe addebitato della rettifica dopo la cancellazione.
 // Idempotente: se esistono già rimborsi per questa spedizione non li ricrea.
 export async function rimborsaAnnulloSpedizione(
   admin: any,
@@ -85,7 +87,7 @@ export async function rimborsaAnnulloSpedizione(
     if (giaRimborsati?.length) return
     const { data: addebiti } = await admin.from('movimenti')
       .select('cliente_id,master_id,master_target_id,importo')
-      .eq('spedizione_id', sped.id).eq('tipo', 'spedizione')
+      .eq('spedizione_id', sped.id).in('tipo', ['spedizione', 'rettifica'])
     const desc = `Rimborso ${sped.numero} - ${sped.dest_nome || ''}`.trim()
     for (const a of (addebiti || [])) {
       const importo = Math.abs(Number(a.importo || 0))
