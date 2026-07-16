@@ -1,4 +1,4 @@
-export type TipoMovimento = 'ricarica' | 'spedizione' | 'rimborso' | 'reso' | 'rettifica' | 'contrassegno'
+export type TipoMovimento = 'ricarica' | 'spedizione' | 'rimborso' | 'reso' | 'rettifica' | 'contrassegno' | 'giacenza'
 
 // Registra un movimento sul CREDITO di un cliente in modo ATOMICO (RPC lato DB:
 // UPDATE credito = credito + importo con RETURNING + INSERT movimento in un'unica

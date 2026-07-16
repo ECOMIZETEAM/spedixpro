@@ -4,6 +4,8 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { isAgente, clientiAgente, bloccaAgente } from '@/lib/agente'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { spediamoproSearchStocks, spediamoproReleaseStock } from '@/lib/spediamopro'
+import { registraMovimento } from '@/lib/movimenti'
+import { addebitaGiacenzaCatena } from '@/lib/giacenza-cascata'
 
 // Gestione di una singola giacenza (dettaglio "Gestisci").
 // Flusso a due attori: il cliente sceglie l'operazione (riconsegna / riconsegna a
@@ -64,7 +66,7 @@ async function contesto(req: NextRequest, id: string): Promise<Ctx | NextRespons
   const ruolo = (utente?.ruolo || '').toLowerCase() === 'cliente' ? 'cliente' : 'master'
   const admin = createAdminSupabase()
   const { data: sped } = await admin.from('spedizioni')
-    .select('*, clienti(ragione_sociale), corrieri(credenziali,nome_contratto)')
+    .select('*, clienti(ragione_sociale), corrieri(credenziali,nome_contratto,master_id)')
     .eq('id', id).maybeSingle()
   if (!sped) return NextResponse.json({ error: 'Giacenza non trovata' }, { status: 404 })
   if (ruolo === 'cliente') {
@@ -197,15 +199,34 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       } catch (e) { console.error('Errore invio svincolo al corriere:', e) }
     }
 
-    // Addebito al cliente
-    if (totale > 0 && !sped.giacenza_addebito_effettuato) {
-      await admin.from('movimenti_clienti').insert({
-        master_id: sped.master_id, cliente_id: sped.cliente_id, tipo: 'addebito',
-        descrizione: `Giacenza ${sped.numero} - ${opLabel[rich.operazione] || rich.operazione}`,
-        prezzo_unitario: totale, quantita: 1, iva: 22, importo: totale,
-        totale_iva: +(totale * 0.22).toFixed(2), totale: +(totale * 1.22).toFixed(2),
-        data_acquisto: new Date().toISOString().split('T')[0],
-      })
+    // Addebito COME LE SPEDIZIONI: due voci separate che scalano il CREDITO (RPC atomica),
+    // + cascata su tutta la rete fino al detentore del contratto (ogni master paga il suo prezzo).
+    if (!sped.giacenza_addebito_effettuato) {
+      const conApertura = rich.operazione !== 'reso'   // il reso non ha apertura dossier
+      const aperturaCli = conApertura ? (Number(rich.costo_apertura) || 0) : 0
+      const servizioCli = Number(rich.costo_servizio) || 0
+      // CLIENTE — due voci
+      if (aperturaCli > 0) {
+        await registraMovimento(admin, { masterId: sped.master_id, clienteId: sped.cliente_id, tipo: 'giacenza',
+          descrizione: `Apertura giacenza ${sped.numero}`, riferimento: sped.numero, importo: -aperturaCli, spedizioneId: id })
+      }
+      if (servizioCli > 0) {
+        await registraMovimento(admin, { masterId: sped.master_id, clienteId: sped.cliente_id, tipo: 'giacenza',
+          descrizione: `${opLabel[rich.operazione] || rich.operazione} ${sped.numero}`, riferimento: sped.numero, importo: -servizioCli, spedizioneId: id })
+      }
+      // Eventuali costi manuali aggiunti dal master: una voce a parte.
+      if (extra > 0) {
+        await registraMovimento(admin, { masterId: sped.master_id, clienteId: sped.cliente_id, tipo: 'giacenza',
+          descrizione: `Costi giacenza ${sped.numero}`, riferimento: sped.numero, importo: -extra, spedizioneId: id })
+      }
+      // CASCATA RETE — ogni master fino al detentore, col suo prezzo giacenza (apertura + servizio).
+      if (sped.corrieri?.nome_contratto && sped.corrieri?.master_id) {
+        await addebitaGiacenzaCatena({
+          masterDirettoId: sped.master_id, corriereOwnerId: sped.corrieri.master_id,
+          corriereNome: sped.corrieri.nome_contratto, operazione: rich.operazione,
+          numero: sped.numero, spedizioneId: id, createdBy: null, conApertura,
+        })
+      }
     }
 
     await admin.from('giacenza_richieste').update({ stato: 'confermata', confermata_da: nomeUtente, confermata_at: new Date().toISOString() }).eq('id', rich.id)
