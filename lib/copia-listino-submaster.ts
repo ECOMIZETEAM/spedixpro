@@ -176,12 +176,15 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
     await admin.from('listini_corrieri').update({ fattore_volume: fattoreSub(cid), solo_peso_reale: soloPesoR }).eq('master_id', subMasterId).eq('corriere_id', cid)
   }
 
-  // 5) FASCE
+  // 5) FASCE — IDEMPOTENTE: prima ripulisco le fasce dei corrieri ereditati su QUESTO listino, poi
+  //    reinserisco. Senza, ogni ri-sync (non-force) accumulava DUPLICATI (stesso listino/corriere/zona).
   const fasceIns = fasceSrc.map((f: any) => ({ listino_id: subListinoId, corriere_id: mapCorr.get(f.corriere_id) || null, zona_id: mapZona.get(f.zona_id) || null, peso_min: 0, peso_max: f.peso_max, prezzo: f.prezzo, tipo: f.tipo, fuel: Number(f.fuel) || 0 })).filter((f: any) => f.corriere_id && f.zona_id)
+  if (subCorrIds.length) await admin.from('listini_corrieri_fasce').delete().eq('listino_id', subListinoId).in('corriere_id', subCorrIds)
   if (fasceIns.length) await admin.from('listini_corrieri_fasce').insert(fasceIns)
 
-  // 6) SUPPLEMENTI (assicurazione, contrassegno, giacenze, ritiro, accessori)
+  // 6) SUPPLEMENTI (assicurazione, contrassegno, giacenze, ritiro, accessori) — IDEMPOTENTE come le fasce.
   const supplIns = (supplSrc || []).map((s: any) => ({ listino_id: subListinoId, corriere_id: mapCorr.get(s.corriere_id) || null, tipo: s.tipo, nome: s.nome, valore: s.valore, tipo_calcolo: s.tipo_calcolo, descrizione: s.descrizione })).filter((s: any) => s.corriere_id)
+  if (subCorrIds.length) await admin.from('listini_corrieri_supplementi').delete().eq('listino_id', subListinoId).in('corriere_id', subCorrIds)
   if (supplIns.length) await admin.from('listini_corrieri_supplementi').insert(supplIns)
 
   return { ok: true, corrieri: subCorrIds.length, fasce: fasceIns.length }
