@@ -36,7 +36,9 @@ export async function sincronizzaZonaAiDiscendenti(admin: any, ownerZonaId: stri
 
   for (const cs of corrSub) {
     const subCorrId = (cs as any).id
-    let { data: zsub } = await admin.from('zone').select('id').eq('nome', zonaNome).eq('corriere_id', subCorrId).maybeSingle()
+    // .limit(1): difensivo se il discendente ha zone duplicate con lo stesso nome (altrimenti
+    // .maybeSingle() andrebbe in errore). Prende la più vecchia (id più basso), deterministico.
+    let { data: zsub } = await admin.from('zone').select('id').eq('nome', zonaNome).eq('corriere_id', subCorrId).order('id', { ascending: true }).limit(1).maybeSingle()
     let subZonaId = (zsub as any)?.id
     if (!subZonaId) {
       const { data: nz } = await admin.from('zone')

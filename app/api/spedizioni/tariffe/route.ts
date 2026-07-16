@@ -4,7 +4,7 @@ import {
   spediamoproGetQuotation,
   kgToGrams, cmToMm, euroToCents, centsToEuro
 } from '@/lib/spediamopro'
-import { trovaZoneMatchDett, isZonaEsclusiva } from '@/lib/zone-match'
+import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
 import { calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
 
 const ZONE_MAP: Record<string,string> = {
@@ -416,12 +416,27 @@ export async function POST(req: NextRequest) {
   // deve escludere gli altri corrieri che coprono la destinazione a provincia/jolly).
   const zonaCorr = new Map<string, string>()
   for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid) zonaCorr.set(zid, cid) }
-  // Zone "esclusive" (Isole Minori): se il CAP vi appartiene, il jolly "Italia" non lo copre.
-  const zoneEsclusive = new Set<string>(fasce.filter((f: any) => isZonaEsclusiva((f.zone as any)?.nome)).map((f: any) => (f.zone as any)?.id).filter(Boolean))
+  // Zone "esclusive" (Isole Minori + Zone Disagiate): se il CAP vi appartiene, il jolly "Italia"
+  // NON lo copre. Includo anche le zone esclusive del MASTER (non solo quelle già prezzate nel
+  // listino del cliente): così una destinazione isola/disagiata viene riconosciuta come esclusiva
+  // ANCHE se il cliente non ha la fascia speciale → il corriere senza quella fascia NON compare
+  // (verrebbe venduto sotto costo come "Italia"), e comparirà un altro corriere che ha la zona.
+  const corrIdsListino = Array.from(new Set(fasce.map((f: any) => (f.corrieri as any)?.id).filter(Boolean)))
+  const esclMaster = await zoneEsclusiveMaster(supabase, corrIdsListino)
+  const zoneEsclusive = new Set<string>([
+    ...fasce.filter((f: any) => isZonaEsclusiva((f.zone as any)?.nome)).map((f: any) => (f.zone as any)?.id).filter(Boolean),
+    ...esclMaster,
+  ])
+  // Le zone esclusive del master vanno tra le candidate (per caricare le righe cap-esatto) ma NON
+  // nella mappa zona->corriere (zonaCorr): servono solo a far scattare capEsclusivo, non a matchare.
+  const candidateZonaIds = Array.from(new Set([
+    ...fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean),
+    ...esclMaster,
+  ]))
   const { ids: zoneMatchIds, capEsclusivo } = await trovaZoneMatchDett(
     supabase,
     { paese: paeseDest, provincia, cap: capDest, citta: (body.shipTo?.city || '') },
-    fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean),
+    candidateZonaIds,
     zonaCorr,
     zoneEsclusive
   )

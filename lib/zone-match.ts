@@ -116,14 +116,30 @@ export async function trovaZoneMatch(
 
 // Nomi di zona considerate "esclusive": un CAP che vi appartiene NON è raggiungibile via il
 // jolly "resto Italia". Serve a non far spedire un corriere che non ha quella zona assegnata.
+// Comprende le ISOLE MINORI e le ZONE DISAGIATE/PERIFERICHE: se il listino non prezza quella
+// zona speciale, il corriere NON compare per quella destinazione (niente ripiego su "Italia" a
+// prezzo pieno) — un altro corriere che ha la zona impostata la coprirà.
 export function isZonaEsclusiva(nome: string | null | undefined): boolean {
-  return /isole?\s*minori/i.test(String(nome || ''))
+  return /isole?\s*minori/i.test(String(nome || '')) || isZonaDisagiata(nome)
 }
 
 // Nomi di zona "disagiata/periferica": zone speciali a supplemento (es. "Zone Disagiate",
 // "Località Periferiche", "Cap Disagiati").
 export function isZonaDisagiata(nome: string | null | undefined): boolean {
   return /disagiat|periferic/i.test(String(nome || ''))
+}
+
+// Zone ESCLUSIVE (isole minori + disagiate) di un MASTER, per i corrieri indicati. Servono a
+// riconoscere una destinazione "esclusiva" ANCHE quando il listino in esame NON ha la fascia
+// speciale: così `capEsclusivo` scatta lo stesso e il corriere senza quella fascia NON aggancia
+// via "Italia" a prezzo pieno (verrebbe venduto sotto costo). Ritorna gli id-zona da aggiungere
+// sia alle candidate (per caricare le righe cap-esatto) sia all'insieme `zoneEsclusive`.
+// NB: NON vanno messe nella mappa zona->corriere del chiamante, così non creano match "gratis".
+export async function zoneEsclusiveMaster(supabase: any, corriereIds: string[]): Promise<string[]> {
+  const ids = Array.from(new Set((corriereIds || []).filter(Boolean)))
+  if (!ids.length) return []
+  const { data } = await supabase.from('zone').select('id,nome').in('corriere_id', ids)
+  return (data || []).filter((z: any) => isZonaEsclusiva((z as any).nome)).map((z: any) => (z as any).id)
 }
 
 // Regola DISAGIATA (per-corriere): restituisce, per i corrieri indicati, la zona disagiata del
