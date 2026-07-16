@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { isAgente, clientiAgente, bloccaAgente } from '@/lib/agente'
+import { sottoAlberoMasterIds } from '@/lib/rete-masters'
+import { spediamoproSearchStocks, spediamoproReleaseStock } from '@/lib/spediamopro'
 
 // Gestione di una singola giacenza (dettaglio "Gestisci").
 // Flusso a due attori: il cliente sceglie l'operazione (riconsegna / riconsegna a
@@ -68,7 +70,10 @@ async function contesto(req: NextRequest, id: string): Promise<Ctx | NextRespons
   if (ruolo === 'cliente') {
     if (sped.cliente_id !== utente?.cliente_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   } else {
-    if (sped.master_id !== utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    // Il master gestisce le giacenze di TUTTA la sua rete (sotto-albero), non solo le proprie:
+    // prima con `sped.master_id !== mio` dava "Non autorizzato" sulle giacenze dei sotto-master.
+    const subtree = utente?.master_id ? await sottoAlberoMasterIds(admin, utente.master_id) : []
+    if (!sped.master_id || !subtree.includes(sped.master_id)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
   // Agente: solo giacenze di un suo cliente.
   if (isAgente(utente)) {
@@ -152,9 +157,38 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const opLabel: Record<string, string> = { riconsegna: 'Riconsegna', riconsegna_nuovo: 'Riconsegna a nuovo destinatario', reso: 'Reso al mittente' }
     const istr = `${opLabel[rich.operazione] || rich.operazione}${rich.data_operazione ? ' - data ' + rich.data_operazione : ''}${rich.note ? ' - ' + rich.note : ''}`
 
-    // Invio al corriere (riuso API delivery-instructions esistente)
-    const cred = sped.corrieri?.credenziali as Record<string, string>
-    if (cred?.master_domain && cred?.password && sped.tracking_number) {
+    // Invio dello svincolo al corriere.
+    const cred = sped.corrieri?.credenziali as Record<string, any>
+    if (cred?.authcode) {
+      // SpediamoPro: rilascio dello STOCK (giacenza). Prima veniva SALTATO (cercava master_domain
+      // di Spedisci) → il pacco restava in giacenza sul corriere pur risultando svincolato da noi.
+      // Mappa operazione → releaseAction: riconsegna=1, nuovo indirizzo=2 (con alternativeAddress),
+      // reso al mittente=3. Se il rilascio fallisce blocco QUI (niente addebito senza svincolo reale).
+      const raw: any = sped.raw_response || {}
+      const spid = raw.id || raw?.raw?.data?.id
+      const code = raw.code || raw?.raw?.data?.code || sped.tracking_number
+      const releaseAction = rich.operazione === 'reso' ? 3 : rich.operazione === 'riconsegna_nuovo' ? 2 : 1
+      const extra: any = {}
+      if (rich.note) extra.instructions = String(rich.note)
+      if (releaseAction === 2) {
+        const nd = rich.nuovo_destinatario || {}
+        extra.alternativeAddress = {
+          name: nd.nome || sped.dest_nome || '', address: nd.indirizzo || '', postalCode: nd.cap || '',
+          city: nd.citta || '', province: nd.provincia || '', country: 'IT',
+          ...(nd.telefono ? { phone: String(nd.telefono) } : {}),
+        }
+      }
+      try {
+        const stocks = await spediamoproSearchStocks(cred.authcode, String(code))
+        const attivo = (stocks || []).find((st: any) => Number(st.status) === 1 && (!spid || Number(st.shipmentId) === Number(spid)))
+        if (!attivo?.id) return NextResponse.json({ error: 'Giacenza non più attiva sul corriere (già svincolata o scaduta).' }, { status: 400 })
+        await spediamoproReleaseStock(cred.authcode, Number(attivo.id), releaseAction, extra)
+      } catch (e: any) {
+        const msg = String(e?.message || e).replace(/spediamo\s*pro/ig, '').replace(/\(\d{3}\)/, '').trim()
+        return NextResponse.json({ error: `Svincolo non riuscito sul corriere. ${msg || 'Riprova o contatta l\'assistenza.'}` }, { status: 400 })
+      }
+    } else if (cred?.master_domain && cred?.password && sped.tracking_number) {
+      // Spedisci.online: delivery-instructions (invariato)
       try {
         await fetch(`https://${cred.master_domain}/api/v2/shipping/delivery-instructions/${sped.tracking_number}`, {
           method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
