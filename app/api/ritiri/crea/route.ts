@@ -5,6 +5,12 @@ import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { spediamoproCreatePickup, spediamoproWaitPickupCode } from '@/lib/spediamopro'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 
+// Il corriere (SpediamoPro/Spedisci) può metterci un po' a rispondere sulla creazione ritiro:
+// alzo la durata max della funzione così il timeout applicativo (25s) scatta PRIMA di quello di
+// Vercel e l'utente riceve un errore pulito invece di un 504.
+export const maxDuration = 30
+export const dynamic = 'force-dynamic'
+
 function normalizzaOrario(v: any): string | null {
   if (!v) return null
   const s = String(v).trim().toLowerCase()
@@ -232,11 +238,23 @@ export async function POST(req: NextRequest) {
   if (shipmentId) payload.shipmentId = shipmentId
 
   console.log('[RITIRO] Payload pickup/create:', JSON.stringify(payload))
-  const res = await fetch(`${baseUrl}/pickup/create`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
+  // Timeout: l'API del corriere a volte si appende. Senza limite la funzione va in 504 (Vercel)
+  // dopo minuti; con AbortController torno un errore pulito e veloce, riprovabile.
+  const ctrl = new AbortController()
+  const to = setTimeout(() => ctrl.abort(), 25000)
+  let res: Response
+  try {
+    res = await fetch(`${baseUrl}/pickup/create`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    })
+  } catch (e: any) {
+    clearTimeout(to)
+    return NextResponse.json({ error: 'Il corriere non ha risposto in tempo per il ritiro. Riprova tra qualche minuto.' }, { status: 504 })
+  }
+  clearTimeout(to)
   const text = await res.text()
   console.log('[RITIRO] Risposta pickup/create status:', res.status, 'body:', text.substring(0, 500))
 
