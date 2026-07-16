@@ -36,7 +36,9 @@ export default function NuovoRitiroPage() {
   const [saving, setSaving] = useState(false)
   const [progresso, setProgresso] = useState<{done:number,total:number}|null>(null)
   const [errore, setErrore] = useState('')
-  const [clientiAddr, setClientiAddr] = useState<Map<string, any>>(new Map())
+  const [clientiList, setClientiList] = useState<any[]>([])   // lista completa (clienti + sotto-master) per il selettore
+  const [mittProprio, setMittProprio] = useState<any>(null)   // indirizzo del master (ritiro "per me")
+  const [ritiroPer, setRitiroPer] = useState('__proprio__')   // chi richiede il ritiro (come Nuova Spedizione)
 
   useEffect(() => {
     fetch('/api/spedizioni/ritirabili').then(r => r.json()).then(d => {
@@ -45,44 +47,63 @@ export default function NuovoRitiroPage() {
     }).catch(() => setLoadingSped(false))
 
     fetch('/api/master').then(r => r.json()).then(d => {
-      if (d?.nome) setMittNome(d.nome)
-      if (d?.indirizzo || d?.indirizzo_operativo) setMittIndirizzo(d.indirizzo || d.indirizzo_operativo)
-      if (d?.citta || d?.citta_operativo) setMittCitta(d.citta || d.citta_operativo)
-      if (d?.provincia || d?.provincia_operativo) setMittProvincia(d.provincia || d.provincia_operativo)
-      if (d?.cap || d?.cap_operativo) setMittCap(d.cap || d.cap_operativo)
-      if (d?.telefono || d?.telefono_operativo) setMittTelefono(d.telefono || d.telefono_operativo)
-      if (d?.email) setMittEmail(d.email)
+      if (!d || d.error) return
+      // Snapshot dell'indirizzo del master (usa l'operativo se c'è, altrimenti la sede legale):
+      // è il mittente del ritiro "per me" e il default all'apertura della pagina.
+      const mp = {
+        nome: d.ragione_sociale || d.nome || '',
+        indirizzo: d.indirizzo_operativo || d.indirizzo || '',
+        citta: d.citta_operativo || d.citta || '',
+        provincia: d.provincia_operativo || d.provincia || '',
+        cap: d.cap_operativo || d.cap || '',
+        telefono: d.telefono_operativo || d.telefono || '',
+        email: d.email_sede || d.email || d.email_supporto || '',
+      }
+      setMittProprio(mp)
+      // Compilo il mittente solo se è ancora vuoto (non sovrascrivo una scelta già fatta).
+      setMittNome(prev => prev || mp.nome)
+      setMittIndirizzo(prev => prev || mp.indirizzo)
+      setMittCitta(prev => prev || mp.citta)
+      setMittProvincia(prev => prev || mp.provincia)
+      setMittCap(prev => prev || mp.cap)
+      setMittTelefono(prev => prev || mp.telefono)
+      setMittEmail(prev => prev || mp.email)
     }).catch(() => {})
 
     const oggi = new Date()
     oggi.setDate(oggi.getDate() + 1)
     setDataRitiro(oggi.toISOString().split('T')[0])
 
-    // Indirizzi dei clienti (e sotto-master) per l'auto-compilazione del mittente.
+    // Lista completa clienti + sotto-master (per il selettore "Ritiro per" e l'auto-compilazione).
     fetch('/api/clienti/lista?conMaster=1').then(r => r.json()).then((arr: any[]) => {
-      const m = new Map<string, any>()
-      for (const c of (Array.isArray(arr) ? arr : [])) m.set(String(c.id).replace(/^m:/, ''), c)
-      setClientiAddr(m)
+      setClientiList(Array.isArray(arr) ? arr : [])
     }).catch(() => {})
   }, [])
 
-  // Seleziono un cliente nel filtro -> auto-compilo il mittente col SUO indirizzo (come Nuova Spedizione).
-  useEffect(() => {
-    if (!fCliente) return
-    const c = clientiAddr.get(fCliente)
+  // Selettore "Ritiro per" (come Nuova Spedizione): compila il mittente con l'indirizzo del
+  // soggetto scelto (io / cliente / sotto-master) e filtra la lista LDV su quel soggetto.
+  function selezionaRitiroPer(id: string) {
+    setRitiroPer(id)
+    if (id === '__proprio__') {
+      if (mittProprio) {
+        setMittNome(mittProprio.nome); setMittIndirizzo(mittProprio.indirizzo); setMittCitta(mittProprio.citta)
+        setMittProvincia(mittProprio.provincia); setMittCap(mittProprio.cap); setMittTelefono(mittProprio.telefono); setMittEmail(mittProprio.email)
+      }
+      setFCliente('')   // mostra tutte le spedizioni
+      return
+    }
+    const c = clientiList.find(x => String(x.id) === id)
     if (!c) return
     setMittNome(c.ragione_sociale || c.nome || '')
-    const ind = c.so_indirizzo || c.indirizzo_operativo || c.indirizzo
-    const cit = c.so_citta || c.citta_operativo || c.citta
-    const prov = c.so_provincia || c.provincia_operativo || c.provincia
-    const cap = c.so_cap || c.cap_operativo || c.cap
-    if (ind) setMittIndirizzo(ind)
-    if (cit) setMittCitta(cit)
-    if (prov) setMittProvincia(prov)
-    if (cap) setMittCap(cap)
-    if (c.telefono) setMittTelefono(c.telefono)
-    if (c.email) setMittEmail(c.email)
-  }, [fCliente, clientiAddr])
+    setMittIndirizzo(c.so_indirizzo || c.indirizzo_operativo || c.indirizzo || '')
+    setMittCitta(c.so_citta || c.citta_operativo || c.citta || '')
+    setMittProvincia(c.so_provincia || c.provincia_operativo || c.provincia || '')
+    setMittCap(c.so_cap || c.cap_operativo || c.cap || '')
+    setMittTelefono(c.telefono || '')
+    setMittEmail(c.email || '')
+    // Filtro le spedizioni ritirabili su questo soggetto (l'id origine è senza prefisso "m:").
+    setFCliente(String(id).replace(/^m:/, ''))
+  }
 
   // Opzioni per i filtri (calcolate sulle spedizioni caricate)
   const optClienti = useMemo(() => {
@@ -182,6 +203,15 @@ export default function NuovoRitiroPage() {
         <div>
           <div style={card}>
             <div style={cardTitle}>Dati Mittente</div>
+            <div style={{ marginBottom: '14px' }}>
+              <label style={lbl}>Ritiro per</label>
+              <select value={ritiroPer} onChange={e => selezionaRitiroPer(e.target.value)} style={inp}>
+                <option value="__proprio__">— Io (ritiro per me) —</option>
+                {clientiList.map((c: any) => (
+                  <option key={c.id} value={c.id}>{c.ragione_sociale || c.nome}{c.is_master ? ' — sotto-master' : ''}</option>
+                ))}
+              </select>
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
               <div><label style={lbl}>Rif. Mittente *</label><input value={mittNome} onChange={e => setMittNome(e.target.value)} style={inp} /></div>
               <div><label style={lbl}>Telefono</label><input value={mittTelefono} onChange={e => setMittTelefono(e.target.value)} style={inp} /></div>
