@@ -136,7 +136,7 @@ export async function trovaZoneMatch(
 // (niente ripiego su "Italia" a prezzo pieno) — un altro corriere che ha la zona la coprirà.
 export function isZonaEsclusiva(nome: string | null | undefined): boolean {
   const n = String(nome || '')
-  return /isole?\s*minori/i.test(n) || isZonaDisagiata(n) || /\b(sardegna|sicilia|calabria|livigno)\b/i.test(n)
+  return /isole?\s*minori/i.test(n) || isZonaDisagiata(n) || /\b(sardegna|sicilia|calabria|livigno|scs)\b/i.test(n)
 }
 
 // Nomi di zona "disagiata/periferica": zone speciali a supplemento (es. "Zone Disagiate",
