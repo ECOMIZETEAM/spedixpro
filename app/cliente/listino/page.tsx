@@ -1,232 +1,143 @@
-import { createServerSupabase } from '@/lib/supabase'
-import { redirect } from 'next/navigation'
-import Link from 'next/link'
+'use client'
+import { useEffect, useState } from 'react'
+
+const eur = (x: number) => Number(x) > 0 ? '€ ' + Number(x).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
+const pct = (x: number) => Number(x) > 0 ? Number(x).toLocaleString('it-IT', { maximumFractionDigits: 2 }) + '%' : '—'
 
 function iconaCorriere(nome: string): string | null {
   const n = (nome || '').toUpperCase()
   const regole: [string, string][] = [
-    ['DELIVERY BUSINESS','poste_delivery_business'],['POSTE','poste_delivery_business'],
-    ['SDA','sda'],['GLS','gls'],['BRT','brt'],['TNT','tnt'],
-    ['DHL ECONNECT','dhl_econnect'],['ECONNECT','dhl_econnect'],['DHL','dhl'],
-    ['FEDEX','fedex'],['UPS','ups'],['HERMES','hermes'],['NEXIVE','nexive'],
-    ['LICCARDI','liccardi'],['SAILPOST','sailpost'],['BDM','bdm'],['NSSA','nssa'],
-    ['HR PARCEL','hrp'],['HRP','hrp'],['PALLETWAYS','palletways'],
-    ['CORREOS EXPRESS','correos_express'],['CORREOS','correos'],
-    ['INPOST','inpost'],['SPRING','spring'],['PAACK','paack'],['SPEEDY','speedy'],
-    ['AMAZON','amazon_shipping'],['CTT','ctt_express'],['AIPACK','aipack'],['GTECH','gtechgroup'],
+    ['DELIVERY BUSINESS', 'poste_delivery_business'], ['POSTE', 'poste_delivery_business'],
+    ['SDA', 'sda'], ['GLS', 'gls'], ['BRT', 'brt'], ['TNT', 'tnt'],
+    ['DHL ECONNECT', 'dhl_econnect'], ['ECONNECT', 'dhl_econnect'], ['DHL', 'dhl'],
+    ['FEDEX', 'fedex'], ['UPS', 'ups'], ['HERMES', 'hermes'], ['NEXIVE', 'nexive'],
+    ['LICCARDI', 'liccardi'], ['SAILPOST', 'sailpost'], ['BDM', 'bdm'], ['NSSA', 'nssa'],
+    ['HR PARCEL', 'hrp'], ['HRP', 'hrp'], ['PALLETWAYS', 'palletways'],
+    ['CORREOS EXPRESS', 'correos_express'], ['CORREOS', 'correos'],
+    ['INPOST', 'inpost'], ['SPRING', 'spring'], ['PAACK', 'paack'], ['SPEEDY', 'speedy'],
+    ['AMAZON', 'amazon_shipping'], ['CTT', 'ctt_express'], ['AIPACK', 'aipack'], ['GTECH', 'gtechgroup'],
   ]
   for (const [k, file] of regole) { if (n.includes(k)) return '/corrieri/' + file + '.png' }
   return null
 }
 
-function parseJSON(s: any) { try { return JSON.parse(s) } catch { return null } }
-const EUR = '\u20AC'
+const TABS: [string, string][] = [
+  ['pesi', 'Pesi / Zone'],
+  ['assicurazione', 'Assicurazione'],
+  ['contrassegno', 'Contrassegni'],
+  ['accessorio', 'Servizi accessori'],
+  ['giacenza', 'Giacenze'],
+  ['ritiro', 'Ritiro'],
+]
 
-export default async function ClienteListinoPage({ searchParams }: { searchParams: Promise<{ corriere?: string }> }) {
-  const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/cliente')
-  const { data: utente } = await supabase.from('utenti').select('cliente_id,master_id').eq('id', user.id).single()
-  if (!utente?.cliente_id) redirect('/cliente')
-  const { data: cliente } = await supabase.from('clienti').select('listino_cliente_id,ragione_sociale').eq('id', utente.cliente_id).single()
+export default function ClienteListinoPage() {
+  const [d, setD] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [tab, setTab] = useState('pesi')
+  useEffect(() => {
+    fetch('/api/cliente/listino-prezzi').then(r => r.json()).then(x => { setD(x); setLoading(false) }).catch(() => setLoading(false))
+  }, [])
 
-  if (!cliente?.listino_cliente_id) {
-    return (
-      <div>
-        <h1 style={{fontSize:'20px',fontWeight:700,color:'#1a1a1a',marginBottom:'16px'}}>Listino prezzi</h1>
-        <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',padding:'40px',textAlign:'center',color:'#bbb'}}>
-          Nessun listino assegnato - contatta il tuo operatore.
-        </div>
-      </div>
-    )
-  }
-
-  const listinoId = cliente.listino_cliente_id
-  const { data: listino } = await supabase.from('listini_clienti').select('*').eq('id', listinoId).single()
-
-  const { data: agganci } = await supabase.from('listini_clienti_corrieri')
-    .select('corriere_id, fattore_volume, corrieri(id,nome_contratto,tipo)')
-    .eq('listino_id', listinoId)
-  let contratti: any[] = (agganci || []).map((a: any) => a.corrieri ? { ...a.corrieri, fattore_volume: a.fattore_volume } : null).filter(Boolean)
-
-  if (!contratti.length) {
-    const { data: fCorr } = await supabase.from('listini_clienti_fasce').select('corriere_id').eq('listino_id', listinoId)
-    const ids = Array.from(new Set((fCorr || []).map((r: any) => r.corriere_id).filter(Boolean)))
-    if (ids.length) {
-      const { data: cs } = await supabase.from('corrieri').select('id,nome_contratto,tipo').in('id', ids)
-      contratti = (cs || []).map((c: any) => ({ ...c, fattore_volume: null }))
-    }
-  }
-
-  // Corrieri DISATTIVATI dal master per questo cliente: nascosti dal listino (default = attivo).
-  const { data: abil } = await supabase.from('clienti_corrieri_abilitati')
-    .select('corriere_id, abilitato').eq('cliente_id', utente.cliente_id)
-  const disattivati = new Set((abil || []).filter((a: any) => a.abilitato === false).map((a: any) => a.corriere_id))
-  contratti = contratti.filter((c: any) => !disattivati.has(c.id))
-
-  const { corriere: corriereSel } = await searchParams
-  const sel = corriereSel ? contratti.find((c: any) => c.id === corriereSel) : null
-
-  if (!sel) {
-    return (
-      <div>
-        <div style={{marginBottom:'20px'}}>
-          <h1 style={{fontSize:'20px',fontWeight:700,color:'#1a1a1a',margin:0}}>Listino prezzi</h1>
-          <p style={{color:'#999',fontSize:'13px',marginTop:'4px'}}>Contratti attivi sul tuo account - clicca per vedere prezzi e supplementi</p>
-        </div>
-        <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
-          {contratti.length === 0 && (
-            <div style={{padding:'40px',textAlign:'center',color:'#bbb'}}>Nessun contratto disponibile.</div>
-          )}
-          {contratti.map((c: any, idx: number) => {
-            const logo = iconaCorriere(c.nome_contratto)
-            return (
-              <Link key={c.id} href={'/cliente/listino?corriere=' + c.id}
-                style={{display:'flex',alignItems:'center',gap:'18px',padding:'18px 22px',textDecoration:'none',borderTop: idx === 0 ? 'none' : '1px solid #f0f0f0'}}>
-                <div style={{width:'110px',height:'40px',display:'flex',alignItems:'center',justifyContent:'flex-start',flexShrink:0}}>
-                  {logo
-                    ? <img src={logo} alt={c.nome_contratto} style={{maxWidth:'100%',maxHeight:'100%',objectFit:'contain'}} />
-                    : <div style={{fontSize:'12px',color:'#999'}}>{c.nome_contratto}</div>}
-                </div>
-                <div style={{fontSize:'15px',fontWeight:600,color:'#2d7fc4'}}>{c.nome_contratto}</div>
-                <div style={{marginLeft:'auto',color:'#cbd5e1',fontSize:'20px'}}>{'\u203A'}</div>
-              </Link>
-            )
-          })}
-        </div>
-      </div>
-    )
-  }
-
-  // TUTTE le zone del corriere (incluse quelle senza prezzo) - come nel master
-  const { data: zoneAll } = await supabase.from('zone')
-    .select('id,nome').eq('master_id', utente.master_id).eq('corriere_id', sel.id).order('nome')
-
-  const { data: fasce } = await supabase.from('listini_clienti_fasce')
-    .select('*').eq('listino_id', listinoId).eq('corriere_id', sel.id).order('peso_max', { ascending: true })
-  const { data: suppl } = await supabase.from('listini_clienti_supplementi')
-    .select('*').eq('listino_id', listinoId).eq('corriere_id', sel.id)
-
-  const fattore = (sel.fattore_volume != null) ? sel.fattore_volume : (listino?.fattore_volume ?? 5000)
-
-  // Colonne = tutte le zone del corriere. Se non ci sono zone definite, ricavo dalle fasce.
-  let zoneCols: { id: string, nome: string }[] = (zoneAll || []).map((z: any) => ({ id: z.id, nome: z.nome }))
-  if (!zoneCols.length) {
-    const seen: Record<string, boolean> = {}
-    ;(fasce || []).forEach((f: any) => { if (f.zona_id && !seen[f.zona_id]) { seen[f.zona_id] = true; zoneCols.push({ id: f.zona_id, nome: 'Zona' }) } })
-  }
-
-  // Righe = fasce peso (tipo + peso). Prezzo per zona da lookup.
-  const righeMap = new Map<string, { tipo: string, peso: number, prezzi: Record<string, number> }>()
-  ;(fasce || []).forEach((f: any) => {
-    const tipo = f.tipo === 'oltre' ? 'oltre' : 'fino_a'
-    const key = tipo + '_' + f.peso_max
-    if (!righeMap.has(key)) righeMap.set(key, { tipo, peso: Number(f.peso_max), prezzi: {} })
-    righeMap.get(key)!.prezzi[f.zona_id] = Number(f.prezzo)
-  })
-  const righe = Array.from(righeMap.values()).sort((a, b) => a.peso - b.peso)
-
-  const byTipo = (t: string) => (suppl || []).filter((s: any) => s.tipo === t)
-  const fmtValori = (s: any) => {
-    const d = parseJSON(s.descrizione) || {}
-    const prezzo = Number(s.valore || d.prezzo_fisso || d.prezzo || 0)
-    const perc = Number(d.perc || d.perc_nolo || 0)
-    const out: string[] = []
-    if (prezzo > 0) out.push(EUR + ' ' + prezzo.toFixed(2))
-    if (perc > 0) out.push(perc + '%')
-    return out.length ? out.join('  +  ') : '-'
-  }
-  const nomeSuppl = (s: any) => { const d = parseJSON(s.descrizione) || {}; return s.nome || d.nome || '' }
-
-  const sezioni: { titolo: string, righe: any[], mostraNome: boolean }[] = [
-    { titolo: 'Assicurazione', righe: byTipo('assicurazione'), mostraNome: false },
-    { titolo: 'Contrassegno', righe: byTipo('contrassegno'), mostraNome: false },
-    { titolo: 'Servizi accessori', righe: byTipo('accessorio'), mostraNome: true },
-    { titolo: 'Giacenze', righe: [...byTipo('giacenza'), ...byTipo('giacenza_apertura')], mostraNome: true },
-    { titolo: 'Ritiro', righe: byTipo('ritiro'), mostraNome: true },
-  ]
-  const logoSel = iconaCorriere(sel.nome_contratto)
+  if (loading) return <div style={{ padding: '40px', textAlign: 'center', color: '#999' }}>Caricamento…</div>
+  const corrieri: any[] = d?.corrieri || []
 
   return (
     <div>
-      <div style={{marginBottom:'16px'}}>
-        <Link href={'/cliente/listino'} style={{fontSize:'13px',color:'#2d7fc4',textDecoration:'none'}}>{'\u2190'} Tutti i contratti</Link>
-      </div>
+      <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: '0 0 4px' }}>Listino prezzi</h1>
+      <p style={{ fontSize: '13px', color: '#8a8a8a', margin: '0 0 18px' }}>I prezzi dei contratti attivi sul tuo account. Sola lettura.</p>
 
-      <div style={{display:'flex',alignItems:'center',gap:'16px',marginBottom:'20px'}}>
-        {logoSel && <img src={logoSel} alt={sel.nome_contratto} style={{height:'38px',objectFit:'contain'}} />}
-        <div>
-          <h1 style={{fontSize:'20px',fontWeight:700,color:'#1a1a1a',margin:0}}>{sel.nome_contratto}</h1>
-          <p style={{color:'#999',fontSize:'13px',marginTop:'2px'}}>Sola lettura</p>
+      {(!d || d.assegnato === false || !corrieri.length) ? (
+        <div style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '10px', padding: '24px', textAlign: 'center', color: '#8a8a8a', fontSize: '13px' }}>
+          Nessun listino assegnato — contatta il tuo operatore.
         </div>
-      </div>
-
-      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden',marginBottom:'20px'}}>
-        <div style={{padding:'12px 18px',borderBottom:'1px solid #f0f0f0',display:'flex',gap:'24px'}}>
-          <div>
-            <span style={{fontSize:'11px',color:'#999',textTransform:'uppercase',letterSpacing:'0.5px'}}>Fattore volumetrico</span>
-            <div style={{fontSize:'13.5px',fontWeight:700,color:'#1a1a1a',marginTop:'2px'}}>{fattore}</div>
-          </div>
-          <div>
-            <span style={{fontSize:'11px',color:'#999',textTransform:'uppercase',letterSpacing:'0.5px'}}>Zone coperte</span>
-            <div style={{fontSize:'13.5px',fontWeight:700,color:'#1a1a1a',marginTop:'2px'}}>{zoneCols.length}</div>
-          </div>
-        </div>
-        <div style={{overflowX:'auto'}}>
-          <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
-            <thead>
-              <tr style={{background:'#fafafa'}}>
-                <th style={{padding:'10px 16px',textAlign:'left',fontWeight:600,color:'#666',fontSize:'11.5px',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap'}}>Peso (kg)</th>
-                {zoneCols.map((z) => (
-                  <th key={z.id} style={{padding:'10px 14px',textAlign:'center',fontWeight:600,color:'#666',fontSize:'11.5px',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap'}}>{z.nome} {EUR}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {righe.map((r, ri) => (
-                <tr key={ri} style={{borderBottom:'1px solid #f5f5f5'}}>
-                  <td style={{padding:'10px 16px',fontWeight:600,color:'#1a1a1a',whiteSpace:'nowrap'}}>
-                    {r.tipo === 'oltre' ? ('Oltre X ogni ' + r.peso + ' kg') : ('Fino a ' + r.peso + ' kg')}
-                  </td>
-                  {zoneCols.map((z) => {
-                    const p = r.prezzi[z.id]
-                    const val = (p != null && !isNaN(p)) ? p : 0
-                    return (
-                      <td key={z.id} style={{padding:'10px 14px',textAlign:'center'}}>
-                        <span style={{fontWeight:700,color: val > 0 ? '#f97316' : '#bbb',fontSize:'14px'}}>{EUR} {val.toFixed(2)}</span>
-                      </td>
-                    )
-                  })}
-                </tr>
-              ))}
-              {righe.length === 0 && (
-                <tr><td colSpan={zoneCols.length + 1} style={{padding:'24px',textAlign:'center',color:'#bbb'}}>Nessuna fascia di prezzo impostata</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <div style={{padding:'12px 18px',background:'#fffbeb',borderTop:'1px solid #f0f0f0',fontSize:'12px',color:'#92400e'}}>
-          Il prezzo si calcola sul peso maggiore tra peso reale e peso volumetrico (L x A x P / {fattore})
-        </div>
-      </div>
-
-      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
-        <div style={{padding:'14px 18px',borderBottom:'1px solid #f0f0f0',fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>Supplementi e servizi</div>
-        {sezioni.every(s => s.righe.length === 0) && (
-          <div style={{padding:'28px',textAlign:'center',color:'#bbb'}}>Nessun supplemento impostato</div>
-        )}
-        {sezioni.map(sez => sez.righe.length > 0 && (
-          <div key={sez.titolo}>
-            <div style={{padding:'10px 18px',fontSize:'12px',fontWeight:700,color:'#666',textTransform:'uppercase',letterSpacing:'0.4px',background:'#fafafa',borderTop:'1px solid #f0f0f0'}}>{sez.titolo}</div>
-            {sez.righe.map((r: any, i: number) => (
-              <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 18px',fontSize:'13px',borderTop:'1px solid #f7f7f7'}}>
-                <span style={{color:'#333'}}>{sez.mostraNome ? (nomeSuppl(r) || sez.titolo) : sez.titolo}</span>
-                <span style={{fontWeight:700,color:'#1a1a1a'}}>{fmtValori(r)}</span>
-              </div>
+      ) : (
+        <>
+          {/* Tab bar (come il listino corriere del master) */}
+          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', borderBottom: '1px solid #e8e8e8', marginBottom: '16px' }}>
+            {TABS.map(([k, label]) => (
+              <button key={k} onClick={() => setTab(k)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: '9px 14px', fontSize: '13px',
+                  fontWeight: tab === k ? 700 : 500, color: tab === k ? '#ea580c' : '#6b7280',
+                  borderBottom: tab === k ? '2px solid #ea580c' : '2px solid transparent', marginBottom: '-1px',
+                }}>{label}</button>
             ))}
           </div>
-        ))}
-      </div>
+
+          {corrieri.map((c: any, i: number) => {
+            const logo = iconaCorriere(c.nome_contratto)
+            return (
+              <div key={i} style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '10px', marginBottom: '16px', overflow: 'hidden' }}>
+                <div style={{ padding: '11px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', background: '#fafafa' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    {logo && <img src={logo} alt="" style={{ height: '26px', maxWidth: '90px', objectFit: 'contain' }} />}
+                    <span style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a' }}>{c.nome_contratto}</span>
+                  </div>
+                  {tab === 'pesi' && <span style={{ fontSize: '11px', color: '#8a8a8a' }}>peso volume 1/{c.fattore}</span>}
+                </div>
+                <div style={{ padding: tab === 'pesi' ? 0 : '14px 16px', overflowX: 'auto' }}>
+                  {tab === 'pesi' ? (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', minWidth: `${160 + (c.zone?.length || 1) * 90}px` }}>
+                      <thead>
+                        <tr>
+                          <th style={thL}>Peso (kg)</th>
+                          {(c.zone || []).map((z: string, k: number) => <th key={k} style={th}>{z}</th>)}
+                          <th style={th}>Fuel</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(c.fasce || []).map((f: any, j: number) => (
+                          <tr key={j} style={{ background: j % 2 ? '#fcfcfc' : '#fff' }}>
+                            <td style={tdL}>{f.tipo === 'oltre' ? `oltre, ogni ${f.peso_max}` : `fino a ${f.peso_max}`}</td>
+                            {(c.zone || []).map((z: string, k: number) => <td key={k} style={td}>{eur(Number(f.prezzi?.[z] || 0))}</td>)}
+                            <td style={td}>{f.fuel ? `${f.fuel}%` : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <SupplTable tipo={tab} righe={(c.supplementi || {})[tab] || []} />
+                  )}
+                </div>
+              </div>
+            )
+          })}
+
+          <div style={{ padding: '12px 16px', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '8px', fontSize: '12px', color: '#9a3412' }}>
+            Il prezzo si calcola sul peso maggiore tra peso reale e peso volumetrico (L × A × P / fattore).
+          </div>
+        </>
+      )}
     </div>
   )
 }
+
+function SupplTable({ tipo, righe }: { tipo: string; righe: any[] }) {
+  if (!righe.length) return <div style={{ fontSize: '12.5px', color: '#9ca3af', padding: '4px 0' }}>Nessuna voce impostata per questo corriere.</div>
+  const scaglioni = tipo === 'assicurazione' || tipo === 'contrassegno'
+  return (
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', minWidth: '360px' }}>
+      <thead>
+        <tr>
+          <th style={thL}>{scaglioni ? 'Valore massimo €' : 'Voce'}</th>
+          <th style={th}>Prezzo fisso €</th>
+          <th style={th}>+% del valore</th>
+        </tr>
+      </thead>
+      <tbody>
+        {righe.map((r: any, j: number) => (
+          <tr key={j} style={{ background: j % 2 ? '#fcfcfc' : '#fff' }}>
+            <td style={tdL}>{scaglioni ? (r.valore_max != null ? `fino a € ${Number(r.valore_max).toLocaleString('it-IT')}` : '—') : (r.nome || '—')}</td>
+            <td style={td}>{eur(Number(r.prezzo || 0))}</td>
+            <td style={td}>{pct(Number(r.perc || 0))}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+const th = { fontSize: '11px', fontWeight: 700 as const, color: '#8a8a8a', textTransform: 'uppercase' as const, textAlign: 'center' as const, padding: '8px 10px', borderBottom: '1px solid #eee', whiteSpace: 'nowrap' as const }
+const thL = { ...th, textAlign: 'left' as const }
+const td = { fontSize: '12.5px', color: '#1a1a1a', padding: '8px 10px', borderBottom: '1px solid #f6f6f6', textAlign: 'center' as const, whiteSpace: 'nowrap' as const }
+const tdL = { ...td, textAlign: 'left' as const, fontWeight: 600 as const, color: '#444' }
