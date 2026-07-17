@@ -41,6 +41,7 @@ export async function POST(req: NextRequest) {
     file_url: fileUrl,
     file_path: path,
     utente: ((utente?.nome || '') + ' ' + (utente?.cognome || '')).trim() || 'Utente',
+    created_by: user.id,   // generatore: consente all'agente di rivedere/scaricare i propri report (RLS)
   }).select().single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })

@@ -13,9 +13,9 @@ export async function GET(req: NextRequest) {
     .order('created_at', { ascending: false })
     .limit(50)
   if (tipo) query = query.eq('tipo', tipo)
-  // Agente: vede SOLO i report che ha generato lui (non lo storico del master).
+  // Agente: vede SOLO i report che ha generato lui (per created_by, robusto e allineato alla RLS).
   if ((utente?.ruolo || '').toLowerCase() === 'agente') {
-    query = query.eq('utente', (((utente?.nome) || '') + ' ' + ((utente?.cognome) || '')).trim())
+    query = query.eq('created_by', user.id)
   }
   const { data } = await query
   return NextResponse.json(data || [])
