@@ -1,16 +1,29 @@
 'use client'
 import { useEffect, useState } from 'react'
 
-const eur = (x: number) => x > 0 ? '€ ' + Number(x).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
+const eur = (x: number) => Number(x) > 0 ? '€ ' + Number(x).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
+const pct = (x: number) => Number(x) > 0 ? Number(x).toLocaleString('it-IT', { maximumFractionDigits: 2 }) + '%' : '—'
+
+const TABS: [string, string][] = [
+  ['pesi', 'Pesi / Zone'],
+  ['assicurazione', 'Assicurazione'],
+  ['contrassegno', 'Contrassegni'],
+  ['accessorio', 'Servizi accessori'],
+  ['giacenza', 'Giacenze'],
+  ['ritiro', 'Ritiro'],
+]
 
 export default function MioListinoPage() {
   const [d, setD] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [tab, setTab] = useState('pesi')
   useEffect(() => {
     fetch('/api/agente/mio-listino').then(r => r.json()).then(x => { setD(x); setLoading(false) }).catch(() => setLoading(false))
   }, [])
 
   if (loading) return <div style={{ padding: '40px', textAlign: 'center', color: '#999' }}>Caricamento…</div>
+
+  const corrieri: any[] = d?.corrieri || []
 
   return (
     <div>
@@ -28,37 +41,80 @@ export default function MioListinoPage() {
           <div style={{ fontSize: '13px', color: '#1a1a1a', fontWeight: 700, marginBottom: '14px' }}>
             {d.nome}{d.solo_peso_reale ? ' · solo peso reale' : ''}
           </div>
-          {(d.corrieri || []).map((c: any, i: number) => (
+
+          {/* Tab bar (come il listino corriere del master) */}
+          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', borderBottom: '1px solid #e8e8e8', marginBottom: '16px' }}>
+            {TABS.map(([k, label]) => (
+              <button key={k} onClick={() => setTab(k)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: '9px 14px', fontSize: '13px',
+                  fontWeight: tab === k ? 700 : 500, color: tab === k ? '#ea580c' : '#6b7280',
+                  borderBottom: tab === k ? '2px solid #ea580c' : '2px solid transparent', marginBottom: '-1px',
+                }}>{label}</button>
+            ))}
+          </div>
+
+          {corrieri.map((c: any, i: number) => (
             <div key={i} style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '10px', marginBottom: '16px', overflow: 'hidden' }}>
               <div style={{ padding: '11px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fafafa' }}>
                 <span style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a' }}>{c.nome_contratto}</span>
-                <span style={{ fontSize: '11px', color: '#8a8a8a' }}>peso volume 1/{c.fattore}</span>
+                {tab === 'pesi' && <span style={{ fontSize: '11px', color: '#8a8a8a' }}>peso volume 1/{c.fattore}</span>}
               </div>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', minWidth: `${160 + (c.zone?.length || 1) * 90}px` }}>
-                  <thead>
-                    <tr>
-                      <th style={thL}>Peso (kg)</th>
-                      {(c.zone || []).map((z: string, k: number) => <th key={k} style={th}>{z}</th>)}
-                      <th style={th}>Fuel</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(c.fasce || []).map((f: any, j: number) => (
-                      <tr key={j} style={{ background: j % 2 ? '#fcfcfc' : '#fff' }}>
-                        <td style={tdL}>{f.tipo === 'oltre' ? `oltre, ogni ${f.peso_max}` : `fino a ${f.peso_max}`}</td>
-                        {(c.zone || []).map((z: string, k: number) => <td key={k} style={td}>{eur(Number(f.prezzi?.[z] || 0))}</td>)}
-                        <td style={td}>{f.fuel ? `${f.fuel}%` : '—'}</td>
+              <div style={{ padding: tab === 'pesi' ? 0 : '14px 16px', overflowX: 'auto' }}>
+                {tab === 'pesi' ? (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', minWidth: `${160 + (c.zone?.length || 1) * 90}px` }}>
+                    <thead>
+                      <tr>
+                        <th style={thL}>Peso (kg)</th>
+                        {(c.zone || []).map((z: string, k: number) => <th key={k} style={th}>{z}</th>)}
+                        <th style={th}>Fuel</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {(c.fasce || []).map((f: any, j: number) => (
+                        <tr key={j} style={{ background: j % 2 ? '#fcfcfc' : '#fff' }}>
+                          <td style={tdL}>{f.tipo === 'oltre' ? `oltre, ogni ${f.peso_max}` : `fino a ${f.peso_max}`}</td>
+                          {(c.zone || []).map((z: string, k: number) => <td key={k} style={td}>{eur(Number(f.prezzi?.[z] || 0))}</td>)}
+                          <td style={td}>{f.fuel ? `${f.fuel}%` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <SupplTable tipo={tab} righe={(c.supplementi || {})[tab] || []} />
+                )}
               </div>
             </div>
           ))}
         </>
       )}
     </div>
+  )
+}
+
+// Tabella read-only per un supplemento. Scaglioni (assicurazione/contrassegno) o voci (accessorio/giacenza/ritiro).
+function SupplTable({ tipo, righe }: { tipo: string; righe: any[] }) {
+  if (!righe.length) return <div style={{ fontSize: '12.5px', color: '#9ca3af', padding: '4px 0' }}>Nessuna voce impostata per questo corriere.</div>
+  const scaglioni = tipo === 'assicurazione' || tipo === 'contrassegno'
+  return (
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', minWidth: '360px' }}>
+      <thead>
+        <tr>
+          <th style={thL}>{scaglioni ? 'Valore massimo €' : 'Voce'}</th>
+          <th style={th}>Prezzo fisso €</th>
+          <th style={th}>+% del valore</th>
+        </tr>
+      </thead>
+      <tbody>
+        {righe.map((r: any, j: number) => (
+          <tr key={j} style={{ background: j % 2 ? '#fcfcfc' : '#fff' }}>
+            <td style={tdL}>{scaglioni ? (r.valore_max != null ? `fino a € ${Number(r.valore_max).toLocaleString('it-IT')}` : '—') : (r.nome || '—')}</td>
+            <td style={td}>{eur(Number(r.prezzo || 0))}</td>
+            <td style={td}>{pct(Number(r.perc || 0))}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   )
 }
 

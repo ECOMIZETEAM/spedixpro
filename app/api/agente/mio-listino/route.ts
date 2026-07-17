@@ -42,15 +42,54 @@ export async function GET() {
     if (!e.fasce.has(key)) e.fasce.set(key, { peso_max: Number((f as any).peso_max), tipo: (f as any).tipo, fuel: Number((f as any).fuel) || 0, prezzi: {} as Record<string, number> })
     e.fasce.get(key).prezzi[zonaNome] = Number((f as any).prezzo)
   }
+  // SUPPLEMENTI (assicurazione, contrassegno, servizi accessori, giacenze, ritiro…) per corriere.
+  const parse = (s: any) => { try { return JSON.parse(s) } catch { return null } }
+  const { data: suppl } = await supabase.from('listini_clienti_supplementi')
+    .select('corriere_id,tipo,nome,descrizione,valore,tipo_calcolo').eq('listino_id', listinoId)
+  const supplPerCorr = new Map<string, any[]>()
+  for (const s of (suppl || [])) {
+    const cid = (s as any).corriere_id; if (!cid) continue
+    const d = parse((s as any).descrizione)
+    const row = {
+      tipo: (s as any).tipo,
+      nome: (s as any).nome ?? d?.nome ?? null,
+      valore_max: d?.valore_max != null ? Number(d.valore_max) : null,
+      prezzo: Number(d?.prezzo_fisso ?? d?.prezzo ?? (s as any).valore ?? 0),
+      perc: Number(d?.perc ?? 0),
+      calcolo_su: d?.calcolo_su || (s as any).tipo_calcolo || null,
+    }
+    if (!supplPerCorr.has(cid)) supplPerCorr.set(cid, [])
+    supplPerCorr.get(cid)!.push(row)
+  }
+  const ordScaglioni = (a: any, b: any) => {
+    const va = a.valore_max, vb = b.valore_max
+    if (va == null && vb == null) return 0
+    if (va == null) return 1
+    if (vb == null) return -1
+    return va - vb
+  }
+
   const ordZona = (a: string, b: string) => (a === 'Italia' ? -1 : b === 'Italia' ? 1 : a.localeCompare(b))
-  const corrieri = Array.from(perCorr.values())
-    .sort((a, b) => a.nome_contratto.localeCompare(b.nome_contratto))
-    .map((c) => ({
-      nome_contratto: c.nome_contratto,
-      fattore: c.fattore,
-      zone: Array.from(c.zoneSet).sort(ordZona as any),
-      fasce: Array.from(c.fasce.values()).sort((a: any, b: any) => (a.tipo === 'oltre' ? 1 : 0) - (b.tipo === 'oltre' ? 1 : 0) || a.peso_max - b.peso_max),
-    }))
+  const corrieri = Array.from(perCorr.entries())
+    .sort((a, b) => a[1].nome_contratto.localeCompare(b[1].nome_contratto))
+    .map(([cid, c]) => {
+      const sup = supplPerCorr.get(cid) || []
+      const perTipo = (t: string) => sup.filter((r: any) => r.tipo === t)
+      return {
+        nome_contratto: c.nome_contratto,
+        fattore: c.fattore,
+        zone: Array.from(c.zoneSet).sort(ordZona as any),
+        fasce: Array.from(c.fasce.values()).sort((a: any, b: any) => (a.tipo === 'oltre' ? 1 : 0) - (b.tipo === 'oltre' ? 1 : 0) || a.peso_max - b.peso_max),
+        supplementi: {
+          assicurazione: perTipo('assicurazione').sort(ordScaglioni),
+          contrassegno: perTipo('contrassegno').sort(ordScaglioni),
+          accessorio: perTipo('accessorio'),
+          giacenza: [...perTipo('giacenza'), ...perTipo('giacenza_apertura')],
+          ritiro: perTipo('ritiro'),
+          sponda: perTipo('sponda'),
+        },
+      }
+    })
   return NextResponse.json({
     assegnato: true,
     nome: (listino as any)?.nome || 'Listino',
