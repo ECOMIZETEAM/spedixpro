@@ -28,24 +28,31 @@ export async function spedisciTrackingStati(
   cred: { master_domain?: string; password?: string },
   tracking: string
 ): Promise<{ stati: string[]; raw: any; ok: boolean }> {
-  const res = await fetch(`https://${cred.master_domain}/api/v2/shipping/tracking/${tracking}`, {
+  // Endpoint CORRETTO: /api/v2/tracking/{tracking} (NON /shipping/tracking, che dà 404).
+  // Struttura risposta: { return: { shipment: [ { shipment: {...stato...}, tracking: [ {data, StatusDescription, phase, officeDescription}, ... ] } ] } }
+  const res = await fetch(`https://${cred.master_domain}/api/v2/tracking/${tracking}`, {
     headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
   })
   const text = await res.text()
   let data: any
   try { data = JSON.parse(text) } catch { data = { raw_text: text } }
 
-  const eventi: any[] = data?.events || data?.tracking || data?.trackingEvents || data?.eventi
-    || (Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []))
+  const ship: any = data?.return?.shipment
+  const first: any = Array.isArray(ship) ? ship[0] : ship
+  const eventi: any[] = Array.isArray(first?.tracking) ? first.tracking : []
   const stati: string[] = []
-  for (const k of ['status', 'stato', 'current_status', 'state']) {
-    if (typeof data?.[k] === 'string') stati.push(data[k])
+  // Stato "testa" della spedizione
+  for (const k of ['statusDescription', 'customerStatusDescription', 'descrizioneStato', 'descrizioneStatoCliente']) {
+    if (typeof first?.shipment?.[k] === 'string') stati.push(first.shipment[k])
   }
-  for (const ev of (eventi || [])) {
-    for (const k of ['status', 'description', 'descrizione', 'stato', 'state', 'message', 'event', 'text', 'nota']) {
+  // Descrizioni/fasi dei singoli eventi
+  for (const ev of eventi) {
+    for (const k of ['StatusDescription', 'appStatusDescription', 'ivrStatusDescription', 'phase', 'descrizioneStato']) {
       if (typeof ev?.[k] === 'string') stati.push(ev[k])
     }
   }
+  // Fallback compat (vecchia struttura, mai usata ma innocua)
+  for (const k of ['status', 'stato', 'current_status', 'state']) if (typeof data?.[k] === 'string') stati.push(data[k])
   return { stati, raw: data, ok: res.ok }
 }
 

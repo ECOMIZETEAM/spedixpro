@@ -76,33 +76,33 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ...base, eventi, status_code: 200, raw: tr })
     }
 
-    // Spedisci.online: endpoint per master_domain con Bearer.
-    const res = await fetch(`https://${cred.master_domain}/api/v2/shipping/tracking/${spedizione.tracking_number}`, {
+    // Spedisci.online: endpoint CORRETTO /api/v2/tracking/{tracking} (NON /shipping/tracking = 404).
+    // Struttura: { return: { shipment: [ { shipment:{...}, tracking:[ {data,StatusDescription,phase,officeDescription} ] } ] } }
+    const res = await fetch(`https://${cred.master_domain}/api/v2/tracking/${spedizione.tracking_number}`, {
       headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' }
     })
     const text = await res.text()
     let data: any
     try { data = JSON.parse(text) } catch { data = { raw_text: text } }
 
-    const eventiSp = data.events || data.tracking || data.trackingEvents || (Array.isArray(data) ? data : [])
-    // Ricavo lo stato "più avanzato" dagli eventi e lo persisto (best-effort)
+    const ship: any = data?.return?.shipment
+    const first: any = Array.isArray(ship) ? ship[0] : ship
+    const eventiRaw: any[] = Array.isArray(first?.tracking) ? first.tracking : []
+    // Normalizzo al formato {date, description, location} come SpediamoPro (così il frontend li mostra).
+    const eventi = eventiRaw.map((ev: any) => ({
+      date: ev.data || ev.date || '',
+      description: ev.StatusDescription || ev.appStatusDescription || ev.descrizioneStato || ev.phase || 'Evento',
+      location: ev.officeDescription || '',
+    }))
+    // Stato "più avanzato" (persist)
     const candidati: string[] = []
-    for (const k of ['status', 'stato', 'current_status', 'state']) if (typeof data?.[k] === 'string') candidati.push(data[k])
-    for (const e of (Array.isArray(eventiSp) ? eventiSp : [])) {
-      for (const k of ['status', 'description', 'descrizione', 'stato', 'state', 'message', 'event', 'text', 'nota']) {
-        if (e && typeof e[k] === 'string') candidati.push(e[k])
-      }
-    }
+    for (const k of ['statusDescription', 'descrizioneStato', 'customerStatusDescription']) if (typeof first?.shipment?.[k] === 'string') candidati.push(first.shipment[k])
+    for (const ev of eventiRaw) for (const k of ['StatusDescription', 'appStatusDescription', 'phase']) if (typeof ev?.[k] === 'string') candidati.push(ev[k])
     let nuovo: string | null = null
     for (const c of candidati) { const m = mapStatoSpedisci(c); if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m }
     await persistiStato(nuovo)
 
-    return NextResponse.json({
-      ...base,
-      eventi: eventiSp,
-      status_code: res.status,
-      raw: data
-    })
+    return NextResponse.json({ ...base, eventi, status_code: res.status, raw: data })
   } catch(e: any) {
     return NextResponse.json({ ...base, eventi: [], error: e.message, tracking_number: spedizione.tracking_number }, { status: 200 })
   }
