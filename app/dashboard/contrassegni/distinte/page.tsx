@@ -14,6 +14,7 @@ export default function DistinteContrassegniPage() {
   const [cerca, setCerca] = useState('')
   const [modalPagamento, setModalPagamento] = useState<any>(null)
   const [metodoPagamento, setMetodoPagamento] = useState('')
+  const [importoPag, setImportoPag] = useState('')   // importo del pagamento (parziale); vuoto = salda il residuo
   const [suddividi, setSuddividi] = useState(false)
   const [righePag, setRighePag] = useState<{metodo:string,importo:string}[]>([{metodo:'',importo:''},{metodo:'',importo:''}])
   const [confermando, setConfermando] = useState(false)
@@ -112,22 +113,25 @@ export default function DistinteContrassegniPage() {
     writeFile(wb, 'Distinta_contrassegni_' + d.numero + '.xlsx')
   }
   function chiudiModalPagamento() {
-    setModalPagamento(null); setMetodoPagamento(''); setSuddividi(false)
+    setModalPagamento(null); setMetodoPagamento(''); setImportoPag(''); setSuddividi(false)
     setRighePag([{metodo:'',importo:''},{metodo:'',importo:''}])
   }
   async function confermaPagamento() {
     const totale = Number(modalPagamento?.totale_iniziale || 0)
+    const residuo = Math.round((totale - Number(modalPagamento?.totale_pagato || 0)) * 100) / 100
     let payload: any
     if (suddividi) {
       const righe = righePag.map(r => ({ metodo: r.metodo, importo: Number(r.importo) }))
         .filter(r => r.metodo && r.importo > 0)
       if (!righe.length) { alert('Inserisci almeno una modalità con importo'); return }
       const somma = Math.round(righe.reduce((s,r)=>s+r.importo,0)*100)/100
-      if (Math.abs(somma - totale) > 0.02) { alert(`La somma delle modalità (€${somma.toFixed(2)}) deve corrispondere al totale (€${totale.toFixed(2)})`); return }
+      if (somma > residuo + 0.02) { alert(`La somma (€${somma.toFixed(2)}) supera il residuo da saldare (€${residuo.toFixed(2)})`); return }
       payload = { pagamenti: righe }
     } else {
       if (!metodoPagamento) { alert('Seleziona il tipo di pagamento'); return }
-      payload = { metodoPagamento }
+      const imp = importoPag !== '' ? Math.round(Number(importoPag) * 100) / 100 : residuo
+      if (!(imp > 0) || imp > residuo + 0.02) { alert(`Importo non valido (residuo € ${residuo.toFixed(2)})`); return }
+      payload = { metodoPagamento, importo: imp }
     }
     setConfermando(true)
     const res = await fetch('/api/contrassegni/distinte/' + modalPagamento.id, {
@@ -211,6 +215,7 @@ export default function DistinteContrassegniPage() {
             <select value={filtri.stato} onChange={e=>setF('stato',e.target.value)} style={sel}>
               <option value="">Tutti</option>
               <option value="in_lavorazione">In lavorazione</option>
+              <option value="parziale">Parziale</option>
               <option value="pagata">Pagata</option>
             </select>
           </div>
@@ -253,9 +258,13 @@ export default function DistinteContrassegniPage() {
                     {d.metodo_pagamento && <span style={{background:'#e0f2fe',color:'#0369a1',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>{d.metodo_pagamento.toUpperCase()}</span>}
                   </td>
                   <td style={{padding:'9px 14px'}}>
-                    <span style={{background:d.stato==='pagata'?'#f0fdf4':'#fffbeb',color:d.stato==='pagata'?'#16a34a':'#d97706',padding:'3px 10px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>
-                      {d.stato==='pagata'?'Pagata':'In lavorazione'}
-                    </span>
+                    {d.stato==='pagata' ? (
+                      <span style={{background:'#f0fdf4',color:'#16a34a',padding:'3px 10px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>Pagata</span>
+                    ) : d.stato==='parziale' ? (
+                      <span style={{background:'#fef9c3',color:'#a16207',padding:'3px 10px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>Parziale € {Number(d.totale_pagato||0).toFixed(2)}/{Number(d.totale_iniziale||0).toFixed(2)}</span>
+                    ) : (
+                      <span style={{background:'#fffbeb',color:'#d97706',padding:'3px 10px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>In lavorazione</span>
+                    )}
                   </td>
                   <td style={{padding:'9px 14px',color:'#1a1a1a',fontSize:'12px'}}>{d.data_pagamento?new Date(d.data_pagamento).toLocaleDateString('it-IT'):'—'}</td>
                   <td style={{padding:'9px 14px'}}>
@@ -295,7 +304,10 @@ export default function DistinteContrassegniPage() {
               <div style={{fontSize:'13px',color:'#1a1a1a',lineHeight:1.9,marginBottom:'16px',background:'#f9fafb',borderRadius:'6px',padding:'12px'}}>
                 <div><strong>Distinta N.</strong> {modalPagamento.numero}</div>
                 <div><strong>Cliente:</strong> {modalPagamento.clienti?.ragione_sociale}</div>
-                <div><strong>Totale:</strong> € {Number(modalPagamento.totale_iniziale).toFixed(4)}</div>
+                <div><strong>Totale:</strong> € {Number(modalPagamento.totale_iniziale).toFixed(2)}</div>
+                {Number(modalPagamento.totale_pagato||0) > 0 && (
+                  <div style={{color:'#a16207'}}><strong>Già pagato:</strong> € {Number(modalPagamento.totale_pagato).toFixed(2)} · <strong>Residuo:</strong> € {(Number(modalPagamento.totale_iniziale)-Number(modalPagamento.totale_pagato)).toFixed(2)}</div>
+                )}
               </div>
               <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'12.5px',color:'#1a1a1a',cursor:'pointer',marginBottom:'12px'}}>
                 <input type="checkbox" checked={suddividi} onChange={e=>setSuddividi(e.target.checked)} style={{width:'15px',height:'15px',accentColor:'#f97316'}}/>
@@ -314,6 +326,12 @@ export default function DistinteContrassegniPage() {
                     <option value="compensata">Compensata</option>
                     <option value="bonifico">Bonifico</option>
                   </select>
+                  <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',margin:'10px 0 4px'}}>Importo pagato (vuoto = salda il residuo)</label>
+                  <input type="number" step="0.01" min="0"
+                    placeholder={`€ ${(Number(modalPagamento.totale_iniziale)-Number(modalPagamento.totale_pagato||0)).toFixed(2)}`}
+                    value={importoPag} onChange={e=>setImportoPag(e.target.value)}
+                    style={{padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',width:'100%',color:'#1a1a1a'}}/>
+                  <div style={{fontSize:'11px',color:'#6b7280',marginTop:'4px'}}>Se paghi solo una parte (es. bonifico parziale) la distinta resta &quot;Parziale&quot; col residuo da saldare.</div>
                 </div>
               ) : (
                 <div style={{marginBottom:'16px'}}>
