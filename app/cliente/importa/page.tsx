@@ -75,6 +75,8 @@ export default function ImportaOrdiniPage() {
 
   // Spedizione
   const [corrieri, setCorrieri] = useState<Corriere[]>([])
+  const [pacchi, setPacchi] = useState<any[]>([])       // pacchi predefiniti del cliente (misure + peso)
+  const [pacco, setPacco] = useState('ordine')          // 'ordine' (misure dal file) | id pacco predefinito
   const [filtro, setFiltro] = useState<string>('min') // 'min' | corriere_id
   const [q, setQ] = useState('')                       // ricerca libera (ordine, destinatario, località, cap, telefono)
   const [filtroStato, setFiltroStato] = useState('tutti') // tutti | da_spedire | spedito | errore | archiviato
@@ -124,7 +126,15 @@ export default function ImportaOrdiniPage() {
     } catch { /* silente */ }
   }
 
-  useEffect(() => { loadOrdini(); loadCorrieri() }, [])
+  async function loadPacchi() {
+    try {
+      const res = await fetch('/api/cliente/pacchi')
+      const data = await res.json()
+      if (res.ok && Array.isArray(data)) setPacchi(data)
+    } catch { /* silente */ }
+  }
+
+  useEffect(() => { loadOrdini(); loadCorrieri(); loadPacchi() }, [])
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -265,6 +275,9 @@ export default function ImportaOrdiniPage() {
       return
     }
 
+    // Pacco predefinito scelto (misure + peso). 'ordine' = usa il peso del file e misure standard.
+    const presetPacco = pacco !== 'ordine' ? pacchi.find(p => String(p.id) === String(pacco)) : null
+
     setSpedendo(true)
     setProgress({ done: 0, total: targets.length })
     let ok = 0, ko = 0
@@ -272,7 +285,10 @@ export default function ImportaOrdiniPage() {
     for (let i = 0; i < targets.length; i++) {
       const o = targets[i]
       try {
-        const packages = [{ length: 20, width: 15, height: 10, weight: o.peso || 1 }]
+        // Con un pacco predefinito: misure e peso dal preset (il peso dell'ordine è fallback se il preset non ce l'ha).
+        const packages = [presetPacco
+          ? { length: Number(presetPacco.lunghezza) || 20, width: Number(presetPacco.larghezza) || 15, height: Number(presetPacco.altezza) || 10, weight: Number(presetPacco.peso) || o.peso || 1 }
+          : { length: 20, width: 15, height: 10, weight: o.peso || 1 }]
         const shipTo = {
           name: o.destinatario, company: '',
           street1: o.indirizzo, street2: '',
@@ -441,6 +457,26 @@ export default function ImportaOrdiniPage() {
             >
               Elimina selezionati
             </button>
+
+            {pacchi.length > 0 && (
+              <>
+                <span style={{ fontSize: '12.5px', color: '#666' }}>Pacco:</span>
+                <select
+                  value={pacco}
+                  onChange={e => setPacco(e.target.value)}
+                  disabled={spedendo}
+                  title="Applica misure e peso di un pacco predefinito a tutti gli ordini selezionati"
+                  style={{ ...inp, width: 'auto', minWidth: '170px', padding: '8px 10px' }}
+                >
+                  <option value="ordine">Misure dal file</option>
+                  {pacchi.map((p: any) => (
+                    <option key={p.id} value={p.id}>
+                      {p.nome} — {p.peso}kg {p.lunghezza}×{p.larghezza}×{p.altezza}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
 
             <span style={{ fontSize: '12.5px', color: '#666' }}>Spedisci con:</span>
             <select
