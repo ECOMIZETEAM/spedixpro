@@ -34,7 +34,6 @@ const ADMIN_FIELDS = [
   {key:'prezzi_in_distinta', label:'Prezzi in distinta', desc:'Visualizza / Nascondi i prezzi nella distinta di spedizione PDF.'},
   {key:'visualizza_fatture', label:'Visualizza fatture', desc:'Visualizza / Nascondi la sezione Fatture.'},
   {key:'vieta_inserimento', label:'Vieta inserimento Spedizione', desc:'Se attivo, il cliente NON puo creare spedizioni.'},
-  {key:'vieta_cancellazione', label:'Vieta cancellazione Spedizione', desc:'Se attivo, il cliente NON puo cancellare le spedizioni.'},
 ]
 
 const DEF_SETT: Record<string,string> = { contrassegno:'si', inserimento_ritiri:'predefinito', autogenera_distinta:'predefinito', formato_stampa:'A4' }

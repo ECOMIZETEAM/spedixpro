@@ -26,11 +26,10 @@ export async function DELETE(req: NextRequest) {
     .eq('id', spedizioneId).single()
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 
-  // ── Permessi (invariati): cliente = le proprie; master = le sue + quelle dei discendenti ──
+  // ── Permessi: cliente = le proprie; master = le sue + quelle dei discendenti ──
+  // (Il blocco "vieta_cancellazione" è stato RIMOSSO: non serve più, vale la regola 48h di SpediamoPro.)
   if (utente?.ruolo === 'cliente') {
     if (sped.cliente_id !== utente.cliente_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
-    const { data: cli } = await supabase.from('clienti').select('vieta_cancellazione').eq('id', sped.cliente_id).single()
-    if (cli?.vieta_cancellazione === true) return NextResponse.json({ error: 'Cancellazione spedizioni non consentita per questo cliente.' }, { status: 403 })
   } else {
     let autorizzato = sped.master_id === utente?.master_id
     if (!autorizzato && utente?.master_id) {
@@ -43,10 +42,6 @@ export async function DELETE(req: NextRequest) {
       }
     }
     if (!autorizzato) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
-    if (sped.master_id === utente?.master_id) {
-      const { data: mio } = await admin.from('masters').select('vieta_cancellazione').eq('id', utente.master_id).maybeSingle()
-      if (mio?.vieta_cancellazione === true) return NextResponse.json({ error: 'Cancellazione spedizioni non consentita per questo account.' }, { status: 403 })
-    }
   }
 
   // Idempotente: già annullata o già in attesa
