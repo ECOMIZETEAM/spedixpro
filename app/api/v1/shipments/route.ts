@@ -125,6 +125,8 @@ export async function POST(req: NextRequest) {
     if (!res.ok || raw.error) return NextResponse.json({ error: raw?.error || text }, { status: 400 })
     numero = raw.trackingNumber; costoCorrente = parseFloat(raw.shipmentCost) || 0
     etichettaUrl = raw.labelData ? `data:application/pdf;base64,${raw.labelData}` : (Array.isArray(raw.labels) && raw.labels[0]?.labelData ? `data:application/pdf;base64,${raw.labels[0].labelData}` : null)
+    // Salvo carrier/contract usati: servono al RITIRO (pickup/create li rilegge da raw_response). Senza, la spedizione non è ritirabile.
+    raw = { ...raw, _carrierCode: rate.carrierCode, _contractCode: rate.contractCode }
   } else if (corriere.tipo === 'spediamopro') {
     // SpediamoPro non ha la seconda riga indirizzo: il "presso" viene accodato all'indirizzo
     // (max 35 caratteri imposti dal corriere).
