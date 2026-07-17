@@ -76,6 +76,8 @@ export default function ImportaOrdiniPage() {
   // Spedizione
   const [corrieri, setCorrieri] = useState<Corriere[]>([])
   const [filtro, setFiltro] = useState<string>('min') // 'min' | corriere_id
+  const [q, setQ] = useState('')                       // ricerca libera (ordine, destinatario, località, cap, telefono)
+  const [filtroStato, setFiltroStato] = useState('tutti') // tutti | da_spedire | spedito | errore | archiviato
   const [spedendo, setSpedendo] = useState(false)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
 
@@ -158,7 +160,15 @@ export default function ImportaOrdiniPage() {
     })
   }
   function toggleAll() {
-    setSel(prev => (prev.size === ordini.length ? new Set() : new Set(ordini.map(o => o.id))))
+    // Seleziona/deseleziona tutti gli ordini ATTUALMENTE VISIBILI (rispetta i filtri).
+    const visibili = ordiniFiltrati.map(o => o.id)
+    setSel(prev => {
+      const tuttiSel = visibili.length > 0 && visibili.every(id => prev.has(id))
+      const next = new Set(prev)
+      if (tuttiSel) visibili.forEach(id => next.delete(id))
+      else visibili.forEach(id => next.add(id))
+      return next
+    })
   }
 
   async function eliminaSelezionati() {
@@ -334,7 +344,18 @@ export default function ImportaOrdiniPage() {
     })
   }
 
-  const allChecked = ordini.length > 0 && sel.size === ordini.length
+  // Filtri: ricerca libera + stato. La selezione/spedizione lavora comunque per id.
+  const ordiniFiltrati = ordini.filter(o => {
+    if (filtroStato !== 'tutti' && o.stato !== filtroStato) return false
+    const s = q.trim().toLowerCase()
+    if (s) {
+      const campi = [o.order_id, o.destinatario, o.indirizzo, o.localita, o.cap, o.provincia, o.telefono]
+        .map(v => String(v ?? '').toLowerCase())
+      if (!campi.some(v => v.includes(s))) return false
+    }
+    return true
+  })
+  const allChecked = ordiniFiltrati.length > 0 && ordiniFiltrati.every(o => sel.has(o.id))
   const modificabile = (o: Ordine) => o.stato === 'da_spedire' || o.stato === 'errore'
 
   return (
@@ -406,7 +427,7 @@ export default function ImportaOrdiniPage() {
           <div style={{ fontSize: '13px', color: '#666' }}>
             {spedendo && progress
               ? `Spedizione ${progress.done}/${progress.total} in corso…`
-              : (sel.size > 0 ? `${sel.size} selezionati` : `${ordini.length} ordini`)}
+              : (sel.size > 0 ? `${sel.size} selezionati` : `${ordiniFiltrati.length}${ordiniFiltrati.length !== ordini.length ? ` di ${ordini.length}` : ''} ordini`)}
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button
@@ -450,12 +471,42 @@ export default function ImportaOrdiniPage() {
           </div>
         </div>
 
+        {/* Filtri: ricerca + stato */}
+        {ordini.length > 0 && (
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '12px' }}>
+            <input
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              placeholder="🔍 Cerca per ordine, destinatario, località, CAP, telefono…"
+              style={{ ...inp, flex: 1, minWidth: '240px', padding: '8px 11px' }}
+            />
+            <select value={filtroStato} onChange={e => setFiltroStato(e.target.value)} style={{ ...inp, width: 'auto', minWidth: '150px', padding: '8px 10px' }}>
+              <option value="tutti">Tutti gli stati</option>
+              <option value="da_spedire">Da spedire</option>
+              <option value="spedito">Spedito</option>
+              <option value="errore">Errore</option>
+              <option value="archiviato">Archiviato</option>
+            </select>
+            {(q || filtroStato !== 'tutti') && (
+              <button onClick={() => { setQ(''); setFiltroStato('tutti') }}
+                style={{ background: '#fff', color: '#666', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 12px', fontSize: '12.5px', cursor: 'pointer' }}>
+                Azzera filtri
+              </button>
+            )}
+          </div>
+        )}
+
         {loading ? (
           <div style={{ padding: '40px', textAlign: 'center', color: '#999', fontSize: '13px' }}>Caricamento…</div>
         ) : ordini.length === 0 ? (
           <div style={{ padding: '50px', textAlign: 'center' }}>
             <div style={{ fontSize: '40px', marginBottom: '12px' }}>📦</div>
             <div style={{ fontSize: '14px', fontWeight: 500, color: '#999' }}>Nessun ordine importato</div>
+          </div>
+        ) : ordiniFiltrati.length === 0 ? (
+          <div style={{ padding: '50px', textAlign: 'center' }}>
+            <div style={{ fontSize: '40px', marginBottom: '12px' }}>🔍</div>
+            <div style={{ fontSize: '14px', fontWeight: 500, color: '#999' }}>Nessun ordine corrisponde ai filtri</div>
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -479,7 +530,7 @@ export default function ImportaOrdiniPage() {
                 </tr>
               </thead>
               <tbody>
-                {ordini.map(o => {
+                {ordiniFiltrati.map(o => {
                   const s = STATO[o.stato] || STATO.da_spedire
                   return (
                     <tr key={o.id} style={{ background: sel.has(o.id) ? '#fff7ed' : '#fff' }}>
