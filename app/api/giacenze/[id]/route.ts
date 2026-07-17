@@ -219,6 +219,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // Non tocco spedizioni.stato cosi la riga non sparisce dall'elenco giacenze.
     await admin.from('spedizioni').update({
       giacenza_stato: 'svincolata', giacenza_istruzioni: istr, giacenza_addebito_effettuato: true,
+      // Se lo svincolo è un RESO, il reso è già stato addebitato qui (a cascata): lo marco così la
+      // scansione resi mostrerà "reso già addebitato in giacenza" e NON riaddebiterà.
+      ...(rich.operazione === 'reso' ? { giacenza_reso_addebitato: true } : {}),
     }).eq('id', id)
     return NextResponse.json({ success: true, addebito: totale })
   }

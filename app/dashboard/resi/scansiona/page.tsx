@@ -1,10 +1,12 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+import { useDialog } from '@/app/components/DialogProvider'
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const btn = (bg: string) => ({padding:'8px 18px',background:bg,color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'600' as const,cursor:'pointer'})
 
 export default function ScansionaResiPage() {
+  const dialog = useDialog()
   const [ldv, setLdv] = useState('')
   const [spedizioneFound, setSpedizioneFound] = useState<any>(null)
   const [errore, setErrore] = useState('')
@@ -29,6 +31,11 @@ export default function ScansionaResiPage() {
       const g0 = distinta[0].target_master_id || distinta[0].cliente_id
       const gN = data.target_master_id || data.cliente_id
       if (g0 !== gN) { setErrore('Questa LDV appartiene a un altro cliente/master: chiudi prima la distinta corrente'); return }
+    }
+    // Reso già addebitato in fase di svincolo giacenza: avviso, poi lo aggiungo comunque (non verrà
+    // riaddebitato lato server). L'operatore conferma e prosegue con gli altri.
+    if (data.gia_addebitato_giacenza) {
+      await dialog.alert({ title: 'Reso già addebitato in giacenza', message: `La spedizione ${data.numero} è stata già gestita e addebitata allo svincolo della giacenza. La aggiungo alla distinta per la logistica, ma NON verrà riaddebitata.` })
     }
     // aggiungo automaticamente alla distinta
     setDistinta(prev => [...prev, { ...data, data_scansione: new Date().toISOString() }])

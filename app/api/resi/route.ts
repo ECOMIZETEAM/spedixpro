@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   // RLS + catena: cerco la LDV su tutta la discendenza (solo discesa)
   const adminDb = createAdminSupabase()
   const { data: spedizione } = await adminDb.from('spedizioni')
-    .select('id,numero,mitt_nome,dest_nome,dest_citta,colli,costo_totale,stato,tracking_number,cliente_id,master_id')
+    .select('id,numero,mitt_nome,dest_nome,dest_citta,colli,costo_totale,stato,tracking_number,cliente_id,master_id,giacenza_reso_addebitato')
     .or(`numero.eq.${ldv},tracking_number.eq.${ldv}`)
     .single()
   if (!spedizione) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
@@ -62,5 +62,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Spedizione già messa in reso e addebitata' }, { status: 400 })
   }
 
-  return NextResponse.json({ ...spedizione, target_master_id: targetMasterId, target_master_nome: targetMasterNome })
+  // Reso già gestito e addebitato in fase di SVINCOLO GIACENZA: la scansione lo segnala (popup)
+  // e non deve riaddebitarlo. Torno 200 con un flag così la UI mostra l'avviso e lascia proseguire.
+  const gia_addebitato_giacenza = (spedizione as any).giacenza_reso_addebitato === true
+
+  return NextResponse.json({ ...spedizione, target_master_id: targetMasterId, target_master_nome: targetMasterNome, gia_addebitato_giacenza })
 }

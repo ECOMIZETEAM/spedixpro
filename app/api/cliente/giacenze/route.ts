@@ -56,17 +56,17 @@ export async function POST(req: NextRequest) {
     await supabase.from('spedizioni').update({
       giacenza_stato: 'svincolata', giacenza_istruzioni: istruzioni, giacenza_giorni: giorni, stato: 'in_consegna'
     }).eq('id', spedizioneId)
-    if (costoTotale > 0 && !spedizione.giacenza_addebito_effettuato) {
-      await supabase.from('movimenti_clienti').insert({
-        master_id: utente?.master_id, cliente_id: spedizione.cliente_id, tipo: 'addebito',
-        descrizione: `Giacenza spedizione ${spedizione.numero} (${giorni} giorni) + riconsegna`,
-        prezzo_unitario: costoTotale, quantita: 1, iva: 22, importo: costoTotale,
-        totale_iva: costoTotale * 0.22, totale: costoTotale * 1.22,
-        data_acquisto: new Date().toISOString().split('T')[0],
-      })
+    // Addebito SVINCOLO (servizio riconsegna) UNIFICATO: cascata rete su `movimenti` (non più
+    // movimenti_clienti). L'apertura è già addebitata all'entrata. Guard giacenza_addebito_effettuato.
+    if (!spedizione.giacenza_addebito_effettuato) {
+      const { addebitaServizioGiacenza } = await import('@/lib/giacenza-cascata')
+      await addebitaServizioGiacenza(
+        { id: spedizioneId, numero: spedizione.numero, cliente_id: spedizione.cliente_id, master_id: spedizione.master_id, corriere_id: spedizione.corriere_id },
+        'riconsegna', costoRiconsegna
+      )
       await supabase.from('spedizioni').update({ giacenza_addebito_effettuato: true }).eq('id', spedizioneId)
     }
-    return NextResponse.json({ success: true, costoAddebitato: costoTotale, giorni })
+    return NextResponse.json({ success: true, costoAddebitato: costoRiconsegna, giorni })
   }
   if (azione === 'chiudi') {
     await supabase.from('spedizioni').update({ giacenza_stato: 'chiusa' }).eq('id', spedizioneId)

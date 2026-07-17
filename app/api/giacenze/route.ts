@@ -128,27 +128,19 @@ export async function POST(req: NextRequest) {
       stato: 'in_consegna'
     }).eq('id', spedizioneId)
 
-    // Addebita costi al cliente se > 0 e non già addebitato. L'addebito va al master PROPRIETARIO
-    // della spedizione (spedizione.master_id), non al master loggato: per le giacenze di rete il
-    // costo è del sotto-master/cliente a cui appartiene la spedizione.
-    if (costoTotale > 0 && !spedizione.giacenza_addebito_effettuato) {
-      await adminDb.from('movimenti_clienti').insert({
-        master_id: spedizione.master_id,
-        cliente_id: spedizione.cliente_id,
-        tipo: 'addebito',
-        descrizione: `Giacenza spedizione ${spedizione.numero} (${giorni} giorni) + riconsegna`,
-        prezzo_unitario: costoTotale,
-        quantita: 1,
-        iva: 22,
-        importo: costoTotale,
-        totale_iva: costoTotale * 0.22,
-        totale: costoTotale * 1.22,
-        data_acquisto: new Date().toISOString().split('T')[0],
-      })
+    // Addebito SVINCOLO (servizio riconsegna) — UNIFICATO col flusso corretto: usa la cascata rete
+    // (lib/giacenza-cascata) sulla tabella `movimenti`, non più `movimenti_clienti` senza cascata.
+    // L'APERTURA è già stata addebitata all'ENTRATA in giacenza (cron). Guard giacenza_addebito_effettuato.
+    if (!spedizione.giacenza_addebito_effettuato) {
+      const { addebitaServizioGiacenza } = await import('@/lib/giacenza-cascata')
+      await addebitaServizioGiacenza(
+        { id: spedizioneId, numero: spedizione.numero, cliente_id: spedizione.cliente_id, master_id: spedizione.master_id, corriere_id: spedizione.corriere_id },
+        'riconsegna', costoRiconsegna
+      )
       await adminDb.from('spedizioni').update({ giacenza_addebito_effettuato: true }).eq('id', spedizioneId)
     }
 
-    return NextResponse.json({ success: true, costoAddebitato: costoTotale, giorni })
+    return NextResponse.json({ success: true, costoAddebitato: costoRiconsegna, giorni })
   }
 
   if (azione === 'chiudi') {

@@ -50,6 +50,9 @@ export async function POST(req: NextRequest) {
     if (errM) return NextResponse.json({ error: errM.message }, { status: 400 })
     for (const v of (voci || [])) {
       await adminDb.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
+      // Reso già addebitato in giacenza → non riaddebitare a cascata (evita doppio).
+      const { data: spG } = await adminDb.from('spedizioni').select('giacenza_reso_addebitato').eq('id', v.id).maybeSingle()
+      if ((spG as any)?.giacenza_reso_addebitato === true) continue
       // prezzo pagato dal master figlio su quella LDV = movimento spedizione con master_target_id
       const { data: movR } = await adminDb.from('movimenti')
         .select('importo').eq('spedizione_id', v.id).eq('master_target_id', targetMasterId)
@@ -74,8 +77,12 @@ export async function POST(req: NextRequest) {
   for (const v of (voci || [])) {
     await supabase.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
     const { data: sp } = await supabase.from('spedizioni')
-      .select('costo_totale,dest_provincia,dest_cap,dest_paese,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id')
+      .select('costo_totale,dest_provincia,dest_cap,dest_paese,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id,giacenza_reso_addebitato')
       .eq('id', v.id).single()
+
+    // Se il reso è GIÀ stato addebitato in fase di svincolo giacenza, NON riaddebitare (resta in
+    // distinta per la logistica, ma costo 0). Evita il doppio addebito.
+    if ((sp as any)?.giacenza_reso_addebitato === true) { resoRows.push({ v, costoReso: 0 }); continue }
 
     // ── Reso = solo NOLO: prezzo fascia del listino cliente (senza contrassegno/assicurazione) ──
     let costoReso = 0
