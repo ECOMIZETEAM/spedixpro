@@ -80,6 +80,15 @@ function buildRigheDa(supplementi: any[], tipo: string, fallback: RigaSuppl[]): 
     if (d) return { valore_max: String(d.valore_max ?? ''), prezzo_fisso: String(d.prezzo_fisso ?? r.valore ?? ''), perc: String(d.perc ?? ''), calcolo_su: d.calcolo_su || r.tipo_calcolo || 'totale' }
     return { valore_max:'', prezzo_fisso: String(r.valore ?? ''), perc:'', calcolo_su: r.tipo_calcolo || 'totale' }
   })
+  // Ordine CRESCENTE per valore massimo (fascia più bassa in alto). Le righe vuote/senza valore in coda.
+  .sort((a,b) => {
+    const va = Number(a.valore_max), vb = Number(b.valore_max)
+    const aEmpty = !a.valore_max || isNaN(va), bEmpty = !b.valore_max || isNaN(vb)
+    if (aEmpty && bEmpty) return 0
+    if (aEmpty) return 1
+    if (bEmpty) return -1
+    return va - vb
+  })
 }
 
 function buildServiziDa(supplementi: any[], tipo: string, fallback: {nome:string;prezzo:number;perc:number}[]) {
