@@ -86,6 +86,44 @@ export default function ClientiPage() {
     } catch { setErrElim('Errore di rete'); setEliminando(false) }
   }
 
+  // Export CSV: anagrafica + credito attuale dei SOLI clienti/sotto-master di appartenenza
+  // (clienti diretti + sotto-master diretti, non tutta la rete). Il credito del sotto-master è il SUO,
+  // non quello dei suoi clienti. Costruito dai dati già caricati (nessuna chiamata extra).
+  function esportaCSV() {
+    const righe = clienti // di appartenenza: diretti + sotto-master diretti
+    if (!righe.length) return
+    const esc = (v: any) => {
+      const s = (v == null ? '' : String(v)).replace(/"/g, '""')
+      return `"${s}"`
+    }
+    const eur = (n: any) => Number(n || 0).toFixed(2).replace('.', ',') // Excel IT: virgola decimale
+    const intestazioni = ['Codice','Tipo','Ragione sociale','Email','Telefono','P.IVA','Indirizzo','Città','Provincia','CAP','Tipo contratto','Listino','Stato','Credito €']
+    const corpo = righe.map((c: any) => [
+      c.codice_cliente || '',
+      c.is_master ? 'Sotto-master' : 'Cliente',
+      c.ragione_sociale || '',
+      c.email || '',
+      c.telefono || '',
+      c.piva || '',
+      c.so_indirizzo || '',
+      c.so_citta || '',
+      c.so_provincia || '',
+      c.so_cap || '',
+      (c.tipo_contratto || '').replace(/_/g, ' '),
+      c.listini_clienti?.nome || '',
+      c.attivo ? 'Attivo' : 'Inattivo',
+      eur(c.credito),
+    ].map(esc).join(';'))
+    const csv = '﻿' + [intestazioni.map(esc).join(';'), ...corpo].join('\r\n') // BOM per Excel UTF-8
+    const oggi = new Date().toISOString().split('T')[0]
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `clienti_credito_${oggi}.csv`
+    document.body.appendChild(a); a.click(); a.remove()
+    URL.revokeObjectURL(url)
+  }
+
   const tipiContratto = useMemo(() => {
     const set = new Set(clienti.map(c => c.tipo_contratto).filter(Boolean))
     return Array.from(set)
@@ -130,7 +168,13 @@ export default function ClientiPage() {
           <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Clienti</h1>
           <p style={{color:'#666',fontSize:'13px',marginTop:'4px'}}>{clientiFiltrati.length} di {clienti.length} clienti</p>
         </div>
-        <a href="/dashboard/clienti/nuovo" style={{background:'#f97316',color:'#fff',padding:'8px 18px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>+ Nuovo Cliente</a>
+        <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+          <button onClick={esportaCSV} disabled={loading || !clienti.length} title="Scarica anagrafica e credito attuale dei tuoi clienti e sotto-master diretti"
+            style={{background:'#fff',color:(loading||!clienti.length)?'#bbb':'#1a1a1a',border:'1px solid #e0e0e0',padding:'8px 16px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',cursor:(loading||!clienti.length)?'default':'pointer',display:'inline-flex',alignItems:'center',gap:'7px'}}>
+            <span style={{fontSize:'14px'}}>⬇</span> Esporta CSV
+          </button>
+          <a href="/dashboard/clienti/nuovo" style={{background:'#f97316',color:'#fff',padding:'8px 18px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>+ Nuovo Cliente</a>
+        </div>
       </div>
 
       {erroreAccesso && (
