@@ -78,6 +78,7 @@ export default function ImportaOrdiniPage() {
   const [corrieri, setCorrieri] = useState<Corriere[]>([])
   const [pacchi, setPacchi] = useState<any[]>([])       // pacchi predefiniti del cliente (misure + peso)
   const [pacco, setPacco] = useState('ordine')          // 'ordine' (misure dal file) | id pacco predefinito
+  const [articoli, setArticoli] = useState<any[]>([])   // catalogo SKU -> peso (+ misure opzionali)
   const [filtro, setFiltro] = useState<string>('min') // 'min' | corriere_id
   const [q, setQ] = useState('')                       // ricerca libera (ordine, destinatario, località, cap, telefono)
   const [filtroStato, setFiltroStato] = useState('tutti') // tutti | da_spedire | spedito | errore | archiviato
@@ -134,8 +135,15 @@ export default function ImportaOrdiniPage() {
       if (res.ok && Array.isArray(data)) setPacchi(data)
     } catch { /* silente */ }
   }
+  async function loadArticoli() {
+    try {
+      const res = await fetch('/api/cliente/articoli')
+      const data = await res.json()
+      if (res.ok && Array.isArray(data)) setArticoli(data)
+    } catch { /* silente */ }
+  }
 
-  useEffect(() => { loadOrdini(); loadCorrieri(); loadPacchi() }, [])
+  useEffect(() => { loadOrdini(); loadCorrieri(); loadPacchi(); loadArticoli() }, [])
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -278,12 +286,15 @@ export default function ImportaOrdiniPage() {
 
     // Pacco scelto a MANO nel selettore ('ordine' = nessun override manuale).
     const presetManuale = pacco !== 'ordine' ? pacchi.find(p => String(p.id) === String(pacco)) : null
-    // Catalogo SKU → pacco per il match AUTOMATICO (quando non c'è un pacco manuale).
+    // Catalogo SKU → pacco (dimensioni) per il match automatico quando non c'è un pacco manuale.
     const skuMap = new Map<string, any>()
     for (const p of pacchi) {
       if (!p.sku) continue
       for (const s of String(p.sku).split(/[\s,;]+/)) { const k = s.trim().toLowerCase(); if (k) skuMap.set(k, p) }
     }
+    // Catalogo articoli SKU → peso (+ misure opzionali).
+    const artMap = new Map<string, any>()
+    for (const a of articoli) { const k = String(a.sku || '').trim().toLowerCase(); if (k) artMap.set(k, a) }
 
     setSpedendo(true)
     setProgress({ done: 0, total: targets.length })
@@ -292,11 +303,19 @@ export default function ImportaOrdiniPage() {
     for (let i = 0; i < targets.length; i++) {
       const o = targets[i]
       try {
-        // Priorità: pacco manuale > match automatico per SKU > peso dal file (misure standard).
-        const box = presetManuale || (o.sku ? skuMap.get(String(o.sku).trim().toLowerCase()) : null)
-        const packages = [box
-          ? { length: Number(box.lunghezza) || 20, width: Number(box.larghezza) || 15, height: Number(box.altezza) || 10, weight: Number(box.peso) || o.peso || 1 }
-          : { length: 20, width: 15, height: 10, weight: o.peso || 1 }]
+        const skuKey = String(o.sku || '').trim().toLowerCase()
+        const articolo = skuKey ? artMap.get(skuKey) : null
+        const box = presetManuale || (skuKey ? skuMap.get(skuKey) : null)   // pacco = sorgente delle MISURE
+        // PESO: articolo (per-SKU) > pacco > file > 1.  MISURE: pacco > articolo (se ha misure) > standard.
+        const peso = (articolo && Number(articolo.peso) > 0) ? Number(articolo.peso)
+          : (box && Number(box.peso) > 0) ? Number(box.peso)
+          : (o.peso || 1)
+        const dims = box
+          ? { l: box.lunghezza, w: box.larghezza, h: box.altezza }
+          : (articolo && (Number(articolo.lunghezza) || Number(articolo.larghezza) || Number(articolo.altezza)))
+            ? { l: articolo.lunghezza, w: articolo.larghezza, h: articolo.altezza }
+            : { l: 20, w: 15, h: 10 }
+        const packages = [{ length: Number(dims.l) || 20, width: Number(dims.w) || 15, height: Number(dims.h) || 10, weight: peso }]
         const shipTo = {
           name: o.destinatario, company: '',
           street1: o.indirizzo, street2: '',
@@ -388,8 +407,11 @@ export default function ImportaOrdiniPage() {
     if (!p.sku) continue
     for (const s of String(p.sku).split(/[\s,;]+/)) { const k = s.trim().toLowerCase(); if (k) skuToPacco.set(k, p) }
   }
+  const artView = new Map<string, any>()
+  for (const a of articoli) { const k = String(a.sku || '').trim().toLowerCase(); if (k) artView.set(k, a) }
   const paccoManuale = pacco !== 'ordine' ? pacchi.find((p: any) => String(p.id) === String(pacco)) : null
   const paccoPerOrdine = (o: Ordine) => paccoManuale || (o.sku ? skuToPacco.get(String(o.sku).trim().toLowerCase()) : null) || null
+  const articoloPerOrdine = (o: Ordine) => o.sku ? (artView.get(String(o.sku).trim().toLowerCase()) || null) : null
 
   return (
     <div>
@@ -601,12 +623,19 @@ export default function ImportaOrdiniPage() {
                       <td style={td}>
                         {(() => {
                           const box = paccoPerOrdine(o)
-                          if (box) return (
-                            <span title={`Pacco "${box.nome}" (${box.peso}kg ${box.lunghezza}×${box.larghezza}×${box.altezza})${paccoManuale ? ' — scelto a mano' : ' — auto da SKU'}`}
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#15803d', fontWeight: 600 }}>
-                              📦 {Number(box.peso) || o.peso || 1} kg
-                            </span>
-                          )
+                          const art = articoloPerOrdine(o)
+                          // Peso effettivo come in spedizione: articolo > pacco > file
+                          const peso = (art && Number(art.peso) > 0) ? Number(art.peso)
+                            : (box && Number(box.peso) > 0) ? Number(box.peso)
+                            : (o.peso ?? 1)
+                          if (art || box) {
+                            const fonte = [art ? 'peso da catalogo SKU' : '', box ? `misure da pacco "${box.nome}"` : ''].filter(Boolean).join(' · ')
+                            return (
+                              <span title={fonte} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#15803d', fontWeight: 600 }}>
+                                📦 {Number(peso).toFixed(3).replace(/\.?0+$/, '')} kg
+                              </span>
+                            )
+                          }
                           return o.peso != null ? `${o.peso} kg` : '—'
                         })()}
                       </td>

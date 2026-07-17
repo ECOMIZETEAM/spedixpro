@@ -67,6 +67,7 @@ const NAV_BASE: NavItem[] = [
     id: 'impostazioni', label: 'Impostazioni', icon: '◉',
     sub: [
       { label: 'Pacchi', href: '/cliente/impostazioni/pacchi' },
+      { label: 'Catalogo articoli', href: '/cliente/impostazioni/articoli' },
       { label: 'Stampa e Notifiche', href: '/cliente/impostazioni/stampa-notifiche' },
       { label: 'Cambia Password', href: '/cliente/impostazioni/cambia-password' },
       { label: 'API Key', href: '/cliente/impostazioni/api-key' },
