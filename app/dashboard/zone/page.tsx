@@ -3,7 +3,9 @@ import { useState, useEffect } from 'react'
 import * as XLSX from 'xlsx'
 import { logoCorriere } from '@/lib/corriere-logo'
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function ZonePage() {
+  const dialog = useDialog()
   const [corrieri, setCorrieri] = useState<any[]>([])
   const [zone, setZone] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -47,12 +49,12 @@ export default function ZonePage() {
 
   async function salvaZona() {
     if(!modalNuovaCorr) return
-    if(!formNuova.nome.trim()){ alert('Inserisci il nome della zona'); return }
+    if(!formNuova.nome.trim()){ await dialog.alert({ title: 'Nome mancante', message: 'Inserisci il nome della zona.' }); return }
     setSaving(true)
     const res = await fetch('/api/zone',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...formNuova,corriereId:modalNuovaCorr})})
     const d = await res.json().catch(()=>({}))
     setSaving(false)
-    if(!res.ok || d?.error){ alert(d?.error || 'Errore durante il salvataggio della zona'); return }
+    if(!res.ok || d?.error){ await dialog.alert({ title: 'Errore', message: d?.error || 'Errore durante il salvataggio della zona.' }); return }
     setFormNuova({nome:'',descrizione:'',con_fuel:false}); setModalNuovaCorr(null); load()
   }
 
@@ -76,12 +78,12 @@ export default function ZonePage() {
       const res = await fetch('/api/zone/'+modalModifica.id+'/cap',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows})})
       const d = await res.json()
       setSavingReg(false)
-      if(d?.error){ alert(d.error); return }
+      if(d?.error){ await dialog.alert({ title: 'Errore', message: d.error }); return }
     } else {
       const res = await fetch('/api/zone/'+modalModifica.id+'/cap',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...formRegione,cap:lista[0]})})
       const d = await res.json()
       setSavingReg(false)
-      if(d?.error){ alert(d.error); return }
+      if(d?.error){ await dialog.alert({ title: 'Errore', message: d.error }); return }
     }
     setFormRegione({paese:'IT',provincia:'',cap:'*',citta:'*'})
     caricaRegioni(modalModifica.id); load()
@@ -92,7 +94,7 @@ export default function ZonePage() {
     const res = await fetch('/api/zone/'+modalModifica.id+'/cap',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(editReg)})
     const d = await res.json()
     setSavingReg(false)
-    if(d?.error){ alert(d.error); return }
+    if(d?.error){ await dialog.alert({ title: 'Errore', message: d.error }); return }
     setEditReg(null)
     caricaRegioni(modalModifica.id); load()
   }
@@ -103,7 +105,7 @@ export default function ZonePage() {
   }
 
   async function elimina(id:string,nome:string) {
-    if(!confirm('Eliminare "'+nome+'"?')) return
+    if(!await dialog.confirm({ title: 'Eliminare la zona?', message: '"'+nome+'" verrà eliminata.', danger: true, confirmText: 'Elimina' })) return
     await fetch('/api/zone/'+id,{method:'DELETE'}); load()
   }
 
@@ -117,9 +119,9 @@ export default function ZonePage() {
     const res = await fetch('/api/zone/copia',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fromCorriereId:fromCorr.id,toCorriereId:toId})})
     const d = await res.json().catch(()=>({}))
     setCopiando(false)
-    if(!res.ok || d?.error){ alert(d?.error||'Errore durante la copia'); return }
+    if(!res.ok || d?.error){ await dialog.alert({ title: 'Errore', message: d?.error||'Errore durante la copia.' }); return }
     setModalCopia(null)
-    alert(`Copiate ${d.create} zone`+(d.saltate?` (${d.saltate} già presenti, saltate)`:'')+'.')
+    await dialog.alert({ title: 'Copia completata', message: `Copiate ${d.create} zone`+(d.saltate?` (${d.saltate} già presenti, saltate)`:'')+'.' })
     load()
   }
 
@@ -157,15 +159,15 @@ export default function ZonePage() {
         const citta = r.city ?? r.citta ?? r.Citta ?? r.CITY ?? '*'
         return {paese:String(paese).trim(),provincia:String(provincia).trim(),cap:String(cap).trim(),citta:String(citta).trim()}
       }).filter(r=>r.paese)
-      if(!rows.length){ alert('Nessuna riga valida nel file (attese colonne country_id/province/cap/city).'); setImporting(''); return }
+      if(!rows.length){ await dialog.alert({ title: 'File non valido', message: 'Nessuna riga valida nel file (attese colonne country_id/province/cap/city).' }); setImporting(''); return }
       const res = await fetch('/api/zone/'+zonaId+'/cap',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows,replace:true})})
       const d = await res.json()
-      if(d?.error){ alert(d.error); setImporting(''); return }
-      alert(`Importate ${d.inserite} regioni nella zona.`)
+      if(d?.error){ await dialog.alert({ title: 'Errore', message: d.error }); setImporting(''); return }
+      await dialog.alert({ title: 'Import completato', message: `Importate ${d.inserite} regioni nella zona.` })
       if(modalModifica?.id===zonaId) caricaRegioni(zonaId)
       load()
     } catch(e:any){
-      alert('Errore lettura file: '+(e?.message||e))
+      await dialog.alert({ title: 'Errore', message: 'Errore lettura file: '+(e?.message||e) })
     }
     setImporting('')
   }
