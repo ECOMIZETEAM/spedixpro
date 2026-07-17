@@ -6,6 +6,8 @@ import { spediamoproCreatePickup, spediamoproWaitPickupCode } from '@/lib/spedia
 // API pubblica MoovExpress — richiede un ritiro per spedizioni del contratto della API key.
 // Auth: Authorization: Bearer <api_key>
 // Body: { shipmentIds:[uuid], date:'YYYY-MM-DD', timeFrom?, timeTo?, from:{name,street1,city,state,postalCode,phone?,email?}, notes? }
+export const maxDuration = 30
+export const dynamic = 'force-dynamic'
 
 function pulisciTelefono(v: any): string | undefined {
   if (!v) return undefined
@@ -34,7 +36,7 @@ export async function POST(req: NextRequest) {
 
   // Solo spedizioni del cliente e del contratto della key
   const { data: spedizioni } = await admin.from('spedizioni')
-    .select('id,raw_response,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_email')
+    .select('id,numero,tracking_number,raw_response,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_email')
     .in('id', shipmentIds).eq('cliente_id', ctx.clienteId).eq('corriere_id', ctx.corriereId)
   if (!spedizioni?.length) return NextResponse.json({ error: 'Spedizioni non trovate' }, { status: 400 })
 
@@ -92,7 +94,9 @@ export async function POST(req: NextRequest) {
   const primaSped: any = spedizioni[0]
   const raw = primaSped.raw_response as any
   const carrierCode = raw?._carrierCode
-  const shipmentId = raw?.shipmentId
+  // Per il ritiro spedisci.online serve la LDV/tracking come "shipmentId": con l'id numerico il ramo
+  // Poste si appende (timeout). Fallback all'id numerico solo se la LDV manca del tutto. (Come flusso principale.)
+  const shipmentId = raw?.trackingNumber || primaSped.tracking_number || primaSped.numero || raw?.shipmentId
   if (!carrierCode) return NextResponse.json({ error: 'Impossibile recuperare il corriere dalla spedizione' }, { status: 400 })
   const baseUrl = `https://${cred.master_domain}/api/v2`
   const shipFrom = {
@@ -122,9 +126,19 @@ export async function POST(req: NextRequest) {
   if (body.notes) payload.specialInstruction = body.notes
   if (shipmentId) payload.shipmentId = shipmentId
 
-  const res = await fetch(`${baseUrl}/pickup/create`, {
-    method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-  })
+  // Timeout: l'API del corriere a volte si appende (Poste). Senza limite → 504. Con AbortController → errore pulito.
+  const ctrl = new AbortController()
+  const toId = setTimeout(() => ctrl.abort(), 25000)
+  let res: Response
+  try {
+    res = await fetch(`${baseUrl}/pickup/create`, {
+      method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctrl.signal,
+    })
+  } catch {
+    clearTimeout(toId)
+    return NextResponse.json({ error: 'Il corriere non ha risposto in tempo per il ritiro. Riprova; se persiste, quel contratto va gestito dal portale del corriere (es. Poste).' }, { status: 504 })
+  }
+  clearTimeout(toId)
   const text = await res.text()
   let r: any; try { r = JSON.parse(text) } catch { r = { error: text.substring(0, 300) } }
   if (!res.ok || r.error) return NextResponse.json({ error: r?.error || `Errore ${res.status}` }, { status: 400 })

@@ -46,15 +46,21 @@ export async function POST(req: NextRequest) {
 
   await admin.from('spedizioni').update({ distinta_id: distinta.id }).in('id', righe.map((r: any) => r.id))
 
-  // Chiusura bordero lato corriere (best-effort)
+  // Chiusura bordero lato corriere (best-effort): per spedisci genera il borderò PDF del corriere.
   try {
     const { chiudiBorderoSpedisci } = await import('@/lib/spedisci')
     await chiudiBorderoSpedisci(admin, distinta.id)
   } catch (e) { console.error('API close-day bordero:', e) }
 
+  // Rileggo il borderò eventualmente prodotto (spedisci): lo restituisco come PDF base64.
+  // NB: non esiste un endpoint /pdf per le distinte via API — restituisco direttamente il documento del corriere.
+  const { data: distFinale } = await admin.from('distinte').select('bordero_id,bordero_pdf').eq('id', distinta.id).maybeSingle()
+  const borderoPdf = distFinale?.bordero_pdf && !String(distFinale.bordero_id || '').startsWith('ERRORE') ? distFinale.bordero_pdf : null
+
   return NextResponse.json({
     id: distinta.id, numero: numeroDistinta, count: righe.length,
     totale_colli: totaleColli, totale_peso: totalePeso,
-    pdf_url: `/api/v1/shipping-lists/${distinta.id}/pdf`,
+    bordero_id: distFinale?.bordero_id || null,
+    bordero_pdf: borderoPdf,   // data:application/pdf;base64,... quando il corriere lo fornisce (spedisci); null per spediamopro
   })
 }
