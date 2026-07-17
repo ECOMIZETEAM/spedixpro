@@ -66,6 +66,8 @@ export default function ModificaMasterPage() {
     const body: any = {
       nome: m.nome, telefono: m.telefono, piva: m.piva, tipo_contratto: m.tipo_contratto,
       parent_listino_id: m.parent_listino_id || null,
+      indirizzo_operativo: m.indirizzo_operativo ?? null, citta_operativo: m.citta_operativo ?? null,
+      provincia_operativo: m.provincia_operativo ?? null, cap_operativo: m.cap_operativo ?? null,
     }
     if (nuovaEmail.trim() && nuovaEmail.trim().toLowerCase() !== (m.login_email||'').trim().toLowerCase()) body.nuova_email = nuovaEmail.trim()
     if (resetPassword) body.resetPassword = true
@@ -111,6 +113,24 @@ export default function ModificaMasterPage() {
               <option value="credito_scalare">Credito a scalare</option>
               <option value="fattura_mensile">Fattura mensile</option>
             </select></div>
+        </div>
+      </div>
+
+      {/* Sede operativa = mittente quando spedisci per conto di questo sotto-master */}
+      <div style={sec}>
+        <div style={sech}>Sede operativa <span style={{fontWeight:400,color:'#999',fontSize:'12px'}}>(mittente per le spedizioni)</span></div>
+        <div style={secb}>
+          <div><label style={lbl}>Indirizzo (via e n. civico)</label>
+            <input style={inp} value={m.indirizzo_operativo||''} onChange={e=>setM({...m,indirizzo_operativo:e.target.value})} placeholder="Via Roma 1"/></div>
+          <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'8px'}}>
+            <div><label style={lbl}>Città</label>
+              <input style={inp} value={m.citta_operativo||''} onChange={e=>setM({...m,citta_operativo:e.target.value})}/></div>
+            <div><label style={lbl}>Prov.</label>
+              <input style={inp} value={m.provincia_operativo||''} onChange={e=>setM({...m,provincia_operativo:e.target.value.toUpperCase().slice(0,2)})} placeholder="es. MI"/></div>
+            <div><label style={lbl}>CAP</label>
+              <input style={inp} value={m.cap_operativo||''} onChange={e=>setM({...m,cap_operativo:e.target.value})}/></div>
+          </div>
+          <div style={{fontSize:'11px',color:'#999',marginTop:'-4px'}}>Usato come mittente quando crei una spedizione per conto di questo sotto-master. Senza, il mittente resta vuoto e non puoi calcolare le tariffe.</div>
         </div>
       </div>
 
