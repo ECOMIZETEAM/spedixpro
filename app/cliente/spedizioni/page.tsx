@@ -45,7 +45,9 @@ const FILTRI_DEFAULT = {
   assicurazione:'', dest_citta:'', dest_cap:'', contenuto:'', fatturato:'', agente:''
 }
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function SpedizioniPage() {
+  const dialog = useDialog()
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [spedizioniFiltrate, setSpedizioniFiltrate] = useState<any[]>([])
   const [notifica, setNotifica] = useState<string>('')
@@ -211,7 +213,7 @@ export default function SpedizioniPage() {
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ ids: selectedIds })
     })
-    if (!res.ok) { alert('Errore generazione PDF'); return }
+    if (!res.ok) { await dialog.alert({ title: 'Errore', message: 'Errore nella generazione del PDF delle etichette.' }); return }
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -230,7 +232,7 @@ async function apriTracking(s: any) {
   }
 
   async function ripristina(id: string, numero: string) {
-    if (!confirm(`Ripristinare la spedizione ${numero}? Non verrà inviato alcun annullo al corriere.`)) return
+    if (!await dialog.confirm({ title: 'Ripristinare la spedizione?', message: `Spedizione ${numero}. Non verrà inviato alcun annullo al corriere.`, confirmText: 'Ripristina' })) return
     setEliminando(id)
     const res = await fetch(`/api/spedizioni/ripristina?id=${id}`, { method: 'POST' })
     setEliminando(null)
@@ -241,7 +243,7 @@ async function apriTracking(s: any) {
   }
 
   async function elimina(id: string, numero: string) {
-    if (!confirm(`Cancellare la spedizione ${numero}?\nResta in elenco come "In annullamento" e potrai ripristinarla; la richiesta di annullo viene inviata al corriere dopo 48 ore.`)) return
+    if (!await dialog.confirm({ title: `Cancellare la spedizione ${numero}?`, message: 'Resta in elenco come "In annullamento" e potrai ripristinarla; la richiesta di annullo viene inviata al corriere dopo 48 ore.', danger: true, confirmText: 'Cancella' })) return
     setEliminando(id)
     const res = await fetch(`/api/spedizioni/elimina?id=${id}`, { method: 'DELETE' })
     const j = await res.json().catch(() => ({}))

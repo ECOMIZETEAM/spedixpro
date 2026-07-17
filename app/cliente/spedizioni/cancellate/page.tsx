@@ -10,7 +10,9 @@ function oreRestanti(richiestoAt: string): { txt: string; pronto: boolean } {
   return { txt: `invio al corriere tra ${h}h ${m}m`, pronto: false }
 }
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function SpedizioniCancellateClientePage() {
+  const dialog = useDialog()
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [pending, setPending] = useState<any[]>([])
   const [manuali, setManuali] = useState<any[]>([])
@@ -35,12 +37,12 @@ export default function SpedizioniCancellateClientePage() {
   useEffect(() => { carica() }, [])
 
   async function ripristina(id: string) {
-    if (!confirm('Ripristinare questa spedizione? Non verrà inviato nessun annullo al corriere.')) return
+    if (!await dialog.confirm({ title: 'Ripristinare la spedizione?', message: 'Non verrà inviato nessun annullo al corriere.', confirmText: 'Ripristina' })) return
     setRipristinando(id)
     const res = await fetch(`/api/spedizioni/ripristina?id=${id}`, { method: 'POST' })
     setRipristinando(null)
     if (res.ok) carica()
-    else { const d = await res.json().catch(() => ({})); alert(d.error || 'Errore ripristino') }
+    else { const d = await res.json().catch(() => ({})); await dialog.alert({ title: 'Errore', message: d.error || 'Errore durante il ripristino.' }) }
   }
 
   const visibili = cerca

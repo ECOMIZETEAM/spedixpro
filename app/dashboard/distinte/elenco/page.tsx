@@ -2,7 +2,9 @@
 import { useState, useEffect } from 'react'
 import DateRangePicker from '@/app/components/DateRangePicker'
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function ElencoDistintePage() {
+  const dialog = useDialog()
   const [distinte, setDistinte] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
@@ -30,14 +32,14 @@ export default function ElencoDistintePage() {
   }
 
   async function confermaSelezionate() {
-    if (!selezionate.size) { alert('Seleziona almeno una distinta'); return }
+    if (!selezionate.size) { await dialog.alert({ title: 'Nessuna distinta selezionata', message: 'Seleziona almeno una distinta.' }); return }
     const res = await fetch('/api/distinte/conferma', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ distinteIds: Array.from(selezionate) })
     })
     const d = await res.json()
     if (d.success) { setSelezionate(new Set()); await carica() }
-    else { alert('Errore: ' + (d.error || 'conferma fallita')) }
+    else { await dialog.alert({ title: 'Errore', message: d.error || 'Conferma fallita.' }) }
   }
 
   async function stampaPDF(dist: any) {

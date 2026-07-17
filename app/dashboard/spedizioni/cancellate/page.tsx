@@ -10,7 +10,9 @@ function oreRestanti(richiestoAt: string): { txt: string; pronto: boolean } {
   return { txt: `invio al corriere tra ${h}h ${m}m`, pronto: false }
 }
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function SpedizioniCancellatePage() {
+  const dialog = useDialog()
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [pending, setPending] = useState<any[]>([])
   const [manuali, setManuali] = useState<any[]>([])   // annullo manuale in sola lettura (nel mio ambito)
@@ -42,21 +44,21 @@ export default function SpedizioniCancellatePage() {
   useEffect(() => { carica() }, [])
 
   async function ripristina(id: string) {
-    if (!confirm('Ripristinare questa spedizione? Non verrà inviato nessun annullo al corriere.')) return
+    if (!await dialog.confirm({ title: 'Ripristinare la spedizione?', message: 'Non verrà inviato nessun annullo al corriere.', confirmText: 'Ripristina' })) return
     setRipristinando(id)
     const res = await fetch(`/api/spedizioni/ripristina?id=${id}`, { method: 'POST' })
     setRipristinando(null)
     if (res.ok) carica()
-    else { const d = await res.json().catch(() => ({})); alert(d.error || 'Errore ripristino') }
+    else { const d = await res.json().catch(() => ({})); await dialog.alert({ title: 'Errore', message: d.error || 'Errore durante il ripristino.' }) }
   }
 
   async function confermaAnnullo(id: string) {
-    if (!confirm('Confermi che l\'annullo è stato eseguito con il corriere (Spedisci)? La spedizione passerà ad annullata e il credito verrà stornato.')) return
+    if (!await dialog.confirm({ title: 'Confermi l\'annullo eseguito?', message: 'Confermi che l\'annullo è stato eseguito con il corriere (Spedisci)? La spedizione passerà ad annullata e il credito verrà stornato.', confirmText: 'Conferma' })) return
     setConfermando(id)
     const res = await fetch(`/api/spedizioni/annulli-manuali/conferma?id=${id}`, { method: 'POST' })
     setConfermando(null)
     if (res.ok) carica()
-    else { const d = await res.json().catch(() => ({})); alert(d.error || 'Errore conferma') }
+    else { const d = await res.json().catch(() => ({})); await dialog.alert({ title: 'Errore', message: d.error || 'Errore durante la conferma.' }) }
   }
 
   const ownerIds = new Set(codaOwner.map(s => s.id))

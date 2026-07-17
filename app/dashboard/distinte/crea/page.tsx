@@ -1,7 +1,9 @@
 'use client'
 import { useState, useEffect } from 'react'
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function CreaDistintaPage() {
+  const dialog = useDialog()
   const [clienti, setClienti] = useState<any[]>([])
   const [corrieri, setCorrieri] = useState<any[]>([])
   const [contratti, setContratti] = useState<any[]>([])
@@ -65,8 +67,8 @@ export default function CreaDistintaPage() {
   }
 
   async function creaDistinta() {
-    if (!selezionate.size) { alert('Seleziona almeno una spedizione'); return }
-    if (!corriereId) { alert('Seleziona un Contratto: ogni distinta deve essere di un solo contratto'); return }
+    if (!selezionate.size) { await dialog.alert({ title: 'Nessuna spedizione selezionata', message: 'Seleziona almeno una spedizione.' }); return }
+    if (!corriereId) { await dialog.alert({ title: 'Contratto mancante', message: 'Seleziona un Contratto: ogni distinta deve essere di un solo contratto.' }); return }
     setCreando(true)
     const res = await fetch('/api/distinte/spedizioni', {
       method: 'POST',
@@ -79,7 +81,7 @@ export default function CreaDistintaPage() {
       setMsg('Distinta N. ' + d.numero + ' creata con successo!')
       await caricaSpedizioni()
       setTimeout(() => setMsg(''), 4000)
-    } else { alert('Errore: ' + (d.error || 'creazione fallita')) }
+    } else { await dialog.alert({ title: 'Errore', message: d.error || 'Creazione distinta fallita.' }) }
   }
 
   const filtrate = spedizioni.filter(s => !cerca ||
