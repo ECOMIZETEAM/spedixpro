@@ -1,7 +1,9 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function RettificaCostiPage() {
+  const dialog = useDialog()
   const [rettifiche, setRettifiche] = useState<any[]>([])
   const [files, setFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
@@ -54,14 +56,14 @@ export default function RettificaCostiPage() {
         await caricaRettifiche(data.fileId)
         setFileSelezionato(data.fileId)
       }
-    } catch(err) { alert('Errore caricamento file') }
+    } catch(err) { await dialog.alert({ title: 'Errore', message: 'Errore nel caricamento del file.' }) }
     setUploading(false)
     if (fileRef.current) fileRef.current.value = ''
   }
 
   async function cancellaRettifiche() {
-    if (!selectedIds.length) { alert('Seleziona almeno una rettifica'); return }
-    if (!confirm('Cancellare le ' + selectedIds.length + ' rettifiche selezionate? Non verra scalato alcun credito.')) return
+    if (!selectedIds.length) { await dialog.alert({ title: 'Nessuna selezione', message: 'Seleziona almeno una rettifica.' }); return }
+    if (!await dialog.confirm({ title: 'Cancellare le rettifiche?', message: 'Cancellare le ' + selectedIds.length + ' rettifiche selezionate? Non verrà scalato alcun credito.', danger: true, confirmText: 'Cancella' })) return
     const res = await fetch('/api/rettifiche', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -72,11 +74,11 @@ export default function RettificaCostiPage() {
       setSelectedIds([])
       await caricaFiles()
       await caricaRettifiche(fileSelezionato || undefined)
-    } else { alert('Errore: ' + (data.error || 'cancellazione fallita')) }
+    } else { await dialog.alert({ title: 'Errore', message: data.error || 'Cancellazione fallita.' }) }
   }
   async function confermaRettifiche() {
-    if (!selectedIds.length) { alert('Seleziona almeno una rettifica'); return }
-    if (!confirm('Confermi le ' + selectedIds.length + ' rettifiche selezionate? Il credito verrà scalato ai clienti.')) return
+    if (!selectedIds.length) { await dialog.alert({ title: 'Nessuna selezione', message: 'Seleziona almeno una rettifica.' }); return }
+    if (!await dialog.confirm({ title: 'Confermare le rettifiche?', message: 'Confermi le ' + selectedIds.length + ' rettifiche selezionate? Il credito verrà scalato ai clienti.', confirmText: 'Conferma' })) return
     setConfermando(true)
     const res = await fetch('/api/rettifiche', {
       method: 'POST',
@@ -86,7 +88,7 @@ export default function RettificaCostiPage() {
     const data = await res.json()
     setConfermando(false)
     if (data.success) {
-      alert('✅ ' + data.rettificate + ' rettifiche confermate! Credito aggiornato.')
+      await dialog.alert({ title: 'Rettifiche confermate', message: data.rettificate + ' rettifiche confermate. Credito aggiornato.' })
       setSelectedIds([])
       caricaRettifiche(fileSelezionato || undefined)
     }

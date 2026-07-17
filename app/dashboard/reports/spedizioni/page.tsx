@@ -8,7 +8,9 @@ const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'
 
 const STATI = ['in_lavorazione','spedita','in_transito','in_consegna','consegnata','in_giacenza','reso_mittente','annullata','non_consegnato']
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function ReportSpedizioniPage() {
+  const dialog = useDialog()
   const [clienti, setClienti] = useState<any[]>([])
   const [corrieri, setCorrieri] = useState<any[]>([])
   const [staff, setStaff] = useState<any[]>([])
@@ -46,7 +48,7 @@ export default function ReportSpedizioniPage() {
       body: JSON.stringify({ tipo: 'spedizioni', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
     })
     const j = await r.json()
-    if (!j.success) { alert('Errore salvataggio report: ' + (j.error||'')); return }
+    if (!j.success) { await dialog.alert({ title: 'Errore', message: 'Errore salvataggio report: ' + (j.error||'') }); return }
     const lista = await fetch('/api/reports/lista?tipo=spedizioni').then(x=>x.json())
     setReports(Array.isArray(lista) ? lista : [])
   }
@@ -67,7 +69,7 @@ export default function ReportSpedizioniPage() {
     // Filtro agente: match sul campo agente del cliente (= "Nome Cognome")
     if (filtri.agente) spedizioni = spedizioni.filter((s:any) => (s.clienti?.agente||'') === filtri.agente)
 
-    if (!spedizioni.length) { alert('Nessuna spedizione trovata con i filtri selezionati'); setGenerating(false); return }
+    if (!spedizioni.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna spedizione trovata con i filtri selezionati.' }); setGenerating(false); return }
 
     const formato = filtri.formato.toLowerCase()
 

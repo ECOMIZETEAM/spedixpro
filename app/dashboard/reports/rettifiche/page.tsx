@@ -6,7 +6,9 @@ import ReportTable from '@/app/components/ReportTable'
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function ReportRettifichePage() {
+  const dialog = useDialog()
   const [clienti, setClienti] = useState<any[]>([])
   const [corrieri, setCorrieri] = useState<any[]>([])
   const [reports, setReports] = useState<any[]>([])
@@ -33,13 +35,13 @@ export default function ReportRettifichePage() {
       body: JSON.stringify({ tipo: 'rettifiche', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
     })
     const j = await r.json()
-    if (!j.success) { alert('Errore salvataggio report: ' + (j.error||'')); return }
+    if (!j.success) { await dialog.alert({ title: 'Errore', message: 'Errore salvataggio report: ' + (j.error||'') }); return }
     const lista = await fetch('/api/reports/lista?tipo=rettifiche').then(x=>x.json())
     setReports(Array.isArray(lista) ? lista : [])
   }
 
   async function generaReport() {
-    if (!filtri.clienteId) { alert('Seleziona un cliente per generare il report rettifiche'); return }
+    if (!filtri.clienteId) { await dialog.alert({ title: 'Cliente mancante', message: 'Seleziona un cliente per generare il report rettifiche.' }); return }
     setGenerating(true)
     try {
       const params = new URLSearchParams()
@@ -49,7 +51,7 @@ export default function ReportRettifichePage() {
       if (filtri.vettore) params.set('vettore', filtri.vettore)
       const res = await fetch('/api/reports/rettifiche?' + params.toString())
       const { righe, master, cliente } = await res.json()
-      if (!righe || !righe.length) { alert('Nessuna rettifica trovata nel periodo'); setGenerating(false); return }
+      if (!righe || !righe.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna rettifica trovata nel periodo.' }); setGenerating(false); return }
       const fmt = filtri.formato.toLowerCase()
       if (fmt === 'xlsx' || fmt === 'csv') {
         const XLSX = await import('xlsx')
@@ -107,7 +109,7 @@ export default function ReportRettifichePage() {
         const pdfB64 = doc.output('datauristring')
         await salvaReport(pdfB64, 'report_rettifiche_'+filtri.dal+'.pdf', 'PDF')
       }
-    } catch(e) { alert('Errore generazione report') }
+    } catch(e) { await dialog.alert({ title: 'Errore', message: 'Errore nella generazione del report.' }) }
     setGenerating(false)
   }
 

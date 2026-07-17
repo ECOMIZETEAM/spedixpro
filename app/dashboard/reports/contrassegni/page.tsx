@@ -5,7 +5,9 @@ import DateRangePicker from '@/app/components/DateRangePicker'
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function ReportContrassegniPage() {
+  const dialog = useDialog()
   const [clienti, setClienti] = useState<any[]>([])
   const [reports, setReports] = useState<any[]>([])
   const [perPage, setPerPage] = useState(10)
@@ -36,7 +38,7 @@ export default function ReportContrassegniPage() {
       body: JSON.stringify({ tipo: 'contrassegni', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
     })
     const j = await r.json()
-    if (!j.success) { alert('Errore salvataggio report: ' + (j.error||'')); return }
+    if (!j.success) { await dialog.alert({ title: 'Errore', message: 'Errore salvataggio report: ' + (j.error||'') }); return }
     const lista = await fetch('/api/reports/lista?tipo=contrassegni').then(x=>x.json())
     setReports(Array.isArray(lista) ? lista : [])
   }
@@ -54,7 +56,7 @@ export default function ReportContrassegniPage() {
     if (filtri.statoContrassegni === 'da_pagare') spedizioni = spedizioni.filter((s:any) => Number(s.contrassegno)>0 && s.stato_contrassegno!=='in_distinta' && s.stato_contrassegno!=='pagato')
     else if (filtri.statoContrassegni === 'in_attesa') spedizioni = spedizioni.filter((s:any) => s.stato_contrassegno==='in_distinta')
     else if (filtri.statoContrassegni === 'pagato') spedizioni = spedizioni.filter((s:any) => s.stato_contrassegno==='pagato')
-    if (!spedizioni.length) { alert('Nessuna spedizione con contrassegno trovata per i filtri selezionati'); setGenerating(false); return }
+    if (!spedizioni.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna spedizione con contrassegno trovata per i filtri selezionati.' }); setGenerating(false); return }
     const { default: jsPDF } = await import('jspdf')
     const { default: autoTable } = await import('jspdf-autotable')
     const doc = new jsPDF({ orientation: 'landscape' })

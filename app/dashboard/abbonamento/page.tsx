@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react'
 const ACCENT = '#f97316'
 const card = { background:'#fff', borderRadius:'8px', border:'1px solid #e8e8e8', padding:'16px' as const }
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function AbbonamentoPage() {
+  const dialog = useDialog()
   const [stato, setStato] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [azione, setAzione] = useState('')
@@ -23,7 +25,7 @@ export default function AbbonamentoPage() {
     const testo = !stato?.attivo ? `Attivare questo piano? Verranno scalati € ${prezzoNuovo}.`
       : isUp ? `Upgrade: verrà scalata solo la differenza (€ ${(prezzoNuovo-prezzoAttuale).toFixed(2)}). Procedere?`
       : `Downgrade a questo piano? Nessun addebito ora, il nuovo canone partirà dal prossimo mese.`
-    if (!confirm(testo)) return
+    if (!await dialog.confirm({ title: 'Confermi il piano?', message: testo, confirmText: 'Conferma' })) return
     setAzione(pianoId); setMsg('')
     const res = await fetch('/api/abbonamento', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pianoId }) })
     const d = await res.json(); setAzione('')
@@ -32,13 +34,13 @@ export default function AbbonamentoPage() {
     carica()
   }
   async function disdici() {
-    if (!confirm('Disdire l\'abbonamento? Il portale verrà BLOCCATO finché non selezioni un nuovo piano. Nessun rimborso.')) return
+    if (!await dialog.confirm({ title: 'Disdire l\'abbonamento?', message: 'Il portale verrà BLOCCATO finché non selezioni un nuovo piano. Nessun rimborso.', danger: true, confirmText: 'Disdici' })) return
     setAzione('disdici')
     await fetch('/api/abbonamento/disdici', { method:'POST' })
     setAzione(''); window.location.reload()
   }
   async function segnaPagato(id:string, nome:string, importo:number) {
-    if (!confirm(`Confermi di aver ricevuto il bonifico di € ${Number(importo).toFixed(2)} da ${nome}?\nIl credito verrà rimborsato in automatico sulla sua Lista Movimenti.`)) return
+    if (!await dialog.confirm({ title: 'Bonifico ricevuto?', message: `Confermi di aver ricevuto il bonifico di € ${Number(importo).toFixed(2)} da ${nome}? Il credito verrà rimborsato in automatico sulla sua Lista Movimenti.`, confirmText: 'Conferma' })) return
     setAzione('pag_'+id); setMsg('')
     const res = await fetch(`/api/abbonamento/pagamenti/${id}`, { method:'POST' })
     const d = await res.json(); setAzione('')
