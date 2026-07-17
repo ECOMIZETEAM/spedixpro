@@ -1,5 +1,6 @@
 import { createServerSupabase } from '@/lib/supabase'
 import ClienteShell from './ClienteShell'
+import { DialogProvider } from '../components/DialogProvider'
 
 // Mai in cache: dipende dalla sessione (senza questo, Vercel può servire una
 // versione statica "senza utente" → sidebar assente).
@@ -18,7 +19,7 @@ export default async function ClienteLayout({ children }: { children: React.Reac
 
   return (
     <ClienteShell cliente={{ ragione_sociale: cliente?.ragione_sociale, credito: cliente?.credito }}>
-      {children}
+      <DialogProvider>{children}</DialogProvider>
     </ClienteShell>
   )
 }

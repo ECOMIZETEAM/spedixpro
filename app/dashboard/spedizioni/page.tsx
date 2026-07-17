@@ -4,6 +4,7 @@ import DateRangePicker from '@/app/components/DateRangePicker'
 import AssistenzaTicketButton from '@/app/components/AssistenzaTicketButton'
 import DettaglioSpedizione from '@/app/components/DettaglioSpedizione'
 import { fmtPeso } from '@/lib/peso'
+import { useDialog } from '@/app/components/DialogProvider'
 
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
@@ -46,6 +47,7 @@ const FILTRI_DEFAULT = {
 }
 
 export default function SpedizioniPage() {
+  const dialog = useDialog()
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [spedizioniFiltrate, setSpedizioniFiltrate] = useState<any[]>([])
   const [notifica, setNotifica] = useState<string>('')
@@ -232,7 +234,7 @@ export default function SpedizioniPage() {
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ ids: selectedIds })
     })
-    if (!res.ok) { alert('Errore generazione PDF'); return }
+    if (!res.ok) { await dialog.alert({ title: 'Errore', message: 'Errore nella generazione del PDF delle etichette.' }); return }
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -251,7 +253,7 @@ async function apriTracking(s: any) {
   }
 
   async function ripristina(id: string, numero: string) {
-    if (!confirm(`Ripristinare la spedizione ${numero}? Non verrà inviato alcun annullo al corriere.`)) return
+    if (!await dialog.confirm({ title: 'Ripristinare la spedizione?', message: `Spedizione ${numero}. Non verrà inviato alcun annullo al corriere.`, confirmText: 'Ripristina' })) return
     setEliminando(id)
     const res = await fetch(`/api/spedizioni/ripristina?id=${id}`, { method: 'POST' })
     setEliminando(null)
@@ -262,7 +264,7 @@ async function apriTracking(s: any) {
   }
 
   async function elimina(id: string, numero: string) {
-    if (!confirm(`Cancellare la spedizione ${numero}?\nResta in elenco come "In annullamento" e potrai ripristinarla; la richiesta di annullo viene inviata al corriere dopo 48 ore.`)) return
+    if (!await dialog.confirm({ title: `Cancellare la spedizione ${numero}?`, message: 'Resta in elenco come "In annullamento" e potrai ripristinarla; la richiesta di annullo viene inviata al corriere dopo 48 ore.', danger: true, confirmText: 'Cancella' })) return
     setEliminando(id)
     const res = await fetch(`/api/spedizioni/elimina?id=${id}`, { method: 'DELETE' })
     const j = await res.json().catch(() => ({}))
@@ -283,7 +285,7 @@ async function apriTracking(s: any) {
   // partite/affidate vengono bloccate dall'endpoint e riportate come non eliminabili).
   async function eliminaSelezionate() {
     if (!selectedIds.length) return
-    if (!confirm(`Eliminare ${selectedIds.length} spedizioni selezionate?\nLe spedizioni gia' partite non verranno eliminate. Le altre andranno in "Spedizioni Cancellate".`)) return
+    if (!await dialog.confirm({ title: `Eliminare ${selectedIds.length} spedizioni selezionate?`, message: 'Le spedizioni già partite non verranno eliminate. Le altre andranno in "Spedizioni Cancellate".', danger: true, confirmText: 'Elimina' })) return
     setEliminandoBulk(true)
     const ids = [...selectedIds]
     let ok = 0

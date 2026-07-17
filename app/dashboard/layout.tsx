@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import DashboardLayout from '../components/Layout'
 import { getPermessiUtente } from '@/lib/permessi'
 import AbbonamentoGate from './AbbonamentoGate'
+import { DialogProvider } from '../components/DialogProvider'
 export default async function Layout({ children }: { children: React.ReactNode }) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -30,8 +31,10 @@ export default async function Layout({ children }: { children: React.ReactNode }
       permessi: perm?.permessi || {},
       superMaster,
     }}>
-      {(utente?.ruolo === 'master' || utente?.ruolo === 'admin') && <AbbonamentoGate />}
-      {children}
+      <DialogProvider>
+        {(utente?.ruolo === 'master' || utente?.ruolo === 'admin') && <AbbonamentoGate />}
+        {children}
+      </DialogProvider>
     </DashboardLayout>
   )
 }
