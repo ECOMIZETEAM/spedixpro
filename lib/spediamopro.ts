@@ -332,7 +332,10 @@ export async function spediamoproCreatePickup(
   let json: any
   try { json = JSON.parse(text) } catch { json = {} }
   const d = json?.data || {}
-  return { id: d.id, code: d.code, status: d.status, raw: json }
+  // Codice pickup robusto: di norma è `code` (CP…), ma prendo anche eventuali alias per non
+  // ripiegare inutilmente sull'id numerico se il campo si chiama diversamente.
+  const code = d.code ?? d.pickupCode ?? d.trackingCode ?? d.tracking ?? d.reference ?? null
+  return { id: d.id, code, status: d.status, raw: json }
 }
 
 export async function spediamoproGetPickup(authcode: string, pickupId: number): Promise<any> {
@@ -349,7 +352,8 @@ export async function spediamoproGetPickup(authcode: string, pickupId: number): 
 export async function spediamoproWaitPickupCode(authcode: string, pickupId: number, maxAttempts = 4, delayMs = 1500): Promise<string | null> {
   for (let i = 0; i < maxAttempts; i++) {
     const d = await spediamoproGetPickup(authcode, pickupId)
-    if (d?.code) return d.code
+    const code = d?.code ?? d?.pickupCode ?? d?.trackingCode ?? d?.tracking ?? d?.reference ?? null
+    if (code) return code
     if (i < maxAttempts - 1) await new Promise(r => setTimeout(r, delayMs))
   }
   return null
