@@ -57,6 +57,7 @@ export interface SpediamoproParcel {
   width: number
   height: number
   type?: number
+  content?: string   // descrizione merce (stampata in etichetta); se assente SpediamoPro usa il default "campionatura generica"
 }
 
 export interface SpediamoproQuotation {
@@ -161,7 +162,7 @@ export async function spediamoproCreateShipment(
     method: 'POST',
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      parcels: params.parcels.map(p => ({ type: 0, weight: p.weight, length: p.length, width: p.width, height: p.height })),
+      parcels: params.parcels.map(p => ({ type: 0, weight: p.weight, length: p.length, width: p.width, height: p.height, ...(p.content ? { content: String(p.content).substring(0, 100) } : {}) })),
       sender: params.sender,
       consignee: params.consignee,
       quotation: {

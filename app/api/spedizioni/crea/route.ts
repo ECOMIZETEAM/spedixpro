@@ -336,6 +336,8 @@ export async function POST(req: NextRequest) {
         shipFrom: body.shipFrom, shipTo: body.shipTo,
         // Rif. Ordine in testa alle note così finisce sull'etichetta (canale trasmesso al corriere).
         notes: [body.rifOrdine ? `Rif. Ordine: ${body.rifOrdine}` : '', body.notes || ''].filter(Boolean).join(' — '),
+        // content = descrizione merce inserita dall'utente → in etichetta (guardato: solo se compilato)
+        ...(String(body.contenuto || '').trim() ? { content: String(body.contenuto).trim() } : {}),
         insuranceValue: body.insuranceValue || 0,
         codValue: body.codValue || 0, accessoriServices: []
       }),
@@ -465,9 +467,12 @@ export async function POST(req: NextRequest) {
       const emailDest = emailSp(body.shipTo.email); if (emailDest) consignee.email = emailDest
 
       // MULTICOLLO: un parcel per OGNI collo (prima si inviava solo il primo -> 1 sola etichetta)
+      // content = descrizione merce inserita dall'utente → stampata in etichetta (altrimenti "campionatura generica")
+      const contenutoMerce = String(body.contenuto || '').trim()
       const parcels = packages.map((p: any) => ({
         weight: kgToGrams(parseFloat(p?.weight) || 1),
         length: cmToMm(p?.length || 10), width: cmToMm(p?.width || 10), height: cmToMm(p?.height || 10),
+        ...(contenutoMerce ? { content: contenutoMerce } : {}),
       }))
       const cashOnDeliveryAmount = body.codValue ? euroToCents(body.codValue) : undefined
       const insuredAmount = body.insuranceValue ? euroToCents(body.insuranceValue) : undefined
