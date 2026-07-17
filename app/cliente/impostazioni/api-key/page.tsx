@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react'
 const ACCENT = '#f97316'
 const card = { background:'#fff', borderRadius:'8px', border:'1px solid #e8e8e8', padding:'16px' as const }
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function ApiKeysPage() {
+  const dialog = useDialog()
   const [contratti, setContratti] = useState<any[]>([])
   const [keys, setKeys] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -39,7 +41,7 @@ export default function ApiKeysPage() {
     carica()
   }
   async function revoca(id:string) {
-    if (!confirm('Revocare questa API key? I sistemi collegati smetteranno di funzionare.')) return
+    if (!await dialog.confirm({ title: 'Revocare la API key?', message: 'I sistemi collegati smetteranno di funzionare.', danger: true, confirmText: 'Revoca' })) return
     await fetch('/api/cliente/api-keys/'+id, { method:'DELETE' })
     carica()
   }

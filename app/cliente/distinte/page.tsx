@@ -1,6 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { useDialog } from '@/app/components/DialogProvider'
 export default function ListaDistinteCliente() {
+  const dialog = useDialog()
   const [distinte, setDistinte] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
@@ -53,7 +55,7 @@ export default function ListaDistinteCliente() {
         doc.addImage(qrUrl, 'PNG', 14, y, 30, 30)
       } catch {}
       doc.save('distinta_'+numero+'.pdf')
-    } catch(e) { alert('Errore stampa PDF') }
+    } catch(e) { await dialog.alert({ title: 'Errore', message: 'Errore nella stampa del PDF.' }) }
     setBusy('')
   }
   async function esporta(id:string, numero:string) {
@@ -70,7 +72,7 @@ export default function ListaDistinteCliente() {
       const wb = utils.book_new()
       utils.book_append_sheet(wb, ws, 'Distinta')
       writeFile(wb, 'distinta_'+numero+'.xlsx')
-    } catch(e) { alert('Errore esportazione') }
+    } catch(e) { await dialog.alert({ title: 'Errore', message: 'Errore nell\'esportazione.' }) }
     setBusy('')
   }
   const th = {textAlign:'left' as const,padding:'10px 12px',fontSize:'11px',fontWeight:'700' as const,color:'#1a1a1a',borderBottom:'1px solid #e8e8e8',whiteSpace:'nowrap' as const}

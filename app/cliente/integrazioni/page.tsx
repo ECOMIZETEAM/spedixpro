@@ -44,7 +44,9 @@ const card: React.CSSProperties = {
   background: '#fff', borderRadius: '8px', border: '1px solid #e8e8e8', padding: '20px',
 }
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function IntegrazioniPage() {
+  const dialog = useDialog()
   const [items, setItems] = useState<Integrazione[]>([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
@@ -133,7 +135,7 @@ export default function IntegrazioniPage() {
   }
 
   async function rimuovi(id: string, nome: string) {
-    if (!confirm(`Scollegare "${nome || 'questo negozio'}"?`)) return
+    if (!await dialog.confirm({ title: `Scollegare "${nome || 'questo negozio'}"?`, danger: true, confirmText: 'Scollega' })) return
     try {
       const res = await fetch('/api/integrazioni/elimina', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },

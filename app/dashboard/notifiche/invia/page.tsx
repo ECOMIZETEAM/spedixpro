@@ -3,7 +3,9 @@ import { useState, useRef, useEffect } from 'react'
 
 const GRUPPI = ['Cliente', 'Amministratore', 'Operatore', 'Agente']
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function InviaNotifica() {
+  const dialog = useDialog()
   const [oggetto, setOggetto] = useState('')
   const [gruppi, setGruppi] = useState<string[]>([])
   const [inviando, setInviando] = useState(false)
@@ -13,7 +15,7 @@ export default function InviaNotifica() {
   async function caricaLista() { const r = await fetch('/api/notifiche'); const j = await r.json(); setLista(Array.isArray(j)?j:[]) }
   useEffect(() => { caricaLista() }, [])
   async function eliminaNotifica(id: string) {
-    if (!confirm('Eliminare questa notifica? Non sarà più visibile.')) return
+    if (!await dialog.confirm({ title: 'Eliminare la notifica?', message: 'Non sarà più visibile.', danger: true, confirmText: 'Elimina' })) return
     await fetch('/api/notifiche?id=' + id, { method: 'DELETE' })
     caricaLista()
   }
@@ -92,7 +94,7 @@ export default function InviaNotifica() {
             <button onMouseDown={(e)=>{e.preventDefault();format('insertOrderedList')}} style={btnTool}>1. Lista</button>
             <button onMouseDown={(e)=>{e.preventDefault();format('justifyLeft')}} style={btnTool}>&larr;</button>
             <button onMouseDown={(e)=>{e.preventDefault();format('justifyCenter')}} style={btnTool}>&harr;</button>
-            <button onClick={()=>{ const url = prompt('URL immagine:'); if (url) format('insertImage', url) }} style={btnTool}>Img</button>
+            <button onClick={async ()=>{ const url = await dialog.prompt({ title: 'Inserisci immagine', message: 'URL dell\'immagine:', placeholder: 'https://…' }); if (url) format('insertImage', url) }} style={btnTool}>Img</button>
           </div>
           <div ref={editorRef} contentEditable suppressContentEditableWarning style={{ minHeight:'180px', border:'1px solid #d1d5db', borderRadius:'6px', padding:'12px', fontSize:'14px', color:'#1a1a1a', outline:'none' }} />
 

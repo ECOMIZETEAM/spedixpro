@@ -1,6 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { useDialog } from '@/app/components/DialogProvider'
 export default function ResiDistinteCliente() {
+  const dialog = useDialog()
   const [distinte, setDistinte] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
@@ -49,7 +51,7 @@ export default function ResiDistinteCliente() {
       doc.text('Totale LDV: '+(d.totale_ldv||0), 14, y); y+=7
       doc.text('Totale: € '+Number(d.totale||0).toFixed(2), 14, y)
       doc.save('distinta_reso_'+d.numero+'.pdf')
-    } catch(e){ alert('Errore stampa PDF') }
+    } catch(e){ await dialog.alert({ title: 'Errore', message: 'Errore nella stampa del PDF.' }) }
     setBusy('')
   }
   async function esporta(d:any) {
@@ -64,7 +66,7 @@ export default function ResiDistinteCliente() {
       const ws = utils.json_to_sheet(rows)
       const wb = utils.book_new(); utils.book_append_sheet(wb, ws, 'Reso')
       writeFile(wb, 'distinta_reso_'+d.numero+'.xlsx')
-    } catch(e){ alert('Errore esportazione') }
+    } catch(e){ await dialog.alert({ title: 'Errore', message: 'Errore nell\'esportazione.' }) }
     setBusy('')
   }
   const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const,marginBottom:'16px'}

@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useDialog } from '@/app/components/DialogProvider'
 
 const OPERAZIONI = [
   { v: 'riconsegna', l: 'Riconsegna' },
@@ -22,6 +23,7 @@ const td = { padding: '10px 12px', fontSize: '12.5px', color: '#1a1a1a', borderB
 const eur = (n: any) => '€ ' + (Number(n) || 0).toFixed(2)
 
 export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; tornaHref: string }) {
+  const dialog = useDialog()
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
@@ -79,7 +81,7 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
         <h1 style={{ fontSize: '22px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Giacenza — {sped.numero}</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
           {isMaster && sped.giacenza_stato !== 'chiusa' && (
-            <button disabled={salvando} onClick={() => { if (confirm('Chiudere la giacenza? Non sarà più gestibile.')) azione({ azione: 'chiudi' }) }}
+            <button disabled={salvando} onClick={async () => { if (await dialog.confirm({ title: 'Chiudere la giacenza?', message: 'Non sarà più gestibile.', danger: true, confirmText: 'Chiudi' })) azione({ azione: 'chiudi' }) }}
               style={{ padding: '7px 14px', background: '#6b7280', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Chiudi giacenza</button>
           )}
           <a href={tornaHref} style={{ fontSize: '13px', color: '#2563eb', textDecoration: 'none' }}>← Torna alle giacenze</a>

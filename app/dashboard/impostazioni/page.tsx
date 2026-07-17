@@ -5,7 +5,9 @@ import { PROVINCE_IT } from '@/lib/province-it'
 const inp = {padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',width:'100%',boxSizing:'border-box' as const}
 const lbl = {fontSize:'12px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function ImpostazioniPage() {
+  const dialog = useDialog()
   const [tab, setTab] = useState<'azienda'|'fatturazione'|'pagamento'|'sede'>('azienda')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -35,10 +37,10 @@ export default function ImpostazioniPage() {
         body: JSON.stringify(dati)
       })
       const out = await res.json().catch(()=>({}))
-      if (!res.ok || out?.error) { alert('Errore nel salvataggio: ' + (out?.error || res.status)); return }
+      if (!res.ok || out?.error) { await dialog.alert({ title: 'Errore', message: 'Errore nel salvataggio: ' + (out?.error || res.status) }); return }
       setSaved(true); setTimeout(()=>setSaved(false), 3000)
     } catch(e:any) {
-      alert('Errore di rete nel salvataggio')
+      await dialog.alert({ title: 'Errore', message: 'Errore di rete nel salvataggio.' })
     } finally {
       setSaving(false)
     }

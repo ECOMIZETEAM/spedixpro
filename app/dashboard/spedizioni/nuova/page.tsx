@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { useDialog } from '@/app/components/DialogProvider'
 
 function iconaCorriere(nome:string): string | null {
   const n = (nome||'').toUpperCase()
@@ -42,6 +43,7 @@ const CARRIERS: Record<string,{nome:string,colore:string}> = {
 const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':(t||'').toUpperCase()
 
 export default function NuovaSpedizionePage() {
+  const dialog = useDialog()
   const router = useRouter()
   const [clienti, setClienti] = useState<Cliente[]>([])
   const [clienteId, setClienteId] = useState('')
@@ -175,7 +177,7 @@ export default function NuovaSpedizionePage() {
   async function scaricaEtichetta(id:string) {
     try {
       const res = await fetch('/dashboard/spedizioni/'+id+'/etichetta')
-      if (!res.ok) { alert('Errore: etichetta non generata'); return }
+      if (!res.ok) { await dialog.alert({ title: 'Errore', message: 'Etichetta non generata.' }); return }
       const blob = await res.blob()
       const ct = res.headers.get('content-type')||''
       const ext = ct.includes('gif')?'gif':ct.includes('png')?'png':'pdf'
@@ -184,7 +186,7 @@ export default function NuovaSpedizionePage() {
       a.href = url; a.download = 'etichetta_'+id+'.'+ext
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       URL.revokeObjectURL(url)
-    } catch { alert('Errore durante il download etichetta') }
+    } catch { await dialog.alert({ title: 'Errore', message: 'Errore durante il download dell\'etichetta.' }) }
   }
   // Reset TOTALE del form dopo la creazione (come un refresh): destinatario, mittente, cliente e
   // tutti i dati spedizione tornano vuoti/iniziali. Il banner di successo (con "Scarica LDV") resta.

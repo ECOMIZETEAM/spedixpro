@@ -7,7 +7,9 @@ const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fo
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
 const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function ReportResiPage() {
+  const dialog = useDialog()
   const [clienti, setClienti] = useState<any[]>([])
   const [reports, setReports] = useState<any[]>([])
   const [generating, setGenerating] = useState(false)
@@ -34,7 +36,7 @@ export default function ReportResiPage() {
     params.set('stato', 'reso_mittente')
     const res = await fetch(`/api/spedizioni/lista?${params}`)
     const spedizioni = await res.json()
-    if (!spedizioni.length) { alert('Nessun reso trovato'); setGenerating(false); return }
+    if (!spedizioni.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessun reso trovato.' }); setGenerating(false); return }
     const formato = filtri.formato.toLowerCase()
     if (formato === 'xlsx' || formato === 'csv') {
       const { utils, writeFile } = await import('xlsx')

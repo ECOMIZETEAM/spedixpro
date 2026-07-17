@@ -1,6 +1,8 @@
 'use client'
 import { useState } from 'react'
+import { useDialog } from '@/app/components/DialogProvider'
 export default function ReportDistinteCliente() {
+  const dialog = useDialog()
   const [dal, setDal] = useState(new Date().toISOString().split('T')[0])
   const [al, setAl] = useState(new Date().toISOString().split('T')[0])
   const [formato, setFormato] = useState('PDF')
@@ -13,7 +15,7 @@ export default function ReportDistinteCliente() {
       if (al) params.set('al', al)
       const res = await fetch('/api/cliente/reports/distinte?' + params.toString())
       const { distinte, master, cliente } = await res.json()
-      if (!distinte || !distinte.length) { alert('Nessuna distinta trovata nel periodo'); setGenerating(false); return }
+      if (!distinte || !distinte.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna distinta trovata nel periodo.' }); setGenerating(false); return }
       const fmt = formato.toLowerCase()
       if (fmt === 'xlsx' || fmt === 'csv') {
         const { utils, writeFile } = await import('xlsx')
@@ -63,7 +65,7 @@ export default function ReportDistinteCliente() {
         })
         doc.save('report_distinte_' + dal + '.pdf')
       }
-    } catch(e) { alert('Errore generazione report') }
+    } catch(e) { await dialog.alert({ title: 'Errore', message: 'Errore nella generazione del report.' }) }
     setGenerating(false)
   }
   const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const,marginBottom:'16px'}

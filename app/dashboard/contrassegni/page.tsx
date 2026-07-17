@@ -18,7 +18,9 @@ const STATI_COD: Record<string,{bg:string,color:string,label:string}> = {
   pagato:{bg:'#f0fdf4',color:'#16a34a',label:'Pagato'},
 }
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function ListaContrassegniPage() {
+  const dialog = useDialog()
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -69,7 +71,7 @@ export default function ListaContrassegniPage() {
     })
     const data = await res.json()
     setCreandoDistinta(false)
-    if (data.success) { setSelectedIds([]); carica(); alert('Distinte create: ' + data.distinte?.length) }
+    if (data.success) { setSelectedIds([]); carica(); await dialog.alert({ title: 'Distinte create', message: 'Distinte create: ' + (data.distinte?.length ?? 0) }) }
   }
 
   return (

@@ -1,7 +1,9 @@
 'use client'
 import { useState, useEffect } from 'react'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import { useDialog } from '@/app/components/DialogProvider'
 export default function ContrassegniCliente() {
+  const dialog = useDialog()
   const [distinte, setDistinte] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
@@ -48,7 +50,7 @@ export default function ContrassegniCliente() {
       doc.setFont('helvetica','bold'); doc.setFontSize(11)
       doc.text('Totale iniziale contrassegni: '+totIniziale.toFixed(2)+' €', 14, y)
       doc.save('distinta_contrassegni_'+numero+'.pdf')
-    } catch(e){ alert('Errore stampa PDF') }
+    } catch(e){ await dialog.alert({ title: 'Errore', message: 'Errore nella stampa del PDF.' }) }
     setBusy('')
   }
   async function esporta(id:string, numero:string, tipo:'csv'|'xlsx') {
@@ -64,7 +66,7 @@ export default function ContrassegniCliente() {
       const ws = utils.json_to_sheet(rows)
       const wb = utils.book_new(); utils.book_append_sheet(wb, ws, 'Contrassegni')
       writeFile(wb, 'distinta_contrassegni_'+numero+'.'+tipo)
-    } catch(e){ alert('Errore esportazione') }
+    } catch(e){ await dialog.alert({ title: 'Errore', message: 'Errore nell\'esportazione.' }) }
     setBusy('')
   }
   const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const,marginBottom:'16px'}

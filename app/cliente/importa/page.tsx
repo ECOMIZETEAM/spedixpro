@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useDialog } from '@/app/components/DialogProvider'
 
 const ACCENT = '#f97316'
 
@@ -61,6 +62,7 @@ const inp: React.CSSProperties = {
 }
 
 export default function ImportaOrdiniPage() {
+  const dialog = useDialog()
   const [ordini, setOrdini] = useState<Ordine[]>([])
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
@@ -192,7 +194,7 @@ export default function ImportaOrdiniPage() {
 
   async function eliminaSelezionati() {
     if (!sel.size) return
-    if (!confirm(`Eliminare ${sel.size} ordini selezionati?`)) return
+    if (!await dialog.confirm({ title: `Eliminare ${sel.size} ordini selezionati?`, danger: true, confirmText: 'Elimina' })) return
     try {
       const res = await fetch('/api/ordini/elimina', {
         method: 'POST',

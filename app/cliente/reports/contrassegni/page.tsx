@@ -1,6 +1,8 @@
 'use client'
 import { useState } from 'react'
+import { useDialog } from '@/app/components/DialogProvider'
 export default function ReportContrassegniCliente() {
+  const dialog = useDialog()
   const [dal, setDal] = useState(new Date().toISOString().split('T')[0])
   const [al, setAl] = useState(new Date().toISOString().split('T')[0])
   const [statoSped, setStatoSped] = useState('tutti')
@@ -15,7 +17,7 @@ export default function ReportContrassegniCliente() {
       if (statoSped) params.set('statoSpedizione', statoSped)
       const res = await fetch('/api/cliente/reports/contrassegni?' + params.toString())
       const { righe, master, cliente } = await res.json()
-      if (!righe || !righe.length) { alert('Nessun contrassegno trovato nel periodo'); setGenerating(false); return }
+      if (!righe || !righe.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessun contrassegno trovato nel periodo.' }); setGenerating(false); return }
       const { default: jsPDF } = await import('jspdf')
       const { default: autoTable } = await import('jspdf-autotable')
       const doc = new jsPDF()
@@ -54,7 +56,7 @@ export default function ReportContrassegniCliente() {
         ]),
       })
       doc.save('report_contrassegni_' + dal + '.pdf')
-    } catch(e) { alert('Errore generazione report') }
+    } catch(e) { await dialog.alert({ title: 'Errore', message: 'Errore nella generazione del report.' }) }
     setGenerating(false)
   }
   const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const,marginBottom:'16px'}

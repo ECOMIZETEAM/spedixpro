@@ -30,7 +30,9 @@ function fmtData(iso: string) {
   return `${d.toLocaleDateString('it-IT')} ${d.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}`
 }
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function MovimentiMasterPage() {
+  const dialog = useDialog()
   const [movimenti, setMovimenti] = useState<Movimento[]>([])
   const [saldo, setSaldo] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -64,7 +66,7 @@ export default function MovimentiMasterPage() {
     } finally { setSavingP('') }
   }
   async function eliminaRicarica(id: string) {
-    if (typeof window !== 'undefined' && !window.confirm('Eliminare questa ricarica?')) return
+    if (!await dialog.confirm({ title: 'Eliminare la ricarica?', danger: true, confirmText: 'Elimina' })) return
     await fetch('/api/portali/ricariche?id=' + id, { method: 'DELETE' })
     await caricaPortali()
   }

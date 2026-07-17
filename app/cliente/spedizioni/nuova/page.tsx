@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import { useDialog } from '@/app/components/DialogProvider'
 
 const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':(t||'').toUpperCase()
 interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; _corriere_id?:string; corriere_nome?:string }
@@ -39,6 +40,7 @@ function iconaCorriere(nome:string): string | null {
   return null
 }
 export default function NuovaSpedizioneCliente() {
+  const dialog = useDialog()
   const router = useRouter()
   const [clienteData, setClienteData] = useState<any>(null)
   const [mitt, setMitt] = useState({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',email:'',telefono:''})
@@ -181,7 +183,7 @@ export default function NuovaSpedizioneCliente() {
   async function scaricaEtichetta(id:string) {
     try {
       const res = await fetch('/api/spedizioni/etichetta?id='+id)
-      if (!res.ok) { alert('Errore: etichetta non generata'); return }
+      if (!res.ok) { await dialog.alert({ title: 'Errore', message: 'Etichetta non generata.' }); return }
       const blob = await res.blob()
       const ct = res.headers.get('content-type')||''
       const ext = ct.includes('gif')?'gif':ct.includes('png')?'png':'pdf'
@@ -190,7 +192,7 @@ export default function NuovaSpedizioneCliente() {
       a.href = url; a.download = 'etichetta_'+id+'.'+ext
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       URL.revokeObjectURL(url)
-    } catch { alert('Errore durante il download etichetta') }
+    } catch { await dialog.alert({ title: 'Errore', message: 'Errore durante il download dell\'etichetta.' }) }
   }
   // Reset TOTALE del form dopo la creazione (come un refresh): destinatario e dati spedizione vuoti.
   // Il mittente torna ai dati del cliente (il cliente spedisce sempre da sé). Il banner successo resta.
