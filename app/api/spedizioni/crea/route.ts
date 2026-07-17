@@ -334,7 +334,9 @@ export async function POST(req: NextRequest) {
         carrierCode: rate.carrierCode, contractCode: rate.contractCode,
         label_format: 'PDF', packages,
         shipFrom: body.shipFrom, shipTo: body.shipTo,
-        notes: body.notes || '', insuranceValue: body.insuranceValue || 0,
+        // Rif. Ordine in testa alle note così finisce sull'etichetta (canale trasmesso al corriere).
+        notes: [body.rifOrdine ? `Rif. Ordine: ${body.rifOrdine}` : '', body.notes || ''].filter(Boolean).join(' — '),
+        insuranceValue: body.insuranceValue || 0,
         codValue: body.codValue || 0, accessoriServices: []
       }),
     })
@@ -487,8 +489,9 @@ export async function POST(req: NextRequest) {
       // costo live). Il controllo sulle destinazioni disagiate è ora PER-ZONA (zone disagiate), non
       // per confronto di prezzo.
 
-      // externalReference SpediamoPro: max 64 caratteri (altrimenti la creazione fallisce).
-      const externalRef = (body.notes ? String(body.notes) : '').substring(0, 64) || undefined
+      // externalReference SpediamoPro: compare sull'etichetta come riferimento. Priorità al Rif. Ordine
+      // (quello che l'utente inserisce), poi la nota. Max 64 caratteri (altrimenti la creazione fallisce).
+      const externalRef = ([body.rifOrdine, body.notes].filter(Boolean).map(String).join(' — ')).substring(0, 64) || undefined
 
       const shipment = await spediamoproCreateShipment(cred.authcode, {
         parcels, sender, consignee, quotation, cashOnDeliveryAmount, insuredAmount,
