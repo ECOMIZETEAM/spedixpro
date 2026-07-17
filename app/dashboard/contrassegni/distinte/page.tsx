@@ -5,7 +5,9 @@ import DateRangePicker from '@/app/components/DateRangePicker'
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function DistinteContrassegniPage() {
+  const dialog = useDialog()
   const [distinte, setDistinte] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
   const [codFiles, setCodFiles] = useState<any[]>([])
@@ -65,10 +67,10 @@ export default function DistinteContrassegniPage() {
       })
       const data = await res.json()
       if (data.success) {
-        alert('File processato! Spedizioni: ' + data.spedizioniProcessate + ' Errori: ' + data.errori)
+        await dialog.alert({ title: 'File processato', message: 'Spedizioni: ' + data.spedizioniProcessate + ' · Errori: ' + data.errori })
         fetch('/api/contrassegni/cod-files').then(r=>r.json()).then(d=>setCodFiles(d||[]))
       }
-    } catch(err) { alert('Errore caricamento file') }
+    } catch(err) { await dialog.alert({ title: 'Errore', message: 'Errore nel caricamento del file.' }) }
     setUploading(false)
     if (fileRef.current) fileRef.current.value = ''
   }
@@ -123,14 +125,14 @@ export default function DistinteContrassegniPage() {
     if (suddividi) {
       const righe = righePag.map(r => ({ metodo: r.metodo, importo: Number(r.importo) }))
         .filter(r => r.metodo && r.importo > 0)
-      if (!righe.length) { alert('Inserisci almeno una modalità con importo'); return }
+      if (!righe.length) { await dialog.alert({ title: 'Dati mancanti', message: 'Inserisci almeno una modalità con importo.' }); return }
       const somma = Math.round(righe.reduce((s,r)=>s+r.importo,0)*100)/100
-      if (somma > residuo + 0.02) { alert(`La somma (€${somma.toFixed(2)}) supera il residuo da saldare (€${residuo.toFixed(2)})`); return }
+      if (somma > residuo + 0.02) { await dialog.alert({ title: 'Importo non valido', message: `La somma (€${somma.toFixed(2)}) supera il residuo da saldare (€${residuo.toFixed(2)}).` }); return }
       payload = { pagamenti: righe }
     } else {
-      if (!metodoPagamento) { alert('Seleziona il tipo di pagamento'); return }
+      if (!metodoPagamento) { await dialog.alert({ title: 'Metodo mancante', message: 'Seleziona il tipo di pagamento.' }); return }
       const imp = importoPag !== '' ? Math.round(Number(importoPag) * 100) / 100 : residuo
-      if (!(imp > 0) || imp > residuo + 0.02) { alert(`Importo non valido (residuo € ${residuo.toFixed(2)})`); return }
+      if (!(imp > 0) || imp > residuo + 0.02) { await dialog.alert({ title: 'Importo non valido', message: `Residuo € ${residuo.toFixed(2)}.` }); return }
       payload = { metodoPagamento, importo: imp }
     }
     setConfermando(true)
@@ -141,7 +143,7 @@ export default function DistinteContrassegniPage() {
     const data = await res.json()
     setConfermando(false)
     if (data.success) { chiudiModalPagamento(); carica() }
-    else alert(data.error || 'Errore durante la conferma')
+    else await dialog.alert({ title: 'Errore', message: data.error || 'Errore durante la conferma.' })
   }
 
   const distinteFiltrate = cerca

@@ -1,9 +1,11 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+import { useDialog } from '@/app/components/DialogProvider'
 
 const inpS: any = { width: '100%', padding: '8px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box' }
 
 export default function ArticoliCliente() {
+  const dialog = useDialog()
   const [articoli, setArticoli] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [q, setQ] = useState('')
@@ -27,21 +29,21 @@ export default function ArticoliCliente() {
     setModal(true)
   }
   async function salva() {
-    if (!sku.trim()) { alert('Inserisci lo SKU'); return }
+    if (!sku.trim()) { await dialog.alert({ title: 'SKU mancante', message: 'Inserisci lo SKU.' }); return }
     setSaving(true)
     const body: any = { sku, nome, peso, lunghezza: lung, larghezza: larg, altezza: alt }
     if (edit) body.id = edit.id
     const res = await fetch('/api/cliente/articoli', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     const d = await res.json(); setSaving(false)
-    if (d.error) { alert('Errore: ' + d.error); return }
+    if (d.error) { await dialog.alert({ title: 'Errore', message: d.error }); return }
     setModal(false); carica()
   }
   async function elimina(id: string) {
-    if (!confirm('Eliminare questo articolo?')) return
+    if (!await dialog.confirm({ title: 'Eliminare l\'articolo?', danger: true, confirmText: 'Elimina' })) return
     await fetch('/api/cliente/articoli?id=' + id, { method: 'DELETE' }); carica()
   }
   async function svuota() {
-    if (!confirm('Svuotare TUTTO il catalogo articoli? L\'operazione non è reversibile.')) return
+    if (!await dialog.confirm({ title: 'Svuotare tutto il catalogo?', message: 'L\'operazione non è reversibile.', danger: true, confirmText: 'Svuota' })) return
     await fetch('/api/cliente/articoli?tutti=1', { method: 'DELETE' }); carica()
   }
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {

@@ -1,7 +1,9 @@
 'use client'
 import { useState, useEffect } from 'react'
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function StaffPage() {
+  const dialog = useDialog()
   const [utenti, setUtenti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
@@ -33,18 +35,18 @@ export default function StaffPage() {
   const [resetting, setResetting] = useState('')
 
   async function elimina(id: string) {
-    if (!confirm('Eliminare questo account?')) return
+    if (!await dialog.confirm({ title: 'Eliminare l\'account?', danger: true, confirmText: 'Elimina' })) return
     await fetch('/api/staff?id=' + id, { method: 'DELETE' })
     carica()
   }
 
   async function reimposta(u: any) {
-    if (!confirm(`Generare una nuova password per ${[u.nome,u.cognome].filter(Boolean).join(' ')||u.email} e inviarla via email?`)) return
+    if (!await dialog.confirm({ title: 'Generare una nuova password?', message: `Verrà generata e inviata via email a ${[u.nome,u.cognome].filter(Boolean).join(' ')||u.email}.`, confirmText: 'Genera e invia' })) return
     setResetting(u.id)
     const r = await fetch('/api/staff', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: u.id, resetPassword: true }) })
     const j = await r.json()
     setResetting('')
-    if (j.error) { alert('Errore: ' + j.error); return }
+    if (j.error) { await dialog.alert({ title: 'Errore', message: j.error }); return }
     setResetCred({ nome: [u.nome,u.cognome].filter(Boolean).join(' ')||u.email, email: j.email || u.email, password: j.password })
   }
 

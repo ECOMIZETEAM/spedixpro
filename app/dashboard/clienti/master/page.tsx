@@ -24,14 +24,14 @@ function NodoAlbero({ masterId, nome, isRoot }: { masterId: string; nome: string
 
   async function risincronizza(e: React.MouseEvent) {
     e.stopPropagation()
-    if (!confirm(`Risincronizzare il listino di "${nome}"? Ricopia contratti e prezzi assegnati dal padre (le sue modifiche ai prezzi ereditati verranno sovrascritte).`)) return
+    if (!await dialog.confirm({ title: `Risincronizzare il listino di "${nome}"?`, message: 'Ricopia contratti e prezzi assegnati dal padre. Le sue modifiche ai prezzi ereditati verranno sovrascritte.', confirmText: 'Risincronizza' })) return
     setSync('...')
     try {
       const res = await fetch(`/api/master/${masterId}/sync-listino?force=1`, { method: 'POST' })
       const d = await res.json()
-      if (d.error) { setSync('err'); alert('Errore: ' + d.error) }
-      else { setSync('ok'); alert(d.ok ? `Listino risincronizzato (${d.corrieri ?? 0} corrieri, ${d.fasce ?? 0} fasce).` : `Esito: ${d.reason || 'nessuna azione'}`) }
-    } catch { setSync('err'); alert('Errore di rete') }
+      if (d.error) { setSync('err'); await dialog.alert({ title: 'Errore', message: d.error }) }
+      else { setSync('ok'); await dialog.alert({ title: 'Fatto', message: d.ok ? `Listino risincronizzato (${d.corrieri ?? 0} corrieri, ${d.fasce ?? 0} fasce).` : `Esito: ${d.reason || 'nessuna azione'}` }) }
+    } catch { setSync('err'); await dialog.alert({ title: 'Errore', message: 'Errore di rete.' }) }
   }
 
   async function toggleEspandi() {
@@ -112,7 +112,9 @@ function NodoAlbero({ masterId, nome, isRoot }: { masterId: string; nome: string
   )
 }
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function ElencoMasterPage() {
+  const dialog = useDialog()
   const [root, setRoot] = useState<{ id: string; nome: string } | null>(null)
   const [loading, setLoading] = useState(true)
 

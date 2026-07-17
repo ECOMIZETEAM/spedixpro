@@ -1,7 +1,9 @@
 ﻿'use client'
 import { useState, useEffect } from 'react'
 
+import { useDialog } from '@/app/components/DialogProvider'
 export default function ListiniPage() {
+  const dialog = useDialog()
   const [listini, setListini] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [eliminando, setEliminando] = useState('')
@@ -33,7 +35,7 @@ export default function ListiniPage() {
     const d = await res.json().catch(() => ({}))
     setDuplicando('')
     setDupModal(null)
-    if (d?.error) { alert(d.error); return }
+    if (d?.error) { await dialog.alert({ title: 'Errore', message: d.error }); return }
     carica()
   }
 
@@ -46,12 +48,12 @@ export default function ListiniPage() {
   useEffect(() => { carica() }, [])
 
   async function elimina(id: string, nome: string) {
-    if (!confirm(`Eliminare il listino "${nome}"? L'operazione è irreversibile.`)) return
+    if (!await dialog.confirm({ title: `Eliminare il listino "${nome}"?`, message: 'L\'operazione è irreversibile.', danger: true, confirmText: 'Elimina' })) return
     setEliminando(id)
     const res = await fetch(`/api/listini/cliente/${id}`, { method: 'DELETE' })
     const d = await res.json().catch(() => ({}))
     setEliminando('')
-    if (d?.error) { alert(d.error); return }
+    if (d?.error) { await dialog.alert({ title: 'Errore', message: d.error }); return }
     setListini(prev => prev.filter(l => l.id !== id))
   }
 

@@ -1,6 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { useDialog } from '@/app/components/DialogProvider'
 export default function PacchiCliente() {
+  const dialog = useDialog()
   const [pacchi, setPacchi] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState(false)
@@ -24,18 +26,18 @@ export default function PacchiCliente() {
     setModal(true)
   }
   async function salva() {
-    if (!nome) { alert('Inserisci un nome'); return }
+    if (!nome) { await dialog.alert({ title: 'Nome mancante', message: 'Inserisci un nome.' }); return }
     setSaving(true)
     const body:any = { nome, peso, lunghezza:lung, larghezza:larg, altezza:alt, sku, predefinito:pred }
     if (edit) body.id = edit.id
     const res = await fetch('/api/cliente/pacchi', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
     const d = await res.json()
     setSaving(false)
-    if (d.error) { alert('Errore: '+d.error); return }
+    if (d.error) { await dialog.alert({ title: 'Errore', message: d.error }); return }
     setModal(false); carica()
   }
   async function elimina(id:string) {
-    if (!confirm('Eliminare questo pacco?')) return
+    if (!await dialog.confirm({ title: 'Eliminare il pacco?', danger: true, confirmText: 'Elimina' })) return
     await fetch('/api/cliente/pacchi?id='+id, { method:'DELETE' })
     carica()
   }
