@@ -18,7 +18,7 @@ export async function GET(_req: NextRequest) {
   // Escludo 'raw' (JSON completo, pesante)
   const ordini = await fetchAll(() => supabase
     .from('ordini_importati')
-    .select('id,destinatario,indirizzo,cap,localita,provincia,country,telefono,email_destinatario,peso,colli,contrassegno,contenuto,note,rif_mittente,rif_destinatario,order_id,totale_ordine,fonte,stato,errore,spedizione_id,created_at')
+    .select('id,destinatario,indirizzo,cap,localita,provincia,country,telefono,email_destinatario,peso,colli,contrassegno,contenuto,sku,note,rif_mittente,rif_destinatario,order_id,totale_ordine,fonte,stato,errore,spedizione_id,created_at')
     .eq('cliente_id', utente.cliente_id)
     .order('created_at', { ascending: false }))
   return NextResponse.json({ ordini })

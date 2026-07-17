@@ -18,6 +18,7 @@ type Ordine = {
   colli: number
   contrassegno: number
   contenuto: string | null
+  sku: string | null
   note: string | null
   rif_mittente: string | null
   rif_destinatario: string | null
@@ -275,8 +276,14 @@ export default function ImportaOrdiniPage() {
       return
     }
 
-    // Pacco predefinito scelto (misure + peso). 'ordine' = usa il peso del file e misure standard.
-    const presetPacco = pacco !== 'ordine' ? pacchi.find(p => String(p.id) === String(pacco)) : null
+    // Pacco scelto a MANO nel selettore ('ordine' = nessun override manuale).
+    const presetManuale = pacco !== 'ordine' ? pacchi.find(p => String(p.id) === String(pacco)) : null
+    // Catalogo SKU → pacco per il match AUTOMATICO (quando non c'è un pacco manuale).
+    const skuMap = new Map<string, any>()
+    for (const p of pacchi) {
+      if (!p.sku) continue
+      for (const s of String(p.sku).split(/[\s,;]+/)) { const k = s.trim().toLowerCase(); if (k) skuMap.set(k, p) }
+    }
 
     setSpedendo(true)
     setProgress({ done: 0, total: targets.length })
@@ -285,9 +292,10 @@ export default function ImportaOrdiniPage() {
     for (let i = 0; i < targets.length; i++) {
       const o = targets[i]
       try {
-        // Con un pacco predefinito: misure e peso dal preset (il peso dell'ordine è fallback se il preset non ce l'ha).
-        const packages = [presetPacco
-          ? { length: Number(presetPacco.lunghezza) || 20, width: Number(presetPacco.larghezza) || 15, height: Number(presetPacco.altezza) || 10, weight: Number(presetPacco.peso) || o.peso || 1 }
+        // Priorità: pacco manuale > match automatico per SKU > peso dal file (misure standard).
+        const box = presetManuale || (o.sku ? skuMap.get(String(o.sku).trim().toLowerCase()) : null)
+        const packages = [box
+          ? { length: Number(box.lunghezza) || 20, width: Number(box.larghezza) || 15, height: Number(box.altezza) || 10, weight: Number(box.peso) || o.peso || 1 }
           : { length: 20, width: 15, height: 10, weight: o.peso || 1 }]
         const shipTo = {
           name: o.destinatario, company: '',
@@ -373,6 +381,15 @@ export default function ImportaOrdiniPage() {
   })
   const allChecked = ordiniFiltrati.length > 0 && ordiniFiltrati.every(o => sel.has(o.id))
   const modificabile = (o: Ordine) => o.stato === 'da_spedire' || o.stato === 'errore'
+
+  // Catalogo SKU → pacco (per l'indicatore in tabella). Il pacco scelto a mano ha comunque la priorità.
+  const skuToPacco = new Map<string, any>()
+  for (const p of pacchi) {
+    if (!p.sku) continue
+    for (const s of String(p.sku).split(/[\s,;]+/)) { const k = s.trim().toLowerCase(); if (k) skuToPacco.set(k, p) }
+  }
+  const paccoManuale = pacco !== 'ordine' ? pacchi.find((p: any) => String(p.id) === String(pacco)) : null
+  const paccoPerOrdine = (o: Ordine) => paccoManuale || (o.sku ? skuToPacco.get(String(o.sku).trim().toLowerCase()) : null) || null
 
   return (
     <div>
@@ -581,7 +598,18 @@ export default function ImportaOrdiniPage() {
                       <td style={td}>{o.cap}</td>
                       <td style={td}>{o.provincia}</td>
                       <td style={td}>{o.telefono || '—'}</td>
-                      <td style={td}>{o.peso != null ? `${o.peso} kg` : '—'}</td>
+                      <td style={td}>
+                        {(() => {
+                          const box = paccoPerOrdine(o)
+                          if (box) return (
+                            <span title={`Pacco "${box.nome}" (${box.peso}kg ${box.lunghezza}×${box.larghezza}×${box.altezza})${paccoManuale ? ' — scelto a mano' : ' — auto da SKU'}`}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#15803d', fontWeight: 600 }}>
+                              📦 {Number(box.peso) || o.peso || 1} kg
+                            </span>
+                          )
+                          return o.peso != null ? `${o.peso} kg` : '—'
+                        })()}
+                      </td>
                       <td style={td}>{o.colli}</td>
                       <td style={td}>{o.contrassegno ? `€ ${Number(o.contrassegno).toFixed(2)}` : '—'}</td>
                       <td style={td}>{o.order_id || '—'}</td>

@@ -10,6 +10,7 @@ export default function PacchiCliente() {
   const [lung, setLung] = useState('')
   const [larg, setLarg] = useState('')
   const [alt, setAlt] = useState('')
+  const [sku, setSku] = useState('')
   const [pred, setPred] = useState(false)
   const [saving, setSaving] = useState(false)
   useEffect(() => { carica() }, [])
@@ -18,14 +19,14 @@ export default function PacchiCliente() {
     fetch('/api/cliente/pacchi').then(r=>r.json()).then(d=>{setPacchi(Array.isArray(d)?d:[]);setLoading(false)}).catch(()=>setLoading(false))
   }
   function apri(p:any) {
-    if (p) { setEdit(p); setNome(p.nome); setPeso(String(p.peso)); setLung(String(p.lunghezza)); setLarg(String(p.larghezza)); setAlt(String(p.altezza)); setPred(p.predefinito) }
-    else { setEdit(null); setNome(''); setPeso(''); setLung(''); setLarg(''); setAlt(''); setPred(false) }
+    if (p) { setEdit(p); setNome(p.nome); setPeso(String(p.peso)); setLung(String(p.lunghezza)); setLarg(String(p.larghezza)); setAlt(String(p.altezza)); setSku(p.sku||''); setPred(p.predefinito) }
+    else { setEdit(null); setNome(''); setPeso(''); setLung(''); setLarg(''); setAlt(''); setSku(''); setPred(false) }
     setModal(true)
   }
   async function salva() {
     if (!nome) { alert('Inserisci un nome'); return }
     setSaving(true)
-    const body:any = { nome, peso, lunghezza:lung, larghezza:larg, altezza:alt, predefinito:pred }
+    const body:any = { nome, peso, lunghezza:lung, larghezza:larg, altezza:alt, sku, predefinito:pred }
     if (edit) body.id = edit.id
     const res = await fetch('/api/cliente/pacchi', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
     const d = await res.json()
@@ -40,7 +41,7 @@ export default function PacchiCliente() {
   }
   async function setPredefinito(p:any) {
     if (p.predefinito) return
-    await fetch('/api/cliente/pacchi', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id:p.id, nome:p.nome, peso:p.peso, lunghezza:p.lunghezza, larghezza:p.larghezza, altezza:p.altezza, predefinito:true }) })
+    await fetch('/api/cliente/pacchi', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id:p.id, nome:p.nome, peso:p.peso, lunghezza:p.lunghezza, larghezza:p.larghezza, altezza:p.altezza, sku:p.sku||'', predefinito:true }) })
     carica()
   }
   const th = {textAlign:'left' as const,padding:'12px 14px',fontSize:'12px',fontWeight:'700' as const,color:'#1a1a1a',borderBottom:'1px solid #e8e8e8'}
@@ -58,17 +59,18 @@ export default function PacchiCliente() {
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead>
               <tr>
-                <th style={th}>Nome</th><th style={th}>Peso (Kg)</th><th style={th}>Misure (cm)</th><th style={th}>Predefinito</th><th style={th}>Menu</th>
+                <th style={th}>Nome</th><th style={th}>Peso (Kg)</th><th style={th}>Misure (cm)</th><th style={th}>SKU</th><th style={th}>Predefinito</th><th style={th}>Menu</th>
               </tr>
             </thead>
             <tbody>
               {!pacchi.length ? (
-                <tr><td colSpan={5} style={{padding:'30px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessun pacco predefinito. Aggiungine uno.</td></tr>
+                <tr><td colSpan={6} style={{padding:'30px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessun pacco predefinito. Aggiungine uno.</td></tr>
               ) : pacchi.map(p=>(
                 <tr key={p.id}>
                   <td style={{...td,color:'#f97316'}}>{p.nome}</td>
                   <td style={{...td,color:'#f97316'}}>{Number(p.peso).toFixed(2)}</td>
                   <td style={{...td,color:'#f97316'}}>{p.lunghezza} X {p.larghezza} X {p.altezza}</td>
+                  <td style={{...td,fontSize:'12px',color:p.sku?'#1a1a1a':'#cbd5e1'}}>{p.sku || '—'}</td>
                   <td style={td}><span onClick={()=>setPredefinito(p)} title={p.predefinito?'Predefinito':'Imposta come predefinito'} style={{cursor:'pointer',fontSize:'18px',color:p.predefinito?'#f59e0b':'#cbd5e1'}}>{p.predefinito ? '★' : '☆'}</span></td>
                   <td style={td}>
                     <button onClick={()=>elimina(p.id)} style={{background:'#dc2626',color:'#fff',border:'none',padding:'6px 10px',borderRadius:'6px',cursor:'pointer',marginRight:'8px'}}>🗑</button>
@@ -91,6 +93,10 @@ export default function PacchiCliente() {
                 <div><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Lungh. (cm)</label><input type="number" value={lung} onChange={e=>setLung(e.target.value)} style={{width:'100%',padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',boxSizing:'border-box'}}/></div>
                 <div><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Largh. (cm)</label><input type="number" value={larg} onChange={e=>setLarg(e.target.value)} style={{width:'100%',padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',boxSizing:'border-box'}}/></div>
                 <div><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Alt. (cm)</label><input type="number" value={alt} onChange={e=>setAlt(e.target.value)} style={{width:'100%',padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',boxSizing:'border-box'}}/></div>
+              </div>
+              <div><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>SKU associati <span style={{fontWeight:400,color:'#999'}}>(opzionale — separa più SKU con virgola o a capo)</span></label>
+                <textarea value={sku} onChange={e=>setSku(e.target.value)} rows={2} placeholder="es. ABC-123, XYZ-9" style={{width:'100%',padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',boxSizing:'border-box',resize:'vertical',fontFamily:'inherit'}}/>
+                <div style={{fontSize:'11px',color:'#999',marginTop:'4px'}}>Quando importi ordini (Amazon/Shopify) con uno di questi SKU, misure e peso di questo pacco vengono applicati in automatico.</div>
               </div>
               <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>
                 <input type="checkbox" checked={pred} onChange={e=>setPred(e.target.checked)}/> Imposta come predefinito

@@ -45,6 +45,7 @@ const ALIAS: Record<string, string[]> = {
 }
 // Colonne ausiliarie (non salvate ma usate per logica: line item, contrassegno, ecc.)
 const AUX: Record<string, string[]> = {
+  sku:           ['sku', 'lineitem_sku', 'lineitemsku', 'seller_sku', 'sellersku'],   // SOLO lo SKU (Amazon 'sku' / Shopify 'Lineitem sku'), per il match col catalogo pacchi
   lineitem_name: ['sku', 'lineitem_sku', 'seller_sku', 'sellersku', 'lineitem_name', 'item_name', 'product_name', 'productname'],
   lineitem_qty:  ['lineitem_quantity', 'quantity', 'qty', 'quantita', 'quantity_purchased', 'quantitypurchased'],
   payment:       ['payment_method', 'metodo_pagamento'],
@@ -218,6 +219,7 @@ export async function POST(req: NextRequest) {
       rif_destinatario: g(r, 'rif_destinatario') || null,
       order_id: grp.oid || null,
       totale_ordine: totale,
+      sku: (A.sku ? String(r[A.sku] ?? '').trim() : '') || null,   // SKU per il match automatico col catalogo pacchi
       fonte: 'csv',
       stato: 'da_spedire',
       raw: r,

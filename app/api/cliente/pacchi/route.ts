@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
     nome: b.nome, peso: Number(b.peso) || 0,
     lunghezza: Number(b.lunghezza) || 0, larghezza: Number(b.larghezza) || 0, altezza: Number(b.altezza) || 0,
     predefinito: !!b.predefinito,
+    sku: typeof b.sku === 'string' ? b.sku.trim() || null : null,   // uno o più SKU (separati da virgola/spazio/newline)
   }
   if (b.predefinito) {
     await supabase.from('pacchi_predefiniti').update({ predefinito: false }).eq('cliente_id', u.cliente_id)
