@@ -143,7 +143,11 @@ export async function POST(req: NextRequest) {
   let r: any; try { r = JSON.parse(text) } catch { r = { error: text.substring(0, 300) } }
   if (!res.ok || r.error) return NextResponse.json({ error: r?.error || `Errore ${res.status}` }, { status: 400 })
 
-  const { data: nuovo, error } = await salvaRitiro(r.pickupId)
-  if (error) return NextResponse.json({ error: `Ritiro creato (${r.pickupId}) ma errore DB: ${error.message}` }, { status: 500 })
-  return NextResponse.json({ id: nuovo.id, pickupId: r.pickupId, stato: 'richiesto', date: body.date })
+  // Codice ritiro del corriere: spedisci può restituirlo come pickupId (CP…) o, in alcune versioni,
+  // come id/uuid/code/reference. Prendo il primo disponibile così salviamo sempre il riferimento giusto.
+  const codiceCorriere = r.pickupId ?? r.pickup_id ?? r.id ?? r.uuid ?? r.code ?? r.reference ?? null
+  const { data: nuovo, error } = await salvaRitiro(codiceCorriere)
+  if (error) return NextResponse.json({ error: `Ritiro creato (${codiceCorriere}) ma errore DB: ${error.message}` }, { status: 500 })
+  // NB: `id` = riferimento interno MoovExpress (UUID). `codice_ritiro`/`pickupId` = codice del CORRIERE (es. CP…).
+  return NextResponse.json({ id: nuovo.id, codice_ritiro: codiceCorriere, pickupId: codiceCorriere, stato: 'richiesto', date: body.date })
 }
