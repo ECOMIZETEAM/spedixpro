@@ -186,6 +186,21 @@ export default function NuovaSpedizionePage() {
       URL.revokeObjectURL(url)
     } catch { alert('Errore durante il download etichetta') }
   }
+  // Reset TOTALE del form dopo la creazione (come un refresh): destinatario, mittente, cliente e
+  // tutti i dati spedizione tornano vuoti/iniziali. Il banner di successo (con "Scarica LDV") resta.
+  function resetForm() {
+    setClienteId('')
+    setMitt(mittAzienda || {nome:'',indirizzo:'',citta:'',provincia:'',cap:'',email:'',telefono:''})
+    setDest({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',paese:'IT',email:'',telefono:'',note:'',rif:'',ordine:''})
+    setNumColli(1); setColli([{lunghezza:'',larghezza:'',altezza:''}])
+    setPeso('1'); setContenuto(''); setTipoContenuto('Merce destinata alla vendita'); setValoreMerce('')
+    setContrassegno('0'); setAssicurazione('0')
+    setTariffe([]); setSelected(null); setExtraNomi([])
+    setRichiediRitiro(false); setRitiroData(new Date().toISOString().split('T')[0]); setRitiroOrario('mattina')
+    setSuggComuni([]); setShowSugg(false); setSuggDest([]); setShowSuggDest(false)
+    setErrore(''); setVista('dati')
+  }
+
   async function creaSpedizione() {
     if (!selected) return
     setCreating(true)
@@ -226,6 +241,7 @@ export default function NuovaSpedizionePage() {
     }
     setCreating(false)
     setSuccesso({numero:data.numero||'—', id:data.spedizioneId||''})
+    resetForm()   // form pulito per la prossima spedizione (il banner successo resta visibile)
   }
 
   

@@ -192,6 +192,21 @@ export default function NuovaSpedizioneCliente() {
       URL.revokeObjectURL(url)
     } catch { alert('Errore durante il download etichetta') }
   }
+  // Reset TOTALE del form dopo la creazione (come un refresh): destinatario e dati spedizione vuoti.
+  // Il mittente torna ai dati del cliente (il cliente spedisce sempre da sé). Il banner successo resta.
+  function resetForm() {
+    const c = clienteData
+    if (c) setMitt({nome:c.ragione_sociale||'',indirizzo:c.so_indirizzo||'',citta:c.so_citta||'',provincia:c.so_provincia||'',cap:c.so_cap||'',email:c.email||'',telefono:c.telefono||''})
+    setDest({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',paese:'IT',email:'',telefono:'',note:''})
+    setNumColli(1); setColli([{lunghezza:'',larghezza:'',altezza:''}])
+    setPeso('1'); setContenuto(''); setTipoContenuto('Merce destinata alla vendita'); setValoreMerce('')
+    setContrassegno('0'); setAssicurazione('0')
+    setTariffe([]); setSelected(null); setExtraNomi([])
+    setRichiediRitiro(false); setRitiroData(new Date().toISOString().split('T')[0]); setRitiroOrario('mattina')
+    setSuggComuni([]); setShowSugg(false); setDaOrdine('')
+    setErrore(''); setVista('dati')
+  }
+
   async function creaSpedizione() {
     if (!selected) return
     setCreating(true)
@@ -237,6 +252,7 @@ export default function NuovaSpedizioneCliente() {
     }
     setCreating(false)
     setSuccesso({numero:data.numero||'—', id:data.spedizioneId||''})
+    resetForm()   // form pulito per la prossima spedizione (il banner successo resta visibile)
   }
 
   const pesoVol0 = colli[0]?.lunghezza&&colli[0]?.larghezza&&colli[0]?.altezza
