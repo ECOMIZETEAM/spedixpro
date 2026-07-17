@@ -78,6 +78,13 @@ const NAV: NavItem[] = [
     { label: 'Report SMS Clienti', href: '/dashboard/reports/sms-clienti', perm: 'admin.reports.sms.clients' },
     { label: 'Storico Credito SMS', href: '/dashboard/reports/storico-sms', perm: 'admin.reports.sms.admin' },
   ]},
+  { label: 'Statistiche', icon: '▦', sub: [
+    { label: 'Profitto', href: '/dashboard/statistiche/profitto' },
+    { label: 'Clienti', href: '/dashboard/statistiche/clienti' },
+    { label: 'Corrieri', href: '/dashboard/statistiche/corrieri' },
+    { label: 'Contrassegni & Rischio', href: '/dashboard/statistiche/contrassegni' },
+    { label: 'Fatturazione', href: '/dashboard/statistiche/fatturazione' },
+  ]},
   { label: 'Registro Attività', href: '/dashboard/audit', icon: '🛡', superMaster: true },
   { label: 'Impostazioni', href: '/dashboard/impostazioni', icon: '◉', sub: [
     { label: 'Azienda', href: '/dashboard/impostazioni' },
