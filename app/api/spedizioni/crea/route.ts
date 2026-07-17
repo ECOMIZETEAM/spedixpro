@@ -387,6 +387,7 @@ export async function POST(req: NextRequest) {
       costo_spedizione: costoCorrente, costo_totale: costoCliente,
       servizi_accessori: serviziAccessori,
       note: body.notes || null, contenuto: body.contenuto || null,
+      rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
     }).select('id').single()
 
     if (insertError) {
@@ -535,6 +536,7 @@ export async function POST(req: NextRequest) {
         costo_spedizione: costoCorrente, costo_totale: costoCliente,
         servizi_accessori: serviziAccessori,
         note: body.notes || null, contenuto: body.contenuto || null,
+        rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
       }).select('id').single()
 
       if (insertError) {

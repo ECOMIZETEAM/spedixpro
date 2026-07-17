@@ -203,7 +203,8 @@ export default function NuovaSpedizionePage() {
         shipFrom:{name:mitt.nome,company:mitt.nome,street1:mitt.indirizzo,street2:'',city:mitt.citta,state:mitt.provincia,postalCode:mitt.cap,country:'IT',phone:mitt.telefono,email:mitt.email},
         shipTo:{name:dest.nome,company:'',street1:dest.indirizzo,street2:'',city:dest.citta,state:dest.provincia,postalCode:dest.cap,country:dest.paese,phone:dest.telefono,email:dest.email},
         notes:dest.note, insuranceValue:+assicurazione, codValue:+contrassegno,
-        contenuto, tipoContenuto, valoreMerce
+        contenuto, tipoContenuto, valoreMerce,
+        rifOrdine:dest.ordine, rifDestinatario:dest.rif
       })
     })
     const data = await res.json()
