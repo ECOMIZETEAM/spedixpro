@@ -114,7 +114,18 @@ export default function ImportaOrdiniPage() {
     p.set('paese', o.country || 'IT')
     if (o.email_destinatario) p.set('email', o.email_destinatario)
     if (o.telefono) p.set('telefono', o.telefono)
-    if (o.peso) p.set('peso', String(o.peso))
+    // Peso + MISURE risolti come in fase di spedizione: articolo(SKU) > pacco > file.
+    const articolo = articoloPerOrdine(o)
+    const box = paccoPerOrdine(o)
+    const pesoRis = (articolo && Number(articolo.peso) > 0) ? Number(articolo.peso)
+      : (box && Number(box.peso) > 0) ? Number(box.peso)
+      : (o.peso || 1)
+    const dimsRis = box ? { l: box.lunghezza, w: box.larghezza, h: box.altezza }
+      : (articolo && (Number(articolo.lunghezza) || Number(articolo.larghezza) || Number(articolo.altezza)))
+        ? { l: articolo.lunghezza, w: articolo.larghezza, h: articolo.altezza }
+        : null
+    p.set('peso', String(pesoRis))
+    if (dimsRis) { if (dimsRis.l) p.set('l', String(dimsRis.l)); if (dimsRis.w) p.set('w', String(dimsRis.w)); if (dimsRis.h) p.set('h', String(dimsRis.h)) }
     if (o.colli) p.set('colli', String(o.colli))
     if (o.contenuto) p.set('contenuto', o.contenuto)
     if (o.order_id) p.set('rif', o.order_id)

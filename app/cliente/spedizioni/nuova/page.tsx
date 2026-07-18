@@ -103,6 +103,12 @@ export default function NuovaSpedizioneCliente() {
     // Dati collo / pagamento dell'ordine
     if (q.get('peso')) setPeso(q.get('peso') as string)
     if (q.get('colli')) { const n = Math.max(1, parseInt(q.get('colli') as string) || 1); aggiornaNumColli(n) }
+    // Misure del 1° collo (da catalogo SKU / pacco dell'ordine importato)
+    if (q.get('l') || q.get('w') || q.get('h')) {
+      setColli(prev => { const n = prev.length ? [...prev] : [{ lunghezza: '', larghezza: '', altezza: '' }]
+        n[0] = { lunghezza: q.get('l') || n[0].lunghezza, larghezza: q.get('w') || n[0].larghezza, altezza: q.get('h') || n[0].altezza }
+        return n })
+    }
     if (q.get('contenuto')) setContenuto(q.get('contenuto') as string)
     if (q.get('rif')) setRifOrdine(q.get('rif') as string)
     if (q.get('valore')) setValoreMerce(q.get('valore') as string)
