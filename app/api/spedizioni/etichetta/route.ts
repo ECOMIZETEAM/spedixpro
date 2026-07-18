@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente } from '@/lib/agente'
+import { PDFDocument, StandardFonts } from 'pdf-lib'
+import { preparaRiepiloghi, disegnaRiepilogoSped } from '@/lib/riepilogo-ordine'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -45,10 +47,32 @@ export async function GET(req: NextRequest) {
     if (!sped.cliente_id || !miei.includes(sped.cliente_id)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
 
+  // Riepilogo ordine (se il cliente lo ha attivato): viene ANTEPOSTO all'etichetta quando è un PDF.
+  const { createAdminSupabase: _admR } = await import('@/lib/supabase-admin')
+  const _adminR = _admR()
+  const { data: spedFull } = await _adminR.from('spedizioni')
+    .select('id,numero,created_at,rif_ordine,contenuto,colli,peso_reale,peso_fatturato,contrassegno,dest_nome,dest_indirizzo,dest_citta,dest_cap,dest_provincia,dest_paese,dest_telefono,mitt_nome,cliente_id,corrieri(nome_contratto)')
+    .eq('id', id).maybeSingle()
+  const riepCtx = spedFull ? await preparaRiepiloghi(_adminR, [spedFull]) : null
+  const conRiepilogo = async (buf: Buffer): Promise<Buffer> => {
+    if (!riepCtx || !spedFull || !riepCtx.riepilogoCli.get((spedFull as any).cliente_id)) return buf
+    try {
+      const out = await PDFDocument.create()
+      const font = await out.embedFont(StandardFonts.Helvetica)
+      const fontBold = await out.embedFont(StandardFonts.HelveticaBold)
+      disegnaRiepilogoSped(out, font, fontBold, riepCtx, spedFull)
+      const label = await PDFDocument.load(new Uint8Array(buf))
+      const pages = await out.copyPages(label, label.getPageIndices())
+      pages.forEach(p => out.addPage(p))
+      return Buffer.from(await out.save())
+    } catch (e) { console.error('Riepilogo singola etichetta:', e); return buf }
+  }
+
   // Caso spedisci.online: etichetta come labelData base64 dentro raw_response
   const labelData = (sped.raw_response as any)?.labelData
   if (labelData) {
-    return new NextResponse(Buffer.from(labelData, 'base64'), {
+    const buf = await conRiepilogo(Buffer.from(labelData, 'base64'))
+    return new NextResponse(new Uint8Array(buf), {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
@@ -78,7 +102,8 @@ export async function GET(req: NextRequest) {
           // ZIP multicollo → PDF unico; PDF/GIF/PNG mono-collo invariati.
           const { buffer: buf, mime, ext } = await normalizzaEtichetta(raw)
           try { const { createAdminSupabase } = await import('@/lib/supabase-admin'); await createAdminSupabase().from('spedizioni').update({ etichetta_url: `data:${mime};base64,${buf.toString('base64')}` }).eq('id', id) } catch {}
-          return new NextResponse(new Uint8Array(buf), { status: 200, headers: { 'Content-Type': mime, 'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.${ext}"`, 'Cache-Control': 'private, max-age=0, no-store' } })
+          const outBuf = mime === 'application/pdf' ? await conRiepilogo(buf) : buf
+          return new NextResponse(new Uint8Array(outBuf), { status: 200, headers: { 'Content-Type': mime, 'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.${ext}"`, 'Cache-Control': 'private, max-age=0, no-store' } })
         } catch (e: any) {
           // Etichetta non ancora generata dal corriere (tipico del multicollo appena creato).
           const m = String(e?.message || '')
@@ -96,8 +121,9 @@ export async function GET(req: NextRequest) {
   const m = src.match(/^data:(application\/pdf|application\/zip|image\/[\w.+-]+);base64,(.+)$/s)
   if (m) {
     const ext = m[1] === 'application/zip' ? 'zip' : m[1].startsWith('image/') ? m[1].split('/')[1] : 'pdf'
-    const buf = Buffer.from(m[2], 'base64')
-    return new NextResponse(buf, {
+    // Riepilogo solo se PDF (zip/immagini non mergiabili).
+    const buf = m[1] === 'application/pdf' ? await conRiepilogo(Buffer.from(m[2], 'base64')) : Buffer.from(m[2], 'base64')
+    return new NextResponse(new Uint8Array(buf), {
       status: 200,
       headers: {
         'Content-Type': m[1],
@@ -113,11 +139,13 @@ export async function GET(req: NextRequest) {
     try {
       const r = await fetch(src)
       if (!r.ok) return NextResponse.json({ error: 'Etichetta non raggiungibile' }, { status: 502 })
-      const buf = Buffer.from(await r.arrayBuffer())
-      return new NextResponse(buf, {
+      const ct = r.headers.get('content-type') || 'application/pdf'
+      let buf = Buffer.from(await r.arrayBuffer())
+      if (/pdf/i.test(ct)) buf = await conRiepilogo(buf)
+      return new NextResponse(new Uint8Array(buf), {
         status: 200,
         headers: {
-          'Content-Type': r.headers.get('content-type') || 'application/pdf',
+          'Content-Type': ct,
           'Content-Disposition': `attachment; filename="${filename}"`,
           'Cache-Control': 'private, max-age=0, no-store',
         },
