@@ -114,15 +114,32 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params
   const ctx = await contesto(req, id)
   if (ctx instanceof NextResponse) return ctx
-  const { admin, sped, ruolo, agente, listinoAgenteId } = ctx
-  const prezzi = await leggiPrezzi(admin, sped)
+  const { admin, sped, ruolo, agente, listinoAgenteId, masterId } = ctx
+  // "SOPRA IL CONTRATTO": se il master che guarda è ANTENATO del proprietario del contratto, è un
+  // semplice passaggio → non vende nulla su questa spedizione → prezzo cliente E prezzo master = 0
+  // (margine 0), come nell'Elenco/Report. Il prezzo del cliente finale lo vede solo il proprietario
+  // (o un suo rivenditore a valle), non i master sopra. Evita che, es., Ecomize Solution veda il
+  // €5 del cliente di Ecomize LL quando il contratto è di Ecomize LL.
+  const ownerId = (sped as any).corrieri?.master_id || null
+  let sopraContratto = false
+  if (ruolo === 'master' && masterId && ownerId && ownerId !== masterId) {
+    let cur: string | null = ownerId
+    for (let i = 0; i < 20 && cur; i++) {
+      const { data: mm }: any = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+      cur = mm?.parent_master_id || null
+      if (cur === masterId) { sopraContratto = true; break }
+    }
+  }
+
+  const prezzi = sopraContratto ? prezziVuoti() : await leggiPrezzi(admin, sped)
   // Prezzo CONTROPARTE = quello che paga chi guarda (solo master/agente, mai il cliente):
   //  - master  → il suo costo dal listino corriere;
   //  - agente  → il suo costo dal listino agente assegnato.
   let prezziControparte: any = null
   let etichettaControparte: string | null = null
   if (ruolo === 'master') {
-    if (agente) { prezziControparte = await leggiPrezziDaListino(admin, listinoAgenteId, sped.corriere_id); etichettaControparte = 'agente' }
+    if (sopraContratto) { prezziControparte = prezziVuoti(); etichettaControparte = 'master' }
+    else if (agente) { prezziControparte = await leggiPrezziDaListino(admin, listinoAgenteId, sped.corriere_id); etichettaControparte = 'agente' }
     else { prezziControparte = await leggiPrezziMaster(admin, sped.corriere_id); etichettaControparte = 'master' }
   }
   const [{ data: storico }, { data: costi }] = await Promise.all([
