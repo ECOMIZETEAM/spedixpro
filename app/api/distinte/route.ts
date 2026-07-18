@@ -10,9 +10,38 @@ export async function GET(req: NextRequest) {
   const p = req.nextUrl.searchParams
   const dal = p.get('dal')
   const al = p.get('al')
-  let query = supabase.from('distinte')
+  const ruolo = (utente?.ruolo || '').toLowerCase()
+
+  const { createAdminSupabase } = await import('@/lib/supabase-admin')
+  const admin = createAdminSupabase()
+
+  // ── Rete: un master vede anche le distinte dei sotto-master (tutta la discendenza),
+  //    etichettate con la PROPRIA PRIMA LINEA (il figlio diretto sotto cui discendono). ──
+  const mine = utente?.master_id
+  let masterIds: string[] = mine ? [mine] : []
+  const primaLineaId = new Map<string, string>()   // master discendente -> figlio diretto (prima linea)
+  const nomeMaster = new Map<string, string>()      // master id -> nome
+  const isMasterRete = ruolo !== 'cliente' && ruolo !== 'agente' && !!mine
+  if (isMasterRete) {
+    let frontier = [mine as string]
+    for (let i = 0; i < 12 && frontier.length; i++) {
+      const { data: figli } = await admin.from('masters').select('id,nome,parent_master_id').in('parent_master_id', frontier)
+      const nuovi: string[] = []
+      for (const c of (figli || [])) {
+        if (masterIds.includes((c as any).id)) continue
+        nomeMaster.set((c as any).id, (c as any).nome)
+        primaLineaId.set((c as any).id, (c as any).parent_master_id === mine ? (c as any).id : (primaLineaId.get((c as any).parent_master_id) || (c as any).id))
+        masterIds.push((c as any).id); nuovi.push((c as any).id)
+      }
+      frontier = nuovi
+    }
+  }
+
+  // Cross-master richiede admin (RLS). Agente resta confinato al proprio master + suoi clienti.
+  const db: any = (isMasterRete && masterIds.length > 1) ? admin : supabase
+  let query = db.from('distinte')
     .select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
-    .eq('master_id', utente?.master_id)
+    .in('master_id', masterIds.length ? masterIds : ['00000000-0000-0000-0000-000000000000'])
     .order('created_at', { ascending: false })
   // Agente: solo le distinte dei suoi clienti.
   if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
@@ -24,8 +53,6 @@ export async function GET(req: NextRequest) {
   // Etichetta "Cliente" leggibile anche quando cliente_id è NULL:
   //  - distinta di un SOTTO-MASTER (master_rete_id) -> nome del sotto-master;
   //  - distinta multi-cliente / spedizione propria -> ricavo dalle spedizioni (Più clienti / Spedizione propria).
-  const { createAdminSupabase } = await import('@/lib/supabase-admin')
-  const admin = createAdminSupabase()
   const reteIds = Array.from(new Set(distinte.filter((d: any) => d.master_rete_id).map((d: any) => d.master_rete_id)))
   const nomeRete = new Map<string, string>()
   if (reteIds.length) {
@@ -53,7 +80,13 @@ export async function GET(req: NextRequest) {
       else if (set.size === 1) cliente_label = Array.from(set)[0]
       else cliente_label = `Più clienti (${set.size})`
     }
-    return { ...d, cliente_label }
+    // Distinta creata da un SOTTO-MASTER della rete: etichetta con la mia prima linea.
+    let master_rete: string | null = null
+    if (d.master_id && d.master_id !== mine) {
+      const flId = primaLineaId.get(d.master_id)
+      master_rete = flId ? (nomeMaster.get(flId) || nomeMaster.get(d.master_id) || null) : (nomeMaster.get(d.master_id) || null)
+    }
+    return { ...d, cliente_label, master_rete }
   })
   return NextResponse.json(out)
 }

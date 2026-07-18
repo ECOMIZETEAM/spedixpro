@@ -137,7 +137,10 @@ export default function ElencoDistintePage() {
                 <tr key={d.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                   <td style={td}><input type="checkbox" checked={selezionate.has(d.id)} onChange={() => toggle(d.id)} /></td>
                   <td style={{ ...td, fontWeight: '700' }}>{d.numero}</td>
-                  <td style={td}>{d.cliente_label || d.clienti?.ragione_sociale || '-'}</td>
+                  <td style={td}>
+                    {d.cliente_label || d.clienti?.ragione_sociale || '-'}
+                    {d.master_rete && <div style={{ fontSize: '10px', color: '#ea580c', fontWeight: 600, marginTop: '2px' }}>Rete: {d.master_rete}</div>}
+                  </td>
                   <td style={td}>{d.corrieri?.nome_contratto || '-'}</td>
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>{d.created_at ? new Date(d.created_at).toLocaleString('it-IT') : '-'}</td>
                   <td style={td}>{d.totale_ldv || 0}</td>
