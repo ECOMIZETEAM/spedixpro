@@ -20,6 +20,7 @@ export default function SpedizioniCancellateClientePage() {
   const [cerca, setCerca] = useState('')
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
+  const [paginaPending, setPaginaPending] = useState(1)
   const [ripristinando, setRipristinando] = useState<string | null>(null)
 
   function carica() {
@@ -54,6 +55,16 @@ export default function SpedizioniCancellateClientePage() {
   const paginaCorr = Math.min(pagina, totalePagine)
   const paginate = visibili.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
 
+  // Sezione "in attesa di annullo": pending + manuali, paginati 10 per pagina.
+  const PENDING_PER_PAGE = 10
+  const pendingCombinati = [
+    ...pending.map((s: any) => ({ s, tipo: 'p' as const })),
+    ...manuali.map((s: any) => ({ s, tipo: 'm' as const })),
+  ]
+  const totPagPending = Math.max(1, Math.ceil(pendingCombinati.length / PENDING_PER_PAGE))
+  const pagPendingCorr = Math.min(paginaPending, totPagPending)
+  const pendingPaginati = pendingCombinati.slice((pagPendingCorr - 1) * PENDING_PER_PAGE, pagPendingCorr * PENDING_PER_PAGE)
+
   return (
     <div>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'20px'}}>
@@ -77,23 +88,24 @@ export default function SpedizioniCancellateClientePage() {
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
               <tbody>
-                {pending.map(s => {
-                  const c = s.annullamento_richiesto_at ? oreRestanti(s.annullamento_richiesto_at) : { txt:'', pronto:false }
-                  return (
-                    <tr key={s.id} style={{borderBottom:'1px solid #fdece0'}}>
-                      <td style={{padding:'10px 16px'}}><span style={{fontWeight:'600',color:'#f97316'}}>{s.numero}</span></td>
-                      <td style={{padding:'10px 14px',color:'#333'}}>{s.dest_nome} · {s.dest_citta}</td>
-                      <td style={{padding:'10px 14px',color:'#ea580c',fontSize:'12px',whiteSpace:'nowrap'}}>{c.txt}</td>
-                      <td style={{padding:'10px 16px',textAlign:'right'}}>
-                        <button onClick={()=>ripristina(s.id)} disabled={ripristinando===s.id}
-                          style={{padding:'6px 12px',background:'#fff',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:'pointer',opacity:ripristinando===s.id?0.6:1}}>
-                          {ripristinando===s.id?'…':'Ripristina'}
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })}
-                {manuali.map(s => (
+                {pendingPaginati.map(({s, tipo}) => tipo === 'p' ? (
+                  (() => {
+                    const c = s.annullamento_richiesto_at ? oreRestanti(s.annullamento_richiesto_at) : { txt:'', pronto:false }
+                    return (
+                      <tr key={s.id} style={{borderBottom:'1px solid #fdece0'}}>
+                        <td style={{padding:'10px 16px'}}><span style={{fontWeight:'600',color:'#f97316'}}>{s.numero}</span></td>
+                        <td style={{padding:'10px 14px',color:'#333'}}>{s.dest_nome} · {s.dest_citta}</td>
+                        <td style={{padding:'10px 14px',color:'#ea580c',fontSize:'12px',whiteSpace:'nowrap'}}>{c.txt}</td>
+                        <td style={{padding:'10px 16px',textAlign:'right'}}>
+                          <button onClick={()=>ripristina(s.id)} disabled={ripristinando===s.id}
+                            style={{padding:'6px 12px',background:'#fff',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:'pointer',opacity:ripristinando===s.id?0.6:1}}>
+                            {ripristinando===s.id?'…':'Ripristina'}
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })()
+                ) : (
                   <tr key={s.id} style={{borderBottom:'1px solid #fdece0'}}>
                     <td style={{padding:'10px 16px'}}><span style={{fontWeight:'600',color:'#f97316'}}>{s.numero}</span></td>
                     <td style={{padding:'10px 14px',color:'#333'}}>{s.dest_nome} · {s.dest_citta}</td>
@@ -102,6 +114,15 @@ export default function SpedizioniCancellateClientePage() {
                 ))}
               </tbody>
             </table>
+            {totPagPending > 1 && (
+              <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:'6px',padding:'12px'}}>
+                <button onClick={()=>setPaginaPending(p=>Math.max(1,p-1))} disabled={pagPendingCorr<=1}
+                  style={{padding:'5px 10px',border:'1px solid #fed7aa',background:'#fff',color:'#ea580c',borderRadius:'6px',fontSize:'12px',cursor:pagPendingCorr<=1?'default':'pointer',opacity:pagPendingCorr<=1?0.5:1}}>‹</button>
+                <span style={{fontSize:'12px',color:'#9a3412'}}>Pagina {pagPendingCorr} di {totPagPending}</span>
+                <button onClick={()=>setPaginaPending(p=>Math.min(totPagPending,p+1))} disabled={pagPendingCorr>=totPagPending}
+                  style={{padding:'5px 10px',border:'1px solid #fed7aa',background:'#fff',color:'#ea580c',borderRadius:'6px',fontSize:'12px',cursor:pagPendingCorr>=totPagPending?'default':'pointer',opacity:pagPendingCorr>=totPagPending?0.5:1}}>›</button>
+              </div>
+            )}
           </div>
         )}
       </div>

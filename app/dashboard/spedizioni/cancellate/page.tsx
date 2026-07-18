@@ -24,6 +24,7 @@ export default function SpedizioniCancellatePage() {
   const [al, setAl] = useState('')
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
+  const [paginaPending, setPaginaPending] = useState(1)   // paginazione sezione "in attesa di annullo"
   const [ripristinando, setRipristinando] = useState<string | null>(null)
   const [confermando, setConfermando] = useState<string | null>(null)
 
@@ -92,6 +93,16 @@ export default function SpedizioniCancellatePage() {
   const totalePagine = Math.max(1, Math.ceil(visibili.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
   const visibiliPaginate = visibili.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
+
+  // Sezione "in attesa di annullo": pending + manuali insieme, paginati 10 per pagina.
+  const PENDING_PER_PAGE = 10
+  const pendingCombinati = [
+    ...pendingVis.map((s: any) => ({ s, tipo: 'p' as const })),
+    ...manualiVis.map((s: any) => ({ s, tipo: 'm' as const })),
+  ]
+  const totPagPending = Math.max(1, Math.ceil(pendingCombinati.length / PENDING_PER_PAGE))
+  const pagPendingCorr = Math.min(paginaPending, totPagPending)
+  const pendingPaginati = pendingCombinati.slice((pagPendingCorr - 1) * PENDING_PER_PAGE, pagPendingCorr * PENDING_PER_PAGE)
 
   return (
     <div>
@@ -182,24 +193,25 @@ export default function SpedizioniCancellatePage() {
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
               <tbody>
-                {pendingVis.map(s => {
-                  const c = s.annullamento_richiesto_at ? oreRestanti(s.annullamento_richiesto_at) : { txt:'', pronto:false }
-                  return (
-                    <tr key={s.id} style={{borderBottom:'1px solid #fdece0'}}>
-                      <td style={{padding:'9px 16px',fontWeight:'700',color:'#1a1a1a'}}>{s.numero}</td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.clienti?.ragione_sociale || '-'}</td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.dest_nome} · {s.dest_citta}</td>
-                      <td style={{padding:'9px 12px',color:'#ea580c',fontSize:'12px',whiteSpace:'nowrap'}}>{c.txt}</td>
-                      <td style={{padding:'9px 16px',textAlign:'right'}}>
-                        <button onClick={()=>ripristina(s.id)} disabled={ripristinando===s.id}
-                          style={{padding:'6px 12px',background:'#fff',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:'pointer',opacity:ripristinando===s.id?0.6:1}}>
-                          {ripristinando===s.id?'…':'Ripristina'}
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })}
-                {manualiVis.map(s => (
+                {pendingPaginati.map(({s, tipo}) => tipo === 'p' ? (
+                  (() => {
+                    const c = s.annullamento_richiesto_at ? oreRestanti(s.annullamento_richiesto_at) : { txt:'', pronto:false }
+                    return (
+                      <tr key={s.id} style={{borderBottom:'1px solid #fdece0'}}>
+                        <td style={{padding:'9px 16px',fontWeight:'700',color:'#1a1a1a'}}>{s.numero}</td>
+                        <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.clienti?.ragione_sociale || '-'}</td>
+                        <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.dest_nome} · {s.dest_citta}</td>
+                        <td style={{padding:'9px 12px',color:'#ea580c',fontSize:'12px',whiteSpace:'nowrap'}}>{c.txt}</td>
+                        <td style={{padding:'9px 16px',textAlign:'right'}}>
+                          <button onClick={()=>ripristina(s.id)} disabled={ripristinando===s.id}
+                            style={{padding:'6px 12px',background:'#fff',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:'pointer',opacity:ripristinando===s.id?0.6:1}}>
+                            {ripristinando===s.id?'…':'Ripristina'}
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })()
+                ) : (
                   <tr key={s.id} style={{borderBottom:'1px solid #fdece0'}}>
                     <td style={{padding:'9px 16px',fontWeight:'700',color:'#1a1a1a'}}>{s.numero}</td>
                     <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.clienti?.ragione_sociale || '-'}</td>
@@ -209,6 +221,15 @@ export default function SpedizioniCancellatePage() {
                 ))}
               </tbody>
             </table>
+            {totPagPending > 1 && (
+              <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:'6px',padding:'12px'}}>
+                <button onClick={()=>setPaginaPending(p=>Math.max(1,p-1))} disabled={pagPendingCorr<=1}
+                  style={{padding:'5px 10px',border:'1px solid #fed7aa',background:'#fff',color:'#ea580c',borderRadius:'6px',fontSize:'12px',cursor:pagPendingCorr<=1?'default':'pointer',opacity:pagPendingCorr<=1?0.5:1}}>‹</button>
+                <span style={{fontSize:'12px',color:'#9a3412'}}>Pagina {pagPendingCorr} di {totPagPending}</span>
+                <button onClick={()=>setPaginaPending(p=>Math.min(totPagPending,p+1))} disabled={pagPendingCorr>=totPagPending}
+                  style={{padding:'5px 10px',border:'1px solid #fed7aa',background:'#fff',color:'#ea580c',borderRadius:'6px',fontSize:'12px',cursor:pagPendingCorr>=totPagPending?'default':'pointer',opacity:pagPendingCorr>=totPagPending?0.5:1}}>›</button>
+              </div>
+            )}
           </div>
         )}
       </div>
