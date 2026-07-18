@@ -39,13 +39,17 @@ export default function AbbonamentoPage() {
     await fetch('/api/abbonamento/disdici', { method:'POST' })
     setAzione(''); window.location.reload()
   }
-  async function segnaPagato(id:string, nome:string, importo:number) {
-    if (!await dialog.confirm({ title: 'Bonifico ricevuto?', message: `Confermi di aver ricevuto il bonifico di € ${Number(importo).toFixed(2)} da ${nome}? Il credito verrà rimborsato in automatico sulla sua Lista Movimenti.`, confirmText: 'Conferma' })) return
+  async function segnaPagato(id:string, nome:string, importo:number, metodo:'pagato'|'bonifico') {
+    const isBonifico = metodo === 'bonifico'
+    const testo = isBonifico
+      ? `Confermi il BONIFICO di € ${Number(importo).toFixed(2)} da ${nome}? Il credito gli verrà RIMBORSATO in automatico (ha pagato con bonifico).`
+      : `Segnare come PAGATO € ${Number(importo).toFixed(2)} da ${nome}? NESSUN rimborso: il pagamento resta scalato dal suo credito.`
+    if (!await dialog.confirm({ title: isBonifico?'Bonifico ricevuto?':'Segna pagato', message: testo, confirmText: 'Conferma' })) return
     setAzione('pag_'+id); setMsg('')
-    const res = await fetch(`/api/abbonamento/pagamenti/${id}`, { method:'POST' })
+    const res = await fetch(`/api/abbonamento/pagamenti/${id}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ metodo }) })
     const d = await res.json(); setAzione('')
     if (d.error) { setMsg(d.error); return }
-    setMsg(`✓ Pagamento registrato — rimborsati € ${Number(d.rimborsato||0).toFixed(2)} a ${nome}`)
+    setMsg(d.rimborsato>0 ? `✓ Bonifico registrato — rimborsati € ${Number(d.rimborsato).toFixed(2)} a ${nome}` : `✓ Pagato registrato (nessun rimborso) — ${nome}`)
     carica()
   }
 
@@ -65,15 +69,27 @@ export default function AbbonamentoPage() {
         </div>
         {msg && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px',marginBottom:'14px',fontSize:'13px',color:'#ea580c'}}>{msg}</div>}
 
-        <div style={{...card, marginBottom:'16px',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'10px'}}>
-          <div>
-            <div style={{fontSize:'12px',color:'#777'}}>Il tuo piano</div>
-            <div style={{fontSize:'18px',fontWeight:800,color:ACCENT}}>Illimitato — gratuito</div>
-            <div style={{fontSize:'12px',color:'#999',marginTop:'2px'}}>Master principale: nessun canone, spedizioni illimitate.</div>
-          </div>
-          <div style={{textAlign:'right' as const}}>
+        {/* KPI mensili */}
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:'12px',marginBottom:'16px'}}>
+          <div style={card}>
             <div style={{fontSize:'12px',color:'#777'}}>Da incassare</div>
-            <div style={{fontSize:'20px',fontWeight:800,color:totaleAperto>0?'#dc2626':'#16a34a'}}>€ {totaleAperto.toFixed(2)}</div>
+            <div style={{fontSize:'22px',fontWeight:800,color:totaleAperto>0?'#dc2626':'#16a34a'}}>€ {totaleAperto.toFixed(2)}</div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>{daIncassare.length} in attesa</div>
+          </div>
+          <div style={card}>
+            <div style={{fontSize:'12px',color:'#777'}}>Incassato questo mese</div>
+            <div style={{fontSize:'22px',fontWeight:800,color:'#16a34a'}}>€ {Number(stato?.incassatoMese||0).toFixed(2)}</div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>pagamenti segnati nel mese</div>
+          </div>
+          <div style={card}>
+            <div style={{fontSize:'12px',color:'#777'}}>Previsto prossimo mese</div>
+            <div style={{fontSize:'22px',fontWeight:800,color:ACCENT}}>€ {Number(stato?.previstoProssimoMese||0).toFixed(2)}</div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>{stato?.abbonatiAttivi||0} abbonati attivi (esclusi gli esenti)</div>
+          </div>
+          <div style={card}>
+            <div style={{fontSize:'12px',color:'#777'}}>Il tuo piano</div>
+            <div style={{fontSize:'18px',fontWeight:800,color:ACCENT}}>Illimitato — gratis</div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>Master principale: nessun canone.</div>
           </div>
         </div>
 
@@ -92,19 +108,25 @@ export default function AbbonamentoPage() {
                 <tr><td colSpan={6} style={{padding:'30px',textAlign:'center' as const,color:'#999',fontSize:'12px'}}>Nessuna iscrizione ancora</td></tr>
               ) : pagamenti.map((p:any)=>(
                 <tr key={p.id} style={{borderBottom:'1px solid #f5f5f5'}}>
-                  <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:600}}>{p.master_nome}</td>
+                  <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:600}}>
+                    {p.master_nome}
+                    {p.master_esente && <span style={{marginLeft:'6px',background:'#eef2ff',color:'#4338ca',borderRadius:'999px',padding:'1px 7px',fontSize:'10px',fontWeight:700}}>esente</span>}
+                  </td>
                   <td style={{padding:'9px 14px',color:'#555'}}>{(p.piano||'').replace('enterprise_','Enterprise ').toUpperCase()}</td>
                   <td style={{padding:'9px 14px',color:'#555'}}>{p.mese}</td>
                   <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:700}}>€ {Number(p.importo||0).toFixed(2)}</td>
                   <td style={{padding:'9px 14px'}}>
                     {p.pagato
-                      ? <span style={{background:'#dcfce7',color:'#16a34a',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Pagato</span>
+                      ? <span style={{background:'#dcfce7',color:'#16a34a',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>{p.metodo==='pagato'?'Pagato':'Bonifico'}</span>
                       : <span style={{background:'#fef3c7',color:'#b45309',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>In attesa</span>}
                   </td>
                   <td style={{padding:'9px 14px',textAlign:'right' as const}}>
-                    {!p.pagato && <button onClick={()=>segnaPagato(p.id, p.master_nome, p.importo)} disabled={!!azione}
-                      style={{background:ACCENT,color:'#fff',border:'none',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:700,cursor:'pointer',opacity:azione==='pag_'+p.id?0.6:1}}>
-                      {azione==='pag_'+p.id?'…':'Segna pagato'}</button>}
+                    {!p.pagato && <div style={{display:'inline-flex',gap:'6px'}}>
+                      <button onClick={()=>segnaPagato(p.id, p.master_nome, p.importo, 'pagato')} disabled={!!azione} title="Saldato: nessun rimborso al credito"
+                        style={{background:'#fff',color:'#16a34a',border:'1px solid #86efac',borderRadius:'6px',padding:'6px 10px',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>Pagato</button>
+                      <button onClick={()=>segnaPagato(p.id, p.master_nome, p.importo, 'bonifico')} disabled={!!azione} title="Bonifico: rimborsa il credito al master"
+                        style={{background:ACCENT,color:'#fff',border:'none',borderRadius:'6px',padding:'6px 10px',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>Bonifico</button>
+                    </div>}
                   </td>
                 </tr>
               ))}

@@ -29,23 +29,39 @@ export async function GET() {
     .select('*', { count: 'exact', head: true })
     .in('master_id', reteIds).gte('created_at', inizioMese).neq('stato', 'annullata')
 
-  // Se sono il ROOT (M1): elenco degli abbonamenti da incassare dalla mia rete
+  // Se sono il ROOT (M1): elenco degli abbonamenti da incassare dalla mia rete + KPI mensili
   let pagamenti: any[] = []
+  let incassatoMese = 0, previstoProssimoMese = 0, abbonatiAttivi = 0
   if (isRoot) {
     const { data: pag } = await admin.from('abbonamenti_pagamenti')
-      .select('id,master_id,piano,mese,importo,pagato,pagato_il,created_at')
-      .eq('root_id', utente.master_id).order('created_at', { ascending: false }).limit(300)
+      .select('id,master_id,piano,mese,importo,pagato,pagato_il,metodo,created_at')
+      .eq('root_id', utente.master_id).order('created_at', { ascending: false }).limit(500)
     const ids = [...new Set((pag || []).map(p => p.master_id))]
     const { data: nomi } = ids.length
-      ? await admin.from('masters').select('id,nome').in('id', ids)
+      ? await admin.from('masters').select('id,nome,email,abbonamento_esente').in('id', ids)
       : { data: [] as any[] }
-    const nomeById = new Map((nomi || []).map((n: any) => [n.id, n.nome]))
-    pagamenti = (pag || []).map(p => ({ ...p, master_nome: nomeById.get(p.master_id) || 'Master' }))
+    const infoById = new Map((nomi || []).map((n: any) => [n.id, n]))
+    // Nome leggibile: nome → email → "Master #<id breve>" (così i record incompleti sono identificabili, non tutti "Master")
+    const nomeDi = (mid: string) => {
+      const i: any = infoById.get(mid)
+      return (i?.nome && String(i.nome).trim()) || (i?.email && String(i.email).trim()) || ('Master #' + String(mid).slice(0, 6))
+    }
+    pagamenti = (pag || []).map(p => ({ ...p, master_nome: nomeDi(p.master_id), master_esente: !!infoById.get(p.master_id)?.abbonamento_esente }))
+
+    // KPI: INCASSATO questo mese (pagamenti segnati pagato nel mese corrente)
+    const mm = new Date().toISOString().slice(0, 7)
+    for (const p of (pag || [])) if (p.pagato && String(p.pagato_il || '').slice(0, 7) === mm) incassatoMese += Number(p.importo || 0)
+    // PREVISTO prossimo mese = canoni ricorrenti dei master della rete con piano attivo e NON esenti.
+    const { data: attivi } = await admin.from('masters')
+      .select('abbonamento_prezzo').in('id', reteIds)
+      .not('abbonamento_piano', 'is', null).neq('abbonamento_esente', true).neq('id', utente.master_id)
+    for (const a of (attivi || [])) { previstoProssimoMese += Number((a as any).abbonamento_prezzo || 0); abbonatiAttivi++ }
   }
 
   return NextResponse.json({
     attivo: isRoot || !!m?.abbonamento_piano,
     illimitato: isRoot,
+    esente: !!(m as any)?.abbonamento_esente,
     piano: isRoot ? 'illimitato' : (m?.abbonamento_piano || null),
     limite: m?.abbonamento_limite || 0,
     prezzo: Number(m?.abbonamento_prezzo || 0),
@@ -54,6 +70,9 @@ export async function GET() {
     piani: PIANI_ENTERPRISE,
     isRoot,
     pagamenti,
+    incassatoMese: Math.round(incassatoMese * 100) / 100,
+    previstoProssimoMese: Math.round(previstoProssimoMese * 100) / 100,
+    abbonatiAttivi,
   })
 }
 
@@ -72,7 +91,7 @@ export async function POST(req: NextRequest) {
   const admin = createAdminSupabase()
   const payer = utente.master_id
   const { data: m } = await admin.from('masters')
-    .select('nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese').eq('id', payer).single()
+    .select('nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese,abbonamento_esente').eq('id', payer).single()
 
   // Trova il SUPERROOT (M1): risalgo la catena fino al master senza padre.
   let rootId = payer
@@ -96,7 +115,7 @@ export async function POST(req: NextRequest) {
   // - downgrade nello stesso mese: 0 (il canone più alto è già pagato)
   let importo = nuovo.prezzo
   if (haPianoQuestoMese) importo = nuovo.prezzo > prezzoAttuale ? (nuovo.prezzo - prezzoAttuale) : 0
-  if (isRoot) importo = 0 // il master principale non paga a sé stesso
+  if (isRoot || (m as any)?.abbonamento_esente) importo = 0 // root e master ESENTI (gratis su tutti i piani)
 
   if (importo > 0) {
     try {
