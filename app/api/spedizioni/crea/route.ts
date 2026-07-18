@@ -467,12 +467,12 @@ export async function POST(req: NextRequest) {
       const emailDest = emailSp(body.shipTo.email); if (emailDest) consignee.email = emailDest
 
       // MULTICOLLO: un parcel per OGNI collo (prima si inviava solo il primo -> 1 sola etichetta)
-      // content = descrizione merce inserita dall'utente → stampata in etichetta (altrimenti "campionatura generica")
-      const contenutoMerce = String(body.contenuto || '').trim()
+      // NB: SpediamoPro non supporta una descrizione merce a testo libero sul collo (verificato via API):
+      // il contenuto inserito dall'utente non può comparire in etichetta, dove resta "campionatura generica".
+      // Il riferimento libero (Rif. Ordine) viaggia invece in externalReference (vedi sotto).
       const parcels = packages.map((p: any) => ({
         weight: kgToGrams(parseFloat(p?.weight) || 1),
         length: cmToMm(p?.length || 10), width: cmToMm(p?.width || 10), height: cmToMm(p?.height || 10),
-        ...(contenutoMerce ? { content: contenutoMerce } : {}),
       }))
       const cashOnDeliveryAmount = body.codValue ? euroToCents(body.codValue) : undefined
       const insuredAmount = body.insuranceValue ? euroToCents(body.insuranceValue) : undefined
