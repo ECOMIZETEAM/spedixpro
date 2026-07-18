@@ -81,6 +81,7 @@ export default function ImportaOrdiniPage() {
   const [pacchi, setPacchi] = useState<any[]>([])       // pacchi predefiniti del cliente (misure + peso)
   const [pacco, setPacco] = useState('ordine')          // 'ordine' (misure dal file) | id pacco predefinito
   const [articoli, setArticoli] = useState<any[]>([])   // catalogo SKU -> peso (+ misure opzionali)
+  const [mittenteNome, setMittenteNome] = useState('')  // nome mittente (profilo cliente) mostrato in colonna
   const [filtro, setFiltro] = useState<string>('min') // 'min' | corriere_id
   const [q, setQ] = useState('')                       // ricerca libera (ordine, destinatario, località, cap, telefono)
   const [filtroStato, setFiltroStato] = useState('tutti') // tutti | da_spedire | spedito | errore | archiviato
@@ -145,7 +146,10 @@ export default function ImportaOrdiniPage() {
     } catch { /* silente */ }
   }
 
-  useEffect(() => { loadOrdini(); loadCorrieri(); loadPacchi(); loadArticoli() }, [])
+  async function loadMittente() {
+    try { const r = await fetch('/api/cliente/mittente'); const d = await r.json(); if (r.ok) setMittenteNome(d?.mittente?.nome || '') } catch {}
+  }
+  useEffect(() => { loadOrdini(); loadCorrieri(); loadPacchi(); loadArticoli(); loadMittente() }, [])
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -594,6 +598,7 @@ export default function ImportaOrdiniPage() {
                     <input type="checkbox" checked={allChecked} onChange={toggleAll} />
                   </th>
                   <th style={th}>Destinatario</th>
+                  <th style={th}>Mittente</th>
                   <th style={th}>Località</th>
                   <th style={th}>CAP</th>
                   <th style={th}>Prov</th>
@@ -618,6 +623,7 @@ export default function ImportaOrdiniPage() {
                         {o.destinatario}
                         <div style={{ fontSize: '11.5px', color: '#999', fontWeight: 400 }}>{o.indirizzo}</div>
                       </td>
+                      <td style={td}>{o.rif_mittente || mittenteNome || '—'}</td>
                       <td style={td}>{o.localita}</td>
                       <td style={td}>{o.cap}</td>
                       <td style={td}>{o.provincia}</td>
