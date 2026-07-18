@@ -464,7 +464,10 @@ export async function POST(req: NextRequest) {
         country: (body.shipTo.country || 'IT').toUpperCase(),
       }
       const telDest = telSp(body.shipTo.phone); if (telDest) consignee.phone = telDest
-      const emailDest = emailSp(body.shipTo.email); if (emailDest) consignee.email = emailDest
+      // SpediamoPro (accept) ESIGE anche l'email del DESTINATARIO come stringa: senza, la creazione
+      // fallisce con 422 ("consignee.email should be of type string"). Era la causa del "non spedisce"
+      // su Poste standard quando il destinatario non aveva un'email valida. Fallback come il mittente.
+      consignee.email = emailSp(body.shipTo.email) || 'noreply@moovexpress.com'
 
       // MULTICOLLO: un parcel per OGNI collo (prima si inviava solo il primo -> 1 sola etichetta)
       // NB: SpediamoPro non supporta una descrizione merce a testo libero sul collo (verificato via API):
