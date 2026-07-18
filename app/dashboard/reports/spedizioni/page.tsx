@@ -88,6 +88,7 @@ export default function ReportSpedizioniPage() {
         'Contrassegno (€)': s.contrassegno,
         'Data': new Date(s.created_at).toLocaleDateString('it-IT'),
         'Stato': s.stato,
+        'Rettifica (€)': s.rettifica || 0,
         'Prezzo Cliente (€)': s.costo_totale,
         'Prezzo Corriere (€)': s.prezzo_corriere != null ? s.prezzo_corriere : '',
         'Margine (€)': s.prezzo_corriere != null ? Math.round((Number(s.costo_totale || 0) - Number(s.prezzo_corriere || 0)) * 100) / 100 : '',
@@ -114,14 +115,15 @@ export default function ReportSpedizioniPage() {
       doc.text(`Totale: ${spedizioni.length} spedizioni`, 14, 22)
       autoTable(doc, {
         startY: 28,
-        head: [['N. Spedizione','Cliente','Destinatario','Città','Peso','Stato','Prezzo Cliente €','Prezzo Corriere €','Margine €']],
+        head: [['N. Spedizione','Cliente','Destinatario','Città','Peso','Stato','Rettifica €','Prezzo Cliente €','Prezzo Corriere €','Margine €']],
         body: spedizioni.map((s: any) => {
           const cli = Number(s.costo_totale || 0)
           const cor = s.prezzo_corriere != null ? Number(s.prezzo_corriere) : null
+          const rett = Number(s.rettifica || 0)
           return [
             s.numero, s.clienti?.ragione_sociale||s.mitt_nome, s.dest_nome,
             `${s.dest_citta} (${s.dest_provincia})`, `${s.peso_reale}kg`,
-            s.stato.replace(/_/g,' '), `€${cli.toFixed(2)}`,
+            s.stato.replace(/_/g,' '), (rett ? `€${rett.toFixed(2)}` : '-'), `€${cli.toFixed(2)}`,
             (cor != null ? `€${cor.toFixed(2)}` : '-'),
             (cor != null ? `€${(cli - cor).toFixed(2)}` : '-'),
           ]
@@ -155,17 +157,17 @@ export default function ReportSpedizioniPage() {
     } else if (formato === 'zip') {
       const { default: JSZip } = await import('jszip' as any)
       const zip = new JSZip()
-      const csv = ['N. Spedizione,Cliente,Destinatario,Città,Peso,Colli,Contrassegno,Data,Stato,Prezzo Cliente,Prezzo Corriere,Margine']
+      const csv = ['N. Spedizione,Cliente,Destinatario,Città,Peso,Colli,Contrassegno,Data,Stato,Rettifica,Prezzo Cliente,Prezzo Corriere,Margine']
       spedizioni.forEach((s: any) => {
         const cli = Number(s.costo_totale || 0)
         const cor = s.prezzo_corriere != null ? Number(s.prezzo_corriere) : null
-        csv.push(`${s.numero},${s.clienti?.ragione_sociale||s.mitt_nome},${s.dest_nome},${s.dest_citta},${s.peso_reale},${s.colli},${s.contrassegno},${new Date(s.created_at).toLocaleDateString('it-IT')},${s.stato},${cli},${cor != null ? cor : ''},${cor != null ? Math.round((cli - cor) * 100) / 100 : ''}`)
+        csv.push(`${s.numero},${s.clienti?.ragione_sociale||s.mitt_nome},${s.dest_nome},${s.dest_citta},${s.peso_reale},${s.colli},${s.contrassegno},${new Date(s.created_at).toLocaleDateString('it-IT')},${s.stato},${Number(s.rettifica||0)},${cli},${cor != null ? cor : ''},${cor != null ? Math.round((cli - cor) * 100) / 100 : ''}`)
       })
       // Riga totali: SOLO Prezzo Cliente, Prezzo Corriere e Margine
       const totCli = spedizioni.reduce((a: number, s: any) => a + Number(s.costo_totale || 0), 0)
       const totCor = spedizioni.reduce((a: number, s: any) => a + Number(s.prezzo_corriere || 0), 0)
-      const rowT = Array(12).fill('')
-      rowT[8] = 'TOTALE'; rowT[9] = String(Math.round(totCli * 100) / 100); rowT[10] = String(Math.round(totCor * 100) / 100); rowT[11] = String(Math.round((totCli - totCor) * 100) / 100)
+      const rowT = Array(13).fill('')
+      rowT[8] = 'TOTALE'; rowT[10] = String(Math.round(totCli * 100) / 100); rowT[11] = String(Math.round(totCor * 100) / 100); rowT[12] = String(Math.round((totCli - totCor) * 100) / 100)
       csv.push(''); csv.push(rowT.join(','))
       zip.file('spedizioni.csv', csv.join('\n'))
       const blob = await zip.generateAsync({type:'blob'})

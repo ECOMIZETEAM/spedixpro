@@ -97,6 +97,7 @@ export async function GET(req: NextRequest) {
   // SOMMO 'spedizione' + 'rettifica' (signed): le rettifiche allineano il prezzo dopo una correzione.
   const sumCliR = new Map<string, number>()
   const sumTargetR = new Map<string, number>()
+  const sumRettCli = new Map<string, number>()   // solo RETTIFICHE lato cliente (l'aumento/variazione di prezzo)
   for (let i = 0; i < spedIds.length; i += 300) {
     const chunk = spedIds.slice(i, i + 300)
     for (let from = 0; ; from += 1000) {
@@ -106,12 +107,15 @@ export async function GET(req: NextRequest) {
       // (costoMine) NON gli arrivano.
       const mvDb = ruolo === 'cliente' ? db : adminDb
       const { data: mvs } = await mvDb.from('movimenti')
-        .select('spedizione_id,master_target_id,cliente_id,importo').in('tipo', ['spedizione', 'rettifica'])
+        .select('spedizione_id,master_target_id,cliente_id,importo,tipo').in('tipo', ['spedizione', 'rettifica'])
         .in('spedizione_id', chunk).order('id', { ascending: true }).range(from, from + 999)
       if (!mvs?.length) break
       for (const mv of mvs) {
         const imp = Number(mv.importo || 0)   // SIGNED
-        if (mv.cliente_id) sumCliR.set(mv.spedizione_id, (sumCliR.get(mv.spedizione_id) || 0) + imp)
+        if (mv.cliente_id) {
+          sumCliR.set(mv.spedizione_id, (sumCliR.get(mv.spedizione_id) || 0) + imp)
+          if ((mv as any).tipo === 'rettifica') sumRettCli.set(mv.spedizione_id, (sumRettCli.get(mv.spedizione_id) || 0) + imp)
+        }
         else if (mv.master_target_id) { const k = mv.spedizione_id + '|' + mv.master_target_id; sumTargetR.set(k, (sumTargetR.get(k) || 0) + imp) }
       }
       if (mvs.length < 1000) break
@@ -195,10 +199,13 @@ export async function GET(req: NextRequest) {
     // Master SOPRA il proprietario del contratto (nessun mio costo né mio listino per quel corriere):
     // semplice passaggio -> prezzo corriere = prezzo cliente -> margine 0 (niente margine totale rete).
     if (prezzo_corriere == null && !calcAgente) prezzo_corriere = prezzo_cliente
+    // Rettifica lato cliente = variazione di prezzo applicata (positivo = aumento, es. +5€).
+    const rettifica = Math.round((-(sumRettCli.get(s.id) || 0)) * 100) / 100
     return {
       ...s,
-      costo_totale: prezzo_cliente,          // "Prezzo Cliente" nel report
+      costo_totale: prezzo_cliente,          // "Prezzo Cliente" nel report (già comprensivo della rettifica)
       prezzo_corriere,                        // "Prezzo Corriere" (quello che pago io)
+      rettifica,                              // colonna "Rettifica" (aumento/variazione di prezzo)
       dett_corriere: null,
       cli_nolo: Number(s.costo_spedizione || 0),
       cli_supplementi: 0,
