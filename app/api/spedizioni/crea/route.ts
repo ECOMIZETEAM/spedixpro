@@ -494,13 +494,23 @@ export async function POST(req: NextRequest) {
       // costo live). Il controllo sulle destinazioni disagiate è ora PER-ZONA (zone disagiate), non
       // per confronto di prezzo.
 
-      // externalReference SpediamoPro: compare sull'etichetta come riferimento. Priorità al Rif. Ordine
-      // (quello che l'utente inserisce), poi la nota. Max 64 caratteri (altrimenti la creazione fallisce).
-      const externalRef = ([body.rifOrdine, body.notes].filter(Boolean).map(String).join(' — ')).substring(0, 64) || undefined
+      // VERIFICATO su etichetta reale (Poste Delivery Business via SpediamoPro):
+      //  - il campo "Rif." in etichetta è un codice interno del corriere e NON è impostabile
+      //    (externalReference viene memorizzato ma non stampato);
+      //  - il "CONTENUTO" è la categoria del parcel (type), non testo libero;
+      //  - l'UNICO campo libero stampato è "NOTE:" (consigneeNote).
+      // Quindi ID Ordine + Contenuto (+ nota utente) li mettiamo nel campo NOTE, dove compaiono.
+      const externalRef = (body.rifOrdine ? String(body.rifOrdine) : (body.notes ? String(body.notes) : '')).substring(0, 64) || undefined
+      const noteEtichetta = [
+        body.rifOrdine ? `Ordine: ${body.rifOrdine}` : '',
+        String(body.contenuto || '').trim() ? `Contenuto: ${String(body.contenuto).trim()}` : '',
+        body.notes ? String(body.notes) : '',
+      ].filter(Boolean).join(' · ').substring(0, 200) || undefined
 
       const shipment = await spediamoproCreateShipment(cred.authcode, {
         parcels, sender, consignee, quotation, cashOnDeliveryAmount, insuredAmount,
         externalReference: externalRef,
+        notes: noteEtichetta,
       })
 
       let trackingReale = shipment.trackingCode
