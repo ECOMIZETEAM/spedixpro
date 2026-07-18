@@ -91,7 +91,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (datiCliente.prezzi_in_distinta !== undefined) upd.prezzi_in_distinta = datiCliente.prezzi_in_distinta
     if (datiCliente.visualizza_fatture !== undefined) upd.visualizza_fatture = datiCliente.visualizza_fatture
     if (datiCliente.vieta_inserimento !== undefined) upd.vieta_inserimento = datiCliente.vieta_inserimento
-    if (datiCliente.vieta_cancellazione !== undefined) upd.vieta_cancellazione = datiCliente.vieta_cancellazione
     const { error } = await admin.from('masters').update(upd).eq('id', targetId)
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
     // Se è stato (ri)assegnato un listino, RI-SINCRONIZZA subito il Listino Corrieri del sotto-master
@@ -133,7 +132,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     visualizza_fatture: datiCliente.visualizza_fatture??true,
     spedizione_custom: datiCliente.spedizione_custom??false,
     vieta_inserimento: datiCliente.vieta_inserimento??false,
-    vieta_cancellazione: datiCliente.vieta_cancellazione??false,
     interno_esclusivo: datiCliente.interno_esclusivo??false,
     gestione_logistica: datiCliente.gestione_logistica??false,
     updated_at: new Date().toISOString(),

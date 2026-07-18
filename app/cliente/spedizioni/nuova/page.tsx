@@ -53,6 +53,9 @@ export default function NuovaSpedizioneCliente() {
   const [numColli, setNumColli] = useState(1)
   const [colli, setColli] = useState<Collo[]>([{lunghezza:'',larghezza:'',altezza:''}])
   const [peso, setPeso] = useState('1')
+  const [pacchiSalvati, setPacchiSalvati] = useState<any[]>([])
+  useEffect(() => { fetch('/api/cliente/pacchi').then(r=>r.json()).then(d=>setPacchiSalvati(Array.isArray(d)?d:[])).catch(()=>{}) }, [])
+  function applicaPacco(p:any) { setPeso(String(p.peso||'')); setNumColli(1); setColli([{ lunghezza:String(p.lunghezza||''), larghezza:String(p.larghezza||''), altezza:String(p.altezza||'') }]); setTariffe([]); setSelected(null) }
   const [contenuto, setContenuto] = useState('')
   const [tipoContenuto, setTipoContenuto] = useState('Merce destinata alla vendita')
   const [valoreMerce, setValoreMerce] = useState('')
@@ -377,6 +380,20 @@ export default function NuovaSpedizioneCliente() {
           {vista==='dati' && (<div style={card}>
             <div style={cardH}>Dati Spedizione</div>
             <div style={cardB}>
+              {pacchiSalvati.length > 0 && (
+                <div style={{marginBottom:'14px'}}>
+                  <label style={{...lbl,marginBottom:'6px'}}>📦 Pacchi salvati <span style={{fontWeight:400,color:'#999'}}>— clicca per riempire peso e misure</span></label>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:'8px'}}>
+                    {pacchiSalvati.map((p:any)=>(
+                      <button key={p.id} type="button" onClick={()=>applicaPacco(p)}
+                        style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'7px 12px',fontSize:'12px',color:'#9a3412',cursor:'pointer',fontWeight:600,display:'flex',flexDirection:'column',alignItems:'flex-start',lineHeight:1.3}}>
+                        <span>{p.nome}</span>
+                        <span style={{fontWeight:400,fontSize:'11px',color:'#b45309'}}>{p.peso}kg · {p.lunghezza}×{p.larghezza}×{p.altezza}cm</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'8px',marginBottom:'14px'}}>
                 <div>

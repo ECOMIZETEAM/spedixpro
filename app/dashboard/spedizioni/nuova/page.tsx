@@ -60,6 +60,7 @@ export default function NuovaSpedizionePage() {
   const [numColli, setNumColli] = useState(1)
   const [colli, setColli] = useState<Collo[]>([{lunghezza:'',larghezza:'',altezza:''}])
   const [peso, setPeso] = useState('1')
+  const [pacchiSalvati, setPacchiSalvati] = useState<any[]>([])   // pacchi predefiniti del cliente selezionato
   const [contenuto, setContenuto] = useState('')
   const [tipoContenuto, setTipoContenuto] = useState('Merce destinata alla vendita')
   const [valoreMerce, setValoreMerce] = useState('')
@@ -134,6 +135,21 @@ export default function NuovaSpedizionePage() {
     if (!c) { setClienteId(''); return }
     setClienteId(id)
     setMitt({nome:c.ragione_sociale,indirizzo:c.so_indirizzo||'',citta:c.so_citta||'',provincia:c.so_provincia||'',cap:c.so_cap||'',email:c.email||'',telefono:c.telefono||''})
+  }
+
+  // Pacchi predefiniti del cliente selezionato (un cliente vero, non "propria" né sotto-master).
+  useEffect(() => {
+    const isRealCliente = clienteId && clienteId !== '__proprio__' && !clienteId.startsWith('m:')
+    if (!isRealCliente) { setPacchiSalvati([]); return }
+    fetch('/api/clienti/' + clienteId + '/pacchi').then(r=>r.json()).then(d=>setPacchiSalvati(Array.isArray(d)?d:[])).catch(()=>setPacchiSalvati([]))
+  }, [clienteId])
+
+  // Applica un pacco salvato: riempie peso + misure del 1° collo (mono-collo).
+  function applicaPacco(p:any) {
+    setPeso(String(p.peso||''))
+    setNumColli(1)
+    setColli([{ lunghezza:String(p.lunghezza||''), larghezza:String(p.larghezza||''), altezza:String(p.altezza||'') }])
+    setTariffe([]); setSelected(null)
   }
 
   function buildPackages() {
@@ -400,6 +416,20 @@ export default function NuovaSpedizionePage() {
           {vista==='dati' && (<div style={card}>
             <div style={cardH}>Dati Spedizione</div>
             <div style={cardB}>
+              {pacchiSalvati.length > 0 && (
+                <div style={{marginBottom:'14px'}}>
+                  <label style={{...lbl,marginBottom:'6px'}}>📦 Pacchi salvati <span style={{fontWeight:400,color:'#999'}}>— clicca per riempire peso e misure</span></label>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:'8px'}}>
+                    {pacchiSalvati.map((p:any)=>(
+                      <button key={p.id} type="button" onClick={()=>applicaPacco(p)}
+                        style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'7px 12px',fontSize:'12px',color:'#9a3412',cursor:'pointer',fontWeight:600,display:'flex',flexDirection:'column',alignItems:'flex-start',lineHeight:1.3}}>
+                        <span>{p.nome}</span>
+                        <span style={{fontWeight:400,fontSize:'11px',color:'#b45309'}}>{p.peso}kg · {p.lunghezza}×{p.larghezza}×{p.altezza}cm</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'8px',marginBottom:'14px'}}>
                 <div>
                   <label style={lbl}>Colli</label>
