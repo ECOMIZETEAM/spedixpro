@@ -9,7 +9,8 @@ import { fetchAll } from '@/lib/fetch-all'
 //   fatturato = quello che ha addebitato ai clienti diretti + sotto-master diretti
 //   costo     = quello che ha pagato lui (verso il livello superiore / corriere)
 //   profitto  = fatturato - costo
-const TIPI = ['spedizione', 'rimborso', 'rettifica']
+// Include spedizioni + rettifiche + RESI + GIACENZE (margine totale), coerente col Report Guadagno.
+const TIPI = ['spedizione', 'rimborso', 'rettifica', 'reso', 'giacenza']
 const n = (x: any) => Number(x || 0)
 const r2 = (x: number) => Math.round(x * 100) / 100
 

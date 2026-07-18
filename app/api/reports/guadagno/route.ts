@@ -32,10 +32,11 @@ export async function GET(req: NextRequest) {
   // Aggregazione: per giorno se l'intervallo è breve, per mese se è lungo (o periodo annuale).
   const perMese = dalParam ? ((Date.parse(alEnd) - Date.parse(dal)) / 86400000 > 92) : (periodo === 'annuale')
   const admin = createAdminSupabase()
-  // Includo 'rettifica': sono correzioni sui prezzi delle spedizioni (es. allineamento sotto costo /
-  // margini disagiati). Se non le conto, il guadagno resta al valore vecchio (E&A appare in perdita
-  // anche dopo aver recuperato). Le annullate restano nette 0 (addebito+rimborso si annullano).
-  const TIPI = ['spedizione', 'rimborso', 'rettifica']
+  // Il GUADAGNO totale include: spedizioni + rettifiche (correzioni prezzo) + RESI + GIACENZE.
+  // Ognuno ha la stessa struttura (movimento cliente = ricavo, movimento master_target = costo),
+  // quindi il margine di resi e giacenze entra automaticamente. Il 'rimborso' netta le annullate a 0.
+  // (Per questo Report Guadagno ≠ Report Spedizioni: quest'ultimo è SOLO spedizioni.)
+  const TIPI = ['spedizione', 'rimborso', 'rettifica', 'reso', 'giacenza']
 
   // sotto-master diretti
   const { data: figli } = await admin.from('masters').select('id').eq('parent_master_id', M)
