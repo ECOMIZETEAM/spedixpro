@@ -12,7 +12,7 @@ import { addebitaServizioGiacenza } from '@/lib/giacenza-cascata'
 // nuovo destinatario / reso) e chiede lo svincolo; il master vede la richiesta,
 // puo' aggiungere costi manuali e conferma lo svincolo -> addebito + invio al corriere.
 
-type Ctx = { admin: any; sped: any; ruolo: 'cliente' | 'master'; agente?: boolean; masterId?: string; clienteId?: string; nomeUtente: string }
+type Ctx = { admin: any; sped: any; ruolo: 'cliente' | 'master'; agente?: boolean; masterId?: string; clienteId?: string; listinoAgenteId?: string | null; nomeUtente: string }
 
 // Mappa i nomi dei servizi giacenza del listino sulle 3 operazioni
 function chiaveServizio(nome: string): string | null {
@@ -23,15 +23,38 @@ function chiaveServizio(nome: string): string | null {
   return null
 }
 
-// Legge i prezzi giacenza dal listino del cliente della spedizione
-async function leggiPrezzi(admin: any, sped: any) {
-  const out: any = { apertura: 0, servizi: { riconsegna: { valore: 0, perc: 0 }, riconsegna_nuovo: { valore: 0, perc: 0 }, reso: { valore: 0, perc: 100 } } }
-  const { data: cliente } = await admin.from('clienti').select('listino_cliente_id').eq('id', sped.cliente_id).maybeSingle()
-  const listinoId = cliente?.listino_cliente_id
+const prezziVuoti = () => ({ apertura: 0, servizi: { riconsegna: { valore: 0, perc: 0 }, riconsegna_nuovo: { valore: 0, perc: 0 }, reso: { valore: 0, perc: 100 } } } as any)
+
+// Legge i prezzi giacenza da un listino CLIENTE (o agente, che è un listino cliente assegnato).
+async function leggiPrezziDaListino(admin: any, listinoId: string | null | undefined, corriereId: string | null) {
+  const out = prezziVuoti()
   if (!listinoId) return out
   let q = admin.from('listini_clienti_supplementi').select('tipo,nome,valore,descrizione,corriere_id').eq('listino_id', listinoId).in('tipo', ['giacenza', 'giacenza_apertura'])
-  if (sped.corriere_id) q = q.eq('corriere_id', sped.corriere_id)
+  if (corriereId) q = q.eq('corriere_id', corriereId)
   const { data: suppl } = await q
+  for (const s of (suppl || [])) {
+    if (s.tipo === 'giacenza_apertura') { out.apertura = Number(s.valore) || 0; continue }
+    const k = chiaveServizio(s.nome)
+    if (!k) continue
+    let perc = 0
+    try { perc = Number(JSON.parse(s.descrizione || '{}')?.perc) || 0 } catch { /* descrizione non JSON */ }
+    out.servizi[k] = { valore: Number(s.valore) || 0, perc }
+  }
+  return out
+}
+
+// Legge i prezzi giacenza dal listino del cliente della spedizione (prezzo CLIENTE).
+async function leggiPrezzi(admin: any, sped: any) {
+  const { data: cliente } = await admin.from('clienti').select('listino_cliente_id').eq('id', sped.cliente_id).maybeSingle()
+  return leggiPrezziDaListino(admin, cliente?.listino_cliente_id, sped.corriere_id)
+}
+
+// Prezzi giacenza dal LISTINO CORRIERE del master (quello che paga il master).
+async function leggiPrezziMaster(admin: any, corriereId: string | null) {
+  const out = prezziVuoti()
+  if (!corriereId) return out
+  const { data: suppl } = await admin.from('listini_corrieri_supplementi')
+    .select('tipo,nome,valore,descrizione').eq('corriere_id', corriereId).in('tipo', ['giacenza', 'giacenza_apertura'])
   for (const s of (suppl || [])) {
     if (s.tipo === 'giacenza_apertura') { out.apertura = Number(s.valore) || 0; continue }
     const k = chiaveServizio(s.nome)
@@ -64,7 +87,7 @@ async function contesto(req: NextRequest, id: string): Promise<Ctx | NextRespons
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome,listino_agente_id').eq('id', user.id).single()
   const ruolo = (utente?.ruolo || '').toLowerCase() === 'cliente' ? 'cliente' : 'master'
   const admin = createAdminSupabase()
   const { data: sped } = await admin.from('spedizioni')
@@ -84,20 +107,29 @@ async function contesto(req: NextRequest, id: string): Promise<Ctx | NextRespons
     const miei = await clientiAgente(supabase, utente)
     if (!sped.cliente_id || !miei.includes(sped.cliente_id)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
-  return { admin, sped, ruolo, agente: isAgente(utente), masterId: utente?.master_id, clienteId: utente?.cliente_id, nomeUtente: utente?.nome || (ruolo === 'cliente' ? 'Cliente' : 'Master') }
+  return { admin, sped, ruolo, agente: isAgente(utente), masterId: utente?.master_id, clienteId: utente?.cliente_id, listinoAgenteId: (utente as any)?.listino_agente_id || null, nomeUtente: utente?.nome || (ruolo === 'cliente' ? 'Cliente' : 'Master') }
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const ctx = await contesto(req, id)
   if (ctx instanceof NextResponse) return ctx
-  const { admin, sped, ruolo } = ctx
+  const { admin, sped, ruolo, agente, listinoAgenteId } = ctx
   const prezzi = await leggiPrezzi(admin, sped)
+  // Prezzo CONTROPARTE = quello che paga chi guarda (solo master/agente, mai il cliente):
+  //  - master  → il suo costo dal listino corriere;
+  //  - agente  → il suo costo dal listino agente assegnato.
+  let prezziControparte: any = null
+  let etichettaControparte: string | null = null
+  if (ruolo === 'master') {
+    if (agente) { prezziControparte = await leggiPrezziDaListino(admin, listinoAgenteId, sped.corriere_id); etichettaControparte = 'agente' }
+    else { prezziControparte = await leggiPrezziMaster(admin, sped.corriere_id); etichettaControparte = 'master' }
+  }
   const [{ data: storico }, { data: costi }] = await Promise.all([
     admin.from('giacenza_richieste').select('*').eq('spedizione_id', id).order('created_at', { ascending: false }),
     admin.from('giacenza_costi').select('*').eq('spedizione_id', id).order('created_at', { ascending: true }),
   ])
-  return NextResponse.json({ sped, prezzi, noloBase: noloBase(sped), storico: storico || [], costi: costi || [], ruolo })
+  return NextResponse.json({ sped, prezzi, prezziControparte, etichettaControparte, noloBase: noloBase(sped), storico: storico || [], costi: costi || [], ruolo })
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

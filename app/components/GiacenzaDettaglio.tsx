@@ -60,18 +60,25 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
   if (loading) return <div style={{ padding: '40px', color: '#64748b' }}>Caricamento…</div>
   if (!data || data.error) return <div style={{ padding: '40px', color: '#dc2626' }}>{data?.error || 'Giacenza non trovata'}</div>
 
-  const { sped, prezzi, noloBase, storico, costi, ruolo } = data
+  const { sped, prezzi, prezziControparte, etichettaControparte, noloBase, storico, costi, ruolo } = data
   const isMaster = ruolo === 'master'
 
-  // anteprima costi dell'operazione selezionata
-  function preview(operazione: string) {
-    const serv = prezzi?.servizi?.[operazione] || { valore: 0, perc: 0 }
+  // Calcola servizio+apertura per un'operazione da un set di prezzi (cliente o controparte).
+  function calcDa(prz: any, operazione: string) {
+    if (!prz) return null
+    const serv = prz?.servizi?.[operazione] || { valore: 0, perc: 0 }
     const servizio = (Number(serv.valore) || 0) + ((Number(serv.perc) || 0) / 100) * (Number(noloBase) || 0)
-    const apertura = operazione === 'reso' ? 0 : (Number(prezzi?.apertura) || 0)
-    // L'apertura è già addebitata all'entrata in giacenza: il totale dell'operazione = SOLO il servizio.
+    const apertura = operazione === 'reso' ? 0 : (Number(prz?.apertura) || 0)
     return { apertura, servizio, totale: servizio }
   }
+  // anteprima costi CLIENTE dell'operazione selezionata
+  function preview(operazione: string) {
+    return calcDa(prezzi, operazione) || { apertura: 0, servizio: 0, totale: 0 }
+  }
   const pv = preview(op)
+  // Prezzo CONTROPARTE (master/agente) per l'operazione selezionata, se disponibile.
+  const pvControparte = prezziControparte ? calcDa(prezziControparte, op) : null
+  const lblControparte = etichettaControparte === 'agente' ? 'tu (agente)' : 'tu (master)'
   const richPending = (storico || []).find((r: any) => r.stato === 'da_confermare')
   const costiExtra = (costi || []).reduce((s: number, c: any) => s + (Number(c.importo) || 0), 0)
   const costoTotaleGiac = (richPending ? Number(richPending.costo_totale) || 0 : 0) + costiExtra
@@ -166,11 +173,20 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
           <div style={card}>
             <div style={cardHead}>Costi applicati — {OP_LABEL[op]}</div>
             <div style={{ padding: '14px 18px', fontSize: '13px', color: '#1a1a1a' }}>
+              {pvControparte && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0 8px', fontSize: '11.5px', color: '#6b7280', borderBottom: '1px solid #eef2f6', marginBottom: '4px' }}>
+                  <span>Prezzo cliente vs {lblControparte}</span>
+                  <span>cliente <b style={{ color: '#1a1a1a' }}>{eur(pv.servizio)}</b> · {lblControparte} <b style={{ color: '#2563eb' }}>{eur(pvControparte.servizio)}</b> · margine <b style={{ color: '#16a34a' }}>{eur(pv.servizio - pvControparte.servizio)}</b></span>
+                </div>
+              )}
               {pv.apertura > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px dashed #eef2f6', color: '#9ca3af' }}><span>Apertura giacenza <span style={{ fontSize: '11px' }}>(già addebitata all'entrata)</span></span><span>{eur(pv.apertura)}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px dashed #eef2f6', color: '#9ca3af' }}><span>Apertura giacenza <span style={{ fontSize: '11px' }}>(già addebitata all'entrata)</span></span><span>{eur(pv.apertura)}{pvControparte ? ` · ${lblControparte} ${eur(pvControparte.apertura)}` : ''}</span></div>
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px dashed #eef2f6' }}><span>{OP_LABEL[op]}{op === 'reso' ? ' (senza assicurazione/contrassegno)' : ''}</span><b>{eur(pv.servizio)}</b></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0 2px', fontSize: '15px' }}><span style={{ fontWeight: 700 }}>Totale operazione</span><b style={{ color: '#16a34a' }}>{eur(pv.totale)}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0 2px', fontSize: '15px' }}><span style={{ fontWeight: 700 }}>Totale operazione (cliente)</span><b style={{ color: '#16a34a' }}>{eur(pv.totale)}</b></div>
+              {pvControparte && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', fontSize: '12px', color: '#2563eb' }}><span>Il tuo costo ({lblControparte})</span><b>{eur(pvControparte.totale)}</b></div>
+              )}
             </div>
           </div>
 
