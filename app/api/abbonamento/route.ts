@@ -29,33 +29,50 @@ export async function GET() {
     .select('*', { count: 'exact', head: true })
     .in('master_id', reteIds).gte('created_at', inizioMese).neq('stato', 'annullata')
 
-  // Se sono il ROOT (M1): elenco degli abbonamenti da incassare dalla mia rete + KPI mensili
-  let pagamenti: any[] = []
+  // Se sono il ROOT (M1): LISTA DEI MASTER della rete (un master = una riga) + KPI mensili.
+  // Ogni master paga il canone il 1° del mese (cron rinnovo-mensile); qui il root vede piano,
+  // canone (0 se esente), e lo stato di incasso del pagamento più vecchio non ancora saldato.
+  let abbonati: any[] = []
   let incassatoMese = 0, previstoProssimoMese = 0, abbonatiAttivi = 0
   if (isRoot) {
+    // Pagamenti della rete (per stato incasso). I record ORFANI (master cancellato) vengono scartati sotto.
     const { data: pag } = await admin.from('abbonamenti_pagamenti')
-      .select('id,master_id,piano,mese,importo,pagato,pagato_il,metodo,created_at')
-      .eq('root_id', utente.master_id).order('created_at', { ascending: false }).limit(500)
-    const ids = [...new Set((pag || []).map(p => p.master_id))]
-    const { data: nomi } = ids.length
-      ? await admin.from('masters').select('id,nome,email,abbonamento_esente').in('id', ids)
-      : { data: [] as any[] }
-    const infoById = new Map((nomi || []).map((n: any) => [n.id, n]))
-    // Nome leggibile: nome → email → "Master #<id breve>" (così i record incompleti sono identificabili, non tutti "Master")
-    const nomeDi = (mid: string) => {
-      const i: any = infoById.get(mid)
-      return (i?.nome && String(i.nome).trim()) || (i?.email && String(i.email).trim()) || ('Master #' + String(mid).slice(0, 6))
-    }
-    pagamenti = (pag || []).map(p => ({ ...p, master_nome: nomeDi(p.master_id), master_esente: !!infoById.get(p.master_id)?.abbonamento_esente }))
+      .select('id,master_id,piano,mese,importo,pagato,pagato_il,metodo')
+      .eq('root_id', utente.master_id).order('mese', { ascending: true }).limit(1000)
+    // Master ATTIVI della rete (con piano OPPURE esenti), escluso il root. Solo questi esistono → niente orfani.
+    const { data: mastersRete } = await admin.from('masters')
+      .select('id,nome,email,abbonamento_piano,abbonamento_prezzo,abbonamento_esente')
+      .in('id', reteIds).neq('id', utente.master_id)
+    const attiviRete = (mastersRete || []).filter((x: any) => x.abbonamento_piano || x.abbonamento_esente)
+    const attiviIds = new Set(attiviRete.map((x: any) => x.id))
 
-    // KPI: INCASSATO questo mese (pagamenti segnati pagato nel mese corrente)
+    // Pagamenti non pagati raggruppati per master (solo di master ESISTENTI e attivi → esclude orfani)
+    const nonPagatiByMaster = new Map<string, any[]>()
+    for (const p of (pag || [])) {
+      if (!attiviIds.has(p.master_id)) continue
+      if (p.pagato) continue
+      if (!nonPagatiByMaster.has(p.master_id)) nonPagatiByMaster.set(p.master_id, [])
+      nonPagatiByMaster.get(p.master_id)!.push(p)
+    }
+    const nomeDi = (m: any) => (m?.nome && String(m.nome).trim()) || (m?.email && String(m.email).trim()) || ('Master #' + String(m?.id).slice(0, 6))
+    abbonati = attiviRete.map((m: any) => {
+      const nonPagati = (nonPagatiByMaster.get(m.id) || [])
+      const daPagare = nonPagati[0] || null   // il più vecchio non saldato
+      const prezzo = m.abbonamento_esente ? 0 : Number(m.abbonamento_prezzo || 0)
+      return {
+        master_id: m.id, master_nome: nomeDi(m), esente: !!m.abbonamento_esente,
+        piano: m.abbonamento_piano, prezzo,
+        pagamento_id: daPagare?.id || null,
+        importo_da_incassare: daPagare ? Number(daPagare.importo || 0) : 0,
+        mese_da_incassare: daPagare?.mese || null,
+        n_da_incassare: nonPagati.length,
+      }
+    }).sort((a, b) => b.importo_da_incassare - a.importo_da_incassare)
+
+    // KPI
     const mm = new Date().toISOString().slice(0, 7)
-    for (const p of (pag || [])) if (p.pagato && String(p.pagato_il || '').slice(0, 7) === mm) incassatoMese += Number(p.importo || 0)
-    // PREVISTO prossimo mese = canoni ricorrenti dei master della rete con piano attivo e NON esenti.
-    const { data: attivi } = await admin.from('masters')
-      .select('abbonamento_prezzo').in('id', reteIds)
-      .not('abbonamento_piano', 'is', null).neq('abbonamento_esente', true).neq('id', utente.master_id)
-    for (const a of (attivi || [])) { previstoProssimoMese += Number((a as any).abbonamento_prezzo || 0); abbonatiAttivi++ }
+    for (const p of (pag || [])) if (attiviIds.has(p.master_id) && p.pagato && String(p.pagato_il || '').slice(0, 7) === mm) incassatoMese += Number(p.importo || 0)
+    for (const m of attiviRete) if (m.abbonamento_piano && !m.abbonamento_esente) { previstoProssimoMese += Number(m.abbonamento_prezzo || 0); abbonatiAttivi++ }
   }
 
   return NextResponse.json({
@@ -69,7 +86,8 @@ export async function GET() {
     credito: Number(m?.credito || 0),
     piani: PIANI_ENTERPRISE,
     isRoot,
-    pagamenti,
+    abbonati,
+    totaleDaIncassare: Math.round(abbonati.reduce((s, a) => s + Number(a.importo_da_incassare || 0), 0) * 100) / 100,
     incassatoMese: Math.round(incassatoMese * 100) / 100,
     previstoProssimoMese: Math.round(previstoProssimoMese * 100) / 100,
     abbonatiAttivi,

@@ -15,13 +15,15 @@ export async function GET() {
   const rootId = roots?.[0]?.id || null
 
   const { data: attivi } = await admin.from('masters')
-    .select('id,nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese,parent_master_id')
+    .select('id,nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese,parent_master_id,abbonamento_esente')
     .not('abbonamento_piano', 'is', null)
 
-  let addebitati = 0
+  let addebitati = 0, esentiSaltati = 0
   for (const m of (attivi || [])) {
     if (m.abbonamento_mese === mese) continue          // già addebitato questo mese
     if (!m.parent_master_id) continue                  // il root è la piattaforma: esente
+    // Master ESENTI (es. LL / Ecomize Solution / MULTIEXPRESS): tengono il piano ma NON pagano.
+    if (m.abbonamento_esente) { await admin.from('masters').update({ abbonamento_mese: mese }).eq('id', m.id); esentiSaltati++; continue }
     const prezzo = Number(m.abbonamento_prezzo || 0)
     if (prezzo > 0) {
       try {
@@ -41,5 +43,5 @@ export async function GET() {
     await admin.from('masters').update({ abbonamento_mese: mese }).eq('id', m.id)
     addebitati++
   }
-  return NextResponse.json({ success: true, mese, addebitati })
+  return NextResponse.json({ success: true, mese, addebitati, esentiSaltati })
 }

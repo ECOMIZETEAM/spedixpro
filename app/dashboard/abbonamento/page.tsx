@@ -59,9 +59,9 @@ export default function AbbonamentoPage() {
 
   // ROOT (master principale): illimitato, non paga; gestisce gli incassi della sua rete
   if (stato?.isRoot) {
-    const pagamenti = stato?.pagamenti || []
-    const daIncassare = pagamenti.filter((p:any)=>!p.pagato)
-    const totaleAperto = daIncassare.reduce((s:number,p:any)=>s+Number(p.importo||0),0)
+    const abbonati = stato?.abbonati || []
+    const daIncassare = abbonati.filter((a:any)=>a.pagamento_id)
+    const totaleAperto = Number(stato?.totaleDaIncassare||0)
     return (
       <div>
         <div style={{marginBottom:'16px'}}>
@@ -93,38 +93,39 @@ export default function AbbonamentoPage() {
           </div>
         </div>
 
-        <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'10px'}}>Iscrizioni della tua rete</div>
+        <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'10px'}}>Master della tua rete <span style={{color:'#999',fontWeight:400}}>({abbonati.length})</span></div>
         <div style={{...card, padding:0, overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
             <thead>
               <tr style={{background:'#fafafa'}}>
-                {['Master','Piano','Mese','Importo','Stato',''].map(h=>(
+                {['Master','Piano','Canone/mese','Stato',''].map(h=>(
                   <th key={h} style={{textAlign:'left' as const,padding:'9px 14px',fontSize:'11px',fontWeight:600,color:'#777',borderBottom:'1px solid #f0f0f0'}}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {!pagamenti.length ? (
-                <tr><td colSpan={6} style={{padding:'30px',textAlign:'center' as const,color:'#999',fontSize:'12px'}}>Nessuna iscrizione ancora</td></tr>
-              ) : pagamenti.map((p:any)=>(
-                <tr key={p.id} style={{borderBottom:'1px solid #f5f5f5'}}>
+              {!abbonati.length ? (
+                <tr><td colSpan={5} style={{padding:'30px',textAlign:'center' as const,color:'#999',fontSize:'12px'}}>Nessun master abbonato ancora</td></tr>
+              ) : abbonati.map((a:any)=>(
+                <tr key={a.master_id} style={{borderBottom:'1px solid #f5f5f5'}}>
                   <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:600}}>
-                    {p.master_nome}
-                    {p.master_esente && <span style={{marginLeft:'6px',background:'#eef2ff',color:'#4338ca',borderRadius:'999px',padding:'1px 7px',fontSize:'10px',fontWeight:700}}>esente</span>}
+                    {a.master_nome}
+                    {a.esente && <span style={{marginLeft:'6px',background:'#eef2ff',color:'#4338ca',borderRadius:'999px',padding:'1px 7px',fontSize:'10px',fontWeight:700}}>esente</span>}
                   </td>
-                  <td style={{padding:'9px 14px',color:'#555'}}>{(p.piano||'').replace('enterprise_','Enterprise ').toUpperCase()}</td>
-                  <td style={{padding:'9px 14px',color:'#555'}}>{p.mese}</td>
-                  <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:700}}>€ {Number(p.importo||0).toFixed(2)}</td>
+                  <td style={{padding:'9px 14px',color:'#555'}}>{(a.piano||'').replace('enterprise_','Enterprise ').toUpperCase() || '—'}</td>
+                  <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:700}}>€ {Number(a.prezzo||0).toFixed(2)}{a.esente && <span style={{fontSize:'10px',color:'#4338ca',fontWeight:600}}> (gratis)</span>}</td>
                   <td style={{padding:'9px 14px'}}>
-                    {p.pagato
-                      ? <span style={{background:'#dcfce7',color:'#16a34a',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>{p.metodo==='pagato'?'Pagato':'Bonifico'}</span>
-                      : <span style={{background:'#fef3c7',color:'#b45309',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>In attesa</span>}
+                    {a.esente
+                      ? <span style={{background:'#eef2ff',color:'#4338ca',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Esente</span>
+                      : a.pagamento_id
+                        ? <span style={{background:'#fef3c7',color:'#b45309',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Da incassare € {Number(a.importo_da_incassare||0).toFixed(2)}{a.n_da_incassare>1?` (${a.n_da_incassare} mesi)`:''}</span>
+                        : <span style={{background:'#dcfce7',color:'#16a34a',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>In regola</span>}
                   </td>
                   <td style={{padding:'9px 14px',textAlign:'right' as const}}>
-                    {!p.pagato && <div style={{display:'inline-flex',gap:'6px'}}>
-                      <button onClick={()=>segnaPagato(p.id, p.master_nome, p.importo, 'pagato')} disabled={!!azione} title="Saldato: nessun rimborso al credito"
+                    {a.pagamento_id && !a.esente && <div style={{display:'inline-flex',gap:'6px'}}>
+                      <button onClick={()=>segnaPagato(a.pagamento_id, a.master_nome, a.importo_da_incassare, 'pagato')} disabled={!!azione} title="Saldato: nessun rimborso al credito"
                         style={{background:'#fff',color:'#16a34a',border:'1px solid #86efac',borderRadius:'6px',padding:'6px 10px',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>Pagato</button>
-                      <button onClick={()=>segnaPagato(p.id, p.master_nome, p.importo, 'bonifico')} disabled={!!azione} title="Bonifico: rimborsa il credito al master"
+                      <button onClick={()=>segnaPagato(a.pagamento_id, a.master_nome, a.importo_da_incassare, 'bonifico')} disabled={!!azione} title="Bonifico: rimborsa il credito al master"
                         style={{background:ACCENT,color:'#fff',border:'none',borderRadius:'6px',padding:'6px 10px',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>Bonifico</button>
                     </div>}
                   </td>
