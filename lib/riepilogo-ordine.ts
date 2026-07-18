@@ -13,12 +13,13 @@ import { PDFDocument, rgb } from 'pdf-lib'
 export type RiepilogoCtx = {
   riepilogoCli: Map<string, boolean>
   nomeCli: Map<string, string>
+  nascondiPrezziCli: Map<string, boolean>
   ordineDiSped: Map<string, { articoli: any[]; order_id: string | null; totale: number | null }>
   catalogo: Map<string, any>
 }
 
 export async function preparaRiepiloghi(admin: any, spedizioni: any[]): Promise<RiepilogoCtx> {
-  const ctx: RiepilogoCtx = { riepilogoCli: new Map(), nomeCli: new Map(), ordineDiSped: new Map(), catalogo: new Map() }
+  const ctx: RiepilogoCtx = { riepilogoCli: new Map(), nomeCli: new Map(), nascondiPrezziCli: new Map(), ordineDiSped: new Map(), catalogo: new Map() }
   const cliIds = Array.from(new Set((spedizioni || []).map((s: any) => s.cliente_id).filter(Boolean)))
   if (!cliIds.length) return ctx
 
@@ -26,6 +27,7 @@ export async function preparaRiepiloghi(admin: any, spedizioni: any[]): Promise<
   for (const c of (cs || [])) {
     ctx.riepilogoCli.set((c as any).id, ((c as any).impostazioni?.stampa_riepilogo) === 'si')
     ctx.nomeCli.set((c as any).id, (c as any).ragione_sociale || '')
+    ctx.nascondiPrezziCli.set((c as any).id, ((c as any).impostazioni?.nascondi_prezzi) === true)
   }
 
   const spedRiepIds = (spedizioni || []).filter((s: any) => ctx.riepilogoCli.get(s.cliente_id)).map((s: any) => s.id)
@@ -98,7 +100,10 @@ export function disegnaRiepilogoSped(pdf: PDFDocument, font: any, fontBold: any,
 
   testo('Colli: ' + (s.colli || 1), ML, 9, true)
   testo('Peso spedizione: ' + (Number(s.peso_fatturato || s.peso_reale || 0)).toFixed(2).replace(/\.?0+$/, '') + ' kg', ML + 90, 9)
+  const nascondiPrezzi = ctx.nascondiPrezziCli.get(s.cliente_id) === true
+  // Il contrassegno resta sempre (è l'importo che il corriere incassa alla consegna).
   if (Number(s.contrassegno) > 0) { y -= 13; testo('Contrassegno: € ' + Number(s.contrassegno).toFixed(2), ML, 10, true) }
-  else if (ord?.totale != null) { y -= 13; testo('Totale ordine: € ' + Number(ord.totale).toFixed(2), ML, 9, false, grigio) }
+  // "Valore ordine" = valore merce dall'ordine importato. Nascosto se il cliente ha "Nascondi prezzi".
+  else if (ord?.totale != null && !nascondiPrezzi) { y -= 13; testo('Valore ordine: € ' + Number(ord.totale).toFixed(2), ML, 9, false, grigio) }
   return true
 }
