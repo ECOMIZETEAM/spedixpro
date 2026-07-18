@@ -35,16 +35,17 @@ export async function GET(req: NextRequest) {
   const subIds = Array.from(subDiretti.keys())
 
   // Movimenti sui libri di M (ricavi da clienti diretti + costo di M)
+  // SOLO movimenti legati a una spedizione (esclude aggiustamenti manuali di saldo) → coerente con l'Elenco.
   const movM = await fetchAll(() => admin.from('movimenti')
     .select('cliente_id,master_target_id,importo,tipo,created_at,spedizione_id')
-    .eq('master_id', M).gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI)
+    .eq('master_id', M).not('spedizione_id', 'is', null).gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI)
     .order('created_at', { ascending: false }))
   // Movimenti dei sotto-master diretti (loro costo verso M = ricavo di M dai sotto-master)
   let movSub: any[] = []
   if (subIds.length) {
     movSub = await fetchAll(() => admin.from('movimenti')
       .select('master_id,master_target_id,importo,tipo,created_at,spedizione_id')
-      .in('master_id', subIds).gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI)
+      .in('master_id', subIds).not('spedizione_id', 'is', null).gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI)
       .order('created_at', { ascending: false }))
   }
 

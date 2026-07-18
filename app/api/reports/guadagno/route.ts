@@ -42,9 +42,13 @@ export async function GET(req: NextRequest) {
   const subIds = new Set((figli || []).map((f: any) => f.id))
 
   // movimenti sui libri del master M (TUTTI: senza range PostgREST taglierebbe a 1000 -> totali errati)
+  // SOLO movimenti legati a una SPEDIZIONE (spedizione_id NOT NULL): il guadagno = margine sulle
+  // spedizioni, come l'Elenco Spedizioni. Gli aggiustamenti manuali di saldo (es. "Accredito credito
+  // a scalare", rettifiche senza spedizione) NON sono margine di spedizione → esclusi. Così Report ed
+  // Elenco combaciano per tutti.
   const movM = await fetchAll(() => admin.from('movimenti')
     .select('master_target_id,cliente_id,importo,tipo,created_at,spedizione_id')
-    .eq('master_id', M).gte('created_at', dal).lte('created_at', alEnd).in('tipo', TIPI)
+    .eq('master_id', M).not('spedizione_id', 'is', null).gte('created_at', dal).lte('created_at', alEnd).in('tipo', TIPI)
     .order('created_at', { ascending: false }).order('id', { ascending: false }))
 
   // movimenti dei sotto-master diretti (per i loro pagamenti a cascata verso M)
@@ -52,7 +56,7 @@ export async function GET(req: NextRequest) {
   if (subIds.size) {
     movSub = await fetchAll(() => admin.from('movimenti')
       .select('master_id,master_target_id,importo,tipo,created_at')
-      .in('master_id', Array.from(subIds)).gte('created_at', dal).lte('created_at', alEnd).in('tipo', TIPI)
+      .in('master_id', Array.from(subIds)).not('spedizione_id', 'is', null).gte('created_at', dal).lte('created_at', alEnd).in('tipo', TIPI)
       .order('created_at', { ascending: false }).order('id', { ascending: false }))
   }
 

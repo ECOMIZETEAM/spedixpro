@@ -26,10 +26,10 @@ export async function GET(req: NextRequest) {
   const subIds = Array.from(subDiretti.keys())
 
   const movM = await fetchAll(() => admin.from('movimenti').select('cliente_id,importo,tipo,created_at').eq('master_id', M)
-    .not('cliente_id', 'is', null).gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI).order('created_at', { ascending: true }))
+    .not('cliente_id', 'is', null).not('spedizione_id', 'is', null).gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI).order('created_at', { ascending: true }))
   let movSub: any[] = []
   if (subIds.length) movSub = await fetchAll(() => admin.from('movimenti').select('master_id,master_target_id,importo,created_at')
-    .in('master_id', subIds).gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI))
+    .in('master_id', subIds).not('spedizione_id', 'is', null).gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI))
 
   const perMese = new Map<string, number>()
   const ricavoCli = new Map<string, number>()
