@@ -177,7 +177,8 @@ export async function spediamoproCreateShipment(
       cashOnDeliveryAmount: params.cashOnDeliveryAmount || null,
       insuredAmount: params.insuredAmount || null,
       externalReference: params.externalReference || null,
-      consigneeNote: params.notes || null,
+      // NOTE SpediamoPro: max ~20 caratteri, oltre → 422 "invalid data". Troncatura difensiva.
+      consigneeNote: params.notes ? String(params.notes).substring(0, 20) : null,
     }),
   })
 

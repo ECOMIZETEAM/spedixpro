@@ -507,18 +507,14 @@ export async function POST(req: NextRequest) {
       // costo live). Il controllo sulle destinazioni disagiate è ora PER-ZONA (zone disagiate), non
       // per confronto di prezzo.
 
-      // VERIFICATO su etichetta reale (Poste Delivery Business via SpediamoPro):
-      //  - il campo "Rif." in etichetta è un codice interno del corriere e NON è impostabile
-      //    (externalReference viene memorizzato ma non stampato);
-      //  - il "CONTENUTO" è la categoria del parcel (type), non testo libero;
-      //  - l'UNICO campo libero stampato è "NOTE:" (consigneeNote).
-      // Quindi ID Ordine + Contenuto (+ nota utente) li mettiamo nel campo NOTE, dove compaiono.
+      // VERIFICATO via API su Poste Delivery Business (SpediamoPro):
+      //  - "Rif." in etichetta = codice interno del corriere, NON impostabile;
+      //  - "CONTENUTO" = categoria del parcel (type), non testo libero;
+      //  - "NOTE:" (consigneeNote) è l'UNICO campo libero stampato, MA accetta max ~20 caratteri:
+      //    oltre, il create fallisce con 422 "The shipment contains invalid data.".
+      // Quindi in NOTE mettiamo SOLO un riferimento breve (l'ID ordine, o la nota), troncato a 20.
       const externalRef = (body.rifOrdine ? String(body.rifOrdine) : (body.notes ? String(body.notes) : '')).substring(0, 64) || undefined
-      const noteEtichetta = [
-        body.rifOrdine ? `Ordine: ${body.rifOrdine}` : '',
-        String(body.contenuto || '').trim() ? `Contenuto: ${String(body.contenuto).trim()}` : '',
-        body.notes ? String(body.notes) : '',
-      ].filter(Boolean).join(' · ').substring(0, 200) || undefined
+      const noteEtichetta = (body.rifOrdine ? String(body.rifOrdine) : (body.notes ? String(body.notes) : '')).trim().substring(0, 20) || undefined
 
       const shipment = await spediamoproCreateShipment(cred.authcode, {
         parcels, sender, consignee, quotation, cashOnDeliveryAmount, insuredAmount,
