@@ -69,17 +69,33 @@ export async function GET(req: NextRequest) {
     cur[campo] += v; perGiorno.set(k, cur)
   }
 
-  let ricaviClienti = 0, costoM = 0, ricaviSub = 0
+  // SPEDIZIONI PROPRIE (master_id = M, senza cliente): il master spedisce per sé. Contano SIA l'uscita
+  // SIA un'entrata pari (paga a se stesso) → margine 0 (come nell'Elenco). Senza questo, il costo della
+  // propria ridurrebbe il guadagno e Report ed Elenco non tornerebbero. Individuo le proprie dalle spedizioni.
+  const costSpedIds = Array.from(new Set((movM || []).filter((m: any) => !m.cliente_id && m.master_target_id === M && m.spedizione_id).map((m: any) => m.spedizione_id)))
+  const propriaSet = new Set<string>()
+  for (let i = 0; i < costSpedIds.length; i += 300) {
+    const chunk = costSpedIds.slice(i, i + 300)
+    const { data: sps } = await admin.from('spedizioni').select('id,master_id,cliente_id').in('id', chunk)
+    for (const sp of (sps || [])) if ((sp as any).master_id === M && !(sp as any).cliente_id) propriaSet.add((sp as any).id)
+  }
+
+  let ricaviClienti = 0, costoM = 0, ricaviSub = 0, ricaviPropria = 0
   for (const m of (movM || [])) {
     // addebito e rimborso si annullano da soli (storno esatto in annullo) -> annullate = netto 0
     if (m.cliente_id) { ricaviClienti += -n(m.importo); acc(m.created_at, 'ricavi', -n(m.importo)) }       // incasso dai clienti diretti
-    else if (m.master_target_id === M) { costoM += -n(m.importo); acc(m.created_at, 'costi', -n(m.importo)) } // costo di M
+    else if (m.master_target_id === M) {
+      const v = -n(m.importo)
+      costoM += v; acc(m.created_at, 'costi', v)                                                            // costo di M
+      // Spedizione propria: entrata = uscita → margine 0 (non riduce il guadagno).
+      if ((m as any).spedizione_id && propriaSet.has((m as any).spedizione_id)) { ricaviPropria += v; acc(m.created_at, 'ricavi', v) }
+    }
   }
   for (const m of movSub) {
     if (m.master_id === m.master_target_id) { ricaviSub += -n(m.importo); acc(m.created_at, 'ricavi', -n(m.importo)) } // cascata sotto-master
   }
 
-  const ricavi = Math.round((ricaviClienti + ricaviSub) * 100) / 100
+  const ricavi = Math.round((ricaviClienti + ricaviSub + ricaviPropria) * 100) / 100
   const costi = Math.round(costoM * 100) / 100
   const guadagno = Math.round((ricavi - costi) * 100) / 100
   // Numero di spedizioni del periodo (distinte) per la media per spedizione
