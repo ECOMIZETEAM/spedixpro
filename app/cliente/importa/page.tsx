@@ -117,6 +117,7 @@ export default function ImportaOrdiniPage() {
     if (o.peso) p.set('peso', String(o.peso))
     if (o.colli) p.set('colli', String(o.colli))
     if (o.contenuto) p.set('contenuto', o.contenuto)
+    if (o.order_id) p.set('rif', o.order_id)
     if (o.contrassegno) p.set('contrassegno', String(o.contrassegno))
     if (o.totale_ordine) p.set('valore', String(o.totale_ordine))
     if (o.note) p.set('note', o.note)
@@ -362,6 +363,7 @@ export default function ImportaOrdiniPage() {
             shipFrom, shipTo,
             notes: o.note || '', insuranceValue: 0, codValue: o.contrassegno || 0,
             contenuto: o.contenuto || '',
+            rifOrdine: o.order_id || '',   // → "Rif." in etichetta (SpediamoPro externalReference)
           }),
         })
         const cData = await cRes.json()

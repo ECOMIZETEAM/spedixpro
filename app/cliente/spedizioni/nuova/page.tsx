@@ -58,6 +58,7 @@ export default function NuovaSpedizioneCliente() {
   function applicaPacco(p:any) { setPeso(String(p.peso||'')); setNumColli(1); setColli([{ lunghezza:String(p.lunghezza||''), larghezza:String(p.larghezza||''), altezza:String(p.altezza||'') }]); setTariffe([]); setSelected(null) }
   const [contenuto, setContenuto] = useState('')
   const [tipoContenuto, setTipoContenuto] = useState('Merce destinata alla vendita')
+  const [rifOrdine, setRifOrdine] = useState('')   // → "Rif." in etichetta (order id da import/integrazione o digitato)
   const [valoreMerce, setValoreMerce] = useState('')
   const [contrassegno, setContrassegno] = useState('0')
   const [assicurazione, setAssicurazione] = useState('0')
@@ -101,6 +102,7 @@ export default function NuovaSpedizioneCliente() {
     if (q.get('peso')) setPeso(q.get('peso') as string)
     if (q.get('colli')) { const n = Math.max(1, parseInt(q.get('colli') as string) || 1); aggiornaNumColli(n) }
     if (q.get('contenuto')) setContenuto(q.get('contenuto') as string)
+    if (q.get('rif')) setRifOrdine(q.get('rif') as string)
     if (q.get('valore')) setValoreMerce(q.get('valore') as string)
     // Contrassegno: se l'ordine e' in contrassegno (pagamento in attesa) arriva gia' valorizzato
     if (q.get('contrassegno')) setContrassegno(q.get('contrassegno') as string)
@@ -204,7 +206,7 @@ export default function NuovaSpedizioneCliente() {
     if (c) setMitt({nome:c.ragione_sociale||'',indirizzo:c.so_indirizzo||'',citta:c.so_citta||'',provincia:c.so_provincia||'',cap:c.so_cap||'',email:c.email||'',telefono:c.telefono||''})
     setDest({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',paese:'IT',email:'',telefono:'',note:''})
     setNumColli(1); setColli([{lunghezza:'',larghezza:'',altezza:''}])
-    setPeso('1'); setContenuto(''); setTipoContenuto('Merce destinata alla vendita'); setValoreMerce('')
+    setPeso('1'); setContenuto(''); setTipoContenuto('Merce destinata alla vendita'); setValoreMerce(''); setRifOrdine('')
     setContrassegno('0'); setAssicurazione('0')
     setTariffe([]); setSelected(null); setExtraNomi([])
     setRichiediRitiro(false); setRitiroData(new Date().toISOString().split('T')[0]); setRitiroOrario('mattina')
@@ -228,7 +230,7 @@ export default function NuovaSpedizioneCliente() {
         shipFrom:{name:mitt.nome,company:mitt.nome,street1:mitt.indirizzo,street2:'',city:mitt.citta,state:mitt.provincia,postalCode:mitt.cap,country:'IT',phone:mitt.telefono,email:mitt.email},
         shipTo:{name:dest.nome,company:'',street1:dest.indirizzo,street2:'',city:dest.citta,state:dest.provincia,postalCode:dest.cap,country:dest.paese,phone:dest.telefono,email:dest.email},
         notes:dest.note, insuranceValue:+assicurazione, codValue:+contrassegno,
-        contenuto, tipoContenuto, valoreMerce
+        contenuto, tipoContenuto, valoreMerce, rifOrdine
       })
     })
     const data = await res.json()
@@ -439,6 +441,11 @@ export default function NuovaSpedizioneCliente() {
               </div>
 
 
+
+              <div style={{marginBottom:'10px'}}>
+                <label style={lbl}>Rif. Ordine</label>
+                <input value={rifOrdine} onChange={e=>setRifOrdine(e.target.value)} placeholder="Es. numero ordine — compare come Rif. in etichetta" style={inp}/>
+              </div>
 
               <div style={{marginBottom:'10px'}}>
                 <label style={lbl}>Contenuto</label>

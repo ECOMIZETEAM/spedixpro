@@ -26,3 +26,5 @@ export async function PATCH(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ ok: true })
 }
+// La pagina Impostazioni salva via PUT: stesso comportamento del PATCH (solo impostazioni).
+export async function PUT(req: NextRequest) { return PATCH(req) }
