@@ -199,6 +199,20 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Numero DISTINTA RESI per le spedizioni in "reso al mittente" (mostrato sotto lo stato in elenco:
+  // segnala che il reso è già stato scansionato/addebitato e chiuso in distinta). voci è JSON → mappo.
+  const distintaReso = new Map<string, number>()
+  const spedReso = (spedizioni || []).filter((s: any) => s.stato === 'reso_mittente')
+  if (spedReso.length) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const adminR = createAdminSupabase()
+    const mastersDelleSped = Array.from(new Set((spedizioni || []).map((s: any) => s.master_id).filter(Boolean)))
+    if (mastersDelleSped.length) {
+      const { data: dr } = await adminR.from('distinte_resi').select('numero,voci').in('master_id', mastersDelleSped)
+      for (const d of (dr || [])) for (const v of (((d as any).voci) || [])) if (v?.id) distintaReso.set(v.id, (d as any).numero)
+    }
+  }
+
   // master_rete = nome della MIA prima linea per le spedizioni dei sotto-master (null per le mie)
   const rows = (spedizioni || []).map((s: any) => {
     let master_rete: string | null = null
@@ -247,7 +261,8 @@ export async function GET(req: NextRequest) {
     if (prezzo_corriere == null) prezzo_corriere = prezzo_cliente
     const margine = Math.round((prezzo_cliente - prezzo_corriere) * 100) / 100
     const id_ordine = idOrdine.get(s.id) || (s as any).id_ordine_esterno || (s as any).rif_ordine || null
-    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, id_ordine }
+    const distinta_reso = distintaReso.get(s.id) || null
+    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, id_ordine, distinta_reso }
   })
   return NextResponse.json(rows)
 }

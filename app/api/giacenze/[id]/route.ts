@@ -217,15 +217,36 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     await admin.from('giacenza_richieste').update({ stato: 'confermata', confermata_da: nomeUtente, confermata_at: new Date().toISOString() }).eq('id', rich.id)
-    // La spedizione resta nella lista giacenze come "svincolata" (verde: svincolo confermato).
-    // Non tocco spedizioni.stato cosi la riga non sparisce dall'elenco giacenze.
+
+    // Se lo SVINCOLO è un RESO: la spedizione entra in "reso al mittente" e va SUBITO chiusa in una
+    // distinta resi (già addebitata qui a cascata), così l'Elenco mostra "Distinta N" sotto lo stato
+    // e la scansione resi la riconosce come già addebitata (nessun doppio addebito).
+    let numeroDistintaReso: number | null = null
+    if (rich.operazione === 'reso' && sped.cliente_id) {
+      // Evita duplicati: solo se non è già in una distinta resi del master.
+      const { data: esistenti } = await admin.from('distinte_resi').select('voci').eq('master_id', sped.master_id)
+      const gia = new Set<string>()
+      for (const d of (esistenti || [])) for (const v of (Array.isArray((d as any).voci) ? (d as any).voci : [])) if (v?.id) gia.add(v.id)
+      if (!gia.has(id)) {
+        const { count } = await admin.from('distinte_resi').select('*', { count: 'exact', head: true }).eq('master_id', sped.master_id)
+        numeroDistintaReso = (count || 0) + 1
+        await admin.from('distinte_resi').insert({
+          master_id: sped.master_id, cliente_id: sped.cliente_id, numero: numeroDistintaReso,
+          totale_ldv: 1, totale: Number(rich.costo_servizio) || 0,
+          voci: [{ id, numero: sped.numero }], stato: 'chiusa',
+        })
+      }
+    }
+
+    // La spedizione resta nella lista giacenze come "svincolata" (verde: svincolo confermato);
+    // per il RESO imposto anche stato='reso_mittente' (la lista giacenze filtra su giacenza_stato, resta visibile).
     await admin.from('spedizioni').update({
       giacenza_stato: 'svincolata', giacenza_istruzioni: istr, giacenza_addebito_effettuato: true,
       // Se lo svincolo è un RESO, il reso è già stato addebitato qui (a cascata): lo marco così la
       // scansione resi mostrerà "reso già addebitato in giacenza" e NON riaddebiterà.
-      ...(rich.operazione === 'reso' ? { giacenza_reso_addebitato: true } : {}),
+      ...(rich.operazione === 'reso' ? { giacenza_reso_addebitato: true, stato: 'reso_mittente' } : {}),
     }).eq('id', id)
-    return NextResponse.json({ success: true, addebito: totale })
+    return NextResponse.json({ success: true, addebito: totale, distintaReso: numeroDistintaReso })
   }
 
   // 5) Chiudi giacenza (solo master) -> non piu gestibile

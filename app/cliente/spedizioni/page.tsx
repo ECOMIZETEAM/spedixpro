@@ -459,6 +459,7 @@ async function apriTracking(s: any) {
                       <td style={{padding:'9px 12px'}}>
                         <span style={{background:st.bg,color:st.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600',whiteSpace:'nowrap' as const}}>{st.label}</span>
                         {s.stato==='annullamento_pending' && <div style={{fontSize:'10px',color:'#ea580c',marginTop:'3px',whiteSpace:'nowrap' as const}}>invio corriere {oreAllAnnullo(s.annullamento_richiesto_at)}</div>}
+                        {s.stato==='reso_mittente' && s.distinta_reso && <div style={{fontSize:'10px',color:'#374151',marginTop:'3px',fontWeight:'600',whiteSpace:'nowrap' as const}}>Distinta {s.distinta_reso}</div>}
                       </td>
                       <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.id_ordine||'—'}</td>
                       <td style={{padding:'9px 12px',fontWeight:'700',color:'#1a1a1a'}}>
