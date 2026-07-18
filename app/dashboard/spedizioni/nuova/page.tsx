@@ -54,6 +54,8 @@ export default function NuovaSpedizionePage() {
   const [showSugg, setShowSugg] = useState(false)
   const [suggDest, setSuggDest] = useState<any[]>([])   // rubrica destinatari
   const [showSuggDest, setShowSuggDest] = useState(false)
+  const [suggMitt, setSuggMitt] = useState<any[]>([])   // rubrica mittenti
+  const [showSuggMitt, setShowSuggMitt] = useState(false)
   const [richiediRitiro, setRichiediRitiro] = useState(false)
   const [ritiroData, setRitiroData] = useState(new Date().toISOString().split('T')[0])
   const [ritiroOrario, setRitiroOrario] = useState('mattina')
@@ -296,7 +298,33 @@ export default function NuovaSpedizionePage() {
                   {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}{c.is_master?' — sotto-master':''}</option>)}
                 </select>
               </div>
-              <div style={{marginBottom:'12px'}}><label style={lbl}>Rif. Mittente</label><input value={mitt.nome} onChange={e=>setMitt({...mitt,nome:e.target.value})} style={inp}/></div>
+              <div style={{marginBottom:'12px',position:'relative'}}>
+                <label style={lbl}>Rif. Mittente</label>
+                <input value={mitt.nome} autoComplete="off"
+                  onChange={async e=>{
+                    const v=e.target.value
+                    setMitt(m=>({...m,nome:v}))
+                    if(v.trim().length>=2){
+                      try{ const r=await fetch('/api/mittenti/cerca?q='+encodeURIComponent(v)+(clienteId?'&clienteId='+encodeURIComponent(clienteId):'')); const j=await r.json(); setSuggMitt(Array.isArray(j)?j:[]); setShowSuggMitt(true) }catch{ setSuggMitt([]) }
+                    } else { setSuggMitt([]); setShowSuggMitt(false) }
+                  }}
+                  onFocus={()=>{ if(suggMitt.length) setShowSuggMitt(true) }}
+                  onBlur={()=>setTimeout(()=>setShowSuggMitt(false),200)}
+                  style={inp}/>
+                {showSuggMitt && suggMitt.length>0 && (
+                  <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:50,background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',maxHeight:'240px',overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}}>
+                    {suggMitt.map((c:any,i:number)=>(
+                      <div key={i} onMouseDown={()=>{ setMitt(m=>({...m,nome:c.nome,indirizzo:c.indirizzo||m.indirizzo,citta:c.citta||m.citta,provincia:c.provincia||m.provincia,cap:c.cap||m.cap,email:c.email||m.email,telefono:c.telefono||m.telefono})); setShowSuggMitt(false) }}
+                        style={{padding:'8px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
+                        onMouseEnter={e=>(e.currentTarget.style.background='#f9fafb')}
+                        onMouseLeave={e=>(e.currentTarget.style.background='#fff')}>
+                        <div style={{fontWeight:600}}>{c.nome}</div>
+                        <div style={{color:'#999',fontSize:'11px'}}>{[c.indirizzo,c.citta,c.provincia&&`(${c.provincia})`,c.cap].filter(Boolean).join(' ')}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div style={{marginBottom:'12px'}}><label style={lbl}>Indirizzo</label><input value={mitt.indirizzo} onChange={e=>setMitt({...mitt,indirizzo:e.target.value})} style={inp}/></div>
               <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'8px',marginBottom:'12px'}}>
                 <div><label style={lbl}>Città</label><input value={mitt.citta} onChange={e=>setMitt({...mitt,citta:e.target.value})} style={inp}/></div>
