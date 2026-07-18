@@ -49,13 +49,15 @@ function noloBase(sped: any) {
   return Math.max(0, (Number(sped.costo_totale) || 0) - (Number(sped.assicurazione) || 0))
 }
 
-// Costi di una operazione secondo il modello: apertura giacenza + servizio (reso = solo reso)
+// Costi dell'operazione di SVINCOLO = SOLO il servizio scelto (riconsegna/reso/…).
+// L'apertura giacenza è addebitata a parte all'ENTRATA in giacenza (dal cron), quindi NON entra
+// nel totale dell'operazione di svincolo. costo_apertura resta come info (già addebitata).
 function calcolaCosti(operazione: string, prezzi: any, sped: any) {
   const base = noloBase(sped)
   const serv = prezzi.servizi[operazione] || { valore: 0, perc: 0 }
   const costoServizio = (Number(serv.valore) || 0) + ((Number(serv.perc) || 0) / 100) * base
   const costoApertura = operazione === 'reso' ? 0 : (Number(prezzi.apertura) || 0)
-  return { costo_apertura: +costoApertura.toFixed(2), costo_servizio: +costoServizio.toFixed(2), costo_totale: +(costoApertura + costoServizio).toFixed(2) }
+  return { costo_apertura: +costoApertura.toFixed(2), costo_servizio: +costoServizio.toFixed(2), costo_totale: +costoServizio.toFixed(2) }
 }
 
 async function contesto(req: NextRequest, id: string): Promise<Ctx | NextResponse> {

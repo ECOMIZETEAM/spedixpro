@@ -68,7 +68,8 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
     const serv = prezzi?.servizi?.[operazione] || { valore: 0, perc: 0 }
     const servizio = (Number(serv.valore) || 0) + ((Number(serv.perc) || 0) / 100) * (Number(noloBase) || 0)
     const apertura = operazione === 'reso' ? 0 : (Number(prezzi?.apertura) || 0)
-    return { apertura, servizio, totale: apertura + servizio }
+    // L'apertura è già addebitata all'entrata in giacenza: il totale dell'operazione = SOLO il servizio.
+    return { apertura, servizio, totale: servizio }
   }
   const pv = preview(op)
   const richPending = (storico || []).find((r: any) => r.stato === 'da_confermare')
@@ -165,7 +166,9 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
           <div style={card}>
             <div style={cardHead}>Costi applicati — {OP_LABEL[op]}</div>
             <div style={{ padding: '14px 18px', fontSize: '13px', color: '#1a1a1a' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px dashed #eef2f6' }}><span>Apertura giacenza</span><b>{eur(pv.apertura)}</b></div>
+              {pv.apertura > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px dashed #eef2f6', color: '#9ca3af' }}><span>Apertura giacenza <span style={{ fontSize: '11px' }}>(già addebitata all'entrata)</span></span><span>{eur(pv.apertura)}</span></div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px dashed #eef2f6' }}><span>{OP_LABEL[op]}{op === 'reso' ? ' (senza assicurazione/contrassegno)' : ''}</span><b>{eur(pv.servizio)}</b></div>
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0 2px', fontSize: '15px' }}><span style={{ fontWeight: 700 }}>Totale operazione</span><b style={{ color: '#16a34a' }}>{eur(pv.totale)}</b></div>
             </div>
