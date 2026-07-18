@@ -60,6 +60,15 @@ export async function GET(req: NextRequest) {
     const k = day(iso); const cur = perGiorno.get(k) || { fatturato: 0, costo: 0 }; cur[campo] += v; perGiorno.set(k, cur)
   }
 
+  // Spedizioni PROPRIE (master senza cliente): contano entrata = uscita → margine 0 (come nel Report Guadagno).
+  const costSpedIds = Array.from(new Set(movM.filter((m: any) => !m.cliente_id && m.master_target_id === M && m.spedizione_id).map((m: any) => m.spedizione_id)))
+  const propriaSet = new Set<string>()
+  for (let i = 0; i < costSpedIds.length; i += 300) {
+    const chunk = costSpedIds.slice(i, i + 300)
+    const { data: sps } = await admin.from('spedizioni').select('id,master_id,cliente_id').in('id', chunk)
+    for (const sp of (sps || [])) if ((sp as any).master_id === M && !(sp as any).cliente_id) propriaSet.add((sp as any).id)
+  }
+
   for (const m of movM) {
     const sid = (m as any).spedizione_id
     if (m.cliente_id) {
@@ -71,6 +80,8 @@ export async function GET(req: NextRequest) {
       const v = -n(m.importo)
       if (sid) costoSped.set(sid, (costoSped.get(sid) || 0) + v)
       accG(m.created_at, 'costo', v)
+      // Propria: ricavo = costo → margine 0 (non riduce il profitto).
+      if (sid && propriaSet.has(sid)) { ricavoSped.set(sid, (ricavoSped.get(sid) || 0) + v); accG(m.created_at, 'fatturato', v) }
     }
   }
   for (const m of movSub) {
