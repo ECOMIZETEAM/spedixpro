@@ -7,8 +7,8 @@ import Moovy from './Moovy'
 // perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
 // always: sempre visibile a chiunque abbia accesso al portale.
 // rete: visibile solo ai master che possono gestire la propria rete di sotto-master.
-type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean, agente?: boolean, superMaster?: boolean }
-type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, external?: boolean, agente?: boolean, superMaster?: boolean, sub?: NavSub[] }
+type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean }
+type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, external?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, sub?: NavSub[] }
 
 const NAV: NavItem[] = [
   { label: 'Spedizioni', href: '/dashboard/spedizioni', icon: '◫', sub: [
@@ -27,8 +27,8 @@ const NAV: NavItem[] = [
     { label: 'Elenco Ritiri', href: '/dashboard/ritiri/elenco', perm: 'admin.pickups.index' },
   ]},
   { label: 'Distinte', icon: '≡', sub: [
-    { label: 'Crea Distinta', href: '/dashboard/distinte/crea', perm: 'admin.shippinglists.create' },
-    { label: 'Elenco Distinte', href: '/dashboard/distinte/elenco', perm: 'admin.shippinglists.index' },
+    { label: 'Crea Distinta', href: '/dashboard/distinte/crea', perm: 'admin.shippinglists.create', agenteOk: true },
+    { label: 'Elenco Distinte', href: '/dashboard/distinte/elenco', perm: 'admin.shippinglists.index', agenteOk: true },
   ]},
   { label: 'Resi', href: '/dashboard/resi', icon: '↺', sub: [
     { label: 'Scansiona Resi', href: '/dashboard/resi/scansiona', perm: 'admin.renderlist.scan' },
@@ -113,9 +113,10 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   // Un elemento e visibile se: admin/master (isFull), oppure marcato always,
   // oppure ha una chiave permesso attiva. Senza perm e non-full = nascosto (solo admin).
   // Le voci "rete" (gestione sotto-master) richiedono in più il flag gestioneRete.
-  const puoVedere = (x: { perm?: string, always?: boolean, rete?: boolean, agente?: boolean, superMaster?: boolean }) => {
+  const puoVedere = (x: { perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean }) => {
     if (x.superMaster) return superMaster       // voce riservata al SUPER master (es. Registro Attività)
     if (x.agente) return ruolo === 'agente'   // voce esclusiva dell'agente (mai al master)
+    if (ruolo === 'agente' && x.agenteOk) return true   // voce concessa anche all'agente (es. Distinte: può chiuderle)
     if (x.rete && !gestioneRete) return false
     return isFull || x.always === true || (!!x.perm && permessi[x.perm] === true)
   }

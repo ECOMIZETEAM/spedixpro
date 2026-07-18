@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
+import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -42,17 +42,22 @@ export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
-  const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
   const body = await req.json()
   const { spedizioniIds, clienteId, corriereId } = body
   if (!spedizioniIds?.length) return NextResponse.json({ error: 'Nessuna spedizione selezionata' }, { status: 400 })
   // Sotto-master (clienteId = "m:<id>"): le spedizioni sono sue -> admin, cliente_id distinta = null
   const masterSel = typeof clienteId === 'string' && clienteId.startsWith('m:') ? clienteId.slice(2) : null
+  // Anche l'agente può chiudere la distinta, ma SOLO per i propri clienti (mai per la rete/sotto-master).
+  const agente = isAgente(utente)
+  if (agente && masterSel) return NextResponse.json({ error: 'Operazione non consentita: gli agenti non gestiscono la rete.' }, { status: 403 })
   let db: any = supabase
   if (masterSel) { const { createAdminSupabase } = await import('@/lib/supabase-admin'); db = createAdminSupabase() }
-  const spedQ = db.from('spedizioni').select('id,colli,peso_reale,costo_totale').in('id', spedizioniIds)
+  let spedQ = db.from('spedizioni').select('id,colli,peso_reale,costo_totale').in('id', spedizioniIds)
+  if (agente) spedQ = spedQ.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
   const { data: speds } = masterSel ? await spedQ : await spedQ.eq('master_id', utente?.master_id)
+  if (!speds?.length) return NextResponse.json({ error: 'Nessuna spedizione valida da chiudere' }, { status: 400 })
+  const spedIdsValidi = speds.map((s: any) => s.id)
   const totaleColli = (speds || []).reduce((s: number, x: any) => s + Number(x.colli || 1), 0)
   const totalePeso = (speds || []).reduce((s: number, x: any) => s + Number(x.peso_reale || 0), 0)
   const prezzoTotale = (speds || []).reduce((s: number, x: any) => s + Number(x.costo_totale || 0), 0)
@@ -67,7 +72,7 @@ export async function POST(req: NextRequest) {
     totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: (speds||[]).length, prezzo_totale: prezzoTotale,
   }).select().single()
   if (error || !distinta) return NextResponse.json({ error: error?.message || 'Errore' }, { status: 400 })
-  await db.from('spedizioni').update({ distinta_id: distinta.id }).in('id', spedizioniIds)
+  await db.from('spedizioni').update({ distinta_id: distinta.id }).in('id', spedIdsValidi)
   // Chiusura borderò/distinta lato corriere (best-effort): Spedisci.online e SpediamoPro (bordereau).
   try { const { chiudiBorderoSpedisci } = await import('@/lib/spedisci'); await chiudiBorderoSpedisci(db, distinta.id) } catch {}
   try { const { chiudiBordereauSpediamopro } = await import('@/lib/spediamopro'); await chiudiBordereauSpediamopro(db, distinta.id) } catch {}
