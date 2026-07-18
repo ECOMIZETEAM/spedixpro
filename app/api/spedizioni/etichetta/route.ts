@@ -60,10 +60,11 @@ export async function GET(req: NextRequest) {
       const out = await PDFDocument.create()
       const font = await out.embedFont(StandardFonts.Helvetica)
       const fontBold = await out.embedFont(StandardFonts.HelveticaBold)
-      disegnaRiepilogoSped(out, font, fontBold, riepCtx, spedFull)
+      // Prima l'ETICHETTA, poi il riepilogo SOTTO.
       const label = await PDFDocument.load(new Uint8Array(buf))
       const pages = await out.copyPages(label, label.getPageIndices())
       pages.forEach(p => out.addPage(p))
+      disegnaRiepilogoSped(out, font, fontBold, riepCtx, spedFull)
       return Buffer.from(await out.save())
     } catch (e) { console.error('Riepilogo singola etichetta:', e); return buf }
   }

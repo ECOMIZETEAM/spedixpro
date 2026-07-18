@@ -41,8 +41,6 @@ export async function POST(req: NextRequest) {
   const fontBold = await pdfMerged.embedFont(StandardFonts.HelveticaBold)
 
   for (const s of spedizioni || []) {
-    // Riepilogo ordine (packing slip) PRIMA delle etichette, se il cliente lo ha attivato.
-    try { disegnaRiepilogoSped(pdfMerged, font, fontBold, riepCtx, s) } catch (e) { console.error('Errore riepilogo:', e) }
     const colli = (s.colli_dettaglio as any[]) || []
     const urls: string[] = []
     if (colli.length > 0) {
@@ -51,6 +49,7 @@ export async function POST(req: NextRequest) {
       urls.push(s.etichetta_url)
     }
 
+    // Prima le pagine ETICHETTA...
     for (const url of urls) {
       try {
         let pdfBytes: Uint8Array
@@ -68,6 +67,8 @@ export async function POST(req: NextRequest) {
         console.error('Errore PDF:', e)
       }
     }
+    // ...poi il RIEPILOGO ordine SOTTO l'etichetta (se il cliente lo ha attivato).
+    try { disegnaRiepilogoSped(pdfMerged, font, fontBold, riepCtx, s) } catch (e) { console.error('Errore riepilogo:', e) }
   }
 
   const mergedBytes = await pdfMerged.save()
