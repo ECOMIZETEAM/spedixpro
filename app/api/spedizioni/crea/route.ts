@@ -20,9 +20,19 @@ function erroreCorrierePulito(raw: any): string {
   const t = String(raw || '').toLowerCase()
   if (/dimension|misur|measure|\bsize\b|volume|lato|length|width|height|weight|\bpeso\b|\bkg\b|oversiz|too (large|big|heavy)/.test(t))
     return 'Collo non ammesso dal corriere: verifica misure e peso (potrebbe essere fuori misura).'
-  if (/provinc|state|postal|\bzip\b|address|indiriz|\bcap\b/.test(t))
-    return 'Indirizzo non valido: controlla provincia, CAP e indirizzo di mittente e destinatario.'
-  return 'Il corriere non può gestire questa spedizione: verifica misure, peso e indirizzo, oppure scegli un altro corriere.'
+  if (/provinc|state|postal|\bzip\b|address|indiriz|\bcap\b|city|citt|recipient|consignee|sender|destinat|mittent/.test(t))
+    return 'Indirizzo non valido: controlla nome, indirizzo, città, provincia e CAP di mittente e destinatario.'
+  if (/\bcod\b|cash.?on.?delivery|contrassegn/.test(t))
+    return 'Contrassegno non gestibile da questo contratto (non previsto o importo oltre il massimo). Rimuovilo o scegli un altro contratto.'
+  if (/insur|assicur/.test(t))
+    return 'Assicurazione non gestibile da questo contratto (non prevista o valore oltre il massimo).'
+  if (/nessuna tariffa|no rate|not available|non disponibile|quotation|service.*not|servizio.*non/.test(t))
+    return 'Nessuna tariffa disponibile per questa destinazione con il contratto scelto: prova un altro contratto.'
+  if (/auth|token|unauthor|forbidden|credential|credenzial|domain|enotfound|fetch failed|econn|network|master_domain/.test(t))
+    return 'Contratto non configurato correttamente (credenziali/dominio mancanti). Contatta l\'assistenza.'
+  // Ultima risorsa: messaggio generico, MA con un frammento ripulito della causa (senza nome provider)
+  const pulito = String(raw || '').replace(/spediamo\s*pro|spedisci\.?online|core\.spediamopro\.com|https?:\/\/[^\s]+/gi, '').replace(/\s+/g, ' ').trim().slice(0, 120)
+  return 'Il corriere non può gestire questa spedizione' + (pulito ? ` (${pulito})` : ': verifica misure, peso, indirizzo e servizi, oppure scegli un altro contratto.')
 }
 
 export async function POST(req: NextRequest) {
