@@ -37,6 +37,100 @@ export default function Moovy() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
+  // ── Modalità VOCE (Fase 1) ──
+  const [inCall, setInCall] = useState(false)
+  const [listening, setListening] = useState(false)
+  const [speaking, setSpeaking] = useState(false)
+  const [pending, setPending] = useState<any>(null)     // azione in attesa di conferma
+  const [voceMsg, setVoceMsg] = useState<Msg[]>([])
+  const [supportata, setSupportata] = useState(true)
+  const recRef = useRef<any>(null)
+  const inCallRef = useRef(false)
+  const pendingRef = useRef<any>(null)
+  const voceMsgRef = useRef<Msg[]>([])
+  useEffect(() => { pendingRef.current = pending }, [pending])
+  useEffect(() => { voceMsgRef.current = voceMsg }, [voceMsg])
+
+  useEffect(() => {
+    const SR = (typeof window !== 'undefined') && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
+    if (!SR) setSupportata(false)
+  }, [])
+
+  const parla = useCallback((testo: string, poi?: () => void) => {
+    try {
+      window.speechSynthesis.cancel()
+      const u = new SpeechSynthesisUtterance(testo.replace(/\*\*/g, ''))
+      u.lang = 'it-IT'; u.rate = 1.05
+      u.onstart = () => setSpeaking(true)
+      u.onend = () => { setSpeaking(false); poi?.() }
+      u.onerror = () => { setSpeaking(false); poi?.() }
+      window.speechSynthesis.speak(u)
+    } catch { poi?.() }
+  }, [])
+
+  const ascolta = useCallback(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SR || !inCallRef.current) return
+    try {
+      const rec = new SR(); recRef.current = rec
+      rec.lang = 'it-IT'; rec.interimResults = false; rec.maxAlternatives = 1; rec.continuous = false
+      rec.onstart = () => setListening(true)
+      rec.onend = () => setListening(false)
+      rec.onerror = () => setListening(false)
+      rec.onresult = (e: any) => {
+        const t = e.results?.[0]?.[0]?.transcript?.trim()
+        setListening(false)
+        if (t) gestisciVoce(t)
+      }
+      rec.start()
+    } catch { setListening(false) }
+  }, [])  // eslint-disable-line
+
+  const eseguiConferma = useCallback(async (az: any) => {
+    setPending(null)
+    try {
+      const res = await fetch('/api/moovy/esegui', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingAction: az }) })
+      const d = await res.json().catch(() => ({}))
+      const reply = d.reply || (d.ok ? 'Fatto.' : 'Non sono riuscito.')
+      setVoceMsg(prev => [...prev, { role: 'assistant', content: reply }])
+      parla(reply, () => ascolta())
+    } catch { parla('Ho avuto un problema eseguendo l\'azione.', () => ascolta()) }
+  }, [parla, ascolta])
+
+  const gestisciVoce = useCallback(async (testo: string) => {
+    setVoceMsg(prev => [...prev, { role: 'user', content: testo }])
+    // Se c'è un'azione in attesa: interpreto sì/no vocale
+    const pa = pendingRef.current
+    if (pa) {
+      const s = testo.toLowerCase()
+      if (/\b(s[iì]|certo|conferm|ok|va bene|procedi|esegui)\b/.test(s)) { eseguiConferma(pa); return }
+      if (/\b(no|annull|lascia|ferma|niente)\b/.test(s)) { setPending(null); const r = 'Ok, annullato.'; setVoceMsg(prev => [...prev, { role: 'assistant', content: r }]); parla(r, () => ascolta()); return }
+      // non chiaro: ripeto la domanda
+      parla('Non ho capito. Confermi? Dì sì oppure no.', () => ascolta()); return
+    }
+    try {
+      const res = await fetch('/api/moovy/voice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: [...voceMsgRef.current, { role: 'user', content: testo }].filter(m => m.content) }) })
+      const d = await res.json().catch(() => ({}))
+      const reply = d.reply || 'Non ho capito.'
+      setVoceMsg(prev => [...prev, { role: 'assistant', content: reply }])
+      if (d.pendingAction) { setPending(d.pendingAction); parla(reply) }   // aspetta conferma (vocale o pulsante)
+      else parla(reply, () => ascolta())
+    } catch { parla('Ho avuto un problema. Riprova.', () => ascolta()) }
+  }, [eseguiConferma, parla, ascolta])
+
+  const avviaCall = useCallback(() => {
+    if (!supportata) return
+    setInCall(true); inCallRef.current = true; setPending(null)
+    setVoceMsg([{ role: 'assistant', content: 'Ciao, sono Moovy. Dimmi pure.' }])
+    parla('Ciao, sono Moovy. Dimmi pure.', () => ascolta())
+  }, [supportata, parla, ascolta])
+
+  const chiudiCall = useCallback(() => {
+    inCallRef.current = false; setInCall(false); setListening(false); setPending(null)
+    try { window.speechSynthesis.cancel() } catch {}
+    try { recRef.current?.stop() } catch {}
+  }, [])
+
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 640)
     check(); window.addEventListener('resize', check); return () => window.removeEventListener('resize', check)
@@ -105,8 +199,43 @@ export default function Moovy() {
                 <div style={{ color: '#9ca3af', fontSize: '10.5px', marginTop: '3px' }}>Assistente MoovExpress</div>
               </div>
             </div>
-            <button onClick={() => setOpen(false)} aria-label="Chiudi" style={{ background: 'none', border: 'none', color: '#fff', fontSize: '22px', cursor: 'pointer', lineHeight: 1, padding: '2px 6px' }}>×</button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {supportata && !inCall && (
+                <button onClick={avviaCall} aria-label="Chiama Moovy" title="Parla con Moovy"
+                  style={{ background: ARANCIO, border: 'none', color: '#fff', width: '30px', height: '30px', borderRadius: '50%', cursor: 'pointer', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📞</button>
+              )}
+              <button onClick={() => { chiudiCall(); setOpen(false) }} aria-label="Chiudi" style={{ background: 'none', border: 'none', color: '#fff', fontSize: '22px', cursor: 'pointer', lineHeight: 1, padding: '2px 6px' }}>×</button>
+            </div>
           </div>
+
+          {/* Overlay CHIAMATA vocale */}
+          {inCall && (
+            <div style={{ position: 'absolute', inset: 0, top: '62px', background: '#0f0f10', zIndex: 5, display: 'flex', flexDirection: 'column', color: '#fff' }}>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {voceMsg.map((m, i) => (
+                  <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%', padding: '9px 12px', borderRadius: '12px', fontSize: '13.5px', lineHeight: 1.45, background: m.role === 'user' ? ARANCIO : '#26262b', color: '#fff' }}>{m.content}</div>
+                ))}
+              </div>
+              {/* Stato + mic */}
+              <div style={{ padding: '18px', textAlign: 'center', borderTop: '1px solid #26262b' }}>
+                <div style={{ fontSize: '12.5px', color: '#9ca3af', marginBottom: '12px' }}>
+                  {speaking ? 'Moovy sta parlando…' : listening ? 'Ti ascolto…' : pending ? 'In attesa di conferma' : 'In pausa'}
+                </div>
+                {pending ? (
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+                    <button onClick={() => eseguiConferma(pending)} style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: '10px', padding: '11px 22px', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>✓ Conferma</button>
+                    <button onClick={() => { setPending(null); const r = 'Ok, annullato.'; setVoceMsg(prev => [...prev, { role: 'assistant', content: r }]); parla(r, () => ascolta()) }} style={{ background: '#3f3f46', color: '#fff', border: 'none', borderRadius: '10px', padding: '11px 22px', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>✕ Annulla</button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', gap: '14px', justifyContent: 'center', alignItems: 'center' }}>
+                    <button onClick={() => (listening ? recRef.current?.stop() : ascolta())} disabled={speaking}
+                      style={{ width: '64px', height: '64px', borderRadius: '50%', border: 'none', background: listening ? '#dc2626' : ARANCIO, color: '#fff', fontSize: '26px', cursor: speaking ? 'default' : 'pointer', boxShadow: listening ? '0 0 0 6px rgba(220,38,38,0.25)' : '0 0 0 6px rgba(249,115,22,0.2)', transition: 'all .2s' }}>🎤</button>
+                    <button onClick={chiudiCall} style={{ width: '52px', height: '52px', borderRadius: '50%', border: 'none', background: '#3f3f46', color: '#fff', fontSize: '20px', cursor: 'pointer' }} title="Termina">📵</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Messaggi */}
           <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '16px', background: '#f7f7f8', display: 'flex', flexDirection: 'column', gap: '12px' }}>
