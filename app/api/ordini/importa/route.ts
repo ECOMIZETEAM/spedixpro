@@ -48,6 +48,9 @@ const AUX: Record<string, string[]> = {
   sku:           ['sku', 'lineitem_sku', 'lineitemsku', 'seller_sku', 'sellersku'],   // SOLO lo SKU (Amazon 'sku' / Shopify 'Lineitem sku'), per il match col catalogo pacchi
   lineitem_name: ['sku', 'lineitem_sku', 'seller_sku', 'sellersku', 'lineitem_name', 'item_name', 'product_name', 'productname'],
   lineitem_qty:  ['lineitem_quantity', 'quantity', 'qty', 'quantita', 'quantity_purchased', 'quantitypurchased'],
+  // Nome prodotto e variante/colore per il riepilogo ordine (separati dallo SKU)
+  lineitem_prodotto: ['lineitem_name', 'item_name', 'product_name', 'productname', 'title', 'product_title', 'descrizione'],
+  lineitem_variante: ['lineitem_variant', 'lineitem_variant_title', 'variant', 'variante', 'variant_title', 'colore', 'color'],
   payment:       ['payment_method', 'metodo_pagamento'],
   shippingm:     ['shipping_method', 'metodo_spedizione', 'ship_service_level', 'shipservicelevel'],
   financial:     ['financial_status', 'payment_status', 'stato_pagamento'],
@@ -137,7 +140,7 @@ export async function POST(req: NextRequest) {
   // Raggruppo gli ordini multi-riga (Shopify: 1 riga per prodotto, dati spedizione solo sulla 1a).
   // Attivo il raggruppamento solo quando c'è la colonna line item + un identificativo ordine.
   const lineMode = !!A.lineitem_name && !!M.order_id
-  type Gruppo = { oid: string; header: any; items: string[] }
+  type Gruppo = { oid: string; header: any; items: string[]; articoli: any[] }
   const gruppi: Gruppo[] = []
   if (lineMode) {
     let cur: Gruppo | null = null
@@ -146,24 +149,28 @@ export async function POST(req: NextRequest) {
       const haDest = !!g(r, 'destinatario')
       // Nuovo ordine: ha un id ordine diverso dal precedente (le righe di continuazione ripetono lo stesso id)
       if (oid && (!cur || oid !== cur.oid)) {
-        cur = { oid, header: r, items: [] }
+        cur = { oid, header: r, items: [], articoli: [] }
         gruppi.push(cur)
       } else if (!cur) {
-        cur = { oid: oid || 'r' + gruppi.length, header: r, items: [] }
+        cur = { oid: oid || 'r' + gruppi.length, header: r, items: [], articoli: [] }
         gruppi.push(cur)
       } else if (haDest && !g(cur.header, 'destinatario')) {
         // la prima riga non aveva destinatario ma questa sì: promuovila a header
         cur.header = r
       }
-      // Accumulo il prodotto di questa riga
+      // Accumulo il prodotto di questa riga (stringa contenuto + articolo strutturato per il riepilogo)
       const li = A.lineitem_name ? String(r[A.lineitem_name] ?? '').trim() : ''
       if (li) {
         const q = A.lineitem_qty ? (toNum(r[A.lineitem_qty]) ?? 1) : 1
+        const nome = (A.lineitem_prodotto ? String(r[A.lineitem_prodotto] ?? '').trim() : '') || li
+        const skuItem = A.sku ? String(r[A.sku] ?? '').trim() : ''
+        const variante = A.lineitem_variante ? String(r[A.lineitem_variante] ?? '').trim() : ''
         cur.items.push(`${q}× ${li}`)
+        cur.articoli.push({ quantita: q, nome, sku: skuItem || null, variante: variante || null })
       }
     }
   } else {
-    for (const r of rows) gruppi.push({ oid: g(r, 'order_id'), header: r, items: [] })
+    for (const r of rows) gruppi.push({ oid: g(r, 'order_id'), header: r, items: [], articoli: [] })
   }
 
   const records: any[] = []
@@ -219,6 +226,7 @@ export async function POST(req: NextRequest) {
       rif_destinatario: g(r, 'rif_destinatario') || null,
       order_id: grp.oid || null,
       totale_ordine: totale,
+      articoli: grp.articoli.length ? grp.articoli : null,   // righe prodotto strutturate per il riepilogo ordine
       sku: (A.sku ? String(r[A.sku] ?? '').trim() : '') || null,   // SKU per il match automatico col catalogo pacchi
       fonte: 'csv',
       stato: 'da_spedire',
