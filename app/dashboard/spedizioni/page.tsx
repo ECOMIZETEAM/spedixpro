@@ -479,7 +479,7 @@ async function apriTracking(s: any) {
                   <th style={{padding:'9px 12px',borderBottom:'1px solid #d1d5db',width:'36px'}}>
                     <input type="checkbox" checked={selectedIds.length===spedizioniPaginate.length&&spedizioniPaginate.length>0} onChange={toggleAll}/>
                   </th>
-                  {['N. Spedizione','Cliente','Destinatario','Peso','Colli','Contrassegno','Data e Ora','Stato','ID Ordine','Prezzo Cliente','Prezzo Corriere','Margine','Distinta N.','Azioni'].map(h=>(
+                  {['N. Spedizione','Cliente','Destinatario','Corriere','Peso','Colli','Contrassegno','Data e Ora','Stato','ID Ordine','Prezzo Cliente','Prezzo Corriere','Margine','Distinta N.','Azioni'].map(h=>(
                     <th key={h} style={{textAlign:'left' as const,padding:'9px 12px',fontSize:'11px',fontWeight:'700',textTransform:'uppercase' as const,letterSpacing:'0.4px',color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
                   ))}
                 </tr>
@@ -507,6 +507,7 @@ async function apriTracking(s: any) {
                         <div style={{color:'#1a1a1a',fontWeight:'500'}}>{s.dest_nome}</div>
                         <div style={{color:'#1a1a1a',fontSize:'11px'}}>{s.dest_citta}, {s.dest_provincia}({s.dest_cap}), {s.dest_paese}</div>
                       </td>
+                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.corrieri?.nome_contratto||'—'}</td>
                       <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{fmtPeso(s)}</td>
                       <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.colli}</td>
                       <td style={{padding:'9px 12px',color:'#1a1a1a'}}>
