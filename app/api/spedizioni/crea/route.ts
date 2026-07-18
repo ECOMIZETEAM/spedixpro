@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
@@ -513,22 +513,26 @@ export async function POST(req: NextRequest) {
         notes: noteEtichetta,
       })
 
+      // ── Tracking + etichetta OTTIMIZZATI: prima la risposta all'utente è restata bloccata
+      //    fino a ~30s (waitForTracking 10×2s + getLabel 5×2s). Ora facciamo solo un tentativo
+      //    BREVE in linea (caso comune: già pronti) e il COMPLETAMENTO con i retry pieni avviene
+      //    in background dopo la risposta (after) — nessuna funzione rimossa. ──
       let trackingReale = shipment.trackingCode
       if (!trackingReale) {
-        trackingReale = await spediamoproWaitForTracking(cred.authcode, shipment.id)
+        // attesa breve (il polling completo lo fa il background qui sotto)
+        trackingReale = await spediamoproWaitForTracking(cred.authcode, shipment.id, 3, 1500)
       }
       const numeroFinale = trackingReale || shipment.code || `SP-${shipment.id}`
 
       let etichettaUrl: string | null = null
       try {
-        const labelBuffer = await spediamoproGetLabel(cred.authcode, shipment.id)
+        // un solo tentativo veloce: spesso l'etichetta mono-collo è già pronta
+        const labelBuffer = await spediamoproGetLabel(cred.authcode, shipment.id, 1, 0)
         // Normalizzo: PDF/GIF/PNG invariati; ZIP multicollo → PDF unico multipagina (un collo per pagina).
         const { buffer, mime } = await normalizzaEtichetta(labelBuffer)
         etichettaUrl = `data:${mime};base64,${buffer.toString('base64')}`
-      } catch (labelErr) {
-        // Tipico del multicollo: l'etichetta si genera in ritardo. Resta null e verrà
-        // riscaricata on-demand al primo download (vedi /api/spedizioni/etichetta).
-        console.error('SpediamoPro label error:', labelErr)
+      } catch {
+        // Non ancora pronta (tipico del multicollo): la completa il background + riscarica on-demand.
       }
 
       const costoCorrente = centsToEuro(shipment.totalPrice)
@@ -581,6 +585,33 @@ export async function POST(req: NextRequest) {
         contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
         numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
       })
+
+      // ── COMPLETAMENTO IN BACKGROUND (dopo la risposta): stessi retry di prima
+      //    (tracking definitivo + etichetta) senza far attendere l'utente. Se non gira,
+      //    restano le reti di sicurezza: cron tracking + riscarica etichetta on-demand. ──
+      if (inserted?.id) {
+        const spedIdBg = inserted.id
+        const trackingGiaOk = !!trackingReale
+        const etichettaGiaOk = !!etichettaUrl
+        const shipIdBg = shipment.id
+        after(async () => {
+          try {
+            const upd: any = {}
+            if (!trackingGiaOk) {
+              const tr = await spediamoproWaitForTracking(cred.authcode, shipIdBg)
+              if (tr && tr !== numeroFinale) { upd.numero = tr; upd.tracking_number = tr }
+            }
+            if (!etichettaGiaOk) {
+              try {
+                const lb = await spediamoproGetLabel(cred.authcode, shipIdBg)
+                const norm = await normalizzaEtichetta(lb)
+                upd.etichetta_url = `data:${norm.mime};base64,${norm.buffer.toString('base64')}`
+              } catch { /* la prende la riscarica on-demand */ }
+            }
+            if (Object.keys(upd).length) await adminCrea.from('spedizioni').update(upd).eq('id', spedIdBg)
+          } catch (e) { console.error('Completamento background spedizione SpediamoPro:', e) }
+        })
+      }
 
       return NextResponse.json({
         numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2), spedizioneId: inserted?.id || null,
