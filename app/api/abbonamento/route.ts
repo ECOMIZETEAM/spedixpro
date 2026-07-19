@@ -69,9 +69,10 @@ export async function GET() {
       }
     }).sort((a, b) => b.importo_da_incassare - a.importo_da_incassare)
 
-    // KPI
+    // KPI. NB: gli ESENTI non generano incasso reale (gratis): escludo anche loro vecchi record "pagato".
+    const esentiIds = new Set(attiviRete.filter((m: any) => m.abbonamento_esente).map((m: any) => m.id))
     const mm = new Date().toISOString().slice(0, 7)
-    for (const p of (pag || [])) if (attiviIds.has(p.master_id) && p.pagato && String(p.pagato_il || '').slice(0, 7) === mm) incassatoMese += Number(p.importo || 0)
+    for (const p of (pag || [])) if (attiviIds.has(p.master_id) && !esentiIds.has(p.master_id) && p.pagato && String(p.pagato_il || '').slice(0, 7) === mm) incassatoMese += Number(p.importo || 0)
     for (const m of attiviRete) if (m.abbonamento_piano && !m.abbonamento_esente) { previstoProssimoMese += Number(m.abbonamento_prezzo || 0); abbonatiAttivi++ }
   }
 
