@@ -33,7 +33,8 @@ export async function GET() {
   // Ogni master paga il canone il 1° del mese (cron rinnovo-mensile); qui il root vede piano,
   // canone (0 se esente), e lo stato di incasso del pagamento più vecchio non ancora saldato.
   let abbonati: any[] = []
-  let incassatoMese = 0, previstoProssimoMese = 0, abbonatiAttivi = 0
+  let storicoIncassi: any[] = []
+  let incassatoMese = 0, incassatoAnno = 0, previstoProssimoMese = 0, abbonatiAttivi = 0
   if (isRoot) {
     // Pagamenti della rete (per stato incasso). I record ORFANI (master cancellato) vengono scartati sotto.
     const { data: pag } = await admin.from('abbonamenti_pagamenti')
@@ -72,7 +73,22 @@ export async function GET() {
     // KPI. NB: gli ESENTI non generano incasso reale (gratis): escludo anche loro vecchi record "pagato".
     const esentiIds = new Set(attiviRete.filter((m: any) => m.abbonamento_esente).map((m: any) => m.id))
     const mm = new Date().toISOString().slice(0, 7)
-    for (const p of (pag || [])) if (attiviIds.has(p.master_id) && !esentiIds.has(p.master_id) && p.pagato && String(p.pagato_il || '').slice(0, 7) === mm) incassatoMese += Number(p.importo || 0)
+    const annoCorr = new Date().getFullYear().toString()
+    // Storico incassi mese per mese (per data di incasso), escludendo gli esenti.
+    const storicoMap = new Map<string, { incassato: number; n: number }>()
+    for (const p of (pag || [])) {
+      if (!attiviIds.has(p.master_id) || esentiIds.has(p.master_id) || !p.pagato) continue
+      const k = String(p.pagato_il || '').slice(0, 7)
+      if (!k) continue
+      const cur = storicoMap.get(k) || { incassato: 0, n: 0 }
+      cur.incassato += Number(p.importo || 0); cur.n++
+      storicoMap.set(k, cur)
+      if (k === mm) incassatoMese += Number(p.importo || 0)
+      if (k.slice(0, 4) === annoCorr) incassatoAnno += Number(p.importo || 0)
+    }
+    storicoIncassi = Array.from(storicoMap.entries())
+      .map(([mese, v]) => ({ mese, incassato: Math.round(v.incassato * 100) / 100, n: v.n }))
+      .sort((a, b) => b.mese.localeCompare(a.mese))
     for (const m of attiviRete) if (m.abbonamento_piano && !m.abbonamento_esente) { previstoProssimoMese += Number(m.abbonamento_prezzo || 0); abbonatiAttivi++ }
   }
 
@@ -90,8 +106,11 @@ export async function GET() {
     abbonati,
     totaleDaIncassare: Math.round(abbonati.reduce((s, a) => s + Number(a.importo_da_incassare || 0), 0) * 100) / 100,
     incassatoMese: Math.round(incassatoMese * 100) / 100,
+    incassatoAnno: Math.round(incassatoAnno * 100) / 100,
+    annoCorrente: new Date().getFullYear(),
     previstoProssimoMese: Math.round(previstoProssimoMese * 100) / 100,
     abbonatiAttivi,
+    storicoIncassi,
   })
 }
 

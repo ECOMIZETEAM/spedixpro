@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 
 const ACCENT = '#f97316'
 const card = { background:'#fff', borderRadius:'8px', border:'1px solid #e8e8e8', padding:'16px' as const }
+const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre']
+const meseLabel = (mm:string) => { const [y,m]=(mm||'').split('-'); return (MESI[Number(m)-1]||m||'')+' '+(y||'') }
 
 import { useDialog } from '@/app/components/DialogProvider'
 export default function AbbonamentoPage() {
@@ -82,6 +84,11 @@ export default function AbbonamentoPage() {
             <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>pagamenti segnati nel mese</div>
           </div>
           <div style={card}>
+            <div style={{fontSize:'12px',color:'#777'}}>Incassato {stato?.annoCorrente||''}</div>
+            <div style={{fontSize:'22px',fontWeight:800,color:'#16a34a'}}>€ {Number(stato?.incassatoAnno||0).toFixed(2)}</div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>totale anno in corso</div>
+          </div>
+          <div style={card}>
             <div style={{fontSize:'12px',color:'#777'}}>Previsto prossimo mese</div>
             <div style={{fontSize:'22px',fontWeight:800,color:ACCENT}}>€ {Number(stato?.previstoProssimoMese||0).toFixed(2)}</div>
             <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>{stato?.abbonatiAttivi||0} abbonati attivi (esclusi gli esenti)</div>
@@ -129,6 +136,31 @@ export default function AbbonamentoPage() {
                         style={{background:ACCENT,color:'#fff',border:'none',borderRadius:'6px',padding:'6px 10px',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>Bonifico</button>
                     </div>}
                   </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* STORICO INCASSI mese per mese */}
+        <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',margin:'22px 0 10px'}}>Storico incassi</div>
+        <div style={{...card, padding:0, overflow:'hidden'}}>
+          <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
+            <thead>
+              <tr style={{background:'#fafafa'}}>
+                {['Mese','Pagamenti','Incassato'].map(h=>(
+                  <th key={h} style={{textAlign: h==='Mese'?'left':'right' as const,padding:'9px 14px',fontSize:'11px',fontWeight:600,color:'#777',borderBottom:'1px solid #f0f0f0'}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {!(stato?.storicoIncassi||[]).length ? (
+                <tr><td colSpan={3} style={{padding:'26px',textAlign:'center' as const,color:'#999',fontSize:'12px'}}>Nessun incasso registrato</td></tr>
+              ) : (stato?.storicoIncassi||[]).map((r:any)=>(
+                <tr key={r.mese} style={{borderBottom:'1px solid #f5f5f5'}}>
+                  <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:600}}>{meseLabel(r.mese)}</td>
+                  <td style={{padding:'9px 14px',color:'#555',textAlign:'right' as const}}>{r.n}</td>
+                  <td style={{padding:'9px 14px',color:'#16a34a',fontWeight:800,textAlign:'right' as const}}>€ {Number(r.incassato||0).toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>
