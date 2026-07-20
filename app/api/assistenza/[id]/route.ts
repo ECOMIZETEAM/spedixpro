@@ -7,9 +7,12 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 // superiore). null = non è parte del ticket (non autorizzato).
 async function partecipante(utente: any, ticket: any): Promise<'master' | 'cliente' | null> {
   if (!utente) return null
-  if (utente.master_id && utente.master_id === ticket.owner_master_id) return 'master'   // lato che risponde
+  // IMPORTANTE: un utente CLIENTE ha anche un master_id (il suo master), che coincide con
+  // l'owner_master_id del ticket → va controllato PRIMA il lato cliente, altrimenti il cliente
+  // verrebbe scambiato per "master" e i suoi messaggi apparirebbero come scritti dall'assistenza.
   if (utente.cliente_id && utente.cliente_id === ticket.cliente_id) return 'cliente'      // cliente che ha aperto
   if (utente.master_id && utente.master_id === ticket.aperto_master_id) return 'cliente'  // master che ha aperto (richiedente)
+  if (utente.master_id && utente.master_id === ticket.owner_master_id) return 'master'    // lato che risponde
   return null
 }
 
@@ -29,7 +32,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!ruolo) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const { data: messaggi } = await admin.from('ticket_messaggi')
     .select('id,autore,autore_nome,testo,allegati,created_at').eq('ticket_id', id).order('created_at', { ascending: true })
-  await admin.from('tickets').update({ aperto_letto: true }).eq('id', id)
+  // Aprendo la chat, segno letto il lato di CHI apre: l'assistenza (owner) o il richiedente.
+  await admin.from('tickets').update(ruolo === 'master' ? { non_letto_owner: false } : { aperto_letto: true }).eq('id', id)
   return NextResponse.json({ ticket: t, messaggi: messaggi || [], ruolo })
 }
 
@@ -63,9 +67,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const { error } = await admin.from('ticket_messaggi').insert({ ticket_id: id, autore: ruolo, autore_nome: autoreNome, testo })
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  // Ticket aggiornato + non letto dall'altra parte; se era "risolto" torna "aperto" con la nuova risposta.
+  // Notifica il lato che NON ha scritto; se era "risolto" torna "aperto" con la nuova risposta.
   const nuovoStato = t.stato === 'risolto' ? 'aperto' : t.stato
-  await admin.from('tickets').update({ updated_at: new Date().toISOString(), aperto_letto: false, stato: nuovoStato }).eq('id', id)
+  const upd: any = { updated_at: new Date().toISOString(), stato: nuovoStato }
+  if (ruolo === 'cliente') { upd.non_letto_owner = true; upd.aperto_letto = true }   // scrive il RICHIEDENTE → notifica l'assistenza
+  else { upd.aperto_letto = false; upd.non_letto_owner = false }                     // scrive l'ASSISTENZA → notifica il richiedente
+  await admin.from('tickets').update(upd).eq('id', id)
   return NextResponse.json({ success: true })
 }
 

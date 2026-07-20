@@ -169,7 +169,10 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     <div style={{ fontSize: '11px', color: '#888' }}>{t.tipo_apertura === 'master' ? 'Sotto-master' : 'Cliente'}</div>
                   </td>
                   <td style={td}>
-                    {t.oggetto}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                      {t.oggetto}
+                      {t.non_letto_owner && <span style={{ background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px' }}>● Nuovo</span>}
+                    </span>
                     {Array.isArray(t.allegati) && t.allegati.length > 0 && <span style={{ marginLeft: '6px', fontSize: '11px', color: '#2563eb' }}>📎{t.allegati.length}</span>}
                   </td>
                   <td style={td}><Badge stato={t.stato} /></td>

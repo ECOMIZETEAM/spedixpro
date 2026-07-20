@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   const admin = createAdminSupabase()
   const ruolo = (utente?.ruolo || '').toLowerCase()
 
-  const record: any = { oggetto, messaggio, stato: 'aperto', categoria }
+  const record: any = { oggetto, messaggio, stato: 'aperto', categoria, non_letto_owner: true }
 
   if (ruolo === 'cliente') {
     if (!utente?.cliente_id) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
