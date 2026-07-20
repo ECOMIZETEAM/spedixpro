@@ -19,6 +19,19 @@ export async function psGet(url: string, key: string, pathAndQuery: string): Pro
   try { return JSON.parse(text) } catch { return null }
 }
 
+export async function psPost(url: string, key: string, resource: string, body: any): Promise<any> {
+  const base = url.replace(/\/+$/, '')
+  const r = await fetch(`${base}/api/${resource}?output_format=JSON`, {
+    method: 'POST',
+    headers: { ...psHeaders(key), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(20000),
+  })
+  const text = await r.text()
+  if (!r.ok) throw new Error(`PrestaShop POST ${r.status}: ${text.slice(0, 160)}`)
+  try { return JSON.parse(text) } catch { return null }
+}
+
 export async function psPut(url: string, key: string, resource: string, id: number | string, body: any): Promise<any> {
   const base = url.replace(/\/+$/, '')
   const r = await fetch(`${base}/api/${resource}/${id}?output_format=JSON`, {

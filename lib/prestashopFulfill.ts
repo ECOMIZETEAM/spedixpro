@@ -1,4 +1,4 @@
-import { psGet, psPut } from '@/lib/prestashop'
+import { psGet, psPut, psPost } from '@/lib/prestashop'
 
 // Rimanda il tracking a PrestaShop alla chiusura distinta: imposta tracking_number
 // sull'order_carrier dell'ordine. Best-effort, mai bloccante.
@@ -30,6 +30,20 @@ export async function fulfillSpedizioniPrestashop(db: any, spedizioneIds: string
 
       carrier.tracking_number = String(tracking)
       await psPut(cred.url, cred.key, 'order_carriers', carrier.id, { order_carrier: carrier })
+
+      // Cambia lo STATO dell'ordine a "Spedito" così il sito lo marca spedito e avvisa il cliente
+      // (il solo tracking_number non basta). Cerco lo stato "spedito" del negozio, fallback id 4
+      // (default PrestaShop). Best-effort: se fallisce, il tracking è comunque passato.
+      try {
+        let shippedId = 4
+        try {
+          const st = await psGet(cred.url, cred.key, 'order_states?display=full')
+          const match = (st?.order_states || []).find((x: any) => /spedit|shipped|exp[ée]di|enviad|versand|verzon/i.test(JSON.stringify(x?.name || '')))
+          if (match?.id) shippedId = Number(match.id)
+        } catch { /* uso il default */ }
+        await psPost(cred.url, cred.key, 'order_histories', { order_history: { id_order: String(ordine.ordine_esterno_id), id_order_state: String(shippedId) } })
+      } catch { /* stato non aggiornato: il tracking è già stato inviato */ }
+
       await segna('ok', null)
     } catch (e: any) {
       await segna('errore', String(e?.message || e).slice(0, 150))
