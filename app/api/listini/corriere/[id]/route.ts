@@ -19,6 +19,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
     if (!upd?.length) {
       await supabase.from('listini_corrieri_corrieri').insert({ listino_id: id, corriere_id, fattore_volume })
     }
+    // COERENZA fattore volume: lo stesso corriere può essere agganciato a PIÙ listini del master
+    // (+ la riga "proprio" listini_corrieri) e il motore prezzi legge il link. Se restano disallineati,
+    // il peso volumetrico — e quindi il margine — cambia da un livello all'altro della rete. Allineo
+    // qui il "proprio" e TUTTI i link del master a questo corriere, così il fattore resta unico.
+    const { data: lcRow } = await supabase.from('listini_corrieri').select('master_id').eq('id', id).maybeSingle()
+    const masterId = (lcRow as any)?.master_id
+    if (masterId) {
+      await supabase.from('listini_corrieri').update({ fattore_volume }).eq('master_id', masterId).eq('corriere_id', corriere_id)
+      const { data: listiniMaster } = await supabase.from('listini_corrieri').select('id').eq('master_id', masterId)
+      const ids = (listiniMaster || []).map((l: any) => l.id)
+      if (ids.length) await supabase.from('listini_corrieri_corrieri').update({ fattore_volume }).in('listino_id', ids).eq('corriere_id', corriere_id)
+    }
   }
 
   await supabase.from('listini_corrieri_fasce').delete().eq('listino_id', id).eq('corriere_id', corriere_id)

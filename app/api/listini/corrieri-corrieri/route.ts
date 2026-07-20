@@ -1,5 +1,6 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { fattoreEreditato } from '@/lib/fattore-volume'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -21,9 +22,13 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const { listinoId, corriereId } = body
   if (!listinoId || !corriereId) return NextResponse.json({ error: 'Dati mancanti' }, { status: 400 })
-  const { error } = await supabase.from('listini_corrieri_corrieri').insert({
-    listino_id: listinoId, corriere_id: corriereId,
-  })
+  // EREDITA il fattore volume del corriere dal "proprio" del master (listini_corrieri per master+corriere)
+  // invece del default 5000: altrimenti un nuovo contratto nasce a 5000 mentre il resto della catena è
+  // a 4000/6000/… e va corretto "a tentativi" (risalvando). Così è giusto da subito.
+  const fattore_volume = await fattoreEreditato(supabase, listinoId, corriereId)
+  const riga: any = { listino_id: listinoId, corriere_id: corriereId }
+  if (fattore_volume != null) riga.fattore_volume = fattore_volume
+  const { error } = await supabase.from('listini_corrieri_corrieri').insert(riga)
   if (error && !error.message.includes('duplicate')) {
     return NextResponse.json({ error: error.message }, { status: 400 })
   }
