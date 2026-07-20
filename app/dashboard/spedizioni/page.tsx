@@ -40,9 +40,14 @@ function codBadgeStyle(stato?: string) {
   return { background:'#e5e7eb', color:'#4b5563' }                            // grigio
 }
 
+// Default: ultimi 30 giorni. Prima partiva senza data → al primo caricamento scaricava e arricchiva
+// (movimenti/prezzi) TUTTO lo storico = elenco lento. Con la finestra recente è istantaneo; l'utente
+// allarga la data quando serve. La ricerca per N. Spedizione resta comunque su tutto lo storico.
+const _oggiISO = new Date().toISOString().slice(0, 10)
+const _da30ISO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
 const FILTRI_DEFAULT = {
   clienteId:'', negozio:'', vettore:'', contratto:'', stato:'', id_ordine:'',
-  numero:'', dal:'', al:'', contrassegno:'', stato_contrassegni:'',
+  numero:'', dal:_da30ISO, al:_oggiISO, contrassegno:'', stato_contrassegni:'',
   assicurazione:'', dest_citta:'', dest_cap:'', contenuto:'', fatturato:'', agente:''
 }
 
