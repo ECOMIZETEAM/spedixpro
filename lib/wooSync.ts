@@ -6,8 +6,10 @@ export async function sincronizzaOrdiniWoo(db: any, integr: any): Promise<{ lett
   const url = cred?.url, ck = cred?.ck, cs = cred?.cs
   if (!url || !ck || !cs) throw new Error('Credenziali WooCommerce mancanti')
 
+  // PAGINAZIONE COMPLETA: prima si fermava a 3 pagine (max 300 ordini) → chi ne aveva di più li
+  // perdeva. Ora scorre finché ci sono ordini "processing" (da spedire), con un tetto di sicurezza.
   const ordini: any[] = []
-  for (let page = 1; page <= 3; page++) {
+  for (let page = 1; page <= 50; page++) {
     const batch = await wooGet(url, ck, cs, `/orders?status=processing&per_page=100&page=${page}&orderby=date&order=desc`)
     if (!Array.isArray(batch) || !batch.length) break
     ordini.push(...batch)

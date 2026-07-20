@@ -3,9 +3,18 @@ import { getValidEbayToken, ebayGet } from '@/lib/ebay'
 // Sincronizza gli ordini eBay non ancora evasi in ordini_ecommerce.
 export async function sincronizzaOrdiniEbay(db: any, integr: any): Promise<{ letti: number; importati: number }> {
   const token = await getValidEbayToken(db, integr)
-  // ordini da evadere: orderfulfillmentstatus {NOT_STARTED | IN_PROGRESS}
-  const data = await ebayGet(token, `/sell/fulfillment/v1/order?filter=orderfulfillmentstatus:%7BNOT_STARTED%7CIN_PROGRESS%7D&limit=50`)
-  const ordini: any[] = data?.orders || []
+  // ordini da evadere: orderfulfillmentstatus {NOT_STARTED | IN_PROGRESS}.
+  // PAGINAZIONE: prima si prendeva solo la 1ª pagina (limit=50) → chi aveva più di 50 ordini da
+  // evadere ne perdeva. Ora si scorre a pagine da 200 (max eBay) finché ci sono ordini.
+  const ordini: any[] = []
+  const LIMIT = 200
+  for (let offset = 0; offset < 5000; offset += LIMIT) {
+    const data = await ebayGet(token, `/sell/fulfillment/v1/order?filter=orderfulfillmentstatus:%7BNOT_STARTED%7CIN_PROGRESS%7D&limit=${LIMIT}&offset=${offset}`)
+    const batch: any[] = data?.orders || []
+    ordini.push(...batch)
+    const total = Number(data?.total || 0)
+    if (batch.length < LIMIT || (total && offset + LIMIT >= total)) break
+  }
 
   let importati = 0
   for (const o of ordini) {
