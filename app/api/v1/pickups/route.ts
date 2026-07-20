@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { autenticaApiKey } from '@/lib/api-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { spediamoproCreatePickup, spediamoproWaitPickupCode } from '@/lib/spediamopro'
+import { erroreRitiroPulito } from '@/lib/errore-corriere'
 
 // API pubblica MoovExpress — richiede un ritiro per spedizioni del contratto della API key.
 // Auth: Authorization: Bearer <api_key>
@@ -86,7 +87,7 @@ export async function POST(req: NextRequest) {
       if (error) return NextResponse.json({ error: `Ritiro creato (${pk.code}) ma errore DB: ${error.message}` }, { status: 500 })
       return NextResponse.json({ id: nuovo.id, pickupId: code || pk.id, stato: 'richiesto', date: body.date })
     } catch (e: any) {
-      return NextResponse.json({ error: e?.message || 'Errore creazione ritiro' }, { status: 400 })
+      return NextResponse.json({ error: erroreRitiroPulito(e) }, { status: 400 })
     }
   }
 

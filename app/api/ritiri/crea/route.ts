@@ -4,6 +4,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { spediamoproCreatePickup, spediamoproWaitPickupCode } from '@/lib/spediamopro'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { erroreRitiroPulito } from '@/lib/errore-corriere'
 
 // Il corriere (SpediamoPro/Spedisci) può metterci un po' a rispondere sulla creazione ritiro:
 // alzo la durata max della funzione così il timeout applicativo (25s) scatta PRIMA di quello di
@@ -43,19 +44,6 @@ function pulisciTelefono(v: any): string | undefined {
   if (!v) return undefined
   const d = String(v).replace(/[^0-9]/g, '')  // solo cifre (toglie +, spazi, trattini)
   return d || undefined
-}
-
-// Messaggio d'errore ritiro PULITO da mostrare all'utente: mai il nome del provider
-// (SpediamoPro/Spedisci) né il JSON/ID tecnici. Estrae il messaggio umano del corriere.
-function erroreRitiroPulito(raw: any): string {
-  const s = String(raw?.message ?? raw ?? '')
-  let msg = ''
-  const j = s.match(/\{[\s\S]*\}/)          // c'è un JSON del corriere?
-  if (j) { try { const o = JSON.parse(j[0]); msg = o?.error?.message || o?.message || (typeof o?.error === 'string' ? o.error : '') || '' } catch {} }
-  if (!msg) msg = s.replace(/^.*?failed[^:]*:\s*/i, '').replace(/\{[\s\S]*\}/, '').trim()
-  msg = msg.replace(/spediamo\s*pro/ig, '').replace(/spedisci(\.online)?/ig, '').replace(/\s{2,}/g, ' ').trim()
-  if (!msg || msg.startsWith('{') || /^\(?\d{3}\)?$/.test(msg)) msg = 'Ritiro non disponibile per questa spedizione.'
-  return msg
 }
 
 export async function POST(req: NextRequest) {

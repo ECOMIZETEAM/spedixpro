@@ -342,7 +342,14 @@ export async function spediamoproCreatePickup(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      contactInfo: params.contactInfo,
+      // Sanitizzo email/telefono anche qui: SpediamoPro valida contactInfo.email/phone e un valore
+      // non-stringa o un'email malformata fanno fallire il ritiro con 422 ("contactInfo.email should
+      // be of type string"). Email sempre valida (fallback di servizio), telefono solo cifre o assente.
+      contactInfo: {
+        ...params.contactInfo,
+        phone: pulisciTel(params.contactInfo.phone),
+        email: pulisciEmail(params.contactInfo.email) || 'noreply@moovexpress.com',
+      },
       date: params.date,
       from: params.from,
       to: params.to,
