@@ -17,11 +17,27 @@ export default function ArticoliCliente() {
   const [importing, setImporting] = useState(false)
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const [pacchi, setPacchi] = useState<any[]>([])
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [paccoSel, setPaccoSel] = useState('')
+  const [assegnando, setAssegnando] = useState(false)
 
-  useEffect(() => { carica() }, [])
+  useEffect(() => { carica(); caricaPacchi() }, [])
   function carica() {
     setLoading(true)
     fetch('/api/cliente/articoli').then(r => r.json()).then(d => { setArticoli(Array.isArray(d) ? d : []); setLoading(false) }).catch(() => setLoading(false))
+  }
+  function caricaPacchi() { fetch('/api/cliente/pacchi').then(r => r.json()).then(d => setPacchi(Array.isArray(d) ? d : [])).catch(() => {}) }
+  function toggle(id: string) { setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n }) }
+  async function assegnaPacco() {
+    if (!paccoSel) { await dialog.alert({ title: 'Pacco mancante', message: 'Scegli il pacco a cui assegnare gli articoli selezionati.' }); return }
+    const skus = articoli.filter(a => sel.has(a.id)).map(a => a.sku).filter(Boolean)
+    if (!skus.length) return
+    setAssegnando(true)
+    const res = await fetch('/api/cliente/pacchi/assegna', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paccoId: paccoSel, skus }) })
+    const d = await res.json().catch(() => ({})); setAssegnando(false)
+    if (!res.ok || d.error) setMsg({ t: 'err', x: d.error || 'Errore assegnazione' })
+    else { setMsg({ t: 'ok', x: `${skus.length} articoli assegnati al pacco` }); setSel(new Set()); caricaPacchi() }
   }
   function apri(a: any) {
     if (a) { setEdit(a); setSku(a.sku); setNome(a.nome || ''); setAsin(a.asin || ''); setPeso(String(a.peso ?? '')); setLung(String(a.lunghezza ?? '')); setLarg(String(a.larghezza ?? '')); setAlt(String(a.altezza ?? '')) }
@@ -62,6 +78,10 @@ export default function ArticoliCliente() {
   }
 
   const filtrati = q.trim() ? articoli.filter(a => (a.sku || '').toLowerCase().includes(q.toLowerCase()) || (a.nome || '').toLowerCase().includes(q.toLowerCase()) || (a.asin || '').toLowerCase().includes(q.toLowerCase())) : articoli
+  // SKU → pacco assegnato (per mostrare la colonna Pacco): ogni pacco ha una lista di SKU nel campo `sku`.
+  const skuToPacco = new Map<string, any>()
+  for (const p of pacchi) for (const s of String(p.sku || '').split(/[\s,;]+/)) { const k = s.trim().toLowerCase(); if (k) skuToPacco.set(k, p) }
+  function toggleAll() { setSel(s => s.size === filtrati.length ? new Set() : new Set(filtrati.map(a => a.id))) }
   const th = { textAlign: 'left' as const, padding: '10px 14px', fontSize: '12px', fontWeight: '700' as const, color: '#1a1a1a', borderBottom: '1px solid #e8e8e8' }
   const td = { padding: '10px 14px', fontSize: '13px', color: '#1a1a1a', borderBottom: '1px solid #f5f5f5' }
   const lbl = { fontSize: '12px', fontWeight: '600' as const, color: '#1a1a1a', display: 'block' as const, marginBottom: '4px' }
@@ -69,7 +89,7 @@ export default function ArticoliCliente() {
   return (
     <div>
       <h1 style={{ fontSize: '22px', fontWeight: '400', color: '#1a1a1a', margin: '0 0 6px' }}>Catalogo articoli</h1>
-      <p style={{ color: '#666', fontSize: '13px', margin: '0 0 20px' }}>SKU → peso (e misure se disponibili). In Importa Ordini il peso viene applicato in automatico allo SKU dell'ordine; le misure, se mancano, vengono dal pacco.</p>
+      <p style={{ color: '#666', fontSize: '13px', margin: '0 0 20px' }}>SKU → peso/misure. Seleziona più articoli e <b>assegnali a un pacco</b> in blocco (peso+misure dalla scatola), invece di scriverli a mano nei Pacchi. In Importa Ordini il peso/misure vengono applicati in automatico allo SKU dell'ordine.</p>
 
       {msg && <div style={{ background: msg.t === 'ok' ? '#f0fdf4' : '#fef2f2', border: `1px solid ${msg.t === 'ok' ? '#bbf7d0' : '#fecaca'}`, color: msg.t === 'ok' ? '#15803d' : '#b91c1c', borderRadius: '8px', padding: '10px 14px', fontSize: '13px', marginBottom: '14px' }}>{msg.x}</div>}
 
@@ -82,6 +102,23 @@ export default function ArticoliCliente() {
           {articoli.length > 0 && <button onClick={svuota} style={{ background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', padding: '9px 12px', borderRadius: '6px', fontSize: '12.5px', cursor: 'pointer' }}>Svuota</button>}
         </div>
 
+        {sel.size > 0 && (
+          <div style={{ padding: '10px 16px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', background: '#fff7ed', borderBottom: '1px solid #fed7aa' }}>
+            <span style={{ fontSize: '13px', fontWeight: 700, color: '#9a3412' }}>{sel.size} selezionati</span>
+            {pacchi.length === 0 ? (
+              <span style={{ fontSize: '13px', color: '#9a3412' }}>Crea prima un <b>Pacco</b> (Impostazioni → Pacchi) e poi assegnali qui.</span>
+            ) : (<>
+              <span style={{ fontSize: '13px', color: '#6b7280' }}>→ assegna al pacco:</span>
+              <select value={paccoSel} onChange={e => setPaccoSel(e.target.value)} style={{ ...inpS, width: 'auto', minWidth: '220px' }}>
+                <option value="">— scegli pacco —</option>
+                {pacchi.map(p => <option key={p.id} value={p.id}>{p.nome} · {p.peso}kg · {p.lunghezza}×{p.larghezza}×{p.altezza}cm</option>)}
+              </select>
+              <button onClick={assegnaPacco} disabled={assegnando || !paccoSel} style={{ background: '#f97316', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', opacity: (assegnando || !paccoSel) ? 0.6 : 1 }}>{assegnando ? 'Assegno…' : 'Assegna'}</button>
+            </>)}
+            <button onClick={() => setSel(new Set())} style={{ background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb', padding: '8px 12px', borderRadius: '6px', fontSize: '13px', cursor: 'pointer' }}>Deseleziona</button>
+          </div>
+        )}
+
         {loading ? (
           <div style={{ padding: '40px', textAlign: 'center', color: '#999', fontSize: '13px' }}>Caricamento…</div>
         ) : !articoli.length ? (
@@ -91,22 +128,24 @@ export default function ArticoliCliente() {
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><th style={th}>SKU</th><th style={th}>ASIN</th><th style={th}>Nome</th><th style={th}>Peso (kg)</th><th style={th}>Misure (cm)</th><th style={{ ...th, width: '110px' }}>Azioni</th></tr></thead>
+              <thead><tr><th style={{ ...th, width: '34px' }}><input type="checkbox" checked={filtrati.length > 0 && sel.size === filtrati.length} onChange={toggleAll} /></th><th style={th}>SKU</th><th style={th}>ASIN</th><th style={th}>Nome</th><th style={th}>Peso (kg)</th><th style={th}>Misure (cm)</th><th style={th}>Pacco</th><th style={{ ...th, width: '110px' }}>Azioni</th></tr></thead>
               <tbody>
-                {filtrati.map(a => (
-                  <tr key={a.id}>
+                {filtrati.map(a => { const pk = skuToPacco.get(String(a.sku || '').toLowerCase()); return (
+                  <tr key={a.id} style={sel.has(a.id) ? { background: '#fff7ed' } : undefined}>
+                    <td style={{ ...td, textAlign: 'center' }}><input type="checkbox" checked={sel.has(a.id)} onChange={() => toggle(a.id)} /></td>
                     <td style={{ ...td, fontWeight: 600, color: '#f97316' }}>{a.sku}</td>
                     <td style={{ ...td, color: a.asin ? '#1a1a1a' : '#cbd5e1' }}>{a.asin || '—'}</td>
                     <td style={td}>{a.nome || '—'}</td>
                     <td style={td}>{Number(a.peso || 0).toFixed(3).replace(/\.?0+$/, '')} kg</td>
-                    <td style={{ ...td, color: (a.lunghezza || a.larghezza || a.altezza) ? '#1a1a1a' : '#cbd5e1' }}>{(a.lunghezza || a.larghezza || a.altezza) ? `${a.lunghezza}×${a.larghezza}×${a.altezza}` : '— (dal pacco)'}</td>
+                    <td style={{ ...td, color: (a.lunghezza || a.larghezza || a.altezza) ? '#1a1a1a' : '#cbd5e1' }}>{(a.lunghezza || a.larghezza || a.altezza) ? `${a.lunghezza}×${a.larghezza}×${a.altezza}` : (pk ? `↳ ${pk.lunghezza}×${pk.larghezza}×${pk.altezza}` : '— (dal pacco)')}</td>
+                    <td style={{ ...td, color: pk ? '#15803d' : '#cbd5e1', fontWeight: pk ? 600 : 400 }}>{pk ? pk.nome : '—'}</td>
                     <td style={td}>
                       <button onClick={() => apri(a)} style={{ background: 'transparent', color: '#f97316', border: 'none', cursor: 'pointer', fontSize: '13px', marginRight: '10px' }}>Edit</button>
                       <button onClick={() => elimina(a.id)} style={{ background: '#dc2626', color: '#fff', border: 'none', padding: '5px 9px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}>🗑</button>
                     </td>
                   </tr>
-                ))}
-                {!filtrati.length && <tr><td colSpan={6} style={{ padding: '24px', textAlign: 'center', color: '#999', fontSize: '13px' }}>Nessun articolo per la ricerca.</td></tr>}
+                )})}
+                {!filtrati.length && <tr><td colSpan={8} style={{ padding: '24px', textAlign: 'center', color: '#999', fontSize: '13px' }}>Nessun articolo per la ricerca.</td></tr>}
               </tbody>
             </table>
           </div>
