@@ -69,8 +69,21 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   const { data: corrMiei } = await admin.from('corrieri').select('id,nome_contratto,settings').eq('master_id', subMasterId)
   const mappaCorrMio = new Map((corrMiei || []).map((c: any) => [(c.nome_contratto || '').trim().toLowerCase(), c]))
   const mapCorr = new Map<string, string>()
+  // Contratti DISABILITATI dal padre per questo sotto-master (masters_corrieri_abilitati.abilitato=false):
+  // NON vanno materializzati. Il flag è la fonte di verità della visibilità. Senza questo controllo la
+  // propagazione (che parte dalle FASCE del listino) creava comunque il contratto -> il sotto-master lo
+  // vedeva e poteva venderlo/spedirlo anche se il detentore l'aveva disabilitato (era il bug "UPS Italia").
+  const { data: disabRows } = await admin.from('masters_corrieri_abilitati').select('corriere_id').eq('master_id', subMasterId).eq('abilitato', false)
+  const disabilitati = new Set((disabRows || []).map((r: any) => r.corriere_id))
+  const subDisabIds: string[] = []
   for (const c of (corrSrc || [])) {
     const key = (c.nome_contratto || '').trim().toLowerCase()
+    if (disabilitati.has(c.id)) {
+      // Disabilitato dal padre: salto la materializzazione e, se esisteva già, lo rimuovo più sotto.
+      const d: any = mappaCorrMio.get(key)
+      if (d?.id) subDisabIds.push(d.id)
+      continue
+    }
     const esist: any = mappaCorrMio.get(key)
     let subId = esist?.id
     if (!subId) {
@@ -83,10 +96,23 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
       if (subId) mappaCorrMio.set(key, { id: subId, settings: settingsContratto(c.settings) })
     } else {
       // Esistente: aggiorno le impostazioni di contratto, MANTENENDO il mittente del sotto-master.
+      // Riattivo (attivo:true) nel caso fosse stato disattivato da una precedente disabilitazione poi
+      // riabilitata -> così ricompare correttamente quando il detentore lo riattiva.
       const merged = { ...(esist.settings || {}), ...settingsContratto(c.settings) }
-      await admin.from('corrieri').update({ settings: merged }).eq('id', subId)
+      await admin.from('corrieri').update({ settings: merged, attivo: true }).eq('id', subId)
     }
     if (subId) mapCorr.set(c.id, subId)
+  }
+
+  // Rimuovo la materializzazione dei contratti disabilitati: fasce/supplementi/link + disattivo il corriere,
+  // così spariscono da chi vende/spedisce. Ricompaiono al prossimo sync quando il padre li riabilita.
+  if (subDisabIds.length) {
+    if (mieiIds.length) {
+      await admin.from('listini_corrieri_fasce').delete().in('listino_id', mieiIds).in('corriere_id', subDisabIds)
+      await admin.from('listini_corrieri_supplementi').delete().in('listino_id', mieiIds).in('corriere_id', subDisabIds)
+    }
+    await admin.from('listini_corrieri_corrieri').delete().in('corriere_id', subDisabIds)
+    await admin.from('corrieri').update({ attivo: false }).in('id', subDisabIds)
   }
 
   // 2) ZONE (+CAP): una per il sotto-master per ciascuna del padre, mappando il corriere.

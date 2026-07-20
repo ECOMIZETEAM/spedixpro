@@ -66,6 +66,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
     if (settings !== undefined) payloadM.settings = settings
     const { error } = await admin.from('masters_corrieri_abilitati').upsert(payloadM, { onConflict: 'master_id,corriere_id' })
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    // Applico subito la modifica: ri-materializzo il listino del sotto-master rispettando il flag.
+    // Disabilitare -> il contratto sparisce (fasce/link rimossi, corriere disattivato); riabilitare -> ricompare.
+    if (abilitato !== undefined) {
+      try { const { copiaListinoAlSottoMaster } = await import('@/lib/copia-listino-submaster'); await copiaListinoAlSottoMaster(admin, subId, { force: true }) } catch (e) { console.error('resync sub dopo toggle contratto', e) }
+    }
     return NextResponse.json({ ok: true })
   }
   const payload: any = { cliente_id: id, corriere_id: corriereId }
