@@ -116,6 +116,13 @@ export default function Dashboard() {
           <div style={kpiValue}>{data.inLavorazione}</div>
         </div>
 
+        {/* LDV da chiudere in distinta — cliccabile: porta alla creazione distinta */}
+        <a href="/dashboard/distinte/crea" style={{...kpiCardLight, textDecoration:'none', display:'block', ...(Number(data.daMettereInDistinta||0) > 0 ? {borderColor:'#fed7aa', background:'#fff7ed'} : {})}}>
+          <div style={kpiIconLight}>🧾</div>
+          <div style={kpiLabel}>DA CHIUDERE<br/><span style={{color:'#bbb'}}>IN DISTINTA</span></div>
+          <div style={{...kpiValue, color: Number(data.daMettereInDistinta||0) > 0 ? '#ea580c' : '#1a1a1a'}}>{data.daMettereInDistinta ?? 0}</div>
+        </a>
+
         {/* Clienti */}
         <div style={kpiCardLight}>
           <div style={kpiIconLight}>👥</div>

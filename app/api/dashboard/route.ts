@@ -45,8 +45,11 @@ export async function GET() {
     ])
     const fatturatoMese = (meseRows || []).reduce((s: number, x: any) => s + Number(x.costo_totale || 0), 0)
     const tassoConsegna = spedizioniTotali > 0 ? Math.round((consegnateTotali / spedizioniTotali) * 1000) / 10 : 0
+    // LDV ancora da chiudere in distinta (nessuna distinta assegnata), escluse le annullate.
+    const daMettereInDistinta = await C(base().is('distinta_id', null).not('stato', 'in', '(annullata)'))
     return NextResponse.json({
       ruolo: 'agente',
+      daMettereInDistinta,
       masterNome: (((utente as any)?.nome) || 'Agente'),
       totClienti: nMiei, clientiTotali: nMiei,
       spedizioniMese, limiteMese: limitePianoA, abbonamentoAttivo: abbonamentoAttivoA, illimitato: isRootA,
@@ -94,9 +97,17 @@ export async function GET() {
   const st: any = statistiche || {}
   const k: any = kpi || {}
 
+  // LDV di TUTTA la rete ancora da chiudere in distinta (distinta non assegnata), escluse le annullate.
+  const { count: daMettereInDistinta } = await admin.from('spedizioni')
+    .select('id', { count: 'exact', head: true })
+    .in('master_id', reteIds.length ? reteIds : [masterId])
+    .is('distinta_id', null)
+    .not('stato', 'in', '(annullata)')
+
   return NextResponse.json({
     ruolo: (utente as any)?.ruolo || 'master',
     masterNome,
+    daMettereInDistinta: daMettereInDistinta || 0,
     totClienti: c.totClienti||0,
     spedizioniMese: spedMeseRete||0,
     limiteMese: limitePiano,
