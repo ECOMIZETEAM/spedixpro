@@ -8,7 +8,7 @@ import { inviaWebhook } from '@/lib/webhooks'
 import {
   spediamoproGetQuotation, spediamoproCreateShipment, spediamoproGetLabel,
   spediamoproWaitForTracking, kgToGrams, cmToMm, euroToCents, centsToEuro,
-  normalizzaEtichetta,
+  normalizzaEtichetta, telValidoSp,
 } from '@/lib/spediamopro'
 
 // GET /api/v1/shipments — elenca le spedizioni del cliente della API key (paginata).
@@ -128,6 +128,11 @@ export async function POST(req: NextRequest) {
     // Salvo carrier/contract usati: servono al RITIRO (pickup/create li rilegge da raw_response). Senza, la spedizione non è ritirabile.
     raw = { ...raw, _carrierCode: rate.carrierCode, _contractCode: rate.contractCode }
   } else if (corriere.tipo === 'spediamopro') {
+    // Telefono destinatario obbligatorio per SpediamoPro (serve alla consegna): errore chiaro invece
+    // del tecnico "consignee.phone should be of type string".
+    if (!telValidoSp(body.shipTo?.phone)) {
+      return NextResponse.json({ error: 'Telefono destinatario obbligatorio e non valido (solo cifre, 6–15): il corriere lo richiede per la consegna.' }, { status: 400 })
+    }
     // SpediamoPro non ha la seconda riga indirizzo: il "presso" viene accodato all'indirizzo
     // (max 35 caratteri imposti dal corriere).
     const sender = { name: body.shipFrom.name?.substring(0,35), address: conPresso(body.shipFrom.street1 || '', pressoFrom).substring(0,35), postalCode: body.shipFrom.postalCode, city: body.shipFrom.city?.substring(0,35), province: body.shipFrom.state?.substring(0,2).toUpperCase(), country: 'IT', phone: body.shipFrom.phone || undefined, email: body.shipFrom.email?.substring(0,50) || undefined }

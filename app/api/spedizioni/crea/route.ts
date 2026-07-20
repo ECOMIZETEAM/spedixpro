@@ -7,6 +7,7 @@ import { isAgente, nomeAgente } from '@/lib/agente'
 import {
   spediamoproGetQuotation,
   spediamoproCreateShipment,
+  telValidoSp,
   spediamoproGetLabel,
   normalizzaEtichetta,
   spediamoproWaitForTracking,
@@ -466,6 +467,12 @@ export async function POST(req: NextRequest) {
   // SPEDIAMOPRO
   // ═══════════════════════════════════════════════════════════════════════════
   if (corriereRecord.tipo === 'spediamopro') {
+    // Telefono DESTINATARIO obbligatorio: SpediamoPro lo esige (serve al corriere per la consegna) e
+    // senza un numero valido rispondeva col tecnico "consignee.phone should be of type string". Meglio
+    // bloccare subito con un messaggio chiaro, così il cliente lo inserisce corretto.
+    if (!telValidoSp(body.shipTo?.phone)) {
+      return NextResponse.json({ error: 'Telefono destinatario obbligatorio e non valido: inserisci un numero corretto (solo cifre, 6–15). Il corriere lo richiede per la consegna.' }, { status: 400 })
+    }
     try {
       // SpediamoPro valida telefono ed email: telefono solo cifre 6-15 (via spazi/trattini/+),
       // email formato valido. Se non validi vengono OMESSI (altrimenti la creazione fallisce).

@@ -73,6 +73,10 @@ export function sanitizzaIndirizzoSp(a: SpediamoproAddress, opts?: { emailObblig
   return out
 }
 
+// Telefono valido per SpediamoPro? (solo cifre, 6–15). Usato per validare a monte il destinatario,
+// che SpediamoPro esige, e dare un errore CHIARO invece del 422 tecnico.
+export function telValidoSp(v: any): boolean { const d = String(v ?? '').replace(/[^0-9]/g, ''); return d.length >= 6 && d.length <= 15 }
+
 export interface SpediamoproParcel {
   weight: number
   length: number
