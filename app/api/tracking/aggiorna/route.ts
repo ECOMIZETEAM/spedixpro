@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { spediamoproGetTracking, spediamoproSearchStocks, mapStatoSpediamopro } from '@/lib/spediamopro'
+import { spediamoproGetTracking, spediamoproSearchStocks, mapStatoSpediamopro, spediamoproGetLabel, normalizzaEtichetta } from '@/lib/spediamopro'
 import { spedisciTrackingStati, mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
 
 export const runtime = 'nodejs'
@@ -21,7 +21,7 @@ export async function GET() {
   // quindi c'è ampio margine sotto maxDuration. NB: a volumi molto alti va spezzato in batch
   // con un campo "ultimo_check_tracking" (round-robin) — vedi TODO cron tracking scalabile.
   const { data: spedizioni } = await admin.from('spedizioni')
-    .select('id,numero,stato,raw_response,tracking_number,giacenza_data,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali)')
+    .select('id,numero,stato,raw_response,tracking_number,etichetta_url,giacenza_data,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali)')
     .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
     .order('updated_at', { ascending: true })
     .limit(1000)
@@ -35,12 +35,17 @@ export async function GET() {
     try {
       let nuovo: string | null = null
       let nuovoTracking: string | null = null
+      // Contesto SpediamoPro per il recupero di numero/etichetta rimasti indietro (vedi sotto).
+      let spAuth: string | null = null
+      let spId: number | null = null
+      let spCode: string | null = null
 
       if (tipo === 'spediamopro') {
         const raw: any = s.raw_response || {}
         const spid = raw.id || raw?.raw?.data?.id
         const authcode = cred?.authcode
         if (!spid || !authcode) continue
+        spAuth = authcode; spId = Number(spid); spCode = raw.code || null
 
         const tr = await spediamoproGetTracking(authcode, Number(spid))
         nuovo = mapStatoSpediamopro(tr.status)
@@ -72,6 +77,24 @@ export async function GET() {
       if (nuovo && nuovo !== s.stato) upd.stato = nuovo
       if (nuovo === 'in_giacenza' && !s.giacenza_data) upd.giacenza_data = new Date().toISOString()
       if (nuovoTracking && nuovoTracking !== s.tracking_number) upd.tracking_number = nuovoTracking
+
+      // RECUPERO NUMERO: alla creazione, se SpediamoPro/BRT non aveva ancora assegnato il tracking, il
+      // numero è rimasto il codice interno (es. "6A5E..." o "SP-<id>"). Ora che il tracking reale c'è,
+      // correggo il numero mostrato (così in elenco appare la LDV vera, non il codice interno).
+      if (nuovoTracking && nuovoTracking !== s.numero && (s.numero === spCode || String(s.numero || '').startsWith('SP-'))) {
+        upd.numero = nuovoTracking
+      }
+
+      // RECUPERO ETICHETTA: se l'etichetta non è mai stata salvata (il completamento in background prova
+      // solo ~20s, ma BRT Express a volte genera dopo minuti/ore) e ora c'è un tracking → la scarico UNA
+      // volta e la salvo. Così il download è immediato e non dipende più dal fallback on-demand.
+      if (tipo === 'spediamopro' && !(s as any).etichetta_url && spAuth && spId && (nuovoTracking || s.tracking_number)) {
+        try {
+          const lb = await spediamoproGetLabel(spAuth, spId, 1, 0)
+          const norm = await normalizzaEtichetta(lb)
+          upd.etichetta_url = `data:${norm.mime};base64,${norm.buffer.toString('base64')}`
+        } catch { /* non ancora pronta: riprovo al giro dopo */ }
+      }
 
       if (Object.keys(upd).length) {
         await admin.from('spedizioni').update(upd).eq('id', s.id)
