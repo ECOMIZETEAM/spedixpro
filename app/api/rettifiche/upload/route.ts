@@ -72,10 +72,13 @@ export async function POST(req: NextRequest) {
     nProcessate++
     // Ricerca SENZA filtro master: decide la catena (solo discesa)
     const { data: spedizione } = await adminDb.from('spedizioni')
-      .select('id,cliente_id,master_id,peso_reale,peso_fatturato,peso_volume,costo_totale,costo_spedizione,numero,dest_provincia,dest_cap,dest_paese,corriere_id')
+      .select('id,cliente_id,master_id,peso_reale,peso_fatturato,peso_volume,costo_totale,costo_spedizione,numero,dest_provincia,dest_cap,dest_paese,corriere_id,stato')
       .or(`numero.ilike.%${ldv}%,tracking_number.ilike.%${ldv}%`)
       .limit(1).single()
     if (!spedizione) { nScartati++; continue }
+    // Niente rettifiche su spedizioni ANNULLATE: sono già stornate, aggiungere una rettifica
+    // lascerebbe un residuo non rimborsato a ogni livello della catena.
+    if ((spedizione as any).stato === 'annullata') { nScartati++; continue }
 
     // Chi carica deve essere il master della spedizione o un suo ANTENATO
     const catena = await risaliCatena(adminDb, spedizione.master_id)

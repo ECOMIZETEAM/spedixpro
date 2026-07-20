@@ -90,8 +90,12 @@ export async function rimborsaAnnulloSpedizione(
       .eq('spedizione_id', sped.id).in('tipo', ['spedizione', 'rettifica'])
     const desc = `Rimborso ${sped.numero} - ${sped.dest_nome || ''}`.trim()
     for (const a of (addebiti || [])) {
-      const importo = Math.abs(Number(a.importo || 0))
-      if (!(importo > 0)) continue
+      // Storno = importo ESATTAMENTE OPPOSTO all'addebito (nega il segno). Così annulla correttamente
+      // sia gli addebiti (spedizione, importo negativo → rimborso positivo) SIA le rettifiche con
+      // importo POSITIVO (correzione a credito → storno negativo). Prima usava Math.abs, che sulle
+      // rettifiche positive raddoppiava invece di annullare, lasciando un residuo a ogni livello.
+      const importo = -Number(a.importo || 0)
+      if (!(Math.abs(importo) > 0.0001)) continue
       try {
         if (a.cliente_id) {
           await registraMovimento(admin, {
