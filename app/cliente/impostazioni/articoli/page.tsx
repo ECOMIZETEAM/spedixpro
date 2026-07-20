@@ -11,7 +11,7 @@ export default function ArticoliCliente() {
   const [q, setQ] = useState('')
   const [modal, setModal] = useState(false)
   const [edit, setEdit] = useState<any>(null)
-  const [sku, setSku] = useState(''); const [nome, setNome] = useState('')
+  const [sku, setSku] = useState(''); const [nome, setNome] = useState(''); const [asin, setAsin] = useState('')
   const [peso, setPeso] = useState(''); const [lung, setLung] = useState(''); const [larg, setLarg] = useState(''); const [alt, setAlt] = useState('')
   const [saving, setSaving] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -24,14 +24,14 @@ export default function ArticoliCliente() {
     fetch('/api/cliente/articoli').then(r => r.json()).then(d => { setArticoli(Array.isArray(d) ? d : []); setLoading(false) }).catch(() => setLoading(false))
   }
   function apri(a: any) {
-    if (a) { setEdit(a); setSku(a.sku); setNome(a.nome || ''); setPeso(String(a.peso ?? '')); setLung(String(a.lunghezza ?? '')); setLarg(String(a.larghezza ?? '')); setAlt(String(a.altezza ?? '')) }
-    else { setEdit(null); setSku(''); setNome(''); setPeso(''); setLung(''); setLarg(''); setAlt('') }
+    if (a) { setEdit(a); setSku(a.sku); setNome(a.nome || ''); setAsin(a.asin || ''); setPeso(String(a.peso ?? '')); setLung(String(a.lunghezza ?? '')); setLarg(String(a.larghezza ?? '')); setAlt(String(a.altezza ?? '')) }
+    else { setEdit(null); setSku(''); setNome(''); setAsin(''); setPeso(''); setLung(''); setLarg(''); setAlt('') }
     setModal(true)
   }
   async function salva() {
     if (!sku.trim()) { await dialog.alert({ title: 'SKU mancante', message: 'Inserisci lo SKU.' }); return }
     setSaving(true)
-    const body: any = { sku, nome, peso, lunghezza: lung, larghezza: larg, altezza: alt }
+    const body: any = { sku, nome, asin, peso, lunghezza: lung, larghezza: larg, altezza: alt }
     if (edit) body.id = edit.id
     const res = await fetch('/api/cliente/articoli', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     const d = await res.json(); setSaving(false)
@@ -61,7 +61,7 @@ export default function ArticoliCliente() {
     if (fileRef.current) fileRef.current.value = ''
   }
 
-  const filtrati = q.trim() ? articoli.filter(a => (a.sku || '').toLowerCase().includes(q.toLowerCase()) || (a.nome || '').toLowerCase().includes(q.toLowerCase())) : articoli
+  const filtrati = q.trim() ? articoli.filter(a => (a.sku || '').toLowerCase().includes(q.toLowerCase()) || (a.nome || '').toLowerCase().includes(q.toLowerCase()) || (a.asin || '').toLowerCase().includes(q.toLowerCase())) : articoli
   const th = { textAlign: 'left' as const, padding: '10px 14px', fontSize: '12px', fontWeight: '700' as const, color: '#1a1a1a', borderBottom: '1px solid #e8e8e8' }
   const td = { padding: '10px 14px', fontSize: '13px', color: '#1a1a1a', borderBottom: '1px solid #f5f5f5' }
   const lbl = { fontSize: '12px', fontWeight: '600' as const, color: '#1a1a1a', display: 'block' as const, marginBottom: '4px' }
@@ -91,11 +91,12 @@ export default function ArticoliCliente() {
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><th style={th}>SKU</th><th style={th}>Nome</th><th style={th}>Peso (kg)</th><th style={th}>Misure (cm)</th><th style={{ ...th, width: '110px' }}>Azioni</th></tr></thead>
+              <thead><tr><th style={th}>SKU</th><th style={th}>ASIN</th><th style={th}>Nome</th><th style={th}>Peso (kg)</th><th style={th}>Misure (cm)</th><th style={{ ...th, width: '110px' }}>Azioni</th></tr></thead>
               <tbody>
                 {filtrati.map(a => (
                   <tr key={a.id}>
                     <td style={{ ...td, fontWeight: 600, color: '#f97316' }}>{a.sku}</td>
+                    <td style={{ ...td, color: a.asin ? '#1a1a1a' : '#cbd5e1' }}>{a.asin || '—'}</td>
                     <td style={td}>{a.nome || '—'}</td>
                     <td style={td}>{Number(a.peso || 0).toFixed(3).replace(/\.?0+$/, '')} kg</td>
                     <td style={{ ...td, color: (a.lunghezza || a.larghezza || a.altezza) ? '#1a1a1a' : '#cbd5e1' }}>{(a.lunghezza || a.larghezza || a.altezza) ? `${a.lunghezza}×${a.larghezza}×${a.altezza}` : '— (dal pacco)'}</td>
@@ -105,7 +106,7 @@ export default function ArticoliCliente() {
                     </td>
                   </tr>
                 ))}
-                {!filtrati.length && <tr><td colSpan={5} style={{ padding: '24px', textAlign: 'center', color: '#999', fontSize: '13px' }}>Nessun articolo per la ricerca.</td></tr>}
+                {!filtrati.length && <tr><td colSpan={6} style={{ padding: '24px', textAlign: 'center', color: '#999', fontSize: '13px' }}>Nessun articolo per la ricerca.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -121,6 +122,7 @@ export default function ArticoliCliente() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div><label style={lbl}>SKU</label><input value={sku} onChange={e => setSku(e.target.value)} disabled={!!edit} style={inpS} /></div>
               <div><label style={lbl}>Nome <span style={{ fontWeight: 400, color: '#999' }}>(opzionale)</span></label><input value={nome} onChange={e => setNome(e.target.value)} style={inpS} /></div>
+              <div><label style={lbl}>ASIN <span style={{ fontWeight: 400, color: '#999' }}>(Amazon, opzionale)</span></label><input value={asin} onChange={e => setAsin(e.target.value)} style={inpS} /></div>
               <div><label style={lbl}>Peso (kg)</label><input type="number" step="0.001" value={peso} onChange={e => setPeso(e.target.value)} style={inpS} /></div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
                 <div><label style={lbl}>Lungh. (cm)</label><input type="number" value={lung} onChange={e => setLung(e.target.value)} style={inpS} /></div>

@@ -16,12 +16,13 @@ function normHeader(s: string) {
 }
 const ALIAS: Record<string, string[]> = {
   sku:        ['variant_sku', 'sku', 'seller_sku', 'sellersku', 'lineitem_sku', 'lineitemsku', 'codice', 'codice_articolo', 'articolo'],
-  nome:       ['title', 'nome', 'name', 'product_name', 'productname', 'descrizione', 'product_title'],
+  asin:       ['asin', 'asin1', 'external_product_id', 'product_id', 'productid'],
+  nome:       ['title', 'nome', 'name', 'product_name', 'productname', 'descrizione', 'product_title', 'item_name', 'product_description'],
   grammi:     ['variant_grams', 'grams', 'grammi'],
-  peso:       ['peso', 'weight', 'peso_kg', 'pesokg', 'variant_weight'],
-  lunghezza:  ['lunghezza', 'length', 'lungh', 'lung'],
-  larghezza:  ['larghezza', 'width', 'largh', 'larg'],
-  altezza:    ['altezza', 'height', 'alt'],
+  peso:       ['peso', 'weight', 'peso_kg', 'pesokg', 'variant_weight', 'item_weight'],
+  lunghezza:  ['lunghezza', 'length', 'lungh', 'lung', 'item_length'],
+  larghezza:  ['larghezza', 'width', 'largh', 'larg', 'item_width'],
+  altezza:    ['altezza', 'height', 'alt', 'item_height'],
 }
 function pick(headers: Set<string>, aliases: string[]): string | null {
   for (const a of aliases) if (headers.has(a)) return a
@@ -68,8 +69,10 @@ export async function POST(req: NextRequest) {
   const headers = new Set(Object.keys(rows[0] || {}))
   const M: Record<string, string | null> = {}
   for (const f of Object.keys(ALIAS)) M[f] = pick(headers, ALIAS[f])
-  if (!M.sku) return NextResponse.json({ error: 'Nessuna colonna SKU riconosciuta nel file (attesa "Variant SKU" o "sku").' }, { status: 400 })
-  if (!M.grammi && !M.peso) return NextResponse.json({ error: 'Nessuna colonna peso riconosciuta (attesa "Variant Grams" o "peso").' }, { status: 400 })
+  if (!M.sku) return NextResponse.json({ error: 'Nessuna colonna SKU riconosciuta nel file (attesa "sku"/"seller-sku"/"Variant SKU").' }, { status: 400 })
+  // Il peso NON è obbligatorio: l'export inventario Amazon (sku/asin/price/quantity) non ha peso/misure.
+  // Importiamo comunque gli SKU (+ ASIN) nel catalogo; peso/misure si aggiungono dopo o arrivano dal
+  // catalogo Pacchi in fase di spedizione.
 
   // Costruisco i record: uno per SKU (l'ultimo vince in caso di duplicati nel file)
   const perSku = new Map<string, any>()
@@ -78,18 +81,18 @@ export async function POST(req: NextRequest) {
     const sku = String(r[M.sku!] ?? '').trim()
     if (!sku) { scartati++; continue }
     // Peso: preferisco i grammi Shopify (->kg), altrimenti il campo peso (già in kg)
-    let peso = 0
-    if (M.grammi && String(r[M.grammi] ?? '').trim() !== '') peso = Math.round((toNum(r[M.grammi]) / 1000) * 1000) / 1000
-    else if (M.peso) peso = toNum(r[M.peso])
-    perSku.set(sku.toLowerCase(), {
-      cliente_id: utente.cliente_id, master_id: utente.master_id,
-      sku, nome: M.nome ? (String(r[M.nome] ?? '').trim() || null) : null,
-      peso,
-      lunghezza: M.lunghezza ? toNum(r[M.lunghezza]) : 0,
-      larghezza: M.larghezza ? toNum(r[M.larghezza]) : 0,
-      altezza: M.altezza ? toNum(r[M.altezza]) : 0,
-      updated_at: new Date().toISOString(),
-    })
+    // Includo nel record SOLO i campi presenti nel file: così re-importare un file di soli SKU
+    // (es. inventario Amazon) NON azzera peso/misure/nome già impostati (l'upsert tocca solo le
+    // colonne fornite). Per gli SKU nuovi i campi mancanti restano al default.
+    const rec: any = { cliente_id: utente.cliente_id, master_id: utente.master_id, sku, updated_at: new Date().toISOString() }
+    if (M.nome) rec.nome = String(r[M.nome] ?? '').trim() || null
+    if (M.asin) rec.asin = String(r[M.asin] ?? '').trim() || null
+    if (M.grammi && String(r[M.grammi] ?? '').trim() !== '') rec.peso = Math.round((toNum(r[M.grammi]) / 1000) * 1000) / 1000
+    else if (M.peso) rec.peso = toNum(r[M.peso])
+    if (M.lunghezza) rec.lunghezza = toNum(r[M.lunghezza])
+    if (M.larghezza) rec.larghezza = toNum(r[M.larghezza])
+    if (M.altezza) rec.altezza = toNum(r[M.altezza])
+    perSku.set(sku.toLowerCase(), rec)
   }
   const records = Array.from(perSku.values())
   if (!records.length) return NextResponse.json({ error: 'Nessuno SKU valido nel file' }, { status: 400 })

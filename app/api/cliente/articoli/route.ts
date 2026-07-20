@@ -29,13 +29,14 @@ export async function POST(req: NextRequest) {
   const b = await req.json()
   const sku = String(b.sku || '').trim()
   if (!sku) return NextResponse.json({ error: 'SKU obbligatorio' }, { status: 400 })
-  const record = {
+  const record: any = {
     cliente_id: u.cliente_id, master_id: u.master_id,
     sku, nome: b.nome ? String(b.nome).trim() : null,
     peso: Number(b.peso) || 0,
     lunghezza: Number(b.lunghezza) || 0, larghezza: Number(b.larghezza) || 0, altezza: Number(b.altezza) || 0,
     updated_at: new Date().toISOString(),
   }
+  if (b.asin !== undefined) record.asin = String(b.asin || '').trim() || null
   if (b.id) {
     const { error } = await supabase.from('articoli_cliente').update(record).eq('id', b.id).eq('cliente_id', u.cliente_id)
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
