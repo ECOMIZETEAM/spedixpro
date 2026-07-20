@@ -73,6 +73,11 @@ export async function trovaZoneMatchDett(
   // una zona esclusiva DI QUEL corriere (Isole/Disagiate/Livigno per CAP-ESATTO; Sardegna/Sicilia/
   // Calabria per PROVINCIA). Così un CAP disagiato per BRT non toglie il jolly "Italia" a Poste.
   const corrieriEsclusi = new Set<string>()
+  // Esclusi per CAP-ESATTO (destinazione in una zona speciale a match cap-esatto: Zone Disagiate,
+  // Isole Minori, Livigno). Per questi il ripiego su provincia/Italia NON è ammesso: se il corriere
+  // non prezza proprio quella zona speciale, la destinazione è scoperta → corriere ESCLUSO del tutto.
+  // (Diverso dalle zone a PROVINCIA come Sardegna/Sicilia/Calabria, che il cliente prezza e usa.)
+  const corrieriCapEsclusi = new Set<string>()
   if (esclCorr && esclCorr.size) {
     for (const r of righe) {
       const cc = esclCorr.get(r.zona_id)
@@ -80,9 +85,16 @@ export async function trovaZoneMatchDett(
       const capMatch = !!r.cap && r.cap !== '*' && r.cap === cap
       const provMatch = !!r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*')
       if (capMatch || provMatch) corrieriEsclusi.add(cc)
+      if (capMatch) corrieriCapEsclusi.add(cc)
     }
   }
   const capEsclusivo = corrieriEsclusi.size > 0   // flag globale (compat)
+
+  // Per un corriere escluso per CAP-ESATTO: il match è valido SOLO se è a sua volta cap-esatto (cioè
+  // il corriere prezza davvero quella zona speciale). Altrimenti il ripiego su provincia/jolly va
+  // scartato → il corriere non copre la destinazione (niente vendita sotto costo su Sardegna/Italia).
+  const filtraCapEscluso = (c: string, picked: any[]): any[] =>
+    corrieriCapEsclusi.has(c) && !picked.some((r: any) => r.cap && r.cap !== '*' && r.cap === cap) ? [] : picked
 
   // Applica i 3 tier (CAP esatto > provincia+cap* > jolly totale) su un insieme di righe.
   const pickTier = (rows: any[]): any[] => {
@@ -98,7 +110,10 @@ export async function trovaZoneMatchDett(
   // quel corriere si toglie il jolly (comportamento globale, invariato).
   if (!zonaCorriere) {
     const rr = capEsclusivo ? senzaJolly(righe) : righe
-    return { ids: Array.from(new Set(pickTier(rr).map((r: any) => r.zona_id).filter(Boolean))), capEsclusivo, corrieriEsclusi }
+    // candidate di UN solo corriere: se è escluso per cap-esatto e il match non è cap-esatto → niente.
+    let picked = pickTier(rr)
+    if (corrieriCapEsclusi.size && !picked.some((r: any) => r.cap && r.cap !== '*' && r.cap === cap)) picked = []
+    return { ids: Array.from(new Set(picked.map((r: any) => r.zona_id).filter(Boolean))), capEsclusivo, corrieriEsclusi }
   }
 
   // Con mappa: tier PER CORRIERE; il jolly si toglie SOLO ai corrieri per cui la dest è esclusiva.
@@ -112,7 +127,7 @@ export async function trovaZoneMatchDett(
   const out = new Set<string>()
   for (const [c, rows] of perCorr) {
     const rr = corrieriEsclusi.has(c) ? senzaJolly(rows) : rows
-    for (const r of pickTier(rr)) out.add(r.zona_id)
+    for (const r of filtraCapEscluso(c, pickTier(rr))) out.add(r.zona_id)
   }
   return { ids: Array.from(out), capEsclusivo, corrieriEsclusi }
 }
