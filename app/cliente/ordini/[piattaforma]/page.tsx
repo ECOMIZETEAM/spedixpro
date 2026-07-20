@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import { useDialog } from '@/app/components/DialogProvider'
 
 const NOMI: Record<string,string> = { shopify:'Shopify', prestashop:'PrestaShop', woocommerce:'WooCommerce' }
 const ACCENT = '#f97316'
@@ -20,7 +21,13 @@ function fmtData(v:any){
   if(isNaN(d.getTime())) return '—'
   return d.toLocaleDateString('it-IT')+' '+d.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})
 }
-function getData(o:any){ return o.created_at || o.creato_il || o.data_ordine || o.raw?.created_at || null }
+// Data REALE dell'ordine (non quella di import): eBay=raw.creationDate, WooCommerce=raw.date_created,
+// Shopify=raw.created_at. Prima usava o.created_at (= quando è stato sincronizzato) → il filtro periodo
+// mostrava tutto sotto la data di import invece delle date vere degli ordini.
+function getData(o:any){
+  const r = o.raw || {}
+  return o.data_ordine || r.creationDate || r.date_created || r.created_at || r.createdDate || r.create_time || o.created_at || o.creato_il || null
+}
 function getTags(o:any){ const t = o.tags ?? o.raw?.tags; return Array.isArray(t)?t.join(', '):(t||'') }
 function labelPag(s:any){ const m:Record<string,string>={ paid:'Pagato', pending:'In attesa', refunded:'Rimborsato', partially_paid:'Parziale', voided:'Annullato' }; return m[s]||s||'—' }
 function coloriPag(s:any){ if(s==='paid') return {bg:'#dcfce7',fg:'#166534'}; if(s==='refunded'||s==='voided') return {bg:'#fee2e2',fg:'#991b1b'}; return {bg:'#fef3c7',fg:'#92400e'} }
@@ -28,6 +35,7 @@ function coloriPag(s:any){ if(s==='paid') return {bg:'#dcfce7',fg:'#166534'}; if
 export default function OrdiniPage() {
   const params = useParams()
   const router = useRouter()
+  const dialog = useDialog()
   const piattaforma = String(params.piattaforma || 'shopify')
   const nome = NOMI[piattaforma] || piattaforma
 
@@ -216,10 +224,17 @@ export default function OrdiniPage() {
     setSpedendo(false)
     carica()
   }
-  function cancellaSelezionati(){
+  async function cancellaSelezionati(){
     const ids = Object.keys(sel).filter(id=>sel[id])
     if (ids.length===0){ setMsg('Seleziona almeno un ordine'); return }
-    setMsg('Eliminazione multipla in arrivo ('+ids.length+' selezionati)')
+    const ok = await dialog.confirm({ title:'Eliminare gli ordini?', message:`Elimini ${ids.length} ordini selezionati? L'operazione non è reversibile.`, confirmText:'Elimina', danger:true })
+    if (!ok) return
+    const res = await fetch('/api/ordini/elimina', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids }) })
+    const j = await res.json().catch(()=>({}))
+    if (!res.ok || j.error) { setMsg('Errore eliminazione: '+(j.error||('HTTP '+res.status))); return }
+    setSel({})
+    setMsg((j.eliminati ?? ids.length)+' ordini eliminati')
+    carica()
   }
 
   const Th = ({k, children, right}:{k?:string, children:any, right?:boolean}) => (
