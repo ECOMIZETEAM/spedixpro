@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 import { ebayExchangeCode } from '@/lib/ebay'
 
 export const runtime = 'nodejs'
@@ -14,7 +14,11 @@ export async function GET(req: NextRequest) {
 
   if (!code || !state) return NextResponse.redirect(`${appUrl}/cliente/integrazioni?error=callback+eBay+non+valido`)
 
-  const supabase = await createServerSupabase()
+  // ADMIN (service role): il callback OAuth NON dipende dalla sessione utente. Al ritorno da eBay il
+  // cookie di sessione può mancare (redirect cross-site) e con l'anon chiuso la lettura dello stato
+  // falliva → "state non valido", nessuna integrazione, connessione bloccata per alcuni clienti.
+  // Lo `state` è già il segreto e contiene cliente_id/master_id: leggiamo/scriviamo via admin.
+  const supabase = createAdminSupabase()
   const { data: st } = await supabase.from('shopify_oauth_state').select('*').eq('state', state).maybeSingle()
   if (!st || st.shop !== 'ebay') {
     return NextResponse.redirect(`${appUrl}/cliente/integrazioni?error=state+non+valido`)
