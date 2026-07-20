@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts'
+import DateRangePicker from '@/app/components/DateRangePicker'
 
 const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const ARANCIO = '#f97316', VERDE = '#16a34a', NERO = '#1a1a1a', GRIGIO = '#9ca3af'
@@ -50,8 +51,7 @@ export default function StatProfittoPage() {
           ))}
         </div>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div><label style={lbl}>Data inizio</label><input type="date" value={dal} onChange={e => setDal(e.target.value)} style={inp} /></div>
-          <div><label style={lbl}>Data fine</label><input type="date" value={al} onChange={e => setAl(e.target.value)} style={inp} /></div>
+          <div><label style={lbl}>Periodo</label><DateRangePicker dal={dal} al={al} onChange={(d, a) => { setDal(d); setAl(a) }} /></div>
           <button onClick={carica} style={{ ...btnPrimario, height: '38px' }}>Filtra</button>
         </div>
       </div>

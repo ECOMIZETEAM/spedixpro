@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 
 import { useDialog } from '@/app/components/DialogProvider'
+import DateRangePicker from '@/app/components/DateRangePicker'
 export default function CreaDistintaPage() {
   const dialog = useDialog()
   const [clienti, setClienti] = useState<any[]>([])
@@ -103,10 +104,7 @@ export default function CreaDistintaPage() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
           <div>
             <label style={lbl}>Data Spedizione</label>
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <input type="date" value={dal} onChange={e => setDal(e.target.value)} style={inp} />
-              <input type="date" value={al} onChange={e => setAl(e.target.value)} style={inp} />
-            </div>
+            <DateRangePicker dal={dal} al={al} onChange={(d, a) => { setDal(d); setAl(a) }} />
           </div>
           <div>
             <label style={lbl}>Cliente</label>

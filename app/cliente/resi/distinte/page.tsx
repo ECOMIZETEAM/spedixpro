@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
+import DateRangePicker from '@/app/components/DateRangePicker'
 export default function ResiDistinteCliente() {
   const dialog = useDialog()
   const [distinte, setDistinte] = useState<any[]>([])
@@ -81,12 +82,8 @@ export default function ResiDistinteCliente() {
         <div style={{padding:'12px 18px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Filtri</div>
         <div style={{padding:'16px',display:'flex',gap:'16px',alignItems:'end',flexWrap:'wrap'}}>
           <div>
-            <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Data distinte (dal)</label>
-            <input type="date" value={dal} onChange={e=>setDal(e.target.value)} style={{padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a'}}/>
-          </div>
-          <div>
-            <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>al</label>
-            <input type="date" value={al} onChange={e=>setAl(e.target.value)} style={{padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a'}}/>
+            <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Data distinte</label>
+            <DateRangePicker dal={dal} al={al} onChange={(d, a) => { setDal(d); setAl(a) }} />
           </div>
         </div>
       </div>

@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import DateRangePicker from '@/app/components/DateRangePicker'
 
 const NOMI: Record<string,string> = { shopify:'Shopify', prestashop:'PrestaShop', woocommerce:'WooCommerce' }
 const ACCENT = '#f97316'
@@ -241,8 +242,7 @@ export default function OrdiniPage() {
       <div style={{...card, marginBottom:'20px'}}>
         <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'16px'}}>▾ Filtri</div>
         <div style={{display:'flex',gap:'14px',flexWrap:'wrap',marginBottom:'14px'}}>
-          <div style={field}><label style={lbl}>Data da</label><input type="date" value={fDa} onChange={e=>setFDa(e.target.value)} style={inp}/></div>
-          <div style={field}><label style={lbl}>Data a</label><input type="date" value={fA} onChange={e=>setFA(e.target.value)} style={inp}/></div>
+          <DateRangePicker dal={fDa} al={fA} onChange={(d,a)=>{setFDa(d);setFA(a)}} />
           <div style={field}><label style={lbl}>{nome} Store</label>
             <select value={fStore} onChange={e=>setFStore(e.target.value)} style={inp}>
               <option value="">Tutti</option>

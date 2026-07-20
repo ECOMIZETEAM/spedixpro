@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
+import DateRangePicker from '@/app/components/DateRangePicker'
 export default function ReportContrassegniCliente() {
   const dialog = useDialog()
   const [dal, setDal] = useState(new Date().toISOString().split('T')[0])
@@ -70,14 +71,7 @@ export default function ReportContrassegniCliente() {
       <div style={card}>
         <div style={{padding:'12px 18px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Nuovo report</div>
         <div style={{padding:'20px',display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'16px'}}>
-          <div>
-            <label style={lbl}>Dalla Data</label>
-            <input type="date" value={dal} onChange={e=>setDal(e.target.value)} style={inp}/>
-          </div>
-          <div>
-            <label style={lbl}>Alla Data</label>
-            <input type="date" value={al} onChange={e=>setAl(e.target.value)} style={inp}/>
-          </div>
+          <DateRangePicker dal={dal} al={al} onChange={(d,a)=>{setDal(d);setAl(a)}} />
           <div>
             <label style={lbl}>Stato spedizione</label>
             <select value={statoSped} onChange={e=>setStatoSped(e.target.value)} style={inp}>

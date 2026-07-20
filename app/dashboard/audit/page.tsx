@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
+import DateRangePicker from '@/app/components/DateRangePicker'
 
 const card = { background: '#fff', borderRadius: '8px', border: '1px solid #e8e8e8', padding: '16px', marginBottom: '16px' }
 const inp = { padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', background: '#fff' }
@@ -74,10 +75,8 @@ export default function AuditPage() {
         <div><label style={{ fontSize: '11px', fontWeight: 600, color: '#666', display: 'block', marginBottom: '4px' }}>Cerca (attore, id, valore)</label>
           <input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && carica()} placeholder="es. nome, 5000, id listino…" style={{ ...inp, minWidth: '240px' }} />
         </div>
-        <div><label style={{ fontSize: '11px', fontWeight: 600, color: '#666', display: 'block', marginBottom: '4px' }}>Dal</label>
-          <input type="date" value={dal} onChange={e => setDal(e.target.value)} style={inp} /></div>
-        <div><label style={{ fontSize: '11px', fontWeight: 600, color: '#666', display: 'block', marginBottom: '4px' }}>Al</label>
-          <input type="date" value={al} onChange={e => setAl(e.target.value)} style={inp} /></div>
+        <div><label style={{ fontSize: '11px', fontWeight: 600, color: '#666', display: 'block', marginBottom: '4px' }}>Periodo</label>
+          <DateRangePicker dal={dal} al={al} onChange={(d, a) => { setDal(d); setAl(a) }} /></div>
         <button onClick={carica} style={{ padding: '9px 20px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Filtra</button>
       </div>
 

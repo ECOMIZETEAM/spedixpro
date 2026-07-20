@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import DateRangePicker from '@/app/components/DateRangePicker'
 
 function oreRestanti(richiestoAt: string): { txt: string; pronto: boolean } {
   const scad = new Date(richiestoAt).getTime() + 48 * 60 * 60 * 1000
@@ -128,14 +129,8 @@ export default function SpedizioniCancellatePage() {
             </select>
           </div>
           <div style={{flex:'0 0 auto'}}>
-            <label style={{fontSize:'11px',fontWeight:'600',color:'#999',textTransform:'uppercase',letterSpacing:'0.4px',display:'block',marginBottom:'4px'}}>Dal</label>
-            <input type="date" value={dal} onChange={e=>{setDal(e.target.value);setPagina(1)}}
-              style={{padding:'7px 10px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}/>
-          </div>
-          <div style={{flex:'0 0 auto'}}>
-            <label style={{fontSize:'11px',fontWeight:'600',color:'#999',textTransform:'uppercase',letterSpacing:'0.4px',display:'block',marginBottom:'4px'}}>Al</label>
-            <input type="date" value={al} onChange={e=>{setAl(e.target.value);setPagina(1)}}
-              style={{padding:'7px 10px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}/>
+            <label style={{fontSize:'11px',fontWeight:'600',color:'#999',textTransform:'uppercase',letterSpacing:'0.4px',display:'block',marginBottom:'4px'}}>Periodo</label>
+            <DateRangePicker dal={dal} al={al} onChange={(d,a)=>{setDal(d);setAl(a);setPagina(1)}}/>
           </div>
           <div style={{minWidth:'200px',flex:'1 1 200px'}}>
             <label style={{fontSize:'11px',fontWeight:'600',color:'#999',textTransform:'uppercase',letterSpacing:'0.4px',display:'block',marginBottom:'4px'}}>Cerca</label>
