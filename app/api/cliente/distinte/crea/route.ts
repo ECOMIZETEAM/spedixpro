@@ -41,6 +41,9 @@ export async function POST(req: NextRequest) {
   if (errIns || !distinta) return NextResponse.json({ error: 'Errore creazione distinta' }, { status: 500 })
   const validIds = valide.map(s => s.id)
   const { error: errUpd } = await supabase.from('spedizioni').update({ distinta_id: distinta.id }).in('id', validIds)
+  // Distinta = consegnate al corriere → "spedita" (solo le "in lavorazione", per non sovrascrivere
+  // in_transito/consegnata). Così si distinguono in elenco dalle etichette create dopo.
+  await supabase.from('spedizioni').update({ stato: 'spedita' }).in('id', validIds).eq('stato', 'in_lavorazione')
   if (errUpd) return NextResponse.json({ error: 'Errore aggancio spedizioni' }, { status: 500 })
   // Distinta chiusa: rimanda il tracking a Shopify per gli ordini ecommerce collegati (best-effort)
   let fulfillEsiti: any[] = []

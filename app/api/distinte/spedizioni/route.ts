@@ -73,6 +73,10 @@ export async function POST(req: NextRequest) {
   }).select().single()
   if (error || !distinta) return NextResponse.json({ error: error?.message || 'Errore' }, { status: 400 })
   await db.from('spedizioni').update({ distinta_id: distinta.id }).in('id', spedIdsValidi)
+  // Distinta = consegnate al corriere → passano a "spedita" (solo quelle ancora "in lavorazione", per
+  // non sovrascrivere in_transito/consegnata). Così in elenco si distinguono dalle etichette appena
+  // create nella stessa giornata (che restano "in lavorazione").
+  await db.from('spedizioni').update({ stato: 'spedita' }).in('id', spedIdsValidi).eq('stato', 'in_lavorazione')
   // Notifica i MARKETPLACE (eBay/Shopify/Woo/PrestaShop/TikTok/Temu): tracking + stato "spedito".
   // Prima lo faceva SOLO la creazione distinta lato CLIENTE: creando la distinta dal MASTER gli ordini
   // marketplace non venivano mai sincronizzati (es. eBay restava "da spedire"). Uso admin per poter

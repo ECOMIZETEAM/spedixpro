@@ -65,6 +65,8 @@ export default function OrdiniPage() {
   const [spedisciCon, setSpedisciCon] = useState('auto')
   const [sms, setSms] = useState('no')
   const [corrieri, setCorrieri] = useState<any[]>([])
+  const [articoliCat, setArticoliCat] = useState<any[]>([])   // catalogo SKU -> peso/misure
+  const [pacchi, setPacchi] = useState<any[]>([])             // pacchi predefiniti (SKU -> scatola)
 
   async function carica() {
     setLoading(true)
@@ -78,6 +80,30 @@ export default function OrdiniPage() {
     setLoading(false)
   }
   useEffect(()=>{ carica() }, [piattaforma])
+  useEffect(()=>{
+    fetch('/api/cliente/articoli').then(r=>r.json()).then(d=>setArticoliCat(Array.isArray(d)?d:[])).catch(()=>{})
+    fetch('/api/cliente/pacchi').then(r=>r.json()).then(d=>setPacchi(Array.isArray(d)?d:[])).catch(()=>{})
+  }, [])
+
+  // SKU -> peso/misure (catalogo articoli) e SKU -> pacco (scatola). eBay/PrestaShop arrivano con
+  // grammi=0: senza questo il peso restava sempre 1kg (non si poteva cambiare fascia). Priorità peso:
+  // articolo(SKU) > pacco(SKU) > grammi del file > 1kg.
+  const skuToArt = useMemo(()=>{ const m=new Map<string,any>(); for(const a of articoliCat){ const k=String(a.sku||'').trim().toLowerCase(); if(k) m.set(k,a) } return m }, [articoliCat])
+  const skuToPacco = useMemo(()=>{ const m=new Map<string,any>(); for(const p of pacchi) for(const s of String(p.sku||'').split(/[\s,;]+/)){ const k=s.trim().toLowerCase(); if(k) m.set(k,p) } return m }, [pacchi])
+  function risolviPeso(o:any){
+    const arts = Array.isArray(o.articoli)?o.articoli:[]
+    const sku0 = String(arts[0]?.sku||'').trim().toLowerCase()
+    const art = sku0 ? skuToArt.get(sku0) : null
+    const pacco = sku0 ? skuToPacco.get(sku0) : null
+    let peso = (art && Number(art.peso)>0) ? Number(art.peso)
+      : (pacco && Number(pacco.peso)>0) ? Number(pacco.peso)
+      : (arts.reduce((s:number,a:any)=>s+(Number(a.grammi)||0)*(Number(a.quantita)||1),0)/1000)
+    if (!(peso>0)) peso = 1
+    const box = pacco ? {l:pacco.lunghezza,w:pacco.larghezza,h:pacco.altezza}
+      : (art && (Number(art.lunghezza)||Number(art.larghezza)||Number(art.altezza))) ? {l:art.lunghezza,w:art.larghezza,h:art.altezza}
+      : {l:20,w:15,h:10}
+    return { peso: Math.max(0.01, peso), l:Number(box.l)||20, w:Number(box.w)||15, h:Number(box.h)||10 }
+  }
   useEffect(()=>{ fetch('/api/cliente/corrieri').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d?.corrieri)?d.corrieri:[])).catch(()=>{}) }, [])
 
   async function sincronizza() {
@@ -100,11 +126,14 @@ export default function OrdiniPage() {
 
   function creaSpedizione(o:any) {
     const d = o.destinatario || {}
+    const rp = risolviPeso(o)
     const qs = new URLSearchParams({
       da_ordine: o.id,
       nome: d.nome||'', indirizzo: d.indirizzo||'', citta: d.citta||'',
       provincia: d.provincia||'', cap: d.cap||'', paese: d.paese||'IT',
       email: d.email||'', telefono: d.telefono||'',
+      peso: String(rp.peso), l: String(rp.l), w: String(rp.w), h: String(rp.h),
+      rif: String(o.numero_ordine || o.ordine_esterno_id || '').replace(/^#/,''),
     })
     if (spedisciCon && spedisciCon !== 'auto') qs.set('corriere', spedisciCon)
     router.push('/cliente/spedizioni/nuova?'+qs.toString())
@@ -186,9 +215,8 @@ export default function OrdiniPage() {
         setMsg('Spedizione ordine '+num+'… ('+(okCount+1)+'/'+ids.length+')')
         if (!d.nome || !d.indirizzo || !d.citta || !d.cap) { errori.push(num+': destinatario incompleto'); continue }
         const arts = Array.isArray(o.articoli)?o.articoli:[]
-        const grammi = arts.reduce((s:number,a:any)=>s+(Number(a.grammi)||0)*(Number(a.quantita)||1),0)
-        const peso = Math.max(1, grammi/1000)
-        const packages = [{ length:20, width:15, height:10, weight:peso }]
+        const rp = risolviPeso(o)   // peso+misure dal catalogo SKU/pacco (fallback grammi/1kg)
+        const packages = [{ length:rp.l, width:rp.w, height:rp.h, weight:rp.peso }]
         const shipTo = { name:d.nome, company:'', street1:d.indirizzo, street2:'', city:d.citta, state:d.provincia||'', postalCode:d.cap, country:d.paese||'IT', phone:d.telefono||'', email:d.email||'' }
         const tarRes = await fetch('/api/spedizioni/tariffe', {
           method:'POST', headers:{'Content-Type':'application/json'},
@@ -206,8 +234,9 @@ export default function OrdiniPage() {
           body: JSON.stringify({
             clienteId:cli.id, carrierCode:t.carrierCode, contractCode:t.contractCode, totalPrice:t.total_price,
             _corriere_id: t._corriere_id || t.corriere_id || null, _spediamopro_quotation: t._spediamopro_quotation || null,
-            packages, colliDettaglio:[{lunghezza:'20',larghezza:'15',altezza:'10'}],
+            packages, colliDettaglio:[{lunghezza:String(rp.l),larghezza:String(rp.w),altezza:String(rp.h)}],
             shipFrom, shipTo, notes:'', insuranceValue:0, codValue:0,
+            rifOrdine: String(o.numero_ordine || o.ordine_esterno_id || num || '').replace(/^#/,''),
             contenuto: arts.map((a:any)=>a.nome).join(', ').slice(0,100), tipoContenuto:'Merce destinata alla vendita', valoreMerce:String(o.totale||'')
           })
         }).then(r=>r.json()).catch(()=>null)

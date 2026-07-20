@@ -77,8 +77,9 @@ export function disegnaRiepilogoSped(pdf: PDFDocument, font: any, fontBold: any,
   y = yStart - 46
   linea(); y -= 20
 
-  // Colonne tabella (A4 orizzontale, 40..802): PRODOTTO ampio, SKU con ~30 caratteri, PESO, MISURE.
-  const cProd = ML + 55, cSku = ML + 430, cPeso = ML + 630, cMis = ML + 710
+  // Colonne tabella (A4 orizzontale, 40..802): SKU con colonna larga (~42 char, niente taglio) e in
+  // NERO (prima grigio/piccolo → poco leggibile e sgranato in stampa). PESO e MISURE spostate a destra.
+  const cProd = ML + 50, cSku = ML + 320, cPeso = ML + 605, cMis = ML + 660
   testo('Q.tà', ML, 11, true, grigio); testo('PRODOTTO', cProd, 11, true, grigio); testo('SKU', cSku, 11, true, grigio); testo('PESO', cPeso, 11, true, grigio); testo('MISURE (cm)', cMis, 11, true, grigio)
   y -= 6; linea(); y -= 18
   const arts = ord?.articoli || []
@@ -89,8 +90,8 @@ export function disegnaRiepilogoSped(pdf: PDFDocument, font: any, fontBold: any,
       const peso = (cat && Number(cat.peso) > 0) ? Number(cat.peso) : (Number(a.grammi) > 0 ? Number(a.grammi) / 1000 : 0)
       const dims = cat && (cat.lunghezza || cat.larghezza || cat.altezza) ? `${cat.lunghezza || '-'}x${cat.larghezza || '-'}x${cat.altezza || '-'}` : '—'
       testo(String(a.quantita || 1) + '×', ML, 12, true)
-      testo(clip(a.nome || cat?.nome || sku, 52), cProd, 12)
-      testo(clip(sku || '—', 30), cSku, 12, false, grigio)
+      testo(clip(a.nome || cat?.nome || sku, 44), cProd, 12)
+      testo(clip(sku || '—', 42), cSku, 12, false, nero)
       testo(peso > 0 ? peso.toFixed(2).replace(/\.?0+$/, '') + 'kg' : '—', cPeso, 11, false, grigio)
       testo(dims, cMis, 11, false, grigio)
       y -= 17
