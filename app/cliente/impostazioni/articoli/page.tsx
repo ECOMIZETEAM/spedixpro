@@ -102,20 +102,20 @@ export default function ArticoliCliente() {
           {articoli.length > 0 && <button onClick={svuota} style={{ background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', padding: '9px 12px', borderRadius: '6px', fontSize: '12.5px', cursor: 'pointer' }}>Svuota</button>}
         </div>
 
-        {sel.size > 0 && (
+        {articoli.length > 0 && (
           <div style={{ padding: '10px 16px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', background: '#fff7ed', borderBottom: '1px solid #fed7aa' }}>
-            <span style={{ fontSize: '13px', fontWeight: 700, color: '#9a3412' }}>{sel.size} selezionati</span>
             {pacchi.length === 0 ? (
-              <span style={{ fontSize: '13px', color: '#9a3412' }}>Crea prima un <b>Pacco</b> (Impostazioni → Pacchi) e poi assegnali qui.</span>
+              <span style={{ fontSize: '13px', color: '#9a3412' }}>💡 Crea prima un <b>Pacco</b> in Impostazioni → Pacchi, poi qui: spunta gli articoli e assegnali al pacco.</span>
             ) : (<>
-              <span style={{ fontSize: '13px', color: '#6b7280' }}>→ assegna al pacco:</span>
+              <span style={{ fontSize: '13px', fontWeight: 700, color: '#9a3412' }}>Assegna a un pacco:</span>
+              <span style={{ fontSize: '12.5px', color: '#6b7280' }}>1) spunta gli articoli qui sotto → 2) scegli il pacco → 3) Assegna</span>
               <select value={paccoSel} onChange={e => setPaccoSel(e.target.value)} style={{ ...inpS, width: 'auto', minWidth: '220px' }}>
                 <option value="">— scegli pacco —</option>
                 {pacchi.map(p => <option key={p.id} value={p.id}>{p.nome} · {p.peso}kg · {p.lunghezza}×{p.larghezza}×{p.altezza}cm</option>)}
               </select>
-              <button onClick={assegnaPacco} disabled={assegnando || !paccoSel} style={{ background: '#f97316', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', opacity: (assegnando || !paccoSel) ? 0.6 : 1 }}>{assegnando ? 'Assegno…' : 'Assegna'}</button>
+              <button onClick={assegnaPacco} disabled={assegnando || !paccoSel || sel.size === 0} style={{ background: '#f97316', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: (assegnando || !paccoSel || sel.size === 0) ? 'not-allowed' : 'pointer', opacity: (assegnando || !paccoSel || sel.size === 0) ? 0.5 : 1 }}>{assegnando ? 'Assegno…' : (sel.size > 0 ? `Assegna (${sel.size})` : 'Assegna')}</button>
+              {sel.size > 0 && <button onClick={() => setSel(new Set())} style={{ background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb', padding: '8px 12px', borderRadius: '6px', fontSize: '13px', cursor: 'pointer' }}>Deseleziona ({sel.size})</button>}
             </>)}
-            <button onClick={() => setSel(new Set())} style={{ background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb', padding: '8px 12px', borderRadius: '6px', fontSize: '13px', cursor: 'pointer' }}>Deseleziona</button>
           </div>
         )}
 
@@ -136,7 +136,7 @@ export default function ArticoliCliente() {
                     <td style={{ ...td, fontWeight: 600, color: '#f97316' }}>{a.sku}</td>
                     <td style={{ ...td, color: a.asin ? '#1a1a1a' : '#cbd5e1' }}>{a.asin || '—'}</td>
                     <td style={td}>{a.nome || '—'}</td>
-                    <td style={td}>{Number(a.peso || 0).toFixed(3).replace(/\.?0+$/, '')} kg</td>
+                    <td style={{ ...td, color: Number(a.peso || 0) > 0 ? '#1a1a1a' : (pk && Number(pk.peso) > 0 ? '#94a3b8' : '#cbd5e1') }}>{Number(a.peso || 0) > 0 ? `${Number(a.peso).toFixed(3).replace(/\.?0+$/, '')} kg` : (pk && Number(pk.peso) > 0 ? `↳ ${Number(pk.peso).toFixed(3).replace(/\.?0+$/, '')} kg` : '— (dal pacco)')}</td>
                     <td style={{ ...td, color: (a.lunghezza || a.larghezza || a.altezza) ? '#1a1a1a' : '#cbd5e1' }}>{(a.lunghezza || a.larghezza || a.altezza) ? `${a.lunghezza}×${a.larghezza}×${a.altezza}` : (pk ? `↳ ${pk.lunghezza}×${pk.larghezza}×${pk.altezza}` : '— (dal pacco)')}</td>
                     <td style={{ ...td, color: pk ? '#15803d' : '#cbd5e1', fontWeight: pk ? 600 : 400 }}>{pk ? pk.nome : '—'}</td>
                     <td style={td}>
