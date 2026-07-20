@@ -19,6 +19,7 @@ type Ordine = {
   colli: number
   contrassegno: number
   contenuto: string | null
+  articoli: { quantita?: number; nome?: string; sku?: string | null; variante?: string | null }[] | null
   sku: string | null
   note: string | null
   rif_mittente: string | null
@@ -611,6 +612,7 @@ export default function ImportaOrdiniPage() {
                     <input type="checkbox" checked={allChecked} onChange={toggleAll} />
                   </th>
                   <th style={th}>Destinatario</th>
+                  <th style={th}>Prodotti</th>
                   <th style={th}>Mittente</th>
                   <th style={th}>Località</th>
                   <th style={th}>CAP</th>
@@ -635,6 +637,26 @@ export default function ImportaOrdiniPage() {
                       <td style={{ ...td, fontWeight: 600, color: '#1a1a1a' }}>
                         {o.destinatario}
                         <div style={{ fontSize: '11.5px', color: '#999', fontWeight: 400 }}>{o.indirizzo}</div>
+                      </td>
+                      <td style={{ ...td, minWidth: '240px' }}>
+                        {Array.isArray(o.articoli) && o.articoli.length ? (
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', border: '1px solid #eee', borderRadius: '4px', overflow: 'hidden' }}>
+                            <thead><tr style={{ background: '#f9fafb' }}>
+                              <th style={{ textAlign: 'left', padding: '3px 6px', fontWeight: 600, color: '#777', width: '32px' }}>Qtà</th>
+                              <th style={{ textAlign: 'left', padding: '3px 6px', fontWeight: 600, color: '#777', width: '80px' }}>SKU</th>
+                              <th style={{ textAlign: 'left', padding: '3px 6px', fontWeight: 600, color: '#777' }}>Titolo</th>
+                            </tr></thead>
+                            <tbody>
+                              {o.articoli.map((a: any, i: number) => (
+                                <tr key={i} style={{ borderTop: '1px solid #f0f0f0' }}>
+                                  <td style={{ padding: '3px 6px', color: '#1a1a1a' }}>{a.quantita || 1}</td>
+                                  <td style={{ padding: '3px 6px', color: '#555', fontFamily: 'monospace' }}>{a.sku || '—'}</td>
+                                  <td style={{ padding: '3px 6px', color: '#1a1a1a' }}>{a.nome || '—'}{a.variante ? <span style={{ color: '#999' }}> — {a.variante}</span> : ''}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : <span style={{ fontSize: '11.5px', color: '#999' }}>{o.contenuto || '—'}</span>}
                       </td>
                       <td style={td}>{o.rif_mittente || mittenteNome || '—'}</td>
                       <td style={td}>{o.localita}</td>
