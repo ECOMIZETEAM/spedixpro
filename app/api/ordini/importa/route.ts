@@ -48,6 +48,9 @@ const AUX: Record<string, string[]> = {
   sku:           ['sku', 'lineitem_sku', 'lineitemsku', 'seller_sku', 'sellersku'],   // SOLO lo SKU (Amazon 'sku' / Shopify 'Lineitem sku'), per il match col catalogo pacchi
   lineitem_name: ['sku', 'lineitem_sku', 'seller_sku', 'sellersku', 'lineitem_name', 'item_name', 'product_name', 'productname'],
   lineitem_qty:  ['lineitem_quantity', 'quantity', 'qty', 'quantita', 'quantity_purchased', 'quantitypurchased'],
+  // ID riga ordine Amazon ("order-item-id"): serve per confermare la spedizione di OGNI articolo di un
+  // ordine multi-SKU (senza, Amazon evade solo il primo). Presente solo negli export Amazon.
+  lineitem_orderitemid: ['orderitemid', 'order_item_id'],
   // Nome prodotto e variante/colore per il riepilogo ordine (separati dallo SKU)
   lineitem_prodotto: ['lineitem_name', 'item_name', 'product_name', 'productname', 'title', 'product_title', 'descrizione'],
   lineitem_variante: ['lineitem_variant', 'lineitem_variant_title', 'variant', 'variante', 'variant_title', 'colore', 'color'],
@@ -165,8 +168,9 @@ export async function POST(req: NextRequest) {
         const nome = (A.lineitem_prodotto ? String(r[A.lineitem_prodotto] ?? '').trim() : '') || li
         const skuItem = A.sku ? String(r[A.sku] ?? '').trim() : ''
         const variante = A.lineitem_variante ? String(r[A.lineitem_variante] ?? '').trim() : ''
+        const orderItemId = A.lineitem_orderitemid ? String(r[A.lineitem_orderitemid] ?? '').trim() : ''
         cur.items.push(`${q}× ${li}`)
-        cur.articoli.push({ quantita: q, nome, sku: skuItem || null, variante: variante || null })
+        cur.articoli.push({ quantita: q, nome, sku: skuItem || null, variante: variante || null, order_item_id: orderItemId || null })
       }
     }
   } else {

@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
 
   const righe = await fetchAll(() => supabase
     .from('ordini_importati')
-    .select('order_id, contenuto, colli, raw, spedizioni!inner(tracking_number, created_at, corrieri(nome_contratto))')
+    .select('order_id, contenuto, colli, raw, articoli, spedizioni!inner(tracking_number, created_at, corrieri(nome_contratto))')
     .eq('cliente_id', utente.cliente_id)
     .eq('stato', 'spedito')
     .is('integrazione_id', null)
@@ -62,23 +62,28 @@ export async function GET(req: NextRequest) {
     // caricando un CSV, Amazon legge tutta l'intestazione come un'unica colonna -> errore.
     const tab = (s: any) => String(s == null ? '' : s).replace(/[\t\r\n]+/g, ' ').trim()
     const header = ['order-id', 'order-item-id', 'quantity', 'ship-date', 'carrier-code', 'carrier-name', 'tracking-number', 'ship-method'].join('\t')
-    const righeTsv = filtrate.map((r: any) => {
+    // Ordine multi-SKU: Amazon evade OGNI articolo solo se il file ha UNA RIGA per order-item-id.
+    // Prima usciva 1 sola riga per ordine (il primo item) → gli altri restavano "non spediti".
+    // Se abbiamo gli articoli con order_item_id (import Amazon) emettiamo una riga per ciascuno;
+    // altrimenti (ordine mono-articolo o import vecchio senza id) restiamo alla riga singola.
+    const righeTsv: string[] = []
+    for (const r of filtrate) {
       const raw = r.raw || {}
       const sp = r.spedizioni || {}
       const car = carrierAmazon(sp.corrieri?.nome_contratto || '')
-      const qty = raw.quantitypurchased || raw.quantity || r.colli || 1
       const shipDate = (sp.created_at || '').slice(0, 10)   // YYYY-MM-DD
-      return [
-        tab(raw.orderid || r.order_id),
-        tab(raw.orderitemid || raw.order_item_id || ''),
-        tab(qty),
-        tab(shipDate),
-        tab(car.code),
-        tab(car.name),
-        tab(sp.tracking_number || ''),
-        tab('Standard'),
+      const orderId = raw.orderid || r.order_id
+      const riga = (orderItemId: any, qty: any) => [
+        tab(orderId), tab(orderItemId), tab(qty), tab(shipDate),
+        tab(car.code), tab(car.name), tab(sp.tracking_number || ''), tab('Standard'),
       ].join('\t')
-    })
+      const arts = Array.isArray(r.articoli) ? r.articoli.filter((a: any) => a && a.order_item_id) : []
+      if (arts.length) {
+        for (const a of arts) righeTsv.push(riga(a.order_item_id, a.quantita || 1))
+      } else {
+        righeTsv.push(riga(raw.orderitemid || raw.order_item_id || '', raw.quantitypurchased || raw.quantity || r.colli || 1))
+      }
+    }
     const txt = [header, ...righeTsv].join('\r\n')   // TAB-separated, niente BOM
     return new NextResponse(txt, {
       headers: {
