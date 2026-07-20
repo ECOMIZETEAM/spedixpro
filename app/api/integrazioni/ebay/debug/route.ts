@@ -12,6 +12,8 @@ export async function GET() {
     EBAY_RU_NAME: present(process.env.EBAY_RU_NAME),
     EBAY_VERIFICATION_TOKEN: present(process.env.EBAY_VERIFICATION_TOKEN),
     EBAY_DELETION_ENDPOINT: present(process.env.EBAY_DELETION_ENDPOINT),
+    EBAY_IDENTITY: process.env.EBAY_IDENTITY || null,   // multi-account eBay attivo se '1'
+    multi_account_attivo: !!process.env.EBAY_IDENTITY && process.env.EBAY_IDENTITY !== '0' && process.env.EBAY_IDENTITY !== 'false',
     // lunghezze per capire spazi/troncamenti, senza rivelare i valori
     len: {
       client_id: (process.env.EBAY_CLIENT_ID || '').length,
