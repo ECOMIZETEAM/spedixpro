@@ -51,6 +51,28 @@ export interface SpediamoproAddress {
   email?: string
 }
 
+// SpediamoPro valida telefono ed email del sender/consignee: un telefono non-stringa (numero) o
+// un'email malformata fanno fallire quotation/create con 422 ("should be of type string" /
+// "not a valid email address"). Sanitizziamo QUI, così OGNI chiamante (preventivo, creazione,
+// ritiri) è al sicuro anche se passa valori grezzi. Telefono → solo cifre (6–15) o assente;
+// email → valida o assente; fallback email di servizio per non bloccare la spedizione.
+function pulisciTel(v: any): string | undefined {
+  const d = String(v ?? '').replace(/[^0-9]/g, '')
+  return d.length >= 6 && d.length <= 15 ? d : undefined
+}
+function pulisciEmail(v: any): string | undefined {
+  const e = String(v ?? '').trim()
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e.substring(0, 50) : undefined
+}
+export function sanitizzaIndirizzoSp(a: SpediamoproAddress, opts?: { emailObbligatoria?: boolean }): SpediamoproAddress {
+  const phone = pulisciTel(a?.phone)
+  const email = pulisciEmail(a?.email) || (opts?.emailObbligatoria ? 'noreply@moovexpress.com' : undefined)
+  const out: any = { ...a }
+  if (phone) out.phone = phone; else delete out.phone
+  if (email) out.email = email; else delete out.email
+  return out
+}
+
 export interface SpediamoproParcel {
   weight: number
   length: number
@@ -86,8 +108,8 @@ export async function spediamoproGetQuotation(
 
   const body: any = {
     parcels: params.parcels.map(p => ({ type: 0, weight: p.weight, length: p.length, width: p.width, height: p.height })),
-    sender: params.sender,
-    consignee: params.consignee,
+    sender: sanitizzaIndirizzoSp(params.sender, { emailObbligatoria: true }),
+    consignee: sanitizzaIndirizzoSp(params.consignee, { emailObbligatoria: true }),
     cashOnDeliveryAmount: params.cashOnDeliveryAmount || null,
     insuredAmount: params.insuredAmount || null,
   }
@@ -165,8 +187,8 @@ export async function spediamoproCreateShipment(
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       parcels: params.parcels.map(p => ({ type: 0, weight: p.weight, length: p.length, width: p.width, height: p.height })),
-      sender: params.sender,
-      consignee: params.consignee,
+      sender: sanitizzaIndirizzoSp(params.sender, { emailObbligatoria: true }),
+      consignee: sanitizzaIndirizzoSp(params.consignee, { emailObbligatoria: true }),
       quotation: {
         service: params.quotation.service,
         expectedDeliveryDate: params.quotation.expectedDeliveryDate,
