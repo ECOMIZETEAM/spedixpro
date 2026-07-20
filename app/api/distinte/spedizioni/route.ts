@@ -73,6 +73,15 @@ export async function POST(req: NextRequest) {
   }).select().single()
   if (error || !distinta) return NextResponse.json({ error: error?.message || 'Errore' }, { status: 400 })
   await db.from('spedizioni').update({ distinta_id: distinta.id }).in('id', spedIdsValidi)
+  // Notifica i MARKETPLACE (eBay/Shopify/Woo/PrestaShop/TikTok/Temu): tracking + stato "spedito".
+  // Prima lo faceva SOLO la creazione distinta lato CLIENTE: creando la distinta dal MASTER gli ordini
+  // marketplace non venivano mai sincronizzati (es. eBay restava "da spedire"). Uso admin per poter
+  // leggere/aggiornare gli ordini dei clienti della rete. Best-effort: non blocca la distinta.
+  try {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { fulfillMarketplace } = await import('@/lib/fulfillMarketplace')
+    await fulfillMarketplace(createAdminSupabase(), spedIdsValidi)
+  } catch {}
   // Chiusura borderò/distinta lato corriere (best-effort): Spedisci.online e SpediamoPro (bordereau).
   try { const { chiudiBorderoSpedisci } = await import('@/lib/spedisci'); await chiudiBorderoSpedisci(db, distinta.id) } catch {}
   try { const { chiudiBordereauSpediamopro } = await import('@/lib/spediamopro'); await chiudiBordereauSpediamopro(db, distinta.id) } catch {}

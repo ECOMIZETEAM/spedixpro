@@ -14,6 +14,7 @@ const NAV: NavItem[] = [
   { label: 'Spedizioni', href: '/dashboard/spedizioni', icon: '◫', sub: [
     { label: 'Nuova Spedizione', href: '/dashboard/spedizioni/nuova', perm: 'admin.shippings.create' },
     { label: 'Elenco Spedizioni', href: '/dashboard/spedizioni', perm: 'admin.shippings.index' },
+    { label: 'Da mettere in distinta', href: '/dashboard/distinte/crea', perm: 'admin.shippinglists.create', agenteOk: true },
     { label: 'Giacenze', href: '/dashboard/spedizioni/giacenze', perm: 'admin.stocks.index' },
     { label: 'Rettifica Costi', href: '/dashboard/spedizioni/rettifica', perm: 'admin.shippings.weight_corrections.index' },
     { label: 'Spedizioni Cancellate', href: '/dashboard/spedizioni/cancellate', perm: 'admin.shippings.cancelled.index' },
