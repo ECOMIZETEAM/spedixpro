@@ -45,38 +45,42 @@ export async function preparaRiepiloghi(admin: any, spedizioni: any[]): Promise<
 }
 
 // Disegna la pagina riepilogo per una spedizione (se il suo cliente lo ha attivato). Ritorna true se disegnata.
+// Formato A4 ORIZZONTALE (842×595): più larghezza per lo SKU (niente taglio) e font più grandi, così
+// in fase di stampa è ben leggibile (prima era A5 verticale con SKU troncato a 13 caratteri e testo 8-9pt).
 export function disegnaRiepilogoSped(pdf: PDFDocument, font: any, fontBold: any, ctx: RiepilogoCtx, s: any): boolean {
   if (!ctx.riepilogoCli.get(s.cliente_id)) return false
   const ord = ctx.ordineDiSped.get(s.id)
-  const W = 420, H = 595 // A5
+  const W = 842, H = 595 // A4 orizzontale
   const page = pdf.addPage([W, H])
-  const nero = rgb(0.1, 0.1, 0.1), grigio = rgb(0.45, 0.45, 0.45), lineC = rgb(0.8, 0.8, 0.8)
-  const ML = 28, MR = W - 28
-  let y = H - 40
-  const testo = (t: string, x: number, size = 9, bold = false, col = nero) => page.drawText(String(t ?? ''), { x, y, size, font: bold ? fontBold : font, color: col })
-  const linea = () => page.drawLine({ start: { x: ML, y: y + 6 }, end: { x: MR, y: y + 6 }, thickness: 0.6, color: lineC })
+  const nero = rgb(0.1, 0.1, 0.1), grigio = rgb(0.4, 0.4, 0.4), lineC = rgb(0.78, 0.78, 0.78)
+  const ML = 40, MR = W - 40
+  let y = H - 50
+  const testo = (t: string, x: number, size = 12, bold = false, col = nero) => page.drawText(String(t ?? ''), { x, y, size, font: bold ? fontBold : font, color: col })
+  const linea = () => page.drawLine({ start: { x: ML, y: y + 7 }, end: { x: MR, y: y + 7 }, thickness: 0.7, color: lineC })
   const clip = (t: string, max: number) => { t = String(t || ''); return t.length > max ? t.slice(0, max - 1) + '…' : t }
 
-  testo('RIEPILOGO ORDINE', ML, 15, true); y -= 20
+  testo('RIEPILOGO ORDINE', ML, 22, true); y -= 28
   const dt = s.created_at ? new Date(s.created_at) : null
   const dataOra = dt ? dt.toLocaleDateString('it-IT') + ' ' + dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : ''
-  if (ord?.order_id || s.rif_ordine) { testo('Ordine: ' + (ord?.order_id || s.rif_ordine), ML, 11, true); y -= 15 }
-  testo('Data e ora: ' + dataOra, ML, 9, false, grigio); y -= 12
-  testo('Corriere: ' + ((s.corrieri?.nome_contratto) || '—'), ML, 9, false, grigio); y -= 12
-  testo('N. Spedizione: ' + (s.numero || ''), ML, 9, false, grigio); y -= 16
-  linea(); y -= 12
+  if (ord?.order_id || s.rif_ordine) { testo('Ordine: ' + (ord?.order_id || s.rif_ordine), ML, 16, true); y -= 22 }
+  testo('Data e ora: ' + dataOra, ML, 12, false, grigio); y -= 17
+  testo('Corriere: ' + ((s.corrieri?.nome_contratto) || '—'), ML, 12, false, grigio); y -= 17
+  testo('N. Spedizione: ' + (s.numero || ''), ML, 12, false, grigio); y -= 22
+  linea(); y -= 18
 
-  const colR = ML + 200
+  const colR = ML + 400
   const yStart = y
-  testo('MITTENTE', ML, 8, true, grigio); testo('DESTINATARIO', colR, 8, true, grigio); y -= 12
-  testo(clip(s.mitt_nome || ctx.nomeCli.get(s.cliente_id) || '', 32), ML, 9, true)
-  testo(clip(s.dest_nome || '', 32), colR, 9, true); y -= 11
-  testo(clip([s.dest_cap, s.dest_citta, s.dest_provincia && '(' + s.dest_provincia + ')'].filter(Boolean).join(' '), 34), colR, 8, false, grigio)
-  y = yStart - 34
-  linea(); y -= 14
+  testo('MITTENTE', ML, 11, true, grigio); testo('DESTINATARIO', colR, 11, true, grigio); y -= 17
+  testo(clip(s.mitt_nome || ctx.nomeCli.get(s.cliente_id) || '', 45), ML, 13, true)
+  testo(clip(s.dest_nome || '', 45), colR, 13, true); y -= 15
+  testo(clip([s.dest_cap, s.dest_citta, s.dest_provincia && '(' + s.dest_provincia + ')'].filter(Boolean).join(' '), 48), colR, 11, false, grigio)
+  y = yStart - 46
+  linea(); y -= 20
 
-  testo('Q.tà', ML, 8, true, grigio); testo('PRODOTTO', ML + 34, 8, true, grigio); testo('SKU', ML + 210, 8, true, grigio); testo('PESO', ML + 285, 8, true, grigio); testo('MISURE (cm)', ML + 320, 8, true, grigio)
-  y -= 4; linea(); y -= 12
+  // Colonne tabella (A4 orizzontale, 40..802): PRODOTTO ampio, SKU con ~30 caratteri, PESO, MISURE.
+  const cProd = ML + 55, cSku = ML + 430, cPeso = ML + 630, cMis = ML + 710
+  testo('Q.tà', ML, 11, true, grigio); testo('PRODOTTO', cProd, 11, true, grigio); testo('SKU', cSku, 11, true, grigio); testo('PESO', cPeso, 11, true, grigio); testo('MISURE (cm)', cMis, 11, true, grigio)
+  y -= 6; linea(); y -= 18
   const arts = ord?.articoli || []
   if (arts.length) {
     for (const a of arts) {
@@ -84,26 +88,26 @@ export function disegnaRiepilogoSped(pdf: PDFDocument, font: any, fontBold: any,
       const cat = sku ? ctx.catalogo.get(s.cliente_id + '|' + sku.toLowerCase()) : null
       const peso = (cat && Number(cat.peso) > 0) ? Number(cat.peso) : (Number(a.grammi) > 0 ? Number(a.grammi) / 1000 : 0)
       const dims = cat && (cat.lunghezza || cat.larghezza || cat.altezza) ? `${cat.lunghezza || '-'}x${cat.larghezza || '-'}x${cat.altezza || '-'}` : '—'
-      testo(String(a.quantita || 1) + '×', ML, 9)
-      testo(clip(a.nome || cat?.nome || sku, 30), ML + 34, 9)
-      testo(clip(sku || '—', 13), ML + 210, 8, false, grigio)
-      testo(peso > 0 ? peso.toFixed(2).replace(/\.?0+$/, '') + 'kg' : '—', ML + 285, 8, false, grigio)
-      testo(dims, ML + 320, 8, false, grigio)
-      y -= 11
-      if (a.variante) { testo(clip('  ' + a.variante, 40), ML + 34, 7.5, false, grigio); y -= 10 }
-      if (y < 90) { testo('… (elenco troncato)', ML + 34, 8, false, grigio); y -= 12; break }
+      testo(String(a.quantita || 1) + '×', ML, 12, true)
+      testo(clip(a.nome || cat?.nome || sku, 52), cProd, 12)
+      testo(clip(sku || '—', 30), cSku, 12, false, grigio)
+      testo(peso > 0 ? peso.toFixed(2).replace(/\.?0+$/, '') + 'kg' : '—', cPeso, 11, false, grigio)
+      testo(dims, cMis, 11, false, grigio)
+      y -= 17
+      if (a.variante) { testo(clip('  ' + a.variante, 60), cProd, 10, false, grigio); y -= 14 }
+      if (y < 80) { testo('… (elenco troncato)', cProd, 11, false, grigio); y -= 16; break }
     }
   } else {
-    testo(clip('Contenuto: ' + (s.contenuto || '—'), 60), ML, 9, false, grigio); y -= 12
+    testo(clip('Contenuto: ' + (s.contenuto || '—'), 90), ML, 12, false, grigio); y -= 17
   }
-  y -= 6; linea(); y -= 14
+  y -= 8; linea(); y -= 20
 
-  testo('Colli: ' + (s.colli || 1), ML, 9, true)
-  testo('Peso spedizione: ' + (Number(s.peso_fatturato || s.peso_reale || 0)).toFixed(2).replace(/\.?0+$/, '') + ' kg', ML + 90, 9)
+  testo('Colli: ' + (s.colli || 1), ML, 12, true)
+  testo('Peso spedizione: ' + (Number(s.peso_fatturato || s.peso_reale || 0)).toFixed(2).replace(/\.?0+$/, '') + ' kg', ML + 140, 12)
   const nascondiPrezzi = ctx.nascondiPrezziCli.get(s.cliente_id) === true
   // Il contrassegno resta sempre (è l'importo che il corriere incassa alla consegna).
-  if (Number(s.contrassegno) > 0) { y -= 13; testo('Contrassegno: € ' + Number(s.contrassegno).toFixed(2), ML, 10, true) }
+  if (Number(s.contrassegno) > 0) { y -= 18; testo('Contrassegno: € ' + Number(s.contrassegno).toFixed(2), ML, 13, true) }
   // "Valore ordine" = valore merce dall'ordine importato. Nascosto se il cliente ha "Nascondi prezzi".
-  else if (ord?.totale != null && !nascondiPrezzi) { y -= 13; testo('Valore ordine: € ' + Number(ord.totale).toFixed(2), ML, 9, false, grigio) }
+  else if (ord?.totale != null && !nascondiPrezzi) { y -= 18; testo('Valore ordine: € ' + Number(ord.totale).toFixed(2), ML, 12, false, grigio) }
   return true
 }
