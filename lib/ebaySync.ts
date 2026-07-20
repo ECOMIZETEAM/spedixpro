@@ -1,30 +1,29 @@
 import { getValidEbayToken, ebayGet } from '@/lib/ebay'
 
-// Sincronizza gli ordini eBay non ancora evasi in ordini_ecommerce.
+// Sincronizza TUTTI gli ordini eBay in ordini_ecommerce (spediti e non, qualunque pagamento).
 export async function sincronizzaOrdiniEbay(db: any, integr: any): Promise<{ letti: number; importati: number }> {
   const token = await getValidEbayToken(db, integr)
-  // Ordini da evadere. Miglioramenti (in coda 1-2-3):
-  //  1) NON pagati inclusi: filtriamo solo per stato di EVASIONE (NOT_STARTED|IN_PROGRESS), non per
-  //     pagamento → prende anche gli ordini "in attesa di spedizione" ancora da pagare.
-  //  2) FINESTRA TEMPORALE ampia: senza creationdate eBay può limitarsi agli ordini recenti; mettiamo
-  //     un range esplicito (ultimi 180 gg) così non sfuggono i non-spediti più vecchi.
-  //  3) PAGINAZIONE completa (pagine da 200, max eBay) — prima si fermava a 50.
+  // Prende TUTTO: nessun filtro di stato/pagamento (contrassegno incluso). Solo finestra data (ultimi
+  // 180 gg) per non scaricare anni di storico. Paginazione completa (pagine da 200, max eBay). Gli
+  // ordini già evasi su eBay vengono marcati 'spedito' (sotto), gli altri restano da spedire.
   const ordini: any[] = []
   const LIMIT = 200
   const daISO = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString()
   const aISO = new Date().toISOString()
-  const STATO = 'orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}'
-  let filtro = `creationdate:[${daISO}..${aISO}],${STATO}`
+  // TUTTI gli ordini (spediti E non spediti, qualsiasi pagamento, contrassegno incluso): NESSUN filtro
+  // di stato/pagamento. Solo la finestra data (ultimi 180 gg) per non prendere anni di storico.
+  let filtro = `creationdate:[${daISO}..${aISO}]`
   let fallback = false
   let totApi = 0
   for (let offset = 0; offset < 10000; offset += LIMIT) {
+    const qFiltro = filtro ? `filter=${encodeURIComponent(filtro)}&` : ''
     let data: any
     try {
-      data = await ebayGet(token, `/sell/fulfillment/v1/order?filter=${encodeURIComponent(filtro)}&limit=${LIMIT}&offset=${offset}`)
+      data = await ebayGet(token, `/sell/fulfillment/v1/order?${qFiltro}limit=${LIMIT}&offset=${offset}`)
     } catch (e: any) {
-      // eBay ha rifiutato il filtro con la data (range non ammesso?): ripiego sul solo stato di
-      // evasione, così il sync non fallisce e prende comunque gli ordini non spediti.
-      if (offset === 0 && !fallback) { fallback = true; filtro = STATO; offset = -LIMIT; continue }
+      // eBay ha rifiutato il filtro data (range non ammesso?): riprovo SENZA filtro (default eBay),
+      // così il sync non fallisce e prende comunque gli ordini.
+      if (offset === 0 && !fallback) { fallback = true; filtro = ''; offset = -LIMIT; continue }
       throw e
     }
     const batch: any[] = data?.orders || []
@@ -67,6 +66,10 @@ export async function sincronizzaOrdiniEbay(db: any, integr: any): Promise<{ let
       stato_pagamento: o.orderPaymentStatus || '',
       raw: o,
     }
+    // Già evaso su eBay → lo marchiamo 'spedito' così NON compare tra i "da spedire". Gli ordini non
+    // evasi NON toccano lo stato (nuovo = default 'da_spedire'; esistente = mantiene il suo, così non
+    // riportiamo a "da spedire" un ordine già spedito da MoovExpress).
+    if (o.orderFulfillmentStatus === 'FULFILLED') payload.stato = 'spedito'
     const { error } = await db.from('ordini_ecommerce').upsert(payload, {
       onConflict: 'integrazione_id,ordine_esterno_id', ignoreDuplicates: false,
     })
