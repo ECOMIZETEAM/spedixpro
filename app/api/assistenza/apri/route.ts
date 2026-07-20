@@ -63,7 +63,19 @@ export async function POST(req: NextRequest) {
   }
   if (allegatiOut.length) record.allegati = allegatiOut
 
-  const { data, error } = await admin.from('tickets').insert(record).select('id').single()
+  const { data, error } = await admin.from('tickets').insert(record).select('id,codice').single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  return NextResponse.json({ success: true, id: data?.id })
+  // Primo messaggio del thread (la chat): l'apertura stessa.
+  if (data?.id) {
+    // Chi APRE è sempre il lato "richiedente" della chat = 'cliente' (anche un sotto-master che apre
+    // verso la linea superiore: lui chiede, l'owner risponde come 'master'). Coerente con la GET/POST.
+    await admin.from('ticket_messaggi').insert({
+      ticket_id: data.id,
+      autore: 'cliente',
+      autore_nome: record.aperto_da || (ruolo === 'cliente' ? 'Cliente' : 'Master'),
+      testo: messaggio,
+      allegati: allegatiOut.length ? allegatiOut : null,
+    })
+  }
+  return NextResponse.json({ success: true, id: data?.id, codice: data?.codice })
 }

@@ -14,7 +14,7 @@ export async function GET(_req: NextRequest) {
   const ruolo = (utente?.ruolo || '').toLowerCase()
   const admin = createAdminSupabase()
 
-  const cols = 'id,oggetto,messaggio,stato,risposta,aperto_da,tipo_apertura,cliente_id,aperto_master_id,aperto_letto,categoria,pod_url,allegati,created_at,updated_at'
+  const cols = 'id,codice,oggetto,messaggio,stato,risposta,aperto_da,tipo_apertura,cliente_id,aperto_master_id,aperto_letto,categoria,pod_url,allegati,created_at,updated_at'
 
   if (ruolo === 'cliente') {
     const { data: miei } = await admin.from('tickets').select(cols)

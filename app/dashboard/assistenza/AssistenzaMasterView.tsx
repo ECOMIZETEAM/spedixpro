@@ -5,6 +5,7 @@ const STATI: Record<string, { label: string; bg: string; color: string }> = {
   aperto: { label: 'Aperto', bg: '#fff7ed', color: '#ea580c' },
   in_lavorazione: { label: 'In lavorazione', bg: '#eff6ff', color: '#2563eb' },
   risolto: { label: 'Risolto', bg: '#f0fdf4', color: '#16a34a' },
+  chiuso: { label: 'Chiuso', bg: '#f3f4f6', color: '#6b7280' },
 }
 function Badge({ stato }: { stato: string }) {
   const s = STATI[stato] || STATI.aperto
@@ -28,6 +29,30 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   const [dragPod, setDragPod] = useState(false)
   const [viewImg, setViewImg] = useState<string | null>(null)   // lightbox foto allegate
   const [podFile, setPodFile] = useState<{ nome: string; dati: string } | null>(null)  // PDF POD caricato ma non ancora inviato
+  // Chat (thread messaggi del ticket selezionato)
+  const [thread, setThread] = useState<any[]>([])
+  const [threadLoad, setThreadLoad] = useState(false)
+  const [testo, setTesto] = useState('')
+  const [inviando, setInviando] = useState(false)
+  const [ruoloChat, setRuoloChat] = useState<'master' | 'cliente'>('master')   // lato del master in QUESTA chat
+
+  async function apriDettaglio(t: any) {
+    setSel(t); setMsg(''); setTesto(''); setThread([]); setThreadLoad(true)
+    const d = await fetch('/api/assistenza/' + t.id).then(r => r.json()).catch(() => null)
+    setThreadLoad(false)
+    if (d && !d.error) { setThread(d.messaggi || []); setRuoloChat(d.ruolo || 'master'); setSel((s: any) => s ? { ...s, ...d.ticket } : d.ticket) }
+  }
+  async function inviaMsg() {
+    if (!testo.trim() || !sel?.id) return
+    setInviando(true)
+    const r = await fetch('/api/assistenza/' + sel.id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ testo }) })
+    const j = await r.json().catch(() => ({})); setInviando(false)
+    if (j.error) { setMsg(j.error); return }
+    setTesto('')
+    const d = await fetch('/api/assistenza/' + sel.id).then(r => r.json()).catch(() => null)
+    if (d && !d.error) { setThread(d.messaggi || []); setRuoloChat(d.ruolo || 'master'); setSel((s: any) => ({ ...s, ...d.ticket })) }
+    carica(true)
+  }
 
   // 1) Carica il PDF dentro la modale (anteprima), senza inviare
   async function caricaPodDentro(file: File) {
@@ -128,15 +153,16 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr style={{ background: '#f9fafb' }}>
-              {['Data', 'Da', 'LDV', 'Stato', 'Azioni'].map(h => <th key={h} style={th}>{h}</th>)}
+              {['Codice', 'Data', 'Da', 'LDV', 'Stato', 'Azioni'].map(h => <th key={h} style={th}>{h}</th>)}
             </tr></thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: '#999' }}>Caricamento…</td></tr>
+                <tr><td colSpan={6} style={{ ...td, textAlign: 'center', color: '#999' }}>Caricamento…</td></tr>
               ) : !filtrati.length ? (
-                <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: '#999' }}>{cerca ? 'Nessuna richiesta per questa LDV' : (isPod ? 'Nessuna richiesta POD ricevuta' : 'Nessun ticket ricevuto')}</td></tr>
+                <tr><td colSpan={6} style={{ ...td, textAlign: 'center', color: '#999' }}>{cerca ? 'Nessuna richiesta per questa LDV' : (isPod ? 'Nessuna richiesta POD ricevuta' : 'Nessun ticket ricevuto')}</td></tr>
               ) : visibili.map(t => (
                 <tr key={t.id}>
+                  <td style={{ ...td, whiteSpace: 'nowrap', fontWeight: 700, color: '#f97316', fontSize: '12.5px' }}>{t.codice || '—'}</td>
                   <td style={{ ...td, whiteSpace: 'nowrap', fontSize: '12px' }}>{new Date(t.created_at).toLocaleDateString('it-IT')} {new Date(t.created_at).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</td>
                   <td style={td}>
                     <div style={{ fontWeight: 600 }}>{t.aperto_da || '—'}</div>
@@ -149,7 +175,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   <td style={td}><Badge stato={t.stato} /></td>
                   <td style={td}>
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      <button onClick={() => { setSel(t); setRisposta(t.risposta || ''); setMsg('') }} style={{ padding: '5px 10px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer', color: '#1a1a1a' }}>Apri</button>
+                      <button onClick={() => apriDettaglio(t)} style={{ padding: '5px 10px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer', color: '#1a1a1a' }}>💬 Apri chat</button>
                       {!isPod && t.stato !== 'in_lavorazione' && t.stato !== 'risolto' && (
                         <button onClick={() => aggiorna(t.id, { stato: 'in_lavorazione' })} style={{ padding: '5px 10px', border: 'none', background: '#2563eb', color: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer' }}>In lavorazione</button>
                       )}
@@ -186,14 +212,15 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
           <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>{isPod ? 'Le mie richieste POD' : 'I miei ticket'}</div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr style={{ background: '#f9fafb' }}>{['Data', 'LDV', 'Stato', isPod ? 'POD' : 'Risposta'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <thead><tr style={{ background: '#f9fafb' }}>{['Codice', 'Data', 'LDV', 'Stato', isPod ? 'POD' : 'Chat'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
               <tbody>
                 {mieiFiltrati.map(t => (
-                  <tr key={t.id}>
+                  <tr key={t.id} onClick={() => { if (!isPod) apriDettaglio(t) }} style={{ cursor: isPod ? 'default' : 'pointer' }}>
+                    <td style={{ ...td, whiteSpace: 'nowrap', fontWeight: 700, color: '#f97316', fontSize: '12.5px' }}>{t.codice || '—'}</td>
                     <td style={{ ...td, whiteSpace: 'nowrap', fontSize: '12px' }}>{new Date(t.created_at).toLocaleDateString('it-IT')}</td>
                     <td style={td}>{t.oggetto}</td>
                     <td style={td}><Badge stato={t.stato} /></td>
-                    <td style={{ ...td, color: '#555', fontSize: '12px' }}>{isPod ? (t.pod_url ? <a href={t.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD</a> : '—') : (t.risposta || '—')}</td>
+                    <td style={{ ...td, color: '#555', fontSize: '12px' }}>{isPod ? (t.pod_url ? <a href={t.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }} onClick={e => e.stopPropagation()}>⬇ Scarica POD</a> : '—') : <span style={{ color: '#2563eb', fontWeight: 600 }}>💬 Apri chat</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -206,8 +233,11 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
       {sel && (
         <div onClick={() => setSel(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '20px' }}>
           <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: '10px', width: '560px', maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: '15px', fontWeight: 700, color: '#1a1a1a' }}>{sel.oggetto}</div>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+              <div style={{ minWidth: 0 }}>
+                <span style={{ fontWeight: 800, color: '#f97316', fontSize: '13px' }}>{sel.codice}</span>
+                <div style={{ fontSize: '15px', fontWeight: 700, color: '#1a1a1a', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sel.oggetto}</div>
+              </div>
               <button onClick={() => setSel(null)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#999' }}>✕</button>
             </div>
             <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -215,7 +245,19 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                 <span><b style={{ color: '#1a1a1a' }}>{sel.aperto_da}</b> ({sel.tipo_apertura === 'master' ? 'Sotto-master' : 'Cliente'})</span>
                 <Badge stato={sel.stato} />
               </div>
-              <div style={{ background: '#f9fafb', border: '1px solid #eee', borderRadius: '8px', padding: '12px 14px', fontSize: '13px', color: '#1a1a1a', whiteSpace: 'pre-wrap' }}>{sel.messaggio}</div>
+              {/* THREAD CHAT */}
+              <div style={{ background: '#f8fafc', border: '1px solid #eee', borderRadius: '10px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '42vh', overflowY: 'auto' }}>
+                {threadLoad ? <div style={{ textAlign: 'center', color: '#999', fontSize: '13px' }}>Caricamento…</div> : (thread.length ? thread.map((m: any) => {
+                  const mio = m.autore === ruoloChat   // "mio" = il lato del master in QUESTA chat
+                  return (
+                    <div key={m.id} style={{ alignSelf: mio ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
+                      <div style={{ fontSize: '10.5px', color: '#94a3b8', margin: mio ? '0 4px 3px 0' : '0 0 3px 4px', textAlign: mio ? 'right' : 'left', fontWeight: 600 }}>{mio ? 'Tu' : (m.autore_nome || (m.autore === 'master' ? 'Assistenza' : 'Cliente'))}</div>
+                      <div style={{ background: mio ? '#f97316' : '#fff', color: mio ? '#fff' : '#1a1a1a', border: mio ? 'none' : '1px solid #e5e7eb', padding: '9px 13px', borderRadius: '12px', fontSize: '13px', lineHeight: 1.45, whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const }}>{m.testo}</div>
+                      <div style={{ fontSize: '10px', color: '#b6c0cc', margin: mio ? '2px 4px 0 0' : '2px 0 0 4px', textAlign: mio ? 'right' : 'left' }}>{new Date(m.created_at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
+                    </div>
+                  )
+                }) : <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: '8px', padding: '12px 14px', fontSize: '13px', color: '#1a1a1a', whiteSpace: 'pre-wrap' }}>{sel.messaggio}</div>)}
+              </div>
 
               {/* Allegati del ticket (foto/PDF caricati dal cliente) */}
               {Array.isArray(sel.allegati) && sel.allegati.length > 0 && (
@@ -265,16 +307,26 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                 </div>
               )}
 
-              {!isPod && <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, color: '#1a1a1a', display: 'block', marginBottom: '5px' }}>Risposta / nota</label>
-                <textarea value={risposta} onChange={e => setRisposta(e.target.value)} rows={3} placeholder="Scrivi una risposta al cliente…" style={{ width: '100%', padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'vertical' }} />
-              </div>}
               {msg && <div style={{ fontSize: '12px', color: '#dc2626' }}>{msg}</div>}
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {!isPod && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { risposta, stato: sel.stato === 'aperto' ? 'in_lavorazione' : sel.stato })) setSel(null) }} style={{ padding: '9px 16px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: '#1a1a1a' }}>Salva risposta</button>}
-                {!isPod && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'in_lavorazione', risposta })) setSel(null) }} style={{ padding: '9px 16px', border: 'none', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>In lavorazione</button>}
-                {sel.stato !== 'risolto' && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'risolto', risposta: isPod ? undefined : risposta })) setSel(null) }} style={{ padding: '9px 16px', border: 'none', background: '#16a34a', color: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Segna risolto</button>}
-              </div>
+
+              {/* Input chat (ticket): scrivi finché non è chiuso */}
+              {!isPod && (sel.stato === 'chiuso' ? (
+                <div style={{ padding: '12px', borderRadius: '8px', background: '#f3f4f6', color: '#6b7280', fontSize: '12.5px', textAlign: 'center' }}>🔒 Ticket chiuso e archiviato — sola lettura.</div>
+              ) : (
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                  <textarea value={testo} onChange={e => setTesto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); inviaMsg() } }} rows={2} placeholder="Rispondi al cliente…" style={{ flex: 1, padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'none' as const }} />
+                  <button disabled={inviando || !testo.trim()} onClick={inviaMsg} style={{ padding: '10px 18px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: inviando || !testo.trim() ? 'default' : 'pointer', opacity: inviando || !testo.trim() ? 0.6 : 1 }}>{inviando ? '…' : 'Invia'}</button>
+                </div>
+              ))}
+
+              {/* Stato del ticket — solo il lato ASSISTENZA (owner) cambia stato/chiude */}
+              {ruoloChat === 'master' && (
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
+                  {!isPod && !['chiuso', 'in_lavorazione', 'risolto'].includes(sel.stato) && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'in_lavorazione' })) setSel((s: any) => ({ ...s, stato: 'in_lavorazione' })) }} style={{ padding: '8px 14px', border: 'none', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>In lavorazione</button>}
+                  {!['risolto', 'chiuso'].includes(sel.stato) && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'risolto' })) setSel((s: any) => ({ ...s, stato: 'risolto' })) }} style={{ padding: '8px 14px', border: 'none', background: '#16a34a', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Segna risolto</button>}
+                  {sel.stato !== 'chiuso' && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'chiuso' })) setSel(null) }} style={{ padding: '8px 14px', border: '1px solid #d1d5db', background: '#fff', color: '#6b7280', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>🔒 Chiudi e archivia</button>}
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -6,6 +6,7 @@ const STATI: Record<string, { label: string; bg: string; color: string }> = {
   aperto: { label: 'Aperto', bg: '#fff7ed', color: '#ea580c' },
   in_lavorazione: { label: 'In lavorazione', bg: '#eff6ff', color: '#2563eb' },
   risolto: { label: 'Risolto', bg: '#f0fdf4', color: '#16a34a' },
+  chiuso: { label: 'Chiuso', bg: '#f3f4f6', color: '#6b7280' },
 }
 function Badge({ stato }: { stato: string }) {
   const s = STATI[stato] || STATI.aperto
@@ -25,6 +26,32 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
   const [pagina, setPagina] = useState(1)
   const [nuoviIds, setNuoviIds] = useState<Set<string>>(new Set())
   const inputRef = useRef<HTMLInputElement>(null)
+  // Chat modale
+  const [chat, setChat] = useState<any>(null)         // { ticket, messaggi }
+  const [chatLoad, setChatLoad] = useState(false)
+  const [testo, setTesto] = useState('')
+  const [inviando, setInviando] = useState(false)
+  const fondoRef = useRef<HTMLDivElement>(null)
+
+  async function apriChat(id: string) {
+    setChatLoad(true); setChat({ id }); setTesto('')
+    const d = await fetch('/api/assistenza/' + id).then(r => r.json()).catch(() => null)
+    setChatLoad(false)
+    if (!d || d.error) { setMsg({ t: 'err', x: d?.error || 'Errore apertura' }); setChat(null); return }
+    setChat(d)
+    setNuoviIds(prev => { const s = new Set(prev); s.delete(id); return s })
+    setTimeout(() => fondoRef.current?.scrollIntoView({ behavior: 'auto' }), 50)
+  }
+  async function inviaMsg() {
+    if (!testo.trim() || !chat?.ticket?.id) return
+    setInviando(true)
+    const r = await fetch('/api/assistenza/' + chat.ticket.id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ testo }) })
+    const j = await r.json(); setInviando(false)
+    if (j.error) { setMsg({ t: 'err', x: j.error }); return }
+    setTesto('')
+    await apriChat(chat.ticket.id)
+    carica(true)
+  }
 
   async function carica(silent = false) {
     if (!silent) setLoading(true)
@@ -126,30 +153,26 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr style={{ background: '#f9fafb' }}>{['Data', 'LDV', 'Stato', isPod ? 'POD' : 'Risposta'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ background: '#f9fafb' }}>{['Codice', 'Data', 'LDV', 'Stato', isPod ? 'POD' : 'Chat'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={4} style={{ ...td, textAlign: 'center', color: '#999' }}>Caricamento…</td></tr>
+                <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: '#999' }}>Caricamento…</td></tr>
               ) : !filtrati.length ? (
-                <tr><td colSpan={4} style={{ ...td, textAlign: 'center', color: '#999' }}>{cerca ? 'Nessuna richiesta per questa LDV' : 'Nessuna richiesta ancora'}</td></tr>
+                <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: '#999' }}>{cerca ? 'Nessuna richiesta per questa LDV' : 'Nessuna richiesta ancora'}</td></tr>
               ) : visibili.map(t => (
-                <tr key={t.id}>
+                <tr key={t.id} onClick={() => apriChat(t.id)} style={{ cursor: 'pointer' }}>
+                  <td style={{ ...td, whiteSpace: 'nowrap', fontWeight: 700, color: '#f97316', fontSize: '12.5px' }}>{t.codice || '—'}</td>
                   <td style={{ ...td, whiteSpace: 'nowrap', fontSize: '12px' }}>{new Date(t.created_at).toLocaleDateString('it-IT')}</td>
                   <td style={td}>
                     <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
                       {t.oggetto}
                       {nuoviIds.has(t.id) && <span style={{ background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px' }}>● Aggiornato</span>}
                     </div>
-                    {!isPod && <div style={{ fontSize: '11.5px', color: '#888', marginTop: '2px' }}>{t.messaggio}</div>}
-                    {!isPod && Array.isArray(t.allegati) && t.allegati.length > 0 && (
-                      <div style={{ display: 'flex', gap: '6px', marginTop: '5px', flexWrap: 'wrap' }}>
-                        {t.allegati.map((a: any, i: number) => <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: '#2563eb', textDecoration: 'none' }}>📎 {a.nome}</a>)}
-                      </div>
-                    )}
+                    {!isPod && <div style={{ fontSize: '11.5px', color: '#888', marginTop: '2px', maxWidth: '340px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.messaggio}</div>}
                   </td>
                   <td style={td}><Badge stato={t.stato} /></td>
-                  <td style={{ ...td, fontSize: '12.5px' }}>
-                    {isPod ? (t.pod_url ? <a href={t.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD</a> : <span style={{ color: '#999' }}>In attesa…</span>) : (t.risposta || '—')}
+                  <td style={{ ...td, fontSize: '12.5px' }} onClick={e => { if (isPod) e.stopPropagation() }}>
+                    {isPod ? (t.pod_url ? <a href={t.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD</a> : <span style={{ color: '#999' }}>In attesa…</span>) : <span style={{ color: '#2563eb', fontWeight: 600 }}>💬 Apri chat</span>}
                   </td>
                 </tr>
               ))}
@@ -172,6 +195,53 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
           </div>
         )}
       </div>
+
+      {chat && (
+        <div onClick={() => setChat(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: '12px', width: '560px', maxWidth: '100%', maxHeight: '86vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'space-between' }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontWeight: 800, color: '#f97316', fontSize: '13px' }}>{chat.ticket?.codice}</span>
+                  {chat.ticket && <Badge stato={chat.ticket.stato} />}
+                </div>
+                <div style={{ fontSize: '13px', color: '#1a1a1a', fontWeight: 600, marginTop: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chat.ticket?.oggetto}</div>
+              </div>
+              <button onClick={() => setChat(null)} style={{ border: 'none', background: 'none', fontSize: '20px', cursor: 'pointer', color: '#999' }}>✕</button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 18px', background: '#f8fafc', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {chatLoad ? <div style={{ textAlign: 'center', color: '#999', fontSize: '13px' }}>Caricamento…</div> : (chat.messaggi || []).map((m: any) => {
+                const mio = m.autore === chat.ruolo
+                return (
+                  <div key={m.id} style={{ alignSelf: mio ? 'flex-end' : 'flex-start', maxWidth: '78%' }}>
+                    <div style={{ fontSize: '10.5px', color: '#94a3b8', margin: mio ? '0 4px 3px 0' : '0 0 3px 4px', textAlign: mio ? 'right' : 'left', fontWeight: 600 }}>{mio ? 'Tu' : (m.autore_nome || 'Assistenza')}</div>
+                    <div style={{ background: mio ? '#f97316' : '#fff', color: mio ? '#fff' : '#1a1a1a', border: mio ? 'none' : '1px solid #e5e7eb', padding: '9px 13px', borderRadius: '12px', fontSize: '13px', lineHeight: 1.45, whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const }}>
+                      {m.testo}
+                      {Array.isArray(m.allegati) && m.allegati.length > 0 && (
+                        <div style={{ display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
+                          {m.allegati.map((a: any, i: number) => <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: mio ? '#fff' : '#2563eb', textDecoration: 'underline' }}>📎 {a.nome}</a>)}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '10px', color: '#b6c0cc', margin: mio ? '2px 4px 0 0' : '2px 0 0 4px', textAlign: mio ? 'right' : 'left' }}>{new Date(m.created_at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
+                  </div>
+                )
+              })}
+              <div ref={fondoRef} />
+            </div>
+
+            {chat.ticket?.stato === 'chiuso' ? (
+              <div style={{ padding: '14px 18px', borderTop: '1px solid #eee', textAlign: 'center', fontSize: '12.5px', color: '#6b7280', background: '#f9fafb' }}>🔒 Ticket chiuso e archiviato — sola lettura.</div>
+            ) : (
+              <div style={{ padding: '12px 14px', borderTop: '1px solid #eee', display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                <textarea value={testo} onChange={e => setTesto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); inviaMsg() } }} rows={2} placeholder="Scrivi un messaggio…" style={{ flex: 1, padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', color: '#1a1a1a', resize: 'none' as const, boxSizing: 'border-box' as const }} />
+                <button disabled={inviando || !testo.trim()} onClick={inviaMsg} style={{ padding: '10px 18px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: inviando || !testo.trim() ? 'default' : 'pointer', opacity: inviando || !testo.trim() ? 0.6 : 1 }}>{inviando ? '…' : 'Invia'}</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
