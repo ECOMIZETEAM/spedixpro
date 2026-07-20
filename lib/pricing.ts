@@ -176,13 +176,25 @@ export async function calcolaPrezzoListino(
   // 1) Match via zone_cap (CAP esatto > provincia > jolly), ristretto alle zone del listino.
   //    Mappa zona->corriere: i tier si applicano PER CORRIERE (il CAP esatto di un corriere non
   //    deve escludere gli altri corrieri che coprono la destinazione a provincia/jolly).
-  const candidateZonaIds = fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean)
+  // Zone ESCLUSIVE del corriere (Zone Disagiate/Isole/Sardegna…) ANCHE se questo listino NON le
+  // prezza: identico a tariffe/route. Servono a NON far cadere su "Italia"/"Sardegna" una
+  // destinazione disagiata quando al cliente manca la fascia speciale → il corriere viene ESCLUSO
+  // (niente vendita sotto costo). Senza questo, un CAP disagiato (es. 09038 in "Zone Disagiate")
+  // ripiegava sulla fascia regionale (Sardegna) e si vendeva sotto costo.
+  const corrIdsListino = Array.from(new Set<string>(fasce.map((f: any) => (f.corrieri as any)?.id).filter(Boolean)))
+  const esclMaster = await zoneEsclusiveMaster(supabase, corrIdsListino)
+  const candidateZonaIds = Array.from(new Set<string>([
+    ...fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean),
+    ...esclMaster.map((z) => z.id),
+  ]))
   const zonaCorr = new Map<string, string>()
   for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid) zonaCorr.set(zid, cid) }
-  // Mappa zona_id -> corriere_id delle zone ESCLUSIVE del listino: l'esclusione dal jolly "Italia"
-  // è PER-CORRIERE (un CAP disagiato per BRT non deve togliere il jolly a Poste).
+  // Mappa zona_id -> corriere_id delle zone ESCLUSIVE: le fasce esclusive del listino + le zone
+  // esclusive del MASTER (così l'esclusione scatta anche se il cliente non ha la fascia speciale).
+  // L'esclusione dal jolly "Italia" è PER-CORRIERE (un CAP disagiato per BRT non tocca Poste).
   const esclCorr = new Map<string, string>()
   for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid && isZonaEsclusiva((f.zone as any)?.nome)) esclCorr.set(zid, cid) }
+  for (const z of esclMaster) esclCorr.set(z.id, z.corriere_id)
   const { ids: zoneMatchIds, corrieriEsclusi } = await trovaZoneMatchDett(
     supabase,
     { paese: params.paese, provincia, cap: params.cap, citta: (params as any).citta },

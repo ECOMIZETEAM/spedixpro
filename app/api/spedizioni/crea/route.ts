@@ -2,7 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
-import { calcolaPrezzoCorriere, calcolaPrezzoCorriereDettaglio, calcolaSupplementiCliente, fattoreVolumeCliente, fattoreVolumeCorriere, calcolaPesoFatturato } from '@/lib/pricing'
+import { calcolaPrezzoCorriere, calcolaPrezzoCorriereDettaglio, calcolaSupplementiCliente, fattoreVolumeCliente, fattoreVolumeCorriere, calcolaPesoFatturato, calcolaPrezzoListino } from '@/lib/pricing'
 import { isAgente, nomeAgente } from '@/lib/agente'
 import {
   spediamoproGetQuotation,
@@ -218,6 +218,25 @@ export async function POST(req: NextRequest) {
         })
         if (!sup.disponibile) return NextResponse.json({ error: 'Il contratto non prevede il contrassegno o l\'assicurazione per questo importo. Rimuovili o scegli un altro corriere.' }, { status: 400 })
       }
+    }
+  }
+
+  // *** Blocco ZONA ESCLUSIVA senza prezzo a listino (Zone Disagiate / Isole / …) ***
+  // Regola: se il CAP di destinazione è in una zona ESCLUSIVA per QUESTO corriere (es. "Zone
+  // Disagiate", "Isole Minori") e il listino del cliente NON prezza quella zona, il corriere NON è
+  // vendibile lì — altrimenti ripiega su "Italia"/"Sardegna" e si vende sotto costo. La tariffe/route
+  // lo esclude già nel preventivo; questo è il gate LATO SERVER, che non si fida di body.totalPrice
+  // (che potrebbe arrivare da un preventivo stale o dalla creazione manuale del master).
+  // calcolaPrezzoListino (con le zone esclusive del master tra le candidate) ritorna il corriere solo
+  // se ha davvero una fascia per la destinazione: se torna un ALTRO corriere (o null), è escluso.
+  if (!isProprio && cliente?.listino_cliente_id && (body.shipTo.country || 'IT').toUpperCase() === 'IT') {
+    const risCli = await calcolaPrezzoListino(adminCrea, {
+      listinoId: cliente.listino_cliente_id, corriereId: corriereRecord.id,
+      provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+      packages,
+    })
+    if (!risCli || risCli.corriere_id !== corriereRecord.id) {
+      return NextResponse.json({ error: 'Destinazione in zona disagiata: nessun prezzo a listino per questo corriere. Spedizione non consentita — scegli un altro corriere o aggiungi la fascia della zona al listino.' }, { status: 400 })
     }
   }
 
