@@ -12,6 +12,10 @@ function oreRestanti(richiestoAt: string): { txt: string; pronto: boolean } {
 }
 
 import { useDialog } from '@/app/components/DialogProvider'
+// Default: ultimi 60 giorni di annullate (le code pending/manuali restano complete: sono attive e
+// poche). Prima si scaricavano e arricchivano TUTTE le annullate di sempre -> pagina sempre piu' lenta.
+const _oggiC = new Date().toISOString().slice(0, 10)
+const _da60C = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
 export default function SpedizioniCancellatePage() {
   const dialog = useDialog()
   const [spedizioni, setSpedizioni] = useState<any[]>([])
@@ -21,8 +25,8 @@ export default function SpedizioniCancellatePage() {
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
   const [filtroCliente, setFiltroCliente] = useState('')
-  const [dal, setDal] = useState('')
-  const [al, setAl] = useState('')
+  const [dal, setDal] = useState(_da60C)
+  const [al, setAl] = useState(_oggiC)
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
   const [paginaPending, setPaginaPending] = useState(1)   // paginazione sezione "in attesa di annullo"
@@ -31,7 +35,7 @@ export default function SpedizioniCancellatePage() {
 
   function carica() {
     Promise.all([
-      fetch('/api/spedizioni/lista?stato=annullata').then(r => r.json()),
+      fetch(`/api/spedizioni/lista?stato=annullata${dal ? '&dal=' + dal : ''}${al ? '&al=' + al + 'T23:59:59' : ''}`).then(r => r.json()),
       fetch('/api/spedizioni/lista?stato=annullamento_pending').then(r => r.json()),
       fetch('/api/spedizioni/lista?stato=annullamento_manuale').then(r => r.json()),
       fetch('/api/spedizioni/annulli-manuali').then(r => r.json()),
@@ -43,7 +47,7 @@ export default function SpedizioniCancellatePage() {
       setLoading(false)
     }).catch(() => setLoading(false))
   }
-  useEffect(() => { carica() }, [])
+  useEffect(() => { carica() }, [dal, al])
 
   async function ripristina(id: string) {
     if (!await dialog.confirm({ title: 'Ripristinare la spedizione?', message: 'Non verrà inviato nessun annullo al corriere.', confirmText: 'Ripristina' })) return

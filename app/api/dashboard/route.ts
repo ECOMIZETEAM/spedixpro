@@ -80,6 +80,7 @@ export async function GET() {
     { data: statistiche },
     { data: kpi },
     { data: ultimeSpedizioni },
+    { count: daMettereInDistinta },
   ] = await Promise.all([
     // Via ADMIN (bypassa RLS): le RPC aggregano SOLO il sotto-albero del proprio master (p_master),
     // quindi contano proprie + improprie della rete SOTTO. Con il client user-scoped l'RLS limitava
@@ -89,6 +90,11 @@ export async function GET() {
     admin.rpc('dashboard_kpi_master', { p_master: masterId }),
     // Spedizioni recenti di tutta la rete (sé + discendenza), via admin per i permessi cross-master.
     admin.from('spedizioni').select(SPED_COLS).in('master_id', reteIds.length ? reteIds : [masterId]).order('created_at',{ascending:false}).limit(10),
+    // LDV di TUTTA la rete ancora da chiudere in distinta (era una query in coda: ora nel batch).
+    admin.from('spedizioni').select('id', { count: 'exact', head: true })
+      .in('master_id', reteIds.length ? reteIds : [masterId])
+      .is('distinta_id', null)
+      .not('stato', 'in', '(annullata)'),
   ])
   // Contatore piano (X/limite) = spedizioni del mese di TUTTA la rete, dalla STESSA RPC (subtree)
   // così coincide con le altre statistiche (niente più discrepanze tipo 98 vs 86).
@@ -96,13 +102,6 @@ export async function GET() {
   const c: any = contatori || {}
   const st: any = statistiche || {}
   const k: any = kpi || {}
-
-  // LDV di TUTTA la rete ancora da chiudere in distinta (distinta non assegnata), escluse le annullate.
-  const { count: daMettereInDistinta } = await admin.from('spedizioni')
-    .select('id', { count: 'exact', head: true })
-    .in('master_id', reteIds.length ? reteIds : [masterId])
-    .is('distinta_id', null)
-    .not('stato', 'in', '(annullata)')
 
   return NextResponse.json({
     ruolo: (utente as any)?.ruolo || 'master',

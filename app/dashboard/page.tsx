@@ -11,7 +11,10 @@ export default function Dashboard() {
 
   useEffect(() => {
     let vivo = true
-    const carica = () => fetch('/api/dashboard', { cache: 'no-store' }).then(r=>r.json()).then(d=>{ if (vivo) { setData(d); setLoading(false) } }).catch(()=>{ if (vivo) setLoading(false) })
+    // ISTANTANEA: mostro subito l'ultima dashboard vista in questa sessione (sessionStorage) e la
+    // riverifico in background — i numeri si aggiornano da soli appena arriva la risposta fresca.
+    try { const c = sessionStorage.getItem('dash_master_v1'); if (c) { setData(JSON.parse(c)); setLoading(false) } } catch {}
+    const carica = () => fetch('/api/dashboard', { cache: 'no-store' }).then(r=>r.json()).then(d=>{ if (vivo && d && !d.error) { setData(d); setLoading(false); try { sessionStorage.setItem('dash_master_v1', JSON.stringify(d)) } catch {} } else if (vivo) setLoading(false) }).catch(()=>{ if (vivo) setLoading(false) })
     carica()
     // Ogni 2 min e SOLO a scheda visibile (prima ogni 20s sempre: con le schede lasciate aperte le
     // RPC dashboard dominavano il carico DB). Al ritorno sulla pagina c'è già il refresh immediato.
