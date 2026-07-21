@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 import { tiktokAuthorizeUrl, tiktokConfigurato } from '@/lib/tiktok'
 import crypto from 'crypto'
 
@@ -20,6 +21,7 @@ export async function GET(req: NextRequest) {
   }
 
   const state = crypto.randomBytes(24).toString('hex')
-  await supabase.from('shopify_oauth_state').insert({ state, cliente_id: utente.cliente_id, master_id: utente.master_id, shop: 'tiktok' })
+  // shopify_oauth_state è chiusa (RLS + no grant): scrivo lo state col client admin (service_role).
+  await createAdminSupabase().from('shopify_oauth_state').insert({ state, cliente_id: utente.cliente_id, master_id: utente.master_id, shop: 'tiktok' })
   return NextResponse.redirect(tiktokAuthorizeUrl(state))
 }

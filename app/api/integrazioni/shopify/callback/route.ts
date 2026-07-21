@@ -47,14 +47,17 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = await createServerSupabase()
+  // shopify_oauth_state è chiusa (RLS + no grant anon/authenticated) e al ritorno cross-site dall'OAuth
+  // il cookie di sessione può mancare: leggo/consumo lo state col client admin (service_role).
+  const adminState = createAdminSupabase()
 
   // Valida e consuma lo state
-  const { data: st } = await supabase
+  const { data: st } = await adminState
     .from('shopify_oauth_state').select('*').eq('state', state).maybeSingle()
   if (!st || st.shop !== shop) {
     return NextResponse.json({ error: 'State non valido o scaduto — riprova il collegamento' }, { status: 400 })
   }
-  await supabase.from('shopify_oauth_state').delete().eq('state', state)
+  await adminState.from('shopify_oauth_state').delete().eq('state', state)
 
   // Scambia code -> access token OFFLINE (senza scadenza): e' il tipo corretto per
   // un'app che sincronizza ordini in background, non richiede refresh e non si "rompe".

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 import crypto from 'crypto'
 
 export const runtime = 'nodejs'
@@ -40,9 +41,10 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // state anti-CSRF (cliente_id/master_id opzionali)
+  // state anti-CSRF (cliente_id/master_id opzionali). La tabella shopify_oauth_state è chiusa
+  // (RLS + no grant anon/authenticated): vi si scrive/legge col client admin (service_role).
   const state = crypto.randomBytes(24).toString('hex')
-  const { error } = await supabase.from('shopify_oauth_state').insert({
+  const { error } = await createAdminSupabase().from('shopify_oauth_state').insert({
     state, cliente_id: clienteId, master_id: masterId, shop,
   })
   if (error) {

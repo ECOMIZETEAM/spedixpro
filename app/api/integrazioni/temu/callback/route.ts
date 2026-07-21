@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 import { temuExchangeCode } from '@/lib/temu'
 
 export const runtime = 'nodejs'
@@ -15,11 +16,13 @@ export async function GET(req: NextRequest) {
   if (!code || !state) return NextResponse.redirect(`${appUrl}/cliente/integrazioni?error=callback+Temu+non+valido`)
 
   const supabase = await createServerSupabase()
-  const { data: st } = await supabase.from('shopify_oauth_state').select('*').eq('state', state).maybeSingle()
+  // shopify_oauth_state è chiusa (RLS + no grant) e il cookie può mancare al ritorno OAuth: uso admin.
+  const adminState = createAdminSupabase()
+  const { data: st } = await adminState.from('shopify_oauth_state').select('*').eq('state', state).maybeSingle()
   if (!st || st.shop !== 'temu') {
     return NextResponse.redirect(`${appUrl}/cliente/integrazioni?error=state+non+valido`)
   }
-  await supabase.from('shopify_oauth_state').delete().eq('state', state)
+  await adminState.from('shopify_oauth_state').delete().eq('state', state)
 
   let tokens: any
   try {

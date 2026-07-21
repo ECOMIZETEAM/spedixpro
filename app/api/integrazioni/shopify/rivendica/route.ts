@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -8,6 +9,10 @@ export const dynamic = 'force-dynamic'
 // all'account del cliente ora loggato.
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
+  // shopify_pending contiene i TOKEN OAuth: la tabella è chiusa (RLS + no grant anon/authenticated),
+  // quindi vi si accede col client admin (service_role). L'autorizzazione resta garantita dai controlli
+  // di sessione qui sotto (dev'essere un cliente loggato). Il resto (utenti/clienti/integrazioni) usa la sessione.
+  const admin = createAdminSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
 
@@ -24,7 +29,7 @@ export async function POST(req: NextRequest) {
   if (!shop) return NextResponse.json({ error: 'Negozio mancante' }, { status: 400 })
 
   // Recupera il pending
-  const { data: pend } = await supabase
+  const { data: pend } = await admin
     .from('shopify_pending').select('*').eq('shop', shop).maybeSingle()
   if (!pend) return NextResponse.json({ error: 'Nessun collegamento in attesa per questo negozio' }, { status: 404 })
 
@@ -46,7 +51,7 @@ export async function POST(req: NextRequest) {
   else await supabase.from('integrazioni').insert(payload)
 
   // Consuma il pending
-  await supabase.from('shopify_pending').delete().eq('shop', shop)
+  await admin.from('shopify_pending').delete().eq('shop', shop)
 
   return NextResponse.json({ ok: true, shop })
 }
