@@ -13,7 +13,9 @@ export default function Dashboard() {
     let vivo = true
     const carica = () => fetch('/api/dashboard', { cache: 'no-store' }).then(r=>r.json()).then(d=>{ if (vivo) { setData(d); setLoading(false) } }).catch(()=>{ if (vivo) setLoading(false) })
     carica()
-    const t = setInterval(carica, 20000)                                   // aggiorna ogni 20s
+    // Ogni 2 min e SOLO a scheda visibile (prima ogni 20s sempre: con le schede lasciate aperte le
+    // RPC dashboard dominavano il carico DB). Al ritorno sulla pagina c'è già il refresh immediato.
+    const t = setInterval(() => { if (document.visibilityState === 'visible') carica() }, 120000)
     const onFocus = () => { if (document.visibilityState === 'visible') carica() }  // e al ritorno sulla pagina
     document.addEventListener('visibilitychange', onFocus)
     window.addEventListener('focus', onFocus)

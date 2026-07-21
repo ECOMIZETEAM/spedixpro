@@ -77,7 +77,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   }
   useEffect(() => {
     carica()
-    const t = setInterval(() => carica(true), 15000)  // aggiornamento automatico ogni 15s
+    const t = setInterval(() => { if (document.visibilityState === 'visible') carica(true) }, 15000)  // auto-refresh 15s SOLO a scheda visibile
     return () => clearInterval(t)
   }, [])
   useEffect(() => { setPodFile(null) }, [sel?.id])   // reset PDF caricato quando cambia/chiude il ticket

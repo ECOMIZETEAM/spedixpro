@@ -91,7 +91,7 @@ export default function ClienteNav() {
   const [ticketBadge, setTicketBadge] = useState<{ count: number; ticket: number; pod: number }>({ count: 0, ticket: 0, pod: 0 })
   useEffect(() => {
     const load = () => fetch('/api/assistenza/non-letti').then(r=>r.json()).then(d=>setTicketBadge({ count: d.count||0, ticket: d.ticket||0, pod: d.pod||0 })).catch(()=>{})
-    load(); const t = setInterval(load, 30000); return () => clearInterval(t)
+    load(); const t = setInterval(() => { if (document.visibilityState === 'visible') load() }, 30000); return () => clearInterval(t)
   }, [pathname])
   const badgeStyle = { background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, minWidth: '17px', height: '17px', borderRadius: '9px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' } as const
   const NOMI_PIATT: Record<string,string> = { shopify:'Shopify', prestashop:'PrestaShop', woocommerce:'WooCommerce' }

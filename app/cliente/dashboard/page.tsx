@@ -10,7 +10,9 @@ export default function ClienteDashboard() {
     fetch('/api/notifiche/mie').then(r=>r.json()).then(d=>{ if (vivo) setNotifiche(Array.isArray(d)?d:[]) }).catch(()=>{})
     const carica = () => fetch('/api/cliente/dashboard', { cache: 'no-store' }).then(r=>r.json()).then(d=>{ if (vivo) { setData(d); setLoading(false) } }).catch(()=>{ if (vivo) setLoading(false) })
     carica()
-    const t = setInterval(carica, 20000)
+    // Ogni 2 min e SOLO a scheda visibile (prima: ogni 20s sempre → 3 RPC a giro, ~44% del carico DB
+    // con le schede lasciate aperte). Al ritorno sul tab c'è già il refresh immediato (onFocus).
+    const t = setInterval(() => { if (document.visibilityState === 'visible') carica() }, 120000)
     const onFocus = () => { if (document.visibilityState === 'visible') carica() }
     document.addEventListener('visibilitychange', onFocus)
     window.addEventListener('focus', onFocus)
