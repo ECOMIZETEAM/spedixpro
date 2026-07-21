@@ -64,6 +64,7 @@ export default function SpedizioniPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
+  const [totale, setTotale] = useState(0)   // conteggio TOTALE dal server (paginazione server-side)
   const [trackingModal, setTrackingModal] = useState<any>(null)
   const [dettaglio, setDettaglio] = useState<any>(null)
   const [trackingData, setTrackingData] = useState<any>(null)
@@ -79,21 +80,19 @@ export default function SpedizioniPage() {
     fetch('/api/staff').then(r=>r.json()).then(d=>setStaff(Array.isArray(d)?d.filter((u:any)=>{const ru=(u.ruolo||'').toLowerCase();return ru!=='cliente'&&ru!=='master'}):[]))
   }, [])
 
-  // Ricarica dal SERVER quando cambia il numero spedizione o l'intervallo date.
-  // Cercando per N. Spedizione la ricerca va su TUTTO lo storico (ignora la data),
-  // così trovi la spedizione anche se è di un altro giorno o oltre le ultime caricate.
+  // PAGINAZIONE SERVER-SIDE: viaggia SOLO la pagina che guardi (10 righe) + il conteggio totale.
+  // Tutti i filtri passano al server; al cambio filtro si riparte da pagina 1 (debounce sui testi).
+  // Cercando per N. Spedizione la ricerca va su TUTTO lo storico (ignora la data), come prima.
   useEffect(() => {
-    const num = (filtri.numero || '').trim()
-    const t = setTimeout(() => { caricaTutte() }, num ? 350 : 0)
+    const t = setTimeout(() => { setPagina(1); carica(1) }, 350)
     return () => clearTimeout(t)
-  }, [filtri.numero, filtri.dal, filtri.al])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(filtri), cerca, perPage])
 
-  // Filtri reattivi: appena tocchi un filtro, la lista si aggiorna (niente bottone "Filtra")
-  useEffect(() => { applicaFiltri(); setPagina(1) }, [filtri, spedizioni])
-
-  async function caricaTutte() {
+  async function carica(paginaReq: number) {
     setLoading(true)
     const q = new URLSearchParams()
+    q.set('page', String(paginaReq)); q.set('perPage', String(perPage))
     const num = (filtri.numero || '').trim()
     if (num) {
       // ricerca per numero su tutto lo storico: NIENTE filtro data
@@ -102,71 +101,38 @@ export default function SpedizioniPage() {
       if (filtri.dal) q.set('dal', filtri.dal)
       if (filtri.al) q.set('al', filtri.al + 'T23:59:59')
     }
-    const res = await fetch('/api/spedizioni/lista' + (q.toString() ? '?' + q.toString() : ''))
+    if (cerca.trim()) q.set('cerca', cerca.trim())
+    // Selezione cliente/sotto-master: parametri dedicati (rete/clienteEq) per mantenere lo scope
+    // di rete e quindi gli stessi prezzi/margini di prima.
+    if (filtri.clienteId) {
+      if (filtri.clienteId.startsWith('m:')) q.set('rete', filtri.clienteId.slice(2))
+      else q.set('clienteEq', filtri.clienteId)
+    }
+    for (const k of ['stato','contratto','vettore','negozio','agente','id_ordine','contrassegno','stato_contrassegni','assicurazione','fatturato','dest_citta','dest_cap','contenuto'] as const) {
+      const v = (filtri as any)[k]
+      if (v) q.set(k, v)
+    }
+    const res = await fetch('/api/spedizioni/lista?' + q.toString())
     const data = await res.json()
-    setSpedizioni(Array.isArray(data) ? data : [])
-    setSpedizioniFiltrate(Array.isArray(data) ? data : [])
+    setSpedizioni(Array.isArray(data?.rows) ? data.rows : [])
+    setSpedizioniFiltrate(Array.isArray(data?.rows) ? data.rows : [])
+    setTotale(Number(data?.total) || 0)
     setLoading(false)
   }
 
-  function applicaFiltri() {
-    let filtered = [...spedizioni]
-    if (filtri.clienteId) {
-      if (filtri.clienteId.startsWith('m:')) {
-        const mid = filtri.clienteId.slice(2)
-        filtered = filtered.filter(s => s.master_rete_id === mid)   // sotto-master agganciato
-      } else {
-        filtered = filtered.filter(s => s.cliente_id === filtri.clienteId)
-      }
-    }
-    if (filtri.stato) filtered = filtered.filter(s => s.stato === filtri.stato)
-    // Match per NOME contratto (non per id): in rete i corrieri hanno id diversi ma stesso nome.
-    if (filtri.contratto) filtered = filtered.filter(s => String(s.corrieri?.nome_contratto||'') === filtri.contratto)
-    if (filtri.vettore) filtered = filtered.filter(s => String(s.corrieri?.nome_contratto||'').split(' ')[0].toUpperCase() === filtri.vettore)
-    if (filtri.numero) filtered = filtered.filter(s => s.numero?.toLowerCase().includes(filtri.numero.toLowerCase()))
-    if (filtri.id_ordine) filtered = filtered.filter(s => (s.id_ordine||'').toLowerCase().includes(filtri.id_ordine.toLowerCase()))
-    // Cercando per N. Spedizione si ignora la data (la spedizione può essere di un altro giorno)
-    if (!filtri.numero) {
-      if (filtri.dal) filtered = filtered.filter(s => new Date(s.created_at) >= new Date(filtri.dal))
-      if (filtri.al) filtered = filtered.filter(s => new Date(s.created_at) <= new Date(filtri.al+'T23:59:59'))
-    }
-    if (filtri.contrassegno==='si') filtered = filtered.filter(s => Number(s.contrassegno)>0)
-    if (filtri.contrassegno==='no') filtered = filtered.filter(s => Number(s.contrassegno)===0)
-    if (filtri.stato_contrassegni==='da_pagare') filtered = filtered.filter(s => Number(s.contrassegno)>0 && s.stato_contrassegno!=='in_distinta' && s.stato_contrassegno!=='pagato')
-    if (filtri.stato_contrassegni==='in_attesa') filtered = filtered.filter(s => s.stato_contrassegno==='in_distinta')
-    if (filtri.stato_contrassegni==='pagato') filtered = filtered.filter(s => s.stato_contrassegno==='pagato')
-    if (filtri.agente) filtered = filtered.filter(s => (s.clienti?.agente||'') === filtri.agente)
-    if (filtri.dest_citta) filtered = filtered.filter(s => s.dest_citta?.toLowerCase().includes(filtri.dest_citta.toLowerCase()))
-    if (filtri.dest_cap) filtered = filtered.filter(s => s.dest_cap?.includes(filtri.dest_cap))
-    if (filtri.contenuto) filtered = filtered.filter(s => s.contenuto?.toLowerCase().includes(filtri.contenuto.toLowerCase()))
-    if (filtri.assicurazione==='si') filtered = filtered.filter(s => Number(s.assicurazione)>0)
-    if (filtri.assicurazione==='no') filtered = filtered.filter(s => !(Number(s.assicurazione)>0))
-    if (filtri.fatturato==='si') filtered = filtered.filter(s => !!s.fatturato)
-    if (filtri.fatturato==='no') filtered = filtered.filter(s => !s.fatturato)
-    if (filtri.negozio) filtered = filtered.filter(s => String(s.canale||'') === filtri.negozio)
-    setSpedizioniFiltrate(filtered)
-  }
-
-  const spedizioniVisibili = cerca
-    ? spedizioniFiltrate.filter(s => {
-        const q = cerca.toLowerCase()
-        return s.numero?.toLowerCase().includes(q) ||
-          s.dest_nome?.toLowerCase().includes(q) ||
-          s.mitt_nome?.toLowerCase().includes(q) ||
-          s.tracking_number?.toLowerCase().includes(q)
-      })
-    : spedizioniFiltrate
-
-  const totalePagine = Math.max(1, Math.ceil(spedizioniVisibili.length / perPage))
+  // Le righe arrivano GIÀ filtrate e paginate dal server.
+  const spedizioniVisibili = spedizioni
+  const totalePagine = Math.max(1, Math.ceil(totale / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
-  const spedizioniPaginate = spedizioniVisibili.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
+  const spedizioniPaginate = spedizioni
+  const vaiAPagina = (n: number) => { const x = Math.max(1, Math.min(totalePagine, n)); setPagina(x); carica(x) }
 
   const setF = (k: string, v: string) => setFiltri(f => ({...f, [k]: v}))
 
-  // Opzioni Vettore/Contratto dai corrieri REALMENTE presenti nelle spedizioni (così il filtro combacia sempre)
-  const vettoriPresenti = Array.from(new Set((spedizioni||[]).map((s:any)=>String(s.corrieri?.nome_contratto||'').split(' ')[0].toUpperCase()).filter(Boolean))).sort()
-  const contrattiPresenti = Array.from(new Set((spedizioni||[]).map((s:any)=>s.corrieri?.nome_contratto).filter(Boolean))).sort()
-  const negoziPresenti = Array.from(new Set((spedizioni||[]).map((s:any)=>s.canale).filter(Boolean))).sort()
+  // Opzioni Vettore/Contratto dai MIEI corrieri (in rete i nomi contratto combaciano); negozi = piattaforme note.
+  const vettoriPresenti = Array.from(new Set((corrieri||[]).map((c:any)=>String(c.nome_contratto||'').split(' ')[0].toUpperCase()).filter(Boolean))).sort()
+  const contrattiPresenti = Array.from(new Set((corrieri||[]).map((c:any)=>c.nome_contratto).filter(Boolean))).sort()
+  const negoziPresenti = ['shopify','woocommerce','prestashop','ebay','tiktok','temu','amazon','csv']
 
   function toggleSelect(id: string) {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id])
@@ -268,7 +234,7 @@ async function apriTracking(s: any) {
     setEliminando(id)
     const res = await fetch(`/api/spedizioni/ripristina?id=${id}`, { method: 'POST' })
     setEliminando(null)
-    if (res.ok) { setNotifica('Spedizione ripristinata.'); caricaTutte() }
+    if (res.ok) { setNotifica('Spedizione ripristinata.'); carica(pagina) }
     else { const d = await res.json().catch(()=>({})); setNotifica(d.error || 'Errore durante il ripristino') }
     window.scrollTo({ top: 0, behavior: 'smooth' })
     setTimeout(() => setNotifica(''), 4000)
@@ -283,7 +249,7 @@ async function apriTracking(s: any) {
     if (res.ok && j.success) {
       setNotifica(j.message || 'Spedizione spostata in attesa di annullo (48h). La trovi in Spedizioni Cancellate.')
       window.scrollTo({ top: 0, behavior: 'smooth' })
-      caricaTutte()
+      carica(pagina)
     } else {
       setNotifica('Impossibile eliminare la spedizione. Hai bisogno del permesso per eseguire questa azione!')
       window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -318,7 +284,7 @@ async function apriTracking(s: any) {
     if (falliti.length) msg += ` · ${falliti.length} non eliminabili (gia' partite o non consentite): ${falliti.slice(0, 8).join(', ')}${falliti.length > 8 ? '…' : ''}`
     setNotifica(msg)
     window.scrollTo({ top: 0, behavior: 'smooth' })
-    caricaTutte()
+    carica(pagina)
     setTimeout(() => setNotifica(''), 8000)
   }
 
@@ -441,7 +407,7 @@ async function apriTracking(s: any) {
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px'}}>
           <div className="gruppo-titolo-selettore">
-          <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>📋 Spedizioni <span style={{color:'#1a1a1a',fontWeight:'400',fontSize:'12px'}}>({spedizioniVisibili.length} risultati)</span></span>
+          <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>📋 Spedizioni <span style={{color:'#1a1a1a',fontWeight:'400',fontSize:'12px'}}>({totale} risultati)</span></span>
           <span style={{display:'block',marginTop:'4px',fontSize:'12px',fontWeight:'400',color:'#666'}}>
             Mostra{' '}
             <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}}
@@ -567,21 +533,21 @@ async function apriTracking(s: any) {
             {totalePagine > 0 && (
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap',gap:'8px'}}>
                 <span style={{fontSize:'12px',color:'#666'}}>
-                  {(paginaCorr - 1) * perPage + 1}-{Math.min(paginaCorr * perPage, spedizioniVisibili.length)} di {spedizioniVisibili.length}
+                  {totale === 0 ? '0' : `${(paginaCorr - 1) * perPage + 1}-${Math.min(paginaCorr * perPage, totale)}`} di {totale}
                 </span>
                 <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
-                  <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1}
+                  <button onClick={()=>vaiAPagina(paginaCorr-1)} disabled={paginaCorr<=1}
                     style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr<=1?'default':'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
                   {Array.from({length: totalePagine}, (_,i)=>i+1)
                     .filter(n => n===1 || n===totalePagine || Math.abs(n-paginaCorr)<=2)
                     .map((n,idx,arr)=>(
                       <span key={n} style={{display:'flex',alignItems:'center'}}>
                         {idx>0 && arr[idx-1] !== n-1 && <span style={{padding:'0 4px',color:'#bbb',fontSize:'12px'}}>…</span>}
-                        <button onClick={()=>setPagina(n)}
+                        <button onClick={()=>vaiAPagina(n)}
                           style={{minWidth:'30px',padding:'5px 8px',border:'1px solid',borderColor:n===paginaCorr?'#f97316':'#d1d5db',borderRadius:'5px',background:n===paginaCorr?'#f97316':'#fff',color:n===paginaCorr?'#fff':'#1a1a1a',fontSize:'12px',fontWeight:n===paginaCorr?'700':'400',cursor:'pointer'}}>{n}</button>
                       </span>
                     ))}
-                  <button onClick={()=>setPagina(p=>Math.min(totalePagine,p+1))} disabled={paginaCorr>=totalePagine}
+                  <button onClick={()=>vaiAPagina(paginaCorr+1)} disabled={paginaCorr>=totalePagine}
                     style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr>=totalePagine?'default':'pointer',color:paginaCorr>=totalePagine?'#ccc':'#1a1a1a'}}>Successivo</button>
                 </div>
               </div>

@@ -29,6 +29,41 @@ export async function GET(req: NextRequest) {
   const contrassegno = p.get('contrassegno')
   const ordinaPer = (stato === 'annullata') ? 'updated_at' : 'created_at'
 
+  // ── PAGINAZIONE SERVER-SIDE (con ?page=N): risposta { rows, total, page, perPage } e TUTTI i
+  //    filtri applicati a DB → viaggiano solo le righe della pagina (10), non l'intero periodo.
+  //    SENZA ?page il comportamento resta IDENTICO a prima (array completo) per le altre pagine.
+  const pageParam = parseInt(p.get('page') || '')
+  const paged = Number.isFinite(pageParam) && pageParam > 0
+  const perPage = Math.min(200, Math.max(1, parseInt(p.get('perPage') || '') || 10))
+  const fContratto = p.get('contratto')
+  const fVettore = p.get('vettore')
+  const fNegozio = p.get('negozio')
+  const fAgente = p.get('agente')
+  const fIdOrdine = p.get('id_ordine')
+  const fStatoContr = p.get('stato_contrassegni')
+  const fAssic = p.get('assicurazione')
+  const fFatt = p.get('fatturato')
+  const fCerca = p.get('cerca')
+  // Selezione RETE/CLIENTE in modalità paginata: parametri DEDICATI che NON sostituiscono lo scope
+  // di rete (così prezzi/margini per prima-linea restano identici a prima, quando il filtro era in
+  // memoria sul browser sopra le righe già arricchite).
+  const fRete = p.get('rete')            // id sotto-master di prima linea: filtra al suo sotto-albero
+  const fClienteEq = p.get('clienteEq')  // id cliente esatto: filtro AND dentro lo scope di rete
+  // Ricerca ID ORDINE: l'id reale sta in ordini_importati/ordini_ecommerce → risolvo prima gli id
+  // spedizione che matchano, poi filtro (più i campi diretti id_ordine_esterno/rif_ordine).
+  const sanitizza = (v: string) => v.replace(/[,()"\\%]/g, ' ').trim()
+  let idOrdineSpedIds: string[] = []
+  if (fIdOrdine) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const adminIO = createAdminSupabase()
+    const cIO = sanitizza(fIdOrdine)
+    const [a, b] = await Promise.all([
+      adminIO.from('ordini_importati').select('spedizione_id').ilike('order_id', `%${cIO}%`).not('spedizione_id', 'is', null).limit(200),
+      adminIO.from('ordini_ecommerce').select('spedizione_id').or(`numero_ordine.ilike.%${cIO}%,ordine_esterno_id.ilike.%${cIO}%`).not('spedizione_id', 'is', null).limit(200),
+    ])
+    idOrdineSpedIds = Array.from(new Set([...(a.data || []), ...(b.data || [])].map((r: any) => r.spedizione_id).filter(Boolean)))
+  }
+
   // ── Rete: un master vede anche le spedizioni dei sotto-master (tutta la discendenza),
   //    ma etichettate con la PROPRIA PRIMA LINEA (il figlio diretto attraverso cui
   //    discende la spedizione). Es: io->MASSIMO->GIOVANNI: le spedizioni di Giovanni
@@ -38,6 +73,7 @@ export async function GET(req: NextRequest) {
   let db: any = supabase
   let masterIds: string[] | null = null
   let subtreeSel: string[] | null = null  // sotto-albero del sotto-master selezionato
+  let reteSubtree: string[] | null = null // filtro rete (paginato): sotto-albero DENTRO la mia rete
 
   // Selezione di un sotto-master agganciato: mostro le spedizioni del suo sotto-albero
   if (masterSel && ruolo !== 'cliente' && ruolo !== 'agente' && utente?.master_id) {
@@ -82,20 +118,39 @@ export async function GET(req: NextRequest) {
       frontier = nuovi
     }
     if (masterIds.length > 1) db = adminDb  // servono i permessi cross-master (RLS)
+    // Filtro RETE (paginato): restringo al sotto-albero del sotto-master selezionato, MANTENENDO
+    // l'arricchimento di rete (prima linea/prezzi) — dev'essere un master della mia rete.
+    if (fRete && masterIds.includes(fRete)) {
+      reteSubtree = [fRete]
+      let fr = [fRete]
+      for (let i = 0; i < 20 && fr.length; i++) {
+        const nu: string[] = []
+        for (const f of fr) for (const c of (figliDi.get(f) || [])) {
+          if (!reteSubtree.includes(c.id)) { reteSubtree.push(c.id); nu.push(c.id) }
+        }
+        fr = nu
+      }
+    }
   }
 
   // Solo colonne leggere (SPED_COLS): esclusi etichetta_url/raw_response/colli_dettaglio.
   // Costruisco una query FRESCA a ogni chiamata (i builder Supabase sono monouso).
-  const buildBase = () => {
+  const buildBase = (contaTotale = false) => {
     // 2° ordinamento su 'id' (tie-breaker DETERMINISTICO): senza, le righe con lo stesso valore di
     // ordinaPer (es. created_at identico negli import in blocco) cambiano posizione tra le pagine
     // (fetchAll >1000) → l'elenco "balla". Con l'id la paginazione è stabile e completa.
-    let q = db.from('spedizioni').select(`${SPED_COLS},clienti(ragione_sociale,agente),corrieri(id,nome_contratto)`).order(ordinaPer, { ascending: false }).order('id', { ascending: false })
+    // I filtri su tabelle collegate (contratto/vettore → corrieri, agente → clienti) richiedono il
+    // join !inner: attivato SOLO quando quel filtro è presente (altrimenti embed normale, invariato).
+    const embCorr = (fContratto || fVettore) ? 'corrieri!inner(id,nome_contratto)' : 'corrieri(id,nome_contratto)'
+    const embCli = fAgente ? 'clienti!inner(ragione_sociale,agente)' : 'clienti(ragione_sociale,agente)'
+    let q = db.from('spedizioni').select(`${SPED_COLS},${embCli},${embCorr}`, contaTotale ? { count: 'exact' } : undefined).order(ordinaPer, { ascending: false }).order('id', { ascending: false })
     if (subtreeSel) q = q.in('master_id', subtreeSel)
     else if (clienteId) q = q.eq('cliente_id', clienteId).eq('master_id', utente?.master_id)
     else if (utente?.ruolo === 'cliente') q = q.eq('cliente_id', utente.cliente_id)
+    else if (reteSubtree) q = q.in('master_id', reteSubtree)
     else if (masterIds && masterIds.length > 1) q = q.in('master_id', masterIds)
     else q = q.eq('master_id', utente?.master_id)
+    if (fClienteEq) q = q.eq('cliente_id', fClienteEq)
     // Filtro stato: se richiesto uno stato preciso lo applico; se non richiesto, mostro anche le
     // spedizioni in annullamento_pending (ripristinabili). Escludo solo annullate e coda manuale.
     if (stato && stato !== 'tutti') q = q.eq('stato', stato)
@@ -109,11 +164,38 @@ export async function GET(req: NextRequest) {
     if (contrassegno === 'si') q = q.gt('contrassegno', 0)
     if (contrassegno === 'no') q = q.eq('contrassegno', 0)
     if (agenteClienteIds !== null) q = q.in('cliente_id', agenteClienteIds.length ? agenteClienteIds : ['00000000-0000-0000-0000-000000000000'])
+    // ── Filtri aggiuntivi (prima applicati in memoria dal browser; identica semantica) ──
+    if (fContratto) q = q.eq('corrieri.nome_contratto', fContratto)
+    if (fVettore) q = q.ilike('corrieri.nome_contratto', `${sanitizza(fVettore)}%`)
+    if (fNegozio) q = q.eq('canale', fNegozio)
+    if (fAgente) q = q.eq('clienti.agente', fAgente)
+    if (fStatoContr === 'da_pagare') q = q.gt('contrassegno', 0).or('stato_contrassegno.is.null,and(stato_contrassegno.neq.in_distinta,stato_contrassegno.neq.pagato)')
+    if (fStatoContr === 'in_attesa') q = q.eq('stato_contrassegno', 'in_distinta')
+    if (fStatoContr === 'pagato') q = q.eq('stato_contrassegno', 'pagato')
+    if (fAssic === 'si') q = q.gt('assicurazione', 0)
+    if (fAssic === 'no') q = q.or('assicurazione.is.null,assicurazione.eq.0')
+    if (fFatt === 'si') q = q.eq('fatturato', true)
+    if (fFatt === 'no') q = q.or('fatturato.is.null,fatturato.eq.false')
+    if (fCerca) { const c = sanitizza(fCerca); if (c) q = q.or(`numero.ilike.%${c}%,dest_nome.ilike.%${c}%,mitt_nome.ilike.%${c}%,tracking_number.ilike.%${c}%`) }
+    if (fIdOrdine) {
+      const c = sanitizza(fIdOrdine)
+      const inIds = idOrdineSpedIds.length ? `id.in.(${idOrdineSpedIds.join(',')}),` : ''
+      q = q.or(`${inIds}id_ordine_esterno.ilike.%${c}%,rif_ordine.ilike.%${c}%`)
+    }
     return q
   }
-  // PostgREST tronca a 1000 righe/query: carico a blocchi finché ci sono, così l'elenco è COMPLETO
-  // (prima un .limit(200) nascondeva tutto oltre le 200). Nessun limite pratico.
-  const spedizioni: any[] = await fetchAll(buildBase)
+  // PAGINATO: solo la pagina richiesta + conteggio totale. LEGACY (senza ?page): tutte le righe
+  // a blocchi (PostgREST tronca a 1000/query) come prima, per le pagine che si aspettano l'array.
+  let totalePaginato = 0
+  let spedizioni: any[]
+  if (paged) {
+    const from = (pageParam - 1) * perPage
+    const { data, count } = await buildBase(true).range(from, from + perPage - 1)
+    spedizioni = data || []
+    totalePaginato = count || 0
+  } else {
+    spedizioni = await fetchAll(buildBase)
+  }
 
   // Costo da mostrare = il PREZZO CLIENTE che ti paga il tuo DIRETTO:
   // - spedizione propria (master_id = io): il prezzo del cliente diretto (costo_totale).
@@ -290,5 +372,6 @@ export async function GET(req: NextRequest) {
     const distinta_reso = distintaReso.get(s.id) || null
     return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, id_ordine, distinta_reso }
   })
+  if (paged) return NextResponse.json({ rows, total: totalePaginato, page: pageParam, perPage })
   return NextResponse.json(rows)
 }
