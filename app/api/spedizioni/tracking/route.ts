@@ -30,10 +30,13 @@ export async function GET(req: NextRequest) {
   if (!spedizione) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 
   // Aggiorna lo stato salvato dallo stato live del tracking (best-effort, non blocca la risposta).
+  // Ritorna lo stato EFFETTIVO dopo l'allineamento: il frontend lo usa per aggiornare badge e riga
+  // in elenco (prima il popup mostrava eventi live ma il badge restava quello vecchio della lista).
+  let statoEffettivo: string = (spedizione as any).stato
   const persistiStato = async (nuovo: string | null) => {
     if (!nuovo || nuovo === 'eccezione' || nuovo === (spedizione as any).stato) return
     if ((spedizione as any).stato === 'consegnata' || (spedizione as any).stato === 'annullata') return
-    try { await admin.from('spedizioni').update({ stato: nuovo }).eq('id', spedizione.id) } catch {}
+    try { await admin.from('spedizioni').update({ stato: nuovo }).eq('id', spedizione.id); statoEffettivo = nuovo } catch {}
   }
 
   const { data: cliente } = await admin.from('clienti').select('ragione_sociale').eq('id', spedizione.cliente_id).single()
@@ -65,7 +68,7 @@ export async function GET(req: NextRequest) {
       const raw: any = spedizione.raw_response || {}
       const spid = raw.id || raw?.raw?.data?.id
       const authcode = cred?.authcode
-      if (!spid || !authcode) return NextResponse.json({ ...base, eventi: [], error: 'Tracking non disponibile per questa spedizione' })
+      if (!spid || !authcode) return NextResponse.json({ ...base, eventi: [], stato: statoEffettivo, error: 'Tracking non disponibile per questa spedizione' })
       const tr = await spediamoproGetTracking(authcode, Number(spid))
       await persistiStato(mapStatoSpediamopro(tr.status))
       const eventi = (tr.events || []).map((e: any) => ({
@@ -73,7 +76,7 @@ export async function GET(req: NextRequest) {
         description: [e.title, e.description].filter(Boolean).join(' — ') || 'Evento',
         location: '',
       })).reverse()   // più recente in alto
-      return NextResponse.json({ ...base, eventi, status_code: 200, raw: tr })
+      return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200, raw: tr })
     }
 
     // Spedisci.online: endpoint CORRETTO /api/v2/tracking/{tracking} (NON /shipping/tracking = 404).
@@ -102,8 +105,8 @@ export async function GET(req: NextRequest) {
     for (const c of candidati) { const m = mapStatoSpedisci(c); if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m }
     await persistiStato(nuovo)
 
-    return NextResponse.json({ ...base, eventi, status_code: res.status, raw: data })
+    return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: res.status, raw: data })
   } catch(e: any) {
-    return NextResponse.json({ ...base, eventi: [], error: e.message, tracking_number: spedizione.tracking_number }, { status: 200 })
+    return NextResponse.json({ ...base, eventi: [], stato: statoEffettivo, error: e.message, tracking_number: spedizione.tracking_number }, { status: 200 })
   }
 }

@@ -141,8 +141,11 @@ export async function GET(req: NextRequest) {
     // -(somma). Prima si leggeva solo 'spedizione' e si sovrascriveva -> le rettifiche non si vedevano.
     const sumCli = new Map<string, number>()      // spedId -> somma signed (movimenti cliente)
     const sumTarget = new Map<string, number>()   // spedId|target -> somma signed (movimenti master)
-    for (let i = 0; i < spedIds.length; i += 300) {
-      const chunk = spedIds.slice(i, i + 300)
+    // Chunk in PARALLELO (prima in sequenza: con migliaia di spedizioni erano decine di round-trip
+    // uno dietro l'altro = lista lenta). L'aggregazione è una somma: l'ordine non conta.
+    const chunksMov: string[][] = []
+    for (let i = 0; i < spedIds.length; i += 300) chunksMov.push(spedIds.slice(i, i + 300))
+    await Promise.all(chunksMov.map(async (chunk) => {
       for (let from = 0; ; from += 1000) {
         const { data: mvs } = await adminMov.from('movimenti')
           .select('spedizione_id,master_target_id,cliente_id,importo').in('tipo', ['spedizione', 'rettifica'])
@@ -155,7 +158,7 @@ export async function GET(req: NextRequest) {
         }
         if (mvs.length < 1000) break
       }
-    }
+    }))
     for (const [spedId, s] of sumCli) pagatoCliente.set(spedId, Math.round(Math.abs(s) * 100) / 100)
     for (const [k, s] of sumTarget) {
       const [spedId, target] = k.split('|')
@@ -187,8 +190,11 @@ export async function GET(req: NextRequest) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const adminOrd = createAdminSupabase()
     const ids = (spedizioni || []).map((s: any) => s.id)
-    for (let i = 0; i < ids.length; i += 300) {
-      const chunk = ids.slice(i, i + 300)
+    // Chunk in PARALLELO (ogni spedizione sta in UN solo chunk → il "primo vince" resta identico;
+    // dentro al chunk l'ordine CSV-prima-di-ecommerce è preservato).
+    const chunksOrd: string[][] = []
+    for (let i = 0; i < ids.length; i += 300) chunksOrd.push(ids.slice(i, i + 300))
+    await Promise.all(chunksOrd.map(async (chunk) => {
       for (let from = 0; ; from += 1000) {
         const { data: imp } = await adminOrd.from('ordini_importati').select('spedizione_id,order_id').in('spedizione_id', chunk).not('order_id', 'is', null).order('id', { ascending: true }).range(from, from + 999)
         for (const o of (imp || [])) { const sid = (o as any).spedizione_id, v = (o as any).order_id; if (sid && v && !idOrdine.has(sid)) idOrdine.set(sid, String(v)) }
@@ -196,7 +202,7 @@ export async function GET(req: NextRequest) {
       }
       const { data: ecom } = await adminOrd.from('ordini_ecommerce').select('spedizione_id,numero_ordine,ordine_esterno_id').in('spedizione_id', chunk)
       for (const o of (ecom || [])) { const sid = (o as any).spedizione_id, v = (o as any).numero_ordine || (o as any).ordine_esterno_id; if (sid && v && !idOrdine.has(sid)) idOrdine.set(sid, String(v)) }
-    }
+    }))
   }
 
   // Numero DISTINTA RESI per le spedizioni in "reso al mittente" (mostrato sotto lo stato in elenco:

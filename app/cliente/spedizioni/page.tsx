@@ -39,9 +39,14 @@ function codBadgeStyle(stato?: string) {
   return { background:'#e5e7eb', color:'#4b5563' }                            // grigio
 }
 
+// Default: ultimi 30 giorni (come l'elenco master). Con dal/al VUOTI si caricava PRIMA tutto lo
+// storico (lento), poi il DateRangePicker auto-impostava oggi-oggi e partiva un SECONDO caricamento:
+// all'apertura si vedeva "oggi" nel filtro ma la lista con tutto (e in caso di race restava così).
+const _oggiISO = new Date().toISOString().slice(0, 10)
+const _da30ISO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
 const FILTRI_DEFAULT = {
   clienteId:'', negozio:'', vettore:'', contratto:'', stato:'', id_ordine:'',
-  numero:'', dal:'', al:'', contrassegno:'', stato_contrassegni:'',
+  numero:'', dal:_da30ISO, al:_oggiISO, contrassegno:'', stato_contrassegni:'',
   assicurazione:'', dest_citta:'', dest_cap:'', contenuto:'', fatturato:'', agente:''
 }
 
@@ -229,6 +234,12 @@ async function apriTracking(s: any) {
     const res = await fetch(`/api/spedizioni/tracking?id=${s.id}`)
     const data = await res.json()
     setTrackingData(data); setTrackingLoading(false)
+    // Allinea SUBITO badge del popup e riga in elenco allo stato live del corriere
+    // (la route lo ha già salvato a DB: prima il badge restava quello vecchio della lista).
+    if (data?.stato && data.stato !== s.stato) {
+      setTrackingModal((m: any) => m && m.id === s.id ? { ...m, stato: data.stato } : m)
+      setSpedizioni(prev => prev.map((x: any) => x.id === s.id ? { ...x, stato: data.stato } : x))
+    }
   }
 
   async function ripristina(id: string, numero: string) {
