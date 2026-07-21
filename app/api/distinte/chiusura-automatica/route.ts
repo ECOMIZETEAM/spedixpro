@@ -17,13 +17,17 @@ export async function GET(req: NextRequest) {
   const supabase = createAdminSupabase()
 
   const ora = new Date()
+  // FINESTRA: prima prendeva solo le create nelle ultime ~22h (created_at >= ieri 23:00): chi saltava
+  // un giro (annullo→ripristino 48h, cron fallito, creata tra le 23 e l'1) usciva dalla finestra PER
+  // SEMPRE e restava aperta. Ora riprende TUTTO l'arretrato senza distinta degli ultimi 30 giorni,
+  // escludendo le annullate/in annullo (non vanno mai in distinta).
   const inizio = new Date(ora)
-  inizio.setDate(inizio.getDate() - 1)
-  inizio.setHours(23, 0, 0, 0)
+  inizio.setDate(inizio.getDate() - 30)
 
   const { data: speds } = await supabase.from('spedizioni')
     .select('id,master_id,cliente_id,corriere_id,colli,peso_reale,costo_totale')
     .is('distinta_id', null)
+    .not('stato', 'in', '(annullata,annullamento_pending,annullamento_manuale)')
     .gte('created_at', inizio.toISOString())
 
   if (!speds?.length) {
@@ -32,15 +36,18 @@ export async function GET(req: NextRequest) {
 
   const gruppi: Record<string, any[]> = {}
   for (const s of speds) {
-    if (!s.master_id || !s.cliente_id || !s.corriere_id) continue
-    const key = s.master_id + '|' + s.cliente_id + '|' + s.corriere_id
+    // cliente_id NULL = spedizione PROPRIA del master: prima veniva SALTATA (mai chiusa in distinta).
+    // Ora la raggruppo per master+corriere con distinta senza cliente (come la chiusura manuale "m:").
+    if (!s.master_id || !s.corriere_id) continue
+    const key = s.master_id + '|' + (s.cliente_id || 'PROPRIA') + '|' + s.corriere_id
     if (!gruppi[key]) gruppi[key] = []
     gruppi[key].push(s)
   }
 
   let distinteCreate = 0
   for (const key in gruppi) {
-    const [masterId, clienteId, corriereId] = key.split('|')
+    const [masterId, clienteRaw, corriereId] = key.split('|')
+    const clienteId = clienteRaw === 'PROPRIA' ? null : clienteRaw
     const righe = gruppi[key]
     const totaleColli = righe.reduce((s, x) => s + Number(x.colli || 1), 0)
     const totalePeso = righe.reduce((s, x) => s + Number(x.peso_reale || 0), 0)
@@ -57,6 +64,9 @@ export async function GET(req: NextRequest) {
     }).select().single()
     if (distinta?.id) {
       await supabase.from('spedizioni').update({ distinta_id: distinta.id }).in('id', righe.map(r => r.id))
+      // Distinta = consegnate al corriere → "spedita" (solo le "in lavorazione", per non sovrascrivere
+      // in_transito/consegnata). Come le chiusure manuali: si distinguono dalle etichette create dopo.
+      await supabase.from('spedizioni').update({ stato: 'spedita' }).in('id', righe.map(r => r.id)).eq('stato', 'in_lavorazione')
       distinteCreate++
       // Tracking a Shopify per gli ordini ecommerce collegati (best-effort)
       try { await fulfillSpedizioniShopify(supabase, righe.map(r => r.id)) } catch {}
