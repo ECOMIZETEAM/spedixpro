@@ -32,16 +32,25 @@ export async function masterIdsVisibili(adminDb: any, masterId: string): Promise
 
 // Sotto-albero di un master: [masterId, figli, nipoti, ...] (id). Serve per filtrare
 // TUTTE le spedizioni che passano sotto quel master.
+// UNA sola query: la tabella masters è piccola (decine di righe); prima si faceva una query PER
+// LIVELLO (fino a 12 round-trip sequenziali ≈ 1s) su OGNI pagina che filtra per rete.
 export async function sottoAlberoMasterIds(adminDb: any, rootId: string): Promise<string[]> {
+  const { data } = await adminDb.from('masters').select('id,parent_master_id')
+  const figliDi = new Map<string, string[]>()
+  for (const m of (data || [])) {
+    const p = (m as any).parent_master_id
+    if (!p) continue
+    if (!figliDi.has(p)) figliDi.set(p, [])
+    figliDi.get(p)!.push((m as any).id)
+  }
   const ids: string[] = [rootId]
   const seen = new Set<string>([rootId])
   let frontier = [rootId]
-  for (let i = 0; i < 12 && frontier.length; i++) {
-    const { data } = await adminDb.from('masters').select('id,parent_master_id').in('parent_master_id', frontier)
+  for (let i = 0; i < 20 && frontier.length; i++) {
     const nuovi: string[] = []
-    for (const m of (data || [])) {
-      if (seen.has(m.id)) continue
-      seen.add(m.id); ids.push(m.id); nuovi.push(m.id)
+    for (const f of frontier) for (const c of (figliDi.get(f) || [])) {
+      if (seen.has(c)) continue
+      seen.add(c); ids.push(c); nuovi.push(c)
     }
     frontier = nuovi
   }

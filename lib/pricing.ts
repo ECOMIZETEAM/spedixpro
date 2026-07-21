@@ -10,6 +10,7 @@
 // della catena col proprio listino ereditato.
 
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
+import { fetchAll } from '@/lib/fetch-all'
 
 const ZONE_MAP: Record<string, string> = {
   CA:'Sardegna',CI:'Sardegna',VS:'Sardegna',NU:'Sardegna',OG:'Sardegna',OT:'Sardegna',OR:'Sardegna',SS:'Sardegna',SU:'Sardegna',
@@ -559,9 +560,11 @@ export async function creaCalcolatoreCorriere(
     listinoPerCorriere.set(l.corriere_id, { id: l.id, fattore })
   }
 
-  const { data: fasce } = listinoIds.length
-    ? await supabase.from('listini_corrieri_fasce').select('listino_id,peso_max,prezzo,tipo,zona_id,fuel,zone(id,nome)').in('listino_id', listinoIds)
-    : { data: [] }
+  // fetchAll: fasce e zone_cap possono superare le 1000 righe (limite PostgREST) — prima venivano
+  // TRONCATE e il fallback prezzava con zone/fasce incomplete (margine sbagliato sui CAP oltre i primi 1000).
+  const fasce: any[] = listinoIds.length
+    ? await fetchAll(() => supabase.from('listini_corrieri_fasce').select('listino_id,peso_max,prezzo,tipo,zona_id,fuel,zone(id,nome)').in('listino_id', listinoIds))
+    : []
   const fascePerListino = new Map<string, any[]>()
   for (const f of fasce || []) {
     if (!fascePerListino.has(f.listino_id)) fascePerListino.set(f.listino_id, [])
@@ -578,9 +581,9 @@ export async function creaCalcolatoreCorriere(
   }
 
   const zonaIds = Array.from(new Set((fasce || []).map((f: any) => f.zone?.id).filter(Boolean)))
-  const { data: zc } = zonaIds.length
-    ? await supabase.from('zone_cap').select('zona_id,paese,provincia,cap').in('zona_id', zonaIds)
-    : { data: [] }
+  const zc: any[] = zonaIds.length
+    ? await fetchAll(() => supabase.from('zone_cap').select('zona_id,paese,provincia,cap').in('zona_id', zonaIds))
+    : []
   const zcByPaese = new Map<string, any[]>()
   for (const r of zc || []) {
     const k = (r.paese || '').toUpperCase()
@@ -684,9 +687,10 @@ export async function creaCalcolatoreListinoCliente(
   const fattorePerCorr = new Map<string, number>()
   for (const a of (aggCorr || [])) { const fv = parseFloat(a?.fattore_volume); if (a?.corriere_id && fv > 0) fattorePerCorr.set(a.corriere_id, fv) }
 
-  const { data: fasce } = await supabase
+  // fetchAll: oltre 1000 fasce venivano TRONCATE (limite PostgREST) → prezzi fallback incompleti.
+  const fasce: any[] = await fetchAll(() => supabase
     .from('listini_clienti_fasce').select('corriere_id,zona_id,peso_max,prezzo,tipo,fuel,zone(id,nome)')
-    .eq('listino_id', listinoId)
+    .eq('listino_id', listinoId))
   const fascePerCorriere = new Map<string, any[]>()
   for (const f of fasce || []) {
     if (!fascePerCorriere.has(f.corriere_id)) fascePerCorriere.set(f.corriere_id, [])
@@ -712,9 +716,9 @@ export async function creaCalcolatoreListinoCliente(
   for (const c of (corrSettL || [])) settPerCorrL.set(c.id, (c as any).settings || {})
 
   const zonaIds = Array.from(new Set((fasce || []).map((f: any) => f.zone?.id).filter(Boolean)))
-  const { data: zc } = zonaIds.length
-    ? await supabase.from('zone_cap').select('zona_id,paese,provincia,cap').in('zona_id', zonaIds)
-    : { data: [] }
+  const zc: any[] = zonaIds.length
+    ? await fetchAll(() => supabase.from('zone_cap').select('zona_id,paese,provincia,cap').in('zona_id', zonaIds))
+    : []
   const zcByPaese = new Map<string, any[]>()
   for (const r of zc || []) {
     const k = (r.paese || '').toUpperCase()

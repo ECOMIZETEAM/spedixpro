@@ -60,11 +60,19 @@ export async function GET(req: NextRequest) {
     const adminDb = createAdminSupabase()
     masterIds = [mine]
     // La volumetria della rete sotto un master risale sempre a lui (tutti i livelli).
+    // UNA sola query sui masters (tabella piccola) invece di una per livello: il BFS resta identico.
+    const { data: tuttiM } = await adminDb.from('masters').select('id,nome,parent_master_id')
+    const figliDi = new Map<string, any[]>()
+    for (const m of (tuttiM || [])) {
+      const p = (m as any).parent_master_id
+      if (!p) continue
+      if (!figliDi.has(p)) figliDi.set(p, [])
+      figliDi.get(p)!.push(m)
+    }
     let frontier = [mine]
-    for (let i = 0; i < 12 && frontier.length; i++) {
-      const { data: figli } = await adminDb.from('masters').select('id,nome,parent_master_id').in('parent_master_id', frontier)
+    for (let i = 0; i < 20 && frontier.length; i++) {
       const nuovi: string[] = []
-      for (const c of (figli || [])) {
+      for (const f of frontier) for (const c of (figliDi.get(f) || [])) {
         if (masterIds.includes(c.id)) continue
         nomeMaster.set(c.id, c.nome)
         // prima linea = il figlio diretto se il padre sono io, altrimenti eredita quella del padre
@@ -116,14 +124,9 @@ export async function GET(req: NextRequest) {
   const calcPerListino = new Map<string, (s: any) => any>()  // listino_id -> calcolatore batch
   const targetIds = new Set<string>()
   for (const fl of primaLineaId.values()) targetIds.add(fl)
-  if (isMasterRete && targetIds.size && (spedizioni || []).length) {
-    const { data: tms } = await db.from('masters').select('id,parent_listino_id').in('id', Array.from(targetIds))
-    for (const t of (tms || [])) parentListinoOf.set(t.id, (t as any).parent_listino_id || null)
-    const { data: miei } = await db.from('corrieri').select('id,nome_contratto').eq('master_id', utente?.master_id)
-    for (const c of (miei || [])) nomeToMioCorr.set(c.nome_contratto, c.id)
-    const listini = Array.from(new Set(Array.from(parentListinoOf.values()).filter(Boolean))) as string[]
-    for (const lid of listini) calcPerListino.set(lid, await creaCalcolatoreListinoCliente(db, lid))
-  }
+  // NB: i calcolatori (fasce/zone/CAP) si costruiscono PIÙ SOTTO e SOLO SE servono: sono il
+  // FALLBACK per le righe senza movimento reale. Prima si costruivano sempre (query pesanti a
+  // ogni apertura) anche quando tutte le righe avevano già i prezzi dai movimenti.
 
   // Prezzi REALI dai MOVIMENTI (solo master): "quello che pago io" (mio movimento) e "quello che mi
   // paga il diretto"; il margine e' la differenza. Non per cliente/agente.
@@ -170,11 +173,28 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Fallback PREZZO CORRIERE quando manca il movimento (spedizioni vecchie / rete non tracciata):
-  // calcolo il MIO listino corriere (quello che pago io). Per le spedizioni di rete il corriere è
-  // del sotto-master -> lo rimappo al MIO corriere con lo stesso nome_contratto.
+  // Fallback PIGRI: i calcolatori listino (query pesanti su fasce/zone) si costruiscono SOLO se
+  // esiste almeno una riga senza prezzo reale dai movimenti. Nel periodo recente praticamente tutte
+  // le righe hanno i movimenti → di norma questi blocchi non partono proprio (lista più veloce).
+  // 1) Listino cliente verso la prima linea: serve alle righe di RETE senza movimento del diretto.
+  const serveListinoFallback = isMasterRete && targetIds.size && (spedizioni || []).some((s: any) => {
+    if (!s.master_id || s.master_id === mineId) return false
+    const fl = primaLineaId.get(s.master_id)
+    return !!fl && !costoTarget.has(s.id + '|' + fl)
+  })
+  if (serveListinoFallback) {
+    const { data: tms } = await db.from('masters').select('id,parent_listino_id').in('id', Array.from(targetIds))
+    for (const t of (tms || [])) parentListinoOf.set(t.id, (t as any).parent_listino_id || null)
+    const { data: miei } = await db.from('corrieri').select('id,nome_contratto').eq('master_id', utente?.master_id)
+    for (const c of (miei || [])) nomeToMioCorr.set(c.nome_contratto, c.id)
+    const listini = Array.from(new Set(Array.from(parentListinoOf.values()).filter(Boolean))) as string[]
+    for (const lid of listini) calcPerListino.set(lid, await creaCalcolatoreListinoCliente(db, lid))
+  }
+  // 2) Fallback PREZZO CORRIERE quando manca il MIO movimento (spedizioni vecchie / rete non
+  //    tracciata): calcolo il MIO listino corriere. Per le spedizioni di rete il corriere è del
+  //    sotto-master -> lo rimappo al MIO corriere con lo stesso nome_contratto.
   let calcMioCorr: ((s: any) => any) | null = null
-  if (mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).length) {
+  if (mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).some((s: any) => !costoMine.has(s.id))) {
     try { calcMioCorr = await creaCalcolatoreCorriere(db, mineId) } catch { calcMioCorr = null }
     if (!nomeToMioCorr.size) {
       const { data: miei } = await db.from('corrieri').select('id,nome_contratto').eq('master_id', mineId)
