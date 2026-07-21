@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AssistenzaTicketButton from '@/app/components/AssistenzaTicketButton'
 import DettaglioSpedizione from '@/app/components/DettaglioSpedizione'
@@ -81,16 +81,27 @@ export default function SpedizioniPage() {
   }, [])
 
   // PAGINAZIONE SERVER-SIDE: viaggia SOLO la pagina che guardi (10 righe) + il conteggio totale.
-  // Tutti i filtri passano al server; al cambio filtro si riparte da pagina 1 (debounce sui testi).
-  // Cercando per N. Spedizione la ricerca va su TUTTO lo storico (ignora la data), come prima.
+  // Percezione ISTANTANEA: cache stale-while-revalidate delle pagine viste + PREFETCH della pagina
+  // successiva; debounce SOLO sui campi di testo (i click su select/date/pagine partono subito);
+  // la tabella non si svuota mai durante il caricamento (spinner solo al primissimo giro).
+  const cacheRef = useRef<Map<string, { rows: any[]; total: number }>>(new Map())
+  const seqRef = useRef(0)
+  const prevFiltriRef = useRef<any>(null)
   useEffect(() => {
-    const t = setTimeout(() => { setPagina(1); carica(1) }, 350)
+    const TESTO = ['numero', 'id_ordine', 'dest_citta', 'dest_cap', 'contenuto']
+    const prev = prevFiltriRef.current
+    let istantaneo = true
+    if (prev) {
+      for (const k of Object.keys(filtri)) if ((filtri as any)[k] !== prev.filtri?.[k] && TESTO.includes(k)) istantaneo = false
+      if (cerca !== prev.cerca) istantaneo = false
+    }
+    prevFiltriRef.current = { filtri, cerca, perPage }
+    const t = setTimeout(() => { setPagina(1); carica(1) }, istantaneo ? 0 : 350)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(filtri), cerca, perPage])
 
-  async function carica(paginaReq: number) {
-    setLoading(true)
+  function buildParams(paginaReq: number) {
     const q = new URLSearchParams()
     q.set('page', String(paginaReq)); q.set('perPage', String(perPage))
     const num = (filtri.numero || '').trim()
@@ -112,13 +123,40 @@ export default function SpedizioniPage() {
       const v = (filtri as any)[k]
       if (v) q.set(k, v)
     }
-    const res = await fetch('/api/spedizioni/lista?' + q.toString())
-    const data = await res.json()
-    setSpedizioni(Array.isArray(data?.rows) ? data.rows : [])
-    setSpedizioniFiltrate(Array.isArray(data?.rows) ? data.rows : [])
-    setTotale(Number(data?.total) || 0)
-    setLoading(false)
+    return q
   }
+
+  async function fetchPagina(paginaReq: number): Promise<{ rows: any[]; total: number } | null> {
+    try {
+      const res = await fetch('/api/spedizioni/lista?' + buildParams(paginaReq).toString())
+      const data = await res.json()
+      if (!Array.isArray(data?.rows)) return null
+      return { rows: data.rows, total: Number(data?.total) || 0 }
+    } catch { return null }
+  }
+
+  async function carica(paginaReq: number) {
+    const k = buildParams(paginaReq).toString()
+    const seq = ++seqRef.current
+    const hit = cacheRef.current.get(k)
+    if (hit) { setSpedizioni(hit.rows); setSpedizioniFiltrate(hit.rows); setTotale(hit.total); setLoading(false) }  // ISTANTANEO
+    else setLoading(true)
+    const fresh = await fetchPagina(paginaReq)
+    if (fresh) {
+      cacheRef.current.set(k, fresh)
+      if (cacheRef.current.size > 40) cacheRef.current.delete(cacheRef.current.keys().next().value as string)
+      if (seq === seqRef.current) { setSpedizioni(fresh.rows); setSpedizioniFiltrate(fresh.rows); setTotale(fresh.total); setLoading(false) }
+    } else if (seq === seqRef.current) setLoading(false)
+    // PREFETCH della pagina successiva: quando clicchi "Successivo" è già in memoria.
+    const tot = fresh?.total ?? hit?.total ?? 0
+    if (paginaReq * perPage < tot) {
+      const kn = buildParams(paginaReq + 1).toString()
+      if (!cacheRef.current.has(kn)) fetchPagina(paginaReq + 1).then(d => { if (d) cacheRef.current.set(kn, d) })
+    }
+  }
+
+  // Dopo un'azione che modifica i dati (elimina/ripristina): cache azzerata + ricarico la pagina.
+  function ricarica() { cacheRef.current.clear(); carica(pagina) }
 
   // Le righe arrivano GIÀ filtrate e paginate dal server.
   const spedizioniVisibili = spedizioni
@@ -234,7 +272,7 @@ async function apriTracking(s: any) {
     setEliminando(id)
     const res = await fetch(`/api/spedizioni/ripristina?id=${id}`, { method: 'POST' })
     setEliminando(null)
-    if (res.ok) { setNotifica('Spedizione ripristinata.'); carica(pagina) }
+    if (res.ok) { setNotifica('Spedizione ripristinata.'); ricarica() }
     else { const d = await res.json().catch(()=>({})); setNotifica(d.error || 'Errore durante il ripristino') }
     window.scrollTo({ top: 0, behavior: 'smooth' })
     setTimeout(() => setNotifica(''), 4000)
@@ -249,7 +287,7 @@ async function apriTracking(s: any) {
     if (res.ok && j.success) {
       setNotifica(j.message || 'Spedizione spostata in attesa di annullo (48h). La trovi in Spedizioni Cancellate.')
       window.scrollTo({ top: 0, behavior: 'smooth' })
-      carica(pagina)
+      ricarica()
     } else {
       setNotifica('Impossibile eliminare la spedizione. Hai bisogno del permesso per eseguire questa azione!')
       window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -284,7 +322,7 @@ async function apriTracking(s: any) {
     if (falliti.length) msg += ` · ${falliti.length} non eliminabili (gia' partite o non consentite): ${falliti.slice(0, 8).join(', ')}${falliti.length > 8 ? '…' : ''}`
     setNotifica(msg)
     window.scrollTo({ top: 0, behavior: 'smooth' })
-    carica(pagina)
+    ricarica()
     setTimeout(() => setNotifica(''), 8000)
   }
 
@@ -442,7 +480,7 @@ async function apriTracking(s: any) {
           </div>
         </div>
 
-        {loading ? (
+        {loading && !spedizioniPaginate.length ? (
           <div style={{padding:'60px',textAlign:'center' as const,color:'#1a1a1a'}}>Caricamento...</div>
         ) : !spedizioniVisibili.length ? (
           <div style={{padding:'60px',textAlign:'center' as const,color:'#1a1a1a'}}>

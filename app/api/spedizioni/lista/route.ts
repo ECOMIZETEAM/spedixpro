@@ -217,7 +217,8 @@ export async function GET(req: NextRequest) {
   const costoTarget = new Map<string, number>()
   const pagatoCliente = new Map<string, number>()
   const costoMinSped = new Map<string, number>()   // costo corriere REALE = movimento più profondo (min)
-  if (mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).length) {
+  const caricaMovimenti = async () => {
+    if (!(mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).length)) return
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const adminMov = createAdminSupabase()
     const spedIds = (spedizioni || []).map((s: any) => s.id)
@@ -255,9 +256,50 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Fallback PIGRI: i calcolatori listino (query pesanti su fasce/zone) si costruiscono SOLO se
-  // esiste almeno una riga senza prezzo reale dai movimenti. Nel periodo recente praticamente tutte
-  // le righe hanno i movimenti → di norma questi blocchi non partono proprio (lista più veloce).
+  // ID ORDINE reale = quello dell'ordine COLLEGATO: da CSV (ordini_importati.order_id) o dalle
+  // integrazioni (ordini_ecommerce.numero_ordine / ordine_esterno_id). Le colonne
+  // spedizioni.id_ordine_esterno/rif_ordine non sono popolate, quindi prima si mostrava la nota.
+  const idOrdine = new Map<string, string>()
+  const caricaIdOrdine = async () => {
+    if (!(spedizioni || []).length) return
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const adminOrd = createAdminSupabase()
+    const ids = (spedizioni || []).map((s: any) => s.id)
+    // Chunk in PARALLELO (ogni spedizione sta in UN solo chunk → il "primo vince" resta identico;
+    // dentro al chunk l'ordine CSV-prima-di-ecommerce è preservato).
+    const chunksOrd: string[][] = []
+    for (let i = 0; i < ids.length; i += 300) chunksOrd.push(ids.slice(i, i + 300))
+    await Promise.all(chunksOrd.map(async (chunk) => {
+      for (let from = 0; ; from += 1000) {
+        const { data: imp } = await adminOrd.from('ordini_importati').select('spedizione_id,order_id').in('spedizione_id', chunk).not('order_id', 'is', null).order('id', { ascending: true }).range(from, from + 999)
+        for (const o of (imp || [])) { const sid = (o as any).spedizione_id, v = (o as any).order_id; if (sid && v && !idOrdine.has(sid)) idOrdine.set(sid, String(v)) }
+        if (!imp?.length || imp.length < 1000) break
+      }
+      const { data: ecom } = await adminOrd.from('ordini_ecommerce').select('spedizione_id,numero_ordine,ordine_esterno_id').in('spedizione_id', chunk)
+      for (const o of (ecom || [])) { const sid = (o as any).spedizione_id, v = (o as any).numero_ordine || (o as any).ordine_esterno_id; if (sid && v && !idOrdine.has(sid)) idOrdine.set(sid, String(v)) }
+    }))
+  }
+
+  // Numero DISTINTA RESI per le spedizioni in "reso al mittente" (mostrato sotto lo stato in elenco:
+  // segnala che il reso è già stato scansionato/addebitato e chiuso in distinta). voci è JSON → mappo.
+  const distintaReso = new Map<string, number>()
+  const spedReso = (spedizioni || []).filter((s: any) => s.stato === 'reso_mittente')
+  const caricaResi = async () => {
+    if (!spedReso.length) return
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const adminR = createAdminSupabase()
+    const mastersDelleSped = Array.from(new Set((spedizioni || []).map((s: any) => s.master_id).filter(Boolean)))
+    if (mastersDelleSped.length) {
+      const { data: dr } = await adminR.from('distinte_resi').select('numero,voci').in('master_id', mastersDelleSped)
+      for (const d of (dr || [])) for (const v of (((d as any).voci) || [])) if (v?.id) distintaReso.set(v.id, (d as any).numero)
+    }
+  }
+
+  // I tre blocchi di arricchimento sono INDIPENDENTI tra loro → girano in PARALLELO (prima in serie).
+  await Promise.all([caricaMovimenti(), caricaIdOrdine(), caricaResi()])
+
+  // Fallback PIGRI (DOPO i movimenti: dipendono dai prezzi reali): i calcolatori listino (query
+  // pesanti su fasce/zone) si costruiscono SOLO se esiste almeno una riga senza prezzo reale.
   // 1) Listino cliente verso la prima linea: serve alle righe di RETE senza movimento del diretto.
   const serveListinoFallback = isMasterRete && targetIds.size && (spedizioni || []).some((s: any) => {
     if (!s.master_id || s.master_id === mineId) return false
@@ -281,43 +323,6 @@ export async function GET(req: NextRequest) {
     if (!nomeToMioCorr.size) {
       const { data: miei } = await db.from('corrieri').select('id,nome_contratto').eq('master_id', mineId)
       for (const c of (miei || [])) nomeToMioCorr.set((c as any).nome_contratto, (c as any).id)
-    }
-  }
-
-  // ID ORDINE reale = quello dell'ordine COLLEGATO: da CSV (ordini_importati.order_id) o dalle
-  // integrazioni (ordini_ecommerce.numero_ordine / ordine_esterno_id). Le colonne
-  // spedizioni.id_ordine_esterno/rif_ordine non sono popolate, quindi prima si mostrava la nota.
-  const idOrdine = new Map<string, string>()
-  if ((spedizioni || []).length) {
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const adminOrd = createAdminSupabase()
-    const ids = (spedizioni || []).map((s: any) => s.id)
-    // Chunk in PARALLELO (ogni spedizione sta in UN solo chunk → il "primo vince" resta identico;
-    // dentro al chunk l'ordine CSV-prima-di-ecommerce è preservato).
-    const chunksOrd: string[][] = []
-    for (let i = 0; i < ids.length; i += 300) chunksOrd.push(ids.slice(i, i + 300))
-    await Promise.all(chunksOrd.map(async (chunk) => {
-      for (let from = 0; ; from += 1000) {
-        const { data: imp } = await adminOrd.from('ordini_importati').select('spedizione_id,order_id').in('spedizione_id', chunk).not('order_id', 'is', null).order('id', { ascending: true }).range(from, from + 999)
-        for (const o of (imp || [])) { const sid = (o as any).spedizione_id, v = (o as any).order_id; if (sid && v && !idOrdine.has(sid)) idOrdine.set(sid, String(v)) }
-        if (!imp?.length || imp.length < 1000) break
-      }
-      const { data: ecom } = await adminOrd.from('ordini_ecommerce').select('spedizione_id,numero_ordine,ordine_esterno_id').in('spedizione_id', chunk)
-      for (const o of (ecom || [])) { const sid = (o as any).spedizione_id, v = (o as any).numero_ordine || (o as any).ordine_esterno_id; if (sid && v && !idOrdine.has(sid)) idOrdine.set(sid, String(v)) }
-    }))
-  }
-
-  // Numero DISTINTA RESI per le spedizioni in "reso al mittente" (mostrato sotto lo stato in elenco:
-  // segnala che il reso è già stato scansionato/addebitato e chiuso in distinta). voci è JSON → mappo.
-  const distintaReso = new Map<string, number>()
-  const spedReso = (spedizioni || []).filter((s: any) => s.stato === 'reso_mittente')
-  if (spedReso.length) {
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const adminR = createAdminSupabase()
-    const mastersDelleSped = Array.from(new Set((spedizioni || []).map((s: any) => s.master_id).filter(Boolean)))
-    if (mastersDelleSped.length) {
-      const { data: dr } = await adminR.from('distinte_resi').select('numero,voci').in('master_id', mastersDelleSped)
-      for (const d of (dr || [])) for (const v of (((d as any).voci) || [])) if (v?.id) distintaReso.set(v.id, (d as any).numero)
     }
   }
 
