@@ -5,6 +5,15 @@ import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { spediamoproCreatePickup, spediamoproWaitPickupCode } from '@/lib/spediamopro'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { erroreRitiroPulito } from '@/lib/errore-corriere'
+import { siglaProvincia } from '@/lib/province-it'
+
+// Provincia a ESATTAMENTE 2 lettere per SpediamoPro (che rifiuta con 422 "province should have
+// exactly 2 characters" se riceve il nome esteso o con spazi). Se non risolvo a 2, torno undefined
+// (SpediamoPro accetta l'assenza, mentre un valore errato fa fallire tutto il ritiro).
+function provincia2(v: any): string | undefined {
+  const p = siglaProvincia(String(v || ''))
+  return p && p.length === 2 ? p : undefined
+}
 
 // Il corriere (SpediamoPro/Spedisci) può metterci un po' a rispondere sulla creazione ritiro:
 // alzo la durata max della funzione così il timeout applicativo (25s) scatta PRIMA di quello di
@@ -141,7 +150,7 @@ export async function POST(req: NextRequest) {
           country: body.mittPaese || 'IT',
           phone: pulisciTelefono(body.mittTelefono),
           email: body.mittEmail || undefined,
-          province: body.mittProvincia || undefined,
+          province: provincia2(body.mittProvincia),
         },
         date: body.dataRitiro,
         from: fascia.from,
@@ -184,7 +193,7 @@ export async function POST(req: NextRequest) {
 
   const shipFrom = {
     name: body.mittNome, company: body.mittNome, street1: body.mittIndirizzo, street2: '',
-    city: body.mittCitta, state: body.mittProvincia || '', postalCode: body.mittCap,
+    city: body.mittCitta, state: siglaProvincia(body.mittProvincia || '') || (body.mittProvincia || ''), postalCode: body.mittCap,
     country: body.mittPaese || 'IT', phone: pulisciTelefono(body.mittTelefono) || null, email: body.mittEmail || 'noreply@moovexpress.com',
   }
 

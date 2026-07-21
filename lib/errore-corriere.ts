@@ -8,6 +8,16 @@ export function erroreRitiroPulito(raw: any): string {
   if (j) { try { const o = JSON.parse(j[0]); msg = o?.error?.message || o?.message || (typeof o?.error === 'string' ? o.error : '') || '' } catch {} }
   if (!msg) msg = s.replace(/^.*?failed[^:]*:\s*/i, '').replace(/\{[\s\S]*\}/, '').trim()
   msg = msg.replace(/spediamo\s*pro/ig, '').replace(/spedisci(\.online)?/ig, '').replace(/pickup failed[^:]*:?/ig, '').replace(/\s{2,}/g, ' ').trim()
+  // Messaggi tipici del corriere → testo chiaro in italiano per l'utente.
+  if (/pickup_date\s*=\s*today.*no longer possible/i.test(msg) || /today.*no longer possible/i.test(msg)) {
+    return 'Il ritiro in giornata non è più disponibile per questo corriere: scegli una data futura (di norma il giorno lavorativo successivo).'
+  }
+  if (/nessun prezzo impostato nel listino/i.test(msg)) {
+    return 'Il corriere non ha una tariffa di ritiro per questo contratto/peso: programma il ritiro dal portale del corriere.'
+  }
+  if (/generic error/i.test(msg)) {
+    return 'Il corriere ha rifiutato il ritiro per questa spedizione (spesso Poste in giornata o area non coperta): riprova con una data futura o programma dal portale del corriere.'
+  }
   if (!msg || msg.startsWith('{') || /^\(?\d{3}\)?$/.test(msg) || /validation failed/i.test(msg)) msg = 'Ritiro non disponibile per questa spedizione.'
   return msg
 }

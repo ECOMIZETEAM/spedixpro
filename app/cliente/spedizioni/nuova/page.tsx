@@ -79,7 +79,7 @@ export default function NuovaSpedizioneCliente() {
   const [creating, setCreating] = useState(false)
   const [errore, setErrore] = useState('')
   const [vista, setVista] = useState<'dati'|'contratto'>('dati')
-  const [successo, setSuccesso] = useState<{numero:string,id:string}|null>(null)
+  const [successo, setSuccesso] = useState<{numero:string,id:string,ritiro?:{ok?:boolean,pickupId?:string,errore?:string}}|null>(null)
   const [daOrdine, setDaOrdine] = useState('')
   const [corrierePref, setCorrierePref] = useState('')
 
@@ -243,9 +243,11 @@ export default function NuovaSpedizioneCliente() {
     })
     const data = await res.json()
     if (data.error) { setCreating(false); setErrore(data.error); return }
+    // Ritiro: mostro l'esito all'utente (niente più silenzio se fallisce).
+    let ritiroEsito: {ok?:boolean,pickupId?:string,errore?:string}|undefined
     if (richiediRitiro && data.spedizioneId) {
       try {
-        await fetch('/api/ritiri/crea', {
+        const rr = await fetch('/api/ritiri/crea', {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({
             spedizioneIds:[data.spedizioneId],
@@ -255,7 +257,9 @@ export default function NuovaSpedizioneCliente() {
             dataRitiro:ritiroData, orarioRitiro:ritiroOrario,
           })
         })
-      } catch {}
+        const rj = await rr.json().catch(()=>({}))
+        ritiroEsito = (!rr.ok || rj.error) ? { errore: rj.error || 'Ritiro non riuscito' } : { ok:true, pickupId: rj.pickupId }
+      } catch { ritiroEsito = { errore: 'Ritiro non riuscito: il corriere non ha risposto. Riprova.' } }
     }
     if (daOrdine) {
       try {
@@ -266,7 +270,7 @@ export default function NuovaSpedizioneCliente() {
       } catch {}
     }
     setCreating(false)
-    setSuccesso({numero:data.numero||'—', id:data.spedizioneId||''})
+    setSuccesso({numero:data.numero||'—', id:data.spedizioneId||'', ritiro: ritiroEsito})
     resetForm()   // form pulito per la prossima spedizione (il banner successo resta visibile)
   }
 
@@ -287,6 +291,9 @@ export default function NuovaSpedizioneCliente() {
           ? <button onClick={()=>scaricaEtichetta(successo.id)} style={{background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'6px 12px',fontSize:'14px',cursor:'pointer',fontWeight:'600'}} title="Scarica etichetta">🖨️ Scarica LDV</button>
           : <span style={{color:'#dc2626',fontSize:'13px'}}>⚠️ Etichetta non generata</span>}
       </div>}
+      {successo?.ritiro && (successo.ritiro.ok
+        ? <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'10px 16px',marginBottom:'16px',fontSize:'13px',color:'#166534'}}>📦 Ritiro prenotato{successo.ritiro.pickupId?<> — <strong>{successo.ritiro.pickupId}</strong></>:''}</div>
+        : <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 16px',marginBottom:'16px',fontSize:'13px',color:'#b91c1c'}}>⚠️ Spedizione creata, ma <strong>ritiro NON prenotato</strong>: {successo.ritiro.errore}</div>)}
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',alignItems:'start'}}>
 
