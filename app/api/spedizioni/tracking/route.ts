@@ -36,6 +36,8 @@ export async function GET(req: NextRequest) {
   const persistiStato = async (nuovo: string | null) => {
     if (!nuovo || nuovo === 'eccezione' || nuovo === (spedizione as any).stato) return
     if ((spedizione as any).stato === 'consegnata' || (spedizione as any).stato === 'annullata') return
+    // Reso appiccicoso: la 'consegnata' dopo un reso e' la consegna del ritorno al mittente.
+    if ((spedizione as any).stato === 'reso_mittente' && nuovo === 'consegnata') return
     // SOLO IN AVANTI: il corriere può essere "indietro" rispetto a noi (es. 'spedita' dopo la
     // distinta mentre lui dice ancora "in lavorazione"): mai declassare lo stato.
     if (nuovo !== 'annullata' && prioritaStato(nuovo) <= prioritaStato((spedizione as any).stato)) return

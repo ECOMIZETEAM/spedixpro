@@ -26,7 +26,17 @@ export async function GET(req: NextRequest) {
   if (dal) query = query.gte('created_at', dal)
   if (al) query = query.lte('created_at', al)
   const { data } = await query
-  return NextResponse.json(data || [])
+  // Ramo catena (cliente_id NULL, target_master_id valorizzato): in pagina va mostrato il
+  // SOTTO-MASTER destinatario del reso, altrimenti la riga resta anonima ('-').
+  const lista = data || []
+  const targetIds = [...new Set(lista.map((d: any) => d.target_master_id).filter(Boolean))]
+  if (targetIds.length) {
+    const adminDb = createAdminSupabase()
+    const { data: ms } = await adminDb.from('masters').select('id,nome').in('id', targetIds)
+    const nomi = new Map((ms || []).map((m: any) => [m.id, m.nome]))
+    for (const d of lista) if ((d as any).target_master_id) (d as any).sottomaster = nomi.get((d as any).target_master_id) || null
+  }
+  return NextResponse.json(lista)
 }
 
 export async function POST(req: NextRequest) {

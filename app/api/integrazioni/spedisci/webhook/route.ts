@@ -76,6 +76,7 @@ export async function POST(req: NextRequest) {
     // 'in lavorazione' per un evento vecchio); consegnate/annullate restano terminali.
     const daAggiornare = (speds || []).filter((sp: any) =>
       sp.stato !== 'consegnata' && sp.stato !== 'annullata' && prioritaStato(nuovo) > prioritaStato(sp.stato)
+      && !(sp.stato === 'reso_mittente' && nuovo === 'consegnata')   // consegna del ritorno, non del pacco
     ).map((sp: any) => sp.id)
     if (daAggiornare.length) await admin.from('spedizioni').update(upd).in('id', daAggiornare)
   }

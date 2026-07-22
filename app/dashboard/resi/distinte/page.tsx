@@ -99,9 +99,23 @@ export default function DistinteResiPage() {
               ) : distintePaginate.map((d:any) => (
                 <tr key={d.id} style={{borderBottom:'1px solid #d1d5db'}}>
                   <td style={{padding:'10px 14px',fontWeight:'700',color:'#1a1a1a'}}>{d.numero}</td>
-                  <td style={{padding:'10px 14px',color:'#1a1a1a'}}>{d.clienti?.ragione_sociale||'-'}</td>
+                  <td style={{padding:'10px 14px',color:'#1a1a1a'}}>
+                    {d.clienti?.ragione_sociale || (d.sottomaster ? (
+                      <span style={{display:'inline-flex',alignItems:'center',gap:'6px'}}>
+                        <span style={{background:'#1a1a1a',color:'#fff',padding:'2px 8px',borderRadius:'4px',fontSize:'10px',fontWeight:'700',letterSpacing:'0.5px'}}>RETE</span>
+                        {d.sottomaster}
+                      </span>
+                    ) : '-')}
+                  </td>
                   <td style={{padding:'10px 14px',color:'#1a1a1a',fontSize:'12px'}}>{new Date(d.created_at).toLocaleString('it-IT')}</td>
-                  <td style={{padding:'10px 14px',color:'#1a1a1a',fontWeight:'500'}}>{d.totale_ldv}</td>
+                  <td style={{padding:'10px 14px',color:'#1a1a1a',fontWeight:'500'}}>
+                    {d.totale_ldv}
+                    {Array.isArray(d.voci) && d.voci.length > 0 && (
+                      <div style={{fontSize:'11px',color:'#666',marginTop:'2px',fontFamily:'monospace'}}>
+                        {d.voci.slice(0,3).map((v:any)=>v.numero).filter(Boolean).join(', ')}{d.voci.length>3?` +${d.voci.length-3}`:''}
+                      </div>
+                    )}
+                  </td>
                   <td style={{padding:'10px 14px',fontWeight:'700',color:'#f97316'}}>{'\u20AC'} {Number(d.totale||0).toFixed(2)}</td>
                   <td style={{padding:'10px 14px'}}>
                     <div style={{display:'flex',gap:'6px'}}>

@@ -92,7 +92,10 @@ export async function GET() {
       // Lo stato avanza SOLO IN AVANTI ('annullata' sempre applicata): il corriere può essere
       // "indietro" rispetto a noi (es. 'spedita' dopo la distinta mentre lui dice ancora
       // "in lavorazione") e NON deve declassare. Era la causa dei badge che regredivano.
-      if (nuovo && nuovo !== s.stato && (nuovo === 'annullata' || prioritaStato(nuovo) > prioritaStato(s.stato))) upd.stato = nuovo
+      // RESO APPICCICOSO: se e' 'reso_mittente', la 'consegnata' del corriere e' la consegna del
+      // RITORNO al mittente -> NON e' una consegna al destinatario, lo stato resta reso.
+      if (nuovo && nuovo !== s.stato && (nuovo === 'annullata' || prioritaStato(nuovo) > prioritaStato(s.stato))
+          && !(s.stato === 'reso_mittente' && nuovo === 'consegnata')) upd.stato = nuovo
       if (nuovo === 'in_giacenza' && !s.giacenza_data) upd.giacenza_data = new Date().toISOString()
       if (nuovoTracking && nuovoTracking !== s.tracking_number) upd.tracking_number = nuovoTracking
 
