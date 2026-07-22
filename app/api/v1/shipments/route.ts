@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
     paese: (body.shipTo.country || 'IT').toUpperCase().trim(),
     packages, corriereId: ctx.corriereId,
   })
-  if (!ris) return NextResponse.json({ error: 'Nessuna tariffa disponibile per questa destinazione/peso' }, { status: 400 })
+  if (!ris) return NextResponse.json({ error: 'Destinazione non coperta dal listino per questo contratto (zona non prezzata): spedizione non creabile con questo corriere.' }, { status: 400 })
 
   // Supplementi contrassegno/assicurazione dal listino cliente (stessa logica del portale)
   const supp = await calcolaSupplementiCliente(admin, {

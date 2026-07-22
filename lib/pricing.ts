@@ -224,10 +224,15 @@ export async function calcolaPrezzoListino(
   }
   if (!fascePerCorriere.size) return null
 
-  // Se è indicato un corriere preciso, usa quello; altrimenti scegli il prezzo più basso
+  // Se è indicato un corriere preciso, usa quello; altrimenti scegli il prezzo più basso.
+  // CORRIERE RICHIESTO ma NON disponibile qui (escluso: zona disagiata non prezzata al cliente,
+  // o zona non coperta) -> NIENTE prezzo. MAI ripiegare sui contratti degli ALTRI corrieri:
+  // si spedirebbe col corriere A al prezzo del corriere B (successo davvero via API v1: BRT in
+  // zona disagiata prezzato con la fascia Poste 4,90 contro un costo reale di 12,38).
+  if (params.corriereId && !fascePerCorriere.has(params.corriereId)) return null
   let miglior: { prezzo: number; corriereId: string; pesoMax: number } | null = null
 
-  const entries = params.corriereId && fascePerCorriere.has(params.corriereId)
+  const entries = params.corriereId
     ? [[params.corriereId, fascePerCorriere.get(params.corriereId)!]] as [string, any[]][]
     : Array.from(fascePerCorriere.entries())
 
