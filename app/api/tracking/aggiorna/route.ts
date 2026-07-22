@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { spediamoproGetTracking, spediamoproSearchStocks, mapStatoSpediamopro, spediamoproGetLabel, normalizzaEtichetta } from '@/lib/spediamopro'
-import { prioritaStato } from '@/lib/spedisci'
+import { spedisciTrackingStati, mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -27,6 +27,7 @@ export async function GET() {
     .limit(3000)
 
   let aggiornate = 0, errori = 0
+  let spedisciBloccato = false   // breaker: al primo 403 di policy niente altre chiamate Spedisci nel giro
   const lavora = async (s: any) => {
     const corr: any = (s as any).corrieri
     const tipo = corr?.tipo
@@ -59,9 +60,20 @@ export async function GET() {
         }
         if (tr.trackingCode) nuovoTracking = tr.trackingCode
 
+      } else if (tipo === 'spedisci') {
+        // Il provider ha CHIUSO il polling (403 "use the Webhooks events"): il WEBHOOK resta la
+        // fonte primaria. Qui TENTIAMO comunque a ogni giro: se il blocco viene rimosso, il polling
+        // riparte DA SOLO (ogni 30 min); al primo 403 di policy fermiamo il resto del giro
+        // (zero chiamate sprecate). Lo stato avanza SOLO in avanti come per SpediamoPro.
+        if (spedisciBloccato) return
+        if (!s.tracking_number || !cred?.master_domain || !cred?.password) return
+        const { stati, raw, ok } = await spedisciTrackingStati(cred, s.tracking_number)
+        if (!ok) { if (JSON.stringify(raw || {}).includes('Webhooks events')) spedisciBloccato = true; return }
+        for (const str of stati) {
+          const m = mapStatoSpedisci(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
       } else {
-        // Spedisci: il POLLING è stato CHIUSO dal provider (403 "For tracking please use the
-        // Webhooks events") → lo stato arriva in tempo reale dal webhook, qui non chiamiamo nulla.
         return
       }
 
