@@ -2,6 +2,34 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
 
+
+// STATO RITIRI SPEDIAMOPRO: rinfresca best-effort dai pickup live (GET /pickups/{id}).
+// Mappa: status >= 4 -> 'elaborato' (preso in carico dal corriere), 1..3 -> 'prenotato'.
+// Solo i non-finali col pickup_id, max 40 per giro, batch paralleli: la lista resta veloce.
+async function rinfrescaStatiPickup(adminDb: any, lista: any[]) {
+  try {
+    const daAggiornare = (lista || []).filter((r: any) => r.pickup_id && !['elaborato', 'annullato', 'completato'].includes(r.stato)).slice(0, 40)
+    if (!daAggiornare.length) return
+    const corrIds = Array.from(new Set(daAggiornare.map((r: any) => r.corriere_id).filter(Boolean)))
+    const { data: corrs } = await adminDb.from('corrieri').select('id,tipo,credenziali').in('id', corrIds)
+    const credPer = new Map((corrs || []).filter((c: any) => c.tipo === 'spediamopro').map((c: any) => [c.id, (c.credenziali || {}).authcode]))
+    const { spediamoproGetPickup } = await import('@/lib/spediamopro')
+    const BATCH = 8
+    for (let i = 0; i < daAggiornare.length; i += BATCH) {
+      await Promise.all(daAggiornare.slice(i, i + BATCH).map(async (r: any) => {
+        const ac = credPer.get(r.corriere_id)
+        if (!ac) return
+        try {
+          const j = await spediamoproGetPickup(ac, Number(r.pickup_id))
+          const st = Number(j?.data?.status)
+          const nuovo = st >= 4 ? 'elaborato' : (st >= 1 ? 'prenotato' : null)
+          if (nuovo && nuovo !== r.stato) { r.stato = nuovo; await adminDb.from('ritiri').update({ stato: nuovo }).eq('id', r.id) }
+        } catch { /* best-effort */ }
+      }))
+    }
+  } catch { /* la lista esce comunque */ }
+}
+
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -27,7 +55,10 @@ export async function GET(req: NextRequest) {
       if (al) q = q.lte('created_at', al + 'T23:59:59')
       return q
     }
-    return NextResponse.json(await fetchAll(build))
+    const lista = await fetchAll(build)
+    const { createAdminSupabase: _admR } = await import('@/lib/supabase-admin')
+    await rinfrescaStatiPickup(_admR(), lista)
+    return NextResponse.json(lista)
   }
 
   // Master/admin: rete = sé + discendenza. Risale la catena ANCHE con "Tutti i clienti".
@@ -57,6 +88,7 @@ export async function GET(req: NextRequest) {
     return q
   }
   const data = await fetchAll(build)
+  await rinfrescaStatiPickup(admin, data)
 
   // Etichetta col nome del sotto-master per i ritiri della rete (null per i miei).
   let out = data || []

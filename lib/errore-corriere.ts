@@ -15,6 +15,9 @@ export function erroreRitiroPulito(raw: any): string {
   if (/nessun prezzo impostato nel listino/i.test(msg)) {
     return 'Il corriere non ha una tariffa di ritiro per questo contratto/peso: programma il ritiro dal portale del corriere.'
   }
+  if (/non idonea al ritiro/i.test(msg)) {
+    return 'Il corriere non ha ancora finalizzato questa spedizione (etichetta in generazione): riprova il ritiro tra qualche minuto.'
+  }
   if (/generic error/i.test(msg)) {
     return 'Il corriere ha rifiutato il ritiro per questa spedizione (spesso Poste in giornata o area non coperta): riprova con una data futura o programma dal portale del corriere.'
   }

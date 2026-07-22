@@ -16,7 +16,7 @@ export default function ElencoRitiriPage() {
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
   const [filtri, setFiltri] = useState({
-    clienteId: '', vettore: '', codRitiro: '',
+    clienteId: '', vettore: '', codRitiro: '', stato: '',
     dal: '', al: '',
   })
 
@@ -45,12 +45,13 @@ export default function ElencoRitiriPage() {
 
   const setF = (k: string, v: string) => setFiltri(f => ({ ...f, [k]: v }))
 
+  const filtratiBase = filtri.stato ? ritiri.filter(r => r.stato === filtri.stato) : ritiri
   const filtrati = cerca
-    ? ritiri.filter(r =>
+    ? filtratiBase.filter(r =>
         r.cod_ritiro?.toLowerCase().includes(cerca.toLowerCase()) ||
         r.tracking_ritiro?.toLowerCase().includes(cerca.toLowerCase()) ||
         r.mitt_nome?.toLowerCase().includes(cerca.toLowerCase()))
-    : ritiri
+    : filtratiBase
 
   const totalePagine = Math.max(1, Math.ceil(filtrati.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
@@ -58,6 +59,8 @@ export default function ElencoRitiriPage() {
 
   const STATO_LABELS: Record<string, { label: string; bg: string; color: string }> = {
     richiesto: { label: 'Richiesto', bg: '#fff7ed', color: '#f97316' },
+    prenotato: { label: 'Prenotato', bg: '#eff6ff', color: '#2563eb' },
+    elaborato: { label: 'Elaborato', bg: '#f0fdf4', color: '#16a34a' },
     confermato: { label: 'Confermato', bg: '#fff7ed', color: '#f97316' },
     completato: { label: 'Completato', bg: '#f0fdf4', color: '#16a34a' },
     annullato: { label: 'Annullato', bg: '#fef2f2', color: '#dc2626' },
@@ -92,7 +95,7 @@ export default function ElencoRitiriPage() {
       {/* Filtri */}
       <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #d1d5db', padding: '14px 16px', marginBottom: '16px' }}>
         <div style={{ fontSize: '12px', fontWeight: '700', color: '#1a1a1a', marginBottom: '10px' }}>{'\u25BC'} Filtri</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr auto', gap: '12px', alignItems: 'end' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr auto', gap: '12px', alignItems: 'end' }}>
           <div>
             <div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Cliente</div>
             <select value={filtri.clienteId} onChange={e => setF('clienteId', e.target.value)} style={sel}>
@@ -108,6 +111,16 @@ export default function ElencoRitiriPage() {
               <option value="gls">GLS</option>
               <option value="brt">BRT</option>
               <option value="poste">Poste Italiane</option>
+            </select>
+          </div>
+          <div>
+            <div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Stato</div>
+            <select value={filtri.stato} onChange={e => setF('stato', e.target.value)} style={sel}>
+              <option value="">Tutti</option>
+              <option value="richiesto">Richiesto</option>
+              <option value="prenotato">Prenotato</option>
+              <option value="elaborato">Elaborato</option>
+              <option value="annullato">Annullato</option>
             </select>
           </div>
           <div>

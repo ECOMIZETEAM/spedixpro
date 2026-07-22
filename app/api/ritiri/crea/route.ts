@@ -104,9 +104,10 @@ export async function POST(req: NextRequest) {
   const pesoTotale = spedizioni.reduce((sum, s) => sum + (parseFloat(String(s.peso_reale)) || 1), 0)
 
   // Funzione comune di salvataggio su DB
-  async function salvaRitiro(pickupCode: string) {
+  async function salvaRitiro(pickupCode: string, pickupId?: number | null) {
     const r = await admin.from('ritiri').insert({
       master_id: masterId, cliente_id: clienteId, corriere_id: corriere!.id,
+      pickup_id: pickupId || null,   // id numerico SpediamoPro: serve per leggere lo stato (prenotato/elaborato)
       tracking_ritiro: pickupCode || null, cod_ritiro: pickupCode || null,
       mitt_nome: body.mittNome, mitt_indirizzo: body.mittIndirizzo, mitt_citta: body.mittCitta,
       mitt_provincia: body.mittProvincia || null, mitt_cap: body.mittCap,
@@ -165,7 +166,7 @@ export async function POST(req: NextRequest) {
       }
       console.log('[RITIRO][SPEDIAMOPRO] pickup creato:', codicePickup, 'id:', pk.id)
 
-      const { data: nuovoRitiro, error: insErr } = await salvaRitiro(codicePickup || String(pk.id))
+      const { data: nuovoRitiro, error: insErr } = await salvaRitiro(codicePickup || String(pk.id), pk.id || null)
       if (insErr) {
         return NextResponse.json({ error: `Ritiro creato (${pk.code}) ma errore DB: ${insErr.message}` }, { status: 500 })
       }
