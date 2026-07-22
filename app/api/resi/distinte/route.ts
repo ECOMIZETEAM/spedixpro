@@ -53,9 +53,13 @@ export async function POST(req: NextRequest) {
   if (targetMasterId && !clienteId) {
     const { count: cM } = await supabase.from('distinte_resi').select('*', {count:'exact',head:true}).eq('master_id', utente?.master_id)
     const numeroM = (cM||0) + 1
+    // Il totale della distinta di RETE = quanto viene ADDEBITATO al sotto-master (il prezzo che
+    // LUI aveva pagato), NON il prezzo del cliente finale: ogni livello vede il proprio prezzo.
+    // Si calcola voce per voce nel loop e si scrive alla fine (il 'totale' della UI e' a prezzo cliente).
+    let totaleCatena = 0
     const { data: distintaM, error: errM } = await supabase.from('distinte_resi').insert({
       master_id: utente?.master_id, cliente_id: null, target_master_id: targetMasterId,
-      numero: numeroM, totale_ldv: (voci||[]).length, totale: totale || 0, voci, stato: 'chiusa',
+      numero: numeroM, totale_ldv: (voci||[]).length, totale: 0, voci, stato: 'chiusa',
     }).select().single()
     if (errM) return NextResponse.json({ error: errM.message }, { status: 400 })
     for (const v of (voci || [])) {
@@ -69,6 +73,7 @@ export async function POST(req: NextRequest) {
         .in('tipo', ['spedizione', 'rettifica'])
       const costoReso = Math.abs((movR || []).reduce((a: number, m: any) => a + Number(m.importo || 0), 0))
       if (costoReso <= 0) continue
+      totaleCatena += costoReso
       try {
         await registraMovimentoMaster(adminDb, {
           masterOwnerId: utente?.master_id, masterTargetId: targetMasterId,
@@ -77,6 +82,7 @@ export async function POST(req: NextRequest) {
         })
       } catch (e) { console.error('Errore addebito reso master:', e) }
     }
+    await supabase.from('distinte_resi').update({ totale: totaleCatena }).eq('id', distintaM.id)
     return NextResponse.json({ id: distintaM.id, numero: numeroM })
   }
   const { count } = await supabase.from('distinte_resi').select('*', {count:'exact',head:true}).eq('master_id', utente?.master_id)
