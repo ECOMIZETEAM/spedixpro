@@ -222,13 +222,20 @@ export default function SpedizioniPage() {
       window.open(url, '_blank')
     } finally { setStampandoId('') }
   }
+  // Id selezionati NELL'ORDINE DELL'ELENCO (non in ordine di click): così le etichette scaricate
+  // /stampate escono nella stessa sequenza in cui le vedi in pagina.
+  function idsInOrdineElenco(): string[] {
+    const pos = new Map(spedizioniPaginate.map((s:any, i:number) => [s.id, i]))
+    return [...selectedIds].sort((a, b) => ((pos.get(a) ?? 1e9) as number) - ((pos.get(b) ?? 1e9) as number))
+  }
+
   async function stampaZebraSelezionati() {
     if (!selectedIds.length) return
     if (!zplOn) { await stampaSelezionati(); return }
     setNotifica('🖨️ Invio ' + selectedIds.length + ' etichette alla Zebra…')
     try {
       const { stampaEtichetteZebra } = await import('@/lib/zebra-print')
-      const urls = selectedIds.map(id => `/api/spedizioni/etichetta?id=${id}`)
+      const urls = idsInOrdineElenco().map(id => `/api/spedizioni/etichetta?id=${id}`)
       const r = await stampaEtichetteZebra(urls)
       setNotifica(`🖨️ Zebra: ${r.ok} stampate${r.errori ? ', ' + r.errori + ' errori' : ''}.`)
     } catch (e: any) {
@@ -241,7 +248,7 @@ export default function SpedizioniPage() {
     const res = await fetch('/api/spedizioni/etichette-bulk', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ ids: selectedIds })
+      body: JSON.stringify({ ids: idsInOrdineElenco() })
     })
     if (!res.ok) { await dialog.alert({ title: 'Errore', message: 'Errore nella generazione del PDF delle etichette.' }); return }
     const blob = await res.blob()

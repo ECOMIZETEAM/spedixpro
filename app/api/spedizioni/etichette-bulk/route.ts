@@ -33,6 +33,11 @@ export async function POST(req: NextRequest) {
     spedizioni = data
   }
 
+  // ORDINE DEL PDF = ordine degli id RICEVUTI (= come appaiono in elenco): il DB con .in() li
+  // restituisce in ordine arbitrario → le etichette uscivano mescolate rispetto alla selezione.
+  const posizione = new Map<string, number>((ids as string[]).map((id: string, i: number) => [id, i]))
+  spedizioni = (spedizioni || []).slice().sort((a: any, b: any) => (posizione.get(a.id) ?? 1e9) - (posizione.get(b.id) ?? 1e9))
+
   // Riepilogo ordine (packing slip): dati + drawer condivisi con la stampa singola.
   const riepCtx = await preparaRiepiloghi(admin, spedizioni || [])
 
