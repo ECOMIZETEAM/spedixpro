@@ -48,6 +48,7 @@ const DEF_IMP: Record<string,any> = {
   nascondi_prezzi:false, ordina_stampe:'default', spedizioni_multiple:false,
   soglia_credito:30, zpl_abilita:'no', zpl_stampante:'',
   notifica_email_dest:true, email_giacenze:'si', notifica_sms:false,
+  autodistinta:'si',   // 'si' = chiusura automatica distinte alle 23:00; 'no' = il cliente chiude da solo
   testo_sms:'Gentile Cliente, la spedizione {numero-spedizione} e stata creata. Segui il tracking sul sito del corriere {sito-corriere}.',
   peso_minimo:1,
 }
@@ -219,8 +220,11 @@ export default function ImpostazioniClientePage() {
               <option value="peso">Per peso</option>
               <option value="destinatario">Per destinatario</option>
             </select></div>
-          <div style={{...rowFull,borderBottom:'none'}}><span style={lblStrong}>Spedizioni multiple per stesso ordine</span>
+          <div style={rowFull}><span style={lblStrong}>Spedizioni multiple per stesso ordine</span>
             <Toggle on={imp('spedizioni_multiple')===true} onToggle={()=>setImp('spedizioni_multiple', !(imp('spedizioni_multiple')===true))} /></div>
+          <div style={{...rowFull,borderBottom:'none'}}>
+            <span style={lblStrong}>Distinta automatica (23:00)<br/><span style={{fontSize:'11px',fontWeight:400,color:'#888'}}>ON: le LDV aperte si chiudono in distinta ogni sera. OFF: il cliente chiude le distinte da solo.</span></span>
+            <Toggle on={imp('autodistinta')!=='no'} onToggle={()=>setImp('autodistinta', imp('autodistinta')!=='no' ? 'no' : 'si')} /></div>
         </div>
 
         <div style={card}>

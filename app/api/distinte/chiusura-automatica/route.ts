@@ -34,11 +34,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: true, distinteCreate: 0, messaggio: 'Nessuna spedizione da chiudere' })
   }
 
+  // AUTODISTINTA OFF (impostazioni cliente): il cron NON chiude le spedizioni di questi clienti —
+  // le distinte le fanno loro a mano dal portale. Default (nessuna impostazione) = ON.
+  const { data: esclusi } = await supabase.from('clienti').select('id').eq('impostazioni->>autodistinta', 'no')
+  const autodistintaOff = new Set((esclusi || []).map((c: any) => c.id))
+
   const gruppi: Record<string, any[]> = {}
   for (const s of speds) {
     // cliente_id NULL = spedizione PROPRIA del master: prima veniva SALTATA (mai chiusa in distinta).
     // Ora la raggruppo per master+corriere con distinta senza cliente (come la chiusura manuale "m:").
     if (!s.master_id || !s.corriere_id) continue
+    if (s.cliente_id && autodistintaOff.has(s.cliente_id)) continue   // autodistinta OFF: chiude lui
     const key = s.master_id + '|' + (s.cliente_id || 'PROPRIA') + '|' + s.corriere_id
     if (!gruppi[key]) gruppi[key] = []
     gruppi[key].push(s)
