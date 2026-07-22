@@ -155,6 +155,10 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   // ── Responsive: sidebar a scomparsa (drawer) su mobile ──
   const [isMobile, setIsMobile] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // Desktop: sidebar richiudibile (preferenza ricordata per sessioni future)
+  const [sidebarChiusa, setSidebarChiusa] = useState(false)
+  useEffect(() => { try { if (localStorage.getItem('spx_sidebar_chiusa') === '1') setSidebarChiusa(true) } catch {} }, [])
+  const toggleSidebar = () => setSidebarChiusa(v => { const n = !v; try { localStorage.setItem('spx_sidebar_chiusa', n ? '1' : '0') } catch {}; return n })
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 900)
     check(); window.addEventListener('resize', check); return () => window.removeEventListener('resize', check)
@@ -164,7 +168,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   const asideBase: React.CSSProperties = { width: '220px', background: '#1a1a1a', display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', zIndex: 1000 }
   const asideStyle: React.CSSProperties = isMobile
     ? { ...asideBase, position: 'fixed', top: 0, left: 0, transform: drawerOpen ? 'translateX(0)' : 'translateX(-100%)', transition: 'transform 0.25s ease', boxShadow: drawerOpen ? '2px 0 20px rgba(0,0,0,0.35)' : 'none' }
-    : { ...asideBase, flexShrink: 0, position: 'sticky', top: 0 }
+    : { ...asideBase, flexShrink: 0, position: 'sticky', top: 0, width: sidebarChiusa ? '0px' : '220px', transition: 'width 0.2s ease' }
 
   function toggleMenu(href: string, el?: HTMLElement) {
     const staAprendo = !openMenus[href]
@@ -297,7 +301,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
         {/* TOPBAR */}
         <header style={{background:'#fff',height:'48px',display:'flex',alignItems:'center',justifyContent:'space-between',padding:isMobile?'0 12px':'0 24px',borderBottom:'1px solid #e8e8e8',flexShrink:0,position:'sticky',top:0,zIndex:10}}>
           <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
-            {isMobile && <button onClick={()=>setDrawerOpen(true)} aria-label="Menu" style={{background:'none',border:'none',fontSize:'23px',cursor:'pointer',color:'#1a1a1a',padding:'2px 6px',lineHeight:1}}>☰</button>}
+            <button onClick={()=>{ if (isMobile) setDrawerOpen(true); else toggleSidebar() }} aria-label="Menu" title={isMobile?'Menu':(sidebarChiusa?'Apri il menu':'Chiudi il menu')} style={{background:'none',border:'none',fontSize:'23px',cursor:'pointer',color:'#1a1a1a',padding:'2px 6px',lineHeight:1}}>☰</button>
             {isMobile && <span style={{fontSize:'14px',fontWeight:800,color:'#1a1a1a'}}>{user?.brandNome || 'MoovExpress'}</span>}
           </div>
           <div style={{display:'flex',alignItems:'center',gap:'12px'}}>

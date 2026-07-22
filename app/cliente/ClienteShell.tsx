@@ -9,6 +9,10 @@ export default function ClienteShell({ cliente, children }: { cliente: { ragione
   const path = usePathname() || ''
   const [isMobile, setIsMobile] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // Desktop: sidebar richiudibile (preferenza ricordata per sessioni future)
+  const [sidebarChiusa, setSidebarChiusa] = useState(false)
+  useEffect(() => { try { if (localStorage.getItem('spx_sidebar_chiusa') === '1') setSidebarChiusa(true) } catch {} }, [])
+  const toggleSidebar = () => setSidebarChiusa(v => { const n = !v; try { localStorage.setItem('spx_sidebar_chiusa', n ? '1' : '0') } catch {}; return n })
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 900)
     check(); window.addEventListener('resize', check); return () => window.removeEventListener('resize', check)
@@ -19,7 +23,7 @@ export default function ClienteShell({ cliente, children }: { cliente: { ragione
   const asideBase: React.CSSProperties = { width: '200px', background: '#1a1a1a', display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', zIndex: 1000 }
   const asideStyle: React.CSSProperties = isMobile
     ? { ...asideBase, position: 'fixed', top: 0, left: 0, transform: drawerOpen ? 'translateX(0)' : 'translateX(-100%)', transition: 'transform 0.25s ease', boxShadow: drawerOpen ? '2px 0 20px rgba(0,0,0,0.35)' : 'none' }
-    : { ...asideBase, flexShrink: 0, position: 'sticky', top: 0 }
+    : { ...asideBase, flexShrink: 0, position: 'sticky', top: 0, width: sidebarChiusa ? '0px' : '200px', transition: 'width 0.2s ease' }
 
   const nome = cliente?.ragione_sociale || 'Cliente'
   const credito = Number(cliente?.credito || 0)
@@ -57,7 +61,7 @@ export default function ClienteShell({ cliente, children }: { cliente: { ragione
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
         <header style={{ background: '#fff', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isMobile ? '0 12px' : '0 24px', borderBottom: '1px solid #e8e8e8', position: 'sticky', top: 0, zIndex: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-            {isMobile && <button onClick={() => setDrawerOpen(true)} aria-label="Menu" style={{ background: 'none', border: 'none', fontSize: '23px', cursor: 'pointer', color: '#1a1a1a', padding: '2px 6px', lineHeight: 1 }}>☰</button>}
+            <button onClick={() => { if (isMobile) setDrawerOpen(true); else toggleSidebar() }} aria-label="Menu" title={isMobile?'Menu':(sidebarChiusa?'Apri il menu':'Chiudi il menu')} style={{ background: 'none', border: 'none', fontSize: '23px', cursor: 'pointer', color: '#1a1a1a', padding: '2px 6px', lineHeight: 1 }}>☰</button>
             <div style={{ fontSize: '13px', color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nome}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
