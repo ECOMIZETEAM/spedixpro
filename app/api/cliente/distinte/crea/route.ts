@@ -31,7 +31,9 @@ export async function POST(req: NextRequest) {
   if (!valide.length) return NextResponse.json({ error: 'Nessuna spedizione valida' }, { status: 400 })
   const totaleColli = valide.reduce((a, s) => a + (Number(s.colli) || 0), 0)
   const totalePeso = valide.reduce((a, s) => a + (Number(s.peso_fatturato || s.peso_reale) || 0), 0)
-  const numero = 'DIST-' + Date.now().toString().slice(-8)
+  // NUMERO GLOBALE dalla sequenza DB: stessa numerazione dei master (la distinta risale la rete).
+  const { data: numSeq } = await supabase.rpc('prossimo_numero_distinta')
+  const numero = String(numSeq || Date.now())
   const oggi = new Date().toISOString().slice(0, 10)
   const { data: distinta, error: errIns } = await supabase
     .from('distinte')
