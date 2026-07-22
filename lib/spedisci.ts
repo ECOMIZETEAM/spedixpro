@@ -90,6 +90,7 @@ export async function chiudiBorderoSpedisci(supabase: any, distintaId: string) {
     const ids: string[] = []
     let pdf: string | null = null
     let errore: string | null = null
+    let giaChiusa = false
     for (const [contractCode, shipmentIds] of gruppi) {
       const r = await fetch(`https://${cred.master_domain}/api/v2/shippinglist/create`, {
         method: 'POST',
@@ -100,7 +101,12 @@ export async function chiudiBorderoSpedisci(supabase: any, distintaId: string) {
       let d: any = {}
       try { d = JSON.parse(text) } catch { d = {} }
       if (!r.ok || d.error) {
-        errore = 'HTTP ' + r.status + ': ' + (d.error || text).toString().slice(0, 150)
+        const msg = (d.error || text).toString()
+        // "Nessuna spedizione trovata": Spedisci ha GIA' chiuso il bordero' dal lato suo (chiusura
+        // automatica serale loro) -> non c'e' piu' nulla da trasmettere, non e' un guasto.
+        // Succedeva a TUTTE le distinte del cron delle 23: le manuali diurne chiudono regolarmente.
+        if (/nessuna spedizione trovata/i.test(msg)) { giaChiusa = true; continue }
+        errore = 'HTTP ' + r.status + ': ' + msg.slice(0, 200)
         continue
       }
       const bid = d.bordero ?? d.id ?? d.shippingListId ?? d.shipping_list_id ?? null
@@ -109,14 +115,15 @@ export async function chiudiBorderoSpedisci(supabase: any, distintaId: string) {
       if (b64 && !pdf) pdf = 'data:application/pdf;base64,' + b64
     }
 
-    // confermata_vettore = TRASMESSA davvero al provider: si accende solo a chiusura riuscita.
+    // confermata_vettore = TRASMESSA davvero al provider (o gia' chiusa dal lato loro).
+    const chiusaOk = ids.length > 0 || (giaChiusa && !errore)
     await supabase.from('distinte').update({
-      bordero_id: ids.length ? ids.join(',') : (errore ? 'ERRORE: ' + errore : null),
+      bordero_id: ids.length ? ids.join(',') : (giaChiusa && !errore ? 'N/A' : (errore ? 'ERRORE: ' + errore : null)),
       bordero_pdf: pdf,
-      ...(ids.length && !errore ? { confermata_vettore: true, data_conferma: new Date().toISOString() } : {}),
+      ...(chiusaOk ? { confermata_vettore: true, data_conferma: new Date().toISOString() } : {}),
     }).eq('id', distintaId)
 
-    return { ok: ids.length > 0, bordero_id: ids.join(','), errore }
+    return { ok: chiusaOk, bordero_id: ids.join(','), errore }
   } catch (e: any) {
     try {
       await supabase.from('distinte').update({ bordero_id: 'ERRORE: ' + String(e?.message || e).slice(0, 150) }).eq('id', distintaId)
