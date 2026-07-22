@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json([])
 
   const q = (req.nextUrl.searchParams.get('q') || '').trim()
@@ -21,7 +21,9 @@ export async function GET(req: NextRequest) {
     .ilike('dest_nome', `${q}%`)
     .order('created_at', { ascending: false })
     .limit(60)
-  if (clienteId && !clienteId.startsWith('m:') && clienteId !== '__proprio__') query = query.eq('cliente_id', clienteId)
+  // Il cliente vede SOLO i propri destinatari; il master può filtrare per cliente selezionato.
+  if ((utente.ruolo || '').toLowerCase() === 'cliente') query = query.eq('cliente_id', utente.cliente_id)
+  else if (clienteId && !clienteId.startsWith('m:') && clienteId !== '__proprio__') query = query.eq('cliente_id', clienteId)
 
   const { data } = await query
   // Dedup per nominativo+indirizzo+CAP, tieni il più recente, max 8
