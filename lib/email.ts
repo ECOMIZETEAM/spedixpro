@@ -98,3 +98,51 @@ export async function inviaInvitoStaff({
     return { ok: false, error: err }
   }
 }
+
+// Escape minimo per interpolare testo utente nell'HTML delle email
+function esc(v: any): string { return String(v ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;') }
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+// NOTIFICA "SPEDIZIONE CREATA" — email brand MoovExpress al MITTENTE e al DESTINATARIO.
+// Le email vere NON vanno mai ai provider (li' va l'email schermo): ai clienti finali scriviamo NOI.
+// Mai nomi dei provider: solo il nome del contratto corriere. Best-effort: non fallisce mai.
+export async function inviaEmailSpedizioneCreata(p: {
+  mittEmail?: string | null; destEmail?: string | null
+  mittNome?: string | null; destNome?: string | null
+  numero: string; corriere?: string | null; destCitta?: string | null
+  notificaDest?: boolean   // impostazione cliente notifica_email_dest (default true)
+}) {
+  const corriere = esc((p.corriere || '').trim())
+  const mitt = String(p.mittEmail || '').trim().toLowerCase()
+  const dest = String(p.destEmail || '').trim().toLowerCase()
+  // Al MITTENTE: conferma con numero spedizione
+  if (EMAIL_RE.test(mitt)) {
+    try {
+      await resend.emails.send({
+        from: FROM, to: mitt,
+        subject: `Spedizione ${p.numero} creata \u2705`,
+        html: wrap(`
+          <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Spedizione creata \u2705</h2>
+          <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 10px">La spedizione <strong>${esc(p.numero)}</strong> per <strong>${esc(p.destNome || 'il destinatario')}</strong>${p.destCitta ? ` (${esc(p.destCitta)})` : ''} \u00e8 stata creata correttamente.</p>
+          ${corriere ? `<p style="color:#666;font-size:14px;margin:0 0 10px">Corriere: <strong>${corriere}</strong></p>` : ''}
+          <p style="color:#999;font-size:13px;margin-top:14px">Conserva il numero di spedizione per seguirne il tracking dal portale.</p>
+        `),
+      })
+    } catch { /* best-effort */ }
+  }
+  // Al DESTINATARIO (se abilitato dalle impostazioni del cliente, e se diverso dal mittente)
+  if ((p.notificaDest ?? true) && EMAIL_RE.test(dest) && dest !== mitt) {
+    try {
+      await resend.emails.send({
+        from: FROM, to: dest,
+        subject: `Un pacco sta arrivando \ud83d\udce6 \u2014 spedizione ${p.numero}`,
+        html: wrap(`
+          <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Un pacco sta arrivando \ud83d\udce6</h2>
+          <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 10px"><strong>${esc(p.mittNome || 'Un mittente')}</strong> ti ha inviato una spedizione.</p>
+          <p style="color:#666;font-size:14px;margin:0 0 10px">Numero spedizione: <strong>${esc(p.numero)}</strong>${corriere ? ` \u2014 Corriere: <strong>${corriere}</strong>` : ''}</p>
+          <p style="color:#999;font-size:13px;margin-top:14px">Con questo numero puoi seguire la consegna sul sito del corriere.</p>
+        `),
+      })
+    } catch { /* best-effort */ }
+  }
+}

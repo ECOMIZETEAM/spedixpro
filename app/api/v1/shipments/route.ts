@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { autenticaApiKey } from '@/lib/api-auth'
 import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
 import { registraMovimento } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import { inviaWebhook } from '@/lib/webhooks'
-import {
+import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation, spediamoproCreateShipment, spediamoproGetLabel,
   spediamoproWaitForTracking, kgToGrams, cmToMm, euroToCents, centsToEuro,
   normalizzaEtichetta, telValidoSp,
@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
     const spedTo = { ...body.shipTo, street2: pressoTo }
     const ratesRes = await fetch(`${baseUrl}/shipping/rates`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ packages, shipFrom: spedFrom, shipTo: spedTo, notes: body.notes || '', insuranceValue: body.insuranceValue || 0, codValue: body.codValue || 0, accessoriServices: [] }),
+      body: JSON.stringify({ packages, shipFrom: { ...spedFrom, email: EMAIL_PER_CORRIERE }, shipTo: { ...spedTo, email: EMAIL_PER_CORRIERE }, notes: body.notes || '', insuranceValue: body.insuranceValue || 0, codValue: body.codValue || 0, accessoriServices: [] }),
     })
     const rates = await ratesRes.json()
     if (!Array.isArray(rates) || !rates.length) return NextResponse.json({ error: 'Nessuna tariffa dal corriere' }, { status: 400 })
@@ -177,6 +177,24 @@ export async function POST(req: NextRequest) {
     canale: 'api',
   }).select('id').single()
   if (insErr) return NextResponse.json({ error: `Spedizione creata sul corriere (${numero}) ma errore DB: ${insErr.message}`, tracking: numero }, { status: 500 })
+
+  // EMAIL BRAND MoovExpress a mittente e destinatario (in background, best-effort):
+  // al provider e' andata solo l'email schermo; ai clienti finali scriviamo noi.
+  after(async () => {
+    try {
+      const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
+      let notificaDest = true
+      if (ctx.clienteId) {
+        const { data: cli } = await admin.from('clienti').select('impostazioni').eq('id', ctx.clienteId).maybeSingle()
+        notificaDest = (cli?.impostazioni as any)?.notifica_email_dest !== false
+      }
+      await inviaEmailSpedizioneCreata({
+        mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
+        mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
+        numero, corriere: corriere.nome_contratto, notificaDest,
+      })
+    } catch { /* best-effort */ }
+  })
 
   // Addebito credito cliente + cascata master
   try {

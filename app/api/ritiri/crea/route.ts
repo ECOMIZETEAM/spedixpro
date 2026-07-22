@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
-import { spediamoproCreatePickup, spediamoproWaitPickupCode } from '@/lib/spediamopro'
+import { spediamoproCreatePickup, spediamoproWaitPickupCode, EMAIL_PER_CORRIERE } from '@/lib/spediamopro'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { erroreRitiroPulito } from '@/lib/errore-corriere'
 import { siglaProvincia } from '@/lib/province-it'
@@ -195,7 +195,7 @@ export async function POST(req: NextRequest) {
   const shipFrom = {
     name: body.mittNome, company: body.mittNome, street1: body.mittIndirizzo, street2: '',
     city: body.mittCitta, state: siglaProvincia(body.mittProvincia || '') || (body.mittProvincia || ''), postalCode: body.mittCap,
-    country: body.mittPaese || 'IT', phone: pulisciTelefono(body.mittTelefono) || null, email: body.mittEmail || 'noreply@moovexpress.com',
+    country: body.mittPaese || 'IT', phone: pulisciTelefono(body.mittTelefono) || null, email: EMAIL_PER_CORRIERE,
   }
 
   // Riuso il contratto GIÀ usato per creare la spedizione (salvato in raw_response._contractCode):

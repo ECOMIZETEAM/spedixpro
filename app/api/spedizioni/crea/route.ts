@@ -4,7 +4,7 @@ import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import { calcolaPrezzoCorriere, calcolaPrezzoCorriereDettaglio, calcolaSupplementiCliente, fattoreVolumeCliente, fattoreVolumeCorriere, calcolaPesoFatturato, calcolaPrezzoListino } from '@/lib/pricing'
 import { isAgente, nomeAgente } from '@/lib/agente'
-import {
+import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation,
   spediamoproCreateShipment,
   telValidoSp,
@@ -363,7 +363,8 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         carrierCode: rate.carrierCode, contractCode: rate.contractCode,
         label_format: 'PDF', packages,
-        shipFrom: body.shipFrom, shipTo: body.shipTo,
+        // EMAIL SCHERMO: al provider va SEMPRE l'email di servizio (mai quelle vere di mitt/dest).
+        shipFrom: { ...body.shipFrom, email: EMAIL_PER_CORRIERE }, shipTo: { ...body.shipTo, email: EMAIL_PER_CORRIERE },
         // Rif. Ordine in testa alle note così finisce sull'etichetta (canale trasmesso al corriere).
         notes: [body.rifOrdine ? `Rif. Ordine: ${body.rifOrdine}` : '', body.notes || ''].filter(Boolean).join(' — '),
         // content = descrizione merce inserita dall'utente → in etichetta (guardato: solo se compilato)
@@ -459,6 +460,25 @@ export async function POST(req: NextRequest) {
       contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
       numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
     })
+
+      // EMAIL BRAND MoovExpress a mittente e destinatario (in background, best-effort):
+      // le email vere restano nostre — al provider e' andata solo l'email schermo.
+      after(async () => {
+        try {
+          const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
+          let notificaDest = true
+          if (clienteId) {
+            const { createAdminSupabase } = await import('@/lib/supabase-admin')
+            const { data: cli } = await createAdminSupabase().from('clienti').select('impostazioni').eq('id', clienteId).maybeSingle()
+            notificaDest = (cli?.impostazioni as any)?.notifica_email_dest !== false
+          }
+          await inviaEmailSpedizioneCreata({
+            mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
+            mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
+            numero: numero, corriere: corriereRecord.nome_contratto, notificaDest,
+          })
+        } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
+      })
 
     return NextResponse.json({ numero, tracking: r.trackingNumber, costo: r.shipmentCost, spedizioneId: inserted?.id || null })
   }
@@ -647,6 +667,25 @@ export async function POST(req: NextRequest) {
           } catch (e) { console.error('Completamento background spedizione SpediamoPro:', e) }
         })
       }
+
+      // EMAIL BRAND MoovExpress a mittente e destinatario (in background, best-effort):
+      // le email vere restano nostre — al provider e' andata solo l'email schermo.
+      after(async () => {
+        try {
+          const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
+          let notificaDest = true
+          if (clienteId) {
+            const { createAdminSupabase } = await import('@/lib/supabase-admin')
+            const { data: cli } = await createAdminSupabase().from('clienti').select('impostazioni').eq('id', clienteId).maybeSingle()
+            notificaDest = (cli?.impostazioni as any)?.notifica_email_dest !== false
+          }
+          await inviaEmailSpedizioneCreata({
+            mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
+            mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
+            numero: numeroFinale, corriere: corriereRecord.nome_contratto, notificaDest,
+          })
+        } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
+      })
 
       return NextResponse.json({
         numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2), spedizioneId: inserted?.id || null,

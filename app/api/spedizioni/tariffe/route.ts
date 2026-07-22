@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import {
+import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation,
   kgToGrams, cmToMm, euroToCents, centsToEuro
 } from '@/lib/spediamopro'
@@ -318,7 +318,8 @@ export async function POST(req: NextRequest) {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          packages: body.packages, shipFrom: body.shipFrom, shipTo: body.shipTo,
+          packages: body.packages,
+          shipFrom: { ...body.shipFrom, email: EMAIL_PER_CORRIERE }, shipTo: { ...body.shipTo, email: EMAIL_PER_CORRIERE },
           notes: '', insuranceValue: 0, codValue: body.codValue || 0, accessoriServices: []
         }),
       })

@@ -64,9 +64,15 @@ function pulisciEmail(v: any): string | undefined {
   const e = String(v ?? '').trim()
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e.substring(0, 50) : undefined
 }
+// EMAIL SCHERMO verso i provider: a SpediamoPro/Spedisci NON vanno MAI le email vere di
+// mittente/destinatario (le notifiche dei provider non devono raggiungere i clienti finali).
+// Le email vere restano nel DB e le usiamo NOI per le notifiche brand MoovExpress.
+export const EMAIL_PER_CORRIERE = process.env.EMAIL_CORRIERE || 'emexpressltd@gmail.com'
+
 export function sanitizzaIndirizzoSp(a: SpediamoproAddress, opts?: { emailObbligatoria?: boolean }): SpediamoproAddress {
   const phone = pulisciTel(a?.phone)
-  const email = pulisciEmail(a?.email) || (opts?.emailObbligatoria ? 'noreply@moovexpress.com' : undefined)
+  // SEMPRE l'email schermo: ogni payload costruito qui è diretto al provider.
+  const email = EMAIL_PER_CORRIERE
   const out: any = { ...a }
   if (phone) out.phone = phone; else delete out.phone
   if (email) out.email = email; else delete out.email
@@ -352,7 +358,7 @@ export async function spediamoproCreatePickup(
       contactInfo: {
         ...params.contactInfo,
         phone: pulisciTel(params.contactInfo.phone),
-        email: pulisciEmail(params.contactInfo.email) || 'noreply@moovexpress.com',
+        email: EMAIL_PER_CORRIERE,   // email schermo: le conferme ritiro del provider non vanno ai clienti
       },
       date: params.date,
       from: params.from,
