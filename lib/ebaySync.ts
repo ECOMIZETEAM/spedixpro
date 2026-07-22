@@ -6,9 +6,14 @@ export function rangeGiorniISO(dal?: string | null, al?: string | null, defaultG
   const oggi = new Date().toISOString().slice(0, 10)
   const d = (dal || '').match(/^\d{4}-\d{2}-\d{2}$/) ? dal! : new Date(Date.now() - defaultGiorni * 24 * 3600 * 1000).toISOString().slice(0, 10)
   const a = (al || '').match(/^\d{4}-\d{2}-\d{2}$/) ? al! : oggi
-  const daISO = new Date(new Date(d + 'T00:00:00Z').getTime() - 2 * 3600 * 1000).toISOString()
-  const aISO = new Date(new Date(a + 'T23:59:59Z').getTime() + 2 * 3600 * 1000).toISOString()
-  return { daISO, aISO }
+  // CLAMP a "adesso": con al=oggi il fine-finestra (23:59+margine) cadrebbe nel FUTURO e eBay
+  // rifiuta con 400 "The start and end dates can't be in the future".
+  const now = Date.now()
+  let dMs = new Date(d + 'T00:00:00Z').getTime() - 2 * 3600 * 1000
+  let aMs = new Date(a + 'T23:59:59Z').getTime() + 2 * 3600 * 1000
+  if (aMs > now) aMs = now
+  if (dMs >= aMs) dMs = aMs - 60 * 1000
+  return { daISO: new Date(dMs).toISOString(), aISO: new Date(aMs).toISOString() }
 }
 
 // Sincronizza gli ordini eBay in ordini_ecommerce (spediti e non, qualunque pagamento, contrassegno
