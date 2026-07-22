@@ -130,8 +130,9 @@ export async function inviaEmailSpedizioneCreata(p: {
       })
     } catch { /* best-effort */ }
   }
-  // Al DESTINATARIO (se abilitato dalle impostazioni del cliente, e se diverso dal mittente)
-  if ((p.notificaDest ?? true) && EMAIL_RE.test(dest) && dest !== mitt) {
+  // Al DESTINATARIO (se abilitato dalle impostazioni del cliente). Parte SEMPRE anche se
+  // l'indirizzo coincide col mittente: sono due comunicazioni diverse (conferma vs avviso arrivo).
+  if ((p.notificaDest ?? true) && EMAIL_RE.test(dest)) {
     try {
       await resend.emails.send({
         from: FROM, to: dest,
