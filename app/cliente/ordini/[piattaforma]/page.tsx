@@ -180,6 +180,9 @@ export default function OrdiniPage() {
         totale:o=>Number(o.totale||0),
       }
       const f = acc[sort.k]; if(f){ arr=[...arr].sort((a,b)=>{ const x=f(a),y=f(b); return x<y?-1*sort.d:x>y?1*sort.d:0 }) }
+    } else {
+      // Default: ordina per DATA REALE dell'ordine (più recente in alto), non per data di import
+      arr = [...arr].sort((a,b)=> new Date(getData(b)||0).getTime() - new Date(getData(a)||0).getTime())
     }
     return arr
   }, [ordini, fStore, fStatoPag, fStatoEv, fPaese, fNum, fSku, fTags, fArch, fDa, fA, search, sort])
