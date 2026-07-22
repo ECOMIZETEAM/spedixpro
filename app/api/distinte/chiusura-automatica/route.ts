@@ -62,12 +62,19 @@ export async function GET(req: NextRequest) {
       .select('numero').eq('master_id', masterId).order('created_at', { ascending: false }).limit(1).single()
     let numeroInt = 1000
     if (ultima?.numero) { const n = parseInt(String(ultima.numero).replace(/\D/g, '')); if (!isNaN(n)) numeroInt = n }
-    const numeroDistinta = String(numeroInt + 1)
-    const { data: distinta } = await supabase.from('distinte').insert({
-      master_id: masterId, cliente_id: clienteId, corriere_id: corriereId,
-      numero: numeroDistinta, data: new Date().toISOString().split('T')[0], stato: 'chiusa', confermata_vettore: true, data_conferma: new Date().toISOString(),
-      totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: righe.length, prezzo_totale: prezzoTotale,
-    }).select().single()
+    // RETRY sul numero (unico per master): in caso di conflitto riprovo col successivo,
+    // cosi' nessun gruppo salta la chiusura notturna in silenzio.
+    let distinta: any = null
+    for (let tent = 1; tent <= 5 && !distinta; tent++) {
+      const numeroDistinta = String(numeroInt + tent)
+      const r = await supabase.from('distinte').insert({
+        master_id: masterId, cliente_id: clienteId, corriere_id: corriereId,
+        numero: numeroDistinta, data: new Date().toISOString().split('T')[0], stato: 'chiusa', confermata_vettore: true, data_conferma: new Date().toISOString(),
+        totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: righe.length, prezzo_totale: prezzoTotale,
+      }).select().single()
+      distinta = r.data
+      if (r.error && !String(r.error.message || '').includes('duplicate key')) break
+    }
     if (distinta?.id) {
       await supabase.from('spedizioni').update({ distinta_id: distinta.id }).in('id', righe.map(r => r.id))
       // Distinta = consegnate al corriere → "spedita" (solo le "in lavorazione", per non sovrascrivere

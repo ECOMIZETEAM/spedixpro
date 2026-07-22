@@ -65,13 +65,21 @@ export async function POST(req: NextRequest) {
     .select('numero').eq('master_id', utente?.master_id).order('created_at', { ascending: false }).limit(1).single()
   let numeroInt = 1000
   if (ultima?.numero) { const n = parseInt(String(ultima.numero).replace(/\D/g, '')); if (!isNaN(n)) numeroInt = n }
-  const numeroDistinta = String(numeroInt + 1)
-  const { data: distinta, error } = await supabase.from('distinte').insert({
-    master_id: utente?.master_id, cliente_id: masterSel ? null : (clienteId || null), master_rete_id: masterSel || null, corriere_id: corriereId || null,
-    numero: numeroDistinta, data: new Date().toISOString().split('T')[0], stato: 'chiusa',
-    totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: (speds||[]).length, prezzo_totale: prezzoTotale,
-  }).select().single()
+  // RETRY sul numero: unico PER MASTER; se due chiusure partono insieme, il secondo insert
+  // collide -> riprovo col numero successivo (fino a 5 tentativi) invece di fallire.
+  let distinta: any = null, error: any = null
+  for (let tent = 1; tent <= 5 && !distinta; tent++) {
+    const numeroDistinta = String(numeroInt + tent)
+    const r = await supabase.from('distinte').insert({
+      master_id: utente?.master_id, cliente_id: masterSel ? null : (clienteId || null), master_rete_id: masterSel || null, corriere_id: corriereId || null,
+      numero: numeroDistinta, data: new Date().toISOString().split('T')[0], stato: 'chiusa',
+      totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: (speds||[]).length, prezzo_totale: prezzoTotale,
+    }).select().single()
+    distinta = r.data; error = r.error
+    if (error && !String(error.message || '').includes('duplicate key')) break
+  }
   if (error || !distinta) return NextResponse.json({ error: error?.message || 'Errore' }, { status: 400 })
+  const numeroDistinta = distinta.numero
   await db.from('spedizioni').update({ distinta_id: distinta.id }).in('id', spedIdsValidi)
   // Distinta = consegnate al corriere → passano a "spedita" (solo quelle ancora "in lavorazione", per
   // non sovrascrivere in_transito/consegnata). Così in elenco si distinguono dalle etichette appena
