@@ -38,7 +38,14 @@ export default function ElencoDistintePage() {
       body: JSON.stringify({ distinteIds: Array.from(selezionate) })
     })
     const d = await res.json()
-    if (d.success) { setSelezionate(new Set()); await carica() }
+    if (d.success) {
+      setSelezionate(new Set()); await carica()
+      // La conferma TRASMETTE la distinta al corriere: se il provider risponde errore va detto
+      // chiaramente (prima falliva in silenzio e sembrava "non le fa confermare").
+      if (d.errori?.length) {
+        await dialog.alert({ title: 'Alcune distinte non trasmesse', message: d.errori.map((e: any) => `Distinta ${e.numero}: ${e.errore}`).join('\n') })
+      }
+    }
     else { await dialog.alert({ title: 'Errore', message: d.error || 'Conferma fallita.' }) }
   }
 

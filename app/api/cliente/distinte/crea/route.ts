@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
   const oggi = new Date().toISOString().slice(0, 10)
   const { data: distinta, error: errIns } = await supabase
     .from('distinte')
-    .insert({ master_id: masterId, cliente_id: clienteId, corriere_id: corriereId, numero, data: oggi, stato: 'chiusa', totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: valide.length, confermata_vettore: true, data_conferma: new Date().toISOString() })
+    .insert({ master_id: masterId, cliente_id: clienteId, corriere_id: corriereId, numero, data: oggi, stato: 'chiusa', totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: valide.length })
     .select('id,numero')
     .single()
   if (errIns || !distinta) return NextResponse.json({ error: 'Errore creazione distinta' }, { status: 500 })

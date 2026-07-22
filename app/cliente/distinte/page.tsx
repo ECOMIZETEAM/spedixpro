@@ -18,6 +18,15 @@ export default function ListaDistinteCliente() {
   const totPagine = Math.max(1, Math.ceil(visibili.length / perPagina))
   const paginaCorr = Math.min(pagina, totPagine)
   const paginate = visibili.slice((paginaCorr-1)*perPagina, paginaCorr*perPagina)
+  async function conferma(id:string) {
+    setBusy(id+'-conf')
+    try {
+      const res = await fetch('/api/cliente/distinte/conferma', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ distintaId: id }) })
+      const d = await res.json()
+      if (d.success) await dialog.alert({ title: 'Distinta confermata', message: d.giaConfermata ? 'Distinta già confermata al vettore.' : 'Distinta trasmessa al vettore.' })
+      else await dialog.alert({ title: 'Conferma non riuscita', message: d.error || 'Errore sconosciuto.' })
+    } finally { setBusy('') }
+  }
   async function stampa(id:string, numero:string) {
     setBusy(id+'-pdf')
     try {
@@ -117,7 +126,7 @@ export default function ListaDistinteCliente() {
                     <td style={td}>
                       <button onClick={()=>stampa(d.id,d.numero)} disabled={busy===d.id+'-pdf'} title="Stampa PDF" style={{...btn,background:'#6b7280',color:'#fff'}}>{busy===d.id+'-pdf'?'...':'🖨'}</button>
                       <button onClick={()=>esporta(d.id,d.numero)} disabled={busy===d.id+'-xlsx'} title="Esporta Excel" style={{...btn,background:'#e5e7eb',color:'#1a1a1a'}}>{busy===d.id+'-xlsx'?'...':'⬇'}</button>
-                      <button title="Conferma" style={{...btn,background:'#06b6d4',color:'#fff'}}>✈</button>
+                      <button onClick={()=>conferma(d.id)} disabled={busy===d.id+'-conf'} title="Conferma al vettore" style={{...btn,background:'#06b6d4',color:'#fff'}}>{busy===d.id+'-conf'?'...':'✈'}</button>
                     </td>
                   </tr>
                 ))}

@@ -462,8 +462,9 @@ export async function spediamoproReleaseStock(authcode: string, stockId: number,
 export async function chiudiBordereauSpediamopro(supabase: any, distintaId: string): Promise<any> {
   try {
     const { data: distinta } = await supabase
-      .from('distinte').select('id, corriere_id, bordero_pdf').eq('id', distintaId).maybeSingle()
-    if (!distinta || distinta.bordero_pdf) return { skip: true }
+      .from('distinte').select('id, corriere_id, bordero_id, bordero_pdf').eq('id', distintaId).maybeSingle()
+    // Gia' chiusa (pdf) o non applicabile (N/A): niente da rifare. Se invece era in ERRORE si RITENTA.
+    if (!distinta || distinta.bordero_pdf || distinta.bordero_id === 'N/A') return { skip: true }
 
     const { data: corriere } = await supabase
       .from('corrieri').select('id, tipo, credenziali').eq('id', distinta.corriere_id).maybeSingle()
@@ -487,6 +488,7 @@ export async function chiudiBordereauSpediamopro(supabase: any, distintaId: stri
     const token = await getSpediamoproToken(authcode)
     let pdf: string | null = null
     let errore: string | null = null
+    let nonSupportato = false
     // L'API accetta max 30 id per richiesta.
     for (let i = 0; i < uniq.length; i += 30) {
       const batch = uniq.slice(i, i + 30)
@@ -495,7 +497,13 @@ export async function chiudiBordereauSpediamopro(supabase: any, distintaId: stri
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!r.ok) {
-        errore = 'HTTP ' + r.status + ': ' + (await r.text().catch(() => '')).slice(0, 150)
+        const txt = await r.text().catch(() => '')
+        let msg = txt
+        try { msg = JSON.parse(txt)?.error?.message || txt } catch {}
+        // Alcuni corrieri SpediamoPro (es. SDA) NON hanno il bordereau: non e' un guasto,
+        // semplicemente non c'e' nulla da trasmettere -> la distinta e' solo documento Moove.
+        if (/non supporta il servizio/i.test(msg)) { nonSupportato = true; continue }
+        errore = 'HTTP ' + r.status + ': ' + String(msg).slice(0, 200)
         continue
       }
       const ct = r.headers.get('content-type') || ''
@@ -504,12 +512,15 @@ export async function chiudiBordereauSpediamopro(supabase: any, distintaId: stri
       if (!pdf && buf.length) pdf = `data:${mime};base64,` + buf.toString('base64')
     }
 
-    await supabase.from('distinte').update({
-      bordero_id: pdf ? 'SP' : (errore ? 'ERRORE: ' + errore : null),
-      bordero_pdf: pdf,
-    }).eq('id', distintaId)
+    // confermata_vettore = TRASMESSA davvero (o non applicabile): niente piu' flag bugiardi.
+    const esito: any = pdf
+      ? { bordero_id: 'SP', bordero_pdf: pdf, confermata_vettore: true, data_conferma: new Date().toISOString() }
+      : (nonSupportato && !errore)
+        ? { bordero_id: 'N/A', confermata_vettore: true, data_conferma: new Date().toISOString() }
+        : { bordero_id: errore ? 'ERRORE: ' + errore : null }
+    await supabase.from('distinte').update(esito).eq('id', distintaId)
 
-    return { ok: !!pdf, errore }
+    return { ok: !!pdf || (nonSupportato && !errore), errore, nonSupportato }
   } catch (e: any) {
     try {
       await supabase.from('distinte').update({ bordero_id: 'ERRORE: ' + String(e?.message || e).slice(0, 150) }).eq('id', distintaId)

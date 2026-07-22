@@ -63,7 +63,8 @@ export async function chiudiBorderoSpedisci(supabase: any, distintaId: string) {
   try {
     const { data: distinta } = await supabase
       .from('distinte').select('id, corriere_id, bordero_id').eq('id', distintaId).maybeSingle()
-    if (!distinta || distinta.bordero_id) return { skip: true }
+    // Gia' chiusa: skip. Se il tentativo precedente era finito in ERRORE si RITENTA.
+    if (!distinta || (distinta.bordero_id && !String(distinta.bordero_id).startsWith('ERRORE'))) return { skip: true }
 
     const { data: corriere } = await supabase
       .from('corrieri').select('id, tipo, credenziali').eq('id', distinta.corriere_id).maybeSingle()
@@ -108,9 +109,11 @@ export async function chiudiBorderoSpedisci(supabase: any, distintaId: string) {
       if (b64 && !pdf) pdf = 'data:application/pdf;base64,' + b64
     }
 
+    // confermata_vettore = TRASMESSA davvero al provider: si accende solo a chiusura riuscita.
     await supabase.from('distinte').update({
       bordero_id: ids.length ? ids.join(',') : (errore ? 'ERRORE: ' + errore : null),
       bordero_pdf: pdf,
+      ...(ids.length && !errore ? { confermata_vettore: true, data_conferma: new Date().toISOString() } : {}),
     }).eq('id', distintaId)
 
     return { ok: ids.length > 0, bordero_id: ids.join(','), errore }

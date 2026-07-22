@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
     const numeroDistinta = String(numSeq || Date.now())
     const { data: distinta } = await supabase.from('distinte').insert({
       master_id: masterId, cliente_id: clienteId, corriere_id: corriereId,
-      numero: numeroDistinta, data: new Date().toISOString().split('T')[0], stato: 'chiusa', confermata_vettore: true, data_conferma: new Date().toISOString(),
+      numero: numeroDistinta, data: new Date().toISOString().split('T')[0], stato: 'chiusa',
       totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: righe.length, prezzo_totale: prezzoTotale,
     }).select().single()
     if (distinta?.id) {
