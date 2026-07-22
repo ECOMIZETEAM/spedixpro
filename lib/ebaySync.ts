@@ -1,31 +1,30 @@
 import { getValidEbayToken, ebayGet } from '@/lib/ebay'
 
-// Sincronizza TUTTI gli ordini eBay in ordini_ecommerce (spediti e non, qualunque pagamento).
-export async function sincronizzaOrdiniEbay(db: any, integr: any): Promise<{ letti: number; importati: number }> {
+// Giorno italiano -> ISO UTC per i filtri data dei marketplace (con margine orario: gli ordini sono
+// timestampati in UTC, il giorno "italiano" parte ~2h prima in UTC d'estate, 1h d'inverno).
+export function rangeGiorniISO(dal?: string | null, al?: string | null, defaultGiorni = 30): { daISO: string; aISO: string } {
+  const oggi = new Date().toISOString().slice(0, 10)
+  const d = (dal || '').match(/^\d{4}-\d{2}-\d{2}$/) ? dal! : new Date(Date.now() - defaultGiorni * 24 * 3600 * 1000).toISOString().slice(0, 10)
+  const a = (al || '').match(/^\d{4}-\d{2}-\d{2}$/) ? al! : oggi
+  const daISO = new Date(new Date(d + 'T00:00:00Z').getTime() - 2 * 3600 * 1000).toISOString()
+  const aISO = new Date(new Date(a + 'T23:59:59Z').getTime() + 2 * 3600 * 1000).toISOString()
+  return { daISO, aISO }
+}
+
+// Sincronizza gli ordini eBay in ordini_ecommerce (spediti e non, qualunque pagamento, contrassegno
+// incluso) NELLA FINESTRA DATE RICHIESTA: si importa SOLO l'intervallo selezionato in pagina
+// (oggi -> solo oggi; ieri -> solo ieri; il mese -> il mese). Default: ultimi 30 giorni.
+export async function sincronizzaOrdiniEbay(db: any, integr: any, range?: { dal?: string | null; al?: string | null }): Promise<{ letti: number; importati: number }> {
   const token = await getValidEbayToken(db, integr)
-  // Prende TUTTO: nessun filtro di stato/pagamento (contrassegno incluso). Solo finestra data (ultimi
-  // 180 gg) per non scaricare anni di storico. Paginazione completa (pagine da 200, max eBay). Gli
-  // ordini già evasi su eBay vengono marcati 'spedito' (sotto), gli altri restano da spedire.
   const ordini: any[] = []
   const LIMIT = 200
-  const daISO = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString()
-  const aISO = new Date().toISOString()
-  // TUTTI gli ordini (spediti E non spediti, qualsiasi pagamento, contrassegno incluso): NESSUN filtro
-  // di stato/pagamento. Solo la finestra data (ultimi 180 gg) per non prendere anni di storico.
-  let filtro = `creationdate:[${daISO}..${aISO}]`
-  let fallback = false
+  const { daISO, aISO } = rangeGiorniISO(range?.dal, range?.al)
+  // Nessun filtro di stato/pagamento (spediti E non, contrassegno incluso): SOLO la finestra data.
+  // Niente fallback "senza data": importare tutto lo storico a prescindere non è mai desiderato.
+  const filtro = `creationdate:[${daISO}..${aISO}]`
   let totApi = 0
   for (let offset = 0; offset < 10000; offset += LIMIT) {
-    const qFiltro = filtro ? `filter=${encodeURIComponent(filtro)}&` : ''
-    let data: any
-    try {
-      data = await ebayGet(token, `/sell/fulfillment/v1/order?${qFiltro}limit=${LIMIT}&offset=${offset}`)
-    } catch (e: any) {
-      // eBay ha rifiutato il filtro data (range non ammesso?): riprovo SENZA filtro (default eBay),
-      // così il sync non fallisce e prende comunque gli ordini.
-      if (offset === 0 && !fallback) { fallback = true; filtro = ''; offset = -LIMIT; continue }
-      throw e
-    }
+    const data: any = await ebayGet(token, `/sell/fulfillment/v1/order?filter=${encodeURIComponent(filtro)}&limit=${LIMIT}&offset=${offset}`)
     const batch: any[] = data?.orders || []
     ordini.push(...batch)
     totApi = Number(data?.total || totApi)
@@ -79,7 +78,7 @@ export async function sincronizzaOrdiniEbay(db: any, integr: any): Promise<{ let
 
   // LOG DIAGNOSTICO: quanti ne dichiara l'API (total) vs quanti letti (paginati) vs salvati vs errori.
   // Se apiTotal > letti → problema di fetch/finestra; se letti > salvati → upsert che falliscono.
-  console.log(`[EBAY SYNC] cliente=${integr.cliente_id} negozio="${integr.nome_negozio}" apiTotal=${totApi} letti=${ordini.length} salvati=${importati} errori=${errori} finestra=${fallback ? 'SENZA-data(fallback)' : daISO.slice(0, 10) + '..oggi'}`)
+  console.log(`[EBAY SYNC] cliente=${integr.cliente_id} negozio="${integr.nome_negozio}" apiTotal=${totApi} letti=${ordini.length} salvati=${importati} errori=${errori} finestra=${daISO.slice(0, 10)}..${aISO.slice(0, 10)}`)
 
   await db.from('integrazioni')
     .update({ ultimo_sync: new Date().toISOString(), ordini_totali: ordini.length })

@@ -4,6 +4,7 @@ import { sincronizzaOrdiniWoo } from '@/lib/wooSync'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 120   // finestre ampie (es. un mese) con molti ordini: niente timeout
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -26,7 +27,7 @@ export async function POST(req: NextRequest) {
   if (!integr) return NextResponse.json({ error: 'Integrazione non trovata' }, { status: 404 })
 
   try {
-    const res = await sincronizzaOrdiniWoo(supabase, integr)
+    const res = await sincronizzaOrdiniWoo(supabase, integr, { dal: body.dal, al: body.al })
     return NextResponse.json({ ok: true, ...res })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Errore sincronizzazione' }, { status: 502 })

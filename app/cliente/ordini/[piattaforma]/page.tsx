@@ -114,7 +114,8 @@ export default function OrdiniPage() {
     try {
       const res = await fetch('/api/integrazioni/'+piattaforma+'/sync', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ integrazione_id: id })
+        // Import guidato dalle DATE selezionate in pagina: oggi -> solo oggi, ieri -> solo ieri, ecc.
+        body: JSON.stringify({ integrazione_id: id, dal: fDa, al: fA })
       })
       const d = await res.json()
       if (d.error) setMsg('Errore: '+d.error)
@@ -136,6 +137,8 @@ export default function OrdiniPage() {
       rif: String(o.numero_ordine || o.ordine_esterno_id || '').replace(/^#/,''),
     })
     if (spedisciCon && spedisciCon !== 'auto') qs.set('corriere', spedisciCon)
+    const cod = codDaOrdine(o)
+    if (cod > 0) qs.set('contrassegno', String(cod))
     router.push('/cliente/spedizioni/nuova?'+qs.toString())
   }
 
@@ -198,6 +201,15 @@ export default function OrdiniPage() {
 
   const [spedendo, setSpedendo] = useState(false)
 
+  // CONTRASSEGNO dall'ordine del marketplace: eBay = paymentMethod CASH_ON_DELIVERY/PICKUP;
+  // Woo = payment_method 'cod'; PrestaShop = modulo cashondelivery. Importo = totale ordine.
+  function codDaOrdine(o:any): number {
+    const r = o.raw || {}
+    const pm = JSON.stringify([r.paymentSummary?.payments, r.payment_method, r.payment, r.module] || '')
+    if (/cash_on_delivery|cash_on_pickup|"cod"|cashondelivery|contrassegno/i.test(pm)) return Number(o.totale || r.total || 0) || 0
+    return 0
+  }
+
   async function spedisciSelezionati(){
     const ids = Object.keys(sel).filter(id=>sel[id])
     if (ids.length===0){ setMsg('Seleziona almeno un ordine'); return }
@@ -220,7 +232,7 @@ export default function OrdiniPage() {
         const shipTo = { name:d.nome, company:'', street1:d.indirizzo, street2:'', city:d.citta, state:d.provincia||'', postalCode:d.cap, country:d.paese||'IT', phone:d.telefono||'', email:d.email||'' }
         const tarRes = await fetch('/api/spedizioni/tariffe', {
           method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ clienteId:cli.id, packages, shipFrom, shipTo, notes:'', insuranceValue:0, codValue:0 })
+          body: JSON.stringify({ clienteId:cli.id, packages, shipFrom, shipTo, notes:'', insuranceValue:0, codValue: codDaOrdine(o) })
         }).then(r=>r.json()).catch(()=>null)
         if (!Array.isArray(tarRes) || !tarRes.length) { errori.push(num+': nessuna tariffa'); continue }
         let t = null
@@ -235,7 +247,7 @@ export default function OrdiniPage() {
             clienteId:cli.id, carrierCode:t.carrierCode, contractCode:t.contractCode, totalPrice:t.total_price,
             _corriere_id: t._corriere_id || t.corriere_id || null, _spediamopro_quotation: t._spediamopro_quotation || null,
             packages, colliDettaglio:[{lunghezza:String(rp.l),larghezza:String(rp.w),altezza:String(rp.h)}],
-            shipFrom, shipTo, notes:'', insuranceValue:0, codValue:0,
+            shipFrom, shipTo, notes:'', insuranceValue:0, codValue: codDaOrdine(o),
             rifOrdine: String(o.numero_ordine || o.ordine_esterno_id || num || '').replace(/^#/,''),
             contenuto: arts.map((a:any)=>a.nome).join(', ').slice(0,100), tipoContenuto:'Merce destinata alla vendita', valoreMerce:String(o.totale||'')
           })
@@ -394,7 +406,7 @@ export default function OrdiniPage() {
                     </td>
                     <td style={td}><span style={{fontSize:'11px',fontWeight:600,padding:'3px 9px',borderRadius:'999px',background:cp.bg,color:cp.fg}}>{labelPag(o.stato_pagamento)}</span></td>
                     <td style={td}><span style={{fontSize:'11px',fontWeight:600,padding:'3px 9px',borderRadius:'999px',background:o.stato==='spedito'?'#dcfce7':'#fef3c7',color:o.stato==='spedito'?'#166534':'#92400e'}}>{o.stato==='spedito'?'Spedito':'Da spedire'}</span></td>
-                    <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>{o.totale?Number(o.totale).toFixed(2):'—'} {o.valuta||''}</td>
+                    <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>{o.totale?Number(o.totale).toFixed(2):'—'} {o.valuta||''}{codDaOrdine(o)>0 && <span title="Ordine in contrassegno: l'importo verrà applicato alla spedizione" style={{marginLeft:'6px',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fff7ed',color:'#c2410c',border:'1px solid #fed7aa'}}>COD</span>}</td>
                     <td style={{...td,color:'#6b7280',maxWidth:'140px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{getTags(o)||'—'}</td>
                     <td style={{...td,color:'#6b7280'}}>{o.spedizione_id?String(o.spedizione_id).slice(0,8):'—'}</td>
                     <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>
