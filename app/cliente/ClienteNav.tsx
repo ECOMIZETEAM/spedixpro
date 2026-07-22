@@ -89,8 +89,13 @@ export default function ClienteNav() {
   }, [])
   // Badge notifiche assistenza (aggiornamenti ai propri ticket)
   const [ticketBadge, setTicketBadge] = useState<{ count: number; ticket: number; pod: number }>({ count: 0, ticket: 0, pod: 0 })
+  // Badge GIACENZE: quante nuove (entrate dopo l'ultima visita alla pagina) — pallino rosso come i ticket
+  const [giacenzeNuove, setGiacenzeNuove] = useState(0)
   useEffect(() => {
-    const load = () => fetch('/api/assistenza/non-letti').then(r=>r.json()).then(d=>setTicketBadge({ count: d.count||0, ticket: d.ticket||0, pod: d.pod||0 })).catch(()=>{})
+    const load = () => {
+      fetch('/api/assistenza/non-letti').then(r=>r.json()).then(d=>setTicketBadge({ count: d.count||0, ticket: d.ticket||0, pod: d.pod||0 })).catch(()=>{})
+      fetch('/api/cliente/giacenze/nuove').then(r=>r.json()).then(d=>setGiacenzeNuove(Number(d?.count)||0)).catch(()=>{})
+    }
     load(); const t = setInterval(() => { if (document.visibilityState === 'visible') load() }, 30000); return () => clearInterval(t)
   }, [pathname])
   const badgeStyle = { background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, minWidth: '17px', height: '17px', borderRadius: '9px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' } as const
@@ -175,6 +180,7 @@ export default function ClienteNav() {
                 </span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   {item.id === 'assistenza' && !isOpen && ticketBadge.count > 0 && <span style={badgeStyle}>{ticketBadge.count}</span>}
+                  {item.id === 'spedizioni' && !isOpen && giacenzeNuove > 0 && <span style={badgeStyle}>{giacenzeNuove}</span>}
                   <span style={{
                     fontSize: '9px', opacity: 0.7,
                     transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .12s',
@@ -186,7 +192,7 @@ export default function ClienteNav() {
                 <div style={{ padding: '2px 0 6px', background: 'rgba(0,0,0,0.25)' }}>
                   {item.sub!.map(s => {
                     const sActive = leafActive(s.href)
-                    const sBadge = s.href === '/cliente/assistenza' ? ticketBadge.ticket : s.href === '/cliente/assistenza/pod' ? ticketBadge.pod : 0
+                    const sBadge = s.href === '/cliente/assistenza' ? ticketBadge.ticket : s.href === '/cliente/assistenza/pod' ? ticketBadge.pod : s.href === '/cliente/spedizioni/giacenze' ? giacenzeNuove : 0
                     return (
                       <a
                         key={s.href}

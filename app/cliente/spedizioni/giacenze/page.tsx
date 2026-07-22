@@ -27,6 +27,8 @@ export default function GiacenzePage() {
   })
 
   useEffect(() => {
+    // Segna le giacenze come VISTE (spegne il pallino rosso nel menu)
+    fetch('/api/cliente/giacenze/nuove', { method: 'POST' }).catch(()=>{})
     carica()
   }, [])
 
