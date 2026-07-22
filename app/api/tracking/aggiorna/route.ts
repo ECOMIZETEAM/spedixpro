@@ -23,7 +23,7 @@ export async function GET() {
   const { data: spedizioni } = await admin.from('spedizioni')
     .select('id,numero,stato,raw_response,tracking_number,etichetta_url,giacenza_data,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali)')
     .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
-    .order('updated_at', { ascending: true })
+    .order('tracking_check_at', { ascending: true, nullsFirst: true })
     .limit(3000)
 
   let aggiornate = 0, errori = 0
@@ -123,13 +123,21 @@ export async function GET() {
     } catch { errori++ }
   }
 
-  // Batch PARALLELI (8 alla volta): con migliaia di attive il giro sequenziale non stava nel
-  // maxDuration; così si coprono TUTTE le attive a ogni giro (aggiornamenti tempestivi).
+  // Batch PARALLELI (16 alla volta) + ROTAZIONE: dopo ogni batch marco tracking_check_at, così
+  // chi è stato controllato va in fondo alla coda e il giro dopo parte da chi aspetta da più
+  // tempo. Anche se il run viene ucciso dal timeout a metà, la rotazione resta EQUA: nessuna
+  // spedizione può restare indietro per sempre (era il bug "si aggiorna solo al click").
   const lista = spedizioni || []
-  const BATCH = 8
+  const BATCH = 16
+  const inizioMs = Date.now()
   for (let i = 0; i < lista.length; i += BATCH) {
-    await Promise.all(lista.slice(i, i + BATCH).map(lavora))
+    const gruppo = lista.slice(i, i + BATCH)
+    await Promise.all(gruppo.map(lavora))
+    try { await admin.from('spedizioni').update({ tracking_check_at: new Date().toISOString() }).in('id', gruppo.map((g: any) => g.id)) } catch {}
+    // margine di sicurezza sotto il maxDuration (300s): meglio fermarsi puliti che essere uccisi
+    if (Date.now() - inizioMs > 270000) break
   }
 
-  return NextResponse.json({ ok: true, esaminate: lista.length, aggiornate, errori })
+  console.log(`[TRACKING] esaminate=${lista.length} aggiornate=${aggiornate} errori=${errori} durata=${Math.round((Date.now() - inizioMs) / 1000)}s`)
+  return NextResponse.json({ ok: true, esaminate: lista.length, aggiornate, errori, durataSec: Math.round((Date.now() - inizioMs) / 1000) })
 }
