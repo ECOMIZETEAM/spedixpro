@@ -20,11 +20,22 @@ export async function GET() {
   // venivano mai raggiunte e non comparivano nella sezione Giacenze. Un giro da 300 impiega ~12s,
   // quindi c'è ampio margine sotto maxDuration. NB: a volumi molto alti va spezzato in batch
   // con un campo "ultimo_check_tracking" (round-robin) — vedi TODO cron tracking scalabile.
-  const { data: spedizioni } = await admin.from('spedizioni')
-    .select('id,numero,stato,raw_response,tracking_number,etichetta_url,giacenza_data,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali)')
-    .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
-    .order('tracking_check_at', { ascending: true, nullsFirst: true })
-    .limit(3000)
+  // A PAGINE: PostgREST tronca ogni risposta a 1000 righe (il vecchio .limit(3000) era
+  // silenziosamente tagliato -> ogni giro copriva solo le prime 1000 attive). Carico tutte
+  // le pagine PRIMA di processare, con dedup per id (le pagine possono slittare se qualche
+  // riga cambia stato nel frattempo).
+  const vistiIds = new Set<string>()
+  const spedizioni: any[] = []
+  for (let pag = 0; pag < 8; pag++) {
+    const { data: pagina } = await admin.from('spedizioni')
+      .select('id,numero,stato,raw_response,tracking_number,etichetta_url,giacenza_data,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali)')
+      .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
+      .order('tracking_check_at', { ascending: true, nullsFirst: true })
+      .order('id', { ascending: true })
+      .range(pag * 1000, pag * 1000 + 999)
+    for (const r of pagina || []) { if (!vistiIds.has(r.id)) { vistiIds.add(r.id); spedizioni.push(r) } }
+    if (!pagina || pagina.length < 1000) break
+  }
 
   let aggiornate = 0, errori = 0
   let spedisciBloccato = false   // breaker: al primo 403 di policy niente altre chiamate Spedisci nel giro
@@ -127,7 +138,7 @@ export async function GET() {
   // chi è stato controllato va in fondo alla coda e il giro dopo parte da chi aspetta da più
   // tempo. Anche se il run viene ucciso dal timeout a metà, la rotazione resta EQUA: nessuna
   // spedizione può restare indietro per sempre (era il bug "si aggiorna solo al click").
-  const lista = spedizioni || []
+  const lista = spedizioni
   const BATCH = 16
   const inizioMs = Date.now()
   for (let i = 0; i < lista.length; i += BATCH) {
