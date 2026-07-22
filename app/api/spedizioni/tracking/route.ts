@@ -74,6 +74,13 @@ export async function GET(req: NextRequest) {
       if (!spid || !authcode) return NextResponse.json({ ...base, eventi: [], stato: statoEffettivo, error: 'Tracking non disponibile per questa spedizione' })
       const tr = await spediamoproGetTracking(authcode, Number(spid))
       await persistiStato(mapStatoSpediamopro(tr.status))
+      // RECUPERO NUMERO al volo: se il numero è ancora il codice interno SpediamoPro (raw.code) e ora
+      // esiste il tracking reale del corriere, correggo subito (senza aspettare il giro del cron).
+      if (tr.trackingCode && tr.trackingCode !== spedizione.numero && (spedizione.numero === raw.code || String(spedizione.numero || '').startsWith('SP-'))) {
+        try { await admin.from('spedizioni').update({ numero: tr.trackingCode, tracking_number: tr.trackingCode }).eq('id', spedizione.id) } catch {}
+        ;(base as any).numero = tr.trackingCode
+        ;(base as any).tracking_number = tr.trackingCode
+      }
       const eventi = (tr.events || []).map((e: any) => ({
         date: e.at || e.date || '',
         description: [e.title, e.description].filter(Boolean).join(' — ') || 'Evento',
