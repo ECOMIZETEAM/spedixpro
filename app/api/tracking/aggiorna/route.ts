@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { spediamoproGetTracking, spediamoproSearchStocks, mapStatoSpediamopro, spediamoproGetLabel, normalizzaEtichetta } from '@/lib/spediamopro'
-import { spedisciTrackingStati, mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
+import { prioritaStato } from '@/lib/spedisci'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -24,10 +24,10 @@ export async function GET() {
     .select('id,numero,stato,raw_response,tracking_number,etichetta_url,giacenza_data,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali)')
     .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
     .order('updated_at', { ascending: true })
-    .limit(1000)
+    .limit(3000)
 
   let aggiornate = 0, errori = 0
-  for (const s of (spedizioni || [])) {
+  const lavora = async (s: any) => {
     const corr: any = (s as any).corrieri
     const tipo = corr?.tipo
     const cred: any = corr?.credenziali || {}
@@ -44,7 +44,7 @@ export async function GET() {
         const raw: any = s.raw_response || {}
         const spid = raw.id || raw?.raw?.data?.id
         const authcode = cred?.authcode
-        if (!spid || !authcode) continue
+        if (!spid || !authcode) return
         spAuth = authcode; spId = Number(spid); spCode = raw.code || null
 
         const tr = await spediamoproGetTracking(authcode, Number(spid))
@@ -59,22 +59,17 @@ export async function GET() {
         }
         if (tr.trackingCode) nuovoTracking = tr.trackingCode
 
-      } else if (tipo === 'spedisci') {
-        if (!s.tracking_number || !cred?.master_domain || !cred?.password) continue
-        // Polling: nessuna configurazione richiesta lato Spedisci (il webhook resta un bonus real-time).
-        const { stati } = await spedisciTrackingStati(cred, s.tracking_number)
-        // mappo tutti gli eventi e scelgo lo stato "più avanzato" (ordine non garantito)
-        for (const str of stati) {
-          const m = mapStatoSpedisci(str)
-          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
-        }
-
       } else {
-        continue
+        // Spedisci: il POLLING è stato CHIUSO dal provider (403 "For tracking please use the
+        // Webhooks events") → lo stato arriva in tempo reale dal webhook, qui non chiamiamo nulla.
+        return
       }
 
       const upd: any = {}
-      if (nuovo && nuovo !== s.stato) upd.stato = nuovo
+      // Lo stato avanza SOLO IN AVANTI ('annullata' sempre applicata): il corriere può essere
+      // "indietro" rispetto a noi (es. 'spedita' dopo la distinta mentre lui dice ancora
+      // "in lavorazione") e NON deve declassare. Era la causa dei badge che regredivano.
+      if (nuovo && nuovo !== s.stato && (nuovo === 'annullata' || prioritaStato(nuovo) > prioritaStato(s.stato))) upd.stato = nuovo
       if (nuovo === 'in_giacenza' && !s.giacenza_data) upd.giacenza_data = new Date().toISOString()
       if (nuovoTracking && nuovoTracking !== s.tracking_number) upd.tracking_number = nuovoTracking
 
@@ -116,5 +111,13 @@ export async function GET() {
     } catch { errori++ }
   }
 
-  return NextResponse.json({ ok: true, esaminate: spedizioni?.length || 0, aggiornate, errori })
+  // Batch PARALLELI (8 alla volta): con migliaia di attive il giro sequenziale non stava nel
+  // maxDuration; così si coprono TUTTE le attive a ogni giro (aggiornamenti tempestivi).
+  const lista = spedizioni || []
+  const BATCH = 8
+  for (let i = 0; i < lista.length; i += BATCH) {
+    await Promise.all(lista.slice(i, i + BATCH).map(lavora))
+  }
+
+  return NextResponse.json({ ok: true, esaminate: lista.length, aggiornate, errori })
 }

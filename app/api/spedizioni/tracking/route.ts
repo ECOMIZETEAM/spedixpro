@@ -4,7 +4,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { spediamoproGetTracking, mapStatoSpediamopro } from '@/lib/spediamopro'
-import { mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
+import { prioritaStato } from '@/lib/spedisci'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -36,6 +36,9 @@ export async function GET(req: NextRequest) {
   const persistiStato = async (nuovo: string | null) => {
     if (!nuovo || nuovo === 'eccezione' || nuovo === (spedizione as any).stato) return
     if ((spedizione as any).stato === 'consegnata' || (spedizione as any).stato === 'annullata') return
+    // SOLO IN AVANTI: il corriere può essere "indietro" rispetto a noi (es. 'spedita' dopo la
+    // distinta mentre lui dice ancora "in lavorazione"): mai declassare lo stato.
+    if (nuovo !== 'annullata' && prioritaStato(nuovo) <= prioritaStato((spedizione as any).stato)) return
     try { await admin.from('spedizioni').update({ stato: nuovo }).eq('id', spedizione.id); statoEffettivo = nuovo } catch {}
   }
 
@@ -79,33 +82,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200, raw: tr })
     }
 
-    // Spedisci.online: endpoint CORRETTO /api/v2/tracking/{tracking} (NON /shipping/tracking = 404).
-    // Struttura: { return: { shipment: [ { shipment:{...}, tracking:[ {data,StatusDescription,phase,officeDescription} ] } ] } }
-    const res = await fetch(`https://${cred.master_domain}/api/v2/tracking/${spedizione.tracking_number}`, {
-      headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' }
-    })
-    const text = await res.text()
-    let data: any
-    try { data = JSON.parse(text) } catch { data = { raw_text: text } }
-
-    const ship: any = data?.return?.shipment
-    const first: any = Array.isArray(ship) ? ship[0] : ship
-    const eventiRaw: any[] = Array.isArray(first?.tracking) ? first.tracking : []
-    // Normalizzo al formato {date, description, location} come SpediamoPro (così il frontend li mostra).
-    const eventi = eventiRaw.map((ev: any) => ({
-      date: ev.data || ev.date || '',
-      description: ev.StatusDescription || ev.appStatusDescription || ev.descrizioneStato || ev.phase || 'Evento',
-      location: ev.officeDescription || '',
+    // Spedisci.online ha CHIUSO il polling del tracking (403 "For tracking please use the Webhooks
+    // events"): gli eventi arrivano in tempo reale dal WEBHOOK e vengono salvati in tracking_events.
+    // Il popup mostra quelli (lo stato è già allineato dal webhook stesso, solo-in-avanti).
+    const { data: evDb } = await admin.from('tracking_events')
+      .select('stato,descrizione,luogo,data_evento')
+      .eq('spedizione_id', spedizione.id)
+      .order('data_evento', { ascending: false })
+    const eventi = (evDb || []).map((e: any) => ({
+      date: e.data_evento || '',
+      description: e.descrizione || 'Evento',
+      location: e.luogo || '',
     }))
-    // Stato "più avanzato" (persist)
-    const candidati: string[] = []
-    for (const k of ['statusDescription', 'descrizioneStato', 'customerStatusDescription']) if (typeof first?.shipment?.[k] === 'string') candidati.push(first.shipment[k])
-    for (const ev of eventiRaw) for (const k of ['StatusDescription', 'appStatusDescription', 'phase']) if (typeof ev?.[k] === 'string') candidati.push(ev[k])
-    let nuovo: string | null = null
-    for (const c of candidati) { const m = mapStatoSpedisci(c); if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m }
-    await persistiStato(nuovo)
-
-    return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: res.status, raw: data })
+    return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200 })
   } catch(e: any) {
     return NextResponse.json({ ...base, eventi: [], stato: statoEffettivo, error: e.message, tracking_number: spedizione.tracking_number }, { status: 200 })
   }

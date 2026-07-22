@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { mapStatoSpedisci } from '@/lib/spedisci'
+import { mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
 import crypto from 'crypto'
 
 export const runtime = 'nodejs'
@@ -51,13 +51,33 @@ export async function POST(req: NextRequest) {
   if (!tracking) return new NextResponse('OK', { status: 200 })
 
   const nuovo = mapStato(event, d?.status || d?.stato || d?.description || '')
+
+  // Spedizioni interessate (per id): servono sia per l'avanzamento stato sia per SALVARE L'EVENTO.
+  const { data: speds } = await admin.from('spedizioni').select('id,stato').eq('tracking_number', tracking)
+
+  // SALVA L'EVENTO in tracking_events: Spedisci ha CHIUSO il polling del tracking (403 "For tracking
+  // please use the Webhooks events") → il popup tracking mostra QUESTI eventi. Best-effort.
+  const descrizione = String(d?.status || d?.stato || d?.description || event || '').slice(0, 300)
+  const luogo = (String(d?.location || d?.office || d?.officeDescription || '').slice(0, 200)) || null
+  let dataEvento = new Date(d?.date || d?.data || d?.timestamp || Date.now())
+  if (isNaN(dataEvento.getTime())) dataEvento = new Date()
+  if ((speds || []).length && descrizione && (event === 'tracking.update' || event === 'stock.created')) {
+    try {
+      await admin.from('tracking_events').insert((speds || []).map((sp: any) => ({
+        spedizione_id: sp.id, stato: nuovo, descrizione, luogo, data_evento: dataEvento.toISOString(),
+      })))
+    } catch { /* l'evento non salvato non blocca l'aggiornamento stato */ }
+  }
+
   if (nuovo) {
     const upd: any = { stato: nuovo }
     if (nuovo === 'in_giacenza') upd.giacenza_data = new Date().toISOString()
-    // aggiorno tutte le spedizioni con quel tracking, ma non "declasso" quelle già consegnate/annullate
-    await admin.from('spedizioni').update(upd)
-      .eq('tracking_number', tracking)
-      .not('stato', 'in', '(consegnata,annullata)')
+    // Lo stato avanza SOLO IN AVANTI (mai declassare: es. 'spedita' dopo la distinta non deve tornare
+    // 'in lavorazione' per un evento vecchio); consegnate/annullate restano terminali.
+    const daAggiornare = (speds || []).filter((sp: any) =>
+      sp.stato !== 'consegnata' && sp.stato !== 'annullata' && prioritaStato(nuovo) > prioritaStato(sp.stato)
+    ).map((sp: any) => sp.id)
+    if (daAggiornare.length) await admin.from('spedizioni').update(upd).in('id', daAggiornare)
   }
 
   return new NextResponse('OK', { status: 200 })
