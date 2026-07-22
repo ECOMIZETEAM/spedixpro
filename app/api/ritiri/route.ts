@@ -20,8 +20,9 @@ async function rinfrescaStatiPickup(adminDb: any, lista: any[]) {
         const ac = credPer.get(r.corriere_id)
         if (!ac) return
         try {
+          // NB: spediamoproGetPickup ritorna GIÀ il contenuto di data ({status,...}), non l'involucro.
           const j = await spediamoproGetPickup(ac, Number(r.pickup_id))
-          const st = Number(j?.data?.status)
+          const st = Number(j?.status ?? j?.data?.status)
           const nuovo = st >= 4 ? 'elaborato' : (st >= 1 ? 'prenotato' : null)
           if (nuovo && nuovo !== r.stato) { r.stato = nuovo; await adminDb.from('ritiri').update({ stato: nuovo }).eq('id', r.id) }
         } catch { /* best-effort */ }
