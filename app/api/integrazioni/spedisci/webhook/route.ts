@@ -76,6 +76,8 @@ export async function POST(req: NextRequest) {
   const event = body?.event || body?.type || ''
   const d = body?.data || body || {}
   console.log('[WEBHOOK][SPEDISCI] evento:', event, 'tracking:', d?.tracking_number || d?.trackingNumber || d?.tracking || '-')
+  // DIAGNOSTICA temporanea: payload con struttura non riconosciuta -> loggo il corpo per mappare i campi reali
+  if (!event) console.log('[WEBHOOK][SPEDISCI] payload:', raw.slice(0, 500))
   const tracking = d?.tracking_number || d?.tracking || d?.trackingNumber || d?.shipment?.tracking_number || d?.code
   if (!tracking) return new NextResponse('OK', { status: 200 })
 
