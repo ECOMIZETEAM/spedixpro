@@ -75,11 +75,55 @@ export async function POST(req: NextRequest) {
 
   const event = body?.event || body?.type || ''
   const d = body?.data || body || {}
-  console.log('[WEBHOOK][SPEDISCI] evento:', event, 'tracking:', d?.tracking_number || d?.trackingNumber || d?.tracking || '-')
-  // DIAGNOSTICA temporanea: payload con struttura non riconosciuta -> loggo il corpo per mappare i campi reali
-  if (!event) console.log('[WEBHOOK][SPEDISCI] payload:', raw.slice(0, 500))
-  const tracking = d?.tracking_number || d?.tracking || d?.trackingNumber || d?.shipment?.tracking_number || d?.code
-  if (!tracking) return new NextResponse('OK', { status: 200 })
+  // FORMATO REALE Spedisci: { ldv, vector_name, order_id, TrackingDettaglio: [{Data,Stato,Luogo}] }
+  // (rimandano TUTTA la cronologia a ogni aggiornamento; niente campo "event").
+  const tracking = d?.ldv || d?.tracking_number || d?.tracking || d?.trackingNumber || d?.shipment?.tracking_number || d?.code
+  console.log('[WEBHOOK][SPEDISCI] evento:', event || 'tracking-cronologia', 'ldv:', tracking || '-')
+  if (!tracking) { console.log('[WEBHOOK][SPEDISCI] payload sconosciuto:', raw.slice(0, 400)); return new NextResponse('OK', { status: 200 }) }
+
+  const dettagli: any[] = Array.isArray(d?.TrackingDettaglio) ? d.TrackingDettaglio : []
+  if (dettagli.length) {
+    const { data: speds2 } = await admin.from('spedizioni').select('id,stato,giacenza_data').eq('tracking_number', tracking)
+    if (!(speds2 || []).length) return new NextResponse('OK', { status: 200 })
+    // "23/07/2026 05:40" (ora italiana) -> ISO con offset giusto
+    const parseData = (s: string): string => {
+      const m = String(s || '').match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/)
+      if (!m) return new Date().toISOString()
+      const mese = Number(m[2])
+      const off = (mese >= 4 && mese <= 10) ? '+02:00' : '+01:00'
+      return `${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:00${off}`
+    }
+    const eventi = dettagli.map((e: any) => ({
+      stato: mapStatoSpedisci(String(e?.Stato || '')),
+      descrizione: String(e?.Stato || '').slice(0, 300),
+      luogo: (String(e?.Luogo || '').slice(0, 200)) || null,
+      data_evento: parseData(e?.Data),
+    })).filter((e: any) => e.descrizione)
+    const ids = (speds2 || []).map((sp: any) => sp.id)
+    // Sostituisco lo storico (arriva completo a ogni giro: cosi' niente duplicati nel popup)
+    try {
+      await admin.from('tracking_events').delete().in('spedizione_id', ids)
+      if (eventi.length) await admin.from('tracking_events').insert(ids.flatMap((id: string) => eventi.map((e: any) => ({ spedizione_id: id, ...e }))))
+    } catch { /* best-effort */ }
+    // Stato piu' avanzato della cronologia, con le regole di sempre
+    let avanzato: string | null = null
+    for (const e of eventi) if (e.stato && prioritaStato(e.stato) > prioritaStato(avanzato)) avanzato = e.stato
+    if (avanzato) {
+      const upd2: any = { stato: avanzato }
+      const daAgg = (speds2 || []).filter((sp: any) =>
+        sp.stato !== 'consegnata' && sp.stato !== 'annullata' && prioritaStato(avanzato!) > prioritaStato(sp.stato)
+        && !(sp.stato === 'reso_mittente' && avanzato === 'consegnata')   // consegna del ritorno, non del pacco
+      )
+      const idsAgg = daAgg.map((sp: any) => sp.id)
+      if (idsAgg.length) {
+        // giacenza_data solo alla PRIMA rilevazione (non ri-datare giacenze gia' note)
+        if (avanzato === 'in_giacenza' && daAgg.every((sp: any) => !sp.giacenza_data)) upd2.giacenza_data = new Date().toISOString()
+        await admin.from('spedizioni').update(upd2).in('id', idsAgg)
+        console.log('[WEBHOOK][SPEDISCI]', tracking, '-> stato', avanzato, `(${idsAgg.length} agg.)`)
+      }
+    }
+    return new NextResponse('OK', { status: 200 })
+  }
 
   const nuovo = mapStato(event, d?.status || d?.stato || d?.description || '')
 
