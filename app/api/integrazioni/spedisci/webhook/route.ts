@@ -83,8 +83,10 @@ export async function POST(req: NextRequest) {
 
   const dettagli: any[] = Array.isArray(d?.TrackingDettaglio) ? d.TrackingDettaglio : []
   if (dettagli.length) {
-    const { data: speds2 } = await admin.from('spedizioni').select('id,stato,giacenza_data').eq('tracking_number', tracking)
-    if (!(speds2 || []).length) return new NextResponse('OK', { status: 200 })
+    // Match su tracking_number O numero (LDV): il webhook copre TUTTO l'account Spedisci,
+    // incluse spedizioni fatte fuori da Moove -> quelle si ignorano (log e stop).
+    const { data: speds2 } = await admin.from('spedizioni').select('id,stato,giacenza_data').or(`tracking_number.eq.${tracking},numero.eq.${tracking}`)
+    if (!(speds2 || []).length) { console.log('[WEBHOOK][SPEDISCI] ldv non nostra:', tracking); return new NextResponse('OK', { status: 200 }) }
     // "23/07/2026 05:40" (ora italiana) -> ISO con offset giusto
     const parseData = (s: string): string => {
       const m = String(s || '').match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/)
