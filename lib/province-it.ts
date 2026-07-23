@@ -61,8 +61,6 @@ export function siglaProvincia(input: string): string {
   return input.toString().trim().toUpperCase()
 }
 
-// Sigle valide correnti (per validare l'output di siglaProvincia: se non e' qui, e' sporco).
-export const SIGLE_IT = new Set(PROVINCE_IT.map(p => p.sigla))
 
 // Elenco COMPLETO delle 107 province italiane attuali: sigla + nome esteso.
 // Usato nei menu a tendina (mostra il NOME, salva la SIGLA — così il calcolo
@@ -107,3 +105,6 @@ export const PROVINCE_IT: { sigla: string; nome: string }[] = [
   { sigla: 'VC', nome: 'Vercelli' }, { sigla: 'VR', nome: 'Verona' }, { sigla: 'VV', nome: 'Vibo Valentia' },
   { sigla: 'VI', nome: 'Vicenza' }, { sigla: 'VT', nome: 'Viterbo' },
 ]
+
+// Sigle valide correnti (per validare l'output di siglaProvincia: se non e' qui, e' sporco).
+export const SIGLE_IT = new Set(PROVINCE_IT.map(p => p.sigla))
