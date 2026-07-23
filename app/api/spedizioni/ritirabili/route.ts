@@ -18,14 +18,16 @@ export async function GET(req: NextRequest) {
   // Master: vede tutta la propria rete (sotto-albero). Cliente: solo le proprie.
   const masterIds = isCliente ? [utente.master_id] : await sottoAlberoMasterIds(admin, utente.master_id)
 
-  // Ritirabile = spedizione ancora da consegnare al corriere: stato 'in_lavorazione' e NON già
-  // messa in un ritiro (ritiro_id null). Le 'spedita'/'in_transito' sono già state ritirate dal
-  // corriere, quindi non devono comparire tra i ritirabili.
+  // Ritirabile = spedizione non ancora presa in carico dal corriere e NON già in un ritiro
+  // (ritiro_id null). Include anche le 'spedita': la distinta serale marca 'spedita' pure i colli
+  // fisicamente ancora dal mittente in attesa di ritiro (caso reale BRT) — escluderle rendeva
+  // impossibile prenotare il ritiro il giorno dopo. Restano fuori solo quelle davvero in viaggio
+  // (in_transito e oltre).
   let query = admin
     .from('spedizioni')
     .select('id,numero,dest_nome,dest_citta,colli,peso_reale,corriere_id,cliente_id,master_id,raw_response,created_at,corrieri(tipo,nome_contratto)')
     .in('master_id', masterIds)
-    .eq('stato', 'in_lavorazione')
+    .in('stato', ['in_lavorazione', 'spedita'])
     .is('ritiro_id', null)
     .order('created_at', { ascending: false })
     .limit(1000)
