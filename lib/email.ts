@@ -103,7 +103,8 @@ export async function inviaInvitoStaff({
 function esc(v: any): string { return String(v ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;') }
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-// NOTIFICA "SPEDIZIONE CREATA" — email brand MoovExpress al MITTENTE e al DESTINATARIO.
+// NOTIFICA "SPEDIZIONE CREATA" — email brand MoovExpress al SOLO DESTINATARIO.
+// (La conferma al mittente e' stata rimossa su richiesta: il mittente vive gia' nel portale.)
 // Le email vere NON vanno mai ai provider (li' va l'email schermo): ai clienti finali scriviamo NOI.
 // Mai nomi dei provider: solo il nome del contratto corriere. Best-effort: non fallisce mai.
 export async function inviaEmailSpedizioneCreata(p: {
@@ -113,25 +114,8 @@ export async function inviaEmailSpedizioneCreata(p: {
   notificaDest?: boolean   // impostazione cliente notifica_email_dest (default true)
 }) {
   const corriere = esc((p.corriere || '').trim())
-  const mitt = String(p.mittEmail || '').trim().toLowerCase()
   const dest = String(p.destEmail || '').trim().toLowerCase()
-  // Al MITTENTE: conferma con numero spedizione
-  if (EMAIL_RE.test(mitt)) {
-    try {
-      await resend.emails.send({
-        from: FROM, to: mitt,
-        subject: `Spedizione ${p.numero} creata \u2705`,
-        html: wrap(`
-          <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Spedizione creata \u2705</h2>
-          <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 10px">La spedizione <strong>${esc(p.numero)}</strong> per <strong>${esc(p.destNome || 'il destinatario')}</strong>${p.destCitta ? ` (${esc(p.destCitta)})` : ''} \u00e8 stata creata correttamente.</p>
-          ${corriere ? `<p style="color:#666;font-size:14px;margin:0 0 10px">Corriere: <strong>${corriere}</strong></p>` : ''}
-          <p style="color:#999;font-size:13px;margin-top:14px">Conserva il numero di spedizione per seguirne il tracking dal portale.</p>
-        `),
-      })
-    } catch { /* best-effort */ }
-  }
-  // Al DESTINATARIO (se abilitato dalle impostazioni del cliente). Parte SEMPRE anche se
-  // l'indirizzo coincide col mittente: sono due comunicazioni diverse (conferma vs avviso arrivo).
+  // Al DESTINATARIO (se abilitato dalle impostazioni del cliente).
   if ((p.notificaDest ?? true) && EMAIL_RE.test(dest)) {
     try {
       await resend.emails.send({
