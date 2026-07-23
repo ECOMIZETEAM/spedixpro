@@ -53,8 +53,16 @@ export function siglaProvincia(input: string): string {
   if (MAPPA[n]) return MAPPA[n]
   const senzaPrefisso = n.replace(/^PROVINCIA (DI |DELLA |DELL )?/, '').trim()
   if (MAPPA[senzaPrefisso]) return MAPPA[senzaPrefisso]
+  // Valori sporchi dei marketplace ("ITALIA/BERGAMO/LOMBARDIA", "Grosseto Italia"):
+  // norm() ha gia' trasformato i separatori in spazi -> provo i singoli pezzi.
+  for (const pezzo of n.split(' ')) {
+    if (pezzo.length > 2 && MAPPA[pezzo]) return MAPPA[pezzo]
+  }
   return input.toString().trim().toUpperCase()
 }
+
+// Sigle valide correnti (per validare l'output di siglaProvincia: se non e' qui, e' sporco).
+export const SIGLE_IT = new Set(PROVINCE_IT.map(p => p.sigla))
 
 // Elenco COMPLETO delle 107 province italiane attuali: sigla + nome esteso.
 // Usato nei menu a tendina (mostra il NOME, salva la SIGLA — così il calcolo

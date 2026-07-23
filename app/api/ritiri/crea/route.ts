@@ -258,8 +258,38 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Il corriere non ha risposto in tempo per il ritiro. Riprova; se persiste, quel contratto non gestisce il ritiro via app (es. Poste): programma il ritiro dal portale del corriere.' }, { status: 504 })
   }
   clearTimeout(to)
-  const text = await res.text()
+  let text = await res.text()
   console.log('[RITIRO] Risposta pickup/create status:', res.status, 'body:', text.substring(0, 500))
+
+  // Spedisci NON accetta piu' il ritiro IN GIORNATA ("PICKUP_DATE = today is no longer possible"):
+  // riprovo in automatico col primo giorno LAVORATIVO utile, cosi' il ritiro parte comunque
+  // (il "richiedi ritiro" da nuova spedizione propone oggi come data).
+  let dataSpostata: string | null = null
+  if (!res.ok && /PICKUP_DATE\s*=\s*today/i.test(text)) {
+    const prossimo = new Date(String(body.dataRitiro) + 'T12:00:00')
+    do { prossimo.setDate(prossimo.getDate() + 1) } while ([0, 6].includes(prossimo.getDay()))
+    dataSpostata = prossimo.toISOString().slice(0, 10)
+    payload.pickupDate = dataSpostata
+    console.log('[RITIRO] Ritiro in giornata rifiutato da Spedisci: riprovo per', dataSpostata)
+    const ctrl2 = new AbortController()
+    const to2 = setTimeout(() => ctrl2.abort(), 25000)
+    try {
+      res = await fetch(`${baseUrl}/pickup/create`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: ctrl2.signal,
+      })
+      text = await res.text()
+      console.log('[RITIRO] Risposta retry pickup/create status:', res.status, 'body:', text.substring(0, 300))
+      if (res.ok) body.dataRitiro = dataSpostata   // il ritiro salvato porta la data REALE
+      else dataSpostata = null
+    } catch {
+      clearTimeout(to2)
+      return NextResponse.json({ error: 'Il corriere non ha risposto in tempo per il ritiro. Riprova tra qualche minuto.' }, { status: 504 })
+    }
+    clearTimeout(to2)
+  }
 
   let r: any
   try { r = JSON.parse(text) } catch { r = { error: text.substring(0, 300) } }
@@ -275,5 +305,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Ritiro creato (${codiceCorriere}) ma errore DB: ${insertError.message}` }, { status: 500 })
   }
   // `id` = riferimento interno MoovExpress; `pickupId` = codice del corriere (es. CP…).
-  return NextResponse.json({ id: nuovoRitiro.id, pickupId: codiceCorriere })
+  return NextResponse.json({
+    id: nuovoRitiro.id, pickupId: codiceCorriere,
+    ...(dataSpostata ? { avviso: `Il corriere non accetta più il ritiro in giornata: ritiro programmato per il ${dataSpostata.split('-').reverse().join('/')}.` } : {}),
+  })
 }

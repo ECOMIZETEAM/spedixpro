@@ -2,6 +2,10 @@
 // esporre il nome del provider tecnico (SpediamoPro / Spedisci.online): l'utente vede solo i brand
 // dei corrieri, mai il provider a valle. Estrae il messaggio utile dal JSON di errore quando c'è.
 export function erroreRitiroPulito(raw: any): string {
+  const s0 = String(typeof raw === 'string' ? raw : JSON.stringify(raw || ''))
+  if (/PICKUP_DATE\s*=\s*today/i.test(s0)) {
+    return 'Il corriere non accetta più il ritiro in giornata: scegli una data da domani in poi.'
+  }
   const s = String(raw?.message ?? raw ?? '')
   let msg = ''
   const j = s.match(/\{[\s\S]*\}/)          // c'è un JSON del corriere?

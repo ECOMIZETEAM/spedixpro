@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
-import { siglaProvincia } from '@/lib/province-it'
+import { siglaProvincia, SIGLE_IT } from '@/lib/province-it'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 
 export const runtime = 'nodejs'
 
@@ -31,7 +32,7 @@ const ALIAS: Record<string, string[]> = {
   localita:           ['localita', 'shipping_city', 'ship_to_city', 'shipcity', 'city', 'citta', 'comune'],
   provincia:          ['provincia', 'shipping_province', 'ship_to_state', 'shipstate', 'state', 'province', 'shipping_province_name'],
   country:            ['country', 'shipping_country', 'ship_to_country', 'shipcountry', 'paese', 'nazione'],
-  telefono:           ['telefono', 'shipping_phone', 'phone', 'buyer_phone', 'buyerphonenumber', 'telefono_destinatario', 'cellulare'],
+  telefono:           ['telefono', 'shipping_phone', 'phone', 'shipphonenumber', 'buyer_phone', 'buyerphonenumber', 'telefono_destinatario', 'cellulare'],
   email_destinatario: ['email_destinatario', 'email', 'buyer_email', 'buyeremail', 'ship_to_email'],
   peso:               ['peso', 'weight', 'peso_kg'],
   colli:              ['colli', 'packages', 'pacchi'],
@@ -41,7 +42,7 @@ const ALIAS: Record<string, string[]> = {
   rif_mittente:       ['rif_mittente', 'riferimento_mittente'],
   rif_destinatario:   ['rif_destinatario', 'riferimento_destinatario'],
   order_id:           ['order_id', 'orderid', 'name', 'order_number', 'order', 'numero_ordine', 'ordine'],
-  totale_ordine:      ['totale_ordine', 'total', 'order_total', 'importo', 'totale', 'item_price'],
+  totale_ordine:      ['totale_ordine', 'total', 'order_total', 'importo', 'totale', 'item_price', 'itemprice'],
 }
 // Colonne ausiliarie (non salvate ma usate per logica: line item, contrassegno, ecc.)
 const AUX: Record<string, string[]> = {
@@ -72,7 +73,10 @@ function toNum(v: any): number | null {
 }
 function cleanCap(v: any): string {
   // Shopify esporta il CAP come '05100 per non perdere lo zero iniziale
-  return String(v ?? '').replace(/^'/, '').replace(/\s+/g, '').trim()
+  const cap = String(v ?? '').replace(/^'/, '').replace(/\s+/g, '').trim()
+  // Excel/xlsx mangiano gli zeri iniziali dei CAP ("00142" -> "142"): ripristino a 5 cifre.
+  if (/^\d{1,4}$/.test(cap)) return cap.padStart(5, '0')
+  return cap
 }
 const isCod = (s: string) => /contrassegn|cash\s*on\s*delivery|\bcod\b/i.test(s || '')
 
@@ -240,6 +244,26 @@ export async function POST(req: NextRequest) {
 
   if (!records.length) {
     return NextResponse.json({ error: 'Nessun ordine valido trovato nel file', errori }, { status: 400 })
+  }
+
+  // PROVINCIA SPORCA (es. Amazon: "ITALIA", "ISCHIA"): se dopo la conversione non e' una sigla
+  // valida, la ricavo dal CAP usando lo STORICO spedizioni (provincia piu' frequente per quel CAP).
+  const daRisolvere = records.filter(r => (r.country || 'IT') === 'IT' && !SIGLE_IT.has(r.provincia))
+  if (daRisolvere.length) {
+    const adminDb = createAdminSupabase()
+    for (const rec of daRisolvere.slice(0, 40)) {
+      try {
+        const { data: sps } = await adminDb.from('spedizioni')
+          .select('dest_provincia').eq('dest_cap', rec.cap).not('dest_provincia', 'is', null).limit(50)
+        const conta = new Map<string, number>()
+        for (const s of (sps || [])) {
+          const pv = String(s.dest_provincia || '').toUpperCase().trim()
+          if (SIGLE_IT.has(pv)) conta.set(pv, (conta.get(pv) || 0) + 1)
+        }
+        const top = [...conta.entries()].sort((a, b) => b[1] - a[1])[0]
+        if (top) rec.provincia = top[0]
+      } catch { /* resta com'e': modificabile a mano dalla lista */ }
+    }
   }
 
   const { data: inserted, error } = await supabase
