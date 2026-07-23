@@ -7,15 +7,50 @@ const API_VERSION = '2026-04'
 // e aggiorna le credenziali salvate. Ritorna { token } oppure { error }.
 export async function getValidShopifyToken(integrazione: any, db?: any): Promise<{ token?: string; error?: string }> {
   const cred = (integrazione?.credenziali || {}) as any
-  const shop = cred.shop
+  const shop = cred.shop || integrazione?.identificativo
   const token = cred.access_token
   const refreshToken = cred.refresh_token
   const expiresAt = cred.expires_at ? Number(cred.expires_at) : null
 
-  if (!shop || !token) return { error: 'Credenziali Shopify mancanti' }
+  if (!shop) return { error: 'Credenziali Shopify mancanti' }
+  const now = Date.now()
+
+  // ── CLIENT CREDENTIALS GRANT (via primaria) ─────────────────────────────────
+  // Shopify NON accetta piu' i token offline non scadenti ("Non-expiring access tokens are
+  // no longer accepted"): i token salvati dai vecchi collegamenti sono morti. Con questo grant
+  // si conia un token a scadenza (24h) per ogni negozio che ha l'app installata, al volo.
+  if (cred.cc_token && cred.cc_expires_at && Number(cred.cc_expires_at) - now > 5 * 60 * 1000) {
+    return { token: cred.cc_token }
+  }
+  const ccKey = process.env.SHOPIFY_API_KEY
+  const ccSecret = process.env.SHOPIFY_API_SECRET
+  if (ccKey && ccSecret) {
+    try {
+      const r = await fetch(`https://${shop}/admin/oauth/access_token`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: ccKey, client_secret: ccSecret, grant_type: 'client_credentials' }),
+      })
+      const raw = await r.text()
+      let d: any = null
+      try { d = JSON.parse(raw) } catch {}
+      if (r.ok && d?.access_token) {
+        const newCred = { ...cred, shop, cc_token: d.access_token, cc_expires_at: now + (Number(d.expires_in) || 86400) * 1000 }
+        try {
+          const supabase = db || await createServerSupabase()
+          await supabase.from('integrazioni').update({ credenziali: newCred }).eq('id', integrazione.id)
+        } catch { /* il token vale comunque per questa richiesta */ }
+        return { token: d.access_token }
+      }
+      console.log('[SHOPIFY] client_credentials fallito per', shop, ':', String(raw).slice(0, 180))
+    } catch (e: any) {
+      console.log('[SHOPIFY] client_credentials errore per', shop, ':', e?.message || e)
+    }
+  }
+
+  // ── Fallback legacy: token salvato / refresh (vecchi collegamenti) ──────────
+  if (!token) return { error: 'Sessione Shopify scaduta. Ricollega il negozio dalle Integrazioni.' }
 
   // Token ancora valido (con margine di 5 minuti)? Usalo.
-  const now = Date.now()
   if (!expiresAt || expiresAt - now > 5 * 60 * 1000) {
     return { token }
   }
