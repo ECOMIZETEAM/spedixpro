@@ -8,7 +8,11 @@ import { fetchAll } from '@/lib/fetch-all'
 // Solo i non-finali col pickup_id, max 40 per giro, batch paralleli: la lista resta veloce.
 async function rinfrescaStatiPickup(adminDb: any, lista: any[]) {
   try {
-    const daAggiornare = (lista || []).filter((r: any) => r.pickup_id && !['elaborato', 'annullato', 'completato'].includes(r.stato)).slice(0, 40)
+    // Da toccare: stati non finali OPPURE codice CP mancante. SpediamoPro assegna il codice CP
+    // in RITARDO (asincrono): se alla prenotazione non era pronto abbiamo salvato l'id numerico
+    // -> qui lo recuperiamo appena disponibile, anche su ritiri gia' elaborati.
+    const senzaCP = (r: any) => !r.cod_ritiro || /^\d+$/.test(String(r.cod_ritiro))
+    const daAggiornare = (lista || []).filter((r: any) => r.pickup_id && (!['elaborato', 'annullato', 'completato'].includes(r.stato) || senzaCP(r))).slice(0, 40)
     if (!daAggiornare.length) return
     const corrIds = Array.from(new Set(daAggiornare.map((r: any) => r.corriere_id).filter(Boolean)))
     const { data: corrs } = await adminDb.from('corrieri').select('id,tipo,credenziali').in('id', corrIds)
@@ -24,7 +28,12 @@ async function rinfrescaStatiPickup(adminDb: any, lista: any[]) {
           const j = await spediamoproGetPickup(ac, Number(r.pickup_id))
           const st = Number(j?.status ?? j?.data?.status)
           const nuovo = st >= 4 ? 'elaborato' : (st >= 1 ? 'prenotato' : null)
-          if (nuovo && nuovo !== r.stato) { r.stato = nuovo; await adminDb.from('ritiri').update({ stato: nuovo }).eq('id', r.id) }
+          const upd: any = {}
+          if (nuovo && nuovo !== r.stato) { r.stato = nuovo; upd.stato = nuovo }
+          // Recupero del codice CP arrivato dopo la prenotazione (in lista appare subito).
+          const code = j?.code ?? j?.pickupCode ?? j?.trackingCode ?? null
+          if (code && senzaCP(r) && code !== r.cod_ritiro) { r.cod_ritiro = code; r.tracking_ritiro = code; upd.cod_ritiro = code; upd.tracking_ritiro = code }
+          if (Object.keys(upd).length) await adminDb.from('ritiri').update(upd).eq('id', r.id)
         } catch { /* best-effort */ }
       }))
     }
