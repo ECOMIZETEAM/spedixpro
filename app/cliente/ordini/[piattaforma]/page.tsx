@@ -119,7 +119,7 @@ export default function OrdiniPage() {
       })
       const d = await res.json()
       if (d.error) setMsg('Errore: '+d.error)
-      else setMsg('Sincronizzati '+d.importati+' ordini (letti '+d.letti+', immagini '+(d.immagini??0)+(d.img_errore?', ERR img: '+d.img_errore:'')+')')
+      else setMsg('Sincronizzati '+d.importati+' ordini'+(d.letti!==undefined?' (letti '+d.letti+')':''))
       carica()
     } catch { setMsg('Errore di connessione') }
     setSincronizzando(false)
