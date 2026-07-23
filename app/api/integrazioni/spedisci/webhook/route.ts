@@ -7,15 +7,41 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 // Verifica la firma HMAC-SHA256 del webhook Spedisci.online.
-// Firma = HMAC( `${timestamp}.${rawBody}` ) in hex; header: Webhook-Signature "t=<ts>,v1=<hex>".
-function verifica(raw: string, timestamp: string | null, signature: string | null, secret: string): boolean {
+// Supporta ENTRAMBI gli schemi visti in giro:
+//  - STANDARD WEBHOOKS (secret "whsec_...", firma BASE64 su `${id}.${timestamp}.${body}` con
+//    chiave = base64-decode del secret; header "v1,<base64>" separati da spazio) — e' il formato
+//    dei secret reali del pannello Spedisci;
+//  - variante legacy hex su `${timestamp}.${body}` con secret grezzo ("t=..,v1=<hex>").
+function sicuroUguale(a: string, b: string): boolean {
+  const A = Buffer.from(a), B = Buffer.from(b)
+  return A.length === B.length && crypto.timingSafeEqual(A, B)
+}
+function verifica(raw: string, id: string | null, timestamp: string | null, signature: string | null, secret: string): boolean {
   if (!timestamp || !signature) return false
-  const age = Math.floor(Date.now() / 1000) - parseInt(timestamp, 10)
+  const age = Math.abs(Math.floor(Date.now() / 1000) - parseInt(timestamp, 10))
   if (!Number.isFinite(age) || age > 300) return false
-  const v1 = signature.split(',').find(p => p.startsWith('v1='))?.slice(3)
-  if (!v1) return false
-  const expected = crypto.createHmac('sha256', secret).update(`${timestamp}.${raw}`).digest('hex')
-  try { return crypto.timingSafeEqual(Buffer.from(v1), Buffer.from(expected)) } catch { return false }
+  // Firme presentate nell'header (uno o piu' token)
+  const presentate: string[] = []
+  for (const tok of signature.split(/\s+/)) {
+    if (tok.startsWith('v1,')) presentate.push(tok.slice(3))
+    for (const p of tok.split(',')) if (p.startsWith('v1=')) presentate.push(p.slice(3))
+    if (!tok.includes(',') && !tok.includes('=')) presentate.push(tok)   // header con la sola firma
+  }
+  if (!presentate.length) return false
+  // Chiavi candidate: secret grezzo + (per whsec_) il contenuto decodificato base64
+  const chiavi: (string | Buffer)[] = [secret]
+  if (secret.startsWith('whsec_')) { try { chiavi.push(Buffer.from(secret.slice(6), 'base64')) } catch {} }
+  // Contenuti firmabili: con message-id (standard) e senza (legacy)
+  const contenuti = [`${timestamp}.${raw}`]
+  if (id) contenuti.unshift(`${id}.${timestamp}.${raw}`)
+  for (const chiave of chiavi) for (const c of contenuti) {
+    const dig = crypto.createHmac('sha256', chiave as any).update(c).digest()
+    const b64 = dig.toString('base64'), hex = dig.toString('hex')
+    for (const pres of presentate) {
+      try { if (sicuroUguale(pres, b64) || sicuroUguale(pres, hex)) return true } catch { /* lunghezze diverse */ }
+    }
+  }
+  return false
 }
 
 // Mappa evento + stato Spedisci.online allo stato interno.
@@ -36,17 +62,20 @@ export async function POST(req: NextRequest) {
   const candidati = [...(righe || []).map((r: any) => r.secret), process.env.SPEDISCI_WEBHOOK_SECRET].filter(Boolean) as string[]
   if (!candidati.length) return new NextResponse('Webhook non configurato', { status: 500 })
 
-  const ts = req.headers.get('webhook-timestamp')
-  const sig = req.headers.get('webhook-signature')
-  if (!candidati.some(sec => verifica(raw, ts, sig, sec))) {
+  const wid = req.headers.get('webhook-id') || req.headers.get('svix-id')
+  const ts = req.headers.get('webhook-timestamp') || req.headers.get('svix-timestamp')
+  const sig = req.headers.get('webhook-signature') || req.headers.get('svix-signature')
+  if (!candidati.some(sec => verifica(raw, wid, ts, sig, sec))) {
+    console.log('[WEBHOOK][SPEDISCI] firma NON verificata. id:', wid, 'ts:', ts, 'sig:', String(sig).slice(0, 60))
     return new NextResponse('Unauthorized', { status: 401 })
   }
 
   let body: any
   try { body = JSON.parse(raw) } catch { return new NextResponse('Bad payload', { status: 200 }) }
 
-  const event = body?.event || ''
-  const d = body?.data || {}
+  const event = body?.event || body?.type || ''
+  const d = body?.data || body || {}
+  console.log('[WEBHOOK][SPEDISCI] evento:', event, 'tracking:', d?.tracking_number || d?.trackingNumber || d?.tracking || '-')
   const tracking = d?.tracking_number || d?.tracking || d?.trackingNumber || d?.shipment?.tracking_number || d?.code
   if (!tracking) return new NextResponse('OK', { status: 200 })
 
