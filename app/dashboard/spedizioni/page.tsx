@@ -636,7 +636,7 @@ async function apriTracking(s: any) {
                       <div style={{padding:'30px',textAlign:'center' as const,color:'#1a1a1a'}}>Caricamento tracking...</div>
                     ):!trackingData?.eventi?.length?(
                       <div style={{padding:'30px',textAlign:'center' as const,color:'#1a1a1a',fontSize:'13px'}}>
-                        {trackingData?.error?`Errore: ${trackingData.error}`:'Nessun evento disponibile'}
+                        {trackingData?.error?`Errore: ${trackingData.error}`:'Nessun evento disponibile al momento: il dettaglio arriverà con il prossimo aggiornamento del corriere.'}
                         {trackingData?.tracking_number&&<div style={{marginTop:'8px',fontSize:'12px',color:'#1a1a1a'}}>Tracking: {trackingData.tracking_number}</div>}
                       </div>
                     ):(
