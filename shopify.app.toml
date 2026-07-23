@@ -1,6 +1,6 @@
 client_id = "f7dfecdb8cb05f8874cd0db742121578"
 name = "MoovExpress"
-application_url = "https://moovexpress.com/cliente/integrazioni"
+application_url = "https://moovexpress.com/api/integrazioni/shopify/enter"
 embedded = false
 
 [access_scopes]
