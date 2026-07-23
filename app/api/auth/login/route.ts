@@ -10,8 +10,10 @@ export async function POST(req: NextRequest) {
   const { error } = await supabase.auth.signInWithPassword({ email, password })
 
   if (error) {
-    return NextResponse.redirect(new URL('/?error=credenziali_errate', req.url))
+    // 303 = "See Other": il browser prosegue in GET. Col default (307) ripeteva il POST
+    // sulla homepage statica -> 405 "La pagina non funziona" a ogni login sbagliato.
+    return NextResponse.redirect(new URL('/?error=credenziali_errate', req.url), 303)
   }
 
-  return NextResponse.redirect(new URL('/dashboard', req.url))
+  return NextResponse.redirect(new URL('/dashboard', req.url), 303)
 }
