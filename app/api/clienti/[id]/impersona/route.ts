@@ -93,5 +93,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.redirect(new URL('/dashboard/clienti?error=sessione_non_creata', req.url))
   }
 
+  const { registraAudit } = await import('@/lib/audit')
+  await registraAudit({ utenteId: user.id, azione: 'impersona_cliente', risorsa: id })
   return okRedirect
 }

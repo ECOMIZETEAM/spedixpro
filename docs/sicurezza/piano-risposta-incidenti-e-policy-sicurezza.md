@@ -69,7 +69,29 @@ Reperibilità: 24 ore su 24, 7 giorni su 7, tramite i recapiti aziendali (telefo
 - Gli accessi sono assegnati per funzione lavorativa (principio del minimo privilegio) e revocati
   immediatamente al termine del rapporto.
 
-## 6. Registro delle revisioni e degli incidenti
+## 6. Classificazione dei dati e registro dei trattamenti
+
+| Classe | Esempi | Misure |
+|---|---|---|
+| Dati personali acquirenti (PII) | nome, indirizzo, telefono, email destinatario | Cifratura, accesso minimo, audit log, anonimizzazione entro 31 giorni dalla spedizione (ordini Amazon: cron giornaliero automatico) |
+| Dati clienti della piattaforma | anagrafiche venditori, listini, credito | Cifratura, isolamento multi-tenant |
+| Credenziali e segreti | API key, token, chiavi | Variabili d'ambiente cifrate, rotazione annuale |
+| Dati operativi non personali | SKU, importi, statistiche | Conservazione per finalita' contabili |
+
+Trattamenti registrati: evasione spedizioni (base: contratto), notifiche email al destinatario
+(base: legittimo interesse del venditore), contabilita' (base: obbligo di legge).
+
+## 7. Gestione delle vulnerabilita' e delle modifiche
+
+- **Scansione continua dipendenze**: GitHub Dependabot (settimanale) + advisor di sicurezza del
+  database a ogni modifica di schema. Correzione: critiche entro 7 giorni, elevate entro 30.
+- **Penetration test**: annuale, tramite fornitore terzo qualificato.
+- **Audit log**: tabella dedicata (accessi a PII, impersonificazioni, azioni amministrative),
+  conservazione 13 mesi, revisione ogni due settimane a cura del titolare.
+- **Gestione modifiche**: ogni modifica passa da build di verifica e revisione; l'approvazione e il
+  deploy in produzione sono riservati al titolare; ambienti di anteprima per le modifiche sensibili.
+
+## 8. Registro delle revisioni e degli incidenti
 
 | Data | Tipo | Note |
 |---|---|---|

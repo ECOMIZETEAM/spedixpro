@@ -1,0 +1,10 @@
+# Scansione continua delle vulnerabilita' delle dipendenze (requisito Amazon DPP: scansioni
+# almeno ogni 30 giorni; qui settimanali). Gli alert di sicurezza aprono PR automatiche.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "security"]

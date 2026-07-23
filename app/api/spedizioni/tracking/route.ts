@@ -44,6 +44,8 @@ export async function GET(req: NextRequest) {
     try { await admin.from('spedizioni').update({ stato: nuovo }).eq('id', spedizione.id); statoEffettivo = nuovo } catch {}
   }
 
+  // Audit accesso PII (visualizzazione dati spedizione/destinatario) — best-effort
+  try { const { registraAudit } = await import('@/lib/audit'); await registraAudit({ utenteId: user.id, ruolo: (utente as any)?.ruolo, azione: 'tracking_view', risorsa: spedizione.numero }) } catch {}
   const { data: cliente } = await admin.from('clienti').select('ragione_sociale').eq('id', spedizione.cliente_id).single()
   const { data: corriere } = await admin.from('corrieri').select('credenziali,tipo,nome_contratto').eq('id', spedizione.corriere_id).single()
   if (!corriere) return NextResponse.json({ error: 'Corriere non trovato' }, { status: 404 })
