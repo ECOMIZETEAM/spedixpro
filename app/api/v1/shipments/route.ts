@@ -119,7 +119,8 @@ export async function POST(req: NextRequest) {
     if (!rate) return NextResponse.json({ error: 'Contratto non disponibile per questo corriere' }, { status: 400 })
     const res = await fetch(`${baseUrl}/shipping/create`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ carrierCode: rate.carrierCode, contractCode: rate.contractCode, label_format: 'PDF', packages, shipFrom: spedFrom, shipTo: spedTo, notes: body.notes || '', insuranceValue: body.insuranceValue || 0, codValue: body.codValue || 0, accessoriServices: [] }),
+      // EMAIL SCHERMO: al provider va SEMPRE l'email di servizio (mai quelle vere di mitt/dest).
+      body: JSON.stringify({ carrierCode: rate.carrierCode, contractCode: rate.contractCode, label_format: 'PDF', packages, shipFrom: { ...spedFrom, email: EMAIL_PER_CORRIERE }, shipTo: { ...spedTo, email: EMAIL_PER_CORRIERE }, notes: body.notes || '', insuranceValue: body.insuranceValue || 0, codValue: body.codValue || 0, accessoriServices: [] }),
     })
     const text = await res.text(); try { raw = JSON.parse(text) } catch { raw = { error: text } }
     if (!res.ok || raw.error) return NextResponse.json({ error: raw?.error || text }, { status: 400 })
