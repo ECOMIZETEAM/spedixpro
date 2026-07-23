@@ -1,5 +1,7 @@
 {
-  "regions": ["lhr1"],
+  "regions": [
+    "lhr1"
+  ],
   "crons": [
     {
       "path": "/api/distinte/chiusura-automatica",
@@ -16,6 +18,10 @@
     {
       "path": "/api/spedizioni/annullamenti-cron",
       "schedule": "30 * * * *"
+    },
+    {
+      "path": "/api/tracking/bonifica-poste",
+      "schedule": "7,37 * * * *"
     }
   ]
 }
