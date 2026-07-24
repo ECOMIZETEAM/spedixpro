@@ -550,6 +550,9 @@ export async function POST(req: NextRequest) {
     if (esclusiQuota > 0) {
       // Messaggio pulito: mai il testo grezzo/nome del provider.
       const t = (ultimoErroreQuota || '').toLowerCase()
+      if (/timed\s*out|timeout|0 bytes received/.test(t)) {
+        return NextResponse.json({ error: 'Il corriere non ha risposto in tempo (rallentamento momentaneo dei suoi sistemi). Riprova tra qualche istante.' }, { status: 400 })
+      }
       const dett = /province|provincia|state/.test(t)
         ? ' Manca la PROVINCIA del mittente o del destinatario: completa l\'indirizzo (provincia obbligatoria per l\'Italia).'
         : /dimension|misur|measure|size|volume|lato|length|width|height|weight|peso|oversiz/.test(t)

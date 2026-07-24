@@ -103,6 +103,14 @@ export interface SpediamoproQuotation {
   courierService?: { courier: string; description: string }
 }
 
+// Errore TRANSITORIO: il backend del provider non ha ricevuto risposta dal corriere in tempo
+// (curl "Operation timed out after ~1000 milliseconds with 0 bytes received"). La spedizione
+// NON è stata creata lato corriere → si può ritentare in sicurezza.
+function isTimeoutCorriere(json: any): boolean {
+  const t = JSON.stringify(json?.error || json || '').toLowerCase()
+  return /timed\s*out|timeout|0 bytes received/.test(t)
+}
+
 export async function spediamoproGetQuotation(
   authcode: string,
   serviceId: string | null,
@@ -132,13 +140,21 @@ export async function spediamoproGetQuotation(
     : []
   if (wantedServices.length) body.services = wantedServices
 
-  const res = await fetch(`${BASE_URL}/quotations`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-
-  const json = await res.json()
+  // Il backend del provider interroga il corriere LIVE (soprattutto per l'estero) con un timeout
+  // interno aggressivo (~1s): a volte risponde "Operation timed out ... 0 bytes received" anche se
+  // la spedizione è perfettamente gestibile. È transitorio → fino a 3 tentativi prima di arrenderci.
+  let res: any = null, json: any = null
+  for (let tent = 1; tent <= 3; tent++) {
+    res = await fetch(`${BASE_URL}/quotations`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    json = await res.json()
+    if ((res.ok && !json.error) || !isTimeoutCorriere(json) || tent === 3) break
+    console.warn(`[SPEDIAMOPRO][quotation] timeout lato corriere (tentativo ${tent}/3), ritento...`)
+    await new Promise(r => setTimeout(r, 900 * tent))
+  }
   if (!res.ok || json.error) {
     const details = json.error?.details?.map((d: any) => `${d.source}: ${d.message}`).join(', ')
     console.error('[SPEDIAMOPRO][quotation] fallita — colli:', params.parcels.length, 'service:', serviceId, 'risposta:', JSON.stringify(json).substring(0, 600))
@@ -192,10 +208,7 @@ export async function spediamoproCreateShipment(
 }> {
   const token = await getSpediamoproToken(authcode)
 
-  const res = await fetch(`${BASE_URL}/quotations/accept`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const payloadAccept = JSON.stringify({
       parcels: params.parcels.map(p => ({ type: 0, weight: p.weight, length: p.length, width: p.width, height: p.height })),
       sender: sanitizzaIndirizzoSp(params.sender, { emailObbligatoria: true }),
       consignee: sanitizzaIndirizzoSp(params.consignee, { emailObbligatoria: true }),
@@ -211,10 +224,22 @@ export async function spediamoproCreateShipment(
       externalReference: params.externalReference || null,
       // NOTE SpediamoPro: max ~20 caratteri, oltre → 422 "invalid data". Troncatura difensiva.
       consigneeNote: params.notes ? String(params.notes).substring(0, 20) : null,
-    }),
-  })
+    })
 
-  const json = await res.json()
+  // Retry SOLO sul timeout transitorio lato corriere (vedi isTimeoutCorriere): in quel caso il
+  // provider risponde con un ERRORE esplicito (niente creato), quindi ritentare è sicuro.
+  let res: any = null, json: any = null
+  for (let tent = 1; tent <= 3; tent++) {
+    res = await fetch(`${BASE_URL}/quotations/accept`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: payloadAccept,
+    })
+    json = await res.json()
+    if ((res.ok && !json.error) || !isTimeoutCorriere(json) || tent === 3) break
+    console.warn(`[SPEDIAMOPRO][create] timeout lato corriere (tentativo ${tent}/3), ritento...`)
+    await new Promise(r => setTimeout(r, 900 * tent))
+  }
   if (!res.ok || json.error) {
     const details = json.error?.details?.map((d: any) => `${d.source}: ${d.message}`).join(', ')
     throw new Error(details || json.error?.message || 'SpediamoPro create shipment failed')

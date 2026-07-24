@@ -19,6 +19,8 @@ import { EMAIL_PER_CORRIERE,
 // (SpediamoPro/Spedisci.online) né il testo grezzo dell'API. Deduce la causa dai keyword.
 function erroreCorrierePulito(raw: any): string {
   const t = String(raw || '').toLowerCase()
+  if (/timed\s*out|timeout|0 bytes received/.test(t))
+    return 'Il corriere non ha risposto in tempo (rallentamento momentaneo dei suoi sistemi). Riprova tra qualche istante.'
   if (/dimension|misur|measure|\bsize\b|volume|lato|length|width|height|weight|\bpeso\b|\bkg\b|oversiz|too (large|big|heavy)/.test(t))
     return 'Collo non ammesso dal corriere: verifica misure e peso (potrebbe essere fuori misura).'
   if (/provinc|state|postal|\bzip\b|address|indiriz|\bcap\b|city|citt|recipient|consignee|sender|destinat|mittent/.test(t))
