@@ -352,9 +352,8 @@ export async function POST(req: NextRequest) {
     // IMPORTANTE: sullo stesso account a valle possono esserci PIÙ corrieri (es. GLS + Poste).
     // Va scelta la tariffa del CONTRATTO di QUESTO corriere (codice_contratto), NON la prima:
     // altrimenti una spedizione "Poste Delivery Express D" poteva stampare GLS/SDA (rates[0]).
-    const rate = cred.codice_contratto
-      ? rates.find((r: any) => r.contractCode === cred.codice_contratto)
-      : rates[0]
+    const { trovaRateContratto } = await import('@/lib/spedisci')
+    const rate = trovaRateContratto(rates, cred)
     if (!rate) return NextResponse.json({ error: 'Contratto non disponibile per questo corriere (verifica il codice contratto)' }, { status: 400 })
 
     const res = await fetch(`${baseUrl}/shipping/create`, {

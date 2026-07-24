@@ -113,9 +113,8 @@ export async function POST(req: NextRequest) {
     if (!Array.isArray(rates) || !rates.length) return NextResponse.json({ error: 'Nessuna tariffa dal corriere' }, { status: 400 })
     // Sceglie la tariffa del CONTRATTO di questo corriere (non la prima): sullo stesso account
     // a valle possono coesistere più corrieri (GLS, Poste...) -> evita etichette col vettore sbagliato.
-    const rate = cred.codice_contratto
-      ? rates.find((r: any) => r.contractCode === cred.codice_contratto)
-      : rates[0]
+    const { trovaRateContratto } = await import('@/lib/spedisci')
+    const rate = trovaRateContratto(rates, cred)
     if (!rate) return NextResponse.json({ error: 'Contratto non disponibile per questo corriere' }, { status: 400 })
     const res = await fetch(`${baseUrl}/shipping/create`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },

@@ -327,9 +327,8 @@ export async function POST(req: NextRequest) {
       if (!Array.isArray(rates) || !rates.length) return null
       // Sceglie la tariffa del CONTRATTO di questo corriere (non la prima): sullo stesso
       // account a valle possono coesistere più corrieri (GLS, Poste, SDA...).
-      const r = cred.codice_contratto
-        ? rates.find((x: any) => x.contractCode === cred.codice_contratto)
-        : rates[0]
+      const { trovaRateContratto } = await import('@/lib/spedisci')
+      const r = trovaRateContratto(rates, cred)
       if (!r) return null
       return {
         carrierCode: r.carrierCode, contractCode: r.contractCode,

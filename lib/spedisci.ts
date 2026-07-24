@@ -1,5 +1,29 @@
 // Mappa una stringa di stato Spedisci.online (localizzata IT/EN) allo stato interno.
 // Usata sia dal webhook real-time sia dal polling del cron.
+// Sceglie la tariffa del CONTRATTO del corriere tra quelle del pannello. Il confronto per
+// codice_contratto esatto NON basta piu': su alcuni pannelli Spedisci (es. spedizioniamas) il
+// contractCode e' CIFRATO e CAMBIA A OGNI RISPOSTA (payload Laravel con IV casuale), quindi
+// l'uguaglianza col codice salvato non combacia mai ("Contratto non disponibile"). Strategia:
+//  1) match esatto sul codice salvato (pannelli con codici stabili in chiaro);
+//  2) match sul vettore salvato (credenziali.carrier_code);
+//  3) pannello con UNA SOLA tariffa -> e' per forza quella;
+//  4) nessun codice salvato -> prima tariffa (comportamento storico);
+//  5) altrimenti null: ambiguo, meglio errore chiaro che etichetta col vettore sbagliato.
+export function trovaRateContratto(rates: any[], cred: any): any | null {
+  if (!Array.isArray(rates) || !rates.length) return null
+  if (cred?.codice_contratto) {
+    const esatto = rates.find((r: any) => r.contractCode === cred.codice_contratto)
+    if (esatto) return esatto
+  }
+  if (cred?.carrier_code) {
+    const perVettore = rates.find((r: any) => r.carrierCode === cred.carrier_code)
+    if (perVettore) return perVettore
+  }
+  if (rates.length === 1) return rates[0]
+  if (!cred?.codice_contratto) return rates[0]
+  return null
+}
+
 export function mapStatoSpedisci(statusStr: string): string | null {
   const s = (statusStr || '').toLowerCase()
   if (!s) return null
