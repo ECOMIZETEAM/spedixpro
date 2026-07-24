@@ -153,6 +153,7 @@ export default function NuovoRitiroPage() {
     if (!mittNome || !mittIndirizzo || !mittCitta || !mittCap) { setErrore('Compila tutti i dati mittente'); return }
     if (!dataRitiro) { setErrore('Seleziona una data di ritiro'); return }
     { const gg = new Date(dataRitiro + 'T00:00:00').getDay(); if (gg === 0 || gg === 6) { setErrore('I ritiri non sono disponibili nei giorni festivi o nel weekend. Scegli un giorno lavorativo (lun-ven).'); return } }
+    if (!mittTelefono || mittTelefono.replace(/[^0-9]/g, '').length < 6) { setErrore('Inserisci un numero di telefono valido: il corriere lo richiede per il ritiro.'); return }
     setSaving(true); setErrore(''); setProgresso({done:0,total:ids.length})
 
     // Un ritiro DISTINTO per ogni LDV selezionata, con barra di progressione
@@ -214,7 +215,7 @@ export default function NuovoRitiroPage() {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
               <div><label style={lbl}>Rif. Mittente *</label><input value={mittNome} onChange={e => setMittNome(e.target.value)} style={inp} /></div>
-              <div><label style={lbl}>Telefono</label><input value={mittTelefono} onChange={e => setMittTelefono(e.target.value)} style={inp} /></div>
+              <div><label style={lbl}>Telefono *</label><input value={mittTelefono} onChange={e => setMittTelefono(e.target.value)} style={inp} /></div>
             </div>
             <div style={{ marginBottom: '14px' }}>
               <label style={lbl}>Indirizzo *</label>
@@ -232,7 +233,7 @@ export default function NuovoRitiroPage() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
               <div>
                 <label style={lbl}>Data Ritiro *</label>
-                <input type="date" value={dataRitiro} onChange={e => setDataRitiro(e.target.value)} style={inp} />
+                <input type="date" value={dataRitiro} min={new Date().toLocaleDateString('sv-SE')} onChange={e => setDataRitiro(e.target.value)} style={inp} />
                 {dataRitiro && [0,6].includes(new Date(dataRitiro + 'T00:00:00').getDay()) && (
                   <div style={{marginTop:'6px',fontSize:'12px',color:'#dc2626',fontWeight:'600'}}>Sabato e domenica i ritiri non sono disponibili. Scegli un giorno lavorativo.</div>
                 )}

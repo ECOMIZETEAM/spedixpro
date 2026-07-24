@@ -100,6 +100,25 @@ export async function POST(req: NextRequest) {
   }
   if (!body.dataRitiro) return NextResponse.json({ error: 'Data ritiro obbligatoria' }, { status: 400 })
 
+  // ── Validazioni PRIMA di chiamare il corriere: data e telefono. Senza questi controlli il
+  //    corriere risponde 422 e l'utente vedeva un generico "Ritiro non disponibile" (log 24/07:
+  //    stessi clienti in loop di tentativi identici su weekend e telefono vuoto). ──
+  {
+    const d = new Date(String(body.dataRitiro) + 'T12:00:00')
+    if (isNaN(d.getTime())) return NextResponse.json({ error: 'Data ritiro non valida.' }, { status: 400 })
+    // "Oggi" nel fuso ITALIANO (il server gira in UTC: tra mezzanotte e le 2 l'UTC è ancora ieri).
+    const oggiRoma = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' })
+    if (String(body.dataRitiro) < oggiRoma) return NextResponse.json({ error: 'La data di ritiro è già passata: scegli una data da oggi in poi.' }, { status: 400 })
+    if ([0, 6].includes(d.getDay())) {
+      return NextResponse.json({ error: 'La data scelta cade di sabato o domenica: i corrieri ritirano solo nei giorni lavorativi (lun–ven). Scegli un\'altra data.' }, { status: 400 })
+    }
+  }
+  // Telefono mittente OBBLIGATORIO: il corriere lo richiede per prenotare il ritiro (senza, il
+  // provider rifiuta con 422 "contactInfo.phone should be of type string").
+  if (!pulisciTelefono(body.mittTelefono) || String(pulisciTelefono(body.mittTelefono)).length < 6) {
+    return NextResponse.json({ error: 'Inserisci un numero di telefono valido del mittente: il corriere lo richiede per prenotare il ritiro.' }, { status: 400 })
+  }
+
   const colliTotali = spedizioni.reduce((sum, s) => sum + (s.colli || 1), 0)
   const pesoTotale = spedizioni.reduce((sum, s) => sum + (parseFloat(String(s.peso_reale)) || 1), 0)
 

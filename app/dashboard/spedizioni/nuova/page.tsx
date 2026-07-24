@@ -57,7 +57,7 @@ export default function NuovaSpedizionePage() {
   const [suggMitt, setSuggMitt] = useState<any[]>([])   // rubrica mittenti
   const [showSuggMitt, setShowSuggMitt] = useState(false)
   const [richiediRitiro, setRichiediRitiro] = useState(false)
-  const [ritiroData, setRitiroData] = useState(new Date().toISOString().split('T')[0])
+  const [ritiroData, setRitiroData] = useState(() => { const d = new Date(); while ([0,6].includes(d.getDay())) d.setDate(d.getDate()+1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })   // weekend -> primo giorno lavorativo (data LOCALE, non UTC)
   const [ritiroOrario, setRitiroOrario] = useState('mattina')
   const [numColli, setNumColli] = useState(1)
   const [colli, setColli] = useState<Collo[]>([{lunghezza:'',larghezza:'',altezza:''}])
@@ -350,7 +350,10 @@ export default function NuovaSpedizionePage() {
                 </label>
                 {richiediRitiro && (
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginTop:'10px'}}>
-                    <div><label style={lbl}>Data ritiro</label><input type="date" value={ritiroData} onChange={e=>setRitiroData(e.target.value)} style={inp}/></div>
+                    <div><label style={lbl}>Data ritiro</label><input type="date" value={ritiroData} min={new Date().toLocaleDateString('sv-SE')} onChange={e=>setRitiroData(e.target.value)} style={inp}/>
+                      {ritiroData && [0,6].includes(new Date(ritiroData + 'T00:00:00').getDay()) && (
+                        <div style={{marginTop:'4px',fontSize:'11.5px',color:'#dc2626',fontWeight:'600'}}>Sabato e domenica i ritiri non sono disponibili: scegli un giorno lavorativo.</div>
+                      )}</div>
                     <div><label style={lbl}>Orario</label>
                       <select value={ritiroOrario} onChange={e=>setRitiroOrario(e.target.value)} style={inp}>
                         <option value="mattina">Mattina</option>

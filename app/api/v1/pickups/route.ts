@@ -6,7 +6,8 @@ import { erroreRitiroPulito } from '@/lib/errore-corriere'
 
 // API pubblica MoovExpress — richiede un ritiro per spedizioni del contratto della API key.
 // Auth: Authorization: Bearer <api_key>
-// Body: { shipmentIds:[uuid], date:'YYYY-MM-DD', timeFrom?, timeTo?, from:{name,street1,city,state,postalCode,phone?,email?}, notes? }
+// Body: { shipmentIds:[uuid], date:'YYYY-MM-DD' (giorno LAVORATIVO, no sab/dom), timeFrom?, timeTo?, from:{name,street1,city,state,postalCode,phone,email?}, notes? }
+// NB: from.phone è OBBLIGATORIO (>=6 cifre): i corrieri lo richiedono per prenotare il ritiro.
 export const maxDuration = 30
 export const dynamic = 'force-dynamic'
 
@@ -32,8 +33,20 @@ export async function POST(req: NextRequest) {
   const shipmentIds = body.shipmentIds
   if (!Array.isArray(shipmentIds) || !shipmentIds.length) return NextResponse.json({ error: 'shipmentIds obbligatorio' }, { status: 400 })
   if (!body.date) return NextResponse.json({ error: 'date obbligatoria (YYYY-MM-DD)' }, { status: 400 })
+  {
+    // Stessa validazione del portale: senza, il corriere rifiuta con un 422 poco chiaro.
+    const d = new Date(String(body.date) + 'T12:00:00')
+    if (isNaN(d.getTime())) return NextResponse.json({ error: 'date non valida (YYYY-MM-DD)' }, { status: 400 })
+    // "Oggi" nel fuso ITALIANO (il server gira in UTC: tra mezzanotte e le 2 l'UTC è ancora ieri).
+    const oggiRoma = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' })
+    if (String(body.date) < oggiRoma) return NextResponse.json({ error: 'La data di ritiro è già passata: usa una data da oggi in poi.' }, { status: 400 })
+    if ([0, 6].includes(d.getDay())) return NextResponse.json({ error: 'La data di ritiro cade di sabato o domenica: i corrieri ritirano solo nei giorni lavorativi (lun-ven).' }, { status: 400 })
+  }
   const from = body.from || {}
   if (!from.name || !from.street1 || !from.city || !from.postalCode) return NextResponse.json({ error: 'Mittente (from) incompleto: name, street1, city, postalCode' }, { status: 400 })
+  if (!pulisciTelefono(from.phone) || String(pulisciTelefono(from.phone)).length < 6) {
+    return NextResponse.json({ error: 'from.phone obbligatorio: il corriere richiede un telefono del mittente per il ritiro.' }, { status: 400 })
+  }
 
   // Solo spedizioni del cliente e del contratto della key
   const { data: spedizioni } = await admin.from('spedizioni')
