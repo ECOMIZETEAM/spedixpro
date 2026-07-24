@@ -67,7 +67,10 @@ export default function DistinteContrassegniPage() {
       })
       const data = await res.json()
       if (data.success) {
-        await dialog.alert({ title: 'File processato', message: 'Spedizioni: ' + data.spedizioniProcessate + ' · Errori: ' + data.errori + (data.saltateNonPagate ? ' · Non ancora pagate (saltate): ' + data.saltateNonPagate : '') })
+        await dialog.alert({ title: 'File processato', message: 'Spedizioni: ' + data.spedizioniProcessate + ' · Errori: ' + data.errori
+          + (data.saltateNonPagate ? ' · Non ancora pagate (saltate): ' + data.saltateNonPagate : '')
+          + (data.doppioniFile ? ' · Doppioni nel file (saltati): ' + data.doppioniFile : '')
+          + (data.giaPagati ? ' · Già pagati in una distinta precedente (saltati): ' + data.giaPagati : '') })
         fetch('/api/contrassegni/cod-files').then(r=>r.json()).then(d=>setCodFiles(d||[]))
       }
     } catch(err) { await dialog.alert({ title: 'Errore', message: 'Errore nel caricamento del file.' }) }
@@ -279,6 +282,16 @@ export default function DistinteContrassegniPage() {
                       )}
                       <button onClick={()=>stampaPDF(d)} style={{padding:'4px 10px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'4px',fontSize:'11px',fontWeight:'600',cursor:'pointer'}}>🖨️ Stampa</button>
                       <button onClick={()=>esportaExcel(d)} style={{padding:'4px 10px',background:'#f0fdf4',color:'#15803d',border:'1px solid #86efac',borderRadius:'4px',fontSize:'11px',fontWeight:'600',cursor:'pointer'}}>📊 Excel</button>
+                      {d.stato==='in_lavorazione' && !Number(d.totale_pagato||0) && (
+                        <button onClick={async()=>{
+                          const ok = await dialog.confirm({ title: 'Elimina distinta', message: `Eliminare la distinta N.${d.numero}? Le spedizioni tornano disponibili per una nuova distinta.`, danger: true })
+                          if (!ok) return
+                          const r = await fetch('/api/contrassegni/distinte/' + d.id, { method: 'DELETE' })
+                          const j = await r.json().catch(()=>({}))
+                          if (j.success) carica()
+                          else await dialog.alert({ title: 'Non eliminabile', message: j.error || 'Errore durante l\'eliminazione.' })
+                        }} style={{padding:'4px 10px',background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:'4px',fontSize:'11px',fontWeight:'600',cursor:'pointer'}}>🗑 Elimina</button>
+                      )}
                     </div>
                   </td>
                 </tr>

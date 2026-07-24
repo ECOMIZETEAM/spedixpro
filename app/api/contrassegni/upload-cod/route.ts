@@ -29,8 +29,12 @@ export async function POST(req: NextRequest) {
   const adminDb = createAdminSupabase()
 
   let spedizioniProcessate = 0, codFile = 0, codSistema = 0, codDaPagare = 0, errori = 0, saltateNonPagate = 0
+  let doppioniFile = 0, giaPagati = 0
   const perCliente: Record<string, any[]> = {}
   const perMaster: Record<string, any[]> = {}
+  // Anti-doppione DENTRO il file: la stessa spedizione ripetuta su più righe entrerebbe due volte
+  // in distinta (il check su DB vede solo le distinte GIÀ salvate) → si pagherebbe doppio.
+  const vistiInFile = new Set<string>()
 
   for (const rigaRaw of (righe || [])) {
     const riga: any = {}
@@ -60,6 +64,12 @@ export async function POST(req: NextRequest) {
       spedizione = r2.data as any
     }
     if (!spedizione) { errori++; continue }
+
+    // Doppione nello STESSO file → la seconda riga si salta (un contrassegno si paga UNA volta).
+    if (vistiInFile.has(spedizione.id)) { doppioniFile++; continue }
+    vistiInFile.add(spedizione.id)
+    // Contrassegno GIÀ PAGATO in una distinta precedente → mai ripagarlo.
+    if (spedizione.stato_contrassegno === 'pagato') { giaPagati++; continue }
 
     // Solo discesa: chi carica deve essere il master della spedizione o un antenato
     const catena = await risaliCatena(adminDb, spedizione.master_id)
@@ -134,5 +144,5 @@ export async function POST(req: NextRequest) {
     spedizioni_processate: spedizioniProcessate, cod_file: codFile, cod_sistema: codSistema,
     cod_da_pagare: codDaPagare, cod_in_distinte: codInDistinte, errori,
   })
-  return NextResponse.json({ success: true, spedizioniProcessate, codFile, codSistema, codDaPagare, codInDistinte, errori, saltateNonPagate })
+  return NextResponse.json({ success: true, spedizioniProcessate, codFile, codSistema, codDaPagare, codInDistinte, errori, saltateNonPagate, doppioniFile, giaPagati })
 }

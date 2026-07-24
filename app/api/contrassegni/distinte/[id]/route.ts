@@ -4,6 +4,47 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { bloccaAgente } from '@/lib/agente'
 
+// ELIMINA una distinta contrassegni SBAGLIATA (es. file caricato per errore). Consentito SOLO:
+// - al master proprietario;
+// - se in lavorazione SENZA pagamenti registrati (pagata/parziale = soldi mossi, non si tocca);
+// - se il destinatario di rete NON l'ha già accettata/propagata.
+// Le spedizioni tornano 'in_attesa' e possono rientrare in una nuova distinta.
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{id: string}> }) {
+  const supabase = await createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg
+  if (!utente?.master_id || (utente.ruolo || '').toLowerCase() === 'cliente') {
+    return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  }
+  const { id } = await params
+  const admin = createAdminSupabase()
+  const { data: dist } = await admin.from('distinte_contrassegni')
+    .select('id,master_id,numero,stato,totale_pagato,accettata_target')
+    .eq('id', id).maybeSingle()
+  if (!dist) return NextResponse.json({ error: 'Distinta non trovata' }, { status: 404 })
+  if (dist.master_id !== utente.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  if (dist.stato !== 'in_lavorazione' || Number(dist.totale_pagato || 0) > 0) {
+    return NextResponse.json({ error: 'Distinta non eliminabile: ci sono pagamenti registrati.' }, { status: 400 })
+  }
+  if ((dist as any).accettata_target) {
+    return NextResponse.json({ error: 'Distinta non eliminabile: il destinatario l\'ha già accettata e propagata.' }, { status: 400 })
+  }
+
+  const { data: righe } = await admin.from('distinte_contrassegni_righe').select('spedizione_id').eq('distinta_id', id)
+  const spedIds = (righe || []).map((r: any) => r.spedizione_id).filter(Boolean)
+  await admin.from('distinte_contrassegni_righe').delete().eq('distinta_id', id)
+  if (spedIds.length) {
+    await admin.from('spedizioni')
+      .update({ stato_contrassegno: 'in_attesa', distinta_contrassegno_id: null })
+      .in('id', spedIds).eq('distinta_contrassegno_id', id).neq('stato_contrassegno', 'pagato')
+  }
+  const { error } = await admin.from('distinte_contrassegni').delete().eq('id', id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  return NextResponse.json({ success: true, spedizioniLiberate: spedIds.length })
+}
+
 export async function PUT(req: NextRequest, { params }: { params: Promise<{id: string}> }) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
