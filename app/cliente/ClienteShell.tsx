@@ -18,6 +18,13 @@ export default function ClienteShell({ cliente, children }: { cliente: { ragione
     check(); window.addEventListener('resize', check); return () => window.removeEventListener('resize', check)
   }, [])
   useEffect(() => { setDrawerOpen(false) }, [path])
+  // La voce "Introduzione" del menu apre il tutorial: su mobile il drawer va chiuso
+  // per non restare aperto sotto (e sopra) l'overlay.
+  useEffect(() => {
+    const chiudi = () => setDrawerOpen(false)
+    window.addEventListener('moovx-apri-tutorial', chiudi)
+    return () => window.removeEventListener('moovx-apri-tutorial', chiudi)
+  }, [])
 
   // overflow: hidden → scorre solo il <nav> di ClienteNav; brand/utente/Esci restano fissi
   const asideBase: React.CSSProperties = { width: '200px', background: '#1a1a1a', display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', zIndex: 1000 }

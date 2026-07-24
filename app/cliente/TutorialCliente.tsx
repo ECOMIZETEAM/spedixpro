@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react'
 
 // Tutorial di primo accesso per il cliente: overlay con i passi principali del portale.
 // Skippabile e mostrato UNA sola volta (flag su clienti.impostazioni.tutorial_visto, con
-// fallback su localStorage). Riapribile dal pulsante "?" in basso a sinistra.
+// fallback su localStorage). Riapribile dalla voce "Introduzione" nel menu (evento
+// 'moovx-apri-tutorial': il vecchio pulsante "?" fisso copriva "Esci" in sidebar).
 const STEPS: { icon: string; titolo: string; testo: string }[] = [
   { icon: '👋', titolo: 'Benvenuto in MoovExpress', testo: 'Questo è il tuo portale per creare e gestire le spedizioni. Ti mostriamo in pochi passi le funzioni principali. Puoi saltare quando vuoi.' },
   { icon: '📦', titolo: 'Nuova Spedizione', testo: 'Da "Nuova Spedizione" crei una spedizione: inserisci destinatario, peso e misure, scegli il contratto e stampi l\'etichetta. Puoi richiamare i pacchi salvati con un clic.' },
@@ -30,6 +31,13 @@ export default function TutorialCliente() {
     return () => { annulla = true }
   }, [])
 
+  // Riapertura dalla voce "Introduzione" del menu (ClienteNav dispatcha l'evento).
+  useEffect(() => {
+    const riapri = () => { setStep(0); setAperto(true) }
+    window.addEventListener('moovx-apri-tutorial', riapri)
+    return () => window.removeEventListener('moovx-apri-tutorial', riapri)
+  }, [])
+
   const chiudi = (salvaVisto: boolean) => {
     setAperto(false)
     if (salvaVisto) {
@@ -38,25 +46,13 @@ export default function TutorialCliente() {
     }
   }
 
-  const riapri = () => { setStep(0); setAperto(true) }
-
-  // Pulsante "?" sempre disponibile per rivedere il tutorial.
-  const helpBtn = (
-    <button onClick={riapri} title="Rivedi il tutorial" style={{
-      position: 'fixed', left: 16, bottom: 16, zIndex: 1400, width: 40, height: 40, borderRadius: '50%',
-      background: '#1a1a1a', color: '#fff', border: '2px solid #f97316', fontSize: 18, fontWeight: 700, cursor: 'pointer',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
-    }}>?</button>
-  )
-
-  if (!aperto) return helpBtn
+  if (!aperto) return null
 
   const s = STEPS[step]
   const ultimo = step === STEPS.length - 1
 
   return (
     <>
-      {helpBtn}
       <div style={{ position: 'fixed', inset: 0, zIndex: 1500, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
         <div style={{ background: '#fff', borderRadius: 16, maxWidth: 460, width: '100%', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.35)', fontFamily: 'var(--font-geist-sans),system-ui,sans-serif' }}>
           <div style={{ background: 'linear-gradient(135deg,#1a1a1a,#333)', padding: '26px 26px 22px', color: '#fff', position: 'relative' }}>

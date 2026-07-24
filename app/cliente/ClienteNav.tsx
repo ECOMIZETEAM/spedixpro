@@ -75,6 +75,8 @@ const NAV_BASE: NavItem[] = [
     ],
   },
   { id: 'documentazione', label: 'Documentazione', icon: '📖', href: 'https://docs.moovexpress.com' },
+  // Riapre il tutorial di benvenuto (overlay TutorialCliente): niente href, dispatcha un evento.
+  { id: 'introduzione', label: 'Introduzione', icon: '?', href: '#' },
 ]
 
 export default function ClienteNav() {
@@ -216,12 +218,14 @@ export default function ClienteNav() {
         }
 
         // Voce singola (leaf). Gli href esterni (http) aprono in nuova scheda.
+        // "Introduzione" non naviga: riapre il tutorial di benvenuto (e chiude il drawer mobile).
         const ext = item.href?.startsWith('http')
         return (
           <a
             key={item.id}
             href={item.href}
             className="spx-item"
+            {...(item.id === 'introduzione' ? { onClick: (e: React.MouseEvent) => { e.preventDefault(); window.dispatchEvent(new Event('moovx-apri-tutorial')) } } : {})}
             {...(ext ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
             style={active ? { background: 'rgba(249,115,22,0.12)', color: '#fff', fontWeight: 600, borderLeft: `3px solid ${ACCENT}` } : {}}
           >
