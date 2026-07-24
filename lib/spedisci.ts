@@ -11,16 +11,21 @@
 //  5) altrimenti null: ambiguo, meglio errore chiaro che etichetta col vettore sbagliato.
 export function trovaRateContratto(rates: any[], cred: any): any | null {
   if (!Array.isArray(rates) || !rates.length) return null
+  // 1) Match ESATTO sul codice salvato (pannelli con codici stabili in chiaro).
   if (cred?.codice_contratto) {
     const esatto = rates.find((r: any) => r.contractCode === cred.codice_contratto)
     if (esatto) return esatto
   }
+  // 2) Vettore salvato (credenziali.carrier_code): valido SOLO se sul pannello esiste
+  //    UN SOLO contratto di quel vettore. Con due contratti dello stesso vettore (es.
+  //    Poste M e Poste D) o col vettore assente, NON si tira a indovinare: null.
   if (cred?.carrier_code) {
-    const perVettore = rates.find((r: any) => r.carrierCode === cred.carrier_code)
-    if (perVettore) return perVettore
+    const perVettore = rates.filter((r: any) => r.carrierCode === cred.carrier_code)
+    return perVettore.length === 1 ? perVettore[0] : null
   }
+  // 3) Pannello mono-tariffa: e' per forza quella.
   if (rates.length === 1) return rates[0]
-  if (!cred?.codice_contratto) return rates[0]
+  // 4) LOGICA CHIUSA: ambiguo -> nessuna spedizione (errore chiaro, mai il vettore sbagliato).
   return null
 }
 
