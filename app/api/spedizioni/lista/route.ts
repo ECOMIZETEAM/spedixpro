@@ -7,7 +7,7 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome,listino_agente_id').eq('id', user.id).single()
   let agenteClienteIds: string[] | null = null
   if ((utente?.ruolo || '').toLowerCase() === 'agente') {
     const nomeAg = (((utente as any)?.nome || '') + ' ' + ((utente as any)?.cognome || '')).trim()
@@ -325,6 +325,13 @@ export async function GET(req: NextRequest) {
       for (const c of (miei || [])) nomeToMioCorr.set((c as any).nome_contratto, (c as any).id)
     }
   }
+  // AGENTE: il margine è prezzo cliente (costo_totale) − SUO costo dal listino agente assegnato
+  // (utenti.listino_agente_id), come nel report guadagno. Senza questo, prezzo_corriere restava
+  // null → pareggiato al prezzo cliente → elenco TUTTO a margine 0.
+  let calcAgente: ((s: any) => any) | null = null
+  if (ruolo === 'agente' && (utente as any)?.listino_agente_id && (spedizioni || []).length) {
+    try { calcAgente = await creaCalcolatoreListinoCliente(db, (utente as any).listino_agente_id) } catch { calcAgente = null }
+  }
 
   // master_rete = nome della MIA prima linea per le spedizioni dei sotto-master (null per le mie)
   const rows = (spedizioni || []).map((s: any) => {
@@ -370,6 +377,11 @@ export async function GET(req: NextRequest) {
       const nome = (s.corrieri as any)?.nome_contratto
       const mioCorr = (s.master_id === mineId) ? s.corriere_id : (nome ? nomeToMioCorr.get(nome) : null)
       if (mioCorr) { const r = calcMioCorr({ ...s, corriere_id: mioCorr }); if (r && r.totale != null) prezzo_corriere = r.totale }
+    }
+    // Agente: il suo "costo" viene dal listino agente (stesso corriere della spedizione).
+    if (prezzo_corriere == null && calcAgente) {
+      const r = calcAgente(s)
+      if (r && r.totale != null) prezzo_corriere = r.totale
     }
     if (prezzo_corriere == null) prezzo_corriere = prezzo_cliente
     const margine = Math.round((prezzo_cliente - prezzo_corriere) * 100) / 100
