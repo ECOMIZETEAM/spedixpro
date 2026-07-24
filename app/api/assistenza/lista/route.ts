@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { fetchAll } from '@/lib/fetch-all'
 
 // Lista ticket:
 // - ricevuti: ticket che il MIO master deve gestire (aperti da miei clienti o sotto-master)
@@ -18,18 +19,20 @@ export async function GET(_req: NextRequest) {
 
   // Ordinamento per ULTIMA ATTIVITA' (updated_at): un ticket vecchio con una risposta fresca
   // del cliente deve risalire in cima, non restare sepolto (prima "spariva" dalla vista).
+  // fetchAll: lo STORICO (chiusi compresi) deve restare visibile per sempre — senza paginazione
+  // PostgREST tronca a 1000 righe e i ticket più vecchi sparirebbero in silenzio.
   if (ruolo === 'cliente') {
-    const { data: miei } = await admin.from('tickets').select(cols)
-      .eq('cliente_id', utente?.cliente_id).order('updated_at', { ascending: false })
+    const miei = await fetchAll(() => admin.from('tickets').select(cols)
+      .eq('cliente_id', utente?.cliente_id).order('updated_at', { ascending: false }))
     return NextResponse.json({ ricevuti: [], miei: miei || [] })
   }
 
   // Master: ricevuti (owner) + miei (aperti verso la linea superiore) + RETE (inoltrati a me
   // da un master sotto di me: partecipo alla catena, il cliente non mi vede).
-  const [{ data: ricevuti }, { data: miei }, { data: rete }] = await Promise.all([
-    admin.from('tickets').select(cols).eq('owner_master_id', masterId).order('updated_at', { ascending: false }),
-    admin.from('tickets').select(cols).eq('aperto_master_id', masterId).order('updated_at', { ascending: false }),
-    admin.from('tickets').select(cols).contains('rete_master_ids', [masterId]).order('updated_at', { ascending: false }),
+  const [ricevuti, miei, rete] = await Promise.all([
+    fetchAll(() => admin.from('tickets').select(cols).eq('owner_master_id', masterId).order('updated_at', { ascending: false })),
+    fetchAll(() => admin.from('tickets').select(cols).eq('aperto_master_id', masterId).order('updated_at', { ascending: false })),
+    fetchAll(() => admin.from('tickets').select(cols).contains('rete_master_ids', [masterId]).order('updated_at', { ascending: false })),
   ])
   const conNuovo = (r: any) => ({ ...r, rete_nuovo: Array.isArray(r.rete_non_letti) && r.rete_non_letti.includes(masterId) })
   return NextResponse.json({ ricevuti: ricevuti || [], miei: miei || [], rete: (rete || []).map(conNuovo) })

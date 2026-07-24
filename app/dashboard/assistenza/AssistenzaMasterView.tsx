@@ -24,6 +24,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   const [nuovo, setNuovo] = useState({ oggetto: '', messaggio: '' })
   const [msg, setMsg] = useState('')
   const [cerca, setCerca] = useState('')             // ricerca per LDV
+  const [filtroStato, setFiltroStato] = useState('tutti')   // lo storico resta sempre: 'tutti' include i chiusi
   const [perPage, setPerPage] = useState(25)
   const [pagina, setPagina] = useState(1)
   const [dragPod, setDragPod] = useState(false)
@@ -113,6 +114,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   // Filtro per categoria (ticket/pod) + ricerca per LDV o nome + paginazione
   const filtrati = ricevuti
     .filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod'))
+    .filter(t => filtroStato === 'tutti' || t.stato === filtroStato)
     .filter(t => {
       if (!cerca.trim()) return true
       const q = cerca.trim().toLowerCase()
@@ -144,6 +146,9 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <input value={cerca} onChange={e => { setCerca(e.target.value); setPagina(1) }} placeholder="🔎 Cerca LDV…"
               style={{ padding: '7px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', minWidth: '200px' }} />
+            <select value={filtroStato} onChange={e => { setFiltroStato(e.target.value); setPagina(1) }} style={{ padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '12.5px', color: '#1a1a1a', background: '#fff' }}>
+              <option value="tutti">Tutti gli stati</option><option value="aperto">Aperti</option><option value="in_lavorazione">In lavorazione</option><option value="risolto">Risolti</option><option value="chiuso">Chiusi (archivio)</option>
+            </select>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#666' }}>
               Mostra
               <select value={perPage} onChange={e => { setPerPage(Number(e.target.value)); setPagina(1) }} style={{ padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: '5px', fontSize: '12px', color: '#1a1a1a', background: '#fff' }}>

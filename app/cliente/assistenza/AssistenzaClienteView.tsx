@@ -22,6 +22,7 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
   const [salvando, setSalvando] = useState(false)
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
   const [cerca, setCerca] = useState('')
+  const [filtroStato, setFiltroStato] = useState('tutti')   // lo storico resta sempre: 'tutti' include i chiusi
   const [perPage, setPerPage] = useState(25)
   const [pagina, setPagina] = useState(1)
   const [nuoviIds, setNuoviIds] = useState<Set<string>>(new Set())
@@ -86,6 +87,7 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
 
   const filtrati = miei
     .filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod'))
+    .filter(t => filtroStato === 'tutti' || t.stato === filtroStato)
     .filter(t => !cerca.trim() || String(t.oggetto || '').toLowerCase().includes(cerca.trim().toLowerCase()))
   const totalePagine = Math.max(1, Math.ceil(filtrati.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
@@ -141,6 +143,9 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
           <span style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>{isPod ? 'Le mie richieste POD' : 'I miei ticket'}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <input value={cerca} onChange={e => { setCerca(e.target.value); setPagina(1) }} placeholder="🔎 Cerca LDV…" style={{ padding: '7px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', minWidth: '190px' }} />
+            <select value={filtroStato} onChange={e => { setFiltroStato(e.target.value); setPagina(1) }} style={{ padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '12.5px', color: '#1a1a1a', background: '#fff' }}>
+              <option value="tutti">Tutti gli stati</option><option value="aperto">Aperti</option><option value="in_lavorazione">In lavorazione</option><option value="risolto">Risolti</option><option value="chiuso">Chiusi (archivio)</option>
+            </select>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#666' }}>
               Mostra
               <select value={perPage} onChange={e => { setPerPage(Number(e.target.value)); setPagina(1) }} style={{ padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: '5px', fontSize: '12px', color: '#1a1a1a', background: '#fff' }}>
