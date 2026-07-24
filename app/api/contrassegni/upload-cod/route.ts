@@ -28,22 +28,37 @@ export async function POST(req: NextRequest) {
   // RLS: match LDV su tutta la catena (solo discesa) -> admin; autorizzazione = check catena
   const adminDb = createAdminSupabase()
 
-  let spedizioniProcessate = 0, codFile = 0, codSistema = 0, codDaPagare = 0, errori = 0
+  let spedizioniProcessate = 0, codFile = 0, codSistema = 0, codDaPagare = 0, errori = 0, saltateNonPagate = 0
   const perCliente: Record<string, any[]> = {}
   const perMaster: Record<string, any[]> = {}
 
   for (const rigaRaw of (righe || [])) {
     const riga: any = {}
     for (const kk in rigaRaw) { riga[String(kk).trim().toLowerCase()] = (rigaRaw as any)[kk] }
-    const ldv = riga['ldv'] || riga['lettera di vettura'] || riga['n. spedizione'] || riga['numero']
-    const importoCod = parseFloat(riga['importo'] || riga['importocod'] || riga['importo cod'] || riga['contrassegno'] || 0)
+    // 'shipment' = export contrassegni SpediamoPro (codice spedizione del provider, es. 6A54B0F9AB03D)
+    const ldv = String(riga['ldv'] || riga['lettera di vettura'] || riga['n. spedizione'] || riga['numero'] || riga['shipment'] || '').trim()
+    // Importo: alias storici + 'COD amount [EUR]' (SpediamoPro) + virgola decimale
+    let importoRaw = riga['importo'] ?? riga['importocod'] ?? riga['importo cod'] ?? riga['contrassegno']
+    if (importoRaw == null) { const k = Object.keys(riga).find(x => x.startsWith('cod amount')); if (k) importoRaw = riga[k] }
+    const importoCod = parseFloat(String(importoRaw ?? 0).replace(',', '.')) || 0
     if (!ldv) { errori++; continue }
+    // Colonna Status (SpediamoPro): in distinta vanno SOLO i contrassegni gia' PAGATI dal corriere.
+    const statusRiga = String(riga['status'] ?? '').trim().toLowerCase()
+    if (statusRiga && !['paid', 'pagato', 'pagata'].includes(statusRiga)) { saltateNonPagate++; continue }
     codFile += importoCod
 
-    const { data: spedizione } = await adminDb.from('spedizioni')
+    let { data: spedizione } = await adminDb.from('spedizioni')
       .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno')
       .ilike('numero', `%${ldv}%`)
       .limit(1).single()
+    if (!spedizione && /^[A-Za-z0-9_-]+$/.test(ldv)) {
+      // Export SpediamoPro: 'Shipment' e' il codice del provider (raw_response.code), non la LDV in elenco.
+      const r2 = await adminDb.from('spedizioni')
+        .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno')
+        .or(`tracking_number.eq.${ldv},raw_response->>code.eq.${ldv}`)
+        .limit(1).maybeSingle()
+      spedizione = r2.data as any
+    }
     if (!spedizione) { errori++; continue }
 
     // Solo discesa: chi carica deve essere il master della spedizione o un antenato
@@ -119,5 +134,5 @@ export async function POST(req: NextRequest) {
     spedizioni_processate: spedizioniProcessate, cod_file: codFile, cod_sistema: codSistema,
     cod_da_pagare: codDaPagare, cod_in_distinte: codInDistinte, errori,
   })
-  return NextResponse.json({ success: true, spedizioniProcessate, codFile, codSistema, codDaPagare, codInDistinte, errori })
+  return NextResponse.json({ success: true, spedizioniProcessate, codFile, codSistema, codDaPagare, codInDistinte, errori, saltateNonPagate })
 }

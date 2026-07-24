@@ -67,7 +67,7 @@ export default function DistinteContrassegniPage() {
       })
       const data = await res.json()
       if (data.success) {
-        await dialog.alert({ title: 'File processato', message: 'Spedizioni: ' + data.spedizioniProcessate + ' · Errori: ' + data.errori })
+        await dialog.alert({ title: 'File processato', message: 'Spedizioni: ' + data.spedizioniProcessate + ' · Errori: ' + data.errori + (data.saltateNonPagate ? ' · Non ancora pagate (saltate): ' + data.saltateNonPagate : '') })
         fetch('/api/contrassegni/cod-files').then(r=>r.json()).then(d=>setCodFiles(d||[]))
       }
     } catch(err) { await dialog.alert({ title: 'Errore', message: 'Errore nel caricamento del file.' }) }
