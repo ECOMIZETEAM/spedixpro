@@ -18,7 +18,10 @@ export async function GET(req: NextRequest) {
     .eq('cliente_id', clienteId)
     .not('giacenza_data', 'is', null)
     .order('giacenza_data', { ascending: false })
-  if (stato) query = query.eq('giacenza_stato', stato)
+  // 'aperta' = in attesa di istruzioni: le giacenze appena rilevate hanno giacenza_stato NULL
+  // (il rilevamento valorizza solo giacenza_data) -> il confronto esatto le escludeva dal filtro.
+  if (stato === 'aperta') query = query.or('giacenza_stato.eq.aperta,giacenza_stato.is.null')
+  else if (stato) query = query.eq('giacenza_stato', stato)
   if (dal) query = query.gte('giacenza_data', dal)
   if (al) query = query.lte('giacenza_data', al + 'T23:59:59')
   const { data } = await query

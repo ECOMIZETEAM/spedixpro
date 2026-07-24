@@ -52,7 +52,10 @@ export async function GET(req: NextRequest) {
   // Agente: solo giacenze dei suoi clienti (copre anche l'eventuale ramo rete).
   if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
   if (clienteId) query = query.eq('cliente_id', clienteId)
-  if (stato) query = query.eq('giacenza_stato', stato)
+  // 'aperta' = in attesa di istruzioni: le giacenze appena rilevate hanno giacenza_stato NULL
+  // (il rilevamento valorizza solo giacenza_data) -> il confronto esatto le escludeva dal filtro.
+  if (stato === 'aperta') query = query.or('giacenza_stato.eq.aperta,giacenza_stato.is.null')
+  else if (stato) query = query.eq('giacenza_stato', stato)
   // Filtro per la data di ENTRATA in giacenza (giacenza_data), non per la data di spedizione
   // (created_at): una giacenza può nascere oggi da una spedizione creata giorni fa, e col filtro
   // su created_at (default oggi) non compariva. Fallback su created_at per righe legacy senza data.
