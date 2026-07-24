@@ -389,6 +389,46 @@ export async function GET(req: NextRequest) {
     const distinta_reso = distintaReso.get(s.id) || null
     return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, id_ordine, distinta_reso }
   })
-  if (paged) return NextResponse.json({ rows, total: totalePaginato, page: pageParam, perPage })
-  return NextResponse.json(rows)
+  // ── CONTRASSEGNO PER-LIVELLO: il badge è verde solo se IO ho incassato. ──
+  // Per un MASTER: verde se la rimessa indirizzata a ME (target_master_id) è pagata; arancio se
+  // esiste ma non è pagata; se non c'è rimessa in ingresso ma HO creato io una distinta con quella
+  // spedizione, sono il livello che ha caricato il file (il corriere mi ha già pagato) → verde.
+  // Cliente e agente NON entrano qui: per loro vale lo stato globale (= stato del cliente finale).
+  let rowsOut: any[] = rows
+  if (mineId && ruolo !== 'cliente' && ruolo !== 'agente') {
+    const codIds = rows.filter((r: any) => Number(r.contrassegno) > 0).map((r: any) => r.id)
+    if (codIds.length) {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const adminCod = createAdminSupabase()
+      const inEntrata = new Map<string, string>()   // spedId -> stato distinta verso di me
+      const inUscita = new Set<string>()            // spedId in una distinta creata da me
+      // Chunk PICCOLI + fetchAll: ogni spedizione ha UNA riga distinta PER LIVELLO della catena,
+      // quindi un chunk grande può superare le 1000 righe (cap PostgREST) e perdere pezzi.
+      for (let i = 0; i < codIds.length; i += 150) {
+        const rr = await fetchAll(() => adminCod.from('distinte_contrassegni_righe')
+          .select('id, spedizione_id, distinte_contrassegni!inner(stato,master_id,target_master_id)')
+          .in('spedizione_id', codIds.slice(i, i + 150)).order('id', { ascending: true }))
+        for (const r of (rr || [])) {
+          const d: any = (r as any).distinte_contrassegni
+          if (!d || !(r as any).spedizione_id) continue
+          if (d.target_master_id === mineId) inEntrata.set((r as any).spedizione_id, d.stato)
+          else if (d.master_id === mineId) inUscita.add((r as any).spedizione_id)
+        }
+      }
+      for (const r of rows as any[]) {
+        if (!(Number(r.contrassegno) > 0)) continue
+        if (inEntrata.has(r.id)) r.stato_contrassegno = inEntrata.get(r.id) === 'pagata' ? 'pagato' : 'in_distinta'
+        else if (inUscita.has(r.id)) r.stato_contrassegno = 'pagato'   // sono il caricatore: incassato dal corriere
+      }
+      // Il filtro contrassegni a DB lavora sullo stato GLOBALE (= del cliente): dopo l'override
+      // per-viewer RIFILTRO le righe così un master che filtra "pagato" vede il SUO pagato, non
+      // quello del cliente. (Il totale paginato resta quello del filtro DB: approssimazione nota.)
+      if (fStatoContr === 'pagato') rowsOut = rows.filter((r: any) => r.stato_contrassegno === 'pagato')
+      else if (fStatoContr === 'in_attesa') rowsOut = rows.filter((r: any) => r.stato_contrassegno === 'in_distinta')
+      else if (fStatoContr === 'da_pagare') rowsOut = rows.filter((r: any) => Number(r.contrassegno) > 0 && !['in_distinta', 'pagato'].includes(String(r.stato_contrassegno || '')))
+    }
+  }
+
+  if (paged) return NextResponse.json({ rows: rowsOut, total: totalePaginato, page: pageParam, perPage })
+  return NextResponse.json(rowsOut)
 }

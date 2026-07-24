@@ -124,10 +124,11 @@ export async function POST(req: NextRequest) {
     if (distinta?.id) {
       codInDistinte += totale
       await supabase.from('distinte_contrassegni_righe').insert(righeDist.map(r => ({ ...r, distinta_id: distinta.id })))
-      // Segna le spedizioni come "in distinta" -> badge contrassegno arancione
-      // (non tocco quelle gia' pagate)
+      // stato_contrassegno GLOBALE = stato verso il CLIENTE FINALE: si marca 'in_distinta' SOLO
+      // per le distinte verso cliente. Per le rimesse verso sotto-master NON si tocca (ogni
+      // livello vede il proprio stato in elenco: verde solo quando HA INCASSATO lui).
       const spedIds = righeDist.map(r => r.spedizione_id).filter(Boolean)
-      if (spedIds.length) {
+      if (spedIds.length && campi.cliente_id) {
         await supabase.from('spedizioni')
           .update({ stato_contrassegno: 'in_distinta', distinta_contrassegno_id: distinta.id })
           .in('id', spedIds)

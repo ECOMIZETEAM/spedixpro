@@ -42,6 +42,26 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{i
   }
   const { error } = await admin.from('distinte_contrassegni').delete().eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+
+  // Se la distinta eliminata era nata dal "Carica" di una rimessa ricevuta, RIAPRO le rimesse in
+  // entrata che contengono quelle spedizioni (caricata_target=false): tornano nella sezione
+  // "da caricare" e i contrassegni non restano MAI orfani (il re-carica salta ciò che è ancora
+  // in altre mie distinte grazie all'anti-duplicato per-master).
+  if (spedIds.length) {
+    try {
+      const { data: rientranti } = await admin.from('distinte_contrassegni_righe')
+        .select('distinta_id, distinte_contrassegni!inner(id,target_master_id,caricata_target)')
+        .in('spedizione_id', spedIds)
+        .eq('distinte_contrassegni.target_master_id', utente.master_id)
+        .eq('distinte_contrassegni.caricata_target', true)
+      const daRiaprire = Array.from(new Set((rientranti || []).map((r: any) => r.distinta_id)))
+      if (daRiaprire.length) {
+        await admin.from('distinte_contrassegni')
+          .update({ caricata_target: false, caricata_target_at: null })
+          .in('id', daRiaprire)
+      }
+    } catch (e) { console.error('[COD][DELETE] riapertura rimesse origine:', e) }
+  }
   return NextResponse.json({ success: true, spedizioniLiberate: spedIds.length })
 }
 
@@ -49,8 +69,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{id: s
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('ruolo').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
+  // Solo un MASTER può segnare pagata una distinta (mai il cliente destinatario).
+  if (!utente?.master_id || (utente.ruolo || '').toLowerCase() === 'cliente') {
+    return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  }
   const { id } = await params
   const body = await req.json()
   const { metodoPagamento, pagamenti } = body
@@ -60,6 +84,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{id: s
     .select('id,master_id,cliente_id,target_master_id,numero,totale_iniziale,totale_pagato,stato')
     .eq('id', id).maybeSingle()
   if (!dist) return NextResponse.json({ error: 'Distinta non trovata' }, { status: 404 })
+  // SOLO il master PROPRIETARIO (chi la deve pagare) può segnarla pagata: senza questo check il
+  // DESTINATARIO poteva auto-accreditarsi il credito con metodo 'compensata' (il movimento gira
+  // su client admin e bypassa la RLS che blocca solo l'update della testata).
+  if (dist.master_id !== utente.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const totale = Math.round(Number(dist.totale_iniziale || 0) * 100) / 100
   const giaPagato = Math.round(Number(dist.totale_pagato || 0) * 100) / 100
   const residuo = Math.round((totale - giaPagato) * 100) / 100
@@ -96,7 +124,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{id: s
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
   // Spedizioni -> 'pagato' SOLO quando la distinta è saldata del tutto (parziale = restano in_distinta)
-  if (saldata) {
+  // e SOLO per le distinte verso CLIENTE: lo stato globale è "il cliente ha incassato". Il pagamento
+  // di una rimessa verso un SOTTO-MASTER rende verde l'elenco DEL sotto-master (vista per-livello),
+  // ma il cliente finale resta arancio finché il SUO master non gli paga la SUA distinta.
+  if (saldata && dist.cliente_id) {
     const { data: righeSped } = await supabase.from('distinte_contrassegni_righe').select('spedizione_id').eq('distinta_id', id)
     if (righeSped?.length) {
       await supabase.from('spedizioni').update({ stato_contrassegno: 'pagato' }).in('id', righeSped.map(r => r.spedizione_id))

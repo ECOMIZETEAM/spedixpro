@@ -13,6 +13,9 @@ export default function DistinteContrassegniPage() {
   const [codFiles, setCodFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
+  const [ricevute, setRicevute] = useState<any[]>([])          // rimesse accettate dal network, da caricare
+  const [selRicevute, setSelRicevute] = useState<Set<string>>(new Set())
+  const [caricando, setCaricando] = useState(false)
   const [cerca, setCerca] = useState('')
   const [modalPagamento, setModalPagamento] = useState<any>(null)
   const [metodoPagamento, setMetodoPagamento] = useState('')
@@ -31,7 +34,29 @@ export default function DistinteContrassegniPage() {
     fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
     carica()
     fetch('/api/contrassegni/cod-files').then(r=>r.json()).then(d=>setCodFiles(d||[]))
+    caricaRicevute()
   }, [])
+
+  function caricaRicevute() {
+    fetch('/api/contrassegni/carica-ricevute').then(r=>r.json()).then(d=>{ setRicevute(Array.isArray(d)?d:[]); setSelRicevute(new Set()) }).catch(()=>{})
+  }
+
+  async function caricaSelezionate() {
+    const ids = Array.from(selRicevute)
+    if (!ids.length) { await dialog.alert({ title: 'Nessuna selezione', message: 'Seleziona almeno una rimessa da caricare.' }); return }
+    const ok = await dialog.confirm({ title: 'Carica rimesse', message: `Caricare ${ids.length} rimesse? Verranno create le distinte contrassegni verso i tuoi clienti e sotto-master.` })
+    if (!ok) return
+    setCaricando(true)
+    try {
+      const r = await fetch('/api/contrassegni/carica-ricevute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ distintaIds: ids }) })
+      const j = await r.json()
+      if (j.success) {
+        await dialog.alert({ title: 'Rimesse caricate', message: `Caricate ${j.rimesseCaricate} rimesse · create ${j.distinteCreate} distinte` + (j.giaCaricate ? ` · ${j.giaCaricate} spedizioni già in distinta (saltate)` : '') })
+        caricaRicevute(); carica()
+      } else await dialog.alert({ title: 'Errore', message: j.error || 'Errore durante il caricamento.' })
+    } catch { await dialog.alert({ title: 'Errore', message: 'Errore durante il caricamento.' }) }
+    setCaricando(false)
+  }
 
   // ricarica le distinte quando cambiano i filtri
   useEffect(() => { carica() }, [filtri])
@@ -201,7 +226,42 @@ export default function DistinteContrassegniPage() {
         </div>
       </div>
 
-      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
+            {ricevute.length > 0 && (
+        <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #fbbf24',overflow:'hidden',marginBottom:'16px'}}>
+          <div style={{padding:'12px 16px',borderBottom:'1px solid #fde68a',background:'#fffbeb',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'10px',flexWrap:'wrap' as const}}>
+            <span style={{fontSize:'13px',fontWeight:'700',color:'#92400e'}}>📥 Rimesse contrassegni accettate — da caricare ({ricevute.length})</span>
+            <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+              <label style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'12px',color:'#92400e',cursor:'pointer',fontWeight:'600'}}>
+                <input type="checkbox" checked={selRicevute.size===ricevute.length && ricevute.length>0} onChange={e=>setSelRicevute(e.target.checked ? new Set(ricevute.map((x:any)=>x.id)) : new Set())} style={{width:'15px',height:'15px',cursor:'pointer'}}/>
+                Seleziona tutte
+              </label>
+              <button onClick={caricaSelezionate} disabled={caricando || !selRicevute.size}
+                style={{padding:'7px 16px',background:selRicevute.size?'#f97316':'#d1d5db',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:selRicevute.size?'pointer':'default'}}>
+                {caricando ? 'Caricamento…' : `Carica distinte (${selRicevute.size})`}
+              </button>
+            </div>
+          </div>
+          <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
+            <thead><tr style={{background:'#f9fafb'}}>
+              {['','NR','Da','Data','LDV','Totale'].map((h,i)=><th key={i} style={{textAlign:'left' as const,padding:'7px 12px',fontWeight:'700',textTransform:'uppercase' as const,fontSize:'10.5px',color:'#1a1a1a',borderBottom:'1px solid #e5e7eb'}}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {ricevute.map((r:any)=>(
+                <tr key={r.id} style={{borderBottom:'1px solid #f1f5f9',cursor:'pointer'}} onClick={()=>setSelRicevute(prev=>{const n=new Set(prev); n.has(r.id)?n.delete(r.id):n.add(r.id); return n})}>
+                  <td style={{padding:'7px 12px',width:'30px'}}><input type="checkbox" checked={selRicevute.has(r.id)} onChange={()=>{}} style={{width:'15px',height:'15px',pointerEvents:'none' as const}}/></td>
+                  <td style={{padding:'7px 12px',fontWeight:'700',color:'#f97316'}}>{r.numero || '—'}</td>
+                  <td style={{padding:'7px 12px',color:'#1a1a1a',fontWeight:'500'}}>{r.mittente}</td>
+                  <td style={{padding:'7px 12px',color:'#1a1a1a'}}>{new Date(r.created_at).toLocaleString('it-IT')}</td>
+                  <td style={{padding:'7px 12px',color:'#1a1a1a'}}>{r.righe}</td>
+                  <td style={{padding:'7px 12px',fontWeight:'700',color:'#1a1a1a'}}>€ {Number(r.totale).toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+<div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
         <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'10px'}}>▼ Filtri</div>
         <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr',gap:'12px',alignItems:'end'}}>
           <div>
