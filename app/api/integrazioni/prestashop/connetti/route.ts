@@ -18,9 +18,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const auth = Buffer.from(key + ':').toString('base64')
-    const test = await fetch(url + '/api/', { headers: { 'Authorization': 'Basic ' + auth }, signal: AbortSignal.timeout(10000) })
-    if (test.status === 401) return NextResponse.json({ error: 'Webservice Key non valida (401 non autorizzato)' }, { status: 400 })
-    if (!test.ok) return NextResponse.json({ error: 'PrestaShop ha risposto con codice ' + test.status + '. Verifica URL e che il Webservice sia attivo.' }, { status: 400 })
+    // Doppia auth: header Basic + ws_key in query (molti hosting strippano l'header Authorization).
+    const test = await fetch(url + '/api/?ws_key=' + encodeURIComponent(key), { headers: { 'Authorization': 'Basic ' + auth }, signal: AbortSignal.timeout(10000) })
+    if (test.status === 401) return NextResponse.json({ error: 'PrestaShop rifiuta la chiave (401). Nel back office verifica: 1) Parametri avanzati → Webservice → "Abilita il webservice di PrestaShop" = SÌ; 2) che la chiave sia copiata esatta (32 caratteri, senza spazi); 3) che la chiave sia ABILITATA e abbia i permessi (GET su orders, order_details, customers, addresses, products, order_carriers; PUT su orders).' }, { status: 400 })
+    if (!test.ok) return NextResponse.json({ error: 'PrestaShop ha risposto con codice ' + test.status + '. Verifica che l\'URL sia quello esatto del negozio (con o senza www, https) e che il Webservice sia attivo.' }, { status: 400 })
   } catch {
     return NextResponse.json({ error: 'Impossibile raggiungere il sito PrestaShop. Verifica URL.' }, { status: 400 })
   }

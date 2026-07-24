@@ -1,16 +1,19 @@
-// Helper PrestaShop Webservice API (Basic auth con API key, output JSON).
+// Helper PrestaShop Webservice API (output JSON). DOPPIA autenticazione: header Basic + parametro
+// ws_key nell'URL. Molti hosting (Apache/PHP-CGI) STRIPPANO l'header Authorization prima che
+// arrivi a PrestaShop -> 401 anche con chiave giusta; il ws_key in query e' il supporto nativo
+// che funziona ovunque. Insieme non confliggono.
 export function psHeaders(key: string): Record<string, string> {
   return { 'Authorization': 'Basic ' + Buffer.from(key + ':').toString('base64') }
 }
 
-function psUrl(url: string, pathAndQuery: string): string {
+function psUrl(url: string, key: string, pathAndQuery: string): string {
   const base = url.replace(/\/+$/, '')
   const sep = pathAndQuery.includes('?') ? '&' : '?'
-  return `${base}/api/${pathAndQuery}${sep}output_format=JSON`
+  return `${base}/api/${pathAndQuery}${sep}output_format=JSON&ws_key=${encodeURIComponent(key)}`
 }
 
 export async function psGet(url: string, key: string, pathAndQuery: string): Promise<any> {
-  const r = await fetch(psUrl(url, pathAndQuery), { headers: psHeaders(key), signal: AbortSignal.timeout(20000) })
+  const r = await fetch(psUrl(url, key, pathAndQuery), { headers: psHeaders(key), signal: AbortSignal.timeout(20000) })
   const text = await r.text()
   if (!r.ok) {
     if (r.status === 404) return null
@@ -21,7 +24,7 @@ export async function psGet(url: string, key: string, pathAndQuery: string): Pro
 
 export async function psPost(url: string, key: string, resource: string, body: any): Promise<any> {
   const base = url.replace(/\/+$/, '')
-  const r = await fetch(`${base}/api/${resource}?output_format=JSON`, {
+  const r = await fetch(`${base}/api/${resource}?output_format=JSON&ws_key=${encodeURIComponent(key)}`, {
     method: 'POST',
     headers: { ...psHeaders(key), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -34,7 +37,7 @@ export async function psPost(url: string, key: string, resource: string, body: a
 
 export async function psPut(url: string, key: string, resource: string, id: number | string, body: any): Promise<any> {
   const base = url.replace(/\/+$/, '')
-  const r = await fetch(`${base}/api/${resource}/${id}?output_format=JSON`, {
+  const r = await fetch(`${base}/api/${resource}/${id}?output_format=JSON&ws_key=${encodeURIComponent(key)}`, {
     method: 'PUT',
     headers: { ...psHeaders(key), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
