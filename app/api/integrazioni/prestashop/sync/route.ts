@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   if (!integr) return NextResponse.json({ error: 'Integrazione non trovata' }, { status: 404 })
 
   try {
-    const res = await sincronizzaOrdiniPrestashop(supabase, integr)
+    const res = await sincronizzaOrdiniPrestashop(supabase, integr, { dal: body.dal, al: body.al })
     return NextResponse.json({ ok: true, ...res })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Errore sincronizzazione' }, { status: 502 })
