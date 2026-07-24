@@ -58,11 +58,9 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
     const d = await fetch('/api/assistenza/lista').then(r => r.json())
     const lista = d.miei || []
     setMiei(lista)
-    const nonLetti = lista.filter((t: any) => t.aperto_letto === false).map((t: any) => t.id)
-    if (nonLetti.length) {
-      setNuoviIds(prev => { const s = new Set(prev); nonLetti.forEach((id: string) => s.add(id)); return s })
-      fetch('/api/assistenza/segna-letti', { method: 'POST' })
-    }
+    // Il "letto" scatta SOLO aprendo la singola chat (lo fa la route del dettaglio): niente piu'
+    // marca-tutto-letto all'apertura della lista, che spegneva il pallino rosso senza aver letto.
+    setNuoviIds(new Set(lista.filter((t: any) => t.aperto_letto === false).map((t: any) => t.id)))
     if (!silent) setLoading(false)
   }
   useEffect(() => { carica(); const t = setInterval(() => { if (document.visibilityState === 'visible') carica(true) }, 15000); return () => clearInterval(t) }, [])

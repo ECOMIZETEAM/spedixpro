@@ -34,10 +34,12 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   const [threadLoad, setThreadLoad] = useState(false)
   const [testo, setTesto] = useState('')
   const [inviando, setInviando] = useState(false)
-  const [ruoloChat, setRuoloChat] = useState<'master' | 'cliente'>('master')   // lato del master in QUESTA chat
+  const [ruoloChat, setRuoloChat] = useState<'master' | 'cliente' | 'rete'>('master')   // lato del master in QUESTA chat
+  const [rete, setRete] = useState<any[]>([])           // ticket inoltrati a me dalla rete
+  const [internoMsg, setInternoMsg] = useState(false)   // owner: messaggio interno alla rete (invisibile al cliente)
 
   async function apriDettaglio(t: any) {
-    setSel(t); setMsg(''); setTesto(''); setThread([]); setThreadLoad(true)
+    setSel(t); setMsg(''); setTesto(''); setThread([]); setThreadLoad(true); setInternoMsg(false)
     const d = await fetch('/api/assistenza/' + t.id).then(r => r.json()).catch(() => null)
     setThreadLoad(false)
     if (d && !d.error) { setThread(d.messaggi || []); setRuoloChat(d.ruolo || 'master'); setSel((s: any) => s ? { ...s, ...d.ticket } : d.ticket) }
@@ -45,7 +47,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   async function inviaMsg() {
     if (!testo.trim() || !sel?.id) return
     setInviando(true)
-    const r = await fetch('/api/assistenza/' + sel.id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ testo }) })
+    const r = await fetch('/api/assistenza/' + sel.id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ testo, interno: ruoloChat === 'rete' ? true : internoMsg }) })
     const j = await r.json().catch(() => ({})); setInviando(false)
     if (j.error) { setMsg(j.error); return }
     setTesto('')
@@ -70,9 +72,8 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   async function carica(silent = false) {
     if (!silent) setLoading(true)
     const d = await fetch('/api/assistenza/lista').then(r => r.json())
-    setRicevuti(d.ricevuti || []); setMiei(d.miei || [])
-    // Segna letti gli aggiornamenti sui ticket che ho aperto io -> la notifica sparisce
-    if ((d.miei || []).some((t: any) => t.aperto_letto === false)) fetch('/api/assistenza/segna-letti', { method: 'POST' })
+    setRicevuti(d.ricevuti || []); setMiei(d.miei || []); setRete(d.rete || [])
+    // Il "letto" scatta solo aprendo la singola chat (route dettaglio): niente marca-tutto-letto.
     if (!silent) setLoading(false)
   }
   useEffect(() => {
@@ -118,6 +119,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
       return String(t.oggetto || '').toLowerCase().includes(q) || String(t.aperto_da || '').toLowerCase().includes(q)
     })
   const mieiFiltrati = miei.filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod'))
+  const reteFiltrati = rete.filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod'))
   const totalePagine = Math.max(1, Math.ceil(filtrati.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
   const visibili = filtrati.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
@@ -172,6 +174,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
                       {t.oggetto}
                       {t.non_letto_owner && <span style={{ background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px' }}>● Nuovo</span>}
+                      {t.inoltrato_a_master_id && <span style={{ background: '#1a1a1a', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px' }}>⤴ Inoltrato</span>}
                     </span>
                     {Array.isArray(t.allegati) && t.allegati.length > 0 && <span style={{ marginLeft: '6px', fontSize: '11px', color: '#2563eb' }}>📎{t.allegati.length}</span>}
                   </td>
@@ -221,9 +224,37 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   <tr key={t.id} onClick={() => { if (!isPod) apriDettaglio(t) }} style={{ cursor: isPod ? 'default' : 'pointer' }}>
                     <td style={{ ...td, whiteSpace: 'nowrap', fontWeight: 700, color: '#f97316', fontSize: '12.5px' }}>{t.codice || '—'}</td>
                     <td style={{ ...td, whiteSpace: 'nowrap', fontSize: '12px' }}>{new Date(t.created_at).toLocaleDateString('it-IT')}</td>
-                    <td style={td}>{t.oggetto}</td>
+                    <td style={td}>{t.oggetto} {t.aperto_letto === false && <span style={{ background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px' }}>● Nuovo</span>}</td>
                     <td style={td}><Badge stato={t.stato} /></td>
                     <td style={{ ...td, color: '#555', fontSize: '12px' }}>{isPod ? (t.pod_url ? <a href={t.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }} onClick={e => e.stopPropagation()}>⬇ Scarica POD</a> : '—') : <span style={{ color: '#2563eb', fontWeight: 600 }}>💬 Apri chat</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* INOLTRATI DALLA MIA RETE (ticket dei sotto-master che mi hanno chiesto supporto) */}
+      {reteFiltrati.length > 0 && (
+        <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', overflow: 'hidden', marginTop: '20px' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', fontSize: '13px', fontWeight: 700, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ background: '#1a1a1a', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px' }}>RETE</span>
+            Inoltrati dalla mia rete
+            <span style={{ fontSize: '11.5px', fontWeight: 400, color: '#888' }}>— le tue risposte sono interne: il cliente finale non le vede</span>
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr style={{ background: '#f9fafb' }}>{['Codice', 'Data', 'Da', 'LDV', 'Stato', 'Chat'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {reteFiltrati.map(t => (
+                  <tr key={t.id} onClick={() => apriDettaglio(t)} style={{ cursor: 'pointer' }}>
+                    <td style={{ ...td, whiteSpace: 'nowrap', fontWeight: 700, color: '#f97316', fontSize: '12.5px' }}>{t.codice || '—'}</td>
+                    <td style={{ ...td, whiteSpace: 'nowrap', fontSize: '12px' }}>{new Date(t.created_at).toLocaleDateString('it-IT')}</td>
+                    <td style={td}><div style={{ fontWeight: 600 }}>{t.aperto_da || '—'}</div></td>
+                    <td style={td}>{t.oggetto} {t.rete_nuovo && <span style={{ background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px' }}>● Nuovo</span>}</td>
+                    <td style={td}><Badge stato={t.stato} /></td>
+                    <td style={{ ...td, color: '#2563eb', fontWeight: 600, fontSize: '12px' }}>💬 Apri chat</td>
                   </tr>
                 ))}
               </tbody>
@@ -251,11 +282,15 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
               {/* THREAD CHAT */}
               <div style={{ background: '#f8fafc', border: '1px solid #eee', borderRadius: '10px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '42vh', overflowY: 'auto' }}>
                 {threadLoad ? <div style={{ textAlign: 'center', color: '#999', fontSize: '13px' }}>Caricamento…</div> : (thread.length ? thread.map((m: any) => {
-                  const mio = m.autore === ruoloChat   // "mio" = il lato del master in QUESTA chat
+                  const mio = m.mio ?? (m.autore === ruoloChat)   // calcolato dal server (fallback legacy)
+                  const interno = m.visibilita === 'rete'
                   return (
                     <div key={m.id} style={{ alignSelf: mio ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
-                      <div style={{ fontSize: '10.5px', color: '#94a3b8', margin: mio ? '0 4px 3px 0' : '0 0 3px 4px', textAlign: mio ? 'right' : 'left', fontWeight: 600 }}>{mio ? 'Tu' : (m.autore_nome || (m.autore === 'master' ? 'Assistenza' : 'Cliente'))}</div>
-                      <div style={{ background: mio ? '#f97316' : '#fff', color: mio ? '#fff' : '#1a1a1a', border: mio ? 'none' : '1px solid #e5e7eb', padding: '9px 13px', borderRadius: '12px', fontSize: '13px', lineHeight: 1.45, whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const }}>{m.testo}</div>
+                      <div style={{ fontSize: '10.5px', color: '#94a3b8', margin: mio ? '0 4px 3px 0' : '0 0 3px 4px', textAlign: mio ? 'right' : 'left', fontWeight: 600 }}>
+                        {mio ? 'Tu' : (m.autore_nome || (m.autore === 'master' ? 'Assistenza' : 'Cliente'))}
+                        {interno && <span style={{ marginLeft: '5px', background: '#1a1a1a', color: '#fff', fontSize: '9px', fontWeight: 700, padding: '1px 6px', borderRadius: '8px' }}>🔒 RETE</span>}
+                      </div>
+                      <div style={{ background: interno ? (mio ? '#334155' : '#f1f5f9') : (mio ? '#f97316' : '#fff'), color: interno ? (mio ? '#fff' : '#334155') : (mio ? '#fff' : '#1a1a1a'), border: interno && !mio ? '1px dashed #94a3b8' : (mio ? 'none' : '1px solid #e5e7eb'), padding: '9px 13px', borderRadius: '12px', fontSize: '13px', lineHeight: 1.45, whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const }}>{m.testo}</div>
                       <div style={{ fontSize: '10px', color: '#b6c0cc', margin: mio ? '2px 4px 0 0' : '2px 0 0 4px', textAlign: mio ? 'right' : 'left' }}>{new Date(m.created_at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
                     </div>
                   )
@@ -316,11 +351,39 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
               {!isPod && (sel.stato === 'chiuso' ? (
                 <div style={{ padding: '12px', borderRadius: '8px', background: '#f3f4f6', color: '#6b7280', fontSize: '12.5px', textAlign: 'center' }}>🔒 Ticket chiuso e archiviato — sola lettura.</div>
               ) : (
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-                  <textarea value={testo} onChange={e => setTesto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); inviaMsg() } }} rows={2} placeholder="Rispondi al cliente…" style={{ flex: 1, padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'none' as const }} />
-                  <button disabled={inviando || !testo.trim()} onClick={inviaMsg} style={{ padding: '10px 18px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: inviando || !testo.trim() ? 'default' : 'pointer', opacity: inviando || !testo.trim() ? 0.6 : 1 }}>{inviando ? '…' : 'Invia'}</button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                  {ruoloChat === 'rete' && (
+                    <div style={{ padding: '8px 12px', borderRadius: '8px', background: '#1a1a1a', color: '#fff', fontSize: '12px', fontWeight: 600 }}>🔒 Risposta interna alla rete: la vede solo la catena dei master — il cliente finale NON la vede.</div>
+                  )}
+                  {ruoloChat === 'master' && Array.isArray(sel.rete_master_ids) && sel.rete_master_ids.length > 0 && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', fontWeight: 600, color: internoMsg ? '#1a1a1a' : '#666', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={internoMsg} onChange={e => setInternoMsg(e.target.checked)} style={{ width: '15px', height: '15px', cursor: 'pointer' }} />
+                      🔒 Messaggio interno alla rete (il cliente non lo vede)
+                    </label>
+                  )}
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                    <textarea value={testo} onChange={e => setTesto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); inviaMsg() } }} rows={2} placeholder={ruoloChat === 'rete' ? 'Rispondi al master che ti ha inoltrato il ticket…' : (internoMsg ? 'Messaggio interno alla rete…' : 'Rispondi al cliente…')} style={{ flex: 1, padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'none' as const }} />
+                    <button disabled={inviando || !testo.trim()} onClick={inviaMsg} style={{ padding: '10px 18px', background: (ruoloChat === 'rete' || internoMsg) ? '#1a1a1a' : '#f97316', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: inviando || !testo.trim() ? 'default' : 'pointer', opacity: inviando || !testo.trim() ? 0.6 : 1 }}>{inviando ? '…' : 'Invia'}</button>
+                  </div>
                 </div>
               ))}
+
+              {/* Inoltro alla linea superiore: il ticket resta unico, il cliente non lo sa */}
+              {!isPod && (ruoloChat === 'master' || ruoloChat === 'rete') && sel.stato !== 'chiuso' && (
+                <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
+                  <button disabled={salvando} onClick={async () => {
+                    setSalvando(true); setMsg('')
+                    const r = await fetch('/api/assistenza/' + sel.id + '/inoltra', { method: 'POST' })
+                    const j = await r.json().catch(() => ({})); setSalvando(false)
+                    if (j.error) { setMsg(j.error); return }
+                    setMsg('')
+                    const d = await fetch('/api/assistenza/' + sel.id).then(x => x.json()).catch(() => null)
+                    if (d && !d.error) { setThread(d.messaggi || []); setSel((s: any) => ({ ...s, ...d.ticket })) }
+                    carica(true)
+                  }} style={{ padding: '8px 14px', border: '1px solid #1a1a1a', background: '#fff', color: '#1a1a1a', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>⤴ Inoltra al mio master superiore</button>
+                  <span style={{ marginLeft: '8px', fontSize: '11px', color: '#888' }}>Il master superiore vedrà tutta la conversazione; il cliente non ne saprà nulla.</span>
+                </div>
+              )}
 
               {/* Stato del ticket — solo il lato ASSISTENZA (owner) cambia stato/chiude */}
               {ruoloChat === 'master' && (
