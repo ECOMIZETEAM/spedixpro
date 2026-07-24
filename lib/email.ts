@@ -10,8 +10,8 @@ const FROM = FROM_RAW.includes('<') ? FROM_RAW : `MoovExpress <${FROM_RAW}>`
 function wrap(inner: string): string {
   return `
   <div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e8e8e8">
-    <div style="background:#1a1a1a;padding:24px 32px">
-      <div style="font-size:20px;font-weight:800;color:#fff">Moov<span style="color:#f97316">Express</span></div>
+    <div style="background:#1a1a1a;padding:20px 32px">
+      <img src="https://zxwykadbgvnllnnegnuh.supabase.co/storage/v1/object/public/loghi/logo-a99cce52-7e74-4849-b755-10cb6274f392.png" alt="MoovExpress" width="133" height="40" style="display:block;height:40px;width:auto;border:0" />
     </div>
     <div style="padding:32px">${inner}</div>
   </div>`
