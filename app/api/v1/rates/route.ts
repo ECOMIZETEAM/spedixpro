@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
 
   const ris = await calcolaPrezzoListino(admin, {
     listinoId: cliente.listino_cliente_id, provincia, cap, paese, packages, corriereId: ctx.corriereId,
+    citta: (shipTo.city || shipTo.citta || '').toString().trim(),   // CAP condivisi tra più comuni
   })
   if (!ris) return NextResponse.json({ error: 'Nessuna tariffa disponibile per questa destinazione/peso' }, { status: 400 })
 

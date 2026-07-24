@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
     nProcessate++
     // Ricerca SENZA filtro master: decide la catena (solo discesa)
     const { data: spedizione } = await adminDb.from('spedizioni')
-      .select('id,cliente_id,master_id,peso_reale,peso_fatturato,peso_volume,costo_totale,costo_spedizione,numero,dest_provincia,dest_cap,dest_paese,corriere_id,stato')
+      .select('id,cliente_id,master_id,peso_reale,peso_fatturato,peso_volume,costo_totale,costo_spedizione,numero,dest_provincia,dest_cap,dest_paese,dest_citta,corriere_id,stato')
       .or(`numero.ilike.%${ldv}%,tracking_number.ilike.%${ldv}%`)
       .limit(1).single()
     if (!spedizione) { nScartati++; continue }
@@ -128,12 +128,12 @@ export async function POST(req: NextRequest) {
       const pesoRicalcolo = pesoReale || pesoIniziale
       const prezzoIni = await calcolaPrezzoListino(adminDb, {
         listinoId: tm.parent_listino_id, provincia: spedizione.dest_provincia || '',
-        cap: spedizione.dest_cap || '', paese: spedizione.dest_paese || 'IT',
+        cap: spedizione.dest_cap || '', paese: spedizione.dest_paese || 'IT', citta: spedizione.dest_citta || '',
         packages: [{ weight: pesoIniziale || 1 }], corriereId: spedizione.corriere_id,
       })
       const prezzoFin = await calcolaPrezzoListino(adminDb, {
         listinoId: tm.parent_listino_id, provincia: spedizione.dest_provincia || '',
-        cap: spedizione.dest_cap || '', paese: spedizione.dest_paese || 'IT',
+        cap: spedizione.dest_cap || '', paese: spedizione.dest_paese || 'IT', citta: spedizione.dest_citta || '',
         packages: [{ weight: pesoRicalcolo }], corriereId: spedizione.corriere_id,
       })
       if (!prezzoIni || !prezzoFin) { nScartati++; continue }

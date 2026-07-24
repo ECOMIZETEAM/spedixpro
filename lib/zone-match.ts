@@ -14,6 +14,24 @@
 
 export type DestZona = { paese?: string; provincia?: string; cap?: string; citta?: string }
 
+// CITTÀ-AWARE (CAP condivisi): alcuni CAP coprono più comuni con trattamento diverso
+// (es. 25050 = Rodengo Saiano NORMALE e Monte Isola ISOLA; 65010 = Spoltore NORMALE e
+// Civitella Casanova DISAGIATA). Le righe cap-esatto con una città SPECIFICA valgono SOLO
+// per quel comune: se la destinazione ha una città, scarto le righe cap-esatto di un comune
+// DIVERSO, così il CAP non aggancia la zona speciale sbagliata. (Senza città o senza
+// righe-con-città: righe invariate.) Condiviso col matching batch di lib/pricing.
+export function filtraCapCondiviso(righe: any[], cap: string, citta?: string | null): any[] {
+  const nrm = (s: any) => (s || '').toString().toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9]/g, '')
+  const dCitta = nrm(citta)
+  if (!dCitta) return righe
+  const capExactConCitta = righe.some((r: any) => r.cap && r.cap !== '*' && r.cap === cap && r.citta && r.citta !== '*')
+  if (!capExactConCitta) return righe
+  return righe.filter((r: any) => {
+    const isCapExactSpecifica = r.cap && r.cap !== '*' && r.cap === cap && r.citta && r.citta !== '*'
+    return !isCapExactSpecifica || nrm(r.citta) === dCitta   // tieni se non è cap-esatto-specifica, o se la città combacia
+  })
+}
+
 // Versione dettagliata: ritorna le zone matchate e se il CAP appartiene (cap-esatto) a una
 // ZONA ESCLUSIVA (es. "Isole Minori"). Quando `capEsclusivo` e' true il jolly "resto Italia"
 // NON copre il CAP: un corriere che avrebbe agganciato solo via jolly resta ESCLUSO (non ha
@@ -54,20 +72,7 @@ export async function trovaZoneMatchDett(
     .in('cap', capFilter)
   let righe = zc || []
 
-  // CITTÀ-AWARE (CAP condivisi): alcuni CAP coprono più comuni con trattamento diverso
-  // (es. 25050 = Rodengo Saiano NORMALE e Monte Isola ISOLA; SpediamoPro distingue per città).
-  // Le righe cap-esatto con una città SPECIFICA valgono SOLO per quel comune: se la destinazione
-  // ha una città, scarto le righe cap-esatto di un comune DIVERSO, così il CAP non aggancia la
-  // zona speciale sbagliata. (Senza città o senza righe-con-città: comportamento invariato.)
-  const nrm = (s: any) => (s || '').toString().toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9]/g, '')
-  const dCitta = nrm((dest as any).citta)
-  const capExactConCitta = righe.some((r: any) => r.cap && r.cap !== '*' && r.cap === cap && r.citta && r.citta !== '*')
-  if (dCitta && capExactConCitta) {
-    righe = righe.filter((r: any) => {
-      const isCapExactSpecifica = r.cap && r.cap !== '*' && r.cap === cap && r.citta && r.citta !== '*'
-      return !isCapExactSpecifica || nrm(r.citta) === dCitta   // tieni se non è cap-esatto-specifica, o se la città combacia
-    })
-  }
+  righe = filtraCapCondiviso(righe, cap, (dest as any).citta)
 
   // Esclusione PER-CORRIERE: la destinazione è "esclusiva" per un corriere SOLO se appartiene a
   // una zona esclusiva DI QUEL corriere (Isole/Disagiate/Livigno per CAP-ESATTO; Sardegna/Sicilia/

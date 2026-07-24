@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
 
   const spedIds = Array.from(new Set(rett.map((r: any) => r.spedizione_id).filter(Boolean)))
   const { data: speds } = await admin.from('spedizioni')
-    .select('id,peso_reale,peso_volume,lunghezza,larghezza,altezza,dest_provincia,dest_cap,dest_paese,corriere_id')
+    .select('id,peso_reale,peso_volume,lunghezza,larghezza,altezza,dest_provincia,dest_cap,dest_paese,dest_citta,corriere_id')
     .in('id', spedIds)
   const spedById = new Map<string, any>()
   ;(speds || []).forEach((s: any) => spedById.set(s.id, s))
@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
 
     let cliOrig = 0, cliCorr = 0
     if (listinoId) {
-      const base = { listinoId, provincia: s.dest_provincia || '', cap: s.dest_cap || '', paese: s.dest_paese || 'IT', corriereId: s.corriere_id }
+      const base = { listinoId, provincia: s.dest_provincia || '', cap: s.dest_cap || '', paese: s.dest_paese || 'IT', citta: s.dest_citta || '', corriereId: s.corriere_id }
       cliOrig = (await calcolaPrezzoListino(admin, { ...base, packages: pkg(pesoOrig) }))?.prezzo || 0
       cliCorr = (await calcolaPrezzoListino(admin, { ...base, packages: pkg(pesoCorr) }))?.prezzo || 0
     }

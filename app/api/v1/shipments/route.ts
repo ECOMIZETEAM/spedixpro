@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
     provincia: (body.shipTo.state || '').toUpperCase().trim(),
     cap: (body.shipTo.postalCode || '').toString().trim(),
     paese: (body.shipTo.country || 'IT').toUpperCase().trim(),
+    citta: (body.shipTo.city || '').toString().trim(),   // CAP condivisi tra più comuni
     packages, corriereId: ctx.corriereId,
   })
   if (!ris) return NextResponse.json({ error: 'Destinazione non coperta dal listino per questo contratto (zona non prezzata): spedizione non creabile con questo corriere.' }, { status: 400 })

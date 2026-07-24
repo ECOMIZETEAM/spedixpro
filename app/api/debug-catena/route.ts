@@ -14,6 +14,7 @@ export async function GET(req: NextRequest) {
   const provincia = p.get('provincia') || 'RM'
   const cap = p.get('cap') || ''
   const paese = p.get('paese') || 'IT'
+  const citta = p.get('citta') || ''
   const peso = parseFloat(p.get('peso') || '1')
   const corriereId = p.get('corriere') || ''
   const masterDiretto = p.get('master') || '0ac48b7e-f6b6-49fa-9929-bb9e31750c81' // MASSIMO
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest) {
   out.masterDirettoRec = mm || null
 
   if (mm?.parent_listino_id) {
-    out.prezzoListinoParent = await calcolaPrezzoListino(supabase, { listinoId: mm.parent_listino_id, provincia, cap, paese, packages })
+    out.prezzoListinoParent = await calcolaPrezzoListino(supabase, { listinoId: mm.parent_listino_id, provincia, cap, paese, citta, packages })
   }
 
   if (corriereOwnerId) {

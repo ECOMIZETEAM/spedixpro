@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
 
   // Spedizioni dei suoi clienti nel periodo (escluse le annullate).
   const speds = await fetchAll(() => supabase.from('spedizioni')
-    .select('id,cliente_id,corriere_id,lunghezza,larghezza,altezza,peso_reale,dest_provincia,dest_cap,dest_paese,contrassegno,assicurazione,costo_totale,costo_spedizione,stato,created_at')
+    .select('id,cliente_id,corriere_id,lunghezza,larghezza,altezza,peso_reale,dest_provincia,dest_cap,dest_paese,dest_citta,contrassegno,assicurazione,costo_totale,costo_spedizione,stato,created_at')
     .in('cliente_id', clienteIds)
     .gte('created_at', dal).lte('created_at', alEnd)
     .not('stato', 'in', '(annullata)')

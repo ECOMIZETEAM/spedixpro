@@ -234,6 +234,7 @@ export async function POST(req: NextRequest) {
     const risCli = await calcolaPrezzoListino(adminCrea, {
       listinoId: cliente.listino_cliente_id, corriereId: corriereRecord.id,
       provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+      citta: body.shipTo.city,   // CAP condivisi (es. 65010 Spoltore/Civitella Casanova): senza città il gate vedeva disagiata anche per il comune normale
       packages,
     })
     if (!risCli || risCli.corriere_id !== corriereRecord.id) {

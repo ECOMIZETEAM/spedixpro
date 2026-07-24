@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   if (!ids.length) return NextResponse.json({ error: 'Nessuna LDV nel reso' }, { status: 400 })
 
   const { data: speds } = await admin.from('spedizioni')
-    .select('id,numero,master_id,cliente_id,dest_provincia,dest_cap,dest_paese,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id,costo_totale')
+    .select('id,numero,master_id,cliente_id,dest_provincia,dest_cap,dest_paese,dest_citta,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id,costo_totale')
     .in('id', ids)
 
   // prima linea per ogni discendente
@@ -96,6 +96,7 @@ export async function POST(req: NextRequest) {
           : [{ weight: s.peso_reale || 1, length: s.lunghezza, width: s.larghezza, height: s.altezza }]
         const ris = await calcolaPrezzoListino(admin, {
           listinoId: cli.listino_cliente_id, provincia: s.dest_provincia || '', cap: s.dest_cap || '', paese: s.dest_paese || 'IT',
+          citta: s.dest_citta || '',   // CAP condivisi tra più comuni
           packages, corriereId: s.corriere_id,
         })
         costoReso = ris?.prezzo || 0

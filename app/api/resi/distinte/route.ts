@@ -93,7 +93,7 @@ export async function POST(req: NextRequest) {
   for (const v of (voci || [])) {
     await supabase.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
     const { data: sp } = await supabase.from('spedizioni')
-      .select('costo_totale,dest_provincia,dest_cap,dest_paese,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id,giacenza_reso_addebitato')
+      .select('costo_totale,dest_provincia,dest_cap,dest_paese,dest_citta,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id,giacenza_reso_addebitato')
       .eq('id', v.id).single()
 
     // Se il reso è GIÀ stato addebitato in fase di svincolo giacenza, NON riaddebitare (resta in
@@ -109,6 +109,7 @@ export async function POST(req: NextRequest) {
       const ris = await calcolaPrezzoListino(adminDb, {
         listinoId: cliRec.listino_cliente_id,
         provincia: sp?.dest_provincia || '', cap: sp?.dest_cap || '', paese: sp?.dest_paese || 'IT',
+        citta: sp?.dest_citta || '',   // CAP condivisi tra più comuni
         packages, corriereId: sp?.corriere_id,
       })
       costoReso = ris?.prezzo || 0

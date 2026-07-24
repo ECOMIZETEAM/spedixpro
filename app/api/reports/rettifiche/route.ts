@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
 
   // Dati originali delle spedizioni (peso cliente, misure, destinazione, corriere)
   let sq = db.from('spedizioni')
-    .select('id,numero,peso_reale,peso_volume,lunghezza,larghezza,altezza,dest_provincia,dest_cap,dest_paese,corriere_id,created_at,corrieri(nome_contratto)')
+    .select('id,numero,peso_reale,peso_volume,lunghezza,larghezza,altezza,dest_provincia,dest_cap,dest_paese,dest_citta,corriere_id,created_at,corrieri(nome_contratto)')
     .in('id', spedIds)
   if (dal) sq = sq.gte('created_at', dal)
   if (al) sq = sq.lte('created_at', al + 'T23:59:59')
@@ -92,7 +92,7 @@ export async function GET(req: NextRequest) {
 
     let costoIniziale = 0, costoFinale = 0
     if (listinoId) {
-      const base = { listinoId, provincia: s.dest_provincia || '', cap: s.dest_cap || '', paese: s.dest_paese || 'IT', corriereId: s.corriere_id }
+      const base = { listinoId, provincia: s.dest_provincia || '', cap: s.dest_cap || '', paese: s.dest_paese || 'IT', citta: s.dest_citta || '', corriereId: s.corriere_id }
       const pIni = await calcolaPrezzoListino(db, { ...base, packages: [{ weight: pesoCliente || 1, ...pkgBase }] })
       const pFin = await calcolaPrezzoListino(db, { ...base, packages: [{ weight: pesoCorriere || pesoCliente || 1, ...pkgBase }] })
       costoIniziale = pIni?.prezzo || 0

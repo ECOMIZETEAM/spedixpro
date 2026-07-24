@@ -9,7 +9,7 @@
 // Usato dal ledger a cascata (STEP 4.5) per sapere quanto paga ogni master
 // della catena col proprio listino ereditato.
 
-import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
+import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster, filtraCapCondiviso } from '@/lib/zone-match'
 import { fetchAll } from '@/lib/fetch-all'
 
 const ZONE_MAP: Record<string, string> = {
@@ -132,6 +132,7 @@ export async function calcolaPrezzoListino(
     corriereId?: string | null
     cap?: string
     paese?: string
+    citta?: string   // città destinazione: distingue i CAP condivisi tra più comuni (zona disagiata vs Italia)
   }
 ): Promise<RisultatoPrezzo> {
   const { listinoId, provincia } = params
@@ -293,6 +294,7 @@ export async function calcolaPrezzoCorriereDettaglio(
     assicurazione?: number
     cap?: string
     paese?: string
+    citta?: string   // città destinazione: distingue i CAP condivisi tra più comuni (zona disagiata vs Italia)
   }
 ): Promise<DettaglioCorriere | null> {
   const { corriereId, masterId, provincia } = params
@@ -587,7 +589,7 @@ export async function creaCalcolatoreCorriere(
 
   const zonaIds = Array.from(new Set((fasce || []).map((f: any) => f.zone?.id).filter(Boolean)))
   const zc: any[] = zonaIds.length
-    ? await fetchAll(() => supabase.from('zone_cap').select('zona_id,paese,provincia,cap').in('zona_id', zonaIds))
+    ? await fetchAll(() => supabase.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', zonaIds))
     : []
   const zcByPaese = new Map<string, any[]>()
   for (const r of zc || []) {
@@ -596,8 +598,9 @@ export async function creaCalcolatoreCorriere(
     zcByPaese.get(k)!.push(r)
   }
 
-  function matchZona(paese: string, provincia: string, cap: string, cand: string[]): string[] {
-    const rows = (zcByPaese.get((paese || 'IT').toUpperCase()) || []).filter((r: any) => cand.includes(r.zona_id))
+  function matchZona(paese: string, provincia: string, cap: string, cand: string[], citta?: string): string[] {
+    let rows = (zcByPaese.get((paese || 'IT').toUpperCase()) || []).filter((r: any) => cand.includes(r.zona_id))
+    rows = filtraCapCondiviso(rows, cap, citta)   // CAP condivisi: la riga di un ALTRO comune non aggancia
     let m = rows.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap)
     if (!m.length) m = rows.filter((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*'))
     if (!m.length) m = rows.filter((r: any) => (!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*'))
@@ -619,7 +622,7 @@ export async function creaCalcolatoreCorriere(
     const cap = (s.dest_cap || '').trim()
     const paese = (s.dest_paese || 'IT').toUpperCase().trim()
     const cand = fasceList.map((f: any) => f.zone?.id).filter(Boolean)
-    const ids = matchZona(paese, provincia, cap, cand)
+    const ids = matchZona(paese, provincia, cap, cand, s.dest_citta)
     const zonaNome = zonaDaProvincia(provincia)
     let fz = ids.length ? fasceList.filter((f: any) => ids.includes(f.zone?.id)) : []
     // Per l'ESTERO niente fallback su Italia.
@@ -722,7 +725,7 @@ export async function creaCalcolatoreListinoCliente(
 
   const zonaIds = Array.from(new Set((fasce || []).map((f: any) => f.zone?.id).filter(Boolean)))
   const zc: any[] = zonaIds.length
-    ? await fetchAll(() => supabase.from('zone_cap').select('zona_id,paese,provincia,cap').in('zona_id', zonaIds))
+    ? await fetchAll(() => supabase.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', zonaIds))
     : []
   const zcByPaese = new Map<string, any[]>()
   for (const r of zc || []) {
@@ -730,8 +733,9 @@ export async function creaCalcolatoreListinoCliente(
     if (!zcByPaese.has(k)) zcByPaese.set(k, [])
     zcByPaese.get(k)!.push(r)
   }
-  function matchZona(paese: string, provincia: string, cap: string, cand: string[]): string[] {
-    const rows = (zcByPaese.get((paese || 'IT').toUpperCase()) || []).filter((r: any) => cand.includes(r.zona_id))
+  function matchZona(paese: string, provincia: string, cap: string, cand: string[], citta?: string): string[] {
+    let rows = (zcByPaese.get((paese || 'IT').toUpperCase()) || []).filter((r: any) => cand.includes(r.zona_id))
+    rows = filtraCapCondiviso(rows, cap, citta)   // CAP condivisi: la riga di un ALTRO comune non aggancia
     let m = rows.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap)
     if (!m.length) m = rows.filter((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*'))
     if (!m.length) m = rows.filter((r: any) => (!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*'))
@@ -765,7 +769,7 @@ export async function creaCalcolatoreListinoCliente(
     const cap = (s.dest_cap || '').trim()
     const paese = (s.dest_paese || 'IT').toUpperCase().trim()
     const cand = fasceList.map((f: any) => f.zone?.id).filter(Boolean)
-    const ids = matchZona(paese, provincia, cap, cand)
+    const ids = matchZona(paese, provincia, cap, cand, s.dest_citta)
     const zonaNome = zonaDaProvincia(provincia)
     let fz = ids.length ? fasceList.filter((f: any) => ids.includes(f.zone?.id)) : []
     // Per l'ESTERO niente fallback su Italia.
