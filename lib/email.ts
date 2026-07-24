@@ -1,7 +1,10 @@
 import { Resend } from 'resend'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
-const FROM = process.env.EMAIL_FROM || 'MoovExpress <onboarding@resend.dev>'
+// Mittente con NOME VISIBILE: se la env contiene solo l'indirizzo (noreply@...), Gmail mostrava
+// "noreply" come nome — qui garantiamo sempre "MoovExpress <indirizzo>".
+const FROM_RAW = process.env.EMAIL_FROM || 'MoovExpress <onboarding@resend.dev>'
+const FROM = FROM_RAW.includes('<') ? FROM_RAW : `MoovExpress <${FROM_RAW}>`
 
 // Intestazione/footer comuni MoovExpress
 function wrap(inner: string): string {
