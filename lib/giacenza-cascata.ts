@@ -84,7 +84,10 @@ export async function addebitaGiacenzaCatena(
           })
         } catch (e) { console.error(`Errore apertura giacenza cascata master ${m.id}:`, e) }
       }
-      if (conServizio && pr.servizio > 0) {
+      // TRACCIABILITA': la voce si scrive ANCHE a importo 0. Se il livello non ha un prezzo per
+      // quell'operazione non paga nulla, ma l'operazione DEVE restare visibile nei suoi movimenti:
+      // prima spariva del tutto e sembrava che la riconsegna non fosse mai passata da lui.
+      if (conServizio) {
         try {
           await registraMovimentoMaster(admin, {
             masterOwnerId: m.id, masterTargetId: m.id, tipo: 'giacenza',

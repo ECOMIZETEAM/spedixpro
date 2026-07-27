@@ -23,6 +23,8 @@ export default function ClienteProfiloPage() {
   const [movimenti, setMovimenti] = useState<any[]>([])
   const [paginaMov, setPaginaMov] = useState(1)
   const [cercaMov, setCercaMov] = useState('')
+  const [totMov, setTotMov] = useState(0)
+  // Ricerca col respiro: 400ms dopo l'ultimo tasto si richiede al SERVER (tutto lo storico).
   const perPaginaMov = 10
   const [saldo, setSaldo] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -39,12 +41,22 @@ export default function ClienteProfiloPage() {
   function caricaCliente() {
     fetch(`/api/clienti/${id}`).then(r => r.json()).then(d => { setCliente(d); setLoading(false) })
   }
-  function caricaMovimenti() {
-    // dettaglio: ultimi 100 (lo storico completo e' nel portale del cliente)
-    fetch(`/api/movimenti/lista?clienteId=${id}&page=1&perPage=100`).then(r => r.json()).then(d => {
-      if (d && !d.error) { setMovimenti(d.movimenti || []); setSaldo(Number(d.saldo || 0)) }
+  function caricaMovimenti(q?: string) {
+    // La RICERCA va fatta dal SERVER su TUTTO lo storico: la scheda carica solo le ultime 100 righe
+    // e cercare una LDV piu' vecchia restituiva "nessun movimento", facendo credere che l'addebito
+    // non fosse mai stato fatto. Senza ricerca resta il caricamento leggero delle ultime 100.
+    const p = new URLSearchParams({ clienteId: String(id), page: '1', perPage: q ? '200' : '100' })
+    if (q) p.set('cerca', q)
+    fetch(`/api/movimenti/lista?${p.toString()}`).then(r => r.json()).then(d => {
+      if (d && !d.error) { setMovimenti(d.movimenti || []); setSaldo(Number(d.saldo || 0)); setTotMov(Number(d.total || 0)) }
     })
   }
+
+  useEffect(() => {
+    const t = setTimeout(() => { setPaginaMov(1); caricaMovimenti(cercaMov.trim() || undefined) }, 400)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cercaMov])
 
   useEffect(() => {
     caricaCliente()
@@ -102,7 +114,7 @@ export default function ClienteProfiloPage() {
   const creditoView = Number(cliente.credito ?? saldo ?? 0)
 
   const movimentiFiltrati = cercaMov
-    ? movimenti.filter((m:any) => (m.descrizione||'').toLowerCase().includes(cercaMov.toLowerCase()) || (m.riferimento||'').toLowerCase().includes(cercaMov.toLowerCase()))
+    ? movimenti   // gia' filtrati dal server su TUTTO lo storico
     : movimenti
   const totPagineMov = Math.max(1, Math.ceil(movimentiFiltrati.length / perPaginaMov))
   const paginaCorrMov = Math.min(paginaMov, totPagineMov)
