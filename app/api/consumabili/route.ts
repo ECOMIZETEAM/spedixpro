@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { registraMovimento } from '@/lib/movimenti'
 import { eDiscendente } from '@/lib/rete-masters'
 import { fetchAll } from '@/lib/fetch-all'
+import { isAgente } from '@/lib/agente'
 
 // Le SPESE (quello che questa pagina chiama "consumabili"): tutto ciò che viene addebitato
 // fuori dalla spedizione. Restano fuori spedizioni, ricariche e abbonamenti, che hanno
@@ -55,7 +56,10 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
+  // Ogni riga porta il credito residuo: l'agente non vede credito/movimenti (come in Lista
+  // Movimenti). Prima non serviva il controllo solo perché la tabella letta era vuota.
+  if (isAgente(utente as any)) return NextResponse.json([])
   const clienteIdRaw = req.nextUrl.searchParams.get('clienteId')
   const dal = req.nextUrl.searchParams.get('dal')
   const al = req.nextUrl.searchParams.get('al')
