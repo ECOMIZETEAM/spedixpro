@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente, isAgente, clientiAgente } from '@/lib/agente'
 
+// Assegnazione listino a un cliente/sotto-master: puo' innescare la propagazione a cascata.
+export const maxDuration = 300
+export const dynamic = 'force-dynamic'
+
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const supabase = await createServerSupabase()

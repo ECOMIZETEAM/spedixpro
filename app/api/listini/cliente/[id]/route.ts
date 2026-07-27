@@ -1,6 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
+
+// La propagazione a cascata tocca decine di sotto-master: col default (15s) la funzione veniva
+// TRONCATA a meta' -> propagazione parziale e prezzi disallineati a valle, in silenzio.
+export const maxDuration = 300
+export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{id:string}> }) {
   const supabase = await createServerSupabase()
@@ -144,18 +149,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
     }
   }
 
-  // PROPAGAZIONE A CASCATA: appena salvo, aggiorno il Listino Corrieri dei sotto-master che
-  // hanno ereditato questo listino (parent_listino_id) — prezzi, supplementi, peso/volume — e
-  // così via lungo tutta la rete sottostante.
-  let propagati = 0
-  try {
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const { propagaListinoACascata } = await import('@/lib/copia-listino-submaster')
-    const admin = createAdminSupabase()
-    propagati = await propagaListinoACascata(admin, id)
-  } catch (e) { console.error('Propagazione listino ai sotto-master:', e) }
+  // PROPAGAZIONE A CASCATA IN BACKGROUND: aggiorna il Listino Corrieri dei sotto-master che hanno
+  // ereditato questo listino (parent_listino_id) e cosi' via lungo tutta la rete. Su reti profonde
+  // tocca decine di master: tenerla DENTRO la risposta faceva aspettare l'utente anche mezzo minuto
+  // dopo il clic su Salva. Il listino e' gia' scritto qui sopra (il salvataggio e' completo e
+  // atomico dal punto di vista dell'utente); la cascata prosegue con after() e finisce da sola.
+  after(async () => {
+    try {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const { propagaListinoACascata } = await import('@/lib/copia-listino-submaster')
+      const t0 = Date.now()
+      const n = await propagaListinoACascata(createAdminSupabase(), id)
+      console.log(`[LISTINO][PROPAGA] listino ${id} -> ${n} sotto-master in ${Date.now() - t0}ms`)
+    } catch (e) { console.error('Propagazione listino ai sotto-master:', e) }
+  })
 
-  return NextResponse.json({ ok: true, propagati })
+  return NextResponse.json({ ok: true, propagazione: 'in corso' })
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{id:string}> }) {

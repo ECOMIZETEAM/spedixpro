@@ -121,14 +121,43 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   //    resta solo sul padre. (Era il bug: i CAP si copiavano solo alla PRIMA creazione della zona,
   //    quindi le aggiunte successive non scendevano -> a valle si prezzava la zona sbagliata.)
   const { data: zoneSrc } = zonaIds.length ? await admin.from('zone').select('id,nome,descrizione,con_fuel,corriere_id').in('id', zonaIds) : { data: [] }
-  // CAP del padre per zona, caricati a parte (l'embed annidato si fermerebbe a 1000 righe).
+  // CAP del padre: UNA query per TUTTE le zone (prima era una query PER ZONA: con 78 zone erano 78
+  // round-trip solo per leggere). L'embed annidato non si usa perche' si fermerebbe a 1000 righe.
   const capSrcPerZona = new Map<string, any[]>()
-  for (const z of (zoneSrc || [])) {
-    capSrcPerZona.set(z.id, await fetchAll(() => admin.from('zone_cap').select('paese,provincia,cap,citta').eq('zona_id', z.id)))
+  {
+    const tutti = zonaIds.length
+      ? await fetchAll(() => admin.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', zonaIds).order('id', { ascending: true }))
+      : []
+    for (const r of tutti) {
+      const k = (r as any).zona_id
+      if (!capSrcPerZona.has(k)) capSrcPerZona.set(k, [])
+      capSrcPerZona.get(k)!.push(r)
+    }
   }
   const { data: zoneMiei } = await admin.from('zone').select('id,nome,corriere_id').eq('master_id', subMasterId)
   const mappaZonaMio = new Map((zoneMiei || []).map((z: any) => [`${z.corriere_id}|${(z.nome || '').trim().toLowerCase()}`, z.id]))
+  // CAP GIA' PRESENTI sul sotto-master: servono a capire se c'e' davvero qualcosa da cambiare.
+  // Prima si cancellava e reinseriva SEMPRE tutto (58.836 righe riscritte a ogni salvataggio,
+  // anche senza modifiche): era la causa principale della lentezza.
+  const capMieiPerZona = new Map<string, any[]>()
+  {
+    const idsMiei = (zoneMiei || []).map((z: any) => z.id)
+    const tutti = idsMiei.length
+      ? await fetchAll(() => admin.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', idsMiei).order('id', { ascending: true }))
+      : []
+    for (const r of tutti) {
+      const k = (r as any).zona_id
+      if (!capMieiPerZona.has(k)) capMieiPerZona.set(k, [])
+      capMieiPerZona.get(k)!.push(r)
+    }
+  }
+  // Impronta di un insieme di CAP: uguale impronta = niente da riscrivere.
+  const impronta = (caps: any[]) => caps
+    .map((c: any) => `${c.paese || ''}|${c.provincia || ''}|${c.cap || ''}|${c.citta || ''}`)
+    .sort().join('\n')
+
   const mapZona = new Map<string, string>()
+  const lavoriCap: Array<() => Promise<void>> = []
   for (const z of (zoneSrc || [])) {
     const subCorr = mapCorr.get(z.corriere_id) || null
     const key = `${subCorr}|${(z.nome || '').trim().toLowerCase()}`
@@ -139,15 +168,22 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
       if (subZid) mappaZonaMio.set(key, subZid)
     }
     if (subZid) {
-      // Sincronizza i CAP col padre (propagazione): azzero e reinserisco quelli attuali del padre.
+      const zid = subZid
       const caps = capSrcPerZona.get(z.id) || []
-      await admin.from('zone_cap').delete().eq('zona_id', subZid)
-      for (let i = 0; i < caps.length; i += 1000) {
-        await admin.from('zone_cap').insert(caps.slice(i, i + 1000).map((cp: any) => ({ zona_id: subZid, paese: cp.paese, provincia: cp.provincia, cap: cp.cap, citta: cp.citta })))
+      // SOLO SE DIVERSI: a regime (nessuna modifica ai CAP) qui non parte alcuna scrittura.
+      if (impronta(caps) !== impronta(capMieiPerZona.get(zid) || [])) {
+        lavoriCap.push(async () => {
+          await admin.from('zone_cap').delete().eq('zona_id', zid)
+          for (let i = 0; i < caps.length; i += 1000) {
+            await admin.from('zone_cap').insert(caps.slice(i, i + 1000).map((cp: any) => ({ zona_id: zid, paese: cp.paese, provincia: cp.provincia, cap: cp.cap, citta: cp.citta })))
+          }
+        })
       }
-      mapZona.set(z.id, subZid)
+      mapZona.set(z.id, zid)
     }
   }
+  // Le zone da riallineare si lavorano a gruppi in PARALLELO (prima una alla volta).
+  for (let i = 0; i < lavoriCap.length; i += 6) await Promise.all(lavoriCap.slice(i, i + 6).map(fn => fn()))
 
   // 3) LISTINO CORRIERI del sotto-master (riuso il primo, altrimenti creo)
   // listini_corrieri.corriere_id è NOT NULL: uso il primo corriere mappato.
@@ -191,16 +227,27 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   const linkSet = new Set((linkEsist || []).map((l: any) => l.corriere_id))
   const nuoviLink = subCorrIds.filter((cid) => !linkSet.has(cid)).map((cid) => ({ listino_id: subListinoId, corriere_id: cid, fattore_volume: fattoreSub(cid) }))
   if (nuoviLink.length) await admin.from('listini_corrieri_corrieri').insert(nuoviLink)
-  // Allineo il fattore anche sui link GIÀ esistenti (fix dei dati in essere sui sotto-master)
-  for (const cid of subCorrIds) {
-    if (linkSet.has(cid)) await admin.from('listini_corrieri_corrieri').update({ fattore_volume: fattoreSub(cid) }).eq('listino_id', subListinoId).eq('corriere_id', cid)
-  }
-  // Allineo anche le righe listini_corrieri PER-CORRIERE = la FONTE del calcolo prezzo (billing):
-  // ogni corriere del sotto-master eredita il fattore volume assegnato dal padre (no default 5000).
+  // Allineo il fattore anche sui link GIÀ esistenti (fix dei dati in essere sui sotto-master) e le
+  // righe listini_corrieri PER-CORRIERE = la FONTE del calcolo prezzo (billing): ogni corriere del
+  // sotto-master eredita il fattore volume assegnato dal padre (no default 5000).
+  // I corrieri con lo STESSO fattore si aggiornano in UNA query (prima: una query per corriere,
+  // con 121 contratti in cascata erano centinaia di round-trip inutili).
   const soloPesoR = !!listinoSrc?.solo_peso_reale
+  const perFattore = new Map<number, string[]>()
   for (const cid of subCorrIds) {
-    await admin.from('listini_corrieri').update({ fattore_volume: fattoreSub(cid), solo_peso_reale: soloPesoR }).eq('master_id', subMasterId).eq('corriere_id', cid)
+    const f = fattoreSub(cid)
+    if (!perFattore.has(f)) perFattore.set(f, [])
+    perFattore.get(f)!.push(cid)
   }
+  await Promise.all(Array.from(perFattore.entries()).flatMap(([f, cids]) => {
+    const daAggiornare = cids.filter((cid) => linkSet.has(cid))
+    return [
+      daAggiornare.length
+        ? admin.from('listini_corrieri_corrieri').update({ fattore_volume: f }).eq('listino_id', subListinoId).in('corriere_id', daAggiornare)
+        : Promise.resolve(),
+      admin.from('listini_corrieri').update({ fattore_volume: f, solo_peso_reale: soloPesoR }).eq('master_id', subMasterId).in('corriere_id', cids),
+    ]
+  }))
 
   // 5) FASCE — IDEMPOTENTE: prima ripulisco le fasce dei corrieri ereditati su QUESTO listino, poi
   //    reinserisco. Senza, ogni ri-sync (non-force) accumulava DUPLICATI (stesso listino/corriere/zona).

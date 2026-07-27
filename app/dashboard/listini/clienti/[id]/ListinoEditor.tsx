@@ -274,7 +274,10 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       const prop = Number(data.propagati || 0)
       // Salva il banner e ricarica: la pagina torna coi dati salvati e mostra la conferma in alto
       try { sessionStorage.removeItem(bozzaKey) } catch {}   // salvato -> la bozza non serve più
-      setFlash(prop > 0 ? `✓ Listino salvato e propagato a ${prop} master collegati` : '✓ Listino salvato!')
+      // La propagazione ai sotto-master ora prosegue in background (il salvataggio e' immediato).
+      setFlash(data.propagazione === 'in corso'
+        ? '✓ Listino salvato! I master collegati vengono aggiornati in automatico entro pochi istanti.'
+        : (prop > 0 ? `✓ Listino salvato e propagato a ${prop} master collegati` : '✓ Listino salvato!'))
       window.location.reload()
     } catch { setMsg('Errore di rete'); setSaving(false) }
   }
