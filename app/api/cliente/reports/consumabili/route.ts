@@ -14,21 +14,28 @@ export async function GET(req: NextRequest) {
     .eq('id', masterId).single()
   const p = req.nextUrl.searchParams
   const dal = p.get('dal'); const al = p.get('al')
-  let query = supabase.from('movimenti_clienti')
-    .select('descrizione,prezzo_unitario,quantita,importo,iva,totale_iva,totale,data_acquisto,created_at')
+  // Le spese del cliente stanno in 'movimenti' (giacenze, resi, rettifiche/consumabili).
+  // Prima si leggeva 'movimenti_clienti', un registro parallelo mai popolato: il report
+  // usciva sempre a zero anche con gli addebiti realmente effettuati.
+  let query = supabase.from('movimenti')
+    .select('descrizione,importo,created_at')
     .eq('cliente_id', clienteId)
-    .order('data_acquisto', { ascending: true })
-  if (dal) query = query.gte('data_acquisto', dal)
-  if (al) query = query.lte('data_acquisto', al)
+    .in('tipo', ['rettifica', 'giacenza', 'reso'])
+    .order('created_at', { ascending: true })
+  if (dal) query = query.gte('created_at', dal)
+  if (al) query = query.lte('created_at', al + 'T23:59:59')
   const { data: mov } = await query
-  const righe = (mov || []).map(m => ({
-    descrizione: m.descrizione || '',
-    quantita: Number(m.quantita || 0),
-    costoUnita: Number(m.prezzo_unitario || 0),
-    costoTotale: Number(m.importo || (Number(m.prezzo_unitario||0) * Number(m.quantita||0))),
-    iva: Number(m.iva || 0),
-    data: m.data_acquisto || m.created_at,
-    totaleIvaInc: Number(m.totale || 0),
-  }))
+  const righe = (mov || []).map(m => {
+    const importo = Math.abs(Number(m.importo || 0))
+    return {
+      descrizione: m.descrizione || '',
+      quantita: 1,
+      costoUnita: importo,
+      costoTotale: importo,
+      iva: 0,
+      data: (m.created_at || '').split('T')[0],
+      totaleIvaInc: importo,
+    }
+  })
   return NextResponse.json({ righe, master: master || {}, cliente: { ragione_sociale: cliente?.ragione_sociale || '' } })
 }

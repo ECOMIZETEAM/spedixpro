@@ -57,6 +57,21 @@ export async function sottoAlberoMasterIds(adminDb: any, rootId: string): Promis
   return ids
 }
 
+// true se `targetId` sta SOTTO `masterId` nella catena (figlio diretto o più in basso).
+// Risale dal target: poche letture anche su reti profonde. Usato per autorizzare la lettura
+// dei dati di un sotto-master: limitarsi ai figli DIRETTI faceva tornare liste vuote, senza
+// spiegazione, a chi guarda da un nodo alto della rete.
+export async function eDiscendente(adminDb: any, targetId?: string | null, masterId?: string | null): Promise<boolean> {
+  if (!targetId || !masterId) return false
+  let cur: string | null = targetId
+  for (let i = 0; i < 20 && cur; i++) {
+    const { data: m }: { data: any } = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+    cur = m?.parent_master_id || null
+    if (cur === masterId) return true
+  }
+  return false
+}
+
 // Un Listino Corrieri è in SOLA LETTURA per il master se è un rivenditore PURO: ha un listino
 // assegnato dal padre (parent_listino_id) E tutti i suoi contratti sono già posseduti da un
 // antenato (li rivende soltanto). Se invece possiede almeno un contratto ORIGINALE (nome_contratto

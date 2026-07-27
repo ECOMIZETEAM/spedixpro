@@ -108,7 +108,8 @@ export async function GET(req: NextRequest) {
         cur = pm?.parent_master_id || null
       }
       if (!sub || !autorizzato) {
-        return NextResponse.json({ error: 'Sotto-master non trovato o non autorizzato' }, { status: 403 })
+        console.warn('[MOVIMENTI][403] sotto-master', { viewer: utente?.master_id, ruolo: utente?.ruolo, targetId })
+        return NextResponse.json({ error: `I movimenti di ${sub?.nome || 'questo master'} sono visibili solo a chi lo ha nella propria rete.` }, { status: 403 })
       }
       const { movimenti, total, somma } = await carica(admin, 'master_target_id', targetId)
       return NextResponse.json({ movimenti, total, somma, page: page || undefined, perPage, saldo: Number(sub.credito || 0), cliente: sub.nome || null })
@@ -134,7 +135,16 @@ export async function GET(req: NextRequest) {
           return NextResponse.json({ movimenti, total, somma, page: page || undefined, perPage, saldo: Number(sub.credito || 0), cliente: sub.nome || null })
         }
       }
-      return NextResponse.json({ error: 'Cliente non trovato o non autorizzato' }, { status: 403 })
+      // Messaggio esplicito: il cliente di un sotto-master NON è leggibile da chi sta più in
+      // alto (mostrerebbe il prezzo finale di vendita del sotto-master). Senza questo testo la
+      // pagina restava muta e sembrava un archivio vuoto.
+      const { data: altro } = await admin.from('clienti')
+        .select('ragione_sociale,masters:master_id(nome)').eq('id', clienteId).maybeSingle()
+      const errore = altro
+        ? `I movimenti di ${(altro as any).ragione_sociale} sono visibili solo al suo master (${(altro as any).masters?.nome || 'rete'}).`
+        : 'Cliente non trovato o non autorizzato'
+      console.warn('[MOVIMENTI][403]', { viewer: utente?.master_id, ruolo: utente?.ruolo, clienteId })
+      return NextResponse.json({ error: errore }, { status: 403 })
     }
   }
   const { movimenti, total, somma } = await carica(supabase, 'cliente_id', clienteId!)

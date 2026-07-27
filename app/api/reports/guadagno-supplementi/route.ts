@@ -35,20 +35,30 @@ export async function GET(req: NextRequest) {
   const dal = dataDa(periodo)
   const admin = createAdminSupabase()
 
-  const { data: mov } = await admin.from('movimenti_clienti')
-    .select('descrizione,importo,totale,created_at')
-    .eq('master_id', M).gte('created_at', dal)
-    .or('descrizione.ilike.%giacenz%,descrizione.ilike.%riconsegn%,descrizione.ilike.%supplement%')
+  // I supplementi stanno in 'movimenti': prima si leggeva 'movimenti_clienti', un registro
+  // parallelo mai popolato, quindi il report dava SEMPRE zero. Qui il segno è sempre negativo
+  // (l'addebito scala il credito): quello che incasso è ciò che addebito IO (master_id = io),
+  // quello che pago è ciò che addebitano A ME (master_target_id = io).
+  const SUPPL = 'descrizione.ilike.%giacenz%,descrizione.ilike.%riconsegn%,descrizione.ilike.%supplement%'
+  const query = (col: string) => admin.from('movimenti')
+    .select('descrizione,importo,created_at,master_id,master_target_id')
+    .eq(col, M).gte('created_at', dal).or(SUPPL)
+  const [{ data: movRicavi }, { data: movCosti }] = await Promise.all([query('master_id'), query('master_target_id')])
 
-  const seen = new Set<string>()
-  let ricavi = 0, costi = 0
-  for (const r of (mov || [])) {
-    const ldv = estraiLdv(r.descrizione || '')
-    if (ldv) { if (seen.has(ldv)) continue; seen.add(ldv) }   // stessa LDV -> non la riconto
-    const imp = Number(r.importo || 0)
-    if (imp >= 0) ricavi += imp
-    else costi += -imp
+  // Stessa LDV contata una volta sola, per lato.
+  const somma = (righe: any[]) => {
+    const seen = new Set<string>()
+    let tot = 0
+    for (const r of (righe || [])) {
+      const ldv = estraiLdv(r.descrizione || '')
+      if (ldv) { if (seen.has(ldv)) continue; seen.add(ldv) }
+      tot += Math.abs(Number(r.importo || 0))
+    }
+    return tot
   }
+  // Un addebito che faccio a me stesso non è un ricavo: conta solo come costo.
+  let ricavi = somma((movRicavi || []).filter((r: any) => r.master_target_id !== M))
+  let costi = somma(movCosti || [])
 
   ricavi = Math.round(ricavi * 100) / 100
   costi = Math.round(costi * 100) / 100

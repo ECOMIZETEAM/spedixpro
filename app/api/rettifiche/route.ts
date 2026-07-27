@@ -75,36 +75,22 @@ export async function POST(req: NextRequest) {
     const totaleDiff = retts.reduce((acc, r) => acc + Math.abs(Number(r.differenza || 0)), 0)
     if (totaleDiff <= 0) continue
 
-    // Crea movimento per ogni rettifica (addebito ATOMICO al credito via RPC, che
-    // ritorna il saldo aggiornato usato come credito_residuo nel registro fatturazione).
+    // Crea movimento per ogni rettifica (addebito ATOMICO al credito via RPC).
+    // Nessun registro parallelo: la rettifica sta in 'movimenti' (con saldo_dopo), l'unica
+    // fonte letta dalle liste. La vecchia copia in 'movimenti_clienti' non veniva mai letta
+    // né controllata per errori e quella tabella è rimasta vuota, facendo apparire vuote le
+    // liste pur essendo gli addebiti regolarmente fatti.
     for (const r of retts) {
       const diff = Math.abs(Number(r.differenza || 0))
       if (diff <= 0) continue
       const descr = `Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso scansione: ${r.peso_reale} Kg )`
-      let saldo = 0
       try {
         // scala credito + scrive in 'movimenti' (Lista Movimenti) in un'unica transazione
-        const res = await registraMovimento(supabase, {
+        await registraMovimento(supabase, {
           masterId: utente?.master_id, clienteId, tipo: 'rettifica',
           descrizione: descr, importo: -diff, spedizioneId: r.spedizione_id || null, createdBy: user.id,
         })
-        saldo = res.saldo
       } catch (e) { console.error('Errore addebito rettifica cliente:', e); continue }
-      // registro fatturazione (movimenti_clienti) con lo snapshot del credito residuo
-      await supabase.from('movimenti_clienti').insert({
-        master_id: utente?.master_id,
-        cliente_id: clienteId,
-        tipo: 'rettifica',
-        descrizione: descr,
-        prezzo_unitario: diff,
-        quantita: 1,
-        iva: 0,
-        importo: diff,
-        totale_iva: 0,
-        totale: diff,
-        credito_residuo: saldo,
-        data_acquisto: new Date().toISOString().split('T')[0],
-      })
     }
 
     // Aggiorna costo spedizioni

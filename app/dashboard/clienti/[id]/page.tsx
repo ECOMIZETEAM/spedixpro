@@ -25,6 +25,7 @@ export default function ClienteProfiloPage() {
   const [primoRender, setPrimoRender] = useState(true)
   const [cercaMov, setCercaMov] = useState('')
   const [totMov, setTotMov] = useState(0)
+  const [errMov, setErrMov] = useState<string | null>(null)
   // Ricerca col respiro: 400ms dopo l'ultimo tasto si richiede al SERVER (tutto lo storico).
   const perPaginaMov = 25
   const [saldo, setSaldo] = useState(0)
@@ -49,8 +50,13 @@ export default function ClienteProfiloPage() {
     const p = new URLSearchParams({ clienteId: String(id), page: String(pag), perPage: String(perPaginaMov) })
     if (q) p.set('cerca', q)
     fetch(`/api/movimenti/lista?${p.toString()}`).then(r => r.json()).then(d => {
-      if (d && !d.error) { setMovimenti(d.movimenti || []); setSaldo(Number(d.saldo || 0)); setTotMov(Number(d.total || 0)) }
-    })
+      // L'errore va MOSTRATO: prima veniva ingoiato e la pagina diceva "Nessun movimento",
+      // indistinguibile da un archivio davvero vuoto (es. accesso non autorizzato o ruolo
+      // agente, che il credito non lo vede per scelta).
+      if (d && d.error) { setErrMov(String(d.error)); setMovimenti([]); setTotMov(0); return }
+      setErrMov(null)
+      if (d) { setMovimenti(d.movimenti || []); setSaldo(Number(d.saldo || 0)); setTotMov(Number(d.total || 0)) }
+    }).catch(() => setErrMov('Errore di rete nel caricamento dei movimenti'))
   }
 
   useEffect(() => {
@@ -187,7 +193,12 @@ export default function ClienteProfiloPage() {
               <span style={{fontSize:'12.5px',color:'#1a1a1a'}}>Cerca:</span>
               <input value={cercaMov} onChange={e=>{setCercaMov(e.target.value);setPaginaMov(1)}} placeholder="Movimento o riferimento…" style={{padding:'7px 10px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',width:'240px',color:'#1a1a1a',background:'#fff'}}/>
             </div>
-            {!movimenti.length ? (
+            {errMov ? (
+              <div style={{padding:'32px 24px',textAlign:'center',color:'#b45309',background:'#fffbeb'}}>
+                <div style={{fontSize:'28px',marginBottom:'8px'}}>🔒</div>
+                <div style={{fontSize:'13px',fontWeight:600,maxWidth:'520px',margin:'0 auto'}}>{errMov}</div>
+              </div>
+            ) : !movimenti.length ? (
               <div style={{padding:'40px',textAlign:'center',color:'#1a1a1a'}}>
                 <div style={{fontSize:'32px',marginBottom:'8px'}}>📊</div>
                 <div style={{fontSize:'13px'}}>Nessun movimento</div>
