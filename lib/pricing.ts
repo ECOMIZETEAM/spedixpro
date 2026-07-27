@@ -401,11 +401,15 @@ export async function calcolaPrezzoCorriereDettaglio(
   const noloBase = prezzo
   const fuelAmt = fuelPct ? noloBase * (fuelPct / 100) : 0
 
+  // ORDINE per id: con supplementi duplicati (piu' listini corrieri per lo stesso contratto) gli
+  // scaglioni con lo STESSO valore_max restavano nell'ordine casuale del database -> la commissione
+  // contrassegno/assicurazione poteva cambiare tra una chiamata e l'altra. Ora la scelta e' stabile.
   const { data: suppl } = await supabase
     .from('listini_corrieri_supplementi')
     .select('tipo,valore,tipo_calcolo,descrizione')
     .in('listino_id', listinoIds)
     .eq('corriere_id', corriereId)
+    .order('id', { ascending: true })
 
   const cod = Number(params.contrassegno) || 0
   const ass = Number(params.assicurazione) || 0
