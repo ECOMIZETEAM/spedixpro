@@ -207,6 +207,9 @@ export default function OrdiniPage() {
   // CONTRASSEGNO dall'ordine del marketplace: eBay = paymentMethod CASH_ON_DELIVERY/PICKUP;
   // Woo = payment_method 'cod'; PrestaShop = modulo cashondelivery. Importo = totale ordine.
   function codDaOrdine(o:any): number {
+    // Il contrassegno lo calcola ORA IL SERVER (/api/ordini/lista): qui il campo `raw` non arriva
+    // mai, quindi il vecchio controllo su o.raw dava sempre 0 e l'importo andava messo a mano.
+    if (o.cod != null) return Number(o.cod) || 0
     const r = o.raw || {}
     const pm = JSON.stringify([r.paymentSummary?.payments, r.payment_method, r.payment, r.module] || '')
     if (/cash_on_delivery|cash_on_pickup|"cod"|cashondelivery|contrassegno/i.test(pm)) return Number(o.totale || r.total || 0) || 0
