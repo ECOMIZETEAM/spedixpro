@@ -14,8 +14,16 @@ function chiaveServizio(nome: string): string | null {
 // Prezzo giacenza (apertura + servizio dell'operazione) di UN master per un suo corriere,
 // letto dal SUO Listino Corrieri (listini_corrieri_supplementi). Se non configurato -> 0.
 async function prezzoGiacenzaMaster(admin: any, corriereId: string, operazione: string): Promise<{ apertura: number; servizio: number }> {
+  // SOLO i listini DEL MASTER PROPRIETARIO del contratto: esistono righe "fantasma" che stanno nel
+  // listino di un ALTRO master ma puntano a questo corriere (39 in archivio). Leggendo per solo
+  // corriere_id quelle righe SCAVALCAVANO il listino configurato: nell'editor "Riconsegna 0" ma
+  // in addebito 0,70. Ora vale ciò che è impostato nel listino del master, punto.
+  const { data: corr } = await admin.from('corrieri').select('master_id').eq('id', corriereId).maybeSingle()
+  const { data: listini } = await admin.from('listini_corrieri').select('id').eq('master_id', (corr as any)?.master_id || '')
+  const listinoIds = (listini || []).map((l: any) => l.id)
+  if (!listinoIds.length) return { apertura: 0, servizio: 0 }
   const { data: suppl } = await admin.from('listini_corrieri_supplementi')
-    .select('id,tipo,nome,valore').eq('corriere_id', corriereId).in('tipo', ['giacenza', 'giacenza_apertura'])
+    .select('id,tipo,nome,valore').eq('corriere_id', corriereId).in('listino_id', listinoIds).in('tipo', ['giacenza', 'giacenza_apertura'])
     .order('id', { ascending: true })   // DETERMINISTICO: con supplementi duplicati prende sempre il primo (id più basso)
   let apertura = 0, servizio = 0
   let aperturaSet = false, servizioSet = false

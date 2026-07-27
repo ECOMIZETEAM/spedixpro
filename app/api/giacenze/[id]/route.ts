@@ -61,8 +61,15 @@ async function leggiPrezziMaster(admin: any, corriereId: string | null) {
   // duplicati — capita quando un master ha piu' listini corrieri per lo stesso contratto — qui si
   // leggeva senza ordine e vinceva l'ULTIMO, quindi il prezzo MOSTRATO poteva non essere quello
   // realmente ADDEBITATO (es. apertura 0,60 a schermo e 0,61 sul movimento).
+  // Come lib/giacenza-cascata: SOLO i listini del master proprietario del contratto, cosi' il
+  // prezzo mostrato e' esattamente quello impostato nel suo Listino Corrieri (niente righe
+  // "fantasma" appartenenti al listino di un altro master).
+  const { data: corrOwner } = await admin.from('corrieri').select('master_id').eq('id', corriereId).maybeSingle()
+  const { data: listiniOwner } = await admin.from('listini_corrieri').select('id').eq('master_id', (corrOwner as any)?.master_id || '')
+  const idsOwner = (listiniOwner || []).map((l: any) => l.id)
+  if (!idsOwner.length) return out
   const { data: suppl } = await admin.from('listini_corrieri_supplementi')
-    .select('tipo,nome,valore,descrizione').eq('corriere_id', corriereId).in('tipo', ['giacenza', 'giacenza_apertura'])
+    .select('tipo,nome,valore,descrizione').eq('corriere_id', corriereId).in('listino_id', idsOwner).in('tipo', ['giacenza', 'giacenza_apertura'])
     .order('id', { ascending: true })
   let aperturaSet = false
   const servizioSet: Record<string, boolean> = {}
