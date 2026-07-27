@@ -81,6 +81,7 @@ export async function GET() {
     { data: kpi },
     { data: ultimeSpedizioni },
     { count: daMettereInDistinta },
+    { data: clientiNegativi },
   ] = await Promise.all([
     // Via ADMIN (bypassa RLS): le RPC aggregano SOLO il sotto-albero del proprio master (p_master),
     // quindi contano proprie + improprie della rete SOTTO. Con il client user-scoped l'RLS limitava
@@ -95,6 +96,12 @@ export async function GET() {
       .in('master_id', reteIds.length ? reteIds : [masterId])
       .is('distinta_id', null)
       .not('stato', 'in', '(annullata)'),
+    // CREDITI DA RECUPERARE: clienti con saldo NEGATIVO. Le due modalita' vanno tenute DISTINTE:
+    // - credito a scalare -> il cliente e' BLOCCATO (non spedisce finche' non ricarica), ma gli
+    //   addebiti di giacenze/resi/rettifiche continuano a scalare: e' denaro da farsi ridare;
+    //   - fattura -> andare sotto zero e' NORMALE, e' semplicemente l'importo da fatturare.
+    admin.from('clienti').select('id,ragione_sociale,credito,tipo_contratto')
+      .eq('master_id', masterId).lt('credito', 0).order('credito', { ascending: true }),
   ])
   // Contatore piano (X/limite) = spedizioni del mese di TUTTA la rete, dalla STESSA RPC (subtree)
   // così coincide con le altre statistiche (niente più discrepanze tipo 98 vs 86).
@@ -131,5 +138,16 @@ export async function GET() {
     statsMensili: st.mensili || [],
     statiUltimi30: st.stati30 || {},
     ultimeSpedizioni: ultimeSpedizioni||[],
+    creditiDaRecuperare: (() => {
+      const righe = (clientiNegativi || []) as any[]
+      const scalare = righe.filter(r => (r.tipo_contratto || '') === 'credito_scalare')
+      const fattura = righe.filter(r => (r.tipo_contratto || '') !== 'credito_scalare')
+      const somma = (a: any[]) => Math.round(a.reduce((s, r) => s + Number(r.credito || 0), 0) * 100) / 100
+      const mappa = (a: any[]) => a.slice(0, 8).map(r => ({ id: r.id, nome: r.ragione_sociale, saldo: Number(r.credito || 0) }))
+      return {
+        scalare: { clienti: scalare.length, totale: somma(scalare), lista: mappa(scalare) },
+        fattura: { clienti: fattura.length, totale: somma(fattura), lista: mappa(fattura) },
+      }
+    })(),
   })
 }

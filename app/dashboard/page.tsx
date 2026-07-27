@@ -170,6 +170,50 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* CREDITI DA RECUPERARE — le due modalita' NON vanno confuse:
+          a scalare = cliente bloccato che deve ricaricare (soldi da farsi ridare);
+          a fattura = normale esposizione da fatturare. */}
+      {(data.creditiDaRecuperare?.scalare?.clienti > 0 || data.creditiDaRecuperare?.fattura?.clienti > 0) && (
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))',gap:'12px'}}>
+          {(['scalare','fattura'] as const).map(k => {
+            const g = data.creditiDaRecuperare?.[k]
+            if (!g || !g.clienti) return null
+            const scal = k === 'scalare'
+            return (
+              <div key={k} style={{background:'#fff',borderRadius:'10px',border:`1px solid ${scal?'#fecaca':'#e5e7eb'}`,overflow:'hidden'}}>
+                <div style={{padding:'12px 14px',borderBottom:'1px solid #f1f5f9',background:scal?'#fef2f2':'#fafafa',display:'flex',justifyContent:'space-between',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
+                  <div>
+                    <div style={{fontSize:'12.5px',fontWeight:800,color:scal?'#b91c1c':'#374151'}}>
+                      {scal ? '⛔ A scalare — bloccati, da ricaricare' : '🧾 A fattura — da fatturare'}
+                    </div>
+                    <div style={{fontSize:'11.5px',color:scal?'#991b1b':'#6b7280',marginTop:'2px'}}>
+                      {scal
+                        ? `${g.clienti} client${g.clienti===1?'e':'i'} non pu${g.clienti===1?'ò':'ossono'} spedire finché non ricarica${g.clienti===1?'':'no'}`
+                        : `${g.clienti} client${g.clienti===1?'e':'i'} con esposizione regolare (spediscono normalmente)`}
+                    </div>
+                  </div>
+                  <div style={{fontSize:'18px',fontWeight:800,color:scal?'#b91c1c':'#374151',whiteSpace:'nowrap'}}>
+                    € {Math.abs(Number(g.totale||0)).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                  </div>
+                </div>
+                <div>
+                  {g.lista.map((c:any)=>(
+                    <a key={c.id} href={`/dashboard/clienti/${c.id}`}
+                      style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'10px',padding:'8px 14px',borderBottom:'1px solid #f8fafc',textDecoration:'none',fontSize:'12.5px',color:'#1a1a1a'}}>
+                      <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.nome}</span>
+                      <span style={{fontWeight:700,color:scal?'#b91c1c':'#6b7280',whiteSpace:'nowrap'}}>€ {Number(c.saldo).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+                    </a>
+                  ))}
+                  {g.clienti > g.lista.length && (
+                    <div style={{padding:'8px 14px',fontSize:'11.5px',color:'#999'}}>e altri {g.clienti - g.lista.length}…</div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {/* Tasso consegna + Top corriere + Top cliente */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:'12px'}}>
         <div style={kpiCardLight}>
