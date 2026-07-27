@@ -32,14 +32,17 @@ async function leggiPrezziDaListino(admin: any, listinoId: string | null | undef
   if (!listinoId) return out
   let q = admin.from('listini_clienti_supplementi').select('tipo,nome,valore,descrizione,corriere_id').eq('listino_id', listinoId).in('tipo', ['giacenza', 'giacenza_apertura'])
   if (corriereId) q = q.eq('corriere_id', corriereId)
-  const { data: suppl } = await q
+  const { data: suppl } = await q.order('id', { ascending: true })   // duplicati: vince il primo, come sopra
+  let aperturaSet = false
+  const servizioSet: Record<string, boolean> = {}
   for (const s of (suppl || [])) {
-    if (s.tipo === 'giacenza_apertura') { out.apertura = Number(s.valore) || 0; continue }
+    if (s.tipo === 'giacenza_apertura') { if (!aperturaSet) { out.apertura = Number(s.valore) || 0; aperturaSet = true } continue }
     const k = chiaveServizio(s.nome)
-    if (!k) continue
+    if (!k || servizioSet[k]) continue
     let perc = 0
     try { perc = Number(JSON.parse(s.descrizione || '{}')?.perc) || 0 } catch { /* descrizione non JSON */ }
     out.servizi[k] = { valore: Number(s.valore) || 0, perc }
+    servizioSet[k] = true
   }
   return out
 }
@@ -54,15 +57,23 @@ async function leggiPrezzi(admin: any, sped: any) {
 async function leggiPrezziMaster(admin: any, corriereId: string | null) {
   const out = prezziVuoti()
   if (!corriereId) return out
+  // STESSA REGOLA di lib/giacenza-cascata (ordine per id, vince il PRIMO): con supplementi
+  // duplicati — capita quando un master ha piu' listini corrieri per lo stesso contratto — qui si
+  // leggeva senza ordine e vinceva l'ULTIMO, quindi il prezzo MOSTRATO poteva non essere quello
+  // realmente ADDEBITATO (es. apertura 0,60 a schermo e 0,61 sul movimento).
   const { data: suppl } = await admin.from('listini_corrieri_supplementi')
     .select('tipo,nome,valore,descrizione').eq('corriere_id', corriereId).in('tipo', ['giacenza', 'giacenza_apertura'])
+    .order('id', { ascending: true })
+  let aperturaSet = false
+  const servizioSet: Record<string, boolean> = {}
   for (const s of (suppl || [])) {
-    if (s.tipo === 'giacenza_apertura') { out.apertura = Number(s.valore) || 0; continue }
+    if (s.tipo === 'giacenza_apertura') { if (!aperturaSet) { out.apertura = Number(s.valore) || 0; aperturaSet = true } continue }
     const k = chiaveServizio(s.nome)
-    if (!k) continue
+    if (!k || servizioSet[k]) continue
     let perc = 0
     try { perc = Number(JSON.parse(s.descrizione || '{}')?.perc) || 0 } catch { /* descrizione non JSON */ }
     out.servizi[k] = { valore: Number(s.valore) || 0, perc }
+    servizioSet[k] = true
   }
   return out
 }
