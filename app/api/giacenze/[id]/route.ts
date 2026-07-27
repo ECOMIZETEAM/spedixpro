@@ -4,6 +4,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { isAgente, clientiAgente, bloccaAgente } from '@/lib/agente'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { spediamoproSearchStocks, spediamoproReleaseStock } from '@/lib/spediamopro'
+import { erroreSvincoloPulito } from '@/lib/errore-corriere'
 import { registraMovimento } from '@/lib/movimenti'
 import { addebitaServizioGiacenza } from '@/lib/giacenza-cascata'
 
@@ -235,10 +236,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         const stocks = await spediamoproSearchStocks(cred.authcode, String(code))
         const attivo = (stocks || []).find((st: any) => Number(st.status) === 1 && (!spid || Number(st.shipmentId) === Number(spid)))
         if (!attivo?.id) return NextResponse.json({ error: 'Giacenza non più attiva sul corriere (già svincolata o scaduta).' }, { status: 400 })
+        // MOTIVO del corriere: lo salvo (serve in elenco) e lo uso per bloccare le combinazioni
+        // impossibili PRIMA di disturbare il corriere. Pacco RIFIUTATO dal destinatario: la
+        // riconsegna viene sempre respinta, l'unica strada è il reso al mittente.
+        const motivo = String(attivo.reason || '')
+        if (motivo) { try { await admin.from('spedizioni').update({ giacenza_motivo: motivo.slice(0, 200) }).eq('id', id) } catch {} }
+        if (/rifiut|refus|respint/i.test(motivo) && releaseAction !== 3) {
+          return NextResponse.json({ error: `Il destinatario ha RIFIUTATO il pacco (motivo del corriere: "${motivo}"): la riconsegna non è accettata. Scegli "Reso al mittente".` }, { status: 400 })
+        }
+        // Indirizzo errato/incompleto/sconosciuto: riconsegnare allo STESSO indirizzo fallirebbe di
+        // nuovo. Serve un nuovo indirizzo (releaseAction 2) o il reso (3).
+        if (/indirizzo\s*(errato|inesistente|incompleto)|sconosciut|manca civico|incompl/i.test(motivo) && releaseAction === 1) {
+          return NextResponse.json({ error: `Il corriere non ha trovato il destinatario (motivo: "${motivo}"): riconsegnare allo stesso indirizzo fallirebbe di nuovo. Scegli "Riconsegna a nuovo indirizzo" indicando l'indirizzo corretto, oppure "Reso al mittente".` }, { status: 400 })
+        }
         await spediamoproReleaseStock(cred.authcode, Number(attivo.id), releaseAction, extra)
       } catch (e: any) {
-        const msg = String(e?.message || e).replace(/spediamo\s*pro/ig, '').replace(/\(\d{3}\)/, '').trim()
-        return NextResponse.json({ error: `Svincolo non riuscito sul corriere. ${msg || 'Riprova o contatta l\'assistenza.'}` }, { status: 400 })
+        return NextResponse.json({ error: erroreSvincoloPulito(e) }, { status: 400 })
       }
     } else if (cred?.master_domain && cred?.password && sped.tracking_number) {
       // Spedisci.online: delivery-instructions (invariato)

@@ -1,3 +1,36 @@
+// SVINCOLO GIACENZA: l'errore del corriere arrivava all'utente come JSON grezzo
+// ('release : {"processId":"<jmkc…>","error":{"id":"err_…","status":500,…}}') — illeggibile e
+// inutile. Qui si estrae la causa e la si traduce in un'indicazione operativa.
+export function erroreSvincoloPulito(raw: any): string {
+  const s = String(raw?.message ?? raw ?? '')
+  let interno = ''
+  const j = s.match(/\{[\s\S]*\}/)
+  if (j) { try { const o = JSON.parse(j[0]); interno = o?.error?.message || o?.message || '' } catch {} }
+  const t = (interno || s).toLowerCase()
+
+  if (/rifiut|refus|respint/.test(t)) {
+    return 'Il destinatario ha rifiutato il pacco: la riconsegna non è possibile, richiedi il reso al mittente.'
+  }
+  if (/non.*trovat|not found|inesistente/.test(t)) {
+    return 'Il corriere non trova più questa giacenza (potrebbe essere già stata svincolata o scaduta). Aggiorna la pagina e ricontrolla lo stato.'
+  }
+  if (/timed\s*out|timeout|0 bytes received/.test(t)) {
+    return 'Il corriere non ha risposto in tempo. Riprova tra qualche istante.'
+  }
+  if (/scadut|expired|termine/.test(t)) {
+    return 'I termini di giacenza sono scaduti: il pacco è già in rientro al mittente. Non serve alcuno svincolo.'
+  }
+  // Errore lato corriere (500): non è un dato sbagliato nostro, è il suo sistema che rifiuta.
+  if (/ha restituito un errore|status.*5\d\d|internal|server error/.test(t)) {
+    const vettore = (interno.match(/servizio di ([A-Za-z ]+) ha restituito/i) || [])[1]
+    return `Il corriere${vettore ? ' ' + vettore.trim() : ''} ha rifiutato lo svincolo con un errore sui suoi sistemi. Di norma succede quando l'operazione scelta non è ammessa per questa giacenza (es. riconsegna di un pacco rifiutato) oppure per un blocco temporaneo: riprova, o scegli il reso al mittente.`
+  }
+  const pulito = (interno || s)
+    .replace(/spediamo\s*pro|spedisci\.?online|core\.spediamopro\.com|https?:\/\/\S+/gi, '')
+    .replace(/\{[\s\S]*\}/, '').replace(/release\s*:/i, '').replace(/\s{2,}/g, ' ').trim().slice(0, 140)
+  return `Svincolo non riuscito sul corriere${pulito ? ': ' + pulito : ''}. Riprova o contatta l'assistenza.`
+}
+
 // Pulisce l'errore tecnico del corriere/provider in un messaggio mostrabile all'utente, SENZA mai
 // esporre il nome del provider tecnico (SpediamoPro / Spedisci.online): l'utente vede solo i brand
 // dei corrieri, mai il provider a valle. Estrae il messaggio utile dal JSON di errore quando c'è.

@@ -28,7 +28,7 @@ export async function GET() {
   const spedizioni: any[] = []
   for (let pag = 0; pag < 8; pag++) {
     const { data: pagina } = await admin.from('spedizioni')
-      .select('id,numero,stato,raw_response,tracking_number,etichetta_url,giacenza_data,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali)')
+      .select('id,numero,stato,raw_response,tracking_number,etichetta_url,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali)')
       .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
       .order('tracking_check_at', { ascending: true, nullsFirst: true })
       .order('id', { ascending: true })
@@ -47,6 +47,7 @@ export async function GET() {
     try {
       let nuovo: string | null = null
       let nuovoTracking: string | null = null
+      let motivoGiacenza: string | null = null   // causale del corriere (rifiuto, assente, indirizzo errato…)
       // Contesto SpediamoPro per il recupero di numero/etichetta rimasti indietro (vedi sotto).
       let spAuth: string | null = null
       let spId: number | null = null
@@ -67,6 +68,10 @@ export async function GET() {
             const stocks = await spediamoproSearchStocks(authcode, tr.shipmentCode || raw.code || String(spid))
             const attivo = (stocks || []).find((st: any) => Number(st.status) === 1 && Number(st.shipmentId) === Number(spid))
             nuovo = attivo ? 'in_giacenza' : 'non_consegnato'
+            // MOTIVO dichiarato dal corriere (es. "Rifiuto del destinatario"): serve all'operatore
+            // per scegliere lo svincolo GIUSTO — su un pacco rifiutato la riconsegna viene respinta
+            // dal corriere, l'unica strada e' il reso al mittente.
+            if (attivo?.reason) motivoGiacenza = String(attivo.reason).slice(0, 200)
           } catch { nuovo = 'non_consegnato' }
         }
         if (tr.trackingCode) nuovoTracking = tr.trackingCode
@@ -97,6 +102,7 @@ export async function GET() {
       if (nuovo && nuovo !== s.stato && (nuovo === 'annullata' || prioritaStato(nuovo) > prioritaStato(s.stato))
           && !(s.stato === 'reso_mittente' && nuovo === 'consegnata')) upd.stato = nuovo
       if (nuovo === 'in_giacenza' && !s.giacenza_data) upd.giacenza_data = new Date().toISOString()
+      if (motivoGiacenza && motivoGiacenza !== (s as any).giacenza_motivo) upd.giacenza_motivo = motivoGiacenza
       if (nuovoTracking && nuovoTracking !== s.tracking_number) upd.tracking_number = nuovoTracking
 
       // RECUPERO NUMERO: alla creazione, se SpediamoPro/BRT non aveva ancora assegnato il tracking, il
