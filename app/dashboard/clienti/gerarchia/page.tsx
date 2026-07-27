@@ -18,6 +18,7 @@ const iniziali = (s: string) => (s || '?').trim().split(/\s+/).slice(0, 2).map(w
 export default function GerarchiaPage() {
   const [masters, setMasters] = useState<Master[]>([])
   const [clienti, setClienti] = useState<Cliente[]>([])
+  const [conteggi, setConteggi] = useState<Record<string,{tot:number;mese:number}>>({})
   const [rootId, setRootId] = useState('')
   const [loading, setLoading] = useState(true)
 
@@ -30,6 +31,7 @@ export default function GerarchiaPage() {
       const ms: Master[] = d.masters || []
       setMasters(ms)
       setClienti(d.clienti || [])
+      setConteggi(d.conteggi || {})
       setRootId(d.rootId || '')
       setExpanded(new Set(ms.map(m => m.id))) // tutto espanso di default
       setLoading(false)
@@ -120,6 +122,20 @@ export default function GerarchiaPage() {
     return <>{text.slice(0, i)}<mark style={{ background: '#fed7aa', color: '#9a3412', padding: '0 1px', borderRadius: '2px' }}>{text.slice(i, i + s.length)}</mark>{text.slice(i + s.length)}</>
   }
 
+  // Spedizioni di un nodo: per il CLIENTE le sue; per il MASTER le proprie + quelle di tutta la
+  // sua discendenza (sotto-master e loro clienti) = il volume che porta davvero alla rete.
+  const spedDi = (id: string) => conteggi[id] || { tot: 0, mese: 0 }
+  // ATTENZIONE: ogni spedizione ha SEMPRE un master_id, quindi quelle dei clienti sono GIA'
+  // conteggiate nel totale del loro master. Il totale di rete somma quindi SOLO i master della
+  // discendenza: aggiungere anche i clienti raddoppierebbe i numeri.
+  function spedRete(masterId: string, prof = 0): { tot: number; mese: number } {
+    if (prof > 15) return { tot: 0, mese: 0 }
+    const acc = { ...spedDi(masterId) }
+    for (const sm of (figliMaster.get(masterId) || [])) { const v = spedRete(sm.id, prof + 1); acc.tot += v.tot; acc.mese += v.mese }
+    return acc
+  }
+  const nFmt = (n: number) => Number(n || 0).toLocaleString('it-IT')
+
   function ClienteRow({ c }: { c: Cliente }) {
     if (keepSet && !keepSet.has(c.id)) return null
     return (
@@ -131,6 +147,13 @@ export default function GerarchiaPage() {
           <div style={{ fontSize: '13px', color: '#1a1a1a', fontWeight: '500', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}><Highlight text={c.ragione_sociale} /></div>
           <div style={{ fontSize: '11px', color: '#a1a1aa', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.email}</div>
         </div>
+        {spedDi(c.id).tot > 0 && (
+          <span title={`${nFmt(spedDi(c.id).tot)} spedizioni totali · ${nFmt(spedDi(c.id).mese)} questo mese`}
+            style={{ fontSize: '11px', color: '#71717a', whiteSpace: 'nowrap' }}>
+            <b style={{ color: '#52525b' }}>{nFmt(spedDi(c.id).tot)}</b> sped.
+            {spedDi(c.id).mese > 0 && <span style={{ color: '#a1a1aa' }}> · {nFmt(spedDi(c.id).mese)} nel mese</span>}
+          </span>
+        )}
         <span style={{ fontSize: '10px', fontWeight: '600', color: '#71717a', background: '#f4f4f5', padding: '2px 7px', borderRadius: '5px' }}>Cliente</span>
         <span title={c.attivo ? 'Attivo' : 'Inattivo'} style={{ width: '8px', height: '8px', borderRadius: '50%', background: c.attivo ? '#22c55e' : '#ef4444', flexShrink: 0 }} />
       </div>
@@ -165,6 +188,13 @@ export default function GerarchiaPage() {
             </div>
             <div style={{ fontSize: '11px', color: '#a1a1aa', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.email}</div>
           </div>
+          {(() => { const v = spedRete(m.id); return v.tot > 0 ? (
+            <span title={`${nFmt(v.tot)} spedizioni della sua rete (sé + sotto-master e clienti) · ${nFmt(v.mese)} questo mese`}
+              style={{ fontSize: '11px', color: '#71717a', whiteSpace: 'nowrap' }}>
+              <b style={{ color: '#ea580c' }}>{nFmt(v.tot)}</b> sped.
+              {v.mese > 0 && <span style={{ color: '#a1a1aa' }}> · {nFmt(v.mese)} nel mese</span>}
+            </span>
+          ) : null })()}
           {nFigli > 0 && (
             <span style={{ fontSize: '11px', color: '#71717a', whiteSpace: 'nowrap' }}>
               {subMasters.length > 0 && <><b style={{ color: '#52525b' }}>{subMasters.length}</b> master</>}

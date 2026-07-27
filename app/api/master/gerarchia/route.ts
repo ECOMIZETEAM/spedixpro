@@ -51,9 +51,20 @@ export async function GET(req: NextRequest) {
   const clientiAlbero = (allClienti || []).filter(c =>
     (completa ? idsAlbero.has(c.master_id) : c.master_id === rootId) && !c.promosso_a_master_id)
 
+  // CONTEGGI SPEDIZIONI (totale + mese corrente) aggregati nel DB: una riga per master e per
+  // cliente. La pagina somma lungo l'albero per il totale di rete di ogni nodo.
+  const conteggi: Record<string, { tot: number; mese: number }> = {}
+  try {
+    const { data: righe } = await admin.rpc('gerarchia_conteggi_spedizioni')
+    for (const r of ((righe || []) as any[])) {
+      if (r.rif_id) conteggi[r.rif_id] = { tot: Number(r.totale) || 0, mese: Number(r.mese) || 0 }
+    }
+  } catch (e) { console.error('Conteggi gerarchia:', e) }
+
   return NextResponse.json({
     rootId,
     masters: mastersAlbero,
     clienti: clientiAlbero,
+    conteggi,
   })
 }
