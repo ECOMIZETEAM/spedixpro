@@ -143,6 +143,34 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
       }
     }
 
+    // SPONDA DI DEFAULT: se il master paga la sponda al corriere per questo contratto e nel listino
+    // cliente non e' stata impostata, la si eredita automaticamente. Senza questo, il salvataggio
+    // (che cancella e riscrive i supplementi del contratto) lasciava il cliente SENZA sponda mentre
+    // il master continuava a pagarla -> margine negativo sui colli pesanti. Vale anche per i listini
+    // futuri: nasce gia' impostata, e resta modificabile a mano.
+    if (!righeSupplementi.some((r: any) => r.tipo === 'sponda')) {
+      try {
+        const { data: corrDati } = await supabase.from('corrieri').select('master_id,nome_contratto').eq('id', corriere_id).maybeSingle()
+        if ((corrDati as any)?.master_id) {
+          const { data: listiniM } = await supabase.from('listini_corrieri').select('id').eq('master_id', (corrDati as any).master_id)
+          const idsM = (listiniM || []).map((l: any) => l.id)
+          if (idsM.length) {
+            const { data: spondaCosto } = await supabase.from('listini_corrieri_supplementi')
+              .select('valore,tipo_calcolo,descrizione').eq('corriere_id', corriere_id).in('listino_id', idsM)
+              .eq('tipo', 'sponda').order('id', { ascending: true }).limit(1).maybeSingle()
+            if (spondaCosto && Number((spondaCosto as any).valore) > 0) {
+              righeSupplementi.push({
+                listino_id: id, corriere_id, tipo: 'sponda', nome: 'Sponda',
+                valore: Number((spondaCosto as any).valore),
+                tipo_calcolo: (spondaCosto as any).tipo_calcolo || 'per_kg',
+                descrizione: (spondaCosto as any).descrizione || null,
+              })
+            }
+          }
+        }
+      } catch (e) { console.error('Sponda di default dal listino corriere:', e) }
+    }
+
     if (righeSupplementi.length) {
       const { error } = await supabase.from('listini_clienti_supplementi').insert(righeSupplementi)
       if (error) return NextResponse.json({ error: error.message }, { status: 400 })
