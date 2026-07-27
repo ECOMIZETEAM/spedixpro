@@ -23,25 +23,35 @@ export async function GET() {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
 
+  // Stesse condizioni del file scaricabile (annullate escluse, tiebreaker in paginazione):
+  // i numeri a video devono coincidere con quelli del file, altrimenti il cliente non torna.
   const righe = await fetchAll(() => supabase
     .from('ordini_importati')
-    .select('id, raw, spedizioni!inner(created_at)')
+    .select('id, raw, articoli, spedizioni!inner(created_at, stato, cancellata_il)')
     .eq('cliente_id', utente.cliente_id)
     .eq('stato', 'spedito')
     .is('integrazione_id', null)                 // solo ordini caricati da FILE (non dai negozi collegati)
     .not('spedizione_id', 'is', null)
-    .order('created_at', { ascending: false }))
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: true }))
 
-  // Raggruppo per piattaforma + data di spedizione
-  const mappa = new Map<string, { piattaforma: string; data: string; n: number }>()
+  const ANNULLATI = ['annullata', 'annullamento_pending', 'annullamento_manuale']
+  // Raggruppo per piattaforma + data di spedizione. Conto ORDINI e RIGHE: Amazon evade per
+  // ARTICOLO, quindi un ordine multi-prodotto vale piu' righe nel file. Mostrare solo gli ordini
+  // faceva sembrare sbagliato il conteggio di Amazon (113 ordini -> 114 record).
+  const mappa = new Map<string, { piattaforma: string; data: string; n: number; righe: number }>()
   const totali: Record<string, number> = { amazon: 0, shopify: 0, altro: 0 }
   for (const r of (righe || [])) {
-    const piatt = piattaformaDa((r as any).raw)
     const sp: any = (r as any).spedizioni
+    if (sp?.cancellata_il || ANNULLATI.includes(String(sp?.stato || ''))) continue
+    const piatt = piattaformaDa((r as any).raw)
     const dataSped = (sp?.created_at || '').slice(0, 10) || '—'
+    const arts = Array.isArray((r as any).articoli) ? (r as any).articoli.filter((a: any) => a && a.order_item_id) : []
+    const nRighe = arts.length || 1
     const key = `${piatt}|${dataSped}`
-    if (!mappa.has(key)) mappa.set(key, { piattaforma: piatt, data: dataSped, n: 0 })
-    mappa.get(key)!.n++
+    if (!mappa.has(key)) mappa.set(key, { piattaforma: piatt, data: dataSped, n: 0, righe: 0 })
+    const g = mappa.get(key)!
+    g.n++; g.righe += nRighe
     totali[piatt] = (totali[piatt] || 0) + 1
   }
 

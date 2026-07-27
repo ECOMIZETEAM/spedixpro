@@ -83,6 +83,7 @@ export default function ReportMarketplacePage() {
                     <tr>
                       <th style={th}>Data spedizione</th>
                       <th style={th}>N. ordini</th>
+                      <th style={th}>Righe nel file</th>
                       <th style={{ ...th, textAlign: 'right' }}>File</th>
                     </tr>
                   </thead>
@@ -91,6 +92,17 @@ export default function ReportMarketplacePage() {
                       <tr key={g.data}>
                         <td style={td}>{g.data}</td>
                         <td style={td}>{g.n}</td>
+                        {/* Amazon evade per ARTICOLO: un ordine con 2 prodotti = 2 righe. Mostrarlo
+                            evita il dubbio "il file ha piu' record degli ordini". */}
+                        <td style={td}>
+                          {g.righe ?? g.n}
+                          {(g.righe ?? g.n) !== g.n && (
+                            <span title="Un ordine con piu' articoli occupa una riga per articolo: e' il numero di record che conta Amazon"
+                              style={{ marginLeft: '6px', fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '999px', background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa' }}>
+                              multi-articolo
+                            </span>
+                          )}
+                        </td>
                         <td style={{ ...td, textAlign: 'right' }}>
                           <button onClick={() => scarica(piatt, g.data)}
                             style={{ background: '#fff', color: ACCENT, border: `1px solid ${ACCENT}`, borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>

@@ -12,16 +12,22 @@ function cell(v: any): string {
 }
 
 // Corriere commerciale (mai il provider tecnico) -> codice vettore accettato da Amazon.
+// REGOLA AMAZON (template ufficiale "Shipping Confirmation", definizione del campo carrier-name):
+// «Please populate this field only when a value of 'Other' is provided in the carrier-code field».
+// Riempire carrier-name insieme a un carrier-code noto fa scattare il warning 99011
+// ("carrier-name ... ignored because it is invalid or conflicts with the value in another field"),
+// UNO PER RIGA: era la causa delle "114 allerte su 114 record" del 27/07. Quindi: name valorizzato
+// SOLO nel ramo 'Other'.
 function carrierAmazon(nome: string): { code: string; name: string } {
   const n = (nome || '').toUpperCase()
-  if (n.includes('BRT')) return { code: 'BRT', name: 'BRT' }
-  if (n.includes('GLS')) return { code: 'GLS', name: 'GLS' }
-  if (n.includes('POSTE')) return { code: 'Poste Italiane', name: 'Poste Italiane' }
-  if (n.includes('SDA')) return { code: 'SDA', name: 'SDA' }
-  if (n.includes('DHL')) return { code: 'DHL', name: 'DHL' }
-  if (n.includes('UPS')) return { code: 'UPS', name: 'UPS' }
-  if (n.includes('TNT')) return { code: 'TNT', name: 'TNT' }
-  if (n.includes('FEDEX') || n.includes('FED EX')) return { code: 'FedEx', name: 'FedEx' }
+  if (n.includes('BRT')) return { code: 'BRT', name: '' }
+  if (n.includes('GLS')) return { code: 'GLS', name: '' }
+  if (n.includes('POSTE')) return { code: 'Poste Italiane', name: '' }
+  if (n.includes('SDA')) return { code: 'SDA', name: '' }
+  if (n.includes('DHL')) return { code: 'DHL', name: '' }
+  if (n.includes('UPS')) return { code: 'UPS', name: '' }
+  if (n.includes('TNT')) return { code: 'TNT', name: '' }
+  if (n.includes('FEDEX') || n.includes('FED EX')) return { code: 'FedEx', name: '' }
   return { code: 'Other', name: nome || 'Corriere' }
 }
 
@@ -41,19 +47,28 @@ export async function GET(req: NextRequest) {
   const piatt = (url.searchParams.get('piattaforma') || 'amazon').toLowerCase()
   const data = url.searchParams.get('data') || ''   // YYYY-MM-DD opzionale
 
+  // ANNULLATE ESCLUSE: confermare ad Amazon una spedizione annullata significa dare un tracking che
+  // nessun corriere scansionera' mai -> Valid Tracking Rate giu', reclami A-to-Z, metriche account
+  // a rischio. Prima non c'era alcun filtro sullo stato della spedizione.
+  // Ordinamento con TIEBREAKER su id: oltre le 1000 righe la paginazione senza chiave univoca puo'
+  // duplicare o perdere ordini (righe con lo stesso created_at).
   const righe = await fetchAll(() => supabase
     .from('ordini_importati')
-    .select('order_id, contenuto, colli, raw, articoli, spedizioni!inner(tracking_number, created_at, corrieri(nome_contratto))')
+    .select('order_id, contenuto, colli, raw, articoli, spedizioni!inner(tracking_number, created_at, stato, cancellata_il, corrieri(nome_contratto))')
     .eq('cliente_id', utente.cliente_id)
     .eq('stato', 'spedito')
     .is('integrazione_id', null)
     .not('spedizione_id', 'is', null)
-    .order('created_at', { ascending: false }))
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: true }))
 
-  // Filtro per piattaforma (dal raw) e data di spedizione
+  const ANNULLATI = ['annullata', 'annullamento_pending', 'annullamento_manuale']
+  // Filtro per piattaforma (dal raw), data di spedizione e spedizione ancora valida
   const filtrate = (righe || []).filter((r: any) => {
     if (piattaformaDa(r.raw) !== piatt) return false
-    if (data) { const d = (r.spedizioni?.created_at || '').slice(0, 10); if (d !== data) return false }
+    const sp = r.spedizioni || {}
+    if (sp.cancellata_il || ANNULLATI.includes(String(sp.stato || ''))) return false
+    if (data) { const d = (sp.created_at || '').slice(0, 10); if (d !== data) return false }
     return true
   })
 
