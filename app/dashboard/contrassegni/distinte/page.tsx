@@ -56,7 +56,12 @@ export default function DistinteContrassegniPage() {
       const r = await fetch('/api/contrassegni/da-caricare', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ destinatari: ids }) })
       const j = await r.json()
       if (j.success) {
-        await dialog.alert({ title:'Contrassegni caricati', message:`Create ${j.distinteCreate} distinte · ${j.spedizioniCaricate} spedizioni · € ${Number(j.totaleCaricato||0).toFixed(2)}` + (j.giaCaricate ? ` · ${j.giaCaricate} gia' in distinta (saltate)` : '') })
+        await dialog.alert({ title:'Contrassegni caricati', message:
+            `Distinte create: ${j.distinteCreate}\n`
+          + `Spedizioni caricate: ${j.spedizioniCaricate} · € ${Number(j.totaleCaricato||0).toFixed(2)}\n`
+          + (j.giaCaricate ? `Già in una tua distinta (saltate): ${j.giaCaricate}\n` : '')
+          + (j.senzaImporto ? `Importo a zero, restano in attesa: ${j.senzaImporto}\n` : '')
+          + (j.nonRiuscite ? `Non caricate, tornate in attesa: ${j.nonRiuscite}\n` : '') })
         caricaDaCaricare(); carica()
       } else await dialog.alert({ title:'Errore', message: j.error || 'Errore durante il caricamento.' })
     } catch { await dialog.alert({ title:'Errore', message:'Errore durante il caricamento.' }) }
@@ -77,7 +82,11 @@ export default function DistinteContrassegniPage() {
       const r = await fetch('/api/contrassegni/carica-ricevute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ distintaIds: ids }) })
       const j = await r.json()
       if (j.success) {
-        await dialog.alert({ title: 'Rimesse caricate', message: `Caricate ${j.rimesseCaricate} rimesse · create ${j.distinteCreate} distinte` + (j.giaCaricate ? ` · ${j.giaCaricate} spedizioni già in distinta (saltate)` : '') })
+        await dialog.alert({ title: 'Rimesse accettate', message:
+            `Rimesse elaborate: ${j.rimesseCaricate}\n`
+          + `Contrassegni ora in attesa di carico: ${j.inAttesa ?? 0} su ${j.destinatari ?? 0} destinatari\n`
+          + (j.giaCaricate ? `Già in una tua distinta (saltate): ${j.giaCaricate}\n` : '')
+          + `\nControllali nella sezione "Contrassegni da caricare" e decidi a chi caricarli.` })
         caricaRicevute(); caricaDaCaricare(); carica()
       } else await dialog.alert({ title: 'Errore', message: j.error || 'Errore durante il caricamento.' })
     } catch { await dialog.alert({ title: 'Errore', message: 'Errore durante il caricamento.' }) }
