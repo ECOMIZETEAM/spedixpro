@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { fetchAll } from '@/lib/fetch-all'
 
-// Guadagno supplementi (giacenze, riconsegne, ecc.): legge la lista movimenti
-// (movimenti_clienti) filtrata per quei nomi. Importo positivo = incasso (addebito
-// al cliente, es. svincolo giacenza), negativo = costo. Dedup per LDV: se compare
-// piu' volte la stessa LDV non la riconto.
+// Guadagno supplementi (giacenze, riconsegne, ecc.): legge 'movimenti' filtrata per quei nomi.
+// Incasso = cio' che addebito io (master_id = io), costo = cio' che addebitano a me
+// (master_target_id = io); l'importo e' sempre negativo perche' l'addebito scala il credito.
+// NIENTE dedup per LDV: la stessa spedizione ha PIU' voci distinte e reali (apertura dossier +
+// riconsegna/reso, quest'ultima anche a 0 per tracciabilita'). Scartarne una perdeva soldi veri
+// e il risultato dipendeva pure dall'ordine con cui tornavano le righe.
 function dataDa(periodo: string): string {
   const d = new Date()
   if (periodo === 'giornaliero') d.setHours(0, 0, 0, 0)
@@ -15,13 +18,6 @@ function dataDa(periodo: string): string {
   return d.toISOString()
 }
 
-function estraiLdv(desc: string): string {
-  const s = desc || ''
-  const m1 = s.match(/spedizione\s+([A-Za-z0-9\-\/]{5,})/i)
-  if (m1) return m1[1].toUpperCase()
-  const m2 = s.match(/\b([A-Za-z0-9\-\/]{8,})\b/)
-  return m2 ? m2[1].toUpperCase() : ''
-}
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -42,20 +38,15 @@ export async function GET(req: NextRequest) {
   const SUPPL = 'descrizione.ilike.%giacenz%,descrizione.ilike.%riconsegn%,descrizione.ilike.%supplement%'
   const query = (col: string) => admin.from('movimenti')
     .select('descrizione,importo,created_at,master_id,master_target_id')
-    .eq(col, M).gte('created_at', dal).or(SUPPL)
-  const [{ data: movRicavi }, { data: movCosti }] = await Promise.all([query('master_id'), query('master_target_id')])
+    .eq(col, M).gte('created_at', dal).or(SUPPL).order('id', { ascending: true })
+  // fetchAll: su un anno di supplementi si supera il taglio silenzioso a 1000 righe.
+  const [movRicavi, movCosti] = await Promise.all([
+    fetchAll(() => query('master_id')), fetchAll(() => query('master_target_id')),
+  ])
 
-  // Stessa LDV contata una volta sola, per lato.
-  const somma = (righe: any[]) => {
-    const seen = new Set<string>()
-    let tot = 0
-    for (const r of (righe || [])) {
-      const ldv = estraiLdv(r.descrizione || '')
-      if (ldv) { if (seen.has(ldv)) continue; seen.add(ldv) }
-      tot += Math.abs(Number(r.importo || 0))
-    }
-    return tot
-  }
+  // Ogni riga di 'movimenti' e' un addebito distinto e gia' unico: si sommano tutte.
+  const somma = (righe: any[]) =>
+    (righe || []).reduce((t: number, r: any) => t + Math.abs(Number(r.importo || 0)), 0)
   // Un addebito che faccio a me stesso non è un ricavo: conta solo come costo.
   let ricavi = somma((movRicavi || []).filter((r: any) => r.master_target_id !== M))
   let costi = somma(movCosti || [])
