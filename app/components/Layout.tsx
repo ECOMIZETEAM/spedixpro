@@ -74,6 +74,7 @@ const NAV: NavItem[] = [
     { label: 'Report Rettifiche', href: '/dashboard/reports/rettifiche', perm: 'admin.reports.priceupdates' },
     { label: 'Report Consumabili', href: '/dashboard/reports/consumabili', perm: 'admin.reports.consumables' },
     { label: 'Report Fatture', href: '/dashboard/reports/fatture', perm: 'admin.reports.invoices' },
+    { label: 'Storico Ricariche', href: '/dashboard/reports/ricariche', perm: 'admin.reports.invoices' },
     { label: 'Report Resi', href: '/dashboard/reports/resi', perm: 'admin.reports.rendershippings' },
     { label: 'Report SMS Clienti', href: '/dashboard/reports/sms-clienti', perm: 'admin.reports.sms.clients' },
     { label: 'Storico Credito SMS', href: '/dashboard/reports/storico-sms', perm: 'admin.reports.sms.admin' },
