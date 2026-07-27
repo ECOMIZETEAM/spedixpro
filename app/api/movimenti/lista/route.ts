@@ -92,6 +92,11 @@ export async function GET(req: NextRequest) {
   } else {
     clienteId = p.get('clienteId')
     if (!clienteId) return NextResponse.json({ error: 'clienteId mancante' }, { status: 400 })
+    // L'id del SOTTO-MASTER può arrivare ancora percent-encoded ("m%3A<id>"): la scheda lo
+    // prende dall'indirizzo della pagina, dove il browser codifica i due punti, e lo rispedisce
+    // codificato una seconda volta. Senza normalizzarlo il prefisso "m:" non veniva riconosciuto
+    // e la richiesta finiva nel ramo dei clienti → 403 e lista vuota su OGNI sotto-master.
+    if (clienteId.includes('%')) { try { clienteId = decodeURIComponent(clienteId) } catch {} }
 
     // Sotto-master (clienteId = "m:<masterId>"): movimenti tra master + saldo del sotto-master
     if (clienteId.startsWith('m:')) {

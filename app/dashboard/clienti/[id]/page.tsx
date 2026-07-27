@@ -17,7 +17,11 @@ function fmtData(iso: string) {
 }
 
 export default function ClienteProfiloPage() {
-  const { id } = useParams()
+  const { id: idUrl } = useParams()
+  // L'indirizzo di un sotto-master è /dashboard/clienti/m:<id> e il browser codifica i due punti:
+  // il valore va decodificato, altrimenti alle API arriva "m%3A<id>", il prefisso "m:" non viene
+  // riconosciuto e la scheda risulta senza movimenti.
+  const id = (() => { try { return decodeURIComponent(String(idUrl ?? '')) } catch { return String(idUrl ?? '') } })()
   const [cliente, setCliente] = useState<any>(null)
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [movimenti, setMovimenti] = useState<any[]>([])

@@ -73,7 +73,10 @@ export async function GET(req: NextRequest) {
   // come in Lista Movimenti; il cliente ha la sua rotta. Finché qui si leggeva la tabella
   // vuota il controllo non serviva, ora sì.
   if (isAgente(utente as any) || nonStaff(utente)) return NextResponse.json([])
-  const clienteIdRaw = req.nextUrl.searchParams.get('clienteId')
+  let clienteIdRaw = req.nextUrl.searchParams.get('clienteId')
+  // Stesso accorgimento di /api/movimenti/lista: l'id del sotto-master può arrivare come
+  // "m%3A<id>" e senza decodificarlo il prefisso "m:" non verrebbe riconosciuto.
+  if (clienteIdRaw?.includes('%')) { try { clienteIdRaw = decodeURIComponent(clienteIdRaw) } catch {} }
   const dal = req.nextUrl.searchParams.get('dal')
   const al = req.nextUrl.searchParams.get('al')
 
