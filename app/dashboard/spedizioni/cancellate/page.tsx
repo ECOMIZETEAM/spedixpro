@@ -93,6 +93,7 @@ export default function SpedizioniCancellatePage() {
   const visibili = spedizioni.filter(passaFiltri)
   const pendingVis = pending.filter(passaFiltri)
   const manualiVis = manualiAltri.filter(passaFiltri)
+  const codaOwnerVis = codaOwner.filter(passaFiltri)   // anche la coda annulli segue ricerca/cliente/date
   const filtriAttivi = !!(filtroCliente || dal || al || cerca)
 
   const totalePagine = Math.max(1, Math.ceil(visibili.length / perPage))
@@ -152,13 +153,16 @@ export default function SpedizioniCancellatePage() {
       {codaOwner.length > 0 && (
         <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #fca5a5',overflow:'hidden',marginBottom:'16px'}}>
           <div style={{padding:'12px 16px',borderBottom:'1px solid #fecaca',background:'#fef2f2'}}>
-            <span style={{fontSize:'13px',fontWeight:'700',color:'#b91c1c'}}>Annulli da richiedere a Spedisci (assistenza) <span style={{color:'#991b1b',fontWeight:'400',fontSize:'12px'}}>({codaOwner.length})</span></span>
+            <span style={{fontSize:'13px',fontWeight:'700',color:'#b91c1c'}}>Annulli da richiedere a Spedisci (assistenza) <span style={{color:'#991b1b',fontWeight:'400',fontSize:'12px'}}>({codaOwnerVis.length}{filtriAttivi && codaOwnerVis.length !== codaOwner.length ? ` di ${codaOwner.length}` : ''})</span></span>
             <span style={{display:'block',marginTop:'2px',fontSize:'12px',color:'#991b1b'}}>Queste spedizioni Spedisci non si annullano via API: richiedi l'annullo all'assistenza (WhatsApp) usando numero e tracking, poi premi "Segna annullato".</span>
           </div>
+          {!codaOwnerVis.length ? (
+            <div style={{padding:'20px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessun annullo da richiedere con i filtri attivi.</div>
+          ) : (
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
               <tbody>
-                {codaOwner.map(s => (
+                {codaOwnerVis.map(s => (
                   <tr key={s.id} style={{borderBottom:'1px solid #fee2e2'}}>
                     <td style={{padding:'9px 16px',fontWeight:'700',color:'#1a1a1a'}}>{s.numero}</td>
                     <td style={{padding:'9px 12px',color:'#666',fontSize:'12px'}}>Tracking: {s.tracking_number || '—'}</td>
@@ -175,6 +179,7 @@ export default function SpedizioniCancellatePage() {
               </tbody>
             </table>
           </div>
+          )}
         </div>
       )}
 
