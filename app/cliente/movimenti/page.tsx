@@ -51,34 +51,43 @@ export default function MovimentiClientePage() {
   const [cerca, setCerca] = useState('')
   const [perPagina, setPerPagina] = useState(10)
   const [pagina, setPagina] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [cercaDeb, setCercaDeb] = useState('')
 
+  // Ricerca col respiro (400ms) e PAGINAZIONE SERVER: si scarica solo la pagina corrente,
+  // non tutto lo storico (con migliaia di movimenti la pagina restava in caricamento).
+  useEffect(() => { const t = setTimeout(() => { setCercaDeb(cerca); setPagina(1) }, 400); return () => clearTimeout(t) }, [cerca])
   useEffect(() => {
-    (async () => {
+    let annulla = false
+    ;(async () => {
+      setLoading(true)
       try {
-        const res = await fetch('/api/movimenti/lista')
+        const params = new URLSearchParams({ page: String(pagina), perPage: String(perPagina) })
+        if (cercaDeb) params.set('cerca', cercaDeb)
+        const res = await fetch('/api/movimenti/lista?' + params.toString())
         const data = await res.json()
+        if (annulla) return
         if (res.ok) {
           setMovimenti(data.movimenti || [])
           setSaldo(Number(data.saldo || 0))
+          setTotal(Number(data.total || 0))
+          setErr(null)
         } else {
           setErr(data.error || 'Errore nel caricamento')
         }
       } catch {
-        setErr('Errore di rete')
+        if (!annulla) setErr('Errore di rete')
       } finally {
-        setLoading(false)
+        if (!annulla) setLoading(false)
       }
     })()
-  }, [])
+    return () => { annulla = true }
+  }, [pagina, perPagina, cercaDeb])
 
-  const visibili = cerca
-    ? movimenti.filter(m =>
-        m.descrizione?.toLowerCase().includes(cerca.toLowerCase()) ||
-        (m.riferimento || '').toLowerCase().includes(cerca.toLowerCase()))
-    : movimenti
-  const totPagine = Math.max(1, Math.ceil(visibili.length / perPagina))
+  const visibili = movimenti
+  const totPagine = Math.max(1, Math.ceil(total / perPagina))
   const paginaCorr = Math.min(pagina, totPagine)
-  const paginate = visibili.slice((paginaCorr-1)*perPagina, paginaCorr*perPagina)
+  const paginate = visibili
 
   return (
     <div>
@@ -157,7 +166,7 @@ export default function MovimentiClientePage() {
           </div>
         )}
         <div style={{padding:'12px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:'12px',color:'#666',borderTop:'1px solid #f0f0f0'}}>
-          <span>Risultati da {visibili.length===0?0:(paginaCorr-1)*perPagina+1} a {Math.min(paginaCorr*perPagina, visibili.length)} di {visibili.length} elementi</span>
+          <span>Risultati da {total===0?0:(paginaCorr-1)*perPagina+1} a {Math.min(paginaCorr*perPagina, total)} di {total} elementi</span>
           <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
             <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr<=1?'default':'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
             {Array.from({length: totPagine}, (_,i)=>i+1).filter(n => n===1 || n===totPagine || Math.abs(n-paginaCorr)<=2).map((n,idx,arr)=>(

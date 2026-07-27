@@ -40,7 +40,7 @@ export default function ClienteProfiloPage() {
     fetch(`/api/clienti/${id}`).then(r => r.json()).then(d => { setCliente(d); setLoading(false) })
   }
   function caricaMovimenti() {
-    fetch(`/api/movimenti/lista?clienteId=${id}`).then(r => r.json()).then(d => {
+    fetch(`/api/movimenti/lista?clienteId=${id}&page=1&perPage=100`)   // dettaglio: ultimi 100 (lo storico completo e' nel portale del cliente).then(r => r.json()).then(d => {
       if (d && !d.error) { setMovimenti(d.movimenti || []); setSaldo(Number(d.saldo || 0)) }
     })
   }

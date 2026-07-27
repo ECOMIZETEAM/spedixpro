@@ -30,7 +30,7 @@ export default function ModificaMasterPage() {
   const [errCredito, setErrCredito] = useState('')
 
   function caricaCredito() {
-    fetch(`/api/movimenti/lista?clienteId=m:${id}`).then(r=>r.json()).then(d=>{
+    fetch(`/api/movimenti/lista?clienteId=m:${id}&page=1&perPage=1`)   // qui serve SOLO il saldo: niente download dello storico.then(r=>r.json()).then(d=>{
       if (d && !d.error) setSaldo(Number(d.saldo||0))
     }).catch(()=>{})
   }

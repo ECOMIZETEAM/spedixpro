@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
 export const dynamic = 'force-dynamic'
+
+// Lista movimenti con PAGINAZIONE SERVER (?page=1&perPage=25): i target grandi hanno migliaia di
+// movimenti (record attuale ~7.900) e scaricarli tutti bloccava la pagina per decine di secondi.
+// Filtri server: ?cerca= (descrizione/riferimento) e ?corriere= (nome contratto via join spedizioni).
+// ?somma=1 aggiunge il totale dell'intero filtro (query leggera sui soli importi).
+// Senza ?page → comportamento storico (lista completa), mantenuto per compatibilità.
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -12,37 +18,68 @@ export async function GET(req: NextRequest) {
   // L'agente non vede movimenti/credito (dati del master).
   if ((utente?.ruolo || '').toLowerCase() === 'agente') return NextResponse.json({ error: 'Non disponibile per gli agenti.' }, { status: 403 })
 
-  const self = req.nextUrl.searchParams.get('self')
+  const p = req.nextUrl.searchParams
+  const self = p.get('self')
+  const page = Math.max(0, parseInt(p.get('page') || '0') || 0)          // 0 = modalità storica (tutto)
+  const perPage = Math.min(200, Math.max(1, parseInt(p.get('perPage') || '25') || 25))
+  const cerca = (p.get('cerca') || '').replace(/[,()%]/g, ' ').trim()     // sanificato per la sintassi or()
+  const corriere = (p.get('corriere') || '').trim()
+  const conSomma = p.get('somma') === '1'
+
+  // Query base per (client, colonna target): filtri identici su lista, conteggio e somma.
+  const buildQ = (db: any, col: string, val: string, select = '*', conteggio = false) => {
+    const sel = corriere ? `${select}, spedizioni!inner(corrieri!inner(nome_contratto))` : select
+    let q = db.from('movimenti').select(sel, conteggio ? { count: 'exact' } : undefined).eq(col, val)
+    if (cerca) q = q.or(`descrizione.ilike.%${cerca}%,riferimento.ilike.%${cerca}%`)
+    if (corriere) q = q.eq('spedizioni.corrieri.nome_contratto', corriere)
+    return q
+  }
+
+  // Carica secondo la modalità: paginata (page>0) o storica completa.
+  const carica = async (db: any, col: string, val: string) => {
+    if (!page) {
+      const movimenti = await fetchAll(() => buildQ(db, col, val).order('created_at', { ascending: false }))
+      return { movimenti: movimenti || [], total: (movimenti || []).length, somma: null as number | null }
+    }
+    const from = (page - 1) * perPage
+    const { data, count } = await buildQ(db, col, val, '*', true)
+      .order('created_at', { ascending: false }).range(from, from + perPage - 1)
+    let somma: number | null = null
+    if (conSomma) {
+      const importi = await fetchAll(() => buildQ(db, col, val, 'importo').order('id', { ascending: true }))
+      somma = Math.round((importi || []).reduce((s: number, r: any) => s + Number(r.importo || 0), 0) * 100) / 100
+    }
+    return { movimenti: data || [], total: count || 0, somma }
+  }
+
+  // Arricchimento nome corriere (solo sulle righe restituite: poche).
+  const conCorriere = async (movs: any[]) => {
+    const spedIds = Array.from(new Set(movs.map((mv: any) => mv.spedizione_id).filter(Boolean)))
+    if (!spedIds.length) return movs.map((mv: any) => ({ ...mv, corriere: null }))
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const nomePerSped = new Map<string, string | null>()
+    for (let i = 0; i < spedIds.length; i += 300) {
+      const { data: speds } = await admin.from('spedizioni').select('id,corrieri(nome_contratto)').in('id', spedIds.slice(i, i + 300))
+      for (const s of (speds || [])) nomePerSped.set(s.id, (s.corrieri as any)?.nome_contratto || null)
+    }
+    return movs.map((mv: any) => ({ ...mv, corriere: mv.spedizione_id ? (nomePerSped.get(mv.spedizione_id) || null) : null }))
+  }
 
   if (self === '1') {
     if (utente?.ruolo === 'cliente' || !utente?.master_id) {
       return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
     }
-    const movimenti = await fetchAll(() => supabase
-      .from('movimenti')
-      .select('*')
-      .eq('master_target_id', utente.master_id)
-      .order('created_at', { ascending: false }))
+    const { movimenti, total, somma } = await carica(supabase, 'master_target_id', utente.master_id)
     const { data: m } = await supabase
       .from('masters').select('credito, nome').eq('id', utente.master_id).single()
-
-    // Corriere di ogni movimento di spedizione: movimento -> spedizione_id -> corriere (nome contratto).
-    // Le spedizioni possono essere di sotto-master (cross-master) -> lettura via admin.
-    const movs = movimenti || []
-    const spedIds = Array.from(new Set(movs.map((mv: any) => mv.spedizione_id).filter(Boolean)))
-    const nomePerSped = new Map<string, string | null>()
-    if (spedIds.length) {
-      const { createAdminSupabase } = await import('@/lib/supabase-admin')
-      const admin = createAdminSupabase()
-      const { data: speds } = await admin.from('spedizioni').select('id,corrieri(nome_contratto)').in('id', spedIds)
-      for (const s of (speds || [])) nomePerSped.set(s.id, (s.corrieri as any)?.nome_contratto || null)
-    }
-    const movimentiOut = movs.map((mv: any) => ({
-      ...mv,
-      corriere: mv.spedizione_id ? (nomePerSped.get(mv.spedizione_id) || null) : null,
-    }))
+    // Opzioni del filtro corriere: i nomi contratto sono condivisi in rete → bastano i MIEI.
+    const { data: miei } = await supabase.from('corrieri').select('nome_contratto').eq('master_id', utente.master_id)
+    const corrieriDisponibili = Array.from(new Set((miei || []).map((c: any) => c.nome_contratto).filter(Boolean))).sort()
     return NextResponse.json({
-      movimenti: movimentiOut,
+      movimenti: await conCorriere(movimenti),
+      total, somma, page: page || undefined, perPage,
+      corrieriDisponibili,
       saldo: Number(m?.credito || 0),
       cliente: m?.nome || null,
     })
@@ -53,7 +90,7 @@ export async function GET(req: NextRequest) {
     clienteId = utente.cliente_id
     if (!clienteId) return NextResponse.json({ error: 'Cliente non associato' }, { status: 400 })
   } else {
-    clienteId = req.nextUrl.searchParams.get('clienteId')
+    clienteId = p.get('clienteId')
     if (!clienteId) return NextResponse.json({ error: 'clienteId mancante' }, { status: 400 })
 
     // Sotto-master (clienteId = "m:<masterId>"): movimenti tra master + saldo del sotto-master
@@ -67,15 +104,14 @@ export async function GET(req: NextRequest) {
       let autorizzato = false
       for (let i = 0; i < 20 && cur; i++) {
         if (cur === utente?.master_id) { autorizzato = true; break }
-        const { data: p } = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
-        cur = p?.parent_master_id || null
+        const { data: pm } = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+        cur = pm?.parent_master_id || null
       }
       if (!sub || !autorizzato) {
         return NextResponse.json({ error: 'Sotto-master non trovato o non autorizzato' }, { status: 403 })
       }
-      const movimenti = await fetchAll(() => admin.from('movimenti').select('*')
-        .eq('master_target_id', targetId).order('created_at', { ascending: false }))
-      return NextResponse.json({ movimenti, saldo: Number(sub.credito || 0), cliente: sub.nome || null })
+      const { movimenti, total, somma } = await carica(admin, 'master_target_id', targetId)
+      return NextResponse.json({ movimenti, total, somma, page: page || undefined, perPage, saldo: Number(sub.credito || 0), cliente: sub.nome || null })
     }
 
     const { data: cli } = await supabase
@@ -90,27 +126,22 @@ export async function GET(req: NextRequest) {
         let autorizzato = false
         for (let i = 0; i < 20 && cur; i++) {
           if (cur === utente?.master_id) { autorizzato = true; break }
-          const { data: p } = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
-          cur = p?.parent_master_id || null
+          const { data: pm } = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+          cur = pm?.parent_master_id || null
         }
         if (autorizzato) {
-          const movimenti = await fetchAll(() => admin.from('movimenti').select('*')
-            .eq('master_target_id', clienteId).order('created_at', { ascending: false }))
-          return NextResponse.json({ movimenti, saldo: Number(sub.credito || 0), cliente: sub.nome || null })
+          const { movimenti, total, somma } = await carica(admin, 'master_target_id', clienteId)
+          return NextResponse.json({ movimenti, total, somma, page: page || undefined, perPage, saldo: Number(sub.credito || 0), cliente: sub.nome || null })
         }
       }
       return NextResponse.json({ error: 'Cliente non trovato o non autorizzato' }, { status: 403 })
     }
   }
-  const movimenti = await fetchAll(() => supabase
-    .from('movimenti')
-    .select('*')
-    .eq('cliente_id', clienteId)
-    .order('created_at', { ascending: false }))
+  const { movimenti, total, somma } = await carica(supabase, 'cliente_id', clienteId!)
   const { data: cli } = await supabase
-    .from('clienti').select('credito, ragione_sociale').eq('id', clienteId).single()
+    .from('clienti').select('credito, ragione_sociale').eq('id', clienteId!).single()
   return NextResponse.json({
-    movimenti: movimenti || [],
+    movimenti, total, somma, page: page || undefined, perPage,
     saldo: Number(cli?.credito || 0),
     cliente: cli?.ragione_sociale || null,
   })

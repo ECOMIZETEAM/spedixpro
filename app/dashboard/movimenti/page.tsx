@@ -41,6 +41,10 @@ export default function MovimentiMasterPage() {
   const [corriereFiltro, setCorriereFiltro] = useState('')
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [somma, setSomma] = useState(0)
+  const [corrieriOpts, setCorrieriOpts] = useState<string[]>([])
+  const [cercaDeb, setCercaDeb] = useState('')   // ricerca col respiro: parte 400ms dopo l'ultimo tasto
   // Portali esterni (solo E&A): credito residuo per portale + ricariche
   const [portali, setPortali] = useState<any>(null)
   const [ricariche, setRicariche] = useState<any[]>([])
@@ -71,33 +75,42 @@ export default function MovimentiMasterPage() {
     await caricaPortali()
   }
 
+  // Debounce della ricerca: la query parte 400ms dopo l'ultimo carattere
+  useEffect(() => { const t = setTimeout(() => { setCercaDeb(cerca); setPagina(1) }, 400); return () => clearTimeout(t) }, [cerca])
+
+  // PAGINAZIONE SERVER: si scaricano solo le righe della pagina (prima si scaricava TUTTO lo
+  // storico — con migliaia di movimenti la pagina restava in caricamento).
   useEffect(() => {
-    (async () => {
+    let annulla = false
+    ;(async () => {
+      setLoading(true)
       try {
-        const res = await fetch('/api/movimenti/lista?self=1')
+        const params = new URLSearchParams({ self: '1', page: String(pagina), perPage: String(perPage), somma: '1' })
+        if (cercaDeb) params.set('cerca', cercaDeb)
+        if (corriereFiltro) params.set('corriere', corriereFiltro)
+        const res = await fetch('/api/movimenti/lista?' + params.toString())
         const data = await res.json()
-        if (res.ok) { setMovimenti(data.movimenti||[]); setSaldo(Number(data.saldo||0)) }
-        else setErr(data.error || 'Errore nel caricamento')
-      } catch { setErr('Errore di rete') }
-      finally { setLoading(false) }
+        if (annulla) return
+        if (res.ok) {
+          setMovimenti(data.movimenti || []); setSaldo(Number(data.saldo || 0))
+          setTotal(Number(data.total || 0)); setSomma(Number(data.somma || 0))
+          if (Array.isArray(data.corrieriDisponibili)) setCorrieriOpts(data.corrieriDisponibili)
+          setErr(null)
+        } else setErr(data.error || 'Errore nel caricamento')
+      } catch { if (!annulla) setErr('Errore di rete') }
+      finally { if (!annulla) setLoading(false) }
     })()
-    caricaPortali()
-  }, [])
+    return () => { annulla = true }
+  }, [pagina, perPage, cercaDeb, corriereFiltro])
+  useEffect(() => { caricaPortali() }, [])
 
-  const corrieri = Array.from(new Set(movimenti.map(m => m.corriere).filter(Boolean))) as string[]
-  const visibili = movimenti.filter(m => {
-    if (corriereFiltro && m.corriere !== corriereFiltro) return false
-    if (cerca) {
-      const c = cerca.toLowerCase()
-      if (!(m.descrizione?.toLowerCase().includes(c) || (m.riferimento||'').toLowerCase().includes(c))) return false
-    }
-    return true
-  })
-  const totaleFiltrato = visibili.reduce((s, m) => s + Number(m.importo || 0), 0)
+  const corrieri = corrieriOpts
+  const visibili = movimenti
+  const totaleFiltrato = somma
 
-  const totalePagine = Math.max(1, Math.ceil(visibili.length / perPage))
+  const totalePagine = Math.max(1, Math.ceil(total / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
-  const _pag = visibili.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
+  const _pag = visibili
 
   return (
     <div>
