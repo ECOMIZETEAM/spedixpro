@@ -22,10 +22,11 @@ export default function ClienteProfiloPage() {
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [movimenti, setMovimenti] = useState<any[]>([])
   const [paginaMov, setPaginaMov] = useState(1)
+  const [primoRender, setPrimoRender] = useState(true)
   const [cercaMov, setCercaMov] = useState('')
   const [totMov, setTotMov] = useState(0)
   // Ricerca col respiro: 400ms dopo l'ultimo tasto si richiede al SERVER (tutto lo storico).
-  const perPaginaMov = 10
+  const perPaginaMov = 25
   const [saldo, setSaldo] = useState(0)
   const [loading, setLoading] = useState(true)
 
@@ -41,11 +42,11 @@ export default function ClienteProfiloPage() {
   function caricaCliente() {
     fetch(`/api/clienti/${id}`).then(r => r.json()).then(d => { setCliente(d); setLoading(false) })
   }
-  function caricaMovimenti(q?: string) {
-    // La RICERCA va fatta dal SERVER su TUTTO lo storico: la scheda carica solo le ultime 100 righe
-    // e cercare una LDV piu' vecchia restituiva "nessun movimento", facendo credere che l'addebito
-    // non fosse mai stato fatto. Senza ricerca resta il caricamento leggero delle ultime 100.
-    const p = new URLSearchParams({ clienteId: String(id), page: '1', perPage: q ? '200' : '100' })
+  // TUTTO lo storico, non le ultime 100: la pagina si sposta sul SERVER (una pagina alla volta),
+  // cosi' anche i clienti con migliaia di movimenti sono navigabili per intero e la ricerca
+  // interroga l'archivio completo.
+  function caricaMovimenti(q?: string, pag = 1) {
+    const p = new URLSearchParams({ clienteId: String(id), page: String(pag), perPage: String(perPaginaMov) })
     if (q) p.set('cerca', q)
     fetch(`/api/movimenti/lista?${p.toString()}`).then(r => r.json()).then(d => {
       if (d && !d.error) { setMovimenti(d.movimenti || []); setSaldo(Number(d.saldo || 0)); setTotMov(Number(d.total || 0)) }
@@ -53,10 +54,17 @@ export default function ClienteProfiloPage() {
   }
 
   useEffect(() => {
-    const t = setTimeout(() => { setPaginaMov(1); caricaMovimenti(cercaMov.trim() || undefined) }, 400)
+    const t = setTimeout(() => { setPaginaMov(1); caricaMovimenti(cercaMov.trim() || undefined, 1) }, 400)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cercaMov])
+
+  // Cambio pagina: chiedo al server la pagina richiesta (niente taglio a 100 righe).
+  useEffect(() => {
+    if (primoRender) { setPrimoRender(false); return }
+    caricaMovimenti(cercaMov.trim() || undefined, paginaMov)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paginaMov])
 
   useEffect(() => {
     caricaCliente()
@@ -116,9 +124,9 @@ export default function ClienteProfiloPage() {
   const movimentiFiltrati = cercaMov
     ? movimenti   // gia' filtrati dal server su TUTTO lo storico
     : movimenti
-  const totPagineMov = Math.max(1, Math.ceil(movimentiFiltrati.length / perPaginaMov))
+  const totPagineMov = Math.max(1, Math.ceil((totMov || movimentiFiltrati.length) / perPaginaMov))
   const paginaCorrMov = Math.min(paginaMov, totPagineMov)
-  const movimentiPag = movimentiFiltrati.slice((paginaCorrMov-1)*perPaginaMov, paginaCorrMov*perPaginaMov)
+  const movimentiPag = movimentiFiltrati   // gia' la pagina giusta, arriva dal server
 
   return (
     <div>
