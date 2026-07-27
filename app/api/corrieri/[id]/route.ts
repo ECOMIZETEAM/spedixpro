@@ -18,7 +18,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   // BLOCCO: se il contratto è usato da spedizioni/ritiri/distinte non si può eliminare (perderesti lo storico).
   const usi: [string, string][] = [['spedizioni', 'spedizioni'], ['ritiri', 'ritiri'], ['distinte', 'distinte']]
   for (const [tab, label] of usi) {
-    const { count } = await admin.from(tab).select('*', { count: 'exact', head: true }).eq('corriere_id', id)
+    const { count } = await admin.from(tab).select('id', { count: 'exact', head: true }).eq('corriere_id', id)
     if ((count || 0) > 0) {
       return NextResponse.json({ error: `Contratto usato da ${count} ${label}: non eliminabile (perderesti lo storico). Disattivalo dalle Impostazioni.` }, { status: 400 })
     }

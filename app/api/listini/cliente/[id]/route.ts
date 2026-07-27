@@ -205,7 +205,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{i
   const { id } = await params
 
   const { count } = await supabase.from('clienti')
-    .select('*', { count: 'exact', head: true }).eq('listino_cliente_id', id)
+    .select('id', { count: 'exact', head: true }).eq('listino_cliente_id', id)
   if ((count || 0) > 0) {
     return NextResponse.json({ error: `Listino usato da ${count} cliente/i: riassegnali a un altro listino prima di eliminarlo.` }, { status: 400 })
   }

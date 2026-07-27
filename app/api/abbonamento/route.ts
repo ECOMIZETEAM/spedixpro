@@ -25,8 +25,11 @@ export async function GET() {
   // ogni spedizione di un sotto-master consuma il contratto/piano dei master sopra.
   const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
   const reteIds = await sottoAlberoMasterIds(admin, utente.master_id)
+  // select('id') e non '*': con head:true il conteggio non restituisce righe, ma con '*' Postgres
+  // deve comunque passare per le colonne PESANTI della tabella (etichette PDF, raw del corriere).
+  // Era la query piu' costosa del database: ~500ms a chiamata. Con la sola chiave usa l'indice.
   const { count } = await admin.from('spedizioni')
-    .select('*', { count: 'exact', head: true })
+    .select('id', { count: 'exact', head: true })
     .in('master_id', reteIds).gte('created_at', inizioMese).neq('stato', 'annullata')
 
   // Se sono il ROOT (M1): LISTA DEI MASTER della rete (un master = una riga) + KPI mensili.

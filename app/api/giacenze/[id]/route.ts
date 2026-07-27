@@ -290,7 +290,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const gia = new Set<string>()
       for (const d of (esistenti || [])) for (const v of (Array.isArray((d as any).voci) ? (d as any).voci : [])) if (v?.id) gia.add(v.id)
       if (!gia.has(id)) {
-        const { count } = await admin.from('distinte_resi').select('*', { count: 'exact', head: true }).eq('master_id', sped.master_id)
+        const { count } = await admin.from('distinte_resi').select('id', { count: 'exact', head: true }).eq('master_id', sped.master_id)
         numeroDistintaReso = (count || 0) + 1
         await admin.from('distinte_resi').insert({
           master_id: sped.master_id, cliente_id: sped.cliente_id, numero: numeroDistintaReso,

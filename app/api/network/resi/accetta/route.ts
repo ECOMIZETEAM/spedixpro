@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
   let create = 0
   const vociDi = (arr: any[]) => arr.map(s => voci.find(v => v.id === s.id) || { id: s.id, numero: s.numero })
   const nextNum = async () => {
-    const { count } = await admin.from('distinte_resi').select('*', { count: 'exact', head: true }).eq('master_id', mio)
+    const { count } = await admin.from('distinte_resi').select('id', { count: 'exact', head: true }).eq('master_id', mio)
     return (count || 0) + 1
   }
 
