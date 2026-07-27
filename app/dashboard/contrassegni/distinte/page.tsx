@@ -16,6 +16,8 @@ export default function DistinteContrassegniPage() {
   const [ricevute, setRicevute] = useState<any[]>([])          // rimesse accettate dal network, da caricare
   const [selRicevute, setSelRicevute] = useState<Set<string>>(new Set())
   const [caricando, setCaricando] = useState(false)
+  const [daCaricare, setDaCaricare] = useState<{gruppi:any[];totale:number;spedizioni:number}>({gruppi:[],totale:0,spedizioni:0})
+  const [selDest, setSelDest] = useState<Set<string>>(new Set())
   const [cerca, setCerca] = useState('')
   const [modalPagamento, setModalPagamento] = useState<any>(null)
   const [metodoPagamento, setMetodoPagamento] = useState('')
@@ -34,8 +36,32 @@ export default function DistinteContrassegniPage() {
     fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
     carica()
     fetch('/api/contrassegni/cod-files').then(r=>r.json()).then(d=>setCodFiles(d||[]))
-    caricaRicevute()
+    caricaRicevute(); caricaDaCaricare()
   }, [])
+
+  function caricaDaCaricare() {
+    fetch('/api/contrassegni/da-caricare').then(r=>r.json()).then(d=>{
+      setDaCaricare({ gruppi: d?.gruppi || [], totale: Number(d?.totale||0), spedizioni: Number(d?.spedizioni||0) })
+      setSelDest(new Set())
+    }).catch(()=>{})
+  }
+
+  async function caricaDestinatari() {
+    const ids = Array.from(selDest)
+    if (!ids.length) { await dialog.alert({ title:'Nessuna selezione', message:'Seleziona almeno un destinatario.' }); return }
+    const ok = await dialog.confirm({ title:'Carica contrassegni', message:`Creare le distinte per ${ids.length} destinatari? Da questo momento i contrassegni scendono al livello selezionato.` })
+    if (!ok) return
+    setCaricando(true)
+    try {
+      const r = await fetch('/api/contrassegni/da-caricare', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ destinatari: ids }) })
+      const j = await r.json()
+      if (j.success) {
+        await dialog.alert({ title:'Contrassegni caricati', message:`Create ${j.distinteCreate} distinte · ${j.spedizioniCaricate} spedizioni · € ${Number(j.totaleCaricato||0).toFixed(2)}` + (j.giaCaricate ? ` · ${j.giaCaricate} gia' in distinta (saltate)` : '') })
+        caricaDaCaricare(); carica()
+      } else await dialog.alert({ title:'Errore', message: j.error || 'Errore durante il caricamento.' })
+    } catch { await dialog.alert({ title:'Errore', message:'Errore durante il caricamento.' }) }
+    setCaricando(false)
+  }
 
   function caricaRicevute() {
     fetch('/api/contrassegni/carica-ricevute').then(r=>r.json()).then(d=>{ setRicevute(Array.isArray(d)?d:[]); setSelRicevute(new Set()) }).catch(()=>{})
@@ -52,7 +78,7 @@ export default function DistinteContrassegniPage() {
       const j = await r.json()
       if (j.success) {
         await dialog.alert({ title: 'Rimesse caricate', message: `Caricate ${j.rimesseCaricate} rimesse · create ${j.distinteCreate} distinte` + (j.giaCaricate ? ` · ${j.giaCaricate} spedizioni già in distinta (saltate)` : '') })
-        caricaRicevute(); carica()
+        caricaRicevute(); caricaDaCaricare(); carica()
       } else await dialog.alert({ title: 'Errore', message: j.error || 'Errore durante il caricamento.' })
     } catch { await dialog.alert({ title: 'Errore', message: 'Errore durante il caricamento.' }) }
     setCaricando(false)
@@ -92,11 +118,17 @@ export default function DistinteContrassegniPage() {
       })
       const data = await res.json()
       if (data.success) {
-        await dialog.alert({ title: 'File processato', message: 'Spedizioni: ' + data.spedizioniProcessate + ' · Errori: ' + data.errori
-          + (data.saltateNonPagate ? ' · Non ancora pagate (saltate): ' + data.saltateNonPagate : '')
-          + (data.doppioniFile ? ' · Doppioni nel file (saltati): ' + data.doppioniFile : '')
-          + (data.giaPagati ? ' · Già pagati in una distinta precedente (saltati): ' + data.giaPagati : '') })
+        await dialog.alert({ title: 'File caricato', message:
+            `Righe nel file: ${data.righeFile ?? '—'}\n`
+          + `Spedizioni riconosciute: ${data.spedizioniProcessate}\n`
+          + `Ora in attesa di essere caricate: ${data.inAttesa ?? 0} (€ ${Number(data.codDaPagare||0).toFixed(2)})\n`
+          + (data.saltateNonPagate ? `Non ancora pagate dal corriere (saltate): ${data.saltateNonPagate}\n` : '')
+          + (data.doppioniFile ? `Doppioni nel file (saltati): ${data.doppioniFile}\n` : '')
+          + (data.giaPagati ? `Già pagati in precedenza (saltati): ${data.giaPagati}\n` : '')
+          + (data.errori ? `Non trovate a sistema: ${data.errori}\n` : '')
+          + `\nControllali nella sezione "Contrassegni da caricare" e decidi a chi caricarli.` })
         fetch('/api/contrassegni/cod-files').then(r=>r.json()).then(d=>setCodFiles(d||[]))
+        caricaDaCaricare()
       }
     } catch(err) { await dialog.alert({ title: 'Errore', message: 'Errore nel caricamento del file.' }) }
     setUploading(false)
@@ -226,7 +258,51 @@ export default function DistinteContrassegniPage() {
         </div>
       </div>
 
-            {ricevute.length > 0 && (
+            {/* AREA DI SOSTA: contrassegni verificabili PRIMA di farli scendere, divisi per destinatario */}
+      {daCaricare.gruppi.length > 0 && (
+        <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #86efac',overflow:'hidden',marginBottom:'16px'}}>
+          <div style={{padding:'12px 16px',borderBottom:'1px solid #bbf7d0',background:'#f0fdf4',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'10px',flexWrap:'wrap' as const}}>
+            <div>
+              <div style={{fontSize:'13px',fontWeight:800,color:'#15803d'}}>💰 Contrassegni da caricare — {daCaricare.spedizioni} spedizioni · € {daCaricare.totale.toFixed(2)}</div>
+              <div style={{fontSize:'11.5px',color:'#166534',marginTop:'2px'}}>Verifica, poi scegli A CHI caricarli: solo allora scendono al livello sotto.</div>
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+              <label style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'12px',color:'#166534',cursor:'pointer',fontWeight:600}}>
+                <input type="checkbox" checked={selDest.size===daCaricare.gruppi.length && daCaricare.gruppi.length>0}
+                  onChange={e=>setSelDest(e.target.checked ? new Set(daCaricare.gruppi.map((g:any)=>g.chiave)) : new Set())}
+                  style={{width:'15px',height:'15px',cursor:'pointer'}}/>
+                Seleziona tutti
+              </label>
+              <button onClick={caricaDestinatari} disabled={caricando || !selDest.size}
+                style={{padding:'7px 16px',background:selDest.size?'#16a34a':'#d1d5db',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:700,cursor:selDest.size?'pointer':'default'}}>
+                {caricando ? 'Caricamento…' : `Carica selezionati (${selDest.size})`}
+              </button>
+            </div>
+          </div>
+          <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
+            <thead><tr style={{background:'#f9fafb'}}>
+              {['','Destinatario','Tipo','Spedizioni','Totale','Provenienza'].map((h,i)=><th key={i} style={{textAlign:'left' as const,padding:'7px 12px',fontWeight:700,textTransform:'uppercase' as const,fontSize:'10.5px',color:'#1a1a1a',borderBottom:'1px solid #e5e7eb'}}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {daCaricare.gruppi.map((g:any)=>(
+                <tr key={g.chiave} style={{borderBottom:'1px solid #f1f5f9',cursor:'pointer'}}
+                  onClick={()=>setSelDest(prev=>{const n=new Set(prev); n.has(g.chiave)?n.delete(g.chiave):n.add(g.chiave); return n})}>
+                  <td style={{padding:'7px 12px',width:'30px'}}><input type="checkbox" checked={selDest.has(g.chiave)} onChange={()=>{}} style={{width:'15px',height:'15px',pointerEvents:'none' as const}}/></td>
+                  <td style={{padding:'7px 12px',fontWeight:600,color:'#1a1a1a'}} title={(g.ldv||[]).slice(0,20).join(', ')}>{g.nome}</td>
+                  <td style={{padding:'7px 12px'}}>
+                    <span style={{fontSize:'10.5px',fontWeight:700,padding:'2px 7px',borderRadius:'999px',background:g.tipo==='cliente'?'#eff6ff':'#fff7ed',color:g.tipo==='cliente'?'#1d4ed8':'#c2410c'}}>{g.tipo}</span>
+                  </td>
+                  <td style={{padding:'7px 12px',color:'#1a1a1a'}}>{g.spedizioni}</td>
+                  <td style={{padding:'7px 12px',fontWeight:700,color:'#15803d'}}>€ {Number(g.totale).toFixed(2)}</td>
+                  <td style={{padding:'7px 12px',color:'#6b7280',fontSize:'11px'}}>{(g.origini||[]).map((o:string)=>o==='file'?'file corriere':'rimessa rete').join(' + ')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {ricevute.length > 0 && (
         <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #fbbf24',overflow:'hidden',marginBottom:'16px'}}>
           <div style={{padding:'12px 16px',borderBottom:'1px solid #fde68a',background:'#fffbeb',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'10px',flexWrap:'wrap' as const}}>
             <span style={{fontSize:'13px',fontWeight:'700',color:'#92400e'}}>📥 Rimesse contrassegni accettate — da caricare ({ricevute.length})</span>

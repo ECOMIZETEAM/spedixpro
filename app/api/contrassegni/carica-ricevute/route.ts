@@ -119,38 +119,28 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    let create = 0
-    // Verso i miei CLIENTI (livello finale): stato_contrassegno globale = stato del CLIENTE → in_distinta.
+    // AREA DI SOSTA: le rimesse accettate NON generano piu' distinte automatiche. I contrassegni
+    // entrano nel "da caricare" gia' divisi per destinatario (cliente o sotto-master) e sara' il
+    // master a scegliere a chi caricarli, esattamente come per il file del corriere.
+    const inSosta: any[] = []
     for (const [clienteId, sped] of Object.entries(clientiMap)) {
-      const totale = sped.reduce((acc, s) => acc + Number(s.contrassegno || 0), 0)
-      const { data: distinta } = await admin.from('distinte_contrassegni').insert({
-        master_id: mio, cliente_id: clienteId, totale_iniziale: totale, totale_rimborsato: totale, stato: 'in_lavorazione',
-      }).select().single()
-      if (!distinta) continue
-      await admin.from('distinte_contrassegni_righe').insert(sped.map(s => ({
-        distinta_id: distinta.id, spedizione_id: s.id, numero_spedizione: s.numero,
-        importo_cod: Number(s.contrassegno), importo_sistema: Number(s.contrassegno),
-      })))
-      await admin.from('spedizioni').update({ stato_contrassegno: 'in_distinta', distinta_contrassegno_id: distinta.id })
-        .in('id', sped.map(s => s.id)).neq('stato_contrassegno', 'pagato')
-      create++
+      for (const sp of sped) inSosta.push({ master_id: mio, spedizione_id: sp.id, importo: Number(sp.contrassegno) || 0,
+        cliente_id: clienteId, target_master_id: null, origine: 'rimessa', origine_id: ricevuteIds[0] || null })
     }
-    // Verso i SOTTO-MASTER (rimessa): niente stato globale (lo vede il loro elenco per-livello).
     for (const [flId, sped] of Object.entries(masterMap)) {
-      const totale = sped.reduce((acc, s) => acc + Number(s.contrassegno || 0), 0)
-      const { data: distinta } = await admin.from('distinte_contrassegni').insert({
-        master_id: mio, target_master_id: flId, totale_iniziale: totale, totale_rimborsato: totale, stato: 'in_lavorazione',
-      }).select().single()
-      if (!distinta) continue
-      await admin.from('distinte_contrassegni_righe').insert(sped.map(s => ({
-        distinta_id: distinta.id, spedizione_id: s.id, numero_spedizione: s.numero,
-        importo_cod: Number(s.contrassegno), importo_sistema: Number(s.contrassegno),
-      })))
-      create++
+      for (const sp of sped) inSosta.push({ master_id: mio, spedizione_id: sp.id, importo: Number(sp.contrassegno) || 0,
+        cliente_id: null, target_master_id: flId, origine: 'rimessa', origine_id: ricevuteIds[0] || null })
+    }
+    let create = 0
+    for (let i = 0; i < inSosta.length; i += 500) {
+      const { data: ins } = await admin.from('cod_da_caricare')
+        .upsert(inSosta.slice(i, i + 500), { onConflict: 'master_id,spedizione_id', ignoreDuplicates: true })
+        .select('id')
+      create += (ins || []).length
     }
 
     return NextResponse.json({
-      success: true, rimesseCaricate: ricevute.length, distinteCreate: create, giaCaricate,
+      success: true, rimesseCaricate: ricevute.length, inAttesa: create, giaCaricate,
       spedizioniTrovate: spedizioni.length, senzaDestinatario,
     })
   } catch (e: any) {

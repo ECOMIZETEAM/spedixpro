@@ -30,8 +30,7 @@ export async function POST(req: NextRequest) {
 
   let spedizioniProcessate = 0, codFile = 0, codSistema = 0, codDaPagare = 0, errori = 0, saltateNonPagate = 0
   let doppioniFile = 0, giaPagati = 0
-  const perCliente: Record<string, any[]> = {}
-  const perMaster: Record<string, any[]> = {}
+  const inSosta: any[] = []   // righe da mettere nell'area "da caricare" (niente distinte automatiche)
   // Anti-doppione DENTRO il file: la stessa spedizione ripetuta su più righe entrerebbe due volte
   // in distinta (il check su DB vede solo le distinte GIÀ salvate) → si pagherebbe doppio.
   const vistiInFile = new Set<string>()
@@ -90,60 +89,41 @@ export async function POST(req: NextRequest) {
     codSistema += Number(spedizione.contrassegno || 0)
     if (spedizione.stato_contrassegno !== 'pagato') codDaPagare += importoCod
 
-    const rigaDistinta = {
-      spedizione_id: spedizione.id, numero_spedizione: spedizione.numero,
-      importo_cod: importoCod, importo_sistema: Number(spedizione.contrassegno || 0),
-    }
+    // AREA DI SOSTA: il contrassegno NON scende subito al livello sotto. Si registra qui col suo
+    // destinatario (cliente diretto oppure primo master sotto di me) e sara' il master, dopo le
+    // sue verifiche, a decidere A CHI caricarlo da Distinte Contrassegni.
     if (idx === 0) {
-      // Cliente diretto: distinta di rimessa verso il cliente (flusso attuale)
       if (!spedizione.cliente_id) { errori++; continue }
-      if (!perCliente[spedizione.cliente_id]) perCliente[spedizione.cliente_id] = []
-      perCliente[spedizione.cliente_id].push(rigaDistinta)
+      inSosta.push({ master_id: masterId, spedizione_id: spedizione.id, importo: importoCod,
+        cliente_id: spedizione.cliente_id, target_master_id: null, origine: 'file' })
     } else {
-      // Catena: la rimessa si ferma al primo master sotto chi carica
-      const target = catena[idx - 1]
-      if (!perMaster[target]) perMaster[target] = []
-      perMaster[target].push(rigaDistinta)
+      inSosta.push({ master_id: masterId, spedizione_id: spedizione.id, importo: importoCod,
+        cliente_id: null, target_master_id: catena[idx - 1], origine: 'file' })
     }
   }
 
-  const { data: ultima } = await adminDb.from('distinte_contrassegni')
-    .select('numero').eq('master_id', masterId).order('numero', { ascending: false }).limit(1).maybeSingle()
-  let numeroDistinta = (ultima?.numero || 1000)
-  let codInDistinte = 0
-
-  async function creaDistinta(campi: any, righeDist: any[]) {
-    const totale = righeDist.reduce((s, r) => s + Number(r.importo_cod || 0), 0)
-    if (totale <= 0) return
-    numeroDistinta++
-    const { data: distinta } = await supabase.from('distinte_contrassegni').insert({
-      master_id: masterId, numero: numeroDistinta,
-      totale_iniziale: totale, totale_rimborsato: totale,
-      stato: 'in_lavorazione', ...campi,
-    }).select().single()
-    if (distinta?.id) {
-      codInDistinte += totale
-      await supabase.from('distinte_contrassegni_righe').insert(righeDist.map(r => ({ ...r, distinta_id: distinta.id })))
-      // stato_contrassegno GLOBALE = stato verso il CLIENTE FINALE: si marca 'in_distinta' SOLO
-      // per le distinte verso cliente. Per le rimesse verso sotto-master NON si tocca (ogni
-      // livello vede il proprio stato in elenco: verde solo quando HA INCASSATO lui).
-      const spedIds = righeDist.map(r => r.spedizione_id).filter(Boolean)
-      if (spedIds.length && campi.cliente_id) {
-        await supabase.from('spedizioni')
-          .update({ stato_contrassegno: 'in_distinta', distinta_contrassegno_id: distinta.id })
-          .in('id', spedIds)
-          .neq('stato_contrassegno', 'pagato')
-      }
+  // Inserimento nell'area di sosta. Il vincolo unico (master, spedizione) rende l'operazione
+  // ripetibile: ricaricando lo stesso file non si duplica nulla.
+  let inAttesa = 0
+  if (inSosta.length) {
+    for (let i = 0; i < inSosta.length; i += 500) {
+      const { data: ins } = await adminDb.from('cod_da_caricare')
+        .upsert(inSosta.slice(i, i + 500), { onConflict: 'master_id,spedizione_id', ignoreDuplicates: true })
+        .select('id')
+      inAttesa += (ins || []).length
     }
   }
-
-  for (const cid in perCliente) await creaDistinta({ cliente_id: cid, target_master_id: null }, perCliente[cid])
-  for (const mid in perMaster) await creaDistinta({ cliente_id: null, target_master_id: mid }, perMaster[mid])
+  const codInDistinte = 0   // nessuna distinta creata dall'upload: si creano al "Carica" 
 
   await supabase.from('cod_files').insert({
     master_id: masterId, nome_file: nomeFile, righe_file: (righe || []).length,
     spedizioni_processate: spedizioniProcessate, cod_file: codFile, cod_sistema: codSistema,
     cod_da_pagare: codDaPagare, cod_in_distinte: codInDistinte, errori,
   })
-  return NextResponse.json({ success: true, spedizioniProcessate, codFile, codSistema, codDaPagare, codInDistinte, errori, saltateNonPagate, doppioniFile, giaPagati })
+  return NextResponse.json({
+    success: true, spedizioniProcessate, codFile, codSistema, codDaPagare, codInDistinte,
+    errori, saltateNonPagate, doppioniFile, giaPagati,
+    inAttesa,                                   // quante spedizioni sono ora in attesa di essere caricate
+    righeFile: (righe || []).length,
+  })
 }
