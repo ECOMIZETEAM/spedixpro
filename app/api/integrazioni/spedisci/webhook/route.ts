@@ -28,11 +28,17 @@ function verifica(raw: string, id: string | null, timestamp: string | null, sign
     if (!tok.includes(',') && !tok.includes('=')) presentate.push(tok)   // header con la sola firma
   }
   if (!presentate.length) return false
-  // Chiavi candidate: secret grezzo + (per whsec_) il contenuto decodificato base64
+  // Chiavi candidate: secret grezzo, il contenuto decodificato base64 e ANCHE il secret senza il
+  // prefisso "whsec_" come testo — pannelli diversi firmano in modi diversi e questa terza
+  // variante mancava.
   const chiavi: (string | Buffer)[] = [secret]
-  if (secret.startsWith('whsec_')) { try { chiavi.push(Buffer.from(secret.slice(6), 'base64')) } catch {} }
-  // Contenuti firmabili: con message-id (standard) e senza (legacy)
-  const contenuti = [`${timestamp}.${raw}`]
+  if (secret.startsWith('whsec_')) {
+    const senzaPrefisso = secret.slice(6)
+    try { chiavi.push(Buffer.from(senzaPrefisso, 'base64')) } catch {}
+    chiavi.push(senzaPrefisso)
+  }
+  // Contenuti firmabili: con message-id (standard), senza (legacy) e col solo corpo.
+  const contenuti = [`${timestamp}.${raw}`, raw]
   if (id) contenuti.unshift(`${id}.${timestamp}.${raw}`)
   for (const chiave of chiavi) for (const c of contenuti) {
     const dig = crypto.createHmac('sha256', chiave as any).update(c).digest()
@@ -42,6 +48,28 @@ function verifica(raw: string, id: string | null, timestamp: string | null, sign
     }
   }
   return false
+}
+
+// Diagnostica di una firma NON riconosciuta: stampa le prime cifre di ogni combinazione
+// (chiave × contenuto) accanto a quella presentata, così si capisce in un colpo solo quale
+// schema usa il pannello. Non espone mai il segreto, solo 12 cifre di un digest.
+function diagnosticaFirma(raw: string, id: string | null, timestamp: string | null, presentata: string, segreti: string[]): string[] {
+  const out: string[] = [`presentata=${presentata.slice(0, 12)}`]
+  if (!timestamp) return out
+  segreti.forEach((secret, i) => {
+    const chiavi: [string, string | Buffer][] = [['grezzo', secret]]
+    if (secret.startsWith('whsec_')) {
+      try { chiavi.push(['base64', Buffer.from(secret.slice(6), 'base64')]) } catch {}
+      chiavi.push(['senza-prefisso', secret.slice(6)])
+    }
+    const contenuti: [string, string][] = [['ts.body', `${timestamp}.${raw}`], ['solo-body', raw]]
+    if (id) contenuti.push(['id.ts.body', `${id}.${timestamp}.${raw}`])
+    for (const [nk, k] of chiavi) for (const [nc, c] of contenuti) {
+      const d = crypto.createHmac('sha256', k as any).update(c).digest()
+      out.push(`s${i}/${nk}/${nc}=${d.toString('hex').slice(0, 12)}|${d.toString('base64').slice(0, 12)}`)
+    }
+  })
+  return out
 }
 
 // Mappa evento + stato Spedisci.online allo stato interno.
@@ -66,7 +94,10 @@ export async function POST(req: NextRequest) {
   const ts = req.headers.get('webhook-timestamp') || req.headers.get('svix-timestamp')
   const sig = req.headers.get('webhook-signature') || req.headers.get('svix-signature')
   if (!candidati.some(sec => verifica(raw, wid, ts, sig, sec))) {
-    console.log('[WEBHOOK][SPEDISCI] firma NON verificata. id:', wid, 'ts:', ts, 'sig:', String(sig).slice(0, 60))
+    console.log('[WEBHOOK][SPEDISCI] firma NON verificata. id:', wid, 'ts:', ts, 'sig:', String(sig).slice(0, 80))
+    // Confronto delle combinazioni possibili: dice subito quale schema usa il pannello.
+    const pres = (String(sig || '').split(/[\s,]+/).find(p => p.startsWith('v1=') || p.startsWith('v1,')) || '').slice(3)
+    if (pres) console.log('[WEBHOOK][SPEDISCI] confronto:', diagnosticaFirma(raw, wid, ts, pres, candidati).join(' '))
     return new NextResponse('Unauthorized', { status: 401 })
   }
 
