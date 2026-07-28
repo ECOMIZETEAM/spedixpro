@@ -15,45 +15,12 @@ export async function getValidShopifyToken(integrazione: any, db?: any): Promise
   if (!shop) return { error: 'Credenziali Shopify mancanti' }
   const now = Date.now()
 
-  // ── CLIENT CREDENTIALS GRANT (via primaria) ─────────────────────────────────
-  // Shopify NON accetta piu' i token offline non scadenti ("Non-expiring access tokens are
-  // no longer accepted"): i token salvati dai vecchi collegamenti sono morti. Con questo grant
-  // si conia un token a scadenza (24h) per ogni negozio che ha l'app installata, al volo.
-  if (cred.cc_token && cred.cc_expires_at && Number(cred.cc_expires_at) - now > 5 * 60 * 1000) {
-    return { token: cred.cc_token }
-  }
-  const ccKey = process.env.SHOPIFY_API_KEY
-  const ccSecret = process.env.SHOPIFY_API_SECRET
-  if (ccKey && ccSecret) {
-    try {
-      const r = await fetch(`https://${shop}/admin/oauth/access_token`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client_id: ccKey, client_secret: ccSecret, grant_type: 'client_credentials' }),
-      })
-      const raw = await r.text()
-      let d: any = null
-      try { d = JSON.parse(raw) } catch {}
-      if (r.ok && d?.access_token) {
-        const newCred = { ...cred, shop, cc_token: d.access_token, cc_expires_at: now + (Number(d.expires_in) || 86400) * 1000 }
-        try {
-          const supabase = db || await createServerSupabase()
-          await supabase.from('integrazioni').update({ credenziali: newCred }).eq('id', integrazione.id)
-        } catch { /* il token vale comunque per questa richiesta */ }
-        return { token: d.access_token }
-      }
-      // Perche' conta: se questa via fallisce si ripiega sul token OAuth, e se anche quello e'
-      // negato l'utente vede un errore generico. Registrare il motivo evita di indovinare.
-      console.error('[SHOPIFY][CC-FALLITO]', shop, String(raw).slice(0, 300))
-    } catch (e: any) {
-      console.log('[SHOPIFY] client_credentials errore per', shop, ':', e?.message || e)
-    }
-  }
-
-  // ── Fallback legacy: token salvato / refresh (vecchi collegamenti) ──────────
-  if (!token) return { error: 'Sessione Shopify scaduta. Ricollega il negozio dalle Integrazioni.' }
-
-  // Token ancora valido (con margine di 5 minuti)? Usalo.
-  if (!expiresAt || expiresAt - now > 5 * 60 * 1000) {
+  // ── TOKEN OAUTH: è QUESTO il token buono ────────────────────────────────────
+  // È quello che il negoziante ha autorizzato con i permessi che ha concesso (ordini compresi).
+  // Va usato per primo, sempre. Il token coniato con client_credentials è un ripiego temporaneo
+  // (24h) e NON porta con sé l'autorizzazione del negoziante: usandolo al posto di questo si
+  // finisce per chiedere gli ordini senza averne il diritto, e Shopify risponde 403.
+  if (token && (!expiresAt || expiresAt - now > 5 * 60 * 1000)) {
     return { token }
   }
 
