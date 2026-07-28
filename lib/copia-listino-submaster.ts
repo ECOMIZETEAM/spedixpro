@@ -95,10 +95,21 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
       subId = nuovo?.id
       if (subId) mappaCorrMio.set(key, { id: subId, settings: settingsContratto(c.settings) })
     } else {
-      // Esistente: aggiorno le impostazioni di contratto, MANTENENDO il mittente del sotto-master.
+      // Esistente: NON si sovrascrivono le impostazioni che il sotto-master ha salvato.
+      // Prima i valori del padre venivano messi per ultimi e vincevano: ogni volta che qualcuno
+      // più in alto salvava un listino, la cascata ripartiva e le impostazioni corriere del
+      // sotto-master (misure massime, peso max collo, colli, agevolazione peso) tornavano a
+      // quelle del padre — da qui il "dopo qualche ora si resettano".
+      // Ora il padre fa solo da VALORE DI PARTENZA: riempie le chiavi che il sotto-master non ha
+      // mai impostato (primo aggancio, o campo nuovo aggiunto in seguito) e non tocca le altre.
+      // Vale contratto per contratto: ogni corriere mantiene i propri valori, indipendenti.
+      const attuali = esist.settings || {}
+      const merged: any = { ...attuali }
+      for (const [k, v] of Object.entries(settingsContratto(c.settings))) {
+        if (attuali[k] === undefined || attuali[k] === null) merged[k] = v
+      }
       // Riattivo (attivo:true) nel caso fosse stato disattivato da una precedente disabilitazione poi
       // riabilitata -> così ricompare correttamente quando il detentore lo riattiva.
-      const merged = { ...(esist.settings || {}), ...settingsContratto(c.settings) }
       await admin.from('corrieri').update({ settings: merged, attivo: true }).eq('id', subId)
     }
     if (subId) mapCorr.set(c.id, subId)
