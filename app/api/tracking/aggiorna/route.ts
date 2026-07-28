@@ -28,12 +28,30 @@ export async function GET() {
   const spedizioni: any[] = []
   for (let pag = 0; pag < 8; pag++) {
     const { data: pagina } = await admin.from('spedizioni')
-      .select('id,numero,stato,raw_response,tracking_number,etichetta_url,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali)')
+      // MAI 'raw_response' né 'etichetta_url' interi: l'etichetta è il PDF in base64 (156 KB in
+      // media) e la risposta del corriere ~43 KB. Su 8.000 righe superavano il gigabyte e la
+      // funzione veniva UCCISA per memoria esaurita (4 volte nelle ultime 24h): il giro moriva
+      // a metà e il tracking restava indietro per tutti. Qui servono solo tre valori, presi
+      // direttamente dal JSON, e l'etichetta si guarda a parte (solo gli id di chi non ce l'ha).
+      .select('id,numero,stato,tracking_number,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code')
       .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
       .order('tracking_check_at', { ascending: true, nullsFirst: true })
       .order('id', { ascending: true })
       .range(pag * 1000, pag * 1000 + 999)
     for (const r of pagina || []) { if (!vistiIds.has(r.id)) { vistiIds.add(r.id); spedizioni.push(r) } }
+    if (!pagina || pagina.length < 1000) break
+  }
+
+  // Chi non ha l'etichetta: SOLO gli id, così sappiamo per quali tentare il recupero senza
+  // portarci in memoria i PDF di tutte le altre.
+  const senzaEtichetta = new Set<string>()
+  for (let pag = 0; pag < 8; pag++) {
+    const { data: pagina } = await admin.from('spedizioni')
+      .select('id').is('etichetta_url', null)
+      .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
+      .order('id', { ascending: true })
+      .range(pag * 1000, pag * 1000 + 999)
+    for (const r of pagina || []) senzaEtichetta.add((r as any).id)
     if (!pagina || pagina.length < 1000) break
   }
 
@@ -54,18 +72,18 @@ export async function GET() {
       let spCode: string | null = null
 
       if (tipo === 'spediamopro') {
-        const raw: any = s.raw_response || {}
-        const spid = raw.id || raw?.raw?.data?.id
+        // Valori presi dalle sole chiavi che servono (vedi select sopra), non dall'intero JSON.
+        const spid = (s as any).sp_id ?? (s as any).sp_id_annidato
         const authcode = cred?.authcode
         if (!spid || !authcode) return
-        spAuth = authcode; spId = Number(spid); spCode = raw.code || null
+        spAuth = authcode; spId = Number(spid); spCode = (s as any).sp_code || null
 
         const tr = await spediamoproGetTracking(authcode, Number(spid))
         nuovo = mapStatoSpediamopro(tr.status)
         if (nuovo === 'eccezione') {
           // distinguo giacenza (stock attivo) da altre eccezioni
           try {
-            const stocks = await spediamoproSearchStocks(authcode, tr.shipmentCode || raw.code || String(spid))
+            const stocks = await spediamoproSearchStocks(authcode, tr.shipmentCode || (s as any).sp_code || String(spid))
             const attivo = (stocks || []).find((st: any) => Number(st.status) === 1 && Number(st.shipmentId) === Number(spid))
             nuovo = attivo ? 'in_giacenza' : 'non_consegnato'
             // MOTIVO dichiarato dal corriere (es. "Rifiuto del destinatario"): serve all'operatore
@@ -115,7 +133,7 @@ export async function GET() {
       // RECUPERO ETICHETTA: se l'etichetta non è mai stata salvata (il completamento in background prova
       // solo ~20s, ma BRT Express a volte genera dopo minuti/ore) e ora c'è un tracking → la scarico UNA
       // volta e la salvo. Così il download è immediato e non dipende più dal fallback on-demand.
-      if (tipo === 'spediamopro' && !(s as any).etichetta_url && spAuth && spId && (nuovoTracking || s.tracking_number)) {
+      if (tipo === 'spediamopro' && senzaEtichetta.has(s.id) && spAuth && spId && (nuovoTracking || s.tracking_number)) {
         try {
           const lb = await spediamoproGetLabel(spAuth, spId, 1, 0)
           const norm = await normalizzaEtichetta(lb)
