@@ -178,7 +178,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       // Email di destinazione = quella NUOVA se cambiata in questo salvataggio, altrimenti l'attuale.
       const emailFinale = (aggiornamento.email || emailVecchia || cliente?.email || '').trim()
       const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
-      const newPassword = 'Mv' + Array.from({length:9}, () => chars[Math.floor(Math.random()*chars.length)]).join('')
+      // 14 caratteri: con 11 (Mv + 9) Supabase rifiutava la password ('at least 12 characters'),
+      // l'errore non veniva letto e al cliente arrivava una password MAI impostata.
+      const newPassword = 'Mv' + Array.from({length:12}, () => chars[Math.floor(Math.random()*chars.length)]).join('')
       // Utente di login del cliente (utenti.id == id auth). Se NON esiste (cliente importato/creato
       // senza accesso), lo CREO ora: così "reset password" vale anche come "attiva accesso".
       let { data: uLogin } = await adminClient.from('utenti').select('id').eq('cliente_id', id).limit(1).maybeSingle()

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
-function generaPassword(len = 10): string {
+// Almeno 12 caratteri: sotto quella soglia Supabase rifiuta la password.
+function generaPassword(len = 14): string {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#'
   return Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
 }

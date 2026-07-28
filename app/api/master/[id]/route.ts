@@ -95,7 +95,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   let passwordImpostata: string | undefined
   const nuovaPassword = (body.nuova_password || '').trim()
   if (nuovaPassword) {
-    if (nuovaPassword.length < 8) return NextResponse.json({ error: 'La password deve avere almeno 8 caratteri' }, { status: 400 })
+    if (nuovaPassword.length < 12) return NextResponse.json({ error: 'La password deve avere almeno 12 caratteri' }, { status: 400 })
     if (!authId) return NextResponse.json({ error: 'Utente di login del master non trovato' }, { status: 400 })
     const { error } = await admin.auth.admin.updateUserById(authId, { password: nuovaPassword })
     if (error) return NextResponse.json({ error: 'Password: ' + error.message }, { status: 400 })
@@ -107,7 +107,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.resetPassword) {
     if (!authId) return NextResponse.json({ error: 'Utente di login del master non trovato' }, { status: 400 })
     const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#'
-    const newPassword = Array.from({ length: 10 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+    // 14 caratteri: sotto i 12 Supabase RIFIUTA la password e il reset falliva.
+    const newPassword = Array.from({ length: 14 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
     const { error } = await admin.auth.admin.updateUserById(authId, { password: newPassword })
     if (error) return NextResponse.json({ error: 'Password: ' + error.message }, { status: 400 })
     passwordImpostata = newPassword

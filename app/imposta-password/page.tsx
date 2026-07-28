@@ -52,7 +52,7 @@ export default function ImpostaPassword() {
   }, [])
 
   async function salva() {
-    if (password.length < 8) { setMsg({ tipo: 'err', testo: 'La password deve avere almeno 8 caratteri' }); return }
+    if (password.length < 12) { setMsg({ tipo: 'err', testo: 'La password deve avere almeno 12 caratteri' }); return }
     if (password !== conferma) { setMsg({ tipo: 'err', testo: 'Le password non coincidono' }); return }
     setSalvando(true); setMsg(null)
     const { error } = await supabase.auth.updateUser({ password })

@@ -76,7 +76,8 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ success: true, email: email.trim(), password })
 }
 
-function generaPassword(len = 10): string {
+// 'Mv' + len: totale >= 12, soglia minima accettata da Supabase.
+function generaPassword(len = 12): string {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
   return 'Mv' + Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
 }
