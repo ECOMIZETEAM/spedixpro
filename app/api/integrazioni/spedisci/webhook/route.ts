@@ -160,3 +160,12 @@ export async function POST(req: NextRequest) {
 
   return new NextResponse('OK', { status: 200 })
 }
+
+// Verifica dell'endpoint: diversi pannelli (e chi configura) provano l'indirizzo in GET prima di
+// attivarlo. Rispondere 405 lo faceva risultare NON valido e il webhook non veniva mai acceso.
+// Qui si conferma soltanto che l'indirizzo è vivo: nessun dato, nessuna azione.
+export async function GET() {
+  return new NextResponse('OK — endpoint webhook attivo. Gli eventi vanno inviati in POST.', {
+    status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+  })
+}
