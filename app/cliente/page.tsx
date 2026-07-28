@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import CampoPassword from '../components/CampoPassword'
 
 export default function ClienteLogin() {
   const [email, setEmail] = useState('')
@@ -46,18 +47,19 @@ export default function ClienteLogin() {
         <form onSubmit={accedi} style={{display:'flex',flexDirection:'column' as const,gap:'14px'}}>
           <div>
             <label style={{fontSize:'11.5px',fontWeight:'600' as const,color:'#666',display:'block' as const,marginBottom:'4px'}}>Email</label>
-            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} required placeholder="Inserisci la tua email"
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} required placeholder="Inserisci la tua email" autoCapitalize="none" autoCorrect="off" spellCheck={false}
               style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',boxSizing:'border-box' as const}}/>
           </div>
           <div>
             <label style={{fontSize:'11.5px',fontWeight:'600' as const,color:'#666',display:'block' as const,marginBottom:'4px'}}>Password</label>
-            <input type="password" value={password} onChange={e=>setPassword(e.target.value)} required placeholder="••••••••"
-              style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',boxSizing:'border-box' as const}}/>
+            <CampoPassword value={password} onChange={setPassword} />
           </div>
           <button type="submit" disabled={loading}
             style={{background:'#f97316',color:'#fff',border:'none',padding:'11px',borderRadius:'6px',fontSize:'14px',fontWeight:'700' as const,cursor:'pointer',opacity:loading?0.7:1}}>
             {loading?'Accesso in corso...':'Accedi'}
           </button>
+          {/* Senza questa via il cliente che non ha (o ha sbagliato) la password resta fuori. */}
+          <a href="/recupera-password" style={{textAlign:'center' as const,color:'#888',fontSize:'12.5px',textDecoration:'none'}}>Password dimenticata?</a>
         </form>
       </div>
     </div>

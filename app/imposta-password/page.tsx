@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-browser'
+import CampoPassword from '../components/CampoPassword'
 
 export default function ImpostaPassword() {
   const supabase = createClient()
@@ -14,13 +15,39 @@ export default function ImpostaPassword() {
   useEffect(() => {
     // Il client browser (@supabase/ssr) scambia automaticamente il token dell'invito
     // presente nell'URL e crea la sessione: la intercetto qui.
+    // Con un token nell'indirizzo la sessione valida è SOLO quella che nasce dalla verifica:
+    // altrimenti questo ascoltatore, che scatta subito con la sessione già presente nel browser,
+    // sbloccherebbe il modulo sull'account sbagliato prima ancora che la verifica sia finita.
+    const conToken = new URLSearchParams(window.location.search).has('token_hash')
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      if (session) { setHasSession(true); setReady(true) }
+      if (session && !conToken) { setHasSession(true); setReady(true) }
     })
-    supabase.auth.getSession().then(({ data }) => {
+    ;(async () => {
+      // Link di RECUPERO PASSWORD: arriva con ?token_hash=...&type=recovery e la sessione la
+      // creiamo qui, senza dipendere dalla lista di indirizzi autorizzati del pannello Supabase.
+      const p = new URLSearchParams(window.location.search)
+      const tokenHash = p.get('token_hash')
+      // Tipo preso dall'indirizzo ma limitato ai valori previsti: non si passa al verificatore
+      // un valore arbitrario scritto da chi confeziona il link.
+      const richiesto = String(p.get('type') || 'recovery')
+      const tipo = (['recovery', 'invite', 'magiclink', 'email'].includes(richiesto) ? richiesto : 'recovery') as any
+      if (tokenHash) {
+        // La sessione eventualmente già aperta in questo browser va CHIUSA prima di verificare:
+        // se il token è scaduto o già consumato e restasse quella di prima, il modulo comparirebbe
+        // lo stesso e cambierebbe la password dell'account SBAGLIATO (tipico: il master apre nel
+        // proprio browser il link di recupero girato da un cliente).
+        await supabase.auth.signOut().catch(() => {})
+        const { data: v, error } = await supabase.auth.verifyOtp({ type: tipo, token_hash: tokenHash })
+        // Pulisco l'indirizzo: il token è a uso singolo, non deve restare nella cronologia.
+        window.history.replaceState(null, '', '/imposta-password')
+        if (v?.session && !error) { setHasSession(true); setReady(true); return }
+        // Link non valido: nessun ripiego sulla sessione presente, si dice e basta.
+        setHasSession(false); setReady(true); return
+      }
+      const { data } = await supabase.auth.getSession()
       if (data.session) setHasSession(true)
       setReady(true)
-    })
+    })()
     return () => { sub.subscription.unsubscribe() }
   }, [])
 
@@ -60,11 +87,11 @@ export default function ImpostaPassword() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div>
               <label style={lbl}>Nuova password</label>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" style={inp} />
+              <CampoPassword value={password} onChange={setPassword} required={false} />
             </div>
             <div>
               <label style={lbl}>Conferma password</label>
-              <input type="password" value={conferma} onChange={e => setConferma(e.target.value)} placeholder="••••••••" style={inp} />
+              <CampoPassword value={conferma} onChange={setConferma} required={false} />
             </div>
             <button onClick={salva} disabled={salvando} style={{ background: salvando ? '#fbbf24' : '#f97316', color: '#fff', border: 'none', padding: '11px', borderRadius: '6px', fontSize: '14px', fontWeight: 700, cursor: salvando ? 'default' : 'pointer' }}>
               {salvando ? 'Salvataggio...' : 'Imposta password ed entra'}

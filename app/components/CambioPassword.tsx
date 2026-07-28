@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase-browser'
+import CampoPassword from './CampoPassword'
 
 // Cambio password self-service per l'utente loggato (master / staff / cliente).
 // Cambia la password dell'account della sessione corrente: stessa email, nuova password.
@@ -38,12 +39,15 @@ export default function CambioPassword({ titolo = 'Cambio Password' }: { titolo?
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', maxWidth: '760px' }}>
           <div>
             <label style={lbl}>Nuova Password:</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" style={inp} />
+            <CampoPassword value={password} onChange={setPassword} placeholder="Almeno 8 caratteri" required={false} />
           </div>
           <div>
             <label style={lbl}>Conferma Password:</label>
-            <input type="password" value={conferma} onChange={e => setConferma(e.target.value)} placeholder="Conferma Password" style={inp} />
+            <CampoPassword value={conferma} onChange={setConferma} placeholder="Ripeti la password" required={false} />
           </div>
+        </div>
+        <div style={{ marginTop: '12px', fontSize: '12.5px', color: '#666' }}>
+          Da qui scegli tu la password: quella che hai ricevuto per email smette di valere.
         </div>
         <button onClick={salva} disabled={salvando} style={{ marginTop: '22px', padding: '9px 22px', background: salvando ? '#7fa8e0' : '#3b82c4', color: '#fff', border: 'none', borderRadius: '5px', fontSize: '14px', fontWeight: 600, cursor: salvando ? 'default' : 'pointer' }}>
           {salvando ? 'Salvataggio...' : 'Salva'}

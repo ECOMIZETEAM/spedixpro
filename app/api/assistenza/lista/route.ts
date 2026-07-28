@@ -21,11 +21,18 @@ export async function GET(_req: NextRequest) {
   // del cliente deve risalire in cima, non restare sepolto (prima "spariva" dalla vista).
   // fetchAll: lo STORICO (chiusi compresi) deve restare visibile per sempre — senza paginazione
   // PostgREST tronca a 1000 righe e i ticket più vecchi sparirebbero in silenzio.
-  if (ruolo === 'cliente') {
+  if (ruolo === 'cliente' || utente?.cliente_id) {
+    if (!utente?.cliente_id) return NextResponse.json({ ricevuti: [], miei: [] })
     const miei = await fetchAll(() => admin.from('tickets').select(cols)
-      .eq('cliente_id', utente?.cliente_id).order('updated_at', { ascending: false }))
-    return NextResponse.json({ ricevuti: [], miei: miei || [] })
+      .eq('cliente_id', utente.cliente_id).order('updated_at', { ascending: false }))
+    // Al cliente la catena di inoltro non va mostrata: uscivano nel corpo della risposta e
+    // bastava guardarla per sapere che la richiesta era stata girata più in alto, e a chi.
+    const puliti = (miei || []).map((r: any) => ({ ...r, inoltrato_a_master_id: undefined, rete_master_ids: undefined, rete_non_letti: undefined }))
+    return NextResponse.json({ ricevuti: [], miei: puliti })
   }
+  // Agente: sola lettura sui SUOI clienti, niente dati del master né della rete (lib/agente.ts).
+  // I ticket non hanno un agente, quindi non c'è un perimetro da applicare: resta fuori.
+  if (ruolo === 'agente') return NextResponse.json({ ricevuti: [], miei: [], rete: [] })
 
   // Master: ricevuti (owner) + miei (aperti verso la linea superiore) + RETE (inoltrati a me
   // da un master sotto di me: partecipo alla catena, il cliente non mi vede).

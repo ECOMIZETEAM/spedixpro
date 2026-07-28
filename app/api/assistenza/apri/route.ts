@@ -10,6 +10,7 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+  if ((utente?.ruolo || '').toLowerCase() === 'agente') return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const masterId = utente?.master_id
   if (!masterId) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
 

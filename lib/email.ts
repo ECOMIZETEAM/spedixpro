@@ -55,7 +55,7 @@ export async function inviaCredenzialiCliente({
         <div style="background:#f5f5f5;border-radius:8px;padding:20px 24px;margin-bottom:20px">
           <div style="padding:8px 0;border-bottom:1px solid #e8e8e8;font-size:13px;display:flex;justify-content:space-between">
             <span style="color:#999;text-transform:uppercase;font-size:11px;letter-spacing:0.5px">Portale</span>
-            <strong style="color:#1a1a1a;font-family:monospace">${portale}</strong>
+            <strong style="color:#1a1a1a;font-family:monospace">${portale}/cliente</strong>
           </div>
           <div style="padding:8px 0;border-bottom:1px solid #e8e8e8;font-size:13px;display:flex;justify-content:space-between">
             <span style="color:#999;text-transform:uppercase;font-size:11px;letter-spacing:0.5px">Email</span>
@@ -66,8 +66,15 @@ export async function inviaCredenzialiCliente({
             <strong style="color:#f97316;font-family:monospace;font-size:16px">${password}</strong>
           </div>
         </div>
-        <a href="https://${portale}" style="display:inline-block;background:#f97316;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;font-size:14px">Accedi al portale →</a>
-        <p style="color:#999;font-size:12px;margin-top:20px">⚠️ Cambia la password al primo accesso per sicurezza.</p>
+        <!-- Porta del CLIENTE, non il Control Center dei master: prima l'email mandava tutti
+             sulla pagina di accesso master. Si entrava lo stesso (il portale reindirizza), ma
+             è la porta sbagliata e chi la riceve non capisce dove deve andare. -->
+        <a href="https://${portale}/cliente" style="display:inline-block;background:#f97316;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;font-size:14px">Accedi al portale cliente →</a>
+        <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:12px 14px;margin-top:20px;font-size:12.5px;color:#9a3412;line-height:1.5">
+          <strong>Vale solo QUESTA email.</strong> Ogni volta che la password viene reimpostata ne arriva una nuova e la precedente smette di funzionare: se ne hai ricevute più di una, usa la più recente — questa è del ${new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}.
+          <div style="margin-top:6px">Non ti fa entrare? Dalla pagina di accesso usa <strong>“Password dimenticata?”</strong> e scegli tu la password.</div>
+        </div>
+        <p style="color:#999;font-size:12px;margin-top:16px">⚠️ Cambia la password al primo accesso per sicurezza.</p>
       `)
     })
     return { ok: true }
@@ -98,6 +105,29 @@ export async function inviaInvitoStaff({
     return { ok: true }
   } catch (err) {
     console.error('Errore invio invito staff:', err)
+    return { ok: false, error: err }
+  }
+}
+
+// RECUPERO PASSWORD: link per reimpostarla da soli. Serve perché le credenziali le crea il
+// master a mano: senza questa via, chi non le ha mai ricevute o le ha perse resta fuori e deve
+// per forza farsi risettare la password da qualcuno.
+export async function inviaRecuperoPassword({ email, link }: { email: string; link: string }) {
+  try {
+    await resend.emails.send({
+      from: FROM,
+      to: email,
+      subject: 'MoovExpress — Reimposta la tua password',
+      html: wrap(`
+        <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Reimposta la password</h2>
+        <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 20px">Hai chiesto di accedere di nuovo al tuo portale MoovExpress. Scegli una nuova password con il pulsante qui sotto: il collegamento vale <strong>un'ora</strong> e una volta sola.</p>
+        <a href="${link}" style="display:inline-block;background:#f97316;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;font-size:14px">Scegli una nuova password →</a>
+        <p style="color:#999;font-size:12px;margin-top:20px">Se non sei stato tu, ignora questa email: la password attuale resta valida.</p>
+      `)
+    })
+    return { ok: true }
+  } catch (err) {
+    console.error('Errore invio recupero password:', err)
     return { ok: false, error: err }
   }
 }

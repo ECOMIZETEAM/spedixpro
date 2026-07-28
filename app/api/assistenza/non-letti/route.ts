@@ -16,7 +16,11 @@ export async function GET(_req: NextRequest) {
 
   let ticket = 0, pod = 0
 
-  if (ruolo === 'cliente') {
+  if (ruolo === 'agente') {
+    // L'agente non vede i ticket del master: nessun contatore.
+    return NextResponse.json({ count: 0, ticket: 0, pod: 0 })
+  }
+  if (ruolo === 'cliente' || utente?.cliente_id) {
     const { data } = await admin.from('tickets').select('categoria').eq('cliente_id', utente?.cliente_id).eq('aperto_letto', false)
     for (const r of (data || [])) { if (cat(r) === 'pod') pod++; else ticket++ }
   } else if (utente?.master_id) {

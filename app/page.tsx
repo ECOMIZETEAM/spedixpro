@@ -1,3 +1,5 @@
+import CampoPassword from './components/CampoPassword'
+
 export default function Home() {
   return (
     <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#f5f5f5',fontFamily:'var(--font-geist-sans),system-ui,sans-serif'}}>
@@ -10,18 +12,23 @@ export default function Home() {
           <div>
             <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Email</label>
             <input name="email" type="email" required placeholder="Inserisci la tua email"
+              autoCapitalize="none" autoCorrect="off" spellCheck={false}
               style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',boxSizing:'border-box'}}/>
           </div>
           <div>
             <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Password</label>
-            <input name="password" type="password" required placeholder="••••••••"
-              style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',boxSizing:'border-box'}}/>
+            <CampoPassword />
           </div>
           <button type="submit"
             style={{background:'#f97316',color:'#fff',border:'none',padding:'11px',borderRadius:'6px',fontSize:'14px',fontWeight:'700',cursor:'pointer'}}>
             Accedi
           </button>
         </form>
+        {/* Senza questa via chi perde (o non riceve mai) la password resta fuori: le credenziali
+            le imposta il master a mano e nessuna email parte da sola. */}
+        <div style={{textAlign:'center',marginTop:'16px'}}>
+          <a href="/recupera-password" style={{color:'#888',fontSize:'12.5px',textDecoration:'none'}}>Password dimenticata?</a>
+        </div>
       </div>
     </div>
   )

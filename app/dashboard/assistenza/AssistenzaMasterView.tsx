@@ -35,15 +35,21 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   const [threadLoad, setThreadLoad] = useState(false)
   const [testo, setTesto] = useState('')
   const [inviando, setInviando] = useState(false)
-  const [ruoloChat, setRuoloChat] = useState<'master' | 'cliente' | 'rete'>('master')   // lato del master in QUESTA chat
+  // '' = ruolo non ancora noto (dettaglio in caricamento): finché è così non si mostra nessun
+  // comando, per non far comparire azioni che potrebbero non spettare a chi guarda.
+  const [ruoloChat, setRuoloChat] = useState<'' | 'master' | 'cliente' | 'rete'>('')   // lato del master in QUESTA chat
   const [rete, setRete] = useState<any[]>([])           // ticket inoltrati a me dalla rete
   const [internoMsg, setInternoMsg] = useState(false)   // owner: messaggio interno alla rete (invisibile al cliente)
 
   async function apriDettaglio(t: any) {
-    setSel(t); setMsg(''); setTesto(''); setThread([]); setThreadLoad(true); setInternoMsg(false)
+    // Il ruolo va AZZERATO: restando quello del ticket precedente, per tutta la durata della
+    // chiamata comparivano comandi non miei — es. aprendo una MIA richiesta POD si vedeva il
+    // riquadro di caricamento e "Inoltra", che spettano a chi la richiesta l'ha ricevuta.
+    setSel(t); setMsg(''); setTesto(''); setThread([]); setThreadLoad(true); setInternoMsg(false); setRuoloChat('')
     const d = await fetch('/api/assistenza/' + t.id).then(r => r.json()).catch(() => null)
     setThreadLoad(false)
     if (d && !d.error) { setThread(d.messaggi || []); setRuoloChat(d.ruolo || 'master'); setSel((s: any) => s ? { ...s, ...d.ticket } : d.ticket) }
+    else setMsg(d?.error || 'Impossibile aprire la richiesta')
   }
   async function inviaMsg() {
     if (!testo.trim() || !sel?.id) return
@@ -225,13 +231,15 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr style={{ background: '#f9fafb' }}>{['Codice', 'Data', 'LDV', 'Stato', isPod ? 'POD' : 'Chat'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
               <tbody>
+                {/* Anche le POD si aprono: è aprendo la richiesta che la notifica "Nuovo" si
+                    spegne, ed è lì che si scarica la POD ricevuta o la si inoltra più in alto. */}
                 {mieiFiltrati.map(t => (
-                  <tr key={t.id} onClick={() => { if (!isPod) apriDettaglio(t) }} style={{ cursor: isPod ? 'default' : 'pointer' }}>
+                  <tr key={t.id} onClick={() => apriDettaglio(t)} style={{ cursor: 'pointer' }}>
                     <td style={{ ...td, whiteSpace: 'nowrap', fontWeight: 700, color: '#f97316', fontSize: '12.5px' }}>{t.codice || '—'}</td>
                     <td style={{ ...td, whiteSpace: 'nowrap', fontSize: '12px' }}>{new Date(t.created_at).toLocaleDateString('it-IT')}</td>
                     <td style={td}>{t.oggetto} {t.aperto_letto === false && <span style={{ background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px' }}>● Nuovo</span>}</td>
                     <td style={td}><Badge stato={t.stato} /></td>
-                    <td style={{ ...td, color: '#555', fontSize: '12px' }}>{isPod ? (t.pod_url ? <a href={t.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }} onClick={e => e.stopPropagation()}>⬇ Scarica POD</a> : '—') : <span style={{ color: '#2563eb', fontWeight: 600 }}>💬 Apri chat</span>}</td>
+                    <td style={{ ...td, color: '#555', fontSize: '12px' }}>{isPod ? (t.pod_url ? <a href={t.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }} onClick={e => { e.stopPropagation(); fetch('/api/assistenza/' + t.id).catch(() => {}); setTimeout(() => carica(true), 600) }}>⬇ Scarica POD</a> : '—') : <span style={{ color: '#2563eb', fontWeight: 600 }}>💬 Apri chat</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -318,7 +326,17 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                 </div>
               )}
 
-              {sel.categoria === 'pod' && (
+              {/* Il caricamento della POD è di chi RISPONDE (assistenza diretta o master della
+                  catena). Sulla richiesta che ho aperto IO più in alto vedo solo il PDF ricevuto. */}
+              {sel.categoria === 'pod' && ruoloChat === 'cliente' && (
+                <div style={{ background: '#f0f9ff', border: '2px dashed #bae6fd', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px' }}>Prova di consegna (POD) — LDV {sel.oggetto}</div>
+                  {sel.pod_url
+                    ? <a href={sel.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica la POD ricevuta</a>
+                    : <div style={{ fontSize: '12.5px', color: '#555' }}>In attesa che il tuo master carichi la POD.</div>}
+                </div>
+              )}
+              {sel.categoria === 'pod' && (ruoloChat === 'master' || ruoloChat === 'rete') && (
                 <div
                   onDragOver={e => { e.preventDefault(); setDragPod(true) }}
                   onDragLeave={() => setDragPod(false)}
@@ -333,7 +351,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '12.5px', color: '#1a1a1a', fontWeight: 600 }}>📄 {podFile.nome}</div>
                       <iframe src={podFile.dati} title="Anteprima POD" style={{ width: '100%', height: '320px', border: '1px solid #cbd5e1', borderRadius: '8px', background: '#fff' }} />
                       <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
-                        <button disabled={salvando} onClick={async () => { if (await inviaPod(sel.id)) { setPodFile(null); setSel(null) } }} style={{ padding: '10px 18px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Invio…' : '✓ Invia al cliente'}</button>
+                        <button disabled={salvando} onClick={async () => { if (await inviaPod(sel.id)) { setPodFile(null); setSel(null) } }} style={{ padding: '10px 18px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Invio…' : (ruoloChat === 'rete' ? '✓ Invia la POD' : '✓ Invia al cliente')}</button>
                         <button disabled={salvando} onClick={() => setPodFile(null)} style={{ padding: '10px 16px', background: '#fff', color: '#1a1a1a', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>Rimuovi</button>
                       </div>
                     </div>
@@ -374,7 +392,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
               ))}
 
               {/* Inoltro alla linea superiore: il ticket resta unico, il cliente non lo sa */}
-              {!isPod && (ruoloChat === 'master' || ruoloChat === 'rete') && sel.stato !== 'chiuso' && (
+              {(ruoloChat === 'master' || ruoloChat === 'rete') && sel.stato !== 'chiuso' && (
                 <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
                   <button disabled={salvando} onClick={async () => {
                     setSalvando(true); setMsg('')
@@ -386,7 +404,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     if (d && !d.error) { setThread(d.messaggi || []); setSel((s: any) => ({ ...s, ...d.ticket })) }
                     carica(true)
                   }} style={{ padding: '8px 14px', border: '1px solid #1a1a1a', background: '#fff', color: '#1a1a1a', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>⤴ Inoltra al mio master superiore</button>
-                  <span style={{ marginLeft: '8px', fontSize: '11px', color: '#888' }}>Il master superiore vedrà tutta la conversazione; il cliente non ne saprà nulla.</span>
+                  <span style={{ marginLeft: '8px', fontSize: '11px', color: '#888' }}>{isPod ? 'Se la POD non ce l\'hai tu, la carica il master superiore su QUESTA richiesta: arriva al cliente da sola, senza riaprire una seconda richiesta.' : 'Il master superiore vedrà tutta la conversazione; il cliente non ne saprà nulla.'}</span>
                 </div>
               )}
 

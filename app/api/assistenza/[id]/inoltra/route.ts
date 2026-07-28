@@ -10,9 +10,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
   const mio = utente?.master_id
-  if (!mio || (utente?.ruolo || '').toLowerCase() === 'cliente') {
+  const ruolo = (utente?.ruolo || '').toLowerCase()
+  // Inoltrare espone la conversazione del cliente al master superiore ed e' IRREVERSIBILE:
+  // fuori il portale cliente e l'agente (sola lettura, niente rete - lib/agente.ts).
+  if (!mio || ruolo === 'cliente' || utente?.cliente_id || ruolo === 'agente') {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
   const { id } = await params

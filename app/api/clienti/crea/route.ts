@@ -58,19 +58,38 @@ export async function POST(req: NextRequest) {
     codice_cliente: codice, attivo: true,
   }).select().single()
   if (error || !nuovoCliente) return NextResponse.json({ error: error?.message||'Errore creazione' }, { status: 400 })
+  // L'accesso va creato PRIMA di spedire le credenziali. Se qui falliva (indirizzo già usato da
+  // un altro account, ecc.) l'errore non veniva letto e l'email partiva lo stesso: al cliente
+  // arrivava una password di un account inesistente e non riusciva ad entrare.
+  let accessoCreato = false
+  let motivoAccesso = ''
   try {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const adminClient = createAdminSupabase()
-    const { data: authUser } = await adminClient.auth.admin.createUser({ email, password, email_confirm: true })
-    if (authUser?.user) {
+    const { data: authUser, error: aErr } = await adminClient.auth.admin.createUser({ email, password, email_confirm: true })
+    if (aErr || !authUser?.user) {
+      motivoAccesso = aErr?.message || 'creazione utente non riuscita'
+      console.error('[CLIENTE][ACCESSO] createUser fallito', { email, motivo: motivoAccesso })
+    } else {
       // client ADMIN: la riga utenti è di un altro utente, l'RLS bloccherebbe il client utente-scoped
       const { error: uErr } = await adminClient.from('utenti').insert({ id: authUser.user.id, ruolo: 'cliente', master_id: utente.master_id, cliente_id: nuovoCliente.id, nome: ragioneSociale, attivo: true })
-      if (uErr) console.error('Errore creazione riga utenti cliente:', uErr)
+      if (uErr) { motivoAccesso = uErr.message; console.error('Errore creazione riga utenti cliente:', uErr) }
+      else accessoCreato = true
     }
-  } catch(e) { console.error('Auth error:', e) }
-  try {
-    const master = (utente as any).masters
-    await inviaCredenzialiCliente({ email, nomeCliente: ragioneSociale, masterNome: master?.nome||'MoovExpress', dominio: 'moovexpress.com', password })
-  } catch(e) { console.error('Email error:', e) }
-  return NextResponse.json({ id: nuovoCliente.id, codice, email, password })
+  } catch(e: any) { motivoAccesso = e?.message || 'errore imprevisto'; console.error('Auth error:', e) }
+
+  // Credenziali spedite SOLO se l'accesso esiste davvero.
+  if (accessoCreato) {
+    try {
+      const master = (utente as any).masters
+      await inviaCredenzialiCliente({ email, nomeCliente: ragioneSociale, masterNome: master?.nome||'MoovExpress', dominio: 'moovexpress.com', password })
+    } catch(e) { console.error('Email error:', e) }
+  }
+  return NextResponse.json({
+    id: nuovoCliente.id, codice, email,
+    password: accessoCreato ? password : null,
+    accessoCreato,
+    // Il master deve saperlo subito: il cliente è in anagrafica ma senza accesso.
+    avviso: accessoCreato ? null : `Cliente creato, ma l'ACCESSO non è stato attivato (${motivoAccesso}). Nessuna email inviata: apri la scheda del cliente e usa "Reset password" per attivarlo.`,
+  })
 }

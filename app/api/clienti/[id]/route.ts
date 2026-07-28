@@ -193,7 +193,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       }
       if (uLogin?.id && emailFinale) {
         // Se appena creato ha già email+password; altrimenti aggiorno email attiva + password.
-        if (!loginCreato) await adminClient.auth.admin.updateUserById(uLogin.id, { email: emailFinale, email_confirm: true, password: newPassword })
+        // L'ESITO va letto: se l'aggiornamento fallisce e l'email parte lo stesso, al cliente
+        // arriva una password che non è mai stata impostata e non riesce ad entrare.
+        if (!loginCreato) {
+          const { error: uErr } = await adminClient.auth.admin.updateUserById(uLogin.id, { email: emailFinale, email_confirm: true, password: newPassword })
+          if (uErr) {
+            console.error('[CLIENTE][RESET] aggiornamento password fallito', { email: emailFinale, motivo: uErr.message })
+            return NextResponse.json({ error: 'Password NON aggiornata (' + uErr.message + '): nessuna email inviata, riprova.' }, { status: 400 })
+          }
+        }
         const { inviaCredenzialiCliente } = await import('@/lib/email')
         await inviaCredenzialiCliente({ email: emailFinale, nomeCliente: cliente?.ragione_sociale || '', masterNome: 'MoovExpress', dominio: 'moovexpress.com', password: newPassword })
         emailInviata = true

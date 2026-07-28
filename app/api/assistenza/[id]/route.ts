@@ -7,10 +7,19 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 // superiore). null = non è parte del ticket (non autorizzato).
 async function partecipante(utente: any, ticket: any): Promise<'master' | 'cliente' | 'rete' | null> {
   if (!utente) return null
-  // IMPORTANTE: un utente CLIENTE ha anche un master_id (il suo master), che coincide con
-  // l'owner_master_id del ticket → va controllato PRIMA il lato cliente, altrimenti il cliente
-  // verrebbe scambiato per "master" e i suoi messaggi apparirebbero come scritti dall'assistenza.
-  if (utente.cliente_id && utente.cliente_id === ticket.cliente_id) return 'cliente'      // cliente che ha aperto
+  const ruolo = String(utente.ruolo || '').toLowerCase()
+  // UTENTE DEL PORTALE CLIENTE: può stare SOLO sul proprio ticket, mai su altro.
+  // Anche il cliente ha un master_id (il master a cui appartiene) e coincide con
+  // l'owner_master_id del ticket: senza questa uscita anticipata, aprendo il ticket di un ALTRO
+  // cliente dello stesso master si cadeva nel ramo "master" più sotto e lo si leggeva tutto,
+  // messaggi interni di rete compresi, potendo anche scrivere firmandosi come assistenza.
+  if (ruolo === 'cliente' || utente.cliente_id) {
+    return utente.cliente_id && utente.cliente_id === ticket.cliente_id ? 'cliente' : null
+  }
+  // AGENTE: sola lettura sui SUOI clienti e nessun dato del master o della rete (lib/agente.ts).
+  // Qui non c'è modo di limitarlo al suo perimetro (i ticket non hanno un agente), quindi resta
+  // fuori: prima era indistinguibile dal master e vedeva le conversazioni di tutti i clienti.
+  if (ruolo === 'agente') return null
   if (utente.master_id && utente.master_id === ticket.aperto_master_id) return 'cliente'  // master che ha aperto (richiedente)
   if (utente.master_id && utente.master_id === ticket.owner_master_id) return 'master'    // lato che risponde
   // Master della CATENA a cui il ticket e' stato inoltrato: vede tutto, il cliente non lo vede.
@@ -51,7 +60,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const rimasti = (t.rete_non_letti || []).filter((x: string) => x !== utente?.master_id)
     await admin.from('tickets').update({ rete_non_letti: rimasti }).eq('id', id)
   }
-  return NextResponse.json({ ticket: t, messaggi: msgOut, ruolo })
+  // Al RICHIEDENTE l'inoltro non si racconta: i messaggi interni erano già nascosti, ma i campi
+  // della catena uscivano lo stesso nel corpo della risposta e bastava guardarla per scoprire
+  // che la richiesta era stata girata più in alto, e a chi.
+  const ticketOut = ruolo === 'cliente'
+    ? { ...t, inoltrato_a_master_id: undefined, rete_master_ids: undefined, rete_non_letti: undefined }
+    : t
+  return NextResponse.json({ ticket: ticketOut, messaggi: msgOut, ruolo })
 }
 
 // POST: aggiunge un messaggio al thread. Entrambe le parti possono scrivere finché il ticket
@@ -119,22 +134,45 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
   const masterId = utente?.master_id
-  if (!masterId || (utente?.ruolo || '').toLowerCase() === 'cliente') {
+  const ruoloUtente = (utente?.ruolo || '').toLowerCase()
+  // Fuori il portale cliente e l'agente (sola lettura, niente dati del master né della rete).
+  if (!masterId || ruoloUtente === 'cliente' || utente?.cliente_id || ruoloUtente === 'agente') {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
   const { id } = await params
   const body = await req.json()
   const admin = createAdminSupabase()
 
-  const { data: t } = await admin.from('tickets').select('owner_master_id').eq('id', id).maybeSingle()
+  const { data: t } = await admin.from('tickets').select('owner_master_id,rete_master_ids,rete_non_letti').eq('id', id).maybeSingle()
   if (!t) return NextResponse.json({ error: 'Ticket non trovato' }, { status: 404 })
-  if (t.owner_master_id !== masterId) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  const inCatena = Array.isArray(t.rete_master_ids) && t.rete_master_ids.includes(masterId)
+  const sonoOwner = t.owner_master_id === masterId
+  if (!sonoOwner && !inCatena) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+
+  const caricaPod = typeof body?.podBase64 === 'string' && !!body.podBase64
+  // Un master della catena può SOLO caricare la POD (è il senso dell'inoltro: ce l'ha lui e la
+  // mette su questa richiesta). NON deve poter cambiare stato né archiviare il ticket di un
+  // cliente che non è suo: quella resta una decisione dell'assistenza diretta.
+  if (!sonoOwner && !caricaPod) {
+    return NextResponse.json({ error: 'Da qui puoi solo caricare la POD: lo stato lo gestisce chi ha ricevuto la richiesta.' }, { status: 403 })
+  }
 
   const upd: any = { updated_at: new Date().toISOString(), aperto_letto: false }
-  // 'chiuso' = archiviato (termina la chat, sola lettura).
-  if (body?.stato && ['aperto', 'in_lavorazione', 'risolto', 'chiuso'].includes(body.stato)) upd.stato = body.stato
+  const altriInCatena = (t.rete_master_ids || []).filter((x: string) => x !== masterId)
+  if (sonoOwner) {
+    // La notifica dell'owner si spegne SOLO quando ha davvero evaso la richiesta caricando la
+    // POD. Spegnerla a ogni salvataggio cancellava il "Nuovo" di un messaggio MAI letto: i
+    // bottoni rapidi "In lavorazione"/"Segna risolto" stanno nella LISTA, non nella chat.
+    if (caricaPod) upd.non_letto_owner = false
+    if (altriInCatena.length) upd.rete_non_letti = altriInCatena          // la catena segue l'esito
+  } else {
+    upd.non_letto_owner = true                                            // avviso l'assistenza diretta
+    upd.rete_non_letti = altriInCatena                                    // e tolgo me dai non letti
+  }
+  // 'chiuso' = archiviato (termina la chat, sola lettura). Solo l'assistenza diretta.
+  if (sonoOwner && body?.stato && ['aperto', 'in_lavorazione', 'risolto', 'chiuso'].includes(body.stato)) upd.stato = body.stato
 
   // Caricamento PDF della POD (base64) -> storage -> pod_url. Caricare la POD chiude la richiesta.
   if (typeof body?.podBase64 === 'string' && body.podBase64) {
