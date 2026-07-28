@@ -41,7 +41,9 @@ export async function getValidShopifyToken(integrazione: any, db?: any): Promise
         } catch { /* il token vale comunque per questa richiesta */ }
         return { token: d.access_token }
       }
-      console.log('[SHOPIFY] client_credentials fallito per', shop, ':', String(raw).slice(0, 180))
+      // Perche' conta: se questa via fallisce si ripiega sul token OAuth, e se anche quello e'
+      // negato l'utente vede un errore generico. Registrare il motivo evita di indovinare.
+      console.error('[SHOPIFY][CC-FALLITO]', shop, String(raw).slice(0, 300))
     } catch (e: any) {
       console.log('[SHOPIFY] client_credentials errore per', shop, ':', e?.message || e)
     }
@@ -110,9 +112,16 @@ export async function shopifyGraphQL(shop: string, token: string, query: string,
   const raw = await r.text()
   let d: any = null
   try { d = JSON.parse(raw) } catch {}
-  if (r.status === 403 || r.status === 401) {
-    // Tipico su app appena create: dati cliente protetti non approvati o scope ordini mancante
-    throw new Error('Shopify ha negato l\'accesso agli ordini (HTTP ' + r.status + '). Verifica nel Partner Dashboard di aver richiesto e ottenuto l\'accesso ai "Protected customer data" e lo scope read_orders, poi ricollega il negozio.')
+  // 401 e 403 sono due problemi DIVERSI e vanno detti diversamente: prima finivano nello stesso
+  // messaggio (che parlava di dati protetti) e la risposta vera di Shopify veniva buttata via,
+  // quindi non si capiva mai quale dei due fosse. Ora si registra il corpo dell'errore.
+  if (r.status === 401) {
+    console.error('[SHOPIFY][401]', shop, raw.slice(0, 300))
+    throw new Error('Il collegamento con Shopify non è più valido (sessione scaduta o app disinstallata dal negozio). Ricollega il negozio dalle Integrazioni.')
+  }
+  if (r.status === 403) {
+    console.error('[SHOPIFY][403]', shop, raw.slice(0, 300))
+    throw new Error('Shopify ha negato la lettura degli ordini (403): l\'app non ha l\'accesso approvato ai dati protetti del cliente (nome, indirizzo, email, telefono). Va richiesto nel Partner Dashboard, in API access → Protected customer data. Sui negozi di sviluppo funziona anche senza, sugli altri no.')
   }
   if (!r.ok) throw new Error(`Shopify HTTP ${r.status}: ${raw.slice(0, 150)}`)
   if (d?.errors) {
