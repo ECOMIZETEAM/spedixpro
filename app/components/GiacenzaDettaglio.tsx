@@ -26,7 +26,7 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
   const dialog = useDialog()
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
+  const [msg, setMsg] = useState<{ t: 'ok' | 'err' | 'avviso'; x: string } | null>(null)
   const [salvando, setSalvando] = useState(false)
   // form gestisci
   const [op, setOp] = useState('riconsegna')
@@ -52,6 +52,9 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
       const j = await r.json().catch(() => ({}))
       setSalvando(false)
       if (!r.ok || j.error) { setMsg({ t: 'err', x: j.error || 'Errore (' + r.status + ')' }); return false }
+      // Avviso non bloccante del corriere (es. riconsegna allo stesso indirizzo dopo un
+      // "indirizzo errato"): l'operazione e' stata fatta, ma chi opera deve saperlo.
+      if (j.avviso) setMsg({ t: 'avviso', x: j.avviso })
       await carica()
       return true
     } catch (e: any) { setSalvando(false); setMsg({ t: 'err', x: 'Errore di rete' }); return false }
@@ -96,7 +99,7 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
         </div>
       </div>
 
-      {msg && <div style={{ padding: '10px 14px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', color: '#fff', background: msg.t === 'ok' ? '#16a34a' : '#dc2626' }}>{msg.x}</div>}
+      {msg && <div style={{ padding: '10px 14px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', color: '#fff', background: msg.t === 'ok' ? '#16a34a' : msg.t === 'avviso' ? '#ea580c' : '#dc2626' }}>{msg.x}</div>}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.1fr) minmax(0,1fr)', gap: '20px', alignItems: 'start' }}>
 

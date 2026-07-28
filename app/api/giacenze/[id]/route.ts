@@ -230,6 +230,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const istr = `${opLabel[rich.operazione] || rich.operazione}${rich.data_operazione ? ' - data ' + rich.data_operazione : ''}${rich.note ? ' - ' + rich.note : ''}`
 
     // Invio dello svincolo al corriere.
+    let avviso: string | null = null   // segnalazione non bloccante da mostrare a chi opera
     const cred = sped.corrieri?.credenziali as Record<string, any>
     if (cred?.authcode) {
       // SpediamoPro: rilascio dello STOCK (giacenza). Prima veniva SALTATO (cercava master_domain
@@ -262,10 +263,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         if (/rifiut|refus|respint/i.test(motivo) && releaseAction !== 3) {
           return NextResponse.json({ error: `Il destinatario ha RIFIUTATO il pacco (motivo del corriere: "${motivo}"): la riconsegna non è accettata. Scegli "Reso al mittente".` }, { status: 400 })
         }
-        // Indirizzo errato/incompleto/sconosciuto: riconsegnare allo STESSO indirizzo fallirebbe di
-        // nuovo. Serve un nuovo indirizzo (releaseAction 2) o il reso (3).
+        // Indirizzo errato/incompleto/sconosciuto: riconsegnare allo STESSO indirizzo ha buone
+        // probabilita' di fallire di nuovo, ma NON e' impossibile (il corriere a volte ritenta e
+        // consegna). Prima era un blocco: il master si vedeva negare un'operazione che il cliente
+        // dal suo portale poteva fare comunque. Ora si avvisa e si lascia decidere a chi opera.
         if (/indirizzo\s*(errato|inesistente|incompleto)|sconosciut|manca civico|incompl/i.test(motivo) && releaseAction === 1) {
-          return NextResponse.json({ error: `Il corriere non ha trovato il destinatario (motivo: "${motivo}"): riconsegnare allo stesso indirizzo fallirebbe di nuovo. Scegli "Riconsegna a nuovo indirizzo" indicando l'indirizzo corretto, oppure "Reso al mittente".` }, { status: 400 })
+          avviso = `Il corriere aveva segnalato "${motivo}": la riconsegna allo stesso indirizzo potrebbe fallire di nuovo. Se non va a buon fine, usa "Riconsegna a nuovo indirizzo" o "Reso al mittente".`
+          console.warn('[GIACENZA] riconsegna stesso indirizzo con motivo indirizzo errato', { spedizione: id, motivo })
         }
         await spediamoproReleaseStock(cred.authcode, Number(attivo.id), releaseAction, extra)
       } catch (e: any) {
@@ -326,7 +330,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       // scansione resi mostrerà "reso già addebitato in giacenza" e NON riaddebiterà.
       ...(rich.operazione === 'reso' ? { giacenza_reso_addebitato: true, stato: 'reso_mittente' } : {}),
     }).eq('id', id)
-    return NextResponse.json({ success: true, addebito: totale, distintaReso: numeroDistintaReso })
+    return NextResponse.json({ success: true, addebito: totale, distintaReso: numeroDistintaReso, avviso })
   }
 
   // 5) Chiudi giacenza (solo master) -> non piu gestibile
