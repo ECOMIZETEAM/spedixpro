@@ -383,8 +383,13 @@ export async function GET(req: NextRequest) {
       const r = calcAgente(s)
       if (r && r.totale != null) prezzo_corriere = r.totale
     }
-    if (prezzo_corriere == null) prezzo_corriere = prezzo_cliente
-    const margine = Math.round((prezzo_cliente - prezzo_corriere) * 100) / 100
+    // AGENTE senza costo proprio (nessun listino agente assegnato, o corriere non coperto):
+    // il margine NON è zero, è SCONOSCIUTO. Pareggiare il costo col prezzo cliente faceva
+    // comparire "0,00 €" su ogni riga, indistinguibile da un margine realmente nullo: da qui
+    // la segnalazione che i margini del portale agente erano sbagliati. Meglio un trattino.
+    const agenteSenzaCosto = ruolo === 'agente' && prezzo_corriere == null
+    if (prezzo_corriere == null && !agenteSenzaCosto) prezzo_corriere = prezzo_cliente
+    const margine = agenteSenzaCosto ? null : Math.round((prezzo_cliente - (prezzo_corriere as number)) * 100) / 100
     const id_ordine = idOrdine.get(s.id) || (s as any).id_ordine_esterno || (s as any).rif_ordine || null
     const distinta_reso = distintaReso.get(s.id) || null
     return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, id_ordine, distinta_reso }
