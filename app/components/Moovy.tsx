@@ -1,5 +1,6 @@
 'use client'
 import { useState, useRef, useEffect, useCallback } from 'react'
+import MoovyIcon from './MoovyIcon'
 
 // MOOVY — assistente AI di MoovExpress. Widget fluttuante presente in entrambi i
 // portali (master e cliente). L'API /api/moovy determina ruolo e contesto dalla
@@ -179,12 +180,14 @@ export default function Moovy() {
     <>
       {/* Pulsante fluttuante */}
       {!open && (
-        <button onClick={() => setOpen(true)} aria-label="Apri MOOVY"
-          style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 1250, width: '58px', height: '58px', borderRadius: '50%', border: 'none', background: ARANCIO, color: '#fff', cursor: 'pointer', boxShadow: '0 8px 24px rgba(249,115,22,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', transition: 'transform .15s' }}
+        <button onClick={() => setOpen(true)} aria-label="Apri MOOVY" title="Moovy — l'assistente MoovExpress"
+          style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 1250, width: '58px', height: '58px', borderRadius: '50%', border: 'none', background: ARANCIO, color: '#fff', cursor: 'pointer', boxShadow: '0 8px 24px rgba(249,115,22,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, transition: 'transform .15s' }}
           onMouseDown={e => (e.currentTarget.style.transform = 'scale(0.94)')}
           onMouseUp={e => (e.currentTarget.style.transform = 'scale(1)')}
+          onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.06)')}
           onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}>
-          💬
+          {/* Leggermente più piccolo del pulsante: il mantello deve respirare dentro il cerchio */}
+          <MoovyIcon size={38} su="arancio" />
         </button>
       )}
 
@@ -193,7 +196,7 @@ export default function Moovy() {
           {/* Header */}
           <div style={{ background: '#1a1a1a', padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: ARANCIO, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>🤖</div>
+              <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: ARANCIO, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><MoovyIcon size={24} su="arancio" /></div>
               <div>
                 <div style={{ color: '#fff', fontWeight: 800, fontSize: '15px', lineHeight: 1 }}>MOOVY</div>
                 <div style={{ color: '#9ca3af', fontSize: '10.5px', marginTop: '3px' }}>Assistente MoovExpress</div>
