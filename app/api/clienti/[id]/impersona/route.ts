@@ -20,6 +20,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     }
   )
 
+  // Le uscite d'errore DOPO il signOut qui sotto devono portarsi dietro i cookie scritti su
+  // okRedirect (cioe' la cancellazione della sessione master): senza, il master resta con dei
+  // cookie che puntano a una sessione ormai revocata e alla prima navigazione si ritrova sulla
+  // pagina di accesso, convinto di essere ancora dentro.
+  const vaiA = (path: string) => {
+    const r = NextResponse.redirect(new URL(path, req.url))
+    okRedirect.cookies.getAll().forEach((c) => r.cookies.set(c))
+    return r
+  }
+
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.redirect(new URL('/', req.url))
 
@@ -72,25 +82,27 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     loginEmail = email
   }
 
-  // logout della sessione master, poi login come cliente (i cookie finiscono su okRedirect)
-  await supabase.auth.signOut()
+  // logout della sessione master, poi login come cliente (i cookie finiscono su okRedirect).
+  // scope 'local': senza argomenti supabase-js usa 'global' e revoca TUTTE le sessioni del master,
+  // anche quelle aperte su altri dispositivi, che con l'impersonazione non c'entrano nulla.
+  await supabase.auth.signOut({ scope: 'local' })
 
   const { data: linkData, error } = await admin.auth.admin.generateLink({
     type: 'magiclink', email: loginEmail as string,
   })
   if (error || !linkData) {
-    return NextResponse.redirect(new URL('/dashboard/clienti?error=impersonazione_fallita', req.url))
+    return vaiA('/dashboard/clienti?error=impersonazione_fallita')
   }
   const tokenHash = linkData.properties?.hashed_token
   if (!tokenHash) {
-    return NextResponse.redirect(new URL('/dashboard/clienti?error=token_mancante', req.url))
+    return vaiA('/dashboard/clienti?error=token_mancante')
   }
 
   const { data: sessionData, error: verifyError } = await supabase.auth.verifyOtp({
     type: 'magiclink', token_hash: tokenHash,
   })
   if (verifyError || !sessionData.session) {
-    return NextResponse.redirect(new URL('/dashboard/clienti?error=sessione_non_creata', req.url))
+    return vaiA('/dashboard/clienti?error=sessione_non_creata')
   }
 
   const { registraAudit } = await import('@/lib/audit')

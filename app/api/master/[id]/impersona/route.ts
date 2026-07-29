@@ -60,17 +60,27 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.redirect(new URL('/dashboard/clienti/master?error=email_mancante', req.url))
   }
 
-  await supabase.auth.signOut()
+  // scope 'local': con il default 'global' si revocavano TUTTE le sessioni del master, comprese
+  // quelle su altri dispositivi che con l'impersonazione non c'entrano.
+  await supabase.auth.signOut({ scope: 'local' })
+
+  // Dopo il signOut le uscite d'errore devono portarsi dietro i cookie scritti su okRedirect,
+  // altrimenti il master resta con cookie di una sessione revocata e viene sbattuto al login.
+  const vaiA = (path: string) => {
+    const r = NextResponse.redirect(new URL(path, req.url))
+    okRedirect.cookies.getAll().forEach((c) => r.cookies.set(c))
+    return r
+  }
 
   const { data: linkData, error } = await admin.auth.admin.generateLink({ type: 'magiclink', email })
   if (error || !linkData?.properties?.hashed_token) {
-    return NextResponse.redirect(new URL('/dashboard/clienti/master?error=impersonazione_fallita', req.url))
+    return vaiA('/dashboard/clienti/master?error=impersonazione_fallita')
   }
   const { data: sessionData, error: verifyError } = await supabase.auth.verifyOtp({
     type: 'magiclink', token_hash: linkData.properties.hashed_token,
   })
   if (verifyError || !sessionData.session) {
-    return NextResponse.redirect(new URL('/dashboard/clienti/master?error=sessione_non_creata', req.url))
+    return vaiA('/dashboard/clienti/master?error=sessione_non_creata')
   }
   const { registraAudit } = await import('@/lib/audit')
   await registraAudit({ utenteId: user.id, ruolo: 'master', azione: 'impersona_master', risorsa: id })

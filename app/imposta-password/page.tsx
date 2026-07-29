@@ -59,7 +59,19 @@ export default function ImpostaPassword() {
     setSalvando(false)
     if (error) { setMsg({ tipo: 'err', testo: error.message || 'Errore durante il salvataggio' }); return }
     setMsg({ tipo: 'ok', testo: 'Password impostata! Accesso in corso...' })
-    setTimeout(() => { window.location.href = '/dashboard' }, 800)
+    // Ogni ruolo al SUO portale. Prima si andava sempre su /dashboard e il cliente veniva poi
+    // rimbalzato dal middleware su /cliente/dashboard: un giro in piu' a vuoto, e per un istante
+    // vedeva l'area sbagliata. Il caricamento e' pieno (window.location), quindi il layout viene
+    // reso lato server con la sessione e la sidebar c'e' subito.
+    let destinazione = '/dashboard'
+    try {
+      const { data: { user: u } } = await supabase.auth.getUser()
+      if (u) {
+        const { data: riga } = await supabase.from('utenti').select('cliente_id').eq('id', u.id).maybeSingle()
+        if (riga?.cliente_id) destinazione = '/cliente/dashboard'
+      }
+    } catch {}
+    setTimeout(() => { window.location.href = destinazione }, 800)
   }
 
   const inp = { width: '100%', padding: '9px 12px', border: '1px solid #e8e8e8', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box' as const }

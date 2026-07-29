@@ -4,17 +4,17 @@ import { createServerClient } from '@supabase/ssr'
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
-  // La pagina di login cliente (/cliente esatto) resta accessibile senza sessione,
-  // altrimenti loop di redirect (ERR_TOO_MANY_REDIRECTS) quando si apre l'app da Shopify.
-  if (pathname === '/cliente') {
-    return NextResponse.next()
-  }
+  // Le due pagine di ACCESSO. Restano aperte a chi non ha sessione (senza questa esenzione si
+  // creava un loop di redirect aprendo l'app da Shopify), ma chi e' GIA' dentro non deve
+  // ritrovarsi il modulo di accesso: il cliente lo vedeva perfino dentro la propria sidebar,
+  // come se la sessione fosse scaduta. Qui sotto viene mandato alla sua dashboard.
+  const isPaginaAccesso = pathname === '/cliente' || pathname === '/'
 
   // Applichiamo il controllo solo alle aree protette
   const isDashboard = pathname.startsWith('/dashboard')
   const isCliente = pathname.startsWith('/cliente')
 
-  if (!isDashboard && !isCliente) {
+  if (!isDashboard && !isCliente && !isPaginaAccesso) {
     return NextResponse.next()
   }
 
@@ -51,6 +51,8 @@ export async function middleware(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user) {
+    // Sulle pagine di accesso e' la situazione normale: si mostra il modulo.
+    if (isPaginaAccesso) return response
     // Non autenticato: rimanda al login appropriato
     const loginUrl = isCliente ? '/cliente' : '/'
     return vaiA(loginUrl)
@@ -63,6 +65,12 @@ export async function middleware(req: NextRequest) {
     .single()
 
   const ruolo = utente?.ruolo
+
+  // Sessione gia' valida su una pagina di accesso: dritto alla propria dashboard, senza far
+  // rivedere il modulo di login a chi e' dentro.
+  if (isPaginaAccesso) {
+    return vaiA(ruolo === 'cliente' ? '/cliente/dashboard' : '/dashboard')
+  }
 
   // Cliente che tenta di accedere all'area master -> rimanda al suo dashboard cliente
   if (isDashboard && ruolo === 'cliente') {
@@ -80,5 +88,6 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/cliente/:path*'],
+  // '/' incluso per mandare alla propria dashboard chi e' gia' dentro e riapre il modulo di accesso.
+  matcher: ['/', '/dashboard/:path*', '/cliente/:path*'],
 }
