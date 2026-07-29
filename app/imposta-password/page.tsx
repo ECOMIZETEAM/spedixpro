@@ -95,8 +95,18 @@ export default function ImpostaPassword() {
         {!ready ? (
           <div style={{ textAlign: 'center', color: '#888', fontSize: '13px', padding: '20px 0' }}>Verifica dell'invito in corso...</div>
         ) : !hasSession ? (
+          // Vicolo cieco: prima diceva solo "chiedi all'amministratore" e l'utente restava fermo.
+          // Il recupero password e' pubblico: la via d'uscita gliela diamo subito.
           <div style={{ textAlign: 'center', color: '#dc2626', fontSize: '13px', padding: '10px 0' }}>
-            Link non valido o scaduto.<br />Chiedi all'amministratore un nuovo invito.
+            Il collegamento è scaduto o è già stato usato.
+            <div style={{ marginTop: '14px' }}>
+              <a href="/recupera-password" style={{ display: 'inline-block', background: '#f97316', color: '#fff', padding: '10px 22px', borderRadius: '6px', textDecoration: 'none', fontWeight: 700, fontSize: '13.5px' }}>
+                Richiedi un nuovo link →
+              </a>
+            </div>
+            <div style={{ marginTop: '10px', color: '#999', fontSize: '12px' }}>
+              Arriva per email in pochi secondi, all'indirizzo del tuo account.
+            </div>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>

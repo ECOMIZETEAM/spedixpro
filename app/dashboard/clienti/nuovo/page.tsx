@@ -88,24 +88,38 @@ export default function NuovoClientePage() {
     const data = await res.json()
     setSaving(false)
     if (data.error) { setErrore(data.error); return }
-    // mostro le credenziali a schermo (da condividere a mano finché Resend non è verificato)
-    setCredenziali({ email: data.email, password: data.password })
+    // mostro le credenziali a schermo (da condividere a mano finché Resend non è verificato).
+    // `accessoCreato` e `avviso` vanno letti: l'API li manda già, ma venivano buttati via e la
+    // pagina mostrava comunque "✓ Cliente creato" con la Password VUOTA. Il master credeva che il
+    // cliente potesse entrare, il cliente non riceveva niente (email non partita) e chiamava.
+    setCredenziali({ email: data.email, password: data.password, accessoCreato: data.accessoCreato !== false, avviso: data.avviso || null })
   }
 
   if (credenziali) return (
     <div style={{maxWidth:'560px',margin:'40px auto'}}>
       <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'10px',padding:'24px'}}>
         <div style={{fontSize:'16px',fontWeight:800,color:'#16a34a',marginBottom:'6px'}}>✓ Cliente creato</div>
-        <p style={{fontSize:'13px',color:'#555',margin:'0 0 16px'}}>Condividi queste credenziali con il cliente (le email automatiche partiranno quando il dominio sarà verificato).</p>
+        {credenziali.avviso ? (
+          <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'12px 14px',margin:'0 0 16px',fontSize:'13px',color:'#9a3412',lineHeight:1.5}}>
+            ⚠️ {credenziali.avviso}
+          </div>
+        ) : (
+          <p style={{fontSize:'13px',color:'#555',margin:'0 0 16px'}}>Condividi queste credenziali con il cliente (le email automatiche partiranno quando il dominio sarà verificato).</p>
+        )}
+        {credenziali.password && (
         <div style={{background:'#fff',border:'1px solid #d1fae5',borderRadius:'8px',padding:'14px'}}>
           <div style={{fontSize:'11px',color:'#999',textTransform:'uppercase',letterSpacing:'0.5px'}}>Email</div>
           <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a',marginBottom:'10px',fontFamily:'monospace'}}>{credenziali.email}</div>
           <div style={{fontSize:'11px',color:'#999',textTransform:'uppercase',letterSpacing:'0.5px'}}>Password</div>
           <div style={{fontSize:'16px',fontWeight:700,color:'#f97316',fontFamily:'monospace'}}>{credenziali.password}</div>
         </div>
+        )}
         <div style={{display:'flex',gap:'8px',marginTop:'16px'}}>
+          {/* Senza password non c'e' niente da copiare: prima il pulsante copiava "Password: " vuoto. */}
+          {credenziali.password && (
           <button onClick={()=>{navigator.clipboard?.writeText(`Email: ${credenziali.email}\nPassword: ${credenziali.password}\nPortale: https://moovexpress.com/cliente`)}}
             style={{background:'#16a34a',color:'#fff',border:'none',borderRadius:'6px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>Copia credenziali</button>
+          )}
           <button onClick={()=>router.push('/dashboard/clienti')}
             style={{background:'#fff',color:'#1a1a1a',border:'1px solid #ddd',borderRadius:'6px',padding:'9px 16px',fontSize:'13px',fontWeight:600,cursor:'pointer'}}>Vai ai clienti</button>
         </div>
