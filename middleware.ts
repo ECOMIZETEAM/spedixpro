@@ -36,12 +36,24 @@ export async function middleware(req: NextRequest) {
     }
   )
 
+  // I redirect qui sotto devono PORTARSI DIETRO i cookie scritti su `response`.
+  // getUser() puo' rinnovare la sessione: in quel caso Supabase ruota il refresh token lato
+  // server e scrive la coppia NUOVA su `response`. Se rispondiamo con un redirect creato da zero,
+  // quei Set-Cookie non partono, il browser tiene il refresh token ormai consumato e alla
+  // richiesta dopo l'utente viene sbattuto fuori senza motivo. E' la stessa classe di errore
+  // corretta nelle rotte di accesso, qui nel punto piu' trafficato dell'app.
+  const vaiA = (path: string) => {
+    const r = NextResponse.redirect(new URL(path, req.url))
+    response.cookies.getAll().forEach((c) => r.cookies.set(c))
+    return r
+  }
+
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user) {
     // Non autenticato: rimanda al login appropriato
     const loginUrl = isCliente ? '/cliente' : '/'
-    return NextResponse.redirect(new URL(loginUrl, req.url))
+    return vaiA(loginUrl)
   }
 
   const { data: utente } = await supabase
@@ -54,12 +66,14 @@ export async function middleware(req: NextRequest) {
 
   // Cliente che tenta di accedere all'area master -> rimanda al suo dashboard cliente
   if (isDashboard && ruolo === 'cliente') {
-    return NextResponse.redirect(new URL('/cliente/dashboard', req.url))
+    return vaiA('/cliente/dashboard')
   }
 
-  // Master che tenta di accedere all'area cliente -> rimanda al suo dashboard master
-  if (isCliente && (ruolo === 'master')) {
-    return NextResponse.redirect(new URL('/dashboard', req.url))
+  // Staff che tenta di accedere all'area cliente -> rimanda al suo dashboard master.
+  // Prima il rimbalzo valeva solo per 'master': admin, operatore e agente entravano in /cliente/*,
+  // dove il layout non trova cliente_id e serve pagine nude, senza sidebar e senza via d'uscita.
+  if (isCliente && ruolo && ruolo !== 'cliente') {
+    return vaiA('/dashboard')
   }
 
   return response

@@ -29,13 +29,24 @@ export async function POST(req: NextRequest) {
       },
     }
   )
-  const { error } = await supabase.auth.signInWithPassword({ email, password })
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
 
   if (error) {
     // Tracciato: prima successo ed errore rispondevano entrambi 303 e dai log non si
     // distingueva un accesso riuscito da uno fallito. Nel log solo l'indirizzo, mai la password.
     console.warn('[LOGIN][FALLITO]', { email, motivo: error.message })
     return NextResponse.redirect(new URL('/?error=credenziali_errate', req.url), 303)
+  }
+
+  // "Account attivo" e' un interruttore che il master usa davvero (staff che se ne va, cliente
+  // moroso) ma che nessuno leggeva: chi veniva disattivato continuava a entrare con tutti i suoi
+  // permessi. Qui vale anche per gli account autenticati senza riga in `utenti`, che altrimenti
+  // arrivavano alla dashboard con i ripieghi permissivi del layout.
+  const { data: utente } = await supabase.from('utenti').select('attivo').eq('id', data.user.id).single()
+  if (!utente || utente.attivo === false) {
+    console.warn('[LOGIN][BLOCCATO]', { email, motivo: !utente ? 'nessuna riga in utenti' : 'account disattivato' })
+    await supabase.auth.signOut({ scope: 'local' })
+    return NextResponse.redirect(new URL('/?error=account_non_attivo', req.url), 303)
   }
 
   return ok

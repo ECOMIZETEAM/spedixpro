@@ -1,14 +1,20 @@
 'use client'
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import CampoPassword from '../components/CampoPassword'
+import PuliziaSessione from '../components/PuliziaSessione'
+
+// Dopo l'accesso si DEVE ricaricare la pagina per intero, non navigare con router.push:
+// /cliente (questo modulo) e /cliente/dashboard stanno sotto lo STESSO app/cliente/layout.tsx,
+// ed e' quel layout a decidere se mostrare la sidebar. Con una navigazione client il layout
+// condiviso non viene rieseguito sul server: resta quello reso qui SENZA sessione, cioe' senza
+// sidebar, finche' l'utente non ricarica a mano. E' il "primo accesso senza sidebar" segnalato.
+function vaiA(url: string) { window.location.href = url }
 
 export default function ClienteLogin() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [errore, setErrore] = useState('')
   const [loading, setLoading] = useState(false)
-  const router = useRouter()
 
   async function accedi(e: React.FormEvent) {
     e.preventDefault()
@@ -30,10 +36,10 @@ export default function ClienteLogin() {
           body: JSON.stringify({ shop: pending })
         })
       } catch {}
-      router.push('/cliente/integrazioni?connected=' + encodeURIComponent(pending))
+      vaiA('/cliente/integrazioni?connected=' + encodeURIComponent(pending))
       return
     }
-    router.push('/cliente/dashboard')
+    vaiA('/cliente/dashboard')
   }
 
   return (
@@ -43,6 +49,7 @@ export default function ClienteLogin() {
           <div style={{fontSize:'22px',fontWeight:'800',color:'#1a1a1a'}}>Moov<span style={{color:'#f97316'}}>Express</span></div>
           <div style={{fontSize:'13px',color:'#999',marginTop:'4px'}}>Portale Cliente</div>
         </div>
+        <PuliziaSessione />
         {errore && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>⚠️ {errore}</div>}
         <form onSubmit={accedi} style={{display:'flex',flexDirection:'column' as const,gap:'14px'}}>
           <div>

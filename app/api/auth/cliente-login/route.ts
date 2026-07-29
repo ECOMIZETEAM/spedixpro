@@ -30,9 +30,23 @@ export async function POST(req: NextRequest) {
     console.warn('[LOGIN][CLIENTE][FALLITO]', { email, motivo: error.message })
     return NextResponse.json({ error: 'Email o password non corretti' }, { status: 401 })
   }
-  const { data: utente } = await supabase.from('utenti').select('ruolo,cliente_id').eq('id', data.user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('ruolo,cliente_id,attivo').eq('id', data.user.id).single()
+  // "Account Attivo" della scheda cliente non veniva letto da nessuna parte: un cliente messo
+  // su OFF dal master (moroso, cessato) entrava lo stesso e continuava a spedire a credito.
+  const { data: cliente } = utente?.cliente_id
+    ? await supabase.from('clienti').select('attivo').eq('id', utente.cliente_id).maybeSingle()
+    : { data: null }
+  if (utente?.attivo === false || cliente?.attivo === false) {
+    console.warn('[LOGIN][CLIENTE][BLOCCATO]', { email, motivo: 'account disattivato' })
+    await supabase.auth.signOut({ scope: 'local' })
+    return NextResponse.json({ error: 'Account non attivo. Contatta il tuo referente.' }, { status: 403 })
+  }
   if (!utente?.cliente_id) {
-    await supabase.auth.signOut()
+    // scope 'local': senza argomenti supabase-js usa 'global' e REVOCA TUTTE le sessioni
+    // dell'utente su OGNI dispositivo. Bastava che un master digitasse le proprie credenziali
+    // qui per sbaglio (email e password sono le stesse dei due portali) per ritrovarsi sloggiato
+    // dall'area master aperta altrove. Qui va chiusa solo la sessione appena creata.
+    await supabase.auth.signOut({ scope: 'local' })
     return NextResponse.json({ error: 'Accesso non autorizzato' }, { status: 403 })
   }
   return ok

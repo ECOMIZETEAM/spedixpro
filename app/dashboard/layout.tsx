@@ -13,7 +13,12 @@ export default async function Layout({ children }: { children: React.ReactNode }
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/')
-  const { data: utente } = await supabase.from('utenti').select('nome,ruolo,master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('nome,ruolo,master_id,attivo').eq('id', user.id).single()
+  // Account autenticato ma SENZA riga in `utenti`: senza questo controllo i ripieghi qui sotto
+  // (ruolo 'master', isFull true) gli davano il menu amministrativo completo. Ne esistono davvero:
+  // si creano quando l'utente nasce in auth ma l'inserimento in `utenti` fallisce a meta'.
+  // Stesso trattamento per chi e' stato disattivato dal master: fuori.
+  if (!utente || utente.attivo === false) redirect('/api/auth/logout')
   // Permessi effettivi dell'utente (admin/master = tutto; operatore/agente = da Impostazioni Permessi)
   const perm = await getPermessiUtente()
   // Brand del master (logo/nome) da mostrare in alto a sinistra

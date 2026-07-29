@@ -1,6 +1,15 @@
 import CampoPassword from './components/CampoPassword'
+import PuliziaSessione from './components/PuliziaSessione'
 
-export default function Home() {
+const MESSAGGI: Record<string, string> = {
+  credenziali_errate: 'Email o password non corretti.',
+  account_non_attivo: 'Account non attivo. Contatta il tuo referente.',
+}
+
+export default async function Home({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  // L'esito dell'accesso arrivava nell'indirizzo ma non veniva mostrato: chi sbagliava la password
+  // tornava al modulo vuoto senza una riga di spiegazione e riprovava uguale.
+  const errore = MESSAGGI[(await searchParams)?.error || ''] || ''
   return (
     <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#f5f5f5',fontFamily:'var(--font-geist-sans),system-ui,sans-serif'}}>
       <div style={{background:'#fff',borderRadius:'12px',padding:'40px',width:'380px',boxShadow:'0 2px 16px rgba(0,0,0,.08)'}}>
@@ -8,6 +17,8 @@ export default function Home() {
           <div style={{fontSize:'22px',fontWeight:'800',color:'#1a1a1a'}}>Moov<span style={{color:'#f97316'}}>Express</span></div>
           <div style={{fontSize:'13px',color:'#999',marginTop:'4px'}}>Control Center</div>
         </div>
+        <PuliziaSessione />
+        {errore && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>⚠️ {errore}</div>}
         <form action="/api/auth/login" method="POST" style={{display:'flex',flexDirection:'column',gap:'14px'}}>
           <div>
             <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Email</label>

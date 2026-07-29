@@ -41,6 +41,15 @@ export const PERMESSI_DEFAULT: Record<string, Record<string, boolean>> = {
   },
 }
 
+// Chi è STAFF del master (non un cliente e non un agente).
+// Serve nelle API che usano createAdminSupabase: il service role BYPASSA la RLS, quindi
+// l'isolamento fra tenant va rifatto a mano o un cliente autenticato leggerebbe i dati
+// dell'intera rete del suo master.
+const STAFF_MASTER = ['master', 'admin', 'operatore']
+export function nonStaffMaster(utente: any): boolean {
+  return !utente?.master_id || !!utente?.cliente_id || !STAFF_MASTER.includes(String(utente?.ruolo || '').toLowerCase())
+}
+
 export type PermessiUtente = {
   ruolo: string
   masterId: string | null

@@ -2,13 +2,14 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { nonStaffMaster } from '@/lib/permessi'
 import { fetchAll } from '@/lib/fetch-all'
 
 export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome,masters(nome,parent_master_id,abbonamento_piano,abbonamento_limite)').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,cliente_id,ruolo,nome,cognome,masters(nome,parent_master_id,abbonamento_piano,abbonamento_limite)').eq('id', user.id).single()
 
   // ── AGENTE: dashboard confinata ai SUOI clienti. Piano = quello del MASTER (riferimento),
   //    conteggio = spedizioni dei suoi clienti. Nessun dato/rete/KPI del master. ──
@@ -60,6 +61,13 @@ export async function GET() {
       statsMensili: [], statiUltimi30: {}, ultimeSpedizioni: ultime || [],
     })
   }
+
+  // Da qui in giù si passa al client ADMIN (service role), che BYPASSA la RLS e legge tutta la
+  // rete del master: fatturato, contrassegni, elenco clienti e le ultime spedizioni con i dati di
+  // mittente e destinatario. Senza questa guardia bastava una sessione CLIENTE per chiamare la
+  // rotta a mano e ricevere tutto (la pagina cliente usa /api/cliente/dashboard, quindi il portale
+  // non se ne accorgeva). Il ramo AGENTE resta sopra: è staff, ma confinato ai suoi clienti.
+  if (nonStaffMaster(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const masterId = utente?.master_id
   const masterRec: any = (utente as any)?.masters || {}
