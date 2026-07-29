@@ -255,13 +255,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         const stocks = await spediamoproSearchStocks(cred.authcode, String(code))
         const attivo = (stocks || []).find((st: any) => Number(st.status) === 1 && (!spid || Number(st.shipmentId) === Number(spid)))
         if (!attivo?.id) return NextResponse.json({ error: 'Giacenza non più attiva sul corriere (già svincolata o scaduta).' }, { status: 400 })
-        // MOTIVO del corriere: lo salvo (serve in elenco) e lo uso per bloccare le combinazioni
-        // impossibili PRIMA di disturbare il corriere. Pacco RIFIUTATO dal destinatario: la
-        // riconsegna viene sempre respinta, l'unica strada è il reso al mittente.
+        // MOTIVO del corriere: lo salvo (serve in elenco) e lo uso solo per AVVISARE.
         const motivo = String(attivo.reason || '')
         if (motivo) { try { await admin.from('spedizioni').update({ giacenza_motivo: motivo.slice(0, 200) }).eq('id', id) } catch {} }
+        // NIENTE BLOCCHI sulla causale: i corrieri a volte registrano un motivo di giacenza
+        // sbagliato (un "rifiuto" che rifiuto non era, un indirizzo dato per errato che invece
+        // e' buono). Impedire la riconsegna su quella base bloccava operazioni legittime, e per
+        // giunta solo al master: dal portale cliente la stessa richiesta passava comunque.
+        // Si avvisa e si lascia decidere a chi opera; se il corriere rifiuta davvero, il suo
+        // errore viene mostrato pulito da erroreSvincoloPulito.
         if (/rifiut|refus|respint/i.test(motivo) && releaseAction !== 3) {
-          return NextResponse.json({ error: `Il destinatario ha RIFIUTATO il pacco (motivo del corriere: "${motivo}"): la riconsegna non è accettata. Scegli "Reso al mittente".` }, { status: 400 })
+          avviso = `Il corriere aveva registrato "${motivo}": su un pacco rifiutato la riconsegna viene spesso respinta. Se non va a buon fine, resta il "Reso al mittente".`
+          console.warn('[GIACENZA] riconsegna su pacco con motivo rifiuto', { spedizione: id, motivo, releaseAction })
         }
         // Indirizzo errato/incompleto/sconosciuto: riconsegnare allo STESSO indirizzo ha buone
         // probabilita' di fallire di nuovo, ma NON e' impossibile (il corriere a volte ritenta e
