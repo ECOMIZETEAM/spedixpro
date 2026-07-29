@@ -73,12 +73,21 @@ export async function GET(req: NextRequest) {
   // SPEDIZIONI PROPRIE (master_id = M, senza cliente): il master spedisce per sé. Contano SIA l'uscita
   // SIA un'entrata pari (paga a se stesso) → margine 0 (come nell'Elenco). Senza questo, il costo della
   // propria ridurrebbe il guadagno e Report ed Elenco non tornerebbero. Individuo le proprie dalle spedizioni.
-  const costSpedIds = Array.from(new Set((movM || []).filter((m: any) => !m.cliente_id && m.master_target_id === M && m.spedizione_id).map((m: any) => m.spedizione_id)))
+  // Una sola lettura delle spedizioni per TUTTI gli id citati dai movimenti: serve sia a
+  // riconoscere le spedizioni proprie, sia a escludere le ANNULLATE dal conteggio (vedi sotto).
+  const idsDaLeggere = Array.from(new Set(
+    (movM || []).filter((m: any) => m.spedizione_id).map((m: any) => m.spedizione_id)
+  ))
   const propriaSet = new Set<string>()
-  for (let i = 0; i < costSpedIds.length; i += 300) {
-    const chunk = costSpedIds.slice(i, i + 300)
-    const { data: sps } = await admin.from('spedizioni').select('id,master_id,cliente_id').in('id', chunk)
-    for (const sp of (sps || [])) if ((sp as any).master_id === M && !(sp as any).cliente_id) propriaSet.add((sp as any).id)
+  const annullateSet = new Set<string>()
+  for (let i = 0; i < idsDaLeggere.length; i += 300) {
+    const chunk = idsDaLeggere.slice(i, i + 300)
+    const { data: sps } = await admin.from('spedizioni').select('id,master_id,cliente_id,stato').in('id', chunk)
+    for (const sp of (sps || [])) {
+      const s: any = sp
+      if (s.master_id === M && !s.cliente_id) propriaSet.add(s.id)
+      if (s.stato === 'annullata' || s.stato === 'annullamento_manuale') annullateSet.add(s.id)
+    }
   }
 
   let ricaviClienti = 0, costoM = 0, ricaviSub = 0, ricaviPropria = 0
@@ -99,9 +108,15 @@ export async function GET(req: NextRequest) {
   const ricavi = Math.round((ricaviClienti + ricaviSub + ricaviPropria) * 100) / 100
   const costi = Math.round(costoM * 100) / 100
   const guadagno = Math.round((ricavi - costi) * 100) / 100
-  // Numero di spedizioni del periodo (distinte) per la media per spedizione
+  // Numero di spedizioni del periodo (distinte) per la media per spedizione.
+  // Le ANNULLATE sono ESCLUSE, come nell'Elenco Spedizioni: i loro movimenti restano (addebito +
+  // storno, netto zero, quindi il guadagno non cambia) ma facevano gonfiare il conteggio. Il
+  // confronto fra le due schermate non tornava mai: su Ecomize Solution erano 7.221 qui contro
+  // 7.011 nell'Elenco, e le 210 di differenza erano esattamente le annullate.
   const spedSet = new Set<string>()
-  for (const m of (movM || [])) if (m.tipo === 'spedizione' && m.spedizione_id) spedSet.add(m.spedizione_id)
+  for (const m of (movM || [])) {
+    if (m.tipo === 'spedizione' && m.spedizione_id && !annullateSet.has(m.spedizione_id)) spedSet.add(m.spedizione_id)
+  }
   const numSpedizioni = spedSet.size
   const mediaSped = numSpedizioni > 0 ? Math.round((guadagno / numSpedizioni) * 100) / 100 : 0
   const r2 = (x: number) => Math.round(x * 100) / 100
