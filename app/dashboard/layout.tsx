@@ -4,6 +4,11 @@ import DashboardLayout from '../components/Layout'
 import { getPermessiUtente } from '@/lib/permessi'
 import AbbonamentoGate from './AbbonamentoGate'
 import { DialogProvider } from '../components/DialogProvider'
+
+// Mai in cache: dipende dalla sessione. Senza questo Vercel puo' servire una versione resa
+// SENZA utente -> sidebar assente al primo accesso (il portale cliente aveva gia' lo stesso
+// accorgimento per lo stesso identico motivo).
+export const dynamic = 'force-dynamic'
 export default async function Layout({ children }: { children: React.ReactNode }) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
