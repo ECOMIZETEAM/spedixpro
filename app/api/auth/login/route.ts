@@ -42,8 +42,13 @@ export async function POST(req: NextRequest) {
   // moroso) ma che nessuno leggeva: chi veniva disattivato continuava a entrare con tutti i suoi
   // permessi. Qui vale anche per gli account autenticati senza riga in `utenti`, che altrimenti
   // arrivavano alla dashboard con i ripieghi permissivi del layout.
-  const { data: utente } = await supabase.from('utenti').select('attivo').eq('id', data.user.id).single()
-  if (!utente || utente.attivo === false) {
+  const { data: utente } = await supabase.from('utenti').select('attivo,cliente_id').eq('id', data.user.id).single()
+  // Anche la scheda cliente deve essere attiva: altrimenti un cliente disattivato entrava lo stesso
+  // passando da questo modulo, e il middleware lo portava tranquillamente al suo portale.
+  const { data: cliente } = utente?.cliente_id
+    ? await supabase.from('clienti').select('attivo').eq('id', utente.cliente_id).maybeSingle()
+    : { data: null }
+  if (!utente || utente.attivo === false || cliente?.attivo === false) {
     console.warn('[LOGIN][BLOCCATO]', { email, motivo: !utente ? 'nessuna riga in utenti' : 'account disattivato' })
     await supabase.auth.signOut({ scope: 'local' })
     return NextResponse.redirect(new URL('/?error=account_non_attivo', req.url), 303)

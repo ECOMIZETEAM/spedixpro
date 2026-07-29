@@ -39,7 +39,9 @@ export default function ClienteLogin() {
       vaiA('/cliente/integrazioni?connected=' + encodeURIComponent(pending))
       return
     }
-    vaiA('/cliente/dashboard')
+    // 'vai' arriva dal server: il cliente va al suo portale, lo staff che ha sbagliato modulo
+    // (agente/master/operatore) viene portato direttamente nell'area master, senza rifare l'accesso.
+    vaiA(data.vai || '/cliente/dashboard')
   }
 
   return (

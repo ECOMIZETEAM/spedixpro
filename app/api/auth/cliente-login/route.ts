@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
   const email = String(body?.email || '').trim().toLowerCase()
   const password = String(body?.password || '')
 
-  const ok = NextResponse.json({ ok: true })
+  const ok = NextResponse.json({ ok: true, vai: '/cliente/dashboard' })
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -41,13 +41,21 @@ export async function POST(req: NextRequest) {
     await supabase.auth.signOut({ scope: 'local' })
     return NextResponse.json({ error: 'Account non attivo. Contatta il tuo referente.' }, { status: 403 })
   }
-  if (!utente?.cliente_id) {
-    // scope 'local': senza argomenti supabase-js usa 'global' e REVOCA TUTTE le sessioni
-    // dell'utente su OGNI dispositivo. Bastava che un master digitasse le proprie credenziali
-    // qui per sbaglio (email e password sono le stesse dei due portali) per ritrovarsi sloggiato
-    // dall'area master aperta altrove. Qui va chiusa solo la sessione appena creata.
+  if (!utente) {
+    // Autenticato ma senza riga in `utenti`: account monco, non si entra da nessuna parte.
     await supabase.auth.signOut({ scope: 'local' })
     return NextResponse.json({ error: 'Accesso non autorizzato' }, { status: 403 })
+  }
+  if (!utente.cliente_id) {
+    // NON e' un cliente ma STAFF (master, admin, operatore, agente): le credenziali sono valide,
+    // ha solo sbagliato portale. Prima rispondevamo "Accesso non autorizzato" e chiudevamo la
+    // sessione: chi ha due account (es. lo stesso titolare che e' agente E cliente) si convinceva
+    // che le credenziali fossero sbagliate. Ora lo lasciamo entrare e lo mandiamo nella SUA area:
+    // il middleware fa comunque rispettare i confini fra i due portali.
+    console.warn('[LOGIN][CLIENTE][E-STAFF]', { email, ruolo: utente.ruolo })
+    const staff = NextResponse.json({ ok: true, vai: '/dashboard' })
+    ok.cookies.getAll().forEach((c) => staff.cookies.set(c))
+    return staff
   }
   return ok
 }
