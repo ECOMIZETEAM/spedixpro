@@ -64,13 +64,18 @@ export async function POST(req: NextRequest) {
     master_id: me.master_id,
     attivo: true,
   })
-  if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 })
+  if (insErr) {
+    // Senza la riga in `utenti` l'account resta orfano: non entra da nessuna parte e quell'email
+    // non e' piu' riutilizzabile. Si ripulisce l'account auth appena creato.
+    await admin.auth.admin.deleteUser(newId).catch(() => {})
+    return NextResponse.json({ error: insErr.message }, { status: 400 })
+  }
 
   // email credenziali (best-effort, funziona quando Resend è verificato)
   const { data: masterRec } = await admin.from('masters').select('nome').eq('id', me.master_id).single()
   try {
     const { inviaCredenzialiCliente } = await import('@/lib/email')
-    await inviaCredenzialiCliente({ email: email.trim(), nomeCliente: nome.trim(), masterNome: masterRec?.nome || 'MoovExpress', dominio: 'moovexpress.com', password })
+    await inviaCredenzialiCliente({ email: email.trim(), nomeCliente: nome.trim(), masterNome: masterRec?.nome || 'MoovExpress', dominio: 'moovexpress.com', password, areaStaff: true })
   } catch (e) { console.error('Errore invio credenziali staff:', e) }
 
   return NextResponse.json({ success: true, email: email.trim(), password })
@@ -124,7 +129,7 @@ export async function PUT(req: NextRequest) {
       try {
         const { data: masterRec } = await admin.from('masters').select('nome').eq('id', me.master_id).single()
         const { inviaCredenzialiCliente } = await import('@/lib/email')
-        await inviaCredenzialiCliente({ email: emailAttuale, nomeCliente: (st as any).nome || 'Collaboratore', masterNome: masterRec?.nome || 'MoovExpress', dominio: 'moovexpress.com', password })
+        await inviaCredenzialiCliente({ email: emailAttuale, nomeCliente: (st as any).nome || 'Collaboratore', masterNome: masterRec?.nome || 'MoovExpress', dominio: 'moovexpress.com', password, areaStaff: true })
       } catch (e) { console.error('Errore invio credenziali staff (reset):', e) }
     }
   }

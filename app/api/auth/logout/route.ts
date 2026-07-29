@@ -14,6 +14,9 @@ export async function GET(req: NextRequest) {
       versoCliente = !!u?.cliente_id
     }
   } catch {}
-  await supabase.auth.signOut()
+  // scope 'local': senza argomenti supabase-js revoca la sessione su TUTTI i dispositivi. Chi
+  // usciva dal telefono si ritrovava sloggiato anche dal PC in magazzino. "Esci" deve chiudere
+  // QUESTO browser e basta.
+  await supabase.auth.signOut({ scope: 'local' })
   return NextResponse.redirect(new URL(versoCliente ? '/cliente' : '/', req.url))
 }

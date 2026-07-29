@@ -38,12 +38,19 @@ export async function inviaEmailTest(to: string): Promise<{ ok: boolean; from: s
 }
 
 // Email credenziali (clienti e master): email + password + link portale
+// areaStaff = l'account NON e' un cliente (master, admin, operatore, agente): va mandato al
+// Control Center, non al portale clienti. Prima ricevevano tutti la stessa email con scritto
+// "Accedi al portale cliente": ci andavano, il portale li respingeva e si convincevano che le
+// credenziali fossero sbagliate. E' successo davvero (agente di Ecomize Solution, 28/07).
 export async function inviaCredenzialiCliente({
-  email, nomeCliente, masterNome, dominio, password
+  email, nomeCliente, masterNome, dominio, password, areaStaff = false
 }: {
-  email: string; nomeCliente: string; masterNome: string; dominio: string; password: string
+  email: string; nomeCliente: string; masterNome: string; dominio: string; password: string; areaStaff?: boolean
 }) {
   const portale = dominio || 'moovexpress.com'
+  const indirizzoPortale = areaStaff ? portale : `${portale}/cliente`
+  const linkPortale = `https://${indirizzoPortale}`
+  const testoPulsante = areaStaff ? 'Accedi al Control Center →' : 'Accedi al portale cliente →'
   try {
     await resend.emails.send({
       from: FROM,
@@ -55,7 +62,7 @@ export async function inviaCredenzialiCliente({
         <div style="background:#f5f5f5;border-radius:8px;padding:20px 24px;margin-bottom:20px">
           <div style="padding:8px 0;border-bottom:1px solid #e8e8e8;font-size:13px;display:flex;justify-content:space-between">
             <span style="color:#999;text-transform:uppercase;font-size:11px;letter-spacing:0.5px">Portale</span>
-            <strong style="color:#1a1a1a;font-family:monospace">${portale}/cliente</strong>
+            <strong style="color:#1a1a1a;font-family:monospace">${indirizzoPortale}</strong>
           </div>
           <div style="padding:8px 0;border-bottom:1px solid #e8e8e8;font-size:13px;display:flex;justify-content:space-between">
             <span style="color:#999;text-transform:uppercase;font-size:11px;letter-spacing:0.5px">Email</span>
@@ -66,10 +73,10 @@ export async function inviaCredenzialiCliente({
             <strong style="color:#f97316;font-family:monospace;font-size:16px">${password}</strong>
           </div>
         </div>
-        <!-- Porta del CLIENTE, non il Control Center dei master: prima l'email mandava tutti
-             sulla pagina di accesso master. Si entrava lo stesso (il portale reindirizza), ma
-             è la porta sbagliata e chi la riceve non capisce dove deve andare. -->
-        <a href="https://${portale}/cliente" style="display:inline-block;background:#f97316;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;font-size:14px">Accedi al portale cliente →</a>
+        <!-- Ogni destinatario alla SUA porta: i clienti al portale cliente, lo staff (master,
+             admin, operatore, agente) al Control Center. Mandarli tutti su /cliente faceva
+             sbattere lo staff contro un rifiuto, con le credenziali giuste in mano. -->
+        <a href="${linkPortale}" style="display:inline-block;background:#f97316;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;font-size:14px">${testoPulsante}</a>
         <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:12px 14px;margin-top:20px;font-size:12.5px;color:#9a3412;line-height:1.5">
           <strong>Vale solo QUESTA email.</strong> Ogni volta che la password viene reimpostata ne arriva una nuova e la precedente smette di funzionare: se ne hai ricevute più di una, usa la più recente — questa è del ${new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}.
           <div style="margin-top:6px">Non ti fa entrare? Dalla pagina di accesso usa <strong>“Password dimenticata?”</strong> e scegli tu la password.</div>

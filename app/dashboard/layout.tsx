@@ -13,7 +13,12 @@ export default async function Layout({ children }: { children: React.ReactNode }
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/')
-  const { data: utente } = await supabase.from('utenti').select('nome,ruolo,master_id,attivo').eq('id', user.id).single()
+  const { data: utente, error: errUtente } = await supabase
+    .from('utenti').select('nome,ruolo,master_id,attivo').eq('id', user.id).maybeSingle()
+  // Un guasto MOMENTANEO della query non deve buttare fuori nessuno: si distingue l'errore
+  // (rete/database non raggiungibile -> si lascia proseguire con permessi minimi) dal caso in cui
+  // la riga davvero non esiste.
+  if (errUtente) throw new Error('Profilo non leggibile in questo momento, riprova fra poco')
   // Account autenticato ma SENZA riga in `utenti`: senza questo controllo i ripieghi qui sotto
   // (ruolo 'master', isFull true) gli davano il menu amministrativo completo. Ne esistono davvero:
   // si creano quando l'utente nasce in auth ma l'inserimento in `utenti` fallisce a meta'.

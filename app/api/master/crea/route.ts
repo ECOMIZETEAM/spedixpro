@@ -94,13 +94,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: authError?.message || 'Errore creazione utente auth' }, { status: 400 })
     }
 
-    await admin.from('utenti').insert({
+    // L'esito di questo insert va CONTROLLATO: senza la riga in `utenti` l'account esiste in
+    // auth ma non e' nessuno per l'applicazione, e l'email con le credenziali partiva lo stesso.
+    // Il destinatario non riusciva a entrare e quell'indirizzo restava occupato per sempre.
+    const { error: uErr } = await admin.from('utenti').insert({
       id: authUser.user.id,
       ruolo: 'master',
       master_id: nuovoMaster.id,
       nome,
       attivo: true,
     })
+    if (uErr) {
+      await admin.auth.admin.deleteUser(authUser.user.id).catch(() => {})
+      await admin.from('masters').delete().eq('id', nuovoMaster.id)
+      return NextResponse.json({ error: 'Creazione accesso master fallita: ' + uErr.message }, { status: 400 })
+    }
 
     // Copia il listino assegnato nel Listino Corrieri del sotto-master (contratti + prezzi).
     // CRITICO per la cascata: un sotto-master senza listino blocca il calcolo costo lungo
@@ -133,7 +141,7 @@ export async function POST(req: NextRequest) {
     const { inviaCredenzialiCliente } = await import('@/lib/email')
     await inviaCredenzialiCliente({
       email, nomeCliente: nome, masterNome: 'MoovExpress',
-      dominio: 'moovexpress.com', password,
+      dominio: 'moovexpress.com', password, areaStaff: true,
     })
   } catch (e) {
     console.error('Errore invio email master:', e)

@@ -36,7 +36,10 @@ export default function ImpostaPassword() {
         // se il token è scaduto o già consumato e restasse quella di prima, il modulo comparirebbe
         // lo stesso e cambierebbe la password dell'account SBAGLIATO (tipico: il master apre nel
         // proprio browser il link di recupero girato da un cliente).
-        await supabase.auth.signOut().catch(() => {})
+        // scope 'local': serve solo a non far ripiegare il modulo sulla sessione gia' aperta in
+        // QUESTO browser. Senza argomenti supabase-js revoca le sessioni su tutti i dispositivi:
+        // il master che apriva il link di recupero girato da un cliente si sloggiava ovunque.
+        await supabase.auth.signOut({ scope: 'local' }).catch(() => {})
         const { data: v, error } = await supabase.auth.verifyOtp({ type: tipo, token_hash: tokenHash })
         // Pulisco l'indirizzo: il token è a uso singolo, non deve restare nella cronologia.
         window.history.replaceState(null, '', '/imposta-password')

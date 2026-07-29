@@ -119,7 +119,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (emailDest) {
       try {
         const { inviaCredenzialiCliente } = await import('@/lib/email')
-        const res = await inviaCredenzialiCliente({ email: emailDest, nomeCliente: m?.nome || 'Master', masterNome: 'MoovExpress', dominio: 'moovexpress.com', password: newPassword })
+        const res = await inviaCredenzialiCliente({ email: emailDest, nomeCliente: m?.nome || 'Master', masterNome: 'MoovExpress', dominio: 'moovexpress.com', password: newPassword, areaStaff: true })
         emailInviata = !!(res as any)?.ok
       } catch (e) { console.error('Invio credenziali master:', e) }
     }

@@ -1,4 +1,5 @@
 import { createServerSupabase } from '@/lib/supabase'
+import { redirect } from 'next/navigation'
 import ClienteShell from './ClienteShell'
 import { DialogProvider } from '../components/DialogProvider'
 
@@ -13,9 +14,13 @@ export default async function ClienteLayout({ children }: { children: React.Reac
   // reindirizzare: il layout avvolge anche il login, e un redirect qui creerebbe un loop.
   // Le pagine interne restano protette dal middleware.
   if (!user) return <>{children}</>
-  const { data: utente } = await supabase.from('utenti').select('cliente_id,ruolo').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('cliente_id,ruolo,attivo').eq('id', user.id).maybeSingle()
   if (!utente?.cliente_id) return <>{children}</>
-  const { data: cliente } = await supabase.from('clienti').select('ragione_sociale,credito').eq('id', utente.cliente_id).single()
+  const { data: cliente } = await supabase.from('clienti').select('ragione_sociale,credito,attivo').eq('id', utente.cliente_id).maybeSingle()
+  // Disattivare un cliente non aveva effetto su chi era GIA' dentro: qui non si controllava mai
+  // `attivo`, quindi restava operativo finche' non chiudeva la sessione (e col recupero password
+  // rientrava pure). Ora la disattivazione ha effetto alla prima pagina che apre.
+  if (utente.attivo === false || cliente?.attivo === false) redirect('/api/auth/logout')
 
   return (
     <ClienteShell cliente={{ ragione_sociale: cliente?.ragione_sociale, credito: cliente?.credito }}>

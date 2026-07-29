@@ -39,7 +39,7 @@ export default function CambioPassword({ titolo = 'Cambio Password' }: { titolo?
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', maxWidth: '760px' }}>
           <div>
             <label style={lbl}>Nuova Password:</label>
-            <CampoPassword value={password} onChange={setPassword} placeholder="Almeno 8 caratteri" required={false} />
+            <CampoPassword value={password} onChange={setPassword} placeholder="Almeno 12 caratteri" required={false} />
           </div>
           <div>
             <label style={lbl}>Conferma Password:</label>
