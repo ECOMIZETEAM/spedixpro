@@ -32,6 +32,11 @@ interface Props {
   supplementiEsistenti?: any[]
   corrieriDisponibili?: Corriere[]
   fattoreCorriere?: number
+  // Il MIO costo per questo corriere, chiave "tipo|peso|zona_id". Serve a segnalare a colpo
+  // d'occhio le caselle in cui sto vendendo SOTTO COSTO: in creazione spedizione il blocco
+  // c'e' gia', ma sul listino di un sotto-master non avvisava nulla e ce ne si accorgeva mesi
+  // dopo guardando i margini (o non ce ne si accorgeva affatto).
+  costiMaster?: Record<string, number>
 }
 
 const fattori = [
@@ -113,7 +118,7 @@ function buildAccessoriDa(supplementi: any[], fallback: {nome:string;prezzo:numb
   })
 }
 
-export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere }: Props) {
+export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere, costiMaster }: Props) {
   const isCorriere = tipoListino === 'corriere'
   const apiAggancio = isCorriere ? '/api/listini/corriere-corrieri' : '/api/listini/cliente-corrieri'
   const basePagina = isCorriere ? '/dashboard/listini/corrieri' : '/dashboard/listini/clienti'
@@ -323,6 +328,23 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       {/* PESI / ZONE */}
       {tab==='pesi' && (
         <div>
+          {(() => {
+            // Riepilogo sotto costo: senza questo un prezzo sbagliato passa inosservato e ci si
+            // accorge della perdita solo mesi dopo, guardando i margini a spedizioni gia' fatte.
+            if (!costiMaster) return null
+            let n = 0
+            for (const f of fasce) for (const z of zone) {
+              const c = costiMaster[`${f.tipo}|${f.peso}|${z.id}`]
+              const p = parseFloat(f.prezzi[z.id] ?? '')
+              if (c != null && p > 0 && p < c) n++
+            }
+            if (!n) return null
+            return (
+              <div style={{margin:'12px 16px 0',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'8px',padding:'10px 14px',fontSize:'13px',color:'#b91c1c'}}>
+                ⚠️ <b>{n} {n===1?'prezzo è':'prezzi sono'} sotto il tuo costo</b> — {n===1?'la casella è evidenziata':'le caselle sono evidenziate'} in rosso, con il costo indicato sotto. Puoi salvare lo stesso, ma su {n===1?'quella tratta':'quelle tratte'} ci rimetti.
+              </div>
+            )
+          })()}
           <div style={{overflowX:'auto' as const}}>
             <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
               <thead>
@@ -350,11 +372,19 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
                         <span style={{fontSize:'12px',color:'#666'}}>kg</span>
                       </div>
                     </td>
-                    {zone.map(z=>(
+                    {zone.map(z=>{
+                      const costo = costiMaster?.[`${fascia.tipo}|${fascia.peso}|${z.id}`]
+                      const prezzo = parseFloat(fascia.prezzi[z.id] ?? '')
+                      const sottoCosto = costo != null && prezzo > 0 && prezzo < costo
+                      return (
                       <td key={z.id} style={{padding:'6px 6px',textAlign:'center' as const}}>
-                        <input type="number" value={fascia.prezzi[z.id]??''} onChange={e=>aggiornaPrezzo(idx,z.id,e.target.value)} placeholder="0.00" min="0" step="0.01" style={{...inp,width:'72px',textAlign:'right' as const}}/>
+                        <input type="number" value={fascia.prezzi[z.id]??''} onChange={e=>aggiornaPrezzo(idx,z.id,e.target.value)} placeholder="0.00" min="0" step="0.01"
+                          title={sottoCosto ? `Sotto costo: il tuo costo per ${z.nome} a questa fascia e' ${costo!.toFixed(2)} €` : (costo != null ? `Tuo costo: ${costo.toFixed(2)} €` : undefined)}
+                          style={{...inp,width:'72px',textAlign:'right' as const,
+                            ...(sottoCosto ? {borderColor:'#dc2626',background:'#fef2f2',color:'#b91c1c',fontWeight:700} : {})}}/>
+                        {sottoCosto && <div style={{fontSize:'10px',color:'#dc2626',marginTop:'2px',whiteSpace:'nowrap' as const}}>costo {costo!.toFixed(2)}</div>}
                       </td>
-                    ))}
+                    )})}
                     <td style={{padding:'6px 6px',textAlign:'center' as const}}>
                       <input type="number" value={fascia.fuel??''} onChange={e=>aggiornaFuel(idx,e.target.value)} placeholder="0" min="0" step="0.01" style={{...inp,width:'60px',textAlign:'right' as const}}/>
                     </td>

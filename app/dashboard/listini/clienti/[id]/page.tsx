@@ -47,6 +47,29 @@ export default async function ModificaListinoPage({
   // Fattore volume del corriere selezionato (per-corriere)
   const { data: aggSel } = await supabase.from('listini_clienti_corrieri').select('fattore_volume').eq('listino_id', id).eq('corriere_id', corriereSelezionato?.id||'').maybeSingle()
   const fattoreCorriere = (aggSel?.fattore_volume != null) ? aggSel.fattore_volume : (listino.fattore_volume ?? 5000)
+
+  // IL MIO COSTO per lo stesso corriere, dal Listino Corrieri del master. Serve all'editor per
+  // segnalare le caselle in cui si sta vendendo sotto costo. Le fasce di TUTTI i contratti stanno
+  // sotto i listini del master e si distinguono per corriere_id, quindi si filtra per quello.
+  const costiMaster: Record<string, number> = {}
+  if (corriereSelezionato?.id && utente?.master_id) {
+    const { data: listiniCorr } = await supabase.from('listini_corrieri').select('id').eq('master_id', utente.master_id)
+    const idsCorr = (listiniCorr || []).map((l: any) => l.id)
+    if (idsCorr.length) {
+      const { data: fasceCosto } = await supabase.from('listini_corrieri_fasce')
+        .select('zona_id,peso_max,prezzo,tipo')
+        .in('listino_id', idsCorr)
+        .eq('corriere_id', corriereSelezionato.id)
+      for (const f of fasceCosto || []) {
+        const chiave = `${f.tipo || 'fino_a'}|${Number(f.peso_max)}|${f.zona_id}`
+        const p = Number(f.prezzo)
+        // Piu' listini del master possono avere la stessa fascia: si tiene il costo PIU' ALTO,
+        // cioe' il caso peggiore. Segnalare troppo poco sarebbe inutile.
+        if (!isNaN(p) && (costiMaster[chiave] == null || p > costiMaster[chiave])) costiMaster[chiave] = p
+      }
+    }
+  }
+
   return (
     <ListinoEditor
       listino={listino}
@@ -58,6 +81,7 @@ export default async function ModificaListinoPage({
       fasceEsistenti={fasceEsistenti||[]}
       supplementiEsistenti={supplementiEsistenti||[]}
       clientiAssegnati={clientiAssegnati||[]}
+      costiMaster={costiMaster}
       tipoListino="cliente"
     />
   )
