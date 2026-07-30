@@ -18,3 +18,20 @@ export function logoCorriere(nomeContratto: string): string | null {
   for (const [chiave, file] of regole) { if (n.includes(chiave)) return `/corrieri/${file}.png` }
   return null
 }
+
+// NOME del vettore da mostrare a schermo, ricavato dal nome del contratto.
+// Da usare ovunque compaia la voce "Vettore": il campo corrieri.tipo NON va mai stampato, perche'
+// contiene il provider tecnico ('spediamopro', 'spedisci') che l'utente non deve vedere.
+// Se il contratto non contiene un marchio riconosciuto si ripiega sul nome del contratto stesso,
+// che e' comunque roba nostra e non nomina il provider.
+const MARCHI: string[] = [
+  'POSTE', 'SDA', 'GLS', 'BRT', 'TNT', 'DHL', 'FEDEX', 'UPS', 'HERMES', 'NEXIVE',
+  'LICCARDI', 'SAILPOST', 'BDM', 'NSSA', 'HR PARCEL', 'HRP', 'PALLETWAYS',
+  'CORREOS', 'INPOST', 'SPRING', 'PAACK', 'SPEEDY', 'AMAZON', 'CTT', 'AIPACK', 'ALT', 'GTECH',
+]
+export function marchioCorriere(nomeContratto: string): string {
+  const nome = (nomeContratto || '').trim()
+  const n = nome.toUpperCase()
+  for (const m of MARCHI) { if (n.includes(m)) return m === 'POSTE' ? 'Poste' : m }
+  return nome
+}

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
+import { marchioCorriere } from '@/lib/corriere-logo'
 export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -26,7 +27,9 @@ export async function GET() {
     const costo = (speds || []).reduce((a, s) => a + (Number(s.costo_totale) || 0), 0)
     result.push({
       id: d.id, numero: d.numero, data: d.data || d.created_at, stato: d.stato,
-      vettore: (d.corrieri?.tipo) || (d.corrieri?.nome_contratto) || '', contratto: (d.corrieri?.nome_contratto) || '',
+      // MAI corrieri.tipo: contiene il provider tecnico ('spediamopro', 'spedisci') e finiva
+      // stampato al cliente nella colonna "Vettore". Il vettore e' il marchio del contratto.
+      vettore: marchioCorriere(d.corrieri?.nome_contratto || ''), contratto: (d.corrieri?.nome_contratto) || '',
       spedizioni: nSped, colli: colli || d.totale_colli || 0, contrassegni, peso: peso || Number(d.totale_peso) || 0, costo,
     })
   }
