@@ -43,10 +43,16 @@ export async function POST(req: NextRequest) {
   // Segno CORRETTO: differenza = costo_iniziale - costo_finale -> negativa = addebito, positiva = accredito.
   const diCatena = rettifiche.filter(r => r.target_master_id)
   const diClienti = rettifiche.filter(r => !r.target_master_id && r.cliente_id)
+  // Client amministrativo dichiarato QUI, prima di entrambi i cicli: serve sia alle rettifiche di
+  // catena sia a quelle verso i clienti (piu' in basso). Era dichiarato dentro il blocco
+  // "if (diCatena.length)" e usato anche fuori: il progetto ignora gli errori di tipo in
+  // compilazione, quindi passava, ma a runtime la variabile non esisteva e OGNI rettifica verso un
+  // cliente finiva nel catch, persa senza traccia.
+  const { createAdminSupabase } = await import('@/lib/supabase-admin')
+  const adminDb = createAdminSupabase()
+
   if (diCatena.length) {
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const { registraMovimentoMaster } = await import('@/lib/movimenti')
-    const adminDb = createAdminSupabase()
     for (const r of diCatena) {
       const diff = Number(r.differenza || 0)
       if (Math.abs(diff) <= 0.005) continue

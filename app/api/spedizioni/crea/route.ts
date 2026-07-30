@@ -96,23 +96,8 @@ export async function POST(req: NextRequest) {
     if (!cliente.listino_cliente_id) return NextResponse.json({ error: 'Nessun contratto attivo' }, { status: 400 })
   }
 
-  // ── Blocco credito insufficiente ("credito a scalare"): vale per CLIENTE, SOTTO-MASTER e
-  //    MASTER su spedizione propria. Se il credito non copre il costo della spedizione, non si può
-  //    spedire (es. credito 2€ ma spedizione 3€). Il ROOT master (senza padre) è esente.
-  {
-    const costoPreventivo = parseFloat(body.totalPrice) || 0
-    let tipoC = '', creditoC = 0, esente = false
-    if (cliente) { tipoC = cliente.tipo_contratto || ''; creditoC = Number(cliente.credito || 0) }
-    else if (isProprio) {
-      const { data: m } = await supabase.from('masters').select('tipo_contratto,credito,parent_master_id').eq('id', utente!.master_id).maybeSingle()
-      tipoC = (m as any)?.tipo_contratto || ''; creditoC = Number((m as any)?.credito || 0); esente = !(m as any)?.parent_master_id
-    }
-    if (!esente && tipoC === 'credito_scalare' && costoPreventivo > 0 && creditoC < costoPreventivo) {
-      return NextResponse.json({
-        error: `Credito insufficiente: disponibili € ${creditoC.toFixed(2)}, spedizione € ${costoPreventivo.toFixed(2)}. Ricarica il credito per spedire.`,
-      }, { status: 402 })
-    }
-  }
+  // Il blocco del credito e' piu' in basso: serve il prezzo calcolato dal SERVER, che si puo'
+  // ottenere solo dopo aver risolto il contratto e la zona di destinazione.
 
   const masterId = isProprio ? utente!.master_id : cliente.master_id
 
@@ -256,6 +241,59 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // *** PREZZO AL CLIENTE CALCOLATO DAL SERVER ***
+  // body.totalPrice arriva dal browser. Veniva usato TALE E QUALE come importo addebitato: bastava
+  // modificarlo per pagare quello che si voleva, mentre la catena dei master veniva addebitata per
+  // intero dal server (perdita secca per tutta la rete). Con totalPrice a 0 si saltava anche il
+  // blocco del credito. Qui il prezzo viene ricalcolato dal listino del cliente, come fa gia'
+  // l'API pubblica in app/api/v1/shipments.
+  // Regola scelta: si addebita il MAGGIORE fra il calcolo del server e quanto dichiarato dal
+  // browser. Cosi' l'abuso "pago meno" e' chiuso, mentre resta possibile un prezzo piu' alto
+  // deciso legittimamente a monte (accessori, maggiorazioni del master): non si cambia in silenzio
+  // la fatturazione di chi oggi addebita correttamente.
+  let prezzoServerCliente = 0
+  if (!isProprio && cliente?.listino_cliente_id) {
+    const risPrezzo = await calcolaPrezzoListino(adminCrea, {
+      listinoId: cliente.listino_cliente_id, corriereId: corriereRecord.id,
+      provincia: body.shipTo.state, cap: body.shipTo.postalCode,
+      paese: body.shipTo.country || 'IT', citta: body.shipTo.city, packages,
+    })
+    if (!risPrezzo) {
+      return NextResponse.json({ error: 'Destinazione non coperta dal listino per questo contratto: spedizione non creabile.' }, { status: 400 })
+    }
+    const suppPrezzo = await calcolaSupplementiCliente(adminCrea, {
+      listinoId: cliente.listino_cliente_id, corriereId: corriereRecord.id,
+      contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+      valoreMerce: Number(body.valoreMerce || 0), nolo: risPrezzo.prezzo,
+    })
+    prezzoServerCliente = Math.round((risPrezzo.prezzo + suppPrezzo.contrassegno + suppPrezzo.assicurazione) * 100) / 100
+    const dichiarato = parseFloat(body.totalPrice) || 0
+    if (dichiarato > 0 && dichiarato < prezzoServerCliente - 0.01) {
+      console.warn('[CREA][PREZZO] importo dichiarato inferiore al listino, uso il listino', {
+        cliente: cliente?.ragione_sociale, dichiarato, listino: prezzoServerCliente,
+      })
+    }
+  }
+
+  // ── Blocco credito insufficiente ("credito a scalare"): vale per CLIENTE, SOTTO-MASTER e
+  //    MASTER su spedizione propria. Il costo di riferimento e' quello del SERVER (prima si usava
+  //    body.totalPrice: con 0 il blocco non scattava e si spediva a credito esaurito).
+  //    Il ROOT master (senza padre) e' esente.
+  {
+    const costoPreventivo = Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
+    let tipoC = '', creditoC = 0, esente = false
+    if (cliente) { tipoC = cliente.tipo_contratto || ''; creditoC = Number(cliente.credito || 0) }
+    else if (isProprio) {
+      const { data: m } = await supabase.from('masters').select('tipo_contratto,credito,parent_master_id').eq('id', utente!.master_id).maybeSingle()
+      tipoC = (m as any)?.tipo_contratto || ''; creditoC = Number((m as any)?.credito || 0); esente = !(m as any)?.parent_master_id
+    }
+    if (!esente && tipoC === 'credito_scalare' && costoPreventivo > 0 && creditoC < costoPreventivo) {
+      return NextResponse.json({
+        error: `Credito insufficiente: disponibili € ${creditoC.toFixed(2)}, spedizione € ${costoPreventivo.toFixed(2)}. Ricarica il credito per spedire.`,
+      }, { status: 402 })
+    }
+  }
+
   // Spedizione propria del master: prezzo dal listino corriere (server-side, non ci fidiamo del body).
   let costoMaster = 0
   if (isProprio) {
@@ -394,7 +432,13 @@ export async function POST(req: NextRequest) {
     if (!res.ok || r.error) return NextResponse.json({ error: erroreCorrierePulito(r?.error || text) }, { status: 400 })
 
     const numero = r.trackingNumber
-    const costoCliente = isProprio ? costoMaster : (parseFloat(body.totalPrice) || parseFloat(r.shipmentCost) || 0)
+    // L'importo ADDEBITATO deve essere quello calcolato dal SERVER. Il controllo del credito piu'
+    // sopra usava gia' il prezzo server, ma qui si addebitava body.totalPrice: bastava abbassarlo
+    // nella richiesta per pagare meno, mentre la catena dei master veniva addebitata per intero.
+    // Si tiene il MAGGIORE fra server e dichiarato, come nel controllo, per non alterare i casi in
+    // cui a monte viene applicato legittimamente un prezzo piu' alto.
+    const dichiaratoCli = parseFloat(body.totalPrice) || parseFloat(r.shipmentCost) || 0
+    const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, dichiaratoCli)
     const costoCorrente = parseFloat(r.shipmentCost) || 0
 
     let etichetteUrls: string[] = []
@@ -605,7 +649,9 @@ export async function POST(req: NextRequest) {
       }
 
       const costoCorrente = centsToEuro(shipment.totalPrice)
-      const costoCliente = isProprio ? costoMaster : (parseFloat(body.totalPrice) || costoCorrente)
+      // Come nel ramo gemello: si addebita il prezzo del SERVER, non quello dichiarato dal browser.
+      const dichiaratoCli = parseFloat(body.totalPrice) || costoCorrente
+      const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, dichiaratoCli)
 
       const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
         master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id,
