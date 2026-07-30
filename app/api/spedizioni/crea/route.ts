@@ -851,6 +851,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Questo contratto è ancora in configurazione e non può essere usato per spedizioni reali.' }, { status: 400 })
     }
 
+    // LIMITI FISICI DEL CONTRATTO, controllati QUI e non solo nel preventivo. Ogni corriere di
+    // questo provider dichiara i suoi (numero colli, lato massimo, somma dei lati, peso per collo)
+    // e li rifiuta a valle. Con un corriere che non permette l'annullo, accorgersene dopo l'acquisto
+    // significa aver comprato una spedizione che non partira' e che non si puo' disdire. Il controllo
+    // del preventivo non basta: alla creazione si arriva anche con una quotazione vecchia o dalla
+    // spedizione propria del master, che quel preventivo non attraversa.
+    {
+      const { motivoLimiteCollo } = await import('@/lib/limiti-collo')
+      const motivo = motivoLimiteCollo((corriereRecord as any)?.settings, pesoReale, packages)
+      if (motivo) {
+        await stornaPrenotazione()
+        return NextResponse.json({ error: `Spedizione non accettata da questo corriere: ${motivo}. Correggi i colli o scegli un altro contratto.` }, { status: 400 })
+      }
+    }
+
     // Il provider ESIGE cellulare ed email di mittente E destinatario (verificato: senza, risponde
     // "Campo 'mittente->cellulare' mancante"). Il controllo va fatto adesso: scoprirlo dopo l'ordine
     // sarebbe irreparabile. L'email vera non gli arriva mai — va quella di servizio, come agli altri.
