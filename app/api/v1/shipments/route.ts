@@ -166,8 +166,57 @@ export async function POST(req: NextRequest) {
     // ZIP multicollo → PDF unico; PDF/immagini mono-collo invariati. Se non pronta, resta null (riscaricata on-demand).
     try { const lb = await spediamoproGetLabel(cred.authcode, shipment.id); const norm = await normalizzaEtichetta(lb); etichettaUrl = `data:${norm.mime};base64,${norm.buffer.toString('base64')}` } catch {}
     raw = { ...shipment, _quotation: quotation }
+  } else if (corriere.tipo === 'easyparcel') {
+    // Tre passi obbligati (preventivo → ordine → lettera di vettura) e NESSUN annullo disponibile:
+    // per questo tutti i controlli stanno prima dell'ordine. Vedi lib/easyparcel.ts.
+    const { easyparcelQuotation, easyparcelOrder, easyparcelWaybill, trovaOffertaVettore, erroreEasyparcelPulito } = await import('@/lib/easyparcel')
+    const apikey = String(cred?.apikey || ''), vettore = String(cred?.vettore || '')
+    if (!apikey || !vettore) return NextResponse.json({ error: 'Contratto non configurato correttamente' }, { status: 400 })
+    // Chiave di prova: l'ordine riesce ma il pacco non esiste. Dall'API pubblica spedisce sempre
+    // un cliente, quindi qui il blocco e' secco (vedi la stessa nota in spedizioni/crea).
+    if (String(cred?.ambiente || '').toLowerCase() === 'demo') return NextResponse.json({ error: 'Questo contratto è ancora in configurazione e non può essere usato per spedizioni reali' }, { status: 400 })
+    // Cellulare di mittente e destinatario: il corriere li rifiuta se mancanti.
+    const solaCifre = (v: any) => String(v || '').replace(/[^0-9]/g, '')
+    const cellM = solaCifre(body.shipFrom?.phone), cellD = solaCifre(body.shipTo?.phone)
+    if (cellM.length < 6) return NextResponse.json({ error: 'Telefono mittente obbligatorio per questo contratto (solo cifre, minimo 6)' }, { status: 400 })
+    if (cellD.length < 6) return NextResponse.json({ error: 'Telefono destinatario obbligatorio per questo contratto (solo cifre, minimo 6)' }, { status: 400 })
+    try {
+      const offerte = await easyparcelQuotation(apikey, {
+        colli: packages.map((p: any) => ({ peso: parseFloat(p?.weight) || 1, larghezza: parseFloat(p?.width) || 10, profondita: parseFloat(p?.length) || 10, altezza: parseFloat(p?.height) || 10 })),
+        mittente: { cap: body.shipFrom.postalCode, localita: body.shipFrom.city, provincia: body.shipFrom.state, nazione: 'IT' },
+        destinatario: { cap: body.shipTo.postalCode, localita: body.shipTo.city, provincia: body.shipTo.state, nazione: (body.shipTo.country || 'IT').toUpperCase() },
+        contenuto: body.contenuto, contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+      })
+      const offerta = trovaOffertaVettore(offerte, vettore)
+      if (!offerta) return NextResponse.json({ error: 'Nessuna tariffa disponibile per questa destinazione con il contratto scelto' }, { status: 400 })
+      const opz = offerta.serviziopzionali || {}
+      const codReq = Number(body.codValue || 0) > 0, assReq = Number(body.insuranceValue || 0) > 0
+      if (codReq && String(opz?.contrassegno?.attivabile || 'N').toUpperCase() !== 'S') return NextResponse.json({ error: 'Contrassegno non disponibile su questo contratto per questa destinazione' }, { status: 400 })
+      if (assReq && String(opz?.assicurazione?.attivabile || 'N').toUpperCase() !== 'S') return NextResponse.json({ error: 'Assicurazione non disponibile su questo contratto per questa destinazione' }, { status: 400 })
+      const ordine = await easyparcelOrder(apikey, {
+        codiceOfferta: String(offerta.codice_offerta),
+        // Il "presso" non ha un campo dedicato: si accoda all'indirizzo, come per l'altro provider.
+        mittente: { nominativo: body.shipFrom.name, indirizzo: conPresso(body.shipFrom.street1 || '', pressoFrom), email: EMAIL_PER_CORRIERE, cellulare: cellM, contatto: body.shipFrom.name },
+        destinatario: { nominativo: body.shipTo.name, indirizzo: conPresso(body.shipTo.street1 || '', pressoTo), email: EMAIL_PER_CORRIERE, cellulare: cellD, contatto: body.shipTo.name },
+        note: body.notes || undefined,
+        contrassegno: codReq, assicurazione: assReq,
+      })
+      let ldv: string | null = null
+      try {
+        const w = await easyparcelWaybill(apikey, ordine.idOrdine, 2, 1500)
+        ldv = w.numero || null
+        const b64 = w.singole[0]?.pdfBase64 || w.pdfBase64
+        if (b64) etichettaUrl = `data:application/pdf;base64,${b64}`
+      } catch { /* non pronta: la recupera il giro di tracking */ }
+      numero = ldv || `DVA-${ordine.idOrdine}`
+      costoCorrente = ordine.importo
+      raw = { ...ordine, _codiceOfferta: String(offerta.codice_offerta), _vettore: vettore, _idOrdine: ordine.idOrdine }
+    } catch (e: any) {
+      console.error('[V1][EASYPARCEL]', e?.codice ?? '-', e?.message, e?.dettagli || '')
+      return NextResponse.json({ error: erroreEasyparcelPulito(e) }, { status: 400 })
+    }
   } else {
-    return NextResponse.json({ error: `Tipo contratto non supportato: ${corriere.tipo}` }, { status: 400 })
+    return NextResponse.json({ error: 'Tipo contratto non supportato' }, { status: 400 })
   }
 
   const { data: inserted, error: insErr } = await admin.from('spedizioni').insert({

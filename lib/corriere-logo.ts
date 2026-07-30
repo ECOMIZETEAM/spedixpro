@@ -35,3 +35,12 @@ export function marchioCorriere(nomeContratto: string): string {
   for (const m of MARCHI) { if (n.includes(m)) return m === 'POSTE' ? 'Poste' : m }
   return nome
 }
+
+// Elenco UNICO dei provider tecnici a valle. Serve alle schermate che mostrano il tipo del
+// contratto solo quando e' un'etichetta innocua (es. 'generico'): il tipo di un provider vero
+// non va mai stampato. Tenerlo in un posto solo evita che l'aggiunta del prossimo provider
+// ricrei la fuga in tre pagine diverse — e' esattamente com'e' successo aggiungendo il terzo.
+export const PROVIDER_TECNICI = ['spediamopro', 'spedisci', 'easyparcel']
+export function isProviderTecnico(tipo?: string | null): boolean {
+  return PROVIDER_TECNICI.includes(String(tipo || '').toLowerCase())
+}

@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
+import { isProviderTecnico } from '@/lib/corriere-logo'
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'12.5px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#999',display:'block' as const,marginBottom:'4px',textTransform:'uppercase' as const,letterSpacing:'0.4px'}
@@ -266,7 +267,7 @@ export default function ClientiPage() {
                     <td style={{padding:'10px 14px',fontSize:'12px'}}>
                       {(c.contratti_attivi && c.contratti_attivi.length)
                         ? c.contratti_attivi.map((ct:any, i:number)=>(
-                            <div key={i} style={{marginBottom:'2px',color:'#1a1a1a'}}>{ct.tipo && !['spediamopro','spedisci'].includes(ct.tipo) && <span style={{fontWeight:'700'}}>{ct.tipo} </span>}{ct.nome_contratto}</div>
+                            <div key={i} style={{marginBottom:'2px',color:'#1a1a1a'}}>{ct.tipo && !isProviderTecnico(ct.tipo) && <span style={{fontWeight:'700'}}>{ct.tipo} </span>}{ct.nome_contratto}</div>
                           ))
                         : <span style={{color:'#1a1a1a'}}>-</span>}
                     </td>

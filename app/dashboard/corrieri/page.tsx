@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { isProviderTecnico } from '@/lib/corriere-logo'
 
 const DISPONIBILI = [
   {tipo:'gls',nome:'GLS',icona:'gls'},
@@ -160,7 +161,7 @@ export default function CorrieriPage() {
                 {iconaCorriere(c.nome_contratto) ? (
                   <img src={iconaCorriere(c.nome_contratto)!} alt="" style={{width:'96px',height:'58px',objectFit:'contain',border:'1px solid #eee',borderRadius:'6px',background:'#fff',flexShrink:0}}/>
                 ) : (
-                  <div style={{width:'96px',height:'58px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'6px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'10px',fontWeight:'700',color:'#333',textTransform:'uppercase',flexShrink:0}}>{['spediamopro','spedisci','generico'].includes(c.tipo) ? (c.nome_contratto||'').slice(0,6) : c.tipo}</div>
+                  <div style={{width:'96px',height:'58px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'6px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'10px',fontWeight:'700',color:'#333',textTransform:'uppercase',flexShrink:0}}>{(isProviderTecnico(c.tipo) || c.tipo === 'generico') ? (c.nome_contratto||'').slice(0,6) : c.tipo}</div>
                 )}
                 <div style={{minWidth:0}}>
                   <div style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>{c.nome_contratto}</div>

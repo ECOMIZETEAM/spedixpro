@@ -72,6 +72,20 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true, manuale: true, message: 'Richiesta di annullo inviata: la spedizione è in cancellazione. Verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
   }
 
+  // ── CONTRATTI DVA: il corriere non ha proprio una chiamata di annullo. Metterli in attesa 48h
+  //    sarebbe solo tempo perso e una promessa falsa: dopo due giorni si scoprirebbe comunque che
+  //    va fatto a mano. Vanno subito in coda al detentore del contratto, come per l'altro caso
+  //    non annullabile via API, con un messaggio che dice come stanno le cose. ──
+  if (corr?.tipo === 'easyparcel') {
+    const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
+    const { error: manErr } = await admin.from('spedizioni').update({
+      stato: 'annullamento_manuale', stato_precedente: sped.stato, annullamento_owner_id: ownerId,
+      annullamento_richiesto_at: new Date().toISOString(), annullamento_da: user.id, annullamento_errore: null,
+    }).eq('id', spedizioneId)
+    if (manErr) return NextResponse.json({ error: manErr.message }, { status: 400 })
+    return NextResponse.json({ success: true, manuale: true, message: 'Richiesta di annullo inviata: questo corriere non consente la cancellazione automatica, quindi verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
+  }
+
   // ── ALTRI CORRIERI (SpediamoPro): ATTESA 48h (pending). Nessuna chiamata al corriere ora. ──
   const { error: updErr } = await admin.from('spedizioni').update({
     stato: 'annullamento_pending',

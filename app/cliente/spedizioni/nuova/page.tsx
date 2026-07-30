@@ -3,7 +3,10 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
 
-const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':(t||'').toUpperCase()
+// Sigla di ripiego quando il contratto non ha un marchio riconosciuto. Attenzione: qui arriva
+// il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
+// all'utente ('EASYPARCEL'). Ogni provider ha la sua sigla neutra.
+const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':t==='easyparcel'?'DVA':(t||'').toUpperCase()
 interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; _corriere_id?:string; corriere_nome?:string }
 interface Collo { lunghezza:string; larghezza:string; altezza:string }
 

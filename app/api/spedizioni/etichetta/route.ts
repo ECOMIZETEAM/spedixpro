@@ -89,6 +89,33 @@ export async function GET(req: NextRequest) {
     src = (sped.colli_dettaglio as any[]).find(c => c?.etichetta_url)?.etichetta_url || null
   }
 
+  // Stesso ripiego per i contratti DVA: li' l'etichetta nasce da una chiamata separata (la lettera
+  // di vettura) che alla creazione puo' non essere ancora pronta. Senza questo, l'unica speranza
+  // sarebbe il giro automatico e nel frattempo il tasto "Etichetta" direbbe "non disponibile".
+  if (!src && (sped as any).corriere_id) {
+    const idOrdine = (sped.raw_response as any)?._idOrdine
+    if (idOrdine) {
+      const { data: corrEP } = await supabase.from('corrieri').select('tipo,credenziali').eq('id', (sped as any).corriere_id).maybeSingle()
+      const apikeyEP = (corrEP?.credenziali as any)?.apikey
+      if (corrEP?.tipo === 'easyparcel' && apikeyEP) {
+        try {
+          const { easyparcelWaybill } = await import('@/lib/easyparcel')
+          const w = await easyparcelWaybill(apikeyEP, String(idOrdine), 2, 1500)
+          const b64 = w.singole[0]?.pdfBase64 || w.pdfBase64
+          if (b64) {
+            const buf = Buffer.from(b64, 'base64')
+            const dataUrl = `data:application/pdf;base64,${b64}`
+            try { const { createAdminSupabase } = await import('@/lib/supabase-admin'); await createAdminSupabase().from('spedizioni').update({ etichetta_url: dataUrl, ...(w.numero ? { tracking_number: w.numero } : {}) }).eq('id', id) } catch {}
+            const outBuf = await conRiepilogo(buf)
+            return new NextResponse(new Uint8Array(outBuf), { status: 200, headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.pdf"`, 'Cache-Control': 'private, max-age=0, no-store' } })
+          }
+        } catch {
+          return NextResponse.json({ error: 'Etichetta non ancora pronta dal corriere (spedizione in lavorazione). Riprova tra qualche minuto.' }, { status: 409 })
+        }
+      }
+    }
+  }
+
   // Fallback SpediamoPro: se l'etichetta non è stata salvata alla creazione (es. non pronta subito
   // per il multicollo), la scarichiamo ORA dall'API col shipment id, e la salviamo per le prossime.
   if (!src) {

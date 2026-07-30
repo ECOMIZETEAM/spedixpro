@@ -96,6 +96,40 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200 })
     }
 
+    // CONTRATTI DVA: il tracking si chiede al momento, e si chiede col CODICE OFFERTA — la ricerca
+    // per lettera di vettura risponde "Spedizione non trovata" (verificato sul campo). Qui non
+    // esiste un webhook, quindi senza questo ramo il riquadro resterebbe sempre vuoto: cadrebbe
+    // sulla lettura di tracking_events, che per questi contratti nessuno riempie mai.
+    if (corriere.tipo === 'easyparcel') {
+      const raw: any = spedizione.raw_response || {}
+      const codiceOfferta = raw._codiceOfferta
+      if (!codiceOfferta || !cred?.apikey) {
+        return NextResponse.json({ ...base, eventi: [], stato: statoEffettivo, error: 'Tracking non ancora disponibile per questa spedizione' })
+      }
+      const { easyparcelTracking, mapStatoEasyparcel } = await import('@/lib/easyparcel')
+      const { stati, raw: trRaw } = await easyparcelTracking(cred.apikey, { codiceOfferta: String(codiceOfferta) })
+      let avanzato: string | null = null
+      for (const s of stati) {
+        const m = mapStatoEasyparcel(s)
+        if (m && prioritaStato(m) > prioritaStato(avanzato)) avanzato = m
+      }
+      await persistiStato(avanzato)
+      // La lettera di vettura puo' essere arrivata dopo la creazione: se il numero e' ancora
+      // quello provvisorio, si corregge subito senza aspettare il giro automatico.
+      const ldv = (trRaw as any)?.tracking?.lettera_vettura
+      if (ldv && ldv !== spedizione.numero && /^DVA-/.test(String(spedizione.numero || ''))) {
+        try { await admin.from('spedizioni').update({ numero: String(ldv), tracking_number: String(ldv) }).eq('id', spedizione.id) } catch {}
+        ;(base as any).numero = String(ldv)
+        ;(base as any).tracking_number = String(ldv)
+      }
+      const eventi = (Array.isArray((trRaw as any)?.dettagli) ? (trRaw as any).dettagli : []).map((e: any) => ({
+        date: [e?.data, e?.ora].filter(Boolean).join(' '),
+        description: [e?.descrizione, e?.note].filter(Boolean).join(' — ') || 'Evento',
+        location: e?.filiale || '',
+      })).reverse()   // più recente in alto, come nell'altro ramo
+      return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200 })
+    }
+
     // Spedisci.online ha CHIUSO il polling del tracking (403 "For tracking please use the Webhooks
     // events"): gli eventi arrivano in tempo reale dal WEBHOOK e vengono salvati in tracking_events.
     // Il popup mostra quelli (lo stato è già allineato dal webhook stesso, solo-in-avanti).

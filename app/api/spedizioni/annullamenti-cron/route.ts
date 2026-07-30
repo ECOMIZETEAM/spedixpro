@@ -30,7 +30,10 @@ export async function GET() {
     try {
       // Il corriere della spedizione: Spedisci non è annullabile via API (contratto non nostro)
       const { data: corr } = await admin.from('corrieri').select('tipo,nome_contratto,master_id').eq('id', (s as any).corriere_id).maybeSingle()
-      if (corr?.tipo === 'spedisci') {
+      // Anche i contratti DVA: nessun annullo via API (vedi annullaSpedizioneSulCorriere). Qui il
+      // caso si presenta solo per richieste entrate prima di questa modifica, ma va coperto:
+      // altrimenti finirebbero nel ramo automatico e verrebbero rimborsate senza essere annullate.
+      if (corr?.tipo === 'spedisci' || corr?.tipo === 'easyparcel') {
         // Coda manuale: instrada al DETENTORE del contratto (richiesta via assistenza WhatsApp).
         const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
         await admin.from('spedizioni').update({

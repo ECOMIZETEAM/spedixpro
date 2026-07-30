@@ -93,6 +93,14 @@ export async function POST(req: NextRequest) {
   const { data: corriere } = await admin.from('corrieri').select('id,tipo,credenziali').eq('id', primaSped.corriere_id).single()
   if (!corriere) return NextResponse.json({ error: 'Corriere non trovato' }, { status: 400 })
 
+  // CONTRATTI DVA: il ritiro si prenota SOLO insieme alla spedizione, non dopo — il corriere non
+  // ha una chiamata per aggiungerlo a posteriori. Senza questa uscita si finirebbe nel ramo in
+  // fondo (che vale per tutto cio' che non e' SpediamoPro) e si tenterebbe una chiamata verso un
+  // dominio che per questi contratti non esiste nemmeno.
+  if (corriere.tipo === 'easyparcel') {
+    return NextResponse.json({ error: 'Per questo corriere il ritiro va richiesto al momento della creazione della spedizione: non può essere aggiunto dopo.' }, { status: 400 })
+  }
+
   const cred = corriere.credenziali as Record<string, string>
 
   if (!body.mittNome || !body.mittIndirizzo || !body.mittCitta || !body.mittCap) {

@@ -40,7 +40,10 @@ const CARRIERS: Record<string,{nome:string,colore:string}> = {
   spediamopro:{nome:'',colore:'#f97316'},
 }
 // Il provider tecnico non si mostra mai: codice interno SP / SO.
-const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':(t||'').toUpperCase()
+// Sigla di ripiego quando il contratto non ha un marchio riconosciuto. Attenzione: qui arriva
+// il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
+// all'utente ('EASYPARCEL'). Ogni provider ha la sua sigla neutra.
+const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':t==='easyparcel'?'DVA':(t||'').toUpperCase()
 
 export default function NuovaSpedizionePage() {
   const dialog = useDialog()

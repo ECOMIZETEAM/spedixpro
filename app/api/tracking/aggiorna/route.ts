@@ -33,7 +33,9 @@ export async function GET() {
       // funzione veniva UCCISA per memoria esaurita (4 volte nelle ultime 24h): il giro moriva
       // a metà e il tracking restava indietro per tutti. Qui servono solo tre valori, presi
       // direttamente dal JSON, e l'etichetta si guarda a parte (solo gli id di chi non ce l'ha).
-      .select('id,numero,stato,tracking_number,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code')
+      // ep_offerta/ep_ordine: i due riferimenti del terzo provider. Il tracking si interroga col
+      // CODICE OFFERTA (per LDV risponde "Spedizione non trovata"), l'etichetta con l'id ordine.
+      .select('id,numero,stato,tracking_number,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code,ep_offerta:raw_response->_codiceOfferta,ep_ordine:raw_response->_idOrdine')
       .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
       .order('tracking_check_at', { ascending: true, nullsFirst: true })
       .order('id', { ascending: true })
@@ -107,6 +109,23 @@ export async function GET() {
           const m = mapStatoSpedisci(str)
           if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
         }
+
+      } else if (tipo === 'easyparcel') {
+        // Si interroga col CODICE OFFERTA, non con la LDV (verificato sul campo: la ricerca per
+        // LDV risponde "Spedizione non trovata"). Senza quel riferimento non c'e' nulla da chiedere.
+        const offerta = (s as any).ep_offerta
+        if (!offerta || !cred?.apikey) return
+        const { easyparcelTracking, mapStatoEasyparcel } = await import('@/lib/easyparcel')
+        const { stati, raw } = await easyparcelTracking(cred.apikey, { codiceOfferta: String(offerta) })
+        for (const str of stati) {
+          const m = mapStatoEasyparcel(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
+        // La LDV compare nel tracking anche quando alla creazione non era ancora pronta: e' la
+        // seconda occasione per rimpiazzare il numero provvisorio "DVA-<ordine>".
+        const ldv = (raw as any)?.tracking?.lettera_vettura
+        if (ldv) nuovoTracking = String(ldv)
+
       } else {
         return
       }
@@ -126,7 +145,9 @@ export async function GET() {
       // RECUPERO NUMERO: alla creazione, se SpediamoPro/BRT non aveva ancora assegnato il tracking, il
       // numero è rimasto il codice interno (es. "6A5E..." o "SP-<id>"). Ora che il tracking reale c'è,
       // correggo il numero mostrato (così in elenco appare la LDV vera, non il codice interno).
-      if (nuovoTracking && nuovoTracking !== s.numero && (s.numero === spCode || String(s.numero || '').startsWith('SP-'))) {
+      // 'DVA-<ordine>' e' il numero provvisorio del terzo provider, assegnato quando la lettera di
+      // vettura non era ancora pronta: va sostituito appena arriva quella vera, come per 'SP-'.
+      if (nuovoTracking && nuovoTracking !== s.numero && (s.numero === spCode || /^(SP|DVA)-/.test(String(s.numero || '')))) {
         upd.numero = nuovoTracking
       }
 
@@ -138,6 +159,20 @@ export async function GET() {
           const lb = await spediamoproGetLabel(spAuth, spId, 1, 0)
           const norm = await normalizzaEtichetta(lb)
           upd.etichetta_url = `data:${norm.mime};base64,${norm.buffer.toString('base64')}`
+        } catch { /* non ancora pronta: riprovo al giro dopo */ }
+      }
+      // Stessa rete di sicurezza per il terzo provider: li' l'etichetta nasce da una chiamata a
+      // parte (getwaybill) e alla creazione puo' non essere ancora disponibile.
+      if (tipo === 'easyparcel' && senzaEtichetta.has(s.id) && (s as any).ep_ordine && cred?.apikey) {
+        try {
+          const { easyparcelWaybill } = await import('@/lib/easyparcel')
+          const w = await easyparcelWaybill(cred.apikey, String((s as any).ep_ordine), 1, 0)
+          const b64 = w.singole[0]?.pdfBase64 || w.pdfBase64
+          if (b64) upd.etichetta_url = `data:application/pdf;base64,${b64}`
+          if (w.numero && w.numero !== s.tracking_number) {
+            upd.tracking_number = w.numero
+            if (/^DVA-/.test(String(s.numero || ''))) upd.numero = w.numero
+          }
         } catch { /* non ancora pronta: riprovo al giro dopo */ }
       }
 

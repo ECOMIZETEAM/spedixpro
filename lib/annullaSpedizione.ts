@@ -68,6 +68,14 @@ export async function annullaSpedizioneSulCorriere(
     return { ok: true }
   }
 
+  // TERZO PROVIDER (contratti DVA): NON esiste una chiamata di annullo — verificato sull'intera
+  // documentazione. Rispondere ok:true (come faceva il ritorno generico qui sotto) significherebbe
+  // marcare la spedizione annullata e RIMBORSARE tutta la catena mentre il pacco continua a
+  // viaggiare: soldi restituiti per merce comunque consegnata. Va in coda manuale, sempre.
+  if (corr.tipo === 'easyparcel') {
+    return { ok: false, reason: 'questo corriere non consente l\'annullo automatico' }
+  }
+
   return { ok: true }
 }
 

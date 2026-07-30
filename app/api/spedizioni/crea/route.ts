@@ -819,5 +819,243 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // EASYPARCEL (contratti DVA / DVA Last Minute)
+  //
+  // Tre passi obbligati — preventivo, ordine, lettera di vettura — e una differenza che cambia
+  // il modo di scrivere questo ramo: DOPO L'ORDINE NON C'E' ANNULLO. Gli altri due provider, se
+  // l'inserimento a database fallisce, cancellano la spedizione dal corriere e nessuno paga nulla.
+  // Qui quella rete non esiste: superato l'ordine, il pacco e' comprato. Percio' tutto cio' che
+  // puo' essere verificato viene verificato PRIMA, e dopo l'ordine non si esce mai per errore.
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (corriereRecord.tipo === 'easyparcel') {
+    const {
+      easyparcelQuotation, easyparcelOrder, easyparcelWaybill,
+      trovaOffertaVettore, erroreEasyparcelPulito, ErroreEasyparcel,
+    } = await import('@/lib/easyparcel')
+
+    const apikey = String(cred?.apikey || '')
+    const vettore = String(cred?.vettore || '')
+    if (!apikey || !vettore) {
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Contratto non configurato correttamente. Contatta l\'assistenza.' }, { status: 400 })
+    }
+
+    // CHIAVE DI PROVA (credenziali.ambiente = 'demo'): l'ordine viene accettato e restituisce
+    // numero ed etichetta, ma NESSUN PACCO ESISTE DAVVERO. Venderlo a un cliente significherebbe
+    // incassare per una spedizione che non partira' mai — e ce ne accorgeremmo dai reclami.
+    // Il proprietario del contratto puo' provarlo sulle proprie spedizioni; a nessun altro.
+    // Va tolto sostituendo la chiave con quella di produzione e mettendo ambiente = 'produzione'.
+    if (String(cred?.ambiente || '').toLowerCase() === 'demo' && !isProprio) {
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Questo contratto è ancora in configurazione e non può essere usato per spedizioni reali.' }, { status: 400 })
+    }
+
+    // Il provider ESIGE cellulare ed email di mittente E destinatario (verificato: senza, risponde
+    // "Campo 'mittente->cellulare' mancante"). Il controllo va fatto adesso: scoprirlo dopo l'ordine
+    // sarebbe irreparabile. L'email vera non gli arriva mai — va quella di servizio, come agli altri.
+    const cell = (v: any): string => String(v || '').replace(/[^0-9]/g, '')
+    const cellMitt = cell(body.shipFrom?.phone)
+    const cellDest = cell(body.shipTo?.phone)
+    if (cellMitt.length < 6) {
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Telefono del mittente obbligatorio per questo corriere: inserisci un numero valido (solo cifre) e riprova.' }, { status: 400 })
+    }
+    if (cellDest.length < 6) {
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Telefono del destinatario obbligatorio per questo corriere: serve al corriere per la consegna.' }, { status: 400 })
+    }
+
+    try {
+      // ── 1) PREVENTIVO: serve solo a ottenere il codice offerta, non a fare il prezzo
+      //    (quello resta il nostro listino, come per ogni altro contratto). ──
+      const offerte = await easyparcelQuotation(apikey, {
+        colli: packages.map((p: any) => ({
+          peso: parseFloat(p?.weight) || 1,
+          larghezza: parseFloat(p?.width) || 10,
+          profondita: parseFloat(p?.length) || 10,
+          altezza: parseFloat(p?.height) || 10,
+        })),
+        mittente: { cap: body.shipFrom.postalCode, localita: body.shipFrom.city, provincia: body.shipFrom.state, nazione: 'IT' },
+        destinatario: { cap: body.shipTo.postalCode, localita: body.shipTo.city, provincia: body.shipTo.state, nazione: (body.shipTo.country || 'IT').toUpperCase() },
+        contenuto: body.contenuto,
+        contrassegno: Number(body.codValue || 0),
+        assicurazione: Number(body.insuranceValue || 0),
+      })
+      // Sulla stessa chiave rispondono TUTTI i vettori agganciati (verificato: 19 offerte in una
+      // sola risposta). Si prende quello del contratto venduto, mai il primo della lista: sarebbe
+      // come stampare un corriere diverso da quello che il cliente ha scelto e pagato.
+      const offerta = trovaOffertaVettore(offerte, vettore)
+      if (!offerta) {
+        await stornaPrenotazione()
+        return NextResponse.json({ error: 'Nessuna tariffa disponibile per questa destinazione con il contratto scelto: prova un altro contratto.' }, { status: 400 })
+      }
+      // Servizi richiesti ma non attivabili su questa offerta: va fermato ORA. Ordinare comunque
+      // significherebbe consegnare senza incassare il contrassegno.
+      const opz = offerta.serviziopzionali || {}
+      const codRichiesto = Number(body.codValue || 0) > 0
+      const assRichiesta = Number(body.insuranceValue || 0) > 0
+      if (codRichiesto && String(opz?.contrassegno?.attivabile || 'N').toUpperCase() !== 'S') {
+        await stornaPrenotazione()
+        return NextResponse.json({ error: 'Contrassegno non disponibile su questo contratto per questa destinazione. Rimuovilo o scegli un altro contratto.' }, { status: 400 })
+      }
+      if (assRichiesta && String(opz?.assicurazione?.attivabile || 'N').toUpperCase() !== 'S') {
+        await stornaPrenotazione()
+        return NextResponse.json({ error: 'Assicurazione non disponibile su questo contratto per questa destinazione.' }, { status: 400 })
+      }
+
+      // ── 2) ORDINE — oltre questa riga il pacco e' comprato e non si torna indietro ──
+      const rifBreve = String(body.rifOrdine || '').trim().slice(0, 40) || undefined
+      const ordine = await easyparcelOrder(apikey, {
+        codiceOfferta: String(offerta.codice_offerta),
+        mittente: {
+          nominativo: body.shipFrom.name, indirizzo: body.shipFrom.street1,
+          email: EMAIL_PER_CORRIERE, cellulare: cellMitt, contatto: body.shipFrom.name,
+        },
+        destinatario: {
+          nominativo: body.shipTo.name, indirizzo: body.shipTo.street1,
+          email: EMAIL_PER_CORRIERE, cellulare: cellDest, contatto: body.shipTo.name,
+        },
+        note: body.notes || undefined,
+        custom: rifBreve,
+        contrassegno: codRichiesto,
+        assicurazione: assRichiesta,
+      })
+
+      // ── 3) LETTERA DI VETTURA: numero di tracking e PDF nascono solo qui.
+      //    Se non e' pronta NON si esce con errore (l'ordine e' pagato): si salva lo stesso e la
+      //    si recupera dopo, come gia' si fa col multicollo dell'altro provider. ──
+      let ldv: string | null = null
+      let etichettaUrl: string | null = null
+      try {
+        const w = await easyparcelWaybill(apikey, ordine.idOrdine, 2, 1500)
+        ldv = w.numero || null
+        const b64 = w.singole[0]?.pdfBase64 || w.pdfBase64
+        if (b64) etichettaUrl = `data:application/pdf;base64,${b64}`
+      } catch (e: any) {
+        console.error('[CREA][EASYPARCEL] waybill non pronta, ordine', ordine.idOrdine, e?.message)
+      }
+
+      // Finche' la LDV non c'e', serve comunque un numero nostro: senza, la spedizione non e'
+      // identificabile in elenco ne' agganciabile ai movimenti. Il completamento in background
+      // lo sostituisce con la LDV vera appena disponibile.
+      const numeroFinale = ldv || `DVA-${ordine.idOrdine}`
+      const costoCorrente = ordine.importo
+      const dichiaratoCli = parseFloat(body.totalPrice) || costoCorrente
+      const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, dichiaratoCli)
+
+      const colliDettaglio = (body.colliDettaglio || packages.map((p: any) => ({
+        lunghezza: p.length, larghezza: p.width, altezza: p.height,
+      }))).map((c: any, i: number) => ({
+        numero: i + 1,
+        lunghezza: c.lunghezza || packages[i]?.length || null,
+        larghezza: c.larghezza || packages[i]?.width || null,
+        altezza: c.altezza || packages[i]?.height || null,
+        peso: packages[i]?.weight || null,
+        etichetta_url: etichettaUrl,
+      }))
+
+      const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
+        master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id,
+        numero: numeroFinale,
+        mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
+        mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
+        mitt_email: body.shipFrom.email || null, mitt_telefono: body.shipFrom.phone || null,
+        dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_citta: body.shipTo.city,
+        dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
+        dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
+        colli: packages.length, peso_reale: pesoReale,
+        peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
+        lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
+        contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
+        tracking_number: ldv,
+        etichetta_url: etichettaUrl,
+        colli_dettaglio: colliDettaglio,
+        // _codiceOfferta e' il riferimento con cui si interroga il tracking (verificato: la ricerca
+        // per LDV risponde "Spedizione non trovata", quella per codice offerta funziona).
+        raw_response: { ...ordine, _codiceOfferta: String(offerta.codice_offerta), _vettore: vettore, _idOrdine: ordine.idOrdine },
+        stato: 'in_lavorazione',
+        costo_spedizione: costoCorrente, costo_totale: costoCliente,
+        servizi_accessori: serviziAccessori,
+        note: body.notes || null, contenuto: body.contenuto || null,
+        rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
+      }).select('id').single()
+
+      if (insertError) {
+        // Caso che con gli altri due provider si risolve annullando: QUI NON SI PUO'. La spedizione
+        // esiste ed e' pagata. Non si addebita il cliente (di una spedizione che non risulta da
+        // nessuna parte non deve pagare) e la prenotazione viene liberata dal giro automatico.
+        // Si lascia una traccia completa nei log per ricostruirla a mano.
+        console.error('[CREA][EASYPARCEL][ORDINE ORFANO] ordine=%s ldv=%s cliente=%s master=%s errore=%s',
+          ordine.idOrdine, ldv || '-', clienteId || '-', masterId, insertError.message)
+        return NextResponse.json({
+          error: `Spedizione creata sul corriere (rif. ${numeroFinale}) ma non registrata a sistema, e questo corriere non consente l'annullo automatico. Contatta subito l'assistenza indicando il riferimento. Dettaglio: ${insertError.message}`,
+          numero: numeroFinale, annullataSuCorriere: false,
+        }, { status: 500 })
+      }
+
+      await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
+
+      // Protetto apposta: da qui la spedizione esiste ed e' salvata. Se la cascata inciampasse,
+      // l'eccezione finirebbe nel catch in fondo e l'utente si vedrebbe un "corriere non
+      // disponibile" per una spedizione che invece e' stata creata regolarmente.
+      try {
+        await addebitaCatena(supabase, {
+          masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
+          costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
+          cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
+          corriereNome: corriereRecord.nome_contratto,
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+          numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
+        })
+      } catch (e) { console.error('[CREA][EASYPARCEL] cascata catena:', e) }
+
+      // Recupero in background di cio' che non era ancora pronto (stesso schema dell'altro provider).
+      if (inserted?.id && (!ldv || !etichettaUrl)) {
+        const spedIdBg = inserted.id
+        const idOrdineBg = ordine.idOrdine
+        after(async () => {
+          try {
+            const { easyparcelWaybill: wb } = await import('@/lib/easyparcel')
+            const w = await wb(apikey, idOrdineBg, 5, 3000)
+            const upd: any = {}
+            if (w.numero) { upd.numero = w.numero; upd.tracking_number = w.numero }
+            const b64 = w.singole[0]?.pdfBase64 || w.pdfBase64
+            if (b64) upd.etichetta_url = `data:application/pdf;base64,${b64}`
+            if (Object.keys(upd).length) await adminCrea.from('spedizioni').update(upd).eq('id', spedIdBg)
+          } catch (e) { console.error('[CREA][EASYPARCEL] completamento background:', e) }
+        })
+      }
+
+      after(async () => {
+        try {
+          const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
+          let notificaDest = true
+          if (clienteId) {
+            const { createAdminSupabase } = await import('@/lib/supabase-admin')
+            const { data: cli } = await createAdminSupabase().from('clienti').select('impostazioni').eq('id', clienteId).maybeSingle()
+            notificaDest = (cli?.impostazioni as any)?.notifica_email_dest !== false
+          }
+          await inviaEmailSpedizioneCreata({
+            mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
+            mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
+            numero: numeroFinale, corriere: corriereRecord.nome_contratto, notificaDest,
+          })
+        } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
+      })
+
+      return NextResponse.json({
+        numero: numeroFinale, tracking: ldv, costo: costoCorrente.toFixed(2), spedizioneId: inserted?.id || null,
+      })
+    } catch (err: any) {
+      // Si arriva qui SOLO da preventivo/ordine falliti: da li' in poi il ramo non lancia piu'.
+      // Quindi lo storno della prenotazione e' sempre corretto — nessun pacco e' stato comprato.
+      console.error('[CREA][EASYPARCEL]', err?.codice ?? '-', err?.message, err?.dettagli || '')
+      await stornaPrenotazione()
+      const msg = err instanceof ErroreEasyparcel ? erroreEasyparcelPulito(err) : erroreCorrierePulito(err?.message)
+      return NextResponse.json({ error: msg }, { status: 400 })
+    }
+  }
+
   { await stornaPrenotazione(); return NextResponse.json({ error: `Tipo corriere non supportato: ${corriereRecord.tipo}` }, { status: 400 }) }
 }
