@@ -82,7 +82,10 @@ export default function ModificaMasterPage() {
   }
 
   if (loading) return <div style={{padding:'40px',textAlign:'center',color:'#666'}}>Caricamento...</div>
-  if (!m) return <div style={{padding:'40px'}}><div style={{...card,color:'#dc2626'}}>{errore||'Master non trovato'}</div></div>
+  // `card` non esiste in questo file: lo stile contenitore si chiama `sec`. Con il nome sbagliato
+  // questa riga andava in errore a runtime, quindi la schermata di ERRORE si rompeva proprio quando
+  // serviva (master non trovato): l'utente vedeva una pagina bianca invece del motivo.
+  if (!m) return <div style={{padding:'40px'}}><div style={{...sec,padding:'16px',color:'#dc2626'}}>{errore||'Master non trovato'}</div></div>
 
   return (
     <div>

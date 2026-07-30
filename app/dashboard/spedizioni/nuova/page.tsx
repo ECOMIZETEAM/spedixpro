@@ -391,7 +391,10 @@ export default function NuovaSpedizionePage() {
                           style={{padding:'8px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
                           onMouseEnter={e=>(e.currentTarget.style.background='#f9fafb')}
                           onMouseLeave={e=>(e.currentTarget.style.background='#fff')}>
-                          <div style={{fontWeight:600}}>{c.nome || r.corriere_nome || codiceProv(chiave)}</div>
+                          {/* Qui siamo nei suggerimenti DESTINATARIO: `r` e `chiave` erano residui
+                              copiati dalla lista delle tariffe e non esistono in questo punto, quindi
+                              un destinatario salvato senza nome faceva sparire tutto il menu. */}
+                          <div style={{fontWeight:600}}>{c.nome || '(senza nome)'}</div>
                           <div style={{color:'#999',fontSize:'11px'}}>{[c.indirizzo,c.citta,c.provincia&&`(${c.provincia})`,c.cap].filter(Boolean).join(' ')}</div>
                         </div>
                       ))}

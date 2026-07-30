@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { useDialog } from '@/app/components/DialogProvider'
 
 interface NodoMaster {
   id: string
@@ -15,6 +16,10 @@ interface NodoCliente {
 }
 
 function NodoAlbero({ masterId, nome, isRoot }: { masterId: string; nome: string; isRoot?: boolean }) {
+  // `dialog` era usato in risincronizza() ma dichiarato SOLO nell'altro componente del file:
+  // qui non esisteva, e al click su "Risincronizza" la pagina si rompeva con un errore a runtime
+  // (il progetto ignora gli errori di tipo in compilazione, quindi non emergeva prima).
+  const dialog = useDialog()
   const [espanso, setEspanso] = useState(false)
   const [caricato, setCaricato] = useState(false)
   const [masters, setMasters] = useState<NodoMaster[]>([])
@@ -112,7 +117,6 @@ function NodoAlbero({ masterId, nome, isRoot }: { masterId: string; nome: string
   )
 }
 
-import { useDialog } from '@/app/components/DialogProvider'
 export default function ElencoMasterPage() {
   const dialog = useDialog()
   const [root, setRoot] = useState<{ id: string; nome: string } | null>(null)
