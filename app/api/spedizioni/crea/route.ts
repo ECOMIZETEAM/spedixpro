@@ -927,11 +927,26 @@ export async function POST(req: NextRequest) {
       //    si recupera dopo, come gia' si fa col multicollo dell'altro provider. ──
       let ldv: string | null = null
       let etichettaUrl: string | null = null
+      // Una etichetta PER OGNI COLLO: il provider le restituisce in single_waybills, ognuna col
+      // proprio numero di lettera di vettura. Vanno tenute separate e assegnate collo per collo —
+      // ripetere la prima su tutti significherebbe far viaggiare tre colli con la stessa etichetta.
+      let etichettePerCollo: string[] = []
       try {
         const w = await easyparcelWaybill(apikey, ordine.idOrdine, 2, 1500)
         ldv = w.numero || null
-        const b64 = w.singole[0]?.pdfBase64 || w.pdfBase64
+        etichettePerCollo = w.singole.map(s => `data:application/pdf;base64,${s.pdfBase64}`)
+        // L'etichetta "della spedizione" e' l'unione di tutte: una pagina per collo, cosi' il
+        // tasto Etichetta stampa tutto in una volta invece di un file per collo.
+        const { unisciEtichette } = await import('@/lib/easyparcel')
+        const b64 = (await unisciEtichette(w.singole.map(s => s.pdfBase64))) || w.pdfBase64
         if (b64) etichettaUrl = `data:application/pdf;base64,${b64}`
+        // Meno etichette che colli: non si puo' annullare (l'ordine e' pagato) quindi la spedizione
+        // va salvata comunque, ma deve restare traccia evidente. Con multicollo attivo questo e'
+        // il segnale che qualcosa non torna e che i colli in eccesso viaggerebbero senza etichetta.
+        if (packages.length > 1 && etichettePerCollo.length < packages.length) {
+          console.error('[CREA][EASYPARCEL][ETICHETTE MANCANTI] ordine=%s colli=%d etichette=%d ldv=%s',
+            ordine.idOrdine, packages.length, etichettePerCollo.length, ldv || '-')
+        }
       } catch (e: any) {
         console.error('[CREA][EASYPARCEL] waybill non pronta, ordine', ordine.idOrdine, e?.message)
       }
@@ -952,7 +967,9 @@ export async function POST(req: NextRequest) {
         larghezza: c.larghezza || packages[i]?.width || null,
         altezza: c.altezza || packages[i]?.height || null,
         peso: packages[i]?.weight || null,
-        etichetta_url: etichettaUrl,
+        // L'etichetta DI QUESTO collo. Se il provider ne ha mandate meno dei colli si lascia null
+        // invece di ripetere la prima: un'etichetta vuota si vede, una sbagliata no.
+        etichetta_url: etichettePerCollo[i] || (packages.length === 1 ? etichettaUrl : null),
       }))
 
       const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
@@ -1016,12 +1033,18 @@ export async function POST(req: NextRequest) {
         const idOrdineBg = ordine.idOrdine
         after(async () => {
           try {
-            const { easyparcelWaybill: wb } = await import('@/lib/easyparcel')
+            const { easyparcelWaybill: wb, unisciEtichette: unisci } = await import('@/lib/easyparcel')
             const w = await wb(apikey, idOrdineBg, 5, 3000)
             const upd: any = {}
             if (w.numero) { upd.numero = w.numero; upd.tracking_number = w.numero }
-            const b64 = w.singole[0]?.pdfBase64 || w.pdfBase64
+            const b64 = (await unisci(w.singole.map(s => s.pdfBase64))) || w.pdfBase64
             if (b64) upd.etichetta_url = `data:application/pdf;base64,${b64}`
+            // Anche qui le etichette vanno rimesse collo per collo, non solo quella unica.
+            if (w.singole.length && Array.isArray(colliDettaglio) && colliDettaglio.length) {
+              upd.colli_dettaglio = colliDettaglio.map((c: any, i: number) => ({
+                ...c, etichetta_url: w.singole[i] ? `data:application/pdf;base64,${w.singole[i].pdfBase64}` : (c.etichetta_url || null),
+              }))
+            }
             if (Object.keys(upd).length) await adminCrea.from('spedizioni').update(upd).eq('id', spedIdBg)
           } catch (e) { console.error('[CREA][EASYPARCEL] completamento background:', e) }
         })

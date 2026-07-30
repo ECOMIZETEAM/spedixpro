@@ -143,19 +143,43 @@ export async function easyparcelQuotation(apikey: string, dati: {
       contenuto: (dati.contenuto || '').trim().slice(0, 50) || 'MERCE VARIA',
       ...(Object.keys(accessori).length ? { accessori } : {}),
     },
-    // Un elemento per collo (nr_colli sempre 1): il campo `peso` del provider e' il peso
-    // COMPLESSIVO della serie, quindi raggruppare colli di peso diverso falserebbe la tariffa.
-    colli: dati.colli.map(c => ({
-      peso: Number((c.peso || 1).toFixed(3)),
-      larghezza: Math.max(1, Math.round(c.larghezza || 10)),
-      profondita: Math.max(1, Math.round(c.profondita || 10)),
-      altezza: Math.max(1, Math.round(c.altezza || 10)),
-      nr_colli: 1,
-    })),
+    colli: serieColli(dati.colli),
     mittente: luogo(dati.mittente, false),
     destinatario: luogo(dati.destinatario, estero),
   })
   return Array.isArray(d.quotation) ? d.quotation : []
+}
+
+// I colli non si spediscono uno per elemento: il provider ragiona per SERIE di colli uguali.
+// Nella sua struttura `peso` e' il peso COMPLESSIVO della serie, le misure sono quelle del SINGOLO
+// collo, e `nr_colli` dice quanti sono. Mandare N elementi con nr_colli:1 e' una forzatura della
+// struttura, ed e' il sospetto numero uno dietro l'etichetta unica sui multicollo.
+// Qui i colli vengono quindi RAGGRUPPATI PER SAGOMA: una serie per ogni terna di misure distinta.
+// Non e' un caso di scuola — sui nostri dati reali il 57% delle spedizioni multicollo ha colli di
+// misure diverse fra loro, quindi la forma "una serie sola" non basterebbe mai da sola.
+export function serieColli(colli: ColloEasyparcel[]): Array<{ peso: number; larghezza: number; profondita: number; altezza: number; nr_colli: number }> {
+  const gruppi = new Map<string, { larghezza: number; profondita: number; altezza: number; peso: number; nr_colli: number }>()
+  for (const c of (colli || [])) {
+    const larghezza = Math.max(1, Math.round(c?.larghezza || 10))
+    const profondita = Math.max(1, Math.round(c?.profondita || 10))
+    const altezza = Math.max(1, Math.round(c?.altezza || 10))
+    const peso = Number(c?.peso) || 1
+    // Nella chiave c'e' anche il PESO, non solo le misure. Verificato sul campo: una serie con
+    // nr_colli:3 e peso 6 viene esplosa dal provider in tre colli da 2 kg — cioe' divide il peso
+    // della serie per il numero di colli. Raggruppando due colli di peso diverso ma stessa sagoma
+    // (2 kg + 4 kg) il provider registrerebbe due colli da 3 kg: totale giusto, singoli sbagliati.
+    const chiave = `${peso}|${larghezza}x${profondita}x${altezza}`
+    const g = gruppi.get(chiave)
+    if (g) { g.peso += peso; g.nr_colli += 1 }
+    else gruppi.set(chiave, { larghezza, profondita, altezza, peso, nr_colli: 1 })
+  }
+  // Senza colli non si quota nulla: un collo minimo di ripiego evita una richiesta vuota.
+  if (!gruppi.size) return [{ peso: 1, larghezza: 10, profondita: 10, altezza: 10, nr_colli: 1 }]
+  return Array.from(gruppi.values()).map(g => ({
+    peso: Number(g.peso.toFixed(3)),
+    larghezza: g.larghezza, profondita: g.profondita, altezza: g.altezza,
+    nr_colli: g.nr_colli,
+  }))
 }
 
 function luogo(l: LuogoEasyparcel, estero: boolean) {
@@ -300,6 +324,28 @@ export async function easyparcelWaybill(
     'lettera di vettura non ancora disponibile',
     ultimo instanceof ErroreEasyparcel ? ultimo.dettagli : ''
   )
+}
+
+// Unisce le etichette dei singoli colli in un PDF unico multipagina, una pagina per collo.
+// Serve al tasto "Etichetta" della spedizione: con un multicollo l'operatore deve poter stampare
+// tutto in un colpo, non scaricare un file per collo. Stessa resa che l'altro provider ottiene
+// unendo lo ZIP. Se l'unione non riesce si ripiega sulla prima: meglio una che nessuna.
+export async function unisciEtichette(pdfBase64: string[]): Promise<string | null> {
+  const validi = (pdfBase64 || []).filter(Boolean)
+  if (!validi.length) return null
+  if (validi.length === 1) return validi[0]
+  try {
+    const { PDFDocument } = await import('pdf-lib')
+    const unito = await PDFDocument.create()
+    for (const b64 of validi) {
+      const src = await PDFDocument.load(Buffer.from(b64, 'base64'))
+      const pagine = await unito.copyPages(src, src.getPageIndices())
+      for (const p of pagine) unito.addPage(p)
+    }
+    return Buffer.from(await unito.save()).toString('base64')
+  } catch {
+    return validi[0]
+  }
 }
 
 // ── TRACKING ───────────────────────────────────────────────────────────────

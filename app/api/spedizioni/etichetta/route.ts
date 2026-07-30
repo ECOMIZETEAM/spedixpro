@@ -101,7 +101,10 @@ export async function GET(req: NextRequest) {
         try {
           const { easyparcelWaybill } = await import('@/lib/easyparcel')
           const w = await easyparcelWaybill(apikeyEP, String(idOrdine), 2, 1500)
-          const b64 = w.singole[0]?.pdfBase64 || w.pdfBase64
+          // Multicollo: le etichette dei singoli colli vanno unite in un PDF unico multipagina,
+          // altrimenti si scaricherebbe solo quella del primo collo.
+          const { unisciEtichette } = await import('@/lib/easyparcel')
+          const b64 = (await unisciEtichette(w.singole.map(s => s.pdfBase64))) || w.pdfBase64
           if (b64) {
             const buf = Buffer.from(b64, 'base64')
             const dataUrl = `data:application/pdf;base64,${b64}`
