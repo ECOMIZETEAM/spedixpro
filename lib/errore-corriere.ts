@@ -94,3 +94,28 @@ export function erroreRitiroPulito(raw: any): string {
   }
   return msg
 }
+
+// TRACKING: il popup rimandava al browser `e.message` grezzo. I messaggi costruiti in
+// lib/spediamopro.ts contengono il NOME DEL PROVIDER per esteso piu' 150 caratteri di corpo della
+// risposta (es. 'SpediamoPro tracking (403): {...}'), stampati tali e quali sia nel portale cliente
+// sia in quello master. E' la funzione piu' usata dell'elenco spedizioni: ogni errore del provider
+// finiva sotto gli occhi del cliente finale.
+// Qui l'errore viene tradotto in un'indicazione utile, senza mai nominare il provider.
+export function erroreTrackingPulito(raw: any): string {
+  const s = String(raw?.message ?? raw ?? '')
+  const t = s.toLowerCase()
+
+  if (/\b40[13]\b|forbidden|unauthorized|auth failed|credenziali/.test(t)) {
+    return 'Il corriere non sta fornendo il dettaglio del tracking in questo momento. Gli aggiornamenti arrivano comunque in automatico: ricontrolla fra poco.'
+  }
+  if (/\b404\b|not found|non trovat|inesistente/.test(t)) {
+    return 'Il corriere non ha ancora registrato questa spedizione: il tracking compare di norma entro qualche ora dalla presa in carico.'
+  }
+  if (/timed\s*out|timeout|etimedout|econnreset|network|fetch failed/.test(t)) {
+    return 'Il corriere non ha risposto in tempo. Riprova fra qualche istante.'
+  }
+  if (/\b5\d\d\b|internal|server error|bad gateway/.test(t)) {
+    return 'Il sistema del corriere sta segnalando un errore temporaneo. Gli eventi verranno recuperati automaticamente.'
+  }
+  return 'Dettaglio del tracking non disponibile in questo momento. Gli aggiornamenti arrivano in automatico dal corriere.'
+}

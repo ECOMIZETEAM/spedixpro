@@ -5,6 +5,7 @@ import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { spediamoproGetTracking, mapStatoSpediamopro } from '@/lib/spediamopro'
 import { prioritaStato } from '@/lib/spedisci'
+import { erroreTrackingPulito } from '@/lib/errore-corriere'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -90,7 +91,9 @@ export async function GET(req: NextRequest) {
         description: [e.title, e.description].filter(Boolean).join(' — ') || 'Evento',
         location: '',
       })).reverse()   // più recente in alto
-      return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200, raw: tr })
+      // Niente `raw`: era il payload di tracking del provider rimandato al browser senza che
+      // nessuna schermata lo usasse (verificato: il popup legge solo eventi ed error).
+      return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200 })
     }
 
     // Spedisci.online ha CHIUSO il polling del tracking (403 "For tracking please use the Webhooks
@@ -107,6 +110,9 @@ export async function GET(req: NextRequest) {
     }))
     return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200 })
   } catch(e: any) {
-    return NextResponse.json({ ...base, eventi: [], stato: statoEffettivo, error: e.message, tracking_number: spedizione.tracking_number }, { status: 200 })
+    // MAI e.message grezzo: contiene il nome del provider e il corpo della sua risposta, e finiva
+    // stampato nel popup sia al cliente sia al master.
+    console.warn('[TRACKING][ERRORE]', { spedizione: spedizione.id, motivo: e?.message })
+    return NextResponse.json({ ...base, eventi: [], stato: statoEffettivo, error: erroreTrackingPulito(e), tracking_number: spedizione.tracking_number }, { status: 200 })
   }
 }
