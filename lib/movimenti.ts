@@ -15,6 +15,12 @@ export async function registraMovimento(
     riferimento?: string | null
     spedizioneId?: string | null
     createdBy?: string | null
+    // true = la capienza del credito viene verificata NELLA STESSA istruzione che muove il saldo
+    // (blocco di riga), quindi due addebiti simultanei non possono passare entrambi. Se il credito
+    // non basta la funzione solleva CREDITO_INSUFFICIENTE e NON scrive nulla.
+    // Si usa per la PRENOTAZIONE in creazione spedizione. Non si applica a fattura_mensile, agli
+    // importi positivi, e a rettifiche/resi/giacenze, che devono poter andare sotto zero.
+    richiediCapienza?: boolean
   }
 ): Promise<{ saldo: number }> {
   const importo = Number(params.importo)
@@ -29,8 +35,11 @@ export async function registraMovimento(
     p_riferimento: params.riferimento ?? null,
     p_spedizione_id: params.spedizioneId ?? null,
     p_created_by: params.createdBy ?? null,
+    p_richiedi_capienza: params.richiediCapienza ?? false,
   })
-  if (error) throw new Error('Errore movimento: ' + error.message)
+  // Il messaggio CREDITO_INSUFFICIENTE viene propagato tale e quale: il chiamante lo riconosce e
+  // risponde 402 senza aver creato nulla.
+  if (error) throw new Error(error.message?.includes('CREDITO_INSUFFICIENTE') ? 'CREDITO_INSUFFICIENTE' : 'Errore movimento: ' + error.message)
   return { saldo: Number(data) }
 }
 

@@ -294,6 +294,46 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ── PRENOTAZIONE DEL CREDITO (solo CLIENTE) ─────────────────────────────────────────────────
+  // Il controllo qui sopra legge il saldo e poi passa la mano al corriere: fra i due momenti
+  // passano secondi, e due richieste simultanee vedevano entrambe credito capiente e passavano
+  // entrambe (caso reale: saldo 29,80, due addebiti da 26,00 -> -22,20).
+  // Qui il credito viene MOSSO SUBITO, con la capienza verificata nella stessa istruzione
+  // (blocco di riga): due prenotazioni simultanee non possono piu' passare entrambe. Se il credito
+  // non basta si esce PRIMA di creare qualcosa dal corriere.
+  // A fine rotta la prenotazione viene CONFERMATA sull'importo definitivo, oppure STORNATA se la
+  // spedizione non nasce. Le prenotazioni eventualmente rimaste appese vengono liberate dal giro
+  // automatico /api/spedizioni/prenotazioni-scadute.
+  let prenotazioneRif: string | null = null
+  if (!isProprio && !masterSub && clienteId && prezzoServerCliente > 0) {
+    const rif = `PRE:${crypto.randomUUID()}`
+    try {
+      await registraMovimento(adminCrea, {
+        masterId, clienteId, tipo: 'spedizione',
+        descrizione: `Prenotazione ${String(body.shipTo?.name || '').slice(0, 40)}`.trim(),
+        riferimento: rif, importo: -Math.abs(prezzoServerCliente),
+        createdBy: user!.id, richiediCapienza: true,
+      })
+      prenotazioneRif = rif
+    } catch (e: any) {
+      if (String(e?.message || '').includes('CREDITO_INSUFFICIENTE')) {
+        const { data: cAgg } = await adminCrea.from('clienti').select('credito').eq('id', clienteId).maybeSingle()
+        return NextResponse.json({
+          error: `Credito insufficiente: disponibili € ${Number((cAgg as any)?.credito || 0).toFixed(2)}, spedizione € ${prezzoServerCliente.toFixed(2)}. Ricarica il credito per spedire.`,
+        }, { status: 402 })
+      }
+      console.error('[CREA][PRENOTAZIONE] fallita, si prosegue con l addebito a fine rotta:', e?.message)
+    }
+  }
+  // Libera la prenotazione quando la spedizione NON nasce. Idempotente: se e' gia' stata
+  // confermata non fa nulla.
+  async function stornaPrenotazione() {
+    if (!prenotazioneRif) return
+    const rif = prenotazioneRif; prenotazioneRif = null
+    try { await adminCrea.rpc('storna_prenotazione_spedizione', { p_riferimento: rif }) }
+    catch (e: any) { console.error('[CREA][STORNO PRENOTAZIONE]', rif, e?.message) }
+  }
+
   // Spedizione propria del master: prezzo dal listino corriere (server-side, non ci fidiamo del body).
   let costoMaster = 0
   if (isProprio) {
@@ -345,6 +385,29 @@ export async function POST(req: NextRequest) {
       return
     }
     if (!(costo > 0)) return
+    // Se il credito e' stato PRENOTATO a inizio rotta, qui la prenotazione va CONFERMATA
+    // sull'importo definitivo: non si crea un secondo movimento, si chiude quello esistente
+    // agganciandolo alla spedizione. La conferma non verifica la capienza (il pacco ormai esiste,
+    // l'importo e' dovuto) ed e' innocua se ripetuta.
+    if (prenotazioneRif) {
+      const rif = prenotazioneRif; prenotazioneRif = null
+      try {
+        const { error } = await adminCrea.rpc('conferma_prenotazione_spedizione', {
+          p_riferimento: rif,
+          p_spedizione_id: spedizioneId,
+          p_descrizione: `${numeroSped} - ${body.shipTo?.name || ''}`.trim(),
+          p_importo_finale: Math.abs(costo),
+          p_riferimento_finale: numeroSped,
+        })
+        if (error) throw new Error(error.message)
+        return
+      } catch (e: any) {
+        // La conferma non e' riuscita: la prenotazione resta appesa e verra' liberata dal giro
+        // automatico. Si prosegue con l'addebito normale qui sotto, per non lasciare la
+        // spedizione senza movimento.
+        console.error('[CREA][CONFERMA PRENOTAZIONE] fallita:', rif, e?.message)
+      }
+    }
     try {
       await registraMovimento(supabase, {
         masterId,
@@ -381,7 +444,7 @@ export async function POST(req: NextRequest) {
       // master a secco è il PROPRIO (utente.master_id). Clienti e livelli inferiori: generico.
       const proprio = utente?.ruolo !== 'cliente' && catenaCheck.masterInsufficiente === utente?.master_id
       const msg = proprio ? catenaCheck.errore : 'Credito insufficiente'
-      return NextResponse.json({ error: msg }, { status: 402 })
+      { await stornaPrenotazione(); return NextResponse.json({ error: msg }, { status: 402 }) }
     }
   }
 
@@ -401,13 +464,13 @@ export async function POST(req: NextRequest) {
       }),
     })
     const rates = await ratesRes.json()
-    if (!Array.isArray(rates) || !rates.length) return NextResponse.json({ error: 'Nessuna tariffa dal corriere' }, { status: 400 })
+    if (!Array.isArray(rates) || !rates.length) { await stornaPrenotazione(); return NextResponse.json({ error: 'Nessuna tariffa dal corriere' }, { status: 400 }) }
     // IMPORTANTE: sullo stesso account a valle possono esserci PIÙ corrieri (es. GLS + Poste).
     // Va scelta la tariffa del CONTRATTO di QUESTO corriere (codice_contratto), NON la prima:
     // altrimenti una spedizione "Poste Delivery Express D" poteva stampare GLS/SDA (rates[0]).
     const { trovaRateContratto } = await import('@/lib/spedisci')
     const rate = trovaRateContratto(rates, cred)
-    if (!rate) return NextResponse.json({ error: 'Contratto non disponibile per questo corriere (verifica il codice contratto)' }, { status: 400 })
+    if (!rate) { await stornaPrenotazione(); return NextResponse.json({ error: 'Contratto non disponibile per questo corriere (verifica il codice contratto)' }, { status: 400 }) }
 
     const res = await fetch(`${baseUrl}/shipping/create`, {
       method: 'POST',
@@ -429,7 +492,7 @@ export async function POST(req: NextRequest) {
     const text = await res.text()
     let r: any
     try { r = JSON.parse(text) } catch { r = { error: text } }
-    if (!res.ok || r.error) return NextResponse.json({ error: erroreCorrierePulito(r?.error || text) }, { status: 400 })
+    if (!res.ok || r.error) { await stornaPrenotazione(); return NextResponse.json({ error: erroreCorrierePulito(r?.error || text) }, { status: 400 }) }
 
     const numero = r.trackingNumber
     // L'importo ADDEBITATO deve essere quello calcolato dal SERVER. Il controllo del credito piu'
@@ -549,7 +612,7 @@ export async function POST(req: NextRequest) {
     // senza un numero valido rispondeva col tecnico "consignee.phone should be of type string". Meglio
     // bloccare subito con un messaggio chiaro, così il cliente lo inserisce corretto.
     if (!telValidoSp(body.shipTo?.phone)) {
-      return NextResponse.json({ error: 'Telefono destinatario obbligatorio e non valido: inserisci un numero corretto (solo cifre, 6–15). Il corriere lo richiede per la consegna.' }, { status: 400 })
+      { await stornaPrenotazione(); return NextResponse.json({ error: 'Telefono destinatario obbligatorio e non valido: inserisci un numero corretto (solo cifre, 6–15). Il corriere lo richiede per la consegna.' }, { status: 400 }) }
     }
     try {
       // SpediamoPro valida telefono ed email: telefono solo cifre 6-15 (via spazi/trattini/+),
@@ -752,9 +815,9 @@ export async function POST(req: NextRequest) {
       })
     } catch (err: any) {
       console.error('SpediamoPro error:', err)
-      return NextResponse.json({ error: erroreCorrierePulito(err?.message) }, { status: 400 })
+      { await stornaPrenotazione(); return NextResponse.json({ error: erroreCorrierePulito(err?.message) }, { status: 400 }) }
     }
   }
 
-  return NextResponse.json({ error: `Tipo corriere non supportato: ${corriereRecord.tipo}` }, { status: 400 })
+  { await stornaPrenotazione(); return NextResponse.json({ error: `Tipo corriere non supportato: ${corriereRecord.tipo}` }, { status: 400 }) }
 }

@@ -26,6 +26,10 @@
     {
       "path": "/api/privacy/purge-pii",
       "schedule": "15 2 * * *"
+    },
+    {
+      "path": "/api/spedizioni/prenotazioni-scadute",
+      "schedule": "*/10 * * * *"
     }
   ]
 }
