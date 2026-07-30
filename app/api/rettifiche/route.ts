@@ -85,8 +85,11 @@ export async function POST(req: NextRequest) {
       if (diff <= 0) continue
       const descr = `Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso scansione: ${r.peso_reale} Kg )`
       try {
-        // scala credito + scrive in 'movimenti' (Lista Movimenti) in un'unica transazione
-        await registraMovimento(supabase, {
+        // scala credito + scrive in 'movimenti' (Lista Movimenti) in un'unica transazione.
+        // Client AMMINISTRATIVO: ad `authenticated` viene tolto il privilegio di scrivere
+        // clienti.credito (permetteva a ogni cliente di ricaricarsi da solo). Qui l'ambito e' gia'
+        // garantito: le rettifiche sono state lette filtrando su master_id di chi chiama.
+        await registraMovimento(adminDb, {
           masterId: utente?.master_id, clienteId, tipo: 'rettifica',
           descrizione: descr, importo: -diff, spedizioneId: r.spedizione_id || null, createdBy: user.id,
         })

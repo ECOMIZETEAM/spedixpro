@@ -49,8 +49,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true })
   }
 
+  // Il cliente addebitato DEVE essere del master che chiama. Finora lo garantiva la RLS, perche'
+  // il movimento passava dal client dell'utente; ora passa dal client amministrativo (serve per
+  // togliere ad `authenticated` il privilegio di scrivere clienti.credito, che permetteva a
+  // qualunque cliente di ricaricarsi da solo) e il controllo va rifatto qui a mano.
+  {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { data: cl } = await createAdminSupabase()
+      .from('clienti').select('id,master_id').eq('id', clienteId).maybeSingle()
+    if (!cl || (cl as any).master_id !== utente?.master_id) {
+      return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    }
+  }
+
   try {
-    await registraMovimento(supabase, {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    await registraMovimento(createAdminSupabase(), {
       masterId: utente?.master_id,
       clienteId,
       tipo: 'rettifica',
