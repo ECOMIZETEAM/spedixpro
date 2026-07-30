@@ -45,7 +45,13 @@ export async function GET(req: NextRequest) {
     const { data: _dc } = await _admin.from('corrieri').select('nome_contratto').in('id', Array.from(_disId))
     _disNomi = new Set((_dc || []).map((c: any) => (c.nome_contratto || '').trim().toLowerCase()))
   }
+  // Oltre ai contratti spenti dal padre per questo master, si nascondono anche quelli che un master
+  // SOPRA ha messo IN PAUSA: chi sta sotto non deve nemmeno vederli, perche' a monte la merce non
+  // partirebbe. Chi ha messo in pausa continua a vederli (la funzione guarda solo gli antenati).
+  const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
+  const _sospesiSopra = await contrattiSospesiSopra(utente?.master_id)
   const _spento = (c: any) => _disId.has(c.id) || _disNomi.has((c.nome_contratto || '').trim().toLowerCase())
+    || sospesoDallaCatena(c.nome_contratto, _sospesiSopra)
   const tuttiICorrieri = (tuttiICorrieriRaw || []).filter((c: any) => !_spento(c))
   const posseduti = new Set((tuttiICorrieri || []).map((c:any) => c.id))
   // Mostra SOLO i corrieri realmente POSSEDUTI dal master e non spenti dal padre: no righe/agganci

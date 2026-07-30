@@ -10,5 +10,10 @@ export async function GET() {
     .select('id,nome_contratto,tipo,multicollo,inserimento_ritiri,settings,attivo')
     .eq('master_id', utente?.master_id)
     .order('nome_contratto')
-  return NextResponse.json(data || [])
+  // Contratti messi in pausa da un master SOPRA: per chi sta sotto non devono nemmeno comparire.
+  // Chi lo ha messo in pausa continua invece a vederlo qui (la sospensione e' sua, e da questa
+  // schermata lo riattiva): contrattiSospesiSopra guarda solo gli ANTENATI, non il proprio livello.
+  const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
+  const sospesi = await contrattiSospesiSopra(utente?.master_id)
+  return NextResponse.json((data || []).filter((c: any) => !sospesoDallaCatena(c.nome_contratto, sospesi)))
 }
