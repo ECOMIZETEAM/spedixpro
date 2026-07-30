@@ -411,7 +411,9 @@ export async function POST(req: NextRequest) {
 
   const { data: fasce } = await supabase
     .from('listini_clienti_fasce')
-    .select('*, zone(id,nome), corrieri(id,tipo,nome_contratto,credenziali,settings)')
+    // `attivo` serve al gate dei contratti in pausa qui sotto: senza, il ramo CLIENTE quotava anche
+    // i contratti messi in pausa dal proprio master.
+    .select('*, zone(id,nome), corrieri(id,tipo,nome_contratto,attivo,credenziali,settings)')
     .eq('listino_id', cliente.listino_cliente_id)
     .order('peso_max', { ascending: true })
 
@@ -488,8 +490,20 @@ export async function POST(req: NextRequest) {
   let esclusiContrassegno = 0, esclusiAssic = 0, esclusiMisura = 0, esclusiFascia = 0, esclusiQuota = 0
   let ultimoErroreQuota = ''
 
+  // CONTRATTI IN PAUSA — ramo CLIENTE (qui passa la quasi totalita' delle spedizioni).
+  // Il controllo esisteva solo nel ramo "spedizione propria" del master: nel ramo cliente il
+  // contratto sospeso veniva quotato col suo prezzo, l'utente lo sceglieva, compilava tutto e
+  // riceveva l'errore solo alla creazione. Peggio del problema di partenza.
+  const { contrattiSospesiSopra: _css, sospesoDallaCatena: _sdc } = await import('@/lib/contratti-catena')
+  const _sospesiCli = await _css(masterId)
+
   for (const [corriereId, fasceDelCorriere] of fascePerCorriere) {
     if (disabilitati.has(corriereId)) continue   // contratto disattivato per questo cliente/sotto-master
+    {
+      const _c: any = (fasceDelCorriere[0] as any)?.corrieri
+      if (_c?.attivo === false) continue                       // in pausa dal proprio master
+      if (_sdc(_c?.nome_contratto, _sospesiCli)) continue      // in pausa da un master superiore
+    }
     // REGOLA "non vendi ciò che non compri": il MASTER del cliente deve avere LUI un prezzo (costo)
     // per questa destinazione+corriere, altrimenti non lo compra da sopra e NON può assegnarlo al
     // cliente → corriere escluso. (Gestione-zone è la fonte: se il master non ha la fascia per questa

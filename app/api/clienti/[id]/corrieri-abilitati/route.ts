@@ -16,8 +16,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{id:st
     if (!sm || sm.parent_master_id !== utente?.master_id) return NextResponse.json([])
     if (!sm.parent_listino_id) return NextResponse.json([])
     const { data: agganciM } = await admin.from('listini_clienti_corrieri')
-      .select('corriere_id, corrieri(id,nome_contratto,tipo)').eq('listino_id', sm.parent_listino_id)
+      .select('corriere_id, corrieri(id,nome_contratto,tipo,attivo)').eq('listino_id', sm.parent_listino_id)
+    // Stesso filtro del ramo cliente: un contratto in pausa (proprio o di un master superiore) non
+    // va proposto per l'abilitazione a un sotto-master. Qui il riferimento e' il master PADRE, cioe'
+    // chi sta assegnando, non il sotto-master.
+    const { contrattiSospesiSopra: _cssM, sospesoDallaCatena: _sdcM } = await import('@/lib/contratti-catena')
+    const _sospesiM = await _cssM(utente?.master_id)
     const contrattiM = (agganciM || []).map((r:any) => r.corrieri).filter(Boolean)
+      .filter((c:any) => c.attivo !== false && !_sdcM(c.nome_contratto, _sospesiM))
     const { data: statiM } = await admin.from('masters_corrieri_abilitati')
       .select('corriere_id, abilitato, settings').eq('master_id', subId)
     const abilM = new Map((statiM||[]).map((s:any) => [s.corriere_id, s.abilitato]))
@@ -31,9 +37,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{id:st
   const { data: cliente } = await supabase.from('clienti').select('listino_cliente_id').eq('id', id).single()
   if (!cliente?.listino_cliente_id) return NextResponse.json([])
   const { data: agganci } = await supabase.from('listini_clienti_corrieri')
-    .select('corriere_id, corrieri(id,nome_contratto,tipo)')
+    .select('corriere_id, corrieri(id,nome_contratto,tipo,attivo)')
     .eq('listino_id', cliente.listino_cliente_id)
-  const contratti = (agganci||[]).map((r:any) => r.corrieri).filter(Boolean)
+  // Contratti in PAUSA: non si possono assegnare a un cliente. Qui si sceglie cosa potra' vendere,
+  // e a valle (tariffe e creazione) il contratto sospeso viene rifiutato: mostrarlo qui significa
+  // far attivare al master qualcosa che poi sparisce, ed e' la schermata da cui e' arrivata la
+  // segnalazione "il contratto D si vede ancora".
+  {
+    const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
+    const { data: u2 } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+    const sospesi = await contrattiSospesiSopra((u2 as any)?.master_id)
+    var contratti = (agganci||[]).map((r:any) => r.corrieri).filter(Boolean)
+      .filter((c:any) => c.attivo !== false && !sospesoDallaCatena(c.nome_contratto, sospesi))
+  }
   const { data: stati } = await supabase.from('clienti_corrieri_abilitati')
     .select('corriere_id, abilitato, settings').eq('cliente_id', id)
   const mappaAbil = new Map((stati||[]).map((s:any) => [s.corriere_id, s.abilitato]))
