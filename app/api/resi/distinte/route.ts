@@ -46,11 +46,43 @@ export async function POST(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
   const body = await req.json()
-  const { spedizioniIds, clienteId, targetMasterId, totale, voci } = body
+  // `voci` viene filtrato piu' sotto alle sole spedizioni della propria rete: serve riassegnabile.
+  const { spedizioniIds, clienteId, targetMasterId, totale } = body
+  let voci = body.voci
   const adminDb = createAdminSupabase()
 
   // ── RAMO CATENA: reso verso un master figlio (addebito del prezzo che LUI ha pagato) ──
   if (targetMasterId && !clienteId) {
+    // Il master bersaglio arriva dal browser e finora non veniva MAI verificato, mentre tutte le
+    // scritture di questo ramo usano il client amministrativo che scavalca l'isolamento: si poteva
+    // quindi addebitare un reso a QUALSIASI master, compreso il proprio padre (il suo importo e'
+    // ricavabile dai movimenti di catena gia' scritti). Qui si richiede che il bersaglio sia un
+    // DISCENDENTE di chi chiama, come si fa gia' in /api/movimenti/crea e in /api/spedizioni/crea.
+    {
+      let cur: string | null = targetMasterId
+      let discendente = false
+      for (let i = 0; i < 20 && cur; i++) {
+        const { data: p } = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+        cur = (p as any)?.parent_master_id || null
+        if (cur && cur === utente?.master_id) { discendente = true; break }
+      }
+      if (!discendente) return NextResponse.json({ error: 'Master non autorizzato' }, { status: 403 })
+    }
+    // Le voci arrivano anch'esse dal browser: si tengono solo le spedizioni della PROPRIA rete,
+    // altrimenti si potrebbero indicare LDV di master estranei per gonfiare l'addebito.
+    {
+      const ids = (voci || []).map((v: any) => v?.id).filter(Boolean)
+      if (ids.length) {
+        const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+        const rete = await sottoAlberoMasterIds(adminDb, utente!.master_id!)
+        const { data: ok } = await adminDb.from('spedizioni').select('id').in('id', ids).in('master_id', rete)
+        const consentiti = new Set((ok || []).map((r: any) => r.id))
+        const scartate = ids.length - consentiti.size
+        if (scartate > 0) console.warn('[RESI][CATENA] voci fuori rete scartate:', scartate)
+        voci = (voci || []).filter((v: any) => consentiti.has(v?.id))
+        if (!voci.length) return NextResponse.json({ error: 'Nessuna spedizione valida nella distinta' }, { status: 400 })
+      }
+    }
     const { count: cM } = await supabase.from('distinte_resi').select('*', {count:'exact',head:true}).eq('master_id', utente?.master_id)
     const numeroM = (cM||0) + 1
     // Il totale della distinta di RETE = quanto viene ADDEBITATO al sotto-master (il prezzo che
