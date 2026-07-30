@@ -121,10 +121,18 @@ export async function POST(req: NextRequest) {
     // Nessun listino corrieri (con prezzi) assegnato al master → niente tariffe.
     if (!corrieriDaQuotare.length) return NextResponse.json({ error: 'Nessun contratto attivo' }, { status: 400 })
 
+    // Contratti messi in pausa da un master SOPRA di noi: non si possono quotare ne' vendere,
+    // perche' a monte la merce non partirebbe. Un contratto sospeso in alto sparisce quindi per
+    // tutta la catena sotto (sotto-master, loro clienti e chiamate via API); se viene riattivato
+    // ricompare da solo, senza toccare nulla.
+    const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
+    const sospesiSopra = await contrattiSospesiSopra(masterIdP)
+
     const risultati: any[] = []
     for (const lc of corrieriDaQuotare) {
       const corr: any = (lc as any).corrieri
       if (!corr || corr.attivo === false) continue
+      if (sospesoDallaCatena(corr.nome_contratto, sospesiSopra)) continue   // in pausa da un livello superiore
       if (superaMisureMax(corr.settings, pesoRealeP, colliP)) continue   // fuori misura per il suo scaglione
       const dett = await calcolaPrezzoCorriereDettaglio(supabase, {
         corriereId: (lc as any).corriere_id, masterId: masterIdP,

@@ -59,6 +59,15 @@ export async function POST(req: NextRequest) {
     .select('id,tipo,credenziali,nome_contratto,attivo,master_id,settings,multicollo').eq('id', ctx.corriereId).single()
   if (!corriere) return NextResponse.json({ error: 'Contratto non trovato' }, { status: 400 })
   if (corriere.attivo === false) return NextResponse.json({ error: 'Contratto in pausa' }, { status: 400 })
+  // La pausa messa da un master SOPRA vale anche per le chiamate via API: altrimenti bastava
+  // integrarsi per continuare a spedire con un contratto sospeso a monte.
+  {
+    const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
+    const sospesi = await contrattiSospesiSopra((corriere as any).master_id)
+    if (sospesoDallaCatena(corriere.nome_contratto, sospesi)) {
+      return NextResponse.json({ error: 'Contratto momentaneamente sospeso' }, { status: 400 })
+    }
+  }
   const cred = corriere.credenziali as Record<string, string>
 
   const packages = Array.isArray(body.packages) && body.packages.length ? body.packages : [{ weight: 1, length: 20, width: 15, height: 10 }]

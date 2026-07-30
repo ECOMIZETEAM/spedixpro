@@ -23,14 +23,24 @@ export async function GET() {
   const disattivati = new Set((abil || []).filter((a: any) => a.abilitato === false).map((a: any) => a.corriere_id))
 
   const { data: fasce } = await supabase.from('listini_clienti_fasce')
-    .select('corriere_id,peso_max,prezzo,tipo,fuel,zone(nome),corrieri(nome_contratto)')
+    .select('corriere_id,peso_max,prezzo,tipo,fuel,zone(nome),corrieri(nome_contratto,attivo,master_id)')
     .eq('listino_id', listinoId).order('peso_max', { ascending: true })
+
+  // Contratti in pausa (al proprio livello o SOPRA nella catena): i loro prezzi non devono
+  // comparire. Mostrare il listino di un contratto sospeso significa far preparare spedizioni che
+  // verranno rifiutate. Se il contratto viene riattivato, i prezzi ricompaiono da soli.
+  const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
+  const masterDelContratto = (fasce || []).map((f: any) => f.corrieri?.master_id).find(Boolean) || null
+  const sospesiSopra = await contrattiSospesiSopra(masterDelContratto)
 
   const defFattore = parseFloat((listino as any)?.fattore_volume) || 5000
   const perCorr = new Map<string, any>()
   for (const f of (fasce || [])) {
     const cid = (f as any).corriere_id
     if (!cid || disattivati.has(cid)) continue
+    const cRec = (f as any).corrieri
+    if (cRec?.attivo === false) continue
+    if (sospesoDallaCatena(cRec?.nome_contratto, sospesiSopra)) continue
     if (!perCorr.has(cid)) {
       perCorr.set(cid, {
         nome_contratto: (f as any).corrieri?.nome_contratto || 'Corriere',

@@ -15,6 +15,17 @@ export async function POST(req: NextRequest) {
   const { data: cliente } = await admin.from('clienti').select('listino_cliente_id').eq('id', ctx.clienteId).single()
   if (!cliente?.listino_cliente_id) return NextResponse.json({ error: 'Nessun listino associato al cliente' }, { status: 400 })
 
+  // Contratto in pausa, al proprio livello o SOPRA: non si quota. Rispondere un prezzo per un
+  // contratto sospeso porterebbe il cliente a tentare la spedizione e a vederla rifiutata dopo.
+  {
+    const { data: c } = await admin.from('corrieri').select('nome_contratto,attivo,master_id').eq('id', ctx.corriereId).maybeSingle()
+    const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
+    const sospesi = await contrattiSospesiSopra((c as any)?.master_id)
+    if ((c as any)?.attivo === false || sospesoDallaCatena((c as any)?.nome_contratto, sospesi)) {
+      return NextResponse.json({ error: 'Contratto momentaneamente sospeso' }, { status: 400 })
+    }
+  }
+
   const packages = Array.isArray(body.packages) && body.packages.length ? body.packages : [{ weight: body.weight || 1 }]
   const shipTo = body.shipTo || {}
   const provincia = (shipTo.state || shipTo.provincia || '').toUpperCase().trim()

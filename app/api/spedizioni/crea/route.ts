@@ -166,6 +166,16 @@ export async function POST(req: NextRequest) {
 
   if (corriereRecord.attivo === false) return NextResponse.json({ error: 'Corriere in pausa: spedizione non consentita.' }, { status: 400 })
 
+  // In pausa da un master SOPRA: la sospensione vale per tutta la catena sotto, altrimenti si
+  // venderebbe un servizio che a monte non parte. Vale anche se il contratto risulta attivo qui.
+  {
+    const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
+    const sospesi = await contrattiSospesiSopra((corriereRecord as any).master_id)
+    if (sospesoDallaCatena((corriereRecord as any).nome_contratto, sospesi)) {
+      return NextResponse.json({ error: 'Contratto momentaneamente sospeso: spedizione non consentita.' }, { status: 400 })
+    }
+  }
+
   // Contenuto OBBLIGATORIO per i servizi internazionali (es. Poste International Plus): serve alla
   // dogana e senza il corriere rifiuta la creazione con un errore poco chiaro. Blocco qui con
   // un messaggio pulito.
