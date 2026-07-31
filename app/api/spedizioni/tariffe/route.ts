@@ -595,8 +595,17 @@ export async function POST(req: NextRequest) {
 
 function trovaFascia(fasce: any[], peso: number) {
   const finoA = fasce.filter(f => f.tipo !== 'oltre').sort((a, b) => a.peso_max - b.peso_max)
-  for (const f of finoA) {
-    if (peso <= parseFloat(f.peso_max)) return f
+  // PIU' ZONE PER LO STESSO CAP: succede spesso che un CAP compaia sia in "Isole Minori" sia in
+  // "Zone Disagiate" dello stesso contratto (in produzione capita su 2.336 CAP). In quel caso qui
+  // arrivavano le fasce di ENTRAMBE le zone e vinceva quella che il database restituiva per prima:
+  // lo stesso CAP poteva essere prezzato in due modi diversi da una richiesta all'altra, e il
+  // preventivo poteva non coincidere con l'addebito. A parita' di scaglione si prende ora la piu'
+  // CARA: e' deterministico, ed e' il verso giusto (una destinazione doppiamente speciale non deve
+  // costare meno di quanto costa a noi).
+  const primo = finoA.find(f => peso <= parseFloat(f.peso_max))
+  if (primo) {
+    const stessoScaglione = finoA.filter(f => parseFloat(f.peso_max) === parseFloat(primo.peso_max))
+    return stessoScaglione.reduce((a, b) => (parseFloat(b.prezzo) > parseFloat(a.prezzo) ? b : a), primo)
   }
   const oltre = fasce.find(f => f.tipo === 'oltre')
   if (oltre) {
