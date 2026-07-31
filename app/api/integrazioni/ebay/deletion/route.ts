@@ -51,11 +51,34 @@ export async function POST(req: NextRequest) {
       try {
         const { createAdminSupabase } = await import('@/lib/supabase-admin')
         const admin = createAdminSupabase()
-        // Cancella eventuali ordini e-commerce sincronizzati collegati a quell'utente eBay.
-        const { error } = await admin.from('ordini_ecommerce').delete()
-          .eq('piattaforma', 'ebay').eq('buyer_id', String(userId))
-        console.log('[EBAY][DELETION] notifica firmata eseguita', error ? 'con errore' : 'ok')
-      } catch { /* best-effort, non bloccare l'ACK */ }
+        // 3) LA CANCELLAZIONE NON AVVENIVA. Si filtrava su una colonna `buyer_id` che in
+        //    `ordini_ecommerce` non esiste e non e' mai esistita: la chiamata falliva, l'errore
+        //    veniva inghiottito dal catch e si rispondeva 200. Ogni richiesta di cancellazione
+        //    ricevuta da eBay non ha quindi mai tolto nulla — un impegno preso e non mantenuto.
+        //    L'acquirente sta in `raw->buyer->>username`.
+        // Si ANONIMIZZA invece di cancellare la riga: l'ordine e' anche un documento contabile e
+        // resta collegato a una spedizione. Spariscono i dati personali (nominativo, indirizzo di
+        // consegna e di registrazione), restano importi e SKU. E' la stessa scelta gia' fatta per
+        // gli ordini Amazon in /api/privacy/purge-pii.
+        const { data: righe } = await admin.from('ordini_ecommerce')
+          .select('id,raw').eq('piattaforma', 'ebay')
+          .filter('raw->buyer->>username', 'eq', String(userId)).limit(1000)
+        let anonimizzati = 0
+        for (const r of (righe || [])) {
+          const raw: any = { ...(r as any).raw }
+          delete raw.buyer
+          delete raw.fulfillmentStartInstructions
+          delete raw.buyerCheckoutNotes
+          const { error } = await admin.from('ordini_ecommerce')
+            .update({ cliente_nome: '[dati rimossi]', destinatario: null, raw })
+            .eq('id', (r as any).id)
+          if (!error) anonimizzati++
+        }
+        console.log('[EBAY][DELETION] notifica firmata: ordini anonimizzati =', anonimizzati, 'su', (righe || []).length)
+      } catch (e: any) {
+        // Non si nasconde piu' l'errore: se la cancellazione non riesce va saputo.
+        console.error('[EBAY][DELETION] anonimizzazione fallita:', e?.message)
+      }
     } else if (!firmato) {
       console.warn('[EBAY][DELETION] notifica SENZA firma: ignorata (nessuna cancellazione)')
     }
