@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
 export const runtime = 'nodejs'
@@ -18,7 +19,8 @@ export const dynamic = 'force-dynamic'
 // Lo storno e' idempotente: se nel frattempo e' stata confermata, non fa nulla.
 const MINUTI_SCADENZA = 15
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const _cron = bloccaCronNonAutorizzato(req); if (_cron) return _cron
   const admin = createAdminSupabase()
   const soglia = new Date(Date.now() - MINUTI_SCADENZA * 60 * 1000).toISOString()
 
@@ -31,7 +33,8 @@ export async function GET() {
     .lt('created_at', soglia)
     .limit(500)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  // Il messaggio del database non esce nella risposta: descrive tabelle e colonne interne.
+  if (error) { console.error('[PRENOTAZIONI]', error.message); return NextResponse.json({ error: 'Errore interno' }, { status: 500 }) }
   if (!appese?.length) return NextResponse.json({ ok: true, liberate: 0 })
 
   let liberate = 0

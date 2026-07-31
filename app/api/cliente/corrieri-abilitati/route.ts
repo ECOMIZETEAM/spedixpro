@@ -13,7 +13,7 @@ export async function GET() {
   const { data: cliente } = await supabase.from('clienti').select('listino_cliente_id').eq('id', id).single()
   if (!cliente?.listino_cliente_id) return NextResponse.json([])
   const { data: agganci } = await supabase.from('listini_clienti_corrieri')
-    .select('corriere_id, corrieri(id,nome_contratto,tipo)')
+    .select('corriere_id, corrieri(id,nome_contratto)')
     .eq('listino_id', cliente.listino_cliente_id)
   const contratti = (agganci||[]).map((r:any) => r.corrieri).filter(Boolean)
   const { data: stati } = await supabase.from('clienti_corrieri_abilitati')
@@ -21,7 +21,10 @@ export async function GET() {
   const mappaAbil = new Map((stati||[]).map((s:any) => [s.corriere_id, s.abilitato]))
   const mappaSett = new Map((stati||[]).map((s:any) => [s.corriere_id, s.settings || {}]))
   const risultato = contratti.map((c:any) => ({
-    id: c.id, nome_contratto: c.nome_contratto, tipo: c.tipo,
+    // Niente campo `tipo`: e' il sistema tecnico dietro il contratto e non deve arrivare al
+    // cliente. La rotta gemella /api/cliente/corrieri lo toglieva gia'; qui era rimasto, e
+    // usciva nel JSON di tre pagine del portale. Nessuna pagina lo usa.
+    id: c.id, nome_contratto: c.nome_contratto,
     abilitato: mappaAbil.has(c.id) ? mappaAbil.get(c.id) : true,
     settings: mappaSett.has(c.id) ? mappaSett.get(c.id) : {},
   }))

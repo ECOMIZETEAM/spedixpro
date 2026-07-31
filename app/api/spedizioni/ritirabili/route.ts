@@ -68,7 +68,8 @@ export async function GET(req: NextRequest) {
       colli: s.colli, peso_reale: s.peso_reale, created_at: s.created_at,
       corriere_id: s.corriere_id,
       corriere_nome: (s.corrieri as any)?.nome_contratto || '—',
-      corriere_tipo: (s.corrieri as any)?.tipo || '',
+      // Niente `corriere_tipo`: il tipo serve al filtro qui sopra, non a chi chiama. Usciva
+      // fino al portale del cliente col nome del sistema tecnico a valle.
       origine_id, origine_nome,
     }
   })

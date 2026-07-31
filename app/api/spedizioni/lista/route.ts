@@ -438,7 +438,12 @@ export async function GET(req: NextRequest) {
   // al corriere: la differenza con `costo_totale` e' il suo guadagno. La pagina del cliente non lo
   // mostra, ma finiva comunque nel browser e bastava aprire gli strumenti per sviluppatori.
   // Si toglie QUI, in fondo, per non toccare i calcoli intermedi che se ne servono.
-  if ((utente?.ruolo || '').toLowerCase() === 'cliente') {
+  //
+  // Vale ANCHE PER L'AGENTE: e' un rivenditore esterno, e sopra queste righe c'e' un intero blocco
+  // che gli ricalcola il margine dal SUO listino agente proprio per non fargli vedere il costo del
+  // master. La colonna grezza vanificava quel lavoro: bastava guardare la risposta.
+  const _ruoloOut = (utente?.ruolo || '').toLowerCase()
+  if (_ruoloOut === 'cliente' || _ruoloOut === 'agente') {
     rowsOut = (rowsOut || []).map((r: any) => { const { costo_spedizione, ...resto } = r; return resto })
   }
 

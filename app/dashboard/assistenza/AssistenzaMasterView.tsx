@@ -1,5 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
+// Allegati e POD non hanno più un link diretto allo storage: passano da /api/file, che controlla
+// che chi scarica sia parte di quella richiesta (vedi lib/file-riservati.ts).
+import { linkAllegato } from '@/lib/file-riservati'
 
 const STATI: Record<string, { label: string; bg: string; color: string }> = {
   aperto: { label: 'Aperto', bg: '#fff7ed', color: '#ea580c' },
@@ -239,7 +242,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     <td style={{ ...td, whiteSpace: 'nowrap', fontSize: '12px' }}>{new Date(t.created_at).toLocaleDateString('it-IT')}</td>
                     <td style={td}>{t.oggetto} {t.aperto_letto === false && <span style={{ background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px' }}>● Nuovo</span>}</td>
                     <td style={td}><Badge stato={t.stato} /></td>
-                    <td style={{ ...td, color: '#555', fontSize: '12px' }}>{isPod ? (t.pod_url ? <a href={t.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }} onClick={e => { e.stopPropagation(); fetch('/api/assistenza/' + t.id).catch(() => {}); setTimeout(() => carica(true), 600) }}>⬇ Scarica POD</a> : '—') : <span style={{ color: '#2563eb', fontWeight: 600 }}>💬 Apri chat</span>}</td>
+                    <td style={{ ...td, color: '#555', fontSize: '12px' }}>{isPod ? (t.pod_url ? <a href={linkAllegato(t.id, t.pod_url)} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }} onClick={e => { e.stopPropagation(); fetch('/api/assistenza/' + t.id).catch(() => {}); setTimeout(() => carica(true), 600) }}>⬇ Scarica POD</a> : '—') : <span style={{ color: '#2563eb', fontWeight: 600 }}>💬 Apri chat</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -317,8 +320,8 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                     {sel.allegati.map((a: any, i: number) => (
                       isImg(a)
-                        ? <img key={i} src={a.url} alt={a.nome} onClick={() => setViewImg(a.url)} title="Clicca per ingrandire" style={{ width: '90px', height: '90px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #e5e7eb', cursor: 'zoom-in' }} />
-                        : <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', textDecoration: 'none' }}>
+                        ? <img key={i} src={linkAllegato(sel.id, a.url)} alt={a.nome} onClick={() => setViewImg(linkAllegato(sel.id, a.url))} title="Clicca per ingrandire" style={{ width: '90px', height: '90px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #e5e7eb', cursor: 'zoom-in' }} />
+                        : <a key={i} href={linkAllegato(sel.id, a.url)} target="_blank" rel="noopener noreferrer" style={{ display: 'block', textDecoration: 'none' }}>
                             <div style={{ width: '90px', height: '90px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', borderRadius: '8px', border: '1px solid #e5e7eb', background: '#f9fafb', fontSize: '11px', color: '#2563eb', textAlign: 'center', padding: '4px' }}><span style={{ fontSize: '24px' }}>📄</span><span style={{ maxWidth: '80px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.nome}</span></div>
                           </a>
                     ))}
@@ -332,7 +335,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                 <div style={{ background: '#f0f9ff', border: '2px dashed #bae6fd', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px' }}>Prova di consegna (POD) — LDV {sel.oggetto}</div>
                   {sel.pod_url
-                    ? <a href={sel.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica la POD ricevuta</a>
+                    ? <a href={linkAllegato(sel.id, sel.pod_url)} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica la POD ricevuta</a>
                     : <div style={{ fontSize: '12.5px', color: '#555' }}>In attesa che il tuo master carichi la POD.</div>}
                 </div>
               )}
@@ -343,7 +346,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   onDrop={e => { e.preventDefault(); setDragPod(false); const f = e.dataTransfer.files?.[0]; if (f) caricaPodDentro(f) }}
                   style={{ background: dragPod ? '#dbeafe' : '#f0f9ff', border: dragPod ? '2px dashed #2563eb' : '2px dashed #bae6fd', borderRadius: '8px', padding: '16px' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px', textAlign: 'center' }}>Prova di consegna (POD) — LDV {sel.oggetto}</div>
-                  {sel.pod_url && !podFile && <div style={{ marginBottom: '10px', textAlign: 'center' }}><a href={sel.pod_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD già inviata</a></div>}
+                  {sel.pod_url && !podFile && <div style={{ marginBottom: '10px', textAlign: 'center' }}><a href={linkAllegato(sel.id, sel.pod_url)} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD già inviata</a></div>}
 
                   {podFile ? (
                     // PDF caricato dentro: anteprima + invio

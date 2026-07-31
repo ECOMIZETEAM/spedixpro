@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
+import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 
 
 // STATO RITIRI SPEDIAMOPRO: rinfresca best-effort dai pickup live (GET /pickups/{id}).
@@ -69,6 +70,25 @@ export async function GET(req: NextRequest) {
     const { createAdminSupabase: _admR } = await import('@/lib/supabase-admin')
     await rinfrescaStatiPickup(_admR(), lista)
     return NextResponse.json(lista)
+  }
+
+  // AGENTE: solo i ritiri dei SUOI clienti. Cadeva nel ramo "Master/admin" qui sotto, che usa il
+  // client admin (scavalca la RLS) e allarga a tutta la discendenza: si ritrovava i ritiri di tutti
+  // i clienti del master — centinaia, quando lui ne ha tre — con ragioni sociali, indirizzi e
+  // volumi. Non ha nemmeno il permesso di vedere la sezione Ritiri, ma la rotta rispondeva lo stesso.
+  if (isAgente(utente)) {
+    const idsMiei = idClientiPerFiltro(await clientiAgente(supabase, utente))
+    const buildAg = () => {
+      let q = supabase.from('ritiri').select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
+        .eq('master_id', utente!.master_id).in('cliente_id', idsMiei)
+        .order('created_at', { ascending: false })
+      if (clienteId) q = q.eq('cliente_id', clienteId)
+      if (codRitiro) q = q.ilike('cod_ritiro', '%' + codRitiro + '%')
+      if (dal) q = q.gte('created_at', dal)
+      if (al) q = q.lte('created_at', al + 'T23:59:59')
+      return q
+    }
+    return NextResponse.json(await fetchAll(buildAg))
   }
 
   // Master/admin: rete = sé + discendenza. Risale la catena ANCHE con "Tutti i clienti".

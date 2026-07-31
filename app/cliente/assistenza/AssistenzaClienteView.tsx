@@ -1,6 +1,8 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import { fileToAllegato } from '@/app/components/fileAllegato'
+// Allegati e POD escono da /api/file, che verifica chi li sta scaricando (lib/file-riservati.ts).
+import { linkAllegato } from '@/lib/file-riservati'
 
 const STATI: Record<string, { label: string; bg: string; color: string }> = {
   aperto: { label: 'Aperto', bg: '#fff7ed', color: '#ea580c' },
@@ -177,7 +179,7 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
                   <td style={{ ...td, fontSize: '12.5px' }} onClick={e => { if (isPod) e.stopPropagation() }}>
                     {/* Scaricare la POD vale come "l'ho vista": senza questo l'etichetta di
                         aggiornamento restava accesa a chi ha gia' preso il documento. */}
-                    {isPod ? (t.pod_url ? <a href={t.pod_url} target="_blank" rel="noopener noreferrer" download onClick={() => { fetch('/api/assistenza/' + t.id).catch(() => {}); setTimeout(() => carica(true), 600) }} style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD</a> : <span style={{ color: '#999' }}>In attesa…</span>) : <span style={{ color: '#2563eb', fontWeight: 600 }}>💬 Apri chat</span>}
+                    {isPod ? (t.pod_url ? <a href={linkAllegato(t.id, t.pod_url)} target="_blank" rel="noopener noreferrer" download onClick={() => { fetch('/api/assistenza/' + t.id).catch(() => {}); setTimeout(() => carica(true), 600) }} style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD</a> : <span style={{ color: '#999' }}>In attesa…</span>) : <span style={{ color: '#2563eb', fontWeight: 600 }}>💬 Apri chat</span>}
                   </td>
                 </tr>
               ))}
@@ -225,7 +227,7 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
                       {m.testo}
                       {Array.isArray(m.allegati) && m.allegati.length > 0 && (
                         <div style={{ display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
-                          {m.allegati.map((a: any, i: number) => <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: mio ? '#fff' : '#2563eb', textDecoration: 'underline' }}>📎 {a.nome}</a>)}
+                          {m.allegati.map((a: any, i: number) => <a key={i} href={linkAllegato(chat.ticket?.id, a.url)} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: mio ? '#fff' : '#2563eb', textDecoration: 'underline' }}>📎 {a.nome}</a>)}
                         </div>
                       )}
                     </div>

@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraMovimentoMaster } from '@/lib/movimenti'
 import { meseCorrente } from '@/lib/piani'
@@ -6,7 +7,8 @@ import { meseCorrente } from '@/lib/piani'
 // CRON (1° del mese): riaddebita il canone ai master ATTIVI (che hanno un piano),
 // accreditando l'incasso al SUPERROOT. I master disdetti (piano null) sono bloccati
 // e NON vengono addebitati. Idempotente: salta chi ha già abbonamento_mese = mese corrente.
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const _cron = bloccaCronNonAutorizzato(req); if (_cron) return _cron
   const admin = createAdminSupabase()
   const mese = meseCorrente()
 

@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { annullaSpedizioneSulCorriere, rimborsaAnnulloSpedizione, trovaOwnerContratto } from '@/lib/annullaSpedizione'
 
@@ -10,7 +11,8 @@ export const maxDuration = 300
 // l'annullo al corriere. Se il corriere accetta (o la considera già inesistente) → 'annullata'
 // + storno credito. Se rifiuta (già spedita/chiusa) → torna allo stato precedente con la nota
 // d'errore, così resta tracciabile e non sparisce.
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const _cron = bloccaCronNonAutorizzato(req); if (_cron) return _cron
   const admin = createAdminSupabase()
   const soglia = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
 

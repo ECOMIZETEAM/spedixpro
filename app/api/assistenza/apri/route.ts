@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { BUCKET_RISERVATI } from '@/lib/file-riservati'
 
 // Apertura di un ticket di assistenza.
 // - Cliente: il ticket va al proprio master (owner = master del cliente).
@@ -58,8 +59,10 @@ export async function POST(req: NextRequest) {
       const nomePulito = String(a?.nome || 'file').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-60)
       const ct = String(a?.tipo || 'application/octet-stream')
       const path = `allegati/${masterId}/${Date.now()}_${i}_${nomePulito}`
-      const { error: upErr } = await admin.storage.from('reports').upload(path, buffer, { contentType: ct, upsert: true })
-      if (!upErr) { const { data: pub } = admin.storage.from('reports').getPublicUrl(path); if (pub?.publicUrl) allegatiOut.push({ url: pub.publicUrl, nome: String(a?.nome || 'file'), tipo: ct }) }
+      const { error: upErr } = await admin.storage.from(BUCKET_RISERVATI).upload(path, buffer, { contentType: ct, upsert: true })
+      // Si salva il PERCORSO, non un URL pubblico: il bucket e' privato e l'allegato esce solo da
+      // /api/file, che prima controlla che chi scarica sia davvero parte di questa richiesta.
+      if (!upErr) allegatiOut.push({ url: path, nome: String(a?.nome || 'file'), tipo: ct })
     } catch { /* salta l'allegato non valido */ }
   }
   if (allegatiOut.length) record.allegati = allegatiOut

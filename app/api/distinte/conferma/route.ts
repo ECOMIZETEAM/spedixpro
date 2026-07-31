@@ -5,6 +5,7 @@ import { bloccaAgente } from '@/lib/agente'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
+import { erroreCorrierePulito } from '@/lib/errore-corriere'
 
 // "Conferma" = TRASMETTI (o ritenta) la chiusura della distinta al provider del corriere.
 // Alla creazione la trasmissione parte gia' in automatico: questo bottone serve per le distinte
@@ -41,7 +42,9 @@ export async function POST(req: NextRequest) {
     const { data: dopo } = await admin.from('distinte').select('confermata_vettore').eq('id', d.id).maybeSingle()
     if (dopo?.confermata_vettore) { confermate++; continue }
     const err = r1?.errore || r2?.errore
-    if (err) { errori.push({ numero: d.numero, errore: String(err).slice(0, 200) }); continue }
+    // Anche al MASTER si mostra un messaggio ripulito: e' un rivenditore, non staff MoovExpress,
+    // e nel popup leggeva il nome del sistema tecnico dietro le quinte. L'originale va nei log.
+    if (err) { console.error('[DISTINTE][CONFERMA]', d.numero, String(err).slice(0, 300)); errori.push({ numero: d.numero, errore: erroreCorrierePulito(err) }); continue }
     // Nessun errore ma nemmeno trasmissione (es. bordero gia' presente da un giro parziale):
     // attestazione manuale, la distinta risulta confermata.
     await admin.from('distinte').update({ confermata_vettore: true, data_conferma: new Date().toISOString() }).eq('id', d.id)

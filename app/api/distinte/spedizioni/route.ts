@@ -52,10 +52,25 @@ export async function POST(req: NextRequest) {
   const agente = isAgente(utente)
   if (agente && masterSel) return NextResponse.json({ error: 'Operazione non consentita: gli agenti non gestiscono la rete.' }, { status: 403 })
   let db: any = supabase
-  if (masterSel) { const { createAdminSupabase } = await import('@/lib/supabase-admin'); db = createAdminSupabase() }
+  // IL 'm:<master>' VA VERIFICATO, come gia' avviene nella GET qui sopra. Arriva dal browser e piu'
+  // sotto si legge con il client admin, che scavalca la RLS: senza controllo bastava passare l'id
+  // di un master ESTRANEO (il padre, un fratello) per agganciare alla propria distinta spedizioni
+  // non proprie — leggendone prezzi di vendita e, riaprendo la distinta, destinatari e indirizzi —
+  // e per portarle a 'spedita'.
+  let masterFilterPost: string[] = []
+  if (masterSel) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { sottoAlberoMasterIds, masterIdsVisibili } = await import('@/lib/rete-masters')
+    const admin = createAdminSupabase()
+    if (!utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    const mieiDiscendenti = await masterIdsVisibili(admin, utente.master_id)
+    if (!mieiDiscendenti.includes(masterSel)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    masterFilterPost = await sottoAlberoMasterIds(admin, masterSel)
+    db = admin
+  }
   let spedQ = db.from('spedizioni').select('id,colli,peso_reale,costo_totale').in('id', spedizioniIds)
   if (agente) spedQ = spedQ.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
-  const { data: speds } = masterSel ? await spedQ : await spedQ.eq('master_id', utente?.master_id)
+  const { data: speds } = masterSel ? await spedQ.in('master_id', masterFilterPost) : await spedQ.eq('master_id', utente?.master_id)
   if (!speds?.length) return NextResponse.json({ error: 'Nessuna spedizione valida da chiudere' }, { status: 400 })
   const spedIdsValidi = speds.map((s: any) => s.id)
   const totaleColli = (speds || []).reduce((s: number, x: any) => s + Number(x.colli || 1), 0)

@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
+import { erroreCorrierePulito } from '@/lib/errore-corriere'
 
 // Conferma (= trasmetti/ritenta la chiusura al provider) di UNA distinta del cliente loggato.
 // Alla creazione la trasmissione parte gia' in automatico: questo serve per quelle rimaste
@@ -29,7 +30,14 @@ export async function POST(req: NextRequest) {
   const { data: dopo } = await admin.from('distinte').select('confermata_vettore').eq('id', d.id).maybeSingle()
   if (dopo?.confermata_vettore) return NextResponse.json({ success: true })
   const err = r1?.errore || r2?.errore
-  if (err) return NextResponse.json({ error: String(err).slice(0, 200) }, { status: 502 })
+  // Il messaggio del provider NON esce cosi' com'e': arrivava al cliente in un popup e conteneva
+  // il nome del sistema tecnico dietro le quinte ("authcode spediamopro mancante", "credenziali
+  // spedisci mancanti", "HTTP 401: <risposta grezza>"). Il cliente deve vedere solo il marchio del
+  // corriere. Il testo originale resta nei log per chi deve intervenire.
+  if (err) {
+    console.error('[CLIENTE][CONFERMA DISTINTA]', d.numero, String(err).slice(0, 300))
+    return NextResponse.json({ error: erroreCorrierePulito(err) }, { status: 502 })
+  }
   await admin.from('distinte').update({ confermata_vettore: true, data_conferma: new Date().toISOString() }).eq('id', d.id)
   return NextResponse.json({ success: true })
 }

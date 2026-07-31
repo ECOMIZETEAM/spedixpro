@@ -91,9 +91,18 @@ export async function getPermessiUtente(): Promise<PermessiUtente | null> {
 }
 
 // Helper server-side per proteggere pagine/API della gestione rete.
+//
+// L'AGENTE NON GESTISCE LA RETE, mai. Questo cancello guardava solo il flag masters.gestione_rete,
+// che e' una caratteristica del MASTER: siccome in produzione tutti i master con agenti ce l'hanno
+// acceso, l'agente lo attraversava insieme al suo master. Da li' arrivava a /api/master/gerarchia
+// e /api/master/figli (l'anagrafica clienti di tutta la rete, non i suoi tre), a /api/master/crea
+// (creare un sotto-master con credenziali proprie) e soprattutto alla PATCH di /api/master/[id],
+// con cui poteva cambiare la password del proprio master ed entrare nel portale al posto suo.
+// Un ruolo di sola lettura non deve poter fare nulla di tutto questo.
 export async function puoGestireRete(): Promise<boolean> {
   const p = await getPermessiUtente()
-  return !!p?.gestioneRete
+  if (!p || p.ruolo === 'agente') return false
+  return !!p.gestioneRete
 }
 
 export function haPermesso(p: PermessiUtente | null, chiave: string): boolean {

@@ -44,3 +44,13 @@ export const PROVIDER_TECNICI = ['spediamopro', 'spedisci', 'easyparcel']
 export function isProviderTecnico(tipo?: string | null): boolean {
   return PROVIDER_TECNICI.includes(String(tipo || '').toLowerCase())
 }
+
+// SIGLA NEUTRA da mandare al browser al posto del tipo del contratto. Il tipo e' il nome del
+// sistema tecnico a valle e non deve uscire da qui: non basta non stamparlo a schermo, perche'
+// chiunque apra gli strumenti per sviluppatori legge la risposta JSON. Le pagine mostrano gia'
+// queste sigle, quindi il comportamento non cambia — cambia solo cosa viaggia sulla rete.
+const SIGLA: Record<string, string> = { spediamopro: 'SP', spedisci: 'SO', easyparcel: 'DVA' }
+export function siglaContratto(tipo?: string | null): string {
+  const t = String(tipo || '').toLowerCase()
+  return SIGLA[t] || t
+}

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { SPED_COLS_CLIENTE } from '@/lib/spedizioni-cols'
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -13,8 +14,11 @@ export async function GET(req: NextRequest) {
   // (es. in_giacenza -> non_consegnato), ma resta `giacenza_data` valorizzata e `giacenza_stato`
   // (aperta/in_gestione/svincolata/chiusa). Quindi filtro per "è entrata in giacenza", non per lo
   // stato corrente della spedizione. Data filtrata su giacenza_data (quando è entrata in giacenza).
+  // Colonne scelte a mano, mai `*`: la RLS limita le RIGHE alle sue spedizioni, non le COLONNE.
+  // Con `*` al cliente arrivavano costo_spedizione (il costo del master, quindi il suo margine),
+  // raw_response (la risposta grezza del provider tecnico) e l'etichetta in base64, ~150 kB a riga.
   let query = supabase.from('spedizioni')
-    .select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
+    .select(SPED_COLS_CLIENTE + ',clienti(ragione_sociale),corrieri(nome_contratto)')
     .eq('cliente_id', clienteId)
     .not('giacenza_data', 'is', null)
     .order('giacenza_data', { ascending: false })

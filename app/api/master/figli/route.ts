@@ -16,6 +16,22 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminSupabase()
 
+  // IL parent_id VA VERIFICATO. Arriva dal browser e qui sotto si legge con il client admin, che
+  // scavalca la RLS: senza questo controllo bastava passare l'id del PROPRIO PADRE — che il
+  // portale gia' consegna al browser in /api/master/root — per farsi dare l'elenco completo dei
+  // clienti e dei sotto-master del padre, cioe' l'anagrafica dei master FRATELLI, concorrenti
+  // diretti sotto lo stesso capo, nome per nome e con l'email di accesso.
+  // Si puo' guardare solo dentro il proprio sotto-albero: se stessi e la propria discendenza.
+  const { data: chi } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const mio = chi?.master_id
+  if (!mio) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  if (parentId !== mio) {
+    const { eDiscendente } = await import('@/lib/rete-masters')
+    if (!(await eDiscendente(admin, parentId, mio))) {
+      return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    }
+  }
+
   const { data: masterFigli } = await admin
     .from('masters')
     .select('id,nome,email,attivo,created_at')

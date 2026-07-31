@@ -1,31 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-
-// Ruolo del richiedente rispetto al ticket: 'master' = lato assistenza (owner che risponde),
-// 'cliente' = lato richiedente (il cliente che ha aperto, o il master che ha aperto verso la linea
-// superiore). null = non è parte del ticket (non autorizzato).
-async function partecipante(utente: any, ticket: any): Promise<'master' | 'cliente' | 'rete' | null> {
-  if (!utente) return null
-  const ruolo = String(utente.ruolo || '').toLowerCase()
-  // UTENTE DEL PORTALE CLIENTE: può stare SOLO sul proprio ticket, mai su altro.
-  // Anche il cliente ha un master_id (il master a cui appartiene) e coincide con
-  // l'owner_master_id del ticket: senza questa uscita anticipata, aprendo il ticket di un ALTRO
-  // cliente dello stesso master si cadeva nel ramo "master" più sotto e lo si leggeva tutto,
-  // messaggi interni di rete compresi, potendo anche scrivere firmandosi come assistenza.
-  if (ruolo === 'cliente' || utente.cliente_id) {
-    return utente.cliente_id && utente.cliente_id === ticket.cliente_id ? 'cliente' : null
-  }
-  // AGENTE: sola lettura sui SUOI clienti e nessun dato del master o della rete (lib/agente.ts).
-  // Qui non c'è modo di limitarlo al suo perimetro (i ticket non hanno un agente), quindi resta
-  // fuori: prima era indistinguibile dal master e vedeva le conversazioni di tutti i clienti.
-  if (ruolo === 'agente') return null
-  if (utente.master_id && utente.master_id === ticket.aperto_master_id) return 'cliente'  // master che ha aperto (richiedente)
-  if (utente.master_id && utente.master_id === ticket.owner_master_id) return 'master'    // lato che risponde
-  // Master della CATENA a cui il ticket e' stato inoltrato: vede tutto, il cliente non lo vede.
-  if (utente.master_id && Array.isArray(ticket.rete_master_ids) && ticket.rete_master_ids.includes(utente.master_id)) return 'rete'
-  return null
-}
+// La regola su chi puo' stare dentro un ticket ora vive in lib/ticket-accesso.ts, perche' la usa
+// anche /api/file per gli allegati e la POD: una sola definizione, nessuna copia da tenere allineata.
+import { partecipanteTicket as partecipante } from '@/lib/ticket-accesso'
+import { BUCKET_RISERVATI } from '@/lib/file-riservati'
 
 // GET: dettaglio ticket + thread messaggi (chat). Accessibile a entrambe le parti.
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -181,11 +160,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       const buffer = Buffer.from(b64, 'base64')
       if (!buffer.length) return NextResponse.json({ error: 'File POD vuoto o non valido' }, { status: 400 })
       const path = `pod/${masterId}/${Date.now()}_${id}.pdf`
-      const { error: upErr } = await admin.storage.from('reports').upload(path, buffer, { contentType: 'application/pdf', upsert: true })
+      const { error: upErr } = await admin.storage.from(BUCKET_RISERVATI).upload(path, buffer, { contentType: 'application/pdf', upsert: true })
       if (upErr) return NextResponse.json({ error: 'Upload POD fallito: ' + upErr.message }, { status: 400 })
-      const { data: pub } = admin.storage.from('reports').getPublicUrl(path)
-      if (!pub?.publicUrl) return NextResponse.json({ error: 'URL POD non generato' }, { status: 400 })
-      upd.pod_url = pub.publicUrl
+      // Percorso, non URL pubblico: la POD porta nome e firma del destinatario e si scarica solo
+      // passando da /api/file (vedi lib/file-riservati.ts).
+      upd.pod_url = path
       upd.stato = 'risolto'
     } catch (e: any) {
       return NextResponse.json({ error: 'Errore caricamento POD: ' + (e?.message || 'sconosciuto') }, { status: 400 })

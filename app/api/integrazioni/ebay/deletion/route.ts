@@ -32,19 +32,33 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   // Cancellazione dati utente eBay (best-effort). eBay richiede solo un ACK 200.
+  //
+  // ATTENZIONE, DUE COSE ERANO SBAGLIATE QUI.
+  // 1) Nessuna verifica del mittente: un `curl` con un buyer_id inventato faceva cancellare righe
+  //    dal database. Ora, prima di toccare qualcosa, si pretende l'intestazione di firma che eBay
+  //    mette su ogni notifica vera. Senza, si risponde comunque 200 (eBay vuole l'ACK, e un 4xx
+  //    ripetuto fa disattivare il keyset Production) ma non si cancella nulla.
+  //    La verifica CRITTOGRAFICA della firma (chiave pubblica eBay per `kid`) resta da fare: e' il
+  //    passo successivo, va provato su una notifica reale prima di renderlo bloccante.
+  // 2) Il corpo finiva nei log: dentro c'e' l'identificativo dell'utente eBay, cioe' proprio il
+  //    dato personale che questa chiamata ci chiede di cancellare. Se ne teneva una copia nei log
+  //    invece di eliminarlo. Ora non si scrive piu' il corpo, solo l'esito.
+  const firmato = !!req.headers.get('x-ebay-signature')
   try {
     const body = await req.json().catch(() => ({}))
     const userId = body?.notification?.data?.userId || body?.notification?.data?.username || null
-    if (userId) {
+    if (userId && firmato) {
       try {
         const { createAdminSupabase } = await import('@/lib/supabase-admin')
         const admin = createAdminSupabase()
         // Cancella eventuali ordini e-commerce sincronizzati collegati a quell'utente eBay.
-        await admin.from('ordini_ecommerce').delete()
+        const { error } = await admin.from('ordini_ecommerce').delete()
           .eq('piattaforma', 'ebay').eq('buyer_id', String(userId))
+        console.log('[EBAY][DELETION] notifica firmata eseguita', error ? 'con errore' : 'ok')
       } catch { /* best-effort, non bloccare l'ACK */ }
+    } else if (!firmato) {
+      console.warn('[EBAY][DELETION] notifica SENZA firma: ignorata (nessuna cancellazione)')
     }
-    console.log('eBay account deletion notification ricevuta', JSON.stringify(body).slice(0, 400))
   } catch { /* ignora: rispondiamo comunque 200 */ }
   return new NextResponse(null, { status: 200 })
 }

@@ -7,6 +7,9 @@ import { EMAIL_PER_CORRIERE,
 } from '@/lib/spediamopro'
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
 import { calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
+// La sigla neutra al posto del tipo del contratto: il nome del sistema tecnico a valle non deve
+// arrivare al browser, nemmeno dentro il JSON (vedi lib/corriere-logo.ts).
+import { siglaContratto } from '@/lib/corriere-logo'
 
 const ZONE_MAP: Record<string,string> = {
   CA:'Sardegna',CI:'Sardegna',VS:'Sardegna',NU:'Sardegna',OG:'Sardegna',OT:'Sardegna',OR:'Sardegna',SS:'Sardegna',SU:'Sardegna',
@@ -71,7 +74,11 @@ export async function POST(req: NextRequest) {
   }
 
   // ─── SPEDIZIONE PROPRIA DEL MASTER → tariffe da LISTINO CORRIERE ───
-  const isProprio = utente?.ruolo !== 'cliente' && body.clienteId === '__proprio__'
+  // L'AGENTE E' FUORI: qui i prezzi arrivano dal Listino Corrieri, cioe' quanto paga il master al
+  // corriere. La pagina gli nasconde la voce "spedizione propria" e la creazione lo blocca gia',
+  // ma la chiamata diretta no: confrontando questi prezzi con quelli del suo cliente ricavava il
+  // margine del master, corriere per corriere e destinazione per destinazione.
+  const isProprio = utente?.ruolo !== 'cliente' && (utente?.ruolo || '').toLowerCase() !== 'agente' && body.clienteId === '__proprio__'
   if (isProprio) {
     const masterIdP = utente!.master_id
     const colliP = Array.isArray(body.packages) && body.packages.length ? body.packages : [body.packages?.[0] || { weight: 1 }]
@@ -123,7 +130,7 @@ export async function POST(req: NextRequest) {
       if (dett.contrassegnoOltreMax || dett.assicurazioneOltreMax) continue
       const prezzoSpedP = dett.nolo + dett.fuel + dett.sponda
       risultati.push({
-        carrierCode: corr.tipo || 'sda', contractCode: '',
+        carrierCode: siglaContratto(corr.tipo) || 'sda', contractCode: '',
         weight_price: dett.nolo.toFixed(2), prezzo_spedizione: prezzoSpedP.toFixed(2),
         costo_sponda: dett.sponda.toFixed(2), costo_fuel: dett.fuel.toFixed(2), fuel: dett.fuel.toFixed(2),
         costo_contrassegno: dett.contrassegno.toFixed(2), costo_assicurazione: dett.assicurazione.toFixed(2),
@@ -131,7 +138,7 @@ export async function POST(req: NextRequest) {
         zona: isEsteroP ? (PAESI[paeseP] || paeseP) : (ZONE_MAP[provinciaP] || 'Italia'),
         peso_reale: pesoRealeP, peso_volume: (dett.peso_volume || 0).toFixed(2), peso_fatturato: (dett.peso_fatturato || pesoRealeP).toFixed(2),
         corriere_nome: corr.nome_contratto || 'Corriere', listino_fascia: 'Listino corriere', limiti_collo: descriviLimiti(corr.settings, pesoRealeP),
-        _corriere_tipo: corr.tipo, _corriere_id: corr.id,
+        _corriere_tipo: siglaContratto(corr.tipo), _corriere_id: corr.id,
       })
     }
     if (!risultati.length) return NextResponse.json({ error: 'Nessuna tariffa dal listino corriere per questa destinazione' }, { status: 400 })
@@ -337,7 +344,7 @@ export async function POST(req: NextRequest) {
           insuredAmount: body.insuranceValue ? euroToCents(body.insuranceValue) : undefined,
         })
         return {
-          carrierCode: 'spediamopro', contractCode: String(quote.service),
+          carrierCode: siglaContratto('spediamopro'), contractCode: String(quote.service),
           total_price: centsToEuro(quote.totalPrice || 0).toFixed(2),
           weight_price: centsToEuro(quote.totalPrice || 0).toFixed(2),
           corriere_id: corriere.id, corriere_tipo: 'spediamopro',
@@ -516,7 +523,7 @@ export async function POST(req: NextRequest) {
     const sponda = calcolaSponda(corriereId, pesoPerFascia)
     const prezzoSped = nolo + costoFuel + sponda
     risultati.push({
-      carrierCode: corriere?.tipo || 'sda',
+      carrierCode: siglaContratto(corriere?.tipo) || 'sda',
       contractCode: '',
       weight_price: nolo.toFixed(2),
       prezzo_spedizione: prezzoSped.toFixed(2),
@@ -535,7 +542,7 @@ export async function POST(req: NextRequest) {
       limiti_collo: descriviLimiti(settsC, pesoReale),   // indicazione limiti collo (scaglione applicabile al peso)
       listino_fascia: `fino a ${fasciaGiusta.peso_max}kg`,
       accessori_disponibili: accessoriPerCorriere.get(corriereId) || [],
-      _corriere_tipo: corriere?.tipo,
+      _corriere_tipo: siglaContratto(corriere?.tipo),
       _corriere_id: corriere?.id,
       // NON esporre la quotazione SpediamoPro: contiene totalPrice/priceBreakdown = il COSTO REALE
       // che paga il master (info riservata). La creazione ri-quota da sola, quindi qui non serve.

@@ -7,6 +7,9 @@ import { spediamoproSearchStocks, spediamoproReleaseStock } from '@/lib/spediamo
 import { erroreSvincoloPulito } from '@/lib/errore-corriere'
 import { registraMovimento } from '@/lib/movimenti'
 import { addebitaServizioGiacenza } from '@/lib/giacenza-cascata'
+// Il calcolo dei prezzi giacenza vive in lib/giacenza-prezzi.ts: lo usa anche l'API pubblica,
+// che prima registrava le richieste con costo zero.
+import { chiaveServizio, prezziVuoti, leggiPrezzi, leggiPrezziDaListino, calcolaCosti, noloBase } from '@/lib/giacenza-prezzi'
 
 // Gestione di una singola giacenza (dettaglio "Gestisci").
 // Flusso a due attori: il cliente sceglie l'operazione (riconsegna / riconsegna a
@@ -15,43 +18,9 @@ import { addebitaServizioGiacenza } from '@/lib/giacenza-cascata'
 
 type Ctx = { admin: any; sped: any; ruolo: 'cliente' | 'master'; agente?: boolean; masterId?: string; clienteId?: string; listinoAgenteId?: string | null; nomeUtente: string }
 
-// Mappa i nomi dei servizi giacenza del listino sulle 3 operazioni
-function chiaveServizio(nome: string): string | null {
-  const n = (nome || '').toLowerCase()
-  if (n.includes('nuovo')) return 'riconsegna_nuovo'
-  if (n.includes('reso')) return 'reso'
-  if (n.includes('riconsegna')) return 'riconsegna'
-  return null
-}
 
-const prezziVuoti = () => ({ apertura: 0, servizi: { riconsegna: { valore: 0, perc: 0 }, riconsegna_nuovo: { valore: 0, perc: 0 }, reso: { valore: 0, perc: 100 } } } as any)
 
-// Legge i prezzi giacenza da un listino CLIENTE (o agente, che è un listino cliente assegnato).
-async function leggiPrezziDaListino(admin: any, listinoId: string | null | undefined, corriereId: string | null) {
-  const out = prezziVuoti()
-  if (!listinoId) return out
-  let q = admin.from('listini_clienti_supplementi').select('tipo,nome,valore,descrizione,corriere_id').eq('listino_id', listinoId).in('tipo', ['giacenza', 'giacenza_apertura'])
-  if (corriereId) q = q.eq('corriere_id', corriereId)
-  const { data: suppl } = await q.order('id', { ascending: true })   // duplicati: vince il primo, come sopra
-  let aperturaSet = false
-  const servizioSet: Record<string, boolean> = {}
-  for (const s of (suppl || [])) {
-    if (s.tipo === 'giacenza_apertura') { if (!aperturaSet) { out.apertura = Number(s.valore) || 0; aperturaSet = true } continue }
-    const k = chiaveServizio(s.nome)
-    if (!k || servizioSet[k]) continue
-    let perc = 0
-    try { perc = Number(JSON.parse(s.descrizione || '{}')?.perc) || 0 } catch { /* descrizione non JSON */ }
-    out.servizi[k] = { valore: Number(s.valore) || 0, perc }
-    servizioSet[k] = true
-  }
-  return out
-}
 
-// Legge i prezzi giacenza dal listino del cliente della spedizione (prezzo CLIENTE).
-async function leggiPrezzi(admin: any, sped: any) {
-  const { data: cliente } = await admin.from('clienti').select('listino_cliente_id').eq('id', sped.cliente_id).maybeSingle()
-  return leggiPrezziDaListino(admin, cliente?.listino_cliente_id, sped.corriere_id)
-}
 
 // Prezzi giacenza dal LISTINO CORRIERE del master (quello che paga il master).
 async function leggiPrezziMaster(admin: any, corriereId: string | null) {
@@ -85,22 +54,7 @@ async function leggiPrezziMaster(admin: any, corriereId: string | null) {
   return out
 }
 
-// Nolo base del cliente senza assicurazione (le commissioni assicurazione/contrassegno
-// NON entrano nel calcolo del reso)
-function noloBase(sped: any) {
-  return Math.max(0, (Number(sped.costo_totale) || 0) - (Number(sped.assicurazione) || 0))
-}
 
-// Costi dell'operazione di SVINCOLO = SOLO il servizio scelto (riconsegna/reso/…).
-// L'apertura giacenza è addebitata a parte all'ENTRATA in giacenza (dal cron), quindi NON entra
-// nel totale dell'operazione di svincolo. costo_apertura resta come info (già addebitata).
-function calcolaCosti(operazione: string, prezzi: any, sped: any) {
-  const base = noloBase(sped)
-  const serv = prezzi.servizi[operazione] || { valore: 0, perc: 0 }
-  const costoServizio = (Number(serv.valore) || 0) + ((Number(serv.perc) || 0) / 100) * base
-  const costoApertura = operazione === 'reso' ? 0 : (Number(prezzi.apertura) || 0)
-  return { costo_apertura: +costoApertura.toFixed(2), costo_servizio: +costoServizio.toFixed(2), costo_totale: +costoServizio.toFixed(2) }
-}
 
 async function contesto(req: NextRequest, id: string): Promise<Ctx | NextResponse> {
   const supabase = await createServerSupabase()

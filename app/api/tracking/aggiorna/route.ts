@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { spediamoproGetTracking, spediamoproSearchStocks, mapStatoSpediamopro, spediamoproGetLabel, normalizzaEtichetta } from '@/lib/spediamopro'
 import { spedisciTrackingStati, mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
@@ -10,7 +11,8 @@ export const maxDuration = 300
 // CRON (ogni 4h): aggiorna lo stato delle spedizioni ancora "attive" leggendo il tracking
 // dai corrieri. SpediamoPro: mappa lo status 0-13; lo status 11 (eccezione) → controlla gli
 // stock: se c'è uno stock attivo → in_giacenza, altrimenti non_consegnato.
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const _cron = bloccaCronNonAutorizzato(req); if (_cron) return _cron
   const admin = createAdminSupabase()
 
   // Escludo anche gli stati di annullamento: il tracking NON deve sovrascrivere una spedizione

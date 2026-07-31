@@ -201,13 +201,20 @@ export async function GET(req: NextRequest) {
     if (prezzo_corriere == null && !calcAgente) prezzo_corriere = prezzo_cliente
     // Rettifica lato cliente = variazione di prezzo applicata (positivo = aumento, es. +5€).
     const rettifica = Math.round((-(sumRettCli.get(s.id) || 0)) * 100) / 100
+    // COSTO DEL MASTER FUORI DAL REPORT DELL'AGENTE. Lo spread `...s` porta con se' la colonna
+    // grezza costo_spedizione, e cli_nolo la ricopiava di proposito: entrambe dicono quanto paga
+    // il MASTER al corriere. Per l'agente il "Prezzo Corriere" e' il suo listino agente (calcAgente
+    // qui sopra), non il costo del master — che e' esattamente il dato che il commento a inizio
+    // rotta dichiara di non volergli dare.
+    const { costo_spedizione: _costoMaster, ...sPulita } = s
+    const base = calcAgente ? sPulita : s
     return {
-      ...s,
+      ...base,
       costo_totale: prezzo_cliente,          // "Prezzo Cliente" nel report (già comprensivo della rettifica)
       prezzo_corriere,                        // "Prezzo Corriere" (quello che pago io)
       rettifica,                              // colonna "Rettifica" (aumento/variazione di prezzo)
       dett_corriere: null,
-      cli_nolo: Number(s.costo_spedizione || 0),
+      cli_nolo: calcAgente ? (prezzo_corriere ?? 0) : Number(s.costo_spedizione || 0),
       cli_supplementi: 0,
     }
   })

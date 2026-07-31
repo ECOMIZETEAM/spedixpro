@@ -20,6 +20,20 @@ export async function autenticaApiKey(req: Request): Promise<ApiContext | null> 
     .eq('chiave', token)
     .maybeSingle()
   if (!data || data.attivo === false) return null
+
+  // IL CLIENTE DEVE ESSERE ANCORA ATTIVO.
+  // Il portale butta fuori a ogni pagina chi viene disattivato (di solito per morosita'), ma qui si
+  // guardava solo la riga della chiave: il cliente sospeso continuava a creare spedizioni via API,
+  // e la catena master veniva addebitata a ogni pacco mentre il master lo credeva fermo. Per
+  // bloccarlo davvero avrebbe dovuto revocare la chiave, che pero' si revoca solo dal portale del
+  // CLIENTE. Stessa cosa per il contratto: se il master lo spegne, non deve restare spendibile.
+  const [{ data: cli }, { data: cor }] = await Promise.all([
+    admin.from('clienti').select('attivo').eq('id', data.cliente_id).maybeSingle(),
+    admin.from('corrieri').select('attivo').eq('id', data.corriere_id).maybeSingle(),
+  ])
+  if (!cli || cli.attivo === false) return null
+  if (cor && cor.attivo === false) return null
+
   // aggiorna last_used_at senza bloccare la risposta
   admin.from('api_keys').update({ last_used_at: new Date().toISOString() }).eq('id', data.id).then(() => {}, () => {})
   return { clienteId: data.cliente_id, masterId: data.master_id, corriereId: data.corriere_id, keyId: data.id }

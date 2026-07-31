@@ -1,8 +1,61 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 
+// SCRITTURE CONSENTITE ALL'AGENTE.
+// L'agente e' di sola lettura, ma alcune rotte usano POST per LEGGERE (preventivi, esportazioni,
+// stampe) e una — la creazione spedizione per i SUOI clienti — gli spetta davvero. Tutto il resto
+// e' vietato; le rotte qui elencate hanno gia' dentro i propri controlli di perimetro.
+const SCRITTURE_AGENTE = [
+  '/api/reports/',                    // generazione ed export dei report che puo' scaricare
+  '/api/spedizioni/crea',             // spedizione per un suo cliente (la rotta verifica che sia suo)
+  '/api/spedizioni/tariffe',          // preventivo: e' una lettura fatta in POST
+  '/api/spedizioni/etichetta',        // stampa LDV
+  '/api/spedizioni/etichette-bulk',   // stampa massiva
+  '/api/spedizioni/tracking',         // consultazione tracking
+  '/api/moovy/',                      // assistente (ha i suoi limiti dentro)
+  '/api/auth/',                       // uscita/sessione
+]
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // AGENTE: nessuna scrittura, su NESSUNA rotta.
+  //
+  // Il confinamento dell'agente era rotta per rotta (lib/agente.ts, bloccaAgente): funziona dove
+  // qualcuno si e' ricordato di metterlo, cioe' su 46 rotte su 210. Sulle altre l'agente — che
+  // e' un rivenditore esterno, non staff — poteva riscrivere il listino d'acquisto del master,
+  // spostare i CAP delle zone (e quindi i prezzi di tutti i clienti), accreditarsi credito,
+  // cambiare l'IBAN del master e persino rifarsi i permessi da solo. Una dimenticanza su una
+  // rotta nuova ricreerebbe il buco.
+  // Qui il divieto e' UNO, sta davanti a tutte le rotte, e vale anche per quelle che nasceranno.
+  // Costa una query solo sulle scritture di chi ha una sessione: le letture e le chiamate con
+  // api key (/api/v1, autenticate diversamente) non toccano il database.
+  if (pathname.startsWith('/api/')) {
+    const scrittura = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS'
+    const consentita = SCRITTURE_AGENTE.some(p => pathname.startsWith(p))
+    const conSessione = req.cookies.getAll().some(c => c.name.startsWith('sb-'))
+    if (!scrittura || consentita || !conSessione) return NextResponse.next()
+
+    const risposta = NextResponse.next({ request: { headers: req.headers } })
+    const sb = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() { return req.cookies.getAll() },
+          setAll(cookiesToSet) { cookiesToSet.forEach(({ name, value, options }) => risposta.cookies.set(name, value, options)) },
+        },
+      }
+    )
+    const { data: { user } } = await sb.auth.getUser()
+    if (!user) return risposta
+    const { data: u } = await sb.from('utenti').select('ruolo').eq('id', user.id).single()
+    if ((u?.ruolo || '').toLowerCase() === 'agente') {
+      return NextResponse.json({ error: 'Operazione non consentita: gli agenti hanno accesso in sola lettura.' }, { status: 403 })
+    }
+    return risposta
+  }
 
   // Le due pagine di ACCESSO. Restano aperte a chi non ha sessione (senza questa esenzione si
   // creava un loop di redirect aprendo l'app da Shopify), ma chi e' GIA' dentro non deve
@@ -89,5 +142,7 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   // '/' incluso per mandare alla propria dashboard chi e' gia' dentro e riapre il modulo di accesso.
-  matcher: ['/', '/dashboard/:path*', '/cliente/:path*'],
+  // '/api/:path*' serve al blocco delle scritture dell'agente qui sopra: la funzione esce subito
+  // (senza toccare il database) su tutto cio' che non e' una scrittura con sessione.
+  matcher: ['/', '/dashboard/:path*', '/cliente/:path*', '/api/:path*'],
 }
