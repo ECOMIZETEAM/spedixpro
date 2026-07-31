@@ -20,13 +20,20 @@ export type StatoPiano = {
   limite: number         // 0 = nessun limite (il master principale, o chi non ha ancora un piano)
   perc: number           // 0-999
   avviso: boolean        // dal 90% in su
-  bloccato: boolean      // io o qualcuno sopra di me e' oltre il limite
-  bloccatoDaMe: boolean  // il limite sfondato e' il MIO (quindi l'upgrade lo posso fare io)
+  bloccato: boolean      // io o qualcuno sopra di me e' fermo: limite sfondato o canone non pagato
+  bloccatoDaMe: boolean  // il motivo del blocco e' MIO (quindi lo posso risolvere io)
+  motivo: 'limite' | 'pagamento' | null
+  giorniPerPagare: number | null   // giorni che restano prima del congelamento (solo per me)
 }
 
 export const NESSUN_LIMITE: StatoPiano = {
   usato: 0, limite: 0, perc: 0, avviso: false, bloccato: false, bloccatoDaMe: false,
+  motivo: null, giorniPerPagare: null,
 }
+
+// Giorni di tolleranza fra il canone non riuscito e il congelamento. Una carta scaduta o una banca
+// che chiede conferma capitano: fermare una rete al primo tentativo fallito sarebbe sproporzionato.
+export const GIORNI_TOLLERANZA = 3
 
 // `admin` deve essere un client con service_role: il contatore e la funzione non sono leggibili
 // dagli utenti (il nome del master che blocca non deve mai arrivare a chi sta sotto).
@@ -39,19 +46,39 @@ export async function statoPiano(admin: any, masterId: string | null | undefined
     console.error('[PIANO] lettura limiti fallita', masterId, error.message)
     return NESSUN_LIMITE
   }
-  const righe = (data || []) as { master_id: string; nome: string; limite: number; usato: number; livello: number }[]
+  const righe = (data || []) as {
+    master_id: string; nome: string; limite: number; usato: number; livello: number
+    congelato: boolean; scaduto_dal: string | null
+  }[]
   const mio = righe.find(r => r.livello === 0)
   // Limite 0/assente = nessun limite: il master principale non ce l'ha, e chi non ha ancora scelto
   // un piano e' gia' fermato dalla schermata di scelta piano, non serve fermarlo anche qui.
   const oltre = righe.filter(r => Number(r.limite) > 0 && Number(r.usato) >= Number(r.limite))
+  // CONGELATI: canone non pagato oltre i giorni di tolleranza. Vale la stessa regola del limite —
+  // ferma se stesso e tutta la rete sotto, mai quelli sopra.
+  const congelati = righe.filter(r => r.congelato)
   const limite = Number(mio?.limite || 0)
   const usato = Number(mio?.usato || 0)
+
+  // Quanto manca al congelamento, per l'avviso: si conta solo il MIO, non quello di chi sta sopra
+  // (a lui non posso rimediare io, e non deve nemmeno sapere che esiste).
+  let giorniPerPagare: number | null = null
+  if (mio?.scaduto_dal && !mio.congelato) {
+    const passati = (Date.now() - new Date(mio.scaduto_dal).getTime()) / 86400000
+    giorniPerPagare = Math.max(0, Math.ceil(GIORNI_TOLLERANZA - passati))
+  }
+
+  const bloccatoDaMe = oltre.some(r => r.livello === 0) || !!mio?.congelato
   return {
     usato, limite,
     perc: limite > 0 ? Math.min(999, Math.round((usato / limite) * 100)) : 0,
-    avviso: limite > 0 && usato >= limite * 0.9,
-    bloccato: oltre.length > 0,
-    bloccatoDaMe: oltre.some(r => r.livello === 0),
+    avviso: (limite > 0 && usato >= limite * 0.9) || giorniPerPagare !== null,
+    bloccato: oltre.length > 0 || congelati.length > 0,
+    bloccatoDaMe,
+    // Se sono fermo per entrambe le ragioni, quella da risolvere prima e' il pagamento: senza
+    // canone in regola non si puo' nemmeno fare l'upgrade.
+    motivo: congelati.length ? 'pagamento' : (oltre.length ? 'limite' : null),
+    giorniPerPagare,
   }
 }
 
@@ -60,6 +87,10 @@ export async function statoPiano(admin: any, masterId: string | null | undefined
 // non sono affari di chi gli sta sotto. Si dice solo di rivolgersi al proprio referente.
 export function messaggioBlocco(stato: StatoPiano, puoFareUpgrade: boolean): string {
   if (stato.bloccatoDaMe && puoFareUpgrade) {
+    if (stato.motivo === 'pagamento') {
+      return 'Il canone non risulta pagato: l\'account è sospeso. Aggiorna il metodo di pagamento da '
+        + 'Abbonamento e tutto riparte da solo, anche per i tuoi clienti.'
+    }
     return `Hai raggiunto il limite del tuo piano (${stato.limite.toLocaleString('it-IT')} spedizioni al mese): `
       + 'passa a un piano superiore da Abbonamento per riprendere subito a spedire.'
   }

@@ -42,7 +42,15 @@ export default function BannerPiano({ linkUpgrade = null }: { linkUpgrade?: stri
       <span style={{ fontSize: '15px' }}>{rosso ? '⛔' : '⚠️'}</span>
       <div style={{ flex: 1, minWidth: '220px' }}>
         {bloccato ? (
-          <><strong>Spedizioni sospese.</strong> {s.messaggio}</>
+          <><strong>{s.motivo === 'pagamento' ? 'Account sospeso.' : 'Spedizioni sospese.'}</strong> {s.messaggio}</>
+        ) : s.giorniPerPagare !== null ? (
+          <>
+            <strong>Canone non riuscito.</strong>{' '}
+            {s.giorniPerPagare > 0
+              ? <>Hai <strong>{s.giorniPerPagare} {s.giorniPerPagare === 1 ? 'giorno' : 'giorni'}</strong> per sistemare il pagamento.</>
+              : <>Il pagamento va sistemato <strong>oggi</strong>.</>}
+            {' '}Dopo, le spedizioni si fermano — anche per i tuoi clienti e i tuoi sotto-master.
+          </>
         ) : (
           <>
             <strong>Stai per esaurire il piano.</strong>{' '}
@@ -51,7 +59,7 @@ export default function BannerPiano({ linkUpgrade = null }: { linkUpgrade?: stri
             {' '}Al 100% le spedizioni si fermano, anche per la tua rete.
           </>
         )}
-        {typeof s.perc === 'number' && s.limite > 0 && (
+        {typeof s.perc === 'number' && s.limite > 0 && s.motivo !== 'pagamento' && s.giorniPerPagare === null && (
           <div style={{ marginTop: '7px', height: '5px', borderRadius: '3px', background: rosso ? '#fee2e2' : '#ffedd5', overflow: 'hidden' }}>
             <div style={{ width: `${Math.min(100, s.perc)}%`, height: '100%', background: rosso ? '#dc2626' : '#f97316' }} />
           </div>
@@ -61,7 +69,7 @@ export default function BannerPiano({ linkUpgrade = null }: { linkUpgrade?: stri
         <a href={linkUpgrade} style={{
           background: rosso ? '#b91c1c' : '#f97316', color: '#fff', textDecoration: 'none',
           borderRadius: '6px', padding: '7px 14px', fontSize: '13px', fontWeight: 700, whiteSpace: 'nowrap',
-        }}>Passa a un piano superiore</a>
+        }}>{s.motivo === 'pagamento' || s.giorniPerPagare !== null ? 'Sistema il pagamento' : 'Passa a un piano superiore'}</a>
       )}
     </div>
   )

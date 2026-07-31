@@ -30,6 +30,7 @@ export async function GET() {
   return NextResponse.json({
     usato: stato.usato, limite: stato.limite, perc: stato.perc,
     avviso: stato.avviso, bloccato: stato.bloccato, bloccatoDaMe: stato.bloccatoDaMe,
+    motivo: stato.motivo, giorniPerPagare: stato.giorniPerPagare,
     messaggio: stato.bloccato ? messaggioBlocco(stato, true) : null,
   })
 }

@@ -120,24 +120,32 @@ export async function POST(req: NextRequest) {
           metodo: 'carta', stripe_invoice_id: inv.id,
         }, { onConflict: 'stripe_invoice_id' })
         // Canone del mese gia' assolto: il rinnovo automatico interno non deve riaddebitarlo.
-        await admin.from('masters').update({ abbonamento_mese: meseCorrente(), stripe_stato: 'active' }).eq('id', m.id)
+        // E il conto alla rovescia si azzera: il pagamento e' entrato, la rete riparte da sola.
+        await admin.from('masters').update({
+          abbonamento_mese: meseCorrente(), stripe_stato: 'active', pagamento_scaduto_dal: null,
+        }).eq('id', m.id)
         break
       }
 
       // ── Pagamento non riuscito: il circuito riprovera' da solo ────────────
-      case 'invoice.payment_failed': {
-        const m = await masterDi(evento.data.object)
-        if (m) await admin.from('masters').update({ stripe_stato: 'past_due' }).eq('id', m.id)
-        break
-      }
-
-      // ── Serve una conferma della banca (3D Secure) ────────────────────────
-      // Sulle carte europee capita ai rinnovi: l'addebito non fallisce, resta in attesa che il
-      // titolare confermi. Va distinto da un pagamento fallito, perche' la cosa da fare e' diversa:
-      // li' si cambia carta, qui si apre la mail del circuito e si conferma.
+      //
+      // In entrambi i casi parte il conto alla rovescia verso il congelamento. La data di partenza
+      // si scrive UNA volta sola: il circuito riprova piu' volte e ogni tentativo fallito manda un
+      // evento — riscriverla a ogni colpo sposterebbe sempre piu' in la' il congelamento, che non
+      // arriverebbe mai. Per questo l'aggiornamento della data e' separato e condizionato.
+      case 'invoice.payment_failed':
       case 'invoice.payment_action_required': {
         const m = await masterDi(evento.data.object)
-        if (m) await admin.from('masters').update({ stripe_stato: 'conferma_richiesta' }).eq('id', m.id)
+        if (m) {
+          // 'past_due' = la carta ha detto no, va cambiata.
+          // 'conferma_richiesta' = la banca chiede al titolare di confermare (3D Secure): la carta
+          // e' buona, manca un clic. Sono due cose diverse e la schermata le dice in modo diverso.
+          const stato = evento.type === 'invoice.payment_failed' ? 'past_due' : 'conferma_richiesta'
+          await admin.from('masters').update({ stripe_stato: stato }).eq('id', m.id)
+          await admin.from('masters')
+            .update({ pagamento_scaduto_dal: new Date().toISOString() })
+            .eq('id', m.id).is('pagamento_scaduto_dal', null)
+        }
         break
       }
 
@@ -148,6 +156,7 @@ export async function POST(req: NextRequest) {
           stripe_subscription_id: null, stripe_stato: 'canceled',
           abbonamento_piano: null, abbonamento_limite: null, abbonamento_prezzo: null,
           abbonamento_piano_programmato: null, abbonamento_programmato_dal: null,
+          pagamento_scaduto_dal: null,
         }).eq('id', m.id)
         break
       }
