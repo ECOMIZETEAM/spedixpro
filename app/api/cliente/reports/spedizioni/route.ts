@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
+import { SPED_COLS_CLIENTE } from '@/lib/spedizioni-cols'
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -16,7 +17,11 @@ export async function GET(req: NextRequest) {
   const provincia = p.get('provincia')
   const buildBase = () => {
     let q = supabase.from('spedizioni')
-      .select('*, clienti(ragione_sociale)')
+      // MAI select('*') su una tabella che il cliente legge: mandava al browser anche
+      // costo_spedizione (il costo del MASTER, quindi il suo guadagno), raw_response (dati del
+      // provider) e etichetta_url (154 kB di PDF per riga). La pagina non li mostrava, ma
+      // bastava aprire gli strumenti per sviluppatori.
+      .select(`${SPED_COLS_CLIENTE}, clienti(ragione_sociale)`)
       .eq('cliente_id', clienteId)
       .order('created_at', { ascending: false })
     if (stato) q = q.eq('stato', stato)

@@ -434,6 +434,14 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // COSTO DEL MASTER FUORI DALLA RISPOSTA AL CLIENTE. `costo_spedizione` e' quanto il master paga
+  // al corriere: la differenza con `costo_totale` e' il suo guadagno. La pagina del cliente non lo
+  // mostra, ma finiva comunque nel browser e bastava aprire gli strumenti per sviluppatori.
+  // Si toglie QUI, in fondo, per non toccare i calcoli intermedi che se ne servono.
+  if ((utente?.ruolo || '').toLowerCase() === 'cliente') {
+    rowsOut = (rowsOut || []).map((r: any) => { const { costo_spedizione, ...resto } = r; return resto })
+  }
+
   if (paged) return NextResponse.json({ rows: rowsOut, total: totalePaginato, page: pageParam, perPage })
   return NextResponse.json(rowsOut)
 }
