@@ -18,14 +18,22 @@ export default function PrivacyPage() {
     <div style={{ background: '#fff', minHeight: '100vh' }}>
       <div style={box}>
         <h1 style={h1}>Privacy Policy</h1>
-        <div style={small}>MoovExpress — Ultimo aggiornamento: 1 luglio 2026</div>
+        <div style={small}>MoovExpress — Ultimo aggiornamento: 31 luglio 2026</div>
 
         <h2 style={h2}>1. Titolare del trattamento</h2>
         <p style={p}>
-          Il titolare del trattamento dei dati è <strong>E&amp;A MULTIEXPRESS</strong>, P.IVA 04795080615,
-          con sede in Via Alcide De Gasperi 90, Santa Maria Capua Vetere (CE), Italia.
+          Il titolare del trattamento dei dati è <strong>E.M EXPRESS LTD</strong>, società di diritto inglese
+          registrata presso la Companies House di Cardiff con numero <strong>16889294</strong>, con sede legale in
+          71-75 Shelton Street, London WC2H 9JQ, Regno Unito.
           Per qualsiasi richiesta relativa alla privacy è possibile scrivere a{' '}
-          <a href="mailto:ecomizelogistics@gmail.com" style={{ color: '#f97316' }}>ecomizelogistics@gmail.com</a>.
+          <a href="mailto:privacy@moovexpress.com" style={{ color: '#f97316' }}>privacy@moovexpress.com</a>.
+        </p>
+        <p style={p}>
+          MoovExpress è il servizio gestito da E.M EXPRESS LTD. I dati trattati attraverso la piattaforma
+          riguardano utenti e destinatari situati nello Spazio Economico Europeo: il trasferimento verso il
+          Regno Unito avviene sulla base della decisione di adeguatezza adottata dalla Commissione europea
+          il 28 giugno 2021 ai sensi dell'art. 45 del Regolamento (UE) 2016/679, che riconosce al Regno Unito
+          un livello di protezione dei dati adeguato.
         </p>
 
         <h2 style={h2}>2. Cosa fa MoovExpress</h2>
@@ -74,7 +82,7 @@ export default function PrivacyPage() {
         <p style={p}>
           Gli interessati possono esercitare i diritti previsti dal GDPR (accesso, rettifica, cancellazione,
           limitazione, opposizione, portabilità) scrivendo a{' '}
-          <a href="mailto:ecomizelogistics@gmail.com" style={{ color: '#f97316' }}>ecomizelogistics@gmail.com</a>.
+          <a href="mailto:privacy@moovexpress.com" style={{ color: '#f97316' }}>privacy@moovexpress.com</a>.
         </p>
 
         <h2 style={h2}>8. Richieste dati e cancellazione (Shopify)</h2>
@@ -92,8 +100,8 @@ export default function PrivacyPage() {
         </p>
 
         <p style={{ ...small, marginTop: '32px' }}>
-          Per contatti: E&amp;A MULTIEXPRESS · Via Alcide De Gasperi 90, Santa Maria Capua Vetere (CE) ·
-          P.IVA 04795080615 · ecomizelogistics@gmail.com
+          Per contatti: E.M EXPRESS LTD · 71-75 Shelton Street, London WC2H 9JQ, United Kingdom ·
+          Company number 16889294 · privacy@moovexpress.com
         </p>
       </div>
     </div>
