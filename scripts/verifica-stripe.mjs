@@ -48,7 +48,7 @@ for (const p of PIANI) {
   const pr = l.data[0]
   if (!pr) { console.log(`  ${p.padEnd(18)} non ancora creato (nasce alla prima attivazione)`); continue }
   creati++
-  const iva = pr.tax_behavior === 'inclusive' ? 'IVA compresa' : pr.tax_behavior === 'exclusive' ? '⚠️ IVA DA AGGIUNGERE' : '⚠️ non specificato'
+  const iva = pr.tax_behavior === 'inclusive' ? 'prezzo finito' : pr.tax_behavior === 'exclusive' ? '⚠️ QUALCOSA SI AGGIUNGE AL PREZZO' : '⚠️ non specificato'
   console.log(`  ${p.padEnd(18)} € ${(pr.unit_amount / 100).toFixed(2)} / ${pr.recurring?.interval}   ${iva}`)
 }
 if (!creati) console.log('  (nessun prezzo ancora: si creano da soli alla prima attivazione di un piano)')
@@ -56,7 +56,7 @@ if (!creati) console.log('  (nessun prezzo ancora: si creano da soli alla prima 
 console.log('\n── Aliquota IVA ──')
 const tr = await s.taxRates.list({ active: true, limit: 100 })
 const ita = tr.data.filter(t => t.country === 'IT')
-if (!ita.length) console.log('  nessuna (si crea da sola alla prima attivazione)')
+if (!ita.length) console.log('  nessuna — corretto: la societa\' che fattura e\' estera, si applica l\'inversione contabile')
 for (const t of ita) console.log(`  ${t.percentage}% ${t.inclusive ? 'compresa nel prezzo' : 'da aggiungere al prezzo'} — ${t.display_name}`)
 
 console.log('\n── Webhook registrati ──')

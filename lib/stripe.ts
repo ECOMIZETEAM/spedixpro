@@ -15,14 +15,20 @@ import { pianoById, type Piano } from '@/lib/piani'
 // comporta esattamente come oggi. Nessuna schermata cambia, nessun addebito parte.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// I prezzi dei piani (139 €, 230 € …) sono PREZZI FINITI: l'IVA e' gia' dentro. Alla cassa il
-// master paga esattamente quella cifra — non 139 + 22%.
+// IVA: ZERO, e non e' una dimenticanza.
 //
-// L'aliquota resta dichiarata lo stesso, ma come IVA COMPRESA: cosi' la fattura che il circuito
-// emette scorpora imponibile e imposta (139 € = 113,93 + 25,07) come dev'essere, senza che il
-// totale cambi di un centesimo. Mettere 0 farebbe pagare la stessa cifra ma emetterebbe una
-// fattura senza IVA, che non e' la stessa cosa.
-export const IVA_PERCENTUALE = 22
+// La societa' che fattura i canoni e' ESTERA (UK), non italiana. Per una prestazione di servizi a
+// un'azienda italiana l'imposta si assolve nel paese del CLIENTE con l'inversione contabile: la
+// fattura esce senza IVA e la versa il destinatario. Aggiungere il 22% qui vorrebbe dire incassare
+// un'imposta che non e' dovuta e che non si potrebbe versare a nessuno.
+//
+// Il master paga quindi esattamente il prezzo del piano: 139 €, senza nulla sopra.
+// Per questo alla cassa si chiede la PARTITA IVA (tax_id_collection): l'inversione contabile vale
+// fra soggetti d'imposta, e il numero del cliente e' cio' che la rende legittima.
+//
+// Se un giorno a fatturare fosse una societa' italiana, qui si rimette 22 con IVA_COMPRESA a true:
+// il totale pagato non cambierebbe (139 resta 139), cambierebbe solo lo scorporo in fattura.
+export const IVA_PERCENTUALE = 0
 export const IVA_COMPRESA = true
 
 export function stripeConfigurato(): boolean {
