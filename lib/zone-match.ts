@@ -189,11 +189,33 @@ export function isZonaDisagiata(nome: string | null | undefined): boolean {
 // "Italia" a prezzo pieno (verrebbe venduto sotto costo). Ritorna le coppie {zona, corriere}: la
 // zona va tra le candidate (per caricare le righe) e nella mappa esclCorr (esclusione PER-CORRIERE).
 // NB: NON vanno messe nella mappa zona->corriere di MATCH, così non creano tariffe "gratis".
-export async function zoneEsclusiveMaster(supabase: any, corriereIds: string[]): Promise<Array<{ id: string; corriere_id: string }>> {
+export async function zoneEsclusiveMaster(
+  supabase: any, corriereIds: string[], cap?: string | null
+): Promise<Array<{ id: string; corriere_id: string }>> {
   const ids = Array.from(new Set((corriereIds || []).filter(Boolean)))
   if (!ids.length) return []
+  const out = new Map<string, string>()
+
   const { data } = await supabase.from('zone').select('id,nome,corriere_id').in('corriere_id', ids)
-  return (data || []).filter((z: any) => isZonaEsclusiva((z as any).nome)).map((z: any) => ({ id: (z as any).id, corriere_id: (z as any).corriere_id }))
+  for (const z of (data || [])) if (isZonaEsclusiva((z as any).nome)) out.set((z as any).id, (z as any).corriere_id)
+
+  // REGOLA UNIVERSALE: se una zona elenca ESPLICITAMENTE questo CAP, per quella destinazione vale
+  // quella zona e nessun'altra — come si chiami la zona non conta.
+  //
+  // Prima l'esclusione dipendeva dal NOME ("disagiate", "isole minori", "sardegna"…): una zona
+  // chiamata "Zona 3" non era riconosciuta, e una destinazione che il corriere fa pagare di piu'
+  // ripiegava sul jolly "Italia" a prezzo base. Ma chi si prende la briga di elencare un CAP per
+  // nome dentro una zona sta dicendo esattamente questo: per quel CAP vale QUESTA zona. Se il
+  // listino non la prezza, il corriere non copre la destinazione — e ne comparira' un altro che
+  // quella zona ce l'ha.
+  const c = String(cap || '').trim()
+  if (c) {
+    const { data: perCap } = await supabase.from('zone')
+      .select('id,corriere_id, zone_cap!inner(cap)')
+      .in('corriere_id', ids).eq('zone_cap.cap', c)
+    for (const z of (perCap || [])) out.set((z as any).id, (z as any).corriere_id)
+  }
+  return Array.from(out, ([id, corriere_id]) => ({ id, corriere_id }))
 }
 
 // Regola DISAGIATA (per-corriere): restituisce, per i corrieri indicati, la zona disagiata del

@@ -427,7 +427,7 @@ export async function POST(req: NextRequest) {
   // ANCHE se il cliente non ha la fascia speciale → il corriere senza quella fascia NON compare
   // (verrebbe venduto sotto costo come "Italia"), e comparirà un altro corriere che ha la zona.
   const corrIdsListino = Array.from(new Set(fasce.map((f: any) => (f.corrieri as any)?.id).filter(Boolean)))
-  const esclMaster = await zoneEsclusiveMaster(supabase, corrIdsListino)
+  const esclMaster = await zoneEsclusiveMaster(supabase, corrIdsListino, capDest)
   // Mappa zona_id -> corriere_id delle zone ESCLUSIVE: le fasce esclusive del cliente + le zone
   // esclusive del MASTER (così l'esclusione scatta anche se il cliente non ha la fascia speciale).
   // L'esclusione dal jolly "Italia" è PER-CORRIERE: un CAP disagiato per BRT NON tocca Poste.

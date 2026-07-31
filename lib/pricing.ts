@@ -217,7 +217,7 @@ export async function calcolaPrezzoListino(
   // (niente vendita sotto costo). Senza questo, un CAP disagiato (es. 09038 in "Zone Disagiate")
   // ripiegava sulla fascia regionale (Sardegna) e si vendeva sotto costo.
   const corrIdsListino = Array.from(new Set<string>(fasce.map((f: any) => (f.corrieri as any)?.id).filter(Boolean)))
-  const esclMaster = await zoneEsclusiveMaster(supabase, corrIdsListino)
+  const esclMaster = await zoneEsclusiveMaster(supabase, corrIdsListino, params.cap)
   const candidateZonaIds = Array.from(new Set<string>([
     ...fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean),
     ...esclMaster.map((z) => z.id),
@@ -386,7 +386,7 @@ export async function calcolaPrezzoCorriereDettaglio(
   // Zone ESCLUSIVE del corriere (isole/disagiate/…), anche se questo listino NON le prezza: servono
   // a NON far cadere su "Italia" una destinazione esclusiva (es. 30126 disagiata) quando manca la
   // fascia speciale → il corriere semplicemente non copre quella destinazione (niente sotto-costo).
-  const esclZone = await zoneEsclusiveMaster(supabase, [corriereId])
+  const esclZone = await zoneEsclusiveMaster(supabase, [corriereId], params.cap)
   const esclCorr = new Map<string, string>()
   for (const z of esclZone) esclCorr.set(z.id, z.corriere_id)
   const zonaCorr = new Map<string, string>()
