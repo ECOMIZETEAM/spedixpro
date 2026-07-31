@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { autenticaApiKey } from '@/lib/api-auth'
+import { leggiEtichetta } from '@/lib/etichette'
 
 // Scarica l'etichetta (LDV) PDF della spedizione creata via API
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -9,16 +10,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params
   const admin = createAdminSupabase()
   const { data: s } = await admin.from('spedizioni')
-    .select('id,numero,etichetta_url,cliente_id').eq('id', id).maybeSingle()
+    .select('id,numero,etichetta_url,etichetta_path,raw_response,cliente_id').eq('id', id).maybeSingle()
   if (!s || s.cliente_id !== ctx.clienteId) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
-  const url = s.etichetta_url || ''
-  const m = /^data:([^;]+);base64,(.*)$/.exec(url)
-  if (!m) return NextResponse.json({ error: 'Etichetta non disponibile' }, { status: 404 })
-  const buf = Buffer.from(m[2], 'base64')
-  return new NextResponse(buf as any, {
+  // leggiEtichetta sa dove vive il PDF: il file su Storage per le spedizioni nuove, il base64 nella
+  // riga per quelle storiche. Qui si leggeva SOLO etichetta_url: appena una spedizione avra' il PDF
+  // su Storage, questa rotta risponderebbe "Etichetta non disponibile" a chi si integra via API.
+  const et = await leggiEtichetta(admin, s as any)
+  if (!et) return NextResponse.json({ error: 'Etichetta non disponibile' }, { status: 404 })
+  return new NextResponse(et.buffer as any, {
     headers: {
-      'Content-Type': m[1] || 'application/pdf',
-      'Content-Disposition': `attachment; filename="ldv_${s.numero || s.id}.pdf"`,
+      'Content-Type': et.mime,
+      'Content-Disposition': `attachment; filename="ldv_${s.numero || s.id}.${et.ext}"`,
     },
   })
 }

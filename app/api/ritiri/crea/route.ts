@@ -166,7 +166,7 @@ export async function POST(req: NextRequest) {
     }
 
     const fascia = fasciaOraria(body.orarioRitiro)
-    console.log('[RITIRO][SPEDIAMOPRO] shipments:', JSON.stringify(shipmentIds), 'courier:', courierCode, 'fascia:', JSON.stringify(fascia))
+    console.log('[RITIRO] spedizioni da ritirare:', shipmentIds.length, 'corriere:', courierCode, 'fascia:', JSON.stringify(fascia))
 
     try {
       const pk = await spediamoproCreatePickup(cred.authcode, {
@@ -191,7 +191,7 @@ export async function POST(req: NextRequest) {
       if (!codicePickup && pk.id) {
         codicePickup = await spediamoproWaitPickupCode(cred.authcode, pk.id)
       }
-      console.log('[RITIRO][SPEDIAMOPRO] pickup creato:', codicePickup, 'id:', pk.id)
+      console.log('[RITIRO] ritiro creato:', codicePickup, 'id:', pk.id)
 
       const { data: nuovoRitiro, error: insErr } = await salvaRitiro(codicePickup || String(pk.id), pk.id || null)
       if (insErr) {
@@ -199,7 +199,7 @@ export async function POST(req: NextRequest) {
       }
       return NextResponse.json({ id: nuovoRitiro.id, pickupId: pk.code || pk.id })
     } catch (e: any) {
-      console.log('[RITIRO][SPEDIAMOPRO] errore:', e?.message)
+      console.log('[RITIRO] errore dal corriere:', e?.message)
       return NextResponse.json({ error: erroreRitiroPulito(e) }, { status: 400 })
     }
   }
@@ -268,7 +268,10 @@ export async function POST(req: NextRequest) {
   if (body.istruzioni) payload.specialInstruction = body.istruzioni
   if (shipmentId) payload.shipmentId = shipmentId
 
-  console.log('[RITIRO] Payload pickup/create:', JSON.stringify(payload))
+  // Il payload NON si stampa: contiene nome, indirizzo e telefono del mittente, cioe' i dati
+  // personali di chi chiede il ritiro, e finirebbero nei log di produzione a ogni richiesta —
+  // mentre il giro notturno di anonimizzazione lavora per toglierli dal database.
+  console.log('[RITIRO] invio richiesta al corriere', { colli: payload?.packages?.length ?? '-', data: payload?.pickupDate ?? '-' })
   // Timeout: l'API del corriere a volte si appende. Senza limite la funzione va in 504 (Vercel)
   // dopo minuti; con AbortController torno un errore pulito e veloce, riprovabile.
   const ctrl = new AbortController()
@@ -287,7 +290,7 @@ export async function POST(req: NextRequest) {
   }
   clearTimeout(to)
   let text = await res.text()
-  console.log('[RITIRO] Risposta pickup/create status:', res.status, 'body:', text.substring(0, 500))
+  console.log('[RITIRO] risposta corriere status:', res.status)
 
   // Spedisci NON accetta piu' il ritiro IN GIORNATA ("PICKUP_DATE = today is no longer possible"):
   // riprovo in automatico col primo giorno LAVORATIVO utile, cosi' il ritiro parte comunque
@@ -298,7 +301,7 @@ export async function POST(req: NextRequest) {
     do { prossimo.setDate(prossimo.getDate() + 1) } while ([0, 6].includes(prossimo.getDay()))
     dataSpostata = prossimo.toISOString().slice(0, 10)
     payload.pickupDate = dataSpostata
-    console.log('[RITIRO] Ritiro in giornata rifiutato da Spedisci: riprovo per', dataSpostata)
+    console.log('[RITIRO] ritiro in giornata rifiutato dal corriere: riprovo per', dataSpostata)
     const ctrl2 = new AbortController()
     const to2 = setTimeout(() => ctrl2.abort(), 25000)
     try {
@@ -309,7 +312,7 @@ export async function POST(req: NextRequest) {
         signal: ctrl2.signal,
       })
       text = await res.text()
-      console.log('[RITIRO] Risposta retry pickup/create status:', res.status, 'body:', text.substring(0, 300))
+      console.log('[RITIRO] risposta corriere (secondo tentativo) status:', res.status)
       if (res.ok) body.dataRitiro = dataSpostata   // il ritiro salvato porta la data REALE
       else dataSpostata = null
     } catch {

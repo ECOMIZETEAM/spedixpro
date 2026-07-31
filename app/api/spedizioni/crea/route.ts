@@ -545,10 +545,12 @@ export async function POST(req: NextRequest) {
           annullata = del.ok
         }
       } catch {}
+      // Il testo del database (tabella, colonna, vincolo) resta nei log, non va all'utente.
+      console.error('[CREA][INSERT]', numero, insertError.message)
       return NextResponse.json({
         error: annullata
-          ? `Spedizione non registrata (errore DB) e annullata sul corriere. Riprova. Dettaglio: ${insertError.message}`
-          : `Errore DB e impossibile annullare sul corriere (rif. ${numero}): contatta l'assistenza. ${insertError.message}`,
+          ? 'Spedizione non registrata e annullata sul corriere: riprova.'
+          : `Spedizione non registrata e non annullabile sul corriere (rif. ${numero}): contatta l'assistenza indicando il riferimento.`,
         numero, annullataSuCorriere: annullata,
       }, { status: 500 })
     }
@@ -729,10 +731,11 @@ export async function POST(req: NextRequest) {
         // COMPENSAZIONE: se non riusciamo a registrarla noi, annulliamo la spedizione sul corriere
         // così non restano "orfane" (create sul corriere ma non su MoovExpress).
         const annullata = (await spediamoproCancelShipment(cred.authcode, shipment.id)).ok
+        console.error('[CREA][INSERT]', numeroFinale, insertError.message)
         return NextResponse.json({
           error: annullata
-            ? `Spedizione non registrata (errore DB) e annullata sul corriere. Riprova. Dettaglio: ${insertError.message}`
-            : `Errore DB e impossibile annullare sul corriere (rif. ${numeroFinale}): contatta l'assistenza. ${insertError.message}`,
+            ? 'Spedizione non registrata e annullata sul corriere: riprova.'
+            : `Spedizione non registrata e non annullabile sul corriere (rif. ${numeroFinale}): contatta l'assistenza indicando il riferimento.`,
           numero: numeroFinale, annullataSuCorriere: annullata,
         }, { status: 500 })
       }
@@ -1009,7 +1012,7 @@ export async function POST(req: NextRequest) {
         console.error('[CREA][EASYPARCEL][ORDINE ORFANO] ordine=%s ldv=%s cliente=%s master=%s errore=%s',
           ordine.idOrdine, ldv || '-', clienteId || '-', masterId, insertError.message)
         return NextResponse.json({
-          error: `Spedizione creata sul corriere (rif. ${numeroFinale}) ma non registrata a sistema, e questo corriere non consente l'annullo automatico. Contatta subito l'assistenza indicando il riferimento. Dettaglio: ${insertError.message}`,
+          error: `Spedizione creata sul corriere (rif. ${numeroFinale}) ma non registrata a sistema, e questo corriere non consente l'annullo automatico. Contatta subito l'assistenza indicando il riferimento.`,
           numero: numeroFinale, annullataSuCorriere: false,
         }, { status: 500 })
       }

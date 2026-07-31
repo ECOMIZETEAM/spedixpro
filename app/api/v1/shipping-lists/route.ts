@@ -28,29 +28,49 @@ export async function POST(req: NextRequest) {
   const totalePeso = righe.reduce((s: number, x: any) => s + Number(x.peso_reale || 0), 0)
   const prezzoTotale = righe.reduce((s: number, x: any) => s + Number(x.costo_totale || 0), 0)
 
-  // Numero progressivo distinta per il master
-  const { data: ultima } = await admin.from('distinte')
-    .select('numero').eq('master_id', ctx.masterId).order('created_at', { ascending: false }).limit(1).maybeSingle()
-  let numeroInt = 1000
-  if (ultima?.numero) { const n = parseInt(String(ultima.numero).replace(/\D/g, '')); if (!isNaN(n)) numeroInt = n }
-  const numeroDistinta = String(numeroInt + 1)
+  // NUMERO dalla sequenza del database, come tutte le altre chiusure (portale master, portale
+  // cliente, chiusura serale automatica). Qui invece si leggeva l'ultima distinta del master e si
+  // faceva +1: la sequenza non avanzava, quindi il numero inventato veniva RIEMESSO identico dalla
+  // chiusura successiva — e la distinta risale la rete, quindi il doppione lo vedono anche i master
+  // sopra. Due clienti che chiudono nello stesso istante ottenevano lo stesso numero.
+  const { data: numSeq } = await admin.rpc('prossimo_numero_distinta')
+  const numeroDistinta = String(numSeq || Date.now())
   const dataDistinta = (body.date && /^\d{4}-\d{2}-\d{2}$/.test(body.date)) ? body.date : new Date().toISOString().split('T')[0]
 
   const { data: distinta, error: insErr } = await admin.from('distinte').insert({
     master_id: ctx.masterId, cliente_id: ctx.clienteId, corriere_id: ctx.corriereId,
     numero: numeroDistinta, data: dataDistinta, stato: 'chiusa',
-    confermata_vettore: true, data_conferma: new Date().toISOString(),
     totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: righe.length, prezzo_totale: prezzoTotale,
   }).select('id').single()
-  if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 })
+  if (insErr) { console.error('[V1][DISTINTE]', insErr.message); return NextResponse.json({ error: 'Distinta non creata' }, { status: 400 }) }
 
-  await admin.from('spedizioni').update({ distinta_id: distinta.id }).in('id', righe.map((r: any) => r.id))
+  const idsRighe = righe.map((r: any) => r.id)
+  await admin.from('spedizioni').update({ distinta_id: distinta.id }).in('id', idsRighe)
+  // Distinta = consegnate al corriere -> "spedita" (solo quelle ancora "in lavorazione", per non
+  // sovrascrivere in_transito/consegnata). Mancava: le spedizioni chiuse via API restavano "in
+  // lavorazione" per sempre, nel portale del cliente e in quello del master.
+  await admin.from('spedizioni').update({ stato: 'spedita' }).in('id', idsRighe).eq('stato', 'in_lavorazione')
 
-  // Chiusura bordero lato corriere (best-effort): per spedisci genera il borderò PDF del corriere.
+  // Tracking ai marketplace collegati: senza, gli ordini restavano non evasi e i tempi di
+  // spedizione del marketplace continuavano a correre. Best-effort, come nella chiusura serale.
+  try { const { fulfillSpedizioniShopify } = await import('@/lib/shopify'); await fulfillSpedizioniShopify(admin, idsRighe) } catch { }
+  try { const { fulfillSpedizioniWoo } = await import('@/lib/wooFulfill'); await fulfillSpedizioniWoo(admin, idsRighe) } catch { }
+  try { const { fulfillSpedizioniPrestashop } = await import('@/lib/prestashopFulfill'); await fulfillSpedizioniPrestashop(admin, idsRighe) } catch { }
+  try { const { fulfillSpedizioniEbay } = await import('@/lib/ebayFulfill'); await fulfillSpedizioniEbay(admin, idsRighe) } catch { }
+  try { const { fulfillSpedizioniTiktok } = await import('@/lib/tiktokFulfill'); await fulfillSpedizioniTiktok(admin, idsRighe) } catch { }
+  try { const { fulfillSpedizioniTemu } = await import('@/lib/temuFulfill'); await fulfillSpedizioniTemu(admin, idsRighe) } catch { }
+
+  // Chiusura al corriere (best-effort). `confermata_vettore` NON si scrive prima: veniva messo a
+  // true insieme all'insert, quindi una chiusura fallita restava marcata come trasmessa e nessuno
+  // se ne accorgeva piu'. Lo scrivono le funzioni di chiusura quando riesce davvero.
   try {
     const { chiudiBorderoSpedisci } = await import('@/lib/spedisci')
     await chiudiBorderoSpedisci(admin, distinta.id)
   } catch (e) { console.error('API close-day bordero:', e) }
+  try {
+    const { chiudiBordereauSpediamopro } = await import('@/lib/spediamopro')
+    await chiudiBordereauSpediamopro(admin, distinta.id)
+  } catch (e) { console.error('API close-day bordereau:', e) }
 
   // Rileggo il borderò eventualmente prodotto (spedisci): lo restituisco come PDF base64.
   // NB: non esiste un endpoint /pdf per le distinte via API — restituisco direttamente il documento del corriere.
