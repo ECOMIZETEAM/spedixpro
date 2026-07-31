@@ -69,9 +69,13 @@ export async function GET(req: NextRequest) {
     } catch (e) { console.error('Riepilogo singola etichetta:', e); return buf }
   }
 
-  // Caso spedisci.online: etichetta come labelData base64 dentro raw_response
+  // Caso spedisci.online: etichetta come labelData base64 dentro raw_response.
+  // ORDINE INVERTITO: prima etichetta_url, questa resta solo come RETE DI SICUREZZA per le
+  // spedizioni vecchie. Il PDF era salvato TRE volte (etichetta_url, dentro ogni collo di
+  // colli_dettaglio e qui): verificato su 300 spedizioni che le tre copie sono identiche al byte.
+  // Leggendo prima etichetta_url si puo' liberare questa copia senza che nessuno se ne accorga.
   const labelData = (sped.raw_response as any)?.labelData
-  if (labelData) {
+  if (labelData && !sped.etichetta_url) {
     const buf = await conRiepilogo(Buffer.from(labelData, 'base64'))
     return new NextResponse(new Uint8Array(buf), {
       status: 200,

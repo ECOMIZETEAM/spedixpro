@@ -519,7 +519,10 @@ export async function POST(req: NextRequest) {
       larghezza: c.larghezza || packages[i]?.width || null,
       altezza: c.altezza || packages[i]?.height || null,
       peso: packages[i]?.weight || null,
-      etichetta_url: etichetteUrls[i] || etichetteUrls[0] || null,
+      // Sul MONOCOLLO l'etichetta del collo e' identica a quella della spedizione: si lascia vuota
+      // e chi stampa usa etichetta_url. Sul MULTICOLLO invece serve, perche' la stampa massiva
+      // scorre i colli uno per uno (app/api/spedizioni/etichette-bulk/route.ts:49-54).
+      etichetta_url: packages.length > 1 ? (etichetteUrls[i] || etichetteUrls[0] || null) : null,
     }))
 
     // *** FIX: salviamo contractCode e carrierCode dentro raw_response per riusarli nei ritiri ***
@@ -538,7 +541,11 @@ export async function POST(req: NextRequest) {
       tracking_number: r.trackingNumber || null,
       etichetta_url: etichetteUrls[0] || (r.labelData ? `data:application/pdf;base64,${r.labelData}` : null),
       colli_dettaglio: colliDettaglio,
-      raw_response: { ...r, _carrierCode: rate.carrierCode, _contractCode: rate.contractCode },
+      // Il PDF NON si salva anche qui: e' gia' in etichetta_url, byte per byte identico
+      // (verificato su 300 spedizioni). Tenerne una copia dentro raw_response costava ~30 kB a
+      // spedizione, cioe' centinaia di MB, senza che nessuno la usasse davvero: i due percorsi di
+      // download leggono etichetta_url e questa resta solo come rete per le spedizioni vecchie.
+      raw_response: { ...r, labelData: undefined, labels: undefined, _carrierCode: rate.carrierCode, _contractCode: rate.contractCode },
       stato: 'in_lavorazione',
       costo_spedizione: costoCorrente, costo_totale: costoCliente,
       servizi_accessori: serviziAccessori,

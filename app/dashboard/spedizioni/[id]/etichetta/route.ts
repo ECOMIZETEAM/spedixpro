@@ -15,7 +15,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{id:s
   // Caso SpediamoPro (o altri): etichetta già salvata come data URI in etichetta_url
   let pdfBuffer: Buffer | null = null
   let mimeType = 'application/pdf'
-  if (labelData) {
+  // etichetta_url e' la fonte primaria; labelData dentro raw_response e' la copia storica
+  // (identica) e resta solo come rete di sicurezza per le spedizioni piu' vecchie.
+  if (labelData && !sped.etichetta_url) {
     pdfBuffer = Buffer.from(labelData, 'base64')
   } else if (sped.etichetta_url) {
     const m = sped.etichetta_url.match(/^data:(application\/pdf|image\/[\w.+-]+);base64,(.+)$/s)
