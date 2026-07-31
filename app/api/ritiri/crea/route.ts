@@ -109,8 +109,14 @@ export async function POST(req: NextRequest) {
     const prima: any = (spedizioni || []).find((s: any) => s.richiedi_ritiro) || {}
     const colliTot = (spedizioni || []).reduce((n: number, s: any) => n + (Number(s.colli) || 1), 0)
     const pesoTot = (spedizioni || []).reduce((n: number, s: any) => n + (Number(s.peso_reale) || 0), 0)
+    // Il numero di prenotazione del ritiro il corriere lo comunica insieme alla lettera di vettura,
+    // e la creazione lo mette da parte in raw_response. Arriva nella forma "CP124656395 03-08-2026":
+    // il numero e' il primo pezzo, la data e' gia' in data_ritiro.
+    const _cr = String((prima.raw_response as any)?._codiceRitiro || '').trim()
+    const codiceRitiro = _cr ? _cr.split(/\s+/)[0] : null
     const { data: r } = await admin.from('ritiri').insert({
       master_id: masterId, cliente_id: clienteId, corriere_id: corriere.id,
+      cod_ritiro: codiceRitiro, tracking_ritiro: codiceRitiro,
       mitt_nome: body.mittNome, mitt_indirizzo: body.mittIndirizzo, mitt_citta: body.mittCitta,
       mitt_provincia: body.mittProvincia || null, mitt_cap: body.mittCap,
       mitt_telefono: body.mittTelefono || null,

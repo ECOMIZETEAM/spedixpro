@@ -257,7 +257,7 @@ export async function POST(req: NextRequest) {
         const b64 = w.singole[0]?.pdfBase64 || w.pdfBase64
         if (b64) etichettaUrl = `data:application/pdf;base64,${b64}`
       } catch { /* non pronta: la recupera il giro di tracking */ }
-      numero = ldv || `DVA-${ordine.idOrdine}`
+      numero = ldv || `TMP-${ordine.idOrdine}`
       costoCorrente = ordine.importo
       raw = { ...ordine, _codiceOfferta: String(offerta.codice_offerta), _vettore: vettore, _idOrdine: ordine.idOrdine }
     } catch (e: any) {

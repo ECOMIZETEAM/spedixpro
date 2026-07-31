@@ -150,7 +150,7 @@ export async function GET(req: NextRequest) {
       // correggo il numero mostrato (così in elenco appare la LDV vera, non il codice interno).
       // 'DVA-<ordine>' e' il numero provvisorio del terzo provider, assegnato quando la lettera di
       // vettura non era ancora pronta: va sostituito appena arriva quella vera, come per 'SP-'.
-      if (nuovoTracking && nuovoTracking !== s.numero && (s.numero === spCode || /^(SP|DVA)-/.test(String(s.numero || '')))) {
+      if (nuovoTracking && nuovoTracking !== s.numero && (s.numero === spCode || /^(SP|DVA|TMP)-/.test(String(s.numero || '')))) {
         upd.numero = nuovoTracking
       }
 

@@ -985,6 +985,7 @@ export async function POST(req: NextRequest) {
       //    Se non e' pronta NON si esce con errore (l'ordine e' pagato): si salva lo stesso e la
       //    si recupera dopo, come gia' si fa col multicollo dell'altro provider. ──
       let ldv: string | null = null
+      let _codiceRitiro: string | null = null
       let etichettaUrl: string | null = null
       // Una etichetta PER OGNI COLLO: il provider le restituisce in single_waybills, ognuna col
       // proprio numero di lettera di vettura. Vanno tenute separate e assegnate collo per collo —
@@ -993,6 +994,10 @@ export async function POST(req: NextRequest) {
       try {
         const w = await easyparcelWaybill(apikey, ordine.idOrdine, 2, 1500)
         ldv = w.numero || null
+        // Il codice di prenotazione del ritiro arriva QUI, non con l'ordine: e' l'unico posto in cui
+        // il corriere lo comunica. Senza salvarlo, il ritiro risulta prenotato ma senza numero, e
+        // chi deve consegnare il pacco al corriere non ha niente da esibire.
+        _codiceRitiro = w.codiceRitiro || null
         etichettePerCollo = w.singole.map(s => `data:application/pdf;base64,${s.pdfBase64}`)
         // L'etichetta "della spedizione" e' l'unione di tutte: una pagina per collo, cosi' il
         // tasto Etichetta stampa tutto in una volta invece di un file per collo.
@@ -1013,7 +1018,7 @@ export async function POST(req: NextRequest) {
       // Finche' la LDV non c'e', serve comunque un numero nostro: senza, la spedizione non e'
       // identificabile in elenco ne' agganciabile ai movimenti. Il completamento in background
       // lo sostituisce con la LDV vera appena disponibile.
-      const numeroFinale = ldv || `DVA-${ordine.idOrdine}`
+      const numeroFinale = ldv || `TMP-${ordine.idOrdine}`
       const costoCorrente = ordine.importo
       const dichiaratoCli = parseFloat(body.totalPrice) || costoCorrente
       const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, dichiaratoCli)
@@ -1049,7 +1054,7 @@ export async function POST(req: NextRequest) {
         colli_dettaglio: colliDettaglio,
         // _codiceOfferta e' il riferimento con cui si interroga il tracking (verificato: la ricerca
         // per LDV risponde "Spedizione non trovata", quella per codice offerta funziona).
-        raw_response: { ...ordine, _codiceOfferta: String(offerta.codice_offerta), _vettore: vettore, _idOrdine: ordine.idOrdine },
+        raw_response: { ...ordine, _codiceOfferta: String(offerta.codice_offerta), _vettore: vettore, _idOrdine: ordine.idOrdine, _codiceRitiro },
         stato: 'in_lavorazione',
         costo_spedizione: costoCorrente, costo_totale: costoCliente,
         servizi_accessori: serviziAccessori,
