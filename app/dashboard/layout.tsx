@@ -4,6 +4,7 @@ import DashboardLayout from '../components/Layout'
 import { getPermessiUtente } from '@/lib/permessi'
 import AbbonamentoGate from './AbbonamentoGate'
 import BannerPiano from '../components/BannerPiano'
+import AvvisoImportante from './AvvisoImportante'
 import { DialogProvider } from '../components/DialogProvider'
 
 // Mai in cache: dipende dalla sessione. Senza questo Vercel puo' servire una versione resa
@@ -49,6 +50,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
     }}>
       <DialogProvider>
         {(utente?.ruolo === 'master' || utente?.ruolo === 'admin') && <AbbonamentoGate />}
+        <AvvisoImportante />
         <BannerPiano linkUpgrade="/dashboard/abbonamento" />
         {children}
       </DialogProvider>
