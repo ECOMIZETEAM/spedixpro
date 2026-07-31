@@ -6,6 +6,7 @@ import { registraMovimento } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import { inviaWebhook } from '@/lib/webhooks'
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
+import { statoPiano, messaggioBlocco } from '@/lib/limite-piano'
 import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation, spediamoproCreateShipment, spediamoproGetLabel,
   spediamoproWaitForTracking, kgToGrams, cmToMm, euroToCents, centsToEuro,
@@ -55,6 +56,13 @@ export async function POST(req: NextRequest) {
     .select('master_id,ragione_sociale,listino_cliente_id,tipo_contratto,credito').eq('id', ctx.clienteId).single()
   if (!cliente?.listino_cliente_id) return NextResponse.json({ error: 'Cliente senza listino' }, { status: 400 })
   const masterId = cliente.master_id
+
+  // LIMITE DEL PIANO: vale anche per chi spedisce dalla propria integrazione, altrimenti basterebbe
+  // usare l'API per aggirarlo. Chi si integra e' un cliente: non puo' fare l'upgrade da se'.
+  {
+    const stato = await statoPiano(admin, masterId)
+    if (stato.bloccato) return NextResponse.json({ error: messaggioBlocco(stato, false), limitePiano: true }, { status: 402 })
+  }
 
   const { data: corriere } = await admin.from('corrieri')
     .select('id,tipo,credenziali,nome_contratto,attivo,master_id,settings,multicollo').eq('id', ctx.corriereId).single()

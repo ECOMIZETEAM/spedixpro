@@ -19,18 +19,16 @@ export async function GET() {
 
   const isRoot = !m?.parent_master_id  // il master principale: illimitato e gratis, mai bloccato
 
-  const now = new Date()
-  const inizioMese = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
   // Il piano conta le spedizioni di TUTTA la rete sotto questo master (sé + discendenza):
   // ogni spedizione di un sotto-master consuma il contratto/piano dei master sopra.
   const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
   const reteIds = await sottoAlberoMasterIds(admin, utente.master_id)
-  // select('id') e non '*': con head:true il conteggio non restituisce righe, ma con '*' Postgres
-  // deve comunque passare per le colonne PESANTI della tabella (etichette PDF, raw del corriere).
-  // Era la query piu' costosa del database: ~500ms a chiamata. Con la sola chiave usa l'indice.
-  const { count } = await admin.from('spedizioni')
-    .select('id', { count: 'exact', head: true })
-    .in('master_id', reteIds).gte('created_at', inizioMese).neq('stato', 'annullata')
+  // Il numero si legge dal CONTATORE (una riga per master e mese, tenuta da un trigger), non
+  // contando le spedizioni: contarle era la query piu' costosa del database (~500ms a chiamata)
+  // e a volume non reggerebbe. Il contatore da' lo stesso identico numero.
+  const { data: righeConta } = await admin.from('contatori_spedizioni')
+    .select('n').in('master_id', reteIds).eq('mese', meseCorrente())
+  const count = (righeConta || []).reduce((t: number, r: any) => t + Number(r.n || 0), 0)
 
   // Se sono il ROOT (M1): LISTA DEI MASTER della rete (un master = una riga) + KPI mensili.
   // Ogni master paga il canone il 1° del mese (cron rinnovo-mensile); qui il root vede piano,

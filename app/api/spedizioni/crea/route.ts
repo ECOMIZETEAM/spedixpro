@@ -4,6 +4,7 @@ import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import { calcolaPrezzoCorriere, calcolaPrezzoCorriereDettaglio, calcolaSupplementiCliente, fattoreVolumeCliente, fattoreVolumeCorriere, calcolaPesoFatturato, calcolaPrezzoListino } from '@/lib/pricing'
 import { isAgente, nomeAgente } from '@/lib/agente'
+import { statoPiano, messaggioBlocco } from '@/lib/limite-piano'
 import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation,
   spediamoproCreateShipment,
@@ -87,6 +88,18 @@ export async function POST(req: NextRequest) {
   // RLS: lettura via admin; autorizzazione = check catena qui sotto.
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const adminCrea = createAdminSupabase()
+
+  // LIMITE DEL PIANO. Va controllato QUI, prima di qualunque chiamata al corriere: piu' avanti la
+  // spedizione e' gia' comprata e fermarla costerebbe un annullo. Si guarda la catena dal master
+  // della spedizione in su — chi sfonda ferma se stesso e tutta la rete sotto di lui.
+  {
+    const stato = await statoPiano(adminCrea, masterId)
+    if (stato.bloccato) {
+      const puoUpgrade = utente?.ruolo !== 'cliente' && !isAgente(utente)
+      return NextResponse.json({ error: messaggioBlocco(stato, puoUpgrade), limitePiano: true }, { status: 402 })
+    }
+  }
+
   if (body._corriere_id) {
     const { data: c } = await adminCrea
       .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id,settings,multicollo')
