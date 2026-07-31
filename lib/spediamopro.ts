@@ -491,7 +491,11 @@ export async function chiudiBordereauSpediamopro(supabase: any, distintaId: stri
     // Gia' chiusa (pdf) o non applicabile (N/A): niente da rifare. Se invece era in ERRORE si RITENTA.
     if (!distinta || distinta.bordero_pdf || distinta.bordero_id === 'N/A') return { skip: true }
 
-    const { data: corriere } = await supabase
+    // Le credenziali si leggono SEMPRE col client amministrativo, qualunque cosa passi il
+    // chiamante: con il token di un utente la query fallirebbe per intero (la colonna non e'
+    // leggibile) e la chiusura si fermerebbe senza che nessuno capisca perche'.
+    const { createAdminSupabase: _adminCred } = await import('@/lib/supabase-admin')
+    const { data: corriere } = await _adminCred()
       .from('corrieri').select('id, tipo, credenziali').eq('id', distinta.corriere_id).maybeSingle()
     if (!corriere || corriere.tipo !== 'spediamopro') return { skip: true }
     const authcode = (corriere.credenziali || {}).authcode

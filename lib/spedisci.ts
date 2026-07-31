@@ -95,7 +95,11 @@ export async function chiudiBorderoSpedisci(supabase: any, distintaId: string) {
     // Gia' chiusa: skip. Se il tentativo precedente era finito in ERRORE si RITENTA.
     if (!distinta || (distinta.bordero_id && !String(distinta.bordero_id).startsWith('ERRORE'))) return { skip: true }
 
-    const { data: corriere } = await supabase
+    // Le credenziali si leggono SEMPRE col client amministrativo, qualunque cosa passi il
+    // chiamante: con il token di un utente la query fallirebbe per intero (la colonna non e'
+    // leggibile) e la chiusura si fermerebbe senza che nessuno capisca perche'.
+    const { createAdminSupabase: _adminCred } = await import('@/lib/supabase-admin')
+    const { data: corriere } = await _adminCred()
       .from('corrieri').select('id, tipo, credenziali').eq('id', distinta.corriere_id).maybeSingle()
     if (!corriere || corriere.tipo !== 'spedisci') return { skip: true }
     const cred = (corriere.credenziali || {}) as any

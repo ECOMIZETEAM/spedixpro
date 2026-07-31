@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/controlla-credenziali.mjs && next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "controlla-credenziali": "node scripts/controlla-credenziali.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

@@ -397,7 +397,7 @@ export async function POST(req: NextRequest) {
   // Client ADMIN per questa lettura: porta dentro `corrieri.credenziali`, che non deve essere
   // leggibile col token di chi chiama. Il perimetro non cambia — resta il listino assegnato a
   // QUESTO cliente, filtrato qui sotto per listino_id.
-  const { data: fasce } = await createAdminSupabase()
+  const { data: fasce, error: errFasce } = await createAdminSupabase()
     .from('listini_clienti_fasce')
     // `attivo` serve al gate dei contratti in pausa qui sotto: senza, il ramo CLIENTE quotava anche
     // i contratti messi in pausa dal proprio master.
@@ -405,6 +405,17 @@ export async function POST(req: NextRequest) {
     .eq('listino_id', cliente.listino_cliente_id)
     .order('peso_max', { ascending: true })
 
+  // UNA QUERY FALLITA NON E' UN LISTINO VUOTO.
+  // Prima si guardava solo `data`: se la query andava in errore (un permesso mancante su una
+  // colonna, una relazione cambiata) `data` tornava null e il cliente si vedeva scritto
+  // "Listino vuoto — configura le fasce prezzi", cioe' gli si dava la colpa della configurazione
+  // mentre il problema era nostro. E' successo davvero: e' costato a un cliente l'impossibilita'
+  // di spedire, con lui e il suo master a cercare per ore un errore nei listini che erano a posto.
+  // Ora l'errore tecnico si distingue dal listino davvero vuoto, e finisce nei log.
+  if (errFasce) {
+    console.error('[TARIFFE] lettura fasce fallita', cliente.listino_cliente_id, errFasce.message)
+    return NextResponse.json({ error: 'Errore tecnico nel calcolo delle tariffe: riprova tra poco. Se persiste contatta l\'assistenza (il listino non c\'entra).' }, { status: 500 })
+  }
   if (!fasce?.length) {
     return NextResponse.json({ error: 'Listino vuoto — configura le fasce prezzi' }, { status: 400 })
   }
