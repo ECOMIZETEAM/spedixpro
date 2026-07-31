@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { fetchAll } from '@/lib/fetch-all'
 
 // Funzione ATTIVA SOLO per E&A MULTIEXPRESS: gestisce i crediti dei portali esterni
 // (SpediamoPro / Spedisci.online) da cui compra i contratti per rivendere.
@@ -19,33 +20,78 @@ export async function GET() {
   const { data: ricariche } = await admin.from('ricariche_portale')
     .select('*').eq('master_id', EA_ID).order('created_at', { ascending: false })
 
-  // Speso = movimenti di spedizione di E&A, raggruppati per TIPO del corriere
+  // Speso sul portale = tutto cio' che consuma il conto esterno, raggruppato per TIPO del corriere
   // (spedisci = SDA; spediamopro = tutto il resto).
-  const { data: movs } = await admin.from('movimenti')
-    .select('importo, spedizione_id').eq('master_target_id', EA_ID).eq('tipo', 'spedizione')
+  //
+  // Due difetti gravi che questo calcolo aveva, entrambi silenziosi:
+  //  1) leggeva i movimenti SENZA paginazione. PostgREST tronca ogni risposta a 1000 righe, e
+  //     E&A ne ha oltre 14.000: lo "speso" mostrato era 5.756 EUR invece di 82.839, cioe' il
+  //     residuo del portale risultava enormemente piu' alto del vero. Ora si usa fetchAll.
+  //  2) contava SOLO i movimenti di tipo 'spedizione'. I RIMBORSI delle spedizioni annullate non
+  //     venivano sottratti, quindi una spedizione annullata restava "spesa" per sempre.
+  // Si tiene conto anche di rettifiche e giacenze: anche quelle pesano sul conto del portale.
+  const movs = await fetchAll(() => admin.from('movimenti')
+    .select('importo, spedizione_id, tipo')
+    .eq('master_target_id', EA_ID)
+    .in('tipo', ['spedizione', 'rimborso', 'rettifica', 'giacenza']))
+
   const spedIds = Array.from(new Set((movs || []).map((m: any) => m.spedizione_id).filter(Boolean)))
   const tipoPerSped = new Map<string, string | null>()
-  if (spedIds.length) {
-    const { data: speds } = await admin.from('spedizioni').select('id, corrieri(tipo)').in('id', spedIds)
+  // A blocchi: un .in() con migliaia di id verrebbe troncato anche lui.
+  for (let i = 0; i < spedIds.length; i += 300) {
+    const { data: speds } = await admin.from('spedizioni').select('id, corrieri(tipo)').in('id', spedIds.slice(i, i + 300))
     for (const s of (speds || [])) tipoPerSped.set(s.id, (s.corrieri as any)?.tipo || null)
   }
   let spesoSpediamo = 0, spesoSpedisci = 0
   for (const m of (movs || [])) {
     const tipo = m.spedizione_id ? tipoPerSped.get(m.spedizione_id) : null
-    const imp = Math.abs(Number(m.importo) || 0)
-    if (tipo === 'spedisci') spesoSpedisci += imp
-    else if (tipo === 'spediamopro') spesoSpediamo += imp
+    // L'importo e' negativo quando esce (addebito) e positivo quando rientra (rimborso):
+    // sommare -importo da' direttamente lo speso NETTO, senza casi particolari per tipo.
+    const netto = -(Number(m.importo) || 0)
+    if (tipo === 'spedisci') spesoSpedisci += netto
+    else if (tipo === 'spediamopro') spesoSpediamo += netto
   }
 
   const ricSpediamo = (ricariche || []).filter((r: any) => r.portale === 'spediamopro').reduce((s: number, r: any) => s + Number(r.importo || 0), 0)
   const ricSpedisci = (ricariche || []).filter((r: any) => r.portale === 'spedisci').reduce((s: number, r: any) => s + Number(r.importo || 0), 0)
   const r2 = (n: number) => Math.round(n * 100) / 100
 
+  // SALDO VERO letto dal portale, non dedotto per sottrazione: e' l'unico numero che non dipende
+  // da quali ricariche sono state trascritte a mano qui dentro. Con questo il controllo si fa da
+  // solo — residuo calcolato contro saldo reale — invece di doverlo rifare a mano ogni volta.
+  // Best-effort: se il portale non risponde, la pagina funziona lo stesso senza questo dato.
+  let saldoReale: number | null = null
+  try {
+    const { data: cSp } = await admin.from('corrieri')
+      .select('credenziali').eq('master_id', EA_ID).eq('tipo', 'spediamopro').limit(1).maybeSingle()
+    const authcode = (cSp?.credenziali as any)?.authcode
+    if (authcode) {
+      const { getSpediamoproToken } = await import('@/lib/spediamopro')
+      const token = await getSpediamoproToken(authcode)
+      const w = await fetch('https://core.spediamopro.com/api/v2/wallet', {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      })
+      if (w.ok) {
+        const wd = await w.json()
+        // Il saldo arriva in CENTESIMI.
+        const cent = Number(wd?.data?.balance)
+        if (Number.isFinite(cent)) saldoReale = r2(cent / 100)
+      }
+    }
+  } catch { /* il saldo live e' un di piu': non deve far fallire la pagina */ }
+
   return NextResponse.json({
     abilitato: true,
     ricariche: ricariche || [],
     portali: {
-      spediamopro: { ricariche: r2(ricSpediamo), speso: r2(spesoSpediamo), residuo: r2(ricSpediamo - spesoSpediamo) },
+      spediamopro: {
+        ricariche: r2(ricSpediamo), speso: r2(spesoSpediamo), residuo: r2(ricSpediamo - spesoSpediamo),
+        saldoReale,
+        // Scarto fra il residuo calcolato qui e il saldo vero del portale: se non e' ~0 vuol dire
+        // che manca una ricarica da trascrivere, oppure che il portale ha addebitato qualcosa che
+        // da noi non risulta (es. rettifiche di peso fatte da loro).
+        scarto: saldoReale === null ? null : r2(saldoReale - (ricSpediamo - spesoSpediamo)),
+      },
       spedisci: { ricariche: r2(ricSpedisci), speso: r2(spesoSpedisci), residuo: r2(ricSpedisci - spesoSpedisci) },
     },
   })

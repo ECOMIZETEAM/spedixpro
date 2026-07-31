@@ -133,6 +133,23 @@ export default function MovimentiMasterPage() {
                   <div style={{fontSize:'12px',fontWeight:700,color:'#1a1a1a'}}>{label}</div>
                   <div style={{fontSize:'24px',fontWeight:800,color:p.residuo<0?'#b91c1c':'#15803d',margin:'6px 0'}}>{fmtEuro(p.residuo)}</div>
                   <div style={{fontSize:'12px',color:'#666'}}>Ricaricato {fmtEuro(p.ricariche)} · Speso {fmtEuro(p.speso)}</div>
+                  {/* Saldo letto DAL PORTALE: e' il numero che non dipende da cosa e' stato
+                      trascritto qui. Se non coincide col residuo calcolato, lo scarto dice di
+                      quanto — di solito e' una ricarica che manca all'appello. */}
+                  {p.saldoReale != null && (
+                    <div style={{marginTop:'6px',fontSize:'12px'}}>
+                      <span style={{color:'#666'}}>Saldo sul portale </span>
+                      <span style={{fontWeight:700,color:'#1a1a1a'}}>{fmtEuro(p.saldoReale)}</span>
+                      {p.scarto != null && Math.abs(p.scarto) >= 0.01 && (
+                        <span style={{marginLeft:'6px',color:Math.abs(p.scarto)>1?'#b91c1c':'#a16207'}}>
+                          (scarto {p.scarto>0?'+':''}{fmtEuro(p.scarto)})
+                        </span>
+                      )}
+                      {p.scarto != null && Math.abs(p.scarto) < 0.01 && (
+                        <span style={{marginLeft:'6px',color:'#15803d',fontWeight:600}}>✓ quadra</span>
+                      )}
+                    </div>
+                  )}
                   <div style={{display:'flex',gap:'6px',marginTop:'10px'}}>
                     <input value={formImporto[pt]} onChange={e=>setFormImporto(f=>({...f,[pt]:e.target.value}))} placeholder="Importo ricarica €" inputMode="decimal"
                       style={{flex:1,padding:'7px 10px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',minWidth:0}}/>
