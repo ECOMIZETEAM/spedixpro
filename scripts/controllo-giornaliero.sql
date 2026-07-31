@@ -90,6 +90,27 @@ coda_ferma as (
   from spedizioni where stato = 'annullamento_manuale'
     and annullamento_richiesto_at < now() - interval '3 days'
 ),
+-- 10d. CONTRATTI CON UN CODICE NON STABILE
+--    Alcuni pannelli restituiscono un codice contratto DIVERSO a ogni chiamata (pacchetto
+--    cifrato). Se e' finito salvato nel contratto, il riconoscimento della tariffa regge solo
+--    finche' il pannello espone UNA sola tariffa per quel vettore: il giorno che ne espone due,
+--    le spedizioni si bloccano a intermittenza con "Contratto non disponibile".
+codice_non_stabile as (
+  select count(*) n from corrieri
+  where tipo = 'spedisci'
+    and length(coalesce(credenziali->>'codice_contratto','')) > 60
+    and credenziali->>'codice_contratto' like 'eyJpdiI6%'
+),
+-- 10e. NOMI CONTRATTO CON SPAZI O MAIUSCOLE DISALLINEATE fra padre e figlio
+--    Il legame fra la copia del figlio e quella del padre e' il NOME: se differiscono per spazi
+--    o maiuscole, il detentore vero non viene riconosciuto e non viene addebitato.
+nomi_disallineati as (
+  select count(*) n from corrieri c
+  join masters m on m.id = c.master_id
+  join corrieri p on p.master_id = m.parent_master_id
+   and lower(btrim(p.nome_contratto)) = lower(btrim(c.nome_contratto))
+   and p.nome_contratto <> c.nome_contratto
+),
 -- 11. VENDITE SOTTO COSTO ancora configurate
 sotto_costo as (
   select count(*) n from (
@@ -125,5 +146,9 @@ union all select 'in coda annullo ma GIA CONSEGNATE', (select n from in_coda_ma_
        case when (select n from in_coda_ma_consegnate) = 0 then 'ok' else 'NON confermarle: rimborserebbero merce recapitata' end
 union all select 'coda annulli ferma da oltre 3 giorni', (select n || ' — € ' || val from coda_ferma),
        case when (select n from coda_ferma) = 0 then 'ok' else 'credito bloccato ai clienti: sollecitare il detentore' end
+union all select 'contratti con codice NON stabile (cifrato)', (select n from codice_non_stabile)::text,
+       case when (select n from codice_non_stabile) = 0 then 'ok' else 'reinserire il codice contratto vero: si bloccheranno a intermittenza' end
+union all select 'nomi contratto disallineati padre/figlio', (select n from nomi_disallineati)::text,
+       case when (select n from nomi_disallineati) = 0 then 'ok' else 'il detentore non viene addebitato: allineare i nomi' end
 union all select 'fasce vendute SOTTO COSTO', (select n from sotto_costo)::text,
        case when (select n from sotto_costo) = 0 then 'ok' else 'perdita in corso' end;

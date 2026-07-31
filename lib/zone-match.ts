@@ -20,8 +20,24 @@ export type DestZona = { paese?: string; provincia?: string; cap?: string; citta
 // per quel comune: se la destinazione ha una città, scarto le righe cap-esatto di un comune
 // DIVERSO, così il CAP non aggancia la zona speciale sbagliata. (Senza città o senza
 // righe-con-città: righe invariate.) Condiviso col matching batch di lib/pricing.
+const nrmCitta = (s: any) => (s || '').toString().toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9]/g, '')
+
+// UNA RIGA CHE NOMINA UN COMUNE VALE SOLO PER QUEL COMUNE.
+// Il match per PROVINCIA (secondo criterio, quando il CAP non combacia) guardava solo la provincia
+// e ignorava del tutto la colonna `citta`. Cosi' una riga come "VE / * / BURANO" — messa li' per
+// dire che Burano e' un'isola minore — agganciava TUTTA la provincia di Venezia, Mestre compresa:
+// mezzo Veneto veniva prezzato (o escluso) come isola minore. Lo stesso vale per le Isole Tremiti
+// su tutta Foggia, l'Isola del Giglio su tutta Grosseto, Porto Azzurro su tutta Livorno.
+// Se la riga ha un comune specifico deve combaciare; se il comune non e' indicato nella
+// destinazione, la riga specifica NON si applica (meglio non prezzare che prezzare l'isola).
+export function rigaValePerCitta(r: any, citta?: string | null): boolean {
+  const rc = r?.citta
+  if (!rc || rc === '*') return true
+  return nrmCitta(rc) === nrmCitta(citta)
+}
+
 export function filtraCapCondiviso(righe: any[], cap: string, citta?: string | null): any[] {
-  const nrm = (s: any) => (s || '').toString().toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9]/g, '')
+  const nrm = nrmCitta
   const dCitta = nrm(citta)
   if (!dCitta) return righe
   const capExactConCitta = righe.some((r: any) => r.cap && r.cap !== '*' && r.cap === cap && r.citta && r.citta !== '*')
@@ -89,6 +105,7 @@ export async function trovaZoneMatchDett(
       if (!cc) continue
       const capMatch = !!r.cap && r.cap !== '*' && r.cap === cap
       const provMatch = !!r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*')
+        && rigaValePerCitta(r, (dest as any).citta)   // "VE/*/BURANO" non vale per tutta Venezia
       if (capMatch || provMatch) corrieriEsclusi.add(cc)
       if (capMatch) corrieriCapEsclusi.add(cc)
     }
@@ -104,7 +121,8 @@ export async function trovaZoneMatchDett(
   // Applica i 3 tier (CAP esatto > provincia+cap* > jolly totale) su un insieme di righe.
   const pickTier = (rows: any[]): any[] => {
     let m = rows.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap)                                   // 1) CAP esatto
-    if (!m.length) m = rows.filter((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*')) // 2) provincia
+    // 2) provincia — ma una riga che nomina un comune vale solo per quel comune (vedi rigaValePerCitta)
+    if (!m.length) m = rows.filter((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*') && rigaValePerCitta(r, (dest as any).citta))
     if (!m.length) m = rows.filter((r: any) => (!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*'))  // 3) jolly
     return m
   }

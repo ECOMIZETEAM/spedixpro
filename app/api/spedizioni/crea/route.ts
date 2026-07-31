@@ -17,6 +17,7 @@ import { EMAIL_PER_CORRIERE,
 // Il sanificatore dei messaggi del corriere ora sta in lib/errore-corriere.ts: lo usano anche
 // l'API pubblica e la conferma distinte, che prima rimandavano il testo grezzo del provider.
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
+import { motivoLimiteCollo } from '@/lib/limiti-collo'
 
 
 export async function POST(req: NextRequest) {
@@ -161,17 +162,18 @@ export async function POST(req: NextRequest) {
   if (packages.length > 1 && (corriereRecord as any)?.multicollo === false) {
     return NextResponse.json({ error: 'Il contratto non prevede la funzione multicollo' }, { status: 400 })
   }
-  const mmax = (corriereRecord as any)?.settings?.misure_max
-  if (mmax && (mmax.lunghezza || mmax.larghezza || mmax.altezza)) {
-    const maxL = parseFloat(mmax.lunghezza) || Infinity
-    const maxW = parseFloat(mmax.larghezza) || Infinity
-    const maxH = parseFloat(mmax.altezza) || Infinity
-    for (const pk of packages) {
-      const L = parseFloat(pk?.length) || 0, W = parseFloat(pk?.width) || 0, H = parseFloat(pk?.height) || 0
-      if (L > maxL || W > maxW || H > maxH) {
-        return NextResponse.json({ error: 'Volume troppo alto. Misure massime consentite: ' + (mmax.lunghezza||'-') + ' x ' + (mmax.larghezza||'-') + ' x ' + (mmax.altezza||'-') + ' cm' }, { status: 400 })
-      }
-    }
+  // STESSO METRO DEL PREVENTIVO. Qui i lati si confrontavano ASSE PER ASSE (lunghezza con
+  // lunghezza, larghezza con larghezza), mentre il preventivo confronta i lati ORDINATI dal piu'
+  // lungo al piu' corto — che e' il criterio giusto, perche' un collo si puo' girare. Risultato:
+  // lo stesso identico collo veniva QUOTATO e poi RIFIUTATO al momento di comprarlo, con un
+  // "Volume troppo alto" che arrivava dopo aver gia' mostrato il prezzo.
+  // In piu' qui si guardava solo `misure_max`, ignorando gli scaglioni di peso, il numero massimo
+  // di colli, il peso per collo e la somma dei lati: limiti che il preventivo applica eccome.
+  // Ora entrambi passano da lib/limiti-collo.ts: una regola sola, stesso esito.
+  const _pesoTotaleColli = packages.reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
+  const _motivoLimite = motivoLimiteCollo((corriereRecord as any)?.settings, _pesoTotaleColli, packages)
+  if (_motivoLimite) {
+    return NextResponse.json({ error: `Collo non accettato da questo contratto: ${_motivoLimite}.` }, { status: 400 })
   }
   const pkg = packages[0]
   // Peso reale = SOMMA di tutti i colli (multicollo), non solo il primo: il costo della spedizione
@@ -425,6 +427,20 @@ export async function POST(req: NextRequest) {
       contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
     })
     if (!catenaCheck.ok) {
+      // DUE COSE DIVERSE, NON UNA. `verificaCreditoCatena` fallisce sia quando un master della
+      // catena e' davvero a secco, sia quando la catena non e' configurata (manca il listino a un
+      // livello, manca la tariffa per quella zona). Prima si rispondeva sempre "Credito
+      // insufficiente" con 402: un problema di configurazione arrivava al cliente travestito da
+      // problema di soldi, e lui ricaricava il credito senza che cambiasse nulla.
+      // `masterInsufficiente` e' valorizzato SOLO nel caso credito: e' quello che distingue.
+      const perCredito = !!catenaCheck.masterInsufficiente
+      if (!perCredito) {
+        console.error('[CREA][CATENA] configurazione incompleta:', catenaCheck.errore)
+        await stornaPrenotazione()
+        return NextResponse.json({
+          error: 'Questo contratto non è configurato correttamente su un livello superiore della rete: non è possibile spedirci. Segnalalo all\'assistenza.',
+        }, { status: 400 })
+      }
       // Nessuno vede credito/costo dei master SOPRA di sé: mostro il dettaglio SOLO se il
       // master a secco è il PROPRIO (utente.master_id). Clienti e livelli inferiori: generico.
       const proprio = utente?.ruolo !== 'cliente' && catenaCheck.masterInsufficiente === utente?.master_id
@@ -455,7 +471,19 @@ export async function POST(req: NextRequest) {
     // altrimenti una spedizione "Poste Delivery Express D" poteva stampare GLS/SDA (rates[0]).
     const { trovaRateContratto } = await import('@/lib/spedisci')
     const rate = trovaRateContratto(rates, cred)
-    if (!rate) { await stornaPrenotazione(); return NextResponse.json({ error: 'Contratto non disponibile per questo corriere (verifica il codice contratto)' }, { status: 400 }) }
+    if (!rate) {
+      // Perche' e' finita cosi' va scritto nei log, altrimenti resta un mistero: o il pannello
+      // espone piu' tariffe dello stesso vettore e il codice contratto salvato non le distingue,
+      // oppure quel codice non e' un identificativo stabile (vedi codiceContrattoCifrato).
+      const { codiceContrattoCifrato } = await import('@/lib/spedisci')
+      console.error('[CREA][CONTRATTO] nessuna tariffa riconosciuta', {
+        contratto: corriereRecord.nome_contratto,
+        tariffe_dal_pannello: Array.isArray(rates) ? rates.length : 0,
+        codice_salvato_cifrato: codiceContrattoCifrato(cred?.codice_contratto),
+      })
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Contratto non disponibile per questa spedizione: il codice contratto configurato non corrisponde a nessuna tariffa. Segnalalo all\'assistenza.' }, { status: 400 })
+    }
 
     const res = await fetch(`${baseUrl}/shipping/create`, {
       method: 'POST',

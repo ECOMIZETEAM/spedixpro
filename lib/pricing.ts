@@ -9,7 +9,7 @@
 // Usato dal ledger a cascata (STEP 4.5) per sapere quanto paga ogni master
 // della catena col proprio listino ereditato.
 
-import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster, filtraCapCondiviso } from '@/lib/zone-match'
+import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster, filtraCapCondiviso, rigaValePerCitta } from '@/lib/zone-match'
 import { fetchAll } from '@/lib/fetch-all'
 
 const ZONE_MAP: Record<string, string> = {
@@ -488,6 +488,12 @@ export async function calcolaPrezzoCorriere(
   params: {
     corriereId: string; masterId: string; provincia: string; pesoReale: number
     packages?: any[]; contrassegno?: number; assicurazione?: number; cap?: string; paese?: string
+    // `citta` mancava QUI ma esiste (ed e' usata) in calcolaPrezzoCorriereDettaglio: i chiamanti la
+    // passavano e TypeScript la segnalava come proprieta' sconosciuta. Serve a distinguere i CAP
+    // condivisi fra piu' comuni — stesso CAP, uno normale e uno in zona disagiata: senza citta' il
+    // costo di catena poteva agganciare la zona sbagliata, cioe' addebitare un importo diverso da
+    // quello calcolato per il cliente.
+    citta?: string
   }
 ): Promise<number | null> {
   const d = await calcolaPrezzoCorriereDettaglio(supabase, params)
@@ -606,7 +612,9 @@ export async function creaCalcolatoreCorriere(
     let rows = (zcByPaese.get((paese || 'IT').toUpperCase()) || []).filter((r: any) => cand.includes(r.zona_id))
     rows = filtraCapCondiviso(rows, cap, citta)   // CAP condivisi: la riga di un ALTRO comune non aggancia
     let m = rows.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap)
-    if (!m.length) m = rows.filter((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*'))
+    // Una riga che nomina un COMUNE vale solo per quel comune (vedi rigaValePerCitta in zone-match):
+    // senza questo, "VE/*/BURANO" prezzava come isola minore tutta la provincia di Venezia.
+    if (!m.length) m = rows.filter((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*') && rigaValePerCitta(r, citta))
     if (!m.length) m = rows.filter((r: any) => (!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*'))
     return Array.from(new Set(m.map((r: any) => r.zona_id)))
   }
@@ -741,7 +749,9 @@ export async function creaCalcolatoreListinoCliente(
     let rows = (zcByPaese.get((paese || 'IT').toUpperCase()) || []).filter((r: any) => cand.includes(r.zona_id))
     rows = filtraCapCondiviso(rows, cap, citta)   // CAP condivisi: la riga di un ALTRO comune non aggancia
     let m = rows.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap)
-    if (!m.length) m = rows.filter((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*'))
+    // Una riga che nomina un COMUNE vale solo per quel comune (vedi rigaValePerCitta in zone-match):
+    // senza questo, "VE/*/BURANO" prezzava come isola minore tutta la provincia di Venezia.
+    if (!m.length) m = rows.filter((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*') && rigaValePerCitta(r, citta))
     if (!m.length) m = rows.filter((r: any) => (!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*'))
     return Array.from(new Set(m.map((r: any) => r.zona_id)))
   }

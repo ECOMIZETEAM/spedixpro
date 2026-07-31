@@ -1,6 +1,7 @@
 import { calcolaPrezzoListino, calcolaPrezzoCorriere } from '@/lib/pricing'
 import { registraMovimentoMaster } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 
 export type LivelloCatena = {
   masterId: string
@@ -44,14 +45,16 @@ async function costruisciCatena(
       const { data: mm }: any = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
       const parent: string | null = mm?.parent_master_id || null
       if (!parent) break
-      const { data: pc } = await adminDb.from('corrieri')
-        .select('id').eq('master_id', parent).eq('nome_contratto', params.corriereNome).limit(1).maybeSingle()
-      if (pc?.id) { ownerReale = parent; cur = parent } else break
+      // Confronto NORMALIZZATO (vedi lib/contratto-per-nome.ts): con l'uguaglianza esatta un nome
+      // salvato con uno spazio finale su un livello e senza sull'altro faceva perdere il detentore
+      // vero del contratto — che quindi non veniva addebitato.
+      const pcId = await corriereDiMasterPerNome(adminDb, parent, params.corriereNome)
+      if (pcId) { ownerReale = parent; cur = parent } else break
     }
   }
 
   for (let i = 0; i < 20 && currentId; i++) {
-    const { data: m } = await adminDb
+    const { data: m }: any = await adminDb
       .from('masters')
       .select('id,nome,tipo_contratto,credito,parent_master_id,parent_listino_id')
       .eq('id', currentId).single()
@@ -66,9 +69,9 @@ async function costruisciCatena(
     // è il costo che vede nella sua lista movimenti.
     let calcolato = false
     if (params.corriereNome) {
-      const { data: mCorr }: any = await adminDb.from('corrieri')
-        .select('id').eq('master_id', m.id).eq('nome_contratto', params.corriereNome).limit(1).maybeSingle()
-      if (mCorr?.id) {
+      const mCorrId = await corriereDiMasterPerNome(adminDb, m.id, params.corriereNome)
+      if (mCorrId) {
+        const mCorr = { id: mCorrId }
         const pesoReale = (params.packages || []).reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
         const pz = await calcolaPrezzoCorriere(adminDb, {
           corriereId: mCorr.id, masterId: m.id,

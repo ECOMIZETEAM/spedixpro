@@ -1,5 +1,6 @@
 import { registraMovimentoMaster, registraMovimento } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 
 // Mappa il "nome" di un supplemento giacenza (sia lato cliente sia lato master) sull'operazione.
 // Es. "Riconsegna al nuovo destinatario" -> riconsegna_nuovo, "Reso al mittente" -> reso.
@@ -65,8 +66,9 @@ export async function addebitaGiacenzaCatena(
       const { data: mm }: any = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
       const parent: string | null = mm?.parent_master_id || null
       if (!parent) break
-      const { data: pc } = await admin.from('corrieri').select('id').eq('master_id', parent).eq('nome_contratto', params.corriereNome).limit(1).maybeSingle()
-      if (pc?.id) { ownerReale = parent; cur = parent } else break
+      // Confronto NORMALIZZATO, come nella cascata delle spedizioni (lib/contratto-per-nome.ts).
+      const pcId = await corriereDiMasterPerNome(admin, parent, params.corriereNome)
+      if (pcId) { ownerReale = parent; cur = parent } else break
     }
   }
 
@@ -77,9 +79,9 @@ export async function addebitaGiacenzaCatena(
     if (!m) break
 
     // Corriere (copia) di questo master per lo stesso contratto -> per leggerne il prezzo giacenza.
-    const { data: mCorr }: any = await admin.from('corrieri')
-      .select('id').eq('master_id', m.id).eq('nome_contratto', params.corriereNome).limit(1).maybeSingle()
-    if (mCorr?.id) {
+    const mCorrId = await corriereDiMasterPerNome(admin, m.id, params.corriereNome)
+    if (mCorrId) {
+      const mCorr = { id: mCorrId }
       const pr = await prezzoGiacenzaMaster(admin, mCorr.id, params.operazione)
       const apertura = params.conApertura ? pr.apertura : 0
       // Due voci separate (come per il cliente): apertura giacenza + servizio.

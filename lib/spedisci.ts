@@ -9,12 +9,29 @@
 //  3) pannello con UNA SOLA tariffa -> e' per forza quella;
 //  4) nessun codice salvato -> prima tariffa (comportamento storico);
 //  5) altrimenti null: ambiguo, meglio errore chiaro che etichetta col vettore sbagliato.
+// Alcuni pannelli restituiscono un contractCode DIVERSO A OGNI CHIAMATA: e' un pacchetto cifrato
+// (base64 di {iv, value, mac}), non un identificativo. Se uno di questi finisce salvato in
+// `credenziali.codice_contratto`, il confronto esatto qui sotto non potra' mai riuscire — e il
+// contratto sopravvive solo finche' il pannello espone UNA sola tariffa per quel vettore. Il giorno
+// che ne espone due, la spedizione si blocca con "Contratto non disponibile", a intermittenza e
+// senza spiegazione. Meglio riconoscerlo e dirlo.
+export function codiceContrattoCifrato(v: any): boolean {
+  const s = String(v || '')
+  if (s.length < 60 || !/^[A-Za-z0-9+/=]+$/.test(s)) return false
+  try {
+    const j = JSON.parse(Buffer.from(s, 'base64').toString('utf8'))
+    return !!(j && typeof j === 'object' && 'iv' in j && 'value' in j)
+  } catch { return false }
+}
+
 export function trovaRateContratto(rates: any[], cred: any): any | null {
   if (!Array.isArray(rates) || !rates.length) return null
   // 1) Match ESATTO sul codice salvato (pannelli con codici stabili in chiaro).
-  if (cred?.codice_contratto) {
+  if (cred?.codice_contratto && !codiceContrattoCifrato(cred.codice_contratto)) {
     const esatto = rates.find((r: any) => r.contractCode === cred.codice_contratto)
     if (esatto) return esatto
+  } else if (cred?.codice_contratto) {
+    console.warn('[CONTRATTO] il codice salvato non e\' un identificativo stabile (pacchetto cifrato): il contratto regge solo finche\' il pannello espone una sola tariffa per il vettore. Va reinserito il codice vero.')
   }
   // 2) Vettore salvato (credenziali.carrier_code): valido SOLO se sul pannello esiste
   //    UN SOLO contratto di quel vettore. Con due contratti dello stesso vettore (es.
