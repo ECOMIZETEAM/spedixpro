@@ -15,10 +15,15 @@ import { pianoById, type Piano } from '@/lib/piani'
 // comporta esattamente come oggi. Nessuna schermata cambia, nessun addebito parte.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// L'IVA NON e' compresa nei prezzi dei piani (139 €, 230 € … sono imponibili, come si usa fra
-// aziende). Al momento del pagamento si aggiunge il 22%. Se un giorno i prezzi diventassero
-// comprensivi di IVA, basta mettere 0 qui: nient'altro cambia.
+// I prezzi dei piani (139 €, 230 € …) sono PREZZI FINITI: l'IVA e' gia' dentro. Alla cassa il
+// master paga esattamente quella cifra — non 139 + 22%.
+//
+// L'aliquota resta dichiarata lo stesso, ma come IVA COMPRESA: cosi' la fattura che il circuito
+// emette scorpora imponibile e imposta (139 € = 113,93 + 25,07) come dev'essere, senza che il
+// totale cambi di un centesimo. Mettere 0 farebbe pagare la stessa cifra ma emetterebbe una
+// fattura senza IVA, che non e' la stessa cosa.
 export const IVA_PERCENTUALE = 22
+export const IVA_COMPRESA = true
 
 export function stripeConfigurato(): boolean {
   return !!process.env.STRIPE_SECRET_KEY
@@ -44,6 +49,7 @@ export async function prezzoStripe(pianoId: string): Promise<{ price: Stripe.Pri
   const chiave = chiavePrezzo(pianoId)
   const attesi = Math.round(piano.prezzo * 100)
 
+  const comportamento = IVA_COMPRESA ? 'inclusive' : 'exclusive'
   const esistenti = await s.prices.list({ lookup_keys: [chiave], active: true, limit: 1, expand: ['data.product'] })
   const trovato = esistenti.data[0]
   // Prezzo gia' presente ma con importo diverso = il listino e' cambiato da noi. Il vecchio non si
@@ -51,7 +57,9 @@ export async function prezzoStripe(pianoId: string): Promise<{ price: Stripe.Pri
   // la chiave, cosi' i prossimi pagamenti usano l'importo giusto. Chi ha gia' l'abbonamento resta
   // sul suo prezzo finche' non cambia piano — e' il comportamento corretto, non un effetto
   // collaterale: a nessuno viene aumentato il canone senza che lo scelga.
-  if (trovato && trovato.unit_amount === attesi) return { price: trovato, piano }
+  // Si sostituisce anche se cambia il MODO di trattare l'IVA, non solo l'importo: un prezzo nato
+  // come "IVA da aggiungere" farebbe pagare 139 + 22% anche dopo aver cambiato la regola qui.
+  if (trovato && trovato.unit_amount === attesi && trovato.tax_behavior === comportamento) return { price: trovato, piano }
   if (trovato) await s.prices.update(trovato.id, { lookup_key: `${chiave}_storico_${trovato.id}` })
 
   const prodotti = await s.products.search({ query: `metadata['piano']:'${pianoId}'`, limit: 1 })
@@ -68,7 +76,7 @@ export async function prezzoStripe(pianoId: string): Promise<{ price: Stripe.Pri
     recurring: { interval: 'month' },
     lookup_key: chiave,
     transfer_lookup_key: true,
-    tax_behavior: 'exclusive',
+    tax_behavior: IVA_COMPRESA ? 'inclusive' : 'exclusive',
     metadata: { piano: pianoId },
   })
   return { price, piano }
@@ -79,11 +87,12 @@ export async function aliquotaIva(): Promise<string[]> {
   if (!IVA_PERCENTUALE) return []
   const s = stripeClient()
   const esistenti = await s.taxRates.list({ active: true, limit: 100 })
-  const trovata = esistenti.data.find(t => t.percentage === IVA_PERCENTUALE && t.inclusive === false && t.country === 'IT')
+  const trovata = esistenti.data.find(t => t.percentage === IVA_PERCENTUALE && t.inclusive === IVA_COMPRESA && t.country === 'IT')
   if (trovata) return [trovata.id]
   const nuova = await s.taxRates.create({
-    display_name: 'IVA', description: `IVA ${IVA_PERCENTUALE}%`, jurisdiction: 'IT', country: 'IT',
-    percentage: IVA_PERCENTUALE, inclusive: false,
+    display_name: 'IVA', description: `IVA ${IVA_PERCENTUALE}%${IVA_COMPRESA ? ' compresa' : ''}`,
+    jurisdiction: 'IT', country: 'IT',
+    percentage: IVA_PERCENTUALE, inclusive: IVA_COMPRESA,
   })
   return [nuova.id]
 }

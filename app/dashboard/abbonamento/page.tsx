@@ -240,7 +240,7 @@ export default function AbbonamentoPage() {
 
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',flexWrap:'wrap',gap:'8px',marginBottom:'10px'}}>
         <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a'}}>Piani disponibili</div>
-        {conCarta && <div style={{fontSize:'11.5px',color:'#777'}}>Prezzi IVA esclusa (+{stato?.carta?.iva}%)</div>}
+        {conCarta && <div style={{fontSize:'11.5px',color:'#777'}}>Prezzi IVA {stato?.carta?.iva}% compresa</div>}
       </div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:'12px'}}>
         {(stato?.piani||[]).map((p:any)=>{

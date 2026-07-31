@@ -105,13 +105,14 @@ export async function POST(req: NextRequest) {
             } catch { /* si ripiega sul piano gia' registrato */ }
           }
         }
-        // L'importo registrato e' l'IMPONIBILE: nei conti dell'abbonamento l'IVA non e' un incasso,
-        // e' una partita di giro verso lo Stato.
-        const imponibile = Number(inv.total_excluding_tax ?? inv.subtotal ?? inv.amount_paid ?? 0) / 100
+        // Si registra il TOTALE incassato, cioe' il prezzo del piano: e' la stessa cifra che
+        // registrano i pagamenti con bonifico (139 €, non 113,93), altrimenti gli incassi della
+        // pagina Abbonamenti sarebbero la somma di due grandezze diverse.
+        const incassato = Number(inv.amount_paid ?? inv.total ?? 0) / 100
         await admin.from('abbonamenti_pagamenti').upsert({
           master_id: m.id, root_id: root, piano: piano?.id || m.abbonamento_piano || null,
           mese: meseCorrente(new Date(Number(inv.created || 0) * 1000)),
-          importo: imponibile, pagato: true, pagato_il: new Date(Number(inv.created || 0) * 1000).toISOString(),
+          importo: incassato, pagato: true, pagato_il: new Date(Number(inv.created || 0) * 1000).toISOString(),
           metodo: 'carta', stripe_invoice_id: inv.id,
         }, { onConflict: 'stripe_invoice_id' })
         // Canone del mese gia' assolto: il rinnovo automatico interno non deve riaddebitarlo.
