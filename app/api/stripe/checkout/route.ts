@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { isAgente } from '@/lib/agente'
-import { pianoById } from '@/lib/piani'
+import { pianoById, meseCorrente } from '@/lib/piani'
 import { stripeConfigurato, stripeClient, prezzoStripe, aliquotaIva, clienteStripe, primoDelProssimoMese, idPrezzo } from '@/lib/stripe'
 
 // Attivazione o cambio piano PAGANDO CON CARTA.
@@ -31,12 +31,14 @@ export async function POST(req: NextRequest) {
 
   const admin = createAdminSupabase()
   const { data: m } = await admin.from('masters')
-    .select('id,nome,email,parent_master_id,abbonamento_esente,abbonamento_piano,stripe_customer_id,stripe_subscription_id,stripe_stato')
+    .select('id,nome,email,parent_master_id,abbonamento_esente,abbonamento_piano,abbonamento_mese,stripe_customer_id,stripe_subscription_id,stripe_stato')
     .eq('id', utente.master_id).single()
   if (!m) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
   if (!m.parent_master_id) return NextResponse.json({ error: 'Il master principale non ha canone.' }, { status: 400 })
   if (m.abbonamento_esente) return NextResponse.json({ error: 'Il tuo abbonamento è gratuito: nessun pagamento da fare.' }, { status: 400 })
   if (m.abbonamento_piano === pianoId && m.stripe_subscription_id) return NextResponse.json({ error: 'Hai già questo piano' }, { status: 400 })
+
+  const meseGiaPagato = !!m.abbonamento_piano && m.abbonamento_mese === meseCorrente()
 
   const s = stripeClient()
   const { price } = await prezzoStripe(pianoId)
@@ -119,9 +121,14 @@ export async function POST(req: NextRequest) {
     line_items: [{ price: price.id, quantity: 1, tax_rates: iva.length ? iva : undefined }],
     subscription_data: {
       metadata: { master_id: m.id, piano: pianoId },
-      // Rinnovo il PRIMO DEL MESE per tutti, come il contatore delle spedizioni. Alla cassa si
-      // paga subito la parte di mese che resta, poi il canone pieno ogni primo del mese.
+      // Rinnovo il PRIMO DEL MESE per tutti, come il contatore delle spedizioni: se il pacchetto
+      // riparte il primo e la bolletta arriva il 13, i due numeri non tornano mai fra loro.
       billing_cycle_anchor: primoDelProssimoMese(),
+      // Chi questo mese ha GIA' pagato il canone col credito e ora passa alla carta non deve
+      // pagare una seconda volta i giorni che ha gia' pagato: non si addebita nulla adesso e la
+      // carta parte dal primo del mese. Senza questo, passare al pagamento con carta a meta' mese
+      // costava due volte lo stesso periodo.
+      proration_behavior: meseGiaPagato ? 'none' : 'create_prorations',
     },
     metadata: { master_id: m.id, piano: pianoId },
     success_url: `${base}/dashboard/abbonamento?pagamento=ok`,

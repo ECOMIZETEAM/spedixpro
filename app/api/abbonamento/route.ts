@@ -141,7 +141,7 @@ export async function POST(req: NextRequest) {
   const admin = createAdminSupabase()
   const payer = utente.master_id
   const { data: m } = await admin.from('masters')
-    .select('nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese,abbonamento_esente').eq('id', payer).single()
+    .select('nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese,abbonamento_esente,stripe_subscription_id,stripe_stato').eq('id', payer).single()
 
   // Trova il SUPERROOT (M1): risalgo la catena fino al master senza padre.
   let rootId = payer
@@ -153,6 +153,12 @@ export async function POST(req: NextRequest) {
     }
   }
   const isRoot = rootId === payer  // il master principale è la piattaforma: esente
+
+  // Chi ha l'abbonamento sulla carta lo cambia da li', non da qui: fargli scalare anche il credito
+  // vorrebbe dire incassare due volte lo stesso mese, una dal circuito e una dal suo conto.
+  if ((m as any)?.stripe_subscription_id && (m as any)?.stripe_stato !== 'canceled') {
+    return NextResponse.json({ error: 'Il tuo abbonamento è pagato con carta: cambia piano dal pulsante di pagamento, non dal credito.' }, { status: 400 })
+  }
 
   const mese = meseCorrente()
   const prezzoAttuale = Number(m?.abbonamento_prezzo || 0)
