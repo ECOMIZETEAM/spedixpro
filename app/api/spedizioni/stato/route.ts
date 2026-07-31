@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { codiceRitiroValido } from '@/lib/easyparcel'
 
 // STATO DI UNA SPEDIZIONE APPENA CREATA.
 //
@@ -28,9 +29,9 @@ export async function GET(req: NextRequest) {
     .eq('id', id).maybeSingle()
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 
-  // Il codice del ritiro arriva come "CP124656395 03-08-2026": il numero e' il primo pezzo.
-  const cr = String((sped.raw_response as any)?._codiceRitiro || '').trim()
-  const codiceRitiro = cr ? cr.split(/\s+/)[0] : null
+  // Il codice del ritiro arriva come "CP124656395 03-08-2026" — ma il corriere in quel campo ci
+  // scrive anche delle frasi finche' il codice non e' pronto: passa solo cio' che e' un codice.
+  const codiceRitiro = codiceRitiroValido((sped.raw_response as any)?._codiceRitiro)
 
   const numero = String(sped.numero || '')
   return NextResponse.json({

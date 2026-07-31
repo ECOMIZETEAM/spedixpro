@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
       // direttamente dal JSON, e l'etichetta si guarda a parte (solo gli id di chi non ce l'ha).
       // ep_offerta/ep_ordine: i due riferimenti del terzo provider. Il tracking si interroga col
       // CODICE OFFERTA (per LDV risponde "Spedizione non trovata"), l'etichetta con l'id ordine.
-      .select('id,numero,stato,tracking_number,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali,nome_contratto),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code,ep_offerta:raw_response->_codiceOfferta,ep_ordine:raw_response->_idOrdine')
+      .select('id,numero,stato,tracking_number,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali,nome_contratto),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code,ep_offerta:raw_response->_codiceOfferta,ep_ordine:raw_response->_idOrdine,richiedi_ritiro,ritiro_id,created_at,ep_ritiro:raw_response->_codiceRitiro')
       .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
       .order('tracking_check_at', { ascending: true, nullsFirst: true })
       .order('id', { ascending: true })
@@ -166,15 +166,36 @@ export async function GET(req: NextRequest) {
       }
       // Stessa rete di sicurezza per il terzo provider: li' l'etichetta nasce da una chiamata a
       // parte (getwaybill) e alla creazione puo' non essere ancora disponibile.
-      if (tipo === 'easyparcel' && senzaEtichetta.has(s.id) && (s as any).ep_ordine && cred?.apikey) {
+      // Manca il CODICE DEL RITIRO? Il corriere lo assegna anche minuti dopo aver accettato
+      // l'ordine (nel frattempo al suo posto risponde "Not available"), quindi ne' la creazione
+      // ne' il completamento in background riescono sempre a prenderlo. Questa e' la rete di
+      // sicurezza definitiva: finche' manca, a ogni giro si riprova — e quando arriva finisce
+      // anche sulla riga in Ritiri, che e' quella che l'utente guarda.
+      // Limite di 3 giorni: se dopo tre giorni il codice non c'e', non arrivera' piu' — e senza
+      // questo paletto ogni giro riscaricherebbe l'etichetta di quella spedizione per sempre.
+      const eta = Date.now() - new Date(String((s as any).created_at || 0)).getTime()
+      const ritiroSenzaCodice = tipo === 'easyparcel' && !!(s as any).richiedi_ritiro
+        && !(s as any).ep_ritiro && eta < 3 * 24 * 3600 * 1000
+      if (tipo === 'easyparcel' && (senzaEtichetta.has(s.id) || ritiroSenzaCodice) && (s as any).ep_ordine && cred?.apikey) {
         try {
           const { easyparcelWaybill } = await import('@/lib/easyparcel')
           const w = await easyparcelWaybill(cred.apikey, String((s as any).ep_ordine), 1, 0)
           const b64 = w.singole[0]?.pdfBase64 || w.pdfBase64
-          if (b64) upd.etichetta_url = `data:application/pdf;base64,${b64}`
+          if (b64 && senzaEtichetta.has(s.id)) upd.etichetta_url = `data:application/pdf;base64,${b64}`
           if (w.numero && w.numero !== s.tracking_number) {
             upd.tracking_number = w.numero
             if (/^(TMP|DVA)-/.test(String(s.numero || ''))) upd.numero = w.numero
+          }
+          if (ritiroSenzaCodice && w.codiceRitiro) {
+            // raw_response non e' in memoria (e' pesante e sta fuori dalla query apposta): lo si
+            // rilegge solo per questa riga, che e' un caso raro.
+            const { data: rr } = await admin.from('spedizioni').select('raw_response').eq('id', s.id).maybeSingle()
+            upd.raw_response = { ...((rr?.raw_response as any) || {}), _codiceRitiro: w.codiceRitiro }
+            if ((s as any).ritiro_id) {
+              await admin.from('ritiri')
+                .update({ cod_ritiro: w.codiceRitiro, tracking_ritiro: w.codiceRitiro })
+                .eq('id', (s as any).ritiro_id)
+            }
           }
         } catch { /* non ancora pronta: riprovo al giro dopo */ }
       }

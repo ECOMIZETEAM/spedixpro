@@ -992,7 +992,7 @@ export async function POST(req: NextRequest) {
       // ripetere la prima su tutti significherebbe far viaggiare tre colli con la stessa etichetta.
       let etichettePerCollo: string[] = []
       try {
-        const w = await easyparcelWaybill(apikey, ordine.idOrdine, 2, 1500)
+        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _vuoleRitiro ? 3 : 2, 1500, _vuoleRitiro)
         ldv = w.numero || null
         // Il codice di prenotazione del ritiro arriva QUI, non con l'ordine: e' l'unico posto in cui
         // il corriere lo comunica. Senza salvarlo, il ritiro risulta prenotato ma senza numero, e
@@ -1095,20 +1095,23 @@ export async function POST(req: NextRequest) {
       } catch (e) { console.error('[CREA][EASYPARCEL] cascata catena:', e) }
 
       // Recupero in background di cio' che non era ancora pronto (stesso schema dell'altro provider).
-      if (inserted?.id && (!ldv || !etichettaUrl)) {
+      // Il recupero in background serve anche quando la LDV c'e' ma manca il codice del ritiro:
+      // il corriere lo assegna anche minuti dopo, e senza questo non lo prendeva piu' nessuno.
+      if (inserted?.id && (!ldv || !etichettaUrl || (_vuoleRitiro && !_codiceRitiro))) {
         const spedIdBg = inserted.id
         const idOrdineBg = ordine.idOrdine
+        const vuoleRitiroBg = _vuoleRitiro
         after(async () => {
           try {
             const { easyparcelWaybill: wb, unisciEtichette: unisci } = await import('@/lib/easyparcel')
-            const w = await wb(apikey, idOrdineBg, 5, 3000)
+            const w = await wb(apikey, idOrdineBg, 8, 4000, vuoleRitiroBg)
             const upd: any = {}
             if (w.numero) { upd.numero = w.numero; upd.tracking_number = w.numero }
             // Il codice di prenotazione del ritiro viaggia con la lettera di vettura: se non era
             // pronta al momento della creazione, questo e' l'unico momento in cui lo si puo'
             // ancora prendere. Senza salvarlo qui il ritiro resterebbe per sempre senza numero.
             if (w.codiceRitiro) {
-              const codice = w.codiceRitiro.split(/\s+/)[0]
+              const codice = w.codiceRitiro
               // Si rilegge la riga adesso: nel frattempo la schermata ha chiamato /api/ritiri/crea,
               // che ha agganciato la spedizione alla riga Ritiri (ritiro_id). Quella riga e' nata
               // senza codice — qui la si completa.
@@ -1157,7 +1160,7 @@ export async function POST(req: NextRequest) {
         // Il codice di prenotazione del ritiro va restituito subito: e' quello che l'utente deve
         // esibire al corriere. Se la lettera di vettura non era ancora pronta qui e' vuoto, e la
         // schermata lo richiede tra qualche secondo con /api/spedizioni/stato.
-        codiceRitiro: _codiceRitiro ? _codiceRitiro.split(/\s+/)[0] : null,
+        codiceRitiro: _codiceRitiro,
         provvisorio: !ldv,
       })
     } catch (err: any) {

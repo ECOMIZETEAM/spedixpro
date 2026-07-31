@@ -299,8 +299,23 @@ function persona(p: PersonaEasyparcel) {
 // non essere ancora pronti: si riprova qualche volta prima di arrendersi. L'assenza della LDV
 // non annulla l'ordine (che resta pagato): il chiamante deve salvare comunque la spedizione e
 // recuperare l'etichetta piu' tardi.
+// CODICE DI PRENOTAZIONE DEL RITIRO (pickup_code). Nel campo non arriva sempre un codice: il
+// corriere ci scrive anche delle frasi — "Service not required" quando il ritiro non e' stato
+// chiesto, "Not available" quando il ritiro c'e' ma il codice non e' ancora stato assegnato.
+// Elencare le frasi da scartare non funziona (la prima versione conosceva solo "not required" e
+// infatti ha salvato "Not" come se fosse un numero di prenotazione): si fa il contrario, passa
+// solo cio' che ha la FORMA di un codice — un blocco unico tipo CP124658259, senza spazi e con
+// dentro delle cifre. Qualunque frase il corriere inventi in futuro viene scartata da sola.
+export function codiceRitiroValido(v: any): string | null {
+  const t = String(v || '').trim().split(/\s+/)[0]   // "CP124658259 03-08-2026" -> "CP124658259"
+  if (t.length < 6) return null
+  if (!/^[A-Za-z0-9][A-Za-z0-9/-]*$/.test(t)) return null
+  if ((t.match(/\d/g) || []).length < 4) return null
+  return t
+}
+
 export async function easyparcelWaybill(
-  apikey: string, idOrdine: string, tentativi = 3, attesaMs = 1500
+  apikey: string, idOrdine: string, tentativi = 3, attesaMs = 1500, attendiRitiro = false
 ): Promise<{ numero: string; pdfBase64: string | null; singole: { numero: string; pdfBase64: string }[]; borderoUrl: string | null; codiceRitiro: string | null }> {
   let ultimo: any = null
   for (let i = 0; i < Math.max(1, tentativi); i++) {
@@ -312,19 +327,20 @@ export async function easyparcelWaybill(
       ultimo = d
       const numero = String(d.waybill_number || '')
       if (!numero) continue          // ancora in lavorazione: si riprova
+      const codiceRitiro = codiceRitiroValido(d.pickup_code)
+      // Il codice del ritiro puo' arrivare DOPO la lettera di vettura. Quando il ritiro e' stato
+      // chiesto, aspettarlo vale quanto aspettare la LDV: senza, chi consegna il pacco al corriere
+      // non ha niente da esibire. All'ultimo tentativo si restituisce comunque cio' che c'e'.
+      if (attendiRitiro && !codiceRitiro && i < Math.max(1, tentativi) - 1) continue
       const singole = (Array.isArray(d.single_waybills) ? d.single_waybills : [])
         .map((s: any) => ({ numero: String(s?.waybill_number || ''), pdfBase64: String(s?.waybill_base64 || '') }))
         .filter((s: any) => s.pdfBase64)
-      // pickup_code non e' sempre un codice: quando il ritiro non e' stato chiesto arriva la frase
-      // "Service not required". Salvarla come se fosse un codice significherebbe mostrare all'utente
-      // un finto numero di prenotazione ritiro.
-      const cr = String(d.pickup_code || '').trim()
       return {
         numero,
         pdfBase64: d.waybill_base64 ? String(d.waybill_base64) : null,
         singole,
         borderoUrl: d.bordero_url ? String(d.bordero_url) : null,
-        codiceRitiro: cr && !/not required|non richiest/i.test(cr) ? cr : null,
+        codiceRitiro,
       }
     } catch (e: any) {
       ultimo = e

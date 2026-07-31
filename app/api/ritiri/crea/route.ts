@@ -5,6 +5,7 @@ import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { spediamoproCreatePickup, spediamoproWaitPickupCode, EMAIL_PER_CORRIERE } from '@/lib/spediamopro'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { erroreRitiroPulito } from '@/lib/errore-corriere'
+import { codiceRitiroValido } from '@/lib/easyparcel'
 import { siglaProvincia } from '@/lib/province-it'
 
 // Provincia a ESATTAMENTE 2 lettere per SpediamoPro (che rifiuta con 422 "province should have
@@ -116,12 +117,12 @@ export async function POST(req: NextRequest) {
     // Se la lettera di vettura non era ancora pronta quando la spedizione e' stata creata, il
     // codice non c'e' ancora: si richiede adesso (sono passati alcuni secondi, di norma basta) e
     // lo si rimette anche sulla spedizione, cosi' resta uno solo il posto in cui vive.
-    if (!_cr && (prima.raw_response as any)?._idOrdine) {
+    if (!codiceRitiroValido(_cr) && (prima.raw_response as any)?._idOrdine) {
       try {
         const { easyparcelWaybill } = await import('@/lib/easyparcel')
         const apikey = String((corriere.credenziali as any)?.apikey || '')
         if (apikey) {
-          const w = await easyparcelWaybill(apikey, String((prima.raw_response as any)._idOrdine), 4, 2000)
+          const w = await easyparcelWaybill(apikey, String((prima.raw_response as any)._idOrdine), 5, 2000, true)
           if (w.codiceRitiro) {
             _cr = w.codiceRitiro
             const agg: any = { raw_response: { ...(prima.raw_response as any), _codiceRitiro: _cr } }
@@ -131,7 +132,7 @@ export async function POST(req: NextRequest) {
         }
       } catch (e: any) { console.error('[RITIRI][EASYPARCEL] codice ritiro non ancora disponibile:', e?.message) }
     }
-    const codiceRitiro = _cr ? _cr.split(/\s+/)[0] : null
+    const codiceRitiro = codiceRitiroValido(_cr)
     const { data: r } = await admin.from('ritiri').insert({
       master_id: masterId, cliente_id: clienteId, corriere_id: corriere.id,
       cod_ritiro: codiceRitiro, tracking_ritiro: codiceRitiro,
