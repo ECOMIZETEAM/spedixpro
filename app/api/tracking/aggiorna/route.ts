@@ -3,6 +3,7 @@ import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { spediamoproGetTracking, spediamoproSearchStocks, mapStatoSpediamopro, spediamoproGetLabel, normalizzaEtichetta } from '@/lib/spediamopro'
 import { spedisciTrackingStati, mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
+import { inviaWebhook } from '@/lib/webhooks'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
       // direttamente dal JSON, e l'etichetta si guarda a parte (solo gli id di chi non ce l'ha).
       // ep_offerta/ep_ordine: i due riferimenti del terzo provider. Il tracking si interroga col
       // CODICE OFFERTA (per LDV risponde "Spedizione non trovata"), l'etichetta con l'id ordine.
-      .select('id,numero,stato,tracking_number,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code,ep_offerta:raw_response->_codiceOfferta,ep_ordine:raw_response->_idOrdine')
+      .select('id,numero,stato,tracking_number,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali,nome_contratto),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code,ep_offerta:raw_response->_codiceOfferta,ep_ordine:raw_response->_idOrdine')
       .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
       .order('tracking_check_at', { ascending: true, nullsFirst: true })
       .order('id', { ascending: true })
@@ -181,6 +182,27 @@ export async function GET(req: NextRequest) {
       if (Object.keys(upd).length) {
         await admin.from('spedizioni').update(upd).eq('id', s.id)
         aggiornate++
+      }
+
+      // WEBHOOK AL CLIENTE quando lo stato CAMBIA DAVVERO.
+      // Chi si integra puo' registrare tracking.updated / tracking.delivered /
+      // tracking.exception, ma finora quelle notifiche partivano da un solo punto: la GET del
+      // tracking, cioe' solo se era il cliente stesso a interrogarci. Il giro che aggiorna
+      // davvero gli stati — questo — non ne mandava nessuna. Risultato: per sapere di una
+      // consegna il cliente doveva fare polling su ogni spedizione, esattamente cio' che il
+      // webhook serve a evitare. Best-effort: non blocca ne' fa fallire il giro.
+      if (upd.stato && (s as any).cliente_id) {
+        const evento = upd.stato === 'consegnata' ? 'tracking.delivered'
+          : (upd.stato === 'in_giacenza' || upd.stato === 'non_consegnato' || upd.stato === 'reso_mittente') ? 'tracking.exception'
+          : 'tracking.updated'
+        inviaWebhook({
+          clienteId: (s as any).cliente_id, corriereId: s.corriere_id, evento,
+          data: {
+            tracking_number: upd.tracking_number || s.tracking_number || (s as any).numero,
+            carrier: (s as any).corrieri?.nome_contratto || null,
+            status: upd.stato, location: '', events: [],
+          },
+        }).catch(() => {})
       }
 
       // ENTRATA in giacenza -> il cliente paga SUBITO l'apertura dossier (+ cascata rete), una volta.
