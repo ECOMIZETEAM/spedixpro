@@ -6,7 +6,7 @@ import { useDialog } from '@/app/components/DialogProvider'
 // Sigla di ripiego quando il contratto non ha un marchio riconosciuto. Attenzione: qui arriva
 // il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
 // all'utente ('EASYPARCEL'). Ogni provider ha la sua sigla neutra.
-const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':t==='easyparcel'?'DVA':(t||'').toUpperCase()
+const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':t==='easyparcel'?'V':(t||'').toUpperCase()
 interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; _corriere_id?:string; corriere_nome?:string }
 interface Collo { lunghezza:string; larghezza:string; altezza:string }
 
@@ -279,11 +279,37 @@ export default function NuovaSpedizioneCliente() {
     }
     setCreating(false)
     setSuccesso({numero:data.numero||'—', id:data.spedizioneId||'', ritiro: ritiroEsito})
+    // Alcuni corrieri preparano la lettera di vettura qualche secondo dopo aver accettato l'ordine.
+    // Finché non c'è, la spedizione porta un numero provvisorio: mostrarlo qui vorrebbe dire dare
+    // all'utente un numero che il corriere non conosce. Quindi lo si richiede finché non arriva
+    // quello vero (e con lui il codice del ritiro) e il messaggio si aggiorna da solo.
+    if (data.spedizioneId && (data.provvisorio || (richiediRitiro && !ritiroEsito?.pickupId))) {
+      attendiDatiCorriere(data.spedizioneId, richiediRitiro)
+    }
     resetForm()   // form pulito per la prossima spedizione (il banner successo resta visibile)
   }
 
   const pesoVol0 = colli[0]?.lunghezza&&colli[0]?.larghezza&&colli[0]?.altezza
     ? ((+colli[0].lunghezza * +colli[0].larghezza * +colli[0].altezza)/5000).toFixed(2) : null
+
+
+  // Richiede numero e codice ritiro finché il corriere non li ha pronti (al massimo ~40 secondi:
+  // oltre è il completamento in background a scriverli, e si vedono in Elenco).
+  async function attendiDatiCorriere(id: string, conRitiro: boolean) {
+    for (let i = 0; i < 16; i++) {
+      await new Promise(r => setTimeout(r, 2500))
+      try {
+        const st = await (await fetch(`/api/spedizioni/stato?id=${encodeURIComponent(id)}`)).json()
+        if (st?.error) return
+        setSuccesso(s => s && s.id === id ? {
+          ...s,
+          numero: st.numero || s.numero,
+          ritiro: s.ritiro && st.codiceRitiro ? { ...s.ritiro, pickupId: st.codiceRitiro } : s.ritiro,
+        } : s)
+        if (!st.provvisorio && (!conRitiro || st.codiceRitiro)) return
+      } catch { return }
+    }
+  }
 
   return (
     <div>

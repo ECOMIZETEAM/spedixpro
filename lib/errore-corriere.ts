@@ -1,3 +1,9 @@
+// NOMI DEI SISTEMI TECNICI A VALLE. Non devono mai comparire in un messaggio mostrato all'utente:
+// gli errori dei corrieri arrivano grezzi e spesso contengono il nome del fornitore o il suo
+// dominio. Erano ripuliti in quattro punti diversi, ognuno con la propria lista — e infatti
+// all'arrivo del terzo fornitore tre di quei quattro punti sono rimasti scoperti. Lista unica.
+const NOMI_FORNITORI = /spediamo\s*pro|spedisci\.?online|core\.spediamopro\.com|easy\s*parcel|api\.easyparcel\.it|\bdva\b/gi
+
 // SVINCOLO GIACENZA: l'errore del corriere arrivava all'utente come JSON grezzo
 // ('release : {"processId":"<jmkc…>","error":{"id":"err_…","status":500,…}}') — illeggibile e
 // inutile. Qui si estrae la causa e la si traduce in un'indicazione operativa.
@@ -26,7 +32,7 @@ export function erroreSvincoloPulito(raw: any): string {
     return `Il corriere${vettore ? ' ' + vettore.trim() : ''} ha rifiutato lo svincolo con un errore sui suoi sistemi. Di norma succede quando l'operazione scelta non è ammessa per questa giacenza (es. riconsegna di un pacco rifiutato) oppure per un blocco temporaneo: riprova, o scegli il reso al mittente.`
   }
   const pulito = (interno || s)
-    .replace(/spediamo\s*pro|spedisci\.?online|core\.spediamopro\.com|https?:\/\/\S+/gi, '')
+    .replace(NOMI_FORNITORI, '').replace(/https?:\/\/\S+/gi, '')
     .replace(/\{[\s\S]*\}/, '').replace(/release\s*:/i, '').replace(/\s{2,}/g, ' ').trim().slice(0, 140)
   return `Svincolo non riuscito sul corriere${pulito ? ': ' + pulito : ''}. Riprova o contatta l'assistenza.`
 }
@@ -66,7 +72,7 @@ export function erroreRitiroPulito(raw: any): string {
     return 'CAP del mittente mancante o non valido: correggilo e riprova.'
   }
   if (!msg) msg = s.replace(/^.*?failed[^:]*:\s*/i, '').replace(/\{[\s\S]*\}/, '').trim()
-  msg = msg.replace(/spediamo\s*pro/ig, '').replace(/spedisci(\.online)?/ig, '').replace(/pickup failed[^:]*:?/ig, '').replace(/\s{2,}/g, ' ').trim()
+  msg = msg.replace(NOMI_FORNITORI, '').replace(/pickup failed[^:]*:?/ig, '').replace(/\s{2,}/g, ' ').trim()
   // Messaggi tipici del corriere → testo chiaro in italiano per l'utente.
   if (/pickup_date\s*=\s*today.*no longer possible/i.test(msg) || /today.*no longer possible/i.test(msg)) {
     return 'Il ritiro in giornata non è più disponibile per questo corriere: scegli una data futura (di norma il giorno lavorativo successivo).'
@@ -85,7 +91,7 @@ export function erroreRitiroPulito(raw: any): string {
     // disponibile" — ma SEMPRE ripuliti: i details[] arrivano grezzi dal provider e possono
     // contenere nomi/URL tecnici che l'utente non deve mai vedere.
     const scrub = (t: string) => t
-      .replace(/spediamo\s*pro/ig, 'il corriere').replace(/spedisci(\.online)?/ig, 'il corriere')
+      .replace(NOMI_FORNITORI, 'il corriere')
       .replace(/https?:\/\/\S+/g, '').replace(/\s{2,}/g, ' ').trim()
     const spiegazioni = dettagli.map(d => scrub([d?.source, d?.message].filter(Boolean).join(': '))).filter(Boolean).join('; ')
     msg = spiegazioni
@@ -141,6 +147,6 @@ export function erroreCorrierePulito(raw: any): string {
   if (/auth|token|unauthor|forbidden|credential|credenzial|domain|enotfound|fetch failed|econn|network|master_domain/.test(t))
     return 'Contratto non configurato correttamente (credenziali/dominio mancanti). Contatta l\'assistenza.'
   // Ultima risorsa: messaggio generico, MA con un frammento ripulito della causa (senza nome provider)
-  const pulito = String(raw || '').replace(/spediamo\s*pro|spedisci\.?online|core\.spediamopro\.com|https?:\/\/[^\s]+/gi, '').replace(/\s+/g, ' ').trim().slice(0, 120)
+  const pulito = String(raw || '').replace(NOMI_FORNITORI, '').replace(/https?:\/\/[^\s]+/gi, '').replace(/\s+/g, ' ').trim().slice(0, 120)
   return 'Il corriere non può gestire questa spedizione' + (pulito ? ` (${pulito})` : ': verifica misure, peso, indirizzo e servizi, oppure scegli un altro contratto.')
 }

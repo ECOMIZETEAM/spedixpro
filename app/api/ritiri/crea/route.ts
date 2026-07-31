@@ -112,7 +112,25 @@ export async function POST(req: NextRequest) {
     // Il numero di prenotazione del ritiro il corriere lo comunica insieme alla lettera di vettura,
     // e la creazione lo mette da parte in raw_response. Arriva nella forma "CP124656395 03-08-2026":
     // il numero e' il primo pezzo, la data e' gia' in data_ritiro.
-    const _cr = String((prima.raw_response as any)?._codiceRitiro || '').trim()
+    let _cr = String((prima.raw_response as any)?._codiceRitiro || '').trim()
+    // Se la lettera di vettura non era ancora pronta quando la spedizione e' stata creata, il
+    // codice non c'e' ancora: si richiede adesso (sono passati alcuni secondi, di norma basta) e
+    // lo si rimette anche sulla spedizione, cosi' resta uno solo il posto in cui vive.
+    if (!_cr && (prima.raw_response as any)?._idOrdine) {
+      try {
+        const { easyparcelWaybill } = await import('@/lib/easyparcel')
+        const apikey = String((corriere.credenziali as any)?.apikey || '')
+        if (apikey) {
+          const w = await easyparcelWaybill(apikey, String((prima.raw_response as any)._idOrdine), 4, 2000)
+          if (w.codiceRitiro) {
+            _cr = w.codiceRitiro
+            const agg: any = { raw_response: { ...(prima.raw_response as any), _codiceRitiro: _cr } }
+            if (w.numero && /^(TMP|DVA)-/.test(String(prima.numero || ''))) { agg.numero = w.numero; agg.tracking_number = w.numero }
+            await admin.from('spedizioni').update(agg).eq('id', prima.id)
+          }
+        }
+      } catch (e: any) { console.error('[RITIRI][EASYPARCEL] codice ritiro non ancora disponibile:', e?.message) }
+    }
     const codiceRitiro = _cr ? _cr.split(/\s+/)[0] : null
     const { data: r } = await admin.from('ritiri').insert({
       master_id: masterId, cliente_id: clienteId, corriere_id: corriere.id,
@@ -124,7 +142,9 @@ export async function POST(req: NextRequest) {
       data_ritiro: prima.data_ritiro || body.dataRitiro, stato: 'richiesto',
     }).select('id').single()
     if (r?.id) { try { await admin.from('spedizioni').update({ ritiro_id: r.id }).in('id', spedizioneIds) } catch { } }
-    return NextResponse.json({ success: true, giaPrenotato: true, ritiroId: r?.id || null })
+    // pickupId = il codice che l'utente deve esibire al corriere. E' il valore che la schermata
+    // stampa nel messaggio "ritiro prenotato": senza, mostrava una conferma senza numero.
+    return NextResponse.json({ success: true, giaPrenotato: true, ritiroId: r?.id || null, pickupId: codiceRitiro })
   }
 
   const cred = corriere.credenziali as Record<string, string>
@@ -188,7 +208,7 @@ export async function POST(req: NextRequest) {
       if (cc) courierCode = cc
     }
     if (!shipmentIds.length) {
-      return NextResponse.json({ error: 'Impossibile recuperare gli ID spedizione SpediamoPro.' }, { status: 400 })
+      return NextResponse.json({ error: 'Il corriere non ha restituito i riferimenti delle spedizioni: riprova tra qualche minuto o contatta l\'assistenza.' }, { status: 400 })
     }
 
     const fascia = fasciaOraria(body.orarioRitiro)

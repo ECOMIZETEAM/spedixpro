@@ -60,7 +60,7 @@ export default function SpedizioniCancellatePage() {
   }
 
   async function confermaAnnullo(id: string) {
-    if (!await dialog.confirm({ title: 'Confermi l\'annullo eseguito?', message: 'Confermi che l\'annullo è stato eseguito con il corriere (Spedisci)? La spedizione passerà ad annullata e il credito verrà stornato.', confirmText: 'Conferma' })) return
+    if (!await dialog.confirm({ title: 'Confermi l\'annullo eseguito?', message: 'Confermi che l\'annullo è stato eseguito con il corriere? La spedizione passerà ad annullata e il credito verrà stornato.', confirmText: 'Conferma' })) return
     setConfermando(id)
     const res = await fetch(`/api/spedizioni/annulli-manuali/conferma?id=${id}`, { method: 'POST' })
     setConfermando(null)
@@ -160,8 +160,8 @@ export default function SpedizioniCancellatePage() {
       {codaOwner.length > 0 && (
         <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #fca5a5',overflow:'hidden',marginBottom:'16px'}}>
           <div style={{padding:'12px 16px',borderBottom:'1px solid #fecaca',background:'#fef2f2'}}>
-            <span style={{fontSize:'13px',fontWeight:'700',color:'#b91c1c'}}>Annulli da richiedere a Spedisci (assistenza) <span style={{color:'#991b1b',fontWeight:'400',fontSize:'12px'}}>({codaOwnerVis.length}{filtriAttivi && codaOwnerVis.length !== codaOwner.length ? ` di ${codaOwner.length}` : ''})</span></span>
-            <span style={{display:'block',marginTop:'2px',fontSize:'12px',color:'#991b1b'}}>Queste spedizioni Spedisci non si annullano via API: richiedi l'annullo all'assistenza (WhatsApp) usando numero e tracking, poi premi "Segna annullato".</span>
+            <span style={{fontSize:'13px',fontWeight:'700',color:'#b91c1c'}}>Annulli da richiedere all'assistenza <span style={{color:'#991b1b',fontWeight:'400',fontSize:'12px'}}>({codaOwnerVis.length}{filtriAttivi && codaOwnerVis.length !== codaOwner.length ? ` di ${codaOwner.length}` : ''})</span></span>
+            <span style={{display:'block',marginTop:'2px',fontSize:'12px',color:'#991b1b'}}>Queste spedizioni non si annullano in automatico: richiedi l'annullo all'assistenza (WhatsApp) usando numero e tracking, poi premi "Segna annullato".</span>
           </div>
           {!codaOwnerVis.length ? (
             <div style={{padding:'20px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessun annullo da richiedere con i filtri attivi.</div>
@@ -173,7 +173,7 @@ export default function SpedizioniCancellatePage() {
                   <tr key={s.id} style={{borderBottom:'1px solid #fee2e2'}}>
                     <td style={{padding:'9px 16px',fontWeight:'700',color:'#1a1a1a'}}>{s.numero}</td>
                     <td style={{padding:'9px 12px',color:'#666',fontSize:'12px'}}>Tracking: {s.tracking_number || '—'}</td>
-                    <td style={{padding:'9px 12px',color:'#666',fontSize:'12px'}}>{s.corrieri?.nome_contratto || 'Spedisci'}</td>
+                    <td style={{padding:'9px 12px',color:'#666',fontSize:'12px'}}>{s.corrieri?.nome_contratto || '—'}</td>
                     <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.dest_nome} · {s.dest_citta}</td>
                     <td style={{padding:'9px 16px',textAlign:'right'}}>
                       <button onClick={()=>confermaAnnullo(s.id)} disabled={confermando===s.id}

@@ -117,7 +117,7 @@ export async function GET(req: NextRequest) {
       // La lettera di vettura puo' essere arrivata dopo la creazione: se il numero e' ancora
       // quello provvisorio, si corregge subito senza aspettare il giro automatico.
       const ldv = (trRaw as any)?.tracking?.lettera_vettura
-      if (ldv && ldv !== spedizione.numero && /^DVA-/.test(String(spedizione.numero || ''))) {
+      if (ldv && ldv !== spedizione.numero && /^(TMP|DVA)-/.test(String(spedizione.numero || ''))) {
         try { await admin.from('spedizioni').update({ numero: String(ldv), tracking_number: String(ldv) }).eq('id', spedizione.id) } catch {}
         ;(base as any).numero = String(ldv)
         ;(base as any).tracking_number = String(ldv)

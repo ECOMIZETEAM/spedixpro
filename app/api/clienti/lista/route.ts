@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { isProviderTecnico } from '@/lib/corriere-logo'
 import { isAgente, nomeAgente } from '@/lib/agente'
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -53,7 +54,7 @@ export async function GET(req: NextRequest) {
     const attivi = corr.filter((co:any)=>{
       const k = c.id + '|' + co.id
       return abilMap.has(k) ? abilMap.get(k) : true
-    }).map((co:any)=>({ nome_contratto: co.nome_contratto, tipo: co.tipo }))
+    }).map((co:any)=>({ nome_contratto: co.nome_contratto, tipo: isProviderTecnico(co.tipo) ? null : co.tipo }))
     return { ...c, contratti_attivi: attivi, negozi: negoziMap.get(c.id) || [] }
   })
   if (conMaster && utente?.master_id && !isAgente(utente)) {
@@ -78,7 +79,7 @@ export async function GET(req: NextRequest) {
       const { data: corrFigli } = await admin.from('corrieri').select('master_id,nome_contratto,tipo').in('master_id', figliIds)
       for (const c of (corrFigli || [])) {
         if (!corrPerSub.has(c.master_id)) corrPerSub.set(c.master_id, [])
-        corrPerSub.get(c.master_id)!.push({ nome_contratto: c.nome_contratto, tipo: c.tipo })
+        corrPerSub.get(c.master_id)!.push({ nome_contratto: c.nome_contratto, tipo: isProviderTecnico(c.tipo) ? null : c.tipo })
       }
     }
     const masterOut = (figli || []).map((m: any) => ({

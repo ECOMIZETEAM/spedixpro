@@ -43,7 +43,7 @@ const CARRIERS: Record<string,{nome:string,colore:string}> = {
 // Sigla di ripiego quando il contratto non ha un marchio riconosciuto. Attenzione: qui arriva
 // il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
 // all'utente ('EASYPARCEL'). Ogni provider ha la sua sigla neutra.
-const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':t==='easyparcel'?'DVA':(t||'').toUpperCase()
+const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':t==='easyparcel'?'V':(t||'').toUpperCase()
 
 export default function NuovaSpedizionePage() {
   const dialog = useDialog()
@@ -272,10 +272,36 @@ export default function NuovaSpedizionePage() {
     }
     setCreating(false)
     setSuccesso({numero:data.numero||'—', id:data.spedizioneId||'', ritiro: ritiroEsito})
+    // Alcuni corrieri preparano la lettera di vettura qualche secondo dopo aver accettato l'ordine.
+    // Finché non c'è, la spedizione porta un numero provvisorio: mostrarlo qui vorrebbe dire dare
+    // all'utente un numero che il corriere non conosce. Quindi lo si richiede finché non arriva
+    // quello vero (e con lui il codice del ritiro) e il messaggio si aggiorna da solo.
+    if (data.spedizioneId && (data.provvisorio || (richiediRitiro && !ritiroEsito?.pickupId))) {
+      attendiDatiCorriere(data.spedizioneId, richiediRitiro)
+    }
     resetForm()   // form pulito per la prossima spedizione (il banner successo resta visibile)
   }
 
   
+
+
+  // Richiede numero e codice ritiro finché il corriere non li ha pronti (al massimo ~40 secondi:
+  // oltre è il completamento in background a scriverli, e si vedono in Elenco).
+  async function attendiDatiCorriere(id: string, conRitiro: boolean) {
+    for (let i = 0; i < 16; i++) {
+      await new Promise(r => setTimeout(r, 2500))
+      try {
+        const st = await (await fetch(`/api/spedizioni/stato?id=${encodeURIComponent(id)}`)).json()
+        if (st?.error) return
+        setSuccesso(s => s && s.id === id ? {
+          ...s,
+          numero: st.numero || s.numero,
+          ritiro: s.ritiro && st.codiceRitiro ? { ...s.ritiro, pickupId: st.codiceRitiro } : s.ritiro,
+        } : s)
+        if (!st.provvisorio && (!conRitiro || st.codiceRitiro)) return
+      } catch { return }
+    }
+  }
 
   return (
     <div>

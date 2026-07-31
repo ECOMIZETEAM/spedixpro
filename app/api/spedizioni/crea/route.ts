@@ -1104,6 +1104,24 @@ export async function POST(req: NextRequest) {
             const w = await wb(apikey, idOrdineBg, 5, 3000)
             const upd: any = {}
             if (w.numero) { upd.numero = w.numero; upd.tracking_number = w.numero }
+            // Il codice di prenotazione del ritiro viaggia con la lettera di vettura: se non era
+            // pronta al momento della creazione, questo e' l'unico momento in cui lo si puo'
+            // ancora prendere. Senza salvarlo qui il ritiro resterebbe per sempre senza numero.
+            if (w.codiceRitiro) {
+              const codice = w.codiceRitiro.split(/\s+/)[0]
+              // Si rilegge la riga adesso: nel frattempo la schermata ha chiamato /api/ritiri/crea,
+              // che ha agganciato la spedizione alla riga Ritiri (ritiro_id). Quella riga e' nata
+              // senza codice — qui la si completa.
+              const { data: att } = await adminCrea.from('spedizioni')
+                .select('raw_response,ritiro_id').eq('id', spedIdBg).maybeSingle()
+              upd.raw_response = { ...((att?.raw_response as any) || {}), _codiceRitiro: w.codiceRitiro }
+              if (att?.ritiro_id) {
+                try {
+                  await adminCrea.from('ritiri').update({ cod_ritiro: codice, tracking_ritiro: codice })
+                    .eq('id', att.ritiro_id).is('cod_ritiro', null)
+                } catch { }
+              }
+            }
             const b64 = (await unisci(w.singole.map(s => s.pdfBase64))) || w.pdfBase64
             if (b64) upd.etichetta_url = `data:application/pdf;base64,${b64}`
             // Anche qui le etichette vanno rimesse collo per collo, non solo quella unica.
@@ -1136,6 +1154,11 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json({
         numero: numeroFinale, tracking: ldv, costo: costoCorrente.toFixed(2), spedizioneId: inserted?.id || null,
+        // Il codice di prenotazione del ritiro va restituito subito: e' quello che l'utente deve
+        // esibire al corriere. Se la lettera di vettura non era ancora pronta qui e' vuoto, e la
+        // schermata lo richiede tra qualche secondo con /api/spedizioni/stato.
+        codiceRitiro: _codiceRitiro ? _codiceRitiro.split(/\s+/)[0] : null,
+        provvisorio: !ldv,
       })
     } catch (err: any) {
       // Si arriva qui SOLO da preventivo/ordine falliti: da li' in poi il ramo non lancia piu'.

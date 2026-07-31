@@ -174,7 +174,7 @@ export async function GET(req: NextRequest) {
           if (b64) upd.etichetta_url = `data:application/pdf;base64,${b64}`
           if (w.numero && w.numero !== s.tracking_number) {
             upd.tracking_number = w.numero
-            if (/^DVA-/.test(String(s.numero || ''))) upd.numero = w.numero
+            if (/^(TMP|DVA)-/.test(String(s.numero || ''))) upd.numero = w.numero
           }
         } catch { /* non ancora pronta: riprovo al giro dopo */ }
       }
