@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
 
   const ruolo = (utente?.ruolo || '').toLowerCase()
   // Campi extra per l'eventuale "riepilogo ordine" (packing slip) da anteporre alle etichette.
-  const cols = 'id,numero,etichetta_url,colli_dettaglio,cliente_id,created_at,rif_ordine,rif_destinatario,contenuto,colli,peso_reale,peso_fatturato,contrassegno,dest_nome,dest_indirizzo,dest_citta,dest_cap,dest_provincia,dest_paese,dest_telefono,mitt_nome,corriere_id,corrieri(nome_contratto)'
+  const cols = 'id,numero,etichetta_url,etichetta_path,colli_dettaglio,cliente_id,created_at,rif_ordine,rif_destinatario,contenuto,colli,peso_reale,peso_fatturato,contrassegno,dest_nome,dest_indirizzo,dest_citta,dest_cap,dest_provincia,dest_paese,dest_telefono,mitt_nome,corriere_id,corrieri(nome_contratto)'
   let spedizioni: any[] | null = null
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
@@ -46,32 +46,51 @@ export async function POST(req: NextRequest) {
   const fontBold = await pdfMerged.embedFont(StandardFonts.HelveticaBold)
 
   for (const s of spedizioni || []) {
+    // Etichette da stampare per questa spedizione. Sul MULTICOLLO ce n'e' una per collo; sul
+    // monocollo il collo non la porta (sarebbe una copia identica) e si usa quella della spedizione.
+    // ATTENZIONE: il ripiego DEVE dipendere dall'aver trovato o no delle etichette, non dal solo
+    // fatto che colli_dettaglio esista. Con il controllo sbagliato una spedizione monocollo con
+    // dettaglio colli valorizzato usciva dalla stampa SENZA ETICHETTA e senza alcun errore.
     const colli = (s.colli_dettaglio as any[]) || []
     const urls: string[] = []
-    if (colli.length > 0) {
-      colli.forEach((c: any) => { if (c.etichetta_url) urls.push(c.etichetta_url) })
-    } else if (s.etichetta_url) {
-      urls.push(s.etichetta_url)
+    colli.forEach((c: any) => { if (c.etichetta_url) urls.push(c.etichetta_url) })
+    if (!urls.length && s.etichetta_url) urls.push(s.etichetta_url)
+
+    // Forma nuova (PDF su Storage): non e' una stringa da decodificare, si scarica.
+    const daStorage: Uint8Array[] = []
+    if (!urls.length && (s as any).etichetta_path) {
+      const { leggiEtichetta } = await import('@/lib/etichette')
+      const et = await leggiEtichetta(admin, s as any)
+      if (et) daStorage.push(new Uint8Array(et.buffer))
     }
 
     // Prima le pagine ETICHETTA...
-    for (const url of urls) {
+    const sorgenti: Array<{ url?: string; bytes?: Uint8Array }> = [
+      ...urls.map(u => ({ url: u })), ...daStorage.map(b => ({ bytes: b })),
+    ]
+    let stampate = 0
+    for (const src of sorgenti) {
       try {
         let pdfBytes: Uint8Array
-        if (url.startsWith('data:application/pdf;base64,')) {
-          const base64 = url.replace('data:application/pdf;base64,', '')
+        if (src.bytes) pdfBytes = src.bytes
+        else if (src.url!.startsWith('data:application/pdf;base64,')) {
+          const base64 = src.url!.replace('data:application/pdf;base64,', '')
           pdfBytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
         } else {
-          const res = await fetch(url)
+          const res = await fetch(src.url!)
           pdfBytes = new Uint8Array(await res.arrayBuffer())
         }
         const pdf = await PDFDocument.load(pdfBytes)
         const pages = await pdfMerged.copyPages(pdf, pdf.getPageIndices())
         pages.forEach(p => pdfMerged.addPage(p))
+        stampate++
       } catch(e) {
         console.error('Errore PDF:', e)
       }
     }
+    // Una spedizione che esce senza NESSUNA pagina e' il guasto peggiore: il pacco parte senza
+    // etichetta e nessuno se ne accorge. Almeno resta scritto nei log.
+    if (!stampate) console.error('[ETICHETTE-BULK] nessuna etichetta stampata per', s.numero, s.id)
     // ...poi il RIEPILOGO ordine SOTTO l'etichetta (se il cliente lo ha attivato).
     try { disegnaRiepilogoSped(pdfMerged, font, fontBold, riepCtx, s) } catch (e) { console.error('Errore riepilogo:', e) }
   }

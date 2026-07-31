@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
 
   const { data: sped } = await supabase
     .from('spedizioni')
-    .select('etichetta_url, colli_dettaglio, cliente_id, master_id, numero, raw_response, corriere_id')
+    .select('etichetta_url, etichetta_path, colli_dettaglio, cliente_id, master_id, numero, raw_response, corriere_id')
     .eq('id', id)
     .single()
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
@@ -67,6 +67,22 @@ export async function GET(req: NextRequest) {
       disegnaRiepilogoSped(out, font, fontBold, riepCtx, spedFull)
       return Buffer.from(await out.save())
     } catch (e) { console.error('Riepilogo singola etichetta:', e); return buf }
+  }
+
+  // FORMA NUOVA: il PDF sta su Storage e nella riga c'e' solo il percorso. Si prova per prima;
+  // se il file non c'e' si prosegue con le forme storiche qui sotto, senza interrompere nulla.
+  if ((sped as any).etichetta_path) {
+    const { leggiEtichetta } = await import('@/lib/etichette')
+    const { createAdminSupabase: _admE } = await import('@/lib/supabase-admin')
+    const et = await leggiEtichetta(_admE(), sped as any)
+    if (et) {
+      const out = et.mime === 'application/pdf' ? await conRiepilogo(et.buffer) : et.buffer
+      return new NextResponse(new Uint8Array(out), { status: 200, headers: {
+        'Content-Type': et.mime,
+        'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.${et.ext}"`,
+        'Cache-Control': 'private, max-age=0, no-store',
+      } })
+    }
   }
 
   // Caso spedisci.online: etichetta come labelData base64 dentro raw_response.
