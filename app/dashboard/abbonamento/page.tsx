@@ -271,16 +271,10 @@ export default function AbbonamentoPage() {
               {attuale ? (
                 <div style={{fontSize:'12px',fontWeight:700,color:'#16a34a',padding:'8px 0'}}>✓ Piano attuale</div>
               ) : conCarta ? (
-                <>
-                  <button onClick={()=>pagaConCarta(p.id)} disabled={!!azione}
-                    style={{width:'100%',background: isUp?ACCENT:'#fff',color:isUp?'#fff':'#1a1a1a',border:isUp?'none':'1px solid #d1d5db',borderRadius:'6px',padding:'8px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',opacity:azione===p.id?0.6:1}}>
-                    {azione===p.id?'…':(!stato?.attivo?'Attiva con carta':isUp?'Upgrade':'Downgrade')}
-                  </button>
-                  <button onClick={()=>cambia(p.id, p.prezzo)} disabled={!!azione}
-                    style={{width:'100%',background:'none',border:'none',color:'#777',fontSize:'11px',padding:'6px 0 0',cursor:'pointer',textDecoration:'underline'}}>
-                    oppure scala dal credito
-                  </button>
-                </>
+                <button onClick={()=>pagaConCarta(p.id)} disabled={!!azione}
+                  style={{width:'100%',background: isUp?ACCENT:'#fff',color:isUp?'#fff':'#1a1a1a',border:isUp?'none':'1px solid #d1d5db',borderRadius:'6px',padding:'8px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',opacity:azione===p.id?0.6:1}}>
+                  {azione===p.id?'…':(!stato?.attivo?'Attiva con carta':isUp?'Upgrade':'Downgrade')}
+                </button>
               ) : (
                 <button onClick={()=>cambia(p.id, p.prezzo)} disabled={!!azione}
                   style={{width:'100%',background: isUp?ACCENT:'#fff',color:isUp?'#fff':'#1a1a1a',border:isUp?'none':'1px solid #d1d5db',borderRadius:'6px',padding:'8px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',opacity:azione===p.id?0.6:1}}>

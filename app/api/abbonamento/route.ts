@@ -154,10 +154,14 @@ export async function POST(req: NextRequest) {
   }
   const isRoot = rootId === payer  // il master principale è la piattaforma: esente
 
-  // Chi ha l'abbonamento sulla carta lo cambia da li', non da qui: fargli scalare anche il credito
-  // vorrebbe dire incassare due volte lo stesso mese, una dal circuito e una dal suo conto.
-  if ((m as any)?.stripe_subscription_id && (m as any)?.stripe_stato !== 'canceled') {
-    return NextResponse.json({ error: 'Il tuo abbonamento è pagato con carta: cambia piano dal pulsante di pagamento, non dal credito.' }, { status: 400 })
+  // IL CANONE SI PAGA CON CARTA, punto. La vecchia strada — scalarlo dal credito interno e poi
+  // rincorrere il bonifico a mano — non e' piu' un'alternativa offerta: toglierla solo dalle
+  // schermate non basterebbe, perche' questa rotta si puo' chiamare lo stesso.
+  //
+  // Restano fuori dalla regola solo chi non paga per davvero: il master principale (e' la
+  // piattaforma) e i master esenti, per cui l'importo e' zero e non c'e' niente da incassare.
+  if (stripeConfigurato() && !isRoot && !(m as any)?.abbonamento_esente) {
+    return NextResponse.json({ error: 'Il canone si paga con carta: scegli il piano e completa il pagamento.' }, { status: 400 })
   }
 
   const mese = meseCorrente()

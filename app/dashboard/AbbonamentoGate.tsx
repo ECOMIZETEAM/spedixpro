@@ -45,7 +45,7 @@ export default function AbbonamentoGate() {
         <div style={{padding:'24px 28px',borderBottom:'1px solid #eee',textAlign:'center'}}>
           <div style={{fontSize:'22px',fontWeight:800,color:'#1a1a1a'}}>Moov<span style={{color:ACCENT}}>Express</span></div>
           <div style={{fontSize:'15px',fontWeight:700,color:'#1a1a1a',marginTop:'10px'}}>Scegli un abbonamento per iniziare</div>
-          <div style={{fontSize:'13px',color:'#777',marginTop:'4px'}}>Per usare la piattaforma seleziona un pacchetto. Puoi pagare con carta (rinnovo automatico ogni mese) oppure farlo scalare dal tuo credito.</div>
+          <div style={{fontSize:'13px',color:'#777',marginTop:'4px'}}>Per usare la piattaforma seleziona un pacchetto. Il canone si paga con carta e si rinnova ogni mese; puoi cambiare piano o disdire quando vuoi.</div>
         </div>
         {msg && <div style={{margin:'16px 28px 0',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px',fontSize:'13px',color:'#dc2626'}}>{msg}</div>}
         <div style={{padding:'20px 28px',display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:'12px'}}>
@@ -55,16 +55,10 @@ export default function AbbonamentoGate() {
               <div style={{fontSize:'12px',color:'#777'}}>fino a <b>{p.limite.toLocaleString('it-IT')}</b> spedizioni/mese</div>
               <div style={{fontSize:'22px',fontWeight:800,color:ACCENT,marginTop:'4px'}}>€ {p.prezzo}<span style={{fontSize:'12px',color:'#999',fontWeight:600}}>/mese</span></div>
               {stato.carta?.disponibile ? (
-                <>
-                  <button onClick={()=>pagaConCarta(p.id)} disabled={!!scegliendo}
-                    style={{marginTop:'8px',background:ACCENT,color:'#fff',border:'none',borderRadius:'8px',padding:'9px',fontSize:'13px',fontWeight:700,cursor:'pointer',opacity:scegliendo===p.id?0.6:1}}>
-                    {scegliendo===p.id?'…':'Attiva con carta'}
-                  </button>
-                  <button onClick={()=>scegli(p.id)} disabled={!!scegliendo}
-                    style={{background:'none',border:'none',color:'#777',fontSize:'11px',padding:'6px 0 0',cursor:'pointer',textDecoration:'underline'}}>
-                    oppure scala dal credito
-                  </button>
-                </>
+                <button onClick={()=>pagaConCarta(p.id)} disabled={!!scegliendo}
+                  style={{marginTop:'8px',background:ACCENT,color:'#fff',border:'none',borderRadius:'8px',padding:'9px',fontSize:'13px',fontWeight:700,cursor:'pointer',opacity:scegliendo===p.id?0.6:1}}>
+                  {scegliendo===p.id?'…':'Attiva con carta'}
+                </button>
               ) : (
                 <button onClick={()=>scegli(p.id)} disabled={!!scegliendo}
                   style={{marginTop:'8px',background:ACCENT,color:'#fff',border:'none',borderRadius:'8px',padding:'9px',fontSize:'13px',fontWeight:700,cursor:'pointer',opacity:scegliendo===p.id?0.6:1}}>
