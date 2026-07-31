@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 import { isAgente, clientiAgente } from '@/lib/agente'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { preparaRiepiloghi, disegnaRiepilogoSped } from '@/lib/riepilogo-ordine'
@@ -115,7 +116,7 @@ export async function GET(req: NextRequest) {
   if (!src && (sped as any).corriere_id) {
     const idOrdine = (sped.raw_response as any)?._idOrdine
     if (idOrdine) {
-      const { data: corrEP } = await supabase.from('corrieri').select('tipo,credenziali').eq('id', (sped as any).corriere_id).maybeSingle()
+      const { data: corrEP } = await createAdminSupabase().from('corrieri').select('tipo,credenziali').eq('id', (sped as any).corriere_id).maybeSingle()
       const apikeyEP = (corrEP?.credenziali as any)?.apikey
       if (corrEP?.tipo === 'easyparcel' && apikeyEP) {
         try {
@@ -144,7 +145,7 @@ export async function GET(req: NextRequest) {
   if (!src) {
     const shipId = (sped.raw_response as any)?.id || (sped.raw_response as any)?.shipmentId
     if (shipId && (sped as any).corriere_id) {
-      const { data: corr } = await supabase.from('corrieri').select('tipo,credenziali').eq('id', (sped as any).corriere_id).maybeSingle()
+      const { data: corr } = await createAdminSupabase().from('corrieri').select('tipo,credenziali').eq('id', (sped as any).corriere_id).maybeSingle()
       const authcode = (corr?.credenziali as any)?.authcode
       if (corr?.tipo === 'spediamopro' && authcode) {
         try {

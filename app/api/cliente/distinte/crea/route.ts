@@ -8,6 +8,7 @@ import { fulfillSpedizioniTiktok } from '@/lib/tiktokFulfill'
 import { fulfillSpedizioniTemu } from '@/lib/temuFulfill'
 import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -56,7 +57,11 @@ export async function POST(req: NextRequest) {
   try { await fulfillSpedizioniTiktok(supabase, validIds) } catch {}
   try { await fulfillSpedizioniTemu(supabase, validIds) } catch {}
   // Chiusura borderò su spedisci.online (best-effort, solo corrieri tipo spedisci)
-  try { await chiudiBorderoSpedisci(supabase, distinta.id) } catch {}
-  try { await chiudiBordereauSpediamopro(supabase, distinta.id) } catch {}
+  // Client ADMIN: la chiusura al corriere legge le credenziali del contratto, che con il token di
+  // un utente non sono piu' leggibili (e non devono esserlo). Il perimetro l'ha gia' deciso questa
+  // rotta: la distinta appena creata e' del cliente loggato.
+  const _adminChiusura = createAdminSupabase()
+  try { await chiudiBorderoSpedisci(_adminChiusura, distinta.id) } catch {}
+  try { await chiudiBordereauSpediamopro(_adminChiusura, distinta.id) } catch {}
   return NextResponse.json({ ok: true, distintaId: distinta.id, numero: distinta.numero, totali: { colli: totaleColli, peso: totalePeso, spedizioni: validIds.length }, fulfill: fulfillEsiti })
 }

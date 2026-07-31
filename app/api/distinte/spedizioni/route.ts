@@ -101,7 +101,12 @@ export async function POST(req: NextRequest) {
     await fulfillMarketplace(createAdminSupabase(), spedIdsValidi)
   } catch {}
   // Chiusura borderò/distinta lato corriere (best-effort): Spedisci.online e SpediamoPro (bordereau).
-  try { const { chiudiBorderoSpedisci } = await import('@/lib/spedisci'); await chiudiBorderoSpedisci(db, distinta.id) } catch {}
-  try { const { chiudiBordereauSpediamopro } = await import('@/lib/spediamopro'); await chiudiBordereauSpediamopro(db, distinta.id) } catch {}
+  // Client ADMIN, non `db`: quando la distinta e' del proprio master, `db` e' il client dell'utente,
+  // che non puo' piu' leggere le credenziali del contratto — e senza quelle la chiusura al corriere
+  // fallirebbe in silenzio.
+  const { createAdminSupabase: _admChiusura } = await import('@/lib/supabase-admin')
+  const _dbChiusura = _admChiusura()
+  try { const { chiudiBorderoSpedisci } = await import('@/lib/spedisci'); await chiudiBorderoSpedisci(_dbChiusura, distinta.id) } catch {}
+  try { const { chiudiBordereauSpediamopro } = await import('@/lib/spediamopro'); await chiudiBordereauSpediamopro(_dbChiusura, distinta.id) } catch {}
   return NextResponse.json({ success: true, distintaId: distinta.id, numero: numeroDistinta })
 }

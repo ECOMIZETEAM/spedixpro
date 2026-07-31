@@ -73,3 +73,59 @@ grant execute on function public.storna_prenotazione_spedizione(text) to authent
 -- Bucket dei file riservati: privato, con tetto e tipi ammessi.
 update storage.buckets set public = false, file_size_limit = 26214400
 where id = 'reports';
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SECONDA PARTE (31/07/2026): listini d'acquisto e credenziali dei corrieri
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- Il LISTINO CORRIERI e' il costo d'acquisto del master: lo vede solo lo staff.
+-- Le policy erano "master_id = il mio master", senza guardare il ruolo — e
+-- utenti.master_id e' valorizzato anche per i 503 clienti e i 18 agenti.
+do $$
+declare r record;
+begin
+  for r in
+    select * from (values
+      ('listini_corrieri','listini_corrieri_access','master_id = public.auth_master_id()'),
+      ('listini_corrieri_fasce','listini_corrieri_fasce_access','listino_id in (select id from public.listini_corrieri where master_id = public.auth_master_id())'),
+      ('listini_corrieri_supplementi','listini_corrieri_suppl_access','listino_id in (select id from public.listini_corrieri where master_id = public.auth_master_id())'),
+      ('listini_corrieri_corrieri','listini_corrieri_corrieri_access','listino_id in (select id from public.listini_corrieri where master_id = public.auth_master_id())')
+    ) as t(tab, pol, cond)
+  loop
+    execute format('drop policy if exists %I on public.%I', r.pol, r.tab);
+    execute format('create policy %I on public.%I for all using (%s and public.auth_staff_master()) with check (%s and public.auth_staff_master())',
+                   r.tab || '_staff', r.tab, r.cond, r.cond);
+  end loop;
+end $$;
+
+-- I PREZZI DI VENDITA si leggono, non si riscrivono: un cliente poteva portare a
+-- 0,01 le proprie fasce e alterare quelle di tutti gli altri clienti del master.
+do $$
+declare r record;
+begin
+  for r in
+    select * from (values
+      ('listini_clienti_fasce','listini_clienti_fasce_access'),
+      ('listini_clienti_supplementi','listini_clienti_suppl_access'),
+      ('listini_clienti_corrieri','listini_clienti_corrieri_access')
+    ) as t(tab, pol)
+  loop
+    execute format('drop policy if exists %I on public.%I', r.pol, r.tab);
+    execute format($f$create policy %I on public.%I for select using (listino_id in (select id from public.listini_clienti where master_id in (select public.mia_rete_master())))$f$, r.tab || '_leggi', r.tab);
+    execute format($f$create policy %I on public.%I for insert with check (listino_id in (select id from public.listini_clienti where master_id in (select public.mia_rete_master())) and public.auth_staff_master())$f$, r.tab || '_inserisci', r.tab);
+    execute format($f$create policy %I on public.%I for update using (listino_id in (select id from public.listini_clienti where master_id in (select public.mia_rete_master())) and public.auth_staff_master()) with check (listino_id in (select id from public.listini_clienti where master_id in (select public.mia_rete_master())) and public.auth_staff_master())$f$, r.tab || '_aggiorna', r.tab);
+    execute format($f$create policy %I on public.%I for delete using (listino_id in (select id from public.listini_clienti where master_id in (select public.mia_rete_master())) and public.auth_staff_master())$f$, r.tab || '_elimina', r.tab);
+  end loop;
+end $$;
+
+-- LE CREDENZIALI DEI CORRIERI non si leggono con il token di un utente.
+-- E' la cosa piu' grave trovata: con quelle chiavi si spedisce direttamente
+-- sull'account del master, a sue spese. Il REVOKE sulla singola colonna non
+-- basta: c'era un permesso di lettura a livello di TABELLA, che copre tutte le
+-- colonne. Si toglie quello e si riconcedono le colonne una per una.
+revoke select on public.corrieri from authenticated, anon;
+grant select (id, master_id, tipo, nome_contratto, attivo, livello, multicollo,
+              inserimento_ritiri, settings, created_at, updated_at, condivisibile)
+  on public.corrieri to authenticated;
+-- NB: aggiungendo una colonna a `corrieri` va aggiunta anche a questa GRANT,
+-- altrimenti resta invisibile al portale.

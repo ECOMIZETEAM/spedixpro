@@ -108,7 +108,10 @@ export async function POST(req: NextRequest) {
 
   // Fallback: primo corriere del listino (compatibilità)
   if (!corriereRecord && cliente?.listino_cliente_id) {
-    const { data: fascia } = await supabase
+    // adminCrea, non il client dell'utente: le credenziali del contratto non devono essere
+    // leggibili con il token di chi chiama (vedi la revoca sulla colonna `credenziali`).
+    // Il perimetro resta quello del listino assegnato al cliente.
+    const { data: fascia } = await adminCrea
       .from('listini_clienti_fasce')
       .select('corrieri(id,tipo,credenziali,nome_contratto,attivo,master_id)')
       .eq('listino_id', cliente.listino_cliente_id)
@@ -118,7 +121,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (!corriereRecord) {
-    const { data: c } = await supabase
+    const { data: c } = await adminCrea
       .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id,settings,multicollo')
       .eq('master_id', masterId).eq('tipo', 'spedisci')
       .limit(1)
@@ -407,7 +410,10 @@ export async function POST(req: NextRequest) {
   //    ereditato). Se un master "credito_scalare" è a secco, tutta la catena è bloccata.
   //    Il proprietario del corriere non viene bloccato qui (costo API noto solo dopo). ──
   if (!isProprio) {
-    const catenaCheck = await verificaCreditoCatena(supabase, {
+    // adminCrea: la catena legge i listini d'acquisto dei master SOPRA, che col token di chi
+  // chiama non sono (e non devono essere) leggibili. Con il client dell'utente questa verifica
+  // vedeva solo una parte della catena.
+  const catenaCheck = await verificaCreditoCatena(adminCrea, {
       masterDirettoId: masterId,
       corriereOwnerId: corriereRecord.master_id,
       provincia: body.shipTo.state,
@@ -561,7 +567,7 @@ export async function POST(req: NextRequest) {
     // Addebito a cascata sui master della catena. Vale ANCHE per la spedizione propria di
     // un master: costruisciCatena risale dal master fino al proprietario reale del contratto
     // e addebita ogni livello col suo prezzo (il proprietario paga il costo reale API).
-    await addebitaCatena(supabase, {
+    await addebitaCatena(adminCrea, {
       masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
       costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
       cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
@@ -744,7 +750,7 @@ export async function POST(req: NextRequest) {
       await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
 
       // Addebito a cascata sui master della catena (vale anche per la spedizione propria).
-      await addebitaCatena(supabase, {
+      await addebitaCatena(adminCrea, {
         masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
         costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
         cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
@@ -1023,7 +1029,7 @@ export async function POST(req: NextRequest) {
       // l'eccezione finirebbe nel catch in fondo e l'utente si vedrebbe un "corriere non
       // disponibile" per una spedizione che invece e' stata creata regolarmente.
       try {
-        await addebitaCatena(supabase, {
+        await addebitaCatena(adminCrea, {
           masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
           costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
           cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,

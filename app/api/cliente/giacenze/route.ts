@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { SPED_COLS_CLIENTE } from '@/lib/spedizioni-cols'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -40,7 +41,10 @@ export async function POST(req: NextRequest) {
   if (!clienteId) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
   const body = await req.json()
   const { spedizioneId, istruzioni, azione } = body
-  const { data: spedizione } = await supabase.from('spedizioni')
+  // Client ADMIN solo per questa lettura, perche' porta dentro le credenziali del contratto: non
+  // devono essere leggibili col token del cliente. Il filtro .eq('cliente_id', clienteId) tiene il
+  // perimetro esattamente com'era — la spedizione dev'essere sua.
+  const { data: spedizione } = await createAdminSupabase().from('spedizioni')
     .select('*, clienti(ragione_sociale), corrieri(credenziali,nome_contratto)')
     .eq('id', spedizioneId).eq('cliente_id', clienteId).single()
   if (!spedizione) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })

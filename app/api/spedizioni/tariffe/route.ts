@@ -10,6 +10,7 @@ import { calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
 // La sigla neutra al posto del tipo del contratto: il nome del sistema tecnico a valle non deve
 // arrivare al browser, nemmeno dentro il JSON (vedi lib/corriere-logo.ts).
 import { siglaContratto } from '@/lib/corriere-logo'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 
 const ZONE_MAP: Record<string,string> = {
   CA:'Sardegna',CI:'Sardegna',VS:'Sardegna',NU:'Sardegna',OG:'Sardegna',OT:'Sardegna',OR:'Sardegna',SS:'Sardegna',SU:'Sardegna',
@@ -393,7 +394,10 @@ export async function POST(req: NextRequest) {
     return dims[0] <= lim[0] && dims[1] <= lim[1] && dims[2] <= lim[2]
   })
 
-  const { data: fasce } = await supabase
+  // Client ADMIN per questa lettura: porta dentro `corrieri.credenziali`, che non deve essere
+  // leggibile col token di chi chiama. Il perimetro non cambia — resta il listino assegnato a
+  // QUESTO cliente, filtrato qui sotto per listino_id.
+  const { data: fasce } = await createAdminSupabase()
     .from('listini_clienti_fasce')
     // `attivo` serve al gate dei contratti in pausa qui sotto: senza, il ramo CLIENTE quotava anche
     // i contratti messi in pausa dal proprio master.
@@ -492,7 +496,10 @@ export async function POST(req: NextRequest) {
     // per questa destinazione+corriere, altrimenti non lo compra da sopra e NON può assegnarlo al
     // cliente → corriere escluso. (Gestione-zone è la fonte: se il master non ha la fascia per questa
     // zona, per lui è come non avere il corriere.) Non tocca peso/agevolazioni/misure: è un gate a monte.
-    const _costoMaster = await calcolaPrezzoCorriereDettaglio(supabase, {
+    // Client ADMIN: legge il LISTINO CORRIERI, cioe' il costo d'acquisto del master. Con il token
+    // del cliente quel listino non e' piu' leggibile (e non deve esserlo: confrontato col suo
+    // prezzo darebbe il margine). Il valore serve solo a questo gate, non esce nella risposta.
+    const _costoMaster = await calcolaPrezzoCorriereDettaglio(createAdminSupabase(), {
       corriereId, masterId, provincia, cap: capDest, paese: paeseDest, citta: (body.shipTo?.city || ''),
       pesoReale, packages: tuttiColli, contrassegno: 0, assicurazione: 0,
     })
