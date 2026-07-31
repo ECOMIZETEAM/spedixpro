@@ -52,7 +52,8 @@ const testo = (nome, piano, canone) => `
   </p>
 
   <p style="font-size:13px;color:#777;line-height:1.6;margin:20px 0 0">
-    Per qualsiasi dubbio rispondi a questa email o scrivici dall'assistenza nel portale.
+    Per qualsiasi dubbio scrivi a <a href="mailto:info@moovexpress.com" style="color:#f97316">info@moovexpress.com</a>
+    o aprici un ticket dall'assistenza nel portale.
   </p>
   <p style="font-size:13px;color:#777;margin:16px 0 0">Il team MoovExpress</p>`
 
@@ -103,6 +104,8 @@ for (const m of destinatari) {
   try {
     const r = await resend.emails.send({
       from: FROM, to: m.email,
+      // Le risposte devono arrivare a una casella vera che qualcuno legge, non al noreply.
+      replyTo: 'info@moovexpress.com',
       subject: 'MoovExpress — il canone passa al pagamento con carta',
       html: pagina(testo(m.nome, NOMI[m.abbonamento_piano] || '', m.abbonamento_prezzo)),
     })

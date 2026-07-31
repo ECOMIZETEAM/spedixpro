@@ -44,10 +44,18 @@ export async function fattoreVolumeCorriere(supabase: any, masterId: string, cor
     .select('id,corriere_id,fattore_volume').eq('master_id', masterId)
   if (!listini?.length) return 5000
   const listinoIds = listini.map((l: any) => l.id)
-  const proprio = listini.find((l: any) => l.corriere_id === corriereId) || listini[0]
+  // Il listino da cui leggere il fattore e' SOLO quello legato a QUESTO corriere. Prima, se il
+  // corriere non ne aveva uno, si ripiegava sul PRIMO listino del master — cioe' sul fattore di un
+  // altro contratto. Velox ha dodici listini con fattori 3333, 4000 e 5000 e nessun ordinamento
+  // garantito: il divisore di un contratto senza listino proprio usciva a caso fra quelli. Se non
+  // c'e' niente di suo, si usa 5000, che e' il valore dichiarato di default — mai quello di un altro.
+  const proprio = listini.find((l: any) => l.corriere_id === corriereId)
   let f = parseFloat(proprio?.fattore_volume) || 5000
   const { data: aggFv } = await supabase.from('listini_corrieri_corrieri')
     .select('listino_id,fattore_volume').in('listino_id', listinoIds).eq('corriere_id', corriereId)
+    .order('listino_id', { ascending: true })   // stesso risultato a ogni chiamata, non a caso
+  // Queste righe sono comunque tutte di QUESTO corriere: usarne una e' legittimo. Si preferisce
+  // quella sul listino suo, e in mancanza la prima in ordine stabile.
   const rows = (aggFv || []).filter((a: any) => parseFloat(a?.fattore_volume) > 0)
   const scelto = rows.find((a: any) => a.listino_id === proprio?.id) || rows[0]
   const fv = parseFloat(scelto?.fattore_volume); if (fv > 0) f = fv
@@ -315,13 +323,20 @@ export async function calcolaPrezzoCorriereDettaglio(
   const listinoIds = listini.map((l: any) => l.id)
   // Fattore volume PER-CORRIERE: l'editor lo salva in listini_corrieri_corrieri (per corriere),
   // NON nel default del listino. Va letto da lì, altrimenti si conteggia 5000 anche se hai messo 4000.
-  const listinoProprio = listini.find((l: any) => l.corriere_id === corriereId) || listini[0]
+  // Il listino da cui leggere il fattore e' SOLO quello legato a QUESTO corriere. Prima, se il
+  // corriere non ne aveva uno, si ripiegava sul PRIMO listino del master — cioe' sul fattore di un
+  // altro contratto. Velox ha dodici listini con fattori 3333, 4000 e 5000 e nessun ordinamento
+  // garantito: il divisore di un contratto senza listino proprio usciva a caso fra quelli. Se non
+  // c'e' niente di suo, si usa 5000, che e' il valore dichiarato di default — mai quello di un altro.
+  const listinoProprio = listini.find((l: any) => l.corriere_id === corriereId)
   let fattore = parseFloat(listinoProprio?.fattore_volume) || 5000
   {
     const { data: aggFv } = await supabase.from('listini_corrieri_corrieri')
       .select('listino_id,fattore_volume').in('listino_id', listinoIds).eq('corriere_id', corriereId)
+      .order('listino_id', { ascending: true })   // stesso risultato a ogni chiamata, non a caso
     const rows = (aggFv || []).filter((a: any) => parseFloat(a?.fattore_volume) > 0)
-    // preferisci l'override sul listino "proprio" del corriere, altrimenti un qualsiasi override valido
+    // preferisci l'override sul listino "proprio" del corriere, altrimenti un qualsiasi override
+    // valido di QUESTO corriere (mai di un altro)
     const scelto = rows.find((a: any) => a.listino_id === listinoProprio?.id) || rows[0]
     const fv = parseFloat(scelto?.fattore_volume)
     if (fv > 0) fattore = fv
