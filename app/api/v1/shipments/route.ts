@@ -187,7 +187,7 @@ export async function POST(req: NextRequest) {
         destinatario: { cap: body.shipTo.postalCode, localita: body.shipTo.city, provincia: body.shipTo.state, nazione: (body.shipTo.country || 'IT').toUpperCase() },
         contenuto: body.contenuto, contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
       })
-      const offerta = trovaOffertaVettore(offerte, vettore)
+      const offerta = trovaOffertaVettore(offerte, vettore, String(cred?.consegna || ''))
       if (!offerta) return NextResponse.json({ error: 'Nessuna tariffa disponibile per questa destinazione con il contratto scelto' }, { status: 400 })
       const opz = offerta.serviziopzionali || {}
       const codReq = Number(body.codValue || 0) > 0, assReq = Number(body.insuranceValue || 0) > 0

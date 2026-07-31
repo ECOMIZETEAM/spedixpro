@@ -900,7 +900,9 @@ export async function POST(req: NextRequest) {
       // Sulla stessa chiave rispondono TUTTI i vettori agganciati (verificato: 19 offerte in una
       // sola risposta). Si prende quello del contratto venduto, mai il primo della lista: sarebbe
       // come stampare un corriere diverso da quello che il cliente ha scelto e pagato.
-      const offerta = trovaOffertaVettore(offerte, vettore)
+      // Anche il SERVIZIO, non solo il vettore: lo stesso codice corriere torna piu' volte con
+      // livelli di servizio e prezzi diversi (vedi lib/easyparcel.ts).
+      const offerta = trovaOffertaVettore(offerte, vettore, String(cred?.consegna || ''))
       if (!offerta) {
         await stornaPrenotazione()
         return NextResponse.json({ error: 'Nessuna tariffa disponibile per questa destinazione con il contratto scelto: prova un altro contratto.' }, { status: 400 })

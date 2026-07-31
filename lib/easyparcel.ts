@@ -193,16 +193,30 @@ function luogo(l: LuogoEasyparcel, estero: boolean) {
 }
 
 // ── Scelta dell'offerta giusta ─────────────────────────────────────────────
-// Il preventivo torna PIU' offerte (DVA, DVALM, e in generale tutti i vettori agganciati alla
-// chiave). Ogni nostro contratto e' legato a UN vettore preciso (credenziali.vettore): va preso
-// quello, mai il primo della lista. Stessa logica di trovaRateContratto per l'altro provider:
-// se il vettore atteso non c'e', si restituisce null e la spedizione si ferma con un errore
-// chiaro — mai ripiegare su un vettore diverso da quello venduto al cliente.
-export function trovaOffertaVettore(offerte: any[], vettore: string): any | null {
+// Il preventivo torna PIU' offerte (tutti i vettori agganciati alla chiave). Ogni nostro contratto
+// e' legato a un vettore preciso (credenziali.vettore).
+//
+// MA IL CODICE VETTORE NON BASTA: identifica il CORRIERE, non il SERVIZIO. Verificato sul campo che
+// TNT compare TRE VOLTE nella stessa risposta, stesso codice "TNTM", con `consegna` diversa e prezzi
+// lontanissimi: E (espresso, 6,74) / X12 (entro le 12, 18,72) / X10 (entro le 10, 20,65). Prendere
+// "la prima che combacia" significa comprare un servizio a caso — e su Milano la differenza fra il
+// primo e il terzo e' tripla.
+// Quindi: se il contratto dichiara anche `consegna`, deve combaciare pure quella. Se non lo dichiara
+// e le offerte per quel vettore sono piu' d'una, si restituisce NULL: meglio una spedizione che non
+// parte con un errore chiaro, che una spedizione comprata sul servizio sbagliato.
+export function trovaOffertaVettore(offerte: any[], vettore: string, consegna?: string): any | null {
   if (!Array.isArray(offerte) || !offerte.length) return null
   const cercato = String(vettore || '').trim().toUpperCase()
   if (!cercato) return null
-  return offerte.find((o: any) => String(o?.vettore || '').trim().toUpperCase() === cercato) || null
+  const stessoVettore = offerte.filter((o: any) => String(o?.vettore || '').trim().toUpperCase() === cercato)
+  if (!stessoVettore.length) return null
+  const servizio = String(consegna || '').trim().toUpperCase()
+  if (servizio) {
+    const esatta = stessoVettore.filter((o: any) => String(o?.consegna || '').trim().toUpperCase() === servizio)
+    return esatta.length === 1 ? esatta[0] : null
+  }
+  // Nessun servizio dichiarato: va bene solo se non c'e' ambiguita'.
+  return stessoVettore.length === 1 ? stessoVettore[0] : null
 }
 
 // ── 2) ORDINE ──────────────────────────────────────────────────────────────
