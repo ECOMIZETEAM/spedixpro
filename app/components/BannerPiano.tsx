@@ -18,7 +18,8 @@ export default function BannerPiano({ linkUpgrade = null }: { linkUpgrade?: stri
     carica()
     // Il piano puo' sbloccarsi mentre uno sta lavorando (upgrade fatto da un'altra scheda, o dal
     // master sopra): senza un ricontrollo periodico resterebbe il banner rosso di prima.
-    const t = setInterval(carica, 120000)
+    // 5 minuti: lo stato cambia di rado, e questo giro lo fa OGNI scheda aperta di OGNI utente.
+    const t = setInterval(carica, 300000)
     return () => { vivo = false; clearInterval(t) }
   }, [])
 
