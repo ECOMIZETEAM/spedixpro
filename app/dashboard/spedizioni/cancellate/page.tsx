@@ -30,6 +30,7 @@ export default function SpedizioniCancellatePage() {
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
   const [paginaPending, setPaginaPending] = useState(1)   // paginazione sezione "in attesa di annullo"
+  const [paginaCoda, setPaginaCoda] = useState(1)         // paginazione coda annulli del detentore
   const [ripristinando, setRipristinando] = useState<string | null>(null)
   const [confermando, setConfermando] = useState<string | null>(null)
 
@@ -94,6 +95,12 @@ export default function SpedizioniCancellatePage() {
   const pendingVis = pending.filter(passaFiltri)
   const manualiVis = manualiAltri.filter(passaFiltri)
   const codaOwnerVis = codaOwner.filter(passaFiltri)   // anche la coda annulli segue ricerca/cliente/date
+  // Coda del detentore a pagine da 10: su E&A sono oltre cento e uscivano tutte insieme,
+  // rendendo la sezione inutilizzabile proprio a chi deve lavorarla.
+  const CODA_PER_PAGE = 10
+  const totPagCoda = Math.max(1, Math.ceil(codaOwnerVis.length / CODA_PER_PAGE))
+  const pagCodaCorr = Math.min(paginaCoda, totPagCoda)
+  const codaOwnerPaginata = codaOwnerVis.slice((pagCodaCorr - 1) * CODA_PER_PAGE, pagCodaCorr * CODA_PER_PAGE)
   const filtriAttivi = !!(filtroCliente || dal || al || cerca)
 
   const totalePagine = Math.max(1, Math.ceil(visibili.length / perPage))
@@ -162,7 +169,7 @@ export default function SpedizioniCancellatePage() {
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
               <tbody>
-                {codaOwnerVis.map(s => (
+                {codaOwnerPaginata.map(s => (
                   <tr key={s.id} style={{borderBottom:'1px solid #fee2e2'}}>
                     <td style={{padding:'9px 16px',fontWeight:'700',color:'#1a1a1a'}}>{s.numero}</td>
                     <td style={{padding:'9px 12px',color:'#666',fontSize:'12px'}}>Tracking: {s.tracking_number || '—'}</td>
@@ -178,6 +185,15 @@ export default function SpedizioniCancellatePage() {
                 ))}
               </tbody>
             </table>
+            {totPagCoda > 1 && (
+              <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:'6px',padding:'12px',borderTop:'1px solid #fee2e2'}}>
+                <button onClick={()=>setPaginaCoda(p=>Math.max(1,p-1))} disabled={pagCodaCorr<=1}
+                  style={{padding:'5px 10px',border:'1px solid #fca5a5',background:'#fff',color:'#b91c1c',borderRadius:'6px',fontSize:'12px',cursor:pagCodaCorr<=1?'default':'pointer',opacity:pagCodaCorr<=1?0.5:1}}>‹</button>
+                <span style={{fontSize:'12px',color:'#991b1b'}}>Pagina {pagCodaCorr} di {totPagCoda} · {codaOwnerVis.length} da annullare</span>
+                <button onClick={()=>setPaginaCoda(p=>Math.min(totPagCoda,p+1))} disabled={pagCodaCorr>=totPagCoda}
+                  style={{padding:'5px 10px',border:'1px solid #fca5a5',background:'#fff',color:'#b91c1c',borderRadius:'6px',fontSize:'12px',cursor:pagCodaCorr>=totPagCoda?'default':'pointer',opacity:pagCodaCorr>=totPagCoda?0.5:1}}>›</button>
+              </div>
+            )}
           </div>
           )}
         </div>
