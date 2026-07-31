@@ -123,3 +123,16 @@ $$;
 
 revoke all on function public.fn_limiti_catena(uuid, text) from anon, authenticated;
 revoke all on function public.fn_conta_spedizione() from anon, authenticated;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- PAGAMENTO DEL CANONE CON CARTA (vedi lib/stripe.ts)
+--   masters.stripe_customer_id / stripe_subscription_id / stripe_stato
+--   abbonamenti_pagamenti.stripe_invoice_id  (indice unico NON parziale: serve come chiave di
+--   conflitto nell'"inserisci o aggiorna", cosi' un webhook ripetuto non registra due incassi)
+--
+-- Nota: il revoke per COLONNA su masters e' inerte, perche' esiste un permesso di lettura
+-- sull'intera tabella che lo copre. Non lo si forza: /api/master legge masters con "select *" dal
+-- client dell'utente, e togliere il permesso su una colonna farebbe fallire l'INTERA query — e'
+-- gia' successo con le credenziali dei corrieri. Quei riferimenti non sono segreti (non aprono
+-- nulla) e nessuna schermata li mostra.
+-- ═══════════════════════════════════════════════════════════════════════════

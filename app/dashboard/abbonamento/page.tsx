@@ -20,6 +20,12 @@ export default function AbbonamentoPage() {
     setStato(d); setLoading(false)
   }
   useEffect(()=>{ carica() }, [])
+  useEffect(()=>{
+    const esito = new URLSearchParams(window.location.search).get('pagamento')
+    if (esito === 'ok') setMsg('✓ Pagamento ricevuto — il piano si attiva in pochi secondi, ricarica se non lo vedi già.')
+    if (esito === 'annullato') setMsg('Pagamento annullato: nessun addebito.')
+    if (esito) window.history.replaceState({}, '', window.location.pathname)
+  }, [])
 
   async function cambia(pianoId:string, prezzoNuovo:number) {
     const prezzoAttuale = Number(stato?.prezzo||0)
@@ -34,6 +40,24 @@ export default function AbbonamentoPage() {
     if (d.error) { setMsg(d.error); return }
     setMsg(d.addebitato>0 ? `✓ Piano attivato — scalati € ${d.addebitato}` : '✓ Piano aggiornato')
     carica()
+  }
+  // Pagamento con CARTA. Il piano non si attiva qui: si attiva quando il circuito conferma
+  // l'incasso. Chi ha gia' l'abbonamento non ripassa dalla cassa — si cambia il piano su quello
+  // che ha, col conguaglio dei giorni che restano.
+  async function pagaConCarta(pianoId:string) {
+    setAzione(pianoId); setMsg('')
+    const res = await fetch('/api/stripe/checkout', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pianoId }) })
+    const d = await res.json().catch(()=>({}))
+    if (d.url) { window.location.href = d.url; return }
+    setAzione('')
+    if (d.error) { setMsg(d.error); return }
+    if (d.aggiornato) { setMsg('✓ Piano aggiornato — la differenza arriverà nella prossima fattura'); carica() }
+  }
+  async function areaFatture() {
+    setAzione('fatture'); setMsg('')
+    const d = await fetch('/api/stripe/portal', { method:'POST' }).then(r=>r.json()).catch(()=>({}))
+    if (d.url) { window.location.href = d.url; return }
+    setAzione(''); setMsg(d.error || 'Area fatture non disponibile')
   }
   async function disdici() {
     if (!await dialog.confirm({ title: 'Disdire l\'abbonamento?', message: 'Il portale verrà BLOCCATO finché non selezioni un nuovo piano. Nessun rimborso.', danger: true, confirmText: 'Disdici' })) return
@@ -58,6 +82,7 @@ export default function AbbonamentoPage() {
   if (loading) return <div style={{padding:'40px',textAlign:'center',color:'#666'}}>Caricamento...</div>
 
   const perc = stato?.limite ? Math.min(100, (stato.spedizioni_mese/stato.limite)*100) : 0
+  const conCarta = !!stato?.carta?.disponibile
 
   // ROOT (master principale): illimitato, non paga; gestisce gli incassi della sua rete
   if (stato?.isRoot) {
@@ -194,6 +219,17 @@ export default function AbbonamentoPage() {
               <div style={{fontSize:'12px',color:'#1a1a1a',marginBottom:'4px'}}>Spedizioni questo mese: <b>{stato.spedizioni_mese?.toLocaleString('it-IT')}</b> di {stato.limite?.toLocaleString('it-IT')}</div>
               <div style={{height:'8px',background:'#f0f0f0',borderRadius:'999px',overflow:'hidden'}}><div style={{height:'100%',width:`${perc}%`,background:perc>90?'#dc2626':ACCENT,transition:'width .4s'}}/></div>
             </div>
+            {stato?.carta?.attiva && (
+              <div style={{marginTop:'12px',display:'flex',gap:'8px',alignItems:'center',flexWrap:'wrap'}}>
+                <button onClick={areaFatture} disabled={!!azione}
+                  style={{background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:700,cursor:'pointer'}}>
+                  {azione==='fatture'?'…':'Fatture e metodo di pagamento'}
+                </button>
+                {stato?.carta?.stato === 'past_due' && (
+                  <span style={{fontSize:'12px',color:'#b91c1c',fontWeight:600}}>Ultimo addebito non riuscito: aggiorna la carta.</span>
+                )}
+              </div>
+            )}
             <button onClick={disdici} disabled={!!azione}
               style={{marginTop:'14px',background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:600,cursor:'pointer'}}>Disdici abbonamento</button>
           </>
@@ -202,7 +238,10 @@ export default function AbbonamentoPage() {
         )}
       </div>
 
-      <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'10px'}}>Piani disponibili</div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',flexWrap:'wrap',gap:'8px',marginBottom:'10px'}}>
+        <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a'}}>Piani disponibili</div>
+        {conCarta && <div style={{fontSize:'11.5px',color:'#777'}}>Prezzi IVA esclusa (+{stato?.carta?.iva}%)</div>}
+      </div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:'12px'}}>
         {(stato?.piani||[]).map((p:any)=>{
           const attuale = stato?.piano===p.id
@@ -214,6 +253,17 @@ export default function AbbonamentoPage() {
               <div style={{fontSize:'20px',fontWeight:800,color:ACCENT,margin:'6px 0'}}>€ {p.prezzo}<span style={{fontSize:'11px',color:'#999',fontWeight:600}}>/mese</span></div>
               {attuale ? (
                 <div style={{fontSize:'12px',fontWeight:700,color:'#16a34a',padding:'8px 0'}}>✓ Piano attuale</div>
+              ) : conCarta ? (
+                <>
+                  <button onClick={()=>pagaConCarta(p.id)} disabled={!!azione}
+                    style={{width:'100%',background: isUp?ACCENT:'#fff',color:isUp?'#fff':'#1a1a1a',border:isUp?'none':'1px solid #d1d5db',borderRadius:'6px',padding:'8px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',opacity:azione===p.id?0.6:1}}>
+                    {azione===p.id?'…':(!stato?.attivo?'Attiva con carta':isUp?'Upgrade':'Downgrade')}
+                  </button>
+                  <button onClick={()=>cambia(p.id, p.prezzo)} disabled={!!azione}
+                    style={{width:'100%',background:'none',border:'none',color:'#777',fontSize:'11px',padding:'6px 0 0',cursor:'pointer',textDecoration:'underline'}}>
+                    oppure scala dal credito
+                  </button>
+                </>
               ) : (
                 <button onClick={()=>cambia(p.id, p.prezzo)} disabled={!!azione}
                   style={{width:'100%',background: isUp?ACCENT:'#fff',color:isUp?'#fff':'#1a1a1a',border:isUp?'none':'1px solid #d1d5db',borderRadius:'6px',padding:'8px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',opacity:azione===p.id?0.6:1}}>

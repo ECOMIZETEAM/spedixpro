@@ -1,0 +1,147 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { createAdminSupabase } from '@/lib/supabase-admin'
+import { stripeConfigurato, stripeClient, pianoDaPrezzo } from '@/lib/stripe'
+import { pianoById, meseCorrente } from '@/lib/piani'
+
+export const dynamic = 'force-dynamic'
+
+// NOTIFICHE DEL CIRCUITO DI PAGAMENTO.
+//
+// E' l'unico posto in cui un abbonamento pagato con carta si attiva, si rinnova o si spegne: qui
+// arriva la conferma che il denaro si e' mosso davvero. Nessun'altra rotta deve attivare un piano
+// a pagamento, altrimenti basterebbe aprire la pagina di pagamento e chiuderla per averlo gratis.
+//
+// La chiamata arriva da fuori, senza sessione: l'unica cosa che la autentica e' la FIRMA sul corpo
+// del messaggio. Senza la verifica della firma chiunque conoscesse l'indirizzo potrebbe regalarsi
+// un piano da 150.000 spedizioni con una richiesta HTTP.
+export async function POST(req: NextRequest) {
+  if (!stripeConfigurato() || !process.env.STRIPE_WEBHOOK_SECRET) {
+    return NextResponse.json({ error: 'non configurato' }, { status: 400 })
+  }
+  const firma = req.headers.get('stripe-signature') || ''
+  const corpo = await req.text()          // il corpo GREZZO: la firma si verifica sui byte esatti
+
+  const s = stripeClient()
+  let evento: any
+  try {
+    evento = s.webhooks.constructEvent(corpo, firma, process.env.STRIPE_WEBHOOK_SECRET)
+  } catch (e: any) {
+    console.error('[STRIPE][WEBHOOK] firma non valida:', e?.message)
+    return NextResponse.json({ error: 'firma non valida' }, { status: 400 })
+  }
+
+  const admin = createAdminSupabase()
+
+  // Il master a cui appartiene l'evento: prima dai dati che ci siamo scritti noi, poi — se
+  // mancassero — dal cliente sul circuito.
+  async function masterDi(oggetto: any): Promise<any | null> {
+    const id = oggetto?.metadata?.master_id
+      || oggetto?.subscription_details?.metadata?.master_id
+      || oggetto?.lines?.data?.[0]?.metadata?.master_id
+    if (id) {
+      const { data } = await admin.from('masters').select('id,nome,parent_master_id,abbonamento_piano,abbonamento_prezzo').eq('id', id).maybeSingle()
+      if (data) return data
+    }
+    const cust = typeof oggetto?.customer === 'string' ? oggetto.customer : oggetto?.customer?.id
+    if (!cust) return null
+    const { data } = await admin.from('masters').select('id,nome,parent_master_id,abbonamento_piano,abbonamento_prezzo').eq('stripe_customer_id', cust).maybeSingle()
+    return data || null
+  }
+
+  // Il master principale della rete: e' lui che incassa i canoni di tutti.
+  async function rootId(): Promise<string | null> {
+    const { data } = await admin.from('masters').select('id').is('parent_master_id', null).limit(1)
+    return data?.[0]?.id || null
+  }
+
+  try {
+    switch (evento.type) {
+      // ── Piano attivato o cambiato ─────────────────────────────────────────
+      case 'checkout.session.completed':
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated': {
+        const o = evento.data.object
+        const m = await masterDi(o)
+        if (!m) break
+        const subId = evento.type === 'checkout.session.completed'
+          ? (typeof o.subscription === 'string' ? o.subscription : o.subscription?.id)
+          : o.id
+        if (!subId) break
+        const sub = await s.subscriptions.retrieve(subId, { expand: ['items.data.price'] })
+        const piano = pianoDaPrezzo(sub.items.data[0]?.price as any) || pianoById(String(o?.metadata?.piano || ''))
+        const attivo = ['active', 'trialing', 'past_due'].includes(sub.status)
+        await admin.from('masters').update({
+          stripe_subscription_id: sub.id,
+          stripe_stato: sub.status,
+          // Il piano si toglie solo quando l'abbonamento e' davvero chiuso (evento apposito):
+          // uno stato 'past_due' significa che il circuito sta ancora riprovando, e spegnere la
+          // rete di qualcuno al primo tentativo fallito sarebbe sproporzionato.
+          ...(attivo && piano ? {
+            abbonamento_piano: piano.id, abbonamento_limite: piano.limite, abbonamento_prezzo: piano.prezzo,
+          } : {}),
+        }).eq('id', m.id)
+        break
+      }
+
+      // ── Canone incassato (primo mese e tutti i rinnovi) ───────────────────
+      case 'invoice.paid': {
+        const inv = evento.data.object
+        const m = await masterDi(inv)
+        if (!m) break
+        const root = await rootId()
+        // Da quale piano viene questo incasso. Il punto in cui il circuito espone il prezzo della
+        // riga e' cambiato fra le versioni della sua interfaccia: si provano le forme note e, se
+        // nessuna risponde, si va a leggerlo direttamente sull'abbonamento — che e' la fonte sicura.
+        const riga = inv.lines?.data?.[0]
+        let piano = pianoDaPrezzo(riga?.price) || pianoDaPrezzo(riga?.pricing?.price_details?.price)
+        if (!piano) {
+          const subRif = inv.subscription || inv.parent?.subscription_details?.subscription
+            || riga?.subscription || riga?.parent?.subscription_item_details?.subscription
+          const subId = typeof subRif === 'string' ? subRif : subRif?.id
+          if (subId) {
+            try {
+              const sub = await s.subscriptions.retrieve(subId, { expand: ['items.data.price'] })
+              piano = pianoDaPrezzo(sub.items.data[0]?.price as any)
+            } catch { /* si ripiega sul piano gia' registrato */ }
+          }
+        }
+        // L'importo registrato e' l'IMPONIBILE: nei conti dell'abbonamento l'IVA non e' un incasso,
+        // e' una partita di giro verso lo Stato.
+        const imponibile = Number(inv.total_excluding_tax ?? inv.subtotal ?? inv.amount_paid ?? 0) / 100
+        await admin.from('abbonamenti_pagamenti').upsert({
+          master_id: m.id, root_id: root, piano: piano?.id || m.abbonamento_piano || null,
+          mese: meseCorrente(new Date(Number(inv.created || 0) * 1000)),
+          importo: imponibile, pagato: true, pagato_il: new Date(Number(inv.created || 0) * 1000).toISOString(),
+          metodo: 'carta', stripe_invoice_id: inv.id,
+        }, { onConflict: 'stripe_invoice_id' })
+        // Canone del mese gia' assolto: il rinnovo automatico interno non deve riaddebitarlo.
+        await admin.from('masters').update({ abbonamento_mese: meseCorrente(), stripe_stato: 'active' }).eq('id', m.id)
+        break
+      }
+
+      // ── Pagamento non riuscito: il circuito riprovera' da solo ────────────
+      case 'invoice.payment_failed': {
+        const m = await masterDi(evento.data.object)
+        if (m) await admin.from('masters').update({ stripe_stato: 'past_due' }).eq('id', m.id)
+        break
+      }
+
+      // ── Abbonamento chiuso: il portale torna bloccato dalla scelta piano ──
+      case 'customer.subscription.deleted': {
+        const m = await masterDi(evento.data.object)
+        if (m) await admin.from('masters').update({
+          stripe_subscription_id: null, stripe_stato: 'canceled',
+          abbonamento_piano: null, abbonamento_limite: null, abbonamento_prezzo: null,
+        }).eq('id', m.id)
+        break
+      }
+    }
+  } catch (e: any) {
+    console.error('[STRIPE][WEBHOOK]', evento?.type, e?.message)
+    // 500: il circuito riprova. Meglio una ripetizione (che i vincoli sul database reggono) che
+    // un pagamento incassato e non registrato.
+    return NextResponse.json({ error: 'errore interno' }, { status: 500 })
+  }
+
+  return NextResponse.json({ ricevuto: true })
+}

@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   const rootId = roots?.[0]?.id || null
 
   const { data: attivi } = await admin.from('masters')
-    .select('id,nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese,parent_master_id,abbonamento_esente')
+    .select('id,nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese,parent_master_id,abbonamento_esente,stripe_subscription_id,stripe_stato')
     .not('abbonamento_piano', 'is', null)
 
   let addebitati = 0, esentiSaltati = 0
@@ -25,6 +25,9 @@ export async function GET(req: NextRequest) {
     if (m.abbonamento_mese === mese) continue          // già addebitato questo mese
     if (!m.parent_master_id) continue                  // il root è la piattaforma: esente
     // Master ESENTI (es. LL / Ecomize Solution / MULTIEXPRESS): tengono il piano ma NON pagano.
+    // Chi paga con CARTA e' gia' addebitato dal circuito, che ci manda la conferma a incasso
+    // avvenuto: riaddebitarlo anche sul credito interno significherebbe fargli pagare due volte.
+    if ((m as any).stripe_subscription_id && (m as any).stripe_stato !== 'canceled') continue
     if (m.abbonamento_esente) { await admin.from('masters').update({ abbonamento_mese: mese }).eq('id', m.id); esentiSaltati++; continue }
     const prezzo = Number(m.abbonamento_prezzo || 0)
     if (prezzo > 0) {

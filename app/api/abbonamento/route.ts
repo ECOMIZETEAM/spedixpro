@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraMovimentoMaster } from '@/lib/movimenti'
 import { PIANI_ENTERPRISE, pianoById, meseCorrente } from '@/lib/piani'
+import { stripeConfigurato, IVA_PERCENTUALE } from '@/lib/stripe'
 
 // Stato abbonamento del master + piani disponibili
 export async function GET() {
@@ -14,7 +15,7 @@ export async function GET() {
 
   const admin = createAdminSupabase()
   const { data: m } = await admin.from('masters')
-    .select('parent_master_id,abbonamento_piano,abbonamento_limite,abbonamento_prezzo,abbonamento_mese,abbonamento_attivato_il,credito')
+    .select('parent_master_id,abbonamento_piano,abbonamento_limite,abbonamento_prezzo,abbonamento_mese,abbonamento_attivato_il,credito,abbonamento_esente,stripe_customer_id,stripe_subscription_id,stripe_stato')
     .eq('id', utente.master_id).single()
 
   const isRoot = !m?.parent_master_id  // il master principale: illimitato e gratis, mai bloccato
@@ -103,6 +104,14 @@ export async function GET() {
     spedizioni_mese: count || 0,
     credito: Number(m?.credito || 0),
     piani: PIANI_ENTERPRISE,
+    // Pagamento con carta: disponibile solo se le chiavi ci sono. Finche' non ci sono, la
+    // schermata resta identica a prima e si paga come si e' sempre pagato.
+    carta: {
+      disponibile: stripeConfigurato() && !isRoot && !(m as any)?.abbonamento_esente,
+      attiva: !!(m as any)?.stripe_subscription_id,
+      stato: (m as any)?.stripe_stato || null,
+      iva: IVA_PERCENTUALE,
+    },
     isRoot,
     abbonati,
     totaleDaIncassare: Math.round(abbonati.reduce((s, a) => s + Number(a.importo_da_incassare || 0), 0) * 100) / 100,
