@@ -1,62 +1,67 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { registraMovimentoMaster } from '@/lib/movimenti'
 import { meseCorrente } from '@/lib/piani'
 import { cambioDaApplicare } from '@/lib/abbonamento-cambi'
 
-// CRON (1° del mese): riaddebita il canone ai master ATTIVI (che hanno un piano),
-// accreditando l'incasso al SUPERROOT. I master disdetti (piano null) sono bloccati
-// e NON vengono addebitati. Idempotente: salta chi ha già abbonamento_mese = mese corrente.
+// GIRO DEL PRIMO DEL MESE.
+//
+// Prima questo giro ADDEBITAVA il canone sul credito interno del master e accreditava l'incasso al
+// master principale, lasciando due righe nei movimenti e un pagamento "da incassare" da rincorrere
+// a mano col bonifico. Non lo fa piu': il canone si paga con carta, la fattura la emette il
+// circuito, e nei movimenti — che sono il conto delle SPEDIZIONI — l'abbonamento non entra piu'.
+//
+// Restano tre compiti:
+//  1. applicare i downgrade e le disdette chiesti il mese scorso (e' oggi che valgono);
+//  2. far partire il conto alla rovescia a chi ha un piano ma NON ha una carta attiva: senza
+//     questo non pagherebbe mai piu' nessuno, perche' l'unico segnale di mancato pagamento arriva
+//     dal circuito e chi non ha mai messo una carta non ne genera nessuno;
+//  3. segnare il mese agli esenti, che tengono il piano senza pagare.
+//
+// Chi paga regolarmente non viene toccato: al suo posto parla il circuito, che addebita la carta e
+// ci manda la conferma (vedi /api/stripe/webhook).
 export async function GET(req: NextRequest) {
   const _cron = bloccaCronNonAutorizzato(req); if (_cron) return _cron
   const admin = createAdminSupabase()
   const mese = meseCorrente()
 
-  // Superroot = master senza padre
-  const { data: roots } = await admin.from('masters').select('id').is('parent_master_id', null).limit(1)
-  const rootId = roots?.[0]?.id || null
-
   const { data: attivi } = await admin.from('masters')
-    .select('id,nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese,parent_master_id,abbonamento_esente,stripe_subscription_id,stripe_stato,abbonamento_piano_programmato,abbonamento_programmato_dal')
+    .select('id,nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese,parent_master_id,abbonamento_esente,stripe_subscription_id,stripe_stato,abbonamento_piano_programmato,abbonamento_programmato_dal,pagamento_scaduto_dal')
     .not('abbonamento_piano', 'is', null)
 
-  let addebitati = 0, esentiSaltati = 0, cambiApplicati = 0
+  let cambiApplicati = 0, esentiSaltati = 0, senzaCarta = 0, conCarta = 0
+
   for (const m of (attivi || [])) {
-    // DOWNGRADE E DISDETTE CHIESTI NEL MESE SCORSO: e' adesso che valgono. Va fatto PRIMA
-    // dell'addebito, altrimenti si incasserebbe il canone del piano vecchio, quello alto.
+    // 1) Downgrade e disdette programmati: e' adesso che entrano in vigore.
     const cambio = cambioDaApplicare(m)
     if (cambio) {
       await admin.from('masters').update(cambio).eq('id', m.id)
       Object.assign(m as any, cambio)
       cambiApplicati++
-      if (!(m as any).abbonamento_piano) continue      // disdetto: non si addebita piu' nulla
+      if (!(m as any).abbonamento_piano) continue      // disdetto: non c'e' piu' niente da fare
     }
-    if (m.abbonamento_mese === mese) continue          // già addebitato questo mese
-    if (!m.parent_master_id) continue                  // il root è la piattaforma: esente
-    // Master ESENTI (es. LL / Ecomize Solution / MULTIEXPRESS): tengono il piano ma NON pagano.
-    // Chi paga con CARTA e' gia' addebitato dal circuito, che ci manda la conferma a incasso
-    // avvenuto: riaddebitarlo anche sul credito interno significherebbe fargli pagare due volte.
-    if ((m as any).stripe_subscription_id && (m as any).stripe_stato !== 'canceled') continue
-    if (m.abbonamento_esente) { await admin.from('masters').update({ abbonamento_mese: mese }).eq('id', m.id); esentiSaltati++; continue }
-    const prezzo = Number(m.abbonamento_prezzo || 0)
-    if (prezzo > 0) {
-      try {
-        await registraMovimentoMaster(admin, {
-          masterOwnerId: m.id, masterTargetId: m.id, tipo: 'abbonamento',
-          descrizione: `Canone mensile ${mese}`, importo: -Math.abs(prezzo), createdBy: null,
-        })
-        if (rootId) await registraMovimentoMaster(admin, {
-          masterOwnerId: rootId, masterTargetId: rootId, tipo: 'abbonamento_incasso',
-          descrizione: `Canone ${mese} da ${m.nome || 'master'}`, importo: Math.abs(prezzo), createdBy: null,
-        })
-        await admin.from('abbonamenti_pagamenti').insert({
-          master_id: m.id, root_id: rootId, piano: m.abbonamento_piano, mese, importo: prezzo, pagato: false,
-        })
-      } catch (e) { console.error('Errore rinnovo abbonamento master', m.id, e); continue }
+
+    if (!m.parent_master_id) continue                  // il master principale e' la piattaforma
+
+    // 3) Esenti: tengono il piano, non pagano, non si congelano.
+    if (m.abbonamento_esente) {
+      await admin.from('masters').update({ abbonamento_mese: mese, pagamento_scaduto_dal: null }).eq('id', m.id)
+      esentiSaltati++
+      continue
     }
-    await admin.from('masters').update({ abbonamento_mese: mese }).eq('id', m.id)
-    addebitati++
+
+    // Ha una carta attiva: se ne occupa il circuito. Se l'addebito fallisce ce lo dira' lui, ed e'
+    // li' che parte il conto alla rovescia — non qui.
+    if ((m as any).stripe_subscription_id && (m as any).stripe_stato !== 'canceled') { conCarta++; continue }
+
+    // 2) Piano attivo ma nessuna carta: il canone di questo mese non lo pagherebbe nessuno.
+    // Parte il conto alla rovescia, esattamente come per un addebito fallito. La data si scrive
+    // una volta sola, altrimenti ogni mese ripartirebbe da capo e il congelamento non arriverebbe.
+    if (!(m as any).pagamento_scaduto_dal) {
+      await admin.from('masters').update({ pagamento_scaduto_dal: new Date().toISOString() }).eq('id', m.id)
+    }
+    senzaCarta++
   }
-  return NextResponse.json({ success: true, mese, addebitati, esentiSaltati, cambiApplicati })
+
+  return NextResponse.json({ success: true, mese, cambiApplicati, esentiSaltati, conCarta, senzaCarta })
 }
