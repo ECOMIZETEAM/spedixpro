@@ -344,7 +344,15 @@ export async function POST(req: NextRequest) {
       provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
       pesoReale, packages,
       contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
-    })) ?? (parseFloat(body.totalPrice) || 0)
+    })) ?? null as any
+
+    // Nessun prezzo a listino per questa destinazione = non vendibile, punto. Prima si ripiegava
+    // su body.totalPrice, cioe' sul numero mandato dal browser: la spedizione partiva lo stesso e
+    // veniva addebitata a una cifra che non usciva da nessun listino. Su una destinazione che il
+    // corriere fa pagare di piu' (periferica, disagiata) e' una perdita secca a ogni collo.
+    if (costoMaster === null) {
+      return NextResponse.json({ error: 'Nessun prezzo a listino per questa destinazione con questo contratto: aggiungi la fascia della zona al listino o scegli un altro corriere.' }, { status: 400 })
+    }
   }
 
   // Peso fatturato/volumetrico da SALVARE sulla spedizione (colonna Peso in elenco), col fattore
