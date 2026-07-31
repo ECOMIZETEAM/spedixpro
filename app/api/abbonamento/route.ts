@@ -45,7 +45,7 @@ export async function GET() {
       .eq('root_id', utente.master_id).order('mese', { ascending: true }).limit(1000)
     // Master ATTIVI della rete (con piano OPPURE esenti), escluso il root. Solo questi esistono → niente orfani.
     const { data: mastersRete } = await admin.from('masters')
-      .select('id,nome,email,abbonamento_piano,abbonamento_prezzo,abbonamento_esente')
+      .select('id,nome,email,abbonamento_piano,abbonamento_prezzo,abbonamento_esente,stripe_subscription_id,stripe_stato,pagamento_scaduto_dal')
       .in('id', reteIds).neq('id', utente.master_id)
     const attiviRete = (mastersRete || []).filter((x: any) => x.abbonamento_piano || x.abbonamento_esente)
     const attiviIds = new Set(attiviRete.map((x: any) => x.id))
@@ -58,6 +58,16 @@ export async function GET() {
       if (!nonPagatiByMaster.has(p.master_id)) nonPagatiByMaster.set(p.master_id, [])
       nonPagatiByMaster.get(p.master_id)!.push(p)
     }
+    // ULTIMO MESE PAGATO, master per master. Con la carta l'incasso e' immediato e la colonna
+    // "da incassare" resta sempre vuota: senza questo il root non vedrebbe piu' NULLA, ne' chi ha
+    // pagato ne' per quale mese. E' l'informazione che serve davvero adesso.
+    const ultimoPagato = new Map<string, any>()
+    for (const p of (pag || [])) {
+      if (!p.pagato) continue
+      const attuale = ultimoPagato.get(p.master_id)
+      if (!attuale || String(p.mese) > String(attuale.mese)) ultimoPagato.set(p.master_id, p)
+    }
+
     const nomeDi = (m: any) => (m?.nome && String(m.nome).trim()) || (m?.email && String(m.email).trim()) || ('Master #' + String(m?.id).slice(0, 6))
     abbonati = attiviRete.map((m: any) => {
       const nonPagati = (nonPagatiByMaster.get(m.id) || [])
@@ -66,6 +76,12 @@ export async function GET() {
       return {
         master_id: m.id, master_nome: nomeDi(m), esente: !!m.abbonamento_esente,
         piano: m.abbonamento_piano, prezzo,
+        // Come sta messo col pagamento: carta attiva, in ritardo, o nessuna carta.
+        carta: m.stripe_subscription_id && m.stripe_stato !== 'canceled' ? (m.stripe_stato || 'active') : null,
+        scaduto_dal: m.pagamento_scaduto_dal || null,
+        ultimo_mese_pagato: ultimoPagato.get(m.id)?.mese || null,
+        ultimo_pagamento_il: ultimoPagato.get(m.id)?.pagato_il || null,
+        ultimo_metodo: ultimoPagato.get(m.id)?.metodo || null,
         pagamento_id: daPagare?.id || null,
         importo_da_incassare: daPagare ? Number(daPagare.importo || 0) : 0,
         mese_da_incassare: daPagare?.mese || null,

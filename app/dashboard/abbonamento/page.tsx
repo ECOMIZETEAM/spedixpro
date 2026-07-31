@@ -137,14 +137,14 @@ export default function AbbonamentoPage() {
           <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
             <thead>
               <tr style={{background:'#fafafa'}}>
-                {['Master','Piano','Canone/mese','Stato',''].map(h=>(
+                {['Master','Piano','Canone/mese','Ultimo pagamento','Stato',''].map(h=>(
                   <th key={h} style={{textAlign:'left' as const,padding:'9px 14px',fontSize:'11px',fontWeight:600,color:'#777',borderBottom:'1px solid #f0f0f0'}}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {!abbonati.length ? (
-                <tr><td colSpan={5} style={{padding:'30px',textAlign:'center' as const,color:'#999',fontSize:'12px'}}>Nessun master abbonato ancora</td></tr>
+                <tr><td colSpan={6} style={{padding:'30px',textAlign:'center' as const,color:'#999',fontSize:'12px'}}>Nessun master abbonato ancora</td></tr>
               ) : abbonati.map((a:any)=>(
                 <tr key={a.master_id} style={{borderBottom:'1px solid #f5f5f5'}}>
                   <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:600}}>
@@ -153,9 +153,20 @@ export default function AbbonamentoPage() {
                   </td>
                   <td style={{padding:'9px 14px',color:'#555'}}>{(a.piano||'').replace('enterprise_','Enterprise ').toUpperCase() || '—'}</td>
                   <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:700}}>€ {Number(a.prezzo||0).toFixed(2)}{a.esente && <span style={{fontSize:'10px',color:'#4338ca',fontWeight:600}}> (gratis)</span>}</td>
+                  <td style={{padding:'9px 14px',color:'#555'}}>
+                    {a.ultimo_mese_pagato
+                      ? <>{meseLabel(a.ultimo_mese_pagato)}<div style={{fontSize:'10.5px',color:'#999'}}>{a.ultimo_metodo === 'carta' ? 'carta' : a.ultimo_metodo || ''}{a.ultimo_pagamento_il ? ` · ${new Date(a.ultimo_pagamento_il).toLocaleDateString('it-IT')}` : ''}</div></>
+                      : <span style={{color:'#bbb'}}>mai</span>}
+                  </td>
                   <td style={{padding:'9px 14px'}}>
                     {a.esente
                       ? <span style={{background:'#eef2ff',color:'#4338ca',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Esente</span>
+                      : a.carta && a.carta !== 'past_due' && a.carta !== 'conferma_richiesta'
+                        ? <span style={{background:'#dcfce7',color:'#16a34a',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Carta attiva</span>
+                      : a.scaduto_dal
+                        ? <span style={{background:'#fef2f2',color:'#b91c1c',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Non paga dal {new Date(a.scaduto_dal).toLocaleDateString('it-IT')}</span>
+                      : !a.carta
+                        ? <span style={{background:'#fef3c7',color:'#b45309',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Nessuna carta</span>
                       : a.pagamento_id
                         ? <span style={{background:'#fef3c7',color:'#b45309',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Da incassare € {Number(a.importo_da_incassare||0).toFixed(2)}{a.n_da_incassare>1?` (${a.n_da_incassare} mesi)`:''}</span>
                         : <span style={{background:'#dcfce7',color:'#16a34a',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>In regola</span>}

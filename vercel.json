@@ -30,6 +30,10 @@
     {
       "path": "/api/spedizioni/prenotazioni-scadute",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/abbonamento/controllo-carta",
+      "schedule": "0 6 * * *"
     }
   ]
 }

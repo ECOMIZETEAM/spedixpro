@@ -53,3 +53,14 @@ export function descriviCambio(m: any): { piano: string | null; disdetta: boolea
     dal: m.abbonamento_programmato_dal,
   }
 }
+
+// DA QUANDO IL CANONE SI PAGA CON CARTA.
+//
+// Fino a ieri il canone si scalava dal credito, in silenzio: i master non hanno mai ricevuto un
+// avviso. Farli trovare congelati senza preavviso sarebbe stato scorretto verso di loro e dannoso
+// per noi — i tre piu' grossi valgono quasi 8.000 spedizioni al mese, e con loro si fermerebbero
+// anche i loro clienti.
+//
+// Quindi il conto alla rovescia non parte prima di questa data: e' il tempo per avvisarli. Passata,
+// questa riga non ha piu' alcun effetto e la regola vale sempre e per tutti.
+export const INIZIO_OBBLIGO_CARTA = new Date('2026-08-03T06:00:00Z')

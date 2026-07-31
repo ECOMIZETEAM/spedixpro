@@ -13,10 +13,11 @@ import { cambioDaApplicare } from '@/lib/abbonamento-cambi'
 //
 // Restano tre compiti:
 //  1. applicare i downgrade e le disdette chiesti il mese scorso (e' oggi che valgono);
-//  2. far partire il conto alla rovescia a chi ha un piano ma NON ha una carta attiva: senza
-//     questo non pagherebbe mai piu' nessuno, perche' l'unico segnale di mancato pagamento arriva
-//     dal circuito e chi non ha mai messo una carta non ne genera nessuno;
-//  3. segnare il mese agli esenti, che tengono il piano senza pagare.
+//  2. segnare il mese agli esenti, che tengono il piano senza pagare.
+//
+// Chi ha un piano ma nessuna carta lo intercetta il controllo GIORNALIERO
+// (/api/abbonamento/controllo-carta): una volta al mese non basterebbe — chi toglie la carta il 5
+// resterebbe scoperto fino al primo del mese dopo.
 //
 // Chi paga regolarmente non viene toccato: al suo posto parla il circuito, che addebita la carta e
 // ci manda la conferma (vedi /api/stripe/webhook).
@@ -54,12 +55,8 @@ export async function GET(req: NextRequest) {
     // li' che parte il conto alla rovescia — non qui.
     if ((m as any).stripe_subscription_id && (m as any).stripe_stato !== 'canceled') { conCarta++; continue }
 
-    // 2) Piano attivo ma nessuna carta: il canone di questo mese non lo pagherebbe nessuno.
-    // Parte il conto alla rovescia, esattamente come per un addebito fallito. La data si scrive
-    // una volta sola, altrimenti ogni mese ripartirebbe da capo e il congelamento non arriverebbe.
-    if (!(m as any).pagamento_scaduto_dal) {
-      await admin.from('masters').update({ pagamento_scaduto_dal: new Date().toISOString() }).eq('id', m.id)
-    }
+    // Piano attivo ma nessuna carta: se ne occupa il controllo GIORNALIERO
+    // (/api/abbonamento/controllo-carta), che se ne accorge anche a meta' mese.
     senzaCarta++
   }
 
