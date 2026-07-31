@@ -61,7 +61,8 @@ for (const t of ita) console.log(`  ${t.percentage}% ${t.inclusive ? 'compresa n
 
 console.log('\n── Webhook registrati ──')
 const ATTESI = ['checkout.session.completed','customer.subscription.created','customer.subscription.updated',
-                'customer.subscription.deleted','invoice.paid','invoice.payment_failed']
+                'customer.subscription.deleted','invoice.paid','invoice.payment_failed',
+                'invoice.payment_action_required']
 const wh = await s.webhookEndpoints.list({ limit: 20 })
 if (!wh.data.length) console.log('  ❌ nessuno — il piano non si attiverebbe mai dopo il pagamento')
 for (const w of wh.data) {

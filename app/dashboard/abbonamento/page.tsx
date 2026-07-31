@@ -31,8 +31,8 @@ export default function AbbonamentoPage() {
     const prezzoAttuale = Number(stato?.prezzo||0)
     const isUp = prezzoNuovo > prezzoAttuale
     const testo = !stato?.attivo ? `Attivare questo piano? Verranno scalati € ${prezzoNuovo}.`
-      : isUp ? `Upgrade: verrà scalata solo la differenza (€ ${(prezzoNuovo-prezzoAttuale).toFixed(2)}). Procedere?`
-      : `Downgrade a questo piano? Nessun addebito ora, il nuovo canone partirà dal prossimo mese.`
+      : isUp ? `Upgrade immediato: vale da subito e viene scalata solo la differenza (€ ${(prezzoNuovo-prezzoAttuale).toFixed(2)}). Procedere?`
+      : `Downgrade dal 1° del mese prossimo. Fino ad allora tieni il piano attuale, che hai già pagato: nessun addebito ora.`
     if (!await dialog.confirm({ title: 'Confermi il piano?', message: testo, confirmText: 'Conferma' })) return
     setAzione(pianoId); setMsg('')
     const res = await fetch('/api/abbonamento', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pianoId }) })
@@ -51,7 +51,12 @@ export default function AbbonamentoPage() {
     if (d.url) { window.location.href = d.url; return }
     setAzione('')
     if (d.error) { setMsg(d.error); return }
-    if (d.aggiornato) { setMsg('✓ Piano aggiornato — la differenza arriverà nella prossima fattura'); carica() }
+    if (d.aggiornato) {
+      setMsg(d.immediato
+        ? '✓ Piano attivo da subito — addebitata solo la differenza per i giorni che restano'
+        : `✓ Downgrade registrato — partirà il ${new Date(d.dal).toLocaleDateString('it-IT')}. Fino ad allora tieni il piano attuale.`)
+      carica()
+    }
   }
   async function areaFatture() {
     setAzione('fatture'); setMsg('')
@@ -60,10 +65,12 @@ export default function AbbonamentoPage() {
     setAzione(''); setMsg(d.error || 'Area fatture non disponibile')
   }
   async function disdici() {
-    if (!await dialog.confirm({ title: 'Disdire l\'abbonamento?', message: 'Il portale verrà BLOCCATO finché non selezioni un nuovo piano. Nessun rimborso.', danger: true, confirmText: 'Disdici' })) return
+    if (!await dialog.confirm({ title: 'Disdire l\'abbonamento?', message: 'Il mese in corso è già pagato e resta attivo fino alla fine. Dal primo del mese prossimo il portale si blocca finché non scegli un nuovo piano. Nessun rimborso.', danger: true, confirmText: 'Disdici' })) return
     setAzione('disdici')
-    await fetch('/api/abbonamento/disdici', { method:'POST' })
-    setAzione(''); window.location.reload()
+    const d = await fetch('/api/abbonamento/disdici', { method:'POST' }).then(r=>r.json()).catch(()=>({}))
+    setAzione('')
+    if (d.error) { setMsg(d.error); return }
+    window.location.reload()
   }
   async function segnaPagato(id:string, nome:string, importo:number, metodo:'pagato'|'bonifico') {
     const isBonifico = metodo === 'bonifico'
@@ -228,6 +235,9 @@ export default function AbbonamentoPage() {
                 {stato?.carta?.stato === 'past_due' && (
                   <span style={{fontSize:'12px',color:'#b91c1c',fontWeight:600}}>Ultimo addebito non riuscito: aggiorna la carta.</span>
                 )}
+                {stato?.carta?.stato === 'conferma_richiesta' && (
+                  <span style={{fontSize:'12px',color:'#b45309',fontWeight:600}}>L'addebito attende la conferma della tua banca: controlla la mail del pagamento.</span>
+                )}
               </div>
             )}
             <button onClick={disdici} disabled={!!azione}
@@ -238,6 +248,13 @@ export default function AbbonamentoPage() {
         )}
       </div>
 
+      {stato?.cambioProgrammato && (
+        <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'11px 16px',marginBottom:'14px',fontSize:'13px',color:'#9a3412'}}>
+          {stato.cambioProgrammato.disdetta
+            ? <>⏳ <strong>Abbonamento in disdetta.</strong> Resta tutto attivo fino al {new Date(stato.cambioProgrammato.dal).toLocaleDateString('it-IT')}; da quel giorno il portale si blocca finché non scegli un nuovo piano.</>
+            : <>⏳ <strong>Passaggio a {stato.cambioProgrammato.piano} programmato</strong> per il {new Date(stato.cambioProgrammato.dal).toLocaleDateString('it-IT')}. Fino ad allora resti sul piano attuale, che hai già pagato.</>}
+        </div>
+      )}
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',flexWrap:'wrap',gap:'8px',marginBottom:'10px'}}>
         <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a'}}>Piani disponibili</div>
         {conCarta && <div style={{fontSize:'11.5px',color:'#777'}}>{stato?.carta?.iva ? `Prezzi IVA ${stato.carta.iva}% compresa` : 'Prezzi finiti — fattura senza IVA (inversione contabile)'}</div>}

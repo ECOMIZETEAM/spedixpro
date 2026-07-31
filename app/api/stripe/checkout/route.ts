@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { isAgente } from '@/lib/agente'
 import { pianoById } from '@/lib/piani'
-import { stripeConfigurato, stripeClient, prezzoStripe, aliquotaIva, clienteStripe } from '@/lib/stripe'
+import { stripeConfigurato, stripeClient, prezzoStripe, aliquotaIva, clienteStripe, primoDelProssimoMese, idPrezzo } from '@/lib/stripe'
 
 // Attivazione o cambio piano PAGANDO CON CARTA.
 //
@@ -44,23 +44,70 @@ export async function POST(req: NextRequest) {
   const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://moovexpress.com').replace(/\/$/, '')
 
   // ── Ha gia' un abbonamento attivo: si cambia il piano su quello ──
+  //
+  // UPGRADE e DOWNGRADE non sono simmetrici, e non e' un dettaglio:
+  //
+  //  · l'UPGRADE deve valere SUBITO — di norma lo si fa perche' si sta per sfondare il limite e le
+  //    spedizioni stanno per fermarsi. Aspettare il mese prossimo lo renderebbe inutile. Si paga
+  //    subito la differenza per i giorni che restano, non un mese intero.
+  //
+  //  · il DOWNGRADE parte dal PRIMO DEL MESE DOPO. Il mese in corso e' gia' stato pagato al prezzo
+  //    alto: abbassare il limite adesso vorrebbe dire togliere qualcosa di gia' pagato, e per di
+  //    piu' rischiare di bloccare una rete che aveva gia' spedito oltre il nuovo limite.
   if (m.stripe_subscription_id) {
     try {
-      const sub = await s.subscriptions.retrieve(m.stripe_subscription_id)
+      const sub = await s.subscriptions.retrieve(m.stripe_subscription_id, { expand: ['items.data.price'] })
       if (sub.status !== 'canceled' && sub.status !== 'incomplete_expired') {
         const voce = sub.items.data[0]
-        await s.subscriptions.update(sub.id, {
-          items: [{ id: voce.id, price: price.id }],
-          // Conguaglio sui giorni: chi passa a un piano superiore a meta' mese paga la differenza
-          // per i giorni che restano, non un mese intero.
-          proration_behavior: 'create_prorations',
+        const prezzoOra = Number((voce.price as any)?.unit_amount || 0)
+        const inSalita = (price.unit_amount || 0) > prezzoOra
+
+        if (inSalita) {
+          // Un eventuale downgrade programmato va tolto di mezzo, altrimenti resterebbe li' ad
+          // aspettare e il mese prossimo riporterebbe giu' un piano appena alzato.
+          if (sub.schedule) {
+            try { await s.subscriptionSchedules.release(String(sub.schedule)) } catch { }
+          }
+          await s.subscriptions.update(sub.id, {
+            items: [{ id: voce.id, price: price.id }],
+            proration_behavior: 'always_invoice',   // emette e incassa SUBITO la differenza
+            metadata: { master_id: m.id, piano: pianoId },
+          })
+          await admin.from('masters').update({
+            abbonamento_piano_programmato: null, abbonamento_programmato_dal: null,
+          }).eq('id', m.id)
+          return NextResponse.json({ aggiornato: true, immediato: true })
+        }
+
+        // Downgrade: si programma per la fine del periodo pagato.
+        const sched = sub.schedule
+          ? await s.subscriptionSchedules.retrieve(String(sub.schedule))
+          : await s.subscriptionSchedules.create({ from_subscription: sub.id })
+        // La fase da tenere e' quella IN CORSO, non l'ultima: con il rinnovo agganciato al primo del
+        // mese le fasi sono due (il pezzo di mese iniziale e poi il primo mese pieno), e prendere
+        // l'ultima faceva rifiutare l'operazione — si stava spostando l'inizio di una fase gia'
+        // cominciata. Il piano nuovo deve partire dalla fine di QUELLA in corso.
+        const corrente = sched.phases.find(f => f.start_date === sched.current_phase?.start_date) || sched.phases[0]
+        await s.subscriptionSchedules.update(sched.id, {
+          end_behavior: 'release',
+          phases: [
+            {
+              items: [{ price: idPrezzo((corrente.items[0] as any).price), quantity: 1 }],
+              start_date: corrente.start_date, end_date: corrente.end_date,
+            },
+            { items: [{ price: price.id, quantity: 1 }] },
+          ],
           metadata: { master_id: m.id, piano: pianoId },
         })
-        return NextResponse.json({ aggiornato: true })
+        const dal = new Date(Number(corrente.end_date) * 1000).toISOString()
+        await admin.from('masters').update({
+          abbonamento_piano_programmato: pianoId, abbonamento_programmato_dal: dal,
+        }).eq('id', m.id)
+        return NextResponse.json({ aggiornato: true, immediato: false, dal })
       }
     } catch (e: any) {
       console.error('[STRIPE] cambio piano fallito', m.id, e?.message)
-      // L'abbonamento non esiste piu' sul circuito: si riparte da una nuova sottoscrizione.
+      return NextResponse.json({ error: 'Cambio piano non riuscito: riprova o contatta l\'assistenza.' }, { status: 400 })
     }
   }
 
@@ -70,7 +117,12 @@ export async function POST(req: NextRequest) {
     mode: 'subscription',
     customer,
     line_items: [{ price: price.id, quantity: 1, tax_rates: iva.length ? iva : undefined }],
-    subscription_data: { metadata: { master_id: m.id, piano: pianoId } },
+    subscription_data: {
+      metadata: { master_id: m.id, piano: pianoId },
+      // Rinnovo il PRIMO DEL MESE per tutti, come il contatore delle spedizioni. Alla cassa si
+      // paga subito la parte di mese che resta, poi il canone pieno ogni primo del mese.
+      billing_cycle_anchor: primoDelProssimoMese(),
+    },
     metadata: { master_id: m.id, piano: pianoId },
     success_url: `${base}/dashboard/abbonamento?pagamento=ok`,
     cancel_url: `${base}/dashboard/abbonamento?pagamento=annullato`,

@@ -3,6 +3,7 @@ import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraMovimentoMaster } from '@/lib/movimenti'
 import { meseCorrente } from '@/lib/piani'
+import { cambioDaApplicare } from '@/lib/abbonamento-cambi'
 
 // CRON (1° del mese): riaddebita il canone ai master ATTIVI (che hanno un piano),
 // accreditando l'incasso al SUPERROOT. I master disdetti (piano null) sono bloccati
@@ -17,11 +18,20 @@ export async function GET(req: NextRequest) {
   const rootId = roots?.[0]?.id || null
 
   const { data: attivi } = await admin.from('masters')
-    .select('id,nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese,parent_master_id,abbonamento_esente,stripe_subscription_id,stripe_stato')
+    .select('id,nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese,parent_master_id,abbonamento_esente,stripe_subscription_id,stripe_stato,abbonamento_piano_programmato,abbonamento_programmato_dal')
     .not('abbonamento_piano', 'is', null)
 
-  let addebitati = 0, esentiSaltati = 0
+  let addebitati = 0, esentiSaltati = 0, cambiApplicati = 0
   for (const m of (attivi || [])) {
+    // DOWNGRADE E DISDETTE CHIESTI NEL MESE SCORSO: e' adesso che valgono. Va fatto PRIMA
+    // dell'addebito, altrimenti si incasserebbe il canone del piano vecchio, quello alto.
+    const cambio = cambioDaApplicare(m)
+    if (cambio) {
+      await admin.from('masters').update(cambio).eq('id', m.id)
+      Object.assign(m as any, cambio)
+      cambiApplicati++
+      if (!(m as any).abbonamento_piano) continue      // disdetto: non si addebita piu' nulla
+    }
     if (m.abbonamento_mese === mese) continue          // già addebitato questo mese
     if (!m.parent_master_id) continue                  // il root è la piattaforma: esente
     // Master ESENTI (es. LL / Ecomize Solution / MULTIEXPRESS): tengono il piano ma NON pagano.
@@ -48,5 +58,5 @@ export async function GET(req: NextRequest) {
     await admin.from('masters').update({ abbonamento_mese: mese }).eq('id', m.id)
     addebitati++
   }
-  return NextResponse.json({ success: true, mese, addebitati, esentiSaltati })
+  return NextResponse.json({ success: true, mese, addebitati, esentiSaltati, cambiApplicati })
 }

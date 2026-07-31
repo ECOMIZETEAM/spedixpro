@@ -4,6 +4,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraMovimentoMaster } from '@/lib/movimenti'
 import { PIANI_ENTERPRISE, pianoById, meseCorrente } from '@/lib/piani'
 import { stripeConfigurato, IVA_PERCENTUALE } from '@/lib/stripe'
+import { descriviCambio, primoDelMeseProssimo } from '@/lib/abbonamento-cambi'
 
 // Stato abbonamento del master + piani disponibili
 export async function GET() {
@@ -15,7 +16,7 @@ export async function GET() {
 
   const admin = createAdminSupabase()
   const { data: m } = await admin.from('masters')
-    .select('parent_master_id,abbonamento_piano,abbonamento_limite,abbonamento_prezzo,abbonamento_mese,abbonamento_attivato_il,credito,abbonamento_esente,stripe_customer_id,stripe_subscription_id,stripe_stato')
+    .select('parent_master_id,abbonamento_piano,abbonamento_limite,abbonamento_prezzo,abbonamento_mese,abbonamento_attivato_il,credito,abbonamento_esente,stripe_customer_id,stripe_subscription_id,stripe_stato,abbonamento_piano_programmato,abbonamento_programmato_dal')
     .eq('id', utente.master_id).single()
 
   const isRoot = !m?.parent_master_id  // il master principale: illimitato e gratis, mai bloccato
@@ -104,6 +105,7 @@ export async function GET() {
     spedizioni_mese: count || 0,
     credito: Number(m?.credito || 0),
     piani: PIANI_ENTERPRISE,
+    cambioProgrammato: descriviCambio(m),
     // Pagamento con carta: disponibile solo se le chiavi ci sono. Finche' non ci sono, la
     // schermata resta identica a prima e si paga come si e' sempre pagato.
     carta: {
@@ -189,9 +191,23 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // DOWNGRADE: non si applica adesso. Il mese in corso e' pagato al prezzo alto, e abbassare il
+  // limite subito significherebbe togliere qualcosa di gia' pagato — e magari bloccare una rete che
+  // quel mese aveva gia' spedito oltre il nuovo limite. Si scrive l'intenzione e la applica il giro
+  // del primo del mese. L'upgrade invece vale subito: serve proprio a non doversi fermare.
+  if (haPianoQuestoMese && nuovo.prezzo < prezzoAttuale) {
+    const dal = primoDelMeseProssimo().toISOString()
+    await admin.from('masters').update({
+      abbonamento_piano_programmato: nuovo.id, abbonamento_programmato_dal: dal,
+    }).eq('id', utente.master_id)
+    return NextResponse.json({ success: true, piano: nuovo.id, addebitato: 0, programmato: true, dal })
+  }
+
   await admin.from('masters').update({
     abbonamento_piano: nuovo.id, abbonamento_limite: nuovo.limite, abbonamento_prezzo: nuovo.prezzo,
     abbonamento_mese: mese,
+    // Un downgrade programmato prima non ha piu' senso dopo un upgrade.
+    abbonamento_piano_programmato: null, abbonamento_programmato_dal: null,
     abbonamento_attivato_il: m?.abbonamento_piano ? undefined : new Date().toISOString(),
   }).eq('id', utente.master_id)
 

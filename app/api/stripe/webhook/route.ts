@@ -39,12 +39,12 @@ export async function POST(req: NextRequest) {
       || oggetto?.subscription_details?.metadata?.master_id
       || oggetto?.lines?.data?.[0]?.metadata?.master_id
     if (id) {
-      const { data } = await admin.from('masters').select('id,nome,parent_master_id,abbonamento_piano,abbonamento_prezzo').eq('id', id).maybeSingle()
+      const { data } = await admin.from('masters').select('id,nome,parent_master_id,abbonamento_piano,abbonamento_prezzo,abbonamento_piano_programmato').eq('id', id).maybeSingle()
       if (data) return data
     }
     const cust = typeof oggetto?.customer === 'string' ? oggetto.customer : oggetto?.customer?.id
     if (!cust) return null
-    const { data } = await admin.from('masters').select('id,nome,parent_master_id,abbonamento_piano,abbonamento_prezzo').eq('stripe_customer_id', cust).maybeSingle()
+    const { data } = await admin.from('masters').select('id,nome,parent_master_id,abbonamento_piano,abbonamento_prezzo,abbonamento_piano_programmato').eq('stripe_customer_id', cust).maybeSingle()
     return data || null
   }
 
@@ -78,6 +78,10 @@ export async function POST(req: NextRequest) {
           // rete di qualcuno al primo tentativo fallito sarebbe sproporzionato.
           ...(attivo && piano ? {
             abbonamento_piano: piano.id, abbonamento_limite: piano.limite, abbonamento_prezzo: piano.prezzo,
+            // Il cambio programmato e' arrivato a destinazione: l'attesa si chiude qui, altrimenti
+            // la schermata continuerebbe ad annunciare un passaggio gia' avvenuto.
+            ...(piano.id === m.abbonamento_piano_programmato
+              ? { abbonamento_piano_programmato: null, abbonamento_programmato_dal: null } : {}),
           } : {}),
         }).eq('id', m.id)
         break
@@ -127,12 +131,23 @@ export async function POST(req: NextRequest) {
         break
       }
 
+      // ── Serve una conferma della banca (3D Secure) ────────────────────────
+      // Sulle carte europee capita ai rinnovi: l'addebito non fallisce, resta in attesa che il
+      // titolare confermi. Va distinto da un pagamento fallito, perche' la cosa da fare e' diversa:
+      // li' si cambia carta, qui si apre la mail del circuito e si conferma.
+      case 'invoice.payment_action_required': {
+        const m = await masterDi(evento.data.object)
+        if (m) await admin.from('masters').update({ stripe_stato: 'conferma_richiesta' }).eq('id', m.id)
+        break
+      }
+
       // ── Abbonamento chiuso: il portale torna bloccato dalla scelta piano ──
       case 'customer.subscription.deleted': {
         const m = await masterDi(evento.data.object)
         if (m) await admin.from('masters').update({
           stripe_subscription_id: null, stripe_stato: 'canceled',
           abbonamento_piano: null, abbonamento_limite: null, abbonamento_prezzo: null,
+          abbonamento_piano_programmato: null, abbonamento_programmato_dal: null,
         }).eq('id', m.id)
         break
       }

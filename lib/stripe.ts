@@ -118,6 +118,20 @@ export async function clienteStripe(admin: any, master: { id: string; nome?: str
   return c.id
 }
 
+// Il riferimento a un prezzo a volte e' l'oggetto intero, a volte solo il codice: serve il codice.
+export function idPrezzo(v: any): string {
+  return typeof v === 'string' ? v : String(v?.id || '')
+}
+
+// PRIMO GIORNO DEL PROSSIMO MESE. E' la data in cui hanno effetto i downgrade e le disdette, ed
+// e' anche il giorno in cui riparte il contatore delle spedizioni: il piano si misura sul mese di
+// calendario, quindi anche il canone deve seguire il mese di calendario, non l'anniversario di
+// quando uno si e' iscritto. Altrimenti chi si abbona il 13 avrebbe il pacchetto che riparte il 1°
+// e la bolletta che arriva il 13, e nessuno dei due numeri tornerebbe con l'altro.
+export function primoDelProssimoMese(d = new Date()): number {
+  return Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1, 0, 0, 0) / 1000)
+}
+
 // Dal prezzo pagato si risale al piano: e' cosi' che il webhook sa quale pacchetto attivare,
 // anche quando il cambio piano e' stato fatto dal portale fatture del circuito e non dal nostro.
 export function pianoDaPrezzo(price: Stripe.Price | null | undefined): Piano | null {
