@@ -63,7 +63,34 @@ contratti_a_meta as (
   where coalesce(co.attivo, true)
     and not exists (select 1 from listini_clienti_fasce f where f.corriere_id = co.id)
 ),
--- 10. VENDITE SOTTO COSTO ancora configurate
+-- 10a. RIMBORSATE MA CONSEGNATE — il caso "furbetto"
+--    Spedizione data per annullata e stornata a tutta la rete, ma il tracking dice che il pacco
+--    e' stato consegnato: il corriere la fa pagare comunque, quindi quei soldi sono persi.
+--    Deve essere 0. Se compare qualcosa, guardare SUBITO chi l'ha annullata.
+rimborsate_ma_consegnate as (
+  select count(*) n from spedizioni s
+  where s.stato = 'annullata'
+    and exists (select 1 from movimenti m where m.spedizione_id = s.id and m.tipo = 'rimborso')
+    and exists (select 1 from tracking_events e where e.spedizione_id = s.id
+                 and (lower(coalesce(e.stato,'')) = 'consegnata' or e.descrizione ~* 'consegnat|delivered'))
+),
+-- 10b. IN CODA ANNULLO MA GIA' CONSEGNATE — il danno non e' ancora fatto, ma basta un clic.
+--    Sono in attesa di conferma e nel frattempo il corriere le ha recapitate: confermarle
+--    significherebbe rimborsare merce consegnata.
+in_coda_ma_consegnate as (
+  select count(*) n from spedizioni s
+  where s.stato in ('annullamento_manuale','annullamento_pending')
+    and exists (select 1 from tracking_events e where e.spedizione_id = s.id
+                 and (lower(coalesce(e.stato,'')) = 'consegnata' or e.descrizione ~* 'consegnat|delivered'))
+),
+-- 10c. CODA ANNULLI FERMA — soldi bloccati: il cliente non riavere il credito finche' il
+--    detentore del contratto non conferma.
+coda_ferma as (
+  select count(*) n, coalesce(round(sum(costo_totale),2),0) val
+  from spedizioni where stato = 'annullamento_manuale'
+    and annullamento_richiesto_at < now() - interval '3 days'
+),
+-- 11. VENDITE SOTTO COSTO ancora configurate
 sotto_costo as (
   select count(*) n from (
     select 1 from masters m
@@ -92,5 +119,11 @@ union all select 'sotto-master senza listino assegnato', (select n from master_s
        case when (select n from master_senza_listino) = 0 then 'ok' else 'da assegnare' end
 union all select 'agenti senza clienti collegati', (select n from agenti_vuoti)::text, 'da assegnare'
 union all select 'contratti senza prezzi di vendita', (select n from contratti_a_meta)::text, 'da prezzare'
+union all select 'RIMBORSATE ma CONSEGNATE (soldi persi)', (select n from rimborsate_ma_consegnate)::text,
+       case when (select n from rimborsate_ma_consegnate) = 0 then 'ok' else 'GUARDARE SUBITO — chi le ha annullate?' end
+union all select 'in coda annullo ma GIA CONSEGNATE', (select n from in_coda_ma_consegnate)::text,
+       case when (select n from in_coda_ma_consegnate) = 0 then 'ok' else 'NON confermarle: rimborserebbero merce recapitata' end
+union all select 'coda annulli ferma da oltre 3 giorni', (select n || ' — € ' || val from coda_ferma),
+       case when (select n from coda_ferma) = 0 then 'ok' else 'credito bloccato ai clienti: sollecitare il detentore' end
 union all select 'fasce vendute SOTTO COSTO', (select n from sotto_costo)::text,
        case when (select n from sotto_costo) = 0 then 'ok' else 'perdita in corso' end;

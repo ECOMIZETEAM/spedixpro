@@ -24,6 +24,30 @@ export async function POST(req: NextRequest) {
   if (sped.stato !== 'annullamento_manuale') return NextResponse.json({ error: 'La spedizione non è in coda annullo manuale.' }, { status: 400 })
   if (sped.annullamento_owner_id !== utente.master_id) return NextResponse.json({ error: 'Solo il detentore del contratto può confermare questo annullo.' }, { status: 403 })
 
+  // IL PACCO E' STATO CONSEGNATO? Allora l'annullo non e' mai avvenuto e confermarlo qui
+  // rimborserebbe cliente E tutta la catena per merce che il corriere ha consegnato e che va
+  // comunque pagata — soldi che non tornano piu' indietro.
+  // Puo' succedere in due modi: la richiesta di annullo arriva quando il pacco e' gia' partito, e
+  // il tracking prosegue per conto suo; oppure qualcuno cancella e fa partire lo stesso.
+  // Non e' un blocco cieco: con ?forza=1 si conferma comunque, per i casi in cui il corriere ha
+  // davvero accettato l'annullo e il tracking racconta un'altra storia.
+  const forza = req.nextUrl.searchParams.get('forza') === '1'
+  if (!forza) {
+    const { data: eventi } = await admin.from('tracking_events')
+      .select('stato,descrizione,data_evento').eq('spedizione_id', spedizioneId)
+      .order('data_evento', { ascending: false }).limit(50)
+    const consegnato = (eventi || []).find((e: any) =>
+      String(e.stato || '').toLowerCase() === 'consegnata' ||
+      /consegnat|delivered/i.test(String(e.descrizione || '')))
+    if (consegnato) {
+      const quando = consegnato.data_evento ? new Date(consegnato.data_evento).toLocaleString('it-IT') : ''
+      return NextResponse.json({
+        error: `Questa spedizione risulta CONSEGNATA${quando ? ' il ' + quando : ''}: l'annullo non è stato eseguito dal corriere. Confermarlo rimborserebbe il cliente e tutta la rete per un pacco già recapitato, che il corriere fa comunque pagare. Se sei certo che il corriere lo abbia annullato, conferma di nuovo forzando l'operazione.`,
+        consegnata: true, quando: consegnato.data_evento || null,
+      }, { status: 409 })
+    }
+  }
+
   const { error } = await admin.from('spedizioni').update({ stato: 'annullata', annullamento_errore: null }).eq('id', spedizioneId)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   await rimborsaAnnulloSpedizione(admin, sped as any, (sped as any).annullamento_da || null)
