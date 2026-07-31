@@ -11,6 +11,7 @@
 
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster, filtraCapCondiviso, rigaValePerCitta } from '@/lib/zone-match'
 import { fetchAll } from '@/lib/fetch-all'
+import { entroMisureAgevolate } from '@/lib/agevolazione-misure'
 
 const ZONE_MAP: Record<string, string> = {
   CA:'Sardegna',CI:'Sardegna',VS:'Sardegna',NU:'Sardegna',OG:'Sardegna',OT:'Sardegna',OR:'Sardegna',SS:'Sardegna',SU:'Sardegna',
@@ -168,13 +169,7 @@ export async function calcolaPrezzoListino(
   // "solo peso reale": ignora il volumetrico, si paga sempre sul peso reale
   const pesoFatturato = listino?.solo_peso_reale ? pesoReale : Math.max(pesoReale, pesoVolume)
   // agevolazione peso reale: valida solo se OGNI pacco e' entro 50x28x32 cm
-  const entroMisureAgevolate = packages.every((p: any) => {
-    const L = Number(p?.length)||0, W = Number(p?.width)||0, H = Number(p?.height)||0
-    if (!L && !W && !H) return true
-    const dims = [L, W, H].sort((a,b)=>b-a)
-    const lim = [50, 32, 28]
-    return dims[0] <= lim[0] && dims[1] <= lim[1] && dims[2] <= lim[2]
-  })
+  // La scatola dell'agevolazione dipende dal CONTRATTO: valutata per corriere piu' sotto.
 
   const { data: fasce } = await supabase
     .from('listini_clienti_fasce')
@@ -248,7 +243,7 @@ export async function calcolaPrezzoListino(
 
   for (const [cId, fasceDelCorriere] of entries) {
     const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
-    const usaPesoReale = !!settsC.agevolazione_peso_reale && entroMisureAgevolate
+    const usaPesoReale = !!settsC.agevolazione_peso_reale && entroMisureAgevolate(settsC, packages)
     const pesoPerFascia = usaPesoReale ? pesoReale : pesoFatturato
     const fascia = trovaFascia(fasceDelCorriere, pesoPerFascia)
     if (!fascia) continue
@@ -345,12 +340,7 @@ export async function calcolaPrezzoCorriereDettaglio(
   const { data: corrSett } = await supabase.from('corrieri').select('settings').eq('id', corriereId).maybeSingle()
   const _sett: any = corrSett?.settings || {}
   if (!soloPesoReale && _sett.agevolazione_peso_reale) {
-    const entro = packages.every((p: any) => {
-      const L = Number(p?.length)||0, W = Number(p?.width)||0, H = Number(p?.height)||0
-      if (!L && !W && !H) return true
-      const d = [L, W, H].sort((a,b)=>b-a)
-      return d[0] <= 50 && d[1] <= 32 && d[2] <= 28
-    })
+    const entro = entroMisureAgevolate(_sett, packages)
     if (entro) pesoFatturato = pesoReale
   }
   // "Peso reale fino a X kg": sotto la soglia si tassa sul peso reale, oltre torna al volumetrico.
@@ -779,8 +769,7 @@ export async function creaCalcolatoreListinoCliente(
     let usaReale = false
     if (!soloPesoReale) {
       if (settC.agevolazione_peso_reale) {
-        const d = [L, W, H].sort((a: number, b: number) => b - a)
-        const entro = (!L && !W && !H) || (d[0] <= 50 && d[1] <= 32 && d[2] <= 28)
+        const entro = entroMisureAgevolate(settC, [{ length: L, width: W, height: H }])
         if (entro) usaReale = true
       }
       const prs = settC.peso_reale_soglia

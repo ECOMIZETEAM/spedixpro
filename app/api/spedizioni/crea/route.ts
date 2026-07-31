@@ -157,6 +157,11 @@ export async function POST(req: NextRequest) {
   if (!body.shipFrom?.state?.trim()) return NextResponse.json({ error: 'Provincia mittente obbligatoria' }, { status: 400 })
 
   const packages = body.packages || [{ length: 20, width: 15, height: 10, weight: 1 }]
+  // RITIRO richiesto insieme alla spedizione. Serve a due cose: ai contratti DVA, dove e' l'UNICO
+  // momento in cui si puo' prenotare (il corriere non ha una chiamata per aggiungerlo dopo), e a
+  // tutti gli altri per lasciare traccia sulla spedizione che il ritiro e' stato chiesto.
+  const _vuoleRitiro = body.richiediRitiro === true && !!body.dataRitiro
+  const _pomeriggio = String(body.orarioRitiro || '').toLowerCase().startsWith('pom')
   // *** Controllo misure massime del corriere (settings.misure_max) ***
   // *** Controllo multicollo ***
   if (packages.length > 1 && (corriereRecord as any)?.multicollo === false) {
@@ -757,6 +762,11 @@ export async function POST(req: NextRequest) {
         stato: 'in_lavorazione',
         costo_spedizione: costoCorrente, costo_totale: costoCliente,
         servizi_accessori: serviziAccessori,
+        // Il ritiro e' stato prenotato insieme all'ordine qui sopra: va segnato sulla spedizione,
+        // altrimenti in scheda risulterebbe "nessun ritiro" pur essendo stato chiesto al corriere.
+        richiedi_ritiro: _vuoleRitiro || false,
+        data_ritiro: _vuoleRitiro ? String(body.dataRitiro) : null,
+        intervallo_ritiro: _vuoleRitiro ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
         note: body.notes || null, contenuto: body.contenuto || null,
         rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
       }).select('id').single()
@@ -946,8 +956,17 @@ export async function POST(req: NextRequest) {
 
       // ── 2) ORDINE — oltre questa riga il pacco e' comprato e non si torna indietro ──
       const rifBreve = String(body.rifOrdine || '').trim().slice(0, 40) || undefined
+      // RITIRO: su questi contratti si prenota SOLO qui — il corriere non ha una chiamata per
+      // aggiungerlo dopo, e infatti /api/ritiri/crea lo rifiuta di proposito.
       const ordine = await easyparcelOrder(apikey, {
         codiceOfferta: String(offerta.codice_offerta),
+        ...(_vuoleRitiro ? { ritiro: {
+          dal: String(body.dataRitiro),
+          dalleMattina: _pomeriggio ? '14:00' : '09:00',
+          alleMattina: _pomeriggio ? '18:00' : '13:00',
+          dallePomeriggio: '14:00',
+          allePomeriggio: '18:00',
+        } } : {}),
         mittente: {
           nominativo: body.shipFrom.name, indirizzo: body.shipFrom.street1,
           email: EMAIL_PER_CORRIERE, cellulare: cellMitt, contatto: body.shipFrom.name,
@@ -1034,6 +1053,9 @@ export async function POST(req: NextRequest) {
         stato: 'in_lavorazione',
         costo_spedizione: costoCorrente, costo_totale: costoCliente,
         servizi_accessori: serviziAccessori,
+        richiedi_ritiro: _vuoleRitiro || false,
+        data_ritiro: _vuoleRitiro ? String(body.dataRitiro) : null,
+        intervallo_ritiro: _vuoleRitiro ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
         note: body.notes || null, contenuto: body.contenuto || null,
         rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
       }).select('id').single()

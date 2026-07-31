@@ -242,7 +242,10 @@ export default function NuovaSpedizionePage() {
         shipTo:{name:dest.nome,company:'',street1:dest.indirizzo,street2:'',city:dest.citta,state:dest.provincia,postalCode:dest.cap,country:dest.paese,phone:dest.telefono,email:dest.email},
         notes:dest.note, insuranceValue:+assicurazione, codValue:+contrassegno,
         contenuto, tipoContenuto, valoreMerce,
-        rifOrdine:dest.ordine, rifDestinatario:dest.rif
+        rifOrdine:dest.ordine, rifDestinatario:dest.rif,
+        // Ritiro: sui contratti DVA si prenota SOLO insieme all'ordine (il corriere non ha
+        // una chiamata per aggiungerlo dopo), quindi la richiesta va passata gia' qui.
+        richiediRitiro, dataRitiro:ritiroData, orarioRitiro:ritiroOrario
       })
     })
     const data = await res.json()

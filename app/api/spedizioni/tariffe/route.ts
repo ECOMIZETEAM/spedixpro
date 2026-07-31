@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { superaLimitiCollo } from '@/lib/limiti-collo'
+import { entroMisureAgevolate } from '@/lib/agevolazione-misure'
 import { createServerSupabase } from '@/lib/supabase'
 import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation,
@@ -387,12 +388,7 @@ export async function POST(req: NextRequest) {
   }
   // Se il listino è "solo peso reale", il volumetrico viene ignorato: si paga sempre sul peso reale.
   const pesoFatturato = listino?.solo_peso_reale ? pesoReale : Math.max(pesoReale, pesoVolume)
-  const entroMisureAgevolate = tuttiColli.every((p: any) => {
-    const L = Number(p?.length)||0, W = Number(p?.width)||0, H = Number(p?.height)||0
-    if (!L && !W && !H) return true
-    const dims = [L, W, H].sort((a,b)=>b-a); const lim = [50, 32, 28]
-    return dims[0] <= lim[0] && dims[1] <= lim[1] && dims[2] <= lim[2]
-  })
+  // La scatola dell'agevolazione dipende dal CONTRATTO: si valuta piu' sotto, per corriere.
 
   // Client ADMIN per questa lettura: porta dentro `corrieri.credenziali`, che non deve essere
   // leggibile col token di chi chiama. Il perimetro non cambia — resta il listino assegnato a
@@ -523,7 +519,7 @@ export async function POST(req: NextRequest) {
     // Peso su cui si tassa: reale se agevolazione misure (≤50x32x28) OPPURE "peso reale fino a X kg" (≤ soglia); altrimenti volumetrico.
     const _prs = settsC?.peso_reale_soglia
     const _usaRealeSoglia = !!_prs?.attivo && Number(_prs.kg) > 0 && pesoReale <= Number(_prs.kg)
-    const pesoPerFascia = ((!!settsC.agevolazione_peso_reale && entroMisureAgevolate) || _usaRealeSoglia) ? pesoReale : pesoFatturatoC
+    const pesoPerFascia = ((!!settsC.agevolazione_peso_reale && entroMisureAgevolate(settsC, tuttiColli)) || _usaRealeSoglia) ? pesoReale : pesoFatturatoC
     const fasciaGiusta = trovaFascia(fasceDelCorriere, pesoPerFascia)
     if (!fasciaGiusta) { esclusiFascia++; continue }   // peso oltre l'ultima fascia e nessuna "oltre X ogni"
     if (Number(fasciaGiusta.prezzo) <= 0) continue   // prezzo 0 per questa zona/peso -> non mostrare il corriere

@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
 
   let spedQuery = admin
     .from('spedizioni')
-    .select('id,numero,tracking_number,raw_response,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_email,master_id,cliente_id')
+    .select('id,numero,tracking_number,raw_response,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_email,master_id,cliente_id,richiedi_ritiro,data_ritiro,intervallo_ritiro')
     .in('id', spedizioneIds).in('master_id', masterIdsAmmessi)
   if (isCliente) spedQuery = spedQuery.eq('cliente_id', utente.cliente_id)
   // Agente: può ritirare solo spedizioni dei suoi clienti.
@@ -98,7 +98,27 @@ export async function POST(req: NextRequest) {
   // fondo (che vale per tutto cio' che non e' SpediamoPro) e si tenterebbe una chiamata verso un
   // dominio che per questi contratti non esiste nemmeno.
   if (corriere.tipo === 'easyparcel') {
-    return NextResponse.json({ error: 'Per questo corriere il ritiro va richiesto al momento della creazione della spedizione: non può essere aggiunto dopo.' }, { status: 400 })
+    // Il portale chiama questa rotta SUBITO DOPO aver creato la spedizione. Su questi contratti il
+    // ritiro e' gia' stato prenotato li', insieme all'ordine: rispondere "non si puo'" farebbe
+    // comparire un errore per un ritiro che invece esiste. Quindi: se sulle spedizioni indicate il
+    // ritiro risulta gia' richiesto, si conferma e si registra la riga nell'elenco Ritiri.
+    const giaChiesto = (spedizioni || []).some((s: any) => s.richiedi_ritiro)
+    if (!giaChiesto) {
+      return NextResponse.json({ error: 'Per questo corriere il ritiro va richiesto al momento della creazione della spedizione: non può essere aggiunto dopo.' }, { status: 400 })
+    }
+    const prima: any = (spedizioni || []).find((s: any) => s.richiedi_ritiro) || {}
+    const colliTot = (spedizioni || []).reduce((n: number, s: any) => n + (Number(s.colli) || 1), 0)
+    const pesoTot = (spedizioni || []).reduce((n: number, s: any) => n + (Number(s.peso_reale) || 0), 0)
+    const { data: r } = await admin.from('ritiri').insert({
+      master_id: masterId, cliente_id: clienteId, corriere_id: corriere.id,
+      mitt_nome: body.mittNome, mitt_indirizzo: body.mittIndirizzo, mitt_citta: body.mittCitta,
+      mitt_provincia: body.mittProvincia || null, mitt_cap: body.mittCap,
+      mitt_telefono: body.mittTelefono || null,
+      colli: colliTot, peso: pesoTot, contenuto: body.contenuto || null,
+      data_ritiro: prima.data_ritiro || body.dataRitiro, stato: 'richiesto',
+    }).select('id').single()
+    if (r?.id) { try { await admin.from('spedizioni').update({ ritiro_id: r.id }).in('id', spedizioneIds) } catch { } }
+    return NextResponse.json({ success: true, giaPrenotato: true, ritiroId: r?.id || null })
   }
 
   const cred = corriere.credenziali as Record<string, string>
