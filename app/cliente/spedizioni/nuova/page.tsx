@@ -278,7 +278,10 @@ export default function NuovaSpedizioneCliente() {
       } catch {}
     }
     setCreating(false)
-    setSuccesso({numero:data.numero||'—', id:data.spedizioneId||'', ritiro: ritiroEsito})
+    // Il numero provvisorio non si mostra: e' un riferimento interno che il corriere non conosce,
+    // e vederlo comparire per poi cambiare da solo sembra un errore. Meglio dire com'e': sta
+    // arrivando. Appena c'e' quello vero il messaggio si completa.
+    setSuccesso({numero: data.provvisorio ? '' : (data.numero||'—'), id:data.spedizioneId||'', ritiro: ritiroEsito})
     // Alcuni corrieri preparano la lettera di vettura qualche secondo dopo aver accettato l'ordine.
     // Finché non c'è, la spedizione porta un numero provvisorio: mostrarlo qui vorrebbe dire dare
     // all'utente un numero che il corriere non conosce. Quindi lo si richiede finché non arriva
@@ -303,7 +306,7 @@ export default function NuovaSpedizioneCliente() {
         if (st?.error) return
         setSuccesso(s => s && s.id === id ? {
           ...s,
-          numero: st.numero || s.numero,
+          numero: st.provvisorio ? s.numero : (st.numero || s.numero),
           ritiro: s.ritiro && st.codiceRitiro ? { ...s.ritiro, pickupId: st.codiceRitiro } : s.ritiro,
         } : s)
         if (!st.provvisorio && (!conRitiro || st.codiceRitiro)) return
@@ -320,7 +323,9 @@ export default function NuovaSpedizioneCliente() {
 
       {errore && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>⚠️ {errore}</div>}
       {successo && <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'12px 16px',marginBottom:'16px',fontSize:'14px',color:'#166534',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px'}}>
-        <span>✓ Spedizione <strong>{successo.numero}</strong> generata con successo</span>
+        <span>{successo.numero
+          ? <>✓ Spedizione <strong>{successo.numero}</strong> generata con successo</>
+          : <>✓ Spedizione generata con successo — <span style={{opacity:.75}}>numero in arrivo dal corriere…</span></>}</span>
         {successo.id
           ? <button onClick={()=>scaricaEtichetta(successo.id)} style={{background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'6px 12px',fontSize:'14px',cursor:'pointer',fontWeight:'600'}} title="Scarica etichetta">🖨️ Scarica LDV</button>
           : <span style={{color:'#dc2626',fontSize:'13px'}}>⚠️ Etichetta non generata</span>}
