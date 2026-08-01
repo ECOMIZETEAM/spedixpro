@@ -56,10 +56,17 @@ export async function middleware(req: NextRequest) {
     }
 
     // ACCOUNT SOSPESO PER CANONE NON PAGATO: non deve poter fare operazioni, e non basta nasconderle
-    // a schermo — le chiamate si possono fare lo stesso dagli strumenti del browser. Il blocco vale
-    // SOLO per lui: i suoi clienti e i suoi sotto-master hanno un master_id diverso e non lo vedono
-    // nemmeno. Restano aperte le rotte per PAGARE, altrimenti sarebbe un blocco senza uscita.
-    const scaduto = (u as any)?.masters?.pagamento_scaduto_dal
+    // a schermo — le chiamate si possono fare lo stesso dagli strumenti del browser.
+    //
+    // Vale SOLO per chi il canone lo deve pagare, cioe' il master e chi lavora per lui. I suoi
+    // CLIENTI hanno lo stesso master_id — nel nostro modello ogni cliente appartiene a un master —
+    // quindi senza questo controllo sul ruolo si sarebbero bloccati anche loro, ed e' esattamente
+    // il contrario di quello che serve: la rete sotto deve continuare a lavorare, e le sue
+    // spedizioni devono continuare a girare nei movimenti del master.
+    // Restano aperte le rotte per PAGARE, altrimenti sarebbe un blocco senza uscita.
+    const ruoloU = (u?.ruolo || '').toLowerCase()
+    const deveLuiPagare = ruoloU === 'master' || ruoloU === 'admin' || ruoloU === 'operatore'
+    const scaduto = deveLuiPagare ? (u as any)?.masters?.pagamento_scaduto_dal : null
     if (scaduto && (Date.now() - new Date(scaduto).getTime()) > 3 * 86400000
         && !pathname.startsWith('/api/stripe/') && !pathname.startsWith('/api/auth/')) {
       return NextResponse.json({ error: 'Account sospeso: il canone non risulta pagato. Riattiva il pagamento per continuare.' }, { status: 402 })

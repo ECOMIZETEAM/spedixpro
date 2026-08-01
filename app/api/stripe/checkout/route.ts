@@ -135,23 +135,17 @@ export async function POST(req: NextRequest) {
     sessione = await s.checkout.sessions.create({
       mode: 'subscription',
       customer,
-      // Una riga sola: l'abbonamento. Il canone del mese IN CORSO non si puo' mettere qui come
-      // voce una-tantum — il circuito rifiuta di mescolare un importo una-tantum con
-      // "niente conteggio dei giorni" nella stessa sessione. Lo si addebita subito dopo, con una
-      // fattura a parte, appena la carta e' registrata (vedi /api/stripe/webhook).
+      // L'ABBONAMENTO PARTE OGGI: canone pieno subito, e poi pieno ogni mese.
+      //
+      // Prima lo agganciavo al primo del mese: il circuito allora mostrava "0,00 € dovuti oggi" e
+      // il mese in corso finiva addebitato a parte, dopo. Tecnicamente tornava, ma alla cassa
+      // sembrava che il mese fosse gratis — e un cliente che legge zero pensa zero.
+      // Cosi' invece l'importo e' quello vero, scritto dove lo si guarda.
+      // Il rinnovo cade nel giorno dell'attivazione anziche' il primo del mese: si perde
+      // l'allineamento col contatore spedizioni, che resta per mese di calendario.
       line_items: [{ price: price.id, quantity: 1, tax_rates: iva.length ? iva : undefined }],
       subscription_data: {
-        metadata: {
-          master_id: m.id, piano: pianoId,
-          // Il segnale per il webhook: questo mese va ancora pagato, per intero.
-          canone_mese: meseGiaPagato ? 'gia_pagato' : 'da_addebitare',
-        },
-        // Rinnovo il PRIMO DEL MESE per tutti, come il contatore delle spedizioni: se il pacchetto
-        // riparte il primo e la bolletta arriva il 13, i due numeri non tornano mai fra loro.
-        billing_cycle_anchor: primoDelProssimoMese(),
-        // Nessun conteggio dei giorni: il mese in corso e' gia' nella riga qui sopra, e da qui in
-        // avanti si paga il canone pieno ogni primo del mese.
-        proration_behavior: 'none',
+        metadata: { master_id: m.id, piano: pianoId },
       },
       metadata: { master_id: m.id, piano: pianoId },
       success_url: `${base}/dashboard/abbonamento?pagamento=ok`,

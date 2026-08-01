@@ -32,6 +32,7 @@ export async function GET() {
   return NextResponse.json({
     usato: stato.usato, limite: stato.limite, perc: stato.perc,
     avviso: stato.avviso, bloccato: stato.bloccato, bloccatoDaMe: stato.bloccatoDaMe,
+    congelato: stato.congelato,
     motivo: stato.motivo, giorniPerPagare: stato.giorniPerPagare,
     // Servono alla schermata di riattivazione: chi e' congelato non puo' navigare fino ad
     // Abbonamento, quindi il pagamento deve poter partire da li'.

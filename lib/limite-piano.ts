@@ -25,15 +25,16 @@ export type StatoPiano = {
   limite: number         // 0 = nessun limite (il master principale, o chi non ha ancora un piano)
   perc: number           // 0-999
   avviso: boolean        // dal 90% in su
-  bloccato: boolean      // io o qualcuno sopra di me e' fermo: limite sfondato o canone non pagato
+  bloccato: boolean      // le SPEDIZIONI sono ferme: io o qualcuno sopra di me e' oltre il limite
   bloccatoDaMe: boolean  // il motivo del blocco e' MIO (quindi lo posso risolvere io)
+  congelato: boolean     // IO non ho pagato il canone: non vedo e non opero, ma la mia rete lavora
   motivo: 'limite' | 'pagamento' | null
   giorniPerPagare: number | null   // giorni che restano prima del congelamento (solo per me)
 }
 
 export const NESSUN_LIMITE: StatoPiano = {
   usato: 0, limite: 0, perc: 0, avviso: false, bloccato: false, bloccatoDaMe: false,
-  motivo: null, giorniPerPagare: null,
+  congelato: false, motivo: null, giorniPerPagare: null,
 }
 
 // Giorni di tolleranza fra il canone non riuscito e il congelamento. Una carta scaduta o una banca
@@ -78,8 +79,19 @@ export async function statoPiano(admin: any, masterId: string | null | undefined
     usato, limite,
     perc: limite > 0 ? Math.min(999, Math.round((usato / limite) * 100)) : 0,
     avviso: (limite > 0 && usato >= limite * 0.9) || giorniPerPagare !== null,
-    bloccato: oltre.length > 0 || congelati.length > 0,
+    // LE SPEDIZIONI LE FERMA SOLO IL LIMITE, MAI IL CANONE NON PAGATO.
+    //
+    // Qui prima c'era anche il congelamento, e il risultato era l'opposto di quello che serve: una
+    // spedizione di un CLIENTE parte dal master del cliente, quindi il master congelato era il
+    // livello 0 e la spedizione veniva rifiutata. Si sarebbe fermata tutta la sua rete — clienti e
+    // sotto-master compresi — proprio quello che non deve succedere.
+    // Il canone non pagato blocca LUI: il portale non si apre e le sue scritture vengono respinte
+    // (CongelatoGate + middleware). Il resto continua a girare: le spedizioni partono, i contatori
+    // salgono e i movimenti entrano nella sua lista, perche' quelle spedizioni gliele sta vendendo
+    // comunque e il conto deve restare giusto.
+    bloccato: oltre.length > 0,
     bloccatoDaMe,
+    congelato: !!mio?.congelato,
     // Se sono fermo per entrambe le ragioni, quella da risolvere prima e' il pagamento: senza
     // canone in regola non si puo' nemmeno fare l'upgrade.
     motivo: congelati.length ? 'pagamento' : (oltre.length ? 'limite' : null),

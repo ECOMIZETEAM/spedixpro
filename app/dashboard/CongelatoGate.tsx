@@ -19,7 +19,7 @@ export default function CongelatoGate() {
   async function carica() {
     try {
       const d = await (await fetch('/api/piano/stato')).json()
-      setS(d?.motivo === 'pagamento' && d?.bloccatoDaMe ? d : null)
+      setS(d?.congelato ? d : null)
     } catch { }
   }
   useEffect(() => {

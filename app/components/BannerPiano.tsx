@@ -24,6 +24,7 @@ export default function BannerPiano({ linkUpgrade = null }: { linkUpgrade?: stri
   }, [])
 
   if (!s || s.error) return null
+  // Il congelato ha gia' la sua schermata sopra il portale: qui basta il limite.
   const bloccato = !!s.bloccato
   const avviso = !bloccato && !!s.avviso
   if (!bloccato && !avviso) return null
