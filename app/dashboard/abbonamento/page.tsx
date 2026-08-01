@@ -348,6 +348,19 @@ export default function AbbonamentoPage() {
         )}
       </div>
 
+      {conCarta && !stato?.carta?.attiva && stato?.attivo && (
+        <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'12px 16px',marginBottom:'14px',fontSize:'13.5px',color:'#9a3412',display:'flex',alignItems:'center',gap:'12px',flexWrap:'wrap'}}>
+          <span style={{fontSize:'15px'}}>💳</span>
+          <div style={{flex:1,minWidth:'240px'}}>
+            <strong>Non hai ancora attivato il pagamento con carta.</strong> Il canone si paga da qui, con
+            rinnovo automatico il primo di ogni mese. Puoi farlo subito.
+          </div>
+          <button onClick={()=>pagaConCarta(stato.piano)} disabled={!!azione}
+            style={{background:'#f97316',color:'#fff',border:'none',borderRadius:'8px',padding:'9px 18px',fontSize:'13px',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+            {azione===stato.piano?'…':'Attiva il pagamento'}
+          </button>
+        </div>
+      )}
       {stato?.cambioProgrammato && (
         <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'11px 16px',marginBottom:'14px',fontSize:'13px',color:'#9a3412'}}>
           {stato.cambioProgrammato.disdetta
@@ -368,7 +381,17 @@ export default function AbbonamentoPage() {
               <div style={{fontSize:'14px',fontWeight:800,color:'#1a1a1a'}}>{p.nome}</div>
               <div style={{fontSize:'12px',color:'#777'}}>fino a <b>{p.limite.toLocaleString('it-IT')}</b>/mese</div>
               <div style={{fontSize:'20px',fontWeight:800,color:ACCENT,margin:'6px 0'}}>€ {p.prezzo}<span style={{fontSize:'11px',color:'#999',fontWeight:600}}>/mese</span></div>
-              {attuale ? (
+              {attuale && conCarta && !stato?.carta?.attiva ? (
+                // Il piano ce l'ha gia', ma non ha ancora una carta: senza questo tasto non aveva
+                // NESSUN modo di pagare il proprio canone — poteva solo cambiare piano.
+                <>
+                  <div style={{fontSize:'12px',fontWeight:700,color:'#16a34a',padding:'2px 0 6px'}}>✓ Piano attuale</div>
+                  <button onClick={()=>pagaConCarta(p.id)} disabled={!!azione}
+                    style={{width:'100%',background:ACCENT,color:'#fff',border:'none',borderRadius:'6px',padding:'8px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',opacity:azione===p.id?0.6:1}}>
+                    {azione===p.id?'…':'Attiva il pagamento'}
+                  </button>
+                </>
+              ) : attuale ? (
                 <div style={{fontSize:'12px',fontWeight:700,color:'#16a34a',padding:'8px 0'}}>✓ Piano attuale</div>
               ) : conCarta ? (
                 <button onClick={()=>pagaConCarta(p.id)} disabled={!!azione}

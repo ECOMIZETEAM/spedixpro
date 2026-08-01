@@ -1194,5 +1194,136 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CIRCUITO INTERNO — il corriere siamo noi
+  //
+  // Nessun provider da chiamare: il numero di lettera di vettura lo assegna il database (con un
+  // contatore atomico, perche' due creazioni simultanee non devono poter ottenere lo stesso
+  // numero) e l'etichetta la stampiamo noi, col logo del master. Tutto il resto — prezzo dal
+  // listino, credito, cascata sulla rete, distinte, contrassegni — e' identico agli altri
+  // contratti: e' esattamente il punto di farlo passare da qui invece che da un modulo a parte.
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (corriereRecord.tipo === 'interno') {
+    const { data: numeroInterno, error: errNum } = await adminCrea.rpc('prossimo_numero_interno', { p_master: corriereRecord.master_id })
+    if (errNum || !numeroInterno) {
+      console.error('[CREA][INTERNO] numerazione fallita', errNum?.message)
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Numerazione interna non disponibile: riprova o contatta l\'assistenza.' }, { status: 500 })
+    }
+    const numeroFinale = String(numeroInterno)
+
+    const costoCorrente = costoMaster || (parseFloat(body.totalPrice) || 0)
+    const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
+
+    // Logo del master proprietario del contratto: e' la sua rete, e' il suo marchio sul pacco.
+    let logoPng: Uint8Array | null = null
+    let nomeMaster: string | null = null
+    try {
+      const { data: mLogo } = await adminCrea.from('masters').select('logo_url,nome').eq('id', corriereRecord.master_id).maybeSingle()
+      nomeMaster = mLogo?.nome || null
+      if (mLogo?.logo_url) {
+        const r = await fetch(mLogo.logo_url)
+        if (r.ok) logoPng = new Uint8Array(await r.arrayBuffer())
+      }
+    } catch { /* senza logo l'etichetta esce col nome scritto: non e' un motivo per non spedire */ }
+
+    let etichettaUrl: string | null = null
+    try {
+      const { etichettaInterna } = await import('@/lib/etichetta-interna')
+      const pdf = await etichettaInterna({
+        numero: numeroFinale,
+        mittente: { nome: body.shipFrom?.name, indirizzo: body.shipFrom?.street1, cap: body.shipFrom?.postalCode, citta: body.shipFrom?.city, provincia: body.shipFrom?.state, telefono: body.shipFrom?.phone },
+        destinatario: { nome: body.shipTo?.name, indirizzo: body.shipTo?.street1, cap: body.shipTo?.postalCode, citta: body.shipTo?.city, provincia: body.shipTo?.state, telefono: body.shipTo?.phone },
+        colli: packages.length, peso: pesoReale,
+        contrassegno: Number(body.codValue || 0), note: body.notes || null,
+        riferimento: body.rifOrdine || null, logoPng, nomeMaster,
+      })
+      etichettaUrl = `data:application/pdf;base64,${Buffer.from(pdf).toString('base64')}`
+    } catch (e: any) {
+      // L'etichetta si puo' ristampare; la spedizione no. Meglio salvarla senza che perderla.
+      console.error('[CREA][INTERNO] etichetta non generata', numeroFinale, e?.message)
+    }
+
+    const colliDettaglio = (body.colliDettaglio || packages.map((p: any) => ({
+      lunghezza: p.length, larghezza: p.width, altezza: p.height,
+    }))).map((c: any, i: number) => ({
+      numero: i + 1,
+      lunghezza: c.lunghezza || packages[i]?.length || null,
+      larghezza: c.larghezza || packages[i]?.width || null,
+      altezza: c.altezza || packages[i]?.height || null,
+      peso: packages[i]?.weight || null,
+      // Etichetta unica multipagina: una pagina per collo, gia' col "collo n di N" sopra.
+      etichetta_url: null,
+    }))
+
+    const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
+      master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id,
+      numero: numeroFinale,
+      mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
+      mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
+      mitt_email: body.shipFrom.email || null, mitt_telefono: body.shipFrom.phone || null,
+      dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_citta: body.shipTo.city,
+      dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
+      dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
+      colli: packages.length, peso_reale: pesoReale,
+      peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
+      lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
+      contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
+      tracking_number: numeroFinale,
+      etichetta_url: etichettaUrl,
+      colli_dettaglio: colliDettaglio,
+      raw_response: { _interno: true },
+      stato: 'in_lavorazione',
+      costo_spedizione: costoCorrente, costo_totale: costoCliente,
+      servizi_accessori: serviziAccessori,
+      richiedi_ritiro: _vuoleRitiro || false,
+      data_ritiro: _vuoleRitiro ? String(body.dataRitiro) : null,
+      intervallo_ritiro: _vuoleRitiro ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
+      note: body.notes || null, contenuto: body.contenuto || null,
+      rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
+    }).select('id').single()
+
+    if (insertError) {
+      // Qui, a differenza dei provider, non c'e' niente da annullare fuori: la spedizione non e'
+      // mai uscita da noi. Si libera la prenotazione e si riparte pulito.
+      console.error('[CREA][INTERNO][INSERT]', numeroFinale, insertError.message)
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Spedizione non registrata: riprova.' }, { status: 500 })
+    }
+
+    await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
+    try {
+      await addebitaCatena(adminCrea, {
+        masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
+        costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
+        cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
+        corriereNome: corriereRecord.nome_contratto,
+        contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+        numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
+      })
+    } catch (e) { console.error('[CREA][INTERNO] cascata catena:', e) }
+
+    after(async () => {
+      try {
+        const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
+        let notificaDest = true
+        if (clienteId) {
+          const { data: cli } = await adminCrea.from('clienti').select('impostazioni').eq('id', clienteId).maybeSingle()
+          notificaDest = (cli?.impostazioni as any)?.notifica_email_dest !== false
+        }
+        await inviaEmailSpedizioneCreata({
+          mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
+          mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
+          numero: numeroFinale, corriere: corriereRecord.nome_contratto, notificaDest,
+        })
+      } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
+    })
+
+    return NextResponse.json({
+      numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2),
+      spedizioneId: inserted?.id || null,
+    })
+  }
+
   { await stornaPrenotazione(); return NextResponse.json({ error: `Tipo corriere non supportato: ${corriereRecord.tipo}` }, { status: 400 }) }
 }
