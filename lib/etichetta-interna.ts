@@ -134,15 +134,21 @@ export async function etichettaInterna(d: Dati): Promise<Uint8Array> {
     // Se il testo sopra ha mangiato lo spazio, il riquadro si appoggia comunque sopra le barre:
     // e' l'ultima cosa a cui rinunciare.
     const cod = Number(d.contrassegno || 0)
+
+    // La nota PRIMA del contrassegno: "citofonare portineria", "consegnare entro le 12" — serve a
+    // chi consegna, e messa dopo il riquadro finiva schiacciata contro le barre.
+    // Si ragiona cosi': la nota ci sta se, dopo averla scritta, il riquadro del contrassegno resta
+    // comunque sopra le barre. Guardare solo il punto in cui si e' arrivati non bastava — il
+    // riquadro puo' scendere, e infatti lo spazio c'era e la nota veniva buttata lo stesso.
+    const altezzaNota = d.note ? 5.5 * MM : 0
+    const spazioSotto = cod > 0 ? 9 * MM : 0
+    if (d.note && (y - altezzaNota - spazioSotto) >= Y_FONDO) {
+      testo(d.note, 6 * MM, y, 8, font, grigio)
+      y -= altezzaNota
+    }
+
     // Il riquadro del contrassegno si appoggia sopra le barre: e' l'ultima cosa a cui rinunciare.
     const yBox = cod > 0 ? Math.max(y - 9 * MM, Y_FONDO) : null
-
-    // La nota PRIMA del contrassegno: "citofonare portineria" serve a chi consegna, e messa dopo
-    // il riquadro finiva schiacciata contro le barre e saltava quasi sempre. Resta comunque un di
-    // piu': se non c'e' posto si lascia perdere, sulle barre non ci si stampa.
-    const tetto = (yBox !== null ? yBox + 10 * MM : Y_FONDO)
-    if (d.note && y - 3.5 * MM >= tetto) testo(d.note, 6 * MM, y, 8, font, grigio)
-
     if (yBox !== null) {
       p.drawRectangle({ x: 6 * MM, y: yBox, width: L - 12 * MM, height: 10 * MM, color: rgb(0, 0, 0) })
       // Importo scritto all'italiana: e' la cifra che l'autista deve farsi dare in mano.
