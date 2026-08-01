@@ -43,7 +43,9 @@ export async function POST(req: NextRequest) {
   const { nome, ruolo, email } = body
   if (!nome || !nome.trim()) return NextResponse.json({ error: 'Nome obbligatorio' }, { status: 400 })
   if (!email || !email.trim()) return NextResponse.json({ error: 'Email obbligatoria' }, { status: 400 })
-  const ruoliValidi = ['admin', 'operatore', 'agente']
+  // 'autista' e' uno staff a tutti gli effetti, ma non entra nel portale: dal telefono vede solo
+  // le sue consegne. E' il modo di dargli un accesso senza dovergli far installare niente.
+  const ruoliValidi = ['admin', 'operatore', 'agente', 'autista']
   if (!ruoliValidi.includes((ruolo||'').toLowerCase())) return NextResponse.json({ error: 'Ruolo non valido' }, { status: 400 })
 
   const admin = createAdminSupabase()
@@ -69,6 +71,20 @@ export async function POST(req: NextRequest) {
     // non e' piu' riutilizzabile. Si ripulisce l'account auth appena creato.
     await admin.auth.admin.deleteUser(newId).catch(() => {})
     return NextResponse.json({ error: insErr.message }, { status: 400 })
+  }
+
+  // Un autista e' anche una riga nell'anagrafica autisti: e' quella che porta la zona e su cui si
+  // contano le consegne. Averne due separate vorrebbe dire tenerle allineate a mano, e infatti
+  // prima o poi si scollegano. Se c'e' gia' un autista con quel nome senza accesso, si aggancia
+  // quello invece di crearne un altro.
+  if ((ruolo || '').toLowerCase() === 'autista') {
+    const { data: esistente } = await admin.from('autisti')
+      .select('id,utente_id').eq('master_id', me.master_id).ilike('nome', nome.trim()).is('utente_id', null).maybeSingle()
+    if (esistente) {
+      await admin.from('autisti').update({ utente_id: newId, email: email.trim() }).eq('id', esistente.id)
+    } else {
+      await admin.from('autisti').insert({ master_id: me.master_id, nome: nome.trim(), email: email.trim(), utente_id: newId, attivo: true })
+    }
   }
 
   // email credenziali (best-effort, funziona quando Resend è verificato)
@@ -139,7 +155,7 @@ export async function PUT(req: NextRequest) {
   if (typeof body.nome === 'string') anagrafica.nome = body.nome.trim()
   if (typeof body.cognome === 'string') anagrafica.cognome = body.cognome.trim() || null
   if (typeof body.telefono === 'string') anagrafica.telefono = body.telefono.trim() || null
-  if (body.ruolo && ['admin', 'operatore', 'agente'].includes(String(body.ruolo).toLowerCase())) anagrafica.ruolo = String(body.ruolo).toLowerCase()
+  if (body.ruolo && ['admin', 'operatore', 'agente', 'autista'].includes(String(body.ruolo).toLowerCase())) anagrafica.ruolo = String(body.ruolo).toLowerCase()
   if (typeof body.attivo === 'boolean') anagrafica.attivo = body.attivo
   // Listino agente (costo dell'agente): un listino cliente di proprietà del master.
   if ('listino_agente_id' in body) {

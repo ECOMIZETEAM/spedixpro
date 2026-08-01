@@ -1207,7 +1207,20 @@ export async function POST(req: NextRequest) {
     }
     const numeroFinale = String(numeroInterno)
 
-    const costoCorrente = costoMaster || (parseFloat(body.totalPrice) || 0)
+    // IL COSTO NON ARRIVA DAL BROWSER. Sugli altri contratti il costo reale lo dice il corriere;
+    // qui il corriere siamo noi, quindi il costo e' il listino di chi manda — calcolato dal
+    // server. Prima si ripiegava su body.totalPrice: bastava cambiare quel numero nel browser e
+    // il detentore del circuito si vedeva addebitare sul credito la cifra scritta da chi spedisce.
+    let costoInterno = costoMaster
+    if (!isProprio) {
+      costoInterno = (await calcolaPrezzoCorriere(adminCrea, {
+        corriereId: corriereRecord.id, masterId,
+        provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
+        pesoReale, packages,
+        contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+      })) ?? 0
+    }
+    const costoCorrente = costoInterno
     const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
 
     // Logo del master proprietario del contratto: e' la sua rete, e' il suo marchio sul pacco.

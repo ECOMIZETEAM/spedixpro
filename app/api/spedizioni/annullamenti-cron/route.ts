@@ -20,12 +20,28 @@ export async function GET(req: NextRequest) {
   // così processo anche quelle il cui stato è stato riportato indietro da altri processi.
   // Il ripristino (undo) azzera annullamento_richiesto_at, quindi le ripristinate sono escluse.
   const { data: pendenti } = await admin.from('spedizioni')
-    .select('id,numero,dest_nome,corriere_id,raw_response,tracking_number,stato_precedente,annullamento_da')
+    .select('id,numero,dest_nome,corriere_id,raw_response,tracking_number,stato_precedente,annullamento_da,stato')
     .not('annullamento_richiesto_at', 'is', null)
     .lte('annullamento_richiesto_at', soglia)
-    .not('stato', 'in', '(annullata,annullamento_manuale)')
+    // 'consegnata' esclusa: fra la richiesta e le 48 ore il pacco puo' essere arrivato davvero, e
+    // qui non si guarda lo stato ma la richiesta — quindi senza questo filtro il cron rimborsava
+    // cliente e catena per merce consegnata. Sul circuito interno succede in poche ore.
+    .not('stato', 'in', '(annullata,annullamento_manuale,consegnata)')
     .order('annullamento_richiesto_at', { ascending: true })
     .limit(200)
+
+  // Le richieste su pacchi ormai consegnati si chiudono: senza azzerare la richiesta resterebbero
+  // a girare a ogni passaggio del cron, ed e' anche il modo di far vedere che sono decadute.
+  const { data: consegnateInAttesa } = await admin.from('spedizioni')
+    .select('id,numero').not('annullamento_richiesto_at', 'is', null)
+    .lte('annullamento_richiesto_at', soglia).eq('stato', 'consegnata').limit(200)
+  for (const s of (consegnateInAttesa || [])) {
+    await admin.from('spedizioni').update({
+      annullamento_richiesto_at: null,
+      annullamento_errore: 'Consegnata prima dello scadere delle 48 ore: annullo decaduto.',
+    }).eq('id', s.id)
+    console.warn('[ANNULLI][CRON] richiesta decaduta, spedizione consegnata:', s.numero)
+  }
 
   let annullate = 0, rifiutate = 0, manuali = 0, errori = 0
   for (const s of (pendenti || [])) {

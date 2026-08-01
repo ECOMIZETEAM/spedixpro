@@ -112,6 +112,7 @@ export default function CatalogoPage() {
       }
       const articoli = righe.map(r => {
         const g = col.grammi ? num(r[col.grammi]) : null
+        const kg = col.peso ? num(r[col.peso]) : null
         return {
           sku: String(r[col.sku] ?? '').trim(),
           nome: col.nome ? String(r[col.nome] ?? '').trim() : '',
@@ -119,7 +120,10 @@ export default function CatalogoPage() {
           asin: col.asin ? String(r[col.asin] ?? '').trim() : '',
           prezzo: col.prezzo ? num(r[col.prezzo]) : null,
           // Shopify esporta i grammi: qui si ragiona in chili, e la conversione la facciamo noi.
-          peso: col.peso ? num(r[col.peso]) : (g != null ? g / 1000 : null),
+          // Il ripiego guarda la CELLA, non la colonna: nei fogli messi insieme a mano capita che
+          // alcune righe abbiano i chili e altre solo i grammi, e guardando la colonna quelle a
+          // grammi finivano in catalogo senza peso.
+          peso: (kg && kg > 0) ? kg : (g != null && g > 0 ? g / 1000 : null),
           lunghezza: col.lunghezza ? num(r[col.lunghezza]) : null,
           larghezza: col.larghezza ? num(r[col.larghezza]) : null,
           altezza: col.altezza ? num(r[col.altezza]) : null,

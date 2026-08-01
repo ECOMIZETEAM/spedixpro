@@ -51,11 +51,20 @@ const CAMPI = ['sku', 'nome', 'ean13', 'asin', 'prezzo', 'url_immagine', 'peso',
 const NUMERICI = new Set(['prezzo', 'peso', 'lunghezza', 'larghezza', 'altezza', 'valore_dichiarato'])
 const RIFERIMENTI = new Set(['corriere_id', 'corriere_estero_id'])
 
-function ripulisci(p: any) {
+// `parziale` = importazione: i campi vuoti NON si scrivono.
+//
+// Serve a non distruggere il catalogo con un file incompleto. Un export di inventario ha SKU,
+// prezzo e quantita' ma non i pesi: caricandolo con la regola normale, peso e misure gia' misurate
+// a mano diventavano NULL, e da quel momento le spedizioni di quel prodotto ripartivano da capo
+// con l'ingombro sbagliato — che e' esattamente il problema che il catalogo doveva risolvere.
+// Nella modifica a mano invece un campo svuotato deve svuotare davvero: li' parziale e' false.
+function ripulisci(p: any, parziale = false) {
   const out: any = {}
   for (const c of CAMPI) {
     if (!(c in p)) continue
     const v = p[c]
+    const vuoto = v === null || v === undefined || String(v).trim() === ''
+    if (parziale && vuoto) continue
     if (NUMERICI.has(c)) {
       // La virgola decimale e' come la scrivono tutti, ed e' quella che esce da un foglio Excel
       // italiano: leggerla come "non numero" vorrebbe dire buttare via il peso.
@@ -99,23 +108,49 @@ export async function POST(req: NextRequest) {
   if (!cliente) return NextResponse.json({ error: 'Cliente non valido' }, { status: 400 })
 
   // Un articolo solo o un'importazione intera: stessa strada, cosi' le regole sono le stesse.
-  const righe: any[] = Array.isArray(body?.articoli) ? body.articoli : [body]
-  const validi: any[] = []
-  let senzaSku = 0
+  // L'importazione e' PARZIALE: quello che nel file non c'e' non si tocca (vedi ripulisci).
+  const importazione = Array.isArray(body?.articoli)
+  const righe: any[] = importazione ? body.articoli : [body]
+  const validi = new Map<string, any>()
+  let senzaSku = 0, doppioni = 0
   for (const r of righe) {
-    const p = ripulisci(r)
+    const p = ripulisci(r, importazione)
     if (!p.sku) { senzaSku++; continue }
-    if (!p.nome) p.nome = p.sku            // meglio un nome uguale allo SKU che una riga persa
-    validi.push({ ...p, master_id: cliente.master_id, cliente_id: cliente.id })
+    // Il nome vero non si sostituisce con lo SKU: se il file non ce l'ha, si tiene quello che c'e'
+    // gia' in catalogo. Solo un articolo NUOVO senza nome prende lo SKU, per non restare anonimo.
+    if (!importazione && !p.nome) p.nome = p.sku
+    const chiave = String(p.sku).toUpperCase()
+    // Lo stesso SKU due volte nello stesso file (due varianti col medesimo codice, capita negli
+    // export): l'upsert rifiuterebbe l'INTERO blocco con "cannot affect row a second time", e
+    // l'importazione si fermerebbe a meta'. Vince l'ultima riga, come farebbe un aggiornamento.
+    if (validi.has(chiave)) doppioni++
+    validi.set(chiave, { ...(validi.get(chiave) || {}), ...p, master_id: cliente.master_id, cliente_id: cliente.id })
   }
-  if (!validi.length) return NextResponse.json({ error: 'Nessuna riga valida: manca lo SKU', senzaSku }, { status: 400 })
+  if (!validi.size) return NextResponse.json({ error: 'Nessuna riga valida: manca lo SKU', senzaSku }, { status: 400 })
+
+  // LA FUSIONE SI FA QUI, NON NEL DATABASE.
+  // Scrivendo righe con campi diversi fra loro, l'upsert a blocchi riempie di NULL quelli che
+  // mancano — cioe' proprio il danno che si vuole evitare. Quindi si legge com'e' adesso
+  // l'articolo, ci si posa sopra solo quello che il file porta davvero, e si riscrive intero.
+  const { data: gia } = await admin.from('articoli_cliente').select('*').eq('cliente_id', cliente.id)
+  const esistente = new Map<string, any>()
+  for (const g of (gia || [])) esistente.set(String(g.sku).trim().toUpperCase(), g)
+
+  const daScrivere = [...validi.entries()].map(([chiave, nuovo]) => {
+    const vecchio = esistente.get(chiave)
+    if (!vecchio) return { ...nuovo, nome: nuovo.nome || nuovo.sku }
+    const { id, created_at, updated_at, ...base } = vecchio
+    const unito: any = { ...base, ...nuovo }
+    unito.nome = unito.nome || vecchio.nome || nuovo.sku
+    return unito
+  })
 
   // Lo SKU gia' in catalogo si AGGIORNA, non si duplica: e' cosi' che si ricarica il listino
   // quando cambiano i pesi. Il vincolo unico e' (cliente_id, sku), che e' esattamente la chiave.
   const { data, error } = await admin.from('articoli_cliente')
-    .upsert(validi, { onConflict: 'cliente_id,sku', ignoreDuplicates: false }).select('id')
+    .upsert(daScrivere, { onConflict: 'cliente_id,sku', ignoreDuplicates: false }).select('id')
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  return NextResponse.json({ ok: true, salvati: (data || []).length, senzaSku })
+  return NextResponse.json({ ok: true, salvati: (data || []).length, senzaSku, doppioni })
 }
 
 export async function DELETE(req: NextRequest) {

@@ -25,6 +25,34 @@ type Dati = {
 const MM = 72 / 25.4          // punti PDF per millimetro
 const L = 100 * MM, H = 150 * MM
 
+// Spezza un testo sulle parole per farlo stare in larghezza, al massimo su `maxRighe` righe.
+// L'ultima riga, se avanza roba, finisce con l'ellissi: meglio dire "c'e' dell'altro" che far
+// credere che il nome finisca li'.
+function aCapo(testo: string, font: any, size: number, larghezza: number, maxRighe: number): string[] {
+  const parole = String(testo || '').trim().split(/\s+/).filter(Boolean)
+  if (!parole.length) return []
+  const righe: string[] = []
+  let corrente = ''
+  for (const parola of parole) {
+    const prova = corrente ? `${corrente} ${parola}` : parola
+    if (font.widthOfTextAtSize(prova, size) <= larghezza) { corrente = prova; continue }
+    if (corrente) righe.push(corrente)
+    if (righe.length >= maxRighe) { corrente = ''; break }
+    // Parola singola piu' lunga della riga (un indirizzo web, un codice): si taglia lei.
+    corrente = parola
+    while (corrente.length > 1 && font.widthOfTextAtSize(corrente, size) > larghezza) corrente = corrente.slice(0, -1)
+  }
+  if (corrente && righe.length < maxRighe) righe.push(corrente)
+  const usate = righe.join(' ').replace(/\s+/g, ' ')
+  const tutto = parole.join(' ')
+  if (usate.length < tutto.length && righe.length) {
+    let ultima = righe[righe.length - 1]
+    while (ultima.length > 1 && font.widthOfTextAtSize(ultima + '…', size) > larghezza) ultima = ultima.slice(0, -1)
+    righe[righe.length - 1] = ultima + '…'
+  }
+  return righe
+}
+
 export async function etichettaInterna(d: Dati): Promise<Uint8Array> {
   const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib')
   const pdf = await PDFDocument.create()
@@ -37,8 +65,24 @@ export async function etichettaInterna(d: Dati): Promise<Uint8Array> {
   for (let i = 1; i <= nColli; i++) {
     const p = pdf.addPage([L, H])
     const nero = rgb(0, 0, 0), grigio = rgb(0.45, 0.45, 0.45)
-    const testo = (t: string, x: number, y: number, size = 9, f = font, col = nero) =>
-      p.drawText(String(t || '').slice(0, 60), { x, y, size, font: f, color: col })
+    // Il testo si MISURA prima di scriverlo. Tagliare a 60 caratteri non voleva dire niente: sono
+    // i millimetri a finire, non le lettere — "AZIENDA AGRICOLA FRATELLI ESPOSITO SRL" sta in 60
+    // caratteri e occupa 112 mm su una pagina che ne ha 88, quindi usciva dal foglio. E
+    // l'etichetta e' l'unica cosa che l'autista ha in mano davanti al citofono: se il nome e'
+    // tagliato, non consegna.
+    const larghezzaUtile = L - 12 * MM
+    const testo = (t: string, x: number, y: number, size = 9, f = font, col = nero) => {
+      let s = String(t || '')
+      const max = larghezzaUtile - (x - 6 * MM)
+      if (!s) return
+      // Prima si prova a rimpicciolire (fino a un limite leggibile), poi si taglia con l'ellissi:
+      // meglio un nome piu' piccolo ma intero che uno grande e mozzato.
+      let dim = size
+      while (dim > size * 0.62 && f.widthOfTextAtSize(s, dim) > max) dim -= 0.5
+      while (s.length > 1 && f.widthOfTextAtSize(s, dim) > max) s = s.slice(0, -1)
+      if (s !== String(t || '') && s.length > 1) s = s.slice(0, -1) + '…'
+      p.drawText(s, { x, y, size: dim, font: f, color: col })
+    }
     const riga = (y: number) => p.drawLine({ start: { x: 6 * MM, y }, end: { x: L - 6 * MM, y }, thickness: 0.7, color: grigio })
 
     let y = H - 8 * MM
@@ -61,7 +105,12 @@ export async function etichettaInterna(d: Dati): Promise<Uint8Array> {
     riga(y); y -= 7 * MM
 
     testo('DESTINATARIO', 6 * MM, y, 7, grassetto, grigio); y -= 6 * MM
-    testo(d.destinatario?.nome || '', 6 * MM, y, 14, grassetto); y -= 6 * MM
+    // Il nome del destinatario non si taglia: e' quello che l'autista legge sul citofono. Se non
+    // ci sta va a capo — due righe, che su una ragione sociale lunga bastano sempre.
+    for (const riga of aCapo(d.destinatario?.nome || '', grassetto, 14, L - 12 * MM, 2)) {
+      testo(riga, 6 * MM, y, 14, grassetto); y -= 5.6 * MM
+    }
+    y -= 0.4 * MM
     testo(d.destinatario?.indirizzo || '', 6 * MM, y, 11); y -= 6 * MM
     testo(`${d.destinatario?.cap || ''} ${d.destinatario?.citta || ''} ${d.destinatario?.provincia ? '(' + d.destinatario.provincia + ')' : ''}`, 6 * MM, y, 13, grassetto)
     y -= 5.5 * MM
@@ -74,14 +123,25 @@ export async function etichettaInterna(d: Dati): Promise<Uint8Array> {
     if (d.riferimento) testo(`Rif. ${d.riferimento}`, 42 * MM, y, 9)
     y -= 6 * MM
 
+    // IL FONDO E' DEL CODICE A BARRE. Le barre stanno a un'altezza fissa (14 mm dal bordo, alte
+    // 20) e il testo che scende non lo sa: con un nome su due righe la nota finiva stampata SOPRA
+    // le barre, e un codice sporcato non si legge — cioe' il pacco non si scansiona piu'.
+    const Y_FONDO = 37 * MM
+
     // Il contrassegno va gridato: chi consegna deve incassare, e se non lo vede non lo chiede.
+    // Se il testo sopra ha mangiato lo spazio, il riquadro si appoggia comunque sopra le barre:
+    // e' l'ultima cosa a cui rinunciare.
     const cod = Number(d.contrassegno || 0)
     if (cod > 0) {
-      p.drawRectangle({ x: 6 * MM, y: y - 9 * MM, width: L - 12 * MM, height: 10 * MM, color: rgb(0, 0, 0) })
-      p.drawText(`CONTRASSEGNO  € ${cod.toFixed(2)}`, { x: 9 * MM, y: y - 6.5 * MM, size: 13, font: grassetto, color: rgb(1, 1, 1) })
-      y -= 13 * MM
+      const yBox = Math.max(y - 9 * MM, Y_FONDO)
+      p.drawRectangle({ x: 6 * MM, y: yBox, width: L - 12 * MM, height: 10 * MM, color: rgb(0, 0, 0) })
+      // Importo scritto all'italiana: e' la cifra che l'autista deve farsi dare in mano.
+      const cifra = cod.toFixed(2).replace('.', ',')
+      p.drawText(`CONTRASSEGNO  € ${cifra}`, { x: 9 * MM, y: yBox + 3.2 * MM, size: 13, font: grassetto, color: rgb(1, 1, 1) })
+      y = yBox - 4 * MM
     }
-    if (d.note) { testo(d.note, 6 * MM, y, 8, font, grigio); y -= 5 * MM }
+    // La nota e' un di piu': se non c'e' posto si lascia perdere, non si stampa sulle barre.
+    if (d.note && y >= Y_FONDO) { testo(d.note, 6 * MM, y, 8, font, grigio); y -= 5 * MM }
 
     // ── Codice a barre in fondo, dove il lettore lo cerca ──
     const larghezze = barreCode128(d.numero)

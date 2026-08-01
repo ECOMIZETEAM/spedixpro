@@ -21,6 +21,12 @@ import { bloccaAgente } from '@/lib/agente'
 
 const TIPI = ['ritiro', 'ingresso', 'partenza', 'arrivo', 'consegna', 'tentata', 'giacenza']
 
+const STATO_PAROLA: Record<string, string> = {
+  annullata: 'annullata', annullamento_pending: 'in attesa di annullo',
+  annullamento_manuale: 'in attesa di annullo', consegnata: 'gia\' consegnata',
+  reso_mittente: 'resa al mittente',
+}
+
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -32,7 +38,12 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const tipo = String(body?.tipo || '')
   if (!TIPI.includes(tipo)) return NextResponse.json({ error: 'Tipo di scansione non valido' }, { status: 400 })
-  const ldv = String(body?.ldv || '').trim()
+  // Le virgole e le parentesi vanno tolte PRIMA di comporre il filtro: sono i separatori del
+  // linguaggio di ricerca, e chi manda la richiesta finirebbe per scrivere il filtro invece del
+  // valore — "zzz,stato.eq.spedita" tornava una spedizione qualsiasi in quello stato, che poi
+  // veniva marcata consegnata con tanto di evento visibile al cliente. Nessuna LDV vera contiene
+  // quei caratteri.
+  const ldv = String(body?.ldv || '').trim().replace(/[,()]/g, '')
   if (!ldv) return NextResponse.json({ error: 'Lettera di vettura mancante' }, { status: 400 })
 
   const admin = createAdminSupabase()
@@ -78,6 +89,14 @@ export async function POST(req: NextRequest) {
   }
 
   const esito = (data as any)?.esito
+  if (esito === 'chiusa') {
+    // Pacco annullato, gia' consegnato o gia' reso: la scansione non lo tocca, e chi ce l'ha in
+    // mano deve saperlo subito invece di vedere una conferma verde che non corrisponde a niente.
+    return NextResponse.json({
+      ok: false, chiusa: true, numero: sped.numero,
+      error: `${sped.numero}: la spedizione risulta ${STATO_PAROLA[(data as any)?.stato] || (data as any)?.stato}`,
+    })
+  }
   return NextResponse.json({
     ok: esito === 'ok',
     ripetuta: esito === 'ripetuta',

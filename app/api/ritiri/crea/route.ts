@@ -252,6 +252,20 @@ export async function POST(req: NextRequest) {
   }
 
   // ══════════════════════════════════════════════════════
+  // RAMO CIRCUITO INTERNO
+  // ══════════════════════════════════════════════════════
+  // Non c'e' nessun corriere a cui chiedere il ritiro: lo fa un nostro autista. Il ritiro si
+  // registra e basta, e finisce nell'elenco da assegnare. Prima questo ramo non esisteva e la
+  // richiesta moriva sul controllo del codice corriere piu' sotto: "Impossibile recuperare il
+  // corriere dalla spedizione", su una spedizione nata benissimo.
+  if (corriere.tipo === 'interno') {
+    const codice = `RIT-${primaSped.numero}`
+    const { data: nuovoRitiro, error: insErr } = await salvaRitiro(codice, null)
+    if (insErr) return NextResponse.json({ error: `Ritiro non registrato: ${insErr.message}` }, { status: 500 })
+    return NextResponse.json({ id: nuovoRitiro.id, pickupId: codice, interno: true })
+  }
+
+  // ══════════════════════════════════════════════════════
   // RAMO SPEDISCI.ONLINE (flusso esistente)
   // ══════════════════════════════════════════════════════
   const carrierCode = raw?._carrierCode

@@ -139,12 +139,20 @@ export async function middleware(req: NextRequest) {
   // Sessione gia' valida su una pagina di accesso: dritto alla propria dashboard, senza far
   // rivedere il modulo di login a chi e' dentro.
   if (isPaginaAccesso) {
+    if (ruolo === 'autista') return vaiA('/autista')
     return vaiA(ruolo === 'cliente' ? '/cliente/dashboard' : '/dashboard')
   }
 
   // Cliente che tenta di accedere all'area master -> rimanda al suo dashboard cliente
   if (isDashboard && ruolo === 'cliente') {
     return vaiA('/cliente/dashboard')
+  }
+
+  // L'AUTISTA non entra nel portale: la sua schermata e' quella del telefono. Non e' solo una
+  // questione di ordine — il portale mostra prezzi, clienti e conti che a chi guida non servono
+  // e non deve vedere.
+  if (ruolo === 'autista' && (isDashboard || isCliente)) {
+    return vaiA('/autista')
   }
 
   // Staff che tenta di accedere all'area cliente -> rimanda al suo dashboard master.

@@ -44,6 +44,13 @@ export async function DELETE(req: NextRequest) {
     if (!autorizzato) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
 
+  // UN PACCO CONSEGNATO NON SI ANNULLA. Sembra ovvio e invece non era scritto da nessuna parte:
+  // la cancellazione passava, e 48 ore dopo il cron rimborsava cliente e catena per merce che il
+  // destinatario aveva gia' in casa. Sul circuito interno e' immediato — l'autista consegna e
+  // segna, e il giorno dopo si clicca il cestino — ma vale per qualsiasi corriere.
+  if (sped.stato === 'consegnata') {
+    return NextResponse.json({ error: 'La spedizione risulta consegnata: non può essere annullata. Se il pacco è tornato indietro usa il reso.' }, { status: 400 })
+  }
   // Idempotente: già annullata o già in attesa
   if (sped.stato === 'annullata') return NextResponse.json({ success: true, already: true })
   if (sped.stato === 'annullamento_pending') return NextResponse.json({ success: true, pending: true })

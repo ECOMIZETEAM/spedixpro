@@ -25,6 +25,10 @@ export async function GET(req: NextRequest) {
   const ctx = await contesto(req)
   if (ctx instanceof NextResponse) return ctx
   const { utente, admin } = ctx
+  // L'agente non c'entra con gli autisti: non li gestisce e non deve vedere l'organizzazione
+  // interna del master (chi guida dove). Stessa cosa per l'autista stesso.
+  const r = (utente.ruolo || '').toLowerCase()
+  if (r === 'agente' || r === 'autista') return NextResponse.json({ autisti: [], zone: [] })
   const { data } = await admin.from('autisti')
     .select('id,nome,telefono,email,zona_id,attivo,note,created_at,zone(nome)')
     .eq('master_id', utente.master_id).order('attivo', { ascending: false }).order('nome')
@@ -42,11 +46,19 @@ export async function POST(req: NextRequest) {
   const nome = String(b?.nome || '').trim()
   if (!nome) return NextResponse.json({ error: 'Il nome è obbligatorio' }, { status: 400 })
 
+  // La zona arriva dal browser: dev'essere una TUA, altrimenti si aggancia l'autista a una zona
+  // di un altro master — che poi torna col suo nome nell'elenco, ed e' un dato che non e' tuo.
+  let zonaId: string | null = b?.zona_id || null
+  if (zonaId) {
+    const { data: z } = await admin.from('zone').select('id').eq('id', zonaId).eq('master_id', utente.master_id).maybeSingle()
+    if (!z) zonaId = null
+  }
+
   const campi = {
     nome,
     telefono: String(b?.telefono || '').trim() || null,
     email: String(b?.email || '').trim() || null,
-    zona_id: b?.zona_id || null,
+    zona_id: zonaId,
     note: String(b?.note || '').trim() || null,
     attivo: b?.attivo !== false,
   }

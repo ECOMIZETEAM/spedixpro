@@ -71,6 +71,7 @@ export default function CreaAccount() {
               <option value="admin">admin</option>
               <option value="operatore">operatore</option>
               <option value="agente">agente</option>
+              <option value="autista">autista</option>
             </select>
           </div>
 

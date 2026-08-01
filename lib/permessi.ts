@@ -39,6 +39,11 @@ export const PERMESSI_DEFAULT: Record<string, Record<string, boolean>> = {
     'admin.notification': false,
     'admin.interno.deliveries.out': false, 'admin.interno.deliveries.in': false, 'admin.interno.inbound.scan': false, 'admin.interno.outbound.scan': false, 'admin.interno.cod.sent': false, 'admin.interno.cod.received': false, 'admin.interno.codlists.index': false, 'admin.interno.codlists.generate': false, 'admin.interno.codlists.excelexport': false, 'admin.interno.stocks': false,
   },
+  // AUTISTA = nessun permesso nel portale. Non ci entra proprio: dal telefono vede solo le SUE
+  // consegne, e le uniche cose che puo' fare sono segnare consegnato o destinatario assente.
+  // L'elenco vuoto e' voluto ed e' la difesa: se un giorno qualcuno gli aprisse una pagina per
+  // sbaglio, non ci sarebbe nessun permesso ad autorizzarlo.
+  autista: {},
 }
 
 // Chi è STAFF del master (non un cliente e non un agente).

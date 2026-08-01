@@ -76,6 +76,15 @@ export async function annullaSpedizioneSulCorriere(
     return { ok: false, reason: 'questo corriere non consente l\'annullo automatico' }
   }
 
+  // CIRCUITO INTERNO: non c'e' nessuno a cui mandare l'annullo, il corriere siamo noi. Basta non
+  // farlo partire — ma se e' gia' stato consegnato non c'e' piu' niente da fermare, e dire ok
+  // qui vorrebbe dire rimborsare cliente e catena per un pacco che il destinatario ha in casa.
+  if (corr.tipo === 'interno') {
+    const { data: s } = await admin.from('spedizioni').select('stato').eq('tracking_number', sped.tracking_number).maybeSingle()
+    if (s?.stato === 'consegnata') return { ok: false, reason: 'la spedizione risulta già consegnata' }
+    return { ok: true }
+  }
+
   return { ok: true }
 }
 

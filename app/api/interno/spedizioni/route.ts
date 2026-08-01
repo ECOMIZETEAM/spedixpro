@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 
 // LE SEZIONI OPERATIVE DEL CIRCUITO INTERNO.
 //
@@ -15,10 +16,18 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
   if (!utente?.master_id || utente.ruolo === 'cliente') return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  // L'autista non entra da qui: la sua schermata e' /autista, con solo le SUE consegne.
+  if ((utente.ruolo || '').toLowerCase() === 'autista') return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const admin = createAdminSupabase()
+  // L'AGENTE VEDE SOLO I SUOI CLIENTI. Vale ovunque nel sistema e qui mancava: la query gira sul
+  // client amministrativo, quindi senza questo filtro un agente leggeva destinatari, indirizzi e
+  // contrassegni di tutta la rete, compresi i clienti di un altro agente.
+  const idsAgente = isAgente(utente)
+    ? idClientiPerFiltro(await clientiAgente(supabase, utente))
+    : null
   const vista = req.nextUrl.searchParams.get('vista') || 'partenza'
   const giorno = req.nextUrl.searchParams.get('giorno') || new Date().toISOString().slice(0, 10)
 
@@ -32,12 +41,18 @@ export async function GET(req: NextRequest) {
 
   if (vista === 'consegne') {
     const da = `${giorno}T00:00:00.000Z`, a = `${giorno}T23:59:59.999Z`
-    const { data: sc } = await admin.from('scansioni_interne')
+    let q = admin.from('scansioni_interne')
       .select('id,tipo,created_at,operatore,filiale,note,autista_id,autisti(nome),spedizioni(numero,dest_nome,dest_citta,dest_cap,contrassegno)')
       .eq('master_id', utente.master_id)
       .in('tipo', ['consegna', 'tentata'])
       .gte('created_at', da).lte('created_at', a)
-      .order('created_at', { ascending: false }).limit(1000)
+    if (idsAgente) {
+      // Le scansioni non portano il cliente: si passa dalle spedizioni dei suoi clienti.
+      const { data: sue } = await admin.from('spedizioni').select('id').in('corriere_id', corrieriIds).in('cliente_id', idsAgente)
+      const ids = (sue || []).map((s: any) => s.id)
+      q = q.in('spedizione_id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000'])
+    }
+    const { data: sc } = await q.order('created_at', { ascending: false }).limit(1000)
     return NextResponse.json({ vista, giorno, righe: sc || [] })
   }
 
@@ -45,10 +60,11 @@ export async function GET(req: NextRequest) {
   const stati = vista === 'arrivo'
     ? ['in_transito', 'in_consegna', 'in_giacenza']
     : ['in_lavorazione', 'spedita']
-  const { data: sp } = await admin.from('spedizioni')
+  let q = admin.from('spedizioni')
     .select('id,numero,stato,created_at,dest_nome,dest_citta,dest_cap,dest_provincia,dest_indirizzo,colli,peso_reale,contrassegno,cliente_id,clienti(ragione_sociale)')
     .in('corriere_id', corrieriIds).in('stato', stati)
-    .order('created_at', { ascending: false }).limit(500)
+  if (idsAgente) q = q.in('cliente_id', idsAgente)
+  const { data: sp } = await q.order('created_at', { ascending: false }).limit(500)
 
   return NextResponse.json({ vista, righe: sp || [] })
 }
