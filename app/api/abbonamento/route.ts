@@ -5,6 +5,7 @@ import { registraMovimentoMaster } from '@/lib/movimenti'
 import { PIANI_ENTERPRISE, pianoById, meseCorrente } from '@/lib/piani'
 import { stripeConfigurato, IVA_PERCENTUALE } from '@/lib/stripe'
 import { descriviCambio, primoDelMeseProssimo } from '@/lib/abbonamento-cambi'
+import { GIORNI_TOLLERANZA } from '@/lib/limite-piano'
 
 // Stato abbonamento del master + piani disponibili
 export async function GET() {
@@ -36,6 +37,7 @@ export async function GET() {
   // Ogni master paga il canone il 1° del mese (cron rinnovo-mensile); qui il root vede piano,
   // canone (0 se esente), e lo stato di incasso del pagamento più vecchio non ancora saldato.
   let abbonati: any[] = []
+  let pagamenti: any[] = []
   let storicoIncassi: any[] = []
   let incassatoMese = 0, incassatoAnno = 0, previstoProssimoMese = 0, abbonatiAttivi = 0
   if (isRoot) {
@@ -79,6 +81,10 @@ export async function GET() {
         // Come sta messo col pagamento: carta attiva, in ritardo, o nessuna carta.
         carta: m.stripe_subscription_id && m.stripe_stato !== 'canceled' ? (m.stripe_stato || 'active') : null,
         scaduto_dal: m.pagamento_scaduto_dal || null,
+        // Congelato = conto alla rovescia scaduto. E' la stessa soglia che ferma le spedizioni,
+        // letta qui una volta sola per non doverla ricalcolare in ogni schermata.
+        congelato: !!m.pagamento_scaduto_dal &&
+          (Date.now() - new Date(m.pagamento_scaduto_dal).getTime()) > GIORNI_TOLLERANZA * 86400000,
         ultimo_mese_pagato: ultimoPagato.get(m.id)?.mese || null,
         ultimo_pagamento_il: ultimoPagato.get(m.id)?.pagato_il || null,
         ultimo_metodo: ultimoPagato.get(m.id)?.metodo || null,
@@ -105,6 +111,17 @@ export async function GET() {
       if (k === mm) incassatoMese += Number(p.importo || 0)
       if (k.slice(0, 4) === annoCorr) incassatoAnno += Number(p.importo || 0)
     }
+    // Elenco dei pagamenti, per poter guardare QUALSIASI mese e non solo il totale: e' la cosa
+    // che serve davvero al master principale ("a luglio quanto ho incassato?").
+    pagamenti = (pag || [])
+      .filter((p: any) => attiviIds.has(p.master_id) && !esentiIds.has(p.master_id))
+      .map((p: any) => ({
+        master_id: p.master_id,
+        master_nome: nomeDi(attiviRete.find((x: any) => x.id === p.master_id)),
+        mese: p.mese, importo: Number(p.importo || 0), pagato: !!p.pagato,
+        pagato_il: p.pagato_il || null, metodo: p.metodo || null, pagamento_id: p.id,
+      }))
+
     storicoIncassi = Array.from(storicoMap.entries())
       .map(([mese, v]) => ({ mese, incassato: Math.round(v.incassato * 100) / 100, n: v.n }))
       .sort((a, b) => b.mese.localeCompare(a.mese))
@@ -139,6 +156,8 @@ export async function GET() {
     previstoProssimoMese: Math.round(previstoProssimoMese * 100) / 100,
     abbonatiAttivi,
     storicoIncassi,
+    pagamenti,
+    meseCorrente: meseCorrente(),
   })
 }
 

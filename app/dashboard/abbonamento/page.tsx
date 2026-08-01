@@ -13,6 +13,8 @@ export default function AbbonamentoPage() {
   const [loading, setLoading] = useState(true)
   const [azione, setAzione] = useState('')
   const [msg, setMsg] = useState('')
+  const [meseScelto, setMeseScelto] = useState('')   // vuoto = mese in corso
+  const [filtro, setFiltro] = useState('tutti')
 
   async function carica() {
     setLoading(true)
@@ -94,26 +96,58 @@ export default function AbbonamentoPage() {
   // ROOT (master principale): illimitato, non paga; gestisce gli incassi della sua rete
   if (stato?.isRoot) {
     const abbonati = stato?.abbonati || []
+    const pagamenti = stato?.pagamenti || []
     const daIncassare = abbonati.filter((a:any)=>a.pagamento_id)
     const totaleAperto = Number(stato?.totaleDaIncassare||0)
+
+    // Mesi selezionabili: quelli in cui c'è stato un movimento, più il mese in corso e il prossimo.
+    const mesiSet = new Set<string>(pagamenti.map((p:any)=>p.mese).filter(Boolean))
+    const oggi = new Date()
+    const mm = (d:Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+    mesiSet.add(mm(oggi)); mesiSet.add(mm(new Date(oggi.getFullYear(), oggi.getMonth()+1, 1)))
+    const mesi = Array.from(mesiSet).sort().reverse()
+    const mese = meseScelto || mm(oggi)
+
+    // Incassato = pagamenti SALDATI del mese di competenza (non della data di incasso): è la
+    // domanda vera — "luglio quanto ha reso?" — e non cambia se il bonifico arriva ad agosto.
+    const delMese = pagamenti.filter((p:any)=>p.mese===mese)
+    const incassatoMese = delMese.filter((p:any)=>p.pagato).reduce((s:number,p:any)=>s+Number(p.importo||0),0)
+    const attesoMese = delMese.reduce((s:number,p:any)=>s+Number(p.importo||0),0)
+    const apertiMese = delMese.filter((p:any)=>!p.pagato)
+
+    const statoDi = (a:any) => a.esente ? 'esente' : a.congelato ? 'congelato'
+      : a.scaduto_dal ? 'ritardo' : a.carta ? 'carta' : 'senza_carta'
+    const FILTRI: {k:string,l:string}[] = [
+      {k:'tutti',l:'Tutti'}, {k:'senza_carta',l:'Senza carta'}, {k:'ritardo',l:'In ritardo'},
+      {k:'congelato',l:'Congelati'}, {k:'carta',l:'Carta attiva'}, {k:'esente',l:'Esenti'},
+    ]
+    const conta = (k:string) => k==='tutti' ? abbonati.length : abbonati.filter((a:any)=>statoDi(a)===k).length
+    const visibili = filtro==='tutti' ? abbonati : abbonati.filter((a:any)=>statoDi(a)===filtro)
+
+    const nCongelati = conta('congelato'), nSenzaCarta = conta('senza_carta'), nRitardo = conta('ritardo')
+
     return (
       <div>
-        <div style={{marginBottom:'16px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'10px',marginBottom:'16px'}}>
           <h1 style={{fontSize:'20px',fontWeight:700,color:'#1a1a1a',margin:0}}>Abbonamenti — Incassi</h1>
+          <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+            <span style={{fontSize:'12px',color:'#777'}}>Mese</span>
+            <select value={mese} onChange={e=>setMeseScelto(e.target.value)}
+              style={{padding:'7px 10px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',fontWeight:600}}>
+              {mesi.map(x=><option key={x} value={x}>{meseLabel(x)}</option>)}
+            </select>
+          </div>
         </div>
         {msg && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px',marginBottom:'14px',fontSize:'13px',color:'#ea580c'}}>{msg}</div>}
 
-        {/* KPI mensili */}
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:'12px',marginBottom:'16px'}}>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:'12px',marginBottom:'16px'}}>
           <div style={card}>
-            <div style={{fontSize:'12px',color:'#777'}}>Da incassare</div>
-            <div style={{fontSize:'22px',fontWeight:800,color:totaleAperto>0?'#dc2626':'#16a34a'}}>€ {totaleAperto.toFixed(2)}</div>
-            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>{daIncassare.length} in attesa</div>
-          </div>
-          <div style={card}>
-            <div style={{fontSize:'12px',color:'#777'}}>Incassato questo mese</div>
-            <div style={{fontSize:'22px',fontWeight:800,color:'#16a34a'}}>€ {Number(stato?.incassatoMese||0).toFixed(2)}</div>
-            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>pagamenti segnati nel mese</div>
+            <div style={{fontSize:'12px',color:'#777'}}>Incassato {meseLabel(mese)}</div>
+            <div style={{fontSize:'22px',fontWeight:800,color:'#16a34a'}}>€ {incassatoMese.toFixed(2)}</div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>
+              {delMese.filter((p:any)=>p.pagato).length} pagamenti su {delMese.length}
+              {attesoMese > incassatoMese ? ` · ${(attesoMese-incassatoMese).toFixed(2)} € ancora aperti` : ''}
+            </div>
           </div>
           <div style={card}>
             <div style={{fontSize:'12px',color:'#777'}}>Incassato {stato?.annoCorrente||''}</div>
@@ -123,53 +157,73 @@ export default function AbbonamentoPage() {
           <div style={card}>
             <div style={{fontSize:'12px',color:'#777'}}>Previsto prossimo mese</div>
             <div style={{fontSize:'22px',fontWeight:800,color:ACCENT}}>€ {Number(stato?.previstoProssimoMese||0).toFixed(2)}</div>
-            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>{stato?.abbonatiAttivi||0} abbonati attivi (esclusi gli esenti)</div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>{stato?.abbonatiAttivi||0} abbonati (esclusi gli esenti)</div>
           </div>
-          <div style={card}>
-            <div style={{fontSize:'12px',color:'#777'}}>Il tuo piano</div>
-            <div style={{fontSize:'18px',fontWeight:800,color:ACCENT}}>Illimitato — gratis</div>
-            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>Master principale: nessun canone.</div>
+          <div style={{...card, borderColor: (nSenzaCarta+nRitardo)>0 ? '#fed7aa' : '#e8e8e8'}}>
+            <div style={{fontSize:'12px',color:'#777'}}>Non stanno pagando</div>
+            <div style={{fontSize:'22px',fontWeight:800,color:(nSenzaCarta+nRitardo)>0?'#b45309':'#16a34a'}}>{nSenzaCarta+nRitardo}</div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>{nSenzaCarta} senza carta · {nRitardo} in ritardo</div>
           </div>
+          <div style={{...card, borderColor: nCongelati>0 ? '#fecaca' : '#e8e8e8'}}>
+            <div style={{fontSize:'12px',color:'#777'}}>Congelati</div>
+            <div style={{fontSize:'22px',fontWeight:800,color:nCongelati>0?'#b91c1c':'#16a34a'}}>{nCongelati}</div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>rete ferma finché non pagano</div>
+          </div>
+          {totaleAperto > 0 && (
+            <div style={card}>
+              <div style={{fontSize:'12px',color:'#777'}}>Vecchi bonifici aperti</div>
+              <div style={{fontSize:'22px',fontWeight:800,color:'#dc2626'}}>€ {totaleAperto.toFixed(2)}</div>
+              <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>{daIncassare.length} da prima della carta</div>
+            </div>
+          )}
         </div>
 
-        <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'10px'}}>Master della tua rete <span style={{color:'#999',fontWeight:400}}>({abbonati.length})</span></div>
+        <div style={{display:'flex',gap:'7px',flexWrap:'wrap',marginBottom:'10px'}}>
+          {FILTRI.map(f=>{
+            const n = conta(f.k), on = filtro===f.k
+            return (
+              <button key={f.k} onClick={()=>setFiltro(f.k)}
+                style={{background:on?'#1a1a1a':'#fff',color:on?'#fff':'#555',border:`1px solid ${on?'#1a1a1a':'#e8e8e8'}`,
+                  borderRadius:'999px',padding:'6px 13px',fontSize:'12.5px',fontWeight:600,cursor:'pointer'}}>
+                {f.l} <span style={{opacity:.65}}>{n}</span>
+              </button>
+            )
+          })}
+        </div>
+
         <div style={{...card, padding:0, overflow:'hidden'}}>
+          <div style={{overflowX:'auto' as const}}>
           <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
             <thead>
               <tr style={{background:'#fafafa'}}>
                 {['Master','Piano','Canone/mese','Ultimo pagamento','Stato',''].map(h=>(
-                  <th key={h} style={{textAlign:'left' as const,padding:'9px 14px',fontSize:'11px',fontWeight:600,color:'#777',borderBottom:'1px solid #f0f0f0'}}>{h}</th>
+                  <th key={h} style={{textAlign:'left' as const,padding:'9px 14px',fontSize:'11px',fontWeight:600,color:'#777',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap' as const}}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {!abbonati.length ? (
-                <tr><td colSpan={6} style={{padding:'30px',textAlign:'center' as const,color:'#999',fontSize:'12px'}}>Nessun master abbonato ancora</td></tr>
-              ) : abbonati.map((a:any)=>(
+              {!visibili.length ? (
+                <tr><td colSpan={6} style={{padding:'30px',textAlign:'center' as const,color:'#999',fontSize:'12px'}}>Nessun master in questo filtro</td></tr>
+              ) : visibili.map((a:any)=>(
                 <tr key={a.master_id} style={{borderBottom:'1px solid #f5f5f5'}}>
-                  <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:600}}>
-                    {a.master_nome}
-                    {a.esente && <span style={{marginLeft:'6px',background:'#eef2ff',color:'#4338ca',borderRadius:'999px',padding:'1px 7px',fontSize:'10px',fontWeight:700}}>esente</span>}
-                  </td>
-                  <td style={{padding:'9px 14px',color:'#555'}}>{(a.piano||'').replace('enterprise_','Enterprise ').toUpperCase() || '—'}</td>
-                  <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:700}}>€ {Number(a.prezzo||0).toFixed(2)}{a.esente && <span style={{fontSize:'10px',color:'#4338ca',fontWeight:600}}> (gratis)</span>}</td>
-                  <td style={{padding:'9px 14px',color:'#555'}}>
+                  <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:600}}>{a.master_nome}</td>
+                  <td style={{padding:'9px 14px',color:'#555',whiteSpace:'nowrap' as const}}>{(a.piano||'').replace('enterprise_','Enterprise ').toUpperCase() || '—'}</td>
+                  <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:700,whiteSpace:'nowrap' as const}}>€ {Number(a.prezzo||0).toFixed(2)}{a.esente && <span style={{fontSize:'10px',color:'#4338ca',fontWeight:600}}> (gratis)</span>}</td>
+                  <td style={{padding:'9px 14px',color:'#555',whiteSpace:'nowrap' as const}}>
                     {a.ultimo_mese_pagato
                       ? <>{meseLabel(a.ultimo_mese_pagato)}<div style={{fontSize:'10.5px',color:'#999'}}>{a.ultimo_metodo === 'carta' ? 'carta' : a.ultimo_metodo || ''}{a.ultimo_pagamento_il ? ` · ${new Date(a.ultimo_pagamento_il).toLocaleDateString('it-IT')}` : ''}</div></>
                       : <span style={{color:'#bbb'}}>mai</span>}
                   </td>
-                  <td style={{padding:'9px 14px'}}>
+                  <td style={{padding:'9px 14px',whiteSpace:'nowrap' as const}}>
                     {a.esente
                       ? <span style={{background:'#eef2ff',color:'#4338ca',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Esente</span>
-                      : a.carta && a.carta !== 'past_due' && a.carta !== 'conferma_richiesta'
-                        ? <span style={{background:'#dcfce7',color:'#16a34a',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Carta attiva</span>
+                      : a.congelato
+                        ? <span style={{background:'#fef2f2',color:'#b91c1c',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Congelato</span>
                       : a.scaduto_dal
-                        ? <span style={{background:'#fef2f2',color:'#b91c1c',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Non paga dal {new Date(a.scaduto_dal).toLocaleDateString('it-IT')}</span>
-                      : !a.carta
-                        ? <span style={{background:'#fef3c7',color:'#b45309',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Nessuna carta</span>
-                      : a.pagamento_id
-                        ? <span style={{background:'#fef3c7',color:'#b45309',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Da incassare € {Number(a.importo_da_incassare||0).toFixed(2)}{a.n_da_incassare>1?` (${a.n_da_incassare} mesi)`:''}</span>
-                        : <span style={{background:'#dcfce7',color:'#16a34a',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>In regola</span>}
+                        ? <span style={{background:'#fef2f2',color:'#b91c1c',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>In ritardo dal {new Date(a.scaduto_dal).toLocaleDateString('it-IT')}</span>
+                      : a.carta
+                        ? <span style={{background:'#dcfce7',color:'#16a34a',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Carta attiva</span>
+                        : <span style={{background:'#fef3c7',color:'#b45309',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Nessuna carta</span>}
                   </td>
                   <td style={{padding:'9px 14px',textAlign:'right' as const}}>
                     {a.pagamento_id && !a.esente && <div style={{display:'inline-flex',gap:'6px'}}>
@@ -183,9 +237,44 @@ export default function AbbonamentoPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
 
-        {/* STORICO INCASSI mese per mese */}
+        <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',margin:'22px 0 10px'}}>
+          Pagamenti di {meseLabel(mese)} <span style={{color:'#999',fontWeight:400}}>({delMese.length})</span>
+          {apertiMese.length>0 && <span style={{color:'#b45309',fontWeight:600,fontSize:'12px'}}> · {apertiMese.length} non ancora incassati</span>}
+        </div>
+        <div style={{...card, padding:0, overflow:'hidden'}}>
+          <div style={{overflowX:'auto' as const}}>
+          <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
+            <thead>
+              <tr style={{background:'#fafafa'}}>
+                {['Master','Importo','Stato','Incassato il','Metodo'].map(h=>(
+                  <th key={h} style={{textAlign:'left' as const,padding:'9px 14px',fontSize:'11px',fontWeight:600,color:'#777',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap' as const}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {!delMese.length ? (
+                <tr><td colSpan={5} style={{padding:'26px',textAlign:'center' as const,color:'#999',fontSize:'12px'}}>Nessun pagamento per {meseLabel(mese)}</td></tr>
+              ) : delMese.map((p:any)=>(
+                <tr key={p.pagamento_id} style={{borderBottom:'1px solid #f5f5f5'}}>
+                  <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:600}}>{p.master_nome}</td>
+                  <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:700,whiteSpace:'nowrap' as const}}>€ {Number(p.importo||0).toFixed(2)}</td>
+                  <td style={{padding:'9px 14px'}}>
+                    {p.pagato
+                      ? <span style={{background:'#dcfce7',color:'#16a34a',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Incassato</span>
+                      : <span style={{background:'#fef3c7',color:'#b45309',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Da incassare</span>}
+                  </td>
+                  <td style={{padding:'9px 14px',color:'#555',whiteSpace:'nowrap' as const}}>{p.pagato_il ? new Date(p.pagato_il).toLocaleDateString('it-IT') : '—'}</td>
+                  <td style={{padding:'9px 14px',color:'#555'}}>{p.metodo || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+        </div>
+
         <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',margin:'22px 0 10px'}}>Storico incassi</div>
         <div style={{...card, padding:0, overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
@@ -200,7 +289,7 @@ export default function AbbonamentoPage() {
               {!(stato?.storicoIncassi||[]).length ? (
                 <tr><td colSpan={3} style={{padding:'26px',textAlign:'center' as const,color:'#999',fontSize:'12px'}}>Nessun incasso registrato</td></tr>
               ) : (stato?.storicoIncassi||[]).map((r:any)=>(
-                <tr key={r.mese} style={{borderBottom:'1px solid #f5f5f5'}}>
+                <tr key={r.mese} style={{borderBottom:'1px solid #f5f5f5',cursor:'pointer'}} onClick={()=>setMeseScelto(r.mese)}>
                   <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:600}}>{meseLabel(r.mese)}</td>
                   <td style={{padding:'9px 14px',color:'#555',textAlign:'right' as const}}>{r.n}</td>
                   <td style={{padding:'9px 14px',color:'#16a34a',fontWeight:800,textAlign:'right' as const}}>€ {Number(r.incassato||0).toFixed(2)}</td>
