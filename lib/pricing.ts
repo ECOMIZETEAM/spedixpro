@@ -787,15 +787,40 @@ export async function creaCalcolatoreListinoCliente(
 
     const L = Number(s.lunghezza) || 0, W = Number(s.larghezza) || 0, H = Number(s.altezza) || 0
     const fattoreC = fattorePerCorr.get(s.corriere_id) || fattore   // per-corriere, fallback default
-    const pesoVolume = (L && W && H) ? (L * W * H) / fattoreC : 0
-    const pesoReale = Number(s.peso_reale) || 1
+
+    // TUTTI I COLLI, non solo il primo.
+    //
+    // Qui si leggevano solo lunghezza/larghezza/altezza della spedizione, che sono le misure di UN
+    // collo: su un multicollo il volumetrico usciva diviso per il numero dei colli. Su una
+    // spedizione vera da 5 colli il peso fatturato risultava 14 kg invece di 79,6 — cioe' una
+    // fascia di prezzo molto piu' bassa, e un margine gonfiato di conseguenza.
+    // Le misure dei singoli colli stanno in colli_dettaglio; se manca (spedizioni vecchie) si
+    // ripiega sulla misura unica ripetuta per il numero di colli, che e' come e' stata creata.
+    const nColli = Math.max(1, Number(s.colli) || 1)
+    const dett = Array.isArray(s.colli_dettaglio) ? s.colli_dettaglio : []
+    const pacchi = dett.length
+      ? dett.map((c: any) => ({
+          length: Number(c?.lunghezza ?? c?.length) || 0,
+          width: Number(c?.larghezza ?? c?.width) || 0,
+          height: Number(c?.altezza ?? c?.height) || 0,
+          weight: Number(c?.peso ?? c?.weight) || 0,
+        }))
+      : Array.from({ length: nColli }, () => ({ length: L, width: W, height: H, weight: 0 }))
+
+    const pesoVolume = pacchi.reduce((t: number, p: any) =>
+      t + ((p.length && p.width && p.height) ? (p.length * p.width * p.height) / fattoreC : 0), 0)
+    // Peso reale: la somma dei colli quando i singoli pesi ci sono (stessa regola del preventivo),
+    // altrimenti quello scritto sulla spedizione.
+    const sommaPesi = pacchi.reduce((t: number, p: any) => t + (Number(p.weight) || 0), 0)
+    const pesoReale = sommaPesi > 0 ? sommaPesi : (Number(s.peso_reale) || 1)
     // Agevolazione peso reale (come il preventivo): se il corriere ha il flag e il collo è entro
     // 50×32×28 cm, oppure "peso reale fino a X kg" sotto soglia, si tassa sul PESO REALE.
     const settC = settPerCorrL.get(s.corriere_id) || {}
     let usaReale = false
     if (!soloPesoReale) {
       if (settC.agevolazione_peso_reale) {
-        const entro = entroMisureAgevolate(settC, [{ length: L, width: W, height: H }])
+        // L'agevolazione vale se OGNI collo sta nella scatola, non solo il primo.
+        const entro = entroMisureAgevolate(settC, pacchi)
         if (entro) usaReale = true
       }
       const prs = settC.peso_reale_soglia
