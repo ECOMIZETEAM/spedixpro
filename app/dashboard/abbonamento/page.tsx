@@ -33,7 +33,7 @@ export default function AbbonamentoPage() {
     const prezzoAttuale = Number(stato?.prezzo||0)
     const isUp = prezzoNuovo > prezzoAttuale
     const testo = !stato?.attivo ? `Attivare questo piano? Verranno scalati € ${prezzoNuovo}.`
-      : isUp ? `Upgrade immediato: vale da subito e viene scalata solo la differenza (€ ${(prezzoNuovo-prezzoAttuale).toFixed(2)}). Procedere?`
+      : isUp ? `Upgrade immediato: vale da subito e paghi la differenza di piano (€ ${(prezzoNuovo-prezzoAttuale).toFixed(2)}). Procedere?`
       : `Downgrade dal 1° del mese prossimo. Fino ad allora tieni il piano attuale, che hai già pagato: nessun addebito ora.`
     if (!await dialog.confirm({ title: 'Confermi il piano?', message: testo, confirmText: 'Conferma' })) return
     setAzione(pianoId); setMsg('')
@@ -55,7 +55,7 @@ export default function AbbonamentoPage() {
     if (d.error) { setMsg(d.error); return }
     if (d.aggiornato) {
       setMsg(d.immediato
-        ? '✓ Piano attivo da subito — addebitata solo la differenza per i giorni che restano'
+        ? '✓ Piano attivo da subito — addebitata la differenza di piano'
         : `✓ Downgrade registrato — partirà il ${new Date(d.dal).toLocaleDateString('it-IT')}. Fino ad allora tieni il piano attuale.`)
       carica()
     }

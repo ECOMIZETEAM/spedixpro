@@ -59,9 +59,8 @@ export default function AvvisoImportante() {
           </p>
 
           <p style={{ ...riga, marginBottom: '22px' }}>
-            Da Abbonamento puoi anche cambiare piano quando vuoi: uno superiore vale subito e ti viene addebitata
-            solo la differenza per i giorni che restano; uno inferiore parte dal primo del mese successivo, così
-            non perdi quello che hai già pagato.
+            Da Abbonamento puoi anche cambiare piano quando vuoi: uno superiore vale subito e paghi la differenza
+            di piano; uno inferiore parte dal primo del mese successivo, così non perdi quello che hai già pagato.
           </p>
 
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>

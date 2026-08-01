@@ -70,11 +70,26 @@ export async function POST(req: NextRequest) {
           if (sub.schedule) {
             try { await s.subscriptionSchedules.release(String(sub.schedule)) } catch { }
           }
+          // Il piano cambia subito, ma SENZA conteggio dei giorni: la differenza si paga intera.
           await s.subscriptions.update(sub.id, {
             items: [{ id: voce.id, price: price.id }],
-            proration_behavior: 'always_invoice',   // emette e incassa SUBITO la differenza
+            proration_behavior: 'none',
             metadata: { master_id: m.id, piano: pianoId },
           })
+          // La differenza fra i due piani, per intero, addebitata subito. Non e' proporzionale ai
+          // giorni: chi passa a un piano superiore lo fa perche' gli serve adesso, e paga la
+          // differenza del piano — che e' anche la regola piu' facile da spiegare a un cliente.
+          const differenza = (price.unit_amount || 0) - prezzoOra
+          if (differenza > 0) {
+            await s.invoiceItems.create({
+              customer: String(sub.customer), amount: differenza, currency: 'eur',
+              description: `Passaggio a ${piano.nome} — differenza di piano`,
+            })
+            const fattura = await s.invoices.create({
+              customer: String(sub.customer), auto_advance: true, collection_method: 'charge_automatically',
+            })
+            try { if (fattura.id) await s.invoices.finalizeInvoice(fattura.id) } catch { /* la incassa il circuito da solo */ }
+          }
           await admin.from('masters').update({
             abbonamento_piano_programmato: null, abbonamento_programmato_dal: null,
           }).eq('id', m.id)
@@ -120,17 +135,31 @@ export async function POST(req: NextRequest) {
     sessione = await s.checkout.sessions.create({
       mode: 'subscription',
       customer,
-      line_items: [{ price: price.id, quantity: 1, tax_rates: iva.length ? iva : undefined }],
+      line_items: [
+        { price: price.id, quantity: 1, tax_rates: iva.length ? iva : undefined },
+        // IL CANONE DEL MESE IN CORSO SI PAGA INTERO, non in proporzione ai giorni che restano.
+        // Che si attivi il primo o il quindici, il mese costa quanto costa: e' la regola concordata,
+        // ed e' anche l'unica che un cliente capisce senza doverla ricalcolare.
+        // Salta solo per chi questo mese ha gia' pagato il canone col credito: pagherebbe due volte.
+        ...(meseGiaPagato ? [] : [{
+          quantity: 1,
+          price_data: {
+            currency: 'eur',
+            unit_amount: price.unit_amount || 0,
+            tax_behavior: 'inclusive' as const,
+            product_data: { name: `${piano.nome} — canone del mese in corso` },
+          },
+          tax_rates: iva.length ? iva : undefined,
+        }]),
+      ],
       subscription_data: {
         metadata: { master_id: m.id, piano: pianoId },
         // Rinnovo il PRIMO DEL MESE per tutti, come il contatore delle spedizioni: se il pacchetto
         // riparte il primo e la bolletta arriva il 13, i due numeri non tornano mai fra loro.
         billing_cycle_anchor: primoDelProssimoMese(),
-        // Chi questo mese ha GIA' pagato il canone col credito e ora passa alla carta non deve
-        // pagare una seconda volta i giorni che ha gia' pagato: non si addebita nulla adesso e la
-        // carta parte dal primo del mese. Senza questo, passare al pagamento con carta a meta' mese
-        // costava due volte lo stesso periodo.
-        proration_behavior: meseGiaPagato ? 'none' : 'create_prorations',
+        // Nessun conteggio dei giorni: il mese in corso e' gia' nella riga qui sopra, e da qui in
+        // avanti si paga il canone pieno ogni primo del mese.
+        proration_behavior: 'none',
       },
       metadata: { master_id: m.id, piano: pianoId },
       success_url: `${base}/dashboard/abbonamento?pagamento=ok`,
