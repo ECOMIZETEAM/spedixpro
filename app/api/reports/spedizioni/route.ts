@@ -159,11 +159,15 @@ export async function GET(req: NextRequest) {
   const rows = (spedizioni || []).map((s: any) => {
     // PREZZO CORRIERE = quello che ho pagato IO (mio movimento reale). Per l'agente = suo listino;
     // se il listino agente non copre quel corriere, ripiego sul costo reale (non 0, che gonfierebbe il margine).
-    const hoMioCosto = !calcAgente && costoMine.has(s.id)
+    // AGENTE SENZA LISTINO ASSEGNATO: non ha un costo suo, e il ripiego finiva sul costo del
+    // MASTER — che gli mostra il margine del master ed e' proprio il dato che non deve vedere.
+    // Meglio nessun numero che un numero di qualcun altro.
+    const agenteSenzaListino = isAgente(utente) && !calcAgente
+    const hoMioCosto = !calcAgente && !agenteSenzaListino && costoMine.has(s.id)
     let prezzo_corriere: number | null = calcAgente
       ? (calcAgente(s)?.totale ?? (Number(s.costo_spedizione || 0) || null))
       : (hoMioCosto ? costoMine.get(s.id)! : null)
-    if (prezzo_corriere == null && calcMioCorr && !calcAgente) {
+    if (prezzo_corriere == null && calcMioCorr && !calcAgente && !agenteSenzaListino) {
       const nome = (s.corrieri as any)?.nome_contratto
       const mioCorr = (s.master_id === mine) ? s.corriere_id : (nome ? nomeToMioCorr.get(nome) : null)
       if (mioCorr) { const r = calcMioCorr({ ...s, corriere_id: mioCorr }); if (r && r.totale != null) prezzo_corriere = r.totale }
@@ -198,7 +202,7 @@ export async function GET(req: NextRequest) {
     // (Prima qui si sovrascriveva col listino agente: era incoerente col guadagno.)
     // Master SOPRA il proprietario del contratto (nessun mio costo né mio listino per quel corriere):
     // semplice passaggio -> prezzo corriere = prezzo cliente -> margine 0 (niente margine totale rete).
-    if (prezzo_corriere == null && !calcAgente) prezzo_corriere = prezzo_cliente
+    if (prezzo_corriere == null && !calcAgente && !agenteSenzaListino) prezzo_corriere = prezzo_cliente
     // Rettifica lato cliente = variazione di prezzo applicata (positivo = aumento, es. +5€).
     const rettifica = Math.round((-(sumRettCli.get(s.id) || 0)) * 100) / 100
     // COSTO DEL MASTER FUORI DAL REPORT DELL'AGENTE. Lo spread `...s` porta con se' la colonna
@@ -207,7 +211,7 @@ export async function GET(req: NextRequest) {
     // qui sopra), non il costo del master — che e' esattamente il dato che il commento a inizio
     // rotta dichiara di non volergli dare.
     const { costo_spedizione: _costoMaster, ...sPulita } = s
-    const base = calcAgente ? sPulita : s
+    const base = (calcAgente || agenteSenzaListino) ? sPulita : s
     return {
       ...base,
       costo_totale: prezzo_cliente,          // "Prezzo Cliente" nel report (già comprensivo della rettifica)

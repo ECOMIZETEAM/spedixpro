@@ -1,3 +1,5 @@
+import { creaCalcolatoreListinoCliente } from '@/lib/pricing'
+import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
@@ -19,9 +21,9 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ guadagno: 0, ricavi: 0, costi: 0 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome,cliente_id,listino_agente_id').eq('id', user.id).single()
   const M = utente?.master_id
-  if (!M || ['cliente','agente'].includes((utente?.ruolo || '').toLowerCase())) return NextResponse.json({ guadagno: 0, ricavi: 0, costi: 0 })
+  if (!M || (utente?.ruolo || '').toLowerCase() === 'cliente') return NextResponse.json({ guadagno: 0, ricavi: 0, costi: 0 })
 
   const periodo = req.nextUrl.searchParams.get('periodo') || 'mensile'
   const dalParam = req.nextUrl.searchParams.get('dal')   // 'YYYY-MM-DD'
@@ -31,12 +33,67 @@ export async function GET(req: NextRequest) {
   const alEnd = dalParam ? new Date((alParam || dalParam) + 'T23:59:59.999Z').toISOString() : new Date().toISOString()
   // Aggregazione: per giorno se l'intervallo è breve, per mese se è lungo (o periodo annuale).
   const perMese = dalParam ? ((Date.parse(alEnd) - Date.parse(dal)) / 86400000 > 92) : (periodo === 'annuale')
+  const TIPI = ['spedizione', 'rimborso', 'rettifica', 'reso', 'giacenza']
   const admin = createAdminSupabase()
+
+  // ── AGENTE ────────────────────────────────────────────────────────────────
+  // Restituiva zero, sempre: il guadagno dell'agente non era calcolato da nessuna parte, e lui si
+  // vedeva un report vuoto. Il suo margine non sta nei movimenti (i movimenti sono del master):
+  // e' la differenza fra quello che i SUOI clienti hanno pagato e quello che costa a LUI, cioe' il
+  // listino agente che il master gli ha assegnato.
+  if (isAgente(utente)) {
+    const idsCli = idClientiPerFiltro(await clientiAgente(supabase, utente))
+    const listinoAg = (utente as any)?.listino_agente_id || null
+    // Senza listino agente non esiste un costo suo: qualunque numero sarebbe inventato, e il
+    // ripiego sul costo del master gli mostrerebbe il margine del master. Meglio dirlo.
+    if (!listinoAg || !idsCli.length || idsCli[0] === '00000000-0000-0000-0000-000000000000') {
+      return NextResponse.json({
+        guadagno: 0, ricavi: 0, costi: 0, periodo, serie: [], numSpedizioni: 0, mediaSped: 0,
+        costiProvider: null, senzaListino: !listinoAg,
+      })
+    }
+    const calcAg = await creaCalcolatoreListinoCliente(admin, listinoAg)
+    const sped = await fetchAll(() => admin.from('spedizioni')
+      .select('id,costo_totale,created_at,stato,corriere_id,peso_reale,peso_fatturato,colli,dest_cap,dest_provincia,dest_citta,dest_paese,colli_dettaglio,contrassegno,assicurazione,servizi_accessori')
+      .in('cliente_id', idsCli).gte('created_at', dal).lte('created_at', alEnd)
+      .order('created_at', { ascending: false }).order('id', { ascending: false }))
+    // Quello che il cliente ha pagato DAVVERO (movimenti), non il campo sulla spedizione: cosi'
+    // rettifiche, resi e giacenze entrano nel conto come nell'elenco.
+    const movCli = await fetchAll(() => admin.from('movimenti')
+      .select('spedizione_id,importo').in('cliente_id', idsCli).not('spedizione_id', 'is', null)
+      .gte('created_at', dal).lte('created_at', alEnd).in('tipo', TIPI)
+      .order('created_at', { ascending: false }).order('id', { ascending: false }))
+    const pagato = new Map<string, number>()
+    for (const m of (movCli || [])) {
+      const k = (m as any).spedizione_id
+      pagato.set(k, (pagato.get(k) || 0) + Math.abs(Number((m as any).importo || 0)) * (Number((m as any).importo || 0) < 0 ? 1 : -1))
+    }
+    let ricaviA = 0, costiA = 0
+    const perG = new Map<string, { ricavi: number; costi: number }>()
+    for (const sp of (sped || [])) {
+      if ((sp as any).stato === 'annullata') continue
+      const ric = pagato.has((sp as any).id) ? pagato.get((sp as any).id)! : Number((sp as any).costo_totale || 0)
+      const cos = calcAg ? (calcAg(sp)?.totale ?? 0) : 0
+      ricaviA += ric; costiA += cos
+      const d = new Date((sp as any).created_at)
+      const k = perMese ? `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}` : d.toISOString().slice(0, 10)
+      const cur = perG.get(k) || { ricavi: 0, costi: 0 }
+      cur.ricavi += ric; cur.costi += cos; perG.set(k, cur)
+    }
+    const r2a = (x: number) => Math.round(x * 100) / 100
+    const n = (sped || []).filter((x: any) => x.stato !== 'annullata').length
+    return NextResponse.json({
+      guadagno: r2a(ricaviA - costiA), ricavi: r2a(ricaviA), costi: r2a(costiA), periodo,
+      serie: Array.from(perG.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([giorno, v]) => ({ giorno, ricavi: r2a(v.ricavi), costi: r2a(v.costi), margine: r2a(v.ricavi - v.costi) })),
+      numSpedizioni: n, mediaSped: n ? r2a((ricaviA - costiA) / n) : 0, costiProvider: null,
+    })
+  }
+
   // Il GUADAGNO totale include: spedizioni + rettifiche (correzioni prezzo) + RESI + GIACENZE.
   // Ognuno ha la stessa struttura (movimento cliente = ricavo, movimento master_target = costo),
   // quindi il margine di resi e giacenze entra automaticamente. Il 'rimborso' netta le annullate a 0.
   // (Per questo Report Guadagno ≠ Report Spedizioni: quest'ultimo è SOLO spedizioni.)
-  const TIPI = ['spedizione', 'rimborso', 'rettifica', 'reso', 'giacenza']
 
   // sotto-master diretti
   const { data: figli } = await admin.from('masters').select('id').eq('parent_master_id', M)
