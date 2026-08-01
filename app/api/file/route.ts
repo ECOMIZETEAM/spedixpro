@@ -63,6 +63,34 @@ export async function GET(req: NextRequest) {
     return servi(admin, path)
   }
 
+  // ── PROVA DI CONSEGNA DEL CIRCUITO INTERNO ────────────────────────────────
+  // La firma del ricevente o la foto del pacco. Chi la puo' vedere: la rete del master che ha
+  // fatto la consegna, e il cliente intestatario della spedizione — che e' quello a cui serve
+  // davvero, quando il destinatario dice che non ha ricevuto niente.
+  const scansioneId = req.nextUrl.searchParams.get('s')
+  if (scansioneId) {
+    const { data: sc } = await admin.from('scansioni_interne')
+      .select('pod_path,master_id,spedizioni(cliente_id)').eq('id', scansioneId).maybeSingle()
+    if (!sc?.pod_path) return NextResponse.json({ error: 'Prova non disponibile' }, { status: 404 })
+    const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+    if (!utente) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+
+    let puo = false
+    if (utente.cliente_id) {
+      puo = (sc as any).spedizioni?.cliente_id === utente.cliente_id
+    } else if (utente.master_id) {
+      // Il master della consegna o un suo antenato: si sale la catena, non si scende.
+      let cur: string | null = (sc as any).master_id
+      for (let i = 0; i < 20 && cur; i++) {
+        if (cur === utente.master_id) { puo = true; break }
+        const { data: m }: any = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+        cur = m?.parent_master_id || null
+      }
+    }
+    if (!puo) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    return servi(admin, (sc as any).pod_path)
+  }
+
   // ── ALLEGATI E POD DEI TICKET ─────────────────────────────────────────────
   if (ticketId) {
     const chiesto = pathDaUrl(req.nextUrl.searchParams.get('f'))

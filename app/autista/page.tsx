@@ -21,9 +21,21 @@ type Sped = {
   colli: number; contrassegno: number; note?: string
 }
 
+// I motivi per cui una consegna non riesce, con quello che comportano davvero. Dirlo all'autista
+// mentre sceglie serve: "assente" e "indirizzo sbagliato" non sono la stessa cosa, e il pacco fa
+// due strade diverse.
+const MOTIVI: [string, string, string][] = [
+  ['assente', 'Non c’era nessuno', 'Si riprova il giorno lavorativo dopo'],
+  ['indirizzo', 'Indirizzo sbagliato', 'Si aspettano istruzioni dal mittente'],
+  ['rifiutata', 'L’hanno rifiutata', 'Il pacco non lo vogliono'],
+  ['sconosciuto', 'Destinatario sconosciuto', 'Si aspettano istruzioni dal mittente'],
+  ['non_riuscita', 'Altro motivo', 'Si riprova il giorno lavorativo dopo'],
+]
+
 export default function AutistaPage() {
   const [dati, setDati] = useState<any>(null)
   const [aperta, setAperta] = useState<Sped | null>(null)
+  const [passo, setPasso] = useState<'scheda' | 'consegna' | 'motivo'>('scheda')
   const [inCorso, setInCorso] = useState(false)
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
   const [scanner, setScanner] = useState(false)
@@ -34,18 +46,33 @@ export default function AutistaPage() {
   }
   useEffect(() => { carica() }, [])
 
-  async function esito(s: Sped, tipo: 'consegna' | 'tentata') {
+  // Dove sei quando segni la consegna. Non si chiede il permesso a freddo: si prova, e se il
+  // telefono dice di no si va avanti lo stesso — una firma senza coordinate vale comunque.
+  function posizione(): Promise<{ lat?: number; lng?: number }> {
+    return new Promise(risolvi => {
+      if (!navigator.geolocation) return risolvi({})
+      const stop = setTimeout(() => risolvi({}), 4000)
+      navigator.geolocation.getCurrentPosition(
+        p => { clearTimeout(stop); risolvi({ lat: p.coords.latitude, lng: p.coords.longitude }) },
+        () => { clearTimeout(stop); risolvi({}) },
+        { enableHighAccuracy: false, timeout: 4000, maximumAge: 60000 },
+      )
+    })
+  }
+
+  async function esito(s: Sped, tipo: 'consegna' | 'tentata', extra: any = {}) {
     setInCorso(true); setMsg(null)
     try {
+      const dove = await posizione()
       const r = await fetch('/api/autista', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ldv: s.numero, tipo }),
+        body: JSON.stringify({ ldv: s.numero, tipo, ...dove, ...extra }),
       })
       const d = await r.json()
       if (d?.error) setMsg({ t: 'err', x: d.error })
       else if (d?.ripetuta) setMsg({ t: 'ok', x: `${s.numero} era già segnata` })
-      else setMsg({ t: 'ok', x: tipo === 'consegna' ? `${s.numero} consegnata` : `${s.numero}: destinatario assente` })
-      setAperta(null)
+      else setMsg({ t: 'ok', x: `${s.numero}: ${d.descrizione || 'registrata'}` })
+      setAperta(null); setPasso('scheda')
       carica()
     } catch { setMsg({ t: 'err', x: 'Nessuna linea: riprova quando torna il segnale' }) }
     setInCorso(false)
@@ -90,7 +117,7 @@ export default function AutistaPage() {
 
       {scanner && <Lettore onLetto={(codice) => {
         const s = consegne.find(c => c.numero.toUpperCase() === codice.toUpperCase())
-        if (s) { setAperta(s); setScanner(false) }
+        if (s) { setAperta(s); setPasso('scheda'); setScanner(false) }
         else setMsg({ t: 'err', x: `${codice} non è fra le tue consegne` })
       }} />}
 
@@ -108,7 +135,7 @@ export default function AutistaPage() {
             {consegnate > 0 ? 'Finito. Buona giornata.' : 'Nessun pacco da consegnare.'}
           </div>
         ) : consegne.map(s => (
-          <button key={s.id} onClick={() => setAperta(s)}
+          <button key={s.id} onClick={() => { setAperta(s); setPasso('scheda') }}
             style={{
               background: '#fff', border: 'none', borderRadius: '12px', padding: '14px 15px', textAlign: 'left',
               boxShadow: '0 1px 3px rgba(0,0,0,.08)', display: 'block', width: '100%',
@@ -170,21 +197,163 @@ export default function AutistaPage() {
               </a>
             </div>
 
-            <button disabled={inCorso} onClick={() => esito(aperta, 'consegna')}
-              style={{ width: '100%', marginTop: '16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '12px', padding: '17px', fontSize: '16.5px', fontWeight: 800 }}>
-              {inCorso ? '…' : 'Consegnato'}
-            </button>
-            <button disabled={inCorso} onClick={() => esito(aperta, 'tentata')}
-              style={{ width: '100%', marginTop: '9px', background: '#fff', color: '#b45309', border: '1px solid #fed7aa', borderRadius: '12px', padding: '15px', fontSize: '15px', fontWeight: 700 }}>
-              Destinatario assente
-            </button>
-            <button disabled={inCorso} onClick={() => setAperta(null)}
-              style={{ width: '100%', marginTop: '9px', background: 'none', color: '#71717a', border: 'none', padding: '12px', fontSize: '14px', fontWeight: 600 }}>
-              Chiudi
-            </button>
+            {passo === 'scheda' && (<>
+              <button disabled={inCorso} onClick={() => setPasso('consegna')}
+                style={{ width: '100%', marginTop: '16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '12px', padding: '17px', fontSize: '16.5px', fontWeight: 800 }}>
+                Consegnato
+              </button>
+              <button disabled={inCorso} onClick={() => setPasso('motivo')}
+                style={{ width: '100%', marginTop: '9px', background: '#fff', color: '#b45309', border: '1px solid #fed7aa', borderRadius: '12px', padding: '15px', fontSize: '15px', fontWeight: 700 }}>
+                Non sono riuscito a consegnare
+              </button>
+              <button disabled={inCorso} onClick={() => setAperta(null)}
+                style={{ width: '100%', marginTop: '9px', background: 'none', color: '#71717a', border: 'none', padding: '12px', fontSize: '14px', fontWeight: 600 }}>
+                Chiudi
+              </button>
+            </>)}
+
+            {passo === 'consegna' && (
+              <Consegna sped={aperta} inCorso={inCorso}
+                onIndietro={() => setPasso('scheda')}
+                onConferma={(dati) => esito(aperta, 'consegna', dati)} />
+            )}
+
+            {passo === 'motivo' && (<>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: NERO, margin: '18px 0 8px' }}>Cos’è successo?</div>
+              {MOTIVI.map(([k, l, d]) => (
+                <button key={k} disabled={inCorso} onClick={() => esito(aperta, 'tentata', { motivo: k })}
+                  style={{ width: '100%', marginBottom: '8px', background: '#fff', border: '1px solid #e4e4e7', borderRadius: '12px', padding: '13px 15px', textAlign: 'left' }}>
+                  <span style={{ display: 'block', fontSize: '15px', fontWeight: 700, color: NERO }}>{l}</span>
+                  <span style={{ display: 'block', fontSize: '12.5px', color: '#71717a', marginTop: '2px' }}>{d}</span>
+                </button>
+              ))}
+              <button disabled={inCorso} onClick={() => setPasso('scheda')}
+                style={{ width: '100%', marginTop: '4px', background: 'none', color: '#71717a', border: 'none', padding: '12px', fontSize: '14px', fontWeight: 600 }}>
+                Indietro
+              </button>
+            </>)}
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// LA PROVA DI CONSEGNA.
+//
+// Senza, una consegna e' una parola contro un'altra: quando il destinatario dice che non ha
+// ricevuto niente non c'e' niente da mostrargli, e su un contrassegno vuol dire discutere di soldi
+// senza carte. Due modi, quelli che si usano davvero: la FIRMA sullo schermo quando qualcuno c'e',
+// la FOTO quando il pacco si lascia in un posto concordato.
+//
+// Non e' obbligatoria: se il telefono fa i capricci si consegna lo stesso. Bloccare l'autista
+// sulla porta di casa sarebbe peggio del non avere la firma.
+function Consegna({ sped, inCorso, onIndietro, onConferma }: {
+  sped: Sped; inCorso: boolean; onIndietro: () => void; onConferma: (dati: any) => void
+}) {
+  const [modo, setModo] = useState<'firma' | 'foto' | null>(null)
+  const [ricevente, setRicevente] = useState('')
+  const [immagine, setImmagine] = useState<string | null>(null)
+  const tela = useRef<HTMLCanvasElement>(null)
+  const disegna = useRef(false)
+  const scritto = useRef(false)
+
+  // Il foglio su cui si firma. Si dimensiona sul telefono vero, altrimenti su schermi piccoli la
+  // firma esce spostata rispetto al dito.
+  useEffect(() => {
+    if (modo !== 'firma') return
+    const c = tela.current
+    if (!c) return
+    const r = c.getBoundingClientRect()
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    c.width = r.width * dpr; c.height = r.height * dpr
+    const ctx = c.getContext('2d')!
+    ctx.scale(dpr, dpr)
+    ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111'
+    scritto.current = false
+  }, [modo])
+
+  function punto(e: any) {
+    const c = tela.current!, r = c.getBoundingClientRect()
+    const t = e.touches?.[0] || e
+    return { x: t.clientX - r.left, y: t.clientY - r.top }
+  }
+  function giu(e: any) { e.preventDefault(); disegna.current = true; const ctx = tela.current!.getContext('2d')!; const p = punto(e); ctx.beginPath(); ctx.moveTo(p.x, p.y) }
+  function muovi(e: any) { if (!disegna.current) return; e.preventDefault(); const ctx = tela.current!.getContext('2d')!; const p = punto(e); ctx.lineTo(p.x, p.y); ctx.stroke(); scritto.current = true }
+  function su() { disegna.current = false }
+  function pulisci() { const c = tela.current!; c.getContext('2d')!.clearRect(0, 0, c.width, c.height); scritto.current = false }
+
+  // La foto si rimpicciolisce PRIMA di partire: dal telefono esce da 4 mega, e su una linea che in
+  // strada e' quella che e' non arriverebbe mai.
+  async function prendiFoto(file: File) {
+    const bitmap = await createImageBitmap(file)
+    const lato = 1000
+    const scala = Math.min(1, lato / Math.max(bitmap.width, bitmap.height))
+    const c = document.createElement('canvas')
+    c.width = Math.round(bitmap.width * scala); c.height = Math.round(bitmap.height * scala)
+    c.getContext('2d')!.drawImage(bitmap, 0, 0, c.width, c.height)
+    setImmagine(c.toDataURL('image/jpeg', 0.72))
+  }
+
+  function conferma() {
+    let pod: string | null = immagine
+    if (modo === 'firma' && tela.current && scritto.current) pod = tela.current.toDataURL('image/png')
+    onConferma({ ricevente: ricevente.trim() || null, podTipo: pod ? modo : null, pod })
+  }
+
+  const eti = { display: 'block', fontSize: '12px', color: '#71717a', fontWeight: 600, marginBottom: '5px' }
+
+  return (
+    <div style={{ marginTop: '16px' }}>
+      <label style={eti as any}>Chi ha ritirato</label>
+      <input value={ricevente} onChange={e => setRicevente(e.target.value)}
+        placeholder="nome di chi firma o ritira"
+        style={{ width: '100%', padding: '13px', fontSize: '16px', borderRadius: '10px', border: '1px solid #d4d4d8', outline: 'none' }} />
+
+      <div style={{ display: 'flex', gap: '8px', margin: '12px 0' }}>
+        {([['firma', 'Firma'], ['foto', 'Foto']] as const).map(([k, l]) => (
+          <button key={k} onClick={() => { setModo(k); setImmagine(null) }}
+            style={{
+              flex: 1, padding: '13px', borderRadius: '10px', fontSize: '15px', fontWeight: 700,
+              border: modo === k ? `2px solid ${ARANCIO}` : '1px solid #d4d4d8',
+              background: modo === k ? '#fff7ed' : '#fff', color: NERO,
+            }}>{l}</button>
+        ))}
+      </div>
+
+      {modo === 'firma' && (
+        <div>
+          <canvas ref={tela}
+            onMouseDown={giu} onMouseMove={muovi} onMouseUp={su} onMouseLeave={su}
+            onTouchStart={giu} onTouchMove={muovi} onTouchEnd={su}
+            style={{ width: '100%', height: '170px', background: '#fff', border: '1px dashed #a1a1aa', borderRadius: '10px', touchAction: 'none', display: 'block' }} />
+          <button onClick={pulisci} style={{ background: 'none', border: 'none', color: '#71717a', fontSize: '13px', fontWeight: 600, padding: '8px 0' }}>
+            Cancella e rifai
+          </button>
+        </div>
+      )}
+
+      {modo === 'foto' && (
+        <div>
+          {immagine
+            ? <img src={immagine} alt="" style={{ width: '100%', borderRadius: '10px', display: 'block' }} />
+            : <label style={{ display: 'block', textAlign: 'center', padding: '30px', border: '1px dashed #a1a1aa', borderRadius: '10px', color: '#52525b', fontSize: '14.5px', fontWeight: 600 }}>
+              Scatta la foto del pacco
+              <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                onChange={e => { const f = e.target.files?.[0]; if (f) prendiFoto(f) }} />
+            </label>}
+          {immagine && <button onClick={() => setImmagine(null)} style={{ background: 'none', border: 'none', color: '#71717a', fontSize: '13px', fontWeight: 600, padding: '8px 0' }}>Rifai la foto</button>}
+        </div>
+      )}
+
+      <button disabled={inCorso} onClick={conferma}
+        style={{ width: '100%', marginTop: '14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '12px', padding: '17px', fontSize: '16.5px', fontWeight: 800 }}>
+        {inCorso ? '…' : 'Conferma consegna'}
+      </button>
+      <button disabled={inCorso} onClick={onIndietro}
+        style={{ width: '100%', marginTop: '8px', background: 'none', color: '#71717a', border: 'none', padding: '12px', fontSize: '14px', fontWeight: 600 }}>
+        Indietro
+      </button>
     </div>
   )
 }

@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
   if (vista === 'consegne') {
     const da = `${giorno}T00:00:00.000Z`, a = `${giorno}T23:59:59.999Z`
     let q = admin.from('scansioni_interne')
-      .select('id,tipo,created_at,operatore,filiale,note,autista_id,autisti(nome),spedizioni(numero,dest_nome,dest_citta,dest_cap,contrassegno)')
+      .select('id,tipo,motivo,ricevente,pod_path,pod_tipo,lat,lng,created_at,operatore,filiale,note,autista_id,autisti(nome),spedizioni(numero,dest_nome,dest_citta,dest_cap,contrassegno)')
       .eq('master_id', utente.master_id)
       .in('tipo', ['consegna', 'tentata'])
       .gte('created_at', da).lte('created_at', a)

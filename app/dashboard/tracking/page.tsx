@@ -27,6 +27,12 @@ const TIPI: [string, string, string][] = [
   ['giacenza', 'Giacenza', 'Resta fermo in deposito'],
 ]
 
+// Il motivo com'e' scritto in archivio -> come si dice a chi legge.
+const MOTIVO_PAROLA: Record<string, string> = {
+  assente: 'destinatario assente', indirizzo: 'indirizzo errato', rifiutata: 'rifiutata dal destinatario',
+  sconosciuto: 'destinatario sconosciuto', non_riuscita: 'non riuscita',
+}
+
 const STATI: Record<string, { t: string; c: string }> = {
   in_lavorazione: { t: 'Da ritirare', c: '#8a8a8a' },
   spedita: { t: 'Ritirata', c: '#2563eb' },
@@ -42,13 +48,15 @@ const TAB_VALIDE = ['scansiona', 'partenza', 'arrivo', 'consegne', 'autisti'] as
 type Tab = typeof TAB_VALIDE[number]
 
 export default function CircuitoInternoPage() {
-  const [tab, setTab] = useState<Tab>('scansiona')
   // La scheda si puo' aprire dall'indirizzo (?tab=autisti): serve alla voce di menu "Autisti e
   // Consegne", che porta qui invece di avere una pagina sua con dentro le stesse cose.
-  useEffect(() => {
+  // Si legge al PRIMO disegno, non dopo: leggendola dopo si vedeva comparire la scheda Scansiona
+  // e poi saltare a quella giusta, che sembra un difetto anche quando non lo e'.
+  const [tab, setTab] = useState<Tab>(() => {
+    if (typeof window === 'undefined') return 'scansiona'
     const t = new URLSearchParams(window.location.search).get('tab') as Tab
-    if (t && (TAB_VALIDE as readonly string[]).includes(t)) setTab(t)
-  }, [])
+    return t && (TAB_VALIDE as readonly string[]).includes(t) ? t : 'scansiona'
+  })
   return (
     <div>
       <div style={{ marginBottom: '18px' }}>
@@ -303,9 +311,17 @@ function Consegne() {
                             <td style={{ ...td, color: '#8a8a8a', whiteSpace: 'nowrap' }}>{new Date(r.created_at).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</td>
                             <td style={{ ...td, fontWeight: 600 }}>{r.spedizioni?.numero || '—'}</td>
                             <td style={td}>{r.spedizioni?.dest_nome || '—'}<span style={{ color: '#8a8a8a' }}> · {r.spedizioni?.dest_cap} {r.spedizioni?.dest_citta}</span></td>
-                            <td style={td}>{r.tipo === 'consegna'
-                              ? <span style={{ color: '#16a34a', fontWeight: 600 }}>consegnata</span>
-                              : <span style={{ color: '#d97706', fontWeight: 600 }}>destinatario assente</span>}</td>
+                            <td style={td}>
+                              {r.tipo === 'consegna'
+                                ? <span style={{ color: '#16a34a', fontWeight: 600 }}>consegnata{r.ricevente ? <span style={{ color: '#666', fontWeight: 400 }}> a {r.ricevente}</span> : null}</span>
+                                : <span style={{ color: '#d97706', fontWeight: 600 }}>{MOTIVO_PAROLA[r.motivo] || 'non riuscita'}</span>}
+                              {r.pod_path ? <a href={`/api/file?s=${r.id}`} target="_blank" rel="noreferrer"
+                                style={{ marginLeft: '8px', color: ACCENT, fontSize: '12px', fontWeight: 700, textDecoration: 'none' }}>
+                                {r.pod_tipo === 'firma' ? 'firma' : 'foto'}
+                              </a> : null}
+                              {r.lat && r.lng ? <a href={`https://maps.google.com/?q=${r.lat},${r.lng}`} target="_blank" rel="noreferrer"
+                                style={{ marginLeft: '8px', color: '#8a8a8a', fontSize: '12px', fontWeight: 600, textDecoration: 'none' }}>dove</a> : null}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

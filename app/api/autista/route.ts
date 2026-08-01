@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { BUCKET_RISERVATI } from '@/lib/file-riservati'
 
 // L'AUTISTA, DAL TELEFONO.
 //
@@ -39,6 +40,8 @@ async function capDellaZona(admin: any, zonaId: string | null): Promise<Set<stri
     for (const r of (data || [])) if (r.cap) out.add(String(r.cap).trim())
     if (!data || data.length < 1000) break
   }
+  // Zona a CAP jolly (una provincia intera, come "Roma e provincia"): non c'e' niente da filtrare.
+  if (out.has('*')) return null
   return out
 }
 
@@ -66,7 +69,7 @@ export async function GET(_req: NextRequest) {
   // gia' consegnato non deve restare nella lista di chi guida.
   const oggi = new Date().toISOString().slice(0, 10)
   const { data: fatte } = autista ? await admin.from('scansioni_interne')
-    .select('tipo,created_at,spedizioni(numero,dest_nome,dest_citta)')
+    .select('tipo,motivo,ricevente,created_at,spedizioni(numero,dest_nome,dest_citta)')
     .eq('autista_id', autista.id).in('tipo', ['consegna', 'tentata'])
     .gte('created_at', `${oggi}T00:00:00.000Z`).order('created_at', { ascending: false }).limit(200) : { data: [] }
 
@@ -78,7 +81,31 @@ export async function GET(_req: NextRequest) {
   })
 }
 
-// L'ESITO: consegnato, oppure destinatario assente. Sono le uniche due cose che puo' fare.
+// Le uniche ragioni per cui una consegna non va a buon fine, e cosa comportano.
+// "Non c'era nessuno" la prima volta si ritenta; alla seconda, e per indirizzo sbagliato, rifiuto
+// o destinatario sconosciuto, il pacco si ferma ad aspettare istruzioni dal mittente — e quel
+// binario nel sistema esiste gia' e si chiama giacenza (lo decide la funzione nel database).
+const MOTIVI = ['assente', 'indirizzo', 'rifiutata', 'sconosciuto', 'non_riuscita']
+
+// La prova di consegna arriva come immagine dal telefono. Sta nel bucket riservato insieme alle
+// altre POD ed esce SOLO da /api/file: una firma e' un dato del destinatario, non roba pubblica.
+async function salvaProva(admin: any, spedizioneId: string, dati: string, tipo: string): Promise<string | null> {
+  try {
+    const m = /^data:(image\/(png|jpeg|jpg|webp));base64,(.+)$/i.exec(String(dati || ''))
+    if (!m) return null
+    const buffer = Buffer.from(m[3], 'base64')
+    // Settecento kilobyte sono gia' tanti per una firma o una foto ridimensionata dal telefono:
+    // oltre, e' qualcosa che non doveva arrivare qui.
+    if (buffer.length > 700 * 1024) return null
+    const est = m[2].toLowerCase() === 'png' ? 'png' : m[2].toLowerCase() === 'webp' ? 'webp' : 'jpg'
+    const path = `pod/${spedizioneId}/${tipo}-${Date.now()}.${est}`
+    const { error } = await admin.storage.from(BUCKET_RISERVATI).upload(path, buffer, { contentType: m[1], upsert: true })
+    if (error) { console.error('[AUTISTA][POD]', error.message); return null }
+    return path
+  } catch (e: any) { console.error('[AUTISTA][POD]', e?.message); return null }
+}
+
+// L'ESITO: consegnato (con la prova) oppure non riuscito (col motivo).
 export async function POST(req: NextRequest) {
   const ctx = await autistaDalToken()
   if ('errore' in ctx) return ctx.errore
@@ -106,6 +133,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Lettera di vettura non trovata' }, { status: 404 })
   }
 
+  const motivo = tipo === 'tentata' ? String(body?.motivo || 'non_riuscita') : ''
+  if (tipo === 'tentata' && !MOTIVI.includes(motivo)) {
+    return NextResponse.json({ error: 'Motivo non valido' }, { status: 400 })
+  }
+
+  // Prova di consegna: firma del ricevente o foto del pacco. NON e' obbligatoria — se il telefono
+  // non collabora la consegna si registra lo stesso, perche' il pacco e' comunque arrivato e
+  // bloccare l'autista sulla porta di casa sarebbe peggio del non avere la firma.
+  let podPath: string | null = null
+  const podTipo = ['firma', 'foto'].includes(String(body?.podTipo)) ? String(body.podTipo) : null
+  if (tipo === 'consegna' && podTipo && body?.pod) {
+    podPath = await salvaProva(admin, sped.id, String(body.pod), podTipo)
+  }
+
+  const coord = (v: any) => { const n = Number(v); return isFinite(n) && Math.abs(n) <= 180 ? n : null }
   const { data, error } = await admin.rpc('fn_scansione_interna', {
     p_spedizione_id: sped.id,
     p_tipo: tipo,
@@ -113,8 +155,14 @@ export async function POST(req: NextRequest) {
     p_autista_id: autista?.id || null,
     p_operatore: autista?.nome || utente.nome || null,
     p_filiale: null,
-    p_note: String(body?.note || '').trim() || null,
+    p_note: String(body?.note || '').trim().slice(0, 300) || null,
     p_created_by: user.id,
+    p_motivo: motivo || null,
+    p_ricevente: String(body?.ricevente || '').trim().slice(0, 120) || null,
+    p_pod_path: podPath,
+    p_pod_tipo: podPath ? podTipo : null,
+    p_lat: coord(body?.lat),
+    p_lng: coord(body?.lng),
   })
   if (error) {
     console.error('[AUTISTA][SCANSIONE]', error.message)
@@ -129,5 +177,6 @@ export async function POST(req: NextRequest) {
     numero: sped.numero, destinatario: sped.dest_nome,
     contrassegno: Number(sped.contrassegno || 0),
     descrizione: (data as any)?.descrizione || null,
+    prova: !!podPath,
   })
 }
