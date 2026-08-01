@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react'
 import { isProviderTecnico } from '@/lib/corriere-logo'
 
 const DISPONIBILI = [
+  // Il circuito interno sta per primo: e' l'unico che non dipende da nessuno.
+  {tipo:'interno',nome:'Circuito interno',icona:'interno'},
   {tipo:'gls',nome:'GLS',icona:'gls'},
   {tipo:'sda',nome:'SDA Express',icona:'sda'},
   {tipo:'generico',nome:'Nexive',icona:'nexive'},
@@ -190,8 +192,17 @@ export default function CorrieriPage() {
           <div style={{padding:'16px',display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'12px'}}>
             {DISPONIBILI.map((c,i) => (
               <a key={i} href={'/dashboard/corrieri/aggiungi?tipo='+c.tipo}
-                style={{border:'1px solid #e8e8e8',borderRadius:'8px',textDecoration:'none',display:'block',overflow:'hidden',background:'#fff'}}>
-                <img src={'/corrieri/'+c.icona+'.png'} alt={c.nome} style={{width:'100%',height:'90px',objectFit:'contain',display:'block'}}/>
+                style={{border:c.tipo==='interno'?'1px solid #f97316':'1px solid #e8e8e8',borderRadius:'8px',textDecoration:'none',display:'block',overflow:'hidden',background:'#fff'}}>
+                {/* Il circuito interno non ha un logo da mettere: il marchio e' quello del master. */}
+                {c.tipo === 'interno' ? (
+                  <div style={{height:'90px',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:'4px',padding:'8px'}}>
+                    <div style={{fontSize:'22px',lineHeight:1}}>⬢</div>
+                    <div style={{fontSize:'12px',fontWeight:700,color:'#1a1a1a',textAlign:'center'}}>Circuito interno</div>
+                    <div style={{fontSize:'10px',color:'#8a8a8a',textAlign:'center'}}>la tua rete</div>
+                  </div>
+                ) : (
+                  <img src={'/corrieri/'+c.icona+'.png'} alt={c.nome} style={{width:'100%',height:'90px',objectFit:'contain',display:'block'}}/>
+                )}
               </a>
             ))}
           </div>

@@ -39,7 +39,7 @@ const NAV: NavItem[] = [
     { label: 'Ticket', href: '/dashboard/assistenza', always: true },
     { label: 'POD', href: '/dashboard/assistenza/pod', always: true },
   ]},
-  { label: 'Tracking Interno', href: '/dashboard/tracking', icon: '◎', perm: 'admin.interno.deliveries.out' },
+  { label: 'Circuito interno', href: '/dashboard/tracking', icon: '◎', perm: 'admin.interno.deliveries.out' },
   { label: 'Il mio listino', href: '/dashboard/listini/mio', icon: '€', agente: true },
   { label: 'Listini Prezzi', href: '/dashboard/listini', icon: '€', sub: [
     { label: 'Nuovo Listino', href: '/dashboard/listini/clienti/nuovo', perm: 'admin.pricelists.create' },

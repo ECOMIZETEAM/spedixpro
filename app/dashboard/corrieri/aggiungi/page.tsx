@@ -14,7 +14,11 @@ async function salvaCorriere(formData: FormData) {
   const credenziali: Record<string,string> = {}
   const settings: Record<string,string> = {}
 
-  if (tipo === 'spedisci') {
+  // Circuito interno: non c'e' nessun provider a cui chiedere le chiavi, il corriere siamo noi.
+  // Il contratto serve comunque, perche' e' quello che porta zone, listino, credito e cascata.
+  if (tipo === 'interno') {
+    settings.filiale = formData.get('filiale') as string || ''
+  } else if (tipo === 'spedisci') {
     credenziali.utente = formData.get('utente') as string || ''
     credenziali.password = formData.get('password') as string || ''
     credenziali.master_domain = formData.get('master_domain') as string || ''
@@ -59,6 +63,14 @@ async function salvaCorriere(formData: FormData) {
 }
 
 const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,string,string][],extra?:string}> = {
+  interno: {
+    titolo: 'Circuito interno',
+    info: 'La tua rete di consegna: i pacchi li ritiri e li consegni tu, con i tuoi autisti. Nessuna credenziale da chiedere a nessuno. Dopo averlo creato imposta le Zone di consegna e i prezzi in Listini Prezzi, poi attivalo per i clienti.',
+    campi: [
+      ['nome_contratto','Nome del servizio','es. Consegne Città','text'],
+      ['filiale','Filiale / deposito principale','es. Napoli Est','text'],
+    ],
+  },
   spedisci: {
     titolo: 'Spedisci.online',
     info: 'Vai su spedisci.online → Impostazioni → API Key per ottenere le credenziali.',
