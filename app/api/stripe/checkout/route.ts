@@ -115,28 +115,40 @@ export async function POST(req: NextRequest) {
 
   // ── Prima attivazione: pagina di pagamento ──
   const customer = await clienteStripe(admin, m as any)
-  const sessione = await s.checkout.sessions.create({
-    mode: 'subscription',
-    customer,
-    line_items: [{ price: price.id, quantity: 1, tax_rates: iva.length ? iva : undefined }],
-    subscription_data: {
+  let sessione
+  try {
+    sessione = await s.checkout.sessions.create({
+      mode: 'subscription',
+      customer,
+      line_items: [{ price: price.id, quantity: 1, tax_rates: iva.length ? iva : undefined }],
+      subscription_data: {
+        metadata: { master_id: m.id, piano: pianoId },
+        // Rinnovo il PRIMO DEL MESE per tutti, come il contatore delle spedizioni: se il pacchetto
+        // riparte il primo e la bolletta arriva il 13, i due numeri non tornano mai fra loro.
+        billing_cycle_anchor: primoDelProssimoMese(),
+        // Chi questo mese ha GIA' pagato il canone col credito e ora passa alla carta non deve
+        // pagare una seconda volta i giorni che ha gia' pagato: non si addebita nulla adesso e la
+        // carta parte dal primo del mese. Senza questo, passare al pagamento con carta a meta' mese
+        // costava due volte lo stesso periodo.
+        proration_behavior: meseGiaPagato ? 'none' : 'create_prorations',
+      },
       metadata: { master_id: m.id, piano: pianoId },
-      // Rinnovo il PRIMO DEL MESE per tutti, come il contatore delle spedizioni: se il pacchetto
-      // riparte il primo e la bolletta arriva il 13, i due numeri non tornano mai fra loro.
-      billing_cycle_anchor: primoDelProssimoMese(),
-      // Chi questo mese ha GIA' pagato il canone col credito e ora passa alla carta non deve
-      // pagare una seconda volta i giorni che ha gia' pagato: non si addebita nulla adesso e la
-      // carta parte dal primo del mese. Senza questo, passare al pagamento con carta a meta' mese
-      // costava due volte lo stesso periodo.
-      proration_behavior: meseGiaPagato ? 'none' : 'create_prorations',
-    },
-    metadata: { master_id: m.id, piano: pianoId },
-    success_url: `${base}/dashboard/abbonamento?pagamento=ok`,
-    cancel_url: `${base}/dashboard/abbonamento?pagamento=annullato`,
-    locale: 'it',
-    allow_promotion_codes: true,
-    billing_address_collection: 'required',
-    tax_id_collection: { enabled: true },   // partita IVA in fattura
-  })
+      success_url: `${base}/dashboard/abbonamento?pagamento=ok`,
+      cancel_url: `${base}/dashboard/abbonamento?pagamento=annullato`,
+      locale: 'it',
+      allow_promotion_codes: true,
+      billing_address_collection: 'required',
+      tax_id_collection: { enabled: true },   // partita IVA in fattura
+      // Senza questo la cassa non si apre proprio: chiedendo la partita IVA e l'indirizzo a un
+      // cliente che esiste gia', il circuito vuole il permesso esplicito di aggiornarne
+      // l'anagrafica con quello che l'utente digita. Mancava, e il tasto non faceva nulla.
+      customer_update: { name: 'auto', address: 'auto' },
+    })
+  } catch (e: any) {
+    // Un errore qui lasciava la pagina muta: la risposta non era JSON e la schermata non aveva
+    // niente da mostrare. Meglio un messaggio, e il motivo vero nei log.
+    console.error('[STRIPE][CASSA]', m.id, e?.message)
+    return NextResponse.json({ error: 'Non riesco ad aprire il pagamento in questo momento. Riprova, o scrivici se continua.' }, { status: 400 })
+  }
   return NextResponse.json({ url: sessione.url })
 }
