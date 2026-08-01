@@ -225,14 +225,7 @@ export default function AbbonamentoPage() {
                         ? <span style={{background:'#dcfce7',color:'#16a34a',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Carta attiva</span>
                         : <span style={{background:'#fef3c7',color:'#b45309',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Nessuna carta</span>}
                   </td>
-                  <td style={{padding:'9px 14px',textAlign:'right' as const}}>
-                    {a.pagamento_id && !a.esente && <div style={{display:'inline-flex',gap:'6px'}}>
-                      <button onClick={()=>segnaPagato(a.pagamento_id, a.master_nome, a.importo_da_incassare, 'pagato')} disabled={!!azione} title="Saldato: nessun rimborso al credito"
-                        style={{background:'#fff',color:'#16a34a',border:'1px solid #86efac',borderRadius:'6px',padding:'6px 10px',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>Pagato</button>
-                      <button onClick={()=>segnaPagato(a.pagamento_id, a.master_nome, a.importo_da_incassare, 'bonifico')} disabled={!!azione} title="Bonifico: rimborsa il credito al master"
-                        style={{background:ACCENT,color:'#fff',border:'none',borderRadius:'6px',padding:'6px 10px',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>Bonifico</button>
-                    </div>}
-                  </td>
+                  <td style={{padding:'9px 14px',textAlign:'right' as const}}></td>
                 </tr>
               ))}
             </tbody>
@@ -368,6 +361,44 @@ export default function AbbonamentoPage() {
             : <>⏳ <strong>Passaggio a {stato.cambioProgrammato.piano} programmato</strong> per il {new Date(stato.cambioProgrammato.dal).toLocaleDateString('it-IT')}. Fino ad allora resti sul piano attuale, che hai già pagato.</>}
         </div>
       )}
+      {!!(stato?.mieiPagamenti||[]).length && (
+        <>
+          <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',margin:'0 0 10px'}}>I tuoi pagamenti</div>
+          <div style={{...card, padding:0, overflow:'hidden', marginBottom:'18px'}}>
+            <div style={{overflowX:'auto' as const}}>
+            <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
+              <thead>
+                <tr style={{background:'#fafafa'}}>
+                  {['Mese','Importo','Stato','Pagato il','Metodo'].map(h=>(
+                    <th key={h} style={{textAlign:'left' as const,padding:'9px 14px',fontSize:'11px',fontWeight:600,color:'#777',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap' as const}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(stato?.mieiPagamenti||[]).map((p:any)=>(
+                  <tr key={p.id} style={{borderBottom:'1px solid #f5f5f5'}}>
+                    <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:600,whiteSpace:'nowrap' as const}}>{meseLabel(p.mese)}</td>
+                    <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:700,whiteSpace:'nowrap' as const}}>€ {Number(p.importo||0).toFixed(2)}</td>
+                    <td style={{padding:'9px 14px'}}>
+                      {p.pagato
+                        ? <span style={{background:'#dcfce7',color:'#16a34a',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Pagato</span>
+                        : <span style={{background:'#fef3c7',color:'#b45309',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>In attesa</span>}
+                    </td>
+                    <td style={{padding:'9px 14px',color:'#555',whiteSpace:'nowrap' as const}}>{p.pagato_il ? new Date(p.pagato_il).toLocaleDateString('it-IT') : '—'}</td>
+                    <td style={{padding:'9px 14px',color:'#555'}}>{p.metodo || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            </div>
+          </div>
+          <div style={{fontSize:'12.5px',color:'#777',margin:'-8px 0 18px'}}>
+            Le fatture, il cambio della carta e i dati di fatturazione si gestiscono da
+            <strong> Fatture e metodo di pagamento</strong>, qui sopra.
+          </div>
+        </>
+      )}
+
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',flexWrap:'wrap',gap:'8px',marginBottom:'10px'}}>
         <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a'}}>Piani disponibili</div>
         {conCarta && <div style={{fontSize:'11.5px',color:'#777'}}>{stato?.carta?.iva ? `Prezzi IVA ${stato.carta.iva}% compresa` : 'Prezzi finiti — fattura senza IVA (inversione contabile)'}</div>}

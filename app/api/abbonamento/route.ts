@@ -22,6 +22,10 @@ export async function GET() {
 
   const isRoot = !m?.parent_master_id  // il master principale: illimitato e gratis, mai bloccato
 
+  const { data: mieiPag } = await admin.from('abbonamenti_pagamenti')
+    .select('id,mese,importo,pagato,pagato_il,metodo')
+    .eq('master_id', utente.master_id).order('mese', { ascending: false }).limit(24)
+
   // Il piano conta le spedizioni di TUTTA la rete sotto questo master (sé + discendenza):
   // ogni spedizione di un sotto-master consuma il contratto/piano dei master sopra.
   const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
@@ -138,6 +142,9 @@ export async function GET() {
     spedizioni_mese: count || 0,
     credito: Number(m?.credito || 0),
     piani: PIANI_ENTERPRISE,
+    // Lo storico dei PROPRI pagamenti: il master lo chiedeva e non lo vedeva da nessuna parte —
+    // sapeva di aver pagato solo perche' se lo ricordava.
+    mieiPagamenti: mieiPag,
     cambioProgrammato: descriviCambio(m),
     // Pagamento con carta: disponibile solo se le chiavi ci sono. Finche' non ci sono, la
     // schermata resta identica a prima e si paga come si e' sempre pagato.
