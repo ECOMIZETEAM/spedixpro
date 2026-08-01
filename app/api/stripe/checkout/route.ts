@@ -135,25 +135,17 @@ export async function POST(req: NextRequest) {
     sessione = await s.checkout.sessions.create({
       mode: 'subscription',
       customer,
-      line_items: [
-        { price: price.id, quantity: 1, tax_rates: iva.length ? iva : undefined },
-        // IL CANONE DEL MESE IN CORSO SI PAGA INTERO, non in proporzione ai giorni che restano.
-        // Che si attivi il primo o il quindici, il mese costa quanto costa: e' la regola concordata,
-        // ed e' anche l'unica che un cliente capisce senza doverla ricalcolare.
-        // Salta solo per chi questo mese ha gia' pagato il canone col credito: pagherebbe due volte.
-        ...(meseGiaPagato ? [] : [{
-          quantity: 1,
-          price_data: {
-            currency: 'eur',
-            unit_amount: price.unit_amount || 0,
-            tax_behavior: 'inclusive' as const,
-            product_data: { name: `${piano.nome} — canone del mese in corso` },
-          },
-          tax_rates: iva.length ? iva : undefined,
-        }]),
-      ],
+      // Una riga sola: l'abbonamento. Il canone del mese IN CORSO non si puo' mettere qui come
+      // voce una-tantum — il circuito rifiuta di mescolare un importo una-tantum con
+      // "niente conteggio dei giorni" nella stessa sessione. Lo si addebita subito dopo, con una
+      // fattura a parte, appena la carta e' registrata (vedi /api/stripe/webhook).
+      line_items: [{ price: price.id, quantity: 1, tax_rates: iva.length ? iva : undefined }],
       subscription_data: {
-        metadata: { master_id: m.id, piano: pianoId },
+        metadata: {
+          master_id: m.id, piano: pianoId,
+          // Il segnale per il webhook: questo mese va ancora pagato, per intero.
+          canone_mese: meseGiaPagato ? 'gia_pagato' : 'da_addebitare',
+        },
         // Rinnovo il PRIMO DEL MESE per tutti, come il contatore delle spedizioni: se il pacchetto
         // riparte il primo e la bolletta arriva il 13, i due numeri non tornano mai fra loro.
         billing_cycle_anchor: primoDelProssimoMese(),

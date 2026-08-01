@@ -84,6 +84,33 @@ export async function POST(req: NextRequest) {
               ? { abbonamento_piano_programmato: null, abbonamento_programmato_dal: null } : {}),
           } : {}),
         }).eq('id', m.id)
+
+        // CANONE DEL MESE IN CORSO, per intero.
+        //
+        // Il conteggio dei giorni non si usa: chi attiva il 15 paga il mese come chi attiva il 1°.
+        // Non si puo' mettere quell'importo nella sessione di pagamento insieme all'abbonamento
+        // (il circuito rifiuta di mescolare una voce una-tantum con "niente conteggio dei giorni"),
+        // quindi lo si addebita QUI, appena la carta e' registrata, con una fattura a parte.
+        //
+        // La chiave di idempotenza e' l'unica cosa che impedisce il doppio addebito: questi eventi
+        // arrivano piu' volte, e senza chiave il cliente pagherebbe due canoni.
+        if (attivo && piano && sub.metadata?.canone_mese === 'da_addebitare') {
+          const mese = meseCorrente()
+          try {
+            await s.invoiceItems.create({
+              customer: String(sub.customer), amount: Math.round(piano.prezzo * 100), currency: 'eur',
+              description: `${piano.nome} — canone ${mese}`,
+            }, { idempotencyKey: `canone-${sub.id}-${mese}` })
+            const f = await s.invoices.create({
+              customer: String(sub.customer), auto_advance: true, collection_method: 'charge_automatically',
+            }, { idempotencyKey: `fattura-canone-${sub.id}-${mese}` })
+            if (f.id) { try { await s.invoices.finalizeInvoice(f.id) } catch { /* la incassa da solo */ } }
+            // Segnato come fatto: se l'evento torna, il ramo non si riapre nemmeno.
+            await s.subscriptions.update(sub.id, { metadata: { ...sub.metadata, canone_mese: `addebitato_${mese}` } })
+          } catch (e: any) {
+            console.error('[STRIPE][CANONE MESE]', sub.id, e?.message)
+          }
+        }
         break
       }
 
