@@ -51,8 +51,11 @@ export function pacchiSpedizione(sped: any): any[] {
   }))
 }
 
-// NOLO del cliente per quella spedizione (fascia + fuel + sponda, senza contrassegno/assicurazione:
-// il motore del listino cliente non li calcola nemmeno). null se non calcolabile.
+// NOLO del cliente per quella spedizione: SOLO il prezzo di fascia/zona (col fuel, che è una
+// percentuale della fascia stessa e non un servizio a parte). Niente contrassegno, niente
+// assicurazione, niente sponda: il pacco torna indietro e basta, non c'è niente da incassare, da
+// assicurare o da scaricare con la sponda — quei supplementi il cliente li ha già pagati all'andata.
+// null se non calcolabile.
 export async function noloCliente(admin: any, sped: any, listinoId: string | null | undefined): Promise<number | null> {
   if (!listinoId) return null
   const ris = await calcolaPrezzoListino(admin, {
@@ -64,11 +67,30 @@ export async function noloCliente(admin: any, sped: any, listinoId: string | nul
     packages: pacchiSpedizione(sped),
     corriereId: sped?.corriere_id,
   })
-  return ris?.prezzo != null && ris.prezzo > 0 ? ris.prezzo : null
+  if (!ris || !(ris.prezzo > 0)) return null
+  // Il motore somma la sponda al prezzo di fascia: qui si riscorpora e si toglie.
+  const sponda = await spondaListinoCliente(admin, listinoId, ris.corriere_id, ris.peso_fatturato)
+  return Math.max(0, r2(ris.prezzo - sponda)) || null
 }
 
-// NOLO di un MASTER per quella spedizione, dal SUO listino corrieri. Si chiama senza contrassegno
-// ne' assicurazione, cosi' il totale che torna e' gia' il solo nolo. null se non calcolabile.
+// Sponda idraulica del listino cliente: sopra la soglia, tot € per ogni kg fatturato.
+// Serve solo per RIMUOVERLA dalla base del reso (stessa formula del motore prezzi).
+async function spondaListinoCliente(admin: any, listinoId: string, corriereId: string | null, pesoFatturato: number): Promise<number> {
+  if (!corriereId) return 0
+  try {
+    const { data: sp } = await admin.from('listini_clienti_supplementi')
+      .select('descrizione,valore').eq('listino_id', listinoId).eq('corriere_id', corriereId).eq('tipo', 'sponda').maybeSingle()
+    if (!sp) return 0
+    let d: any = null; try { d = JSON.parse(sp.descrizione) } catch { /* descrizione non JSON */ }
+    const soglia = Number(d?.soglia_kg) || 0
+    const prezzoKg = Number(sp.valore) || 0
+    return soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia ? r2(pesoFatturato * prezzoKg) : 0
+  } catch { return 0 }
+}
+
+// NOLO di un MASTER per quella spedizione, dal SUO listino corrieri: fascia + fuel, e nient'altro.
+// Stessa regola del cliente — sul ritorno non si paga ne' contrassegno ne' assicurazione ne'
+// sponda. null se non calcolabile.
 export async function noloMaster(admin: any, masterId: string, corriereId: string, sped: any): Promise<number | null> {
   const pacchi = pacchiSpedizione(sped)
   const pesoReale = pacchi.reduce((s: number, p: any) => s + (Number(p?.weight) || 0), 0) || 1
@@ -80,7 +102,9 @@ export async function noloMaster(admin: any, masterId: string, corriereId: strin
     citta: sped?.dest_citta || '',
     pesoReale, packages: pacchi,
   })
-  return d && d.totale > 0 ? d.totale : null
+  if (!d) return null
+  const nolo = r2((Number(d.nolo) || 0) + (Number(d.fuel) || 0))   // niente sponda, niente commissioni
+  return nolo > 0 ? nolo : null
 }
 
 // Riga "Reso al mittente" (o altro servizio giacenza) dal LISTINO CORRIERI di un master.
