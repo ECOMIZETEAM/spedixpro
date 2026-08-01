@@ -20,3 +20,11 @@ buildlog.txt
 build_log.txt
 npmlog*.txt
 blocco_contratto.txt
+
+# file temporanei delle prove: contengono token di sessione, non devono mai entrare nel repo
+.cookie-*
+.aut.json
+.risp.json
+.utente-prova
+.prova-*.mjs
+.accesso-*.mjs
