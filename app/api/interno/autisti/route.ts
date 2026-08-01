@@ -42,6 +42,8 @@ export async function POST(req: NextRequest) {
   if (ctx instanceof NextResponse) return ctx
   const { utente, admin } = ctx
   const _b = bloccaAgente(utente); if (_b) return _b        // agente = sola lettura
+  // Un autista non si modifica l'anagrafica da solo: si assegnerebbe la zona che vuole.
+  if ((utente.ruolo || '').toLowerCase() === 'autista') return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const b = await req.json()
   const nome = String(b?.nome || '').trim()
   if (!nome) return NextResponse.json({ error: 'Il nome è obbligatorio' }, { status: 400 })

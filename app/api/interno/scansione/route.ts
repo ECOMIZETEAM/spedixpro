@@ -34,6 +34,13 @@ export async function POST(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
   if (!utente?.master_id || utente.ruolo === 'cliente') return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const _b = bloccaAgente(utente); if (_b) return _b
+  // L'AUTISTA NON PASSA DA QUI. Questa e' la scansione di DEPOSITO: vale su tutta la rete e su
+  // ogni tipo di lettura, comprese partenze e giacenze. Lui ha la sua rotta, che accetta solo
+  // consegna/tentata/ritiro e solo sui pacchi del suo master. Senza questo controllo bastava che
+  // chiamasse questa invece della sua per uscire dal suo perimetro.
+  if ((utente.ruolo || '').toLowerCase() === 'autista') {
+    return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  }
 
   const body = await req.json()
   const tipo = String(body?.tipo || '')
