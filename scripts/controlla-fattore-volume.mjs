@@ -1,8 +1,9 @@
 // CONTROLLO DEL FATTORE PESO/VOLUME SU TUTTA LA RETE.
 //
-// La regola: il fattore lo assegna il master di sopra insieme al contratto, e il master di sotto
-// quello deve vedere e usare. Se poi lui lo rivende ai suoi clienti con un altro fattore e' una
-// sua scelta commerciale, ma il valore EREDITATO deve coincidere con quello assegnato.
+// La regola: chi POSSIEDE il contratto decide il fattore, e sopra di lui non c'e' nessuno da cui
+// ereditarlo — se carica 4000, e' 4000. Chi invece riceve il contratto propagato deve vedere e
+// usare quello che gli e' stato assegnato. Se poi lui lo rivende ai suoi clienti con un fattore
+// diverso e' una sua scelta commerciale, e non riguarda questo controllo.
 //
 // Lo script e' di sola LETTURA: elenca le differenze, non tocca niente.
 //   node scripts/controlla-fattore-volume.mjs
@@ -73,11 +74,24 @@ function assegnato(m, nomeContratto) {
   return def ? { valore: def, dove: `default del listino "${L.nome}"` } : null
 }
 
-console.log('\n═══ FATTORE PESO/VOLUME — differenze fra assegnato dal padre e usato dal figlio ═══\n')
-let diff = 0, ok = 0, senzaAssegnato = 0
+// UN CONTRATTO E' DI CHI STA PIU' IN ALTO AD AVERLO.
+// Sopra il proprietario non c'e' un fornitore che detta le condizioni: se lui carica 4000, e' 4000,
+// e non c'e' niente da confrontare. Il controllo ha senso solo per le COPIE propagate piu' sotto.
+function eProprietario(m, nomeContratto) {
+  let cur = m.parent_master_id
+  for (let i = 0; i < 20 && cur; i++) {
+    if (corrieri.some(c => c.master_id === cur && c.nome_contratto === nomeContratto)) return false
+    cur = master[cur]?.parent_master_id || null
+  }
+  return true
+}
+
+console.log('\n═══ FATTORE PESO/VOLUME — solo le COPIE propagate: assegnato dal padre vs usato ═══\n')
+let diff = 0, ok = 0, senzaAssegnato = 0, propri = 0
 for (const c of corrieri.filter(x => x.attivo !== false)) {
   const m = master[c.master_id]
   if (!m || !m.parent_master_id) continue          // il master principale non eredita da nessuno
+  if (eProprietario(m, c.nome_contratto)) { propri++; continue }   // contratto suo: decide lui
   const a = assegnato(m, c.nome_contratto)
   const u = usato(c.master_id, c.id)
   if (!a) { senzaAssegnato++; continue }
@@ -88,4 +102,5 @@ for (const c of corrieri.filter(x => x.attivo !== false)) {
   console.log(`     assegnato dal padre: ${a.valore}  (${a.dove})`)
   console.log(`     usato davvero      : ${u.valore}  (${daChi})\n`)
 }
-console.log(`── contratti allineati: ${ok} · differenti: ${diff} · senza listino assegnato dal padre: ${senzaAssegnato}\n`)
+console.log(`── copie propagate allineate: ${ok} · differenti: ${diff} · senza listino assegnato: ${senzaAssegnato}`)
+console.log(`   (esclusi ${propri} contratti PROPRI, dove il fattore lo decide chi possiede il contratto)\n`)
