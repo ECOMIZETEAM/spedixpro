@@ -83,8 +83,11 @@ export async function middleware(req: NextRequest) {
   // Applichiamo il controllo solo alle aree protette
   const isDashboard = pathname.startsWith('/dashboard')
   const isCliente = pathname.startsWith('/cliente')
+  // La schermata dell'autista e' un'area protetta come le altre: senza questo, aperta senza
+  // sessione serviva la pagina nuda con dentro un errore, invece di mandare al modulo di accesso.
+  const isAutista = pathname.startsWith('/autista')
 
-  if (!isDashboard && !isCliente && !isPaginaAccesso) {
+  if (!isDashboard && !isCliente && !isAutista && !isPaginaAccesso) {
     return NextResponse.next()
   }
 
@@ -155,6 +158,11 @@ export async function middleware(req: NextRequest) {
     return vaiA('/autista')
   }
 
+  // ...e chi autista non e' non ha niente da fare nella sua schermata.
+  if (isAutista && ruolo !== 'autista') {
+    return vaiA(ruolo === 'cliente' ? '/cliente/dashboard' : '/dashboard')
+  }
+
   // Staff che tenta di accedere all'area cliente -> rimanda al suo dashboard master.
   // Prima il rimbalzo valeva solo per 'master': admin, operatore e agente entravano in /cliente/*,
   // dove il layout non trova cliente_id e serve pagine nude, senza sidebar e senza via d'uscita.
@@ -169,5 +177,5 @@ export const config = {
   // '/' incluso per mandare alla propria dashboard chi e' gia' dentro e riapre il modulo di accesso.
   // '/api/:path*' serve al blocco delle scritture dell'agente qui sopra: la funzione esce subito
   // (senza toccare il database) su tutto cio' che non e' una scrittura con sessione.
-  matcher: ['/', '/dashboard/:path*', '/cliente/:path*', '/api/:path*'],
+  matcher: ['/', '/dashboard/:path*', '/cliente/:path*', '/autista/:path*', '/autista', '/api/:path*'],
 }
