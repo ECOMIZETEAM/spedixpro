@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { usePathname } from 'next/navigation'
 
 const ACCENT = '#f97316'
 
@@ -13,13 +14,14 @@ const ACCENT = '#f97316'
 // e' un avviso — e' il blocco.
 export default function CongelatoGate() {
   const [s, setS] = useState<any>(null)
+  const percorso = usePathname()
   const [attesa, setAttesa] = useState(false)
   const [msg, setMsg] = useState('')
 
   async function carica() {
     try {
       const d = await (await fetch('/api/piano/stato')).json()
-      setS(d?.congelato ? d : null)
+      setS(d?.congelato || d?.oltreLimite ? d : null)
     } catch { }
   }
   useEffect(() => {
@@ -29,7 +31,9 @@ export default function CongelatoGate() {
     return () => clearInterval(t)
   }, [])
 
-  if (!s) return null
+  // La pagina Abbonamento resta raggiungibile: e' l'unico posto dove si risolve. Coprirla
+  // significherebbe chiudere qualcuno fuori senza dargli la chiave.
+  if (!s || (percorso || '').startsWith('/dashboard/abbonamento')) return null
 
   async function paga() {
     setAttesa(true); setMsg('')
@@ -48,23 +52,36 @@ export default function CongelatoGate() {
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,15,15,.82)', zIndex: 10001, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
       <div style={{ background: '#fff', borderRadius: '14px', maxWidth: '560px', width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,.45)', overflow: 'hidden' }}>
         <div style={{ background: '#b91c1c', padding: '18px 28px' }}>
-          <div style={{ fontSize: '18px', fontWeight: 800, color: '#fff' }}>Account sospeso</div>
+          <div style={{ fontSize: '18px', fontWeight: 800, color: '#fff' }}>{s.congelato ? 'Account sospeso' : 'Pacchetto esaurito'}</div>
         </div>
         <div style={{ padding: '26px 28px' }}>
           <p style={{ fontSize: '14px', color: '#333', lineHeight: 1.65, margin: '0 0 14px' }}>
-            Il canone dell'abbonamento non risulta pagato, quindi il tuo accesso al portale è sospeso.
+            {s.congelato
+              ? <>Il canone dell'abbonamento non risulta pagato, quindi il tuo accesso al portale è sospeso.</>
+              : <>Hai esaurito le <strong>{Number(s.limite || 0).toLocaleString('it-IT')}</strong> spedizioni del tuo piano
+                 ({Number(s.usato || 0).toLocaleString('it-IT')} questo mese, contando anche quelle della tua rete):
+                 il tuo accesso al portale resta sospeso finché non passi a un piano più capiente.</>}
             {s.piano ? <> Il tuo piano è <strong>{String(s.piano).replace('enterprise_', 'Enterprise ').toUpperCase()}</strong>{s.prezzo ? <> — € {s.prezzo} al mese</> : null}.</> : null}
           </p>
           <p style={{ fontSize: '14px', color: '#333', lineHeight: 1.65, margin: '0 0 18px' }}>
-            <strong>I tuoi clienti e i tuoi sotto-master continuano a spedire normalmente</strong>: il
-            blocco riguarda solo il tuo accesso. Appena il pagamento va a buon fine si riattiva tutto,
-            senza dover chiedere niente a nessuno.
+            <strong>I tuoi clienti e i tuoi sotto-master continuano a spedire normalmente</strong>, e le loro
+            spedizioni continuano a entrare nei tuoi conti: il blocco riguarda solo il tuo accesso. Appena
+            {s.congelato ? ' il pagamento va a buon fine' : ' fai l\'upgrade'} si riattiva tutto, senza aver perso nulla.
           </p>
           {msg && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '10px', marginBottom: '14px', fontSize: '13px', color: '#b91c1c' }}>{msg}</div>}
-          <button onClick={paga} disabled={attesa || !s.piano}
-            style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '8px', padding: '12px 22px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', opacity: attesa ? .6 : 1 }}>
-            {attesa ? 'Attendere…' : 'Paga e riattiva subito'}
-          </button>
+          {s.congelato ? (
+            <button onClick={paga} disabled={attesa || !s.piano}
+              style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '8px', padding: '12px 22px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', opacity: attesa ? .6 : 1 }}>
+              {attesa ? 'Attendere…' : 'Paga e riattiva subito'}
+            </button>
+          ) : (
+            // Pacchetto finito: il rimedio non e' pagare di nuovo, e' salire di piano. Il portale
+            // e' chiuso, quindi il tasto deve portarlo dove puo' farlo davvero.
+            <a href="/dashboard/abbonamento"
+              style={{ background: ACCENT, color: '#fff', textDecoration: 'none', borderRadius: '8px', padding: '12px 22px', fontSize: '14px', fontWeight: 700 }}>
+              Passa a un piano superiore
+            </a>
+          )}
           <p style={{ fontSize: '12.5px', color: '#777', margin: '16px 0 0' }}>
             Per assistenza scrivi a <a href="mailto:info@moovexpress.com" style={{ color: ACCENT }}>info@moovexpress.com</a>.
           </p>

@@ -57,12 +57,8 @@ export async function POST(req: NextRequest) {
   if (!cliente?.listino_cliente_id) return NextResponse.json({ error: 'Cliente senza listino' }, { status: 400 })
   const masterId = cliente.master_id
 
-  // LIMITE DEL PIANO: vale anche per chi spedisce dalla propria integrazione, altrimenti basterebbe
-  // usare l'API per aggirarlo. Chi si integra e' un cliente: non puo' fare l'upgrade da se'.
-  {
-    const stato = await statoPiano(admin, masterId)
-    if (stato.bloccato) return NextResponse.json({ error: messaggioBlocco(stato, false), limitePiano: true }, { status: 402 })
-  }
+  // Nessun blocco per limite o canone: chi si integra e' un CLIENTE, e non deve subire i conti
+  // fra noi e il suo master. Il blocco vive nel portale di chi non e' in regola.
 
   const { data: corriere } = await admin.from('corrieri')
     .select('id,tipo,credenziali,nome_contratto,attivo,master_id,settings,multicollo').eq('id', ctx.corriereId).single()

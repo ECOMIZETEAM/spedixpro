@@ -89,16 +89,11 @@ export async function POST(req: NextRequest) {
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const adminCrea = createAdminSupabase()
 
-  // LIMITE DEL PIANO. Va controllato QUI, prima di qualunque chiamata al corriere: piu' avanti la
-  // spedizione e' gia' comprata e fermarla costerebbe un annullo. Si guarda la catena dal master
-  // della spedizione in su — chi sfonda ferma se stesso e tutta la rete sotto di lui.
-  {
-    const stato = await statoPiano(adminCrea, masterId)
-    if (stato.bloccato) {
-      const puoUpgrade = utente?.ruolo !== 'cliente' && !isAgente(utente)
-      return NextResponse.json({ error: messaggioBlocco(stato, puoUpgrade), limitePiano: true }, { status: 402 })
-    }
-  }
+  // NIENTE BLOCCO DELLE SPEDIZIONI. Qui c'era il controllo del piano, che fermava la spedizione
+  // quando il master della catena era oltre il limite o non in regola col canone. Ma fermare una
+  // spedizione significa fermare il CLIENTE, che non c'entra: ha pagato il suo master e il suo
+  // pacco deve partire. Chi non e' in regola viene chiuso fuori dal PROPRIO portale (CongelatoGate
+  // e middleware) — non gli si spegne la rete, e i movimenti continuano a girare nella sua lista.
 
   if (body._corriere_id) {
     const { data: c } = await adminCrea
