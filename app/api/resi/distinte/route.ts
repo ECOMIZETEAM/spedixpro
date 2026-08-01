@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
-import { calcolaPrezzoListino } from '@/lib/pricing'
 import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
+import { noloCliente, applicaServizio, prezzoResoMaster } from '@/lib/reso-prezzi'
+import { leggiPrezziDaListino } from '@/lib/giacenza-prezzi'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -103,7 +104,16 @@ export async function POST(req: NextRequest) {
       const { data: movR } = await adminDb.from('movimenti')
         .select('importo').eq('spedizione_id', v.id).eq('master_target_id', targetMasterId)
         .in('tipo', ['spedizione', 'rettifica'])
-      const costoReso = Math.abs((movR || []).reduce((a: number, m: any) => a + Number(m.importo || 0), 0))
+      const pagato = Math.abs((movR || []).reduce((a: number, m: any) => a + Number(m.importo || 0), 0))
+      // Comanda il SUO listino corrieri (fisso + percentuale sul suo nolo); quanto ha pagato
+      // l'andata resta il ripiego per chi il reso non ce l'ha configurato.
+      const { data: spD } = await adminDb.from('spedizioni')
+        .select('colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta,corrieri(nome_contratto)')
+        .eq('id', v.id).maybeSingle()
+      const costoReso = await prezzoResoMaster(adminDb, {
+        masterId: targetMasterId, sped: spD, pagato,
+        corriereNome: (spD as any)?.corrieri?.nome_contratto || null,
+      })
       if (costoReso <= 0) continue
       totaleCatena += costoReso
       try {
@@ -132,22 +142,16 @@ export async function POST(req: NextRequest) {
     // distinta per la logistica, ma costo 0). Evita il doppio addebito.
     if ((sp as any)?.giacenza_reso_addebitato === true) { resoRows.push({ v, costoReso: 0 }); continue }
 
-    // ── Reso = solo NOLO: prezzo fascia del listino cliente (senza contrassegno/assicurazione) ──
-    let costoReso = 0
-    if (cliRec?.listino_cliente_id) {
-      const packages = (Array.isArray(sp?.colli_dettaglio) && sp!.colli_dettaglio.length)
-        ? sp!.colli_dettaglio.map((c: any) => ({ weight: sp!.peso_reale || 1, length: c.lunghezza, width: c.larghezza, height: c.altezza }))
-        : [{ weight: sp?.peso_reale || 1, length: sp?.lunghezza, width: sp?.larghezza, height: sp?.altezza }]
-      const ris = await calcolaPrezzoListino(adminDb, {
-        listinoId: cliRec.listino_cliente_id,
-        provincia: sp?.dest_provincia || '', cap: sp?.dest_cap || '', paese: sp?.dest_paese || 'IT',
-        citta: sp?.dest_citta || '',   // CAP condivisi tra più comuni
-        packages, corriereId: sp?.corriere_id,
-      })
-      costoReso = ris?.prezzo || 0
-    }
-    // fallback (cliente senza listino / non calcolabile): usa il costo totale, mai negativo
-    if (!(costoReso > 0)) costoReso = Math.max(0, Number(sp?.costo_totale || 0))
+    // ── Reso = NOLO del listino cliente per la PERCENTUALE del suo listino ──
+    // Prima era sempre il 100% del nolo: chi ha il reso al 120% o al 150% lo pagava come al 100%
+    // se il reso arrivava da qui invece che dalla giacenza. Stesso evento, stesso prezzo.
+    const nolo = await noloCliente(adminDb, sp, cliRec?.listino_cliente_id)
+    const prezziGiac = await leggiPrezziDaListino(adminDb, cliRec?.listino_cliente_id, sp?.corriere_id || null)
+    const servReso = prezziGiac.servizi?.reso || { valore: 0, perc: 100 }
+    // fallback (cliente senza listino / non calcolabile): il costo totale, mai negativo
+    const base = nolo != null ? nolo : Math.max(0, Number(sp?.costo_totale || 0))
+    let costoReso = applicaServizio(servReso, base)
+    if (!(costoReso > 0)) costoReso = 0
 
     totaleReso += costoReso
     resoRows.push({ v, costoReso })

@@ -1,6 +1,7 @@
 import { registraMovimentoMaster, registraMovimento } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
+import { noloMaster, applicaServizio } from '@/lib/reso-prezzi'
 
 // Mappa il "nome" di un supplemento giacenza (sia lato cliente sia lato master) sull'operazione.
 // Es. "Riconsegna al nuovo destinatario" -> riconsegna_nuovo, "Reso al mittente" -> reso.
@@ -14,7 +15,12 @@ function chiaveServizio(nome: string): string | null {
 
 // Prezzo giacenza (apertura + servizio dell'operazione) di UN master per un suo corriere,
 // letto dal SUO Listino Corrieri (listini_corrieri_supplementi). Se non configurato -> 0.
-async function prezzoGiacenzaMaster(admin: any, corriereId: string, operazione: string): Promise<{ apertura: number; servizio: number }> {
+//
+// `perc` e' la percentuale sul nolo: quasi tutti i listini hanno il reso a percentuale col valore
+// fisso a zero, e finche' qui si leggeva il solo valore fisso l'intera rete pagava zero mentre il
+// cliente pagava il reso per intero. Chi chiama la applica al nolo di QUEL master (vedi
+// lib/reso-prezzi.ts): la percentuale senza base non vuol dire niente.
+async function prezzoGiacenzaMaster(admin: any, corriereId: string, operazione: string): Promise<{ apertura: number; servizio: number; perc: number }> {
   // SOLO i listini DEL MASTER PROPRIETARIO del contratto: esistono righe "fantasma" che stanno nel
   // listino di un ALTRO master ma puntano a questo corriere (39 in archivio). Leggendo per solo
   // corriere_id quelle righe SCAVALCAVANO il listino configurato: nell'editor "Riconsegna 0" ma
@@ -22,17 +28,21 @@ async function prezzoGiacenzaMaster(admin: any, corriereId: string, operazione: 
   const { data: corr } = await admin.from('corrieri').select('master_id').eq('id', corriereId).maybeSingle()
   const { data: listini } = await admin.from('listini_corrieri').select('id').eq('master_id', (corr as any)?.master_id || '')
   const listinoIds = (listini || []).map((l: any) => l.id)
-  if (!listinoIds.length) return { apertura: 0, servizio: 0 }
+  if (!listinoIds.length) return { apertura: 0, servizio: 0, perc: 0 }
   const { data: suppl } = await admin.from('listini_corrieri_supplementi')
-    .select('id,tipo,nome,valore').eq('corriere_id', corriereId).in('listino_id', listinoIds).in('tipo', ['giacenza', 'giacenza_apertura'])
+    .select('id,tipo,nome,valore,descrizione').eq('corriere_id', corriereId).in('listino_id', listinoIds).in('tipo', ['giacenza', 'giacenza_apertura'])
     .order('id', { ascending: true })   // DETERMINISTICO: con supplementi duplicati prende sempre il primo (id più basso)
-  let apertura = 0, servizio = 0
+  let apertura = 0, servizio = 0, perc = 0
   let aperturaSet = false, servizioSet = false
   for (const s of (suppl || [])) {
     if (s.tipo === 'giacenza_apertura') { if (!aperturaSet) { apertura = Number(s.valore) || 0; aperturaSet = true } continue }
-    if (chiaveServizio(s.nome) === operazione && !servizioSet) { servizio = Number(s.valore) || 0; servizioSet = true }
+    if (chiaveServizio(s.nome) === operazione && !servizioSet) {
+      servizio = Number(s.valore) || 0
+      try { perc = Number(JSON.parse(s.descrizione || '{}')?.perc) || 0 } catch { /* descrizione non JSON */ }
+      servizioSet = true
+    }
   }
-  return { apertura, servizio }
+  return { apertura, servizio, perc }
 }
 
 /**
@@ -73,6 +83,17 @@ export async function addebitaGiacenzaCatena(
   }
 
   const opLabel: Record<string, string> = { riconsegna: 'Riconsegna', riconsegna_nuovo: 'Riconsegna a nuovo destinatario', reso: 'Reso al mittente' }
+
+  // La spedizione serve solo se un livello ha il servizio a PERCENTUALE: la percentuale si applica
+  // al nolo di quel master, e il nolo si ricalcola dal suo listino. Si legge una volta sola.
+  let sped: any = null
+  if (params.spedizioneId) {
+    const { data } = await admin.from('spedizioni')
+      .select('id,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta')
+      .eq('id', params.spedizioneId).maybeSingle()
+    sped = data || null
+  }
+
   let currentId: string | null = params.masterDirettoId
   for (let i = 0; i < 20 && currentId; i++) {
     const { data: m }: any = await admin.from('masters').select('id,parent_master_id').eq('id', currentId).maybeSingle()
@@ -98,11 +119,18 @@ export async function addebitaGiacenzaCatena(
       // quell'operazione non paga nulla, ma l'operazione DEVE restare visibile nei suoi movimenti:
       // prima spariva del tutto e sembrava che la riconsegna non fosse mai passata da lui.
       if (conServizio) {
+        // Fisso + percentuale sul NOLO di questo master. Senza la percentuale il servizio valeva
+        // zero praticamente per tutti, e la rete si prendeva resi e riconsegne gratis.
+        let servizio = pr.servizio
+        if (pr.perc > 0) {
+          const nolo = sped ? await noloMaster(admin, m.id, mCorr.id, sped) : null
+          if (nolo != null) servizio = applicaServizio({ valore: pr.servizio, perc: pr.perc }, nolo)
+        }
         try {
           await registraMovimentoMaster(admin, {
             masterOwnerId: m.id, masterTargetId: m.id, tipo: 'giacenza',
             descrizione: `${opLabel[params.operazione] || params.operazione} ${params.numero}`, riferimento: params.numero,
-            importo: -Math.abs(pr.servizio), spedizioneId: params.spedizioneId, createdBy: params.createdBy,
+            importo: -Math.abs(servizio), spedizioneId: params.spedizioneId, createdBy: params.createdBy,
           })
         } catch (e) { console.error(`Errore servizio giacenza cascata master ${m.id}:`, e) }
       }

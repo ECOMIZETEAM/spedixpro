@@ -7,6 +7,8 @@
 // e tutta la catena sopra pagavano lo stesso: riconsegne e resi gratis, a spese del master.
 // Il calcolo deve essere UNO solo, per il portale e per l'API.
 
+import { noloCliente } from '@/lib/reso-prezzi'
+
 // Mappa i nomi dei servizi giacenza del listino sulle 3 operazioni
 export function chiaveServizio(nome: string): string | null {
   const n = (nome || '').toLowerCase()
@@ -46,16 +48,28 @@ export async function leggiPrezzi(admin: any, sped: any) {
 }
 
 // Nolo base del cliente senza assicurazione (le commissioni assicurazione/contrassegno
-// NON entrano nel calcolo del reso)
+// NON entrano nel calcolo del reso).
+// RIPIEGO: il costo totale porta dentro anche la commissione contrassegno, che qui non ci va. Si
+// usa solo se il nolo non e' ricalcolabile dal listino (vedi noloClienteSpedizione).
 export function noloBase(sped: any) {
   return Math.max(0, (Number(sped.costo_totale) || 0) - (Number(sped.assicurazione) || 0))
+}
+
+// Nolo VERO del cliente per quella spedizione: ricalcolato dal suo listino, quindi senza
+// commissione contrassegno ne' assicurazione. E' la stessa base che usa la scansione resi, cosi'
+// lo stesso reso costa uguale da qualsiasi parte arrivi.
+export async function noloClienteSpedizione(admin: any, sped: any): Promise<number> {
+  if (!sped?.cliente_id) return noloBase(sped)
+  const { data: cliente } = await admin.from('clienti').select('listino_cliente_id').eq('id', sped.cliente_id).maybeSingle()
+  const n = await noloCliente(admin, sped, cliente?.listino_cliente_id)
+  return n != null ? n : noloBase(sped)
 }
 
 // Costi dell'operazione di SVINCOLO = SOLO il servizio scelto (riconsegna/reso/…).
 // L'apertura giacenza è addebitata a parte all'ENTRATA in giacenza (dal cron), quindi NON entra
 // nel totale dell'operazione di svincolo. costo_apertura resta come info (già addebitata).
-export function calcolaCosti(operazione: string, prezzi: any, sped: any) {
-  const base = noloBase(sped)
+export function calcolaCosti(operazione: string, prezzi: any, sped: any, baseNolo?: number | null) {
+  const base = baseNolo != null && baseNolo >= 0 ? baseNolo : noloBase(sped)
   const serv = prezzi.servizi[operazione] || { valore: 0, perc: 0 }
   const costoServizio = (Number(serv.valore) || 0) + ((Number(serv.perc) || 0) / 100) * base
   const costoApertura = operazione === 'reso' ? 0 : (Number(prezzi.apertura) || 0)

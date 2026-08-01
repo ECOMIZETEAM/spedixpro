@@ -3,7 +3,8 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
-import { calcolaPrezzoListino } from '@/lib/pricing'
+import { noloCliente, applicaServizio, prezzoResoMaster } from '@/lib/reso-prezzi'
+import { leggiPrezziDaListino } from '@/lib/giacenza-prezzi'
 
 // Il master accetta un RESO ricevuto dalla rete e lo PROPAGA:
 // - spedizioni dei propri clienti -> distinta reso verso il cliente (addebito nolo)
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
   if (!ids.length) return NextResponse.json({ error: 'Nessuna LDV nel reso' }, { status: 400 })
 
   const { data: speds } = await admin.from('spedizioni')
-    .select('id,numero,master_id,cliente_id,dest_provincia,dest_cap,dest_paese,dest_citta,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id,costo_totale')
+    .select('id,numero,master_id,cliente_id,dest_provincia,dest_cap,dest_paese,dest_citta,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id,costo_totale,giacenza_reso_addebitato,corrieri(nome_contratto)')
     .in('id', ids)
 
   // prima linea per ogni discendente
@@ -89,19 +90,14 @@ export async function POST(req: NextRequest) {
     if (!dist) continue
     for (const s of arr) {
       await admin.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', s.id)
-      let costoReso = 0
-      if (cli?.listino_cliente_id) {
-        const packages = (Array.isArray(s.colli_dettaglio) && s.colli_dettaglio.length)
-          ? s.colli_dettaglio.map((c: any) => ({ weight: s.peso_reale || 1, length: c.lunghezza, width: c.larghezza, height: c.altezza }))
-          : [{ weight: s.peso_reale || 1, length: s.lunghezza, width: s.larghezza, height: s.altezza }]
-        const ris = await calcolaPrezzoListino(admin, {
-          listinoId: cli.listino_cliente_id, provincia: s.dest_provincia || '', cap: s.dest_cap || '', paese: s.dest_paese || 'IT',
-          citta: s.dest_citta || '',   // CAP condivisi tra più comuni
-          packages, corriereId: s.corriere_id,
-        })
-        costoReso = ris?.prezzo || 0
-      }
-      if (!(costoReso > 0)) costoReso = Math.max(0, Number(s.costo_totale || 0))
+      // Reso già addebitato allo svincolo giacenza: resta in distinta per la logistica, ma non si
+      // riaddebita. Il controllo c'era nella scansione e non qui: chi riceveva il reso dalla rete
+      // pagava due volte lo stesso pacco.
+      if (s.giacenza_reso_addebitato === true) continue
+      const nolo = await noloCliente(admin, s, cli?.listino_cliente_id)
+      const prezziGiac = await leggiPrezziDaListino(admin, cli?.listino_cliente_id, s.corriere_id || null)
+      const base = nolo != null ? nolo : Math.max(0, Number(s.costo_totale || 0))
+      const costoReso = applicaServizio(prezziGiac.servizi?.reso || { valore: 0, perc: 100 }, base)
       totale += costoReso
       // Addebito atomico al credito del cliente (RPC transazionale)
       if (costoReso > 0) {
@@ -127,9 +123,14 @@ export async function POST(req: NextRequest) {
     if (!dist) continue
     for (const s of arr) {
       await admin.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', s.id)
+      if (s.giacenza_reso_addebitato === true) continue   // già pagato allo svincolo: niente bis
       const { data: movR } = await admin.from('movimenti')
         .select('importo').eq('spedizione_id', s.id).eq('master_target_id', flId).in('tipo', ['spedizione', 'rettifica'])
-      const costoReso = Math.abs((movR || []).reduce((a: number, m: any) => a + Number(m.importo || 0), 0))
+      const pagato = Math.abs((movR || []).reduce((a: number, m: any) => a + Number(m.importo || 0), 0))
+      // Il suo listino corrieri comanda; quanto ha pagato l'andata è il ripiego.
+      const costoReso = await prezzoResoMaster(admin, {
+        masterId: flId, sped: s, pagato, corriereNome: (s as any).corrieri?.nome_contratto || null,
+      })
       if (costoReso <= 0) continue
       totale += costoReso
       try {

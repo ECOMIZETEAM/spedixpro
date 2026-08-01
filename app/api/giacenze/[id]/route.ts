@@ -9,7 +9,7 @@ import { registraMovimento } from '@/lib/movimenti'
 import { addebitaServizioGiacenza } from '@/lib/giacenza-cascata'
 // Il calcolo dei prezzi giacenza vive in lib/giacenza-prezzi.ts: lo usa anche l'API pubblica,
 // che prima registrava le richieste con costo zero.
-import { chiaveServizio, prezziVuoti, leggiPrezzi, leggiPrezziDaListino, calcolaCosti, noloBase } from '@/lib/giacenza-prezzi'
+import { chiaveServizio, prezziVuoti, leggiPrezzi, leggiPrezziDaListino, calcolaCosti, noloClienteSpedizione } from '@/lib/giacenza-prezzi'
 
 // Gestione di una singola giacenza (dettaglio "Gestisci").
 // Flusso a due attori: il cliente sceglie l'operazione (riconsegna / riconsegna a
@@ -119,7 +119,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     admin.from('giacenza_richieste').select('*').eq('spedizione_id', id).order('created_at', { ascending: false }),
     admin.from('giacenza_costi').select('*').eq('spedizione_id', id).order('created_at', { ascending: true }),
   ])
-  return NextResponse.json({ sped, prezzi, prezziControparte, etichettaControparte, noloBase: noloBase(sped), storico: storico || [], costi: costi || [], ruolo })
+  // La base mostrata a video dev'essere la STESSA su cui si addebita: il nolo ricalcolato dal
+  // listino, non il costo totale (che porta dentro anche la commissione contrassegno).
+  const base = await noloClienteSpedizione(admin, sped)
+  return NextResponse.json({ sped, prezzi, prezziControparte, etichettaControparte, noloBase: base, storico: storico || [], costi: costi || [], ruolo })
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -136,7 +139,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const operazione = String(body?.operazione || '')
     if (!['riconsegna', 'riconsegna_nuovo', 'reso'].includes(operazione)) return NextResponse.json({ error: 'Operazione non valida' }, { status: 400 })
     const prezzi = await leggiPrezzi(admin, sped)
-    const costi = calcolaCosti(operazione, prezzi, sped)
+    const costi = calcolaCosti(operazione, prezzi, sped, await noloClienteSpedizione(admin, sped))
     const { data, error } = await admin.from('giacenza_richieste').insert({
       spedizione_id: id, master_id: sped.master_id, cliente_id: sped.cliente_id,
       operazione, data_operazione: body?.data || null, note: body?.note || null,
