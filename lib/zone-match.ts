@@ -93,21 +93,52 @@ export async function trovaZoneMatchDett(
   // Esclusione PER-CORRIERE: la destinazione è "esclusiva" per un corriere SOLO se appartiene a
   // una zona esclusiva DI QUEL corriere (Isole/Disagiate/Livigno per CAP-ESATTO; Sardegna/Sicilia/
   // Calabria per PROVINCIA). Così un CAP disagiato per BRT non toglie il jolly "Italia" a Poste.
+  // A PARITA' DI CAP, VINCE LA RIGA CHE NOMINA IL COMUNE.
+  //
+  // Lo stesso CAP puo' stare in DUE zone dello stesso contratto: 98055 Lipari e' sia in "SCS" (con
+  // il comune a jolly, perche' Lipari e' in Sicilia) sia in "Isole Minori" (col comune scritto).
+  // Vincevano entrambe, e siccome il listino prezzava SCS ma non Isole Minori, Lipari veniva
+  // venduta al prezzo della Sicilia — molto meno di quanto costa spedire su un'isola minore.
+  //
+  // Chi scrive il comune in una riga sta dicendo qualcosa di piu' preciso di chi lascia il jolly:
+  // quella riga vale di piu'. Se la zona piu' precisa non e' prezzata, la destinazione resta
+  // scoperta — che e' esattamente il comportamento voluto, non un effetto collaterale.
+  const piuSpecifica = (rows: any[]): any[] => {
+    const citta = String((dest as any).citta || '').trim().toUpperCase()
+    if (!citta) return rows
+    const conComune = rows.filter((r: any) => {
+      const c = String(r.citta || '').trim().toUpperCase()
+      return c && c !== '*' && c === citta
+    })
+    return conComune.length ? conComune : rows
+  }
+
   const corrieriEsclusi = new Set<string>()
   // Esclusi per CAP-ESATTO (destinazione in una zona speciale a match cap-esatto: Zone Disagiate,
   // Isole Minori, Livigno). Per questi il ripiego su provincia/Italia NON è ammesso: se il corriere
   // non prezza proprio quella zona speciale, la destinazione è scoperta → corriere ESCLUSO del tutto.
   // (Diverso dalle zone a PROVINCIA come Sardegna/Sicilia/Calabria, che il cliente prezza e usa.)
   const corrieriCapEsclusi = new Set<string>()
+  // corriere -> zone che rivendicano QUESTO cap (per non farlo passare via il jolly di un'altra)
+  const capEsclusiviZone = new Map<string, Set<string>>()
   if (esclCorr && esclCorr.size) {
+    // Fra le righe a CAP esatto tengo solo le piu' specifiche: e' quella la zona che rivendica
+    // davvero la destinazione. Senza questo, la riga jolly di un'altra zona (SCS: 98055/*) contava
+    // quanto quella che scrive "Lipari", e vinceva la piu' economica.
+    const capEsatte = new Set(piuSpecifica(righe.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap)))
     for (const r of righe) {
+      if (r.cap && r.cap !== '*' && r.cap === cap && !capEsatte.has(r)) continue
       const cc = esclCorr.get(r.zona_id)
       if (!cc) continue
       const capMatch = !!r.cap && r.cap !== '*' && r.cap === cap
       const provMatch = !!r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*')
         && rigaValePerCitta(r, (dest as any).citta)   // "VE/*/BURANO" non vale per tutta Venezia
       if (capMatch || provMatch) corrieriEsclusi.add(cc)
-      if (capMatch) corrieriCapEsclusi.add(cc)
+      if (capMatch) {
+        corrieriCapEsclusi.add(cc)
+        if (!capEsclusiviZone.has(cc)) capEsclusiviZone.set(cc, new Set())
+        capEsclusiviZone.get(cc)!.add(r.zona_id)
+      }
     }
   }
   const capEsclusivo = corrieriEsclusi.size > 0   // flag globale (compat)
@@ -115,12 +146,19 @@ export async function trovaZoneMatchDett(
   // Per un corriere escluso per CAP-ESATTO: il match è valido SOLO se è a sua volta cap-esatto (cioè
   // il corriere prezza davvero quella zona speciale). Altrimenti il ripiego su provincia/jolly va
   // scartato → il corriere non copre la destinazione (niente vendita sotto costo su Sardegna/Italia).
-  const filtraCapEscluso = (c: string, picked: any[]): any[] =>
-    corrieriCapEsclusi.has(c) && !picked.some((r: any) => r.cap && r.cap !== '*' && r.cap === cap) ? [] : picked
+  const filtraCapEscluso = (c: string, picked: any[]): any[] => {
+    if (!corrieriCapEsclusi.has(c)) return picked
+    // Il match cap-esatto vale solo se viene da una zona che quel CAP lo rivendica DAVVERO, cioe'
+    // una di quelle che hanno fatto scattare l'esclusione. Bastava una riga jolly di un'altra zona
+    // (es. "SCS: 98055 / *") per far passare il corriere sul prezzo sbagliato.
+    const buone = capEsclusiviZone.get(c)
+    return picked.some((r: any) => r.cap && r.cap !== '*' && r.cap === cap && (!buone || buone.has(r.zona_id)))
+      ? picked : []
+  }
 
   // Applica i 3 tier (CAP esatto > provincia+cap* > jolly totale) su un insieme di righe.
   const pickTier = (rows: any[]): any[] => {
-    let m = rows.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap)                                   // 1) CAP esatto
+    let m = piuSpecifica(rows.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap))                    // 1) CAP esatto
     // 2) provincia — ma una riga che nomina un comune vale solo per quel comune (vedi rigaValePerCitta)
     if (!m.length) m = rows.filter((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*') && rigaValePerCitta(r, (dest as any).citta))
     if (!m.length) m = rows.filter((r: any) => (!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*'))  // 3) jolly
