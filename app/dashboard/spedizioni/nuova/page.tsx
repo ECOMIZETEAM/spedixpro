@@ -65,6 +65,9 @@ export default function NuovaSpedizionePage() {
   const [numColli, setNumColli] = useState(1)
   const [colli, setColli] = useState<Collo[]>([{lunghezza:'',larghezza:'',altezza:''}])
   const [peso, setPeso] = useState('1')
+  const [sku, setSku] = useState('')
+  const [skuQta, setSkuQta] = useState('1')
+  const [skuMsg, setSkuMsg] = useState('')
   const [pacchiSalvati, setPacchiSalvati] = useState<any[]>([])   // pacchi predefiniti del cliente selezionato
   const [contenuto, setContenuto] = useState('')
   const [tipoContenuto, setTipoContenuto] = useState('Merce destinata alla vendita')
@@ -155,6 +158,34 @@ export default function NuovaSpedizionePage() {
     setNumColli(1)
     setColli([{ lunghezza:String(p.lunghezza||''), larghezza:String(p.larghezza||''), altezza:String(p.altezza||'') }])
     setTariffe([]); setSelected(null)
+  }
+
+  // ── SKU DAL CATALOGO ──
+  // Chi spedisce sempre la stessa merce ridigita peso e misure a ogni spedizione, e prima o poi
+  // sbaglia: il peso volumetrico dipende da quelle misure, e un numero tirato a caso li' si paga
+  // in fattura. Con lo SKU in catalogo li mette il sistema.
+  // Il peso e' quello del pezzo per la quantita' (due pezzi pesano il doppio); le misure restano
+  // quelle dell'articolo, che chi imballa puo' sempre correggere.
+  async function cercaSku() {
+    const codice = sku.trim()
+    if (!codice || !clienteId || clienteId === '__proprio__' || clienteId.startsWith('m:')) return
+    setSkuMsg('cerco…')
+    try {
+      const d = await fetch(`/api/catalogo?cliente_id=${clienteId}&cerca=${encodeURIComponent(codice)}`).then(r=>r.json())
+      const eq = (a:any,b:string) => String(a||'').trim().toUpperCase() === b.toUpperCase()
+      const a = (d?.articoli||[]).find((x:any)=> eq(x.sku,codice) || eq(x.ean13,codice))
+      if (!a) { setSkuMsg('non è in catalogo'); return }
+      const q = Math.max(1, parseInt(String(skuQta))||1)
+      if (a.peso) setPeso(String(+(Number(a.peso)*q).toFixed(3)))
+      if (a.lunghezza && a.larghezza && a.altezza) {
+        setNumColli(1)
+        setColli([{ lunghezza:String(a.lunghezza), larghezza:String(a.larghezza), altezza:String(a.altezza) }])
+      }
+      if (!contenuto && a.nome) setContenuto(String(a.nome).slice(0,60))
+      setTariffe([]); setSelected(null)
+      const mancante = !a.peso ? ' (peso non in catalogo)' : (!a.lunghezza ? ' (misure non in catalogo)' : '')
+      setSkuMsg(`${a.nome || a.sku}${mancante}`)
+    } catch { setSkuMsg('non riesco a leggere il catalogo') }
   }
 
   function buildPackages() {
@@ -495,6 +526,25 @@ export default function NuovaSpedizionePage() {
           {vista==='dati' && (<div style={card}>
             <div style={cardH}>Dati Spedizione</div>
             <div style={cardB}>
+              {clienteId && clienteId !== '__proprio__' && !clienteId.startsWith('m:') && (
+                <div style={{marginBottom:'14px'}}>
+                  <label style={{...lbl,marginBottom:'6px'}}>
+                    Articolo dal catalogo <span style={{fontWeight:400,color:'#999'}}>— SKU o codice a barre: riempie peso e misure</span>
+                  </label>
+                  <div style={{display:'flex',gap:'8px',alignItems:'center',flexWrap:'wrap'}}>
+                    <input value={sku} onChange={e=>{setSku(e.target.value);setSkuMsg('')}}
+                      onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); cercaSku() } }}
+                      placeholder="es. TSHIRT-M-BLU" style={{...inp,maxWidth:'220px'}}/>
+                    <input type="number" min="1" value={skuQta} onChange={e=>setSkuQta(e.target.value)}
+                      title="Quantità" style={{...inp,maxWidth:'80px'}}/>
+                    <button type="button" onClick={cercaSku}
+                      style={{background:'#fff',border:'1px solid #d5d5d5',borderRadius:'6px',padding:'9px 14px',fontSize:'12.5px',fontWeight:600,color:'#1a1a1a',cursor:'pointer'}}>
+                      Applica
+                    </button>
+                    {skuMsg && <span style={{fontSize:'12px',color:skuMsg.includes('non ')?'#b45309':'#166534'}}>{skuMsg}</span>}
+                  </div>
+                </div>
+              )}
               {pacchiSalvati.length > 0 && (
                 <div style={{marginBottom:'14px'}}>
                   <label style={{...lbl,marginBottom:'6px'}}>📦 Pacchi salvati <span style={{fontWeight:400,color:'#999'}}>— clicca per riempire peso e misure</span></label>

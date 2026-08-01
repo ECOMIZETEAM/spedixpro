@@ -38,8 +38,17 @@ const STATI: Record<string, { t: string; c: string }> = {
   reso_mittente: { t: 'Reso al mittente', c: '#7c3aed' },
 }
 
+const TAB_VALIDE = ['scansiona', 'partenza', 'arrivo', 'consegne', 'autisti'] as const
+type Tab = typeof TAB_VALIDE[number]
+
 export default function CircuitoInternoPage() {
-  const [tab, setTab] = useState<'scansiona' | 'partenza' | 'arrivo' | 'consegne' | 'autisti'>('scansiona')
+  const [tab, setTab] = useState<Tab>('scansiona')
+  // La scheda si puo' aprire dall'indirizzo (?tab=autisti): serve alla voce di menu "Autisti e
+  // Consegne", che porta qui invece di avere una pagina sua con dentro le stesse cose.
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get('tab') as Tab
+    if (t && (TAB_VALIDE as readonly string[]).includes(t)) setTab(t)
+  }, [])
   return (
     <div>
       <div style={{ marginBottom: '18px' }}>

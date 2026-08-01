@@ -50,6 +50,7 @@ const NAV: NavItem[] = [
   { label: 'Clienti', href: '/dashboard/clienti', icon: '⊙', sub: [
     { label: 'Nuovo Cliente', href: '/dashboard/clienti/nuovo', perm: 'admin.clients.create' },
     { label: 'Elenco Clienti', href: '/dashboard/clienti', perm: 'admin.clients.index' },
+    { label: 'Catalogo prodotti', href: '/dashboard/catalogo', perm: 'admin.clients.index' },
     { label: 'Nuovo Master', href: '/dashboard/clienti/master/nuovo', rete: true },
     { label: 'Elenco Master', href: '/dashboard/clienti/master', rete: true },
     { label: 'Gerarchia', href: '/dashboard/clienti/gerarchia', rete: true },
