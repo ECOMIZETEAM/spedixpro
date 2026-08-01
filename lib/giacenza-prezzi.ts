@@ -47,12 +47,18 @@ export async function leggiPrezzi(admin: any, sped: any) {
   return leggiPrezziDaListino(admin, cliente?.listino_cliente_id, sped.corriere_id)
 }
 
-// Nolo base del cliente senza assicurazione (le commissioni assicurazione/contrassegno
-// NON entrano nel calcolo del reso).
-// RIPIEGO: il costo totale porta dentro anche la commissione contrassegno, che qui non ci va. Si
-// usa solo se il nolo non e' ricalcolabile dal listino (vedi noloClienteSpedizione).
+// RIPIEGO, quando il nolo non e' ricalcolabile dal listino: quanto il cliente aveva pagato.
+//
+// ATTENZIONE — qui c'era una trappola di unita' di misura. `spedizioni.assicurazione` NON e' la
+// commissione dell'assicurazione: e' il VALORE dichiarato della merce (lo stesso numero che parte
+// verso il corriere come importo assicurato). Sottrarlo dal costo faceva crollare la base a zero:
+// in archivio, su 22 spedizioni assicurate, TUTTE hanno il valore assicurato piu' alto del costo
+// di trasporto — 500 EUR di merce contro 9,75 di nolo. E uno zero qui non e' innocuo: il cliente
+// non pagava niente e la rete sopra di lui veniva addebitata lo stesso.
+// Il costo totale porta dentro le commissioni, quindi questo ripiego sovrastima di poco: e' il
+// verso giusto in cui sbagliare.
 export function noloBase(sped: any) {
-  return Math.max(0, (Number(sped.costo_totale) || 0) - (Number(sped.assicurazione) || 0))
+  return Math.max(0, Number(sped.costo_totale) || 0)
 }
 
 // Nolo VERO del cliente per quella spedizione: ricalcolato dal suo listino, quindi senza
@@ -68,8 +74,12 @@ export async function noloClienteSpedizione(admin: any, sped: any): Promise<numb
 // Costi dell'operazione di SVINCOLO = SOLO il servizio scelto (riconsegna/reso/…).
 // L'apertura giacenza è addebitata a parte all'ENTRATA in giacenza (dal cron), quindi NON entra
 // nel totale dell'operazione di svincolo. costo_apertura resta come info (già addebitata).
+//
+// La base "solo nolo" vale SOLO PER IL RESO. Su una riconsegna il pacco riparte per essere
+// consegnato: il contrassegno si incassa lo stesso e la sponda serve di nuovo, quindi la base
+// resta il prezzo pieno che il cliente aveva pagato.
 export function calcolaCosti(operazione: string, prezzi: any, sped: any, baseNolo?: number | null) {
-  const base = baseNolo != null && baseNolo >= 0 ? baseNolo : noloBase(sped)
+  const base = operazione === 'reso' && baseNolo != null && baseNolo >= 0 ? baseNolo : noloBase(sped)
   const serv = prezzi.servizi[operazione] || { valore: 0, perc: 0 }
   const costoServizio = (Number(serv.valore) || 0) + ((Number(serv.perc) || 0) / 100) * base
   const costoApertura = operazione === 'reso' ? 0 : (Number(prezzi.apertura) || 0)

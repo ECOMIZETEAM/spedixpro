@@ -63,24 +63,30 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
   if (loading) return <div style={{ padding: '40px', color: '#64748b' }}>Caricamento…</div>
   if (!data || data.error) return <div style={{ padding: '40px', color: '#dc2626' }}>{data?.error || 'Giacenza non trovata'}</div>
 
-  const { sped, prezzi, prezziControparte, etichettaControparte, noloBase, storico, costi, ruolo } = data
+  const { sped, prezzi, prezziControparte, etichettaControparte, noloBase, noloBaseControparte, storico, costi, ruolo } = data
   const isMaster = ruolo === 'master'
 
   // Calcola servizio+apertura per un'operazione da un set di prezzi (cliente o controparte).
-  function calcDa(prz: any, operazione: string) {
+  //
+  // La BASE non e' la stessa per tutti e due: il cliente paga la percentuale sul SUO nolo, il
+  // master sul SUO. Con una base sola a video uscivano un costo controparte e un margine falsi —
+  // e diversi dal movimento che veniva poi scritto davvero.
+  function calcDa(prz: any, operazione: string, base: number) {
     if (!prz) return null
     const serv = prz?.servizi?.[operazione] || { valore: 0, perc: 0 }
-    const servizio = (Number(serv.valore) || 0) + ((Number(serv.perc) || 0) / 100) * (Number(noloBase) || 0)
+    const servizio = (Number(serv.valore) || 0) + ((Number(serv.perc) || 0) / 100) * (Number(base) || 0)
     const apertura = operazione === 'reso' ? 0 : (Number(prz?.apertura) || 0)
     return { apertura, servizio, totale: servizio }
   }
   // anteprima costi CLIENTE dell'operazione selezionata
   function preview(operazione: string) {
-    return calcDa(prezzi, operazione) || { apertura: 0, servizio: 0, totale: 0 }
+    return calcDa(prezzi, operazione, Number(noloBase) || 0) || { apertura: 0, servizio: 0, totale: 0 }
   }
   const pv = preview(op)
   // Prezzo CONTROPARTE (master/agente) per l'operazione selezionata, se disponibile.
-  const pvControparte = prezziControparte ? calcDa(prezziControparte, op) : null
+  const pvControparte = prezziControparte
+    ? calcDa(prezziControparte, op, Number(noloBaseControparte ?? noloBase) || 0)
+    : null
   const lblControparte = etichettaControparte === 'agente' ? 'tu (agente)' : 'tu (master)'
   const richPending = (storico || []).find((r: any) => r.stato === 'da_confermare')
   const costiExtra = (costi || []).reduce((s: number, c: any) => s + (Number(c.importo) || 0), 0)

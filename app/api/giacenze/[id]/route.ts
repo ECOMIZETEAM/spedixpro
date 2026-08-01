@@ -10,6 +10,7 @@ import { addebitaServizioGiacenza } from '@/lib/giacenza-cascata'
 // Il calcolo dei prezzi giacenza vive in lib/giacenza-prezzi.ts: lo usa anche l'API pubblica,
 // che prima registrava le richieste con costo zero.
 import { chiaveServizio, prezziVuoti, leggiPrezzi, leggiPrezziDaListino, calcolaCosti, noloClienteSpedizione } from '@/lib/giacenza-prezzi'
+import { noloCliente, noloMaster } from '@/lib/reso-prezzi'
 
 // Gestione di una singola giacenza (dettaglio "Gestisci").
 // Flusso a due attori: il cliente sceglie l'operazione (riconsegna / riconsegna a
@@ -119,10 +120,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     admin.from('giacenza_richieste').select('*').eq('spedizione_id', id).order('created_at', { ascending: false }),
     admin.from('giacenza_costi').select('*').eq('spedizione_id', id).order('created_at', { ascending: true }),
   ])
-  // La base mostrata a video dev'essere la STESSA su cui si addebita: il nolo ricalcolato dal
-  // listino, non il costo totale (che porta dentro anche la commissione contrassegno).
+  // Le basi mostrate a video devono essere le STESSE su cui si addebita, e sono DUE: il cliente
+  // paga la sua percentuale sul suo nolo, il master sulla propria. Con una base sola il costo
+  // della controparte — e quindi il margine — usciva sbagliato a schermo.
   const base = await noloClienteSpedizione(admin, sped)
-  return NextResponse.json({ sped, prezzi, prezziControparte, etichettaControparte, noloBase: base, storico: storico || [], costi: costi || [], ruolo })
+  let baseControparte: number | null = null
+  if (ruolo === 'master' && !sopraContratto) {
+    baseControparte = agente
+      ? await noloCliente(admin, sped, listinoAgenteId)
+      : (ownerId ? await noloMaster(admin, ownerId, sped.corriere_id, sped) : null)
+  } else if (sopraContratto) {
+    baseControparte = 0
+  }
+  return NextResponse.json({
+    sped, prezzi, prezziControparte, etichettaControparte,
+    noloBase: base, noloBaseControparte: baseControparte,
+    storico: storico || [], costi: costi || [], ruolo,
+  })
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -249,12 +263,29 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     // SVINCOLO: si addebita SOLO il servizio scelto (riconsegna/reso/…). L'APERTURA è già stata
     // addebitata all'ENTRATA in giacenza (dal cron). Cliente + cascata rete (solo servizio).
-    if (!sped.giacenza_addebito_effettuato) {
-      const servizioCli = Number(rich.costo_servizio) || 0
-      await addebitaServizioGiacenza(
+    //
+    // Il RESO non guarda giacenza_addebito_effettuato. Un pacco puo' finire in giacenza DUE volte:
+    // prima riconsegna (che marca l'addebito come fatto), la riconsegna fallisce, e al secondo giro
+    // si sceglie il reso. Con la guardia unica quel reso non lo pagava nessuno — ne' il cliente ne'
+    // la rete — e veniva pure marcato come addebitato, quindi la scansione in sede lo saltava per
+    // sempre. Il doppio addebito lo impedisce l'indice unico nel database, non questo flag.
+    let resoAddebitato = false
+    let importoResoCliente = 0
+    if (rich.operazione === 'reso') {
+      const esito = await addebitaServizioGiacenza(
         { id, numero: sped.numero, cliente_id: sped.cliente_id, master_id: sped.master_id, corriere_id: sped.corriere_id },
-        rich.operazione, servizioCli
+        'reso', 0
       )
+      resoAddebitato = esito.addebitato
+      importoResoCliente = esito.importoCliente
+    }
+    if (!sped.giacenza_addebito_effettuato) {
+      if (rich.operazione !== 'reso') {
+        await addebitaServizioGiacenza(
+          { id, numero: sped.numero, cliente_id: sped.cliente_id, master_id: sped.master_id, corriere_id: sped.corriere_id },
+          rich.operazione, Number(rich.costo_servizio) || 0
+        )
+      }
       // Eventuali costi manuali aggiunti dal master: una voce a parte al cliente.
       if (extra > 0) {
         await registraMovimento(admin, { masterId: sped.master_id, clienteId: sped.cliente_id, tipo: 'giacenza',
@@ -278,7 +309,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         numeroDistintaReso = (count || 0) + 1
         await admin.from('distinte_resi').insert({
           master_id: sped.master_id, cliente_id: sped.cliente_id, numero: numeroDistintaReso,
-          totale_ldv: 1, totale: Number(rich.costo_servizio) || 0,
+          // In distinta va quello che e' stato addebitato DAVVERO, non il preventivo congelato
+          // nella richiesta: il prezzo lo decide il database al momento dell'addebito.
+          totale_ldv: 1, totale: importoResoCliente,
           voci: [{ id, numero: sped.numero }], stato: 'chiusa',
         })
       }
@@ -290,7 +323,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       giacenza_stato: 'svincolata', giacenza_istruzioni: istr, giacenza_addebito_effettuato: true,
       // Se lo svincolo è un RESO, il reso è già stato addebitato qui (a cascata): lo marco così la
       // scansione resi mostrerà "reso già addebitato in giacenza" e NON riaddebiterà.
-      ...(rich.operazione === 'reso' ? { giacenza_reso_addebitato: true, stato: 'reso_mittente' } : {}),
+      // Il flag si scrive solo se l'addebito e' passato davvero: marcarlo senza averlo addebitato
+      // significava togliere quel reso anche alla scansione in sede, e non pagarlo mai piu'.
+      ...(rich.operazione === 'reso' ? { stato: 'reso_mittente', ...(resoAddebitato ? { giacenza_reso_addebitato: true } : {}) } : {}),
     }).eq('id', id)
     return NextResponse.json({ success: true, addebito: totale, distintaReso: numeroDistintaReso, avviso })
   }

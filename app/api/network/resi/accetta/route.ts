@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
-import { noloCliente, applicaServizio, prezzoResoMaster } from '@/lib/reso-prezzi'
-import { leggiPrezziDaListino } from '@/lib/giacenza-prezzi'
+import { noloCliente, noloMaster, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
+import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 
 // Il master accetta un RESO ricevuto dalla rete e lo PROPAGA:
 // - spedizioni dei propri clienti -> distinta reso verso il cliente (addebito nolo)
@@ -88,27 +87,20 @@ export async function POST(req: NextRequest) {
       master_id: mio, cliente_id: clienteId, numero, totale_ldv: arr.length, totale: 0, voci: vociDi(arr), stato: 'chiusa',
     }).select().single()
     if (!dist) continue
+    const righe: RigaReso[] = []
     for (const s of arr) {
       await admin.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', s.id)
-      // Reso già addebitato allo svincolo giacenza: resta in distinta per la logistica, ma non si
-      // riaddebita. Il controllo c'era nella scansione e non qui: chi riceveva il reso dalla rete
-      // pagava due volte lo stesso pacco.
-      if (s.giacenza_reso_addebitato === true) continue
       const nolo = await noloCliente(admin, s, cli?.listino_cliente_id)
-      const prezziGiac = await leggiPrezziDaListino(admin, cli?.listino_cliente_id, s.corriere_id || null)
-      const base = nolo != null ? nolo : Math.max(0, Number(s.costo_totale || 0))
-      const costoReso = applicaServizio(prezziGiac.servizi?.reso || { valore: 0, perc: 100 }, base)
-      totale += costoReso
-      // Addebito atomico al credito del cliente (RPC transazionale)
-      if (costoReso > 0) {
-        try {
-          await registraMovimento(admin, {
-            masterId: mio, clienteId, tipo: 'reso', descrizione: `Reso ${s.numero}`,
-            importo: -costoReso, spedizioneId: s.id, createdBy: user.id,
-          })
-        } catch (e) { console.error('Errore addebito reso cliente:', e) }
-      }
+      righe.push({
+        spedizione_id: s.id, cliente_id: clienteId, master_owner_id: mio, corriere_id: s.corriere_id || null,
+        nolo: nolo != null ? nolo : Math.max(0, Number(s.costo_totale || 0)),
+      })
     }
+    // La percentuale, la guardia contro il doppio addebito (compreso il reso già pagato allo
+    // svincolo giacenza) e la scrittura di tutte le voci in una transazione: le fa il database.
+    try {
+      for (const e of await addebitaResi(admin, righe, user.id)) totale += Number(e.importo || 0)
+    } catch (e) { console.error('Errore addebito reso cliente:', e) }
     await admin.from('distinte_resi').update({ totale }).eq('id', dist.id)
     create++
   }
@@ -121,25 +113,20 @@ export async function POST(req: NextRequest) {
       master_id: mio, cliente_id: null, target_master_id: flId, numero, totale_ldv: arr.length, totale: 0, voci: vociDi(arr), stato: 'chiusa',
     }).select().single()
     if (!dist) continue
+    const righe: RigaReso[] = []
     for (const s of arr) {
       await admin.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', s.id)
-      if (s.giacenza_reso_addebitato === true) continue   // già pagato allo svincolo: niente bis
-      const { data: movR } = await admin.from('movimenti')
-        .select('importo').eq('spedizione_id', s.id).eq('master_target_id', flId).in('tipo', ['spedizione', 'rettifica'])
-      const pagato = Math.abs((movR || []).reduce((a: number, m: any) => a + Number(m.importo || 0), 0))
-      // Il suo listino corrieri comanda; quanto ha pagato l'andata è il ripiego.
-      const costoReso = await prezzoResoMaster(admin, {
-        masterId: flId, sped: s, pagato, corriereNome: (s as any).corrieri?.nome_contratto || null,
+      // Il prezzo lo decide il SUO listino corrieri, quindi serve la SUA copia del contratto.
+      const suoCorriere = await corriereDiMasterPerNome(admin, flId, (s as any).corrieri?.nome_contratto || null)
+      righe.push({
+        spedizione_id: s.id, master_target_id: flId, master_owner_id: mio, corriere_id: suoCorriere,
+        nolo: (suoCorriere ? await noloMaster(admin, flId, suoCorriere, s) : null) || 0,
+        pagato: await pagatoDaMaster(admin, s.id, flId),
       })
-      if (costoReso <= 0) continue
-      totale += costoReso
-      try {
-        await registraMovimentoMaster(admin, {
-          masterOwnerId: mio, masterTargetId: flId, tipo: 'reso', descrizione: `Reso ${s.numero}`,
-          importo: -costoReso, spedizioneId: s.id, createdBy: user.id,
-        })
-      } catch (e) { console.error('Errore addebito reso sotto-master:', e) }
     }
+    try {
+      for (const e of await addebitaResi(admin, righe, user.id)) totale += Number(e.importo || 0)
+    } catch (e) { console.error('Errore addebito reso sotto-master:', e) }
     await admin.from('distinte_resi').update({ totale }).eq('id', dist.id)
     create++
   }

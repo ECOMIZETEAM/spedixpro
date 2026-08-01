@@ -1,5 +1,4 @@
 import { calcolaPrezzoListino, calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
-import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 
 // QUANTO COSTA UN RESO — una regola sola, per tutti e due i modi in cui un reso nasce.
 //
@@ -107,58 +106,54 @@ export async function noloMaster(admin: any, masterId: string, corriereId: strin
   return nolo > 0 ? nolo : null
 }
 
-// Riga "Reso al mittente" (o altro servizio giacenza) dal LISTINO CORRIERI di un master.
-// null = non configurata, che e' diverso da configurata a zero: nel primo caso si ripiega su
-// quanto il master aveva pagato, nel secondo il reso e' davvero gratis per lui.
-export async function servizioMaster(admin: any, corriereId: string, operazione: string): Promise<PrezzoServizio | null> {
-  // Solo i listini del master PROPRIETARIO di quella copia di contratto: esistono righe che stanno
-  // nel listino di un altro master ma puntano a questo corriere, e leggendo per solo corriere_id
-  // scavalcherebbero il listino configurato (stesso motivo spiegato in giacenza-cascata).
-  const { data: corr } = await admin.from('corrieri').select('master_id').eq('id', corriereId).maybeSingle()
-  const { data: listini } = await admin.from('listini_corrieri').select('id').eq('master_id', (corr as any)?.master_id || '')
-  const ids = (listini || []).map((l: any) => l.id)
-  if (!ids.length) return null
-  const { data: righe } = await admin.from('listini_corrieri_supplementi')
-    .select('nome,valore,descrizione').eq('corriere_id', corriereId).in('listino_id', ids).eq('tipo', 'giacenza')
-    .order('id', { ascending: true })   // con righe duplicate vince sempre la prima
-  for (const s of (righe || [])) {
-    if (chiaveServizio(s.nome) !== operazione) continue
-    let perc = 0
-    try { perc = Number(JSON.parse(s.descrizione || '{}')?.perc) || 0 } catch { /* descrizione non JSON */ }
-    return { valore: Number(s.valore) || 0, perc }
-  }
-  return null
-}
-
-// Nome del servizio giacenza -> operazione (stessa mappa di giacenza-prezzi).
-export function chiaveServizio(nome: string): string | null {
-  const n = (nome || '').toLowerCase()
-  if (n.includes('nuovo')) return 'riconsegna_nuovo'
-  if (n.includes('reso')) return 'reso'
-  if (n.includes('riconsegna')) return 'riconsegna'
-  return null
-}
-
 export function applicaServizio(p: PrezzoServizio, nolo: number): number {
   return r2((Number(p.valore) || 0) + ((Number(p.perc) || 0) / 100) * (Number(nolo) || 0))
 }
 
-/**
- * Quanto addebitare a un MASTER per il reso di una spedizione.
- * Il suo listino corrieri comanda (fisso + percentuale sul SUO nolo); se non ha quel contratto o
- * non ha configurato il reso, si ripiega su quanto aveva pagato la spedizione andata.
- */
-export async function prezzoResoMaster(
-  admin: any,
-  params: { masterId: string; sped: any; corriereNome?: string | null; pagato: number },
-): Promise<number> {
-  const pagato = Math.max(0, Number(params.pagato) || 0)
-  if (!params.corriereNome) return pagato
-  const corrId = await corriereDiMasterPerNome(admin, params.masterId, params.corriereNome)
-  if (!corrId) return pagato
-  const serv = await servizioMaster(admin, corrId, 'reso')
-  if (!serv) return pagato
-  if (!(serv.perc > 0)) return r2(serv.valore)          // solo prezzo fisso: niente base da calcolare
-  const nolo = await noloMaster(admin, params.masterId, corrId, params.sped)
-  return applicaServizio(serv, nolo != null ? nolo : pagato)
+// ── L'ADDEBITO DEL RESO LO FA IL DATABASE ─────────────────────────────────────────────────────
+//
+// Qui si calcola solo il NOLO (il motore tariffe vive in questa parte). La REGOLA — quale
+// percentuale si applica, cosa fare se il listino non ha la riga, come impedire il doppio
+// addebito — sta in fn_addebita_resi, cosi' esiste in un posto solo e non puo' piu' essere
+// scritta in tre modi diversi da tre rotte diverse. E quella funzione scrive tutte le voci in
+// UNA transazione: una distinta da cento lettere di vettura non puo' piu' restare addebitata a
+// meta' se qualcosa va storto per strada.
+
+export type RigaReso = {
+  spedizione_id: string
+  cliente_id?: string | null          // addebito al cliente...
+  master_target_id?: string | null    // ...oppure a un master
+  master_owner_id: string             // chi lo addebita
+  corriere_id?: string | null         // la copia di contratto DI QUEL soggetto
+  nolo: number
+  pagato?: number                     // ripiego se il reso non e' configurato nel suo listino
+  da_giacenza?: boolean               // e' lo svincolo stesso a chiamare: la guardia non si applica
+}
+
+export type EsitoReso = {
+  spedizione_id: string
+  esito: 'addebitato' | 'gia_addebitato' | 'zero' | 'inesistente'
+  importo?: number
+  cliente_id?: string | null
+  master_target_id?: string | null
+}
+
+export async function addebitaResi(admin: any, righe: RigaReso[], createdBy?: string | null): Promise<EsitoReso[]> {
+  const utili = (righe || []).filter(r => r && r.spedizione_id && (r.cliente_id || r.master_target_id))
+  if (!utili.length) return []
+  const { data, error } = await admin.rpc('fn_addebita_resi', {
+    p_righe: utili,
+    p_created_by: createdBy ?? null,
+  })
+  if (error) throw new Error('Addebito reso non riuscito: ' + error.message)
+  return (Array.isArray(data) ? data : []) as EsitoReso[]
+}
+
+// Quanto quel soggetto aveva pagato la spedizione andata: e' il ripiego quando nel suo listino la
+// riga del reso non c'e' proprio (diverso da configurata a zero, che vuol dire reso gratis).
+export async function pagatoDaMaster(admin: any, spedizioneId: string, masterId: string): Promise<number> {
+  const { data } = await admin.from('movimenti')
+    .select('importo').eq('spedizione_id', spedizioneId).eq('master_target_id', masterId)
+    .in('tipo', ['spedizione', 'rettifica'])
+  return Math.abs((data || []).reduce((a: number, m: any) => a + (Number(m.importo) || 0), 0))
 }

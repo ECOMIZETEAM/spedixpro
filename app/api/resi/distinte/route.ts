@@ -3,8 +3,8 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
-import { noloCliente, applicaServizio, prezzoResoMaster } from '@/lib/reso-prezzi'
-import { leggiPrezziDaListino } from '@/lib/giacenza-prezzi'
+import { noloCliente, noloMaster, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
+import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -40,12 +40,57 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(lista)
 }
 
+// LE RIGHE DELLA PROPRIA CATENA.
+//
+// Chi scansiona il pacco rientrato apre la catena, ma finora non veniva addebitato di niente: il
+// reso gli compariva a carico solo se era passato dalla giacenza. Il costo pero' esiste comunque —
+// il corriere il rientro glielo fa pagare — e va registrato come per ogni altro livello, salendo
+// fino a chi possiede davvero il contratto.
+// Non c'e' rischio di doppio addebito: se un livello e' gia' stato addebitato (per esempio perche'
+// il padre gli ha gia' girato la distinta) l'indice unico nel database lo respinge.
+async function righeCatenaPropria(adminDb: any, mioMasterId: string, voci: any[]): Promise<RigaReso[]> {
+  const { catenaContratto } = await import('@/lib/giacenza-cascata')
+  const righe: RigaReso[] = []
+  const cache = new Map<string, { masterId: string; corriereId: string }[]>()
+  for (const v of (voci || [])) {
+    const { data: sp } = await adminDb.from('spedizioni')
+      .select('id,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta,corrieri(nome_contratto,master_id)')
+      .eq('id', v.id).maybeSingle()
+    const nome = (sp as any)?.corrieri?.nome_contratto || null
+    const owner = (sp as any)?.corrieri?.master_id || null
+    if (!sp || !nome || !owner) continue
+    if (!cache.has(nome)) cache.set(nome, await catenaContratto(adminDb, mioMasterId, owner, nome))
+    for (const liv of cache.get(nome)!) {
+      righe.push({
+        spedizione_id: sp.id, master_target_id: liv.masterId, master_owner_id: liv.masterId,
+        corriere_id: liv.corriereId,
+        nolo: (await noloMaster(adminDb, liv.masterId, liv.corriereId, sp)) || 0,
+        pagato: await pagatoDaMaster(adminDb, sp.id, liv.masterId),
+      })
+    }
+  }
+  return righe
+}
+
+// Voci gia' chiuse in una distinta di reso di questo master: si scartano.
+// Senza questo, un secondo invio dello stesso elenco — il POST che va in timeout su una distinta
+// lunga e l'operatore che riclicca — creava una seconda distinta e riaddebitava tutto. L'indice
+// unico nel database impedisce il doppio movimento, ma la distinta doppia restava.
+async function escludiGiaInDistinta(adminDb: any, masterId: string, voci: any[]): Promise<any[]> {
+  const { data } = await adminDb.from('distinte_resi').select('voci').eq('master_id', masterId)
+  const gia = new Set<string>()
+  for (const d of (data || [])) for (const v of (Array.isArray(d?.voci) ? d.voci : [])) if (v?.id) gia.add(v.id)
+  return (voci || []).filter((v: any) => !gia.has(v?.id))
+}
+
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
+  // Un cliente non chiude distinte di reso: le sue le fa il suo master (come in network/resi/accetta).
+  if (!utente?.master_id || utente.ruolo === 'cliente') return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const body = await req.json()
   // `voci` viene filtrato piu' sotto alle sole spedizioni della propria rete: serve riassegnabile.
   const { spedizioniIds, clienteId, targetMasterId, totale } = body
@@ -69,20 +114,27 @@ export async function POST(req: NextRequest) {
       }
       if (!discendente) return NextResponse.json({ error: 'Master non autorizzato' }, { status: 403 })
     }
-    // Le voci arrivano anch'esse dal browser: si tengono solo le spedizioni della PROPRIA rete,
-    // altrimenti si potrebbero indicare LDV di master estranei per gonfiare l'addebito.
+    // Le voci arrivano anch'esse dal browser: si tengono solo le spedizioni passate DAL BERSAGLIO,
+    // non genericamente dalla rete di chi chiama.
+    //
+    // Con il sotto-albero del chiamante due rami fratelli si confondevano: un master con due
+    // sotto-master A e B poteva addebitare ad A i resi delle spedizioni di B — spedizioni che ad A
+    // non sono mai passate — e A se li vedeva scalare dal credito, calcolati sul suo listino.
+    // Legandole al bersaglio il controllo diventa piu' stretto senza perdere un caso legittimo:
+    // una spedizione di un sotto-sotto-master sta comunque nel sotto-albero della sua prima linea.
     {
       const ids = (voci || []).map((v: any) => v?.id).filter(Boolean)
-      if (ids.length) {
-        const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
-        const rete = await sottoAlberoMasterIds(adminDb, utente!.master_id!)
-        const { data: ok } = await adminDb.from('spedizioni').select('id').in('id', ids).in('master_id', rete)
-        const consentiti = new Set((ok || []).map((r: any) => r.id))
-        const scartate = ids.length - consentiti.size
-        if (scartate > 0) console.warn('[RESI][CATENA] voci fuori rete scartate:', scartate)
-        voci = (voci || []).filter((v: any) => consentiti.has(v?.id))
-        if (!voci.length) return NextResponse.json({ error: 'Nessuna spedizione valida nella distinta' }, { status: 400 })
-      }
+      if (!ids.length) return NextResponse.json({ error: 'Nessuna spedizione nella distinta' }, { status: 400 })
+      const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+      const reteTarget = await sottoAlberoMasterIds(adminDb, targetMasterId)
+      const { data: ok } = await adminDb.from('spedizioni').select('id').in('id', ids).in('master_id', reteTarget)
+      const consentiti = new Set((ok || []).map((r: any) => r.id))
+      const scartate = ids.length - consentiti.size
+      if (scartate > 0) console.warn('[RESI][CATENA] voci non passate dal bersaglio, scartate:', scartate)
+      voci = (voci || []).filter((v: any) => consentiti.has(v?.id))
+      if (!voci.length) return NextResponse.json({ error: 'Nessuna spedizione valida nella distinta' }, { status: 400 })
+      voci = await escludiGiaInDistinta(adminDb, utente!.master_id!, voci)
+      if (!voci.length) return NextResponse.json({ error: 'Queste LDV sono già in una distinta di reso' }, { status: 409 })
     }
     const { count: cM } = await supabase.from('distinte_resi').select('*', {count:'exact',head:true}).eq('master_id', utente?.master_id)
     const numeroM = (cM||0) + 1
@@ -95,66 +147,71 @@ export async function POST(req: NextRequest) {
       numero: numeroM, totale_ldv: (voci||[]).length, totale: 0, voci, stato: 'chiusa',
     }).select().single()
     if (errM) return NextResponse.json({ error: errM.message }, { status: 400 })
+    // Il prezzo lo decide il listino corrieri DEL SOTTO-MASTER; quanto aveva pagato l'andata resta
+    // il ripiego per chi il reso non ce l'ha configurato. La regola e l'anti-doppio-addebito stanno
+    // nel database, e tutte le voci si scrivono in una transazione sola.
+    const righe: RigaReso[] = []
     for (const v of (voci || [])) {
       await adminDb.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
-      // Reso già addebitato in giacenza → non riaddebitare a cascata (evita doppio).
-      const { data: spG } = await adminDb.from('spedizioni').select('giacenza_reso_addebitato').eq('id', v.id).maybeSingle()
-      if ((spG as any)?.giacenza_reso_addebitato === true) continue
-      // prezzo pagato dal master figlio su quella LDV = movimento spedizione con master_target_id
-      const { data: movR } = await adminDb.from('movimenti')
-        .select('importo').eq('spedizione_id', v.id).eq('master_target_id', targetMasterId)
-        .in('tipo', ['spedizione', 'rettifica'])
-      const pagato = Math.abs((movR || []).reduce((a: number, m: any) => a + Number(m.importo || 0), 0))
-      // Comanda il SUO listino corrieri (fisso + percentuale sul suo nolo); quanto ha pagato
-      // l'andata resta il ripiego per chi il reso non ce l'ha configurato.
       const { data: spD } = await adminDb.from('spedizioni')
         .select('colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta,corrieri(nome_contratto)')
         .eq('id', v.id).maybeSingle()
-      const costoReso = await prezzoResoMaster(adminDb, {
-        masterId: targetMasterId, sped: spD, pagato,
-        corriereNome: (spD as any)?.corrieri?.nome_contratto || null,
+      const nomeContratto = (spD as any)?.corrieri?.nome_contratto || null
+      const suoCorriere = await corriereDiMasterPerNome(adminDb, targetMasterId, nomeContratto)
+      righe.push({
+        spedizione_id: v.id,
+        master_target_id: targetMasterId,
+        master_owner_id: utente!.master_id!,
+        corriere_id: suoCorriere,
+        nolo: (suoCorriere && spD ? await noloMaster(adminDb, targetMasterId, suoCorriere, spD) : null) || 0,
+        pagato: await pagatoDaMaster(adminDb, v.id, targetMasterId),
       })
-      if (costoReso <= 0) continue
-      totaleCatena += costoReso
-      try {
-        await registraMovimentoMaster(adminDb, {
-          masterOwnerId: utente?.master_id, masterTargetId: targetMasterId,
-          tipo: 'reso', descrizione: `Reso ${v.numero}`, importo: -costoReso,
-          spedizioneId: v.id, createdBy: user.id,
-        })
-      } catch (e) { console.error('Errore addebito reso master:', e) }
     }
+    try {
+      for (const e of await addebitaResi(adminDb, righe, user.id)) totaleCatena += Number(e.importo || 0)
+      // ...e la catena di chi scansiona, dal suo livello fino al detentore del contratto.
+      await addebitaResi(adminDb, await righeCatenaPropria(adminDb, utente!.master_id!, voci), user.id)
+    } catch (e) { console.error('Errore addebito reso master:', e) }
     await supabase.from('distinte_resi').update({ totale: totaleCatena }).eq('id', distintaM.id)
     return NextResponse.json({ id: distintaM.id, numero: numeroM })
+  }
+  // ── RAMO CLIENTE ──
+  // Anche qui le voci arrivano dal browser: devono essere spedizioni DI QUEL cliente e della
+  // propria rete, altrimenti si potrebbero addebitare a un cliente le LDV di un altro.
+  {
+    const ids = (voci || []).map((v: any) => v?.id).filter(Boolean)
+    if (!clienteId || !ids.length) return NextResponse.json({ error: 'Nessuna spedizione nella distinta' }, { status: 400 })
+    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const rete = await sottoAlberoMasterIds(adminDb, utente!.master_id!)
+    const { data: ok } = await adminDb.from('spedizioni').select('id')
+      .in('id', ids).eq('cliente_id', clienteId).in('master_id', rete)
+    const consentiti = new Set((ok || []).map((r: any) => r.id))
+    if (ids.length !== consentiti.size) console.warn('[RESI][CLIENTE] voci non del cliente o fuori rete, scartate:', ids.length - consentiti.size)
+    voci = (voci || []).filter((v: any) => consentiti.has(v?.id))
+    if (!voci.length) return NextResponse.json({ error: 'Nessuna spedizione valida nella distinta' }, { status: 400 })
+    voci = await escludiGiaInDistinta(adminDb, utente!.master_id!, voci)
+    if (!voci.length) return NextResponse.json({ error: 'Queste LDV sono già in una distinta di reso' }, { status: 409 })
   }
   const { count } = await supabase.from('distinte_resi').select('*', {count:'exact',head:true}).eq('master_id', utente?.master_id)
   const numero = (count||0) + 1
   const { data: cliRec } = await supabase.from('clienti').select('listino_cliente_id').eq('id', clienteId).single()
-  let totaleReso = 0
-  const resoRows: { v: any; costoReso: number }[] = []
+  // Il NOLO lo calcola il motore tariffe (qui), la PERCENTUALE e l'addebito li fa il database:
+  // stessa regola dello svincolo giacenza, e tutte le voci in una transazione sola.
+  const righeCli: RigaReso[] = []
   for (const v of (voci || [])) {
     await supabase.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
     const { data: sp } = await supabase.from('spedizioni')
-      .select('costo_totale,dest_provincia,dest_cap,dest_paese,dest_citta,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id,giacenza_reso_addebitato')
+      .select('costo_totale,dest_provincia,dest_cap,dest_paese,dest_citta,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id')
       .eq('id', v.id).single()
-
-    // Se il reso è GIÀ stato addebitato in fase di svincolo giacenza, NON riaddebitare (resta in
-    // distinta per la logistica, ma costo 0). Evita il doppio addebito.
-    if ((sp as any)?.giacenza_reso_addebitato === true) { resoRows.push({ v, costoReso: 0 }); continue }
-
-    // ── Reso = NOLO del listino cliente per la PERCENTUALE del suo listino ──
-    // Prima era sempre il 100% del nolo: chi ha il reso al 120% o al 150% lo pagava come al 100%
-    // se il reso arrivava da qui invece che dalla giacenza. Stesso evento, stesso prezzo.
     const nolo = await noloCliente(adminDb, sp, cliRec?.listino_cliente_id)
-    const prezziGiac = await leggiPrezziDaListino(adminDb, cliRec?.listino_cliente_id, sp?.corriere_id || null)
-    const servReso = prezziGiac.servizi?.reso || { valore: 0, perc: 100 }
-    // fallback (cliente senza listino / non calcolabile): il costo totale, mai negativo
-    const base = nolo != null ? nolo : Math.max(0, Number(sp?.costo_totale || 0))
-    let costoReso = applicaServizio(servReso, base)
-    if (!(costoReso > 0)) costoReso = 0
-
-    totaleReso += costoReso
-    resoRows.push({ v, costoReso })
+    righeCli.push({
+      spedizione_id: v.id,
+      cliente_id: clienteId,
+      master_owner_id: utente!.master_id!,
+      corriere_id: sp?.corriere_id || null,
+      // ripiego se il listino non e' calcolabile: il costo totale, mai negativo
+      nolo: nolo != null ? nolo : Math.max(0, Number(sp?.costo_totale || 0)),
+    })
   }
 
   const { data: distinta, error } = await supabase.from('distinte_resi').insert({
@@ -162,22 +219,18 @@ export async function POST(req: NextRequest) {
     cliente_id: clienteId,
     numero,
     totale_ldv: spedizioniIds.length,
-    totale: totaleReso, // solo nolo (coerente con l'addebito)
+    totale: 0,   // scritto dopo l'addebito: in distinta va quello che e' stato addebitato davvero
     voci,
     stato: 'chiusa',
   }).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
-  // Addebito atomico del nolo al credito del cliente (RPC: update credito + movimento in transazione)
-  for (const { v, costoReso } of resoRows) {
-    if (!(costoReso > 0)) continue
-    try {
-      await registraMovimento(supabase, {
-        masterId: utente?.master_id, clienteId, tipo: 'reso',
-        descrizione: `Reso ${v.numero}`, importo: -costoReso,
-        spedizioneId: v.id, createdBy: user.id,
-      })
-    } catch (e) { console.error('Errore addebito reso cliente:', e) }
-  }
+  let totaleReso = 0
+  try {
+    for (const e of await addebitaResi(adminDb, righeCli, user.id)) totaleReso += Number(e.importo || 0)
+    // ...e la catena dei master, dal master del cliente fino al detentore del contratto.
+    await addebitaResi(adminDb, await righeCatenaPropria(adminDb, utente!.master_id!, voci), user.id)
+  } catch (e) { console.error('Errore addebito reso cliente:', e) }
+  await supabase.from('distinte_resi').update({ totale: totaleReso }).eq('id', distinta.id)
   return NextResponse.json({ id: distinta.id, numero })
 }

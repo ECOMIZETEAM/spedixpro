@@ -33,7 +33,9 @@ export async function GET() {
   const movs = await fetchAll(() => admin.from('movimenti')
     .select('importo, spedizione_id, tipo')
     .eq('master_target_id', EA_ID)
-    .in('tipo', ['spedizione', 'rimborso', 'rettifica', 'giacenza']))
+    // 'reso' compreso: un pacco che rientra il corriere lo fa pagare, quindi pesa sul conto del
+    // portale come una spedizione. Prima mancava, e i resi non comparivano nello speso.
+    .in('tipo', ['spedizione', 'rimborso', 'rettifica', 'giacenza', 'reso']))
 
   const spedIds = Array.from(new Set((movs || []).map((m: any) => m.spedizione_id).filter(Boolean)))
   const tipoPerSped = new Map<string, string | null>()

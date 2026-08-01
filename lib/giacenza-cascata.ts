@@ -1,7 +1,7 @@
 import { registraMovimentoMaster, registraMovimento } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
-import { noloMaster, applicaServizio } from '@/lib/reso-prezzi'
+import { noloMaster, noloCliente, applicaServizio, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
 
 // Mappa il "nome" di un supplemento giacenza (sia lato cliente sia lato master) sull'operazione.
 // Es. "Riconsegna al nuovo destinatario" -> riconsegna_nuovo, "Reso al mittente" -> reso.
@@ -141,6 +141,92 @@ export async function addebitaGiacenzaCatena(
   }
 }
 
+/**
+ * RESO allo svincolo giacenza: cliente + tutta la catena fino al detentore del contratto, in una
+ * chiamata sola al database. Qui si calcolano solo i NOLI (il motore tariffe vive nell'app); la
+ * percentuale, il ripiego e l'anti-doppio-addebito li applica fn_addebita_resi.
+ */
+async function addebitaResoGiacenza(admin: any, sped: SpedGiac, corriereNome: string | null, corriereOwnerId: string | null): Promise<EsitoAddebito> {
+  const { data: full } = await admin.from('spedizioni')
+    .select('id,numero,cliente_id,master_id,corriere_id,costo_totale,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta')
+    .eq('id', sped.id).maybeSingle()
+  if (!full) return { addebitato: false, importoCliente: 0 }
+  const righe: RigaReso[] = []
+
+  if (full.cliente_id) {
+    const { data: cli } = await admin.from('clienti').select('listino_cliente_id').eq('id', full.cliente_id).maybeSingle()
+    const nolo = await noloCliente(admin, full, cli?.listino_cliente_id)
+    righe.push({
+      spedizione_id: full.id, cliente_id: full.cliente_id, master_owner_id: full.master_id,
+      corriere_id: full.corriere_id,
+      nolo: nolo != null ? nolo : Math.max(0, Number(full.costo_totale || 0)),
+      da_giacenza: true,
+    })
+  }
+
+  // La catena: dal master della spedizione fino a chi possiede davvero il contratto. Ogni livello
+  // paga il SUO nolo, letto dalla SUA copia del contratto.
+  if (corriereNome && corriereOwnerId) {
+    for (const liv of await catenaContratto(admin, full.master_id, corriereOwnerId, corriereNome)) {
+      righe.push({
+        spedizione_id: full.id, master_target_id: liv.masterId, master_owner_id: liv.masterId,
+        corriere_id: liv.corriereId,
+        nolo: (await noloMaster(admin, liv.masterId, liv.corriereId, full)) || 0,
+        pagato: await pagatoDaMaster(admin, full.id, liv.masterId),
+        da_giacenza: true,
+      })
+    }
+  }
+
+  try {
+    const esiti = await addebitaResi(admin, righe, null)
+    const cli = esiti.find(e => e.cliente_id && e.esito === 'addebitato')
+    return {
+      // "addebitato" vuol dire che qualcuno ha davvero pagato: se torna tutto zero il reso non e'
+      // stato incassato da nessuno, e chi chiama non deve marcarlo come gia' addebitato.
+      addebitato: esiti.some(e => e.esito === 'addebitato' || e.esito === 'gia_addebitato'),
+      importoCliente: Number(cli?.importo || 0),
+    }
+  } catch (e) {
+    console.error('Errore addebito reso giacenza:', e)
+    return { addebitato: false, importoCliente: 0 }
+  }
+}
+
+export type EsitoAddebito = { addebitato: boolean; importoCliente: number }
+
+/**
+ * I livelli che pagano, dal master diretto fino al DETENTORE REALE del contratto (il master piu'
+ * in alto che possiede lo stesso nome_contratto), con la copia di contratto di ciascuno.
+ * Il confronto sui nomi e' normalizzato: in archivio c'e' un contratto salvato con lo spazio
+ * finale su un livello e senza sull'altro, ed e' gia' costato un detentore non riconosciuto.
+ */
+export async function catenaContratto(
+  admin: any, masterDirettoId: string, corriereOwnerId: string, corriereNome: string,
+): Promise<{ masterId: string; corriereId: string }[]> {
+  let ownerReale = corriereOwnerId
+  let cur: string | null = corriereOwnerId
+  for (let i = 0; i < 20 && cur; i++) {
+    const { data: mm }: any = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+    const parent: string | null = mm?.parent_master_id || null
+    if (!parent) break
+    const pcId = await corriereDiMasterPerNome(admin, parent, corriereNome)
+    if (pcId) { ownerReale = parent; cur = parent } else break
+  }
+
+  const out: { masterId: string; corriereId: string }[] = []
+  let id: string | null = masterDirettoId
+  for (let i = 0; i < 20 && id; i++) {
+    const { data: m }: any = await admin.from('masters').select('id,parent_master_id').eq('id', id).maybeSingle()
+    if (!m) break
+    const cId = await corriereDiMasterPerNome(admin, m.id, corriereNome)
+    if (cId) out.push({ masterId: m.id, corriereId: cId })
+    if (m.id === ownerReale) break
+    id = m.parent_master_id
+  }
+  return out
+}
+
 const OP_LABEL: Record<string, string> = { riconsegna: 'Riconsegna', riconsegna_nuovo: 'Riconsegna a nuovo destinatario', reso: 'Reso al mittente' }
 
 // Prezzo giacenza dal listino del CLIENTE (apertura + servizio dell'operazione) per un corriere.
@@ -191,9 +277,17 @@ export async function addebitaAperturaGiacenza(sped: SpedGiac): Promise<void> {
  * il cliente paga l'importo (congelato nella richiesta) e la spesa risale la rete (ogni master
  * paga il SUO servizio). L'apertura NON si tocca qui (già addebitata all'entrata).
  */
-export async function addebitaServizioGiacenza(sped: SpedGiac, operazione: string, importoServizioCliente: number): Promise<void> {
+export async function addebitaServizioGiacenza(sped: SpedGiac, operazione: string, importoServizioCliente: number): Promise<EsitoAddebito> {
   const admin = createAdminSupabase()
   const { data: corr } = await admin.from('corrieri').select('master_id,nome_contratto').eq('id', sped.corriere_id).maybeSingle()
+
+  // IL RESO NON PASSA DA QUI: lo decide il database (fn_addebita_resi), cosi' costa uguale che
+  // arrivi dallo svincolo giacenza o dalla scansione in sede, e cliente e catena si addebitano in
+  // una transazione sola invece che con un ciclo che puo' fermarsi a meta'.
+  if (operazione === 'reso') {
+    return addebitaResoGiacenza(admin, sped, corr?.nome_contratto || null, corr?.master_id || null)
+  }
+
   if (sped.cliente_id && importoServizioCliente > 0) {
     try {
       await registraMovimento(admin, { masterId: sped.master_id, clienteId: sped.cliente_id, tipo: 'giacenza',
@@ -204,4 +298,5 @@ export async function addebitaServizioGiacenza(sped: SpedGiac, operazione: strin
     await addebitaGiacenzaCatena({ masterDirettoId: sped.master_id, corriereOwnerId: corr.master_id, corriereNome: corr.nome_contratto,
       operazione, numero: sped.numero, spedizioneId: sped.id, createdBy: null, conApertura: false, conServizio: true })
   }
+  return { addebitato: true, importoCliente: Math.abs(Number(importoServizioCliente) || 0) }
 }
