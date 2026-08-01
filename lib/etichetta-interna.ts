@@ -94,15 +94,17 @@ export async function etichettaInterna(d: Dati): Promise<Uint8Array> {
     }
     // Collo n di N: senza, in deposito non si sa se il carico e' completo.
     testo(`COLLO ${i} DI ${nColli}`, L - 34 * MM, y - 5 * MM, 11, grassetto)
-    y -= 18 * MM
+    // Millimetri contati: sotto ci sono nome, indirizzo, contrassegno, nota e codice a barre, e su
+    // 15 cm il primo che avanza spazio deve darlo. L'intestazione e' quella che serve meno.
+    y -= 15 * MM
     riga(y); y -= 6 * MM
 
     testo('MITTENTE', 6 * MM, y, 7, grassetto, grigio); y -= 4.5 * MM
     testo(d.mittente?.nome || '', 6 * MM, y, 10, grassetto); y -= 4.2 * MM
     testo(d.mittente?.indirizzo || '', 6 * MM, y, 9); y -= 4.2 * MM
     testo(`${d.mittente?.cap || ''} ${d.mittente?.citta || ''} ${d.mittente?.provincia ? '(' + d.mittente.provincia + ')' : ''}`, 6 * MM, y, 9)
-    y -= 7 * MM
-    riga(y); y -= 7 * MM
+    y -= 6 * MM
+    riga(y); y -= 6 * MM
 
     testo('DESTINATARIO', 6 * MM, y, 7, grassetto, grigio); y -= 6 * MM
     // Il nome del destinatario non si taglia: e' quello che l'autista legge sul citofono. Se non
@@ -132,16 +134,22 @@ export async function etichettaInterna(d: Dati): Promise<Uint8Array> {
     // Se il testo sopra ha mangiato lo spazio, il riquadro si appoggia comunque sopra le barre:
     // e' l'ultima cosa a cui rinunciare.
     const cod = Number(d.contrassegno || 0)
-    if (cod > 0) {
-      const yBox = Math.max(y - 9 * MM, Y_FONDO)
+    // Il riquadro del contrassegno si appoggia sopra le barre: e' l'ultima cosa a cui rinunciare.
+    const yBox = cod > 0 ? Math.max(y - 9 * MM, Y_FONDO) : null
+
+    // La nota PRIMA del contrassegno: "citofonare portineria" serve a chi consegna, e messa dopo
+    // il riquadro finiva schiacciata contro le barre e saltava quasi sempre. Resta comunque un di
+    // piu': se non c'e' posto si lascia perdere, sulle barre non ci si stampa.
+    const tetto = (yBox !== null ? yBox + 10 * MM : Y_FONDO)
+    if (d.note && y - 3.5 * MM >= tetto) testo(d.note, 6 * MM, y, 8, font, grigio)
+
+    if (yBox !== null) {
       p.drawRectangle({ x: 6 * MM, y: yBox, width: L - 12 * MM, height: 10 * MM, color: rgb(0, 0, 0) })
       // Importo scritto all'italiana: e' la cifra che l'autista deve farsi dare in mano.
       const cifra = cod.toFixed(2).replace('.', ',')
       p.drawText(`CONTRASSEGNO  € ${cifra}`, { x: 9 * MM, y: yBox + 3.2 * MM, size: 13, font: grassetto, color: rgb(1, 1, 1) })
       y = yBox - 4 * MM
     }
-    // La nota e' un di piu': se non c'e' posto si lascia perdere, non si stampa sulle barre.
-    if (d.note && y >= Y_FONDO) { testo(d.note, 6 * MM, y, 8, font, grigio); y -= 5 * MM }
 
     // ── Codice a barre in fondo, dove il lettore lo cerca ──
     const larghezze = barreCode128(d.numero)
