@@ -50,9 +50,19 @@ export async function middleware(req: NextRequest) {
     )
     const { data: { user } } = await sb.auth.getUser()
     if (!user) return risposta
-    const { data: u } = await sb.from('utenti').select('ruolo').eq('id', user.id).single()
+    const { data: u } = await sb.from('utenti').select('ruolo, masters(pagamento_scaduto_dal)').eq('id', user.id).single()
     if ((u?.ruolo || '').toLowerCase() === 'agente') {
       return NextResponse.json({ error: 'Operazione non consentita: gli agenti hanno accesso in sola lettura.' }, { status: 403 })
+    }
+
+    // ACCOUNT SOSPESO PER CANONE NON PAGATO: non deve poter fare operazioni, e non basta nasconderle
+    // a schermo — le chiamate si possono fare lo stesso dagli strumenti del browser. Il blocco vale
+    // SOLO per lui: i suoi clienti e i suoi sotto-master hanno un master_id diverso e non lo vedono
+    // nemmeno. Restano aperte le rotte per PAGARE, altrimenti sarebbe un blocco senza uscita.
+    const scaduto = (u as any)?.masters?.pagamento_scaduto_dal
+    if (scaduto && (Date.now() - new Date(scaduto).getTime()) > 3 * 86400000
+        && !pathname.startsWith('/api/stripe/') && !pathname.startsWith('/api/auth/')) {
+      return NextResponse.json({ error: 'Account sospeso: il canone non risulta pagato. Riattiva il pagamento per continuare.' }, { status: 402 })
     }
     return risposta
   }

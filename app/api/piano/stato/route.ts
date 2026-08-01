@@ -17,6 +17,8 @@ export async function GET() {
 
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).maybeSingle()
   if (!utente?.master_id) return NextResponse.json({ bloccato: false })
+  const { data: mio } = await createAdminSupabase().from('masters')
+    .select('abbonamento_piano,abbonamento_prezzo').eq('id', utente.master_id).maybeSingle()
 
   const stato = await statoPiano(createAdminSupabase(), utente.master_id)
   const staff = utente.ruolo !== 'cliente' && !isAgente(utente)
@@ -31,6 +33,9 @@ export async function GET() {
     usato: stato.usato, limite: stato.limite, perc: stato.perc,
     avviso: stato.avviso, bloccato: stato.bloccato, bloccatoDaMe: stato.bloccatoDaMe,
     motivo: stato.motivo, giorniPerPagare: stato.giorniPerPagare,
+    // Servono alla schermata di riattivazione: chi e' congelato non puo' navigare fino ad
+    // Abbonamento, quindi il pagamento deve poter partire da li'.
+    piano: mio?.abbonamento_piano || null, prezzo: Number(mio?.abbonamento_prezzo || 0),
     messaggio: stato.bloccato ? messaggioBlocco(stato, true) : null,
   })
 }

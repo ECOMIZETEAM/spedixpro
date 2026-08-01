@@ -5,11 +5,16 @@ import { meseCorrente } from '@/lib/piani'
 // Ogni master vede nel proprio piano il traffico di TUTTA la sua rete: le spedizioni dei suoi
 // sotto-master e dei loro clienti sono spedizioni che lui rivende, e consumano il suo pacchetto.
 //
-// Il blocco invece SCENDE E NON SALE MAI. Se un master sfonda il suo limite si fermano lui, i suoi
-// sotto-master e i loro clienti — finche' non fa l'upgrade. Chi sta SOPRA non si ferma: ha il suo
-// piano, lo paga, e non deve subire il mancato upgrade di qualcun altro. Per questo il controllo
-// guarda la catena dal master della spedizione IN SU: se uno qualsiasi di quei livelli e' oltre il
-// proprio limite, la spedizione non parte.
+// Il blocco del LIMITE scende e non sale mai. Se un master sfonda il suo limite si fermano lui, i
+// suoi sotto-master e i loro clienti — finche' non fa l'upgrade. Chi sta SOPRA non si ferma: ha il
+// suo piano, lo paga, e non deve subire il mancato upgrade di qualcun altro. Per questo il
+// controllo guarda la catena dal master della spedizione IN SU.
+//
+// Il CONGELAMENTO per canone non pagato funziona in modo diverso, ed e' voluto: riguarda SOLO chi
+// non ha pagato. I suoi clienti e i suoi sotto-master continuano a spedire come sempre, i conteggi
+// e i movimenti proseguono, il flusso non si ferma. A fermarsi e' lui: non vede le pagine e non
+// puo' fare operazioni finche' non salda. E' una questione fra noi e lui, e non ha senso farla
+// pagare a chi ha pagato.
 //
 // Il conteggio non si fa contando le spedizioni: c'e' un contatore per (master, mese) tenuto da un
 // trigger sul database (scripts/limite-piano.sql). Contare a ogni creazione le spedizioni del mese
@@ -54,9 +59,9 @@ export async function statoPiano(admin: any, masterId: string | null | undefined
   // Limite 0/assente = nessun limite: il master principale non ce l'ha, e chi non ha ancora scelto
   // un piano e' gia' fermato dalla schermata di scelta piano, non serve fermarlo anche qui.
   const oltre = righe.filter(r => Number(r.limite) > 0 && Number(r.usato) >= Number(r.limite))
-  // CONGELATI: canone non pagato oltre i giorni di tolleranza. Vale la stessa regola del limite —
-  // ferma se stesso e tutta la rete sotto, mai quelli sopra.
-  const congelati = righe.filter(r => r.congelato)
+  // CONGELATO: solo il MIO (livello 0). Quello di un master sopra di me non mi riguarda — lui non
+  // vede il portale, ma la sua rete lavora regolarmente.
+  const congelati = righe.filter(r => r.congelato && r.livello === 0)
   const limite = Number(mio?.limite || 0)
   const usato = Number(mio?.usato || 0)
 
