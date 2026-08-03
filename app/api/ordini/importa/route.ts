@@ -137,8 +137,28 @@ export async function POST(req: NextRequest) {
 
   const missing = REQUIRED.filter(f => !M[f])
   if (missing.length) {
+    // NON basta dire quali colonne mancano: chi carica ha esportato QUALCOSA da Shopify, e da lì
+    // si esportano due file diversi che si somigliano nel nome. Uno ha gli indirizzi, l'altro no.
+    // Elencargli "cap, localita, provincia" lo lascia a cercare colonne che nel suo file non
+    // possono esserci, e la volta dopo riprova con lo stesso file.
+    const h = headers
+    const eReportVendite = (h.has('order_name') || h.has('ordine')) && (h.has('total_sales') || h.has('vendite_totali'))
+      && !h.has('shipping_zip') && !h.has('shipping_address1')
+    const eSoloAnagrafica = h.has('customer_name') || h.has('nome_cliente')
+
+    if (eReportVendite || (eSoloAnagrafica && missing.length >= 4)) {
+      return NextResponse.json({
+        error: 'Questo è il report delle VENDITE, non degli ordini: dentro ci sono numero, data e importo, ma nessun indirizzo di spedizione. '
+          + 'Da Shopify serve l\'altro export: Ordini → seleziona gli ordini → Esporta → "CSV per Excel". '
+          + 'Quel file contiene Shipping Name, Shipping Address, Shipping Zip, Shipping City e Shipping Province, e si carica così com\'è.',
+      }, { status: 400 })
+    }
+
+    // Caso generico: si dice anche cosa il file CONTIENE, così si vede subito se e' il file giusto.
+    const trovate = [...headers].slice(0, 12).join(', ')
     return NextResponse.json({
-      error: `Colonne non riconosciute nel file: ${missing.join(', ')}. Usa un export Shopify/eBay/Amazon oppure il nostro template.`,
+      error: `Nel file mancano le colonne: ${missing.join(', ')}. Nel file ho trovato invece: ${trovate}. `
+        + 'Serve un export che contenga l\'indirizzo di spedizione (Shopify: Ordini → Esporta; Amazon: report degli ordini; eBay: export vendite) oppure il nostro template.',
     }, { status: 400 })
   }
 
