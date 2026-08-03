@@ -47,6 +47,14 @@ export async function autenticaApiKey(req: Request): Promise<ApiContext | null> 
   try {
     const { data: st } = await admin.rpc('fn_stato_api_cliente', { p_cliente: data.cliente_id })
     const s: any = st || {}
+    // I TRE GIORNI PARTONO DA QUI. Il primo momento in cui il pacchetto risulta finito si segna,
+    // e da li' si contano. Quando il mese riparte e si torna sotto, il segno si cancella:
+    // altrimenti chi ha sforato a luglio se lo porterebbe dietro per sempre.
+    if (s?.oltre_limite && !s?.sforato_dal) {
+      admin.from('clienti').update({ api_limite_sforato_dal: new Date().toISOString() }).eq('id', data.cliente_id).then(() => {}, () => {})
+    } else if (!s?.oltre_limite && s?.sforato_dal) {
+      admin.from('clienti').update({ api_limite_sforato_dal: null }).eq('id', data.cliente_id).then(() => {}, () => {})
+    }
     if (s?.bloccato) {
       blocco = {
         motivo: s.oltre_limite ? 'pacchetto_esaurito' : 'non_pagato',
@@ -70,8 +78,11 @@ export function rispostaBlocco(ctx: ApiContext | null): Response | null {
   const messaggio = b.motivo === 'pacchetto_esaurito'
     ? `Pacchetto esaurito: hai usato ${b.usate} delle ${b.limite} spedizioni comprese nel piano ${b.piano}. Passa a un pacchetto piu' grande dal portale, in Impostazioni → Chiavi API.`
     : 'Pagamento non riuscito: le API restano ferme finche\' non viene saldato. Sistemalo dal portale, in Impostazioni → Chiavi API.'
+  // NON 402. Quel codice i gestionali lo traducono in "credito insufficiente" — e' successo
+  // davvero, e il cliente e' andato a cercare un problema di credito che non esisteva. 429 dice
+  // quello che e' davvero: la quota del periodo e' finita.
   return new Response(JSON.stringify({ error: messaggio, codice: b.motivo, usate: b.usate, limite: b.limite }), {
-    status: 402, headers: { 'Content-Type': 'application/json' },
+    status: 429, headers: { 'Content-Type': 'application/json' },
   })
 }
 
