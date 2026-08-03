@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { calcolaPrezzoListino } from '@/lib/pricing'
 import { isAgente, clientiAgente } from '@/lib/agente'
+import { vedeLaRete } from '@/lib/perimetro'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -36,6 +37,9 @@ export async function GET(req: NextRequest) {
   let intestazioneCliente = ''
   let rett: any[] = []
 
+  // La rete e' roba da master: l'agente era gia' fermato piu' sopra, il CLIENTE no — e da qui in
+  // giu' si passa al client amministrativo, che scavalca la RLS.
+  if (masterSel && !vedeLaRete(utente)) return NextResponse.json({ righe: [], master: {}, cliente: {} })
   if (masterSel) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const { masterIdsVisibili } = await import('@/lib/rete-masters')

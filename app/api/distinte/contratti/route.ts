@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { vedeLaRete } from '@/lib/perimetro'
 
 // restituisce i contratti con il conteggio delle spedizioni ancora da mettere in distinta
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const p = req.nextUrl.searchParams
   const clienteIdRaw = p.get('clienteId')
   const masterSel = clienteIdRaw && clienteIdRaw.startsWith('m:') ? clienteIdRaw.slice(2) : null
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
 
   let db: any = supabase
   let masterFilter: string[] = [utente?.master_id]
-  if (masterSel && utente?.master_id) {
+  if (masterSel && vedeLaRete(utente)) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const { sottoAlberoMasterIds, masterIdsVisibili } = await import('@/lib/rete-masters')
     const admin = createAdminSupabase()

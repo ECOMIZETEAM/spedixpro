@@ -2,6 +2,7 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { fetchAll } from '@/lib/fetch-all'
+import { vedeLaRete } from '@/lib/perimetro'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest) {
 
   let db: any = supabase
   let subtreeSel: string[] | null = null
-  if (masterSel && utente?.master_id) {
+  if (masterSel && vedeLaRete(utente)) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const { sottoAlberoMasterIds, masterIdsVisibili } = await import('@/lib/rete-masters')
     const adminDb = createAdminSupabase()

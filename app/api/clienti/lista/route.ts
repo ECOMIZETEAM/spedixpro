@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { isProviderTecnico } from '@/lib/corriere-logo'
 import { isAgente, nomeAgente } from '@/lib/agente'
+import { vedeLaRete } from '@/lib/perimetro'
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -57,7 +58,7 @@ export async function GET(req: NextRequest) {
     }).map((co:any)=>({ nome_contratto: co.nome_contratto, tipo: isProviderTecnico(co.tipo) ? null : co.tipo }))
     return { ...c, contratti_attivi: attivi, negozi: negoziMap.get(c.id) || [] }
   })
-  if (conMaster && utente?.master_id && !isAgente(utente)) {
+  if (conMaster && vedeLaRete(utente)) {
     // I sotto-master agganciati compaiono come pseudo-clienti (id = "m:<masterId>")
     // (mai per l'agente: non deve vedere la rete/sotto-master)
     const { createAdminSupabase } = await import('@/lib/supabase-admin')

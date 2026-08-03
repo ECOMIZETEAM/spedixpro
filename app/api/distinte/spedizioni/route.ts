@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { vedeLaRete } from '@/lib/perimetro'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
   const al = p.get('al')
   let db: any = supabase
   let masterFilter: string[] = [utente?.master_id]
-  if (masterSel && utente?.master_id) {
+  if (masterSel && vedeLaRete(utente)) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const { sottoAlberoMasterIds, masterIdsVisibili } = await import('@/lib/rete-masters')
     const admin = createAdminSupabase()
