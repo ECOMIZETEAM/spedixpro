@@ -34,6 +34,10 @@
     {
       "path": "/api/abbonamento/controllo-carta",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/spedizioni/tmp-recupero",
+      "schedule": "*/15 * * * *"
     }
   ]
 }
