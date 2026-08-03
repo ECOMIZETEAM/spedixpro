@@ -102,8 +102,26 @@ export async function POST(req: NextRequest) {
       }
     }
     // Una spedizione che esce senza NESSUNA pagina e' il guasto peggiore: il pacco parte senza
-    // etichetta e nessuno se ne accorge. Almeno resta scritto nei log.
-    if (!stampate) console.error('[ETICHETTE-BULK] nessuna etichetta stampata per', s.numero, s.id)
+    // etichetta e nessuno se ne accorge. Nei log restava scritto, ma i log non li guarda chi
+    // stampa: oggi una spedizione e' stata ristampata quattro volte di fila senza che uscisse
+    // niente. Quindi il buco si mette NEL FOGLIO, dove chi stampa lo vede.
+    if (!stampate) {
+      console.error('[ETICHETTE-BULK] nessuna etichetta stampata per', s.numero, s.id)
+      try {
+        const pg = pdfMerged.addPage([283, 425])
+        pg.drawText('ETICHETTA NON DISPONIBILE', { x: 20, y: 360, size: 14, font: fontBold })
+        pg.drawText(String(s.numero || ''), { x: 20, y: 335, size: 12, font })
+        for (const [i, riga] of [
+          'Per questa spedizione non e\' stato possibile',
+          'produrre l\'etichetta da stampare.',
+          '',
+          'Non spedire il pacco con questo foglio:',
+          'apri la spedizione e ristampa la sua etichetta.',
+        ].entries()) {
+          pg.drawText(riga, { x: 20, y: 300 - i * 18, size: 10, font })
+        }
+      } catch (e) { console.error('Errore foglio segnaposto:', e) }
+    }
     // ...poi il RIEPILOGO ordine SOTTO l'etichetta (se il cliente lo ha attivato).
     try { disegnaRiepilogoSped(pdfMerged, font, fontBold, riepCtx, s) } catch (e) { console.error('Errore riepilogo:', e) }
   }
