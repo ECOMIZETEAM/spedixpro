@@ -119,11 +119,139 @@ export async function GET(req: NextRequest) {
     else { soloEtichette++; console.log('[TMP] recuperate solo le etichette', s.numero) }
   }
 
+  // ── SECONDA PARTE: I MULTICOLLO SENZA LE ETICHETTE DEI SINGOLI COLLI ──
+  //
+  // Qui il numero c'e' ed e' giusto: manca l'etichetta dei colli dal secondo in poi, perche' al
+  // momento della creazione il provider aveva pronta solo quella principale. Il pacco 2 e il pacco 3
+  // partono senza niente sopra.
+  //
+  // Per richiedere di nuovo le etichette serve l'ID ORDINE del provider, ed e' gia' in casa:
+  // raw_response._idOrdine, scritto alla creazione e gia' usato dalla ristampa etichetta, dai ritiri
+  // e dal tracking. (Sull'etichetta e' anche stampato un "Rif.", ma quello e' il riferimento SCRITTO
+  // DAL CLIENTE: leggerlo da li' vorrebbe dire chiedere al provider l'ordine di un altro, visto che
+  // tutti i contratti condividono la stessa chiave.)
+  const colliRecuperati = await recuperaMulticollo(admin)
+
+  // ── TERZA PARTE: L'ESTRATTO CONTO CHE CITA UN NUMERO CHE NON ESISTE ──
+  //
+  // Quasi tutte le spedizioni di questo contratto nascono col numero provvisorio e lo perdono dopo
+  // pochi secondi, sostituito da chi completa la creazione. Il numero della spedizione diventa
+  // quello giusto, ma il MOVIMENTO no: la sua descrizione era gia' stata scritta, e nessuno ci
+  // torna sopra. Risultato: il cliente apre l'estratto conto e legge addebiti intestati a
+  // "TMP-25629971", che non trova da nessuna parte e non sa a cosa corrispondano.
+  //
+  // Il ricambio del numero avviene troppo in fretta perche' il controllo qui sopra lo intercetti:
+  // quando questo lavoro passa, la spedizione ha gia' il numero buono. Quindi si parte dall'altro
+  // capo — dai movimenti — e si rimette il numero vero. Solo il testo: importi, date e collegamenti
+  // non si toccano.
+  const estrattoContoSistemato = await sistemaMovimenti(admin)
+
   return NextResponse.json({
     esaminate: (ferme || []).length,
     completate,            // numero provvisorio sostituito con la LDV vera
     soloEtichette,         // etichette recuperate, la LDV non c'e' ancora
     ancoraNulla,           // il provider non ha ancora niente
     saltate,               // non e' un contratto che produce numeri provvisori
+    colliRecuperati,       // multicollo a cui sono state riprese le etichette dei singoli colli
+    estrattoContoSistemato,
   })
+}
+
+async function sistemaMovimenti(admin: any): Promise<number> {
+  // A blocchi: le righe da sistemare sono migliaia e non c'e' nessuna fretta di finirle in un giro.
+  const { data: mv } = await admin.from('movimenti')
+    .select('id,descrizione,riferimento,spedizione_id')
+    .like('descrizione', '%TMP-%')
+    .not('spedizione_id', 'is', null)
+    .limit(300)
+  if (!mv?.length) return 0
+
+  const { data: sped } = await admin.from('spedizioni')
+    .select('id,numero').in('id', [...new Set(mv.map((m: any) => m.spedizione_id))])
+  const numeroDi = new Map<string, string>()
+  for (const s of (sped || [])) numeroDi.set(s.id, s.numero)
+
+  let fatti = 0
+  for (const m of mv) {
+    const vero = numeroDi.get(m.spedizione_id)
+    // Se la spedizione e' ancora col numero provvisorio non c'e' niente da mettere al suo posto:
+    // ci ripasseremo quando ce l'avra'.
+    if (!vero || vero.startsWith('TMP-')) continue
+    const tmp = (String(m.descrizione || '').match(/TMP-\d+/) || [])[0]
+    if (!tmp) continue
+    const patch: any = { descrizione: String(m.descrizione).split(tmp).join(vero) }
+    if (m.riferimento && String(m.riferimento).includes(tmp)) patch.riferimento = String(m.riferimento).split(tmp).join(vero)
+    const { error } = await admin.from('movimenti').update(patch).eq('id', m.id)
+    if (!error) fatti++
+  }
+  if (fatti) console.log('[ESTRATTO CONTO] rimesso il numero vero su', fatti, 'movimenti')
+  return fatti
+}
+
+async function recuperaMulticollo(admin: any): Promise<number> {
+  const { easyparcelWaybillGrezza } = await import('@/lib/easyparcel')
+  const { data: cor } = await admin.from('corrieri').select('id,credenziali').eq('tipo', 'easyparcel')
+  const chiaveDi = new Map<string, string>()
+  for (const c of (cor || [])) if (c?.credenziali?.apikey) chiaveDi.set(c.id, c.credenziali.apikey)
+  if (!chiaveDi.size) return 0
+
+  // Le etichette NON si portano dietro nella ricerca: sono PDF da mezzo mega l'uno, e tirarne fuori
+  // cinquanta ogni quarto d'ora per poi scartarli quasi sempre e' peso inutile addosso al database.
+  const { data: multi } = await admin.from('spedizioni')
+    .select('id,numero,colli,colli_dettaglio,corriere_id,lunghezza,larghezza,altezza,peso_reale,ordine:raw_response->_idOrdine')
+    .in('corriere_id', [...chiaveDi.keys()])
+    .gt('colli', 1)
+    .not('numero', 'like', 'TMP-%')
+    .gte('created_at', new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString())
+    .order('created_at', { ascending: false })
+    .limit(100)
+
+  let sistemate = 0
+  for (const s of (multi || [])) {
+    const gia = (Array.isArray(s.colli_dettaglio) ? s.colli_dettaglio : []).filter((x: any) => x?.etichetta_url).length
+    if (gia >= s.colli) continue                       // completa: non si tocca
+    const ordine = s.ordine ? String(s.ordine) : null
+    if (!ordine) continue
+
+    let w: any = null
+    try { w = await easyparcelWaybillGrezza(chiaveDi.get(s.corriere_id)!, ordine) } catch { continue }
+
+    // LA PROVA CHE E' PROPRIO QUESTA SPEDIZIONE. Il riferimento e' stato letto da un PDF: se per
+    // qualsiasi motivo fosse quello di un altro ordine, scriveremmo su un pacco le etichette di un
+    // altro — che e' molto peggio di un'etichetta mancante. Se il numero non combacia, si lascia.
+    if (String(w?.numero || '') !== s.numero) {
+      console.warn('[COLLI] riferimento non combaciante, lasciata com era', s.numero)
+      continue
+    }
+    const sing = (w?.singole || []).filter((x: any) => x?.pdfBase64)
+    if (sing.length < s.colli) continue                // ancora incomplete dall'altra parte
+
+    // LE MISURE VANNO MESSE, NON LASCIATE VUOTE.
+    // Le spedizioni che arrivano dalle API non hanno il dettaglio dei colli: il prezzo lo calcola
+    // ripiegando sulle misure della spedizione ripetute per ogni collo. Ma il calcolo guarda PRIMA
+    // colli_dettaglio: se lo troviamo riempito di oggetti senza misure, il volumetrico viene zero e
+    // il peso fatturato crolla. Quindi ogni collo che nasce qui prende le misure della spedizione,
+    // che e' esattamente cio' che il calcolo avrebbe usato da solo: il prezzo non si muove di un
+    // centesimo.
+    const misureBase = {
+      lunghezza: Number(s.lunghezza) || undefined,
+      larghezza: Number(s.larghezza) || undefined,
+      altezza: Number(s.altezza) || undefined,
+    }
+    const dett = Array.isArray(s.colli_dettaglio) && s.colli_dettaglio.length === s.colli
+      ? [...s.colli_dettaglio]
+      : Array.from({ length: s.colli }, (_: any, i: number) => ({ ...(s.colli_dettaglio?.[i] || {}) }))
+    for (let i = 0; i < s.colli; i++) {
+      const c: any = { ...dett[i] }
+      if (c.lunghezza == null && c.larghezza == null && c.altezza == null) Object.assign(c, misureBase)
+      dett[i] = { ...c, numero: sing[i].numero || c?.numero, etichetta_url: `data:application/pdf;base64,${sing[i].pdfBase64}` }
+    }
+    // Si scrivono SOLO le etichette dei colli. Il numero della spedizione qui non si tocca mai:
+    // e' gia' quello giusto.
+    const { error } = await admin.from('spedizioni').update({ colli_dettaglio: dett }).eq('id', s.id)
+    if (error) { console.error('[COLLI] scrittura fallita', s.numero, error.message); continue }
+    sistemate++
+    console.log('[COLLI] recuperate', s.colli, 'etichette per', s.numero)
+  }
+  return sistemate
 }
