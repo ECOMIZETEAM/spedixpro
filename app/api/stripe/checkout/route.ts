@@ -25,7 +25,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
 
-  const { pianoId } = await req.json().catch(() => ({} as any))
+  const corpo = await req.json().catch(() => ({} as any))
+  const pianoId = corpo?.pianoId
+  // Una tantum invece dell'abbonamento. Non e' un'alternativa che si offre: e' il ripiego per chi
+  // la banca ha gia' rifiutato, perche' molte carte aziendali e prepagate non accettano il mandato
+  // ricorrente pur avendo i soldi sopra.
+  const singolo = corpo?.modo === 'singolo'
   const piano = pianoById(String(pianoId || ''))
   if (!piano || !String(pianoId).startsWith('enterprise_')) return NextResponse.json({ error: 'Piano non valido' }, { status: 400 })
 
@@ -132,7 +137,24 @@ export async function POST(req: NextRequest) {
   const customer = await clienteStripe(admin, m as any)
   let sessione
   try {
-    sessione = await s.checkout.sessions.create({
+    sessione = singolo ? await s.checkout.sessions.create({
+      mode: 'payment',
+      customer,
+      line_items: [{
+        quantity: 1,
+        price_data: {
+          currency: 'eur',
+          unit_amount: Math.round(Number(piano.prezzo) * 100),
+          tax_behavior: 'inclusive',
+          product_data: { name: `MoovExpress ${piano.nome} — canone ${meseCorrente()}` },
+        },
+      }],
+      tax_id_collection: { enabled: true },
+      customer_update: { name: 'auto', address: 'auto' },
+      metadata: { master_id: m.id, piano: pianoId, modo: 'singolo', mese: meseCorrente() },
+      success_url: `${base}/dashboard/abbonamento?pagamento=ok`,
+      cancel_url: `${base}/dashboard/abbonamento`,
+    }) : await s.checkout.sessions.create({
       mode: 'subscription',
       customer,
       // L'ABBONAMENTO PARTE OGGI: canone pieno subito, e poi pieno ogni mese.

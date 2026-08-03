@@ -13,6 +13,9 @@ export default function AbbonamentoPage() {
   const [loading, setLoading] = useState(true)
   const [azione, setAzione] = useState('')
   const [msg, setMsg] = useState('')
+  // Tornato indietro dalla cassa senza pagare: quasi sempre e' la banca che ha rifiutato il
+  // mandato ricorrente. Si propone il pagamento del solo mese, che quelle carte accettano.
+  const [rifiutato, setRifiutato] = useState(false)
   const [meseScelto, setMeseScelto] = useState('')   // vuoto = mese in corso
   const [filtro, setFiltro] = useState('tutti')
 
@@ -22,6 +25,8 @@ export default function AbbonamentoPage() {
     setStato(d); setLoading(false)
   }
   useEffect(()=>{ carica() }, [])
+  // Tornato dalla cassa senza aver pagato: la banca ha rifiutato il rinnovo automatico.
+  useEffect(()=>{ if (new URLSearchParams(window.location.search).get('rifiutato')) setRifiutato(true) }, [])
   useEffect(()=>{
     const esito = new URLSearchParams(window.location.search).get('pagamento')
     if (esito === 'ok') setMsg('✓ Pagamento ricevuto — il piano si attiva in pochi secondi, ricarica se non lo vedi già.')
@@ -46,9 +51,9 @@ export default function AbbonamentoPage() {
   // Pagamento con CARTA. Il piano non si attiva qui: si attiva quando il circuito conferma
   // l'incasso. Chi ha gia' l'abbonamento non ripassa dalla cassa — si cambia il piano su quello
   // che ha, col conguaglio dei giorni che restano.
-  async function pagaConCarta(pianoId:string) {
+  async function pagaConCarta(pianoId:string, modo?:'singolo') {
     setAzione(pianoId); setMsg('')
-    const res = await fetch('/api/stripe/checkout', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pianoId }) })
+    const res = await fetch('/api/stripe/checkout', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pianoId, modo }) })
     const d = await res.json().catch(()=>({}))
     if (d.url) { window.location.href = d.url; return }
     setAzione('')
@@ -138,7 +143,27 @@ export default function AbbonamentoPage() {
             </select>
           </div>
         </div>
-        {msg && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px',marginBottom:'14px',fontSize:'13px',color:'#ea580c'}}>{msg}</div>}
+        {rifiutato && (
+        <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'14px 16px',marginBottom:'14px'}}>
+          <div style={{fontSize:'14px',fontWeight:700,color:'#9a3412'}}>Il rinnovo automatico non è passato</div>
+          <div style={{fontSize:'13.5px',color:'#9a3412',lineHeight:1.6,marginTop:'5px'}}>
+            Succede con le carte aziendali e le prepagate, che spesso non accettano gli addebiti
+            ricorrenti — non è un problema di saldo. Puoi pagare <strong>solo questo mese</strong> con la
+            stessa carta: il mese prossimo dovrai rifarlo a mano.
+          </div>
+          <div style={{display:'flex',gap:'8px',marginTop:'10px',flexWrap:'wrap'}}>
+            <button disabled={!!azione} onClick={()=>pagaConCarta(stato?.piano, 'singolo')}
+              style={{background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>
+              {azione ? '…' : 'Paga solo questo mese'}
+            </button>
+            <button onClick={()=>setRifiutato(false)}
+              style={{background:'#fff',color:'#9a3412',border:'1px solid #fed7aa',borderRadius:'6px',padding:'9px 16px',fontSize:'13px',fontWeight:600,cursor:'pointer'}}>
+              Riprova col rinnovo automatico
+            </button>
+          </div>
+        </div>
+      )}
+      {msg && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px',marginBottom:'14px',fontSize:'13px',color:'#ea580c'}}>{msg}</div>}
 
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:'12px',marginBottom:'16px'}}>
           <div style={card}>

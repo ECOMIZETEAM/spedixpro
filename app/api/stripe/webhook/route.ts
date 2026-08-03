@@ -142,6 +142,29 @@ export async function POST(req: NextRequest) {
         const o = evento.data.object
         const m = await masterDi(o)
         if (!m) break
+        // CANONE PAGATO UNA TANTUM. Nessun abbonamento da leggere: si attiva il piano, si sblocca
+        // il congelamento e si registra l'incasso. NON si salva stripe_subscription_id, altrimenti
+        // il portale mostrerebbe un rinnovo automatico che non esiste e il mese dopo nessuno lo
+        // solleciterebbe.
+        if (evento.type === 'checkout.session.completed' && o?.mode === 'payment') {
+          const pUna = pianoById(String(o?.metadata?.piano || ''))
+          if (o?.payment_status === 'paid' && pUna) {
+            const mese = String(o?.metadata?.mese || meseCorrente())
+            await admin.from('masters').update({
+              abbonamento_piano: pUna.id, abbonamento_limite: pUna.limite, abbonamento_prezzo: pUna.prezzo,
+              abbonamento_mese: mese, pagamento_scaduto_dal: null,
+            }).eq('id', m.id)
+            try {
+              await admin.from('abbonamenti_pagamenti').upsert({
+                master_id: m.id, root_id: await rootId(), piano: pUna.id, mese,
+                importo: pUna.prezzo, pagato: true, pagato_il: new Date().toISOString(),
+                metodo: 'carta', stripe_invoice_id: String(o?.payment_intent || o?.id),
+              }, { onConflict: 'stripe_invoice_id' })
+            } catch (e: any) { console.error('[STRIPE] incasso una tantum non registrato:', e?.message) }
+            console.log('[STRIPE] canone pagato una tantum', m.nome, pUna.id, mese)
+          }
+          break
+        }
         const subId = evento.type === 'checkout.session.completed'
           ? (typeof o.subscription === 'string' ? o.subscription : o.subscription?.id)
           : o.id
