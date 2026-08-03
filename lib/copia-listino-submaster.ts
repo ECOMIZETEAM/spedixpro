@@ -215,18 +215,40 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   // Le zone da riallineare si lavorano a gruppi in PARALLELO (prima una alla volta).
   for (let i = 0; i < lavoriCap.length; i += 6) await Promise.all(lavoriCap.slice(i, i + 6).map(fn => fn()))
 
-  // 3) LISTINO CORRIERI del sotto-master (riuso il primo, altrimenti creo)
-  // listini_corrieri.corriere_id è NOT NULL: uso il primo corriere mappato.
+  // 3) UN LISTINO PER CONTRATTO, non uno per tutti.
+  //
+  // Prima si riusava "il primo listino corrieri che c'e'" e ci si scriveva dentro le fasce di
+  // TUTTI i contratti propagati. Ogni contratto e' invece una cosa a se': ha le sue zone, i suoi
+  // prezzi e il suo divisore volumetrico, e mescolarli in un contenitore solo li fa interferire.
+  // E' successo davvero: le tariffe di Poste, BRT, SDA e DVA sono finite dentro il listino del
+  // CIRCUITO INTERNO di un master — che con quei contratti non c'entra niente — solo perche' quel
+  // listino era "il primo". Da li' bastava cambiare il divisore del circuito per spostare i prezzi
+  // di 2.810 spedizioni al mese fatte con un altro corriere.
   const primoCorr = [...mapCorr.values()][0]
   if (!primoCorr) return { ok: false, reason: 'nessun corriere da copiare' }
-  let subListinoId = mieiIds[0]
-  if (!subListinoId) {
-    const { data: nl } = await admin.from('listini_corrieri').insert({ master_id: subMasterId, corriere_id: primoCorr, nome: listinoSrc?.nome || 'Listino Corrieri', fattore_volume: listinoSrc?.fattore_volume || 5000, solo_peso_reale: !!listinoSrc?.solo_peso_reale, attivo: true }).select('id').single()
-    subListinoId = nl?.id
-  } else {
-    await admin.from('listini_corrieri').update({ fattore_volume: listinoSrc?.fattore_volume || 5000, solo_peso_reale: !!listinoSrc?.solo_peso_reale }).eq('id', subListinoId)
+
+  // Il listino di CIASCUN contratto del sotto-master: quello legato a lui, altrimenti si crea.
+  const listinoPerCorriere = new Map<string, string>()
+  {
+    const { data: gia } = await admin.from('listini_corrieri')
+      .select('id,corriere_id').eq('master_id', subMasterId)
+    for (const l of (gia || [])) if ((l as any).corriere_id) listinoPerCorriere.set((l as any).corriere_id, (l as any).id)
   }
+  for (const subCid of new Set(mapCorr.values())) {
+    if (listinoPerCorriere.has(subCid)) continue
+    const { data: co } = await admin.from('corrieri').select('nome_contratto').eq('id', subCid).maybeSingle()
+    const { data: nl } = await admin.from('listini_corrieri').insert({
+      master_id: subMasterId, corriere_id: subCid,
+      nome: (co as any)?.nome_contratto || listinoSrc?.nome || 'Listino Corrieri',
+      fattore_volume: listinoSrc?.fattore_volume || 5000,
+      solo_peso_reale: !!listinoSrc?.solo_peso_reale, attivo: true,
+    }).select('id').single()
+    if (nl?.id) listinoPerCorriere.set(subCid, nl.id)
+  }
+  const subListinoId = listinoPerCorriere.get(primoCorr) || mieiIds[0]
   if (!subListinoId) return { ok: false, reason: 'errore creazione listino' }
+  // Dove finisce la fascia di un contratto: nel listino DI QUEL contratto.
+  const listinoDi = (subCid: string): string => listinoPerCorriere.get(subCid) || subListinoId
 
   const subCorrIds = [...new Set(mapCorr.values())]
 
@@ -255,7 +277,7 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   // 4) LINK contratti attivati (con fattore_volume per-corriere ereditato dal padre)
   const { data: linkEsist } = await admin.from('listini_corrieri_corrieri').select('corriere_id').eq('listino_id', subListinoId)
   const linkSet = new Set((linkEsist || []).map((l: any) => l.corriere_id))
-  const nuoviLink = subCorrIds.filter((cid) => !linkSet.has(cid)).map((cid) => ({ listino_id: subListinoId, corriere_id: cid, fattore_volume: fattoreSub(cid) }))
+  const nuoviLink = subCorrIds.filter((cid) => !linkSet.has(cid)).map((cid) => ({ listino_id: listinoDi(cid), corriere_id: cid, fattore_volume: fattoreSub(cid) }))
   if (nuoviLink.length) await admin.from('listini_corrieri_corrieri').insert(nuoviLink)
   // Allineo il fattore anche sui link GIÀ esistenti (fix dei dati in essere sui sotto-master) e le
   // righe listini_corrieri PER-CORRIERE = la FONTE del calcolo prezzo (billing): ogni corriere del
@@ -281,12 +303,13 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
 
   // 5) FASCE — IDEMPOTENTE: prima ripulisco le fasce dei corrieri ereditati su QUESTO listino, poi
   //    reinserisco. Senza, ogni ri-sync (non-force) accumulava DUPLICATI (stesso listino/corriere/zona).
-  const fasceIns = fasceSrc.map((f: any) => ({ listino_id: subListinoId, corriere_id: mapCorr.get(f.corriere_id) || null, zona_id: mapZona.get(f.zona_id) || null, peso_min: 0, peso_max: f.peso_max, prezzo: f.prezzo, tipo: f.tipo, fuel: Number(f.fuel) || 0 })).filter((f: any) => f.corriere_id && f.zona_id)
+  // Ogni fascia nel listino DEL SUO contratto.
+  const fasceIns = fasceSrc.map((f: any) => ({ listino_id: listinoDi(mapCorr.get(f.corriere_id) || ''), corriere_id: mapCorr.get(f.corriere_id) || null, zona_id: mapZona.get(f.zona_id) || null, peso_min: 0, peso_max: f.peso_max, prezzo: f.prezzo, tipo: f.tipo, fuel: Number(f.fuel) || 0 })).filter((f: any) => f.corriere_id && f.zona_id)
   if (subCorrIds.length) await admin.from('listini_corrieri_fasce').delete().eq('listino_id', subListinoId).in('corriere_id', subCorrIds)
   if (fasceIns.length) await admin.from('listini_corrieri_fasce').insert(fasceIns)
 
   // 6) SUPPLEMENTI (assicurazione, contrassegno, giacenze, ritiro, accessori) — IDEMPOTENTE come le fasce.
-  const supplIns = (supplSrc || []).map((s: any) => ({ listino_id: subListinoId, corriere_id: mapCorr.get(s.corriere_id) || null, tipo: s.tipo, nome: s.nome, valore: s.valore, tipo_calcolo: s.tipo_calcolo, descrizione: s.descrizione })).filter((s: any) => s.corriere_id)
+  const supplIns = (supplSrc || []).map((s: any) => ({ listino_id: listinoDi(mapCorr.get(s.corriere_id) || ''), corriere_id: mapCorr.get(s.corriere_id) || null, tipo: s.tipo, nome: s.nome, valore: s.valore, tipo_calcolo: s.tipo_calcolo, descrizione: s.descrizione })).filter((s: any) => s.corriere_id)
   if (subCorrIds.length) await admin.from('listini_corrieri_supplementi').delete().eq('listino_id', subListinoId).in('corriere_id', subCorrIds)
   if (supplIns.length) await admin.from('listini_corrieri_supplementi').insert(supplIns)
 
