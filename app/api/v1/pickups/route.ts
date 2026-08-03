@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { autenticaApiKey } from '@/lib/api-auth'
+import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { spediamoproCreatePickup, spediamoproWaitPickupCode } from '@/lib/spediamopro'
 import { erroreRitiroPulito } from '@/lib/errore-corriere'
@@ -27,6 +27,7 @@ function fasciaOraria(from: any, to: any): { from: string; to: string } {
 export async function POST(req: NextRequest) {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
+  const _b = rispostaBlocco(ctx); if (_b) return _b
   const body = await req.json().catch(() => ({}))
   const admin = createAdminSupabase()
 

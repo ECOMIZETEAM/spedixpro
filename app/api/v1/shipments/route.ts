@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { autenticaApiKey } from '@/lib/api-auth'
+import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
 import { registraMovimento } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
@@ -18,6 +18,7 @@ import { EMAIL_PER_CORRIERE,
 export async function GET(req: NextRequest) {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
+  const _b = rispostaBlocco(ctx); if (_b) return _b
   const admin = createAdminSupabase()
   const url = new URL(req.url)
   const limit = Math.min(200, Math.max(1, parseInt(url.searchParams.get('limit') || '50') || 50))
@@ -37,6 +38,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
+  const _b = rispostaBlocco(ctx); if (_b) return _b
   const body = await req.json().catch(() => ({}))
   const admin = createAdminSupabase()
 

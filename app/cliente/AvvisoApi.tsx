@@ -86,12 +86,12 @@ export default function AvvisoApi() {
             Tutti i pacchetti comprendono tutti i canali di vendita, il salvataggio automatico
             settimanale e gli aggiornamenti gratuiti per sempre. Dal pacchetto Easy in su hai anche
             l’assistenza via chat ed email.
-            {!gratis && <> Trovi tutto in <strong>Impostazioni → API</strong>, dove puoi attivare il pagamento con carta.</>}
+            {!gratis && <> Trovi tutto in <strong>Impostazioni → Chiavi API</strong>, dove puoi attivare il pagamento con carta.</>}
           </p>
 
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
             {!gratis && (
-              <a href="/cliente/impostazioni/api" onClick={hoCapito}
+              <a href="/cliente/impostazioni/api-key" onClick={hoCapito}
                 style={{ background: ACCENT, color: '#fff', textDecoration: 'none', borderRadius: '8px', padding: '11px 20px', fontSize: '14px', fontWeight: 700 }}>
                 Vedi i pacchetti
               </a>

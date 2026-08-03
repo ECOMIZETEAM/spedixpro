@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { autenticaApiKey } from '@/lib/api-auth'
+import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 
 // Dettaglio/stato di una spedizione creata via API
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
+  const _b = rispostaBlocco(ctx); if (_b) return _b
   const { id } = await params
   const admin = createAdminSupabase()
   const { data: s } = await admin.from('spedizioni')
@@ -27,6 +28,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
+  const _b = rispostaBlocco(ctx); if (_b) return _b
   const { id } = await params
   const admin = createAdminSupabase()
   const { data: sped } = await admin.from('spedizioni')

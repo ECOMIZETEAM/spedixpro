@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { autenticaApiKey } from '@/lib/api-auth'
+import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { leggiEtichetta } from '@/lib/etichette'
 
 // Scarica l'etichetta (LDV) PDF della spedizione creata via API
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
+  const _b = rispostaBlocco(ctx); if (_b) return _b
   const { id } = await params
   const admin = createAdminSupabase()
   const { data: s } = await admin.from('spedizioni')

@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import PianoApi from './PianoApi'
 
 const ACCENT = '#f97316'
 const card = { background:'#fff', borderRadius:'8px', border:'1px solid #e8e8e8', padding:'16px' as const }
@@ -109,6 +110,7 @@ export default function ApiKeysPage() {
           )
         })}
       </div>
+      <PianoApi />
     </div>
   )
 }

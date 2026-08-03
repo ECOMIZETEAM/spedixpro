@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { stripeConfigurato, stripeClient, pianoDaPrezzo } from '@/lib/stripe'
+import { stripeConfigurato, stripeClient, pianoDaPrezzo, pianoApiDaPrezzo } from '@/lib/stripe'
 import { pianoById, meseCorrente } from '@/lib/piani'
 
 export const dynamic = 'force-dynamic'
@@ -52,6 +52,72 @@ export async function POST(req: NextRequest) {
   async function rootId(): Promise<string | null> {
     const { data } = await admin.from('masters').select('id').is('parent_master_id', null).limit(1)
     return data?.[0]?.id || null
+  }
+
+  // ── I PACCHETTI API DEI CLIENTI ───────────────────────────────────────────
+  // Passano dallo stesso circuito e quindi dalla stessa porta, ma sono un'altra cosa dai canoni
+  // dei master: si riconoscono dal metadato `cliente_id`, che ci mettiamo noi quando apriamo la
+  // cassa. Vengono trattati qui e la funzione esce: senza questo, un pagamento di un cliente
+  // finirebbe nel ramo dei master, che cerca un master_id e non lo trova.
+  const clienteDaEvento = (o: any): string | null =>
+    o?.metadata?.cliente_id || o?.subscription_details?.metadata?.cliente_id || null
+
+  try {
+    const oggetto: any = evento.data.object
+    let clienteId = clienteDaEvento(oggetto)
+    if (!clienteId && oggetto?.customer) {
+      const { data: c } = await admin.from('clienti').select('id').eq('api_stripe_customer_id', String(oggetto.customer)).maybeSingle()
+      clienteId = c?.id || null
+    }
+    if (clienteId) {
+      switch (evento.type) {
+        case 'checkout.session.completed':
+        case 'customer.subscription.created':
+        case 'customer.subscription.updated': {
+          const subId = evento.type === 'checkout.session.completed'
+            ? (typeof oggetto.subscription === 'string' ? oggetto.subscription : oggetto.subscription?.id)
+            : oggetto.id
+          if (!subId) break
+          const sub = await s.subscriptions.retrieve(subId, { expand: ['items.data.price'] })
+          const codice = pianoApiDaPrezzo(sub.items.data[0]?.price as any) || String(oggetto?.metadata?.piano_api || '')
+          const attivo = ['active', 'trialing', 'past_due'].includes(sub.status)
+          if (!attivo || !codice) break
+          await admin.from('clienti').update({
+            api_piano: codice,
+            api_stripe_subscription_id: sub.id,
+            api_stripe_customer_id: String(sub.customer),
+            api_scaduto_dal: null,          // ha pagato: il conto alla rovescia si azzera
+          }).eq('id', clienteId)
+          console.log('[STRIPE][API] pacchetto attivato', clienteId, codice)
+          break
+        }
+        case 'invoice.paid': {
+          await admin.from('clienti').update({ api_scaduto_dal: null }).eq('id', clienteId)
+          break
+        }
+        case 'invoice.payment_failed':
+        case 'invoice.payment_action_required': {
+          // Il conto alla rovescia parte UNA volta sola: se ripartisse a ogni tentativo del
+          // circuito, i tre giorni non scadrebbero mai.
+          const { data: c } = await admin.from('clienti').select('api_scaduto_dal').eq('id', clienteId).maybeSingle()
+          if (!c?.api_scaduto_dal) {
+            await admin.from('clienti').update({ api_scaduto_dal: new Date().toISOString() }).eq('id', clienteId)
+          }
+          break
+        }
+        case 'customer.subscription.deleted': {
+          // Disdetta: torna al pacchetto gratuito, non resta senza niente.
+          await admin.from('clienti').update({
+            api_piano: 'free', api_stripe_subscription_id: null, api_scaduto_dal: null,
+          }).eq('id', clienteId)
+          break
+        }
+      }
+      return NextResponse.json({ received: true })
+    }
+  } catch (e: any) {
+    console.error('[STRIPE][API] evento non elaborato:', e?.message)
+    return NextResponse.json({ received: true })
   }
 
   try {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { autenticaApiKey } from '@/lib/api-auth'
+import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
@@ -9,6 +9,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 export async function POST(req: NextRequest) {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
+  const _b = rispostaBlocco(ctx); if (_b) return _b
 
   const body = await req.json().catch(() => ({}))
   const admin = createAdminSupabase()

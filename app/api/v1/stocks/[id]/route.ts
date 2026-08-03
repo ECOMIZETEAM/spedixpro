@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { autenticaApiKey } from '@/lib/api-auth'
+import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { leggiPrezzi, calcolaCosti, noloClienteSpedizione } from '@/lib/giacenza-prezzi'
 
@@ -10,6 +10,7 @@ import { leggiPrezzi, calcolaCosti, noloClienteSpedizione } from '@/lib/giacenza
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
+  const _b = rispostaBlocco(ctx); if (_b) return _b
   const { id } = await params
   const body = await req.json().catch(() => ({}))
   const action = String(body.action || '')

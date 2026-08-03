@@ -5,6 +5,9 @@ export type ApiContext = {
   masterId: string
   corriereId: string
   keyId: string
+  // Perche' le API sono ferme, se lo sono. Vive qui e non in ogni rotta: il controllo si fa una
+  // volta sola, dove la chiave viene gia' letta, e nessuna rotta nuova puo' dimenticarselo.
+  blocco?: { motivo: 'pacchetto_esaurito' | 'non_pagato'; usate: number; limite: number; piano: string } | null
 }
 
 // Autentica una richiesta API pubblica tramite header Authorization: Bearer <api_key>.
@@ -36,7 +39,40 @@ export async function autenticaApiKey(req: Request): Promise<ApiContext | null> 
 
   // aggiorna last_used_at senza bloccare la risposta
   admin.from('api_keys').update({ last_used_at: new Date().toISOString() }).eq('id', data.id).then(() => {}, () => {})
-  return { clienteId: data.cliente_id, masterId: data.master_id, corriereId: data.corriere_id, keyId: data.id }
+
+  // Il pacchetto: chi sfora o non paga si ferma QUI, non nel portale. E' la differenza col master,
+  // dove a chiudersi e' il pannello: qui le API sono lo strumento che sta usando, e fermare quelle
+  // significa fermare lui e nessun altro — i suoi pacchi gia' partiti continuano il loro giro.
+  let blocco: ApiContext['blocco'] = null
+  try {
+    const { data: st } = await admin.rpc('fn_stato_api_cliente', { p_cliente: data.cliente_id })
+    const s: any = st || {}
+    if (s?.bloccato) {
+      blocco = {
+        motivo: s.oltre_limite ? 'pacchetto_esaurito' : 'non_pagato',
+        usate: Number(s.usate || 0), limite: Number(s.limite || 0), piano: String(s.nome || s.piano || ''),
+      }
+    }
+  } catch (e: any) {
+    // Se il controllo non risponde NON si blocca nessuno: un errore nostro non deve spegnere le
+    // spedizioni di chi ha pagato.
+    console.error('[API][PIANO] controllo non riuscito:', e?.message)
+  }
+
+  return { clienteId: data.cliente_id, masterId: data.master_id, corriereId: data.corriere_id, keyId: data.id, blocco }
+}
+
+// La risposta da dare quando le API sono ferme. Dice cosa e' successo e cosa fare: un 402 muto
+// manderebbe l'integratore a cercare un errore nel suo codice che non c'e'.
+export function rispostaBlocco(ctx: ApiContext | null): Response | null {
+  if (!ctx?.blocco) return null
+  const b = ctx.blocco
+  const messaggio = b.motivo === 'pacchetto_esaurito'
+    ? `Pacchetto esaurito: hai usato ${b.usate} delle ${b.limite} spedizioni comprese nel piano ${b.piano}. Passa a un pacchetto piu' grande dal portale, in Impostazioni → Chiavi API.`
+    : 'Pagamento non riuscito: le API restano ferme finche\' non viene saldato. Sistemalo dal portale, in Impostazioni → Chiavi API.'
+  return new Response(JSON.stringify({ error: messaggio, codice: b.motivo, usate: b.usate, limite: b.limite }), {
+    status: 402, headers: { 'Content-Type': 'application/json' },
+  })
 }
 
 // Genera una chiave API leggibile e sicura.

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { autenticaApiKey } from '@/lib/api-auth'
+import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { spediamoproGetTracking, mapStatoSpediamopro } from '@/lib/spediamopro'
 import { mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
@@ -11,6 +11,7 @@ import { inviaWebhook } from '@/lib/webhooks'
 export async function GET(req: NextRequest, { params }: { params: Promise<{ tracking: string }> }) {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
+  const _b = rispostaBlocco(ctx); if (_b) return _b
   const { tracking } = await params
   const trk = decodeURIComponent(tracking || '').trim()
   if (!trk) return NextResponse.json({ error: 'Numero di tracking mancante' }, { status: 400 })
