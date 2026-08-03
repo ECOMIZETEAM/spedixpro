@@ -295,9 +295,9 @@ export default function ReportSpedizioniPage() {
                 <td style={{padding:'9px 14px'}}>
                   <span style={{background:'#e0f2fe',color:'#0369a1',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>{r.formato}</span>
                 </td>
-                <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:'500'}}>{r.utente_nome}</td>
-                <td style={{padding:'9px 14px',color:'#1a1a1a',fontSize:'12px'}}>{r.size||'—'}</td>
-                <td style={{padding:'9px 14px',color:'#16a34a',fontSize:'12px',fontWeight:'500'}}>{r.stato}</td>
+                <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:'500'}}>{r.utente||'—'}</td>
+                <td style={{padding:'9px 14px',color:'#1a1a1a',fontSize:'12px'}}>{r.size_bytes ? `${Math.max(1,Math.round(r.size_bytes/1024))} KB` : '—'}</td>
+                <td style={{padding:'9px 14px',color:'#16a34a',fontSize:'12px',fontWeight:'500'}}>{r.status||'—'}</td>
                 <td style={{padding:'9px 14px'}}>
                   <a href={r.file_url} target="_blank" rel="noopener noreferrer" download style={{color:'#f97316',fontWeight:'600',fontSize:'13px',cursor:'pointer',textDecoration:'none'}}>Scarica</a>
                 </td>

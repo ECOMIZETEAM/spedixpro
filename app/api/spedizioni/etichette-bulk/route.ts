@@ -53,7 +53,20 @@ export async function POST(req: NextRequest) {
     // dettaglio colli valorizzato usciva dalla stampa SENZA ETICHETTA e senza alcun errore.
     const colli = (s.colli_dettaglio as any[]) || []
     const urls: string[] = []
-    colli.forEach((c: any) => { if (c.etichetta_url) urls.push(c.etichetta_url) })
+    // UNA ETICHETTA UGUALE NON SI STAMPA DUE VOLTE.
+    //
+    // Alcuni contratti non mandano un'etichetta per collo: mandano UN SOLO PDF con dentro gia' una
+    // pagina per ogni collo. La creazione lo copia identico su tutti i colli, e qui si finiva a
+    // impilare N volte un documento che di pagine ne ha gia' N: una spedizione da 13 colli usciva
+    // di 169 fogli invece di 13, e chi stampava se ne accorgeva dalla stampante.
+    // Sono byte identici, quindi togliere i doppioni non fa perdere nulla: se le etichette sono
+    // davvero diverse una per collo, restano tutte.
+    const visti = new Set<string>()
+    colli.forEach((c: any) => {
+      if (!c.etichetta_url || visti.has(c.etichetta_url)) return
+      visti.add(c.etichetta_url)
+      urls.push(c.etichetta_url)
+    })
     if (!urls.length && s.etichetta_url) urls.push(s.etichetta_url)
 
     // Forma nuova (PDF su Storage): non e' una stringa da decodificare, si scarica.

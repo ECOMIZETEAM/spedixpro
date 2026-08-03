@@ -15,12 +15,22 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome,listino_agente_id').eq('id', user.id).single()
   const p = req.nextUrl.searchParams
-  const clienteIdRaw = p.get('clienteId')
+  const ruoloUtente = (utente?.ruolo || '').toLowerCase()
+  // UN CLIENTE VEDE SOLO LE PROPRIE SPEDIZIONI, QUALUNQUE COSA CHIEDA.
+  //
+  // Il perimetro lo decideva il parametro ?clienteId. Passando "m:<id>" si finiva nel ramo della
+  // rete, che per costruzione usa il client amministrativo e quindi SCAVALCA la RLS — e il
+  // master_id ce l'hanno anche gli utenti cliente. Bastava quindi che un cliente chiamasse questa
+  // rotta con l'id del proprio master per scaricarsi il report di tutte le spedizioni della rete,
+  // costi nostri compresi. Il ruolo va guardato PRIMA di leggere qualunque parametro: quello che
+  // arriva da fuori non puo' allargare il perimetro di chi chiede.
+  const eCliente = ruoloUtente === 'cliente'
+  const clienteIdRaw = eCliente ? null : p.get('clienteId')
   const masterSel = clienteIdRaw && clienteIdRaw.startsWith('m:') ? clienteIdRaw.slice(2) : null
   const clienteId = masterSel ? null : clienteIdRaw
   const stato = p.get('stato'); const dal = p.get('dal'); const al = p.get('al')
   const contrassegno = p.get('contrassegno'); const provincia = p.get('provincia')
-  const ruolo = (utente?.ruolo || '').toLowerCase()
+  const ruolo = ruoloUtente
   const mine = utente?.master_id
   const isMaster = ruolo !== 'cliente' && ruolo !== 'agente' && !!mine
 
@@ -47,7 +57,7 @@ export async function GET(req: NextRequest) {
   // Scope della query
   let db: any = supabase
   let subtreeSel: string[] | null = null
-  if (masterSel && mine) {
+  if (masterSel && isMaster && mine) {
     const { sottoAlberoMasterIds, masterIdsVisibili } = await import('@/lib/rete-masters')
     const mieiDiscendenti = await masterIdsVisibili(adminDb, mine)
     subtreeSel = mieiDiscendenti.includes(masterSel) ? await sottoAlberoMasterIds(adminDb, masterSel) : ['00000000-0000-0000-0000-000000000000']
@@ -203,6 +213,7 @@ export async function GET(req: NextRequest) {
     // Master SOPRA il proprietario del contratto (nessun mio costo né mio listino per quel corriere):
     // semplice passaggio -> prezzo corriere = prezzo cliente -> margine 0 (niente margine totale rete).
     if (prezzo_corriere == null && !calcAgente && !agenteSenzaListino) prezzo_corriere = prezzo_cliente
+    if (eCliente) prezzo_corriere = prezzo_cliente
     // Rettifica lato cliente = variazione di prezzo applicata (positivo = aumento, es. +5€).
     const rettifica = Math.round((-(sumRettCli.get(s.id) || 0)) * 100) / 100
     // COSTO DEL MASTER FUORI DAL REPORT DELL'AGENTE. Lo spread `...s` porta con se' la colonna
@@ -210,15 +221,18 @@ export async function GET(req: NextRequest) {
     // il MASTER al corriere. Per l'agente il "Prezzo Corriere" e' il suo listino agente (calcAgente
     // qui sopra), non il costo del master — che e' esattamente il dato che il commento a inizio
     // rotta dichiara di non volergli dare.
+    // Il costo del master non esce ne' verso l'agente ne' verso il CLIENTE: dice quanto paghiamo
+    // noi al corriere, cioe' il margine. Per l'agente era gia' cosi'; per il cliente no, e la
+    // colonna grezza usciva su tutte le spedizioni.
     const { costo_spedizione: _costoMaster, ...sPulita } = s
-    const base = (calcAgente || agenteSenzaListino) ? sPulita : s
+    const base = (calcAgente || agenteSenzaListino || eCliente) ? sPulita : s
     return {
       ...base,
       costo_totale: prezzo_cliente,          // "Prezzo Cliente" nel report (già comprensivo della rettifica)
       prezzo_corriere,                        // "Prezzo Corriere" (quello che pago io)
       rettifica,                              // colonna "Rettifica" (aumento/variazione di prezzo)
       dett_corriere: null,
-      cli_nolo: calcAgente ? (prezzo_corriere ?? 0) : Number(s.costo_spedizione || 0),
+      cli_nolo: calcAgente ? (prezzo_corriere ?? 0) : (eCliente ? 0 : Number(s.costo_spedizione || 0)),
       cli_supplementi: 0,
     }
   })
@@ -232,16 +246,25 @@ export async function POST(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id,nome').eq('id', user.id).single()
   const body = await req.json()
 
+  // I NOMI DELLE COLONNE SONO QUELLI VERI.
+  // Qui si scriveva su utente_nome, stato e size: tre colonne che nella tabella non esistono (sono
+  // utente, status e size_bytes). Ogni salvataggio finiva in errore 42703, e siccome le pagine non
+  // guardano la risposta il master vedeva il file scaricarsi e poi non trovava nulla nell'elenco
+  // dei report. E' questo il "non me li fa fare": il report si faceva, non si registrava.
   const { data: report, error } = await supabase.from('reports_generati').insert({
     master_id: utente?.master_id,
-    tipo: 'spedizioni',
+    tipo: body.tipo || 'spedizioni',
     formato: body.formato || 'pdf',
-    filtri: body.filtri || {},
-    utente_nome: (utente as any)?.nome || 'Admin',
-    stato: 'disponibile',
-    size: null,
+    filtri: typeof body.filtri === 'string' ? body.filtri : JSON.stringify(body.filtri || {}),
+    utente: ((utente as any)?.nome || '').trim() || 'Utente',
+    status: 'disponibile',
+    size_bytes: null,
+    created_by: user.id,
   }).select().single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  if (error) {
+    console.error('[REPORT] registrazione non riuscita:', error.message)
+    return NextResponse.json({ error: error.message }, { status: 400 })
+  }
   return NextResponse.json({ id: report.id })
 }
