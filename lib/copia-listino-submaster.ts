@@ -60,7 +60,26 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   const { data: listinoSrc } = await admin.from('listini_clienti').select('nome,fattore_volume,solo_peso_reale').eq('id', parentListinoId).single()
 
   const corriereIds = [...new Set(fasceSrc.map((f: any) => f.corriere_id).filter(Boolean))]
-  const zonaIds = [...new Set(fasceSrc.map((f: any) => f.zona_id).filter(Boolean))]
+
+  // LE ZONE SI COPIANO TUTTE, NON SOLO QUELLE CHE VENDO.
+  //
+  // Qui si prendevano solo le zone che compaiono nelle fasce del listino, cioe' quelle a cui ho
+  // messo un prezzo. Sembra sensato — "ti do quello che ti vendo" — ed e' il buco che ha fatto
+  // perdere soldi per mesi.
+  //
+  // Una zona non e' solo un contenitore di prezzi: e' la MAPPA di dove quel corriere costa di piu'.
+  // Se al sotto-master arriva solo "Italia" e "SCS", un CAP di Livigno o di Capri non trova nessuna
+  // sua zona, ricade sul jolly "Italia" e viene VENDUTO al prezzo dell'Italia — mentre il detentore
+  // lo paga come zona disagiata. Successo davvero su sei master del contratto Poste V.
+  //
+  // Copiandole tutte, quelle senza prezzo arrivano vuote: e per la regola del sistema una zona
+  // senza prezzo rende il corriere NON VENDIBILE li'. Che e' esattamente cio' che deve succedere
+  // finche' il master non decide un prezzo suo.
+  const zonaDaFasce = fasceSrc.map((f: any) => f.zona_id).filter(Boolean)
+  const { data: zoneContratto } = corriereIds.length
+    ? await admin.from('zone').select('id').in('corriere_id', corriereIds)
+    : { data: [] as any[] }
+  const zonaIds = [...new Set([...zonaDaFasce, ...((zoneContratto || []) as any[]).map(z => z.id)])]
 
   // 1) CORRIERI (contratti): uno per il sotto-master per ciascuno del padre (riuso per nome).
   //    Le IMPOSTAZIONI DI CONTRATTO (agevolazione peso, misure/volume massimo, scaglioni,
