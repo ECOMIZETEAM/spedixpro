@@ -11,6 +11,9 @@ const ACCENT = '#f97316'
 export default function PianoApi() {
   const [d, setD] = useState<any>(null)
   const [inCorso, setInCorso] = useState('')
+  // Rinnovo automatico o un mese alla volta. Non e' un vezzo: molte carte aziendali e prepagate
+  // rifiutano il mandato ricorrente pur avendo i soldi sopra, e con il pagamento singolo passano.
+  const [modo, setModo] = useState<'abbonamento' | 'singolo'>('abbonamento')
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
 
   async function carica() {
@@ -28,7 +31,7 @@ export default function PianoApi() {
     setInCorso(codice); setMsg(null)
     try {
       const r = await fetch('/api/cliente/api-piano', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ piano: codice }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ piano: codice, modo }),
       })
       const x = await r.json()
       if (x?.url) { window.location.href = x.url; return }
@@ -90,6 +93,28 @@ export default function PianoApi() {
           </div>
         )}
       </div>
+
+      {/* Come pagare: la scelta sta PRIMA dei pacchetti, perche' cambia cosa succede quando si
+          preme il tasto — e perche' per chi ha una carta che rifiuta i ricorrenti e' l'unica via. */}
+      <div style={{ display: 'flex', gap: '8px', margin: '0 0 12px', flexWrap: 'wrap' }}>
+        {([['abbonamento', 'Rinnovo automatico', 'si paga da solo ogni mese'],
+           ['singolo', 'Un mese alla volta', 'paghi solo questo mese']] as const).map(([k, t, d]) => (
+          <button key={k} onClick={() => setModo(k as any)}
+            style={{
+              flex: '1 1 200px', textAlign: 'left', padding: '11px 14px', borderRadius: '10px', cursor: 'pointer',
+              border: modo === k ? `2px solid ${ACCENT}` : '1px solid #e8e8e8',
+              background: modo === k ? '#fff7ed' : '#fff',
+            }}>
+            <span style={{ display: 'block', fontSize: '13.5px', fontWeight: 700, color: '#1a1a1a' }}>{t}</span>
+            <span style={{ display: 'block', fontSize: '12px', color: '#8a8a8a' }}>{d}</span>
+          </button>
+        ))}
+      </div>
+      {modo === 'singolo' && (
+        <div style={{ fontSize: '12.5px', color: '#8a8a8a', margin: '-6px 0 12px' }}>
+          Il mese prossimo dovrai rifarlo a mano. Utile se la tua carta rifiuta i pagamenti ricorrenti.
+        </div>
+      )}
 
       {/* I pacchetti */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: '10px' }}>

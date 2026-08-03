@@ -74,6 +74,19 @@ export async function POST(req: NextRequest) {
         case 'checkout.session.completed':
         case 'customer.subscription.created':
         case 'customer.subscription.updated': {
+          // PAGAMENTO SINGOLO: nessun abbonamento da leggere, il pacchetto si attiva e basta.
+          // Non si salva l'id di un abbonamento che non esiste, altrimenti il portale mostrerebbe
+          // un rinnovo automatico che nessuno ha attivato.
+          if (evento.type === 'checkout.session.completed' && oggetto?.mode === 'payment') {
+            const cod = String(oggetto?.metadata?.piano_api || '')
+            if (oggetto?.payment_status === 'paid' && cod) {
+              await admin.from('clienti').update({
+                api_piano: cod, api_scaduto_dal: null, api_limite_sforato_dal: null,
+              }).eq('id', clienteId)
+              console.log('[STRIPE][API] pacchetto attivato con pagamento singolo', clienteId, cod)
+            }
+            break
+          }
           const subId = evento.type === 'checkout.session.completed'
             ? (typeof oggetto.subscription === 'string' ? oggetto.subscription : oggetto.subscription?.id)
             : oggetto.id

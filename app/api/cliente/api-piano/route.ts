@@ -53,7 +53,13 @@ export async function POST(req: NextRequest) {
   const { clienteId, admin } = ctx
   if (!stripeConfigurato()) return NextResponse.json({ error: 'Pagamento con carta non disponibile' }, { status: 400 })
 
-  const { piano: codice } = await req.json().catch(() => ({} as any))
+  const body = await req.json().catch(() => ({} as any))
+  const codice = body?.piano
+  // SINGOLO O RICORRENTE. Non e' una comodita': parecchie carte aziendali e prepagate italiane
+  // rifiutano il MANDATO ricorrente (codice 83 della rete) pur avendo i soldi sopra. Con il
+  // pagamento singolo quelle stesse carte passano. Meno comodo per noi — il mese dopo va richiesto
+  // — ma incassare e' meglio che perdere il cliente su un no della sua banca.
+  const singolo = body?.modo === 'singolo'
   const { data: piano } = await admin.from('piani_api').select('*').eq('codice', String(codice || '')).eq('attivo', true).maybeSingle()
   if (!piano) return NextResponse.json({ error: 'Pacchetto non valido' }, { status: 400 })
   if (!(Number(piano.prezzo) > 0)) return NextResponse.json({ error: 'Il pacchetto Free non si paga' }, { status: 400 })
@@ -91,8 +97,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ cambiato: true, piano: piano.codice })
     }
 
-    const prezzo = await prezzoStripeApi(piano as any)
     const base = process.env.NEXT_PUBLIC_SITE_URL || 'https://moovexpress.com'
+    const mese = new Date().toISOString().slice(0, 7)
+
+    if (singolo) {
+      // Una tantum: il prezzo si costruisce qui e non si salva a listino — non deve finire fra i
+      // prezzi ricorrenti, dove il webhook lo scambierebbe per un abbonamento.
+      const sessione = await s.checkout.sessions.create({
+        mode: 'payment',
+        customer,
+        line_items: [{
+          quantity: 1,
+          price_data: {
+            currency: 'eur',
+            unit_amount: Math.round(Number(piano.prezzo) * 100),
+            tax_behavior: 'inclusive',
+            product_data: { name: `MoovExpress API ${piano.nome} — ${mese}` },
+          },
+        }],
+        tax_id_collection: { enabled: true },
+        customer_update: { name: 'auto', address: 'auto' },
+        metadata: { cliente_id: cli.id, piano_api: piano.codice, modo: 'singolo', mese },
+        success_url: `${base}/cliente/impostazioni/api-key?pagato=1`,
+        cancel_url: `${base}/cliente/impostazioni/api-key`,
+      })
+      return NextResponse.json({ url: sessione.url })
+    }
+
+    const prezzo = await prezzoStripeApi(piano as any)
     const sessione = await s.checkout.sessions.create({
       mode: 'subscription',
       customer,
