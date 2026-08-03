@@ -138,3 +138,61 @@ export function pianoDaPrezzo(price: Stripe.Price | null | undefined): Piano | n
   const id = String(price?.metadata?.piano || (price?.lookup_key || '').replace(/^moov_/, '').replace(/_storico_.*$/, ''))
   return pianoById(id) || null
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// I PACCHETTI DI CHI USA LE API
+//
+// Sono un'altra cosa dal canone del master: li paga un CLIENTE che usa il nostro sistema come
+// motore del suo negozio. Fino a 50 spedizioni al mese non paga niente — chi prova o ha un
+// negozio piccolo non deve nemmeno pensarci — e sopra sceglie un pacchetto.
+//
+// Vivono nel database (tabella piani_api) invece che in un file, perche' i prezzi di questo
+// listino li vuole cambiare chi vende, non chi scrive il codice.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type PianoApi = { codice: string; nome: string; limite: number; prezzo: number }
+
+const chiavePrezzoApi = (codice: string) => `moov_api_${codice}`
+
+export async function prezzoStripeApi(piano: PianoApi): Promise<Stripe.Price> {
+  if (!(piano.prezzo > 0)) throw new Error('Il piano Free non si paga')
+  const s = stripeClient()
+  const chiave = chiavePrezzoApi(piano.codice)
+  const attesi = Math.round(piano.prezzo * 100)
+  const comportamento = IVA_COMPRESA ? 'inclusive' : 'exclusive'
+
+  const esistenti = await s.prices.list({ lookup_keys: [chiave], active: true, limit: 1 })
+  const trovato = esistenti.data[0]
+  // Stessa regola dei canoni: un prezzo sul circuito non si modifica. Se il listino cambia se ne
+  // crea uno nuovo e gli si passa la chiave; chi ha gia' l'abbonamento resta sul suo finche' non
+  // cambia piano, cosi' a nessuno viene aumentato il canone senza che lo scelga.
+  if (trovato && trovato.unit_amount === attesi && trovato.tax_behavior === comportamento) return trovato
+  if (trovato) await s.prices.update(trovato.id, { lookup_key: `${chiave}_storico_${trovato.id}` })
+
+  const prodotti = await s.products.search({ query: `metadata['piano_api']:'${piano.codice}'`, limit: 1 })
+  const prodotto = prodotti.data[0] || await s.products.create({
+    name: `MoovExpress API ${piano.nome}`,
+    description: `Fino a ${piano.limite.toLocaleString('it-IT')} spedizioni al mese via API`,
+    metadata: { piano_api: piano.codice },
+  })
+
+  return s.prices.create({
+    product: prodotto.id,
+    currency: 'eur',
+    unit_amount: attesi,
+    recurring: { interval: 'month' },
+    lookup_key: chiave,
+    transfer_lookup_key: true,
+    tax_behavior: comportamento,
+    metadata: { piano_api: piano.codice },
+  })
+}
+
+// Dal prezzo pagato al codice del pacchetto API: serve al webhook per sapere cosa attivare.
+export function pianoApiDaPrezzo(price: Stripe.Price | null | undefined): string | null {
+  const m = String(price?.metadata?.piano_api || '')
+  if (m) return m
+  const k = String(price?.lookup_key || '')
+  const r = /^moov_api_([a-z]+)/.exec(k)
+  return r ? r[1] : null
+}
