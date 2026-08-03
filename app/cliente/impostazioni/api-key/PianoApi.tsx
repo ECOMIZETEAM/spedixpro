@@ -22,8 +22,13 @@ export default function PianoApi() {
   }
   useEffect(() => {
     carica()
-    if (new URLSearchParams(window.location.search).get('pagato')) {
-      setMsg({ t: 'ok', x: 'Pagamento registrato. Il pacchetto è attivo.' })
+    const q = new URLSearchParams(window.location.search)
+    if (q.get('pagato')) setMsg({ t: 'ok', x: 'Pagamento registrato. Il pacchetto è attivo.' })
+    // Tornato indietro dalla cassa senza aver pagato: quasi sempre e' la banca che ha rifiutato il
+    // mandato ricorrente. Si passa da soli al mese singolo, che quelle carte accettano.
+    if (q.get('rifiutato')) {
+      setModo('singolo')
+      setMsg({ t: 'err', x: 'La banca non ha accettato il rinnovo automatico. Puoi pagare questo mese con la stessa carta.' })
     }
   }, [])
 
@@ -94,25 +99,23 @@ export default function PianoApi() {
         )}
       </div>
 
-      {/* Come pagare: la scelta sta PRIMA dei pacchetti, perche' cambia cosa succede quando si
-          preme il tasto — e perche' per chi ha una carta che rifiuta i ricorrenti e' l'unica via. */}
-      <div style={{ display: 'flex', gap: '8px', margin: '0 0 12px', flexWrap: 'wrap' }}>
-        {([['abbonamento', 'Rinnovo automatico', 'si paga da solo ogni mese'],
-           ['singolo', 'Un mese alla volta', 'paghi solo questo mese']] as const).map(([k, t, d]) => (
-          <button key={k} onClick={() => setModo(k as any)}
-            style={{
-              flex: '1 1 200px', textAlign: 'left', padding: '11px 14px', borderRadius: '10px', cursor: 'pointer',
-              border: modo === k ? `2px solid ${ACCENT}` : '1px solid #e8e8e8',
-              background: modo === k ? '#fff7ed' : '#fff',
-            }}>
-            <span style={{ display: 'block', fontSize: '13.5px', fontWeight: 700, color: '#1a1a1a' }}>{t}</span>
-            <span style={{ display: 'block', fontSize: '12px', color: '#8a8a8a' }}>{d}</span>
-          </button>
-        ))}
-      </div>
+      {/* PRIMA SI PROVA IL RINNOVO AUTOMATICO. La scelta non si mostra in partenza: chiedere subito
+          "abbonamento o mese singolo?" a chi non ha nessun problema e' una domanda in piu' e una
+          probabilita' in piu' che scelga il singolo, che poi ogni mese va rincorso.
+          Il ripiego compare SOLO a chi la banca ha gia' detto di no — e a quel punto e' la strada
+          giusta, non un'alternativa. */}
       {modo === 'singolo' && (
-        <div style={{ fontSize: '12.5px', color: '#8a8a8a', margin: '-6px 0 12px' }}>
-          Il mese prossimo dovrai rifarlo a mano. Utile se la tua carta rifiuta i pagamenti ricorrenti.
+        <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '10px', padding: '13px 15px', marginBottom: '12px' }}>
+          <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#9a3412' }}>Paghi un mese alla volta</div>
+          <div style={{ fontSize: '12.5px', color: '#9a3412', marginTop: '4px', lineHeight: 1.55 }}>
+            Il rinnovo automatico non è passato: succede con le carte aziendali e le prepagate, che
+            spesso non accettano gli addebiti ricorrenti. Così paghi solo questo mese — il prossimo
+            dovrai rifarlo a mano.
+            <button onClick={() => setModo('abbonamento')}
+              style={{ background: 'none', border: 'none', color: '#9a3412', fontWeight: 700, textDecoration: 'underline', cursor: 'pointer', padding: '0 0 0 4px', fontSize: '12.5px' }}>
+              Riprova col rinnovo automatico
+            </button>
+          </div>
         </div>
       )}
 
