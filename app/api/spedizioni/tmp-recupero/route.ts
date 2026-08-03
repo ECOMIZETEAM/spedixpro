@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
     .limit(50)
 
   let completate = 0, soloEtichette = 0, ancoraNulla = 0, saltate = 0
-  const { easyparcelWaybill, unisciEtichette } = await import('@/lib/easyparcel')
+  const { easyparcelWaybillGrezza, unisciEtichette } = await import('@/lib/easyparcel')
 
   for (const s of (ferme || [])) {
     const corr: any = (s as any).corrieri
@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
     const ordine = String(s.numero).replace(/^TMP-/, '')
     let w: any = null
     try {
-      w = await easyparcelWaybill(apikey, ordine)
+      w = await easyparcelWaybillGrezza(apikey, ordine)
     } catch (e: any) {
       console.warn('[TMP] waybill non ancora disponibile', s.numero, e?.message)
       ancoraNulla++
@@ -69,7 +69,11 @@ export async function GET(req: NextRequest) {
       const dett = Array.isArray(s.colli_dettaglio) ? [...s.colli_dettaglio] : []
       if (dett.length) {
         for (let i = 0; i < dett.length; i++) {
-          if (singole[i]) dett[i] = { ...dett[i], etichetta_url: `data:application/pdf;base64,${singole[i]}` }
+          if (singole[i]) dett[i] = {
+            ...dett[i],
+            etichetta_url: `data:application/pdf;base64,${singole[i]}`,
+            numero: w.singole[i]?.numero || dett[i]?.numero,
+          }
         }
         patch.colli_dettaglio = dett
       }
@@ -80,7 +84,7 @@ export async function GET(req: NextRequest) {
     // IL NUMERO si cambia solo se la LDV c'e' davvero ed e' diversa. Un numero e' l'identita' della
     // spedizione: sta nei movimenti, nelle distinte, sull'etichetta gia' stampata. Non si tocca
     // per un valore vuoto o dubbio.
-    const ldv = String(w?.ldv || '').trim()
+    const ldv = String(w?.numero || '').trim()
     if (ldv && ldv !== s.numero) {
       // Se quel numero esiste gia' su un'altra spedizione, non si sovrascrive niente: si segnala.
       const { data: gia } = await admin.from('spedizioni').select('id').eq('numero', ldv).neq('id', s.id).maybeSingle()
@@ -98,7 +102,20 @@ export async function GET(req: NextRequest) {
     const { error } = await admin.from('spedizioni').update(patch).eq('id', s.id)
     if (error) { console.error('[TMP] aggiornamento fallito', s.numero, error.message); continue }
 
-    if (patch.numero) { completate++; console.log('[TMP] completata', s.numero, '->', patch.numero) }
+    if (patch.numero) {
+      completate++
+      console.log('[TMP] completata', s.numero, '->', patch.numero)
+      // ANCHE L'ESTRATTO CONTO. Il movimento porta il numero scritto nella descrizione: se resta
+      // quello provvisorio, il cliente si ritrova addebitata una spedizione con un numero che non
+      // esiste da nessuna parte e non sa a cosa corrisponde. Cambia solo il testo — mai l'importo.
+      const { data: mv } = await admin.from('movimenti').select('id,descrizione').eq('spedizione_id', s.id)
+      for (const m of (mv || [])) {
+        const t = String(m.descrizione || '')
+        if (t.includes(s.numero)) {
+          await admin.from('movimenti').update({ descrizione: t.split(s.numero).join(patch.numero) }).eq('id', m.id)
+        }
+      }
+    }
     else { soloEtichette++; console.log('[TMP] recuperate solo le etichette', s.numero) }
   }
 

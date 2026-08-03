@@ -314,6 +314,30 @@ export function codiceRitiroValido(v: any): string | null {
   return t
 }
 
+// LA WAYBILL COSI' COM'E', anche incompleta.
+// easyparcelWaybill qui sopra pretende il numero: se non c'e' insiste e poi solleva un errore, e
+// insieme al numero butta via le ETICHETTE che il provider aveva gia' pronto. Ma un'etichetta vale
+// da sola — il pacco con quella parte — ed e' esattamente per questo che due spedizioni sono
+// rimaste ferme un giorno intero con le loro etichette gia' disponibili dall'altra parte.
+// Questa restituisce quello che c'e', numero compreso se c'e'. La usa solo il recupero delle
+// spedizioni ferme su un numero provvisorio: la creazione continua a usare quella sopra.
+export async function easyparcelWaybillGrezza(
+  apikey: string, idOrdine: string
+): Promise<{ numero: string; pdfBase64: string | null; singole: { numero: string; pdfBase64: string }[]; codiceRitiro: string | null }> {
+  const d = await chiama(apikey, 'getwaybill', {
+    details: { order_id: Number(idOrdine) || idOrdine, waybill_base64: 'Y', single_waybills: 'Y' },
+  })
+  const singole = (Array.isArray(d.single_waybills) ? d.single_waybills : [])
+    .map((s: any) => ({ numero: String(s?.waybill_number || ''), pdfBase64: String(s?.waybill_base64 || '') }))
+    .filter((s: any) => s.pdfBase64)
+  return {
+    numero: String(d.waybill_number || ''),
+    pdfBase64: d.waybill_base64 ? String(d.waybill_base64) : null,
+    singole,
+    codiceRitiro: codiceRitiroValido(d.pickup_code),
+  }
+}
+
 export async function easyparcelWaybill(
   apikey: string, idOrdine: string, tentativi = 3, attesaMs = 1500, attendiRitiro = false
 ): Promise<{ numero: string; pdfBase64: string | null; singole: { numero: string; pdfBase64: string }[]; borderoUrl: string | null; codiceRitiro: string | null }> {
