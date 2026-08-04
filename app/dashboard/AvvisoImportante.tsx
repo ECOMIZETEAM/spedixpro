@@ -54,8 +54,9 @@ export default function AvvisoImportante() {
 
           <p style={riga}>
             <strong>Da domenica 3 agosto</strong> chi non ha ancora attivato la carta avrà <strong>3 giorni</strong> per
-            farlo. Passati quelli le spedizioni si sospendono — e con esse quelle dei tuoi clienti e dei tuoi
-            sotto-master. Appena il pagamento va a buon fine riparte tutto da solo.
+            farlo. Passati quelli il portale si chiude e non potrai più operare — ma{' '}
+            <strong>i tuoi clienti e i tuoi sotto-master continuano a spedire normalmente</strong>: il canone
+            è tuo, non loro. Appena il pagamento va a buon fine riparte tutto da solo.
           </p>
 
           <p style={{ ...riga, marginBottom: '22px' }}>

@@ -31,11 +31,15 @@ export type StatoPiano = {
   oltreIlMio: boolean    // IO ho finito il pacchetto: stesso trattamento, si riapre con l'upgrade
   motivo: 'limite' | 'pagamento' | null
   giorniPerPagare: number | null   // giorni che restano prima del congelamento (solo per me)
+  // L'ISTANTE ESATTO in cui scatta, non il numero di giorni arrotondato. Un "hai 2 giorni" letto
+  // di sera vuol dire una cosa diversa da un "hai 2 giorni" letto di mattina: con la scadenza vera
+  // il portale puo' mostrare il tempo che resta davvero, che scende mentre lo si guarda.
+  scadenzaPagamento: string | null
 }
 
 export const NESSUN_LIMITE: StatoPiano = {
   usato: 0, limite: 0, perc: 0, avviso: false, bloccato: false, bloccatoDaMe: false,
-  congelato: false, oltreIlMio: false, motivo: null, giorniPerPagare: null,
+  congelato: false, oltreIlMio: false, motivo: null, giorniPerPagare: null, scadenzaPagamento: null,
 }
 
 // Giorni di tolleranza fra il canone non riuscito e il congelamento. Una carta scaduta o una banca
@@ -70,9 +74,11 @@ export async function statoPiano(admin: any, masterId: string | null | undefined
   // Quanto manca al congelamento, per l'avviso: si conta solo il MIO, non quello di chi sta sopra
   // (a lui non posso rimediare io, e non deve nemmeno sapere che esiste).
   let giorniPerPagare: number | null = null
+  let scadenzaPagamento: string | null = null
   if (mio?.scaduto_dal && !mio.congelato) {
     const passati = (Date.now() - new Date(mio.scaduto_dal).getTime()) / 86400000
     giorniPerPagare = Math.max(0, Math.ceil(GIORNI_TOLLERANZA - passati))
+    scadenzaPagamento = new Date(new Date(mio.scaduto_dal).getTime() + GIORNI_TOLLERANZA * 86400000).toISOString()
   }
 
   const bloccatoDaMe = oltre.some(r => r.livello === 0) || !!mio?.congelato
@@ -97,6 +103,7 @@ export async function statoPiano(admin: any, masterId: string | null | undefined
     // canone in regola non si puo' nemmeno fare l'upgrade.
     motivo: congelati.length ? 'pagamento' : (oltre.length ? 'limite' : null),
     giorniPerPagare,
+    scadenzaPagamento,
   }
 }
 

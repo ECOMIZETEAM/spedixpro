@@ -33,7 +33,7 @@ export async function GET() {
     usato: stato.usato, limite: stato.limite, perc: stato.perc,
     avviso: stato.avviso, bloccato: stato.bloccato, bloccatoDaMe: stato.bloccatoDaMe,
     congelato: stato.congelato, oltreLimite: stato.oltreIlMio,
-    motivo: stato.motivo, giorniPerPagare: stato.giorniPerPagare,
+    motivo: stato.motivo, giorniPerPagare: stato.giorniPerPagare, scadenzaPagamento: stato.scadenzaPagamento,
     // Servono alla schermata di riattivazione: chi e' congelato non puo' navigare fino ad
     // Abbonamento, quindi il pagamento deve poter partire da li'.
     piano: mio?.abbonamento_piano || null, prezzo: Number(mio?.abbonamento_prezzo || 0),

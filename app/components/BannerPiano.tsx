@@ -9,8 +9,31 @@ import { useEffect, useState } from 'react'
 //
 // A un cliente non arriva ne' il numero ne' il nome di chi ha superato il limite: solo che al
 // momento non si puo' spedire e a chi rivolgersi.
+// IL TEMPO CHE RESTA, DETTO COME LO DIREBBE UNA PERSONA.
+// "2 giorni" letto di sera e "2 giorni" letto di mattina non sono la stessa cosa: sotto le 48 ore
+// si passa alle ore, e nell'ultima ora ai minuti, perche' e' li' che serve muoversi.
+function tempoMancante(scadenza: string | null, ora: number): string {
+  if (!scadenza) return ''
+  const ms = new Date(scadenza).getTime() - ora
+  if (!(ms > 0)) return ''
+  const minuti = Math.floor(ms / 60000)
+  const ore = Math.floor(minuti / 60)
+  const giorni = Math.floor(ore / 24)
+  if (giorni >= 2) return `${giorni} giorni e ${ore % 24} ore`
+  if (ore >= 1) return `${ore} ${ore === 1 ? 'ora' : 'ore'} e ${minuti % 60} min`
+  return `${minuti} ${minuti === 1 ? 'minuto' : 'minuti'}`
+}
+
 export default function BannerPiano({ linkUpgrade = null }: { linkUpgrade?: string | null }) {
   const [s, setS] = useState<any>(null)
+  const [ora, setOra] = useState(() => Date.now())
+
+  // Il conto alla rovescia scende mentre lo si guarda: un numero fermo lo si legge come una data
+  // lontana. Ogni minuto basta — sotto l'ora si vedono i minuti scalare, ed e' quello che serve.
+  useEffect(() => {
+    const t = setInterval(() => setOra(Date.now()), 60000)
+    return () => clearInterval(t)
+  }, [])
 
   useEffect(() => {
     let vivo = true
@@ -29,6 +52,10 @@ export default function BannerPiano({ linkUpgrade = null }: { linkUpgrade?: stri
   const avviso = !bloccato && !!s.avviso
   if (!bloccato && !avviso) return null
 
+  // Se il fondo non ha ancora la scadenza esatta (installazioni vecchie), si ripiega sui giorni.
+  const mancante = tempoMancante(s.scadenzaPagamento, ora)
+    || (s.giorniPerPagare > 0 ? `${s.giorniPerPagare} ${s.giorniPerPagare === 1 ? 'giorno' : 'giorni'}` : '')
+
   const rosso = bloccato
   const box = {
     display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' as const,
@@ -46,11 +73,18 @@ export default function BannerPiano({ linkUpgrade = null }: { linkUpgrade?: stri
           <><strong>{s.motivo === 'pagamento' ? 'Account sospeso.' : 'Spedizioni sospese.'}</strong> {s.messaggio}</>
         ) : s.giorniPerPagare !== null ? (
           <>
+            {/* QUELLO CHE SUCCEDE DAVVERO, non quello che succedeva prima.
+                Il banner diceva che si fermano le spedizioni "anche per i tuoi clienti e i tuoi
+                sotto-master": non e' vero e non lo e' mai stato nelle intenzioni — chi sta sotto
+                il canone non lo deve. A fermarsi e' solo chi non ha pagato, e solo lui. Dirgli il
+                falso, per giunta piu' grave del vero, lo mette in allarme con i suoi clienti per
+                una cosa che non succedera'. */}
             <strong>Canone non riuscito.</strong>{' '}
-            {s.giorniPerPagare > 0
-              ? <>Hai <strong>{s.giorniPerPagare} {s.giorniPerPagare === 1 ? 'giorno' : 'giorni'}</strong> per sistemare il pagamento.</>
-              : <>Il pagamento va sistemato <strong>oggi</strong>.</>}
-            {' '}Dopo, le spedizioni si fermano — anche per i tuoi clienti e i tuoi sotto-master.
+            {mancante
+              ? <>Ti resta <strong>{mancante}</strong> per sistemare il pagamento.</>
+              : <>Il pagamento va sistemato <strong>adesso</strong>.</>}
+            {' '}Dopo non potrai più operare dal portale: i tuoi clienti e i tuoi sotto-master
+            continuano a spedire normalmente.
           </>
         ) : (
           <>
