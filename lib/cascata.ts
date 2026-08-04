@@ -38,10 +38,23 @@ async function costruisciCatena(
   // Proprietario REALE del contratto: il master più IN ALTO che possiede questo stesso corriere
   // (stesso nome_contratto). Chi spedisce usa una COPIA del corriere, ma il costo reale dell'API
   // lo paga il proprietario del contratto; i livelli sotto pagano il loro prezzo di rivendita.
+  // Il vertice della catena: chi sta attaccato alla piattaforma non ha un master a cui deve, quindi
+  // per lui i due conti non esistono e resta tutto su quello unico.
+  const { data: radice }: any = await adminDb.from('masters').select('id').is('parent_master_id', null).limit(1).maybeSingle()
+  const radiceId: string | null = radice?.id || null
+
   let ownerReale = params.corriereOwnerId
+  let contrattoDichiaratoProprio = false
   if (params.corriereNome) {
     let cur: string | null = params.corriereOwnerId
     for (let i = 0; i < 20 && cur; i++) {
+      // IL DETENTORE SI DICHIARA. Se il contratto di questo master e' marcato come SUO, la risalita
+      // finisce qui: un contratto con lo stesso nome piu' in alto non se lo puo' prendere.
+      const cid = await corriereDiMasterPerNome(adminDb, cur, params.corriereNome)
+      if (cid) {
+        const { data: cc }: any = await adminDb.from('corrieri').select('proprio').eq('id', cid).maybeSingle()
+        if (cc?.proprio) { ownerReale = cur; contrattoDichiaratoProprio = true; break }
+      }
       const { data: mm }: any = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
       const parent: string | null = mm?.parent_master_id || null
       if (!parent) break
@@ -56,7 +69,7 @@ async function costruisciCatena(
   for (let i = 0; i < 20 && currentId; i++) {
     const { data: m }: any = await adminDb
       .from('masters')
-      .select('id,nome,tipo_contratto,credito,parent_master_id,parent_listino_id')
+      .select('id,nome,tipo_contratto,credito,credito_proprio,parent_master_id,parent_listino_id')
       .eq('id', currentId).single()
     if (!m) {
       return { catena, errore: 'Catena master non leggibile: impossibile verificare i livelli.' }
@@ -100,10 +113,20 @@ async function costruisciCatena(
       }
     }
 
+    // IL SALDO DEL CONTO CHE PAGHERA' DAVVERO.
+    // Un master puo' avere due conti: quello verso il master sopra e quello dei contratti SUOI.
+    // Il costo finisce sul secondo solo se ricorrono TRE cose insieme: questo livello e' il
+    // detentore, il contratto e' DICHIARATO suo, e il master non e' un vertice (chi sta attaccato
+    // alla piattaforma non deve niente a nessuno e ha un conto solo).
+    // Guardare "sono il detentore" e basta sarebbe sbagliato: sui contratti della rete il detentore
+    // e' il master in cima, che il conto proprio non ce l'ha — lo si vedrebbe a zero e si
+    // bloccherebbero le spedizioni di tutti.
+    const eVertice = !m.parent_master_id || m.parent_master_id === radiceId
+    const pagaDalSuoConto = isProprietario && contrattoDichiaratoProprio && !eVertice
     catena.push({
       masterId: m.id, nome: m.nome,
       tipoContratto: m.tipo_contratto || 'credito_scalare',
-      credito: Number(m.credito || 0),
+      credito: Number((pagaDalSuoConto ? m.credito_proprio : m.credito) || 0),
       prezzo, isProprietario,
     })
 
