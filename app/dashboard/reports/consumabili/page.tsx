@@ -27,6 +27,20 @@ export default function ReportConsumabiliPage() {
 
   const setF = (k:string,v:string) => setFiltri(f=>({...f,[k]:v}))
 
+  // Prima il report veniva solo scaricato al volo e poi "registrato" con una POST senza allegato:
+  // in elenco restava una riga senza file da riscaricare. Ora il file va davvero sul bucket privato.
+  async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
+    const filtriTxt = 'dalla_data=' + (filtri.dal||'') + ' alla_data=' + (filtri.al||'')
+    const r = await fetch('/api/reports/salva', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo: 'consumabili', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
+    })
+    const j = await r.json()
+    if (!j.success) { await dialog.alert({ title: 'Errore', message: 'Errore salvataggio report: ' + (j.error||'') }); return }
+    const lista = await fetch('/api/reports/lista?tipo=consumabili').then(x=>x.json())
+    setReports(Array.isArray(lista) ? lista : [])
+  }
+
   async function generaReport() {
     setGenerating(true)
     const params = new URLSearchParams()
@@ -38,7 +52,7 @@ export default function ReportConsumabiliPage() {
     if (!movimenti.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessun consumabile trovato.' }); setGenerating(false); return }
     const formato = filtri.formato.toLowerCase()
     if (formato === 'xlsx' || formato === 'csv') {
-      const { utils, writeFile } = await import('xlsx')
+      const { utils, writeFile, write } = await import('xlsx')
       const rows = movimenti.map((m:any) => ({
         'Data': new Date(m.data_acquisto).toLocaleDateString('it-IT'),
         'Cliente': m.clienti?.ragione_sociale||'—',
@@ -51,7 +65,11 @@ export default function ReportConsumabiliPage() {
       const ws = utils.json_to_sheet(rows)
       const wb = utils.book_new()
       utils.book_append_sheet(wb, ws, 'Consumabili')
-      writeFile(wb, `report_consumabili_${filtri.dal}.${formato==='xlsx'?'xlsx':'csv'}`)
+      const nomeFile = `report_consumabili_${filtri.dal}.${formato==='xlsx'?'xlsx':'csv'}`
+      writeFile(wb, nomeFile)
+      // stesso workbook riscritto in base64: cosi' il file archiviato e' identico a quello scaricato
+      const b64 = write(wb, { bookType: formato === 'csv' ? 'csv' : 'xlsx', type: 'base64' })
+      await salvaReport(b64, nomeFile, formato)
     } else {
       const { default: jsPDF } = await import('jspdf')
       const { default: autoTable } = await import('jspdf-autotable')
@@ -73,9 +91,8 @@ export default function ReportConsumabiliPage() {
         styles:{fontSize:8}, headStyles:{fillColor:[249,115,22]},
       })
       doc.save(`report_consumabili_${filtri.dal}.pdf`)
+      await salvaReport(doc.output('datauristring'), `report_consumabili_${filtri.dal}.pdf`, 'pdf')
     }
-    await fetch('/api/reports/spedizioni',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({formato:filtri.formato,filtri,tipo:'consumabili'})})
-    fetch('/api/reports/lista?tipo=consumabili').then(r=>r.json()).then(d=>setReports(d||[]))
     setGenerating(false)
   }
 

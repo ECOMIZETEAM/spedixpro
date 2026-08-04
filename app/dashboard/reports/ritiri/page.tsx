@@ -25,6 +25,22 @@ export default function ReportRitiriPage() {
 
   const setF = (k:string,v:string) => setFiltri(f=>({...f,[k]:v}))
 
+  // Prima il report veniva solo scaricato al volo e la riga in elenco nasceva senza file:
+  // restava un record vuoto, non riscaricabile. Ora il file parte davvero verso il bucket
+  // riservato, che risponde con file_path e file_url (link a /api/file, non allo storage).
+  async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
+    const filtriTxt = 'dalla_data=' + (filtri.dal||'') + ' alla_data=' + (filtri.al||'')
+    const r = await fetch('/api/reports/salva', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo: 'ritiri', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
+    })
+    const j = await r.json()
+    // qui non c'e' il DialogProvider: l'errore finisce in console, senza inventare import
+    if (!j.success) { console.error('Errore salvataggio report ritiri: ' + (j.error||'')); return }
+    const lista = await fetch('/api/reports/lista?tipo=ritiri').then(x=>x.json())
+    setReports(Array.isArray(lista) ? lista : [])
+  }
+
   async function generaReport() {
     setGenerating(true)
     const rows = [['Cliente','Dalla Data','Alla Data','Vettore','Contratto','Formato'],[filtri.clienteId||'Tutti',filtri.dal,filtri.al,filtri.vettore||'Tutti',filtri.contratto||'Tutti',filtri.formato]]
@@ -34,9 +50,13 @@ export default function ReportRitiriPage() {
     doc.setFontSize(14)
     doc.text(`Report Ritiri — ${filtri.dal} / ${filtri.al}`, 14, 15)
     autoTable(doc, { startY:25, head:[rows[0]], body:[rows[1]], styles:{fontSize:9}, headStyles:{fillColor:[249,115,22]} })
-    doc.save(`report_ritiri_${filtri.dal}.pdf`)
-    await fetch('/api/reports/spedizioni',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({formato:filtri.formato,filtri,tipo:'ritiri'})})
-    fetch('/api/reports/lista?tipo=ritiri').then(r=>r.json()).then(d=>setReports(d||[]))
+    const nomeFile = `report_ritiri_${filtri.dal}.pdf`
+    doc.save(nomeFile)
+    // jsPDF restituisce gia' un data: URI, quindi va passato cosi' com'e'.
+    // Il formato dichiarato e' 'pdf' perche' questa pagina produce solo PDF, qualunque
+    // sia la voce scelta nella tendina: scrivere XLSX o CSV darebbe un content-type
+    // sbagliato a un file che PDF resta.
+    await salvaReport(doc.output('datauristring'), nomeFile, 'pdf')
     setGenerating(false)
   }
 

@@ -27,6 +27,21 @@ export default function ReportResiPage() {
 
   const setF = (k:string,v:string) => setFiltri(f=>({...f,[k]:v}))
 
+  // Prima il file veniva solo scaricato al volo e nell'elenco finiva una riga senza allegato:
+  // niente da riscaricare in seguito. Qui il file viene caricato davvero sul bucket privato
+  // (via /api/reports/salva, che scrive file_path + link a /api/file).
+  async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
+    const filtriTxt = 'dalla_data=' + (filtri.dal||'') + ' alla_data=' + (filtri.al||'')
+    const r = await fetch('/api/reports/salva', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo: 'resi', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
+    })
+    const j = await r.json()
+    if (!j.success) { await dialog.alert({ title: 'Errore', message: 'Errore salvataggio report: ' + (j.error||'') }); return }
+    const lista = await fetch('/api/reports/lista?tipo=resi').then(x=>x.json())
+    setReports(Array.isArray(lista) ? lista : [])
+  }
+
   async function generaReport() {
     setGenerating(true)
     const params = new URLSearchParams()
@@ -49,7 +64,12 @@ export default function ReportResiPage() {
       const ws = utils.json_to_sheet(rows)
       const wb = utils.book_new()
       utils.book_append_sheet(wb, ws, 'Resi')
-      writeFile(wb, `report_resi_${filtri.dal}.${formato==='xlsx'?'xlsx':'csv'}`)
+      const nomeFile = `report_resi_${filtri.dal}.${formato==='xlsx'?'xlsx':'csv'}`
+      writeFile(wb, nomeFile)
+      // stesso foglio riscritto in base64: e' la copia che finisce nell'archivio
+      const XLSX = await import('xlsx')
+      const b64 = XLSX.write(wb, { bookType: formato === 'csv' ? 'csv' : 'xlsx', type: 'base64' })
+      await salvaReport(b64, nomeFile, formato)
     } else {
       const { default: jsPDF } = await import('jspdf')
       const { default: autoTable } = await import('jspdf-autotable')
@@ -67,9 +87,10 @@ export default function ReportResiPage() {
         styles:{fontSize:8}, headStyles:{fillColor:[249,115,22]},
       })
       doc.save(`report_resi_${filtri.dal}.pdf`)
+      await salvaReport(doc.output('datauristring'), `report_resi_${filtri.dal}.pdf`, 'pdf')
     }
-    await fetch('/api/reports/spedizioni',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({formato:filtri.formato,filtri,tipo:'resi'})})
-    fetch('/api/reports/lista?tipo=resi').then(r=>r.json()).then(d=>setReports(d||[]))
+    // La vecchia POST a /api/reports/spedizioni non spediva il file: creava la riga vuota.
+    // L'elenco ora lo ricarica salvaReport, una volta sola.
     setGenerating(false)
   }
 

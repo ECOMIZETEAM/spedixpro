@@ -34,9 +34,17 @@ export default function ReportTable({ reports, onScarica }: { reports: any[], on
                 <td style={{ padding: '9px 14px', fontSize: '12px', color: '#1a1a1a' }}>{new Date(r.created_at).toLocaleString('it-IT')}</td>
                 <td style={{ padding: '9px 14px', color: '#1a1a1a', fontSize: '12px' }}>{String(r.filtri || '').split(' ').map((f: string, idx: number) => <div key={idx}>{f}</div>)}</td>
                 <td style={{ padding: '9px 14px' }}><span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700' }}>{r.formato}</span></td>
-                <td style={{ padding: '9px 14px' }}>{r.utente_nome}</td>
-                <td style={{ padding: '9px 14px', color: '#16a34a', fontWeight: '500' }}>{r.stato}</td>
-                <td style={{ padding: '9px 14px' }}><a href={r.file_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: '600', textDecoration: 'none', cursor: 'pointer' }}>Scarica</a></td>
+                {/* I nomi delle colonne sono quelli veri della tabella: utente e status. Con
+                    utente_nome e stato queste due celle restavano vuote su tutte le pagine. */}
+                <td style={{ padding: '9px 14px' }}>{r.utente || '—'}</td>
+                <td style={{ padding: '9px 14px', color: '#16a34a', fontWeight: '500' }}>{r.status || '—'}</td>
+                <td style={{ padding: '9px 14px' }}>
+                  {/* Le righe vecchie sono state registrate senza il file: un link vuoto porterebbe
+                      a una pagina di errore, e chi lo prova pensa che il report sia rotto. */}
+                  {r.file_url
+                    ? <a href={r.file_url} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: '600', textDecoration: 'none', cursor: 'pointer' }}>Scarica</a>
+                    : <span style={{ color: '#9ca3af', fontSize: '12px' }}>non conservato</span>}
+                </td>
               </tr>
             ))}
           </tbody>

@@ -171,20 +171,19 @@ export default function ReportSpedizioniPage() {
       csv.push(''); csv.push(rowT.join(','))
       zip.file('spedizioni.csv', csv.join('\n'))
       const blob = await zip.generateAsync({type:'blob'})
+      const nomeZip = `report_spedizioni_${filtri.dal}.zip`
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = url; a.download = `report_spedizioni_${filtri.dal}.zip`
+      a.href = url; a.download = nomeZip
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       URL.revokeObjectURL(url)
+      // Anche lo ZIP va conservato: prima questo ramo registrava la riga senza il file, e in
+      // elenco restava un report che non si poteva riscaricare.
+      const b64 = await new Promise<string>(res => {
+        const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.readAsDataURL(blob)
+      })
+      await salvaReport(b64, nomeZip, 'zip')
     }
-
-    // Salva nel registro report
-    await fetch('/api/reports/spedizioni', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ formato: filtri.formato, filtri })
-    })
-    await caricaReports()
     setGenerating(false)
   }
 

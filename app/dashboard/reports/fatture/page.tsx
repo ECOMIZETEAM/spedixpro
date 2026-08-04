@@ -25,6 +25,22 @@ export default function ReportFatturePage() {
 
   const setF = (k:string,v:string) => setFiltri(f=>({...f,[k]:v}))
 
+  // Prima il report veniva solo scaricato al volo e "registrato" senza allegare nulla: nell'elenco
+  // restava una riga con il tasto Scarica che non puntava a niente. Ora il file viaggia in base64
+  // verso /api/reports/salva, che lo mette sul bucket riservato e scrive file_path/file_url.
+  async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
+    const filtriTxt = 'dalla_data=' + (filtri.dal||'') + ' alla_data=' + (filtri.al||'')
+    const r = await fetch('/api/reports/salva', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo: 'fatture', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
+    })
+    const j = await r.json()
+    // Qui non c'e' il DialogProvider: l'errore va in console, senza rompere il download gia' avvenuto.
+    if (!j.success) { console.error('Errore salvataggio report fatture:', j.error || ''); return }
+    const lista = await fetch('/api/reports/lista?tipo=fatture').then(x=>x.json())
+    setReports(Array.isArray(lista) ? lista : [])
+  }
+
   async function generaReport() {
     setGenerating(true)
     const { default: jsPDF } = await import('jspdf')
@@ -39,8 +55,11 @@ export default function ReportFatturePage() {
       styles:{fontSize:9}, headStyles:{fillColor:[249,115,22]}
     })
     doc.save(`report_fatture_${filtri.dal}.pdf`)
-    await fetch('/api/reports/spedizioni',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({formato:filtri.formato,filtri,tipo:'fatture'})})
-    fetch('/api/reports/lista?tipo=fatture').then(r=>r.json()).then(d=>setReports(d||[]))
+    // Il file prodotto qui e' sempre un PDF (jsPDF), qualunque sia la voce scelta nel menu Formato:
+    // registro quindi 'pdf', altrimenti il bucket salverebbe il PDF con il content-type sbagliato e
+    // il download dall'elenco non si aprirebbe.
+    const pdfB64 = doc.output('datauristring')
+    await salvaReport(pdfB64, `report_fatture_${filtri.dal}.pdf`, 'pdf')
     setGenerating(false)
   }
 

@@ -25,6 +25,21 @@ export default function ReportSmsClientiPage() {
 
   const setF = (k:string,v:string) => setFiltri(f=>({...f,[k]:v}))
 
+  // Prima il file veniva solo scaricato al volo e la riga in elenco nasceva senza allegato:
+  // niente file_path, quindi "Scarica" non aveva nulla da dare. Ora il PDF viaggia in base64
+  // verso /api/reports/salva, che lo mette sul bucket riservato e scrive la riga completa.
+  async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
+    const filtriTxt = 'dalla_data=' + (filtri.dal||'') + ' alla_data=' + (filtri.al||'')
+    const r = await fetch('/api/reports/salva', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo: 'sms-clienti', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
+    })
+    const j = await r.json()
+    if (!j.success) { console.error('Errore salvataggio report: ' + (j.error||'')); return }
+    const lista = await fetch('/api/reports/lista?tipo=sms-clienti').then(x=>x.json())
+    setReports(Array.isArray(lista) ? lista : [])
+  }
+
   async function generaReport() {
     setGenerating(true)
     const { default: jsPDF } = await import('jspdf')
@@ -40,8 +55,11 @@ export default function ReportSmsClientiPage() {
       styles:{fontSize:9}, headStyles:{fillColor:[249,115,22]}
     })
     doc.save(`report_sms_clienti_${filtri.dal}.pdf`)
-    await fetch('/api/reports/spedizioni',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({formato:filtri.formato,filtri,tipo:'sms-clienti'})})
-    fetch('/api/reports/lista?tipo=sms-clienti').then(r=>r.json()).then(d=>setReports(d||[]))
+    // Il file prodotto qui e' sempre un PDF (jsPDF), qualunque sia la voce scelta nel menu
+    // Formato: passo 'pdf' perche' e' il contenuto reale, altrimenti il bucket lo salverebbe
+    // con un content-type sbagliato e il download uscirebbe illeggibile.
+    const b64 = doc.output('datauristring')
+    await salvaReport(b64, `report_sms_clienti_${filtri.dal}.pdf`, 'pdf')
     setGenerating(false)
   }
 
