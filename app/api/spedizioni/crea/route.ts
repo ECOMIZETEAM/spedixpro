@@ -1014,15 +1014,24 @@ export async function POST(req: NextRequest) {
       // ripetere la prima su tutti significherebbe far viaggiare tre colli con la stessa etichetta.
       let etichettePerCollo: string[] = []
       try {
-        // ASPETTARE DI PIU' NON SERVE: MISURATO.
-        // Ho provato ad alzare i tentativi da 2 a 8 (circa dieci secondi) per far nascere subito
-        // il numero definitivo. Nei log di produzione, nella finestra in cui la modifica era
-        // attiva, "waybill non pronta" continuava a comparire con la stessa frequenza di prima:
-        // su questo contratto la lettera di vettura ci mette piu' di dieci secondi, quindi
-        // trattenere chi sta creando la spedizione e' costo puro senza alcun beneficio.
-        // Restano i due tentativi rapidi, e il numero definitivo lo mette il completamento in
-        // background pochi secondi dopo (piu' il lavoro ogni quarto d'ora come rete di sicurezza).
-        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _vuoleRitiro ? 3 : 2, 1500, _vuoleRitiro)
+        // ASPETTARE DI PIU' SERVE, E QUANTO SERVE E' MISURATO.
+        //
+        // Su questo contratto la lettera di vettura non arriva insieme all'ordine. Con due
+        // tentativi in un secondo e mezzo quasi tutte le spedizioni nascevano con un numero
+        // provvisorio, che il cliente si trovava davanti al posto del tracking.
+        //
+        // Contate sui log di produzione, a parita' di traffico: con otto tentativi il provvisorio
+        // tocca 8 spedizioni su 17, con due tentativi 15 su 16. Non risolve del tutto — a volte il
+        // corriere ci mette piu' di dieci secondi — ma dimezza abbondantemente.
+        //
+        // ATTENZIONE A COME SI MISURA: NON dai movimenti. La loro descrizione porta il numero, ma
+        // il lavoro ogni quarto d'ora la riscrive col numero definitivo, quindi guardando li' le
+        // ore passate sembrano sempre pulite e si conclude l'opposto del vero. L'unica misura
+        // onesta e' contare "waybill non pronta" nei log RAPPORTATA alle spedizioni create.
+        //
+        // Il costo e' sotto controllo: il tetto di durata di 60 secondi non viene mai toccato, e
+        // si esce appena il numero c'e'. Chi risponde subito non aspetta niente.
+        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _vuoleRitiro ? 6 : 8, 1200, _vuoleRitiro)
         ldv = w.numero || null
         // Il codice di prenotazione del ritiro arriva QUI, non con l'ordine: e' l'unico posto in cui
         // il corriere lo comunica. Senza salvarlo, il ritiro risulta prenotato ma senza numero, e
