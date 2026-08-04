@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
+import { vedeLaRete } from '@/lib/perimetro'
 
 // Guadagno del master = quanto incassa dai clienti diretti e dai sotto-master diretti
 // per le SPEDIZIONI, meno quanto il master paga al livello superiore/corriere.
@@ -203,7 +204,12 @@ export async function GET(req: NextRequest) {
   //    leggere, e deve restare cosi'. ──
   const EA_MULTI_ID = 'a8d42a25-3711-4343-a6df-ee2ba9bbf08b'
   let costiProvider: any = null
-  if (M === EA_MULTI_ID) {
+  // NON BASTA CHE SIA LA RETE GIUSTA: DEVE ESSERE LA PERSONA GIUSTA.
+  // Il controllo guardava solo il master. Ma sotto quel master ci sono anche due AGENTI, che sono
+  // rivenditori esterni: a loro finiva sotto gli occhi la spesa divisa per fornitore, con i nomi
+  // dei fornitori a valle — l'unica cosa che non deve uscire da qui. I clienti erano gia' fermati
+  // piu' sopra; gli agenti no, perche' li' si guarda solo il ruolo 'cliente'.
+  if (M === EA_MULTI_ID && vedeLaRete(utente)) {
     const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
     const sub = await sottoAlberoMasterIds(admin, M)
     const sp = await fetchAll(() => admin.from('spedizioni')
