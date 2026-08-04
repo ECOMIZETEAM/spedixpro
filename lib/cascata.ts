@@ -137,6 +137,26 @@ async function costruisciCatena(
   return { catena }
 }
 
+// UN MASTER HA DAVVERO DUE CONTI?
+// Stessa condizione che qui sopra decide su quale conto finisce il costo, tenuta in una funzione
+// sola: se un giorno cambia, cambia insieme per il controllo del credito e per le pagine. Metterla
+// anche nelle pagine "tanto e' facile" e' esattamente il modo in cui le due si allontanano.
+// I clienti non c'entrano: hanno un conto solo e devono al proprio master comunque.
+export async function haContoProprio(masterId: string | null | undefined): Promise<boolean> {
+  if (!masterId) return false
+  // Letture minime e sul master di chi sta guardando: serve l'accesso pieno perche' la radice
+  // della piattaforma non e' nella rete di chi interroga e con le sole regole per-inquilino
+  // tornerebbe vuota — e un vertice si vedrebbe un secondo conto che non ha.
+  const admin = createAdminSupabase()
+  const { data: m } = await admin.from('masters').select('parent_master_id').eq('id', masterId).maybeSingle()
+  if (!m?.parent_master_id) return false
+  const { data: radice } = await admin.from('masters').select('id').is('parent_master_id', null).maybeSingle()
+  if (radice?.id && m.parent_master_id === radice.id) return false
+  const { count } = await admin.from('corrieri')
+    .select('id', { count: 'exact', head: true }).eq('master_id', masterId).eq('proprio', true)
+  return (count || 0) > 0
+}
+
 export async function verificaCreditoCatena(
   supabase: any,
   params: {

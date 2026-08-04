@@ -72,7 +72,12 @@ export async function GET(req: NextRequest) {
     }
     const { movimenti, total, somma } = await carica(supabase, 'master_target_id', utente.master_id)
     const { data: m } = await supabase
-      .from('masters').select('credito, nome').eq('id', utente.master_id).single()
+      .from('masters').select('credito, nome, credito_proprio').eq('id', utente.master_id).single()
+    // Chi porta contratti SUOI ha due conti, e finora ne vedeva uno: i costi dei suoi contratti
+    // scendevano da un saldo che nessuna pagina mostrava. Il secondo si manda solo a chi ce l'ha
+    // davvero, cosi' per tutti gli altri la pagina resta identica.
+    const { haContoProprio } = await import('@/lib/cascata')
+    const dueConti = await haContoProprio(utente.master_id)
     // Opzioni del filtro corriere: i nomi contratto sono condivisi in rete → bastano i MIEI.
     const { data: miei } = await supabase.from('corrieri').select('nome_contratto').eq('master_id', utente.master_id)
     const corrieriDisponibili = Array.from(new Set((miei || []).map((c: any) => c.nome_contratto).filter(Boolean))).sort()
@@ -81,6 +86,7 @@ export async function GET(req: NextRequest) {
       total, somma, page: page || undefined, perPage,
       corrieriDisponibili,
       saldo: Number(m?.credito || 0),
+      saldoProprio: dueConti ? Number((m as any)?.credito_proprio || 0) : undefined,
       cliente: m?.nome || null,
     })
   }

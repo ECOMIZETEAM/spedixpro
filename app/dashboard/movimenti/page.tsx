@@ -35,6 +35,8 @@ export default function MovimentiMasterPage() {
   const dialog = useDialog()
   const [movimenti, setMovimenti] = useState<Movimento[]>([])
   const [saldo, setSaldo] = useState(0)
+  // null = un conto solo (quasi tutti). Valorizzato solo per chi porta contratti suoi.
+  const [saldoProprio, setSaldoProprio] = useState<number|null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [cerca, setCerca] = useState('')
@@ -93,6 +95,7 @@ export default function MovimentiMasterPage() {
         if (annulla) return
         if (res.ok) {
           setMovimenti(data.movimenti || []); setSaldo(Number(data.saldo || 0))
+          setSaldoProprio(data.saldoProprio == null ? null : Number(data.saldoProprio))
           setTotal(Number(data.total || 0)); setSomma(Number(data.somma || 0))
           if (Array.isArray(data.corrieriDisponibili)) setCorrieriOpts(data.corrieriDisponibili)
           setErr(null)
@@ -177,9 +180,17 @@ export default function MovimentiMasterPage() {
       <div style={{...card,marginBottom:'16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px'}}>
         <div style={{display:'flex',gap:'28px',flexWrap:'wrap'}}>
           <div>
-            <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>Credito disponibile</div>
+            {/* Con due conti la sola parola "credito" non basta piu': bisogna dire QUALE, altrimenti
+                si ricarica quello sbagliato e il blocco resta. */}
+            <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>{saldoProprio!=null?'Credito · conto rete':'Credito disponibile'}</div>
             <div style={{fontSize:'26px',fontWeight:700,color:saldo<0?'#b91c1c':'#15803d',marginTop:'4px'}}>{fmtEuro(saldo)}</div>
           </div>
+          {saldoProprio!=null && (
+            <div>
+              <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>Credito · contratti tuoi</div>
+              <div style={{fontSize:'26px',fontWeight:700,color:saldoProprio<0?'#b91c1c':'#15803d',marginTop:'4px'}}>{fmtEuro(saldoProprio)}</div>
+            </div>
+          )}
           <div>
             <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>Totale movimenti{corriereFiltro?` · ${corriereFiltro}`:''}</div>
             <div style={{fontSize:'26px',fontWeight:700,color:totaleFiltrato<0?'#b91c1c':'#15803d',marginTop:'4px'}}>{fmtImporto(totaleFiltrato)}</div>
