@@ -234,6 +234,18 @@ export async function catenaContratto(
   let ownerReale = corriereOwnerId
   let cur: string | null = corriereOwnerId
   for (let i = 0; i < 20 && cur; i++) {
+    // IL DETENTORE SI DICHIARA, NON SI INDOVINA.
+    // Prima si risaliva finche' si trovava un contratto che si CHIAMAVA uguale, e ci si fermava
+    // li'. Funziona finche' i nomi non si scontrano: il giorno in cui un master porta un contratto
+    // SUO e lo chiama come uno che esiste piu' in alto, la catena risalirebbe fino a quello e gli
+    // addebiterebbe roba che non e' sua — senza un errore e senza che nessuno se ne accorga.
+    // Il segno `proprio` chiude la questione: se questo contratto e' dichiarato suo, la catena
+    // finisce qui e chi sta sopra non viene nemmeno guardato.
+    const curCid = await corriereDiMasterPerNome(admin, cur, corriereNome)
+    if (curCid) {
+      const { data: cc }: any = await admin.from('corrieri').select('proprio').eq('id', curCid).maybeSingle()
+      if (cc?.proprio) { ownerReale = cur; break }
+    }
     const { data: mm }: any = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
     const parent: string | null = mm?.parent_master_id || null
     if (!parent) break
