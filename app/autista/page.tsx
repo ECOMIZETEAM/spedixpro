@@ -368,33 +368,66 @@ function Lettore({ onLetto }: { onLetto: (codice: string) => void }) {
   const [manuale, setManuale] = useState('')
   const [supportato, setSupportato] = useState(true)
 
+  // LEGGERE I CODICI DEVE FUNZIONARE ANCHE SU IPHONE.
+  //
+  // Prima si usava solo BarcodeDetector, che e' una funzione del browser: su Android c'e', su
+  // Safari iOS NO. Quando mancava, la schermata si arrendeva e diceva "questo telefono non legge i
+  // codici: scrivi il numero" — cioe' TUTTI gli autisti con iPhone hanno sempre digitato a mano,
+  // consegna per consegna. Non era un telefono difettoso: era una scelta mia che non copriva i
+  // telefoni che usano davvero.
+  //
+  // Ora: dove BarcodeDetector c'e' si usa quello, che e' nativo e piu' rapido; dove non c'e' si
+  // decodifica l'immagine da soli. La fotocamera si apre allo stesso modo, cambia solo chi legge.
   useEffect(() => {
-    const D = (window as any).BarcodeDetector
-    if (!D) { setSupportato(false); return }
     let stream: MediaStream | null = null
     let fermo = false
-    const detector = new D({ formats: ['code_128', 'code_39', 'ean_13', 'qr_code'] })
-      ; (async () => {
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-          if (video.current) { video.current.srcObject = stream; await video.current.play() }
-          const cerca = async () => {
-            if (fermo || !video.current) return
-            try {
-              const trovati = await detector.detect(video.current)
-              if (trovati?.length) {
-                const v = String(trovati[0].rawValue || '').trim()
-                if (v) { fermo = true; onLetto(v); return }
-              }
-            } catch { /* fotogramma non leggibile: si riprova col prossimo */ }
-            requestAnimationFrame(cerca)
-          }
+    let controlli: { stop: () => void } | null = null
+
+    const avvia = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+        if (video.current) { video.current.srcObject = stream; await video.current.play() }
+      } catch {
+        setErrore('Non riesco ad accedere alla fotocamera. Controlla il permesso nel telefono.')
+        return
+      }
+
+      const D = (window as any).BarcodeDetector
+      if (D) {
+        const detector = new D({ formats: ['code_128', 'code_39', 'ean_13', 'qr_code'] })
+        const cerca = async () => {
+          if (fermo || !video.current) return
+          try {
+            const trovati = await detector.detect(video.current)
+            if (trovati?.length) {
+              const v = String(trovati[0].rawValue || '').trim()
+              if (v) { fermo = true; onLetto(v); return }
+            }
+          } catch { /* fotogramma non leggibile: si riprova col prossimo */ }
           requestAnimationFrame(cerca)
-        } catch {
-          setErrore('Non riesco ad accedere alla fotocamera. Controlla il permesso nel telefono.')
         }
-      })()
-    return () => { fermo = true; stream?.getTracks().forEach(t => t.stop()) }
+        requestAnimationFrame(cerca)
+        return
+      }
+
+      // Il ripiego che fa funzionare gli iPhone. Si carica solo qui, quando serve davvero: e' un
+      // pezzo pesante e non ha senso farlo scaricare a chi ha gia' il lettore nativo.
+      try {
+        const { BrowserMultiFormatReader } = await import('@zxing/browser')
+        const lettore = new BrowserMultiFormatReader()
+        controlli = await lettore.decodeFromVideoElement(video.current!, (risultato) => {
+          if (fermo || !risultato) return
+          const v = String(risultato.getText() || '').trim()
+          if (v) { fermo = true; controlli?.stop(); onLetto(v) }
+        })
+      } catch {
+        // Nemmeno il ripiego parte: resta la scrittura a mano, che ora almeno si vede.
+        setSupportato(false)
+      }
+    }
+    avvia()
+
+    return () => { fermo = true; controlli?.stop(); stream?.getTracks().forEach(t => t.stop()) }
   }, [onLetto])
 
   return (
