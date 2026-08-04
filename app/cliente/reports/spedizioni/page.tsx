@@ -9,6 +9,7 @@ const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'
 const STATI = ['in_lavorazione','spedita','in_transito','in_consegna','consegnata','in_giacenza','reso_mittente','annullata','non_consegnato']
 
 import { useDialog } from '@/app/components/DialogProvider'
+import { inviaReport } from '@/lib/report-client'
 export default function ReportSpedizioniPage() {
   const dialog = useDialog()
   const [clienti, setClienti] = useState<any[]>([])
@@ -42,11 +43,7 @@ export default function ReportSpedizioniPage() {
 
   async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
     const filtriTxt = 'dalla_data=' + (filtri.dal||'') + ' alla_data=' + (filtri.al||'')
-    const r = await fetch('/api/reports/salva', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tipo: 'spedizioni', filtri: filtriTxt, formato, fileBase64, nomeFile })
-    })
-    const j = await r.json()
+    const j = await inviaReport({ tipo: 'spedizioni', filtri: filtriTxt, formato, fileBase64, nomeFile })
     if (!j.success) { await dialog.alert({ title: 'Errore', message: 'Errore salvataggio report: ' + (j.error||'') }); return }
     const lista = await fetch('/api/reports/lista?tipo=spedizioni').then(x=>x.json())
     setReports(Array.isArray(lista) ? lista : [])

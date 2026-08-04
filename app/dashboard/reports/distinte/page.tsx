@@ -7,6 +7,7 @@ const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fo
 const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
 
 import { useDialog } from '@/app/components/DialogProvider'
+import { inviaReport } from '@/lib/report-client'
 export default function ReportDistintePage() {
   const dialog = useDialog()
   const [clienti, setClienti] = useState<any[]>([])
@@ -30,11 +31,7 @@ export default function ReportDistintePage() {
 
   async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
     const filtriTxt = 'dalla_data=' + (filtri.dal||'') + ' alla_data=' + (filtri.al||'')
-    const r = await fetch('/api/reports/salva', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tipo: 'distinte', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
-    })
-    const j = await r.json()
+    const j = await inviaReport({ tipo: 'distinte', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
     if (!j.success) { await dialog.alert({ title: 'Errore', message: 'Errore salvataggio report: ' + (j.error||'') }); return }
     const lista = await fetch('/api/reports/lista?tipo=distinte').then(x=>x.json())
     setReports(Array.isArray(lista) ? lista : [])

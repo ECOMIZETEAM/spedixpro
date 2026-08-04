@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import ReportTable from '@/app/components/ReportTable'
+import { inviaReport } from '@/lib/report-client'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -30,11 +31,7 @@ export default function ReportRitiriPage() {
   // riservato, che risponde con file_path e file_url (link a /api/file, non allo storage).
   async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
     const filtriTxt = 'dalla_data=' + (filtri.dal||'') + ' alla_data=' + (filtri.al||'')
-    const r = await fetch('/api/reports/salva', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tipo: 'ritiri', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
-    })
-    const j = await r.json()
+    const j = await inviaReport({ tipo: 'ritiri', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
     // qui non c'e' il DialogProvider: l'errore finisce in console, senza inventare import
     if (!j.success) { console.error('Errore salvataggio report ritiri: ' + (j.error||'')); return }
     const lista = await fetch('/api/reports/lista?tipo=ritiri').then(x=>x.json())

@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import ReportTable from '@/app/components/ReportTable'
+import { inviaReport } from '@/lib/report-client'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -30,11 +31,7 @@ export default function ReportFatturePage() {
   // verso /api/reports/salva, che lo mette sul bucket riservato e scrive file_path/file_url.
   async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
     const filtriTxt = 'dalla_data=' + (filtri.dal||'') + ' alla_data=' + (filtri.al||'')
-    const r = await fetch('/api/reports/salva', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tipo: 'fatture', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
-    })
-    const j = await r.json()
+    const j = await inviaReport({ tipo: 'fatture', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
     // Qui non c'e' il DialogProvider: l'errore va in console, senza rompere il download gia' avvenuto.
     if (!j.success) { console.error('Errore salvataggio report fatture:', j.error || ''); return }
     const lista = await fetch('/api/reports/lista?tipo=fatture').then(x=>x.json())
