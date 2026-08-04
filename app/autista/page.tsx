@@ -411,7 +411,19 @@ function Lettore({ onLetto }: { onLetto: (codice: string) => void }) {
           <input value={manuale} onChange={e => setManuale(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && manuale.trim()) onLetto(manuale.trim()) }}
             placeholder="Numero della lettera di vettura"
-            style={{ flex: 1, padding: '12px 13px', fontSize: '15px', borderRadius: '9px', border: 'none', outline: 'none' }} />
+            autoCapitalize="characters" autoCorrect="off" spellCheck={false}
+            // NERO SU NERO. Il campo non aveva ne' sfondo ne' colore del testo: su un contenitore
+            // scuro il telefono in modalita' scura lo disegnava scuro con testo scuro, e l'autista
+            // non vedeva quello che stava scrivendo. In cabina, con il pacco in mano, e' un
+            // problema serio. I colori adesso sono dichiarati e non dipendono dal telefono:
+            // colorScheme lo tiene chiaro anche su iOS, e WebkitTextFillColor serve perche' Safari
+            // ignora `color` sugli input in modalita' scura.
+            style={{
+              flex: 1, padding: '12px 13px', fontSize: '16px', borderRadius: '9px',
+              border: 'none', outline: 'none',
+              background: '#fff', color: '#18181b', WebkitTextFillColor: '#18181b',
+              colorScheme: 'light',
+            }} />
           <button onClick={() => manuale.trim() && onLetto(manuale.trim())}
             style={{ background: ARANCIO, color: '#fff', border: 'none', borderRadius: '9px', padding: '12px 16px', fontSize: '14.5px', fontWeight: 700 }}>
             Cerca
