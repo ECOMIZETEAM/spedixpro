@@ -155,24 +155,10 @@ export async function POST(req: NextRequest) {
         await admin.from('spedizioni').update(upd2).in('id', idsAgg)
         console.log('[WEBHOOK][SPEDISCI]', tracking, '-> stato', avanzato, `(${idsAgg.length} agg.)`)
 
-        // L'APERTURA DELLA GIACENZA SI ADDEBITA QUI, NON DOPO.
-        // Su questo corriere la giacenza la scopre il webhook, che arriva subito; l'addebito
-        // invece stava solo nel giro di tracking, che passa ogni mezz'ora e paga solo se in quel
-        // momento il pacco e' ANCORA in giacenza. Se nel frattempo veniva svincolato o consegnato,
-        // quella finestra si chiudeva e la pratica non la pagava piu' nessuno: in trenta giorni
-        // 12 giacenze su 13 sono passate cosi'. Chi la scopre la addebita.
-        if (primaGiacenza) {
-          try {
-            const { addebitaAperturaGiacenza } = await import('@/lib/giacenza-cascata')
-            const { data: complete } = await admin.from('spedizioni')
-              .select('id,numero,cliente_id,master_id,corriere_id,giacenza_apertura_addebitata')
-              .in('id', idsAgg)
-            for (const sp of (complete || [])) {
-              if ((sp as any).giacenza_apertura_addebitata) continue
-              await addebitaAperturaGiacenza(sp as any)
-            }
-          } catch (e) { console.error('[WEBHOOK][SPEDISCI] addebito apertura giacenza:', e) }
-        }
+        // L'addebito dell'apertura non si chiama piu' da qui: appena la riga viene scritta con
+        // giacenza_data, il database la mette da solo in coda (trigger trg_giacenza_da_addebitare)
+        // e il lavoro pianificato la addebita. Cosi' vale per QUALUNQUE strada, non solo per queste
+        // due che conosciamo oggi.
       }
     }
     return new NextResponse('OK', { status: 200 })

@@ -226,18 +226,10 @@ export async function GET(req: NextRequest) {
         }).catch(() => {})
       }
 
-      // ENTRATA in giacenza -> il cliente paga SUBITO l'apertura dossier (+ cascata rete), una volta.
-      // Il servizio (riconsegna/reso) sarà addebitato allo svincolo. Best-effort: non blocca il cron.
-      if (nuovo === 'in_giacenza' && !(s as any).giacenza_apertura_addebitata && !(s as any).giacenza_addebito_effettuato) {
-        try {
-          const { addebitaAperturaGiacenza } = await import('@/lib/giacenza-cascata')
-          await addebitaAperturaGiacenza({
-            id: s.id, numero: (s as any).numero, cliente_id: (s as any).cliente_id,
-            master_id: (s as any).master_id, corriere_id: s.corriere_id,
-            giacenza_apertura_addebitata: (s as any).giacenza_apertura_addebitata,
-          })
-        } catch (e) { console.error('Errore addebito apertura giacenza:', e) }
-      }
+      // L'apertura giacenza non si addebita piu' da qui: la registra il database da solo (trigger
+      // trg_giacenza_da_addebitare) appena una spedizione entra in giacenza, da qualunque strada.
+      // Qui sotto, fuori dal ciclo, si svuota quella coda. Prima l'addebito stava dietro a QUESTA
+      // porta soltanto, e le giacenze scoperte dal webhook del corriere non le pagava nessuno.
     } catch { errori++ }
   }
 
@@ -256,6 +248,36 @@ export async function GET(req: NextRequest) {
     if (Date.now() - inizioMs > 270000) break
   }
 
-  console.log(`[TRACKING] esaminate=${lista.length} aggiornate=${aggiornate} errori=${errori} durata=${Math.round((Date.now() - inizioMs) / 1000)}s`)
-  return NextResponse.json({ ok: true, esaminate: lista.length, aggiornate, errori, durataSec: Math.round((Date.now() - inizioMs) / 1000) })
+  // ── APERTURE GIACENZA DA ADDEBITARE ──
+  // La coda la riempie il database da solo, con un trigger, appena una spedizione entra in
+  // giacenza: cosi' nessuna strada d'ingresso puo' saltare l'addebito, nemmeno una che nascera'
+  // domani. Qui si svuota: il prezzo lo sa l'applicazione, la regola la tiene il database.
+  let giacenzeAddebitate = 0
+  try {
+    const { data: coda } = await admin.from('giacenze_da_addebitare')
+      .select('spedizione_id, tentativi, spedizioni(id,numero,cliente_id,master_id,corriere_id,giacenza_apertura_addebitata)')
+      .lt('tentativi', 5).limit(200)
+    if (coda?.length) {
+      const { addebitaAperturaGiacenza } = await import('@/lib/giacenza-cascata')
+      for (const riga of coda) {
+        const sp: any = (riga as any).spedizioni
+        if (!sp) { await admin.from('giacenze_da_addebitare').delete().eq('spedizione_id', (riga as any).spedizione_id); continue }
+        try {
+          await addebitaAperturaGiacenza(sp)
+          // Si toglie dalla coda solo se e' andata: un errore la lascia li' per il giro dopo, con
+          // il conto dei tentativi che cresce — dopo cinque smette di riprovare e resta a vista.
+          await admin.from('giacenze_da_addebitare').delete().eq('spedizione_id', sp.id)
+          giacenzeAddebitate++
+        } catch (e: any) {
+          console.error('[GIACENZA][APERTURA] addebito non riuscito', sp.numero, e?.message)
+          await admin.from('giacenze_da_addebitare')
+            .update({ tentativi: ((riga as any).tentativi || 0) + 1, ultimo_errore: String(e?.message || e).slice(0, 300) })
+            .eq('spedizione_id', sp.id)
+        }
+      }
+    }
+  } catch (e: any) { console.error('[GIACENZA][APERTURA] coda non svuotata:', e?.message) }
+
+  console.log(`[TRACKING] esaminate=${lista.length} aggiornate=${aggiornate} errori=${errori} giacenze=${giacenzeAddebitate} durata=${Math.round((Date.now() - inizioMs) / 1000)}s`)
+  return NextResponse.json({ ok: true, esaminate: lista.length, aggiornate, errori, giacenzeAddebitate, durataSec: Math.round((Date.now() - inizioMs) / 1000) })
 }
