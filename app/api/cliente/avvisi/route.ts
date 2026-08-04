@@ -47,7 +47,20 @@ export async function POST(req: NextRequest) {
   if (!ctx) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const { avviso } = await req.json().catch(() => ({} as any))
   if (avviso !== AVVISO_API) return NextResponse.json({ error: 'Avviso sconosciuto' }, { status: 400 })
-  await ctx.admin.from('avvisi_visti')
-    .upsert({ cliente_id: ctx.clienteId, avviso: AVVISO_API, visto_da: ctx.user.id }, { onConflict: 'cliente_id,avviso' })
+  // L'UPSERT NON PUO' AGGANCIARE UN INDICE PARZIALE.
+  // Su questa tabella l'unicita' e' garantita da due indici PARZIALI (uno per i master, uno per i
+  // clienti, ciascuno valido solo dove la sua colonna non e' nulla). Un "in caso di conflitto"
+  // senza la stessa condizione Postgres non riesce ad agganciarlo e alza un errore — che qui non
+  // veniva letto: la rotta rispondeva comunque "fatto", il popup sembrava chiudersi e tornava al
+  // caricamento successivo, per sempre. Circa 700 errori al giorno, e nessuno dei 624 clienti era
+  // mai riuscito a togliersi l'avviso dallo schermo.
+  // Si scrive e basta: se la riga c'e' gia' significa che l'avviso era gia' stato chiuso, ed e'
+  // esattamente il risultato voluto. Qualunque altro errore va detto, non ingoiato.
+  const { error } = await ctx.admin.from('avvisi_visti')
+    .insert({ cliente_id: ctx.clienteId, avviso: AVVISO_API, visto_da: ctx.user.id })
+  if (error && error.code !== '23505') {
+    console.error('[AVVISI] chiusura non registrata:', error.message)
+    return NextResponse.json({ error: error.message }, { status: 400 })
+  }
   return NextResponse.json({ success: true })
 }

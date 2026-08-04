@@ -1138,6 +1138,7 @@ export async function POST(req: NextRequest) {
       // il corriere lo assegna anche minuti dopo, e senza questo non lo prendeva piu' nessuno.
       if (inserted?.id && (!ldv || !etichettaUrl || (_vuoleRitiro && !_codiceRitiro))) {
         const spedIdBg = inserted.id
+        const ldvAllaCreazione = !!ldv
         const idOrdineBg = ordine.idOrdine
         const vuoleRitiroBg = _vuoleRitiro
         after(async () => {
@@ -1173,11 +1174,33 @@ export async function POST(req: NextRequest) {
               }))
             }
             if (Object.keys(upd).length) await adminCrea.from('spedizioni').update(upd).eq('id', spedIdBg)
+            // LA MAIL AL DESTINATARIO PARTE DA QUI, QUANDO IL NUMERO NON C'ERA PRIMA.
+            // Alla creazione le avremmo scritto il numero provvisorio, e una mail spedita non la
+            // richiama indietro nessuno: il destinatario prova a tracciare, non trova niente e
+            // chiama l'assistenza. Adesso il numero vero c'e': la mail parte ora.
+            if (!ldvAllaCreazione && w.numero) {
+              try {
+                const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
+                let notificaDest = true
+                if (clienteId) {
+                  const { data: cli } = await adminCrea.from('clienti').select('impostazioni').eq('id', clienteId).maybeSingle()
+                  notificaDest = (cli?.impostazioni as any)?.notifica_email_dest !== false
+                }
+                await inviaEmailSpedizioneCreata({
+                  mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
+                  mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
+                  numero: w.numero, corriere: corriereRecord.nome_contratto, notificaDest,
+                })
+              } catch (e) { console.error('[CREA][EASYPARCEL] mail destinatario dopo il completamento:', e) }
+            }
           } catch (e) { console.error('[CREA][EASYPARCEL] completamento background:', e) }
         })
       }
 
       after(async () => {
+        // Niente mail con un numero che non esiste: se la lettera di vettura non era pronta la
+        // manda il completamento qui sopra, appena arriva quella vera.
+        if (!ldv) return
         try {
           const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
           let notificaDest = true
