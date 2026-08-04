@@ -21,6 +21,12 @@ import { erroreCorrierePulito } from '@/lib/errore-corriere'
 import { motivoLimiteCollo } from '@/lib/limiti-collo'
 
 
+// La creazione parla con i corrieri: alcuni rispondono subito, altri si prendono qualche secondo
+// per emettere la lettera di vettura. Senza un tetto esplicito vale quello brevissimo di default,
+// e una richiesta che scade dopo che l'ordine e' gia' stato PAGATO e' il peggio che possa capitare:
+// il pacco esiste dal corriere e da noi no. Un minuto e' molto piu' di quanto serva davvero.
+export const maxDuration = 60
+
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -1008,7 +1014,17 @@ export async function POST(req: NextRequest) {
       // ripetere la prima su tutti significherebbe far viaggiare tre colli con la stessa etichetta.
       let etichettePerCollo: string[] = []
       try {
-        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _vuoleRitiro ? 3 : 2, 1500, _vuoleRitiro)
+        // SI ASPETTA CHE IL NUMERO CI SIA DAVVERO.
+        // Prima si riprovava due volte in un secondo e mezzo, e tanto non bastava: praticamente
+        // ogni spedizione nasceva col numero provvisorio TMP-, che il cliente si trovava davanti
+        // al posto del tracking finche' il recupero in background non passava. Il corriere il
+        // numero lo emette in pochi secondi: basta dargli quei secondi, e si esce appena c'e' —
+        // chi risponde subito non aspetta niente.
+        // La rete di sicurezza resta comunque: se anche cosi' non arriva, la spedizione si salva
+        // col numero provvisorio e viene completata dopo. Meglio tardi che persa.
+        // Con il ritiro si insiste un po' meno: li' si aspetta anche il codice di prenotazione, che il
+        // corriere assegna con i suoi tempi, e il codice ha gia' il suo recupero in background.
+        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _vuoleRitiro ? 6 : 8, 1200, _vuoleRitiro)
         ldv = w.numero || null
         // Il codice di prenotazione del ritiro arriva QUI, non con l'ordine: e' l'unico posto in cui
         // il corriere lo comunica. Senza salvarlo, il ritiro risulta prenotato ma senza numero, e
