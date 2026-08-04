@@ -11,7 +11,7 @@
 
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster, filtraCapCondiviso, rigaValePerCitta } from '@/lib/zone-match'
 import { fetchAll } from '@/lib/fetch-all'
-import { entroMisureAgevolate } from '@/lib/agevolazione-misure'
+import { entroMisureAgevolate, pesoSuReale } from '@/lib/agevolazione-misure'
 
 const ZONE_MAP: Record<string, string> = {
   CA:'Sardegna',CI:'Sardegna',VS:'Sardegna',NU:'Sardegna',OG:'Sardegna',OT:'Sardegna',OR:'Sardegna',SS:'Sardegna',SU:'Sardegna',
@@ -272,7 +272,9 @@ export async function calcolaPrezzoListino(
 
   for (const [cId, fasceDelCorriere] of entries) {
     const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
-    const usaPesoReale = !!settsC.agevolazione_peso_reale && entroMisureAgevolate(settsC, packages)
+    // La regola sta in un posto solo: qui mancava la soglia "peso reale fino a X kg", e questo e'
+    // il punto che decide quanto si paga davvero.
+    const usaPesoReale = pesoSuReale(settsC, packages, pesoReale)
     const pesoPerFascia = usaPesoReale ? pesoReale : pesoFatturato
     const fascia = trovaFascia(fasceDelCorriere, pesoPerFascia)
     if (!fascia) continue
@@ -365,15 +367,7 @@ export async function calcolaPrezzoCorriereDettaglio(
   // si tassa sul peso reale (come nel preventivo cliente).
   const { data: corrSett } = await supabase.from('corrieri').select('settings').eq('id', corriereId).maybeSingle()
   const _sett: any = corrSett?.settings || {}
-  if (!soloPesoReale && _sett.agevolazione_peso_reale) {
-    const entro = entroMisureAgevolate(_sett, packages)
-    if (entro) pesoFatturato = pesoReale
-  }
-  // "Peso reale fino a X kg": sotto la soglia si tassa sul peso reale, oltre torna al volumetrico.
-  const _prs = _sett.peso_reale_soglia
-  if (!soloPesoReale && _prs?.attivo && Number(_prs.kg) > 0 && pesoReale <= Number(_prs.kg)) {
-    pesoFatturato = pesoReale
-  }
+  if (pesoSuReale(_sett, packages, pesoReale, soloPesoReale)) pesoFatturato = pesoReale
 
   const { data: fasce } = await supabase
     .from('listini_corrieri_fasce')
@@ -816,17 +810,8 @@ export async function creaCalcolatoreListinoCliente(
     // Agevolazione peso reale (come il preventivo): se il corriere ha il flag e il collo è entro
     // 50×32×28 cm, oppure "peso reale fino a X kg" sotto soglia, si tassa sul PESO REALE.
     const settC = settPerCorrL.get(s.corriere_id) || {}
-    let usaReale = false
-    if (!soloPesoReale) {
-      if (settC.agevolazione_peso_reale) {
-        // L'agevolazione vale se OGNI collo sta nella scatola, non solo il primo.
-        const entro = entroMisureAgevolate(settC, pacchi)
-        if (entro) usaReale = true
-      }
-      const prs = settC.peso_reale_soglia
-      if (prs?.attivo && Number(prs.kg) > 0 && pesoReale <= Number(prs.kg)) usaReale = true
-    }
-    const pesoFatturato = (soloPesoReale || usaReale) ? pesoReale : Math.max(pesoReale, pesoVolume)
+    const usaReale = pesoSuReale(settC, pacchi, pesoReale, soloPesoReale)
+    const pesoFatturato = usaReale ? pesoReale : Math.max(pesoReale, pesoVolume)
 
     const provincia = (s.dest_provincia || '').toUpperCase().trim()
     const cap = (s.dest_cap || '').trim()

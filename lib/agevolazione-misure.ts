@@ -36,3 +36,26 @@ export function descriviAgevolazione(settings: any): string {
   const box = settings?.agevolazione_misure || PREDEFINITA
   return `${box.lunghezza}×${box.larghezza}×${box.altezza} cm`
 }
+
+// SI TASSA SUL PESO REALE? LA RISPOSTA STA QUI, E SOLO QUI.
+//
+// Questa regola era scritta a mano in TRE punti del motore dei prezzi, e non erano uguali: quello
+// della CREAZIONE conosceva solo la scatola agevolata e ignorava la soglia "peso reale fino a X kg",
+// mentre il dettaglio e i report le conoscevano entrambe. Risultato: il cliente vedeva il prezzo
+// giusto e ne pagava un altro. Su BRT Express, in trenta giorni, 698 spedizioni con peso reale
+// sotto i 5 kg fatturate sul volumetrico — 5.826 kg addebitati in piu'. Un pacco da 1,9 kg
+// fatturato 13,4.
+//
+// Le condizioni sono tre e basta che UNA sia vera:
+//  - il listino dice di tassare sempre sul reale (solo_peso_reale);
+//  - il contratto ha l'agevolazione e OGNI collo sta dentro la scatola;
+//  - il contratto ha la soglia attiva e il peso reale ci sta sotto.
+export function pesoSuReale(
+  settings: any, packages: any[], pesoReale: number, soloPesoReale = false
+): boolean {
+  if (soloPesoReale) return true
+  if (settings?.agevolazione_peso_reale && entroMisureAgevolate(settings, packages)) return true
+  const soglia = settings?.peso_reale_soglia
+  if (soglia?.attivo && Number(soglia.kg) > 0 && Number(pesoReale) <= Number(soglia.kg)) return true
+  return false
+}
