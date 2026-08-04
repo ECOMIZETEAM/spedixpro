@@ -1014,15 +1014,14 @@ export async function POST(req: NextRequest) {
       // ripetere la prima su tutti significherebbe far viaggiare tre colli con la stessa etichetta.
       let etichettePerCollo: string[] = []
       try {
-        // NON SI INSISTE PIU' DI COSI', ED E' UNA LEZIONE PAGATA.
-        // Avevo alzato i tentativi da 2 a 8 per non far mai nascere il numero provvisorio. Il
-        // risultato e' stato l'opposto: moltiplicando per quattro le richieste su un traffico che
-        // arriva a raffica, il fornitore ha cominciato a rifiutarle, e un rifiuto qui vale come
-        // "non pronta" — quindi numero provvisorio. Misurato sui movimenti, che portano il numero
-        // del momento della creazione: dalle 08:33 alle 11:14 zero provvisori su 372 spedizioni,
-        // dalle 11:16 (rilascio) in poi ne sono ricomparsi 27 in un quarto d'ora.
-        // Con due tentativi il numero arriva subito lo stesso. Se un giorno tornasse a mancare,
-        // la strada e' aspettare di piu' fra un tentativo e l'altro, non chiedere piu' spesso.
+        // ASPETTARE DI PIU' NON SERVE: MISURATO.
+        // Ho provato ad alzare i tentativi da 2 a 8 (circa dieci secondi) per far nascere subito
+        // il numero definitivo. Nei log di produzione, nella finestra in cui la modifica era
+        // attiva, "waybill non pronta" continuava a comparire con la stessa frequenza di prima:
+        // su questo contratto la lettera di vettura ci mette piu' di dieci secondi, quindi
+        // trattenere chi sta creando la spedizione e' costo puro senza alcun beneficio.
+        // Restano i due tentativi rapidi, e il numero definitivo lo mette il completamento in
+        // background pochi secondi dopo (piu' il lavoro ogni quarto d'ora come rete di sicurezza).
         const w = await easyparcelWaybill(apikey, ordine.idOrdine, _vuoleRitiro ? 3 : 2, 1500, _vuoleRitiro)
         ldv = w.numero || null
         // Il codice di prenotazione del ritiro arriva QUI, non con l'ordine: e' l'unico posto in cui
