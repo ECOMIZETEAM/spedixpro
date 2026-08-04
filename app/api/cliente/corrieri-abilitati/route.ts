@@ -10,12 +10,23 @@ export async function GET() {
   const supabase = await createServerSupabase()
   const id = await getClienteId(supabase)
   if (!id) return NextResponse.json([])
-  const { data: cliente } = await supabase.from('clienti').select('listino_cliente_id').eq('id', id).single()
+  const { data: cliente } = await supabase.from('clienti').select('listino_cliente_id,master_id').eq('id', id).single()
   if (!cliente?.listino_cliente_id) return NextResponse.json([])
   const { data: agganci } = await supabase.from('listini_clienti_corrieri')
     .select('corriere_id, corrieri(id,nome_contratto)')
     .eq('listino_id', cliente.listino_cliente_id)
+  // QUELLO CHE IL PADRE NON HA PIU', IL FIGLIO NON PUO' VENDERLO.
+  // Un contratto si spegne dalla scheda del cliente o del sotto-master, e l'effetto scende lungo
+  // tutta la catena: se il master sopra smette di dare BRT al suo sotto-master, i clienti di quel
+  // sotto-master non devono piu' vederlo — anche se nel loro listino c'e' ancora, perche' il
+  // listino non viene toccato: si nasconde, non si cancella, e riaccendendolo torna tutto.
+  // Qui la regola mancava: il contratto restava nell'elenco delle impostazioni e il cliente poteva
+  // pure accenderlo, salvo poi scoprire in creazione che non si puo' usare. Le rotte che contano
+  // (tariffe, creazione, API) la applicavano gia': era questa a raccontare un'altra storia.
+  const { contrattiSospesiSopra } = await import('@/lib/contratti-catena')
+  const sospesi = await contrattiSospesiSopra(cliente.master_id)
   const contratti = (agganci||[]).map((r:any) => r.corrieri).filter(Boolean)
+    .filter((c:any) => !sospesi.has(c.id))
   const { data: stati } = await supabase.from('clienti_corrieri_abilitati')
     .select('corriere_id, abilitato, settings').eq('cliente_id', id)
   const mappaAbil = new Map((stati||[]).map((s:any) => [s.corriere_id, s.abilitato]))
