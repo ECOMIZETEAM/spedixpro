@@ -128,7 +128,12 @@ export async function POST(req: NextRequest) {
     // Il perimetro resta quello del listino assegnato al cliente.
     const { data: fascia } = await adminCrea
       .from('listini_clienti_fasce')
-      .select('corrieri(id,tipo,credenziali,nome_contratto,attivo,master_id)')
+      // `settings` e `multicollo` servono ANCHE qui: i limiti del collo li legge da questo record,
+      // e le altre due strade per arrivare al contratto (sopra e sotto) li prendono gia'. Senza,
+      // motivoLimiteCollo riceveva undefined e lasciava passare tutto — misure, peso per collo,
+      // numero di colli, somma dei lati — e il confronto `multicollo === false` non scattava mai.
+      // Bastava chiamare la creazione senza _corriere_id per non incontrare nessun limite.
+      .select('corrieri(id,tipo,credenziali,nome_contratto,attivo,master_id,settings,multicollo)')
       .eq('listino_id', cliente.listino_cliente_id)
       .limit(1)
       .single()
