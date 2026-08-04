@@ -83,6 +83,19 @@ export async function POST(req: NextRequest) {
   const pkg = packages[0]
   const pesoReale = packages.reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
 
+  // I LIMITI DEL COLLO VALGONO ANCHE QUI.
+  // Misure massime, peso per collo, numero di colli, somma dei lati, limite combinato e scaglioni
+  // di misura erano applicati solo dal portale: chi spediva dalle API o dai negozi online li
+  // scavalcava tutti. E' la porta da cui passano i volumi automatici, quindi proprio quella dove
+  // un collo fuori sagoma entra a ripetizione — e poi il corriere lo fattura con i suoi
+  // supplementi, che a noi nessuno rimborsa.
+  // Stessa libreria del portale: una regola sola, stesso esito da qualunque parte si entri.
+  const { motivoLimiteCollo } = await import('@/lib/limiti-collo')
+  const _motivoLimite = motivoLimiteCollo((corriere as any)?.settings, pesoReale, packages)
+  if (_motivoLimite) {
+    return NextResponse.json({ error: `Collo non accettato da questo contratto: ${_motivoLimite}.` }, { status: 400 })
+  }
+
   // Prezzo a carico del cliente (listino cliente, contratto della key)
   const ris = await calcolaPrezzoListino(admin, {
     listinoId: cliente.listino_cliente_id,
