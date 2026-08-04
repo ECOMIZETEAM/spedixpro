@@ -1014,17 +1014,16 @@ export async function POST(req: NextRequest) {
       // ripetere la prima su tutti significherebbe far viaggiare tre colli con la stessa etichetta.
       let etichettePerCollo: string[] = []
       try {
-        // SI ASPETTA CHE IL NUMERO CI SIA DAVVERO.
-        // Prima si riprovava due volte in un secondo e mezzo, e tanto non bastava: praticamente
-        // ogni spedizione nasceva col numero provvisorio TMP-, che il cliente si trovava davanti
-        // al posto del tracking finche' il recupero in background non passava. Il corriere il
-        // numero lo emette in pochi secondi: basta dargli quei secondi, e si esce appena c'e' —
-        // chi risponde subito non aspetta niente.
-        // La rete di sicurezza resta comunque: se anche cosi' non arriva, la spedizione si salva
-        // col numero provvisorio e viene completata dopo. Meglio tardi che persa.
-        // Con il ritiro si insiste un po' meno: li' si aspetta anche il codice di prenotazione, che il
-        // corriere assegna con i suoi tempi, e il codice ha gia' il suo recupero in background.
-        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _vuoleRitiro ? 6 : 8, 1200, _vuoleRitiro)
+        // NON SI INSISTE PIU' DI COSI', ED E' UNA LEZIONE PAGATA.
+        // Avevo alzato i tentativi da 2 a 8 per non far mai nascere il numero provvisorio. Il
+        // risultato e' stato l'opposto: moltiplicando per quattro le richieste su un traffico che
+        // arriva a raffica, il fornitore ha cominciato a rifiutarle, e un rifiuto qui vale come
+        // "non pronta" — quindi numero provvisorio. Misurato sui movimenti, che portano il numero
+        // del momento della creazione: dalle 08:33 alle 11:14 zero provvisori su 372 spedizioni,
+        // dalle 11:16 (rilascio) in poi ne sono ricomparsi 27 in un quarto d'ora.
+        // Con due tentativi il numero arriva subito lo stesso. Se un giorno tornasse a mancare,
+        // la strada e' aspettare di piu' fra un tentativo e l'altro, non chiedere piu' spesso.
+        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _vuoleRitiro ? 3 : 2, 1500, _vuoleRitiro)
         ldv = w.numero || null
         // Il codice di prenotazione del ritiro arriva QUI, non con l'ordine: e' l'unico posto in cui
         // il corriere lo comunica. Senza salvarlo, il ritiro risulta prenotato ma senza numero, e
