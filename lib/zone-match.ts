@@ -42,10 +42,49 @@ export function filtraCapCondiviso(righe: any[], cap: string, citta?: string | n
   if (!dCitta) return righe
   const capExactConCitta = righe.some((r: any) => r.cap && r.cap !== '*' && r.cap === cap && r.citta && r.citta !== '*')
   if (!capExactConCitta) return righe
-  return righe.filter((r: any) => {
+  const filtrate = righe.filter((r: any) => {
     const isCapExactSpecifica = r.cap && r.cap !== '*' && r.cap === cap && r.citta && r.citta !== '*'
     return !isCapExactSpecifica || nrm(r.citta) === dCitta   // tieni se non è cap-esatto-specifica, o se la città combacia
   })
+
+  // UN COMUNE CHE NON COMBACIA CON NESSUNO NON DEVE FAR SCIVOLARE SUL PREZZO ITALIA.
+  //
+  // Il filtro qui sopra serve a un caso vero: il CAP 25050 e' Rodengo Saiano (normale) e Monte
+  // Isola (isola), e se scrivi il primo la riga del secondo non deve valere. Ma quando la scrittura
+  // non combacia con NESSUNO — una frazione (Bratto per Castione della Presolana), un nome
+  // altoatesino nell'altra lingua (Lüsen per Luson), o semplicemente un refuso — cadevano TUTTE le
+  // righe a CAP esatto: il CAP perdeva la rivendicazione della zona speciale e si finiva sul jolly
+  // "Italia". Il prezzo dipendeva da come uno digitava: "PIANA DI MONTE VENA" 5,34 euro,
+  // "Piana di Monte Verna" 14,95. Quarantatre spedizioni, 135,79 euro rimessi.
+  //
+  // Se non resta niente, si torna alle righe non filtrate: e' lo stesso comportamento che si ha
+  // quando il comune non e' indicato, e li' il prezzo era giusto. Vale la regola di sempre — meglio
+  // non prezzare che prezzare l'isola al prezzo della pianura: se il corriere quella zona non la
+  // prezza resta escluso, e chi spedisce lo vede subito invece di scoprirlo in fattura.
+  const restaUnaRivendicazione = filtrate.some((r: any) => r.cap && r.cap !== '*' && r.cap === cap)
+  if (restaUnaRivendicazione) return filtrate
+
+  // NON COMBACIA NIENTE: e ora bisogna distinguere due casi molto diversi.
+  //
+  // Se per quel CAP e' nominato UN SOLO comune, una scrittura che non combacia e' una variante
+  // dello stesso posto — una frazione (Bratto per Castione della Presolana), un nome altoatesino
+  // nell'altra lingua (Lüsen per Luson) o un refuso. La zona speciale va rivendicata lo stesso,
+  // altrimenti si scivola sul jolly "Italia" e si vende l'isola al prezzo della pianura. Sono 241
+  // spedizioni in trenta giorni, su 56 CAP.
+  //
+  // Se invece i comuni nominati sono PIU' D'UNO — il caso 25050, Rodengo Saiano normale e Monte
+  // Isola isola — non si puo' sapere quale sia, e rivendicare vorrebbe dire far pagare l'isola a
+  // chi sta in pianura. Li' si lascia come prima: altre 292 spedizioni, e non si toccano.
+  const comuniNominati = new Set(
+    righe.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap && r.citta && r.citta !== '*')
+         .map((r: any) => nrm(r.citta))
+  )
+  if (comuniNominati.size === 1) {
+    console.warn('[ZONE] comune scritto diversamente:', citta, '— CAP', cap, 'appartiene a', [...comuniNominati][0], ': zona speciale rivendicata lo stesso')
+    return righe
+  }
+  console.warn('[ZONE] comune non riconosciuto e CAP condiviso fra piu comuni:', cap, '—', citta, ': lasciato com era')
+  return filtrate
 }
 
 // Versione dettagliata: ritorna le zone matchate e se il CAP appartiene (cap-esatto) a una
