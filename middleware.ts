@@ -16,41 +16,16 @@ const SCRITTURE_AGENTE = [
   '/api/auth/',                       // uscita/sessione
 ]
 
-// IL FLUSSO GIA' IN CORSO NON SI FERMA MAI.
+// CHI NON PAGA PUO' FARE UNA COSA SOLA: PAGARE.
 //
-// Il congelamento per canone non pagato e' un blocco di consultazione e di operazioni: il master
-// non deve poter USARE il gestionale. Ma sotto di lui c'e' gente che il canone non lo deve — i suoi
-// clienti, i suoi sotto-master — e ci sono pacchi gia' in viaggio, soldi gia' incassati e rimborsi
-// gia' promessi. Quella roba deve arrivare a destinazione da sola.
+// Nessuna eccezione, nemmeno per le operazioni che sembrano riguardare i suoi clienti: se un
+// cliente ha bisogno di credito, il master prima paga la piattaforma e poi lo ricarica. Restano
+// aperte soltanto le rotte del pagamento e quelle della sessione, altrimenti sarebbe un blocco
+// senza uscita.
 //
-// Il divieto era cieco su tutti i metodi diversi da GET, e il risultato era rovesciato: il
-// congelato non poteva piu' girare ai clienti i contrassegni che il corriere aveva gia' incassato,
-// ne' confermare gli annulli (e quindi i rimborsi non partivano), ne' svincolare le giacenze — la
-// merce restava in deposito fino a tornare indietro — ne' rispondere all'assistenza, ne' RICARICARE
-// IL CREDITO: e con la rete quasi tutta a credito a scalare, i clienti si sarebbero fermati da soli
-// nel giro di due giorni. Nel frattempo, per un difetto di ordine dei controlli, poteva ancora
-// vendere spedizioni nuove.
-//
-// Queste rotte passano anche da congelato. Non sono un favore: sono cose che riguardano chi sta
-// sotto, non lui.
-const FLUSSO_IN_CORSO = [
-  '/api/movimenti/crea',                        // ricaricare il credito ai clienti: e' l'ossigeno della rete sotto
-  '/api/contrassegni/',                         // denaro di terzi gia' incassato, deve scendere
-  '/api/network/contrassegni/',
-  '/api/spedizioni/annulli-manuali/conferma',   // senza la conferma il rimborso non parte mai
-  '/api/spedizioni/ripristina',                 // annullare un annullo entro le 48h
-  '/api/giacenze/',                             // merce ferma in deposito che matura costi ogni giorno
-  '/api/assistenza/',                           // e' il canale con cui si sbrogliano giacenze e annulli
-  '/api/rettifiche/',                           // costi gia' sostenuti, da far scendere a chi li deve
-  '/api/network/rettifiche',
-  '/api/interno/scansione',                     // sul circuito interno le scansioni SONO il tracking
-  '/api/notifiche',                             // avvisi ai suoi clienti, non a lui
-  '/api/avvisi',
-  '/api/distinte/conferma',                     // ritrasmettere al corriere roba gia' creata
-  '/api/distinte/spedizioni',
-  '/api/resi/distinte',                         // pacchi che stanno gia' tornando indietro
-  '/api/ritiri/crea',                           // far ritirare pacchi che esistono gia'
-]
+// La rete SOTTO continua a lavorare: il conto e' di ciascuno, e il flag sta sulla riga del singolo
+// master. Un sotto-master che ha pagato il suo canone non si ferma perche' si e' fermato il padre —
+// e se non lo ha pagato si congela per conto suo, non per colpa di chi sta sopra.
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
@@ -107,8 +82,7 @@ export async function middleware(req: NextRequest) {
     const deveLuiPagare = ruoloU === 'master' || ruoloU === 'admin' || ruoloU === 'operatore'
     const scaduto = deveLuiPagare ? (u as any)?.masters?.pagamento_scaduto_dal : null
     if (scaduto && (Date.now() - new Date(scaduto).getTime()) > 3 * 86400000
-        && !pathname.startsWith('/api/stripe/') && !pathname.startsWith('/api/auth/')
-        && !FLUSSO_IN_CORSO.some(p => pathname.startsWith(p))) {
+        && !pathname.startsWith('/api/stripe/') && !pathname.startsWith('/api/auth/')) {
       return NextResponse.json({ error: 'Account sospeso: il canone non risulta pagato. Riattiva il pagamento per continuare.' }, { status: 402 })
     }
     return risposta
