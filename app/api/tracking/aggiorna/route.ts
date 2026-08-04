@@ -27,9 +27,19 @@ export async function GET(req: NextRequest) {
   // silenziosamente tagliato -> ogni giro copriva solo le prime 1000 attive). Carico tutte
   // le pagine PRIMA di processare, con dedup per id (le pagine possono slittare se qualche
   // riga cambia stato nel frattempo).
+  // IL TETTO DEVE GRIDARE, NON TRONCARE IN SILENZIO.
+  // Le pagine erano 8, cioe' 8.000 spedizioni per giro, e le attive sono arrivate a 7.971: a
+  // ventinove dal limite. Superarlo non da' errore — le eccedenti semplicemente non vengono
+  // guardate. La rotazione per tracking_check_at fa si' che al giro dopo tocchi a loro, quindi non
+  // si perdono; ma piu' si sfora, piu' cresce il ritardo, e nessuno se ne accorgerebbe.
+  // Le pagine salgono a 12 (non di piu': con 8.000 righe questa funzione e' gia' stata uccisa per
+  // memoria esaurita, ed e' il motivo per cui qui si leggono poche colonne e mai i PDF).
+  // E se anche 12 non bastassero, adesso resta scritto nei log.
+  const PAGINE_MAX = 12
   const vistiIds = new Set<string>()
   const spedizioni: any[] = []
-  for (let pag = 0; pag < 8; pag++) {
+  let tettoRaggiunto = false
+  for (let pag = 0; pag < PAGINE_MAX; pag++) {
     const { data: pagina } = await admin.from('spedizioni')
       // MAI 'raw_response' né 'etichetta_url' interi: l'etichetta è il PDF in base64 (156 KB in
       // media) e la risposta del corriere ~43 KB. Su 8.000 righe superavano il gigabyte e la
@@ -45,12 +55,17 @@ export async function GET(req: NextRequest) {
       .range(pag * 1000, pag * 1000 + 999)
     for (const r of pagina || []) { if (!vistiIds.has(r.id)) { vistiIds.add(r.id); spedizioni.push(r) } }
     if (!pagina || pagina.length < 1000) break
+    if (pag === PAGINE_MAX - 1) tettoRaggiunto = true
+  }
+  if (tettoRaggiunto) {
+    console.error('[TRACKING][TETTO] lette', spedizioni.length, 'spedizioni: e\' il massimo per giro.',
+      'Le altre slittano al giro dopo. Se si ripete, il giro va spezzato in piu\' esecuzioni.')
   }
 
   // Chi non ha l'etichetta: SOLO gli id, così sappiamo per quali tentare il recupero senza
   // portarci in memoria i PDF di tutte le altre.
   const senzaEtichetta = new Set<string>()
-  for (let pag = 0; pag < 8; pag++) {
+  for (let pag = 0; pag < PAGINE_MAX; pag++) {
     const { data: pagina } = await admin.from('spedizioni')
       .select('id').is('etichetta_url', null)
       .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
