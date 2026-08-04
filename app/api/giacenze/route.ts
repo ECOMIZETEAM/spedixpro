@@ -113,6 +113,17 @@ export async function POST(req: NextRequest) {
           await spediamoproReleaseStock(cred.authcode, Number(attivo.id), 1, istruzioni ? { instructions: istruzioni } : {})
         }
       } catch (e) { console.error('Errore svincolo SpediamoPro:', e) }
+    } else if (tipoCorr === 'easyparcel' && cred?.apikey) {
+      // Contratto V: anche questa strada deve arrivare al corriere, altrimenti il pacco resta
+      // fermo in deposito mentre da noi risulta svincolato. Qui l'azione e' sempre la riconsegna
+      // al destinatario, come nel ramo dell'altro contratto qui sopra.
+      try {
+        const { easyparcelSvincolo } = await import('@/lib/easyparcel')
+        await easyparcelSvincolo(cred.apikey, String(spedizione.numero || spedizione.tracking_number), 'D', {
+          note: istruzioni || 'Riconsegnare al destinatario',
+          telefonoDestinatario: spedizione.dest_telefono || '',
+        })
+      } catch (e) { console.error('Errore svincolo contratto V:', e) }
     } else if (cred?.master_domain && cred?.password) {
       // Spedisci.online: delivery-instructions
       try {

@@ -96,6 +96,57 @@ async function chiama(apikey: string, call: string, corpo: any, timeoutMs = 3000
   return d
 }
 
+// ── SVINCOLO DI UNA SPEDIZIONE IN GIACENZA ──
+//
+// Quando il pacco resta fermo in deposito, si dice al corriere che farne. Le azioni sono quattro e
+// le decide il fornitore: D consegnare di nuovo al destinatario, M riportarlo al mittente,
+// N portarlo a un altro indirizzo, S distruggerlo.
+//
+// Due cose che si pagano care se si sbagliano:
+// - le NOTE stanno in 65 caratteri, non uno di piu';
+// - la spedizione deve essere di chi possiede la chiave, altrimenti il fornitore rifiuta (161).
+//   Non e' un problema teorico: la stessa chiave copre tutti i contratti della rete.
+export type AzioneSvincolo = 'D' | 'M' | 'N' | 'S'
+
+export type NuovoIndirizzoSvincolo = {
+  cognome: string; indirizzo: string
+  nome?: string; civico?: string; cap?: string; localita?: string; provincia?: string
+  telefono?: string; citofono?: string
+}
+
+export async function easyparcelSvincolo(
+  apikey: string,
+  ldv: string,
+  azione: AzioneSvincolo,
+  opts: { note?: string; telefonoDestinatario?: string; nuovoIndirizzo?: NuovoIndirizzoSvincolo } = {}
+): Promise<{ idGiacenza: number | null; token: string | null; importo: number; azione: AzioneSvincolo; esitoVettore: any }> {
+  if (!ldv) throw new ErroreEasyparcel(0, 'lettera di vettura mancante')
+  const corpo: any = { shipment_id: String(ldv), azione }
+  // 65 caratteri: oltre, il fornitore rifiuta l'intera richiesta per un campo facoltativo.
+  if (opts.note) corpo.note = String(opts.note).slice(0, 65)
+  if (opts.telefonoDestinatario) corpo.telefono_destinatario = String(opts.telefonoDestinatario)
+  if (azione === 'N') {
+    const n = opts.nuovoIndirizzo
+    // Senza cognome e indirizzo la richiesta parte e viene respinta: meglio dirlo qui, dove si
+    // capisce ancora cosa manca.
+    if (!n?.cognome || !n?.indirizzo) throw new ErroreEasyparcel(0, 'nuovo indirizzo incompleto: servono cognome e indirizzo')
+    corpo.nuovo_indirizzo = {
+      nome: n.nome || '', cognome: n.cognome, indirizzo: n.indirizzo, civico: n.civico || '',
+      cap: n.cap || '', localita: n.localita || '', provincia: n.provincia || '',
+      telefono: n.telefono || '', citofono: n.citofono || '',
+    }
+  }
+  const d = await chiama(apikey, 'svincolo', corpo)
+  return {
+    idGiacenza: d?.id_giacenza != null ? Number(d.id_giacenza) : null,
+    token: d?.token ? String(d.token) : null,
+    // Quanto ci costa: dipende dall'azione e lo decide il fornitore, non il nostro listino.
+    importo: Number(d?.importo) || 0,
+    azione,
+    esitoVettore: d?.risposta_vettore ?? null,
+  }
+}
+
 // ── Stato dell'account (chiave valida? credito? ambiente reale o di prova?) ──
 export async function easyparcelInfo(apikey: string): Promise<{
   cliente: string; live: boolean; credito: number; scadenza: string; canale: string; idDva: string

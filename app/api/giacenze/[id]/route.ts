@@ -65,7 +65,7 @@ async function contesto(req: NextRequest, id: string): Promise<Ctx | NextRespons
   const ruolo = (utente?.ruolo || '').toLowerCase() === 'cliente' ? 'cliente' : 'master'
   const admin = createAdminSupabase()
   const { data: sped } = await admin.from('spedizioni')
-    .select('*, clienti(ragione_sociale), corrieri(credenziali,nome_contratto,master_id)')
+    .select('*, clienti(ragione_sociale), corrieri(tipo,credenziali,nome_contratto,master_id)')
     .eq('id', id).maybeSingle()
   if (!sped) return NextResponse.json({ error: 'Giacenza non trovata' }, { status: 404 })
   if (ruolo === 'cliente') {
@@ -249,6 +249,46 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         }
         await spediamoproReleaseStock(cred.authcode, Number(attivo.id), releaseAction, extra)
       } catch (e: any) {
+        return NextResponse.json({ error: erroreSvincoloPulito(e) }, { status: 400 })
+      }
+    } else if (sped.corrieri?.tipo === 'easyparcel' && cred?.apikey) {
+      // CONTRATTO V: lo svincolo si chiede con la lettera di vettura, non con un id di giacenza.
+      //
+      // Finche' questo ramo non c'era, una giacenza di questo contratto non veniva mandata a
+      // nessuno: da noi risultava svincolata, dal corriere il pacco restava fermo in deposito a
+      // maturare giorni finche' non tornava indietro da solo. E' lo stesso guasto che c'era gia'
+      // stato sull'altro contratto.
+      //
+      // Le nostre tre operazioni diventano le loro: riconsegna = consegnare al destinatario,
+      // reso = riportarlo al mittente, nuovo indirizzo = portarlo altrove. La quarta che loro
+      // hanno, distruggere il pacco, non la esponiamo: e' irreversibile e nessuno la chiede da
+      // un portale.
+      const { easyparcelSvincolo } = await import('@/lib/easyparcel')
+      const azioneV = rich.operazione === 'reso' ? 'M' : rich.operazione === 'riconsegna_nuovo' ? 'N' : 'D'
+      const nd = rich.nuovo_destinatario || {}
+      try {
+        const esito = await easyparcelSvincolo(cred.apikey, String(sped.numero || sped.tracking_number), azioneV as any, {
+          // Le note stanno in 65 caratteri: ci mettiamo l'operazione e la data, che sono quello
+          // che serve a chi in deposito deve capire cosa fare.
+          note: istr,
+          telefonoDestinatario: nd.telefono || sped.dest_telefono || '',
+          nuovoIndirizzo: azioneV === 'N' ? {
+            cognome: nd.nome || sped.dest_nome || '',
+            indirizzo: nd.indirizzo || '',
+            cap: nd.cap || '', localita: nd.citta || '', provincia: nd.provincia || '',
+            telefono: nd.telefono || '',
+          } : undefined,
+        })
+        // Il costo che ci addebita il corriere e' suo e non c'entra col prezzo che facciamo al
+        // cliente: si annota accanto alla richiesta, cosi' a fine mese si puo' confrontare.
+        try {
+          await admin.from('giacenza_richieste')
+            .update({ note: [rich.note, `[corriere: ${esito.azione} - € ${esito.importo.toFixed(2)}${esito.idGiacenza ? ' - rif ' + esito.idGiacenza : ''}]`].filter(Boolean).join(' ') })
+            .eq('id', rich.id)
+        } catch {}
+        console.log('[GIACENZA][V] svincolo registrato', sped.numero, esito.azione, esito.importo)
+      } catch (e: any) {
+        // Niente addebito senza svincolo vero: si blocca qui, come sull'altro contratto.
         return NextResponse.json({ error: erroreSvincoloPulito(e) }, { status: 400 })
       }
     } else if (cred?.master_domain && cred?.password && sped.tracking_number) {

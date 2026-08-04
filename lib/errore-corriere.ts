@@ -26,6 +26,15 @@ export function erroreSvincoloPulito(raw: any): string {
   if (/scadut|expired|termine/.test(t)) {
     return 'I termini di giacenza sono scaduti: il pacco è già in rientro al mittente. Non serve alcuno svincolo.'
   }
+  // Il fornitore del contratto V risponde con codici suoi: il credito insufficiente e la
+  // spedizione che non e' nostra sono i due casi che capitano davvero, e vanno detti per quello
+  // che sono — non come "errore generico, riprova", che manda a sbattere due volte.
+  if (/\b120\b/.test(t) && /credit|saldo|fond/.test(t)) {
+    return 'Credito insufficiente sul conto del corriere per pagare lo svincolo. Ricarica e riprova.'
+  }
+  if (/\b16[123]\b/.test(t) || /non appartiene|perimetro/.test(t)) {
+    return 'Questa spedizione non risulta gestibile con il contratto usato: controlla che la giacenza sia della spedizione giusta.'
+  }
   // Errore lato corriere (500): non è un dato sbagliato nostro, è il suo sistema che rifiuta.
   if (/ha restituito un errore|status.*5\d\d|internal|server error/.test(t)) {
     const vettore = (interno.match(/servizio di ([A-Za-z ]+) ha restituito/i) || [])[1]
