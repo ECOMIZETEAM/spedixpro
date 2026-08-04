@@ -77,7 +77,14 @@ export async function POST(req: NextRequest) {
   }
   const cred = corriere.credenziali as Record<string, string>
 
-  const packages = Array.isArray(body.packages) && body.packages.length ? body.packages : [{ weight: 1, length: 20, width: 15, height: 10 }]
+  // `weight` in cima al corpo vale anche qui. Il preventivo (v1/rates) lo accetta da sempre, la
+  // creazione lo ignorava e spediva 1 kg: chi avesse quotato 30 kg e poi creato con lo stesso
+  // corpo si sarebbe visto addebitare un chilo, e la differenza la mettevamo noi. Oggi non lo usa
+  // nessuno (zero spedizioni in 90 giorni sul collo predefinito), ma le due porte devono
+  // rispondere allo stesso corpo nello stesso modo.
+  const packages = Array.isArray(body.packages) && body.packages.length
+    ? body.packages
+    : [{ weight: Number(body.weight) || 1, length: 20, width: 15, height: 10 }]
   if (packages.length > 1 && (corriere as any).multicollo === false)
     return NextResponse.json({ error: 'Il contratto non prevede il multicollo' }, { status: 400 })
   const pkg = packages[0]
