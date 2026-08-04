@@ -197,8 +197,10 @@ export async function GET(req: NextRequest) {
     return { giorno: k, ricavi: r2(v.ricavi), costi: r2(v.costi), margine: r2(v.ricavi - v.costi) }
   })
 
-  // ── SOLO per E&A MULTIEXPRESS: costo corriere diviso per provider (SpediamoPro / Spedisci.online).
-  //    Serve a verificare 1=1 col credito speso su ciascun account. Non compare per gli altri master. ──
+  // ── SOLO per E&A MULTIEXPRESS: costo corriere diviso per provider.
+  //    Serve a verificare 1=1 col credito speso su ciascun account. Non compare per gli altri
+  //    master: e' l'unico punto dell'applicazione dove i nomi dei fornitori a valle si possono
+  //    leggere, e deve restare cosi'. ──
   const EA_MULTI_ID = 'a8d42a25-3711-4343-a6df-ee2ba9bbf08b'
   let costiProvider: any = null
   if (M === EA_MULTI_ID) {
@@ -220,7 +222,15 @@ export async function GET(req: NextRequest) {
       cur.costo += Number((s as any).costo_spedizione || 0); cur.n++
       agg.set(tipo, cur)
     }
-    const LABEL: Record<string, string> = { spediamopro: 'SpediamoPro', spedisci: 'Spedisci.online' }
+    // Ogni fornitore col suo nome. Chi non era nell'elenco usciva col nome tecnico del tipo
+    // ('easyparcel'), che oltretutto non e' il nome con cui quel conto si chiama davvero: la voce
+    // c'era, ma sembrava mancare.
+    const LABEL: Record<string, string> = {
+      spediamopro: 'SpediamoPro',
+      spedisci: 'Spedisci.online',
+      easyparcel: 'DVA',
+      interno: 'Circuito interno',
+    }
     costiProvider = Array.from(agg.entries())
       .map(([tipo, v]) => ({ provider: LABEL[tipo] || tipo, costo: r2(v.costo), n: v.n }))
       .sort((a, b) => b.costo - a.costo)
