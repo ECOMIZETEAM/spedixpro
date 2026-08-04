@@ -293,6 +293,36 @@ export async function GET(req: NextRequest) {
     }
   } catch (e: any) { console.error('[GIACENZA][APERTURA] coda non svuotata:', e?.message) }
 
-  console.log(`[TRACKING] esaminate=${lista.length} aggiornate=${aggiornate} errori=${errori} giacenze=${giacenzeAddebitate} durata=${Math.round((Date.now() - inizioMs) / 1000)}s`)
-  return NextResponse.json({ ok: true, esaminate: lista.length, aggiornate, errori, giacenzeAddebitate, durataSec: Math.round((Date.now() - inizioMs) / 1000) })
+  // ── RESI DA ADDEBITARE ──
+  // Stessa idea delle giacenze: la coda la riempie il database con un trigger appena una
+  // spedizione passa a "reso al mittente", da qualunque strada. Qui si lavora, riusando lo stesso
+  // calcolo dello svincolo giacenza — non una copia. Se il reso e' gia' stato pagato da un'altra
+  // strada la funzione del database risponde "gia_addebitato" e non si paga due volte: vince il
+  // primo dei due momenti che arriva.
+  let resiAddebitati = 0
+  try {
+    const { data: coda } = await admin.from('resi_da_addebitare')
+      .select('spedizione_id, tentativi').lt('tentativi', 5).limit(100)
+    if (coda?.length) {
+      const { addebitaResoDaTracking } = await import('@/lib/giacenza-cascata')
+      for (const riga of coda) {
+        const spId = (riga as any).spedizione_id
+        try {
+          const esito = await addebitaResoDaTracking(admin, spId)
+          // Si toglie dalla coda anche quando risulta gia' addebitato: significa che qualcun altro
+          // ha fatto il lavoro, ed e' il risultato voluto. Resta in coda solo se e' andata storta.
+          await admin.from('resi_da_addebitare').delete().eq('spedizione_id', spId)
+          if (esito.addebitato) resiAddebitati++
+        } catch (e: any) {
+          console.error('[RESO][ADDEBITO] non riuscito', spId, e?.message)
+          await admin.from('resi_da_addebitare')
+            .update({ tentativi: ((riga as any).tentativi || 0) + 1, ultimo_errore: String(e?.message || e).slice(0, 300) })
+            .eq('spedizione_id', spId)
+        }
+      }
+    }
+  } catch (e: any) { console.error('[RESO][ADDEBITO] coda non svuotata:', e?.message) }
+
+  console.log(`[TRACKING] esaminate=${lista.length} aggiornate=${aggiornate} errori=${errori} giacenze=${giacenzeAddebitate} resi=${resiAddebitati} durata=${Math.round((Date.now() - inizioMs) / 1000)}s`)
+  return NextResponse.json({ ok: true, esaminate: lista.length, aggiornate, errori, giacenzeAddebitate, resiAddebitati, durataSec: Math.round((Date.now() - inizioMs) / 1000) })
 }

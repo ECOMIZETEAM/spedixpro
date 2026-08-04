@@ -142,11 +142,38 @@ export async function addebitaGiacenzaCatena(
 }
 
 /**
+ * RESO CHE ARRIVA DAL CORRIERE, non da uno svincolo.
+ *
+ * Quando e' il corriere a rimandare indietro il pacco, lo stato arriva dal tracking e nessuno dei
+ * tre punti che addebitavano il reso (svincolo giacenza, distinta, rimessa di rete) viene toccato:
+ * su 62 resi, 60 non li aveva pagati nessuno. Ora il database mette quei resi in coda da solo, con
+ * un trigger, e questa funzione li lavora riusando lo STESSO calcolo dello svincolo — non una copia.
+ *
+ * L'unica differenza e' `da_giacenza: false`: qui la guardia del database DEVE applicarsi. Se il
+ * reso e' gia' stato addebitato da un'altra strada, fn_addebita_resi risponde "gia_addebitato" e
+ * non si paga due volte. Vince il primo dei due momenti che arriva.
+ */
+export async function addebitaResoDaTracking(admin: any, spedizioneId: string): Promise<EsitoAddebito> {
+  const { data: sp } = await admin.from('spedizioni')
+    .select('id,numero,cliente_id,master_id,corriere_id,giacenza_apertura_addebitata,corrieri(nome_contratto,master_id)')
+    .eq('id', spedizioneId).maybeSingle()
+  if (!sp) return { addebitato: false, importoCliente: 0 }
+  const corr: any = (sp as any).corrieri
+  return addebitaResoGiacenza(
+    admin,
+    sp as any,
+    corr?.nome_contratto || null,
+    corr?.master_id || null,
+    false,
+  )
+}
+
+/**
  * RESO allo svincolo giacenza: cliente + tutta la catena fino al detentore del contratto, in una
  * chiamata sola al database. Qui si calcolano solo i NOLI (il motore tariffe vive nell'app); la
  * percentuale, il ripiego e l'anti-doppio-addebito li applica fn_addebita_resi.
  */
-async function addebitaResoGiacenza(admin: any, sped: SpedGiac, corriereNome: string | null, corriereOwnerId: string | null): Promise<EsitoAddebito> {
+async function addebitaResoGiacenza(admin: any, sped: SpedGiac, corriereNome: string | null, corriereOwnerId: string | null, daGiacenza = true): Promise<EsitoAddebito> {
   const { data: full } = await admin.from('spedizioni')
     .select('id,numero,cliente_id,master_id,corriere_id,costo_totale,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta')
     .eq('id', sped.id).maybeSingle()
@@ -160,7 +187,7 @@ async function addebitaResoGiacenza(admin: any, sped: SpedGiac, corriereNome: st
       spedizione_id: full.id, cliente_id: full.cliente_id, master_owner_id: full.master_id,
       corriere_id: full.corriere_id,
       nolo: nolo != null ? nolo : Math.max(0, Number(full.costo_totale || 0)),
-      da_giacenza: true,
+      da_giacenza: daGiacenza,
     })
   }
 
@@ -173,7 +200,7 @@ async function addebitaResoGiacenza(admin: any, sped: SpedGiac, corriereNome: st
         corriere_id: liv.corriereId,
         nolo: (await noloMaster(admin, liv.masterId, liv.corriereId, full)) || 0,
         pagato: await pagatoDaMaster(admin, full.id, liv.masterId),
-        da_giacenza: true,
+        da_giacenza: daGiacenza,
       })
     }
   }
