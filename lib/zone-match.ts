@@ -125,7 +125,23 @@ export async function trovaZoneMatchDett(
     // Fra le righe a CAP esatto tengo solo le piu' specifiche: e' quella la zona che rivendica
     // davvero la destinazione. Senza questo, la riga jolly di un'altra zona (SCS: 98055/*) contava
     // quanto quella che scrive "Lipari", e vinceva la piu' economica.
-    const capEsatte = new Set(piuSpecifica(righe.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap)))
+    // OGNI CONTRATTO PER CONTO SUO, ED E' IL PUNTO DELICATO.
+    // "Vince la riga che nomina il comune" e' una regola che vale DENTRO un contratto: serve a
+    // decidere quale delle SUE zone rivendica la destinazione. Applicandola a tutte le righe
+    // insieme faceva un danno: bastava che UN contratto qualsiasi del listino scrivesse il comune,
+    // e le righe cap-esatto di tutti gli ALTRI venivano buttate via — quei corrieri non finivano
+    // fra gli esclusi, ripiegavano sul jolly e vendevano un'isola minore al prezzo dell'Italia.
+    // Portoferraio venduta 4,85 e pagata 9,79; e cosi' Anacapri, Pantelleria, Lampedusa, Murano.
+    // Venti spedizioni in due giorni, circa 1.200 euro al mese.
+    const capEsatteRighe = righe.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap)
+    const perCorriere = new Map<string, any[]>()
+    for (const r of capEsatteRighe) {
+      const cc = esclCorr.get(r.zona_id) || '(senza corriere)'
+      if (!perCorriere.has(cc)) perCorriere.set(cc, [])
+      perCorriere.get(cc)!.push(r)
+    }
+    const capEsatte = new Set<any>()
+    for (const gruppo of perCorriere.values()) for (const r of piuSpecifica(gruppo)) capEsatte.add(r)
     for (const r of righe) {
       if (r.cap && r.cap !== '*' && r.cap === cap && !capEsatte.has(r)) continue
       const cc = esclCorr.get(r.zona_id)
