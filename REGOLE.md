@@ -108,6 +108,12 @@ Due trappole in cui si è già caduti, entrambe nello stesso giorno:
 - **Contare le occorrenze di un nome nei file non dice se un controllo c'è.** Le regole stanno nelle
   librerie condivise: il file che le usa non nomina le impostazioni. Si misura il comportamento,
   non le parole.
+- **`spedizioni.costo_spedizione` non è quello che si paga.** È un costo nominale del fornitore, a
+  volte il quadruplo dell'addebito vero (Lovero: 20,00 in colonna, 5,12 addebitati). Confrontarlo
+  con `costo_totale` ha prodotto "239 spedizioni sotto costo per 481 €" quando le vere erano 81 per
+  271 €. **Il margine di un livello si calcola solo dai `movimenti`**: quello che incassa dal figlio
+  meno quello che gli addebita il padre, sulla stessa `spedizione_id`. Nessuna colonna della riga
+  spedizione è una scorciatoia valida — e infatti il portale non la legge mai.
 
 Quando si tocca il motore dei prezzi o il credito, la verifica non è "compila": è rieseguire il
 calcolo sui dati veri di produzione, prima e dopo, e confrontare — comprese le spedizioni che oggi
