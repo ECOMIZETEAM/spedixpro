@@ -132,8 +132,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   } else if (sopraContratto) {
     baseControparte = 0
   }
+  // LE CREDENZIALI DEL CORRIERE NON ESCONO DA QUI.
+  // La spedizione veniva restituita intera, e dentro ci sono le credenziali del contratto —
+  // authcode, password, chiavi. Questa stessa pagina la apre anche il CLIENTE FINALE dal suo
+  // portale: bastava guardare la risposta negli strumenti del browser per portarsi via la chiave
+  // con cui spediamo. Servono solo qui dentro, per parlare col corriere: al browser si manda il
+  // nome del contratto e basta.
+  const { credenziali: _chiavi, ...corriereSenzaChiavi } = (sped.corrieri || {}) as any
+  const spedPulita = { ...sped, corrieri: corriereSenzaChiavi }
+
   return NextResponse.json({
-    sped, prezzi, prezziControparte, etichettaControparte,
+    sped: spedPulita, prezzi, prezziControparte, etichettaControparte,
     noloBase: base, noloBaseControparte: baseControparte,
     storico: storico || [], costi: costi || [], ruolo,
   })

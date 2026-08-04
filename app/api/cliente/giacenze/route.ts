@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
   // devono essere leggibili col token del cliente. Il filtro .eq('cliente_id', clienteId) tiene il
   // perimetro esattamente com'era — la spedizione dev'essere sua.
   const { data: spedizione } = await createAdminSupabase().from('spedizioni')
-    .select('*, clienti(ragione_sociale), corrieri(credenziali,nome_contratto)')
+    .select('*, clienti(ragione_sociale), corrieri(tipo,credenziali,nome_contratto)')
     .eq('id', spedizioneId).eq('cliente_id', clienteId).single()
   if (!spedizione) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
   const dataGiacenza = spedizione.giacenza_data ? new Date(spedizione.giacenza_data) : new Date(spedizione.created_at)
@@ -55,7 +55,19 @@ export async function POST(req: NextRequest) {
   const costoTotale = (costoGiornaliero * giorni) + costoRiconsegna
   if (azione === 'svincola') {
     const cred = spedizione.corrieri?.credenziali as Record<string,string>
-    if (cred?.master_domain && cred?.password) {
+    if (cred?.apikey && spedizione.corrieri?.tipo === 'easyparcel') {
+      // Contratto V: anche dal portale del cliente lo svincolo deve arrivare al corriere. Senza
+      // questo ramo la richiesta restava dentro casa nostra e il pacco fermo in deposito.
+      // Da qui l'operazione e' una sola, la riconsegna al destinatario (come nel ramo qui sotto):
+      // reso e nuovo indirizzo passano dalla richiesta che conferma il master.
+      try {
+        const { easyparcelSvincolo } = await import('@/lib/easyparcel')
+        await easyparcelSvincolo(cred.apikey, String(spedizione.numero || spedizione.tracking_number), 'D', {
+          note: istruzioni || 'Riconsegnare al destinatario',
+          telefonoDestinatario: spedizione.dest_telefono || '',
+        })
+      } catch (e) { console.error('Errore svincolo contratto V (portale cliente):', e) }
+    } else if (cred?.master_domain && cred?.password) {
       try {
         await fetch(`https://${cred.master_domain}/api/v2/shipping/delivery-instructions/${spedizione.tracking_number}`, {
           method: 'POST',
