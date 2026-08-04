@@ -1290,7 +1290,7 @@ export async function POST(req: NextRequest) {
         destinatario: { nome: body.shipTo?.name, indirizzo: body.shipTo?.street1, cap: body.shipTo?.postalCode, citta: body.shipTo?.city, provincia: body.shipTo?.state, telefono: body.shipTo?.phone },
         colli: packages.length, peso: pesoReale,
         contrassegno: Number(body.codValue || 0), note: body.notes || null,
-        riferimento: body.rifOrdine || null, logoPng, nomeMaster,
+        riferimento: body.rifOrdine || null, logoImg: logoPng, nomeMaster,
       })
       etichettaUrl = `data:application/pdf;base64,${Buffer.from(pdf).toString('base64')}`
     } catch (e: any) {

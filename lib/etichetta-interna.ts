@@ -18,7 +18,7 @@ type Dati = {
   contrassegno?: number | null
   note?: string | null
   riferimento?: string | null
-  logoPng?: Uint8Array | null
+  logoImg?: Uint8Array | null
   nomeMaster?: string | null
 }
 
@@ -58,8 +58,21 @@ export async function etichettaInterna(d: Dati): Promise<Uint8Array> {
   const pdf = await PDFDocument.create()
   const font = await pdf.embedFont(StandardFonts.Helvetica)
   const grassetto = await pdf.embedFont(StandardFonts.HelveticaBold)
+  // PNG e JPG hanno due funzioni DIVERSE, e passare l'uno all'altra non produce un errore visibile:
+  // il logo semplicemente non compare. Un master con un logo JPG avrebbe stampato etichette senza
+  // marchio senza che nessuno se ne accorgesse, perche' nessuno guarda le etichette degli altri.
   let logo: any = null
-  if (d.logoPng?.length) { try { logo = await pdf.embedPng(d.logoPng) } catch { logo = null } }
+  const b = d.logoImg
+  if (b?.length) {
+    try {
+      if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) logo = await pdf.embedPng(b)
+      else if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) logo = await pdf.embedJpg(b)
+      else console.warn('[ETICHETTA] logo in un formato che non si puo\' incorporare: esce col nome scritto')
+    } catch (e: any) {
+      console.warn('[ETICHETTA] logo illeggibile, esce col nome scritto:', e?.message)
+      logo = null
+    }
+  }
 
   const nColli = Math.max(1, Number(d.colli) || 1)
   for (let i = 1; i <= nColli; i++) {
