@@ -19,6 +19,7 @@ import { EMAIL_PER_CORRIERE,
 // l'API pubblica e la conferma distinte, che prima rimandavano il testo grezzo del provider.
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
 import { motivoLimiteCollo } from '@/lib/limiti-collo'
+import { vedeLaRete } from '@/lib/perimetro'
 
 
 // La creazione parla con i corrieri: alcuni rispondono subito, altri si prendono qualche secondo
@@ -56,7 +57,13 @@ export async function POST(req: NextRequest) {
   let masterSub: string | null = null
   let subListino: string | null = null
   let subCredito = 0, subTipo = ''
-  if (subMatch && utente?.ruolo !== 'cliente' && utente?.master_id) {
+  // CHI SPEDISCE PER UN SOTTO-MASTER, e chi puo' fare una spedizione PROPRIA, e' chi la rete la
+  // governa: master, admin, operatore. Il controllo era "non e' un cliente", che lascia dentro
+  // l'AUTISTA — che un master_id ce l'ha come tutti, e a cui questa rotta non e' mai servita:
+  // in produzione le spedizioni le creano solo cliente, master e admin, mai un autista.
+  // La regola sta in lib/perimetro.ts, la stessa delle giacenze e delle altre rotte, invece di
+  // essere riscritta a mano un ruolo per volta.
+  if (subMatch && vedeLaRete(utente)) {
     const { createAdminSupabase: _adm } = await import('@/lib/supabase-admin')
     const _a = _adm()
     const { data: sm } = await _a.from('masters').select('parent_master_id,parent_listino_id,credito,tipo_contratto').eq('id', subMatch).maybeSingle()
@@ -66,7 +73,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Spedizione propria del master (nessun cliente): costo = listino corriere.
-  const isProprio = utente?.ruolo !== 'cliente' && body.clienteId === '__proprio__'
+  const isProprio = vedeLaRete(utente) && body.clienteId === '__proprio__'
 
   const clienteId = utente?.ruolo === 'cliente' ? utente.cliente_id : ((isProprio || masterSub) ? null : body.clienteId)
   let cliente: any = null

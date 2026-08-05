@@ -124,10 +124,18 @@ export async function POST(req: NextRequest) {
   const costoCliente = Math.round((ris.prezzo + supp.contrassegno + supp.assicurazione) * 100) / 100
 
   // Verifica credito della catena master
+  // GLI STESSI ARGOMENTI DEL PORTALE, che chiama questa identica funzione dieci righe diverse piu'
+  // in la'. Qui mancavano CONTRASSEGNO e ASSICURAZIONE: il credito veniva verificato sul solo nolo
+  // e poi addebitato col supplemento, quindi passava chi non aveva capienza per l'importo vero.
+  // Non e' un caso di scuola: 279 spedizioni con contrassegno via API in trenta giorni.
+  // Mancava anche CITTA', e senza quella i livelli superiori della catena prezzano il CAP condiviso
+  // in modo diverso dal cliente — la stessa spedizione, due zone.
   const catena = await verificaCreditoCatena(admin, {
     masterDirettoId: masterId, corriereOwnerId: corriere.master_id,
     provincia: body.shipTo.state, packages, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+    citta: body.shipTo.city,
     corriereNome: corriere.nome_contratto,
+    contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
   })
   if (!catena.ok) return NextResponse.json({ error: 'Credito insufficiente' }, { status: 402 })
 
