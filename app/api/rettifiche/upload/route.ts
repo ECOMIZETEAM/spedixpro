@@ -1,22 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
-import { zonaDaProvincia, calcolaPrezzoListino } from '@/lib/pricing'
+import { calcolaPrezzoListino } from '@/lib/pricing'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
-function trovaFasciaLocale(fasce: any[], peso: number) {
-  const finoA = fasce.filter(f => f.tipo !== 'oltre').sort((a,b)=>parseFloat(a.peso_max)-parseFloat(b.peso_max))
-  for (const f of finoA) { if (peso <= parseFloat(f.peso_max)) return f }
-  const oltre = fasce.find(f => f.tipo === 'oltre')
-  if (oltre && finoA.length) {
-    const ultima = finoA[finoA.length-1]
-    const kgExtra = peso - parseFloat(ultima.peso_max)
-    const prezzoExtra = Math.ceil(kgExtra / parseFloat(oltre.peso_max)) * parseFloat(oltre.prezzo)
-    return { ...ultima, prezzo: parseFloat(ultima.prezzo) + prezzoExtra }
-  }
-  // Peso oltre l'ultima fascia e nessuna "oltre X ogni": nessun prezzo.
-  return null
-}
 
 // Risale la catena dei master: [masterId, padre, nonno, ...]
 async function risaliCatena(adminDb: any, masterId: string): Promise<string[]> {
@@ -99,15 +86,22 @@ export async function POST(req: NextRequest) {
       let costoFinale = costoIniziale
       const { data: cli } = await supabase.from('clienti').select('listino_cliente_id').eq('id', spedizione.cliente_id).single()
       if (cli?.listino_cliente_id && pesoReale > 0 && spedizione.corriere_id) {
-        const zonaNome = zonaDaProvincia(spedizione.dest_provincia || '')
-        const { data: fasce } = await supabase.from('listini_clienti_fasce')
-          .select('peso_max,prezzo,tipo,zona_id, zone(nome)')
-          .eq('listino_id', cli.listino_cliente_id)
-          .eq('corriere_id', spedizione.corriere_id)
-        let zonaFasce = (fasce||[]).filter((f:any) => (f.zone as any)?.nome === zonaNome)
-        if (!zonaFasce.length) zonaFasce = (fasce||[]).filter((f:any) => (f.zone as any)?.nome === 'Italia')
-        const fascia = trovaFasciaLocale(zonaFasce, pesoReale)
-        if (fascia) costoFinale = parseFloat(fascia.prezzo)
+        // LA ZONA SI RICALCOLA COME SI CALCOLA, cioe' col CAP e col comune.
+        // Qui si guardava la sola PROVINCIA: le zone agganciate al CAP — isole minori, zone
+        // disagiate, Livigno — non hanno un nome che venga fuori dalla provincia, quindi non si
+        // trovava nessuna fascia e si ripiegava su "Italia". Una spedizione venduta 14,95 sulla
+        // fascia isola sarebbe stata riportata a 5,34, e la differenza rimborsata al cliente:
+        // il file dei pesi del corriere avrebbe REGALATO il supplemento dell'isola.
+        // La stessa funzione la usa gia' il ramo della catena, qui sotto: una regola sola.
+        const ris = await calcolaPrezzoListino(supabase, {
+          listinoId: cli.listino_cliente_id, corriereId: spedizione.corriere_id,
+          provincia: spedizione.dest_provincia || '', cap: spedizione.dest_cap || '',
+          paese: spedizione.dest_paese || 'IT', citta: spedizione.dest_citta || '',
+          packages: [{ weight: pesoReale }],   // il peso vero del corriere, senza misure: nessun volumetrico
+        })
+        // Nessun prezzo = quel contratto non copre quella destinazione (zona esclusiva non
+        // prezzata al cliente). Non si inventa una tariffa: si lascia il costo com'e'.
+        if (ris) costoFinale = ris.prezzo
       }
       const differenza = costoIniziale - costoFinale
       if (Math.abs(differenza) <= 0.01) { continue }
