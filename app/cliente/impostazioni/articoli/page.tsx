@@ -289,6 +289,9 @@ export default function ArticoliCliente() {
               {/* VARIANTI. Ogni variante e' una riga a se' col SUO SKU: la maglietta rossa S e la
                   nera L sono due articoli, con due giacenze. Qui si dice solo a quale PRODOTTO
                   appartengono e in cosa differiscono, cosi' a schermo stanno insieme. */}
+              {/* Solo in modifica: in creazione la casella "ha piu' varianti" copre gia' il caso,
+                  e un articolo singolo una variante non ce l'ha. */}
+              {edit && (<>
               <div><label style={lbl}>Prodotto <span style={{ fontWeight: 400, color: '#999' }}>(raggruppa le varianti, opzionale)</span></label>
                 <input value={prodotto} onChange={e => setProdotto(e.target.value)} placeholder="es. T-shirt logo" style={inpS} /></div>
               <div>
@@ -302,6 +305,7 @@ export default function ArticoliCliente() {
                 ))}
                 <button onClick={() => setAttrs(x => [...x, { k: '', v: '' }])} style={{ background: '#fff', color: '#f97316', border: '1px dashed #fdba74', borderRadius: '6px', cursor: 'pointer', padding: '6px 12px', fontSize: '12.5px', fontWeight: 600 }}>+ aggiungi variante</button>
               </div>
+              </>)}
               <div><label style={lbl}>Peso (kg)</label><input type="number" step="0.001" value={peso} onChange={e => setPeso(e.target.value)} style={inpS} /></div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
                 <div><label style={lbl}>Lungh. (cm)</label><input type="number" value={lung} onChange={e => setLung(e.target.value)} style={inpS} /></div>

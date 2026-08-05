@@ -327,6 +327,11 @@ export default function CatalogoPage() {
               <GeneratoreVarianti prodotto={form.nome || ''} onSalva={salvaVarianti} salvataggio={creoVar} />
             </div>
           ) : (<>
+          {/* SOLO IN MODIFICA. In creazione questi due campi erano un doppione della casella qui
+              sopra: se il prodotto NON ha varianti non c'e' niente da raggruppare, e se ce le ha
+              se ne occupa il generatore. Restano dove servono davvero — a correggere il prodotto o
+              la variante di un articolo che esiste gia', magari creato da Shopify o da un file. */}
+          {form.id && (<>
           <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#666', margin: '14px 0 8px', textTransform: 'uppercase' }}>Prodotto e variante</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: '10px' }}>
             <div>
@@ -341,6 +346,7 @@ export default function CatalogoPage() {
           <div style={{ fontSize: '11.5px', color: '#999', marginTop: '6px' }}>
             Ogni variante è un articolo con il SUO SKU e la sua giacenza: la maglietta rossa S e la nera L sono due righe.
           </div>
+          </>)}
           <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#666', margin: '14px 0 8px', textTransform: 'uppercase' }}>Dimensioni e peso</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: '10px' }}>
             {([['peso', 'Peso (kg)'], ['lunghezza', 'Lunghezza (cm)'], ['larghezza', 'Larghezza (cm)'], ['altezza', 'Altezza (cm)']] as const).map(([k, l]) => (
