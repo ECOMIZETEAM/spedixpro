@@ -4,22 +4,26 @@
 // Stanno qui e non copiati in ogni pagina per il motivo di sempre: quattro copie degli stessi stili
 // e delle stesse chiamate diventano quattro comportamenti diversi al primo ritocco.
 
-export const inp: any = { width: '100%', padding: '8px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box' }
-export const card: any = { background: '#fff', borderRadius: '8px', border: '1px solid #e8e8e8', overflow: 'hidden', marginBottom: '18px' }
-export const cardH: any = { padding: '13px 16px', borderBottom: '1px solid #f0f0f0', fontSize: '13.5px', fontWeight: 700, color: '#1a1a1a' }
-export const th: any = { textAlign: 'left', padding: '9px 14px', fontSize: '11.5px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '.03em', borderBottom: '1px solid #eee' }
-export const td: any = { padding: '10px 14px', fontSize: '13px', color: '#1a1a1a', borderBottom: '1px solid #f5f5f5' }
-export const lbl: any = { fontSize: '11.5px', fontWeight: 600, color: '#1a1a1a', display: 'block', marginBottom: '4px' }
-export const btn: any = { background: '#f97316', color: '#fff', border: 'none', padding: '9px 16px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }
-export const btnSec: any = { background: '#fff', color: '#f97316', border: '1px solid #fdba74', padding: '8px 14px', borderRadius: '6px', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }
+// Gli stili sono quelli del resto del portale (li stessi di Catalogo prodotti e Listini), non
+// inventati qui: in un gestionale la coerenza vale, perche' uno impara un posto e si aspetta di
+// ritrovarlo uguale. Stavano a occhio e si vedeva.
+export const ACCENT = '#f97316'
+export const inp: any = { width: '100%', padding: '9px 11px', fontSize: '13px', border: '1px solid #d5d5d5', borderRadius: '6px', outline: 'none', color: '#1a1a1a', background: '#fff', boxSizing: 'border-box' }
+export const card: any = { background: '#fff', borderRadius: '8px', border: '1px solid #e8e8e8', overflow: 'hidden', marginBottom: '14px' }
+export const cardH: any = { padding: '12px 16px', borderBottom: '1px solid #f0f0f0', fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }
+export const th: any = { padding: '9px 12px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#666', textAlign: 'left', whiteSpace: 'nowrap' }
+export const td: any = { padding: '8px 12px', fontSize: '12.5px', color: '#1a1a1a', borderTop: '1px solid #f0f0f0' }
+export const lbl: any = { display: 'block', fontSize: '11.5px', color: '#666', marginBottom: '4px' }
+export const btn: any = { background: ACCENT, color: '#fff', border: 'none', borderRadius: '6px', padding: '9px 16px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }
+export const btnSec: any = { background: '#fff', color: '#555', border: '1px solid #d5d5d5', borderRadius: '6px', padding: '9px 16px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }
 
 export const eur = (n: any) => `€ ${Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 export function Testata({ titolo, sottotitolo }: { titolo: string; sottotitolo?: string }) {
   return (
-    <div style={{ marginBottom: '20px' }}>
-      <h1 style={{ fontSize: '22px', fontWeight: 400, color: '#1a1a1a', margin: '0 0 6px' }}>{titolo}</h1>
-      {sottotitolo && <p style={{ color: '#666', fontSize: '13px', margin: 0 }}>{sottotitolo}</p>}
+    <div style={{ marginBottom: '18px' }}>
+      <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>{titolo}</h1>
+      {sottotitolo && <p style={{ color: '#1a1a1a', fontSize: '13px', marginTop: '4px' }}>{sottotitolo}</p>}
     </div>
   )
 }
@@ -35,7 +39,7 @@ export function Avviso({ msg }: { msg: { t: 'ok' | 'err'; x: string } | null }) 
 }
 
 export function Vuoto({ testo }: { testo: string }) {
-  return <div style={{ padding: '26px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>{testo}</div>
+  return <div style={{ padding: '46px', textAlign: 'center', color: '#8a8a8a', fontSize: '13px' }}>{testo}</div>
 }
 
 // La descrizione di una variante: "rosso · S". Uguale a quella del selettore articoli.

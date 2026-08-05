@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import SelectCercabile from '@/app/components/SelectCercabile'
 import { useDialog } from '@/app/components/DialogProvider'
 import { inp, card, cardH, th, td, lbl, btn, eur, Testata, Avviso, Vuoto } from '../comune'
 
@@ -80,10 +81,10 @@ export default function ListinoLogisticaPage() {
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'end', marginBottom: '14px' }}>
             <div style={{ flex: 1 }}><label style={lbl}>Cliente</label>
-              <select value={cliente} onChange={e => setCliente(e.target.value)} style={inp}>
+              <SelectCercabile value={cliente} onChange={e => setCliente(e.target.value)} style={inp}>
                 <option value="">— scegli —</option>
                 {clienti.map(c => <option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
-              </select></div>
+              </SelectCercabile></div>
             <button onClick={() => setFasce(f => [...f, { peso_max: '', prezzo: '' }])} disabled={!cliente} style={{ background: '#fff', color: '#f97316', border: '1px dashed #fdba74', borderRadius: '6px', padding: '8px 14px', fontSize: '12.5px', fontWeight: 600, cursor: cliente ? 'pointer' : 'not-allowed', opacity: cliente ? 1 : 0.5 }}>+ fascia</button>
             <button onClick={salvaFasce} disabled={!cliente || salvo} style={{ ...btn, opacity: (!cliente || salvo) ? 0.5 : 1 }}>{salvo ? 'Salvo…' : 'Salva listino'}</button>
           </div>

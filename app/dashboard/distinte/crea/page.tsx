@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import SelectCercabile from '@/app/components/SelectCercabile'
 
 import { useDialog } from '@/app/components/DialogProvider'
 import DateRangePicker from '@/app/components/DateRangePicker'
@@ -108,10 +109,10 @@ export default function CreaDistintaPage() {
           </div>
           <div>
             <label style={lbl}>Cliente</label>
-            <select value={clienteId} onChange={e => setClienteId(e.target.value)} style={inp}>
+            <SelectCercabile value={clienteId} onChange={e => setClienteId(e.target.value)} style={inp}>
               <option value="">Tutti i clienti</option>
               {clienti.map(c => <option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
-            </select>
+            </SelectCercabile>
           </div>
           <div>
             <label style={lbl}>Contratto</label>

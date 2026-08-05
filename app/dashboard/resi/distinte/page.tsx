@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',background:'#fff',color:'#1a1a1a'}
@@ -68,11 +69,11 @@ export default function DistinteResiPage() {
           </div>
           <div>
             <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'6px'}}>Cliente</label>
-            <select value={clienteId} onChange={e=>{setClienteId(e.target.value);setPagina(1)}}
+            <SelectCercabile value={clienteId} onChange={e=>{setClienteId(e.target.value);setPagina(1)}}
               style={{...inp,width:'100%'}}>
               <option value="">Tutti</option>
               {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
-            </select>
+            </SelectCercabile>
           </div>
         </div>
       </div>

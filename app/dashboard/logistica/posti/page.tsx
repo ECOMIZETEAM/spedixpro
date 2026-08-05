@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import SelectCercabile from '@/app/components/SelectCercabile'
 import { useDialog } from '@/app/components/DialogProvider'
 import { inp, card, cardH, th, td, lbl, btn, eur, Testata, Avviso, Vuoto } from '../comune'
 
@@ -66,10 +67,10 @@ export default function PostiPage() {
         <div style={cardH}>Occupa un posto</div>
         <div style={{ padding: '16px', display: 'grid', gridTemplateColumns: '1.4fr 1.3fr 1.4fr auto', gap: '10px', alignItems: 'end' }}>
           <div><label style={lbl}>Cliente</label>
-            <select value={cliente} onChange={e => setCliente(e.target.value)} style={inp}>
+            <SelectCercabile value={cliente} onChange={e => setCliente(e.target.value)} style={inp}>
               <option value="">— scegli —</option>
               {clienti.map(c => <option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
-            </select></div>
+            </SelectCercabile></div>
           <div><label style={lbl}>Tipo di posto</label>
             <select value={tipo} onChange={e => setTipo(e.target.value)} style={inp}>
               <option value="">— nessuno —</option>

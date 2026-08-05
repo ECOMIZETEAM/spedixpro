@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { useSearchParams } from 'next/navigation'
 
@@ -98,10 +99,10 @@ export default function ElencoRitiriPage() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr auto', gap: '12px', alignItems: 'end' }}>
           <div>
             <div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Cliente</div>
-            <select value={filtri.clienteId} onChange={e => setF('clienteId', e.target.value)} style={sel}>
+            <SelectCercabile value={filtri.clienteId} onChange={e => setF('clienteId', e.target.value)} style={sel}>
               <option value="">Tutti</option>
               {clienti.map((c: any) => <option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
-            </select>
+            </SelectCercabile>
           </div>
           <div>
             <div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Vettore</div>

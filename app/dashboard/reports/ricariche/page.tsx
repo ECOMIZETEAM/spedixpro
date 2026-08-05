@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import ReportTable from '@/app/components/ReportTable'
 import { useDialog } from '@/app/components/DialogProvider'
@@ -137,10 +138,10 @@ export default function ReportRicarichePage() {
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'16px',marginBottom:'16px'}}>
         <div style={{display:'grid',gridTemplateColumns:'1.4fr 1fr 0.8fr auto auto',gap:'12px',alignItems:'end'}}>
           <div><label style={lbl}>Cliente</label>
-            <select value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={sel}>
+            <SelectCercabile value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={sel}>
               <option value="">Tutti i clienti</option>
               {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
-            </select>
+            </SelectCercabile>
           </div>
           <div><label style={lbl}>Periodo</label>
             <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} />

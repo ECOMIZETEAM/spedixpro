@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import SelectCercabile from '@/app/components/SelectCercabile'
 import { useDialog } from '@/app/components/DialogProvider'
 import { inp, card, cardH, th, td, lbl, btn, Testata, Avviso, Vuoto, variante } from '../comune'
 
@@ -82,10 +83,10 @@ export default function CaricoPage() {
         <div style={cardH}>Registra un arrivo</div>
         <div style={{ padding: '16px', display: 'grid', gridTemplateColumns: '1.3fr 1.7fr 90px 1.2fr auto', gap: '10px', alignItems: 'end' }}>
           <div><label style={lbl}>Cliente</label>
-            <select value={cliente} onChange={e => setCliente(e.target.value)} style={inp}>
+            <SelectCercabile value={cliente} onChange={e => setCliente(e.target.value)} style={inp}>
               <option value="">— scegli —</option>
               {clienti.map(c => <option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
-            </select></div>
+            </SelectCercabile></div>
           <div><label style={lbl}>Articolo</label>
             <select value={art} onChange={e => setArt(e.target.value)} disabled={!cliente} style={inp}>
               <option value="">{cliente ? (catalogo.length ? '— scegli —' : 'nessun articolo a catalogo') : 'scegli prima il cliente'}</option>

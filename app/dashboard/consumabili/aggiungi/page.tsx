@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import SelectCercabile from '@/app/components/SelectCercabile'
 import { useRouter } from 'next/navigation'
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -65,10 +66,10 @@ export default function AggiungiSpesaPage() {
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'16px',marginBottom:'16px'}}>
           <div>
             <label style={lbl}>Cliente</label>
-            <select value={form.clienteId} onChange={e=>set('clienteId',e.target.value)} style={inp}>
+            <SelectCercabile value={form.clienteId} onChange={e=>set('clienteId',e.target.value)} style={inp}>
               <option value="">Seleziona cliente...</option>
               {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
-            </select>
+            </SelectCercabile>
           </div>
           <div>
             <label style={lbl}>Data Acquisto</label>

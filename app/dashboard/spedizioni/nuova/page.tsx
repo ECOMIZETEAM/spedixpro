@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import SelectCercabile from '@/app/components/SelectCercabile'
 import { useRouter } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
 import SelettoreArticoli, { type RigaArticolo, type ArticoloCat } from '@/app/components/SelettoreArticoli'
@@ -394,11 +395,11 @@ export default function NuovaSpedizionePage() {
             <div style={cardB}>
               <div style={{marginBottom:'12px'}}>
                 <label style={lbl}>Cliente *</label>
-                <select value={clienteId} onChange={e=>selezionaCliente(e.target.value)} style={inp}>
+                <SelectCercabile value={clienteId} onChange={e=>selezionaCliente(e.target.value)} style={inp}>
                   <option value="">— seleziona cliente —</option>
                   {!isAgente && <option value="__proprio__">— Spedizione propria (nessun cliente) —</option>}
                   {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}{c.is_master?' — sotto-master':''}</option>)}
-                </select>
+                </SelectCercabile>
               </div>
               <div style={{marginBottom:'12px',position:'relative'}}>
                 <label style={lbl}>Rif. Mittente</label>

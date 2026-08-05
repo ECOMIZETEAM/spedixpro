@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import SelectCercabile from '@/app/components/SelectCercabile'
 import GeneratoreVarianti, { type Opzione, type RigaVariante } from '@/app/components/GeneratoreVarianti'
 
 // IL CATALOGO DEI CLIENTI, DAL LATO DEL MASTER.
@@ -212,10 +213,10 @@ export default function CatalogoPage() {
       <div style={{ ...card, padding: '14px', marginBottom: '14px', display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div style={{ minWidth: '240px' }}>
           <label style={{ display: 'block', fontSize: '11.5px', color: '#666', marginBottom: '4px' }}>Cliente</label>
-          <select value={clienteId} onChange={e => { setClienteId(e.target.value); setForm(null); setMsg(null) }} style={{ ...inp, width: '100%' }}>
+          <SelectCercabile value={clienteId} onChange={e => { setClienteId(e.target.value); setForm(null); setMsg(null) }} style={{ ...inp, width: '100%' }}>
             <option value="">— scegli un cliente —</option>
             {clienti.map((c: any) => <option key={c.id} value={c.id}>{c.ragione_sociale || c.nome}</option>)}
-          </select>
+          </SelectCercabile>
         </div>
         <div style={{ flex: 1, minWidth: '200px' }}>
           <label style={{ display: 'block', fontSize: '11.5px', color: '#666', marginBottom: '4px' }}>Cerca</label>
