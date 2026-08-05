@@ -32,6 +32,10 @@ Qui non serve ricordarsene: il database le applica da solo, da qualunque strada 
 | Cancellare un contratto porta via la sua configurazione | vincoli `on delete cascade` (zone, fasce, supplementi, listini) |
 | ...ma **non** spedizioni, ritiri e distinte | quei vincoli restano bloccanti, di proposito |
 | Il canone non passa dai movimenti | trigger `trg_no_canone_su_movimenti` (si paga con carta, mai dal credito) |
+| La giacenza di magazzino e' il saldo di un registro | trigger `trg_articolo_saldo` da `articoli_movimenti` |
+| Un pacco non scarica due volte lo stesso articolo | indice unico `uniq_artmov_sped_articolo` |
+| Se la spedizione salta, la merce rientra | trigger `trg_articoli_rientro` (annullo effettivo e reso, **non** il pending) |
+| ...e rientra una volta sola | indice unico parziale `uniq_artmov_rientro` |
 | Chi detiene un contratto | colonna `corrieri.proprio` — dichiarato, non dedotto dal nome |
 | Contatori spedizioni, audit sui listini | trigger `trg_conta_spedizione`, `trg_audit` |
 
