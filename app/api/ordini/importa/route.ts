@@ -3,6 +3,8 @@ import { createServerSupabase } from '@/lib/supabase'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 import { siglaProvincia, SIGLE_IT } from '@/lib/province-it'
+import comuniIT from '@/lib/data/comuni.json'
+import frazioniIT from '@/lib/data/frazioni.json'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
 export const runtime = 'nodejs'
@@ -60,7 +62,31 @@ const AUX: Record<string, string[]> = {
   financial:     ['financial_status', 'payment_status', 'stato_pagamento'],
 }
 
-const REQUIRED = ['destinatario', 'indirizzo', 'cap', 'localita', 'provincia']
+// LA PROVINCIA NON LA SI CHIEDE A CHI IMPORTA: SI RICAVA DAL CAP.
+// Amazon nell'ordine non la scrive proprio ("Lovere, 24065", "Bologna, 40139"), e finche' era fra
+// i campi obbligatori quegli ordini venivano SCARTATI — con un messaggio che diceva "dati
+// destinatario incompleti" senza dire quale dato. Due ordini veri persi cosi'.
+// L'elenco dei comuni ce l'abbiamo gia' in casa (lib/data/comuni.json, 7.904 comuni, piu' 9.878
+// frazioni): dal CAP alla sigla e' una lettura, non un indovinello. 24065 -> BG, 40139 -> BO.
+// Se un CAP appartenesse a piu' province non si tira a indovinare: si lascia vuota e la riga entra
+// lo stesso, correggibile a mano dalla lista. Meglio un ordine da completare che un ordine perso.
+const CAP_PROVINCIA: Map<string, string> = (() => {
+  const m = new Map<string, string>()
+  const ambigui = new Set<string>()
+  const aggiungi = (cap: string, sigla: string) => {
+    const c = String(cap || '').trim()
+    const s = String(sigla || '').toUpperCase().trim()
+    if (!/^\d{5}$/.test(c) || s.length !== 2) return
+    const gia = m.get(c)
+    if (gia && gia !== s) { ambigui.add(c); m.delete(c); return }
+    if (!ambigui.has(c)) m.set(c, s)
+  }
+  for (const c of (comuniIT as any[])) for (const cap of (c.cap || [])) aggiungi(cap, c.sigla)
+  for (const f of (frazioniIT as any[])) aggiungi(f.cap, f.sigla)
+  return m
+})()
+
+const REQUIRED = ['destinatario', 'indirizzo', 'cap', 'localita']
 
 function pick(headers: Set<string>, aliases: string[]): string | null {
   for (const a of aliases) if (headers.has(a)) return a
@@ -214,8 +240,18 @@ export async function POST(req: NextRequest) {
     const loc = g(r, 'localita')
     const prov = g(r, 'provincia')
 
-    if (!dest || !ind || !cap || !loc || !prov) {
-      errori.push({ riga: i + 2, motivo: `Ordine ${grp.oid || i + 1}: dati destinatario incompleti` })
+    // La provincia si ricava dal CAP quando manca o non e' una sigla valida (Amazon scrive il nome
+    // esteso, o niente del tutto). Solo dopo si decide se la riga e' completa.
+    let provFinale = siglaProvincia(prov)
+    if (!SIGLE_IT.has(provFinale)) provFinale = CAP_PROVINCIA.get(cap) || ''
+
+    // IL MESSAGGIO DICE QUALE CAMPO MANCA. Prima diceva solo "dati destinatario incompleti", e chi
+    // lo leggeva non aveva modo di sapere cosa correggere nel proprio gestionale.
+    const mancanti = [
+      !dest && 'nome destinatario', !ind && 'indirizzo', !cap && 'CAP', !loc && 'citta',
+    ].filter(Boolean) as string[]
+    if (mancanti.length) {
+      errori.push({ riga: i + 2, motivo: `Ordine ${grp.oid || i + 1}: manca ${mancanti.join(', ')}` })
       return
     }
 
@@ -241,7 +277,7 @@ export async function POST(req: NextRequest) {
       indirizzo: ind,
       cap,
       localita: loc,
-      provincia: siglaProvincia(prov),   // Amazon esporta il nome esteso ("Milano") -> sigla ("MI")
+      provincia: provFinale,   // nome esteso -> sigla, oppure ricavata dal CAP se Amazon non la scrive
       country: (g(r, 'country').toUpperCase()) || 'IT',
       telefono: g(r, 'telefono') || null,
       email_destinatario: g(r, 'email_destinatario') || null,
