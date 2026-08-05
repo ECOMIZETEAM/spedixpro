@@ -31,10 +31,20 @@ export function estensioneDa(mime: string): string {
 
 // Percorso stabile e ordinato per data: cosi' il bucket resta navigabile e si puo' ragionare per
 // periodo (es. archiviare il 2026 senza toccare il resto).
-export function percorsoEtichetta(spedizioneId: string, quando: Date, ext: string): string {
+//
+// UNA CHIAVE PER DOCUMENTO, NON PER SPEDIZIONE. Il percorso era `AAAA/MM/<idSpedizione>.pdf`, e
+// siccome il caricamento sovrascrive, su una spedizione MULTICOLLO i colli si sarebbero scritti
+// l'uno sull'altro: le etichette dei colli sono documenti diversi, ognuno col suo numero di lettera
+// di vettura. Sarebbe rimasta solo l'ultima, tutti i colli avrebbero puntato a quella, e in stampa
+// sarebbe uscita UNA pagina sola — attaccata su tutti i pacchi. Senza nessun errore: il foglio
+// "ETICHETTA NON DISPONIBILE" scatta solo quando non esce niente.
+// Nessuno chiamava ancora questa funzione, quindi non e' un guasto avvenuto: e' quello che sarebbe
+// successo al primo multicollo dopo aver collegato la scrittura.
+export function percorsoEtichetta(spedizioneId: string, quando: Date, ext: string, collo?: number): string {
   const a = quando.getUTCFullYear()
   const m = String(quando.getUTCMonth() + 1).padStart(2, '0')
-  return `${a}/${m}/${spedizioneId}.${ext}`
+  const nome = Number.isFinite(collo as number) && (collo as number) > 0 ? `collo-${collo}` : 'sped'
+  return `${a}/${m}/${spedizioneId}/${nome}.${ext}`
 }
 
 // Scompone un data URL. Torna null se non e' un data URL (es. e' gia' un percorso, o un URL http).
@@ -48,10 +58,12 @@ export function scomponiDataUrl(v: string | null | undefined): { buffer: Buffer;
 // Carica un PDF su Storage e restituisce il percorso. NON tocca il database: chi chiama decide
 // quando e come salvarlo, perche' l'ordine delle scritture e' la parte delicata.
 export async function caricaEtichetta(
-  admin: any, spedizioneId: string, buffer: Buffer, mime = 'application/pdf', quando = new Date()
+  admin: any, spedizioneId: string, buffer: Buffer, mime = 'application/pdf', quando = new Date(),
+  collo?: number,   // numero del collo (1..N) per il multicollo; assente = etichetta della spedizione
 ): Promise<string | null> {
   try {
-    const path = percorsoEtichetta(spedizioneId, quando, estensioneDa(mime))
+    if (!buffer?.length) { console.error('[ETICHETTE] rifiutato caricamento vuoto', spedizioneId, collo ?? '-'); return null }
+    const path = percorsoEtichetta(spedizioneId, quando, estensioneDa(mime), collo)
     const { error } = await admin.storage.from(BUCKET).upload(path, buffer, { contentType: mime, upsert: true })
     if (error) { console.error('[ETICHETTE] caricamento fallito', spedizioneId, error.message); return null }
     return path

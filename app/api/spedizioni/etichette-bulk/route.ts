@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
+import { createHash } from 'node:crypto'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { preparaRiepiloghi, disegnaRiepilogoSped } from '@/lib/riepilogo-ordine'
 
@@ -82,6 +83,15 @@ export async function POST(req: NextRequest) {
       ...urls.map(u => ({ url: u })), ...daStorage.map(b => ({ bytes: b })),
     ]
     let stampate = 0
+    // IL DOPPIONE SI RICONOSCE DAL CONTENUTO, NON DALLA STRINGA.
+    // Il filtro qui sopra confronta i valori: funziona finche' il valore E' il PDF (un data URL).
+    // Quando l'etichetta diventa un PERCORSO su Storage, lo stesso identico documento avra' chiavi
+    // diverse — una per collo — e quel filtro non vedrebbe piu' niente: tornerebbe il guasto dei
+    // 169 fogli, cioe' N copie di un PDF che di pagine ne ha gia' N.
+    // Qui si confrontano i byte veri, quindi la protezione vale in entrambe le forme. Oggi non
+    // cambia nulla — byte uguali vengono da stringhe uguali, gia' scartate sopra — ma quando la
+    // scrittura passera' allo Storage sara' l'unica difesa rimasta, e deve esserci gia'.
+    const impronte = new Set<string>()
     for (const src of sorgenti) {
       try {
         let pdfBytes: Uint8Array
@@ -93,6 +103,9 @@ export async function POST(req: NextRequest) {
           const res = await fetch(src.url!)
           pdfBytes = new Uint8Array(await res.arrayBuffer())
         }
+        const impronta = createHash('sha1').update(pdfBytes).digest('hex')
+        if (impronte.has(impronta)) continue
+        impronte.add(impronta)
         const pdf = await PDFDocument.load(pdfBytes)
         const pages = await pdfMerged.copyPages(pdf, pdf.getPageIndices())
         pages.forEach(p => pdfMerged.addPage(p))
