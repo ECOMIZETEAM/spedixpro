@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
+import SelettoreArticoli, { type RigaArticolo, type ArticoloCat } from '@/app/components/SelettoreArticoli'
 
 // Sigla di ripiego quando il contratto non ha un marchio riconosciuto. Attenzione: qui arriva
 // il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
@@ -62,6 +63,11 @@ export default function NuovaSpedizioneCliente() {
   const [peso, setPeso] = useState('1')
   const [pacchiSalvati, setPacchiSalvati] = useState<any[]>([])
   useEffect(() => { fetch('/api/cliente/pacchi').then(r=>r.json()).then(d=>setPacchiSalvati(Array.isArray(d)?d:[])).catch(()=>{}) }, [])
+  // CATALOGO: serve a dire cosa c'e' nel pacco e a scaricare il magazzino. Se il cliente non ha
+  // articoli il selettore non compare nemmeno, quindi per chi non lo usa la pagina resta identica.
+  const [catalogo, setCatalogo] = useState<ArticoloCat[]>([])
+  const [articoliScelti, setArticoliScelti] = useState<RigaArticolo[]>([])
+  useEffect(() => { fetch('/api/cliente/articoli').then(r=>r.json()).then(d=>setCatalogo(Array.isArray(d)?d:[])).catch(()=>{}) }, [])
   function applicaPacco(p:any) { setPeso(String(p.peso||'')); setNumColli(1); setColli([{ lunghezza:String(p.lunghezza||''), larghezza:String(p.larghezza||''), altezza:String(p.altezza||'') }]); setTariffe([]); setSelected(null) }
   const [contenuto, setContenuto] = useState('')
   const [tipoContenuto, setTipoContenuto] = useState('Merce destinata alla vendita')
@@ -222,6 +228,8 @@ export default function NuovaSpedizioneCliente() {
     setPeso('1'); setContenuto(''); setTipoContenuto('Merce destinata alla vendita'); setValoreMerce(''); setRifOrdine('')
     setContrassegno('0'); setAssicurazione('0')
     setTariffe([]); setSelected(null); setExtraNomi([])
+    // Anche gli articoli: senza questo il pacco successivo scaricherebbe di nuovo la stessa merce.
+    setArticoliScelti([])
     setRichiediRitiro(false); setRitiroData(new Date().toISOString().split('T')[0]); setRitiroOrario('mattina')
     setSuggComuni([]); setShowSugg(false); setDaOrdine('')
     setErrore(''); setVista('dati')
@@ -251,6 +259,20 @@ export default function NuovaSpedizioneCliente() {
     })
     const data = await res.json()
     if (data.error) { setCreating(false); setErrore(data.error); return }
+    // SCARICO DAL MAGAZZINO. Si fa QUI e non dentro la creazione: quella ha quattro rami, uno per
+    // corriere, e ripetere la stessa cosa in quattro punti e' il modo in cui uno resta indietro.
+    // Se fallisce non si blocca niente: la spedizione esiste gia' ed e' quella che conta. Il
+    // magazzino si corregge con un conteggio, e la rotta si puo' richiamare senza scaricare due
+    // volte (c'e' un indice unico che lo impedisce).
+    if (articoliScelti.length && data.spedizioneId) {
+      try {
+        await fetch('/api/spedizioni/articoli', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ spedizione_id: data.spedizioneId, articoli: articoliScelti.map(r=>({ articolo_id:r.id, quantita:r.qta })) })
+        })
+      } catch { console.error('[SPEDIZIONE] scarico magazzino non riuscito') }
+    }
+
     // Ritiro: mostro l'esito all'utente (niente più silenzio se fallisce).
     let ritiroEsito: {ok?:boolean,pickupId?:string,errore?:string}|undefined
     if (richiediRitiro && data.spedizioneId) {
@@ -559,6 +581,10 @@ export default function NuovaSpedizioneCliente() {
               <div style={{marginBottom:'10px'}}>
                 <label style={lbl}>Contenuto</label>
                 <input value={contenuto} onChange={e=>setContenuto(e.target.value)} style={inp}/>
+              </div>
+
+              <div style={{marginBottom:'10px'}}>
+                <SelettoreArticoli articoli={catalogo} valore={articoliScelti} onChange={setArticoliScelti} />
               </div>
 
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'}}>
