@@ -51,12 +51,17 @@ const NAV: NavItem[] = [
     { label: 'Nuovo Cliente', href: '/dashboard/clienti/nuovo', perm: 'admin.clients.create' },
     { label: 'Elenco Clienti', href: '/dashboard/clienti', perm: 'admin.clients.index' },
     { label: 'Catalogo prodotti', href: '/dashboard/catalogo', perm: 'admin.clients.index' },
-    // Logistica conto terzi: la merce del cliente tenuta da noi. Sta sotto Clienti perche' e' un
-    // servizio che si vende a loro, e si apre scegliendo di chi e' la merce.
-    { label: 'Logistica', href: '/dashboard/logistica', perm: 'admin.clients.index' },
     { label: 'Nuovo Master', href: '/dashboard/clienti/master/nuovo', rete: true },
     { label: 'Elenco Master', href: '/dashboard/clienti/master', rete: true },
     { label: 'Gerarchia', href: '/dashboard/clienti/gerarchia', rete: true },
+  ]},
+  // LOGISTICA CONTO TERZI: e' un servizio a se', non un dettaglio dell'anagrafica clienti — la
+  // merce del cliente tenuta da noi, con il suo magazzino, il suo listino e i suoi addebiti.
+  { label: 'Logistica', href: '/dashboard/logistica/carico', icon: '▤', sub: [
+    { label: 'Carico merce', href: '/dashboard/logistica/carico', perm: 'admin.clients.index' },
+    { label: 'Magazzino', href: '/dashboard/logistica/posti', perm: 'admin.clients.index' },
+    { label: 'Listino logistica', href: '/dashboard/logistica/listino', perm: 'admin.clients.index' },
+    { label: 'Addebiti', href: '/dashboard/logistica/addebiti', perm: 'admin.clients.index' },
   ]},
   { label: 'Autisti e Consegne', href: '/dashboard/autisti', icon: '⊡', perm: 'admin.drivers.index' },
   { label: 'Consumabili', href: '/dashboard/consumabili', icon: '▣', sub: [
