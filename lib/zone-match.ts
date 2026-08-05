@@ -64,26 +64,33 @@ export function filtraCapCondiviso(righe: any[], cap: string, citta?: string | n
   const restaUnaRivendicazione = filtrate.some((r: any) => r.cap && r.cap !== '*' && r.cap === cap)
   if (restaUnaRivendicazione) return filtrate
 
-  // NON COMBACIA NIENTE: e ora bisogna distinguere due casi molto diversi.
+  // NON COMBACIA NIENTE: non si rivendica la zona speciale. Mai.
   //
-  // Se per quel CAP e' nominato UN SOLO comune, una scrittura che non combacia e' una variante
-  // dello stesso posto — una frazione (Bratto per Castione della Presolana), un nome altoatesino
-  // nell'altra lingua (Lüsen per Luson) o un refuso. La zona speciale va rivendicata lo stesso,
-  // altrimenti si scivola sul jolly "Italia" e si vende l'isola al prezzo della pianura. Sono 241
-  // spedizioni in trenta giorni, su 56 CAP.
+  // Qui il 4 agosto c'era una regola in piu': "se per quel CAP e' nominato UN SOLO comune, allora
+  // la scrittura diversa e' una variante dello stesso posto (una frazione, un nome altoatesino
+  // nell'altra lingua, un refuso) e la zona speciale si rivendica lo stesso". L'ho tolta il giorno
+  // dopo, perche' era un indovinello travestito da regola.
   //
-  // Se invece i comuni nominati sono PIU' D'UNO — il caso 25050, Rodengo Saiano normale e Monte
-  // Isola isola — non si puo' sapere quale sia, e rivendicare vorrebbe dire far pagare l'isola a
-  // chi sta in pianura. Li' si lascia come prima: altre 292 spedizioni, e non si toccano.
-  const comuniNominati = new Set(
-    righe.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap && r.citta && r.citta !== '*')
-         .map((r: any) => nrm(r.citta))
-  )
-  if (comuniNominati.size === 1) {
-    console.warn('[ZONE] comune scritto diversamente:', citta, '— CAP', cap, 'appartiene a', [...comuniNominati][0], ': zona speciale rivendicata lo stesso')
-    return righe
-  }
-  console.warn('[ZONE] comune non riconosciuto e CAP condiviso fra piu comuni:', cap, '—', citta, ': lasciato com era')
+  // Il motivo: quella condizione non distingue due situazioni opposte.
+  //   - "PIANA DI MONTE VENA" per "Piana di Monte Verna" e' davvero lo stesso posto scritto male;
+  //   - "Brugnato" NON e' "Sesta Godano": sono due comuni diversi che condividono il CAP 19020, e
+  //     solo il secondo e' disagiato. Stessa cosa per Ficarazzi/Ustica (90010), Isca sullo
+  //     Ionio/Davoli (88060), Temu'/Monte Isola (25050).
+  // Dall'esterno le due situazioni sono identiche: senza un elenco ufficiale comune->CAP non c'e'
+  // modo di sapere quale sia quale, e indovinando si sbaglia quanto si azzecca.
+  //
+  // E c'era un danno peggiore, che e' il motivo per cui l'ho tolta di corsa. Il numero di comuni
+  // nominati DIPENDE DA QUALI RIGHE ARRIVANO QUI, e al cliente e ai master ne arrivano insiemi
+  // diversi: il cliente passa dal suo listino, i master dai loro listini corrieri. Sulla stessa
+  // spedizione la stessa funzione decideva in due modi — Brugnato 19020: al cliente "lasciato
+  // com'era" (Italia, 4,89), al master "rivendicata lo stesso" (disagiata, 10,00). La differenza
+  // la pagava il master, e non era un caso di scuola: sei spedizioni in sedici ore.
+  //
+  // Cosi' la decisione dipende solo da CAP e comune scritto, che sono gli stessi a ogni livello.
+  // Si torna alla regola di sempre: meglio non prezzare che prezzare l'isola al prezzo della
+  // pianura. I refusi tornano a scivolare su "Italia" — sono ~43 spedizioni al mese, molto meno
+  // di quanto costava l'indovinello — e la cura vera e' un elenco comune/CAP, non un'euristica.
+  console.warn('[ZONE] comune non riconosciuto per il CAP', cap, '—', citta, ': zona speciale NON rivendicata')
   return filtrate
 }
 
