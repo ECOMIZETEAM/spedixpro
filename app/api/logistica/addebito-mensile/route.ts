@@ -44,14 +44,17 @@ function meseDi(d = new Date()) {
 // In tutti e due i casi la chiave finisce nella stessa colonna e nello stesso indice unico
 // (blocco, periodo): e' quello che impedisce di fatturare due volte lo stesso periodo, qualunque
 // modo si sia scelto e quante volte si rilanci il giro.
-function periodoDi(modo: string, occupatoDal: string, oggi = new Date()): string {
-  if (modo !== 'giorni30') return meseDi(oggi)
-  const inizio = new Date(occupatoDal + 'T00:00:00Z')
-  const giorni = Math.floor((oggi.getTime() - inizio.getTime()) / 86400000)
-  if (giorni < 0) return meseDi(oggi)
+function periodoDi(modo: string, occupatoDal: string, oggi = new Date()): { chiave: string; inizio: Date } {
+  if (modo !== 'giorni30') {
+    // Il mese solare comincia il primo: e' quella la data da confrontare con l'accensione.
+    return { chiave: meseDi(oggi), inizio: new Date(Date.UTC(oggi.getUTCFullYear(), oggi.getUTCMonth(), 1)) }
+  }
+  const inizio0 = new Date(occupatoDal + 'T00:00:00Z')
+  const giorni = Math.floor((oggi.getTime() - inizio0.getTime()) / 86400000)
+  if (giorni < 0) return { chiave: meseDi(oggi), inizio: new Date(Date.UTC(oggi.getUTCFullYear(), oggi.getUTCMonth(), 1)) }
   const n = Math.floor(giorni / 30)
-  const dal = new Date(inizio.getTime() + n * 30 * 86400000)
-  return dal.toISOString().slice(0, 10)
+  const dal = new Date(inizio0.getTime() + n * 30 * 86400000)
+  return { chiave: dal.toISOString().slice(0, 10), inizio: dal }
 }
 
 export async function GET(req: NextRequest) {
@@ -88,10 +91,20 @@ export async function GET(req: NextRequest) {
   // Il modo di contare il periodo e' del MASTER a cui appartiene il posto: in una rete ognuno puo'
   // avere il suo magazzino e le sue abitudini.
   const masterIds = Array.from(new Set((posti || []).map((p: any) => p.master_id)))
-  const { data: mm } = await admin.from('masters').select('id,logistica_periodo')
+  const { data: mm } = await admin.from('masters').select('id,logistica_periodo,logistica_attiva_dal')
     .in('id', masterIds.length ? masterIds : ['00000000-0000-0000-0000-000000000000'])
   const modoDi = new Map((mm || []).map((m: any) => [m.id, m.logistica_periodo || 'solare']))
+  const attivaDal = new Map((mm || []).map((m: any) => [m.id, m.logistica_attiva_dal ? new Date(m.logistica_attiva_dal) : null]))
   const periodoDelPosto = (p: any) => periodoDi(modoDi.get(p.master_id) || 'solare', p.occupato_dal)
+
+  // NIENTE STORICO: non si fattura un periodo cominciato prima dell'accensione. Col mese solare
+  // significa che il mese in corso — gia' iniziato — non si paga, e il primo addebito e' quello
+  // dopo. Vale identico per l'anteprima: quello che si vede e' quello che succederebbe.
+  const daFatturare = (p: any) => {
+    const dal = attivaDal.get(p.master_id)
+    if (!dal) return true
+    return periodoDelPosto(p).inizio.getTime() >= dal.getTime()
+  }
 
   // Cosa e' gia' stato fatturato per questo mese: serve sia all'anteprima (per non contarlo due
   // volte) sia al giro vero.
@@ -104,7 +117,8 @@ export async function GET(req: NextRequest) {
 
   const daFare = (posti || []).filter((p: any) =>
     Number(tipoDi(p).prezzo_mese || 0) > 0 &&
-    !gia.has(`${p.id}|${meseForzato || periodoDelPosto(p)}`))
+    daFatturare(p) &&
+    !gia.has(`${p.id}|${meseForzato || periodoDelPosto(p).chiave}`))
   const totale = Math.round(daFare.reduce((s: number, p: any) => s + Number(tipoDi(p).prezzo_mese), 0) * 100) / 100
 
   if (anteprima) {
@@ -128,7 +142,7 @@ export async function GET(req: NextRequest) {
   let euro = 0
   for (const p of daFare) {
     const prezzo = Number(tipoDi(p).prezzo_mese)
-    const periodo = meseForzato || periodoDelPosto(p)
+    const periodo = meseForzato || periodoDelPosto(p).chiave
     const descrizione = `Giacenza magazzino ${periodo} — ${tipoDi(p).nome}${p.ubicazione ? ' · ' + p.ubicazione : ''}`
     try {
       // PRIMA il segno che e' stato fatto, POI il movimento: se l'indice unico rifiuta (mese gia'

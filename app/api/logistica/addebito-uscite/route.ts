@@ -52,6 +52,13 @@ export async function GET(req: NextRequest) {
   const { data: fasce } = await qf
   if (!fasce?.length) return NextResponse.json({ anteprima, attivi: 0, da_addebitare: 0, totale: 0, clienti: [] })
 
+  // NIENTE STORICO. Oltre alla data del listino c'e' il pavimento dell'accensione della logistica:
+  // un listino compilato durante le prove non deve poter far pagare spedizioni fatte prima che il
+  // servizio venisse acceso davvero. Si prende la piu' RECENTE delle due.
+  const { data: mAttivi } = await admin.from('masters').select('id,logistica_attiva_dal')
+    .in('id', Array.from(new Set(fasce.map((f: any) => f.master_id))))
+  const accensione = new Map((mAttivi || []).map((m: any) => [m.id, m.logistica_attiva_dal || '']))
+
   type Fascia = { peso: number; prezzo: number }
   // DA QUANDO SI FATTURA. Il servizio si accende compilando le fasce, e da quel momento in poi si
   // paga: non prima. Senza questa data, accendere la logistica a un cliente gli avrebbe addebitato
@@ -60,9 +67,11 @@ export async function GET(req: NextRequest) {
   // agosto, 37 euro che non andavano chiesti a nessuno.
   const perCliente = new Map<string, { master_id: string; fasce: Fascia[]; dal: string }>()
   for (const f of fasce) {
-    const r = perCliente.get(f.cliente_id) || { master_id: f.master_id, fasce: [] as Fascia[], dal: f.created_at }
+    const pavimento = accensione.get(f.master_id) || ''
+    const inizio = f.created_at > pavimento ? f.created_at : pavimento
+    const r = perCliente.get(f.cliente_id) || { master_id: f.master_id, fasce: [] as Fascia[], dal: inizio }
     r.fasce.push({ peso: Number(f.peso_max), prezzo: Number(f.prezzo) })
-    if (f.created_at < r.dal) r.dal = f.created_at
+    if (inizio < r.dal) r.dal = inizio
     perCliente.set(f.cliente_id, r)
   }
   for (const r of perCliente.values()) r.fasce.sort((a, b) => a.peso - b.peso)
