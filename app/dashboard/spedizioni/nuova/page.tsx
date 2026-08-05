@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
+import SelettoreArticoli, { type RigaArticolo, type ArticoloCat } from '@/app/components/SelettoreArticoli'
 
 function iconaCorriere(nome:string): string | null {
   const n = (nome||'').toUpperCase()
@@ -50,6 +51,16 @@ export default function NuovaSpedizionePage() {
   const router = useRouter()
   const [clienti, setClienti] = useState<Cliente[]>([])
   const [clienteId, setClienteId] = useState('')
+  // Il catalogo e' del CLIENTE della spedizione, quindi si ricarica quando cambia il cliente.
+  // Spedizione propria (__proprio__) e sotto-master (m:) non hanno un magazzino: li' non compare.
+  const [catalogo, setCatalogo] = useState<ArticoloCat[]>([])
+  const [articoliScelti, setArticoliScelti] = useState<RigaArticolo[]>([])
+  useEffect(() => {
+    setArticoliScelti([])
+    if (!clienteId || clienteId === '__proprio__' || clienteId.startsWith('m:')) { setCatalogo([]); return }
+    fetch(`/api/catalogo?cliente_id=${clienteId}`).then(r=>r.json())
+      .then(d=>setCatalogo(Array.isArray(d?.articoli)?d.articoli:[])).catch(()=>setCatalogo([]))
+  }, [clienteId])
   const [mitt, setMitt] = useState({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',email:'',telefono:''})
   const [mittAzienda, setMittAzienda] = useState<typeof mitt|null>(null)   // dati azienda da Impostazioni (mittente predefinito)
   const [dest, setDest] = useState({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',paese:'IT',email:'',telefono:'',note:'',rif:'',ordine:''})
@@ -250,6 +261,9 @@ export default function NuovaSpedizionePage() {
     setPeso('1'); setContenuto(''); setTipoContenuto('Merce destinata alla vendita'); setValoreMerce('')
     setContrassegno('0'); setAssicurazione('0')
     setTariffe([]); setSelected(null); setExtraNomi([])
+    // Esplicito anche se setClienteId('') qui sopra lo farebbe gia' scattare: se un domani l'ordine
+    // delle righe cambia, il pacco successivo non deve scaricare la merce di questo.
+    setArticoliScelti([])
     setRichiediRitiro(false); setRitiroData(new Date().toISOString().split('T')[0]); setRitiroOrario('mattina')
     setSuggComuni([]); setShowSugg(false); setSuggDest([]); setShowSuggDest(false)
     setErrore(''); setVista('dati')
@@ -281,6 +295,18 @@ export default function NuovaSpedizionePage() {
     })
     const data = await res.json()
     if (data.error) { setCreating(false); setErrore(data.error); return }
+    // SCARICO DAL MAGAZZINO DEL CLIENTE. Qui e non dentro la creazione: quella ha quattro rami, uno
+    // per corriere, e ripetere la stessa cosa in quattro punti e' il modo in cui uno resta indietro.
+    // Se fallisce non si blocca niente: la spedizione c'e' gia' ed e' quella che conta.
+    if (articoliScelti.length && data.spedizioneId) {
+      try {
+        await fetch('/api/spedizioni/articoli', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ spedizione_id: data.spedizioneId, articoli: articoliScelti.map(r=>({ articolo_id:r.id, quantita:r.qta })) })
+        })
+      } catch { console.error('[SPEDIZIONE] scarico magazzino non riuscito') }
+    }
+
     // Ritiro: NON ingoio più l'esito. Se fallisce (es. Poste in giornata, provincia errata) lo mostro
     // all'utente nel banner, così sa che la spedizione è creata ma il ritiro no (e perché).
     let ritiroEsito: {ok?:boolean,pickupId?:string,errore?:string}|undefined
@@ -608,6 +634,10 @@ export default function NuovaSpedizionePage() {
               <div style={{marginBottom:'10px'}}>
                 <label style={lbl}>Contenuto</label>
                 <input value={contenuto} onChange={e=>setContenuto(e.target.value)} style={inp}/>
+              </div>
+
+              <div style={{marginBottom:'10px'}}>
+                <SelettoreArticoli articoli={catalogo} valore={articoliScelti} onChange={setArticoliScelti} />
               </div>
 
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'}}>
