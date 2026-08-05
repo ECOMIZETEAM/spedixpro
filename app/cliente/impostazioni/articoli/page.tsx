@@ -13,6 +13,15 @@ export default function ArticoliCliente() {
   const [edit, setEdit] = useState<any>(null)
   const [sku, setSku] = useState(''); const [nome, setNome] = useState(''); const [asin, setAsin] = useState('')
   const [peso, setPeso] = useState(''); const [lung, setLung] = useState(''); const [larg, setLarg] = useState(''); const [alt, setAlt] = useState('')
+  // VARIANTI: `prodotto` raggruppa (es. "T-SHIRT LOGO"), gli attributi dicono in cosa differiscono.
+  // Sono coppie libere — colore, taglia, gusto — perche' cambiano da mestiere a mestiere.
+  const [prodotto, setProdotto] = useState('')
+  const [attrs, setAttrs] = useState<{ k: string; v: string }[]>([])
+  // Movimento di magazzino: carico merce arrivata, oppure conteggio (inventario).
+  const [giacArt, setGiacArt] = useState<any>(null)
+  const [giacTipo, setGiacTipo] = useState<'carico' | 'inventario'>('carico')
+  const [giacQta, setGiacQta] = useState(''); const [giacNota, setGiacNota] = useState('')
+  const [giacSaving, setGiacSaving] = useState(false)
   const [saving, setSaving] = useState(false)
   const [importing, setImporting] = useState(false)
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
@@ -40,19 +49,45 @@ export default function ArticoliCliente() {
     else { setMsg({ t: 'ok', x: `${skus.length} articoli assegnati al pacco` }); setSel(new Set()); caricaPacchi() }
   }
   function apri(a: any) {
-    if (a) { setEdit(a); setSku(a.sku); setNome(a.nome || ''); setAsin(a.asin || ''); setPeso(String(a.peso ?? '')); setLung(String(a.lunghezza ?? '')); setLarg(String(a.larghezza ?? '')); setAlt(String(a.altezza ?? '')) }
-    else { setEdit(null); setSku(''); setNome(''); setAsin(''); setPeso(''); setLung(''); setLarg(''); setAlt('') }
+    if (a) {
+      setEdit(a); setSku(a.sku); setNome(a.nome || ''); setAsin(a.asin || ''); setPeso(String(a.peso ?? ''))
+      setLung(String(a.lunghezza ?? '')); setLarg(String(a.larghezza ?? '')); setAlt(String(a.altezza ?? ''))
+      setProdotto(a.prodotto || '')
+      setAttrs(Object.entries(a.attributi || {}).map(([k, v]) => ({ k, v: String(v ?? '') })))
+    } else {
+      setEdit(null); setSku(''); setNome(''); setAsin(''); setPeso(''); setLung(''); setLarg(''); setAlt('')
+      setProdotto(''); setAttrs([])
+    }
     setModal(true)
   }
   async function salva() {
     if (!sku.trim()) { await dialog.alert({ title: 'SKU mancante', message: 'Inserisci lo SKU.' }); return }
     setSaving(true)
-    const body: any = { sku, nome, asin, peso, lunghezza: lung, larghezza: larg, altezza: alt }
+    const attributi: Record<string, string> = {}
+    for (const a of attrs) { const k = a.k.trim(); if (k && a.v.trim()) attributi[k] = a.v.trim() }
+    const body: any = { sku, nome, asin, peso, lunghezza: lung, larghezza: larg, altezza: alt,
+      prodotto, attributi: Object.keys(attributi).length ? attributi : null }
     if (edit) body.id = edit.id
     const res = await fetch('/api/cliente/articoli', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     const d = await res.json(); setSaving(false)
     if (d.error) { await dialog.alert({ title: 'Errore', message: d.error }); return }
     setModal(false); carica()
+  }
+  async function salvaGiacenza() {
+    const n = parseInt(giacQta, 10)
+    if (!isFinite(n)) { await dialog.alert({ title: 'Quantita mancante', message: 'Scrivi quanti pezzi.' }); return }
+    setGiacSaving(true)
+    const res = await fetch('/api/cliente/articoli/giacenza', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ articolo_id: giacArt.id, tipo: giacTipo, quantita: n, nota: giacNota }),
+    })
+    const d = await res.json().catch(() => ({})); setGiacSaving(false)
+    if (!res.ok || d.error) { await dialog.alert({ title: 'Errore', message: d.error || 'Non riuscito' }); return }
+    setGiacArt(null); setGiacQta(''); setGiacNota(''); carica()
+  }
+  function apriGiacenza(a: any, tipo: 'carico' | 'inventario') {
+    setGiacArt(a); setGiacTipo(tipo); setGiacNota('')
+    setGiacQta(tipo === 'inventario' ? String(a.quantita ?? 0) : '')
   }
   async function elimina(id: string) {
     if (!await dialog.confirm({ title: 'Eliminare l\'articolo?', danger: true, confirmText: 'Elimina' })) return
@@ -77,7 +112,7 @@ export default function ArticoliCliente() {
     if (fileRef.current) fileRef.current.value = ''
   }
 
-  const filtrati = q.trim() ? articoli.filter(a => (a.sku || '').toLowerCase().includes(q.toLowerCase()) || (a.nome || '').toLowerCase().includes(q.toLowerCase()) || (a.asin || '').toLowerCase().includes(q.toLowerCase())) : articoli
+  const filtrati = q.trim() ? articoli.filter(a => (a.sku || '').toLowerCase().includes(q.toLowerCase()) || (a.nome || '').toLowerCase().includes(q.toLowerCase()) || (a.asin || '').toLowerCase().includes(q.toLowerCase()) || (a.prodotto || '').toLowerCase().includes(q.toLowerCase())) : articoli
   // SKU → pacco assegnato (per mostrare la colonna Pacco): ogni pacco ha una lista di SKU nel campo `sku`.
   const skuToPacco = new Map<string, any>()
   for (const p of pacchi) for (const s of String(p.sku || '').split(/[\s,;]+/)) { const k = s.trim().toLowerCase(); if (k) skuToPacco.set(k, p) }
@@ -128,7 +163,7 @@ export default function ArticoliCliente() {
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><th style={{ ...th, width: '34px' }}><input type="checkbox" checked={filtrati.length > 0 && sel.size === filtrati.length} onChange={toggleAll} /></th><th style={th}>SKU</th><th style={th}>ASIN</th><th style={th}>Nome</th><th style={th}>Peso (kg)</th><th style={th}>Misure (cm)</th><th style={th}>Pacco</th><th style={{ ...th, width: '110px' }}>Azioni</th></tr></thead>
+              <thead><tr><th style={{ ...th, width: '34px' }}><input type="checkbox" checked={filtrati.length > 0 && sel.size === filtrati.length} onChange={toggleAll} /></th><th style={th}>SKU</th><th style={th}>ASIN</th><th style={th}>Nome</th><th style={th}>Prodotto · variante</th><th style={th}>Giacenza</th><th style={th}>Peso (kg)</th><th style={th}>Misure (cm)</th><th style={th}>Pacco</th><th style={{ ...th, width: '110px' }}>Azioni</th></tr></thead>
               <tbody>
                 {filtrati.map(a => { const pk = skuToPacco.get(String(a.sku || '').toLowerCase()); return (
                   <tr key={a.id} style={sel.has(a.id) ? { background: '#fff7ed' } : undefined}>
@@ -136,6 +171,25 @@ export default function ArticoliCliente() {
                     <td style={{ ...td, fontWeight: 600, color: '#f97316' }}>{a.sku}</td>
                     <td style={{ ...td, color: a.asin ? '#1a1a1a' : '#cbd5e1' }}>{a.asin || '—'}</td>
                     <td style={td}>{a.nome || '—'}</td>
+                    <td style={td}>
+                      {a.prodotto ? <div style={{ fontWeight: 600 }}>{a.prodotto}</div> : null}
+                      {a.attributi && Object.keys(a.attributi).length ? (
+                        <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                          {Object.entries(a.attributi).map(([k, v]) => `${k}: ${v}`).join(' · ')}
+                        </div>
+                      ) : (!a.prodotto ? <span style={{ color: '#cbd5e1' }}>—</span> : null)}
+                    </td>
+                    <td style={td}>
+                      {/* La giacenza puo' andare SOTTO ZERO: si spedisce comunque un pacco vero, e
+                          un numero rosso si vede e si corregge. Bloccare fermerebbe il lavoro. */}
+                      <span style={{ fontWeight: 700, fontSize: '14px', color: Number(a.quantita) < 0 ? '#b91c1c' : Number(a.quantita) > 0 ? '#15803d' : '#9ca3af' }}>
+                        {Number(a.quantita ?? 0)}
+                      </span>
+                      <button onClick={() => apriGiacenza(a, 'carico')} title="Carica merce arrivata"
+                        style={{ marginLeft: '8px', background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 700, padding: '2px 7px' }}>+</button>
+                      <button onClick={() => apriGiacenza(a, 'inventario')} title="Ho contato: correggi la giacenza"
+                        style={{ marginLeft: '4px', background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', padding: '2px 7px' }}>=</button>
+                    </td>
                     <td style={{ ...td, color: Number(a.peso || 0) > 0 ? '#1a1a1a' : (pk && Number(pk.peso) > 0 ? '#94a3b8' : '#cbd5e1') }}>{Number(a.peso || 0) > 0 ? `${Number(a.peso).toFixed(3).replace(/\.?0+$/, '')} kg` : (pk && Number(pk.peso) > 0 ? `↳ ${Number(pk.peso).toFixed(3).replace(/\.?0+$/, '')} kg` : '— (dal pacco)')}</td>
                     <td style={{ ...td, color: (a.lunghezza || a.larghezza || a.altezza) ? '#1a1a1a' : '#cbd5e1' }}>{(a.lunghezza || a.larghezza || a.altezza) ? `${a.lunghezza}×${a.larghezza}×${a.altezza}` : (pk ? `↳ ${pk.lunghezza}×${pk.larghezza}×${pk.altezza}` : '— (dal pacco)')}</td>
                     <td style={{ ...td, color: pk ? '#15803d' : '#cbd5e1', fontWeight: pk ? 600 : 400 }}>{pk ? pk.nome : '—'}</td>
@@ -145,7 +199,7 @@ export default function ArticoliCliente() {
                     </td>
                   </tr>
                 )})}
-                {!filtrati.length && <tr><td colSpan={8} style={{ padding: '24px', textAlign: 'center', color: '#999', fontSize: '13px' }}>Nessun articolo per la ricerca.</td></tr>}
+                {!filtrati.length && <tr><td colSpan={10} style={{ padding: '24px', textAlign: 'center', color: '#999', fontSize: '13px' }}>Nessun articolo per la ricerca.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -153,6 +207,36 @@ export default function ArticoliCliente() {
       </div>
 
       {articoli.length > 0 && <div style={{ fontSize: '12px', color: '#999', marginTop: '10px' }}>{filtrati.length} di {articoli.length} articoli</div>}
+
+      {giacArt && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setGiacArt(null)}>
+          <div style={{ background: '#fff', borderRadius: '10px', padding: '24px', width: '400px', maxWidth: '90%' }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#1a1a1a', margin: '0 0 4px' }}>
+              {giacTipo === 'carico' ? 'Carica merce' : 'Correggi la giacenza'}
+            </h2>
+            <p style={{ fontSize: '12.5px', color: '#6b7280', margin: '0 0 16px' }}>
+              {giacArt.sku}{giacArt.nome ? ` · ${giacArt.nome}` : ''} — adesso ne risultano <b>{Number(giacArt.quantita ?? 0)}</b>
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={lbl}>{giacTipo === 'carico' ? 'Quanti pezzi sono arrivati' : 'Quanti pezzi ci sono davvero'}</label>
+                <input type="number" step="1" value={giacQta} onChange={e => setGiacQta(e.target.value)} autoFocus style={inpS} />
+              </div>
+              <div><label style={lbl}>Nota <span style={{ fontWeight: 400, color: '#999' }}>(opzionale)</span></label>
+                <input value={giacNota} onChange={e => setGiacNota(e.target.value)} placeholder={giacTipo === 'carico' ? 'es. bolla 1234' : 'es. conteggio del 5 agosto'} style={inpS} /></div>
+              <div style={{ fontSize: '11.5px', color: '#999' }}>
+                {giacTipo === 'carico'
+                  ? 'Si aggiunge a quello che gia\u2019 c\u2019e\u2019. Resta scritto nel registro dell\u2019articolo.'
+                  : 'Si scrive la differenza rispetto a quello che il sistema credeva, così resta la traccia di quanto mancava.'}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', marginTop: '20px', justifyContent: 'flex-end' }}>
+              <button onClick={() => setGiacArt(null)} style={{ padding: '9px 18px', border: '1px solid #d1d5db', borderRadius: '6px', background: '#fff', cursor: 'pointer', fontSize: '13px', color: '#1a1a1a' }}>Annulla</button>
+              <button onClick={salvaGiacenza} disabled={giacSaving} style={{ padding: '9px 18px', border: 'none', borderRadius: '6px', background: '#f97316', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 600, opacity: giacSaving ? 0.6 : 1 }}>{giacSaving ? 'Salvo…' : 'Salva'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {modal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setModal(false)}>
@@ -162,6 +246,22 @@ export default function ArticoliCliente() {
               <div><label style={lbl}>SKU</label><input value={sku} onChange={e => setSku(e.target.value)} disabled={!!edit} style={inpS} /></div>
               <div><label style={lbl}>Nome <span style={{ fontWeight: 400, color: '#999' }}>(opzionale)</span></label><input value={nome} onChange={e => setNome(e.target.value)} style={inpS} /></div>
               <div><label style={lbl}>ASIN <span style={{ fontWeight: 400, color: '#999' }}>(Amazon, opzionale)</span></label><input value={asin} onChange={e => setAsin(e.target.value)} style={inpS} /></div>
+              {/* VARIANTI. Ogni variante e' una riga a se' col SUO SKU: la maglietta rossa S e la
+                  nera L sono due articoli, con due giacenze. Qui si dice solo a quale PRODOTTO
+                  appartengono e in cosa differiscono, cosi' a schermo stanno insieme. */}
+              <div><label style={lbl}>Prodotto <span style={{ fontWeight: 400, color: '#999' }}>(raggruppa le varianti, opzionale)</span></label>
+                <input value={prodotto} onChange={e => setProdotto(e.target.value)} placeholder="es. T-shirt logo" style={inpS} /></div>
+              <div>
+                <label style={lbl}>Variante <span style={{ fontWeight: 400, color: '#999' }}>(colore, taglia, gusto…)</span></label>
+                {attrs.map((a, i) => (
+                  <div key={i} style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                    <input value={a.k} onChange={e => setAttrs(x => x.map((y, j) => j === i ? { ...y, k: e.target.value } : y))} placeholder="colore" style={{ ...inpS, flex: 1 }} />
+                    <input value={a.v} onChange={e => setAttrs(x => x.map((y, j) => j === i ? { ...y, v: e.target.value } : y))} placeholder="rosso" style={{ ...inpS, flex: 1 }} />
+                    <button onClick={() => setAttrs(x => x.filter((_, j) => j !== i))} style={{ background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '6px', cursor: 'pointer', padding: '0 10px', fontSize: '13px' }}>×</button>
+                  </div>
+                ))}
+                <button onClick={() => setAttrs(x => [...x, { k: '', v: '' }])} style={{ background: '#fff', color: '#f97316', border: '1px dashed #fdba74', borderRadius: '6px', cursor: 'pointer', padding: '6px 12px', fontSize: '12.5px', fontWeight: 600 }}>+ aggiungi variante</button>
+              </div>
               <div><label style={lbl}>Peso (kg)</label><input type="number" step="0.001" value={peso} onChange={e => setPeso(e.target.value)} style={inpS} /></div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
                 <div><label style={lbl}>Lungh. (cm)</label><input type="number" value={lung} onChange={e => setLung(e.target.value)} style={inpS} /></div>

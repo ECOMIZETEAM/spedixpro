@@ -32,6 +32,14 @@ export async function POST(req: NextRequest) {
   const record: any = {
     cliente_id: u.cliente_id, master_id: u.master_id,
     sku, nome: b.nome ? String(b.nome).trim() : null,
+    // VARIANTI. `prodotto` e' il nome che raggruppa ("T-SHIRT LOGO"), `attributi` dice in cosa
+    // differiscono ({"colore":"rosso","taglia":"S"}). Ogni variante resta una RIGA con il suo SKU:
+    // e' come lavorano Shopify e Amazon, quindi gli ordini importati la agganciano da soli.
+    prodotto: b.prodotto ? String(b.prodotto).trim() : null,
+    attributi: (b.attributi && typeof b.attributi === 'object' && !Array.isArray(b.attributi)) ? b.attributi : null,
+    // NB: `quantita` non compare qui, e non deve. La tiene il trigger dal registro dei movimenti,
+    // come il credito dai movimenti: se la si potesse scrivere da qui, il saldo e la sua storia
+    // divergerebbero al primo salvataggio della scheda articolo.
     peso: Number(b.peso) || 0,
     lunghezza: Number(b.lunghezza) || 0, larghezza: Number(b.larghezza) || 0, altezza: Number(b.altezza) || 0,
     updated_at: new Date().toISOString(),
