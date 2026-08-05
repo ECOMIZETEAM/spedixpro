@@ -47,9 +47,15 @@ async function clienteDiLavoro(supabase: any, admin: any, utente: any, clienteId
 
 const CAMPI = ['sku', 'nome', 'ean13', 'asin', 'prezzo', 'url_immagine', 'peso', 'lunghezza', 'larghezza',
   'altezza', 'descrizione_doganale', 'valore_dichiarato', 'codice_hs', 'codice_mid', 'paese_origine',
-  'corriere_id', 'corriere_estero_id'] as const
+  'corriere_id', 'corriere_estero_id',
+  // Varianti: `prodotto` raggruppa ("T-SHIRT LOGO"), `attributi` dice in cosa differiscono.
+  // NB: `quantita` NON e' e non deve essere qui — la giacenza e' il saldo del registro dei
+  // movimenti, tenuto da un trigger. Scriverla da qui la farebbe divergere dalla sua storia.
+  'prodotto', 'attributi'] as const
 const NUMERICI = new Set(['prezzo', 'peso', 'lunghezza', 'larghezza', 'altezza', 'valore_dichiarato'])
 const RIFERIMENTI = new Set(['corriere_id', 'corriere_estero_id'])
+// Passano cosi' come sono: sono oggetti, non testo da ripulire.
+const OGGETTI = new Set(['attributi'])
 
 // `parziale` = importazione: i campi vuoti NON si scrivono.
 //
@@ -65,6 +71,10 @@ function ripulisci(p: any, parziale = false) {
     const v = p[c]
     const vuoto = v === null || v === undefined || String(v).trim() === ''
     if (parziale && vuoto) continue
+    if (OGGETTI.has(c)) {
+      out[c] = (v && typeof v === 'object' && !Array.isArray(v)) ? v : null
+      continue
+    }
     if (NUMERICI.has(c)) {
       // La virgola decimale e' come la scrivono tutti, ed e' quella che esce da un foglio Excel
       // italiano: leggerla come "non numero" vorrebbe dire buttare via il peso.

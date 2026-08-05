@@ -18,6 +18,12 @@ export default function CaricoPage() {
   const [art, setArt] = useState(''); const [qta, setQta] = useState('')
   const [blocco, setBlocco] = useState(''); const [nota, setNota] = useState('')
   const [salvo, setSalvo] = useState(false)
+  // NUOVO ARTICOLO al volo: arriva merce che a catalogo non c'e' ancora, e chi sta al banco non
+  // puo' fermarsi ad aprire un'altra pagina. Si crea qui e resta subito selezionato.
+  const [nuovo, setNuovo] = useState(false)
+  const [nSku, setNSku] = useState(''); const [nProdotto, setNProdotto] = useState('')
+  const [nVariante, setNVariante] = useState(''); const [nPeso, setNPeso] = useState('')
+  const [creo, setCreo] = useState(false)
 
   useEffect(() => { fetch('/api/clienti/lista').then(r => r.json()).then(d => setClienti(Array.isArray(d) ? d : [])).catch(() => {}) }, [])
   function ricaricaCatalogo(id = cliente) {
@@ -29,6 +35,32 @@ export default function CaricoPage() {
     if (!cliente) { setBlocchi([]); return }
     fetch(`/api/logistica/blocchi?cliente_id=${cliente}&solo_occupati=1`).then(r => r.json()).then(d => setBlocchi(Array.isArray(d) ? d : [])).catch(() => {})
   }, [cliente])
+
+  async function creaArticolo() {
+    if (!cliente) { await dialog.alert({ title: 'Cliente mancante', message: 'Scegli prima di chi è la merce.' }); return }
+    if (!nSku.trim()) { await dialog.alert({ title: 'SKU mancante', message: 'Lo SKU serve: è il codice con cui l\u2019articolo viene riconosciuto negli ordini.' }); return }
+    setCreo(true)
+    // La variante si scrive libera ("rosso, S") e diventa attributi: chi sta al banco non deve
+    // ragionare per coppie chiave/valore.
+    const parti = nVariante.split(',').map(x => x.trim()).filter(Boolean)
+    const attributi: Record<string, string> = {}
+    parti.forEach((v, i) => { attributi[`variante${parti.length > 1 ? ' ' + (i + 1) : ''}`] = v })
+    const r = await fetch('/api/catalogo', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cliente_id: cliente, sku: nSku.trim(), nome: nProdotto.trim() || nSku.trim(),
+        prodotto: nProdotto.trim() || null, attributi: parti.length ? attributi : null, peso: nPeso || null }),
+    })
+    const d = await r.json().catch(() => ({})); setCreo(false)
+    if (!r.ok || d.error) { setMsg({ t: 'err', x: d.error || 'Errore' }); return }
+    setMsg({ t: 'ok', x: `Articolo ${nSku.trim()} creato` })
+    setNuovo(false); setNSku(''); setNProdotto(''); setNVariante(''); setNPeso('')
+    // Si ricarica e si seleziona quello appena creato, cosi' si puo' caricare subito.
+    const d2 = await fetch(`/api/catalogo?cliente_id=${cliente}`).then(x => x.json()).catch(() => null)
+    const lista = Array.isArray(d2?.articoli) ? d2.articoli : []
+    setCatalogo(lista)
+    const creato = lista.find((a: any) => String(a.sku).toUpperCase() === nSku.trim().toUpperCase())
+    if (creato) setArt(creato.id)
+  }
 
   async function carica() {
     const n = parseInt(qta, 10)
@@ -69,6 +101,27 @@ export default function CaricoPage() {
         </div>
         <div style={{ padding: '0 16px 16px' }}>
           <input value={nota} onChange={e => setNota(e.target.value)} placeholder="Nota (facoltativa): es. bolla 1234, arrivo del 5 agosto" style={inp} />
+          {cliente && !nuovo && (
+            <button onClick={() => setNuovo(true)} style={{ marginTop: '10px', background: '#fff', color: '#f97316', border: '1px dashed #fdba74', borderRadius: '6px', padding: '8px 14px', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}>
+              + L&apos;articolo non c&apos;è a catalogo
+            </button>
+          )}
+          {cliente && nuovo && (
+            <div style={{ marginTop: '12px', border: '1px solid #fed7aa', background: '#fff7ed', borderRadius: '8px', padding: '14px' }}>
+              <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#9a3412', marginBottom: '10px' }}>Nuovo articolo per questo cliente</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1.2fr 100px auto auto', gap: '8px', alignItems: 'end' }}>
+                <div><label style={lbl}>SKU</label><input value={nSku} onChange={e => setNSku(e.target.value)} placeholder="obbligatorio" style={inp} /></div>
+                <div><label style={lbl}>Prodotto</label><input value={nProdotto} onChange={e => setNProdotto(e.target.value)} placeholder="es. T-shirt logo" style={inp} /></div>
+                <div><label style={lbl}>Variante</label><input value={nVariante} onChange={e => setNVariante(e.target.value)} placeholder="rosso, S" style={inp} /></div>
+                <div><label style={lbl}>Peso (kg)</label><input type="number" step="0.001" value={nPeso} onChange={e => setNPeso(e.target.value)} style={inp} /></div>
+                <button onClick={creaArticolo} disabled={creo} style={{ ...btn, opacity: creo ? 0.6 : 1 }}>{creo ? 'Creo…' : 'Crea'}</button>
+                <button onClick={() => setNuovo(false)} style={{ background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '9px 14px', fontSize: '12.5px', cursor: 'pointer' }}>Annulla</button>
+              </div>
+              <div style={{ fontSize: '11.5px', color: '#9a3412', marginTop: '8px' }}>
+                Più varianti si separano con la virgola: <b>rosso, S</b>. Appena creato resta selezionato, così puoi caricarlo subito.
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

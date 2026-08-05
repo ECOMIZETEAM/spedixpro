@@ -33,10 +33,17 @@ export async function POST(req: NextRequest) {
   const rete = await sottoAlberoMasterIds(admin, u.master_id)
 
   // L'articolo dev'essere di un cliente della MIA rete: non basta conoscerne l'id.
+  //
+  // DUE LETTURE, NON UNA CON LA RELAZIONE INCORPORATA. Con `clienti!inner(master_id)` il dato
+  // arriva a volte come oggetto e a volte come elenco di uno, a seconda di come PostgREST decide di
+  // tipizzare la join: leggendolo come oggetto tornava undefined, e un carico legittimo veniva
+  // rifiutato con "Articolo non trovato nella tua rete" — successo davvero, al primo uso vero.
+  // Due query separate costano niente e non hanno forme ambigue.
   const { data: art } = await admin.from('articoli_cliente')
-    .select('id,cliente_id,sku,clienti!inner(master_id)').eq('id', articoloId).maybeSingle()
-  const masterDelCliente = (art as any)?.clienti?.master_id
-  if (!art || !masterDelCliente || !rete.includes(masterDelCliente)) {
+    .select('id,cliente_id,sku').eq('id', articoloId).maybeSingle()
+  if (!art) return NextResponse.json({ error: 'Articolo non trovato' }, { status: 404 })
+  const { data: cli } = await admin.from('clienti').select('master_id').eq('id', art.cliente_id).maybeSingle()
+  if (!cli?.master_id || !rete.includes(cli.master_id)) {
     return NextResponse.json({ error: 'Articolo non trovato nella tua rete' }, { status: 403 })
   }
 

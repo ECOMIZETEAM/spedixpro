@@ -50,7 +50,6 @@ const NAV: NavItem[] = [
   { label: 'Clienti', href: '/dashboard/clienti', icon: '⊙', sub: [
     { label: 'Nuovo Cliente', href: '/dashboard/clienti/nuovo', perm: 'admin.clients.create' },
     { label: 'Elenco Clienti', href: '/dashboard/clienti', perm: 'admin.clients.index' },
-    { label: 'Catalogo prodotti', href: '/dashboard/catalogo', perm: 'admin.clients.index' },
     { label: 'Nuovo Master', href: '/dashboard/clienti/master/nuovo', rete: true },
     { label: 'Elenco Master', href: '/dashboard/clienti/master', rete: true },
     { label: 'Gerarchia', href: '/dashboard/clienti/gerarchia', rete: true },
@@ -58,6 +57,9 @@ const NAV: NavItem[] = [
   // LOGISTICA CONTO TERZI: e' un servizio a se', non un dettaglio dell'anagrafica clienti — la
   // merce del cliente tenuta da noi, con il suo magazzino, il suo listino e i suoi addebiti.
   { label: 'Logistica', href: '/dashboard/logistica/carico', icon: '▤', sub: [
+    // Il catalogo sta QUI e non sotto Clienti: e' l'anagrafica del magazzino, e chi lavora in
+    // logistica lo cerca dove sta il resto del magazzino. Lasciandolo sotto Clienti non si trovava.
+    { label: 'Catalogo prodotti', href: '/dashboard/catalogo', perm: 'admin.clients.index' },
     { label: 'Carico merce', href: '/dashboard/logistica/carico', perm: 'admin.clients.index' },
     { label: 'Magazzino', href: '/dashboard/logistica/posti', perm: 'admin.clients.index' },
     { label: 'Listino logistica', href: '/dashboard/logistica/listino', perm: 'admin.clients.index' },
