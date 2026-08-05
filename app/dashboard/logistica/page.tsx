@@ -30,6 +30,12 @@ export default function LogisticaPage() {
   // ANTEPRIMA DELL'ADDEBITO: si guarda cosa verrebbe fatturato PRIMA che parta qualcosa.
   // E' una lettura, non muove un centesimo.
   const [anteprima, setAnteprima] = useState<any>(null)
+  const [antUscite, setAntUscite] = useState<any>(null)
+  // FASCE DELL'USCITA, per cliente. Compilarle ACCENDE il servizio per quel cliente; svuotarle lo
+  // spegne. Finche' nessuno le ha, il giro degli addebiti non guarda nessuno.
+  const [fCliente, setFCliente] = useState('')
+  const [fasce, setFasce] = useState<{ peso_max: string; prezzo: string }[]>([])
+  const [fSaving, setFSaving] = useState(false)
 
   // tipo di posto
   const [tNome, setTNome] = useState(''); const [tPrezzo, setTPrezzo] = useState('')
@@ -86,6 +92,29 @@ export default function LogisticaPage() {
     if (!r.ok || d.error) { setMsg({ t: 'err', x: d.error || 'Errore' }); return }
     setCQta(''); setCNota(''); setMsg({ t: 'ok', x: `Caricato. Adesso ne risultano ${d.quantita}` })
     fetch(`/api/catalogo?cliente_id=${cCliente}`).then(r => r.json()).then(d2 => setCCatalogo(Array.isArray(d2?.articoli) ? d2.articoli : [])).catch(() => {})
+  }
+
+  useEffect(() => {
+    setFasce([])
+    if (!fCliente) return
+    fetch(`/api/logistica/fasce?cliente_id=${fCliente}`).then(r=>r.json())
+      .then(d=>setFasce(Array.isArray(d)?d.map((x:any)=>({peso_max:String(x.peso_max),prezzo:String(x.prezzo)})):[])).catch(()=>{})
+  }, [fCliente])
+
+  async function salvaFasce() {
+    if (!fCliente) { await dialog.alert({ title: 'Cliente mancante', message: 'Scegli il cliente.' }); return }
+    setFSaving(true)
+    const r = await fetch('/api/logistica/fasce', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cliente_id: fCliente, fasce }) })
+    const d = await r.json().catch(() => ({})); setFSaving(false)
+    if (!r.ok || d.error) { setMsg({ t: 'err', x: d.error || 'Errore' }); return }
+    setMsg({ t: 'ok', x: d.attivo ? `Listino salvato: ${d.fasce} fasce. Il servizio uscite e ATTIVO per questo cliente.` : 'Listino svuotato: per questo cliente le uscite non si addebitano.' })
+  }
+  async function guardaUscite() {
+    setAntUscite(null)
+    const r = await fetch('/api/logistica/addebito-uscite?anteprima=1')
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok || d.error) { setMsg({ t: 'err', x: d.error || 'Errore' }); return }
+    setAntUscite(d)
   }
 
   async function guardaAnteprima() {
@@ -201,6 +230,49 @@ export default function LogisticaPage() {
               {!blocchi.length && <tr><td colSpan={6} style={{ padding: '26px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>Nessun posto ancora. Definisci i tipi qui sotto, poi assegnane uno a un cliente.</td></tr>}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* ── FASCE DELL'USCITA: accendono il servizio, cliente per cliente ── */}
+      <div style={card}>
+        <div style={{ ...cardH, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Costo dell&apos;uscita — fasce di peso</span>
+          <button onClick={guardaUscite} style={{ background: '#fff', color: '#f97316', border: '1px solid #fdba74', padding: '6px 12px', borderRadius: '6px', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}>Anteprima uscite</button>
+        </div>
+        <div style={{ padding: '14px 16px' }}>
+          <div style={{ fontSize: '12.5px', color: '#6b7280', marginBottom: '12px' }}>
+            Qui il peso conta, perché c&apos;è un pacco vero da pesare. <b>Compilare le fasce accende il servizio per quel cliente</b>: senza fasce non paga niente.
+          </div>
+          {antUscite && (
+            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '12px 14px', marginBottom: '12px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: '#92400e', marginBottom: '6px' }}>
+                {antUscite.da_addebitare} spedizioni da addebitare · {eur(antUscite.totale)} — clienti col servizio attivo: {antUscite.attivi}
+              </div>
+              {(antUscite.clienti || []).map((c: any, i: number) => (
+                <div key={i} style={{ fontSize: '12.5px', color: '#78350f' }}>{c.cliente}: {c.spedizioni} spedizioni · <b>{eur(c.importo)}</b></div>
+              ))}
+              {!antUscite.clienti?.length && <div style={{ fontSize: '12.5px', color: '#78350f' }}>Niente da addebitare.</div>}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'end', marginBottom: '12px' }}>
+            <div style={{ flex: 1 }}><label style={lbl}>Cliente</label>
+              <select value={fCliente} onChange={e => setFCliente(e.target.value)} style={inp}>
+                <option value="">— scegli —</option>
+                {clienti.map(c => <option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
+              </select></div>
+            <button onClick={() => setFasce(f => [...f, { peso_max: '', prezzo: '' }])} disabled={!fCliente} style={{ background: '#fff', color: '#f97316', border: '1px dashed #fdba74', borderRadius: '6px', padding: '8px 14px', fontSize: '12.5px', fontWeight: 600, cursor: fCliente ? 'pointer' : 'not-allowed', opacity: fCliente ? 1 : 0.5 }}>+ fascia</button>
+            <button onClick={salvaFasce} disabled={!fCliente || fSaving} style={{ ...btn, opacity: (!fCliente || fSaving) ? 0.5 : 1 }}>{fSaving ? 'Salvo…' : 'Salva listino'}</button>
+          </div>
+          {fCliente && fasce.map((f, i) => (
+            <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '6px' }}>
+              <span style={{ fontSize: '12.5px', color: '#6b7280', width: '54px' }}>fino a</span>
+              <input type="number" step="0.001" value={f.peso_max} onChange={e => setFasce(x => x.map((y, j) => j === i ? { ...y, peso_max: e.target.value } : y))} placeholder="kg" style={{ ...inp, width: '110px' }} />
+              <span style={{ fontSize: '12.5px', color: '#6b7280' }}>kg costa</span>
+              <input type="number" step="0.01" value={f.prezzo} onChange={e => setFasce(x => x.map((y, j) => j === i ? { ...y, prezzo: e.target.value } : y))} placeholder="€" style={{ ...inp, width: '110px' }} />
+              <button onClick={() => setFasce(x => x.filter((_, j) => j !== i))} style={{ background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '6px', cursor: 'pointer', padding: '6px 11px', fontSize: '13px' }}>×</button>
+            </div>
+          ))}
+          {fCliente && !fasce.length && <div style={{ fontSize: '12.5px', color: '#9ca3af' }}>Nessuna fascia: per questo cliente le uscite non si addebitano.</div>}
         </div>
       </div>
 
