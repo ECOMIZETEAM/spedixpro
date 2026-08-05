@@ -127,6 +127,15 @@ export async function archiviaLotto(admin: any, quante = 100): Promise<{
   esaminate: number; archiviate: number; saltate: number; fallite: number
 }> {
   const impronta = (b: Buffer) => createHash('sha1').update(b).digest('hex')
+  // QUESTA QUERY DIPENDE DA UN INDICE, e senza va in timeout.
+  // Cercare 'data:%' dentro una colonna di testo su una tabella da 4 GB significa leggersela tutta:
+  // al primo giro il lotto da 100 e' morto con "canceling statement due to statement timeout".
+  // In produzione c'e':
+  //   create index concurrently idx_spedizioni_da_archiviare on spedizioni (created_at)
+  //     where etichetta_path is null and etichetta_url like 'data:%';
+  // E' parziale, quindi pesa 520 kB e si RESTRINGE man mano che le righe vengono archiviate, fino a
+  // sparire da solo quando non ce n'e' piu' nessuna. Le tre condizioni qui sotto devono restare
+  // IDENTICHE al predicato dell'indice, altrimenti Postgres non lo usa e si torna al timeout.
   // Le piu' VECCHIE per prime: nessuno le sta stampando adesso.
   const { data: righe, error } = await admin
     .from('spedizioni').select('id,numero,etichetta_url,created_at')
