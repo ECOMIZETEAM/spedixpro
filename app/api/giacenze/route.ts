@@ -29,7 +29,11 @@ export async function GET(req: NextRequest) {
       ? await sottoAlberoMasterIds(adminDb, masterSel)
       : ['00000000-0000-0000-0000-000000000000']
     db = adminDb
-  } else if (utente?.master_id && !isAgente(utente) && utente?.ruolo !== 'cliente') {
+  // Elencare "cliente per cliente" i ruoli esclusi a mano (agente, cliente) lasciava dentro
+  // l'AUTISTA, che un master_id ce l'ha come tutti: con l'accesso pieno vedeva le giacenze
+  // dell'intera rete, prezzi e clienti compresi. La regola sta in lib/perimetro.ts, dove e' una
+  // sola e non si dimentica un ruolo per volta.
+  } else if (vedeLaRete(utente)) {
     // MASTER: le giacenze risalgono a TUTTA la rete (come Elenco Spedizioni/volumetria), non solo
     // le proprie: prima si vedeva solo master_id === il mio, quindi le giacenze dei sotto-master
     // (es. Ecomize LL) non comparivano.
@@ -73,6 +77,20 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
+
+  // LE GIACENZE DELLA RETE LE GESTISCE CHI LA RETE LA VEDE.
+  // Il controllo piu' sotto e' "la spedizione sta nel sotto-albero del MIO master": corretto per un
+  // master, rovinoso per un cliente — che un master_id ce l'ha anche lui, tutti e 634. E siccome
+  // questa rotta legge e scrive con l'accesso pieno, le regole per-inquilino non lo fermavano: un
+  // cliente qualsiasi poteva svincolare o chiudere la giacenza di QUALUNQUE spedizione della rete
+  // del suo master — non solo le proprie — facendo partire la chiamata al corriere e l'addebito su
+  // tutta la catena. Il cliente la sua giacenza la CHIEDE, da /api/giacenze/[id]: e' li' che il
+  // master la conferma.
+  // Il portale cliente questa rotta non la chiama affatto: la usa solo la dashboard del master.
+  if (!vedeLaRete(utente)) {
+    return NextResponse.json({ error: 'Operazione riservata al master.' }, { status: 403 })
+  }
+
   const body = await req.json()
   const { spedizioneId, istruzioni, azione } = body
 

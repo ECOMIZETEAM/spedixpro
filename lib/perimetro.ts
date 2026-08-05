@@ -8,7 +8,12 @@
 //
 // Non e' una svista di una rotta sola: lo stesso pezzo era copiato in sei posti. Quindi la regola
 // sta qui, una volta, e le rotte la chiamano. Chi la scrive di nuovo a mano sbagliera' di nuovo.
-export function vedeLaRete(utente: any): boolean {
+// Il tipo di ritorno non e' `boolean` ma una GARANZIA: chi supera questo controllo ha un
+// master_id, e da qui in poi il compilatore lo sa. Serve a qualcosa di concreto — nelle rotte
+// il passo successivo e' sempre `utente.master_id`, e senza la garanzia si finiva col mettere un
+// punto interrogativo o un punto esclamativo a caso pur di far compilare, che e' esattamente il
+// gesto con cui un controllo di perimetro si annacqua.
+export function vedeLaRete(utente: any): utente is { master_id: string; ruolo?: string } {
   const ruolo = String(utente?.ruolo || '').toLowerCase()
   if (!utente?.master_id) return false
   // Il cliente vede se stesso. L'agente vede i propri clienti, mai la rete: e' un rivenditore,
