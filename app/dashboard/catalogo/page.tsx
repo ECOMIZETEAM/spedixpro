@@ -125,7 +125,6 @@ export default function CatalogoPage() {
         nome: `${prodotto} ${r.valori.join(' ')}`.trim(),
         prodotto, attributi,
         ...(r.peso ? { peso: r.peso } : {}),
-        ...(r.prezzo ? { prezzo: r.prezzo } : {}),
       }
     })
     const r = await fetch('/api/catalogo', {

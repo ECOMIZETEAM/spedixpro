@@ -85,7 +85,7 @@ export default function ArticoliCliente() {
       const attributi: Record<string, string> = {}
       opzioni.forEach((o, i) => { if (r.valori[i]) attributi[o.nome] = r.valori[i] })
       return { sku: r.sku.trim(), nome: `${prodotto} ${r.valori.join(' ')}`.trim(), prodotto, attributi,
-        ...(r.peso ? { peso: r.peso } : {}), ...(r.prezzo ? { prezzo: r.prezzo } : {}) }
+        ...(r.peso ? { peso: r.peso } : {}) }
     })
     // /api/catalogo accetta anche i CLIENTI (usa il proprio cliente_id) e crea tutto in un colpo:
     // dodici chiamate separate sarebbero dodici occasioni di restare a meta'.

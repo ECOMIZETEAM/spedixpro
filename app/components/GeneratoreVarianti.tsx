@@ -12,7 +12,7 @@ import { useMemo, useState } from 'react'
 // Il modello dei dati NON cambia: ogni combinazione resta UNA RIGA CON IL SUO SKU, che e' quello
 // che fa combaciare gli ordini di Shopify e Amazon e che tiene la giacenza separata.
 
-export type RigaVariante = { sku: string; valori: string[]; peso: string; prezzo: string }
+export type RigaVariante = { sku: string; valori: string[]; peso: string }
 export type Opzione = { nome: string; valori: string[] }
 
 const inp: any = { width: '100%', padding: '8px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box' }
@@ -60,7 +60,7 @@ export default function GeneratoreVarianti({ prodotto, onSalva, salvataggio }: {
     const perChiave = new Map((righe || []).map(r => [r.valori.join('|'), r]))
     setRighe(combinazioni.map(valori => {
       const gia = perChiave.get(valori.join('|'))
-      return gia || { sku: skuSuggerito(prodotto, valori), valori, peso: pesoTutte, prezzo: '' }
+      return gia || { sku: skuSuggerito(prodotto, valori), valori, peso: pesoTutte }
     }))
   }
 
@@ -122,7 +122,6 @@ export default function GeneratoreVarianti({ prodotto, onSalva, salvataggio }: {
                 <th style={{ textAlign: 'left', padding: '8px 12px', fontSize: '11px', color: '#666', fontWeight: 700 }}>VARIANTE</th>
                 <th style={{ textAlign: 'left', padding: '8px 12px', fontSize: '11px', color: '#666', fontWeight: 700 }}>SKU *</th>
                 <th style={{ textAlign: 'left', padding: '8px 12px', fontSize: '11px', color: '#666', fontWeight: 700, width: '110px' }}>PESO (KG)</th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', fontSize: '11px', color: '#666', fontWeight: 700, width: '110px' }}>PREZZO €</th>
                 <th style={{ width: '40px' }}></th>
               </tr></thead>
               <tbody>
@@ -137,9 +136,6 @@ export default function GeneratoreVarianti({ prodotto, onSalva, salvataggio }: {
                       </td>
                       <td style={{ padding: '6px 12px' }}>
                         <input value={r.peso} onChange={e => setRighe(x => (x || []).map((y, j) => j === i ? { ...y, peso: e.target.value } : y))} inputMode="decimal" style={{ ...inp, padding: '6px 9px' }} />
-                      </td>
-                      <td style={{ padding: '6px 12px' }}>
-                        <input value={r.prezzo} onChange={e => setRighe(x => (x || []).map((y, j) => j === i ? { ...y, prezzo: e.target.value } : y))} inputMode="decimal" style={{ ...inp, padding: '6px 9px' }} />
                       </td>
                       <td style={{ padding: '6px 8px' }}>
                         {/* Non tutte le combinazioni esistono davvero: la rossa in L puo' non essere
@@ -162,6 +158,13 @@ export default function GeneratoreVarianti({ prodotto, onSalva, salvataggio }: {
             </div>
           )}
 
+          {/* UN TASTO SPENTO CHE NON DICE PERCHE' e' peggio di un errore: uno preme, non succede
+              niente, e non sa cosa gli manca. Qui il motivo si legge accanto al tasto. */}
+          {!prodotto.trim() && (
+            <div style={{ marginTop: '12px', fontSize: '12.5px', color: '#b45309' }}>
+              Manca il <b>nome del prodotto</b> qui sopra: serve anche a comporre gli SKU suggeriti.
+            </div>
+          )}
           <div style={{ marginTop: '14px' }}>
             <button type="button" disabled={!!salvataggio || !righe.length || !!duplicati.size || senzaSku || !prodotto.trim()}
               onClick={() => onSalva(prodotto.trim(), opzioniPulite, righe)}
