@@ -259,6 +259,22 @@ export default function OrdiniPage() {
           })
         }).then(r=>r.json()).catch(()=>null)
         if (!creaRes || creaRes.error) { errori.push(num+': '+(creaRes?.error||'errore creazione')); continue }
+        // SCARICO DAL MAGAZZINO, in automatico. Qui non serve una tendina come nelle pagine di
+        // spedizione a mano: l'ordine SA GIA' cosa contiene — SKU e quantita' arrivano da Shopify o
+        // da Amazon — e lo SKU e' gia' quello con cui si agganciano peso e misure dal catalogo.
+        // Chi non ha quello SKU a catalogo semplicemente non scarica niente: nessun danno.
+        // Se fallisce non si blocca l'ordine: la spedizione c'e' e il magazzino si corregge.
+        const righeMagazzino = arts
+          .map((a:any)=>({ art: skuToArt.get(String(a.sku||'').trim().toLowerCase()), q: Math.max(1, parseInt(String(a.quantita))||1) }))
+          .filter((r:any)=>r.art?.id)
+          .map((r:any)=>({ articolo_id: r.art.id, quantita: r.q }))
+        if (righeMagazzino.length && creaRes.spedizioneId) {
+          await fetch('/api/spedizioni/articoli', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ spedizione_id: creaRes.spedizioneId, articoli: righeMagazzino })
+          }).catch(()=>{})
+        }
+
         await fetch('/api/ordini/segna-spedito', {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ ordine_id:id, spedizione_id:creaRes.spedizioneId||null })
