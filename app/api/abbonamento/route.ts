@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { registraMovimentoMaster } from '@/lib/movimenti'
 import { PIANI_ENTERPRISE, pianoById, meseCorrente } from '@/lib/piani'
 import { stripeConfigurato, IVA_PERCENTUALE } from '@/lib/stripe'
 import { descriviCambio, primoDelMeseProssimo } from '@/lib/abbonamento-cambi'
@@ -202,7 +201,14 @@ export async function POST(req: NextRequest) {
   //
   // Restano fuori dalla regola solo chi non paga per davvero: il master principale (e' la
   // piattaforma) e i master esenti, per cui l'importo e' zero e non c'e' niente da incassare.
-  if (stripeConfigurato() && !isRoot && !(m as any)?.abbonamento_esente) {
+  // La regola NON dipende piu' da stripeConfigurato(). Prima si', e voleva dire che il giorno in
+  // cui quella variabile d'ambiente fosse mancata — un ambiente nuovo, una chiave scaduta, una
+  // svista — la strada vecchia si sarebbe riaperta da sola e avrebbe ricominciato a mangiare il
+  // credito delle spedizioni, in silenzio. E' successo davvero fino al 30 luglio: quattro master
+  // portano ancora addosso il canone scalato dal credito, e tre di loro sono fermi a -139,00 tondi,
+  // cioe' esattamente il canone, senza aver mai spedito un pacco.
+  // Chi paga, paga con carta. Senza carta non si attiva: non esiste piu' un ripiego.
+  if (!isRoot && !(m as any)?.abbonamento_esente) {
     return NextResponse.json({ error: 'Il canone si paga con carta: scegli il piano e completa il pagamento.' }, { status: 400 })
   }
 
@@ -215,33 +221,17 @@ export async function POST(req: NextRequest) {
   // - primo abbonamento / mese nuovo non ancora addebitato: canone pieno
   // - upgrade nello stesso mese: solo la differenza
   // - downgrade nello stesso mese: 0 (il canone più alto è già pagato)
-  let importo = nuovo.prezzo
-  if (haPianoQuestoMese) importo = nuovo.prezzo > prezzoAttuale ? (nuovo.prezzo - prezzoAttuale) : 0
-  if (isRoot || (m as any)?.abbonamento_esente) importo = 0 // root e master ESENTI (gratis su tutti i piani)
-
-  if (importo > 0) {
-    try {
-      // addebito al master che paga
-      await registraMovimentoMaster(admin, {
-        masterOwnerId: payer, masterTargetId: payer,
-        tipo: 'abbonamento', descrizione: `Abbonamento ${nuovo.nome}`,
-        importo: -Math.abs(importo), createdBy: user.id,
-      })
-      // ACCREDITO al superroot (M1) — NON a cascata sugli intermedi
-      await registraMovimentoMaster(admin, {
-        masterOwnerId: rootId, masterTargetId: rootId,
-        tipo: 'abbonamento_incasso', descrizione: `Abbonamento ${nuovo.nome} da ${m?.nome || 'master'}`,
-        importo: Math.abs(importo), createdBy: user.id,
-      })
-      // registro il pagamento da incassare (il root lo segnerà "pagato" quando arriva il bonifico)
-      await admin.from('abbonamenti_pagamenti').insert({
-        master_id: payer, root_id: rootId, piano: nuovo.id, mese, importo, pagato: false,
-      })
-    } catch (e) {
-      console.error('Errore addebito/accredito abbonamento:', e)
-      return NextResponse.json({ error: 'Errore nell\'addebito del piano' }, { status: 500 })
-    }
-  }
+  // Qui ci arrivano SOLO il root e i master esenti, per cui il canone e' zero: chi paga e' stato
+  // rimandato alla carta qui sopra. Quindi non c'e' piu' niente da addebitare, e soprattutto non
+  // c'e' piu' il codice per farlo.
+  //
+  // C'era: scalava il canone dal credito delle SPEDIZIONI e lo accreditava al root. E' il motivo
+  // per cui un master a credito scalare, appena abbonato, si ritrovava a -139,00 e non poteva
+  // spedire il primo pacco finche' non ricaricava il canone. Averlo lasciato spento dietro a un
+  // controllo sulla configurazione non bastava: il codice che sa muovere soldi, se resta scritto,
+  // prima o poi qualcuno lo riaccende.
+  // Le voci gia' registrate restano dove sono: lo storico non si cancella.
+  const importo = 0
 
   // DOWNGRADE: non si applica adesso. Il mese in corso e' pagato al prezzo alto, e abbassare il
   // limite subito significherebbe togliere qualcosa di gia' pagato — e magari bloccare una rete che
