@@ -104,7 +104,56 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  // Sorgente etichetta: prima etichetta_url, poi primo collo con etichetta
+  // MULTICOLLO: LE ETICHETTE DEI COLLI SI UNISCONO, NON SE NE PRENDE UNA.
+  //
+  // Qui si leggeva UNA sorgente sola — l'etichetta della spedizione, oppure quella del PRIMO collo
+  // — e su un multicollo dove ogni collo ha la sua lettera di vettura ne usciva una sola. Il
+  // secondo pacco sarebbe partito senza etichetta, o peggio con quella del primo: due colli con lo
+  // stesso numero non si distinguono piu' in deposito.
+  // Successo davvero su 3UW1WLJ009719, due colli con due numeri diversi.
+  //
+  // I DOPPIONI SI RICONOSCONO DAI BYTE, non dalla stringa. Alcuni contratti non mandano
+  // un'etichetta per collo: mandano UN PDF che di pagine ne ha gia' N, e la creazione lo copia
+  // identico su ogni collo. Impilarlo N volte darebbe N x N pagine — e' il guasto dei 169 fogli,
+  // gia' pagato nella stampa massiva. Confrontando i byte, quel caso resta una copia sola.
+  let unito: Buffer | null = null
+  if (Array.isArray(sped.colli_dettaglio) && sped.colli_dettaglio.length > 1) {
+    const { scomponiDataUrl } = await import('@/lib/etichette')
+    const { createHash } = await import('node:crypto')
+    const viste = new Set<string>()
+    const pezzi: Buffer[] = []
+    for (const c of (sped.colli_dettaglio as any[])) {
+      const d = scomponiDataUrl(c?.etichetta_url)
+      if (!d?.buffer?.length) continue
+      const impronta = createHash('sha1').update(d.buffer).digest('hex')
+      if (viste.has(impronta)) continue
+      viste.add(impronta); pezzi.push(d.buffer)
+    }
+    if (pezzi.length > 1) {
+      try {
+        const out = await PDFDocument.create()
+        for (const b of pezzi) {
+          const pdf = await PDFDocument.load(new Uint8Array(b))
+          const pagine = await out.copyPages(pdf, pdf.getPageIndices())
+          pagine.forEach(pg => out.addPage(pg))
+        }
+        unito = Buffer.from(await out.save())
+      } catch (e) {
+        // Se l'unione non riesce non si resta senza niente: si prosegue con la strada di sempre.
+        console.error('[ETICHETTA] unione colli fallita', sped.numero, e)
+      }
+    }
+  }
+  if (unito) {
+    const outBuf = await conRiepilogo(unito)
+    return new NextResponse(new Uint8Array(outBuf), { status: 200, headers: {
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="etichette-${sped.numero || id}.pdf"`,
+      'Cache-Control': 'private, max-age=0, no-store',
+    } })
+  }
+
+  // Un collo solo (o etichette tutte identiche): prima quella della spedizione, poi quella del collo.
   let src: string | null = sped.etichetta_url || null
   if (!src && Array.isArray(sped.colli_dettaglio)) {
     src = (sped.colli_dettaglio as any[]).find(c => c?.etichetta_url)?.etichetta_url || null
