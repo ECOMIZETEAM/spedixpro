@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
+import GeneratoreVarianti, { type Opzione, type RigaVariante } from '@/app/components/GeneratoreVarianti'
 
 const inpS: any = { width: '100%', padding: '8px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box' }
 
@@ -22,6 +23,10 @@ export default function ArticoliCliente() {
   const [giacTipo, setGiacTipo] = useState<'carico' | 'inventario'>('carico')
   const [giacQta, setGiacQta] = useState(''); const [giacNota, setGiacNota] = useState('')
   const [giacSaving, setGiacSaving] = useState(false)
+  // Un solo punto d'ingresso: "Aggiungi" apre il modulo, e le varianti sono un'opzione DENTRO.
+  // Due tasti separati costringono a decidere prima di cominciare quale dei due e' il proprio caso.
+  const [conVarianti, setConVarianti] = useState(false)
+  const [creoVar, setCreoVar] = useState(false)
   const [saving, setSaving] = useState(false)
   const [importing, setImporting] = useState(false)
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
@@ -58,6 +63,7 @@ export default function ArticoliCliente() {
       setEdit(null); setSku(''); setNome(''); setAsin(''); setPeso(''); setLung(''); setLarg(''); setAlt('')
       setProdotto(''); setAttrs([])
     }
+    setConVarianti(false)
     setModal(true)
   }
   async function salva() {
@@ -73,6 +79,22 @@ export default function ArticoliCliente() {
     if (d.error) { await dialog.alert({ title: 'Errore', message: d.error }); return }
     setModal(false); carica()
   }
+  async function salvaVarianti(prodotto: string, opzioni: Opzione[], righe: RigaVariante[]) {
+    setCreoVar(true)
+    const lista = righe.map(r => {
+      const attributi: Record<string, string> = {}
+      opzioni.forEach((o, i) => { if (r.valori[i]) attributi[o.nome] = r.valori[i] })
+      return { sku: r.sku.trim(), nome: `${prodotto} ${r.valori.join(' ')}`.trim(), prodotto, attributi,
+        ...(r.peso ? { peso: r.peso } : {}), ...(r.prezzo ? { prezzo: r.prezzo } : {}) }
+    })
+    // /api/catalogo accetta anche i CLIENTI (usa il proprio cliente_id) e crea tutto in un colpo:
+    // dodici chiamate separate sarebbero dodici occasioni di restare a meta'.
+    const res = await fetch('/api/catalogo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ articoli: lista }) })
+    const d = await res.json().catch(() => ({})); setCreoVar(false)
+    if (!res.ok || d?.error) { await dialog.alert({ title: 'Errore', message: d?.error || 'Non riuscito' }); return }
+    setModal(false); setConVarianti(false); setMsg({ t: 'ok', x: `${lista.length} varianti create` }); carica()
+  }
+
   async function salvaGiacenza() {
     const n = parseInt(giacQta, 10)
     if (!isFinite(n)) { await dialog.alert({ title: 'Quantita mancante', message: 'Scrivi quanti pezzi.' }); return }
@@ -240,8 +262,26 @@ export default function ArticoliCliente() {
 
       {modal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setModal(false)}>
-          <div style={{ background: '#fff', borderRadius: '10px', padding: '24px', width: '440px', maxWidth: '90%' }} onClick={e => e.stopPropagation()}>
+          <div style={{ background: '#fff', borderRadius: '10px', padding: '24px', width: conVarianti && !edit ? '860px' : '440px', maxWidth: '94%', maxHeight: '88vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
             <h2 style={{ fontSize: '17px', fontWeight: '700', color: '#1a1a1a', margin: '0 0 16px' }}>{edit ? 'Modifica articolo' : 'Aggiungi articolo'}</h2>
+            {!edit && (
+              <div style={{ marginBottom: '12px', padding: '10px 12px', background: '#fafafa', border: '1px solid #eee', borderRadius: '6px' }}>
+                <label style={{ display: 'flex', gap: '8px', alignItems: 'center', cursor: 'pointer', fontSize: '13px', color: '#1a1a1a' }}>
+                  <input type="checkbox" checked={conVarianti} onChange={e => setConVarianti(e.target.checked)} />
+                  <span>Questo prodotto ha <b>più varianti</b> (colore, taglia, gusto…)</span>
+                </label>
+              </div>
+            )}
+
+            {conVarianti && !edit ? (
+              <div>
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={lbl}>Nome del prodotto</label>
+                  <input value={prodotto} onChange={e => setProdotto(e.target.value)} placeholder="es. T-shirt logo" style={inpS} />
+                </div>
+                <GeneratoreVarianti prodotto={prodotto} onSalva={salvaVarianti} salvataggio={creoVar} />
+              </div>
+            ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div><label style={lbl}>SKU</label><input value={sku} onChange={e => setSku(e.target.value)} disabled={!!edit} style={inpS} /></div>
               <div><label style={lbl}>Nome <span style={{ fontWeight: 400, color: '#999' }}>(opzionale)</span></label><input value={nome} onChange={e => setNome(e.target.value)} style={inpS} /></div>
@@ -270,9 +310,10 @@ export default function ArticoliCliente() {
               </div>
               <div style={{ fontSize: '11px', color: '#999' }}>Le misure sono opzionali: se le lasci vuote, in spedizione vengono usate quelle del pacco.</div>
             </div>
+            )}
             <div style={{ display: 'flex', gap: '10px', marginTop: '20px', justifyContent: 'flex-end' }}>
               <button onClick={() => setModal(false)} style={{ padding: '9px 18px', border: '1px solid #d1d5db', borderRadius: '6px', background: '#fff', cursor: 'pointer', fontSize: '13px', color: '#1a1a1a' }}>Annulla</button>
-              <button onClick={salva} disabled={saving} style={{ padding: '9px 18px', border: 'none', borderRadius: '6px', background: '#f97316', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: '600', opacity: saving ? 0.6 : 1 }}>{saving ? 'Salvataggio…' : 'Salva'}</button>
+              {!(conVarianti && !edit) && <button onClick={salva} disabled={saving} style={{ padding: '9px 18px', border: 'none', borderRadius: '6px', background: '#f97316', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: '600', opacity: saving ? 0.6 : 1 }}>{saving ? 'Salvataggio…' : 'Salva'}</button>}
             </div>
           </div>
         </div>

@@ -34,11 +34,13 @@ function combina(opzioni: Opzione[]): string[][] {
   }, [[]])
 }
 
-export default function GeneratoreVarianti({ onSalva, salvataggio }: {
+// Il NOME DEL PRODOTTO arriva da fuori e non e' un campo di questo componente: nel modulo unico
+// e' gia' il campo "Nome" in cima, e chiederlo due volte confonderebbe — quale dei due vale?
+export default function GeneratoreVarianti({ prodotto, onSalva, salvataggio }: {
+  prodotto: string
   onSalva: (prodotto: string, opzioni: Opzione[], righe: RigaVariante[]) => void
   salvataggio?: boolean
 }) {
-  const [prodotto, setProdotto] = useState('')
   const [opzioni, setOpzioni] = useState<Opzione[]>([{ nome: '', valori: [] }])
   const [testoValori, setTestoValori] = useState<string[]>([''])
   const [righe, setRighe] = useState<RigaVariante[] | null>(null)
@@ -72,14 +74,7 @@ export default function GeneratoreVarianti({ onSalva, salvataggio }: {
 
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '10px' }}>
-        <div>
-          <label style={lbl}>Nome del prodotto</label>
-          <input value={prodotto} onChange={e => setProdotto(e.target.value)} placeholder="es. T-shirt logo" style={inp} />
-        </div>
-      </div>
-
-      <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#666', margin: '16px 0 8px', textTransform: 'uppercase' }}>Opzioni</div>
+      <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#666', margin: '4px 0 8px', textTransform: 'uppercase' }}>Opzioni</div>
       {opzioni.map((o, i) => (
         <div key={i} style={{ display: 'grid', gridTemplateColumns: '190px 1fr auto', gap: '8px', marginBottom: '8px', alignItems: 'end' }}>
           <div>

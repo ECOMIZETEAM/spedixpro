@@ -249,10 +249,6 @@ export default function CatalogoPage() {
             onKeyDown={e => { if (e.key === 'Enter') carica(clienteId, cerca) }}
             placeholder="SKU, nome o codice a barre" disabled={nessunCliente} style={{ ...inp, width: '100%' }} />
         </div>
-        <button onClick={() => { setVarianti(true); setForm(null); setMsg(null) }} disabled={nessunCliente}
-          style={{ background: '#111827', color: '#fff', border: 'none', borderRadius: '6px', padding: '9px 16px', fontSize: '13px', fontWeight: 700, cursor: nessunCliente ? 'not-allowed' : 'pointer', opacity: nessunCliente ? 0.5 : 1, whiteSpace: 'nowrap' }}>
-          Prodotto con varianti
-        </button>
         <button onClick={() => { setForm({ sku: '', nome: '', _variante: '', _varianteOrig: '' }); setVarianti(false) }} disabled={nessunCliente}
           style={{ background: nessunCliente ? '#ccc' : ACCENT, color: '#fff', border: 'none', borderRadius: '6px', padding: '9px 16px', fontSize: '13px', fontWeight: 700, cursor: nessunCliente ? 'default' : 'pointer' }}>
           Nuovo articolo
@@ -296,29 +292,41 @@ export default function CatalogoPage() {
         </div>
       )}
 
-      {varianti && (
-        <div style={{ ...card, padding: '16px', marginBottom: '14px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>Nuovo prodotto con varianti</div>
-            <button onClick={() => setVarianti(false)} style={{ background: '#fff', color: '#555', border: '1px solid #d5d5d5', borderRadius: '6px', padding: '7px 14px', fontSize: '12.5px', cursor: 'pointer' }}>Chiudi</button>
-          </div>
-          <GeneratoreVarianti onSalva={salvaVarianti} salvataggio={creoVar} />
-        </div>
-      )}
-
       {form && (
         <div style={{ ...card, padding: '16px', marginBottom: '14px' }}>
           <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a', marginBottom: '12px' }}>
             {form.id ? `Modifica ${form.sku}` : 'Nuovo articolo'}
           </div>
+          {/* Il NOME resta sempre visibile: con le varianti diventa il nome del prodotto. */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '10px' }}>
-            {([['sku', 'SKU *'], ['nome', 'Nome'], ['ean13', 'EAN13'], ['asin', 'ASIN'], ['prezzo', 'Prezzo €']] as const).map(([k, l]) => (
+            {(((varianti && !form.id) ? [['nome', 'Nome del prodotto']] : [['sku', 'SKU *'], ['nome', 'Nome'], ['ean13', 'EAN13'], ['asin', 'ASIN'], ['prezzo', 'Prezzo €']]) as any[]).map(([k, l]: any) => (
               <div key={k}>
                 <label style={{ display: 'block', fontSize: '11.5px', color: '#666', marginBottom: '4px' }}>{l}</label>
                 <input value={form[k] ?? ''} onChange={e => setForm({ ...form, [k]: e.target.value })} style={{ ...inp, width: '100%' }} />
               </div>
             ))}
           </div>
+          {/* UN SOLO PUNTO DI INGRESSO. Prima c'erano due tasti — "Nuovo articolo" e "Prodotto con
+              varianti" — e uno doveva decidere PRIMA di cominciare quale dei due era il suo caso.
+              Shopify ha un tasto solo e le varianti sono un'opzione dentro, che e' come uno ci
+              pensa: "creo un prodotto... ah, e ne ho di tre colori". */}
+          {!form.id && (
+            <div style={{ margin: '14px 0 4px', padding: '10px 12px', background: '#fafafa', border: '1px solid #eee', borderRadius: '6px' }}>
+              <label style={{ display: 'flex', gap: '8px', alignItems: 'center', cursor: 'pointer', fontSize: '13px', color: '#1a1a1a' }}>
+                <input type="checkbox" checked={varianti} onChange={e => setVarianti(e.target.checked)} />
+                <span>Questo prodotto ha <b>più varianti</b> (colore, taglia, gusto…)</span>
+              </label>
+              {varianti && <div style={{ fontSize: '11.5px', color: '#666', marginTop: '6px', marginLeft: '24px' }}>
+                Definisci le opzioni qui sotto: le combinazioni escono da sole, una per riga, ognuna col suo SKU e la sua giacenza.
+              </div>}
+            </div>
+          )}
+
+          {varianti && !form.id ? (
+            <div style={{ marginTop: '10px' }}>
+              <GeneratoreVarianti prodotto={form.nome || ''} onSalva={salvaVarianti} salvataggio={creoVar} />
+            </div>
+          ) : (<>
           <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#666', margin: '14px 0 8px', textTransform: 'uppercase' }}>Prodotto e variante</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: '10px' }}>
             <div>
@@ -351,8 +359,9 @@ export default function CatalogoPage() {
               </div>
             ))}
           </div>
+          </>)}
           <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
-            <button onClick={salva} style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '6px', padding: '9px 16px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Salva</button>
+            {!(varianti && !form.id) && <button onClick={salva} style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '6px', padding: '9px 16px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Salva</button>}
             <button onClick={() => { setForm(null); setMsg(null) }} style={{ background: '#fff', color: '#555', border: '1px solid #d5d5d5', borderRadius: '6px', padding: '9px 16px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>Annulla</button>
           </div>
         </div>
