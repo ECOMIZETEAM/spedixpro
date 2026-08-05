@@ -38,6 +38,13 @@ export async function GET() {
   // Quanto ha spedito questo mese e quale pacchetto gli servirebbe: un avviso che dice "guarda che
   // cambia qualcosa" senza dire cosa cambia PER TE non serve a niente.
   const { data: stato } = await admin.rpc('fn_stato_api_cliente', { p_cliente: clienteId })
+
+  // A CHI NON PAGA NON SI ANNUNCIA UN PREZZO.
+  // I pacchetti riguardano solo chi rivende le spedizioni fuori dal portale. Per tutti gli altri le
+  // API sono comprese: annunciargli un listino che non li tocca vuol dire farli telefonare in
+  // assistenza per chiedere se devono pagare — e la risposta e' no.
+  if ((stato as any)?.esente) return NextResponse.json({ avviso: null })
+
   const { data: piani } = await admin.from('piani_api').select('codice,nome,limite,prezzo').eq('attivo', true).order('ordine')
   return NextResponse.json({ avviso: AVVISO_API, stato: stato || null, piani: piani || [] })
 }

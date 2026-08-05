@@ -11,11 +11,19 @@ export async function GET(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
 
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const admin = createAdminSupabase()
   // Gate super master: solo chi ha is_super_master può vedere il registro.
+  //
+  // IL RUOLO VA GUARDATO INSIEME AL MASTER. `master_id` e' l'appartenenza al tenant, non un
+  // permesso: sotto MoovExpress ci sono anche utenti con ruolo 'cliente' (l'app Shopify pubblica ne
+  // crea uno per ogni negozio che la installa). Senza questa riga, ognuno di loro avrebbe letto il
+  // registro delle modifiche ai listini di tutta la piattaforma.
+  if (!['master', 'admin'].includes(String(utente.ruolo || '').toLowerCase())) {
+    return NextResponse.json({ error: 'Sezione riservata al super master' }, { status: 403 })
+  }
   const { data: m } = await admin.from('masters').select('is_super_master').eq('id', utente.master_id).single()
   if (!m?.is_super_master) return NextResponse.json({ error: 'Sezione riservata al super master' }, { status: 403 })
 

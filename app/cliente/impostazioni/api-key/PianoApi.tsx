@@ -52,9 +52,49 @@ export default function PianoApi() {
 
   const s = d.stato || {}
   const usate = Number(s.usate || 0), limite = Number(s.limite || 0)
+
+  // I MESI PRECEDENTI SI RICONOSCONO DAL MESE, NON DALLA POSIZIONE.
+  // Prima si scartava semplicemente la prima riga, dando per scontato che fosse il mese in corso.
+  // Ma quella riga nasce con la prima chiamata API del mese: chi non ne ha ancora fatte non ce
+  // l'ha, e allora la riga scartata era l'ultimo mese vero — che spariva dall'elenco.
+  const meseCorrente = new Date().toISOString().slice(0, 7)
+  const mesiPrecedenti = (d.storico || []).filter((x: any) => x.mese !== meseCorrente).slice(0, 3)
+
+  // CHI NON PAGA NON DEVE VEDERE UN NEGOZIO.
+  //
+  // Le API le paga solo chi rivende le spedizioni fuori dal portale; per tutti gli altri sono
+  // comprese, e per loro questa sezione era una vetrina di pacchetti con un allarme rosso sopra —
+  // "pacchetto esaurito, le API sono ferme" — mentre le API funzionavano benissimo. Un avviso che
+  // annuncia un blocco che non arrivera' mai fa telefonare in assistenza chi non aveva problemi.
+  if (s.esente) {
+    return (
+      <div style={{ marginTop: '26px' }}>
+        <div style={{ fontSize: '15px', fontWeight: 700, color: '#1a1a1a', marginBottom: '4px' }}>Uso delle API</div>
+        <div style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '10px', padding: '16px' }}>
+          <div>
+            <span style={{ fontSize: '26px', fontWeight: 800, color: '#1a1a1a' }}>{usate.toLocaleString('it-IT')}</span>
+            <span style={{ fontSize: '14px', color: '#666' }}> spedizioni create via API questo mese</span>
+          </div>
+          <div style={{ fontSize: '13px', color: '#15803d', marginTop: '8px', fontWeight: 600 }}>
+            Comprese nel tuo servizio: nessun limite e nessun costo aggiuntivo.
+          </div>
+        </div>
+        {mesiPrecedenti.length > 0 && (
+          <div style={{ marginTop: '12px', fontSize: '12.5px', color: '#8a8a8a' }}>
+            Mesi precedenti: {mesiPrecedenti.map((x: any) => `${x.mese} → ${x.n}`).join(' · ')}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   const pieno = limite > 0 ? Math.min(100, Math.round((usate / limite) * 100)) : 0
   const oltre = !!s.oltre_limite
-  const colore = oltre ? '#dc2626' : pieno >= 80 ? '#d97706' : '#16a34a'
+  const bloccato = !!s.bloccato
+  const siFerma = s.si_ferma_il
+    ? new Date(s.si_ferma_il).toLocaleDateString('it-IT', { day: 'numeric', month: 'long' })
+    : ''
+  const colore = bloccato ? '#dc2626' : oltre ? '#d97706' : pieno >= 80 ? '#d97706' : '#16a34a'
 
   return (
     <div style={{ marginTop: '26px' }}>
@@ -86,17 +126,27 @@ export default function PianoApi() {
         <div style={{ height: '8px', background: '#f0f0f0', borderRadius: '4px', marginTop: '10px', overflow: 'hidden' }}>
           <div style={{ width: `${pieno}%`, height: '100%', background: colore }} />
         </div>
-        {oltre && (
+        {/* FERMO E "QUASI FERMO" NON SONO LA STESSA COSA.
+            Questo avviso guardava `oltre_limite` (usate > limite) e annunciava "le API sono ferme".
+            Ma il blocco vero, quello che alza il 429, guarda `bloccato` — che arriva solo DOPO i
+            tre giorni di preavviso. Nel mezzo il cliente leggeva di essere fermo mentre stava
+            spedendo: o telefona in assistenza, o peggio ci crede e stacca la sua integrazione da
+            solo. Ora l'avviso dice in che stato e' davvero, e da quando. */}
+        {bloccato ? (
           <div style={{ marginTop: '10px', fontSize: '13px', color: '#991b1b', fontWeight: 600 }}>
-            Pacchetto esaurito: le API sono ferme finché non passi a uno più grande. Il portale resta
-            aperto e le spedizioni già create continuano il loro giro.
+            Le API sono ferme: il pacchetto è esaurito e il tempo per passare a uno più grande è
+            scaduto. Il portale resta aperto e le spedizioni già create continuano il loro giro.
           </div>
-        )}
-        {s.scaduto_dal && !oltre && (
+        ) : oltre ? (
+          <div style={{ marginTop: '10px', fontSize: '13px', color: '#b45309', fontWeight: 600 }}>
+            Hai superato il pacchetto. Le API continuano a funzionare{siFerma ? ` fino al ${siFerma}` : ' ancora per poco'}:
+            passa a uno più grande per non fermarti.
+          </div>
+        ) : s.scaduto_dal ? (
           <div style={{ marginTop: '10px', fontSize: '13px', color: '#991b1b', fontWeight: 600 }}>
             L’ultimo pagamento non è andato a buon fine. Hai 3 giorni per sistemarlo, poi le API si fermano.
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* PRIMA SI PROVA IL RINNOVO AUTOMATICO. La scelta non si mostra in partenza: chiedere subito
@@ -160,9 +210,9 @@ export default function PianoApi() {
         })}
       </div>
 
-      {(d.storico || []).length > 1 && (
+      {mesiPrecedenti.length > 0 && (
         <div style={{ marginTop: '14px', fontSize: '12.5px', color: '#8a8a8a' }}>
-          Mesi precedenti: {(d.storico || []).slice(1, 4).map((x: any) => `${x.mese} → ${x.n}`).join(' · ')}
+          Mesi precedenti: {mesiPrecedenti.map((x: any) => `${x.mese} → ${x.n}`).join(' · ')}
         </div>
       )}
     </div>

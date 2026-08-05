@@ -38,6 +38,11 @@ Qui non serve ricordarsene: il database le applica da solo, da qualunque strada 
 | ...e rientra una volta sola | indice unico parziale `uniq_artmov_rientro` |
 | Chi detiene un contratto | colonna `corrieri.proprio` — dichiarato, non dedotto dal nome |
 | Contatori spedizioni, audit sui listini | trigger `trg_conta_spedizione`, `trg_audit` |
+| Il pacchetto API si consuma **solo** con le API | trigger `fn_conta_spedizione_cliente` filtra `canale = 'api'` |
+| Chi paga le API non se lo decide da solo | trigger `trg_api_solo_piattaforma` su `clienti` (campi `api_*`: solo chiave di servizio) |
+| Un master non si promuove, e non si stacca dalla catena | trigger `trg_master_campi_di_sistema` (`is_super_master`, `parent_master_id`, `abbonamento_*`, `stripe_*`) |
+| Un cliente nasce **senza** pagare le API | default `clienti.api_esente = true` |
+| Se le API sono ferme, e perché | `fn_stato_api_cliente` — unica fonte, usata sia dal blocco sia dai pannelli |
 
 **Le due code funzionano così**: il database registra il *fatto* (c'è da addebitare), il lavoro
 pianificato calcola il *prezzo* e addebita. La regola sta nel database, la tariffa nell'applicazione
@@ -85,6 +90,13 @@ Queste sono decisioni del committente, non scelte tecniche. Il codice deve rispe
    la riconciliazione dei costi di E&A MULTIEXPRESS.
 9. **Lo storico non si cancella.** Spedizioni, ritiri, distinte e movimenti restano anche quando si
    cancella ciò che li ha generati.
+10. **Le API le paga solo chi rivende** le spedizioni fuori dal portale; chi le usa per spedire la
+    propria merce non paga niente. La differenza non è calcolabile — una chiamata è identica nei due
+    casi — quindi la decide **una persona**, e solo il super master: l'incasso è della piattaforma,
+    su Stripe non c'è nessuno split verso il master di riferimento. Si accende da
+    *Dashboard → Abbonamenti API*, che accanto all'interruttore mostra l'indizio: la quota di
+    spedizioni partite dal mittente più usato. Vicino al 100% è un magazzino solo (merce propria),
+    sotto il 70% con molti mittenti diversi sono spedizioni di altri.
 
 ---
 
@@ -107,6 +119,17 @@ Da sistemare, e da guardare con sospetto quando si tocca qualcosa lì vicino.
   omonimo di CAP, invece di indovinare. Non ancora fatto.
 - **Il messaggio dell'autista** dice "non è fra le tue consegne" senza sapere il perché: la ricerca
   è solo sulle consegne già caricate.
+- **`master_id` non è un permesso, ma viene usato come tale.** È l'appartenenza al tenant, e ce
+  l'hanno anche clienti, agenti e autisti: sotto MoovExpress ci sono quattro utenti con ruolo
+  `cliente`, e non per caso — `lib/shopifyProvision.ts` ne crea uno per ogni negozio che installa
+  l'app Shopify pubblica. Un controllo scritto «il mio master è super master» quindi *non basta*:
+  va sempre accompagnato dal ruolo. Sistemato il 5 agosto nelle due rotte che ce l'avevano
+  (`/api/audit`, `/api/root/api-clienti`); da guardare con sospetto ogni volta che se ne scrive una
+  nuova riservata al super master.
+- **`clienti.tipo_contratto` lo cambia il master su se stesso** (`app/api/master/route.ts`, elenco
+  `COLONNE`), e quel campo decide se vale il blocco per credito esaurito. Lasciato com'è perché è
+  una scelta esplicita della rotta, non una svista — ma è l'unico campo che vale soldi rimasto
+  scrivibile dal diretto interessato.
 - **Il credito non ferma la spedizione propria di un master**, né quella per un sotto-master:
   `verificaCreditoCatena` non viene chiamata per quel ramo, e `registra_movimento_master` — a
   differenza della gemella per i clienti — non controlla la capienza. Misurato: un solo addebito ha
