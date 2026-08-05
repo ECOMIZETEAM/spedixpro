@@ -20,10 +20,12 @@ export default function ListinoLogisticaPage() {
   const [cliente, setCliente] = useState('')
   const [fasce, setFasce] = useState<{ peso_max: string; prezzo: string }[]>([])
   const [salvo, setSalvo] = useState(false)
+  const [periodo, setPeriodo] = useState('solare')
 
   useEffect(() => {
     ricaricaTipi()
     fetch('/api/clienti/lista').then(r => r.json()).then(d => setClienti(Array.isArray(d) ? d : [])).catch(() => {})
+    fetch('/api/logistica/periodo').then(r => r.json()).then(d => setPeriodo(d?.periodo || 'solare')).catch(() => {})
   }, [])
   function ricaricaTipi() { fetch('/api/logistica/tipi').then(r => r.json()).then(d => setTipi(Array.isArray(d) ? d : [])).catch(() => {}) }
   useEffect(() => {
@@ -32,6 +34,14 @@ export default function ListinoLogisticaPage() {
     fetch(`/api/logistica/fasce?cliente_id=${cliente}`).then(r => r.json())
       .then(d => setFasce(Array.isArray(d) ? d.map((x: any) => ({ peso_max: String(x.peso_max), prezzo: String(x.prezzo) })) : [])).catch(() => {})
   }, [cliente])
+
+  async function salvaPeriodo(v: string) {
+    setPeriodo(v)
+    const r = await fetch('/api/logistica/periodo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ periodo: v }) })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok || d.error) { setMsg({ t: 'err', x: d.error || 'Errore' }); return }
+    setMsg({ t: 'ok', x: v === 'solare' ? 'Si paga il mese di calendario' : 'Si paga ogni 30 giorni dall\u2019occupazione' })
+  }
 
   async function salvaTipo() {
     if (!nome.trim()) { await dialog.alert({ title: 'Nome mancante', message: 'Come si chiama questo posto? Es. Bancale.' }); return }
@@ -68,8 +78,18 @@ export default function ListinoLogisticaPage() {
             {!tipi.length && <tr><td colSpan={2}><Vuoto testo="Nessun tipo di posto. Comincia da qui: bancale, mezzo bancale, ripiano…" /></td></tr>}
           </tbody>
         </table>
-        <div style={{ padding: '12px 16px', fontSize: '12px', color: '#9ca3af', borderTop: '1px solid #f5f5f5' }}>
-          Un posto mezzo vuoto si paga intero, come in ogni magazzino.
+        <div style={{ padding: '14px 16px', borderTop: '1px solid #f5f5f5' }}>
+          <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#666', textTransform: 'uppercase', marginBottom: '8px' }}>Come si conta il periodo</div>
+          {([['solare', 'Mese di calendario', 'Un posto occupato il 30 agosto paga agosto, e il 1° settembre paga settembre. Si paga il mese iniziato — è lo standard, e in fattura si legge bene.'],
+             ['giorni30', 'Ogni 30 giorni', 'Trenta giorni veri dal momento in cui il posto è stato occupato, e poi ogni trenta. Più giusto verso il cliente, ma le date in fattura ballano.']] as const).map(([v2, titolo, spiega]) => (
+            <label key={v2} style={{ display: 'flex', gap: '9px', alignItems: 'flex-start', cursor: 'pointer', padding: '8px 0' }}>
+              <input type="radio" name="periodo" checked={periodo === v2} onChange={() => salvaPeriodo(v2)} style={{ marginTop: '3px' }} />
+              <span><b style={{ fontSize: '13px' }}>{titolo}</b><br /><span style={{ fontSize: '12px', color: '#666' }}>{spiega}</span></span>
+            </label>
+          ))}
+          <div style={{ fontSize: '11.5px', color: '#9ca3af', marginTop: '6px' }}>
+            Un posto mezzo vuoto si paga intero, come in ogni magazzino. Cambiare il modo non rifattura niente: vale dal prossimo periodo.
+          </div>
         </div>
       </div>
 
