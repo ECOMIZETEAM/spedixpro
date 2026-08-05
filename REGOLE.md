@@ -92,14 +92,32 @@ Queste sono decisioni del committente, non scelte tecniche. Il codice deve rispe
 
 Da sistemare, e da guardare con sospetto quando si tocca qualcosa lì vicino.
 
-- **Il preventivo via API** (`/api/v1/rates`) non applica i limiti del collo: quota un prezzo per un
-  collo che poi la creazione rifiuta.
-- **Il prezzo cambia con l'ortografia del comune**: `filtraCapCondiviso` scarta le righe a CAP
-  esatto quando il comune scritto non combacia con quello a listino. "PIANA DI MONTE VENA" 5,34 €,
-  "Piana di Monte Verna" 14,95 €.
-- **Il logo dell'etichetta accetta solo PNG**: con un JPG sparisce in silenzio.
+- **Il comune scritto diversamente fa perdere la zona speciale.** Se il comune non combacia con
+  nessuno di quelli elencati per quel CAP, la zona speciale non viene rivendicata e si finisce su
+  "Italia": circa 43 spedizioni al mese prezzate meno del dovuto.
+  È una scelta, non una svista. Il 4 agosto avevo aggiunto la regola opposta — «se per quel CAP è
+  nominato un solo comune, allora è lo stesso posto scritto male» — e il giorno dopo l'ho tolta,
+  perché non distingue *Piana di Monte Vena* (refuso) da *Brugnato*, che è un comune diverso che
+  condivide il CAP con Sesta Godano. Peggio: il numero di comuni nominati **dipende da quali righe
+  arrivano alla funzione**, e al cliente e ai master ne arrivano insiemi diversi — così la stessa
+  spedizione veniva prezzata Italia al cliente e disagiata al master, e la differenza la pagava il
+  master. Sei spedizioni in sedici ore.
+  **La cura vera esiste e ce l'abbiamo in casa**: `lib/data/comuni.json` (7.904 comuni con CAP e
+  provincia) e `lib/data/frazioni.json` (9.878). Con quelli si distingue una frazione da un comune
+  omonimo di CAP, invece di indovinare. Non ancora fatto.
 - **Il messaggio dell'autista** dice "non è fra le tue consegne" senza sapere il perché: la ricerca
   è solo sulle consegne già caricate.
+- **Il credito non ferma la spedizione propria di un master**, né quella per un sotto-master:
+  `verificaCreditoCatena` non viene chiamata per quel ramo, e `registra_movimento_master` — a
+  differenza della gemella per i clienti — non controlla la capienza. Misurato: un solo addebito ha
+  davvero attraversato lo zero (3,96 €), più 44 avvenuti a conto già negativo. Da fare insieme,
+  perché la causa è una sola — ma da quella funzione passano 25.385 addebiti a settimana, quindi
+  non è una modifica da fare di corsa.
+
+Chiuse il 4-5 agosto, elencate qui perché non vengano "riscoperte": i limiti del collo nel
+preventivo via API, il `weight` letto diversamente dalle due porte API, il logo dell'etichetta
+(ora riconosciuto dai byte), il perimetro di giacenze e creazione, il credito via API senza
+contrassegno.
 
 ---
 
