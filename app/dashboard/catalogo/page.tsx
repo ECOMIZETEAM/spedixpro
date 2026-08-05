@@ -80,9 +80,21 @@ export default function CatalogoPage() {
   async function salva() {
     setMsg(null)
     if (!String(form?.sku || '').trim()) { setMsg({ t: 'err', x: 'Lo SKU è obbligatorio' }); return }
+    // LA VARIANTE si scrive libera ("rosso, S") perche' e' cosi' che uno la pensa. Diventa
+    // `attributi` solo se e' stata TOCCATA: se resta com'era non si riscrive, altrimenti un
+    // articolo creato dal portale cliente con chiavi vere (colore, taglia) le perderebbe,
+    // diventando "variante 1, variante 2", a ogni salvataggio fatto da qui.
+    const corpo: any = { ...form, cliente_id: clienteId }
+    delete corpo._variante; delete corpo._varianteOrig
+    if (form._variante !== form._varianteOrig) {
+      const parti = String(form._variante || '').split(',').map((x: string) => x.trim()).filter(Boolean)
+      const attributi: Record<string, string> = {}
+      parti.forEach((val: string, i: number) => { attributi[`variante${parti.length > 1 ? ' ' + (i + 1) : ''}`] = val })
+      corpo.attributi = parti.length ? attributi : null
+    }
     const r = await fetch('/api/catalogo', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, cliente_id: clienteId }),
+      body: JSON.stringify(corpo),
     })
     const d = await r.json()
     if (d?.error) { setMsg({ t: 'err', x: d.error }); return }
@@ -183,7 +195,7 @@ export default function CatalogoPage() {
             onKeyDown={e => { if (e.key === 'Enter') carica(clienteId, cerca) }}
             placeholder="SKU, nome o codice a barre" disabled={nessunCliente} style={{ ...inp, width: '100%' }} />
         </div>
-        <button onClick={() => setForm({ sku: '', nome: '' })} disabled={nessunCliente}
+        <button onClick={() => setForm({ sku: '', nome: '', _variante: '', _varianteOrig: '' })} disabled={nessunCliente}
           style={{ background: nessunCliente ? '#ccc' : ACCENT, color: '#fff', border: 'none', borderRadius: '6px', padding: '9px 16px', fontSize: '13px', fontWeight: 700, cursor: nessunCliente ? 'default' : 'pointer' }}>
           Nuovo articolo
         </button>
@@ -217,6 +229,20 @@ export default function CatalogoPage() {
                 <input value={form[k] ?? ''} onChange={e => setForm({ ...form, [k]: e.target.value })} style={{ ...inp, width: '100%' }} />
               </div>
             ))}
+          </div>
+          <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#666', margin: '14px 0 8px', textTransform: 'uppercase' }}>Prodotto e variante</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: '10px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '11.5px', color: '#666', marginBottom: '4px' }}>Prodotto <span style={{ color: '#999' }}>(raggruppa le varianti)</span></label>
+              <input value={form.prodotto ?? ''} onChange={e => setForm({ ...form, prodotto: e.target.value })} placeholder="es. T-shirt logo" style={{ ...inp, width: '100%' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '11.5px', color: '#666', marginBottom: '4px' }}>Variante <span style={{ color: '#999' }}>(separa con la virgola)</span></label>
+              <input value={form._variante ?? ''} onChange={e => setForm({ ...form, _variante: e.target.value })} placeholder="rosso, S" style={{ ...inp, width: '100%' }} />
+            </div>
+          </div>
+          <div style={{ fontSize: '11.5px', color: '#999', marginTop: '6px' }}>
+            Ogni variante è un articolo con il SUO SKU e la sua giacenza: la maglietta rossa S e la nera L sono due righe.
           </div>
           <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#666', margin: '14px 0 8px', textTransform: 'uppercase' }}>Dimensioni e peso</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: '10px' }}>
@@ -256,8 +282,8 @@ export default function CatalogoPage() {
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr style={{ background: '#fafafa' }}>
-                <th style={th}>SKU</th><th style={th}>Nome</th><th style={th}>EAN</th>
-                <th style={th}>Peso</th><th style={th}>Misure (cm)</th><th style={th}></th>
+                <th style={th}>SKU</th><th style={th}>Nome</th><th style={th}>Prodotto · variante</th>
+                <th style={th}>Giacenza</th><th style={th}>Peso</th><th style={th}>Misure (cm)</th><th style={th}></th>
               </tr></thead>
               <tbody>
                 {articoli.map((a: any) => {
@@ -266,7 +292,17 @@ export default function CatalogoPage() {
                     <tr key={a.id}>
                       <td style={{ ...td, fontWeight: 600, whiteSpace: 'nowrap' }}>{a.sku}</td>
                       <td style={td}>{a.nome || '—'}</td>
-                      <td style={{ ...td, color: '#8a8a8a' }}>{a.ean13 || '—'}</td>
+                      <td style={td}>
+                        {a.prodotto ? <div style={{ fontWeight: 600 }}>{a.prodotto}</div> : null}
+                        {a.attributi && Object.keys(a.attributi).length
+                          ? <div style={{ fontSize: '12px', color: '#8a8a8a' }}>{Object.values(a.attributi).filter(Boolean).join(' · ')}</div>
+                          : (!a.prodotto ? <span style={{ color: '#c8c8c8' }}>—</span> : null)}
+                      </td>
+                      {/* La giacenza si legge e basta: si muove dal carico o dal portale del cliente,
+                          perche' e' il saldo del registro dei movimenti e non un campo della scheda. */}
+                      <td style={{ ...td, fontWeight: 700, color: Number(a.quantita) < 0 ? '#b91c1c' : Number(a.quantita) > 0 ? '#15803d' : '#c8c8c8' }}>
+                        {Number(a.quantita ?? 0)}
+                      </td>
                       <td style={{ ...td, whiteSpace: 'nowrap' }}>
                         {a.peso ? `${Number(a.peso).toFixed(3).replace(/\.?0+$/, '')} kg`
                           : <span style={{ color: '#d97706' }}>manca</span>}
@@ -276,7 +312,7 @@ export default function CatalogoPage() {
                           : <span style={{ color: '#d97706' }}>mancano</span>}
                       </td>
                       <td style={{ ...td, textAlign: 'right' as const, whiteSpace: 'nowrap' }}>
-                        <button onClick={() => setForm({ ...a })} style={{ background: 'none', border: 'none', color: ACCENT, fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}>Modifica</button>
+                        <button onClick={() => { const t = Object.values(a.attributi || {}).filter(Boolean).join(', '); setForm({ ...a, _variante: t, _varianteOrig: t }) }} style={{ background: 'none', border: 'none', color: ACCENT, fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}>Modifica</button>
                         <button onClick={() => elimina(a)} style={{ background: 'none', border: 'none', color: '#8a8a8a', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer', marginLeft: '10px' }}>Elimina</button>
                       </td>
                     </tr>
