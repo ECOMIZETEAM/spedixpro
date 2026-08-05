@@ -38,6 +38,10 @@
     {
       "path": "/api/spedizioni/tmp-recupero",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/spedizioni/archivia-etichette",
+      "schedule": "*/10 * * * *"
     }
   ]
 }
