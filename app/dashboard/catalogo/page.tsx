@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import GeneratoreVarianti, { type Opzione, type RigaVariante } from '@/app/components/GeneratoreVarianti'
 
 // IL CATALOGO DEI CLIENTI, DAL LATO DEL MASTER.
 //
@@ -59,6 +60,9 @@ export default function CatalogoPage() {
   const [cerca, setCerca] = useState('')
   const [caricando, setCaricando] = useState(false)
   const [form, setForm] = useState<any>(null)
+  // Prodotto con varianti: si definiscono le OPZIONI e le combinazioni escono da sole.
+  const [varianti, setVarianti] = useState(false)
+  const [creoVar, setCreoVar] = useState(false)
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
   const [importando, setImportando] = useState(false)
 
@@ -99,6 +103,30 @@ export default function CatalogoPage() {
     const d = await r.json()
     if (d?.error) { setMsg({ t: 'err', x: d.error }); return }
     setForm(null); setMsg({ t: 'ok', x: 'Articolo salvato' }); carica()
+  }
+
+  // Crea in un colpo solo tutte le combinazioni: ognuna e' una RIGA con il suo SKU, che e' quello
+  // che fa combaciare gli ordini di Shopify e Amazon e tiene le giacenze separate.
+  async function salvaVarianti(prodotto: string, opzioni: Opzione[], righe: RigaVariante[]) {
+    setMsg(null); setCreoVar(true)
+    const articoli = righe.map(r => {
+      const attributi: Record<string, string> = {}
+      opzioni.forEach((o, i) => { if (r.valori[i]) attributi[o.nome] = r.valori[i] })
+      return {
+        sku: r.sku.trim(),
+        nome: `${prodotto} ${r.valori.join(' ')}`.trim(),
+        prodotto, attributi,
+        ...(r.peso ? { peso: r.peso } : {}),
+        ...(r.prezzo ? { prezzo: r.prezzo } : {}),
+      }
+    })
+    const r = await fetch('/api/catalogo', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cliente_id: clienteId, articoli }),
+    })
+    const d = await r.json().catch(() => ({})); setCreoVar(false)
+    if (!r.ok || d?.error) { setMsg({ t: 'err', x: d?.error || 'Errore' }); return }
+    setVarianti(false); setMsg({ t: 'ok', x: `${articoli.length} varianti create` }); carica()
   }
 
   async function elimina(a: any) {
@@ -195,7 +223,11 @@ export default function CatalogoPage() {
             onKeyDown={e => { if (e.key === 'Enter') carica(clienteId, cerca) }}
             placeholder="SKU, nome o codice a barre" disabled={nessunCliente} style={{ ...inp, width: '100%' }} />
         </div>
-        <button onClick={() => setForm({ sku: '', nome: '', _variante: '', _varianteOrig: '' })} disabled={nessunCliente}
+        <button onClick={() => { setVarianti(true); setForm(null); setMsg(null) }} disabled={nessunCliente}
+          style={{ background: '#111827', color: '#fff', border: 'none', borderRadius: '6px', padding: '9px 16px', fontSize: '13px', fontWeight: 700, cursor: nessunCliente ? 'not-allowed' : 'pointer', opacity: nessunCliente ? 0.5 : 1, whiteSpace: 'nowrap' }}>
+          Prodotto con varianti
+        </button>
+        <button onClick={() => { setForm({ sku: '', nome: '', _variante: '', _varianteOrig: '' }); setVarianti(false) }} disabled={nessunCliente}
           style={{ background: nessunCliente ? '#ccc' : ACCENT, color: '#fff', border: 'none', borderRadius: '6px', padding: '9px 16px', fontSize: '13px', fontWeight: 700, cursor: nessunCliente ? 'default' : 'pointer' }}>
           Nuovo articolo
         </button>
@@ -215,6 +247,16 @@ export default function CatalogoPage() {
           background: msg.t === 'ok' ? '#f0fdf4' : '#fef2f2', color: msg.t === 'ok' ? '#166534' : '#991b1b',
           border: `1px solid ${msg.t === 'ok' ? '#bbf7d0' : '#fecaca'}`,
         }}>{msg.x}</div>
+      )}
+
+      {varianti && (
+        <div style={{ ...card, padding: '16px', marginBottom: '14px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>Nuovo prodotto con varianti</div>
+            <button onClick={() => setVarianti(false)} style={{ background: '#fff', color: '#555', border: '1px solid #d5d5d5', borderRadius: '6px', padding: '7px 14px', fontSize: '12.5px', cursor: 'pointer' }}>Chiudi</button>
+          </div>
+          <GeneratoreVarianti onSalva={salvaVarianti} salvataggio={creoVar} />
+        </div>
       )}
 
       {form && (
