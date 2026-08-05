@@ -27,6 +27,9 @@ export default function LogisticaPage() {
   const [blocchi, setBlocchi] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
+  // ANTEPRIMA DELL'ADDEBITO: si guarda cosa verrebbe fatturato PRIMA che parta qualcosa.
+  // E' una lettura, non muove un centesimo.
+  const [anteprima, setAnteprima] = useState<any>(null)
 
   // tipo di posto
   const [tNome, setTNome] = useState(''); const [tPrezzo, setTPrezzo] = useState('')
@@ -85,6 +88,14 @@ export default function LogisticaPage() {
     fetch(`/api/catalogo?cliente_id=${cCliente}`).then(r => r.json()).then(d2 => setCCatalogo(Array.isArray(d2?.articoli) ? d2.articoli : [])).catch(() => {})
   }
 
+  async function guardaAnteprima() {
+    setAnteprima(null)
+    const r = await fetch('/api/logistica/addebito-mensile?anteprima=1')
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok || d.error) { setMsg({ t: 'err', x: d.error || 'Errore' }); return }
+    setAnteprima(d)
+  }
+
   const occupati = blocchi.filter(b => !b.liberato_il)
   const mensile = occupati.reduce((s, b) => s + Number(b.logistica_tipi_blocco?.prezzo_mese || 0), 0)
   const blocchiDelCliente = blocchi.filter(b => !b.liberato_il && b.cliente_id === cCliente)
@@ -140,6 +151,24 @@ export default function LogisticaPage() {
           <span style={{ fontWeight: 400, fontSize: '12.5px', color: '#6b7280' }}>
             {occupati.length} posti · <b style={{ color: '#15803d' }}>{eur(mensile)}</b> al mese
           </span>
+        </div>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button onClick={guardaAnteprima} style={{ background: '#fff', color: '#f97316', border: '1px solid #fdba74', padding: '7px 14px', borderRadius: '6px', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}>
+            Anteprima addebito del mese
+          </button>
+          <span style={{ fontSize: '12px', color: '#9ca3af' }}>Mostra chi pagherebbe quanto. Non addebita niente.</span>
+          {anteprima && (
+            <div style={{ width: '100%', marginTop: '4px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '12px 14px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: '#92400e', marginBottom: '6px' }}>
+                {anteprima.mese}: {anteprima.posti_da_fatturare} posti · {eur(anteprima.totale)}
+                {anteprima.gia_fatturati > 0 && <span style={{ fontWeight: 400 }}> — {anteprima.gia_fatturati} gia fatturati questo mese, non si ripetono</span>}
+              </div>
+              {(anteprima.clienti || []).map((c: any, i: number) => (
+                <div key={i} style={{ fontSize: '12.5px', color: '#78350f' }}>{c.cliente}: {c.posti} posti · <b>{eur(c.importo)}</b></div>
+              ))}
+              {!anteprima.clienti?.length && <div style={{ fontSize: '12.5px', color: '#78350f' }}>Niente da fatturare.</div>}
+            </div>
+          )}
         </div>
         <div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: '1.4fr 1.2fr 1.4fr auto', gap: '10px', alignItems: 'end', background: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
           <div><label style={lbl}>Cliente</label>
