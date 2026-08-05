@@ -14,6 +14,8 @@
 // controlli di autorizzazione che oggi proteggono ogni download. I file escono solo passando dal
 // nostro codice, che continua a verificare chi sta chiedendo.
 
+import { createHash } from 'node:crypto'
+
 export type EtichettaLetta = { buffer: Buffer; mime: string; ext: string }
 
 const BUCKET = 'etichette'
@@ -111,6 +113,51 @@ export async function leggiEtichetta(
     try { return { buffer: Buffer.from(legacy, 'base64'), mime: 'application/pdf', ext: 'pdf' } } catch { }
   }
   return null
+}
+
+// ARCHIVIA UN LOTTO: prende le righe che hanno ancora il PDF dentro, lo mette su Storage e scrive
+// il percorso. NON cancella il base64: finche' non c'e' la prova sul campo, le copie restano due.
+//
+// Sta qui e non in una rotta perche' la chiamano in due: il giro dedicato e — soprattutto — un cron
+// che gia' funziona. Il giro dedicato, appena creato, non veniva mai invocato da Vercel (la rotta
+// rispondeva, il registro dei cron non la prendeva), e nel frattempo il database cresceva di 239 MB
+// al giorno. Appoggiarsi a un cron gia' vivo toglie di mezzo quel problema: due inneschi, una sola
+// implementazione.
+export async function archiviaLotto(admin: any, quante = 100): Promise<{
+  esaminate: number; archiviate: number; saltate: number; fallite: number
+}> {
+  const impronta = (b: Buffer) => createHash('sha1').update(b).digest('hex')
+  // Le piu' VECCHIE per prime: nessuno le sta stampando adesso.
+  const { data: righe, error } = await admin
+    .from('spedizioni').select('id,numero,etichetta_url,created_at')
+    .is('etichetta_path', null).like('etichetta_url', 'data:%')
+    .order('created_at', { ascending: true }).limit(quante)
+  if (error) { console.error('[ARCHIVIA-ETICHETTE] lettura fallita', error.message); return { esaminate: 0, archiviate: 0, saltate: 0, fallite: 0 } }
+
+  let archiviate = 0, saltate = 0, fallite = 0
+  for (const r of righe || []) {
+    const dato = scomponiDataUrl(r.etichetta_url)
+    if (!dato?.buffer?.length) { saltate++; continue }
+
+    const path = await caricaEtichetta(admin, r.id, dato.buffer, dato.mime, r.created_at ? new Date(r.created_at) : new Date())
+    if (!path) { fallite++; continue }
+
+    // SI RILEGGE PRIMA DI FIDARSI. Un caricamento senza errore non garantisce un file integro: un
+    // buffer troncato o un'interruzione a meta' passerebbero lo stesso. Se il file riletto non e'
+    // identico, il percorso NON si scrive e il giro dopo riprova.
+    const riletto = await scaricaEtichetta(admin, path)
+    if (!riletto || impronta(riletto.buffer) !== impronta(dato.buffer)) {
+      fallite++
+      console.error('[ARCHIVIA-ETICHETTE] verifica fallita', r.numero, path)
+      continue
+    }
+    const { error: upErr } = await admin.from('spedizioni').update({ etichetta_path: path }).eq('id', r.id)
+    if (upErr) { fallite++; console.error('[ARCHIVIA-ETICHETTE]', r.numero, upErr.message); continue }
+    archiviate++
+  }
+  const esito = { esaminate: (righe || []).length, archiviate, saltate, fallite }
+  if (esito.esaminate) console.log('[ARCHIVIA-ETICHETTE]', JSON.stringify(esito))
+  return esito
 }
 
 // Vero se la spedizione ha un'etichetta, in QUALUNQUE forma. Da usare al posto dei controlli

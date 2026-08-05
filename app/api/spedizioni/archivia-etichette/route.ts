@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { createHash } from 'node:crypto'
-import { scomponiDataUrl, caricaEtichetta, scaricaEtichetta } from '@/lib/etichette'
+import { archiviaLotto } from '@/lib/etichette'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -31,55 +30,9 @@ export const maxDuration = 120
 // Chi legge non deve accorgersi di niente: `leggiEtichetta` prova prima il file e poi il base64, ed
 // e' gia' usata da tutte e quattro le strade di stampa.
 
-const QUANTE = 100          // per giro: ~15 MB di traffico, ben dentro i 120 secondi
-const IMPRONTA = (b: Buffer | Uint8Array) => createHash('sha1').update(b).digest('hex')
-
+// Il lavoro vero sta in lib/etichette.ts: lo chiama anche tmp-recupero, che e' un cron gia' vivo.
+// Questa rotta resta come innesco dedicato e per poterla lanciare a mano quando serve.
 export async function GET(req: NextRequest) {
   const _b = bloccaCronNonAutorizzato(req); if (_b) return _b
-  const admin = createAdminSupabase()
-
-  // Le piu' VECCHIE per prime: sono quelle che nessuno sta stampando in questo momento, quindi la
-  // finestra in cui una riga ha il percorso ma il file non fosse ancora leggibile non tocca nessuno.
-  const { data: righe, error } = await admin
-    .from('spedizioni')
-    .select('id,numero,etichetta_url,created_at')
-    .is('etichetta_path', null)
-    .like('etichetta_url', 'data:%')
-    .order('created_at', { ascending: true })
-    .limit(QUANTE)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-  let archiviate = 0, saltate = 0, fallite = 0
-  const motivi: Record<string, number> = {}
-  const conta = (m: string) => { motivi[m] = (motivi[m] || 0) + 1 }
-
-  for (const r of righe || []) {
-    const dato = scomponiDataUrl(r.etichetta_url)
-    if (!dato || !dato.buffer.length) { saltate++; conta('non e\' un data url leggibile'); continue }
-
-    const quando = r.created_at ? new Date(r.created_at) : new Date()
-    const path = await caricaEtichetta(admin, r.id, dato.buffer, dato.mime, quando)
-    if (!path) { fallite++; conta('caricamento fallito'); continue }
-
-    // SI RILEGGE PRIMA DI FIDARSI. Un caricamento che non da' errore non garantisce che il file sia
-    // integro: un buffer troncato, un'interruzione a meta', un mime sbagliato passerebbero lo
-    // stesso. Qui si riscarica e si confrontano i byte uno per uno (l'impronta): se non
-    // combaciano il percorso NON viene scritto, la riga resta com'era e il giro dopo riprova.
-    const riletto = await scaricaEtichetta(admin, path)
-    if (!riletto || IMPRONTA(riletto.buffer) !== IMPRONTA(dato.buffer)) {
-      fallite++; conta('riletto diverso da cio\' che era stato caricato')
-      console.error('[ARCHIVIA-ETICHETTE] verifica fallita', r.numero, path)
-      continue
-    }
-
-    // Solo adesso la riga impara dove sta il suo file. `etichetta_url` resta dov'e': finche' non
-    // avremo la prova sul campo che questo giro e' affidabile, le copie restano due.
-    const { error: upErr } = await admin.from('spedizioni').update({ etichetta_path: path }).eq('id', r.id)
-    if (upErr) { fallite++; conta('scrittura del percorso fallita'); console.error('[ARCHIVIA-ETICHETTE]', r.numero, upErr.message); continue }
-    archiviate++
-  }
-
-  const esito = { archiviate, saltate, fallite, esaminate: (righe || []).length, motivi }
-  console.log('[ARCHIVIA-ETICHETTE]', JSON.stringify(esito))
-  return NextResponse.json(esito)
+  return NextResponse.json(await archiviaLotto(createAdminSupabase(), 100))
 }

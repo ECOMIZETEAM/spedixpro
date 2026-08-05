@@ -146,7 +146,18 @@ export async function GET(req: NextRequest) {
   // non si toccano.
   const estrattoContoSistemato = await sistemaMovimenti(admin)
 
+  // ARCHIVIAZIONE ETICHETTE, appoggiata qui.
+  // Il giro dedicato (/api/spedizioni/archivia-etichette) esiste ma Vercel non lo invocava, mentre
+  // questo parte ogni quarto d'ora da mesi. Lotto piccolo per non allungare troppo un giro che ha
+  // gia' il suo lavoro, e avvolto: se l'archiviazione fallisce, il recupero dei TMP non ne risente.
+  let etichetteArchiviate = 0
+  try {
+    const { archiviaLotto } = await import('@/lib/etichette')
+    etichetteArchiviate = (await archiviaLotto(admin, 60)).archiviate
+  } catch (e: any) { console.error('[TMP-RECUPERO] archiviazione etichette fallita:', e?.message) }
+
   return NextResponse.json({
+    etichetteArchiviate,
     esaminate: (ferme || []).length,
     completate,            // numero provvisorio sostituito con la LDV vera
     soloEtichette,         // etichette recuperate, la LDV non c'e' ancora
