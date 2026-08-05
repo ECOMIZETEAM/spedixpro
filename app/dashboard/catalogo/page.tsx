@@ -64,6 +64,13 @@ export default function CatalogoPage() {
   // Prodotto con varianti: si definiscono le OPZIONI e le combinazioni escono da sole.
   const [varianti, setVarianti] = useState(false)
   const [creoVar, setCreoVar] = useState(false)
+  // CARICO RAPIDO dal catalogo. La giacenza resta in sola lettura nella scheda — e' il saldo di un
+  // registro, non un campo — ma il gesto "ne sono arrivati dieci" si fa da qui, che e' dove uno lo
+  // cerca. Carico merce resta per il giro di magazzino, dove serve anche dire in che posto e' finita.
+  const [giac, setGiac] = useState<any>(null)
+  const [giacTipo, setGiacTipo] = useState<'carico' | 'inventario'>('carico')
+  const [giacQta, setGiacQta] = useState(''); const [giacNota, setGiacNota] = useState('')
+  const [giacSalvo, setGiacSalvo] = useState(false)
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
   const [importando, setImportando] = useState(false)
 
@@ -128,6 +135,24 @@ export default function CatalogoPage() {
     const d = await r.json().catch(() => ({})); setCreoVar(false)
     if (!r.ok || d?.error) { setMsg({ t: 'err', x: d?.error || 'Errore' }); return }
     setVarianti(false); setMsg({ t: 'ok', x: `${articoli.length} varianti create` }); carica()
+  }
+
+  async function salvaGiacenza() {
+    const n = parseInt(giacQta, 10)
+    if (!isFinite(n) || n === 0) { setMsg({ t: 'err', x: 'Scrivi quanti pezzi' }); return }
+    setGiacSalvo(true)
+    // Inventario = "ho contato, ce ne sono N": si manda la DIFFERENZA, cosi' nel registro resta
+    // scritto quanto mancava rispetto a quello che il sistema credeva.
+    const delta = giacTipo === 'inventario' ? n - Number(giac.quantita || 0) : n
+    if (delta === 0) { setGiacSalvo(false); setGiac(null); return }
+    const r = await fetch('/api/logistica/carico', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ articolo_id: giac.id, quantita: delta, nota: giacNota || (giacTipo === 'inventario' ? 'conteggio' : 'carico') }),
+    })
+    const d = await r.json().catch(() => ({})); setGiacSalvo(false)
+    if (!r.ok || d?.error) { setMsg({ t: 'err', x: d?.error || 'Errore' }); return }
+    setGiac(null); setGiacQta(''); setGiacNota('')
+    setMsg({ t: 'ok', x: `Giacenza aggiornata: ${d.quantita}` }); carica()
   }
 
   async function elimina(a: any) {
@@ -250,6 +275,27 @@ export default function CatalogoPage() {
         }}>{msg.x}</div>
       )}
 
+      {giac && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }} onClick={() => setGiac(null)}>
+          <div style={{ background: '#fff', borderRadius: '8px', padding: '20px', width: '380px', maxWidth: '92%' }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a' }}>{giacTipo === 'carico' ? 'È arrivata merce' : 'Correggi la giacenza'}</div>
+            <div style={{ fontSize: '12.5px', color: '#666', margin: '4px 0 14px' }}>
+              {giac.sku}{giac.nome ? ` · ${giac.nome}` : ''} — adesso ne risultano <b>{Number(giac.quantita ?? 0)}</b>
+            </div>
+            <label style={{ display: 'block', fontSize: '11.5px', color: '#666', marginBottom: '4px' }}>
+              {giacTipo === 'carico' ? 'Quanti pezzi sono arrivati' : 'Quanti pezzi ci sono davvero'}
+            </label>
+            <input type="number" step="1" value={giacQta} autoFocus onChange={e => setGiacQta(e.target.value)} style={{ ...inp, width: '100%' }} />
+            <label style={{ display: 'block', fontSize: '11.5px', color: '#666', margin: '10px 0 4px' }}>Nota (facoltativa)</label>
+            <input value={giacNota} onChange={e => setGiacNota(e.target.value)} placeholder="es. bolla 1234" style={{ ...inp, width: '100%' }} />
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
+              <button onClick={() => setGiac(null)} style={{ background: '#fff', color: '#555', border: '1px solid #d5d5d5', borderRadius: '6px', padding: '9px 16px', fontSize: '13px', cursor: 'pointer' }}>Annulla</button>
+              <button onClick={salvaGiacenza} disabled={giacSalvo} style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '6px', padding: '9px 16px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: giacSalvo ? 0.6 : 1 }}>{giacSalvo ? 'Salvo…' : 'Salva'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {varianti && (
         <div style={{ ...card, padding: '16px', marginBottom: '14px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
@@ -345,6 +391,10 @@ export default function CatalogoPage() {
                           perche' e' il saldo del registro dei movimenti e non un campo della scheda. */}
                       <td style={{ ...td, fontWeight: 700, color: Number(a.quantita) < 0 ? '#b91c1c' : Number(a.quantita) > 0 ? '#15803d' : '#c8c8c8' }}>
                         {Number(a.quantita ?? 0)}
+                        <button onClick={() => { setGiac(a); setGiacTipo('carico'); setGiacQta(''); setGiacNota('') }} title="E' arrivata merce"
+                          style={{ marginLeft: '8px', background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 700, padding: '1px 7px' }}>+</button>
+                        <button onClick={() => { setGiac(a); setGiacTipo('inventario'); setGiacQta(String(a.quantita ?? 0)); setGiacNota('') }} title="Ho contato: correggi"
+                          style={{ marginLeft: '4px', background: '#fff', color: '#666', border: '1px solid #e5e5e5', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', padding: '1px 7px' }}>=</button>
                       </td>
                       <td style={{ ...td, whiteSpace: 'nowrap' }}>
                         {a.peso ? `${Number(a.peso).toFixed(3).replace(/\.?0+$/, '')} kg`
