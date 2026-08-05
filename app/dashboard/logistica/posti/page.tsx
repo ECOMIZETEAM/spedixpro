@@ -65,7 +65,7 @@ export default function PostiPage() {
 
       <div style={card}>
         <div style={cardH}>Occupa un posto</div>
-        <div style={{ padding: '16px', display: 'grid', gridTemplateColumns: '1.4fr 1.3fr 1.4fr auto', gap: '10px', alignItems: 'end' }}>
+        <div style={{ padding: '16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: '10px', alignItems: 'end' }}>
           <div><label style={lbl}>Cliente</label>
             <SelectCercabile value={cliente} onChange={e => setCliente(e.target.value)} style={inp}>
               <option value="">— scegli —</option>

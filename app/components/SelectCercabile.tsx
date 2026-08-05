@@ -1,5 +1,6 @@
 'use client'
-import { Children, isValidElement, useEffect, useMemo, useRef, useState } from 'react'
+import { Children, isValidElement, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 // UNA TENDINA CHE SI PUO' CERCARE.
 //
@@ -53,12 +54,45 @@ export default function SelectCercabile({ value, onChange, children, style, disa
   const [aperto, setAperto] = useState(false)
   const [q, setQ] = useState('')
   const box = useRef<HTMLDivElement>(null)
+  const pannello = useRef<HTMLDivElement>(null)
+  // IL PANNELLO SI DISEGNA FUORI DAL RIQUADRO.
+  // Le schede del portale nascondono cio' che esce dai bordi (overflow hidden), e una tendina
+  // aperta dentro una di quelle veniva TAGLIATA a meta': si vedeva la casella di ricerca e un
+  // nome, il resto no. Disegnandolo in fondo alla pagina e posizionandolo sul campo, nessun
+  // contenitore lo puo' piu' ritagliare.
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const [montato, setMontato] = useState(false)
+  useEffect(() => { setMontato(true) }, [])
 
   useEffect(() => {
     if (!aperto) return
-    const fuori = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) { setAperto(false); setQ('') } }
+    const fuori = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (box.current?.contains(t) || pannello.current?.contains(t)) return
+      setAperto(false); setQ('')
+    }
     document.addEventListener('mousedown', fuori)
     return () => document.removeEventListener('mousedown', fuori)
+  }, [aperto])
+
+  // La posizione si ricalcola all'apertura e mentre si scorre: senza, il pannello resterebbe
+  // fermo dov'era mentre la pagina scivola sotto.
+  useLayoutEffect(() => {
+    if (!aperto) { setPos(null); return }
+    const misura = () => {
+      const r = box.current?.getBoundingClientRect()
+      if (!r) return
+      // Se sotto non c'e' spazio si apre VERSO L'ALTO: su uno schermo corto, o con il campo in
+      // fondo alla pagina, altrimenti il pannello finisce fuori dallo schermo.
+      const spazioSotto = window.innerHeight - r.bottom
+      const alto = Math.min(320, Math.max(180, spazioSotto - 12))
+      const versoAlto = spazioSotto < 220 && r.top > spazioSotto
+      setPos({ top: versoAlto ? Math.max(8, r.top - alto - 4) : r.bottom + 4, left: r.left, width: r.width })
+    }
+    misura()
+    window.addEventListener('scroll', misura, true)
+    window.addEventListener('resize', misura)
+    return () => { window.removeEventListener('scroll', misura, true); window.removeEventListener('resize', misura) }
   }, [aperto])
 
   // Poche voci: si resta sulla tendina di sempre. Nessuna differenza, nessun rischio.
@@ -89,8 +123,8 @@ export default function SelectCercabile({ value, onChange, children, style, disa
         <span style={{ color: '#9ca3af', fontSize: '10px', flexShrink: 0 }}>▼</span>
       </button>
 
-      {aperto && (
-        <div style={{ position: 'absolute', zIndex: 60, top: 'calc(100% + 4px)', left: 0, minWidth: '100%', width: 'max-content', maxWidth: '420px', background: '#fff', border: '1px solid #d5d5d5', borderRadius: '6px', boxShadow: '0 8px 24px rgba(0,0,0,.12)' }}>
+      {aperto && montato && pos && createPortal(
+        <div ref={pannello} style={{ position: 'fixed', zIndex: 3000, top: pos.top, left: pos.left, width: Math.max(pos.width, 240), maxWidth: 'calc(100vw - 16px)', background: '#fff', border: '1px solid #d5d5d5', borderRadius: '6px', boxShadow: '0 10px 30px rgba(0,0,0,.16)' }}>
           <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Cerca…"
             onKeyDown={e => {
               if (e.key === 'Escape') { setAperto(false); setQ('') }
@@ -106,7 +140,7 @@ export default function SelectCercabile({ value, onChange, children, style, disa
                 <div key={`${o.value}-${i}`} onClick={() => !o.disabled && scegli(o.value)}
                   style={{ padding: '8px 11px', fontSize: '13px', cursor: o.disabled ? 'default' : 'pointer',
                     background: sel ? '#fff7ed' : undefined, color: o.disabled ? '#9ca3af' : '#1a1a1a',
-                    fontWeight: sel ? 700 : 400, whiteSpace: 'nowrap' }}
+                    fontWeight: sel ? 700 : 400, wordBreak: 'break-word' }}
                   onMouseEnter={e => { if (!sel && !o.disabled) (e.currentTarget as HTMLDivElement).style.background = '#f7f7f7' }}
                   onMouseLeave={e => { if (!sel) (e.currentTarget as HTMLDivElement).style.background = '' }}>
                   {o.label}
@@ -115,8 +149,7 @@ export default function SelectCercabile({ value, onChange, children, style, disa
             })}
             {!filtrate.length && <div style={{ padding: '14px', fontSize: '12.5px', color: '#9ca3af', textAlign: 'center' }}>Nessun risultato.</div>}
           </div>
-        </div>
-      )}
+        </div>, document.body)}
     </div>
   )
 }

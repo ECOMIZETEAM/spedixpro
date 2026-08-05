@@ -56,7 +56,7 @@ export default function ListinoLogisticaPage() {
 
       <div style={card}>
         <div style={cardH}>Giacenza — tipi di posto e prezzo al mese</div>
-        <div style={{ padding: '16px', display: 'grid', gridTemplateColumns: '1.6fr 1fr auto', gap: '10px', alignItems: 'end' }}>
+        <div style={{ padding: '16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: '10px', alignItems: 'end' }}>
           <div><label style={lbl}>Nome</label><input value={nome} onChange={e => setNome(e.target.value)} placeholder="es. Bancale" style={inp} /></div>
           <div><label style={lbl}>Prezzo al mese (€)</label><input type="number" step="0.01" value={prezzo} onChange={e => setPrezzo(e.target.value)} placeholder="15.00" style={inp} /></div>
           <button onClick={salvaTipo} style={btn}>Aggiungi</button>

@@ -81,7 +81,7 @@ export default function CaricoPage() {
 
       <div style={card}>
         <div style={cardH}>Registra un arrivo</div>
-        <div style={{ padding: '16px', display: 'grid', gridTemplateColumns: '1.3fr 1.7fr 90px 1.2fr auto', gap: '10px', alignItems: 'end' }}>
+        <div style={{ padding: '16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: '10px', alignItems: 'end' }}>
           <div><label style={lbl}>Cliente</label>
             <SelectCercabile value={cliente} onChange={e => setCliente(e.target.value)} style={inp}>
               <option value="">— scegli —</option>
@@ -110,7 +110,7 @@ export default function CaricoPage() {
           {cliente && nuovo && (
             <div style={{ marginTop: '12px', border: '1px solid #fed7aa', background: '#fff7ed', borderRadius: '8px', padding: '14px' }}>
               <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#9a3412', marginBottom: '10px' }}>Nuovo articolo per questo cliente</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1.2fr 100px auto auto', gap: '8px', alignItems: 'end' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '8px', alignItems: 'end' }}>
                 <div><label style={lbl}>SKU</label><input value={nSku} onChange={e => setNSku(e.target.value)} placeholder="obbligatorio" style={inp} /></div>
                 <div><label style={lbl}>Prodotto</label><input value={nProdotto} onChange={e => setNProdotto(e.target.value)} placeholder="es. T-shirt logo" style={inp} /></div>
                 <div><label style={lbl}>Variante</label><input value={nVariante} onChange={e => setNVariante(e.target.value)} placeholder="rosso, S" style={inp} /></div>
@@ -129,7 +129,7 @@ export default function CaricoPage() {
       {cliente && (
         <div style={card}>
           <div style={cardH}>Magazzino di questo cliente</div>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '520px' }}>
             <thead><tr><th style={th}>Prodotto</th><th style={th}>Variante</th><th style={th}>SKU</th><th style={th}>Giacenza</th><th style={th}>Posto</th></tr></thead>
             <tbody>
               {catalogo.map(a => (
@@ -143,7 +143,7 @@ export default function CaricoPage() {
               ))}
               {!catalogo.length && <tr><td colSpan={5}><Vuoto testo="Questo cliente non ha ancora articoli a catalogo." /></td></tr>}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
     </div>
