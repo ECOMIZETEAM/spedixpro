@@ -55,12 +55,21 @@ export async function POST(req: NextRequest) {
   const pesi = new Set(righe.map((f: any) => f.peso))
   if (pesi.size !== righe.length) return NextResponse.json({ error: 'Ci sono due fasce con lo stesso peso' }, { status: 400 })
 
+  // LA DATA DI ATTIVAZIONE NON SI MUOVE.
+  // Il listino si salva intero (cancella e riscrivi), quindi senza questo ogni ritocco riporterebbe
+  // la data a oggi — e le spedizioni fatte nel frattempo non verrebbero mai addebitate. Si tiene
+  // la piu' vecchia: e' il momento in cui il servizio e' stato acceso per questo cliente, e da li'
+  // in poi si fattura.
+  const { data: gia } = await admin.from('logistica_fasce')
+    .select('created_at').eq('cliente_id', clienteId).order('created_at').limit(1)
+  const attivoDal = gia?.[0]?.created_at || new Date().toISOString()
+
   await admin.from('logistica_fasce').delete().eq('cliente_id', clienteId)
   if (righe.length) {
     const { error } = await admin.from('logistica_fasce').insert(
-      righe.map((f: any) => ({ master_id: cliente.master_id, cliente_id: clienteId, peso_max: f.peso, prezzo: f.prezzo }))
+      righe.map((f: any) => ({ master_id: cliente.master_id, cliente_id: clienteId, peso_max: f.peso, prezzo: f.prezzo, created_at: attivoDal }))
     )
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   }
-  return NextResponse.json({ ok: true, fasce: righe.length, attivo: righe.length > 0 })
+  return NextResponse.json({ ok: true, fasce: righe.length, attivo: righe.length > 0, attivo_dal: righe.length ? attivoDal : null })
 }

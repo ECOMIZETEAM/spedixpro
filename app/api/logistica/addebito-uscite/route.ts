@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
   const admin = createAdminSupabase()
 
   // 1) Chi ha il servizio acceso, cioe' chi ha le fasce.
-  let qf = admin.from('logistica_fasce').select('cliente_id,master_id,peso_max,prezzo')
+  let qf = admin.from('logistica_fasce').select('cliente_id,master_id,peso_max,prezzo,created_at')
   if (master) {
     const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
     const rete = await sottoAlberoMasterIds(admin, master)
@@ -53,10 +53,16 @@ export async function GET(req: NextRequest) {
   if (!fasce?.length) return NextResponse.json({ anteprima, attivi: 0, da_addebitare: 0, totale: 0, clienti: [] })
 
   type Fascia = { peso: number; prezzo: number }
-  const perCliente = new Map<string, { master_id: string; fasce: Fascia[] }>()
+  // DA QUANDO SI FATTURA. Il servizio si accende compilando le fasce, e da quel momento in poi si
+  // paga: non prima. Senza questa data, accendere la logistica a un cliente gli avrebbe addebitato
+  // all'indietro tutte le spedizioni della finestra — lavoro fatto quando il servizio non esisteva
+  // ancora. Visto in anteprima su un caso vero: 37 spedizioni dal 13 luglio, listino creato il 5
+  // agosto, 37 euro che non andavano chiesti a nessuno.
+  const perCliente = new Map<string, { master_id: string; fasce: Fascia[]; dal: string }>()
   for (const f of fasce) {
-    const r = perCliente.get(f.cliente_id) || { master_id: f.master_id, fasce: [] as Fascia[] }
+    const r = perCliente.get(f.cliente_id) || { master_id: f.master_id, fasce: [] as Fascia[], dal: f.created_at }
     r.fasce.push({ peso: Number(f.peso_max), prezzo: Number(f.prezzo) })
+    if (f.created_at < r.dal) r.dal = f.created_at
     perCliente.set(f.cliente_id, r)
   }
   for (const r of perCliente.values()) r.fasce.sort((a, b) => a.peso - b.peso)
@@ -82,7 +88,11 @@ export async function GET(req: NextRequest) {
     .select('spedizione_id').eq('tipo', 'uscita').in('spedizione_id', speds.map((s: any) => s.id))
   const fatte = new Set((gia || []).map((g: any) => g.spedizione_id))
 
-  const daFare = speds.filter((s: any) => !fatte.has(s.id))
+  const daFare = speds.filter((s: any) => {
+    if (fatte.has(s.id)) return false
+    const c = perCliente.get(s.cliente_id)
+    return !!c && s.created_at >= c.dal      // niente addebiti prima dell'accensione
+  })
 
   if (anteprima) {
     const per = new Map<string, { posti: number; importo: number }>()
