@@ -31,6 +31,7 @@ Qui non serve ricordarsene: il database le applica da solo, da qualunque strada 
 | I soldi finiscono sul conto giusto | `registra_movimento_master` chiama `fn_conto_di` |
 | Cancellare un contratto porta via la sua configurazione | vincoli `on delete cascade` (zone, fasce, supplementi, listini) |
 | ...ma **non** spedizioni, ritiri e distinte | quei vincoli restano bloccanti, di proposito |
+| Il canone non passa dai movimenti | trigger `trg_no_canone_su_movimenti` (si paga con carta, mai dal credito) |
 | Chi detiene un contratto | colonna `corrieri.proprio` — dichiarato, non dedotto dal nome |
 | Contatori spedizioni, audit sui listini | trigger `trg_conta_spedizione`, `trg_audit` |
 
