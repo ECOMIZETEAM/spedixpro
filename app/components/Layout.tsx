@@ -51,6 +51,9 @@ const NAV: NavItem[] = [
     { label: 'Nuovo Cliente', href: '/dashboard/clienti/nuovo', perm: 'admin.clients.create' },
     { label: 'Elenco Clienti', href: '/dashboard/clienti', perm: 'admin.clients.index' },
     { label: 'Catalogo prodotti', href: '/dashboard/catalogo', perm: 'admin.clients.index' },
+    // Logistica conto terzi: la merce del cliente tenuta da noi. Sta sotto Clienti perche' e' un
+    // servizio che si vende a loro, e si apre scegliendo di chi e' la merce.
+    { label: 'Logistica', href: '/dashboard/logistica', perm: 'admin.clients.index' },
     { label: 'Nuovo Master', href: '/dashboard/clienti/master/nuovo', rete: true },
     { label: 'Elenco Master', href: '/dashboard/clienti/master', rete: true },
     { label: 'Gerarchia', href: '/dashboard/clienti/gerarchia', rete: true },
