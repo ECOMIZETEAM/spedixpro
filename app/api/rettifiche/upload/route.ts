@@ -47,29 +47,41 @@ export async function POST(req: NextRequest) {
       if (!lette.righe.length) return NextResponse.json({ error: 'Il file non contiene ripesature leggibili' }, { status: 400 })
 
       const adminRip = createAdminSupabase()
-      // Gia' caricate: si tolgono PRIMA di calcolare, cosi' i totali a schermo sono quelli che
-      // entrerebbero davvero. L'export del fornitore e' cumulativo. (La garanzia vera resta
-      // l'indice unico sul database: questo serve solo a mostrare numeri onesti.)
-      const { data: gia } = await adminRip.from('rettifiche')
-        .select('rif_fornitore').eq('master_id', myMaster)
-        .in('rif_fornitore', lette.righe.map(r => r.idOrdine))
-      const viste = new Set((gia || []).map((g: any) => g.rif_fornitore))
-      const tutteNuove = lette.righe.filter(r => !viste.has(r.idOrdine))
-      // IL COSTO DEL FORNITORE E' QUELLO DI TUTTO IL FILE, non della fetta che sto elaborando ora.
-      // Spezzando il lavoro a pacchetti da quindici avevo lasciato il totale sul pacchetto: a
-      // schermo usciva 33,54 invece di 356,35 — cioe' la somma degli ultimi quindici.
-      const costoFornitoreTotale = Math.round(tutteNuove.reduce((s, r) => s + r.addebitoFornitore, 0) * 100) / 100
-      let nuove = tutteNuove
 
       // A FETTE, cosi' la schermata puo' dire a che punto sta.
       // Riprezzare una spedizione vuol dire ricostruire tutta la sua catena di master, e ognuno e'
       // qualche lettura: su centosei spedizioni sono centinaia di viaggi al database, e in un colpo
       // solo la richiesta ci mette troppo e la pagina resta muta. Il browser ne chiede un pezzo per
       // volta e misura quanto ci mette davvero: il tempo che manca e' calcolato sul ritmo vero.
-      const totaleNuove = tutteNuove.length
+      //
+      // L'INDICE CONTA SUL FILE, NON SU "QUELLE CHE RESTANO DA FARE". E' il guasto che ha fatto
+      // sparire quarantasei spedizioni su centosei, due volte di fila: la fetta veniva presa
+      // dall'elenco delle NON ancora caricate, che pero' si accorcia di quindici a ogni giro perche'
+      // nel frattempo le stiamo scrivendo noi. L'indice avanzava di quindici, la lista ne perdeva
+      // quindici, e ogni giro ne saltava un blocco intero; dopo quattro giri la fetta cadeva oltre
+      // la fine e il lavoro si dichiarava finito a sessanta su centosei. Ogni caricamento ne
+      // prendeva un pezzo diverso — ecco perche' i totali dei destinatari cambiavano ogni volta.
+      // Il file e' la sola cosa che non cambia sotto i piedi: si numera quello.
+      const totaleFile = lette.righe.length
       const da = Math.max(0, Number(body?.da) || 0)
-      const quante = Math.max(1, Math.min(200, Number(body?.quante) || totaleNuove))
-      if (body?.da !== undefined) nuove = nuove.slice(da, da + quante)
+      const quante = Math.max(1, Math.min(200, Number(body?.quante) || totaleFile))
+      const fetta = body?.da !== undefined ? lette.righe.slice(da, da + quante) : lette.righe
+
+      // Gia' caricate: si saltano SENZA spostare l'indice, cosi' rileggere lo stesso export (che il
+      // fornitore manda cumulativo) non rifa' i conti su quelle di ieri. La garanzia vera resta
+      // l'indice unico sul database: questo evita solo lavoro inutile.
+      const viste = new Set<string>()
+      for (let i = 0; i < fetta.length; i += 200) {
+        const { data: gia } = await adminRip.from('rettifiche')
+          .select('rif_fornitore').eq('master_id', myMaster)
+          .in('rif_fornitore', fetta.slice(i, i + 200).map(r => r.idOrdine))
+        for (const g of (gia || [])) viste.add((g as any).rif_fornitore)
+      }
+      const nuove = fetta.filter(r => !viste.has(r.idOrdine))
+      // IL COSTO DEL FORNITORE E' QUELLO DI TUTTO IL FILE, non della fetta che sto elaborando ora.
+      // Spezzando il lavoro a pacchetti da quindici avevo lasciato il totale sul pacchetto: a
+      // schermo usciva 33,54 invece di 356,35 — cioe' la somma degli ultimi quindici.
+      const costoFornitoreTotale = Math.round(lette.righe.reduce((s, r) => s + r.addebitoFornitore, 0) * 100) / 100
       const esiti = await calcolaRipesature(adminRip, nuove)
 
       // ── CARICAMENTO VERO ──
@@ -129,7 +141,7 @@ export async function POST(req: NextRequest) {
           const { data: pre } = await supabase.from('rettifiche_files')
             .select('n_processate,n_trovate,n_scartati,n_da_rettificare').eq('id', creaturaFile).maybeSingle()
           await supabase.from('rettifiche_files').update({
-            n_processate: (pre?.n_processate || 0) + esiti.length,
+            n_processate: (pre?.n_processate || 0) + fetta.length,
             n_trovate: (pre?.n_trovate || 0) + esiti.filter(e => e.trovata).length,
             n_scartati: (pre?.n_scartati || 0) + esiti.filter(e => !e.trovata).length,
             n_da_rettificare: (pre?.n_da_rettificare || 0) + scritte,
@@ -137,34 +149,20 @@ export async function POST(req: NextRequest) {
         }
 
         return NextResponse.json({
-          success: true, tipo: 'ripesature', anteprima: false,
+          success: true, tipo: 'ripesature',
           fileId: creaturaFile,
-          da, quante: nuove.length, totaleDaFare: totaleNuove,
-          finito: da + nuove.length >= totaleNuove,
-          creato: scritte, doppioniRespinti: doppioni,
+          // Dove siamo arrivati NEL FILE: serve alla barra e a sapere se c'e' un altro pezzo da
+          // chiedere. Si conta sul file, non sul lavoro rimasto, che si accorcia mentre lo si fa.
+          da, quante: fetta.length, totaleDaFare: totaleFile,
+          finito: da + fetta.length >= totaleFile,
+          creato: scritte, doppioniRespinti: doppioni, giaCaricate: fetta.length - nuove.length,
           totali: {
-            nelFile: (righe || []).length, spedizioni: lette.righe.length,
-            giaCaricate: viste.size,
+            nelFile: (righe || []).length, spedizioni: totaleFile,
             nonTrovate: esiti.filter(e => !e.trovata).length,
             addebitoFornitore: costoFornitoreTotale,
           },
         })
       }
-
-      return NextResponse.json({
-        success: true, tipo: 'ripesature', anteprima: true,
-        // Dove siamo arrivati: serve alla barra, e a sapere se c'e' un altro pezzo da chiedere.
-        da, quante: nuove.length, totaleDaFare: totaleNuove,
-        finito: da + nuove.length >= totaleNuove,
-        totali: {
-          nelFile: (righe || []).length,
-          spedizioni: lette.righe.length,
-          giaCaricate: viste.size,
-          nonTrovate: esiti.filter(e => !e.trovata).length,
-          addebitoFornitore: costoFornitoreTotale,
-        },
-        righe: esiti,
-      })
     }
   }
 
