@@ -40,6 +40,10 @@ export default function RettificaCostiPage() {
   // flusso del file dei pesi, che continua a funzionare come prima.
   const [ripesature, setRipesature] = useState<any>(null)
   const [caricandoRip, setCaricandoRip] = useState(false)
+  // Quali gruppi sono aperti. RAGGRUPPATE PER DESTINATARIO DIRETTO: un master vede i suoi
+  // sotto-master e i suoi clienti diretti, non l'elenco piatto di tutta la rete sotto. Con 106
+  // spedizioni su sei destinatari, l'elenco piatto e' illeggibile e non si capisce chi paga cosa.
+  const [aperti, setAperti] = useState<Record<string, boolean>>({})
 
   // Il caricamento vero: si rimanda lo STESSO file con conferma, cosi' i numeri che si scrivono
   // sono ricalcolati adesso e non quelli che il browser si e' tenuto in tasca dall'anteprima.
@@ -156,6 +160,20 @@ export default function RettificaCostiPage() {
         r.clienti?.ragione_sociale?.toLowerCase().includes(cerca.toLowerCase())
       )
     : rettifiche
+
+  // Un gruppo per destinatario: il master a cui e' indirizzata, oppure il cliente se e' diretto.
+  const gruppi = (() => {
+    const map = new Map<string, { nome: string; tipo: 'master' | 'cliente'; righe: any[]; totale: number }>()
+    for (const r of rettificheFiltrate) {
+      const nome = r.masters?.nome || r.clienti?.ragione_sociale || '(senza destinatario)'
+      const chiave = (r.target_master_id || r.cliente_id || 'x') + '|' + nome
+      if (!map.has(chiave)) map.set(chiave, { nome, tipo: r.target_master_id ? 'master' : 'cliente', righe: [], totale: 0 })
+      const g = map.get(chiave)!
+      g.righe.push(r)
+      g.totale += Number(r.differenza || 0)
+    }
+    return [...map.entries()].sort((a, b) => Math.abs(b[1].totale) - Math.abs(a[1].totale))
+  })()
 
   return (
     <div>
@@ -323,7 +341,30 @@ export default function RettificaCostiPage() {
                 ))}
               </tr></thead>
               <tbody>
-                {rettificheFiltrate.map((r:any)=>{
+                {gruppi.map(([chiave, g]) => (
+                  <tr key={'g-'+chiave} onClick={()=>setAperti(p=>({...p,[chiave]:!p[chiave]}))}
+                    style={{background:'#f3f4f6',cursor:'pointer'}}>
+                    <td style={{padding:'9px 10px',borderBottom:'1px solid #d1d5db'}} onClick={e=>e.stopPropagation()}>
+                      <input type="checkbox"
+                        checked={g.righe.filter((r:any)=>r.stato==='da_rettificare').every((r:any)=>selectedIds.includes(r.id)) && g.righe.some((r:any)=>r.stato==='da_rettificare')}
+                        onChange={e=>{
+                          const ids = g.righe.filter((r:any)=>r.stato==='da_rettificare').map((r:any)=>r.id)
+                          setSelectedIds(prev => e.target.checked ? [...new Set([...prev,...ids])] : prev.filter(i=>!ids.includes(i)))
+                        }}/>
+                    </td>
+                    <td colSpan={9} style={{padding:'9px 10px',borderBottom:'1px solid #d1d5db',fontSize:'12.5px',fontWeight:700,color:'#1a1a1a'}}>
+                      <span style={{display:'inline-block',width:'14px',color:'#6b7280'}}>{aperti[chiave]?'▾':'▸'}</span>
+                      {g.nome}
+                      <span style={{fontWeight:400,color:'#6b7280',marginLeft:'8px'}}>
+                        {g.tipo==='master'?'sotto-master':'cliente diretto'} · {g.righe.length} {g.righe.length===1?'rettifica':'rettifiche'}
+                      </span>
+                      <span style={{float:'right',fontWeight:700,color:g.totale<0?'#dc2626':'#15803d'}}>
+                        € {Math.abs(g.totale).toFixed(2)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {gruppi.flatMap(([chiave,g]) => aperti[chiave] ? g.righe : []).map((r:any)=>{
                   const isSelected = selectedIds.includes(r.id)
                   const diff = Number(r.differenza || 0)
                   const isDaRett = r.stato === 'da_rettificare'
