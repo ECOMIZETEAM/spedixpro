@@ -19,21 +19,38 @@ export async function GET(req: NextRequest) {
   if (fileId) query = query.eq('file_id', fileId)
   const { data } = await query
 
-  // IL NOME DEL DESTINATARIO ESCE PIATTO, non come relazione incorporata.
-  // Con `masters:target_master_id(nome)` il dato arriva a volte come oggetto e a volte come elenco
-  // di uno, a seconda di come PostgREST decide di tipizzare la join: la schermata leggeva
-  // `r.masters?.nome`, trovava undefined, e mostrava "(senza destinatario)" su tutti e quattro i
-  // gruppi mentre a database i nomi c'erano tutti. E' la stessa trappola gia' costata un errore
-  // sul carico merce. Qui si normalizza una volta sola, e chi legge non deve indovinare la forma.
-  const uno = (v: any) => Array.isArray(v) ? v[0] : v
-  const righe = (data || []).map((r: any) => {
-    const m = uno(r.masters), c = uno(r.clienti)
-    return {
-      ...r,
-      destinatario_nome: m?.nome || c?.ragione_sociale || null,
-      destinatario_tipo: r.target_master_id ? 'master' : (r.cliente_id ? 'cliente' : null),
+  // IL NOME DEL DESTINATARIO NON SI PUO' LEGGERE CON LA SESSIONE DI CHI GUARDA.
+  //
+  // Le regole per-inquilino su `masters` mostrano a un master SOLO SE STESSO: provato con la
+  // sessione vera di MULTIEXPRESS, vede le sue 106 rettifiche ma zero dei quattro sotto-master a
+  // cui sono indirizzate, e un solo master in tutto. Quindi la relazione incorporata tornava
+  // `null` e la schermata scriveva "(senza destinatario)" su tutti i gruppi.
+  //
+  // Non e' un buco da aprire allargando le regole: il nome dei propri destinatari e' roba che
+  // questo master ha il diritto di vedere, ma solo per le righe CHE SONO SUE. Quindi si risolve
+  // qui, con la chiave di servizio, e SOLO sui destinatari che compaiono nelle sue rettifiche —
+  // che sono gia' filtrate per master_id poche righe sopra. Nessun altro nome esce da qui.
+  const righeGrezze = data || []
+  const idMaster = [...new Set(righeGrezze.map((r: any) => r.target_master_id).filter(Boolean))]
+  const idClienti = [...new Set(righeGrezze.map((r: any) => r.cliente_id).filter(Boolean))]
+  const nomi = new Map<string, string>()
+  if (idMaster.length || idClienti.length) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    if (idMaster.length) {
+      const { data: mm } = await admin.from('masters').select('id,nome').in('id', idMaster)
+      for (const m of (mm || [])) nomi.set(m.id, m.nome)
     }
-  })
+    if (idClienti.length) {
+      const { data: cc } = await admin.from('clienti').select('id,ragione_sociale').in('id', idClienti)
+      for (const c of (cc || [])) nomi.set(c.id, c.ragione_sociale)
+    }
+  }
+  const righe = righeGrezze.map((r: any) => ({
+    ...r,
+    destinatario_nome: nomi.get(r.target_master_id) || nomi.get(r.cliente_id) || null,
+    destinatario_tipo: r.target_master_id ? 'master' : (r.cliente_id ? 'cliente' : null),
+  }))
   return NextResponse.json(righe)
 }
 
