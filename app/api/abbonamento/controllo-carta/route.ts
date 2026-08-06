@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { INIZIO_OBBLIGO_CARTA } from '@/lib/abbonamento-cambi'
+import { meseCorrente } from '@/lib/piani'
 
 // CONTROLLO GIORNALIERO: chi ha un piano attivo ma nessuna carta non sta pagando il canone.
 //
@@ -20,14 +21,24 @@ export async function GET(req: NextRequest) {
   }
 
   const admin = createAdminSupabase()
+  const mese = meseCorrente()
   const { data: attivi } = await admin.from('masters')
-    .select('id,nome,parent_master_id,abbonamento_esente,stripe_subscription_id,stripe_stato,pagamento_scaduto_dal')
+    .select('id,nome,parent_master_id,abbonamento_esente,abbonamento_mese,stripe_subscription_id,stripe_stato,pagamento_scaduto_dal')
     .not('abbonamento_piano', 'is', null)
 
   const segnati: string[] = []
   for (const m of (attivi || [])) {
     if (!m.parent_master_id) continue                                   // il principale e' la piattaforma
     if (m.abbonamento_esente) continue                                  // tiene il piano, non paga
+    // QUESTO MESE RISULTA GIA' PAGATO — comunque sia arrivato il pagamento.
+    //
+    // Il controllo guardava solo la carta, quindi chi salda per altra via (un bonifico segnato a
+    // mano dagli incassi) veniva rincorso lo stesso: il giorno dopo si ritrovava il conto alla
+    // rovescia addosso e tre giorni dopo il portale chiuso, pur avendo pagato. E' successo con
+    // Central Poste, agosto saldato fuori dal circuito.
+    // `abbonamento_mese` significa gia' questo altrove — in stripe/checkout la stessa condizione
+    // si chiama `meseGiaPagato` — quindi qui non si inventa niente, si smette di ignorarla.
+    if (m.abbonamento_mese === mese) continue
     if (m.stripe_subscription_id && m.stripe_stato !== 'canceled') continue  // paga con carta: ci pensa il circuito
     if (m.pagamento_scaduto_dal) continue                               // conto alla rovescia gia' partito
 
