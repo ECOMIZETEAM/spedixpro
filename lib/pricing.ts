@@ -84,16 +84,37 @@ export async function fattoreVolumeCorriere(supabase: any, masterId: string, cor
 }
 
 // Peso fatturato (max tra reale e volumetrico) sul TOTALE dei colli, dato un fattore.
+// IL PESO FATTURATO SI DECIDE COLLO PER COLLO, come fa il corriere.
+//
+// Prima si sommava tutto e si confrontava dopo: max(somma dei pesi, somma dei volumi). Il corriere
+// fa il contrario — per OGNI collo prende il maggiore fra il suo peso e il suo volume, e poi somma.
+// Su un collo solo le due cose coincidono sempre, ed e' per questo che nessuno se n'era accorto.
+// Sul multicollo no: se un collo e' pesante e uno voluminoso, il sorpasso del secondo viene
+// assorbito dal peso del primo e sparisce.
+//
+// Caso vero (3UW1WLJ008202): due colli da 10 kg, 22x55x39 e 37x57x25.
+//   a somme:        peso 20, volume 19,98        -> 20,00 kg -> fascia 0-20 -> 6,99
+//   collo per collo: max(10;9,44) + max(10;10,54) -> 20,54 kg -> fascia 0-30 -> 8,23
+// Il fornitore ci ha addebitato 1,24, cioe' esattamente la differenza fra quelle due fasce: la sua
+// tariffa e' identica alla nostra, era il conto del peso a essere diverso.
+//
+// Misurato prima di cambiare: su 516 multicollo in 30 giorni, 118 erano contate meno del corriere
+// (491 kg non fatturati, fino a 39 kg su una singola spedizione) e in 35 casi cambiava la fascia.
+// Quelle le pagavamo noi, e ce ne accorgevamo solo settimane dopo, dal file delle ripesature.
 export function calcolaPesoFatturato(packages: any[], fattore: number, soloPesoReale = false): { pesoReale: number; pesoVolume: number; pesoFatturato: number } {
   const pks = Array.isArray(packages) ? packages : []
-  const pesoReale = pks.reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0)
-  let pesoVolume = 0
   const f = fattore > 0 ? fattore : 5000
+  let pesoReale = 0, pesoVolume = 0, perCollo = 0
   for (const p of pks) {
+    const peso = parseFloat(p?.weight) || 0
     const L = parseFloat(p?.length) || 0, W = parseFloat(p?.width) || 0, H = parseFloat(p?.height) || 0
-    if (L && W && H) pesoVolume += (L * W * H) / f
+    const vol = (L && W && H) ? (L * W * H) / f : 0
+    pesoReale += peso
+    pesoVolume += vol
+    // Un collo senza misure vale il suo peso: non si inventa un volume che non conosciamo.
+    perCollo += Math.max(peso, vol)
   }
-  const pesoFatturato = soloPesoReale ? pesoReale : Math.max(pesoReale, pesoVolume)
+  const pesoFatturato = soloPesoReale ? pesoReale : perCollo
   return { pesoReale, pesoVolume, pesoFatturato }
 }
 
@@ -190,13 +211,16 @@ export async function calcolaPrezzoListino(
     if (fv > 0) fattore = fv
   }
 
-  const pesoReale = packages.reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
-  let pesoVolume = 0
-  for (const p of packages) {
-    if (p?.length && p?.width && p?.height) pesoVolume += (p.length * p.width * p.height) / fattore
-  }
-  // "solo peso reale": ignora il volumetrico, si paga sempre sul peso reale
-  const pesoFatturato = listino?.solo_peso_reale ? pesoReale : Math.max(pesoReale, pesoVolume)
+  // UNA FUNZIONE SOLA, non una copia qui e una piu' giu'.
+  // Il peso fatturato era ricalcolato a mano in TRE punti: qui (prezzo cliente), nel prezzo del
+  // corriere piu' sotto, e in calcolaPesoFatturato — che pero' la usava un chiamante solo. Quando
+  // si e' scoperto che il conto era diverso da quello del corriere, correggere la funzione
+  // condivisa non avrebbe cambiato un solo prezzo: le due copie vive stavano qui.
+  // "solo peso reale": ignora il volumetrico, si paga sempre sul peso reale.
+  const _pf = calcolaPesoFatturato(packages, fattore, !!listino?.solo_peso_reale)
+  const pesoReale = _pf.pesoReale || 1
+  const pesoVolume = _pf.pesoVolume
+  const pesoFatturato = _pf.pesoFatturato || pesoReale
   // agevolazione peso reale: valida solo se OGNI pacco e' entro 50x28x32 cm
   // La scatola dell'agevolazione dipende dal CONTRATTO: valutata per corriere piu' sotto.
 
@@ -357,12 +381,14 @@ export async function calcolaPrezzoCorriereDettaglio(
   const soloPesoReale = listini.some((l: any) => l.solo_peso_reale)
 
   const packages = Array.isArray(params.packages) && params.packages.length ? params.packages : []
-  let pesoVolume = 0
-  for (const p of packages) {
-    if (p?.length && p?.width && p?.height) pesoVolume += (p.length * p.width * p.height) / fattore
-  }
-  const pesoReale = Number(params.pesoReale) || 1
-  let pesoFatturato = soloPesoReale ? pesoReale : Math.max(pesoReale, pesoVolume)
+  // Stessa funzione del prezzo cliente (vedi la nota li' sopra): il peso fatturato si conta collo
+  // per collo, come fa il corriere, e in un punto solo.
+  const _pfm = calcolaPesoFatturato(packages, fattore, soloPesoReale)
+  const pesoVolume = _pfm.pesoVolume
+  // Il peso reale arriva dal chiamante e vince sul ricavato dai colli: c'e' chi passa il peso senza
+  // il dettaglio dei colli, e in quel caso dai pacchi non si ricava niente.
+  const pesoReale = Number(params.pesoReale) || _pfm.pesoReale || 1
+  let pesoFatturato = soloPesoReale ? pesoReale : Math.max(_pfm.pesoFatturato, pesoReale)
   // Agevolazione peso reale: se il corriere ha il flag e OGNI collo è entro 50x32x28 cm,
   // si tassa sul peso reale (come nel preventivo cliente).
   const { data: corrSett } = await supabase.from('corrieri').select('settings').eq('id', corriereId).maybeSingle()
