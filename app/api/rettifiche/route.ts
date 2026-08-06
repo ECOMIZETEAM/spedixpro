@@ -40,6 +40,30 @@ export async function GET(req: NextRequest) {
   // qui, con la chiave di servizio, e SOLO sui destinatari che compaiono nelle sue rettifiche —
   // che sono gia' filtrate per master_id poche righe sopra. Nessun altro nome esce da qui.
   const righeGrezze = data || []
+
+  // PERCHE' UNA RIGA NON SI PUO' CONFERMARE, scritto sulla riga stessa.
+  // La conferma rifiuta le rettifiche su spedizioni in annullo — giusto, perche' quel pacco sta per
+  // essere stornato e addebitargli una ripesatura lascerebbe un residuo su una spedizione che non
+  // ha mai viaggiato. Ma finora quelle righe restavano in elenco identiche alle altre: si premeva
+  // Conferma, sparivano tutte tranne una, e non c'era modo di sapere se fosse una scelta o un
+  // guasto. Ora lo stato della spedizione arriva insieme alla riga.
+  const idSped = [...new Set(righeGrezze.map((r: any) => r.spedizione_id).filter(Boolean))]
+  const statoSped = new Map<string, string>()
+  if (idSped.length) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const adm = createAdminSupabase()
+    for (let i = 0; i < idSped.length; i += 300) {
+      const { data: ss } = await adm.from('spedizioni').select('id,stato').in('id', idSped.slice(i, i + 300))
+      for (const s of (ss || [])) statoSped.set((s as any).id, (s as any).stato)
+    }
+  }
+  const bloccoDi = (r: any) => {
+    const st = r.spedizione_id ? statoSped.get(r.spedizione_id) : null
+    if (st === 'annullata') return 'Spedizione annullata: non si addebita'
+    if (st === 'annullamento_pending' || st === 'annullamento_manuale') return 'Spedizione in annullo: si conferma solo se l\'annullo non va a buon fine'
+    return null
+  }
+
   const idMaster = [...new Set(righeGrezze.map((r: any) => r.target_master_id).filter(Boolean))]
   const idClienti = [...new Set(righeGrezze.map((r: any) => r.cliente_id).filter(Boolean))]
   const nomi = new Map<string, string>()
@@ -59,6 +83,7 @@ export async function GET(req: NextRequest) {
     ...r,
     destinatario_nome: nomi.get(r.target_master_id) || nomi.get(r.cliente_id) || null,
     destinatario_tipo: r.target_master_id ? 'master' : (r.cliente_id ? 'cliente' : null),
+    blocco: bloccoDi(r),
   }))
   return NextResponse.json(righe)
 }

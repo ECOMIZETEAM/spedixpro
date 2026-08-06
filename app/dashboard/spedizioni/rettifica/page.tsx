@@ -152,10 +152,26 @@ export default function RettificaCostiPage() {
     const data = await res.json()
     setConfermando(false)
     if (data.success) {
-      await dialog.alert({ title: 'Rettifiche confermate', message: data.rettificate + ' rettifiche confermate. Credito aggiornato.' })
+      // SE UNA RIGA NON PASSA, VA DETTO PERCHE'.
+      // La conferma il motivo lo restituisce da sempre, ma qui veniva buttato via: a schermo usciva
+      // "N confermate" e quelle rimaste restavano li' mute, senza che si potesse capire se fosse un
+      // guasto o una scelta. Quasi sempre e' una scelta — la spedizione e' in annullo, o il
+      // destinatario non e' piu' della rete — ma se non lo si scrive sembra un guasto.
+      const saltate = Array.isArray(data.dettaglio) ? data.dettaglio : []
+      const perche = new Map<string, number>()
+      for (const s of saltate) perche.set(s.perche, (perche.get(s.perche) || 0) + 1)
+      await dialog.alert({
+        title: 'Rettifiche confermate',
+        message: `${data.rettificate} rettifiche confermate, credito aggiornato.`
+          + (saltate.length
+              ? `\n\nNON confermate: ${saltate.length}.\n`
+                + Array.from(perche.entries()).map(([m, n]) => `• ${n} — ${m}`).join('\n')
+                + '\n\nRestano in elenco: non sono un errore, aspettano che si sappia come va a finire.'
+              : ''),
+      })
       setSelectedIds([])
       caricaRettifiche(fileSelezionato || undefined)
-    }
+    } else await dialog.alert({ title: 'Errore', message: data.error || 'Conferma non riuscita.' })
   }
 
   function toggleSelect(id: string) {
@@ -341,7 +357,16 @@ export default function RettificaCostiPage() {
                         {isDaRett && <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(r.id)}/>}
                       </td>
                       <td style={{padding:'8px 10px',color:'#1a1a1a',fontWeight:'500',fontSize:'12px'}}>{r.clienti?.ragione_sociale || (r.masters?.nome ? ('🏢 ' + r.masters.nome) : '—')}</td>
-                      <td style={{padding:'8px 10px',color:'#f97316',fontWeight:'600'}}>{r.numero_spedizione}</td>
+                      <td style={{padding:'8px 10px',color:'#f97316',fontWeight:'600'}}>
+                        {r.numero_spedizione}
+                        {/* Perche' questa riga non si puo' confermare, scritto qui e non solo dopo
+                            aver premuto Conferma: cosi' non sembra che sia rimasta li' per errore. */}
+                        {r.blocco && (
+                          <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:600,color:'#b45309',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'4px',padding:'2px 6px',display:'inline-block',whiteSpace:'normal',maxWidth:'260px'}}>
+                            ⏸ {r.blocco}
+                          </div>
+                        )}
+                      </td>
                       <td style={{padding:'8px 10px',color:'#1a1a1a'}}>{Number(r.peso_iniziale).toFixed(2)}</td>
                       <td style={{padding:'8px 10px',color:'#1a1a1a'}}>{Number(r.peso_volume_iniziale).toFixed(2)}</td>
                       <td style={{padding:'8px 10px',color:Number(r.peso_reale)>Number(r.peso_iniziale)?'#dc2626':'#374151',fontWeight:Number(r.peso_reale)>Number(r.peso_iniziale)?'700':'400'}}>
