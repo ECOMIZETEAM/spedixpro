@@ -20,9 +20,12 @@ async function costruisciCatena(
     costoSpedizione: number
     provincia: string
     packages: any[]
-    cap?: string
+    // OBBLIGATORI. Il comune serve per i CAP condivisi (25050 Rodengo Saiano vs Monte Isola):
+    // senza, la zona che rivendica il CAP "solo per QUEL comune" vince comunque, e il master paga
+    // la tariffa isola per un posto che isola non e'. Vedi la nota su verificaCreditoCatena.
+    cap: string
+    citta: string
     paese?: string
-    citta?: string   // città destinazione: per i CAP condivisi (es. 25050 Rodengo Saiano vs Monte Isola)
     // Nome contratto del corriere: i sotto-master rivendono con COPIE dello stesso corriere.
     // Serve per (1) trovare il proprietario REALE del contratto e (2) prezzare il corriere giusto.
     corriereNome?: string
@@ -157,17 +160,28 @@ export async function haContoProprio(masterId: string | null | undefined): Promi
   return (count || 0) > 0
 }
 
+// IL CAP E IL COMUNE SONO OBBLIGATORI, e non e' pignoleria.
+//
+// Erano facoltativi, e la porta delle API si era dimenticata `citta`: compilava benissimo. Dentro
+// la stessa richiesta il cliente veniva prezzato col comune e i master addebitati senza — e senza
+// comune la zona speciale che rivendica un CAP "ma solo per QUEL comune" vince lo stesso. Il master
+// pagava la tariffa isola per destinazioni che isola non sono: Ficarazzi al posto di Ustica,
+// Bacoli al posto di Ischia. 162,37 euro presi di troppo a quattro master in tre settimane, e
+// nessun errore da nessuna parte.
+//
+// Renderli obbligatori sposta il controllo dove passano tutte le porte: una rotta nuova che se li
+// dimentica NON COMPILA. E' l'unica versione di questa regola che non si puo' dimenticare.
 export async function verificaCreditoCatena(
   supabase: any,
   params: {
     masterDirettoId: string
     corriereOwnerId: string
     provincia: string
+    cap: string
+    citta: string
     packages: any[]
     costoSpedizione?: number
-    cap?: string
     paese?: string
-    citta?: string
     corriereNome?: string
     contrassegno?: number
     assicurazione?: number
@@ -214,9 +228,10 @@ export async function addebitaCatena(
     destNome: string
     spedizioneId: string | null
     createdBy: string | null
-    cap?: string
+    // Obbligatori: e' la riga che mancava proprio qui, chiamata dalle API. Vedi sopra.
+    cap: string
+    citta: string
     paese?: string
-    citta?: string
     corriereNome?: string
     contrassegno?: number
     assicurazione?: number
@@ -255,57 +270,13 @@ export async function addebitaCatena(
     }
   }
 }
-
-export async function rimborsaCatena(
-  supabase: any,
-  params: {
-    masterDirettoId: string
-    corriereOwnerId: string
-    costoSpedizione: number
-    provincia: string
-    packages: any[]
-    numero: string
-    destNome: string
-    spedizioneId: string | null
-    createdBy: string | null
-    cap?: string
-    paese?: string
-    citta?: string
-    corriereNome?: string
-    contrassegno?: number
-    assicurazione?: number
-  }
-): Promise<void> {
-  const adminMov = createAdminSupabase()
-  const { catena } = await costruisciCatena(supabase, {
-    masterDirettoId: params.masterDirettoId,
-    corriereOwnerId: params.corriereOwnerId,
-    costoSpedizione: params.costoSpedizione,
-    provincia: params.provincia,
-    packages: params.packages,
-    cap: params.cap,
-    paese: params.paese,
-    citta: params.citta,
-    corriereNome: params.corriereNome,
-    contrassegno: params.contrassegno,
-    assicurazione: params.assicurazione,
-  })
-
-  for (const liv of catena) {
-    if (!(liv.prezzo > 0)) continue
-    try {
-      await registraMovimentoMaster(adminMov, {
-        masterOwnerId: liv.masterId,
-        masterTargetId: liv.masterId,
-        tipo: 'rimborso',
-        descrizione: `Rimborso ${params.numero} - ${params.destNome || ''}`.trim(),
-        riferimento: params.numero,
-        importo: Math.abs(liv.prezzo),
-        spedizioneId: params.spedizioneId,
-        createdBy: params.createdBy,
-      })
-    } catch (e) {
-      console.error(`Errore rimborso cascata su master ${liv.masterId}:`, e)
-    }
-  }
-}
+// NOTA: qui c'era `rimborsaCatena`, tolta il 6 agosto.
+//
+// Non la chiamava NESSUNO — un solo riferimento in tutto il progetto, la sua stessa definizione —
+// ed era una seconda strada per fare una cosa che si fa gia' altrove in modo piu' sicuro. Gli
+// annulli stornano da lib/annullaSpedizione.ts, che ROVESCIA I MOVIMENTI REALMENTE REGISTRATI;
+// questa invece ricalcolava il rimborso dal listino. Le due cose coincidono solo finche' il
+// listino non cambia e finche' entrambe risolvono la stessa zona — cioe' non sempre, come si e'
+// visto proprio oggi con il comune mancante. Una funzione che restituisce soldi con un conto
+// diverso da quello con cui li ha presi non e' una comodita': e' una trappola che aspetta il
+// primo che la chiama.
