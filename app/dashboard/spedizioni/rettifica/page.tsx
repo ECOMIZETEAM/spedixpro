@@ -39,6 +39,31 @@ export default function RettificaCostiPage() {
   // riconosce da sola dalle colonne. Qui si tiene il risultato per mostrarlo, senza toccare il
   // flusso del file dei pesi, che continua a funzionare come prima.
   const [ripesature, setRipesature] = useState<any>(null)
+  const [caricandoRip, setCaricandoRip] = useState(false)
+
+  // Il caricamento vero: si rimanda lo STESSO file con conferma, cosi' i numeri che si scrivono
+  // sono ricalcolati adesso e non quelli che il browser si e' tenuto in tasca dall'anteprima.
+  async function caricaRipesature() {
+    if (!ripesature?.fileRighe) return
+    setCaricandoRip(true)
+    try {
+      const res = await fetch('/api/rettifiche/upload', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nomeFile: ripesature.nomeFile, righe: ripesature.fileRighe, conferma: true }),
+      })
+      const d = await res.json()
+      if (d?.error) await dialog.alert({ title: 'Errore', message: d.error })
+      else {
+        await dialog.alert({
+          title: 'Rettifiche create',
+          message: `Create ${d.creato} rettifiche.` + (d.doppioniRespinti ? ` ${d.doppioniRespinti} erano già state caricate e sono state respinte.` : ''),
+        })
+        setRipesature(null)
+        await caricaFiles()
+      }
+    } catch { await dialog.alert({ title: 'Errore', message: 'Errore di rete.' }) }
+    setCaricandoRip(false)
+  }
 
   async function uploadFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -65,7 +90,8 @@ export default function RettificaCostiPage() {
       })
       const data = await res.json()
       if (data?.tipo === 'ripesature') {
-        setRipesature(data)
+        // Si tengono le righe lette: il caricamento vero le rimanda al server, che rifa' i conti.
+        setRipesature({ ...data, fileRighe: righe, nomeFile: file.name })
         setUploading(false)
         if (fileRef.current) fileRef.current.value = ''
         return
@@ -152,6 +178,16 @@ export default function RettificaCostiPage() {
             {ripesature.totali.nonTrovate > 0 && <> {ripesature.totali.nonTrovate} non risultano fra le nostre spedizioni.</>}
             <br/>Costo del fornitore: <strong>€ {Number(ripesature.totali.addebitoFornitore).toFixed(2)}</strong>.
             {' '}<span style={{fontWeight:700}}>Nessuna rettifica è stata creata: questa è solo un'anteprima.</span>
+            <div style={{marginTop:'12px'}}>
+              <button onClick={caricaRipesature} disabled={caricandoRip}
+                style={{background:caricandoRip?'#d5d5d5':'#f97316',color:'#fff',border:'none',borderRadius:'8px',padding:'10px 18px',fontSize:'13px',fontWeight:700,cursor:caricandoRip?'default':'pointer'}}>
+                {caricandoRip ? 'Sto caricando…' : 'Carica le rettifiche'}
+              </button>
+              <span style={{fontSize:'12px',color:'#92400e',marginLeft:'10px'}}>
+                Le rettifiche vengono create verso i tuoi <strong>destinatari diretti</strong>. Da lì
+                ognuno decide se accettarle e se propagarle alla propria rete.
+              </span>
+            </div>
           </div>
           <div style={{background:'#fff',border:'1px solid #e8e8e8',borderRadius:'10px',overflow:'hidden'}}>
             <div style={{overflowX:'auto'}}>

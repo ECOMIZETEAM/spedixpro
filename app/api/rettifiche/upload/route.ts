@@ -57,6 +57,70 @@ export async function POST(req: NextRequest) {
       const nuove = lette.righe.filter(r => !viste.has(r.idOrdine))
       const esiti = await calcolaRipesature(adminRip, nuove)
 
+      // ── CARICAMENTO VERO ──
+      // Si scrive SOLO se chi carica lo chiede esplicitamente. Il primo giro e' sempre
+      // un'anteprima: chi paga guarda i numeri, poi conferma.
+      if (body?.conferma === true) {
+        // Anche queste finiscono nell'elenco "File processati", come gli altri caricamenti: chi
+        // guarda dopo deve poter risalire da una rettifica al file che l'ha generata.
+        const { data: fileRip } = await supabase.from('rettifiche_files').insert({
+          master_id: myMaster, nome_file: nomeFile, n_tot_spedizioni: (righe || []).length,
+        }).select().single()
+        const creaturaFile = fileRip?.id || null
+        const daScrivere: any[] = []
+        for (const e of esiti) {
+          if (!e.trovata || !e.spedizioneId) continue
+          // A CHI VA INDIRIZZATA: al FIGLIO DIRETTO di chi carica, non al fondo della catena.
+          // La catena arriva dal basso verso il detentore; il figlio diretto e' quello che sta
+          // subito PRIMA di me. Se non ci sono master sotto, il destinatario e' il cliente.
+          const cat = e.catenaDalBasso || []
+          const mio = cat.indexOf(myMaster)
+          const figlio = mio > 0 ? cat[mio - 1] : null
+          const liv = figlio
+            ? e.livelli.find(l => l.masterId === figlio)
+            : e.livelli.find(l => l.clienteId)
+          if (!liv || liv.differenza == null) continue
+          // Le differenze nulle non diventano una riga: una rettifica da zero euro e' solo rumore
+          // nell'elenco di chi la deve guardare.
+          if (Math.abs(liv.differenza) < 0.01) continue
+          daScrivere.push({
+            master_id: myMaster, file_id: creaturaFile,
+            spedizione_id: e.spedizioneId, numero_spedizione: e.ldv,
+            cliente_id: figlio ? null : liv.clienteId,
+            target_master_id: figlio,
+            peso_iniziale: e.pesoPrima, peso_volume_iniziale: 0,
+            peso_reale: e.pesoDopo, peso_volume_reale: 0,
+            costo_iniziale: liv.pagato, costo_finale: liv.dovuto,
+            differenza: -liv.differenza,   // la colonna e' "quanto restituisco": un addebito e' negativo
+            stato: 'da_rettificare',
+            rif_fornitore: e.idOrdine,     // l'anti-doppione: indice unico sul database
+          })
+        }
+        let scritte = 0, doppioni = 0
+        for (const riga of daScrivere) {
+          const { error } = await adminRip.from('rettifiche').insert(riga)
+          // 23505 = l'indice unico ha respinto un doppione. E' il comportamento voluto, non un guasto.
+          if (!error) scritte++
+          else if (error.code === '23505') doppioni++
+          else console.error('[RIPESATURE] riga non scritta', riga.numero_spedizione, error.message)
+        }
+        await supabase.from('rettifiche_files').update({
+          n_processate: lette.righe.length, n_trovate: esiti.filter(e => e.trovata).length,
+          n_scartati: esiti.filter(e => !e.trovata).length + viste.size, n_da_rettificare: scritte,
+        }).eq('id', creaturaFile)
+
+        return NextResponse.json({
+          success: true, tipo: 'ripesature', anteprima: false,
+          creato: scritte, doppioniRespinti: doppioni,
+          totali: {
+            nelFile: (righe || []).length, spedizioni: lette.righe.length,
+            giaCaricate: viste.size,
+            nonTrovate: esiti.filter(e => !e.trovata).length,
+            addebitoFornitore: Math.round(nuove.reduce((s, r) => s + r.addebitoFornitore, 0) * 100) / 100,
+          },
+        })
+      }
+
       return NextResponse.json({
         success: true, tipo: 'ripesature', anteprima: true,
         totali: {

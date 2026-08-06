@@ -42,6 +42,9 @@ export type EsitoRipesatura = {
   misure: string
   addebitoFornitore: number
   livelli: LivelloRettifica[]
+  // I master della catena, dal piu' basso al detentore del contratto. Serve a capire a chi va
+  // indirizzata la rettifica: al FIGLIO DIRETTO di chi la sta caricando, non al fondo della catena.
+  catenaDalBasso?: string[]
 }
 
 const arrotonda = (n: number) => Math.round(n * 100) / 100
@@ -122,6 +125,9 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0),
       })
       if (errore) base.motivo = errore
+      // L'ordine della catena e' dal master della spedizione IN SU, fino al detentore. Serve per
+      // sapere chi e' il figlio DIRETTO di chi carica: e' a lui che va indirizzata la rettifica.
+      base.catenaDalBasso = catena.map(l => l.masterId)
       for (const liv of catena) {
         const pagato = arrotonda(pagatoMaster.get(liv.masterId) || 0)
         // Il detentore del contratto paga il costo reale del fornitore, non un listino: per lui la
