@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
+import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
 // Decisione del master ricevente su una rettifica di catena: 'propagata' o 'assorbita'.
@@ -11,7 +12,10 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente as any); if (_bloccoAg) return _bloccoAg   // agente = no scrittura / no rete
-  if (!utente?.master_id || utente.ruolo === 'cliente') {
+  // Il ruolo, non l'elenco di quelli da tenere fuori: escludendo il solo 'cliente' passava
+  // l'AUTISTA, che un master_id ce l'ha (3 in produzione) — e qui sotto si legge e si scrive con la
+  // chiave di servizio, che scavalca le regole per riga.
+  if (!utente?.master_id || !gestisceLaRete(utente)) {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
   const body = await req.json().catch(() => ({}))

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
-import { calcolaPrezzoListino } from '@/lib/pricing'
+import { gestisceLaRete } from '@/lib/ruoli'
+import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
 
@@ -25,6 +26,11 @@ export async function POST(req: NextRequest) {
   const _bloccoAg = bloccaAgente(utente as any); if (_bloccoAg) return _bloccoAg   // agente = no scrittura / no rete
   const myMaster = utente?.master_id
   if (!myMaster) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
+  // IL RUOLO, NON SOLO L'APPARTENENZA. `master_id` ce l'hanno anche i clienti (769 in produzione)
+  // e gli autisti: da solo dice a quale rete uno appartiene, non che comandi qualcosa. Qui sotto si
+  // scrive con la chiave di servizio, che scavalca le regole per riga — quindi il permesso va
+  // controllato a mano, come fa gia' la rotta gemella /api/network/rettifiche.
+  if (!gestisceLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const body = await req.json()
   const { nomeFile, righe } = body
 
@@ -100,6 +106,7 @@ export async function POST(req: NextRequest) {
           creaturaFile = fileRip?.id || null
         }
         const daScrivere: any[] = []
+        let fuoriCatena = 0
         for (const e of esiti) {
           if (!e.trovata || !e.spedizioneId) continue
           // A CHI VA INDIRIZZATA: al FIGLIO DIRETTO di chi carica, non al fondo della catena.
@@ -107,6 +114,16 @@ export async function POST(req: NextRequest) {
           // subito PRIMA di me. Se non ci sono master sotto, il destinatario e' il cliente.
           const cat = e.catenaDalBasso || []
           const mio = cat.indexOf(myMaster)
+          // "NON SONO NELLA CATENA" NON E' "SONO L'ULTIMO".
+          // Con indexOf che torna -1 il conto `mio > 0 ? ... : null` cadeva sullo stesso ramo del
+          // caso legittimo `mio === 0`, e la rettifica veniva intestata al CLIENTE FINALE di una
+          // spedizione che non e' mia: saltando tutti i master in mezzo, riprezzata sul listino
+          // sbagliato, e addebitata alla conferma con la chiave di servizio — che non ricontrolla
+          // di chi sia quel cliente. Ci si finisce in tre modi: caricando un file con lettere di
+          // vettura altrui, stando sopra il detentore del contratto (la catena si ferma li'), o
+          // con una catena rotta a meta'. Il ramo del file dei pesi, in fondo a questo stesso file,
+          // la guardia ce l'ha da sempre: "idx === -1 -> scartata".
+          if (mio < 0 || e.catenaCompleta === false) { fuoriCatena++; continue }
           const figlio = mio > 0 ? cat[mio - 1] : null
           const liv = figlio
             ? e.livelli.find(l => l.masterId === figlio)
@@ -156,6 +173,7 @@ export async function POST(req: NextRequest) {
           da, quante: fetta.length, totaleDaFare: totaleFile,
           finito: da + fetta.length >= totaleFile,
           creato: scritte, doppioniRespinti: doppioni, giaCaricate: fetta.length - nuove.length,
+          fuoriCatena,
           totali: {
             nelFile: (righe || []).length, spedizioni: totaleFile,
             nonTrovate: esiti.filter(e => !e.trovata).length,
@@ -199,7 +217,7 @@ export async function POST(req: NextRequest) {
     nProcessate++
     // Ricerca SENZA filtro master: decide la catena (solo discesa)
     const { data: spedizione } = await adminDb.from('spedizioni')
-      .select('id,cliente_id,master_id,peso_reale,peso_fatturato,peso_volume,costo_totale,costo_spedizione,numero,dest_provincia,dest_cap,dest_paese,dest_citta,corriere_id,stato')
+      .select('id,cliente_id,master_id,peso_reale,peso_fatturato,peso_volume,costo_totale,costo_spedizione,numero,dest_provincia,dest_cap,dest_paese,dest_citta,corriere_id,stato,contrassegno,assicurazione,valore_merce,servizi_accessori')
       .or(`numero.ilike.%${ldv}%,tracking_number.ilike.%${ldv}%`)
       .limit(1).single()
     if (!spedizione) { nScartati++; continue }
@@ -241,7 +259,36 @@ export async function POST(req: NextRequest) {
         })
         // Nessun prezzo = quel contratto non copre quella destinazione (zona esclusiva non
         // prezzata al cliente). Non si inventa una tariffa: si lascia il costo com'e'.
-        if (ris) costoFinale = ris.prezzo
+        //
+        // LE DUE CIFRE VANNO FATTE CON LA STESSA RICETTA.
+        // `costoIniziale` e' costo_totale, cioe' quello che il cliente ha PAGATO: nolo + fee
+        // contrassegno + fee assicurazione + servizi accessori scelti. Riprezzando il solo nolo,
+        // tutto il resto finiva dentro la differenza col segno POSITIVO. Finche' la conferma
+        // prendeva il valore assoluto usciva un addebito sbagliato; col segno rispettato — che e'
+        // giusto, un accredito non deve diventare un prelievo — quella stessa differenza diventa
+        // una NOTA DI CREDITO vera: su una spedizione con contrassegno da 3 euro di fee, un collo
+        // diventato piu' pesante avrebbe REGALATO al cliente la commissione gia' incassata.
+        // Le fee si RICALCOLANO sul nolo nuovo, come fa la creazione, perche' certi scaglioni sono
+        // in percentuale sul nolo; gli accessori invece si riportano come sono stati addebitati.
+        if (ris) {
+          const sup = await calcolaSupplementiCliente(supabase, {
+            listinoId: cli.listino_cliente_id, corriereId: spedizione.corriere_id,
+            contrassegno: Number((spedizione as any).contrassegno || 0),
+            assicurazione: Number((spedizione as any).assicurazione || 0),
+            valoreMerce: Number((spedizione as any).valore_merce || 0), nolo: ris.prezzo,
+          })
+          // `disponibile: false` non vuol dire "fee zero", vuol dire "questo listino non prezza
+          // contrassegno o assicurazione per questo contratto" — e le due fee tornano 0 senza
+          // errore. Sommare quello zero toglierebbe dal dovuto una commissione che il cliente ha
+          // gia' pagato, e la rettifica uscirebbe a suo favore. Come quando manca la tariffa: non
+          // si inventa niente, si lascia il costo com'e' e non nasce nessuna rettifica.
+          if (sup.disponibile) {
+            const acc = Array.isArray((spedizione as any).servizi_accessori)
+              ? (spedizione as any).servizi_accessori.reduce((a: number, x: any) => a + (Number(x?.importo) || 0), 0)
+              : 0
+            costoFinale = Math.round((ris.prezzo + sup.contrassegno + sup.assicurazione + acc) * 100) / 100
+          }
+        }
       }
       const differenza = costoIniziale - costoFinale
       if (Math.abs(differenza) <= 0.01) { continue }

@@ -2,12 +2,21 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { registraMovimento } from '@/lib/movimenti'
 import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
+import { gestisceLaRete, vedeLaRete } from '@/lib/ruoli'
+
+// Confermare cento rettifiche vuol dire cento chiamate di credito in fila. Col limite di durata
+// breve la funzione veniva uccisa a meta' — ed e' proprio meta' lavoro fatto il caso peggiore.
+export const maxDuration = 300
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
+  // L'elenco delle rettifiche e' roba di chi le deve girare, non di chi le deve pagare: l'agente le
+  // vede filtrate sui suoi clienti (piu' sotto), il cliente non le vede affatto. Serviva anche a
+  // procurarsi gli id da passare alla cancellazione.
+  if (!vedeLaRete(utente)) return NextResponse.json([])
   const fileId = req.nextUrl.searchParams.get('fileId')
   let query = supabase.from('rettifiche')
     .select('*, clienti(ragione_sociale), masters:target_master_id(nome)')
@@ -60,96 +69,130 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
+  // Il ruolo, non la sola appartenenza: `master_id` ce l'hanno anche i clienti, e qui sotto si
+  // muove credito con la chiave di servizio, che scavalca le regole per riga.
+  if (!gestisceLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const body = await req.json()
   const { rettificaIds } = body
   if (!rettificaIds?.length) return NextResponse.json({ error: 'Nessuna rettifica selezionata' }, { status: 400 })
+
+  const { createAdminSupabase } = await import('@/lib/supabase-admin')
+  const adminDb = createAdminSupabase()
 
   const { data: rettifiche } = await supabase.from('rettifiche')
     .select('*')
     .in('id', rettificaIds)
     .eq('master_id', utente?.master_id)
     .eq('confermata', false)
+  if (!rettifiche?.length) return NextResponse.json({ error: 'Nessuna rettifica trovata (o gia\' confermata da un altro invio).' }, { status: 404 })
 
-  if (!rettifiche?.length) return NextResponse.json({ error: 'Nessuna rettifica trovata' }, { status: 404 })
+  // Se qualcosa va storto su una riga, quella riga TORNA APERTA: non deve restare archiviata come
+  // fatta senza che i soldi si siano mossi. Prima i due `catch` si limitavano a scrivere nel log e
+  // la chiusura passava lo stesso su tutti gli id — un addebito fallito spariva dall'elenco e da
+  // ogni traccia, e nessuno poteva accorgersene se non riconciliando i movimenti a mano.
+  const saltate: { id: string; perche: string }[] = []
+  const riapriRiga = async (r: any, perche: string) => {
+    saltate.push({ id: r.id, perche })
+    await supabase.from('rettifiche').update({ confermata: false, stato: 'da_rettificare' }).eq('id', r.id)
+  }
 
-  // Rettifiche verso master della catena: addebito/accredito diretto al master target.
-  // Segno CORRETTO: differenza = costo_iniziale - costo_finale -> negativa = addebito, positiva = accredito.
-  const diCatena = rettifiche.filter(r => r.target_master_id)
-  const diClienti = rettifiche.filter(r => !r.target_master_id && r.cliente_id)
-  // Client amministrativo dichiarato QUI, prima di entrambi i cicli: serve sia alle rettifiche di
-  // catena sia a quelle verso i clienti (piu' in basso). Era dichiarato dentro il blocco
-  // "if (diCatena.length)" e usato anche fuori: il progetto ignora gli errori di tipo in
-  // compilazione, quindi passava, ma a runtime la variabile non esisteva e OGNI rettifica verso un
-  // cliente finiva nel catch, persa senza traccia.
-  const { createAdminSupabase } = await import('@/lib/supabase-admin')
-  const adminDb = createAdminSupabase()
+  // A CHI STO PER SCALARE IL CREDITO E' DAVVERO ROBA MIA?
+  // La riga porta con se' destinatario e importo, e fin qui nessuno li aveva mai ricontrollati: si
+  // passavano tali e quali alla funzione di credito, invocata con la chiave di servizio, che sotto
+  // quel ruolo salta i propri controlli di appartenenza. Chi riesce a scrivere una riga in
+  // `rettifiche` (la tabella e' esposta) sceglie destinatario e cifra. Quindi qui si verifica che il
+  // master destinatario stia DAVVERO sotto di me — e siccome la mappa non contiene me stesso, una
+  // riga intestata a se' stessi non passa — e che il cliente sia DAVVERO un mio cliente.
+  const { mappaPrimaLinea } = await import('@/lib/prima-linea')
+  const discendenti = await mappaPrimaLinea(adminDb, utente!.master_id)
+  const idClienti = [...new Set(rettifiche.map((r: any) => r.cliente_id).filter(Boolean))]
+  const mieiClienti = new Set<string>()
+  if (idClienti.length) {
+    const { data: cc } = await adminDb.from('clienti').select('id').eq('master_id', utente!.master_id).in('id', idClienti)
+    for (const c of (cc || [])) mieiClienti.add((c as any).id)
+  }
 
-  if (diCatena.length) {
-    const { registraMovimentoMaster } = await import('@/lib/movimenti')
-    for (const r of diCatena) {
-      const diff = Number(r.differenza || 0)
-      if (Math.abs(diff) <= 0.005) continue
-      try {
+  // Fra il caricamento e la conferma passano giorni, e la finestra di annullo e' di 48 ore: una
+  // spedizione annullata nel frattempo e' gia' stata stornata, e lo storno non ripassa. Una
+  // rettifica confermata dopo resterebbe addosso a un pacco che non ha mai viaggiato.
+  const idSped = [...new Set(rettifiche.map((r: any) => r.spedizione_id).filter(Boolean))]
+  const statoSped = new Map<string, string>()
+  for (let i = 0; i < idSped.length; i += 300) {
+    const { data: ss } = await adminDb.from('spedizioni').select('id,stato').in('id', idSped.slice(i, i + 300))
+    for (const s of (ss || [])) statoSped.set((s as any).id, (s as any).stato)
+  }
+  const annullata = (r: any) => {
+    const st = r.spedizione_id ? statoSped.get(r.spedizione_id) : null
+    return st === 'annullata' || st === 'annullamento_pending' || st === 'annullamento_manuale'
+  }
+
+  const descrizione = (r: any) =>
+    `Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso scansione: ${r.peso_reale} Kg )`
+
+  const { registraMovimentoMaster } = await import('@/lib/movimenti')
+  let mosse = 0
+  const spedizioniDaAggiornare: any[] = []
+
+  for (const r of rettifiche as any[]) {
+    // PRESA ATOMICA, UNA RIGA ALLA VOLTA.
+    // Serve contro il doppio addebito: due schede, o un secondo invio dopo che il primo e' andato
+    // in timeout mentre ancora girava, rileggevano le stesse righe ancora aperte e addebitavano una
+    // seconda volta. La condizione sta nel WHERE, quindi chi arriva secondo non si prende la riga.
+    // MA LA PRESA E' PER RIGA, NON PER TUTTE. Chiudendole tutte in blocco prima di muovere un euro,
+    // una funzione uccisa a meta' lasciava le rimanenti marcate "confermate" senza nessun movimento:
+    // sparivano dall'elenco (che filtra confermata = false) e i soldi non si incassavano piu', senza
+    // un errore da nessuna parte. Un doppio addebito e' sbagliato ma SI VEDE nei movimenti; un
+    // incasso perso in silenzio non lo trova nessuno. Cosi' la finestra vale una riga sola.
+    const { data: presa } = await supabase.from('rettifiche')
+      .update({ confermata: true, stato: 'confermata' })
+      .eq('id', r.id).eq('master_id', utente!.master_id).eq('confermata', false)
+      .select('id')
+    if (!presa?.length) { saltate.push({ id: r.id, perche: 'gia\' confermata da un altro invio' }); continue }
+
+    // SEGNO: differenza = costo_iniziale - costo_finale, quindi negativa = addebito e positiva =
+    // accredito. Il ramo dei master lo rispettava, quello dei clienti prendeva il valore assoluto e
+    // scriveva sempre un addebito: una nota di credito da 2,15 diventava un prelievo di 2,15, cioe'
+    // 4,30 di scarto nella direzione opposta a quella mostrata a chi preme Conferma — e proprio nei
+    // casi frequenti, visto che quasi meta' dei colli ripesati misura MENO del dichiarato.
+    const diff = Number(r.differenza || 0)
+    // Importo a zero: non c'e' niente da muovere, ma la riga resta CHIUSA — riaprirla la
+    // rimetterebbe in elenco per sempre, visto che al giro dopo sarebbe di nuovo zero.
+    if (Math.abs(diff) <= 0.005) continue
+    if (annullata(r)) { await riapriRiga(r, 'spedizione annullata dopo il caricamento'); continue }
+
+    try {
+      if (r.target_master_id) {
+        if (!discendenti.has(r.target_master_id)) { await riapriRiga(r, 'destinatario non e\' un master della tua rete'); continue }
         await registraMovimentoMaster(adminDb, {
-          masterOwnerId: utente?.master_id, masterTargetId: r.target_master_id,
-          tipo: 'rettifica',
-          descrizione: `Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso scansione: ${r.peso_reale} Kg )`,
-          importo: diff,
+          masterOwnerId: utente!.master_id, masterTargetId: r.target_master_id,
+          tipo: 'rettifica', descrizione: descrizione(r), importo: diff,
           spedizioneId: r.spedizione_id || null, createdBy: user.id,
         })
-      } catch (e) { console.error('Errore rettifica master:', e) }
-    }
-    await supabase.from('rettifiche').update({ confermata: true, stato: 'confermata' }).in('id', diCatena.map(r => r.id))
-  }
-
-  // Raggruppa per cliente
-  const clientiMap: Record<string, any[]> = {}
-  diClienti.forEach(r => {
-    if (!clientiMap[r.cliente_id]) clientiMap[r.cliente_id] = []
-    clientiMap[r.cliente_id].push(r)
-  })
-
-  for (const [clienteId, retts] of Object.entries(clientiMap)) {
-    // Calcola totale da addebitare (differenza positiva = costo maggiore)
-    const totaleDiff = retts.reduce((acc, r) => acc + Math.abs(Number(r.differenza || 0)), 0)
-    if (totaleDiff <= 0) continue
-
-    // Crea movimento per ogni rettifica (addebito ATOMICO al credito via RPC).
-    // Nessun registro parallelo: la rettifica sta in 'movimenti' (con saldo_dopo), l'unica
-    // fonte letta dalle liste. La vecchia copia in 'movimenti_clienti' non veniva mai letta
-    // né controllata per errori e quella tabella è rimasta vuota, facendo apparire vuote le
-    // liste pur essendo gli addebiti regolarmente fatti.
-    for (const r of retts) {
-      const diff = Math.abs(Number(r.differenza || 0))
-      if (diff <= 0) continue
-      const descr = `Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso scansione: ${r.peso_reale} Kg )`
-      try {
-        // scala credito + scrive in 'movimenti' (Lista Movimenti) in un'unica transazione.
-        // Client AMMINISTRATIVO: ad `authenticated` viene tolto il privilegio di scrivere
-        // clienti.credito (permetteva a ogni cliente di ricaricarsi da solo). Qui l'ambito e' gia'
-        // garantito: le rettifiche sono state lette filtrando su master_id di chi chiama.
+      } else if (r.cliente_id) {
+        if (!mieiClienti.has(r.cliente_id)) { await riapriRiga(r, 'il cliente non e\' tuo'); continue }
         await registraMovimento(adminDb, {
-          masterId: utente?.master_id, clienteId, tipo: 'rettifica',
-          descrizione: descr, importo: -diff, spedizioneId: r.spedizione_id || null, createdBy: user.id,
+          masterId: utente!.master_id, clienteId: r.cliente_id,
+          tipo: 'rettifica', descrizione: descrizione(r), importo: diff,
+          spedizioneId: r.spedizione_id || null, createdBy: user.id,
         })
-      } catch (e) { console.error('Errore addebito rettifica cliente:', e); continue }
-    }
-
-    // Aggiorna costo spedizioni
-    for (const r of retts) {
-      if (r.spedizione_id) {
-        await supabase.from('spedizioni').update({
-          costo_totale: r.costo_finale,
-          peso_fatturato: r.peso_reale,
-        }).eq('id', r.spedizione_id)
-      }
+        if (r.spedizione_id) spedizioniDaAggiornare.push(r)
+      } else { await riapriRiga(r, 'nessun destinatario'); continue }
+      mosse++
+    } catch (e: any) {
+      console.error('[RETTIFICHE] addebito non riuscito', r.numero_spedizione, e?.message)
+      await riapriRiga(r, 'addebito non riuscito')
     }
   }
 
-  // Segna rettifiche come confermate
-  await supabase.from('rettifiche').update({ confermata: true, stato: 'confermata' }).in('id', rettificaIds)
+  // Il costo della spedizione si aggiorna SOLO se l'addebito e' andato a buon fine: prima si
+  // riscriveva comunque, e restava a sistema una spedizione riprezzata che nessuno aveva pagato.
+  for (const r of spedizioniDaAggiornare) {
+    await supabase.from('spedizioni').update({
+      costo_totale: r.costo_finale, peso_fatturato: r.peso_reale,
+    }).eq('id', r.spedizione_id)
+  }
 
-  return NextResponse.json({ success: true, rettificate: rettifiche.length })
+  return NextResponse.json({ success: true, rettificate: mosse, nonEseguite: saltate.length, dettaglio: saltate })
 }
 
 export async function DELETE(req: NextRequest) {
@@ -158,6 +201,11 @@ export async function DELETE(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
+  // CHI DEVE PAGARE NON PUO' CANCELLARE IL PROPRIO ADDEBITO.
+  // Il filtro era solo `master_id`, che un utente cliente ce l'ha uguale a quello del suo master, e
+  // `bloccaAgente` ferma l'agente ma non il cliente: bastavano due chiamate col suo cookie — una per
+  // leggersi l'id della rettifica, una per cancellarla — e la ripesatura non veniva mai addebitata.
+  if (!gestisceLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const body = await req.json()
   const { rettificaIds } = body
   if (!rettificaIds?.length) return NextResponse.json({ error: 'Nessuna rettifica selezionata' }, { status: 400 })
