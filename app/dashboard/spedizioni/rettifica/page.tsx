@@ -77,7 +77,7 @@ export default function RettificaCostiPage() {
         // Il passaggio in mezzo — "guarda l'anteprima, poi premi carica" — era una complicazione
         // inutile: la stessa scelta si fa gia' selezionando i gruppi e premendo Conferma, e fino a
         // quel momento non si muove un euro.
-        let creati = data.creato || 0, gia = data.giaCaricate || 0
+        let creati = data.creato || 0, gia = data.giaCaricate || 0, fornitore = data.costoFornitoreScalato || 0
         let da = (data.da || 0) + (data.quante || 0)
         const totale = data.totaleDaFare ?? 0
         const fileId = data.fileId
@@ -90,7 +90,7 @@ export default function RettificaCostiPage() {
           })
           const d2 = await r2.json()
           if (d2?.error) break
-          creati += d2.creato || 0; gia += d2.giaCaricate || 0
+          creati += d2.creato || 0; gia += d2.giaCaricate || 0; fornitore += d2.costoFornitoreScalato || 0
           const avanti = (d2.da || 0) + (d2.quante || 0)
           // Se il segnaposto non si muove il file non finirebbe mai di essere chiesto: meglio
           // fermarsi e dire quante ne sono entrate che restare a girare a vuoto.
@@ -108,7 +108,8 @@ export default function RettificaCostiPage() {
           title: 'Rettifiche create',
           message: `Create ${creati} rettifiche su ${totale} spedizioni nel file.`
             + (gia ? ` ${gia} erano già state caricate da un file precedente e sono state saltate.` : '')
-            + ' Scegli a chi girarle e premi Conferma: fino a quel momento non viene scalato nulla.',
+            + (fornitore ? ` Il conto del fornitore, € ${fornitore.toFixed(2)}, è stato scalato dal tuo credito: è la fattura che hai già ricevuto.` : '')
+            + ' Scegli a chi girarle e premi Conferma: fino a quel momento non viene scalato nulla a loro.',
         })
         return
       }

@@ -167,27 +167,46 @@ export async function POST(req: NextRequest) {
         // differenza che addebitava ai sotto-master, mentre una parte non fa che coprire il conto
         // del fornitore. Con 356 euro su un file solo, il margine era gonfiato di altrettanto.
         //
-        // Si scala a ogni spedizione TROVATA, non solo a quelle che generano una rettifica verso il
-        // basso: il fornitore le ha fatturate tutte, anche quelle che al livello sotto non fanno
-        // differenza. Il doppione lo impedisce l'indice unico sul database (l'export del fornitore
-        // e' cumulativo: lo stesso ordine ritorna nel file del giorno dopo).
+        // SI GUARDA TUTTO IL FILE, NON SOLO LE RIGHE NUOVE.
+        //
+        // Prima questo giro partiva dalle sole spedizioni che generavano una rettifica nuova. Ma il
+        // conto del fornitore non c'entra con le rettifiche: e' la fattura di CHI CARICA, e riguarda
+        // ogni riga del file — comprese quelle gia' caricate ieri e quelle che al livello sotto non
+        // fanno differenza. Con quella versione, un file gia' caricato non avrebbe mai scalato
+        // niente: e' esattamente il caso delle 106 di stasera, entrate prima che questo codice
+        // esistesse. Cosi' invece basta ricaricare lo stesso file e il conto si mette a posto, senza
+        // che nascano rettifiche doppie (quelle le respinge il loro indice unico).
+        //
+        // Il doppio addebito lo impedisce l'indice unico sul riferimento: l'export del fornitore e'
+        // cumulativo, lo stesso ordine ritorna nel file del giorno dopo, e ricaricarlo due volte
+        // non puo' scalare due volte.
         let fornitoreScalato = 0
         const { registraMovimentoMaster } = await import('@/lib/movimenti')
-        for (const e of esiti) {
-          if (!e.trovata || !e.spedizioneId || !(e.addebitoFornitore > 0)) continue
+        const spedPerLdv = new Map<string, string>()
+        for (let i = 0; i < fetta.length; i += 200) {
+          const { data: ss } = await adminRip.from('spedizioni')
+            .select('id,tracking_number').in('tracking_number', fetta.slice(i, i + 200).map(r => r.ldv))
+          for (const s of (ss || [])) spedPerLdv.set((s as any).tracking_number, (s as any).id)
+        }
+        for (const r of fetta) {
+          const sid = spedPerLdv.get(r.ldv)
+          if (!sid || !(r.addebitoFornitore > 0)) continue
           try {
             await registraMovimentoMaster(adminRip, {
               masterOwnerId: myMaster, masterTargetId: myMaster, tipo: 'rettifica',
-              descrizione: `Ripesatura ${e.ldv} - costo addebitato dal fornitore`,
-              riferimento: `RIPFORN-${e.idOrdine}`,
-              importo: -Math.abs(e.addebitoFornitore),
-              spedizioneId: e.spedizioneId, createdBy: user.id,
+              descrizione: `Ripesatura ${r.ldv} - costo addebitato dal fornitore`,
+              riferimento: `RIPFORN-${r.idOrdine}`,
+              importo: -Math.abs(r.addebitoFornitore),
+              spedizioneId: sid, createdBy: user.id,
             })
-            fornitoreScalato += e.addebitoFornitore
+            fornitoreScalato += r.addebitoFornitore
           } catch (err: any) {
-            // 23505 = gia' scalato da un caricamento precedente. E' il comportamento voluto.
-            if (!String(err?.message || '').includes('23505') && !String(err?.code || '') .includes('23505')) {
-              console.error('[RIPESATURE] costo fornitore non scalato', e.ldv, err?.message)
+            // Gia' scalato da un caricamento precedente: e' il comportamento voluto, non un
+            // guasto. Il messaggio arriva impacchettato dentro un Error, quindi si riconosce dal
+            // testo del vincolo e non dal codice, che qui non passa.
+            const m = String(err?.message || '')
+            if (!/23505|duplicate key|unique constraint/i.test(m)) {
+              console.error('[RIPESATURE] costo fornitore non scalato', r.ldv, m)
             }
           }
         }
