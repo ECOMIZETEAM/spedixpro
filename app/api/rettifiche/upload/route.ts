@@ -157,6 +157,40 @@ export async function POST(req: NextRequest) {
           else if (error.code === '23505') doppioni++
           else console.error('[RIPESATURE] riga non scritta', riga.numero_spedizione, error.message)
         }
+
+        // ── IL CONTO DEL FORNITORE LO PAGA CHI CARICA, E LO PAGA ADESSO ──
+        //
+        // Quando questo file arriva, il fornitore ha GIA' mandato la fattura a chi lo sta caricando:
+        // quei soldi sono usciti davvero. Poi lui li recupera girando le rettifiche ai livelli sotto
+        // — ma il recupero e' una cosa diversa dalla spesa, e finora la spesa non veniva registrata
+        // da nessuna parte. Risultato: nei margini chi carica sembrava guadagnare tutta la
+        // differenza che addebitava ai sotto-master, mentre una parte non fa che coprire il conto
+        // del fornitore. Con 356 euro su un file solo, il margine era gonfiato di altrettanto.
+        //
+        // Si scala a ogni spedizione TROVATA, non solo a quelle che generano una rettifica verso il
+        // basso: il fornitore le ha fatturate tutte, anche quelle che al livello sotto non fanno
+        // differenza. Il doppione lo impedisce l'indice unico sul database (l'export del fornitore
+        // e' cumulativo: lo stesso ordine ritorna nel file del giorno dopo).
+        let fornitoreScalato = 0
+        const { registraMovimentoMaster } = await import('@/lib/movimenti')
+        for (const e of esiti) {
+          if (!e.trovata || !e.spedizioneId || !(e.addebitoFornitore > 0)) continue
+          try {
+            await registraMovimentoMaster(adminRip, {
+              masterOwnerId: myMaster, masterTargetId: myMaster, tipo: 'rettifica',
+              descrizione: `Ripesatura ${e.ldv} - costo addebitato dal fornitore`,
+              riferimento: `RIPFORN-${e.idOrdine}`,
+              importo: -Math.abs(e.addebitoFornitore),
+              spedizioneId: e.spedizioneId, createdBy: user.id,
+            })
+            fornitoreScalato += e.addebitoFornitore
+          } catch (err: any) {
+            // 23505 = gia' scalato da un caricamento precedente. E' il comportamento voluto.
+            if (!String(err?.message || '').includes('23505') && !String(err?.code || '') .includes('23505')) {
+              console.error('[RIPESATURE] costo fornitore non scalato', e.ldv, err?.message)
+            }
+          }
+        }
         // I conteggi si SOMMANO a quelli gia' scritti dalle fette precedenti.
         if (creaturaFile) {
           const { data: pre } = await supabase.from('rettifiche_files')
@@ -177,7 +211,7 @@ export async function POST(req: NextRequest) {
           da, quante: fetta.length, totaleDaFare: totaleFile,
           finito: da + fetta.length >= totaleFile,
           creato: scritte, doppioniRespinti: doppioni, giaCaricate: fetta.length - nuove.length,
-          fuoriCatena,
+          fuoriCatena, costoFornitoreScalato: Math.round(fornitoreScalato * 100) / 100,
           totali: {
             nelFile: (righe || []).length, spedizioni: totaleFile,
             nonTrovate: esiti.filter(e => !e.trovata).length,
