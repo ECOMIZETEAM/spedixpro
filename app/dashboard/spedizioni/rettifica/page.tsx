@@ -185,9 +185,9 @@ export default function RettificaCostiPage() {
   const gruppi = (() => {
     const map = new Map<string, { nome: string; tipo: 'master' | 'cliente'; righe: any[]; totale: number }>()
     for (const r of rettificheFiltrate) {
-      const nome = r.masters?.nome || r.clienti?.ragione_sociale || '(senza destinatario)'
+      const nome = r.destinatario_nome || '(senza destinatario)'
       const chiave = (r.target_master_id || r.cliente_id || 'x') + '|' + nome
-      if (!map.has(chiave)) map.set(chiave, { nome, tipo: r.target_master_id ? 'master' : 'cliente', righe: [], totale: 0 })
+      if (!map.has(chiave)) map.set(chiave, { nome, tipo: (r.destinatario_tipo || 'cliente') as 'master'|'cliente', righe: [], totale: 0 })
       const g = map.get(chiave)!
       g.righe.push(r)
       g.totale += Number(r.differenza || 0)
@@ -369,7 +369,7 @@ export default function RettificaCostiPage() {
                 ))}
               </tr></thead>
               <tbody>
-                {gruppi.map(([chiave, g]) => (
+                {gruppi.flatMap(([chiave, g]) => [(
                   <tr key={'g-'+chiave} onClick={()=>setAperti(p=>({...p,[chiave]:!p[chiave]}))}
                     style={{background:'#f3f4f6',cursor:'pointer'}}>
                     <td style={{padding:'9px 10px',borderBottom:'1px solid #d1d5db'}} onClick={e=>e.stopPropagation()}>
@@ -391,8 +391,7 @@ export default function RettificaCostiPage() {
                       </span>
                     </td>
                   </tr>
-                ))}
-                {gruppi.flatMap(([chiave,g]) => aperti[chiave] ? g.righe : []).map((r:any)=>{
+                ), ...(aperti[chiave] ? g.righe : []).map((r:any)=>{
                   const isSelected = selectedIds.includes(r.id)
                   const diff = Number(r.differenza || 0)
                   const isDaRett = r.stato === 'da_rettificare'
@@ -424,7 +423,7 @@ export default function RettificaCostiPage() {
                       </td>
                     </tr>
                   )
-                })}
+                })])}
               </tbody>
             </table>
           </div>

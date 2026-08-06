@@ -18,7 +18,23 @@ export async function GET(req: NextRequest) {
   if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
   if (fileId) query = query.eq('file_id', fileId)
   const { data } = await query
-  return NextResponse.json(data || [])
+
+  // IL NOME DEL DESTINATARIO ESCE PIATTO, non come relazione incorporata.
+  // Con `masters:target_master_id(nome)` il dato arriva a volte come oggetto e a volte come elenco
+  // di uno, a seconda di come PostgREST decide di tipizzare la join: la schermata leggeva
+  // `r.masters?.nome`, trovava undefined, e mostrava "(senza destinatario)" su tutti e quattro i
+  // gruppi mentre a database i nomi c'erano tutti. E' la stessa trappola gia' costata un errore
+  // sul carico merce. Qui si normalizza una volta sola, e chi legge non deve indovinare la forma.
+  const uno = (v: any) => Array.isArray(v) ? v[0] : v
+  const righe = (data || []).map((r: any) => {
+    const m = uno(r.masters), c = uno(r.clienti)
+    return {
+      ...r,
+      destinatario_nome: m?.nome || c?.ragione_sociale || null,
+      destinatario_tipo: r.target_master_id ? 'master' : (r.cliente_id ? 'cliente' : null),
+    }
+  })
+  return NextResponse.json(righe)
 }
 
 export async function POST(req: NextRequest) {
