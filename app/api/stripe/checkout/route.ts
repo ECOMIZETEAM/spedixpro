@@ -43,7 +43,19 @@ export async function POST(req: NextRequest) {
   if (m.abbonamento_esente) return NextResponse.json({ error: 'Il tuo abbonamento è gratuito: nessun pagamento da fare.' }, { status: 400 })
   if (m.abbonamento_piano === pianoId && m.stripe_subscription_id) return NextResponse.json({ error: 'Hai già questo piano' }, { status: 400 })
 
+  // IL MESE IN CORSO E' GIA' SALDATO: l'abbonamento parte dal mese prossimo.
+  //
+  // Succede a chi paga per altra via — un bonifico segnato a mano dagli incassi — e poi va a
+  // mettere la carta nello stesso mese. Senza questo pagherebbe DUE VOLTE lo stesso canone: la
+  // cassa addebita il mese pieno il giorno stesso dell'attivazione. E' successo davvero con
+  // Central Poste, agosto saldato fuori dal circuito.
+  // Questa variabile esisteva gia' qui, calcolata e mai usata: l'intenzione c'era, il collegamento no.
+  //
+  // Il circuito vuole l'inizio addebiti ad almeno 48 ore di distanza: se si attiva a fine mese il
+  // primo del mese prossimo e' troppo vicino, e si prende la scadenza piu' lontana fra le due —
+  // che cade comunque nel mese nuovo, quindi il mese gia' pagato non viene mai riaddebitato.
   const meseGiaPagato = !!m.abbonamento_piano && m.abbonamento_mese === meseCorrente()
+  const inizioAddebiti = Math.max(primoDelProssimoMese(), Math.floor(Date.now() / 1000) + 49 * 3600)
 
   const s = stripeClient()
   const { price } = await prezzoStripe(pianoId)
@@ -168,7 +180,22 @@ export async function POST(req: NextRequest) {
       line_items: [{ price: price.id, quantity: 1, tax_rates: iva.length ? iva : undefined }],
       subscription_data: {
         metadata: { master_id: m.id, piano: pianoId },
+        // Solo per chi il mese in corso l'ha gia' pagato (vedi sopra). Per tutti gli altri non
+        // cambia niente: canone pieno subito, come prima.
+        //
+        // IL CONGELAMENTO CONTINUA A FUNZIONARE. L'abbonamento nasce 'trialing', che il webhook
+        // conta gia' fra gli stati attivi, e il controllo giornaliero lo lascia stare perche' ha
+        // una carta agganciata — giustamente, se ne occupa il circuito. Al primo addebito, il mese
+        // prossimo: se va a buon fine arriva `invoice.paid` e il mese si segna pagato; se va a
+        // vuoto arriva `invoice.payment_failed`, parte il conto alla rovescia e tre giorni dopo si
+        // congela, esattamente come per chiunque altro.
+        ...(meseGiaPagato ? { trial_end: inizioAddebiti } : {}),
       },
+      // LA CARTA SI PRENDE COMUNQUE, anche quando oggi non c'e' niente da pagare. E' il default
+      // del circuito, ma qui e' il punto di tutta l'operazione e non deve dipendere da un default:
+      // senza carta agganciata, il mese prossimo non ci sarebbe niente da addebitare e il canone
+      // resterebbe scoperto in silenzio.
+      payment_method_collection: 'always',
       metadata: { master_id: m.id, piano: pianoId },
       success_url: `${base}/dashboard/abbonamento?pagamento=ok`,
       cancel_url: `${base}/dashboard/abbonamento?pagamento=annullato`,
