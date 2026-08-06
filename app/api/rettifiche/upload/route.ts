@@ -54,7 +54,17 @@ export async function POST(req: NextRequest) {
         .select('rif_fornitore').eq('master_id', myMaster)
         .in('rif_fornitore', lette.righe.map(r => r.idOrdine))
       const viste = new Set((gia || []).map((g: any) => g.rif_fornitore))
-      const nuove = lette.righe.filter(r => !viste.has(r.idOrdine))
+      let nuove = lette.righe.filter(r => !viste.has(r.idOrdine))
+
+      // A FETTE, cosi' la schermata puo' dire a che punto sta.
+      // Riprezzare una spedizione vuol dire ricostruire tutta la sua catena di master, e ognuno e'
+      // qualche lettura: su centosei spedizioni sono centinaia di viaggi al database, e in un colpo
+      // solo la richiesta ci mette troppo e la pagina resta muta. Il browser ne chiede un pezzo per
+      // volta e misura quanto ci mette davvero: il tempo che manca e' calcolato sul ritmo vero.
+      const totaleNuove = nuove.length
+      const da = Math.max(0, Number(body?.da) || 0)
+      const quante = Math.max(1, Math.min(200, Number(body?.quante) || totaleNuove))
+      if (body?.da !== undefined) nuove = nuove.slice(da, da + quante)
       const esiti = await calcolaRipesature(adminRip, nuove)
 
       // ── CARICAMENTO VERO ──
@@ -123,6 +133,9 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json({
         success: true, tipo: 'ripesature', anteprima: true,
+        // Dove siamo arrivati: serve alla barra, e a sapere se c'e' un altro pezzo da chiedere.
+        da, quante: nuove.length, totaleDaFare: totaleNuove,
+        finito: da + nuove.length >= totaleNuove,
         totali: {
           nelFile: (righe || []).length,
           spedizioni: lette.righe.length,

@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+import BarraAvanzamento from '@/app/components/BarraAvanzamento'
 
 import { useDialog } from '@/app/components/DialogProvider'
 export default function RettificaCostiPage() {
@@ -40,6 +41,7 @@ export default function RettificaCostiPage() {
   // flusso del file dei pesi, che continua a funzionare come prima.
   const [ripesature, setRipesature] = useState<any>(null)
   const [caricandoRip, setCaricandoRip] = useState(false)
+  const [avanz, setAvanz] = useState<{fatti:number;totale:number;da:number|null;etichetta:string}|null>(null)
   // Quali gruppi sono aperti. RAGGRUPPATE PER DESTINATARIO DIRETTO: un master vede i suoi
   // sotto-master e i suoi clienti diretti, non l'elenco piatto di tutta la rete sotto. Con 106
   // spedizioni su sei destinatari, l'elenco piatto e' illeggibile e non si capisce chi paga cosa.
@@ -90,12 +92,30 @@ export default function RettificaCostiPage() {
       const res = await fetch('/api/rettifiche/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nomeFile: file.name, righe })
+        body: JSON.stringify({ nomeFile: file.name, righe, da: 0, quante: 15 })
       })
       const data = await res.json()
       if (data?.tipo === 'ripesature') {
-        // Si tengono le righe lette: il caricamento vero le rimanda al server, che rifa' i conti.
-        setRipesature({ ...data, fileRighe: righe, nomeFile: file.name })
+        // A FETTE, con la barra: riprezzare una spedizione vuol dire ricostruire tutta la sua catena
+        // di master, e in un colpo solo la pagina resterebbe muta per un minuto.
+        let tutte = [...(data.righe || [])]
+        let da = (data.da || 0) + (data.quante || 0)
+        const totale = data.totaleDaFare ?? tutte.length
+        setAvanz({ fatti: tutte.length, totale, da: Date.now(), etichetta: 'Sto ricalcolando le spedizioni' })
+        while (!data.finito && da < totale) {
+          const r2 = await fetch('/api/rettifiche/upload', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nomeFile: file.name, righe, da, quante: 15 }),
+          })
+          const d2 = await r2.json()
+          if (d2?.error) break
+          tutte = tutte.concat(d2.righe || [])
+          da = (d2.da || 0) + (d2.quante || 0)
+          setAvanz(a => a ? { ...a, fatti: tutte.length } : a)
+          if (d2.finito) break
+        }
+        setAvanz(null)
+        setRipesature({ ...data, righe: tutte, fileRighe: righe, nomeFile: file.name })
         setUploading(false)
         if (fileRef.current) fileRef.current.value = ''
         return
@@ -186,6 +206,14 @@ export default function RettificaCostiPage() {
           listino con il collo vero, per questo c'e' una riga per livello. Al detentore del
           contratto puo' costare un euro e al cliente due e settanta, ed e' giusto cosi'.
           Per ora si guarda soltanto: nessuna rettifica creata, nessun credito toccato. */}
+      {avanz && (
+        <div style={{marginBottom:'16px'}}>
+          <BarraAvanzamento fatti={avanz.fatti} totale={avanz.totale} iniziatoIl={avanz.da}
+            etichetta={avanz.etichetta}
+            sottotitolo="Ogni spedizione viene riprezzata sul listino di ciascun livello." />
+        </div>
+      )}
+
       {ripesature && (
         <div style={{marginBottom:'20px'}}>
           <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'10px',padding:'12px 15px',marginBottom:'14px',fontSize:'13px',color:'#92400e',lineHeight:1.6}}>
