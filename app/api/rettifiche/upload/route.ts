@@ -54,14 +54,19 @@ export async function POST(req: NextRequest) {
         .select('rif_fornitore').eq('master_id', myMaster)
         .in('rif_fornitore', lette.righe.map(r => r.idOrdine))
       const viste = new Set((gia || []).map((g: any) => g.rif_fornitore))
-      let nuove = lette.righe.filter(r => !viste.has(r.idOrdine))
+      const tutteNuove = lette.righe.filter(r => !viste.has(r.idOrdine))
+      // IL COSTO DEL FORNITORE E' QUELLO DI TUTTO IL FILE, non della fetta che sto elaborando ora.
+      // Spezzando il lavoro a pacchetti da quindici avevo lasciato il totale sul pacchetto: a
+      // schermo usciva 33,54 invece di 356,35 — cioe' la somma degli ultimi quindici.
+      const costoFornitoreTotale = Math.round(tutteNuove.reduce((s, r) => s + r.addebitoFornitore, 0) * 100) / 100
+      let nuove = tutteNuove
 
       // A FETTE, cosi' la schermata puo' dire a che punto sta.
       // Riprezzare una spedizione vuol dire ricostruire tutta la sua catena di master, e ognuno e'
       // qualche lettura: su centosei spedizioni sono centinaia di viaggi al database, e in un colpo
       // solo la richiesta ci mette troppo e la pagina resta muta. Il browser ne chiede un pezzo per
       // volta e misura quanto ci mette davvero: il tempo che manca e' calcolato sul ritmo vero.
-      const totaleNuove = nuove.length
+      const totaleNuove = tutteNuove.length
       const da = Math.max(0, Number(body?.da) || 0)
       const quante = Math.max(1, Math.min(200, Number(body?.quante) || totaleNuove))
       if (body?.da !== undefined) nuove = nuove.slice(da, da + quante)
@@ -70,13 +75,18 @@ export async function POST(req: NextRequest) {
       // ── CARICAMENTO VERO ──
       // Si scrive SOLO se chi carica lo chiede esplicitamente. Il primo giro e' sempre
       // un'anteprima: chi paga guarda i numeri, poi conferma.
-      if (body?.conferma === true) {
-        // Anche queste finiscono nell'elenco "File processati", come gli altri caricamenti: chi
-        // guarda dopo deve poter risalire da una rettifica al file che l'ha generata.
-        const { data: fileRip } = await supabase.from('rettifiche_files').insert({
-          master_id: myMaster, nome_file: nomeFile, n_tot_spedizioni: (righe || []).length,
-        }).select().single()
-        const creaturaFile = fileRip?.id || null
+      {
+        // UNA RIGA SOLA NELL'ELENCO FILE, non una per pacchetto.
+        // Il lavoro si fa a fette per poter mostrare la barra; ma il FILE e' uno, e creare una riga
+        // a ogni fetta riempirebbe l'elenco di sette righe uguali per un solo caricamento.
+        // La prima fetta la crea, le altre si portano dietro il suo identificativo.
+        let creaturaFile: string | null = body?.fileId || null
+        if (!creaturaFile) {
+          const { data: fileRip } = await supabase.from('rettifiche_files').insert({
+            master_id: myMaster, nome_file: nomeFile, n_tot_spedizioni: (righe || []).length,
+          }).select().single()
+          creaturaFile = fileRip?.id || null
+        }
         const daScrivere: any[] = []
         for (const e of esiti) {
           if (!e.trovata || !e.spedizioneId) continue
@@ -114,19 +124,29 @@ export async function POST(req: NextRequest) {
           else if (error.code === '23505') doppioni++
           else console.error('[RIPESATURE] riga non scritta', riga.numero_spedizione, error.message)
         }
-        await supabase.from('rettifiche_files').update({
-          n_processate: lette.righe.length, n_trovate: esiti.filter(e => e.trovata).length,
-          n_scartati: esiti.filter(e => !e.trovata).length + viste.size, n_da_rettificare: scritte,
-        }).eq('id', creaturaFile)
+        // I conteggi si SOMMANO a quelli gia' scritti dalle fette precedenti.
+        if (creaturaFile) {
+          const { data: pre } = await supabase.from('rettifiche_files')
+            .select('n_processate,n_trovate,n_scartati,n_da_rettificare').eq('id', creaturaFile).maybeSingle()
+          await supabase.from('rettifiche_files').update({
+            n_processate: (pre?.n_processate || 0) + esiti.length,
+            n_trovate: (pre?.n_trovate || 0) + esiti.filter(e => e.trovata).length,
+            n_scartati: (pre?.n_scartati || 0) + esiti.filter(e => !e.trovata).length,
+            n_da_rettificare: (pre?.n_da_rettificare || 0) + scritte,
+          }).eq('id', creaturaFile)
+        }
 
         return NextResponse.json({
           success: true, tipo: 'ripesature', anteprima: false,
+          fileId: creaturaFile,
+          da, quante: nuove.length, totaleDaFare: totaleNuove,
+          finito: da + nuove.length >= totaleNuove,
           creato: scritte, doppioniRespinti: doppioni,
           totali: {
             nelFile: (righe || []).length, spedizioni: lette.righe.length,
             giaCaricate: viste.size,
             nonTrovate: esiti.filter(e => !e.trovata).length,
-            addebitoFornitore: Math.round(nuove.reduce((s, r) => s + r.addebitoFornitore, 0) * 100) / 100,
+            addebitoFornitore: costoFornitoreTotale,
           },
         })
       }
@@ -141,7 +161,7 @@ export async function POST(req: NextRequest) {
           spedizioni: lette.righe.length,
           giaCaricate: viste.size,
           nonTrovate: esiti.filter(e => !e.trovata).length,
-          addebitoFornitore: Math.round(nuove.reduce((s, r) => s + r.addebitoFornitore, 0) * 100) / 100,
+          addebitoFornitore: costoFornitoreTotale,
         },
         righe: esiti,
       })

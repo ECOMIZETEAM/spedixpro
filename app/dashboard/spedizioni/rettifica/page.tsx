@@ -39,37 +39,11 @@ export default function RettificaCostiPage() {
   // Anteprima delle RIPESATURE del fornitore: e' un file diverso da quello dei pesi, e la rotta lo
   // riconosce da sola dalle colonne. Qui si tiene il risultato per mostrarlo, senza toccare il
   // flusso del file dei pesi, che continua a funzionare come prima.
-  const [ripesature, setRipesature] = useState<any>(null)
-  const [caricandoRip, setCaricandoRip] = useState(false)
   const [avanz, setAvanz] = useState<{fatti:number;totale:number;da:number|null;etichetta:string}|null>(null)
   // Quali gruppi sono aperti. RAGGRUPPATE PER DESTINATARIO DIRETTO: un master vede i suoi
   // sotto-master e i suoi clienti diretti, non l'elenco piatto di tutta la rete sotto. Con 106
   // spedizioni su sei destinatari, l'elenco piatto e' illeggibile e non si capisce chi paga cosa.
   const [aperti, setAperti] = useState<Record<string, boolean>>({})
-
-  // Il caricamento vero: si rimanda lo STESSO file con conferma, cosi' i numeri che si scrivono
-  // sono ricalcolati adesso e non quelli che il browser si e' tenuto in tasca dall'anteprima.
-  async function caricaRipesature() {
-    if (!ripesature?.fileRighe) return
-    setCaricandoRip(true)
-    try {
-      const res = await fetch('/api/rettifiche/upload', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nomeFile: ripesature.nomeFile, righe: ripesature.fileRighe, conferma: true }),
-      })
-      const d = await res.json()
-      if (d?.error) await dialog.alert({ title: 'Errore', message: d.error })
-      else {
-        await dialog.alert({
-          title: 'Rettifiche create',
-          message: `Create ${d.creato} rettifiche.` + (d.doppioniRespinti ? ` ${d.doppioniRespinti} erano già state caricate e sono state respinte.` : ''),
-        })
-        setRipesature(null)
-        await caricaFiles()
-      }
-    } catch { await dialog.alert({ title: 'Errore', message: 'Errore di rete.' }) }
-    setCaricandoRip(false)
-  }
 
   async function uploadFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -98,31 +72,42 @@ export default function RettificaCostiPage() {
       })
       const data = await res.json()
       if (data?.tipo === 'ripesature') {
-        // A FETTE, con la barra: riprezzare una spedizione vuol dire ricostruire tutta la sua catena
-        // di master, e in un colpo solo la pagina resterebbe muta per un minuto.
-        let tutte = [...(data.righe || [])]
+        // UN GESTO SOLO: si mette il file e le rettifiche nascono. Poi si sceglie A CHI e QUALI
+        // dalla tabella qui sotto, che e' dove la decisione viene presa davvero.
+        // Il passaggio in mezzo — "guarda l'anteprima, poi premi carica" — era una complicazione
+        // inutile: la stessa scelta si fa gia' selezionando i gruppi e premendo Conferma, e fino a
+        // quel momento non si muove un euro.
+        let creati = data.creato || 0, doppioni = data.doppioniRespinti || 0
         let da = (data.da || 0) + (data.quante || 0)
-        const totale = data.totaleDaFare ?? tutte.length
-        setAvanz({ fatti: tutte.length, totale, da: Date.now(), etichetta: 'Sto ricalcolando le spedizioni' })
-        while (!data.finito && da < totale) {
+        const totale = data.totaleDaFare ?? 0
+        const fileId = data.fileId
+        let finito = !!data.finito
+        setAvanz({ fatti: da, totale, da: Date.now(), etichetta: 'Sto ricalcolando le spedizioni' })
+        while (!finito && da < totale) {
           const r2 = await fetch('/api/rettifiche/upload', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nomeFile: file.name, righe, da, quante: 15 }),
+            body: JSON.stringify({ nomeFile: file.name, righe, da, quante: 15, fileId }),
           })
           const d2 = await r2.json()
           if (d2?.error) break
-          tutte = tutte.concat(d2.righe || [])
+          creati += d2.creato || 0; doppioni += d2.doppioniRespinti || 0
           da = (d2.da || 0) + (d2.quante || 0)
-          setAvanz(a => a ? { ...a, fatti: tutte.length } : a)
-          if (d2.finito) break
+          finito = !!d2.finito
+          setAvanz(a => a ? { ...a, fatti: da } : a)
         }
         setAvanz(null)
-        setRipesature({ ...data, righe: tutte, fileRighe: righe, nomeFile: file.name })
         setUploading(false)
         if (fileRef.current) fileRef.current.value = ''
+        await caricaFiles()
+        if (fileId) { await caricaRettifiche(fileId); setFileSelezionato(fileId) }
+        await dialog.alert({
+          title: 'Rettifiche create',
+          message: `Create ${creati} rettifiche.`
+            + (doppioni ? ` ${doppioni} erano già state caricate e sono state respinte.` : '')
+            + ' Scegli a chi girarle e premi Conferma: fino a quel momento non viene scalato nulla.',
+        })
         return
       }
-      setRipesature(null)
       setAvanz(null)
       if (data.success) {
         await caricaFiles()
@@ -218,63 +203,6 @@ export default function RettificaCostiPage() {
         </div>
       )}
 
-      {ripesature && (
-        <div style={{marginBottom:'20px'}}>
-          <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'10px',padding:'12px 15px',marginBottom:'14px',fontSize:'13px',color:'#92400e',lineHeight:1.6}}>
-            <strong>Ripesature del fornitore.</strong> {ripesature.totali.nelFile} righe nel file ={' '}
-            <strong>{ripesature.totali.spedizioni} spedizioni</strong> (i colli di una stessa spedizione
-            portano lo stesso importo e vengono contati una volta sola).
-            {ripesature.totali.giaCaricate > 0 && <> Di queste, <strong>{ripesature.totali.giaCaricate} erano già state caricate</strong> e sono escluse.</>}
-            {ripesature.totali.nonTrovate > 0 && <> {ripesature.totali.nonTrovate} non risultano fra le nostre spedizioni.</>}
-            <br/>Costo del fornitore: <strong>€ {Number(ripesature.totali.addebitoFornitore).toFixed(2)}</strong>.
-            {' '}<span style={{fontWeight:700}}>Nessuna rettifica è stata creata: questa è solo un'anteprima.</span>
-            <div style={{marginTop:'12px'}}>
-              <button onClick={caricaRipesature} disabled={caricandoRip}
-                style={{background:caricandoRip?'#d5d5d5':'#f97316',color:'#fff',border:'none',borderRadius:'8px',padding:'10px 18px',fontSize:'13px',fontWeight:700,cursor:caricandoRip?'default':'pointer'}}>
-                {caricandoRip ? 'Sto caricando…' : 'Carica le rettifiche'}
-              </button>
-              <span style={{fontSize:'12px',color:'#92400e',marginLeft:'10px'}}>
-                Le rettifiche vengono create verso i tuoi <strong>destinatari diretti</strong>. Da lì
-                ognuno decide se accettarle e se propagarle alla propria rete.
-              </span>
-            </div>
-          </div>
-          <div style={{background:'#fff',border:'1px solid #e8e8e8',borderRadius:'10px',overflow:'hidden'}}>
-            <div style={{overflowX:'auto'}}>
-              <table style={{width:'100%',borderCollapse:'collapse',minWidth:'860px'}}>
-                <thead><tr>
-                  {['Spedizione','Collo riscontrato','Chi paga','Addebitato','Dovuto','Differenza'].map((h,i)=>(
-                    <th key={h} style={{textAlign:i>2?'right':'left',padding:'9px 12px',fontSize:'11px',fontWeight:700,textTransform:'uppercase',color:'#666',borderBottom:'1px solid #e8e8e8',whiteSpace:'nowrap'}}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {(ripesature.righe||[]).filter((r:any)=>r.trovata).map((r:any)=>(r.livelli||[]).map((l:any,i:number)=>(
-                    <tr key={r.ldv+'-'+i}>
-                      {i===0 && (<>
-                        <td style={{padding:'8px 12px',fontSize:'12.5px',borderBottom:'1px solid #e8e8e8',verticalAlign:'top'}} rowSpan={r.livelli.length}>
-                          <div style={{fontWeight:700}}>{r.ldv}</div>
-                          <div style={{fontSize:'11.5px',color:'#8a8a8a'}}>{r.destinatario}</div>
-                        </td>
-                        <td style={{padding:'8px 12px',fontSize:'12.5px',borderBottom:'1px solid #e8e8e8',verticalAlign:'top'}} rowSpan={r.livelli.length}>
-                          <div>{r.pesoPrima} → <strong>{r.pesoDopo} kg</strong>{r.colli>1?' · '+r.colli+' colli':''}</div>
-                          <div style={{fontSize:'11.5px',color:'#8a8a8a'}}>{r.misure}</div>
-                          <div style={{fontSize:'11.5px',color:'#15803d'}}>fornitore € {Number(r.addebitoFornitore).toFixed(2)}</div>
-                        </td>
-                      </>)}
-                      <td style={{padding:'8px 12px',fontSize:'12.5px',borderBottom:'1px solid #f5f5f5'}}>{l.chi}</td>
-                      <td style={{padding:'8px 12px',fontSize:'12.5px',borderBottom:'1px solid #f5f5f5',textAlign:'right',fontVariantNumeric:'tabular-nums'}}>€ {Number(l.pagato).toFixed(2)}</td>
-                      <td style={{padding:'8px 12px',fontSize:'12.5px',borderBottom:'1px solid #f5f5f5',textAlign:'right',fontVariantNumeric:'tabular-nums'}}>{l.dovuto==null?'—':'€ '+Number(l.dovuto).toFixed(2)}</td>
-                      <td style={{padding:'8px 12px',fontSize:'12.5px',borderBottom:'1px solid #f5f5f5',textAlign:'right',fontWeight:700,fontVariantNumeric:'tabular-nums',color:l.differenza==null?'#8a8a8a':l.differenza>=0?'#15803d':'#b91c1c'}}>
-                        {l.differenza==null?'n/d':(l.differenza>=0?'+':'')+'€ '+Number(l.differenza).toFixed(2)}
-                      </td>
-                    </tr>
-                  )))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Upload + File processati */}
       <div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:'16px',marginBottom:'16px'}}>
