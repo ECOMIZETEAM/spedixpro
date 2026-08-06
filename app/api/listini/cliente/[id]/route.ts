@@ -213,11 +213,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{id:st
   const { data: fasce } = await fasceQuery.order('peso_max')
   const { data: supplementi } = await supplQuery
 
-  // Fattore volume del corriere selezionato (dalla riga di aggancio)
+  // Fattore volume del corriere selezionato (dalla riga di aggancio).
+  // Se il contratto non ha ancora un valore suo, NON si mostra il default del listino: si mostra
+  // quello del CONTRATTO, ereditato da chi lo ha assegnato. Altrimenti la schermata propone 5000 a
+  // un master che paga su 4000, e chi salva senza guardare se lo porta dietro.
   let fattoreCorriere = listino?.fattore_volume ?? 5000
   if (corriereId) {
     const { data: agg } = await supabase.from('listini_clienti_corrieri').select('fattore_volume').eq('listino_id', id).eq('corriere_id', corriereId).maybeSingle()
     if (agg?.fattore_volume != null) fattoreCorriere = agg.fattore_volume
+    else if (listino?.master_id) {
+      const { fattoreVolumeCorriere } = await import('@/lib/pricing')
+      const f = await fattoreVolumeCorriere(supabase, listino.master_id, corriereId)
+      if (f > 0) fattoreCorriere = f
+    }
   }
 
   return NextResponse.json({ listino, fattoreCorriere, fasce: fasce||[], supplementi: supplementi||[] })

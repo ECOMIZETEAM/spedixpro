@@ -55,7 +55,16 @@ export async function POST(req: NextRequest) {
     .eq('listino_id', sourceListinoId).eq('corriere_id', corriereId).maybeSingle()
   await admin.from('listini_clienti_corrieri').insert({
     listino_id: targetId, corriere_id: corriereId,
-    fattore_volume: cr?.fattore_volume ?? null, abilitato: cr?.abilitato ?? true,
+    // Se il listino di partenza non aveva un fattore suo, si eredita quello del CONTRATTO invece di
+    // lasciar vincere il 5000 predefinito della colonna.
+    fattore_volume: cr?.fattore_volume ?? (await (async () => {
+      const { data: t } = await admin.from('listini_clienti').select('master_id').eq('id', targetId).maybeSingle()
+      if (!t?.master_id) return null
+      const { fattoreVolumeCorriere } = await import('@/lib/pricing')
+      const f = await fattoreVolumeCorriere(admin, t.master_id, corriereId)
+      return f > 0 ? f : null
+    })()),
+    abilitato: cr?.abilitato ?? true,
   })
   // Fasce del corriere (IDEMPOTENTE: pulisco il target prima, così non si duplica su ri-copia)
   const { data: fasce } = await admin.from('listini_clienti_fasce')
