@@ -12,7 +12,14 @@ export type LivelloCatena = {
   isProprietario: boolean
 }
 
-async function costruisciCatena(
+// ESPORTATA perche' serve anche a RIPREZZARE.
+//
+// Quando il fornitore ci ripesa un collo, ogni livello va riprezzato con le misure vere. Il prezzo
+// nuovo deve uscire dalla STESSA funzione che ha fatto l'addebito originale: se lo ricalcolassi
+// altrove con una copia della logica, le due si allontanerebbero al primo ritocco e la rettifica
+// direbbe una cifra che non e' la differenza fra due prezzi confrontabili.
+// Non scrive niente: costruisce la catena e i prezzi, e basta.
+export async function costruisciCatena(
   supabase: any,
   params: {
     masterDirettoId: string
