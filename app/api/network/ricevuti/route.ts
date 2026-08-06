@@ -22,9 +22,17 @@ export async function GET(_req: NextRequest) {
   const adminDb = createAdminSupabase()
 
   const [rett, cod, resi] = await Promise.all([
+    // SI VEDE SOLO QUELLO CHE E' GIA' STATO ADDEBITATO.
+    // Mancava il filtro sulla conferma: appena il master di sopra CARICAVA il file, le righe
+    // comparivano gia' qui sotto — ancora in attesa, ancora sue, ancora modificabili o
+    // cancellabili. Chi le vedeva se le trovava addosso prima che nessuno avesse deciso niente e
+    // senza che gli fosse stato tolto un euro. Una rettifica diventa "ricevuta" nel momento in cui
+    // il livello di sopra la conferma e il credito viene scalato: prima non esiste, per chi la
+    // riceve. E' la stessa regola dei contrassegni, dove la rimessa si vede solo da caricata.
     adminDb.from('rettifiche')
       .select('id,numero_spedizione,peso_iniziale,peso_reale,costo_iniziale,costo_finale,differenza,confermata,stato,propagazione,created_at,masters:master_id(nome)')
       .eq('target_master_id', mio)
+      .eq('confermata', true)
       .order('created_at', { ascending: false }).limit(200),
     adminDb.from('distinte_contrassegni')
       .select('id,numero,totale_iniziale,totale_rimborsato,metodo_pagamento,stato,data_pagamento,accettata_target,created_at,masters:master_id(nome),distinte_contrassegni_righe(numero_spedizione,importo_cod)')

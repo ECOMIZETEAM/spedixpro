@@ -143,6 +143,10 @@ export async function POST(req: NextRequest) {
             differenza: -liv.differenza,   // la colonna e' "quanto restituisco": un addebito e' negativo
             stato: 'da_rettificare',
             rif_fornitore: e.idOrdine,     // l'anti-doppione: indice unico sul database
+            // Le misure viaggiano con la riga: servono a chi la ricevera' per riprezzare col
+            // PROPRIO listino quando la gira al livello sotto. La cifra in euro non scende lungo
+            // la catena — quella e' il costo di chi sta sopra.
+            colli_ripesati: e.colli_ripesati || null,
           })
         }
         let scritte = 0, doppioni = 0

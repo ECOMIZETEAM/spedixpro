@@ -13,6 +13,7 @@ export default function NetworkRicevutiPage() {
   const [msg, setMsg] = useState('')
   const [propagando, setPropagando] = useState<string>('')
   const [accettando, setAccettando] = useState<string>('')
+  const [apertoBlocco, setApertoBlocco] = useState<string>('')
 
   async function carica() {
     setLoading(true)
@@ -22,39 +23,42 @@ export default function NetworkRicevutiPage() {
   }
   useEffect(()=>{ carica() }, [])
 
-  // Propaga una rettifica ricevuta ai MIEI clienti/sub-master: riusa l'upload
-  // (stessa LDV + peso reale -> il mio upload la smista col MIO listino)
-  async function propaga(r: any) {
-    setPropagando(r.id); setMsg('')
+  // UN BLOCCO, NON CINQUANTASETTE RIGHE.
+  // Le rettifiche arrivano tutte insieme, dallo stesso file dello stesso mittente: si decidono
+  // insieme. Il dettaglio resta, ma si apre solo se uno lo vuole vedere.
+  const blocchi = (() => {
+    const m = new Map<string, any>()
+    for (const r of (dati.rettifiche || [])) {
+      const giorno = new Date(r.created_at).toLocaleDateString('it-IT')
+      const da = r.masters?.nome || '—'
+      const k = da + '|' + giorno
+      if (!m.has(k)) m.set(k, { k, da, giorno, righe: [], totale: 0, daDecidere: [] })
+      const b = m.get(k)
+      b.righe.push(r); b.totale += Number(r.differenza) || 0
+      if (!r.propagazione) b.daDecidere.push(r.id)
+    }
+    return Array.from(m.values()).sort((a, b) => (a.giorno < b.giorno ? 1 : -1))
+  })()
+
+  // Accetta l'intero blocco e lo gira alla propria rete: nascono le MIE rettifiche verso i miei
+  // sotto-master e clienti, riprezzate col MIO listino. Restano in attesa nella mia "Rettifica
+  // Costi": li' decido a chi caricarle, e solo allora il credito scende di un gradino.
+  async function decidiBlocco(b: any, decisione: 'propagata' | 'assorbita') {
+    if (!b.daDecidere.length) return
+    setPropagando(b.k); setMsg('')
     try {
-      const res = await fetch('/api/rettifiche/upload', {
+      const res = await fetch('/api/network/rettifiche', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-          nomeFile: 'Propagazione ' + r.numero_spedizione,
-          righe: [{ 'LDV': r.numero_spedizione, 'Peso Reale': r.peso_reale }],
-        })
+        body: JSON.stringify({ rettifica_ids: b.daDecidere, decisione })
       })
       const d = await res.json()
       if (d.error) setMsg('Errore: ' + d.error)
-      else if (d.nDaRettificare > 0) {
-        await decidi(r, 'propagata', true)
-        setMsg('✓ ' + r.numero_spedizione + ': rettifica creata verso il tuo cliente/master — confermala dalla pagina Rettifiche')
-      }
-      else if (d.nTrovate > 0) setMsg(r.numero_spedizione + ': nessuna differenza col tuo listino (o gia propagata)')
-      else setMsg(r.numero_spedizione + ': LDV non agganciata (' + (d.nScartati||0) + ' scartate)')
+      else if (decisione === 'assorbita') setMsg(`✓ ${d.assorbite} rettifiche assorbite: restano a tuo carico, la tua rete non viene toccata.`)
+      else setMsg(`✓ Create ${d.create} rettifiche verso i tuoi sotto-master e clienti — le trovi in Spedizioni › Rettifica Costi, divise per destinatario. Fino a quando non premi Conferma lì, non viene scalato niente a nessuno.`
+        + (d.nonPropagate ? ` (${d.nonPropagate} non girate: ${(d.dettaglio||[]).slice(0,3).map((x:any)=>x.ldv+' — '+x.perche).join('; ')})` : ''))
+      carica()
     } catch { setMsg('Errore di connessione') }
     setPropagando('')
-  }
-
-  async function decidi(r: any, decisione: string | null, silenzioso = false) {
-    try {
-      await fetch('/api/network/rettifiche', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ rettifica_id: r.id, decisione })
-      })
-      if (!silenzioso) setMsg(decisione === 'assorbita' ? ('✓ ' + r.numero_spedizione + ': assorbita — resta a tuo carico, i tuoi clienti non vengono toccati') : 'Aggiornata')
-      carica()
-    } catch { if (!silenzioso) setMsg('Errore di connessione') }
   }
 
   // Accetta un reso ricevuto: propaga (distinte reso verso clienti e/o sotto-master)
@@ -116,45 +120,66 @@ export default function NetworkRicevutiPage() {
         {loading ? <div style={{padding:'40px',textAlign:'center',color:'#999'}}>Caricamento…</div> : (
           <>
           {tab==='rettifiche' && (
-            <table style={{width:'100%',borderCollapse:'collapse'}}>
-              <thead><tr style={{background:'#f9fafb'}}>
-                <th style={th}>Data</th><th style={th}>Da</th><th style={th}>LDV</th><th style={th}>Peso dich. → reale</th><th style={th}>Costo → ricalcolo</th><th style={th}>Differenza</th><th style={th}>Stato</th><th style={th}></th>
-              </tr></thead>
-              <tbody>
-                {dati.rettifiche.length===0 ? <tr><td colSpan={8} style={{...td,textAlign:'center',color:'#999',padding:'32px'}}>Nessuna rettifica ricevuta</td></tr> :
-                dati.rettifiche.map((r:any)=>(
-                  <tr key={r.id}>
-                    <td style={td}>{new Date(r.created_at).toLocaleDateString('it-IT')}</td>
-                    <td style={td}>{r.masters?.nome||'—'}</td>
-                    <td style={{...td,fontWeight:600}}>{r.numero_spedizione}</td>
-                    <td style={td}>{r.peso_iniziale} → {r.peso_reale} kg</td>
-                    <td style={td}>€ {Number(r.costo_iniziale).toFixed(2)} → € {Number(r.costo_finale).toFixed(2)}</td>
-                    <td style={{...td,fontWeight:700,color:Number(r.differenza)<0?'#dc2626':'#16a34a'}}>€ {Number(r.differenza).toFixed(2)}</td>
-                    <td style={td}>
-                      <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:r.confermata?'#fee2e2':'#fef3c7',color:r.confermata?'#991b1b':'#92400e'}}>
-                        {r.confermata?'Addebitata':'In attesa'}
-                      </span>
-                    </td>
-                    <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>
-                      {r.propagazione === 'propagata' ? (
-                        <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#ffedd5',color:'#ea580c'}}>↓ Propagata</span>
-                      ) : r.propagazione === 'assorbita' ? (
-                        <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#dcfce7',color:'#166534'}}>✓ Assorbita da me</span>
-                      ) : (<>
-                        <button onClick={()=>propaga(r)} disabled={propagando===r.id}
-                          style={{background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'5px 10px',fontSize:'12px',fontWeight:600,cursor:'pointer',opacity:propagando===r.id?.6:1,marginRight:'6px'}}>
-                          {propagando===r.id?'…':'↓ Propaga'}
+            blocchi.length===0 ? <div style={{padding:'32px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessuna rettifica ricevuta</div> :
+            <div>
+              {blocchi.map((b:any)=>(
+                <div key={b.k} style={{borderTop:'1px solid #f0f0f0'}}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px',flexWrap:'wrap',padding:'14px 16px'}}>
+                    <div>
+                      <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>
+                        Da {b.da} · {b.righe.length} rettifiche · <span style={{color:'#dc2626'}}>€ {Math.abs(b.totale).toFixed(2)}</span>
+                      </div>
+                      <div style={{fontSize:'12px',color:'#8a8a8a',marginTop:'3px'}}>
+                        Ricevute il {b.giorno} · già scalate dal tuo credito.
+                        {b.daDecidere.length ? ' Decidi se tenertele o girarle alla tua rete.' : ' Già decise.'}
+                      </div>
+                    </div>
+                    <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                      <button onClick={()=>setApertoBlocco(apertoBlocco===b.k?'':b.k)}
+                        style={{background:'#fff',color:'#666',border:'1px solid #e8e8e8',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>
+                        {apertoBlocco===b.k?'Nascondi il dettaglio':'Vedi le '+b.righe.length}
+                      </button>
+                      {b.daDecidere.length>0 && <>
+                        <button onClick={()=>decidiBlocco(b,'propagata')} disabled={propagando===b.k}
+                          style={{background:ACCENT,color:'#fff',border:'none',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',opacity:propagando===b.k?.6:1}}>
+                          {propagando===b.k?'…':'Accetta e gira alla mia rete ('+b.daDecidere.length+')'}
                         </button>
-                        <button onClick={()=>decidi(r, 'assorbita')}
-                          style={{background:'#f0fdf4',color:'#166534',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'5px 10px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>
-                          ✓ La assorbo io
+                        <button onClick={()=>decidiBlocco(b,'assorbita')} disabled={propagando===b.k}
+                          style={{background:'#f0fdf4',color:'#166534',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:600,cursor:'pointer'}}>
+                          ✓ Le assorbo io
                         </button>
-                      </>)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      </>}
+                    </div>
+                  </div>
+                  {apertoBlocco===b.k && (
+                    <table style={{width:'100%',borderCollapse:'collapse',background:'#fcfcfc'}}>
+                      <thead><tr style={{background:'#f9fafb'}}>
+                        <th style={th}>LDV</th><th style={th}>Peso dich. → reale</th><th style={th}>Costo → ricalcolo</th><th style={th}>Differenza</th><th style={th}>Stato</th>
+                      </tr></thead>
+                      <tbody>
+                        {b.righe.map((r:any)=>(
+                          <tr key={r.id}>
+                            <td style={{...td,fontWeight:600}}>{r.numero_spedizione}</td>
+                            <td style={td}>{r.peso_iniziale} → {r.peso_reale} kg</td>
+                            <td style={td}>€ {Number(r.costo_iniziale).toFixed(2)} → € {Number(r.costo_finale).toFixed(2)}</td>
+                            <td style={{...td,fontWeight:700,color:Number(r.differenza)<0?'#dc2626':'#16a34a'}}>€ {Number(r.differenza).toFixed(2)}</td>
+                            <td style={td}>
+                              {r.propagazione === 'propagata' ? (
+                                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#ffedd5',color:'#ea580c'}}>↓ Girata alla mia rete</span>
+                              ) : r.propagazione === 'assorbita' ? (
+                                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#dcfce7',color:'#166534'}}>✓ Assorbita da me</span>
+                              ) : (
+                                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#fef3c7',color:'#92400e'}}>Da decidere</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
           {tab==='contrassegni' && (
             <table style={{width:'100%',borderCollapse:'collapse'}}>

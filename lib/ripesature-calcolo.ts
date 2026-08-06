@@ -49,6 +49,11 @@ export type EsitoRipesatura = {
   // listino, una destinazione fuori tariffa) i livelli sopra quel punto MANCANO — e chi carica
   // rischia di non trovarsi dentro e di scambiare "non sono nella catena" per "sono l'ultimo".
   catenaCompleta?: boolean
+  // I colli come li ha rimisurati il fornitore. Viaggiano con la rettifica perche' chi la ricevera'
+  // dovra' riprezzarli col PROPRIO listino per girarli al livello sotto: la cifra in euro non
+  // scende lungo la catena, e col solo peso il volume — che e' quello che fa il supplemento — si
+  // perderebbe per strada.
+  colli_ripesati?: { weight: number; length: number; width: number; height: number }[]
 }
 
 const arrotonda = (n: number) => Math.round(n * 100) / 100
@@ -81,6 +86,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     const packages = r.colli.map(c => ({
       weight: c.peso, length: c.lunghezza, width: c.larghezza, height: c.altezza,
     }))
+    base.colli_ripesati = packages
     const dest = {
       provincia: s.dest_provincia || '', cap: s.dest_cap || '',
       citta: s.dest_citta || '', paese: s.dest_paese || 'IT',
