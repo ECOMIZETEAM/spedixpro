@@ -267,6 +267,7 @@ export async function POST(req: NextRequest) {
   // deciso legittimamente a monte (accessori, maggiorazioni del master): non si cambia in silenzio
   // la fatturazione di chi oggi addebita correttamente.
   let prezzoServerCliente = 0
+  let zonaCliente: string | undefined
   if (!isProprio && cliente?.listino_cliente_id) {
     const risPrezzo = await calcolaPrezzoListino(adminCrea, {
       listinoId: cliente.listino_cliente_id, corriereId: corriereRecord.id,
@@ -282,6 +283,7 @@ export async function POST(req: NextRequest) {
       valoreMerce: Number(body.valoreMerce || 0), nolo: risPrezzo.prezzo,
     })
     prezzoServerCliente = Math.round((risPrezzo.prezzo + suppPrezzo.contrassegno + suppPrezzo.assicurazione) * 100) / 100
+    zonaCliente = risPrezzo.zona
     const dichiarato = parseFloat(body.totalPrice) || 0
     if (dichiarato > 0 && dichiarato < prezzoServerCliente - 0.01) {
       console.warn('[CREA][PREZZO] importo dichiarato inferiore al listino, uso il listino', {
@@ -464,6 +466,9 @@ export async function POST(req: NextRequest) {
       citta: body.shipTo.city,
       corriereNome: corriereRecord.nome_contratto,
       contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+      // Con che zona e a che prezzo e' stato calcolato il cliente: serve al controllo "due zone
+      // sulla stessa spedizione" dentro verificaCreditoCatena, comune a tutte le porte.
+      zonaCliente, prezzoCliente: prezzoServerCliente || undefined,
     })
     if (!catenaCheck.ok) {
       // DUE COSE DIVERSE, NON UNA. `verificaCreditoCatena` fallisce sia quando un master della

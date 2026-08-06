@@ -177,6 +177,10 @@ export type DettaglioCorriere = {
   peso_fatturato: number   // peso EFFETTIVO su cui è tassato (reale se agevolazione, altrimenti volumetrico)
   contrassegnoOltreMax?: boolean   // COD richiesto oltre il max (o senza tariffa) -> corriere da escludere
   assicurazioneOltreMax?: boolean  // assicurazione richiesta oltre il max -> corriere da escludere
+  // QUALE ZONA HA VINTO. Serve a confrontare la zona che risolve il COSTO di un master con quella
+  // che risolve il PREZZO del cliente: se sulla stessa spedizione escono due zone diverse, qualcuno
+  // compra isola e vende pianura. Senza questo nome, quella differenza non si puo' nemmeno vedere.
+  zona?: string
 }
 
 // Calcola il prezzo di trasporto per un listino dato.
@@ -524,6 +528,8 @@ export async function calcolaPrezzoCorriereDettaglio(
     peso_fatturato: r2(pesoFatturato),
     contrassegnoOltreMax,
     assicurazioneOltreMax,
+    // La zona che ha vinto davvero: quella delle fasce scelte, non quella dedotta dalla provincia.
+    zona: (fasceZona[0] as any)?.zone?.nome || zonaNome,
   }
 }
 

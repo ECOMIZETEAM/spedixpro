@@ -1,4 +1,4 @@
-import { calcolaPrezzoListino, calcolaPrezzoCorriere } from '@/lib/pricing'
+import { calcolaPrezzoListino, calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
 import { registraMovimentoMaster, descrizioneSpedizione } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
@@ -10,6 +10,10 @@ export type LivelloCatena = {
   credito: number
   prezzo: number
   isProprietario: boolean
+  // La zona con cui e' stato calcolato QUESTO livello. Serve a confrontarla con quella del prezzo
+  // al cliente: sulla stessa spedizione devono essere la stessa, altrimenti qualcuno sta comprando
+  // isola e vendendo pianura.
+  zona?: string
 }
 
 // ESPORTATA perche' serve anche a RIPREZZARE.
@@ -91,18 +95,19 @@ export async function costruisciCatena(
     // Ogni master (a QUALSIASI livello) paga il SUO Listino Corrieri per questo corriere:
     // è il costo che vede nella sua lista movimenti.
     let calcolato = false
+    let zonaLivello: string | undefined
     if (params.corriereNome) {
       const mCorrId = await corriereDiMasterPerNome(adminDb, m.id, params.corriereNome)
       if (mCorrId) {
         const mCorr = { id: mCorrId }
         const pesoReale = (params.packages || []).reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
-        const pz = await calcolaPrezzoCorriere(adminDb, {
+        const pz = await calcolaPrezzoCorriereDettaglio(adminDb, {
           corriereId: mCorr.id, masterId: m.id,
           provincia: params.provincia, cap: params.cap, paese: params.paese, citta: params.citta,
           pesoReale, packages: params.packages,
           contrassegno: params.contrassegno, assicurazione: params.assicurazione,
         })
-        if (pz != null) { prezzo = pz; calcolato = true }
+        if (pz != null) { prezzo = pz.totale; zonaLivello = pz.zona; calcolato = true }
       }
     }
     // Fallback se il master non ha il listino corrieri per questo contratto:
@@ -120,6 +125,7 @@ export async function costruisciCatena(
         })
         if (!ris) return { catena, errore: `Nessuna tariffa nel listino del master "${m.nome}".` }
         prezzo = ris.prezzo
+        zonaLivello = ris.zona
       }
     }
 
@@ -137,7 +143,7 @@ export async function costruisciCatena(
       masterId: m.id, nome: m.nome,
       tipoContratto: m.tipo_contratto || 'credito_scalare',
       credito: Number((pagaDalSuoConto ? m.credito_proprio : m.credito) || 0),
-      prezzo, isProprietario,
+      prezzo, isProprietario, zona: zonaLivello,
     })
 
     if (isProprietario) break
@@ -192,6 +198,9 @@ export async function verificaCreditoCatena(
     corriereNome?: string
     contrassegno?: number
     assicurazione?: number
+    // La zona e il prezzo con cui e' stato calcolato il CLIENTE. Servono al controllo qui sotto.
+    zonaCliente?: string
+    prezzoCliente?: number
   }
 ): Promise<{ ok: boolean; errore?: string; masterInsufficiente?: string }> {
   const { catena, errore } = await costruisciCatena(supabase, {
@@ -208,6 +217,38 @@ export async function verificaCreditoCatena(
     assicurazione: params.assicurazione,
   })
   if (errore) return { ok: false, errore }
+
+  // ── DUE ZONE SULLA STESSA SPEDIZIONE: NON SI PARTE ──
+  //
+  // E' il guasto che continua a tornare sotto nomi diversi. Su una spedizione per Vulcano Porto il
+  // prezzo al cliente ha risolto "Italia" (4,70) e il costo del suo master "Isole Minori" (10,10):
+  // stessa destinazione, stesso contratto, due zone. Il master ha comprato isola e venduto pianura,
+  // 5,40 di perdita secca, e nessuno se n'e' accorto fino a quando il cliente non si e' lamentato.
+  // Le cause sono state di volta in volta diverse — il comune non passato alla cascata, il comune
+  // scritto in modo che non combacia con l'elenco della zona, gli elenchi disallineati fra il
+  // listino del cliente e quello del master — ma il SINTOMO e' sempre lo stesso, ed e' questo.
+  //
+  // Quindi si controlla il sintomo, non le cause: se il cliente paga MENO di quanto costa al suo
+  // master diretto E le due cifre vengono da zone diverse, la spedizione non nasce.
+  //
+  // Le due condizioni servono tutte e due, e nessuna basta da sola:
+  //  - solo "paga meno del costo" bloccherebbe i listini volutamente sotto costo, che esistono e
+  //    sono una scelta di chi li fa (ci si era gia' provato, e i falsi positivi lo fecero togliere);
+  //  - solo "zone diverse" bloccherebbe i casi innocui, tipo un listino che chiama "SCS" quello che
+  //    un altro chiama "Italia" con gli stessi identici prezzi: nomi diversi, nessuna perdita.
+  // Insieme descrivono esattamente il danno: sto vendendo sotto costo PERCHE' ho letto un'altra
+  // zona. Meglio un errore chiaro adesso che una perdita silenziosa da spiegare a fine mese.
+  const diretto = catena[0]
+  if (params.zonaCliente && diretto?.zona && params.prezzoCliente != null) {
+    const zoneDiverse = String(params.zonaCliente).trim().toUpperCase() !== String(diretto.zona).trim().toUpperCase()
+    const sottoCosto = Number(params.prezzoCliente) < diretto.prezzo - 0.01
+    if (zoneDiverse && sottoCosto) {
+      return {
+        ok: false,
+        errore: `Destinazione fuori zona: al cliente risulta "${params.zonaCliente}" (€ ${Number(params.prezzoCliente).toFixed(2)}) ma per il contratto e' "${diretto.zona}" (€ ${diretto.prezzo.toFixed(2)}). Spedizione non creabile: allinea la zona sul listino del cliente, oppure scegli un altro corriere.`,
+      }
+    }
+  }
 
   for (const liv of catena) {
     if (liv.tipoContratto === 'credito_scalare' && liv.prezzo > 0 && liv.credito < liv.prezzo) {

@@ -136,8 +136,17 @@ export async function POST(req: NextRequest) {
     citta: body.shipTo.city,
     corriereNome: corriere.nome_contratto,
     contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+    // Con che zona e a che prezzo e' stato calcolato il cliente: serve al controllo "due zone sulla
+    // stessa spedizione" dentro verificaCreditoCatena, che vale per tutte le porte insieme.
+    zonaCliente: ris.zona, prezzoCliente: costoCliente,
   })
-  if (!catena.ok) return NextResponse.json({ error: 'Credito insufficiente' }, { status: 402 })
+  // NON E' SEMPRE CREDITO. La stessa verifica fallisce anche quando la catena non e' configurata o
+  // quando cliente e contratto risolvono due zone diverse: rispondere sempre "Credito insufficiente"
+  // mandava chi integra a ricaricare un conto che era gia' pieno, mentre il problema era un altro.
+  if (!catena.ok) {
+    const eCredito = /credito insufficiente/i.test(catena.errore || '')
+    return NextResponse.json({ error: catena.errore || 'Credito insufficiente' }, { status: eCredito ? 402 : 400 })
+  }
 
   // ── PRENOTAZIONE DEL CREDITO ─────────────────────────────────────────────────────
   // Prima qui si LEGGEVA il saldo e si addebitava solo a fine rotta, dopo la chiamata al corriere:
