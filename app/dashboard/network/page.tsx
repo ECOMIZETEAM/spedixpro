@@ -40,9 +40,12 @@ export default function NetworkRicevutiPage() {
     return Array.from(m.values()).sort((a, b) => (a.giorno < b.giorno ? 1 : -1))
   })()
 
-  // Accetta l'intero blocco e lo gira alla propria rete: nascono le MIE rettifiche verso i miei
-  // sotto-master e clienti, riprezzate col MIO listino. Restano in attesa nella mia "Rettifica
-  // Costi": li' decido a chi caricarle, e solo allora il credito scende di un gradino.
+  // ACCETTARE NON E' CARICARE.
+  // Accettare vuol dire "va bene, me la prendo in carico": le righe finiscono nella MIA pagina
+  // Rettifica Costi, riprezzate col MIO listino e gia' divise per cliente e sotto-master. Li'
+  // guardo, scelgo a CHI caricarle, e solo premendo Conferma il credito scende di un gradino.
+  // Sono due gesti distinti, come per i contrassegni: chi accetta non sta ancora addebitando
+  // nessuno, e finche' non carica non e' uscito un euro dalla sua rete.
   async function decidiBlocco(b: any, decisione: 'propagata' | 'assorbita') {
     if (!b.daDecidere.length) return
     setPropagando(b.k); setMsg('')
@@ -54,7 +57,7 @@ export default function NetworkRicevutiPage() {
       const d = await res.json()
       if (d.error) setMsg('Errore: ' + d.error)
       else if (decisione === 'assorbita') setMsg(`✓ ${d.assorbite} rettifiche assorbite: restano a tuo carico, la tua rete non viene toccata.`)
-      else setMsg(`✓ Create ${d.create} rettifiche verso i tuoi sotto-master e clienti — le trovi in Spedizioni › Rettifica Costi, divise per destinatario. Fino a quando non premi Conferma lì, non viene scalato niente a nessuno.`
+      else setMsg(`✓ Accettate: ${d.create} rettifiche sono nella tua pagina Spedizioni › Rettifica Costi, divise per cliente e sotto-master. Da lì scegli a chi caricarle — fino a quel momento non viene scalato niente a nessuno.`
         + (d.nonPropagate ? ` (${d.nonPropagate} non girate: ${(d.dettaglio||[]).slice(0,3).map((x:any)=>x.ldv+' — '+x.perche).join('; ')})` : ''))
       carica()
     } catch { setMsg('Errore di connessione') }
@@ -103,7 +106,7 @@ export default function NetworkRicevutiPage() {
     <div>
       <div style={{marginBottom:'20px'}}>
         <h1 style={{fontSize:'20px',fontWeight:700,color:'#1a1a1a',margin:0}}>Dal mio network</h1>
-        <p style={{color:'#999',fontSize:'13px',marginTop:'4px'}}>Rettifiche, rimesse contrassegni e resi ricevuti dal livello superiore — accetta e propaga alla tua rete/clienti</p>
+        <p style={{color:'#999',fontSize:'13px',marginTop:'4px'}}>Rettifiche, rimesse contrassegni e resi ricevuti dal livello superiore. Qui si ACCETTA: a chi caricarli si decide dopo, dalle rispettive pagine — e solo allora il credito scende di un gradino.</p>
       </div>
 
       <div style={{display:'flex',gap:'8px',marginBottom:'16px'}}>
@@ -131,7 +134,7 @@ export default function NetworkRicevutiPage() {
                       </div>
                       <div style={{fontSize:'12px',color:'#8a8a8a',marginTop:'3px'}}>
                         Ricevute il {b.giorno} · già scalate dal tuo credito.
-                        {b.daDecidere.length ? ' Decidi se tenertele o girarle alla tua rete.' : ' Già decise.'}
+                        {b.daDecidere.length ? ' Accettandole vanno nella tua Rettifica Costi, divise per cliente e sotto-master: da lì scegli a chi caricarle.' : ' Già decise.'}
                       </div>
                     </div>
                     <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
@@ -142,7 +145,7 @@ export default function NetworkRicevutiPage() {
                       {b.daDecidere.length>0 && <>
                         <button onClick={()=>decidiBlocco(b,'propagata')} disabled={propagando===b.k}
                           style={{background:ACCENT,color:'#fff',border:'none',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',opacity:propagando===b.k?.6:1}}>
-                          {propagando===b.k?'…':'Accetta e gira alla mia rete ('+b.daDecidere.length+')'}
+                          {propagando===b.k?'…':'Accetta ('+b.daDecidere.length+')'}
                         </button>
                         <button onClick={()=>decidiBlocco(b,'assorbita')} disabled={propagando===b.k}
                           style={{background:'#f0fdf4',color:'#166534',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:600,cursor:'pointer'}}>
@@ -165,7 +168,7 @@ export default function NetworkRicevutiPage() {
                             <td style={{...td,fontWeight:700,color:Number(r.differenza)<0?'#dc2626':'#16a34a'}}>€ {Number(r.differenza).toFixed(2)}</td>
                             <td style={td}>
                               {r.propagazione === 'propagata' ? (
-                                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#ffedd5',color:'#ea580c'}}>↓ Girata alla mia rete</span>
+                                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#ffedd5',color:'#ea580c'}}>✓ Accettata — è in Rettifica Costi</span>
                               ) : r.propagazione === 'assorbita' ? (
                                 <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#dcfce7',color:'#166534'}}>✓ Assorbita da me</span>
                               ) : (

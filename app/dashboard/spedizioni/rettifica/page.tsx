@@ -289,7 +289,10 @@ export default function RettificaCostiPage() {
           <div style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a'}}>Caricamento...</div>
         ) : !rettificheFiltrate.length ? (
           <div style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a',fontSize:'13px'}}>
-            {fileSelezionato ? 'Nessuna rettifica trovata' : 'Carica un file per vedere le spedizioni'}
+            {/* Le rettifiche non arrivano solo da un file: quelle accettate in "Dal mio network"
+                non ne hanno uno, e "Carica un file per vedere le spedizioni" faceva pensare che
+                fossero sparite. */}
+            {fileSelezionato ? 'Nessuna rettifica trovata' : 'Nessuna rettifica in attesa. Ne arrivano caricando un file del corriere, oppure accettandole in "Dal mio network".'}
           </div>
         ) : (
           <div style={{overflowX:'auto' as const}}>
