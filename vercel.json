@@ -50,6 +50,10 @@
     {
       "path": "/api/logistica/addebito-uscite",
       "schedule": "45 5 * * *"
+    },
+    {
+      "path": "/api/integrazioni/sync-cron",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

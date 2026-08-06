@@ -2,7 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
-import { registraMovimento } from '@/lib/movimenti'
+import { registraMovimento, descrizioneSpedizione } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import { inviaWebhook } from '@/lib/webhooks'
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
@@ -350,7 +350,7 @@ export async function POST(req: NextRequest) {
       const { error: errConf } = await admin.rpc('conferma_prenotazione_spedizione', {
         p_riferimento: rif,
         p_spedizione_id: inserted?.id || null,
-        p_descrizione: `${numero} - ${body.shipTo?.name || ''}`.trim(),
+        p_descrizione: descrizioneSpedizione(numero, body.shipTo?.name),
         p_importo_finale: Math.abs(costoCliente),
         p_riferimento_finale: numero,
       })
@@ -358,7 +358,7 @@ export async function POST(req: NextRequest) {
       // qui, per non lasciare la spedizione senza movimento.
       if (errConf) { console.error('[V1][CONFERMA PRENOTAZIONE]', rif, errConf.message); throw new Error(errConf.message) }
     } else if (costoCliente > 0) {
-      await registraMovimento(admin, { masterId, clienteId: ctx.clienteId, tipo: 'spedizione', descrizione: `${numero} - ${body.shipTo?.name||''}`.trim(), riferimento: numero, importo: -Math.abs(costoCliente), spedizioneId: inserted?.id || null, createdBy: null })
+      await registraMovimento(admin, { masterId, clienteId: ctx.clienteId, tipo: 'spedizione', descrizione: descrizioneSpedizione(numero, body.shipTo?.name), riferimento: numero, importo: -Math.abs(costoCliente), spedizioneId: inserted?.id || null, createdBy: null })
     }
   } catch (e) { console.error('API mov cliente:', e) }
   // IL COMUNE VA PASSATO ANCHE QUI, non solo nel prezzo al cliente.

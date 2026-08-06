@@ -170,17 +170,22 @@ export async function GET(req: NextRequest) {
 
 async function sistemaMovimenti(admin: any): Promise<number> {
   // A blocchi: le righe da sistemare sono migliaia e non c'e' nessuna fretta di finirle in un giro.
+  // SI CERCA SUL RIFERIMENTO, NON SULLA DESCRIZIONE.
+  // La descrizione ora dice "In attesa di lettera di vettura" invece di esibire il TMP: e' quello
+  // che legge il cliente, e un codice che non esiste da nessuna parte lo mandava in confusione.
+  // Il riferimento resta il TMP — e' interno — ed e' l'aggancio buono per ritrovare queste righe.
   const { data: mv } = await admin.from('movimenti')
     .select('id,descrizione,riferimento,spedizione_id')
-    .like('descrizione', '%TMP-%')
+    .like('riferimento', 'TMP-%')
     .not('spedizione_id', 'is', null)
     .limit(300)
   if (!mv?.length) return 0
 
   const { data: sped } = await admin.from('spedizioni')
-    .select('id,numero').in('id', [...new Set(mv.map((m: any) => m.spedizione_id))])
+    .select('id,numero,dest_nome').in('id', [...new Set(mv.map((m: any) => m.spedizione_id))])
   const numeroDi = new Map<string, string>()
-  for (const s of (sped || [])) numeroDi.set(s.id, s.numero)
+  const destDi = new Map<string, string>()
+  for (const s of (sped || [])) { numeroDi.set(s.id, s.numero); destDi.set(s.id, s.dest_nome || '') }
 
   let fatti = 0
   for (const m of mv) {
@@ -188,10 +193,14 @@ async function sistemaMovimenti(admin: any): Promise<number> {
     // Se la spedizione e' ancora col numero provvisorio non c'e' niente da mettere al suo posto:
     // ci ripasseremo quando ce l'avra'.
     if (!vero || vero.startsWith('TMP-')) continue
-    const tmp = (String(m.descrizione || '').match(/TMP-\d+/) || [])[0]
-    if (!tmp) continue
-    const patch: any = { descrizione: String(m.descrizione).split(tmp).join(vero) }
-    if (m.riferimento && String(m.riferimento).includes(tmp)) patch.riferimento = String(m.riferimento).split(tmp).join(vero)
+    // La descrizione si RICOSTRUISCE dal numero vero e dal destinatario della spedizione, invece
+    // di sostituire un pezzo di testo: cosi' vale sia per le righe vecchie (che il TMP ce l'hanno
+    // scritto dentro) sia per quelle nuove, che dicono "In attesa di lettera di vettura".
+    const { descrizioneSpedizione } = await import('@/lib/movimenti')
+    const patch: any = {
+      descrizione: descrizioneSpedizione(vero, destDi.get(m.spedizione_id)),
+      riferimento: vero,
+    }
     const { error } = await admin.from('movimenti').update(patch).eq('id', m.id)
     if (!error) fatti++
   }

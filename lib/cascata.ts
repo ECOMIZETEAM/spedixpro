@@ -1,5 +1,5 @@
 import { calcolaPrezzoListino, calcolaPrezzoCorriere } from '@/lib/pricing'
-import { registraMovimentoMaster } from '@/lib/movimenti'
+import { registraMovimentoMaster, descrizioneSpedizione } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 
@@ -259,7 +259,7 @@ export async function addebitaCatena(
         masterOwnerId: liv.masterId,
         masterTargetId: liv.masterId,
         tipo: 'spedizione',
-        descrizione: `${params.numero} - ${params.destNome || ''}`.trim(),
+        descrizione: descrizioneSpedizione(params.numero, params.destNome),
         riferimento: params.numero,
         importo: -Math.abs(liv.prezzo),
         spedizioneId: params.spedizioneId,

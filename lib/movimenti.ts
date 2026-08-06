@@ -73,3 +73,19 @@ export async function registraMovimentoMaster(
   if (error) throw new Error('Errore movimento master: ' + error.message)
   return { saldo: Number(data) }
 }
+
+// COME SI CHIAMA UN ADDEBITO PRIMA CHE LA LETTERA DI VETTURA ESISTA.
+//
+// Sui contratti DVA il numero non arriva insieme all'ordine: la spedizione nasce con un
+// "TMP-<ordine>" e lo perde entro un quarto d'ora. Il movimento pero' veniva scritto subito con
+// quel testo, e per tutta la finestra il cliente si trovava nell'estratto conto un addebito
+// intestato a un codice che non esiste da nessuna parte — sembra un tracking, non lo e', e non si
+// puo' cercare. Meglio dire la verita': la lettera di vettura non c'e' ancora.
+//
+// Sta qui e non nelle tre rotte che lo scrivevano a mano: e' la stessa lezione del comune mancante
+// nella cascata — un testo copiato in tre punti diventa tre testi diversi al primo ritocco.
+export function descrizioneSpedizione(numero: string, destNome?: string | null): string {
+  const testa = String(numero || '').startsWith('TMP-') ? 'In attesa di lettera di vettura' : String(numero || '')
+  const coda = String(destNome || '').trim()
+  return coda ? `${testa} - ${coda}` : testa
+}
