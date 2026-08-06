@@ -32,9 +32,13 @@ export default function BarraAvanzamento({
   etichetta?: string
   sottotitolo?: string
 }) {
+  // TOTALE ANCORA IGNOTO: la barra deve comparire SUBITO, non dopo il primo pezzo di lavoro.
+  // E' proprio all'inizio che serve — mentre si legge il file e si preparano i conti la schermata
+  // resta ferma, ed e' li' che uno pensa si sia piantata e ricarica la pagina.
+  const indeterminata = !totale || totale <= 0
   const tot = Math.max(1, totale)
-  const pct = Math.min(100, Math.round((fatti / tot) * 100))
-  const finito = fatti >= totale
+  const pct = indeterminata ? 0 : Math.min(100, Math.round((fatti / tot) * 100))
+  const finito = !indeterminata && fatti >= totale
 
   let stima = ''
   if (!finito && iniziatoIl && fatti > 0) {
@@ -49,21 +53,27 @@ export default function BarraAvanzamento({
           {etichetta || 'Elaborazione in corso'}
         </div>
         <div style={{ fontSize: '13px', color: '#1a1a1a', fontVariantNumeric: 'tabular-nums' }}>
-          <strong>{Math.min(fatti, totale)}</strong> di {totale}
-          <span style={{ color: '#8a8a8a' }}> · {pct}%</span>
+          {indeterminata ? <span style={{ color: '#8a8a8a' }}>sto preparando…</span> : (
+            <><strong>{Math.min(fatti, totale)}</strong> di {totale}
+            <span style={{ color: '#8a8a8a' }}> · {pct}%</span></>
+          )}
         </div>
       </div>
 
       <div style={{ height: '10px', background: '#f0f0f0', borderRadius: '5px', marginTop: '10px', overflow: 'hidden' }}>
         <div style={{
-          width: `${pct}%`, height: '100%', borderRadius: '5px',
+          width: indeterminata ? '35%' : `${pct}%`, height: '100%', borderRadius: '5px',
           background: finito ? '#15803d' : 'linear-gradient(90deg,#f97316,#fb923c)',
           transition: 'width .35s ease',
+          animation: indeterminata ? 'moovAvanza 1.1s ease-in-out infinite' : undefined,
         }} />
       </div>
+      {/* Finche' non si sa quanto lavoro c'e', la barra si muove avanti e indietro: dice "sto
+          lavorando" senza promettere una percentuale che non conosciamo ancora. */}
+      <style>{`@keyframes moovAvanza{0%{margin-left:0}50%{margin-left:65%}100%{margin-left:0}}`}</style>
 
       <div style={{ fontSize: '12px', color: '#8a8a8a', marginTop: '8px', minHeight: '16px' }}>
-        {finito ? 'Fatto.' : (stima ? `Manca ${stima}.` : 'Sto cominciando…')}
+        {finito ? 'Fatto.' : (stima ? `Manca ${stima}.` : (indeterminata ? 'Sto leggendo il file…' : 'Sto cominciando…'))}
         {sottotitolo && <span style={{ marginLeft: stima || finito ? '6px' : 0 }}>{sottotitolo}</span>}
       </div>
     </div>

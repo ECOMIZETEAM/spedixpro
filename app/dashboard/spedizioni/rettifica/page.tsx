@@ -75,6 +75,8 @@ export default function RettificaCostiPage() {
     const file = e.target.files?.[0]
     if (!file) return
     setUploading(true)
+    // SUBITO, prima ancora di leggere il file: e' il tratto in cui la schermata sembrava morta.
+    setAvanz({ fatti: 0, totale: 0, da: null, etichetta: 'Sto leggendo il file' })
     try {
       const { utils, read } = await import('xlsx')
       const buffer = await file.arrayBuffer()
@@ -121,12 +123,14 @@ export default function RettificaCostiPage() {
         return
       }
       setRipesature(null)
+      setAvanz(null)
       if (data.success) {
         await caricaFiles()
         await caricaRettifiche(data.fileId)
         setFileSelezionato(data.fileId)
       }
     } catch(err) { await dialog.alert({ title: 'Errore', message: 'Errore nel caricamento del file.' }) }
+    setAvanz(null)
     setUploading(false)
     if (fileRef.current) fileRef.current.value = ''
   }
