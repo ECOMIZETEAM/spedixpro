@@ -304,6 +304,25 @@ export default function OrdiniPage() {
     setSpedendo(false)
     carica()
   }
+  // UNISCE PIU' ORDINI IN UN PACCO SOLO, se vanno tutti alla stessa identica persona.
+  // La verifica dell'identita' la fa il server, che e' l'unico posto da cui non si puo' scappare:
+  // qui si chiede e basta. Se i dati non combaciano risponde di no e non unisce niente.
+  const [unendo, setUnendo] = useState(false)
+  async function unisciSelezionati(){
+    const ids = Object.keys(sel).filter(id=>sel[id])
+    if (ids.length < 2) { await dialog.alert({ title:'Servono almeno due ordini', message:'Seleziona due o piu\' ordini dello stesso destinatario.' }); return }
+    const ok = await dialog.confirm({ title:'Unire gli ordini?', message:`Unire ${ids.length} ordini in un pacco solo? Si uniscono soltanto se i dati del destinatario sono identici. Gli ordini restano tutti in elenco: quelli assorbiti vengono segnati come uniti.`, confirmText:'Unisci' })
+    if (!ok) return
+    setUnendo(true)
+    try {
+      const r = await fetch('/api/ordini/unisci', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tipo:'ecommerce', ids }) })
+      const d = await r.json()
+      if (d.error) await dialog.alert({ title:'Non uniti', message: d.error })
+      else { await dialog.alert({ title:'Ordini uniti', message:`${d.uniti} ordini uniti nell'ordine ${d.numero || ''}: ${d.articoli} articoli, € ${Number(d.totale).toFixed(2)}. Ora spedisci quello.` }); setSel({}); carica() }
+    } catch { await dialog.alert({ title:'Errore', message:'Errore di connessione.' }) }
+    setUnendo(false)
+  }
+
   async function cancellaSelezionati(){
     const ids = Object.keys(sel).filter(id=>sel[id])
     if (ids.length===0){ setMsg('Seleziona almeno un ordine'); return }
@@ -387,6 +406,7 @@ export default function OrdiniPage() {
           </select>
           <div style={{flex:1}}/>
           <button onClick={spedisciSelezionati} disabled={spedendo} style={{opacity:spedendo?.6:1,background:'#f97316',color:'#fff',border:'none',borderRadius:'8px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>Spedisci selezionati{nSel>0?' ('+nSel+')':''}</button>
+          <button onClick={unisciSelezionati} disabled={unendo} style={{opacity:unendo?.6:1,background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'8px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>{unendo?'Unione…':'Unisci selezionati'}{nSel>1?' ('+nSel+')':''}</button>
           <button onClick={cancellaSelezionati} style={{background:'#dc2626',color:'#fff',border:'none',borderRadius:'8px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>Cancella selezionati</button>
         </div>
 

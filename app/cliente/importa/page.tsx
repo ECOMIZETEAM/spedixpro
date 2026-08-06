@@ -87,6 +87,31 @@ export default function ImportaOrdiniPage() {
   const [q, setQ] = useState('')                       // ricerca libera (ordine, destinatario, località, cap, telefono)
   const [filtroStato, setFiltroStato] = useState('tutti') // tutti | da_spedire | spedito | errore | archiviato
   const [spedendo, setSpedendo] = useState(false)
+  const [unendo, setUnendo] = useState(false)
+
+  // UNISCE PIU' ORDINI IN UN PACCO SOLO, se vanno tutti alla stessa identica persona.
+  // La verifica dell'identita' del destinatario la fa il server — e' l'unico posto da cui non si
+  // puo' scappare, e la stessa che usa l'elenco degli ordini dei negozi: se ognuna delle due
+  // schermate se la scrivesse per conto suo, unirebbero cose diverse.
+  async function unisciSelezionati() {
+    const ids = Array.from(sel)
+    if (ids.length < 2) return
+    if (!confirm(`Unire ${ids.length} ordini in un pacco solo? Si uniscono soltanto se i dati del destinatario sono identici. Restano tutti in elenco: quelli assorbiti vengono segnati come uniti.`)) return
+    setUnendo(true)
+    try {
+      const r = await fetch('/api/ordini/unisci', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tipo: 'importati', ids }),
+      })
+      const d = await r.json()
+      if (d.error) alert('Non uniti: ' + d.error)
+      else {
+        alert(`${d.uniti} ordini uniti: ${d.articoli} articoli, € ${Number(d.totale).toFixed(2)}. Ora spedisci quello rimasto.`)
+        setSel(new Set()); loadOrdini()
+      }
+    } catch { alert('Errore di connessione.') }
+    setUnendo(false)
+  }
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
 
   async function loadOrdini() {
@@ -562,6 +587,21 @@ export default function ImportaOrdiniPage() {
               }}
             >
               {spedendo ? 'Spedizione in corso…' : 'Spedisci selezionati'}
+            </button>
+            {/* UNIRE PIU' ORDINI IN UN PACCO SOLO. Il controllo che vadano davvero alla stessa
+                persona lo fa il server: qui si chiede e basta. */}
+            <button
+              onClick={unisciSelezionati}
+              disabled={sel.size < 2 || spedendo || unendo}
+              style={{
+                background: sel.size > 1 && !spedendo && !unendo ? '#fff7ed' : '#f3f4f6',
+                color: sel.size > 1 && !spedendo && !unendo ? '#ea580c' : '#9ca3af',
+                border: '1px solid ' + (sel.size > 1 && !spedendo && !unendo ? '#fed7aa' : '#e5e7eb'),
+                borderRadius: '8px', padding: '8px 16px', fontSize: '13px', fontWeight: 600,
+                cursor: sel.size > 1 && !spedendo && !unendo ? 'pointer' : 'not-allowed', marginLeft: '8px',
+              }}
+            >
+              {unendo ? 'Unione…' : 'Unisci selezionati'}
             </button>
           </div>
         </div>
