@@ -80,7 +80,8 @@ export async function POST(req: NextRequest) {
     const riga: any = {}
     for (const k in rigaRaw) { riga[String(k).trim().toLowerCase()] = (rigaRaw as any)[k] }
     const ldv = String(riga['ldv'] || riga['n. spedizione'] || riga['numero'] || '').trim()
-    const pesoReale = parseFloat(String(riga['peso reale'] || riga['peso_reale'] || riga['pesoreale'] || riga['peso'] || riga['peso volume'] || riga['pesovolume'] || 0))
+    // Con raw:false le celle arrivano come testo: un peso scritto "8,5" va letto 8,5 e non 8.
+    const pesoReale = parseFloat(String(riga['peso reale'] || riga['peso_reale'] || riga['pesoreale'] || riga['peso'] || riga['peso volume'] || riga['pesovolume'] || 0).replace(',', '.'))
     if (!ldv) continue
     if (!perLdv.has(ldv)) perLdv.set(ldv, [])
     perLdv.get(ldv)!.push(pesoReale)

@@ -49,7 +49,15 @@ export default function RettificaCostiPage() {
       const buffer = await file.arrayBuffer()
       const wb = read(buffer)
       const ws = wb.Sheets[wb.SheetNames[0]]
-      const righe = utils.sheet_to_json(ws)
+      // SI LEGGONO I TESTI, NON I NUMERI GIA' INTERPRETATI.
+      //
+      // Di suo questa libreria converte le celle in numeri usando le convenzioni inglesi: l'importo
+      // "1,02" del file del fornitore diventa CENTODUE, perche' legge la virgola come separatore
+      // delle migliaia. Il totale del file veniva 35.635 euro invece di 356,35 — cento volte tanto,
+      // e nessun errore da nessuna parte.
+      // Con raw:false arriva la cella com'e' scritta e i separatori li interpretiamo noi, che
+      // sappiamo quali colonne usano la virgola (gli euro) e quali il punto (i chili).
+      const righe = utils.sheet_to_json(ws, { raw: false })
       const res = await fetch('/api/rettifiche/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
