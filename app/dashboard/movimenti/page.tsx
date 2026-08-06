@@ -50,7 +50,7 @@ export default function MovimentiMasterPage() {
   // Portali esterni (solo E&A): credito residuo per portale + ricariche
   const [portali, setPortali] = useState<any>(null)
   const [ricariche, setRicariche] = useState<any[]>([])
-  const [formImporto, setFormImporto] = useState<{ spediamopro: string; spedisci: string }>({ spediamopro: '', spedisci: '' })
+  const [formImporto, setFormImporto] = useState<{ spediamopro: string; spedisci: string; easyparcel: string }>({ spediamopro: '', spedisci: '', easyparcel: '' })
   const [savingP, setSavingP] = useState('')
 
   async function caricaPortali() {
@@ -61,7 +61,7 @@ export default function MovimentiMasterPage() {
       else { setPortali(null); setRicariche([]) }
     } catch {}
   }
-  async function aggiungiRicarica(portale: 'spediamopro' | 'spedisci') {
+  async function aggiungiRicarica(portale: 'spediamopro' | 'spedisci' | 'easyparcel') {
     const imp = parseFloat(String(formImporto[portale] || '').replace(',', '.'))
     if (!isFinite(imp) || imp === 0) return
     setSavingP(portale)
@@ -127,9 +127,11 @@ export default function MovimentiMasterPage() {
           <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'4px'}}>Portali esterni — credito residuo</div>
           <div style={{fontSize:'12px',color:'#999',marginBottom:'14px'}}>Ricariche fatte sui portali meno lo speso su MoovExpress con i loro contratti.</div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px'}}>
-            {(['spediamopro','spedisci'] as const).map(pt => {
+            {/* Il terzo conto mancava: il suo speso non finiva in nessuno dei due secchi e spariva
+                dal quadro — 10.526,97 euro usciti e non riconciliati da nessuna parte. */}
+            {(['spediamopro','spedisci','easyparcel'] as const).map(pt => {
               const p = portali[pt] || { ricariche:0, speso:0, residuo:0 }
-              const label = pt==='spediamopro' ? 'SpediamoPro' : 'Spedisci.online (SDA)'
+              const label = pt==='spediamopro' ? 'SpediamoPro' : pt==='spedisci' ? 'Spedisci.online (SDA)' : 'EasyParcel / DVA'
               const lista = ricariche.filter((r:any) => r.portale===pt)
               return (
                 <div key={pt} style={{border:'1px solid #eee',borderRadius:'8px',padding:'14px'}}>

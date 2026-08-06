@@ -44,7 +44,12 @@ export async function GET() {
     const { data: speds } = await admin.from('spedizioni').select('id, corrieri(tipo)').in('id', spedIds.slice(i, i + 300))
     for (const s of (speds || [])) tipoPerSped.set(s.id, (s.corrieri as any)?.tipo || null)
   }
-  let spesoSpediamo = 0, spesoSpedisci = 0
+  // IL TERZO FORNITORE MANCAVA DEL TUTTO.
+  // La pagina nasce con due portali e non e' mai stata aggiornata quando ne e' entrato un terzo:
+  // il suo speso non finiva in nessuno dei due secchi e semplicemente spariva dal conto. Misurato
+  // sui dati veri: 1.270 movimenti per 10.526,97 euro usciti dal conto di E&A e non riconciliati da
+  // nessuna parte. Non era un errore di calcolo, era un fornitore invisibile.
+  let spesoSpediamo = 0, spesoSpedisci = 0, spesoEasyparcel = 0
   for (const m of (movs || [])) {
     const tipo = m.spedizione_id ? tipoPerSped.get(m.spedizione_id) : null
     // L'importo e' negativo quando esce (addebito) e positivo quando rientra (rimborso):
@@ -52,10 +57,12 @@ export async function GET() {
     const netto = -(Number(m.importo) || 0)
     if (tipo === 'spedisci') spesoSpedisci += netto
     else if (tipo === 'spediamopro') spesoSpediamo += netto
+    else if (tipo === 'easyparcel') spesoEasyparcel += netto
   }
 
   const ricSpediamo = (ricariche || []).filter((r: any) => r.portale === 'spediamopro').reduce((s: number, r: any) => s + Number(r.importo || 0), 0)
   const ricSpedisci = (ricariche || []).filter((r: any) => r.portale === 'spedisci').reduce((s: number, r: any) => s + Number(r.importo || 0), 0)
+  const ricEasyparcel = (ricariche || []).filter((r: any) => r.portale === 'easyparcel').reduce((s: number, r: any) => s + Number(r.importo || 0), 0)
   const r2 = (n: number) => Math.round(n * 100) / 100
 
   // SALDO VERO letto dal portale, non dedotto per sottrazione: e' l'unico numero che non dipende
@@ -95,6 +102,7 @@ export async function GET() {
         scarto: saldoReale === null ? null : r2(saldoReale - (ricSpediamo - spesoSpediamo)),
       },
       spedisci: { ricariche: r2(ricSpedisci), speso: r2(spesoSpedisci), residuo: r2(ricSpedisci - spesoSpedisci) },
+      easyparcel: { ricariche: r2(ricEasyparcel), speso: r2(spesoEasyparcel), residuo: r2(ricEasyparcel - spesoEasyparcel) },
     },
   })
 }
@@ -107,7 +115,7 @@ export async function POST(req: NextRequest) {
   if (utente?.master_id !== EA_ID) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const body = await req.json()
-  const portale = body.portale === 'spedisci' ? 'spedisci' : (body.portale === 'spediamopro' ? 'spediamopro' : null)
+  const portale = ['spedisci', 'spediamopro', 'easyparcel'].includes(body.portale) ? body.portale : null
   const importo = Number(body.importo)
   if (!portale) return NextResponse.json({ error: 'Portale non valido' }, { status: 400 })
   if (!isFinite(importo) || importo === 0) return NextResponse.json({ error: 'Inserisci un importo diverso da 0 (usa il − per correggere)' }, { status: 400 })
