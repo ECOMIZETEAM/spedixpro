@@ -105,6 +105,17 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ── SU QUESTI CONTRATTI IL RITIRO NON SI AGGIUNGE DOPO ──
+  // Non c'e' un ramo per questo tipo, e senza un'uscita esplicita la richiesta finiva nel ramo
+  // qui sotto: cercava un codice corriere che quelle spedizioni non hanno MAI (verificato: assente
+  // su tutte e 1.264) e rispondeva "Impossibile recuperare il corriere dalla spedizione", mandando
+  // a cercare il guasto dalla parte sbagliata. Il fornitore non ha proprio una chiamata per
+  // prenotare un ritiro dopo l'ordine: si chiede alla creazione o non si chiede piu'.
+  // Stesso testo di /api/ritiri/crea, che lo rifiuta gia' per la stessa ragione.
+  if (corriere.tipo === 'easyparcel') {
+    return NextResponse.json({ error: 'Per questo contratto il ritiro va richiesto al momento della creazione della spedizione: non puo\' essere aggiunto dopo.' }, { status: 400 })
+  }
+
   // ── SPEDISCI ──
   const primaSped: any = spedizioni[0]
   const raw = primaSped.raw_response as any

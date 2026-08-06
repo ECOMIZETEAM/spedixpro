@@ -903,7 +903,7 @@ export async function POST(req: NextRequest) {
   if (corriereRecord.tipo === 'easyparcel') {
     const {
       easyparcelQuotation, easyparcelOrder, easyparcelWaybill,
-      trovaOffertaVettore, erroreEasyparcelPulito, ErroreEasyparcel,
+      trovaOffertaVettore, erroreEasyparcelPulito, ErroreEasyparcel, ritiroEasyparcel,
     } = await import('@/lib/easyparcel')
 
     const apikey = String(cred?.apikey || '')
@@ -999,13 +999,10 @@ export async function POST(req: NextRequest) {
       // aggiungerlo dopo, e infatti /api/ritiri/crea lo rifiuta di proposito.
       const ordine = await easyparcelOrder(apikey, {
         codiceOfferta: String(offerta.codice_offerta),
-        ...(_vuoleRitiro ? { ritiro: {
-          dal: String(body.dataRitiro),
-          dalleMattina: _pomeriggio ? '14:00' : '09:00',
-          alleMattina: _pomeriggio ? '18:00' : '13:00',
-          dallePomeriggio: '14:00',
-          allePomeriggio: '18:00',
-        } } : {}),
+        // Stessa funzione dell'API pubblica: il blocco del ritiro si costruisce in un posto solo,
+        // altrimenti la prossima porta lo riscrive male — o non lo scrive affatto, che e' quello
+        // che e' successo.
+        ...(_vuoleRitiro ? { ritiro: ritiroEasyparcel(String(body.dataRitiro), _pomeriggio) } : {}),
         mittente: {
           nominativo: body.shipFrom.name, indirizzo: body.shipFrom.street1,
           email: EMAIL_PER_CORRIERE, cellulare: cellMitt, contatto: body.shipFrom.name,

@@ -13,6 +13,14 @@ import { EMAIL_PER_CORRIERE,
   normalizzaEtichetta, telValidoSp,
 } from '@/lib/spediamopro'
 
+// IL TETTO DI DURATA, che qui non c'era.
+// Oltre la chiamata d'ordine il pacco e' COMPRATO: se la funzione viene uccisa fra l'ordine e la
+// riga su spedizioni, il fornitore ha incassato e a sistema non resta niente — nessuna spedizione,
+// nessun movimento, un 504 a chi integra, che ritenta e compra un secondo pacco. E' peggio di un
+// numero provvisorio, che almeno resta registrato e recuperabile. Alzando l'attesa della lettera di
+// vettura la coda misurata arriva a 10-22 secondi: senza un tetto dichiarato si andava a sbattere.
+export const maxDuration = 60
+
 // GET /api/v1/shipments — elenca le spedizioni del cliente della API key (paginata).
 // Molti client "testano il collegamento" con una GET qui: senza questa si otteneva 405.
 export async function GET(req: NextRequest) {
@@ -34,7 +42,11 @@ export async function GET(req: NextRequest) {
 
 // API pubblica MoovExpress — crea una spedizione sul contratto della API key.
 // Auth: Authorization: Bearer <api_key>
-// Body: { packages:[{weight,length,width,height}], shipFrom:{...}, shipTo:{...}, codValue?, insuranceValue?, notes?, contenuto? }
+// Body: { packages:[{weight,length,width,height}], shipFrom:{...}, shipTo:{...}, codValue?, insuranceValue?, notes?, contenuto?,
+//         pickup?: { requested: true, date: 'AAAA-MM-GG', time?: 'mattina'|'pomeriggio' } }
+// Il RITIRO va chiesto QUI: su alcuni contratti si prenota solo insieme all'ordine e non si puo'
+// aggiungere dopo — /api/v1/pickups per quei contratti risponde 400 apposta. Se il ritiro e' stato
+// preso, la risposta contiene `ritiro: { richiesto, data, intervallo, codice }`.
 export async function POST(req: NextRequest) {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
@@ -102,6 +114,14 @@ export async function POST(req: NextRequest) {
   if (_motivoLimite) {
     return NextResponse.json({ error: `Collo non accettato da questo contratto: ${_motivoLimite}.` }, { status: 400 })
   }
+
+  // IL RITIRO CHIESTO DA CHI INTEGRA.
+  // Si accettano due forme perche' l'API pubblica parla inglese ma i client italiani mandano gia'
+  // i nomi del portale: meglio leggere tutte e due che rispondere 200 OK ignorando la richiesta.
+  const _vuoleRitiro = (body.pickup?.requested === true || body.richiediRitiro === true)
+    && !!(body.pickup?.date || body.dataRitiro)
+  const _dataRitiro = String(body.pickup?.date || body.dataRitiro || '')
+  const _pomeriggio = String(body.pickup?.time || body.orarioRitiro || '').toLowerCase().startsWith('pom')
 
   // Prezzo a carico del cliente (listino cliente, contratto della key)
   const ris = await calcolaPrezzoListino(admin, {
@@ -190,6 +210,8 @@ export async function POST(req: NextRequest) {
   }
 
   let numero = '', costoCorrente = 0, etichettaUrl: string | null = null, raw: any = null
+  // Il codice del ritiro prenotato dal corriere: va restituito a chi integra, come fa il portale.
+  let codiceRitiro: string | null = null
 
   if (corriere.tipo === 'spedisci') {
     const baseUrl = `https://${cred.master_domain}/api/v2`
@@ -261,7 +283,7 @@ export async function POST(req: NextRequest) {
   } else if (corriere.tipo === 'easyparcel') {
     // Tre passi obbligati (preventivo → ordine → lettera di vettura) e NESSUN annullo disponibile:
     // per questo tutti i controlli stanno prima dell'ordine. Vedi lib/easyparcel.ts.
-    const { easyparcelQuotation, easyparcelOrder, easyparcelWaybill, trovaOffertaVettore, erroreEasyparcelPulito } = await import('@/lib/easyparcel')
+    const { easyparcelQuotation, easyparcelOrder, easyparcelWaybill, trovaOffertaVettore, erroreEasyparcelPulito, ritiroEasyparcel } = await import('@/lib/easyparcel')
     const apikey = String(cred?.apikey || ''), vettore = String(cred?.vettore || '')
     if (!apikey || !vettore) return errore('Contratto non configurato correttamente')
     // Chiave di prova: l'ordine riesce ma il pacco non esiste. Dall'API pubblica spedisce sempre
@@ -285,8 +307,16 @@ export async function POST(req: NextRequest) {
       const codReq = Number(body.codValue || 0) > 0, assReq = Number(body.insuranceValue || 0) > 0
       if (codReq && String(opz?.contrassegno?.attivabile || 'N').toUpperCase() !== 'S') return errore('Contrassegno non disponibile su questo contratto per questa destinazione')
       if (assReq && String(opz?.assicurazione?.attivabile || 'N').toUpperCase() !== 'S') return errore('Assicurazione non disponibile su questo contratto per questa destinazione')
+      // RITIRO: su questi contratti si prenota SOLO qui — il corriere non ha una chiamata per
+      // aggiungerlo dopo, e infatti /api/ritiri/crea lo rifiuta di proposito. Il portale il ritiro
+      // lo legge e lo manda da sempre; questa rotta non leggeva NESSUN campo di ritiro, quindi
+      // qualunque cosa mandasse chi integra veniva ignorata in silenzio, con 200 OK e la spedizione
+      // creata. Misurato: 48 spedizioni da questa porta, ZERO col ritiro; dal portale, sullo stesso
+      // tipo di contratto, il ritiro viene chiesto sul 28,6% (348 su 1216). E non e' rimediabile
+      // dopo: quei pacchi vanno portati a mano in filiale.
       const ordine = await easyparcelOrder(apikey, {
         codiceOfferta: String(offerta.codice_offerta),
+        ...(_vuoleRitiro ? { ritiro: ritiroEasyparcel(_dataRitiro, _pomeriggio) } : {}),
         // Il "presso" non ha un campo dedicato: si accoda all'indirizzo, come per l'altro provider.
         mittente: { nominativo: body.shipFrom.name, indirizzo: conPresso(body.shipFrom.street1 || '', pressoFrom), email: EMAIL_PER_CORRIERE, cellulare: cellM, contatto: body.shipFrom.name },
         destinatario: { nominativo: body.shipTo.name, indirizzo: conPresso(body.shipTo.street1 || '', pressoTo), email: EMAIL_PER_CORRIERE, cellulare: cellD, contatto: body.shipTo.name },
@@ -295,14 +325,27 @@ export async function POST(req: NextRequest) {
       })
       let ldv: string | null = null
       try {
-        const w = await easyparcelWaybill(apikey, ordine.idOrdine, 2, 1500)
+        // QUANTO SI ASPETTA LA LETTERA DI VETTURA.
+        // Su questo fornitore il numero non torna insieme all'ordine: se entro l'attesa non c'e', la
+        // spedizione nasce con un numero provvisorio "TMP-...", senza etichetta, e il pacco non
+        // parte. Il portale aspetta 8 x 1200 ms, e nel suo commento c'e' la misura fatta in
+        // produzione: con otto tentativi il provvisorio tocca 8 spedizioni su 17, con due 15 su 16.
+        // Qui erano rimasti 2 x 1500 — la correzione era stata fatta su una porta sola, e su questa
+        // NESSUNA delle 48 spedizioni ha preso il numero al primo colpo.
+        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _vuoleRitiro ? 6 : 8, 1200, _vuoleRitiro)
         ldv = w.numero || null
+        codiceRitiro = w.codiceRitiro || null
         const b64 = w.singole[0]?.pdfBase64 || w.pdfBase64
         if (b64) etichettaUrl = `data:application/pdf;base64,${b64}`
-      } catch { /* non pronta: la recupera il giro di tracking */ }
+      } catch (e: any) {
+        // NON MUTO. Il progetto misura questo guasto contando "waybill non pronta" nei log, e qui
+        // il catch vuoto rendeva la misura cieca proprio sulla porta che sbagliava di piu': per
+        // questo il difetto e' rimasto invisibile pur essendo gia' noto e gia' corretto altrove.
+        console.error('[V1][EASYPARCEL] waybill non pronta, ordine', ordine.idOrdine, e?.message)
+      }
       numero = ldv || `TMP-${ordine.idOrdine}`
       costoCorrente = ordine.importo
-      raw = { ...ordine, _codiceOfferta: String(offerta.codice_offerta), _vettore: vettore, _idOrdine: ordine.idOrdine }
+      raw = { ...ordine, _codiceOfferta: String(offerta.codice_offerta), _vettore: vettore, _idOrdine: ordine.idOrdine, _codiceRitiro: codiceRitiro }
     } catch (e: any) {
       console.error('[V1][EASYPARCEL]', e?.codice ?? '-', e?.message, e?.dettagli || '')
       return errore(erroreEasyparcelPulito(e))
@@ -325,6 +368,9 @@ export async function POST(req: NextRequest) {
     contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
     tracking_number: numero, etichetta_url: etichettaUrl, raw_response: raw, stato: 'in_lavorazione',
     costo_spedizione: costoCorrente, costo_totale: costoCliente, note: body.notes || null, contenuto: body.contenuto || null,
+    richiedi_ritiro: _vuoleRitiro || false,
+    data_ritiro: _vuoleRitiro ? _dataRitiro : null,
+    intervallo_ritiro: _vuoleRitiro ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
     canale: 'api',
   }).select('id').single()
   // Qui NON si storna: il pacco dal corriere esiste gia' e va pagato. Il messaggio del database
@@ -400,5 +446,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     id: inserted?.id || null, tracking: numero, contratto: corriere.nome_contratto,
     prezzo: costoCliente, valuta: 'EUR', label_url: `/api/v1/shipments/${inserted?.id}/label`, stato: 'in_lavorazione',
+    // Se il ritiro e' stato chiesto, chi integra deve poterlo dimostrare al corriere.
+    ...(_vuoleRitiro ? { ritiro: { richiesto: true, data: _dataRitiro, intervallo: _pomeriggio ? '14:00-18:00' : '09:00-13:00', codice: codiceRitiro } } : {}),
   })
 }

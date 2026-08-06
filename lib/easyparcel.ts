@@ -389,8 +389,30 @@ export async function easyparcelWaybillGrezza(
   }
 }
 
+// COME SI CHIEDE IL RITIRO A QUESTO FORNITORE.
+//
+// Il blocco si costruiva a mano dentro la creazione dal portale, e quando e' nata la porta dell'API
+// nessuno l'ha ricopiato: risultato, dall'API il ritiro non si poteva chiedere e non se ne accorgeva
+// nessuno — 48 spedizioni, zero ritiri, e su questi contratti il ritiro NON si puo' aggiungere dopo,
+// quindi ogni pacco andava portato a mano in filiale. Sta qui perche' la porta che nascera' domani
+// lo trovi gia' fatto invece di riscriverlo (male).
+export function ritiroEasyparcel(dal: string, pomeriggio: boolean) {
+  return {
+    dal: String(dal),
+    dalleMattina: pomeriggio ? '14:00' : '09:00',
+    alleMattina: pomeriggio ? '18:00' : '13:00',
+    dallePomeriggio: '14:00',
+    allePomeriggio: '18:00',
+  }
+}
+
+// L'ATTESA DI DEFAULT E' QUELLA MISURATA, non un numero tondo.
+// Il valore va passato da ogni chiamante, e chi ne scriveva uno nuovo ripartiva da questo default:
+// con 3 x 1500 il numero provvisorio usciva quasi sempre. Portato a 8 x 1200 — la stessa attesa che
+// in produzione ha fatto scendere il provvisorio da 15 spedizioni su 16 a 8 su 17 — cosi' chi non
+// specifica niente eredita il valore giusto invece di quello sbagliato.
 export async function easyparcelWaybill(
-  apikey: string, idOrdine: string, tentativi = 3, attesaMs = 1500, attendiRitiro = false
+  apikey: string, idOrdine: string, tentativi = 8, attesaMs = 1200, attendiRitiro = false
 ): Promise<{ numero: string; pdfBase64: string | null; singole: { numero: string; pdfBase64: string }[]; borderoUrl: string | null; codiceRitiro: string | null }> {
   let ultimo: any = null
   for (let i = 0; i < Math.max(1, tentativi); i++) {

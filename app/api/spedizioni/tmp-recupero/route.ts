@@ -29,7 +29,14 @@ export async function GET(req: NextRequest) {
   const { data: ferme } = await admin.from('spedizioni')
     .select('id,numero,colli,corriere_id,stato,colli_dettaglio,created_at,corrieri(tipo,credenziali)')
     .like('numero', 'TMP-%')
-    .not('stato', 'in', '(annullata,annullamento_manuale)')
+    // UNA SPEDIZIONE IN CODA DI ANNULLO MANUALE E' ANCORA VIVA PRESSO IL FORNITORE, e va recuperata
+    // come le altre. Escluderla creava un anello chiuso: il recupero non la guardava piu', e senza
+    // il numero vero nemmeno i suoi movimenti venivano risistemati (riga piu' sotto: si salta
+    // finche' il numero comincia per TMP). Restava un numero provvisorio per sempre, nessuna
+    // etichetta, e l'addebito gia' fatto a tutti e tre i livelli con un riferimento che il fornitore
+    // non conosce — quindi l'annullo manuale non era nemmeno eseguibile, perche' chi lo deve fare
+    // non ha una lettera di vettura da citare. E' il caso di TMP-25681381, 18,52 euro fermi li'.
+    .not('stato', 'in', '(annullata)')
     // Oltre una settimana la lettera di vettura non arriva piu': quella spedizione va guardata a
     // mano, non ritentata all'infinito. Il limite tiene anche la ricerca leggera su una tabella
     // che cresce di 1.500 righe al giorno.
