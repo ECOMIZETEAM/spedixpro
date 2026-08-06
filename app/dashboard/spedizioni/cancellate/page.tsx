@@ -174,8 +174,23 @@ export default function SpedizioniCancellatePage() {
                     <td style={{padding:'9px 16px',fontWeight:'700',color:'#1a1a1a'}}>{s.numero}</td>
                     <td style={{padding:'9px 12px',color:'#666',fontSize:'12px'}}>Tracking: {s.tracking_number || '—'}</td>
                     <td style={{padding:'9px 12px',color:'#666',fontSize:'12px'}}>{s.corrieri?.nome_contratto || '—'}</td>
-                    <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.dest_nome} · {s.dest_citta}</td>
-                    <td style={{padding:'9px 16px',textAlign:'right'}}>
+                    <td style={{padding:'9px 12px',color:'#1a1a1a'}}>
+                      {s.dest_nome} · {s.dest_citta}
+                      {/* IL FORNITORE L'HA RIPESATA: e' una misura fatta sul collo vero, quindi quel
+                          pacco e' partito. Chiedere l'annullo non ha piu' senso — va rimessa in piedi,
+                          altrimenti resta in coda per sempre e con lei la sua rettifica. */}
+                      {s.ripesata && (
+                        <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:600,color:'#166534',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'4px',padding:'2px 6px',display:'inline-block'}}>
+                          ✓ Ripesata dal corriere: è partita
+                        </div>
+                      )}
+                    </td>
+                    <td style={{padding:'9px 16px',textAlign:'right',whiteSpace:'nowrap'}}>
+                      <button onClick={()=>ripristina(s.id)} disabled={ripristinando===s.id}
+                        style={{padding:'6px 12px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer',marginRight:'6px',opacity:ripristinando===s.id?0.6:1}}
+                        title="Il pacco e' partito: togli l'annullo e rimettila in elenco">
+                        {ripristinando===s.id?'…':'↩︎ Ripristina'}
+                      </button>
                       <button onClick={()=>confermaAnnullo(s.id)} disabled={confermando===s.id}
                         style={{padding:'6px 12px',background:'#b91c1c',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer',opacity:confermando===s.id?0.6:1}}>
                         {confermando===s.id?'…':'Segna annullato'}

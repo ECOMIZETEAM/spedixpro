@@ -37,7 +37,14 @@ export async function POST(req: NextRequest) {
     if (!autorizzato) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
 
-  if (sped.stato !== 'annullamento_pending') {
+  // ANCHE DALLA CODA DELL'ASSISTENZA, non solo dalle 48 ore.
+  // Su certi contratti l'annullo non parte da solo: la spedizione resta in coda finche' qualcuno lo
+  // chiede a mano al fornitore. Ma nel frattempo il pacco puo' essere partito davvero — e quando il
+  // fornitore lo RIPESA, quella e' la prova che ha viaggiato: l'ha misurato lui. Da li' l'annullo
+  // non ha piu' senso, e chi tiene il contratto deve poterla rimettere in piedi. Prima non si
+  // poteva: restava in coda per sempre, e con lei la rettifica della ripesatura, che nessuno poteva
+  // ne' confermare ne' togliere.
+  if (sped.stato !== 'annullamento_pending' && sped.stato !== 'annullamento_manuale') {
     return NextResponse.json({ error: 'La spedizione non è in attesa di annullo: non è ripristinabile.' }, { status: 400 })
   }
 
@@ -47,6 +54,9 @@ export async function POST(req: NextRequest) {
     annullamento_richiesto_at: null,
     annullamento_da: null,
     annullamento_errore: null,
+    // Sparisce anche dalla coda di chi doveva chiederlo all'assistenza: se non si azzerasse,
+    // resterebbe li' un promemoria per un annullo che non si fa piu'.
+    annullamento_owner_id: null,
   }).eq('id', spedizioneId)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
