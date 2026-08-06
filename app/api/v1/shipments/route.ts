@@ -361,8 +361,22 @@ export async function POST(req: NextRequest) {
       await registraMovimento(admin, { masterId, clienteId: ctx.clienteId, tipo: 'spedizione', descrizione: `${numero} - ${body.shipTo?.name||''}`.trim(), riferimento: numero, importo: -Math.abs(costoCliente), spedizioneId: inserted?.id || null, createdBy: null })
     }
   } catch (e) { console.error('API mov cliente:', e) }
+  // IL COMUNE VA PASSATO ANCHE QUI, non solo nel prezzo al cliente.
+  //
+  // Mancava, ed era l'unica delle sette chiamate alla cascata in tutto il progetto a non averlo —
+  // perfino la verifica del credito, venti righe piu' su in QUESTO stesso file, lo passa. Cosi'
+  // dentro la stessa richiesta il cliente veniva prezzato col comune e i master addebitati senza.
+  //
+  // Non e' un dettaglio, perche' senza comune `filtraCapCondiviso` esce subito senza scartare
+  // niente: la riga "quel CAP, ma solo per QUEL comune" sopravvive e vince, visto che il CAP esatto
+  // ha la precedenza sulla provincia. Su 87020 la riga e' "Verbicaro": una spedizione per Santa
+  // Maria del Cedro — stesso CAP, comune diverso — veniva venduta al cliente a tariffa SCS (5,50)
+  // e addebitata al suo master a tariffa Zone Disagiate (12,32). Il master ci rimetteva 6,82 a
+  // pacco, e il conto lo pagava sempre lui perche' il cliente aveva gia' pagato il prezzo giusto.
+  // Misurato: 28 spedizioni in perdita su 31, 156,97 euro in trenta giorni, tutte da questa porta.
+  // Dal portale, nella identica situazione, 536 spedizioni e 2 sole in perdita per 0,62 euro.
   try {
-    await addebitaCatena(admin, { masterDirettoId: masterId, corriereOwnerId: corriere.master_id, costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', corriereNome: corriere.nome_contratto, contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0), numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: null })
+    await addebitaCatena(admin, { masterDirettoId: masterId, corriereOwnerId: corriere.master_id, costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city, corriereNome: corriere.nome_contratto, contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0), numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: null })
   } catch (e) { console.error('API cascata:', e) }
 
   // Notifica ai webhook del cliente (best-effort: non blocca né fa fallire la creazione)
