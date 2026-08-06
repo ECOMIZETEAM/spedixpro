@@ -106,7 +106,13 @@ Da sistemare, e da guardare con sospetto quando si tocca qualcosa lì vicino.
 
 - **Il comune scritto diversamente fa perdere la zona speciale.** Se il comune non combacia con
   nessuno di quelli elencati per quel CAP, la zona speciale non viene rivendicata e si finisce su
-  "Italia": circa 43 spedizioni al mese prezzate meno del dovuto.
+  "Italia".
+  **La misura "circa 43 al mese" che stava qui era sbagliata di dieci volte**: contate il 6 agosto,
+  sono **307 spedizioni in sette giorni** che toccano uno dei **541 CAP** rivendicati solo per certi
+  comuni. Non tutte finiscono in perdita — il grosso del danno veniva da un'altra causa, ora chiusa
+  (vedi sotto) — ma il perimetro è quello, e va ricordato quando si tocca `filtraCapCondiviso`.
+  Il residuo vero di *questo* problema, dopo la chiusura di quell'altra: 13 spedizioni dal portale
+  per 63,78 € (Portoferraio, Murano, Carloforte, Brugnato).
   È una scelta, non una svista. Il 4 agosto avevo aggiunto la regola opposta — «se per quel CAP è
   nominato un solo comune, allora è lo stesso posto scritto male» — e il giorno dopo l'ho tolta,
   perché non distingue *Piana di Monte Vena* (refuso) da *Brugnato*, che è un comune diverso che
@@ -141,6 +147,16 @@ Chiuse il 4-5 agosto, elencate qui perché non vengano "riscoperte": i limiti de
 preventivo via API, il `weight` letto diversamente dalle due porte API, il logo dell'etichetta
 (ora riconosciuto dai byte), il perimetro di giacenze e creazione, il credito via API senza
 contrassegno.
+
+Chiusa il 6 agosto — **la cascata dell'API addebitava senza il comune**. Delle sette chiamate a
+`addebitaCatena` era l'unica a non passare `citta`: perfino la verifica del credito, venti righe
+più su nello stesso file, lo passava. Così, dentro la stessa richiesta, il cliente veniva prezzato
+col comune e i master addebitati senza — e senza comune la riga «quel CAP ma solo per QUEL comune»
+sopravvive e vince, perché il CAP esatto batte la provincia. Costo: 162,37 € addebitati di troppo
+a quattro master fra il 17 luglio e il 6 agosto, su 29 spedizioni.
+**Non era la propagazione delle zone**, che è risultata corretta ai tre livelli: era la stessa
+tabella interrogata con due domande diverse. Il modo in cui si è distinto: dal portale, che il
+comune lo passa, 536 spedizioni nella identica situazione e 2 sole in perdita per 0,62 €.
 
 ---
 
