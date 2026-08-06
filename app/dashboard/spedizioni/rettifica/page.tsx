@@ -35,6 +35,11 @@ export default function RettificaCostiPage() {
     setLoading(false)
   }
 
+  // Anteprima delle RIPESATURE del fornitore: e' un file diverso da quello dei pesi, e la rotta lo
+  // riconosce da sola dalle colonne. Qui si tiene il risultato per mostrarlo, senza toccare il
+  // flusso del file dei pesi, che continua a funzionare come prima.
+  const [ripesature, setRipesature] = useState<any>(null)
+
   async function uploadFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -51,6 +56,13 @@ export default function RettificaCostiPage() {
         body: JSON.stringify({ nomeFile: file.name, righe })
       })
       const data = await res.json()
+      if (data?.tipo === 'ripesature') {
+        setRipesature(data)
+        setUploading(false)
+        if (fileRef.current) fileRef.current.value = ''
+        return
+      }
+      setRipesature(null)
       if (data.success) {
         await caricaFiles()
         await caricaRettifiche(data.fileId)
@@ -116,6 +128,59 @@ export default function RettificaCostiPage() {
       <div style={{marginBottom:'16px'}}>
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Importa file</h1>
       </div>
+
+      {/* RIPESATURE DEL FORNITORE — riconosciute dal file, non da una voce di menu a parte.
+          L'importo NON scende uguale lungo la catena: ogni livello viene riprezzato sul proprio
+          listino con il collo vero, per questo c'e' una riga per livello. Al detentore del
+          contratto puo' costare un euro e al cliente due e settanta, ed e' giusto cosi'.
+          Per ora si guarda soltanto: nessuna rettifica creata, nessun credito toccato. */}
+      {ripesature && (
+        <div style={{marginBottom:'20px'}}>
+          <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'10px',padding:'12px 15px',marginBottom:'14px',fontSize:'13px',color:'#92400e',lineHeight:1.6}}>
+            <strong>Ripesature del fornitore.</strong> {ripesature.totali.nelFile} righe nel file ={' '}
+            <strong>{ripesature.totali.spedizioni} spedizioni</strong> (i colli di una stessa spedizione
+            portano lo stesso importo e vengono contati una volta sola).
+            {ripesature.totali.giaCaricate > 0 && <> Di queste, <strong>{ripesature.totali.giaCaricate} erano già state caricate</strong> e sono escluse.</>}
+            {ripesature.totali.nonTrovate > 0 && <> {ripesature.totali.nonTrovate} non risultano fra le nostre spedizioni.</>}
+            <br/>Costo del fornitore: <strong>€ {Number(ripesature.totali.addebitoFornitore).toFixed(2)}</strong>.
+            {' '}<span style={{fontWeight:700}}>Nessuna rettifica è stata creata: questa è solo un'anteprima.</span>
+          </div>
+          <div style={{background:'#fff',border:'1px solid #e8e8e8',borderRadius:'10px',overflow:'hidden'}}>
+            <div style={{overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',minWidth:'860px'}}>
+                <thead><tr>
+                  {['Spedizione','Collo riscontrato','Chi paga','Addebitato','Dovuto','Differenza'].map((h,i)=>(
+                    <th key={h} style={{textAlign:i>2?'right':'left',padding:'9px 12px',fontSize:'11px',fontWeight:700,textTransform:'uppercase',color:'#666',borderBottom:'1px solid #e8e8e8',whiteSpace:'nowrap'}}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {(ripesature.righe||[]).filter((r:any)=>r.trovata).map((r:any)=>(r.livelli||[]).map((l:any,i:number)=>(
+                    <tr key={r.ldv+'-'+i}>
+                      {i===0 && (<>
+                        <td style={{padding:'8px 12px',fontSize:'12.5px',borderBottom:'1px solid #e8e8e8',verticalAlign:'top'}} rowSpan={r.livelli.length}>
+                          <div style={{fontWeight:700}}>{r.ldv}</div>
+                          <div style={{fontSize:'11.5px',color:'#8a8a8a'}}>{r.destinatario}</div>
+                        </td>
+                        <td style={{padding:'8px 12px',fontSize:'12.5px',borderBottom:'1px solid #e8e8e8',verticalAlign:'top'}} rowSpan={r.livelli.length}>
+                          <div>{r.pesoPrima} → <strong>{r.pesoDopo} kg</strong>{r.colli>1?' · '+r.colli+' colli':''}</div>
+                          <div style={{fontSize:'11.5px',color:'#8a8a8a'}}>{r.misure}</div>
+                          <div style={{fontSize:'11.5px',color:'#15803d'}}>fornitore € {Number(r.addebitoFornitore).toFixed(2)}</div>
+                        </td>
+                      </>)}
+                      <td style={{padding:'8px 12px',fontSize:'12.5px',borderBottom:'1px solid #f5f5f5'}}>{l.chi}</td>
+                      <td style={{padding:'8px 12px',fontSize:'12.5px',borderBottom:'1px solid #f5f5f5',textAlign:'right',fontVariantNumeric:'tabular-nums'}}>€ {Number(l.pagato).toFixed(2)}</td>
+                      <td style={{padding:'8px 12px',fontSize:'12.5px',borderBottom:'1px solid #f5f5f5',textAlign:'right',fontVariantNumeric:'tabular-nums'}}>{l.dovuto==null?'—':'€ '+Number(l.dovuto).toFixed(2)}</td>
+                      <td style={{padding:'8px 12px',fontSize:'12.5px',borderBottom:'1px solid #f5f5f5',textAlign:'right',fontWeight:700,fontVariantNumeric:'tabular-nums',color:l.differenza==null?'#8a8a8a':l.differenza>=0?'#15803d':'#b91c1c'}}>
+                        {l.differenza==null?'n/d':(l.differenza>=0?'+':'')+'€ '+Number(l.differenza).toFixed(2)}
+                      </td>
+                    </tr>
+                  )))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Upload + File processati */}
       <div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:'16px',marginBottom:'16px'}}>

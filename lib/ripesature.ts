@@ -33,78 +33,70 @@ export type Ripesatura = {
   destinatario: string
 }
 
-const euro = (s: string) => Number(String(s || '0').replace(/\./g, '').replace(',', '.')) || 0
-const kg = (s: string) => Number(String(s || '0').replace(',', '.')) || 0
+const euro = (v: any) => {
+  // Il PUNTO qui e' separatore delle migliaia e la VIRGOLA e' decimale: "1.234,56".
+  if (typeof v === 'number') return v
+  return Number(String(v ?? '0').replace(/\./g, '').replace(',', '.')) || 0
+}
+const kg = (v: any) => {
+  // Qui invece il punto E' decimale: "8.000" sono otto chili, non ottomila.
+  if (typeof v === 'number') return v
+  return Number(String(v ?? '0').replace(',', '.')) || 0
+}
 
-function misure(s: string): { lunghezza: number; larghezza: number; altezza: number } {
-  const p = String(s || '').toLowerCase().split('x').map(x => Number(x.trim()) || 0)
+function misure(v: any): { lunghezza: number; larghezza: number; altezza: number } {
+  const p = String(v ?? '').toLowerCase().split('x').map(x => Number(String(x).trim()) || 0)
   return { lunghezza: p[0] || 0, larghezza: p[1] || 0, altezza: p[2] || 0 }
 }
 
-// Divide una riga tenendo conto delle virgolette: i nomi contengono virgole e punti e virgola.
-function celle(riga: string, sep: string): string[] {
-  const out: string[] = []
-  let cur = '', dentro = false
-  for (let i = 0; i < riga.length; i++) {
-    const c = riga[i]
-    if (c === '"') { if (dentro && riga[i + 1] === '"') { cur += '"'; i++ } else dentro = !dentro; continue }
-    if (c === sep && !dentro) { out.push(cur); cur = ''; continue }
-    cur += c
+// Le righe arrivano gia' lette dalla pagina (xlsx legge sia CSV sia XLS), quindi qui non si fa
+// nessun parsing di testo: si normalizzano solo i NOMI delle colonne, perche' "id_ordine",
+// "ID Ordine" e "id-ordine" devono essere la stessa cosa.
+function normalizza(riga: any): Record<string, any> {
+  const out: Record<string, any> = {}
+  for (const k of Object.keys(riga || {})) {
+    out[String(k).toLowerCase().replace(/[^a-z0-9]/g, '')] = riga[k]
   }
-  out.push(cur)
-  return out.map(x => x.trim())
+  return out
 }
 
-export function leggiRipesature(testo: string): { righe: Ripesatura[]; scartate: number; totaleFornitore: number } {
-  // Il BOM davanti alla prima intestazione fa fallire il confronto sul primo nome di colonna.
-  const pulito = testo.replace(/^﻿/, '')
-  const linee = pulito.split(/\r?\n/).filter(r => r.trim())
-  if (!linee.length) return { righe: [], scartate: 0, totaleFornitore: 0 }
+// Il file e' di ripesature? Si riconosce dalle colonne, non dal nome del file: chi carica non deve
+// sapere in quale schermata va quale export.
+export function sembraRipesature(righe: any[]): boolean {
+  const r = normalizza((righe || [])[0] || {})
+  return 'idordine' in r && 'ldv' in r && ('misureriscontrate' in r || 'pesoriscontrato' in r)
+}
 
-  const sep = (linee[0].match(/;/g) || []).length >= (linee[0].match(/,/g) || []).length ? ';' : ','
-  // Via TUTTO cio' che non e' lettera o cifra: "id_ordine", "ID Ordine" e "id-ordine" devono
-  // diventare la stessa cosa. Tenere il trattino basso, come facevo prima, bastava a non
-  // riconoscere nemmeno una colonna.
-  const intest = celle(linee[0], sep).map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''))
-  const col = (nome: string) => intest.indexOf(nome)
-  const iOrdine = col('idordine'), iVerifica = col('idverifica'), iLdv = col('ldv')
-  const iMisure = col('misureriscontrate'), iPeso = col('pesoriscontrato'), iAddebito = col('addebito')
-  const iChiusura = col('datachiusura'), iMitt = col('mittente'), iDest = col('destinatario')
-  if (iOrdine < 0 || iLdv < 0 || iAddebito < 0) {
-    throw new Error('Il file non sembra un export di ripesature: mancano le colonne id_ordine, ldv o addebito.')
-  }
-
+export function leggiRipesature(righe: any[]): { righe: Ripesatura[]; scartate: number; totaleFornitore: number } {
   const gruppi = new Map<string, Ripesatura>()
   let scartate = 0
-  for (let n = 1; n < linee.length; n++) {
-    const c = celle(linee[n], sep)
-    const idOrdine = c[iOrdine] || ''
-    const ldv = c[iLdv] || ''
+  for (const grezza of (righe || [])) {
+    const c = normalizza(grezza)
+    const idOrdine = String(c.idordine ?? '').trim()
+    const ldv = String(c.ldv ?? '').trim()
     if (!idOrdine || !ldv) { scartate++; continue }
-    const m = misure(iMisure >= 0 ? c[iMisure] : '')
-    const collo: ColloRipesato = { peso: kg(iPeso >= 0 ? c[iPeso] : '0'), ...m }
+    const collo: ColloRipesato = { peso: kg(c.pesoriscontrato), ...misure(c.misureriscontrate) }
 
     const g = gruppi.get(idOrdine)
     if (!g) {
       gruppi.set(idOrdine, {
         idOrdine,
-        idVerifiche: [c[iVerifica] || ''].filter(Boolean),
+        idVerifiche: [String(c.idverifica ?? '')].filter(Boolean),
         ldv,
         // L'IMPORTO NON SI SOMMA: e' lo stesso su tutte le righe della spedizione.
-        addebitoFornitore: euro(c[iAddebito]),
+        addebitoFornitore: euro(c.addebito),
         colli: [collo],
-        dataChiusura: iChiusura >= 0 ? c[iChiusura] : '',
-        mittente: iMitt >= 0 ? c[iMitt] : '',
-        destinatario: iDest >= 0 ? c[iDest] : '',
+        dataChiusura: String(c.datachiusura ?? ''),
+        mittente: String(c.mittente ?? ''),
+        destinatario: String(c.destinatario ?? ''),
       })
     } else {
-      if (c[iVerifica]) g.idVerifiche.push(c[iVerifica])
+      if (c.idverifica) g.idVerifiche.push(String(c.idverifica))
       g.colli.push(collo)
       // La LDV madre e' la piu' corta: quella dei colli la contiene come suffisso.
       if (ldv.length < g.ldv.length) g.ldv = ldv
     }
   }
-
-  const righe = [...gruppi.values()]
-  return { righe, scartate, totaleFornitore: righe.reduce((s, r) => s + r.addebitoFornitore, 0) }
+  const out = [...gruppi.values()]
+  return { righe: out, scartate, totaleFornitore: out.reduce((s, r) => s + r.addebitoFornitore, 0) }
 }

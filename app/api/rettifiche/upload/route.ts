@@ -27,6 +27,50 @@ export async function POST(req: NextRequest) {
   if (!myMaster) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
   const body = await req.json()
   const { nomeFile, righe } = body
+
+  // ── E' IL FILE DELLE RIPESATURE DEL FORNITORE? ──
+  //
+  // Una schermata sola, due file possibili: quello dei PESI (storico) e quello delle RIPESATURE che
+  // manda il corriere. Chi carica non deve sapere in quale voce di menu va quale export — lo
+  // riconosce il sistema dalle COLONNE.
+  //
+  // E' successo davvero: il file delle ripesature caricato qui dentro ha risposto "0 da rettificare"
+  // senza spiegare perche'. Il motivo e' che questa rotta cerca una colonna "peso reale", mentre
+  // quel file la chiama `peso_riscontrato` — e soprattutto qui le MISURE vengono buttate via
+  // ("senza misure: nessun volumetrico"), mentre su quel file e' proprio il volume a fare il
+  // supplemento: su 45 spedizioni su 106 il pacco pesa MENO del dichiarato e paga lo stesso.
+  {
+    const { sembraRipesature, leggiRipesature } = await import('@/lib/ripesature')
+    if (sembraRipesature(righe || [])) {
+      const { calcolaRipesature } = await import('@/lib/ripesature-calcolo')
+      const lette = leggiRipesature(righe || [])
+      if (!lette.righe.length) return NextResponse.json({ error: 'Il file non contiene ripesature leggibili' }, { status: 400 })
+
+      const adminRip = createAdminSupabase()
+      // Gia' caricate: si tolgono PRIMA di calcolare, cosi' i totali a schermo sono quelli che
+      // entrerebbero davvero. L'export del fornitore e' cumulativo. (La garanzia vera resta
+      // l'indice unico sul database: questo serve solo a mostrare numeri onesti.)
+      const { data: gia } = await adminRip.from('rettifiche')
+        .select('rif_fornitore').eq('master_id', myMaster)
+        .in('rif_fornitore', lette.righe.map(r => r.idOrdine))
+      const viste = new Set((gia || []).map((g: any) => g.rif_fornitore))
+      const nuove = lette.righe.filter(r => !viste.has(r.idOrdine))
+      const esiti = await calcolaRipesature(adminRip, nuove)
+
+      return NextResponse.json({
+        success: true, tipo: 'ripesature', anteprima: true,
+        totali: {
+          nelFile: (righe || []).length,
+          spedizioni: lette.righe.length,
+          giaCaricate: viste.size,
+          nonTrovate: esiti.filter(e => !e.trovata).length,
+          addebitoFornitore: Math.round(nuove.reduce((s, r) => s + r.addebitoFornitore, 0) * 100) / 100,
+        },
+        righe: esiti,
+      })
+    }
+  }
+
   // RLS: match LDV su tutta la catena (discendenti) -> admin; l'autorizzazione e' il check catena stesso
   const adminDb = createAdminSupabase()
 
