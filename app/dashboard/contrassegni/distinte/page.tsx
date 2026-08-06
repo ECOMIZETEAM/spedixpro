@@ -332,16 +332,34 @@ export default function DistinteContrassegniPage() {
               {['','NR','Da','Data','LDV','Totale'].map((h,i)=><th key={i} style={{textAlign:'left' as const,padding:'7px 12px',fontWeight:'700',textTransform:'uppercase' as const,fontSize:'10.5px',color:'#1a1a1a',borderBottom:'1px solid #e5e7eb'}}>{h}</th>)}
             </tr></thead>
             <tbody>
-              {ricevute.map((r:any)=>(
-                <tr key={r.id} style={{borderBottom:'1px solid #f1f5f9',cursor:'pointer'}} onClick={()=>setSelRicevute(prev=>{const n=new Set(prev); n.has(r.id)?n.delete(r.id):n.add(r.id); return n})}>
+              {/* "Da MULTIEXPRESS, 74 LDV, 3.812 €" non dice quello che serve per decidere: la domanda
+                  e' A CHI vanno. Sotto ogni rimessa c'e' la stessa divisione per destinatario che si
+                  vede dopo nell'area di sosta — cosi' si sa cosa si sta accettando prima di farlo. */}
+              {ricevute.flatMap((r:any)=>[
+                <tr key={r.id} style={{borderBottom:(r.destinatari||[]).length?'none':'1px solid #f1f5f9',cursor:'pointer'}} onClick={()=>setSelRicevute(prev=>{const n=new Set(prev); n.has(r.id)?n.delete(r.id):n.add(r.id); return n})}>
                   <td style={{padding:'7px 12px',width:'30px'}}><input type="checkbox" checked={selRicevute.has(r.id)} onChange={()=>{}} style={{width:'15px',height:'15px',pointerEvents:'none' as const}}/></td>
                   <td style={{padding:'7px 12px',fontWeight:'700',color:'#f97316'}}>{r.numero || '—'}</td>
                   <td style={{padding:'7px 12px',color:'#1a1a1a',fontWeight:'500'}}>{r.mittente}</td>
                   <td style={{padding:'7px 12px',color:'#1a1a1a'}}>{new Date(r.created_at).toLocaleString('it-IT')}</td>
                   <td style={{padding:'7px 12px',color:'#1a1a1a'}}>{r.righe}</td>
                   <td style={{padding:'7px 12px',fontWeight:'700',color:'#1a1a1a'}}>€ {Number(r.totale).toFixed(2)}</td>
-                </tr>
-              ))}
+                </tr>,
+                ...(r.destinatari||[]).map((d:any,i:number)=>(
+                  <tr key={r.id+':'+i} style={{borderBottom:i===(r.destinatari.length-1)?'1px solid #f1f5f9':'none',background:'#fffdf7',cursor:'pointer'}}
+                    onClick={()=>setSelRicevute(prev=>{const n=new Set(prev); n.has(r.id)?n.delete(r.id):n.add(r.id); return n})}>
+                    <td style={{padding:'4px 12px'}}></td>
+                    <td style={{padding:'4px 12px',color:'#a16207',fontSize:'11px'}}>↳</td>
+                    <td colSpan={2} style={{padding:'4px 12px',color:'#1a1a1a',fontSize:'11.5px'}}>
+                      <span style={{fontWeight:600}}>{d.nome}</span>
+                      <span style={{fontSize:'10px',fontWeight:700,padding:'1px 6px',borderRadius:'999px',marginLeft:'7px',
+                        background:d.tipo==='cliente'?'#eff6ff':d.tipo==='sotto-master'?'#fff7ed':'#fef2f2',
+                        color:d.tipo==='cliente'?'#1d4ed8':d.tipo==='sotto-master'?'#c2410c':'#dc2626'}}>{d.tipo}</span>
+                    </td>
+                    <td style={{padding:'4px 12px',color:'#6b7280',fontSize:'11.5px'}}>{d.spedizioni}</td>
+                    <td style={{padding:'4px 12px',color:'#166534',fontSize:'11.5px',fontWeight:600}}>€ {Number(d.totale).toFixed(2)}</td>
+                  </tr>
+                )),
+              ])}
             </tbody>
           </table>
         </div>
