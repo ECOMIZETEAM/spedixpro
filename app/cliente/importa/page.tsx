@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
+import PagaConCarta from '@/app/cliente/PagaConCarta'
 
 const ACCENT = '#f97316'
 
@@ -112,7 +113,11 @@ export default function ImportaOrdiniPage() {
     } catch { alert('Errore di connessione.') }
     setUnendo(false)
   }
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
+  const [progress, setProgress] = useState<{ done: number; total: number; fase?: 'tariffe' | 'crea' } | null>(null)
+  // Carrello: credito insufficiente per l'intero lotto → "Paga con la carta" per il mancante.
+  // Il lotto già preparato (tariffe calcolate) si conserva qui, così il pagamento non lo ricalcola.
+  const [creditoKO, setCreditoKO] = useState<{ mancante: number; costo: number; credito: number } | null>(null)
+  const lottoRef = useRef<{ preparati: any[]; preErrori: any[]; shipFrom: any } | null>(null)
 
   async function loadOrdini() {
     setLoading(true)
@@ -341,9 +346,15 @@ export default function ImportaOrdiniPage() {
     for (const a of articoli) { const k = String(a.sku || '').trim().toLowerCase(); if (k) artMap.set(k, a) }
 
     setSpedendo(true)
-    setProgress({ done: 0, total: targets.length })
-    let ok = 0, ko = 0
+    setCreditoKO(null)
 
+    // ── PRE-PASSAGGIO: calcolo le tariffe di TUTTO il lotto UNA volta e scelgo il corriere per ogni
+    //    riga. Serve a due cose: sapere il TOTALE del lotto (per il pagamento unico) e non richiedere
+    //    le tariffe due volte (il ciclo di creazione riusa queste scelte). Le righe senza tariffa
+    //    valida finiscono tra i preErrori e non entrano nel totale.
+    setProgress({ done: 0, total: targets.length, fase: 'tariffe' })
+    const preparati: any[] = []
+    const preErrori: { o: any; err: string }[] = []
     for (let i = 0; i < targets.length; i++) {
       const o = targets[i]
       try {
@@ -368,29 +379,71 @@ export default function ImportaOrdiniPage() {
           phone: o.telefono || '', email: o.email_destinatario || '',
         }
 
-        // 1) Tariffe
         const tRes = await fetch('/api/spedizioni/tariffe', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ packages, shipFrom, shipTo, codValue: o.contrassegno || 0, insuranceValue: 0, notes: o.note || '' }),
         })
         const tariffe = await tRes.json()
-        if (!Array.isArray(tariffe) || !tariffe.length) {
-          throw new Error(tariffe?.error || 'Nessuna tariffa disponibile')
-        }
+        if (!Array.isArray(tariffe) || !tariffe.length) throw new Error(tariffe?.error || 'Nessuna tariffa disponibile')
 
-        // 2) Scelta corriere
         let scelta: any
         if (filtro === 'min') {
-          scelta = tariffe.reduce((a: any, b: any) =>
-            parseFloat(b.total_price) < parseFloat(a.total_price) ? b : a)
+          scelta = tariffe.reduce((a: any, b: any) => parseFloat(b.total_price) < parseFloat(a.total_price) ? b : a)
         } else {
           scelta = tariffe.find((t: any) => String(t._corriere_id) === String(filtro))
           if (!scelta) throw new Error('Corriere selezionato non disponibile per questo ordine')
         }
-        const corriereId = scelta._corriere_id
-        if (!corriereId) throw new Error('Corriere non identificato (listino senza corriere)')
+        if (!scelta._corriere_id) throw new Error('Corriere non identificato (listino senza corriere)')
 
-        // 3) Crea spedizione
+        preparati.push({ o, packages, shipTo, scelta, corriereId: scelta._corriere_id })
+      } catch (e: any) {
+        preErrori.push({ o, err: String(e?.message || e) })
+      }
+      setProgress({ done: i + 1, total: targets.length, fase: 'tariffe' })
+    }
+
+    // ── TOTALE del lotto e CANCELLO credito: come il server, il blocco vale SOLO per il credito a
+    //    scalare (chi fattura a mensile va sotto zero ed è normale). Se il credito non basta, chiedo
+    //    UN pagamento per l'intero mancante e riprovo tutto il lotto — senza ricalcolare le tariffe.
+    const totale = Math.round(preparati.reduce((s, p) => s + (parseFloat(p.scelta.total_price) || 0), 0) * 100) / 100
+    let tipoContratto = '', credito = 0
+    try {
+      const cli = await fetch('/api/cliente/dati').then(r => r.json())
+      tipoContratto = String(cli?.tipo_contratto || ''); credito = Number(cli?.credito || 0)
+    } catch {}
+    if (preparati.length && tipoContratto === 'credito_scalare' && credito < totale) {
+      lottoRef.current = { preparati, preErrori, shipFrom }
+      const mancante = Math.max(0, Math.ceil((totale - credito) * 100) / 100)
+      setCreditoKO({ mancante, costo: totale, credito })
+      setSpedendo(false)
+      setProgress(null)
+      return
+    }
+
+    await eseguiCreazioneLotto(preparati, preErrori, shipFrom)
+  }
+
+  // Crea le spedizioni del lotto già preparato (tariffe scelte nel pre-passaggio). Chiamato subito
+  // se il credito basta, oppure dopo "Paga con la carta" (riusa lo stesso lotto, niente ricalcolo).
+  async function eseguiCreazioneLotto(preparati: any[], preErrori: { o: any; err: string }[], shipFrom: any) {
+    setSpedendo(true)
+    const totale = preparati.length + preErrori.length
+    setProgress({ done: 0, total: totale, fase: 'crea' })
+    let ok = 0, ko = 0
+
+    // Le righe rimaste senza tariffa: segnate errore subito, non si creano.
+    for (const pe of preErrori) {
+      await fetch('/api/ordini/aggiorna-stato', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: pe.o.id, stato: 'errore', errore: pe.err }),
+      })
+      ko++
+    }
+    setProgress({ done: ko, total: totale, fase: 'crea' })
+
+    for (let i = 0; i < preparati.length; i++) {
+      const { o, packages, shipTo, scelta, corriereId } = preparati[i]
+      try {
         const cRes = await fetch('/api/spedizioni/crea', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -406,7 +459,6 @@ export default function ImportaOrdiniPage() {
         const cData = await cRes.json()
         if (!cRes.ok || cData.error) throw new Error(cData?.error || 'Errore creazione spedizione')
 
-        // 4) Marca come spedito
         await fetch('/api/ordini/aggiorna-stato', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: o.id, stato: 'spedito', numero: cData.numero }),
@@ -419,9 +471,10 @@ export default function ImportaOrdiniPage() {
         })
         ko++
       }
-      setProgress({ done: i + 1, total: targets.length })
+      setProgress({ done: ko + ok, total: totale, fase: 'crea' })
     }
 
+    lottoRef.current = null
     setSpedendo(false)
     setProgress(null)
     setSel(new Set())
@@ -480,6 +533,14 @@ export default function ImportaOrdiniPage() {
         </div>
       )}
 
+      {/* Carrello: credito insufficiente per l'intero lotto → pagamento unico con la carta */}
+      {creditoKO && (
+        <PagaConCarta
+          mancante={creditoKO.mancante} costo={creditoKO.costo} credito={creditoKO.credito}
+          onPagato={() => { setCreditoKO(null); const l = lottoRef.current; if (l) eseguiCreazioneLotto(l.preparati, l.preErrori, l.shipFrom) }}
+        />
+      )}
+
       {/* Upload */}
       <div style={{ ...card, marginBottom: '16px' }}>
         <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', justifyContent: 'space-between' }}>
@@ -526,7 +587,9 @@ export default function ImportaOrdiniPage() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
           <div style={{ fontSize: '13px', color: '#666' }}>
             {spedendo && progress
-              ? `Spedizione ${progress.done}/${progress.total} in corso…`
+              ? (progress.fase === 'tariffe'
+                  ? `Calcolo tariffe ${progress.done}/${progress.total}…`
+                  : `Spedizione ${progress.done}/${progress.total} in corso…`)
               : (sel.size > 0 ? `${sel.size} selezionati` : `${ordiniFiltrati.length}${ordiniFiltrati.length !== ordini.length ? ` di ${ordini.length}` : ''} ordini`)}
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>

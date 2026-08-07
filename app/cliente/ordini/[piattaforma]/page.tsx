@@ -1,8 +1,9 @@
 'use client'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { useDialog } from '@/app/components/DialogProvider'
+import PagaConCarta from '@/app/cliente/PagaConCarta'
 
 const NOMI: Record<string,string> = { shopify:'Shopify', prestashop:'PrestaShop', woocommerce:'WooCommerce' }
 const ACCENT = '#f97316'
@@ -220,6 +221,10 @@ export default function OrdiniPage() {
   function frecc(k:string){ if(!sort||sort.k!==k) return '↕'; return sort.d===1?'↑':'↓' }
 
   const [spedendo, setSpedendo] = useState(false)
+  // Carrello: credito insufficiente per l'intero lotto → "Paga con la carta" per il mancante.
+  // Il lotto già preparato (tariffe calcolate) resta qui, così il pagamento non lo ricalcola.
+  const [creditoKO, setCreditoKO] = useState<{ mancante: number; costo: number; credito: number } | null>(null)
+  const lottoRef = useRef<{ preparati: any[]; errori: string[]; shipFrom: any; cliId: string } | null>(null)
 
   // CONTRASSEGNO dall'ordine del marketplace: eBay = paymentMethod CASH_ON_DELIVERY/PICKUP;
   // Woo = payment_method 'cod'; PrestaShop = modulo cashondelivery. Importo = totale ordine.
@@ -237,17 +242,25 @@ export default function OrdiniPage() {
     const ids = Object.keys(sel).filter(id=>sel[id])
     if (ids.length===0){ setMsg('Seleziona almeno un ordine'); return }
     setSpedendo(true)
-    let okCount = 0; const errori: string[] = []
+    setCreditoKO(null)
+    const errori: string[] = []
     try {
       const cli = await fetch('/api/cliente/dati').then(r=>r.json())
       if (!cli || cli.error) { setMsg('Errore: dati cliente non disponibili'); setSpedendo(false); return }
       const shipFrom = { name:cli.ragione_sociale||'', company:cli.ragione_sociale||'', street1:cli.so_indirizzo||'', street2:'', city:cli.so_citta||'', state:cli.so_provincia||'', postalCode:cli.so_cap||'', country:'IT', phone:cli.telefono||'', email:cli.email||'' }
+
+      // ── PRE-PASSAGGIO: calcolo tariffe e scelgo il corriere per TUTTO il lotto una volta sola.
+      //    Serve il TOTALE del lotto (per il pagamento unico) e a non richiedere le tariffe due
+      //    volte (il ciclo di creazione riusa queste scelte). Le righe scartate finiscono in `errori`.
+      const preparati: any[] = []
+      let fatte = 0
       for (const id of ids) {
         const o = ordini.find(x=>x.id===id)
         if (!o || o.stato==='spedito') continue
         const d = o.destinatario || {}
         const num = o.numero_ordine || id
-        setMsg('Spedizione ordine '+num+'… ('+(okCount+1)+'/'+ids.length+')')
+        fatte++
+        setMsg('Calcolo tariffe '+fatte+'/'+ids.length+'…')
         if (!d.nome || !d.indirizzo || !d.citta || !d.cap) { errori.push(num+': destinatario incompleto'); continue }
         const arts = Array.isArray(o.articoli)?o.articoli:[]
         const rp = risolviPeso(o)   // peso+misure dal catalogo SKU/pacco (fallback grammi/1kg)
@@ -264,10 +277,44 @@ export default function OrdiniPage() {
           if (!t) { errori.push(num+': corriere scelto non disponibile per questa destinazione'); continue }
         }
         if (!t) t = tarRes[0]
+        preparati.push({ id, o, num, arts, rp, packages, shipTo, t })
+      }
+
+      // ── TOTALE del lotto e CANCELLO credito: come il server, il blocco vale SOLO per il credito a
+      //    scalare (chi fattura a mensile va sotto zero ed è normale). Se non basta, chiedo UN
+      //    pagamento per il mancante e riprovo il lotto — senza ricalcolare le tariffe.
+      const totale = Math.round(preparati.reduce((s,p)=>s+(parseFloat(p.t.total_price)||0),0)*100)/100
+      const credito = Number(cli?.credito||0)
+      if (preparati.length && String(cli?.tipo_contratto||'')==='credito_scalare' && credito < totale) {
+        lottoRef.current = { preparati, errori, shipFrom, cliId: cli.id }
+        const mancante = Math.max(0, Math.ceil((totale-credito)*100)/100)
+        setCreditoKO({ mancante, costo: totale, credito })
+        setSpedendo(false)
+        return
+      }
+
+      await eseguiCreazioneLotto(preparati, errori, shipFrom, cli.id)
+      return
+    } catch { errori.push('errore imprevisto') }
+    setSel({})
+    setMsg('Errori: '+errori.join(' | '))
+    setSpedendo(false)
+    carica()
+  }
+
+  // Crea le spedizioni del lotto già preparato (tariffe scelte nel pre-passaggio). Chiamato subito
+  // se il credito basta, oppure dopo "Paga con la carta" (riusa lo stesso lotto, niente ricalcolo).
+  async function eseguiCreazioneLotto(preparati: any[], errori: string[], shipFrom: any, cliId: string) {
+    setSpedendo(true)
+    let okCount = 0
+    for (let i=0;i<preparati.length;i++){
+      const { id, o, num, arts, rp, packages, shipTo, t } = preparati[i]
+      setMsg('Spedizione '+num+'… ('+(i+1)+'/'+preparati.length+')')
+      try {
         const creaRes = await fetch('/api/spedizioni/crea', {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({
-            clienteId:cli.id, carrierCode:t.carrierCode, contractCode:t.contractCode, totalPrice:t.total_price,
+            clienteId:cliId, carrierCode:t.carrierCode, contractCode:t.contractCode, totalPrice:t.total_price,
             _corriere_id: t._corriere_id || t.corriere_id || null, _spediamopro_quotation: t._spediamopro_quotation || null,
             packages, colliDettaglio:[{lunghezza:String(rp.l),larghezza:String(rp.w),altezza:String(rp.h)}],
             shipFrom, shipTo, notes:'', insuranceValue:0, codValue: codDaOrdine(o),
@@ -297,8 +344,9 @@ export default function OrdiniPage() {
           body: JSON.stringify({ ordine_id:id, spedizione_id:creaRes.spedizioneId||null })
         }).catch(()=>{})
         okCount++
-      }
-    } catch { errori.push('errore imprevisto') }
+      } catch { errori.push(num+': errore imprevisto') }
+    }
+    lottoRef.current = null
     setSel({})
     setMsg('Spedite '+okCount+' spedizioni'+(errori.length?' — Errori: '+errori.join(' | '):''))
     setSpedendo(false)
@@ -352,6 +400,14 @@ export default function OrdiniPage() {
       </div>
 
       {msg && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#ea580c'}}>{msg}</div>}
+
+      {/* Carrello: credito insufficiente per l'intero lotto → pagamento unico con la carta */}
+      {creditoKO && (
+        <PagaConCarta
+          mancante={creditoKO.mancante} costo={creditoKO.costo} credito={creditoKO.credito}
+          onPagato={()=>{ setCreditoKO(null); const l=lottoRef.current; if(l) eseguiCreazioneLotto(l.preparati, l.errori, l.shipFrom, l.cliId) }}
+        />
+      )}
 
       <div style={{...card, marginBottom:'20px'}}>
         <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'16px'}}>▾ Filtri</div>
