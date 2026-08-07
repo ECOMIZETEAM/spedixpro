@@ -125,6 +125,21 @@ export async function POST(req: NextRequest) {
   // All'azienda no, perche' la fattura esce senza imposta (inversione contabile).
   const privato = corpo?.privato === true
 
+  // Il nome della ZONA e' interno: "ITALIA V" ha in coda la sigla del fornitore, "SCS" e
+  // "Zona 3" non dicono niente a nessuno. Qui diventano parole per chi compra.
+  const zonaPubblica = (z: string): string => {
+    const n = (z || '').toUpperCase()
+    if (/ISOLE?\s*MINORI/.test(n)) return 'Isole minori'
+    if (/DISAGIAT|PERIFERIC|ZONA\s*3/.test(n)) return 'Località disagiata'
+    if (/LIVIGNO|CAMPIONE/.test(n)) return 'Livigno e Campione'
+    if (/^SCS$/.test(n)) return 'Sicilia, Calabria o Sardegna'
+    if (/SICILIA/.test(n)) return 'Sicilia'
+    if (/SARDEGNA/.test(n)) return 'Sardegna'
+    if (/CALABRIA/.test(n)) return 'Calabria'
+    if (/ITALIA/.test(n)) return 'Italia'
+    return z   // all'estero e' gia' il nome del paese
+  }
+
   const offerte = (esito.risultati || []).map((r: any) => {
     const netto = Number(r.total_price)
     const marchio = marchioCorriere(r.corriere_nome || '')
@@ -141,11 +156,21 @@ export async function POST(req: NextRequest) {
       assicurazione: r.costo_assicurazione,
       pesoConsiderato: r.peso_fatturato,
       pesoReale: r.peso_reale,
-      zona: r.zona,
+      zona: zonaPubblica(r.zona),
       fascia: r.listino_fascia,
       limiti: r.limiti_collo || null,
     }
   })
 
-  return NextResponse.json({ offerte, privato, iva: IVA }, { headers: H })
+  // UN'OFFERTA PER MARCHIO, la piu' conveniente.
+  // Il motore restituisce un risultato per CONTRATTO, e di Poste ne abbiamo cinque: in vetrina
+  // uscivano tre righe "Poste" a prezzi diversi che il cliente non puo' distinguere, perche' i
+  // nomi dei contratti non si pubblicano. Delle nostre, gli diamo la migliore.
+  const perMarchio = new Map<string, any>()
+  for (const o of offerte.sort((a: any, b: any) => Number(a.prezzo) - Number(b.prezzo))) {
+    if (!perMarchio.has(o.corriere)) perMarchio.set(o.corriere, o)
+  }
+  const scelte = [...perMarchio.values()]
+
+  return NextResponse.json({ offerte: scelte, privato, iva: IVA }, { headers: H })
 }
