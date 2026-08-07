@@ -5,8 +5,12 @@ import { fetchAll } from '@/lib/fetch-all'
 export const dynamic = 'force-dynamic'
 
 // Riconosce la piattaforma di provenienza dell'ordine importato dalla riga originale (raw).
-export function piattaformaDa(raw: any): 'amazon' | 'shopify' | 'altro' {
+export function piattaformaDa(raw: any): 'amazon' | 'shopify' | 'temu' | 'altro' {
   if (!raw || typeof raw !== 'object') return 'altro'
+  // Temu PRIMA: il suo export ha colonne inequivocabili (Sconto di Temu, la email "virtuale" di
+  // relay, l'ID articolo dell'ordine). Va riconosciuto, se no gli ordini Temu finiscono in "altro"
+  // e non escono quando si scarica il tracking per piattaforma.
+  if ('sconto_di_temu' in raw || 'email_virtuale' in raw || 'id_articolo_dellordine' in raw) return 'temu'
   if ('orderitemid' in raw || 'order_item_id' in raw || 'amazonorderid' in raw) return 'amazon'
   if ('lineitem_name' in raw || 'financial_status' in raw || 'shipping_name' in raw || 'shipping_zip' in raw) return 'shopify'
   return 'altro'

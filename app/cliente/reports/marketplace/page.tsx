@@ -8,6 +8,7 @@ type Gruppo = { piattaforma: string; data: string; n: number }
 const PIATT: Record<string, { label: string; emoji: string; nota: string }> = {
   amazon: { label: 'Amazon', emoji: '📦', nota: 'Scarica il file e caricalo su Amazon (Seller Central → Ordini → Carica file conferma spedizione) per marcare gli ordini come spediti con tracking.' },
   shopify: { label: 'Shopify', emoji: '🛍️', nota: 'CSV con numero ordine e tracking, utile come riferimento per l\'evasione.' },
+  temu: { label: 'Temu', emoji: '🧡', nota: 'CSV con ID ordine e tracking, da usare per confermare la spedizione degli ordini Temu.' },
   altro: { label: 'Altri file', emoji: '📄', nota: 'CSV ordine + tracking.' },
 }
 
@@ -37,7 +38,7 @@ export default function ReportMarketplacePage() {
     window.location.href = '/api/cliente/reports/marketplace/download?' + q.toString()
   }
 
-  const piattaforme = ['amazon', 'shopify'].filter(p => (totali[p] || 0) > 0 || gruppi.some(g => g.piattaforma === p))
+  const piattaforme = ['amazon', 'shopify', 'temu'].filter(p => (totali[p] || 0) > 0 || gruppi.some(g => g.piattaforma === p))
   const hasDati = gruppi.length > 0
 
   return (
@@ -56,7 +57,7 @@ export default function ReportMarketplacePage() {
           Nessun ordine importato da file e spedito, per ora. Quando importi un file (Amazon/Shopify) e spedisci gli ordini, qui trovi i report con i tracking da scaricare.
         </div>
       ) : (
-        (piattaforme.length ? piattaforme : ['amazon', 'shopify']).map(piatt => {
+        (piattaforme.length ? piattaforme : ['amazon', 'shopify', 'temu']).map(piatt => {
           const gs = gruppi.filter(g => g.piattaforma === piatt)
           if (!gs.length) return null
           const meta = PIATT[piatt] || PIATT.altro

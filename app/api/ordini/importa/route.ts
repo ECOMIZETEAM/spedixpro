@@ -26,37 +26,42 @@ function normHeader(s: string) {
 // (Shopify: "Shipping Address1" -> "shipping_address1") e i trattini VENGONO RIMOSSI
 // (Amazon: "ship-postal-code" -> "shippostalcode"). Perciò per Amazon servono le
 // forme CONCATENATE (senza separatore), che aggiungo qui accanto a quelle Shopify.
+// TEMU: l'export ordini e' tutto in italiano, con header lunghi. Normalizzati (spazi->_, accenti
+// tolti, apostrofi e parentesi rimossi come ogni altro non-parola): "ID Ordine"->id_ordine,
+// "città di spedizione"->citta_di_spedizione, "nome dell'articolo"->nome_dellarticolo,
+// "codice postale di spedizione (…)"->codice_postale_di_spedizione_... (parentesi via). Aggiunti
+// qui accanto a Shopify/Amazon/eBay: cosi' i tre marketplace + Temu passano dallo stesso import.
 const ALIAS: Record<string, string[]> = {
-  destinatario:       ['destinatario', 'shipping_name', 'ship_to_name', 'recipient_name', 'recipientname', 'nome_destinatario', 'buyer_name', 'buyername', 'nome_e_cognome'],
-  indirizzo:          ['indirizzo', 'shipping_address1', 'ship_to_address_1', 'shipaddress1', 'address1', 'indirizzo_spedizione', 'via'],
-  indirizzo2:         ['indirizzo2', 'shipping_address2', 'shipaddress2', 'address2'],
-  cap:                ['cap', 'shipping_zip', 'ship_to_zip', 'shippostalcode', 'zip', 'postal_code', 'cap_destinatario'],
-  localita:           ['localita', 'shipping_city', 'ship_to_city', 'shipcity', 'city', 'citta', 'comune'],
-  provincia:          ['provincia', 'shipping_province', 'ship_to_state', 'shipstate', 'state', 'province', 'shipping_province_name'],
-  country:            ['country', 'shipping_country', 'ship_to_country', 'shipcountry', 'paese', 'nazione'],
-  telefono:           ['telefono', 'shipping_phone', 'phone', 'shipphonenumber', 'buyer_phone', 'buyerphonenumber', 'telefono_destinatario', 'cellulare'],
-  email_destinatario: ['email_destinatario', 'email', 'buyer_email', 'buyeremail', 'ship_to_email'],
+  destinatario:       ['destinatario', 'shipping_name', 'ship_to_name', 'recipient_name', 'recipientname', 'nome_destinatario', 'buyer_name', 'buyername', 'nome_e_cognome', 'nome_completo_del_destinatario'],
+  indirizzo:          ['indirizzo', 'shipping_address1', 'ship_to_address_1', 'shipaddress1', 'address1', 'indirizzo_spedizione', 'via', 'indirizzo_di_spedizione_1'],
+  indirizzo2:         ['indirizzo2', 'shipping_address2', 'shipaddress2', 'address2', 'indirizzo_di_spedizione_2'],
+  cap:                ['cap', 'shipping_zip', 'ship_to_zip', 'shippostalcode', 'zip', 'postal_code', 'cap_destinatario', 'codice_postale_di_spedizione_la_spedizione_deve_essere_effettuata_al_seguente_cap', 'codice_postale_di_spedizione'],
+  localita:           ['localita', 'shipping_city', 'ship_to_city', 'shipcity', 'city', 'citta', 'comune', 'citta_di_spedizione'],
+  provincia:          ['provincia', 'shipping_province', 'ship_to_state', 'shipstate', 'state', 'province', 'shipping_province_name', 'stato_di_spedizione'],
+  country:            ['country', 'shipping_country', 'ship_to_country', 'shipcountry', 'paese', 'nazione', 'paese_di_spedizione'],
+  telefono:           ['telefono', 'shipping_phone', 'phone', 'shipphonenumber', 'buyer_phone', 'buyerphonenumber', 'telefono_destinatario', 'cellulare', 'numero_di_telefono_del_destinatario'],
+  email_destinatario: ['email_destinatario', 'email', 'buyer_email', 'buyeremail', 'ship_to_email', 'email_virtuale'],
   peso:               ['peso', 'weight', 'peso_kg'],
   colli:              ['colli', 'packages', 'pacchi'],
   contrassegno:       ['contrassegno', 'cod', 'cash_on_delivery'],
-  contenuto:          ['contenuto', 'sku', 'lineitem_sku', 'seller_sku', 'sellersku', 'lineitem_name', 'item_name', 'product_name', 'productname', 'descrizione', 'articolo'],
+  contenuto:          ['contenuto', 'sku', 'lineitem_sku', 'seller_sku', 'sellersku', 'lineitem_name', 'item_name', 'product_name', 'productname', 'descrizione', 'articolo', 'nome_dellarticolo', 'codice_sku'],
   note:               ['note', 'notes', 'order_note', 'note_ordine'],
   rif_mittente:       ['rif_mittente', 'riferimento_mittente'],
   rif_destinatario:   ['rif_destinatario', 'riferimento_destinatario'],
-  order_id:           ['order_id', 'orderid', 'name', 'order_number', 'order', 'numero_ordine', 'ordine'],
-  totale_ordine:      ['totale_ordine', 'total', 'order_total', 'importo', 'totale', 'item_price', 'itemprice'],
+  order_id:           ['order_id', 'orderid', 'name', 'order_number', 'order', 'numero_ordine', 'ordine', 'id_ordine'],
+  totale_ordine:      ['totale_ordine', 'total', 'order_total', 'importo', 'totale', 'item_price', 'itemprice', 'totale_prezzo_al_dettaglio_dopo_lo_sconto_imposte_escluse', 'prezzo_base_della_merce'],
 }
 // Colonne ausiliarie (non salvate ma usate per logica: line item, contrassegno, ecc.)
 const AUX: Record<string, string[]> = {
-  sku:           ['sku', 'lineitem_sku', 'lineitemsku', 'seller_sku', 'sellersku'],   // SOLO lo SKU (Amazon 'sku' / Shopify 'Lineitem sku'), per il match col catalogo pacchi
-  lineitem_name: ['sku', 'lineitem_sku', 'seller_sku', 'sellersku', 'lineitem_name', 'item_name', 'product_name', 'productname'],
-  lineitem_qty:  ['lineitem_quantity', 'quantity', 'qty', 'quantita', 'quantity_purchased', 'quantitypurchased'],
-  // ID riga ordine Amazon ("order-item-id"): serve per confermare la spedizione di OGNI articolo di un
-  // ordine multi-SKU (senza, Amazon evade solo il primo). Presente solo negli export Amazon.
-  lineitem_orderitemid: ['orderitemid', 'order_item_id'],
+  sku:           ['sku', 'lineitem_sku', 'lineitemsku', 'seller_sku', 'sellersku', 'codice_sku'],   // SOLO lo SKU (Amazon 'sku' / Shopify 'Lineitem sku' / Temu 'Codice SKU'), per il match col catalogo pacchi
+  lineitem_name: ['sku', 'lineitem_sku', 'seller_sku', 'sellersku', 'lineitem_name', 'item_name', 'product_name', 'productname', 'codice_sku', 'nome_dellarticolo'],
+  lineitem_qty:  ['lineitem_quantity', 'quantity', 'qty', 'quantita', 'quantity_purchased', 'quantitypurchased', 'quantita_acquistata', 'quantita_da_spedire'],
+  // ID riga ordine (Amazon "order-item-id", Temu "ID articolo dell'ordine"): serve per confermare la
+  // spedizione di OGNI articolo di un ordine multi-SKU (senza, si evade solo il primo).
+  lineitem_orderitemid: ['orderitemid', 'order_item_id', 'id_articolo_dellordine'],
   // Nome prodotto e variante/colore per il riepilogo ordine (separati dallo SKU)
-  lineitem_prodotto: ['lineitem_name', 'item_name', 'product_name', 'productname', 'title', 'product_title', 'descrizione'],
-  lineitem_variante: ['lineitem_variant', 'lineitem_variant_title', 'variant', 'variante', 'variant_title', 'colore', 'color'],
+  lineitem_prodotto: ['lineitem_name', 'item_name', 'product_name', 'productname', 'title', 'product_title', 'descrizione', 'nome_dellarticolo', 'nome_articolo_in_base_allordine_utente'],
+  lineitem_variante: ['lineitem_variant', 'lineitem_variant_title', 'variant', 'variante', 'variant_title', 'colore', 'color', 'variazione'],
   payment:       ['payment_method', 'metodo_pagamento'],
   shippingm:     ['shipping_method', 'metodo_spedizione', 'ship_service_level', 'shipservicelevel'],
   financial:     ['financial_status', 'payment_status', 'stato_pagamento'],
