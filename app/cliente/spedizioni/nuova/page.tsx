@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
 import SelettoreArticoli, { type RigaArticolo, type ArticoloCat } from '@/app/components/SelettoreArticoli'
+import PagaConCarta from '@/app/cliente/PagaConCarta'
 
 // Sigla di ripiego quando il contratto non ha un marchio riconosciuto. Attenzione: qui arriva
 // il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
@@ -91,6 +92,8 @@ export default function NuovaSpedizioneCliente() {
   const [errore, setErrore] = useState('')
   const [vista, setVista] = useState<'dati'|'contratto'>('dati')
   const [successo, setSuccesso] = useState<{numero:string,id:string,ritiro?:{ok?:boolean,pickupId?:string,errore?:string}}|null>(null)
+  // Credito insufficiente: tiene l'esatto mancante per offrire "Paga con la carta" e riprovare.
+  const [creditoKO, setCreditoKO] = useState<{mancante:number,costo:number,credito:number}|null>(null)
   const [daOrdine, setDaOrdine] = useState('')
   const [corrierePref, setCorrierePref] = useState('')
 
@@ -237,7 +240,7 @@ export default function NuovaSpedizioneCliente() {
 
   async function creaSpedizione() {
     if (!selected) return
-    setCreating(true)
+    setCreating(true); setCreditoKO(null); setErrore('')
     const res = await fetch('/api/spedizioni/crea', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
@@ -258,6 +261,13 @@ export default function NuovaSpedizioneCliente() {
       })
     })
     const data = await res.json()
+    // Credito insufficiente: invece del solo messaggio, mostro il riquadro "Paga con la carta"
+    // (addebita l'esatto mancante e riprova da solo). Vedi PagaConCarta.
+    if (res.status === 402 && data?.credito_insufficiente) {
+      setCreating(false)
+      setCreditoKO({ mancante: Number(data.mancante) || 0, costo: Number(data.costo) || 0, credito: Number(data.credito) || 0 })
+      return
+    }
     if (data.error) { setCreating(false); setErrore(data.error); return }
     // SCARICO DAL MAGAZZINO. Si fa QUI e non dentro la creazione: quella ha quattro rami, uno per
     // corriere, e ripetere la stessa cosa in quattro punti e' il modo in cui uno resta indietro.
@@ -344,6 +354,7 @@ export default function NuovaSpedizioneCliente() {
       </div>
 
       {errore && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>⚠️ {errore}</div>}
+      {creditoKO && <PagaConCarta mancante={creditoKO.mancante} costo={creditoKO.costo} credito={creditoKO.credito} onPagato={() => { setCreditoKO(null); creaSpedizione() }} />}
       {successo && <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'12px 16px',marginBottom:'16px',fontSize:'14px',color:'#166534',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px'}}>
         <span>{successo.numero
           ? <>✓ Spedizione <strong>{successo.numero}</strong> generata con successo</>

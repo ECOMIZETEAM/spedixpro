@@ -305,8 +305,12 @@ export async function POST(req: NextRequest) {
       tipoC = (m as any)?.tipo_contratto || ''; creditoC = Number((m as any)?.credito || 0); esente = !(m as any)?.parent_master_id
     }
     if (!esente && tipoC === 'credito_scalare' && costoPreventivo > 0 && creditoC < costoPreventivo) {
+      // Campi strutturati (oltre al messaggio) così il portale cliente può offrire "Paga con la
+      // carta" per l'esatto mancante — arrotondato per eccesso al centesimo, mai scoperto.
+      const mancante = Math.max(0, Math.ceil((costoPreventivo - creditoC) * 100) / 100)
       return NextResponse.json({
         error: `Credito insufficiente: disponibili € ${creditoC.toFixed(2)}, spedizione € ${costoPreventivo.toFixed(2)}. Ricarica il credito per spedire.`,
+        credito_insufficiente: true, mancante, costo: costoPreventivo, credito: creditoC,
       }, { status: 402 })
     }
   }
@@ -335,8 +339,11 @@ export async function POST(req: NextRequest) {
     } catch (e: any) {
       if (String(e?.message || '').includes('CREDITO_INSUFFICIENTE')) {
         const { data: cAgg } = await adminCrea.from('clienti').select('credito').eq('id', clienteId).maybeSingle()
+        const creditoAgg = Number((cAgg as any)?.credito || 0)
+        const mancante = Math.max(0, Math.ceil((prezzoServerCliente - creditoAgg) * 100) / 100)
         return NextResponse.json({
-          error: `Credito insufficiente: disponibili € ${Number((cAgg as any)?.credito || 0).toFixed(2)}, spedizione € ${prezzoServerCliente.toFixed(2)}. Ricarica il credito per spedire.`,
+          error: `Credito insufficiente: disponibili € ${creditoAgg.toFixed(2)}, spedizione € ${prezzoServerCliente.toFixed(2)}. Ricarica il credito per spedire.`,
+          credito_insufficiente: true, mancante, costo: prezzoServerCliente, credito: creditoAgg,
         }, { status: 402 })
       }
       console.error('[CREA][PRENOTAZIONE] fallita, si prosegue con l addebito a fine rotta:', e?.message)

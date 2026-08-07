@@ -69,9 +69,17 @@ export async function POST(req: NextRequest) {
     // Riconosciuta dal metadato scopo='ricarica'. Va PRIMA di tutto: ha anche cliente_id e
     // finirebbe nel ramo dei pacchetti API. Il credito si muove QUI, a pagamento confermato —
     // mai aprendo la cassa — e SOLO via la RPC atomica (mai UPDATE diretto su `credito`).
-    if (evento.type === 'checkout.session.completed' && oggetto?.metadata?.scopo === 'ricarica') {
+    // Due strade portano qui: la CASSA (checkout.session.completed, ricarica normale) e l'ADDEBITO
+    // off_session sulla carta salvata (payment_intent.succeeded, "Paga con la carta" in creazione
+    // spedizione). Entrambe hanno scopo='ricarica' e la STESSA chiave (l'id del PaymentIntent): per
+    // la cassa e' oggetto.payment_intent, per il PI e' oggetto.id — coincidono. L'addebito off_session
+    // e' gia' accreditato in linea dalla sua rotta; questo ramo e' la rete di sicurezza, idempotente.
+    const eRicarica = oggetto?.metadata?.scopo === 'ricarica' &&
+      (evento.type === 'checkout.session.completed' || evento.type === 'payment_intent.succeeded')
+    if (eRicarica) {
       const clid = String(oggetto?.metadata?.cliente_id || '')
-      const importoPagato = Number(oggetto?.amount_total || 0) / 100   // quello che ha pagato davvero
+      // amount_total (cassa) oppure amount_received (PaymentIntent): quello che ha pagato davvero.
+      const importoPagato = Number(oggetto?.amount_total ?? oggetto?.amount_received ?? oggetto?.amount ?? 0) / 100
       const rif = 'ricarica:' + String(oggetto?.payment_intent || oggetto?.id)   // chiave d'idempotenza
       if (!clid || !(importoPagato > 0)) {
         console.error('[STRIPE][RICARICA] dati mancanti', oggetto?.id)
