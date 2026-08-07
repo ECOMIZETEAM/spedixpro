@@ -64,6 +64,38 @@ export async function POST(req: NextRequest) {
 
   try {
     const oggetto: any = evento.data.object
+
+    // ── RICARICA CREDITO DEL CLIENTE ──────────────────────────────────────────
+    // Riconosciuta dal metadato scopo='ricarica'. Va PRIMA di tutto: ha anche cliente_id e
+    // finirebbe nel ramo dei pacchetti API. Il credito si muove QUI, a pagamento confermato —
+    // mai aprendo la cassa — e SOLO via la RPC atomica (mai UPDATE diretto su `credito`).
+    if (evento.type === 'checkout.session.completed' && oggetto?.metadata?.scopo === 'ricarica') {
+      const clid = String(oggetto?.metadata?.cliente_id || '')
+      const importoPagato = Number(oggetto?.amount_total || 0) / 100   // quello che ha pagato davvero
+      const rif = 'ricarica:' + String(oggetto?.payment_intent || oggetto?.id)   // chiave d'idempotenza
+      if (!clid || !(importoPagato > 0)) {
+        console.error('[STRIPE][RICARICA] dati mancanti', oggetto?.id)
+        return NextResponse.json({ ricevuto: true })
+      }
+      // Se questa ricarica è già stata accreditata (ri-consegna del webhook), non ripeterla.
+      const { data: gia } = await admin.from('movimenti').select('id').eq('tipo', 'ricarica').eq('riferimento', rif).maybeSingle()
+      if (gia) return NextResponse.json({ ricevuto: true })
+      // Master del cliente AUTOREVOLE dal database (non dal metadato) + salva il customer per gli
+      // addebiti futuri fuori sessione.
+      const { data: cliRic } = await admin.from('clienti').select('master_id, stripe_customer_id').eq('id', clid).maybeSingle()
+      if (!cliRic) { console.error('[STRIPE][RICARICA] cliente non trovato', clid); return NextResponse.json({ ricevuto: true }) }
+      const cust = typeof oggetto?.customer === 'string' ? oggetto.customer : oggetto?.customer?.id
+      if (cust && !cliRic.stripe_customer_id) await admin.from('clienti').update({ stripe_customer_id: cust }).eq('id', clid)
+      const { error: eRic } = await admin.rpc('registra_movimento_cliente', {
+        p_master_id: cliRic.master_id, p_cliente_id: clid, p_tipo: 'ricarica',
+        p_descrizione: 'Ricarica credito con carta', p_importo: importoPagato,
+        p_riferimento: rif, p_spedizione_id: null, p_created_by: null, p_richiedi_capienza: false,
+      })
+      if (eRic) { console.error('[STRIPE][RICARICA] accredito fallito', clid, eRic.message); return NextResponse.json({ error: 'errore' }, { status: 500 }) }
+      console.log('[STRIPE][RICARICA] accreditati', importoPagato, '€ a', clid)
+      return NextResponse.json({ ricevuto: true })
+    }
+
     let clienteId = clienteDaEvento(oggetto)
     if (!clienteId && oggetto?.customer) {
       const { data: c } = await admin.from('clienti').select('id').eq('api_stripe_customer_id', String(oggetto.customer)).maybeSingle()
