@@ -51,10 +51,18 @@ export function mapStatoSpedisci(statusStr: string): string | null {
   if (!s) return null
   if (s.includes('consegnat') || s.includes('delivered')) return 'consegnata'  // NB: 'delivered' (non 'deliver') per non catturare "out for delivery"
   if (s.includes('giacenz') || s.includes('stock') || s.includes('deposit') || s.includes('giacenza')) return 'in_giacenza'
-  if (s.includes('reso') || s.includes('return to sender') || s.includes('al mittente') || s.includes('rientro')) return 'reso_mittente'
+  // RESO: match PRECISO. Il vecchio codice usava s.includes('reso') e s.includes('al mittente'),
+  // e questi due catturavano frasi che resi NON sono:
+  //   - 'al mittente' e' dentro 'dal mittente': "La spedizione e' stata creata dal mittente" ("d"
+  //     + "al mittente") marcava reso OGNI spedizione GLS appena creata. Guasto vero, 06/08/2026.
+  //   - 'reso' e' dentro 'preso': "preso in carico" sarebbe caduto qui invece che in "spedita".
+  // Ora: 'reso' come PAROLA INTERA, piu' le frasi di rientro esplicite. "al mittente" da solo non
+  // basta: dev'essere preceduto da reso/ritorno/rientro/restituzione.
+  if (/\breso\b/.test(s) || s.includes('return to sender') || /\brientr/.test(s)
+      || /restitu/.test(s) || /(ritorno|ritornat\w*|respint\w*|resa|rispedit\w*) al mittente/.test(s)) return 'reso_mittente'
   if (s.includes('in consegna') || s.includes('out for delivery') || s.includes('distribuzione') || s.includes('in distribuzione')) return 'in_consegna'
   if (s.includes('transit') || s.includes('transito') || s.includes('arrivat') || s.includes('hub') || s.includes('partenz') || s.includes('viaggio') || s.includes('smistament')) return 'in_transito'
-  if (s.includes('presa in carico') || s.includes('spedit') || s.includes('accettat') || s.includes('ritirat') || s.includes('partita') || s.includes('picked') || s.includes('lavorazione')) return 'spedita'
+  if (s.includes('presa in carico') || s.includes('preso in caric') || s.includes('spedit') || s.includes('accettat') || s.includes('ritirat') || s.includes('partita') || s.includes('picked') || s.includes('lavorazione')) return 'spedita'
   if (s.includes('mancata') || s.includes('fallit') || s.includes('exception') || s.includes('rifiut') || s.includes('problema') || s.includes('indirizzo errato') || s.includes('anomal')) return 'non_consegnato'
   return null
 }
