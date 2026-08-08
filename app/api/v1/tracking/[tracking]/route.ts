@@ -13,8 +13,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
   const _b = rispostaBlocco(ctx); if (_b) return _b
   const { tracking } = await params
-  const trk = decodeURIComponent(tracking || '').trim()
-  if (!trk) return NextResponse.json({ error: 'Numero di tracking mancante' }, { status: 400 })
+  // Un numero di tracking è alfanumerico (lettere, cifre, - _ .). Ripulisco il resto PRIMA di
+  // costruire il filtro PostgREST qui sotto: una virgola o una parentesi nel valore spezzerebbe
+  // il .or() (500, o match inatteso di righe proprie). L'isolamento per cliente regge comunque
+  // (cliente_id in AND), ma il filtro non dev'essere malformabile da chi chiama.
+  const trk = decodeURIComponent(tracking || '').trim().replace(/[^A-Za-z0-9._-]/g, '')
+  if (!trk) return NextResponse.json({ error: 'Numero di tracking mancante o non valido' }, { status: 400 })
 
   const admin = createAdminSupabase()
   // Solo spedizioni del cliente della API key (per tracking_number oppure numero LDV)

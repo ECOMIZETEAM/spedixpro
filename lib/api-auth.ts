@@ -1,5 +1,10 @@
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
+// Freno di frequenza per chiave: generoso per l'uso vero (anche import in blocco), ma ferma il
+// martellamento di una chiave — anche trapelata a un terzo — sugli endpoint, tracking in testa
+// (che chiama il corriere a valle a ogni colpo). Finestra di 60 secondi.
+const LIMITE_RATE_GLOBALE = 600
+
 export type ApiContext = {
   clienteId: string
   masterId: string
@@ -8,6 +13,9 @@ export type ApiContext = {
   // Perche' le API sono ferme, se lo sono. Vive qui e non in ogni rotta: il controllo si fa una
   // volta sola, dove la chiave viene gia' letta, e nessuna rotta nuova puo' dimenticarselo.
   blocco?: { motivo: 'pacchetto_esaurito' | 'non_pagato'; usate: number; limite: number; piano: string } | null
+  // Troppe richieste in questa finestra: stesso principio del blocco, una guardia sola per tutte
+  // le porte.
+  rateLimit?: { conteggio: number; limite: number } | null
 }
 
 // Autentica una richiesta API pubblica tramite header Authorization: Bearer <api_key>.
@@ -67,12 +75,34 @@ export async function autenticaApiKey(req: Request): Promise<ApiContext | null> 
     console.error('[API][PIANO] controllo non riuscito:', e?.message)
   }
 
-  return { clienteId: data.cliente_id, masterId: data.master_id, corriereId: data.corriere_id, keyId: data.id, blocco }
+  // FRENO DI FREQUENZA per chiave, contato in modo atomico lato DB (finestra di 60s). Sta qui,
+  // dove passano tutte le rotte, così nessuna rotta nuova può dimenticarselo. Un errore nostro nel
+  // conteggio NON deve bloccare chi ha pagato: in caso di guasto si lascia passare.
+  let rateLimit: ApiContext['rateLimit'] = null
+  try {
+    const { data: rl } = await admin.rpc('fn_api_rate_limit', {
+      p_key_id: data.id, p_bucket: 'global', p_limite: LIMITE_RATE_GLOBALE, p_finestra_sec: 60,
+    })
+    const r: any = rl || {}
+    if (r.permesso === false) rateLimit = { conteggio: Number(r.conteggio || 0), limite: Number(r.limite || 0) }
+  } catch (e: any) {
+    console.error('[API][RATE] controllo non riuscito:', e?.message)
+  }
+
+  return { clienteId: data.cliente_id, masterId: data.master_id, corriereId: data.corriere_id, keyId: data.id, blocco, rateLimit }
 }
 
 // La risposta da dare quando le API sono ferme. Dice cosa e' successo e cosa fare: un 402 muto
 // manderebbe l'integratore a cercare un errore nel suo codice che non c'e'.
 export function rispostaBlocco(ctx: ApiContext | null): Response | null {
+  // Troppe richieste: viene prima di tutto. 429 con Retry-After dice all'integratore di rallentare,
+  // senza confondere con un problema di credito (che sarebbe 402).
+  if (ctx?.rateLimit) {
+    return new Response(JSON.stringify({
+      error: 'Troppe richieste in poco tempo: rallenta e riprova tra qualche secondo.',
+      codice: 'rate_limit', limite: ctx.rateLimit.limite,
+    }), { status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '10' } })
+  }
   if (!ctx?.blocco) return null
   const b = ctx.blocco
   const messaggio = b.motivo === 'pacchetto_esaurito'

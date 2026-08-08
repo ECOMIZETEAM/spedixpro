@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
       let code: string | null = pk.code || null
       if (!code && pk.id) code = await spediamoproWaitPickupCode(cred.authcode, pk.id)
       const { data: nuovo, error } = await salvaRitiro(code || String(pk.id))
-      if (error) return NextResponse.json({ error: `Ritiro creato (${pk.code}) ma errore DB: ${error.message}` }, { status: 500 })
+      if (error) { console.error('[API][PICKUP] salvataggio ritiro fallito:', error.message); return NextResponse.json({ error: `Ritiro creato presso il corriere (${pk.code}) ma non registrato a sistema: contatta l'assistenza indicando questo codice.` }, { status: 500 }) }
       return NextResponse.json({ id: nuovo.id, pickupId: code || pk.id, stato: 'richiesto', date: body.date })
     } catch (e: any) {
       return NextResponse.json({ error: erroreRitiroPulito(e) }, { status: 400 })
@@ -167,13 +167,15 @@ export async function POST(req: NextRequest) {
   clearTimeout(toId)
   const text = await res.text()
   let r: any; try { r = JSON.parse(text) } catch { r = { error: text.substring(0, 300) } }
-  if (!res.ok || r.error) return NextResponse.json({ error: r?.error || `Errore ${res.status}` }, { status: 400 })
+  // L'errore del fornitore a valle va SEMPRE ripulito (nomi tecnici/dominio) prima di uscire — come
+  // fa il ramo SpediamoPro qui sopra. Senza, il testo grezzo del provider arriverebbe al partner.
+  if (!res.ok || r.error) return NextResponse.json({ error: r?.error ? erroreRitiroPulito(r.error) : `Errore ${res.status}` }, { status: 400 })
 
   // Codice ritiro del corriere: spedisci può restituirlo come pickupId (CP…) o, in alcune versioni,
   // come id/uuid/code/reference. Prendo il primo disponibile così salviamo sempre il riferimento giusto.
   const codiceCorriere = r.pickupId ?? r.pickup_id ?? r.id ?? r.uuid ?? r.code ?? r.reference ?? null
   const { data: nuovo, error } = await salvaRitiro(codiceCorriere)
-  if (error) return NextResponse.json({ error: `Ritiro creato (${codiceCorriere}) ma errore DB: ${error.message}` }, { status: 500 })
+  if (error) { console.error('[API][PICKUP] salvataggio ritiro fallito:', error.message); return NextResponse.json({ error: `Ritiro creato presso il corriere (${codiceCorriere}) ma non registrato a sistema: contatta l'assistenza indicando questo codice.` }, { status: 500 }) }
   // NB: `id` = riferimento interno MoovExpress (UUID). `codice_ritiro`/`pickupId` = codice del CORRIERE (es. CP…).
   return NextResponse.json({ id: nuovo.id, codice_ritiro: codiceCorriere, pickupId: codiceCorriere, stato: 'richiesto', date: body.date })
 }
