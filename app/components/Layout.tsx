@@ -3,6 +3,9 @@ import { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import FlashBanner from './FlashBanner'
 import Moovy from './Moovy'
+import MenuProfilo from './MenuProfilo'
+import CampanellaNotifiche from './CampanellaNotifiche'
+import SupportoButton from './SupportoButton'
 
 // perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
 // always: sempre visibile a chiunque abbia accesso al portale.
@@ -317,18 +320,10 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
             <button onClick={()=>{ if (isMobile) setDrawerOpen(true); else toggleSidebar() }} aria-label="Menu" title={isMobile?'Menu':(sidebarChiusa?'Apri il menu':'Chiudi il menu')} style={{background:'none',border:'none',fontSize:'23px',cursor:'pointer',color:'#1a1a1a',padding:'2px 6px',lineHeight:1}}>☰</button>
             {isMobile && <span style={{fontSize:'14px',fontWeight:800,color:'#1a1a1a'}}>{user?.brandNome || 'MoovExpress'}</span>}
           </div>
-          <div style={{display:'flex',alignItems:'center',gap:'12px'}}>
-            <div style={{position:'relative',cursor:'pointer'}}>
-              <span style={{fontSize:'18px'}}>🔔</span>
-              <span style={{position:'absolute',top:'-2px',right:'-4px',width:'8px',height:'8px',background:'#f97316',borderRadius:'50%',border:'2px solid #fff'}}></span>
-            </div>
-            <div style={{display:'flex',alignItems:'center',gap:'6px',cursor:'pointer',padding:'4px 10px',borderRadius:'6px',border:'1px solid #e8e8e8'}}>
-              <div style={{width:'26px',height:'26px',background:'#f97316',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:'700',fontSize:'11px',color:'#fff'}}>
-                {user?.nome?.substring(0,2).toUpperCase() || 'DA'}
-              </div>
-              <span style={{fontSize:'13px',fontWeight:'500',color:'#333'}}>{user?.nome || 'Admin'}</span>
-              <span style={{fontSize:'10px',color:'#bbb'}}>▾</span>
-            </div>
+          <div style={{display:'flex',alignItems:'center',gap:isMobile?'6px':'10px'}}>
+            <SupportoButton compatto={isMobile} />
+            <CampanellaNotifiche />
+            <MenuProfilo nome={user?.nome} ruolo={user?.ruolo} />
           </div>
         </header>
 
