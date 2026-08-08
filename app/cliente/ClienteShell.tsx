@@ -8,7 +8,7 @@ import MenuProfilo from '../components/MenuProfilo'
 import CampanellaNotifiche from '../components/CampanellaNotifiche'
 import SupportoButton from '../components/SupportoButton'
 
-export default function ClienteShell({ cliente, children }: { cliente: { ragione_sociale?: string | null; credito?: number | null }; children: React.ReactNode }) {
+export default function ClienteShell({ cliente, children, brandLogo, brandNome }: { cliente: { ragione_sociale?: string | null; credito?: number | null }; children: React.ReactNode; brandLogo?: string | null; brandNome?: string | null }) {
   const path = usePathname() || ''
   const [isMobile, setIsMobile] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -44,7 +44,13 @@ export default function ClienteShell({ cliente, children }: { cliente: { ragione
 
       <aside style={asideStyle}>
         <a href="/cliente/dashboard" style={{ padding: '18px', borderBottom: '1px solid #2a2a2a', display: 'block', textDecoration: 'none', flexShrink: 0 }}>
-          <div style={{ fontSize: '16px', fontWeight: '800', color: '#fff' }}>Moov<span style={{ color: '#f97316' }}>Express</span></div>
+          {brandLogo ? (
+            <img src={brandLogo} alt={brandNome || 'Logo'} style={{ maxHeight: '34px', maxWidth: '150px', objectFit: 'contain', display: 'block' }} />
+          ) : brandNome ? (
+            <div style={{ fontSize: '16px', fontWeight: '800', color: '#fff' }}>{brandNome}</div>
+          ) : (
+            <div style={{ fontSize: '16px', fontWeight: '800', color: '#fff' }}>Moov<span style={{ color: '#f97316' }}>Express</span></div>
+          )}
           <div style={{ fontSize: '9px', color: '#fff', marginTop: '2px', textTransform: 'uppercase', letterSpacing: '1px' }}>Portale Cliente</div>
         </a>
         <div style={{ padding: '8px 0', borderBottom: '1px solid #2a2a2a', flexShrink: 0 }}>
@@ -97,7 +103,7 @@ export default function ClienteShell({ cliente, children }: { cliente: { ragione
         </main>
       </div>
       <Moovy />
-      <TutorialCliente />
+      <TutorialCliente brandNome={brandNome} />
     </div>
   )
 }

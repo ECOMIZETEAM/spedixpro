@@ -15,9 +15,11 @@ const STEPS: { icon: string; titolo: string; testo: string }[] = [
   { icon: '🎙️', titolo: 'Moovy, il tuo assistente', testo: 'In basso a destra c\'è Moovy: chiedigli a voce o per iscritto di tracciare una spedizione, controllare il credito e altro. Buone spedizioni!' },
 ]
 
-export default function TutorialCliente() {
+export default function TutorialCliente({ brandNome }: { brandNome?: string | null }) {
   const [aperto, setAperto] = useState(false)
   const [step, setStep] = useState(0)
+  // Benvenuto col marchio del master (white-label), non "MoovExpress" fisso.
+  const passi = brandNome ? STEPS.map((s, i) => i === 0 ? { ...s, titolo: `Benvenuto in ${brandNome}` } : s) : STEPS
 
   useEffect(() => {
     // Mostra al primo accesso: chiede al server se il tutorial è già stato visto.
