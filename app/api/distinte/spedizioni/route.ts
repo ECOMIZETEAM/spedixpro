@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { vedeLaRete } from '@/lib/perimetro'
+import { fetchAll } from '@/lib/fetch-all'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -25,17 +26,24 @@ export async function GET(req: NextRequest) {
     masterFilter = mieiDiscendenti.includes(masterSel) ? await sottoAlberoMasterIds(admin, masterSel) : ['00000000-0000-0000-0000-000000000000']
     db = admin
   }
-  let query = db.from('spedizioni')
-    .select('id,numero,mitt_nome,dest_nome,dest_citta,dest_cap,dest_provincia,peso_reale,peso_fatturato,colli,created_at,cliente_id,corriere_id,clienti(ragione_sociale)')
-    .in('master_id', masterFilter)
-    .is('distinta_id', null)
-    .order('created_at', { ascending: false })
-  if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
-  if (clienteId) query = query.eq('cliente_id', clienteId)
-  if (corriereId) query = query.eq('corriere_id', corriereId)
-  if (dal) query = query.gte('created_at', dal)
-  if (al) query = query.lte('created_at', al + 'T23:59:59')
-  const { data } = await query
+  // Filtro agente calcolato UNA volta (è async), poi riusato dentro build().
+  const filtroAgente = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
+  // fetchAll: senza, la lista dei candidati da mettere in distinta troncava a 1000 → in una giornata
+  // intensa l'operatore non vedeva (né poteva selezionare) le spedizioni oltre la millesima.
+  const build = () => {
+    let q = db.from('spedizioni')
+      .select('id,numero,mitt_nome,dest_nome,dest_citta,dest_cap,dest_provincia,peso_reale,peso_fatturato,colli,created_at,cliente_id,corriere_id,clienti(ragione_sociale)')
+      .in('master_id', masterFilter)
+      .is('distinta_id', null)
+      .order('created_at', { ascending: false })
+    if (filtroAgente) q = q.in('cliente_id', filtroAgente)
+    if (clienteId) q = q.eq('cliente_id', clienteId)
+    if (corriereId) q = q.eq('corriere_id', corriereId)
+    if (dal) q = q.gte('created_at', dal)
+    if (al) q = q.lte('created_at', al + 'T23:59:59')
+    return q
+  }
+  const data = await fetchAll(build)
   return NextResponse.json(data || [])
 }
 

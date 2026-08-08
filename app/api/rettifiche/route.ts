@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { registraMovimento } from '@/lib/movimenti'
 import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete, vedeLaRete } from '@/lib/ruoli'
+import { fetchAll } from '@/lib/fetch-all'
 
 // Confermare cento rettifiche vuol dire cento chiamate di credito in fila. Col limite di durata
 // breve la funzione veniva uccisa a meta' — ed e' proprio meta' lavoro fatto il caso peggiore.
@@ -18,15 +19,19 @@ export async function GET(req: NextRequest) {
   // procurarsi gli id da passare alla cancellazione.
   if (!vedeLaRete(utente)) return NextResponse.json([])
   const fileId = req.nextUrl.searchParams.get('fileId')
-  let query = supabase.from('rettifiche')
-    .select('*, clienti(ragione_sociale), masters:target_master_id(nome)')
-    .eq('master_id', utente?.master_id)
-    .eq('confermata', false)
-    .order('created_at', { ascending: false })
-  // Agente: solo le rettifiche dei suoi clienti.
-  if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
-  if (fileId) query = query.eq('file_id', fileId)
-  const { data } = await query
+  const filtroAgente = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
+  // fetchAll: senza, oltre 1000 rettifiche da confermare non comparivano (e non erano confermabili).
+  const build = () => {
+    let q = supabase.from('rettifiche')
+      .select('*, clienti(ragione_sociale), masters:target_master_id(nome)')
+      .eq('master_id', utente?.master_id)
+      .eq('confermata', false)
+      .order('created_at', { ascending: false })
+    if (filtroAgente) q = q.in('cliente_id', filtroAgente)
+    if (fileId) q = q.eq('file_id', fileId)
+    return q
+  }
+  const data = await fetchAll(build)
 
   // IL NOME DEL DESTINATARIO NON SI PUO' LEGGERE CON LA SESSIONE DI CHI GUARDA.
   //

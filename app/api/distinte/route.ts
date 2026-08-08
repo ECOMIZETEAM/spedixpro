@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { fetchAll } from '@/lib/fetch-all'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -39,16 +40,19 @@ export async function GET(req: NextRequest) {
 
   // Cross-master richiede admin (RLS). Agente resta confinato al proprio master + suoi clienti.
   const db: any = (isMasterRete && masterIds.length > 1) ? admin : supabase
-  let query = db.from('distinte')
-    .select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
-    .in('master_id', masterIds.length ? masterIds : ['00000000-0000-0000-0000-000000000000'])
-    .order('created_at', { ascending: false })
-  // Agente: solo le distinte dei suoi clienti.
-  if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
-  if (dal) query = query.gte('created_at', dal)
-  if (al) query = query.lte('created_at', al + 'T23:59:59')
-  const { data } = await query
-  const distinte = data || []
+  const filtroAgente = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
+  // fetchAll: senza, oltre 1000 distinte non comparivano più nell'elenco.
+  const build = () => {
+    let q = db.from('distinte')
+      .select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
+      .in('master_id', masterIds.length ? masterIds : ['00000000-0000-0000-0000-000000000000'])
+      .order('created_at', { ascending: false })
+    if (filtroAgente) q = q.in('cliente_id', filtroAgente)
+    if (dal) q = q.gte('created_at', dal)
+    if (al) q = q.lte('created_at', al + 'T23:59:59')
+    return q
+  }
+  const distinte = await fetchAll(build)
 
   // Etichetta "Cliente" leggibile anche quando cliente_id è NULL:
   //  - distinta di un SOTTO-MASTER (master_rete_id) -> nome del sotto-master;

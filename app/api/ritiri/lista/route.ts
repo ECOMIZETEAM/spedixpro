@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { fetchAll } from '@/lib/fetch-all'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -13,19 +14,17 @@ export async function GET(req: NextRequest) {
   if ((utente.ruolo || '').toLowerCase() === 'agente') {
     const { isAgente, clientiAgente, idClientiPerFiltro } = await import('@/lib/agente')
     const ids = idClientiPerFiltro(await clientiAgente(supabase, utente))
-    const { data: ritiri, error } = await supabase.from('ritiri').select('*, clienti(ragione_sociale)')
+    const ritiri = await fetchAll(() => supabase.from('ritiri').select('*, clienti(ragione_sociale)')
       .eq('master_id', utente.master_id).in('cliente_id', ids)
-      .order('created_at', { ascending: false })
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+      .order('created_at', { ascending: false }))
     return NextResponse.json(ritiri || [])
   }
 
   // Cliente: solo i propri ritiri.
   if (utente.ruolo === 'cliente') {
-    const { data: ritiri, error } = await supabase.from('ritiri').select('*, clienti(ragione_sociale)')
+    const ritiri = await fetchAll(() => supabase.from('ritiri').select('*, clienti(ragione_sociale)')
       .eq('master_id', utente.master_id).eq('cliente_id', utente.cliente_id)
-      .order('created_at', { ascending: false })
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+      .order('created_at', { ascending: false }))
     return NextResponse.json(ritiri || [])
   }
 
@@ -35,10 +34,9 @@ export async function GET(req: NextRequest) {
   const admin = createAdminSupabase()
   const masterIds = await masterIdsVisibili(admin, utente.master_id)
   const db = masterIds.length > 1 ? admin : supabase
-  const { data: ritiri, error } = await db.from('ritiri').select('*, clienti(ragione_sociale)')
+  const ritiri = await fetchAll(() => db.from('ritiri').select('*, clienti(ragione_sociale)')
     .in('master_id', masterIds)
-    .order('created_at', { ascending: false })
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    .order('created_at', { ascending: false }))
 
   // Etichetta col nome del sotto-master per i ritiri della rete (null per i miei).
   let out = ritiri || []
