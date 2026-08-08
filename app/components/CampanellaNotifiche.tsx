@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 // La campanella ora PORTA alle notifiche davvero: legge /api/notifiche/mie (gli annunci destinati
 // al gruppo dell'utente), mostra un pallino con il numero di NON lette, e aprendola le elenca.
 // Prima era un'icona muta con un pallino finto disegnato a mano.
-type Notifica = { id: string; oggetto: string; messaggio: string; created_at: string }
+type Notifica = { id: string; oggetto: string; messaggio: string; created_at: string; link?: string | null }
 
 const VISTE_KEY = 'spx_notifiche_viste'   // ricorda l'ultima notifica vista (per contare le nuove)
 
@@ -84,16 +84,25 @@ export default function CampanellaNotifiche() {
               <div style={{ padding: '28px 16px', textAlign: 'center', color: '#999', fontSize: '13px' }}>
                 Nessuna notifica.
               </div>
-            ) : lista.map(n => (
-              <div key={n.id} style={{ padding: '12px 16px', borderBottom: '1px solid #f5f5f5' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'baseline' }}>
-                  <div style={{ fontWeight: 600, fontSize: '13px', color: '#1a1a1a' }}>{n.oggetto}</div>
-                  <div style={{ fontSize: '11px', color: '#bbb', whiteSpace: 'nowrap' }}>{quando(n.created_at)}</div>
-                </div>
-                <div style={{ fontSize: '12.5px', color: '#666', marginTop: '4px', lineHeight: 1.45 }}
-                  dangerouslySetInnerHTML={{ __html: n.messaggio || '' }} />
-              </div>
-            ))}
+            ) : lista.map(n => {
+              const contenuto = (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'baseline' }}>
+                    <div style={{ fontWeight: 600, fontSize: '13px', color: '#1a1a1a' }}>{n.oggetto}</div>
+                    <div style={{ fontSize: '11px', color: '#bbb', whiteSpace: 'nowrap' }}>{quando(n.created_at)}</div>
+                  </div>
+                  <div style={{ fontSize: '12.5px', color: '#666', marginTop: '4px', lineHeight: 1.45 }}
+                    dangerouslySetInnerHTML={{ __html: n.messaggio || '' }} />
+                </>
+              )
+              const base: React.CSSProperties = { display: 'block', padding: '12px 16px', borderBottom: '1px solid #f5f5f5', textDecoration: 'none' }
+              // Se la notifica ha un link (es. la spedizione, la giacenza) la card ci porta.
+              return n.link
+                ? <a key={n.id} href={n.link} onClick={() => setAperto(false)} style={{ ...base, cursor: 'pointer' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = '#faf7f4')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{contenuto}</a>
+                : <div key={n.id} style={base}>{contenuto}</div>
+            })}
           </div>
         </div>
       )}
