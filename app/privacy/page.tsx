@@ -26,7 +26,7 @@ export default function PrivacyPage() {
           registrata presso la Companies House di Cardiff con numero <strong>16889294</strong>, con sede legale in
           71-75 Shelton Street, London WC2H 9JQ, Regno Unito.
           Per qualsiasi richiesta relativa alla privacy è possibile scrivere a{' '}
-          <a href="mailto:privacy@moovexpress.com" style={{ color: '#f97316' }}>privacy@moovexpress.com</a>.
+          <a href="mailto:info@moovexpress.com" style={{ color: '#f97316' }}>info@moovexpress.com</a>.
         </p>
         <p style={p}>
           MoovExpress è il servizio gestito da E.M EXPRESS LTD. I dati trattati attraverso la piattaforma
@@ -82,7 +82,7 @@ export default function PrivacyPage() {
         <p style={p}>
           Gli interessati possono esercitare i diritti previsti dal GDPR (accesso, rettifica, cancellazione,
           limitazione, opposizione, portabilità) scrivendo a{' '}
-          <a href="mailto:privacy@moovexpress.com" style={{ color: '#f97316' }}>privacy@moovexpress.com</a>.
+          <a href="mailto:info@moovexpress.com" style={{ color: '#f97316' }}>info@moovexpress.com</a>.
         </p>
 
         <h2 style={h2}>8. Richieste dati e cancellazione (Shopify)</h2>
@@ -101,7 +101,7 @@ export default function PrivacyPage() {
 
         <p style={{ ...small, marginTop: '32px' }}>
           Per contatti: E.M EXPRESS LTD · 71-75 Shelton Street, London WC2H 9JQ, United Kingdom ·
-          Company number 16889294 · privacy@moovexpress.com
+          Company number 16889294 · info@moovexpress.com
         </p>
       </div>
     </div>

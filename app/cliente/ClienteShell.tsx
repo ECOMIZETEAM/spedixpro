@@ -4,6 +4,9 @@ import { usePathname } from 'next/navigation'
 import ClienteNav from './ClienteNav'
 import Moovy from '../components/Moovy'
 import TutorialCliente from './TutorialCliente'
+import MenuProfilo from '../components/MenuProfilo'
+import CampanellaNotifiche from '../components/CampanellaNotifiche'
+import SupportoButton from '../components/SupportoButton'
 
 export default function ClienteShell({ cliente, children }: { cliente: { ragione_sociale?: string | null; credito?: number | null }; children: React.ReactNode }) {
   const path = usePathname() || ''
@@ -69,15 +72,24 @@ export default function ClienteShell({ cliente, children }: { cliente: { ragione
         <header style={{ background: '#fff', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isMobile ? '0 12px' : '0 24px', borderBottom: '1px solid #e8e8e8', position: 'sticky', top: 0, zIndex: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
             <button onClick={() => { if (isMobile) setDrawerOpen(true); else toggleSidebar() }} aria-label="Menu" title={isMobile?'Menu':(sidebarChiusa?'Apri il menu':'Chiudi il menu')} style={{ background: 'none', border: 'none', fontSize: '23px', cursor: 'pointer', color: '#1a1a1a', padding: '2px 6px', lineHeight: 1 }}>☰</button>
-            <div style={{ fontSize: '13px', color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nome}</div>
+            {!isMobile && <div style={{ fontSize: '13px', color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nome}</div>}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '6px' : '8px' }}>
             <a href="/cliente/ricarica" style={{ background: '#f5f5f5', border: '1px solid #e8e8e8', borderRadius: '20px', padding: '4px 12px', fontSize: '12px', fontWeight: '600', color: '#1a1a1a', whiteSpace: 'nowrap', textDecoration: 'none' }}>
               Credito: <span style={{ color: credito > 0 ? '#16a34a' : '#dc2626' }}>€ {credito.toFixed(2)}</span>
             </a>
-            <a href="/cliente/ricarica" title="Ricarica credito con carta" style={{ background: '#f97316', color: '#fff', borderRadius: '20px', padding: '4px 12px', fontSize: '12px', fontWeight: '700', whiteSpace: 'nowrap', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <span style={{ fontSize: '13px', lineHeight: 1 }}>＋</span> {isMobile ? '' : 'Ricarica'}
-            </a>
+            {!isMobile && (
+              <a href="/cliente/ricarica" title="Ricarica credito con carta" style={{ background: '#f97316', color: '#fff', borderRadius: '20px', padding: '4px 12px', fontSize: '12px', fontWeight: '700', whiteSpace: 'nowrap', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ fontSize: '13px', lineHeight: 1 }}>＋</span> Ricarica
+              </a>
+            )}
+            <SupportoButton compatto={isMobile} />
+            <CampanellaNotifiche />
+            <MenuProfilo nome={nome} ruolo="cliente" compatto={isMobile} voci={[
+              { label: 'Impostazioni', href: '/cliente/impostazioni', icona: '◉' },
+              { label: 'Ricarica credito', href: '/cliente/ricarica', icona: '★' },
+              { label: 'Cambia password', href: '/cliente/impostazioni/cambia-password', icona: '🔑' },
+            ]} />
           </div>
         </header>
         <main style={{ flex: 1, minHeight: 0, padding: isMobile ? '14px' : '24px', overflowY: 'auto' }}>

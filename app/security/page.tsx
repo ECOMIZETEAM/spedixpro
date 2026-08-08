@@ -25,7 +25,7 @@ export default function SecurityPage() {
           Il servizio MoovExpress è gestito da <strong>E.M EXPRESS LTD</strong>, company number 16889294,
           71-75 Shelton Street, London WC2H 9JQ, Regno Unito.
           Contatto per sicurezza e privacy:{' '}
-          <a href="mailto:privacy@moovexpress.com" style={{ color: '#f97316' }}>privacy@moovexpress.com</a>.
+          <a href="mailto:info@moovexpress.com" style={{ color: '#f97316' }}>info@moovexpress.com</a>.
         </p>
 
         <h2 style={h2}>2. Misure di sicurezza</h2>
@@ -65,13 +65,13 @@ export default function SecurityPage() {
         <h2 style={h2}>6. Segnalazioni</h2>
         <p style={p}>
           Vulnerabilità o incidenti di sicurezza possono essere segnalati a{' '}
-          <a href="mailto:privacy@moovexpress.com" style={{ color: '#f97316' }}>privacy@moovexpress.com</a>.
+          <a href="mailto:info@moovexpress.com" style={{ color: '#f97316' }}>info@moovexpress.com</a>.
           Ci impegniamo a esaminare tempestivamente ogni segnalazione.
         </p>
 
         <p style={{ ...small, marginTop: '32px' }}>
           E.M EXPRESS LTD · 71-75 Shelton Street, London WC2H 9JQ, United Kingdom ·
-          Company number 16889294 · privacy@moovexpress.com
+          Company number 16889294 · info@moovexpress.com
         </p>
       </div>
     </div>

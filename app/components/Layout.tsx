@@ -323,7 +323,11 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
           <div style={{display:'flex',alignItems:'center',gap:isMobile?'6px':'10px'}}>
             <SupportoButton compatto={isMobile} />
             <CampanellaNotifiche />
-            <MenuProfilo nome={user?.nome} ruolo={user?.ruolo} />
+            <MenuProfilo nome={user?.nome} ruolo={user?.ruolo} voci={[
+              { label: 'Impostazioni', href: '/dashboard/impostazioni', icona: '◉' },
+              ...((ruolo === 'master' || ruolo === 'admin') ? [{ label: 'Abbonamento', href: '/dashboard/abbonamento', icona: '★' }] : []),
+              { label: 'Cambia password', href: '/dashboard/impostazioni/password', icona: '🔑' },
+            ]} />
           </div>
         </header>
 

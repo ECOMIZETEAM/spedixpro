@@ -9,7 +9,9 @@ const RUOLI: Record<string, string> = {
   agente: 'Agente', cliente: 'Cliente',
 }
 
-export default function MenuProfilo({ nome, ruolo }: { nome?: string; ruolo?: string }) {
+type Voce = { label: string; href: string; icona: string }
+
+export default function MenuProfilo({ nome, ruolo, voci, compatto = false }: { nome?: string; ruolo?: string; voci: Voce[]; compatto?: boolean }) {
   const [aperto, setAperto] = useState(false)
   const box = useRef<HTMLDivElement>(null)
 
@@ -26,13 +28,6 @@ export default function MenuProfilo({ nome, ruolo }: { nome?: string; ruolo?: st
   const iniziali = (nome || 'DA').substring(0, 2).toUpperCase()
   const r = (ruolo || '').toLowerCase()
   const ruoloBello = RUOLI[r] || 'Utente'
-  const soloMaster = r === 'master' || r === 'admin'
-
-  const voci = [
-    { label: 'Impostazioni', href: '/dashboard/impostazioni', icona: '◉', ok: true },
-    { label: 'Abbonamento', href: '/dashboard/abbonamento', icona: '★', ok: soloMaster },
-    { label: 'Cambia password', href: '/dashboard/impostazioni/password', icona: '🔑', ok: true },
-  ].filter(v => v.ok)
 
   const vociStile: React.CSSProperties = {
     display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 14px',
@@ -52,7 +47,7 @@ export default function MenuProfilo({ nome, ruolo }: { nome?: string; ruolo?: st
         <span style={{ width: '26px', height: '26px', background: '#f97316', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '11px', color: '#fff' }}>
           {iniziali}
         </span>
-        <span style={{ fontSize: '13px', fontWeight: 500, color: '#333' }}>{nome || 'Admin'}</span>
+        {!compatto && <span style={{ fontSize: '13px', fontWeight: 500, color: '#333', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px' }}>{nome || 'Admin'}</span>}
         <span style={{ fontSize: '10px', color: '#bbb', transition: 'transform .15s', transform: aperto ? 'rotate(180deg)' : 'none' }}>▾</span>
       </button>
 
