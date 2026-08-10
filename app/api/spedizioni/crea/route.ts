@@ -688,10 +688,8 @@ export async function POST(req: NextRequest) {
       { await stornaPrenotazione(); return NextResponse.json({ error: 'Telefono destinatario obbligatorio e non valido: inserisci un numero corretto (solo cifre, 6–15). Il corriere lo richiede per la consegna.' }, { status: 400 }) }
     }
     try {
-      // SpediamoPro valida telefono ed email: telefono solo cifre 6-15 (via spazi/trattini/+),
-      // email formato valido. Se non validi vengono OMESSI (altrimenti la creazione fallisce).
+      // SpediamoPro valida il telefono: solo cifre 6-15 (via spazi/trattini/+); se non valido è OMESSO.
       const telSp = (v: any): string | undefined => { const d = String(v || '').replace(/[^0-9]/g, ''); return (d.length >= 6 && d.length <= 15) ? d : undefined }
-      const emailSp = (v: any): string | undefined => { const e = String(v || '').trim(); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e.substring(0, 50) : undefined }
       const sender = {
         name: body.shipFrom.name?.substring(0, 35),
         address: body.shipFrom.street1?.substring(0, 35),
@@ -700,10 +698,10 @@ export async function POST(req: NextRequest) {
         province: body.shipFrom.state?.substring(0, 2).toUpperCase(),
         country: 'IT',
         phone: telSp(body.shipFrom.phone),
-        // SpediamoPro (accept) ESIGE l'email del mittente come stringa: se l'anagrafica non ne ha
-        // una valida, usiamo un indirizzo di servizio così la creazione non fallisce (prima dava
-        // "sender.email should be of type string").
-        email: emailSp(body.shipFrom.email) || 'noreply@moovexpress.com',
+        // EMAIL SCHERMO: al provider va SEMPRE l'email di servizio, mai quella vera del mittente —
+        // come Spedisci, DVA e l'API pubblica. SpediamoPro esige comunque una stringa email valida,
+        // e questa lo è; così l'email vera del cliente non lascia mai la piattaforma.
+        email: EMAIL_PER_CORRIERE,
       }
       const consignee: any = {
         name: body.shipTo.name?.substring(0, 35),
@@ -714,10 +712,10 @@ export async function POST(req: NextRequest) {
         country: (body.shipTo.country || 'IT').toUpperCase(),
       }
       const telDest = telSp(body.shipTo.phone); if (telDest) consignee.phone = telDest
-      // SpediamoPro (accept) ESIGE anche l'email del DESTINATARIO come stringa: senza, la creazione
-      // fallisce con 422 ("consignee.email should be of type string"). Era la causa del "non spedisce"
-      // su Poste standard quando il destinatario non aveva un'email valida. Fallback come il mittente.
-      consignee.email = emailSp(body.shipTo.email) || 'noreply@moovexpress.com'
+      // EMAIL SCHERMO anche per il destinatario: al provider va SEMPRE l'email di servizio, mai quella
+      // vera. Così le notifiche automatiche del corriere non arrivano al cliente finale (le mandiamo
+      // noi, col brand MoovExpress) e l'email vera del destinatario non lascia mai la piattaforma.
+      consignee.email = EMAIL_PER_CORRIERE
 
       // MULTICOLLO: un parcel per OGNI collo (prima si inviava solo il primo -> 1 sola etichetta)
       // NB: SpediamoPro non supporta una descrizione merce a testo libero sul collo (verificato via API):

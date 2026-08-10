@@ -178,8 +178,8 @@ export default function NuovaSpedizioneCliente() {
   }
 
   async function calcolaTariffe() {
-    if (!dest.nome||!dest.indirizzo||!dest.citta||!dest.cap||!dest.email||!dest.telefono) {
-      setErrore('Compila tutti i dati del destinatario (inclusi email e telefono)'); return
+    if (!dest.nome||!dest.indirizzo||!dest.citta||!dest.cap||!dest.telefono) {
+      setErrore('Compila tutti i dati del destinatario (incluso il telefono)'); return
     }
     if (dest.paese==='IT' && !dest.provincia) {
       setErrore('La provincia è obbligatoria per le spedizioni in Italia'); return
