@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { fetchAll } from '@/lib/fetch-all'
 import { vedeLaRete } from '@/lib/perimetro'
+import { SPED_COLS } from '@/lib/spedizioni-cols'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -18,6 +19,7 @@ export async function GET(req: NextRequest) {
   const statoContrassegno = p.get('statoContrassegno')
   const vettore = p.get('vettore')
   const contratto = p.get('contratto')
+  const numero = p.get('numero')            // ricerca N. Spedizione: la pagina NON manda la data
   const dal = p.get('dal')
   const al = p.get('al')
   const sanitizza = (v: string) => v.replace(/[,()"\\%]/g, ' ').trim()
@@ -40,8 +42,10 @@ export async function GET(req: NextRequest) {
   const buildBase = () => {
     // Filtro su corrieri (vettore/contratto) → il join deve essere INNER, altrimenti passa tutto.
     const embCorr = (vettore || contratto) ? 'corrieri!inner(nome_contratto)' : 'corrieri(nome_contratto)'
+    // Colonne LEGGERE (SPED_COLS): niente raw_response/etichetta/colli_dettaglio (blob da ~300KB/riga)
+    // — era la causa della lentezza. Tutte le colonne che la pagina usa ci sono.
     let q = db.from('spedizioni')
-      .select('*, clienti(ragione_sociale), ' + embCorr)
+      .select(`${SPED_COLS}, clienti(ragione_sociale), ${embCorr}`)
       .gt('contrassegno', 0)
       .order('created_at', { ascending: false })
     if (subtreeSel) q = q.in('master_id', subtreeSel)
@@ -52,6 +56,8 @@ export async function GET(req: NextRequest) {
     if (statoContrassegno) q = q.eq('stato_contrassegno', statoContrassegno)
     if (contratto) q = q.eq('corrieri.nome_contratto', contratto)                        // contratto esatto
     if (vettore) q = q.ilike('corrieri.nome_contratto', `${sanitizza(vettore)}%`)          // vettore = prima parola
+    // N. Spedizione: cerca su TUTTO lo storico (la pagina non manda dal/al quando c'e' il numero).
+    if (numero) q = q.ilike('numero', `%${sanitizza(numero)}%`)
     if (dal) q = q.gte('created_at', dal)
     if (al) q = q.lte('created_at', al + 'T23:59:59')
     return q

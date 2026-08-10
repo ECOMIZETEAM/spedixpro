@@ -37,7 +37,7 @@ export default function ListaContrassegniPage() {
   const [pagina, setPagina] = useState(1)
   const [creandoDistinta, setCreandoDistinta] = useState(false)
   const [filtri, setFiltri] = useState({
-    clienteId:'', vettore:'', contratto:'', statoSpedizione:'', statoContrassegno:'',
+    numero:'', clienteId:'', vettore:'', contratto:'', statoSpedizione:'', statoContrassegno:'',
     dal: new Date().toISOString().split('T')[0],
     al: new Date().toISOString().split('T')[0],
   })
@@ -45,8 +45,16 @@ export default function ListaContrassegniPage() {
   useEffect(() => {
     fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
     fetch('/api/corrieri/lista').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d)?d:[]))
-    carica()
   }, [])
+
+  // AUTO-REFRESH: appena tocchi un filtro la lista si aggiorna (niente bottone "Filtra"). Menu =
+  // subito, N. Spedizione (testo) con piccolo debounce. Fa anche il primo caricamento al mount.
+  useEffect(() => {
+    const num = (filtri.numero || '').trim()
+    const t = setTimeout(() => { carica() }, num ? 350 : 0)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(filtri)])
 
   // Opzioni Vettore/Contratto dai MIEI corrieri (in rete i nomi contratto combaciano).
   const vettoriPresenti = Array.from(new Set((corrieri||[]).map((c:any)=>String(c.nome_contratto||'').split(' ')[0].toUpperCase()).filter(Boolean))).sort()
@@ -55,16 +63,22 @@ export default function ListaContrassegniPage() {
   async function carica() {
     setLoading(true)
     const params = new URLSearchParams()
+    const num = (filtri.numero || '').trim()
+    if (num) {
+      params.set('numero', num)            // N. Spedizione: cerca su TUTTO lo storico, niente data
+    } else {
+      if (filtri.dal) params.set('dal', filtri.dal)
+      if (filtri.al) params.set('al', filtri.al)
+    }
     if (filtri.clienteId) params.set('clienteId', filtri.clienteId)
     if (filtri.vettore) params.set('vettore', filtri.vettore)
     if (filtri.contratto) params.set('contratto', filtri.contratto)
     if (filtri.statoSpedizione) params.set('stato', filtri.statoSpedizione)
     if (filtri.statoContrassegno) params.set('statoContrassegno', filtri.statoContrassegno)
-    if (filtri.dal) params.set('dal', filtri.dal)
-    if (filtri.al) params.set('al', filtri.al)
     const res = await fetch('/api/contrassegni?' + params.toString())
     const data = await res.json()
     setSpedizioni(Array.isArray(data) ? data : [])
+    setPagina(1)
     setLoading(false)
   }
 
@@ -166,13 +180,14 @@ export default function ListaContrassegniPage() {
             </select>
           </div>
         </div>
-        <div style={{display:'grid',gridTemplateColumns:'auto 1fr',gap:'10px',alignItems:'end'}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',alignItems:'end'}}>
+          <div>
+            <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>N. Spedizione</div>
+            <input value={filtri.numero} onChange={e=>setF('numero',e.target.value)} placeholder="Cerca su tutto lo storico (ignora la data)" style={sel}/>
+          </div>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Data Spedizione:</div>
             <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} />
-          </div>
-          <div style={{display:'flex',justifyContent:'flex-end',gap:'8px'}}>
-            <button onClick={carica} style={{padding:'7px 20px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer'}}>▼ Filtra</button>
           </div>
         </div>
       </div>
