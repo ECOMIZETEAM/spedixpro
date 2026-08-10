@@ -48,51 +48,68 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
+  const mio = utente?.master_id
   const body = await req.json()
   const { spedizioneIds } = body
   if (!spedizioneIds?.length) return NextResponse.json({ error: 'Nessuna spedizione' }, { status: 400 })
 
+  // SOLO i contrassegni ANCORA IN ATTESA: non gia' in una distinta e non pagati. Lo stesso COD non
+  // va in due distinte — l'indice unico uniq_righe_cod_sped_per_master lo garantisce nel database,
+  // ma qui si scartano prima, cosi' non si creano teste di distinta a vuoto (pagabili due volte).
   const { data: spedizioni } = await supabase.from('spedizioni')
-    .select('id,cliente_id,contrassegno,numero')
+    .select('id,cliente_id,contrassegno,numero,stato_contrassegno,distinta_contrassegno_id')
     .in('id', spedizioneIds)
-    .eq('master_id', utente?.master_id)
+    .eq('master_id', mio)
+    .gt('contrassegno', 0)
+    .is('distinta_contrassegno_id', null)
+    .or('stato_contrassegno.is.null,stato_contrassegno.eq.in_attesa')
 
-  if (!spedizioni?.length) return NextResponse.json({ error: 'Spedizioni non trovate' }, { status: 404 })
+  if (!spedizioni?.length) return NextResponse.json({ error: 'Nessun contrassegno in attesa tra quelli selezionati (già in distinta o pagati).' }, { status: 400 })
 
-  // Raggruppa per cliente
+  // Raggruppa per cliente (i COD propri del master, senza cliente, non fanno una distinta cliente).
   const clientiMap: Record<string, any[]> = {}
-  spedizioni.forEach(s => {
-    if (!clientiMap[s.cliente_id]) clientiMap[s.cliente_id] = []
-    clientiMap[s.cliente_id].push(s)
-  })
-
-  const distinte = []
-  for (const [clienteId, sped] of Object.entries(clientiMap)) {
-    const totale = sped.reduce((acc, s) => acc + Number(s.contrassegno || 0), 0)
-    const { data: distinta } = await supabase.from('distinte_contrassegni').insert({
-      master_id: utente?.master_id,
-      cliente_id: clienteId,
-      totale_iniziale: totale,
-      totale_rimborsato: totale,
-      stato: 'in_lavorazione',
-    }).select().single()
-
-    if (distinta) {
-      const righe = sped.map(s => ({
-        distinta_id: distinta.id,
-        spedizione_id: s.id,
-        numero_spedizione: s.numero,
-        importo_cod: Number(s.contrassegno),
-        importo_sistema: Number(s.contrassegno),
-      }))
-      await supabase.from('distinte_contrassegni_righe').insert(righe)
-      await supabase.from('spedizioni').update({
-        stato_contrassegno: 'in_distinta',
-        distinta_contrassegno_id: distinta.id
-      }).in('id', sped.map(s => s.id))
-      distinte.push(distinta)
-    }
+  let saltate = 0
+  for (const s of spedizioni) {
+    if (!s.cliente_id) { saltate++; continue }
+    ;(clientiMap[s.cliente_id] ||= []).push(s)
   }
 
-  return NextResponse.json({ success: true, distinte })
+  const distinte: any[] = []
+  for (const [clienteId, sped] of Object.entries(clientiMap)) {
+    const totale = Math.round(sped.reduce((acc, s) => acc + Number(s.contrassegno || 0), 0) * 100) / 100
+    // Numero progressivo PER MASTER (indice unico uniq_distinte_cod_master_numero): se due creazioni
+    // concorrenti scelgono lo stesso numero, il secondo riprova col successivo. Stessa regola del
+    // caricamento da file/rimessa, cosi' la numerazione resta unica e coerente.
+    let distinta: any = null
+    for (let tentativo = 0; tentativo < 8 && !distinta; tentativo++) {
+      const { data: ultima } = await supabase.from('distinte_contrassegni')
+        .select('numero').eq('master_id', mio).order('numero', { ascending: false }).limit(1).maybeSingle()
+      const numero = Number(ultima?.numero || 1000) + 1 + tentativo
+      const { data, error } = await supabase.from('distinte_contrassegni').insert({
+        master_id: mio, cliente_id: clienteId, numero,
+        totale_iniziale: totale, totale_rimborsato: totale, stato: 'in_lavorazione',
+      }).select('id,numero').single()
+      if (!error && data?.id) distinta = data
+      else if (error && !String(error.message || '').includes('uniq_distinte_cod_master_numero')) break
+    }
+    if (!distinta?.id) { saltate += sped.length; continue }
+
+    // Le RIGHE devono esistere: se l'indice unico rifiuta l'INSERT (un COD gia' in una mia distinta)
+    // la testata va rimossa, altrimenti resta una distinta col totale pieno e zero righe.
+    const { error: errRighe } = await supabase.from('distinte_contrassegni_righe').insert(sped.map(s => ({
+      distinta_id: distinta.id, spedizione_id: s.id,
+      numero_spedizione: s.numero, importo_cod: Number(s.contrassegno), importo_sistema: Number(s.contrassegno),
+    })))
+    if (errRighe) {
+      await supabase.from('distinte_contrassegni').delete().eq('id', distinta.id)
+      saltate += sped.length
+      continue
+    }
+    await supabase.from('spedizioni').update({
+      stato_contrassegno: 'in_distinta', distinta_contrassegno_id: distinta.id,
+    }).in('id', sped.map(s => s.id))
+    distinte.push(distinta)
+  }
+
+  return NextResponse.json({ success: true, distinte, create: distinte.length, saltate })
 }

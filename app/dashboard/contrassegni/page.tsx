@@ -13,11 +13,16 @@ const STATI_SPED: Record<string,{bg:string,color:string,label:string}> = {
   in_transito:{bg:'#eff6ff',color:'#2563eb',label:'In transito'},
   in_consegna:{bg:'#fff7ed',color:'#ea580c',label:'In Consegna'},
 }
+// In attesa = COD non ancora ricevuto (grigio, selezionabile) · In lavorazione = messo in distinta
+// (arancio) · Pagato = rimborsato al cliente (verde). Stesso codice colore di Spedisci.
 const STATI_COD: Record<string,{bg:string,color:string,label:string}> = {
-  in_attesa:{bg:'#fff7ed',color:'#ea580c',label:'In attesa'},
-  in_distinta:{bg:'#fef9c3',color:'#ca8a04',label:'In distinta'},
+  in_attesa:{bg:'#f1f5f9',color:'#475569',label:'In attesa'},
+  in_distinta:{bg:'#fff7ed',color:'#ea580c',label:'In lavorazione'},
   pagato:{bg:'#f0fdf4',color:'#16a34a',label:'Pagato'},
 }
+// Un contrassegno e' selezionabile per una distinta solo se e' ancora IN ATTESA (non gia' in una
+// distinta, non pagato). Gli altri hanno la checkbox disattivata, come su Spedisci.
+const selezionabile = (s:any) => !s.distinta_contrassegno_id && (!s.stato_contrassegno || s.stato_contrassegno==='in_attesa')
 
 import { useDialog } from '@/app/components/DialogProvider'
 export default function ListaContrassegniPage() {
@@ -60,8 +65,16 @@ export default function ListaContrassegniPage() {
   const totalePagine = Math.max(1, Math.ceil(visibili.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
   const visibiliPag = visibili.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
-  function toggleSelect(id:string) { setSelectedIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]) }
-  function toggleAll() { if (selectedIds.length===visibili.length) setSelectedIds([]); else setSelectedIds(visibili.map(s=>s.id)) }
+  const selezionabili = visibili.filter(selezionabile)
+  function toggleSelect(id:string) {
+    const s = spedizioni.find(x=>x.id===id)
+    if (s && !selezionabile(s)) return                 // solo i "in attesa" si selezionano
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id])
+  }
+  function toggleAll() {
+    if (selectedIds.length===selezionabili.length && selezionabili.length>0) setSelectedIds([])
+    else setSelectedIds(selezionabili.map(s=>s.id))
+  }
 
   async function creaDistinta() {
     if (!selectedIds.length) return
@@ -72,7 +85,31 @@ export default function ListaContrassegniPage() {
     })
     const data = await res.json()
     setCreandoDistinta(false)
-    if (data.success) { setSelectedIds([]); carica(); await dialog.alert({ title: 'Distinte create', message: 'Distinte create: ' + (data.distinte?.length ?? 0) }) }
+    if (data.success) {
+      setSelectedIds([]); carica()
+      await dialog.alert({ title: 'Distinte create', message:
+        'Distinte create: ' + (data.create ?? data.distinte?.length ?? 0)
+        + (data.saltate ? '\nContrassegni saltati (già in distinta o senza cliente): ' + data.saltate : '') })
+    } else await dialog.alert({ title: 'Nessuna distinta creata', message: data.error || 'Errore durante la creazione.' })
+  }
+
+  async function esportaExcel() {
+    const { utils, writeFile } = await import('xlsx')
+    const righe = visibili.map((s:any) => ({
+      'N. Spedizione': s.numero,
+      Mittente: s.clienti?.ragione_sociale || s.mitt_nome || '',
+      Destinatario: s.dest_nome || '',
+      Indirizzo: [s.dest_indirizzo, s.dest_citta, s.dest_cap, s.dest_provincia].filter(Boolean).join(', '),
+      'Data Spedizione': s.created_at ? new Date(s.created_at).toLocaleDateString('it-IT') : '',
+      Contrassegno: Number(s.contrassegno||0),
+      'Stato spedizione': STATI_SPED[s.stato]?.label || s.stato || '',
+      'N. Distinta': s.distinta_numero || '',
+      'Stato contrassegno': (STATI_COD[s.stato_contrassegno||'in_attesa']||STATI_COD['in_attesa']).label,
+      'Ultimo aggiornamento': (s.updated_at||s.created_at) ? new Date(s.updated_at||s.created_at).toLocaleDateString('it-IT') : '',
+    }))
+    const ws = utils.json_to_sheet(righe)
+    const wb = utils.book_new(); utils.book_append_sheet(wb, ws, 'Contrassegni')
+    writeFile(wb, `Contrassegni_${filtri.dal}_${filtri.al}.xlsx`)
   }
 
   return (
@@ -136,7 +173,7 @@ export default function ListaContrassegniPage() {
           style={{padding:'7px 16px',background:selectedIds.length>0?'#f97316':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
           {creandoDistinta ? 'Creazione...' : ('+ Crea Distinte' + (selectedIds.length>0 ? ' (' + selectedIds.length + ')' : ''))}
         </button>
-        <button style={{padding:'7px 12px',background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',cursor:'pointer'}}>📊</button>
+        <button onClick={esportaExcel} title="Esporta in Excel (rispetta i filtri)" style={{padding:'7px 12px',background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer',color:'#15803d'}}>📊 XLS</button>
       </div>
 
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
@@ -164,7 +201,7 @@ export default function ListaContrassegniPage() {
               <thead>
                 <tr style={{background:'#f9fafb'}}>
                   <th style={{padding:'9px 12px',borderBottom:'1px solid #d1d5db',width:'36px'}}>
-                    <input type="checkbox" checked={selectedIds.length===visibili.length&&visibili.length>0} onChange={toggleAll}/>
+                    <input type="checkbox" title="Seleziona tutti gli in attesa" checked={selectedIds.length===selezionabili.length&&selezionabili.length>0} onChange={toggleAll} disabled={selezionabili.length===0}/>
                   </th>
                   {['N. Spedizione','Mittente','Destinatario','Data Spedizione','Contrassegno','Allegati','Stato spedizione','N. Dist.','Stato contrassegno','Ultimo aggiornamento',''].map(h=>(
                     <th key={h} style={{textAlign:'left' as const,padding:'9px 12px',fontSize:'11px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
@@ -176,9 +213,10 @@ export default function ListaContrassegniPage() {
                   const stSped = STATI_SPED[s.stato] || {bg:'#f5f5f5',color:'#1a1a1a',label:s.stato}
                   const stCod = STATI_COD[s.stato_contrassegno||'in_attesa'] || STATI_COD['in_attesa']
                   const isSelected = selectedIds.includes(s.id)
+                  const puoSel = selezionabile(s)
                   return (
                     <tr key={s.id} style={{borderBottom:'1px solid #d1d5db',background:isSelected?'#fff7ed':'#fff'}}>
-                      <td style={{padding:'9px 12px'}}><input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(s.id)}/></td>
+                      <td style={{padding:'9px 12px'}}><input type="checkbox" checked={isSelected} disabled={!puoSel} onChange={()=>toggleSelect(s.id)} title={puoSel?'':'Solo i contrassegni "in attesa" si possono mettere in distinta'} style={{cursor:puoSel?'pointer':'not-allowed',opacity:puoSel?1:0.4}}/></td>
                       <td style={{padding:'9px 12px'}}><span style={{color:'#f97316',fontWeight:'700'}}>{s.numero}</span></td>
                       <td style={{padding:'9px 12px',fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>{s.clienti?.ragione_sociale||s.mitt_nome}</td>
                       <td style={{padding:'9px 12px'}}>
@@ -189,7 +227,7 @@ export default function ListaContrassegniPage() {
                       <td style={{padding:'9px 12px',fontWeight:'700',color:'#1a1a1a'}}>€ {Number(s.contrassegno).toFixed(2)}</td>
                       <td style={{padding:'9px 12px',textAlign:'center' as const}}><span style={{fontSize:'16px',cursor:'pointer'}}>📁</span></td>
                       <td style={{padding:'9px 12px'}}><span style={{background:stSped.bg,color:stSped.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>{stSped.label}</span></td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>—</td>
+                      <td style={{padding:'9px 12px',color:s.distinta_numero?'#f97316':'#9ca3af',fontSize:'12px',fontWeight:s.distinta_numero?'700':'400'}}>{s.distinta_numero||'—'}</td>
                       <td style={{padding:'9px 12px'}}><span style={{background:stCod.bg,color:stCod.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>{stCod.label}</span></td>
                       <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{new Date(s.updated_at||s.created_at).toLocaleDateString('it-IT')}</td>
                       <td style={{padding:'9px 12px'}}><span style={{color:'#dc2626',fontSize:'16px',cursor:'pointer'}}>⊘</span></td>

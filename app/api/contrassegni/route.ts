@@ -50,5 +50,14 @@ export async function GET(req: NextRequest) {
     return q
   }
   // Carico TUTTI i contrassegni (prima .limit(500) tagliava): sono spedizioni normali.
-  return NextResponse.json(await fetchAll(buildBase))
+  const lista = await fetchAll(buildBase)
+
+  // Numero della distinta contrassegni per le spedizioni gia' in distinta (colonna "N. Dist.").
+  const distIds = [...new Set((lista as any[]).map(s => s.distinta_contrassegno_id).filter(Boolean))]
+  if (distIds.length) {
+    const { data: dist } = await db.from('distinte_contrassegni').select('id,numero').in('id', distIds)
+    const numById = new Map((dist || []).map((d: any) => [d.id, d.numero]))
+    for (const s of (lista as any[])) if (s.distinta_contrassegno_id) s.distinta_numero = numById.get(s.distinta_contrassegno_id) ?? null
+  }
+  return NextResponse.json(lista)
 }
