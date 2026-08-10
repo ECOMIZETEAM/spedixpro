@@ -25,17 +25,17 @@ export async function GET(req: NextRequest) {
   // risultava sempre 0 e il cliente doveva riscriverlo a mano (segnalato su WooCommerce).
   const ordini = await fetchAll(() => supabase
     .from('ordini_ecommerce')
-    .select('id,integrazione_id,piattaforma,ordine_esterno_id,numero_ordine,cliente_nome,destinatario,articoli,totale,valuta,stato,stato_pagamento,spedizione_id,fulfillment_stato,fulfillment_errore,created_at,d1:raw->>creationDate,d2:raw->>date_created,d3:raw->>created_at,d4:raw->>createdDate,d5:raw->>create_time,d6:raw->>date_add,p1:raw->>payment_method,p2:raw->>payment_method_title,p3:raw->>module,p4:raw->>payment,p5:raw->paymentSummary')
+    .select('id,integrazione_id,piattaforma,ordine_esterno_id,numero_ordine,cliente_nome,destinatario,articoli,totale,valuta,stato,stato_pagamento,spedizione_id,fulfillment_stato,fulfillment_errore,created_at,d1:raw->>creationDate,d2:raw->>date_created,d3:raw->>created_at,d4:raw->>createdDate,d5:raw->>create_time,d6:raw->>date_add,p1:raw->>payment_method,p2:raw->>payment_method_title,p3:raw->>module,p4:raw->>payment,p5:raw->paymentSummary,d7:raw->>createdAt,p6:raw->paymentGatewayNames')
     .eq('cliente_id', utente.cliente_id)
     .eq('piattaforma', piattaforma)
     .order('created_at', { ascending: false }))
-  const rows = (ordini as any[]).map(({ d1, d2, d3, d4, d5, d6, p1, p2, p3, p4, p5, ...o }: any) => {
-    let t: any = d1 || d2 || d3 || d4 || d5 || d6 || null
+  const rows = (ordini as any[]).map(({ d1, d2, d3, d4, d5, d6, d7, p1, p2, p3, p4, p5, p6, ...o }: any) => {
+    let t: any = d1 || d2 || d3 || d4 || d5 || d6 || d7 || null   // d7 = Shopify createdAt (camelCase)
     // epoch (TikTok/Temu): secondi o millisecondi -> ISO
     if (t && /^\d{9,13}$/.test(String(t))) t = new Date(Number(t) * (String(t).length <= 10 ? 1000 : 1)).toISOString()
     // CONTRASSEGNO: Woo payment_method 'cod' (titolo "Pagamento alla consegna"), PrestaShop modulo
     // cashondelivery, eBay paymentSummary CASH_ON_DELIVERY/PICKUP. Importo = totale dell'ordine.
-    const firma = JSON.stringify([p1, p2, p3, p4, p5])
+    const firma = JSON.stringify([p1, p2, p3, p4, p5, p6])
     const isCod = /cash[\s_-]?on[\s_-]?(delivery|pickup)|cashondelivery|"cod"|\bcontrassegn|pagamento alla consegna|alla consegna/i.test(firma)
     const cod = isCod ? (Number(o.totale) || 0) : 0
     return { ...o, data_ordine: t || o.created_at, cod, metodo_pagamento: p2 || p1 || p4 || p3 || null }

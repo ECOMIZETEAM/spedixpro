@@ -14,12 +14,13 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any): Promise<{ 
   // Ordini non evasi via GraphQL (immagini inline), paginati fino a ~300.
   const ordini: any[] = []
   let cursor: string | null = null
+  let completa = false   // true se abbiamo scaricato TUTTI i non-evasi (nessuna pagina troncata)
   for (let page = 0; page < 3; page++) {
     const data: any = await shopifyGraphQL(shop, token, `
       query($cursor: String){
         orders(first: 100, after: $cursor, query: "status:open fulfillment_status:unfulfilled", sortKey: CREATED_AT){
           edges { node {
-            legacyResourceId name email phone displayFinancialStatus
+            legacyResourceId name email phone createdAt paymentGatewayNames displayFinancialStatus
             totalPriceSet { shopMoney { amount currencyCode } }
             shippingAddress { name address1 address2 city province provinceCode zip country countryCodeV2 phone }
             lineItems(first: 100){ edges { node { title quantity sku image { url } } } }
@@ -29,7 +30,7 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any): Promise<{ 
       }`, { cursor })
     const conn = data?.orders
     for (const e of (conn?.edges || [])) ordini.push(e.node)
-    if (!conn?.pageInfo?.hasNextPage) break
+    if (!conn?.pageInfo?.hasNextPage) { completa = true; break }
     cursor = conn.pageInfo.endCursor
   }
 
@@ -70,6 +71,21 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any): Promise<{ 
       onConflict: 'integrazione_id,ordine_esterno_id', ignoreDuplicates: false,
     })
     if (!error) importati++
+  }
+
+  // Ordini che erano DA SPEDIRE ma non sono piu' tra i non-evasi di Shopify (evasi/annullati la'
+  // fuori): li segno "spediti", cosi' non restano bloccati su "da spedire" nel gestionale quando li
+  // hai gia' evasi su Shopify. SOLO se abbiamo la lista COMPLETA dei non-evasi (nessuna pagina
+  // troncata), altrimenti si rischia di chiudere per sbaglio ordini ancora da spedire.
+  if (completa) {
+    const vistiIds = new Set(ordini.map((o: any) => String(o.legacyResourceId)))
+    const { data: giaDaSpedire } = await db.from('ordini_ecommerce')
+      .select('id,ordine_esterno_id')
+      .eq('integrazione_id', integr.id).eq('stato', 'da_spedire')
+    const daChiudere = (giaDaSpedire || [])
+      .filter((r: any) => !vistiIds.has(String(r.ordine_esterno_id)))
+      .map((r: any) => r.id)
+    if (daChiudere.length) await db.from('ordini_ecommerce').update({ stato: 'spedito' }).in('id', daChiudere)
   }
 
   await db.from('integrazioni')
