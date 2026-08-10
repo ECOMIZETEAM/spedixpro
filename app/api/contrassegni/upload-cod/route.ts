@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
   const adminDb = createAdminSupabase()
 
   let spedizioniProcessate = 0, codFile = 0, codSistema = 0, codDaPagare = 0, errori = 0, saltateNonPagate = 0
-  let doppioniFile = 0, giaPagati = 0
+  let doppioniFile = 0, giaPagati = 0, giaInDistintaCount = 0
   const inSosta: any[] = []   // righe da mettere nell'area "da caricare" (niente distinte automatiche)
   // Anti-doppione DENTRO il file: la stessa spedizione ripetuta su più righe entrerebbe due volte
   // in distinta (il check su DB vede solo le distinte GIÀ salvate) → si pagherebbe doppio.
@@ -88,11 +88,7 @@ export async function POST(req: NextRequest) {
       .eq('spedizione_id', spedizione.id)
       .eq('distinte_contrassegni.master_id', masterId)
       .limit(1)
-    if (giaInDistinta && giaInDistinta.length > 0) { continue }
-
-    spedizioniProcessate++
-    codSistema += Number(spedizione.contrassegno || 0)
-    if (spedizione.stato_contrassegno !== 'pagato') codDaPagare += importoCod
+    if (giaInDistinta && giaInDistinta.length > 0) { giaInDistintaCount++; continue }   // gia' in una MIA distinta
 
     // AREA DI SOSTA: il contrassegno NON scende subito al livello sotto. Si registra qui col suo
     // destinatario (cliente diretto oppure primo master sotto di me) e sara' il master, dopo le
@@ -105,6 +101,11 @@ export async function POST(req: NextRequest) {
       inSosta.push({ master_id: masterId, spedizione_id: spedizione.id, importo: importoCod,
         cliente_id: null, target_master_id: catena[idx - 1], origine: 'file' })
     }
+    // Conta SOLO le righe davvero messe in sosta (DOPO tutti i filtri): cosi' ogni riga del file
+    // finisce in UNA categoria sola e il totale torna sempre (niente riga contata due volte).
+    spedizioniProcessate++
+    codSistema += Number(spedizione.contrassegno || 0)
+    if (spedizione.stato_contrassegno !== 'pagato') codDaPagare += importoCod
   }
 
   // Inserimento nell'area di sosta. Il vincolo unico (master, spedizione) rende l'operazione
@@ -118,17 +119,24 @@ export async function POST(req: NextRequest) {
       inAttesa += (ins || []).length
     }
   }
-  const codInDistinte = 0   // nessuna distinta creata dall'upload: si creano al "Carica" 
+  const codInDistinte = 0   // nessuna distinta creata dall'upload: si creano al "Carica"
+
+  // RICONCILIAZIONE: ogni riga del file DEVE finire in UNA categoria. Se il totale non torna
+  // (nonClassificate > 0) c'e' una riga persa per strada, e va segnalata invece di sparire.
+  const righeTot = (righe || []).length
+  const nonClassificate = righeTot - (spedizioniProcessate + errori + saltateNonPagate + doppioniFile + giaPagati + giaInDistintaCount)
 
   await supabase.from('cod_files').insert({
-    master_id: masterId, nome_file: nomeFile, righe_file: (righe || []).length,
+    master_id: masterId, nome_file: nomeFile, righe_file: righeTot,
     spedizioni_processate: spedizioniProcessate, cod_file: codFile, cod_sistema: codSistema,
     cod_da_pagare: codDaPagare, cod_in_distinte: codInDistinte, errori,
   })
   return NextResponse.json({
     success: true, spedizioniProcessate, codFile, codSistema, codDaPagare, codInDistinte,
     errori, saltateNonPagate, doppioniFile, giaPagati,
+    giaInDistinta: giaInDistintaCount,          // gia' in una mia distinta (prima: saltate in silenzio)
+    nonClassificate,                            // DEVE essere 0: se >0 qualche riga non e' stata classificata
     inAttesa,                                   // quante spedizioni sono ora in attesa di essere caricate
-    righeFile: (righe || []).length,
+    righeFile: righeTot,
   })
 }

@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import BarraAvanzamento from '@/app/components/BarraAvanzamento'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -14,6 +15,9 @@ export default function DistinteContrassegniPage() {
   const [codFiles, setCodFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
+  // Barra di avanzamento: appare per QUALSIASI cosa si carichi/importi (upload file COD, carico
+  // destinatari, carico rimesse). Modo indeterminato: e' una POST unica, non sappiamo la percentuale.
+  const [avanz, setAvanz] = useState<{fatti:number;totale:number;da:number|null;etichetta:string;sottotitolo?:string}|null>(null)
   const [ricevute, setRicevute] = useState<any[]>([])          // rimesse accettate dal network, da caricare
   const [selRicevute, setSelRicevute] = useState<Set<string>>(new Set())
   const [caricando, setCaricando] = useState(false)
@@ -53,6 +57,7 @@ export default function DistinteContrassegniPage() {
     const ok = await dialog.confirm({ title:'Carica contrassegni', message:`Creare le distinte per ${ids.length} destinatari? Da questo momento i contrassegni scendono al livello selezionato.` })
     if (!ok) return
     setCaricando(true)
+    setAvanz({ fatti: 0, totale: 0, da: null, etichetta: 'Sto creando le distinte', sottotitolo: `${ids.length} destinatari` })
     try {
       const r = await fetch('/api/contrassegni/da-caricare', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ destinatari: ids }) })
       const j = await r.json()
@@ -66,6 +71,7 @@ export default function DistinteContrassegniPage() {
         caricaDaCaricare(); carica()
       } else await dialog.alert({ title:'Errore', message: j.error || 'Errore durante il caricamento.' })
     } catch { await dialog.alert({ title:'Errore', message:'Errore durante il caricamento.' }) }
+    setAvanz(null)
     setCaricando(false)
   }
 
@@ -79,6 +85,7 @@ export default function DistinteContrassegniPage() {
     const ok = await dialog.confirm({ title: 'Carica rimesse', message: `Caricare ${ids.length} rimesse? Verranno create le distinte contrassegni verso i tuoi clienti e sotto-master.` })
     if (!ok) return
     setCaricando(true)
+    setAvanz({ fatti: 0, totale: 0, da: null, etichetta: 'Sto caricando le rimesse', sottotitolo: `${ids.length} rimesse` })
     try {
       const r = await fetch('/api/contrassegni/carica-ricevute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ distintaIds: ids }) })
       const j = await r.json()
@@ -91,6 +98,7 @@ export default function DistinteContrassegniPage() {
         caricaRicevute(); caricaDaCaricare(); carica()
       } else await dialog.alert({ title: 'Errore', message: j.error || 'Errore durante il caricamento.' })
     } catch { await dialog.alert({ title: 'Errore', message: 'Errore durante il caricamento.' }) }
+    setAvanz(null)
     setCaricando(false)
   }
 
@@ -116,12 +124,14 @@ export default function DistinteContrassegniPage() {
     const file = e.target.files?.[0]
     if (!file) return
     setUploading(true)
+    setAvanz({ fatti: 0, totale: 0, da: null, etichetta: 'Sto leggendo il file dei contrassegni', sottotitolo: file.name })
     try {
       const { utils, read } = await import('xlsx')
       const buffer = await file.arrayBuffer()
       const wb = read(buffer)
       const ws = wb.Sheets[wb.SheetNames[0]]
       const righe = utils.sheet_to_json(ws)
+      setAvanz(a => a ? { ...a, etichetta: 'Sto caricando i contrassegni', sottotitolo: `${righe.length} righe` } : a)
       const res = await fetch('/api/contrassegni/upload-cod', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ nomeFile: file.name, righe })
@@ -129,18 +139,21 @@ export default function DistinteContrassegniPage() {
       const data = await res.json()
       if (data.success) {
         await dialog.alert({ title: 'File caricato', message:
-            `Righe nel file: ${data.righeFile ?? '—'}\n`
-          + `Spedizioni riconosciute: ${data.spedizioniProcessate}\n`
-          + `Ora in attesa di essere caricate: ${data.inAttesa ?? 0} (€ ${Number(data.codDaPagare||0).toFixed(2)})\n`
-          + (data.saltateNonPagate ? `Non ancora pagate dal corriere (saltate): ${data.saltateNonPagate}\n` : '')
-          + (data.doppioniFile ? `Doppioni nel file (saltati): ${data.doppioniFile}\n` : '')
-          + (data.giaPagati ? `Già pagati in precedenza (saltati): ${data.giaPagati}\n` : '')
-          + (data.errori ? `Non trovate a sistema: ${data.errori}\n` : '')
-          + `\nControllali nella sezione "Contrassegni da caricare" e decidi a chi caricarli.` })
+            `Righe lette dal file: ${data.righeFile ?? '—'}\n\n`
+          + `Come sono state ripartite (tutte contate):\n`
+          + `• Riconosciute e caricate: ${data.spedizioniProcessate} (di cui nuove in attesa: ${data.inAttesa ?? 0} · € ${Number(data.codDaPagare||0).toFixed(2)})\n`
+          + `• Già in una tua distinta: ${data.giaInDistinta || 0}\n`
+          + `• Già pagate in precedenza: ${data.giaPagati || 0}\n`
+          + `• Doppioni nel file: ${data.doppioniFile || 0}\n`
+          + `• Non ancora versate dal corriere: ${data.saltateNonPagate || 0}\n`
+          + `• Non trovate a sistema (scartate): ${data.errori || 0}\n`
+          + (data.nonClassificate ? `\n⚠️ Righe NON classificate: ${data.nonClassificate} — avvisami, è un errore!\n` : '')
+          + `\nLe "caricate" le trovi in "Contrassegni da caricare": decidi a chi caricarle.` })
         fetch('/api/contrassegni/cod-files').then(r=>r.json()).then(d=>setCodFiles(d||[]))
         caricaDaCaricare()
       }
     } catch(err) { await dialog.alert({ title: 'Errore', message: 'Errore nel caricamento del file.' }) }
+    setAvanz(null)
     setUploading(false)
     if (fileRef.current) fileRef.current.value = ''
   }
@@ -223,6 +236,12 @@ export default function DistinteContrassegniPage() {
   return (
     <div>
       <div style={{marginBottom:'16px'}}><h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Distinte contrassegni</h1></div>
+
+      {avanz && (
+        <div style={{marginBottom:'16px'}}>
+          <BarraAvanzamento fatti={avanz.fatti} totale={avanz.totale} iniziatoIl={avanz.da} etichetta={avanz.etichetta} sottotitolo={avanz.sottotitolo} />
+        </div>
+      )}
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:'16px',marginBottom:'16px'}}>
         <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'16px'}}>
