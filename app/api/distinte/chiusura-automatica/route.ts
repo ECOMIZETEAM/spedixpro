@@ -30,9 +30,7 @@ export async function GET(req: NextRequest) {
     .not('stato', 'in', '(annullata,annullamento_pending,annullamento_manuale)')
     .gte('created_at', inizio.toISOString())
 
-  if (!speds?.length) {
-    return NextResponse.json({ success: true, distinteCreate: 0, messaggio: 'Nessuna spedizione da chiudere' })
-  }
+  // NB: niente uscita anticipata se non ci sono spedizioni — sotto vanno comunque chiusi i RESI.
 
   // AUTODISTINTA OFF (impostazioni cliente): il cron NON chiude le spedizioni di questi clienti —
   // le distinte le fanno loro a mano dal portale. Default (nessuna impostazione) = ON.
@@ -40,7 +38,7 @@ export async function GET(req: NextRequest) {
   const autodistintaOff = new Set((esclusi || []).map((c: any) => c.id))
 
   const gruppi: Record<string, any[]> = {}
-  for (const s of speds) {
+  for (const s of (speds || [])) {
     // cliente_id NULL = spedizione PROPRIA del master: prima veniva SALTATA (mai chiusa in distinta).
     // Ora la raggruppo per master+corriere con distinta senza cliente (come la chiusura manuale "m:").
     if (!s.master_id || !s.corriere_id) continue
@@ -83,5 +81,61 @@ export async function GET(req: NextRequest) {
       try { await chiudiBordereauSpediamopro(supabase, distinta.id) } catch {}
     }
   }
-  return NextResponse.json({ success: true, distinteCreate, spedizioniChiuse: speds.length })
+  // ── DISTINTE DEI RESI (stesso giro delle 23: chiudo in distinta anche i resi rientrati) ──
+  // Il reso e' GIA' addebitato dalla coda (resi_da_addebitare -> cron tracking), e l'addebito sale
+  // gia' tutta la catena: qui NON si tocca il credito, si crea solo il DOCUMENTO che mancava. Il
+  // numero distinta compare in elenco spedizioni agganciato al master DELLA SPEDIZIONE, quindi
+  // "sale la rete" da solo: lo vede anche il master sopra guardando la stessa spedizione.
+  let distinteResiCreate = 0
+  try {
+    // Resi rientrati (stato reso_mittente) di un cliente, non ancora in una distinta_resi, ultimi 30gg.
+    // Le proprie del master (cliente_id NULL) non hanno flusso di distinta reso, come nel POST manuale.
+    const { data: resi } = await supabase.from('spedizioni')
+      .select('id,master_id,cliente_id')
+      .eq('stato', 'reso_mittente')
+      .not('cliente_id', 'is', null)
+      .not('master_id', 'is', null)
+      .gte('created_at', inizio.toISOString())
+
+    if (resi?.length) {
+      // Voci gia' chiuse (anti-doppia distinta, come escludiGiaInDistinta) + ultimo numero per master.
+      const masterIds = [...new Set(resi.map((r: any) => r.master_id))]
+      const { data: drEsistenti } = await supabase.from('distinte_resi').select('master_id,numero,voci').in('master_id', masterIds)
+      const giaInDistinta = new Set<string>()
+      const maxNumPerMaster = new Map<string, number>()
+      for (const d of (drEsistenti || [])) {
+        for (const v of (Array.isArray((d as any).voci) ? (d as any).voci : [])) if (v?.id) giaInDistinta.add(v.id)
+        const mid = (d as any).master_id, n = Number((d as any).numero || 0)
+        if (n > (maxNumPerMaster.get(mid) || 0)) maxNumPerMaster.set(mid, n)
+      }
+
+      // Raggruppo per master DIRETTO + cliente: la distinta_resi e' per cliente, come nel flusso manuale.
+      const gruppiResi: Record<string, any[]> = {}
+      for (const r of resi) {
+        if (giaInDistinta.has(r.id)) continue
+        const key = r.master_id + '|' + r.cliente_id
+        if (!gruppiResi[key]) gruppiResi[key] = []
+        gruppiResi[key].push(r)
+      }
+
+      for (const key in gruppiResi) {
+        const [masterId, clienteId] = key.split('|')
+        const righe = gruppiResi[key]
+        // TOTALE = quanto e' GIA' stato addebitato AL CLIENTE (movimento reso con cliente_id): si somma
+        // cio' che la coda ha gia' scritto, per mostrarlo in distinta. Nessun addebito parte da qui.
+        const { data: movs } = await supabase.from('movimenti')
+          .select('importo').eq('tipo', 'reso').eq('cliente_id', clienteId).in('spedizione_id', righe.map(r => r.id))
+        const totale = (movs || []).reduce((s: number, m: any) => s + Math.abs(Number(m.importo || 0)), 0)
+        const numero = (maxNumPerMaster.get(masterId) || 0) + 1
+        maxNumPerMaster.set(masterId, numero)
+        const { error: errR } = await supabase.from('distinte_resi').insert({
+          master_id: masterId, cliente_id: clienteId, numero,
+          totale_ldv: righe.length, totale, voci: righe.map(r => ({ id: r.id })), stato: 'chiusa',
+        })
+        if (!errR) distinteResiCreate++
+      }
+    }
+  } catch (e: any) { console.error('[DISTINTE-RESI][CRON] errore:', e?.message) }
+
+  return NextResponse.json({ success: true, distinteCreate, spedizioniChiuse: (speds?.length || 0), distinteResiCreate })
 }
