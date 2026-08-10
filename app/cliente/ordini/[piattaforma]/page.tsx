@@ -113,26 +113,18 @@ export default function OrdiniPage() {
     if (!id) { setMsg('Nessun negozio '+nome+' collegato'); return }
     setSincronizzando(true); setMsg('')
     try {
-      // IL FILTRO SERVE A GUARDARE, NON A DECIDERE COSA SI IMPORTA.
-      //
-      // Qui si mandavano le date del selettore, che e' lo stesso che filtra la lista a schermo. Ma
-      // sono due intenzioni diverse: mettere il filtro su ieri per controllare un ordine non vuol
-      // dire "smetti di scaricare quelli di oggi". E invece succedeva proprio quello — la prima
-      // sincronizzazione della giornata funzionava (date vuote, finestra di 30 giorni), poi bastava
-      // toccare il selettore e da li' in avanti ogni Sincronizza chiedeva solo quella finestra: il
-      // cliente premeva, non arrivava niente, e aveva ordini nuovi sul negozio.
-      //
-      // Ora si manda l'UNIONE: dal piu' vecchio fra il periodo scelto e gli ultimi 30 giorni, fino
-      // a oggi. Chi vuole ripescare un giorno vecchio continua a poterlo fare, e i nuovi arrivano
-      // comunque sempre. Nessuno ci perde niente.
+      // IL PERIODO SCELTO IN PAGINA DECIDE COSA SI IMPORTA: se metti "oggi", Sincronizza scarica SOLO
+      // oggi; "ultimi 30 giorni" -> quelli. Se non hai scelto date, default agli ultimi 30 giorni,
+      // cosi' il primo sync non parte vuoto. (Prima si mandava un'unione fissa >=30gg che ignorava il
+      // selettore: mettere "oggi" scaricava comunque tutto il mese.)
       const trentaGiorniFa = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
       const oggi = new Date().toISOString().slice(0, 10)
       const res = await fetch('/api/integrazioni/'+piattaforma+'/sync', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
           integrazione_id: id,
-          dal: (fDa && fDa < trentaGiorniFa) ? fDa : trentaGiorniFa,
-          al: (fA && fA > oggi) ? fA : oggi,
+          dal: fDa || trentaGiorniFa,
+          al: fA || oggi,
         })
       })
       const d = await res.json()

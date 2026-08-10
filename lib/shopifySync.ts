@@ -1,15 +1,20 @@
 import { getValidShopifyToken, shopifyGraphQL } from '@/lib/shopify'
+import { rangeGiorniISO } from '@/lib/ebaySync'
 
-// Sincronizza gli ordini non evasi di Shopify in ordini_ecommerce.
+// Sincronizza gli ordini di Shopify in ordini_ecommerce NELLA FINESTRA DATE richiesta (default 30gg).
 // db: client Supabase (user-scoped dal portale, admin dall'app embedded).
 // L'integrazione porta con sé cliente_id/master_id: funziona in entrambi i contesti.
-export async function sincronizzaOrdiniShopify(db: any, integr: any): Promise<{ letti: number; importati: number }> {
+export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { dal?: string | null; al?: string | null }): Promise<{ letti: number; importati: number }> {
   const cred = integr.credenziali as any
   const shop = cred?.shop
   if (!shop) throw new Error('Credenziali Shopify mancanti')
   const tk = await getValidShopifyToken(integr, db)
   if (tk.error || !tk.token) throw new Error(tk.error || 'Token non disponibile')
   const token = tk.token
+  // FINESTRA DATE: si importa SOLO l'intervallo scelto in pagina (oggi -> solo oggi; il mese -> il
+  // mese). created_at di Shopify e' un timestamp: uso gli estremi ISO gia' pronti (margine orario).
+  const { daISO, aISO } = rangeGiorniISO(range?.dal, range?.al)
+  const filtroData = `created_at:>=${daISO} created_at:<=${aISO}`
 
   // Ordini via GraphQL (immagini inline), i piu' RECENTI prima, paginati fino a ~300. Prendiamo sia
   // gli EVASI sia i NON evasi (status:open, senza filtro fulfillment): cosi' anche gli ordini gia'
@@ -21,7 +26,7 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any): Promise<{ 
   for (let page = 0; page < 3; page++) {
     const data: any = await shopifyGraphQL(shop, token, `
       query($cursor: String){
-        orders(first: 100, after: $cursor, query: "status:open", sortKey: CREATED_AT, reverse: true){
+        orders(first: 100, after: $cursor, query: "status:open ${filtroData}", sortKey: CREATED_AT, reverse: true){
           edges { node {
             legacyResourceId name email phone createdAt paymentGatewayNames displayFinancialStatus displayFulfillmentStatus
             totalPriceSet { shopMoney { amount currencyCode } }
@@ -89,6 +94,7 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any): Promise<{ 
     const { data: giaDaSpedire } = await db.from('ordini_ecommerce')
       .select('id,ordine_esterno_id')
       .eq('integrazione_id', integr.id).eq('stato', 'da_spedire')
+      .gte('raw->>createdAt', daISO).lte('raw->>createdAt', aISO)   // SOLO ordini nella finestra sincronizzata: fuori non li tocco
     const daChiudere = (giaDaSpedire || [])
       .filter((r: any) => !vistiIds.has(String(r.ordine_esterno_id)))
       .map((r: any) => r.id)
