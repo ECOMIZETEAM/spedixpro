@@ -23,11 +23,19 @@ export async function GET(req: NextRequest) {
   // CONTRASSEGNO e a precompilare l'importo COD sulla spedizione. Prima la pagina cercava questi
   // dati dentro `o.raw`, che pero' NON viene mai restituito qui (troppo pesante) -> il contrassegno
   // risultava sempre 0 e il cliente doveva riscriverlo a mano (segnalato su WooCommerce).
+  // SOLO gli ordini di integrazioni ANCORA ESISTENTI: a ogni disconnetti/ricollega nasce una nuova
+  // integrazione e la vecchia sparisce, ma i suoi ordini restano ORFANI in tabella -> senza questo
+  // filtro comparivano duplicati con la data di IMPORT sbagliata (le righe sotto la vecchia connessione).
+  const { data: integrs } = await supabase.from('integrazioni').select('id')
+    .eq('cliente_id', utente.cliente_id).eq('piattaforma', piattaforma)
+  const integrIds = (integrs || []).map((i: any) => i.id)
+  if (!integrIds.length) return NextResponse.json([])
   const ordini = await fetchAll(() => supabase
     .from('ordini_ecommerce')
     .select('id,integrazione_id,piattaforma,ordine_esterno_id,numero_ordine,cliente_nome,destinatario,articoli,totale,valuta,stato,stato_pagamento,spedizione_id,fulfillment_stato,fulfillment_errore,created_at,d1:raw->>creationDate,d2:raw->>date_created,d3:raw->>created_at,d4:raw->>createdDate,d5:raw->>create_time,d6:raw->>date_add,p1:raw->>payment_method,p2:raw->>payment_method_title,p3:raw->>module,p4:raw->>payment,p5:raw->paymentSummary,d7:raw->>createdAt,p6:raw->paymentGatewayNames')
     .eq('cliente_id', utente.cliente_id)
     .eq('piattaforma', piattaforma)
+    .in('integrazione_id', integrIds)
     .order('created_at', { ascending: false }))
   const rows = (ordini as any[]).map(({ d1, d2, d3, d4, d5, d6, d7, p1, p2, p3, p4, p5, p6, ...o }: any) => {
     let t: any = d1 || d2 || d3 || d4 || d5 || d6 || d7 || null   // d7 = Shopify createdAt (camelCase)
