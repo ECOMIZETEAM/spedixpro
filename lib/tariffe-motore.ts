@@ -19,6 +19,7 @@ import { EMAIL_PER_CORRIERE,
   kgToGrams, cmToMm, euroToCents, centsToEuro
 } from '@/lib/spediamopro'
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
+import { normalizzaPaese } from '@/lib/paesi'
 import { calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
 // La sigla neutra al posto del tipo del contratto: il nome del sistema tecnico a valle non deve
 // arrivare al browser, nemmeno dentro il JSON (vedi lib/corriere-logo.ts).
@@ -216,7 +217,9 @@ export async function calcolaTariffeCliente(
   const pesoReale = tuttiColli.reduce((s:number,p:any) => s + (parseFloat(p?.weight) || 0), 0) || 1
   const provincia = (body.shipTo?.state || '').toUpperCase().trim()
   const capDest = (body.shipTo?.postalCode || '').trim()
-  const paeseDest = (body.shipTo?.country || 'IT').toUpperCase().trim()
+  // Nome esteso -> ISO2 ("Italia"/"Italy" -> "IT"): senza, un CSV col paese per esteso finiva per
+  // "estero" e non trovava tariffa (zone_cap ha i paesi come codice ISO). Vedi lib/paesi.ts.
+  const paeseDest = normalizzaPaese(body.shipTo?.country)
   const isEstero = paeseDest !== 'IT'
   const zonaNome = ZONE_MAP[provincia] || 'Italia'
 

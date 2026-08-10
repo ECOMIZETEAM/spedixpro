@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 import { siglaProvincia, SIGLE_IT } from '@/lib/province-it'
+import { normalizzaPaese } from '@/lib/paesi'
 import comuniIT from '@/lib/data/comuni.json'
 import frazioniIT from '@/lib/data/frazioni.json'
 import { createAdminSupabase } from '@/lib/supabase-admin'
@@ -283,7 +284,7 @@ export async function POST(req: NextRequest) {
       cap,
       localita: loc,
       provincia: provFinale,   // nome esteso -> sigla, oppure ricavata dal CAP se Amazon non la scrive
-      country: (g(r, 'country').toUpperCase()) || 'IT',
+      country: normalizzaPaese(g(r, 'country')),   // "Italia"/"Italy" -> "IT" (Temu esporta il paese esteso)
       telefono: g(r, 'telefono') || null,
       email_destinatario: g(r, 'email_destinatario') || null,
       peso: M.peso ? toNum(r[M.peso!]) : null,
