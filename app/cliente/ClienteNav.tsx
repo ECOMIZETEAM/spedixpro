@@ -59,7 +59,7 @@ const NAV_BASE: NavItem[] = [
   {
     id: 'account', label: 'Mio Account', icon: '⊙',
     sub: [
-      { label: 'Ricarica Credito', href: '/cliente/ricarica' },
+      // 'Ricarica Credito' nascosta: ricariche self-service sospese (vedi RICARICHE_SOSPESE nelle rotte).
       { label: 'Listino Prezzi', href: '/cliente/listino' },
       { label: 'Lista Movimenti', href: '/cliente/movimenti' },
     ],

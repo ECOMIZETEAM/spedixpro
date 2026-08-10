@@ -79,6 +79,23 @@ export default function RicaricaCredito() {
     }
   }
 
+  // SOSPESE (decisione super master): niente ricarica self-service. Deve combaciare col blocco lato
+  // rotta in app/api/cliente/ricarica. Per riattivare: rimettere a false qui e nella rotta.
+  const SOSPESE = true
+  if (SOSPESE) {
+    return (
+      <div style={{ maxWidth: 640, margin: '0 auto' }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1a1a1a', margin: '4px 0 4px' }}>Ricarica credito</h1>
+        <div style={{ ...card, background: '#fff7ed', borderColor: '#fed7aa', marginTop: 16 }}>
+          <div style={{ fontWeight: 700, color: '#9a3412', fontSize: 15 }}>Ricariche temporaneamente sospese</div>
+          <div style={{ color: '#9a3412', fontSize: 13, marginTop: 6 }}>
+            Al momento non è possibile ricaricare il credito con carta. Per aggiungere credito contatta il tuo referente.
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={{ maxWidth: 640, margin: '0 auto' }}>
       <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1a1a1a', margin: '4px 0 4px' }}>Ricarica credito</h1>

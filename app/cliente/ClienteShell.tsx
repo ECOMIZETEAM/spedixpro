@@ -81,14 +81,9 @@ export default function ClienteShell({ cliente, children, brandLogo, brandNome }
             {!isMobile && <div style={{ fontSize: '13px', color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nome}</div>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '6px' : '8px' }}>
-            <a href="/cliente/ricarica" style={{ background: '#f5f5f5', border: '1px solid #e8e8e8', borderRadius: '20px', padding: '4px 12px', fontSize: '12px', fontWeight: '600', color: '#1a1a1a', whiteSpace: 'nowrap', textDecoration: 'none' }}>
+            <span style={{ background: '#f5f5f5', border: '1px solid #e8e8e8', borderRadius: '20px', padding: '4px 12px', fontSize: '12px', fontWeight: '600', color: '#1a1a1a', whiteSpace: 'nowrap' }}>
               Credito: <span style={{ color: credito > 0 ? '#16a34a' : '#dc2626' }}>€ {credito.toFixed(2)}</span>
-            </a>
-            {!isMobile && (
-              <a href="/cliente/ricarica" title="Ricarica credito con carta" style={{ background: '#f97316', color: '#fff', borderRadius: '20px', padding: '4px 12px', fontSize: '12px', fontWeight: '700', whiteSpace: 'nowrap', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <span style={{ fontSize: '13px', lineHeight: 1 }}>＋</span> Ricarica
-              </a>
-            )}
+            </span>
             <SupportoButton compatto={isMobile} />
             <CampanellaNotifiche />
             <MenuProfilo nome={nome} ruolo="cliente" compatto={isMobile} voci={[
