@@ -48,7 +48,7 @@ export default function OrdiniPage() {
 
   const [fStore, setFStore] = useState('')
   const [fStatoPag, setFStatoPag] = useState('')
-  const [fStatoEv, setFStatoEv] = useState('')
+  const [fStatoEv, setFStatoEv] = useState('da_spedire')   // default: solo i NON evasi (da spedire). "Tutti" mostra anche gli spediti.
   const [fPaese, setFPaese] = useState('')
   const [fNum, setFNum] = useState('')
   const [fSku, setFSku] = useState('')

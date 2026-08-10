@@ -86,7 +86,7 @@ export default function ImportaOrdiniPage() {
   const [mittenteNome, setMittenteNome] = useState('')  // nome mittente (profilo cliente) mostrato in colonna
   const [filtro, setFiltro] = useState<string>('min') // 'min' | corriere_id
   const [q, setQ] = useState('')                       // ricerca libera (ordine, destinatario, località, cap, telefono)
-  const [filtroStato, setFiltroStato] = useState('tutti') // tutti | da_spedire | spedito | errore | archiviato
+  const [filtroStato, setFiltroStato] = useState('da_spedire') // default: solo i NON evasi. tutti | da_spedire | spedito | errore | archiviato
   const [spedendo, setSpedendo] = useState(false)
   const [unendo, setUnendo] = useState(false)
 
