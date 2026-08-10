@@ -158,13 +158,21 @@ export default function NetworkRicevutiPage() {
                   {apertoBlocco===b.k && (
                     <table style={{width:'100%',borderCollapse:'collapse',background:'#fcfcfc'}}>
                       <thead><tr style={{background:'#f9fafb'}}>
-                        <th style={th}>LDV</th><th style={th}>Peso dich. → reale</th><th style={th}>Costo → ricalcolo</th><th style={th}>Differenza</th><th style={th}>Stato</th>
+                        <th style={th}>LDV</th><th style={th}>Peso fatturato (vol.)</th><th style={th}>Costo → ricalcolo</th><th style={th}>Differenza</th><th style={th}>Stato</th>
                       </tr></thead>
                       <tbody>
                         {b.righe.map((r:any)=>(
                           <tr key={r.id}>
                             <td style={{...td,fontWeight:600}}>{r.numero_spedizione}</td>
-                            <td style={td}>{r.peso_iniziale} → {r.peso_reale} kg</td>
+                            {/* Si mostra il peso che FATTURA (max fra reale e volume): con un collo
+                                leggero ma ingombrante e' il volume a far salire il costo, e va scritto
+                                — altrimenti "14 kg" sembra un peso sceso e la rettifica pare un furto. */}
+                            {(() => {
+                              const vol = Number(r.peso_volume_reale) || 0
+                              const reale = Number(r.peso_reale) || 0
+                              const fatt = Math.max(reale, vol)
+                              return <td style={td}>{r.peso_iniziale} → <strong>{fatt.toFixed(1)}</strong> kg{vol > reale ? <span style={{color:'#ea580c'}}> (vol.)</span> : ''}</td>
+                            })()}
                             <td style={td}>€ {Number(r.costo_iniziale).toFixed(2)} → € {Number(r.costo_finale).toFixed(2)}</td>
                             <td style={{...td,fontWeight:700,color:Number(r.differenza)<0?'#dc2626':'#16a34a'}}>€ {Number(r.differenza).toFixed(2)}</td>
                             <td style={td}>

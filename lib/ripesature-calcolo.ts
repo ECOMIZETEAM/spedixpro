@@ -1,4 +1,4 @@
-import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
+import { calcolaPrezzoListino, calcolaSupplementiCliente, calcolaPesoFatturato, fattoreVolumeCorriere } from '@/lib/pricing'
 import { costruisciCatena } from '@/lib/cascata'
 import type { Ripesatura } from '@/lib/ripesature'
 
@@ -39,6 +39,7 @@ export type EsitoRipesatura = {
   colli: number
   pesoPrima: number
   pesoDopo: number
+  pesoVolumeDopo: number   // peso VOLUMETRICO dopo la ripesatura: va mostrato accanto al reale
   misure: string
   addebitoFornitore: number
   livelli: LivelloRettifica[]
@@ -67,6 +68,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
       colli: r.colli.length,
       pesoPrima: 0,
       pesoDopo: arrotonda(r.colli.reduce((s, c) => s + c.peso, 0)),
+      pesoVolumeDopo: 0,
       misure: r.colli.map(c => `${c.lunghezza}x${c.larghezza}x${c.altezza}`).join(' + '),
       addebitoFornitore: r.addebitoFornitore,
       livelli: [],
@@ -87,6 +89,15 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
       weight: c.peso, length: c.lunghezza, width: c.larghezza, height: c.altezza,
     }))
     base.colli_ripesati = packages
+    // IL VOLUME DOPO LA RIPESATURA. Serve perche' mostrare solo i 14 kg reali quando il volume ne fa
+    // 50 fa sembrare la rettifica un furto (peso giu', costo su): il costo sale per il VOLUME, e va
+    // scritto accanto al reale. Divisore = fattore del contratto (quello che il master ha impostato
+    // per questo corriere). Per il cliente sotto lo si riprende esatto dal suo listino.
+    try {
+      const fatt = await fattoreVolumeCorriere(admin, s.master_id, s.corriere_id)
+      const pv = calcolaPesoFatturato(packages, fatt).pesoVolume
+      if (pv > 0) base.pesoVolumeDopo = arrotonda(pv)
+    } catch { /* senza fattore il volume resta 0 */ }
     const dest = {
       provincia: s.dest_provincia || '', cap: s.dest_cap || '',
       citta: s.dest_citta || '', paese: s.dest_paese || 'IT',
@@ -133,6 +144,8 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           listinoId: cl.listino_cliente_id, corriereId: s.corriere_id, packages, ...dest,
         })
         if (ris) {
+          // Per il CLIENTE il volume lo dice il SUO listino (fattore suo): e' quello esatto.
+          if (Number(ris.peso_volume) > 0) base.pesoVolumeDopo = arrotonda(Number(ris.peso_volume))
           // LE DUE CIFRE DEVONO ESSERE FATTE CON LA STESSA RICETTA.
           // `pagato` viene dai movimenti, e alla creazione il cliente e' addebitato di
           // nolo + fee contrassegno + fee assicurazione. Riprezzando il solo nolo si sottraeva una
