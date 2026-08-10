@@ -40,14 +40,19 @@ export async function POST(req: NextRequest) {
     for (const kk in rigaRaw) { riga[String(kk).trim().toLowerCase()] = (rigaRaw as any)[kk] }
     // 'shipment' = export contrassegni SpediamoPro (codice spedizione del provider, es. 6A54B0F9AB03D)
     const ldv = String(riga['ldv'] || riga['lettera di vettura'] || riga['n. spedizione'] || riga['numero'] || riga['shipment'] || '').trim()
-    // Importo: alias storici + 'COD amount [EUR]' (SpediamoPro) + virgola decimale
-    let importoRaw = riga['importo'] ?? riga['importocod'] ?? riga['importo cod'] ?? riga['contrassegno']
+    // Importo VERSATO dal corriere. Nei file Ecomize/Em express c'e' 'pagato' (quanto il corriere ha
+    // davvero versato) accanto a 'contrassegno' (il nominale): a scendere al cliente e' il PAGATO.
+    // Restano gli alias storici + 'COD amount [EUR]' (SpediamoPro). Virgola decimale gestita.
+    let importoRaw = riga['pagato'] ?? riga['importo'] ?? riga['importocod'] ?? riga['importo cod'] ?? riga['contrassegno']
     if (importoRaw == null) { const k = Object.keys(riga).find(x => x.startsWith('cod amount')); if (k) importoRaw = riga[k] }
     const importoCod = parseFloat(String(importoRaw ?? 0).replace(',', '.')) || 0
     if (!ldv) { errori++; continue }
     // Colonna Status (SpediamoPro): in distinta vanno SOLO i contrassegni gia' PAGATI dal corriere.
     const statusRiga = String(riga['status'] ?? '').trim().toLowerCase()
     if (statusRiga && !['paid', 'pagato', 'pagata'].includes(statusRiga)) { saltateNonPagate++; continue }
+    // Formato Ecomize/Em express: se c'e' la colonna 'pagato' ed e' 0 (o vuota) il corriere non ha
+    // ancora versato quel contrassegno → si salta, esattamente come lo status non-pagato di sopra.
+    if (('pagato' in riga) && !(importoCod > 0)) { saltateNonPagate++; continue }
     codFile += importoCod
 
     let { data: spedizione } = await adminDb.from('spedizioni')
