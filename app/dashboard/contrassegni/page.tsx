@@ -29,6 +29,7 @@ export default function ListaContrassegniPage() {
   const dialog = useDialog()
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
+  const [corrieri, setCorrieri] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [cerca, setCerca] = useState('')
@@ -43,13 +44,20 @@ export default function ListaContrassegniPage() {
 
   useEffect(() => {
     fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
+    fetch('/api/corrieri/lista').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d)?d:[]))
     carica()
   }, [])
+
+  // Opzioni Vettore/Contratto dai MIEI corrieri (in rete i nomi contratto combaciano).
+  const vettoriPresenti = Array.from(new Set((corrieri||[]).map((c:any)=>String(c.nome_contratto||'').split(' ')[0].toUpperCase()).filter(Boolean))).sort()
+  const contrattiPresenti = Array.from(new Set((corrieri||[]).map((c:any)=>c.nome_contratto).filter(Boolean))).sort()
 
   async function carica() {
     setLoading(true)
     const params = new URLSearchParams()
     if (filtri.clienteId) params.set('clienteId', filtri.clienteId)
+    if (filtri.vettore) params.set('vettore', filtri.vettore)
+    if (filtri.contratto) params.set('contratto', filtri.contratto)
     if (filtri.statoSpedizione) params.set('stato', filtri.statoSpedizione)
     if (filtri.statoContrassegno) params.set('statoContrassegno', filtri.statoContrassegno)
     if (filtri.dal) params.set('dal', filtri.dal)
@@ -128,15 +136,16 @@ export default function ListaContrassegniPage() {
           </div>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Vettore</div>
-            <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
+            <select value={filtri.vettore} onChange={e=>setFiltri(f=>({...f,vettore:e.target.value,contratto:''}))} style={sel}>
               <option value="">Tutti</option>
-              <option value="sda">SDA</option><option value="gls">GLS</option><option value="brt">BRT</option>
+              {vettoriPresenti.map((v:string)=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Contratto</div>
             <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={sel}>
               <option value="">Tutti</option>
+              {contrattiPresenti.filter((n:string)=>!filtri.vettore || String(n||'').split(' ')[0].toUpperCase()===filtri.vettore).map((n:string)=><option key={n} value={n}>{n}</option>)}
             </select>
           </div>
           <div>
@@ -203,7 +212,7 @@ export default function ListaContrassegniPage() {
                   <th style={{padding:'9px 12px',borderBottom:'1px solid #d1d5db',width:'36px'}}>
                     <input type="checkbox" title="Seleziona tutti gli in attesa" checked={selectedIds.length===selezionabili.length&&selezionabili.length>0} onChange={toggleAll} disabled={selezionabili.length===0}/>
                   </th>
-                  {['N. Spedizione','Mittente','Destinatario','Data Spedizione','Contrassegno','Allegati','Stato spedizione','N. Dist.','Stato contrassegno','Ultimo aggiornamento',''].map(h=>(
+                  {['N. Spedizione','Mittente','Destinatario','Data Spedizione','Contrassegno','Stato spedizione','N. Dist.','Stato contrassegno','Ultimo aggiornamento',''].map(h=>(
                     <th key={h} style={{textAlign:'left' as const,padding:'9px 12px',fontSize:'11px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
                   ))}
                 </tr>
@@ -225,7 +234,6 @@ export default function ListaContrassegniPage() {
                       </td>
                       <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px',whiteSpace:'nowrap' as const}}>{new Date(s.created_at).toLocaleDateString('it-IT')}</td>
                       <td style={{padding:'9px 12px',fontWeight:'700',color:'#1a1a1a'}}>€ {Number(s.contrassegno).toFixed(2)}</td>
-                      <td style={{padding:'9px 12px',textAlign:'center' as const}}><span style={{fontSize:'16px',cursor:'pointer'}}>📁</span></td>
                       <td style={{padding:'9px 12px'}}><span style={{background:stSped.bg,color:stSped.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>{stSped.label}</span></td>
                       <td style={{padding:'9px 12px',color:s.distinta_numero?'#f97316':'#9ca3af',fontSize:'12px',fontWeight:s.distinta_numero?'700':'400'}}>{s.distinta_numero||'—'}</td>
                       <td style={{padding:'9px 12px'}}><span style={{background:stCod.bg,color:stCod.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>{stCod.label}</span></td>

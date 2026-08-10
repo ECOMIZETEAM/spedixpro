@@ -16,8 +16,11 @@ export async function GET(req: NextRequest) {
   const clienteId = masterSel ? null : clienteIdRaw
   const stato = p.get('stato')
   const statoContrassegno = p.get('statoContrassegno')
+  const vettore = p.get('vettore')
+  const contratto = p.get('contratto')
   const dal = p.get('dal')
   const al = p.get('al')
+  const sanitizza = (v: string) => v.replace(/[,()"\\%]/g, ' ').trim()
 
   let db: any = supabase
   let subtreeSel: string[] | null = null
@@ -35,8 +38,10 @@ export async function GET(req: NextRequest) {
   // Agente: solo contrassegni dei suoi clienti (calcolato una volta, fuori dal loop).
   const agIds = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
   const buildBase = () => {
+    // Filtro su corrieri (vettore/contratto) → il join deve essere INNER, altrimenti passa tutto.
+    const embCorr = (vettore || contratto) ? 'corrieri!inner(nome_contratto)' : 'corrieri(nome_contratto)'
     let q = db.from('spedizioni')
-      .select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
+      .select('*, clienti(ragione_sociale), ' + embCorr)
       .gt('contrassegno', 0)
       .order('created_at', { ascending: false })
     if (subtreeSel) q = q.in('master_id', subtreeSel)
@@ -45,6 +50,8 @@ export async function GET(req: NextRequest) {
     if (clienteId) q = q.eq('cliente_id', clienteId)
     if (stato) q = q.eq('stato', stato)
     if (statoContrassegno) q = q.eq('stato_contrassegno', statoContrassegno)
+    if (contratto) q = q.eq('corrieri.nome_contratto', contratto)                        // contratto esatto
+    if (vettore) q = q.ilike('corrieri.nome_contratto', `${sanitizza(vettore)}%`)          // vettore = prima parola
     if (dal) q = q.gte('created_at', dal)
     if (al) q = q.lte('created_at', al + 'T23:59:59')
     return q
