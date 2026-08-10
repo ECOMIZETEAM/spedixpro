@@ -36,6 +36,23 @@ export async function sincronizzaOrdiniEbay(db: any, integr: any, range?: { dal?
     if (batch.length < LIMIT || (totApi && offset + LIMIT >= totApi)) break
   }
 
+  // Oltre alla finestra date: gli ordini ANCORA DA EVADERE, a prescindere dalla data. Un ordine
+  // pagato ma non spedito puo' essere piu' VECCHIO della finestra e va comunque importato — era il
+  // "non me li importa tutti" (21 ordini, solo 13 dentro i 30 giorni). Qui NON allarghiamo lo storico
+  // di TUTTI gli ordini (quello resta indesiderato): prendiamo solo i non evasi, che sono pochi ed
+  // esattamente quelli da spedire. Best-effort + DEDUP: se la query fallisce o l'ordine c'e' gia',
+  // l'import della finestra resta valido.
+  const visti = new Set(ordini.map((o: any) => String(o.orderId)))
+  try {
+    for (let offset = 0; offset < 2000; offset += LIMIT) {
+      const data: any = await ebayGet(token, `/sell/fulfillment/v1/order?filter=${encodeURIComponent('orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}')}&limit=${LIMIT}&offset=${offset}`)
+      const batch: any[] = data?.orders || []
+      for (const o of batch) { const id = String(o.orderId); if (!visti.has(id)) { visti.add(id); ordini.push(o) } }
+      const tot = Number(data?.total || 0)
+      if (batch.length < LIMIT || (tot && offset + LIMIT >= tot)) break
+    }
+  } catch (e: any) { console.error('[EBAY SYNC] fetch ordini da evadere (best-effort):', e?.message) }
+
   let importati = 0, errori = 0
   for (const o of ordini) {
     const shipTo = o.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo || {}
