@@ -104,17 +104,22 @@ export async function fattoreVolumeCorriere(supabase: any, masterId: string, cor
 export function calcolaPesoFatturato(packages: any[], fattore: number, soloPesoReale = false): { pesoReale: number; pesoVolume: number; pesoFatturato: number } {
   const pks = Array.isArray(packages) ? packages : []
   const f = fattore > 0 ? fattore : 5000
-  let pesoReale = 0, pesoVolume = 0, perCollo = 0
+  let pesoReale = 0, pesoVolume = 0
   for (const p of pks) {
     const peso = parseFloat(p?.weight) || 0
     const L = parseFloat(p?.length) || 0, W = parseFloat(p?.width) || 0, H = parseFloat(p?.height) || 0
+    // Un collo senza misure vale il suo peso: non si inventa un volume che non conosciamo.
     const vol = (L && W && H) ? (L * W * H) / f : 0
     pesoReale += peso
     pesoVolume += vol
-    // Un collo senza misure vale il suo peso: non si inventa un volume che non conosciamo.
-    perCollo += Math.max(peso, vol)
   }
-  const pesoFatturato = soloPesoReale ? pesoReale : perCollo
+  // PESO FATTURATO = SOMMA DEI VOLUMI, non collo-per-collo.
+  // Si confronta il peso REALE TOTALE col VOLUME TOTALE e si prende il più alto — è la regola del
+  // gestionale. Prima si sommava il massimo(reale,volume) di OGNI collo: su una multicollo con una
+  // scatola densa e una ingombrante il risultato usciva più alto della regola (es. 30 kg reali
+  // fatturati 30,48), sovra-fatturando il cliente. Su una spedizione mono-collo i due metodi danno
+  // lo stesso identico numero (nessuna spedizione a un collo cambia).
+  const pesoFatturato = soloPesoReale ? pesoReale : Math.max(pesoReale, pesoVolume)
   return { pesoReale, pesoVolume, pesoFatturato }
 }
 
