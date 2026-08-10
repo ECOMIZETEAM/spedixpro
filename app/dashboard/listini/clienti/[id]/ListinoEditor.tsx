@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { logoCorriere } from '@/lib/corriere-logo'
 import { setFlash } from '@/lib/flash'
 
@@ -137,6 +137,19 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     window.location.href = `${basePagina}/${listino.id}?corriere=${nuovoContrattoId}`
   }
   const corriereId = corriereSelezionatoId || corrieri[0]?.id || ''
+  // ZONE POSSEDUTE DAL MASTER: quelle per cui ho un costo su QUESTO corriere (da costiMaster).
+  // Sulle altre non posso mettere un prezzo di vendita: venderei una zona che non compro, e nasce
+  // l'"orfano" — un prezzo che a valle resta comunque bloccato perché il costo manca (è successo:
+  // clienti con isole/disagiate prezzate ma non spedibili). Meglio non farlo scrivere proprio.
+  // Guardia attiva SOLO se conosco i costi (costiMaster non vuoto) e SOLO su un listino di vendita
+  // (mai sul listino-costo del master, dove le zone il costo ce l'hanno per definizione).
+  const zoneMasterPossiede = useMemo(() => {
+    const s = new Set<string>()
+    for (const k of Object.keys(costiMaster || {})) { const zid = k.split('|')[2]; if (zid) s.add(zid) }
+    return s
+  }, [costiMaster])
+  const guardiaCosti = !isCorriere && zoneMasterPossiede.size > 0
+  const zonaBloccata = (zid: string) => guardiaCosti && !zoneMasterPossiede.has(zid)
   // BOZZA in corso: se vai a vedere un altro listino e poi torni la ritrovi (navigazione);
   // se invece RICARICHI la pagina (reload) riparte pulita dai dati salvati.
   const bozzaKey = `bozza_listino:${listino.id}:${corriereId}`
@@ -345,16 +358,28 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
               </div>
             )
           })()}
+          {(() => {
+            // Zone che il master NON possiede: non prezzabili (casella bloccata). Spiega perché, così
+            // non sembra un errore. Senza questo nascevano prezzi "orfani" bloccati a valle.
+            if (!guardiaCosti) return null
+            const bloccate = zone.filter(z => zonaBloccata(z.id))
+            if (!bloccate.length) return null
+            return (
+              <div style={{margin:'12px 16px 0',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'10px 14px',fontSize:'13px',color:'#4b5563'}}>
+                🔒 <b>{bloccate.length===1?'1 zona non è disponibile':`${bloccate.length} zone non sono disponibili`}</b> — non hai un costo per {bloccate.length===1?'questa zona':'queste zone'} su questo corriere, quindi non {bloccate.length===1?'la puoi':'le puoi'} prezzare: {bloccate.map(z=>z.nome).join(', ')}. Per attivarla, chiedi al tuo master.
+              </div>
+            )
+          })()}
           <div style={{overflowX:'auto' as const}}>
             <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
               <thead>
                 <tr style={{background:'#fafafa'}}>
                   <th style={{padding:'9px 12px',textAlign:'left' as const,fontWeight:'600',color:'#1a1a1a',fontSize:'11.5px',borderBottom:'1px solid #d1d5db',minWidth:'230px'}}>Peso (kg)</th>
-                  {zone.map(z=>(
-                    <th key={z.id} style={{padding:'9px 10px',textAlign:'center' as const,fontWeight:'600',color:'#1a1a1a',fontSize:'11.5px',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>
-                      {z.nome} €
+                  {zone.map(z=>{ const bl = zonaBloccata(z.id); return (
+                    <th key={z.id} style={{padding:'9px 10px',textAlign:'center' as const,fontWeight:'600',color:bl?'#9ca3af':'#1a1a1a',fontSize:'11.5px',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>
+                      {z.nome} €{bl && <div style={{fontSize:'9px',fontWeight:500,color:'#9ca3af'}}>non disponibile</div>}
                     </th>
-                  ))}
+                  )})}
                   <th style={{padding:'9px 8px',textAlign:'center' as const,fontWeight:'600',color:'#1a1a1a',fontSize:'11.5px',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>Fuel %</th>
                   <th style={{padding:'9px 8px',borderBottom:'1px solid #d1d5db',width:'32px'}}></th>
                 </tr>
@@ -373,16 +398,20 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
                       </div>
                     </td>
                     {zone.map(z=>{
+                      const bloccata = zonaBloccata(z.id)
                       const costo = costiMaster?.[`${fascia.tipo}|${fascia.peso}|${z.id}`]
                       const prezzo = parseFloat(fascia.prezzi[z.id] ?? '')
-                      const sottoCosto = costo != null && prezzo > 0 && prezzo < costo
+                      const sottoCosto = !bloccata && costo != null && prezzo > 0 && prezzo < costo
                       return (
                       <td key={z.id} style={{padding:'6px 6px',textAlign:'center' as const}}>
-                        <input type="number" value={fascia.prezzi[z.id]??''} onChange={e=>aggiornaPrezzo(idx,z.id,e.target.value)} placeholder="0.00" min="0" step="0.01"
-                          title={sottoCosto ? `Sotto costo: il tuo costo per ${z.nome} a questa fascia e' ${costo!.toFixed(2)} €` : (costo != null ? `Tuo costo: ${costo.toFixed(2)} €` : undefined)}
+                        <input type="number" value={fascia.prezzi[z.id]??''} disabled={bloccata}
+                          onChange={e=>{ if (!bloccata) aggiornaPrezzo(idx,z.id,e.target.value) }} placeholder={bloccata?'—':'0.00'} min="0" step="0.01"
+                          title={bloccata ? `Non possiedi il costo per «${z.nome}» su questo corriere: non puoi venderla. Chiedi al tuo master di attivare questa zona.` : (sottoCosto ? `Sotto costo: il tuo costo per ${z.nome} a questa fascia e' ${costo!.toFixed(2)} €` : (costo != null ? `Tuo costo: ${costo.toFixed(2)} €` : undefined))}
                           style={{...inp,width:'72px',textAlign:'right' as const,
+                            ...(bloccata ? {background:'#f3f4f6',color:'#9ca3af',borderColor:'#e5e7eb',cursor:'not-allowed'} : {}),
                             ...(sottoCosto ? {borderColor:'#dc2626',background:'#fef2f2',color:'#b91c1c',fontWeight:700} : {})}}/>
                         {sottoCosto && <div style={{fontSize:'10px',color:'#dc2626',marginTop:'2px',whiteSpace:'nowrap' as const}}>costo {costo!.toFixed(2)}</div>}
+                        {bloccata && <div style={{fontSize:'10px',color:'#9ca3af',marginTop:'2px',whiteSpace:'nowrap' as const}}>non disp.</div>}
                       </td>
                     )})}
                     <td style={{padding:'6px 6px',textAlign:'center' as const}}>
