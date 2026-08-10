@@ -21,7 +21,14 @@ import { stripeConfigurato, stripeClient } from '@/lib/stripe'
 const MIN = 1        // qui non c'e' minimo di ricarica: si copre l'esatto mancante di UNA spedizione
 const MAX = 5000
 
+// SOSPESE su decisione del super master: niente addebito carta self-service (né ricarica né
+// pagamento della singola spedizione con carta). Per riattivare: rimettere a false.
+const RICARICHE_SOSPESE = true
+
 export async function POST(req: NextRequest) {
+  if (RICARICHE_SOSPESE) {
+    return NextResponse.json({ error: 'Il pagamento con carta è temporaneamente sospeso.' }, { status: 503 })
+  }
   if (!stripeConfigurato()) {
     return NextResponse.json({ error: 'Il pagamento con carta non è ancora attivo.' }, { status: 400 })
   }

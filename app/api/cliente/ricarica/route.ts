@@ -16,7 +16,14 @@ import { stripeConfigurato, stripeClient } from '@/lib/stripe'
 const MIN = 10       // ricarica minima concordata
 const MAX = 5000     // oltre, meglio parlarne: bonifico o pratica dedicata
 
+// SOSPESE su decisione del super master: i clienti NON possono ricaricarsi da soli con carta al
+// momento. Per riattivare: rimettere a false.
+const RICARICHE_SOSPESE = true
+
 export async function POST(req: NextRequest) {
+  if (RICARICHE_SOSPESE) {
+    return NextResponse.json({ error: 'Le ricariche del credito sono temporaneamente sospese.' }, { status: 503 })
+  }
   if (!stripeConfigurato()) {
     return NextResponse.json({ error: 'Il pagamento con carta non è ancora attivo.' }, { status: 400 })
   }
