@@ -59,8 +59,11 @@ export async function GET(req: NextRequest) {
   }
   await adminState.from('shopify_oauth_state').delete().eq('state', state)
 
-  // Scambia code -> access token OFFLINE (senza scadenza): e' il tipo corretto per
-  // un'app che sincronizza ordini in background, non richiede refresh e non si "rompe".
+  // Scambia code -> access token OFFLINE A SCADENZA (`expiring=1`). Shopify NON accetta piu' i
+  // token offline non-scadenti sull'Admin API (risponde 403 "Non-expiring access tokens are no
+  // longer accepted"). Con `expiring=1` la risposta porta access_token + expires_in + refresh_token:
+  // il token si rinnova col refresh (vedi getValidShopifyToken), non si "rompe". Al refresh Shopify
+  // INVALIDA il vecchio refresh_token, quindi va sempre salvato quello nuovo.
   let token = ''
   let scope = ''
   let refreshToken = ''
@@ -70,7 +73,7 @@ export async function GET(req: NextRequest) {
     const r = await fetch(`https://${shop}/admin/oauth/access_token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: apiKey, client_secret: apiSecret, code }),
+      body: JSON.stringify({ client_id: apiKey, client_secret: apiSecret, code, expiring: '1' }),
     })
     const raw = await r.text()
     let d: any = null

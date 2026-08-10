@@ -20,7 +20,11 @@ export async function getValidShopifyToken(integrazione: any, db?: any): Promise
   // Va usato per primo, sempre. Il token coniato con client_credentials è un ripiego temporaneo
   // (24h) e NON porta con sé l'autorizzazione del negoziante: usandolo al posto di questo si
   // finisce per chiedere gli ordini senza averne il diritto, e Shopify risponde 403.
-  if (token && (!expiresAt || expiresAt - now > 5 * 60 * 1000)) {
+  // Si usa il token SOLO se ha una scadenza ancora valida. Un token NON-SCADENTE (expiresAt null,
+  // il vecchio tipo) Shopify ora lo RIFIUTA con 403 ("Non-expiring access tokens are no longer
+  // accepted"): va rinnovato col refresh (sotto). Prima qui `!expiresAt` lo restituiva com'era —
+  // ed era la causa del 403 sulle integrazioni collegate col vecchio flusso.
+  if (token && expiresAt && expiresAt - now > 5 * 60 * 1000) {
     return { token }
   }
 
