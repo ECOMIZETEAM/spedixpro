@@ -31,13 +31,18 @@ function imageDataToZpl(data: Uint8ClampedArray, w: number, h: number): string {
 }
 
 // PDF -> ZPL (una etichetta ^XA...^XZ per pagina), renderizzato alla dpi della stampante.
-async function pdfToZpl(pdfData: ArrayBuffer, dpi: number): Promise<string> {
+// maxW = larghezza massima stampabile in dot: se l'etichetta a questa risoluzione la supera, la si
+// riduce per farla stare TUTTA. Senza, il lato destro esce dall'area e viene TAGLIATO (Poste, che
+// genera il PDF piu' largo dell'etichetta da 10 cm).
+async function pdfToZpl(pdfData: ArrayBuffer, dpi: number, maxW = 0): Promise<string> {
   const pdfjs = await loadPdfjs()
   const doc = await pdfjs.getDocument({ data: new Uint8Array(pdfData) }).promise
-  const scale = dpi / 72
   let out = ''
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p)
+    let scale = dpi / 72
+    const wPiena = page.getViewport({ scale }).width
+    if (maxW && wPiena > maxW) scale = scale * (maxW / wPiena)   // fit-to-width: riduce se sborda
     const viewport = page.getViewport({ scale })
     const w = Math.round(viewport.width), h = Math.round(viewport.height)
     const canvas = document.createElement('canvas')
@@ -50,14 +55,15 @@ async function pdfToZpl(pdfData: ArrayBuffer, dpi: number): Promise<string> {
   return out
 }
 
-// Immagine (GIF/PNG) -> ZPL
-async function imageToZpl(blob: Blob, dpi: number): Promise<string> {
+// Immagine (GIF/PNG) -> ZPL. maxW: vedi pdfToZpl (fit-to-width, evita il taglio a destra).
+async function imageToZpl(blob: Blob, dpi: number, maxW = 0): Promise<string> {
   const url = URL.createObjectURL(blob)
   try {
     const img = await new Promise<HTMLImageElement>((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = url })
-    const w = img.naturalWidth, h = img.naturalHeight
+    let w = img.naturalWidth, h = img.naturalHeight
+    if (maxW && w > maxW) { const k = maxW / w; w = Math.round(w * k); h = Math.round(h * k) }
     const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h
-    const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0)
+    const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h)
     return imageDataToZpl(ctx.getImageData(0, 0, w, h).data, w, h)
   } finally { URL.revokeObjectURL(url) }
 }
@@ -87,20 +93,24 @@ async function inviaZpl(zpl: string, device?: any): Promise<void> {
 }
 
 // Stampa UNA etichetta (dato l'URL che ritorna il PDF/immagine). dpi = risoluzione stampante (203 std).
-export async function stampaEtichettaZebra(labelUrl: string, dpi = 203): Promise<void> {
+// larghezzaMm = larghezza dell'etichetta (10 cm standard): oltre, il contenuto viene ridotto per non
+// finire tagliato a destra.
+export async function stampaEtichettaZebra(labelUrl: string, dpi = 203, larghezzaMm = 100): Promise<void> {
   const res = await fetch(labelUrl)
   if (!res.ok) throw new Error('Etichetta non disponibile.')
   const ct = (res.headers.get('content-type') || '').toLowerCase()
   const buf = await res.arrayBuffer()
   const head = new Uint8Array(buf.slice(0, 4))
   const isPdf = ct.includes('pdf') || (head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46) // %PDF
-  const zpl = isPdf ? await pdfToZpl(buf, dpi) : await imageToZpl(new Blob([buf], { type: ct || 'image/png' }), dpi)
+  const maxW = Math.round(dpi * larghezzaMm / 25.4)
+  const zpl = isPdf ? await pdfToZpl(buf, dpi, maxW) : await imageToZpl(new Blob([buf], { type: ct || 'image/png' }), dpi, maxW)
   await inviaZpl(zpl)
 }
 
 // Stampa PIÙ etichette in sequenza (una chiamata write per ognuna). Ritorna quante ok/errore.
-export async function stampaEtichetteZebra(labelUrls: string[], dpi = 203): Promise<{ ok: number; errori: number }> {
+export async function stampaEtichetteZebra(labelUrls: string[], dpi = 203, larghezzaMm = 100): Promise<{ ok: number; errori: number }> {
   const device = await getStampante()   // una volta sola
+  const maxW = Math.round(dpi * larghezzaMm / 25.4)
   let ok = 0, errori = 0
   for (const u of labelUrls) {
     try {
@@ -109,7 +119,7 @@ export async function stampaEtichetteZebra(labelUrls: string[], dpi = 203): Prom
       const buf = await res.arrayBuffer()
       const head = new Uint8Array(buf.slice(0, 4))
       const isPdf = ct.includes('pdf') || (head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46)
-      const zpl = isPdf ? await pdfToZpl(buf, dpi) : await imageToZpl(new Blob([buf], { type: ct || 'image/png' }), dpi)
+      const zpl = isPdf ? await pdfToZpl(buf, dpi, maxW) : await imageToZpl(new Blob([buf], { type: ct || 'image/png' }), dpi, maxW)
       await inviaZpl(zpl, device); ok++
     } catch { errori++ }
   }
