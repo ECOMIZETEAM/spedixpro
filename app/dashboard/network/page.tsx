@@ -56,6 +56,7 @@ export default function NetworkRicevutiPage() {
       })
       const d = await res.json()
       if (d.error) setMsg('Errore: ' + d.error)
+      else if (d.giaDecise) setMsg('ℹ️ ' + (d.messaggio || 'Queste rettifiche erano già state decise.'))
       else if (decisione === 'assorbita') setMsg(`✓ ${d.assorbite} rettifiche assorbite: restano a tuo carico, la tua rete non viene toccata.`)
       else setMsg(`✓ Accettate: ${d.create} rettifiche sono nella tua pagina Spedizioni › Rettifica Costi, divise per cliente e sotto-master. Da lì scegli a chi caricarle — fino a quel momento non viene scalato niente a nessuno.`
         + (d.nonPropagate ? ` (${d.nonPropagate} non girate: ${(d.dettaglio||[]).slice(0,3).map((x:any)=>x.ldv+' — '+x.perche).join('; ')})` : ''))

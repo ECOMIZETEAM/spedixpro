@@ -54,11 +54,20 @@ export async function POST(req: NextRequest) {
   // SOLO LE MIE, E SOLO QUELLE GIA' ADDEBITATE.
   // Una rettifica che il livello di sopra non ha ancora confermato non e' mia: non mi e' stato
   // tolto un euro, e girarla al livello sotto vorrebbe dire incassare qualcosa che non ho pagato.
-  const { data: righe } = await adminDb.from('rettifiche')
+  const { data: tutteMie } = await adminDb.from('rettifiche')
     .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_reale,colli_ripesati,rif_fornitore,propagazione')
     .in('id', ids).eq('target_master_id', mio).eq('confermata', true)
-  if (!righe?.length) {
+  if (!tutteMie?.length) {
     return NextResponse.json({ error: 'Nessuna rettifica tua fra quelle indicate (o non ancora confermata da chi te l\'ha girata).' }, { status: 404 })
+  }
+  // Si agisce SOLO su quelle ANCORA DA DECIDERE. Se il browser e' rimasto aperto da prima (pagina
+  // "stale") e rimanda righe gia' decise, non si rifa' il lavoro: ne' la propagazione lenta a vuoto
+  // (le figlie ci sono gia', l'indice le respinge tutte, e intanto la pagina sembra piantata), ne' un
+  // "assorbi" che sovrascriverebbe una propagazione gia' fatta. Si risponde chiaro, non "non fa nulla".
+  const righe = (tutteMie as any[]).filter(r => !r.propagazione)
+  if (!righe.length) {
+    return NextResponse.json({ ok: true, assorbite: 0, create: 0, giaDecise: tutteMie.length,
+      messaggio: `Queste ${tutteMie.length} rettifiche erano già state decise: non c'è altro da fare. Aggiorna la pagina.` })
   }
 
   if (decisione !== 'propagata') {
