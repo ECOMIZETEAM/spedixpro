@@ -14,7 +14,12 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
   // FINESTRA DATE: si importa SOLO l'intervallo scelto in pagina (oggi -> solo oggi; il mese -> il
   // mese). created_at di Shopify e' un timestamp: uso gli estremi ISO gia' pronti (margine orario).
   const { daISO, aISO } = rangeGiorniISO(range?.dal, range?.al)
-  const filtroData = `created_at:>=${daISO} created_at:<=${aISO}`
+  // FILTRO SU updated_at, NON created_at: cosi' una ri-sincronizzazione RIPESCA e AGGIORNA gli ordini
+  // MODIFICATI dopo la creazione (destinatario aggiunto dopo, evasione cambiata, indirizzo corretto…),
+  // non solo quelli nuovi. Un ordine creato ieri ma cambiato oggi rientra nella finestra "oggi" e si
+  // aggiorna. La DATA mostrata in lista resta quella di creazione (createdAt): qui si decide solo COSA
+  // ripescare, non cosa visualizzare.
+  const filtroData = `updated_at:>=${daISO} updated_at:<=${aISO}`
 
   // Ordini via GraphQL (immagini inline), i piu' RECENTI prima, paginati fino a ~300. Prendiamo sia
   // gli EVASI sia i NON evasi (status:open, senza filtro fulfillment): cosi' anche gli ordini gia'
@@ -26,9 +31,9 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
   for (let page = 0; page < 3; page++) {
     const data: any = await shopifyGraphQL(shop, token, `
       query($cursor: String){
-        orders(first: 100, after: $cursor, query: "status:open ${filtroData}", sortKey: CREATED_AT, reverse: true){
+        orders(first: 100, after: $cursor, query: "status:open ${filtroData}", sortKey: UPDATED_AT, reverse: true){
           edges { node {
-            legacyResourceId name email phone createdAt paymentGatewayNames displayFinancialStatus displayFulfillmentStatus
+            legacyResourceId name email phone createdAt updatedAt paymentGatewayNames displayFinancialStatus displayFulfillmentStatus
             totalPriceSet { shopMoney { amount currencyCode } }
             shippingAddress { name address1 address2 city province provinceCode zip country countryCodeV2 phone }
             lineItems(first: 100){ edges { node { title quantity sku image { url } } } }
@@ -94,7 +99,7 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
     const { data: giaDaSpedire } = await db.from('ordini_ecommerce')
       .select('id,ordine_esterno_id')
       .eq('integrazione_id', integr.id).eq('stato', 'da_spedire')
-      .gte('raw->>createdAt', daISO).lte('raw->>createdAt', aISO)   // SOLO ordini nella finestra sincronizzata: fuori non li tocco
+      .gte('raw->>updatedAt', daISO).lte('raw->>updatedAt', aISO)   // finestra su updated_at come il fetch: gli ordini NON toccati non si chiudono per sbaglio
     const daChiudere = (giaDaSpedire || [])
       .filter((r: any) => !vistiIds.has(String(r.ordine_esterno_id)))
       .map((r: any) => r.id)
