@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyShopifyWebhook } from '@/lib/shopifyWebhook'
-import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 // GDPR: 48h dopo la disinstallazione Shopify chiede di cancellare i dati del negozio.
-// Eliminiamo l'integrazione e gli ordini importati collegati a quel negozio.
+// I topic di conformita' sono registrati (toml) verso /webhooks/compliance: questo endpoint
+// standalone e' ridondante, ma lo teniamo COMPLETO e CORRETTO (admin/service role, non
+// createServerSupabase che senza cookie di sessione + RLS cancellerebbe 0 righe) cosi' non
+// e' una trappola se una vecchia sottoscrizione lo chiamasse ancora.
 export async function POST(req: NextRequest) {
   const raw = await req.text()
   const hmac = req.headers.get('x-shopify-hmac-sha256')
@@ -22,16 +25,16 @@ export async function POST(req: NextRequest) {
 
   if (shop) {
     try {
-      const supabase = await createServerSupabase()
-      const { data: ints } = await supabase
-        .from('integrazioni')
-        .select('id')
-        .eq('piattaforma', 'shopify')
-        .eq('identificativo', shop)
+      const admin = createAdminSupabase()
+      const { data: ints } = await admin
+        .from('integrazioni').select('id')
+        .eq('piattaforma', 'shopify').eq('identificativo', shop)
       const ids = (ints || []).map((i: any) => i.id)
       if (ids.length) {
-        await supabase.from('ordini_importati').delete().in('integrazione_id', ids)
-        await supabase.from('integrazioni').delete().in('id', ids)
+        // ordini_ecommerce = tabella attuale (con i dati destinatario); ordini_importati = legacy
+        await admin.from('ordini_ecommerce').delete().in('integrazione_id', ids)
+        await admin.from('ordini_importati').delete().in('integrazione_id', ids)
+        await admin.from('integrazioni').delete().in('id', ids)
       }
     } catch (e) {
       // Non blocchiamo l'ack: Shopify richiede comunque 200.
