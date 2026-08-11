@@ -27,6 +27,26 @@ export async function POST(req: NextRequest) {
   const { nomeFile, righe } = body
   // RLS: match LDV su tutta la catena (solo discesa) -> admin; autorizzazione = check catena
   const adminDb = createAdminSupabase()
+  // Chunking: il client spezza i file grossi in blocchi per mostrare l'avanzamento ed evitare il
+  // timeout della funzione. I blocchi passano scriviLog=false; il record riepilogo del file si scrive
+  // con una chiamata finale `soloLog` che porta i totali già aggregati dal client.
+  const scriviLog = body.scriviLog !== false
+  if (body.soloLog) {
+    const s = body.soloLog || {}
+    await supabase.from('cod_files').insert({
+      master_id: masterId, nome_file: nomeFile, righe_file: Number(s.righeFile) || 0,
+      spedizioni_processate: Number(s.spedizioniProcessate) || 0, cod_file: Number(s.codFile) || 0,
+      cod_sistema: Number(s.codSistema) || 0, cod_da_pagare: Number(s.codDaPagare) || 0,
+      cod_in_distinte: 0, errori: Number(s.errori) || 0,
+    })
+    return NextResponse.json({ success: true, logged: true })
+  }
+  // La catena di un master è la stessa per tutte le sue righe: si risale UNA volta e si riusa.
+  const catenaCache = new Map<string, string[]>()
+  const getCatena = async (mid: string): Promise<string[]> => {
+    const c = catenaCache.get(mid); if (c) return c
+    const path = await risaliCatena(adminDb, mid); catenaCache.set(mid, path); return path
+  }
 
   let spedizioniProcessate = 0, codFile = 0, codSistema = 0, codDaPagare = 0, errori = 0, saltateNonPagate = 0
   let doppioniFile = 0, giaPagati = 0, giaInDistintaCount = 0
@@ -55,10 +75,20 @@ export async function POST(req: NextRequest) {
     if (('pagato' in riga) && !(importoCod > 0)) { saltateNonPagate++; continue }
     codFile += importoCod
 
+    // Match ESATTO per primo (usa l'indice su numero → veloce): copre la stragrande maggioranza.
     let { data: spedizione } = await adminDb.from('spedizioni')
       .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno')
-      .ilike('numero', `%${ldv}%`)
-      .limit(1).single()
+      .eq('numero', ldv)
+      .limit(1).maybeSingle()
+    if (!spedizione) {
+      // Ripiego: match parziale (numero che CONTIENE la LDV). È una scansione, ma gira SOLO sulle
+      // righe che l'esatto non ha risolto, non più su tutte.
+      const rLike = await adminDb.from('spedizioni')
+        .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno')
+        .ilike('numero', `%${ldv}%`)
+        .limit(1).maybeSingle()
+      spedizione = rLike.data as any
+    }
     if (!spedizione && /^[A-Za-z0-9_-]+$/.test(ldv)) {
       // Export SpediamoPro: 'Shipment' e' il codice del provider (raw_response.code), non la LDV in elenco.
       const r2 = await adminDb.from('spedizioni')
@@ -76,7 +106,7 @@ export async function POST(req: NextRequest) {
     if (spedizione.stato_contrassegno === 'pagato') { giaPagati++; continue }
 
     // Solo discesa: chi carica deve essere il master della spedizione o un antenato
-    const catena = await risaliCatena(adminDb, spedizione.master_id)
+    const catena = await getCatena(spedizione.master_id)
     const idx = catena.indexOf(masterId)
     if (idx === -1) { errori++; continue }
 
@@ -126,11 +156,15 @@ export async function POST(req: NextRequest) {
   const righeTot = (righe || []).length
   const nonClassificate = righeTot - (spedizioniProcessate + errori + saltateNonPagate + doppioniFile + giaPagati + giaInDistintaCount)
 
-  await supabase.from('cod_files').insert({
-    master_id: masterId, nome_file: nomeFile, righe_file: righeTot,
-    spedizioni_processate: spedizioniProcessate, cod_file: codFile, cod_sistema: codSistema,
-    cod_da_pagare: codDaPagare, cod_in_distinte: codInDistinte, errori,
-  })
+  // In modalità chunk il record riepilogo NON si scrive per ogni blocco: lo scrive la chiamata finale
+  // `soloLog` con i totali del file. Le chiamate singole (scriviLog=true) restano identiche a prima.
+  if (scriviLog) {
+    await supabase.from('cod_files').insert({
+      master_id: masterId, nome_file: nomeFile, righe_file: righeTot,
+      spedizioni_processate: spedizioniProcessate, cod_file: codFile, cod_sistema: codSistema,
+      cod_da_pagare: codDaPagare, cod_in_distinte: codInDistinte, errori,
+    })
+  }
   return NextResponse.json({
     success: true, spedizioniProcessate, codFile, codSistema, codDaPagare, codInDistinte,
     errori, saltateNonPagate, doppioniFile, giaPagati,

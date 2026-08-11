@@ -121,58 +121,76 @@ export default function DistinteContrassegniPage() {
   const setF = (k:string,v:string) => setFiltri(f=>({...f,[k]:v}))
 
   async function uploadFile(e: React.ChangeEvent<HTMLInputElement>) {
-    // MULTI-FILE: l'export contrassegni del provider è paginato (500 righe/file), quindi le pagine
-    // vanno caricate tutte insieme. Si processano in fila, un file = una POST; i doppioni fra pagine
-    // sono già gestiti dal vincolo unico (master, spedizione) nell'area di sosta.
+    // Legge TUTTE le righe di TUTTI i file selezionati (CSV con papaparse — robusto sui CSV grandi,
+    // niente tetto a 500 — XLS/XLSX con xlsx), poi le processa a BLOCCHI. I blocchi tengono viva la
+    // barra (avanzamento per righe) ed evitano il timeout della funzione su file grossi. I doppioni
+    // fra righe/pagine sono gestiti dal vincolo unico (master, spedizione) nell'area di sosta.
     const files = Array.from(e.target.files || [])
     if (!files.length) return
     setUploading(true)
     const inizio = Date.now()
-    // Barra DETERMINATA: totale = numero di file, avanza a ogni file completato (con stima del tempo).
-    setAvanz({ fatti: 0, totale: files.length, da: inizio,
-      etichetta: files.length > 1 ? 'Sto caricando i file dei contrassegni' : 'Sto leggendo il file dei contrassegni',
-      sottotitolo: files.length > 1 ? `0 di ${files.length} file` : files[0].name })
+    setAvanz({ fatti: 0, totale: 0, da: inizio, etichetta: 'Sto leggendo i file dei contrassegni',
+      sottotitolo: files.length > 1 ? `${files.length} file` : files[0].name })
 
-    const { utils, read } = await import('xlsx')
-    const tot = { righeFile: 0, spedizioniProcessate: 0, inAttesa: 0, codDaPagare: 0,
+    // 1) LETTURA: numero VERO di righe per file (così si vede subito se un file ha davvero >500 righe).
+    const Papa = (await import('papaparse')).default
+    let xlsxUtils: any = null, xlsxRead: any = null
+    const letti: { name: string; righe: any[] }[] = []
+    for (const file of files) {
+      let righe: any[] = []
+      try {
+        if (/\.csv$/i.test(file.name) || file.type === 'text/csv') {
+          const parsed = Papa.parse(await file.text(), { header: true, skipEmptyLines: true })
+          righe = (parsed.data as any[]) || []
+        } else {
+          if (!xlsxRead) { const x = await import('xlsx'); xlsxUtils = x.utils; xlsxRead = x.read }
+          const wb = xlsxRead(await file.arrayBuffer())
+          righe = xlsxUtils.sheet_to_json(wb.Sheets[wb.SheetNames[0]])
+        }
+      } catch { righe = [] }
+      letti.push({ name: file.name, righe })
+    }
+    const totaleRighe = letti.reduce((s, f) => s + f.righe.length, 0)
+    setAvanz(a => a ? { ...a, totale: totaleRighe, etichetta: 'Sto caricando i contrassegni',
+      sottotitolo: `${totaleRighe} righe da ${files.length} file` } : a)
+
+    // 2) ELABORAZIONE a blocchi.
+    const CHUNK = 200
+    const tot = { righeFile: 0, spedizioniProcessate: 0, inAttesa: 0, codFile: 0, codSistema: 0, codDaPagare: 0,
       giaInDistinta: 0, giaPagati: 0, doppioniFile: 0, saltateNonPagate: 0, errori: 0, nonClassificate: 0 }
     const problemi: string[] = []
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
-      setAvanz(a => a ? { ...a, fatti: i, sottotitolo: `${file.name} — ${i + 1} di ${files.length}` } : a)
-      try {
-        const buffer = await file.arrayBuffer()
-        const wb = read(buffer)
-        const ws = wb.Sheets[wb.SheetNames[0]]
-        const righe = utils.sheet_to_json(ws)
-        const res = await fetch('/api/contrassegni/upload-cod', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nomeFile: file.name, righe })
-        })
-        const data = await res.json()
-        if (data.success) {
-          tot.righeFile += data.righeFile || 0
-          tot.spedizioniProcessate += data.spedizioniProcessate || 0
-          tot.inAttesa += data.inAttesa || 0
-          tot.codDaPagare += Number(data.codDaPagare || 0)
-          tot.giaInDistinta += data.giaInDistinta || 0
-          tot.giaPagati += data.giaPagati || 0
-          tot.doppioniFile += data.doppioniFile || 0
-          tot.saltateNonPagate += data.saltateNonPagate || 0
-          tot.errori += data.errori || 0
-          tot.nonClassificate += data.nonClassificate || 0
-        } else {
-          problemi.push(`${file.name}: ${data.error || 'non caricato'}`)
-        }
-      } catch {
-        problemi.push(`${file.name}: lettura non riuscita`)
+    let fatte = 0
+    for (const f of letti) {
+      if (!f.righe.length) { problemi.push(`${f.name}: nessuna riga letta`); continue }
+      const agg = { righeFile: f.righe.length, spedizioniProcessate: 0, codFile: 0, codSistema: 0, codDaPagare: 0, errori: 0 }
+      for (let i = 0; i < f.righe.length; i += CHUNK) {
+        const blocco = f.righe.slice(i, i + CHUNK)
+        try {
+          const res = await fetch('/api/contrassegni/upload-cod', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nomeFile: f.name, righe: blocco, scriviLog: false })
+          })
+          const d = await res.json()
+          if (d.success) {
+            tot.spedizioniProcessate += d.spedizioniProcessate || 0; tot.inAttesa += d.inAttesa || 0
+            tot.codDaPagare += Number(d.codDaPagare || 0); tot.giaInDistinta += d.giaInDistinta || 0
+            tot.giaPagati += d.giaPagati || 0; tot.doppioniFile += d.doppioniFile || 0
+            tot.saltateNonPagate += d.saltateNonPagate || 0; tot.errori += d.errori || 0
+            tot.nonClassificate += d.nonClassificate || 0; tot.codFile += Number(d.codFile || 0); tot.codSistema += Number(d.codSistema || 0)
+            agg.spedizioniProcessate += d.spedizioniProcessate || 0; agg.codFile += Number(d.codFile || 0)
+            agg.codSistema += Number(d.codSistema || 0); agg.codDaPagare += Number(d.codDaPagare || 0); agg.errori += d.errori || 0
+          } else { problemi.push(`${f.name}: ${d.error || 'blocco non caricato'}`) }
+        } catch { problemi.push(`${f.name}: errore di rete su un blocco`) }
+        fatte += blocco.length
+        setAvanz(a => a ? { ...a, fatti: fatte, sottotitolo: `${f.name} — ${Math.min(fatte, totaleRighe)}/${totaleRighe} righe` } : a)
       }
-      setAvanz(a => a ? { ...a, fatti: i + 1 } : a)
+      tot.righeFile += f.righe.length
+      // Una riga di riepilogo in "File processati" per ogni file (come prima).
+      try { await fetch('/api/contrassegni/upload-cod', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nomeFile: f.name, soloLog: agg }) }) } catch {}
     }
 
     await dialog.alert({ title: files.length > 1 ? `${files.length} file caricati` : 'File caricato', message:
-        `Righe totali lette: ${tot.righeFile}\n\n`
+        `Righe totali lette dai file: ${totaleRighe}\n\n`
       + `Come sono state ripartite (tutte contate):\n`
       + `• Riconosciute e caricate: ${tot.spedizioniProcessate} (di cui nuove in attesa: ${tot.inAttesa} · € ${tot.codDaPagare.toFixed(2)})\n`
       + `• Già in una tua distinta: ${tot.giaInDistinta}\n`
