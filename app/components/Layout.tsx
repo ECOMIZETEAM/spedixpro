@@ -168,6 +168,15 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   }, [path])
   const badgeStyle = { background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, minWidth: '17px', height: '17px', borderRadius: '9px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' } as const
 
+  // Credito del master in topbar (solo staff di rete). All'avvio, a ogni cambio pagina e ogni 2 min:
+  // dopo una spedizione o un addebito il numero si aggiorna da solo.
+  const [creditoTop, setCreditoTop] = useState<{ mostra: boolean; rete: number; proprio: number } | null>(null)
+  useEffect(() => {
+    if (!['master', 'admin', 'operatore'].includes(ruolo)) return
+    const load = () => fetch('/api/master/credito').then(r => r.json()).then(d => { if (d && d.mostra) setCreditoTop(d) }).catch(() => {})
+    load(); const t = setInterval(load, 120000); return () => clearInterval(t)
+  }, [ruolo, path])
+
   // ── Responsive: sidebar a scomparsa (drawer) su mobile ──
   const [isMobile, setIsMobile] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -321,6 +330,18 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
             {isMobile && <span style={{fontSize:'14px',fontWeight:800,color:'#1a1a1a'}}>{user?.brandNome || 'MoovExpress'}</span>}
           </div>
           <div style={{display:'flex',alignItems:'center',gap:isMobile?'6px':'10px'}}>
+            {creditoTop?.mostra && (() => {
+              const rete = Number(creditoTop.rete || 0)
+              const pos = rete >= 0
+              return (
+                <a href="/dashboard/movimenti" title="Il tuo credito — vai ai movimenti"
+                  style={{display:'flex',alignItems:'center',gap:'6px',textDecoration:'none',background:pos?'#f0fdf4':'#fef2f2',border:`1px solid ${pos?'#bbf7d0':'#fecaca'}`,borderRadius:'8px',padding:'5px 10px'}}>
+                  <span style={{fontSize:'13px'}}>💳</span>
+                  {!isMobile && <span style={{fontSize:'10px',fontWeight:700,textTransform:'uppercase' as const,letterSpacing:'0.4px',color:'#6b7280'}}>Credito</span>}
+                  <span style={{fontSize:'13px',fontWeight:800,color:pos?'#16a34a':'#dc2626',whiteSpace:'nowrap' as const}}>€ {rete.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+                </a>
+              )
+            })()}
             <SupportoButton compatto={isMobile} />
             <CampanellaNotifiche />
             <MenuProfilo nome={user?.nome} ruolo={user?.ruolo} voci={[
