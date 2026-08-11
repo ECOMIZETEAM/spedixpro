@@ -24,14 +24,22 @@ export async function GET(req: NextRequest) {
   const perPage = Math.min(200, Math.max(1, parseInt(p.get('perPage') || '25') || 25))
   const cerca = (p.get('cerca') || '').replace(/[,()%]/g, ' ').trim()     // sanificato per la sintassi or()
   const corriere = (p.get('corriere') || '').trim()
+  const gruppo = (p.get('gruppo') || '').trim()   // solo E&A: filtra i movimenti per portale/sotto-account
   const conSomma = p.get('somma') === '1'
+
+  // Corrieri del gruppo scelto (valorizzato nel ramo self di E&A): filtra i movimenti-spedizione a
+  // quel portale/sotto-account. Le ricariche (senza spedizione) restano fuori dai gruppi (stanno nelle card).
+  let corriereIdsGruppo: string[] | null = null
 
   // Query base per (client, colonna target): filtri identici su lista, conteggio e somma.
   const buildQ = (db: any, col: string, val: string, select = '*', conteggio = false) => {
-    const sel = corriere ? `${select}, spedizioni!inner(corrieri!inner(nome_contratto))` : select
+    let sel = select
+    if (corriere) sel = `${sel}, spedizioni!inner(corrieri!inner(nome_contratto))`
+    else if (corriereIdsGruppo) sel = `${sel}, spedizioni!inner(corriere_id)`
     let q = db.from('movimenti').select(sel, conteggio ? { count: 'exact' } : undefined).eq(col, val)
     if (cerca) q = q.or(`descrizione.ilike.%${cerca}%,riferimento.ilike.%${cerca}%`)
     if (corriere) q = q.eq('spedizioni.corrieri.nome_contratto', corriere)
+    else if (corriereIdsGruppo) q = q.in('spedizioni.corriere_id', corriereIdsGruppo.length ? corriereIdsGruppo : ['00000000-0000-0000-0000-000000000000'])
     return q
   }
 
@@ -69,6 +77,18 @@ export async function GET(req: NextRequest) {
   if (self === '1') {
     if (utente?.ruolo === 'cliente' || !utente?.master_id) {
       return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    }
+    // Filtro per GRUPPO (E&A): i movimenti-spedizione del portale/sotto-account scelto. Il gruppo è
+    // il tipo del corriere (spediamopro/easyparcel/gls/interno) o, per Spedisci, il master_domain.
+    if (gruppo) {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const adm = createAdminSupabase()
+      const { data: cs } = await adm.from('corrieri').select('id,tipo,credenziali').eq('master_id', utente.master_id)
+      corriereIdsGruppo = (cs || []).filter((c: any) =>
+        ['spediamopro', 'easyparcel', 'gls', 'interno'].includes(gruppo)
+          ? c.tipo === gruppo
+          : c.tipo === 'spedisci' && ((c.credenziali as any)?.master_domain === gruppo)
+      ).map((c: any) => c.id)
     }
     const { movimenti, total, somma } = await carica(supabase, 'master_target_id', utente.master_id)
     const { data: m } = await supabase

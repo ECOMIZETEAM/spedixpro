@@ -1,10 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { fetchAll } from '@/lib/fetch-all'
 
 // Funzione ATTIVA SOLO per E&A MULTIEXPRESS: gestisce i crediti dei portali esterni
-// (SpediamoPro / Spedisci.online) da cui compra i contratti per rivendere.
+// (SpediamoPro / Spedisci.online / DVA) da cui compra i contratti per rivendere. È l'UNICA pagina
+// dove i nomi dei fornitori tecnici possono comparire (riconciliazione costi E&A, cfr. REGOLE.md).
 const EA_ID = 'a8d42a25-3711-4343-a6df-ee2ba9bbf08b'
+
+// Etichetta leggibile del gruppo. Spedisci ha PIÙ sotto-account (master_domain), ognuno col suo
+// wallet: es. revlogistic.spedisci.online → "Spedisci · revlogistic".
+function labelGruppo(gruppo: string, portale: string): string {
+  const g = String(gruppo || portale || '')
+  if (portale === 'spediamopro' || g === 'spediamopro') return 'SpediamoPro'
+  if (portale === 'easyparcel' || g === 'easyparcel') return 'DVA'
+  if (portale === 'spedisci' || g.endsWith('.spedisci.online')) return 'Spedisci · ' + g.replace('.spedisci.online', '')
+  return g || portale
+}
+// Dal gruppo (fine) al portale (grosso): spediamopro/easyparcel restano; qualsiasi altro = spedisci.
+function portaleDaGruppo(gruppo: string): string {
+  if (gruppo === 'spediamopro' || gruppo === 'easyparcel') return gruppo
+  return 'spedisci'
+}
+// Ordine di visualizzazione: prima i due conti unici, poi i sotto-account Spedisci.
+function ordine(portale: string): number {
+  return portale === 'spediamopro' ? 0 : portale === 'easyparcel' ? 1 : 2
+}
 
 export async function GET() {
   const supabase = await createServerSupabase()
@@ -16,60 +35,31 @@ export async function GET() {
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
 
-  // Ricariche registrate sui portali.
+  // Ricariche registrate (con il gruppo fine, per Spedisci il sotto-account).
   const { data: ricariche } = await admin.from('ricariche_portale')
     .select('*').eq('master_id', EA_ID).order('created_at', { ascending: false })
 
-  // Speso sul portale = tutto cio' che consuma il conto esterno, raggruppato per TIPO del corriere
-  // (spedisci = SDA; spediamopro = tutto il resto).
-  //
-  // Due difetti gravi che questo calcolo aveva, entrambi silenziosi:
-  //  1) leggeva i movimenti SENZA paginazione. PostgREST tronca ogni risposta a 1000 righe, e
-  //     E&A ne ha oltre 14.000: lo "speso" mostrato era 5.756 EUR invece di 82.839, cioe' il
-  //     residuo del portale risultava enormemente piu' alto del vero. Ora si usa fetchAll.
-  //  2) contava SOLO i movimenti di tipo 'spedizione'. I RIMBORSI delle spedizioni annullate non
-  //     venivano sottratti, quindi una spedizione annullata restava "spesa" per sempre.
-  // Si tiene conto anche di rettifiche e giacenze: anche quelle pesano sul conto del portale.
-  const movs = await fetchAll(() => admin.from('movimenti')
-    .select('importo, spedizione_id, tipo')
-    .eq('master_target_id', EA_ID)
-    // 'reso' compreso: un pacco che rientra il corriere lo fa pagare, quindi pesa sul conto del
-    // portale come una spedizione. Prima mancava, e i resi non comparivano nello speso.
-    .in('tipo', ['spedizione', 'rimborso', 'rettifica', 'giacenza', 'reso']))
+  // SPESO per gruppo, aggregato NEL DATABASE (prima si scaricavano 14.000+ movimenti in memoria a
+  // ogni apertura: era la lentezza). La RPC raggruppa spediamopro/easyparcel per tipo e Spedisci per
+  // master_domain (i 5 sotto-account) e sottrae già i rimborsi.
+  const { data: spesoRows } = await admin.rpc('speso_portali_ea')
 
-  const spedIds = Array.from(new Set((movs || []).map((m: any) => m.spedizione_id).filter(Boolean)))
-  const tipoPerSped = new Map<string, string | null>()
-  // A blocchi: un .in() con migliaia di id verrebbe troncato anche lui.
-  for (let i = 0; i < spedIds.length; i += 300) {
-    const { data: speds } = await admin.from('spedizioni').select('id, corrieri(tipo)').in('id', spedIds.slice(i, i + 300))
-    for (const s of (speds || [])) tipoPerSped.set(s.id, (s.corrieri as any)?.tipo || null)
-  }
-  // IL TERZO FORNITORE MANCAVA DEL TUTTO.
-  // La pagina nasce con due portali e non e' mai stata aggiornata quando ne e' entrato un terzo:
-  // il suo speso non finiva in nessuno dei due secchi e semplicemente spariva dal conto. Misurato
-  // sui dati veri: 1.270 movimenti per 10.526,97 euro usciti dal conto di E&A e non riconciliati da
-  // nessuna parte. Non era un errore di calcolo, era un fornitore invisibile.
-  let spesoSpediamo = 0, spesoSpedisci = 0, spesoEasyparcel = 0
-  for (const m of (movs || [])) {
-    const tipo = m.spedizione_id ? tipoPerSped.get(m.spedizione_id) : null
-    // L'importo e' negativo quando esce (addebito) e positivo quando rientra (rimborso):
-    // sommare -importo da' direttamente lo speso NETTO, senza casi particolari per tipo.
-    const netto = -(Number(m.importo) || 0)
-    if (tipo === 'spedisci') spesoSpedisci += netto
-    else if (tipo === 'spediamopro') spesoSpediamo += netto
-    else if (tipo === 'easyparcel') spesoEasyparcel += netto
-  }
-
-  const ricSpediamo = (ricariche || []).filter((r: any) => r.portale === 'spediamopro').reduce((s: number, r: any) => s + Number(r.importo || 0), 0)
-  const ricSpedisci = (ricariche || []).filter((r: any) => r.portale === 'spedisci').reduce((s: number, r: any) => s + Number(r.importo || 0), 0)
-  const ricEasyparcel = (ricariche || []).filter((r: any) => r.portale === 'easyparcel').reduce((s: number, r: any) => s + Number(r.importo || 0), 0)
   const r2 = (n: number) => Math.round(n * 100) / 100
+  const gruppi = new Map<string, { gruppo: string; portale: string; speso: number; ricariche: number }>()
+  for (const row of (spesoRows || []) as any[]) {
+    if (!['spediamopro', 'easyparcel', 'spedisci'].includes(row.portale)) continue   // gls/interno non sono wallet
+    gruppi.set(row.gruppo, { gruppo: row.gruppo, portale: row.portale, speso: Number(row.speso) || 0, ricariche: 0 })
+  }
+  for (const r of (ricariche || []) as any[]) {
+    const g = r.gruppo || r.portale
+    if (!gruppi.has(g)) gruppi.set(g, { gruppo: g, portale: r.portale, speso: 0, ricariche: 0 })
+    gruppi.get(g)!.ricariche += Number(r.importo || 0)
+  }
 
-  // SALDO VERO letto dal portale, non dedotto per sottrazione: e' l'unico numero che non dipende
-  // da quali ricariche sono state trascritte a mano qui dentro. Con questo il controllo si fa da
-  // solo — residuo calcolato contro saldo reale — invece di doverlo rifare a mano ogni volta.
-  // Best-effort: se il portale non risponde, la pagina funziona lo stesso senza questo dato.
-  let saldoReale: number | null = null
+  // Saldo VERO letto dal wallet SpediamoPro (unico provider che lo espone). Da qui deduco anche
+  // "quanto inserito davvero" = saldo + speso, che spiega lo scarto con le ricariche trascritte.
+  // Timeout stretto: il saldo è un di più e non deve rallentare/bloccare la pagina.
+  let saldoSpediamo: number | null = null
   try {
     const { data: cSp } = await admin.from('corrieri')
       .select('credenziali').eq('master_id', EA_ID).eq('tipo', 'spediamopro').limit(1).maybeSingle()
@@ -77,34 +67,34 @@ export async function GET() {
     if (authcode) {
       const { getSpediamoproToken } = await import('@/lib/spediamopro')
       const token = await getSpediamoproToken(authcode)
+      const ctrl = new AbortController()
+      const t = setTimeout(() => ctrl.abort(), 3500)
       const w = await fetch('https://core.spediamopro.com/api/v2/wallet', {
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      })
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, signal: ctrl.signal,
+      }).finally(() => clearTimeout(t))
       if (w.ok) {
         const wd = await w.json()
-        // Il saldo arriva in CENTESIMI.
-        const cent = Number(wd?.data?.balance)
-        if (Number.isFinite(cent)) saldoReale = r2(cent / 100)
+        const cent = Number(wd?.data?.balance)   // saldo in CENTESIMI
+        if (Number.isFinite(cent)) saldoSpediamo = r2(cent / 100)
       }
     }
-  } catch { /* il saldo live e' un di piu': non deve far fallire la pagina */ }
+  } catch { /* best-effort */ }
 
-  return NextResponse.json({
-    abilitato: true,
-    ricariche: ricariche || [],
-    portali: {
-      spediamopro: {
-        ricariche: r2(ricSpediamo), speso: r2(spesoSpediamo), residuo: r2(ricSpediamo - spesoSpediamo),
-        saldoReale,
-        // Scarto fra il residuo calcolato qui e il saldo vero del portale: se non e' ~0 vuol dire
-        // che manca una ricarica da trascrivere, oppure che il portale ha addebitato qualcosa che
-        // da noi non risulta (es. rettifiche di peso fatte da loro).
-        scarto: saldoReale === null ? null : r2(saldoReale - (ricSpediamo - spesoSpediamo)),
-      },
-      spedisci: { ricariche: r2(ricSpedisci), speso: r2(spesoSpedisci), residuo: r2(ricSpedisci - spesoSpedisci) },
-      easyparcel: { ricariche: r2(ricEasyparcel), speso: r2(spesoEasyparcel), residuo: r2(ricEasyparcel - spesoEasyparcel) },
-    },
-  })
+  const out = Array.from(gruppi.values()).map(g => {
+    const residuo = r2(g.ricariche - g.speso)
+    const base: any = {
+      gruppo: g.gruppo, portale: g.portale, label: labelGruppo(g.gruppo, g.portale),
+      ricariche: r2(g.ricariche), speso: r2(g.speso), residuo,
+    }
+    if (g.portale === 'spediamopro' && saldoSpediamo != null) {
+      base.saldoReale = saldoSpediamo
+      base.realeInserito = r2(saldoSpediamo + g.speso)   // dedotto dal saldo live: quanto versato davvero
+      base.scarto = r2(saldoSpediamo - residuo)          // se ≠0: manca una ricarica da trascrivere
+    }
+    return base
+  }).sort((a, b) => ordine(a.portale) - ordine(b.portale) || a.label.localeCompare(b.label))
+
+  return NextResponse.json({ abilitato: true, ricariche: ricariche || [], gruppi: out })
 }
 
 export async function POST(req: NextRequest) {
@@ -115,18 +105,32 @@ export async function POST(req: NextRequest) {
   if (utente?.master_id !== EA_ID) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const body = await req.json()
-  const portale = ['spedisci', 'spediamopro', 'easyparcel'].includes(body.portale) ? body.portale : null
+  // Ora si passa il GRUPPO (fine). Compat: se arriva ancora 'portale', vale come gruppo.
+  const gruppo = String(body.gruppo || body.portale || '').trim()
   const importo = Number(body.importo)
-  if (!portale) return NextResponse.json({ error: 'Portale non valido' }, { status: 400 })
+  if (!gruppo) return NextResponse.json({ error: 'Gruppo non valido' }, { status: 400 })
   if (!isFinite(importo) || importo === 0) return NextResponse.json({ error: 'Inserisci un importo diverso da 0 (usa il − per correggere)' }, { status: 400 })
+  const portale = portaleDaGruppo(gruppo)
 
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
-  const { error } = await admin.from('ricariche_portale').insert({
-    master_id: EA_ID, portale, importo, data: body.data || null,
+  const { data: ins, error } = await admin.from('ricariche_portale').insert({
+    master_id: EA_ID, portale, gruppo, importo, data: body.data || null,
     note: body.note ? String(body.note).slice(0, 200) : null, created_by: user.id,
-  })
+  }).select('id, portale, gruppo').single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+
+  // La ricarica è denaro versato sul wallet del provider, che finanzia le spedizioni (le quali
+  // scalano lo STESSO conto rete di E&A): quindi ACCREDITA il credito. Movimento atomico via RPC,
+  // conto 'rete' (fn_conto_di per una ricarica → 'rete'). Riferimento = id ricarica per poterlo stornare.
+  try {
+    await admin.rpc('registra_movimento_master', {
+      p_master_owner_id: EA_ID, p_master_target_id: EA_ID, p_tipo: 'ricarica',
+      p_descrizione: 'Ricarica ' + labelGruppo((ins as any).gruppo, (ins as any).portale),
+      p_importo: importo, p_riferimento: (ins as any).id, p_spedizione_id: null, p_created_by: user.id,
+    })
+  } catch (e) { console.error('accredito ricarica portale fallito', e) }
+
   return NextResponse.json({ ok: true })
 }
 
@@ -141,7 +145,21 @@ export async function DELETE(req: NextRequest) {
 
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
+  // Leggo la ricarica PRIMA di cancellarla, per stornare l'accredito corrispondente.
+  const { data: ric } = await admin.from('ricariche_portale')
+    .select('importo, portale, gruppo').eq('id', id).eq('master_id', EA_ID).maybeSingle()
   const { error } = await admin.from('ricariche_portale').delete().eq('id', id).eq('master_id', EA_ID)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+
+  // Storna dal credito l'accredito fatto al momento della ricarica (storico intatto: movimento opposto).
+  if (ric) {
+    try {
+      await admin.rpc('registra_movimento_master', {
+        p_master_owner_id: EA_ID, p_master_target_id: EA_ID, p_tipo: 'ricarica',
+        p_descrizione: 'Storno ricarica ' + labelGruppo((ric as any).gruppo, (ric as any).portale),
+        p_importo: -Number((ric as any).importo || 0), p_riferimento: id, p_spedizione_id: null, p_created_by: user.id,
+      })
+    } catch (e) { console.error('storno ricarica portale fallito', e) }
+  }
   return NextResponse.json({ ok: true })
 }
