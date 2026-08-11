@@ -391,6 +391,7 @@ export async function POST(req: NextRequest) {
         mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
         mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
         numero, corriere: corriere.nome_contratto, notificaDest,
+        spedizioneId: inserted?.id || null,
       })
     } catch { /* best-effort */ }
   })

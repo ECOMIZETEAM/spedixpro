@@ -152,11 +152,34 @@ export async function inviaEmailSpedizioneCreata(p: {
   mittNome?: string | null; destNome?: string | null
   numero: string; corriere?: string | null; destCitta?: string | null
   notificaDest?: boolean   // impostazione cliente notifica_email_dest (default true)
+  spedizioneId?: string | null   // se presente, dispaccia anche l'SMS di notifica (stesso evento)
 }) {
+  // NOTIFICA SMS al destinatario (best-effort, indipendente dall'email): stesso evento "spedizione
+  // creata". Gatea da sola sulla preferenza notifica_sms e sul credito SMS; non parte se non c'è il
+  // gateway configurato. Sta qui perché ogni porta che manda l'email passa già da questa funzione.
+  if (p.spedizioneId) {
+    try { const { inviaSmsCreazione } = await import('@/lib/sms'); await inviaSmsCreazione(p.spedizioneId) } catch { /* best-effort */ }
+  }
   const corriere = esc((p.corriere || '').trim())
   const dest = String(p.destEmail || '').trim().toLowerCase()
   // Al DESTINATARIO (se abilitato dalle impostazioni del cliente).
   if ((p.notificaDest ?? true) && EMAIL_RE.test(dest)) {
+    // Link al tracking del NOSTRO portale (stesso dell'SMS): si ricava dal tracking_token della
+    // spedizione. Best-effort: se non lo troviamo, l'email parte comunque senza pulsante.
+    let urlTracking: string | null = null
+    if (p.spedizioneId) {
+      try {
+        const { createAdminSupabase } = await import('@/lib/supabase-admin')
+        const { data: sp } = await createAdminSupabase().from('spedizioni').select('tracking_token').eq('id', p.spedizioneId).maybeSingle()
+        if (sp?.tracking_token) {
+          const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://moovexpress.com').replace(/\/$/, '')
+          urlTracking = `${base}/traccia/${sp.tracking_token}`
+        }
+      } catch { /* best-effort */ }
+    }
+    const bloccoTracking = urlTracking
+      ? `<a href="${urlTracking}" style="display:inline-block;background:#f97316;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;font-size:14px;margin-top:14px">Segui la spedizione \u2192</a>`
+      : `<p style="color:#999;font-size:13px;margin-top:14px">Con questo numero puoi seguire la consegna.</p>`
     try {
       await resend.emails.send({
         from: FROM, to: dest,
@@ -165,7 +188,7 @@ export async function inviaEmailSpedizioneCreata(p: {
           <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Un pacco sta arrivando \ud83d\udce6</h2>
           <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 10px"><strong>${esc(p.mittNome || 'Un mittente')}</strong> ti ha inviato una spedizione.</p>
           <p style="color:#666;font-size:14px;margin:0 0 10px">Numero spedizione: <strong>${esc(p.numero)}</strong>${corriere ? ` \u2014 Corriere: <strong>${corriere}</strong>` : ''}</p>
-          <p style="color:#999;font-size:13px;margin-top:14px">Con questo numero puoi seguire la consegna sul sito del corriere.</p>
+          ${bloccoTracking}
         `),
       })
     } catch { /* best-effort */ }

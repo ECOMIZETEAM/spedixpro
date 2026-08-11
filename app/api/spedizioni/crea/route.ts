@@ -670,6 +670,7 @@ export async function POST(req: NextRequest) {
             mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
             mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
             numero: numero, corriere: corriereRecord.nome_contratto, notificaDest,
+            spedizioneId: inserted?.id || null,
           })
         } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
       })
@@ -883,6 +884,7 @@ export async function POST(req: NextRequest) {
             mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
             mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
             numero: numeroFinale, corriere: corriereRecord.nome_contratto, notificaDest,
+            spedizioneId: inserted?.id || null,
           })
         } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
       })
@@ -1209,6 +1211,7 @@ export async function POST(req: NextRequest) {
                   mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
                   mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
                   numero: w.numero, corriere: corriereRecord.nome_contratto, notificaDest,
+                  spedizioneId: spedIdBg,
                 })
               } catch (e) { console.error('[CREA][EASYPARCEL] mail destinatario dopo il completamento:', e) }
             }
@@ -1232,6 +1235,7 @@ export async function POST(req: NextRequest) {
             mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
             mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
             numero: numeroFinale, corriere: corriereRecord.nome_contratto, notificaDest,
+            spedizioneId: inserted?.id || null,
           })
         } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
       })
