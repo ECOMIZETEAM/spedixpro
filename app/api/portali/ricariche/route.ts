@@ -56,29 +56,53 @@ export async function GET() {
     gruppi.get(g)!.ricariche += Number(r.importo || 0)
   }
 
-  // Saldo VERO letto dal wallet SpediamoPro (unico provider che lo espone). Da qui deduco anche
-  // "quanto inserito davvero" = saldo + speso, che spiega lo scarto con le ricariche trascritte.
-  // Timeout stretto: il saldo è un di più e non deve rallentare/bloccare la pagina.
-  let saldoSpediamo: number | null = null
-  try {
-    const { data: cSp } = await admin.from('corrieri')
-      .select('credenziali').eq('master_id', EA_ID).eq('tipo', 'spediamopro').limit(1).maybeSingle()
-    const authcode = (cSp?.credenziali as any)?.authcode
-    if (authcode) {
-      const { getSpediamoproToken } = await import('@/lib/spediamopro')
-      const token = await getSpediamoproToken(authcode)
-      const ctrl = new AbortController()
-      const t = setTimeout(() => ctrl.abort(), 3500)
-      const w = await fetch('https://core.spediamopro.com/api/v2/wallet', {
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, signal: ctrl.signal,
-      }).finally(() => clearTimeout(t))
-      if (w.ok) {
-        const wd = await w.json()
-        const cent = Number(wd?.data?.balance)   // saldo in CENTESIMI
-        if (Number.isFinite(cent)) saldoSpediamo = r2(cent / 100)
-      }
-    }
-  } catch { /* best-effort */ }
+  // Saldo VERO letto dai provider (ognuno col suo modo), IN PARALLELO con timeout: è un di più e non
+  // deve rallentare la pagina. Da qui deduco "quanto inserito davvero" = saldo + speso, che spiega lo
+  // scarto con le ricariche trascritte. Chiave = GRUPPO (per Spedisci, il singolo sotto-account):
+  //  - SpediamoPro: GET /wallet (centesimi, prepagato)
+  //  - DVA: apikeyinfo → credito_prepagato (prepagato di rete)
+  //  - Spedisci: GET https://{master_domain}/api/v2/account → campo `credit` (postpagato: negativo = dovuto)
+  const conTimeout = <T,>(p: Promise<T>, ms: number): Promise<T | null> =>
+    Promise.race([p.catch(() => null), new Promise<null>(res => setTimeout(() => res(null), ms))])
+
+  const { data: corr } = await admin.from('corrieri')
+    .select('tipo, credenziali').eq('master_id', EA_ID).in('tipo', ['spediamopro', 'easyparcel', 'spedisci'])
+  const authcode = (corr || []).find((c: any) => c.tipo === 'spediamopro')?.credenziali?.authcode
+  const epCred = (corr || []).find((c: any) => c.tipo === 'easyparcel')?.credenziali
+  const spedisciAcc = new Map<string, string>()   // master_domain → password (uno per sotto-account)
+  for (const c of (corr || []) as any[]) {
+    const cd = c.credenziali
+    if (c.tipo === 'spedisci' && cd?.master_domain && cd?.password && !spedisciAcc.has(cd.master_domain)) spedisciAcc.set(cd.master_domain, cd.password)
+  }
+
+  const tasks: Array<Promise<{ gruppo: string; saldo: number } | null>> = []
+  tasks.push(conTimeout((async () => {
+    if (!authcode) return null
+    const { getSpediamoproToken } = await import('@/lib/spediamopro')
+    const token = await getSpediamoproToken(authcode)
+    const w = await fetch('https://core.spediamopro.com/api/v2/wallet', { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } })
+    if (!w.ok) return null
+    const cent = Number((await w.json())?.data?.balance)
+    return Number.isFinite(cent) ? { gruppo: 'spediamopro', saldo: r2(cent / 100) } : null
+  })(), 4000))
+  tasks.push(conTimeout((async () => {
+    const apikey = (epCred as any)?.apikey
+    if (!apikey || (epCred as any)?.ambiente !== 'produzione') return null
+    const { easyparcelInfo } = await import('@/lib/easyparcel')
+    const info = await easyparcelInfo(apikey)
+    return info.live && Number.isFinite(info.credito) ? { gruppo: 'easyparcel', saldo: r2(info.credito) } : null
+  })(), 4000))
+  for (const [dom, pass] of spedisciAcc) {
+    tasks.push(conTimeout((async () => {
+      const res = await fetch(`https://${dom}/api/v2/account`, { headers: { Authorization: `Bearer ${pass}`, Accept: 'application/json' } })
+      if (!res.ok) return null
+      const c = Number((await res.json())?.credit)   // saldo conto del sotto-account
+      return Number.isFinite(c) ? { gruppo: dom, saldo: r2(c) } : null
+    })(), 4000))
+  }
+  const saldiRis = await Promise.all(tasks)
+  const saldoLive: Record<string, number | null> = {}
+  for (const rr of saldiRis) if (rr) saldoLive[rr.gruppo] = rr.saldo
 
   const out = Array.from(gruppi.values()).map(g => {
     const residuo = r2(g.ricariche - g.speso)
@@ -86,10 +110,11 @@ export async function GET() {
       gruppo: g.gruppo, portale: g.portale, label: labelGruppo(g.gruppo, g.portale),
       ricariche: r2(g.ricariche), speso: r2(g.speso), residuo,
     }
-    if (g.portale === 'spediamopro' && saldoSpediamo != null) {
-      base.saldoReale = saldoSpediamo
-      base.realeInserito = r2(saldoSpediamo + g.speso)   // dedotto dal saldo live: quanto versato davvero
-      base.scarto = r2(saldoSpediamo - residuo)          // se ≠0: manca una ricarica da trascrivere
+    const sLive = saldoLive[g.gruppo]
+    if (sLive != null) {
+      base.saldoReale = sLive
+      base.realeInserito = r2(sLive + g.speso)   // dedotto dal saldo live: quanto versato davvero
+      base.scarto = r2(sLive - residuo)          // se ≠0: manca una ricarica da trascrivere
     }
     return base
   }).sort((a, b) => ordine(a.portale) - ordine(b.portale) || a.label.localeCompare(b.label))
