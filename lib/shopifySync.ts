@@ -36,6 +36,8 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
             legacyResourceId name email phone createdAt updatedAt paymentGatewayNames displayFinancialStatus displayFulfillmentStatus
             totalPriceSet { shopMoney { amount currencyCode } }
             shippingAddress { name address1 address2 city province provinceCode zip country countryCodeV2 phone }
+            billingAddress { name address1 address2 city province provinceCode zip country countryCodeV2 phone }
+            customer { displayName }
             lineItems(first: 100){ edges { node { title quantity sku image { url } } } }
           } }
           pageInfo { hasNextPage endCursor }
@@ -49,16 +51,24 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
 
   let importati = 0
   for (const o of ordini) {
+    // DESTINATARIO con RIPIEGO: se l'indirizzo di SPEDIZIONE e' vuoto (capita su ordini/bozze dove e'
+    // stato compilato solo il cliente o la fatturazione), si usa la FATTURAZIONE, e per il solo nome
+    // il nome del CLIENTE. Cosi' un ordine con cliente ma senza ship-to non resta col destinatario in
+    // bianco (prima restava '-'); resta la spedizione a poterlo correggere prima di partire.
     const ship = o.shippingAddress || {}
+    const bill = o.billingAddress || {}
+    const haSpedizione = !!(ship.name || ship.address1 || ship.city || ship.zip)
+    const addr = haSpedizione ? ship : bill
+    const nomeDest = ship.name || bill.name || o.customer?.displayName || ''
     const destinatario = {
-      nome: ship.name || '',
-      indirizzo: [ship.address1, ship.address2].filter(Boolean).join(' '),
-      citta: ship.city || '',
-      provincia: ship.provinceCode || ship.province || '',
-      cap: ship.zip || '',
-      paese: ship.countryCodeV2 || 'IT',
+      nome: nomeDest,
+      indirizzo: [addr.address1, addr.address2].filter(Boolean).join(' '),
+      citta: addr.city || '',
+      provincia: addr.provinceCode || addr.province || '',
+      cap: addr.zip || '',
+      paese: addr.countryCodeV2 || 'IT',
       email: o.email || '',
-      telefono: ship.phone || o.phone || '',
+      telefono: ship.phone || bill.phone || o.phone || '',
     }
     const articoli = (o.lineItems?.edges || []).map((e: any) => ({
       nome: e.node.title, quantita: e.node.quantity, grammi: 0, sku: e.node.sku || '',
