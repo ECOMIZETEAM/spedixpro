@@ -297,9 +297,9 @@ export default function DistinteContrassegniPage() {
       <div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:'16px',marginBottom:'16px'}}>
         <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'16px'}}>
           <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',marginBottom:'12px'}}>Carica il file con i contrassegni ricevuto dal corriere.</div>
-          <div style={{fontSize:'12px',color:'#1a1a1a',marginBottom:'6px',fontWeight:'600'}}>Seleziona file: XLS, XLSX, CSV — puoi selezionarne <strong>più di uno</strong></div>
+          <div style={{fontSize:'12px',color:'#1a1a1a',marginBottom:'6px',fontWeight:'600'}}>Seleziona file: XLS, XLSX, CSV</div>
           <input ref={fileRef} type="file" accept=".csv,.xls,.xlsx" multiple onChange={uploadFile} style={{fontSize:'12px',marginBottom:'8px',display:'block',color:'#1a1a1a'}}/>
-          <div style={{fontSize:'11px',color:'#1a1a1a',marginBottom:'12px'}}>Il file deve contenere obbligatoriamente 2 colonne: <strong>LDV, ImportoCOD</strong>. L'export del corriere è a pagine da 500: carica tutte le pagine insieme.</div>
+          <div style={{fontSize:'11px',color:'#1a1a1a',marginBottom:'12px'}}>Il file deve contenere le colonne <strong>LDV</strong> e <strong>ImportoCOD</strong>. <strong>Nessun limite di righe</strong>: carica pure un unico file grande (anche decine di migliaia di righe) — la barra sale man mano che elabora. Puoi anche selezionare più file insieme.</div>
           <button onClick={()=>fileRef.current?.click()} disabled={uploading}
             style={{padding:'7px 16px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer',opacity:uploading?0.7:1}}>
             {uploading?'Caricamento...':'Carica file CSV'}
