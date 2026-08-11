@@ -121,38 +121,71 @@ export default function DistinteContrassegniPage() {
   const setF = (k:string,v:string) => setFiltri(f=>({...f,[k]:v}))
 
   async function uploadFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+    // MULTI-FILE: l'export contrassegni del provider è paginato (500 righe/file), quindi le pagine
+    // vanno caricate tutte insieme. Si processano in fila, un file = una POST; i doppioni fra pagine
+    // sono già gestiti dal vincolo unico (master, spedizione) nell'area di sosta.
+    const files = Array.from(e.target.files || [])
+    if (!files.length) return
     setUploading(true)
-    setAvanz({ fatti: 0, totale: 0, da: null, etichetta: 'Sto leggendo il file dei contrassegni', sottotitolo: file.name })
-    try {
-      const { utils, read } = await import('xlsx')
-      const buffer = await file.arrayBuffer()
-      const wb = read(buffer)
-      const ws = wb.Sheets[wb.SheetNames[0]]
-      const righe = utils.sheet_to_json(ws)
-      setAvanz(a => a ? { ...a, etichetta: 'Sto caricando i contrassegni', sottotitolo: `${righe.length} righe` } : a)
-      const res = await fetch('/api/contrassegni/upload-cod', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ nomeFile: file.name, righe })
-      })
-      const data = await res.json()
-      if (data.success) {
-        await dialog.alert({ title: 'File caricato', message:
-            `Righe lette dal file: ${data.righeFile ?? '—'}\n\n`
-          + `Come sono state ripartite (tutte contate):\n`
-          + `• Riconosciute e caricate: ${data.spedizioniProcessate} (di cui nuove in attesa: ${data.inAttesa ?? 0} · € ${Number(data.codDaPagare||0).toFixed(2)})\n`
-          + `• Già in una tua distinta: ${data.giaInDistinta || 0}\n`
-          + `• Già pagate in precedenza: ${data.giaPagati || 0}\n`
-          + `• Doppioni nel file: ${data.doppioniFile || 0}\n`
-          + `• Non ancora versate dal corriere: ${data.saltateNonPagate || 0}\n`
-          + `• Non trovate a sistema (scartate): ${data.errori || 0}\n`
-          + (data.nonClassificate ? `\n⚠️ Righe NON classificate: ${data.nonClassificate} — avvisami, è un errore!\n` : '')
-          + `\nLe "caricate" le trovi in "Contrassegni da caricare": decidi a chi caricarle.` })
-        fetch('/api/contrassegni/cod-files').then(r=>r.json()).then(d=>setCodFiles(d||[]))
-        caricaDaCaricare()
+    const inizio = Date.now()
+    // Barra DETERMINATA: totale = numero di file, avanza a ogni file completato (con stima del tempo).
+    setAvanz({ fatti: 0, totale: files.length, da: inizio,
+      etichetta: files.length > 1 ? 'Sto caricando i file dei contrassegni' : 'Sto leggendo il file dei contrassegni',
+      sottotitolo: files.length > 1 ? `0 di ${files.length} file` : files[0].name })
+
+    const { utils, read } = await import('xlsx')
+    const tot = { righeFile: 0, spedizioniProcessate: 0, inAttesa: 0, codDaPagare: 0,
+      giaInDistinta: 0, giaPagati: 0, doppioniFile: 0, saltateNonPagate: 0, errori: 0, nonClassificate: 0 }
+    const problemi: string[] = []
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      setAvanz(a => a ? { ...a, fatti: i, sottotitolo: `${file.name} — ${i + 1} di ${files.length}` } : a)
+      try {
+        const buffer = await file.arrayBuffer()
+        const wb = read(buffer)
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        const righe = utils.sheet_to_json(ws)
+        const res = await fetch('/api/contrassegni/upload-cod', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nomeFile: file.name, righe })
+        })
+        const data = await res.json()
+        if (data.success) {
+          tot.righeFile += data.righeFile || 0
+          tot.spedizioniProcessate += data.spedizioniProcessate || 0
+          tot.inAttesa += data.inAttesa || 0
+          tot.codDaPagare += Number(data.codDaPagare || 0)
+          tot.giaInDistinta += data.giaInDistinta || 0
+          tot.giaPagati += data.giaPagati || 0
+          tot.doppioniFile += data.doppioniFile || 0
+          tot.saltateNonPagate += data.saltateNonPagate || 0
+          tot.errori += data.errori || 0
+          tot.nonClassificate += data.nonClassificate || 0
+        } else {
+          problemi.push(`${file.name}: ${data.error || 'non caricato'}`)
+        }
+      } catch {
+        problemi.push(`${file.name}: lettura non riuscita`)
       }
-    } catch(err) { await dialog.alert({ title: 'Errore', message: 'Errore nel caricamento del file.' }) }
+      setAvanz(a => a ? { ...a, fatti: i + 1 } : a)
+    }
+
+    await dialog.alert({ title: files.length > 1 ? `${files.length} file caricati` : 'File caricato', message:
+        `Righe totali lette: ${tot.righeFile}\n\n`
+      + `Come sono state ripartite (tutte contate):\n`
+      + `• Riconosciute e caricate: ${tot.spedizioniProcessate} (di cui nuove in attesa: ${tot.inAttesa} · € ${tot.codDaPagare.toFixed(2)})\n`
+      + `• Già in una tua distinta: ${tot.giaInDistinta}\n`
+      + `• Già pagate in precedenza: ${tot.giaPagati}\n`
+      + `• Doppioni nei file: ${tot.doppioniFile}\n`
+      + `• Non ancora versate dal corriere: ${tot.saltateNonPagate}\n`
+      + `• Non trovate a sistema (scartate): ${tot.errori}\n`
+      + (tot.nonClassificate ? `\n⚠️ Righe NON classificate: ${tot.nonClassificate} — avvisami, è un errore!\n` : '')
+      + (problemi.length ? `\n⚠️ File con problemi:\n${problemi.join('\n')}\n` : '')
+      + `\nLe "caricate" le trovi in "Contrassegni da caricare": decidi a chi caricarle.` })
+
+    fetch('/api/contrassegni/cod-files').then(r => r.json()).then(d => setCodFiles(d || []))
+    caricaDaCaricare()
     setAvanz(null)
     setUploading(false)
     if (fileRef.current) fileRef.current.value = ''
@@ -246,9 +279,9 @@ export default function DistinteContrassegniPage() {
       <div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:'16px',marginBottom:'16px'}}>
         <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'16px'}}>
           <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',marginBottom:'12px'}}>Carica il file con i contrassegni ricevuto dal corriere.</div>
-          <div style={{fontSize:'12px',color:'#1a1a1a',marginBottom:'6px',fontWeight:'600'}}>Seleziona file: XLS, XLSX, CSV</div>
-          <input ref={fileRef} type="file" accept=".csv,.xls,.xlsx" onChange={uploadFile} style={{fontSize:'12px',marginBottom:'8px',display:'block',color:'#1a1a1a'}}/>
-          <div style={{fontSize:'11px',color:'#1a1a1a',marginBottom:'12px'}}>Il file deve contenere obbligatoriamente 2 colonne: <strong>LDV, ImportoCOD</strong></div>
+          <div style={{fontSize:'12px',color:'#1a1a1a',marginBottom:'6px',fontWeight:'600'}}>Seleziona file: XLS, XLSX, CSV — puoi selezionarne <strong>più di uno</strong></div>
+          <input ref={fileRef} type="file" accept=".csv,.xls,.xlsx" multiple onChange={uploadFile} style={{fontSize:'12px',marginBottom:'8px',display:'block',color:'#1a1a1a'}}/>
+          <div style={{fontSize:'11px',color:'#1a1a1a',marginBottom:'12px'}}>Il file deve contenere obbligatoriamente 2 colonne: <strong>LDV, ImportoCOD</strong>. L'export del corriere è a pagine da 500: carica tutte le pagine insieme.</div>
           <button onClick={()=>fileRef.current?.click()} disabled={uploading}
             style={{padding:'7px 16px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer',opacity:uploading?0.7:1}}>
             {uploading?'Caricamento...':'Carica file CSV'}
