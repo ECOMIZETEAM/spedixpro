@@ -78,6 +78,35 @@ export default function Dashboard() {
         <p style={{color:'#999',fontSize:'12px',margin:'4px 0 0'}}>{new Date().toLocaleDateString('it-IT',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
       </div>
 
+      {/* IL TUO CREDITO: conto rete (verso il master sopra) + eventuale conto proprio. Verde se a
+          credito, rosso se a debito — chi fattura va sotto zero ed e' normale. */}
+      {data.creditoMaster && (() => {
+        const rete = Number(data.creditoMaster.rete || 0)
+        const proprio = Number(data.creditoMaster.proprio || 0)
+        const pos = rete >= 0
+        const col = pos ? '#16a34a' : '#dc2626'
+        const bg = pos ? '#f0fdf4' : '#fef2f2'
+        const bord = pos ? '#bbf7d0' : '#fecaca'
+        const euro = (n:number) => '€ ' + n.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})
+        return (
+          <div style={{display:'flex',alignItems:'center',gap:'16px',background:bg,border:`1px solid ${bord}`,borderRadius:'10px',padding:'14px 20px',flexWrap:'wrap' as const}}>
+            <div style={{width:'46px',height:'46px',background:'#fff',border:`1px solid ${bord}`,borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'22px'}}>💳</div>
+            <div style={{flex:1,minWidth:'170px'}}>
+              <div style={{fontSize:'11px',fontWeight:700,textTransform:'uppercase' as const,letterSpacing:'0.6px',color:'#6b7280'}}>Il tuo credito</div>
+              <div style={{fontSize:'28px',fontWeight:800,color:col,lineHeight:1.15}}>{euro(rete)}</div>
+              <div style={{fontSize:'11px',color:'#6b7280',marginTop:'2px'}}>{pos ? 'Saldo a tuo credito' : 'Saldo a debito (da saldare/ricaricare)'}</div>
+            </div>
+            {proprio !== 0 && (
+              <div style={{textAlign:'right' as const,minWidth:'150px',borderLeft:`1px solid ${bord}`,paddingLeft:'16px'}}>
+                <div style={{fontSize:'11px',fontWeight:700,textTransform:'uppercase' as const,letterSpacing:'0.6px',color:'#6b7280'}}>Conto proprio</div>
+                <div style={{fontSize:'22px',fontWeight:800,color: proprio>=0?'#16a34a':'#dc2626'}}>{euro(proprio)}</div>
+                <div style={{fontSize:'10px',color:'#9ca3af'}}>contratti tuoi</div>
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
       {/* KPI */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:'12px'}}>
 

@@ -90,6 +90,7 @@ export async function GET() {
     { data: ultimeSpedizioni },
     { count: daMettereInDistinta },
     { data: clientiNegativi },
+    { data: mioCredito },
   ] = await Promise.all([
     // Via ADMIN (bypassa RLS): le RPC aggregano SOLO il sotto-albero del proprio master (p_master),
     // quindi contano proprie + improprie della rete SOTTO. Con il client user-scoped l'RLS limitava
@@ -110,6 +111,9 @@ export async function GET() {
     //   - fattura -> andare sotto zero e' NORMALE, e' semplicemente l'importo da fatturare.
     admin.from('clienti').select('id,ragione_sociale,credito,tipo_contratto')
       .eq('master_id', masterId).lt('credito', 0).order('credito', { ascending: true }),
+    // IL CREDITO DEL MASTER stesso: conto RETE (verso il master sopra) + conto PROPRIO (contratti suoi).
+    // Puo' essere negativo — chi fattura va sotto zero ed e' normale (REGOLE.md).
+    admin.from('masters').select('credito,credito_proprio').eq('id', masterId).maybeSingle(),
   ])
   // Contatore piano (X/limite) = spedizioni del mese di TUTTA la rete, dalla STESSA RPC (subtree)
   // così coincide con le altre statistiche (niente più discrepanze tipo 98 vs 86).
@@ -121,6 +125,10 @@ export async function GET() {
   return NextResponse.json({
     ruolo: (utente as any)?.ruolo || 'master',
     masterNome,
+    creditoMaster: {
+      rete: Number((mioCredito as any)?.credito || 0),
+      proprio: Number((mioCredito as any)?.credito_proprio || 0),
+    },
     daMettereInDistinta: daMettereInDistinta || 0,
     totClienti: c.totClienti||0,
     spedizioniMese: spedMeseRete||0,
