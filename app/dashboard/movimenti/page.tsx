@@ -157,13 +157,15 @@ export default function MovimentiMasterPage() {
                     <div style={{marginTop:'6px',fontSize:'12px'}}>
                       <span style={{color:'#666'}}>Saldo sul portale </span>
                       <span style={{fontWeight:700,color:'#1a1a1a'}}>{fmtEuro(g.saldoReale)}</span>
-                      {g.scarto != null && Math.abs(g.scarto) >= 0.01 ? (
+                      {/* Scarto/quadra SOLO dove c'è riconciliazione (SpediamoPro/DVA). Per Spedisci
+                          scarto è assente: mostriamo il saldo grezzo, senza badge fuorviante. */}
+                      {g.scarto != null && (Math.abs(g.scarto) >= 0.01 ? (
                         <span style={{marginLeft:'6px',color:Math.abs(g.scarto)>1?'#b91c1c':'#a16207'}}>
                           (scarto {g.scarto>0?'+':''}{fmtEuro(g.scarto)})
                         </span>
                       ) : (
                         <span style={{marginLeft:'6px',color:'#15803d',fontWeight:600}}>✓ quadra</span>
-                      )}
+                      ))}
                     </div>
                   )}
                   {g.realeInserito != null && manca != null && Math.abs(manca) >= 0.01 && (

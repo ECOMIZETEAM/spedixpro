@@ -113,8 +113,14 @@ export async function GET() {
     const sLive = saldoLive[g.gruppo]
     if (sLive != null) {
       base.saldoReale = sLive
-      base.realeInserito = r2(sLive + g.speso)   // dedotto dal saldo live: quanto versato davvero
-      base.scarto = r2(sLive - residuo)          // se ≠0: manca una ricarica da trascrivere
+      // La RICONCILIAZIONE (versato = saldo+speso, scarto, Allinea) vale SOLO per i conti DEDICATI di
+      // E&A — SpediamoPro e DVA — dove il nostro speso aggrega tutta e sola la rete. I conti Spedisci
+      // sono account rivenditore SEPARATI (E.M Express, M.C Logistica…) con attività fuori MoovExpress:
+      // lì saldo+speso NON è "versato", quindi mostriamo solo il saldo grezzo (niente scarto/Allinea).
+      if (g.portale === 'spediamopro' || g.portale === 'easyparcel') {
+        base.realeInserito = r2(sLive + g.speso)
+        base.scarto = r2(sLive - residuo)
+      }
     }
     return base
   }).sort((a, b) => ordine(a.portale) - ordine(b.portale) || a.label.localeCompare(b.label))
