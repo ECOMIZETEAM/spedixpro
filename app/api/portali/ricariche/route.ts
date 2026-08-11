@@ -145,8 +145,8 @@ export async function POST(req: NextRequest) {
   const importo = Number(body.importo)
   // 'cod' = rimessa contrassegni riaccreditata dal provider; 'ricarica' = versamento di E&A.
   const categoria = body.categoria === 'cod' ? 'cod' : 'ricarica'
-  if (!gruppo) return NextResponse.json({ error: 'Gruppo non valido' }, { status: 400 })
-  if (!isFinite(importo) || importo === 0) return NextResponse.json({ error: 'Inserisci un importo diverso da 0 (usa il − per correggere)' }, { status: 400 })
+  if (!gruppo) { console.error('[RICARICHE][400] gruppo mancante — body:', JSON.stringify(body)); return NextResponse.json({ error: 'Gruppo non valido' }, { status: 400 }) }
+  if (!isFinite(importo) || importo === 0) { console.error('[RICARICHE][400] importo non valido — body:', JSON.stringify(body)); return NextResponse.json({ error: 'Inserisci un importo diverso da 0 (usa il − per correggere)' }, { status: 400 }) }
   const portale = portaleDaGruppo(gruppo)
 
   const { createAdminSupabase } = await import('@/lib/supabase-admin')

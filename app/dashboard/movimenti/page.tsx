@@ -70,11 +70,20 @@ export default function MovimentiMasterPage() {
   }
   async function aggiungi(gruppo: string, categoria: 'ricarica' | 'cod', importo?: number, note?: string) {
     const src = categoria === 'cod' ? formCod[gruppo] : formImporto[gruppo]
-    const imp = importo != null ? importo : parseFloat(String(src || '').replace(',', '.'))
-    if (!isFinite(imp) || imp === 0) return
+    // Parsing robusto dei formati italiani: "1.234,56" → 1234.56, "1234,56" → 1234.56.
+    let raw = String(importo != null ? importo : (src || '')).trim().replace(/[^0-9.,-]/g, '')
+    if (raw.includes('.') && raw.includes(',')) raw = raw.replace(/\./g, '').replace(',', '.')
+    else if (raw.includes(',')) raw = raw.replace(',', '.')
+    const imp = importo != null ? importo : parseFloat(raw)
+    if (!isFinite(imp) || imp === 0) { await dialog.alert({ title: 'Importo non valido', message: `Inserisci un importo (hai scritto: "${src ?? ''}").` }); return }
     setSavingP(gruppo)
     try {
-      await fetch('/api/portali/ricariche', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gruppo, importo: imp, categoria, note }) })
+      const res = await fetch('/api/portali/ricariche', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gruppo, importo: imp, categoria, note }) })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({} as any))
+        await dialog.alert({ title: 'Operazione non riuscita', message: (d as any).error || `Errore ${res.status}` })
+        return
+      }
       if (categoria === 'cod') setFormCod(f => ({ ...f, [gruppo]: '' })); else setFormImporto(f => ({ ...f, [gruppo]: '' }))
       await caricaPortali()
     } finally { setSavingP('') }
