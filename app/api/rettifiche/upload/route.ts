@@ -138,7 +138,9 @@ export async function POST(req: NextRequest) {
             cliente_id: figlio ? null : liv.clienteId,
             target_master_id: figlio,
             peso_iniziale: e.pesoPrima, peso_volume_iniziale: 0,
-            peso_reale: e.pesoDopo, peso_volume_reale: 0,
+            // Il volume vero (quello che fa salire il costo): prima era 0 anche sul primo livello,
+            // così la sua Rettifica Costi mostrava "0,00" mentre il livello sotto vedeva il volume.
+            peso_reale: e.pesoDopo, peso_volume_reale: e.pesoVolumeDopo || 0,
             costo_iniziale: liv.pagato, costo_finale: liv.dovuto,
             differenza: -liv.differenza,   // la colonna e' "quanto restituisco": un addebito e' negativo
             stato: 'da_rettificare',

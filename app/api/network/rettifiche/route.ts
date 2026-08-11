@@ -78,6 +78,9 @@ export async function POST(req: NextRequest) {
   const { calcolaRipesature } = await import('@/lib/ripesature-calcolo')
   let create = 0
   const saltate: { ldv: string; perche: string }[] = []
+  const idFatte: string[] = []      // figlia creata (o già esistente) → 'propagata'
+  const idAzzerate: string[] = []   // differenza a zero → 'assorbita'. Tutte le ALTRE saltate NON
+                                    // vengono più marcate: restano propagazione=null e ritentabili.
 
   for (const r of righe as any[]) {
     const colli = Array.isArray(r.colli_ripesati) ? r.colli_ripesati : []
@@ -117,7 +120,7 @@ export async function POST(req: NextRequest) {
       ? esito.livelli.find(l => l.masterId === figlio)
       : esito.livelli.find(l => l.clienteId)
     if (!liv || liv.differenza == null) { saltate.push({ ldv: r.numero_spedizione, perche: 'nessun prezzo a listino per il livello sotto' }); continue }
-    if (Math.abs(liv.differenza) < 0.01) { saltate.push({ ldv: r.numero_spedizione, perche: 'differenza a zero' }); continue }
+    if (Math.abs(liv.differenza) < 0.01) { saltate.push({ ldv: r.numero_spedizione, perche: 'differenza a zero' }); idAzzerate.push(r.id); continue }
 
     const { error } = await adminDb.from('rettifiche').insert({
       master_id: mio, spedizione_id: esito.spedizioneId, numero_spedizione: esito.ldv,
@@ -132,14 +135,22 @@ export async function POST(req: NextRequest) {
       origine_rettifica_id: r.id,         // l'anti-doppione: si propaga una volta sola
     })
     // 23505 = l'indice unico ha respinto una seconda propagazione della stessa riga. Voluto.
-    if (!error) create++
-    else if (error.code === '23505') saltate.push({ ldv: r.numero_spedizione, perche: 'gia\' propagata' })
+    if (!error) { create++; idFatte.push(r.id) }
+    else if (error.code === '23505') { saltate.push({ ldv: r.numero_spedizione, perche: 'gia\' propagata' }); idFatte.push(r.id) }
     else { console.error('[RETTIFICHE][PROPAGA]', r.numero_spedizione, error.message); saltate.push({ ldv: r.numero_spedizione, perche: 'non riuscita' }) }
   }
 
-  await adminDb.from('rettifiche').update({ propagazione: 'propagata' }).in('id', righe.map((r: any) => r.id))
+  // Si segna lo stato SOLO su chi è stato davvero deciso: 'propagata' chi ha (o già aveva) una figlia,
+  // 'assorbita' chi non aveva nulla da addebitare. Tutte le altre saltate RESTANO propagazione=null e
+  // rimangono nell'elenco "da decidere": si ritentano dopo aver sistemato la causa (listino del livello
+  // sotto mancante, misure non salvate, catena incompleta), invece di sparire assorbite in silenzio —
+  // era il motivo per cui la rettifica arrivava a un sotto-master (es. Ecomize LL) ma lui non poteva
+  // né vederla né addebitarla, e non era più recuperabile.
+  if (idFatte.length) await adminDb.from('rettifiche').update({ propagazione: 'propagata' }).in('id', idFatte)
+  if (idAzzerate.length) await adminDb.from('rettifiche').update({ propagazione: 'assorbita' }).in('id', idAzzerate)
 
+  const ritentabili = righe.length - idFatte.length - idAzzerate.length
   return NextResponse.json({
-    ok: true, create, nonPropagate: saltate.length, dettaglio: saltate.slice(0, 20),
+    ok: true, create, nonPropagate: saltate.length, ritentabili, dettaglio: saltate.slice(0, 20),
   })
 }
