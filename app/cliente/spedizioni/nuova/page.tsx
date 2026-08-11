@@ -54,6 +54,20 @@ export default function NuovaSpedizioneCliente() {
   const [suggDest, setSuggDest] = useState<any[]>([])   // rubrica destinatari
   const [showSuggDest, setShowSuggDest] = useState(false)
   const [dest, setDest] = useState({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',paese:'IT',email:'',telefono:'',note:''})
+  // Avvertenza (non blocca): destinatario che rifiuta i contrassegni, storico rete per telefono.
+  const [codAlert, setCodAlert] = useState<{totCod:number;resi:number;nonConsegnato:number;giacenza:number;rifiutati:number}|null>(null)
+  useEffect(()=>{
+    const tel = (dest.telefono||'').replace(/[^0-9]/g,'')
+    if (tel.length < 9) { setCodAlert(null); return }
+    const t = setTimeout(async()=>{
+      try{
+        const r = await fetch('/api/spedizioni/check-destinatario?telefono='+encodeURIComponent(dest.telefono))
+        const j = await r.json()
+        setCodAlert(j && j.mostra ? j : null)
+      }catch{ setCodAlert(null) }
+    }, 500)
+    return ()=>clearTimeout(t)
+  }, [dest.telefono])
   const [suggComuni, setSuggComuni] = useState<any[]>([])
   const [showSugg, setShowSugg] = useState(false)
   const [richiediRitiro, setRichiediRitiro] = useState(false)
@@ -512,6 +526,17 @@ export default function NuovaSpedizioneCliente() {
                 <div><label style={lbl}>Email</label><input value={dest.email} onChange={e=>setDest({...dest,email:e.target.value})} style={inp}/></div>
                 <div><label style={lbl}>Telefono</label><input value={dest.telefono} onChange={e=>setDest({...dest,telefono:e.target.value})} style={inp}/></div>
               </div>
+              {codAlert && (
+                <div style={{display:'flex',gap:'10px',alignItems:'flex-start',padding:'10px 12px',marginBottom:'12px',background:'#fffbeb',border:'1px solid #fcd34d',borderRadius:'6px'}}>
+                  <span style={{fontSize:'16px',lineHeight:'18px'}}>⚠️</span>
+                  <div style={{fontSize:'12.5px',color:'#92400e',lineHeight:'1.45'}}>
+                    <b>Attenzione destinatario:</b> su <b>{codAlert.totCod}</b> spedizion{codAlert.totCod===1?'e':'i'} in contrassegno ne ha
+                    {' '}<b>{codAlert.rifiutati>0 ? `rifiutat${codAlert.rifiutati===1?'a':'e'} ${codAlert.rifiutati}` : 'lasciate in giacenza'}</b>
+                    {codAlert.giacenza>0 && codAlert.rifiutati>0 ? ` (di cui ${codAlert.giacenza} ora in giacenza)` : ''}.
+                    {' '}Puoi comunque spedire — è solo un avviso.
+                  </div>
+                </div>
+              )}
               <div><label style={lbl}>Note</label><input value={dest.note} onChange={e=>setDest({...dest,note:e.target.value})} style={inp}/></div>
             </div>
           </div>
