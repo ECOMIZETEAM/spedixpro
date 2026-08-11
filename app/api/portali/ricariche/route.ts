@@ -45,15 +45,19 @@ export async function GET() {
   const { data: spesoRows } = await admin.rpc('speso_portali_ea')
 
   const r2 = (n: number) => Math.round(n * 100) / 100
-  const gruppi = new Map<string, { gruppo: string; portale: string; speso: number; ricariche: number }>()
+  const gruppi = new Map<string, { gruppo: string; portale: string; speso: number; ricariche: number; rimesseCod: number }>()
   for (const row of (spesoRows || []) as any[]) {
     if (!['spediamopro', 'easyparcel', 'spedisci'].includes(row.portale)) continue   // gls/interno non sono wallet
-    gruppi.set(row.gruppo, { gruppo: row.gruppo, portale: row.portale, speso: Number(row.speso) || 0, ricariche: 0 })
+    gruppi.set(row.gruppo, { gruppo: row.gruppo, portale: row.portale, speso: Number(row.speso) || 0, ricariche: 0, rimesseCod: 0 })
   }
   for (const r of (ricariche || []) as any[]) {
     const g = r.gruppo || r.portale
-    if (!gruppi.has(g)) gruppi.set(g, { gruppo: g, portale: r.portale, speso: 0, ricariche: 0 })
-    gruppi.get(g)!.ricariche += Number(r.importo || 0)
+    if (!gruppi.has(g)) gruppi.set(g, { gruppo: g, portale: r.portale, speso: 0, ricariche: 0, rimesseCod: 0 })
+    const gg = gruppi.get(g)!
+    // La rimessa contrassegni (COD riaccreditato dal provider) alza il residuo come una ricarica,
+    // ma la teniamo distinta per mostrarla separata sulla card.
+    if (r.categoria === 'cod') gg.rimesseCod += Number(r.importo || 0)
+    else gg.ricariche += Number(r.importo || 0)
   }
 
   // Saldo VERO letto dai provider (ognuno col suo modo), IN PARALLELO con timeout: è un di più e non
@@ -105,10 +109,10 @@ export async function GET() {
   for (const rr of saldiRis) if (rr) saldoLive[rr.gruppo] = rr.saldo
 
   const out = Array.from(gruppi.values()).map(g => {
-    const residuo = r2(g.ricariche - g.speso)
+    const residuo = r2(g.ricariche + g.rimesseCod - g.speso)
     const base: any = {
       gruppo: g.gruppo, portale: g.portale, label: labelGruppo(g.gruppo, g.portale),
-      ricariche: r2(g.ricariche), speso: r2(g.speso), residuo,
+      ricariche: r2(g.ricariche), rimesseCod: r2(g.rimesseCod), speso: r2(g.speso), residuo,
     }
     const sLive = saldoLive[g.gruppo]
     if (sLive != null) {
@@ -139,6 +143,8 @@ export async function POST(req: NextRequest) {
   // Ora si passa il GRUPPO (fine). Compat: se arriva ancora 'portale', vale come gruppo.
   const gruppo = String(body.gruppo || body.portale || '').trim()
   const importo = Number(body.importo)
+  // 'cod' = rimessa contrassegni riaccreditata dal provider; 'ricarica' = versamento di E&A.
+  const categoria = body.categoria === 'cod' ? 'cod' : 'ricarica'
   if (!gruppo) return NextResponse.json({ error: 'Gruppo non valido' }, { status: 400 })
   if (!isFinite(importo) || importo === 0) return NextResponse.json({ error: 'Inserisci un importo diverso da 0 (usa il − per correggere)' }, { status: 400 })
   const portale = portaleDaGruppo(gruppo)
@@ -146,21 +152,21 @@ export async function POST(req: NextRequest) {
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
   const { data: ins, error } = await admin.from('ricariche_portale').insert({
-    master_id: EA_ID, portale, gruppo, importo, data: body.data || null,
+    master_id: EA_ID, portale, gruppo, importo, categoria, data: body.data || null,
     note: body.note ? String(body.note).slice(0, 200) : null, created_by: user.id,
   }).select('id, portale, gruppo').single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
-  // La ricarica è denaro versato sul wallet del provider, che finanzia le spedizioni (le quali
-  // scalano lo STESSO conto rete di E&A): quindi ACCREDITA il credito. Movimento atomico via RPC,
-  // conto 'rete' (fn_conto_di per una ricarica → 'rete'). Riferimento = id ricarica per poterlo stornare.
+  // Ricarica e rimessa contrassegni ACCREDITANO entrambe il credito rete di E&A (l'utente ha scelto
+  // di contare il COD nel credito). Movimento atomico via RPC, conto 'rete' (fn_conto_di con
+  // spedizione null → 'rete'). Riferimento = id per poterlo stornare alla cancellazione.
   try {
     await admin.rpc('registra_movimento_master', {
       p_master_owner_id: EA_ID, p_master_target_id: EA_ID, p_tipo: 'ricarica',
-      p_descrizione: 'Ricarica ' + labelGruppo((ins as any).gruppo, (ins as any).portale),
+      p_descrizione: (categoria === 'cod' ? 'Rimessa contrassegni ' : 'Ricarica ') + labelGruppo((ins as any).gruppo, (ins as any).portale),
       p_importo: importo, p_riferimento: (ins as any).id, p_spedizione_id: null, p_created_by: user.id,
     })
-  } catch (e) { console.error('accredito ricarica portale fallito', e) }
+  } catch (e) { console.error('accredito ricarica/cod portale fallito', e) }
 
   return NextResponse.json({ ok: true })
 }

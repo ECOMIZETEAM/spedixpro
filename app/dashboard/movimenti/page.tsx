@@ -13,7 +13,7 @@ type Movimento = {
 }
 type Gruppo = {
   gruppo: string; portale: string; label: string
-  ricariche: number; speso: number; residuo: number
+  ricariche: number; rimesseCod: number; speso: number; residuo: number
   saldoReale?: number; realeInserito?: number; scarto?: number
 }
 
@@ -57,6 +57,7 @@ export default function MovimentiMasterPage() {
   const [gruppi, setGruppi] = useState<Gruppo[] | null>(null)
   const [ricariche, setRicariche] = useState<any[]>([])
   const [formImporto, setFormImporto] = useState<Record<string,string>>({})
+  const [formCod, setFormCod] = useState<Record<string,string>>({})
   const [savingP, setSavingP] = useState('')
 
   async function caricaPortali() {
@@ -67,25 +68,28 @@ export default function MovimentiMasterPage() {
       else { setGruppi(null); setRicariche([]) }
     } catch {}
   }
-  async function aggiungiRicarica(gruppo: string, importo?: number, note?: string) {
-    const imp = importo != null ? importo : parseFloat(String(formImporto[gruppo] || '').replace(',', '.'))
+  async function aggiungi(gruppo: string, categoria: 'ricarica' | 'cod', importo?: number, note?: string) {
+    const src = categoria === 'cod' ? formCod[gruppo] : formImporto[gruppo]
+    const imp = importo != null ? importo : parseFloat(String(src || '').replace(',', '.'))
     if (!isFinite(imp) || imp === 0) return
     setSavingP(gruppo)
     try {
-      await fetch('/api/portali/ricariche', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gruppo, importo: imp, note }) })
-      setFormImporto(f => ({ ...f, [gruppo]: '' }))
+      await fetch('/api/portali/ricariche', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gruppo, importo: imp, categoria, note }) })
+      if (categoria === 'cod') setFormCod(f => ({ ...f, [gruppo]: '' })); else setFormImporto(f => ({ ...f, [gruppo]: '' }))
       await caricaPortali()
     } finally { setSavingP('') }
   }
   async function allineaSaldo(g: Gruppo) {
-    const manca = Math.round(((g.realeInserito || 0) - g.ricariche) * 100) / 100
+    // Le ricariche sono complete (gestite a mano): lo scarto residuo↔saldo è COD non ancora segnato,
+    // quindi l'allineamento aggiunge una RIMESSA CONTRASSEGNI, non una ricarica.
+    const manca = Math.round((g.scarto || 0) * 100) / 100
     if (Math.abs(manca) < 0.01) return
     if (!await dialog.confirm({
-      title: 'Allineare al saldo reale?',
-      message: `Aggiungo una ricarica di ${fmtImporto(manca)} a ${g.label} (dedotta dal saldo live ${fmtEuro(g.saldoReale||0)} + speso). Il credito verrà accreditato di conseguenza.`,
-      confirmText: 'Allinea',
+      title: 'Segnare la rimessa contrassegni mancante?',
+      message: `Aggiungo una rimessa contrassegni di ${fmtImporto(manca)} a ${g.label}, così il residuo quadra col saldo reale del wallet (${fmtEuro(g.saldoReale||0)}). Accredita il credito.`,
+      confirmText: 'Segna COD',
     })) return
-    await aggiungiRicarica(g.gruppo, manca, 'Allineamento al saldo reale del portale')
+    await aggiungi(g.gruppo, 'cod', manca, 'Rimessa contrassegni (allineamento al saldo wallet)')
   }
   async function eliminaRicarica(id: string) {
     if (!await dialog.confirm({ title: 'Eliminare la ricarica?', message: 'Verrà stornato anche l’accredito corrispondente sul credito.', danger: true, confirmText: 'Elimina' })) return
@@ -145,12 +149,12 @@ export default function MovimentiMasterPage() {
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))',gap:'14px'}}>
             {gruppi.map(g => {
               const lista = ricariche.filter((r:any) => (r.gruppo || r.portale) === g.gruppo)
-              const manca = g.realeInserito != null ? Math.round((g.realeInserito - g.ricariche) * 100) / 100 : null
+              const manca = g.scarto != null ? Math.round(g.scarto * 100) / 100 : null
               return (
                 <div key={g.gruppo} style={{border:'1px solid #eee',borderRadius:'8px',padding:'14px'}}>
                   <div style={{fontSize:'12px',fontWeight:700,color:'#1a1a1a'}}>{g.label}</div>
                   <div style={{fontSize:'22px',fontWeight:800,color:g.residuo<0?'#b91c1c':'#15803d',margin:'6px 0'}}>{fmtEuro(g.residuo)}</div>
-                  <div style={{fontSize:'12px',color:'#666'}}>Ricaricato {fmtEuro(g.ricariche)} · Speso {fmtEuro(g.speso)}</div>
+                  <div style={{fontSize:'12px',color:'#666'}}>Ricaricato {fmtEuro(g.ricariche)}{g.rimesseCod>0?` · Rimesse COD ${fmtEuro(g.rimesseCod)}`:''} · Speso {fmtEuro(g.speso)}</div>
                   {/* Saldo letto DAL PORTALE (solo SpediamoPro lo espone): da qui deduco quanto è
                       stato versato davvero = saldo + speso, e lo scarto con le ricariche trascritte. */}
                   {g.saldoReale != null && (
@@ -168,26 +172,35 @@ export default function MovimentiMasterPage() {
                       ))}
                     </div>
                   )}
-                  {g.realeInserito != null && manca != null && Math.abs(manca) >= 0.01 && (
+                  {manca != null && Math.abs(manca) >= 0.01 && (
                     <div style={{marginTop:'8px',fontSize:'12px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'8px'}}>
-                      <div style={{color:'#9a3412'}}>Versato davvero ≈ <b>{fmtEuro(g.realeInserito)}</b> (dal saldo live). Trascritto {fmtEuro(g.ricariche)}.</div>
+                      <div style={{color:'#9a3412'}}>Il residuo non quadra col saldo wallet per <b>{fmtEuro(Math.abs(manca))}</b>: sono contrassegni rientrati non ancora segnati.</div>
                       <button onClick={()=>allineaSaldo(g)} disabled={savingP===g.gruppo}
                         style={{marginTop:'6px',background:'#ea580c',color:'#fff',border:'none',borderRadius:'6px',padding:'6px 10px',fontSize:'12px',fontWeight:600,cursor:'pointer',opacity:savingP===g.gruppo?0.6:1}}>
-                        Allinea al saldo reale ({fmtImporto(manca)})
+                        Segna come rimessa COD ({fmtImporto(manca)})
                       </button>
                     </div>
                   )}
                   <div style={{display:'flex',gap:'6px',marginTop:'10px'}}>
-                    <input value={formImporto[g.gruppo]||''} onChange={e=>setFormImporto(f=>({...f,[g.gruppo]:e.target.value}))} placeholder="Importo ricarica €" inputMode="decimal"
+                    <input value={formImporto[g.gruppo]||''} onChange={e=>setFormImporto(f=>({...f,[g.gruppo]:e.target.value}))} placeholder="Ricarica €" inputMode="decimal"
                       style={{flex:1,padding:'7px 10px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',minWidth:0}}/>
-                    <button onClick={()=>aggiungiRicarica(g.gruppo)} disabled={savingP===g.gruppo}
-                      style={{background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',padding:'7px 14px',fontSize:'13px',fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',opacity:savingP===g.gruppo?0.6:1}}>+ Aggiungi</button>
+                    <button onClick={()=>aggiungi(g.gruppo,'ricarica')} disabled={savingP===g.gruppo}
+                      style={{background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',padding:'7px 12px',fontSize:'13px',fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',opacity:savingP===g.gruppo?0.6:1}}>+ Ricarica</button>
+                  </div>
+                  <div style={{display:'flex',gap:'6px',marginTop:'6px'}}>
+                    <input value={formCod[g.gruppo]||''} onChange={e=>setFormCod(f=>({...f,[g.gruppo]:e.target.value}))} placeholder="Rimessa contrassegni €" inputMode="decimal"
+                      style={{flex:1,padding:'7px 10px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',minWidth:0}}/>
+                    <button onClick={()=>aggiungi(g.gruppo,'cod')} disabled={savingP===g.gruppo}
+                      style={{background:'#0d9488',color:'#fff',border:'none',borderRadius:'6px',padding:'7px 12px',fontSize:'13px',fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',opacity:savingP===g.gruppo?0.6:1}}>+ COD</button>
                   </div>
                   {lista.length>0 && (
                     <div style={{marginTop:'10px',maxHeight:'150px',overflowY:'auto'}}>
                       {lista.map((r:any)=>(
                         <div key={r.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'8px',fontSize:'12px',padding:'4px 0',borderBottom:'1px solid #f5f5f5'}}>
-                          <span style={{color:'#666'}}>{new Date(r.created_at).toLocaleDateString('it-IT')}</span>
+                          <span style={{color:'#666',display:'flex',gap:'5px',alignItems:'center'}}>
+                            {r.categoria==='cod' && <span style={{fontSize:'9px',fontWeight:700,color:'#0d9488',border:'1px solid #99f6e4',borderRadius:'4px',padding:'0 4px'}}>COD</span>}
+                            {new Date(r.created_at).toLocaleDateString('it-IT')}
+                          </span>
                           <span style={{fontWeight:600,color:Number(r.importo)<0?'#b91c1c':'#15803d'}}>{fmtEuro(Number(r.importo))}</span>
                           <button onClick={()=>eliminaRicarica(r.id)} title="Elimina" style={{background:'none',border:'none',color:'#dc2626',cursor:'pointer',fontSize:'15px',lineHeight:1}}>×</button>
                         </div>
