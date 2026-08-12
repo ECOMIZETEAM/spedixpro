@@ -184,6 +184,10 @@ export async function inviaSmsCreazione(spedizioneId: string | null | undefined)
       .eq('id', spedizioneId).maybeSingle()
     if (!sp || !sp.tracking_token) return
 
+    // Account demo: nessun SMS reale parte (non si consuma credito, non si tocca il gateway).
+    const { masterEDemo } = await import('@/lib/demo')
+    if (await masterEDemo(sp.master_id, admin)) return
+
     const tel = normalizzaTelefonoIT(sp.dest_telefono)
     if (!tel) return   // niente numero cellulare: non si consuma credito
 

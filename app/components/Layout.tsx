@@ -101,6 +101,7 @@ const NAV: NavItem[] = [
   ]},
   { label: 'Registro Attività', href: '/dashboard/audit', icon: '🛡', superMaster: true },
   { label: 'Abbonamenti API', href: '/dashboard/api-clienti', icon: '⚿', superMaster: true },
+  { label: 'Account Demo', href: '/dashboard/demo', icon: '🎬', superMaster: true },
   { label: 'Impostazioni', href: '/dashboard/impostazioni', icon: '◉', sub: [
     { label: 'Azienda', href: '/dashboard/impostazioni' },
     { label: 'Logo', href: '/dashboard/impostazioni/logo' },

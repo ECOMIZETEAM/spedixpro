@@ -153,7 +153,12 @@ export async function inviaEmailSpedizioneCreata(p: {
   numero: string; corriere?: string | null; destCitta?: string | null
   notificaDest?: boolean   // impostazione cliente notifica_email_dest (default true)
   spedizioneId?: string | null   // se presente, dispaccia anche l'SMS di notifica (stesso evento)
+  masterId?: string | null   // se è un master DEMO, non parte nulla di reale (email/SMS finti)
 }) {
+  // Account demo: nessuna email/SMS reale al destinatario. La prova non deve scrivere a nessuno.
+  if (p.masterId) {
+    try { const { masterEDemo } = await import('@/lib/demo'); if (await masterEDemo(p.masterId)) return } catch { /* best-effort */ }
+  }
   // NOTIFICA SMS al destinatario (best-effort, indipendente dall'email): stesso evento "spedizione
   // creata". Gatea da sola sulla preferenza notifica_sms e sul credito SMS; non parte se non c'è il
   // gateway configurato. Sta qui perché ogni porta che manda l'email passa già da questa funzione.

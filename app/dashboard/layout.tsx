@@ -6,6 +6,7 @@ import AbbonamentoGate from './AbbonamentoGate'
 import BannerPiano from '../components/BannerPiano'
 import AvvisoImportante from './AvvisoImportante'
 import CongelatoGate from './CongelatoGate'
+import BannerDemo from '../components/BannerDemo'
 import { DialogProvider } from '../components/DialogProvider'
 
 // Mai in cache: dipende dalla sessione. Senza questo Vercel puo' servire una versione resa
@@ -33,12 +34,18 @@ export default async function Layout({ children }: { children: React.ReactNode }
   let brandLogo: string | null = null
   let brandNome: string | null = null
   let superMaster = false
+  let demo = false
+  let demoScadenza: string | null = null
   if (utente?.master_id) {
-    const { data: m } = await supabase.from('masters').select('logo_url,nome,is_super_master').eq('id', utente.master_id).single()
+    const { data: m } = await supabase.from('masters').select('logo_url,nome,is_super_master,demo,demo_scadenza').eq('id', utente.master_id).single()
     brandLogo = m?.logo_url || null
     brandNome = m?.nome || null
     superMaster = !!m?.is_super_master
+    demo = m?.demo === true
+    demoScadenza = m?.demo_scadenza || null
   }
+  // Prova demo terminata: fuori dal gestionale, verso la pagina che spiega com'è andata.
+  if (demo && demoScadenza && new Date(demoScadenza).getTime() < Date.now()) redirect('/demo-scaduta')
   return (
     <DashboardLayout user={{
       nome: utente?.nome || 'Admin',
@@ -50,10 +57,11 @@ export default async function Layout({ children }: { children: React.ReactNode }
       superMaster,
     }}>
       <DialogProvider>
-        {(utente?.ruolo === 'master' || utente?.ruolo === 'admin') && <AbbonamentoGate />}
-        <CongelatoGate />
-        <AvvisoImportante />
-        <BannerPiano linkUpgrade="/dashboard/abbonamento" />
+        {demo && demoScadenza && <BannerDemo scadenza={demoScadenza} />}
+        {!demo && (utente?.ruolo === 'master' || utente?.ruolo === 'admin') && <AbbonamentoGate />}
+        {!demo && <CongelatoGate />}
+        {!demo && <AvvisoImportante />}
+        {!demo && <BannerPiano linkUpgrade="/dashboard/abbonamento" />}
         {children}
       </DialogProvider>
     </DashboardLayout>

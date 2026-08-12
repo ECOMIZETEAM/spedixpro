@@ -1392,6 +1392,7 @@ export async function POST(req: NextRequest) {
           mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
           mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
           numero: numeroFinale, corriere: corriereRecord.nome_contratto, notificaDest,
+          masterId, // se il master è demo, niente email/SMS reali
         })
       } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
     })

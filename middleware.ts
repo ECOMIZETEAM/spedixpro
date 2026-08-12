@@ -64,9 +64,28 @@ export async function middleware(req: NextRequest) {
     )
     const { data: { user } } = await sb.auth.getUser()
     if (!user) return risposta
-    const { data: u } = await sb.from('utenti').select('ruolo, masters(pagamento_scaduto_dal)').eq('id', user.id).single()
+    const { data: u } = await sb.from('utenti').select('ruolo, masters(pagamento_scaduto_dal, demo, demo_scadenza)').eq('id', user.id).single()
     if ((u?.ruolo || '').toLowerCase() === 'agente' && !consentita) {
       return NextResponse.json({ error: 'Operazione non consentita: gli agenti hanno accesso in sola lettura.' }, { status: 403 })
+    }
+
+    // ACCOUNT DEMO: prova a tempo, tutto simulato. Due regole, prima del canone:
+    //  - se la demo è SCADUTA, si può solo uscire (come il blocco canone, ma per fine prova);
+    //  - finché è attiva, restano vietate solo le porte che spenderebbero soldi veri o collegherebbero
+    //    account reali (Stripe, canone, acquisto/gateway SMS, saldi provider, negozi). Il resto — creare
+    //    spedizioni interne, gestire clienti, vedere report — funziona: è il senso della prova.
+    const md: any = (u as any)?.masters
+    if (md?.demo === true) {
+      const scaduta = !!md.demo_scadenza && new Date(md.demo_scadenza).getTime() < Date.now()
+      if (scaduta && !pathname.startsWith('/api/auth/')) {
+        return NextResponse.json({ error: 'La prova demo è terminata. Contattaci per attivare un account reale.' }, { status: 402 })
+      }
+      // Denylist inline (il middleware gira su Edge: niente import di lib/demo, che tira dentro il
+      // client admin). Prefissi delle porte che spenderebbero soldi veri o collegherebbero account reali.
+      const VIETATE_DEMO = ['/api/stripe/', '/api/abbonamento/', '/api/sms/acquista', '/api/sms/test', '/api/sms/test-accredito', '/api/sms/autoricarica', '/api/portali/', '/api/integrazioni/', '/api/cliente/ricarica', '/api/cliente/paga-carta']
+      if (!scaduta && VIETATE_DEMO.some(p => pathname.startsWith(p))) {
+        return NextResponse.json({ error: 'Modalità demo: questa operazione è simulata e non disponibile nella prova. Con un account reale funziona a tutti gli effetti.' }, { status: 403 })
+      }
     }
 
     // ACCOUNT SOSPESO PER CANONE NON PAGATO: non deve poter fare operazioni, e non basta nasconderle
