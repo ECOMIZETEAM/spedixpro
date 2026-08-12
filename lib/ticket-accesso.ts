@@ -77,3 +77,12 @@ export function mascheraCatena(ticket: any, viewerMasterId: string | null | unde
     rete_non_letti: nonLetti,
   }
 }
+
+// "Chi se ne occupa" PER MASTER: ogni livello della catena ha la sua assegnazione, indipendente e
+// invisibile agli altri (in `tickets.assegnazioni` = { "<master_id>": {id, nome} }). Restituisce
+// l'assegnazione DEL MASTER che guarda — così un livello non vede mai chi ha in carico un altro.
+export function assegnatoPer(ticket: any, masterId: string | null | undefined): { assegnato_id: string | null; assegnato_nome: string | null } {
+  const mappa = ticket?.assegnazioni
+  const voce = masterId && mappa && typeof mappa === 'object' ? mappa[masterId] : null
+  return { assegnato_id: voce?.id || null, assegnato_nome: voce?.nome || null }
+}

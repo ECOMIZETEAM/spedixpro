@@ -279,7 +279,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr style={{ background: '#f9fafb' }}>{['Codice', 'Data', 'Da', 'LDV', 'Stato', 'Chat'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <thead><tr style={{ background: '#f9fafb' }}>{['Codice', 'Data', 'Da', 'LDV', 'Stato', 'In carico', 'Chat'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
               <tbody>
                 {reteFiltrati.map(t => (
                   <tr key={t.id} onClick={() => apriDettaglio(t)} style={{ cursor: 'pointer' }}>
@@ -288,6 +288,11 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     <td style={td}><div style={{ fontWeight: 600 }}>{t.aperto_da || '—'}</div></td>
                     <td style={td}>{t.oggetto} {t.rete_nuovo && <span style={{ background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px' }}>● Nuovo</span>}</td>
                     <td style={td}><Badge stato={t.stato} /></td>
+                    <td style={td}>
+                      {t.assegnato_nome
+                        ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#eef6ff', color: '#0369a1', padding: '3px 9px', borderRadius: '10px', fontSize: '11.5px', fontWeight: 700, whiteSpace: 'nowrap' }}>👤 {t.assegnato_nome}</span>
+                        : <span style={{ fontSize: '11.5px', color: '#9ca3af', fontStyle: 'italic' }}>da assegnare</span>}
+                    </td>
                     <td style={{ ...td, color: '#2563eb', fontWeight: 600, fontSize: '12px' }}>💬 Apri chat</td>
                   </tr>
                 ))}
@@ -314,9 +319,10 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                 <Badge stato={sel.stato} />
               </div>
 
-              {/* Chi se ne occupa (solo lato assistenza diretta): la squadra vede se il ticket è già
-                  in carico a qualcuno, e chi vuole può prenderlo/subentrare o rilasciarlo. */}
-              {ruoloChat === 'master' && (
+              {/* Chi se ne occupa, PER LIVELLO: sia l'assistenza diretta (owner) sia chi partecipa
+                  dalla rete (es. E&A) vede/gestisce la PROPRIA assegnazione — indipendente e non
+                  visibile all'altro livello. La squadra vede se è già preso e può subentrare. */}
+              {(ruoloChat === 'master' || ruoloChat === 'rete') && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', fontSize: '12px', color: '#666', background: '#f8fafc', border: '1px solid #eef2f7', borderRadius: '8px', padding: '8px 12px' }}>
                   <span>In carico a:</span>
                   {sel.assegnato_nome
