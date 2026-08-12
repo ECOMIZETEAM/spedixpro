@@ -11,10 +11,11 @@ const TIPO_LABEL: Record<string, string> = { acquisto: 'Acquisto', trasferimento
 
 export default function NotificheSmsPage() {
   const dialog = useDialog()
-  const [dati, setDati] = useState<{ creditoWallet: number; creditoSms: number; costoSms: number; movimenti: Mov[]; clienti: Cliente[] } | null>(null)
+  const [dati, setDati] = useState<{ creditoWallet: number; creditoSms: number; costoSms: number; movimenti: Mov[]; clienti: Cliente[]; radice?: boolean; gatewayPronto?: boolean } | null>(null)
   const [pacchetto, setPacchetto] = useState(1000)
   const [clienteSel, setClienteSel] = useState('')
   const [importoTrasf, setImportoTrasf] = useState('')
+  const [telProva, setTelProva] = useState('')
   const [busy, setBusy] = useState(false)
 
   const carica = useCallback(async () => {
@@ -54,6 +55,19 @@ export default function NotificheSmsPage() {
     } finally { setBusy(false) }
   }
 
+  async function inviaProva() {
+    if (busy) return
+    const tel = telProva.trim()
+    if (!tel) { await dialog.alert({ message: 'Inserisci un numero di cellulare' }); return }
+    setBusy(true)
+    try {
+      const r = await fetch('/api/sms/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telefono: tel }) })
+      const j = await r.json()
+      if (!r.ok) { await dialog.alert({ title: 'SMS di prova non riuscito', message: j.error || 'Errore' }); return }
+      await dialog.alert({ title: 'SMS inviato', message: `SMS di prova inviato a ${j.inviatoA}. Controlla il telefono: se arriva, il gateway è a posto.` })
+    } finally { setBusy(false) }
+  }
+
   const card: React.CSSProperties = { background: '#fff', borderRadius: '10px', border: '1px solid #e5e7eb', padding: '18px 20px' }
   const lbl: React.CSSProperties = { display: 'block', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: '#9ca3af', marginBottom: '6px' }
   const inp: React.CSSProperties = { padding: '8px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', background: '#fff' }
@@ -81,6 +95,23 @@ export default function NotificheSmsPage() {
           <div style={{ fontSize: '12.5px', color: '#9ca3af', marginTop: '2px' }}>Il credito SMS si compra da qui</div>
         </div>
       </div>
+
+      {/* SMS di prova — solo il master radice (il gateway è unico e globale) */}
+      {dati?.radice && (
+        <div style={{ ...card, marginBottom: '16px' }}>
+          <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', marginBottom: '4px' }}>Invia SMS di prova</div>
+          <div style={{ fontSize: '12.5px', color: '#6b7280', marginBottom: '12px' }}>Verifica il gateway (mittente registrato e consegna) senza creare una spedizione. Non tocca il credito SMS.</div>
+          {!dati.gatewayPronto && (
+            <div style={{ fontSize: '12.5px', color: '#9a3412', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: '6px', padding: '9px 12px', marginBottom: '11px' }}>
+              ⚠️ Gateway non ancora configurato: aggiungi su Vercel <b>SKEBBY_USERNAME</b>, <b>SKEBBY_PASSWORD</b> e <b>SKEBBY_SENDER</b> (il mittente registrato), poi ridistribuisci.
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '8px', maxWidth: '380px' }}>
+            <input value={telProva} onChange={e => setTelProva(e.target.value)} placeholder="Cellulare (es. 3401234567)" style={{ ...inp, flex: 1 }} />
+            <button onClick={inviaProva} disabled={busy || !dati.gatewayPronto} style={{ ...btn, opacity: (busy || !dati.gatewayPronto) ? 0.6 : 1 }}>Invia prova</button>
+          </div>
+        </div>
+      )}
 
       {/* Acquisto + Trasferimento */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))', gap: '14px', marginBottom: '16px' }}>

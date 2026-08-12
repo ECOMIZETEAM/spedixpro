@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { COSTO_SMS_EUR } from '@/lib/sms'
+import { COSTO_SMS_EUR, smsConfigurato } from '@/lib/sms'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,7 +17,7 @@ export async function GET() {
   }
   const admin = createAdminSupabase()
   const [{ data: m }, { data: mov }, { data: clienti }] = await Promise.all([
-    admin.from('masters').select('credito,credito_sms').eq('id', u.master_id).maybeSingle(),
+    admin.from('masters').select('credito,credito_sms,parent_master_id').eq('id', u.master_id).maybeSingle(),
     admin.from('movimenti_sms').select('tipo,descrizione,importo,quantita_sms,saldo_dopo,cliente_id,created_at')
       .eq('master_id', u.master_id).order('created_at', { ascending: false }).limit(80),
     admin.from('clienti').select('id,ragione_sociale,credito_sms').eq('master_id', u.master_id).order('ragione_sociale'),
@@ -28,5 +28,9 @@ export async function GET() {
     costoSms: COSTO_SMS_EUR,
     movimenti: mov || [],
     clienti: clienti || [],
+    // Il gateway Esendex/Skebby è UNICO e globale (conto E&A): l'SMS di prova, che spende il credito
+    // vero, è riservato al master RADICE (senza genitore). gatewayPronto = env credenziali presenti.
+    radice: !m?.parent_master_id,
+    gatewayPronto: smsConfigurato(),
   })
 }
