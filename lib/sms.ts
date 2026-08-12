@@ -81,6 +81,44 @@ export async function inviaSms(telefono: string, messaggio: string): Promise<{ o
   }
 }
 
+// AUTO-RICARICA: se il titolare (cliente o master) l'ha attivata e scende sotto la soglia, riaddebita
+// un pacchetto sulla carta salvata (off_session). L'accredito lo fa il webhook (payment_intent.succeeded,
+// scopo='sms'), idempotente. Best-effort: non lancia, non blocca l'invio. Un timbro `ultimo_addebito`
+// evita doppioni da invii ravvicinati (finestra 30 min).
+async function autoRicaricaSeServe(admin: any, tipo: 'cliente' | 'master', id: string): Promise<void> {
+  try {
+    const { stripeConfigurato, stripeClient } = await import('@/lib/stripe')
+    if (!stripeConfigurato()) return
+    const tab = tipo === 'cliente' ? 'clienti' : 'masters'
+    const { data: t } = await admin.from(tab).select('credito_sms,impostazioni,stripe_customer_id').eq('id', id).maybeSingle()
+    const imp = (t?.impostazioni as any) || {}
+    const auto = imp.sms_auto
+    if (!auto?.attiva || !t?.stripe_customer_id) return
+    const soglia = Number(auto.soglia) || 0
+    const pacchetto = Number(auto.pacchetto) || 1000
+    const rimanenti = Math.floor(Number(t.credito_sms || 0) / COSTO_SMS_EUR)
+    if (rimanenti >= soglia) return
+    // Non riaddebitare se si è già tentato di recente (evita doppioni e non martella una carta ko).
+    if (auto.ultimo_addebito && Date.now() - new Date(auto.ultimo_addebito).getTime() < 30 * 60 * 1000) return
+    // Timbra SUBITO il tentativo (prima dell'addebito): due invii ravvicinati non fanno due ricariche.
+    await admin.from(tab).update({ impostazioni: { ...imp, sms_auto: { ...auto, ultimo_addebito: new Date().toISOString() } } }).eq('id', id)
+
+    const s = stripeClient()
+    const cust: any = await s.customers.retrieve(t.stripe_customer_id)
+    let pm: string | null = (cust?.invoice_settings?.default_payment_method as string) || null
+    if (!pm) { const pms = await s.paymentMethods.list({ customer: t.stripe_customer_id, type: 'card', limit: 1 }); pm = pms.data[0]?.id || null }
+    if (!pm) return
+    await s.paymentIntents.create({
+      amount: Math.round(pacchetto * COSTO_SMS_EUR * 100), currency: 'eur',
+      customer: t.stripe_customer_id, payment_method: pm, off_session: true, confirm: true,
+      metadata: { scopo: 'sms', quantita_sms: String(pacchetto), ...(tipo === 'cliente' ? { cliente_id: id } : { master_id: id }) },
+    })
+  } catch (e: any) {
+    // Off_session può richiedere autenticazione (3DS) e fallire: pazienza, il titolare comprerà a mano.
+    console.error('[SMS][AUTO-RICARICA]', tipo, id, e?.message)
+  }
+}
+
 function urlTracking(token: string): string {
   const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://moovexpress.com').replace(/\/$/, '')
   return `${base}/traccia/${token}`
@@ -147,6 +185,9 @@ export async function inviaSmsCreazione(spedizioneId: string | null | undefined)
     if (esito.ok) {
       // Segna sulla spedizione che l'SMS è partito (per i report).
       await admin.from('spedizioni').update({ notifica_sms: true }).eq('id', sp.id)
+      // Auto-ricarica del titolare, se attiva e sotto soglia (best-effort, non blocca).
+      if (sp.cliente_id) await autoRicaricaSeServe(admin, 'cliente', sp.cliente_id)
+      else if (sp.master_id) await autoRicaricaSeServe(admin, 'master', sp.master_id)
     } else {
       // Invio fallito dopo aver consumato: rimborsa il credito, così non si paga un SMS mai partito.
       await admin.rpc('sms_rettifica', {

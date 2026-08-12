@@ -11,13 +11,19 @@ const TIPO_LABEL: Record<string, string> = { acquisto: 'Acquisto', trasferimento
 
 export default function NotificheSmsPage() {
   const dialog = useDialog()
-  const [dati, setDati] = useState<{ creditoWallet: number; creditoSms: number; costoSms: number; movimenti: Mov[]; clienti: Cliente[]; radice?: boolean; gatewayPronto?: boolean } | null>(null)
+  const [dati, setDati] = useState<{ creditoWallet: number; creditoSms: number; costoSms: number; movimenti: Mov[]; clienti: Cliente[]; radice?: boolean; gatewayPronto?: boolean; cartaSalvata?: boolean; auto?: { attiva: boolean; soglia: number; pacchetto: number } } | null>(null)
   const [pacchetto, setPacchetto] = useState(1000)
   const [telProva, setTelProva] = useState('')
+  const [aAttiva, setAAttiva] = useState(false)
+  const [aSoglia, setASoglia] = useState(100)
+  const [aPacchetto, setAPacchetto] = useState(1000)
   const [busy, setBusy] = useState(false)
 
   const carica = useCallback(async () => {
-    try { const r = await fetch('/api/sms/stato'); if (r.ok) setDati(await r.json()) } catch {}
+    try {
+      const r = await fetch('/api/sms/stato')
+      if (r.ok) { const j = await r.json(); setDati(j); setAAttiva(!!j.auto?.attiva); setASoglia(Number(j.auto?.soglia) || 100); setAPacchetto(Number(j.auto?.pacchetto) || 1000) }
+    } catch {}
   }, [])
   useEffect(() => { carica() }, [carica])
   // Ritorno dalla cassa Stripe: il webhook accredita in un attimo, ricarico il saldo dopo un istante.
@@ -39,6 +45,17 @@ export default function NotificheSmsPage() {
       const j = await r.json()
       if (!r.ok || !j.url) { await dialog.alert({ title: 'Acquisto non riuscito', message: j.error || 'Errore' }); return }
       window.location.href = j.url   // cassa Stripe: gli SMS si accreditano a pagamento confermato
+    } finally { setBusy(false) }
+  }
+
+  async function salvaAuto(attiva: boolean) {
+    if (busy) return
+    setBusy(true)
+    try {
+      const r = await fetch('/api/sms/autoricarica', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attiva, soglia: aSoglia, pacchetto: aPacchetto }) })
+      const j = await r.json()
+      if (!r.ok) { await dialog.alert({ title: 'Auto-ricarica', message: j.error || 'Errore' }); return }
+      setAAttiva(attiva); await carica()
     } finally { setBusy(false) }
   }
 
@@ -102,6 +119,29 @@ export default function NotificheSmsPage() {
           {[1000, 5000, 10000].map(n => <option key={n} value={n}>{n.toLocaleString('it-IT')} SMS — {eur(n * costoSms)}</option>)}
         </select>
         <button onClick={acquista} disabled={busy} style={{ ...btn, width: '100%' }}>Paga con carta ({eur(pacchetto * costoSms)})</button>
+      </div>
+
+      {/* Auto-ricarica */}
+      <div style={{ ...card, marginBottom: '16px', maxWidth: '420px' }}>
+        <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', marginBottom: '4px' }}>Auto-ricarica</div>
+        <div style={{ fontSize: '12.5px', color: '#6b7280', marginBottom: '12px' }}>Sotto la soglia, ricarico il pacchetto sulla carta salvata.</div>
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+          <div style={{ flex: 1 }}>
+            <label style={lbl}>Sotto (SMS)</label>
+            <input type="number" min={0} value={aSoglia} onChange={e => setASoglia(Math.max(0, Math.floor(Number(e.target.value)) || 0))} style={{ ...inp, width: '100%' }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={lbl}>Ricarica</label>
+            <select value={aPacchetto} onChange={e => setAPacchetto(Number(e.target.value))} style={{ ...inp, width: '100%' }}>
+              {[1000, 5000, 10000].map(n => <option key={n} value={n}>{n.toLocaleString('it-IT')} SMS</option>)}
+            </select>
+          </div>
+        </div>
+        {!dati?.cartaSalvata && <div style={{ fontSize: '11.5px', color: '#9a3412', marginBottom: '10px' }}>Fai un primo acquisto: la carta viene salvata e l'auto-ricarica può funzionare.</div>}
+        {aAttiva
+          ? <button onClick={() => salvaAuto(false)} disabled={busy} style={{ ...btn, background: '#fff', color: '#dc2626', border: '1px solid #fecaca' }}>Disattiva</button>
+          : <button onClick={() => salvaAuto(true)} disabled={busy || !dati?.cartaSalvata} style={{ ...btn, opacity: (busy || !dati?.cartaSalvata) ? 0.6 : 1 }}>Attiva auto-ricarica</button>}
+        {aAttiva && <span style={{ marginLeft: '10px', fontSize: '12px', color: '#16a34a', fontWeight: 600 }}>● Attiva</span>}
       </div>
 
       {/* Storico */}

@@ -81,6 +81,8 @@ export async function POST(req: NextRequest) {
         },
       }],
       metadata,
+      // Salva la carta per gli addebiti futuri fuori sessione (auto-ricarica sotto soglia).
+      payment_intent_data: { setup_future_usage: 'off_session', metadata },
       success_url: `${base}${successPath}`,
       cancel_url: `${base}${successPath.split('?')[0]}`,
       locale: 'it',
