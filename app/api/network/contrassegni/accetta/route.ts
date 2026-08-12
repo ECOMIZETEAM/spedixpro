@@ -38,5 +38,17 @@ export async function POST(req: NextRequest) {
     .update({ accettata_target: true, accettata_target_at: new Date().toISOString() })
     .eq('id', distintaId)
 
-  return NextResponse.json({ success: true, numero: ricevuta.numero })
+  // SUBITO nella sosta VERDE "Contrassegni da caricare" (consolidata per cliente), come per
+  // MULTIEXPRESS ed Ecomize Solution: niente più passaggio intermedio giallo che lasciava le rimesse
+  // spezzate per numero invece che unite per cliente (un sotto-master come Ecomize LL le vedeva così).
+  // Il master sceglie A CHI e QUANDO far scendere i soldi DAL VERDE, uguale per tutti — qui non si
+  // muove denaro, si consolida. Best-effort: se salta, la rimessa resta accettata e la si carica a mano.
+  let inAttesa = 0
+  try {
+    const { caricaRimesseInSosta } = await import('@/lib/cod-rimesse')
+    const res = await caricaRimesseInSosta(admin, mio, [distintaId])
+    inAttesa = res.inAttesa
+  } catch (e: any) { console.error('[COD][ACCETTA] auto-carico in sosta:', e?.message) }
+
+  return NextResponse.json({ success: true, numero: ricevuta.numero, inAttesa })
 }

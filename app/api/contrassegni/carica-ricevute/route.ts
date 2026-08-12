@@ -4,6 +4,7 @@ import { isAgente, bloccaAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
 import { mappaPrimaLinea } from '@/lib/prima-linea'
+import { caricaRimesseInSosta } from '@/lib/cod-rimesse'
 
 // CARICA le rimesse contrassegni RICEVUTE (già accettate dal network): per ogni rimessa
 // selezionata crea le MIE distinte verso i clienti diretti e/o verso la prima linea dei
@@ -123,99 +124,17 @@ export async function POST(req: NextRequest) {
   if (!distintaIds.length) return NextResponse.json({ error: 'Seleziona almeno una rimessa da caricare' }, { status: 400 })
 
   const admin = createAdminSupabase()
-
-  // CLAIM ATOMICO: marco SUBITO caricata_target=true con le condizioni nel WHERE e lavoro solo
-  // sulle righe ritornate. Due click concorrenti (due tab/dispositivi) non possono più caricare
-  // la stessa rimessa due volte: il secondo non "vince" nessuna riga → niente doppio pagamento.
-  const { data: ricevute } = await admin.from('distinte_contrassegni')
-    .update({ caricata_target: true, caricata_target_at: new Date().toISOString() })
-    .in('id', distintaIds)
-    .eq('target_master_id', mio).eq('accettata_target', true).eq('caricata_target', false)
-    .select('id,numero')
-  if (!ricevute?.length) return NextResponse.json({ error: 'Nessuna rimessa caricabile tra quelle selezionate (già caricate, non accettate o non tue).' }, { status: 400 })
-  const ricevuteIds = ricevute.map((r: any) => r.id)
-  // In caso di errore a metà: riapro il claim così nulla resta bloccato/perso.
-  const annullaClaim = async () => {
-    try { await admin.from('distinte_contrassegni').update({ caricata_target: false, caricata_target_at: null }).in('id', ricevuteIds) } catch {}
-  }
-
+  // Logica di carico condivisa (stessa usata dall'accettazione, così il flusso è identico per tutti).
   try {
-    // LDV delle rimesse selezionate — PAGINATO (PostgREST tronca a 1000: con "Seleziona tutte" su
-    // rimesse grandi le LDV oltre il tetto sparirebbero in silenzio = contrassegni mai rimessi).
-    const righeRic = await fetchAll(() => admin.from('distinte_contrassegni_righe')
-      .select('numero_spedizione').in('distinta_id', ricevuteIds).order('id', { ascending: true }))
-    const numeri = Array.from(new Set((righeRic || []).map((r: any) => r.numero_spedizione).filter(Boolean)))
-    if (!numeri.length) { await annullaClaim(); return NextResponse.json({ error: 'Nessuna LDV nelle rimesse selezionate' }, { status: 400 }) }
-
-    // Spedizioni (mie o del mio sotto-albero: la rimessa è indirizzata a me)
-    const spedizioni: any[] = []
-    for (let i = 0; i < numeri.length; i += 200) {
-      const chunk = await fetchAll(() => admin.from('spedizioni')
-        .select('id,master_id,cliente_id,contrassegno,numero')
-        .in('numero', numeri.slice(i, i + 200)).gt('contrassegno', 0).order('id', { ascending: true }))
-      spedizioni.push(...chunk)
+    const res = await caricaRimesseInSosta(admin, mio, distintaIds)
+    if (!res.rimesseCaricate) {
+      return NextResponse.json({ error: 'Nessuna rimessa caricabile tra quelle selezionate (già caricate, non accettate o non tue).' }, { status: 400 })
     }
-    if (!spedizioni.length) { await annullaClaim(); return NextResponse.json({ error: 'Spedizioni non trovate' }, { status: 404 }) }
-
-    // Prima linea per ogni discendente (il figlio DIRETTO attraverso cui discende, come resi/elenco).
-    // Stessa funzione dell'anteprima qui sopra: se divergessero, il riquadro prometterebbe una
-    // divisione e il carico ne farebbe un'altra.
-    const primaLinea = await mappaPrimaLinea(admin, mio)
-
-    // ANTI-DUPLICATO PER-MASTER: escludo le spedizioni già in una distinta creata da ME.
-    // Tutto PAGINATO e a chunk (id delle mie distinte possono superare i limiti di URL/1000 righe).
-    const mieDist = await fetchAll(() => admin.from('distinte_contrassegni').select('id').eq('master_id', mio).order('id', { ascending: true }))
-    const giaMie = new Set<string>()
-    for (let i = 0; i < mieDist.length; i += 200) {
-      const mieRighe = await fetchAll(() => admin.from('distinte_contrassegni_righe')
-        .select('spedizione_id').in('distinta_id', mieDist.slice(i, i + 200).map((d: any) => d.id)).order('id', { ascending: true }))
-      for (const r of mieRighe) if ((r as any).spedizione_id) giaMie.add((r as any).spedizione_id)
-    }
-    const daCaricare = spedizioni.filter((s: any) => !giaMie.has(s.id))
-    const giaCaricate = spedizioni.length - daCaricare.length
-
-    // DUE RAMI: spedizioni MIE → distinta al cliente; di un SOTTO-MASTER → rimessa alla sua prima linea.
-    const clientiMap: Record<string, any[]> = {}
-    const masterMap: Record<string, any[]> = {}
-    let senzaDestinatario = 0
-    for (const s of daCaricare) {
-      if (s.master_id === mio) {
-        if (!s.cliente_id) { senzaDestinatario++; continue }
-        ;(clientiMap[s.cliente_id] = clientiMap[s.cliente_id] || []).push(s)
-      } else {
-        const fl = primaLinea.get(s.master_id)
-        if (!fl) { senzaDestinatario++; continue }
-        ;(masterMap[fl] = masterMap[fl] || []).push(s)
-      }
-    }
-
-    // AREA DI SOSTA: le rimesse accettate NON generano piu' distinte automatiche. I contrassegni
-    // entrano nel "da caricare" gia' divisi per destinatario (cliente o sotto-master) e sara' il
-    // master a scegliere a chi caricarli, esattamente come per il file del corriere.
-    const inSosta: any[] = []
-    for (const [clienteId, sped] of Object.entries(clientiMap)) {
-      for (const sp of sped) inSosta.push({ master_id: mio, spedizione_id: sp.id, importo: Number(sp.contrassegno) || 0,
-        cliente_id: clienteId, target_master_id: null, origine: 'rimessa', origine_id: ricevuteIds[0] || null })
-    }
-    for (const [flId, sped] of Object.entries(masterMap)) {
-      for (const sp of sped) inSosta.push({ master_id: mio, spedizione_id: sp.id, importo: Number(sp.contrassegno) || 0,
-        cliente_id: null, target_master_id: flId, origine: 'rimessa', origine_id: ricevuteIds[0] || null })
-    }
-    let create = 0
-    for (let i = 0; i < inSosta.length; i += 500) {
-      const { data: ins } = await admin.from('cod_da_caricare')
-        .upsert(inSosta.slice(i, i + 500), { onConflict: 'master_id,spedizione_id', ignoreDuplicates: true })
-        .select('id')
-      create += (ins || []).length
-    }
-
     return NextResponse.json({
-      success: true, rimesseCaricate: ricevute.length, inAttesa: create, giaCaricate,
-      spedizioniTrovate: spedizioni.length, senzaDestinatario,
+      success: true, rimesseCaricate: res.rimesseCaricate, inAttesa: res.inAttesa,
+      giaCaricate: res.giaCaricate, senzaDestinatario: res.senzaDestinatario,
     })
   } catch (e: any) {
-    // Errore a metà: riapro il claim, l'utente riprova e l'anti-duplicato salta ciò che è già entrato.
-    await annullaClaim()
     console.error('[COD][CARICA-RICEVUTE] errore:', e?.message)
     return NextResponse.json({ error: 'Errore durante il caricamento: riprova. Nessuna rimessa è andata persa.' }, { status: 500 })
   }
