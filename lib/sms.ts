@@ -46,10 +46,10 @@ async function login(): Promise<{ userKey: string; sessionKey: string } | null> 
     const r = await fetch(`${BASE}/login`, {
       headers: { Authorization: 'Basic ' + Buffer.from(`${u}:${p}`).toString('base64') },
     })
-    if (!r.ok) return null
     const txt = (await r.text()).trim()   // formato: "USER_KEY;SESSION_KEY"
+    if (!r.ok) { console.error('[SMS][LOGIN] HTTP ' + r.status + ' ' + txt.slice(0, 160)); return null }
     const [userKey, sessionKey] = txt.split(';')
-    if (!userKey || !sessionKey) return null
+    if (!userKey || !sessionKey) { console.error('[SMS][LOGIN] risposta inattesa: ' + txt.slice(0, 160)); return null }
     sessione = { userKey, sessionKey, ts: Date.now() }
     return sessione
   } catch { return null }
@@ -75,7 +75,8 @@ export async function inviaSms(telefono: string, messaggio: string): Promise<{ o
     })
     const j: any = await r.json().catch(() => ({}))
     if (r.ok && (j?.result === 'OK' || j?.result === undefined)) return { ok: true }
-    return { ok: false, error: j?.result || `HTTP ${r.status}` }
+    console.error('[SMS][INVIO] HTTP ' + r.status + ' ' + JSON.stringify(j).slice(0, 200))
+    return { ok: false, error: j?.result || j?.message || `HTTP ${r.status}` }
   } catch (e: any) {
     return { ok: false, error: String(e?.message || e) }
   }
@@ -190,6 +191,7 @@ export async function inviaSmsCreazione(spedizioneId: string | null | undefined)
       else if (sp.master_id) await autoRicaricaSeServe(admin, 'master', sp.master_id)
     } else {
       // Invio fallito dopo aver consumato: rimborsa il credito, così non si paga un SMS mai partito.
+      console.error('[SMS][CREAZIONE] invio non riuscito per spedizione ' + sp.id + ': ' + esito.error)
       await admin.rpc('sms_rettifica', {
         p_master_id: sp.master_id, p_cliente_id: sp.cliente_id,
         p_importo: COSTO_SMS_EUR, p_note: 'Rimborso SMS non inviato', p_created_by: null,

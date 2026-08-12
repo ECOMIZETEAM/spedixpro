@@ -20,17 +20,13 @@ export async function GET() {
     .select('tipo,descrizione,quantita_sms,importo,spedizione_id,created_at')
     .eq('cliente_id', u.cliente_id).order('created_at', { ascending: false }).limit(150)
 
-  // Numero LDV delle spedizioni citate negli invii, per mostrarle in chiaro.
-  const spIds = Array.from(new Set((mov || []).filter(m => m.spedizione_id).map(m => m.spedizione_id)))
-  const numeroDi: Record<string, string> = {}
-  if (spIds.length) {
-    const { data: sp } = await admin.from('spedizioni').select('id,numero').in('id', spIds)
-    for (const s of (sp || [])) numeroDi[s.id] = s.numero
-  }
-
-  const inviati = (mov || []).filter(m => m.tipo === 'consumo').map(m => ({
-    numero: m.spedizione_id ? (numeroDi[m.spedizione_id] || '—') : '—', quando: m.created_at,
-  }))
+  // SMS DAVVERO inviati = spedizioni con notifica_sms a true (il flag si accende solo a invio riuscito).
+  // NON si usano le righe 'consumo' di movimenti_sms: un invio fallito consuma e poi rimborsa, ma
+  // resterebbe in elenco come se fosse partito (è quello che confondeva).
+  const { data: spSms } = await admin.from('spedizioni')
+    .select('numero,created_at').eq('cliente_id', u.cliente_id).eq('notifica_sms', true)
+    .order('created_at', { ascending: false }).limit(100)
+  const inviati = (spSms || []).map((s: any) => ({ numero: s.numero, quando: s.created_at }))
   // Ricariche ricevute = acquisti (carta) o trasferimenti dal master. Quantità dal campo o dall'importo.
   const acquisti = (mov || []).filter(m => (m.tipo === 'acquisto' || m.tipo === 'trasferimento') && Number(m.importo) > 0).map(m => ({
     quantita: Number(m.quantita_sms) || Math.round(Number(m.importo) / COSTO_SMS_EUR) || 0, quando: m.created_at,
