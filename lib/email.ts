@@ -167,22 +167,35 @@ export async function inviaEmailSpedizioneCreata(p: {
     // Link al tracking del NOSTRO portale (stesso dell'SMS): si ricava dal tracking_token della
     // spedizione. Best-effort: se non lo troviamo, l'email parte comunque senza pulsante.
     let urlTracking: string | null = null
+    // REPLY-TO = chi ha fatto la spedizione (il mittente). Senza, il destinatario che risponde alla
+    // notifica scriveva a noreply@moovexpress.com → la sua domanda arrivava a NOI, non al cliente che
+    // ha spedito. Ordine: mittente della spedizione → email dell'account cliente → mittEmail passato.
+    let replyTo: string | undefined
     if (p.spedizioneId) {
       try {
         const { createAdminSupabase } = await import('@/lib/supabase-admin')
-        const { data: sp } = await createAdminSupabase().from('spedizioni').select('tracking_token').eq('id', p.spedizioneId).maybeSingle()
+        const admin = createAdminSupabase()
+        const { data: sp } = await admin.from('spedizioni').select('tracking_token,cliente_id,mitt_email').eq('id', p.spedizioneId).maybeSingle()
         if (sp?.tracking_token) {
           const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://moovexpress.com').replace(/\/$/, '')
           urlTracking = `${base}/traccia/${sp.tracking_token}`
         }
+        const mittSp = String(sp?.mitt_email || '').trim().toLowerCase()
+        if (EMAIL_RE.test(mittSp)) replyTo = mittSp
+        else if (sp?.cliente_id) {
+          const { data: cl } = await admin.from('clienti').select('email').eq('id', sp.cliente_id).maybeSingle()
+          const ec = String(cl?.email || '').trim().toLowerCase()
+          if (EMAIL_RE.test(ec)) replyTo = ec
+        }
       } catch { /* best-effort */ }
     }
+    if (!replyTo) { const m = String(p.mittEmail || '').trim().toLowerCase(); if (EMAIL_RE.test(m)) replyTo = m }
     const bloccoTracking = urlTracking
       ? `<a href="${urlTracking}" style="display:inline-block;background:#f97316;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;font-size:14px;margin-top:14px">Segui la spedizione \u2192</a>`
       : `<p style="color:#999;font-size:13px;margin-top:14px">Con questo numero puoi seguire la consegna.</p>`
     try {
       await resend.emails.send({
-        from: FROM, to: dest,
+        from: FROM, to: dest, replyTo,
         subject: `Un pacco sta arrivando \ud83d\udce6 \u2014 spedizione ${p.numero}`,
         html: wrap(`
           <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Un pacco sta arrivando \ud83d\udce6</h2>
