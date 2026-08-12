@@ -15,22 +15,25 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params
   const admin = createAdminSupabase()
   const { data: t } = await admin.from('tickets')
-    .select('id,codice,oggetto,stato,categoria,tipo_apertura,aperto_da,cliente_id,owner_master_id,aperto_master_id,pod_url,created_at,updated_at,inoltrato_a_master_id,rete_master_ids,rete_non_letti')
+    .select('id,codice,oggetto,stato,categoria,tipo_apertura,aperto_da,cliente_id,owner_master_id,aperto_master_id,pod_url,created_at,updated_at,inoltrato_a_master_id,rete_master_ids,rete_non_letti,assegnato_id,assegnato_nome')
     .eq('id', id).maybeSingle()
   if (!t) return NextResponse.json({ error: 'Ticket non trovato' }, { status: 404 })
   const ruolo = await partecipante(utente, t)
   if (!ruolo) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   let q = admin.from('ticket_messaggi')
-    .select('id,autore,autore_nome,testo,allegati,created_at,visibilita,autore_master_id').eq('ticket_id', id).order('created_at', { ascending: true })
+    .select('id,autore,autore_id,autore_nome,testo,allegati,created_at,visibilita,autore_master_id').eq('ticket_id', id).order('created_at', { ascending: true })
   // Il RICHIEDENTE (cliente o master che ha aperto) NON vede i messaggi interni della rete:
   // per lui esiste solo la conversazione con la sua assistenza diretta.
   if (ruolo === 'cliente') q = q.eq('visibilita', 'pubblico')
   const { data: messaggi } = await q
-  // 'mio' calcolato lato server (il browser non conosce il proprio master_id).
+  // 'mio' calcolato lato server (il browser non conosce il proprio master_id): serve al LATO del
+  // fumetto (destra/arancio). 'tu' invece è l'UTENTE preciso che ha scritto — con Sara e Giuliana
+  // sullo stesso master, 'mio' è vero per entrambe, ma 'tu' solo per chi guarda.
   const msgOut = (messaggi || []).map((m: any) => ({
     ...m,
     mio: ruolo === 'cliente' ? m.autore === 'cliente'
       : (m.autore !== 'cliente' && (m.autore_master_id ? m.autore_master_id === utente?.master_id : ruolo === 'master' && m.autore === 'master')),
+    tu: !!m.autore_id && m.autore_id === user.id,
   }))
   // Aprendo la chat, segno letto il lato di CHI apre.
   if (ruolo === 'master') await admin.from('tickets').update({ non_letto_owner: false }).eq('id', id)
@@ -43,9 +46,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // della catena uscivano lo stesso nel corpo della risposta e bastava guardarla per scoprire
   // che la richiesta era stata girata più in alto, e a chi.
   const ticketOut = ruolo === 'cliente'
-    ? { ...t, inoltrato_a_master_id: undefined, rete_master_ids: undefined, rete_non_letti: undefined }
+    ? { ...t, inoltrato_a_master_id: undefined, rete_master_ids: undefined, rete_non_letti: undefined, assegnato_id: undefined, assegnato_nome: undefined }
     : t
-  return NextResponse.json({ ticket: ticketOut, messaggi: msgOut, ruolo })
+  // io_id: chi sta guardando. Serve alla chat per marcare "· tu" e all'header per capire se il
+  // ticket è già in carico a me (mostra "Prendi in carico" solo se lo tiene un altro / nessuno).
+  return NextResponse.json({ ticket: ticketOut, messaggi: msgOut, ruolo, io_id: user.id })
 }
 
 // POST: aggiunge un messaggio al thread. Entrambe le parti possono scrivere finché il ticket
@@ -57,7 +62,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
   const { id } = await params
   const admin = createAdminSupabase()
-  const { data: t } = await admin.from('tickets').select('id,stato,cliente_id,owner_master_id,aperto_master_id,tipo_apertura,aperto_da,rete_master_ids,rete_non_letti,inoltrato_a_master_id').eq('id', id).maybeSingle()
+  const { data: t } = await admin.from('tickets').select('id,stato,cliente_id,owner_master_id,aperto_master_id,tipo_apertura,aperto_da,rete_master_ids,rete_non_letti,inoltrato_a_master_id,assegnato_id').eq('id', id).maybeSingle()
   if (!t) return NextResponse.json({ error: 'Ticket non trovato' }, { status: 404 })
   const ruolo = await partecipante(utente, t)
   if (!ruolo) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
@@ -85,7 +90,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const visibilita = ruolo === 'rete' ? 'rete' : (ruolo === 'master' && body?.interno === true && reteIds.length ? 'rete' : 'pubblico')
 
   const { error } = await admin.from('ticket_messaggi').insert({
-    ticket_id: id, autore: ruolo, autore_nome: autoreNome, testo, visibilita,
+    ticket_id: id, autore: ruolo, autore_id: user.id, autore_nome: autoreNome, testo, visibilita,
     autore_master_id: ruolo === 'cliente' ? null : (utente?.master_id || null),
   })
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
@@ -103,6 +108,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // owner/assistenza
     if (visibilita === 'pubblico') { upd.aperto_letto = false; upd.non_letto_owner = false }  // notifica il richiedente
     if (reteIds.length) upd.rete_non_letti = senzaMe(reteIds)           // la catena vede comunque il seguito
+    // Chi risponde per primo si prende il ticket: così, in una squadra (es. Sara e Giuliana),
+    // si vede subito chi lo sta seguendo. Non lo sovrascrive se qualcuno l'ha già preso.
+    if (!t.assegnato_id) { upd.assegnato_id = user.id; upd.assegnato_nome = autoreNome }
   }
   await admin.from('tickets').update(upd).eq('id', id)
   return NextResponse.json({ success: true })
@@ -113,7 +121,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
   const masterId = utente?.master_id
   const ruoloUtente = (utente?.ruolo || '').toLowerCase()
   // Fuori il portale cliente e l'agente (sola lettura, niente dati del master né della rete).
@@ -124,11 +132,26 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const body = await req.json()
   const admin = createAdminSupabase()
 
-  const { data: t } = await admin.from('tickets').select('owner_master_id,rete_master_ids,rete_non_letti').eq('id', id).maybeSingle()
+  const { data: t } = await admin.from('tickets').select('owner_master_id,rete_master_ids,rete_non_letti,assegnato_id').eq('id', id).maybeSingle()
   if (!t) return NextResponse.json({ error: 'Ticket non trovato' }, { status: 404 })
   const inCatena = Array.isArray(t.rete_master_ids) && t.rete_master_ids.includes(masterId)
   const sonoOwner = t.owner_master_id === masterId
   if (!sonoOwner && !inCatena) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+
+  const nomeUtente = [utente?.nome, utente?.cognome].filter(Boolean).join(' ') || 'Assistenza'
+
+  // ASSEGNAZIONE ("chi se ne occupa"): aggiornamento ISOLATO che NON tocca le notifiche né lo stato
+  // — assegnare un ticket non deve accendere il "Nuovo" al cliente. Solo il lato che possiede la
+  // richiesta (owner) assegna: "chi se ne occupa" è la squadra del master proprietario del ticket.
+  if (body?.assegna !== undefined) {
+    if (!sonoOwner) return NextResponse.json({ error: 'L\'assegnazione spetta a chi ha ricevuto la richiesta.' }, { status: 403 })
+    const campi = body.assegna === 'io'
+      ? { assegnato_id: user.id, assegnato_nome: nomeUtente }
+      : { assegnato_id: null, assegnato_nome: null }
+    const { error } = await admin.from('tickets').update(campi).eq('id', id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    return NextResponse.json({ success: true })
+  }
 
   const caricaPod = typeof body?.podBase64 === 'string' && !!body.podBase64
   // Un master della catena può SOLO caricare la POD (è il senso dell'inoltro: ce l'ha lui e la
@@ -169,6 +192,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     } catch (e: any) {
       return NextResponse.json({ error: 'Errore caricamento POD: ' + (e?.message || 'sconosciuto') }, { status: 400 })
     }
+  }
+
+  // Agire su un ticket non ancora preso da nessuno (in lavorazione, risolto o POD caricata) vale
+  // come prenderlo in carico: così "chi se ne occupa" resta vero senza un click in più. Non
+  // sovrascrive chi l'ha già in carico (!t.assegnato_id).
+  if (sonoOwner && !t.assegnato_id && (upd.stato === 'in_lavorazione' || upd.stato === 'risolto' || upd.pod_url)) {
+    upd.assegnato_id = user.id; upd.assegnato_nome = nomeUtente
   }
 
   const { error } = await admin.from('tickets').update(upd).eq('id', id)

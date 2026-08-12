@@ -76,6 +76,7 @@ export async function POST(req: NextRequest) {
     await admin.from('ticket_messaggi').insert({
       ticket_id: data.id,
       autore: 'cliente',
+      autore_id: user.id,   // chi ha scritto davvero: distingue in chat i "· tu" (il master è condiviso)
       autore_nome: record.aperto_da || (ruolo === 'cliente' ? 'Cliente' : 'Master'),
       testo: messaggio,
       allegati: allegatiOut.length ? allegatiOut : null,

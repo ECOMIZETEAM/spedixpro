@@ -90,7 +90,7 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
   const filtrati = miei
     .filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod'))
     .filter(t => filtroStato === 'tutti' || t.stato === filtroStato)
-    .filter(t => !cerca.trim() || String(t.oggetto || '').toLowerCase().includes(cerca.trim().toLowerCase()))
+    .filter(t => { const q = cerca.trim().toLowerCase(); return !q || String(t.oggetto || '').toLowerCase().includes(q) || String(t.codice || '').toLowerCase().includes(q) })
   const totalePagine = Math.max(1, Math.ceil(filtrati.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
   const visibili = filtrati.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
@@ -144,7 +144,7 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>{isPod ? 'Le mie richieste POD' : 'I miei ticket'}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <input value={cerca} onChange={e => { setCerca(e.target.value); setPagina(1) }} placeholder="🔎 Cerca LDV…" style={{ padding: '7px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', minWidth: '190px' }} />
+            <input value={cerca} onChange={e => { setCerca(e.target.value); setPagina(1) }} placeholder="🔎 Cerca LDV o pratica…" style={{ padding: '7px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', minWidth: '190px' }} />
             <select value={filtroStato} onChange={e => { setFiltroStato(e.target.value); setPagina(1) }} style={{ padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '12.5px', color: '#1a1a1a', background: '#fff' }}>
               <option value="tutti">Tutti gli stati</option><option value="aperto">Aperti</option><option value="in_lavorazione">In lavorazione</option><option value="risolto">Risolti</option><option value="chiuso">Chiusi (archivio)</option>
             </select>

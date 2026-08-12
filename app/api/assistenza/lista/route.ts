@@ -15,7 +15,7 @@ export async function GET(_req: NextRequest) {
   const ruolo = (utente?.ruolo || '').toLowerCase()
   const admin = createAdminSupabase()
 
-  const cols = 'id,codice,oggetto,messaggio,stato,risposta,aperto_da,tipo_apertura,cliente_id,aperto_master_id,aperto_letto,non_letto_owner,categoria,pod_url,allegati,created_at,updated_at,inoltrato_a_master_id,rete_master_ids,rete_non_letti'
+  const cols = 'id,codice,oggetto,messaggio,stato,risposta,aperto_da,tipo_apertura,cliente_id,aperto_master_id,aperto_letto,non_letto_owner,categoria,pod_url,allegati,created_at,updated_at,inoltrato_a_master_id,rete_master_ids,rete_non_letti,assegnato_id,assegnato_nome'
 
   // Ordinamento per ULTIMA ATTIVITA' (updated_at): un ticket vecchio con una risposta fresca
   // del cliente deve risalire in cima, non restare sepolto (prima "spariva" dalla vista).
@@ -27,7 +27,7 @@ export async function GET(_req: NextRequest) {
       .eq('cliente_id', utente.cliente_id).order('updated_at', { ascending: false }))
     // Al cliente la catena di inoltro non va mostrata: uscivano nel corpo della risposta e
     // bastava guardarla per sapere che la richiesta era stata girata più in alto, e a chi.
-    const puliti = (miei || []).map((r: any) => ({ ...r, inoltrato_a_master_id: undefined, rete_master_ids: undefined, rete_non_letti: undefined }))
+    const puliti = (miei || []).map((r: any) => ({ ...r, inoltrato_a_master_id: undefined, rete_master_ids: undefined, rete_non_letti: undefined, assegnato_id: undefined, assegnato_nome: undefined }))
     return NextResponse.json({ ricevuti: [], miei: puliti })
   }
   // Agente: sola lettura sui SUOI clienti, niente dati del master né della rete (lib/agente.ts).
@@ -46,6 +46,6 @@ export async function GET(_req: NextRequest) {
   // cliente NON devo sapere se e a CHI la mia richiesta viene girata ancora più su. Prima questi
   // campi uscivano nel ramo master e il sotto-master vedeva "inoltrato a MoovExpress". Nei RICEVUTI
   // (li gestisco io) e nella RETE (partecipo alla catena) restano, lì è giusto vederli.
-  const senzaCatenaSopra = (r: any) => ({ ...r, inoltrato_a_master_id: undefined, rete_master_ids: undefined, rete_non_letti: undefined })
+  const senzaCatenaSopra = (r: any) => ({ ...r, inoltrato_a_master_id: undefined, rete_master_ids: undefined, rete_non_letti: undefined, assegnato_id: undefined, assegnato_nome: undefined })
   return NextResponse.json({ ricevuti: ricevuti || [], miei: (miei || []).map(senzaCatenaSopra), rete: (rete || []).map(conNuovo) })
 }

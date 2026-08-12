@@ -41,6 +41,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   // '' = ruolo non ancora noto (dettaglio in caricamento): finché è così non si mostra nessun
   // comando, per non far comparire azioni che potrebbero non spettare a chi guarda.
   const [ruoloChat, setRuoloChat] = useState<'' | 'master' | 'cliente' | 'rete'>('')   // lato del master in QUESTA chat
+  const [ioId, setIoId] = useState<string>('')          // id dell'utente che guarda: per "· tu" e "Prendi in carico"
   const [rete, setRete] = useState<any[]>([])           // ticket inoltrati a me dalla rete
   const [internoMsg, setInternoMsg] = useState(false)   // owner: messaggio interno alla rete (invisibile al cliente)
 
@@ -51,8 +52,20 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
     setSel(t); setMsg(''); setTesto(''); setThread([]); setThreadLoad(true); setInternoMsg(false); setRuoloChat('')
     const d = await fetch('/api/assistenza/' + t.id).then(r => r.json()).catch(() => null)
     setThreadLoad(false)
-    if (d && !d.error) { setThread(d.messaggi || []); setRuoloChat(d.ruolo || 'master'); setSel((s: any) => s ? { ...s, ...d.ticket } : d.ticket) }
+    if (d && !d.error) { setThread(d.messaggi || []); setRuoloChat(d.ruolo || 'master'); setIoId(d.io_id || ''); setSel((s: any) => s ? { ...s, ...d.ticket } : d.ticket) }
     else setMsg(d?.error || 'Impossibile aprire la richiesta')
+  }
+
+  // Assegnazione ("chi se ne occupa"): 'io' = me ne occupo io, 'nessuno' = rilascio. Aggiorna la
+  // scheda aperta e le liste. Il PUT lato server è isolato: assegnare NON notifica il cliente.
+  async function assegna(id: string, val: 'io' | 'nessuno') {
+    setSalvando(true)
+    const r = await fetch('/api/assistenza/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assegna: val }) })
+    const j = await r.json().catch(() => ({})); setSalvando(false)
+    if (!r.ok || j.error) { setMsg(j.error || 'Errore assegnazione'); return }
+    const d = await fetch('/api/assistenza/' + id).then(x => x.json()).catch(() => null)
+    if (d && !d.error) { setIoId(d.io_id || ''); setSel((s: any) => s ? { ...s, ...d.ticket } : s) }
+    carica(true)
   }
   async function inviaMsg() {
     if (!testo.trim() || !sel?.id) return
@@ -62,7 +75,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
     if (j.error) { setMsg(j.error); return }
     setTesto('')
     const d = await fetch('/api/assistenza/' + sel.id).then(r => r.json()).catch(() => null)
-    if (d && !d.error) { setThread(d.messaggi || []); setRuoloChat(d.ruolo || 'master'); setSel((s: any) => ({ ...s, ...d.ticket })) }
+    if (d && !d.error) { setThread(d.messaggi || []); setRuoloChat(d.ruolo || 'master'); setIoId(d.io_id || ''); setSel((s: any) => ({ ...s, ...d.ticket })) }
     carica(true)
   }
 
@@ -120,17 +133,17 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
     setApri(false); setNuovo({ oggetto: '', messaggio: '' }); carica()
   }
 
-  // Filtro per categoria (ticket/pod) + ricerca per LDV o nome + paginazione
+  // Ricerca: per LDV (oggetto), numero pratica (codice) O cliente (aperto_da). Va applicata a TUTTE
+  // le tabelle — ricevuti, miei E rete — perché per un master alto (es. E&A) la gran parte dei
+  // ticket sta in "rete" (inoltrati): cercando lì la ricerca prima era morta.
+  const q = cerca.trim().toLowerCase()
+  const matchCerca = (t: any) => !q || [t.codice, t.oggetto, t.aperto_da].some(v => String(v || '').toLowerCase().includes(q))
   const filtrati = ricevuti
     .filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod'))
     .filter(t => filtroStato === 'tutti' || t.stato === filtroStato)
-    .filter(t => {
-      if (!cerca.trim()) return true
-      const q = cerca.trim().toLowerCase()
-      return String(t.oggetto || '').toLowerCase().includes(q) || String(t.aperto_da || '').toLowerCase().includes(q)
-    })
-  const mieiFiltrati = miei.filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod'))
-  const reteFiltrati = rete.filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod'))
+    .filter(matchCerca)
+  const mieiFiltrati = miei.filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod')).filter(matchCerca)
+  const reteFiltrati = rete.filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod')).filter(matchCerca)
   const totalePagine = Math.max(1, Math.ceil(filtrati.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
   const visibili = filtrati.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
@@ -153,8 +166,8 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>{isPod ? 'Richieste POD ricevute' : 'Ticket ricevuti'}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <input value={cerca} onChange={e => { setCerca(e.target.value); setPagina(1) }} placeholder="🔎 Cerca LDV…"
-              style={{ padding: '7px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', minWidth: '200px' }} />
+            <input value={cerca} onChange={e => { setCerca(e.target.value); setPagina(1) }} placeholder="🔎 Cerca LDV, pratica o cliente…"
+              style={{ padding: '7px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', minWidth: '230px' }} />
             <select value={filtroStato} onChange={e => { setFiltroStato(e.target.value); setPagina(1) }} style={{ padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '12.5px', color: '#1a1a1a', background: '#fff' }}>
               <option value="tutti">Tutti gli stati</option><option value="aperto">Aperti</option><option value="in_lavorazione">In lavorazione</option><option value="risolto">Risolti</option><option value="chiuso">Chiusi (archivio)</option>
             </select>
@@ -169,13 +182,13 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr style={{ background: '#f9fafb' }}>
-              {['Codice', 'Data', 'Da', 'LDV', 'Stato', 'Azioni'].map(h => <th key={h} style={th}>{h}</th>)}
+              {['Codice', 'Data', 'Da', 'LDV', 'Stato', 'In carico', 'Azioni'].map(h => <th key={h} style={th}>{h}</th>)}
             </tr></thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} style={{ ...td, textAlign: 'center', color: '#999' }}>Caricamento…</td></tr>
+                <tr><td colSpan={7} style={{ ...td, textAlign: 'center', color: '#999' }}>Caricamento…</td></tr>
               ) : !filtrati.length ? (
-                <tr><td colSpan={6} style={{ ...td, textAlign: 'center', color: '#999' }}>{cerca ? 'Nessuna richiesta per questa LDV' : (isPod ? 'Nessuna richiesta POD ricevuta' : 'Nessun ticket ricevuto')}</td></tr>
+                <tr><td colSpan={7} style={{ ...td, textAlign: 'center', color: '#999' }}>{cerca ? `Nessun risultato per «${cerca}»` : (isPod ? 'Nessuna richiesta POD ricevuta' : 'Nessun ticket ricevuto')}</td></tr>
               ) : visibili.map(t => (
                 <tr key={t.id}>
                   <td style={{ ...td, whiteSpace: 'nowrap', fontWeight: 700, color: '#f97316', fontSize: '12.5px' }}>{t.codice || '—'}</td>
@@ -193,6 +206,11 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     {Array.isArray(t.allegati) && t.allegati.length > 0 && <span style={{ marginLeft: '6px', fontSize: '11px', color: '#2563eb' }}>📎{t.allegati.length}</span>}
                   </td>
                   <td style={td}><Badge stato={t.stato} /></td>
+                  <td style={td}>
+                    {t.assegnato_nome
+                      ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#eef6ff', color: '#0369a1', padding: '3px 9px', borderRadius: '10px', fontSize: '11.5px', fontWeight: 700, whiteSpace: 'nowrap' }}>👤 {t.assegnato_nome}</span>
+                      : <span style={{ fontSize: '11.5px', color: '#9ca3af', fontStyle: 'italic' }}>da assegnare</span>}
+                  </td>
                   <td style={td}>
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       <button onClick={() => apriDettaglio(t)} style={{ padding: '5px 10px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer', color: '#1a1a1a' }}>💬 Apri chat</button>
@@ -295,6 +313,21 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                 <span><b style={{ color: '#1a1a1a' }}>{sel.aperto_da}</b> ({sel.tipo_apertura === 'master' ? 'Sotto-master' : 'Cliente'})</span>
                 <Badge stato={sel.stato} />
               </div>
+
+              {/* Chi se ne occupa (solo lato assistenza diretta): la squadra vede se il ticket è già
+                  in carico a qualcuno, e chi vuole può prenderlo/subentrare o rilasciarlo. */}
+              {ruoloChat === 'master' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', fontSize: '12px', color: '#666', background: '#f8fafc', border: '1px solid #eef2f7', borderRadius: '8px', padding: '8px 12px' }}>
+                  <span>In carico a:</span>
+                  {sel.assegnato_nome
+                    ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#eef6ff', color: '#0369a1', padding: '3px 10px', borderRadius: '10px', fontSize: '11.5px', fontWeight: 700 }}>👤 {sel.assegnato_nome}{sel.assegnato_id === ioId ? ' · tu' : ''}</span>
+                    : <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>nessuno</span>}
+                  <span style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
+                    {sel.assegnato_id !== ioId && <button disabled={salvando} onClick={() => assegna(sel.id, 'io')} style={{ padding: '4px 11px', border: '1px solid #0369a1', background: '#fff', color: '#0369a1', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, cursor: salvando ? 'default' : 'pointer' }}>Prendi in carico</button>}
+                    {sel.assegnato_id && sel.assegnato_id === ioId && <button disabled={salvando} onClick={() => assegna(sel.id, 'nessuno')} style={{ padding: '4px 11px', border: '1px solid #d1d5db', background: '#fff', color: '#6b7280', borderRadius: '6px', fontSize: '11.5px', fontWeight: 600, cursor: salvando ? 'default' : 'pointer' }}>Rilascia</button>}
+                  </span>
+                </div>
+              )}
               {/* THREAD CHAT */}
               <div style={{ background: '#f8fafc', border: '1px solid #eee', borderRadius: '10px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '42vh', overflowY: 'auto' }}>
                 {threadLoad ? <div style={{ textAlign: 'center', color: '#999', fontSize: '13px' }}>Caricamento…</div> : (thread.length ? thread.map((m: any) => {
@@ -303,7 +336,9 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   return (
                     <div key={m.id} style={{ alignSelf: mio ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
                       <div style={{ fontSize: '10.5px', color: '#94a3b8', margin: mio ? '0 4px 3px 0' : '0 0 3px 4px', textAlign: mio ? 'right' : 'left', fontWeight: 600 }}>
-                        {mio ? 'Tu' : (m.autore_nome || (m.autore === 'master' ? 'Assistenza' : 'Cliente'))}
+                        {/* Sempre il NOME di chi ha scritto (Sara/Giuliana), mai "Tu": col master
+                            condiviso, "Tu" non diceva quale dei due. "· tu" marca i propri. */}
+                        {m.autore_nome || (m.autore === 'cliente' ? 'Cliente' : m.autore === 'rete' ? 'Rete' : 'Assistenza')}{m.tu ? ' · tu' : ''}
                         {interno && <span style={{ marginLeft: '5px', background: '#1a1a1a', color: '#fff', fontSize: '9px', fontWeight: 700, padding: '1px 6px', borderRadius: '8px' }}>🔒 RETE</span>}
                       </div>
                       <div style={{ background: interno ? (mio ? '#334155' : '#f1f5f9') : (mio ? '#f97316' : '#fff'), color: interno ? (mio ? '#fff' : '#334155') : (mio ? '#fff' : '#1a1a1a'), border: interno && !mio ? '1px dashed #94a3b8' : (mio ? 'none' : '1px solid #e5e7eb'), padding: '9px 13px', borderRadius: '12px', fontSize: '13px', lineHeight: 1.45, whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const }}>{m.testo}</div>
