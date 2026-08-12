@@ -72,6 +72,18 @@ export default function NotificheSmsPage() {
     } finally { setBusy(false) }
   }
 
+  async function accreditoProva() {
+    if (busy) return
+    setBusy(true)
+    try {
+      const r = await fetch('/api/sms/test-accredito', { method: 'POST' })
+      const j = await r.json()
+      if (!r.ok) { await dialog.alert({ title: 'Prova', message: j.error || 'Errore' }); return }
+      await dialog.alert({ title: 'SMS di prova accreditati', message: `+${j.aggiunti} SMS aggiunti al tuo credito, gratis. Ora crea una spedizione con la notifica SMS attiva verso il tuo numero per provare l'invio completo.` })
+      await carica()
+    } finally { setBusy(false) }
+  }
+
   const card: React.CSSProperties = { background: '#fff', borderRadius: '10px', border: '1px solid #e5e7eb', padding: '18px 20px' }
   const lbl: React.CSSProperties = { display: 'block', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: '#9ca3af', marginBottom: '6px' }
   const inp: React.CSSProperties = { padding: '8px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', background: '#fff' }
@@ -106,6 +118,10 @@ export default function NotificheSmsPage() {
           <div style={{ display: 'flex', gap: '8px', maxWidth: '380px' }}>
             <input value={telProva} onChange={e => setTelProva(e.target.value)} placeholder="Cellulare (es. 3401234567)" style={{ ...inp, flex: 1 }} />
             <button onClick={inviaProva} disabled={busy || !dati.gatewayPronto} style={{ ...btn, opacity: (busy || !dati.gatewayPronto) ? 0.6 : 1 }}>Invia prova</button>
+          </div>
+          <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f1f5f9' }}>
+            <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>Provare l'acquisto senza pagare? Accreditati qualche SMS gratis, poi crea una spedizione con la notifica SMS verso il tuo numero.</div>
+            <button onClick={accreditoProva} disabled={busy} style={{ ...btn, background: '#fff', color: '#0369a1', border: '1px solid #bae6fd' }}>+ Accredita 25 SMS di prova (gratis)</button>
           </div>
         </div>
       )}

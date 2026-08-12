@@ -79,7 +79,7 @@ const NAV: NavItem[] = [
   ]},
   { label: 'Lista Movimenti', href: '/dashboard/movimenti', icon: '≣' },
   { label: 'Abbonamento', href: '/dashboard/abbonamento', icon: '★' },
-  { label: 'Reports & SMS', href: '/dashboard/reports', icon: '◈', sub: [
+  { label: 'Reports', href: '/dashboard/reports', icon: '◈', sub: [
     { label: 'Report Spedizioni', href: '/dashboard/reports/spedizioni', perm: 'admin.reports.shippings' },
     { label: 'Report Giacenze', href: '/dashboard/reports/giacenze', perm: 'admin.reports.stocks' },
     { label: 'Report Distinte', href: '/dashboard/reports/distinte', perm: 'admin.reports.shippinglists' },
@@ -91,7 +91,6 @@ const NAV: NavItem[] = [
     { label: 'Storico Ricariche', href: '/dashboard/reports/ricariche', perm: 'admin.reports.invoices' },
     { label: 'Report Resi', href: '/dashboard/reports/resi', perm: 'admin.reports.rendershippings' },
     { label: 'Report SMS Clienti', href: '/dashboard/reports/sms-clienti', perm: 'admin.reports.sms.clients' },
-    { label: 'Storico Credito SMS', href: '/dashboard/reports/storico-sms', perm: 'admin.reports.sms.admin' },
   ]},
   { label: 'Statistiche', icon: '▦', sub: [
     { label: 'Profitto', href: '/dashboard/statistiche/profitto' },
@@ -107,6 +106,7 @@ const NAV: NavItem[] = [
     { label: 'Logo', href: '/dashboard/impostazioni/logo' },
     { label: 'Filiale / Rete Interna', href: '/dashboard/impostazioni/filiale' },
     { label: 'Corrieri', href: '/dashboard/corrieri' },
+    { label: 'SMS', href: '/dashboard/reports/storico-sms' },
     { label: 'Staff', href: '/dashboard/impostazioni/staff' },
     { label: 'Permessi', href: '/dashboard/impostazioni/permessi' },
     { label: 'Zone di Consegna', href: '/dashboard/listini/zone' },
@@ -342,6 +342,13 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                 </a>
               )
             })()}
+            {['master', 'admin', 'operatore'].includes(ruolo) && (
+              <a href="/dashboard/reports/storico-sms" title="SMS — credito e acquisto"
+                style={{ display: 'flex', alignItems: 'center', gap: '5px', textDecoration: 'none', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: '8px', padding: '5px 10px' }}>
+                <span style={{ fontSize: '13px' }}>✉</span>
+                {!isMobile && <span style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.4px', color: '#9a3412' }}>SMS</span>}
+              </a>
+            )}
             <SupportoButton compatto={isMobile} />
             <CampanellaNotifiche />
             <MenuProfilo nome={user?.nome} ruolo={user?.ruolo} voci={[

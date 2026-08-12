@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
 import ReportGuadagno from '@/app/components/ReportGuadagno'
 import GuadagnoChart from '@/app/components/GuadagnoChart'
+import BannerSms from '@/app/components/BannerSms'
 import GuadagnoAgente from '@/app/components/GuadagnoAgente'
 
 export default function Dashboard() {
@@ -77,6 +78,9 @@ export default function Dashboard() {
         <h1 style={{fontSize:'18px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Ciao, {data.masterNome}</h1>
         <p style={{color:'#999',fontSize:'12px',margin:'4px 0 0'}}>{new Date().toLocaleDateString('it-IT',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
       </div>
+
+      {/* Banner SMS: quanti ne restano / invito ad attivare */}
+      <BannerSms />
 
       {/* IL TUO CREDITO: conto rete (verso il master sopra) + eventuale conto proprio. Verde se a
           credito, rosso se a debito — chi fattura va sotto zero ed e' normale. */}
