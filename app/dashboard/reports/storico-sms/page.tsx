@@ -13,8 +13,6 @@ export default function NotificheSmsPage() {
   const dialog = useDialog()
   const [dati, setDati] = useState<{ creditoWallet: number; creditoSms: number; costoSms: number; movimenti: Mov[]; clienti: Cliente[]; radice?: boolean; gatewayPronto?: boolean } | null>(null)
   const [pacchetto, setPacchetto] = useState(1000)
-  const [clienteSel, setClienteSel] = useState('')
-  const [importoTrasf, setImportoTrasf] = useState('')
   const [telProva, setTelProva] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -22,36 +20,25 @@ export default function NotificheSmsPage() {
     try { const r = await fetch('/api/sms/stato'); if (r.ok) setDati(await r.json()) } catch {}
   }, [])
   useEffect(() => { carica() }, [carica])
+  // Ritorno dalla cassa Stripe: il webhook accredita in un attimo, ricarico il saldo dopo un istante.
+  useEffect(() => {
+    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('acquisto') === 'ok') {
+      window.history.replaceState({}, '', window.location.pathname)
+      const t = setTimeout(() => carica(), 1500); return () => clearTimeout(t)
+    }
+  }, [carica])
 
   const costoSms = dati?.costoSms || 0.084
   const smsDisponibili = dati ? Math.floor(dati.creditoSms / costoSms) : 0
 
   async function acquista() {
     if (busy) return
-    const costo = pacchetto * costoSms
-    const ok = await dialog.confirm({ title: 'Conferma acquisto', message: `Acquistare ${pacchetto.toLocaleString('it-IT')} SMS per ${eur(costo)}? L'importo viene scalato dal tuo credito.` })
-    if (!ok) return
     setBusy(true)
     try {
       const r = await fetch('/api/sms/acquista', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ quantita: pacchetto }) })
       const j = await r.json()
-      if (!r.ok) { await dialog.alert({ title: 'Acquisto non riuscito', message: j.error || 'Errore' }); return }
-      await carica()
-    } finally { setBusy(false) }
-  }
-
-  async function trasferisci() {
-    if (busy) return
-    const importo = Number(String(importoTrasf).replace(',', '.'))
-    if (!clienteSel) { await dialog.alert({ message: 'Seleziona un cliente' }); return }
-    if (!Number.isFinite(importo) || importo <= 0) { await dialog.alert({ message: 'Inserisci un importo valido' }); return }
-    setBusy(true)
-    try {
-      const r = await fetch('/api/sms/trasferisci', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clienteId: clienteSel, importo }) })
-      const j = await r.json()
-      if (!r.ok) { await dialog.alert({ title: 'Trasferimento non riuscito', message: j.error || 'Errore' }); return }
-      setImportoTrasf('')
-      await carica()
+      if (!r.ok || !j.url) { await dialog.alert({ title: 'Acquisto non riuscito', message: j.error || 'Errore' }); return }
+      window.location.href = j.url   // cassa Stripe: gli SMS si accreditano a pagamento confermato
     } finally { setBusy(false) }
   }
 
@@ -78,22 +65,15 @@ export default function NotificheSmsPage() {
       <div style={{ marginBottom: '18px' }}>
         <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Notifiche SMS</h1>
         <span style={{ display: 'block', marginTop: '4px', fontSize: '13px', color: '#666' }}>
-          Acquista credito SMS e distribuiscilo ai tuoi clienti. Ogni SMS con il link di tracking costa {eur(costoSms)}.
+          Compra i tuoi SMS con carta: sono per te e per i tuoi <b>clienti diretti</b> (mai i sotto-master). Ogni SMS di notifica costa {eur(costoSms)}.
         </span>
       </div>
 
-      {/* Saldi */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '14px', marginBottom: '16px' }}>
-        <div style={{ ...card, borderColor: '#fdba74', background: '#fff7ed' }}>
-          <span style={lbl}>Credito SMS disponibile</span>
-          <div style={{ fontSize: '26px', fontWeight: 800, color: '#ea580c' }}>{dati ? eur(dati.creditoSms) : '—'}</div>
-          <div style={{ fontSize: '12.5px', color: '#9a3412', marginTop: '2px' }}>≈ {smsDisponibili.toLocaleString('it-IT')} SMS</div>
-        </div>
-        <div style={card}>
-          <span style={lbl}>Credito conto (per acquistare)</span>
-          <div style={{ fontSize: '26px', fontWeight: 800, color: '#1a1a1a' }}>{dati ? eur(dati.creditoWallet) : '—'}</div>
-          <div style={{ fontSize: '12.5px', color: '#9ca3af', marginTop: '2px' }}>Il credito SMS si compra da qui</div>
-        </div>
+      {/* SMS disponibili */}
+      <div style={{ ...card, borderColor: '#fdba74', background: '#fff7ed', marginBottom: '16px', maxWidth: '360px' }}>
+        <span style={lbl}>SMS disponibili</span>
+        <div style={{ fontSize: '30px', fontWeight: 800, color: '#ea580c' }}>{smsDisponibili.toLocaleString('it-IT')}</div>
+        <div style={{ fontSize: '12.5px', color: '#9a3412', marginTop: '2px' }}>≈ {dati ? eur(dati.creditoSms) : '—'} di credito · {eur(costoSms)}/SMS</div>
       </div>
 
       {/* SMS di prova — solo il master radice (il gateway è unico e globale) */}
@@ -113,29 +93,15 @@ export default function NotificheSmsPage() {
         </div>
       )}
 
-      {/* Acquisto + Trasferimento */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))', gap: '14px', marginBottom: '16px' }}>
-        <div style={card}>
-          <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', marginBottom: '12px' }}>Acquista credito SMS</div>
-          <label style={lbl}>Pacchetto</label>
-          <select value={pacchetto} onChange={e => setPacchetto(Number(e.target.value))} style={{ ...inp, width: '100%', marginBottom: '10px' }}>
-            {[1000, 5000, 10000].map(n => <option key={n} value={n}>{n.toLocaleString('it-IT')} SMS — {eur(n * costoSms)}</option>)}
-          </select>
-          <button onClick={acquista} disabled={busy} style={{ ...btn, width: '100%' }}>Acquista ({eur(pacchetto * costoSms)})</button>
-        </div>
-
-        <div style={card}>
-          <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', marginBottom: '12px' }}>Trasferisci a un cliente</div>
-          <label style={lbl}>Cliente</label>
-          <select value={clienteSel} onChange={e => setClienteSel(e.target.value)} style={{ ...inp, width: '100%', marginBottom: '10px' }}>
-            <option value="">— seleziona —</option>
-            {(dati?.clienti || []).map(c => <option key={c.id} value={c.id}>{c.ragione_sociale} ({eur(c.credito_sms)})</option>)}
-          </select>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <input value={importoTrasf} onChange={e => setImportoTrasf(e.target.value)} placeholder="Importo €" style={{ ...inp, flex: 1 }} />
-            <button onClick={trasferisci} disabled={busy} style={btn}>Trasferisci</button>
-          </div>
-        </div>
+      {/* Compra SMS (carta / Stripe) */}
+      <div style={{ ...card, marginBottom: '16px', maxWidth: '420px' }}>
+        <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', marginBottom: '4px' }}>Compra SMS</div>
+        <div style={{ fontSize: '12.5px', color: '#6b7280', marginBottom: '12px' }}>Pagamento con carta. Gli SMS restano tuoi: nessun trasferimento, ognuno compra i suoi.</div>
+        <label style={lbl}>Pacchetto</label>
+        <select value={pacchetto} onChange={e => setPacchetto(Number(e.target.value))} style={{ ...inp, width: '100%', marginBottom: '10px' }}>
+          {[1000, 5000, 10000].map(n => <option key={n} value={n}>{n.toLocaleString('it-IT')} SMS — {eur(n * costoSms)}</option>)}
+        </select>
+        <button onClick={acquista} disabled={busy} style={{ ...btn, width: '100%' }}>Paga con carta ({eur(pacchetto * costoSms)})</button>
       </div>
 
       {/* Storico */}

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { stripeConfigurato, stripeClient, pianoDaPrezzo, pianoApiDaPrezzo } from '@/lib/stripe'
 import { pianoById, meseCorrente } from '@/lib/piani'
+import { COSTO_SMS_EUR } from '@/lib/sms'
 
 export const dynamic = 'force-dynamic'
 
@@ -101,6 +102,38 @@ export async function POST(req: NextRequest) {
       })
       if (eRic) { console.error('[STRIPE][RICARICA] accredito fallito', clid, eRic.message); return NextResponse.json({ error: 'errore' }, { status: 500 }) }
       console.log('[STRIPE][RICARICA] accreditati', importoPagato, '€ a', clid)
+      return NextResponse.json({ ricevuto: true })
+    }
+
+    // ── ACQUISTO PACCHETTO SMS ────────────────────────────────────────────────
+    // Riconosciuto da scopo='sms'. Va PRIMA del ramo pacchetti API (ha anche cliente_id). Gli SMS si
+    // accreditano QUI, a pagamento confermato, via RPC atomica idempotente (chiave = PaymentIntent).
+    // Non tocca il wallet spedizioni né `movimenti`: è un contatore a parte, comprato con carta.
+    const eSms = oggetto?.metadata?.scopo === 'sms' &&
+      (evento.type === 'checkout.session.completed' || evento.type === 'payment_intent.succeeded')
+    if (eSms) {
+      if (evento.type === 'checkout.session.completed' && oggetto?.payment_status !== 'paid') {
+        return NextResponse.json({ ricevuto: true })
+      }
+      const quantita = Math.floor(Number(oggetto?.metadata?.quantita_sms || 0))
+      const smsMaster = String(oggetto?.metadata?.master_id || '') || null
+      const smsCliente = String(oggetto?.metadata?.cliente_id || '') || null
+      const rif = 'sms:' + String(oggetto?.payment_intent || oggetto?.id)   // chiave d'idempotenza
+      if ((!smsMaster && !smsCliente) || !(quantita > 0)) {
+        console.error('[STRIPE][SMS] dati mancanti', oggetto?.id); return NextResponse.json({ ricevuto: true })
+      }
+      const { error: eSmsRpc } = await admin.rpc('sms_accredita_carta', {
+        p_master_id: smsMaster, p_cliente_id: smsCliente, p_quantita: quantita,
+        p_costo_unitario: COSTO_SMS_EUR, p_riferimento: rif,
+      })
+      if (eSmsRpc) { console.error('[STRIPE][SMS] accredito fallito', eSmsRpc.message); return NextResponse.json({ error: 'errore' }, { status: 500 }) }
+      // Salva il customer per l'auto-ricarica futura (addebito off-session sulla carta salvata).
+      const cust = typeof oggetto?.customer === 'string' ? oggetto.customer : oggetto?.customer?.id
+      if (cust) {
+        if (smsCliente) await admin.from('clienti').update({ stripe_customer_id: cust }).eq('id', smsCliente).is('stripe_customer_id', null)
+        else if (smsMaster) await admin.from('masters').update({ stripe_customer_id: cust }).eq('id', smsMaster).is('stripe_customer_id', null)
+      }
+      console.log('[STRIPE][SMS] accreditati', quantita, 'SMS a', smsCliente || smsMaster)
       return NextResponse.json({ ricevuto: true })
     }
 
