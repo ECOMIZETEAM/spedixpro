@@ -14,12 +14,29 @@ export async function sincronizzaOrdiniWoo(db: any, integr: any, range?: { dal?:
   // Finestra data su date_created (after/before). Paginazione completa (tetto sicurezza 50 pagine).
   const { daISO, aISO } = rangeGiorniISO(range?.dal, range?.al)
   const ordini: any[] = []
+  const visti = new Set<string>()
+  const aggiungi = (batch: any[]) => { for (const o of batch) { const id = String(o.id); if (!visti.has(id)) { visti.add(id); ordini.push(o) } } }
+
+  // 1) La FINESTRA scelta (per data di creazione).
   for (let page = 1; page <= 50; page++) {
     const batch = await wooGet(url, ck, cs, `/orders?status=processing,on-hold&after=${encodeURIComponent(daISO)}&before=${encodeURIComponent(aISO)}&per_page=100&page=${page}&orderby=date&order=desc`)
     if (!Array.isArray(batch) || !batch.length) break
-    ordini.push(...batch)
+    aggiungi(batch)
     if (batch.length < 100) break
   }
+
+  // 2) TUTTI gli ordini ANCORA DA SPEDIRE (processing/on-hold) a PRESCINDERE dalla data: un ordine
+  //    pagato ma non ancora evaso puo' essere piu' VECCHIO della finestra e va comunque importato —
+  //    era il "non me li importa tutti" (stessa cosa gia' risolta per eBay). Sono pochi ed
+  //    esattamente quelli da spedire. Best-effort + DEDUP: se fallisce, l'import della finestra resta.
+  try {
+    for (let page = 1; page <= 50; page++) {
+      const batch = await wooGet(url, ck, cs, `/orders?status=processing,on-hold&per_page=100&page=${page}&orderby=date&order=desc`)
+      if (!Array.isArray(batch) || !batch.length) break
+      aggiungi(batch)
+      if (batch.length < 100) break
+    }
+  } catch (e: any) { console.error('[WOO SYNC] fetch ordini da evadere (best-effort):', e?.message) }
 
   let importati = 0
   for (const o of ordini) {

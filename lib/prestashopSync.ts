@@ -8,15 +8,9 @@ export async function sincronizzaOrdiniPrestashop(db: any, integr: any, range?: 
   const url = cred?.url, key = cred?.key
   if (!url || !key) throw new Error('Credenziali PrestaShop mancanti')
 
-  // FILTRO PERIODO guidato dalla pagina (come eBay/Woo): la sintassi intervallo date-only
-  // e' verificata su negozio reale. Senza periodo: ultimi 100 ordini validi.
-  const filtroData = (range?.dal && range?.al) ? `&filter[date_add]=[${range.dal},${range.al}]&date=1` : ''
-  const ordRes = await psGet(url, key, `orders?display=full&filter[valid]=[1]&sort=[id_DESC]&limit=100${filtroData}`)
-  const ordini: any[] = ordRes?.orders || []
-
-  // STATI ORDINE del negozio: il flag 'shipped' dice se lo stato equivale a "spedito"
-  // (NB: NON usare 'delivery': su negozi reali "Preparazione in corso" ha delivery=1 ma shipped=0).
-  // Serve per (a) marcare gli ordini gia' evasi e (b) mostrare il NOME dello stato, non il numero.
+  // STATI ORDINE del negozio PRIMA di tutto: servono sia a marcare gli evasi sia al catch-all dei NON
+  // evasi qui sotto. 'shipped'=1 → lo stato equivale a "spedito" (NON usare 'delivery': su negozi reali
+  // "Preparazione in corso" ha delivery=1 ma shipped=0). Serve anche per mostrare il NOME dello stato.
   const statoInfo = new Map<string, { nome: string; spedito: boolean }>()
   try {
     const st = await psGet(url, key, 'order_states?display=full')
@@ -28,6 +22,38 @@ export async function sincronizzaOrdiniPrestashop(db: any, integr: any, range?: 
       statoInfo.set(String(x.id), { nome: nome || String(x.id), spedito: String(x.shipped) === '1' })
     }
   } catch { /* fallback: numeri grezzi, nessun ordine marcato spedito */ }
+
+  // FETCH PAGINATO: col solo `limit=100` PrestaShop tornava AL MASSIMO 100 ordini e il resto spariva —
+  // era il "non li importa tutti". Ora si scorre a pagine (limit=offset,100) finche' non si esaurisce.
+  const fetchPaginato = async (queryFiltri: string): Promise<any[]> => {
+    const out: any[] = []
+    for (let page = 0; page < 50; page++) {
+      const res = await psGet(url, key, `orders?display=full&${queryFiltri}sort=[id_DESC]&limit=${page * 100},100`)
+      const batch: any[] = res?.orders || []
+      out.push(...batch)
+      if (batch.length < 100) break
+    }
+    return out
+  }
+
+  const ordini: any[] = []
+  const visti = new Set<string>()
+  const aggiungi = (arr: any[]) => { for (const o of arr) { const id = String(o.id); if (!visti.has(id)) { visti.add(id); ordini.push(o) } } }
+
+  // 1) FINESTRA: ordini validi nell'intervallo scelto (default ultimi 30 giorni, come gli altri sync).
+  const oggi = new Date().toISOString().slice(0, 10)
+  const dal = (range?.dal && /^\d{4}-\d{2}-\d{2}$/.test(range.dal)) ? range.dal : new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+  const al = (range?.al && /^\d{4}-\d{2}-\d{2}$/.test(range.al)) ? range.al : oggi
+  aggiungi(await fetchPaginato(`filter[valid]=[1]&filter[date_add]=[${dal},${al}]&date=1&`))
+
+  // 2) CATCH-ALL: tutti gli ordini validi ANCORA DA SPEDIRE a prescindere dalla data (stati non
+  //    'shipped'). Un ordine pagato ma non evaso puo' essere piu' vecchio della finestra e va comunque
+  //    importato — come per eBay/Woo. La coda dei non evasi e' piccola, quindi il costo e' contenuto.
+  const nonSpediti = [...statoInfo.entries()].filter(([, v]) => !v.spedito).map(([id]) => id)
+  if (nonSpediti.length) {
+    try { aggiungi(await fetchPaginato(`filter[valid]=[1]&filter[current_state]=[${nonSpediti.join('|')}]&`)) }
+    catch (e: any) { console.error('[PRESTA SYNC] catch-all non evasi (best-effort):', e?.message) }
+  }
 
   // Ordini gia' spediti DA NOI (spedizione collegata o stato spedito): mai declassare a 'da_spedire'
   // per colpa di un negozio non ancora aggiornato.
