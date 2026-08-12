@@ -1,9 +1,21 @@
 // Invio SMS di notifica al destinatario, con il link al tracking del NOSTRO portale (/traccia/…).
-// Gateway: Esendex Italia (docs.esendex.it) — API REST "app.esendex.it/API/v1.0/REST": login in Basic
-// Auth -> "USER_KEY;SESSION_KEY", poi POST /sms. Le credenziali stanno SOLO nelle env di Vercel, mai in
-// chat: ESENDEX_USERNAME (email dell'account), ESENDEX_PASSWORD, ESENDEX_SENDER (mittente/alias
-// registrato), ESENDEX_QUALITY ('N' alta, 'L' media, 'LL' bassa). Reggo anche i vecchi nomi SKEBBY_*
-// come ripiego. Se le env non ci sono, tutto è NO-OP: nessun SMS parte finché non si configura il gateway.
+// Gateway: Esendex Italia (docs.esendex.it) — API REST "app.esendex.it/API/v1.0/REST", POST /sms.
+//
+// AUTENTICAZIONE — due modi, in ordine di preferenza:
+//  A) TOKEN (consigliato per Vercel): headers user_key + Access_token, con un token NON scadente preso
+//     UNA volta dal pannello Esendex (pagina "API & IP"). Env: ESENDEX_USER_KEY + ESENDEX_ACCESS_TOKEN.
+//     È l'unico modo affidabile da server: NON passa da /login.
+//  B) LOGIN Basic (ripiego): GET /login con Basic Auth -> "USER_KEY;SESSION_KEY", chiave che scade dopo
+//     5 min di inattività. Env: ESENDEX_USERNAME + ESENDEX_PASSWORD.
+//
+// PERCHÉ il token e non il login: verificato 12/08 che un WAF di Esendex risponde 404 a QUALSIASI
+// "Authorization: Basic" ben formato sul path /login (e /token) da IP non in whitelist — e Vercel ha IP
+// dinamici, non whitelistabili. Il login Basic dava quindi 404 -> "gateway non configurato" -> nessun SMS.
+// L'invio con user_key+Access_token su /sms NON è bloccato dal WAF: è la strada giusta da serverless.
+//
+// Le credenziali stanno SOLO nelle env di Vercel, mai in chat. ESENDEX_SENDER = mittente/alias
+// registrato; ESENDEX_QUALITY = 'N' alta, 'L' media, 'LL' bassa. Reggo anche i vecchi nomi SKEBBY_*.
+// Se non c'è nessuna credenziale, tutto è NO-OP: nessun SMS parte finché non si configura il gateway.
 //
 // Regole rispettate: il nome del provider tecnico non compare mai al cliente; l'invio è best-effort e
 // non blocca la creazione; il credito SMS si consuma SOLO via RPC atomica (sms_consuma), con rimborso
@@ -15,8 +27,27 @@ const BASE = 'https://app.esendex.it/API/v1.0/REST'
 // Lo compra CHI manda gli SMS (il cliente per sé, o il master per i suoi clienti), pagando su Stripe.
 export const COSTO_SMS_EUR = 0.10
 
-export function smsConfigurato(): boolean {
+function tokenConfigurato(): boolean {
+  return !!((process.env.ESENDEX_USER_KEY || process.env.SKEBBY_USER_KEY) && (process.env.ESENDEX_ACCESS_TOKEN || process.env.SKEBBY_ACCESS_TOKEN))
+}
+function basicConfigurato(): boolean {
   return !!((process.env.ESENDEX_USERNAME || process.env.SKEBBY_USERNAME) && (process.env.ESENDEX_PASSWORD || process.env.SKEBBY_PASSWORD))
+}
+// Il gateway è pronto se abbiamo il token (modo A, preferito) OPPURE le credenziali di login (modo B).
+export function smsConfigurato(): boolean {
+  return tokenConfigurato() || basicConfigurato()
+}
+
+// Header di autenticazione per /sms. Preferisce SEMPRE il token (user_key + Access_token): non passa da
+// /login, quindi immune al WAF e alla scadenza della sessione. Solo se il token non c'è, ripiega sul
+// login Basic (user_key + Session_key). Ritorna null se non è configurato niente.
+async function authHeaders(): Promise<Record<string, string> | null> {
+  const userKey = process.env.ESENDEX_USER_KEY || process.env.SKEBBY_USER_KEY
+  const accessToken = process.env.ESENDEX_ACCESS_TOKEN || process.env.SKEBBY_ACCESS_TOKEN
+  if (userKey && accessToken) return { user_key: userKey, Access_token: accessToken }
+  const s = await login()
+  if (s) return { user_key: s.userKey, Session_key: s.sessionKey }
+  return null
 }
 
 // ── Normalizzazione telefono italiano a E.164, SOLO se è un cellulare (gli SMS ai fissi non arrivano).
@@ -59,12 +90,12 @@ async function login(): Promise<{ userKey: string; sessionKey: string } | null> 
 export async function inviaSms(telefono: string, messaggio: string): Promise<{ ok: boolean; error?: string }> {
   const dest = normalizzaTelefonoIT(telefono)
   if (!dest) return { ok: false, error: 'numero non cellulare' }
-  const s = await login()
-  if (!s) return { ok: false, error: 'gateway non configurato' }
+  const auth = await authHeaders()
+  if (!auth) return { ok: false, error: 'gateway non configurato' }
   try {
     const r = await fetch(`${BASE}/sms`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', user_key: s.userKey, Session_key: s.sessionKey },
+      headers: { 'Content-Type': 'application/json', ...auth },
       body: JSON.stringify({
         // Esendex: 'N' alta qualità/consegna, 'L' media, 'LL' bassa/economica.
         message_type: process.env.ESENDEX_QUALITY || process.env.SKEBBY_QUALITY || 'N',
@@ -76,7 +107,8 @@ export async function inviaSms(telefono: string, messaggio: string): Promise<{ o
     const j: any = await r.json().catch(() => ({}))
     if (r.ok && (j?.result === 'OK' || j?.result === undefined)) return { ok: true }
     console.error('[SMS][INVIO] HTTP ' + r.status + ' ' + JSON.stringify(j).slice(0, 200))
-    return { ok: false, error: j?.result || j?.message || `HTTP ${r.status}` }
+    // Esendex riporta l'errore in error_message (es. "Invalid value for parameter [user_key]").
+    return { ok: false, error: j?.error_message || j?.result || j?.message || `HTTP ${r.status}` }
   } catch (e: any) {
     return { ok: false, error: String(e?.message || e) }
   }
