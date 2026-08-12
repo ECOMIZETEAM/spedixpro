@@ -42,5 +42,10 @@ export async function GET(_req: NextRequest) {
     fetchAll(() => admin.from('tickets').select(cols).contains('rete_master_ids', [masterId]).order('updated_at', { ascending: false })),
   ])
   const conNuovo = (r: any) => ({ ...r, rete_nuovo: Array.isArray(r.rete_non_letti) && r.rete_non_letti.includes(masterId) })
-  return NextResponse.json({ ricevuti: ricevuti || [], miei: miei || [], rete: (rete || []).map(conNuovo) })
+  // I MIEI ticket (aperti da me verso la mia linea superiore): sono il RICHIEDENTE, e come per un
+  // cliente NON devo sapere se e a CHI la mia richiesta viene girata ancora più su. Prima questi
+  // campi uscivano nel ramo master e il sotto-master vedeva "inoltrato a MoovExpress". Nei RICEVUTI
+  // (li gestisco io) e nella RETE (partecipo alla catena) restano, lì è giusto vederli.
+  const senzaCatenaSopra = (r: any) => ({ ...r, inoltrato_a_master_id: undefined, rete_master_ids: undefined, rete_non_letti: undefined })
+  return NextResponse.json({ ricevuti: ricevuti || [], miei: (miei || []).map(senzaCatenaSopra), rete: (rete || []).map(conNuovo) })
 }

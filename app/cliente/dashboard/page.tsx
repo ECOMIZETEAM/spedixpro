@@ -48,9 +48,11 @@ export default function ClienteDashboard() {
         <h1 style={{fontSize:'18px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Ciao, {data.clienteNome}</h1>
         <p style={{color:'#999',fontSize:'12px',margin:'4px 0 0'}}>{new Date().toLocaleDateString('it-IT',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
       </div>
-      {notifiche.length > 0 && (
+      {/* In dashboard SOLO gli avvisi importanti del master: le "Spedizione consegnata" (a valanga)
+          restano nella campanella, tab Spedizioni, così non seppelliscono gli avvisi e non intasano. */}
+      {notifiche.filter((n:any)=>n.categoria==='avviso').length > 0 && (
         <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
-          {notifiche.map((n:any)=>(
+          {notifiche.filter((n:any)=>n.categoria==='avviso').map((n:any)=>(
             <div key={n.id} style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'14px 18px'}}>
               <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'6px'}}>
                 <span style={{fontSize:'16px'}}>🔔</span>
