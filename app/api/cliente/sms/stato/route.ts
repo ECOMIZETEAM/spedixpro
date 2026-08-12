@@ -17,7 +17,7 @@ export async function GET() {
   const admin = createAdminSupabase()
   const { data: cli } = await admin.from('clienti').select('credito_sms,impostazioni,stripe_customer_id').eq('id', u.cliente_id).maybeSingle()
   const { data: mov } = await admin.from('movimenti_sms')
-    .select('tipo,descrizione,quantita_sms,spedizione_id,created_at')
+    .select('tipo,descrizione,quantita_sms,importo,spedizione_id,created_at')
     .eq('cliente_id', u.cliente_id).order('created_at', { ascending: false }).limit(150)
 
   // Numero LDV delle spedizioni citate negli invii, per mostrarle in chiaro.
@@ -31,8 +31,9 @@ export async function GET() {
   const inviati = (mov || []).filter(m => m.tipo === 'consumo').map(m => ({
     numero: m.spedizione_id ? (numeroDi[m.spedizione_id] || '—') : '—', quando: m.created_at,
   }))
-  const acquisti = (mov || []).filter(m => m.tipo === 'acquisto').map(m => ({
-    quantita: m.quantita_sms || 0, quando: m.created_at,
+  // Ricariche ricevute = acquisti (carta) o trasferimenti dal master. Quantità dal campo o dall'importo.
+  const acquisti = (mov || []).filter(m => (m.tipo === 'acquisto' || m.tipo === 'trasferimento') && Number(m.importo) > 0).map(m => ({
+    quantita: Number(m.quantita_sms) || Math.round(Number(m.importo) / COSTO_SMS_EUR) || 0, quando: m.created_at,
   }))
 
   const imp = (cli?.impostazioni as any) || {}

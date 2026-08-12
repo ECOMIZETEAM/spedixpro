@@ -14,6 +14,8 @@ export default function NotificheSmsPage() {
   const [dati, setDati] = useState<{ creditoWallet: number; creditoSms: number; costoSms: number; movimenti: Mov[]; clienti: Cliente[]; radice?: boolean; puoTestare?: boolean; gatewayPronto?: boolean; cartaSalvata?: boolean; auto?: { attiva: boolean; soglia: number; pacchetto: number } } | null>(null)
   const [pacchetto, setPacchetto] = useState(1000)
   const [telProva, setTelProva] = useState('')
+  const [clienteSel, setClienteSel] = useState('')
+  const [smsTrasf, setSmsTrasf] = useState('')
   const [aAttiva, setAAttiva] = useState(false)
   const [aSoglia, setASoglia] = useState(100)
   const [aPacchetto, setAPacchetto] = useState(1000)
@@ -45,6 +47,22 @@ export default function NotificheSmsPage() {
       const j = await r.json()
       if (!r.ok || !j.url) { await dialog.alert({ title: 'Acquisto non riuscito', message: j.error || 'Errore' }); return }
       window.location.href = j.url   // cassa Stripe: gli SMS si accreditano a pagamento confermato
+    } finally { setBusy(false) }
+  }
+
+  // Trasferisci (frazionamento) SMS dal tuo credito a un cliente: è così che il cliente ottiene gli SMS
+  // (non li compra da solo — chiede a te). Si inserisce il NUMERO di SMS, si scala l'equivalente in euro.
+  async function trasferisci() {
+    if (busy) return
+    const n = Math.floor(Number(smsTrasf))
+    if (!clienteSel) { await dialog.alert({ message: 'Seleziona un cliente' }); return }
+    if (!Number.isFinite(n) || n <= 0) { await dialog.alert({ message: 'Inserisci quanti SMS dare al cliente' }); return }
+    setBusy(true)
+    try {
+      const r = await fetch('/api/sms/trasferisci', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clienteId: clienteSel, importo: n * costoSms }) })
+      const j = await r.json()
+      if (!r.ok) { await dialog.alert({ title: 'Trasferimento non riuscito', message: j.error || 'Errore' }); return }
+      setSmsTrasf(''); await carica()
     } finally { setBusy(false) }
   }
 
@@ -135,6 +153,22 @@ export default function NotificheSmsPage() {
           {[1000, 5000, 10000].map(n => <option key={n} value={n}>{n.toLocaleString('it-IT')} SMS — {eur(n * costoSms)}</option>)}
         </select>
         <button onClick={acquista} disabled={busy} style={{ ...btn, width: '100%' }}>Paga con carta ({eur(pacchetto * costoSms)})</button>
+      </div>
+
+      {/* Dai SMS a un cliente (frazionamento) */}
+      <div style={{ ...card, marginBottom: '16px', maxWidth: '420px' }}>
+        <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', marginBottom: '4px' }}>Dai SMS a un cliente</div>
+        <div style={{ fontSize: '12.5px', color: '#6b7280', marginBottom: '12px' }}>I tuoi clienti non comprano da soli: gli SMS glieli giri tu, dal tuo credito.</div>
+        <label style={lbl}>Cliente</label>
+        <select value={clienteSel} onChange={e => setClienteSel(e.target.value)} style={{ ...inp, width: '100%', marginBottom: '10px' }}>
+          <option value="">— seleziona —</option>
+          {(dati?.clienti || []).map(c => <option key={c.id} value={c.id}>{c.ragione_sociale} ({Math.floor(Number(c.credito_sms || 0) / costoSms)} SMS)</option>)}
+        </select>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <input value={smsTrasf} onChange={e => setSmsTrasf(e.target.value)} placeholder="Quanti SMS" inputMode="numeric" style={{ ...inp, flex: 1 }} />
+          <button onClick={trasferisci} disabled={busy} style={btn}>Dai</button>
+        </div>
+        {Number(smsTrasf) > 0 && <div style={{ fontSize: '11.5px', color: '#9ca3af', marginTop: '6px' }}>= {eur(Math.floor(Number(smsTrasf)) * costoSms)} dal tuo credito SMS</div>}
       </div>
 
       {/* Auto-ricarica */}
