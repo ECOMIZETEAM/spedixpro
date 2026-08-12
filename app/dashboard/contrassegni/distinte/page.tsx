@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import BarraAvanzamento from '@/app/components/BarraAvanzamento'
@@ -22,7 +22,10 @@ export default function DistinteContrassegniPage() {
   const [selRicevute, setSelRicevute] = useState<Set<string>>(new Set())
   const [caricando, setCaricando] = useState(false)
   const [daCaricare, setDaCaricare] = useState<{gruppi:any[];totale:number;spedizioni:number}>({gruppi:[],totale:0,spedizioni:0})
-  const [selDest, setSelDest] = useState<Set<string>>(new Set())
+  const [selDest, setSelDest] = useState<Set<string>>(new Set())        // gruppi INTERI selezionati
+  const [selSped, setSelSped] = useState<Record<string, Set<string>>>({}) // spedizioni singole per gruppo
+  const [espansi, setEspansi] = useState<Set<string>>(new Set())          // tendine aperte
+  const [dettGruppo, setDettGruppo] = useState<Record<string, any>>({})   // dettaglio paginato per gruppo
   const [cerca, setCerca] = useState('')
   const [modalPagamento, setModalPagamento] = useState<any>(null)
   const [metodoPagamento, setMetodoPagamento] = useState('')
@@ -47,19 +50,55 @@ export default function DistinteContrassegniPage() {
   function caricaDaCaricare() {
     fetch('/api/contrassegni/da-caricare').then(r=>r.json()).then(d=>{
       setDaCaricare({ gruppi: d?.gruppi || [], totale: Number(d?.totale||0), spedizioni: Number(d?.spedizioni||0) })
-      setSelDest(new Set())
+      setSelDest(new Set()); setSelSped({}); setEspansi(new Set()); setDettGruppo({})
     }).catch(()=>{})
   }
 
+  // Tendina di un cliente: carica le sue spedizioni PAGINATE (10/pag) dall'endpoint dettaglio.
+  async function caricaDettaglio(chiave: string, page = 1) {
+    setDettGruppo(prev => ({ ...prev, [chiave]: { ...(prev[chiave]||{}), loading: true } }))
+    try {
+      const d = await fetch(`/api/contrassegni/da-caricare/dettaglio?chiave=${encodeURIComponent(chiave)}&page=${page}`).then(r=>r.json())
+      setDettGruppo(prev => ({ ...prev, [chiave]: { totale: d?.totale||0, page: d?.page||page, perPage: d?.perPage||10, righe: d?.righe||[], loading: false } }))
+    } catch { setDettGruppo(prev => ({ ...prev, [chiave]: { ...(prev[chiave]||{}), loading: false } })) }
+  }
+  function toggleEspansi(chiave: string) {
+    setEspansi(prev => { const n = new Set(prev); if (n.has(chiave)) n.delete(chiave); else { n.add(chiave); if (!dettGruppo[chiave]) caricaDettaglio(chiave, 1) } return n })
+  }
+  // Selezione della SINGOLA spedizione: se il gruppo era "intero" lo sgancio (si passa al manuale).
+  function toggleSpedizione(chiave: string, id: string) {
+    setSelDest(prev => { if (!prev.has(chiave)) return prev; const n = new Set(prev); n.delete(chiave); return n })
+    setSelSped(prev => {
+      const cur = new Set(prev[chiave] || [])
+      cur.has(id) ? cur.delete(id) : cur.add(id)
+      const next = { ...prev }; if (cur.size) next[chiave] = cur; else delete next[chiave]
+      return next
+    })
+  }
+  // Checkbox del gruppo: seleziona/annulla il cliente INTERO (azzera l'eventuale selezione a mano).
+  function toggleGruppo(chiave: string) {
+    setSelDest(prev => { const n = new Set(prev); if (n.has(chiave)) { n.delete(chiave); return n } n.add(chiave); return n })
+    setSelSped(prev => { if (!prev[chiave]) return prev; const n = { ...prev }; delete n[chiave]; return n })
+  }
+
+  // Conta i contrassegni selezionati su TUTTA la rete: gruppi interi (tutte le loro spedizioni) +
+  // le singole spuntate a mano (dai gruppi non interi).
+  function contaSelezionati() {
+    return daCaricare.gruppi.reduce((s: number, g: any) => s + (selDest.has(g.chiave) ? g.spedizioni : (selSped[g.chiave]?.size || 0)), 0)
+  }
+
   async function caricaDestinatari() {
-    const ids = Array.from(selDest)
-    if (!ids.length) { await dialog.alert({ title:'Nessuna selezione', message:'Seleziona almeno un destinatario.' }); return }
-    const ok = await dialog.confirm({ title:'Carica contrassegni', message:`Creare le distinte per ${ids.length} destinatari? Da questo momento i contrassegni scendono al livello selezionato.` })
+    const destWhole = Array.from(selDest)
+    const spedIndiv: string[] = []
+    for (const [chiave, set] of Object.entries(selSped)) { if (!selDest.has(chiave)) for (const id of set) spedIndiv.push(id) }
+    const conta = contaSelezionati()
+    if (!conta) { await dialog.alert({ title:'Nessuna selezione', message:'Seleziona almeno un contrassegno.' }); return }
+    const ok = await dialog.confirm({ title:'Carica contrassegni', message:`Caricare ${conta} contrassegni? Da questo momento scendono al livello sotto. Quelli non selezionati restano in attesa.` })
     if (!ok) return
     setCaricando(true)
-    setAvanz({ fatti: 0, totale: 0, da: null, etichetta: 'Sto creando le distinte', sottotitolo: `${ids.length} destinatari` })
+    setAvanz({ fatti: 0, totale: 0, da: null, etichetta: 'Sto creando le distinte', sottotitolo: `${conta} contrassegni` })
     try {
-      const r = await fetch('/api/contrassegni/da-caricare', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ destinatari: ids }) })
+      const r = await fetch('/api/contrassegni/da-caricare', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ destinatari: destWhole, spedizioni: spedIndiv }) })
       const j = await r.json()
       if (j.success) {
         await dialog.alert({ title:'Contrassegni caricati', message:
@@ -339,23 +378,26 @@ export default function DistinteContrassegniPage() {
       </div>
 
             {/* AREA DI SOSTA: contrassegni verificabili PRIMA di farli scendere, divisi per destinatario */}
-      {daCaricare.gruppi.length > 0 && (
+      {daCaricare.gruppi.length > 0 && (() => {
+        const conta = contaSelezionati()
+        const tuttiInteri = selDest.size === daCaricare.gruppi.length && daCaricare.gruppi.length > 0
+        return (
         <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #86efac',overflow:'hidden',marginBottom:'16px'}}>
           <div style={{padding:'12px 16px',borderBottom:'1px solid #bbf7d0',background:'#f0fdf4',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'10px',flexWrap:'wrap' as const}}>
             <div>
               <div style={{fontSize:'13px',fontWeight:800,color:'#15803d'}}>💰 Contrassegni da caricare — {daCaricare.spedizioni} spedizioni · € {daCaricare.totale.toFixed(2)}</div>
-              <div style={{fontSize:'11.5px',color:'#166534',marginTop:'2px'}}>Verifica, poi scegli A CHI caricarli: solo allora scendono al livello sotto.</div>
+              <div style={{fontSize:'11.5px',color:'#166534',marginTop:'2px'}}>Apri un cliente per scegliere le singole spedizioni (anche su più pagine), oppure spunta il cliente intero. Le non selezionate restano in attesa.</div>
             </div>
             <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
               <label style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'12px',color:'#166534',cursor:'pointer',fontWeight:600}}>
-                <input type="checkbox" checked={selDest.size===daCaricare.gruppi.length && daCaricare.gruppi.length>0}
-                  onChange={e=>setSelDest(e.target.checked ? new Set(daCaricare.gruppi.map((g:any)=>g.chiave)) : new Set())}
+                <input type="checkbox" checked={tuttiInteri}
+                  onChange={e=>{ if (e.target.checked) { setSelDest(new Set(daCaricare.gruppi.map((g:any)=>g.chiave))); setSelSped({}) } else setSelDest(new Set()) }}
                   style={{width:'15px',height:'15px',cursor:'pointer'}}/>
                 Seleziona tutti
               </label>
-              <button onClick={caricaDestinatari} disabled={caricando || !selDest.size}
-                style={{padding:'7px 16px',background:selDest.size?'#16a34a':'#d1d5db',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:700,cursor:selDest.size?'pointer':'default'}}>
-                {caricando ? 'Caricamento…' : `Carica selezionati (${selDest.size})`}
+              <button onClick={caricaDestinatari} disabled={caricando || !conta}
+                style={{padding:'7px 16px',background:conta?'#16a34a':'#d1d5db',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:700,cursor:conta?'pointer':'default'}}>
+                {caricando ? 'Caricamento…' : `Carica selezionati (${conta})`}
               </button>
             </div>
           </div>
@@ -364,23 +406,71 @@ export default function DistinteContrassegniPage() {
               {['','Destinatario','Tipo','Spedizioni','Totale','Provenienza'].map((h,i)=><th key={i} style={{textAlign:'left' as const,padding:'7px 12px',fontWeight:700,textTransform:'uppercase' as const,fontSize:'10.5px',color:'#1a1a1a',borderBottom:'1px solid #e5e7eb'}}>{h}</th>)}
             </tr></thead>
             <tbody>
-              {daCaricare.gruppi.map((g:any)=>(
-                <tr key={g.chiave} style={{borderBottom:'1px solid #f1f5f9',cursor:'pointer'}}
-                  onClick={()=>setSelDest(prev=>{const n=new Set(prev); n.has(g.chiave)?n.delete(g.chiave):n.add(g.chiave); return n})}>
-                  <td style={{padding:'7px 12px',width:'30px'}}><input type="checkbox" checked={selDest.has(g.chiave)} onChange={()=>{}} style={{width:'15px',height:'15px',pointerEvents:'none' as const}}/></td>
-                  <td style={{padding:'7px 12px',fontWeight:600,color:'#1a1a1a'}} title={(g.ldv||[]).slice(0,20).join(', ')}>{g.nome}</td>
-                  <td style={{padding:'7px 12px'}}>
-                    <span style={{fontSize:'10.5px',fontWeight:700,padding:'2px 7px',borderRadius:'999px',background:g.tipo==='cliente'?'#eff6ff':'#fff7ed',color:g.tipo==='cliente'?'#1d4ed8':'#c2410c'}}>{g.tipo}</span>
-                  </td>
-                  <td style={{padding:'7px 12px',color:'#1a1a1a'}}>{g.spedizioni}</td>
-                  <td style={{padding:'7px 12px',fontWeight:700,color:'#15803d'}}>€ {Number(g.totale).toFixed(2)}</td>
-                  <td style={{padding:'7px 12px',color:'#6b7280',fontSize:'11px'}}>{(g.origini||[]).map((o:string)=>o==='file'?'file corriere':'rimessa rete').join(' + ')}</td>
-                </tr>
-              ))}
+              {daCaricare.gruppi.map((g:any)=>{
+                const aperto = espansi.has(g.chiave)
+                const intero = selDest.has(g.chiave)
+                const nSel = intero ? g.spedizioni : (selSped[g.chiave]?.size || 0)
+                const dett = dettGruppo[g.chiave]
+                const totPag = dett ? Math.max(1, Math.ceil((dett.totale||0)/(dett.perPage||10))) : 1
+                return (
+                <Fragment key={g.chiave}>
+                  <tr style={{borderBottom:'1px solid #f1f5f9',cursor:'pointer',background:aperto?'#f0fdf4':'transparent'}} onClick={()=>toggleEspansi(g.chiave)}>
+                    <td style={{padding:'7px 12px',width:'30px'}} onClick={e=>{e.stopPropagation(); toggleGruppo(g.chiave)}}>
+                      <input type="checkbox" checked={intero} ref={el=>{ if(el) el.indeterminate = !intero && nSel>0 }} onChange={()=>{}} style={{width:'15px',height:'15px',cursor:'pointer',pointerEvents:'none' as const}}/>
+                    </td>
+                    <td style={{padding:'7px 12px',fontWeight:600,color:'#1a1a1a'}}>
+                      <span style={{display:'inline-block',width:'14px',color:'#16a34a',transform:aperto?'rotate(90deg)':'none',transition:'transform .15s'}}>▸</span>
+                      {g.nome}
+                      {nSel>0 && <span style={{marginLeft:'8px',fontSize:'10.5px',fontWeight:700,color:'#166534',background:'#dcfce7',borderRadius:'999px',padding:'1px 7px'}}>{nSel} selezionate</span>}
+                    </td>
+                    <td style={{padding:'7px 12px'}}>
+                      <span style={{fontSize:'10.5px',fontWeight:700,padding:'2px 7px',borderRadius:'999px',background:g.tipo==='cliente'?'#eff6ff':'#fff7ed',color:g.tipo==='cliente'?'#1d4ed8':'#c2410c'}}>{g.tipo}</span>
+                    </td>
+                    <td style={{padding:'7px 12px',color:'#1a1a1a'}}>{g.spedizioni}</td>
+                    <td style={{padding:'7px 12px',fontWeight:700,color:'#15803d'}}>€ {Number(g.totale).toFixed(2)}</td>
+                    <td style={{padding:'7px 12px',color:'#6b7280',fontSize:'11px'}}>{(g.origini||[]).map((o:string)=>o==='file'?'file corriere':'rimessa rete').join(' + ')}</td>
+                  </tr>
+                  {aperto && (
+                    <tr style={{background:'#fafffb'}}>
+                      <td colSpan={6} style={{padding:'0 12px 10px 34px'}}>
+                        {!dett || dett.loading ? (
+                          <div style={{padding:'12px',color:'#999',fontSize:'12px'}}>Caricamento spedizioni…</div>
+                        ) : !dett.righe?.length ? (
+                          <div style={{padding:'12px',color:'#999',fontSize:'12px'}}>Nessuna spedizione.</div>
+                        ) : (
+                          <div>
+                            {dett.righe.map((s:any)=>{
+                              const sel = intero || (selSped[g.chiave]?.has(s.spedizione_id) || false)
+                              return (
+                                <label key={s.spedizione_id} style={{display:'flex',alignItems:'center',gap:'10px',padding:'6px 8px',borderBottom:'1px solid #eef2f0',cursor:'pointer',fontSize:'12px'}}>
+                                  <input type="checkbox" checked={sel} onChange={()=>toggleSpedizione(g.chiave, s.spedizione_id)} style={{width:'14px',height:'14px',cursor:'pointer'}}/>
+                                  <span style={{fontFamily:'monospace',color:'#1a1a1a',minWidth:'130px'}}>{s.numero}</span>
+                                  <span style={{color:'#374151',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{s.dest_nome}{s.dest_citta?` · ${s.dest_citta}`:''}</span>
+                                  <span style={{fontWeight:700,color:'#15803d',whiteSpace:'nowrap' as const}}>€ {Number(s.importo).toFixed(2)}</span>
+                                </label>
+                              )
+                            })}
+                            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'8px',padding:'8px 4px 2px',flexWrap:'wrap' as const}}>
+                              <span style={{fontSize:'11px',color:'#6b7280'}}>{(dett.page-1)*(dett.perPage||10)+1}-{Math.min(dett.page*(dett.perPage||10), dett.totale)} di {dett.totale}</span>
+                              <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
+                                <button onClick={()=>dett.page>1 && caricaDettaglio(g.chiave, dett.page-1)} disabled={dett.page<=1} style={{padding:'4px 9px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'11px',cursor:dett.page<=1?'default':'pointer',color:dett.page<=1?'#ccc':'#1a1a1a'}}>‹ Prec</button>
+                                <span style={{fontSize:'11px',color:'#6b7280'}}>Pag. {dett.page}/{totPag}</span>
+                                <button onClick={()=>dett.page<totPag && caricaDettaglio(g.chiave, dett.page+1)} disabled={dett.page>=totPag} style={{padding:'4px 9px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'11px',cursor:dett.page>=totPag?'default':'pointer',color:dett.page>=totPag?'#ccc':'#1a1a1a'}}>Succ ›</button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </div>
-      )}
+        )
+      })()}
 
       {ricevute.length > 0 && (
         <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #fbbf24',overflow:'hidden',marginBottom:'16px'}}>

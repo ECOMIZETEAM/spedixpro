@@ -78,7 +78,11 @@ export async function POST(req: NextRequest) {
   const mio = utente.master_id
   const body = await req.json().catch(() => ({}))
   const destinatari: string[] = Array.isArray(body.destinatari) ? body.destinatari.filter(Boolean) : []
-  if (!destinatari.length) return NextResponse.json({ error: 'Seleziona almeno un destinatario da caricare' }, { status: 400 })
+  // Selezione PER SINGOLA SPEDIZIONE (dalla tendina del cliente): si possono caricare solo alcune
+  // delle sue spedizioni, le altre restano in sosta. Il POST poi le raggruppa comunque per
+  // destinatario e crea una distinta per gruppo — quindi selezioni miste (più clienti) funzionano.
+  const spedizioniSel: string[] = Array.isArray(body.spedizioni) ? body.spedizioni.filter(Boolean).map(String) : []
+  if (!destinatari.length && !spedizioniSel.length) return NextResponse.json({ error: 'Seleziona almeno un contrassegno da caricare' }, { status: 400 })
 
   const admin = createAdminSupabase()
   const cliIds = destinatari.filter(d => d.startsWith('c:')).map(d => d.slice(2))
@@ -100,7 +104,17 @@ export async function POST(req: NextRequest) {
       .select('id,spedizione_id,importo,cliente_id,target_master_id,origine,origine_id')
     claim.push(...(data || []))
   }
-  if (!claim.length) return NextResponse.json({ error: 'Nessun contrassegno da caricare per i destinatari scelti (forse è già stato caricato).' }, { status: 400 })
+  // Claim per singola spedizione. Se una è già stata presa dal gruppo intero qui sopra, il delete
+  // non la ritrova (già rimossa) → nessun doppio claim.
+  if (spedizioniSel.length) {
+    for (let i = 0; i < spedizioniSel.length; i += 300) {
+      const { data } = await admin.from('cod_da_caricare').delete()
+        .eq('master_id', mio).in('spedizione_id', spedizioniSel.slice(i, i + 300))
+        .select('id,spedizione_id,importo,cliente_id,target_master_id,origine,origine_id')
+      claim.push(...(data || []))
+    }
+  }
+  if (!claim.length) return NextResponse.json({ error: 'Nessun contrassegno da caricare per la selezione (forse è già stato caricato).' }, { status: 400 })
 
   // Rimette in sosta le righe non andate a buon fine: nessun contrassegno si perde mai.
   const rimettiInSosta = async (rows: any[]) => {
