@@ -1,19 +1,22 @@
 // Invio SMS di notifica al destinatario, con il link al tracking del NOSTRO portale (/traccia/…).
-// Gateway: Skebby (scelto per l'Italia). Le credenziali stanno SOLO nelle env di Vercel, mai in chat:
-//   SKEBBY_USERNAME, SKEBBY_PASSWORD, SKEBBY_SENDER (mittente alfanumerico registrato), SKEBBY_QUALITY.
-// Se le env non ci sono, tutto è NO-OP: nessun SMS parte finché non si configura il gateway.
+// Gateway: Esendex Italia (docs.esendex.it) — API REST "app.esendex.it/API/v1.0/REST": login in Basic
+// Auth -> "USER_KEY;SESSION_KEY", poi POST /sms. Le credenziali stanno SOLO nelle env di Vercel, mai in
+// chat: ESENDEX_USERNAME (email dell'account), ESENDEX_PASSWORD, ESENDEX_SENDER (mittente/alias
+// registrato), ESENDEX_QUALITY ('N' alta, 'L' media, 'LL' bassa). Reggo anche i vecchi nomi SKEBBY_*
+// come ripiego. Se le env non ci sono, tutto è NO-OP: nessun SMS parte finché non si configura il gateway.
 //
 // Regole rispettate: il nome del provider tecnico non compare mai al cliente; l'invio è best-effort e
 // non blocca la creazione; il credito SMS si consuma SOLO via RPC atomica (sms_consuma), con rimborso
 // automatico se l'invio poi fallisce.
 
-const BASE = 'https://api.skebby.it/API/v1.0/REST'
+const BASE = 'https://app.esendex.it/API/v1.0/REST'
 
-// Prezzo di vendita per SMS (schermata "Notifiche SMS"): 1.000 SMS = 84 € → 0,084 €/SMS.
-export const COSTO_SMS_EUR = 0.084
+// Prezzo di vendita per SMS (schermata "Notifiche SMS"): 1.000 SMS = 90 € → 0,090 €/SMS (IVA esclusa).
+// È il prezzo con cui GUADAGNA la piattaforma (E&A): i master lo pagano, non lo rivendono con margine.
+export const COSTO_SMS_EUR = 0.09
 
 export function smsConfigurato(): boolean {
-  return !!(process.env.SKEBBY_USERNAME && process.env.SKEBBY_PASSWORD)
+  return !!((process.env.ESENDEX_USERNAME || process.env.SKEBBY_USERNAME) && (process.env.ESENDEX_PASSWORD || process.env.SKEBBY_PASSWORD))
 }
 
 // ── Normalizzazione telefono italiano a E.164, SOLO se è un cellulare (gli SMS ai fissi non arrivano).
@@ -35,10 +38,14 @@ const SESSIONE_TTL = 30 * 60 * 1000
 
 async function login(): Promise<{ userKey: string; sessionKey: string } | null> {
   if (sessione && Date.now() - sessione.ts < SESSIONE_TTL) return sessione
-  const u = process.env.SKEBBY_USERNAME, p = process.env.SKEBBY_PASSWORD
+  const u = process.env.ESENDEX_USERNAME || process.env.SKEBBY_USERNAME
+  const p = process.env.ESENDEX_PASSWORD || process.env.SKEBBY_PASSWORD
   if (!u || !p) return null
   try {
-    const r = await fetch(`${BASE}/login?username=${encodeURIComponent(u)}&password=${encodeURIComponent(p)}`)
+    // Login in Basic Auth (consigliato dai doc Esendex): niente password nell'URL.
+    const r = await fetch(`${BASE}/login`, {
+      headers: { Authorization: 'Basic ' + Buffer.from(`${u}:${p}`).toString('base64') },
+    })
     if (!r.ok) return null
     const txt = (await r.text()).trim()   // formato: "USER_KEY;SESSION_KEY"
     const [userKey, sessionKey] = txt.split(';')
@@ -59,9 +66,10 @@ export async function inviaSms(telefono: string, messaggio: string): Promise<{ o
       method: 'POST',
       headers: { 'Content-Type': 'application/json', user_key: s.userKey, Session_key: s.sessionKey },
       body: JSON.stringify({
-        message_type: process.env.SKEBBY_QUALITY || 'GP',   // GP = alta qualità/consegna
+        // Esendex: 'N' alta qualità/consegna, 'L' media, 'LL' bassa/economica.
+        message_type: process.env.ESENDEX_QUALITY || process.env.SKEBBY_QUALITY || 'N',
         message: messaggio,
-        sender: process.env.SKEBBY_SENDER || 'MoovExpress',
+        sender: process.env.ESENDEX_SENDER || process.env.SKEBBY_SENDER || 'MoovExpress',
         recipient: [dest],
       }),
     })

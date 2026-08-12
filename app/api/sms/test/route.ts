@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'L\'SMS di prova è riservato al gestore della piattaforma.' }, { status: 403 })
   }
   if (!smsConfigurato()) {
-    return NextResponse.json({ error: 'Gateway non configurato: mancano le credenziali SMS su Vercel (SKEBBY_USERNAME, SKEBBY_PASSWORD).' }, { status: 400 })
+    return NextResponse.json({ error: 'Gateway non configurato: mancano le credenziali SMS su Vercel (ESENDEX_USERNAME, ESENDEX_PASSWORD).' }, { status: 400 })
   }
 
   const body = await req.json().catch(() => ({}))

@@ -103,7 +103,7 @@ export default function NotificheSmsPage() {
           <div style={{ fontSize: '12.5px', color: '#6b7280', marginBottom: '12px' }}>Verifica il gateway (mittente registrato e consegna) senza creare una spedizione. Non tocca il credito SMS.</div>
           {!dati.gatewayPronto && (
             <div style={{ fontSize: '12.5px', color: '#9a3412', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: '6px', padding: '9px 12px', marginBottom: '11px' }}>
-              ⚠️ Gateway non ancora configurato: aggiungi su Vercel <b>SKEBBY_USERNAME</b>, <b>SKEBBY_PASSWORD</b> e <b>SKEBBY_SENDER</b> (il mittente registrato), poi ridistribuisci.
+              ⚠️ Gateway non ancora configurato: aggiungi su Vercel <b>ESENDEX_USERNAME</b>, <b>ESENDEX_PASSWORD</b> e <b>ESENDEX_SENDER</b> (il mittente registrato), poi ridistribuisci.
             </div>
           )}
           <div style={{ display: 'flex', gap: '8px', maxWidth: '380px' }}>
