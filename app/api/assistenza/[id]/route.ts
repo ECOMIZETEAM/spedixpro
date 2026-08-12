@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 // La regola su chi puo' stare dentro un ticket ora vive in lib/ticket-accesso.ts, perche' la usa
 // anche /api/file per gli allegati e la POD: una sola definizione, nessuna copia da tenere allineata.
-import { partecipanteTicket as partecipante } from '@/lib/ticket-accesso'
+import { partecipanteTicket as partecipante, posizioneCatena, messaggioVisibileCatena, mascheraCatena } from '@/lib/ticket-accesso'
 import { BUCKET_RISERVATI } from '@/lib/file-riservati'
 
 // GET: dettaglio ticket + thread messaggi (chat). Accessibile a entrambe le parti.
@@ -26,10 +26,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // per lui esiste solo la conversazione con la sua assistenza diretta.
   if (ruolo === 'cliente') q = q.eq('visibilita', 'pubblico')
   const { data: messaggi } = await q
+  // CATENA A PIU' LIVELLI: un master della catena vede i messaggi 'rete' solo fino al proprio
+  // bersaglio d'inoltro (un gradino sopra), mai oltre — così un sotto-master non scopre che il suo
+  // master ha inoltrato ancora più in alto. Il cliente ha già solo i 'pubblico' (filtro SQL sopra).
+  const posViewer = posizioneCatena(utente?.master_id, t)
+  const messaggiVisti = ruolo === 'cliente' ? (messaggi || []) : (messaggi || []).filter((m: any) => messaggioVisibileCatena(m, posViewer, t))
   // 'mio' calcolato lato server (il browser non conosce il proprio master_id): serve al LATO del
   // fumetto (destra/arancio). 'tu' invece è l'UTENTE preciso che ha scritto — con Sara e Giuliana
   // sullo stesso master, 'mio' è vero per entrambe, ma 'tu' solo per chi guarda.
-  const msgOut = (messaggi || []).map((m: any) => ({
+  const msgOut = messaggiVisti.map((m: any) => ({
     ...m,
     mio: ruolo === 'cliente' ? m.autore === 'cliente'
       : (m.autore !== 'cliente' && (m.autore_master_id ? m.autore_master_id === utente?.master_id : ruolo === 'master' && m.autore === 'master')),
@@ -45,9 +50,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // Al RICHIEDENTE l'inoltro non si racconta: i messaggi interni erano già nascosti, ma i campi
   // della catena uscivano lo stesso nel corpo della risposta e bastava guardarla per scoprire
   // che la richiesta era stata girata più in alto, e a chi.
+  // Al cliente: via del tutto i campi catena. Al master della catena: mascherati oltre il suo
+  // bersaglio d'inoltro (vede di aver inoltrato, non a chi altro è stato girato più su).
   const ticketOut = ruolo === 'cliente'
     ? { ...t, inoltrato_a_master_id: undefined, rete_master_ids: undefined, rete_non_letti: undefined, assegnato_id: undefined, assegnato_nome: undefined }
-    : t
+    : mascheraCatena(t, utente?.master_id)
   // io_id: chi sta guardando. Serve alla chat per marcare "· tu" e all'header per capire se il
   // ticket è già in carico a me (mostra "Prendi in carico" solo se lo tiene un altro / nessuno).
   return NextResponse.json({ ticket: ticketOut, messaggi: msgOut, ruolo, io_id: user.id })

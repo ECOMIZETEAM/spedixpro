@@ -46,9 +46,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     updated_at: new Date().toISOString(),
   }).eq('id', id)
 
-  // Traccia dell'inoltro nella chat: INTERNA, il cliente non la vede.
+  // Traccia dell'inoltro nella chat: INTERNA, il cliente non la vede. L'autore e' il NUOVO PADRE
+  // (padreId), non chi inoltra: la traccia rivela il livello superiore, quindi deve stare "in alto"
+  // nella catena. Cosi' chi sta SOTTO il forwarder non la vede (regola messaggioVisibileCatena:
+  // autore alla posizione p+2 non e' visibile a chi sta a p). Chi inoltra la vede lo stesso (p+1).
   await admin.from('ticket_messaggi').insert({
-    ticket_id: id, autore: 'rete', autore_nome: 'Sistema', visibilita: 'rete', autore_master_id: mio,
+    ticket_id: id, autore: 'rete', autore_nome: 'Sistema', visibilita: 'rete', autore_master_id: padreId,
     testo: `📤 Ticket inoltrato da ${me?.nome || 'master'} a ${padre?.nome || 'master superiore'}.`,
   })
 

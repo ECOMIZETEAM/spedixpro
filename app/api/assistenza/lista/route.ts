@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
+import { mascheraCatena } from '@/lib/ticket-accesso'
 
 // Lista ticket:
 // - ricevuti: ticket che il MIO master deve gestire (aperti da miei clienti o sotto-master)
@@ -41,11 +42,15 @@ export async function GET(_req: NextRequest) {
     fetchAll(() => admin.from('tickets').select(cols).eq('aperto_master_id', masterId).order('updated_at', { ascending: false })),
     fetchAll(() => admin.from('tickets').select(cols).contains('rete_master_ids', [masterId]).order('updated_at', { ascending: false })),
   ])
-  const conNuovo = (r: any) => ({ ...r, rete_nuovo: Array.isArray(r.rete_non_letti) && r.rete_non_letti.includes(masterId) })
+  // rete_nuovo va calcolato PRIMA di mascherare (usa il rete_non_letti pieno), poi si maschera la
+  // catena oltre il proprio bersaglio d'inoltro (come nel dettaglio).
+  const conNuovo = (r: any) => ({ ...mascheraCatena(r, masterId), rete_nuovo: Array.isArray(r.rete_non_letti) && r.rete_non_letti.includes(masterId) })
   // I MIEI ticket (aperti da me verso la mia linea superiore): sono il RICHIEDENTE, e come per un
   // cliente NON devo sapere se e a CHI la mia richiesta viene girata ancora più su. Prima questi
   // campi uscivano nel ramo master e il sotto-master vedeva "inoltrato a MoovExpress". Nei RICEVUTI
   // (li gestisco io) e nella RETE (partecipo alla catena) restano, lì è giusto vederli.
   const senzaCatenaSopra = (r: any) => ({ ...r, inoltrato_a_master_id: undefined, rete_master_ids: undefined, rete_non_letti: undefined, assegnato_id: undefined, assegnato_nome: undefined })
-  return NextResponse.json({ ricevuti: ricevuti || [], miei: (miei || []).map(senzaCatenaSopra), rete: (rete || []).map(conNuovo) })
+  // ricevuti (sono owner): maschero la catena oltre il mio bersaglio d'inoltro. miei (richiedente):
+  // via del tutto i campi catena. rete (partecipo): rete_nuovo + maschera.
+  return NextResponse.json({ ricevuti: (ricevuti || []).map((r: any) => mascheraCatena(r, masterId)), miei: (miei || []).map(senzaCatenaSopra), rete: (rete || []).map(conNuovo) })
 }
