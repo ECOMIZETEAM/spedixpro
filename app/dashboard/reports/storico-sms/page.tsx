@@ -11,7 +11,7 @@ const TIPO_LABEL: Record<string, string> = { acquisto: 'Acquisto', trasferimento
 
 export default function NotificheSmsPage() {
   const dialog = useDialog()
-  const [dati, setDati] = useState<{ creditoWallet: number; creditoSms: number; costoSms: number; movimenti: Mov[]; clienti: Cliente[]; radice?: boolean; gatewayPronto?: boolean; cartaSalvata?: boolean; auto?: { attiva: boolean; soglia: number; pacchetto: number } } | null>(null)
+  const [dati, setDati] = useState<{ creditoWallet: number; creditoSms: number; costoSms: number; movimenti: Mov[]; clienti: Cliente[]; radice?: boolean; puoTestare?: boolean; gatewayPronto?: boolean; cartaSalvata?: boolean; auto?: { attiva: boolean; soglia: number; pacchetto: number } } | null>(null)
   const [pacchetto, setPacchetto] = useState(1000)
   const [telProva, setTelProva] = useState('')
   const [aAttiva, setAAttiva] = useState(false)
@@ -105,8 +105,8 @@ export default function NotificheSmsPage() {
         <div style={{ fontSize: '12.5px', color: '#9a3412', marginTop: '2px' }}>≈ {dati ? eur(dati.creditoSms) : '—'} di credito · {eur(costoSms)}/SMS</div>
       </div>
 
-      {/* SMS di prova — solo il master radice (il gateway è unico e globale) */}
-      {dati?.radice && (
+      {/* SMS di prova — radice o master abilitato (il gateway è unico e globale) */}
+      {dati?.puoTestare && (
         <div style={{ ...card, marginBottom: '16px' }}>
           <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', marginBottom: '4px' }}>Invia SMS di prova</div>
           <div style={{ fontSize: '12.5px', color: '#6b7280', marginBottom: '12px' }}>Verifica il gateway (mittente registrato e consegna) senza creare una spedizione. Non tocca il credito SMS.</div>

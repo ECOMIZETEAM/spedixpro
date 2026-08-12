@@ -17,7 +17,7 @@ export async function GET() {
   }
   const admin = createAdminSupabase()
   const [{ data: m }, { data: mov }, { data: clienti }] = await Promise.all([
-    admin.from('masters').select('credito,credito_sms,parent_master_id,impostazioni,stripe_customer_id').eq('id', u.master_id).maybeSingle(),
+    admin.from('masters').select('credito,credito_sms,parent_master_id,impostazioni,stripe_customer_id,sms_test_abilitato').eq('id', u.master_id).maybeSingle(),
     admin.from('movimenti_sms').select('tipo,descrizione,importo,quantita_sms,saldo_dopo,cliente_id,created_at')
       .eq('master_id', u.master_id).order('created_at', { ascending: false }).limit(80),
     admin.from('clienti').select('id,ragione_sociale,credito_sms').eq('master_id', u.master_id).order('ragione_sociale'),
@@ -31,6 +31,8 @@ export async function GET() {
     // Il gateway Esendex/Skebby è UNICO e globale (conto E&A): l'SMS di prova, che spende il credito
     // vero, è riservato al master RADICE (senza genitore). gatewayPronto = env credenziali presenti.
     radice: !m?.parent_master_id,
+    // Chi può vedere le PROVE SMS: il radice o un master esplicitamente abilitato (es. Ecomize LL).
+    puoTestare: !m?.parent_master_id || !!m?.sms_test_abilitato,
     gatewayPronto: smsConfigurato(),
     cartaSalvata: !!m?.stripe_customer_id,
     auto: (() => { const a = ((m?.impostazioni as any) || {}).sms_auto || {}; return { attiva: !!a.attiva, soglia: Number(a.soglia) || 100, pacchetto: Number(a.pacchetto) || 1000 } })(),

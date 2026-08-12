@@ -20,9 +20,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
   const admin = createAdminSupabase()
-  const { data: m } = await admin.from('masters').select('parent_master_id').eq('id', u.master_id).maybeSingle()
-  if (m?.parent_master_id) {
-    return NextResponse.json({ error: 'L\'SMS di prova è riservato al gestore della piattaforma.' }, { status: 403 })
+  const { data: m } = await admin.from('masters').select('parent_master_id,sms_test_abilitato').eq('id', u.master_id).maybeSingle()
+  if (m?.parent_master_id && !m?.sms_test_abilitato) {
+    return NextResponse.json({ error: 'Prove SMS non abilitate per questo master.' }, { status: 403 })
   }
   if (!smsConfigurato()) {
     return NextResponse.json({ error: 'Gateway non configurato: mancano le credenziali SMS su Vercel (ESENDEX_USERNAME, ESENDEX_PASSWORD).' }, { status: 400 })
