@@ -20,18 +20,29 @@ const STATO_LABEL: Record<string, string> = {
   annullamento_pending: 'In lavorazione',
 }
 
+const COLS = 'id,master_id,stato,numero,tracking_number,dest_citta,dest_provincia,updated_at,created_at'
+
 export async function GET(req: NextRequest) {
   const token = (req.nextUrl.searchParams.get('t') || '').trim()
-  // Il token è l'esadecimale di un uuid (32 char). Regex stretta: niente lookup su input sospetti.
-  if (!/^[a-f0-9]{20,40}$/.test(token)) {
-    return NextResponse.json({ error: 'Codice non valido' }, { status: 400 })
-  }
+  const numero = (req.nextUrl.searchParams.get('n') || '').trim()
   const admin = createAdminSupabase()
-  const { data: s } = await admin
-    .from('spedizioni')
-    .select('id,master_id,stato,numero,tracking_number,dest_citta,dest_provincia,updated_at,created_at')
-    .eq('tracking_token', token)
-    .single()
+
+  let s: any = null
+  if (token) {
+    // Token = esadecimale di un uuid (32 char). Regex stretta: niente lookup su input sospetti.
+    if (!/^[a-f0-9]{20,40}$/.test(token)) return NextResponse.json({ error: 'Codice non valido' }, { status: 400 })
+    const { data } = await admin.from('spedizioni').select(COLS).eq('tracking_token', token).maybeSingle()
+    s = data
+  } else if (numero) {
+    // Ricerca dal PORTALE (/traccia): il cliente digita la LDV / numero. Alfanumerico + trattini.
+    if (!/^[A-Za-z0-9_-]{5,40}$/.test(numero)) return NextResponse.json({ error: 'Numero non valido' }, { status: 400 })
+    const { data } = await admin.from('spedizioni').select(COLS)
+      .or(`numero.eq.${numero},tracking_number.eq.${numero}`)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    s = data
+  } else {
+    return NextResponse.json({ error: 'Manca il codice' }, { status: 400 })
+  }
   if (!s) return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
   // WHITE-LABEL: il destinatario vede il marchio del master della spedizione (come nel portale
