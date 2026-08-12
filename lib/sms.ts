@@ -11,9 +11,9 @@
 
 const BASE = 'https://app.esendex.it/API/v1.0/REST'
 
-// Prezzo di vendita per SMS (schermata "Notifiche SMS"): 1.000 SMS = 90 € → 0,090 €/SMS (IVA esclusa).
-// È il prezzo con cui GUADAGNA la piattaforma (E&A): i master lo pagano, non lo rivendono con margine.
-export const COSTO_SMS_EUR = 0.09
+// Prezzo di vendita per SMS: 1.000 SMS = 100 € → 0,10 €/SMS (senza IVA — società UK, reverse charge).
+// Lo compra CHI manda gli SMS (il cliente per sé, o il master per i suoi clienti), pagando su Stripe.
+export const COSTO_SMS_EUR = 0.10
 
 export function smsConfigurato(): boolean {
   return !!((process.env.ESENDEX_USERNAME || process.env.SKEBBY_USERNAME) && (process.env.ESENDEX_PASSWORD || process.env.SKEBBY_PASSWORD))
