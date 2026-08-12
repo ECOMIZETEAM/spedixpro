@@ -116,5 +116,32 @@ export async function POST(req: NextRequest) {
   // del sito: la regola dei prezzi deve esistere in un posto solo.
   const esito = await calcolaTariffeCliente(supabase, { cliente, clienteId, subMatch }, body)
   if (esito.errore) return NextResponse.json({ error: esito.errore }, { status: esito.stato })
-  return NextResponse.json(esito.risultati)
+
+  // GATE "non vendere ciò che non possiedi": mostra SOLO i corrieri che il master può davvero usare
+  // (suoi o di un ANTENATO nella catena) — lo stesso criterio che applica la creazione. Un listino
+  // che punta a corrieri fuori catena (es. copiati da un'altra rete) non deve proporli in lista per
+  // poi vederseli rifiutare con "Corriere non disponibile per questo master".
+  let risultati: any[] = Array.isArray(esito.risultati) ? esito.risultati : []
+  try {
+    const admin = createAdminSupabase()
+    const ids = [...new Set(risultati.map((r: any) => r._corriere_id).filter(Boolean))]
+    if (ids.length && cliente?.master_id) {
+      const { data: corr } = await admin.from('corrieri').select('id,master_id').in('id', ids)
+      const masterDiCorr = new Map((corr || []).map((c: any) => [c.id, c.master_id]))
+      const catena = new Set<string>()
+      let cur: string | null = cliente.master_id
+      for (let i = 0; i < 20 && cur; i++) {
+        catena.add(cur)
+        const { data: mm } = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+        cur = mm?.parent_master_id || null
+      }
+      risultati = risultati.filter((r: any) => {
+        if (!r._corriere_id) return true            // senza id non si può verificare: si lascia (raro)
+        const mid = masterDiCorr.get(r._corriere_id)
+        return !!mid && catena.has(mid)
+      })
+    }
+  } catch { /* in caso di errore non filtro: meglio mostrare che rompere la pagina */ }
+
+  return NextResponse.json(risultati)
 }
