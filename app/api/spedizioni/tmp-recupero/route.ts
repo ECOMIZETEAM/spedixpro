@@ -153,6 +153,15 @@ export async function GET(req: NextRequest) {
   // non si toccano.
   const estrattoContoSistemato = await sistemaMovimenti(admin)
 
+  // ── QUARTA PARTE: SPEDIAMOPRO FERME SULLA REFERENZA ──
+  // SpediamoPro (Poste Delivery Business) assegna la LDV Poste in modo ASINCRONO: se alla creazione
+  // non c'e' ancora (l'attesa breve + il completamento in background mollano dopo ~20s), la
+  // spedizione resta col `code` del provider come numero (es. "6A7C7CA9BC399") e un tracking che non
+  // esiste. Prima la sistemava solo il giro pesante /api/tracking/aggiorna, che gira su ~8.000
+  // spedizioni a rotazione e a volte non le raggiungeva per un pezzo ("30 sì, una no"). Qui, ogni
+  // 15 min e solo su quelle davvero ferme, si richiede il tracking e si scrive la LDV vera.
+  const spediamoproSospese = await recuperaSpediamoproSospese(admin)
+
   // ARCHIVIAZIONE ETICHETTE, appoggiata qui.
   // Il giro dedicato (/api/spedizioni/archivia-etichette) esiste ma Vercel non lo invocava, mentre
   // questo parte ogni quarto d'ora da mesi. Lotto piccolo per non allungare troppo un giro che ha
@@ -172,7 +181,74 @@ export async function GET(req: NextRequest) {
     saltate,               // non e' un contratto che produce numeri provvisori
     colliRecuperati,       // multicollo a cui sono state riprese le etichette dei singoli colli
     estrattoContoSistemato,
+    spediamoproSospese,    // SpediamoPro ferme sulla referenza a cui è stata scritta la LDV vera
   })
+}
+
+// Recupera le spedizioni SpediamoPro rimaste col `code` del provider come numero (LDV Poste non
+// ancora assegnata alla creazione). Cerca il tracking reale e, quando c'è, scrive numero + LDV e
+// rimette il numero vero nella descrizione dei movimenti. Isolata e best-effort, come il resto.
+async function recuperaSpediamoproSospese(admin: any): Promise<number> {
+  const { spediamoproGetTracking, spediamoproGetLabel, normalizzaEtichetta } = await import('@/lib/spediamopro')
+  const { data: cor } = await admin.from('corrieri').select('id,credenziali').eq('tipo', 'spediamopro')
+  const authDi = new Map<string, string>()
+  for (const c of (cor || [])) if (c?.credenziali?.authcode) authDi.set(c.id, c.credenziali.authcode)
+  if (!authDi.size) return 0
+
+  // Attive, recenti (7gg) e su un contratto SpediamoPro. Il filtro "ferma sulla referenza"
+  // (numero === code del provider) si fa in memoria: PostgREST non confronta colonna e campo JSON.
+  const { data: righe } = await admin.from('spedizioni')
+    .select('id,numero,etichetta_url,corriere_id,sp_id:raw_response->id,sp_id2:raw_response->raw->data->id,sp_code:raw_response->code')
+    .in('corriere_id', [...authDi.keys()])
+    .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
+    .gte('created_at', new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString())
+    .order('created_at', { ascending: false })
+    .limit(400)
+
+  let fatte = 0
+  for (const s of (righe || [])) {
+    const code = (s as any).sp_code
+    if (!code || s.numero !== code) continue        // solo quelle ancora sulla referenza SpediamoPro
+    const authcode = authDi.get(s.corriere_id)
+    const spid = (s as any).sp_id ?? (s as any).sp_id2
+    if (!authcode || !spid) continue
+
+    let tr: any = null
+    try { tr = await spediamoproGetTracking(authcode, Number(spid)) } catch { continue }
+
+    const patch: any = {}
+    const ldv = String(tr?.trackingCode || '').trim()
+    if (ldv && ldv !== s.numero) {
+      // Se quella LDV è già di un'altra spedizione non si sovrascrive: si segnala.
+      const { data: gia } = await admin.from('spedizioni').select('id').eq('numero', ldv).neq('id', s.id).maybeSingle()
+      if (gia) console.error('[SP] LDV già in uso da un altra spedizione, non riassegnata', ldv, s.numero)
+      else { patch.numero = ldv; patch.tracking_number = ldv }
+    }
+    // Etichetta di sicurezza: di norma c'è già, ma se manca la si scarica (una volta).
+    if (!s.etichetta_url) {
+      try {
+        const lb = await spediamoproGetLabel(authcode, Number(spid), 1, 0)
+        const n = await normalizzaEtichetta(lb)
+        patch.etichetta_url = `data:${n.mime};base64,${n.buffer.toString('base64')}`
+      } catch { /* non ancora pronta: al giro dopo */ }
+    }
+    if (!Object.keys(patch).length) continue
+
+    const { error } = await admin.from('spedizioni').update(patch).eq('id', s.id)
+    if (error) { console.error('[SP] aggiornamento fallito', s.numero, error.message); continue }
+
+    if (patch.numero) {
+      fatte++
+      console.log('[SP] completata', s.numero, '->', patch.numero)
+      // L'estratto conto porta il numero vecchio nella descrizione: si rimette quello vero (solo testo).
+      const { data: mv } = await admin.from('movimenti').select('id,descrizione').eq('spedizione_id', s.id)
+      for (const m of (mv || [])) {
+        const t = String(m.descrizione || '')
+        if (t.includes(s.numero)) await admin.from('movimenti').update({ descrizione: t.split(s.numero).join(patch.numero) }).eq('id', m.id)
+      }
+    }
+  }
+  return fatte
 }
 
 async function sistemaMovimenti(admin: any): Promise<number> {
