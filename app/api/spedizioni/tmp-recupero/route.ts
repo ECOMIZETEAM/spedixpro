@@ -174,7 +174,7 @@ export async function GET(req: NextRequest) {
     etichetteArchiviate = (await archiviaLotto(admin, 60)).archiviate
     // 2) LIBERA il base64 di quelle GIÀ archiviate (verifica del file su Storage prima di azzerare) +
     //    archivia le etichette per-collo dei multicollo. È il recupero grosso dello spazio del TOAST.
-    etichetteLiberate = await liberaEtichetteArchiviate(admin, 80)
+    etichetteLiberate = await liberaEtichetteArchiviate(admin, 150)
   } catch (e: any) { console.error('[TMP-RECUPERO] archiviazione/liberazione etichette fallita:', e?.message) }
 
   return NextResponse.json({
