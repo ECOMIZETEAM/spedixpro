@@ -173,11 +173,12 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
                   const r1 = await fetch('/api/giacenze/' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ azione: 'richiesta', operazione: op, data: dataOp || null, note, nuovoDestinatario: op === 'riconsegna_nuovo' ? nd : null }) })
                   const j1 = await r1.json().catch(() => ({}))
                   if (!r1.ok || j1.error) { setSalvando(false); setMsg({ t: 'err', x: j1.error || 'Errore (' + r1.status + ')' }); return }
-                  if (isMaster && j1.id) {
-                    // Passo 2 (SOLO master): svincola SUBITO — chiama il corriere, addebita a cascata e
-                    // mette 'svincolata'. Così il master non lascia una richiesta pendente che i master
-                    // SOPRA (es. MULTIEXPRESS) vedrebbero come "da confermare" loro. conferma_svincolo
-                    // blocca da solo se il corriere rifiuta (niente 'svincolata' senza svincolo reale).
+                  if (j1.id) {
+                    // Passo 2: svincola SUBITO — chiama il corriere, addebita a cascata e mette
+                    // 'svincolata'. Lo fanno CLIENTE e master, entrambi in autonomia e in un colpo:
+                    // nessuno lascia una richiesta pendente che qualcun altro (i master sopra) veda
+                    // come "da confermare" sua. conferma_svincolo blocca da solo se il corriere
+                    // rifiuta (niente 'svincolata' senza svincolo reale).
                     const r2 = await fetch('/api/giacenze/' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ azione: 'conferma_svincolo', richiestaId: j1.id }) })
                     const j2 = await r2.json().catch(() => ({}))
                     setSalvando(false)
@@ -186,13 +187,10 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
                     setMsg({ t: j2.avviso ? 'avviso' : 'ok', x: j2.avviso || 'Svincolo effettuato e inviato al corriere.' })
                     await carica()
                   } else {
-                    // CLIENTE: resta la richiesta, la conferma il suo master.
-                    setSalvando(false); setNote(''); setDataOp('')
-                    setMsg({ t: 'ok', x: 'Operazione registrata: in attesa di conferma dal master.' })
-                    await carica()
+                    setSalvando(false); await carica()
                   }
                 } catch { setSalvando(false); setMsg({ t: 'err', x: 'Errore di rete' }) }
-              }} style={{ padding: '10px 22px', background: isMaster ? '#16a34a' : '#2563eb', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Attendi…' : (isMaster ? '✅ Svincola subito' : 'Invia richiesta')}</button>
+              }} style={{ padding: '10px 22px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Attendi…' : '✅ Svincola subito'}</button>
             </div>
           </div>
         </div>

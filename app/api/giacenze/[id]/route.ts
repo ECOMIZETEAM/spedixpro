@@ -195,9 +195,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ success: true })
   }
 
-  // 4) Conferma svincolo (solo master) -> addebito + aggiornamento + invio al corriere
+  // 4) Conferma svincolo -> addebito + aggiornamento + invio al corriere.
+  // Lo fanno CLIENTE e master: entrambi svincolano in autonomia (il cliente decide del SUO pacco).
+  // Il contesto ha gia' autorizzato chi chiama (il cliente possiede la spedizione, il master la ha
+  // in catena, l'agente e' gia' bloccato sopra in sola lettura). Il corriere viene chiamato con le
+  // credenziali del CONTRATTO lato server: il cliente non vede mai il nome del provider. L'addebito
+  // cade sempre su sped.cliente_id/master_id, non su chi preme il bottone; i costi manuali (extra)
+  // li aggiunge solo il master, quindi per un cliente valgono 0.
   if (azione === 'conferma_svincolo') {
-    if (ruolo !== 'master') return NextResponse.json({ error: 'Solo il master puo confermare lo svincolo' }, { status: 403 })
     const { data: rich } = await admin.from('giacenza_richieste').select('*').eq('id', body?.richiestaId).eq('spedizione_id', id).maybeSingle()
     if (!rich) return NextResponse.json({ error: 'Richiesta non trovata' }, { status: 404 })
     if (rich.stato === 'confermata') return NextResponse.json({ error: 'Richiesta gia confermata' }, { status: 400 })

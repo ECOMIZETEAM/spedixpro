@@ -94,7 +94,7 @@ export default function GiacenzePage() {
   }
   const statoLabel: Record<string,string> = {
     aperta:'In attesa di istruzioni', in_gestione:'In gestione',
-    svincolata:'In gestione - Svincolo confermato', chiusa:'Chiusa',
+    svincolata:'Svincolata', chiusa:'Chiusa',
   }
 
   return (
@@ -206,12 +206,15 @@ export default function GiacenzePage() {
                         </span>
                       </td>
                       <td style={{padding:'9px 12px'}}>
-                        {g.giacenza_stato!=='chiusa' && (
-                          <a href={`/cliente/spedizioni/giacenze/${g.id}`}
-                            style={{display:'inline-block',padding:'4px 10px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'4px',fontSize:'12px',fontWeight:'600',cursor:'pointer',textDecoration:'none'}}>
-                            ✏️ Gestisci
-                          </a>
-                        )}
+                        {g.giacenza_stato!=='chiusa' && (() => {
+                          const daGestire = ['aperta','in_gestione'].includes(g.giacenza_stato||'aperta')
+                          return (
+                            <a href={`/cliente/spedizioni/giacenze/${g.id}`}
+                              style={{display:'inline-block',padding:'4px 10px',background:daGestire?'#fff7ed':'#f1f5f9',color:daGestire?'#ea580c':'#475569',border:`1px solid ${daGestire?'#fed7aa':'#cbd5e1'}`,borderRadius:'4px',fontSize:'12px',fontWeight:'600',cursor:'pointer',textDecoration:'none'}}>
+                              {daGestire ? '✏️ Gestisci' : '👁 Dettagli'}
+                            </a>
+                          )
+                        })()}
                       </td>
                     </tr>
                   )
