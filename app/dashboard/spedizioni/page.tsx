@@ -74,6 +74,9 @@ export default function SpedizioniPage() {
   const [eliminando, setEliminando] = useState<string|null>(null)
   const [eliminandoBulk, setEliminandoBulk] = useState(false)
   const [filtri, setFiltri] = useState(FILTRI_DEFAULT)
+  const [resoModal, setResoModal] = useState(false)
+  const [resoBusy, setResoBusy] = useState(false)
+  const [resoOpts, setResoOpts] = useState({ assicura: false, ritiro: false, dataRitiro: '', orarioRitiro: 'mattina' })
 
   useEffect(() => {
     fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
@@ -261,6 +264,37 @@ export default function SpedizioniPage() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
+  }
+  // ETICHETTA DI RESO: per le spedizioni selezionate crea le spedizioni di ritorno (mitt/dest invertiti,
+  // stesso corriere, no contrassegno), poi scarica le nuove etichette in un unico PDF.
+  async function confermaReso() {
+    if (!selectedIds.length) return
+    if (resoOpts.ritiro && !resoOpts.dataRitiro) { await dialog.alert({ title: 'Data mancante', message: 'Indica la data del ritiro.' }); return }
+    setResoBusy(true)
+    try {
+      const res = await fetch('/api/spedizioni/reso-etichetta', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: idsInOrdineElenco(), assicura: resoOpts.assicura, ritiro: resoOpts.ritiro, dataRitiro: resoOpts.dataRitiro, orarioRitiro: resoOpts.orarioRitiro }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) { await dialog.alert({ title: 'Errore', message: j?.error || 'Creazione resi non riuscita.' }); return }
+      const creati = j.creati || [], errori = j.errori || []
+      if (creati.length) {
+        try {
+          const idsNuovi = creati.map((c: any) => c.spedizioneId).filter(Boolean)
+          const r2 = await fetch('/api/spedizioni/etichette-bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: idsNuovi }) })
+          if (r2.ok) { const blob = await r2.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `etichette_reso_${idsNuovi.length}.pdf`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url) }
+        } catch {}
+      }
+      setResoModal(false); setSelectedIds([])
+      const ritFalliti = creati.filter((c: any) => c.ritiro && !c.ritiro.ok)
+      let msg = `${creati.length} etichett${creati.length === 1 ? 'a' : 'e'} di reso creat${creati.length === 1 ? 'a' : 'e'}.`
+      if (errori.length) msg += ` ${errori.length} non riuscit${errori.length === 1 ? 'a' : 'e'} (${errori.map((e: any) => e.originale).join(', ')}).`
+      if (ritFalliti.length) msg += ` Ritiro non prenotato per ${ritFalliti.length} (vedi elenco Ritiri).`
+      setNotifica(msg)
+      ricarica()
+    } catch (e: any) { await dialog.alert({ title: 'Errore', message: String(e?.message || e) }) }
+    finally { setResoBusy(false) }
   }
 async function apriTracking(s: any) {
     setTrackingModal(s); setTrackingData(null); setTrackingLoading(true); setTrackingTab('tracking')
@@ -478,6 +512,10 @@ async function apriTracking(s: any) {
             <button onClick={eliminaSelezionate} disabled={selectedIds.length===0||eliminandoBulk}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#dc2626':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0&&!eliminandoBulk?'pointer':'not-allowed',opacity:eliminandoBulk?0.6:1}}>
               {eliminandoBulk?'Eliminazione…':`🗑️ Elimina Selezionate${selectedIds.length>0?` (${selectedIds.length})`:''}`}
+            </button>
+            <button onClick={()=>setResoModal(true)} disabled={selectedIds.length===0}
+              style={{padding:'6px 14px',background:selectedIds.length>0?'#0d9488':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
+              ↩︎ Etichetta di reso{selectedIds.length>0?` (${selectedIds.length})`:''}
             </button>
             <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
               <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Cerca:</span>
@@ -699,6 +737,43 @@ async function apriTracking(s: any) {
       )}
 
       {dettaglio && <DettaglioSpedizione s={dettaglio} onClose={()=>setDettaglio(null)} etichettaHref={`/dashboard/spedizioni/${dettaglio.id}/etichetta`} />}
+      {resoModal && (
+        <div onClick={()=>!resoBusy&&setResoModal(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'20px'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',padding:'24px',maxWidth:'430px',width:'100%'}}>
+            <h2 style={{fontSize:'18px',fontWeight:700,color:'#1a1a1a',margin:'0 0 6px'}}>↩︎ Etichetta di reso</h2>
+            <p style={{fontSize:'13px',color:'#666',margin:'0 0 16px',lineHeight:1.5}}>
+              Per {selectedIds.length} spedizion{selectedIds.length===1?'e':'i'} creo una <strong>nuova spedizione di ritorno</strong>: stesso corriere, mittente e destinatario invertiti, senza contrassegno.
+            </p>
+            <label style={{display:'flex',alignItems:'center',gap:'10px',padding:'10px 0',cursor:'pointer',fontSize:'14px',color:'#1a1a1a'}}>
+              <input type="checkbox" checked={resoOpts.assicura} onChange={e=>setResoOpts(o=>({...o,assicura:e.target.checked}))}/>
+              Assicura il reso <span style={{color:'#9ca3af',fontSize:'12px'}}>(se il listino lo prevede)</span>
+            </label>
+            <label style={{display:'flex',alignItems:'center',gap:'10px',padding:'10px 0',cursor:'pointer',fontSize:'14px',color:'#1a1a1a',borderTop:'1px solid #f0f0f0'}}>
+              <input type="checkbox" checked={resoOpts.ritiro} onChange={e=>setResoOpts(o=>({...o,ritiro:e.target.checked}))}/>
+              Prenota il ritiro col corriere
+            </label>
+            {resoOpts.ritiro && (
+              <div style={{display:'flex',gap:'12px',padding:'2px 0 6px 30px',flexWrap:'wrap'}}>
+                <div>
+                  <div style={{fontSize:'11px',color:'#6b7280',marginBottom:'3px'}}>Data ritiro</div>
+                  <input type="date" value={resoOpts.dataRitiro} min={new Date().toISOString().slice(0,10)} onChange={e=>setResoOpts(o=>({...o,dataRitiro:e.target.value}))} style={{padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}/>
+                </div>
+                <div>
+                  <div style={{fontSize:'11px',color:'#6b7280',marginBottom:'3px'}}>Fascia</div>
+                  <select value={resoOpts.orarioRitiro} onChange={e=>setResoOpts(o=>({...o,orarioRitiro:e.target.value}))} style={{padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}>
+                    <option value="mattina">Mattina (9–13)</option>
+                    <option value="pomeriggio">Pomeriggio (14–18)</option>
+                  </select>
+                </div>
+              </div>
+            )}
+            <div style={{display:'flex',gap:'10px',justifyContent:'flex-end',marginTop:'18px'}}>
+              <button onClick={()=>setResoModal(false)} disabled={resoBusy} style={{padding:'9px 18px',border:'1px solid #d1d5db',background:'#fff',borderRadius:'8px',fontSize:'13px',fontWeight:600,cursor:'pointer',color:'#374151'}}>Annulla</button>
+              <button onClick={confermaReso} disabled={resoBusy} style={{padding:'9px 20px',border:'none',background:resoBusy?'#9ca3af':'#0d9488',color:'#fff',borderRadius:'8px',fontSize:'13px',fontWeight:700,cursor:resoBusy?'default':'pointer'}}>{resoBusy?'Creazione…':'Crea etichette di reso'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
