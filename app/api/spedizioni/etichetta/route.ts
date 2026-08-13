@@ -70,57 +70,16 @@ export async function GET(req: NextRequest) {
     } catch (e) { console.error('Riepilogo singola etichetta:', e); return buf }
   }
 
-  // MULTICOLLO PRIMA DI TUTTO. Se ogni collo ha la SUA etichetta, si UNISCONO — e va fatto PRIMA
-  // delle sorgenti a etichetta SINGOLA (Storage `etichetta_path`, labelData, `etichetta_url`), che
-  // portano UNA sola etichetta combinata a 1 pagina. Prima l'unione stava DOPO `etichetta_path`:
-  // su una spedizione con l'etichetta anche su Storage, la route serviva quella (1 pagina) e usciva
-  // senza mai unire i colli -> ne usciva UNA sola. Successo su 3UW1WLJ011344 (2 colli, 2 numeri).
-  // I doppioni si riconoscono dai BYTE: alcuni contratti mandano UN pdf gia' a N pagine copiato su
-  // ogni collo — impilarlo darebbe NxN fogli, quindi qui resta una copia sola (e si va al singolo).
+  // TUTTA la lettura dell'etichetta GIÀ salvata passa da leggiEtichettaCompleta: sa dove vive il PDF
+  // (Storage `etichetta_path`, base64 in `etichetta_url`, labelData storico) ED è MULTICOLLO — se
+  // ogni collo ha la sua etichetta le UNISCE in un PDF unico (una pagina per collo), riconoscendo dai
+  // byte il caso "un pdf a N pagine copiato su ogni collo" (una copia sola). L'unione vive lì, in un
+  // solo posto: prima era duplicata solo qui e gli altri punti di download (dettaglio, API) ne
+  // stampavano uno solo. I ripieghi più sotto restano per quando l'etichetta NON è ancora salvata.
   {
-    let unito: Buffer | null = null
-    if (Array.isArray(sped.colli_dettaglio) && sped.colli_dettaglio.length > 1) {
-      const { scomponiDataUrl } = await import('@/lib/etichette')
-      const { createHash } = await import('node:crypto')
-      const viste = new Set<string>()
-      const pezzi: Buffer[] = []
-      for (const c of (sped.colli_dettaglio as any[])) {
-        const d = scomponiDataUrl(c?.etichetta_url)
-        if (!d?.buffer?.length) continue
-        const impronta = createHash('sha1').update(d.buffer).digest('hex')
-        if (viste.has(impronta)) continue
-        viste.add(impronta); pezzi.push(d.buffer)
-      }
-      if (pezzi.length > 1) {
-        try {
-          const out = await PDFDocument.create()
-          for (const b of pezzi) {
-            const pdf = await PDFDocument.load(new Uint8Array(b))
-            const pagine = await out.copyPages(pdf, pdf.getPageIndices())
-            pagine.forEach(pg => out.addPage(pg))
-          }
-          unito = Buffer.from(await out.save())
-        } catch (e) {
-          console.error('[ETICHETTA] unione colli fallita', sped.numero, e)
-        }
-      }
-    }
-    if (unito) {
-      const outBuf = await conRiepilogo(unito)
-      return new NextResponse(new Uint8Array(outBuf), { status: 200, headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="etichette-${sped.numero || id}.pdf"`,
-        'Cache-Control': 'private, max-age=0, no-store',
-      } })
-    }
-  }
-
-  // FORMA NUOVA: il PDF sta su Storage e nella riga c'e' solo il percorso. Si prova per prima;
-  // se il file non c'e' si prosegue con le forme storiche qui sotto, senza interrompere nulla.
-  if ((sped as any).etichetta_path) {
-    const { leggiEtichetta } = await import('@/lib/etichette')
-    const { createAdminSupabase: _admE } = await import('@/lib/supabase-admin')
-    const et = await leggiEtichetta(_admE(), sped as any)
+    const { leggiEtichettaCompleta } = await import('@/lib/etichette')
+    const { createAdminSupabase: _admL } = await import('@/lib/supabase-admin')
+    const et = await leggiEtichettaCompleta(_admL(), sped as any)
     if (et) {
       const out = et.mime === 'application/pdf' ? await conRiepilogo(et.buffer) : et.buffer
       return new NextResponse(new Uint8Array(out), { status: 200, headers: {
@@ -130,26 +89,6 @@ export async function GET(req: NextRequest) {
       } })
     }
   }
-
-  // Caso spedisci.online: etichetta come labelData base64 dentro raw_response.
-  // ORDINE INVERTITO: prima etichetta_url, questa resta solo come RETE DI SICUREZZA per le
-  // spedizioni vecchie. Il PDF era salvato TRE volte (etichetta_url, dentro ogni collo di
-  // colli_dettaglio e qui): verificato su 300 spedizioni che le tre copie sono identiche al byte.
-  // Leggendo prima etichetta_url si puo' liberare questa copia senza che nessuno se ne accorga.
-  const labelData = (sped.raw_response as any)?.labelData
-  if (labelData && !sped.etichetta_url) {
-    const buf = await conRiepilogo(Buffer.from(labelData, 'base64'))
-    return new NextResponse(new Uint8Array(buf), {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.pdf"`,
-        'Cache-Control': 'private, max-age=0, no-store',
-      },
-    })
-  }
-
-  // (L'unione multicollo è gestita in CIMA, prima delle sorgenti a etichetta singola — vedi sopra.)
 
   // Un collo solo (o etichette tutte identiche): prima quella della spedizione, poi quella del collo.
   let src: string | null = sped.etichetta_url || null

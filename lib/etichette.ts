@@ -115,6 +115,58 @@ export async function leggiEtichetta(
   return null
 }
 
+// COME leggiEtichetta, MA MULTICOLLO. Se la spedizione ha più colli e ognuno ha la SUA etichetta,
+// le UNISCE in un unico PDF (una pagina per collo). È LA funzione che TUTTI i punti di download di
+// una singola spedizione devono usare: la stampa singola, il dettaglio, l'API. Senza, si scarica il
+// solo primo collo (era il caso di 3UW1WLJ012948, easyparcel a 3 colli: 3 etichette in
+// colli_dettaglio, ma etichetta_url ne portava una sola).
+//
+// Un PDF GIÀ a N pagine copiato su ogni collo (alcuni contratti mandano così) verrebbe impilato N
+// volte: si riconosce dai BYTE (stessa impronta) e si tiene una volta sola. Regge sia la forma
+// storica (data URL nel collo) sia quella nuova (percorso su Storage per collo). Se non c'è nulla da
+// unire, ripiega su leggiEtichetta (etichetta unica). Le etichette non-PDF (immagini/zip) non si
+// uniscono: si va all'unica.
+export async function leggiEtichettaCompleta(
+  admin: any,
+  sped: { etichetta_path?: string | null; etichetta_url?: string | null; colli_dettaglio?: any; raw_response?: any }
+): Promise<EtichettaLetta | null> {
+  const colli = Array.isArray(sped?.colli_dettaglio) ? (sped!.colli_dettaglio as any[]) : []
+  // Raccoglie le etichette PDF DISTINTE dei colli (data URL o percorso Storage), scartando i doppioni
+  // byte-per-byte (il pdf a N pagine copiato su ogni collo).
+  const viste = new Set<string>()
+  const pezzi: Buffer[] = []
+  for (const c of colli) {
+    let buf: Buffer | null = null
+    if (c?.etichetta_path) { const d = await scaricaEtichetta(admin, c.etichetta_path); if (d && d.mime === 'application/pdf' && d.buffer.length) buf = d.buffer }
+    if (!buf) { const d = scomponiDataUrl(c?.etichetta_url); if (d && d.mime === 'application/pdf' && d.buffer.length) buf = d.buffer }
+    if (!buf?.length) continue
+    const impronta = createHash('sha1').update(buf).digest('hex')
+    if (viste.has(impronta)) continue
+    viste.add(impronta); pezzi.push(buf)
+  }
+  // Più colli con etichette diverse → PDF unico, una pagina per collo.
+  if (pezzi.length > 1) {
+    try {
+      const { PDFDocument } = await import('pdf-lib')
+      const out = await PDFDocument.create()
+      for (const b of pezzi) {
+        const pdf = await PDFDocument.load(new Uint8Array(b))
+        const pagine = await out.copyPages(pdf, pdf.getPageIndices())
+        pagine.forEach(p => out.addPage(p))
+      }
+      return { buffer: Buffer.from(await out.save()), mime: 'application/pdf', ext: 'pdf' }
+    } catch (e: any) {
+      console.error('[ETICHETTE] unione colli fallita, ripiego su etichetta unica:', e?.message)
+    }
+  }
+  // Niente da unire: l'etichetta della spedizione (Storage/base64/labelData); se manca ma un collo
+  // ne porta una, quella. Così dettaglio e API pubblica non dipendono da nessuna logica esterna.
+  const unica = await leggiEtichetta(admin, sped)
+  if (unica) return unica
+  if (pezzi.length === 1) return { buffer: pezzi[0], mime: 'application/pdf', ext: 'pdf' }
+  return null
+}
+
 // ARCHIVIA UN LOTTO: prende le righe che hanno ancora il PDF dentro, lo mette su Storage e scrive
 // il percorso. NON cancella il base64: finche' non c'e' la prova sul campo, le copie restano due.
 //
