@@ -69,6 +69,11 @@ export async function GET(req: NextRequest) {
   //    discende la spedizione). Es: io->MASSIMO->GIOVANNI: le spedizioni di Giovanni
   //    le vedo sotto "MASSIMO" (la mia prima linea). ──
   const ruolo = (utente?.ruolo || '').toLowerCase()
+  // FILTRO STATO CONTRASSEGNI PER UN MASTER: lo stato che vede è PER-LIVELLO (override più sotto), non
+  // quello globale del cliente. Quindi il filtro NON si può fare a DB sullo stato globale (le righe
+  // dove globale≠per-livello sparirebbero da ogni filtro): si prende TUTTO il COD e si filtra in
+  // memoria dopo l'override, paginando lì. Cliente/agente vedono lo stato globale → filtro a DB, come prima.
+  const filtroCodPerViewer = !!fStatoContr && !!utente?.master_id && ruolo !== 'cliente' && ruolo !== 'agente'
   const isMasterRete = ruolo !== 'cliente' && ruolo !== 'agente' && !clienteIdRaw && agenteClienteIds === null
   let db: any = supabase
   let masterIds: string[] | null = null
@@ -169,9 +174,14 @@ export async function GET(req: NextRequest) {
     if (fVettore) q = q.ilike('corrieri.nome_contratto', `${sanitizza(fVettore)}%`)
     if (fNegozio) q = q.eq('canale', fNegozio)
     if (fAgente) q = q.eq('clienti.agente', fAgente)
-    if (fStatoContr === 'da_pagare') q = q.gt('contrassegno', 0).or('stato_contrassegno.is.null,and(stato_contrassegno.neq.in_distinta,stato_contrassegno.neq.pagato)')
-    if (fStatoContr === 'in_attesa') q = q.eq('stato_contrassegno', 'in_distinta')
-    if (fStatoContr === 'pagato') q = q.eq('stato_contrassegno', 'pagato')
+    // Master: prendo tutto il COD e filtro in memoria dopo l'override per-livello (vedi filtroCodPerViewer).
+    // Cliente/agente: lo stato mostrato È quello globale, quindi filtro a DB come prima.
+    if (fStatoContr) {
+      if (filtroCodPerViewer) q = q.gt('contrassegno', 0)
+      else if (fStatoContr === 'da_pagare') q = q.gt('contrassegno', 0).or('stato_contrassegno.is.null,and(stato_contrassegno.neq.in_distinta,stato_contrassegno.neq.pagato)')
+      else if (fStatoContr === 'in_attesa') q = q.eq('stato_contrassegno', 'in_distinta')
+      else if (fStatoContr === 'pagato') q = q.eq('stato_contrassegno', 'pagato')
+    }
     if (fAssic === 'si') q = q.gt('assicurazione', 0)
     if (fAssic === 'no') q = q.or('assicurazione.is.null,assicurazione.eq.0')
     if (fFatt === 'si') q = q.eq('fatturato', true)
@@ -188,12 +198,14 @@ export async function GET(req: NextRequest) {
   // a blocchi (PostgREST tronca a 1000/query) come prima, per le pagine che si aspettano l'array.
   let totalePaginato = 0
   let spedizioni: any[]
-  if (paged) {
+  if (paged && !filtroCodPerViewer) {
     const from = (pageParam - 1) * perPage
     const { data, count } = await buildBase(true).range(from, from + perPage - 1)
     spedizioni = data || []
     totalePaginato = count || 0
   } else {
+    // Legacy (array completo) O filtro contrassegni del master: prendo tutto il candidato COD e
+    // pagino in memoria DOPO l'override per-livello (più sotto), così i due stati non divergono.
     spedizioni = await fetchAll(buildBase)
   }
 
@@ -405,8 +417,9 @@ export async function GET(req: NextRequest) {
     if (codIds.length) {
       const { createAdminSupabase } = await import('@/lib/supabase-admin')
       const adminCod = createAdminSupabase()
-      const inEntrata = new Map<string, string>()   // spedId -> stato distinta verso di me
+      const inEntrata = new Map<string, string>()   // spedId -> stato distinta verso di me (dal livello sopra)
       const inUscita = new Set<string>()            // spedId in una distinta creata da me
+      const inUscitaPagata = new Set<string>()      // spedId in una MIA distinta già 'pagata' (ho pagato il mio cliente)
       // Chunk PICCOLI + fetchAll: ogni spedizione ha UNA riga distinta PER LIVELLO della catena,
       // quindi un chunk grande può superare le 1000 righe (cap PostgREST) e perdere pezzi.
       for (let i = 0; i < codIds.length; i += 150) {
@@ -417,12 +430,18 @@ export async function GET(req: NextRequest) {
           const d: any = (r as any).distinte_contrassegni
           if (!d || !(r as any).spedizione_id) continue
           if (d.target_master_id === mineId) inEntrata.set((r as any).spedizione_id, d.stato)
-          else if (d.master_id === mineId) inUscita.add((r as any).spedizione_id)
+          else if (d.master_id === mineId) { inUscita.add((r as any).spedizione_id); if (d.stato === 'pagata') inUscitaPagata.add((r as any).spedizione_id) }
         }
       }
       for (const r of rows as any[]) {
         if (!(Number(r.contrassegno) > 0)) continue
-        if (inEntrata.has(r.id)) r.stato_contrassegno = inEntrata.get(r.id) === 'pagata' ? 'pagato' : 'in_distinta'
+        // Se ho GIÀ PAGATO il mio cliente (mia distinta 'pagata'), per me questo contrassegno è CHIUSO
+        // = pagato, anche se la rimessa che mi deve il livello sopra non è ancora saldata (è un conto a
+        // parte, non lo stato di QUESTA spedizione verso il mio cliente). Prima vinceva la rimessa in
+        // ingresso e la riga restava arancio pur avendo pagato: 40 spedizioni di un solo master così,
+        // e sparivano anche dai filtri.
+        if (inUscitaPagata.has(r.id)) r.stato_contrassegno = 'pagato'
+        else if (inEntrata.has(r.id)) r.stato_contrassegno = inEntrata.get(r.id) === 'pagata' ? 'pagato' : 'in_distinta'
         else if (inUscita.has(r.id)) r.stato_contrassegno = 'pagato'   // sono il caricatore: incassato dal corriere
       }
       // Il filtro contrassegni a DB lavora sullo stato GLOBALE (= del cliente): dopo l'override
@@ -432,6 +451,14 @@ export async function GET(req: NextRequest) {
       else if (fStatoContr === 'in_attesa') rowsOut = rows.filter((r: any) => r.stato_contrassegno === 'in_distinta')
       else if (fStatoContr === 'da_pagare') rowsOut = rows.filter((r: any) => Number(r.contrassegno) > 0 && !['in_distinta', 'pagato'].includes(String(r.stato_contrassegno || '')))
     }
+  }
+
+  // Filtro contrassegni del master: ho preso TUTTO il COD e filtrato in memoria (rowsOut) sullo stato
+  // per-livello. Se paginato, pagino ORA sul filtrato — il totale è quello filtrato, non il conteggio DB.
+  if (paged && filtroCodPerViewer) {
+    totalePaginato = rowsOut.length
+    const from = (pageParam - 1) * perPage
+    rowsOut = rowsOut.slice(from, from + perPage)
   }
 
   // COSTO DEL MASTER FUORI DALLA RISPOSTA AL CLIENTE. `costo_spedizione` e' quanto il master paga
