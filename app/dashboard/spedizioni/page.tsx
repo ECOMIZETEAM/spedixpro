@@ -279,13 +279,8 @@ export default function SpedizioniPage() {
       const j = await res.json().catch(() => ({}))
       if (!res.ok) { await dialog.alert({ title: 'Errore', message: j?.error || 'Creazione resi non riuscita.' }); return }
       const creati = j.creati || [], errori = j.errori || []
-      if (creati.length) {
-        try {
-          const idsNuovi = creati.map((c: any) => c.spedizioneId).filter(Boolean)
-          const r2 = await fetch('/api/spedizioni/etichette-bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: idsNuovi }) })
-          if (r2.ok) { const blob = await r2.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `etichette_reso_${idsNuovi.length}.pdf`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url) }
-        } catch {}
-      }
+      // Le etichette NON si scaricano qui in un PDF unico: i resi compaiono in elenco e si scarica
+      // l'etichetta di ognuno singolarmente (come le altre spedizioni), per mandarle ai clienti separate.
       setResoModal(false); setSelectedIds([])
       const ritFalliti = creati.filter((c: any) => c.ritiro && !c.ritiro.ok)
       let msg = `${creati.length} etichett${creati.length === 1 ? 'a' : 'e'} di reso creat${creati.length === 1 ? 'a' : 'e'}.`
