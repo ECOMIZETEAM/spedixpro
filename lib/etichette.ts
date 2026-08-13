@@ -221,6 +221,70 @@ export async function archiviaLotto(admin: any, quante = 100): Promise<{
   return esito
 }
 
+// LIBERA il base64 GIÀ ARCHIVIATO. archiviaLotto scrive `etichetta_path` ma TIENE il base64 in
+// `etichetta_url` come rete di sicurezza "finché non c'è la prova sul campo". Questa è la prova: per
+// ogni riga già archiviata rilegge il file da Storage e lo confronta byte-per-byte col base64; solo
+// se combacia, azzera `etichetta_url`. Fa lo stesso con le etichette PER-COLLO dei multicollo dentro
+// `colli_dettaglio` (le archivia su Storage con percorso per-collo, poi toglie il base64). MAI
+// cancellare una copia inline senza aver verificato che quella su Storage è integra: se il file manca
+// o è diverso, il base64 resta. È il grosso dello spazio del TOAST (etichette duplicate).
+export async function liberaEtichetteArchiviate(admin: any, quante = 80): Promise<{
+  esaminate: number; url_liberati: number; colli_archiviati: number; saltate: number
+}> {
+  const impronta = (b: Buffer) => createHash('sha1').update(b).digest('hex')
+  // L'indice parziale idx_sped_libera_base64 (etichetta_path not null AND etichetta_url not null)
+  // rende questa ricerca istantanea e si RESTRINGE man mano che si liberano le righe.
+  const { data: righe } = await admin.from('spedizioni')
+    .select('id,numero,created_at,etichetta_url,etichetta_path,colli_dettaglio')
+    .not('etichetta_path', 'is', null).not('etichetta_url', 'is', null)
+    .limit(quante)
+
+  let url_liberati = 0, colli_archiviati = 0, saltate = 0
+  for (const r of righe || []) {
+    const upd: any = {}
+
+    // (1) etichetta_url: azzera SOLO se la copia su Storage esiste e combacia.
+    const inline = scomponiDataUrl(r.etichetta_url)
+    if (inline?.buffer?.length) {
+      const suStorage = await scaricaEtichetta(admin, r.etichetta_path)
+      if (suStorage?.buffer?.length && impronta(suStorage.buffer) === impronta(inline.buffer)) {
+        upd.etichetta_url = null
+      }
+    }
+    // Se etichetta_url NON è un data-url (http, o già svuotato in questa passata) non si tocca.
+
+    // (2) colli_dettaglio: archivia le etichette per-collo base64 e toglie il base64 (solo se ok).
+    const colli = Array.isArray(r.colli_dettaglio) ? (r.colli_dettaglio as any[]) : null
+    if (colli && colli.some((c: any) => typeof c?.etichetta_url === 'string' && c.etichetta_url.startsWith('data:'))) {
+      const quando = r.created_at ? new Date(r.created_at) : new Date()
+      let cambiato = false
+      const nuovi = colli.map((c: any) => c)   // copia, la riempio sotto
+      for (let i = 0; i < colli.length; i++) {
+        const d = scomponiDataUrl(colli[i]?.etichetta_url)
+        if (!d?.buffer?.length) continue
+        // numero collo per il percorso: l'indice i+1 è sempre affidabile (il campo `numero` a volte è la LDV).
+        const path = await caricaEtichetta(admin, r.id, d.buffer, d.mime, quando, i + 1)
+        if (!path) continue
+        const riletto = await scaricaEtichetta(admin, path)
+        if (riletto?.buffer?.length && impronta(riletto.buffer) === impronta(d.buffer)) {
+          nuovi[i] = { ...colli[i], etichetta_url: null, etichetta_path: path }
+          cambiato = true; colli_archiviati++
+        }
+      }
+      if (cambiato) upd.colli_dettaglio = nuovi
+    }
+
+    if (Object.keys(upd).length) {
+      const { error } = await admin.from('spedizioni').update(upd).eq('id', r.id)
+      if (error) { console.error('[LIBERA-ETICHETTE]', r.numero, error.message); saltate++; continue }
+      if ('etichetta_url' in upd) url_liberati++
+    } else saltate++
+  }
+  const esito = { esaminate: (righe || []).length, url_liberati, colli_archiviati, saltate }
+  if (esito.esaminate) console.log('[LIBERA-ETICHETTE]', JSON.stringify(esito))
+  return esito
+}
+
 // Vero se la spedizione ha un'etichetta, in QUALUNQUE forma. Da usare al posto dei controlli
 // `etichetta_url is null`, che dopo la migrazione direbbero "manca" su spedizioni che ce l'hanno
 // eccome — e farebbero riscaricare dal corriere migliaia di etichette gia' presenti.
