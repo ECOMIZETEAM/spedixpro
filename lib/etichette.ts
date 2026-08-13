@@ -52,7 +52,7 @@ export function percorsoEtichetta(spedizioneId: string, quando: Date, ext: strin
 // Scompone un data URL. Torna null se non e' un data URL (es. e' gia' un percorso, o un URL http).
 export function scomponiDataUrl(v: string | null | undefined): { buffer: Buffer; mime: string } | null {
   if (!v || typeof v !== 'string') return null
-  const m = v.match(/^data:([^;,]+);base64,(.+)$/s)
+  const m = v.match(/^data:([^;,]+);base64,([\s\S]+)$/)
   if (!m) return null
   try { return { buffer: Buffer.from(m[2], 'base64'), mime: m[1] } } catch { return null }
 }
