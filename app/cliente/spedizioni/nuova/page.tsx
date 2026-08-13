@@ -70,6 +70,8 @@ export default function NuovaSpedizioneCliente() {
   }, [dest.telefono])
   const [suggComuni, setSuggComuni] = useState<any[]>([])
   const [showSugg, setShowSugg] = useState(false)
+  const [suggComuniMitt, setSuggComuniMitt] = useState<any[]>([])   // autocomplete città→CAP del MITTENTE
+  const [showComuneMitt, setShowComuneMitt] = useState(false)
   const [richiediRitiro, setRichiediRitiro] = useState(false)
   const [ritiroData, setRitiroData] = useState(() => { const d = new Date(); while ([0,6].includes(d.getDay())) d.setDate(d.getDate()+1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })   // weekend -> primo giorno lavorativo (data LOCALE, non UTC)
   const [ritiroOrario, setRitiroOrario] = useState('mattina')
@@ -422,7 +424,32 @@ export default function NuovaSpedizioneCliente() {
               </div>
               <div style={{marginBottom:'12px'}}><label style={lbl}>Indirizzo</label><input value={mitt.indirizzo} onChange={e=>setMitt({...mitt,indirizzo:e.target.value})} style={inp}/></div>
               <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'8px',marginBottom:'12px'}}>
-                <div><label style={lbl}>Città</label><input value={mitt.citta} onChange={e=>setMitt({...mitt,citta:e.target.value})} style={inp}/></div>
+                <div style={{position:'relative'}}>
+                  <label style={lbl}>Città</label>
+                  <input value={mitt.citta} autoComplete="off"
+                    onChange={async e=>{
+                      const v=e.target.value
+                      setMitt(m=>({...m,citta:v}))
+                      if(v.trim().length>=2){
+                        try{ const r=await fetch('/api/comuni?q='+encodeURIComponent(v)); const j=await r.json(); setSuggComuniMitt(Array.isArray(j)?j:[]); setShowComuneMitt(true) }catch{ setSuggComuniMitt([]) }
+                      } else { setSuggComuniMitt([]); setShowComuneMitt(false) }
+                    }}
+                    onFocus={()=>{ if(suggComuniMitt.length) setShowComuneMitt(true) }}
+                    onBlur={()=>setTimeout(()=>setShowComuneMitt(false),200)}
+                    style={inp}/>
+                  {showComuneMitt && suggComuniMitt.length>0 && (
+                    <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:50,background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',maxHeight:'220px',overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}}>
+                      {suggComuniMitt.map((c:any,i:number)=>(
+                        <div key={i} onMouseDown={()=>{ setMitt(m=>({...m,citta:c.nome,provincia:c.sigla,cap:c.cap})); setShowComuneMitt(false) }}
+                          style={{padding:'7px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
+                          onMouseEnter={e=>(e.currentTarget.style.background='#f9fafb')}
+                          onMouseLeave={e=>(e.currentTarget.style.background='#fff')}>
+                          {c.nome} <span style={{color:'#999'}}>({c.sigla}) - {c.cap}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <div><label style={lbl}>Prov.</label><input value={mitt.provincia} onChange={e=>setMitt({...mitt,provincia:e.target.value})} style={inp}/></div>
                 <div><label style={lbl}>CAP</label><input value={mitt.cap} onChange={e=>setMitt({...mitt,cap:e.target.value})} style={inp}/></div>
               </div>

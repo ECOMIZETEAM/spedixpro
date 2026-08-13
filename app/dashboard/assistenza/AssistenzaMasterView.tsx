@@ -79,16 +79,17 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
     carica(true)
   }
 
-  // 1) Carica il PDF dentro la modale (anteprima), senza inviare
+  // 1) Carica il file della POD dentro la modale (anteprima), senza inviare.
+  // PDF o IMMAGINE (jpg/png/webp): BRT manda la POD come FOTO, non come PDF.
   async function caricaPodDentro(file: File) {
-    if (file.type !== 'application/pdf') { setMsg('Il file della POD deve essere un PDF'); return }
+    if (!['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { setMsg('La POD deve essere un PDF o un\'immagine (JPG/PNG)'); return }
     setMsg('')
     const b64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej; r.readAsDataURL(file) })
     setPodFile({ nome: file.name, dati: b64 })
   }
   // 2) Invia la POD caricata al cliente (chiude in automatico = risolto)
   async function inviaPod(id: string): Promise<boolean> {
-    if (!podFile) { setMsg('Prima carica il PDF della POD'); return false }
+    if (!podFile) { setMsg('Prima carica il file della POD'); return false }
     return await aggiorna(id, { podBase64: podFile.dati })
   }
 
@@ -390,10 +391,12 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   {sel.pod_url && !podFile && <div style={{ marginBottom: '10px', textAlign: 'center' }}><a href={linkAllegato(sel.id, sel.pod_url)} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD già inviata</a></div>}
 
                   {podFile ? (
-                    // PDF caricato dentro: anteprima + invio
+                    // File caricato dentro (PDF o foto): anteprima + invio
                     <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '12.5px', color: '#1a1a1a', fontWeight: 600 }}>📄 {podFile.nome}</div>
-                      <iframe src={podFile.dati} title="Anteprima POD" style={{ width: '100%', height: '320px', border: '1px solid #cbd5e1', borderRadius: '8px', background: '#fff' }} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '12.5px', color: '#1a1a1a', fontWeight: 600 }}>{podFile.dati.startsWith('data:image/') ? '🖼️' : '📄'} {podFile.nome}</div>
+                      {podFile.dati.startsWith('data:image/')
+                        ? <img src={podFile.dati} alt="Anteprima POD" style={{ maxWidth: '100%', maxHeight: '320px', display: 'block', margin: '0 auto', border: '1px solid #cbd5e1', borderRadius: '8px', background: '#fff' }} />
+                        : <iframe src={podFile.dati} title="Anteprima POD" style={{ width: '100%', height: '320px', border: '1px solid #cbd5e1', borderRadius: '8px', background: '#fff' }} />}
                       <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
                         <button disabled={salvando} onClick={async () => { if (await inviaPod(sel.id)) { setPodFile(null); setSel(null) } }} style={{ padding: '10px 18px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Invio…' : (ruoloChat === 'rete' ? '✓ Invia la POD' : '✓ Invia al cliente')}</button>
                         <button disabled={salvando} onClick={() => setPodFile(null)} style={{ padding: '10px 16px', background: '#fff', color: '#1a1a1a', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>Rimuovi</button>
@@ -401,12 +404,12 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     </div>
                   ) : (
                     <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: '12.5px', color: '#555', marginBottom: '10px' }}>📎 Trascina qui il PDF della POD, oppure</div>
+                      <div style={{ fontSize: '12.5px', color: '#555', marginBottom: '10px' }}>📎 Trascina qui la POD (PDF o foto), oppure</div>
                       <label style={{ display: 'inline-block', padding: '8px 16px', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>
-                        {sel.pod_url ? 'Sostituisci PDF' : 'Scegli PDF'}
-                        <input type="file" accept="application/pdf" onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) caricaPodDentro(f) }} style={{ display: 'none' }} />
+                        {sel.pod_url ? 'Sostituisci file' : 'Scegli file'}
+                        <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) caricaPodDentro(f) }} style={{ display: 'none' }} />
                       </label>
-                      <div style={{ fontSize: '11px', color: '#666', marginTop: '9px' }}>Carica il PDF: lo vedi qui in anteprima, poi premi “Invia al cliente”. All'invio la richiesta si chiude (risolta) e il cliente riceve la notifica.</div>
+                      <div style={{ fontSize: '11px', color: '#666', marginTop: '9px' }}>Carica la POD (PDF o foto, es. BRT): la vedi qui in anteprima, poi premi “Invia al cliente”. All'invio la richiesta si chiude (risolta) e il cliente riceve la notifica.</div>
                     </div>
                   )}
                 </div>

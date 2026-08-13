@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
 import { spediamoproSearchStocks, spediamoproReleaseStock } from '@/lib/spediamopro'
 import { vedeLaRete } from '@/lib/perimetro'
+import { SPED_COLS } from '@/lib/spedizioni-cols'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -47,8 +48,11 @@ export async function GET(req: NextRequest) {
   // Filtro "è entrata in giacenza" (giacenza_data valorizzata), NON lo stato corrente: dopo lo
   // svincolo il cron sposta spedizioni.stato (in_giacenza -> non_consegnato/in_consegna) ma la
   // giacenza deve RESTARE in elenco (con giacenza_stato = svincolata/chiusa). Prima spariva.
+  // Colonne LEGGERE (SPED_COLS): niente etichetta_url/raw_response/colli_dettaglio (~300 KB/riga di
+  // blob PDF/base64). Includono già tutti i campi giacenza_* che la pagina usa. Era `*`: su una rete
+  // con molte giacenze la lista trasferiva decine di MB → "veramente lenta". La rotta cliente lo faceva già.
   let query = db.from('spedizioni')
-    .select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
+    .select(`${SPED_COLS}, clienti(ragione_sociale), corrieri(nome_contratto)`)
     .not('giacenza_data', 'is', null)
     .order('giacenza_data', { ascending: false })
 

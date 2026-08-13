@@ -190,14 +190,19 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   // 'chiuso' = archiviato (termina la chat, sola lettura). Solo l'assistenza diretta.
   if (sonoOwner && body?.stato && ['aperto', 'in_lavorazione', 'risolto', 'chiuso'].includes(body.stato)) upd.stato = body.stato
 
-  // Caricamento PDF della POD (base64) -> storage -> pod_url. Caricare la POD chiude la richiesta.
+  // Caricamento POD (base64) -> storage -> pod_url. Caricare la POD chiude la richiesta.
+  // PDF **o IMMAGINE** (jpg/png/webp): BRT manda FOTO, non PDF. Si conserva il tipo REALE del file
+  // (prima era forzato a application/pdf, e una foto BRT veniva salvata come .pdf illeggibile).
   if (typeof body?.podBase64 === 'string' && body.podBase64) {
     try {
-      const b64 = body.podBase64.split(',').pop() || body.podBase64
+      const m = String(body.podBase64).match(/^data:(application\/pdf|image\/(?:png|jpe?g|webp));base64,(.+)$/)
+      const mime = m ? m[1] : 'application/pdf'
+      const b64 = m ? m[2] : (body.podBase64.split(',').pop() || body.podBase64)
       const buffer = Buffer.from(b64, 'base64')
       if (!buffer.length) return NextResponse.json({ error: 'File POD vuoto o non valido' }, { status: 400 })
-      const path = `pod/${masterId}/${Date.now()}_${id}.pdf`
-      const { error: upErr } = await admin.storage.from(BUCKET_RISERVATI).upload(path, buffer, { contentType: 'application/pdf', upsert: true })
+      const ext = mime === 'application/pdf' ? 'pdf' : (mime === 'image/jpeg' ? 'jpg' : mime.split('/')[1])
+      const path = `pod/${masterId}/${Date.now()}_${id}.${ext}`
+      const { error: upErr } = await admin.storage.from(BUCKET_RISERVATI).upload(path, buffer, { contentType: mime, upsert: true })
       if (upErr) return NextResponse.json({ error: 'Upload POD fallito: ' + upErr.message }, { status: 400 })
       // Percorso, non URL pubblico: la POD porta nome e firma del destinatario e si scarica solo
       // passando da /api/file (vedi lib/file-riservati.ts).

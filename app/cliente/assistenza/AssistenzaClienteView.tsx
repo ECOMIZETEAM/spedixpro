@@ -179,7 +179,9 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
                   <td style={{ ...td, fontSize: '12.5px' }} onClick={e => { if (isPod) e.stopPropagation() }}>
                     {/* Scaricare la POD vale come "l'ho vista": senza questo l'etichetta di
                         aggiornamento restava accesa a chi ha gia' preso il documento. */}
-                    {isPod ? (t.pod_url ? <a href={linkAllegato(t.id, t.pod_url)} target="_blank" rel="noopener noreferrer" download onClick={() => { fetch('/api/assistenza/' + t.id).catch(() => {}); setTimeout(() => carica(true), 600) }} style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD</a> : <span style={{ color: '#999' }}>In attesa…</span>) : <span style={{ color: '#2563eb', fontWeight: 600 }}>💬 Apri chat</span>}
+                    {/* Niente `download`: la POD può essere una FOTO (es. BRT) — così si apre e si VEDE
+                        inline (immagine o PDF), poi la si può salvare. /api/file la serve inline. */}
+                    {isPod ? (t.pod_url ? <a href={linkAllegato(t.id, t.pod_url)} target="_blank" rel="noopener noreferrer" onClick={() => { fetch('/api/assistenza/' + t.id).catch(() => {}); setTimeout(() => carica(true), 600) }} style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>📄 Apri POD</a> : <span style={{ color: '#999' }}>In attesa…</span>) : <span style={{ color: '#2563eb', fontWeight: 600 }}>💬 Apri chat</span>}
                   </td>
                 </tr>
               ))}

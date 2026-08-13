@@ -28,9 +28,11 @@ export async function getValidShopifyToken(integrazione: any, db?: any): Promise
     return { token }
   }
 
-  // Vecchi token a scadenza: provo a rinnovare col refresh token. Se non c'e' o il
-  // rinnovo fallisce, chiedo di ricollegare il negozio (i nuovi collegamenti usano
-  // token offline che non scadono, quindi questo ramo riguarda solo vecchie connessioni).
+  // Token scaduto (o vecchio non-scadente ormai rifiutato): si rinnova col refresh token
+  // (grant_type=refresh_token, expiring=1 — vedi sotto). Se il refresh token non c'e' (tipico dei
+  // collegamenti fatti PRIMA del passaggio ai token scadenti), non c'è nulla da rinnovare: si chiede
+  // di ricollegare il negozio. NB: i nuovi collegamenti chiedono `expiring=1` nello scambio token
+  // (callback), come da doc Shopify — NON `grant_options[]=expiring` nell'authorize (non esiste).
   if (!refreshToken) {
     return { error: 'Sessione Shopify scaduta. Ricollega il negozio dalle Integrazioni.' }
   }
