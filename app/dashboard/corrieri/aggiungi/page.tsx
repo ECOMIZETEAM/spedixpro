@@ -1,5 +1,6 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { redirect } from 'next/navigation'
+import TestGls from './TestGls'
 
 async function salvaCorriere(formData: FormData) {
   'use server'
@@ -243,6 +244,9 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
           </div>
         </form>
       </div>
+
+      {/* Test connessione: solo per un contratto GLS diretto già salvato (proprietario). */}
+      {tipo === 'gls' && corriereEsistente && <TestGls corriereId={corriereEsistente.id} />}
     </div>
   )
 }
