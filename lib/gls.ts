@@ -38,12 +38,14 @@ export type ParcelGls = {
   localita: string
   cap: string
   provincia: string
-  colli: number
-  pesoReale: number          // kg
+  // UN PESO (kg) PER COLLO; la lunghezza = numero colli. GLS vuole N <Parcel> (uno per collo):
+  // verificato che <Colli>N in un solo Parcel crea 1 collo, mentre 3 <Parcel> creano 3 colli sotto
+  // lo stesso NumeroSpedizione (ProgressivoCollo 01/02/03).
+  pesiColli: number[]
   bda?: string               // riferimento ordine/documento (max 20)
-  importoContrassegno?: number   // EUR, 0 = niente COD
+  importoContrassegno?: number   // EUR, 0 = niente COD (solo sul PRIMO collo)
   modalitaIncasso?: string       // codice metodo incasso (dipende dal contratto)
-  assicurazione?: number         // EUR
+  assicurazione?: number         // EUR (solo sul primo collo)
   note?: string                  // Notespedizione
 }
 
@@ -58,7 +60,8 @@ export type RisultatoGls = {
   siglaSedeDestino: string | null
   // true = indirizzo non instradato: numero valido ma la sede lo rilavora a mano. Da mostrare.
   glsCheck: boolean
-  pdfBase64: string | null
+  numeroColli: number
+  pdfBase64: string | null   // etichetta del PRIMO collo (comodità: test / mono-collo)
   errore: string | null
   raw: string
 }
@@ -95,28 +98,35 @@ function faultString(xml: string): string | null {
   return estraiTag(xml, 'faultstring')
 }
 
-// Costruisce l'XMLInfoParcel per AddParcel (STRUTTURA VERIFICATA).
+// Costruisce l'XMLInfoParcel per AddParcel (STRUTTURA VERIFICATA). Un <Parcel> PER COLLO.
 export function costruisciXmlInfoParcel(cred: CredenzialiGls, p: ParcelGls): string {
   const info =
     tag('SedeGls', cred.sigla_sede) +
     tag('CodiceClienteGls', cred.user_webservice) +
     tag('PasswordClienteGls', cred.password_webservice)
-  const parcel = [
-    tag('CodiceContrattoGls', cred.codice_contratto),
-    tag('RagioneSociale', (p.ragioneSociale || '').substring(0, 70)),
-    tag('Indirizzo', (p.indirizzo || '').substring(0, 70)),
-    tag('Localita', (p.localita || '').substring(0, 50)),
-    tag('Zipcode', p.cap),
-    tag('Provincia', (p.provincia || '').substring(0, 2).toUpperCase()),
-    tag('Colli', Math.max(1, Math.round(p.colli || 1))),
-    tag('PesoReale', pesoIt(p.pesoReale)),
-    p.importoContrassegno && p.importoContrassegno > 0 ? tag('Importocontrassegno', euroIt(p.importoContrassegno)) : '',
-    p.importoContrassegno && p.importoContrassegno > 0 && p.modalitaIncasso ? tag('ModalitaIncasso', p.modalitaIncasso) : '',
-    p.assicurazione && p.assicurazione > 0 ? tag('Assicurazione', euroIt(p.assicurazione)) : '',
-    p.note ? tag('Notespedizione', p.note.substring(0, 100)) : '',
-    p.bda ? tag('Bda', String(p.bda).substring(0, 20)) : '',
-  ].filter(Boolean).join('')
-  return `<Info>${info}<Parcel>${parcel}</Parcel></Info>`
+  const pesi = (p.pesiColli && p.pesiColli.length) ? p.pesiColli : [1]
+  const parcels = pesi.map((peso, idx) => {
+    const primo = idx === 0
+    const campi = [
+      tag('CodiceContrattoGls', cred.codice_contratto),
+      tag('RagioneSociale', (p.ragioneSociale || '').substring(0, 70)),
+      tag('Indirizzo', (p.indirizzo || '').substring(0, 70)),
+      tag('Localita', (p.localita || '').substring(0, 50)),
+      tag('Zipcode', p.cap),
+      tag('Provincia', (p.provincia || '').substring(0, 2).toUpperCase()),
+      tag('Colli', '1'),
+      tag('PesoReale', pesoIt(peso)),
+      // Contrassegno / assicurazione / note / riferimento SOLO sul primo collo (dati di spedizione,
+      // non di collo: ripeterli su ogni Parcel rischia di moltiplicarli).
+      primo && p.importoContrassegno && p.importoContrassegno > 0 ? tag('Importocontrassegno', euroIt(p.importoContrassegno)) : '',
+      primo && p.importoContrassegno && p.importoContrassegno > 0 && p.modalitaIncasso ? tag('ModalitaIncasso', p.modalitaIncasso) : '',
+      primo && p.assicurazione && p.assicurazione > 0 ? tag('Assicurazione', euroIt(p.assicurazione)) : '',
+      primo && p.note ? tag('Notespedizione', p.note.substring(0, 100)) : '',
+      primo && p.bda ? tag('Bda', String(p.bda).substring(0, 20)) : '',
+    ].filter(Boolean).join('')
+    return `<Parcel>${campi}</Parcel>`
+  }).join('')
+  return `<Info>${info}${parcels}</Info>`
 }
 
 // Chiamata SOAP 1.1: `innerBody` è già il contenuto interno di <Operazione xmlns=...>…</Operazione>.
@@ -150,7 +160,7 @@ export async function creaSpedizioneGls(cred: CredenzialiGls, parcel: ParcelGls)
     soap = await chiamaGls('AddParcel', `<XMLInfoParcel>${escXml(xml)}</XMLInfoParcel>`)
   } catch (e) {
     // Rete/timeout PRIMA di una risposta: non c'è (quasi certamente) nessun collo creato.
-    return { numeroSpedizione: null, tracking: null, siglaMittente: null, siglaSedeDestino: null, glsCheck: false, pdfBase64: null, errore: 'GLS non raggiungibile: ' + (e instanceof Error ? e.message : String(e)), raw: '' }
+    return { numeroSpedizione: null, tracking: null, siglaMittente: null, siglaSedeDestino: null, glsCheck: false, numeroColli: 0, pdfBase64: null, errore: 'GLS non raggiungibile: ' + (e instanceof Error ? e.message : String(e)), raw: '' }
   }
   const fault = faultString(soap)
   // il contenuto utile è XML-escapato dentro <AddParcelResult>
@@ -169,7 +179,8 @@ export async function creaSpedizioneGls(cred: CredenzialiGls, parcel: ParcelGls)
   const tracking = numeroSpedizione ? (prefisso + numeroSpedizione) : null
   const errGls = estraiTag(inner, 'DescrizioneErrore') || estraiTag(inner, 'Errore')
   const errore = numeroSpedizione ? null : (fault || errGls || 'GLS non ha restituito un numero spedizione')
-  return { numeroSpedizione, tracking, siglaMittente, siglaSedeDestino, glsCheck, pdfBase64: null, errore, raw: (soap || '').substring(0, 2000) }
+  const numeroColli = (parcel.pesiColli && parcel.pesiColli.length) ? parcel.pesiColli.length : 1
+  return { numeroSpedizione, tracking, siglaMittente, siglaSedeDestino, glsCheck, numeroColli, pdfBase64: null, errore, raw: (soap || '').substring(0, 2000) }
 }
 
 // Scarica l'etichetta PDF (base64) di una spedizione già creata.
@@ -184,7 +195,8 @@ export async function etichettaGls(
     tag('CodiceContratto', cred.codice_contratto) +
     tag('NumeroSpedizione', numeroSpedizione) +
     `<Bda>${escXml(opts?.bda || '')}</Bda>` +
-    `<NumeroCollo>${escXml(opts?.numeroCollo || '')}</NumeroCollo>` +
+    // NumeroCollo VUOTO torna null (verificato): serve il numero del collo (1..N). Default 1.
+    `<NumeroCollo>${escXml(opts?.numeroCollo || '1')}</NumeroCollo>` +
     `<TipoPorto>${escXml(opts?.tipoPorto || '')}</TipoPorto>`
   const soap = await chiamaGls('GetPdfBySped', inner)
   const b64 = estraiTag(soap, 'GetPdfBySpedResult')
@@ -192,6 +204,22 @@ export async function etichettaGls(
   // un PDF vero in base64 è lungo e inizia con "JVBER" (%PDF); sotto una certa soglia è un errore.
   if (pulito.length > 500 && /^JVBER/i.test(pulito)) return { pdfBase64: pulito, errore: null }
   return { pdfBase64: null, errore: faultString(soap) || 'Etichetta non disponibile' }
+}
+
+// Etichette di TUTTI i colli (uno per collo: GetPdfBySped NumeroCollo 1..N). Torna il base64 per
+// collo nell'ordine (indice 0 = collo 1). Best-effort: salta i colli che non tornano.
+export async function etichetteGls(
+  cred: CredenzialiGls, numeroSpedizione: string, numeroColli: number, opts?: { bda?: string; tipoPorto?: string }
+): Promise<{ etichette: string[]; errore: string | null }> {
+  const n = Math.max(1, Math.round(numeroColli || 1))
+  const etichette: string[] = []
+  for (let i = 1; i <= n; i++) {
+    try {
+      const et = await etichettaGls(cred, numeroSpedizione, { ...opts, numeroCollo: String(i) })
+      if (et.pdfBase64) etichette.push(et.pdfBase64)
+    } catch { /* la riprende il recupero in background */ }
+  }
+  return { etichette, errore: etichette.length ? null : 'nessuna etichetta disponibile' }
 }
 
 // Annulla una spedizione GLS (DeleteSped). Torna true se l'annullo è confermato.

@@ -1428,7 +1428,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Contratto GLS non configurato correttamente. Contatta l\'assistenza.' }, { status: 400 })
     }
     try {
-      const { creaSpedizioneConEtichettaGls, annullaSpedizioneGls } = await import('@/lib/gls')
+      const { creaSpedizioneGls, etichetteGls, annullaSpedizioneGls } = await import('@/lib/gls')
 
       // Prezzo dal listino PRIMA della creazione (come il circuito interno).
       let costoCorrente = costoMaster
@@ -1443,14 +1443,16 @@ export async function POST(req: NextRequest) {
       const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
 
       const bda = (body.rifOrdine ? String(body.rifOrdine) : '').trim().substring(0, 20) || undefined
-      const ris = await creaSpedizioneConEtichettaGls(credGls, {
+      // MULTICOLLO: un peso per collo (GLS crea un <Parcel> per collo). Contrassegno/assicurazione
+      // vanno solo sul primo collo (li mette lib/gls).
+      const pesiColli = packages.map((p: any) => parseFloat(p?.weight) || 1)
+      const ris = await creaSpedizioneGls(credGls, {
         ragioneSociale: body.shipTo.name,
         indirizzo: body.shipTo.street1,
         localita: body.shipTo.city,
         cap: body.shipTo.postalCode,
         provincia: body.shipTo.state,
-        colli: packages.length,
-        pesoReale,
+        pesiColli,
         importoContrassegno: body.codValue ? Number(body.codValue) : undefined,
         assicurazione: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         note: body.notes ? String(body.notes) : undefined,
@@ -1466,7 +1468,20 @@ export async function POST(req: NextRequest) {
       // numeroFinale = il TRACKING vero per il cliente = sigla sede + numero (es. NL860…).
       const numeroBare = ris.numeroSpedizione
       const numeroFinale = ris.tracking || ris.numeroSpedizione
-      const etichettaUrl = ris.pdfBase64 ? `data:application/pdf;base64,${ris.pdfBase64}` : null
+
+      // Etichette: una PER COLLO (GetPdfBySped NumeroCollo 1..N; col vuoto non torna nulla).
+      // L'etichetta "della spedizione" è l'unione (una pagina per collo, come easyparcel).
+      let etichettePerCollo: string[] = []
+      let etichettaUrl: string | null = null
+      try {
+        const et = await etichetteGls(credGls, numeroBare, ris.numeroColli, { bda })
+        etichettePerCollo = et.etichette.map(b => `data:application/pdf;base64,${b}`)
+        if (et.etichette.length) {
+          const { unisciEtichette } = await import('@/lib/easyparcel')
+          const merged = await unisciEtichette(et.etichette)
+          etichettaUrl = merged ? `data:application/pdf;base64,${merged}` : (etichettePerCollo[0] || null)
+        }
+      } catch (e) { console.error('[CREA][GLS] etichette:', e) }
 
       const colliDettaglio = (body.colliDettaglio || packages.map((p: any) => ({ lunghezza: p.length, larghezza: p.width, altezza: p.height })))
         .map((c: any, i: number) => ({
@@ -1475,7 +1490,7 @@ export async function POST(req: NextRequest) {
           larghezza: c.larghezza || packages[i]?.width || null,
           altezza: c.altezza || packages[i]?.height || null,
           peso: packages[i]?.weight || null,
-          etichetta_url: packages.length === 1 ? etichettaUrl : null,
+          etichetta_url: etichettePerCollo[i] || (packages.length === 1 ? etichettaUrl : null),
         }))
 
       const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
@@ -1532,15 +1547,24 @@ export async function POST(req: NextRequest) {
         })
       } catch (e) { console.error('[CREA][GLS] cascata catena:', e) }
 
-      // Etichetta non pronta al volo? La si riprende in background (rete di sicurezza).
+      // Etichette non pronte al volo? Le si riprende in background (rete di sicurezza), per collo.
       if (inserted?.id && !etichettaUrl) {
         const spedIdBg = inserted.id
+        const numColliBg = ris.numeroColli
+        const colliBase = colliDettaglio
         after(async () => {
           try {
-            const { etichettaGls } = await import('@/lib/gls')
-            const et = await etichettaGls(credGls, numeroBare, { bda })
-            if (et.pdfBase64) await adminCrea.from('spedizioni').update({ etichetta_url: `data:application/pdf;base64,${et.pdfBase64}` }).eq('id', spedIdBg)
-          } catch (e) { console.error('[CREA][GLS] recupero etichetta background:', e) }
+            const { etichetteGls } = await import('@/lib/gls')
+            const { unisciEtichette } = await import('@/lib/easyparcel')
+            const et = await etichetteGls(credGls, numeroBare, numColliBg, { bda })
+            if (et.etichette.length) {
+              const merged = await unisciEtichette(et.etichette)
+              const upd: any = {}
+              if (merged) upd.etichetta_url = `data:application/pdf;base64,${merged}`
+              upd.colli_dettaglio = colliBase.map((c: any, i: number) => ({ ...c, etichetta_url: et.etichette[i] ? `data:application/pdf;base64,${et.etichette[i]}` : (c.etichetta_url || null) }))
+              await adminCrea.from('spedizioni').update(upd).eq('id', spedIdBg)
+            }
+          } catch (e) { console.error('[CREA][GLS] recupero etichette background:', e) }
         })
       }
 

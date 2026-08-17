@@ -48,8 +48,7 @@ export async function POST(req: Request) {
       localita: 'Milano',
       cap: '20100',
       provincia: 'MI',
-      colli: 1,
-      pesoReale: 1,
+      pesiColli: [1],
       bda: 'TEST',
     })
 
