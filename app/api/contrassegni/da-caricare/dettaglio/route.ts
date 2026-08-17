@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
   const ids = (righe || []).map((r: any) => r.spedizione_id).filter(Boolean)
   const info = new Map<string, any>()
   if (ids.length) {
-    const { data: sp } = await admin.from('spedizioni').select('id,numero,dest_nome,dest_citta').in('id', ids)
+    const { data: sp } = await admin.from('spedizioni').select('id,numero,dest_nome,dest_citta,created_at').in('id', ids)
     for (const s of (sp || [])) info.set((s as any).id, s)
   }
 
@@ -47,6 +47,7 @@ export async function GET(req: NextRequest) {
       numero: info.get(r.spedizione_id)?.numero || '—',
       dest_nome: info.get(r.spedizione_id)?.dest_nome || '',
       dest_citta: info.get(r.spedizione_id)?.dest_citta || '',
+      created_at: info.get(r.spedizione_id)?.created_at || null,
     })),
   })
 }

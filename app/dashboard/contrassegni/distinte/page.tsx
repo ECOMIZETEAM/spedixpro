@@ -448,7 +448,8 @@ export default function DistinteContrassegniPage() {
                                   <input type="checkbox" checked={sel} onChange={()=>toggleSpedizione(g.chiave, s.spedizione_id)} style={{width:'14px',height:'14px',cursor:'pointer'}}/>
                                   <span style={{fontFamily:'monospace',color:'#1a1a1a',minWidth:'130px'}}>{s.numero}</span>
                                   <span style={{color:'#374151',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{s.dest_nome}{s.dest_citta?` · ${s.dest_citta}`:''}</span>
-                                  <span style={{fontWeight:700,color:'#15803d',whiteSpace:'nowrap' as const}}>€ {Number(s.importo).toFixed(2)}</span>
+                                  <span title="Data spedizione" style={{color:'#9ca3af',fontSize:'11px',whiteSpace:'nowrap' as const,minWidth:'66px',textAlign:'right' as const}}>{s.created_at?new Date(s.created_at).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'}):''}</span>
+                                  <span style={{fontWeight:700,color:'#15803d',whiteSpace:'nowrap' as const,minWidth:'72px',textAlign:'right' as const}}>€ {Number(s.importo).toFixed(2)}</span>
                                 </label>
                               )
                             })}
