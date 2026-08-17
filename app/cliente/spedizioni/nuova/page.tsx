@@ -10,7 +10,7 @@ import PagaConCarta from '@/app/cliente/PagaConCarta'
 // all'utente ('EASYPARCEL'). Ogni provider ha la sua sigla neutra.
 const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':t==='easyparcel'?'V':(t||'').toUpperCase()
 interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; _corriere_id?:string; corriere_nome?:string }
-interface Collo { lunghezza:string; larghezza:string; altezza:string }
+interface Collo { lunghezza:string; larghezza:string; altezza:string; peso?:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const lbl = {fontSize:'11.5px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px',whiteSpace:'nowrap' as const}
@@ -171,7 +171,7 @@ export default function NuovaSpedizioneCliente() {
     setNumColli(num)
     setColli(prev => {
       const next = [...prev]
-      while (next.length < num) next.push({lunghezza:'',larghezza:'',altezza:''})
+      while (next.length < num) next.push({lunghezza:'',larghezza:'',altezza:'',peso:''})
       return next.slice(0, num)
     })
     setTariffe([]); setSelected(null)
@@ -182,7 +182,20 @@ export default function NuovaSpedizioneCliente() {
     setTariffe([]); setSelected(null)
   }
 
+  // ESTERO MULTICOLLO: il peso va indicato COLLO PER COLLO (i corrieri internazionali — es. UPS —
+  // lo pretendono per ogni collo, non un totale). Solo estero (non Italia) e piu' di un collo.
+  const esteroMulti = dest.paese !== 'IT' && colli.length > 1
+  const pesoTotaleColli = colli.reduce((s,c)=>s+(+(c.peso||0)||0), 0)
+
   function buildPackages() {
+    if (esteroMulti) {
+      return colli.map(c => ({
+        length: +c.lunghezza||20,
+        width: +c.larghezza||15,
+        height: +c.altezza||10,
+        weight: +(c.peso||0)||0,
+      }))
+    }
     const n = Math.max(1, colli.length)
     const pesoPerCollo = (+peso || 0) / n
     return colli.map(c => ({
@@ -199,6 +212,9 @@ export default function NuovaSpedizioneCliente() {
     }
     if (dest.paese==='IT' && !dest.provincia) {
       setErrore('La provincia è obbligatoria per le spedizioni in Italia'); return
+    }
+    if (esteroMulti && colli.some(c => !(+(c.peso||0)>0))) {
+      setErrore('Spedizione estera multicollo: indica il peso (kg) di OGNI collo'); return
     }
     setErrore(''); setLoading(true); setTariffe([]); setSelected(null)
     const res = await fetch('/api/spedizioni/tariffe', {
@@ -598,9 +614,15 @@ export default function NuovaSpedizioneCliente() {
                     onChange={e=>aggiornaNumColli(parseInt(e.target.value)||1)} style={inp}/>
                 </div>
                 <div>
-                  <label style={lbl}>Peso totale</label>
-                  <input type="number" value={peso} min="0.1" step="0.1"
-                    onChange={e=>{setPeso(e.target.value);setTariffe([]);setSelected(null)}} style={inp}/>
+                  <label style={lbl}>Peso totale{esteroMulti ? ' (somma colli)' : ''}</label>
+                  {esteroMulti ? (
+                    <input type="number" value={pesoTotaleColli ? pesoTotaleColli.toFixed(2) : ''} readOnly disabled
+                      title="Spedizione estera multicollo: il peso si indica per collo qui sotto"
+                      style={{...inp, background:'#f1f5f9', color:'#475569'}}/>
+                  ) : (
+                    <input type="number" value={peso} min="0.1" step="0.1"
+                      onChange={e=>{setPeso(e.target.value);setTariffe([]);setSelected(null)}} style={inp}/>
+                  )}
                 </div>
                 <div>
                   <label style={lbl}>Contrassegno €</label>
@@ -615,14 +637,15 @@ export default function NuovaSpedizioneCliente() {
               </div>
 
               <div style={{marginBottom:'14px'}}>
-                <div style={{display:'grid',gridTemplateColumns:'32px 1fr 1fr 1fr',gap:'6px',marginBottom:'6px'}}>
+                <div style={{display:'grid',gridTemplateColumns: esteroMulti ? '32px 1fr 1fr 1fr 1fr' : '32px 1fr 1fr 1fr',gap:'6px',marginBottom:'6px'}}>
                   <div style={{...lbl,marginBottom:0}}>#</div>
                   <div style={{...lbl,marginBottom:0}}>Lunghezza (cm)</div>
                   <div style={{...lbl,marginBottom:0}}>Larghezza (cm)</div>
                   <div style={{...lbl,marginBottom:0}}>Altezza (cm)</div>
+                  {esteroMulti && <div style={{...lbl,marginBottom:0}}>Peso (kg)</div>}
                 </div>
                 {colli.map((c,i)=>(
-                  <div key={i} style={{display:'grid',gridTemplateColumns:'32px 1fr 1fr 1fr',gap:'6px',marginBottom:'6px',alignItems:'center'}}>
+                  <div key={i} style={{display:'grid',gridTemplateColumns: esteroMulti ? '32px 1fr 1fr 1fr 1fr' : '32px 1fr 1fr 1fr',gap:'6px',marginBottom:'6px',alignItems:'center'}}>
                     <div style={{fontSize:'12px',color:'#999',fontWeight:'600',textAlign:'center'}}>{i+1}</div>
                     <input type="number" value={c.lunghezza} placeholder="es. 30"
                       onChange={e=>aggiornaCollo(i,'lunghezza',e.target.value)} style={inp}/>
@@ -630,6 +653,8 @@ export default function NuovaSpedizioneCliente() {
                       onChange={e=>aggiornaCollo(i,'larghezza',e.target.value)} style={inp}/>
                     <input type="number" value={c.altezza} placeholder="es. 15"
                       onChange={e=>aggiornaCollo(i,'altezza',e.target.value)} style={inp}/>
+                    {esteroMulti && <input type="number" value={c.peso||''} min="0.1" step="0.1" placeholder="kg"
+                      onChange={e=>aggiornaCollo(i,'peso',e.target.value)} style={inp}/>}
                   </div>
                 ))}
               </div>
