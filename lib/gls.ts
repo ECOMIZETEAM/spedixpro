@@ -209,6 +209,85 @@ export async function annullaSpedizioneGls(cred: CredenzialiGls, numeroSpedizion
   }
 }
 
+// Chiude (= TRASMETTE alla sede GLS) una o più spedizioni per numero NUDO. Senza questa, AddParcel
+// crea la spedizione ma resta "in attesa di chiusura" e GLS NON passa a ritirare. Batch: un <Parcel>
+// per numero in una sola chiamata. Il campo è `NumeroDiSpedizioneGLSDaConfermare` (verificato: con
+// <NumeroSpedizione> GLS cercava "-1" → "Spedizione inesistente"). Param `_xmlRequest` (underscore).
+export async function chiudiSpedizioniGls(
+  cred: CredenzialiGls, numeri: string[]
+): Promise<{ ok: boolean; esiti: Record<string, string>; errore: string | null; raw: string }> {
+  const nums = Array.from(new Set(numeri.map(n => String(n || '').trim()).filter(Boolean)))
+  if (!nums.length) return { ok: true, esiti: {}, errore: null, raw: '' }
+  const parcels = nums.map(n => `<Parcel><NumeroDiSpedizioneGLSDaConfermare>${escXml(n)}</NumeroDiSpedizioneGLSDaConfermare></Parcel>`).join('')
+  const xmlReq =
+    `<Info>` +
+    tag('SedeGls', cred.sigla_sede) +
+    tag('CodiceClienteGls', cred.user_webservice) +
+    tag('PasswordClienteGls', cred.password_webservice) +
+    parcels +
+    `</Info>`
+  let soap: string
+  try {
+    soap = await chiamaGls('CloseWorkDayByShipmentNumber', `<_xmlRequest>${escXml(xmlReq)}</_xmlRequest>`)
+  } catch (e) {
+    return { ok: false, esiti: {}, errore: 'GLS non raggiungibile: ' + (e instanceof Error ? e.message : String(e)), raw: '' }
+  }
+  const fault = faultString(soap)
+  if (fault) return { ok: false, esiti: {}, errore: fault, raw: soap.substring(0, 2000) }
+  // Esito per-spedizione: coppie <NumeroDiSpedizioneGLSDaConfermare> + <esito> dentro ogni <Parcel>.
+  const esiti: Record<string, string> = {}
+  const re = /<NumeroDiSpedizioneGLSDaConfermare>\s*([^<]*?)\s*<\/NumeroDiSpedizioneGLSDaConfermare>[\s\S]*?<esito>\s*([^<]*?)\s*<\/esito>/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(soap))) esiti[m[1].trim()] = m[2].trim()
+  const descr = (estraiTag(soap, 'DescrizioneErrore') || '').trim()
+  // Trasmesso se GLS risponde OK a livello globale e almeno una spedizione è andata a buon fine.
+  const ok = /^ok$/i.test(descr) && nums.some(n => /ok/i.test(esiti[n] || ''))
+  return { ok, esiti, errore: ok ? null : (descr || 'chiusura GLS non confermata'), raw: soap.substring(0, 2000) }
+}
+
+// Chiusura GLS di una DISTINTA (stessa forma di chiudiBorderoSpedisci/chiudiBordereauSpediamopro).
+// Best-effort, mai bloccante. Solo per corrieri di tipo 'gls'. Il numero NUDO sta in
+// raw_response.numero (fallback: le cifre del numero/tracking). GLS non produce un PDF di borderò:
+// a chiusura avvenuta si segna bordero_id='N/A' e confermata_vettore=true (come SDA/spedisci-già-chiusa).
+export async function chiudiGiornataGls(supabase: any, distintaId: string) {
+  try {
+    const { data: distinta } = await supabase
+      .from('distinte').select('id, corriere_id, bordero_id').eq('id', distintaId).maybeSingle()
+    if (!distinta || (distinta.bordero_id && !String(distinta.bordero_id).startsWith('ERRORE'))) return { skip: true }
+
+    // Credenziali SEMPRE via admin: la colonna non è leggibile col token utente.
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { data: corriere } = await createAdminSupabase()
+      .from('corrieri').select('id, tipo, credenziali').eq('id', distinta.corriere_id).maybeSingle()
+    if (!corriere || corriere.tipo !== 'gls') return { skip: true }
+    const cred = (corriere.credenziali || {}) as CredenzialiGls
+    if (!cred.sigla_sede || !cred.user_webservice || !cred.password_webservice) return { errore: 'credenziali GLS mancanti' }
+
+    const { data: speds } = await supabase
+      .from('spedizioni').select('id, numero, tracking_number, raw_response').eq('distinta_id', distintaId)
+    const numeri: string[] = []
+    for (const s of speds || []) {
+      const raw = (s.raw_response || {}) as any
+      let n = raw?.numero ? String(raw.numero) : ''
+      if (!n) { const mm = String(s.numero || s.tracking_number || '').match(/\d{6,}/); n = mm ? mm[0] : '' }
+      if (n) numeri.push(n)
+    }
+    if (!numeri.length) return { errore: 'nessuna spedizione GLS con numero' }
+
+    const r = await chiudiSpedizioniGls(cred, numeri)
+    await supabase.from('distinte').update({
+      bordero_id: r.ok ? 'N/A' : ('ERRORE: ' + (r.errore || 'chiusura GLS').slice(0, 150)),
+      ...(r.ok ? { confermata_vettore: true, data_conferma: new Date().toISOString() } : {}),
+    }).eq('id', distintaId)
+    return { ok: r.ok, errore: r.errore, esiti: r.esiti }
+  } catch (e: any) {
+    try {
+      await supabase.from('distinte').update({ bordero_id: 'ERRORE: ' + String(e?.message || e).slice(0, 150) }).eq('id', distintaId)
+    } catch {}
+    return { errore: String(e?.message || e) }
+  }
+}
+
 // Comodo per il percorso di creazione: crea + scarica subito l'etichetta.
 export async function creaSpedizioneConEtichettaGls(cred: CredenzialiGls, parcel: ParcelGls): Promise<RisultatoGls> {
   const ris = await creaSpedizioneGls(cred, parcel)

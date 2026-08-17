@@ -5,6 +5,7 @@ import { bloccaAgente } from '@/lib/agente'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
+import { chiudiGiornataGls } from '@/lib/gls'
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
 
 // "Conferma" = TRASMETTI (o ritenta) la chiusura della distinta al provider del corriere.
@@ -39,9 +40,10 @@ export async function POST(req: NextRequest) {
     // Ritenta la chiusura sul provider giusto (l'altro fa skip da solo).
     const r1: any = await chiudiBorderoSpedisci(admin, d.id).catch((e: any) => ({ errore: String(e?.message || e) }))
     const r2: any = await chiudiBordereauSpediamopro(admin, d.id).catch((e: any) => ({ errore: String(e?.message || e) }))
+    const r3: any = await chiudiGiornataGls(admin, d.id).catch((e: any) => ({ errore: String(e?.message || e) }))
     const { data: dopo } = await admin.from('distinte').select('confermata_vettore').eq('id', d.id).maybeSingle()
     if (dopo?.confermata_vettore) { confermate++; continue }
-    const err = r1?.errore || r2?.errore
+    const err = r1?.errore || r2?.errore || r3?.errore
     // Anche al MASTER si mostra un messaggio ripulito: e' un rivenditore, non staff MoovExpress,
     // e nel popup leggeva il nome del sistema tecnico dietro le quinte. L'originale va nei log.
     if (err) { console.error('[DISTINTE][CONFERMA]', d.numero, String(err).slice(0, 300)); errori.push({ numero: d.numero, errore: erroreCorrierePulito(err) }); continue }
