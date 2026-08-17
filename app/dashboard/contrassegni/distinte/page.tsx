@@ -441,16 +441,24 @@ export default function DistinteContrassegniPage() {
                           <div style={{padding:'12px',color:'#999',fontSize:'12px'}}>Nessuna spedizione.</div>
                         ) : (
                           <div>
-                            {dett.righe.map((s:any)=>{
+                            {dett.righe.map((s:any, idx:number)=>{
                               const sel = intero || (selSped[g.chiave]?.has(s.spedizione_id) || false)
+                              const giorno = s.created_at ? new Date(s.created_at).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric'}) : 'Senza data'
+                              const prec = idx>0 ? dett.righe[idx-1].created_at : undefined
+                              const giornoPrec = idx>0 ? (prec ? new Date(prec).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric'}) : 'Senza data') : null
                               return (
-                                <label key={s.spedizione_id} style={{display:'flex',alignItems:'center',gap:'10px',padding:'6px 8px',borderBottom:'1px solid #eef2f0',cursor:'pointer',fontSize:'12px'}}>
-                                  <input type="checkbox" checked={sel} onChange={()=>toggleSpedizione(g.chiave, s.spedizione_id)} style={{width:'14px',height:'14px',cursor:'pointer'}}/>
-                                  <span style={{fontFamily:'monospace',color:'#1a1a1a',minWidth:'130px'}}>{s.numero}</span>
-                                  <span style={{color:'#374151',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{s.dest_nome}{s.dest_citta?` · ${s.dest_citta}`:''}</span>
-                                  <span title="Data spedizione" style={{color:'#9ca3af',fontSize:'11px',whiteSpace:'nowrap' as const,minWidth:'66px',textAlign:'right' as const}}>{s.created_at?new Date(s.created_at).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'}):''}</span>
-                                  <span style={{fontWeight:700,color:'#15803d',whiteSpace:'nowrap' as const,minWidth:'72px',textAlign:'right' as const}}>€ {Number(s.importo).toFixed(2)}</span>
-                                </label>
+                                <Fragment key={s.spedizione_id}>
+                                  {giorno!==giornoPrec && (
+                                    <div style={{padding:'7px 8px 3px',fontSize:'11px',fontWeight:700,color:'#6b7280',textTransform:'uppercase' as const,letterSpacing:'.02em',background:'#f6faf8',borderBottom:'1px solid #eef2f0'}}>📅 {giorno}</div>
+                                  )}
+                                  <label style={{display:'flex',alignItems:'center',gap:'10px',padding:'6px 8px',borderBottom:'1px solid #eef2f0',cursor:'pointer',fontSize:'12px'}}>
+                                    <input type="checkbox" checked={sel} onChange={()=>toggleSpedizione(g.chiave, s.spedizione_id)} style={{width:'14px',height:'14px',cursor:'pointer'}}/>
+                                    <span style={{fontFamily:'monospace',color:'#1a1a1a',minWidth:'130px'}}>{s.numero}</span>
+                                    <span style={{color:'#374151',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{s.dest_nome}{s.dest_citta?` · ${s.dest_citta}`:''}</span>
+                                    <span title="Data spedizione" style={{color:'#9ca3af',fontSize:'11px',whiteSpace:'nowrap' as const,minWidth:'66px',textAlign:'right' as const}}>{s.created_at?new Date(s.created_at).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'}):''}</span>
+                                    <span style={{fontWeight:700,color:'#15803d',whiteSpace:'nowrap' as const,minWidth:'72px',textAlign:'right' as const}}>€ {Number(s.importo).toFixed(2)}</span>
+                                  </label>
+                                </Fragment>
                               )
                             })}
                             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'8px',padding:'8px 4px 2px',flexWrap:'wrap' as const}}>

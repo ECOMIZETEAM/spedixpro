@@ -2,12 +2,19 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { isAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { fetchAll } from '@/lib/fetch-all'
 
 export const dynamic = 'force-dynamic'
 
 // Spedizioni di UN destinatario nella sosta "da caricare", PAGINATE (10/pagina): serve alla tendina
 // che si apre cliccando un cliente, per selezionare le singole spedizioni da caricare (le altre
 // restano in pending). Solo la sosta del MIO master (admin + scope master_id).
+//
+// ORDINE PER DATA SPEDIZIONE (recenti prima), non per data di sosta: cosi' la UI puo' raggruppare per
+// giorno e si vede a colpo d'occhio cosa e' recente e cosa e' vecchio. La sosta di un singolo
+// destinatario e' piccola (poche centinaia di righe): la si prende tutta, si ordina per data della
+// SPEDIZIONE e si pagina in memoria — piu' semplice e ugualmente veloce di un ordinamento su una
+// colonna che la sosta non ha.
 const PAGE = 10
 
 export async function GET(req: NextRequest) {
@@ -22,32 +29,45 @@ export async function GET(req: NextRequest) {
   const page = Math.max(1, Number(req.nextUrl.searchParams.get('page')) || 1)
   const admin = createAdminSupabase()
 
-  let q = admin.from('cod_da_caricare').select('spedizione_id,importo', { count: 'exact' }).eq('master_id', mio)
-  if (chiave.startsWith('c:')) q = q.eq('cliente_id', chiave.slice(2))
-  else if (chiave.startsWith('m:')) q = q.eq('target_master_id', chiave.slice(2))
-  else return NextResponse.json({ totale: 0, righe: [] })
+  const filtra = (qq: any) => {
+    qq = qq.eq('master_id', mio)
+    if (chiave.startsWith('c:')) return qq.eq('cliente_id', chiave.slice(2))
+    if (chiave.startsWith('m:')) return qq.eq('target_master_id', chiave.slice(2))
+    return null
+  }
+  if (!filtra(admin.from('cod_da_caricare').select('spedizione_id'))) {
+    return NextResponse.json({ totale: 0, righe: [] })
+  }
 
-  const from = (page - 1) * PAGE
-  const { data: righe, count } = await q.order('created_at', { ascending: true }).range(from, from + PAGE - 1)
-
-  const ids = (righe || []).map((r: any) => r.spedizione_id).filter(Boolean)
+  const tutte = await fetchAll(() => filtra(admin.from('cod_da_caricare').select('spedizione_id,importo')))
+  const ids = tutte.map((r: any) => r.spedizione_id).filter(Boolean)
   const info = new Map<string, any>()
-  if (ids.length) {
-    const { data: sp } = await admin.from('spedizioni').select('id,numero,dest_nome,dest_citta,created_at').in('id', ids)
+  for (let i = 0; i < ids.length; i += 300) {
+    const { data: sp } = await admin.from('spedizioni').select('id,numero,dest_nome,dest_citta,created_at').in('id', ids.slice(i, i + 300))
     for (const s of (sp || [])) info.set((s as any).id, s)
   }
 
-  return NextResponse.json({
-    totale: count || 0,
-    page,
-    perPage: PAGE,
-    righe: (righe || []).map((r: any) => ({
+  // Ordino per DATA SPEDIZIONE (recenti prima); a parita' di data, per numero.
+  const ordinate = tutte.map((r: any) => {
+    const s = info.get(r.spedizione_id) || {}
+    return {
       spedizione_id: r.spedizione_id,
       importo: Number(r.importo) || 0,
-      numero: info.get(r.spedizione_id)?.numero || '—',
-      dest_nome: info.get(r.spedizione_id)?.dest_nome || '',
-      dest_citta: info.get(r.spedizione_id)?.dest_citta || '',
-      created_at: info.get(r.spedizione_id)?.created_at || null,
-    })),
+      numero: s.numero || '—',
+      dest_nome: s.dest_nome || '',
+      dest_citta: s.dest_citta || '',
+      created_at: s.created_at || null,
+    }
+  }).sort((a: any, b: any) => {
+    const d = String(b.created_at || '').localeCompare(String(a.created_at || ''))
+    return d !== 0 ? d : String(a.numero).localeCompare(String(b.numero))
+  })
+
+  const from = (page - 1) * PAGE
+  return NextResponse.json({
+    totale: ordinate.length,
+    page,
+    perPage: PAGE,
+    righe: ordinate.slice(from, from + PAGE),
   })
 }
