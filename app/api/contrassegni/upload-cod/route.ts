@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { fetchAll } from '@/lib/fetch-all'
 
 // Risale la catena dei master: [masterId, padre, nonno, ...]
 async function risaliCatena(adminDb: any, masterId: string): Promise<string[]> {
@@ -49,11 +50,20 @@ export async function POST(req: NextRequest) {
   }
 
   let spedizioniProcessate = 0, codFile = 0, codSistema = 0, codDaPagare = 0, errori = 0, saltateNonPagate = 0
-  let doppioniFile = 0, giaPagati = 0, giaInDistintaCount = 0
+  let doppioniFile = 0, giaPagati = 0, giaInDistintaCount = 0, giaInSostaCount = 0
   const inSosta: any[] = []   // righe da mettere nell'area "da caricare" (niente distinte automatiche)
   // Anti-doppione DENTRO il file: la stessa spedizione ripetuta su più righe entrerebbe due volte
   // in distinta (il check su DB vede solo le distinte GIÀ salvate) → si pagherebbe doppio.
   const vistiInFile = new Set<string>()
+  // GIA' IN SOSTA da un file/chunk PRECEDENTE: la stessa LDV non si ricarica. Prima solo il vincolo
+  // unico del DB la fermava DOPO (upsert ignoreDuplicates), ma la riga veniva comunque CONTATA come
+  // "processata": ricaricando lo stesso file i numeri si gonfiavano e sembrava di caricare due volte
+  // la stessa LDV. Ora la si riconosce PRIMA (set caricato a inizio richiesta, quindi copre anche i
+  // chunk gia' scritti) e la si conta a parte, senza gonfiare "processate"/"da pagare".
+  const giaInSostaSet = new Set<string>()
+  for (const r of await fetchAll(() => adminDb.from('cod_da_caricare').select('spedizione_id').eq('master_id', masterId))) {
+    if ((r as any).spedizione_id) giaInSostaSet.add((r as any).spedizione_id)
+  }
 
   for (const rigaRaw of (righe || [])) {
     const riga: any = {}
@@ -104,6 +114,9 @@ export async function POST(req: NextRequest) {
     vistiInFile.add(spedizione.id)
     // Contrassegno GIÀ PAGATO in una distinta precedente → mai ripagarlo.
     if (spedizione.stato_contrassegno === 'pagato') { giaPagati++; continue }
+    // GIÀ IN SOSTA (caricato da un file/chunk precedente, non ancora messo in distinta): non si
+    // ricarica e NON si riconta come "processata". Risparmia anche la query giaInDistinta qui sotto.
+    if (giaInSostaSet.has(spedizione.id)) { giaInSostaCount++; continue }
 
     // Solo discesa: chi carica deve essere il master della spedizione o un antenato
     const catena = await getCatena(spedizione.master_id)
@@ -154,7 +167,7 @@ export async function POST(req: NextRequest) {
   // RICONCILIAZIONE: ogni riga del file DEVE finire in UNA categoria. Se il totale non torna
   // (nonClassificate > 0) c'e' una riga persa per strada, e va segnalata invece di sparire.
   const righeTot = (righe || []).length
-  const nonClassificate = righeTot - (spedizioniProcessate + errori + saltateNonPagate + doppioniFile + giaPagati + giaInDistintaCount)
+  const nonClassificate = righeTot - (spedizioniProcessate + errori + saltateNonPagate + doppioniFile + giaPagati + giaInDistintaCount + giaInSostaCount)
 
   // In modalità chunk il record riepilogo NON si scrive per ogni blocco: lo scrive la chiamata finale
   // `soloLog` con i totali del file. Le chiamate singole (scriviLog=true) restano identiche a prima.
@@ -169,6 +182,7 @@ export async function POST(req: NextRequest) {
     success: true, spedizioniProcessate, codFile, codSistema, codDaPagare, codInDistinte,
     errori, saltateNonPagate, doppioniFile, giaPagati,
     giaInDistinta: giaInDistintaCount,          // gia' in una mia distinta (prima: saltate in silenzio)
+    giaInSosta: giaInSostaCount,                // gia' in area di sosta (re-upload dello stesso file)
     nonClassificate,                            // DEVE essere 0: se >0 qualche riga non e' stata classificata
     inAttesa,                                   // quante spedizioni sono ora in attesa di essere caricate
     righeFile: righeTot,
