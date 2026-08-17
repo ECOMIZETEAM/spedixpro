@@ -18,7 +18,7 @@ export default function TestGls({ corriereId }: { corriereId: string }) {
       const d = await res.json().catch(() => ({}))
       if (d?.ok) {
         setStato('ok')
-        setMsg(`Connessione riuscita. N° spedizione di prova: ${d.numeroSpedizione}${d.haEtichetta ? ' · etichetta ricevuta' : ' · ⚠️ nessuna etichetta'}${d.collodProvaAnnullato === false ? ' · ⚠️ collo di prova NON annullato (cancellalo dal portale GLS)' : ''}`)
+        setMsg(`Connessione riuscita. Tracking di prova: ${d.tracking || d.numeroSpedizione}${d.haEtichetta ? ' · etichetta ricevuta' : ' · ⚠️ nessuna etichetta'}${d.collodProvaAnnullato === false ? ' · ⚠️ collo di prova NON annullato (cancellalo dal portale GLS)' : ''}`)
       } else {
         setStato('ko')
         setMsg((d?.errore || d?.error || 'Errore sconosciuto') + (d?.raw ? `\n\nRisposta GLS:\n${d.raw}` : ''))

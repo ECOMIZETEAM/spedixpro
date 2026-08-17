@@ -48,7 +48,16 @@ export type ParcelGls = {
 }
 
 export type RisultatoGls = {
+  // NUDO (es. 860091374): è quello che vogliono GetPdfBySped e DeleteSped.
   numeroSpedizione: string | null
+  // TRACKING per il cliente = SiglaMittente + numero (es. NL860091374). La sigla è la sede del
+  // CONTRATTO (SedeGls), costante: Quick "GLS NL LIGHT" → NL; Ecomize "GLS TR" → TR. È definitivo
+  // anche in "GLS Check". NB: NON è la sigla di DESTINO (M2/DUOMO…), che varia e manca in GLS Check.
+  tracking: string | null
+  siglaMittente: string | null
+  siglaSedeDestino: string | null
+  // true = indirizzo non instradato: numero valido ma la sede lo rilavora a mano. Da mostrare.
+  glsCheck: boolean
   pdfBase64: string | null
   errore: string | null
   raw: string
@@ -141,17 +150,26 @@ export async function creaSpedizioneGls(cred: CredenzialiGls, parcel: ParcelGls)
     soap = await chiamaGls('AddParcel', `<XMLInfoParcel>${escXml(xml)}</XMLInfoParcel>`)
   } catch (e) {
     // Rete/timeout PRIMA di una risposta: non c'è (quasi certamente) nessun collo creato.
-    return { numeroSpedizione: null, pdfBase64: null, errore: 'GLS non raggiungibile: ' + (e instanceof Error ? e.message : String(e)), raw: '' }
+    return { numeroSpedizione: null, tracking: null, siglaMittente: null, siglaSedeDestino: null, glsCheck: false, pdfBase64: null, errore: 'GLS non raggiungibile: ' + (e instanceof Error ? e.message : String(e)), raw: '' }
   }
   const fault = faultString(soap)
   // il contenuto utile è XML-escapato dentro <AddParcelResult>
   const inner = (estraiTag(soap, 'AddParcelResult') ?? soap)
     .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&')
-  const numRaw = estraiTag(inner, 'NumeroSpedizione')
-  const numeroSpedizione = numRaw && /\d/.test(numRaw) ? numRaw.trim() : null
+  const numRaw = (estraiTag(inner, 'NumeroSpedizione') || '').trim()
+  // 999999999 è il sentinella d'errore di GLS (non un numero vero).
+  const numeroSpedizione = numRaw && /\d/.test(numRaw) && numRaw !== '999999999' ? numRaw : null
+  const siglaMittente = (estraiTag(inner, 'SiglaMittente') || '').trim() || null
+  const siglaSedeDestino = (estraiTag(inner, 'SiglaSedeDestino') || '').trim() || null
+  const descrDestino = (estraiTag(inner, 'DescrizioneSedeDestino') || '').trim()
+  const glsCheck = /gls\s*check/i.test(descrDestino)
+  // Tracking = sigla sede del CONTRATTO (mittente) + numero. Fallback alla SedeGls delle credenziali
+  // se la risposta non riportasse la sigla.
+  const prefisso = (siglaMittente || (cred.sigla_sede || '')).trim()
+  const tracking = numeroSpedizione ? (prefisso + numeroSpedizione) : null
   const errGls = estraiTag(inner, 'DescrizioneErrore') || estraiTag(inner, 'Errore')
   const errore = numeroSpedizione ? null : (fault || errGls || 'GLS non ha restituito un numero spedizione')
-  return { numeroSpedizione, pdfBase64: null, errore, raw: (soap || '').substring(0, 2000) }
+  return { numeroSpedizione, tracking, siglaMittente, siglaSedeDestino, glsCheck, pdfBase64: null, errore, raw: (soap || '').substring(0, 2000) }
 }
 
 // Scarica l'etichetta PDF (base64) di una spedizione già creata.

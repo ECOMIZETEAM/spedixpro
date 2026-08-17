@@ -62,6 +62,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: !!ris.numeroSpedizione,
       numeroSpedizione: ris.numeroSpedizione,
+      tracking: ris.tracking,
       haEtichetta: !!ris.pdfBase64,
       errore: ris.errore,
       collodProvaAnnullato: annullato,

@@ -1462,7 +1462,10 @@ export async function POST(req: NextRequest) {
         await stornaPrenotazione()
         return NextResponse.json({ error: erroreCorrierePulito(ris.errore || 'GLS: creazione non riuscita') }, { status: 400 })
       }
-      const numeroFinale = ris.numeroSpedizione
+      // numeroBare = quello nudo (860…): lo vogliono GetPdfBySped e DeleteSped.
+      // numeroFinale = il TRACKING vero per il cliente = sigla sede + numero (es. NL860…).
+      const numeroBare = ris.numeroSpedizione
+      const numeroFinale = ris.tracking || ris.numeroSpedizione
       const etichettaUrl = ris.pdfBase64 ? `data:application/pdf;base64,${ris.pdfBase64}` : null
 
       const colliDettaglio = (body.colliDettaglio || packages.map((p: any) => ({ lunghezza: p.length, larghezza: p.width, altezza: p.height })))
@@ -1491,7 +1494,9 @@ export async function POST(req: NextRequest) {
         tracking_number: numeroFinale,
         etichetta_url: etichettaUrl,
         colli_dettaglio: colliDettaglio,
-        raw_response: { _gls: true, numero: numeroFinale },
+        // Si conserva il numero NUDO (serve a GetPdfBySped/DeleteSped/CloseWorkDay) accanto al
+        // tracking mostrato, più le sigle sede e il flag GLS Check.
+        raw_response: { _gls: true, numero: numeroBare, tracking: numeroFinale, siglaMittente: ris.siglaMittente, siglaSedeDestino: ris.siglaSedeDestino, glsCheck: ris.glsCheck },
         stato: 'in_lavorazione',
         costo_spedizione: costoCorrente, costo_totale: costoCliente,
         servizi_accessori: serviziAccessori,
@@ -1505,7 +1510,7 @@ export async function POST(req: NextRequest) {
       if (insertError) {
         // COMPENSAZIONE: la spedizione esiste su GLS ma non da noi -> la si annulla, cosi' nessuno
         // paga una spedizione che non risulta a sistema.
-        const annullata = await annullaSpedizioneGls(credGls, numeroFinale)
+        const annullata = await annullaSpedizioneGls(credGls, numeroBare)
         console.error('[CREA][GLS][INSERT]', numeroFinale, insertError.message)
         return NextResponse.json({
           error: annullata
@@ -1533,7 +1538,7 @@ export async function POST(req: NextRequest) {
         after(async () => {
           try {
             const { etichettaGls } = await import('@/lib/gls')
-            const et = await etichettaGls(credGls, numeroFinale, { bda })
+            const et = await etichettaGls(credGls, numeroBare, { bda })
             if (et.pdfBase64) await adminCrea.from('spedizioni').update({ etichetta_url: `data:application/pdf;base64,${et.pdfBase64}` }).eq('id', spedIdBg)
           } catch (e) { console.error('[CREA][GLS] recupero etichetta background:', e) }
         })
