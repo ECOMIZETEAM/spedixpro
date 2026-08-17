@@ -7,7 +7,7 @@ export async function GET() {
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
   const { data } = await supabase.from('corrieri')
-    .select('id,nome_contratto,tipo,multicollo,inserimento_ritiri,settings,attivo')
+    .select('id,nome_contratto,tipo,multicollo,inserimento_ritiri,settings,attivo,livello,proprio')
     .eq('master_id', utente?.master_id)
     .order('nome_contratto')
   // Contratti messi in pausa da un master SOPRA: per chi sta sotto non devono nemmeno comparire.

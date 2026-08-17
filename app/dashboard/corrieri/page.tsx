@@ -178,6 +178,10 @@ export default function CorrieriPage() {
                   style={{background:c.attivo?'#fef2f2':'#f0fdf4',color:c.attivo?'#dc2626':'#16a34a',padding:'5px 10px',borderRadius:'6px',fontSize:'11px',fontWeight:'600',border:'none',cursor:'pointer'}}>
                   {c.attivo?'|| In pausa':'▶ Riattiva'}
                 </button>
+                {c.proprio && (
+                  <a href={`/dashboard/corrieri/aggiungi?tipo=${c.tipo}&id=${c.id}`} title="Modifica credenziali del contratto (solo il proprietario)"
+                    style={{padding:'5px 10px',background:'#eff6ff',color:'#2563eb',borderRadius:'6px',fontSize:'11px',border:'1px solid #bfdbfe',cursor:'pointer',textDecoration:'none'}}>✎ Modifica</a>
+                )}
                 <button onClick={() => apriImpostazioni(c)} title="Impostazioni"
                   style={{padding:'5px 10px',background:'#fff7ed',color:'#f97316',borderRadius:'6px',fontSize:'11px',border:'1px solid #fed7aa',cursor:'pointer'}}>⚙ Impostazioni</button>
                 <button onClick={() => setConfermaElimina(c.id)} title="Elimina"
