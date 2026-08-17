@@ -59,7 +59,7 @@ export default function DistinteContrassegniPage() {
     setDettGruppo(prev => ({ ...prev, [chiave]: { ...(prev[chiave]||{}), loading: true } }))
     try {
       const d = await fetch(`/api/contrassegni/da-caricare/dettaglio?chiave=${encodeURIComponent(chiave)}&page=${page}`).then(r=>r.json())
-      setDettGruppo(prev => ({ ...prev, [chiave]: { totale: d?.totale||0, page: d?.page||page, perPage: d?.perPage||10, righe: d?.righe||[], loading: false } }))
+      setDettGruppo(prev => ({ ...prev, [chiave]: { totale: d?.totale||0, page: d?.page||page, perPage: d?.perPage||10, righe: d?.righe||[], perGiorno: d?.perGiorno||{}, loading: false } }))
     } catch { setDettGruppo(prev => ({ ...prev, [chiave]: { ...(prev[chiave]||{}), loading: false } })) }
   }
   function toggleEspansi(chiave: string) {
@@ -79,6 +79,23 @@ export default function DistinteContrassegniPage() {
   function toggleGruppo(chiave: string) {
     setSelDest(prev => { const n = new Set(prev); if (n.has(chiave)) { n.delete(chiave); return n } n.add(chiave); return n })
     setSelSped(prev => { if (!prev[chiave]) return prev; const n = { ...prev }; delete n[chiave]; return n })
+  }
+  // Checkbox dell'intestazione GIORNO: seleziona/deseleziona tutte le spedizioni di quel giorno
+  // (anche quelle su altre pagine, via perGiorno). Se il gruppo era "intero" passo al granulare
+  // partendo da TUTTE le sue spedizioni, poi tolgo il giorno — cosi' "intero meno un giorno" funziona.
+  function toggleGiorno(chiave: string, giornoIds: string[]) {
+    if (!giornoIds.length) return
+    const perG: Record<string, string[]> = dettGruppo[chiave]?.perGiorno || {}
+    const tuttiGruppo = Object.values(perG).flat() as string[]
+    const eraIntero = selDest.has(chiave)
+    setSelDest(prev => { if (!prev.has(chiave)) return prev; const n = new Set(prev); n.delete(chiave); return n })
+    setSelSped(prev => {
+      const cur = new Set(eraIntero ? tuttiGruppo : (prev[chiave] || []))
+      const tuttiSel = giornoIds.every(id => cur.has(id))
+      if (tuttiSel) giornoIds.forEach(id => cur.delete(id)); else giornoIds.forEach(id => cur.add(id))
+      const next = { ...prev }; if (cur.size) next[chiave] = cur; else delete next[chiave]
+      return next
+    })
   }
 
   // Conta i contrassegni selezionati su TUTTA la rete: gruppi interi (tutte le loro spedizioni) +
@@ -443,15 +460,20 @@ export default function DistinteContrassegniPage() {
                           <div>
                             {dett.righe.map((s:any, idx:number)=>{
                               const sel = intero || (selSped[g.chiave]?.has(s.spedizione_id) || false)
-                              const giorno = s.created_at ? new Date(s.created_at).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric'}) : 'Senza data'
-                              const prec = idx>0 ? dett.righe[idx-1].created_at : undefined
-                              const giornoPrec = idx>0 ? (prec ? new Date(prec).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric'}) : 'Senza data') : null
+                              const iso = s.created_at ? String(s.created_at).slice(0,10) : 'senza-data'
+                              const isoPrec = idx>0 ? (dett.righe[idx-1].created_at ? String(dett.righe[idx-1].created_at).slice(0,10) : 'senza-data') : null
+                              const giornoLabel = s.created_at ? new Date(s.created_at).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric'}) : 'Senza data'
+                              const giornoIds: string[] = (dett.perGiorno?.[iso] || [])
+                              const giornoSel = intero || (giornoIds.length>0 && giornoIds.every((id:string)=>selSped[g.chiave]?.has(id)))
                               return (
                                 <Fragment key={s.spedizione_id}>
-                                  {giorno!==giornoPrec && (
-                                    <div style={{padding:'7px 8px 3px',fontSize:'11px',fontWeight:700,color:'#6b7280',textTransform:'uppercase' as const,letterSpacing:'.02em',background:'#f6faf8',borderBottom:'1px solid #eef2f0'}}>📅 {giorno}</div>
+                                  {iso!==isoPrec && (
+                                    <label style={{display:'flex',alignItems:'center',gap:'8px',padding:'7px 8px 5px',fontSize:'11px',fontWeight:700,color:'#166534',textTransform:'uppercase' as const,letterSpacing:'.02em',background:'#f6faf8',borderBottom:'1px solid #eef2f0',cursor:'pointer'}}>
+                                      <input type="checkbox" checked={giornoSel} onChange={()=>toggleGiorno(g.chiave, giornoIds)} style={{width:'14px',height:'14px',cursor:'pointer'}}/>
+                                      📅 {giornoLabel} <span style={{color:'#9ca3af',fontWeight:400}}>({giornoIds.length})</span>
+                                    </label>
                                   )}
-                                  <label style={{display:'flex',alignItems:'center',gap:'10px',padding:'6px 8px',borderBottom:'1px solid #eef2f0',cursor:'pointer',fontSize:'12px'}}>
+                                  <label style={{display:'flex',alignItems:'center',gap:'10px',padding:'6px 8px 6px 26px',borderBottom:'1px solid #eef2f0',cursor:'pointer',fontSize:'12px'}}>
                                     <input type="checkbox" checked={sel} onChange={()=>toggleSpedizione(g.chiave, s.spedizione_id)} style={{width:'14px',height:'14px',cursor:'pointer'}}/>
                                     <span style={{fontFamily:'monospace',color:'#1a1a1a',minWidth:'130px'}}>{s.numero}</span>
                                     <span style={{color:'#374151',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{s.dest_nome}{s.dest_citta?` · ${s.dest_citta}`:''}</span>
@@ -464,9 +486,11 @@ export default function DistinteContrassegniPage() {
                             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'8px',padding:'8px 4px 2px',flexWrap:'wrap' as const}}>
                               <span style={{fontSize:'11px',color:'#6b7280'}}>{(dett.page-1)*(dett.perPage||10)+1}-{Math.min(dett.page*(dett.perPage||10), dett.totale)} di {dett.totale}</span>
                               <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
+                                <button onClick={()=>dett.page>1 && caricaDettaglio(g.chiave, 1)} disabled={dett.page<=1} title="Prima pagina" style={{padding:'4px 9px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'11px',cursor:dett.page<=1?'default':'pointer',color:dett.page<=1?'#ccc':'#1a1a1a'}}>« Prima</button>
                                 <button onClick={()=>dett.page>1 && caricaDettaglio(g.chiave, dett.page-1)} disabled={dett.page<=1} style={{padding:'4px 9px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'11px',cursor:dett.page<=1?'default':'pointer',color:dett.page<=1?'#ccc':'#1a1a1a'}}>‹ Prec</button>
                                 <span style={{fontSize:'11px',color:'#6b7280'}}>Pag. {dett.page}/{totPag}</span>
                                 <button onClick={()=>dett.page<totPag && caricaDettaglio(g.chiave, dett.page+1)} disabled={dett.page>=totPag} style={{padding:'4px 9px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'11px',cursor:dett.page>=totPag?'default':'pointer',color:dett.page>=totPag?'#ccc':'#1a1a1a'}}>Succ ›</button>
+                                <button onClick={()=>dett.page<totPag && caricaDettaglio(g.chiave, totPag)} disabled={dett.page>=totPag} title="Ultima pagina" style={{padding:'4px 9px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'11px',cursor:dett.page>=totPag?'default':'pointer',color:dett.page>=totPag?'#ccc':'#1a1a1a'}}>Ultima »</button>
                               </div>
                             </div>
                           </div>

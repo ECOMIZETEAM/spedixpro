@@ -63,11 +63,20 @@ export async function GET(req: NextRequest) {
     return d !== 0 ? d : String(a.numero).localeCompare(String(b.numero))
   })
 
+  // Id per GIORNO (chiave ISO YYYY-MM-DD) su TUTTO il gruppo: serve alla UI per "seleziona tutte le
+  // spedizioni di quel giorno" anche quando il blocco-data sfora piu' pagine.
+  const perGiorno: Record<string, string[]> = {}
+  for (const r of ordinate) {
+    const g = r.created_at ? String(r.created_at).slice(0, 10) : 'senza-data'
+    ;(perGiorno[g] ||= []).push(r.spedizione_id)
+  }
+
   const from = (page - 1) * PAGE
   return NextResponse.json({
     totale: ordinate.length,
     page,
     perPage: PAGE,
     righe: ordinate.slice(from, from + PAGE),
+    perGiorno,
   })
 }
