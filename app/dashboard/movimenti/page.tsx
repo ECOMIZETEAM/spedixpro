@@ -42,6 +42,8 @@ export default function MovimentiMasterPage() {
   const [saldo, setSaldo] = useState(0)
   // null = un conto solo (quasi tutti). Valorizzato solo per chi porta contratti suoi.
   const [saldoProprio, setSaldoProprio] = useState<number|null>(null)
+  // Commissioni MoovExpress accumulate sui contratti propri (0,05 €/spedizione). null = non applicabile.
+  const [saldoCommissioni, setSaldoCommissioni] = useState<number|null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [cerca, setCerca] = useState('')
@@ -125,6 +127,7 @@ export default function MovimentiMasterPage() {
         if (res.ok) {
           setMovimenti(data.movimenti || []); setSaldo(Number(data.saldo || 0))
           setSaldoProprio(data.saldoProprio == null ? null : Number(data.saldoProprio))
+          setSaldoCommissioni(data.saldoCommissioni == null ? null : Number(data.saldoCommissioni))
           setTotal(Number(data.total || 0)); setSomma(Number(data.somma || 0))
           if (Array.isArray(data.corrieriDisponibili)) setCorrieriOpts(data.corrieriDisponibili)
           setErr(null)
@@ -233,6 +236,12 @@ export default function MovimentiMasterPage() {
             <div>
               <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>Credito · contratti tuoi</div>
               <div style={{fontSize:'26px',fontWeight:700,color:saldoProprio<0?'#b91c1c':'#15803d',marginTop:'4px'}}>{fmtEuro(saldoProprio)}</div>
+            </div>
+          )}
+          {saldoCommissioni!=null && (
+            <div title="0,05 € per spedizione sui tuoi contratti. Si accumula e si salda a parte: non blocca mai le spedizioni.">
+              <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>Commissioni MoovExpress</div>
+              <div style={{fontSize:'26px',fontWeight:700,color:saldoCommissioni<0?'#b45309':'#15803d',marginTop:'4px'}}>{fmtEuro(saldoCommissioni)}</div>
             </div>
           )}
           <div>

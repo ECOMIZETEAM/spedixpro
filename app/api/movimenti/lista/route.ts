@@ -92,7 +92,7 @@ export async function GET(req: NextRequest) {
     }
     const { movimenti, total, somma } = await carica(supabase, 'master_target_id', utente.master_id)
     const { data: m } = await supabase
-      .from('masters').select('credito, nome, credito_proprio').eq('id', utente.master_id).single()
+      .from('masters').select('credito, nome, credito_proprio, commissioni_moovexpress').eq('id', utente.master_id).single()
     // Chi porta contratti SUOI ha due conti, e finora ne vedeva uno: i costi dei suoi contratti
     // scendevano da un saldo che nessuna pagina mostrava. Il secondo si manda solo a chi ce l'ha
     // davvero, cosi' per tutti gli altri la pagina resta identica.
@@ -107,6 +107,9 @@ export async function GET(req: NextRequest) {
       corrieriDisponibili,
       saldo: Number(m?.credito || 0),
       saldoProprio: dueConti ? Number((m as any)?.credito_proprio || 0) : undefined,
+      // Commissioni MoovExpress accumulate sui contratti propri (0,05 €/spedizione): lista/saldo a
+      // parte, si mostra solo a chi ha contratti propri. Negativo = dovuto a MoovExpress.
+      saldoCommissioni: dueConti ? Number((m as any)?.commissioni_moovexpress || 0) : undefined,
       cliente: m?.nome || null,
     })
   }
