@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
-import { spediamoproGetTracking, mapStatoSpediamopro } from '@/lib/spediamopro'
+import { spediamoproGetTracking, mapStatoSpediamopro, spediamoproEventiIndicanoReso } from '@/lib/spediamopro'
 import { prioritaStato } from '@/lib/spedisci'
 import { erroreTrackingPulito } from '@/lib/errore-corriere'
 
@@ -78,7 +78,11 @@ export async function GET(req: NextRequest) {
       const authcode = cred?.authcode
       if (!spid || !authcode) return NextResponse.json({ ...base, eventi: [], stato: statoEffettivo, error: 'Tracking non disponibile per questa spedizione' })
       const tr = await spediamoproGetTracking(authcode, Number(spid))
-      await persistiStato(mapStatoSpediamopro(tr.status))
+      // Reso al mittente: lo status numerico non lo distingue, lo dicono gli eventi. Se c'e', vince
+      // (poi la guardia "reso appiccicoso" in persistiStato tiene reso anche sulla consegna di ritorno).
+      let nuovoSp = mapStatoSpediamopro(tr.status)
+      if (spediamoproEventiIndicanoReso(tr.events)) nuovoSp = 'reso_mittente'
+      await persistiStato(nuovoSp)
       // RECUPERO NUMERO al volo: se il numero è ancora il codice interno SpediamoPro (raw.code) e ora
       // esiste il tracking reale del corriere, correggo subito (senza aspettare il giro del cron).
       if (tr.trackingCode && tr.trackingCode !== spedizione.numero && (spedizione.numero === raw.code || String(spedizione.numero || '').startsWith('SP-'))) {

@@ -46,20 +46,31 @@ export function trovaRateContratto(rates: any[], cred: any): any | null {
   return null
 }
 
+// UN TESTO DI TRACKING INDICA UN RESO AL MITTENTE. Match PRECISO: decide un ADDEBITO, quindi un
+// falso positivo vale soldi (il guasto 'dal mittente' costo' 345,88 EUR il 06-07/08/2026).
+// Si pretende un VERBO DI RIENTRO immediatamente prima di " al mittente". Cosi':
+//   - 'creata DAL mittente' -> "d"+"al mittente" NON matcha (nessun verbo di rientro davanti);
+//   - 'reso DISPONIBILE presso l'ufficio' (participio di rendere = GIACENZA) NON matcha: manca "al mittente";
+//   - 'rientro in filiale/sede' (torna in deposito dopo mancata consegna, riesce il giorno dopo) NON matcha;
+//   - 'restituzione IMPORTO contrassegno al mittente' (rimessa DENARO del COD) NON matcha: fra
+//     'restituzione' e 'al mittente' c'e' 'importo', non sono adiacenti;
+//   - 'consegnato al DESTINATARIO' (consegna vera) NON matcha.
+// Include 'consegnat... al mittente' (la CONSEGNA del reso al mittente, che chiude il giro).
+// REGOLA UNICA condivisa da TUTTI i corrieri (sta in un posto solo): spedisci la usa nella mappatura
+// stati; spediamopro la applica sugli EVENTI, perche' il suo stato numerico non distingue il reso
+// (una riconsegna al mittente registra come "consegnata").
+export function testoIndicaReso(testo: string): boolean {
+  const s = (testo || '').toLowerCase()
+  return /(res[oa]|ritorn\w*|rientr\w*|restitu\w*|respint\w*|rispedit\w*|consegn\w*|rinvi\w*) al mittente/.test(s)
+    || /return(ed|ing)? to sender/.test(s)
+}
+
 export function mapStatoSpedisci(statusStr: string): string | null {
   const s = (statusStr || '').toLowerCase()
   if (!s) return null
   if (s.includes('consegnat') || s.includes('delivered')) return 'consegnata'  // NB: 'delivered' (non 'deliver') per non catturare "out for delivery"
   if (s.includes('giacenz') || s.includes('stock') || s.includes('deposit') || s.includes('giacenza')) return 'in_giacenza'
-  // RESO: match PRECISO. Il vecchio codice usava s.includes('reso') e s.includes('al mittente'),
-  // e questi due catturavano frasi che resi NON sono:
-  //   - 'al mittente' e' dentro 'dal mittente': "La spedizione e' stata creata dal mittente" ("d"
-  //     + "al mittente") marcava reso OGNI spedizione GLS appena creata. Guasto vero, 06/08/2026.
-  //   - 'reso' e' dentro 'preso': "preso in carico" sarebbe caduto qui invece che in "spedita".
-  // Ora: 'reso' come PAROLA INTERA, piu' le frasi di rientro esplicite. "al mittente" da solo non
-  // basta: dev'essere preceduto da reso/ritorno/rientro/restituzione.
-  if (/\breso\b/.test(s) || s.includes('return to sender') || /\brientr/.test(s)
-      || /restitu/.test(s) || /(ritorno|ritornat\w*|respint\w*|resa|rispedit\w*) al mittente/.test(s)) return 'reso_mittente'
+  if (testoIndicaReso(s)) return 'reso_mittente'
   if (s.includes('in consegna') || s.includes('out for delivery') || s.includes('distribuzione') || s.includes('in distribuzione')) return 'in_consegna'
   if (s.includes('transit') || s.includes('transito') || s.includes('arrivat') || s.includes('hub') || s.includes('partenz') || s.includes('viaggio') || s.includes('smistament')) return 'in_transito'
   if (s.includes('presa in carico') || s.includes('preso in caric') || s.includes('spedit') || s.includes('accettat') || s.includes('ritirat') || s.includes('partita') || s.includes('picked') || s.includes('lavorazione')) return 'spedita'

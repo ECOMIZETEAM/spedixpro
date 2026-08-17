@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { prioritaStato } from '@/lib/spedisci'
+import { prioritaStato, testoIndicaReso } from '@/lib/spedisci'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -19,7 +19,8 @@ function mappaFrase(str: string): string | null {
   if (t.includes('non consegnat') || t.includes('mancata') || t.includes('tentativo di consegna')) return 'non_consegnato'
   if (t.includes('consegnat')) return 'consegnata'
   if (t.includes('giacenz')) return 'in_giacenza'
-  if (t.includes('reso') || t.includes('restituz') || t.includes('al mittente') || t.includes('rientro')) return 'reso_mittente'
+  // Regola reso UNICA e blindata (evita 'dal mittente'/'preso'/'reso disponibile'), come le altre porte.
+  if (testoIndicaReso(t)) return 'reso_mittente'
   if (t.includes('in consegna')) return 'in_consegna'
   if (t.includes('transito')) return 'in_transito'
   if (t.includes('presa in carico') || t.includes('accettat')) return 'spedita'

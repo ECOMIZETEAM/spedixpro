@@ -3,6 +3,7 @@
  * Auth: OAuth2 Client Credentials (Authcode as Basic username, empty password)
  * Units: weight in grams, dimensions in mm, prices in euro cents
  */
+import { testoIndicaReso } from './spedisci'
 
 const BASE_URL = 'https://core.spediamopro.com/api/v2'
 
@@ -571,4 +572,15 @@ export function mapStatoSpediamopro(status: number | null): string | null {
     case 11: return 'eccezione'
     default: return null
   }
+}
+
+// IL RESO STA NEGLI EVENTI, NON NELLO STATUS. Lo status numerico di SpediamoPro non ha un valore
+// per "reso al mittente": quando il pacco viene reso e riconsegnato al mittente lo status diventa
+// 10/12 (consegnata) e la spedizione risultava consegnata al destinatario — falso, e per giunta
+// il reso non veniva addebitato a nessuno. Il segnale c'e' solo negli eventi testuali ("RESO AL
+// MITTENTE"): qui li si guarda con la stessa regola blindata usata per gli altri corrieri.
+// events: [{ at, title, description }].
+export function spediamoproEventiIndicanoReso(events: any[]): boolean {
+  return (Array.isArray(events) ? events : []).some((e: any) =>
+    testoIndicaReso(`${e?.title || ''} ${e?.description || ''}`))
 }

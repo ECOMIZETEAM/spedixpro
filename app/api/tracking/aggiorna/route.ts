@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { spediamoproGetTracking, spediamoproSearchStocks, mapStatoSpediamopro, spediamoproGetLabel, normalizzaEtichetta } from '@/lib/spediamopro'
+import { spediamoproGetTracking, spediamoproSearchStocks, mapStatoSpediamopro, spediamoproEventiIndicanoReso, spediamoproGetLabel, normalizzaEtichetta } from '@/lib/spediamopro'
 import { spedisciTrackingStati, mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
 import { inviaWebhook } from '@/lib/webhooks'
 
@@ -112,6 +112,11 @@ export async function GET(req: NextRequest) {
             if (attivo?.reason) motivoGiacenza = String(attivo.reason).slice(0, 200)
           } catch { nuovo = 'non_consegnato' }
         }
+        // RESO AL MITTENTE: lo status numerico non lo distingue (una riconsegna al mittente registra
+        // come "consegnata"); lo dicono gli EVENTI. Se il pacco e' stato reso, lo stato e'
+        // reso_mittente — e il trigger DB (trg_reso_da_addebitare) mette in coda l'addebito del reso.
+        // Vince su tutto il resto (anche su una eventuale eccezione/giacenza dello stesso giro).
+        if (spediamoproEventiIndicanoReso(tr.events)) nuovo = 'reso_mittente'
         if (tr.trackingCode) nuovoTracking = tr.trackingCode
 
       } else if (tipo === 'spedisci') {
@@ -309,10 +314,20 @@ export async function GET(req: NextRequest) {
         const spId = (riga as any).spedizione_id
         try {
           const esito = await addebitaResoDaTracking(admin, spId)
-          // Si toglie dalla coda anche quando risulta gia' addebitato: significa che qualcun altro
-          // ha fatto il lavoro, ed e' il risultato voluto. Resta in coda solo se e' andata storta.
-          await admin.from('resi_da_addebitare').delete().eq('spedizione_id', spId)
-          if (esito.addebitato) resiAddebitati++
+          if (esito.addebitato) {
+            // Si toglie dalla coda SOLO se qualcuno ha davvero pagato (o era gia' pagato: qualcun
+            // altro ha fatto il lavoro, risultato voluto).
+            await admin.from('resi_da_addebitare').delete().eq('spedizione_id', spId)
+            resiAddebitati++
+          } else {
+            // addebitato:false NON e' un successo. addebitaResoGiacenza INGOIA l'errore della RPC e
+            // torna false: cancellare qui perdeva il reso in silenzio per sempre (lo stato e' gia'
+            // reso_mittente, il trigger non lo rimette piu' in coda). Lo si lascia con tentativi++ per
+            // ritentare; dopo 5 resta a vista con l'errore, non sparisce.
+            await admin.from('resi_da_addebitare')
+              .update({ tentativi: ((riga as any).tentativi || 0) + 1, ultimo_errore: 'addebito non passato (nessun movimento scritto)' })
+              .eq('spedizione_id', spId)
+          }
         } catch (e: any) {
           console.error('[RESO][ADDEBITO] non riuscito', spId, e?.message)
           await admin.from('resi_da_addebitare')

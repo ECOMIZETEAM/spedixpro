@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { spediamoproGetTracking, mapStatoSpediamopro } from '@/lib/spediamopro'
+import { spediamoproGetTracking, mapStatoSpediamopro, spediamoproEventiIndicanoReso } from '@/lib/spediamopro'
 import { mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
 import { inviaWebhook } from '@/lib/webhooks'
 
@@ -60,6 +60,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
     if (!nuovo || nuovo === sped.stato) return
     if (nuovo === 'eccezione') { notifica('tracking.exception', nuovo, eventi); return }
     if (sped.stato === 'consegnata' || sped.stato === 'annullata') return
+    // Reso appiccicoso: dopo un reso la 'consegnata' del corriere e' la consegna del RITORNO al
+    // mittente, non una consegna al destinatario -> lo stato resta reso (come nelle altre due porte).
+    if (sped.stato === 'reso_mittente' && nuovo === 'consegnata') return
     try { await admin.from('spedizioni').update({ stato: nuovo }).eq('id', sped.id) } catch {}
     notifica(nuovo === 'consegnata' ? 'tracking.delivered' : 'tracking.updated', nuovo, eventi)
   }
@@ -70,7 +73,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
       const spid = raw.id || raw?.raw?.data?.id
       if (!spid || !cred.authcode) return NextResponse.json({ ...base, events: [] })
       const tr = await spediamoproGetTracking(cred.authcode, Number(spid))
-      const nuovo = mapStatoSpediamopro(tr.status)
+      // Reso al mittente: sta negli eventi, non nello status numerico (che registra "consegnata").
+      let nuovo = mapStatoSpediamopro(tr.status)
+      if (spediamoproEventiIndicanoReso(tr.events)) nuovo = 'reso_mittente'
       const events = (tr.events || []).map((e: any) => ({
         timestamp: e.at || e.date || '',
         status: [e.title, e.description].filter(Boolean).join(' — ') || 'Evento',
