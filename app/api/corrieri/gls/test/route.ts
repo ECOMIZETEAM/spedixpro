@@ -23,14 +23,19 @@ export async function POST(req: Request) {
   const corriereId = String(body?.corriereId || '')
   if (!corriereId) return NextResponse.json({ error: 'corriereId mancante' }, { status: 400 })
 
-  // Solo il PROPRIETARIO (proprio=true) del contratto, nel proprio master, di tipo gls.
+  // Verifica proprietà con client user-scoped (RLS), SENZA credenziali: la colonna `credenziali`
+  // non è leggibile da 'authenticated' (grant SELECT per-colonna), un select che la include
+  // fallirebbe l'intera query.
   const { data: c } = await supabase.from('corrieri')
-    .select('id,tipo,proprio,credenziali,settings,nome_contratto')
+    .select('id,tipo,proprio,settings,nome_contratto')
     .eq('id', corriereId).eq('master_id', utente.master_id).eq('proprio', true).eq('tipo', 'gls')
     .maybeSingle()
   if (!c) return NextResponse.json({ error: 'Contratto GLS non trovato o non di tua proprietà' }, { status: 403 })
 
-  const cred = (c.credenziali || {}) as CredenzialiGls
+  // Credenziali via admin: la proprietà è già verificata qui sopra.
+  const { createAdminSupabase } = await import('@/lib/supabase-admin')
+  const { data: credRow } = await createAdminSupabase().from('corrieri').select('credenziali').eq('id', corriereId).maybeSingle()
+  const cred = ((credRow as { credenziali?: CredenzialiGls } | null)?.credenziali || {}) as CredenzialiGls
   if (!cred.sigla_sede || !cred.user_webservice || !cred.password_webservice) {
     return NextResponse.json({ error: 'Credenziali GLS incomplete: compila Sigla Sede, User e Password del webservice dal pannello.' }, { status: 400 })
   }

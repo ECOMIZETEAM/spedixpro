@@ -164,10 +164,19 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
   let corriereEsistente: any = null
   if (id) {
     const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
-    const { data: c } = await supabase.from('corrieri').select('*').eq('id', id).eq('master_id', utente?.master_id).maybeSingle()
+    // Le CREDENZIALI non sono leggibili da 'authenticated' (il grant SELECT su corrieri e' per-colonna
+    // e le tiene fuori apposta): un select('*') qui falliva l'INTERA query -> `c` null -> la pagina
+    // rimbalzava sempre a /dashboard/corrieri (il pulsante Modifica sembrava non funzionare). Leggo
+    // prima i campi non-segreti (RLS + proprieta'), poi le credenziali via admin SOLO dopo aver
+    // verificato che il contratto e' del proprio master ed e' proprio.
+    const { data: c } = await supabase.from('corrieri')
+      .select('id,nome_contratto,tipo,settings,proprio,master_id')
+      .eq('id', id).eq('master_id', utente?.master_id).maybeSingle()
     if (!c) redirect('/dashboard/corrieri')
     if (!(c as any)?.proprio) redirect('/dashboard/corrieri?error=' + encodeURIComponent('Solo il proprietario del contratto può modificarlo'))
-    corriereEsistente = c
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { data: credRow } = await createAdminSupabase().from('corrieri').select('credenziali').eq('id', id).maybeSingle()
+    corriereEsistente = { ...(c as any), credenziali: (credRow as any)?.credenziali || {} }
   }
 
   const credenzialiEsistenti = corriereEsistente?.credenziali || {}
