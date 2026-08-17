@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { creaSpedizioneGls, annullaSpedizioneGls, type CredenzialiGls } from '@/lib/gls'
+import { creaSpedizioneConEtichettaGls, annullaSpedizioneGls, type CredenzialiGls } from '@/lib/gls'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEST connessione GLS diretto — SOLO IL PROPRIETARIO del contratto.
@@ -41,9 +41,8 @@ export async function POST(req: Request) {
   }
 
   // Collo di prova: destinazione neutra, 1 collo, 1 kg, nessun contrassegno.
-  const settings = (c.settings || {}) as Record<string, unknown>
   try {
-    const ris = await creaSpedizioneGls(cred, {
+    const ris = await creaSpedizioneConEtichettaGls(cred, {
       ragioneSociale: 'TEST MOOVEXPRESS - NON SPEDIRE',
       indirizzo: 'Via Prova 1',
       localita: 'Milano',
@@ -52,7 +51,6 @@ export async function POST(req: Request) {
       colli: 1,
       pesoReale: 1,
       bda: 'TEST',
-      tipoCollo: typeof settings.tipo_collo === 'string' ? settings.tipo_collo : undefined,
     })
 
     // Se ha creato davvero un collo, lo annulliamo per non lasciarlo sull'account.
