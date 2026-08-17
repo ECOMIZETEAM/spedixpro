@@ -212,6 +212,10 @@ export async function POST(req: NextRequest) {
   let numero = '', costoCorrente = 0, etichettaUrl: string | null = null, raw: any = null
   // Il codice del ritiro prenotato dal corriere: va restituito a chi integra, come fa il portale.
   let codiceRitiro: string | null = null
+  // MULTICOLLO: l'etichetta di OGNI collo. Il portale la salva qui e la label route la unisce; questa
+  // porta invece salvava solo il primo collo -> chi stampa da API riceveva una etichetta sola su un
+  // pacco da N colli. Resta null sul mono-collo e su spediamopro (che gia' consegna il PDF unito).
+  let colliDettaglio: any[] | null = null
 
   if (corriere.tipo === 'spedisci') {
     const baseUrl = `https://${cred.master_domain}/api/v2`
@@ -239,7 +243,26 @@ export async function POST(req: NextRequest) {
     // interni, e da qui finiva dritta a chi si integra con l'API. Il portale la ripuliva gia'.
     if (!res.ok || raw.error) return errore(erroreCorrierePulito(raw?.error || text))
     numero = raw.trackingNumber; costoCorrente = parseFloat(raw.shipmentCost) || 0
-    etichettaUrl = raw.labelData ? `data:application/pdf;base64,${raw.labelData}` : (Array.isArray(raw.labels) && raw.labels[0]?.labelData ? `data:application/pdf;base64,${raw.labels[0].labelData}` : null)
+    // MULTICOLLO: il provider torna una etichetta per collo in raw.labels; su mono-collo un solo
+    // labelData. Come il portale: si tiene la prima come principale e si salva OGNI collo in
+    // colli_dettaglio, cosi' la label route (leggiEtichettaCompleta) le unisce tutte. Prima si
+    // prendeva solo labels[0] e chi stampava da API riceveva un'etichetta sola su un multicollo.
+    let etichetteUrls: string[] = []
+    if (Array.isArray(raw.labels) && raw.labels.length) {
+      etichetteUrls = raw.labels.map((l: any) => l.labelData ? `data:application/pdf;base64,${l.labelData}` : (l.url || '')).filter(Boolean)
+    }
+    // Principale: la prima per-collo se il provider le ha separate, altrimenti il PDF unico — che su
+    // questo provider e' GIA' multipagina (un collo per pagina), verificato sulle spedizioni reali.
+    etichettaUrl = etichetteUrls[0] || (raw.labelData ? `data:application/pdf;base64,${raw.labelData}` : null)
+    // colli_dettaglio SOLO se il provider manda un'etichetta separata per collo (labels[] con piu' di
+    // uno): cosi' la label route le unisce. Con il labelData unico multipagina NON si duplica per
+    // collo (sarebbe lo stesso PDF N volte, spreco di disco): basta gia' etichetta_url.
+    if (packages.length > 1 && etichetteUrls.length > 1) {
+      colliDettaglio = packages.map((p: any, i: number) => ({
+        numero: i + 1, lunghezza: p?.length || null, larghezza: p?.width || null, altezza: p?.height || null, peso: p?.weight || null,
+        etichetta_url: etichetteUrls[i] || etichetteUrls[0] || null,
+      }))
+    }
     // Salvo carrier/contract usati: servono al RITIRO (pickup/create li rilegge da raw_response). Senza, la spedizione non è ritirabile.
     // Niente copia del PDF dentro raw_response: e' gia' in etichetta_url (vedi crea/route.ts).
     raw = { ...raw, labelData: undefined, labels: undefined, _carrierCode: rate.carrierCode, _contractCode: rate.contractCode }
@@ -335,8 +358,22 @@ export async function POST(req: NextRequest) {
         const w = await easyparcelWaybill(apikey, ordine.idOrdine, _vuoleRitiro ? 6 : 8, 1200, _vuoleRitiro)
         ldv = w.numero || null
         codiceRitiro = w.codiceRitiro || null
-        const b64 = w.singole[0]?.pdfBase64 || w.pdfBase64
+        // MULTICOLLO: il provider torna una etichetta per collo in w.singole. Come il portale: si
+        // uniscono tutte nel PDF principale E si salva OGNI collo in colli_dettaglio, cosi' la label
+        // route le rende tutte. Prima si prendeva solo singole[0] -> su un multicollo usciva una
+        // etichetta sola (poi il cron recuperaMulticollo la sanava, ma solo dopo, non alla stampa).
+        const singole = (w.singole || []).filter((s: any) => s?.pdfBase64)
+        const etichettePerCollo = singole.map((s: any) => `data:application/pdf;base64,${s.pdfBase64}`)
+        const { unisciEtichette } = await import('@/lib/easyparcel')
+        const b64 = (await unisciEtichette(singole.map((s: any) => s.pdfBase64))) || w.pdfBase64
         if (b64) etichettaUrl = `data:application/pdf;base64,${b64}`
+        if (packages.length > 1) {
+          colliDettaglio = packages.map((p: any, i: number) => ({
+            numero: i + 1, lunghezza: p?.length || null, larghezza: p?.width || null, altezza: p?.height || null, peso: p?.weight || null,
+            // Se il provider ne manda meno dei colli si lascia null: un'etichetta vuota si vede, una ripetuta inganna.
+            etichetta_url: etichettePerCollo[i] || null,
+          }))
+        }
       } catch (e: any) {
         // NON MUTO. Il progetto misura questo guasto contando "waybill non pronta" nei log, e qui
         // il catch vuoto rendeva la misura cieca proprio sulla porta che sbagliava di piu': per
@@ -366,7 +403,7 @@ export async function POST(req: NextRequest) {
     peso_volume: ris?.peso_volume || null, peso_fatturato: ris?.peso_fatturato || null,
     lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
     contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
-    tracking_number: numero, etichetta_url: etichettaUrl, raw_response: raw, stato: 'in_lavorazione',
+    tracking_number: numero, etichetta_url: etichettaUrl, colli_dettaglio: colliDettaglio, raw_response: raw, stato: 'in_lavorazione',
     costo_spedizione: costoCorrente, costo_totale: costoCliente, note: body.notes || null, contenuto: body.contenuto || null,
     richiedi_ritiro: _vuoleRitiro || false,
     data_ritiro: _vuoleRitiro ? _dataRitiro : null,
