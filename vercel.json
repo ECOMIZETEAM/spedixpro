@@ -40,6 +40,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/tracking/recupero-resi",
+      "schedule": "15,45 * * * *"
+    },
+    {
       "path": "/api/spedizioni/archivia-etichette",
       "schedule": "*/10 * * * *"
     },
