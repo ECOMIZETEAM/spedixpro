@@ -277,6 +277,12 @@ export default function DistinteContrassegniPage() {
       rimborsato: Number(r.importo_cod || 0),
     }))
   }
+  // Nome file dell'export: "Distinta contrassegni <CLIENTE> <numero>" — il cliente e' il nome che
+  // serve a chi lo apre; il numero resta come coda per non sovrascrivere due distinte dello stesso cliente.
+  function nomeFileDistinta(d: any) {
+    const cli = String(d.clienti?.ragione_sociale || '').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim()
+    return ('Distinta contrassegni ' + (cli ? cli + ' ' : '') + (d.numero ?? '')).trim()
+  }
   async function stampaPDF(d: any) {
     const { default: jsPDF } = await import('jspdf')
     const { default: autoTable } = await import('jspdf-autotable')
@@ -297,14 +303,14 @@ export default function DistinteContrassegniPage() {
     doc.setFont('helvetica','bold'); doc.setFontSize(11)
     doc.text('Totale iniziale contrassegni: ' + Number(d.totale_iniziale||0).toFixed(2) + ' €', 14, endY)
     doc.text('Totale contrassegni rimborsati: ' + Number(d.totale_rimborsato||0).toFixed(2) + ' €', 14, endY + 8)
-    doc.save('Distinta_contrassegni_' + d.numero + '.pdf')
+    doc.save(nomeFileDistinta(d) + '.pdf')
   }
   async function esportaExcel(d: any) {
     const { utils, writeFile } = await import('xlsx')
     const righe = estraiRighe(d)
     const ws = utils.json_to_sheet(righe.map((r: any) => ({ Spedizioni: r.numero, 'Rif. Mittente': r.mittente, Destinatario: r.destinatario, 'Data Spedizione': r.data, 'Contr. iniziale': r.iniziale, 'Contr. rimborsato': r.rimborsato })))
     const wb = utils.book_new(); utils.book_append_sheet(wb, ws, 'Distinta ' + d.numero)
-    writeFile(wb, 'Distinta_contrassegni_' + d.numero + '.xlsx')
+    writeFile(wb, nomeFileDistinta(d) + '.xlsx')
   }
   function chiudiModalPagamento() {
     setModalPagamento(null); setMetodoPagamento(''); setImportoPag(''); setSuddividi(false)
