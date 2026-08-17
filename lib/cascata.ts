@@ -14,6 +14,12 @@ export type LivelloCatena = {
   // al cliente: sulla stessa spedizione devono essere la stessa, altrimenti qualcuno sta comprando
   // isola e vendendo pianura.
   zona?: string
+  // Questo livello e' il DETENTORE di un contratto SUO (proprio, non-vertice). Sui contratti propri
+  // il master paga il corriere per conto suo: NON si addebita il nolo e NON si blocca sul credito
+  // (al suo posto MoovExpress addebita la commissione fissa, via trigger). L'addebito spedizione e il
+  // controllo credito saltano questo livello; le RIPESATURE no (usano la stessa catena ma per loro
+  // il detentore-proprio paga comunque il riprezzo al corriere).
+  pagaDalSuoConto?: boolean
 }
 
 // ESPORTATA perche' serve anche a RIPREZZARE.
@@ -144,6 +150,7 @@ export async function costruisciCatena(
       tipoContratto: m.tipo_contratto || 'credito_scalare',
       credito: Number((pagaDalSuoConto ? m.credito_proprio : m.credito) || 0),
       prezzo, isProprietario, zona: zonaLivello,
+      pagaDalSuoConto,
     })
 
     if (isProprietario) break
@@ -251,6 +258,8 @@ export async function verificaCreditoCatena(
   }
 
   for (const liv of catena) {
+    // Contratti PROPRI: non si bloccano mai (il master paga il corriere per conto suo).
+    if (liv.pagaDalSuoConto) continue
     if (liv.tipoContratto === 'credito_scalare' && liv.prezzo > 0 && liv.credito < liv.prezzo) {
       // masterInsufficiente = chi è a secco: il chiamante decide se mostrarne il dettaglio
       // (solo al diretto interessato) o un generico "Credito insufficiente" ai livelli sotto.
@@ -302,6 +311,10 @@ export async function addebitaCatena(
 
   for (const liv of catena) {
     if (!(liv.prezzo > 0)) continue
+    // CONTRATTI PROPRI: NIENTE NOLO. Il detentore-proprio paga il corriere per conto suo; qui non si
+    // addebita. MoovExpress incassa solo la commissione fissa (trigger fee su spedizioni). Vale sia
+    // per la spedizione propria del master sia per quella di un suo cliente sul suo contratto.
+    if (liv.pagaDalSuoConto) continue
     try {
       await registraMovimentoMaster(adminMov, {
         masterOwnerId: liv.masterId,

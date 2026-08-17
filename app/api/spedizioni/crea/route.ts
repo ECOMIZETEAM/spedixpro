@@ -110,7 +110,7 @@ export async function POST(req: NextRequest) {
 
   if (body._corriere_id) {
     const { data: c } = await adminCrea
-      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id,settings,multicollo')
+      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id,settings,multicollo,proprio')
       .eq('id', body._corriere_id)
       .single()
     if (c) {
@@ -140,7 +140,7 @@ export async function POST(req: NextRequest) {
       // motivoLimiteCollo riceveva undefined e lasciava passare tutto — misure, peso per collo,
       // numero di colli, somma dei lati — e il confronto `multicollo === false` non scattava mai.
       // Bastava chiamare la creazione senza _corriere_id per non incontrare nessun limite.
-      .select('corrieri(id,tipo,credenziali,nome_contratto,attivo,master_id,settings,multicollo)')
+      .select('corrieri(id,tipo,credenziali,nome_contratto,attivo,master_id,settings,multicollo,proprio)')
       .eq('listino_id', cliente.listino_cliente_id)
       .limit(1)
       .single()
@@ -149,7 +149,7 @@ export async function POST(req: NextRequest) {
 
   if (!corriereRecord) {
     const { data: c } = await adminCrea
-      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id,settings,multicollo')
+      .from('corrieri').select('id,tipo,credenziali,nome_contratto,attivo,master_id,settings,multicollo,proprio')
       .eq('master_id', masterId).eq('tipo', 'spedisci')
       .limit(1)
       .single()
@@ -300,7 +300,12 @@ export async function POST(req: NextRequest) {
     const costoPreventivo = Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
     let tipoC = '', creditoC = 0, esente = false
     if (cliente) { tipoC = cliente.tipo_contratto || ''; creditoC = Number(cliente.credito || 0) }
-    else if (isProprio) {
+    else if (isProprio && !corriereRecord?.proprio) {
+      // Spedizione PROPRIA del master su un contratto DI RETE: paga la rete, quindi si blocca sul
+      // credito rete come un cliente. Sui contratti PROPRI del master (ramo non preso qui) NON si
+      // blocca mai: sono suoi, li paga al corriere per conto suo — MoovExpress incassa solo la
+      // commissione fissa (17/08). Prima questo ramo scattava anche sui propri leggendo il credito
+      // RETE: un master credito_scalare con la rete a 0 non poteva spedire nemmeno sui SUOI contratti.
       const { data: m } = await supabase.from('masters').select('tipo_contratto,credito,parent_master_id').eq('id', utente!.master_id).maybeSingle()
       tipoC = (m as any)?.tipo_contratto || ''; creditoC = Number((m as any)?.credito || 0); esente = !(m as any)?.parent_master_id
     }
