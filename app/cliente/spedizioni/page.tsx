@@ -48,7 +48,13 @@ const _da30ISO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().s
 const FILTRI_DEFAULT = {
   clienteId:'', negozio:'', vettore:'', contratto:'', stato:'', id_ordine:'',
   numero:'', dal:_da30ISO, al:_oggiISO, contrassegno:'', stato_contrassegni:'',
-  assicurazione:'', dest_citta:'', dest_cap:'', contenuto:'', fatturato:'', agente:''
+  assicurazione:'', dest_citta:'', dest_cap:'', contenuto:'', fatturato:'', agente:'',
+  // Ordinamento colonna (vuoto = data più recente), applicato a DB su tutto il periodo filtrato.
+  ordina:'', dir:'desc'
+}
+const ORDINABILE: Record<string,string> = {
+  'N. Spedizione':'numero', 'Destinatario':'destinatario', 'Corriere':'vettore', 'Peso':'peso',
+  'Colli':'colli', 'Contrassegno':'contrassegno', 'Data e Ora':'data', 'Stato':'stato', 'Totale':'prezzo',
 }
 
 import { useDialog } from '@/app/components/DialogProvider'
@@ -120,6 +126,7 @@ export default function SpedizioniPage() {
       const v = (filtri as any)[k]
       if (v) q.set(k, v)
     }
+    if (filtri.ordina) { q.set('ordina', filtri.ordina); q.set('dir', filtri.dir || 'desc') }
     return q
   }
 
@@ -154,6 +161,14 @@ export default function SpedizioniPage() {
 
   // Dopo un'azione che modifica i dati (elimina/ripristina): cache azzerata + ricarico la pagina.
   function ricarica() { cacheRef.current.clear(); carica(pagina) }
+  // Click header: discendente → ascendente → default (data recente). L'ordine è a DB su tutto il periodo.
+  function ordinaColonna(col: string) {
+    setFiltri(f => {
+      if (f.ordina !== col) return { ...f, ordina: col, dir: 'desc' }
+      if (f.dir === 'desc') return { ...f, dir: 'asc' }
+      return { ...f, ordina: '', dir: 'desc' }
+    })
+  }
 
   // Le righe arrivano GIÀ filtrate e paginate dal server.
   const spedizioniVisibili = spedizioni
@@ -482,9 +497,18 @@ async function apriTracking(s: any) {
                   <th style={{padding:'9px 12px',borderBottom:'1px solid #d1d5db',width:'36px'}}>
                     <input type="checkbox" checked={selectedIds.length===spedizioniPaginate.length&&spedizioniPaginate.length>0} onChange={toggleAll}/>
                   </th>
-                  {['N. Spedizione','Cliente','Destinatario','Corriere','Peso','Colli','Contrassegno','Data e Ora','Stato','ID Ordine','Totale','Distinta N.','Azioni'].map(h=>(
-                    <th key={h} style={{textAlign:'left' as const,padding:'9px 12px',fontSize:'11px',fontWeight:'700',textTransform:'uppercase' as const,letterSpacing:'0.4px',color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
-                  ))}
+                  {['N. Spedizione','Cliente','Destinatario','Corriere','Peso','Colli','Contrassegno','Data e Ora','Stato','ID Ordine','Totale','Distinta N.','Azioni'].map(h=>{
+                    const key = ORDINABILE[h]
+                    const attivo = !!key && filtri.ordina === key
+                    const freccia = attivo ? (filtri.dir==='asc'?' ↑':' ↓') : (key?' ↕':'')
+                    return (
+                      <th key={h} onClick={key ? ()=>ordinaColonna(key) : undefined}
+                        title={key?`Ordina per ${h}`:undefined}
+                        style={{textAlign:'left' as const,padding:'9px 12px',fontSize:'11px',fontWeight:'700',textTransform:'uppercase' as const,letterSpacing:'0.4px',color:attivo?'#ea580c':'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const,cursor:key?'pointer':'default',userSelect:'none' as const}}>
+                        {h}<span style={{color:attivo?'#ea580c':'#cbd5e1',fontWeight:400}}>{freccia}</span>
+                      </th>
+                    )
+                  })}
                 </tr>
               </thead>
               <tbody>

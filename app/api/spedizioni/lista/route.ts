@@ -28,6 +28,17 @@ export async function GET(req: NextRequest) {
   const contenuto = p.get('contenuto')
   const contrassegno = p.get('contrassegno')
   const ordinaPer = (stato === 'annullata') ? 'updated_at' : 'created_at'
+  // ── ORDINAMENTO scelto dall'utente (?ordina=<chiave>&dir=asc|desc). Whitelist: solo colonne
+  //    ordinabili a DB (le calcolate — margine, prezzo corriere — no). Applicato SERVER-SIDE su tutto
+  //    il periodo filtrato, non solo sulla pagina. 'vettore' ordina per corrieri.nome_contratto (join).
+  const dirAsc = (p.get('dir') || '').toLowerCase() === 'asc'
+  const COLONNE_ORDINE: Record<string, string> = {
+    numero: 'numero', destinatario: 'dest_nome', peso: 'peso_fatturato', colli: 'colli',
+    contrassegno: 'contrassegno', data: ordinaPer, stato: 'stato', prezzo: 'costo_totale',
+  }
+  const chiaveOrdine = (p.get('ordina') || '').trim()
+  const ordinaVettore = chiaveOrdine === 'vettore'
+  const colOrdine: string | null = COLONNE_ORDINE[chiaveOrdine] || null
 
   // ── PAGINAZIONE SERVER-SIDE (con ?page=N): risposta { rows, total, page, perPage } e TUTTI i
   //    filtri applicati a DB → viaggiano solo le righe della pagina (10), non l'intero periodo.
@@ -146,9 +157,14 @@ export async function GET(req: NextRequest) {
     // (fetchAll >1000) → l'elenco "balla". Con l'id la paginazione è stabile e completa.
     // I filtri su tabelle collegate (contratto/vettore → corrieri, agente → clienti) richiedono il
     // join !inner: attivato SOLO quando quel filtro è presente (altrimenti embed normale, invariato).
-    const embCorr = (fContratto || fVettore) ? 'corrieri!inner(id,nome_contratto)' : 'corrieri(id,nome_contratto)'
+    const embCorr = (fContratto || fVettore || ordinaVettore) ? 'corrieri!inner(id,nome_contratto)' : 'corrieri(id,nome_contratto)'
     const embCli = fAgente ? 'clienti!inner(ragione_sociale,agente)' : 'clienti(ragione_sociale,agente)'
-    let q = db.from('spedizioni').select(`${SPED_COLS},${embCli},${embCorr}`, contaTotale ? { count: 'exact' } : undefined).order(ordinaPer, { ascending: false }).order('id', { ascending: false })
+    let q = db.from('spedizioni').select(`${SPED_COLS},${embCli},${embCorr}`, contaTotale ? { count: 'exact' } : undefined)
+    // Ordine scelto dall'utente (default: data più recente). Tie-breaker 'id' → paginazione stabile.
+    if (ordinaVettore) q = q.order('nome_contratto', { referencedTable: 'corrieri', ascending: dirAsc })
+    else if (colOrdine) q = q.order(colOrdine, { ascending: dirAsc })
+    else q = q.order(ordinaPer, { ascending: false })
+    q = q.order('id', { ascending: false })
     if (subtreeSel) q = q.in('master_id', subtreeSel)
     else if (clienteId) q = q.eq('cliente_id', clienteId).eq('master_id', utente?.master_id)
     else if (utente?.ruolo === 'cliente') q = q.eq('cliente_id', utente.cliente_id)
