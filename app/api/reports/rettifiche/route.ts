@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
     listinoId = tm?.parent_listino_id || null
     intestazioneCliente = tm?.nome || ''
     const { data } = await adminDb.from('rettifiche')
-      .select('spedizione_id,numero_spedizione,peso_reale,created_at')
+      .select('spedizione_id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,created_at')
       .eq('master_id', masterId).eq('target_master_id', masterSel)
       .order('created_at', { ascending: true })
     rett = data || []
@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
     listinoId = cliente?.listino_cliente_id || null
     intestazioneCliente = cliente?.ragione_sociale || ''
     const { data } = await supabase.from('rettifiche')
-      .select('spedizione_id,numero_spedizione,peso_reale,created_at')
+      .select('spedizione_id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,created_at')
       .eq('master_id', masterId).eq('cliente_id', clienteId)
       .order('created_at', { ascending: true })
     rett = data || []
@@ -87,30 +87,30 @@ export async function GET(req: NextRequest) {
   const righe: any[] = []
   for (const r of rett) {
     const s = spedById.get(r.spedizione_id)
-    if (!s) continue
+    if (!s) continue   // fuori dal filtro data/vettore
 
-    const pesoCliente = Number(s.peso_reale || 0)
-    const pesoVolume = Number(s.peso_volume || 0)
-    const pesoCorriere = Number(r.peso_reale || 0)
-    const pkgBase = { length: Number(s.lunghezza) || 0, width: Number(s.larghezza) || 0, height: Number(s.altezza) || 0 }
-
-    let costoIniziale = 0, costoFinale = 0
-    if (listinoId) {
-      const base = { listinoId, provincia: s.dest_provincia || '', cap: s.dest_cap || '', paese: s.dest_paese || 'IT', citta: s.dest_citta || '', corriereId: s.corriere_id }
-      const pIni = await calcolaPrezzoListino(db, { ...base, packages: [{ weight: pesoCliente || 1, ...pkgBase }] })
-      const pFin = await calcolaPrezzoListino(db, { ...base, packages: [{ weight: pesoCorriere || pesoCliente || 1, ...pkgBase }] })
-      costoIniziale = pIni?.prezzo || 0
-      costoFinale = pFin?.prezzo || 0
-    }
-    const differenza = costoIniziale - costoFinale
+    // I pesi e i costi si prendono DALLA RETTIFICA, non si ricalcolano dalle misure ORIGINALI della
+    // spedizione: la rettifica li ha già calcolati sul VOLUME RIPESATO (peso_volume_reale). Prima il
+    // report mostrava il peso reale ripesato ma, come "peso/volume reale", il volume ORIGINARIO della
+    // spedizione — così un pacco leggero ma ingombrante (2 kg reali, 30 kg volumetrici) usciva coi kg
+    // sbagliati, e il conguaglio ricalcolato non combaciava con quello davvero addebitato.
+    const pesoReale = Number(r.peso_reale || 0)
+    const pesoVolReale = Number(r.peso_volume_reale || 0)
+    const costoIniziale = Number(r.costo_iniziale || 0)
+    const costoFinale = Number(r.costo_finale || 0)
 
     righe.push({
       numero: s.numero || r.numero_spedizione || '',
-      pesoDichiarato: pesoCliente,
-      pesoVolDichiarato: pesoVolume,
-      pesoReale: pesoCorriere,
-      pesoVolReale: pesoVolume,
-      costoIniziale, costoFinale, differenza,
+      pesoDichiarato: Number(r.peso_iniziale || 0),
+      pesoVolDichiarato: Number(r.peso_volume_iniziale || 0),
+      pesoReale,
+      pesoVolReale,
+      // Il peso su cui si rettifica è il MAGGIORE fra reale e volumetrico ripesato (il volume vince
+      // quando il pacco è leggero ma voluminoso): è questo il kg che "conta" nella rettifica.
+      pesoFatturato: Math.max(pesoReale, pesoVolReale),
+      volumeVince: pesoVolReale > pesoReale,
+      costoIniziale, costoFinale,
+      differenza: costoIniziale - costoFinale,
     })
   }
 

@@ -58,8 +58,19 @@ export default function NetworkRicevutiPage() {
       if (d.error) setMsg('Errore: ' + d.error)
       else if (d.giaDecise) setMsg('ℹ️ ' + (d.messaggio || 'Queste rettifiche erano già state decise.'))
       else if (decisione === 'assorbita') setMsg(`✓ ${d.assorbite} rettifiche assorbite: restano a tuo carico, la tua rete non viene toccata.`)
-      else setMsg(`✓ Accettate: ${d.create} rettifiche sono nella tua pagina Spedizioni › Rettifica Costi, divise per cliente e sotto-master. Da lì scegli a chi caricarle — fino a quel momento non viene scalato niente a nessuno.`
-        + (d.nonPropagate ? ` (${d.nonPropagate} non girate: ${(d.dettaglio||[]).slice(0,3).map((x:any)=>x.ldv+' — '+x.perche).join('; ')})` : ''))
+      else {
+        // Messaggio COMPLETO e persistente: prima non spiegava perché alcune non venissero girate
+        // (mostrava "0 accettate" e basta), e sembrava che "non le facesse accettare". Ora dice
+        // esattamente quali sono rimaste indietro, perché, e come chiuderle ("Le assorbo io").
+        const parti: string[] = []
+        if (d.create > 0) parti.push(`✓ Accettate ${d.create}: sono in Spedizioni › Rettifica Costi, divise per cliente e sotto-master — da lì scegli a chi caricarle (fino ad allora non scende niente a nessuno).`)
+        if (d.nonPropagate) {
+          const elenco = (d.dettaglio || []).map((x: any) => `${x.ldv} — ${x.perche}`).join('\n• ')
+          parti.push(`⚠️ ${d.nonPropagate} non si possono girare al livello sotto:\n• ${elenco}\nQueste tienile a tuo carico con "Le assorbo io", oppure sistema il listino di chi sta sotto (fascia di peso o zona mancante) e riprova.`)
+        }
+        if (!d.create && !d.nonPropagate) parti.push('Nessuna rettifica da decidere.')
+        setMsg(parti.join('\n\n'))
+      }
       carica()
     } catch { setMsg('Errore di connessione') }
     setPropagando('')
@@ -118,7 +129,7 @@ export default function NetworkRicevutiPage() {
         ))}
       </div>
 
-      {msg && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#ea580c'}}>{msg}</div>}
+      {msg && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#ea580c',whiteSpace:'pre-line' as const}}>{msg}</div>}
 
       <div style={card}>
         {loading ? <div style={{padding:'40px',textAlign:'center',color:'#999'}}>Caricamento…</div> : (

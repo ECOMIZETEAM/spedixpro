@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
     const liv = figlio
       ? esito.livelli.find(l => l.masterId === figlio)
       : esito.livelli.find(l => l.clienteId)
-    if (!liv || liv.differenza == null) { saltate.push({ ldv: r.numero_spedizione, perche: 'nessun prezzo a listino per il livello sotto' }); continue }
+    if (!liv || liv.differenza == null) { saltate.push({ ldv: r.numero_spedizione, perche: 'il listino di chi sta sotto non copre questa spedizione (peso ripesato oltre la fascia massima, o destinazione/zona non prevista): non è girabile, va tenuta a tuo carico ("Le assorbo io")' }); continue }
     if (Math.abs(liv.differenza) < 0.01) { saltate.push({ ldv: r.numero_spedizione, perche: 'differenza a zero' }); idAzzerate.push(r.id); continue }
 
     const { error } = await adminDb.from('rettifiche').insert({
