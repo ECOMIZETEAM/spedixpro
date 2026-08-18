@@ -916,6 +916,7 @@ export async function POST(req: NextRequest) {
     const {
       easyparcelQuotation, easyparcelOrder, easyparcelWaybill,
       trovaOffertaVettore, erroreEasyparcelPulito, ErroreEasyparcel, ritiroEasyparcel,
+      preparaDoganaEasyparcel,
     } = await import('@/lib/easyparcel')
 
     const apikey = String(cred?.apikey || '')
@@ -1005,6 +1006,27 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Assicurazione non disponibile su questo contratto per questa destinazione.' }, { status: 400 })
       }
 
+      // DOGANA (solo estero): i corrieri internazionali di questo provider rifiutano l'ordine senza
+      // i codici HS/TARIC. Si prepara PRIMA di comprare: se mancano i dati indispensabili si blocca
+      // qui — dopo l'ordine non c'e' annullo e il pacco resterebbe pagato e fermo. Il codice HS si
+      // prende dal campo del form se c'e', altrimenti viene cercato dalla descrizione della merce.
+      const estero = String(body.shipTo?.country || 'IT').toUpperCase() !== 'IT'
+      let dogana
+      try {
+        dogana = await preparaDoganaEasyparcel(apikey, {
+          estero,
+          contenuto: body.contenuto,
+          valore: Number(body.valoreMerce || 0),
+          peso: pesoReale,
+          nrColli: packages.length,
+          hscode: body.hscode,
+          origine: body.origineMerce,
+        })
+      } catch (e: any) {
+        await stornaPrenotazione()
+        return NextResponse.json({ error: String(e?.message || 'Dati doganali mancanti per la spedizione internazionale.') }, { status: 400 })
+      }
+
       // ── 2) ORDINE — oltre questa riga il pacco e' comprato e non si torna indietro ──
       const rifBreve = String(body.rifOrdine || '').trim().slice(0, 40) || undefined
       // RITIRO: su questi contratti si prenota SOLO qui — il corriere non ha una chiamata per
@@ -1027,6 +1049,7 @@ export async function POST(req: NextRequest) {
         custom: rifBreve,
         contrassegno: codRichiesto,
         assicurazione: assRichiesta,
+        ...(dogana ? { dogana } : {}),
       })
 
       // ── 3) LETTERA DI VETTURA: numero di tracking e PDF nascono solo qui.

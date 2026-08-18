@@ -306,7 +306,7 @@ export async function POST(req: NextRequest) {
   } else if (corriere.tipo === 'easyparcel') {
     // Tre passi obbligati (preventivo → ordine → lettera di vettura) e NESSUN annullo disponibile:
     // per questo tutti i controlli stanno prima dell'ordine. Vedi lib/easyparcel.ts.
-    const { easyparcelQuotation, easyparcelOrder, easyparcelWaybill, trovaOffertaVettore, erroreEasyparcelPulito, ritiroEasyparcel } = await import('@/lib/easyparcel')
+    const { easyparcelQuotation, easyparcelOrder, easyparcelWaybill, trovaOffertaVettore, erroreEasyparcelPulito, ritiroEasyparcel, preparaDoganaEasyparcel } = await import('@/lib/easyparcel')
     const apikey = String(cred?.apikey || ''), vettore = String(cred?.vettore || '')
     if (!apikey || !vettore) return errore('Contratto non configurato correttamente')
     // Chiave di prova: l'ordine riesce ma il pacco non esiste. Dall'API pubblica spedisce sempre
@@ -337,6 +337,21 @@ export async function POST(req: NextRequest) {
       // creata. Misurato: 48 spedizioni da questa porta, ZERO col ritiro; dal portale, sullo stesso
       // tipo di contratto, il ritiro viene chiesto sul 28,6% (348 su 1216). E non e' rimediabile
       // dopo: quei pacchi vanno portati a mano in filiale.
+      // DOGANA (solo estero): senza codici HS/TARIC i corrieri internazionali rifiutano l'ordine, e
+      // questo provider non ha annullo. Si prepara PRIMA di comprare e si blocca qui se mancano i dati.
+      let dogana
+      try {
+        dogana = await preparaDoganaEasyparcel(apikey, {
+          estero: String(body.shipTo.country || 'IT').toUpperCase() !== 'IT',
+          contenuto: body.contenuto,
+          valore: Number(body.valoreMerce ?? body.declaredValue ?? body.insuranceValue ?? 0),
+          peso: packages.reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0),
+          nrColli: packages.length,
+          hscode: body.hscode, origine: body.origineMerce,
+        })
+      } catch (e: any) {
+        return errore(String(e?.message || 'Dati doganali mancanti per la spedizione internazionale'))
+      }
       const ordine = await easyparcelOrder(apikey, {
         codiceOfferta: String(offerta.codice_offerta),
         ...(_vuoleRitiro ? { ritiro: ritiroEasyparcel(_dataRitiro, _pomeriggio) } : {}),
@@ -345,6 +360,7 @@ export async function POST(req: NextRequest) {
         destinatario: { nominativo: body.shipTo.name, indirizzo: conPresso(body.shipTo.street1 || '', pressoTo), email: EMAIL_PER_CORRIERE, cellulare: cellD, contatto: body.shipTo.name },
         note: body.notes || undefined,
         contrassegno: codReq, assicurazione: assReq,
+        ...(dogana ? { dogana } : {}),
       })
       let ldv: string | null = null
       try {

@@ -270,6 +270,92 @@ export function trovaOffertaVettore(offerte: any[], vettore: string, consegna?: 
   return stessoVettore.length === 1 ? stessoVettore[0] : null
 }
 
+// ── DOGANA (spedizioni internazionali con sdoganamento) ─────────────────────
+// I corrieri DVA verso destinazioni che passano la dogana (PDBPLUS internazionale) RIFIUTANO
+// l'ordine senza i codici HS/TARIC della merce: errorcode 175 "SERVIZI - HS Codes/TARIC obbligatori".
+// La struttura NON e' documentata da nessuna parte: e' stata ricavata provando l'API reale, campo
+// per campo. Ogni voce della dichiarazione va in dettagli.hscodes[] con questi nomi ESATTI — e i
+// nomi contano, perche' il provider ignora in silenzio i campi che non riconosce:
+//   hscode              codice HS/TARIC (solo cifre)                 obbligatorio
+//   descrizione         descrizione della merce                     obbligatorio
+//   quantita            numero pezzi, > 0                            obbligatorio
+//   importo             valore della merce in EUR                    obbligatorio
+//   peso                peso in kg                                   obbligatorio
+//   motivo_esportazione causale doganale                            obbligatorio
+//   origine             paese di origine ISO (es. IT)               facoltativo
+// Trappole verificate sul campo: il codice NON e' 'codice'/'hs_code'/'taric'/'taric_code' (tutti
+// dati per "codice mancante") ma 'hscode'; il valore NON e' 'valore' ma 'importo'.
+export type MerceDogana = {
+  hscode: string; descrizione: string; quantita: number; importo: number; peso: number
+  origine?: string; motivoEsportazione?: string
+}
+
+// Le causali che il provider accetta sono un insieme chiuso. 'SALE' (vendita) e' quella giusta per
+// una spedizione commerciale. Verificato che 'VENDITA'/'vendita'/'sale'/'regalo'/'gift'/'campione'
+// e i numeri vengono RIFIUTATI ("motivo_esportazione non valido"): non inventarne altre a tavolino.
+export const MOTIVO_ESPORTAZIONE_VENDITA = 'SALE'
+
+function voceHscode(v: MerceDogana) {
+  return {
+    // Solo cifre: il provider vuole il codice nudo (i nostri articoli lo salvano a volte con punti).
+    hscode: String(v.hscode || '').replace(/[^0-9]/g, ''),
+    descrizione: String(v.descrizione || '').trim().slice(0, 100) || 'MERCE VARIA',
+    quantita: Math.max(1, Math.round(Number(v.quantita) || 1)),
+    importo: Number((Number(v.importo) || 0).toFixed(2)),
+    peso: Number((Number(v.peso) || 0).toFixed(3)),
+    motivo_esportazione: String(v.motivoEsportazione || MOTIVO_ESPORTAZIONE_VENDITA),
+    ...(v.origine ? { origine: String(v.origine).trim().toUpperCase().slice(0, 2) } : {}),
+  }
+}
+
+// Ricerca del codice HS/TARIC dalla descrizione merce: serve a compilare la dogana quando il cliente
+// non l'ha indicato a mano. Param del provider = 'q'; ritorna il codice piu' probabile o null.
+export async function easyparcelTaric(apikey: string, descrizione: string): Promise<string | null> {
+  const q = String(descrizione || '').trim()
+  if (!q) return null
+  try {
+    const d = await chiama(apikey, 'taric-search', { q })
+    const r = Array.isArray(d?.results) ? d.results : []
+    const code = String(r[0]?.taric_code || '').replace(/[^0-9]/g, '')
+    return code || null
+  } catch { return null }
+}
+
+// Prepara la dichiarazione doganale per l'ordine, in UN posto solo perche' le porte che creano
+// spedizioni sono piu' d'una (portale, API pubblica) e una regola doganale sparsa a mano in ognuna
+// e' una regola che prima o poi qualcuno dimentica.
+// - Rotta nazionale (estero=false): nessuna dogana, ritorna undefined.
+// - Rotta internazionale: costruisce UNA voce aggregata (descrizione + valore + peso della
+//   spedizione). Se il codice HS non e' stato indicato lo cerca dalla descrizione. Se mancano i dati
+//   indispensabili SOLLEVA un errore ADESSO: il provider non ha annullo, quindi un ordine partito
+//   senza dogana sarebbe comprato, fermo e irrecuperabile — meglio fermarsi prima con un messaggio
+//   che dice cosa manca.
+export async function preparaDoganaEasyparcel(apikey: string, dati: {
+  estero: boolean; contenuto?: string; valore?: number; peso?: number; nrColli?: number
+  hscode?: string; origine?: string
+}): Promise<MerceDogana[] | undefined> {
+  if (!dati.estero) return undefined
+  const descrizione = String(dati.contenuto || '').trim()
+  const valore = Number(dati.valore) || 0
+  let hscode = String(dati.hscode || '').replace(/[^0-9]/g, '')
+  if (!hscode && descrizione) hscode = (await easyparcelTaric(apikey, descrizione)) || ''
+  if (!descrizione || !hscode || valore <= 0) {
+    const mancano: string[] = []
+    if (!descrizione) mancano.push('descrizione della merce')
+    if (valore <= 0) mancano.push('valore dichiarato della merce (maggiore di 0)')
+    if (!hscode) mancano.push('codice HS/TARIC della merce')
+    throw new ErroreEasyparcel(199, `Spedizione internazionale: per la dogana serve ${mancano.join(', ')}. Compila questi dati e riprova.`)
+  }
+  return [{
+    hscode, descrizione,
+    // Una voce aggregata: un lotto di quella merce. Non fingiamo un conteggio pezzi che non abbiamo.
+    quantita: 1,
+    importo: valore,
+    peso: Number(dati.peso) || 0.1,
+    origine: String(dati.origine || 'IT'),
+  }]
+}
+
 // ── 2) ORDINE ──────────────────────────────────────────────────────────────
 // Da qui in poi il credito prepagato E' SPESO e non esiste modo di annullare via API.
 export type PersonaEasyparcel = {
@@ -286,6 +372,8 @@ export async function easyparcelOrder(apikey: string, dati: {
   contrassegno?: boolean
   contrassegnoModalita?: 'C' | 'A'
   assicurazione?: boolean
+  // Dichiarazione doganale (solo estero): senza, i corrieri internazionali rifiutano con errore 175.
+  dogana?: MerceDogana[]
   ritiro?: { dal: string; dalleMattina?: string; alleMattina?: string; dallePomeriggio?: string; allePomeriggio?: string }
 }): Promise<{ ordine: string; idOrdine: string; importo: number; codiceOfferta: string }> {
   const accessori: any = {}
@@ -298,6 +386,9 @@ export async function easyparcelOrder(apikey: string, dati: {
       ...(dati.note ? { note_cliente: String(dati.note).slice(0, 200) } : {}),
       ...(dati.custom ? { custom: String(dati.custom).slice(0, 50) } : {}),
       ...(Object.keys(accessori).length ? { accessori } : {}),
+      // I codici HS/TARIC vanno qui dentro, in hscodes[]: verificato che e' l'unico posto e l'unico
+      // nome che il provider riconosce (vedi preparaDoganaEasyparcel per la scoperta della struttura).
+      ...(Array.isArray(dati.dogana) && dati.dogana.length ? { hscodes: dati.dogana.map(voceHscode) } : {}),
     },
     mittente: persona(dati.mittente),
     destinatario: persona(dati.destinatario),
