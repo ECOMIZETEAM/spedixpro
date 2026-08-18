@@ -323,8 +323,38 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // I tre blocchi di arricchimento sono INDIPENDENTI tra loro → girano in PARALLELO (prima in serie).
-  await Promise.all([caricaMovimenti(), caricaIdOrdine(), caricaResi()])
+  // Ticket APERTI collegati a queste spedizioni (badge "ticket aperto" sulla LDV). Mostrato solo a
+  // chi può davvero aprire il ticket (cliente proprietario / master della rete), coerente con la RLS
+  // del dettaglio: chi non è parte del ticket non vede il badge.
+  const ticketPerSped = new Map<string, { id: string; codice: any; stato: string }>()
+  const caricaTicket = async () => {
+    if (!(spedizioni || []).length) return
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const adminT = createAdminSupabase()
+    const ids = (spedizioni || []).map((s: any) => s.id)
+    const clienteIdViewer = (utente as any)?.cliente_id
+    for (let i = 0; i < ids.length; i += 300) {
+      const { data: tk } = await adminT.from('tickets')
+        .select('id,codice,stato,spedizione_id,cliente_id,owner_master_id,aperto_master_id,rete_master_ids')
+        .in('spedizione_id', ids.slice(i, i + 300)).neq('stato', 'chiuso')
+      for (const t of ((tk || []) as any[])) {
+        const sid = t.spedizione_id
+        if (!sid || ticketPerSped.has(sid)) continue
+        let vis = false
+        if (ruolo === 'cliente') vis = !!t.cliente_id && t.cliente_id === clienteIdViewer
+        else if (ruolo === 'agente') vis = agenteClienteIds !== null && agenteClienteIds.includes(t.cliente_id)
+        else {
+          const rete = Array.isArray(t.rete_master_ids) ? t.rete_master_ids : []
+          vis = t.owner_master_id === mineId || t.aperto_master_id === mineId || rete.includes(mineId)
+            || (!!masterIds && (masterIds.includes(t.owner_master_id) || masterIds.includes(t.aperto_master_id)))
+        }
+        if (vis) ticketPerSped.set(sid, { id: t.id, codice: t.codice, stato: t.stato })
+      }
+    }
+  }
+
+  // I blocchi di arricchimento sono INDIPENDENTI tra loro → girano in PARALLELO (prima in serie).
+  await Promise.all([caricaMovimenti(), caricaIdOrdine(), caricaResi(), caricaTicket()])
 
   // Fallback PIGRI (DOPO i movimenti: dipendono dai prezzi reali): i calcolatori listino (query
   // pesanti su fasce/zone) si costruiscono SOLO se esiste almeno una riga senza prezzo reale.
@@ -420,7 +450,7 @@ export async function GET(req: NextRequest) {
     const margine = agenteSenzaCosto ? null : Math.round((prezzo_cliente - (prezzo_corriere as number)) * 100) / 100
     const id_ordine = idOrdine.get(s.id) || (s as any).id_ordine_esterno || (s as any).rif_ordine || null
     const distinta_reso = distintaReso.get(s.id) || null
-    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, id_ordine, distinta_reso }
+    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, id_ordine, distinta_reso, ticket: ticketPerSped.get(s.id) || null }
   })
   // ── CONTRASSEGNO PER-LIVELLO: il badge è verde solo se IO ho incassato. ──
   // Per un MASTER: verde se la rimessa indirizzata a ME (target_master_id) è pagata; arancio se

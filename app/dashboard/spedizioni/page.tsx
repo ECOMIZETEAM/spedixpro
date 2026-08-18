@@ -584,6 +584,8 @@ async function apriTracking(s: any) {
                         <button onClick={()=>apriTracking(s)} style={{fontWeight:'700',color:'#f97316',background:'none',border:'none',cursor:'pointer',fontSize:'13px',padding:0,textDecoration:'underline'}}>
                           {s.numero}
                         </button>
+                        {s.ticket && <div><a href={`/dashboard/assistenza?ticket=${s.ticket.id}`} title="Ticket aperto su questa spedizione — clicca per aprirlo"
+                          style={{display:'inline-flex',alignItems:'center',gap:'3px',marginTop:'4px',background:'#fef3c7',color:'#b45309',border:'1px solid #fde68a',borderRadius:'10px',padding:'1px 7px',fontSize:'10px',fontWeight:700,textDecoration:'none',whiteSpace:'nowrap' as const}}>🎫 ticket aperto</a></div>}
                       </td>
                       <td style={{padding:'9px 12px',fontSize:'12px'}}>
                         <div style={{fontWeight:'500',color:'#1a1a1a'}}>{s.mitt_nome}</div>
@@ -630,7 +632,7 @@ async function apriTracking(s: any) {
                             <button onClick={()=>elimina(s.id,s.numero)} disabled={eliminando===s.id}
                               style={{padding:'4px 8px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'14px',border:'1px solid #fecaca',cursor:'pointer',opacity:eliminando===s.id?0.5:1}} title="Elimina">🗑️</button>
                           )}
-                          <AssistenzaTicketButton ldv={s.numero} />
+                          <AssistenzaTicketButton ldv={s.numero} spedizioneId={s.id} />
                         </div>
                       </td>
                     </tr>

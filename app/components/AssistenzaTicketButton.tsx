@@ -8,7 +8,7 @@ function fileToObj(file: File): Promise<any> {
   return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res({ nome: file.name, tipo: file.type || 'application/octet-stream', dati: r.result as string }); r.onerror = rej; r.readAsDataURL(file) })
 }
 
-export default function AssistenzaTicketButton({ ldv }: { ldv: string }) {
+export default function AssistenzaTicketButton({ ldv, spedizioneId }: { ldv: string; spedizioneId?: string }) {
   const [open, setOpen] = useState(false)
   const [modo, setModo] = useState<'' | 'ticket' | 'pod'>('')   // '' = scelta iniziale
   const [desc, setDesc] = useState('')
@@ -30,7 +30,7 @@ export default function AssistenzaTicketButton({ ldv }: { ldv: string }) {
     setInviando(true); setMsg(null)
     const r = await fetch('/api/assistenza/apri', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ oggetto: ldv, messaggio: desc, categoria: modo, allegati: modo === 'ticket' ? files : [] }),
+      body: JSON.stringify({ oggetto: ldv, messaggio: desc, categoria: modo, allegati: modo === 'ticket' ? files : [], spedizione_id: spedizioneId || null }),
     })
     const j = await r.json(); setInviando(false)
     if (j.error) { setMsg({ t: 'err', x: j.error }); return }

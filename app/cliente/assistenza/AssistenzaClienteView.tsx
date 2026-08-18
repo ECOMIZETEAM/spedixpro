@@ -67,6 +67,12 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
     if (!silent) setLoading(false)
   }
   useEffect(() => { carica(); const t = setInterval(() => { if (document.visibilityState === 'visible') carica(true) }, 15000); return () => clearInterval(t) }, [])
+  // Deep-link dal badge "ticket aperto" dell'elenco spedizioni: /cliente/assistenza?ticket=<id>
+  useEffect(() => {
+    const tid = new URLSearchParams(window.location.search).get('ticket')
+    if (tid) apriChat(tid)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function aggiungiFile(list: FileList | File[]) {
     const arr = Array.from(list).slice(0, 10)

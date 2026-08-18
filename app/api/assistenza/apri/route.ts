@@ -46,6 +46,32 @@ export async function POST(req: NextRequest) {
     record.tipo_apertura = 'master'
   }
 
+  // Collegamento alla SPEDIZIONE (per il badge "ticket aperto" sull'elenco). Facoltativo, e
+  // VALIDATO: il cliente può collegare solo una sua spedizione; il master solo una della sua rete
+  // (sua o dei sotto-master). Se non valido, si apre il ticket senza collegamento (la LDV resta
+  // comunque nell'oggetto) invece di fallire.
+  const autorizzatoSp = async (sp: any): Promise<boolean> => {
+    if (!sp) return false
+    if (ruolo === 'cliente') return sp.cliente_id === utente?.cliente_id
+    if (sp.master_id === masterId) return true
+    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    return (await sottoAlberoMasterIds(admin, masterId)).includes(sp.master_id)
+  }
+  const spedIdIn = String(body?.spedizione_id || '').trim()
+  if (spedIdIn) {
+    const { data: sp } = await admin.from('spedizioni').select('id,cliente_id,master_id').eq('id', spedIdIn).maybeSingle()
+    if (await autorizzatoSp(sp)) record.spedizione_id = (sp as any).id
+  }
+  // Fallback: nessun id esplicito ma l'oggetto è una LDV → collega solo se combacia UNA sola
+  // spedizione autorizzata (evita ambiguità se due master hanno numeri simili).
+  if (!record.spedizione_id) {
+    const ldv = oggetto.trim()
+    if (ldv.length >= 4 && ldv.length <= 40) {
+      const { data: sps } = await admin.from('spedizioni').select('id,cliente_id,master_id').eq('numero', ldv).limit(2)
+      if (sps && sps.length === 1 && await autorizzatoSp(sps[0])) record.spedizione_id = (sps[0] as any).id
+    }
+  }
+
   // Allegati (foto/PDF) — solo sui ticket
   const allegatiIn = Array.isArray(body?.allegati) ? body.allegati.slice(0, 10) : []
   const allegatiOut: any[] = []

@@ -105,6 +105,13 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
     const t = setInterval(() => { if (document.visibilityState === 'visible') carica(true) }, 15000)  // auto-refresh 15s SOLO a scheda visibile
     return () => clearInterval(t)
   }, [])
+  // Deep-link dal badge "ticket aperto" dell'elenco spedizioni: /dashboard/assistenza?ticket=<id>
+  // apre direttamente quel ticket (apriDettaglio usa solo l'id e poi ricarica il ticket completo).
+  useEffect(() => {
+    const tid = new URLSearchParams(window.location.search).get('ticket')
+    if (tid) apriDettaglio({ id: tid })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   useEffect(() => { setPodFile(null) }, [sel?.id])   // reset PDF caricato quando cambia/chiude il ticket
 
   // Riconosce un allegato immagine anche se manca il content-type corretto
