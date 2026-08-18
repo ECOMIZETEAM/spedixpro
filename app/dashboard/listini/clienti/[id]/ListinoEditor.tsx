@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { logoCorriere } from '@/lib/corriere-logo'
 import { setFlash } from '@/lib/flash'
+import { useDialog } from '@/app/components/DialogProvider'
 
 // Input decimale che accetta virgola o punto e valori parziali (es. "0.", "0,5")
 // mentre scrivi, restituendo comunque il NUMERO al parent (nessuna modifica al salvataggio).
@@ -212,6 +213,41 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     if (d?.error) { setCopiaErr(d.error); return }
     setCopiaOk('Corriere copiato con successo.')
     setTimeout(()=>{ window.location.href = `${basePagina}/${d.id}` }, 900)
+  }
+
+  // ── Eliminazione: listino intero o singolo contratto, con conferma MoovExpress ──
+  const dialog = useDialog()
+  const [eliminando, setEliminando] = useState(false)
+  async function eliminaListino() {
+    const ok = await dialog.confirm({
+      title: `Eliminare il listino "${nome}"?`,
+      message: 'Cancella TUTTI i contratti, fasce e supplementi di questo listino. I clienti che ce l\'hanno assegnato resteranno senza listino. Lo storico delle spedizioni non cambia. Operazione irreversibile.',
+      danger: true, confirmText: 'Elimina listino',
+    })
+    if (!ok) return
+    setEliminando(true)
+    const res = await fetch(`/api/listini/cliente/${listino.id}`, { method: 'DELETE' })
+    const d = await res.json().catch(() => ({}))
+    setEliminando(false)
+    if (d?.error) { await dialog.alert({ title: 'Errore', message: d.error }); return }
+    window.location.href = '/dashboard/listini'
+  }
+  async function rimuoviCorriere(c: any) {
+    const ok = await dialog.confirm({
+      title: `Rimuovere "${c.nome_contratto}" da questo listino?`,
+      message: 'Cancella le fasce peso/zona e i supplementi di questo contratto SOLO in questo listino. Gli altri contratti restano. Lo storico non cambia. Operazione irreversibile.',
+      danger: true, confirmText: 'Rimuovi contratto',
+    })
+    if (!ok) return
+    setEliminando(true)
+    const res = await fetch('/api/listini/rimuovi-corriere', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ listinoId: listino.id, corriereId: c.id }),
+    })
+    const d = await res.json().catch(() => ({}))
+    setEliminando(false)
+    if (d?.error) { await dialog.alert({ title: 'Errore', message: d.error }); return }
+    window.location.href = `${basePagina}/${listino.id}`
   }
 
   const [righeAssic, setRigheAssic] = useState<RigaSuppl[]>(() => bozza?.righeAssic ?? buildRigheDa(supplementiEsistenti||[], 'assicurazione', [rigaVuota()]))
@@ -657,6 +693,10 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px',display:'flex',alignItems:'center',gap:'12px',flexWrap:'wrap' as const}}>
         <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>Nome Listino</label>
         <input value={nome} onChange={e=>setNome(e.target.value)} style={{...inp,padding:'8px 11px',minWidth:'280px'}}/>
+        {!isCorriere && (
+          <button onClick={eliminaListino} disabled={eliminando} title="Elimina l'intero listino"
+            style={{marginLeft:'auto',padding:'8px 14px',background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:'7px',fontSize:'12.5px',fontWeight:'700',cursor:'pointer',opacity:eliminando?0.6:1,whiteSpace:'nowrap' as const}}>🗑 Elimina listino</button>
+        )}
       </div>
 
       {/* Accordion contratti */}
@@ -683,6 +723,10 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
                   {!isCorriere && (
                     <button onClick={(e)=>{e.stopPropagation(); apriCopia(c)}} title="Copia questo corriere in un altro listino"
                       style={{padding:'4px 10px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer',whiteSpace:'nowrap' as const}}>⧉ Copia</button>
+                  )}
+                  {!isCorriere && (
+                    <button onClick={(e)=>{e.stopPropagation(); rimuoviCorriere(c)}} disabled={eliminando} title="Rimuovi questo contratto dal listino"
+                      style={{padding:'4px 9px',background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:'6px',fontSize:'13px',cursor:'pointer',opacity:eliminando?0.6:1}}>🗑</button>
                   )}
                   <span style={{fontSize:'18px',color:'#9ca3af',transform:aperto?'rotate(90deg)':'none',transition:'transform 0.15s'}}>›</span>
                 </div>
