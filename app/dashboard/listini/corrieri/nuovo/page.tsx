@@ -132,6 +132,46 @@ export default function ListinoCorrierePage() {
   const [spondaSoglia, setSpondaSoglia] = useState(150)
   const [spondaPrezzoKg, setSpondaPrezzoKg] = useState(0)
 
+  // ── Duplica il COSTO di questo contratto in un LISTINO CLIENTE (nuovo o esistente) + maggiorazione ──
+  const [dupOpen, setDupOpen] = useState(false)
+  const [dupTargetMode, setDupTargetMode] = useState<'nuovo' | 'esistente'>('nuovo')
+  const [dupNome, setDupNome] = useState('')
+  const [dupTargetId, setDupTargetId] = useState('')
+  const [listiniClienti, setListiniClienti] = useState<any[]>([])
+  const [dupDefMode, setDupDefMode] = useState<'perc' | 'fisso'>('perc')
+  const [dupDefVal, setDupDefVal] = useState('')
+  const [dupPerFascia, setDupPerFascia] = useState<Record<string, { mode: 'perc' | 'fisso'; valore: string }>>({})
+  const [duplicando, setDuplicando] = useState(false)
+  const [dupMsg, setDupMsg] = useState('')
+  const keyFascia = (f: Fascia) => `${f.tipo === 'oltre' ? 'oltre' : 'fino_a'}_${Number(f.kg)}`
+  function setPerFascia(key: string, patch: Partial<{ mode: 'perc' | 'fisso'; valore: string }>) {
+    setDupPerFascia(prev => ({ ...prev, [key]: { mode: prev[key]?.mode || 'perc', valore: prev[key]?.valore ?? '', ...patch } }))
+  }
+  function apriDuplica() {
+    setDupTargetMode('nuovo'); setDupNome(`${corrieri.find((c: any) => c.id === corriereId)?.nome_contratto || 'Listino'} (cliente)`)
+    setDupTargetId(''); setDupDefMode('perc'); setDupDefVal(''); setDupPerFascia({}); setDupMsg(''); setDupOpen(true)
+    fetch('/api/listini/lista').then(r => r.json()).then(d => setListiniClienti(Array.isArray(d) ? d : [])).catch(() => setListiniClienti([]))
+  }
+  async function confermaDuplica() {
+    if (dupTargetMode === 'nuovo' && !dupNome.trim()) { setDupMsg('Inserisci un nome per il nuovo listino'); return }
+    if (dupTargetMode === 'esistente' && !dupTargetId) { setDupMsg('Scegli un listino cliente esistente'); return }
+    const num = (v: string) => Number(String(v).replace(',', '.')) || 0
+    const perFascia: Record<string, { mode: string; valore: number }> = {}
+    for (const [k, v] of Object.entries(dupPerFascia)) { const val = num(v.valore); if (val) perFascia[k] = { mode: v.mode, valore: val } }
+    const markup = { default: num(dupDefVal) ? { mode: dupDefMode, valore: num(dupDefVal) } : null, perFascia }
+    setDuplicando(true); setDupMsg('')
+    const res = await fetch('/api/listini/costo-in-cliente', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ corriereId, ...(dupTargetMode === 'nuovo' ? { nuovoNome: dupNome.trim() } : { targetListinoId: dupTargetId }), markup }),
+    })
+    const d = await res.json().catch(() => ({}))
+    setDuplicando(false)
+    if (d?.error) { setDupMsg(d.error); return }
+    setDupOpen(false)
+    setMsg(`✓ "${d.nome_corriere}" copiato nel listino cliente${d.creato ? ' nuovo' : ''} con la maggiorazione`)
+    setTimeout(() => setMsg(''), 5000)
+  }
+
   async function carica(corriereDaSelezionare?: string) {
     setLoading(true); setErrore(''); setMsg('')
     const url = corriereDaSelezionare ? `/api/listini/corrieri?corriere=${corriereDaSelezionare}` : '/api/listini/corrieri'
@@ -256,8 +296,12 @@ export default function ListinoCorrierePage() {
           {fattori.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}
         </select>
         {soloPesoReale && <span style={{fontSize:'11px',color:'#f97316'}}>Si paga sempre sul peso reale, il volumetrico viene ignorato.</span>}
+        <button onClick={apriDuplica} disabled={saving} title="Crea un listino cliente da questo costo, con maggiorazione"
+          style={{marginLeft:'auto',padding:'9px 16px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>
+          ⧉ Duplica in listino cliente
+        </button>
         <button onClick={salva} disabled={saving||soloLettura} title={soloLettura?'Listino assegnato dal master: sola lettura':''}
-          style={{marginLeft:'auto',padding:'9px 24px',background:soloLettura?'#e5e7eb':'#f97316',color:soloLettura?'#9ca3af':'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:soloLettura?'not-allowed':'pointer',opacity:saving?0.6:1}}>
+          style={{padding:'9px 24px',background:soloLettura?'#e5e7eb':'#f97316',color:soloLettura?'#9ca3af':'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:soloLettura?'not-allowed':'pointer',opacity:saving?0.6:1}}>
           {saving?'Salvo...':'Salva'}
         </button>
       </div>
@@ -573,6 +617,78 @@ export default function ListinoCorrierePage() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {dupOpen && (
+        <div onClick={()=>duplicando?null:setDupOpen(false)} style={{position:'fixed',inset:0,background:'rgba(15,15,15,0.55)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',maxWidth:'560px',width:'100%',maxHeight:'88vh',overflowY:'auto' as const,padding:'22px',boxShadow:'0 20px 60px rgba(0,0,0,.35)'}}>
+            <div style={{fontSize:'17px',fontWeight:800,color:'#1a1a1a',marginBottom:'4px'}}>Duplica in listino cliente</div>
+            <div style={{fontSize:'12.5px',color:'#666',marginBottom:'16px'}}>Copio il <b>costo</b> di <b>{corrieri.find((c:any)=>c.id===corriereId)?.nome_contratto||'—'}</b> in un listino cliente, con la maggiorazione. Le zone restano le stesse.</div>
+
+            {/* Destinazione */}
+            <div style={{display:'flex',gap:'8px',marginBottom:'10px'}}>
+              <button onClick={()=>setDupTargetMode('nuovo')} style={{flex:1,padding:'8px',borderRadius:'8px',border:`1px solid ${dupTargetMode==='nuovo'?'#f97316':'#e2e2e2'}`,background:dupTargetMode==='nuovo'?'#fff7ed':'#fff',color:'#1a1a1a',fontSize:'12.5px',fontWeight:700,cursor:'pointer'}}>Nuovo listino</button>
+              <button onClick={()=>setDupTargetMode('esistente')} style={{flex:1,padding:'8px',borderRadius:'8px',border:`1px solid ${dupTargetMode==='esistente'?'#f97316':'#e2e2e2'}`,background:dupTargetMode==='esistente'?'#fff7ed':'#fff',color:'#1a1a1a',fontSize:'12.5px',fontWeight:700,cursor:'pointer'}}>Listino esistente</button>
+            </div>
+            {dupTargetMode==='nuovo' ? (
+              <input value={dupNome} onChange={e=>setDupNome(e.target.value)} placeholder="Nome del nuovo listino cliente" autoFocus
+                style={{width:'100%',padding:'9px 12px',border:'1px solid #e2e2e2',borderRadius:'8px',fontSize:'14px',color:'#1a1a1a',outline:'none',marginBottom:'16px',boxSizing:'border-box' as const}}/>
+            ) : (
+              <select value={dupTargetId} onChange={e=>setDupTargetId(e.target.value)}
+                style={{width:'100%',padding:'9px 12px',border:'1px solid #e2e2e2',borderRadius:'8px',fontSize:'14px',color:'#1a1a1a',background:'#fff',marginBottom:'16px',boxSizing:'border-box' as const}}>
+                <option value="">Scegli un listino cliente…</option>
+                {listiniClienti.map((l:any)=><option key={l.id} value={l.id}>{l.nome}</option>)}
+              </select>
+            )}
+
+            {/* Maggiorazione predefinita (% o valore fisso) */}
+            <div style={{fontSize:'12px',fontWeight:700,color:'#1a1a1a',marginBottom:'6px'}}>Maggiorazione predefinita</div>
+            <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'6px'}}>
+              <select value={dupDefMode} onChange={e=>setDupDefMode(e.target.value as any)} style={{...inp,padding:'8px 10px'}}>
+                <option value="perc">% percentuale</option>
+                <option value="fisso">€ valore fisso</option>
+              </select>
+              <input type="number" step="0.01" value={dupDefVal} onChange={e=>setDupDefVal(e.target.value)} placeholder="0"
+                style={{...inp,width:'110px',textAlign:'right' as const}}/>
+              <span style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>{dupDefMode==='perc'?'%':'€'}</span>
+            </div>
+            <div style={{fontSize:'11.5px',color:'#888',marginBottom:'14px'}}>Si applica a tutte le fasce. Sotto puoi sovrascrivere singole fasce. Lascia 0 per copiare il costo così com'è.</div>
+
+            {/* Per fascia: flag % o fisso */}
+            <div style={{fontSize:'12px',fontWeight:700,color:'#1a1a1a',marginBottom:'6px'}}>Per fascia (facoltativo)</div>
+            <div style={{border:'1px solid #eee',borderRadius:'8px',overflow:'hidden',marginBottom:'16px'}}>
+              <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12.5px'}}>
+                <thead><tr style={{background:'#fafafa'}}>
+                  <th style={{textAlign:'left' as const,padding:'7px 10px',fontWeight:700,color:'#666',borderBottom:'1px solid #eee'}}>Fascia</th>
+                  <th style={{textAlign:'left' as const,padding:'7px 10px',fontWeight:700,color:'#666',borderBottom:'1px solid #eee'}}>Tipo</th>
+                  <th style={{textAlign:'left' as const,padding:'7px 10px',fontWeight:700,color:'#666',borderBottom:'1px solid #eee'}}>Valore</th>
+                </tr></thead>
+                <tbody>
+                  {fasce.map((f,i)=>{ const k=keyFascia(f); const cur=dupPerFascia[k]; return (
+                    <tr key={i} style={{borderBottom:'1px solid #f4f4f4'}}>
+                      <td style={{padding:'6px 10px',color:'#1a1a1a',fontWeight:600}}>{f.tipo==='oltre'?`oltre, ogni ${f.kg||'?'} kg`:`fino a ${f.kg||'?'} kg`}</td>
+                      <td style={{padding:'6px 10px'}}>
+                        <select value={cur?.mode||'perc'} onChange={e=>setPerFascia(k,{mode:e.target.value as any})} style={{...inp,padding:'5px 6px'}}>
+                          <option value="perc">%</option><option value="fisso">€ fisso</option>
+                        </select>
+                      </td>
+                      <td style={{padding:'6px 10px'}}>
+                        <input type="number" step="0.01" value={cur?.valore??''} onChange={e=>setPerFascia(k,{valore:e.target.value})} placeholder="default"
+                          style={{...inp,width:'90px',textAlign:'right' as const}}/>
+                      </td>
+                    </tr>
+                  )})}
+                </tbody>
+              </table>
+            </div>
+
+            {dupMsg && <div style={{padding:'8px 12px',borderRadius:'8px',background:'#fef2f2',border:'1px solid #fecaca',color:'#b91c1c',fontSize:'12.5px',marginBottom:'12px'}}>{dupMsg}</div>}
+            <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
+              <button onClick={()=>setDupOpen(false)} disabled={duplicando} style={{background:'#fff',color:'#1a1a1a',border:'1px solid #ddd',borderRadius:'8px',padding:'9px 18px',fontSize:'13px',fontWeight:600,cursor:'pointer'}}>Annulla</button>
+              <button onClick={confermaDuplica} disabled={duplicando} style={{background:'#f97316',color:'#fff',border:'none',borderRadius:'8px',padding:'9px 20px',fontSize:'13px',fontWeight:700,cursor:'pointer',opacity:duplicando?0.6:1}}>{duplicando?'Duplico…':'Duplica'}</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
