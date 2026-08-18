@@ -34,7 +34,13 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
   const [chatLoad, setChatLoad] = useState(false)
   const [testo, setTesto] = useState('')
   const [inviando, setInviando] = useState(false)
+  const [chatFiles, setChatFiles] = useState<any[]>([])   // allegati del messaggio in composizione
   const fondoRef = useRef<HTMLDivElement>(null)
+  async function aggiungiChatFile(list: FileList | File[]) {
+    const arr = Array.from(list).slice(0, 10)
+    const objs = await Promise.all(arr.map(fileToAllegato))
+    setChatFiles(f => [...f, ...objs].slice(0, 10))
+  }
 
   async function apriChat(id: string) {
     setChatLoad(true); setChat({ id }); setTesto('')
@@ -46,12 +52,12 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
     setTimeout(() => fondoRef.current?.scrollIntoView({ behavior: 'auto' }), 50)
   }
   async function inviaMsg() {
-    if (!testo.trim() || !chat?.ticket?.id) return
+    if ((!testo.trim() && !chatFiles.length) || !chat?.ticket?.id) return
     setInviando(true)
-    const r = await fetch('/api/assistenza/' + chat.ticket.id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ testo }) })
+    const r = await fetch('/api/assistenza/' + chat.ticket.id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ testo, allegati: chatFiles }) })
     const j = await r.json(); setInviando(false)
     if (j.error) { setMsg({ t: 'err', x: j.error }); return }
-    setTesto('')
+    setTesto(''); setChatFiles([])
     await apriChat(chat.ticket.id)
     carica(true)
   }
@@ -234,8 +240,12 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
                     <div style={{ background: mio ? '#f97316' : '#fff', color: mio ? '#fff' : '#1a1a1a', border: mio ? 'none' : '1px solid #e5e7eb', padding: '9px 13px', borderRadius: '12px', fontSize: '13px', lineHeight: 1.45, whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const }}>
                       {m.testo}
                       {Array.isArray(m.allegati) && m.allegati.length > 0 && (
-                        <div style={{ display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
-                          {m.allegati.map((a: any, i: number) => <a key={i} href={linkAllegato(chat.ticket?.id, a.url)} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: mio ? '#fff' : '#2563eb', textDecoration: 'underline' }}>📎 {a.nome}</a>)}
+                        <div style={{ display: 'flex', gap: '6px', marginTop: m.testo ? '6px' : '0', flexWrap: 'wrap' }}>
+                          {m.allegati.map((a: any, i: number) => (
+                            (String(a?.tipo || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|heic|heif|bmp|avif)(\?|$)/i.test(String(a?.nome || a?.url || '')))
+                              ? <a key={i} href={linkAllegato(chat.ticket?.id, a.url)} target="_blank" rel="noopener noreferrer"><img src={linkAllegato(chat.ticket?.id, a.url)} alt={a.nome} style={{ width: '84px', height: '84px', objectFit: 'cover', borderRadius: '8px', border: mio ? '1px solid rgba(255,255,255,0.45)' : '1px solid #e5e7eb', display: 'block' }} /></a>
+                              : <a key={i} href={linkAllegato(chat.ticket?.id, a.url)} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: mio ? '#fff' : '#2563eb', textDecoration: 'underline' }}>📎 {a.nome}</a>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -249,9 +259,25 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
             {chat.ticket?.stato === 'chiuso' ? (
               <div style={{ padding: '14px 18px', borderTop: '1px solid #eee', textAlign: 'center', fontSize: '12.5px', color: '#6b7280', background: '#f9fafb' }}>🔒 Ticket chiuso e archiviato — sola lettura.</div>
             ) : (
-              <div style={{ padding: '12px 14px', borderTop: '1px solid #eee', display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-                <textarea value={testo} onChange={e => setTesto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); inviaMsg() } }} rows={2} placeholder="Scrivi un messaggio…" style={{ flex: 1, padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', color: '#1a1a1a', resize: 'none' as const, boxSizing: 'border-box' as const }} />
-                <button disabled={inviando || !testo.trim()} onClick={inviaMsg} style={{ padding: '10px 18px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: inviando || !testo.trim() ? 'default' : 'pointer', opacity: inviando || !testo.trim() ? 0.6 : 1 }}>{inviando ? '…' : 'Invia'}</button>
+              <div style={{ padding: '10px 14px', borderTop: '1px solid #eee' }}>
+                {chatFiles.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                    {chatFiles.map((f, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f3f4f6', borderRadius: '6px', padding: '4px 8px', fontSize: '11px', color: '#1a1a1a' }}>
+                        {String(f.tipo).startsWith('image/') ? <img src={f.dati} alt="" style={{ width: 22, height: 22, objectFit: 'cover', borderRadius: 4 }} /> : <span>📄</span>}
+                        <span style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.nome}</span>
+                        <button onClick={() => setChatFiles(a => a.filter((_, j) => j !== i))} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#dc2626', fontSize: '13px' }}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                  <label title="Allega foto o PDF" style={{ padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', cursor: 'pointer', fontSize: '16px', color: '#6b7280', background: '#fff', lineHeight: 1 }}>📎
+                    <input type="file" accept="image/*,application/pdf" multiple onChange={e => { if (e.target.files?.length) aggiungiChatFile(e.target.files); e.currentTarget.value = '' }} style={{ display: 'none' }} />
+                  </label>
+                  <textarea value={testo} onChange={e => setTesto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); inviaMsg() } }} rows={2} placeholder="Scrivi un messaggio…" style={{ flex: 1, padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', color: '#1a1a1a', resize: 'none' as const, boxSizing: 'border-box' as const }} />
+                  <button disabled={inviando || (!testo.trim() && !chatFiles.length)} onClick={inviaMsg} style={{ padding: '10px 18px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: inviando || (!testo.trim() && !chatFiles.length) ? 'default' : 'pointer', opacity: inviando || (!testo.trim() && !chatFiles.length) ? 0.6 : 1 }}>{inviando ? '…' : 'Invia'}</button>
+                </div>
               </div>
             )}
           </div>

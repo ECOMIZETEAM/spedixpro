@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 // Allegati e POD non hanno più un link diretto allo storage: passano da /api/file, che controlla
 // che chi scarica sia parte di quella richiesta (vedi lib/file-riservati.ts).
 import { linkAllegato } from '@/lib/file-riservati'
+import { fileToAllegato } from '@/app/components/fileAllegato'
 
 const STATI: Record<string, { label: string; bg: string; color: string }> = {
   aperto: { label: 'Aperto', bg: '#fff7ed', color: '#ea580c' },
@@ -44,12 +45,18 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   const [ioId, setIoId] = useState<string>('')          // id dell'utente che guarda: per "· tu" e "Prendi in carico"
   const [rete, setRete] = useState<any[]>([])           // ticket inoltrati a me dalla rete
   const [internoMsg, setInternoMsg] = useState(false)   // owner: messaggio interno alla rete (invisibile al cliente)
+  const [chatFiles, setChatFiles] = useState<any[]>([]) // allegati del messaggio in composizione
+  async function aggiungiChatFile(list: FileList | File[]) {
+    const arr = Array.from(list).slice(0, 10)
+    const objs = await Promise.all(arr.map(fileToAllegato))
+    setChatFiles(f => [...f, ...objs].slice(0, 10))
+  }
 
   async function apriDettaglio(t: any) {
     // Il ruolo va AZZERATO: restando quello del ticket precedente, per tutta la durata della
     // chiamata comparivano comandi non miei — es. aprendo una MIA richiesta POD si vedeva il
     // riquadro di caricamento e "Inoltra", che spettano a chi la richiesta l'ha ricevuta.
-    setSel(t); setMsg(''); setTesto(''); setThread([]); setThreadLoad(true); setInternoMsg(false); setRuoloChat('')
+    setSel(t); setMsg(''); setTesto(''); setChatFiles([]); setThread([]); setThreadLoad(true); setInternoMsg(false); setRuoloChat('')
     const d = await fetch('/api/assistenza/' + t.id).then(r => r.json()).catch(() => null)
     setThreadLoad(false)
     if (d && !d.error) { setThread(d.messaggi || []); setRuoloChat(d.ruolo || 'master'); setIoId(d.io_id || ''); setSel((s: any) => s ? { ...s, ...d.ticket } : d.ticket) }
@@ -68,12 +75,12 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
     carica(true)
   }
   async function inviaMsg() {
-    if (!testo.trim() || !sel?.id) return
+    if ((!testo.trim() && !chatFiles.length) || !sel?.id) return
     setInviando(true)
-    const r = await fetch('/api/assistenza/' + sel.id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ testo, interno: ruoloChat === 'rete' ? true : internoMsg }) })
+    const r = await fetch('/api/assistenza/' + sel.id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ testo, allegati: chatFiles, interno: ruoloChat === 'rete' ? true : internoMsg }) })
     const j = await r.json().catch(() => ({})); setInviando(false)
     if (j.error) { setMsg(j.error); return }
-    setTesto('')
+    setTesto(''); setChatFiles([])
     const d = await fetch('/api/assistenza/' + sel.id).then(r => r.json()).catch(() => null)
     if (d && !d.error) { setThread(d.messaggi || []); setRuoloChat(d.ruolo || 'master'); setIoId(d.io_id || ''); setSel((s: any) => ({ ...s, ...d.ticket })) }
     carica(true)
@@ -82,7 +89,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   // 1) Carica il file della POD dentro la modale (anteprima), senza inviare.
   // PDF o IMMAGINE (jpg/png/webp): BRT manda la POD come FOTO, non come PDF.
   async function caricaPodDentro(file: File) {
-    if (!['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { setMsg('La POD deve essere un PDF o un\'immagine (JPG/PNG)'); return }
+    if (!(file.type === 'application/pdf' || file.type.startsWith('image/'))) { setMsg('La POD deve essere un PDF o un\'immagine'); return }
     setMsg('')
     const b64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej; r.readAsDataURL(file) })
     setPodFile({ nome: file.name, dati: b64 })
@@ -355,7 +362,16 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                         {m.autore_nome || (m.autore === 'cliente' ? 'Cliente' : m.autore === 'rete' ? 'Rete' : 'Assistenza')}{m.tu ? ' · tu' : ''}
                         {interno && <span style={{ marginLeft: '5px', background: '#1a1a1a', color: '#fff', fontSize: '9px', fontWeight: 700, padding: '1px 6px', borderRadius: '8px' }}>🔒 RETE</span>}
                       </div>
-                      <div style={{ background: interno ? (mio ? '#334155' : '#f1f5f9') : (mio ? '#f97316' : '#fff'), color: interno ? (mio ? '#fff' : '#334155') : (mio ? '#fff' : '#1a1a1a'), border: interno && !mio ? '1px dashed #94a3b8' : (mio ? 'none' : '1px solid #e5e7eb'), padding: '9px 13px', borderRadius: '12px', fontSize: '13px', lineHeight: 1.45, whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const }}>{m.testo}</div>
+                      {m.testo && <div style={{ background: interno ? (mio ? '#334155' : '#f1f5f9') : (mio ? '#f97316' : '#fff'), color: interno ? (mio ? '#fff' : '#334155') : (mio ? '#fff' : '#1a1a1a'), border: interno && !mio ? '1px dashed #94a3b8' : (mio ? 'none' : '1px solid #e5e7eb'), padding: '9px 13px', borderRadius: '12px', fontSize: '13px', lineHeight: 1.45, whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const }}>{m.testo}</div>}
+                      {Array.isArray(m.allegati) && m.allegati.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '5px', justifyContent: mio ? 'flex-end' : 'flex-start' }}>
+                          {m.allegati.map((a: any, i: number) => (
+                            isImg(a)
+                              ? <img key={i} src={linkAllegato(sel.id, a.url)} alt={a.nome} onClick={() => setViewImg(linkAllegato(sel.id, a.url))} title="Clicca per ingrandire" style={{ width: '82px', height: '82px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #e5e7eb', cursor: 'zoom-in' }} />
+                              : <a key={i} href={linkAllegato(sel.id, a.url)} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#2563eb', textDecoration: 'none', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', padding: '4px 8px' }}>📎 {a.nome}</a>
+                          ))}
+                        </div>
+                      )}
                       <div style={{ fontSize: '10px', color: '#b6c0cc', margin: mio ? '2px 4px 0 0' : '2px 0 0 4px', textAlign: mio ? 'right' : 'left' }}>{new Date(m.created_at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
                     </div>
                   )
@@ -414,7 +430,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                       <div style={{ fontSize: '12.5px', color: '#555', marginBottom: '10px' }}>📎 Trascina qui la POD (PDF o foto), oppure</div>
                       <label style={{ display: 'inline-block', padding: '8px 16px', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>
                         {sel.pod_url ? 'Sostituisci file' : 'Scegli file'}
-                        <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) caricaPodDentro(f) }} style={{ display: 'none' }} />
+                        <input type="file" accept="application/pdf,image/*" onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) caricaPodDentro(f) }} style={{ display: 'none' }} />
                       </label>
                       <div style={{ fontSize: '11px', color: '#666', marginTop: '9px' }}>Carica la POD (PDF o foto, es. BRT): la vedi qui in anteprima, poi premi “Invia al cliente”. All'invio la richiesta si chiude (risolta) e il cliente riceve la notifica.</div>
                     </div>
@@ -438,9 +454,23 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                       🔒 Messaggio interno alla rete (il cliente non lo vede)
                     </label>
                   )}
+                  {chatFiles.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {chatFiles.map((f, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f3f4f6', borderRadius: '6px', padding: '4px 8px', fontSize: '11px', color: '#1a1a1a' }}>
+                          {String(f.tipo).startsWith('image/') ? <img src={f.dati} alt="" style={{ width: '22px', height: '22px', objectFit: 'cover', borderRadius: '4px' }} /> : <span>📄</span>}
+                          <span style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.nome}</span>
+                          <button onClick={() => setChatFiles(a => a.filter((_, j) => j !== i))} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#dc2626', fontSize: '13px' }}>✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                    <label title="Allega foto o PDF" style={{ padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', cursor: 'pointer', fontSize: '16px', color: '#6b7280', background: '#fff', lineHeight: 1 }}>📎
+                      <input type="file" accept="image/*,application/pdf" multiple onChange={e => { if (e.target.files?.length) aggiungiChatFile(e.target.files); e.currentTarget.value = '' }} style={{ display: 'none' }} />
+                    </label>
                     <textarea value={testo} onChange={e => setTesto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); inviaMsg() } }} rows={2} placeholder={ruoloChat === 'rete' ? 'Rispondi al master che ti ha inoltrato il ticket…' : (internoMsg ? 'Messaggio interno alla rete…' : 'Rispondi al cliente…')} style={{ flex: 1, padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'none' as const }} />
-                    <button disabled={inviando || !testo.trim()} onClick={inviaMsg} style={{ padding: '10px 18px', background: (ruoloChat === 'rete' || internoMsg) ? '#1a1a1a' : '#f97316', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: inviando || !testo.trim() ? 'default' : 'pointer', opacity: inviando || !testo.trim() ? 0.6 : 1 }}>{inviando ? '…' : 'Invia'}</button>
+                    <button disabled={inviando || (!testo.trim() && !chatFiles.length)} onClick={inviaMsg} style={{ padding: '10px 18px', background: (ruoloChat === 'rete' || internoMsg) ? '#1a1a1a' : '#f97316', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: inviando || (!testo.trim() && !chatFiles.length) ? 'default' : 'pointer', opacity: inviando || (!testo.trim() && !chatFiles.length) ? 0.6 : 1 }}>{inviando ? '…' : 'Invia'}</button>
                   </div>
                 </div>
               ))}

@@ -5,6 +5,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 // anche /api/file per gli allegati e la POD: una sola definizione, nessuna copia da tenere allineata.
 import { partecipanteTicket as partecipante, posizioneCatena, messaggioVisibileCatena, mascheraCatena, assegnatoPer } from '@/lib/ticket-accesso'
 import { BUCKET_RISERVATI } from '@/lib/file-riservati'
+import { caricaAllegatiTicket } from '@/lib/allegati-ticket'
 
 // GET: dettaglio ticket + thread messaggi (chat). Accessibile a entrambe le parti.
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -77,7 +78,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const body = await req.json().catch(() => ({}))
   const testo = String(body?.testo || '').trim()
-  if (!testo) return NextResponse.json({ error: 'Messaggio vuoto' }, { status: 400 })
+  // Allegati del messaggio (foto/PDF/qualsiasi file). Un messaggio può essere di solo testo, di
+  // soli allegati (es. una foto), o entrambi.
+  const allegatiIn = Array.isArray(body?.allegati) ? body.allegati.slice(0, 10) : []
+  if (!testo && !allegatiIn.length) return NextResponse.json({ error: 'Messaggio vuoto' }, { status: 400 })
+  const allegatiOut = allegatiIn.length ? await caricaAllegatiTicket(admin, utente?.master_id || t.owner_master_id || 'x', allegatiIn) : []
 
   // Nome autore: cliente = ragione sociale; master = nome utente o "Assistenza".
   let autoreNome = 'Assistenza'
@@ -99,6 +104,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { error } = await admin.from('ticket_messaggi').insert({
     ticket_id: id, autore: ruolo, autore_id: user.id, autore_nome: autoreNome, testo, visibilita,
     autore_master_id: ruolo === 'cliente' ? null : (utente?.master_id || null),
+    allegati: allegatiOut.length ? allegatiOut : null,
   })
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   // Notifiche: chi scrive non si auto-notifica; il cliente viene toccato SOLO dai messaggi pubblici.
@@ -195,12 +201,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   // (prima era forzato a application/pdf, e una foto BRT veniva salvata come .pdf illeggibile).
   if (typeof body?.podBase64 === 'string' && body.podBase64) {
     try {
-      const m = String(body.podBase64).match(/^data:(application\/pdf|image\/(?:png|jpe?g|webp));base64,(.+)$/)
-      const mime = m ? m[1] : 'application/pdf'
+      // PDF o QUALSIASI immagine (image/*: jpg, png, webp, heic/heif dell'iPhone, gif, avif…).
+      const m = String(body.podBase64).match(/^data:(application\/pdf|image\/[a-z0-9.+-]+);base64,(.+)$/i)
+      const mime = m ? m[1].toLowerCase() : 'application/pdf'
       const b64 = m ? m[2] : (body.podBase64.split(',').pop() || body.podBase64)
       const buffer = Buffer.from(b64, 'base64')
       if (!buffer.length) return NextResponse.json({ error: 'File POD vuoto o non valido' }, { status: 400 })
-      const ext = mime === 'application/pdf' ? 'pdf' : (mime === 'image/jpeg' ? 'jpg' : mime.split('/')[1])
+      const ext = mime === 'application/pdf' ? 'pdf' : (/jpe?g/.test(mime) ? 'jpg' : ((mime.split('/')[1] || 'img').replace(/[^a-z0-9]/g, '') || 'img'))
       const path = `pod/${masterId}/${Date.now()}_${id}.${ext}`
       const { error: upErr } = await admin.storage.from(BUCKET_RISERVATI).upload(path, buffer, { contentType: mime, upsert: true })
       if (upErr) return NextResponse.json({ error: 'Upload POD fallito: ' + upErr.message }, { status: 400 })
