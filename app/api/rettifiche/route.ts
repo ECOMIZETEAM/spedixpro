@@ -156,8 +156,16 @@ export async function POST(req: NextRequest) {
     return st === 'annullata' || st === 'annullamento_pending' || st === 'annullamento_manuale'
   }
 
-  const descrizione = (r: any) =>
-    `Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso scansione: ${r.peso_reale} Kg )`
+  // Il peso su cui si rettifica è il MAGGIORE fra reale e volumetrico ripesato. Sulla lista movimenti
+  // va scritto QUELLO (spesso il volume: un pacco di 2 kg reali ma 30 kg volumetrici si rettifica sui
+  // 30) — altrimenti "peso scansione 2 Kg" con un addebito sembra un errore, mentre la rettifica è sul
+  // volume. È lo stesso peso che si usa per aggiornare spedizioni.peso_fatturato qui sotto.
+  const pesoFatt = (r: any) => Math.max(Number(r.peso_reale) || 0, Number(r.peso_volume_reale) || 0)
+  const descrizione = (r: any) => {
+    const f = pesoFatt(r)
+    const vol = (Number(r.peso_volume_reale) || 0) > (Number(r.peso_reale) || 0)
+    return `Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso ripesato: ${f} Kg${vol ? ' volumetrico' : ''} )`
+  }
 
   const { registraMovimentoMaster } = await import('@/lib/movimenti')
   let mosse = 0
@@ -217,8 +225,11 @@ export async function POST(req: NextRequest) {
   // Il costo della spedizione si aggiorna SOLO se l'addebito e' andato a buon fine: prima si
   // riscriveva comunque, e restava a sistema una spedizione riprezzata che nessuno aveva pagato.
   for (const r of spedizioniDaAggiornare) {
+    // peso_fatturato = il MAGGIORE fra reale e volumetrico ripesato (non il solo peso reale): è quello
+    // che è stato davvero fatturato col ricalcolo. Prima ci scriveva peso_reale e, quando vinceva il
+    // volume, la spedizione restava con un peso fatturato più basso del costo che le era stato messo.
     await supabase.from('spedizioni').update({
-      costo_totale: r.costo_finale, peso_fatturato: r.peso_reale,
+      costo_totale: r.costo_finale, peso_fatturato: pesoFatt(r),
     }).eq('id', r.spedizione_id)
   }
 
