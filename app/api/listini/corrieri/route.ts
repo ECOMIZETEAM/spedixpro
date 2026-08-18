@@ -56,7 +56,11 @@ export async function GET(req: NextRequest) {
   const posseduti = new Set((tuttiICorrieri || []).map((c:any) => c.id))
   // Mostra SOLO i corrieri realmente POSSEDUTI dal master e non spenti dal padre: no righe/agganci
   // "estranei" (residui di duplicazioni/ereditarietà che puntano a corrieri di altri master).
-  const corrieri = [..._mappaCorr.values()].filter(Boolean).filter((c:any) => posseduti.has(c.id) && !_spento(c))
+  const corrieriBase = [..._mappaCorr.values()].filter(Boolean).filter((c:any) => posseduti.has(c.id) && !_spento(c))
+  // Marca ogni corriere come PROPRIO o EREDITATO dal master sopra: l'editor blocca i soli ereditati.
+  const { corrieriEreditatiIds } = await import('@/lib/rete-masters')
+  const _ereditatiIds = await corrieriEreditatiIds(_admin, utente?.master_id)
+  const corrieri = corrieriBase.map((c:any) => ({ ...c, ereditato: _ereditatiIds.has(c.id) }))
   const corrieriDisponibili = (tuttiICorrieri||[]).filter(c => !corrieri.some((x:any) => x.id === c.id))
 
   const corriereSelezionato = corrieri.find((c:any) => c.id === corriereId) || corrieri[0]
@@ -96,6 +100,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     listino, corrieri, corrieriDisponibili,
     corriereSelezionatoId: corriereSelezionato?.id || '',
+    corriereEreditato: !!corriereSelezionato?.ereditato,
     fasce, supplementi,
   })
 }
@@ -107,18 +112,22 @@ export async function POST(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente as any); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
 
-  // Sola lettura solo per i RIVENDITORI puri (contratti tutti ereditati da un antenato).
-  // Il titolare dei contratti (es. E&A) resta editabile anche con parent_listino_id.
-  {
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const { listinoCorrieriSolaLettura } = await import('@/lib/rete-masters')
-    const admin = createAdminSupabase()
-    if (await listinoCorrieriSolaLettura(admin, utente?.master_id)) return NextResponse.json({ error: 'Questo listino è assegnato dal tuo master: è in sola lettura e non può essere modificato.' }, { status: 403 })
-  }
-
   const body = await req.json()
   const { listinoId, corriereId, fasce, supplementi, fattore_volume, solo_peso_reale } = body
   if (!listinoId || !corriereId) return NextResponse.json({ error: 'Dati mancanti' }, { status: 400 })
+
+  // SOLA LETTURA PER-CONTRATTO: si modificano solo i contratti PROPRI. Quelli EREDITATI da un master
+  // sopra (stesso nome_contratto di un antenato) sono in sola lettura ANCHE se il master possiede
+  // altri contratti suoi — prima bastava possederne uno per poterli toccare tutti. La guardia sta qui,
+  // nel server, non solo nella UI: senza, chi bypassa la pagina riscriverebbe comunque il prezzo
+  // ereditato (REGOLE.md: la regola che decide chi paga cosa va dove passano tutte le porte).
+  {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { corrieriEreditatiIds } = await import('@/lib/rete-masters')
+    const admin = createAdminSupabase()
+    const ereditati = await corrieriEreditatiIds(admin, utente?.master_id)
+    if (ereditati.has(corriereId)) return NextResponse.json({ error: 'Questo contratto è ereditato dal tuo master: il prezzo è in sola lettura e non puoi modificarlo.' }, { status: 403 })
+  }
 
   await supabase.from('listini_corrieri').update({ fattore_volume, solo_peso_reale: !!solo_peso_reale }).eq('id', listinoId)
 

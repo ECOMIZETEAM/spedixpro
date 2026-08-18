@@ -72,6 +72,39 @@ export async function eDiscendente(adminDb: any, targetId?: string | null, maste
   return false
 }
 
+// I corrieri (per ID) che il master EREDITA da un master sopra: il loro `nome_contratto` è già
+// posseduto da un antenato nella catena. Il prezzo di questi contratti lo decide chi li DETIENE, non
+// chi li rivende — da qui in giù sono di sola lettura. I corrieri PROPRI (nome che NESSUN antenato
+// possiede, es. E&A con BRT/Poste/UPS) restano modificabili. Ritorna un Set di `corrieri.id` ereditati
+// (vuoto = niente di ereditato: tutto proprio).
+//
+// A differenza di `listinoCorrieriSolaLettura` — che è tutto-o-niente a livello master — questa
+// distingue CONTRATTO PER CONTRATTO: un master misto (possiede i suoi + rivende quelli del padre) può
+// così modificare i propri e vedere-soltanto quelli ereditati, invece di poter toccare tutto perché
+// possiede almeno un contratto suo.
+export async function corrieriEreditatiIds(adminDb: any, masterId: string): Promise<Set<string>> {
+  const ereditati = new Set<string>()
+  if (!masterId) return ereditati
+  const { data: m } = await adminDb.from('masters').select('parent_master_id,parent_listino_id').eq('id', masterId).maybeSingle()
+  if (!m?.parent_listino_id) return ereditati   // nessun listino assegnato → titolare, niente ereditato
+  const { data: miei } = await adminDb.from('corrieri').select('id,nome_contratto').eq('master_id', masterId)
+  if (!miei?.length) return ereditati
+  // Nomi contratto posseduti dagli ANTENATI (catena parent_master_id)
+  const antenati = new Set<string>()
+  let cur: string | null = m.parent_master_id
+  for (let i = 0; i < 20 && cur; i++) {
+    const { data: ac } = await adminDb.from('corrieri').select('nome_contratto').eq('master_id', cur)
+    for (const c of (ac || [])) { const n = (c.nome_contratto || '').trim().toLowerCase(); if (n) antenati.add(n) }
+    const { data: pm } = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+    cur = pm?.parent_master_id || null
+  }
+  for (const c of (miei || [])) {
+    const n = (c.nome_contratto || '').trim().toLowerCase()
+    if (n && antenati.has(n)) ereditati.add(c.id)
+  }
+  return ereditati
+}
+
 // Un Listino Corrieri è in SOLA LETTURA per il master se è un rivenditore PURO: ha un listino
 // assegnato dal padre (parent_listino_id) E tutti i suoi contratti sono già posseduti da un
 // antenato (li rivende soltanto). Se invece possiede almeno un contratto ORIGINALE (nome_contratto

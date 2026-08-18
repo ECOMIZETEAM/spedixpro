@@ -6,11 +6,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utenteAg } = await supabase.from('utenti').select('ruolo').eq('id', user.id).single()
+  const { data: utenteAg } = await supabase.from('utenti').select('ruolo,master_id').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utenteAg); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
   const { id } = await params
   const body = await req.json()
   const { nome, corriere_id, fattore_volume, fasce, supplementi } = body
+
+  // SOLA LETTURA PER-CONTRATTO: non si modificano i contratti EREDITATI da un master sopra (stesso
+  // nome_contratto di un antenato). La guardia sta nel server, non solo nella UI.
+  if (corriere_id) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { corrieriEreditatiIds } = await import('@/lib/rete-masters')
+    const admin = createAdminSupabase()
+    const ereditati = await corrieriEreditatiIds(admin, (utenteAg as any)?.master_id)
+    if (ereditati.has(corriere_id)) return NextResponse.json({ error: 'Questo contratto è ereditato dal tuo master: il prezzo è in sola lettura e non puoi modificarlo.' }, { status: 403 })
+  }
 
   await supabase.from('listini_corrieri').update({ nome }).eq('id', id)
   if (corriere_id && fattore_volume !== undefined) {
@@ -128,5 +138,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{id:st
     if (agg?.fattore_volume != null) fattoreCorriere = agg.fattore_volume
   }
 
-  return NextResponse.json({ listino, fattoreCorriere, fasce: fasce||[], supplementi: supplementi||[] })
+  // Contratto ereditato dal master sopra? Se sì, l'editor lo mostra in sola lettura.
+  let ereditato = false
+  if (corriereId && (listino as any)?.master_id) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { corrieriEreditatiIds } = await import('@/lib/rete-masters')
+    const admin = createAdminSupabase()
+    const _er = await corrieriEreditatiIds(admin, (listino as any).master_id)
+    ereditato = _er.has(corriereId)
+  }
+
+  return NextResponse.json({ listino, fattoreCorriere, ereditato, fasce: fasce||[], supplementi: supplementi||[] })
 }

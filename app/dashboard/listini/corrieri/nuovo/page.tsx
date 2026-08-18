@@ -99,7 +99,8 @@ export default function ListinoCorrierePage() {
   const [tab, setTab] = useState('pesi')
   const [fattore, setFattore] = useState(5000)
   const [soloPesoReale, setSoloPesoReale] = useState(false)
-  const [soloLettura, setSoloLettura] = useState(false)  // listino assegnato dal master padre
+  const [soloLettura, setSoloLettura] = useState(false)  // TUTTO il listino assegnato dal padre (rivenditore puro): nasconde "Aggiungi contratto" e il banner generale
+  const [soloLetturaCorriere, setSoloLetturaCorriere] = useState(false)  // il SINGOLO contratto aperto è ereditato dal master sopra → prezzi in sola lettura
 
   const [aggiungendoContratto, setAggiungendoContratto] = useState(false)
   const [nuovoContrattoId, setNuovoContrattoId] = useState('')
@@ -181,6 +182,9 @@ export default function ListinoCorrierePage() {
     setCorrieri(data.corrieri || [])
     setCorrieriDisponibili(data.corrieriDisponibili || [])
     setCorriereId(data.corriereSelezionatoId || '')
+    // Il contratto aperto è ereditato dal master sopra? Allora i suoi prezzi sono in sola lettura,
+    // anche se altri contratti di questo master sono suoi e restano modificabili.
+    setSoloLetturaCorriere(!!data.corriereEreditato)
     setFattore(Number(data.listino?.fattore_volume) || 5000)
     setSoloPesoReale(!!data.listino?.solo_peso_reale)
     setFasce(buildFasceInit(data.fasce || []))
@@ -242,7 +246,7 @@ export default function ListinoCorrierePage() {
   function setRigaContr(i:number,k:keyof RigaSuppl,v:string) { setRigheContr(prev=>prev.map((r,idx)=>idx===i?{...r,[k]:v}:r)) }
 
   async function salva() {
-    if (soloLettura) { setErrore('Questo listino è assegnato dal tuo master: è in sola lettura e non può essere modificato.'); return }
+    if (soloLetturaCorriere) { setErrore('Questo contratto è ereditato dal tuo master: il prezzo è in sola lettura e non puoi modificarlo.'); return }
     if (!corriereId) { setErrore('Seleziona un contratto'); return }
     if (!listino) { setErrore('Listino non trovato'); return }
     setSaving(true); setErrore('')
@@ -289,6 +293,13 @@ export default function ListinoCorrierePage() {
   // Corpo dell'editor del contratto attualmente aperto (dentro la tendina).
   const editorContratto = (
     <div>
+      {/* Contratto ereditato dal master sopra (ma il master ne possiede altri suoi): banner per-contratto.
+          Non appare per i rivenditori puri, che hanno già il banner generale sopra la lista. */}
+      {soloLetturaCorriere && !soloLettura && (
+        <div style={{margin:'12px 14px 0',padding:'10px 14px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',fontSize:'12.5px',color:'#ea580c',lineHeight:1.5,pointerEvents:'auto' as const}}>
+          Questo contratto è <b>ereditato dal tuo master</b>: i prezzi sono in <b>sola lettura</b>. Puoi vederli e usarli, ma li gestisce il master sopra di te. Con <b>⧉ Duplica in listino cliente</b> puoi comunque crearci sopra un tuo listino di vendita.
+        </div>
+      )}
       {/* Fattore peso/volume (per-corriere) */}
       <div style={{padding:'16px 18px',borderBottom:'1px solid #eee',display:'flex',alignItems:'center',gap:'12px',flexWrap:'wrap' as const}}>
         <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>Fattore Peso/Volume (kg/m³)</label>
@@ -296,12 +307,14 @@ export default function ListinoCorrierePage() {
           {fattori.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}
         </select>
         {soloPesoReale && <span style={{fontSize:'11px',color:'#f97316'}}>Si paga sempre sul peso reale, il volumetrico viene ignorato.</span>}
+        {/* Duplica: cliccabile SEMPRE, anche su un contratto ereditato in sola lettura — per questo
+            forza pointerEvents:auto, superando l'overlay che blocca il resto dell'editor. */}
         <button onClick={apriDuplica} disabled={saving} title="Crea un listino cliente da questo costo, con maggiorazione"
-          style={{marginLeft:'auto',padding:'9px 16px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>
+          style={{marginLeft:'auto',padding:'9px 16px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer',pointerEvents:'auto' as const}}>
           ⧉ Duplica in listino cliente
         </button>
-        <button onClick={salva} disabled={saving||soloLettura} title={soloLettura?'Listino assegnato dal master: sola lettura':''}
-          style={{padding:'9px 24px',background:soloLettura?'#e5e7eb':'#f97316',color:soloLettura?'#9ca3af':'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:soloLettura?'not-allowed':'pointer',opacity:saving?0.6:1}}>
+        <button onClick={salva} disabled={saving||soloLetturaCorriere} title={soloLetturaCorriere?'Contratto ereditato dal master: sola lettura':''}
+          style={{padding:'9px 24px',background:soloLetturaCorriere?'#e5e7eb':'#f97316',color:soloLetturaCorriere?'#9ca3af':'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:soloLetturaCorriere?'not-allowed':'pointer',opacity:saving?0.6:1}}>
           {saving?'Salvo...':'Salva'}
         </button>
       </div>
@@ -607,8 +620,8 @@ export default function ListinoCorrierePage() {
                   <span style={{fontSize:'18px',color:'#9ca3af',transform:aperto?'rotate(90deg)':'none',transition:'transform 0.15s'}}>›</span>
                 </div>
                 {aperto && (
-                  <div style={{borderTop:'1px solid #eee', ...(soloLettura ? {pointerEvents:'none' as const, opacity:0.92, userSelect:'none' as const} : {})}}
-                    title={soloLettura ? 'Assegnato dal master: sola lettura' : undefined}>
+                  <div style={{borderTop:'1px solid #eee', ...(soloLetturaCorriere ? {pointerEvents:'none' as const, opacity:0.92, userSelect:'none' as const} : {})}}
+                    title={soloLetturaCorriere ? 'Contratto ereditato dal master: sola lettura' : undefined}>
                     {loading ? (
                       <div style={{padding:'30px',textAlign:'center' as const,color:'#999',fontSize:'13px'}}>Caricamento…</div>
                     ) : editorContratto}
