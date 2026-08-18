@@ -67,7 +67,8 @@ export async function POST(req: NextRequest) {
   if (!record.spedizione_id) {
     const ldv = oggetto.trim()
     if (ldv.length >= 4 && ldv.length <= 40) {
-      const { data: sps } = await admin.from('spedizioni').select('id,cliente_id,master_id').eq('numero', ldv).limit(2)
+      // case-insensitive: l'oggetto può essere minuscolo (es. 1uw07wf…), il numero è maiuscolo.
+      const { data: sps } = await admin.from('spedizioni').select('id,cliente_id,master_id').ilike('numero', ldv).limit(2)
       if (sps && sps.length === 1 && await autorizzatoSp(sps[0])) record.spedizione_id = (sps[0] as any).id
     }
   }
