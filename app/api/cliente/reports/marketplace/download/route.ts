@@ -87,7 +87,10 @@ export async function GET(req: NextRequest) {
       const sp = r.spedizioni || {}
       const car = carrierAmazon(sp.corrieri?.nome_contratto || '')
       const shipDate = (sp.created_at || '').slice(0, 10)   // YYYY-MM-DD
-      const orderId = raw.orderid || r.order_id
+      // order-id: prima quello normalizzato salvato (ora popolato anche dai file 'amazon-order-id'),
+      // poi i nomi grezzi come rete per gli ordini importati PRIMA della correzione dell'alias, che
+      // avevano r.order_id nullo e uscivano con la colonna 'order-id' vuota (file rifiutato da Amazon).
+      const orderId = r.order_id || raw.orderid || raw.amazonorderid || raw.amazon_order_id || raw.merchantorderid || ''
       const riga = (orderItemId: any, qty: any) => [
         tab(orderId), tab(orderItemId), tab(qty), tab(shipDate),
         tab(car.code), tab(car.name), tab(sp.tracking_number || ''), tab('Standard'),

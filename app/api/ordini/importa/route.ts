@@ -49,7 +49,11 @@ const ALIAS: Record<string, string[]> = {
   note:               ['note', 'notes', 'order_note', 'note_ordine'],
   rif_mittente:       ['rif_mittente', 'riferimento_mittente'],
   rif_destinatario:   ['rif_destinatario', 'riferimento_destinatario'],
-  order_id:           ['order_id', 'orderid', 'name', 'order_number', 'order', 'numero_ordine', 'ordine', 'id_ordine'],
+  // Amazon usa 'amazon-order-id' (normalizzato -> 'amazonorderid'): senza questo alias i suoi report
+  // NON venivano riconosciuti come ordine, quindi le righe multi-articolo non venivano raggruppate
+  // (lineMode restava falso) e l'order_id restava vuoto, rendendo poi inutilizzabile il file di
+  // conferma da rimandare ad Amazon (colonna 'order-id' vuota). 'merchant-order-id' e' l'altro nome.
+  order_id:           ['order_id', 'orderid', 'name', 'order_number', 'order', 'numero_ordine', 'ordine', 'id_ordine', 'amazonorderid', 'amazon_order_id', 'merchantorderid'],
   totale_ordine:      ['totale_ordine', 'total', 'order_total', 'importo', 'totale', 'item_price', 'itemprice', 'totale_prezzo_al_dettaglio_dopo_lo_sconto_imposte_escluse', 'prezzo_base_della_merce'],
 }
 // Colonne ausiliarie (non salvate ma usate per logica: line item, contrassegno, ecc.)
@@ -202,19 +206,33 @@ export async function POST(req: NextRequest) {
   type Gruppo = { oid: string; header: any; items: string[]; articoli: any[] }
   const gruppi: Gruppo[] = []
   if (lineMode) {
+    // Raggruppo per order_id usando una MAPPA, non solo il confronto con la riga precedente: cosi'
+    // le righe dello stesso ordine vengono unite anche se NON sono consecutive. Amazon, a differenza
+    // di Shopify, non sempre ordina il file per order-id: con il vecchio confronto "diverso dal
+    // precedente" lo stesso ordine si spezzava in piu' gruppi (e in piu' spedizioni).
+    const perOid = new Map<string, Gruppo>()
     let cur: Gruppo | null = null
     for (const r of rows) {
       const oid = g(r, 'order_id')
       const haDest = !!g(r, 'destinatario')
-      // Nuovo ordine: ha un id ordine diverso dal precedente (le righe di continuazione ripetono lo stesso id)
-      if (oid && (!cur || oid !== cur.oid)) {
-        cur = { oid, header: r, items: [], articoli: [] }
-        gruppi.push(cur)
+      if (oid) {
+        const esistente = perOid.get(oid)
+        if (esistente) {
+          // Ordine gia' visto (anche non consecutivo): stesso gruppo. Se la prima riga non aveva
+          // destinatario e questa si', la promuovo a header.
+          cur = esistente
+          if (haDest && !g(cur.header, 'destinatario')) cur.header = r
+        } else {
+          cur = { oid, header: r, items: [], articoli: [] }
+          perOid.set(oid, cur)
+          gruppi.push(cur)
+        }
       } else if (!cur) {
-        cur = { oid: oid || 'r' + gruppi.length, header: r, items: [], articoli: [] }
+        // Riga senza id ordine e nessun gruppo aperto: ordine a se'.
+        cur = { oid: 'r' + gruppi.length, header: r, items: [], articoli: [] }
         gruppi.push(cur)
       } else if (haDest && !g(cur.header, 'destinatario')) {
-        // la prima riga non aveva destinatario ma questa sì: promuovila a header
+        // Riga di continuazione (id ordine vuoto) che porta il destinatario: promuovila a header.
         cur.header = r
       }
       // Accumulo il prodotto di questa riga (stringa contenuto + articolo strutturato per il riepilogo)
