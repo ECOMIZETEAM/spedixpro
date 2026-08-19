@@ -21,31 +21,30 @@ async function staff(supabase: any) {
 
 const NESSUNO = ['00000000-0000-0000-0000-000000000000']
 
-// GET: lista delle spedizioni ancora da preparare della RETE del master (come la lista giacenze),
-// con gli articoli da prelevare quando il cliente li ha dichiarati.
+// GET: lista delle spedizioni ancora da preparare del SOLO master detentore (chi ha fisicamente la
+// merce = master DIRETTO del cliente), con gli articoli da prelevare quando il cliente li ha dichiarati.
+// NON risale la catena: se il cliente e' di Ecomize LL, il "da preparare" e' di Ecomize LL, non del
+// super-master sopra ne' dei master a fianco — loro non hanno la merce e non lo devono preparare.
 // Con ?count=1 torna solo { count } (leggero): serve al badge rosso numerato sul menu, stile ticket.
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const s = await staff(supabase)
   if (!s) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const admin = createAdminSupabase()
-  const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
-  const rete = await sottoAlberoMasterIds(admin, s.master_id)
-  const reteSafe = rete.length ? rete : NESSUNO
 
-  // Solo conteggio (badge): niente join/blob, TUTTA la rete del master.
+  // Solo conteggio (badge): niente join/blob. SOLO le spedizioni di QUESTO master (detentore).
   if (req.nextUrl.searchParams.get('count')) {
     const { count } = await admin.from('spedizioni')
       .select('id', { count: 'exact', head: true })
       .eq('preparazione_stato', 'da_preparare')
-      .in('master_id', reteSafe)
+      .eq('master_id', s.master_id)
     return NextResponse.json({ count: count || 0 })
   }
 
   const { data: speds, error } = await admin.from('spedizioni')
     .select(`${SPED_COLS}, preparazione_stato, clienti(ragione_sociale), corrieri(nome_contratto)`)
     .eq('preparazione_stato', 'da_preparare')
-    .in('master_id', reteSafe)
+    .eq('master_id', s.master_id)
     .order('created_at', { ascending: true })
     .limit(1000)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
