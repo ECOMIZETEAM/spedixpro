@@ -37,7 +37,6 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
             totalPriceSet { shopMoney { amount currencyCode } }
             shippingAddress { name address1 address2 city province provinceCode zip country countryCodeV2 phone }
             billingAddress { name address1 address2 city province provinceCode zip country countryCodeV2 phone }
-            customer { displayName }
             lineItems(first: 100){ edges { node { title quantity sku image { url } } } }
           } }
           pageInfo { hasNextPage endCursor }
@@ -52,14 +51,14 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
   let importati = 0
   for (const o of ordini) {
     // DESTINATARIO con RIPIEGO: se l'indirizzo di SPEDIZIONE e' vuoto (capita su ordini/bozze dove e'
-    // stato compilato solo il cliente o la fatturazione), si usa la FATTURAZIONE, e per il solo nome
-    // il nome del CLIENTE. Cosi' un ordine con cliente ma senza ship-to non resta col destinatario in
-    // bianco (prima restava '-'); resta la spedizione a poterlo correggere prima di partire.
+    // stata compilata solo la fatturazione), si usa la FATTURAZIONE. NB: il nome del CLIENTE non si usa
+    // piu' come ripiego — il campo `customer` richiede lo scope read_customers (che non chiediamo, e non
+    // serve): il nome viene da shippingAddress/billingAddress, presente su ogni ordine spedibile.
     const ship = o.shippingAddress || {}
     const bill = o.billingAddress || {}
     const haSpedizione = !!(ship.name || ship.address1 || ship.city || ship.zip)
     const addr = haSpedizione ? ship : bill
-    const nomeDest = ship.name || bill.name || o.customer?.displayName || ''
+    const nomeDest = ship.name || bill.name || ''
     const destinatario = {
       nome: nomeDest,
       indirizzo: [addr.address1, addr.address2].filter(Boolean).join(' '),
