@@ -205,9 +205,15 @@ export default function ImportaOrdiniPage() {
       const res = await fetch('/api/ordini/importa', { method: 'POST', body: fd })
       const data = await res.json()
       if (res.ok) {
-        const motivi = (data.errori || []).map((e: any) => e.motivo).filter(Boolean)
-        const extra = data.scartati ? ` — ${data.scartati} righe scartate${motivi.length ? ' (' + Array.from(new Set(motivi)).slice(0, 3).join('; ') + ')' : ''}` : ''
-        setMsg({ type: 'ok', text: `${data.importati} ordini importati${extra}` })
+        if (data.messaggio && !data.importati) {
+          // Tutti gli ordini del file erano già stati importati: messaggio chiaro, non un muto "0".
+          setMsg({ type: 'ok', text: data.messaggio })
+        } else {
+          const motivi = (data.errori || []).map((e: any) => e.motivo).filter(Boolean)
+          const gia = data.giaPresenti ? ` — ${data.giaPresenti} già importati (saltati)` : ''
+          const extra = data.scartati ? ` — ${data.scartati} righe scartate${motivi.length ? ' (' + Array.from(new Set(motivi)).slice(0, 3).join('; ') + ')' : ''}` : ''
+          setMsg({ type: 'ok', text: `${data.importati} ordini importati${gia}${extra}` })
+        }
         loadOrdini()
       } else {
         setMsg({ type: 'err', text: data.error || 'Errore durante l\'importazione' })

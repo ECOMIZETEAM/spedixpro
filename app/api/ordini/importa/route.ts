@@ -326,6 +326,37 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Nessun ordine valido trovato nel file', errori }, { status: 400 })
   }
 
+  // DEDUP: gli ordini con lo stesso order_id GIA' importati da questo cliente non si reimportano.
+  // Shopify/Amazon/Temu esportano SEMPRE tutti gli ordini (anche i gia' spediti): senza questo, chi
+  // ri-carica lo stesso file o l'export aggiornato si ritrovava i DOPPIONI. E soprattutto il messaggio
+  // "0 ordini importati" sembrava un errore, mentre e' "li avevi gia' caricati": ora lo diciamo chiaro.
+  let giaPresenti = 0
+  {
+    const ids = [...new Set(records.map(r => r.order_id).filter(Boolean))]
+    if (ids.length) {
+      const esistenti = new Set<string>()
+      for (let i = 0; i < ids.length; i += 300) {
+        const { data: ex } = await supabase.from('ordini_importati')
+          .select('order_id').eq('cliente_id', clienteId).in('order_id', ids.slice(i, i + 300))
+        for (const e of (ex || [])) if ((e as any).order_id) esistenti.add((e as any).order_id)
+      }
+      if (esistenti.size) {
+        for (let k = records.length - 1; k >= 0; k--) {
+          if (records[k].order_id && esistenti.has(records[k].order_id)) { records.splice(k, 1); giaPresenti++ }
+        }
+      }
+    }
+  }
+
+  if (!records.length) {
+    // Tutti gli ordini del file erano gia' stati importati: non e' un errore, e' un "niente di nuovo".
+    // Status 200 con un messaggio comprensibile, non un 400 secco.
+    return NextResponse.json({
+      importati: 0, scartati: errori.length, giaPresenti, errori,
+      messaggio: `Questi ordini erano già stati importati in precedenza (${giaPresenti} su ${giaPresenti + errori.length}): non c'è nessun nuovo ordine da caricare.`,
+    })
+  }
+
   // PROVINCIA SPORCA (es. Amazon: "ITALIA", "ISCHIA"): se dopo la conversione non e' una sigla
   // valida, la ricavo dal CAP usando lo STORICO spedizioni (provincia piu' frequente per quel CAP).
   const daRisolvere = records.filter(r => (r.country || 'IT') === 'IT' && !SIGLE_IT.has(r.provincia))
@@ -353,6 +384,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     importati: inserted?.length || 0,
     scartati: errori.length,
+    giaPresenti,
     errori,
   })
 }
