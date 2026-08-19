@@ -73,6 +73,19 @@ export default function EditorPreventivo() {
     finally { if (!silenzioso) setSalvando(false) }
   }
 
+  async function invia() {
+    if (!destEmail.trim()) { setMsg({ t: 'err', x: 'Inserisci l\'email del destinatario' }); return }
+    setSalvando(true)
+    const ok = await salva(true)
+    if (!ok) { setSalvando(false); return }
+    try {
+      const res = await fetch(`/api/preventivi/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ azione: 'invia', email: destEmail.trim() }) })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok || d?.error) { setMsg({ t: 'err', x: d?.error || 'Invio non riuscito' }); setSalvando(false); return }
+      setStato('inviato'); setMsg({ t: 'ok', x: 'Preventivo inviato via email al cliente.' })
+    } catch { setMsg({ t: 'err', x: 'Errore di rete' }) } finally { setSalvando(false) }
+  }
+
   // Prezzi = listino completo: salvo prima (per non perdere le sezioni), poi vado all'editor listini.
   async function apriListino() {
     setSalvando(true)
@@ -101,7 +114,11 @@ export default function EditorPreventivo() {
           <a href="/dashboard/preventivi" style={{ fontSize: '12.5px', color: '#f97316', textDecoration: 'none' }}>← Preventivi</a>
           <h1 style={{ fontSize: '19px', fontWeight: 700, color: '#1a1a1a', margin: '4px 0 0' }}>Modifica preventivo</h1>
         </div>
-        <button onClick={() => salva()} disabled={salvando} style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 22px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.6 : 1 }}>{salvando ? 'Salvo…' : '💾 Salva'}</button>
+        <div style={{ display: 'inline-flex', gap: '10px', alignItems: 'center' }}>
+          {stato === 'accettato' && <span style={{ background: '#dcfce7', color: '#15803d', fontSize: '12px', fontWeight: 700, padding: '5px 12px', borderRadius: '20px' }}>✅ Accettato</span>}
+          <button onClick={() => salva()} disabled={salvando || stato === 'accettato'} style={{ background: '#fff', color: '#1a1a1a', border: '1px solid #ddd', borderRadius: '8px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.6 : 1 }}>{salvando ? 'Salvo…' : '💾 Salva'}</button>
+          <button onClick={invia} disabled={salvando || stato === 'accettato' || corrieri.length === 0} title={corrieri.length === 0 ? 'Compila prima i prezzi' : 'Invia via email al cliente'} style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 20px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: (salvando || stato === 'accettato' || corrieri.length === 0) ? 0.5 : 1 }}>📤 Invia al cliente</button>
+        </div>
       </div>
       {msg && <div style={{ background: msg.t === 'ok' ? '#f0fdf4' : '#fef2f2', border: `1px solid ${msg.t === 'ok' ? '#bbf7d0' : '#fecaca'}`, color: msg.t === 'ok' ? '#15803d' : '#b91c1c', borderRadius: '8px', padding: '10px 14px', fontSize: '13px', marginBottom: '14px' }}>{msg.x}</div>}
 

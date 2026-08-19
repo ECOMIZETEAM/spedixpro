@@ -17,6 +17,42 @@ function wrap(inner: string): string {
   </div>`
 }
 
+// Wrap BRANDIZZATO col logo/colore del MASTER (fallback MoovExpress). Non tocca wrap() (le altre email).
+function wrapBrand(inner: string, b: { logo?: string | null; colore?: string | null; nome?: string | null }): string {
+  const colore = b.colore || '#1a1a1a'
+  const header = b.logo
+    ? `<img src="${b.logo}" alt="logo" style="display:block;max-height:44px;max-width:200px;height:auto;border:0" />`
+    : `<div style="color:#fff;font-size:20px;font-weight:800">${esc(b.nome || 'Preventivo')}</div>`
+  return `
+  <div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e8e8e8">
+    <div style="background:${colore};padding:20px 28px">${header}</div>
+    <div style="padding:30px">${inner}</div>
+  </div>`
+}
+
+// Email del PREVENTIVO al destinatario: brandizzata (logo+colore del master) con link alla pagina pubblica.
+export async function inviaEmailPreventivo({ to, oggetto, destNome, link, master }: {
+  to: string; oggetto?: string; destNome?: string; link: string
+  master: { nome?: string | null; logo_url?: string | null; colore_primario?: string | null; colore_secondario?: string | null }
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const colP = master.colore_primario || '#f97316'
+    const r: any = await resend.emails.send({
+      from: FROM,
+      to,
+      subject: oggetto || `Preventivo${master.nome ? ' da ' + master.nome : ''}`,
+      html: wrapBrand(`
+        <h2 style="font-size:19px;color:#1a1a1a;margin:0 0 10px">${esc(oggetto || 'Il tuo preventivo')}</h2>
+        <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 18px">${destNome ? 'Ciao ' + esc(destNome) + ', ' : ''}ecco il preventivo${master.nome ? ' di ' + esc(master.nome) : ''}. Aprilo per vedere i prezzi e, se ti va bene, accettarlo con un clic.</p>
+        <p style="text-align:center;margin:22px 0"><a href="${link}" style="background:${colP};color:#fff;text-decoration:none;border-radius:8px;padding:12px 26px;font-size:14px;font-weight:700;display:inline-block">Vedi e accetta il preventivo</a></p>
+        <p style="color:#999;font-size:12px;margin-top:16px;word-break:break-all">Oppure copia questo link: ${link}</p>
+      `, { logo: master.logo_url, colore: master.colore_secondario, nome: master.nome }),
+    })
+    if (r?.error) return { ok: false, error: r.error?.message || JSON.stringify(r.error) }
+    return { ok: true }
+  } catch (err: any) { return { ok: false, error: String(err?.message || err) } }
+}
+
 // Email di prova (verifica dominio/mittente Resend). Ritorna esito + id Resend o errore.
 export async function inviaEmailTest(to: string): Promise<{ ok: boolean; from: string; id?: string | null; error?: string }> {
   try {

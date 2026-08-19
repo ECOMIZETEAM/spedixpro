@@ -38,8 +38,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params
   const admin = createAdminSupabase()
   const b = await req.json().catch(() => ({}))
-  const { data: p } = await admin.from('preventivi').select('id,master_id,stato,listino_template_id,dest_nome,oggetto').eq('id', id).maybeSingle()
+  const { data: p } = await admin.from('preventivi').select('id,master_id,stato,listino_template_id,dest_nome,dest_email,oggetto,token').eq('id', id).maybeSingle()
   if (!p || p.master_id !== s.master_id) return NextResponse.json({ error: 'Preventivo non trovato' }, { status: 404 })
+
+  if (b.azione === 'invia') {
+    if (p.stato === 'accettato') return NextResponse.json({ error: 'Preventivo gia\' accettato.' }, { status: 400 })
+    const to = (b.email || p.dest_email || '').trim()
+    if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return NextResponse.json({ error: 'Email destinatario mancante o non valida' }, { status: 400 })
+    if (!p.listino_template_id) return NextResponse.json({ error: 'Compila prima i prezzi (listino) del preventivo.' }, { status: 400 })
+    const { data: m } = await admin.from('masters').select('nome,logo_url,colore_primario,colore_secondario').eq('id', s.master_id).maybeSingle()
+    const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://moovexpress.com').replace(/\/$/, '')
+    const { inviaEmailPreventivo } = await import('@/lib/email')
+    const esito = await inviaEmailPreventivo({ to, oggetto: p.oggetto, destNome: p.dest_nome, link: `${base}/preventivo/${p.token}`, master: m || {} })
+    if (!esito.ok) return NextResponse.json({ error: 'Invio email fallito: ' + (esito.error || '') }, { status: 400 })
+    await admin.from('preventivi').update({ stato: 'inviato', inviato_il: new Date().toISOString(), dest_email: to, updated_at: new Date().toISOString() }).eq('id', id)
+    return NextResponse.json({ ok: true })
+  }
 
   if (b.azione === 'crea_listino') {
     if (p.stato === 'accettato') return NextResponse.json({ error: 'Preventivo gia\' accettato.' }, { status: 400 })
