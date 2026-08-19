@@ -23,3 +23,10 @@ api_version = "2026-04"
 [[webhooks.subscriptions]]
 compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
 uri = "https://moovexpress.com/api/integrazioni/shopify/webhooks/compliance"
+
+# Disinstallazione: alla rimozione dell'app segniamo l'integrazione come disconnessa e svuotiamo le
+# credenziali (l'handler usa il service_role, il webhook arriva senza sessione). Prima NON era
+# sottoscritto: la pulizia arrivava solo 48h dopo con shop/redact.
+[[webhooks.subscriptions]]
+topics = [ "app/uninstalled" ]
+uri = "https://moovexpress.com/api/integrazioni/shopify/webhooks/app-uninstalled"

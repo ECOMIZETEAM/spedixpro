@@ -133,7 +133,11 @@ export async function fulfillSpedizioniShopify(supabase: any, spedizioneIds: str
         .from('integrazioni').select('*').eq('id', ordine.integrazione_id).maybeSingle()
       const shop = (integr?.credenziali as any)?.shop
       if (!integr || !shop) { await segna('errore', 'integrazione non trovata'); continue }
-      const tk = await getValidShopifyToken(integr)
+      // Si passa il client GIA' pronto (nel cron e' l'admin/service_role): senza, getValidShopifyToken
+      // ripiega su createServerSupabase (user-scoped) e nel cron — che non ha sessione — la RLS blocca
+      // il salvataggio del token rinnovato. Shopify invalida il vecchio refresh_token appena lo usi:
+      // se il nuovo non si salva, al giro dopo il refresh fallisce e il negozio "si scollega" da solo.
+      const tk = await getValidShopifyToken(integr, supabase)
       if (tk.error || !tk.token) { await segna('errore', tk.error || 'token non disponibile'); continue }
       // 1) fulfillment orders aperti dell'ordine (GraphQL)
       const gid = `gid://shopify/Order/${ordine.ordine_esterno_id}`

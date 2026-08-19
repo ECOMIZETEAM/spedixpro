@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyShopifyWebhook } from '@/lib/shopifyWebhook'
-import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -22,7 +22,10 @@ export async function POST(req: NextRequest) {
 
   if (shop) {
     try {
-      const supabase = await createServerSupabase()
+      // Admin client (service_role): il webhook arriva SENZA cookie di sessione. Con createServerSupabase
+      // (ANON) la RLS su integrazioni nascondeva ogni riga -> l'update colpiva 0 record e la
+      // disinstallazione NON veniva registrata (silenziosamente). Come le altre route webhook.
+      const supabase = createAdminSupabase()
       await supabase
         .from('integrazioni')
         .update({ stato: 'disconnesso', credenziali: {}, errore: 'App disinstallata su Shopify' })
