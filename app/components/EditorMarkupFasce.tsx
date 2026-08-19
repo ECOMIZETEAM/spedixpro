@@ -16,8 +16,14 @@ const num = (v: string) => Number(String(v).replace(',', '.')) || 0
 const inp: any = { padding: '6px 8px', border: '1px solid #d5d5d5', borderRadius: '6px', fontSize: '12.5px', color: '#1a1a1a', boxSizing: 'border-box' }
 const eur = (n: number) => `€ ${Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
-export default function EditorMarkupFasce({ fasce, onChange }: { fasce: FasciaMarkup[]; onChange: (m: MarkupOut) => void }) {
-  const [pf, setPf] = useState<Record<string, { mode: 'perc' | 'fisso'; valore: string }>>({})
+export default function EditorMarkupFasce({ fasce, onChange, valoreIniziale }: { fasce: FasciaMarkup[]; onChange: (m: MarkupOut) => void; valoreIniziale?: MarkupOut }) {
+  // Seme dai valori gia' impostati (per la "Modifica"): usare un key stabile sul componente cosi'
+  // rimonta col seme giusto quando cambia il contesto (es. corriere diverso).
+  const [pf, setPf] = useState<Record<string, { mode: 'perc' | 'fisso'; valore: string }>>(() => {
+    const seed: Record<string, { mode: 'perc' | 'fisso'; valore: string }> = {}
+    for (const [k, v] of Object.entries(valoreIniziale?.perFascia || {})) seed[k] = { mode: (v as any).mode === 'fisso' ? 'fisso' : 'perc', valore: String((v as any).valore) }
+    return seed
+  })
   const [bulkMode, setBulkMode] = useState<'perc' | 'fisso'>('perc')
   const [bulkVal, setBulkVal] = useState('')
 

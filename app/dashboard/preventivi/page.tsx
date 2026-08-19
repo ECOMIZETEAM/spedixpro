@@ -56,7 +56,8 @@ export default function Preventivi() {
       })
       const d = await res.json().catch(() => ({}))
       if (!res.ok || d?.error) { setErr(d?.error || 'Creazione non riuscita'); setCreando(false); return }
-      setOpen(false); carica()
+      // Va dritto all'editor del nuovo preventivo.
+      window.location.href = `/dashboard/preventivi/${d.id}`
     } catch { setErr('Errore di rete') } finally { setCreando(false) }
   }
 
@@ -91,9 +92,12 @@ export default function Preventivi() {
                 <td style={td}>{badge(r.stato)}</td>
                 <td style={{ ...td, whiteSpace: 'nowrap', color: '#666' }}>{dataBreve(r.created_at)}</td>
                 <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                  {r.stato !== 'accettato' && (
-                    <button onClick={() => elimina(r.id, r.dest_nome || '')} title="Elimina" style={{ background: 'transparent', border: 'none', color: '#b91c1c', fontSize: '15px', cursor: 'pointer' }}>🗑</button>
-                  )}
+                  <span style={{ display: 'inline-flex', gap: '8px', alignItems: 'center' }}>
+                    <a href={`/dashboard/preventivi/${r.id}`} style={{ background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 700, textDecoration: 'none' }}>{r.stato === 'accettato' ? 'Apri' : 'Modifica'}</a>
+                    {r.stato !== 'accettato' && (
+                      <button onClick={() => elimina(r.id, r.dest_nome || '')} title="Elimina" style={{ background: 'transparent', border: 'none', color: '#b91c1c', fontSize: '15px', cursor: 'pointer' }}>🗑</button>
+                    )}
+                  </span>
                 </td>
               </tr>
             ))}
