@@ -332,7 +332,10 @@ export async function POST(req: NextRequest) {
   // "0 ordini importati" sembrava un errore, mentre e' "li avevi gia' caricati": ora lo diciamo chiaro.
   let giaPresenti = 0
   {
-    const ids = [...new Set(records.map(r => r.order_id).filter(Boolean))]
+    // Si deduplica SOLO sugli order_id che sono un VERO id d'ordine (Amazon/Temu/numero): su
+    // un'etichetta generica riusata ("AMAZON", "g") si salterebbero ordini DIVERSI = falso positivo.
+    const { rifOrdineAffidabile } = await import('@/lib/rif-ordine')
+    const ids = [...new Set(records.map(r => r.order_id).filter((x: any) => rifOrdineAffidabile(x)))]
     if (ids.length) {
       const esistenti = new Set<string>()
       for (let i = 0; i < ids.length; i += 300) {

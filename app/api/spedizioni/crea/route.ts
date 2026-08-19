@@ -115,7 +115,10 @@ export async function POST(req: NextRequest) {
   // indirizzo si'. Le annullate non contano (annullare+rifare e' legittimo).
   {
     const rifOrd = String(body.rifOrdine || '').trim()
-    if (clienteId && rifOrd) {
+    // Solo su un rif che e' un VERO id d'ordine (Amazon/Temu/numero): su un'etichetta riusata a mano
+    // ("AMAZON", "g", "EXP 2") si bloccherebbero ordini DIVERSI dello stesso cliente = falso positivo.
+    const { rifOrdineAffidabile } = await import('@/lib/rif-ordine')
+    if (clienteId && rifOrdineAffidabile(rifOrd)) {
       const capDest = String(body.shipTo?.postalCode || '').trim()
       const { data: giaSpedite } = await adminCrea.from('spedizioni')
         .select('id,numero,stato,cancellata_il')
