@@ -72,6 +72,12 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ righe, riepilogo })
 }
 
+// Le uniche azioni ammesse, con la GUARDIA sullo stato attuale (transizione rigida). L'update scatta
+// SOLO se lo stato di partenza e' quello giusto: cosi' due click, un doppio invio o una richiesta in
+// ritardo non possono "saltare" lo stato. È il cuore delle regole rigide sui bonifici.
+//   in_attesa --effettuato--> effettuato --arrivato--> arrivato   (+ le due annulla, un passo alla volta)
+const AZIONI = ['effettuato', 'arrivato', 'annulla_effettuato', 'annulla_arrivato', 'nota', 'elimina']
+
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const s = await staff(supabase)
@@ -79,27 +85,38 @@ export async function POST(req: NextRequest) {
   const admin = createAdminSupabase()
   const b = await req.json().catch(() => ({}))
   const id = String(b.id || ''); const azione = String(b.azione || '')
-  if (!id || !azione) return NextResponse.json({ error: 'Dati mancanti' }, { status: 400 })
+  if (!id || !AZIONI.includes(azione)) return NextResponse.json({ error: 'Dati non validi' }, { status: 400 })
 
-  // La riga dev'essere del MIO master: conoscere un id qualsiasi non basta.
+  // La riga dev'essere del MIO master: conoscere un id qualsiasi non basta. E ogni scrittura ripete
+  // il vincolo master (eq master_id) come cintura, oltre alla guardia di stato.
   const { data: riga } = await admin.from('ricariche_check')
-    .select('id,master_id,bonifico_effettuato_il').eq('id', id).maybeSingle()
-  if (!riga || riga.master_id !== s.master_id) return NextResponse.json({ error: 'Riga non trovata' }, { status: 403 })
+    .select('id,master_id,bonifico_effettuato_il,bonifico_arrivato_il').eq('id', id).maybeSingle()
+  if (!riga || riga.master_id !== s.master_id) return NextResponse.json({ error: 'Riga non trovata nella tua rete' }, { status: 403 })
+
+  const now = new Date().toISOString()
 
   if (azione === 'elimina') {
-    await admin.from('ricariche_check').delete().eq('id', id)
-    return NextResponse.json({ ok: true })
+    const { error } = await admin.from('ricariche_check').delete().eq('id', id).eq('master_id', s.master_id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    return NextResponse.json({ ok: true, eliminata: true })
   }
-  const now = new Date().toISOString()
-  let patch: any = null
-  if (azione === 'effettuato') patch = { bonifico_effettuato_il: now }
-  else if (azione === 'annulla_effettuato') patch = { bonifico_effettuato_il: null, bonifico_arrivato_il: null }
-  else if (azione === 'arrivato') patch = { bonifico_arrivato_il: now, bonifico_effettuato_il: riga.bonifico_effettuato_il || now }
-  else if (azione === 'annulla_arrivato') patch = { bonifico_arrivato_il: null }
-  else if (azione === 'nota') patch = { note: b.note ? String(b.note).slice(0, 500) : null }
-  else return NextResponse.json({ error: 'Azione non valida' }, { status: 400 })
+  if (azione === 'nota') {
+    const { error } = await admin.from('ricariche_check').update({ note: b.note ? String(b.note).slice(0, 500) : null }).eq('id', id).eq('master_id', s.master_id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  } else {
+    // Transizione RIGIDA: patch + guardia sullo stato di partenza.
+    let q: any = admin.from('ricariche_check')
+    if (azione === 'effettuato') q = q.update({ bonifico_effettuato_il: now }).is('bonifico_effettuato_il', null)
+    else if (azione === 'arrivato') q = q.update({ bonifico_arrivato_il: now }).is('bonifico_arrivato_il', null).not('bonifico_effettuato_il', 'is', null)
+    else if (azione === 'annulla_arrivato') q = q.update({ bonifico_arrivato_il: null }).not('bonifico_arrivato_il', 'is', null)
+    else /* annulla_effettuato */ q = q.update({ bonifico_effettuato_il: null }).not('bonifico_effettuato_il', 'is', null).is('bonifico_arrivato_il', null)
+    const { error } = await q.eq('id', id).eq('master_id', s.master_id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    // Se la guardia non ha trovato la riga (0 update) NON e' un errore: la riga era gia' in quello
+    // stato o la transizione non era valida. Sotto rileggo e restituisco lo stato VERO: la UI si
+    // allinea sempre alla realta', non a un click ottimistico.
+  }
 
-  const { error } = await admin.from('ricariche_check').update(patch).eq('id', id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  return NextResponse.json({ ok: true })
+  const { data: fresh } = await admin.from('ricariche_check').select('*').eq('id', id).maybeSingle()
+  return NextResponse.json({ ok: true, riga: fresh ? arricchisci(fresh) : null })
 }

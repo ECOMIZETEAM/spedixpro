@@ -36,6 +36,14 @@ export default function CheckRicariche() {
   useEffect(() => { carica() }, [stato])
 
   async function azione(id: string, az: string) {
+    if (facendo) return   // guardia anti doppio-click: un'azione alla volta
+    // Conferma sulle azioni che tornano indietro o cancellano: niente cambi di stato per sbaglio.
+    const conferme: Record<string, string> = {
+      annulla_effettuato: 'Annullare il "bonifico effettuato"? La ricarica torna in attesa.',
+      annulla_arrivato: 'Annullare la conferma d\'arrivo? Il bonifico torna a "effettuato, non ancora incassato".',
+      elimina: 'Togliere questa ricarica dal monitoraggio bonifici? (non tocca il credito)',
+    }
+    if (conferme[az] && !window.confirm(conferme[az])) return
     setFacendo(id + az); setErr('')
     try {
       const res = await fetch('/api/statistiche/check-ricariche', {
@@ -43,9 +51,14 @@ export default function CheckRicariche() {
         body: JSON.stringify({ id, azione: az }),
       })
       const d = await res.json().catch(() => ({}))
-      if (d?.error) { setErr(d.error); setFacendo(''); return }
+      // Controlla lo STATO HTTP, non solo d.error: un 404/403 (es. sessione o deploy) non deve
+      // sembrare riuscito. Cosi' non si vede mai uno stato "segnato" che in realta' non e' salvato.
+      if (!res.ok || d?.error) { setErr(d?.error || 'Operazione non riuscita — ricarica la pagina e riprova'); setFacendo(''); return }
+      // La UI si allinea allo stato VERO restituito dal server (mai ottimistico), poi rinfresca il riepilogo.
+      if (d?.eliminata) setRighe(prev => prev.filter(r => r.id !== id))
+      else if (d?.riga) setRighe(prev => prev.map(r => (r.id === id ? d.riga : r)))
       carica()
-    } catch { setErr('Errore di rete') } finally { setFacendo('') }
+    } catch { setErr('Errore di rete — ricarica la pagina') } finally { setFacendo('') }
   }
 
   const dataOra = (s: any) => { try { return new Date(s).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) } catch { return '' } }
