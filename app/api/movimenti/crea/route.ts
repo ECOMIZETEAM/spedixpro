@@ -4,6 +4,18 @@ import { registraMovimento, TipoMovimento } from '@/lib/movimenti'
 
 const TIPI_MANUALI: TipoMovimento[] = ['ricarica', 'reso', 'rettifica', 'rimborso']
 
+// CHECK RICARICHE: ogni ricarica MANUALE (tipo 'ricarica', importo positivo) lascia una riga di
+// controllo per monitorare il bonifico atteso (contabilita' + anti-truffa). Best-effort: non deve
+// mai far fallire la ricarica. Le ricariche Stripe/carta NON passano di qui, quindi restano fuori.
+async function tracciaRicarica(admin: any, d: { masterId: string; targetTipo: 'cliente' | 'master'; targetId: string; targetNome: string | null; importo: number; createdBy: string }) {
+  try {
+    await admin.from('ricariche_check').insert({
+      master_id: d.masterId, target_tipo: d.targetTipo, target_id: d.targetId,
+      target_nome: d.targetNome, importo: Math.abs(d.importo), created_by: d.createdBy,
+    })
+  } catch (e) { console.error('[ricariche-check] tracciamento fallito', e) }
+}
+
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -37,7 +49,7 @@ export async function POST(req: NextRequest) {
     const targetMasterId = clienteId.slice(2)
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const admin = createAdminSupabase()
-    const { data: sub } = await admin.from('masters').select('id,parent_master_id').eq('id', targetMasterId).single()
+    const { data: sub } = await admin.from('masters').select('id,parent_master_id,nome').eq('id', targetMasterId).single()
     // Autorizzato se il mio master è un ANTENATO del sotto-master (figlio diretto o più in basso
     // nella rete), coerente con accesso/impersona che risalgono la catena parent_master_id.
     let cur: string | null = sub?.parent_master_id || null
@@ -58,6 +70,7 @@ export async function POST(req: NextRequest) {
         riferimento: riferimento ? String(riferimento).trim() : null,
         importo, createdBy: user.id,
       })
+      if (tipo === 'ricarica' && importo > 0) await tracciaRicarica(admin, { masterId: utente.master_id, targetTipo: 'master', targetId: targetMasterId, targetNome: (sub as any)?.nome || null, importo, createdBy: user.id })
       return NextResponse.json({ ok: true, saldo })
     } catch (e: any) {
       return NextResponse.json({ error: e?.message || 'Errore ricarica sotto-master' }, { status: 500 })
@@ -66,13 +79,13 @@ export async function POST(req: NextRequest) {
 
   // Verifica che il cliente appartenga a questo master
   const { data: cli } = await supabase
-    .from('clienti').select('id, master_id').eq('id', clienteId).single()
+    .from('clienti').select('id, master_id, ragione_sociale').eq('id', clienteId).single()
   if (!cli || cli.master_id !== utente.master_id) {
     // Fallback robusto: l'id potrebbe essere quello di un SOTTO-MASTER della rete inviato
     // SENZA il prefisso m: (bug frontend). Se è un master discendente, lo tratto come sotto-master.
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const admin = createAdminSupabase()
-    const { data: sub } = await admin.from('masters').select('id,parent_master_id').eq('id', clienteId).maybeSingle()
+    const { data: sub } = await admin.from('masters').select('id,parent_master_id,nome').eq('id', clienteId).maybeSingle()
     if (sub) {
       let cur: string | null = sub.parent_master_id || null
       let autorizzato = false
@@ -90,6 +103,7 @@ export async function POST(req: NextRequest) {
             riferimento: riferimento ? String(riferimento).trim() : null,
             importo, createdBy: user.id,
           })
+          if (tipo === 'ricarica' && importo > 0) await tracciaRicarica(admin, { masterId: utente.master_id, targetTipo: 'master', targetId: clienteId, targetNome: (sub as any)?.nome || null, importo, createdBy: user.id })
           return NextResponse.json({ ok: true, saldo })
         } catch (e: any) {
           return NextResponse.json({ error: e?.message || 'Errore ricarica sotto-master' }, { status: 500 })
@@ -109,6 +123,10 @@ export async function POST(req: NextRequest) {
       importo,
       createdBy: user.id,
     })
+    if (tipo === 'ricarica' && importo > 0) {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      await tracciaRicarica(createAdminSupabase(), { masterId: utente.master_id, targetTipo: 'cliente', targetId: clienteId, targetNome: (cli as any)?.ragione_sociale || null, importo, createdBy: user.id })
+    }
     return NextResponse.json({ ok: true, saldo })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Errore registrazione movimento' }, { status: 500 })

@@ -99,6 +99,7 @@ const NAV: NavItem[] = [
     { label: 'Corrieri', href: '/dashboard/statistiche/corrieri' },
     { label: 'Contrassegni & Rischio', href: '/dashboard/statistiche/contrassegni' },
     { label: 'Fatturazione', href: '/dashboard/statistiche/fatturazione' },
+    { label: 'Check Ricariche', href: '/dashboard/statistiche/check-ricariche' },
   ]},
   { label: 'Registro Attività', href: '/dashboard/audit', icon: '🛡', superMaster: true },
   { label: 'Abbonamenti API', href: '/dashboard/api-clienti', icon: '⚿', superMaster: true },
@@ -177,6 +178,14 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
     if (!['master', 'admin', 'operatore'].includes(ruolo)) return
     const load = () => fetch('/api/logistica/da-preparare?count=1').then(r => r.json()).then(d => setPreparaBadge(d.count || 0)).catch(() => {})
     load(); const t = setInterval(load, 30000); return () => clearInterval(t)
+  }, [path, ruolo])
+
+  // Badge "Check Ricariche": alert bonifici (cliente non ha pagato / incasso non confermato). Stile ticket.
+  const [ricariAlert, setRicariAlert] = useState(0)
+  useEffect(() => {
+    if (!['master', 'admin', 'operatore'].includes(ruolo)) return
+    const load = () => fetch('/api/statistiche/check-ricariche?count=1').then(r => r.json()).then(d => setRicariAlert(d.count || 0)).catch(() => {})
+    load(); const t = setInterval(load, 60000); return () => clearInterval(t)
   }, [path, ruolo])
 
   // Credito del master in topbar (solo staff di rete). All'avvio, a ogni cambio pagina e ogni 2 min:
@@ -279,6 +288,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                     <span style={{flex:1}}>{item.label}</span>
                     {item.label === 'Assistenza Clienti' && !isOpen && ticketBadge.count > 0 && <span style={badgeStyle}>{ticketBadge.count}</span>}
                     {item.label === 'Logistica' && !isOpen && preparaBadge > 0 && <span style={badgeStyle}>{preparaBadge}</span>}
+                    {item.label === 'Statistiche' && !isOpen && ricariAlert > 0 && <span style={badgeStyle}>{ricariAlert}</span>}
                     <span style={{fontSize:'10px',color:'#4a7090',transition:'transform 0.2s',display:'inline-block',transform:isOpen?'rotate(90deg)':'rotate(0deg)'}}>▶</span>
                   </div>
                 ) : (
@@ -303,7 +313,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                 {hasSub && isOpen && (
                   <div style={{background:'rgba(0,0,0,0.25)'}}>
                     {item.sub?.map(sub => {
-                      const subBadge = sub.href === '/dashboard/assistenza' ? ticketBadge.ticket : sub.href === '/dashboard/assistenza/pod' ? ticketBadge.pod : sub.href === '/dashboard/logistica/da-preparare' ? preparaBadge : 0
+                      const subBadge = sub.href === '/dashboard/assistenza' ? ticketBadge.ticket : sub.href === '/dashboard/assistenza/pod' ? ticketBadge.pod : sub.href === '/dashboard/logistica/da-preparare' ? preparaBadge : sub.href === '/dashboard/statistiche/check-ricariche' ? ricariAlert : 0
                       return (
                       <a key={sub.href} href={sub.href} style={{
                         display:'flex',alignItems:'center',gap:'8px',
