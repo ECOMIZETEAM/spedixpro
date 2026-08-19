@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
     if (clienteId && rifOrd) {
       const capDest = String(body.shipTo?.postalCode || '').trim()
       const { data: giaSpedite } = await adminCrea.from('spedizioni')
-        .select('numero,stato,cancellata_il')
+        .select('id,numero,stato,cancellata_il')
         .eq('cliente_id', clienteId).eq('rif_ordine', rifOrd).eq('dest_cap', capDest)
         .limit(5)
       const attiva = (giaSpedite || []).find((s: any) => !s.cancellata_il
@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
       if (attiva) {
         return NextResponse.json({
           error: `Questo ordine risulta già spedito (spedizione ${attiva.numero}): non ne è stata creata un'altra per evitare il doppione.`,
-          gia_spedito: attiva.numero,
+          gia_spedito: attiva.numero, gia_spedito_id: attiva.id,
         }, { status: 409 })
       }
     }

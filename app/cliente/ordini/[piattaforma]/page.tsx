@@ -231,6 +231,7 @@ export default function OrdiniPage() {
   }
 
   async function spedisciSelezionati(){
+    if (spedendo) return   // guardia doppio-submit: un secondo click prima del re-render poteva partire due volte
     const ids = Object.keys(sel).filter(id=>sel[id])
     if (ids.length===0){ setMsg('Seleziona almeno un ordine'); return }
     setSpedendo(true)
@@ -314,6 +315,15 @@ export default function OrdiniPage() {
             contenuto: arts.map((a:any)=>a.nome).join(', ').slice(0,100), tipoContenuto:'Merce destinata alla vendita', valoreMerce:String(o.totale||'')
           })
         }).then(r=>r.json()).catch(()=>null)
+        if (creaRes?.gia_spedito) {
+          // Gia' spedito (la guardia server ha impedito il doppione): collego l'ordine alla spedizione
+          // esistente e lo conto come riuscito, non come errore.
+          await fetch('/api/ordini/segna-spedito', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ ordine_id:id, spedizione_id:creaRes.gia_spedito_id||null })
+          }).catch(()=>{})
+          okCount++; continue
+        }
         if (!creaRes || creaRes.error) { errori.push(num+': '+(creaRes?.error||'errore creazione')); continue }
         // SCARICO DAL MAGAZZINO, in automatico. Qui non serve una tendina come nelle pagine di
         // spedizione a mano: l'ordine SA GIA' cosa contiene — SKU e quantita' arrivano da Shopify o
