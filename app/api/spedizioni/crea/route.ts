@@ -102,6 +102,36 @@ export async function POST(req: NextRequest) {
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const adminCrea = createAdminSupabase()
 
+  // ── GUARDIA ANTI-DOPPIA-SPEDIZIONE (money-critical) ──────────────────────────────────────────
+  // Se questo ordine risulta GIA' spedito — stesso cliente, stesso riferimento ordine, stessa
+  // destinazione — NON se ne crea un'altra. Era la causa di ~185 spedizioni doppie (doppio pacco +
+  // doppio addebito, ~1.100 € di solo costo corriere): la spedizione parte e ADDEBITA, ma il
+  // collegamento all'ordine ("segnato spedito", che lo toglie dalla lista) e' una SECONDA chiamata
+  // HTTP separata — se fallisce (rete/timeout, o il lookup best-effort non trova il numero) l'ordine
+  // resta "da spedire" e l'utente lo rispedisce. Il controllo sta QUI, nell'unico punto da cui passano
+  // TUTTE le porte (import file, negozi collegati, spedizione singola), non nelle pagine.
+  // Si confronta anche il CAP di destinazione: cosi' un riferimento riusato a mano su un'altra
+  // destinazione (legittimo) non viene bloccato, ma lo stesso ordine marketplace verso lo stesso
+  // indirizzo si'. Le annullate non contano (annullare+rifare e' legittimo).
+  {
+    const rifOrd = String(body.rifOrdine || '').trim()
+    if (clienteId && rifOrd) {
+      const capDest = String(body.shipTo?.postalCode || '').trim()
+      const { data: giaSpedite } = await adminCrea.from('spedizioni')
+        .select('numero,stato,cancellata_il')
+        .eq('cliente_id', clienteId).eq('rif_ordine', rifOrd).eq('dest_cap', capDest)
+        .limit(5)
+      const attiva = (giaSpedite || []).find((s: any) => !s.cancellata_il
+        && !['annullata', 'annullamento_pending', 'annullamento_manuale'].includes(String(s.stato || '')))
+      if (attiva) {
+        return NextResponse.json({
+          error: `Questo ordine risulta già spedito (spedizione ${attiva.numero}): non ne è stata creata un'altra per evitare il doppione.`,
+          gia_spedito: attiva.numero,
+        }, { status: 409 })
+      }
+    }
+  }
+
   // NIENTE BLOCCO DELLE SPEDIZIONI. Qui c'era il controllo del piano, che fermava la spedizione
   // quando il master della catena era oltre il limite o non in regola col canone. Ma fermare una
   // spedizione significa fermare il CLIENTE, che non c'entra: ha pagato il suo master e il suo

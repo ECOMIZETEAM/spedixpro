@@ -463,6 +463,18 @@ export default function ImportaOrdiniPage() {
           }),
         })
         const cData = await cRes.json()
+        // GIA' SPEDITO: la guardia server ha impedito il doppione. L'ordine E' gia' spedito (spedizione
+        // esistente): lo segniamo 'spedito' collegandola, cosi' esce dalla lista e non si ritenta —
+        // self-heal del disaccoppiamento crea↔segna-spedito che causava i doppioni. NON e' un errore.
+        if (cRes.status === 409 && cData?.gia_spedito) {
+          await fetch('/api/ordini/aggiorna-stato', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: o.id, stato: 'spedito', numero: cData.gia_spedito }),
+          })
+          ok++
+          setProgress({ done: ko + ok, total: totale, fase: 'crea' })
+          continue
+        }
         if (!cRes.ok || cData.error) throw new Error(cData?.error || 'Errore creazione spedizione')
 
         await fetch('/api/ordini/aggiorna-stato', {
