@@ -17,10 +17,15 @@ export async function GET(req: NextRequest) {
   }
 
   const apiKey = process.env.SHOPIFY_API_KEY
-  const appUrl = process.env.SHOPIFY_APP_URL
-  if (!apiKey || !appUrl) {
-    return NextResponse.json({ error: 'Configurazione Shopify mancante (variabili ambiente)' }, { status: 500 })
+  if (!apiKey) {
+    // Config mancante: non un 500 nudo (il reviewer vedrebbe "la pagina non funziona"), ma una
+    // pagina utile con il perché.
+    return NextResponse.redirect(new URL('/cliente/integrazioni?shopify_error=config', req.url))
   }
+  // App URL NORMALIZZATA: niente slash finale + fallback all'origine. Shopify confronta il redirect_uri
+  // BYTE-A-BYTE con l'allowed redirection URL: uno slash di troppo (//api), http, o www invece
+  // dell'apex fa fallire l'authorize con "redirect_uri is not whitelisted" -> pagina d'errore Shopify.
+  const appUrl = (process.env.SHOPIFY_APP_URL || new URL(req.url).origin).trim().replace(/\/+$/, '')
 
   // L'OAuth parte SUBITO (requisito app pubblica Shopify).
   // Se un cliente MoovExpress e' gia' loggato, colleghiamo il negozio al volo:

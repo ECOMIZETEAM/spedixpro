@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import CampoPassword from '../components/CampoPassword'
 import PuliziaSessione from '../components/PuliziaSessione'
 
@@ -15,6 +15,19 @@ export default function ClienteLogin() {
   const [password, setPassword] = useState('')
   const [errore, setErrore] = useState('')
   const [loading, setLoading] = useState(false)
+
+  // Se un collegamento Shopify è fallito, i vari rami rimandano qui con ?error=... . Prima la pagina
+  // NON lo leggeva: il reviewer vedeva solo il form di login, muto, senza sapere cosa fosse andato
+  // storto né come proseguire — un vicolo cieco. Ora mostriamo un messaggio chiaro.
+  useEffect(() => {
+    const err = new URLSearchParams(window.location.search).get('error')
+    if (!err) return
+    const MSG: Record<string, string> = {
+      firma: 'Collegamento Shopify non riuscito: la richiesta non è stata riconosciuta. Riprova ad aprire l\'app dal tuo negozio Shopify.',
+      login_shopify: 'Il negozio è stato collegato, ma non siamo riusciti ad aprire il tuo portale in automatico. Accedi qui sotto (o riprova il collegamento dal negozio).',
+    }
+    setErrore(MSG[err] || 'Si è verificato un problema durante il collegamento Shopify. Riprova dal tuo negozio; se il problema persiste contatta l\'assistenza.')
+  }, [])
 
   async function accedi(e: React.FormEvent) {
     e.preventDefault()
