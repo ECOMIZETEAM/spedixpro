@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
   if (masterSub) {
     cliente = { master_id: utente!.master_id, listino_cliente_id: subListino, tipo_contratto: subTipo, credito: subCredito, ragione_sociale: 'Sotto-master' }
   } else if (!isProprio) {
-    const { data } = await supabase.from('clienti').select('master_id,ragione_sociale,listino_cliente_id,vieta_inserimento,tipo_contratto,credito,agente').eq('id', clienteId).single()
+    const { data } = await supabase.from('clienti').select('master_id,ragione_sociale,listino_cliente_id,vieta_inserimento,tipo_contratto,credito,agente,gestione_logistica').eq('id', clienteId).single()
     cliente = data
     if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
     // Agente: il cliente dev'essere assegnato a lui.
@@ -94,6 +94,12 @@ export async function POST(req: NextRequest) {
   // ottenere solo dopo aver risolto il contratto e la zona di destinazione.
 
   const masterId = isProprio ? utente!.master_id : cliente.master_id
+
+  // Cliente "logistica": la sua merce sta nel magazzino del master detentore, che prepara
+  // FISICAMENTE il pacco (il cliente non spedisce in autonomia). Le sue spedizioni nascono
+  // 'da_preparare' e avvisano lo staff del master (l'aggancio e' in addebitaCredito, punto unico
+  // attraversato da tutti i 5 rami corriere). Non vale per spedizione propria o per conto sotto-master.
+  const daPreparare = !isProprio && !masterSub && (cliente as any)?.gestione_logistica === true
 
   let corriereRecord: any = null
 
@@ -430,6 +436,23 @@ export async function POST(req: NextRequest) {
   // Helper: registra la detrazione del credito dopo una spedizione riuscita.
   // Non deve mai far fallire la spedizione (è già creata sul corriere + DB).
   async function addebitaCredito(spedizioneId: string | null, numeroSped: string, costo: number) {
+    // FULFILLMENT LOGISTICA: se il cliente e' "gestione_logistica", la merce sta nel magazzino del
+    // master detentore, che prepara FISICAMENTE il pacco. Qui — punto UNICO che tutti i 5 rami
+    // corriere attraversano con l'id gia' creato — marco la spedizione 'da_preparare'. Lo staff del
+    // master la vede nella lista "Da preparare" col pallino rosso numerato sul menu (conteggio di rete,
+    // stile ticket): niente riga 'notifiche' da tenere pulita, il badge scala da solo alla preparazione.
+    // Best-effort in after(): non deve MAI bloccare addebito o spedizione. Update via admin: l'evento
+    // puo' partire da un cliente, che per RLS non scriverebbe la colonna.
+    if (daPreparare && spedizioneId) {
+      const _sid = spedizioneId
+      after(async () => {
+        try {
+          await adminCrea.from('spedizioni').update({ preparazione_stato: 'da_preparare' }).eq('id', _sid)
+        } catch (e) {
+          console.error('[CREA][fulfillment] set da_preparare fallito per', _sid, e)
+        }
+      })
+    }
     // Spedizione propria del master: NON addebito qui. Ci pensa addebitaCatena (sotto),
     // che risale la catena fino al proprietario REALE del contratto e registra un
     // movimento 'spedizione' per OGNI master del ramo (incluso questo). Così la

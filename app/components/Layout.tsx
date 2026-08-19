@@ -62,6 +62,7 @@ const NAV: NavItem[] = [
   { label: 'Logistica', href: '/dashboard/logistica/carico', icon: '▤', sub: [
     // Il catalogo sta QUI e non sotto Clienti: e' l'anagrafica del magazzino, e chi lavora in
     // logistica lo cerca dove sta il resto del magazzino. Lasciandolo sotto Clienti non si trovava.
+    { label: 'Da preparare', href: '/dashboard/logistica/da-preparare', perm: 'admin.clients.index' },
     { label: 'Catalogo prodotti', href: '/dashboard/catalogo', perm: 'admin.clients.index' },
     { label: 'Carico merce', href: '/dashboard/logistica/carico', perm: 'admin.clients.index' },
     { label: 'Magazzino', href: '/dashboard/logistica/posti', perm: 'admin.clients.index' },
@@ -169,6 +170,15 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   }, [path])
   const badgeStyle = { background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, minWidth: '17px', height: '17px', borderRadius: '9px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' } as const
 
+  // Badge "Da preparare" (fulfillment logistica): pallino rosso numerato come i ticket, conteggio su
+  // TUTTA la rete del master (l'endpoint scende con sottoAlberoMasterIds). Solo staff di rete.
+  const [preparaBadge, setPreparaBadge] = useState(0)
+  useEffect(() => {
+    if (!['master', 'admin', 'operatore'].includes(ruolo)) return
+    const load = () => fetch('/api/logistica/da-preparare?count=1').then(r => r.json()).then(d => setPreparaBadge(d.count || 0)).catch(() => {})
+    load(); const t = setInterval(load, 30000); return () => clearInterval(t)
+  }, [path, ruolo])
+
   // Credito del master in topbar (solo staff di rete). All'avvio, a ogni cambio pagina e ogni 2 min:
   // dopo una spedizione o un addebito il numero si aggiorna da solo.
   const [creditoTop, setCreditoTop] = useState<{ mostra: boolean; rete: number; proprio: number } | null>(null)
@@ -268,6 +278,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                     <span style={{fontSize:'13px',width:'16px',textAlign:'center',opacity:.8}}>{item.icon}</span>
                     <span style={{flex:1}}>{item.label}</span>
                     {item.label === 'Assistenza Clienti' && !isOpen && ticketBadge.count > 0 && <span style={badgeStyle}>{ticketBadge.count}</span>}
+                    {item.label === 'Logistica' && !isOpen && preparaBadge > 0 && <span style={badgeStyle}>{preparaBadge}</span>}
                     <span style={{fontSize:'10px',color:'#4a7090',transition:'transform 0.2s',display:'inline-block',transform:isOpen?'rotate(90deg)':'rotate(0deg)'}}>▶</span>
                   </div>
                 ) : (
@@ -292,7 +303,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                 {hasSub && isOpen && (
                   <div style={{background:'rgba(0,0,0,0.25)'}}>
                     {item.sub?.map(sub => {
-                      const subBadge = sub.href === '/dashboard/assistenza' ? ticketBadge.ticket : sub.href === '/dashboard/assistenza/pod' ? ticketBadge.pod : 0
+                      const subBadge = sub.href === '/dashboard/assistenza' ? ticketBadge.ticket : sub.href === '/dashboard/assistenza/pod' ? ticketBadge.pod : sub.href === '/dashboard/logistica/da-preparare' ? preparaBadge : 0
                       return (
                       <a key={sub.href} href={sub.href} style={{
                         display:'flex',alignItems:'center',gap:'8px',
