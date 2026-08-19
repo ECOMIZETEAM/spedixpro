@@ -34,10 +34,10 @@ function normHeader(s: string) {
 // qui accanto a Shopify/Amazon/eBay: cosi' i tre marketplace + Temu passano dallo stesso import.
 const ALIAS: Record<string, string[]> = {
   destinatario:       ['destinatario', 'shipping_name', 'ship_to_name', 'recipient_name', 'recipientname', 'nome_destinatario', 'buyer_name', 'buyername', 'nome_e_cognome', 'nome_completo_del_destinatario'],
-  indirizzo:          ['indirizzo', 'shipping_address1', 'ship_to_address_1', 'shipaddress1', 'address1', 'indirizzo_spedizione', 'via', 'indirizzo_di_spedizione_1'],
-  indirizzo2:         ['indirizzo2', 'shipping_address2', 'shipaddress2', 'address2', 'indirizzo_di_spedizione_2'],
-  cap:                ['cap', 'shipping_zip', 'ship_to_zip', 'shippostalcode', 'zip', 'postal_code', 'cap_destinatario', 'codice_postale_di_spedizione_la_spedizione_deve_essere_effettuata_al_seguente_cap', 'codice_postale_di_spedizione'],
-  localita:           ['localita', 'shipping_city', 'ship_to_city', 'shipcity', 'city', 'citta', 'comune', 'citta_di_spedizione'],
+  indirizzo:          ['indirizzo', 'shipping_address1', 'ship_to_address_1', 'shipaddress1', 'address1', 'shipping_street', 'shipping_address_1', 'indirizzo_spedizione', 'via', 'indirizzo_di_spedizione_1'],
+  indirizzo2:         ['indirizzo2', 'shipping_address2', 'shipping_address_2', 'shipaddress2', 'address2', 'indirizzo_di_spedizione_2'],
+  cap:                ['cap', 'shipping_zip', 'ship_to_zip', 'shippostalcode', 'shipping_postal_code', 'shipping_zip_code', 'zip', 'postal_code', 'postcode', 'cap_destinatario', 'codice_postale_di_spedizione_la_spedizione_deve_essere_effettuata_al_seguente_cap', 'codice_postale_di_spedizione'],
+  localita:           ['localita', 'shipping_city', 'ship_to_city', 'shipcity', 'shipping_town', 'city', 'citta', 'comune', 'citta_di_spedizione'],
   provincia:          ['provincia', 'shipping_province', 'ship_to_state', 'shipstate', 'state', 'province', 'shipping_province_name', 'stato_di_spedizione'],
   country:            ['country', 'shipping_country', 'ship_to_country', 'shipcountry', 'paese', 'nazione', 'paese_di_spedizione'],
   telefono:           ['telefono', 'shipping_phone', 'phone', 'shipphonenumber', 'buyer_phone', 'buyerphonenumber', 'telefono_destinatario', 'cellulare', 'numero_di_telefono_del_destinatario'],
