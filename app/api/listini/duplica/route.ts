@@ -12,11 +12,18 @@ export async function POST(req: NextRequest) {
   const _bloccoAg = bloccaAgente(utente as any); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
   if (!utente?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
 
-  const { listinoId, nome, maggiorazione } = await req.json()
+  const { listinoId, nome, maggiorazione, modo } = await req.json()
   if (!listinoId) return NextResponse.json({ error: 'listinoId mancante' }, { status: 400 })
-  // Maggiorazione % applicata SOLO ai prezzi peso/zona (fasce), non a supplementi/accessori/giacenze
+  // Maggiorazione applicata SOLO ai prezzi peso/zona (fasce), non a supplementi/accessori/giacenze.
+  // Uguale su TUTTE le fasce di TUTTI i corrieri: % percentuale o € valore fisso aggiunto.
   const magg = Number(maggiorazione) || 0
-  const applicaMagg = (p: any) => magg ? Math.round((Number(p || 0) * (1 + magg / 100)) * 100) / 100 : p
+  const fisso = modo === 'fisso'
+  const applicaMagg = (p: any) => {
+    if (!magg) return p
+    const base = Number(p || 0)
+    const nuovo = fisso ? base + magg : base * (1 + magg / 100)
+    return Math.round(nuovo * 100) / 100
+  }
 
   const admin = createAdminSupabase()
   const { data: src } = await admin.from('listini_clienti').select('*')

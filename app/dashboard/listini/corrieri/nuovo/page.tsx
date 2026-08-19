@@ -1,6 +1,7 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { logoCorriere } from '@/lib/corriere-logo'
+import EditorMarkupFasce, { type MarkupOut } from '@/app/components/EditorMarkupFasce'
 
 const inp = {padding:'6px 8px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const inpFull = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'13px',color:'#1a1a1a',background:'#fff',width:'100%',textAlign:'right' as const,boxSizing:'border-box' as const}
@@ -139,31 +140,27 @@ export default function ListinoCorrierePage() {
   const [dupNome, setDupNome] = useState('')
   const [dupTargetId, setDupTargetId] = useState('')
   const [listiniClienti, setListiniClienti] = useState<any[]>([])
-  const [dupDefMode, setDupDefMode] = useState<'perc' | 'fisso'>('perc')
-  const [dupDefVal, setDupDefVal] = useState('')
-  const [dupPerFascia, setDupPerFascia] = useState<Record<string, { mode: 'perc' | 'fisso'; valore: string }>>({})
+  const [dupMarkup, setDupMarkup] = useState<MarkupOut>({ default: null, perFascia: {} })
   const [duplicando, setDuplicando] = useState(false)
   const [dupMsg, setDupMsg] = useState('')
   const keyFascia = (f: Fascia) => `${f.tipo === 'oltre' ? 'oltre' : 'fino_a'}_${Number(f.kg)}`
-  function setPerFascia(key: string, patch: Partial<{ mode: 'perc' | 'fisso'; valore: string }>) {
-    setDupPerFascia(prev => ({ ...prev, [key]: { mode: prev[key]?.mode || 'perc', valore: prev[key]?.valore ?? '', ...patch } }))
-  }
+  // Fasce per l'editor markup: costo d'esempio = il piu' basso fra le zone della fascia.
+  const fasceMarkup = useMemo(() => fasce.map(f => {
+    const costi = Object.values(f.prezzi || {}).map((v: any) => parseFloat(v)).filter((n: number) => isFinite(n) && n > 0)
+    return { key: keyFascia(f), label: f.tipo === 'oltre' ? `oltre, ogni ${f.kg || '?'} kg` : `fino a ${f.kg || '?'} kg`, tipo: f.tipo, peso: Number(f.kg), costo: costi.length ? Math.min(...costi) : 0 }
+  }), [fasce])
   function apriDuplica() {
     setDupTargetMode('nuovo'); setDupNome(`${corrieri.find((c: any) => c.id === corriereId)?.nome_contratto || 'Listino'} (cliente)`)
-    setDupTargetId(''); setDupDefMode('perc'); setDupDefVal(''); setDupPerFascia({}); setDupMsg(''); setDupOpen(true)
+    setDupTargetId(''); setDupMarkup({ default: null, perFascia: {} }); setDupMsg(''); setDupOpen(true)
     fetch('/api/listini/lista').then(r => r.json()).then(d => setListiniClienti(Array.isArray(d) ? d : [])).catch(() => setListiniClienti([]))
   }
   async function confermaDuplica() {
     if (dupTargetMode === 'nuovo' && !dupNome.trim()) { setDupMsg('Inserisci un nome per il nuovo listino'); return }
     if (dupTargetMode === 'esistente' && !dupTargetId) { setDupMsg('Scegli un listino cliente esistente'); return }
-    const num = (v: string) => Number(String(v).replace(',', '.')) || 0
-    const perFascia: Record<string, { mode: string; valore: number }> = {}
-    for (const [k, v] of Object.entries(dupPerFascia)) { const val = num(v.valore); if (val) perFascia[k] = { mode: v.mode, valore: val } }
-    const markup = { default: num(dupDefVal) ? { mode: dupDefMode, valore: num(dupDefVal) } : null, perFascia }
     setDuplicando(true); setDupMsg('')
     const res = await fetch('/api/listini/costo-in-cliente', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ corriereId, ...(dupTargetMode === 'nuovo' ? { nuovoNome: dupNome.trim() } : { targetListinoId: dupTargetId }), markup }),
+      body: JSON.stringify({ corriereId, ...(dupTargetMode === 'nuovo' ? { nuovoNome: dupNome.trim() } : { targetListinoId: dupTargetId }), markup: dupMarkup }),
     })
     const d = await res.json().catch(() => ({}))
     setDuplicando(false)
@@ -655,45 +652,10 @@ export default function ListinoCorrierePage() {
               </select>
             )}
 
-            {/* Maggiorazione predefinita (% o valore fisso) */}
-            <div style={{fontSize:'12px',fontWeight:700,color:'#1a1a1a',marginBottom:'6px'}}>Maggiorazione predefinita</div>
-            <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'6px'}}>
-              <select value={dupDefMode} onChange={e=>setDupDefMode(e.target.value as any)} style={{...inp,padding:'8px 10px'}}>
-                <option value="perc">% percentuale</option>
-                <option value="fisso">€ valore fisso</option>
-              </select>
-              <input type="number" step="0.01" value={dupDefVal} onChange={e=>setDupDefVal(e.target.value)} placeholder="0"
-                style={{...inp,width:'110px',textAlign:'right' as const}}/>
-              <span style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>{dupDefMode==='perc'?'%':'€'}</span>
-            </div>
-            <div style={{fontSize:'11.5px',color:'#888',marginBottom:'14px'}}>Si applica a tutte le fasce. Sotto puoi sovrascrivere singole fasce. Lascia 0 per copiare il costo così com'è.</div>
-
-            {/* Per fascia: flag % o fisso */}
-            <div style={{fontSize:'12px',fontWeight:700,color:'#1a1a1a',marginBottom:'6px'}}>Per fascia (facoltativo)</div>
-            <div style={{border:'1px solid #eee',borderRadius:'8px',overflow:'hidden',marginBottom:'16px'}}>
-              <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12.5px'}}>
-                <thead><tr style={{background:'#fafafa'}}>
-                  <th style={{textAlign:'left' as const,padding:'7px 10px',fontWeight:700,color:'#666',borderBottom:'1px solid #eee'}}>Fascia</th>
-                  <th style={{textAlign:'left' as const,padding:'7px 10px',fontWeight:700,color:'#666',borderBottom:'1px solid #eee'}}>Tipo</th>
-                  <th style={{textAlign:'left' as const,padding:'7px 10px',fontWeight:700,color:'#666',borderBottom:'1px solid #eee'}}>Valore</th>
-                </tr></thead>
-                <tbody>
-                  {fasce.map((f,i)=>{ const k=keyFascia(f); const cur=dupPerFascia[k]; return (
-                    <tr key={i} style={{borderBottom:'1px solid #f4f4f4'}}>
-                      <td style={{padding:'6px 10px',color:'#1a1a1a',fontWeight:600}}>{f.tipo==='oltre'?`oltre, ogni ${f.kg||'?'} kg`:`fino a ${f.kg||'?'} kg`}</td>
-                      <td style={{padding:'6px 10px'}}>
-                        <select value={cur?.mode||'perc'} onChange={e=>setPerFascia(k,{mode:e.target.value as any})} style={{...inp,padding:'5px 6px'}}>
-                          <option value="perc">%</option><option value="fisso">€ fisso</option>
-                        </select>
-                      </td>
-                      <td style={{padding:'6px 10px'}}>
-                        <input type="number" step="0.01" value={cur?.valore??''} onChange={e=>setPerFascia(k,{valore:e.target.value})} placeholder="default"
-                          style={{...inp,width:'90px',textAlign:'right' as const}}/>
-                      </td>
-                    </tr>
-                  )})}
-                </tbody>
-              </table>
+            {/* Maggiorazione: modifica in blocco + per fascia + ANTEPRIMA (componente condiviso) */}
+            <div style={{fontSize:'12px',fontWeight:700,color:'#1a1a1a',marginBottom:'8px'}}>Maggiorazione — con anteprima del prezzo cliente</div>
+            <div style={{marginBottom:'16px'}}>
+              <EditorMarkupFasce fasce={fasceMarkup} onChange={setDupMarkup} />
             </div>
 
             {dupMsg && <div style={{padding:'8px 12px',borderRadius:'8px',background:'#fef2f2',border:'1px solid #fecaca',color:'#b91c1c',fontSize:'12.5px',marginBottom:'12px'}}>{dupMsg}</div>}

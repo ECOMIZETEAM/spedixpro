@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { logoCorriere } from '@/lib/corriere-logo'
 import { setFlash } from '@/lib/flash'
 import { useDialog } from '@/app/components/DialogProvider'
+import EditorMarkupFasce, { type MarkupOut } from '@/app/components/EditorMarkupFasce'
 
 // Input decimale che accetta virgola o punto e valori parziali (es. "0.", "0,5")
 // mentre scrivi, restituendo comunque il NUMERO al parent (nessuna modifica al salvataggio).
@@ -185,15 +186,15 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   const [copiaSaving, setCopiaSaving] = useState(false)
   const [copiaErr, setCopiaErr] = useState('')
   const [copiaOk, setCopiaOk] = useState('')
-  const [copiaMagg, setCopiaMagg] = useState('')   // valore della maggiorazione PREDEFINITA
-  const [copiaDefMode, setCopiaDefMode] = useState<'perc'|'fisso'>('perc')
-  const [copiaPerFascia, setCopiaPerFascia] = useState<Record<string,{mode:'perc'|'fisso',valore:string}>>({})
+  const [copiaMarkup, setCopiaMarkup] = useState<MarkupOut>({ default: null, perFascia: {} })
   const keyFasciaCopia = (f: Fascia) => `${f.tipo==='oltre'?'oltre':'fino_a'}_${Number(f.peso)}`
-  function setCopiaPF(key:string, patch:Partial<{mode:'perc'|'fisso',valore:string}>) {
-    setCopiaPerFascia(prev => ({ ...prev, [key]: { mode: prev[key]?.mode||'perc', valore: prev[key]?.valore??'', ...patch } }))
-  }
+  // Fasce per l'editor markup: base = i prezzi del listino di ORIGINE (il piu' basso fra le zone della fascia).
+  const fasceMarkupCopia = useMemo(() => fasce.map(f => {
+    const costi = Object.values(f.prezzi || {}).map((v:any)=>parseFloat(v)).filter((n:number)=>isFinite(n)&&n>0)
+    return { key: keyFasciaCopia(f), label: f.tipo==='oltre'?`oltre, ogni ${f.peso||'?'} kg`:`fino a ${f.peso||'?'} kg`, tipo: f.tipo, peso: Number(f.peso), costo: costi.length?Math.min(...costi):0 }
+  }), [fasce])
   async function apriCopia(c: any) {
-    setCopia(c); setCopiaModo('esistente'); setCopiaTarget(''); setCopiaNome(''); setCopiaErr(''); setCopiaOk(''); setCopiaMagg(''); setCopiaDefMode('perc'); setCopiaPerFascia({})
+    setCopia(c); setCopiaModo('esistente'); setCopiaTarget(''); setCopiaNome(''); setCopiaErr(''); setCopiaOk(''); setCopiaMarkup({ default: null, perFascia: {} })
     try { const r = await fetch('/api/listini/lista'); const d = await r.json(); setListiniList((Array.isArray(d)?d:[]).filter((x:any)=>x.id!==listino.id)) } catch { setListiniList([]) }
   }
   async function confermaCopia() {
@@ -203,10 +204,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     setCopiaSaving(true); setCopiaErr('')
     const body: any = { sourceListinoId: listino.id, corriereId: copia.id }
     if (copiaModo==='nuovo') body.nuovoNome = copiaNome.trim(); else body.targetListinoId = copiaTarget
-    const num = (v:string)=>Number(String(v).replace(',','.'))||0
-    const perFascia:Record<string,{mode:string;valore:number}> = {}
-    for (const [k,v] of Object.entries(copiaPerFascia)) { const val=num(v.valore); if (val) perFascia[k]={mode:v.mode,valore:val} }
-    body.markup = { default: num(copiaMagg) ? { mode: copiaDefMode, valore: num(copiaMagg) } : null, perFascia }
+    body.markup = copiaMarkup
     const res = await fetch('/api/listini/duplica-corriere', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
     const d = await res.json().catch(()=>({}))
     setCopiaSaving(false)
@@ -789,44 +787,8 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
               )}
 
               <div style={{marginTop:'14px'}}>
-                <label style={{fontSize:'12px',fontWeight:600,color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Maggiorazione predefinita <span style={{color:'#999',fontWeight:400}}>(opzionale)</span></label>
-                <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
-                  <select value={copiaDefMode} onChange={e=>setCopiaDefMode(e.target.value as any)} style={{padding:'9px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}>
-                    <option value="perc">% percentuale</option>
-                    <option value="fisso">€ valore fisso</option>
-                  </select>
-                  <input type="number" step="0.01" value={copiaMagg} onChange={e=>setCopiaMagg(e.target.value)} placeholder="0"
-                    style={{width:'110px',padding:'9px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',textAlign:'right' as const}}/>
-                  <span style={{fontSize:'13px',color:'#1a1a1a',fontWeight:600}}>{copiaDefMode==='perc'?'%':'€'}</span>
-                </div>
-                <div style={{fontSize:'11px',color:'#999',marginTop:'4px'}}>Si applica a tutte le fasce peso/zona (non tocca supplementi). Sotto puoi sovrascrivere singole fasce. 0 = copia identica.</div>
-
-                <div style={{fontSize:'12px',fontWeight:600,color:'#1a1a1a',margin:'12px 0 5px'}}>Per fascia <span style={{color:'#999',fontWeight:400}}>(facoltativo)</span></div>
-                <div style={{border:'1px solid #eee',borderRadius:'8px',overflow:'hidden',maxHeight:'220px',overflowY:'auto' as const}}>
-                  <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12.5px'}}>
-                    <thead><tr style={{background:'#fafafa'}}>
-                      <th style={{textAlign:'left' as const,padding:'6px 10px',fontWeight:700,color:'#666',borderBottom:'1px solid #eee'}}>Fascia</th>
-                      <th style={{textAlign:'left' as const,padding:'6px 10px',fontWeight:700,color:'#666',borderBottom:'1px solid #eee'}}>Tipo</th>
-                      <th style={{textAlign:'left' as const,padding:'6px 10px',fontWeight:700,color:'#666',borderBottom:'1px solid #eee'}}>Valore</th>
-                    </tr></thead>
-                    <tbody>
-                      {fasce.map((f,i)=>{ const k=keyFasciaCopia(f); const cur=copiaPerFascia[k]; return (
-                        <tr key={i} style={{borderBottom:'1px solid #f4f4f4'}}>
-                          <td style={{padding:'5px 10px',color:'#1a1a1a',fontWeight:600}}>{f.tipo==='oltre'?`oltre, ogni ${f.peso||'?'} kg`:`fino a ${f.peso||'?'} kg`}</td>
-                          <td style={{padding:'5px 10px'}}>
-                            <select value={cur?.mode||'perc'} onChange={e=>setCopiaPF(k,{mode:e.target.value as any})} style={{padding:'5px 6px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}}>
-                              <option value="perc">%</option><option value="fisso">€ fisso</option>
-                            </select>
-                          </td>
-                          <td style={{padding:'5px 10px'}}>
-                            <input type="number" step="0.01" value={cur?.valore??''} onChange={e=>setCopiaPF(k,{valore:e.target.value})} placeholder="default"
-                              style={{width:'90px',padding:'6px 8px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'12px',color:'#1a1a1a',background:'#fff',textAlign:'right' as const}}/>
-                          </td>
-                        </tr>
-                      )})}
-                    </tbody>
-                  </table>
-                </div>
+                <label style={{fontSize:'12px',fontWeight:600,color:'#1a1a1a',display:'block',marginBottom:'8px'}}>Maggiorazione — con anteprima del prezzo</label>
+                <EditorMarkupFasce fasce={fasceMarkupCopia} onChange={setCopiaMarkup} />
               </div>
 
               {copiaErr && <div style={{marginTop:'12px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'9px 12px',fontSize:'12.5px',color:'#dc2626'}}>{copiaErr}</div>}

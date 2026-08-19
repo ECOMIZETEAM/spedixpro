@@ -13,6 +13,7 @@ export default function ListiniPage() {
   const [dupModal, setDupModal] = useState<{ id: string; nome: string } | null>(null)
   const [dupNome, setDupNome] = useState('')
   const [dupMagg, setDupMagg] = useState('0')
+  const [dupModo, setDupModo] = useState<'perc'|'fisso'>('perc')
 
   const PER_PAGINA = 10
   const filtrati = listini.filter(l => (l.nome || '').toLowerCase().includes(cerca.trim().toLowerCase()))
@@ -31,7 +32,7 @@ export default function ListiniPage() {
     if (!nome) return
     const maggiorazione = Number(String(dupMagg).replace(',', '.')) || 0
     setDuplicando(dupModal.id)
-    const res = await fetch('/api/listini/duplica', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listinoId: dupModal.id, nome, maggiorazione }) })
+    const res = await fetch('/api/listini/duplica', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listinoId: dupModal.id, nome, maggiorazione, modo: dupModo }) })
     const d = await res.json().catch(() => ({}))
     setDuplicando('')
     setDupModal(null)
@@ -153,13 +154,17 @@ export default function ListiniPage() {
             <input value={dupNome} onChange={e=>setDupNome(e.target.value)} autoFocus
               style={{width:'100%',padding:'9px 12px',border:'1px solid #e2e2e2',borderRadius:'8px',fontSize:'14px',color:'#1a1a1a',outline:'none',marginBottom:'16px',boxSizing:'border-box'}}/>
 
-            <label style={{display:'block',fontSize:'12px',fontWeight:700,color:'#1a1a1a',marginBottom:'6px'}}>Maggiorazione % sui prezzi peso/zona</label>
+            <label style={{display:'block',fontSize:'12px',fontWeight:700,color:'#1a1a1a',marginBottom:'6px'}}>Maggiorazione sui prezzi peso/zona</label>
             <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'8px'}}>
+              <select value={dupModo} onChange={e=>setDupModo(e.target.value as any)} style={{padding:'9px 10px',border:'1px solid #e2e2e2',borderRadius:'8px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}>
+                <option value="perc">% percentuale</option>
+                <option value="fisso">€ valore fisso</option>
+              </select>
               <input type="number" step="0.01" value={dupMagg} onChange={e=>setDupMagg(e.target.value)} placeholder="0"
-                style={{width:'120px',padding:'9px 12px',border:'1px solid #e2e2e2',borderRadius:'8px',fontSize:'14px',color:'#1a1a1a',outline:'none'}}/>
-              <span style={{fontSize:'15px',fontWeight:700,color:'#1a1a1a'}}>%</span>
+                style={{width:'110px',padding:'9px 12px',border:'1px solid #e2e2e2',borderRadius:'8px',fontSize:'14px',color:'#1a1a1a',outline:'none'}}/>
+              <span style={{fontSize:'15px',fontWeight:700,color:'#1a1a1a'}}>{dupModo==='perc'?'%':'€'}</span>
             </div>
-            <div style={{fontSize:'12px',color:'#888',marginBottom:'20px'}}>Applica l'aumento SOLO alle fasce peso/zona. Non tocca contrassegno, assicurazione, giacenze o servizi. Lascia 0 per una copia identica.</div>
+            <div style={{fontSize:'12px',color:'#888',marginBottom:'20px'}}>Applica l'aumento (uguale su tutte le fasce di tutti i corrieri) SOLO ai prezzi peso/zona. Non tocca contrassegno, assicurazione, giacenze o servizi. Lascia 0 per una copia identica.</div>
 
             <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
               <button onClick={()=>setDupModal(null)} disabled={!!duplicando} style={{background:'#fff',color:'#1a1a1a',border:'1px solid #ddd',borderRadius:'8px',padding:'9px 18px',fontSize:'13px',fontWeight:600,cursor:'pointer'}}>Annulla</button>
