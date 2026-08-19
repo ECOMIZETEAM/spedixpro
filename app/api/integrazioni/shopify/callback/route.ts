@@ -55,7 +55,14 @@ export async function GET(req: NextRequest) {
   const { data: st } = await adminState
     .from('shopify_oauth_state').select('*').eq('state', state).maybeSingle()
   if (!st || st.shop !== shop) {
-    return NextResponse.json({ error: 'State non valido o scaduto — riprova il collegamento' }, { status: 400 })
+    // State gia' consumato (reload/back/retry del callback) o scaduto. IDEMPOTENZA: se il negozio
+    // RISULTA GIA' COLLEGATO, il primo giro e' andato a buon fine -> trattiamo il reload come successo,
+    // invece del vecchio JSON "400 State non valido" che sembra "l'app non funziona". Altrimenti si
+    // manda a una pagina utile per riprovare, non a un errore grezzo.
+    const { data: gia } = await adminState.from('integrazioni').select('id')
+      .eq('piattaforma', 'shopify').eq('identificativo', shop).eq('stato', 'attivo').maybeSingle()
+    if (gia?.id) return NextResponse.redirect(`${appUrl}/cliente/integrazioni?connected=${encodeURIComponent(shop)}`)
+    return NextResponse.redirect(new URL('/cliente?error=collegamento_scaduto', req.url))
   }
   await adminState.from('shopify_oauth_state').delete().eq('state', state)
 
@@ -87,7 +94,9 @@ export async function GET(req: NextRequest) {
     if (d.refresh_token_expires_in) refreshExpiresAt = now + Number(d.refresh_token_expires_in) * 1000
     if (!token) throw new Error('nessun access_token ricevuto')
   } catch (e: any) {
-    return NextResponse.json({ error: 'Scambio token fallito: ' + (e?.message || e) }, { status: 502 })
+    console.error('[SHOPIFY][CALLBACK] scambio token', shop, e?.message || e)
+    // Non un 502 JSON grezzo (sembra "l'app non funziona"): pagina utile per riprovare.
+    return NextResponse.redirect(new URL('/cliente?error=collegamento_token', req.url))
   }
 
   // CASO A: cliente gia' identificato -> integrazione attiva
