@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useDialog } from '@/app/components/DialogProvider'
 
 // CHECK RICARICHE — monitoraggio bonifici delle ricariche manuali (contabilita' + anti-truffa).
 // Ogni ricarica manuale a un cliente/sotto-master compare qui: si segna "bonifico effettuato" e poi
@@ -22,6 +23,7 @@ export default function CheckRicariche() {
   const [cerca, setCerca] = useState('')
   const [facendo, setFacendo] = useState('')
   const [err, setErr] = useState('')
+  const dialog = useDialog()
 
   function carica() {
     setLoading(true)
@@ -37,13 +39,13 @@ export default function CheckRicariche() {
 
   async function azione(id: string, az: string) {
     if (facendo) return   // guardia anti doppio-click: un'azione alla volta
-    // Conferma sulle azioni che tornano indietro o cancellano: niente cambi di stato per sbaglio.
-    const conferme: Record<string, string> = {
-      annulla_effettuato: 'Annullare il "bonifico effettuato"? La ricarica torna in attesa.',
-      annulla_arrivato: 'Annullare la conferma d\'arrivo? Il bonifico torna a "effettuato, non ancora incassato".',
-      elimina: 'Togliere questa ricarica dal monitoraggio bonifici? (non tocca il credito)',
+    // Conferma (popup MoovExpress) sulle azioni che tornano indietro o cancellano: niente per sbaglio.
+    const conferme: Record<string, { title: string; message: string; confirmText: string; danger?: boolean }> = {
+      annulla_effettuato: { title: 'Annullare il "bonifico effettuato"?', message: 'La ricarica torna in attesa di bonifico.', confirmText: 'Annulla bonifico' },
+      annulla_arrivato: { title: 'Annullare la conferma d\'arrivo?', message: 'Il bonifico torna a "effettuato, non ancora incassato".', confirmText: 'Annulla arrivo' },
+      elimina: { title: 'Eliminare questa ricarica dal monitoraggio?', message: 'Toglie la riga dal Check Ricariche (es. se hai fatto uno storno -€ sul credito e non aspetti più il bonifico). NON tocca il credito né i movimenti.', confirmText: 'Elimina', danger: true },
     }
-    if (conferme[az] && !window.confirm(conferme[az])) return
+    if (conferme[az] && !(await dialog.confirm(conferme[az]))) return
     setFacendo(id + az); setErr('')
     try {
       const res = await fetch('/api/statistiche/check-ricariche', {
@@ -151,18 +153,22 @@ export default function CheckRicariche() {
                       )}
                     </td>
                     <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      {r.stato === 'in_attesa' && (
-                        <button onClick={() => azione(r.id, 'effettuato')} disabled={facendo === r.id + 'effettuato'} style={btn}>Bonifico effettuato</button>
-                      )}
-                      {r.stato === 'effettuato' && (
-                        <span style={{ display: 'inline-flex', gap: '6px' }}>
-                          <button onClick={() => azione(r.id, 'annulla_effettuato')} disabled={!!facendo} style={btnSec} title="Torna in attesa">↶</button>
-                          <button onClick={() => azione(r.id, 'arrivato')} disabled={facendo === r.id + 'arrivato'} style={{ ...btn, background: '#16a34a' }}>Bonifico arrivato</button>
-                        </span>
-                      )}
-                      {r.stato === 'arrivato' && (
-                        <button onClick={() => azione(r.id, 'annulla_arrivato')} disabled={!!facendo} style={btnSec} title="Annulla conferma arrivo">↶ annulla arrivo</button>
-                      )}
+                      <span style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+                        {r.stato === 'in_attesa' && (
+                          <button onClick={() => azione(r.id, 'effettuato')} disabled={facendo === r.id + 'effettuato'} style={btn}>Bonifico effettuato</button>
+                        )}
+                        {r.stato === 'effettuato' && (
+                          <>
+                            <button onClick={() => azione(r.id, 'annulla_effettuato')} disabled={!!facendo} style={btnSec} title="Torna in attesa">↶</button>
+                            <button onClick={() => azione(r.id, 'arrivato')} disabled={facendo === r.id + 'arrivato'} style={{ ...btn, background: '#16a34a' }}>Bonifico arrivato</button>
+                          </>
+                        )}
+                        {r.stato === 'arrivato' && (
+                          <button onClick={() => azione(r.id, 'annulla_arrivato')} disabled={!!facendo} style={btnSec} title="Annulla conferma arrivo">↶ annulla arrivo</button>
+                        )}
+                        {/* Elimina dal monitoraggio (es. storno -€ sul credito). Conferma popup MoovExpress. */}
+                        <button onClick={() => azione(r.id, 'elimina')} disabled={!!facendo} title="Elimina dal Check Ricariche" style={{ background: 'transparent', border: 'none', color: '#b91c1c', fontSize: '15px', cursor: 'pointer', padding: '2px 4px', lineHeight: 1 }}>🗑</button>
+                      </span>
                     </td>
                   </tr>
                 ))}
