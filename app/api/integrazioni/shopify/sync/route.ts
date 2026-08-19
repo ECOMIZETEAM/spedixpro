@@ -16,7 +16,9 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}))
-  const integrazioneId = body.integrazione_id
+  // Il pulsante "Sincronizza" del portale manda { id }, non { integrazione_id }: accetto entrambi
+  // (era la causa di "integrazione_id mancante" pur avendo il negozio collegato).
+  const integrazioneId = body.integrazione_id || body.id
   if (!integrazioneId) return NextResponse.json({ error: 'integrazione_id mancante' }, { status: 400 })
 
   // Recupera l'integrazione (deve essere del cliente loggato)
