@@ -6,11 +6,14 @@ embedded = false
 [access_scopes]
 scopes = "read_orders,read_assigned_fulfillment_orders,read_merchant_managed_fulfillment_orders,read_third_party_fulfillment_orders,write_assigned_fulfillment_orders,write_merchant_managed_fulfillment_orders,write_third_party_fulfillment_orders"
 optional_scopes = [ ]
-# App NON-embedded (embedded=false): l'installazione la gestiamo noi via OAuth classico
-# (/enter -> /install -> /admin/oauth/authorize -> /callback), che è l'unico modo di ottenere il
-# token per un'app non-embedded. Con la Managed Installation (false) Shopify scavalcava il nostro
-# OAuth e il negozio non si collegava: era il "la pagina non funziona" visto dalla review Shopify.
-use_legacy_install_flow = true
+# use_legacy_install_flow = FALSE (Shopify Managed Installation). Verificato che va bene anche per
+# questa app NON-embedded: all'apertura, /enter non trova il token, avvia il nostro OAuth classico
+# (/install -> /admin/oauth/authorize -> /callback) e ottiene il token con l'authorization code grant
+# — e' cosi' che sono stati provisionati i clienti Shopify (il callback prende il token). NON mettere
+# true: la legacy flow NON supporta i webhook app-specific dichiarati qui sotto (deploy rifiutato), e
+# il "la pagina non funziona" della review era un HTTP 431 (header/cookie troppo grandi sul collegamento
+# dal portale), non un problema di install flow.
+use_legacy_install_flow = false
 
 [auth]
 redirect_urls = [
