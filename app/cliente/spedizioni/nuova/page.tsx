@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
 import SelettoreArticoli, { type RigaArticolo, type ArticoloCat } from '@/app/components/SelettoreArticoli'
 import PagaConCarta from '@/app/cliente/PagaConCarta'
+import { PAESI_MONDO } from '@/lib/paesi-elenco'
 
 // Sigla di ripiego quando il contratto non ha un marchio riconosciuto. Attenzione: qui arriva
 // il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
@@ -530,7 +531,7 @@ export default function NuovaSpedizioneCliente() {
                 </div>
                 <div><label style={lbl}>Paese</label>
                   <select value={dest.paese} onChange={e=>{ const paese=e.target.value; setDest(d=>({...d, paese, provincia: paese==='IT' ? (d.paese==='IT'?d.provincia:'') : paese})); setTariffe([]); setSelected(null) }} style={inp}>
-                    <option value="IT">Italia</option><option value="AT">Austria</option><option value="BE">Belgio</option><option value="BG">Bulgaria</option><option value="HR">Croazia</option><option value="DK">Danimarca</option><option value="EE">Estonia</option><option value="FI">Finlandia</option><option value="FR">Francia</option><option value="DE">Germania</option><option value="GR">Grecia</option><option value="IE">Irlanda</option><option value="LV">Lettonia</option><option value="LT">Lituania</option><option value="LU">Lussemburgo</option><option value="MC">Monaco</option><option value="NL">Paesi Bassi</option><option value="PL">Polonia</option><option value="PT">Portogallo</option><option value="GB">Regno Unito</option><option value="CZ">Rep. Ceca</option><option value="RO">Romania</option><option value="SK">Slovacchia</option><option value="SI">Slovenia</option><option value="ES">Spagna</option><option value="SE">Svezia</option><option value="HU">Ungheria</option>
+                    {PAESI_MONDO.map(p => <option key={p.code} value={p.code}>{p.nome}</option>)}
                   </select>
                 </div>
               </div>
