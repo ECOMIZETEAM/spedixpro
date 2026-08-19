@@ -6,7 +6,8 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
-  const { data: listini } = await supabase.from('listini_clienti').select('id,nome,created_at').eq('master_id', utente?.master_id).order('nome')
+  // Esclude i listini-BOZZA dei preventivi (preventivo_id valorizzato): non sono listini clienti veri.
+  const { data: listini } = await supabase.from('listini_clienti').select('id,nome,created_at').eq('master_id', utente?.master_id).is('preventivo_id', null).order('nome')
   const ids = (listini || []).map((l: any) => l.id)
 
   // A chi è assegnato ciascun listino: clienti (clienti.listino_cliente_id) + sotto-master (masters.parent_listino_id).

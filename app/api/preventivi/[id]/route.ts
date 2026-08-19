@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { vedeLaRete } from '@/lib/perimetro'
+import { leggiGrigliaListino } from '@/lib/preventivo-prezzi'
 
 // Singolo preventivo: GET (con il branding del master per l'anteprima) + PATCH (dettagli + contenuto).
 // Il contenuto e' un jsonb flessibile: { sezioni: [{id,tipo,titolo,testo}], corrieri: [{corriere_id,nome,markup,righe}] }.
@@ -23,7 +24,39 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!p || p.master_id !== s.master_id) return NextResponse.json({ error: 'Preventivo non trovato' }, { status: 404 })
   // Branding del master per l'anteprima (logo, nome, colori). Vive su masters.
   const { data: m } = await admin.from('masters').select('nome,logo_url,colore_primario,colore_secondario,email,telefono,indirizzo,citta,cap,provincia,pec,partita_iva,piva').eq('id', s.master_id).maybeSingle()
-  return NextResponse.json({ preventivo: p, branding: m || {} })
+  const prezzi = await leggiGrigliaListino(admin, p.listino_template_id)
+  return NextResponse.json({ preventivo: p, branding: m || {}, prezzi })
+}
+
+// POST azione 'crea_listino': crea (o ritorna) il listino-BOZZA collegato al preventivo, da compilare
+// con l'editor listini completo (tutte le zone + supplementi). Marcato preventivo_id per non comparire
+// tra i listini clienti veri.
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const supabase = await createServerSupabase()
+  const s = await staff(supabase)
+  if (!s) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  const { id } = await params
+  const admin = createAdminSupabase()
+  const b = await req.json().catch(() => ({}))
+  const { data: p } = await admin.from('preventivi').select('id,master_id,stato,listino_template_id,dest_nome,oggetto').eq('id', id).maybeSingle()
+  if (!p || p.master_id !== s.master_id) return NextResponse.json({ error: 'Preventivo non trovato' }, { status: 404 })
+
+  if (b.azione === 'crea_listino') {
+    if (p.stato === 'accettato') return NextResponse.json({ error: 'Preventivo gia\' accettato.' }, { status: 400 })
+    // Gia' collegato e ancora esistente? ritorna quello.
+    if (p.listino_template_id) {
+      const { data: l } = await admin.from('listini_clienti').select('id').eq('id', p.listino_template_id).maybeSingle()
+      if (l) return NextResponse.json({ ok: true, listino_id: l.id })
+    }
+    const { data: nuovo, error: e1 } = await admin.from('listini_clienti').insert({
+      master_id: s.master_id, nome: `Preventivo — ${p.dest_nome || p.oggetto || 'bozza'}`.slice(0, 120),
+      attivo: true, preventivo_id: id,
+    }).select('id').single()
+    if (e1 || !nuovo) return NextResponse.json({ error: e1?.message || 'Errore creazione listino' }, { status: 400 })
+    await admin.from('preventivi').update({ listino_template_id: nuovo.id, updated_at: new Date().toISOString() }).eq('id', id)
+    return NextResponse.json({ ok: true, listino_id: nuovo.id })
+  }
+  return NextResponse.json({ error: 'Azione non valida' }, { status: 400 })
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

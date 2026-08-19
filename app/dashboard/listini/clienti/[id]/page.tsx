@@ -6,13 +6,13 @@ export default async function ModificaListinoPage({
   params, searchParams
 }: {
   params: Promise<{id:string}>
-  searchParams: Promise<{corriere?:string}>
+  searchParams: Promise<{corriere?:string; preventivo?:string}>
 }) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/')
   const { id } = await params
-  const { corriere: corriereQuery } = await searchParams
+  const { corriere: corriereQuery, preventivo: preventivoId } = await searchParams
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
   const { data: listino } = await supabase.from('listini_clienti').select('*').eq('id', id).single()
   if (!listino) redirect('/dashboard/listini')
@@ -71,6 +71,13 @@ export default async function ModificaListinoPage({
   }
 
   return (
+    <>
+    {preventivoId && (
+      <div style={{margin:'0 0 14px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'10px 14px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'10px',flexWrap:'wrap'}}>
+        <span style={{fontSize:'13px',color:'#9a3412'}}>Stai compilando i <b>prezzi di un preventivo</b>. Aggiungi corrieri, zone e supplementi, poi torna al preventivo.</span>
+        <a href={`/dashboard/preventivi/${preventivoId}`} style={{background:'#ea580c',color:'#fff',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:700,textDecoration:'none',whiteSpace:'nowrap'}}>← Torna al preventivo</a>
+      </div>
+    )}
     <ListinoEditor
       listino={listino}
       corrieri={corrieri||[]}
@@ -84,5 +91,6 @@ export default async function ModificaListinoPage({
       costiMaster={costiMaster}
       tipoListino="cliente"
     />
+    </>
   )
 }
