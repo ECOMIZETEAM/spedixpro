@@ -7,13 +7,19 @@ export default function LogoPage() {
   const [logo, setLogo] = useState<string|null>(null)       // anteprima (dataURL locale o URL salvato)
   const [logoFile, setLogoFile] = useState<File|null>(null) // file scelto da caricare
   const [nome, setNome] = useState('')
+  const [colPrim, setColPrim] = useState('#f97316')   // colore principale (accenti, bottoni)
+  const [colSec, setColSec] = useState('#1a1a1a')     // colore secondario (testi/header scuri)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
 
   useEffect(() => {
     fetch('/api/master').then(r => r.json()).then(d => {
-      if (d && !d.error) { setNome(d.nome || ''); if (d.logo_url) setLogo(d.logo_url) }
+      if (d && !d.error) {
+        setNome(d.nome || ''); if (d.logo_url) setLogo(d.logo_url)
+        if (d.colore_primario) setColPrim(d.colore_primario)
+        if (d.colore_secondario) setColSec(d.colore_secondario)
+      }
       setLoading(false)
     }).catch(() => setLoading(false))
   }, [])
@@ -58,7 +64,13 @@ export default function LogoPage() {
       if (nome.trim()) fd.append('nome', nome.trim())
       const res = await fetch('/api/master/logo', { method: 'POST', body: fd })
       const data = await res.json()
+      // Colori: salvati sull'anagrafica master (stesse colonne usate da email/preventivi).
+      const resCol = await fetch('/api/master', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ colore_primario: colPrim, colore_secondario: colSec }),
+      })
       if (!res.ok) { setMsg('Errore: ' + (data.error || 'salvataggio fallito')) }
+      else if (!resCol.ok) { setMsg('Logo salvato, ma i colori no: riprova') }
       else {
         setMsg('✅ Salvato con successo!')
         if (data.logo_url) { setLogo(data.logo_url); setLogoFile(null) }
@@ -138,6 +150,37 @@ export default function LogoPage() {
                   <div style={{fontSize:'12px'}}>Nessun logo — verrà mostrato il nome</div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+
+        {/* COLORI DEL BRAND — usati nei preventivi e nelle email */}
+        <div style={{marginTop:'24px',borderTop:'1px solid #eee',paddingTop:'20px'}}>
+          <label style={lbl}>Colori del brand</label>
+          <p style={{fontSize:'12px',color:'#666',margin:'0 0 12px'}}>Usati nei preventivi e nelle email che mandi ai clienti.</p>
+          <div style={{display:'flex',gap:'24px',flexWrap:'wrap' as const,alignItems:'flex-end'}}>
+            <div>
+              <div style={{fontSize:'12px',color:'#1a1a1a',marginBottom:'4px'}}>Colore principale</div>
+              <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                <input type="color" value={colPrim} onChange={e=>setColPrim(e.target.value)} style={{width:'42px',height:'36px',border:'1px solid #d1d5db',borderRadius:'6px',padding:'2px',cursor:'pointer',background:'#fff'}}/>
+                <input value={colPrim} onChange={e=>setColPrim(e.target.value)} style={{width:'100px',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a'}}/>
+              </div>
+            </div>
+            <div>
+              <div style={{fontSize:'12px',color:'#1a1a1a',marginBottom:'4px'}}>Colore secondario</div>
+              <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                <input type="color" value={colSec} onChange={e=>setColSec(e.target.value)} style={{width:'42px',height:'36px',border:'1px solid #d1d5db',borderRadius:'6px',padding:'2px',cursor:'pointer',background:'#fff'}}/>
+                <input value={colSec} onChange={e=>setColSec(e.target.value)} style={{width:'100px',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a'}}/>
+              </div>
+            </div>
+            <div style={{flex:1,minWidth:'220px'}}>
+              <div style={{fontSize:'12px',color:'#1a1a1a',marginBottom:'4px'}}>Anteprima</div>
+              <div style={{border:'1px solid #eee',borderRadius:'8px',overflow:'hidden'}}>
+                <div style={{background:colSec,color:'#fff',padding:'10px 14px',fontSize:'13px',fontWeight:700}}>{nome || 'La tua azienda'}</div>
+                <div style={{padding:'12px 14px',background:'#fff'}}>
+                  <button type="button" style={{background:colPrim,color:'#fff',border:'none',borderRadius:'6px',padding:'8px 16px',fontSize:'12.5px',fontWeight:700,cursor:'default'}}>Accetta preventivo</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

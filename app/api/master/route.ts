@@ -8,7 +8,8 @@ const COLONNE = [
   'iban','banca','intestatario',
   'indirizzo_fatturazione','cap_fatturazione','citta_fatturazione','provincia_fatturazione',
   'indirizzo_operativo','cap_operativo','citta_operativo','provincia_operativo','telefono_operativo',
-  'logo_url','tipo_contratto'
+  'logo_url','tipo_contratto',
+  'colore_primario','colore_secondario',
 ]
 
 export async function GET() {
