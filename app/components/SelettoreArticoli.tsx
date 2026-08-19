@@ -29,14 +29,15 @@ export function descriviVariante(a: ArticoloCat): string {
 }
 
 export default function SelettoreArticoli({
-  articoli, valore, onChange, titolo = 'Cosa c’e’ nel pacco',
+  articoli, valore, onChange, titolo = 'Cosa c’e’ nel pacco', apertoDefault = false,
 }: {
   articoli: ArticoloCat[]
   valore: RigaArticolo[]
   onChange: (v: RigaArticolo[]) => void
   titolo?: string
+  apertoDefault?: boolean
 }) {
-  const [aperto, setAperto] = useState(false)
+  const [aperto, setAperto] = useState(apertoDefault)
   const [q, setQ] = useState('')
 
   const scelti = useMemo(() => new Map(valore.map(r => [r.id, r.qta])), [valore])

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { Testata, Avviso, Vuoto, card, cardH, th, td, btn } from '../comune'
+import { Testata, Avviso, Vuoto, card, cardH, th, td, btn, btnSec } from '../comune'
+import SelettoreArticoli, { type ArticoloCat, type RigaArticolo } from '@/app/components/SelettoreArticoli'
 
 // SPEDIZIONI DA PREPARARE (fulfillment logistica).
 // Lo staff del master vede qui i pacchi dei clienti "logistica" da preparare fisicamente, con gli
@@ -14,6 +15,42 @@ export default function DaPreparare() {
   const [loading, setLoading] = useState(true)
   const [facendo, setFacendo] = useState<string>('')
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
+
+  // Editor articoli (la logistica aggiunge/modifica cosa c'e' nel pacco se il cliente l'ha dimenticato).
+  const [edit, setEdit] = useState<Riga | null>(null)
+  const [cat, setCat] = useState<ArticoloCat[]>([])
+  const [sel, setSel] = useState<RigaArticolo[]>([])
+  const [caricoCat, setCaricoCat] = useState(false)
+  const [salvoArt, setSalvoArt] = useState(false)
+
+  async function apriEditor(r: Riga) {
+    setEdit(r); setCaricoCat(true); setCat([])
+    setSel((articoli[r.id] || []).filter((a: any) => a.articolo_id).map((a: any) => ({ id: a.articolo_id, qta: a.quantita || 1 })))
+    try {
+      const d = await fetch(`/api/catalogo?cliente_id=${r.cliente_id}`).then(x => x.json())
+      setCat(Array.isArray(d?.articoli) ? d.articoli : [])
+    } catch { setCat([]) }
+    setCaricoCat(false)
+  }
+
+  async function salvaArticoli() {
+    if (!edit) return
+    setSalvoArt(true)
+    try {
+      const res = await fetch('/api/spedizioni/articoli', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ spedizione_id: edit.id, articoli: sel.map(r => ({ articolo_id: r.id, quantita: r.qta })) }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (d?.error) { setMsg({ t: 'err', x: d.error }); setSalvoArt(false); return }
+      // Aggiorna la riga in locale coi nomi dal catalogo (niente ricarica dell'intera lista).
+      const nuovi = sel.map(r => { const a = cat.find(c => c.id === r.id); return { articolo_id: r.id, sku: a?.sku, nome: a?.prodotto || a?.nome || a?.sku, quantita: r.qta } })
+      setArticoli(prev => ({ ...prev, [edit.id]: nuovi }))
+      setEdit(null)
+      setMsg({ t: 'ok', x: 'Articoli del pacco aggiornati.' })
+    } catch { setMsg({ t: 'err', x: 'Errore di rete' }) }
+    finally { setSalvoArt(false) }
+  }
 
   function carica() {
     setLoading(true)
@@ -82,8 +119,8 @@ export default function DaPreparare() {
                       <td style={td}>{r.corrieri?.nome_contratto || '—'}</td>
                       <td style={{ ...td, whiteSpace: 'nowrap' }}>{r.colli || 1} · {Number(r.peso_fatturato || r.peso_reale || 0)} kg</td>
                       <td style={td}>
-                        {arts.length === 0 ? <span style={{ color: '#aaa' }}>—</span> : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        {arts.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginBottom: '4px' }}>
                             {arts.map((a, i) => (
                               <span key={i} style={{ fontSize: '12px' }}>
                                 <b>{a.quantita}×</b> {a.nome}{a.sku ? <span style={{ color: '#999' }}> ({a.sku})</span> : null}
@@ -91,6 +128,9 @@ export default function DaPreparare() {
                             ))}
                           </div>
                         )}
+                        <button onClick={() => apriEditor(r)} style={{ background: 'transparent', border: 'none', color: '#ea580c', fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: 0 }}>
+                          {arts.length === 0 ? '＋ aggiungi articoli' : '✎ modifica'}
+                        </button>
                       </td>
                       <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <button onClick={() => preparata(r.id)} disabled={facendo === r.id} style={{ ...btn, opacity: facendo === r.id ? 0.6 : 1 }}>
@@ -105,6 +145,28 @@ export default function DaPreparare() {
           </div>
         )}
       </div>
+
+      {edit && (
+        <div onClick={() => !salvoArt && setEdit(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(15,15,15,0.55)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: '12px', width: '100%', maxWidth: '560px', maxHeight: '85vh', overflowY: 'auto', padding: '20px' }}>
+            <div style={{ fontSize: '16px', fontWeight: 800, color: '#1a1a1a', marginBottom: '2px' }}>Cosa c'è nel pacco</div>
+            <div style={{ fontSize: '12.5px', color: '#777', marginBottom: '14px' }}>
+              {edit.clienti?.ragione_sociale} · {edit.numero || edit.tracking_number} — correggi cosa prelevare dal magazzino. Alla conferma la giacenza si aggiorna da sola.
+            </div>
+            {caricoCat ? (
+              <div style={{ padding: '30px', textAlign: 'center', color: '#999', fontSize: '13px' }}>Carico il catalogo…</div>
+            ) : cat.length === 0 ? (
+              <div style={{ padding: '20px', textAlign: 'center', color: '#999', fontSize: '13px' }}>Questo cliente non ha articoli a catalogo: caricali da Catalogo prodotti.</div>
+            ) : (
+              <SelettoreArticoli articoli={cat} valore={sel} onChange={setSel} titolo="Articoli da prelevare" apertoDefault />
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '18px' }}>
+              <button onClick={() => setEdit(null)} disabled={salvoArt} style={btnSec}>Annulla</button>
+              <button onClick={salvaArticoli} disabled={salvoArt || caricoCat} style={{ ...btn, opacity: (salvoArt || caricoCat) ? 0.6 : 1 }}>{salvoArt ? 'Salvo…' : 'Salva'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

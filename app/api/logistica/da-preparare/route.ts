@@ -55,12 +55,12 @@ export async function GET(req: NextRequest) {
   const articoli: Record<string, any[]> = {}
   if (ids.length) {
     const { data: mov } = await admin.from('articoli_movimenti')
-      .select('spedizione_id, quantita, articoli_cliente(sku,nome,prodotto)')
+      .select('spedizione_id, articolo_id, quantita, articoli_cliente(sku,nome,prodotto)')
       .eq('tipo', 'spedizione').in('spedizione_id', ids)
     for (const m of (mov || [])) {
       const sid = (m as any).spedizione_id; if (!sid) continue
       const a = (m as any).articoli_cliente || {}
-      ;(articoli[sid] ||= []).push({ sku: a.sku, nome: a.nome || a.prodotto || a.sku, quantita: Math.abs(Number((m as any).quantita) || 0) })
+      ;(articoli[sid] ||= []).push({ articolo_id: (m as any).articolo_id, sku: a.sku, nome: a.nome || a.prodotto || a.sku, quantita: Math.abs(Number((m as any).quantita) || 0) })
     }
   }
   return NextResponse.json({ spedizioni: speds || [], articoli })
