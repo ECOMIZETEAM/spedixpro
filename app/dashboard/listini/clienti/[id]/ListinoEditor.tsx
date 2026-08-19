@@ -187,6 +187,34 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   const [copiaErr, setCopiaErr] = useState('')
   const [copiaOk, setCopiaOk] = useState('')
   const [copiaMarkup, setCopiaMarkup] = useState<MarkupOut>({ default: null, perFascia: {} })
+  // "Da costo": riempi i prezzi di un corriere dal COSTO del master con una maggiorazione (%/€ fisso).
+  const [dcOpen, setDcOpen] = useState(false)
+  const [dcCorr, setDcCorr] = useState<any>(null)
+  const [dcFasce, setDcFasce] = useState<any[]>([])
+  const [dcMarkup, setDcMarkup] = useState<MarkupOut>({ default: null, perFascia: {} })
+  const [dcLoad, setDcLoad] = useState(false)
+  const [dcSaving, setDcSaving] = useState(false)
+  async function apriDaCosto(c: any) {
+    setDcCorr(c); setDcOpen(true); setDcLoad(true); setDcFasce([]); setDcMarkup({ default: null, perFascia: {} })
+    try {
+      const d = await fetch(`/api/listini/corrieri?corriere=${c.id}`).then(r => r.json())
+      const raw = Array.isArray(d?.fasce) ? d.fasce : []
+      const map = new Map<string, { tipo: string; peso: number; costi: number[] }>()
+      for (const f of raw) { const tipo = f.tipo === 'oltre' ? 'oltre' : 'fino_a'; const peso = Number(f.peso_max); const k = `${tipo}_${peso}`; const pr = parseFloat(f.prezzo); if (!map.has(k)) map.set(k, { tipo, peso, costi: [] }); if (isFinite(pr) && pr > 0) map.get(k)!.costi.push(pr) }
+      setDcFasce(Array.from(map.values()).sort((a, b) => a.tipo === 'oltre' ? 1 : b.tipo === 'oltre' ? -1 : a.peso - b.peso).map(g => ({ key: `${g.tipo}_${g.peso}`, label: g.tipo === 'oltre' ? `oltre ${g.peso} kg` : `fino a ${g.peso} kg`, tipo: g.tipo, peso: g.peso, costo: g.costi.length ? Math.min(...g.costi) : 0 })))
+    } catch { setDcFasce([]) }
+    setDcLoad(false)
+  }
+  async function confermaDaCosto() {
+    if (!dcCorr) return
+    setDcSaving(true)
+    try {
+      const res = await fetch('/api/listini/costo-in-cliente', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ corriereId: dcCorr.id, targetListinoId: listino.id, markup: dcMarkup, sovrascrivi: true }) })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok || d?.error) { await dialog.alert({ title: 'Errore', message: d?.error || 'Riempimento non riuscito' }); setDcSaving(false); return }
+      window.location.reload()   // ricarica: le celle si riempiono coi prezzi (costo + margine)
+    } catch { await dialog.alert({ title: 'Errore', message: 'Errore di rete' }); setDcSaving(false) }
+  }
   const keyFasciaCopia = (f: Fascia) => `${f.tipo==='oltre'?'oltre':'fino_a'}_${Number(f.peso)}`
   // Fasce per l'editor markup: base = i prezzi del listino di ORIGINE (il piu' basso fra le zone della fascia).
   const fasceMarkupCopia = useMemo(() => fasce.map(f => {
@@ -719,6 +747,10 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
                   )}
                   <span style={{flex:1,fontSize:'14px',fontWeight:'600',color:'#1a1a1a'}}>{c.nome_contratto}</span>
                   {!isCorriere && (
+                    <button onClick={(e)=>{e.stopPropagation(); apriDaCosto(c)}} title="Riempi i prezzi dal TUO costo con una maggiorazione (% o € fisso)"
+                      style={{padding:'4px 10px',background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer',whiteSpace:'nowrap' as const}}>€ Da costo</button>
+                  )}
+                  {!isCorriere && (
                     <button onClick={(e)=>{e.stopPropagation(); apriCopia(c)}} title="Copia questo corriere in un altro listino"
                       style={{padding:'4px 10px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer',whiteSpace:'nowrap' as const}}>⧉ Copia</button>
                   )}
@@ -797,6 +829,23 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
             <div style={{padding:'14px 20px',borderTop:'1px solid #eee',display:'flex',justifyContent:'flex-end',gap:'10px'}}>
               <button onClick={()=>setCopia(null)} disabled={copiaSaving} style={{padding:'9px 16px',background:'#fff',color:'#1a1a1a',border:'1px solid #ddd',borderRadius:'7px',fontSize:'13px',cursor:'pointer'}}>Annulla</button>
               <button onClick={confermaCopia} disabled={copiaSaving} style={{padding:'9px 20px',background:'#f97316',color:'#fff',border:'none',borderRadius:'7px',fontSize:'13px',fontWeight:700,cursor:'pointer',opacity:copiaSaving?0.7:1}}>{copiaSaving?'Copio…':'Copia'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Riempi dal costo + margine (%/€) */}
+      {dcOpen && (
+        <div onClick={()=>!dcSaving && setDcOpen(false)} style={{position:'fixed',inset:0,background:'rgba(15,15,15,0.55)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',width:'100%',maxWidth:'600px',maxHeight:'86vh',overflowY:'auto' as const,padding:'20px'}}>
+            <div style={{fontSize:'16px',fontWeight:800,color:'#1a1a1a',marginBottom:'4px'}}>Riempi dal costo — {dcCorr?.nome_contratto}</div>
+            <div style={{fontSize:'12.5px',color:'#666',marginBottom:'14px'}}>Parte dal <b>tuo costo</b> su questo corriere e applica la maggiorazione (% o € fisso) su tutte le zone. Sovrascrive i prezzi attuali di questo contratto (le zone che non hai a costo restano vuote).</div>
+            {dcLoad ? <div style={{padding:'20px',textAlign:'center',color:'#999',fontSize:'13px'}}>Carico il costo…</div>
+              : dcFasce.length===0 ? <div style={{color:'#999',fontSize:'12.5px'}}>Nessun costo per questo corriere (non hai un contratto costo qui).</div>
+                : <EditorMarkupFasce fasce={dcFasce} onChange={setDcMarkup} />}
+            <div style={{display:'flex',justifyContent:'flex-end',gap:'10px',marginTop:'16px'}}>
+              <button onClick={()=>setDcOpen(false)} disabled={dcSaving} style={{padding:'9px 18px',background:'#fff',color:'#1a1a1a',border:'1px solid #ddd',borderRadius:'8px',fontSize:'13px',fontWeight:600,cursor:'pointer'}}>Annulla</button>
+              <button onClick={confermaDaCosto} disabled={dcSaving||dcLoad||dcFasce.length===0} style={{padding:'9px 20px',background:'#f97316',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:700,cursor:'pointer',opacity:(dcSaving||dcLoad||!dcFasce.length)?0.6:1}}>{dcSaving?'Riempio…':'Riempi i prezzi'}</button>
             </div>
           </div>
         </div>

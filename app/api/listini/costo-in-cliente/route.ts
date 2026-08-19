@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   if (!utente?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
   const masterId = utente.master_id
 
-  const { corriereId, targetListinoId, nuovoNome, markup } = await req.json()
+  const { corriereId, targetListinoId, nuovoNome, markup, sovrascrivi } = await req.json()
   if (!corriereId) return NextResponse.json({ error: 'corriereId mancante' }, { status: 400 })
   if (!targetListinoId && !(nuovoNome && String(nuovoNome).trim())) {
     return NextResponse.json({ error: 'Scegli un listino cliente esistente o un nome per il nuovo listino' }, { status: 400 })
@@ -56,6 +56,7 @@ export async function POST(req: NextRequest) {
   // DESTINAZIONE = listino CLIENTE (nuovo o esistente) del master.
   let targetId = targetListinoId as string | undefined
   let creato = false
+  let corrierePresente = false
   if (nuovoNome && String(nuovoNome).trim()) {
     const { data: nuovo, error: e1 } = await admin.from('listini_clienti').insert({
       master_id: masterId, nome: String(nuovoNome).trim(), attivo: true,
@@ -69,11 +70,13 @@ export async function POST(req: NextRequest) {
     if (!tgt) return NextResponse.json({ error: 'Listino cliente di destinazione non trovato' }, { status: 404 })
     const { data: gia } = await admin.from('listini_clienti_corrieri').select('id')
       .eq('listino_id', targetId).eq('corriere_id', corriereId).maybeSingle()
-    if (gia) return NextResponse.json({ error: `Il contratto "${corr.nome_contratto}" è già presente in questo listino cliente` }, { status: 409 })
+    // sovrascrivi: il corriere e' gia' nel listino e si vogliono RIEMPIRE/riprezzare le celle dal
+    // costo con la maggiorazione — non e' un errore, si sovrascrivono fasce e supplementi.
+    if (gia) { if (!sovrascrivi) return NextResponse.json({ error: `Il contratto "${corr.nome_contratto}" è già presente in questo listino cliente` }, { status: 409 }); corrierePresente = true }
   }
 
-  // Aggancio corriere al listino cliente
-  await admin.from('listini_clienti_corrieri').insert({
+  // Aggancio corriere al listino cliente (salta se gia' presente in sovrascrittura).
+  if (!corrierePresente) await admin.from('listini_clienti_corrieri').insert({
     listino_id: targetId, corriere_id: corriereId, fattore_volume: fattoreCosto, abilitato: true,
   })
 
