@@ -108,10 +108,14 @@ export default function NetworkRicevutiPage() {
     setAccettando('')
   }
 
+  // Il numero sul tab = azioni ANCORA DA FARE, non il totale ricevuto: appena si accetta/decide
+  // deve sparire. Prima contava TUTTO (dati.x.length) e restava "(1)"/"(11)" anche dopo aver
+  // accettato tutto. Pending: rettifica non ancora decisa (!propagazione — vale sulle RIGHE, così
+  // un blocco accettato in parte conta solo quelle rimaste); rimessa/reso non ancora accettati.
   const tabs: [typeof tab, string, number][] = [
-    ['rettifiche', 'Rettifiche ricevute', dati.rettifiche.length],
-    ['contrassegni', 'Rimesse COD ricevute', dati.contrassegni.length],
-    ['resi', 'Resi ricevuti', dati.resi.length],
+    ['rettifiche', 'Rettifiche ricevute', (dati.rettifiche||[]).filter((r:any)=>!r.propagazione).length],
+    ['contrassegni', 'Rimesse COD ricevute', (dati.contrassegni||[]).filter((c:any)=>!c.accettata_target).length],
+    ['resi', 'Resi ricevuti', (dati.resi||[]).filter((r:any)=>!r.accettata_target).length],
   ]
 
   return (
@@ -124,7 +128,7 @@ export default function NetworkRicevutiPage() {
       <div style={{display:'flex',gap:'8px',marginBottom:'16px'}}>
         {tabs.map(([k, label, n]) => (
           <button key={k} onClick={()=>setTab(k)} style={{background:tab===k?ACCENT:'#fff',color:tab===k?'#fff':'#1a1a1a',border:'1px solid '+(tab===k?ACCENT:'#e8e8e8'),borderRadius:'8px',padding:'8px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>
-            {label} ({n})
+            {label}{n>0?` (${n})`:''}
           </button>
         ))}
       </div>
