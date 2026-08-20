@@ -62,11 +62,33 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const { data: l } = await admin.from('listini_clienti').select('id').eq('id', p.listino_template_id).maybeSingle()
       if (l) return NextResponse.json({ ok: true, listino_id: l.id })
     }
+    // Se il master parte da un listino ESISTENTE, la bozza nasce come sua COPIA (corrieri+fasce+
+    // supplementi): il listino di origine resta intatto, la bozza è modificabile e all'accettazione
+    // diventa il listino del cliente. Senza sourceListinoId la bozza è vuota (compilata da zero).
+    let srcCfg: any = null
+    const srcId = b.sourceListinoId ? String(b.sourceListinoId) : null
+    if (srcId) {
+      const { data: src } = await admin.from('listini_clienti').select('id,fattore_volume,solo_peso_reale')
+        .eq('id', srcId).eq('master_id', s.master_id).maybeSingle()
+      if (!src) return NextResponse.json({ error: 'Listino di origine non trovato' }, { status: 404 })
+      srcCfg = src
+    }
     const { data: nuovo, error: e1 } = await admin.from('listini_clienti').insert({
       master_id: s.master_id, nome: `Preventivo — ${p.dest_nome || p.oggetto || 'bozza'}`.slice(0, 120),
       attivo: true, preventivo_id: id,
+      fattore_volume: srcCfg?.fattore_volume ?? null, solo_peso_reale: srcCfg?.solo_peso_reale ?? false,
     }).select('id').single()
     if (e1 || !nuovo) return NextResponse.json({ error: e1?.message || 'Errore creazione listino' }, { status: 400 })
+    if (srcId) {
+      const [{ data: cs }, { data: fs }, { data: ss }] = await Promise.all([
+        admin.from('listini_clienti_corrieri').select('corriere_id,fattore_volume,abilitato').eq('listino_id', srcId),
+        admin.from('listini_clienti_fasce').select('corriere_id,zona_id,peso_min,peso_max,tipo,fuel,prezzo').eq('listino_id', srcId),
+        admin.from('listini_clienti_supplementi').select('corriere_id,tipo,descrizione,valore,tipo_calcolo,nome').eq('listino_id', srcId),
+      ])
+      if (cs?.length) await admin.from('listini_clienti_corrieri').insert(cs.map((r: any) => ({ ...r, listino_id: nuovo.id })))
+      if (fs?.length) await admin.from('listini_clienti_fasce').insert(fs.map((r: any) => ({ ...r, listino_id: nuovo.id })))
+      if (ss?.length) await admin.from('listini_clienti_supplementi').insert(ss.map((r: any) => ({ ...r, listino_id: nuovo.id })))
+    }
     await admin.from('preventivi').update({ listino_template_id: nuovo.id, updated_at: new Date().toISOString() }).eq('id', id)
     return NextResponse.json({ ok: true, listino_id: nuovo.id })
   }
