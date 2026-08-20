@@ -129,9 +129,12 @@ export async function POST(req: NextRequest) {
             ? e.livelli.find(l => l.masterId === figlio)
             : e.livelli.find(l => l.clienteId)
           if (!liv || liv.differenza == null) continue
-          // Le differenze nulle non diventano una riga: una rettifica da zero euro e' solo rumore
-          // nell'elenco di chi la deve guardare.
-          if (Math.abs(liv.differenza) < 0.01) continue
+          // SOLO RECUPERI, MAI RIMBORSI. La ripesatura del fornitore serve a incassare quello che
+          // abbiamo fatturato in MENO; se riprezzata sul listino del livello esce piu' bassa (o
+          // uguale) di quanto pagato — liv.differenza = dovuto - pagato <= 0 — non si crea una nota
+          // di credito: non si regalano soldi su un pacco che il fornitore ci ha comunque
+          // conteggiato. Le nulle restano fuori come prima (erano solo rumore nell'elenco).
+          if (liv.differenza < 0.01) continue
           daScrivere.push({
             master_id: myMaster, file_id: creaturaFile,
             spedizione_id: e.spedizioneId, numero_spedizione: e.ldv,
@@ -350,7 +353,8 @@ export async function POST(req: NextRequest) {
         }
       }
       const differenza = costoIniziale - costoFinale
-      if (Math.abs(differenza) <= 0.01) { continue }
+      // SOLO RECUPERI (differenza negativa = addebito), mai rimborsi: vedi il ramo ripesature sopra.
+      if (differenza > -0.01) { continue }
       nDaRettificare++
       rettificheToInsert.push({
         master_id: myMaster, file_id: fileRec?.id, spedizione_id: spedizione.id,
@@ -380,7 +384,8 @@ export async function POST(req: NextRequest) {
       const costoIniziale = prezzoIni.prezzo
       const costoFinale = prezzoFin.prezzo
       const differenza = costoIniziale - costoFinale
-      if (Math.abs(differenza) <= 0.01) { continue }
+      // SOLO RECUPERI (differenza negativa = addebito), mai rimborsi: vedi il ramo ripesature sopra.
+      if (differenza > -0.01) { continue }
       nDaRettificare++
       rettificheToInsert.push({
         master_id: myMaster, file_id: fileRec?.id, spedizione_id: spedizione.id,

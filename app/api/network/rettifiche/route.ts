@@ -120,7 +120,10 @@ export async function POST(req: NextRequest) {
       ? esito.livelli.find(l => l.masterId === figlio)
       : esito.livelli.find(l => l.clienteId)
     if (!liv || liv.differenza == null) { saltate.push({ ldv: r.numero_spedizione, perche: 'il listino di chi sta sotto non copre questa spedizione (peso ripesato oltre la fascia massima, o destinazione/zona non prevista): non è girabile, va tenuta a tuo carico ("Le assorbo io")' }); continue }
-    if (Math.abs(liv.differenza) < 0.01) { saltate.push({ ldv: r.numero_spedizione, perche: 'differenza a zero' }); idAzzerate.push(r.id); continue }
+    // SOLO RECUPERI, MAI RIMBORSI: se al livello sotto la ripesatura riprezza piu' basso (o uguale)
+    // di quanto ha pagato (liv.differenza = dovuto - pagato <= 0) non si gira una nota di credito.
+    // Come lo zero, e' una decisione presa (assorbita), non un errore da ritentare.
+    if (liv.differenza < 0.01) { saltate.push({ ldv: r.numero_spedizione, perche: 'niente da recuperare al livello sotto (rimborso o zero): tenuta a tuo carico' }); idAzzerate.push(r.id); continue }
 
     const { error } = await adminDb.from('rettifiche').insert({
       master_id: mio, spedizione_id: esito.spedizioneId, numero_spedizione: esito.ldv,

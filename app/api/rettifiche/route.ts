@@ -193,9 +193,14 @@ export async function POST(req: NextRequest) {
     // 4,30 di scarto nella direzione opposta a quella mostrata a chi preme Conferma — e proprio nei
     // casi frequenti, visto che quasi meta' dei colli ripesati misura MENO del dichiarato.
     const diff = Number(r.differenza || 0)
-    // Importo a zero: non c'e' niente da muovere, ma la riga resta CHIUSA — riaprirla la
-    // rimetterebbe in elenco per sempre, visto che al giro dopo sarebbe di nuovo zero.
-    if (Math.abs(diff) <= 0.005) continue
+    // SOLO RECUPERI, MAI RIMBORSI, e questa e' la PORTA UNICA dove il credito si muove: qualunque
+    // flusso l'abbia creata (file ripesature, file pesi, propagazione di rete), un accredito qui non
+    // passa. differenza = costo_iniziale - costo_finale, quindi negativa = addebito (recuperiamo) e
+    // positiva = accredito (restituiremmo): la ripesatura serve a incassare quello che abbiamo
+    // fatturato in meno, non a regalare soldi su un pacco che il fornitore ci ha comunque conteggiato.
+    // Importo zero O positivo: niente da muovere, ma la riga resta CHIUSA (riaprirla la rimetterebbe
+    // in elenco per sempre). Restano solo gli addebiti veri (diff < 0).
+    if (diff >= -0.005) continue
     if (annullata(r)) { await riapriRiga(r, 'spedizione annullata dopo il caricamento'); continue }
 
     try {
