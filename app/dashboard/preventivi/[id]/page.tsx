@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useParams } from 'next/navigation'
 
 // EDITOR PREVENTIVO (Fase 2 + prezzi completi): dettagli + sezioni customizzabili + PREZZI = listino
@@ -33,18 +33,48 @@ export default function EditorPreventivo() {
   const [srcMode, setSrcMode] = useState<'nuovo' | 'esistente'>('nuovo')
   const [srcListino, setSrcListino] = useState('')
   const [listiniDisp, setListiniDisp] = useState<any[]>([])
+  // Cliente esistente: selettore con ricerca (riempie nome/email e salva cliente_id).
+  const [clienti, setClienti] = useState<any[]>([])
+  const [clientiLoad, setClientiLoad] = useState(false)
+  const [clienteId, setClienteId] = useState('')
+  const [cercaCli, setCercaCli] = useState('')
+  const clientiFiltrati = useMemo(() => {
+    const q = cercaCli.trim().toLowerCase()
+    if (!q) return []
+    return clienti.filter((c: any) => `${c.ragione_sociale || ''} ${c.codice_cliente || ''} ${c.email || ''}`.toLowerCase().includes(q))
+  }, [clienti, cercaCli])
 
   function carica() {
     fetch(`/api/preventivi/${id}`).then(r => r.json()).then(d => {
       if (d?.error) { setMsg({ t: 'err', x: d.error }); setLoading(false); return }
       const p = d.preventivo || {}
       setStato(p.stato || 'bozza'); setBrand(d.branding || {}); setPrezzi(d.prezzi || { corrieri: [] }); setListinoId(p.listino_template_id || null)
-      setDestTipo(p.dest_tipo || 'cliente_nuovo'); setDestNome(p.dest_nome || ''); setDestEmail(p.dest_email || '')
+      const dt = p.dest_tipo === 'cliente' ? 'cliente' : 'cliente_nuovo'
+      setDestTipo(dt); setDestNome(p.dest_nome || ''); setDestEmail(p.dest_email || ''); setClienteId(p.cliente_id || '')
+      if (dt === 'cliente') caricaClienti()
       setOggetto(p.oggetto || ''); setValidoFino(p.valido_fino || '')
       const c = p.contenuto || {}
       setSezioni(Array.isArray(c.sezioni) ? c.sezioni : [])
       setLoading(false)
     }).catch(() => { setMsg({ t: 'err', x: 'Errore nel caricamento' }); setLoading(false) })
+  }
+
+  async function caricaClienti() {
+    if (clientiLoad || clienti.length) return
+    setClientiLoad(true)
+    try {
+      const r = await fetch('/api/clienti/lista'); const d = await r.json()
+      setClienti((Array.isArray(d) ? d : []).filter((c: any) => !c.is_master && !String(c.id).startsWith('m:')))
+    } catch { setClienti([]) }
+    setClientiLoad(false)
+  }
+  function cambiaDest(v: string) {
+    setDestTipo(v)
+    if (v === 'cliente') caricaClienti()
+    else { setClienteId(''); setCercaCli('') }
+  }
+  function scegliCliente(c: any) {
+    setClienteId(c.id); setDestNome(c.ragione_sociale || ''); setDestEmail(c.email || ''); setCercaCli('')
   }
   useEffect(() => { carica() }, [id])
   useEffect(() => { fetch('/api/listini/lista').then(r => r.json()).then(d => setListiniDisp(Array.isArray(d) ? d : [])).catch(() => {}) }, [])
@@ -67,7 +97,7 @@ export default function EditorPreventivo() {
     try {
       const res = await fetch(`/api/preventivi/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dest_tipo: destTipo, dest_nome: destNome, dest_email: destEmail, oggetto, valido_fino: validoFino || null, contenuto: { sezioni } }),
+        body: JSON.stringify({ dest_tipo: destTipo, dest_nome: destNome, dest_email: destEmail, cliente_id: destTipo === 'cliente' ? (clienteId || null) : null, master_target_id: null, oggetto, valido_fino: validoFino || null, contenuto: { sezioni } }),
       })
       const d = await res.json().catch(() => ({}))
       if (!res.ok || d?.error) { setMsg({ t: 'err', x: d?.error || 'Salvataggio non riuscito' }); return false }
@@ -133,14 +163,44 @@ export default function EditorPreventivo() {
             <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a', marginBottom: '12px' }}>Dettagli</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
               <div><label style={lbl}>A chi</label>
-                <select value={destTipo} onChange={e => setDestTipo(e.target.value)} style={inp}>
-                  <option value="cliente_nuovo">Cliente nuovo</option><option value="cliente">Cliente esistente</option><option value="master">Sotto-master</option>
+                <select value={destTipo} onChange={e => cambiaDest(e.target.value)} style={inp}>
+                  <option value="cliente_nuovo">Cliente nuovo</option>
+                  <option value="cliente">Cliente esistente</option>
                 </select>
               </div>
               <div><label style={lbl}>Valido fino al</label><input type="date" value={validoFino || ''} onChange={e => setValidoFino(e.target.value)} style={inp} /></div>
-              <div><label style={lbl}>Nome destinatario</label><input value={destNome} onChange={e => setDestNome(e.target.value)} style={inp} /></div>
-              <div><label style={lbl}>Email</label><input type="email" value={destEmail} onChange={e => setDestEmail(e.target.value)} style={inp} /></div>
             </div>
+            {destTipo === 'cliente' ? (
+              <div style={{ marginBottom: '10px' }}>
+                <label style={lbl}>Cliente</label>
+                {clienteId ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid #d5d5d5', borderRadius: '6px', padding: '9px 11px', background: '#f9fafb' }}>
+                    <span style={{ flex: 1, fontSize: '13px', color: '#1a1a1a', fontWeight: 600 }}>{destNome || 'Cliente selezionato'}{destEmail ? <span style={{ color: '#888', fontWeight: 400 }}> · {destEmail}</span> : null}</span>
+                    <button onClick={() => { setClienteId(''); setDestNome(''); setDestEmail(''); setCercaCli('') }} style={{ background: 'none', border: 'none', color: '#f97316', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>cambia</button>
+                  </div>
+                ) : (
+                  <div style={{ position: 'relative' }}>
+                    <input value={cercaCli} onChange={e => setCercaCli(e.target.value)} placeholder={clientiLoad ? 'Carico i clienti…' : '🔍  Cerca cliente per nome, codice o email…'} style={inp} />
+                    {cercaCli.trim() && (
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, background: '#fff', border: '1px solid #d5d5d5', borderTop: 'none', borderRadius: '0 0 8px 8px', maxHeight: '260px', overflow: 'auto', boxShadow: '0 8px 22px rgba(0,0,0,0.12)' }}>
+                        {clientiFiltrati.length === 0 ? <div style={{ padding: '10px 12px', fontSize: '12.5px', color: '#999' }}>{clientiLoad ? 'Carico…' : 'Nessun cliente trovato.'}</div> : clientiFiltrati.slice(0, 50).map((c: any) => (
+                          <div key={c.id} onMouseDown={e => e.preventDefault()} onClick={() => scegliCliente(c)} style={{ padding: '9px 12px', fontSize: '13px', color: '#1a1a1a', cursor: 'pointer', borderBottom: '1px solid #f2f2f2' }}>
+                            <span style={{ fontWeight: 600 }}>{c.ragione_sociale}</span>
+                            {(c.codice_cliente || c.email) && <span style={{ color: '#888', fontSize: '11.5px' }}> · {[c.codice_cliente, c.email].filter(Boolean).join(' · ')}</span>}
+                          </div>
+                        ))}
+                        {clientiFiltrati.length > 50 && <div style={{ padding: '8px 12px', fontSize: '11.5px', color: '#999' }}>…affina la ricerca ({clientiFiltrati.length} risultati)</div>}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                <div><label style={lbl}>Nome destinatario</label><input value={destNome} onChange={e => setDestNome(e.target.value)} style={inp} /></div>
+                <div><label style={lbl}>Email</label><input type="email" value={destEmail} onChange={e => setDestEmail(e.target.value)} style={inp} /></div>
+              </div>
+            )}
             <label style={lbl}>Oggetto</label><input value={oggetto} onChange={e => setOggetto(e.target.value)} style={inp} />
           </div>
 
