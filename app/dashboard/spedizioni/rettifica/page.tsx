@@ -308,6 +308,9 @@ export default function RettificaCostiPage() {
               style={{padding:'4px 8px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px',width:'180px',color:'#1a1a1a'}}/>
           </div>
         </div>
+        <div style={{padding:'7px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'11px',color:'#8a8a8a',lineHeight:1.5}}>
+          Si fattura sul <strong style={{color:'#1a1a1a'}}>maggiore fra peso reale e volume</strong>: in grassetto quello su cui si paga, in <strong style={{color:'#dc2626'}}>rosso</strong> il peso ripesato che fa salire il costo. La colonna <strong style={{color:'#1a1a1a'}}>Differenza</strong> è quanto recuperi.
+        </div>
 
         {loading ? (
           <div style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a'}}>Caricamento...</div>
@@ -358,6 +361,16 @@ export default function RettificaCostiPage() {
                   const isSelected = selectedIds.includes(r.id)
                   const diff = Number(r.differenza || 0)
                   const isDaRett = r.stato === 'da_rettificare'
+                  // Si FATTURA sul MAGGIORE fra reale e volume: evidenzio quella misura (il perché del
+                  // costo) e smorzo l'altra. Prima = grassetto scuro, Dopo = grassetto ROSSO (il peso
+                  // ripesato che fa salire). A colpo d'occhio: "prima pagavi su X, ora su Y". Il vecchio
+                  // rosso (reale ripesato > reale dichiarato) confondeva: non seguiva il recupero, che
+                  // quasi sempre lo fa il volume.
+                  const pIni = Number(r.peso_iniziale)||0, pvIni = Number(r.peso_volume_iniziale)||0
+                  const pRe  = Number(r.peso_reale)||0,    pvRe  = Number(r.peso_volume_reale)||0
+                  const volIni = pvIni > pIni, volRe = pvRe > pRe
+                  const cIni = (on:boolean) => ({padding:'8px 10px', color: on?'#1a1a1a':'#b0b4bb', fontWeight: on?700:400})
+                  const cRe  = (on:boolean) => ({padding:'8px 10px', color: on?'#dc2626':'#b0b4bb', fontWeight: on?700:400})
                   return (
                     <tr key={r.id} style={{borderBottom:'1px solid #d1d5db',background:isSelected?'#fff7ed':'#fff'}}>
                       <td style={{padding:'8px 10px'}}>
@@ -374,12 +387,10 @@ export default function RettificaCostiPage() {
                           </div>
                         )}
                       </td>
-                      <td style={{padding:'8px 10px',color:'#1a1a1a'}}>{Number(r.peso_iniziale).toFixed(2)}</td>
-                      <td style={{padding:'8px 10px',color:'#1a1a1a'}}>{Number(r.peso_volume_iniziale).toFixed(2)}</td>
-                      <td style={{padding:'8px 10px',color:Number(r.peso_reale)>Number(r.peso_iniziale)?'#dc2626':'#374151',fontWeight:Number(r.peso_reale)>Number(r.peso_iniziale)?'700':'400'}}>
-                        {Number(r.peso_reale).toFixed(2)}
-                      </td>
-                      <td style={{padding:'8px 10px',color:'#1a1a1a'}}>{Number(r.peso_volume_reale).toFixed(2)} kg</td>
+                      <td style={cIni(!volIni)}>{pIni.toFixed(2)}</td>
+                      <td style={cIni(volIni)}>{pvIni.toFixed(2)}</td>
+                      <td style={cRe(!volRe)}>{pRe.toFixed(2)}</td>
+                      <td style={cRe(volRe)}>{pvRe.toFixed(2)} kg</td>
                       <td style={{padding:'8px 10px',color:'#1a1a1a'}}>{Number(r.costo_iniziale).toFixed(4)}</td>
                       <td style={{padding:'8px 10px',color:'#1a1a1a'}}>{Number(r.costo_finale).toFixed(4)}</td>
                       <td style={{padding:'8px 10px'}}>
