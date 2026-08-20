@@ -50,11 +50,21 @@ export function descriviAgevolazione(settings: any): string {
 //  - il listino dice di tassare sempre sul reale (solo_peso_reale);
 //  - il contratto ha l'agevolazione e OGNI collo sta dentro la scatola;
 //  - il contratto ha la soglia attiva e il peso reale ci sta sotto.
+//
+// Un contratto può però pretendere DUE condizioni insieme, non l'una O l'altra: i Poste Delivery
+// Business (PDB) danno il peso reale solo se il collo sta nella scatola 50×32×28 E pesa fino a 5 kg —
+// un pacco 40×30×20 da 8 kg lì va sul volumetrico, perché è così che Poste lo tassa a noi. Per questi
+// contratti si dichiara `agevolazione_peso_max`: quando c'è, la scatola da sola non basta, serve
+// anche il peso sotto quel tetto. Senza il campo la scatola vale da sola, come sempre (nessun altro
+// contratto cambia).
 export function pesoSuReale(
   settings: any, packages: any[], pesoReale: number, soloPesoReale = false
 ): boolean {
   if (soloPesoReale) return true
-  if (settings?.agevolazione_peso_reale && entroMisureAgevolate(settings, packages)) return true
+  if (settings?.agevolazione_peso_reale && entroMisureAgevolate(settings, packages)) {
+    const maxKg = Number(settings?.agevolazione_peso_max) || 0
+    if (maxKg <= 0 || Number(pesoReale) <= maxKg) return true
+  }
   const soglia = settings?.peso_reale_soglia
   if (soglia?.attivo && Number(soglia.kg) > 0 && Number(pesoReale) <= Number(soglia.kg)) return true
   return false
