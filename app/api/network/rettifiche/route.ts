@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
       master_id: mio, spedizione_id: esito.spedizioneId, numero_spedizione: esito.ldv,
       cliente_id: figlio ? null : liv.clienteId,
       target_master_id: figlio,
-      peso_iniziale: esito.pesoPrima, peso_volume_iniziale: 0,
+      peso_iniziale: esito.pesoRealePrima, peso_volume_iniziale: esito.pesoVolumePrima,   // dichiarato: reale + volumetrico
       peso_reale: esito.pesoDopo, peso_volume_reale: esito.pesoVolumeDopo,   // il volume, cosi' si vede perche' il costo sale
       costo_iniziale: liv.pagato, costo_finale: liv.dovuto,
       differenza: -liv.differenza,        // la colonna e' "quanto restituisco": un addebito e' negativo

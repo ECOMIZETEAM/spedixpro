@@ -38,6 +38,12 @@ export type EsitoRipesatura = {
   destinatario: string
   colli: number
   pesoPrima: number
+  // Il collo come DICHIARATO alla creazione, per la colonna "iniziale" della tabella: il peso REALE
+  // dichiarato e il suo VOLUMETRICO, in simmetria con pesoDopo/pesoVolumeDopo (ripesati). Prima si
+  // scriveva peso_iniziale = peso_fatturato (il max, spesso il volume) e peso_volume_iniziale = 0:
+  // la colonna "peso iniziale" mostrava il volume e "peso/volume iniziale" restava vuota.
+  pesoRealePrima: number
+  pesoVolumePrima: number
   pesoDopo: number
   pesoVolumeDopo: number   // peso VOLUMETRICO dopo la ripesatura: va mostrato accanto al reale
   misure: string
@@ -67,6 +73,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
       ldv: r.ldv, idOrdine: r.idOrdine, trovata: false, destinatario: r.destinatario,
       colli: r.colli.length,
       pesoPrima: 0,
+      pesoRealePrima: 0, pesoVolumePrima: 0,
       pesoDopo: arrotonda(r.colli.reduce((s, c) => s + c.peso, 0)),
       pesoVolumeDopo: 0,
       misure: r.colli.map(c => `${c.lunghezza}x${c.larghezza}x${c.altezza}`).join(' + '),
@@ -75,7 +82,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     }
 
     const { data: s } = await admin.from('spedizioni')
-      .select('id,cliente_id,master_id,corriere_id,stato,peso_fatturato,dest_provincia,dest_cap,dest_citta,dest_paese,contrassegno,assicurazione,valore_merce,servizi_accessori')
+      .select('id,cliente_id,master_id,corriere_id,stato,peso_fatturato,peso_reale,peso_volume,dest_provincia,dest_cap,dest_citta,dest_paese,contrassegno,assicurazione,valore_merce,servizi_accessori')
       .eq('tracking_number', r.ldv).maybeSingle()
     if (!s) { out.push({ ...base, motivo: 'spedizione non trovata' }); continue }
     if (s.stato === 'annullata') { out.push({ ...base, spedizioneId: s.id, motivo: 'spedizione annullata' }); continue }
@@ -83,6 +90,8 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     base.trovata = true
     base.spedizioneId = s.id
     base.pesoPrima = Number(s.peso_fatturato || 0)
+    base.pesoRealePrima = Number(s.peso_reale || 0)
+    base.pesoVolumePrima = Number(s.peso_volume || 0)
 
     // Il collo come lo ha misurato il fornitore, nella forma che vuole il motore dei prezzi.
     const packages = r.colli.map(c => ({

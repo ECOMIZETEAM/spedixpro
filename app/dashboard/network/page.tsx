@@ -186,7 +186,10 @@ export default function NetworkRicevutiPage() {
                               const vol = Number(r.peso_volume_reale) || 0
                               const reale = Number(r.peso_reale) || 0
                               const fatt = Math.max(reale, vol)
-                              return <td style={td}>{r.peso_iniziale} → <strong>{fatt.toFixed(1)}</strong> kg{vol > reale ? <span style={{color:'#ea580c'}}> (vol.)</span> : ''}</td>
+                              // Il "prima" è il FATTURATO iniziale = max(reale, volume) dichiarati (non il solo
+                              // peso_iniziale, che ora è il reale dichiarato): così è coerente col "dopo" (fatt).
+                              const iniz = Math.max(Number(r.peso_iniziale) || 0, Number(r.peso_volume_iniziale) || 0)
+                              return <td style={td}>{iniz.toFixed(1)} → <strong>{fatt.toFixed(1)}</strong> kg{vol > reale ? <span style={{color:'#ea580c'}}> (vol.)</span> : ''}</td>
                             })()}
                             <td style={td}>€ {Number(r.costo_iniziale).toFixed(2)} → € {Number(r.costo_finale).toFixed(2)}</td>
                             <td style={{...td,fontWeight:700,color:Number(r.differenza)<0?'#dc2626':'#16a34a'}}>€ {Number(r.differenza).toFixed(2)}</td>

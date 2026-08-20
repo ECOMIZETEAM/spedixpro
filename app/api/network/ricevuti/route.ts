@@ -34,7 +34,7 @@ export async function GET(_req: NextRequest) {
     // decidere: il sotto-master smetteva di vederle e non poteva più addebitarle. Ora le null
     // (da decidere) vengono sempre prima e il tetto è ampio, così non spariscono mai.
     adminDb.from('rettifiche')
-      .select('id,numero_spedizione,peso_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,confermata,stato,propagazione,created_at,masters:master_id(nome)')
+      .select('id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,confermata,stato,propagazione,created_at,masters:master_id(nome)')
       .eq('target_master_id', mio)
       .eq('confermata', true)
       .order('propagazione', { ascending: true, nullsFirst: true })

@@ -140,7 +140,10 @@ export async function POST(req: NextRequest) {
             spedizione_id: e.spedizioneId, numero_spedizione: e.ldv,
             cliente_id: figlio ? null : liv.clienteId,
             target_master_id: figlio,
-            peso_iniziale: e.pesoPrima, peso_volume_iniziale: 0,
+            // "iniziale" = collo DICHIARATO: reale nella colonna Peso, volumetrico in Peso/Volume
+            // (prima: peso_iniziale=fatturato e peso_volume_iniziale=0, cioè peso che mostrava il
+            //  volume e peso/volume vuoto). Il costo resta calcolato sul fatturato, qui è solo display.
+            peso_iniziale: e.pesoRealePrima, peso_volume_iniziale: e.pesoVolumePrima,
             // Il volume vero (quello che fa salire il costo): prima era 0 anche sul primo livello,
             // così la sua Rettifica Costi mostrava "0,00" mentre il livello sotto vedeva il volume.
             peso_reale: e.pesoDopo, peso_volume_reale: e.pesoVolumeDopo || 0,
@@ -359,7 +362,8 @@ export async function POST(req: NextRequest) {
       rettificheToInsert.push({
         master_id: myMaster, file_id: fileRec?.id, spedizione_id: spedizione.id,
         numero_spedizione: spedizione.numero, cliente_id: spedizione.cliente_id, target_master_id: null,
-        peso_iniziale: pesoIniziale, peso_volume_iniziale: Number(spedizione.peso_volume||0),
+        // "iniziale" = collo dichiarato (reale + volume); il costo si calcola su pesoIniziale (fatturato), qui è display.
+        peso_iniziale: Number(spedizione.peso_reale || pesoIniziale), peso_volume_iniziale: Number(spedizione.peso_volume||0),
         peso_reale: pesoReale || pesoIniziale, peso_volume_reale: 0,
         costo_iniziale: costoIniziale, costo_finale: costoFinale, differenza,
         stato: 'da_rettificare',
@@ -390,7 +394,8 @@ export async function POST(req: NextRequest) {
       rettificheToInsert.push({
         master_id: myMaster, file_id: fileRec?.id, spedizione_id: spedizione.id,
         numero_spedizione: spedizione.numero, cliente_id: null, target_master_id: targetMasterId,
-        peso_iniziale: pesoIniziale, peso_volume_iniziale: Number(spedizione.peso_volume||0),
+        // "iniziale" = collo dichiarato (reale + volume); il costo si calcola su pesoIniziale (fatturato), qui è display.
+        peso_iniziale: Number(spedizione.peso_reale || pesoIniziale), peso_volume_iniziale: Number(spedizione.peso_volume||0),
         peso_reale: pesoRicalcolo, peso_volume_reale: 0,
         costo_iniziale: costoIniziale, costo_finale: costoFinale, differenza,
         stato: 'da_rettificare',
