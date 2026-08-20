@@ -25,13 +25,7 @@ export default function Preventivi() {
   const [master, setMaster] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
-  const [open, setOpen] = useState(false)
   const [creando, setCreando] = useState(false)
-  // form crea
-  const [destTipo, setDestTipo] = useState<'cliente_nuovo' | 'cliente' | 'master'>('cliente_nuovo')
-  const [nome, setNome] = useState('')
-  const [email, setEmail] = useState('')
-  const [oggetto, setOggetto] = useState('Preventivo di spedizione')
 
   function carica() {
     setLoading(true)
@@ -44,21 +38,19 @@ export default function Preventivi() {
   }
   useEffect(() => { carica() }, [])
 
-  function apri() { setDestTipo('cliente_nuovo'); setNome(''); setEmail(''); setOggetto('Preventivo di spedizione'); setErr(''); setOpen(true) }
-
-  async function crea() {
-    if (!nome.trim()) { setErr('Inserisci il nome del destinatario'); return }
+  // Crea subito una bozza vuota e apre l'editor: i dettagli (a chi, nome, email, oggetto) si
+  // compilano lì. Niente popup: era un doppione degli stessi campi dell'editor.
+  async function creaDiretto() {
     setCreando(true); setErr('')
     try {
       const res = await fetch('/api/preventivi', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dest_tipo: destTipo, dest_nome: nome.trim(), dest_email: email.trim(), oggetto: oggetto.trim() }),
+        body: JSON.stringify({ dest_tipo: 'cliente_nuovo', oggetto: 'Preventivo di spedizione' }),
       })
       const d = await res.json().catch(() => ({}))
       if (!res.ok || d?.error) { setErr(d?.error || 'Creazione non riuscita'); setCreando(false); return }
-      // Va dritto all'editor del nuovo preventivo.
       window.location.href = `/dashboard/preventivi/${d.id}`
-    } catch { setErr('Errore di rete') } finally { setCreando(false) }
+    } catch { setErr('Errore di rete'); setCreando(false) }
   }
 
   async function elimina(id: string, nomeDest: string) {
@@ -114,7 +106,7 @@ export default function Preventivi() {
           <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Preventivi</h1>
           <p style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>Crea e invia preventivi brandizzati a clienti e sotto-master. All'accettazione diventano il loro listino.</p>
         </div>
-        <button onClick={apri} style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>+ Crea preventivo</button>
+        <button onClick={creaDiretto} disabled={creando} style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', opacity: creando ? 0.6 : 1 }}>{creando ? 'Creo…' : '+ Crea preventivo'}</button>
       </div>
 
       <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '8px', padding: '10px 14px', fontSize: '12.5px', color: '#9a3412', marginBottom: '16px' }}>
@@ -133,30 +125,6 @@ export default function Preventivi() {
         {loading ? <div style={{ padding: '30px', textAlign: 'center', color: '#999' }}>Carico…</div> : <Tabella righe={master} vuoto="Nessun preventivo a sotto-master." />}
       </div>
 
-      {open && (
-        <div onClick={() => !creando && setOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(15,15,15,0.55)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: '12px', width: '100%', maxWidth: '460px', padding: '22px' }}>
-            <div style={{ fontSize: '17px', fontWeight: 800, color: '#1a1a1a', marginBottom: '14px' }}>Nuovo preventivo</div>
-            <label style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', display: 'block', marginBottom: '4px' }}>A chi</label>
-            <select value={destTipo} onChange={e => setDestTipo(e.target.value as any)} style={{ ...inp, marginBottom: '12px' }}>
-              <option value="cliente_nuovo">Cliente nuovo (non ancora registrato)</option>
-              <option value="cliente">Cliente esistente</option>
-              <option value="master">Sotto-master</option>
-            </select>
-            <label style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', display: 'block', marginBottom: '4px' }}>Nome destinatario</label>
-            <input value={nome} onChange={e => setNome(e.target.value)} placeholder="Es. Rossi Srl" autoFocus style={{ ...inp, marginBottom: '12px' }} />
-            <label style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', display: 'block', marginBottom: '4px' }}>Email (per l'invio)</label>
-            <input value={email} onChange={e => setEmail(e.target.value)} placeholder="email@azienda.it" type="email" style={{ ...inp, marginBottom: '12px' }} />
-            <label style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', display: 'block', marginBottom: '4px' }}>Oggetto</label>
-            <input value={oggetto} onChange={e => setOggetto(e.target.value)} style={{ ...inp, marginBottom: '18px' }} />
-            {err && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: '6px', padding: '8px 12px', fontSize: '12.5px', marginBottom: '12px' }}>{err}</div>}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button onClick={() => setOpen(false)} disabled={creando} style={{ background: '#fff', color: '#1a1a1a', border: '1px solid #ddd', borderRadius: '8px', padding: '9px 18px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>Annulla</button>
-              <button onClick={crea} disabled={creando} style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', padding: '9px 20px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: creando ? 0.6 : 1 }}>{creando ? 'Creo…' : 'Crea bozza'}</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
