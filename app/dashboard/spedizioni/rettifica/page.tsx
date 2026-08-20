@@ -103,7 +103,12 @@ export default function RettificaCostiPage() {
         setUploading(false)
         if (fileRef.current) fileRef.current.value = ''
         await caricaFiles()
-        if (fileId) { await caricaRettifiche(fileId); setFileSelezionato(fileId) }
+        // ACCUMULA, non sostituisce. Prima si restringeva la vista al SOLO file appena caricato
+        // (caricaRettifiche(fileId)) e le rettifiche gia' in attesa da file precedenti — o accettate
+        // in "Dal mio network" — sparivano dall'elenco: sembrava che il caricamento le avesse tolte.
+        // Come per i contrassegni, dopo l'upload si mostrano TUTTE le pendenti insieme; il singolo
+        // file resta rivedibile cliccandolo in "File processati".
+        await caricaRettifiche(); setFileSelezionato('')
         await dialog.alert({
           title: 'Rettifiche create',
           message: `Create ${creati} rettifiche su ${totale} spedizioni nel file.`
@@ -116,8 +121,8 @@ export default function RettificaCostiPage() {
       setAvanz(null)
       if (data.success) {
         await caricaFiles()
-        await caricaRettifiche(data.fileId)
-        setFileSelezionato(data.fileId)
+        // Anche il file dei pesi: accumula tutte le pendenti, non solo quelle appena caricate.
+        await caricaRettifiche(); setFileSelezionato('')
       }
     } catch(err) { await dialog.alert({ title: 'Errore', message: 'Errore nel caricamento del file.' }) }
     setAvanz(null)
@@ -275,8 +280,10 @@ export default function RettificaCostiPage() {
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <span style={{fontSize:'14px',fontWeight:'700',color:'#1a1a1a'}}>
-            Spedizioni trovate
-            {fileSelezionato && <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'400',marginLeft:'8px'}}>({rettificheFiltrate.length} righe)</span>}
+            {fileSelezionato ? 'Spedizioni del file' : 'Rettifiche in attesa'}
+            <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'400',marginLeft:'8px'}}>({rettificheFiltrate.length} righe)</span>
+            {fileSelezionato && <button onClick={()=>{setFileSelezionato('');caricaRettifiche()}}
+              style={{marginLeft:'10px',fontSize:'11px',color:'#f97316',background:'none',border:'none',cursor:'pointer',textDecoration:'underline',padding:0,fontWeight:600}}>mostra tutte</button>}
           </span>
           <div style={{display:'flex',gap:'10px',alignItems:'center'}}>
             <button onClick={confermaRettifiche} disabled={confermando||selectedIds.length===0}
