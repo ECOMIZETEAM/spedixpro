@@ -194,6 +194,18 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   const [dcMarkup, setDcMarkup] = useState<MarkupOut>({ default: null, perFascia: {} })
   const [dcLoad, setDcLoad] = useState(false)
   const [dcSaving, setDcSaving] = useState(false)
+  // "Da listino esistente": copia un corriere da un ALTRO listino cliente in questo (via duplica-corriere).
+  // Serve p.es. ai preventivi: proporre un corriere che il master prezza già altrove, senza rifarlo dal costo.
+  const [dlOpen, setDlOpen] = useState(false)
+  const [dlListini, setDlListini] = useState<any[]>([])
+  const [dlSourceId, setDlSourceId] = useState('')
+  const [dlCorrieri, setDlCorrieri] = useState<any[]>([])
+  const [dlCorrId, setDlCorrId] = useState('')
+  const [dlFasce, setDlFasce] = useState<any[]>([])
+  const [dlMarkup, setDlMarkup] = useState<MarkupOut>({ default: null, perFascia: {} })
+  const [dlLoad, setDlLoad] = useState(false)
+  const [dlSaving, setDlSaving] = useState(false)
+  const [dlErr, setDlErr] = useState('')
   async function apriDaCosto(c: any) {
     setDcCorr(c); setDcOpen(true); setDcLoad(true); setDcFasce([]); setDcMarkup({ default: null, perFascia: {} })
     try {
@@ -239,6 +251,35 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     if (d?.error) { setCopiaErr(d.error); return }
     setCopiaOk('Corriere copiato con successo.')
     setTimeout(()=>{ window.location.href = `${basePagina}/${d.id}` }, 900)
+  }
+
+  // ── "Da listino esistente": porta DENTRO questo listino un corriere preso da un altro ──
+  async function apriDaListino() {
+    setDlOpen(true); setDlSourceId(''); setDlCorrieri([]); setDlCorrId(''); setDlFasce([]); setDlErr(''); setDlMarkup({ default: null, perFascia: {} })
+    try { const r = await fetch('/api/listini/lista'); const d = await r.json(); setDlListini((Array.isArray(d)?d:[]).filter((x:any)=>x.id!==listino.id)) } catch { setDlListini([]) }
+  }
+  async function dlSelSource(id: string) {
+    setDlSourceId(id); setDlCorrId(''); setDlFasce([]); setDlCorrieri([]); setDlErr(''); setDlMarkup({ default: null, perFascia: {} })
+    if (!id) return
+    setDlLoad(true)
+    try { const d = await fetch(`/api/listini/corrieri-di?listino=${id}`).then(r=>r.json()); setDlCorrieri(Array.isArray(d?.corrieri)?d.corrieri:[]) } catch { setDlCorrieri([]) }
+    setDlLoad(false)
+  }
+  function dlSelCorr(id: string) {
+    setDlCorrId(id); setDlMarkup({ default: null, perFascia: {} })
+    const c = dlCorrieri.find((x:any)=>x.id===id)
+    const ff = (c?.fasce||[]).map((g:any)=>({ key: `${g.tipo}_${g.peso}`, label: g.tipo==='oltre'?`oltre ${g.peso} kg`:`fino a ${g.peso} kg`, tipo: g.tipo, peso: g.peso, costo: g.costo||0 }))
+    setDlFasce(ff)
+  }
+  async function confermaDaListino() {
+    if (!dlSourceId || !dlCorrId) { setDlErr('Scegli un listino e un corriere.'); return }
+    setDlSaving(true); setDlErr('')
+    try {
+      const res = await fetch('/api/listini/duplica-corriere', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ sourceListinoId: dlSourceId, corriereId: dlCorrId, targetListinoId: listino.id, markup: dlMarkup }) })
+      const d = await res.json().catch(()=>({}))
+      if (!res.ok || d?.error) { setDlErr(d?.error || 'Copia non riuscita'); setDlSaving(false); return }
+      window.location.reload()   // il corriere copiato compare nell'accordion
+    } catch { setDlErr('Errore di rete'); setDlSaving(false) }
   }
 
   // ── Eliminazione: listino intero o singolo contratto, con conferma MoovExpress ──
@@ -690,6 +731,12 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
               + Aggiungi contratto
             </button>
           )}
+          {!isCorriere && !aggiungendoContratto && (
+            <button onClick={apriDaListino} title="Copia qui un corriere preso da un altro tuo listino"
+              style={{background:'#fff7ed',border:'1px solid #fed7aa',color:'#ea580c',padding:'9px 16px',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>
+              ⧉ Da listino esistente
+            </button>
+          )}
         </div>
 
         {aggiungendoContratto && (
@@ -788,6 +835,48 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       )}
 
       {/* Popup COPIA CORRIERE */}
+      {dlOpen && (
+        <div onClick={()=>!dlSaving && setDlOpen(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',width:'100%',maxWidth:'560px',maxHeight:'85vh',overflow:'auto',boxShadow:'0 10px 40px rgba(0,0,0,0.2)'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'16px 20px',borderBottom:'1px solid #eee'}}>
+              <span style={{fontWeight:800,fontSize:'15px',color:'#1a1a1a'}}>Aggiungi corriere da un listino esistente</span>
+              <button onClick={()=>setDlOpen(false)} style={{background:'none',border:'none',fontSize:'20px',cursor:'pointer',color:'#999',lineHeight:1}}>×</button>
+            </div>
+            <div style={{padding:'18px 20px'}}>
+              <p style={{fontSize:'12.5px',color:'#666',margin:'0 0 14px'}}>Scegli un altro tuo listino e il corriere da proporre: fasce, zone e supplementi vengono copiati qui. Puoi applicare una maggiorazione (% o € fisso) prima di copiare.</p>
+              <label style={{fontSize:'12px',fontWeight:700,color:'#1a1a1a',display:'block',marginBottom:'6px'}}>Listino di origine</label>
+              <select value={dlSourceId} onChange={e=>dlSelSource(e.target.value)} style={{width:'100%',padding:'9px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}}>
+                <option value="">Seleziona un listino…</option>
+                {dlListini.map((l:any)=><option key={l.id} value={l.id}>{l.nome}</option>)}
+              </select>
+              {dlSourceId && (
+                <div style={{marginTop:'14px'}}>
+                  <label style={{fontSize:'12px',fontWeight:700,color:'#1a1a1a',display:'block',marginBottom:'6px'}}>Corriere</label>
+                  {dlLoad ? <div style={{fontSize:'12.5px',color:'#999'}}>Carico i corrieri…</div> : (
+                    <select value={dlCorrId} onChange={e=>dlSelCorr(e.target.value)} style={{width:'100%',padding:'9px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}}>
+                      <option value="">Seleziona un corriere…</option>
+                      {dlCorrieri.map((c:any)=><option key={c.id} value={c.id}>{c.nome_contratto}</option>)}
+                    </select>
+                  )}
+                  {dlSourceId && !dlLoad && dlCorrieri.length===0 && <div style={{marginTop:'8px',fontSize:'12px',color:'#999'}}>Questo listino non ha corrieri.</div>}
+                </div>
+              )}
+              {dlCorrId && dlFasce.length>0 && (
+                <div style={{marginTop:'16px'}}>
+                  <label style={{fontSize:'12px',fontWeight:700,color:'#1a1a1a',display:'block',marginBottom:'6px'}}>Maggiorazione (opzionale)</label>
+                  <EditorMarkupFasce fasce={dlFasce} onChange={setDlMarkup} />
+                </div>
+              )}
+              {dlErr && <div style={{marginTop:'12px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'9px 12px',fontSize:'12.5px',color:'#dc2626'}}>{dlErr}</div>}
+            </div>
+            <div style={{display:'flex',justifyContent:'flex-end',gap:'10px',padding:'14px 20px',borderTop:'1px solid #eee'}}>
+              <button onClick={()=>setDlOpen(false)} disabled={dlSaving} style={{padding:'9px 16px',background:'#fff',color:'#1a1a1a',border:'1px solid #ddd',borderRadius:'7px',fontSize:'13px',cursor:'pointer'}}>Annulla</button>
+              <button onClick={confermaDaListino} disabled={dlSaving || !dlCorrId} style={{padding:'9px 20px',background:'#f97316',color:'#fff',border:'none',borderRadius:'7px',fontSize:'13px',fontWeight:700,cursor:'pointer',opacity:(dlSaving||!dlCorrId)?0.6:1}}>{dlSaving?'Aggiungo…':'Aggiungi al listino'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {copia && (
         <div onClick={()=>!copiaSaving && setCopia(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
           <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',width:'440px',maxWidth:'92vw',boxShadow:'0 20px 60px rgba(0,0,0,.25)',overflow:'hidden'}}>
