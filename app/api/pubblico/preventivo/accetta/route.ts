@@ -11,6 +11,12 @@ function generaPassword(len = 14): string {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#'
   let out = ''; for (let i = 0; i < len; i++) out += chars[randomInt(chars.length)]; return out
 }
+function slugify(s: string): string {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'master'
+}
+function suffisso(): string {
+  const c = 'abcdefghijklmnopqrstuvwxyz0123456789'; let o = ''; for (let i = 0; i < 5; i++) o += c[randomInt(c.length)]; return o
+}
 
 async function finalizza(admin: any, p: any, draftId: string, clienteCreatoId: string | null) {
   const now = new Date().toISOString()
@@ -39,11 +45,67 @@ export async function POST(req: NextRequest) {
   const draftId = p.listino_template_id as string
   const rinomina = async () => { await admin.from('listini_clienti').update({ preventivo_id: null, nome: `Listino ${p.dest_nome || 'preventivo'}`.slice(0, 120) }).eq('id', draftId) }
 
-  // ── Sotto-master: il listino diventa il suo contratto (parent_listino_id). ──
+  // ── Sotto-master ESISTENTE: il listino diventa il suo contratto (parent_listino_id). ──
   if (p.dest_tipo === 'master') {
     if (!p.master_target_id) return NextResponse.json({ error: 'Destinatario non valido.' }, { status: 400 })
+    // Dev'essere un MIO sotto-master (difesa: non toccare i master di altri).
+    const { data: tgt } = await admin.from('masters').select('id,parent_master_id').eq('id', p.master_target_id).maybeSingle()
+    if (!tgt || tgt.parent_master_id !== p.master_id) return NextResponse.json({ error: 'Destinatario non valido.' }, { status: 400 })
     await rinomina()
     await admin.from('masters').update({ parent_listino_id: draftId }).eq('id', p.master_target_id)
+    await finalizza(admin, p, draftId, null)
+    return NextResponse.json({ ok: true })
+  }
+
+  // ── Sotto-master NUOVO: crea il sotto-master + accesso sotto il master del preventivo. ──
+  if (p.dest_tipo === 'master_nuovo') {
+    const email = String(p.dest_email || '').trim().toLowerCase()
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return NextResponse.json({ error: 'Email mancante: chiedi al mittente di reinviare il preventivo con la tua email.' }, { status: 400 })
+    let masterId: string | null = null
+    const { data: giaM } = await admin.from('masters').select('id,parent_master_id').eq('email', email).maybeSingle()
+    if (giaM) {
+      // Email gia' di un master: riuso SOLO se e' gia' un mio sotto-master, altrimenti rifiuto.
+      if (giaM.parent_master_id !== p.master_id) return NextResponse.json({ error: 'Questa email è già usata da un altro operatore. Contatta il mittente.' }, { status: 400 })
+      masterId = giaM.id
+    } else {
+      const nome = p.dest_nome || email
+      let creato: { id: string } | null = null
+      for (let t = 0; t < 6 && !creato; t++) {
+        const slug = `${slugify(nome)}-${suffisso()}`.slice(0, 60)
+        const { data, error } = await admin.from('masters').insert({
+          nome, slug, email, parent_master_id: p.master_id, parent_listino_id: draftId, attivo: true, tipo_contratto: 'credito_scalare',
+        }).select('id').single()
+        if (!error && data) { creato = data; break }
+        if (error?.code === '23505' && /slug/.test(error.message || '')) continue
+        if (error?.code === '23505' && /email/.test(error.message || '')) {
+          const { data: g2 } = await admin.from('masters').select('id,parent_master_id').eq('email', email).maybeSingle()
+          if (g2 && g2.parent_master_id === p.master_id) { masterId = g2.id; break }
+          return NextResponse.json({ error: 'Questa email è già in uso. Contatta il mittente.' }, { status: 400 })
+        }
+        console.error('[preventivo/accetta] insert master', error)
+        return NextResponse.json({ error: 'Non riusciamo a creare l\'account. Contatta il mittente.' }, { status: 500 })
+      }
+      if (creato) {
+        masterId = creato.id
+        // Accesso (best-effort: se fallisce, il sotto-master resta e il mittente lo attiva).
+        const password = generaPassword()
+        const { data: au, error: aErr } = await admin.auth.admin.createUser({ email, password, email_confirm: true })
+        if (!aErr && au?.user) {
+          const { error: uErr } = await admin.from('utenti').insert({ id: au.user.id, ruolo: 'master', master_id: creato.id, cliente_id: null, nome, attivo: true })
+          if (uErr) { await admin.auth.admin.deleteUser(au.user.id).catch(() => {}) }
+          else {
+            try {
+              const { inviaCredenzialiCliente } = await import('@/lib/email')
+              const { data: mm } = await admin.from('masters').select('nome').eq('id', p.master_id).maybeSingle()
+              await inviaCredenzialiCliente({ email, nomeCliente: nome, masterNome: mm?.nome || 'MoovExpress', dominio: 'moovexpress.com', password })
+            } catch {}
+          }
+        }
+      }
+    }
+    if (!masterId) return NextResponse.json({ error: 'Non riusciamo a completare l\'accettazione. Contatta il mittente.' }, { status: 500 })
+    await rinomina()
+    await admin.from('masters').update({ parent_listino_id: draftId }).eq('id', masterId)
     await finalizza(admin, p, draftId, null)
     return NextResponse.json({ ok: true })
   }

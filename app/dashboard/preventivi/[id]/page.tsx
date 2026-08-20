@@ -26,7 +26,7 @@ export default function EditorPreventivo() {
   const [listinoId, setListinoId] = useState<string | null>(null)
   // A chi: prima lo switch destinatario (cliente / sotto-master), poi — per il cliente — nuovo o esistente.
   const [destKind, setDestKind] = useState<'cliente' | 'master'>('cliente')
-  const [clienteMode, setClienteMode] = useState<'nuovo' | 'esistente'>('nuovo')
+  const [entMode, setEntMode] = useState<'nuovo' | 'esistente'>('nuovo')
   const [destNome, setDestNome] = useState('')
   const [destEmail, setDestEmail] = useState('')
   const [clienteId, setClienteId] = useState('')
@@ -45,7 +45,7 @@ export default function EditorPreventivo() {
   const [pickFocus, setPickFocus] = useState(false)
   const [listinoConsigliato, setListinoConsigliato] = useState<{ id: string; nome: string } | null>(null)
   // dest_tipo per il backend, derivato dai due switch.
-  const destTipoSave = destKind === 'master' ? 'master' : (clienteMode === 'nuovo' ? 'cliente_nuovo' : 'cliente')
+  const destTipoSave = destKind === 'cliente' ? (entMode === 'nuovo' ? 'cliente_nuovo' : 'cliente') : (entMode === 'nuovo' ? 'master_nuovo' : 'master')
   const selezionatoId = destKind === 'master' ? masterTargetId : clienteId
   const entitaFiltrate = useMemo(() => {
     const base = destKind === 'master' ? masters : clienti
@@ -59,8 +59,8 @@ export default function EditorPreventivo() {
       if (d?.error) { setMsg({ t: 'err', x: d.error }); setLoading(false); return }
       const p = d.preventivo || {}
       setStato(p.stato || 'bozza'); setBrand(d.branding || {}); setPrezzi(d.prezzi || { corrieri: [] }); setListinoId(p.listino_template_id || null)
-      if (p.dest_tipo === 'master') { setDestKind('master'); setMasterTargetId(p.master_target_id || '') }
-      else { setDestKind('cliente'); setClienteMode(p.dest_tipo === 'cliente' ? 'esistente' : 'nuovo'); setClienteId(p.cliente_id || '') }
+      if (p.dest_tipo === 'master' || p.dest_tipo === 'master_nuovo') { setDestKind('master'); setEntMode(p.dest_tipo === 'master' ? 'esistente' : 'nuovo'); setMasterTargetId(p.master_target_id || '') }
+      else { setDestKind('cliente'); setEntMode(p.dest_tipo === 'cliente' ? 'esistente' : 'nuovo'); setClienteId(p.cliente_id || '') }
       setDestNome(p.dest_nome || ''); setDestEmail(p.dest_email || '')
       if (p.dest_tipo === 'master' || p.dest_tipo === 'cliente') caricaEntita()
       setOggetto(p.oggetto || ''); setValidoFino(p.valido_fino || '')
@@ -84,11 +84,12 @@ export default function EditorPreventivo() {
   function scegliKind(k: 'cliente' | 'master') {
     setDestKind(k); setCercaCli(''); setPickFocus(false); setListinoConsigliato(null)
     setClienteId(''); setMasterTargetId('')
-    if (k === 'master' || clienteMode === 'esistente') caricaEntita()
+    if (entMode === 'esistente') caricaEntita()
   }
-  function scegliClienteMode(m: 'nuovo' | 'esistente') {
-    setClienteMode(m); setCercaCli(''); setPickFocus(false); setListinoConsigliato(null)
-    if (m === 'esistente') caricaEntita(); else setClienteId('')
+  function scegliEntMode(m: 'nuovo' | 'esistente') {
+    setEntMode(m); setCercaCli(''); setPickFocus(false); setListinoConsigliato(null)
+    setClienteId(''); setMasterTargetId('')
+    if (m === 'esistente') caricaEntita()
   }
   // Il destinatario (cliente o sotto-master) ha gia' un listino agganciato: lo consigliamo come base.
   function consiglia(c: any) {
@@ -225,26 +226,19 @@ export default function EditorPreventivo() {
               </div>
               <div><label style={lbl}>Valido fino al</label><input type="date" value={validoFino || ''} onChange={e => setValidoFino(e.target.value)} style={inp} /></div>
             </div>
-            {destKind === 'cliente' ? (
-              <div style={{ marginBottom: '10px' }}>
-                <label style={lbl}>Cliente</label>
-                <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
-                  <button onClick={() => scegliClienteMode('nuovo')} style={{ flex: 1, padding: '9px', borderRadius: '6px', border: clienteMode === 'nuovo' ? '2px solid #f97316' : '1px solid #d5d5d5', background: clienteMode === 'nuovo' ? '#fff7ed' : '#fff', color: '#1a1a1a', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Nuovo</button>
-                  <button onClick={() => scegliClienteMode('esistente')} style={{ flex: 1, padding: '9px', borderRadius: '6px', border: clienteMode === 'esistente' ? '2px solid #f97316' : '1px solid #d5d5d5', background: clienteMode === 'esistente' ? '#fff7ed' : '#fff', color: '#1a1a1a', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Esistente</button>
+            <div style={{ marginBottom: '10px' }}>
+              <label style={lbl}>{destKind === 'master' ? 'Sotto-master' : 'Cliente'}</label>
+              <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+                <button onClick={() => scegliEntMode('nuovo')} style={{ flex: 1, padding: '9px', borderRadius: '6px', border: entMode === 'nuovo' ? '2px solid #f97316' : '1px solid #d5d5d5', background: entMode === 'nuovo' ? '#fff7ed' : '#fff', color: '#1a1a1a', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Nuovo</button>
+                <button onClick={() => scegliEntMode('esistente')} style={{ flex: 1, padding: '9px', borderRadius: '6px', border: entMode === 'esistente' ? '2px solid #f97316' : '1px solid #d5d5d5', background: entMode === 'esistente' ? '#fff7ed' : '#fff', color: '#1a1a1a', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Esistente</button>
+              </div>
+              {entMode === 'nuovo' ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div><label style={lbl}>Nome destinatario</label><input value={destNome} onChange={e => setDestNome(e.target.value)} style={inp} /></div>
+                  <div><label style={lbl}>Email</label><input type="email" value={destEmail} onChange={e => setDestEmail(e.target.value)} style={inp} /></div>
                 </div>
-                {clienteMode === 'nuovo' ? (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                    <div><label style={lbl}>Nome destinatario</label><input value={destNome} onChange={e => setDestNome(e.target.value)} style={inp} /></div>
-                    <div><label style={lbl}>Email</label><input type="email" value={destEmail} onChange={e => setDestEmail(e.target.value)} style={inp} /></div>
-                  </div>
-                ) : selettoreEntita}
-              </div>
-            ) : (
-              <div style={{ marginBottom: '10px' }}>
-                <label style={lbl}>Sotto-master</label>
-                {selettoreEntita}
-              </div>
-            )}
+              ) : selettoreEntita}
+            </div>
             <label style={lbl}>Oggetto</label><input value={oggetto} onChange={e => setOggetto(e.target.value)} style={inp} />
           </div>
 

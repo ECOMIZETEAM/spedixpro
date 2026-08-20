@@ -26,8 +26,8 @@ export async function GET(_req: NextRequest) {
   const righe = data || []
   // Split come chiesto: destinatari clienti vs sotto-master.
   return NextResponse.json({
-    clienti: righe.filter((r: any) => r.dest_tipo !== 'master'),
-    master: righe.filter((r: any) => r.dest_tipo === 'master'),
+    clienti: righe.filter((r: any) => !String(r.dest_tipo || '').startsWith('master')),
+    master: righe.filter((r: any) => String(r.dest_tipo || '').startsWith('master')),
   })
 }
 
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
   if (!s) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const admin = createAdminSupabase()
   const b = await req.json().catch(() => ({}))
-  const dest_tipo = ['cliente_nuovo', 'cliente', 'master'].includes(b.dest_tipo) ? b.dest_tipo : 'cliente_nuovo'
+  const dest_tipo = ['cliente_nuovo', 'cliente', 'master', 'master_nuovo'].includes(b.dest_tipo) ? b.dest_tipo : 'cliente_nuovo'
   const { data, error } = await admin.from('preventivi').insert({
     master_id: s.master_id,
     dest_tipo,

@@ -107,7 +107,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const b = await req.json().catch(() => ({}))
   const patch: any = { updated_at: new Date().toISOString() }
-  if (b.dest_tipo && ['cliente_nuovo', 'cliente', 'master'].includes(b.dest_tipo)) patch.dest_tipo = b.dest_tipo
+  if (b.dest_tipo && ['cliente_nuovo', 'cliente', 'master', 'master_nuovo'].includes(b.dest_tipo)) patch.dest_tipo = b.dest_tipo
   if (b.dest_nome !== undefined) patch.dest_nome = b.dest_nome ? String(b.dest_nome).slice(0, 200) : null
   if (b.dest_email !== undefined) patch.dest_email = b.dest_email ? String(b.dest_email).slice(0, 200).trim() : null
   if (b.cliente_id !== undefined) patch.cliente_id = b.cliente_id || null
