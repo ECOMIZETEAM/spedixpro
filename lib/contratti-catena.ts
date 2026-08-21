@@ -38,9 +38,9 @@ export async function contrattiRimossiSopra(masterId: string | null | undefined)
   const nomiPropriMiei = new Set<string>((cMio || []).map((c: any) => norm(c.nome_contratto)))
 
   for (let i = 0; i < 20; i++) {
-    const { data: mRow } = await admin.from('masters').select('parent_master_id,parent_listino_id').eq('id', corrente).maybeSingle()
-    const padre: string | null = (mRow as any)?.parent_master_id || null
-    const listino: string | null = (mRow as any)?.parent_listino_id || null
+    const mRow: any = (await admin.from('masters').select('parent_master_id,parent_listino_id').eq('id', corrente).maybeSingle()).data
+    const padre: string | null = mRow?.parent_master_id || null
+    const listino: string | null = mRow?.parent_listino_id || null
     if (!padre || visti.has(padre)) break
     visti.add(padre)
 
