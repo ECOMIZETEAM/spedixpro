@@ -60,10 +60,16 @@ export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get('id') || ''
   if (!id) return NextResponse.json({ error: 'id mancante' }, { status: 400 })
   // Solo un preventivo del MIO master, e solo se non gia' accettato (lo storico dell'accettato resta).
-  const { data: p } = await admin.from('preventivi').select('id,master_id,stato').eq('id', id).maybeSingle()
+  const { data: p } = await admin.from('preventivi').select('id,master_id,stato,listino_template_id').eq('id', id).maybeSingle()
   if (!p || p.master_id !== s.master_id) return NextResponse.json({ error: 'Non trovato' }, { status: 403 })
   if (p.stato === 'accettato') return NextResponse.json({ error: 'Un preventivo accettato non si elimina (ha creato un listino).' }, { status: 400 })
   const { error } = await admin.from('preventivi').delete().eq('id', id).eq('master_id', s.master_id)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  // La bozza-listino collegata scende col preventivo: senza, restava una bozza ORFANA (listino con
+  // preventivo_id che punta a un preventivo sparito). La guardia `preventivo_id=id` la limita alla SOLA
+  // bozza di questo preventivo, mai un listino reale.
+  if (p.listino_template_id) {
+    await admin.from('listini_clienti').delete().eq('id', p.listino_template_id).eq('preventivo_id', id)
+  }
   return NextResponse.json({ ok: true })
 }
