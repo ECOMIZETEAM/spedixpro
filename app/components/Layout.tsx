@@ -10,8 +10,8 @@ import SupportoButton from './SupportoButton'
 // perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
 // always: sempre visibile a chiunque abbia accesso al portale.
 // rete: visibile solo ai master che possono gestire la propria rete di sotto-master.
-type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean }
-type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, external?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, sub?: NavSub[] }
+type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean }
+type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, external?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, sub?: NavSub[] }
 
 const NAV: NavItem[] = [
   { label: 'Spedizioni', href: '/dashboard/spedizioni', icon: '◫', sub: [
@@ -101,7 +101,7 @@ const NAV: NavItem[] = [
     { label: 'Contrassegni & Rischio', href: '/dashboard/statistiche/contrassegni' },
     { label: 'Fatturazione', href: '/dashboard/statistiche/fatturazione' },
     { label: 'Check Ricariche', href: '/dashboard/statistiche/check-ricariche' },
-    { label: 'Rettifiche automatiche', href: '/dashboard/statistiche/rettifiche-auto' },
+    { label: 'Rettifiche automatiche', href: '/dashboard/statistiche/rettifiche-auto', soloMultiexpress: true },
   ]},
   { label: 'Registro Attività', href: '/dashboard/audit', icon: '🛡', superMaster: true },
   { label: 'Abbonamenti API', href: '/dashboard/api-clienti', icon: '⚿', superMaster: true },
@@ -123,18 +123,20 @@ const NAV: NavItem[] = [
   { label: 'Documentazione', href: 'https://docs.moovexpress.com', icon: '📖', always: true, external: true },
 ]
 
-export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, gestioneRete?: boolean, permessi?: Record<string, boolean>, superMaster?: boolean } }) {
+export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, gestioneRete?: boolean, permessi?: Record<string, boolean>, superMaster?: boolean, isMultiexpress?: boolean } }) {
   const path = usePathname()
   const isFull = user?.isFull ?? true
   const gestioneRete = user?.gestioneRete ?? false
   const permessi = user?.permessi || {}
   const ruolo = (user?.ruolo || '').toLowerCase()
   const superMaster = user?.superMaster ?? false
+  const isMultiexpress = user?.isMultiexpress ?? false
 
   // Un elemento e visibile se: admin/master (isFull), oppure marcato always,
   // oppure ha una chiave permesso attiva. Senza perm e non-full = nascosto (solo admin).
   // Le voci "rete" (gestione sotto-master) richiedono in più il flag gestioneRete.
-  const puoVedere = (x: { perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean }) => {
+  const puoVedere = (x: { perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean }) => {
+    if (x.soloMultiexpress) return isMultiexpress   // voce riservata a MULTIEXPRESS (Rettifiche automatiche)
     if (x.superMaster) return superMaster       // voce riservata al SUPER master (es. Registro Attività)
     if (x.agente) return ruolo === 'agente'   // voce esclusiva dell'agente (mai al master)
     if (ruolo === 'agente' && x.agenteOk) return true   // voce concessa anche all'agente (es. Distinte: può chiuderle)

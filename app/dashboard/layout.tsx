@@ -55,6 +55,8 @@ export default async function Layout({ children }: { children: React.ReactNode }
       gestioneRete: perm?.gestioneRete ?? false,
       permessi: perm?.permessi || {},
       superMaster,
+      // Rettifiche automatiche OneTracking: solo MULTIEXPRESS (detentore PDB), gli altri no.
+      isMultiexpress: utente?.master_id === 'a8d42a25-3711-4343-a6df-ee2ba9bbf08b',
     }}>
       <DialogProvider>
         {demo && demoScadenza && <BannerDemo scadenza={demoScadenza} />}

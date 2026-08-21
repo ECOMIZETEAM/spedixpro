@@ -27,9 +27,7 @@ async function autorizzato(req: NextRequest, admin: any): Promise<boolean> {
   if (!user) return false
   const { data: u } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   if (!gestisceLaRete(u as any) || !u?.master_id) return false
-  if (u.master_id === MASTER_DETENTORE) return true
-  const { data: m } = await admin.from('masters').select('parent_master_id').eq('id', u.master_id).maybeSingle()
-  return !(m as any)?.parent_master_id   // solo il master RADICE
+  return u.master_id === MASTER_DETENTORE   // SOLO MULTIEXPRESS (detentore PDB): gli altri non hanno questa funzione
 }
 
 export async function GET(req: NextRequest) {
