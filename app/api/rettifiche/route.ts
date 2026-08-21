@@ -109,12 +109,20 @@ export async function POST(req: NextRequest) {
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const adminDb = createAdminSupabase()
 
-  const { data: rettifiche } = await supabase.from('rettifiche')
-    .select('*')
-    .in('id', rettificaIds)
-    .eq('master_id', utente?.master_id)
-    .eq('confermata', false)
-  if (!rettifiche?.length) return NextResponse.json({ error: 'Nessuna rettifica trovata (o gia\' confermata da un altro invio).' }, { status: 404 })
+  // A LOTTI, non in un colpo solo. Con centinaia di rettifiche selezionate — l'harvester delle
+  // ripesature ne accumula a migliaia — un unico `.in('id', [...])` costruisce verso PostgREST una
+  // URL enorme (694 id ≈ 25 KB) che viene respinta: `data` torna vuoto e la schermata diceva
+  // "Nessuna rettifica trovata" pur avendone centinaia in attesa. Si legge a fette da 200.
+  const rettifiche: any[] = []
+  for (let i = 0; i < rettificaIds.length; i += 200) {
+    const { data } = await supabase.from('rettifiche')
+      .select('*')
+      .in('id', rettificaIds.slice(i, i + 200))
+      .eq('master_id', utente?.master_id)
+      .eq('confermata', false)
+    if (data?.length) rettifiche.push(...data)
+  }
+  if (!rettifiche.length) return NextResponse.json({ error: 'Nessuna rettifica trovata (o gia\' confermata da un altro invio).' }, { status: 404 })
 
   // Se qualcosa va storto su una riga, quella riga TORNA APERTA: non deve restare archiviata come
   // fatta senza che i soldi si siano mossi. Prima i due `catch` si limitavano a scrivere nel log e
@@ -255,11 +263,17 @@ export async function DELETE(req: NextRequest) {
   const body = await req.json()
   const { rettificaIds } = body
   if (!rettificaIds?.length) return NextResponse.json({ error: 'Nessuna rettifica selezionata' }, { status: 400 })
-  const { error } = await supabase.from('rettifiche')
-    .delete()
-    .in('id', rettificaIds)
-    .eq('master_id', utente?.master_id)
-    .eq('confermata', false)
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  return NextResponse.json({ success: true, eliminate: rettificaIds.length })
+  // A LOTTI come la conferma: con centinaia di id un solo `.in()` sfora la URL verso PostgREST.
+  let eliminate = 0
+  for (let i = 0; i < rettificaIds.length; i += 200) {
+    const fetta = rettificaIds.slice(i, i + 200)
+    const { error } = await supabase.from('rettifiche')
+      .delete()
+      .in('id', fetta)
+      .eq('master_id', utente?.master_id)
+      .eq('confermata', false)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    eliminate += fetta.length
+  }
+  return NextResponse.json({ success: true, eliminate })
 }

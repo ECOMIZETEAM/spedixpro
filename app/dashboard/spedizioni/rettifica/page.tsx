@@ -149,34 +149,57 @@ export default function RettificaCostiPage() {
     if (!selectedIds.length) { await dialog.alert({ title: 'Nessuna selezione', message: 'Seleziona almeno una rettifica.' }); return }
     if (!await dialog.confirm({ title: 'Confermare le rettifiche?', message: 'Confermi le ' + selectedIds.length + ' rettifiche selezionate? Il credito verrà scalato ai clienti.', confirmText: 'Conferma' })) return
     setConfermando(true)
-    const res = await fetch('/api/rettifiche', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rettificaIds: selectedIds })
-    })
-    const data = await res.json()
+    // A LOTTI, con la barra. Con centinaia di rettifiche (l'harvester ne accumula a migliaia) una
+    // sola richiesta ci metteva minuti e rischiava il timeout: si è visto con 694 in attesa. Si
+    // mandano a pacchetti da 150 accumulando i risultati; ogni pacchetto è una presa atomica per
+    // riga lato server, quindi un'interruzione non ripete gli addebiti già fatti.
+    const LOTTO = 150
+    const ids = [...selectedIds]
+    let rettificate = 0
+    const saltate: any[] = []
+    let erroreFatale = ''
+    setAvanz({ fatti: 0, totale: ids.length, da: Date.now(), etichetta: 'Conferma rettifiche' })
+    for (let i = 0; i < ids.length; i += LOTTO) {
+      const fetta = ids.slice(i, i + LOTTO)
+      try {
+        const res = await fetch('/api/rettifiche', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rettificaIds: fetta })
+        })
+        const data = await res.json()
+        if (data.success) {
+          rettificate += data.rettificate || 0
+          if (Array.isArray(data.dettaglio)) saltate.push(...data.dettaglio)
+        } else if (res.status !== 404) {
+          // 404 = questo pacchetto era già tutto confermato (re-invio): si salta, non è fatale.
+          erroreFatale = data.error || 'Conferma non riuscita.'
+          break
+        }
+      } catch {
+        erroreFatale = 'Interruzione durante la conferma: riprova — le già confermate non si ripetono.'
+        break
+      }
+      setAvanz(prev => prev ? { ...prev, fatti: Math.min(i + LOTTO, ids.length) } : prev)
+    }
+    setAvanz(null)
     setConfermando(false)
-    if (data.success) {
-      // SE UNA RIGA NON PASSA, VA DETTO PERCHE'.
-      // La conferma il motivo lo restituisce da sempre, ma qui veniva buttato via: a schermo usciva
-      // "N confermate" e quelle rimaste restavano li' mute, senza che si potesse capire se fosse un
-      // guasto o una scelta. Quasi sempre e' una scelta — la spedizione e' in annullo, o il
-      // destinatario non e' piu' della rete — ma se non lo si scrive sembra un guasto.
-      const saltate = Array.isArray(data.dettaglio) ? data.dettaglio : []
-      const perche = new Map<string, number>()
-      for (const s of saltate) perche.set(s.perche, (perche.get(s.perche) || 0) + 1)
-      await dialog.alert({
-        title: 'Rettifiche confermate',
-        message: `${data.rettificate} rettifiche confermate, credito aggiornato.`
-          + (saltate.length
-              ? `\n\nNON confermate: ${saltate.length}.\n`
-                + Array.from(perche.entries()).map(([m, n]) => `• ${n} — ${m}`).join('\n')
-                + '\n\nRestano in elenco: non sono un errore, aspettano che si sappia come va a finire.'
-              : ''),
-      })
-      setSelectedIds([])
-      caricaRettifiche(fileSelezionato || undefined)
-    } else await dialog.alert({ title: 'Errore', message: data.error || 'Conferma non riuscita.' })
+    if (erroreFatale) { await dialog.alert({ title: 'Errore', message: erroreFatale }); caricaRettifiche(fileSelezionato || undefined); return }
+    // SE UNA RIGA NON PASSA, VA DETTO PERCHE' (quasi sempre è una scelta: spedizione in annullo o
+    // destinatario non più della rete). Si raggruppano i motivi dei pacchetti in un unico riepilogo.
+    const perche = new Map<string, number>()
+    for (const s of saltate) perche.set(s.perche, (perche.get(s.perche) || 0) + 1)
+    await dialog.alert({
+      title: 'Rettifiche confermate',
+      message: `${rettificate} rettifiche confermate, credito aggiornato.`
+        + (saltate.length
+            ? `\n\nNON confermate: ${saltate.length}.\n`
+              + Array.from(perche.entries()).map(([m, n]) => `• ${n} — ${m}`).join('\n')
+              + '\n\nRestano in elenco: non sono un errore, aspettano che si sappia come va a finire.'
+            : ''),
+    })
+    setSelectedIds([])
+    caricaRettifiche(fileSelezionato || undefined)
   }
 
   function toggleSelect(id: string) {
