@@ -55,6 +55,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ ok: true })
   }
 
+  // RICONFERMA del master: il destinatario ha accettato (stato 'accettato_da_confermare'), ora il master
+  // conferma e SI APRE davvero la posizione (cliente/sotto-master + credenziali + listino reale).
+  if (b.azione === 'attiva') {
+    if (p.stato === 'accettato') return NextResponse.json({ ok: true, gia: true })
+    if (p.stato !== 'accettato_da_confermare') return NextResponse.json({ error: 'Il preventivo non è in attesa di conferma (il destinatario non l\'ha ancora accettato).' }, { status: 400 })
+    // Ricarico il preventivo COMPLETO (servono dest_tipo, cliente_id, master_target_id, created_by...).
+    const { data: pieno } = await admin.from('preventivi').select('*').eq('id', id).maybeSingle()
+    if (!pieno || pieno.master_id !== s.master_id) return NextResponse.json({ error: 'Preventivo non trovato' }, { status: 404 })
+    const { attivaPreventivo } = await import('@/lib/preventivo-attiva')
+    const esito = await attivaPreventivo(admin, pieno)
+    if ('error' in esito) return NextResponse.json({ error: esito.error }, { status: esito.status })
+    return NextResponse.json({ ok: true })
+  }
+
   if (b.azione === 'crea_listino') {
     if (p.stato === 'accettato') return NextResponse.json({ error: 'Preventivo gia\' accettato.' }, { status: 400 })
     // Gia' collegato e ancora esistente? ritorna quello.

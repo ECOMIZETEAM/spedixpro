@@ -14,7 +14,8 @@ const STATO_STILE: Record<string, { bg: string; col: string; label: string }> = 
   bozza: { bg: '#f3f4f6', col: '#4b5563', label: '📝 Bozza' },
   inviato: { bg: '#dbeafe', col: '#1d4ed8', label: '📤 Inviato' },
   visto: { bg: '#e0e7ff', col: '#4338ca', label: '👁 Visto' },
-  accettato: { bg: '#dcfce7', col: '#15803d', label: '✅ Accettato' },
+  accettato_da_confermare: { bg: '#fef9c3', col: '#a16207', label: '🟡 Da confermare' },
+  accettato: { bg: '#dcfce7', col: '#15803d', label: '✅ Attivato' },
   rifiutato: { bg: '#fee2e2', col: '#b91c1c', label: '✖ Rifiutato' },
   scaduto: { bg: '#fef3c7', col: '#92400e', label: '⏳ Scaduto' },
 }
@@ -26,6 +27,7 @@ export default function Preventivi() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [creando, setCreando] = useState(false)
+  const [attivando, setAttivando] = useState('')
 
   function carica() {
     setLoading(true)
@@ -62,6 +64,20 @@ export default function Preventivi() {
     carica()
   }
 
+  // Riconferma del master: il destinatario ha accettato, ora il master conferma e SI APRE la posizione
+  // (cliente/sotto-master + credenziali + listino reale). È il gate che il super-master voleva.
+  async function attiva(id: string, nomeDest: string) {
+    const ok = await dialog.confirm({ title: 'Confermare e attivare?', message: `${nomeDest} ha accettato il preventivo. Confermando si apre la sua posizione e partono le credenziali d'accesso.`, confirmText: 'Conferma e attiva' })
+    if (!ok) return
+    setAttivando(id)
+    const res = await fetch(`/api/preventivi/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ azione: 'attiva' }) })
+    const d = await res.json().catch(() => ({}))
+    setAttivando('')
+    if (!res.ok || d?.error) { await dialog.alert({ title: 'Errore', message: d?.error || 'Attivazione non riuscita' }); return }
+    await dialog.alert({ title: 'Posizione attivata', message: `${nomeDest} è ora attivo: credenziali inviate e listino agganciato.` })
+    carica()
+  }
+
   const dataBreve = (s: any) => { try { return new Date(s).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: '2-digit' }) } catch { return '' } }
   const badge = (st: string) => { const s = STATO_STILE[st] || STATO_STILE.bozza; return <span style={{ background: s.bg, color: s.col, fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px', whiteSpace: 'nowrap' }}>{s.label}</span> }
 
@@ -85,8 +101,11 @@ export default function Preventivi() {
                 <td style={{ ...td, whiteSpace: 'nowrap', color: '#666' }}>{dataBreve(r.created_at)}</td>
                 <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
                   <span style={{ display: 'inline-flex', gap: '8px', alignItems: 'center' }}>
-                    <a href={`/dashboard/preventivi/${r.id}`} style={{ background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 700, textDecoration: 'none' }}>{r.stato === 'accettato' ? 'Apri' : 'Modifica'}</a>
-                    {r.stato !== 'accettato' && (
+                    {r.stato === 'accettato_da_confermare' && (
+                      <button onClick={() => attiva(r.id, r.dest_nome || '')} disabled={attivando === r.id} style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', opacity: attivando === r.id ? 0.6 : 1 }}>{attivando === r.id ? 'Attivo…' : '✓ Conferma e attiva'}</button>
+                    )}
+                    <a href={`/dashboard/preventivi/${r.id}`} style={{ background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 700, textDecoration: 'none' }}>{(r.stato === 'accettato' || r.stato === 'accettato_da_confermare') ? 'Apri' : 'Modifica'}</a>
+                    {!['accettato', 'accettato_da_confermare'].includes(r.stato) && (
                       <button onClick={() => elimina(r.id, r.dest_nome || '')} title="Elimina" style={{ background: 'transparent', border: 'none', color: '#b91c1c', fontSize: '15px', cursor: 'pointer' }}>🗑</button>
                     )}
                   </span>
