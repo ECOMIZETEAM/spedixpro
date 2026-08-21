@@ -47,11 +47,7 @@ export async function GET(_req: NextRequest) {
   }
 
   return NextResponse.json({
-    stato: sess?.stato || 'scaduta',
-    ha_cookie: !!sess?.url_template,
-    aggiornato_il: sess?.aggiornato_il || null,
-    ultimo_ok_il: sess?.ultimo_ok_il || null,
-    email_alert: sess?.email_alert || null,
+    token: sess?.token || null,
     statistiche: stat,
     recuperoTot: Math.round(recuperoTot * 100) / 100,
     arretrato,
