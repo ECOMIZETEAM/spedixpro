@@ -14,10 +14,12 @@ export default function PreventivoPubblico() {
   const [err, setErr] = useState('')
   const [accettando, setAccettando] = useState(false)
   const [accettato, setAccettato] = useState(false)
+  const [rifiutando, setRifiutando] = useState(false)
+  const [rifiutato, setRifiutato] = useState(false)
 
   useEffect(() => {
     fetch(`/api/pubblico/preventivo?t=${token}`).then(r => r.json()).then(x => {
-      if (x?.error) { setErr(x.error) } else { setD(x); if (x.stato === 'accettato') setAccettato(true) }
+      if (x?.error) { setErr(x.error) } else { setD(x); if (x.stato === 'accettato' || x.stato === 'accettato_da_confermare') setAccettato(true); if (x.stato === 'rifiutato') setRifiutato(true) }
       setLoading(false)
     }).catch(() => { setErr('Preventivo non disponibile'); setLoading(false) })
   }, [token])
@@ -30,6 +32,16 @@ export default function PreventivoPubblico() {
       if (!res.ok || x?.error) { setErr(x?.error || 'Accettazione non riuscita'); setAccettando(false); return }
       setAccettato(true)
     } catch { setErr('Errore di rete') } finally { setAccettando(false) }
+  }
+
+  async function rifiuta() {
+    setRifiutando(true); setErr('')
+    try {
+      const res = await fetch('/api/pubblico/preventivo/rifiuta', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) })
+      const x = await res.json().catch(() => ({}))
+      if (!res.ok || x?.error) { setErr(x?.error || 'Operazione non riuscita'); setRifiutando(false); return }
+      setRifiutato(true)
+    } catch { setErr('Errore di rete') } finally { setRifiutando(false) }
   }
 
   if (loading) return <div style={{ padding: '60px', textAlign: 'center', color: '#666', fontFamily: 'sans-serif' }}>Caricamento…</div>
@@ -94,15 +106,25 @@ export default function PreventivoPubblico() {
             {accettato ? (
               <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '18px' }}>
                 <div style={{ fontSize: '17px', fontWeight: 800, color: '#15803d' }}>✅ Preventivo accettato!</div>
-                <div style={{ fontSize: '13px', color: '#166534', marginTop: '6px' }}>Grazie. Il tuo listino è pronto. Se è il tuo primo accesso, ti abbiamo inviato le credenziali via email per entrare e iniziare a spedire.</div>
+                <div style={{ fontSize: '13px', color: '#166534', marginTop: '6px' }}>Grazie! La tua richiesta è stata inviata. Appena viene confermata, se è il tuo primo accesso ricevi via email le credenziali per entrare e iniziare a spedire.</div>
+              </div>
+            ) : rifiutato ? (
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '18px' }}>
+                <div style={{ fontSize: '17px', fontWeight: 800, color: '#b91c1c' }}>Preventivo rifiutato</div>
+                <div style={{ fontSize: '13px', color: '#991b1b', marginTop: '6px' }}>Hai rifiutato questo preventivo. Se cambi idea, contatta chi te l'ha inviato.</div>
               </div>
             ) : d.scaduto ? null : (
               <>
                 {err && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: '8px', padding: '10px 14px', fontSize: '13px', marginBottom: '12px' }}>{err}</div>}
-                <button onClick={accetta} disabled={accettando} style={{ background: colP, color: '#fff', border: 'none', borderRadius: '10px', padding: '14px 32px', fontSize: '15px', fontWeight: 800, cursor: 'pointer', opacity: accettando ? 0.6 : 1 }}>
+                <button onClick={accetta} disabled={accettando || rifiutando} style={{ background: colP, color: '#fff', border: 'none', borderRadius: '10px', padding: '14px 32px', fontSize: '15px', fontWeight: 800, cursor: 'pointer', opacity: (accettando || rifiutando) ? 0.6 : 1 }}>
                   {accettando ? 'Accetto…' : 'Accetta preventivo'}
                 </button>
                 <div style={{ fontSize: '11.5px', color: '#999', marginTop: '10px' }}>Accettando, il preventivo diventa il tuo listino.</div>
+                <div style={{ marginTop: '14px' }}>
+                  <button onClick={rifiuta} disabled={accettando || rifiutando} style={{ background: 'transparent', border: 'none', color: '#999', fontSize: '12.5px', textDecoration: 'underline', cursor: 'pointer' }}>
+                    {rifiutando ? 'Attendere…' : 'Rifiuta preventivo'}
+                  </button>
+                </div>
               </>
             )}
           </div>

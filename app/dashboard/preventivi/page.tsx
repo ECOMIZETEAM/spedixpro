@@ -74,7 +74,12 @@ export default function Preventivi() {
     const d = await res.json().catch(() => ({}))
     setAttivando('')
     if (!res.ok || d?.error) { await dialog.alert({ title: 'Errore', message: d?.error || 'Attivazione non riuscita' }); return }
-    await dialog.alert({ title: 'Posizione attivata', message: `${nomeDest} è ora attivo: credenziali inviate e listino agganciato.` })
+    if (d?.credenzialiInviate === false) {
+      // Posizione aperta ma l'email delle credenziali NON è partita: avvisa chiaro così il master la rimanda a mano.
+      await dialog.alert({ title: 'Attivato — ma email credenziali NON partita', message: `${nomeDest} è ora attivo e il listino è agganciato, ma l'email con le credenziali d'accesso non è stata inviata. Invia tu le credenziali (o riprova più tardi), altrimenti non potrà entrare.` })
+    } else {
+      await dialog.alert({ title: 'Posizione attivata', message: `${nomeDest} è ora attivo: credenziali inviate e listino agganciato.` })
+    }
     carica()
   }
 

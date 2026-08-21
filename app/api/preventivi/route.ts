@@ -24,6 +24,14 @@ export async function GET(_req: NextRequest) {
     .eq('master_id', s.master_id).order('created_at', { ascending: false }).limit(500)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   const righe = data || []
+  // Marca come SCADUTI i preventivi inviati/visti la cui validità è passata: prima lo stato 'scaduto'
+  // non veniva mai scritto (si calcolava solo a video). Aggiornamento pigro, alla lettura della lista.
+  const oggi = new Date().toISOString().slice(0, 10)
+  const daScadere = righe.filter((r: any) => (r.stato === 'inviato' || r.stato === 'visto') && r.valido_fino && String(r.valido_fino) < oggi).map((r: any) => r.id)
+  if (daScadere.length) {
+    await admin.from('preventivi').update({ stato: 'scaduto', updated_at: new Date().toISOString() }).in('id', daScadere)
+    for (const r of righe) if (daScadere.includes(r.id)) r.stato = 'scaduto'
+  }
   // Split come chiesto: destinatari clienti vs sotto-master.
   return NextResponse.json({
     clienti: righe.filter((r: any) => !String(r.dest_tipo || '').startsWith('master')),

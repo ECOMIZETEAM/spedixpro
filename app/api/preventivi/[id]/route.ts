@@ -66,7 +66,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { attivaPreventivo } = await import('@/lib/preventivo-attiva')
     const esito = await attivaPreventivo(admin, pieno)
     if ('error' in esito) return NextResponse.json({ error: esito.error }, { status: esito.status })
-    return NextResponse.json({ ok: true })
+    // credenzialiInviate=false → account creato ma l'email con le credenziali NON è partita: il master
+    // deve rimandarle a mano, altrimenti il destinatario resta fuori senza accorgersene.
+    return NextResponse.json({ ok: true, credenzialiInviate: esito.credenzialiInviate !== false })
   }
 
   if (b.azione === 'crea_listino') {

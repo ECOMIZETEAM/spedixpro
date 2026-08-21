@@ -35,11 +35,15 @@ async function finalizza(admin: any, p: any, draftId: string, clienteCreatoId: s
   } catch {}
 }
 
-type Esito = { ok: true } | { error: string, status: number }
+type Esito = { ok: true, credenzialiInviate?: boolean } | { error: string, status: number }
 
 export async function attivaPreventivo(admin: any, p: any): Promise<Esito> {
   if (!p.listino_template_id) return { error: 'Preventivo senza prezzi.', status: 400 }
   const draftId = p.listino_template_id as string
+  // Traccia se l'email con le credenziali è partita: se si crea un NUOVO account e l'email non parte,
+  // il master deve saperlo (altrimenti il destinatario resta senza accesso, in silenzio). Per gli
+  // account già esistenti resta true: non si mandano credenziali, quindi non c'è nulla da avvisare.
+  let credenzialiInviate = true
   const rinomina = async () => { await admin.from('listini_clienti').update({ preventivo_id: null, nome: `Listino ${p.dest_nome || 'preventivo'}`.slice(0, 120) }).eq('id', draftId) }
 
   // ── Sotto-master ESISTENTE: il listino diventa il suo contratto (parent_listino_id). ──
@@ -50,7 +54,7 @@ export async function attivaPreventivo(admin: any, p: any): Promise<Esito> {
     await rinomina()
     await admin.from('masters').update({ parent_listino_id: draftId }).eq('id', p.master_target_id)
     await finalizza(admin, p, draftId, null)
-    return { ok: true }
+    return { ok: true, credenzialiInviate }
   }
 
   // ── Sotto-master NUOVO: crea il sotto-master + accesso sotto il master del preventivo. ──
@@ -96,8 +100,9 @@ export async function attivaPreventivo(admin: any, p: any): Promise<Esito> {
               const { inviaCredenzialiCliente } = await import('@/lib/email')
               const { data: mm } = await admin.from('masters').select('nome').eq('id', p.master_id).maybeSingle()
               // areaStaff: è un sotto-MASTER, il link va al Control Center, non a /cliente (che lo respinge).
-              await inviaCredenzialiCliente({ email, nomeCliente: nome, masterNome: mm?.nome || 'MoovExpress', dominio: 'moovexpress.com', password, areaStaff: true })
-            } catch {}
+              const es: any = await inviaCredenzialiCliente({ email, nomeCliente: nome, masterNome: mm?.nome || 'MoovExpress', dominio: 'moovexpress.com', password, areaStaff: true })
+              if (es && es.ok === false) credenzialiInviate = false
+            } catch { credenzialiInviate = false }
           }
         }
       }
@@ -106,7 +111,7 @@ export async function attivaPreventivo(admin: any, p: any): Promise<Esito> {
     await rinomina()
     await admin.from('masters').update({ parent_listino_id: draftId }).eq('id', masterId)
     await finalizza(admin, p, draftId, null)
-    return { ok: true }
+    return { ok: true, credenzialiInviate }
   }
 
   // ── Cliente esistente. ──
@@ -156,8 +161,9 @@ export async function attivaPreventivo(admin: any, p: any): Promise<Esito> {
             try {
               const { inviaCredenzialiCliente } = await import('@/lib/email')
               const { data: mm } = await admin.from('masters').select('nome').eq('id', p.master_id).maybeSingle()
-              await inviaCredenzialiCliente({ email, nomeCliente: p.dest_nome || email, masterNome: mm?.nome || 'MoovExpress', dominio: 'moovexpress.com', password })
-            } catch {}
+              const es: any = await inviaCredenzialiCliente({ email, nomeCliente: p.dest_nome || email, masterNome: mm?.nome || 'MoovExpress', dominio: 'moovexpress.com', password })
+              if (es && es.ok === false) credenzialiInviate = false
+            } catch { credenzialiInviate = false }
           }
         }
       }
