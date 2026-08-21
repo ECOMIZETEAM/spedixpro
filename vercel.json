@@ -16,6 +16,10 @@
       "schedule": "*/30 * * * *"
     },
     {
+      "path": "/api/tracking/ripesature-auto",
+      "schedule": "3,13,23,33,43,53 * * * *"
+    },
+    {
       "path": "/api/spedizioni/annullamenti-cron",
       "schedule": "30 * * * *"
     },

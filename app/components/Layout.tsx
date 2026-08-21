@@ -101,6 +101,7 @@ const NAV: NavItem[] = [
     { label: 'Contrassegni & Rischio', href: '/dashboard/statistiche/contrassegni' },
     { label: 'Fatturazione', href: '/dashboard/statistiche/fatturazione' },
     { label: 'Check Ricariche', href: '/dashboard/statistiche/check-ricariche' },
+    { label: 'Rettifiche automatiche', href: '/dashboard/statistiche/rettifiche-auto' },
   ]},
   { label: 'Registro Attività', href: '/dashboard/audit', icon: '🛡', superMaster: true },
   { label: 'Abbonamenti API', href: '/dashboard/api-clienti', icon: '⚿', superMaster: true },

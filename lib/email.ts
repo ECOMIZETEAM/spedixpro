@@ -73,6 +73,27 @@ export async function inviaEmailTest(to: string): Promise<{ ok: boolean; from: s
   }
 }
 
+// Avviso "sessione OneTracking scaduta" al master radice: il controllo automatico ripesature e' in
+// pausa finche' non incolla un cookie fresco. Mandata UNA volta per scadenza (anti-spam nel worker).
+export async function inviaAllertaOneTracking(to: string, arretrato?: number): Promise<{ ok: boolean }> {
+  if (!to) return { ok: false }
+  try {
+    await resend.emails.send({
+      from: FROM, to,
+      subject: '⚠️ OneTracking scaduta — rettifiche automatiche in pausa',
+      html: wrap(`
+        <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Sessione OneTracking scaduta</h2>
+        <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 12px">Il controllo automatico delle ripesature è <strong>in pausa</strong>: serve un cookie fresco.${arretrato ? ` In coda ci sono <strong>${arretrato}</strong> consegne da controllare.` : ''}</p>
+        <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 12px">Vai su <strong>Statistiche › Rettifiche automatiche</strong>, incolla il nuovo cURL di OneTracking (Copy as cURL sulla riga <em>full-tracking</em>) e riparte da solo, smaltendo l'arretrato.</p>
+      `),
+    })
+    return { ok: true }
+  } catch (err: any) {
+    console.error('[OT] allerta email non inviata:', err?.message || err)
+    return { ok: false }
+  }
+}
+
 // Email credenziali (clienti e master): email + password + link portale
 // areaStaff = l'account NON e' un cliente (master, admin, operatore, agente): va mandato al
 // Control Center, non al portale clienti. Prima ricevevano tutti la stessa email con scritto
