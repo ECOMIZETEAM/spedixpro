@@ -55,11 +55,13 @@ const FILTRI_DEFAULT = {
   // in fondo allo storico. Veloce perché il default è 30 giorni (set piccolo).
   ordina:'', dir:'desc'
 }
-// Header colonna -> chiave di ordinamento accettata dalla lista API. Le colonne calcolate (margine,
-// prezzo corriere, distinta, cliente) non sono ordinabili a DB: restano header semplici.
+// Header colonna -> chiave di ordinamento accettata dalla lista API. 'margine' è calcolato (non è una
+// colonna DB): la lista lo ordina prendendo tutto il periodo filtrato e impaginando in memoria. Le
+// altre calcolate (prezzo corriere, distinta, cliente) restano header semplici.
 const ORDINABILE: Record<string,string> = {
   'N. Spedizione':'numero', 'Destinatario':'destinatario', 'Corriere':'vettore', 'Peso':'peso',
-  'Colli':'colli', 'Contrassegno':'contrassegno', 'Data e Ora':'data', 'Stato':'stato', 'Prezzo Cliente':'prezzo',
+  'Colli':'colli', 'Contrassegno':'contrassegno', 'Data e Ora':'data', 'Stato':'stato',
+  'Prezzo Cliente':'prezzo', 'Margine':'margine',
 }
 
 export default function SpedizioniPage() {

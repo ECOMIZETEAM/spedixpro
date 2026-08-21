@@ -41,12 +41,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ count: count || 0 })
   }
 
+  // ?storico=1 → i pacchi GIA' preparati (storico), i più recenti prima. Default = ancora da preparare
+  // (i più vecchi prima, così si smaltiscono in ordine di arrivo). Il badge del menu usa sempre e solo
+  // il conteggio dei 'da_preparare' qui sopra, quindi lo storico non lo tocca.
+  const storico = req.nextUrl.searchParams.get('storico') === '1'
   const { data: speds, error } = await admin.from('spedizioni')
     .select(`${SPED_COLS}, preparazione_stato, clienti(ragione_sociale), corrieri(nome_contratto)`)
-    .eq('preparazione_stato', 'da_preparare')
+    .eq('preparazione_stato', storico ? 'preparata' : 'da_preparare')
     .eq('master_id', s.master_id)
-    .order('created_at', { ascending: true })
-    .limit(1000)
+    .order('created_at', { ascending: !storico })
+    .limit(storico ? 500 : 1000)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
   // Articoli da prelevare per questi pacchi (solo se il cliente li ha dichiarati alla spedizione).

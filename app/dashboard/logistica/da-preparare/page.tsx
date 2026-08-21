@@ -15,6 +15,9 @@ export default function DaPreparare() {
   const [loading, setLoading] = useState(true)
   const [facendo, setFacendo] = useState<string>('')
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
+  // Due viste sulla stessa lista: i pacchi ancora DA preparare (default, operativo) e lo STORICO di
+  // quelli già preparati — così la logistica può ritrovare un pacco vecchio senza cercarlo altrove.
+  const [vista, setVista] = useState<'da_preparare' | 'storico'>('da_preparare')
 
   // Editor articoli (la logistica aggiunge/modifica cosa c'e' nel pacco se il cliente l'ha dimenticato).
   const [edit, setEdit] = useState<Riga | null>(null)
@@ -54,12 +57,12 @@ export default function DaPreparare() {
 
   function carica() {
     setLoading(true)
-    fetch('/api/logistica/da-preparare')
+    fetch('/api/logistica/da-preparare' + (vista === 'storico' ? '?storico=1' : ''))
       .then(r => r.json())
       .then(d => { setRighe(Array.isArray(d?.spedizioni) ? d.spedizioni : []); setArticoli(d?.articoli || {}); setLoading(false) })
       .catch(() => { setLoading(false); setMsg({ t: 'err', x: 'Errore nel caricamento' }) })
   }
-  useEffect(() => { carica() }, [])
+  useEffect(() => { carica() }, [vista])
 
   async function preparata(id: string) {
     setFacendo(id); setMsg(null)
@@ -86,10 +89,21 @@ export default function DaPreparare() {
       <Testata titolo="Da preparare" sottotitolo="Spedizioni dei clienti in logistica da preparare fisicamente e affidare al corriere. L'etichetta è già emessa." />
       <Avviso msg={msg} />
 
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+        {([['da_preparare', 'Da preparare'], ['storico', 'Storico']] as const).map(([v, label]) => (
+          <button key={v} onClick={() => { if (vista !== v) { setMsg(null); setVista(v) } }}
+            style={{ padding: '7px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '13px',
+              border: '1px solid ' + (vista === v ? '#ea580c' : '#e5e5e5'),
+              background: vista === v ? '#fff7ed' : '#fff', color: vista === v ? '#ea580c' : '#555' }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div style={card}>
-        <div style={cardH}>{loading ? 'Carico…' : `${righe.length} da preparare`}</div>
+        <div style={cardH}>{loading ? 'Carico…' : (vista === 'storico' ? `${righe.length} preparate (storico)` : `${righe.length} da preparare`)}</div>
         {loading ? null : righe.length === 0 ? (
-          <Vuoto testo="Niente da preparare. Le nuove spedizioni dei clienti in logistica compaiono qui." />
+          <Vuoto testo={vista === 'storico' ? 'Ancora nessun pacco preparato.' : 'Niente da preparare. Le nuove spedizioni dei clienti in logistica compaiono qui.'} />
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '860px' }}>
@@ -128,14 +142,21 @@ export default function DaPreparare() {
                             ))}
                           </div>
                         )}
-                        <button onClick={() => apriEditor(r)} style={{ background: 'transparent', border: 'none', color: '#ea580c', fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: 0 }}>
-                          {arts.length === 0 ? '＋ aggiungi articoli' : '✎ modifica'}
-                        </button>
+                        {vista !== 'storico' && (
+                          <button onClick={() => apriEditor(r)} style={{ background: 'transparent', border: 'none', color: '#ea580c', fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: 0 }}>
+                            {arts.length === 0 ? '＋ aggiungi articoli' : '✎ modifica'}
+                          </button>
+                        )}
+                        {vista === 'storico' && arts.length === 0 && <span style={{ color: '#bbb', fontSize: '12px' }}>—</span>}
                       </td>
                       <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        <button onClick={() => preparata(r.id)} disabled={facendo === r.id} style={{ ...btn, opacity: facendo === r.id ? 0.6 : 1 }}>
-                          {facendo === r.id ? '…' : '✓ Preparata'}
-                        </button>
+                        {vista === 'storico' ? (
+                          <span style={{ color: '#16a34a', fontWeight: 700, fontSize: '12px' }}>✓ Preparata</span>
+                        ) : (
+                          <button onClick={() => preparata(r.id)} disabled={facendo === r.id} style={{ ...btn, opacity: facendo === r.id ? 0.6 : 1 }}>
+                            {facendo === r.id ? '…' : '✓ Preparata'}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   )

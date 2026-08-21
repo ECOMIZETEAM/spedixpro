@@ -3,6 +3,11 @@ import { createServerSupabase } from '@/lib/supabase'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
 import { creaCalcolatoreListinoCliente, creaCalcolatoreCorriere } from '@/lib/pricing'
 import { fetchAll } from '@/lib/fetch-all'
+
+// L'ordinamento per MARGINE (sotto) calcola sul MOVIMENTI di tutto il periodo filtrato: sul network
+// intero legge molte righe, quindi serve più della finestra breve di default.
+export const maxDuration = 60
+
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -38,6 +43,11 @@ export async function GET(req: NextRequest) {
   }
   const chiaveOrdine = (p.get('ordina') || '').trim()
   const ordinaVettore = chiaveOrdine === 'vettore'
+  // Il MARGINE non è una colonna a DB (si calcola dai movimenti dopo il fetch): per ordinarlo si
+  // prende TUTTO il set filtrato, si calcola il margine di ognuno, si ordina e si impagina in memoria
+  // — come già fa il filtro contrassegni del master. Veloce sui set piccoli (default 30 giorni); sul
+  // network intero è più lento, si restringe data/cliente.
+  const ordinaMargine = chiaveOrdine === 'margine'
   const colOrdine: string | null = COLONNE_ORDINE[chiaveOrdine] || null
 
   // ── PAGINAZIONE SERVER-SIDE (con ?page=N): risposta { rows, total, page, perPage } e TUTTI i
@@ -214,7 +224,7 @@ export async function GET(req: NextRequest) {
   // a blocchi (PostgREST tronca a 1000/query) come prima, per le pagine che si aspettano l'array.
   let totalePaginato = 0
   let spedizioni: any[]
-  if (paged && !filtroCodPerViewer) {
+  if (paged && !filtroCodPerViewer && !ordinaMargine) {
     const from = (pageParam - 1) * perPage
     const { data, count } = await buildBase(true).range(from, from + perPage - 1)
     spedizioni = data || []
@@ -457,6 +467,17 @@ export async function GET(req: NextRequest) {
   // esiste ma non è pagata; se non c'è rimessa in ingresso ma HO creato io una distinta con quella
   // spedizione, sono il livello che ha caricato il file (il corriere mi ha già pagato) → verde.
   // Cliente e agente NON entrano qui: per loro vale lo stato globale (= stato del cliente finale).
+  // ORDINE PER MARGINE (in memoria, dopo il calcolo qui sopra): margine sconosciuto (null, es. agente
+  // senza costo) sempre in fondo; dir=asc mette i più bassi/negativi in cima, per stanare il sotto costo.
+  if (ordinaMargine) {
+    rows.sort((a: any, b: any) => {
+      const ma = a.margine, mb = b.margine
+      if (ma == null && mb == null) return 0
+      if (ma == null) return 1
+      if (mb == null) return -1
+      return dirAsc ? (ma - mb) : (mb - ma)
+    })
+  }
   let rowsOut: any[] = rows
   if (mineId && ruolo !== 'cliente' && ruolo !== 'agente') {
     const codIds = rows.filter((r: any) => Number(r.contrassegno) > 0).map((r: any) => r.id)
@@ -501,7 +522,7 @@ export async function GET(req: NextRequest) {
 
   // Filtro contrassegni del master: ho preso TUTTO il COD e filtrato in memoria (rowsOut) sullo stato
   // per-livello. Se paginato, pagino ORA sul filtrato — il totale è quello filtrato, non il conteggio DB.
-  if (paged && filtroCodPerViewer) {
+  if (paged && (filtroCodPerViewer || ordinaMargine)) {
     totalePaginato = rowsOut.length
     const from = (pageParam - 1) * perPage
     rowsOut = rowsOut.slice(from, from + perPage)
