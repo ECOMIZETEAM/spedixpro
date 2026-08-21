@@ -70,12 +70,20 @@ export async function GET(req: NextRequest) {
   let listino = (listiniMaster || []).find((l:any) => l.corriere_id === corriereSelezionato?.id) || null
   if (!listino && corriereSelezionato) {
     const base: any = (listiniMaster || [])[0]
-    const { data: nuovo } = await supabase.from('listini_corrieri').insert({
+    const { data: nuovo, error: eIns } = await supabase.from('listini_corrieri').insert({
       master_id: utente?.master_id, corriere_id: corriereSelezionato.id,
       nome: base?.nome || 'Listino Corrieri',
       fattore_volume: base?.fattore_volume ?? 5000, solo_peso_reale: false, attivo: true,
     }).select().single()
-    listino = nuovo
+    // CORSA fra due caricamenti: se un altro render l'ha appena creato (col vincolo unico
+    // master_id+corriere_id il doppione è impedito), RILEGGO quello esistente invece di cadere sul
+    // placeholder sotto e generare un guscio in più.
+    if (nuovo) listino = nuovo
+    else if (eIns) {
+      const { data: gia } = await supabase.from('listini_corrieri').select('*')
+        .eq('master_id', utente?.master_id).eq('corriere_id', corriereSelezionato.id).maybeSingle()
+      listino = gia
+    }
     if (listino?.id && !masterListinoIds.includes(listino.id)) masterListinoIds.push(listino.id)
   }
   if (!listino) {

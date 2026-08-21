@@ -54,9 +54,11 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
     if (giaFasce?.length) return { ok: true, reason: 'gia configurato' }
   }
 
-  const { data: fasceSrc } = await admin.from('listini_clienti_fasce').select('corriere_id,zona_id,peso_max,prezzo,tipo,fuel').eq('listino_id', parentListinoId)
-  if (!fasceSrc?.length) return { ok: false, reason: 'listino assegnato vuoto' }
-  const { data: supplSrc } = await admin.from('listini_clienti_supplementi').select('corriere_id,tipo,nome,valore,tipo_calcolo,descrizione').eq('listino_id', parentListinoId)
+  // fetchAll: oltre 1000 fasce PostgREST tronca in SILENZIO → il sotto-master riceveva un Listino
+  // Corrieri PARZIALE (alcuni corrieri/zone senza prezzi). La lettura zone_cap più sotto lo faceva già.
+  const fasceSrc = await fetchAll(() => admin.from('listini_clienti_fasce').select('corriere_id,zona_id,peso_max,prezzo,tipo,fuel').eq('listino_id', parentListinoId).order('id', { ascending: true }))
+  if (!fasceSrc.length) return { ok: false, reason: 'listino assegnato vuoto' }
+  const supplSrc = await fetchAll(() => admin.from('listini_clienti_supplementi').select('corriere_id,tipo,nome,valore,tipo_calcolo,descrizione').eq('listino_id', parentListinoId).order('id', { ascending: true }))
   const { data: listinoSrc } = await admin.from('listini_clienti').select('nome,fattore_volume,solo_peso_reale').eq('id', parentListinoId).single()
 
   const corriereIds = [...new Set(fasceSrc.map((f: any) => f.corriere_id).filter(Boolean))]
