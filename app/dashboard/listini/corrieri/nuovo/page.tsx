@@ -92,6 +92,9 @@ export default function ListinoCorrierePage() {
   const [listino, setListino] = useState<any>(null)
   const [corrieri, setCorrieri] = useState<any[]>([])
   const [corrieriDisponibili, setCorrieriDisponibili] = useState<any[]>([])
+  // Logo del master: per il circuito interno il "logo del corriere" è il suo marchio (lo stesso che
+  // finisce sull'etichetta interna). Se non ha caricato un logo, resta la sigla a iniziali.
+  const [masterLogo, setMasterLogo] = useState<string | null>(null)
   const [corriereId, setCorriereId] = useState('')
   const [expandedId, setExpandedId] = useState<string>('')
   const [saving, setSaving] = useState(false)
@@ -208,6 +211,8 @@ export default function ListinoCorrierePage() {
   useEffect(() => {
     carica()
     fetch('/api/listini/corrieri/ereditato').then(r => r.json()).then(d => setSoloLettura(!!d?.ereditato)).catch(() => {})
+    // Logo del master per il circuito interno (vedi masterLogo sopra).
+    fetch('/api/master').then(r => r.json()).then(d => setMasterLogo(d?.logo_url || null)).catch(() => {})
   }, [])
 
   // Apre/chiude un contratto (accordion). Aprendone uno diverso, ne carica i dati.
@@ -609,6 +614,11 @@ export default function ListinoCorrierePage() {
                   {logoCorriere(c.nome_contratto) ? (
                     <span style={{width:'56px',height:'40px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
                       <img src={logoCorriere(c.nome_contratto)!} alt={c.nome_contratto} style={{maxWidth:'56px',maxHeight:'40px',objectFit:'contain' as const}}/>
+                    </span>
+                  ) : (c.tipo === 'interno' && masterLogo) ? (
+                    // Circuito interno: il marchio è quello del master (lo stesso dell'etichetta), non un logo provider.
+                    <span style={{width:'56px',height:'40px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                      <img src={masterLogo} alt={c.nome_contratto} style={{maxWidth:'56px',maxHeight:'40px',objectFit:'contain' as const}}/>
                     </span>
                   ) : (
                     <span style={{width:'40px',height:'40px',borderRadius:'8px',background:aperto?'#f97316':'#f3f4f6',color:aperto?'#fff':'#6b7280',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'12px',fontWeight:'700',flexShrink:0}}>{iniziali(c.nome_contratto)}</span>

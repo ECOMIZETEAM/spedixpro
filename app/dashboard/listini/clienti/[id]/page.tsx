@@ -17,7 +17,7 @@ export default async function ModificaListinoPage({
   const { data: listino } = await supabase.from('listini_clienti').select('*').eq('id', id).single()
   if (!listino) redirect('/dashboard/listini')
   let { data: corrieriAssegnati } = await supabase.from('listini_clienti_corrieri')
-    .select('corriere_id, corrieri(id,nome_contratto)')
+    .select('corriere_id, corrieri(id,nome_contratto,tipo)')
     .eq('listino_id', id)
   let corrieri = (corrieriAssegnati||[]).map((r:any) => r.corrieri).filter(Boolean)
 
@@ -29,7 +29,7 @@ export default async function ModificaListinoPage({
       await supabase.from('listini_clienti_corrieri').insert(
         idsUnici.map((corriere_id:any) => ({ listino_id: id, corriere_id }))
       )
-      const { data: corrieriStorici } = await supabase.from('corrieri').select('id,nome_contratto').in('id', idsUnici)
+      const { data: corrieriStorici } = await supabase.from('corrieri').select('id,nome_contratto,tipo').in('id', idsUnici)
       corrieri = corrieriStorici || []
     }
   }

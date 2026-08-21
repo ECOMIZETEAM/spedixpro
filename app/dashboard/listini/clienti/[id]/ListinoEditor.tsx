@@ -170,6 +170,9 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   const [fasce, setFasce] = useState<Fascia[]>(() => bozza?.fasce ?? buildFasceInit(fasceEsistenti))
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  // Logo del master per il circuito interno (stesso marchio dell'etichetta); se manca, restano le iniziali.
+  const [masterLogo, setMasterLogo] = useState<string | null>(null)
+  useEffect(() => { fetch('/api/master').then(r => r.json()).then(d => setMasterLogo(d?.logo_url || null)).catch(() => {}) }, [])
   const [tab, setTab] = useState('pesi')
   const [chiuso, setChiuso] = useState(false)   // collassa il corriere aperto senza cambiare pagina
   function toggleContratto(cId: string) {
@@ -788,6 +791,11 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
                   {logoCorriere(c.nome_contratto) ? (
                     <span style={{width:'56px',height:'40px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
                       <img src={logoCorriere(c.nome_contratto)!} alt={c.nome_contratto} style={{maxWidth:'56px',maxHeight:'40px',objectFit:'contain' as const}}/>
+                    </span>
+                  ) : ((c as any).tipo === 'interno' && masterLogo) ? (
+                    // Circuito interno: il marchio è quello del master (lo stesso dell'etichetta), non un logo provider.
+                    <span style={{width:'56px',height:'40px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                      <img src={masterLogo} alt={c.nome_contratto} style={{maxWidth:'56px',maxHeight:'40px',objectFit:'contain' as const}}/>
                     </span>
                   ) : (
                     <span style={{width:'40px',height:'40px',borderRadius:'8px',background:aperto?'#f97316':'#f3f4f6',color:aperto?'#fff':'#6b7280',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'12px',fontWeight:'700',flexShrink:0}}>{iniziali(c.nome_contratto)}</span>
