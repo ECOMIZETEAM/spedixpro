@@ -29,6 +29,8 @@ export default function EditorPreventivo() {
   const [entMode, setEntMode] = useState<'nuovo' | 'esistente'>('nuovo')
   const [destNome, setDestNome] = useState('')
   const [destEmail, setDestEmail] = useState('')
+  // Anagrafica del destinatario NUOVO: serve ad aprire una posizione COMPLETA (fatturabile) all'attivazione.
+  const [anag, setAnag] = useState({ piva: '', codice_fiscale: '', cod_sdi: '', pec: '', telefono: '', indirizzo: '', cap: '', citta: '', provincia: '', paese: 'IT' })
   const [clienteId, setClienteId] = useState('')
   const [masterTargetId, setMasterTargetId] = useState('')
   const [oggetto, setOggetto] = useState('')
@@ -62,6 +64,7 @@ export default function EditorPreventivo() {
       if (p.dest_tipo === 'master' || p.dest_tipo === 'master_nuovo') { setDestKind('master'); setEntMode(p.dest_tipo === 'master' ? 'esistente' : 'nuovo'); setMasterTargetId(p.master_target_id || '') }
       else { setDestKind('cliente'); setEntMode(p.dest_tipo === 'cliente' ? 'esistente' : 'nuovo'); setClienteId(p.cliente_id || '') }
       setDestNome(p.dest_nome || ''); setDestEmail(p.dest_email || '')
+      setAnag({ piva: p.dest_piva || '', codice_fiscale: p.dest_codice_fiscale || '', cod_sdi: p.dest_cod_sdi || '', pec: p.dest_pec || '', telefono: p.dest_telefono || '', indirizzo: p.dest_indirizzo || '', cap: p.dest_cap || '', citta: p.dest_citta || '', provincia: p.dest_provincia || '', paese: p.dest_paese || 'IT' })
       if (p.dest_tipo === 'master' || p.dest_tipo === 'cliente') caricaEntita()
       setOggetto(p.oggetto || ''); setValidoFino(p.valido_fino || '')
       const c = p.contenuto || {}
@@ -129,7 +132,7 @@ export default function EditorPreventivo() {
     try {
       const res = await fetch(`/api/preventivi/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dest_tipo: destTipoSave, dest_nome: destNome, dest_email: destEmail, cliente_id: destTipoSave === 'cliente' ? (clienteId || null) : null, master_target_id: destTipoSave === 'master' ? (masterTargetId || null) : null, oggetto, valido_fino: validoFino || null, contenuto: { sezioni } }),
+        body: JSON.stringify({ dest_tipo: destTipoSave, dest_nome: destNome, dest_email: destEmail, cliente_id: destTipoSave === 'cliente' ? (clienteId || null) : null, master_target_id: destTipoSave === 'master' ? (masterTargetId || null) : null, dest_piva: anag.piva, dest_codice_fiscale: anag.codice_fiscale, dest_cod_sdi: anag.cod_sdi, dest_pec: anag.pec, dest_telefono: anag.telefono, dest_indirizzo: anag.indirizzo, dest_cap: anag.cap, dest_citta: anag.citta, dest_provincia: anag.provincia, dest_paese: anag.paese, oggetto, valido_fino: validoFino || null, contenuto: { sezioni } }),
       })
       const d = await res.json().catch(() => ({}))
       if (!res.ok || d?.error) { setMsg({ t: 'err', x: d?.error || 'Salvataggio non riuscito' }); return false }
@@ -233,9 +236,22 @@ export default function EditorPreventivo() {
                 <button onClick={() => scegliEntMode('esistente')} style={{ flex: 1, padding: '9px', borderRadius: '6px', border: entMode === 'esistente' ? '2px solid #f97316' : '1px solid #d5d5d5', background: entMode === 'esistente' ? '#fff7ed' : '#fff', color: '#1a1a1a', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Esistente</button>
               </div>
               {entMode === 'nuovo' ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <div><label style={lbl}>Nome destinatario</label><input value={destNome} onChange={e => setDestNome(e.target.value)} style={inp} /></div>
-                  <div><label style={lbl}>Email</label><input type="email" value={destEmail} onChange={e => setDestEmail(e.target.value)} style={inp} /></div>
+                <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div><label style={lbl}>Nome / Ragione sociale</label><input value={destNome} onChange={e => setDestNome(e.target.value)} style={inp} /></div>
+                    <div><label style={lbl}>Email</label><input type="email" value={destEmail} onChange={e => setDestEmail(e.target.value)} style={inp} /></div>
+                    <div><label style={lbl}>P.IVA</label><input value={anag.piva} onChange={e => setAnag(a => ({ ...a, piva: e.target.value }))} style={inp} /></div>
+                    <div><label style={lbl}>Codice fiscale</label><input value={anag.codice_fiscale} onChange={e => setAnag(a => ({ ...a, codice_fiscale: e.target.value }))} style={inp} /></div>
+                    <div><label style={lbl}>Codice SDI</label><input value={anag.cod_sdi} onChange={e => setAnag(a => ({ ...a, cod_sdi: e.target.value }))} style={inp} /></div>
+                    <div><label style={lbl}>PEC</label><input value={anag.pec} onChange={e => setAnag(a => ({ ...a, pec: e.target.value }))} style={inp} /></div>
+                    <div><label style={lbl}>Telefono</label><input value={anag.telefono} onChange={e => setAnag(a => ({ ...a, telefono: e.target.value }))} style={inp} /></div>
+                    <div><label style={lbl}>Indirizzo</label><input value={anag.indirizzo} onChange={e => setAnag(a => ({ ...a, indirizzo: e.target.value }))} style={inp} /></div>
+                    <div><label style={lbl}>CAP</label><input value={anag.cap} onChange={e => setAnag(a => ({ ...a, cap: e.target.value }))} style={inp} /></div>
+                    <div><label style={lbl}>Città</label><input value={anag.citta} onChange={e => setAnag(a => ({ ...a, citta: e.target.value }))} style={inp} /></div>
+                    <div><label style={lbl}>Provincia</label><input value={anag.provincia} onChange={e => setAnag(a => ({ ...a, provincia: e.target.value.toUpperCase().slice(0, 2) }))} style={inp} /></div>
+                    <div><label style={lbl}>Paese</label><input value={anag.paese} onChange={e => setAnag(a => ({ ...a, paese: e.target.value }))} style={inp} /></div>
+                  </div>
+                  <p style={{ fontSize: '11.5px', color: '#888', margin: '8px 0 0' }}>Nome ed email bastano per <b>inviare</b>. Il resto serve ad aprire una posizione <b>completa e fatturabile</b> quando confermi l'attivazione — puoi lasciarli vuoti e il destinatario/tu li completate dopo.</p>
                 </div>
               ) : selettoreEntita}
             </div>

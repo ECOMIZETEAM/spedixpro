@@ -137,6 +137,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (b.dest_email !== undefined) patch.dest_email = b.dest_email ? String(b.dest_email).slice(0, 200).trim() : null
   if (b.cliente_id !== undefined) patch.cliente_id = b.cliente_id || null
   if (b.master_target_id !== undefined) patch.master_target_id = b.master_target_id || null
+  // Anagrafica del destinatario (usata all'attivazione per aprire una posizione completa/fatturabile).
+  if (b.dest_piva !== undefined) patch.dest_piva = b.dest_piva ? String(b.dest_piva).slice(0, 30).trim() : null
+  if (b.dest_codice_fiscale !== undefined) patch.dest_codice_fiscale = b.dest_codice_fiscale ? String(b.dest_codice_fiscale).slice(0, 30).trim() : null
+  if (b.dest_cod_sdi !== undefined) patch.dest_cod_sdi = b.dest_cod_sdi ? String(b.dest_cod_sdi).slice(0, 10).trim() : null
+  if (b.dest_pec !== undefined) patch.dest_pec = b.dest_pec ? String(b.dest_pec).slice(0, 200).trim() : null
+  if (b.dest_telefono !== undefined) patch.dest_telefono = b.dest_telefono ? String(b.dest_telefono).slice(0, 40).trim() : null
+  if (b.dest_indirizzo !== undefined) patch.dest_indirizzo = b.dest_indirizzo ? String(b.dest_indirizzo).slice(0, 200) : null
+  if (b.dest_cap !== undefined) patch.dest_cap = b.dest_cap ? String(b.dest_cap).slice(0, 10).trim() : null
+  if (b.dest_citta !== undefined) patch.dest_citta = b.dest_citta ? String(b.dest_citta).slice(0, 100) : null
+  if (b.dest_provincia !== undefined) patch.dest_provincia = b.dest_provincia ? String(b.dest_provincia).slice(0, 2).toUpperCase() : null
+  if (b.dest_paese !== undefined) patch.dest_paese = b.dest_paese ? String(b.dest_paese).slice(0, 2).toUpperCase() : null
   if (b.oggetto !== undefined) patch.oggetto = b.oggetto ? String(b.oggetto).slice(0, 300) : null
   if (b.valido_fino !== undefined) patch.valido_fino = b.valido_fino || null
   if (b.contenuto !== undefined && b.contenuto && typeof b.contenuto === 'object') patch.contenuto = b.contenuto

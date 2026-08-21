@@ -69,6 +69,10 @@ export async function attivaPreventivo(admin: any, p: any): Promise<Esito> {
         const slug = `${slugify(nome)}-${suffisso()}`.slice(0, 60)
         const { data, error } = await admin.from('masters').insert({
           nome, slug, email, parent_master_id: p.master_id, parent_listino_id: draftId, attivo: true, tipo_contratto: 'credito_scalare',
+          // Anagrafica dal preventivo → posizione completa/fatturabile da subito (piva su entrambe le colonne).
+          piva: p.dest_piva || null, partita_iva: p.dest_piva || null, codice_fiscale: p.dest_codice_fiscale || null, codice_sdi: p.dest_cod_sdi || null,
+          pec: p.dest_pec || null, telefono: p.dest_telefono || null, indirizzo: p.dest_indirizzo || null, cap: p.dest_cap || null,
+          citta: p.dest_citta || null, provincia: p.dest_provincia || null, paese: p.dest_paese || null,
         }).select('id').single()
         if (!error && data) { creato = data; break }
         if (error?.code === '23505' && /slug/.test(error.message || '')) continue
@@ -129,6 +133,11 @@ export async function attivaPreventivo(admin: any, p: any): Promise<Esito> {
         const { data, error } = await admin.from('clienti').insert({
           master_id: p.master_id, ragione_sociale: p.dest_nome || email, email,
           listino_cliente_id: draftId, tipo_contratto: 'credito_scalare', codice_cliente: codice, attivo: true,
+          // Anagrafica dal preventivo → cliente completo/fatturabile. Sede legale e operativa uguali
+          // (il preventivo raccoglie un indirizzo solo); il cliente le affina dal suo profilo se serve.
+          piva: p.dest_piva || null, cod_sdi: p.dest_cod_sdi || null, pec: p.dest_pec || null, telefono: p.dest_telefono || null,
+          sl_indirizzo: p.dest_indirizzo || null, sl_cap: p.dest_cap || null, sl_citta: p.dest_citta || null, sl_provincia: p.dest_provincia || null, sl_paese: p.dest_paese || null,
+          so_indirizzo: p.dest_indirizzo || null, so_cap: p.dest_cap || null, so_citta: p.dest_citta || null, so_provincia: p.dest_provincia || null, so_paese: p.dest_paese || null,
         }).select('id').single()
         if (!error && data) { nuovo = data; break }
         if (error?.code === '23505' && String(error.message).includes('email')) { const { data: g2 } = await admin.from('clienti').select('id').eq('email', email).maybeSingle(); if (g2) { clienteId = g2.id; break } }
