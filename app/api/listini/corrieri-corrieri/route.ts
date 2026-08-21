@@ -1,36 +1,6 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabase } from '@/lib/supabase'
-import { fattoreEreditato } from '@/lib/fattore-volume'
-
-export async function GET(req: NextRequest) {
-  const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json([])
-  const { searchParams } = new URL(req.url)
-  const listinoId = searchParams.get('listinoId')
-  if (!listinoId) return NextResponse.json([])
-  const { data } = await supabase.from('listini_corrieri_corrieri')
-    .select('corriere_id, corrieri(id,nome_contratto,tipo)')
-    .eq('listino_id', listinoId)
-  return NextResponse.json((data||[]).map((r:any) => r.corrieri))
-}
-
-export async function POST(req: NextRequest) {
-  const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const body = await req.json()
-  const { listinoId, corriereId } = body
-  if (!listinoId || !corriereId) return NextResponse.json({ error: 'Dati mancanti' }, { status: 400 })
-  // EREDITA il fattore volume del corriere dal "proprio" del master (listini_corrieri per master+corriere)
-  // invece del default 5000: altrimenti un nuovo contratto nasce a 5000 mentre il resto della catena è
-  // a 4000/6000/… e va corretto "a tentativi" (risalvando). Così è giusto da subito.
-  const fattore_volume = await fattoreEreditato(supabase, listinoId, corriereId)
-  const riga: any = { listino_id: listinoId, corriere_id: corriereId }
-  if (fattore_volume != null) riga.fattore_volume = fattore_volume
-  const { error } = await supabase.from('listini_corrieri_corrieri').insert(riga)
-  if (error && !error.message.includes('duplicate')) {
-    return NextResponse.json({ error: error.message }, { status: 400 })
-  }
-  return NextResponse.json({ ok: true })
-}
+// Aggancio di un corriere a un LISTINO CORRIERI: è ESATTAMENTE la stessa operazione di
+// /api/listini/corriere-corrieri (due editor diversi la chiamano — questa dal Listino Corrieri,
+// l'altra dal Listino Clienti). Prima erano due copie identiche che col tempo divergevano
+// (commenti/dettagli diversi) = il classico "fix una, dimentica l'altra". Ora c'è UNA sola
+// implementazione e questa rotta la ri-esporta.
+export { GET, POST } from '../corriere-corrieri/route'

@@ -306,7 +306,13 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   // 5) FASCE — IDEMPOTENTE: prima ripulisco le fasce dei corrieri ereditati su QUESTO listino, poi
   //    reinserisco. Senza, ogni ri-sync (non-force) accumulava DUPLICATI (stesso listino/corriere/zona).
   // Ogni fascia nel listino DEL SUO contratto.
-  const fasceIns = fasceSrc.map((f: any) => ({ listino_id: listinoDi(mapCorr.get(f.corriere_id) || ''), corriere_id: mapCorr.get(f.corriere_id) || null, zona_id: mapZona.get(f.zona_id) || null, peso_min: 0, peso_max: f.peso_max, prezzo: f.prezzo, tipo: f.tipo, fuel: Number(f.fuel) || 0 })).filter((f: any) => f.corriere_id && f.zona_id)
+  const fasceMappate = fasceSrc.map((f: any) => ({ listino_id: listinoDi(mapCorr.get(f.corriere_id) || ''), corriere_id: mapCorr.get(f.corriere_id) || null, zona_id: mapZona.get(f.zona_id) || null, peso_min: 0, peso_max: f.peso_max, prezzo: f.prezzo, tipo: f.tipo, fuel: Number(f.fuel) || 0 }))
+  const fasceIns = fasceMappate.filter((f: any) => f.corriere_id && f.zona_id)
+  // NON scartare prezzi in SILENZIO: una fascia con corriere OK ma ZONA non mappata è una perdita di
+  // prezzo inattesa nella propagazione (diverso da un corriere disabilitato, giustamente escluso) → si
+  // logga per accorgersene, invece di sparire senza traccia.
+  const zonaMancante = fasceMappate.filter((f: any) => f.corriere_id && !f.zona_id).length
+  if (zonaMancante > 0) console.error('[propaga] sub', subMasterId, ':', zonaMancante, 'fasce scartate per ZONA non mappata (prezzi persi) dal listino', parentListinoId)
   if (subCorrIds.length) await admin.from('listini_corrieri_fasce').delete().eq('listino_id', subListinoId).in('corriere_id', subCorrIds)
   if (fasceIns.length) await admin.from('listini_corrieri_fasce').insert(fasceIns)
 
