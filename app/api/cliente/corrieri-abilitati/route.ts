@@ -23,10 +23,13 @@ export async function GET() {
   // Qui la regola mancava: il contratto restava nell'elenco delle impostazioni e il cliente poteva
   // pure accenderlo, salvo poi scoprire in creazione che non si puo' usare. Le rotte che contano
   // (tariffe, creazione, API) la applicavano gia': era questa a raccontare un'altra storia.
-  const { contrattiSospesiSopra } = await import('@/lib/contratti-catena')
+  const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
   const sospesi = await contrattiSospesiSopra(cliente.master_id)
   const contratti = (agganci||[]).map((r:any) => r.corrieri).filter(Boolean)
-    .filter((c:any) => !sospesi.has(c.id))
+    // BUG: prima confrontava `sospesi.has(c.id)`, ma il set contiene i NOMI dei contratti (minuscoli),
+    // non gli id → sempre falso, il filtro non toglieva nulla e un contratto tolto sopra restava
+    // accendibile dal cliente. Ora si confronta per nome, come tutte le altre porte.
+    .filter((c:any) => !sospesoDallaCatena(c.nome_contratto, sospesi))
   const { data: stati } = await supabase.from('clienti_corrieri_abilitati')
     .select('corriere_id, abilitato, settings').eq('cliente_id', id)
   const mappaAbil = new Map((stati||[]).map((s:any) => [s.corriere_id, s.abilitato]))
