@@ -12,24 +12,25 @@ export async function GET(req: NextRequest) {
   const admin = createAdminSupabase()
   if (!(await autorizzaHarvester(req, admin))) return NextResponse.json({ error: 'Non autorizzato' }, { status: 401 })
 
-  const limit = Math.min(200, Math.max(1, Number(req.nextUrl.searchParams.get('limit')) || 40))
+  const limit = Math.min(200, Math.max(1, Number(req.nextUrl.searchParams.get('limit')) || 20))
+
+  // Anti-join server-side (RPC): raggiunge TUTTE le non-controllate, non solo le recenti.
+  const { data: righe } = await admin.rpc('prossime_ripesature', { lim: limit })
+
+  // Arretrato (solo per display): consegnate PDB - gia' controllate.
+  let restanti = 0
   const { data: pdb } = await admin.from('corrieri').select('id')
     .eq('nome_contratto', 'Poste Delivery Business S').eq('tipo', 'spediamopro')
   const pdbIds = (pdb || []).map((c: any) => c.id)
-  if (!pdbIds.length) return NextResponse.json({ righe: [], restanti: 0 })
-
-  const { data: cand } = await admin.from('spedizioni').select('id,tracking_number')
-    .in('corriere_id', pdbIds).eq('stato', 'consegnata').not('tracking_number', 'is', null)
-    .order('created_at', { ascending: false }).limit(500)
-  const ids = (cand || []).map((c: any) => c.id)
-  const { data: gia } = ids.length
-    ? await admin.from('ripesature_check').select('spedizione_id').in('spedizione_id', ids)
-    : { data: [] as any[] }
-  const fatti = new Set((gia || []).map((g: any) => g.spedizione_id))
-  const daFare = (cand || []).filter((c: any) => !fatti.has(c.id))
+  if (pdbIds.length) {
+    const { count: consegnate } = await admin.from('spedizioni').select('*', { count: 'exact', head: true })
+      .in('corriere_id', pdbIds).eq('stato', 'consegnata').not('tracking_number', 'is', null)
+    const { count: controllate } = await admin.from('ripesature_check').select('*', { count: 'exact', head: true })
+    restanti = Math.max(0, (consegnate || 0) - (controllate || 0))
+  }
 
   return NextResponse.json({
-    righe: daFare.slice(0, limit).map((c: any) => ({ spedizione_id: c.id, ldv: c.tracking_number })),
-    restanti: daFare.length,
+    righe: (righe || []).map((r: any) => ({ spedizione_id: r.spedizione_id, ldv: r.ldv })),
+    restanti,
   })
 }
