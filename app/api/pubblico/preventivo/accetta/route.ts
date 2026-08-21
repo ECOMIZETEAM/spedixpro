@@ -97,7 +97,8 @@ export async function POST(req: NextRequest) {
             try {
               const { inviaCredenzialiCliente } = await import('@/lib/email')
               const { data: mm } = await admin.from('masters').select('nome').eq('id', p.master_id).maybeSingle()
-              await inviaCredenzialiCliente({ email, nomeCliente: nome, masterNome: mm?.nome || 'MoovExpress', dominio: 'moovexpress.com', password })
+              // areaStaff: è un sotto-MASTER, il link va al Control Center, non a /cliente (che lo respinge).
+              await inviaCredenzialiCliente({ email, nomeCliente: nome, masterNome: mm?.nome || 'MoovExpress', dominio: 'moovexpress.com', password, areaStaff: true })
             } catch {}
           }
         }
