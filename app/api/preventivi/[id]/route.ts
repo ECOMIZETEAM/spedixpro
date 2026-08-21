@@ -76,6 +76,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const { data: l } = await admin.from('listini_clienti').select('id').eq('id', p.listino_template_id).maybeSingle()
       if (l) return NextResponse.json({ ok: true, listino_id: l.id })
     }
+    // Anti-doppione robusto per BACK-LINK: la bozza è agganciata da listini_clienti.preventivo_id. Se
+    // ne esiste già una per QUESTO preventivo (anche prima che il puntatore listino_template_id venga
+    // scritto — es. doppio click nella finestra fra insert e update), la riuso invece di crearne una
+    // seconda che poi resterebbe orfana. Il filtro preventivo_id=id non prende mai un listino reale.
+    {
+      const { data: gia } = await admin.from('listini_clienti').select('id').eq('preventivo_id', id).limit(1).maybeSingle()
+      if (gia) { await admin.from('preventivi').update({ listino_template_id: gia.id, updated_at: new Date().toISOString() }).eq('id', id); return NextResponse.json({ ok: true, listino_id: gia.id }) }
+    }
     // Se il master parte da un listino ESISTENTE, la bozza nasce come sua COPIA (corrieri+fasce+
     // supplementi): il listino di origine resta intatto, la bozza è modificabile e all'accettazione
     // diventa il listino del cliente. Senza sourceListinoId la bozza è vuota (compilata da zero).

@@ -65,11 +65,10 @@ export async function DELETE(req: NextRequest) {
   if (p.stato === 'accettato') return NextResponse.json({ error: 'Un preventivo accettato non si elimina (ha creato un listino).' }, { status: 400 })
   const { error } = await admin.from('preventivi').delete().eq('id', id).eq('master_id', s.master_id)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  // La bozza-listino collegata scende col preventivo: senza, restava una bozza ORFANA (listino con
-  // preventivo_id che punta a un preventivo sparito). La guardia `preventivo_id=id` la limita alla SOLA
-  // bozza di questo preventivo, mai un listino reale.
-  if (p.listino_template_id) {
-    await admin.from('listini_clienti').delete().eq('id', p.listino_template_id).eq('preventivo_id', id)
-  }
+  // La bozza-listino collegata scende col preventivo. La si cancella per BACK-LINK autorevole
+  // (listini_clienti.preventivo_id), NON per il puntatore listino_template_id — che può essere NULL o
+  // stale se 'crea_listino' si è interrotto fra l'insert della bozza e la scrittura del puntatore,
+  // lasciando bozze orfane. Il filtro preventivo_id=id non tocca mai un listino reale (che ha NULL).
+  await admin.from('listini_clienti').delete().eq('preventivo_id', id)
   return NextResponse.json({ ok: true })
 }

@@ -33,6 +33,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
     }
   }
 
+  // RIPRISTINO su errore: PostgREST non dà una transazione multi-statement, quindi se un insert qui
+  // sotto fallisce (es. una zona referenziata cancellata nel frattempo → FK error) il corriere NON deve
+  // restare senza prezzi. Fotografo le righe attuali e, in caso di errore, le rimetto com'erano.
+  const { data: _fasceOld } = await supabase.from('listini_clienti_fasce').select('*').eq('listino_id', id).eq('corriere_id', corriere_id)
+  const { data: _supplOld } = await supabase.from('listini_clienti_supplementi').select('*').eq('listino_id', id).eq('corriere_id', corriere_id)
+  const ripristina = async () => {
+    await supabase.from('listini_clienti_fasce').delete().eq('listino_id', id).eq('corriere_id', corriere_id)
+    await supabase.from('listini_clienti_supplementi').delete().eq('listino_id', id).eq('corriere_id', corriere_id)
+    if (_fasceOld?.length) await supabase.from('listini_clienti_fasce').insert(_fasceOld)
+    if (_supplOld?.length) await supabase.from('listini_clienti_supplementi').insert(_supplOld)
+  }
+
   // Cancella SOLO le fasce di questo contratto (non tocca gli altri corrieri già configurati)
   await supabase.from('listini_clienti_fasce').delete().eq('listino_id', id).eq('corriere_id', corriere_id)
   await supabase.from('listini_clienti_supplementi').delete().eq('listino_id', id).eq('corriere_id', corriere_id)
@@ -57,7 +69,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
   }
   if (nuoveFasce.length) {
     const { error } = await supabase.from('listini_clienti_fasce').insert(nuoveFasce)
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    if (error) { await ripristina(); return NextResponse.json({ error: error.message }, { status: 400 }) }
   }
 
   // Salva supplementi (assicurazione, contrassegno, giacenze, ritiro, servizi accessori, extra)
@@ -173,7 +185,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
 
     if (righeSupplementi.length) {
       const { error } = await supabase.from('listini_clienti_supplementi').insert(righeSupplementi)
-      if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+      if (error) { await ripristina(); return NextResponse.json({ error: error.message }, { status: 400 }) }
     }
   }
 
@@ -253,6 +265,13 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{i
     .select('id', { count: 'exact', head: true }).eq('parent_listino_id', id)
   if ((nSub || 0) > 0) {
     return NextResponse.json({ error: `Listino assegnato a ${nSub} sotto-master: riassegnalo prima di eliminarlo.` }, { status: 400 })
+  }
+  // Anche gli AGENTI: la loro FK utenti.listino_agente_id è ON DELETE SET NULL, quindi la cancellazione
+  // NON viene rifiutata ma azzererebbe in SILENZIO il listino su cui si calcola il guadagno dell'agente.
+  const { count: nAg } = await supabase.from('utenti')
+    .select('id', { count: 'exact', head: true }).eq('listino_agente_id', id)
+  if ((nAg || 0) > 0) {
+    return NextResponse.json({ error: `Listino assegnato a ${nAg} agente/i: riassegnalo prima di eliminarlo.` }, { status: 400 })
   }
 
   // ATOMICO: si cancella SOLO l'header; i figli (fasce/supplementi/corrieri) scendono da soli col
