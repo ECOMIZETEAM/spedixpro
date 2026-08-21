@@ -17,20 +17,19 @@ const HEADER_VIETATI = new Set([
   'host', 'content-length', 'connection', 'accept-encoding', 'transfer-encoding',
 ])
 
-// Estrae url_template (con __LDV__ al posto della LDV) e gli header da un cURL "Copy as cURL" (bash).
+// Estrae gli header (cookie compreso) e l'URL del dettaglio da un cURL "Copy as cURL".
+// ROBUSTO: basta un cURL di QUALSIASI richiesta OneTracking (il cookie vale per tutto il dominio).
+// Se l'URL e' gia' quello del dettaglio lo si riusa (preservando il suffisso), altrimenti si
+// costruisce l'endpoint noto del dettaglio (quello che restituisce pesoDim/RILEVATO).
+const DETTAGLIO_DEFAULT = 'https://one-tracking-filiali.posteitaliane.it/api/dettaglio-spedizione/__LDV__/poste/-'
+
 export function parseCurl(curl: string): SessioneOT | null {
   if (!curl || typeof curl !== 'string') return null
   const testo = curl.replace(/\\\r?\n/g, ' ')   // unisce le righe spezzate con backslash
 
-  // URL: primo argomento fra apici/virgolette dopo `curl`, o il primo http(s) trovato.
-  let url: string | null = null
-  const mUrl = testo.match(/curl\s+(?:-[A-Za-z]+\s+)*['"]([^'"]+)['"]/) || testo.match(/(https?:\/\/[^\s'"]+)/)
-  if (mUrl) url = mUrl[1]
-  if (!url) return null
-
   const headers: Record<string, string> = {}
-  // -H 'name: value'  /  --header "name: value"
-  const reH = /(?:-H|--header)\s+(['"])(.*?)\1/g
+  // -H 'name: value'  /  --header "name: value"  ([\s\S] per non dipendere dal flag 's')
+  const reH = /(?:-H|--header)\s+(['"])([\s\S]*?)\1/g
   let m: RegExpExecArray | null
   while ((m = reH.exec(testo)) !== null) {
     const idx = m[2].indexOf(':')
@@ -40,16 +39,23 @@ export function parseCurl(curl: string): SessioneOT | null {
     if (!k || k.startsWith(':') || HEADER_VIETATI.has(k.toLowerCase())) continue
     headers[k] = v
   }
-  // -b / --cookie 'cookie...'  (a volte il cookie sta qui invece che in -H)
-  const reB = /(?:-b|--cookie)\s+(['"])(.*?)\1/g
+  // -b / --cookie 'cookie...'  (Chrome spesso mette il cookie qui)
+  const reB = /(?:-b|--cookie)\s+(['"])([\s\S]*?)\1/g
   while ((m = reB.exec(testo)) !== null) {
     if (!Object.keys(headers).some(k => k.toLowerCase() === 'cookie')) headers['cookie'] = m[2].trim()
   }
+  // Senza cookie non c'e' sessione.
+  if (!Object.keys(headers).some(k => k.toLowerCase() === 'cookie')) return null
 
-  // LDV -> __LDV__ nel percorso /dettaglio-spedizione/{LDV}/...
-  const urlTpl = url.replace(/(\/dettaglio-spedizione\/)[^/?]+/, '$1__LDV__')
-  if (!urlTpl.includes('__LDV__')) return null   // cURL della pagina sbagliata
-  return { url_template: urlTpl, headers }
+  // URL: se c'e' gia' il dettaglio-spedizione lo riuso (LDV -> __LDV__), altrimenti — se e' un cURL
+  // di OneTracking/Poste — costruisco l'endpoint del dettaglio io.
+  const dett = testo.match(/https?:\/\/[^\s'"]*\/dettaglio-spedizione\/[^\s'"]*/)
+  let url_template: string | null = null
+  if (dett) url_template = dett[0].replace(/(\/dettaglio-spedizione\/)[^/?]+/, '$1__LDV__')
+  else if (/one-tracking-filiali|posteitaliane/i.test(testo)) url_template = DETTAGLIO_DEFAULT
+
+  if (!url_template || !url_template.includes('__LDV__')) return null
+  return { url_template, headers }
 }
 
 export type EsitoFetch = { scaduta: boolean; json: any | null; motivo?: string }

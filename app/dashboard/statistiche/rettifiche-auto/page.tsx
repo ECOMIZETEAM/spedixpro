@@ -85,9 +85,9 @@ export default function RettificheAutoPage() {
         <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', marginBottom: '6px' }}>Rinnova la sessione (cURL)</div>
         <ol style={{ fontSize: '12.5px', color: '#4b5563', lineHeight: 1.7, margin: '0 0 10px', paddingLeft: '18px' }}>
           <li>Su OneTracking filiali apri una spedizione qualsiasi.</li>
-          <li>F12 → Network → filtro <code>tracking</code> → ricarica.</li>
-          <li>Tasto destro sulla riga <b>full-tracking</b> → Copy → <b>Copy as cURL</b>.</li>
-          <li>Incolla qui sotto e salva.</li>
+          <li>F12 → Network → ricarica.</li>
+          <li>Tasto destro su una richiesta qualsiasi a <b>one-tracking-filiali</b> (es. <b>full-tracking</b>) → Copy → <b>Copy as cURL</b>.</li>
+          <li>Incolla qui sotto e salva (mi serve solo il cookie: l'indirizzo del dettaglio lo costruisco io).</li>
         </ol>
         <textarea value={curl} onChange={e => setCurl(e.target.value)} placeholder="curl 'https://one-tracking-filiali.posteitaliane.it/api/dettaglio-spedizione/…' -H 'cookie: …' …"
           style={{ width: '100%', minHeight: '90px', fontSize: '11px', fontFamily: 'monospace', padding: '8px', border: '1px solid #d1d5db', borderRadius: '6px', color: '#1a1a1a', resize: 'vertical' }} />
