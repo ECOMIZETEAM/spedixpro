@@ -70,11 +70,41 @@ function pulisciEmail(v: any): string | undefined {
 // Le email vere restano nel DB e le usiamo NOI per le notifiche brand MoovExpress.
 export const EMAIL_PER_CORRIERE = process.env.EMAIL_CORRIERE || 'emexpressltd@gmail.com'
 
+// TESTO SICURO PER L'ETICHETTA DEL CORRIERE.
+// Il PDF etichetta lo genera SpediamoPro/il corriere con un font Latin-1/WinAnsi: certi caratteri
+// Unicode NON sono rappresentabili e in STAMPA si corrompono — U+1D52 (ᵒ, ordinale in apice)
+// diventa il byte di controllo 0x1A, U+2019 (' apostrofo tipografico) diventa uno spazio. Il dato da
+// noi resta integro (DB/portale), ma va normalizzato PRIMA dell'invio o l'etichetta esce rotta.
+// Qui si riportano i caratteri tipografici ai loro equivalenti semplici e si tiene solo Latin-1
+// (gli accenti italiani à è é ì ò ù ci stanno dentro: restano intatti).
+export function normalizzaTestoCorriere(v: any): string {
+  let s = String(v ?? '')
+  if (!s) return ''
+  try { s = s.normalize('NFC') } catch { /* runtime senza normalize: si prosegue col grezzo */ }
+  s = s
+    .replace(/[‘’‚‛′]/g, "'")      // apostrofi/virgolette singole curve → '
+    .replace(/[“”„‟″]/g, '"')      // virgolette doppie curve → "
+    .replace(/[–—−]/g, '-')                  // en/em dash, meno → -
+    .replace(/[\u00A0\u2007\u202F]/g, ' ')            // spazi non-breaking -> spazio
+    .replace(/[ᵒº]/g, 'o')                        // ᵒ (U+1D52) / º ordinale → o  (il ° U+00B0 resta)
+    .replace(/…/g, '...')                              // ellissi → ...
+    .replace(/[\u0000-\u001F\u007F]/g, '')            // control char (incl. 0x1A) -> via
+  // Tutto cio' che resta fuori da Latin-1 non lo rende il font etichetta: si toglie invece di
+  // lasciarlo diventare 0x1A/spazio in stampa.
+  s = Array.from(s).filter(ch => ch.charCodeAt(0) <= 0xFF).join('')
+  return s
+}
+
 export function sanitizzaIndirizzoSp(a: SpediamoproAddress, opts?: { emailObbligatoria?: boolean }): SpediamoproAddress {
   const phone = pulisciTel(a?.phone)
   // SEMPRE l'email schermo: ogni payload costruito qui è diretto al provider.
   const email = EMAIL_PER_CORRIERE
   const out: any = { ...a }
+  // Normalizzo i testi che finiscono STAMPATI in etichetta: nome, indirizzo, citta'. Un punto solo,
+  // vale per tutte le porte (portale, /api/v1, ritiri), perche' tutte passano di qui.
+  if (out.name) out.name = normalizzaTestoCorriere(out.name)
+  if (out.address) out.address = normalizzaTestoCorriere(out.address)
+  if (out.city) out.city = normalizzaTestoCorriere(out.city)
   if (phone) out.phone = phone; else delete out.phone
   if (email) out.email = email; else delete out.email
   return out
@@ -222,9 +252,10 @@ export async function spediamoproCreateShipment(
       labelFormat: [9,19].includes(Number(params.quotation.service)) ? 1 : 0,
       cashOnDeliveryAmount: params.cashOnDeliveryAmount || null,
       insuredAmount: params.insuredAmount || null,
-      externalReference: params.externalReference || null,
-      // NOTE SpediamoPro: max ~20 caratteri, oltre → 422 "invalid data". Troncatura difensiva.
-      consigneeNote: params.notes ? String(params.notes).substring(0, 20) : null,
+      externalReference: params.externalReference ? (normalizzaTestoCorriere(params.externalReference).substring(0, 64) || null) : null,
+      // NOTE SpediamoPro: max ~20 caratteri, oltre → 422 "invalid data". Normalizzo i caratteri (apostrofo
+      // curvo/ᵒ romperebbero la STAMPA dell'etichetta) e tronco a 20.
+      consigneeNote: params.notes ? (normalizzaTestoCorriere(params.notes).substring(0, 20) || null) : null,
     })
 
   // Retry SOLO sul timeout transitorio lato corriere (vedi isTimeoutCorriere): in quel caso il

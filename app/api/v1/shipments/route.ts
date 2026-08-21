@@ -293,7 +293,11 @@ export async function POST(req: NextRequest) {
     try {
       const quotation = await spediamoproGetQuotation(cred.authcode, serviceIdV1, { parcels, sender, consignee, cashOnDeliveryAmount: cod, insuredAmount: ins })
       const externalRefV1 = (body.notes ? String(body.notes) : '').substring(0, 64) || undefined
-      const shipment = await spediamoproCreateShipment(cred.authcode, { parcels, sender, consignee, quotation, cashOnDeliveryAmount: cod, insuredAmount: ins, externalReference: externalRefV1 })
+      // La NOTA del cliente va al riquadro NOTE dell'etichetta del corriere (come fa il portale), non
+      // solo nel Riferimento. Il campo NOTE di SpediamoPro e' max ~20 char (oltre = 422): si tronca; i
+      // caratteri li normalizza la lib. Regola: se scrivono in note, deve arrivare in note.
+      const noteEtichettaV1 = body.notes ? String(body.notes).trim().substring(0, 20) : undefined
+      const shipment = await spediamoproCreateShipment(cred.authcode, { parcels, sender, consignee, quotation, cashOnDeliveryAmount: cod, insuredAmount: ins, externalReference: externalRefV1, notes: noteEtichettaV1 })
       let trk = shipment.trackingCode; if (!trk) trk = await spediamoproWaitForTracking(cred.authcode, shipment.id)
       numero = trk || shipment.code || `SP-${shipment.id}`; costoCorrente = centsToEuro(shipment.totalPrice)
       // ZIP multicollo → PDF unico; PDF/immagini mono-collo invariati. Se non pronta, resta null (riscaricata on-demand).
