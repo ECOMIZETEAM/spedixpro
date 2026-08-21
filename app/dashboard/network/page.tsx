@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import BarraAvanzamento from '@/app/components/BarraAvanzamento'
 
 const ACCENT = '#f97316'
 const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const}
@@ -14,6 +15,7 @@ export default function NetworkRicevutiPage() {
   const [propagando, setPropagando] = useState<string>('')
   const [accettando, setAccettando] = useState<string>('')
   const [apertoBlocco, setApertoBlocco] = useState<string>('')
+  const [avanz, setAvanz] = useState<{k:string,fatti:number,totale:number,da:number}|null>(null)
 
   async function carica() {
     setLoading(true)
@@ -49,31 +51,49 @@ export default function NetworkRicevutiPage() {
   async function decidiBlocco(b: any, decisione: 'propagata' | 'assorbita') {
     if (!b.daDecidere.length) return
     setPropagando(b.k); setMsg('')
+    const ids: string[] = b.daDecidere
     try {
-      const res = await fetch('/api/network/rettifiche', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ rettifica_ids: b.daDecidere, decisione })
-      })
-      const d = await res.json()
-      if (d.error) setMsg('Errore: ' + d.error)
-      else if (d.giaDecise) setMsg('ℹ️ ' + (d.messaggio || 'Queste rettifiche erano già state decise.'))
-      else if (decisione === 'assorbita') setMsg(`✓ ${d.assorbite} rettifiche assorbite: restano a tuo carico, la tua rete non viene toccata.`)
-      else {
-        // Messaggio COMPLETO e persistente: prima non spiegava perché alcune non venissero girate
-        // (mostrava "0 accettate" e basta), e sembrava che "non le facesse accettare". Ora dice
-        // esattamente quali sono rimaste indietro, perché, e come chiuderle ("Le assorbo io").
-        const parti: string[] = []
-        if (d.create > 0) parti.push(`✓ Accettate ${d.create}: sono in Spedizioni › Rettifica Costi, divise per cliente e sotto-master — da lì scegli a chi caricarle (fino ad allora non scende niente a nessuno).`)
-        if (d.nonPropagate) {
-          const elenco = (d.dettaglio || []).map((x: any) => `${x.ldv} — ${x.perche}`).join('\n• ')
-          parti.push(`⚠️ ${d.nonPropagate} non si possono girare al livello sotto:\n• ${elenco}\nQueste tienile a tuo carico con "Le assorbo io", oppure sistema il listino di chi sta sotto (fascia di peso o zona mancante) e riprova.`)
-        }
-        if (!d.create && !d.nonPropagate) parti.push('Nessuna rettifica da decidere.')
-        setMsg(parti.join('\n\n'))
+      // ASSORBI: solo un'etichetta sulle righe, una query sola → veloce, niente barra.
+      if (decisione === 'assorbita') {
+        const res = await fetch('/api/network/rettifiche', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ rettifica_ids: ids, decisione })
+        })
+        const d = await res.json()
+        if (d.error) setMsg('Errore: ' + d.error)
+        else setMsg(`✓ ${d.assorbite ?? ids.length} rettifiche assorbite: restano a tuo carico, la tua rete non viene toccata.`)
+        carica(); setPropagando(''); return
       }
+      // ACCETTA/PROPAGA: ognuna ricostruisce la cascata (lento). Si lavora A LOTTI con una barra,
+      // così su 196 rettifiche si vede l'avanzamento invece di sembrare piantato — e un lotto lungo
+      // non rischia il timeout della funzione.
+      const BATCH = 12
+      let create = 0, nonProp = 0, giaDecise = 0
+      const dettaglio: any[] = []
+      setAvanz({ k: b.k, fatti: 0, totale: ids.length, da: Date.now() })
+      for (let i = 0; i < ids.length; i += BATCH) {
+        const fetta = ids.slice(i, i + BATCH)
+        const res = await fetch('/api/network/rettifiche', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ rettifica_ids: fetta, decisione })
+        })
+        const d = await res.json()
+        if (d.error) { setMsg('Errore: ' + d.error); break }
+        create += d.create || 0; nonProp += d.nonPropagate || 0; giaDecise += d.giaDecise || 0
+        if (Array.isArray(d.dettaglio)) dettaglio.push(...d.dettaglio)
+        setAvanz(a => a ? { ...a, fatti: Math.min(i + BATCH, ids.length) } : a)
+      }
+      const parti: string[] = []
+      if (create > 0) parti.push(`✓ Accettate ${create}: sono in Spedizioni › Rettifica Costi, divise per cliente e sotto-master — da lì scegli a chi caricarle (fino ad allora non scende niente a nessuno).`)
+      if (nonProp) {
+        const elenco = dettaglio.slice(0, 30).map((x: any) => `${x.ldv} — ${x.perche}`).join('\n• ')
+        parti.push(`⚠️ ${nonProp} non si possono girare al livello sotto:\n• ${elenco}\nQueste tienile a tuo carico con "Le assorbo io", oppure sistema il listino di chi sta sotto (fascia di peso o zona mancante) e riprova.`)
+      }
+      if (!create && !nonProp) parti.push(giaDecise ? 'Queste rettifiche erano già state decise.' : 'Nessuna rettifica da decidere.')
+      setMsg(parti.join('\n\n'))
       carica()
     } catch { setMsg('Errore di connessione') }
-    setPropagando('')
+    setPropagando(''); setAvanz(null)
   }
 
   // Accetta un reso ricevuto: propaga (distinte reso verso clienti e/o sotto-master)
@@ -161,7 +181,7 @@ export default function NetworkRicevutiPage() {
                       {b.daDecidere.length>0 && <>
                         <button onClick={()=>decidiBlocco(b,'propagata')} disabled={propagando===b.k}
                           style={{background:ACCENT,color:'#fff',border:'none',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',opacity:propagando===b.k?.6:1}}>
-                          {propagando===b.k?'…':'Accetta ('+b.daDecidere.length+')'}
+                          {propagando===b.k?(avanz&&avanz.k===b.k?`${avanz.fatti}/${avanz.totale}…`:'…'):'Accetta ('+b.daDecidere.length+')'}
                         </button>
                         <button onClick={()=>decidiBlocco(b,'assorbita')} disabled={propagando===b.k}
                           style={{background:'#f0fdf4',color:'#166534',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:600,cursor:'pointer'}}>
@@ -170,6 +190,13 @@ export default function NetworkRicevutiPage() {
                       </>}
                     </div>
                   </div>
+                  {propagando===b.k && avanz && avanz.k===b.k && (
+                    <div style={{padding:'0 16px 14px'}}>
+                      <BarraAvanzamento fatti={avanz.fatti} totale={avanz.totale} iniziatoIl={avanz.da}
+                        etichetta="Accetto le rettifiche"
+                        sottotitolo="Ogni spedizione viene riprezzata sul listino del livello sotto." />
+                    </div>
+                  )}
                   {apertoBlocco===b.k && (
                     <table style={{width:'100%',borderCollapse:'collapse',background:'#fcfcfc'}}>
                       <thead><tr style={{background:'#f9fafb'}}>
