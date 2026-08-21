@@ -10,7 +10,7 @@ import { statoPiano, messaggioBlocco } from '@/lib/limite-piano'
 import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation, spediamoproCreateShipment, spediamoproGetLabel,
   spediamoproWaitForTracking, kgToGrams, cmToMm, euroToCents, centsToEuro,
-  normalizzaEtichetta, telValidoSp,
+  normalizzaEtichetta, telValidoSp, indirizzoEtichetta,
 } from '@/lib/spediamopro'
 
 // IL TETTO DI DURATA, che qui non c'era.
@@ -272,10 +272,13 @@ export async function POST(req: NextRequest) {
     if (!telValidoSp(body.shipTo?.phone)) {
       return errore('Telefono destinatario obbligatorio e non valido (solo cifre, 6–15): il corriere lo richiede per la consegna.')
     }
-    // SpediamoPro non ha la seconda riga indirizzo: il "presso" viene accodato all'indirizzo
-    // (max 35 caratteri imposti dal corriere).
-    const sender = { name: body.shipFrom.name?.substring(0,35), address: conPresso(body.shipFrom.street1 || '', pressoFrom).substring(0,35), postalCode: body.shipFrom.postalCode, city: body.shipFrom.city?.substring(0,35), province: body.shipFrom.state?.substring(0,2).toUpperCase(), country: 'IT', phone: body.shipFrom.phone || undefined, email: body.shipFrom.email?.substring(0,50) || undefined }
-    const consignee: any = { name: body.shipTo.name?.substring(0,35), address: conPresso(body.shipTo.street1 || '', pressoTo).substring(0,35), postalCode: body.shipTo.postalCode, city: body.shipTo.city?.substring(0,35), province: body.shipTo.state?.substring(0,2).toUpperCase(), country: (body.shipTo.country||'IT').toUpperCase() }
+    // Il corriere non ha una seconda riga indirizzo. L'indirizzo si costruisce tenendo SEMPRE il
+    // civico: BRT stampa ~21 caratteri della riga, Poste ~35, quindi si accorcia la via (Via->V. ecc.)
+    // preservando il numero civico invece di tagliare in coda (dove il civico sparirebbe). Il presso
+    // entra solo se resta spazio. Vedi indirizzoEtichetta.
+    const maxAddr = /brt/i.test(corriere.nome_contratto || '') ? 21 : 35
+    const sender = { name: body.shipFrom.name?.substring(0,35), address: indirizzoEtichetta(body.shipFrom.street1 || '', pressoFrom, maxAddr), postalCode: body.shipFrom.postalCode, city: body.shipFrom.city?.substring(0,35), province: body.shipFrom.state?.substring(0,2).toUpperCase(), country: 'IT', phone: body.shipFrom.phone || undefined, email: body.shipFrom.email?.substring(0,50) || undefined }
+    const consignee: any = { name: body.shipTo.name?.substring(0,35), address: indirizzoEtichetta(body.shipTo.street1 || '', pressoTo, maxAddr), postalCode: body.shipTo.postalCode, city: body.shipTo.city?.substring(0,35), province: body.shipTo.state?.substring(0,2).toUpperCase(), country: (body.shipTo.country||'IT').toUpperCase() }
     if (body.shipTo.phone) consignee.phone = body.shipTo.phone
     if (body.shipTo.email) consignee.email = body.shipTo.email.substring(0,50)
     // MULTICOLLO: un parcel per OGNI collo (prima si inviava un solo parcel col peso totale).

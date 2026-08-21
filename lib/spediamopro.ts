@@ -95,6 +95,39 @@ export function normalizzaTestoCorriere(v: any): string {
   return s
 }
 
+// INDIRIZZO ETICHETTA: tiene SEMPRE il numero civico (che sta in coda) anche quando la riga supera
+// lo spazio stampato dal corriere. Prima si tagliava a lunghezza fissa e su vie lunghe spariva
+// proprio il civico (es. BRT stampa ~21 char: "Via Dante Alighieri 28" -> "VIA DANTE ALIGHIERI 2").
+// Ora: abbrevia i prefissi comuni (Via->V., Piazza->P.za...); se ancora lungo, accorcia il CORPO
+// della via ma non il civico. Il "presso" entra solo se avanza spazio: il civico ha priorita'.
+export function indirizzoEtichetta(via: string, presso: string, max: number): string {
+  let v = normalizzaTestoCorriere(via).trim()
+  if (!v) return ''
+  if (v.length > max) {
+    v = v
+      .replace(/^via\s/i, 'V. ').replace(/^viale\s/i, 'V.le ')
+      .replace(/^piazzale\s/i, 'P.le ').replace(/^piazza\s/i, 'P.za ')
+      .replace(/^corso\s/i, 'C.so ').replace(/^vicolo\s/i, 'V.lo ')
+      .replace(/^largo\s/i, 'L.go ').replace(/^strada\s/i, 'Str. ')
+      .replace(/^localita'?\s/i, 'Loc. ')
+  }
+  if (v.length > max) {
+    // civico finale: numero + eventuale /lettera (28, 28/A, 28-30)
+    const m = v.match(/\s(\d+\s*[\/\-]?\s*[A-Za-z]?)\s*$/)
+    if (m && m.index != null) {
+      const civ = m[1].replace(/\s+/g, '')
+      const corpo = v.slice(0, m.index).trim()
+      const keep = max - civ.length - 1
+      v = (keep > 1 ? corpo.slice(0, keep).trim() + ' ' : '') + civ
+    } else {
+      v = v.slice(0, max)
+    }
+  }
+  const p = normalizzaTestoCorriere(presso).trim()
+  if (p && (max - v.length - 5) >= 3) v = (v + ' c/o ' + p).substring(0, max)
+  return v
+}
+
 export function sanitizzaIndirizzoSp(a: SpediamoproAddress, opts?: { emailObbligatoria?: boolean }): SpediamoproAddress {
   const phone = pulisciTel(a?.phone)
   // SEMPRE l'email schermo: ogni payload costruito qui è diretto al provider.
