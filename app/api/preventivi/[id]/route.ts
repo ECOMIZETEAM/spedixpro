@@ -80,14 +80,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }).select('id').single()
     if (e1 || !nuovo) return NextResponse.json({ error: e1?.message || 'Errore creazione listino' }, { status: 400 })
     if (srcId) {
-      const [{ data: cs }, { data: fs }, { data: ss }] = await Promise.all([
-        admin.from('listini_clienti_corrieri').select('corriere_id,fattore_volume,abilitato').eq('listino_id', srcId),
-        admin.from('listini_clienti_fasce').select('corriere_id,zona_id,peso_min,peso_max,tipo,fuel,prezzo').eq('listino_id', srcId),
-        admin.from('listini_clienti_supplementi').select('corriere_id,tipo,descrizione,valore,tipo_calcolo,nome').eq('listino_id', srcId),
-      ])
-      if (cs?.length) await admin.from('listini_clienti_corrieri').insert(cs.map((r: any) => ({ ...r, listino_id: nuovo.id })))
-      if (fs?.length) await admin.from('listini_clienti_fasce').insert(fs.map((r: any) => ({ ...r, listino_id: nuovo.id })))
-      if (ss?.length) await admin.from('listini_clienti_supplementi').insert(ss.map((r: any) => ({ ...r, listino_id: nuovo.id })))
+      // fetchAll (oltre 1000 righe non si troncano) + controllo errori: se una insert fallisce la
+      // bozza NON deve restare a metà → rollback (il CASCADE toglie i figli) e 400. Prima le insert
+      // erano `if (?.length)` senza verifica e la bozza poteva uscire vuota/parziale.
+      const { fetchAll } = await import('@/lib/fetch-all')
+      const cs = await fetchAll(() => admin.from('listini_clienti_corrieri').select('corriere_id,fattore_volume,abilitato').eq('listino_id', srcId).order('corriere_id', { ascending: true }))
+      const fs = await fetchAll(() => admin.from('listini_clienti_fasce').select('corriere_id,zona_id,peso_min,peso_max,tipo,fuel,prezzo').eq('listino_id', srcId).order('id', { ascending: true }))
+      const ss = await fetchAll(() => admin.from('listini_clienti_supplementi').select('corriere_id,tipo,descrizione,valore,tipo_calcolo,nome').eq('listino_id', srcId).order('id', { ascending: true }))
+      const rollback = async (msg: string) => { await admin.from('listini_clienti').delete().eq('id', nuovo.id); return NextResponse.json({ error: msg }, { status: 400 }) }
+      if (cs.length) { const { error } = await admin.from('listini_clienti_corrieri').insert(cs.map((r: any) => ({ ...r, listino_id: nuovo.id }))); if (error) return rollback('Copia contratti non riuscita: ' + error.message) }
+      for (let i = 0; i < fs.length; i += 1000) { const { error } = await admin.from('listini_clienti_fasce').insert(fs.slice(i, i + 1000).map((r: any) => ({ ...r, listino_id: nuovo.id }))); if (error) return rollback('Copia prezzi non riuscita: ' + error.message) }
+      if (ss.length) { const { error } = await admin.from('listini_clienti_supplementi').insert(ss.map((r: any) => ({ ...r, listino_id: nuovo.id }))); if (error) return rollback('Copia supplementi non riuscita: ' + error.message) }
     }
     await admin.from('preventivi').update({ listino_template_id: nuovo.id, updated_at: new Date().toISOString() }).eq('id', id)
     return NextResponse.json({ ok: true, listino_id: nuovo.id })

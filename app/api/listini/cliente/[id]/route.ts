@@ -240,16 +240,25 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{i
   const _bloccoAg = bloccaAgente(utenteAg); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
   const { id } = await params
 
-  const { count } = await supabase.from('clienti')
+  // GUARDIA COMPLETA prima di toccare qualsiasi cosa. Prima si guardavano SOLO i clienti: se il
+  // listino era assegnato a un SOTTO-MASTER (masters.parent_listino_id, FK NO ACTION) la cancellazione
+  // dei figli passava ma la DELETE dell'header veniva RIFIUTATA dal DB → il listino restava SVUOTATO.
+  // È il bug "cancello e ritorna vuoto". Ora si guardano ANCHE i sotto-master.
+  const { count: nCli } = await supabase.from('clienti')
     .select('id', { count: 'exact', head: true }).eq('listino_cliente_id', id)
-  if ((count || 0) > 0) {
-    return NextResponse.json({ error: `Listino usato da ${count} cliente/i: riassegnali a un altro listino prima di eliminarlo.` }, { status: 400 })
+  if ((nCli || 0) > 0) {
+    return NextResponse.json({ error: `Listino usato da ${nCli} cliente/i: riassegnali a un altro listino prima di eliminarlo.` }, { status: 400 })
+  }
+  const { count: nSub } = await supabase.from('masters')
+    .select('id', { count: 'exact', head: true }).eq('parent_listino_id', id)
+  if ((nSub || 0) > 0) {
+    return NextResponse.json({ error: `Listino assegnato a ${nSub} sotto-master: riassegnalo prima di eliminarlo.` }, { status: 400 })
   }
 
-  await supabase.from('listini_clienti_fasce').delete().eq('listino_id', id)
-  await supabase.from('listini_clienti_supplementi').delete().eq('listino_id', id)
-  await supabase.from('listini_clienti_corrieri').delete().eq('listino_id', id)
+  // ATOMICO: si cancella SOLO l'header; i figli (fasce/supplementi/corrieri) scendono da soli col
+  // ON DELETE CASCADE (verificato sul DB). Così, se la DELETE venisse rifiutata da un riferimento
+  // imprevisto, il listino NON resta mai svuotato — prima invece i figli erano già stati cancellati.
   const { error } = await supabase.from('listini_clienti').delete().eq('id', id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  if (error) return NextResponse.json({ error: 'Impossibile eliminare il listino: è ancora referenziato. ' + error.message }, { status: 400 })
   return NextResponse.json({ ok: true })
 }

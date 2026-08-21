@@ -32,6 +32,13 @@ export async function POST(req: NextRequest) {
     .eq('id', corriereId).eq('master_id', utente.master_id).maybeSingle()
   if (!corr) return NextResponse.json({ error: 'Corriere non trovato' }, { status: 404 })
 
+  // Le FASCE del corriere sorgente si leggono PRIMA di creare/agganciare qualsiasi cosa: copiare un
+  // corriere SENZA prezzi lasciava un listino agganciato ma VUOTO (il bug "duplicato vuoto"). Meglio
+  // rifiutare subito e dire di compilare i prezzi all'origine, così non nasce mai un guscio vuoto.
+  const { data: fasce } = await admin.from('listini_clienti_fasce')
+    .select('zona_id,peso_min,peso_max,prezzo,tipo,fuel').eq('listino_id', sourceListinoId).eq('corriere_id', corriereId)
+  if (!fasce?.length) return NextResponse.json({ error: `Il corriere "${corr.nome_contratto}" non ha prezzi nel listino di origine: compila prima le fasce, poi duplicalo.` }, { status: 400 })
+
   let targetId = targetListinoId as string | undefined
   let creato = false
   if (nuovoNome && String(nuovoNome).trim()) {
@@ -67,11 +74,9 @@ export async function POST(req: NextRequest) {
     })()),
     abilitato: cr?.abilitato ?? true,
   })
-  // Fasce del corriere (IDEMPOTENTE: pulisco il target prima, così non si duplica su ri-copia)
-  const { data: fasce } = await admin.from('listini_clienti_fasce')
-    .select('zona_id,peso_min,peso_max,prezzo,tipo,fuel').eq('listino_id', sourceListinoId).eq('corriere_id', corriereId)
+  // Fasce del corriere (già lette e verificate NON vuote sopra; IDEMPOTENTE: pulisco il target prima).
   await admin.from('listini_clienti_fasce').delete().eq('listino_id', targetId).eq('corriere_id', corriereId)
-  if (fasce?.length) await admin.from('listini_clienti_fasce').insert(fasce.map((f: any) => ({ ...f, listino_id: targetId, corriere_id: corriereId, prezzo: applicaMarkup(f.prezzo, f.tipo, f.peso_max) })))
+  await admin.from('listini_clienti_fasce').insert(fasce.map((f: any) => ({ ...f, listino_id: targetId, corriere_id: corriereId, prezzo: applicaMarkup(f.prezzo, f.tipo, f.peso_max) })))
   // Supplementi del corriere (idem)
   const { data: sup } = await admin.from('listini_clienti_supplementi')
     .select('tipo,descrizione,valore,tipo_calcolo,nome').eq('listino_id', sourceListinoId).eq('corriere_id', corriereId)
