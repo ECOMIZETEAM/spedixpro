@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
       // direttamente dal JSON, e l'etichetta si guarda a parte (solo gli id di chi non ce l'ha).
       // ep_offerta/ep_ordine: i due riferimenti del terzo provider. Il tracking si interroga col
       // CODICE OFFERTA (per LDV risponde "Spedizione non trovata"), l'etichetta con l'id ordine.
-      .select('id,numero,stato,tracking_number,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali,nome_contratto),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code,ep_offerta:raw_response->_codiceOfferta,ep_ordine:raw_response->_idOrdine,richiedi_ritiro,ritiro_id,created_at,ep_ritiro:raw_response->_codiceRitiro')
+      .select('id,numero,stato,tracking_number,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali,nome_contratto),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code,ep_offerta:raw_response->_codiceOfferta,ep_ordine:raw_response->_idOrdine,gls_numero:raw_response->numero,richiedi_ritiro,ritiro_id,created_at,ep_ritiro:raw_response->_codiceRitiro')
       .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
       .order('tracking_check_at', { ascending: true, nullsFirst: true })
       .order('id', { ascending: true })
@@ -148,6 +148,20 @@ export async function GET(req: NextRequest) {
         // seconda occasione per rimpiazzare il numero provvisorio "DVA-<ordine>".
         const ldv = (raw as any)?.tracking?.lettera_vettura
         if (ldv) nuovoTracking = String(ldv)
+
+      } else if (tipo === 'gls') {
+        // GLS DIRETTO (contratto proprio): il webservice di creazione non dà lo stato di consegna,
+        // lo legge il T&T Infoweb (manuale MU40). Serve il numero NUDO salvato in raw_response.numero
+        // alla creazione — il tracking_number è prefissato (NL…), che il T&T non accetta. Le
+        // credenziali (sigla_sede/codice_contratto) arrivano dalla join corrieri.credenziali via admin.
+        const numeroNudo = (s as any).gls_numero
+        if (!numeroNudo || !cred?.sigla_sede) return
+        const { trackingGls, mapStatoGls } = await import('@/lib/gls')
+        const { stati } = await trackingGls(cred, String(numeroNudo))
+        for (const str of stati) {
+          const m = mapStatoGls(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
 
       } else {
         return

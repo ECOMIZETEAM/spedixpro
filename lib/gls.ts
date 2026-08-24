@@ -22,6 +22,8 @@
 // pannello), MAI in chat. Qui arrivano già lette da chi chiama.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { testoIndicaReso } from '@/lib/spedisci'
+
 const GLS_ENDPOINT = 'https://labelservice.gls-italy.com/ilswebservice.asmx'
 const GLS_NS = 'https://labelservice.gls-italy.com/'
 
@@ -328,4 +330,84 @@ export async function creaSpedizioneConEtichettaGls(cred: CredenzialiGls, parcel
   } catch {
     return ris // l'etichetta la riprende il recupero in background
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TRACKING DI CONSEGNA — T&T Infoweb (manuale GLS MU40)
+//
+// Il webservice di CREAZIONE (labelservice) NON dà lo stato di consegna: quello si legge dal sistema
+// Track & Trace separato di GLS. Endpoint GET XML pubblico, keyato da sede+contratto+numero (niente
+// password). Ritorna gli eventi come gli altri provider — una lista di stringhe di stato che il cron
+// mappa con mapStatoGls + prioritaStato.
+//
+// Host DIVERSO dalla creazione: infoweb.gls-italy.com (TLS 1.2+, richiesto da GLS). Vuole il numero
+// NUDO (es. 860091374), quello salvato in raw_response.numero alla creazione, NON il tracking_number
+// prefissato (NL860…) che il T&T non riconosce.
+// ─────────────────────────────────────────────────────────────────────────────
+const GLS_TT_ENDPOINT = 'https://infoweb.gls-italy.com/XML/get_xml_track.php'
+
+// Interroga il T&T GLS per numero spedizione e ritorna le stringhe di stato del tracking PRINCIPALE.
+export async function trackingGls(
+  cred: CredenzialiGls, numeroNudo: string, timeoutMs = 15000
+): Promise<{ stati: string[]; raw: string }> {
+  const sede = (cred.sigla_sede || '').trim()
+  const contratto = (cred.codice_contratto || '').trim()
+  const num = String(numeroNudo || '').replace(/\D/g, '')   // il T&T vuole il numero NUDO (solo cifre)
+  if (!sede || !num) return { stati: [], raw: '' }
+  const url = `${GLS_TT_ENDPOINT}?locpartenza=${encodeURIComponent(sede)}&NumSped=${encodeURIComponent(num)}` +
+    (contratto ? `&CodCli=${encodeURIComponent(contratto)}` : '')
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), timeoutMs)
+  let xml = ''
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/xml, text/xml' } })
+    xml = await res.text()
+  } catch {
+    return { stati: [], raw: '' }   // rete/timeout: nessun aggiornamento, si riprova al giro dopo
+  } finally {
+    clearTimeout(t)
+  }
+  // SOLO il PRIMO blocco <TRACKING>…</TRACKING> = la spedizione principale. Gli eventuali
+  // <SPEDIZIONEDIRIENTRO> (reso) / <SPEDIZIONEDINOLTRO> (inoltro) hanno un LORO <TRACKING> con la
+  // "Consegnata." del RITORNO al mittente: leggerli qui marcherebbe consegnata la spedizione di
+  // ANDATA (stesso genere di bug del reso letto come consegna). <TRACKINGINT> ha un tag diverso e
+  // non viene catturato da questa regex. NON si mappa <StatoSpedizione> ("Non consegnato" è il
+  // default di QUALSIASI spedizione non ancora consegnata, non una mancata consegna): ci si basa
+  // sui testi precisi degli eventi.
+  const mTrack = /<TRACKING>([\s\S]*?)<\/TRACKING>/i.exec(xml)
+  const blocco = mTrack ? mTrack[1] : ''
+  const stati: string[] = []
+  const re = /<Stato>([\s\S]*?)<\/Stato>/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(blocco))) {
+    const s = m[1].replace(/\s+/g, ' ').trim()
+    if (s) stati.push(s)
+  }
+  return { stati, raw: xml.substring(0, 2000) }
+}
+
+// Mappa una stringa di stato del T&T GLS (evento <Stato>) allo stato interno. Sullo stampo di
+// mapStatoEasyparcel, con la REGOLA RESO condivisa (testoIndicaReso). Ordine per priorità.
+export function mapStatoGls(testo: string): string | null {
+  const s = (testo || '').toLowerCase().trim()
+  if (!s) return null
+  // 1) RESO: regola unica condivisa (verbo di rientro + "al mittente"). GLS di norma mette il reso in
+  //    una spedizione a parte (<SPEDIZIONEDIRIENTRO>, che qui NON leggiamo), ma se un evento del
+  //    tracking principale dice "…al mittente" lo cogliamo lo stesso.
+  if (testoIndicaReso(s)) return 'reso_mittente'
+  // 2) CONSEGNATA: "consegnat…" col T finale. "consegna prevista" (senza T) è in consegna, non qui.
+  if (/consegnat/.test(s)) return 'consegnata'
+  // 3) GIACENZA VERA (in sede, in attesa di istruzioni dal mittente): è quella che si ADDEBITA, come
+  //    per gli altri corrieri. NB: la disponibilità presso un GLS Point/Shop NON è una giacenza da
+  //    addebitare (è un punto di ritiro, spesso la modalità scelta dal destinatario) → sta al punto 4.
+  if (/in giacenza|giacenza presso/.test(s)) return 'in_giacenza'
+  // 4) IN CONSEGNA / disponibile al punto di ritiro (nessun addebito).
+  if (/consegna prevista|in consegna|out for delivery|in distribuzione|disponibile per il ritiro|disponibile presso/.test(s)) return 'in_consegna'
+  // 5) MANCATA CONSEGNA vera (evento, non la "Non consegnato" complessiva che qui non arriva mai).
+  if (/consegna non riuscita|indirizzo errato|indirizzo incompleto|destinatario assente|mancata|rifiut/.test(s)) return 'non_consegnato'
+  // 6) IN TRANSITO.
+  if (/in transito|partita dalla sede|arrivata nella sede|smistament|hub|inoltrat|in viaggio/.test(s)) return 'in_transito'
+  // 7) SPEDITA / presa in carico (inclusa "creata dal mittente", che testoIndicaReso NON matcha apposta).
+  if (/creata dal mittente|registrata nei nostri sistemi|ritiro effettuato|presa in carico|affidata a gls|spedit|accettat/.test(s)) return 'spedita'
+  return null
 }
