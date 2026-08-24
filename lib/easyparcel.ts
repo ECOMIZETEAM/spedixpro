@@ -185,20 +185,38 @@ export async function easyparcelQuotation(apikey: string, dati: {
   if (dati.contrassegno && dati.contrassegno > 0) accessori.contrassegno_importo = Number(dati.contrassegno.toFixed(2))
   if (dati.assicurazione && dati.assicurazione > 0) accessori.assicurazione_importo = Number(dati.assicurazione.toFixed(2))
 
-  const d = await chiama(apikey, 'quotation', {
+  const colli = serieColli(dati.colli)
+  const mittente = luogo(dati.mittente, false)
+  const destinatario = luogo(dati.destinatario, estero)
+
+  // cosa_spedire: 'M' = pacchi (merce), 'P' = pallet. Sopra il peso massimo PER COLLO il provider
+  // rifiuta il pacco con errorcode -98 ("Oltre singolo peso massimo consentito"): quella merce per DVA
+  // e' un PALLET, non un pacco (lo distingue anche il loro pannello — "Pacchi / Documenti / Pallet").
+  // Il limite dipende dal contratto (verificato sull'API reale: gia' 100 kg su un collo lo supera),
+  // quindi non si hardcoda una soglia — si riprova la STESSA quotazione come pallet. L'offerta pallet
+  // porta il suo codice_offerta e l'ordine (che usa solo quel codice) parte senza altre modifiche.
+  const richiesta = (cosaSpedire: 'M' | 'P') => ({
     dettagli: {
       tipo_spedizione: estero ? 'E' : 'N',
-      cosa_spedire: 'M',
+      cosa_spedire: cosaSpedire,
       // Campo obbligatorio per il provider. Da noi la descrizione merce e' facoltativa:
       // senza un ripiego la quotazione fallirebbe su ogni spedizione lasciata in bianco.
       contenuto: (dati.contenuto || '').trim().slice(0, 50) || 'MERCE VARIA',
       ...(Object.keys(accessori).length ? { accessori } : {}),
     },
-    colli: serieColli(dati.colli),
-    mittente: luogo(dati.mittente, false),
-    destinatario: luogo(dati.destinatario, estero),
+    colli, mittente, destinatario,
   })
-  return Array.isArray(d.quotation) ? d.quotation : []
+
+  try {
+    const d = await chiama(apikey, 'quotation', richiesta('M'))
+    return Array.isArray(d.quotation) ? d.quotation : []
+  } catch (e: any) {
+    if (e instanceof ErroreEasyparcel && (e.codice === -98 || /peso massimo/i.test(e.message || ''))) {
+      const d = await chiama(apikey, 'quotation', richiesta('P'))
+      return Array.isArray(d.quotation) ? d.quotation : []
+    }
+    throw e
+  }
 }
 
 // I colli non si spediscono uno per elemento: il provider ragiona per SERIE di colli uguali.
