@@ -22,7 +22,7 @@ export async function DELETE(req: NextRequest) {
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
   const { data: sped } = await admin.from('spedizioni')
-    .select('id,master_id,cliente_id,stato,corriere_id,raw_response,tracking_number,numero,dest_nome')
+    .select('id,master_id,cliente_id,stato,corriere_id,raw_response,tracking_number,numero,dest_nome,created_at')
     .eq('id', spedizioneId).single()
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 
@@ -93,7 +93,18 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true, manuale: true, message: 'Richiesta di annullo inviata: questo corriere non consente la cancellazione automatica, quindi verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
   }
 
-  // ── ALTRI CORRIERI (SpediamoPro): ATTESA 48h (pending). Nessuna chiamata al corriere ora. ──
+  // ── SpediamoPro oltre 15 giorni: il corriere NON annulla più (limite fisso di Poste, mostrato
+  //    anche dal pannello SpediamoPro). Aspettare 48h per un rifiuto certo — e poi vederla "tornare
+  //    disponibile" — confonde e basta, e la coda manuale sarebbe una promessa falsa (nemmeno a mano
+  //    si annulla). Lo diciamo SUBITO e lo scriviamo sulla spedizione, che resta valida. ──
+  if (corr?.tipo === 'spediamopro' && (sped as any).created_at &&
+      new Date((sped as any).created_at).getTime() < Date.now() - 15 * 24 * 60 * 60 * 1000) {
+    const msg = 'Non annullabile: sono passati più di 15 giorni dalla creazione — il corriere non consente più l\'annullo.'
+    await admin.from('spedizioni').update({ annullamento_errore: msg }).eq('id', spedizioneId)
+    return NextResponse.json({ error: msg }, { status: 400 })
+  }
+
+  // ── ALTRI CORRIERI (SpediamoPro entro i 15 giorni): ATTESA 48h (pending). Nessuna chiamata ora. ──
   const { error: updErr } = await admin.from('spedizioni').update({
     stato: 'annullamento_pending',
     stato_precedente: sped.stato,

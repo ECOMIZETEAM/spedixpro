@@ -67,11 +67,16 @@ export async function GET(req: NextRequest) {
         await rimborsaAnnulloSpedizione(admin, s as any, (s as any).annullamento_da || null)
         annullate++
       } else {
-        // Il corriere rifiuta: torno allo stato precedente con la nota d'errore (non resta appesa in pending)
+        // Il corriere rifiuta: torno allo stato precedente con la nota d'errore (non resta appesa in
+        // pending). Il caso piu' comune e' il limite dei 15 giorni di Poste: lo scrivo in italiano chiaro.
+        const reason = esito.reason || 'spedizione già spedita o chiusa in distinta'
+        const nota = /15\s*(days|giorni)/i.test(reason)
+          ? 'Non annullabile: sono passati più di 15 giorni dalla creazione — il corriere non consente più l\'annullo.'
+          : `Annullo rifiutato dal corriere: ${reason}`
         await admin.from('spedizioni').update({
           stato: (s as any).stato_precedente || 'in_lavorazione',
           annullamento_richiesto_at: null,
-          annullamento_errore: `Annullo rifiutato dal corriere: ${esito.reason || 'spedizione già spedita o chiusa in distinta'}`,
+          annullamento_errore: nota,
         }).eq('id', s.id)
         rifiutate++
       }
