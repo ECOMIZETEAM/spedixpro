@@ -86,6 +86,19 @@ async function login(): Promise<{ userKey: string; sessionKey: string } | null> 
   } catch { return null }
 }
 
+// message_type dell'API REST Skebby/Esendex: GP (Classic+, con delivery report), TI (Classic),
+// SI (Basic). Il codice mandava 'N'/'L'/'LL' — valori del VECCHIO endpoint HTTP, NON validi per la
+// REST v1.0 → ogni invio veniva RIFIUTATO ("Invalid value for parameter [message_type]"): è il motivo
+// per cui gli SMS non partivano pur avendo user_key+access_token+sender configurati. L'alias mittente
+// (TPOA, es. "moovexpress") è ammesso solo con le qualità ALTE → default GP.
+function tipoMessaggio(): string {
+  const q = String(process.env.ESENDEX_QUALITY || process.env.SKEBBY_QUALITY || '').toUpperCase()
+  if (q === 'GP' || q === 'TI' || q === 'SI' || q === 'AD') return q
+  if (q === 'L') return 'TI'        // retrocompat: media
+  if (q === 'LL') return 'SI'       // retrocompat: bassa (l'alias potrebbe non essere ammesso)
+  return 'GP'                       // 'N' o vuoto: alta qualità con report (l'alias richiede alta qualità)
+}
+
 // Invio grezzo di un SMS. Ritorna ok/errore, non lancia.
 export async function inviaSms(telefono: string, messaggio: string): Promise<{ ok: boolean; error?: string }> {
   const dest = normalizzaTelefonoIT(telefono)
@@ -97,8 +110,7 @@ export async function inviaSms(telefono: string, messaggio: string): Promise<{ o
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...auth },
       body: JSON.stringify({
-        // Esendex: 'N' alta qualità/consegna, 'L' media, 'LL' bassa/economica.
-        message_type: process.env.ESENDEX_QUALITY || process.env.SKEBBY_QUALITY || 'N',
+        message_type: tipoMessaggio(),   // GP/TI/SI (mai 'N': rifiutato dalla REST)
         message: messaggio,
         sender: process.env.ESENDEX_SENDER || process.env.SKEBBY_SENDER || 'MoovExpress',
         recipient: [dest],
