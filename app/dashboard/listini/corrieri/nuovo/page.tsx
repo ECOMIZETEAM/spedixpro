@@ -146,6 +146,9 @@ export default function ListinoCorrierePage() {
   const [dupMarkup, setDupMarkup] = useState<MarkupOut>({ default: null, perFascia: {} })
   const [duplicando, setDuplicando] = useState(false)
   const [dupMsg, setDupMsg] = useState('')
+  // Modale aperto → blocca lo scroll della pagina sotto: la tabella per-fascia è lunga e senza questo
+  // la rotella scorre il listino dietro invece del popup (stesso pattern del widget Supporto).
+  useEffect(() => { if (!dupOpen) return; document.body.style.overflow = 'hidden'; return () => { document.body.style.overflow = '' } }, [dupOpen])
   const keyFascia = (f: Fascia) => `${f.tipo === 'oltre' ? 'oltre' : 'fino_a'}_${Number(f.kg)}`
   // Fasce per l'editor markup: costo d'esempio = il piu' basso fra le zone della fascia.
   const fasceMarkup = useMemo(() => fasce.map(f => {
@@ -641,8 +644,8 @@ export default function ListinoCorrierePage() {
       )}
 
       {dupOpen && (
-        <div onClick={()=>duplicando?null:setDupOpen(false)} style={{position:'fixed',inset:0,background:'rgba(15,15,15,0.55)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',maxWidth:'560px',width:'100%',maxHeight:'88vh',overflowY:'auto' as const,padding:'22px',boxShadow:'0 20px 60px rgba(0,0,0,.35)'}}>
+        <div onClick={()=>duplicando?null:setDupOpen(false)} style={{position:'fixed',inset:0,background:'rgba(15,15,15,0.55)',zIndex:9999,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'20px',overflowY:'auto'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',maxWidth:'560px',width:'100%',margin:'auto',maxHeight:'88vh',overflowY:'auto' as const,overscrollBehavior:'contain' as const,padding:'22px',boxShadow:'0 20px 60px rgba(0,0,0,.35)'}}>
             <div style={{fontSize:'17px',fontWeight:800,color:'#1a1a1a',marginBottom:'4px'}}>Duplica in listino cliente</div>
             <div style={{fontSize:'12.5px',color:'#666',marginBottom:'16px'}}>Copio il <b>costo</b> di <b>{corrieri.find((c:any)=>c.id===corriereId)?.nome_contratto||'—'}</b> in un listino cliente, con la maggiorazione. Le zone restano le stesse.</div>
 

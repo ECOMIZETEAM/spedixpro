@@ -209,6 +209,9 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   const [dlLoad, setDlLoad] = useState(false)
   const [dlSaving, setDlSaving] = useState(false)
   const [dlErr, setDlErr] = useState('')
+  // Un modale aperto → blocca lo scroll della pagina sotto: senza questo la rotella "sfonda" e scorre
+  // l'editor dietro invece del contenuto del popup (stesso pattern del widget Supporto).
+  useEffect(() => { if (!dcOpen && !dlOpen && !copia) return; document.body.style.overflow = 'hidden'; return () => { document.body.style.overflow = '' } }, [dcOpen, dlOpen, copia])
   async function apriDaCosto(c: any) {
     setDcCorr(c); setDcOpen(true); setDcLoad(true); setDcFasce([]); setDcMarkup({ default: null, perFascia: {} })
     try {
@@ -844,8 +847,8 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
 
       {/* Popup COPIA CORRIERE */}
       {dlOpen && (
-        <div onClick={()=>!dlSaving && setDlOpen(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',width:'100%',maxWidth:'560px',maxHeight:'85vh',overflow:'auto',boxShadow:'0 10px 40px rgba(0,0,0,0.2)'}}>
+        <div onClick={()=>!dlSaving && setDlOpen(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1000,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'20px',overflowY:'auto'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',width:'100%',maxWidth:'560px',margin:'auto',maxHeight:'85vh',overflow:'auto',overscrollBehavior:'contain' as const,boxShadow:'0 10px 40px rgba(0,0,0,0.2)'}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'16px 20px',borderBottom:'1px solid #eee'}}>
               <span style={{fontWeight:800,fontSize:'15px',color:'#1a1a1a'}}>Aggiungi corriere da un listino esistente</span>
               <button onClick={()=>setDlOpen(false)} style={{background:'none',border:'none',fontSize:'20px',cursor:'pointer',color:'#999',lineHeight:1}}>×</button>
@@ -886,8 +889,8 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       )}
 
       {copia && (
-        <div onClick={()=>!copiaSaving && setCopia(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',width:'440px',maxWidth:'92vw',boxShadow:'0 20px 60px rgba(0,0,0,.25)',overflow:'hidden'}}>
+        <div onClick={()=>!copiaSaving && setCopia(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1000,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'20px',overflowY:'auto'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',width:'440px',maxWidth:'92vw',margin:'auto',boxShadow:'0 20px 60px rgba(0,0,0,.25)',overflow:'hidden'}}>
             <div style={{padding:'16px 20px',borderBottom:'1px solid #eee',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
               <span style={{fontWeight:800,fontSize:'15px',color:'#1a1a1a'}}>Copia corriere</span>
               <button onClick={()=>setCopia(null)} style={{background:'none',border:'none',fontSize:'20px',cursor:'pointer',color:'#999',lineHeight:1}}>×</button>
@@ -933,8 +936,8 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
 
       {/* Riempi dal costo + margine (%/€) */}
       {dcOpen && (
-        <div onClick={()=>!dcSaving && setDcOpen(false)} style={{position:'fixed',inset:0,background:'rgba(15,15,15,0.55)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',width:'100%',maxWidth:'600px',maxHeight:'86vh',overflowY:'auto' as const,padding:'20px'}}>
+        <div onClick={()=>!dcSaving && setDcOpen(false)} style={{position:'fixed',inset:0,background:'rgba(15,15,15,0.55)',zIndex:9999,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'20px',overflowY:'auto'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',width:'100%',maxWidth:'600px',margin:'auto',maxHeight:'86vh',overflowY:'auto' as const,overscrollBehavior:'contain' as const,padding:'20px'}}>
             <div style={{fontSize:'16px',fontWeight:800,color:'#1a1a1a',marginBottom:'4px'}}>Riempi dal costo — {dcCorr?.nome_contratto}</div>
             <div style={{fontSize:'12.5px',color:'#666',marginBottom:'14px'}}>Parte dal <b>tuo costo</b> su questo corriere e applica la maggiorazione (% o € fisso) su tutte le zone. Sovrascrive i prezzi attuali di questo contratto (le zone che non hai a costo restano vuote).</div>
             {dcLoad ? <div style={{padding:'20px',textAlign:'center',color:'#999',fontSize:'13px'}}>Carico il costo…</div>

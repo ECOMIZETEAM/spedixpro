@@ -47,6 +47,9 @@ export default function ListiniPage() {
       .catch(() => setLoading(false))
   }
   useEffect(() => { carica() }, [])
+  // Modale aperto → blocca lo scroll della pagina sotto: altrimenti la rotella "sfonda" il popup e
+  // scorre la lista dietro invece del contenuto del popup (stesso pattern del widget Supporto).
+  useEffect(() => { if (!dupModal) return; document.body.style.overflow = 'hidden'; return () => { document.body.style.overflow = '' } }, [dupModal])
 
   async function elimina(id: string, nome: string) {
     if (!await dialog.confirm({ title: `Eliminare il listino "${nome}"?`, message: 'L\'operazione è irreversibile.', danger: true, confirmText: 'Elimina' })) return
@@ -145,8 +148,8 @@ export default function ListiniPage() {
       </div>
 
       {dupModal && (
-        <div onClick={()=>duplicando ? null : setDupModal(null)} style={{position:'fixed',inset:0,background:'rgba(15,15,15,0.55)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',maxWidth:'440px',width:'100%',padding:'24px',boxShadow:'0 20px 60px rgba(0,0,0,.35)'}}>
+        <div onClick={()=>duplicando ? null : setDupModal(null)} style={{position:'fixed',inset:0,background:'rgba(15,15,15,0.55)',zIndex:9999,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'20px',overflowY:'auto'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',maxWidth:'440px',width:'100%',margin:'auto',padding:'24px',boxShadow:'0 20px 60px rgba(0,0,0,.35)'}}>
             <div style={{fontSize:'17px',fontWeight:800,color:'#1a1a1a',marginBottom:'6px'}}>Duplica listino</div>
             <div style={{fontSize:'13px',color:'#666',marginBottom:'18px'}}>Copia di <b>{dupModal.nome}</b></div>
 
