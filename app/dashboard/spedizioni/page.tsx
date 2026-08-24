@@ -349,7 +349,9 @@ async function apriTracking(s: any) {
       window.scrollTo({ top: 0, behavior: 'smooth' })
       ricarica()
     } else {
-      setNotifica('Impossibile eliminare la spedizione. Hai bisogno del permesso per eseguire questa azione!')
+      // Mostra il motivo VERO dell'API (es. "Non annullabile: oltre 15 giorni", "consegnata: non si
+      // annulla"). Il messaggio generico sui permessi resta solo come ultima spiaggia (403 senza corpo).
+      setNotifica(j.error || 'Impossibile eliminare la spedizione. Hai bisogno del permesso per eseguire questa azione!')
       window.scrollTo({ top: 0, behavior: 'smooth' })
     }
     setTimeout(() => setNotifica(''), 4000)
