@@ -65,9 +65,10 @@ export function normalizzaTelefonoIT(raw: string | null | undefined): string | n
   return null
 }
 
-// Sessione Skebby in cache (le chiavi durano a lungo: si evita un login a ogni SMS).
+// Sessione Esendex in cache. ATTENZIONE: la session_key SCADE dopo 5 min di INATTIVITÀ (docs Esendex):
+// il vecchio TTL 30 min faceva inviare con una chiave già morta → "Invalid value for parameter". 4 min.
 let sessione: { userKey: string; sessionKey: string; ts: number } | null = null
-const SESSIONE_TTL = 30 * 60 * 1000
+const SESSIONE_TTL = 4 * 60 * 1000
 
 async function login(): Promise<{ userKey: string; sessionKey: string } | null> {
   if (sessione && Date.now() - sessione.ts < SESSIONE_TTL) return sessione
@@ -88,17 +89,13 @@ async function login(): Promise<{ userKey: string; sessionKey: string } | null> 
   } catch { return null }
 }
 
-// message_type dell'API REST Skebby/Esendex: GP (Classic+, con delivery report), TI (Classic),
-// SI (Basic). Il codice mandava 'N'/'L'/'LL' — valori del VECCHIO endpoint HTTP, NON validi per la
-// REST v1.0 → ogni invio veniva RIFIUTATO ("Invalid value for parameter [message_type]"): è il motivo
-// per cui gli SMS non partivano pur avendo user_key+access_token+sender configurati. L'alias mittente
-// (TPOA, es. "moovexpress") è ammesso solo con le qualità ALTE → default GP.
+// message_type dell'API REST ESENDEX (docs.esendex.it/#esendex-rest-api-introduction): 'N' (alta
+// qualità), 'L' (media), 'LL' (bassa). Questo conto è ESENDEX, NON Skebby: i codici NON sono GP/TI/SI.
+// 'N' è alta qualità e supporta l'alias mittente (TPOA "moovexpress"). Default 'N'.
 function tipoMessaggio(): string {
   const q = String(process.env.ESENDEX_QUALITY || process.env.SKEBBY_QUALITY || '').toUpperCase()
-  if (q === 'GP' || q === 'TI' || q === 'SI' || q === 'AD') return q
-  if (q === 'L') return 'TI'        // retrocompat: media
-  if (q === 'LL') return 'SI'       // retrocompat: bassa (l'alias potrebbe non essere ammesso)
-  return 'GP'                       // 'N' o vuoto: alta qualità con report (l'alias richiede alta qualità)
+  if (q === 'N' || q === 'L' || q === 'LL') return q
+  return 'N'
 }
 
 // Invio grezzo di un SMS. Ritorna ok/errore, non lancia.
@@ -106,7 +103,11 @@ export async function inviaSms(telefono: string, messaggio: string): Promise<{ o
   const dest = normalizzaTelefonoIT(telefono)
   if (!dest) return { ok: false, error: 'numero non cellulare' }
   const auth = await authHeaders()
-  if (!auth) return { ok: false, error: 'gateway non configurato' }
+  if (!auth) {
+    // Distinguo "manca tutto" da "credenziali email/password c'erano ma il /login è fallito" (creds
+    // errate o WAF che blocca il Basic Auth dagli IP Vercel): errori diversi, fix diversi.
+    return { ok: false, error: basicConfigurato() ? 'login Esendex non riuscito (email/password errate o /login bloccato da Vercel): usa il token' : 'gateway non configurato (nessuna credenziale Esendex)' }
+  }
   try {
     const r = await fetch(`${BASE}/sms`, {
       method: 'POST',
