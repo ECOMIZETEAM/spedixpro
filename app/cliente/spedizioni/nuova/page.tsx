@@ -86,11 +86,21 @@ export default function NuovaSpedizioneCliente() {
   const [catalogo, setCatalogo] = useState<ArticoloCat[]>([])
   const [articoliScelti, setArticoliScelti] = useState<RigaArticolo[]>([])
   useEffect(() => { fetch('/api/cliente/articoli').then(r=>r.json()).then(d=>setCatalogo(Array.isArray(d)?d:[])).catch(()=>{}) }, [])
+  // Precompila il codice HS dalla merce del catalogo (colonna codice_hs), senza sovrascrivere quello
+  // digitato a mano: la dogana usa una voce aggregata, quindi basta il primo articolo che ce l'ha.
+  useEffect(() => {
+    const art = articoliScelti.map(r => catalogo.find(a => a.id === r.id)).find(a => a && (a as any).codice_hs)
+    const code = art ? String((art as any).codice_hs).replace(/[^0-9]/g, '') : ''
+    if (code) setHscode(prev => prev ? prev : code)
+  }, [articoliScelti, catalogo])
   function applicaPacco(p:any) { setPeso(String(p.peso||'')); setNumColli(1); setColli([{ lunghezza:String(p.lunghezza||''), larghezza:String(p.larghezza||''), altezza:String(p.altezza||'') }]); setTariffe([]); setSelected(null) }
   const [contenuto, setContenuto] = useState('')
   const [tipoContenuto, setTipoContenuto] = useState('Merce destinata alla vendita')
   const [rifOrdine, setRifOrdine] = useState('')   // → "Rif." in etichetta (order id da import/integrazione o digitato)
   const [valoreMerce, setValoreMerce] = useState('')
+  // Codice HS/TARIC per la dogana (solo estero): senza, i corrieri internazionali DVA rifiutano l'ordine
+  // e prima non c'era un campo per inserirlo (si sperava solo nell'auto-ricerca dalla descrizione).
+  const [hscode, setHscode] = useState('')
   const [contrassegno, setContrassegno] = useState('0')
   const [assicurazione, setAssicurazione] = useState('0')
   const [tariffe, setTariffe] = useState<Tariffa[]>([])
@@ -261,7 +271,7 @@ export default function NuovaSpedizioneCliente() {
     if (c) setMitt({nome:c.ragione_sociale||'',indirizzo:c.so_indirizzo||'',citta:c.so_citta||'',provincia:c.so_provincia||'',cap:c.so_cap||'',email:c.email||'',telefono:c.telefono||''})
     setDest({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',paese:'IT',email:'',telefono:'',note:''})
     setNumColli(1); setColli([{lunghezza:'',larghezza:'',altezza:''}])
-    setPeso('1'); setContenuto(''); setTipoContenuto('Merce destinata alla vendita'); setValoreMerce(''); setRifOrdine('')
+    setPeso('1'); setContenuto(''); setTipoContenuto('Merce destinata alla vendita'); setValoreMerce(''); setHscode(''); setRifOrdine('')
     setContrassegno('0'); setAssicurazione('0')
     setTariffe([]); setSelected(null); setExtraNomi([])
     // Anche gli articoli: senza questo il pacco successivo scaricherebbe di nuovo la stessa merce.
@@ -287,7 +297,7 @@ export default function NuovaSpedizioneCliente() {
         shipFrom:{name:mitt.nome,company:mitt.nome,street1:mitt.indirizzo,street2:'',city:mitt.citta,state:mitt.provincia,postalCode:mitt.cap,country:'IT',phone:mitt.telefono,email:mitt.email},
         shipTo:{name:dest.nome,company:'',street1:dest.indirizzo,street2:'',city:dest.citta,state:dest.provincia,postalCode:dest.cap,country:dest.paese,phone:dest.telefono,email:dest.email},
         notes:dest.note, insuranceValue:+assicurazione, codValue:+contrassegno,
-        contenuto, tipoContenuto, valoreMerce, rifOrdine,
+        contenuto, tipoContenuto, valoreMerce, hscode, rifOrdine,
         // Ritiro: sui contratti DVA si prenota SOLO insieme all'ordine (il corriere non ha una
         // chiamata per aggiungerlo dopo), quindi la richiesta va passata gia' qui.
         richiediRitiro, dataRitiro:ritiroData, orarioRitiro:ritiroOrario
@@ -692,6 +702,13 @@ export default function NuovaSpedizioneCliente() {
                   <input type="number" value={valoreMerce} onChange={e=>setValoreMerce(e.target.value)} min="0" step="0.01" style={inp}/>
                 </div>
               </div>
+              {dest.paese !== 'IT' && (
+                <div style={{marginTop:'10px'}}>
+                  <label style={lbl}>Codice HS/TARIC (dogana)</label>
+                  <input value={hscode} onChange={e=>setHscode(e.target.value)} placeholder="es. 61091000 — solo cifre" style={inp}/>
+                  <div style={{fontSize:'11px',color:'#888',marginTop:'4px'}}>Obbligatorio per le spedizioni fuori Italia. Se lo lasci vuoto proviamo a ricavarlo dalla descrizione, ma potrebbe non bastare (in quel caso la spedizione non parte).</div>
+                </div>
+              )}
             </div>
           </div>)}
 

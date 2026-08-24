@@ -101,6 +101,14 @@ export default function NuovaSpedizionePage() {
   const [contenuto, setContenuto] = useState('')
   const [tipoContenuto, setTipoContenuto] = useState('Merce destinata alla vendita')
   const [valoreMerce, setValoreMerce] = useState('')
+  // Codice HS/TARIC per la dogana (solo estero): senza, i corrieri internazionali DVA rifiutano l'ordine.
+  const [hscode, setHscode] = useState('')
+  // Precompila il codice HS dalla merce del catalogo (colonna codice_hs), senza sovrascrivere il manuale.
+  useEffect(() => {
+    const art = articoliScelti.map(r => catalogo.find(a => a.id === r.id)).find(a => a && (a as any).codice_hs)
+    const code = art ? String((art as any).codice_hs).replace(/[^0-9]/g, '') : ''
+    if (code) setHscode(prev => prev ? prev : code)
+  }, [articoliScelti, catalogo])
   const [contrassegno, setContrassegno] = useState('0')
   const [assicurazione, setAssicurazione] = useState('0')
   const [tariffe, setTariffe] = useState<Tariffa[]>([])
@@ -291,7 +299,7 @@ export default function NuovaSpedizionePage() {
     setMitt(mittAzienda || {nome:'',indirizzo:'',citta:'',provincia:'',cap:'',email:'',telefono:''})
     setDest({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',paese:'IT',email:'',telefono:'',note:'',rif:'',ordine:''})
     setNumColli(1); setColli([{lunghezza:'',larghezza:'',altezza:''}])
-    setPeso('1'); setContenuto(''); setTipoContenuto('Merce destinata alla vendita'); setValoreMerce('')
+    setPeso('1'); setContenuto(''); setTipoContenuto('Merce destinata alla vendita'); setValoreMerce(''); setHscode('')
     setContrassegno('0'); setAssicurazione('0')
     setTariffe([]); setSelected(null); setExtraNomi([])
     // Esplicito anche se setClienteId('') qui sopra lo farebbe gia' scattare: se un domani l'ordine
@@ -319,7 +327,7 @@ export default function NuovaSpedizionePage() {
         shipFrom:{name:mitt.nome,company:mitt.nome,street1:mitt.indirizzo,street2:'',city:mitt.citta,state:mitt.provincia,postalCode:mitt.cap,country:'IT',phone:mitt.telefono,email:mitt.email},
         shipTo:{name:dest.nome,company:'',street1:dest.indirizzo,street2:'',city:dest.citta,state:dest.provincia,postalCode:dest.cap,country:dest.paese,phone:dest.telefono,email:dest.email},
         notes:dest.note, insuranceValue:+assicurazione, codValue:+contrassegno,
-        contenuto, tipoContenuto, valoreMerce,
+        contenuto, tipoContenuto, valoreMerce, hscode,
         rifOrdine:dest.ordine, rifDestinatario:dest.rif,
         // Ritiro: sui contratti DVA si prenota SOLO insieme all'ordine (il corriere non ha
         // una chiamata per aggiungerlo dopo), quindi la richiesta va passata gia' qui.
@@ -734,6 +742,13 @@ export default function NuovaSpedizionePage() {
                   <input type="number" value={valoreMerce} onChange={e=>setValoreMerce(e.target.value)} min="0" step="0.01" style={inp}/>
                 </div>
               </div>
+              {dest.paese !== 'IT' && (
+                <div style={{marginTop:'10px'}}>
+                  <label style={lbl}>Codice HS/TARIC (dogana)</label>
+                  <input value={hscode} onChange={e=>setHscode(e.target.value)} placeholder="es. 61091000 — solo cifre" style={inp}/>
+                  <div style={{fontSize:'11px',color:'#888',marginTop:'4px'}}>Obbligatorio per le spedizioni fuori Italia. Se lo lasci vuoto proviamo a ricavarlo dalla descrizione, ma potrebbe non bastare (in quel caso la spedizione non parte).</div>
+                </div>
+              )}
             </div>
           </div>)}
 
