@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
   const ragioneSociale = pulisci(corpo.ragione_sociale, 160)
   const piva = pulisci(corpo.piva, 20)
   const pianoId = pulisci(corpo.piano, 40)
-  const contrattiPreferenza = corpo.contratti === 'propri' ? 'propri' : 'nostri'
+  const contrattiPreferenza = corpo.contratti === 'propri' ? 'propri' : corpo.contratti === 'misto' ? 'misto' : 'nostri'
   const volume = pulisci(corpo.volume, 40)
   // Corrieri di interesse: solo BRAND (mai i nomi dei fornitori tecnici), da una lista chiusa.
   const CORRIERI_VALIDI = ['BRT', 'Poste', 'UPS', 'SDA', 'GLS', 'DHL']
@@ -132,7 +132,7 @@ export async function POST(req: NextRequest) {
     await admin.from('notifiche').insert({
       master_id: MULTIEXPRESS, cliente_id: null, gruppi: ['Amministratore'],
       oggetto: 'Nuova richiesta rivenditore', link: '/dashboard/clienti/master',
-      messaggio: `${ragioneSociale} — piano ${piano.nome}, listini ${contrattiPreferenza === 'propri' ? 'PROPRI' : 'MoovExpress'}${corrieri.length ? ', corrieri: ' + corrieri.join(', ') : ''}${volume ? ', ~' + volume + '/mese' : ''}. Da approvare.`,
+      messaggio: `${ragioneSociale} — piano ${piano.nome}, listini ${contrattiPreferenza === 'propri' ? 'PROPRI' : contrattiPreferenza === 'misto' ? 'MISTI (nostri+suoi)' : 'MoovExpress'}${corrieri.length ? ', corrieri: ' + corrieri.join(', ') : ''}${volume ? ', ~' + volume + '/mese' : ''}. Da approvare.`,
     })
   } catch {}
 
