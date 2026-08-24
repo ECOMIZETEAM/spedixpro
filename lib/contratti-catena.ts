@@ -8,17 +8,18 @@
 // tre modi in cui un antenato "toglie" un corriere al figlio, e vanno coperti TUTTI:
 //   (1) PAUSA        -> la riga del padre ha attivo=false;
 //   (2) DISATTIVA    -> masters_corrieri_abilitati(master_id=figlio, corriere_id=riga-padre, abilitato=false);
-//   (3) ELIMINA      -> il padre non offre piu' quel contratto nel listino ASSEGNATO al figlio
-//                       (nessuna fascia/aggancio in parent_listino_id) oppure la riga del padre non c'e' piu'.
+//   (3) ELIMINA      -> la riga del padre per quel contratto non c'e' piu' (il master l'ha cancellato).
 //
 // Qui si risale la catena e si raccolgono i NOMI dei contratti che il figlio ha EREDITATO ma che
 // l'antenato NON gli offre piu'. Il risultato puo' solo RESTRINGERE (nascondere), mai ampliare, ed e' un
 // filtro alla LETTURA: NON si cancella nulla nei dati del sotto-master (mai il rischio di cancellare un
 // suo contratto proprio omonimo). Un contratto PROPRIO non entra mai nell'elenco (guardia proprio).
 //
-// Verificato sui dati veri prima del rilascio: dei contratti che questo filtro nasconde, uno solo aveva
-// spedizioni negli ultimi 7 giorni (il contratto Poste internazionale inattivo, che deve sparire); tutti
-// gli altri erano gia' fermi da una pausa. Zero collisioni fra un contratto proprio del sub e un antenato.
+// ATTENZIONE (24/08): la prima versione nascondeva anche i contratti ATTIVI al padre ma senza fascia
+// nel listino assegnato al figlio. Sbagliato: spariva "Poste PDB Internazionale" a Ecomize LL pur essendo
+// attivo e spedibile. Ora si guardano SOLO le tre azioni vere (pausa/disattiva/elimina la riga), MAI il
+// listino: un prezzo mancante e' un problema di tariffa (nessuna tariffa esce), non di disponibilita' —
+// non deve nascondere il contratto. Il filtro puo' solo togliere cio' che il padre non ha piu' davvero.
 //
 // Nota sul client: service role perche' l'RLS sui corrieri (master_id IN mia_rete_master()) nasconde le
 // righe dei master superiori. Uso legittimo: si legge solo nome/attivo/aggancio/flag degli ANTENATI, e il
@@ -38,9 +39,8 @@ export async function contrattiRimossiSopra(masterId: string | null | undefined)
   const nomiPropriMiei = new Set<string>((cMio || []).map((c: any) => norm(c.nome_contratto)))
 
   for (let i = 0; i < 20; i++) {
-    const mRow: any = (await admin.from('masters').select('parent_master_id,parent_listino_id').eq('id', corrente).maybeSingle()).data
+    const mRow: any = (await admin.from('masters').select('parent_master_id').eq('id', corrente).maybeSingle()).data
     const padre: string | null = mRow?.parent_master_id || null
-    const listino: string | null = mRow?.parent_listino_id || null
     if (!padre || visti.has(padre)) break
     visti.add(padre)
 
@@ -49,20 +49,12 @@ export async function contrattiRimossiSopra(masterId: string | null | undefined)
     const { data: disab } = await admin.from('masters_corrieri_abilitati').select('corriere_id').eq('master_id', corrente).eq('abilitato', false)
     const disabIds = new Set((disab || []).map((r: any) => r.corriere_id))
 
-    // OFFERTI dal padre = attivo=true, non disabilitati per il figlio, e presenti nel listino assegnato
-    // (una fascia o un aggancio). Se il figlio non ha un listino assegnato (difensivo): basta attivo+non-disab.
-    const candidati = (cPadre || []).filter((c: any) => c.attivo !== false && !disabIds.has(c.id))
+    // OFFERTI dal padre = i contratti che il padre ha ANCORA, attivi e non disabilitati per il figlio.
+    // PAUSA (attivo=false), DISATTIVA (in disabIds) ed ELIMINA (riga del padre assente) lo fanno uscire da
+    // qui e quindi lo nascondono a valle. NIENTE listino: se il contratto e' attivo al padre spedisce.
     const offerti = new Set<string>()
-    if (listino && candidati.length) {
-      const ids = candidati.map((c: any) => c.id)
-      const [{ data: fasceP }, { data: aggP }] = await Promise.all([
-        admin.from('listini_clienti_fasce').select('corriere_id').eq('listino_id', listino).in('corriere_id', ids),
-        admin.from('listini_clienti_corrieri').select('corriere_id').eq('listino_id', listino).in('corriere_id', ids),
-      ])
-      const conPrezzo = new Set<string>([...(fasceP || []).map((r: any) => r.corriere_id), ...(aggP || []).map((r: any) => r.corriere_id)])
-      for (const c of candidati) if (conPrezzo.has(c.id)) offerti.add(norm(c.nome_contratto))
-    } else {
-      for (const c of candidati) offerti.add(norm(c.nome_contratto))
+    for (const c of (cPadre || [])) {
+      if ((c as any).attivo !== false && !disabIds.has((c as any).id)) offerti.add(norm((c as any).nome_contratto))
     }
 
     // I contratti EREDITATI dal figlio (proprio!=true) che il padre non offre piu' -> nascosti.
