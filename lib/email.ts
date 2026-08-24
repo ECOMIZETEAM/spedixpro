@@ -292,16 +292,33 @@ export async function inviaEmailSpedizioneCreata(p: {
     const bloccoTracking = urlTracking
       ? `<a href="${urlTracking}" style="display:inline-block;background:#f97316;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;font-size:14px;margin-top:14px">Segui la spedizione \u2192</a>`
       : `<p style="color:#999;font-size:13px;margin-top:14px">Con questo numero puoi seguire la consegna.</p>`
-    try {
-      await resend.emails.send({
-        from: FROM, to: dest, replyTo,
-        subject: `Un pacco sta arrivando \ud83d\udce6 \u2014 spedizione ${p.numero}`,
-        html: wrap(`
+    // WHITE-LABEL: l'email che il cliente-del-cliente riceve porta il LOGO + NOME del master (non
+    // "MoovExpress"), e parte a NOME del master. Colori STANDARD (header scuro + bottone arancio come
+    // le altre email): si eredita solo il MARCHIO, non i colori (scelta di prodotto). Il master lo
+    // conosciamo da p.masterId; se non ha logo n\u00e9 nome, si ripiega sul marchio MoovExpress (wrap).
+    let brandLogo: string | null = null, brandNome: string | null = null
+    if (p.masterId) {
+      try {
+        const { createAdminSupabase } = await import('@/lib/supabase-admin')
+        const { data: mb } = await createAdminSupabase().from('masters').select('logo_url,nome').eq('id', p.masterId).maybeSingle()
+        brandLogo = (mb as any)?.logo_url || null
+        brandNome = (mb as any)?.nome || null
+      } catch { /* best-effort: fallback MoovExpress */ }
+    }
+    const fromAddr = FROM.match(/<([^>]+)>/)?.[1] || FROM
+    const fromBrand = brandNome ? `${brandNome.replace(/["<>]/g, '').slice(0, 60)} <${fromAddr}>` : FROM
+    const corpo = `
           <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Un pacco sta arrivando \ud83d\udce6</h2>
           <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 10px"><strong>${esc(p.mittNome || 'Un mittente')}</strong> ti ha inviato una spedizione.</p>
           <p style="color:#666;font-size:14px;margin:0 0 10px">Numero spedizione: <strong>${esc(p.numero)}</strong>${corriere ? ` \u2014 Corriere: <strong>${corriere}</strong>` : ''}</p>
           ${bloccoTracking}
-        `),
+        `
+    try {
+      await resend.emails.send({
+        from: fromBrand, to: dest, replyTo,
+        subject: `Un pacco sta arrivando \ud83d\udce6 \u2014 spedizione ${p.numero}`,
+        // header scuro col logo del master (colore default #1a1a1a di wrapBrand); fallback MoovExpress.
+        html: (brandLogo || brandNome) ? wrapBrand(corpo, { logo: brandLogo, nome: brandNome }) : wrap(corpo),
       })
     } catch { /* best-effort */ }
   }
