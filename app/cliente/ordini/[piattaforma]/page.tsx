@@ -303,6 +303,12 @@ export default function OrdiniPage() {
     for (let i=0;i<preparati.length;i++){
       const { id, o, num, arts, rp, packages, shipTo, t } = preparati[i]
       setMsg('Spedizione '+num+'… ('+(i+1)+'/'+preparati.length+')')
+      // Dogana (estero): il codice HS viene dal CATALOGO tramite lo SKU dell'ordine — lo stesso da cui
+      // arrivano peso e misure. Prima merce che ce l'ha; se nessuna, il backend prova l'auto-ricerca TARIC.
+      const esteroOrd = String(shipTo?.country || 'IT').toUpperCase() !== 'IT'
+      const hscodeOrd = esteroOrd
+        ? String((arts.map((a:any)=>skuToArt.get(String(a.sku||'').trim().toLowerCase())).find((x:any)=>x && x.codice_hs)?.codice_hs) || '').replace(/[^0-9]/g,'')
+        : ''
       try {
         const creaRes = await fetch('/api/spedizioni/crea', {
           method:'POST', headers:{'Content-Type':'application/json'},
@@ -312,7 +318,7 @@ export default function OrdiniPage() {
             packages, colliDettaglio:[{lunghezza:String(rp.l),larghezza:String(rp.w),altezza:String(rp.h)}],
             shipFrom, shipTo, notes:'', insuranceValue:0, codValue: codDaOrdine(o),
             rifOrdine: String(o.numero_ordine || o.ordine_esterno_id || num || '').replace(/^#/,''),
-            contenuto: arts.map((a:any)=>a.nome).join(', ').slice(0,100), tipoContenuto:'Merce destinata alla vendita', valoreMerce:String(o.totale||'')
+            contenuto: arts.map((a:any)=>a.nome).join(', ').slice(0,100), tipoContenuto:'Merce destinata alla vendita', valoreMerce:String(o.totale||''), hscode: hscodeOrd
           })
         }).then(r=>r.json()).catch(()=>null)
         if (creaRes?.gia_spedito) {
