@@ -28,7 +28,7 @@ const BASE = 'https://app.esendex.it/API/v1.0/REST'
 export const COSTO_SMS_EUR = 0.10
 
 function tokenConfigurato(): boolean {
-  return !!((process.env.ESENDEX_USER_KEY || process.env.SKEBBY_USER_KEY) && (process.env.ESENDEX_ACCESS_TOKEN || process.env.SKEBBY_ACCESS_TOKEN))
+  return !!((process.env.ESENDEX_USER_KEY || process.env.SKEBBY_USER_KEY)?.trim() && (process.env.ESENDEX_ACCESS_TOKEN || process.env.SKEBBY_ACCESS_TOKEN)?.trim())
 }
 function basicConfigurato(): boolean {
   return !!((process.env.ESENDEX_USERNAME || process.env.SKEBBY_USERNAME) && (process.env.ESENDEX_PASSWORD || process.env.SKEBBY_PASSWORD))
@@ -42,8 +42,10 @@ export function smsConfigurato(): boolean {
 // /login, quindi immune al WAF e alla scadenza della sessione. Solo se il token non c'è, ripiega sul
 // login Basic (user_key + Session_key). Ritorna null se non è configurato niente.
 async function authHeaders(): Promise<Record<string, string> | null> {
-  const userKey = process.env.ESENDEX_USER_KEY || process.env.SKEBBY_USER_KEY
-  const accessToken = process.env.ESENDEX_ACCESS_TOKEN || process.env.SKEBBY_ACCESS_TOKEN
+  // .trim(): un a-capo o uno spazio finale incollato nell'env di Vercel fa rispondere a Esendex
+  // "Invalid value for parameter [user_key]" — la chiave sembra giusta ma non combacia. Lo togliamo.
+  const userKey = (process.env.ESENDEX_USER_KEY || process.env.SKEBBY_USER_KEY || '').trim()
+  const accessToken = (process.env.ESENDEX_ACCESS_TOKEN || process.env.SKEBBY_ACCESS_TOKEN || '').trim()
   if (userKey && accessToken) return { user_key: userKey, Access_token: accessToken }
   const s = await login()
   if (s) return { user_key: s.userKey, Session_key: s.sessionKey }
@@ -112,7 +114,7 @@ export async function inviaSms(telefono: string, messaggio: string): Promise<{ o
       body: JSON.stringify({
         message_type: tipoMessaggio(),   // GP/TI/SI (mai 'N': rifiutato dalla REST)
         message: messaggio,
-        sender: process.env.ESENDEX_SENDER || process.env.SKEBBY_SENDER || 'MoovExpress',
+        sender: (process.env.ESENDEX_SENDER || process.env.SKEBBY_SENDER || 'MoovExpress').trim(),
         recipient: [dest],
       }),
     })
