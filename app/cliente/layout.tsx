@@ -36,7 +36,7 @@ export default async function ClienteLayout({ children }: { children: React.Reac
 
   return (
     <ClienteShell cliente={{ ragione_sociale: cliente?.ragione_sociale, credito: cliente?.credito }} brandLogo={brandLogo} brandNome={brandNome}>
-      <DialogProvider><AvvisoApi /><BannerPiano />{children}</DialogProvider>
+      <DialogProvider><AvvisoApi brandLogo={brandLogo} brandNome={brandNome} /><BannerPiano />{children}</DialogProvider>
     </ClienteShell>
   )
 }

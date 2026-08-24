@@ -11,7 +11,9 @@ const ACCENT = '#f97316'
 // Dice tre cose e basta: fino a 50 spedizioni al mese non cambia niente, tu quest'anno ne fai
 // tante cosi', e questo e' il pacchetto che ti serve. Un avviso che annuncia un cambiamento senza
 // dire cosa cambia PER CHI LEGGE si chiude e si dimentica.
-export default function AvvisoApi() {
+// WHITE-LABEL: l'intestazione mostra il logo del master (come la sidebar), non "MoovExpress" fisso.
+// Colori della piattaforma invariati (scelta di prodotto): si eredita solo il marchio.
+export default function AvvisoApi({ brandLogo, brandNome }: { brandLogo?: string | null; brandNome?: string | null }) {
   const [d, setD] = useState<any>(null)
   const [chiudendo, setChiudendo] = useState(false)
 
@@ -38,7 +40,13 @@ export default function AvvisoApi() {
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,15,15,.72)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
       <div style={{ background: '#fff', borderRadius: '14px', maxWidth: '640px', width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,.4)' }}>
         <div style={{ background: '#1a1a1a', padding: '18px 28px' }}>
-          <div style={{ fontSize: '20px', fontWeight: 800, color: '#fff' }}>Moov<span style={{ color: ACCENT }}>Express</span></div>
+          {brandLogo ? (
+            <img src={brandLogo} alt={brandNome || 'Logo'} style={{ maxHeight: '30px', maxWidth: '180px', objectFit: 'contain', display: 'block' }} />
+          ) : brandNome ? (
+            <div style={{ fontSize: '20px', fontWeight: 800, color: '#fff' }}>{brandNome}</div>
+          ) : (
+            <div style={{ fontSize: '20px', fontWeight: 800, color: '#fff' }}>Moov<span style={{ color: ACCENT }}>Express</span></div>
+          )}
         </div>
 
         <div style={{ padding: '26px 28px' }}>
