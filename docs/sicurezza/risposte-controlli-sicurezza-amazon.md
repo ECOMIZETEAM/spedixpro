@@ -1,0 +1,128 @@
+# MoovExpress — Risposte ai controlli di sicurezza SP-API (RDA / Data Protection Policy)
+
+**Uso:** copiare/incollare ogni risposta nel campo corrispondente del questionario Amazon
+(Solution Provider Portal → caso RDA). Ancorate all'infrastruttura reale (Vercel + Supabase +
+GitHub + Google Workspace) e coerenti con `piano-risposta-incidenti-e-policy-sicurezza.md`.
+Rispondere in inglese se il form è in inglese (versioni EN in fondo a ogni punto se servono).
+
+> ⚠️ **3 punti che devi confermare/fare TU prima di inviare** — cercali sotto come **[DA CONFERMARE]**:
+> 1. Politica dispositivi (2.3): confermare che si lavora solo da dispositivi designati, cifrati, senza copie su USB.
+> 2. Backup RTO/RPO (2.1/2.7): confermare piano Supabase (PITR sì/no) e obiettivi di ripristino.
+> 3. Penetration test (2.7): pianificare la data (impegno annuale già dichiarato, non ancora eseguito).
+
+---
+
+## 1.1 — Protezione della rete
+*(controlli per limitare l'accesso pubblico a database, file server ed endpoint desktop/sviluppatore)*
+
+MoovExpress non gestisce server fisici né macchine sempre accese: l'infrastruttura è interamente
+serverless e gestita.
+- **Database (Supabase/PostgreSQL):** non è esposto pubblicamente all'applicazione tramite porte
+  aperte; l'accesso avviene solo attraverso il livello API con Row-Level Security attiva per ogni
+  tabella. L'accesso amministrativo diretto al database è riservato ai soli amministratori nominati,
+  su TLS e con MFA obbligatoria, tramite la console Supabase.
+- **Applicazione (Vercel):** funzioni serverless senza server persistenti o porte aperte verso
+  Internet; firewall e mitigazione DDoS gestiti dal provider. Tutto il traffico su HTTPS/TLS 1.2+.
+- **File server:** nessuno. I file (report, etichette, POD) risiedono in bucket privati Supabase
+  Storage e sono serviti solo tramite endpoint applicativi autenticati.
+- **Endpoint sviluppatore:** nessun dato Amazon risiede sui computer degli sviluppatori. Lo sviluppo
+  e l'amministrazione avvengono via console cloud gestite (Vercel, Supabase, GitHub) con MFA; il
+  repository del codice è **privato**. I segreti stanno solo in variabili d'ambiente cifrate.
+
+## 1.2 — Gestione degli accessi  &  1.3 — Principio del privilegio minimo
+*(come si identificano individualmente i dipendenti e si limita l'accesso "need-to-know")*
+
+- **Identità individuali:** ogni persona con accesso alle informazioni Amazon ha un account
+  **nominativo e personale** su ciascun servizio (GitHub, Vercel, Supabase, Google Workspace). Non
+  esistono account condivisi né credenziali generiche. MFA obbligatoria su tutti.
+- **Need-to-know:** il team è ristretto; l'accesso è concesso **per funzione lavorativa** e revocato
+  immediatamente al termine del rapporto o quando non più necessario.
+- **A livello applicativo:** isolamento multi-tenant con Row-Level Security per-tenant su ogni
+  tabella (ogni cliente vede solo i propri dati); il ruolo con privilegi elevati (`service_role`) è
+  usato **solo lato server** e mai esposto al browser; le credenziali dei corrieri sono revocate ai
+  ruoli `anon`/`authenticated` (grant per-colonna) e leggibili solo dal backend amministrativo.
+- **Accesso ai dati Amazon:** limitato al solo personale che gestisce l'evasione degli ordini, per
+  la sola finalità di spedizione.
+
+## 2.3 — Gestione delle risorse (accesso da dispositivi personali) **[DA CONFERMARE]**
+*(meccanismo per impedire l'accesso da unità USB / telefoni personali e relativo alert)*
+
+> ⚠️ Conferma che questo riflette la realtà; è già in linea col piano di sicurezza. Se serve, lo
+> formalizziamo in una riga di policy.
+
+- L'accesso alle informazioni Amazon avviene **solo attraverso l'applicazione e le console cloud
+  gestite** (protette da MFA): non esistono esportazioni massive né copie locali dei dati sui
+  dispositivi. Non è previsto né consentito il trasferimento di dati Amazon su unità rimovibili
+  (USB) o dispositivi personali non gestiti.
+- I dispositivi usati per l'amministrazione hanno **cifratura del disco** attiva e blocco schermo.
+- **Rilevamento/alert:** ogni accesso ai dati personali è tracciato nel registro `audit_accessi`
+  (conservazione 12+ mesi, revisione periodica) e gli accessi alle console cloud generano notifiche
+  di nuovo dispositivo/login (Vercel, Supabase, Google Workspace, GitHub): un accesso da un
+  dispositivo non riconosciuto viene segnalato via email e verificato.
+
+## 2.4 — Crittografia dei dati inattivi
+*(metodi di cifratura at-rest e sistemi di gestione delle chiavi)*
+
+- **Database e Storage (Supabase, su infrastruttura AWS):** cifratura at-rest **AES-256**; le chiavi
+  sono gestite dal servizio gestito (AWS KMS) e non sono mai esposte all'applicazione.
+- **Backup:** cifrati con lo stesso standard.
+- **Segreti applicativi** (API key, token): in **variabili d'ambiente cifrate** su Vercel, oppure in
+  tabelle dedicate del database ad accesso ristretto; mai nel codice o in repository.
+- **In transito:** TLS 1.2+ su tutte le tratte (utente↔app, app↔database, app↔API terze).
+
+## 2.1 — Conservazione dei dati  &  2.7 — Backup / ripristino **[DA CONFERMARE]**
+*(backup cifrati, posizioni geograficamente separate, procedure di ripristino RTO/RPO)*
+
+- **Backup automatici:** Supabase esegue backup automatici cifrati del database, conservati
+  sull'infrastruttura cloud gestita (AWS), con ridondanza a livello di regione del provider.
+- **Conservazione/minimizzazione PII:** i dati personali degli acquirenti Amazon vengono
+  anonimizzati/cancellati **entro 31 giorni** dalla spedizione tramite un cron giornaliero
+  automatico; i log di accesso alle PII sono conservati **12+ mesi**.
+- **Procedure di ripristino (RTO/RPO):** [DA CONFERMARE con il piano Supabase]
+  - **RPO** (perdita massima di dati): ≤ 24 ore con i backup giornalieri; **prossima allo zero se è
+    attivo il Point-in-Time Recovery** (dipende dal piano Supabase).
+  - **RTO** (tempo di ripristino): ripristino del servizio da backup entro poche ore.
+  - *Da confermare:* piano Supabase in uso (PITR attivo?) e i valori RTO/RPO definitivi che vuoi
+    dichiarare. Posso alzare il piano o attivare PITR se vuoi valori più forti.
+
+## 2.6 — Registrazione e monitoraggio
+*(logging di sicurezza, rilevamento di attività sospette, indagine sugli incidenti)*
+
+- **Log:** log applicativi e di runtime su Vercel; log del database e delle autenticazioni su
+  Supabase; registro applicativo **`audit_accessi`** che traccia gli accessi ai dati personali
+  (impersonazioni, tracking, download etichette) con conservazione 12+ mesi e revisione periodica.
+- **Rilevamento attività sospette:** scansione continua degli advisor di sicurezza Supabase e
+  Dependabot; notifiche di login/nuovo dispositivo dei provider; revisione del registro accessi.
+- **Indagine sugli incidenti:** procedura formalizzata nel Piano di Risposta agli Incidenti
+  (rilevamento → contenimento → valutazione → notifica → eradicazione → post-mortem entro 7 giorni).
+  Ogni incidente che coinvolga Amazon Information è notificato a **security@amazon.com entro 24 ore**.
+
+## 1.4 — Gestione delle credenziali (policy password)
+*(lunghezza, complessità e durata delle password per i sistemi che trattano informazioni Amazon)*
+
+- **Lunghezza/complessità:** minimo **12 caratteri** con caratteri speciali; divieto di riuso tra
+  servizi. Sull'autenticazione dell'applicazione è attiva la **protezione contro password compromesse
+  (leaked password protection)** e la lunghezza minima 12 è imposta dal sistema.
+- **MFA:** obbligatoria su tutti i servizi amministrativi (Vercel, Supabase, GitHub, Google
+  Workspace, Resend, registrar del dominio).
+- **Durata/rotazione:** scadenza **365 giorni** con rotazione annuale; rotazione immediata in caso di
+  sospetta compromissione o di cessazione di un collaboratore.
+- Le credenziali degli utenti finali dell'applicazione sono gestite dal servizio di autenticazione
+  (hash sicuro), mai memorizzate in chiaro.
+
+## 2.7 — Gestione delle vulnerabilità (tracciamento delle correzioni) **[DA CONFERMARE: pentest]**
+*(come si monitora l'avanzamento delle correzioni da scansioni e penetration test)*
+
+- **Scansione continua:** **Dependabot** su GitHub (dipendenze) + **advisor di sicurezza Supabase**
+  (configurazione DB/RLS), eseguiti con regolarità.
+- **Tracciamento delle correzioni:** ogni risultato genera un elemento tracciabile (PR Dependabot /
+  issue GitHub / voce advisor) che viene chiuso solo a correzione applicata e ri-verificata. **SLA:
+  vulnerabilità critiche entro 7 giorni, elevate entro 30 giorni.**
+- **Penetration test:** impegno a un pentest **annuale** da società qualificata; il risultato viene
+  tracciato e le correzioni gestite con lo stesso SLA. ⚠️ **[DA CONFERMARE]** — pianificare la data
+  del primo pentest (spesso in pacchetto con la Data Security Assessment richiesta da Amazon).
+
+---
+
+### Registro
+- v1.0 — 24/08/2026 — prima stesura in risposta al rifiuto RDA di Amazon del 19/08/2026.
