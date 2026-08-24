@@ -48,10 +48,12 @@ export async function POST(req: Request) {
   async function groq(msgs: any[], withTools: boolean) {
     const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST', headers: { Authorization: `Bearer ${GROQ}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'llama-3.3-70b-versatile', temperature: 0.2, max_tokens: 700,
+      // Stesso modello della chat via GROQ_MODEL (default gpt-oss-120b): llama-3.3-70b-versatile
+      // dismesso da Groq il 16/08/2026. gpt-oss-120b supporta il tool-calling usato qui.
+      body: JSON.stringify({ model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b', temperature: 0.2, max_tokens: 700,
         messages: [{ role: 'system', content: SYS }, ...msgs], ...(withTools ? { tools: TOOLS, tool_choice: 'auto' } : {}) }),
     })
-    if (!r.ok) throw new Error('groq ' + r.status)
+    if (!r.ok) { console.error('[MOOVY][VOICE][GROQ] HTTP', r.status, (await r.text().catch(() => '')).slice(0, 200)); throw new Error('groq ' + r.status) }
     return (await r.json())?.choices?.[0]?.message
   }
 

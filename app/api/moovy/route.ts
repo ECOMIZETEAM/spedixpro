@@ -130,18 +130,30 @@ export async function POST(req: Request) {
       try {
         // Groq: API compatibile OpenAI, in streaming (SSE). Il system prompt va
         // come primo messaggio con ruolo "system".
+        // MODELLO via env (GROQ_MODEL) così una dismissione futura si cambia SENZA deploy. Groq ha
+        // DISMESSO `llama-3.3-70b-versatile` il 16/08/2026: era la causa del "problema tecnico" (le
+        // richieste al modello non venivano più servite). Default = openai/gpt-oss-120b, la migrazione
+        // consigliata da Groq.
+        const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b'
         const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${GROQ_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
+            model: MODEL,
             temperature: 0.3,
             max_tokens: 1024,
             stream: true,
             messages: [{ role: 'system', content: systemPrompt(ruolo, contesto) }, ...messages],
           }),
         })
-        if (!resp.ok || !resp.body) throw new Error('groq ' + resp.status)
+        if (!resp.ok) {
+          // Prima il catch INGHIOTTIVA l'errore (nessun log): un fallimento Groq era invisibile e
+          // diventava un generico "problema tecnico" impossibile da diagnosticare. Ora stato + corpo.
+          const errTxt = await resp.text().catch(() => '')
+          console.error('[MOOVY][GROQ] HTTP', resp.status, MODEL, errTxt.slice(0, 300))
+          throw new Error('groq ' + resp.status)
+        }
+        if (!resp.body) throw new Error('groq no body')
 
         const reader = resp.body.getReader()
         const dec = new TextDecoder()
@@ -164,7 +176,8 @@ export async function POST(req: Request) {
             } catch { /* frammento non-JSON: ignora */ }
           }
         }
-      } catch {
+      } catch (e: any) {
+        console.error('[MOOVY][GROQ] chiamata fallita:', e?.message || e)
         try { controller.enqueue(encoder.encode('\n\nMi dispiace, ho avuto un problema tecnico. Riprova tra poco o apri un Ticket dalla sezione Assistenza.')) } catch {}
       } finally {
         try { controller.close() } catch {}
