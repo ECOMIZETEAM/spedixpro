@@ -46,6 +46,20 @@ export async function POST(req: NextRequest) {
     record.tipo_apertura = 'master'
   }
 
+  // ── UNA RICHIESTA APERTA ALLA VOLTA: se chi apre ha già un ticket 'aperto' o 'in_lavorazione',
+  //    non ne può aprire un altro finché quello non è risolto. Vale per i ticket di ASSISTENZA; le
+  //    richieste POD (per-spedizione, più d'una legittima) restano fuori dal blocco. ──
+  if (categoria === 'ticket') {
+    let q = admin.from('tickets').select('codice').eq('categoria', 'ticket').in('stato', ['aperto', 'in_lavorazione'])
+    q = ruolo === 'cliente'
+      ? q.eq('cliente_id', utente!.cliente_id)
+      : q.eq('aperto_master_id', masterId).eq('tipo_apertura', 'master')
+    const { data: gia } = await q.limit(1).maybeSingle()
+    if (gia) {
+      return NextResponse.json({ error: `Hai già una richiesta di assistenza aperta (${(gia as any).codice}): aspetta che sia risolta prima di aprirne un'altra.` }, { status: 400 })
+    }
+  }
+
   // Collegamento alla SPEDIZIONE (per il badge "ticket aperto" sull'elenco). Facoltativo, e
   // VALIDATO: il cliente può collegare solo una sua spedizione; il master solo una della sua rete
   // (sua o dei sotto-master). Se non valido, si apre il ticket senza collegamento (la LDV resta
