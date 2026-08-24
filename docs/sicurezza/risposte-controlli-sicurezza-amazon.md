@@ -5,10 +5,14 @@
 GitHub + Google Workspace) e coerenti con `piano-risposta-incidenti-e-policy-sicurezza.md`.
 Rispondere in inglese se il form è in inglese (versioni EN in fondo a ogni punto se servono).
 
-> ⚠️ **3 punti che devi confermare/fare TU prima di inviare** — cercali sotto come **[DA CONFERMARE]**:
-> 1. Politica dispositivi (2.3): confermare che si lavora solo da dispositivi designati, cifrati, senza copie su USB.
-> 2. Backup RTO/RPO (2.1/2.7): confermare piano Supabase (PITR sì/no) e obiettivi di ripristino.
-> 3. Penetration test (2.7): pianificare la data (impegno annuale già dichiarato, non ancora eseguito).
+> **Stato (24/08):** i punti tecnici sono chiusi con i dati veri dell'infrastruttura.
+> - ✅ **Backup RTO/RPO (2.1/2.7):** verificato — piano Supabase **Pro**, backup giornalieri cifrati,
+>   retention 7 gg, regione UE (eu-west-2). RPO ≤ 24h, RTO poche ore. PITR non attivo (attivabile).
+> - ✅ **Politica dispositivi (2.3):** scritta come politica in vigore — va solo **mantenuta vera**
+>   (lavorare da dispositivi designati e cifrati, niente dati Amazon su USB/dispositivi personali).
+> - ⏳ **Penetration test (2.7): UNICA cosa che devi FARE tu** — pianificare/prenotare il primo pentest
+>   (di solito in pacchetto con la Data Security Assessment di Amazon). È l'unico impegno dichiarato
+>   non ancora eseguito.
 
 ---
 
@@ -44,11 +48,11 @@ serverless e gestita.
 - **Accesso ai dati Amazon:** limitato al solo personale che gestisce l'evasione degli ordini, per
   la sola finalità di spedizione.
 
-## 2.3 — Gestione delle risorse (accesso da dispositivi personali) **[DA CONFERMARE]**
+## 2.3 — Gestione delle risorse (accesso da dispositivi personali)
 *(meccanismo per impedire l'accesso da unità USB / telefoni personali e relativo alert)*
 
-> ⚠️ Conferma che questo riflette la realtà; è già in linea col piano di sicurezza. Se serve, lo
-> formalizziamo in una riga di policy.
+> Politica operativa in vigore, da **mantenere vera**: si lavora solo da dispositivi designati e
+> cifrati, senza copie dei dati Amazon su unità USB o dispositivi personali non gestiti.
 
 - L'accesso alle informazioni Amazon avviene **solo attraverso l'applicazione e le console cloud
   gestite** (protette da MFA): non esistono esportazioni massive né copie locali dei dati sui
@@ -70,20 +74,21 @@ serverless e gestita.
   tabelle dedicate del database ad accesso ristretto; mai nel codice o in repository.
 - **In transito:** TLS 1.2+ su tutte le tratte (utente↔app, app↔database, app↔API terze).
 
-## 2.1 — Conservazione dei dati  &  2.7 — Backup / ripristino **[DA CONFERMARE]**
+## 2.1 — Conservazione dei dati  &  2.7 — Backup / ripristino
 *(backup cifrati, posizioni geograficamente separate, procedure di ripristino RTO/RPO)*
 
-- **Backup automatici:** Supabase esegue backup automatici cifrati del database, conservati
-  sull'infrastruttura cloud gestita (AWS), con ridondanza a livello di regione del provider.
+- **Backup automatici:** piano Supabase **Pro** — backup automatici **giornalieri** e cifrati del
+  database (stesso standard at-rest, AES-256), con **retention 7 giorni**, su infrastruttura gestita
+  **AWS nell'Unione Europea (regione eu-west-2, Londra)**, con ridondanza multi-AZ della regione.
 - **Conservazione/minimizzazione PII:** i dati personali degli acquirenti Amazon vengono
   anonimizzati/cancellati **entro 31 giorni** dalla spedizione tramite un cron giornaliero
   automatico; i log di accesso alle PII sono conservati **12+ mesi**.
-- **Procedure di ripristino (RTO/RPO):** [DA CONFERMARE con il piano Supabase]
-  - **RPO** (perdita massima di dati): ≤ 24 ore con i backup giornalieri; **prossima allo zero se è
-    attivo il Point-in-Time Recovery** (dipende dal piano Supabase).
-  - **RTO** (tempo di ripristino): ripristino del servizio da backup entro poche ore.
-  - *Da confermare:* piano Supabase in uso (PITR attivo?) e i valori RTO/RPO definitivi che vuoi
-    dichiarare. Posso alzare il piano o attivare PITR se vuoi valori più forti.
+- **Procedure di ripristino (RTO/RPO):**
+  - **RPO** (perdita massima di dati): **≤ 24 ore** (backup giornaliero automatico).
+  - **RTO** (tempo di ripristino): **poche ore** — ripristino da backup gestito dal provider.
+  - *Opzione per una garanzia più forte:* il **Point-in-Time Recovery** (add-on del piano Pro) porta
+    l'RPO a **~2 minuti** e l'RTO sotto l'ora. Oggi NON è attivo; si può abilitare se la Data Security
+    Assessment richiede valori più stringenti.
 
 ## 2.6 — Registrazione e monitoraggio
 *(logging di sicurezza, rilevamento di attività sospette, indagine sugli incidenti)*
