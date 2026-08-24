@@ -73,6 +73,43 @@ export async function inviaEmailTest(to: string): Promise<{ ok: boolean; from: s
   }
 }
 
+// Auto-registrazione rivenditore: conferma "richiesta ricevuta, in revisione" con link allo stato.
+export async function inviaRichiestaPartner({ to, nome, piano, link }: {
+  to: string; nome?: string; piano?: string; link: string
+}): Promise<{ ok: boolean }> {
+  try {
+    await resend.emails.send({
+      from: FROM, to,
+      subject: 'Richiesta ricevuta — MoovExpress',
+      html: wrap(`
+        <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Richiesta ricevuta ✅</h2>
+        <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 12px">${nome ? 'Ciao ' + esc(nome) + ', ' : ''}abbiamo ricevuto la tua richiesta${piano ? ' per il piano <strong>' + esc(piano) + '</strong>' : ''}. È <strong>in revisione</strong>: la verifichiamo e ti ricontattiamo a breve per attivare l'account.</p>
+        <p style="text-align:center;margin:22px 0"><a href="${link}" style="background:#f97316;color:#fff;text-decoration:none;border-radius:8px;padding:12px 26px;font-size:14px;font-weight:700;display:inline-block">Segui lo stato della richiesta</a></p>
+        <p style="color:#999;font-size:12px;margin-top:16px;word-break:break-all">Oppure copia questo link: ${link}</p>
+      `),
+    })
+    return { ok: true }
+  } catch { return { ok: false } }
+}
+
+// Esito della richiesta rivenditore quando NON approvata (l'approvazione manda invece le credenziali).
+export async function inviaRichiestaPartnerRifiutata({ to, nome, motivo }: {
+  to: string; nome?: string; motivo?: string
+}): Promise<{ ok: boolean }> {
+  try {
+    await resend.emails.send({
+      from: FROM, to,
+      subject: 'Aggiornamento sulla tua richiesta — MoovExpress',
+      html: wrap(`
+        <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Aggiornamento sulla tua richiesta</h2>
+        <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 12px">${nome ? 'Ciao ' + esc(nome) + ', ' : ''}grazie per l'interesse in MoovExpress. Al momento non possiamo dare seguito alla richiesta${motivo ? ': ' + esc(motivo) : '.'}</p>
+        <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 12px">Se pensi ci sia un errore o vuoi parlarne, rispondi pure a questa email.</p>
+      `),
+    })
+    return { ok: true }
+  } catch { return { ok: false } }
+}
+
 // Avviso "sessione OneTracking scaduta" al master radice: il controllo automatico ripesature e' in
 // pausa finche' non incolla un cookie fresco. Mandata UNA volta per scadenza (anti-spam nel worker).
 export async function inviaAllertaOneTracking(to: string, arretrato?: number): Promise<{ ok: boolean }> {

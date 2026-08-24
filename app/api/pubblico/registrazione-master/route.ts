@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { randomInt } from 'crypto'
+import { randomInt, randomBytes } from 'crypto'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { pianoById } from '@/lib/piani'
+import { inviaRichiestaPartner } from '@/lib/email'
 
 /* AUTO-REGISTRAZIONE MASTER dal SITO PUBBLICO (www.moovexpress.com/prezzi → "Attiva questo piano").
  *
@@ -73,6 +74,13 @@ export async function POST(req: NextRequest) {
   const piva = pulisci(corpo.piva, 20)
   const pianoId = pulisci(corpo.piano, 40)
   const contrattiPreferenza = corpo.contratti === 'propri' ? 'propri' : 'nostri'
+  const volume = pulisci(corpo.volume, 40)
+  // Corrieri di interesse: solo BRAND (mai i nomi dei fornitori tecnici), da una lista chiusa.
+  const CORRIERI_VALIDI = ['BRT', 'Poste', 'UPS', 'SDA', 'GLS', 'DHL']
+  const corrieri = Array.isArray(corpo.corrieri)
+    ? Array.from(new Set((corpo.corrieri as unknown[]).map(v => pulisci(v, 20)).filter(v => CORRIERI_VALIDI.includes(v))))
+    : []
+  const token = randomBytes(16).toString('hex')   // 32 hex → pagina pubblica "stato richiesta"
 
   // ── Validazione.
   if (!email) return no("Serve l'email.", 400)
@@ -102,6 +110,9 @@ export async function POST(req: NextRequest) {
       registrazione_stato: 'da_approvare',
       contratti_preferenza: contrattiPreferenza,
       piano_richiesto: piano.id,
+      corrieri_interesse: corrieri.length ? corrieri : null,
+      volume_stimato: volume || null,
+      richiesta_token: token,
     }).select('id').single()
     if (!error && data) { creato = data; break }
     const msg = String(error?.message || '')
@@ -112,17 +123,22 @@ export async function POST(req: NextRequest) {
   }
   if (!creato) return no('Registrazione momentaneamente non disponibile. Riprova fra poco.', 503)
 
+  // Email al richiedente: "richiesta ricevuta / in revisione" con link alla pagina di stato.
+  const linkStato = `https://www.moovexpress.com/stato-richiesta/${token}`
+  try { await inviaRichiestaPartner({ to: email, nome: ragioneSociale, piano: piano.nome, link: linkStato }) } catch {}
+
   // Avvisa la piattaforma: la richiesta va rivista e approvata (la vede MULTIEXPRESS e il root).
   try {
     await admin.from('notifiche').insert({
       master_id: MULTIEXPRESS, cliente_id: null, gruppi: ['Amministratore'],
       oggetto: 'Nuova richiesta rivenditore', link: '/dashboard/clienti/master',
-      messaggio: `${ragioneSociale} ha richiesto il piano ${piano.nome} (contratti: ${contrattiPreferenza === 'propri' ? 'propri' : 'MoovExpress'}). Da approvare.`,
+      messaggio: `${ragioneSociale} — piano ${piano.nome}, listini ${contrattiPreferenza === 'propri' ? 'PROPRI' : 'MoovExpress'}${corrieri.length ? ', corrieri: ' + corrieri.join(', ') : ''}${volume ? ', ~' + volume + '/mese' : ''}. Da approvare.`,
     })
   } catch {}
 
   return NextResponse.json({
     ok: true,
-    messaggio: 'Richiesta ricevuta! La verifichiamo e ti ricontattiamo per attivare l’account e completare l’attivazione del piano.',
+    token,
+    messaggio: 'Richiesta ricevuta! La verifichiamo e ti ricontattiamo per attivare l’account.',
   }, { headers: H })
 }
