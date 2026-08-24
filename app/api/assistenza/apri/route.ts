@@ -46,20 +46,6 @@ export async function POST(req: NextRequest) {
     record.tipo_apertura = 'master'
   }
 
-  // ── UNA RICHIESTA APERTA ALLA VOLTA: se chi apre ha già un ticket 'aperto' o 'in_lavorazione',
-  //    non ne può aprire un altro finché quello non è risolto. Vale per i ticket di ASSISTENZA; le
-  //    richieste POD (per-spedizione, più d'una legittima) restano fuori dal blocco. ──
-  if (categoria === 'ticket') {
-    let q = admin.from('tickets').select('codice').eq('categoria', 'ticket').in('stato', ['aperto', 'in_lavorazione'])
-    q = ruolo === 'cliente'
-      ? q.eq('cliente_id', utente!.cliente_id)
-      : q.eq('aperto_master_id', masterId).eq('tipo_apertura', 'master')
-    const { data: gia } = await q.limit(1).maybeSingle()
-    if (gia) {
-      return NextResponse.json({ error: `Hai già una richiesta di assistenza aperta (${(gia as any).codice}): aspetta che sia risolta prima di aprirne un'altra.` }, { status: 400 })
-    }
-  }
-
   // Collegamento alla SPEDIZIONE (per il badge "ticket aperto" sull'elenco). Facoltativo, e
   // VALIDATO: il cliente può collegare solo una sua spedizione; il master solo una della sua rete
   // (sua o dei sotto-master). Se non valido, si apre il ticket senza collegamento (la LDV resta
@@ -84,6 +70,27 @@ export async function POST(req: NextRequest) {
       // case-insensitive: l'oggetto può essere minuscolo (es. 1uw07wf…), il numero è maiuscolo.
       const { data: sps } = await admin.from('spedizioni').select('id,cliente_id,master_id').ilike('numero', ldv).limit(2)
       if (sps && sps.length === 1 && await autorizzatoSp(sps[0])) record.spedizione_id = (sps[0] as any).id
+    }
+  }
+
+  // ── UNA RICHIESTA APERTA PER SPEDIZIONE: se chi apre ha già una richiesta 'aperta'/'in_lavorazione'
+  //    della STESSA categoria SULLA STESSA spedizione, non ne può aprire un'altra finché quella non è
+  //    risolta (evita i doppioni: es. reale TK-00095 + TK-00104 sulla stessa LDV). Il blocco è
+  //    PER-SPEDIZIONE: su un'ALTRA spedizione può aprire liberamente. Vale sia per i ticket sia per le
+  //    POD. Se il ticket non è collegato a una spedizione (LDV non riconosciuta) non si blocca nulla:
+  //    non c'è un perimetro su cui deduplicare. ──
+  if (record.spedizione_id) {
+    let q = admin.from('tickets').select('codice')
+      .eq('categoria', categoria)
+      .eq('spedizione_id', record.spedizione_id)
+      .in('stato', ['aperto', 'in_lavorazione'])
+    q = ruolo === 'cliente'
+      ? q.eq('cliente_id', utente!.cliente_id)
+      : q.eq('aperto_master_id', masterId).eq('tipo_apertura', 'master')
+    const { data: gia } = await q.limit(1).maybeSingle()
+    if (gia) {
+      const cosa = categoria === 'pod' ? 'una richiesta POD aperta' : 'una richiesta di assistenza aperta'
+      return NextResponse.json({ error: `Hai già ${cosa} su questa spedizione (${(gia as any).codice}): aspetta che sia risolta prima di aprirne un'altra.` }, { status: 400 })
     }
   }
 
