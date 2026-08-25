@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
   // ("senza misure: nessun volumetrico"), mentre su quel file e' proprio il volume a fare il
   // supplemento: su 45 spedizioni su 106 il pacco pesa MENO del dichiarato e paga lo stesso.
   {
-    const { sembraRipesature, sembraRipesatureSP, leggiRipesature } = await import('@/lib/ripesature')
+    const { sembraRipesature, sembraRipesatureSP, leggiRipesature, FUORI_SAGOMA_EUR } = await import('@/lib/ripesature')
     if (sembraRipesature(righe || [])) {
       const { calcolaRipesature } = await import('@/lib/ripesature-calcolo')
       const lette = leggiRipesature(righe || [])
@@ -115,6 +115,10 @@ export async function POST(req: NextRequest) {
         for (const g of (gia || [])) viste.add((g as any).rif_fornitore)
       }
       const nuove = fetta.filter(r => !viste.has(r.idOrdine))
+      // Il flag fuori sagoma / reso vive sulla Ripesatura letta dal file; l'esito del motore porta
+      // solo idOrdine → si rimappa qui per sapere, riga per riga, se aggiungere il supplemento fisso
+      // o se saltarla (reso).
+      const ripPerOrdine = new Map(nuove.map(r => [r.idOrdine, r]))
       // IL COSTO DEL FORNITORE E' QUELLO DI TUTTO IL FILE, non della fetta che sto elaborando ora.
       // Spezzando il lavoro a pacchetti da quindici avevo lasciato il totale sul pacchetto: a
       // schermo usciva 33,54 invece di 356,35 — cioe' la somma degli ultimi quindici.
@@ -152,11 +156,21 @@ export async function POST(req: NextRequest) {
           creaturaFile = fileRip?.id || null
         }
         const daScrivere: any[] = []
-        let fuoriCatena = 0
+        let fuoriCatena = 0, resoSaltate = 0
         for (const e of esiti) {
           if (!e.trovata || !e.spedizioneId) continue
           // Già rettificata (OneTracking o import precedente) → non se ne crea una seconda.
           if (giaRettificateSet.has(e.spedizioneId)) { giaRettificateCount++; continue }
+          const rip = ripPerOrdine.get(e.idOrdine) as any
+          // RESO: il "peso reale" del file è il peso del RITORNO, non una ripesatura dell'andata:
+          // darlo al motore riprezzerebbe l'andata su un peso che non è suo. Il reso ha il suo flusso
+          // (prezzo = nolo di fascia), quindi qui NON si crea un addebito cliente. Il costo fornitore
+          // (quello che E&A ha davvero pagato per il ritorno) resta scalato sotto, come per tutte.
+          if (rip?.reso) { resoSaltate++; continue }
+          // FUORI SAGOMA: supplemento FISSO da addebitare in aggiunta e far cascare invariato. Va
+          // creata la rettifica ANCHE quando la ripesatura non produce differenza (Amount = solo il
+          // supplemento), altrimenti i 16,39 non verrebbero mai recuperati.
+          const fs = rip?.fuoriSagoma ? FUORI_SAGOMA_EUR : 0
           // A CHI VA INDIRIZZATA: al FIGLIO DIRETTO di chi carica, non al fondo della catena.
           // La catena arriva dal basso verso il detentore; il figlio diretto e' quello che sta
           // subito PRIMA di me. Se non ci sono master sotto, il destinatario e' il cliente.
@@ -181,8 +195,10 @@ export async function POST(req: NextRequest) {
           // abbiamo fatturato in MENO; se riprezzata sul listino del livello esce piu' bassa (o
           // uguale) di quanto pagato — liv.differenza = dovuto - pagato <= 0 — non si crea una nota
           // di credito: non si regalano soldi su un pacco che il fornitore ci ha comunque
-          // conteggiato. Le nulle restano fuori come prima (erano solo rumore nell'elenco).
-          if (liv.differenza < 0.01) continue
+          // conteggiato. ECCEZIONE: se c'e' un fuori sagoma da recuperare (fs>0) la riga si crea lo
+          // stesso, con differenza a zero, per far scendere il supplemento.
+          if (liv.differenza < 0.01 && fs === 0) continue
+          const diffRett = liv.differenza >= 0.01 ? liv.differenza : 0
           daScrivere.push({
             master_id: myMaster, file_id: creaturaFile,
             spedizione_id: e.spedizioneId, numero_spedizione: e.ldv,
@@ -196,7 +212,8 @@ export async function POST(req: NextRequest) {
             // così la sua Rettifica Costi mostrava "0,00" mentre il livello sotto vedeva il volume.
             peso_reale: e.pesoDopo, peso_volume_reale: e.pesoVolumeDopo || 0,
             costo_iniziale: liv.pagato, costo_finale: liv.dovuto,
-            differenza: -liv.differenza,   // la colonna e' "quanto restituisco": un addebito e' negativo
+            differenza: -diffRett,   // la colonna e' "quanto restituisco": un addebito e' negativo (0 se solo fuori sagoma)
+            fuori_sagoma: fs,        // supplemento FISSO, si addebita in aggiunta e cascata invariato
             stato: 'da_rettificare',
             rif_fornitore: e.idOrdine,     // l'anti-doppione: indice unico sul database
             // Le misure viaggiano con la riga: servono a chi la ricevera' per riprezzare col
@@ -299,8 +316,9 @@ export async function POST(req: NextRequest) {
           creato: scritte, doppioniRespinti: doppioni, giaCaricate: fetta.length - nuove.length,
           giaRettificate: giaRettificateCount,   // già fatte da OneTracking/import: saltate (no doppio)
           fuoriCatena, costoFornitoreScalato: Math.round(fornitoreScalato * 100) / 100,
-          fuoriSagoma: (fetta as any[]).filter(r => r.fuoriSagoma).length,   // extra €16,39 (cascata: prossimo rilascio)
-          reso: (fetta as any[]).filter(r => r.reso).length,                 // gestito dal flusso reso a parte
+          fuoriSagoma: (fetta as any[]).filter(r => r.fuoriSagoma).length,   // supplemento €16,39 che ora cascata
+          reso: (fetta as any[]).filter(r => r.reso).length,                 // reso nel file (costo fornitore scalato)
+          resoSaltate,                                                       // reso NON rettificati al cliente (flusso reso a parte)
           totali: {
             nelFile: (righe || []).length, spedizioni: totaleFile,
             nonTrovate: esiti.filter(e => !e.trovata).length,

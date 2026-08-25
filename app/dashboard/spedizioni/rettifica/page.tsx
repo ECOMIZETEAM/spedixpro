@@ -228,7 +228,8 @@ export default function RettificaCostiPage() {
       if (!map.has(chiave)) map.set(chiave, { nome, tipo: (r.destinatario_tipo || 'cliente') as 'master'|'cliente', righe: [], totale: 0 })
       const g = map.get(chiave)!
       g.righe.push(r)
-      g.totale += Number(r.differenza || 0)
+      // Il totale del gruppo è l'ADDEBITO vero: ripesatura (differenza) + supplemento fuori sagoma.
+      g.totale += Number(r.differenza || 0) - Number(r.fuori_sagoma || 0)
     }
     return [...map.entries()].sort((a, b) => Math.abs(b[1].totale) - Math.abs(a[1].totale))
   })()
@@ -383,6 +384,11 @@ export default function RettificaCostiPage() {
                 ), ...(aperti[chiave] ? g.righe : []).map((r:any)=>{
                   const isSelected = selectedIds.includes(r.id)
                   const diff = Number(r.differenza || 0)
+                  // L'addebito vero = ripesatura + supplemento fuori sagoma (fisso, in aggiunta). Una
+                  // riga di solo fuori sagoma ha differenza 0 ma addebita comunque i 16,39: va mostrato
+                  // questo, non uno "0" che sembrerebbe un errore.
+                  const fs = Number(r.fuori_sagoma || 0)
+                  const addebito = Math.round((diff - fs) * 100) / 100
                   const isDaRett = r.stato === 'da_rettificare'
                   // Si FATTURA sul MAGGIORE fra reale e volume: evidenzio quella misura (il perché del
                   // costo) e smorzo l'altra. Prima = grassetto scuro, Dopo = grassetto ROSSO (il peso
@@ -409,6 +415,11 @@ export default function RettificaCostiPage() {
                             ⏸ {r.blocco}
                           </div>
                         )}
+                        {fs > 0 && (
+                          <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:600,color:'#7c2d12',background:'#ffedd5',border:'1px solid #fdba74',borderRadius:'4px',padding:'2px 6px',display:'inline-block'}}>
+                            + fuori sagoma € {fs.toFixed(2)}
+                          </div>
+                        )}
                       </td>
                       <td style={cIni(!volIni)}>{pIni.toFixed(2)}</td>
                       <td style={cIni(volIni)}>{pvIni.toFixed(2)}</td>
@@ -418,9 +429,9 @@ export default function RettificaCostiPage() {
                       <td style={{padding:'8px 10px',color:'#1a1a1a'}}>{Number(r.costo_finale).toFixed(4)}</td>
                       <td style={{padding:'8px 10px'}}>
                         {r.stato==='ok' ? (
-                          <span style={{color:'#16a34a',fontWeight:'700'}}>{diff.toFixed(4)}</span>
-                        ) : diff !== 0 ? (
-                          <span style={{color:diff<0?'#dc2626':'#16a34a',fontWeight:'700'}}>{diff.toFixed(4)}</span>
+                          <span style={{color:'#16a34a',fontWeight:'700'}}>{addebito.toFixed(4)}</span>
+                        ) : addebito !== 0 ? (
+                          <span style={{color:addebito<0?'#dc2626':'#16a34a',fontWeight:'700'}}>{addebito.toFixed(4)}</span>
                         ) : (
                           <span style={{color:'#dc2626',fontWeight:'700',display:'flex',alignItems:'center',gap:'4px'}}>
                             Errore! 🔄

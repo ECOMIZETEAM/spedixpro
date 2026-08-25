@@ -78,6 +78,12 @@ const RE_SP_DIM   = /(?:dim:|dimensioni:)\s*([0-9.]+x[0-9.]+x[0-9.]+)/i
 // Amount di SpediamoPro: punto decimale ("7.45"), importi piccoli (nessuna migliaia).
 const importoSP = (v: any) => Math.abs(Number(String(v ?? '0').replace(',', '.')) || 0)
 
+// Supplemento FUORI SAGOMA di SpediamoPro: importo FISSO, misurato sui dati veri 3/3 identici a
+// 16,39 € (righe con Amount = 16,39 esatto, zero ripesatura dentro). Non entra nel listino: si
+// addebita in aggiunta alla differenza e cascata INVARIATO lungo la catena (scelta dell'utente).
+// Se un domani il fornitore lo cambia, si tocca solo qui.
+export const FUORI_SAGOMA_EUR = 16.39
+
 // E' una riga del formato TRANSAZIONI SpediamoPro (dato nel testo)?
 export function sembraRipesatureSP(righe: any[]): boolean {
   const r = normalizza((righe || [])[0] || {})

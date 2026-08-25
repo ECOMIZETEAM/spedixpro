@@ -36,7 +36,7 @@ export default function NetworkRicevutiPage() {
       const k = da + '|' + giorno
       if (!m.has(k)) m.set(k, { k, da, giorno, righe: [], totale: 0, daDecidere: [] })
       const b = m.get(k)
-      b.righe.push(r); b.totale += Number(r.differenza) || 0
+      b.righe.push(r); b.totale += (Number(r.differenza) || 0) - (Number(r.fuori_sagoma) || 0)   // addebito vero = ripesatura + fuori sagoma
       if (!r.propagazione) b.daDecidere.push(r.id)
     }
     return Array.from(m.values()).sort((a, b) => (a.giorno < b.giorno ? 1 : -1))
@@ -225,7 +225,18 @@ export default function NetworkRicevutiPage() {
                               return <td style={td}>{iniz.toFixed(1)} → <strong>{fatt.toFixed(1)}</strong> kg{vol > reale ? <span style={{color:'#ea580c'}}> (vol.)</span> : ''}</td>
                             })()}
                             <td style={td}>€ {Number(r.costo_iniziale).toFixed(2)} → € {Number(r.costo_finale).toFixed(2)}</td>
-                            <td style={{...td,fontWeight:700,color:Number(r.differenza)<0?'#dc2626':'#16a34a'}}>€ {Number(r.differenza).toFixed(2)}</td>
+                            {(() => {
+                              // Addebito vero = ripesatura (differenza) + fuori sagoma (fisso, in aggiunta).
+                              const add = Math.round((Number(r.differenza || 0) - Number(r.fuori_sagoma || 0)) * 100) / 100
+                              return (
+                                <td style={{...td,fontWeight:700,color:add<0?'#dc2626':'#16a34a'}}>
+                                  € {add.toFixed(2)}
+                                  {Number(r.fuori_sagoma || 0) > 0 && (
+                                    <span style={{display:'block',fontSize:'10px',fontWeight:600,color:'#7c2d12'}}>di cui fuori sagoma € {Number(r.fuori_sagoma).toFixed(2)}</span>
+                                  )}
+                                </td>
+                              )
+                            })()}
                             <td style={td}>
                               {r.propagazione === 'propagata' ? (
                                 <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#ffedd5',color:'#ea580c'}}>✓ Accettata — è in Rettifica Costi</span>

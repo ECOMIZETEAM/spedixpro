@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
   // Una rettifica che il livello di sopra non ha ancora confermato non e' mia: non mi e' stato
   // tolto un euro, e girarla al livello sotto vorrebbe dire incassare qualcosa che non ho pagato.
   const { data: tutteMie } = await adminDb.from('rettifiche')
-    .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_reale,colli_ripesati,rif_fornitore,propagazione')
+    .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_reale,colli_ripesati,rif_fornitore,propagazione,fuori_sagoma')
     .in('id', ids).eq('target_master_id', mio).eq('confermata', true)
 
   // IN ATTESA SOPRA: rettifiche che HAI selezionato, tue (target=mio), ma che il livello di SOPRA non
@@ -133,11 +133,23 @@ export async function POST(req: NextRequest) {
     const liv = figlio
       ? esito.livelli.find(l => l.masterId === figlio)
       : esito.livelli.find(l => l.clienteId)
-    if (!liv || liv.differenza == null) { saltate.push({ ldv: r.numero_spedizione, perche: 'il listino di chi sta sotto non copre questa spedizione (peso ripesato oltre la fascia massima, o destinazione/zona non prevista): non è girabile, va tenuta a tuo carico ("Le assorbo io")' }); continue }
-    // SOLO RECUPERI, MAI RIMBORSI: se al livello sotto la ripesatura riprezza piu' basso (o uguale)
-    // di quanto ha pagato (liv.differenza = dovuto - pagato <= 0) non si gira una nota di credito.
-    // Come lo zero, e' una decisione presa (assorbita), non un errore da ritentare.
-    if (liv.differenza < 0.01) { saltate.push({ ldv: r.numero_spedizione, perche: 'niente da recuperare al livello sotto (rimborso o zero): tenuta a tuo carico' }); idAzzerate.push(r.id); continue }
+    const fs = Number(r.fuori_sagoma) || 0
+    // Senza il livello del figlio non c'e' nulla su cui costruire la figlia (ne' costo ne' il cliente
+    // destinatario): resta da decidere, ritentabile.
+    if (!liv) { saltate.push({ ldv: r.numero_spedizione, perche: 'catena/listino del livello sotto non ricostruito: riprova quando sara\' disponibile' }); continue }
+    // SOLO RECUPERI, MAI RIMBORSI: la RIPESATURA si gira solo se il listino del figlio prezza il collo
+    // (dovuto non null) e c'e' qualcosa da recuperare (differenza >= 0.01). Il FUORI SAGOMA invece e'
+    // un importo FISSO che per regola scende INVARIATO a prescindere dal listino: se c'e', la figlia
+    // si crea COMUNQUE — anche quando il collo ripesato e' oltre la fascia massima del figlio — con la
+    // sola parte ripesatura a zero, altrimenti il supplemento si fermerebbe a questo livello.
+    const reweighGirabile = liv.differenza != null && liv.differenza >= 0.01
+    if (!reweighGirabile && fs === 0) {
+      // Niente supplemento e niente ripesatura da girare: se il listino non copre proprio il collo
+      // (differenza null) e' ritentabile; se lo copre ma esce <= 0 e' una scelta presa (assorbita).
+      if (liv.differenza == null) { saltate.push({ ldv: r.numero_spedizione, perche: 'il listino di chi sta sotto non copre questa spedizione (peso ripesato oltre la fascia massima, o destinazione/zona non prevista): non è girabile, va tenuta a tuo carico ("Le assorbo io")' }); continue }
+      saltate.push({ ldv: r.numero_spedizione, perche: 'niente da recuperare al livello sotto (rimborso o zero): tenuta a tuo carico' }); idAzzerate.push(r.id); continue
+    }
+    const diffFiglia = reweighGirabile ? liv.differenza : 0
 
     const { error } = await adminDb.from('rettifiche').insert({
       master_id: mio, spedizione_id: esito.spedizioneId, numero_spedizione: esito.ldv,
@@ -145,8 +157,9 @@ export async function POST(req: NextRequest) {
       target_master_id: figlio,
       peso_iniziale: esito.pesoRealePrima, peso_volume_iniziale: esito.pesoVolumePrima,   // dichiarato: reale + volumetrico
       peso_reale: esito.pesoDopo, peso_volume_reale: esito.pesoVolumeDopo,   // il volume, cosi' si vede perche' il costo sale
-      costo_iniziale: liv.pagato, costo_finale: liv.dovuto,
-      differenza: -liv.differenza,        // la colonna e' "quanto restituisco": un addebito e' negativo
+      costo_iniziale: liv.pagato, costo_finale: liv.dovuto ?? liv.pagato,   // dovuto null (collo oltre fascia, solo fuori sagoma) → pari a pagato, differenza 0
+      differenza: -diffFiglia,            // la colonna e' "quanto restituisco": un addebito e' negativo (0 se solo fuori sagoma)
+      fuori_sagoma: fs,                   // il supplemento fisso scende INVARIATO, NON si riprezza
       stato: 'da_rettificare', confermata: false,
       colli_ripesati: colli,              // le misure continuano a scendere, per il livello dopo
       origine_rettifica_id: r.id,         // l'anti-doppione: si propaga una volta sola

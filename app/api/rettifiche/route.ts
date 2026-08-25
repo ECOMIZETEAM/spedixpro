@@ -169,10 +169,25 @@ export async function POST(req: NextRequest) {
   // 30) — altrimenti "peso scansione 2 Kg" con un addebito sembra un errore, mentre la rettifica è sul
   // volume. È lo stesso peso che si usa per aggiornare spedizioni.peso_fatturato qui sotto.
   const pesoFatt = (r: any) => Math.max(Number(r.peso_reale) || 0, Number(r.peso_volume_reale) || 0)
+  const dimDi = (r: any) => {
+    const c = Array.isArray(r.colli_ripesati) ? r.colli_ripesati[0] : null
+    return c && Number(c.length) && Number(c.width) && Number(c.height) ? ` dim ${c.length}x${c.width}x${c.height}cm` : ''
+  }
+  // La descrizione MOTIVA il movimento: la parte ripesatura (peso inserito → ripesato) e, se c'e', il
+  // supplemento fuori sagoma come voce a sé con le sue dimensioni — così un addebito da 16,39 su un
+  // pacco lungo si spiega da solo. Se la riga è SOLO fuori sagoma (nessuna ripesatura) si scrive solo
+  // quella, senza il fuorviante "peso inserito X - peso ripesato X".
   const descrizione = (r: any) => {
-    const f = pesoFatt(r)
-    const vol = (Number(r.peso_volume_reale) || 0) > (Number(r.peso_reale) || 0)
-    return `Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso ripesato: ${f} Kg${vol ? ' volumetrico' : ''} )`
+    const extraFS = Number(r.fuori_sagoma) || 0
+    const haReweigh = Number(r.differenza || 0) < -0.005
+    const parti: string[] = []
+    if (haReweigh) {
+      const f = pesoFatt(r)
+      const vol = (Number(r.peso_volume_reale) || 0) > (Number(r.peso_reale) || 0)
+      parti.push(`Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso ripesato: ${f} Kg${vol ? ' volumetrico' : ''} )`)
+    }
+    if (extraFS > 0) parti.push(`Supplemento fuori sagoma ${r.numero_spedizione} €${extraFS.toFixed(2)}${dimDi(r)}`)
+    return parti.length ? parti.join(' + ') : `Rettifica ${r.numero_spedizione}`
   }
 
   const { registraMovimentoMaster } = await import('@/lib/movimenti')
@@ -201,14 +216,18 @@ export async function POST(req: NextRequest) {
     // 4,30 di scarto nella direzione opposta a quella mostrata a chi preme Conferma — e proprio nei
     // casi frequenti, visto che quasi meta' dei colli ripesati misura MENO del dichiarato.
     const diff = Number(r.differenza || 0)
+    // FUORI SAGOMA: supplemento FISSO da addebitare IN AGGIUNTA alla differenza. differenza negativa
+    // = addebito, quindi si SOTTRAE (più negativo): importo = diff - fuori_sagoma. Un SOLO movimento
+    // (stessa chiave RIP-): l'anti-doppio è l'indice unico su quel riferimento, un secondo movimento
+    // lo violerebbe e i 16,39 andrebbero persi. Cascata invariata: ogni livello risconta lo stesso 16,39.
+    const extraFS = Number(r.fuori_sagoma) || 0
+    const importoAddebito = Math.round((diff - extraFS) * 100) / 100
     // SOLO RECUPERI, MAI RIMBORSI, e questa e' la PORTA UNICA dove il credito si muove: qualunque
     // flusso l'abbia creata (file ripesature, file pesi, propagazione di rete), un accredito qui non
-    // passa. differenza = costo_iniziale - costo_finale, quindi negativa = addebito (recuperiamo) e
-    // positiva = accredito (restituiremmo): la ripesatura serve a incassare quello che abbiamo
-    // fatturato in meno, non a regalare soldi su un pacco che il fornitore ci ha comunque conteggiato.
-    // Importo zero O positivo: niente da muovere, ma la riga resta CHIUSA (riaprirla la rimetterebbe
-    // in elenco per sempre). Restano solo gli addebiti veri (diff < 0).
-    if (diff >= -0.005) continue
+    // passa. Il gate guarda l'importo TOTALE (differenza + fuori sagoma): una riga di solo fuori
+    // sagoma ha differenza 0 ma importo -16,39, e NON deve essere scartata. Importo zero O positivo:
+    // niente da muovere, ma la riga resta CHIUSA (riaprirla la rimetterebbe in elenco per sempre).
+    if (importoAddebito >= -0.005) continue
     if (annullata(r)) { await riapriRiga(r, 'spedizione annullata dopo il caricamento'); continue }
 
     // UN PACCO NON SI RETTIFICA DUE VOLTE ALLO STESSO DESTINATARIO. Questa e' la PORTA UNICA dove il
@@ -230,17 +249,20 @@ export async function POST(req: NextRequest) {
         if (!discendenti.has(r.target_master_id)) { await riapriRiga(r, 'destinatario non e\' un master della tua rete'); continue }
         await registraMovimentoMaster(adminDb, {
           masterOwnerId: utente!.master_id, masterTargetId: r.target_master_id,
-          tipo: 'rettifica', descrizione: descrizione(r), importo: diff,
+          tipo: 'rettifica', descrizione: descrizione(r), importo: importoAddebito,
           riferimento: rifRett, spedizioneId: r.spedizione_id || null, createdBy: user.id,
         })
       } else if (r.cliente_id) {
         if (!mieiClienti.has(r.cliente_id)) { await riapriRiga(r, 'il cliente non e\' tuo'); continue }
         await registraMovimento(adminDb, {
           masterId: utente!.master_id, clienteId: r.cliente_id,
-          tipo: 'rettifica', descrizione: descrizione(r), importo: diff,
+          tipo: 'rettifica', descrizione: descrizione(r), importo: importoAddebito,
           riferimento: rifRett, spedizioneId: r.spedizione_id || null, createdBy: user.id,
         })
-        if (r.spedizione_id) spedizioniDaAggiornare.push(r)
+        // Il costo_totale/peso_fatturato della spedizione si aggiorna SOLO se c'è stata una vera
+        // ripesatura (diff<0): un fuori sagoma puro (diff=0) non cambia il nolo, e riscrivere
+        // peso_fatturato col peso ripesato lo abbasserebbe sotto il fatturato reale.
+        if (r.spedizione_id && diff < -0.005) spedizioniDaAggiornare.push(r)
       } else { await riapriRiga(r, 'nessun destinatario'); continue }
       mosse++
     } catch (e: any) {
