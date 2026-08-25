@@ -39,6 +39,9 @@ export async function GET(req: NextRequest) {
     ;(masters||[]).forEach((m:any)=>{ mMap[m.id] = m })
     distinte.forEach((d:any)=>{ if (d.target_master_id && mMap[d.target_master_id]) d.target_master = { nome: mMap[d.target_master_id].nome } })
   }
+  // Distinte "proprie" (nessun cliente né sotto-master): COD del master stesso, già incassato → etichetta
+  // esplicita così in elenco non appaiono senza destinatario.
+  distinte.forEach((d:any)=>{ if (!d.cliente_id && !d.target_master_id && !d.clienti) d.clienti = { ragione_sociale: 'Propri (già incassati)' } })
   return NextResponse.json(distinte)
 }
 

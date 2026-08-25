@@ -50,8 +50,11 @@ export async function POST(req: NextRequest) {
   }
 
   let spedizioniProcessate = 0, codFile = 0, codSistema = 0, codDaPagare = 0, errori = 0, saltateNonPagate = 0
-  let doppioniFile = 0, giaInDistintaCount = 0, giaInSostaCount = 0
+  let doppioniFile = 0, giaInDistintaCount = 0, giaInSostaCount = 0, propri = 0
   const giaPagati = 0   // niente più blocco globale su 'pagato': l'anti-doppio ora è per-master (vedi sotto)
+  // Dettaglio degli scarti: quali LDV e PERCHÉ, così il riepilogo import può mostrarle (non solo il numero).
+  const erroriDettaglio: { ldv: string; motivo: string }[] = []
+  const segnaErrore = (ldv: string, motivo: string) => { errori++; if (erroriDettaglio.length < 100) erroriDettaglio.push({ ldv: ldv || '(riga senza LDV)', motivo }) }
   const inSosta: any[] = []   // righe da mettere nell'area "da caricare" (niente distinte automatiche)
   // Anti-doppione DENTRO il file: la stessa spedizione ripetuta su più righe entrerebbe due volte
   // in distinta (il check su DB vede solo le distinte GIÀ salvate) → si pagherebbe doppio.
@@ -86,7 +89,7 @@ export async function POST(req: NextRequest) {
     let importoRaw = riga['pagato'] ?? riga['importo'] ?? riga['importocod'] ?? riga['importo cod'] ?? riga['contrassegno']
     if (importoRaw == null) { const k = Object.keys(riga).find(x => x.startsWith('cod amount')); if (k) importoRaw = riga[k] }
     const importoCod = parseFloat(String(importoRaw ?? 0).replace(',', '.')) || 0
-    if (!ldv) { errori++; continue }
+    if (!ldv) { segnaErrore('', 'riga senza LDV'); continue }
     // Colonna Status (SpediamoPro): in distinta vanno SOLO i contrassegni gia' PAGATI dal corriere.
     const statusRiga = String(riga['status'] ?? '').trim().toLowerCase()
     if (statusRiga && !['paid', 'pagato', 'pagata'].includes(statusRiga)) { saltateNonPagate++; continue }
@@ -117,7 +120,7 @@ export async function POST(req: NextRequest) {
         .limit(1).maybeSingle()
       spedizione = r2.data as any
     }
-    if (!spedizione) { errori++; continue }
+    if (!spedizione) { segnaErrore(ldv, 'non trovata a sistema'); continue }
 
     // Doppione nello STESSO file → la seconda riga si salta (un contrassegno si paga UNA volta).
     if (vistiInFile.has(spedizione.id)) { doppioniFile++; continue }
@@ -133,13 +136,21 @@ export async function POST(req: NextRequest) {
     // Solo discesa: chi carica deve essere il master della spedizione o un antenato
     const catena = await getCatena(spedizione.master_id)
     const idx = catena.indexOf(masterId)
-    if (idx === -1) { errori++; continue }
+    if (idx === -1) { segnaErrore(spedizione.numero || ldv, 'fuori dalla tua rete'); continue }
 
+    // SPEDIZIONE PROPRIA del master (idx=0 e nessun cliente sotto): il COD è già suo, non c'è nessuno da
+    // pagare. NON è un errore: si registra a parte (cliente_id e target entrambi null = "proprio"), così è
+    // visibile e caricabile nel riquadro "Propri — già incassati", ma senza pagamento a valle.
+    if (idx === 0 && !spedizione.cliente_id) {
+      inSosta.push({ master_id: masterId, spedizione_id: spedizione.id, importo: importoCod,
+        cliente_id: null, target_master_id: null, origine: 'file' })
+      propri++
+      continue
+    }
     // AREA DI SOSTA: il contrassegno NON scende subito al livello sotto. Si registra qui col suo
     // destinatario (cliente diretto oppure primo master sotto di me) e sara' il master, dopo le
     // sue verifiche, a decidere A CHI caricarlo da Distinte Contrassegni.
     if (idx === 0) {
-      if (!spedizione.cliente_id) { errori++; continue }
       inSosta.push({ master_id: masterId, spedizione_id: spedizione.id, importo: importoCod,
         cliente_id: spedizione.cliente_id, target_master_id: null, origine: 'file' })
     } else {
@@ -171,7 +182,7 @@ export async function POST(req: NextRequest) {
   // RICONCILIAZIONE: ogni riga del file DEVE finire in UNA categoria. Se il totale non torna
   // (nonClassificate > 0) c'e' una riga persa per strada, e va segnalata invece di sparire.
   const righeTot = (righe || []).length
-  const nonClassificate = righeTot - (spedizioniProcessate + errori + saltateNonPagate + doppioniFile + giaPagati + giaInDistintaCount + giaInSostaCount)
+  const nonClassificate = righeTot - (spedizioniProcessate + propri + errori + saltateNonPagate + doppioniFile + giaPagati + giaInDistintaCount + giaInSostaCount)
 
   // In modalità chunk il record riepilogo NON si scrive per ogni blocco: lo scrive la chiamata finale
   // `soloLog` con i totali del file. Le chiamate singole (scriviLog=true) restano identiche a prima.
@@ -185,6 +196,8 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     success: true, spedizioniProcessate, codFile, codSistema, codDaPagare, codInDistinte,
     errori, saltateNonPagate, doppioniFile, giaPagati,
+    propri,                                     // spedizioni PROPRIE del master (COD gia' suo): riquadro a parte
+    erroriDettaglio,                            // [{ldv, motivo}] degli scarti: la UI le puo' mostrare
     giaInDistinta: giaInDistintaCount,          // gia' in una mia distinta (prima: saltate in silenzio)
     giaInSosta: giaInSostaCount,                // gia' in area di sosta (re-upload dello stesso file)
     nonClassificate,                            // DEVE essere 0: se >0 qualche riga non e' stata classificata

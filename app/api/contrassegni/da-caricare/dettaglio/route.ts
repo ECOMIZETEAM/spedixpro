@@ -33,6 +33,7 @@ export async function GET(req: NextRequest) {
     qq = qq.eq('master_id', mio)
     if (chiave.startsWith('c:')) return qq.eq('cliente_id', chiave.slice(2))
     if (chiave.startsWith('m:')) return qq.eq('target_master_id', chiave.slice(2))
+    if (chiave === 'proprio') return qq.is('cliente_id', null).is('target_master_id', null)  // COD del master stesso
     return null
   }
   if (!filtra(admin.from('cod_da_caricare').select('spedizione_id'))) {

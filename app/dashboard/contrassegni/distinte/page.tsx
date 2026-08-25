@@ -184,7 +184,8 @@ export default function DistinteContrassegniPage() {
     // 2) ELABORAZIONE a blocchi.
     const CHUNK = 200
     const tot = { righeFile: 0, spedizioniProcessate: 0, inAttesa: 0, codFile: 0, codSistema: 0, codDaPagare: 0,
-      giaInDistinta: 0, giaInSosta: 0, giaPagati: 0, doppioniFile: 0, saltateNonPagate: 0, errori: 0, nonClassificate: 0 }
+      giaInDistinta: 0, giaInSosta: 0, giaPagati: 0, propri: 0, doppioniFile: 0, saltateNonPagate: 0, errori: 0, nonClassificate: 0,
+      erroriDettaglio: [] as { ldv: string; motivo: string }[] }
     const problemi: string[] = []
     let fatte = 0
     for (const f of letti) {
@@ -202,7 +203,8 @@ export default function DistinteContrassegniPage() {
             tot.spedizioniProcessate += d.spedizioniProcessate || 0; tot.inAttesa += d.inAttesa || 0
             tot.codDaPagare += Number(d.codDaPagare || 0); tot.giaInDistinta += d.giaInDistinta || 0
             tot.giaPagati += d.giaPagati || 0; tot.doppioniFile += d.doppioniFile || 0
-            tot.giaInSosta += d.giaInSosta || 0
+            tot.giaInSosta += d.giaInSosta || 0; tot.propri += d.propri || 0
+            if (Array.isArray(d.erroriDettaglio)) tot.erroriDettaglio.push(...d.erroriDettaglio)
             tot.saltateNonPagate += d.saltateNonPagate || 0; tot.errori += d.errori || 0
             tot.nonClassificate += d.nonClassificate || 0; tot.codFile += Number(d.codFile || 0); tot.codSistema += Number(d.codSistema || 0)
             agg.spedizioniProcessate += d.spedizioniProcessate || 0; agg.codFile += Number(d.codFile || 0)
@@ -224,9 +226,11 @@ export default function DistinteContrassegniPage() {
       + `• Già in area di sosta (file già importato): ${tot.giaInSosta}\n`
       + `• Già in una tua distinta: ${tot.giaInDistinta}\n`
       + `• Già pagate in precedenza: ${tot.giaPagati}\n`
+      + (tot.propri ? `• Contrassegni propri, già incassati (nessun pagamento): ${tot.propri} — nel riquadro "Propri"\n` : '')
       + `• Doppioni nei file: ${tot.doppioniFile}\n`
       + `• Non ancora versate dal corriere: ${tot.saltateNonPagate}\n`
-      + `• Non trovate a sistema (scartate): ${tot.errori}\n`
+      + `• Scartate (non trovate a sistema / fuori rete): ${tot.errori}\n`
+      + (tot.erroriDettaglio.length ? `   ↳ ${tot.erroriDettaglio.slice(0,15).map(e=>`${e.ldv} — ${e.motivo}`).join('\n   ↳ ')}${tot.erroriDettaglio.length>15?`\n   … e altre ${tot.erroriDettaglio.length-15}`:''}\n` : '')
       + (tot.nonClassificate ? `\n⚠️ Righe NON classificate: ${tot.nonClassificate} — avvisami, è un errore!\n` : '')
       + (problemi.length ? `\n⚠️ File con problemi:\n${problemi.join('\n')}\n` : '')
       + `\nLe "caricate" le trovi in "Contrassegni da caricare": decidi a chi caricarle.` })

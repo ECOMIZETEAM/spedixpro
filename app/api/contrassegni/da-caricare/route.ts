@@ -59,11 +59,13 @@ export async function GET() {
 
   const mappa = new Map<string, any>()
   for (const r of righe as any[]) {
-    const chiave = r.cliente_id ? `c:${r.cliente_id}` : `m:${r.target_master_id}`
+    // cliente_id → distinta cliente; target_master_id → verso sotto-master; ENTRAMBI null → "proprio"
+    // (spedizione del master stesso: COD già suo, si carica senza pagamento nel riquadro a parte).
+    const chiave = r.cliente_id ? `c:${r.cliente_id}` : (r.target_master_id ? `m:${r.target_master_id}` : 'proprio')
     if (!mappa.has(chiave)) {
       mappa.set(chiave, {
-        chiave, tipo: r.cliente_id ? 'cliente' : 'sotto-master',
-        nome: r.cliente_id ? (nomeCli.get(r.cliente_id) || '—') : (nomeMst.get(r.target_master_id) || '—'),
+        chiave, tipo: r.cliente_id ? 'cliente' : (r.target_master_id ? 'sotto-master' : 'proprio'),
+        nome: r.cliente_id ? (nomeCli.get(r.cliente_id) || '—') : (r.target_master_id ? (nomeMst.get(r.target_master_id) || '—') : 'Contrassegni propri (già incassati)'),
         spedizioni: 0, totale: 0, aZero: 0, origini: new Set<string>(),
       })
     }
@@ -102,6 +104,7 @@ export async function POST(req: NextRequest) {
   const admin = createAdminSupabase()
   const cliIds = destinatari.filter(d => d.startsWith('c:')).map(d => d.slice(2))
   const mstIds = destinatari.filter(d => d.startsWith('m:')).map(d => d.slice(2))
+  const vuoleProprio = destinatari.includes('proprio')   // riquadro "propri" (COD del master stesso)
 
   // ── CLAIM ATOMICO: le righe si PRENDONO cancellandole e riportandole indietro. Chi arriva
   //    secondo non ottiene nulla (Postgres serializza le delete sulla stessa riga) → niente
@@ -116,6 +119,13 @@ export async function POST(req: NextRequest) {
   if (mstIds.length) {
     const { data } = await admin.from('cod_da_caricare').delete()
       .eq('master_id', mio).in('target_master_id', mstIds)
+      .select('id,spedizione_id,importo,cliente_id,target_master_id,origine,origine_id')
+    claim.push(...(data || []))
+  }
+  // Gruppo "proprio": le righe con cliente_id E target_master_id entrambi null (COD del master stesso).
+  if (vuoleProprio) {
+    const { data } = await admin.from('cod_da_caricare').delete()
+      .eq('master_id', mio).is('cliente_id', null).is('target_master_id', null)
       .select('id,spedizione_id,importo,cliente_id,target_master_id,origine,origine_id')
     claim.push(...(data || []))
   }
@@ -169,7 +179,7 @@ export async function POST(req: NextRequest) {
     for (const r of claim) {
       if (giaMie.has(r.spedizione_id)) { giaInDistinta.push(r); continue }        // gia' gestita: non torna in sosta
       if (!(Number(r.importo) > 0)) { senzaImporto.push(r); continue }            // importo 0: resta in sosta
-      const k = r.cliente_id ? `c:${r.cliente_id}` : `m:${r.target_master_id}`
+      const k = r.cliente_id ? `c:${r.cliente_id}` : (r.target_master_id ? `m:${r.target_master_id}` : 'proprio')
       if (!perDest.has(k)) perDest.set(k, [])
       perDest.get(k)!.push(r)
     }
@@ -181,6 +191,7 @@ export async function POST(req: NextRequest) {
     for (const [k, rows] of perDest) {
       const totale = Math.round(rows.reduce((s, r) => s + (Number(r.importo) || 0), 0) * 100) / 100
       const versoCliente = k.startsWith('c:')
+      const versoProprio = k === 'proprio'   // COD del master stesso: già incassato → distinta subito 'pagata'
       let dist: any = null
 
       // Numero univoco per master (indice unico uniq_distinte_cod_master_numero): se due carichi
@@ -192,8 +203,10 @@ export async function POST(req: NextRequest) {
         const { data, error } = await admin.from('distinte_contrassegni').insert({
           master_id: mio, numero,
           cliente_id: versoCliente ? k.slice(2) : null,
-          target_master_id: versoCliente ? null : k.slice(2),
-          totale_iniziale: totale, totale_rimborsato: totale, stato: 'in_lavorazione',
+          target_master_id: (versoCliente || versoProprio) ? null : k.slice(2),
+          totale_iniziale: totale, totale_rimborsato: totale,
+          stato: versoProprio ? 'pagata' : 'in_lavorazione',
+          ...(versoProprio ? { data_pagamento: new Date().toISOString(), totale_pagato: totale } : {}),
         }).select('id').single()
         if (!error && data?.id) dist = data
         else if (error && !String(error.message || '').includes('uniq_distinte_cod_master_numero')) break
@@ -216,9 +229,10 @@ export async function POST(req: NextRequest) {
         continue
       }
 
-      if (versoCliente) {
+      if (versoCliente || versoProprio) {
+        // proprio: già incassato dal master → 'pagato' subito. verso cliente: 'in_distinta' (pagherà alla conferma).
         await admin.from('spedizioni')
-          .update({ stato_contrassegno: 'in_distinta', distinta_contrassegno_id: dist.id })
+          .update({ stato_contrassegno: versoProprio ? 'pagato' : 'in_distinta', distinta_contrassegno_id: dist.id })
           .in('id', rows.map(r => r.spedizione_id)).neq('stato_contrassegno', 'pagato')
       }
       create++; totaleCaricato += totale; spedizioniCaricate += rows.length
