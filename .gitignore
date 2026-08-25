@@ -33,3 +33,7 @@ blocco_contratto.txt
 # Il repo è pubblico → non devono MAI entrare. Cartella locale di lavoro per le riconciliazioni.
 /cod/
 /COD/
+
+# export ripesature/transazioni SpediamoPro: DATI REALI dei clienti (repo pubblico)
+/rettifiche/
+/Rettifiche/

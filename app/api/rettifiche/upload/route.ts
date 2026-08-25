@@ -46,13 +46,39 @@ export async function POST(req: NextRequest) {
   // ("senza misure: nessun volumetrico"), mentre su quel file e' proprio il volume a fare il
   // supplemento: su 45 spedizioni su 106 il pacco pesa MENO del dichiarato e paga lo stesso.
   {
-    const { sembraRipesature, leggiRipesature } = await import('@/lib/ripesature')
+    const { sembraRipesature, sembraRipesatureSP, leggiRipesature } = await import('@/lib/ripesature')
     if (sembraRipesature(righe || [])) {
       const { calcolaRipesature } = await import('@/lib/ripesature-calcolo')
       const lette = leggiRipesature(righe || [])
       if (!lette.righe.length) return NextResponse.json({ error: 'Il file non contiene ripesature leggibili' }, { status: 400 })
 
       const adminRip = createAdminSupabase()
+
+      // ── FILE TRANSAZIONI SpediamoPro: il "ldv" letto è il CODICE provider (6A...), non il tracking.
+      //    Il motore e il costo fornitore agganciano per tracking_number → risolvo 6A → tracking
+      //    (raw_response.code) e rimappo il ldv. Le righe il cui codice non aggancia una spedizione si
+      //    scartano (non c'è nulla da rettificare a sistema).
+      const isSP = sembraRipesatureSP(righe || [])
+      if (isSP) {
+        const codici = Array.from(new Set(lette.righe.map(r => r.codiceProvider || r.ldv)))
+        const codeToTrack = new Map<string, string>()
+        for (let i = 0; i < codici.length; i += 100) {
+          const { data } = await adminRip.from('spedizioni')
+            .select('tracking_number,code:raw_response->>code')
+            .or(codici.slice(i, i + 100).map(c => `raw_response->>code.eq.${c}`).join(','))
+          for (const s of (data || [])) {
+            const code = (s as any).code, tn = (s as any).tracking_number
+            if (code && tn) codeToTrack.set(code, tn)
+          }
+        }
+        lette.righe = lette.righe.filter(r => {
+          const t = codeToTrack.get(r.codiceProvider || r.ldv)
+          if (!t) return false
+          r.ldv = t   // ora aggancia per tracking_number come il resto del flusso
+          return true
+        })
+        if (!lette.righe.length) return NextResponse.json({ error: 'Nessuna spedizione SpediamoPro agganciata (codici non trovati a sistema)' }, { status: 400 })
+      }
 
       // A FETTE, cosi' la schermata puo' dire a che punto sta.
       // Riprezzare una spedizione vuol dire ricostruire tutta la sua catena di master, e ognuno e'
@@ -90,6 +116,21 @@ export async function POST(req: NextRequest) {
       const costoFornitoreTotale = Math.round(lette.righe.reduce((s, r) => s + r.addebitoFornitore, 0) * 100) / 100
       const esiti = await calcolaRipesature(adminRip, nuove)
 
+      // ── ANTI-DOPPIO PER SPEDIZIONE ── salta le spedizioni che hanno GIÀ una rettifica viva
+      // (confermata o da_rettificare), da OneTracking o da un import precedente. Il dedup su
+      // rif_fornitore NON basta tra fonti diverse: OneTracking usa il tracking come rif, il file
+      // SpediamoPro usa il codice 6A... → chiavi diverse, non si vedrebbero. Stessa guardia che usa
+      // OneTracking in creaRettificaDaEsito. (Il costo fornitore RIPFORN- resta comunque scalato sotto,
+      // una volta sola: la spesa del fornitore c'è anche se non creo una seconda rettifica.)
+      const spedEsiti = Array.from(new Set(esiti.filter(e => e.spedizioneId).map(e => e.spedizioneId as string)))
+      const giaRettificateSet = new Set<string>()
+      for (let i = 0; i < spedEsiti.length; i += 200) {
+        const { data: gr } = await adminRip.from('rettifiche').select('spedizione_id')
+          .in('spedizione_id', spedEsiti.slice(i, i + 200)).or('confermata.eq.true,stato.eq.da_rettificare')
+        for (const x of (gr || [])) if ((x as any).spedizione_id) giaRettificateSet.add((x as any).spedizione_id)
+      }
+      let giaRettificateCount = 0
+
       // ── CARICAMENTO VERO ──
       // Si scrive SOLO se chi carica lo chiede esplicitamente. Il primo giro e' sempre
       // un'anteprima: chi paga guarda i numeri, poi conferma.
@@ -109,6 +150,8 @@ export async function POST(req: NextRequest) {
         let fuoriCatena = 0
         for (const e of esiti) {
           if (!e.trovata || !e.spedizioneId) continue
+          // Già rettificata (OneTracking o import precedente) → non se ne crea una seconda.
+          if (giaRettificateSet.has(e.spedizioneId)) { giaRettificateCount++; continue }
           // A CHI VA INDIRIZZATA: al FIGLIO DIRETTO di chi carica, non al fondo della catena.
           // La catena arriva dal basso verso il detentore; il figlio diretto e' quello che sta
           // subito PRIMA di me. Se non ci sono master sotto, il destinatario e' il cliente.
@@ -199,10 +242,21 @@ export async function POST(req: NextRequest) {
         for (const r of fetta) {
           const sid = spedPerLdv.get(r.ldv)
           if (!sid || !(r.addebitoFornitore > 0)) continue
+          // Descrizione del costo fornitore: per il file SpediamoPro dettaglio dimensioni + flag (fuori
+          // sagoma / reso), così il movimento è motivato. Il fuori sagoma è fisso €16,39; il reso è un
+          // supplemento gestito dal flusso reso a parte (qui solo indicato).
+          const c0: any = (r.colli || [])[0] || {}
+          const dimTxt = (c0.lunghezza && c0.larghezza && c0.altezza) ? ` dim ${c0.lunghezza}x${c0.larghezza}x${c0.altezza}cm` : ''
+          const parti: string[] = []
+          if ((r as any).fuoriSagoma) parti.push('fuori sagoma €16,39')
+          if ((r as any).reso) parti.push('reso: gestito dal flusso reso')
+          const descrizione = (r as any).codiceProvider
+            ? `Ripesatura ${r.ldv}${dimTxt} - costo fornitore €${r.addebitoFornitore.toFixed(2)}${parti.length ? ` [${parti.join(' + ')}]` : ''}`
+            : `Ripesatura ${r.ldv} - costo addebitato dal fornitore`
           try {
             await registraMovimentoMaster(adminRip, {
               masterOwnerId: myMaster, masterTargetId: myMaster, tipo: 'rettifica',
-              descrizione: `Ripesatura ${r.ldv} - costo addebitato dal fornitore`,
+              descrizione,
               riferimento: `RIPFORN-${r.idOrdine}`,
               importo: -Math.abs(r.addebitoFornitore),
               spedizioneId: sid, createdBy: user.id,
@@ -238,7 +292,10 @@ export async function POST(req: NextRequest) {
           da, quante: fetta.length, totaleDaFare: totaleFile,
           finito: da + fetta.length >= totaleFile,
           creato: scritte, doppioniRespinti: doppioni, giaCaricate: fetta.length - nuove.length,
+          giaRettificate: giaRettificateCount,   // già fatte da OneTracking/import: saltate (no doppio)
           fuoriCatena, costoFornitoreScalato: Math.round(fornitoreScalato * 100) / 100,
+          fuoriSagoma: (fetta as any[]).filter(r => r.fuoriSagoma).length,   // extra €16,39 (cascata: prossimo rilascio)
+          reso: (fetta as any[]).filter(r => r.reso).length,                 // gestito dal flusso reso a parte
           totali: {
             nelFile: (righe || []).length, spedizioni: totaleFile,
             nonTrovate: esiti.filter(e => !e.trovata).length,
