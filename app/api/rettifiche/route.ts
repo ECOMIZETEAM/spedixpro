@@ -211,27 +211,49 @@ export async function POST(req: NextRequest) {
     if (diff >= -0.005) continue
     if (annullata(r)) { await riapriRiga(r, 'spedizione annullata dopo il caricamento'); continue }
 
+    // UN PACCO NON SI RETTIFICA DUE VOLTE ALLO STESSO DESTINATARIO. Questa e' la PORTA UNICA dove il
+    // credito si muove: qui converge OGNI pipeline (file ripesature, file pesi, cascata di rete,
+    // OneTracking). Chiave deterministica RIP-<spedizione>-<destinatario>: se esiste gia' un movimento
+    // rettifica con quel riferimento, la seconda NON si addebita. E' il doppio addebito reale a ILARIA
+    // PITTALIS (3UW1WLJ008099): il file MISURE di MULTIEXPRESS in cascata (volumetrico 16 kg) + il file
+    // PESI di Velox (reale 5,65) -> due addebiti. La riga resta CHIUSA (gia' presa atomicamente), come
+    // per il caso diff>=0: NON si riapre, altrimenti tornerebbe in elenco per sempre. La garanzia vera
+    // e' l'indice unico su movimenti(riferimento) per 'RIP-%'; questo pre-controllo evita solo il throw.
+    const rifRett = r.spedizione_id ? `RIP-${r.spedizione_id}-${r.target_master_id || r.cliente_id}` : null
+    if (rifRett) {
+      const { data: giaRett } = await adminDb.from('movimenti').select('id').eq('riferimento', rifRett).limit(1).maybeSingle()
+      if (giaRett) { saltate.push({ id: r.id, perche: 'gia\' rettificata per questa spedizione (evitato doppio addebito)' }); continue }
+    }
+
     try {
       if (r.target_master_id) {
         if (!discendenti.has(r.target_master_id)) { await riapriRiga(r, 'destinatario non e\' un master della tua rete'); continue }
         await registraMovimentoMaster(adminDb, {
           masterOwnerId: utente!.master_id, masterTargetId: r.target_master_id,
           tipo: 'rettifica', descrizione: descrizione(r), importo: diff,
-          spedizioneId: r.spedizione_id || null, createdBy: user.id,
+          riferimento: rifRett, spedizioneId: r.spedizione_id || null, createdBy: user.id,
         })
       } else if (r.cliente_id) {
         if (!mieiClienti.has(r.cliente_id)) { await riapriRiga(r, 'il cliente non e\' tuo'); continue }
         await registraMovimento(adminDb, {
           masterId: utente!.master_id, clienteId: r.cliente_id,
           tipo: 'rettifica', descrizione: descrizione(r), importo: diff,
-          spedizioneId: r.spedizione_id || null, createdBy: user.id,
+          riferimento: rifRett, spedizioneId: r.spedizione_id || null, createdBy: user.id,
         })
         if (r.spedizione_id) spedizioniDaAggiornare.push(r)
       } else { await riapriRiga(r, 'nessun destinatario'); continue }
       mosse++
     } catch (e: any) {
-      console.error('[RETTIFICHE] addebito non riuscito', r.numero_spedizione, e?.message)
-      await riapriRiga(r, 'addebito non riuscito')
+      const m = String(e?.message || '')
+      // Doppione intercettato dall'indice unico su movimenti(riferimento) 'RIP-%' (race fra due
+      // conferme simultanee): il doppio addebito e' gia' stato evitato, e' il comportamento voluto —
+      // NON si riapre la riga (e' consumata correttamente).
+      if (/23505|duplicate key|unique/i.test(m)) {
+        saltate.push({ id: r.id, perche: 'gia\' rettificata per questa spedizione (evitato doppio addebito)' })
+      } else {
+        console.error('[RETTIFICHE] addebito non riuscito', r.numero_spedizione, e?.message)
+        await riapriRiga(r, 'addebito non riuscito')
+      }
     }
   }
 
