@@ -57,8 +57,22 @@ export async function POST(req: NextRequest) {
   const { data: tutteMie } = await adminDb.from('rettifiche')
     .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_reale,colli_ripesati,rif_fornitore,propagazione')
     .in('id', ids).eq('target_master_id', mio).eq('confermata', true)
+
+  // IN ATTESA SOPRA: rettifiche che HAI selezionato, tue (target=mio), ma che il livello di SOPRA non
+  // ha ancora CONFERMATO. Non sono girabili (non ti è stato scalato niente) — ma NON sono perse: prima
+  // sparivano in silenzio dal conteggio, ed è ESATTAMENTE la sensazione "non me le porta tutte". Ora si
+  // contano e si dicono, così sai che aspettano solo una conferma sopra e le ritenti dopo.
+  const { data: attesaSopra } = await adminDb.from('rettifiche')
+    .select('numero_spedizione').in('id', ids).eq('target_master_id', mio).eq('confermata', false)
+  const attesaLdv = (attesaSopra || []).map((r: any) => r.numero_spedizione)
+
   if (!tutteMie?.length) {
-    return NextResponse.json({ error: 'Nessuna rettifica tua fra quelle indicate (o non ancora confermata da chi te l\'ha girata).' }, { status: 404 })
+    return NextResponse.json({
+      error: attesaLdv.length
+        ? `Nessuna girabile adesso: ${attesaLdv.length} ${attesaLdv.length === 1 ? 'è in attesa' : 'sono in attesa'} che il livello sopra le confermi. NON sono perse — riprova quando saranno confermate.`
+        : 'Nessuna rettifica tua fra quelle indicate (o non ancora confermata da chi te l\'ha girata).',
+      inAttesaSopra: attesaLdv.length, dettaglioAttesaSopra: attesaLdv.slice(0, 100),
+    }, { status: 404 })
   }
   // Si agisce SOLO su quelle ANCORA DA DECIDERE. Se il browser e' rimasto aperto da prima (pagina
   // "stale") e rimanda righe gia' decise, non si rifa' il lavoro: ne' la propagazione lenta a vuoto
@@ -66,13 +80,13 @@ export async function POST(req: NextRequest) {
   // "assorbi" che sovrascriverebbe una propagazione gia' fatta. Si risponde chiaro, non "non fa nulla".
   const righe = (tutteMie as any[]).filter(r => !r.propagazione)
   if (!righe.length) {
-    return NextResponse.json({ ok: true, assorbite: 0, create: 0, giaDecise: tutteMie.length,
-      messaggio: `Queste ${tutteMie.length} rettifiche erano già state decise: non c'è altro da fare. Aggiorna la pagina.` })
+    return NextResponse.json({ ok: true, assorbite: 0, create: 0, giaDecise: tutteMie.length, inAttesaSopra: attesaLdv.length,
+      messaggio: `Queste ${tutteMie.length} rettifiche erano già state decise: non c'è altro da fare.${attesaLdv.length ? ` (Altre ${attesaLdv.length} sono in attesa che il livello sopra le confermi.)` : ''} Aggiorna la pagina.` })
   }
 
   if (decisione !== 'propagata') {
     await adminDb.from('rettifiche').update({ propagazione: decisione }).in('id', righe.map((r: any) => r.id))
-    return NextResponse.json({ ok: true, assorbite: righe.length })
+    return NextResponse.json({ ok: true, assorbite: righe.length, inAttesaSopra: attesaLdv.length })
   }
 
   const { calcolaRipesature } = await import('@/lib/ripesature-calcolo')
@@ -154,6 +168,10 @@ export async function POST(req: NextRequest) {
 
   const ritentabili = righe.length - idFatte.length - idAzzerate.length
   return NextResponse.json({
-    ok: true, create, nonPropagate: saltate.length, ritentabili, dettaglio: saltate.slice(0, 20),
+    ok: true, create, nonPropagate: saltate.length, ritentabili,
+    // NON troncato più a 20: chi deve sistemare le saltate (misure mancanti, listino sotto, catena)
+    // deve poterle vedere TUTTE, altrimenti oltre la ventesima "spariscono" e sembrano perse.
+    dettaglio: saltate,
+    inAttesaSopra: attesaLdv.length, dettaglioAttesaSopra: attesaLdv.slice(0, 100),
   })
 }

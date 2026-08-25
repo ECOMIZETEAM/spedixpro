@@ -68,7 +68,7 @@ export default function NetworkRicevutiPage() {
       // così su 196 rettifiche si vede l'avanzamento invece di sembrare piantato — e un lotto lungo
       // non rischia il timeout della funzione.
       const BATCH = 12
-      let create = 0, nonProp = 0, giaDecise = 0
+      let create = 0, nonProp = 0, giaDecise = 0, inAttesa = 0
       const dettaglio: any[] = []
       setAvanz({ k: b.k, fatti: 0, totale: ids.length, da: Date.now() })
       for (let i = 0; i < ids.length; i += BATCH) {
@@ -78,18 +78,24 @@ export default function NetworkRicevutiPage() {
           body: JSON.stringify({ rettifica_ids: fetta, decisione })
         })
         const d = await res.json()
-        if (d.error) { setMsg('Errore: ' + d.error); break }
-        create += d.create || 0; nonProp += d.nonPropagate || 0; giaDecise += d.giaDecise || 0
+        // "In attesa sopra" NON è un errore: la 404 con inAttesaSopra dice solo che quel lotto era tutto
+        // da confermare più in alto → si conta e si continua. Ci si ferma solo su un errore vero.
+        if (d.error && !d.inAttesaSopra) { setMsg('Errore: ' + d.error); break }
+        create += d.create || 0; nonProp += d.nonPropagate || 0; giaDecise += d.giaDecise || 0; inAttesa += d.inAttesaSopra || 0
         if (Array.isArray(d.dettaglio)) dettaglio.push(...d.dettaglio)
         setAvanz(a => a ? { ...a, fatti: Math.min(i + BATCH, ids.length) } : a)
       }
       const parti: string[] = []
       if (create > 0) parti.push(`✓ Accettate ${create}: sono in Spedizioni › Rettifica Costi, divise per cliente e sotto-master — da lì scegli a chi caricarle (fino ad allora non scende niente a nessuno).`)
       if (nonProp) {
-        const elenco = dettaglio.slice(0, 30).map((x: any) => `${x.ldv} — ${x.perche}`).join('\n• ')
-        parti.push(`⚠️ ${nonProp} non si possono girare al livello sotto:\n• ${elenco}\nQueste tienile a tuo carico con "Le assorbo io", oppure sistema il listino di chi sta sotto (fascia di peso o zona mancante) e riprova.`)
+        // TUTTE, non solo le prime 30: oltre il taglio "sparivano" e sembravano perse. Cap alto + conteggio.
+        const CAP = 100
+        const elenco = dettaglio.slice(0, CAP).map((x: any) => `${x.ldv} — ${x.perche}`).join('\n• ')
+        const extra = dettaglio.length > CAP ? `\n• … e altre ${dettaglio.length - CAP}` : ''
+        parti.push(`⚠️ ${nonProp} non si possono girare al livello sotto:\n• ${elenco}${extra}\nQueste tienile a tuo carico con "Le assorbo io", oppure sistema il listino di chi sta sotto (fascia di peso o zona mancante) e riprova.`)
       }
-      if (!create && !nonProp) parti.push(giaDecise ? 'Queste rettifiche erano già state decise.' : 'Nessuna rettifica da decidere.')
+      if (inAttesa) parti.push(`⏳ ${inAttesa} in attesa che il livello sopra le confermi: NON sono perse — riprova quando saranno confermate.`)
+      if (!create && !nonProp && !inAttesa) parti.push(giaDecise ? 'Queste rettifiche erano già state decise.' : 'Nessuna rettifica da decidere.')
       setMsg(parti.join('\n\n'))
       carica()
     } catch { setMsg('Errore di connessione') }
