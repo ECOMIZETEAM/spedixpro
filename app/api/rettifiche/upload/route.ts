@@ -80,21 +80,26 @@ export async function POST(req: NextRequest) {
       const quante = Math.max(1, Math.min(200, Number(body?.quante) || totaleFile))
       const fetta = body?.da !== undefined ? lette.righe.slice(da, da + quante) : lette.righe
 
-      // SpediamoPro: rimappa 6A → tracking_number SOLO per i codici di QUESTA fetta (≤ quante). Le
-      // righe il cui codice non aggancia restano col 6A: il motore non le troverà (contate come "non
-      // trovate"), senza toccare la lunghezza del file (l'indice a fette conta sul file, non deve
-      // cambiare sotto i piedi).
+      // SpediamoPro: rimappa 6A → tracking_number SOLO per i codici di QUESTA fetta. Le righe il cui
+      // codice non aggancia restano col 6A: il motore non le troverà (contate come "non trovate"),
+      // senza toccare la lunghezza del file (l'indice a fette conta sul file, non deve cambiare sotto
+      // i piedi).
+      //
+      // .in() → "= ANY(array)": UNA sola condizione che usa l'indice idx_spedizioni_raw_code, a
+      // qualsiasi dimensione (misurato: 500 codici in 470ms). NON tornare a .or(...eq...) con molti
+      // rami: oltre ~50 il planner molla l'indice e va in seq-scan sull'INTERA tabella spedizioni →
+      // statement timeout (57014) → l'aggancio torna a vuoto e l'import muore con "Nessuna spedizione
+      // agganciata". E' il guasto vero del "non riesco a caricarlo": il vecchio batch da 100 andava
+      // SEMPRE in timeout (verificato: 5/5 batch a 500, 0 codici agganciati su 500).
       if (isSP) {
         const codiciFetta = Array.from(new Set(fetta.map(r => r.codiceProvider || r.ldv)))
         const codeToTrack = new Map<string, string>()
-        for (let i = 0; i < codiciFetta.length; i += 50) {
-          const { data: sp } = await adminRip.from('spedizioni')
-            .select('tracking_number,code:raw_response->>code')
-            .or(codiciFetta.slice(i, i + 50).map(c => `raw_response->>code.eq.${c}`).join(','))
-          for (const s of (sp || [])) {
-            const code = (s as any).code, tn = (s as any).tracking_number
-            if (code && tn) codeToTrack.set(code, tn)
-          }
+        const { data: sp } = await adminRip.from('spedizioni')
+          .select('tracking_number,code:raw_response->>code')
+          .in('raw_response->>code', codiciFetta)
+        for (const s of (sp || [])) {
+          const code = (s as any).code, tn = (s as any).tracking_number
+          if (code && tn) codeToTrack.set(code, tn)
         }
         for (const r of fetta) { const t = codeToTrack.get(r.codiceProvider || r.ldv); if (t) r.ldv = t }
       }
