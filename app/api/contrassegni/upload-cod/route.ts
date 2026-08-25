@@ -50,7 +50,8 @@ export async function POST(req: NextRequest) {
   }
 
   let spedizioniProcessate = 0, codFile = 0, codSistema = 0, codDaPagare = 0, errori = 0, saltateNonPagate = 0
-  let doppioniFile = 0, giaPagati = 0, giaInDistintaCount = 0, giaInSostaCount = 0
+  let doppioniFile = 0, giaInDistintaCount = 0, giaInSostaCount = 0
+  const giaPagati = 0   // niente più blocco globale su 'pagato': l'anti-doppio ora è per-master (vedi sotto)
   const inSosta: any[] = []   // righe da mettere nell'area "da caricare" (niente distinte automatiche)
   // Anti-doppione DENTRO il file: la stessa spedizione ripetuta su più righe entrerebbe due volte
   // in distinta (il check su DB vede solo le distinte GIÀ salvate) → si pagherebbe doppio.
@@ -63,6 +64,15 @@ export async function POST(req: NextRequest) {
   const giaInSostaSet = new Set<string>()
   for (const r of await fetchAll(() => adminDb.from('cod_da_caricare').select('spedizione_id').eq('master_id', masterId))) {
     if ((r as any).spedizione_id) giaInSostaSet.add((r as any).spedizione_id)
+  }
+  // GIÀ IN UNA MIA DISTINTA (a qualunque livello: verso cliente o verso un sotto-master). Precaricato
+  // una volta, come la sosta. Sostituisce il vecchio blocco su stato_contrassegno='pagato' GLOBALE:
+  // quello lo mette anche un livello SOTTO quando anticipa ai suoi clienti, e bloccava me — detentore del
+  // contratto (es. E&A per SpediamoPro) — dal caricare la MIA tratta e rimborsarlo. L'anti-doppio è
+  // PER-MASTER: le distinte sono personali del livello. Backstop DB: uniq_righe_cod_sped_per_master.
+  const giaInMieDistinteSet = new Set<string>()
+  for (const r of await fetchAll(() => adminDb.from('distinte_contrassegni_righe').select('spedizione_id').eq('distinta_master_id', masterId))) {
+    if ((r as any).spedizione_id) giaInMieDistinteSet.add((r as any).spedizione_id)
   }
 
   for (const rigaRaw of (righe || [])) {
@@ -112,26 +122,18 @@ export async function POST(req: NextRequest) {
     // Doppione nello STESSO file → la seconda riga si salta (un contrassegno si paga UNA volta).
     if (vistiInFile.has(spedizione.id)) { doppioniFile++; continue }
     vistiInFile.add(spedizione.id)
-    // Contrassegno GIÀ PAGATO in una distinta precedente → mai ripagarlo.
-    if (spedizione.stato_contrassegno === 'pagato') { giaPagati++; continue }
+    // GIÀ IN UNA MIA DISTINTA → l'HO già caricata io, non si ricarica. PER-MASTER: se l'ha caricata un
+    // ALTRO livello (es. un sotto-master che ha anticipato ai suoi clienti) io la carico lo stesso —
+    // è la mia tratta, che lo rimborsa. (Prima qui c'era il blocco su 'pagato' globale: sbagliato.)
+    if (giaInMieDistinteSet.has(spedizione.id)) { giaInDistintaCount++; continue }
     // GIÀ IN SOSTA (caricato da un file/chunk precedente, non ancora messo in distinta): non si
-    // ricarica e NON si riconta come "processata". Risparmia anche la query giaInDistinta qui sotto.
+    // ricarica e NON si riconta come "processata".
     if (giaInSostaSet.has(spedizione.id)) { giaInSostaCount++; continue }
 
     // Solo discesa: chi carica deve essere il master della spedizione o un antenato
     const catena = await getCatena(spedizione.master_id)
     const idx = catena.indexOf(masterId)
     if (idx === -1) { errori++; continue }
-
-    // Anti-duplicato PER LIVELLO: la stessa LDV puo' stare in una distinta di M1 (verso M2)
-    // e in una di M2 (verso il cliente) -> controllo solo le distinte del MIO master
-    const { data: giaInDistinta } = await adminDb
-      .from('distinte_contrassegni_righe')
-      .select('id, distinte_contrassegni!inner(master_id)')
-      .eq('spedizione_id', spedizione.id)
-      .eq('distinte_contrassegni.master_id', masterId)
-      .limit(1)
-    if (giaInDistinta && giaInDistinta.length > 0) { giaInDistintaCount++; continue }   // gia' in una MIA distinta
 
     // AREA DI SOSTA: il contrassegno NON scende subito al livello sotto. Si registra qui col suo
     // destinatario (cliente diretto oppure primo master sotto di me) e sara' il master, dopo le
@@ -148,7 +150,9 @@ export async function POST(req: NextRequest) {
     // finisce in UNA categoria sola e il totale torna sempre (niente riga contata due volte).
     spedizioniProcessate++
     codSistema += Number(spedizione.contrassegno || 0)
-    if (spedizione.stato_contrassegno !== 'pagato') codDaPagare += importoCod
+    // Ogni riga che arriva qui è una MIA nuova tratta da caricare (le già-mie sono state saltate sopra):
+    // conta come "da pagare" anche se un livello sotto l'ha già anticipata — io devo comunque rimborsarlo.
+    codDaPagare += importoCod
   }
 
   // Inserimento nell'area di sosta. Il vincolo unico (master, spedizione) rende l'operazione

@@ -28,3 +28,8 @@ blocco_contratto.txt
 .utente-prova
 .prova-*.mjs
 .accesso-*.mjs
+
+# export contrassegni SpediamoPro: DATI REALI dei clienti (nomi, indirizzi, importi COD).
+# Il repo è pubblico → non devono MAI entrare. Cartella locale di lavoro per le riconciliazioni.
+/cod/
+/COD/
