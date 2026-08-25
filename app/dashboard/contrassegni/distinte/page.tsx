@@ -18,8 +18,6 @@ export default function DistinteContrassegniPage() {
   // Barra di avanzamento: appare per QUALSIASI cosa si carichi/importi (upload file COD, carico
   // destinatari, carico rimesse). Modo indeterminato: e' una POST unica, non sappiamo la percentuale.
   const [avanz, setAvanz] = useState<{fatti:number;totale:number;da:number|null;etichetta:string;sottotitolo?:string}|null>(null)
-  const [ricevute, setRicevute] = useState<any[]>([])          // rimesse accettate dal network, da caricare
-  const [selRicevute, setSelRicevute] = useState<Set<string>>(new Set())
   const [caricando, setCaricando] = useState(false)
   const [daCaricare, setDaCaricare] = useState<{gruppi:any[];totale:number;spedizioni:number}>({gruppi:[],totale:0,spedizioni:0})
   const [selDest, setSelDest] = useState<Set<string>>(new Set())        // gruppi INTERI selezionati
@@ -44,7 +42,7 @@ export default function DistinteContrassegniPage() {
     fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
     carica()
     fetch('/api/contrassegni/cod-files').then(r=>r.json()).then(d=>setCodFiles(d||[]))
-    caricaRicevute(); caricaDaCaricare()
+    caricaDaCaricare()
   }, [])
 
   function caricaDaCaricare() {
@@ -127,33 +125,6 @@ export default function DistinteContrassegniPage() {
         caricaDaCaricare(); carica()
       } else await dialog.alert({ title:'Errore', message: j.error || 'Errore durante il caricamento.' })
     } catch { await dialog.alert({ title:'Errore', message:'Errore durante il caricamento.' }) }
-    setAvanz(null)
-    setCaricando(false)
-  }
-
-  function caricaRicevute() {
-    fetch('/api/contrassegni/carica-ricevute').then(r=>r.json()).then(d=>{ setRicevute(Array.isArray(d)?d:[]); setSelRicevute(new Set()) }).catch(()=>{})
-  }
-
-  async function caricaSelezionate() {
-    const ids = Array.from(selRicevute)
-    if (!ids.length) { await dialog.alert({ title: 'Nessuna selezione', message: 'Seleziona almeno una rimessa da caricare.' }); return }
-    const ok = await dialog.confirm({ title: 'Carica rimesse', message: `Caricare ${ids.length} rimesse? Verranno create le distinte contrassegni verso i tuoi clienti e sotto-master.` })
-    if (!ok) return
-    setCaricando(true)
-    setAvanz({ fatti: 0, totale: 0, da: null, etichetta: 'Sto caricando le rimesse', sottotitolo: `${ids.length} rimesse` })
-    try {
-      const r = await fetch('/api/contrassegni/carica-ricevute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ distintaIds: ids }) })
-      const j = await r.json()
-      if (j.success) {
-        await dialog.alert({ title: 'Rimesse accettate', message:
-            `Rimesse elaborate: ${j.rimesseCaricate}\n`
-          + `Contrassegni ora in attesa di carico: ${j.inAttesa ?? 0} su ${j.destinatari ?? 0} destinatari\n`
-          + (j.giaCaricate ? `Già in una tua distinta (saltate): ${j.giaCaricate}\n` : '')
-          + `\nControllali nella sezione "Contrassegni da caricare" e decidi a chi caricarli.` })
-        caricaRicevute(); caricaDaCaricare(); carica()
-      } else await dialog.alert({ title: 'Errore', message: j.error || 'Errore durante il caricamento.' })
-    } catch { await dialog.alert({ title: 'Errore', message: 'Errore durante il caricamento.' }) }
     setAvanz(null)
     setCaricando(false)
   }
@@ -512,59 +483,6 @@ export default function DistinteContrassegniPage() {
         </div>
         )
       })()}
-
-      {ricevute.length > 0 && (
-        <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #fbbf24',overflow:'hidden',marginBottom:'16px'}}>
-          <div style={{padding:'12px 16px',borderBottom:'1px solid #fde68a',background:'#fffbeb',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'10px',flexWrap:'wrap' as const}}>
-            <span style={{fontSize:'13px',fontWeight:'700',color:'#92400e'}}>📥 Rimesse contrassegni accettate — da caricare ({ricevute.length})</span>
-            <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
-              <label style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'12px',color:'#92400e',cursor:'pointer',fontWeight:'600'}}>
-                <input type="checkbox" checked={selRicevute.size===ricevute.length && ricevute.length>0} onChange={e=>setSelRicevute(e.target.checked ? new Set(ricevute.map((x:any)=>x.id)) : new Set())} style={{width:'15px',height:'15px',cursor:'pointer'}}/>
-                Seleziona tutte
-              </label>
-              <button onClick={caricaSelezionate} disabled={caricando || !selRicevute.size}
-                style={{padding:'7px 16px',background:selRicevute.size?'#f97316':'#d1d5db',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:selRicevute.size?'pointer':'default'}}>
-                {caricando ? 'Caricamento…' : `Carica distinte (${selRicevute.size})`}
-              </button>
-            </div>
-          </div>
-          <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
-            <thead><tr style={{background:'#f9fafb'}}>
-              {['','NR','Da','Data','LDV','Totale'].map((h,i)=><th key={i} style={{textAlign:'left' as const,padding:'7px 12px',fontWeight:'700',textTransform:'uppercase' as const,fontSize:'10.5px',color:'#1a1a1a',borderBottom:'1px solid #e5e7eb'}}>{h}</th>)}
-            </tr></thead>
-            <tbody>
-              {/* "Da MULTIEXPRESS, 74 LDV, 3.812 €" non dice quello che serve per decidere: la domanda
-                  e' A CHI vanno. Sotto ogni rimessa c'e' la stessa divisione per destinatario che si
-                  vede dopo nell'area di sosta — cosi' si sa cosa si sta accettando prima di farlo. */}
-              {ricevute.flatMap((r:any)=>[
-                <tr key={r.id} style={{borderBottom:(r.destinatari||[]).length?'none':'1px solid #f1f5f9',cursor:'pointer'}} onClick={()=>setSelRicevute(prev=>{const n=new Set(prev); n.has(r.id)?n.delete(r.id):n.add(r.id); return n})}>
-                  <td style={{padding:'7px 12px',width:'30px'}}><input type="checkbox" checked={selRicevute.has(r.id)} onChange={()=>{}} style={{width:'15px',height:'15px',pointerEvents:'none' as const}}/></td>
-                  <td style={{padding:'7px 12px',fontWeight:'700',color:'#f97316'}}>{r.numero || '—'}</td>
-                  <td style={{padding:'7px 12px',color:'#1a1a1a',fontWeight:'500'}}>{r.mittente}</td>
-                  <td style={{padding:'7px 12px',color:'#1a1a1a'}}>{new Date(r.created_at).toLocaleString('it-IT')}</td>
-                  <td style={{padding:'7px 12px',color:'#1a1a1a'}}>{r.righe}</td>
-                  <td style={{padding:'7px 12px',fontWeight:'700',color:'#1a1a1a'}}>€ {Number(r.totale).toFixed(2)}</td>
-                </tr>,
-                ...(r.destinatari||[]).map((d:any,i:number)=>(
-                  <tr key={r.id+':'+i} style={{borderBottom:i===(r.destinatari.length-1)?'1px solid #f1f5f9':'none',background:'#fffdf7',cursor:'pointer'}}
-                    onClick={()=>setSelRicevute(prev=>{const n=new Set(prev); n.has(r.id)?n.delete(r.id):n.add(r.id); return n})}>
-                    <td style={{padding:'4px 12px'}}></td>
-                    <td style={{padding:'4px 12px',color:'#a16207',fontSize:'11px'}}>↳</td>
-                    <td colSpan={2} style={{padding:'4px 12px',color:'#1a1a1a',fontSize:'11.5px'}}>
-                      <span style={{fontWeight:600}}>{d.nome}</span>
-                      <span style={{fontSize:'10px',fontWeight:700,padding:'1px 6px',borderRadius:'999px',marginLeft:'7px',
-                        background:d.tipo==='cliente'?'#eff6ff':d.tipo==='sotto-master'?'#fff7ed':'#fef2f2',
-                        color:d.tipo==='cliente'?'#1d4ed8':d.tipo==='sotto-master'?'#c2410c':'#dc2626'}}>{d.tipo}</span>
-                    </td>
-                    <td style={{padding:'4px 12px',color:'#6b7280',fontSize:'11.5px'}}>{d.spedizioni}</td>
-                    <td style={{padding:'4px 12px',color:'#166534',fontSize:'11.5px',fontWeight:600}}>€ {Number(d.totale).toFixed(2)}</td>
-                  </tr>
-                )),
-              ])}
-            </tbody>
-          </table>
-        </div>
-      )}
 
 <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
         <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'10px'}}>▼ Filtri</div>

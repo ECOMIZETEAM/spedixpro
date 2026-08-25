@@ -28,6 +28,21 @@ export async function GET() {
   }
   const admin = createAdminSupabase()
 
+  // AUTO-RECUPERO (sostituisce la vecchia casella "gialla"): le rimesse ACCETTATE ma non ancora messe
+  // in sosta — auto-carico fallito in accettazione (era best-effort) o vecchie di prima che
+  // l'accettazione caricasse da sola — si caricano ORA nel verde. Così NON serve più un box a parte per
+  // recuperarle a mano: entrano qui da sole, unite per cliente come tutte le altre. `caricaRimesseInSosta`
+  // è idempotente (claim atomico su caricata_target=false): rieseguirla non crea doppioni. Best-effort:
+  // se salta, il verde mostra comunque ciò che è già in sosta.
+  try {
+    const { data: daRecuperare } = await admin.from('distinte_contrassegni')
+      .select('id').eq('target_master_id', utente.master_id).eq('accettata_target', true).eq('caricata_target', false)
+    if (daRecuperare?.length) {
+      const { caricaRimesseInSosta } = await import('@/lib/cod-rimesse')
+      await caricaRimesseInSosta(admin, utente.master_id, daRecuperare.map((d: any) => d.id))
+    }
+  } catch (e: any) { console.error('[COD][DA-CARICARE][auto-recupero rimesse]', e?.message) }
+
   const righe = await fetchAll(() => admin.from('cod_da_caricare')
     .select('id,spedizione_id,importo,cliente_id,target_master_id,origine,created_at')
     .eq('master_id', utente.master_id).order('created_at', { ascending: true }))

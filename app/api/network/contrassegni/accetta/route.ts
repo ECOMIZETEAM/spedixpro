@@ -3,10 +3,12 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
-// Il target ACCETTA una rimessa contrassegni ricevuta dal padre. ACCETTA e basta:
-// la propagazione ai propri clienti/sotto-master NON è più automatica — si fa da
-// Contrassegni › Distinte Contrassegni selezionando le rimesse e premendo "Carica"
-// (/api/contrassegni/carica-ricevute). Così il master sceglie QUANDO far scendere i soldi.
+// Il target ACCETTA una rimessa contrassegni ricevuta dal padre. Accettare la mette SUBITO nell'area
+// di sosta VERDE "Contrassegni da caricare" (consolidata per cliente) tramite caricaRimesseInSosta.
+// NIENTE più casella "gialla" intermedia da caricare a mano: rimossa il 25/08 perché era un doppio
+// percorso della stessa cosa (un eventuale straggler si auto-recupera nel verde da GET da-caricare).
+// Qui NON si muove denaro — si consolida. Il master sceglie A CHI e QUANDO far scendere i soldi dal
+// verde (POST /api/contrassegni/da-caricare).
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
