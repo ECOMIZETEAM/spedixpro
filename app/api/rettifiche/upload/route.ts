@@ -54,31 +54,12 @@ export async function POST(req: NextRequest) {
 
       const adminRip = createAdminSupabase()
 
-      // ── FILE TRANSAZIONI SpediamoPro: il "ldv" letto è il CODICE provider (6A...), non il tracking.
-      //    Il motore e il costo fornitore agganciano per tracking_number → risolvo 6A → tracking
-      //    (raw_response.code) e rimappo il ldv. Le righe il cui codice non aggancia una spedizione si
-      //    scartano (non c'è nulla da rettificare a sistema).
+      // FILE TRANSAZIONI SpediamoPro? Il "ldv" letto è il CODICE provider (6A...): va rimappato in
+      // tracking_number (raw_response.code) perché il motore e il costo fornitore agganciano per
+      // tracking. La rimappatura si fa SOLO sui codici della fetta corrente (sotto), non su tutti a
+      // ogni giro: risolvere 500 codici con un OR enorme su un campo JSON non indicizzato faceva
+      // sforare il tempo del primo blocco → funzione uccisa → "non riesco a caricarlo".
       const isSP = sembraRipesatureSP(righe || [])
-      if (isSP) {
-        const codici = Array.from(new Set(lette.righe.map(r => r.codiceProvider || r.ldv)))
-        const codeToTrack = new Map<string, string>()
-        for (let i = 0; i < codici.length; i += 100) {
-          const { data } = await adminRip.from('spedizioni')
-            .select('tracking_number,code:raw_response->>code')
-            .or(codici.slice(i, i + 100).map(c => `raw_response->>code.eq.${c}`).join(','))
-          for (const s of (data || [])) {
-            const code = (s as any).code, tn = (s as any).tracking_number
-            if (code && tn) codeToTrack.set(code, tn)
-          }
-        }
-        lette.righe = lette.righe.filter(r => {
-          const t = codeToTrack.get(r.codiceProvider || r.ldv)
-          if (!t) return false
-          r.ldv = t   // ora aggancia per tracking_number come il resto del flusso
-          return true
-        })
-        if (!lette.righe.length) return NextResponse.json({ error: 'Nessuna spedizione SpediamoPro agganciata (codici non trovati a sistema)' }, { status: 400 })
-      }
 
       // A FETTE, cosi' la schermata puo' dire a che punto sta.
       // Riprezzare una spedizione vuol dire ricostruire tutta la sua catena di master, e ognuno e'
@@ -98,6 +79,25 @@ export async function POST(req: NextRequest) {
       const da = Math.max(0, Number(body?.da) || 0)
       const quante = Math.max(1, Math.min(200, Number(body?.quante) || totaleFile))
       const fetta = body?.da !== undefined ? lette.righe.slice(da, da + quante) : lette.righe
+
+      // SpediamoPro: rimappa 6A → tracking_number SOLO per i codici di QUESTA fetta (≤ quante). Le
+      // righe il cui codice non aggancia restano col 6A: il motore non le troverà (contate come "non
+      // trovate"), senza toccare la lunghezza del file (l'indice a fette conta sul file, non deve
+      // cambiare sotto i piedi).
+      if (isSP) {
+        const codiciFetta = Array.from(new Set(fetta.map(r => r.codiceProvider || r.ldv)))
+        const codeToTrack = new Map<string, string>()
+        for (let i = 0; i < codiciFetta.length; i += 50) {
+          const { data: sp } = await adminRip.from('spedizioni')
+            .select('tracking_number,code:raw_response->>code')
+            .or(codiciFetta.slice(i, i + 50).map(c => `raw_response->>code.eq.${c}`).join(','))
+          for (const s of (sp || [])) {
+            const code = (s as any).code, tn = (s as any).tracking_number
+            if (code && tn) codeToTrack.set(code, tn)
+          }
+        }
+        for (const r of fetta) { const t = codeToTrack.get(r.codiceProvider || r.ldv); if (t) r.ldv = t }
+      }
 
       // Gia' caricate: si saltano SENZA spostare l'indice, cosi' rileggere lo stesso export (che il
       // fornitore manda cumulativo) non rifa' i conti su quelle di ieri. La garanzia vera resta
