@@ -37,7 +37,8 @@ const NAV_BASE: NavItem[] = [
     ],
   },
   { id: 'resi', label: 'Resi', icon: '↺', href: '/cliente/resi/distinte' },
-  { id: 'fatture', label: 'Fatture', icon: '◻', href: '/cliente/fatture' },
+  // 'Fatture' nascosta dal menu finché resta uno stub "Sezione in arrivo" (audit #103):
+  // era un vicolo cieco per i clienti. Ripristinare la voce quando la sezione esiste davvero.
   { id: 'sms', label: 'SMS', icon: '✉', href: '/cliente/sms' },
   {
     id: 'assistenza', label: 'Assistenza', icon: '☏',
