@@ -680,6 +680,16 @@ export function erroreEasyparcelPulito(e: any): string {
     }
     case 0:
       return 'Il corriere non ha risposto in tempo. Riprova tra qualche istante.'
+    case -98: {
+      // "CALCOLO NON POSSIBILE": la spedizione sfora un LIMITE FISICO del corriere (peso per collo o
+      // ingombro del pallet). Non è temporaneo — "riprova/scegli un altro" fuorviava: il vettore non
+      // prende quel collo così com'è. Si dice PERCHÉ e cosa fare, senza il "-98" grezzo.
+      if (/misur|dimension|ingombr|sagoma/i.test(dettagli))
+        return 'Il pallet supera le misure massime accettate dal corriere: riduci l\'ingombro dei colli o usa un altro servizio.'
+      if (/peso/i.test(dettagli))
+        return 'Il collo supera il peso massimo accettato dal corriere: dividi la merce in più colli o usa un altro servizio.'
+      return 'La spedizione supera i limiti di peso o di misura del corriere: riduci ingombro/peso dei colli o usa un altro servizio.'
+    }
   }
   return 'Corriere non disponibile per questa spedizione. Riprova o scegli un altro corriere.'
 }
