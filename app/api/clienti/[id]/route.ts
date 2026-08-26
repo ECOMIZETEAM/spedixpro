@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { gestisceLaRete } from '@/lib/ruoli'
-import { bloccaAgente, isAgente, clientiAgente } from '@/lib/agente'
+import { bloccaAgente, isAgente, clientiAgente, nomeAgente } from '@/lib/agente'
 
 // Assegnazione listino a un cliente/sotto-master: puo' innescare la propagazione a cascata.
 export const maxDuration = 300
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .eq('id', id)
     .eq('master_id', utente?.master_id)
   // Agente: può vedere SOLO un cliente a lui assegnato.
-  if (isAgente(utente)) qCli = qCli.eq('agente', (((utente?.nome)||'')+' '+((utente?.cognome)||'')).trim())
+  if (isAgente(utente)) qCli = qCli.eq('agente', nomeAgente(utente))
   const { data: cliente } = await qCli.single()
   if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' },{ status: 404 })
   return NextResponse.json(cliente)

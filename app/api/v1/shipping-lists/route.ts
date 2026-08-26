@@ -72,6 +72,12 @@ export async function POST(req: NextRequest) {
     const { chiudiBordereauSpediamopro } = await import('@/lib/spediamopro')
     await chiudiBordereauSpediamopro(admin, distinta.id)
   } catch (e) { console.error('API close-day bordereau:', e) }
+  // GLS: mancava qui (e nei flussi distinta cliente) → un partner con contratto GLS non chiudeva mai
+  // la giornata GLS. I flussi master la chiamano su ogni distinta; l'altro provider fa skip. (audit #2)
+  try {
+    const { chiudiGiornataGls } = await import('@/lib/gls')
+    await chiudiGiornataGls(admin, distinta.id)
+  } catch (e) { console.error('API close-day gls:', e) }
 
   // Rileggo il borderò eventualmente prodotto (spedisci): lo restituisco come PDF base64.
   // NB: non esiste un endpoint /pdf per le distinte via API — restituisco direttamente il documento del corriere.
