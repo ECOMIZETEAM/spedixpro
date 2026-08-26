@@ -47,9 +47,3 @@ export function bloccaAgente(utente: Utente, messaggio = 'Operazione non consent
   if (isAgente(utente)) return NextResponse.json({ error: messaggio }, { status: 403 })
   return null
 }
-
-// 403 per le aree del master vietate all'agente (report guadagno/margini, movimenti/credito, rete).
-export function vietatoAlMaster(utente: Utente, messaggio = 'Sezione non disponibile per gli agenti.'): NextResponse | null {
-  if (isAgente(utente)) return NextResponse.json({ error: messaggio }, { status: 403 })
-  return null
-}

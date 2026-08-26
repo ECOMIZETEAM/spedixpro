@@ -130,16 +130,3 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(out)
 }
 
-export async function POST(req: NextRequest) {
-  const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
-  const body = await req.json()
-  const { error, data } = await supabase.from('ritiri').insert({
-    master_id: utente?.master_id,
-    ...body
-  }).select().single()
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  return NextResponse.json(data)
-}

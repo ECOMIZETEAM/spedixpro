@@ -1,9 +1,5 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-// SPED_COLS_CLIENTE, non SPED_COLS: la seconda contiene costo_spedizione, cioe' quanto il master
-// paga al corriere. Accanto a costo_totale (quello che paga lui) e' il margine del master riga per
-// riga, servito al cliente nel JSON della sua dashboard.
-import { SPED_COLS_CLIENTE } from '@/lib/spedizioni-cols'
 export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -17,12 +13,10 @@ export async function GET() {
     { data: contatori },
     { data: statistiche },
     { data: kpi },
-    { data: ultimeSpedizioni },
   ] = await Promise.all([
     supabase.rpc('dashboard_contatori_cliente', { p_cliente: clienteId }),
     supabase.rpc('dashboard_statistiche_cliente', { p_cliente: clienteId }),
     supabase.rpc('dashboard_kpi_cliente', { p_cliente: clienteId }),
-    supabase.from('spedizioni').select(SPED_COLS_CLIENTE).eq('cliente_id', clienteId).order('created_at',{ascending:false}).limit(10),
   ])
   const c: any = contatori || {}
   const st: any = statistiche || {}
@@ -45,6 +39,5 @@ export async function GET() {
     codIncassati: Number(k.codIncassati||0),
     statsMensili: st.mensili || [],
     statiUltimi30: st.stati30 || {},
-    ultimeSpedizioni: ultimeSpedizioni||[],
   })
 }
