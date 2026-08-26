@@ -4,6 +4,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { isAgente, clientiAgente } from '@/lib/agente'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { preparaRiepiloghi, disegnaRiepilogoSped } from '@/lib/riepilogo-ordine'
+import { ldvProvvisoria } from '@/lib/numero-spedizione'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -115,9 +116,13 @@ export async function GET(req: NextRequest) {
           if (b64) {
             const buf = Buffer.from(b64, 'base64')
             const dataUrl = `data:application/pdf;base64,${b64}`
-            try { const { createAdminSupabase } = await import('@/lib/supabase-admin'); await createAdminSupabase().from('spedizioni').update({ etichetta_url: dataUrl, ...(w.numero ? { tracking_number: w.numero } : {}) }).eq('id', id) } catch {}
+            // Appena abbiamo il waybill vero, se il numero era ancora provvisorio (TMP-…) lo
+            // sostituiamo col numero definitivo — come fa il cron tracking/aggiorna. Senza questo la
+            // spedizione restava mostrata come "TMP-…" anche dopo aver scaricato l'etichetta buona.
+            const numeroReale = w.numero && ldvProvvisoria(sped.numero) ? w.numero : (sped.numero || id)
+            try { const { createAdminSupabase } = await import('@/lib/supabase-admin'); await createAdminSupabase().from('spedizioni').update({ etichetta_url: dataUrl, ...(w.numero ? { tracking_number: w.numero } : {}), ...(w.numero && ldvProvvisoria(sped.numero) ? { numero: w.numero } : {}) }).eq('id', id) } catch {}
             const outBuf = await conRiepilogo(buf)
-            return new NextResponse(new Uint8Array(outBuf), { status: 200, headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.pdf"`, 'Cache-Control': 'private, max-age=0, no-store' } })
+            return new NextResponse(new Uint8Array(outBuf), { status: 200, headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="etichetta-${numeroReale}.pdf"`, 'Cache-Control': 'private, max-age=0, no-store' } })
           }
         } catch {
           return NextResponse.json({ error: 'Etichetta non ancora pronta dal corriere (spedizione in lavorazione). Riprova tra qualche minuto.' }, { status: 409 })

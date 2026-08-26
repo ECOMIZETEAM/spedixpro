@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { ldvProvvisoria } from '@/lib/numero-spedizione'
 
 // Etichetta aperta dal DETTAGLIO spedizione. Usa leggiEtichettaCompleta come tutti gli altri punti:
 // così su una spedizione MULTICOLLO escono TUTTI i colli (una pagina ciascuno) e non solo il primo.
@@ -32,7 +33,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   return new NextResponse(new Uint8Array(et.buffer), {
     headers: {
       'Content-Type': et.mime,
-      'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.${et.ext}"`,
+      'Content-Disposition': `attachment; filename="etichetta-${(ldvProvvisoria(sped.numero) ? sped.tracking_number : sped.numero) || id}.${et.ext}"`,
     },
   })
 }

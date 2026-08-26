@@ -1,5 +1,6 @@
 'use client'
 import React from 'react'
+import { ldvProvvisoria, LDV_IN_ELABORAZIONE } from '@/lib/numero-spedizione'
 
 const card: React.CSSProperties = { background: '#fff', border: '1px solid #e8e8e8', borderRadius: '10px', overflow: 'hidden' }
 const cardH: React.CSSProperties = { padding: '11px 15px', borderBottom: '1px solid #f0f0f0', fontSize: '13px', fontWeight: 700, color: '#1a1a1a', background: '#fafafa' }
@@ -28,7 +29,7 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref }: { s: 
         <div style={{ padding: '15px 20px', borderBottom: '1px solid #e8e8e8', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', borderRadius: '12px 12px 0 0' }}>
           <div>
             <div style={{ fontSize: '16px', fontWeight: 800, color: '#1a1a1a' }}>Dettaglio spedizione</div>
-            <div style={{ fontSize: '12px', color: '#f97316', fontWeight: 700, marginTop: '2px' }}>{s.numero}{s.tracking_number ? ` · ${s.tracking_number}` : ''}</div>
+            <div style={{ fontSize: '12px', color: '#f97316', fontWeight: 700, marginTop: '2px' }}>{ldvProvvisoria(s.numero) ? `⏳ ${LDV_IN_ELABORAZIONE}` : s.numero}{s.tracking_number ? ` · ${s.tracking_number}` : ''}</div>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '22px', color: '#999', cursor: 'pointer', lineHeight: 1 }}>×</button>
         </div>
