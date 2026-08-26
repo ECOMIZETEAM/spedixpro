@@ -27,8 +27,11 @@ const PLATFORMS: { id: string; nome: string; attivo: boolean; colore: string; do
   { id: 'wix',         nome: 'Wix',          attivo: false, colore: '#000000', dominio: 'wix.com' },
   { id: 'bigcommerce', nome: 'BigCommerce',  attivo: false, colore: '#121118', dominio: 'bigcommerce.com' },
   { id: 'squarespace', nome: 'Squarespace',  attivo: false, colore: '#000000', dominio: 'squarespace.com' },
-  { id: 'tiktok',      nome: 'TikTok Shop',  attivo: true,  colore: '#000000', dominio: 'tiktokshop.com' },
-  { id: 'temu',        nome: 'Temu',         attivo: true,  colore: '#fb7701', dominio: 'temu.com' },
+  // Temu/TikTok disattivati (non collegabili) finché il cron sync-cron non li sincronizza davvero:
+  // oggi il loro OAuth funziona ma il cron NON importa gli ordini (cade nel default dello switch),
+  // così il merchant crederebbe che sincronizzi mentre non lo fa. Riattivare insieme al ramo cron.
+  { id: 'tiktok',      nome: 'TikTok Shop',  attivo: false, colore: '#000000', dominio: 'tiktokshop.com' },
+  { id: 'temu',        nome: 'Temu',         attivo: false, colore: '#fb7701', dominio: 'temu.com' },
   { id: 'storeden',    nome: 'Storeden',     attivo: false, colore: '#e2001a', dominio: 'storeden.com' },
   { id: 'manomano',    nome: 'ManoMano',     attivo: false, colore: '#00817d', dominio: 'manomano.com' },
 ]
