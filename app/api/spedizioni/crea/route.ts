@@ -605,11 +605,12 @@ export async function POST(req: NextRequest) {
         label_format: 'PDF', packages,
         // EMAIL SCHERMO: al provider va SEMPRE l'email di servizio (mai quelle vere di mitt/dest).
         shipFrom: { ...body.shipFrom, email: EMAIL_PER_CORRIERE }, shipTo: { ...body.shipTo, email: EMAIL_PER_CORRIERE },
-        // NOTE = SOLO la nota del cliente (se scrive in note, arriva in note). L'id ordine NON va qui:
-        // prima era anteposto ("Rif. Ordine: X — nota") e occupava il campo note al posto della nota
-        // vera. Spedisci non espone un campo riferimento separato: l'id ordine resta su rif_ordine.
-        notes: body.notes || '',
-        // content = descrizione merce inserita dall'utente → in etichetta (guardato: solo se compilato)
+        // NOTE = nota del cliente + rif ordine (Spedisci NON ha un campo riferimento separato, quindi
+        // per far comparire il rif sull'etichetta va qui). Nota prima, poi rif: su un ordine importato
+        // senza nota esce il rif; su una spedizione manuale con nota esce la nota (+ rif se ci sta).
+        notes: [body.notes, body.rifOrdine].filter(Boolean).map((s: any) => String(s).trim()).join(' '),
+        // content = descrizione merce inserita dall'utente → esce in etichetta (Spedisci ha il campo
+        // dedicato, a differenza di SpediamoPro): il contenuto vero viaggia qui, non serve metterlo in NOTE.
         ...(String(body.contenuto || '').trim() ? { content: String(body.contenuto).trim() } : {}),
         insuranceValue: body.insuranceValue || 0,
         codValue: body.codValue || 0, accessoriServices: []
@@ -818,7 +819,11 @@ export async function POST(req: NextRequest) {
       // cliente va in NOTE (troncata a 20). Prima ENTRAMBI prendevano l'id ordine → la nota del cliente
       // spariva e in NOTE usciva l'id ordine. Stessa regola del ramo API v1 (se scrivi in note → in note).
       const externalRef = (body.rifOrdine ? String(body.rifOrdine) : '').substring(0, 64) || undefined
-      const noteEtichetta = body.notes ? String(body.notes).trim().substring(0, 20) : undefined
+      // NOTE è l'UNICO campo libero stampato (max 20). Su un ordine IMPORTATO non c'è una nota a mano
+      // ma serve il RIF ORDINE per abbinare il pacco: quindi in NOTE mettiamo nota + rif + contenuto in
+      // quest'ordine, troncati a 20 (la nota manuale ha la precedenza; se non c'è, esce il rif). Il
+      // "CONTENUTO" e il "Rif" veri di SpediamoPro non sono impostabili (categoria fissa + codice interno).
+      const noteEtichetta = [body.notes, body.rifOrdine, body.contenuto].filter(Boolean).map((s: any) => String(s).trim()).join(' ').substring(0, 20) || undefined
 
       const shipment = await spediamoproCreateShipment(cred.authcode, {
         parcels, sender, consignee, quotation, cashOnDeliveryAmount, insuredAmount,
