@@ -605,8 +605,10 @@ export async function POST(req: NextRequest) {
         label_format: 'PDF', packages,
         // EMAIL SCHERMO: al provider va SEMPRE l'email di servizio (mai quelle vere di mitt/dest).
         shipFrom: { ...body.shipFrom, email: EMAIL_PER_CORRIERE }, shipTo: { ...body.shipTo, email: EMAIL_PER_CORRIERE },
-        // Rif. Ordine in testa alle note così finisce sull'etichetta (canale trasmesso al corriere).
-        notes: [body.rifOrdine ? `Rif. Ordine: ${body.rifOrdine}` : '', body.notes || ''].filter(Boolean).join(' — '),
+        // NOTE = SOLO la nota del cliente (se scrive in note, arriva in note). L'id ordine NON va qui:
+        // prima era anteposto ("Rif. Ordine: X — nota") e occupava il campo note al posto della nota
+        // vera. Spedisci non espone un campo riferimento separato: l'id ordine resta su rif_ordine.
+        notes: body.notes || '',
         // content = descrizione merce inserita dall'utente → in etichetta (guardato: solo se compilato)
         ...(String(body.contenuto || '').trim() ? { content: String(body.contenuto).trim() } : {}),
         insuranceValue: body.insuranceValue || 0,
@@ -812,9 +814,11 @@ export async function POST(req: NextRequest) {
       //  - "CONTENUTO" = categoria del parcel (type), non testo libero;
       //  - "NOTE:" (consigneeNote) è l'UNICO campo libero stampato, MA accetta max ~20 caratteri:
       //    oltre, il create fallisce con 422 "The shipment contains invalid data.".
-      // Quindi in NOTE mettiamo SOLO un riferimento breve (l'ID ordine, o la nota), troncato a 20.
-      const externalRef = (body.rifOrdine ? String(body.rifOrdine) : (body.notes ? String(body.notes) : '')).substring(0, 64) || undefined
-      const noteEtichetta = (body.rifOrdine ? String(body.rifOrdine) : (body.notes ? String(body.notes) : '')).trim().substring(0, 20) || undefined
+      // OGNI CAMPO AL SUO CAMPO: l'ID ORDINE va in externalReference (il riferimento dato), la NOTA del
+      // cliente va in NOTE (troncata a 20). Prima ENTRAMBI prendevano l'id ordine → la nota del cliente
+      // spariva e in NOTE usciva l'id ordine. Stessa regola del ramo API v1 (se scrivi in note → in note).
+      const externalRef = (body.rifOrdine ? String(body.rifOrdine) : '').substring(0, 64) || undefined
+      const noteEtichetta = body.notes ? String(body.notes).trim().substring(0, 20) : undefined
 
       const shipment = await spediamoproCreateShipment(cred.authcode, {
         parcels, sender, consignee, quotation, cashOnDeliveryAmount, insuredAmount,
