@@ -75,6 +75,7 @@ const NAV_BASE: NavItem[] = [
       { label: 'Cambia Password', href: '/cliente/impostazioni/cambia-password' },
       { label: 'API Key', href: '/cliente/impostazioni/api-key' },
       { label: 'Logo', href: '/cliente/impostazioni/logo' },
+      { label: 'Dati doganali (EORI)', href: '/cliente/impostazioni/dogana' },
     ],
   },
   { id: 'documentazione', label: 'Documentazione', icon: '📖', href: 'https://docs.moovexpress.com' },

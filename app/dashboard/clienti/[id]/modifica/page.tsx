@@ -81,6 +81,7 @@ export default function ModificaClientePage() {
               <div><label style={lbl}>PEC</label><input value={form.pec||''} onChange={e=>set('pec',e.target.value)} placeholder="pec@esempio.it" style={inp}/></div>
               <div><label style={lbl}>Cod Destinatario (fattura elettronica)</label><input value={form.cod_sdi||''} onChange={e=>set('cod_sdi',e.target.value)} style={inp}/></div>
               <div><label style={lbl}>Rappresentante Legale</label><input value={form.rappresentante_legale||''} onChange={e=>set('rappresentante_legale',e.target.value)} style={inp}/></div>
+              <div><label style={lbl}>Codice EORI</label><input value={form.eori||''} onChange={e=>set('eori',e.target.value)} placeholder="Es. IT12345678901 — serve per le spedizioni extra-UE" style={inp}/></div>
             </div>
           </div>
 

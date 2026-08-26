@@ -116,6 +116,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     piva: datiCliente.piva||null, cf: datiCliente.cf||null,
     pec: datiCliente.pec||null, cod_sdi: datiCliente.cod_sdi||null,
     rappresentante_legale: datiCliente.rappresentante_legale||null,
+    eori: datiCliente.eori||null,
     telefono: datiCliente.telefono||null,
     sl_paese: datiCliente.sl_paese||'Italia', sl_indirizzo: datiCliente.sl_indirizzo||null,
     sl_citta: datiCliente.sl_citta||null, sl_provincia: datiCliente.sl_provincia||null, sl_cap: datiCliente.sl_cap||null,

@@ -62,6 +62,10 @@
     {
       "path": "/api/cron/pulizia-notifiche",
       "schedule": "45 2 * * *"
+    },
+    {
+      "path": "/api/spedizioni/dogana-bloccata",
+      "schedule": "20 * * * *"
     }
   ]
 }

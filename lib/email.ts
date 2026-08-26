@@ -73,6 +73,43 @@ export async function inviaEmailTest(to: string): Promise<{ ok: boolean; from: s
   }
 }
 
+// Avviso al CLIENTE: una sua spedizione internazionale è ferma in dogana e servono documenti per
+// sbloccarla (EORI, contenuto dettagliato, email destinatario). A differenza di
+// inviaEmailSpedizioneCreata ritorna {ok,error} e NON ha effetti collaterali (niente SMS).
+// Brandizzata col master (logo+nome) se disponibile. Chiamata dal cron dogana-bloccata.
+export async function inviaEmailDoganaFerma({ to, destNome, numero, paese, masterId, link }: {
+  to: string; destNome?: string | null; numero: string; paese?: string | null; masterId?: string | null; link?: string | null
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    let brand: { logo?: string | null; nome?: string | null } | null = null
+    let from = FROM
+    if (masterId) {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const { data: mb } = await createAdminSupabase().from('masters').select('logo_url,nome').eq('id', masterId).maybeSingle()
+      if (mb?.logo_url || mb?.nome) {
+        brand = { logo: mb.logo_url, nome: mb.nome }
+        const addr = FROM.match(/<([^>]+)>/)?.[1] || FROM
+        if (mb?.nome) from = `${String(mb.nome).replace(/["<>]/g, '').slice(0, 60)} <${addr}>`
+      }
+    }
+    const inner = `
+      <h2 style="font-size:19px;color:#1a1a1a;margin:0 0 10px">La tua spedizione è ferma in dogana</h2>
+      <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 14px">${destNome ? 'Ciao ' + esc(destNome) + ', ' : ''}la spedizione <strong>${esc(numero)}</strong>${paese ? ' verso ' + esc(paese) : ''} è bloccata in dogana e non può partire finché non riceviamo alcuni dati obbligatori per l'esportazione:</p>
+      <ul style="color:#555;font-size:14px;line-height:1.7;margin:0 0 16px;padding-left:20px">
+        <li><strong>Codice EORI</strong> del mittente (l'identificativo doganale dell'esportatore)</li>
+        <li><strong>Contenuto dettagliato</strong> della spedizione, articolo per articolo, con il valore di ciascuno</li>
+        <li><strong>Email del destinatario</strong></li>
+      </ul>
+      <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 16px">${link ? 'Apri il ticket qui sotto e allega questi dati' : 'Rispondi a questo messaggio allegando questi dati'}: li inoltriamo subito al corriere per sbloccare la spedizione.</p>
+      ${link ? `<p style="text-align:center;margin:22px 0"><a href="${link}" style="background:#f97316;color:#fff;text-decoration:none;border-radius:8px;padding:12px 26px;font-size:14px;font-weight:700;display:inline-block">Apri il ticket e invia i documenti</a></p>` : ''}
+    `
+    const html = brand ? wrapBrand(inner, { logo: brand.logo, nome: brand.nome }) : wrap(inner)
+    const r: any = await resend.emails.send({ from, to, subject: `Spedizione ${numero} ferma in dogana — servono alcuni dati`, html })
+    if (r?.error) return { ok: false, error: r.error?.message || JSON.stringify(r.error) }
+    return { ok: true }
+  } catch (err: any) { return { ok: false, error: String(err?.message || err) } }
+}
+
 // Auto-registrazione rivenditore: conferma "richiesta ricevuta, in revisione" con link allo stato.
 export async function inviaRichiestaPartner({ to, nome, piano, link }: {
   to: string; nome?: string; piano?: string; link: string

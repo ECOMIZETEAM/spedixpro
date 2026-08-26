@@ -21,6 +21,8 @@ export async function PATCH(req: NextRequest) {
   // il cliente puo aggiornare solo le proprie impostazioni (non credito, non listino, ecc.)
   const payload: any = {}
   if (body.impostazioni !== undefined) payload.impostazioni = body.impostazioni
+  // EORI: il cliente può impostare il proprio codice doganale (serve per le spedizioni extra-UE).
+  if (body.eori !== undefined) payload.eori = body.eori ? String(body.eori).trim().slice(0, 30) : null
   if (Object.keys(payload).length === 0) return NextResponse.json({ ok: true })
   const { error } = await supabase.from('clienti').update(payload).eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
