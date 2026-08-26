@@ -26,9 +26,11 @@ export async function POST(req: NextRequest) {
   if (!utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const admin = createAdminSupabase()
-  // Solo il super master genera demo (è il proprietario della piattaforma).
-  const { data: mioMaster } = await admin.from('masters').select('is_super_master,parent_master_id').eq('id', utente.master_id).single()
-  if (!(mioMaster?.is_super_master || mioMaster?.parent_master_id === null)) {
+  // Solo il super master genera demo (è il proprietario della piattaforma). NON "parent_master_id
+  // === null": le demo sono create come root isolati (parent null) e quel ramo le lasciava creare
+  // altre demo a raffica. Solo il flag is_super_master (verificato: 1 solo, le demo non ce l'hanno).
+  const { data: mioMaster } = await admin.from('masters').select('is_super_master').eq('id', utente.master_id).single()
+  if (!mioMaster?.is_super_master) {
     return NextResponse.json({ error: 'Solo il super master può creare account demo' }, { status: 403 })
   }
 

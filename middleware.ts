@@ -82,7 +82,7 @@ export async function middleware(req: NextRequest) {
       }
       // Denylist inline (il middleware gira su Edge: niente import di lib/demo, che tira dentro il
       // client admin). Prefissi delle porte che spenderebbero soldi veri o collegherebbero account reali.
-      const VIETATE_DEMO = ['/api/stripe/', '/api/abbonamento/', '/api/sms/acquista', '/api/sms/test', '/api/sms/test-accredito', '/api/sms/autoricarica', '/api/portali/', '/api/integrazioni/', '/api/cliente/ricarica', '/api/cliente/paga-carta']
+      const VIETATE_DEMO = ['/api/stripe/', '/api/abbonamento/', '/api/sms/acquista', '/api/sms/test', '/api/sms/test-accredito', '/api/sms/autoricarica', '/api/portali/', '/api/integrazioni/', '/api/cliente/ricarica', '/api/cliente/paga-carta', '/api/master/demo/']
       if (!scaduta && VIETATE_DEMO.some(p => pathname.startsWith(p))) {
         return NextResponse.json({ error: 'Modalità demo: questa operazione è simulata e non disponibile nella prova. Con un account reale funziona a tutti gli effetti.' }, { status: 403 })
       }

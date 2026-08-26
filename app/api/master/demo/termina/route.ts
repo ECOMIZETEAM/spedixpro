@@ -14,7 +14,9 @@ export async function POST(req: NextRequest) {
 
   const admin = createAdminSupabase()
   const { data: mio } = await admin.from('masters').select('is_super_master,parent_master_id').eq('id', utente.master_id).single()
-  if (!(mio?.is_super_master || mio?.parent_master_id === null)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  // SOLO il super-master vero: le demo sono root con parent null, "parent === null" le lasciava
+  // terminare le demo altrui. Vedi la stessa guardia in demo/lista.
+  if (!mio?.is_super_master) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const { id } = await req.json().catch(() => ({}))
   if (!id) return NextResponse.json({ error: 'id mancante' }, { status: 400 })

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
+import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
 // Il target ACCETTA una rimessa contrassegni ricevuta dal padre. Accettare la mette SUBITO nell'area
@@ -15,7 +16,10 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente as any); if (_bloccoAg) return _bloccoAg   // agente = no scrittura / no rete
-  if (!utente?.master_id || utente.ruolo === 'cliente') {
+  // Il RUOLO, non il solo master_id: l'autista ce l'ha ma non gestisce la rete, e qui si scrive con la
+  // service key (accetta rimesse COD). Come le gemelle ricevuti/rettifiche: gestisceLaRete = master/
+  // admin/operatore, non autista/agente/cliente.
+  if (!utente?.master_id || !gestisceLaRete(utente)) {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
   const mio = utente.master_id
