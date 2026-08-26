@@ -50,14 +50,23 @@ export async function GET(req: NextRequest) {
       return { movimenti: movimenti || [], total: (movimenti || []).length, somma: null as number | null }
     }
     const from = (page - 1) * perPage
-    const { data, count } = await buildQ(db, col, val, '*', true)
+    // SOLO le righe della pagina: niente count:'exact', che rifaceva lo scan del filtro a ogni pagina.
+    const { data } = await buildQ(db, col, val, '*', false)
       .order('created_at', { ascending: false }).range(from, from + perPage - 1)
-    let somma: number | null = null
-    if (conSomma) {
-      const importi = await fetchAll(() => buildQ(db, col, val, 'importo').order('id', { ascending: true }))
-      somma = Math.round((importi || []).reduce((s: number, r: any) => s + Number(r.importo || 0), 0) * 100) / 100
-    }
-    return { movimenti: data || [], total: count || 0, somma }
+    // TOTALE (serve alla paginazione) + SOMMA in UNA query aggregata sull'indice: prima la somma era
+    // un fetchAll di TUTTI gli importi del filtro (per E&A ~64k righe, ~65 viaggi HTTP) ripetuto a
+    // OGNI click/keystroke — era la lentezza della lista. La RPC applica gli stessi filtri di buildQ
+    // (verificato: numeri identici alla query diretta) ed e' SECURITY INVOKER (stessa RLS di adesso).
+    const { data: tot } = await db.rpc('movimenti_totali', {
+      p_col: col, p_val: val,
+      p_cerca: cerca || null,
+      p_corriere_nome: corriere || null,
+      p_corriere_ids: corriereIdsGruppo,
+    })
+    const row: any = Array.isArray(tot) ? tot[0] : tot
+    const total = Number(row?.total || 0)
+    const somma = conSomma ? Math.round(Number(row?.somma || 0) * 100) / 100 : null
+    return { movimenti: data || [], total, somma }
   }
 
   // Arricchimento nome corriere (solo sulle righe restituite: poche).
