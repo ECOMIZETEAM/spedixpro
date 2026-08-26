@@ -36,23 +36,40 @@ export async function GET() {
   const nomeContrattoDi = (d: any): string =>
     d.corrieri?.nome_contratto || nomiContratto.get(d.corriere_id) || ''
 
+  // Aggregati (colli/contrassegni/peso/costo/numero spedizioni) per distinta in UNA sola query .in()
+  // invece di N query (una per distinta): era un N+1 che teneva la pagina in "Caricamento…" finché
+  // non finivano tutte. Raggruppo per distinta_id in memoria; output identico a prima.
+  const idsDistinte = (distinte || []).map((d: any) => d.id)
+  type Agg = { n: number; colli: number; contrassegni: number; peso: number; costo: number }
+  const nuovoAgg = (): Agg => ({ n: 0, colli: 0, contrassegni: 0, peso: 0, costo: 0 })
+  const perDistinta = new Map<string, Agg>()
+  if (idsDistinte.length) {
+    const speds = await fetchAll(() => supabase
+      .from('spedizioni')
+      .select('distinta_id,costo_totale,contrassegno,colli,peso_fatturato,peso_reale')
+      .in('distinta_id', idsDistinte))
+    for (const s of speds || []) {
+      const k = (s as any).distinta_id
+      if (!k) continue
+      const a = perDistinta.get(k) || nuovoAgg()
+      a.n += 1
+      a.colli += Number((s as any).colli) || 0
+      a.contrassegni += Number((s as any).contrassegno) || 0
+      a.peso += Number((s as any).peso_fatturato || (s as any).peso_reale) || 0
+      a.costo += Number((s as any).costo_totale) || 0
+      perDistinta.set(k, a)
+    }
+  }
+
   const result = []
   for (const d of distinte || []) {
-    const { data: speds } = await supabase
-      .from('spedizioni')
-      .select('costo_totale,contrassegno,colli,peso_fatturato,peso_reale')
-      .eq('distinta_id', d.id)
-    const nSped = (speds || []).length
-    const colli = (speds || []).reduce((a, s) => a + (Number(s.colli) || 0), 0)
-    const contrassegni = (speds || []).reduce((a, s) => a + (Number(s.contrassegno) || 0), 0)
-    const peso = (speds || []).reduce((a, s) => a + (Number(s.peso_fatturato || s.peso_reale) || 0), 0)
-    const costo = (speds || []).reduce((a, s) => a + (Number(s.costo_totale) || 0), 0)
+    const a = perDistinta.get(d.id) || nuovoAgg()
     result.push({
       id: d.id, numero: d.numero, data: d.data || d.created_at, stato: d.stato,
       // MAI corrieri.tipo: contiene il provider tecnico ('spediamopro', 'spedisci') e finiva
       // stampato al cliente nella colonna "Vettore". Il vettore e' il marchio del contratto.
       vettore: marchioCorriere(nomeContrattoDi(d)), contratto: nomeContrattoDi(d),
-      spedizioni: nSped, colli: colli || d.totale_colli || 0, contrassegni, peso: peso || Number(d.totale_peso) || 0, costo,
+      spedizioni: a.n, colli: a.colli || d.totale_colli || 0, contrassegni: a.contrassegni, peso: a.peso || Number(d.totale_peso) || 0, costo: a.costo,
     })
   }
   return NextResponse.json(result)
