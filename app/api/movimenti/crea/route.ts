@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { gestisceLaRete } from '@/lib/ruoli'
 import { registraMovimento, TipoMovimento } from '@/lib/movimenti'
 
 const TIPI_MANUALI: TipoMovimento[] = ['ricarica', 'reso', 'rettifica', 'rimborso']
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest) {
     .from('utenti').select('ruolo, master_id').eq('id', user.id).single()
 
   // Solo il master può registrare movimenti manuali (ricariche, resi, rettifiche)
-  if (utente?.ruolo === 'cliente' || !utente?.master_id) {
+  if (!utente?.master_id || !gestisceLaRete(utente)) {   // muove credito: solo master/admin/operatore, non agente/autista/cliente
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
 

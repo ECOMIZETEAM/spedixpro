@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
@@ -90,7 +91,7 @@ export async function POST(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
   // Un cliente non chiude distinte di reso: le sue le fa il suo master (come in network/resi/accetta).
-  if (!utente?.master_id || utente.ruolo === 'cliente') return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  if (!utente?.master_id || !gestisceLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })   // POST addebita il reso: solo chi gestisce la rete (il GET sopra resta con isAgente)
   const body = await req.json()
   // `voci` viene filtrato piu' sotto alle sole spedizioni della propria rete: serve riassegnabile.
   const { spedizioniIds, clienteId, targetMasterId, totale } = body

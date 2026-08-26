@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { gestisceLaRete } from '@/lib/ruoli'
 import { bloccaAgente, isAgente, clientiAgente } from '@/lib/agente'
 
 // Assegnazione listino a un cliente/sotto-master: puo' innescare la propagazione a cascata.
@@ -220,8 +221,10 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
-  const ruolo = (utente?.ruolo || '').toLowerCase()
-  if (!utente?.master_id || ruolo === 'cliente' || ruolo === 'agente') {
+  // DELETE distruttivo (assorbe spedizioni/movimenti/distinte + rimuove il login): solo chi gestisce
+  // la rete. Prima escludeva cliente e agente ma NON l'autista (che ha master_id); gestisceLaRete li
+  // esclude tutti tenendo master/admin/operatore.
+  if (!utente?.master_id || !gestisceLaRete(utente)) {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
   const { createAdminSupabase } = await import('@/lib/supabase-admin')

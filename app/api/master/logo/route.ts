@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
 export async function POST(req: NextRequest) {
@@ -8,7 +9,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
 
   const { data: utente } = await supabase.from('utenti').select('ruolo,master_id').eq('id', user.id).single()
-  if (utente?.ruolo === 'cliente' || !utente?.master_id) {
+  if (!utente?.master_id || !gestisceLaRete(utente)) {   // branding del master: solo chi gestisce la rete
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
   const masterId = utente.master_id
@@ -75,7 +76,7 @@ export async function DELETE() {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
 
   const { data: utente } = await supabase.from('utenti').select('ruolo,master_id').eq('id', user.id).single()
-  if (utente?.ruolo === 'cliente' || !utente?.master_id) {
+  if (!utente?.master_id || !gestisceLaRete(utente)) {   // branding del master: solo chi gestisce la rete
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
 

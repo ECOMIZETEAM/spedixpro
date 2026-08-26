@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { gestisceLaRete } from '@/lib/ruoli'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // La response finale (redirect) DEVE portare i cookie della nuova sessione:
@@ -34,8 +35,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!user) return NextResponse.redirect(new URL('/', req.url))
 
   const { data: utente } = await supabase.from('utenti').select('ruolo,master_id').eq('id', user.id).single()
-  // Cliente e AGENTE non possono impersonare.
-  if (!utente || utente.ruolo === 'cliente' || (utente.ruolo || '').toLowerCase() === 'agente') {
+  // Impersonare (login come il cliente) è un'azione potente: solo chi gestisce la rete (master/admin/
+  // operatore). Prima escludeva cliente e agente ma NON l'autista, che ha master_id e passava.
+  if (!utente?.master_id || !gestisceLaRete(utente)) {
     return NextResponse.redirect(new URL('/dashboard', req.url))
   }
 

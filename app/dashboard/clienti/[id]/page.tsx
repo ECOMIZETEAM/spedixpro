@@ -80,8 +80,13 @@ export default function ClienteProfiloPage() {
   useEffect(() => {
     caricaCliente()
     caricaMovimenti()
-    fetch(`/api/spedizioni/lista?clienteId=${id}`).then(r => r.json()).then(d => {
-      setSpedizioni(Array.isArray(d) ? d.slice(0, 10) : [])
+    // Solo le ULTIME 10, chieste al server (page=1&perPage=10): senza ?page la rotta entra nel ramo
+    // legacy che scarica TUTTO lo storico del cliente e gira l'intera pipeline di arricchimento
+    // (movimenti 205k, ordini, resi, ticket, pricing) per poi buttarne via tutto tranne 10. Il ramo
+    // paginato risponde { rows, total, ... } (oggetto, non array): si legge d.rows — con fallback
+    // all'array legacy, così non si rompe se un domani cambia forma.
+    fetch(`/api/spedizioni/lista?clienteId=${id}&page=1&perPage=10`).then(r => r.json()).then(d => {
+      setSpedizioni(Array.isArray(d?.rows) ? d.rows : (Array.isArray(d) ? d.slice(0, 10) : []))
     })
   }, [id])
 

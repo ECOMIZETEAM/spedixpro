@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { gestisceLaRete } from '@/lib/ruoli'
 import { isAgente, bloccaAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
@@ -91,7 +92,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente as any); if (_bloccoAg) return _bloccoAg
-  if (!utente?.master_id || utente.ruolo === 'cliente') return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  if (!utente?.master_id || !gestisceLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })   // POST: crea distinte/muove COD, solo chi gestisce la rete (il GET sopra ha già isAgente)
   const mio = utente.master_id
   const body = await req.json().catch(() => ({}))
   const destinatari: string[] = Array.isArray(body.destinatari) ? body.destinatari.filter(Boolean) : []

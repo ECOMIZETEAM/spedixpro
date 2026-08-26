@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { gestisceLaRete } from '@/lib/ruoli'
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
-  if (!utente?.master_id || utente.ruolo === 'cliente') return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  if (!utente?.master_id || !gestisceLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })   // elimina contratto+listini: solo chi gestisce la rete
 
   // Solo un corriere di PROPRIETÀ del master (o sotto-master loggato)
   const { data: corr } = await supabase.from('corrieri').select('id').eq('id', id).eq('master_id', utente.master_id).maybeSingle()
@@ -43,8 +44,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
-  if (!utente?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  // Il PATCH cambia la config del corriere (attivo/multicollo/settings): era guardato dal solo
+  // master_id, che ce l'hanno anche cliente/agente/autista. Solo chi gestisce la rete.
+  if (!utente?.master_id || !gestisceLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const body = await req.json()
   const campi: any = {}
   if (body.attivo !== undefined) campi.attivo = body.attivo

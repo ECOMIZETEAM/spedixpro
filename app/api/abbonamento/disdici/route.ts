@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { isAgente } from '@/lib/agente'
 import { stripeConfigurato, stripeClient } from '@/lib/stripe'
 import { DISDETTA, primoDelMeseProssimo } from '@/lib/abbonamento-cambi'
 
@@ -19,7 +19,7 @@ export async function POST() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
-  if (!utente?.master_id || utente.ruolo === 'cliente' || isAgente(utente)) {
+  if (!utente?.master_id || !gestisceLaRete(utente)) {   // disdetta abbonamento: solo chi gestisce la rete (prima l'autista passava)
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
 // Almeno 12 caratteri: sotto quella soglia Supabase rifiuta la password.
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest) {
   if (!(await puoGestireRete())) return NextResponse.json({ error: 'Gestione rete non abilitata per questo account' }, { status: 403 })
 
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
-  if (!utente?.master_id || utente.ruolo === 'cliente') {
+  if (!utente?.master_id || !gestisceLaRete(utente)) {   // crea sotto-master + credenziali: solo chi gestisce la rete
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
 
