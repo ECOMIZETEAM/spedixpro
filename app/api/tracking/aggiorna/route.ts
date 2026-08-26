@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { spediamoproGetTracking, spediamoproSearchStocks, mapStatoSpediamopro, spediamoproEventiIndicanoReso, spediamoproGetLabel, normalizzaEtichetta } from '@/lib/spediamopro'
+import { rimborsaAnnulloSpedizione } from '@/lib/annullaSpedizione'
 import { spedisciTrackingStati, mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
 import { inviaWebhook } from '@/lib/webhooks'
 
@@ -237,6 +238,18 @@ export async function GET(req: NextRequest) {
       if (Object.keys(upd).length) {
         await admin.from('spedizioni').update(upd).eq('id', s.id)
         aggiornate++
+      }
+
+      // AUTO-ANNULLO DEL CORRIERE = ANCHE STORNO DEL CREDITO.
+      // Se il corriere cancella la spedizione (es. SpediamoPro status 0: LDV async mai assegnata,
+      // tipico sulle internazionali BRT Europa) qui si aggiornava SOLO lo stato ad 'annullata' e il
+      // cliente restava ADDEBITATO per un pacco mai partito — segnalato da un cliente ("cancellate da
+      // sole, riaccreditatemi"). Ora, sulla transizione verso annullata, si restituisce il credito a
+      // cascata (cliente + master), come l'annullo manuale. rimborsaAnnulloSpedizione e' idempotente
+      // (salta se esiste gia' un 'rimborso'): niente doppio storno con annullamenti-cron/annullo manuale.
+      if (upd.stato === 'annullata' && s.stato !== 'annullata') {
+        try { await rimborsaAnnulloSpedizione(admin, s as any, null) }
+        catch (e: any) { console.error('[TRACKING][AUTO-ANNULLO] storno non riuscito', (s as any).numero, e?.message) }
       }
 
       // WEBHOOK AL CLIENTE quando lo stato CAMBIA DAVVERO.
