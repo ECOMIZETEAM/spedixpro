@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 
 // Rubrica MITTENTI: autocomplete sul nominativo. Sorgente = mittenti già usati nelle spedizioni
 // del master (da qualsiasi origine), così si popola da sola come la rubrica destinatari.
@@ -8,7 +9,7 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json([])
 
   const q = (req.nextUrl.searchParams.get('q') || '').trim()
@@ -23,6 +24,14 @@ export async function GET(req: NextRequest) {
     .limit(60)
   // Il cliente vede SOLO i propri mittenti; il master può filtrare per cliente selezionato.
   if ((utente.ruolo || '').toLowerCase() === 'cliente') query = query.eq('cliente_id', utente.cliente_id)
+  else if (isAgente(utente)) {
+    // L'agente vede SOLO i mittenti dei SUOI clienti (match per nome). Un clienteId dal browser
+    // vale solo se è davvero uno dei suoi; altrimenti restringe a tutti e soli i suoi clienti. Senza
+    // questo ramo cadeva sull'else e leggeva la rubrica PII di qualsiasi cliente del master.
+    const idsMiei = idClientiPerFiltro(await clientiAgente(supabase, utente))
+    if (clienteId && idsMiei.includes(clienteId)) query = query.eq('cliente_id', clienteId)
+    else query = query.in('cliente_id', idsMiei)
+  }
   else if (clienteId && !clienteId.startsWith('m:') && clienteId !== '__proprio__') query = query.eq('cliente_id', clienteId)
 
   const { data } = await query
