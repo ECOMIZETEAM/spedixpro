@@ -57,7 +57,6 @@ const NAV: NavItem[] = [
     { label: 'Nuovo Master', href: '/dashboard/clienti/master/nuovo', rete: true },
     { label: 'Elenco Master', href: '/dashboard/clienti/master', rete: true },
     { label: 'Gerarchia', href: '/dashboard/clienti/gerarchia', rete: true },
-    { label: 'Report Agenti', href: '/dashboard/agenti', perm: 'admin.clients.index' },
   ]},
   // LOGISTICA CONTO TERZI: e' un servizio a se', non un dettaglio dell'anagrafica clienti — la
   // merce del cliente tenuta da noi, con il suo magazzino, il suo listino e i suoi addebiti.
@@ -89,6 +88,7 @@ const NAV: NavItem[] = [
     { label: 'Report Contrassegni', href: '/dashboard/reports/contrassegni', perm: 'admin.reports.cod' },
     { label: 'Report Ritiri', href: '/dashboard/reports/ritiri', perm: 'admin.reports.pickups' },
     { label: 'Report Rettifiche', href: '/dashboard/reports/rettifiche', perm: 'admin.reports.priceupdates' },
+    { label: 'Report Agenti', href: '/dashboard/reports/agenti', perm: 'admin.reports.shippings' },
     { label: 'Report Consumabili', href: '/dashboard/reports/consumabili', perm: 'admin.reports.consumables' },
     { label: 'Report Fatture', href: '/dashboard/reports/fatture', perm: 'admin.reports.invoices' },
     { label: 'Storico Ricariche', href: '/dashboard/reports/ricariche', perm: 'admin.reports.invoices' },
