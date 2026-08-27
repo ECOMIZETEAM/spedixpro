@@ -34,10 +34,13 @@ export default function NetworkRicevutiPage() {
       const giorno = new Date(r.created_at).toLocaleDateString('it-IT')
       const da = r.masters?.nome || '—'
       const k = da + '|' + giorno
-      if (!m.has(k)) m.set(k, { k, da, giorno, righe: [], totale: 0, daDecidere: [] })
+      if (!m.has(k)) m.set(k, { k, da, giorno, righe: [], totale: 0, totaleDaDecidere: 0, daDecidere: [] })
       const b = m.get(k)
-      b.righe.push(r); b.totale += (Number(r.differenza) || 0) - (Number(r.fuori_sagoma) || 0)   // addebito vero = ripesatura + fuori sagoma
-      if (!r.propagazione) b.daDecidere.push(r.id)
+      const addebito = (Number(r.differenza) || 0) - (Number(r.fuori_sagoma) || 0)   // addebito vero = ripesatura + fuori sagoma
+      b.righe.push(r); b.totale += addebito
+      // Il totale che conta è quello del DA DECIDERE, non di tutto il blocco: 578 già decise + 2 nuove
+      // mostravano "580 · €1957" accanto a "Accetta (2)" — sembrava un errore. Ora il blocco grida i 2.
+      if (!r.propagazione) { b.daDecidere.push(r.id); b.totaleDaDecidere += addebito }
     }
     return Array.from(m.values()).sort((a, b) => (a.giorno < b.giorno ? 1 : -1))
   })()
@@ -172,11 +175,15 @@ export default function NetworkRicevutiPage() {
                   <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px',flexWrap:'wrap',padding:'14px 16px'}}>
                     <div>
                       <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>
-                        Da {b.da} · {b.righe.length} rettifiche · <span style={{color:'#dc2626'}}>€ {Math.abs(b.totale).toFixed(2)}</span>
+                        Da {b.da} · {b.daDecidere.length > 0
+                          ? <><span style={{color:ACCENT}}>{b.daDecidere.length} da accettare</span> · <span style={{color:'#dc2626'}}>€ {Math.abs(b.totaleDaDecidere).toFixed(2)}</span></>
+                          : <>{b.righe.length} rettifiche · <span style={{color:'#999'}}>già decise</span></>}
                       </div>
                       <div style={{fontSize:'12px',color:'#8a8a8a',marginTop:'3px'}}>
                         Ricevute il {b.giorno} · già scalate dal tuo credito.
-                        {b.daDecidere.length ? ' Accettandole vanno nella tua Rettifica Costi, divise per cliente e sotto-master: da lì scegli a chi caricarle.' : ' Già decise.'}
+                        {b.daDecidere.length
+                          ? (b.righe.length > b.daDecidere.length ? ` Le altre ${b.righe.length - b.daDecidere.length} le hai già decise.` : '') + ' Accettandole vanno nella tua Rettifica Costi, divise per cliente e sotto-master: da lì scegli a chi caricarle.'
+                          : ' Già decise.'}
                       </div>
                     </div>
                     <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
