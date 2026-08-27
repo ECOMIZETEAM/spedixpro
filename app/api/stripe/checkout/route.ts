@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { isAgente } from '@/lib/agente'
 import { pianoById, meseCorrente } from '@/lib/piani'
+import { giorniNelMese } from '@/lib/abbonamento-cambi'
 import { stripeConfigurato, stripeClient, prezzoStripe, aliquotaIva, clienteStripe, primoDelProssimoMese, idPrezzo } from '@/lib/stripe'
 
 // Attivazione o cambio piano PAGANDO CON CARTA.
@@ -87,30 +88,36 @@ export async function POST(req: NextRequest) {
           if (sub.schedule) {
             try { await s.subscriptionSchedules.release(String(sub.schedule)) } catch { }
           }
-          // Il piano cambia subito, ma SENZA conteggio dei giorni: la differenza si paga intera.
+          // Il piano cambia SUBITO — il limite si alza adesso, ed e' il senso dell'upgrade — ma
+          // senza il conteggio dei giorni del circuito: il conguaglio lo calcoliamo noi.
           await s.subscriptions.update(sub.id, {
             items: [{ id: voce.id, price: price.id }],
             proration_behavior: 'none',
             metadata: { master_id: m.id, piano: pianoId },
           })
-          // La differenza fra i due piani, per intero, addebitata subito. Non e' proporzionale ai
-          // giorni: chi passa a un piano superiore lo fa perche' gli serve adesso, e paga la
-          // differenza del piano — che e' anche la regola piu' facile da spiegare a un cliente.
-          const differenza = (price.unit_amount || 0) - prezzoOra
-          if (differenza > 0) {
+          // NON si addebita adesso. Si accumula il CONGUAGLIO — la differenza di piano proporzionata
+          // ai giorni che restano nel mese — come voce IN SOSPESO sul circuito (un invoiceItem SENZA
+          // fattura): si aggancia da sola alla prossima fattura di rinnovo, cosi' il master paga
+          // rinnovo + conguaglio in un colpo, il primo del mese. Regola decisa da chi vende: chi fa
+          // upgrade il 28 non paga la differenza piena per tre giorni di utilizzo, ma la sua quota.
+          // Prima qui si addebitava la differenza PIENA subito, con una fattura a parte: quella strada
+          // in produzione non incassava (restavano righe a 0) e comunque non era la regola voluta.
+          const mese = meseCorrente()
+          const gg = giorniNelMese(mese)
+          const restanti = Math.max(0, gg - new Date().getUTCDate() + 1)
+          const conguaglio = Math.round(((price.unit_amount || 0) - prezzoOra) / gg * restanti)   // centesimi
+          if (conguaglio > 0) {
             await s.invoiceItems.create({
-              customer: String(sub.customer), amount: differenza, currency: 'eur',
-              description: `Passaggio a ${piano.nome} — differenza di piano`,
+              customer: String(sub.customer), amount: conguaglio, currency: 'eur',
+              description: `Conguaglio ${piano.nome} — ${restanti} giorni di utilizzo`,
+              metadata: { master_id: m.id, tipo: 'conguaglio', mese, piano: pianoId },
             })
-            const fattura = await s.invoices.create({
-              customer: String(sub.customer), auto_advance: true, collection_method: 'charge_automatically',
-            })
-            try { if (fattura.id) await s.invoices.finalizeInvoice(fattura.id) } catch { /* la incassa il circuito da solo */ }
+            // Nessuna invoices.create: la voce resta in sospeso e la incassa il rinnovo.
           }
           await admin.from('masters').update({
             abbonamento_piano_programmato: null, abbonamento_programmato_dal: null,
           }).eq('id', m.id)
-          return NextResponse.json({ aggiornato: true, immediato: true })
+          return NextResponse.json({ aggiornato: true, immediato: true, conguaglio: conguaglio / 100 })
         }
 
         // Downgrade: si programma per la fine del periodo pagato.

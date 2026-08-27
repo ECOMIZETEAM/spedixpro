@@ -60,7 +60,9 @@ export default function AbbonamentoPage() {
     if (d.error) { setMsg(d.error); return }
     if (d.aggiornato) {
       setMsg(d.immediato
-        ? '✓ Piano attivo da subito — addebitata la differenza di piano'
+        ? (d.conguaglio > 0
+            ? `✓ Piano attivo da subito. Il conguaglio di € ${Number(d.conguaglio).toFixed(2)} (differenza sui giorni che restano) si paga col prossimo rinnovo — lo vedi qui sopra in "Prossimo pagamento".`
+            : '✓ Piano attivo da subito.')
         : `✓ Downgrade registrato — partirà il ${new Date(d.dal).toLocaleDateString('it-IT')}. Fino ad allora tieni il piano attuale.`)
       carica()
     }
@@ -365,6 +367,34 @@ export default function AbbonamentoPage() {
           <div style={{fontSize:'13px',color:'#dc2626',fontWeight:600}}>Nessun abbonamento attivo — seleziona un piano per usare la piattaforma.</div>
         )}
       </div>
+
+      {stato?.prossimoPagamento && (
+        <div style={{...card, marginBottom:'16px', borderColor:ACCENT, background:'#fff7ed'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',flexWrap:'wrap',gap:'8px'}}>
+            <div style={{fontSize:'12px',fontWeight:700,textTransform:'uppercase',letterSpacing:'.4px',color:'#9a3412'}}>Prossimo pagamento</div>
+            <div style={{fontSize:'26px',fontWeight:800,color:'#ea580c'}}>€ {Number(stato.prossimoPagamento.totale).toFixed(2)}</div>
+          </div>
+          <div style={{fontSize:'13px',color:'#7c2d12',marginTop:'10px',lineHeight:1.7}}>
+            <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
+              <span>Rinnovo {stato.prossimoPagamento.pianoRinnovo || ''}</span>
+              <span style={{fontWeight:700,whiteSpace:'nowrap'}}>€ {Number(stato.prossimoPagamento.rinnovo).toFixed(2)}</span>
+            </div>
+            {(stato.prossimoPagamento.dettaglio||[]).map((d:any,i:number)=>(
+              <div key={i} style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
+                <span>Conguaglio {d.piano} · {d.giorniRestanti} giorni</span>
+                <span style={{fontWeight:700,whiteSpace:'nowrap'}}>€ {Number(d.importo).toFixed(2)}</span>
+              </div>
+            ))}
+          </div>
+          {stato.prossimoPagamento.conguaglio > 0 && (
+            <div style={{fontSize:'12px',color:'#9a3412',marginTop:'10px',borderTop:'1px dashed #fed7aa',paddingTop:'9px',lineHeight:1.6}}>
+              Il <strong>conguaglio</strong> è la differenza dei piani che hai cambiato questo mese, contata
+              solo sui giorni di effettivo utilizzo. Si paga <strong>insieme al rinnovo</strong>, non subito
+              all&apos;upgrade.
+            </div>
+          )}
+        </div>
+      )}
 
       {conCarta && !stato?.carta?.attiva && stato?.attivo && (
         <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'12px 16px',marginBottom:'14px',fontSize:'13.5px',color:'#9a3412',display:'flex',alignItems:'center',gap:'12px',flexWrap:'wrap'}}>

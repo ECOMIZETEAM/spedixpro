@@ -54,6 +54,57 @@ export function descriviCambio(m: any): { piano: string | null; disdetta: boolea
   }
 }
 
+// CONGUAGLIO DEI CAMBI DI PIANO A META' MESE.
+//
+// Un upgrade a meta' mese NON fa pagare subito la differenza piena del piano: fa pagare, al prossimo
+// rinnovo, la differenza PROPORZIONATA ai giorni che restano nel mese. La regola, decisa da chi
+// vende (confermata il 27/08):
+//
+//   conguaglio = (prezzo_nuovo − prezzo_vecchio) / giorni_del_mese × giorni_dal_cambio_a_fine_mese
+//
+// I giorni sono inclusivi: chi passa il 16 di agosto paga per 16 giorni (16→31). Con piu' upgrade
+// nello stesso mese (5k→10k→20k) ogni salto parte dal prezzo del piano precedente, quindi la somma
+// e' esatta: non si paga due volte lo stesso pezzo.
+//
+// Perche' proporzionata e non piena: chi passa il 28 userebbe il piano grande tre giorni e pagare la
+// differenza intera sarebbe ingiusto. Il rinnovo del mese dopo e' comunque pieno.
+//
+// I giorni si leggono in UTC, come sono scritte le date sul database, cosi' il numero mostrato al
+// master e quello addebitato dal circuito coincidono al centesimo.
+export function giorniNelMese(mese: string): number {
+  const [a, m] = mese.split('-').map(Number)
+  return new Date(Date.UTC(a, m, 0)).getUTCDate()   // giorno 0 del mese dopo = ultimo del mese
+}
+
+export type VoceConguaglio = { piano: string; giornoCambio: number; giorniRestanti: number; importo: number }
+
+// Dalle righe di `abbonamenti_pagamenti` di UN mese (ognuna porta piano + created_at) ricostruisce
+// la scaletta dei piani e somma il conguaglio di ogni upgrade. Le righe possono arrivare in
+// qualsiasi ordine: si riordinano per data. Downgrade e ripetizioni dello stesso piano non generano
+// conguaglio (solo i salti in su, prezzo che cresce).
+export function conguaglioDelMese(
+  righe: Array<{ piano?: string | null; created_at?: string | null }>,
+  mese: string,
+): { totale: number; dettaglio: VoceConguaglio[] } {
+  const giorni = giorniNelMese(mese)
+  const ordinate = [...righe].filter(r => r.piano).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+  let prezzoPrec: number | null = null
+  let totale = 0
+  const dettaglio: VoceConguaglio[] = []
+  for (const r of ordinate) {
+    const pi = pianoById(r.piano!); if (!pi) continue
+    if (prezzoPrec != null && pi.prezzo > prezzoPrec) {   // solo gli UPGRADE
+      const giorno = r.created_at ? new Date(r.created_at).getUTCDate() : 1
+      const restanti = Math.max(0, giorni - giorno + 1)
+      const q = Math.round(((pi.prezzo - prezzoPrec) / giorni * restanti) * 100) / 100
+      totale += q
+      dettaglio.push({ piano: pi.nome, giornoCambio: giorno, giorniRestanti: restanti, importo: q })
+    }
+    prezzoPrec = pi.prezzo
+  }
+  return { totale: Math.round(totale * 100) / 100, dettaglio }
+}
+
 // DA QUANDO IL CANONE SI PAGA CON CARTA.
 //
 // Fino a ieri il canone si scalava dal credito, in silenzio: i master non hanno mai ricevuto un

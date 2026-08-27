@@ -4,7 +4,7 @@ import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { PIANI_ENTERPRISE, pianoById, meseCorrente } from '@/lib/piani'
 import { stripeConfigurato, IVA_PERCENTUALE } from '@/lib/stripe'
-import { descriviCambio, primoDelMeseProssimo } from '@/lib/abbonamento-cambi'
+import { descriviCambio, primoDelMeseProssimo, conguaglioDelMese } from '@/lib/abbonamento-cambi'
 import { GIORNI_TOLLERANZA } from '@/lib/limite-piano'
 
 // Stato abbonamento del master + piani disponibili
@@ -23,8 +23,27 @@ export async function GET() {
   const isRoot = !m?.parent_master_id  // il master principale: illimitato e gratis, mai bloccato
 
   const { data: mieiPag } = await admin.from('abbonamenti_pagamenti')
-    .select('id,mese,importo,pagato,pagato_il,metodo')
+    .select('id,mese,importo,pagato,pagato_il,metodo,piano,created_at')
     .eq('master_id', utente.master_id).order('mese', { ascending: false }).limit(24)
+
+  // PROSSIMO PAGAMENTO (solo master pagante): il rinnovo del piano corrente + il CONGUAGLIO degli
+  // upgrade fatti QUESTO mese (la differenza di piano proporzionata ai giorni, che oggi non paga).
+  // Stessa funzione che il checkout usa per addebitarlo: cosi' il numero mostrato e quello incassato
+  // coincidono. Il master lo chiedeva e non lo vedeva da nessuna parte — "quanto andro' a pagare?".
+  let prossimoPagamento: any = null
+  if (!isRoot && !(m as any)?.abbonamento_esente && m?.abbonamento_piano) {
+    const meseC = meseCorrente()
+    const { totale: conguaglio, dettaglio } = conguaglioDelMese(
+      (mieiPag || []).filter((p: any) => p.mese === meseC), meseC)
+    // Rinnovo: il piano corrente, oppure il downgrade PROGRAMMATO se c'e' (parte dal 1° del mese dopo).
+    const pianoRinnovo = (m as any)?.abbonamento_piano_programmato
+      ? pianoById((m as any).abbonamento_piano_programmato) : pianoById(m.abbonamento_piano!)
+    const rinnovo = Number(pianoRinnovo?.prezzo ?? m?.abbonamento_prezzo ?? 0)
+    prossimoPagamento = {
+      totale: Math.round((rinnovo + conguaglio) * 100) / 100,
+      rinnovo, conguaglio, dettaglio, pianoRinnovo: pianoRinnovo?.nome || null,
+    }
+  }
 
   // Il piano conta le spedizioni di TUTTA la rete sotto questo master (sé + discendenza):
   // ogni spedizione di un sotto-master consuma il contratto/piano dei master sopra.
@@ -145,6 +164,7 @@ export async function GET() {
     // Lo storico dei PROPRI pagamenti: il master lo chiedeva e non lo vedeva da nessuna parte —
     // sapeva di aver pagato solo perche' se lo ricordava.
     mieiPagamenti: mieiPag,
+    prossimoPagamento,
     cambioProgrammato: descriviCambio(m),
     // Pagamento con carta: disponibile solo se le chiavi ci sono. Finche' non ci sono, la
     // schermata resta identica a prima e si paga come si e' sempre pagato.
