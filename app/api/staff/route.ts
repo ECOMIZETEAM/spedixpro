@@ -12,7 +12,7 @@ export async function GET(_req: NextRequest) {
   if ((me.ruolo || '').toLowerCase() === 'agente') return NextResponse.json([])   // l'agente non vede lo staff
 
   const { data: utenti } = await supabase.from('utenti')
-    .select('id,nome,cognome,telefono,ruolo,attivo,created_at,listino_agente_id')
+    .select('id,nome,cognome,telefono,ruolo,attivo,created_at,listino_agente_id,agente_metodo,agente_valore')
     .eq('master_id', me.master_id)
     .order('nome', { ascending: true })
 
@@ -166,6 +166,11 @@ export async function PUT(req: NextRequest) {
     } else {
       anagrafica.listino_agente_id = null
     }
+  }
+  // Compenso agente: metodo (uno dei 4) + valore (% per perc_*, € a spedizione per fisso).
+  if (typeof body.agente_metodo === 'string' && ['listino', 'perc_netto', 'perc_lordo', 'fisso'].includes(body.agente_metodo)) {
+    anagrafica.agente_metodo = body.agente_metodo
+    anagrafica.agente_valore = Math.max(0, Number(body.agente_valore) || 0)
   }
   if (Object.keys(anagrafica).length) {
     const { error } = await admin.from('utenti').update(anagrafica).eq('id', id).eq('master_id', me.master_id)

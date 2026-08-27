@@ -25,6 +25,8 @@ export default function ModificaStaffPage() {
   const [passwordMostrata, setPasswordMostrata] = useState('')
   const [listinoAgente, setListinoAgente] = useState('')
   const [listini, setListini] = useState<any[]>([])
+  const [metodo, setMetodo] = useState('listino')   // come il master paga l'agente
+  const [valore, setValore] = useState('')          // % (perc_*) o € a spedizione (fisso)
 
   useEffect(() => {
     fetch('/api/staff').then(r => r.json()).then((arr: any[]) => {
@@ -33,6 +35,8 @@ export default function ModificaStaffPage() {
       setNome(s.nome || ''); setCognome(s.cognome || ''); setTelefono(s.telefono || '')
       setRuolo((s.ruolo || 'operatore').toLowerCase()); setEmailOrig(s.email || ''); setEmail(s.email || '')
       setListinoAgente(s.listino_agente_id || '')
+      setMetodo((s.agente_metodo || 'listino'))
+      setValore(s.agente_valore != null && Number(s.agente_valore) ? String(s.agente_valore) : '')
       setLoading(false)
     }).catch(() => { setErrore('Errore caricamento'); setLoading(false) })
     fetch('/api/listini/lista').then(r => r.json()).then((arr: any[]) => setListini(Array.isArray(arr) ? arr : [])).catch(() => {})
@@ -40,7 +44,10 @@ export default function ModificaStaffPage() {
 
   async function salva() {
     setSaving(true); setErrore(''); setMsg(''); setPasswordMostrata('')
-    const body: any = { id, nome, cognome, telefono, ruolo, listino_agente_id: ruolo === 'agente' ? (listinoAgente || null) : null }
+    const body: any = { id, nome, cognome, telefono, ruolo,
+      listino_agente_id: ruolo === 'agente' && metodo === 'listino' ? (listinoAgente || null) : null,
+      agente_metodo: ruolo === 'agente' ? metodo : 'listino',
+      agente_valore: ruolo === 'agente' && metodo !== 'listino' ? (Number(valore) || 0) : 0 }
     if (email.trim() && email.trim().toLowerCase() !== emailOrig.trim().toLowerCase()) body.nuova_email = email.trim()
     if (resetPassword) body.resetPassword = true
     const res = await fetch('/api/staff', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -82,13 +89,45 @@ export default function ModificaStaffPage() {
               </select></div>
           </div>
           {ruolo === 'agente' && (
-            <div>
-              <label style={lbl}>Listino agente (il suo costo)</label>
-              <select style={inp} value={listinoAgente} onChange={e=>setListinoAgente(e.target.value)}>
-                <option value="">— nessuno —</option>
-                {listini.map((l:any)=><option key={l.id} value={l.id}>{l.nome}</option>)}
-              </select>
-              <div style={{fontSize:'11px',color:'#8a8a8a',marginTop:'4px'}}>L&apos;agente lo vede in sola lettura in &quot;Il mio listino&quot;. Il suo margine = prezzo cliente − questo costo.</div>
+            <div style={{display:'grid',gap:'10px'}}>
+              <div>
+                <label style={lbl}>Come lo paghi (compenso)</label>
+                <select style={inp} value={metodo} onChange={e=>setMetodo(e.target.value)}>
+                  <option value="listino">Listino personale (margine sul suo listino)</option>
+                  <option value="perc_lordo">Percentuale sul lordo (sul prezzo cliente)</option>
+                  <option value="perc_netto">Percentuale sul netto (sul tuo margine)</option>
+                  <option value="fisso">Fisso a spedizione</option>
+                </select>
+              </div>
+              {metodo === 'listino' && (
+                <div>
+                  <label style={lbl}>Listino agente (il suo costo)</label>
+                  <select style={inp} value={listinoAgente} onChange={e=>setListinoAgente(e.target.value)}>
+                    <option value="">— nessuno —</option>
+                    {listini.map((l:any)=><option key={l.id} value={l.id}>{l.nome}</option>)}
+                  </select>
+                  <div style={{fontSize:'11px',color:'#8a8a8a',marginTop:'4px'}}>Il suo margine = prezzo cliente − questo costo. Lo vede in sola lettura in &quot;Il mio listino&quot;.</div>
+                </div>
+              )}
+              {(metodo === 'perc_lordo' || metodo === 'perc_netto') && (
+                <div>
+                  <label style={lbl}>Percentuale {metodo === 'perc_lordo' ? 'sul lordo (prezzo cliente)' : 'sul netto (tuo margine = prezzo − tuo costo)'}</label>
+                  <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                    <input style={{...inp,maxWidth:'130px'}} type="number" step="0.1" min="0" max="100" value={valore} onChange={e=>setValore(e.target.value)} placeholder="es. 10"/>
+                    <span style={{color:'#666'}}>%</span>
+                  </div>
+                </div>
+              )}
+              {metodo === 'fisso' && (
+                <div>
+                  <label style={lbl}>Euro per ogni spedizione</label>
+                  <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                    <span style={{color:'#666'}}>€</span>
+                    <input style={{...inp,maxWidth:'130px'}} type="number" step="0.01" min="0" value={valore} onChange={e=>setValore(e.target.value)} placeholder="es. 0,50"/>
+                    <span style={{color:'#666'}}>a spedizione</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

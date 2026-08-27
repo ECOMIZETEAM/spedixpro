@@ -57,6 +57,7 @@ const NAV: NavItem[] = [
     { label: 'Nuovo Master', href: '/dashboard/clienti/master/nuovo', rete: true },
     { label: 'Elenco Master', href: '/dashboard/clienti/master', rete: true },
     { label: 'Gerarchia', href: '/dashboard/clienti/gerarchia', rete: true },
+    { label: 'Report Agenti', href: '/dashboard/agenti', perm: 'admin.clients.index' },
   ]},
   // LOGISTICA CONTO TERZI: e' un servizio a se', non un dettaglio dell'anagrafica clienti — la
   // merce del cliente tenuta da noi, con il suo magazzino, il suo listino e i suoi addebiti.
