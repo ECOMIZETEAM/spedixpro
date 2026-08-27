@@ -46,10 +46,11 @@ type Props = {
   style?: React.CSSProperties
   disabled?: boolean
   className?: string
+  cercaSempre?: boolean   // forza la ricerca anche sotto la soglia di voci
   [altro: string]: any
 }
 
-export default function SelectCercabile({ value, onChange, children, style, disabled, className, ...resto }: Props) {
+export default function SelectCercabile({ value, onChange, children, style, disabled, className, cercaSempre, ...resto }: Props) {
   const opzioni = useMemo(() => raccogli(children), [children])
   const [aperto, setAperto] = useState(false)
   const [q, setQ] = useState('')
@@ -96,7 +97,9 @@ export default function SelectCercabile({ value, onChange, children, style, disa
   }, [aperto])
 
   // Poche voci: si resta sulla tendina di sempre. Nessuna differenza, nessun rischio.
-  if (opzioni.length < SOGLIA) {
+  // `cercaSempre` forza la ricerca anche con poche voci (es. tendina agenti nei report: la si vuole
+  // uguale a quella clienti anche se gli agenti sono 3).
+  if (opzioni.length < SOGLIA && !cercaSempre) {
     // `null` non e' un valore ammesso da <select>: diventa stringa vuota, che e' il modo in cui
     // una tendina rappresenta "niente scelto".
     return <select value={value ?? ''} onChange={onChange} style={style} disabled={disabled} className={className} {...resto}>{children}</select>
@@ -124,7 +127,7 @@ export default function SelectCercabile({ value, onChange, children, style, disa
       </button>
 
       {aperto && montato && pos && createPortal(
-        <div ref={pannello} style={{ position: 'fixed', zIndex: 3000, top: pos.top, left: pos.left, width: Math.max(pos.width, 240), maxWidth: 'calc(100vw - 16px)', background: '#fff', border: '1px solid #d5d5d5', borderRadius: '6px', boxShadow: '0 10px 30px rgba(0,0,0,.16)' }}>
+        <div ref={pannello} style={{ position: 'fixed', zIndex: 1000000, top: pos.top, left: pos.left, width: Math.max(pos.width, 240), maxWidth: 'calc(100vw - 16px)', background: '#fff', border: '1px solid #d5d5d5', borderRadius: '6px', boxShadow: '0 10px 30px rgba(0,0,0,.16)' }}>
           <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Cerca…"
             onKeyDown={e => {
               if (e.key === 'Escape') { setAperto(false); setQ('') }

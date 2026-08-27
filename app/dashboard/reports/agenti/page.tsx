@@ -93,7 +93,7 @@ export default function ReportAgentiPage() {
         <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>Filtri {loading && d && <span style={{ fontSize: 11, fontWeight: 500, color: '#9ca3af' }}>· aggiorno…</span>}</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div><label style={lbl}>Agente</label>
-            <SelectCercabile value={filtri.agenteId} onChange={e => setFiltri(f => ({ ...f, agenteId: (e.target as any).value }))} style={sel}>
+            <SelectCercabile value={filtri.agenteId} onChange={e => setFiltri(f => ({ ...f, agenteId: (e.target as any).value }))} style={sel} cercaSempre>
               <option value="">Tutti gli agenti</option>
               {agentiLista.map((a: any) => <option key={a.id} value={a.id}>{a.nome}</option>)}
             </SelectCercabile>
