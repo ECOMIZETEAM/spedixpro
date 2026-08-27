@@ -202,6 +202,10 @@ export async function calcolaPrezzoListino(
     cap?: string
     paese?: string
     citta?: string   // città destinazione: distingue i CAP condivisi tra più comuni (zona disagiata vs Italia)
+    // SOLO ricalcolo RETTIFICHE: forza la fascia di UNA zona (di norma 'Italia'), bypassando il match
+    // per CAP e l'esclusione zona-disagiata. Serve a rettificare su una fascia UNICA e coerente per
+    // tutta la catena. Default assente = comportamento normale (la creazione NON lo passa mai).
+    zonaForzata?: string
   }
 ): Promise<RisultatoPrezzo> {
   const { listinoId, provincia } = params
@@ -282,10 +286,20 @@ export async function calcolaPrezzoListino(
   }
   const fascePerCorriere = new Map<string, any[]>()
   for (const [cId, fasceC] of tuttePerCorr) {
-    let sel = fasceC.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id))
-    if (!sel.length && !isEsteroL && !corrieriEsclusi.has(cId)) {
-      sel = fasceC.filter((f: any) => (f.zone as any)?.nome === zonaNome)
-      if (!sel.length) sel = fasceC.filter((f: any) => (f.zone as any)?.nome === 'Italia')
+    let sel: any[]
+    if (params.zonaForzata) {
+      // RICALCOLO RETTIFICHE: fascia forzata su UNA zona (di norma 'Italia'), stessa per tutti i livelli.
+      // Si bypassa il match per CAP e l'esclusione zona-disagiata: qui non si sta VENDENDO (dove
+      // l'esclusione evita di vendere sotto costo), si rettifica a posteriori su una fascia coerente.
+      // Se la zona forzata non c'è nel listino, ripiega su 'Italia'.
+      sel = fasceC.filter((f: any) => (f.zone as any)?.nome === params.zonaForzata)
+      if (!sel.length && params.zonaForzata !== 'Italia') sel = fasceC.filter((f: any) => (f.zone as any)?.nome === 'Italia')
+    } else {
+      sel = fasceC.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id))
+      if (!sel.length && !isEsteroL && !corrieriEsclusi.has(cId)) {
+        sel = fasceC.filter((f: any) => (f.zone as any)?.nome === zonaNome)
+        if (!sel.length) sel = fasceC.filter((f: any) => (f.zone as any)?.nome === 'Italia')
+      }
     }
     if (sel.length) fascePerCorriere.set(cId, sel)
   }
@@ -363,6 +377,9 @@ export async function calcolaPrezzoCorriereDettaglio(
     cap?: string
     paese?: string
     citta?: string   // città destinazione: distingue i CAP condivisi tra più comuni (zona disagiata vs Italia)
+    // SOLO ricalcolo RETTIFICHE: come in calcolaPrezzoListino — forza la fascia di UNA zona (di norma
+    // 'Italia') per tutti i livelli, bypassando match CAP + esclusione. Default assente = normale.
+    zonaForzata?: string
   }
 ): Promise<DettaglioCorriere | null> {
   const { corriereId, masterId, provincia } = params
@@ -426,12 +443,20 @@ export async function calcolaPrezzoCorriereDettaglio(
     { paese: params.paese, provincia, cap: params.cap, citta: (params as any).citta },
     candidateZonaIds, zonaCorr, esclCorr
   )
-  let fasceZona = zoneMatchIds.length ? fasce.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id)) : []
-  // Per l'ESTERO niente fallback su Italia; e nemmeno se la dest è ESCLUSIVA per questo corriere.
-  const isEsteroC = (params.paese || 'IT').toUpperCase().trim() !== 'IT'
-  if (!isEsteroC && !corrieriEsclusi.has(corriereId)) {
-    if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
-    if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
+  let fasceZona: any[]
+  if (params.zonaForzata) {
+    // RICALCOLO RETTIFICHE: fascia forzata su UNA zona coerente per tutta la catena (di norma 'Italia'),
+    // bypassando match CAP + esclusione. Ripiega su 'Italia' se la zona forzata non c'è in questo listino.
+    fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === params.zonaForzata)
+    if (!fasceZona.length && params.zonaForzata !== 'Italia') fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
+  } else {
+    fasceZona = zoneMatchIds.length ? fasce.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id)) : []
+    // Per l'ESTERO niente fallback su Italia; e nemmeno se la dest è ESCLUSIVA per questo corriere.
+    const isEsteroC = (params.paese || 'IT').toUpperCase().trim() !== 'IT'
+    if (!isEsteroC && !corrieriEsclusi.has(corriereId)) {
+      if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
+      if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
+    }
   }
   if (!fasceZona.length) return null
 

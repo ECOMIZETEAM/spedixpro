@@ -143,88 +143,121 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     const { data: corr } = await admin.from('corrieri')
       .select('id,nome_contratto,master_id').eq('id', s.corriere_id).maybeSingle()
 
-    // ── IL CLIENTE ──
-    if (s.cliente_id) {
-      const { data: cl } = await admin.from('clienti')
-        .select('ragione_sociale,listino_cliente_id').eq('id', s.cliente_id).maybeSingle()
-      let dovuto: number | null = null
-      if (cl?.listino_cliente_id) {
-        const ris = await calcolaPrezzoListino(admin, {
-          listinoId: cl.listino_cliente_id, corriereId: s.corriere_id, packages, ...dest,
-        })
-        if (ris) {
-          // Per il CLIENTE il volume lo dice il SUO listino (fattore suo): e' quello esatto.
-          if (Number(ris.peso_volume) > 0) base.pesoVolumeDopo = arrotonda(Number(ris.peso_volume))
-          // LE DUE CIFRE DEVONO ESSERE FATTE CON LA STESSA RICETTA.
-          // `pagato` viene dai movimenti, e alla creazione il cliente e' addebitato di
-          // nolo + fee contrassegno + fee assicurazione. Riprezzando il solo nolo si sottraeva una
-          // mela da una pera: su una spedizione con contrassegno la fee finiva tutta dentro la
-          // differenza, e una ripesatura da un euro usciva come nota di credito. Al livello dei
-          // master le fee erano gia' passate (qui sotto, a costruisciCatena): l'asimmetria era
-          // dentro la stessa funzione. La fee si RICALCOLA sul nolo nuovo, come fa la creazione,
-          // perche' certi scaglioni sono in percentuale sul nolo.
-          const sup = await calcolaSupplementiCliente(admin, {
-            listinoId: cl.listino_cliente_id, corriereId: s.corriere_id,
-            contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0),
-            valoreMerce: Number(s.valore_merce || 0), nolo: ris.prezzo,
+    // ── CLIENTE + MASTER: costruzione dei livelli, opzionalmente su una FASCIA UNICA (zonaForzata) ──
+    // Estratta in una funzione così la si può rifare un SECONDO giro forzando 'Italia' quando le zone
+    // dei livelli non coincidono (evita MULTI su SCS + Ecomize su Italia) o quando un livello, che il
+    // listino coprirebbe su Italia, resta bloccato dall'esclusione zona-disagiata.
+    const costruisciLivelli = async (zonaForzata?: string) => {
+      const livelli: LivelloRettifica[] = []
+      const zone: (string | null)[] = []
+      let pesoVolumeDopo: number | null = null
+      let motivo: string | undefined
+      let catenaDalBasso: string[] = []
+      let catenaCompleta = true
+      let bloccato = false   // un livello CHE HA il listino ma non prezza la zona (Italia potrebbe sbloccarlo)
+
+      // ── IL CLIENTE ──
+      if (s.cliente_id) {
+        const { data: cl } = await admin.from('clienti')
+          .select('ragione_sociale,listino_cliente_id').eq('id', s.cliente_id).maybeSingle()
+        let dovuto: number | null = null
+        if (cl?.listino_cliente_id) {
+          const ris = await calcolaPrezzoListino(admin, {
+            listinoId: cl.listino_cliente_id, corriereId: s.corriere_id, packages, ...dest, zonaForzata,
           })
-          // `disponibile: false` NON e' "fee zero", e' "non so quanto vale": quel listino non
-          // prezza contrassegno o assicurazione per quel contratto, e la funzione lo dice cosi',
-          // senza errore — alla creazione e sull'API pubblica quella stessa condizione fa
-          // rispondere 400. Prendendo lo zero, il dovuto perderebbe una commissione che il cliente
-          // ha gia' pagato e la rettifica uscirebbe a suo favore. Meglio nessun numero che uno
-          // storto: `dovuto` resta null e la riga non viene scritta, come quando manca la tariffa.
-          // (Oggi in produzione sono 19 spedizioni con contrassegno in questo stato.)
-          if (sup.disponibile) {
-            // I servizi accessori scelti sono dentro quello che il cliente ha pagato — alla
-            // creazione si addebita il MAGGIORE fra listino e totale dichiarato, e il dichiarato li
-            // comprende. Si riportano come sono stati addebitati, non si ricalcolano: l'importo li'
-            // dentro e' gia' quello risolto allora, percentuali sul valore merce comprese.
-            const acc = Array.isArray(s.servizi_accessori)
-              ? s.servizi_accessori.reduce((a: number, x: any) => a + (Number(x?.importo) || 0), 0)
-              : 0
-            dovuto = arrotonda(ris.prezzo + sup.contrassegno + sup.assicurazione + acc)
+          if (ris) {
+            zone.push(ris.zona)
+            // Per il CLIENTE il volume lo dice il SUO listino (fattore suo): e' quello esatto.
+            if (Number(ris.peso_volume) > 0) pesoVolumeDopo = arrotonda(Number(ris.peso_volume))
+            // LE DUE CIFRE DEVONO ESSERE FATTE CON LA STESSA RICETTA.
+            // `pagato` viene dai movimenti, e alla creazione il cliente e' addebitato di
+            // nolo + fee contrassegno + fee assicurazione. Riprezzando il solo nolo si sottraeva una
+            // mela da una pera: su una spedizione con contrassegno la fee finiva tutta dentro la
+            // differenza, e una ripesatura da un euro usciva come nota di credito. Al livello dei
+            // master le fee erano gia' passate (qui sotto, a costruisciCatena): l'asimmetria era
+            // dentro la stessa funzione. La fee si RICALCOLA sul nolo nuovo, come fa la creazione,
+            // perche' certi scaglioni sono in percentuale sul nolo.
+            const sup = await calcolaSupplementiCliente(admin, {
+              listinoId: cl.listino_cliente_id, corriereId: s.corriere_id,
+              contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0),
+              valoreMerce: Number(s.valore_merce || 0), nolo: ris.prezzo,
+            })
+            // `disponibile: false` NON e' "fee zero", e' "non so quanto vale": quel listino non
+            // prezza contrassegno o assicurazione per quel contratto, e la funzione lo dice cosi',
+            // senza errore — alla creazione e sull'API pubblica quella stessa condizione fa
+            // rispondere 400. Prendendo lo zero, il dovuto perderebbe una commissione che il cliente
+            // ha gia' pagato e la rettifica uscirebbe a suo favore. Meglio nessun numero che uno
+            // storto: `dovuto` resta null e la riga non viene scritta, come quando manca la tariffa.
+            // (Oggi in produzione sono 19 spedizioni con contrassegno in questo stato.)
+            if (sup.disponibile) {
+              // I servizi accessori scelti sono dentro quello che il cliente ha pagato — alla
+              // creazione si addebita il MAGGIORE fra listino e totale dichiarato, e il dichiarato li
+              // comprende. Si riportano come sono stati addebitati, non si ricalcolano: l'importo li'
+              // dentro e' gia' quello risolto allora, percentuali sul valore merce comprese.
+              const acc = Array.isArray(s.servizi_accessori)
+                ? s.servizi_accessori.reduce((a: number, x: any) => a + (Number(x?.importo) || 0), 0)
+                : 0
+              dovuto = arrotonda(ris.prezzo + sup.contrassegno + sup.assicurazione + acc)
+            } else {
+              motivo = 'il listino non prezza contrassegno/assicurazione per questo contratto'
+            }
           } else {
-            base.motivo = 'il listino non prezza contrassegno/assicurazione per questo contratto'
+            bloccato = true   // ha il listino ma non prezza la zona -> forse Italia lo sblocca
           }
         }
-      }
-      base.livelli.push({
-        chi: cl?.ragione_sociale || 'cliente', clienteId: s.cliente_id, masterId: null,
-        pagato: arrotonda(pagatoCliente), dovuto,
-        differenza: dovuto == null ? null : arrotonda(dovuto - pagatoCliente),
-      })
-    }
-
-    // ── I MASTER DELLA CATENA ──
-    // Stessa funzione che ha fatto l'addebito, con il collo ripesato al posto di quello dichiarato.
-    if (corr) {
-      const { catena, errore } = await costruisciCatena(admin, {
-        masterDirettoId: s.master_id, corriereOwnerId: corr.master_id,
-        costoSpedizione: 0, provincia: dest.provincia, packages,
-        cap: dest.cap, citta: dest.citta, paese: dest.paese,
-        corriereNome: corr.nome_contratto,
-        contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0),
-      })
-      if (errore) base.motivo = errore
-      // Una catena interrotta non e' una catena: i livelli sopra il punto di rottura non ci sono.
-      // Chi carica, non trovandosi dentro, sembrerebbe "il primo della fila" e la rettifica gli
-      // cadrebbe addosso al cliente finale saltando i master in mezzo. Meglio non scriverla.
-      base.catenaCompleta = !errore
-      // L'ordine della catena e' dal master della spedizione IN SU, fino al detentore. Serve per
-      // sapere chi e' il figlio DIRETTO di chi carica: e' a lui che va indirizzata la rettifica.
-      base.catenaDalBasso = catena.map(l => l.masterId)
-      for (const liv of catena) {
-        const pagato = arrotonda(pagatoMaster.get(liv.masterId) || 0)
-        // Il detentore del contratto paga il costo reale del fornitore, non un listino: per lui la
-        // differenza e' quella che ci ha addebitato il fornitore, che sta nel file.
-        const dovuto = liv.isProprietario ? arrotonda(pagato + r.addebitoFornitore) : arrotonda(liv.prezzo)
-        base.livelli.push({
-          chi: liv.nome, clienteId: null, masterId: liv.masterId,
-          pagato, dovuto, differenza: arrotonda(dovuto - pagato),
+        livelli.push({
+          chi: cl?.ragione_sociale || 'cliente', clienteId: s.cliente_id, masterId: null,
+          pagato: arrotonda(pagatoCliente), dovuto,
+          differenza: dovuto == null ? null : arrotonda(dovuto - pagatoCliente),
         })
       }
+
+      // ── I MASTER DELLA CATENA ──
+      // Stessa funzione che ha fatto l'addebito, con il collo ripesato al posto di quello dichiarato.
+      if (corr) {
+        const { catena, errore } = await costruisciCatena(admin, {
+          masterDirettoId: s.master_id, corriereOwnerId: corr.master_id,
+          costoSpedizione: 0, provincia: dest.provincia, packages,
+          cap: dest.cap, citta: dest.citta, paese: dest.paese,
+          corriereNome: corr.nome_contratto,
+          contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0),
+          zonaForzata,
+        })
+        if (errore) { motivo = errore; bloccato = true }
+        // Una catena interrotta non e' una catena: i livelli sopra il punto di rottura non ci sono.
+        catenaCompleta = !errore
+        catenaDalBasso = catena.map(l => l.masterId)
+        for (const liv of catena) {
+          zone.push(liv.zona ?? null)
+          const pagato = arrotonda(pagatoMaster.get(liv.masterId) || 0)
+          // Il detentore del contratto paga il costo reale del fornitore, non un listino: per lui la
+          // differenza e' quella che ci ha addebitato il fornitore, che sta nel file.
+          const dovuto = liv.isProprietario ? arrotonda(pagato + r.addebitoFornitore) : arrotonda(liv.prezzo)
+          livelli.push({
+            chi: liv.nome, clienteId: null, masterId: liv.masterId,
+            pagato, dovuto, differenza: arrotonda(dovuto - pagato),
+          })
+        }
+      }
+      return { livelli, zone, pesoVolumeDopo, motivo, catenaDalBasso, catenaCompleta, bloccato }
     }
+
+    // PASSO 1: normale (ogni livello con la sua zona). PASSO 2 (solo se serve): stessa fascia 'Italia'
+    // per TUTTI, così non si mescolano zone diverse tra i livelli e non restano bloccati per assenza
+    // della fascia disagiata. Si usa il forzato SOLO se sblocca davvero: altrimenti resta il passo 1
+    // (identico a oggi -> nessuna regressione sulle spedizioni che gia' funzionano).
+    let res = await costruisciLivelli()
+    const zoneValide = res.zone.filter((z): z is string => !!z)
+    const incoerente = new Set(zoneValide).size > 1
+    if (res.bloccato || incoerente) {
+      const forzato = await costruisciLivelli('Italia')
+      if (!forzato.bloccato) res = forzato
+    }
+    base.livelli = res.livelli
+    if (res.pesoVolumeDopo != null) base.pesoVolumeDopo = res.pesoVolumeDopo
+    if (res.motivo) base.motivo = res.motivo
+    base.catenaDalBasso = res.catenaDalBasso
+    base.catenaCompleta = res.catenaCompleta
 
     out.push(base)
   }

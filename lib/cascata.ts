@@ -48,6 +48,9 @@ export async function costruisciCatena(
     corriereNome?: string
     contrassegno?: number
     assicurazione?: number
+    // SOLO ricalcolo RETTIFICHE: forza la stessa fascia (di norma 'Italia') su TUTTI i livelli della
+    // catena, così non si mescolano zone diverse (MULTI su SCS, Ecomize su Italia). Default assente.
+    zonaForzata?: string
   }
 ): Promise<{ catena: LivelloCatena[]; errore?: string }> {
   const catena: LivelloCatena[] = []
@@ -112,6 +115,7 @@ export async function costruisciCatena(
           provincia: params.provincia, cap: params.cap, paese: params.paese, citta: params.citta,
           pesoReale, packages: params.packages,
           contrassegno: params.contrassegno, assicurazione: params.assicurazione,
+          zonaForzata: params.zonaForzata,
         })
         if (pz != null) { prezzo = pz.totale; zonaLivello = pz.zona; calcolato = true }
       }
@@ -128,6 +132,7 @@ export async function costruisciCatena(
         const ris = await calcolaPrezzoListino(adminDb, {
           listinoId: m.parent_listino_id, provincia: params.provincia,
           packages: params.packages, cap: params.cap, paese: params.paese, citta: params.citta,
+          zonaForzata: params.zonaForzata,
         })
         if (!ris) return { catena, errore: `Nessuna tariffa nel listino del master "${m.nome}".` }
         prezzo = ris.prezzo
