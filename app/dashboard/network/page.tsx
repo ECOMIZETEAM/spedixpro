@@ -119,7 +119,7 @@ export default function NetworkRicevutiPage() {
         const CAP = 100
         const elenco = dettaglio.slice(0, CAP).map((x: any) => `${x.ldv} — ${x.perche}`).join('\n• ')
         const extra = dettaglio.length > CAP ? `\n• … e altre ${dettaglio.length - CAP}` : ''
-        parti.push(`⚠️ ${nonProp} non si possono girare al livello sotto:\n• ${elenco}${extra}\nQueste tienile a tuo carico con "Le assorbo io", oppure sistema il listino di chi sta sotto (fascia di peso o zona mancante) e riprova.`)
+        parti.push(`⚠️ ${nonProp} non si possono girare perché il listino del cliente non arriva a quel peso/zona:\n• ${elenco}${extra}\n👉 Alza la fascia sul listino del cliente (aggiungi il peso o la zona che manca), poi ripremi Accetta: passeranno. Solo se decidi di non addebitarle, "Le assorbo io".`)
       }
       if (inAttesa) parti.push(`⏳ ${inAttesa} in attesa che il livello sopra le confermi: NON sono perse — riprova quando saranno confermate.`)
       if (!create && !nonProp && !inAttesa) parti.push(giaDecise ? 'Queste rettifiche erano già state decise.' : 'Nessuna rettifica da decidere.')

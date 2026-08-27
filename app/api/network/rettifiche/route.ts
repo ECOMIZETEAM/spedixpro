@@ -146,7 +146,15 @@ export async function POST(req: NextRequest) {
     if (!reweighGirabile && fs === 0) {
       // Niente supplemento e niente ripesatura da girare: se il listino non copre proprio il collo
       // (differenza null) e' ritentabile; se lo copre ma esce <= 0 e' una scelta presa (assorbita).
-      if (liv.differenza == null) { saltate.push({ ldv: r.numero_spedizione, perche: 'il listino di chi sta sotto non copre questa spedizione (peso ripesato oltre la fascia massima, o destinazione/zona non prevista): non è girabile, va tenuta a tuo carico ("Le assorbo io")' }); continue }
+      if (liv.differenza == null) {
+        // Il listino del cliente non arriva a questo peso (ultima fascia superata, nessuna regola
+        // "oltre") o a questa zona. NON è un vicolo cieco: il master alza la fascia sul listino del
+        // suo cliente e RIPREME Accetta — allora prezza e passa. Il messaggio glielo dice, col peso
+        // vero, invece di suggerire di assorbire (che sarebbe farsi carico di un costo del cliente).
+        const pesoFatt = Math.max(Number(esito.pesoDopo) || 0, Number(esito.pesoVolumeDopo) || 0)
+        saltate.push({ ldv: r.numero_spedizione, perche: `il listino di ${liv.chi || 'questo cliente'} non copre ${pesoFatt ? pesoFatt.toFixed(0) + ' kg' : 'questo peso'} (peso ripesato oltre l'ultima fascia, o zona non prevista) → aggiungi la fascia mancante al suo listino e ripremi Accetta: passerà.` })
+        continue
+      }
       saltate.push({ ldv: r.numero_spedizione, perche: 'niente da recuperare al livello sotto (rimborso o zero): tenuta a tuo carico' }); idAzzerate.push(r.id); continue
     }
     const diffFiglia = reweighGirabile ? liv.differenza : 0
