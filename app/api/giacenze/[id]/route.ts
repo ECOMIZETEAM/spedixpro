@@ -3,10 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { isAgente, clientiAgente, bloccaAgente } from '@/lib/agente'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
-import { spediamoproSearchStocks, spediamoproReleaseStock } from '@/lib/spediamopro'
-import { erroreSvincoloPulito } from '@/lib/errore-corriere'
-import { registraMovimento } from '@/lib/movimenti'
-import { addebitaServizioGiacenza } from '@/lib/giacenza-cascata'
+import { eseguiSvincolo } from '@/lib/giacenza-svincolo'
 // Il calcolo dei prezzi giacenza vive in lib/giacenza-prezzi.ts: lo usa anche l'API pubblica,
 // che prima registrava le richieste con costo zero.
 import { chiaveServizio, prezziVuoti, leggiPrezzi, leggiPrezziDaListino, calcolaCosti, noloClienteSpedizione } from '@/lib/giacenza-prezzi'
@@ -207,210 +204,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!rich) return NextResponse.json({ error: 'Richiesta non trovata' }, { status: 404 })
     if (rich.stato === 'confermata') return NextResponse.json({ error: 'Richiesta gia confermata' }, { status: 400 })
 
-    const { data: costiManuali } = await admin.from('giacenza_costi').select('importo').eq('spedizione_id', id)
-    const extra = (costiManuali || []).reduce((s: number, c: any) => s + (Number(c.importo) || 0), 0)
-    const totale = +((Number(rich.costo_totale) || 0) + extra).toFixed(2)
-
-    const opLabel: Record<string, string> = { riconsegna: 'Riconsegna', riconsegna_nuovo: 'Riconsegna a nuovo destinatario', reso: 'Reso al mittente' }
-    const istr = `${opLabel[rich.operazione] || rich.operazione}${rich.data_operazione ? ' - data ' + rich.data_operazione : ''}${rich.note ? ' - ' + rich.note : ''}`
-
-    // Invio dello svincolo al corriere.
-    let avviso: string | null = null   // segnalazione non bloccante da mostrare a chi opera
-    const cred = sped.corrieri?.credenziali as Record<string, any>
-    if (cred?.authcode) {
-      // SpediamoPro: rilascio dello STOCK (giacenza). Prima veniva SALTATO (cercava master_domain
-      // di Spedisci) → il pacco restava in giacenza sul corriere pur risultando svincolato da noi.
-      // Mappa operazione → releaseAction: riconsegna=1, nuovo indirizzo=2 (con alternativeAddress),
-      // reso al mittente=3. Se il rilascio fallisce blocco QUI (niente addebito senza svincolo reale).
-      const raw: any = sped.raw_response || {}
-      const spid = raw.id || raw?.raw?.data?.id
-      const code = raw.code || raw?.raw?.data?.code || sped.tracking_number
-      const releaseAction = rich.operazione === 'reso' ? 3 : rich.operazione === 'riconsegna_nuovo' ? 2 : 1
-      const extra: any = {}
-      if (rich.note) extra.instructions = String(rich.note)
-      if (releaseAction === 2) {
-        const nd = rich.nuovo_destinatario || {}
-        extra.alternativeAddress = {
-          name: nd.nome || sped.dest_nome || '', address: nd.indirizzo || '', postalCode: nd.cap || '',
-          city: nd.citta || '', province: nd.provincia || '', country: 'IT',
-          ...(nd.telefono ? { phone: String(nd.telefono) } : {}),
-        }
-      }
-      try {
-        const stocks = await spediamoproSearchStocks(cred.authcode, String(code))
-        const attivo = (stocks || []).find((st: any) => Number(st.status) === 1 && (!spid || Number(st.shipmentId) === Number(spid)))
-        if (!attivo?.id) return NextResponse.json({ error: 'Giacenza non più attiva sul corriere (già svincolata o scaduta).' }, { status: 400 })
-        // MOTIVO del corriere: lo salvo (serve in elenco) e lo uso solo per AVVISARE.
-        const motivo = String(attivo.reason || '')
-        if (motivo) { try { await admin.from('spedizioni').update({ giacenza_motivo: motivo.slice(0, 200) }).eq('id', id) } catch {} }
-        // NIENTE BLOCCHI sulla causale: i corrieri a volte registrano un motivo di giacenza
-        // sbagliato (un "rifiuto" che rifiuto non era, un indirizzo dato per errato che invece
-        // e' buono). Impedire la riconsegna su quella base bloccava operazioni legittime, e per
-        // giunta solo al master: dal portale cliente la stessa richiesta passava comunque.
-        // Si avvisa e si lascia decidere a chi opera; se il corriere rifiuta davvero, il suo
-        // errore viene mostrato pulito da erroreSvincoloPulito.
-        if (/rifiut|refus|respint/i.test(motivo) && releaseAction !== 3) {
-          avviso = `Il corriere aveva registrato "${motivo}": su un pacco rifiutato la riconsegna viene spesso respinta. Se non va a buon fine, resta il "Reso al mittente".`
-          console.warn('[GIACENZA] riconsegna su pacco con motivo rifiuto', { spedizione: id, motivo, releaseAction })
-        }
-        // Indirizzo errato/incompleto/sconosciuto: riconsegnare allo STESSO indirizzo ha buone
-        // probabilita' di fallire di nuovo, ma NON e' impossibile (il corriere a volte ritenta e
-        // consegna). Prima era un blocco: il master si vedeva negare un'operazione che il cliente
-        // dal suo portale poteva fare comunque. Ora si avvisa e si lascia decidere a chi opera.
-        if (/indirizzo\s*(errato|inesistente|incompleto)|sconosciut|manca civico|incompl/i.test(motivo) && releaseAction === 1) {
-          avviso = `Il corriere aveva segnalato "${motivo}": la riconsegna allo stesso indirizzo potrebbe fallire di nuovo. Se non va a buon fine, usa "Riconsegna a nuovo indirizzo" o "Reso al mittente".`
-          console.warn('[GIACENZA] riconsegna stesso indirizzo con motivo indirizzo errato', { spedizione: id, motivo })
-        }
-        await spediamoproReleaseStock(cred.authcode, Number(attivo.id), releaseAction, extra)
-      } catch (e: any) {
-        return NextResponse.json({ error: erroreSvincoloPulito(e) }, { status: 400 })
-      }
-    } else if (sped.corrieri?.tipo === 'easyparcel' && cred?.apikey) {
-      // CONTRATTO V: lo svincolo si chiede con la lettera di vettura, non con un id di giacenza.
-      //
-      // Finche' questo ramo non c'era, una giacenza di questo contratto non veniva mandata a
-      // nessuno: da noi risultava svincolata, dal corriere il pacco restava fermo in deposito a
-      // maturare giorni finche' non tornava indietro da solo. E' lo stesso guasto che c'era gia'
-      // stato sull'altro contratto.
-      //
-      // Le nostre tre operazioni diventano le loro: riconsegna = consegnare al destinatario,
-      // reso = riportarlo al mittente, nuovo indirizzo = portarlo altrove. La quarta che loro
-      // hanno, distruggere il pacco, non la esponiamo: e' irreversibile e nessuno la chiede da
-      // un portale.
-      const { easyparcelSvincolo } = await import('@/lib/easyparcel')
-      const azioneV = rich.operazione === 'reso' ? 'M' : rich.operazione === 'riconsegna_nuovo' ? 'N' : 'D'
-      const nd = rich.nuovo_destinatario || {}
-      try {
-        const esito = await easyparcelSvincolo(cred.apikey, String(sped.numero || sped.tracking_number), azioneV as any, {
-          // Le note stanno in 65 caratteri: ci mettiamo l'operazione e la data, che sono quello
-          // che serve a chi in deposito deve capire cosa fare.
-          note: istr,
-          telefonoDestinatario: nd.telefono || sped.dest_telefono || '',
-          nuovoIndirizzo: azioneV === 'N' ? {
-            cognome: nd.nome || sped.dest_nome || '',
-            indirizzo: nd.indirizzo || '',
-            cap: nd.cap || '', localita: nd.citta || '', provincia: nd.provincia || '',
-            telefono: nd.telefono || '',
-          } : undefined,
-        })
-        // Il costo che ci addebita il corriere e' suo e non c'entra col prezzo che facciamo al
-        // cliente: si annota accanto alla richiesta, cosi' a fine mese si puo' confrontare.
-        try {
-          await admin.from('giacenza_richieste')
-            .update({ note: [rich.note, `[corriere: ${esito.azione} - € ${esito.importo.toFixed(2)}${esito.idGiacenza ? ' - rif ' + esito.idGiacenza : ''}]`].filter(Boolean).join(' ') })
-            .eq('id', rich.id)
-        } catch {}
-        console.log('[GIACENZA][V] svincolo registrato', sped.numero, esito.azione, esito.importo)
-      } catch (e: any) {
-        // Niente addebito senza svincolo vero: si blocca qui, come sull'altro contratto.
-        return NextResponse.json({ error: erroreSvincoloPulito(e) }, { status: 400 })
-      }
-    } else if (cred?.master_domain && cred?.password && (sped.tracking_number || sped.numero)) {
-      // Spedisci.online: rilascio della giacenza via POST /api/v2/stock/update (endpoint VERIFICATO
-      // contro la doc + probe). Prima si chiamava /api/v2/shipping/delivery-instructions/{ldv}: NON
-      // ESISTE (404, lo stesso prefisso /shipping/ già noto sbagliato per il tracking) e per giunta
-      // era fire-and-forget → il pacco restava fermo in deposito mentre da noi risultava svincolato.
-      // Ora si blocca sull'errore come SpediamoPro/DVA: niente 'svincolata' senza svincolo reale.
-      // Le nostre operazioni → le loro action: riconsegna=RETRY, nuovo indirizzo=NEWADDRESS, reso=RETURN.
-      const ldvV = String(sped.tracking_number || sped.numero)
-      const actionV = rich.operazione === 'reso' ? 'RETURN' : rich.operazione === 'riconsegna_nuovo' ? 'NEWADDRESS' : 'RETRY'
-      // scheduled_at è obbligatorio, formato DD/MM/YYYY: la data scelta o oggi.
-      let gg = rich.data_operazione ? new Date(rich.data_operazione) : new Date()
-      if (isNaN(gg.getTime())) gg = new Date()
-      const scheduledV = `${String(gg.getDate()).padStart(2, '0')}/${String(gg.getMonth() + 1).padStart(2, '0')}/${gg.getFullYear()}`
-      const ndV = rich.nuovo_destinatario || {}
-      const bodyV: any = { ldv: ldvV, action: actionV, scheduled_at: scheduledV, note: (rich.note || istr || '').slice(0, 200) }
-      if (actionV === 'NEWADDRESS') {
-        const telV = Number(String(ndV.telefono || sped.dest_telefono || '').replace(/\D/g, '')) || undefined
-        bodyV.newaddress = {
-          name: ndV.nome || sped.dest_nome || '', street1: ndV.indirizzo || '', city: ndV.citta || '',
-          state: ndV.provincia || '', postalCode: ndV.cap || '', country: 'IT',
-          ...(telV ? { phone: telV } : {}),
-          email: ndV.email || (sped as any).dest_email || 'noreply@moovexpress.com',
-          notes: (rich.note || istr || '').slice(0, 200),
-        }
-      }
-      try {
-        const rv = await fetch(`https://${cred.master_domain}/api/v2/stock/update`, {
-          method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(bodyV),
-        })
-        if (!rv.ok) {
-          const t = await rv.text().catch(() => '')
-          throw new Error(`Spedisci HTTP ${rv.status}${t ? ' - ' + t.slice(0, 140) : ''}`)
-        }
-      } catch (e: any) {
-        return NextResponse.json({ error: erroreSvincoloPulito(e) }, { status: 400 })
-      }
+    // Lo svincolo vero (corriere + addebito a cascata + distinta reso + marca 'svincolata') vive in
+    // lib/giacenza-svincolo: PORTA UNICA usata anche dall'API v1, così la regola dei soldi sta in un
+    // posto solo. Blocca (throw) se il corriere rifiuta → qui diventa 400, niente 'svincolata' finta.
+    try {
+      const { addebito, distintaReso, avviso } = await eseguiSvincolo(admin, sped, rich, nomeUtente)
+      return NextResponse.json({ success: true, addebito, distintaReso, avviso })
+    } catch (e: any) {
+      return NextResponse.json({ error: e?.message || 'Svincolo non riuscito' }, { status: 400 })
     }
-
-    // SVINCOLO: si addebita SOLO il servizio scelto (riconsegna/reso/…). L'APERTURA è già stata
-    // addebitata all'ENTRATA in giacenza (dal cron). Cliente + cascata rete (solo servizio).
-    //
-    // Il RESO non guarda giacenza_addebito_effettuato. Un pacco puo' finire in giacenza DUE volte:
-    // prima riconsegna (che marca l'addebito come fatto), la riconsegna fallisce, e al secondo giro
-    // si sceglie il reso. Con la guardia unica quel reso non lo pagava nessuno — ne' il cliente ne'
-    // la rete — e veniva pure marcato come addebitato, quindi la scansione in sede lo saltava per
-    // sempre. Il doppio addebito lo impedisce l'indice unico nel database, non questo flag.
-    let resoAddebitato = false
-    let importoResoCliente = 0
-    if (rich.operazione === 'reso') {
-      const esito = await addebitaServizioGiacenza(
-        { id, numero: sped.numero, cliente_id: sped.cliente_id, master_id: sped.master_id, corriere_id: sped.corriere_id },
-        'reso', 0
-      )
-      resoAddebitato = esito.addebitato
-      importoResoCliente = esito.importoCliente
-    }
-    if (!sped.giacenza_addebito_effettuato) {
-      if (rich.operazione !== 'reso') {
-        await addebitaServizioGiacenza(
-          { id, numero: sped.numero, cliente_id: sped.cliente_id, master_id: sped.master_id, corriere_id: sped.corriere_id },
-          rich.operazione, Number(rich.costo_servizio) || 0
-        )
-      }
-      // Eventuali costi manuali aggiunti dal master: una voce a parte al cliente.
-      if (extra > 0) {
-        await registraMovimento(admin, { masterId: sped.master_id, clienteId: sped.cliente_id, tipo: 'giacenza',
-          descrizione: `Costi giacenza ${sped.numero}`, riferimento: sped.numero, importo: -Math.abs(extra), spedizioneId: id })
-      }
-    }
-
-    await admin.from('giacenza_richieste').update({ stato: 'confermata', confermata_da: nomeUtente, confermata_at: new Date().toISOString() }).eq('id', rich.id)
-
-    // Se lo SVINCOLO è un RESO: la spedizione entra in "reso al mittente" e va SUBITO chiusa in una
-    // distinta resi (già addebitata qui a cascata), così l'Elenco mostra "Distinta N" sotto lo stato
-    // e la scansione resi la riconosce come già addebitata (nessun doppio addebito).
-    let numeroDistintaReso: number | null = null
-    if (rich.operazione === 'reso' && sped.cliente_id) {
-      // Evita duplicati: solo se non è già in una distinta resi del master.
-      const { data: esistenti } = await admin.from('distinte_resi').select('voci').eq('master_id', sped.master_id)
-      const gia = new Set<string>()
-      for (const d of (esistenti || [])) for (const v of (Array.isArray((d as any).voci) ? (d as any).voci : [])) if (v?.id) gia.add(v.id)
-      if (!gia.has(id)) {
-        const { count } = await admin.from('distinte_resi').select('id', { count: 'exact', head: true }).eq('master_id', sped.master_id)
-        numeroDistintaReso = (count || 0) + 1
-        await admin.from('distinte_resi').insert({
-          master_id: sped.master_id, cliente_id: sped.cliente_id, numero: numeroDistintaReso,
-          // In distinta va quello che e' stato addebitato DAVVERO, non il preventivo congelato
-          // nella richiesta: il prezzo lo decide il database al momento dell'addebito.
-          totale_ldv: 1, totale: importoResoCliente,
-          voci: [{ id, numero: sped.numero }], stato: 'chiusa',
-        })
-      }
-    }
-
-    // La spedizione resta nella lista giacenze come "svincolata" (verde: svincolo confermato);
-    // per il RESO imposto anche stato='reso_mittente' (la lista giacenze filtra su giacenza_stato, resta visibile).
-    await admin.from('spedizioni').update({
-      giacenza_stato: 'svincolata', giacenza_istruzioni: istr, giacenza_addebito_effettuato: true,
-      // Se lo svincolo è un RESO, il reso è già stato addebitato qui (a cascata): lo marco così la
-      // scansione resi mostrerà "reso già addebitato in giacenza" e NON riaddebiterà.
-      // Il flag si scrive solo se l'addebito e' passato davvero: marcarlo senza averlo addebitato
-      // significava togliere quel reso anche alla scansione in sede, e non pagarlo mai piu'.
-      ...(rich.operazione === 'reso' ? { stato: 'reso_mittente', ...(resoAddebitato ? { giacenza_reso_addebitato: true } : {}) } : {}),
-    }).eq('id', id)
-    return NextResponse.json({ success: true, addebito: totale, distintaReso: numeroDistintaReso, avviso })
   }
 
   // 5) Chiudi giacenza (solo master) -> non piu gestibile
