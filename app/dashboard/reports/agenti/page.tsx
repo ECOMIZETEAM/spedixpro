@@ -28,7 +28,8 @@ export default function ReportAgentiPage() {
     if (r?.agenti && !agentiLista.length) setAgentiLista(r.agenti)   // popola il filtro dalla prima lettura completa
     setLoading(false)
   }
-  useEffect(() => { carica() }, [])
+  // Auto-aggiorna appena cambi un filtro (come Elenco Spedizioni): niente bottone "Aggiorna".
+  useEffect(() => { carica() }, [filtri.agenteId, filtri.dal, filtri.al])
 
   const eur = (n: number) => '€ ' + Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const th: React.CSSProperties = { textAlign: 'left', padding: '10px 12px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .4, color: '#8a8a8a', borderBottom: '1px solid #eee' }
@@ -89,8 +90,8 @@ export default function ReportAgentiPage() {
       </div>
 
       <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #d1d5db', padding: 16, marginBottom: 16 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a', marginBottom: 14 }}>Filtri</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>Filtri {loading && d && <span style={{ fontSize: 11, fontWeight: 500, color: '#9ca3af' }}>· aggiorno…</span>}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div><label style={lbl}>Agente</label>
             <SelectCercabile value={filtri.agenteId} onChange={e => setFiltri(f => ({ ...f, agenteId: (e.target as any).value }))} style={sel}>
               <option value="">Tutti gli agenti</option>
@@ -100,23 +101,10 @@ export default function ReportAgentiPage() {
           <div><label style={lbl}>Data</label>
             <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal: string, al: string) => setFiltri(f => ({ ...f, dal, al }))} />
           </div>
-          <div><label style={lbl}>Formato download</label>
-            <select value={filtri.formato} onChange={e => setFiltri(f => ({ ...f, formato: e.target.value }))} style={sel}>
-              <option value="XLSX">Excel</option><option value="CSV">CSV</option><option value="PDF">PDF</option>
-            </select>
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button onClick={carica} disabled={loading} style={{ padding: '9px 22px', background: '#f97316', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: loading ? .7 : 1 }}>
-            {loading ? 'Aggiorno…' : 'Aggiorna'}
-          </button>
-          <button onClick={scarica} disabled={scaricando || loading || !(d?.agenti?.length)} style={{ padding: '9px 22px', background: '#1a1a1a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: (scaricando || loading || !(d?.agenti?.length)) ? .5 : 1 }}>
-            {scaricando ? 'Scarico…' : '⬇ Scarica'}
-          </button>
         </div>
       </div>
 
-      {loading ? <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>Caricamento…</div> : d?.error ? (
+      {(loading && !d) ? <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>Caricamento…</div> : d?.error ? (
         <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>{d.error}</div>
       ) : !d?.agenti?.length ? (
         <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>Nessun agente nel periodo. Assegna il compenso dalla scheda dell&apos;agente (Impostazioni → Staff).</div>
@@ -148,6 +136,15 @@ export default function ReportAgentiPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+          {/* Download in fondo, dove sono i soldi — come Elenco Spedizioni. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+            <select value={filtri.formato} onChange={e => setFiltri(f => ({ ...f, formato: e.target.value }))} style={{ ...sel, width: 'auto', padding: '9px 12px' }}>
+              <option value="XLSX">Excel</option><option value="CSV">CSV</option><option value="PDF">PDF</option>
+            </select>
+            <button onClick={scarica} disabled={scaricando} style={{ padding: '9px 22px', background: '#1a1a1a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: scaricando ? .6 : 1 }}>
+              {scaricando ? 'Scarico…' : '⬇ Scarica ' + (filtri.agenteId ? "l'agente" : 'tutti')}
+            </button>
           </div>
           <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 10 }}>Calcolato sui movimenti reali dei clienti dell&apos;agente (rettifiche e resi compresi). Il &quot;netto&quot; è il margine tuo (prezzo cliente − tuo costo).</p>
         </>
