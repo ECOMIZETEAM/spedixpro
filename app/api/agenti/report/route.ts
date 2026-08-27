@@ -28,10 +28,13 @@ export async function GET(req: NextRequest) {
   const dal = dalParam ? new Date(dalParam + 'T00:00:00.000Z').toISOString() : inizioMese()
   const alEnd = dalParam ? new Date((alParam || dalParam) + 'T23:59:59.999Z').toISOString() : new Date().toISOString()
 
-  // I MIEI agenti.
-  const { data: agenti } = await admin.from('utenti')
+  // I MIEI agenti (eventualmente uno solo, se filtrato dal report).
+  const agenteId = req.nextUrl.searchParams.get('agenteId')
+  let q = admin.from('utenti')
     .select('id,nome,cognome,agente_metodo,agente_valore,listino_agente_id')
-    .eq('master_id', M).eq('ruolo', 'agente').order('cognome', { ascending: true })
+    .eq('master_id', M).eq('ruolo', 'agente')
+  if (agenteId) q = q.eq('id', agenteId)
+  const { data: agenti } = await q.order('cognome', { ascending: true })
 
   const righe: any[] = []
   let totale = 0
