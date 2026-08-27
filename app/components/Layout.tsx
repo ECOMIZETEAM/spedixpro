@@ -192,6 +192,17 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
     load(); const t = setInterval(load, 60000); return () => clearInterval(t)
   }, [path, ruolo])
 
+  // Badge RETE: "Dal mio network" (rettifiche/COD/resi da accettare) e "Rettifica Costi" (rettifiche
+  // mie ancora da confermare). Erano parcheggiate in silenzio — nessun master sapeva di averle, e i
+  // recuperi non arrivavano mai al cliente. Stesso pattern di ticket/logistica: conteggio + poll 30s.
+  const [reteBadge, setReteBadge] = useState<{ daAccettare: number; daAccettareImporto: number; daConfermare: number; daConfermareImporto: number }>({ daAccettare: 0, daAccettareImporto: 0, daConfermare: 0, daConfermareImporto: 0 })
+  useEffect(() => {
+    if (!['master', 'admin', 'operatore'].includes(ruolo)) return
+    const load = () => fetch('/api/network/badge').then(r => r.json()).then(d => setReteBadge({ daAccettare: d.daAccettare || 0, daAccettareImporto: d.daAccettareImporto || 0, daConfermare: d.daConfermare || 0, daConfermareImporto: d.daConfermareImporto || 0 })).catch(() => {})
+    load(); const t = setInterval(load, 30000); return () => clearInterval(t)
+  }, [path, ruolo])
+  const eur = (n: number) => '€ ' + Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
   // Credito del master in topbar (solo staff di rete). All'avvio, a ogni cambio pagina e ogni 2 min:
   // dopo una spedizione o un addebito il numero si aggiorna da solo.
   const [creditoTop, setCreditoTop] = useState<{ mostra: boolean; rete: number; proprio: number } | null>(null)
@@ -293,6 +304,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                     {item.label === 'Assistenza Clienti' && !isOpen && ticketBadge.count > 0 && <span style={badgeStyle}>{ticketBadge.count}</span>}
                     {item.label === 'Logistica' && !isOpen && preparaBadge > 0 && <span style={badgeStyle}>{preparaBadge}</span>}
                     {item.label === 'Statistiche' && !isOpen && ricariAlert > 0 && <span style={badgeStyle}>{ricariAlert}</span>}
+                    {item.label === 'Spedizioni' && !isOpen && reteBadge.daConfermare > 0 && <span style={badgeStyle} title={`${reteBadge.daConfermare} rettifiche da confermare · ${eur(reteBadge.daConfermareImporto)}`}>{reteBadge.daConfermare}</span>}
                     <span style={{fontSize:'10px',color:'#4a7090',transition:'transform 0.2s',display:'inline-block',transform:isOpen?'rotate(90deg)':'rotate(0deg)'}}>▶</span>
                   </div>
                 ) : (
@@ -310,6 +322,9 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                     {item.href === '/dashboard/assistenza' && ticketBadge.count > 0 && (
                       <span style={{background:'#dc2626',color:'#fff',fontSize:'10px',fontWeight:700,minWidth:'17px',height:'17px',borderRadius:'9px',display:'inline-flex',alignItems:'center',justifyContent:'center',padding:'0 5px'}}>{ticketBadge.count}</span>
                     )}
+                    {item.href === '/dashboard/network' && reteBadge.daAccettare > 0 && (
+                      <span style={badgeStyle} title={`${reteBadge.daAccettare} da accettare${reteBadge.daAccettareImporto > 0 ? ' · ' + eur(reteBadge.daAccettareImporto) : ''}`}>{reteBadge.daAccettare}</span>
+                    )}
                   </a>
                 )}
 
@@ -317,7 +332,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                 {hasSub && isOpen && (
                   <div style={{background:'rgba(0,0,0,0.25)'}}>
                     {item.sub?.map(sub => {
-                      const subBadge = sub.href === '/dashboard/assistenza' ? ticketBadge.ticket : sub.href === '/dashboard/assistenza/pod' ? ticketBadge.pod : sub.href === '/dashboard/logistica/da-preparare' ? preparaBadge : sub.href === '/dashboard/statistiche/check-ricariche' ? ricariAlert : 0
+                      const subBadge = sub.href === '/dashboard/assistenza' ? ticketBadge.ticket : sub.href === '/dashboard/assistenza/pod' ? ticketBadge.pod : sub.href === '/dashboard/logistica/da-preparare' ? preparaBadge : sub.href === '/dashboard/statistiche/check-ricariche' ? ricariAlert : sub.href === '/dashboard/spedizioni/rettifica' ? reteBadge.daConfermare : 0
                       return (
                       <a key={sub.href} href={sub.href} style={{
                         display:'flex',alignItems:'center',gap:'8px',
