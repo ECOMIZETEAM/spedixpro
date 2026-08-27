@@ -21,6 +21,22 @@ export async function GET(_req: NextRequest) {
   const mio = utente.master_id
   const adminDb = createAdminSupabase()
 
+  // SELF-HEAL: una FIGLIA può esistere mentre il padre è rimasto propagazione=null (giro di
+  // propagazione interrotto a metà, o concorrente). Quel padre riappare come "da decidere" e al
+  // re-tentativo dà "già propagata" — la confusione segnalata da Lorenzo. Prima di leggere, marco
+  // 'propagata' i padri (miei, confermati, ancora null) che hanno GIA' una figlia, così escono dalle
+  // "da decidere". Best-effort, idempotente, non muove denaro (solo il flag propagazione).
+  try {
+    const { data: candid } = await adminDb.from('rettifiche')
+      .select('id').eq('target_master_id', mio).eq('confermata', true).is('propagazione', null)
+    const ids = (candid || []).map((r: any) => r.id)
+    if (ids.length) {
+      const { data: figlie } = await adminDb.from('rettifiche').select('origine_rettifica_id').in('origine_rettifica_id', ids)
+      const conFiglia = Array.from(new Set((figlie || []).map((f: any) => f.origine_rettifica_id).filter(Boolean)))
+      if (conFiglia.length) await adminDb.from('rettifiche').update({ propagazione: 'propagata' }).in('id', conFiglia as string[])
+    }
+  } catch { /* best-effort: non deve mai bloccare la lista */ }
+
   const [rett, cod, resi] = await Promise.all([
     // SI VEDE SOLO QUELLO CHE E' GIA' STATO ADDEBITATO.
     // Mancava il filtro sulla conferma: appena il master di sopra CARICAVA il file, le righe
