@@ -121,6 +121,27 @@ export async function spedisciTrackingStati(
   return { stati, raw: data, ok: res.ok }
 }
 
+// Le LDV ancora in GIACENZA sul portale Spedisci (GET /api/v2/stocks/open). Serve al controllo
+// automatico: se una che noi diamo per svincolata è ancora in questa lista, il corriere non l'ha
+// lavorata. Ritorna un Set di ldv in MAIUSCOLO (match case-insensitive) + ok. ok=false → non so
+// (rete/errore): il controllo non conclude nulla, non marca "ferma" a vuoto.
+export async function spedisciStocksAperti(
+  cred: { master_domain?: string; password?: string }
+): Promise<{ ldv: Set<string>; ok: boolean }> {
+  const out = new Set<string>()
+  if (!cred?.master_domain || !cred?.password) return { ldv: out, ok: false }
+  try {
+    const res = await fetch(`https://${cred.master_domain}/api/v2/stocks/open`, {
+      headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
+    })
+    if (!res.ok) return { ldv: out, ok: false }
+    const data: any = await res.json().catch(() => null)
+    const stocks: any[] = Array.isArray(data?.stocks) ? data.stocks : []
+    for (const s of stocks) if (s?.ldv) out.add(String(s.ldv).toUpperCase())
+    return { ldv: out, ok: true }
+  } catch { return { ldv: out, ok: false } }
+}
+
 // Chiusura borderò (Close Day) su spedisci.online per una distinta.
 // Best-effort: mai bloccante. Salva bordero_id/bordero_pdf sulla distinta.
 // Solo per corrieri di tipo 'spedisci'. shipmentId e _contractCode da raw_response.

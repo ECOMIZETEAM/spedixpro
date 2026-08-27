@@ -66,6 +66,10 @@
     {
       "path": "/api/spedizioni/dogana-bloccata",
       "schedule": "20 * * * *"
+    },
+    {
+      "path": "/api/spedizioni/verifica-giacenze",
+      "schedule": "15 */6 * * *"
     }
   ]
 }
