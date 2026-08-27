@@ -18,6 +18,9 @@ export default function AbbonamentoPage() {
   const [rifiutato, setRifiutato] = useState(false)
   const [meseScelto, setMeseScelto] = useState('')   // vuoto = mese in corso
   const [filtro, setFiltro] = useState('tutti')
+  // Riallineo conguagli: anteprima + applica (solo master principale)
+  const [riall, setRiall] = useState<any>(null)
+  const [riallAzione, setRiallAzione] = useState('')
 
   async function carica() {
     setLoading(true)
@@ -95,6 +98,25 @@ export default function AbbonamentoPage() {
     carica()
   }
 
+  // RIALLINEO CONGUAGLI (solo master principale): anteprima poi applica.
+  async function caricaRiallineo() {
+    setRiallAzione('carico'); setMsg('')
+    const d = await fetch('/api/abbonamento/riallinea-conguagli').then(r=>r.json()).catch(()=>({error:'Errore nel controllo'}))
+    setRiall(d); setRiallAzione('')
+  }
+  async function applicaRiallineo() {
+    const n = (riall?.righe||[]).filter((r:any)=>!r.gia_allineato).length
+    if (!await dialog.confirm({ title:'Riallineo i conguagli?',
+      message:`Tolgo le differenze piene in sospeso (€ ${Number(riall?.totale_in_sospeso||0).toFixed(2)}) e metto i conguagli proporzionati (€ ${Number(riall?.totale_conguaglio||0).toFixed(2)}) su ${n} master. Si incassano al loro rinnovo — nessun addebito adesso.`,
+      confirmText:'Riallinea' })) return
+    setRiallAzione('applico'); setMsg('')
+    const d = await fetch('/api/abbonamento/riallinea-conguagli', { method:'POST' }).then(r=>r.json()).catch(()=>({error:'errore'}))
+    setRiallAzione('')
+    if (d.error) { setMsg(d.error); return }
+    setMsg(`✓ Riallineati ${d.master} master — tolto € ${Number(d.tolto||0).toFixed(2)}, messo € ${Number(d.messo||0).toFixed(2)}. Si incassa al rinnovo.`)
+    caricaRiallineo()
+  }
+
   if (loading) return <div style={{padding:'40px',textAlign:'center',color:'#666'}}>Caricamento...</div>
 
   const perc = stato?.limite ? Math.min(100, (stato.spedizioni_mese/stato.limite)*100) : 0
@@ -166,6 +188,47 @@ export default function AbbonamentoPage() {
         </div>
       )}
       {msg && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px',marginBottom:'14px',fontSize:'13px',color:'#ea580c'}}>{msg}</div>}
+
+        <div style={{...card, marginBottom:'16px', borderColor:'#fed7aa'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'10px'}}>
+            <div style={{flex:1,minWidth:'240px'}}>
+              <div style={{fontSize:'13px',fontWeight:800,color:'#1a1a1a'}}>Riallinea conguagli upgrade</div>
+              <div style={{fontSize:'12px',color:'#777',marginTop:'2px',lineHeight:1.5}}>Toglie le differenze di piano PIENE rimaste in sospeso dalla vecchia gestione e mette il conguaglio proporzionato ai giorni. Si incassa al rinnovo di ogni master — nessun addebito adesso.</div>
+            </div>
+            {!riall && <button onClick={caricaRiallineo} disabled={!!riallAzione}
+              style={{background:'#1a1a1a',color:'#fff',border:'none',borderRadius:'6px',padding:'9px 18px',fontSize:'13px',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>{riallAzione==='carico'?'…':'Controlla'}</button>}
+          </div>
+          {riall && (
+            riall.error ? <div style={{marginTop:'10px',fontSize:'13px',color:'#dc2626'}}>{riall.error}</div>
+            : !riall.righe?.length ? <div style={{marginTop:'10px',fontSize:'13px',color:'#16a34a',fontWeight:600}}>✓ Tutto già allineato, niente da fare.</div>
+            : <>
+              <div style={{overflowX:'auto' as const,marginTop:'12px'}}>
+                <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
+                  <thead><tr style={{background:'#fafafa'}}>
+                    {['Master','In sospeso (tolgo)','Conguaglio (metto)','Rinnovo'].map(h=>(<th key={h} style={{textAlign:'left' as const,padding:'8px 12px',fontSize:'11px',fontWeight:600,color:'#777',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap' as const}}>{h}</th>))}
+                  </tr></thead>
+                  <tbody>
+                    {riall.righe.map((r:any)=>(
+                      <tr key={r.master} style={{borderBottom:'1px solid #f5f5f5',opacity:r.gia_allineato?0.5:1}}>
+                        <td style={{padding:'8px 12px',fontWeight:600}}>{r.master}{r.gia_allineato && <span style={{fontSize:'10px',color:'#16a34a',marginLeft:'6px'}}>già ok</span>}</td>
+                        <td style={{padding:'8px 12px',color:'#dc2626',fontWeight:700,whiteSpace:'nowrap' as const}}>€ {Number(r.in_sospeso).toFixed(2)}</td>
+                        <td style={{padding:'8px 12px',color:'#16a34a',fontWeight:700,whiteSpace:'nowrap' as const}}>€ {Number(r.conguaglio).toFixed(2)}</td>
+                        <td style={{padding:'8px 12px',color:'#555',whiteSpace:'nowrap' as const}}>{r.rinnovo||'—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'10px',marginTop:'12px'}}>
+                <div style={{fontSize:'12.5px',color:'#555'}}>Totale: <b style={{color:'#dc2626'}}>€ {Number(riall.totale_in_sospeso).toFixed(2)}</b> → <b style={{color:'#16a34a'}}>€ {Number(riall.totale_conguaglio).toFixed(2)}</b></div>
+                <div style={{display:'flex',gap:'8px'}}>
+                  <button onClick={caricaRiallineo} disabled={!!riallAzione} style={{background:'#fff',color:'#555',border:'1px solid #d1d5db',borderRadius:'6px',padding:'9px 16px',fontSize:'13px',fontWeight:600,cursor:'pointer'}}>{riallAzione==='carico'?'…':'Ricontrolla'}</button>
+                  <button onClick={applicaRiallineo} disabled={!!riallAzione} style={{background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',padding:'9px 18px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>{riallAzione==='applico'?'Applico…':'Applica riallineo'}</button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
 
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:'12px',marginBottom:'16px'}}>
           <div style={card}>
@@ -381,7 +444,7 @@ export default function AbbonamentoPage() {
             </div>
             {(stato.prossimoPagamento.dettaglio||[]).map((d:any,i:number)=>(
               <div key={i} style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
-                <span>Conguaglio {d.piano} · {d.giorniRestanti} giorni</span>
+                <span>Conguaglio {d.piano} · dal {d.giornoDa} al {d.giornoA} ({d.giorni} giorni)</span>
                 <span style={{fontWeight:700,whiteSpace:'nowrap'}}>€ {Number(d.importo).toFixed(2)}</span>
               </div>
             ))}

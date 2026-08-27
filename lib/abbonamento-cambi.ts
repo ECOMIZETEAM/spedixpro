@@ -76,31 +76,50 @@ export function giorniNelMese(mese: string): number {
   return new Date(Date.UTC(a, m, 0)).getUTCDate()   // giorno 0 del mese dopo = ultimo del mese
 }
 
-export type VoceConguaglio = { piano: string; giornoCambio: number; giorniRestanti: number; importo: number }
+export type VoceConguaglio = { piano: string; giornoDa: number; giornoA: number; giorni: number; importo: number }
 
 // Dalle righe di `abbonamenti_pagamenti` di UN mese (ognuna porta piano + created_at) ricostruisce
-// la scaletta dei piani e somma il conguaglio di ogni upgrade. Le righe possono arrivare in
-// qualsiasi ordine: si riordinano per data. Downgrade e ripetizioni dello stesso piano non generano
-// conguaglio (solo i salti in su, prezzo che cresce).
+// la scaletta dei piani e somma il conguaglio degli upgrade. Le righe possono arrivare in qualsiasi
+// ordine: si riordinano per data.
+//
+// SEGMENTI NON SOVRAPPOSTI. Il primo piano del mese e' la BASE: e' il canone gia' pagato, e copre
+// l'intero mese al suo livello. Ogni piano successivo occupa il suo tratto di giorni — dal giorno in
+// cui parte fino al giorno prima del cambio dopo (o fine mese) — e su quel tratto si paga solo
+// l'EXTRA rispetto alla base. Cosi' i giorni non si sommano oltre il mese: 10k dall'11 al 21 (11
+// giorni) + 20k dal 22 al 31 (10 giorni), non "21 + 10". Il totale e' identico al conto giorno per
+// giorno: canone base + somma degli extra = quanto avrebbe pagato pagando ogni giorno al suo piano.
+//
+// Solo salti in SU rispetto alla base generano conguaglio: un downgrade non da' mai rimborso.
 export function conguaglioDelMese(
   righe: Array<{ piano?: string | null; created_at?: string | null }>,
   mese: string,
 ): { totale: number; dettaglio: VoceConguaglio[] } {
   const giorni = giorniNelMese(mese)
-  const ordinate = [...righe].filter(r => r.piano).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
-  let prezzoPrec: number | null = null
-  let totale = 0
-  const dettaglio: VoceConguaglio[] = []
+  const ordinate = [...righe].filter(r => r.piano)
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+
+  // Scaletta piano→giorno, saltando le ripetizioni dello stesso prezzo (rinnovo + conferma, ecc.).
+  const tappe: { prezzo: number; nome: string; giorno: number }[] = []
   for (const r of ordinate) {
     const pi = pianoById(r.piano!); if (!pi) continue
-    if (prezzoPrec != null && pi.prezzo > prezzoPrec) {   // solo gli UPGRADE
-      const giorno = r.created_at ? new Date(r.created_at).getUTCDate() : 1
-      const restanti = Math.max(0, giorni - giorno + 1)
-      const q = Math.round(((pi.prezzo - prezzoPrec) / giorni * restanti) * 100) / 100
-      totale += q
-      dettaglio.push({ piano: pi.nome, giornoCambio: giorno, giorniRestanti: restanti, importo: q })
-    }
-    prezzoPrec = pi.prezzo
+    const giorno = r.created_at ? new Date(r.created_at).getUTCDate() : 1
+    if (tappe.length && tappe[tappe.length - 1].prezzo === pi.prezzo) continue
+    tappe.push({ prezzo: pi.prezzo, nome: pi.nome, giorno })
+  }
+  if (tappe.length < 2) return { totale: 0, dettaglio: [] }
+
+  const base = tappe[0].prezzo
+  let totale = 0
+  const dettaglio: VoceConguaglio[] = []
+  for (let i = 1; i < tappe.length; i++) {
+    const t = tappe[i]
+    if (t.prezzo <= base) continue                                  // non sopra la base: nessun extra
+    const giornoDa = t.giorno
+    const giornoA = i + 1 < tappe.length ? tappe[i + 1].giorno - 1 : giorni   // fino al cambio dopo, o fine mese
+    const gg = Math.max(0, giornoA - giornoDa + 1)
+    const q = Math.round(((t.prezzo - base) / giorni * gg) * 100) / 100
+    totale += q
+    dettaglio.push({ piano: t.nome, giornoDa, giornoA, giorni: gg, importo: q })
   }
   return { totale: Math.round(totale * 100) / 100, dettaglio }
 }
