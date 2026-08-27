@@ -16,11 +16,16 @@ export default function NetworkRicevutiPage() {
   const [accettando, setAccettando] = useState<string>('')
   const [apertoBlocco, setApertoBlocco] = useState<string>('')
   const [avanz, setAvanz] = useState<{k:string,fatti:number,totale:number,da:number}|null>(null)
+  // I MIEI clienti col listino troppo basso (recuperi bloccati perché il peso ripesato supera
+  // l'ultima fascia e manca la regola "oltre"). Solo miei, in casa mia. Appare solo se ce ne sono.
+  const [daAlzare, setDaAlzare] = useState<{clienti:any[],totaleRecuperi:number,totaleImporto:number}>({clienti:[],totaleRecuperi:0,totaleImporto:0})
+  const [apriAlzare, setApriAlzare] = useState(false)
 
   async function carica() {
     setLoading(true)
     const d = await fetch('/api/network/ricevuti').then(r=>r.json()).catch(()=>null)
     if (d && !d.error) setDati(d)
+    fetch('/api/network/listini-da-alzare').then(r=>r.json()).then(x=>{ if (x && !x.error) setDaAlzare(x) }).catch(()=>{})
     setLoading(false)
   }
   useEffect(()=>{ carica() }, [])
@@ -194,6 +199,46 @@ export default function NetworkRicevutiPage() {
           {tab==='rettifiche' && (
             (blocchi.length===0 && proprie.length===0) ? <div style={{padding:'32px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessuna rettifica ricevuta</div> :
             <div>
+              {/* LISTINI DA ALZARE: appare solo se HO clienti col listino troppo basso che bloccano
+                  recuperi. Per-master (i miei clienti). Dice chi, fin dove arriva, il peso che serve,
+                  e quanto sblocco. Alzo quel listino e riaccetto. Sparisce quando è tutto a posto. */}
+              {daAlzare.clienti.length > 0 && (
+                <div style={{borderTop:'1px solid #f0f0f0',background:'#fffbeb',padding:'14px 16px'}}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px',flexWrap:'wrap'}}>
+                    <div>
+                      <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>
+                        🔧 {daAlzare.clienti.length} {daAlzare.clienti.length===1?'cliente':'clienti'} col listino da alzare · <span style={{color:'#dc2626'}}>€ {Math.abs(daAlzare.totaleImporto).toFixed(2)}</span> bloccati
+                      </div>
+                      <div style={{fontSize:'12px',color:'#8a5a2b',marginTop:'3px',maxWidth:'680px'}}>
+                        Questi tuoi clienti hanno spedito colli più pesanti dell'ultima fascia del loro listino: il recupero non passa finché non alzi la fascia. Alza il listino del cliente, poi ripremi <strong>Accetta</strong>.
+                      </div>
+                    </div>
+                    <button onClick={()=>setApriAlzare(v=>!v)}
+                      style={{background:'#fff',color:'#666',border:'1px solid #e8e8e8',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>
+                      {apriAlzare?'Nascondi':'Vedi quali'}
+                    </button>
+                  </div>
+                  {apriAlzare && (
+                    <table style={{width:'100%',borderCollapse:'collapse',background:'#fcfcfc',marginTop:'10px'}}>
+                      <thead><tr style={{background:'#f9fafb'}}>
+                        <th style={th}>Cliente</th><th style={th}>Corriere</th><th style={th}>Arriva a</th><th style={th}>Serve</th><th style={th}>Recuperi</th><th style={th}>Bloccato</th>
+                      </tr></thead>
+                      <tbody>
+                        {daAlzare.clienti.map((c:any,i:number)=>(
+                          <tr key={i}>
+                            <td style={{...td,fontWeight:600}}>{c.cliente}</td>
+                            <td style={td}>{c.corriere}</td>
+                            <td style={td}>{c.fasciaMax} kg</td>
+                            <td style={{...td,fontWeight:700,color:'#ea580c'}}>{c.pesoMassimo} kg</td>
+                            <td style={td}>{c.recuperi}</td>
+                            <td style={{...td,fontWeight:700,color:'#dc2626'}}>€ {c.importo.toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
               {/* LE TUE SPEDIZIONI PROPRIE: non è una scelta, sono tue. Riconosciute in automatico
                   (senza cliente + spedite da te), mostrate come tali, un solo tasto per chiuderle. */}
               {proprie.length>0 && (
