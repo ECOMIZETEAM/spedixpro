@@ -305,14 +305,43 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         // Niente addebito senza svincolo vero: si blocca qui, come sull'altro contratto.
         return NextResponse.json({ error: erroreSvincoloPulito(e) }, { status: 400 })
       }
-    } else if (cred?.master_domain && cred?.password && sped.tracking_number) {
-      // Spedisci.online: delivery-instructions (invariato)
+    } else if (cred?.master_domain && cred?.password && (sped.tracking_number || sped.numero)) {
+      // Spedisci.online: rilascio della giacenza via POST /api/v2/stock/update (endpoint VERIFICATO
+      // contro la doc + probe). Prima si chiamava /api/v2/shipping/delivery-instructions/{ldv}: NON
+      // ESISTE (404, lo stesso prefisso /shipping/ già noto sbagliato per il tracking) e per giunta
+      // era fire-and-forget → il pacco restava fermo in deposito mentre da noi risultava svincolato.
+      // Ora si blocca sull'errore come SpediamoPro/DVA: niente 'svincolata' senza svincolo reale.
+      // Le nostre operazioni → le loro action: riconsegna=RETRY, nuovo indirizzo=NEWADDRESS, reso=RETURN.
+      const ldvV = String(sped.tracking_number || sped.numero)
+      const actionV = rich.operazione === 'reso' ? 'RETURN' : rich.operazione === 'riconsegna_nuovo' ? 'NEWADDRESS' : 'RETRY'
+      // scheduled_at è obbligatorio, formato DD/MM/YYYY: la data scelta o oggi.
+      let gg = rich.data_operazione ? new Date(rich.data_operazione) : new Date()
+      if (isNaN(gg.getTime())) gg = new Date()
+      const scheduledV = `${String(gg.getDate()).padStart(2, '0')}/${String(gg.getMonth() + 1).padStart(2, '0')}/${gg.getFullYear()}`
+      const ndV = rich.nuovo_destinatario || {}
+      const bodyV: any = { ldv: ldvV, action: actionV, scheduled_at: scheduledV, note: (rich.note || istr || '').slice(0, 200) }
+      if (actionV === 'NEWADDRESS') {
+        const telV = Number(String(ndV.telefono || sped.dest_telefono || '').replace(/\D/g, '')) || undefined
+        bodyV.newaddress = {
+          name: ndV.nome || sped.dest_nome || '', street1: ndV.indirizzo || '', city: ndV.citta || '',
+          state: ndV.provincia || '', postalCode: ndV.cap || '', country: 'IT',
+          ...(telV ? { phone: telV } : {}),
+          email: ndV.email || (sped as any).dest_email || 'noreply@moovexpress.com',
+          notes: (rich.note || istr || '').slice(0, 200),
+        }
+      }
       try {
-        await fetch(`https://${cred.master_domain}/api/v2/shipping/delivery-instructions/${sped.tracking_number}`, {
+        const rv = await fetch(`https://${cred.master_domain}/api/v2/stock/update`, {
           method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ instructions: istr, operation: rich.operazione, new_recipient: rich.nuovo_destinatario || undefined }),
+          body: JSON.stringify(bodyV),
         })
-      } catch (e) { console.error('Errore invio svincolo al corriere:', e) }
+        if (!rv.ok) {
+          const t = await rv.text().catch(() => '')
+          throw new Error(`Spedisci HTTP ${rv.status}${t ? ' - ' + t.slice(0, 140) : ''}`)
+        }
+      } catch (e: any) {
+        return NextResponse.json({ error: erroreSvincoloPulito(e) }, { status: 400 })
+      }
     }
 
     // SVINCOLO: si addebita SOLO il servizio scelto (riconsegna/reso/…). L'APERTURA è già stata

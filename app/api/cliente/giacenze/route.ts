@@ -67,14 +67,18 @@ export async function POST(req: NextRequest) {
           telefonoDestinatario: spedizione.dest_telefono || '',
         })
       } catch (e) { console.error('Errore svincolo contratto V (portale cliente):', e) }
-    } else if (cred?.master_domain && cred?.password) {
+    } else if (cred?.master_domain && cred?.password && (spedizione.tracking_number || spedizione.numero)) {
+      // Spedisci.online: rilascio via /api/v2/stock/update (endpoint corretto; il vecchio
+      // /shipping/delivery-instructions dava 404). Dal portale cliente l'operazione è la riconsegna = RETRY.
       try {
-        await fetch(`https://${cred.master_domain}/api/v2/shipping/delivery-instructions/${spedizione.tracking_number}`, {
+        const oggi = new Date()
+        const sched = `${String(oggi.getDate()).padStart(2, '0')}/${String(oggi.getMonth() + 1).padStart(2, '0')}/${oggi.getFullYear()}`
+        await fetch(`https://${cred.master_domain}/api/v2/stock/update`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ instructions: istruzioni || 'Riconsegnare al destinatario' })
+          body: JSON.stringify({ ldv: String(spedizione.tracking_number || spedizione.numero), action: 'RETRY', scheduled_at: sched, note: (istruzioni || 'Riconsegnare al destinatario').slice(0, 200) })
         })
-      } catch(e) { console.error('Errore svincolo corriere:', e) }
+      } catch(e) { console.error('Errore svincolo Spedisci:', e) }
     }
     await supabase.from('spedizioni').update({
       giacenza_stato: 'svincolata', giacenza_istruzioni: istruzioni, giacenza_giorni: giorni, stato: 'in_consegna'
