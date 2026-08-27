@@ -50,7 +50,7 @@ export async function GET(_req: NextRequest) {
     // decidere: il sotto-master smetteva di vederle e non poteva più addebitarle. Ora le null
     // (da decidere) vengono sempre prima e il tetto è ampio, così non spariscono mai.
     adminDb.from('rettifiche')
-      .select('id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,fuori_sagoma,confermata,stato,propagazione,created_at,masters:master_id(nome)')
+      .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,fuori_sagoma,confermata,stato,propagazione,created_at,masters:master_id(nome)')
       .eq('target_master_id', mio)
       .eq('confermata', true)
       .order('propagazione', { ascending: true, nullsFirst: true })
@@ -65,8 +65,22 @@ export async function GET(_req: NextRequest) {
       .order('created_at', { ascending: false }).limit(100),
   ])
 
+  // SPEDIZIONI PROPRIE DEL RICEVENTE: la rettifica è di una spedizione SENZA cliente il cui
+  // proprietario è il master stesso (l'ha spedita lui, per conto suo). Sotto di lui non c'è nessuno
+  // a cui girarla: è già a suo carico (il credito gli è stato scalato). Non va mostrata come una
+  // scelta "propaga / Le assorbo io" — quel bottone suona come accollarsi il costo di un altro,
+  // mentre qui il pacco è suo. Si marca `propria` così la UI la mostra come "tua spedizione".
+  const rettRows = (rett.data || []) as any[]
+  const spedIds = [...new Set(rettRows.map(r => r.spedizione_id).filter(Boolean))]
+  const proprieSet = new Set<string>()
+  for (let i = 0; i < spedIds.length; i += 300) {
+    const { data: ss } = await adminDb.from('spedizioni').select('id,cliente_id,master_id').in('id', spedIds.slice(i, i + 300))
+    for (const s of (ss || [])) if ((s as any).cliente_id == null && (s as any).master_id === mio) proprieSet.add((s as any).id)
+  }
+  for (const r of rettRows) r.propria = !!(r.spedizione_id && proprieSet.has(r.spedizione_id))
+
   return NextResponse.json({
-    rettifiche: rett.data || [],
+    rettifiche: rettRows,
     contrassegni: cod.data || [],
     resi: resi.data || [],
   })

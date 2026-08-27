@@ -28,9 +28,14 @@ export default function NetworkRicevutiPage() {
   // UN BLOCCO, NON CINQUANTASETTE RIGHE.
   // Le rettifiche arrivano tutte insieme, dallo stesso file dello stesso mittente: si decidono
   // insieme. Il dettaglio resta, ma si apre solo se uno lo vuole vedere.
-  const blocchi = (() => {
+  const { blocchi, proprie } = (() => {
     const m = new Map<string, any>()
+    const proprie: any[] = []
     for (const r of (dati.rettifiche || [])) {
+      // LE TUE SPEDIZIONI PROPRIE (senza cliente, spedite da te) ancora da decidere NON vanno coi
+      // blocchi da propagare: sotto di te non c'è nessuno, sono già a tuo carico. Sezione a parte,
+      // niente "propaga / Le assorbo io" — che suona come accollarsi il costo di un altro.
+      if (r.propria && !r.propagazione) { proprie.push(r); continue }
       const giorno = new Date(r.created_at).toLocaleDateString('it-IT')
       const da = r.masters?.nome || '—'
       const k = da + '|' + giorno
@@ -42,8 +47,27 @@ export default function NetworkRicevutiPage() {
       // mostravano "580 · €1957" accanto a "Accetta (2)" — sembrava un errore. Ora il blocco grida i 2.
       if (!r.propagazione) { b.daDecidere.push(r.id); b.totaleDaDecidere += addebito }
     }
-    return Array.from(m.values()).sort((a, b) => (a.giorno < b.giorno ? 1 : -1))
+    return { blocchi: Array.from(m.values()).sort((a, b) => (a.giorno < b.giorno ? 1 : -1)), proprie }
   })()
+  const totaleProprie = proprie.reduce((a: number, r: any) => a + ((Number(r.differenza) || 0) - (Number(r.fuori_sagoma) || 0)), 0)
+
+  // CHIUDE LE TUE SPEDIZIONI PROPRIE. Non c'è niente da propagare (sono tue), e il credito ti è già
+  // stato scalato quando il livello sopra le ha confermate: marcarle 'assorbita' NON muove un euro,
+  // le toglie solo dal "da decidere". Riusa la stessa porta dell'assorbi, ma la parola è "sono mie".
+  async function chiudiProprie(ids: string[]) {
+    if (!ids.length) return
+    setPropagando('__proprie__'); setMsg('')
+    try {
+      const res = await fetch('/api/network/rettifiche', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rettifica_ids: ids, decisione: 'assorbita' }),
+      })
+      const d = await res.json()
+      if (d.error) setMsg('Errore: ' + d.error)
+      else setMsg(`✓ ${d.assorbite ?? ids.length} tue spedizioni proprie chiuse: erano già a tuo carico, le hai spedite tu.`)
+    } catch { setMsg('Errore di rete') }
+    carica(); setPropagando('')
+  }
 
   // ACCETTARE NON E' CARICARE.
   // Accettare vuol dire "va bene, me la prendo in carico": le righe finiscono nella MIA pagina
@@ -168,8 +192,47 @@ export default function NetworkRicevutiPage() {
         {loading ? <div style={{padding:'40px',textAlign:'center',color:'#999'}}>Caricamento…</div> : (
           <>
           {tab==='rettifiche' && (
-            blocchi.length===0 ? <div style={{padding:'32px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessuna rettifica ricevuta</div> :
+            (blocchi.length===0 && proprie.length===0) ? <div style={{padding:'32px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessuna rettifica ricevuta</div> :
             <div>
+              {/* LE TUE SPEDIZIONI PROPRIE: non è una scelta, sono tue. Riconosciute in automatico
+                  (senza cliente + spedite da te), mostrate come tali, un solo tasto per chiuderle. */}
+              {proprie.length>0 && (
+                <div style={{borderTop:'1px solid #f0f0f0',background:'#fff7ed',padding:'14px 16px'}}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px',flexWrap:'wrap'}}>
+                    <div>
+                      <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>
+                        📦 Tue spedizioni proprie · {proprie.length} · <span style={{color:'#dc2626'}}>€ {Math.abs(totaleProprie).toFixed(2)}</span>
+                      </div>
+                      <div style={{fontSize:'12px',color:'#8a5a2b',marginTop:'3px',maxWidth:'640px'}}>
+                        Le hai spedite <strong>tu</strong>, senza cliente finale: la ripesatura è <strong>già a tuo carico</strong> (te l'hanno scalata). Non c'è nessuno a valle a cui girarla — è tua e basta, niente da propagare.
+                      </div>
+                    </div>
+                    <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                      <button onClick={()=>setApertoBlocco(apertoBlocco==='__proprie__'?'':'__proprie__')}
+                        style={{background:'#fff',color:'#666',border:'1px solid #e8e8e8',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>
+                        {apertoBlocco==='__proprie__'?'Nascondi':'Vedi le '+proprie.length}
+                      </button>
+                      <button onClick={()=>chiudiProprie(proprie.map((r:any)=>r.id))} disabled={propagando==='__proprie__'}
+                        style={{background:'#1a1a1a',color:'#fff',border:'none',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',opacity:propagando==='__proprie__'?.6:1}}>
+                        {propagando==='__proprie__'?'…':'✓ Ho capito, chiudile'}
+                      </button>
+                    </div>
+                  </div>
+                  {apertoBlocco==='__proprie__' && (
+                    <table style={{width:'100%',borderCollapse:'collapse',background:'#fcfcfc',marginTop:'10px'}}>
+                      <thead><tr style={{background:'#f9fafb'}}><th style={th}>LDV</th><th style={th}>Addebito</th></tr></thead>
+                      <tbody>
+                        {proprie.map((r:any)=>(
+                          <tr key={r.id}>
+                            <td style={{...td,fontWeight:600}}>{r.numero_spedizione}</td>
+                            <td style={{...td,fontWeight:700,color:'#dc2626'}}>€ {(Math.round(((Number(r.differenza)||0)-(Number(r.fuori_sagoma)||0))*100)/100).toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
               {blocchi.map((b:any)=>(
                 <div key={b.k} style={{borderTop:'1px solid #f0f0f0'}}>
                   <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px',flexWrap:'wrap',padding:'14px 16px'}}>
