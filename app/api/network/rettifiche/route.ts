@@ -157,7 +157,8 @@ export async function POST(req: NextRequest) {
       }
       saltate.push({ ldv: r.numero_spedizione, perche: 'niente da recuperare al livello sotto (rimborso o zero): tenuta a tuo carico' }); idAzzerate.push(r.id); continue
     }
-    const diffFiglia = reweighGirabile ? liv.differenza : 0
+    // reweighGirabile garantisce già differenza != null, ma TS non lo propaga: fisso a numero.
+    const diffFiglia = reweighGirabile && liv.differenza != null ? liv.differenza : 0
 
     const { error } = await adminDb.from('rettifiche').insert({
       master_id: mio, spedizione_id: esito.spedizioneId, numero_spedizione: esito.ldv,
