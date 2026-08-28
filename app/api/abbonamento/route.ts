@@ -65,9 +65,13 @@ export async function GET() {
   let incassatoMese = 0, incassatoAnno = 0, previstoProssimoMese = 0, abbonatiAttivi = 0
   if (isRoot) {
     // Pagamenti della rete (per stato incasso). I record ORFANI (master cancellato) vengono scartati sotto.
-    const { data: pag } = await admin.from('abbonamenti_pagamenti')
+    const { data: pagTutti } = await admin.from('abbonamenti_pagamenti')
       .select('id,master_id,piano,mese,importo,pagato,pagato_il,metodo')
       .eq('root_id', utente.master_id).order('mese', { ascending: true }).limit(1000)
+    // Le righe a 0€ sono le fatture-FANTASMA del cambio piano (Stripe emette un'invoice a zero quando
+    // si fa l'upgrade): non sono incassi, non vanno né in lista né nei conteggi. Restano nel DB perché
+    // il calcolo del conguaglio legge da lì la scaletta dei piani — qui si escludono e basta.
+    const pag = (pagTutti || []).filter((p: any) => Number(p.importo || 0) !== 0)
     // Master ATTIVI della rete (con piano OPPURE esenti), escluso il root. Solo questi esistono → niente orfani.
     const { data: mastersRete } = await admin.from('masters')
       .select('id,nome,email,abbonamento_piano,abbonamento_prezzo,abbonamento_esente,stripe_subscription_id,stripe_stato,pagamento_scaduto_dal')
@@ -163,7 +167,9 @@ export async function GET() {
     piani: PIANI_ENTERPRISE,
     // Lo storico dei PROPRI pagamenti: il master lo chiedeva e non lo vedeva da nessuna parte —
     // sapeva di aver pagato solo perche' se lo ricordava.
-    mieiPagamenti: mieiPag,
+    // Nascondi le righe-fantasma a 0€ (cambio piano) anche dallo storico del singolo master: mostra i
+    // pagamenti veri. La scaletta piani per il conguaglio la legge da mieiPag (completo), sopra.
+    mieiPagamenti: (mieiPag || []).filter((p: any) => Number(p.importo || 0) !== 0),
     prossimoPagamento,
     cambioProgrammato: descriviCambio(m),
     // Pagamento con carta: disponibile solo se le chiavi ci sono. Finche' non ci sono, la
