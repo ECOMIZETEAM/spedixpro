@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { fetchAll } from '@/lib/fetch-all'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -24,10 +25,15 @@ export async function GET(req: NextRequest) {
     .select('id,nome,email,parent_master_id,attivo')
     .order('nome')
 
-  const { data: allClienti } = await admin
+  // TUTTI i clienti della rete: PostgREST tronca a 1000 righe per query, e la rete supera i 1000
+  // (la Gerarchia segnava CLIENTI TOTALI 998 invece di 1187, e sotto-contava OGNI nodo dell'albero:
+  // prendeva i primi 1000 in ordine alfabetico e buttava via il resto in silenzio). Si paginano a
+  // blocchi con fetchAll. Ordine stabile (ragione_sociale + id) per non saltare righe fra le pagine.
+  const allClienti = await fetchAll<any>(() => admin
     .from('clienti')
     .select('id,ragione_sociale,email,master_id,attivo,promosso_a_master_id')
-    .order('ragione_sociale')
+    .order('ragione_sociale', { ascending: true })
+    .order('id', { ascending: true }))
 
   function isDescendant(masterId: string, ancestorId: string, masters: any[]): boolean {
     let curr = masterId
