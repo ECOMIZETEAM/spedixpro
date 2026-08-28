@@ -59,13 +59,25 @@ export async function POST(req: NextRequest) {
   const newId = created?.user?.id
   if (!newId) return NextResponse.json({ error: 'Creazione utente fallita' }, { status: 400 })
 
-  const { error: insErr } = await admin.from('utenti').insert({
+  const daInserire: any = {
     id: newId,
     nome: nome.trim(),
     ruolo: (ruolo||'').toLowerCase(),
     master_id: me.master_id,
     attivo: true,
-  })
+  }
+  // Compenso agente gia' alla creazione (uno dei 4 metodi): il master di riferimento lo assegna qui,
+  // senza dover aprire la modifica subito dopo. Stessa validazione della PUT.
+  if ((ruolo||'').toLowerCase() === 'agente') {
+    const metodo = ['listino','perc_netto','perc_lordo','fisso'].includes(body.agente_metodo) ? body.agente_metodo : 'listino'
+    daInserire.agente_metodo = metodo
+    daInserire.agente_valore = metodo !== 'listino' ? Math.max(0, Number(body.agente_valore) || 0) : 0
+    if (metodo === 'listino' && body.listino_agente_id) {
+      const { data: lk } = await admin.from('listini_clienti').select('id').eq('id', body.listino_agente_id).eq('master_id', me.master_id).maybeSingle()
+      daInserire.listino_agente_id = lk?.id || null
+    }
+  }
+  const { error: insErr } = await admin.from('utenti').insert(daInserire)
   if (insErr) {
     // Senza la riga in `utenti` l'account resta orfano: non entra da nessuna parte e quell'email
     // non e' piu' riutilizzabile. Si ripulisce l'account auth appena creato.

@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 export default function CreaAccount() {
@@ -11,6 +11,12 @@ export default function CreaAccount() {
   const [msg, setMsg] = useState('')
   const [salvando, setSalvando] = useState(false)
   const [cred, setCred] = useState<any>(null)
+  // Compenso agente (uno dei 4 metodi), assegnabile gia' alla creazione.
+  const [metodo, setMetodo] = useState('listino')
+  const [valore, setValore] = useState('')
+  const [listinoAgente, setListinoAgente] = useState('')
+  const [listini, setListini] = useState<any[]>([])
+  useEffect(() => { fetch('/api/listini/lista').then(r => r.json()).then((a: any[]) => setListini(Array.isArray(a) ? a : [])).catch(() => {}) }, [])
 
   async function salva() {
     if (!nome.trim()) { setMsg('Inserisci il nome'); return }
@@ -19,7 +25,13 @@ export default function CreaAccount() {
     setSalvando(true); setMsg('')
     const r = await fetch('/api/staff', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nome, ruolo, email })
+      body: JSON.stringify({ nome, ruolo, email,
+        ...(ruolo === 'agente' ? {
+          agente_metodo: metodo,
+          agente_valore: metodo !== 'listino' ? (Number(valore) || 0) : 0,
+          listino_agente_id: metodo === 'listino' ? (listinoAgente || null) : null,
+        } : {}),
+      })
     })
     const j = await r.json()
     setSalvando(false)
@@ -65,7 +77,7 @@ export default function CreaAccount() {
             <input value={nome} onChange={e=>setNome(e.target.value)} style={inp} />
           </div>
 
-          <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'22px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom: ruolo==='agente' ? '14px' : '22px' }}>
             <label style={lbl}>Ruolo</label>
             <select value={ruolo} onChange={e=>setRuolo(e.target.value)} style={{ ...inp, cursor:'pointer' }}>
               <option value="admin">admin</option>
@@ -74,6 +86,50 @@ export default function CreaAccount() {
               <option value="autista">autista</option>
             </select>
           </div>
+
+          {ruolo === 'agente' && (
+            <div style={{ border:'1px solid #e8e8e8', borderRadius:'8px', padding:'14px', marginBottom:'22px', background:'#fafafa' }}>
+              <div style={{ fontSize:'13px', fontWeight:700, color:'#1a1a1a', marginBottom:'10px' }}>Compenso agente</div>
+              <div style={{ marginBottom:'10px' }}>
+                <label style={{ fontSize:'12px', fontWeight:600, color:'#1a1a1a', display:'block', marginBottom:'4px' }}>Come lo paghi</label>
+                <select value={metodo} onChange={e=>setMetodo(e.target.value)} style={{ ...inp, width:'100%', flex:'none', cursor:'pointer' }}>
+                  <option value="listino">Listino personale (margine sul suo listino)</option>
+                  <option value="perc_lordo">Percentuale sul lordo (prezzo cliente)</option>
+                  <option value="perc_netto">Percentuale sul netto (tuo margine)</option>
+                  <option value="fisso">Fisso a spedizione</option>
+                </select>
+              </div>
+              {metodo === 'listino' && (
+                <div>
+                  <label style={{ fontSize:'12px', fontWeight:600, color:'#1a1a1a', display:'block', marginBottom:'4px' }}>Listino agente (il suo costo)</label>
+                  <select value={listinoAgente} onChange={e=>setListinoAgente(e.target.value)} style={{ ...inp, width:'100%', flex:'none', cursor:'pointer' }}>
+                    <option value="">— nessuno (lo assegni dopo) —</option>
+                    {listini.map((l:any)=><option key={l.id} value={l.id}>{l.nome}</option>)}
+                  </select>
+                  <div style={{ fontSize:'11px', color:'#8a8a8a', marginTop:'4px' }}>Il suo margine = prezzo cliente − questo costo. Lo vede in sola lettura in &quot;Il mio listino&quot;.</div>
+                </div>
+              )}
+              {(metodo === 'perc_lordo' || metodo === 'perc_netto') && (
+                <div>
+                  <label style={{ fontSize:'12px', fontWeight:600, color:'#1a1a1a', display:'block', marginBottom:'4px' }}>Percentuale {metodo === 'perc_lordo' ? 'sul lordo (prezzo cliente)' : 'sul netto (tuo margine)'}</label>
+                  <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+                    <input type="number" step="0.1" min="0" max="100" value={valore} onChange={e=>setValore(e.target.value)} placeholder="es. 10" style={{ ...inp, maxWidth:'130px', flex:'none' }} />
+                    <span style={{ color:'#666' }}>%</span>
+                  </div>
+                </div>
+              )}
+              {metodo === 'fisso' && (
+                <div>
+                  <label style={{ fontSize:'12px', fontWeight:600, color:'#1a1a1a', display:'block', marginBottom:'4px' }}>Euro per ogni spedizione</label>
+                  <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+                    <span style={{ color:'#666' }}>€</span>
+                    <input type="number" step="0.01" min="0" value={valore} onChange={e=>setValore(e.target.value)} placeholder="es. 0,50" style={{ ...inp, maxWidth:'130px', flex:'none' }} />
+                    <span style={{ color:'#666' }}>a spedizione</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <p style={{ color:'#15803d', fontSize:'13px', marginBottom:'14px' }}>Dopo il salvataggio vedrai a schermo email e password del collaboratore, da condividere con lui. Potrà accedere con il suo login insieme a te (senza espellervi a vicenda).</p>
 
