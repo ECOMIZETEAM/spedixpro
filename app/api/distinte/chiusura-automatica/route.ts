@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { fulfillSpedizioniShopify } from '@/lib/shopify'
-import { fulfillSpedizioniWoo } from '@/lib/wooFulfill'
-import { fulfillSpedizioniPrestashop } from '@/lib/prestashopFulfill'
-import { fulfillSpedizioniEbay } from '@/lib/ebayFulfill'
-import { fulfillSpedizioniTiktok } from '@/lib/tiktokFulfill'
-import { fulfillSpedizioniTemu } from '@/lib/temuFulfill'
+import { fulfillMarketplace } from '@/lib/fulfillMarketplace'
 import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
 
@@ -70,13 +65,9 @@ export async function GET(req: NextRequest) {
       // in_transito/consegnata). Come le chiusure manuali: si distinguono dalle etichette create dopo.
       await supabase.from('spedizioni').update({ stato: 'spedita' }).in('id', righe.map(r => r.id)).eq('stato', 'in_lavorazione')
       distinteCreate++
-      // Tracking a Shopify per gli ordini ecommerce collegati (best-effort)
-      try { await fulfillSpedizioniShopify(supabase, righe.map(r => r.id)) } catch {}
-      try { await fulfillSpedizioniWoo(supabase, righe.map(r => r.id)) } catch {}
-      try { await fulfillSpedizioniPrestashop(supabase, righe.map(r => r.id)) } catch {}
-      try { await fulfillSpedizioniEbay(supabase, righe.map(r => r.id)) } catch {}
-      try { await fulfillSpedizioniTiktok(supabase, righe.map(r => r.id)) } catch {}
-      try { await fulfillSpedizioniTemu(supabase, righe.map(r => r.id)) } catch {}
+      // Tracking ai marketplace collegati (best-effort). UNICA porta: fulfillMarketplace applica la
+      // guardia "mai evadere col numero provvisorio" per tutte le piattaforme.
+      try { await fulfillMarketplace(supabase, righe.map(r => r.id)) } catch {}
       try { await chiudiBorderoSpedisci(supabase, distinta.id) } catch {}
       try { await chiudiBordereauSpediamopro(supabase, distinta.id) } catch {}
       try { const { chiudiGiornataGls } = await import('@/lib/gls'); await chiudiGiornataGls(supabase, distinta.id) } catch {}

@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
     .not('spedizione_id', 'is', null)
     .or('fulfillment_stato.is.null,fulfillment_stato.neq.ok')          // tutto tranne i già evasi
     .gte('created_at', new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString())
-    .order('created_at', { ascending: false })
+    .order('created_at', { ascending: true })   // i PIÙ VECCHI prima: si svuota la coda, non si perdono gli arretrati
     .limit(1000)
 
   const spedIds = Array.from(new Set(

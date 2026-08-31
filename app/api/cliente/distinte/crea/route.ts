@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { fulfillSpedizioniShopify } from '@/lib/shopify'
-import { fulfillSpedizioniWoo } from '@/lib/wooFulfill'
-import { fulfillSpedizioniPrestashop } from '@/lib/prestashopFulfill'
-import { fulfillSpedizioniEbay } from '@/lib/ebayFulfill'
-import { fulfillSpedizioniTiktok } from '@/lib/tiktokFulfill'
-import { fulfillSpedizioniTemu } from '@/lib/temuFulfill'
+import { fulfillMarketplace } from '@/lib/fulfillMarketplace'
 import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
 import { createAdminSupabase } from '@/lib/supabase-admin'
@@ -48,14 +43,10 @@ export async function POST(req: NextRequest) {
   // in_transito/consegnata). Così si distinguono in elenco dalle etichette create dopo.
   await supabase.from('spedizioni').update({ stato: 'spedita' }).in('id', validIds).eq('stato', 'in_lavorazione')
   if (errUpd) return NextResponse.json({ error: 'Errore aggancio spedizioni' }, { status: 500 })
-  // Distinta chiusa: rimanda il tracking a Shopify per gli ordini ecommerce collegati (best-effort)
+  // Distinta chiusa: rimanda il tracking ai marketplace collegati (best-effort). UNICA porta:
+  // fulfillMarketplace applica la guardia "mai evadere col numero provvisorio" per TUTTE le piattaforme.
   let fulfillEsiti: any[] = []
-  try { fulfillEsiti = await fulfillSpedizioniShopify(supabase, validIds) } catch {}
-  try { await fulfillSpedizioniWoo(supabase, validIds) } catch {}
-  try { await fulfillSpedizioniPrestashop(supabase, validIds) } catch {}
-  try { await fulfillSpedizioniEbay(supabase, validIds) } catch {}
-  try { await fulfillSpedizioniTiktok(supabase, validIds) } catch {}
-  try { await fulfillSpedizioniTemu(supabase, validIds) } catch {}
+  try { fulfillEsiti = await fulfillMarketplace(supabase, validIds) } catch {}
   // Chiusura borderò su spedisci.online (best-effort, solo corrieri tipo spedisci)
   // Client ADMIN: la chiusura al corriere legge le credenziali del contratto, che con il token di
   // un utente non sono piu' leggibili (e non devono esserlo). Il perimetro l'ha gia' deciso questa

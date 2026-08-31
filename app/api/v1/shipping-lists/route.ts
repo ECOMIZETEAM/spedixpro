@@ -52,14 +52,10 @@ export async function POST(req: NextRequest) {
   // lavorazione" per sempre, nel portale del cliente e in quello del master.
   await admin.from('spedizioni').update({ stato: 'spedita' }).in('id', idsRighe).eq('stato', 'in_lavorazione')
 
-  // Tracking ai marketplace collegati: senza, gli ordini restavano non evasi e i tempi di
-  // spedizione del marketplace continuavano a correre. Best-effort, come nella chiusura serale.
-  try { const { fulfillSpedizioniShopify } = await import('@/lib/shopify'); await fulfillSpedizioniShopify(admin, idsRighe) } catch { }
-  try { const { fulfillSpedizioniWoo } = await import('@/lib/wooFulfill'); await fulfillSpedizioniWoo(admin, idsRighe) } catch { }
-  try { const { fulfillSpedizioniPrestashop } = await import('@/lib/prestashopFulfill'); await fulfillSpedizioniPrestashop(admin, idsRighe) } catch { }
-  try { const { fulfillSpedizioniEbay } = await import('@/lib/ebayFulfill'); await fulfillSpedizioniEbay(admin, idsRighe) } catch { }
-  try { const { fulfillSpedizioniTiktok } = await import('@/lib/tiktokFulfill'); await fulfillSpedizioniTiktok(admin, idsRighe) } catch { }
-  try { const { fulfillSpedizioniTemu } = await import('@/lib/temuFulfill'); await fulfillSpedizioniTemu(admin, idsRighe) } catch { }
+  // Tracking ai marketplace collegati: senza, gli ordini restavano non evasi e i tempi di spedizione
+  // del marketplace continuavano a correre. UNICA porta: fulfillMarketplace applica la guardia
+  // "mai evadere col numero provvisorio" per tutte le piattaforme. Best-effort.
+  try { const { fulfillMarketplace } = await import('@/lib/fulfillMarketplace'); await fulfillMarketplace(admin, idsRighe) } catch { }
 
   // Chiusura al corriere (best-effort). `confermata_vettore` NON si scrive prima: veniva messo a
   // true insieme all'insert, quindi una chiusura fallita restava marcata come trasmessa e nessuno
