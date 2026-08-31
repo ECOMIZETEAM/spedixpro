@@ -18,7 +18,11 @@ export async function fulfillSpedizioniEbay(db: any, spedizioneIds: string[]) {
       const { data: sped } = await db.from('spedizioni').select('tracking_number, corrieri(nome_contratto)').eq('id', ordine.spedizione_id).maybeSingle()
       const tracking = sped?.tracking_number
       if (!tracking) { await segna('errore', 'tracking number mancante'); continue }
-      const company = (sped as any)?.corrieri?.nome_contratto || 'Other'
+      // eBay vuole un CODICE vettore dal suo elenco: passargli il nome del NOSTRO contratto (es. "Poste
+      // Delivery Business S") lo fa RIFIUTARE (evasione persa) e per giunta espone il provider al
+      // compratore. 'Other' è il valore generico SEMPRE valido: l'ordine risulta spedito col numero di
+      // tracking e non trapela nulla. (Con l'elenco codici eBay per l'Italia si potrebbe mostrare il brand.)
+      const company = 'Other'
 
       const { data: integr } = await db.from('integrazioni').select('*').eq('id', ordine.integrazione_id).maybeSingle()
       if (!integr) { await segna('errore', 'integrazione non trovata'); continue }

@@ -1,4 +1,5 @@
 import { getValidTiktokToken, tiktokRequest } from '@/lib/tiktok'
+import { marchioCorriere } from '@/lib/corriere-logo'
 
 // Rimanda il tracking a TikTok Shop alla chiusura distinta (self-managed shipping). Best-effort.
 // Flusso 202309: l'ordine ha uno o più package -> per ciascuno si imposta tracking + provider e si spedisce.
@@ -23,7 +24,9 @@ export async function fulfillSpedizioniTiktok(db: any, spedizioneIds: string[]) 
       const { data: sped } = await db.from('spedizioni').select('tracking_number, corrieri(nome_contratto)').eq('id', ordine.spedizione_id).maybeSingle()
       const tracking = sped?.tracking_number
       if (!tracking) { await segna('errore', 'tracking number mancante'); continue }
-      const carrierNome = ((sped as any)?.corrieri?.nome_contratto || '').toLowerCase()
+      // Si abbina sul BRAND pubblico (Poste/BRT/GLS…), non sul nome del NOSTRO contratto: così il match
+      // coi provider TikTok è più affidabile e non si ragiona su una stringa che nomina il fornitore.
+      const brand = marchioCorriere((sped as any)?.corrieri?.nome_contratto || '').toLowerCase()
 
       const { data: integr } = await db.from('integrazioni').select('*').eq('id', ordine.integrazione_id).maybeSingle()
       if (!integr) { await segna('errore', 'integrazione non trovata'); continue }
@@ -40,8 +43,12 @@ export async function fulfillSpedizioniTiktok(db: any, spedizioneIds: string[]) 
         } catch { providers = [] }
         providerCache.set(integr.id, providers)
       }
-      const match = (providers || []).find((p: any) => (p.name || '').toLowerCase().includes(carrierNome) || carrierNome.includes((p.name || '').toLowerCase()))
-      const providerId = match?.id || providers?.[0]?.id
+      // Match sul brand. Se non c'è, NON si usa il primo provider a caso (darebbe al compratore l'URL di
+      // tracking di un corriere SBAGLIATO): si cerca un generico ("other/altro"), altrimenti si lascia
+      // vuoto e l'ordine si ritenta al giro dopo — meglio ritentare che marcare un vettore errato.
+      const match = brand ? (providers || []).find((p: any) => { const n = (p.name || '').toLowerCase(); return n && (n.includes(brand) || brand.includes(n)) }) : null
+      const generico = (providers || []).find((p: any) => /\bother\b|general|altro/i.test(p.name || ''))
+      const providerId = match?.id || generico?.id
 
       // package(s) dell'ordine (dal dettaglio ordine)
       let packageIds: string[] = []

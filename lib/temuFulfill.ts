@@ -1,4 +1,5 @@
 import { getValidTemuToken, temuRequest } from '@/lib/temu'
+import { marchioCorriere } from '@/lib/corriere-logo'
 
 // Rimanda il tracking a Temu alla chiusura distinta. Best-effort.
 // NB: nome API ("bg.logistics.shipment.confirm") e campi da confermare sui doc partner Temu.
@@ -20,7 +21,9 @@ export async function fulfillSpedizioniTemu(db: any, spedizioneIds: string[]) {
       const { data: sped } = await db.from('spedizioni').select('tracking_number, corrieri(nome_contratto)').eq('id', ordine.spedizione_id).maybeSingle()
       const tracking = sped?.tracking_number
       if (!tracking) { await segna('errore', 'tracking number mancante'); continue }
-      const carrier = (sped as any)?.corrieri?.nome_contratto || 'Other'
+      // Il brand PUBBLICO (Poste/BRT/GLS…), mai il nome del nostro contratto: non deve arrivare al
+      // compratore il nome del fornitore tecnico.
+      const carrier = marchioCorriere((sped as any)?.corrieri?.nome_contratto || '') || 'Other'
 
       const { data: integr } = await db.from('integrazioni').select('*').eq('id', ordine.integrazione_id).maybeSingle()
       if (!integr) { await segna('errore', 'integrazione non trovata'); continue }

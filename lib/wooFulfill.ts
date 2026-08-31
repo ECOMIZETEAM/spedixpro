@@ -1,4 +1,5 @@
 import { wooPost, wooPut } from '@/lib/woo'
+import { marchioCorriere } from '@/lib/corriere-logo'
 
 // Rimanda il tracking a WooCommerce alla chiusura distinta.
 // Woo non ha un campo tracking nativo: aggiungiamo una NOTA ordine (visibile al cliente)
@@ -18,11 +19,16 @@ export async function fulfillSpedizioniWoo(db: any, spedizioneIds: string[]) {
     }
     try {
       const { data: sped } = await db
-        .from('spedizioni').select('tracking_number, corrieri(nome_contratto)')
+        .from('spedizioni').select('tracking_number, tracking_token, corrieri(nome_contratto)')
         .eq('id', ordine.spedizione_id).maybeSingle()
       const tracking = sped?.tracking_number
       if (!tracking) { await segna('errore', 'tracking number mancante'); continue }
-      const company = (sped as any)?.corrieri?.nome_contratto || 'Corriere'
+      // BRAND PUBBLICO, mai il nome del contratto (roba interna). E link di tracciamento WHITE-LABEL
+      // (/traccia/<token>, lo stesso di SMS/email al destinatario): il compratore ha un link cliccabile
+      // sul nostro dominio, non un numero nudo, e non vede alcun provider.
+      const company = marchioCorriere((sped as any)?.corrieri?.nome_contratto || '') || 'Corriere'
+      const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://moovexpress.com').replace(/\/$/, '')
+      const link = (sped as any)?.tracking_token ? `${base}/traccia/${(sped as any).tracking_token}` : null
 
       const { data: integr } = await db.from('integrazioni').select('*').eq('id', ordine.integrazione_id).maybeSingle()
       const cred = integr?.credenziali as any
@@ -30,7 +36,9 @@ export async function fulfillSpedizioniWoo(db: any, spedizioneIds: string[]) {
 
       // 1) nota ordine col tracking (visibile al cliente)
       await wooPost(cred.url, cred.ck, cred.cs, `/orders/${ordine.ordine_esterno_id}/notes`, {
-        note: `Spedizione affidata a ${company}. Tracking: ${tracking}`,
+        note: link
+          ? `Spedizione affidata a ${company}. Tracking: ${tracking}. Traccia qui: ${link}`
+          : `Spedizione affidata a ${company}. Tracking: ${tracking}`,
         customer_note: true,
       })
       // 2) ordine a stato completato

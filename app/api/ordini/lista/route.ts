@@ -44,7 +44,11 @@ export async function GET(req: NextRequest) {
     // CONTRASSEGNO: Woo payment_method 'cod' (titolo "Pagamento alla consegna"), PrestaShop modulo
     // cashondelivery, eBay paymentSummary CASH_ON_DELIVERY/PICKUP. Importo = totale dell'ordine.
     const firma = JSON.stringify([p1, p2, p3, p4, p5, p6])
-    const isCod = /cash[\s_-]?on[\s_-]?(delivery|pickup)|cashondelivery|"cod"|\bcontrassegn|pagamento alla consegna|alla consegna/i.test(firma)
+    // CONTRASSEGNO = SOLDI: se non lo si riconosce, l'ordine risulta prepagato e non si incassa niente
+    // alla consegna. Oltre a 'cod'/'cash on delivery'/'contrassegno' si coprono gli slug dei gateway COD
+    // non standard (cod_advanced, wc_cod, cod-gateway…) con 'cod' come token o con separatore, e i termini
+    // in altre lingue (nachnahme DE, contre remboursement FR, contra reembolso ES).
+    const isCod = /cash[\s_-]?on[\s_-]?(delivery|pickup)|cashondelivery|\bcod\b|[_-]cod\b|\bcod[_-]|contrassegn|(pagamento|paghi)[\s_]*(alla|in)?[\s_]*consegna|alla consegna|payment on delivery|nachnahme|contre[\s_-]?remboursement|contra[\s_-]?reembolso/i.test(firma)
     const cod = isCod ? (Number(o.totale) || 0) : 0
     return { ...o, data_ordine: t || o.created_at, cod, metodo_pagamento: p2 || p1 || p4 || p3 || null }
   })
