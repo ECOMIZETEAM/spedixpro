@@ -88,15 +88,17 @@ export async function GET(req: NextRequest) {
         const spid = raw.id || raw?.raw?.data?.id
         const stocks = ((await spediamoproSearchStocks(cred.authcode, String(code))) || [])
           .filter((st: any) => !spid || Number(st.shipmentId) === Number(spid))
-        // SpediamoPro tiene lo STORICO degli stock: dopo lo svincolo RESTA anche il vecchio record
-        // status 1 -> "esiste uno status 1" NON basta. Status: 1 = giacenza da lavorare (releaseAction
-        // nullo), 2 = "Richiesta svincolo ELABORATA", 3 = "Svincolata". Se ANCHE UN solo stock e' >=2
-        // SpediamoPro la mostra svincolata (es. Michele De Cesare: status 1 storico + status 3) -> NON e'
-        // ferma. Ferma = attiva (status 1, releaseAction nullo) e MAI arrivata a >=2 (svincolo mai
-        // registrato su SpediamoPro = il nostro rilascio non e' passato -> serve davvero ri-svincolare).
-        const svincolatoSuSped = stocks.some((st: any) => Number(st.status) >= 2)
-        const attivaSenzaSvincolo = stocks.some((st: any) => Number(st.status) === 1 && !st.releaseAction)
-        esito = (attivaSenzaSvincolo && !svincolatoSuSped) ? 'ferma' : 'ok'
+        // Doc SpediamoPro (/stocks): ogni stock ha `releaseAction` (svincolo RICHIESTO da noi: enum
+        // 1=riconsegna,2=riconsegna altro indir.,3=reso,4=ritiro,5=altro,6=abbandona) e `releasedAt`/
+        // `courierReleaseAction` (registrazione). SpediamoPro tiene lo STORICO: dopo lo svincolo resta
+        // anche il vecchio record senza release. Uso i campi DOCUMENTATI (non lo `status`, non enumerato):
+        // "ferma" = c'e' una giacenza su cui NON abbiamo MAI chiesto lo svincolo (releaseAction e
+        // releasedAt nulli su OGNI stock) = il nostro rilascio non e' mai arrivato a SpediamoPro. Se un
+        // qualsiasi stock ha releaseAction/releasedAt, per SpediamoPro e' svincolata (anche se il corriere
+        // non l'ha ancora registrata, come "Richiesta svincolo elaborata") -> NON ferma.
+        const svincoloRichiesto = stocks.some((st: any) => st.releaseAction != null || st.releasedAt != null)
+        const cEGiacenza = stocks.length > 0
+        esito = (cEGiacenza && !svincoloRichiesto) ? 'ferma' : 'ok'
       } else if (tipo === 'easyparcel' && cred.apikey) {
         const { stati } = await easyparcelTracking(cred.apikey, { ldv: String(s.tracking_number || s.numero) })
         const mappati = (stati || []).map((t: string) => mapStatoEasyparcel(t))
