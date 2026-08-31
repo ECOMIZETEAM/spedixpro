@@ -34,9 +34,9 @@ export async function fulfillSpedizioniTiktok(db: any, spedizioneIds: string[]) 
       const shopCipher = cred.shop_cipher
       const token = await getValidTiktokToken(db, integr)
 
-      // provider di spedizione (mappo il corriere sul provider TikTok, fallback al primo)
-      let providers = providerCache.get(integr.id)
-      if (!providers) {
+      // provider di spedizione (mappo il corriere sul provider TikTok)
+      let providers: any[] = providerCache.get(integr.id) || []
+      if (!providers.length) {
         try {
           const p = await tiktokRequest('GET', '/logistics/202309/shipping_providers', { token, shopCipher })
           providers = p?.data?.shipping_providers || []

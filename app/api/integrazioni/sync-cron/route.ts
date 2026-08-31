@@ -62,6 +62,15 @@ export async function GET(req: NextRequest) {
           const { sincronizzaOrdiniShopify } = await import('@/lib/shopifySync')
           res = await sincronizzaOrdiniShopify(admin, it); break
         }
+        case 'tiktok': {
+          // Mancava: gli ordini TikTok non venivano importati da soli (solo sync manuale).
+          const { sincronizzaOrdiniTiktok } = await import('@/lib/tiktokSync')
+          res = await sincronizzaOrdiniTiktok(admin, it); break
+        }
+        case 'temu': {
+          const { sincronizzaOrdiniTemu } = await import('@/lib/temuSync')
+          res = await sincronizzaOrdiniTemu(admin, it); break
+        }
         default:
           // Piattaforma senza sincronizzazione automatica (o non piu' usata): si marca come vista,
           // altrimenti resterebbe sempre in cima alla lista dei trascurati e ruberebbe il posto
