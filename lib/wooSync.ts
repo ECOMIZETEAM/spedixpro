@@ -77,8 +77,30 @@ export async function sincronizzaOrdiniWoo(db: any, integr: any, range?: { dal?:
     if (!error) importati++
   }
 
+  // CHIUSURA: gli ordini che il merchant porta a 'completed' su Woo (fuori dal nostro portale) escono
+  // da processing/on-hold e non li rileggiamo piu' -> restavano 'da_spedire' PER SEMPRE nel nostro
+  // portale, col bottone "Crea spedizione" attivo = rischio DOPPIA spedizione. Come Shopify/eBay/Presta,
+  // recupero i 'completed' della finestra e segno 'spedito' le SOLE righe corrispondenti ancora
+  // 'da_spedire' (mai declassare chi abbiamo gia' spedito noi: la guardia .eq('stato','da_spedire') lo
+  // garantisce). Best-effort: se fallisce, l'import della finestra resta valido.
+  try {
+    const completati = new Set<string>()
+    for (let page = 1; page <= 50; page++) {
+      const batch = await wooGet(url, ck, cs, `/orders?status=completed&after=${encodeURIComponent(daISO)}&before=${encodeURIComponent(aISO)}&per_page=100&page=${page}&orderby=date&order=desc`)
+      if (!Array.isArray(batch) || !batch.length) break
+      for (const o of batch) completati.add(String(o.id))
+      if (batch.length < 100) break
+    }
+    const ids = Array.from(completati)
+    for (let i = 0; i < ids.length; i += 200) {
+      await db.from('ordini_ecommerce').update({ stato: 'spedito' })
+        .eq('integrazione_id', integr.id).eq('stato', 'da_spedire')
+        .in('ordine_esterno_id', ids.slice(i, i + 200))
+    }
+  } catch (e: any) { console.error('[WOO SYNC] chiusura completed (best-effort):', e?.message) }
+
   await db.from('integrazioni')
-    .update({ ultimo_sync: new Date().toISOString(), ordini_totali: ordini.length })
+    .update({ ultimo_sync: new Date().toISOString(), ordini_totali: ordini.length, errore: null })   // sync riuscita: azzera un errore precedente
     .eq('id', integr.id)
 
   return { letti: ordini.length, importati }

@@ -124,7 +124,7 @@ export async function sincronizzaOrdiniPrestashop(db: any, integr: any, range?: 
   }
 
   await db.from('integrazioni')
-    .update({ ultimo_sync: new Date().toISOString(), ordini_totali: ordini.length })
+    .update({ ultimo_sync: new Date().toISOString(), ordini_totali: ordini.length, errore: null })   // sync riuscita: azzera un errore precedente (non piu' appiccicato quando lo store rientra)
     .eq('id', integr.id)
 
   return { letti: ordini.length, importati }

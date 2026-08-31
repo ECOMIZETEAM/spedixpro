@@ -105,7 +105,7 @@ export async function sincronizzaOrdiniEbay(db: any, integr: any, range?: { dal?
   console.log(`[EBAY SYNC] cliente=${integr.cliente_id} negozio="${integr.nome_negozio}" apiTotal=${totApi} letti=${ordini.length} salvati=${importati} errori=${errori} finestra=${daISO.slice(0, 10)}..${aISO.slice(0, 10)}`)
 
   await db.from('integrazioni')
-    .update({ ultimo_sync: new Date().toISOString(), ordini_totali: ordini.length })
+    .update({ ultimo_sync: new Date().toISOString(), ordini_totali: ordini.length, errore: null })   // sync riuscita: azzera un errore precedente (non piu' appiccicato quando lo store rientra)
     .eq('id', integr.id)
 
   return { letti: ordini.length, importati }

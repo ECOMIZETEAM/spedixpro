@@ -535,7 +535,12 @@ export default function OrdiniPage() {
                     <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>
                       {o.stato!=='spedito'
                         ? <button onClick={()=>creaSpedizione(o)} style={{background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>Crea spedizione</button>
-                        : <span style={{color:'#166534',fontSize:'12px',fontWeight:600}}>✓ Spedito</span>}
+                        : <span style={{display:'inline-flex',flexDirection:'column',alignItems:'flex-end',gap:'3px'}}>
+                            <span style={{color:'#166534',fontSize:'12px',fontWeight:600}}>✓ Spedito</span>
+                            {/* Write-back allo store fallito (es. chiavi negozio in sola lettura): il tracking
+                                NON e' arrivato al negozio ne' al compratore. Prima "✓ Spedito" lo nascondeva. */}
+                            {o.fulfillment_stato==='errore' && <span title={o.fulfillment_errore || 'Il tracking non e\' stato inviato al negozio: verifica che le chiavi API del negozio siano in lettura E SCRITTURA (read-write).'} style={{color:'#b45309',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fffbeb',border:'1px solid #fde68a',cursor:'help',whiteSpace:'nowrap'}}>⚠ Store non aggiornato</span>}
+                          </span>}
                     </td>
                   </tr>)
                 })}
