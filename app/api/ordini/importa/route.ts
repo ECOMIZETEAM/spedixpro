@@ -105,14 +105,24 @@ function pick(headers: Set<string>, aliases: string[]): string | null {
 }
 function toNum(v: any): number | null {
   if (v === null || v === undefined || String(v).trim() === '') return null
-  const n = parseFloat(String(v).replace(/[^0-9,.-]/g, '').replace(',', '.'))
+  let s = String(v).replace(/[^0-9,.-]/g, '')
+  // Separatori misti (formato IT): "1.234,56" = '.' migliaia + ',' decimale. Prima si sostituiva SOLO
+  // la 1a virgola -> "1.234,56" -> "1.234.56" -> parseFloat si fermava a 1.234 (importo /1000: un COD di
+  // 1.200 € diventava 1,20 €). Ora: se ci sono SIA '.' SIA ',', tolgo i '.' (migliaia) e uso ',' come
+  // decimale; se solo ',', e' il decimale; se solo '.', resta decimale ("1234.56", "8.000" di Shopify = 8).
+  if (s.includes('.') && s.includes(',')) s = s.replace(/\./g, '').replace(',', '.')
+  else if (s.includes(',')) s = s.replace(',', '.')
+  const n = parseFloat(s)
   return isNaN(n) ? null : n
 }
-function cleanCap(v: any): string {
+function cleanCap(v: any, paese?: string): string {
   // Shopify esporta il CAP come '05100 per non perdere lo zero iniziale
   const cap = String(v ?? '').replace(/^'/, '').replace(/\s+/g, '').trim()
-  // Excel/xlsx mangiano gli zeri iniziali dei CAP ("00142" -> "142"): ripristino a 5 cifre.
-  if (/^\d{1,4}$/.test(cap)) return cap.padStart(5, '0')
+  // Excel/xlsx mangiano gli zeri iniziali dei CAP ITALIANI ("00142" -> "142"): ripristino a 5 cifre.
+  // SOLO per l'Italia: i CAP ESTERI a 4 cifre (CH 8001, AT 5020, BE 1000, DK 2100) sono validi cosi'
+  // e NON vanno imbottiti con uno zero iniziale (li corromperebbe -> spedizione a un CAP inesistente).
+  const eItalia = !paese || paese === 'IT'
+  if (eItalia && /^\d{1,4}$/.test(cap)) return cap.padStart(5, '0')
   return cap
 }
 const isCod = (s: string) => /contrassegn|cash\s*on\s*delivery|\bcod\b/i.test(s || '')
@@ -270,7 +280,8 @@ export async function POST(req: NextRequest) {
     const a1 = g(r, 'indirizzo')
     const a2 = M.indirizzo2 ? String(r[M.indirizzo2!] ?? '').trim() : ''
     const ind = [a1, a2].filter(Boolean).join(' ')
-    const cap = cleanCap(M.cap ? r[M.cap] : '')
+    const paese = normalizzaPaese(g(r, 'country'))   // "Italia"/"Italy"/"DE" -> ISO2 (Temu esporta esteso)
+    const cap = cleanCap(M.cap ? r[M.cap] : '', paese)   // padStart a 5 cifre solo per l'Italia
     const loc = g(r, 'localita')
     const prov = g(r, 'provincia')
 
@@ -300,7 +311,11 @@ export async function POST(req: NextRequest) {
     if (!contrassegno && totale) {
       const metodo = (A.payment ? String(r[A.payment] ?? '') : '') + ' ' + (A.shippingm ? String(r[A.shippingm] ?? '') : '')
       const fin = (A.financial ? String(r[A.financial] ?? '') : '').trim().toLowerCase()
-      const inAttesa = ['pending', 'unpaid', 'authorized', 'partially_paid', 'in attesa', 'non pagato'].includes(fin)
+      // 'authorized'/'partially_paid' TOLTI di proposito: su Shopify 'authorized' = carta GIA' autorizzata
+      // (prepagato a cattura manuale) e 'partially_paid' = acconto gia' versato. Dedurne un contrassegno
+      // sull'INTERO totale farebbe incassare i contanti al corriere su un ordine gia' pagato con carta =
+      // DOPPIO addebito. I COD veri restano coperti da pending/unpaid e dal metodo esplicito (isCod).
+      const inAttesa = ['pending', 'unpaid', 'in attesa', 'non pagato'].includes(fin)
       if (isCod(metodo) || inAttesa) contrassegno = totale
     }
 
@@ -312,7 +327,7 @@ export async function POST(req: NextRequest) {
       cap,
       localita: loc,
       provincia: provFinale,   // nome esteso -> sigla, oppure ricavata dal CAP se Amazon non la scrive
-      country: normalizzaPaese(g(r, 'country')),   // "Italia"/"Italy" -> "IT" (Temu esporta il paese esteso)
+      country: paese,   // ISO2 gia' normalizzato sopra (serve anche a cleanCap per non imbottire i CAP esteri)
       telefono: g(r, 'telefono') || null,
       email_destinatario: g(r, 'email_destinatario') || null,
       peso: M.peso ? toNum(r[M.peso!]) : null,
