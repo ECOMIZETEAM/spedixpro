@@ -13,11 +13,25 @@ import { fulfillSpedizioniTemu } from '@/lib/temuFulfill'
 export async function fulfillMarketplace(db: any, spedizioneIds: string[]): Promise<any[]> {
   let esiti: any[] = []
   if (!spedizioneIds?.length) return esiti
-  try { esiti = await fulfillSpedizioniShopify(db, spedizioneIds) } catch {}
-  try { await fulfillSpedizioniWoo(db, spedizioneIds) } catch {}
-  try { await fulfillSpedizioniPrestashop(db, spedizioneIds) } catch {}
-  try { await fulfillSpedizioniEbay(db, spedizioneIds) } catch {}
-  try { await fulfillSpedizioniTiktok(db, spedizioneIds) } catch {}
-  try { await fulfillSpedizioniTemu(db, spedizioneIds) } catch {}
+
+  // NON si evade allo store con un numero PROVVISORIO. Se la LDV vera non c'è ancora (SpediamoPro/Poste
+  // la assegnano async, anche 18h+; DVA parte su TMP-), il numero è il code provvisorio (6A…/TMP-/SP-/
+  // DVA-). Spingerlo al compratore = tracking FINTO nella sua email + ordine chiuso 'spedito' sullo store,
+  // che poi NON viene mai ri-aggiornato con la LDV vera. Quindi qui si evadono SOLO le spedizioni con LDV
+  // definitiva; le altre le riprende `fulfill-retry` appena il tracking diventa vero. Guardia in UN punto
+  // solo: vale per Shopify/Woo/PrestaShop/eBay/TikTok/Temu insieme.
+  const { ldvProvvisoria } = await import('@/lib/numero-spedizione')
+  const { data: sped } = await db.from('spedizioni').select('id,tracking_number').in('id', spedizioneIds)
+  const pronti = (sped || [])
+    .filter((s: any) => s.tracking_number && !ldvProvvisoria(s.tracking_number))
+    .map((s: any) => s.id)
+  if (!pronti.length) return esiti
+
+  try { esiti = await fulfillSpedizioniShopify(db, pronti) } catch {}
+  try { await fulfillSpedizioniWoo(db, pronti) } catch {}
+  try { await fulfillSpedizioniPrestashop(db, pronti) } catch {}
+  try { await fulfillSpedizioniEbay(db, pronti) } catch {}
+  try { await fulfillSpedizioniTiktok(db, pronti) } catch {}
+  try { await fulfillSpedizioniTemu(db, pronti) } catch {}
   return esiti
 }

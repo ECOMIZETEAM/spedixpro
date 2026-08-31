@@ -60,6 +60,10 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/integrazioni/fulfill-retry",
+      "schedule": "*/20 * * * *"
+    },
+    {
       "path": "/api/cron/pulizia-notifiche",
       "schedule": "45 2 * * *"
     },
