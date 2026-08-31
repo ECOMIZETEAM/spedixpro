@@ -86,13 +86,17 @@ export async function GET(req: NextRequest) {
         const raw: any = s.raw_response || {}
         const code = raw.code || raw?.raw?.data?.code || s.tracking_number
         const spid = raw.id || raw?.raw?.data?.id
-        const stocks = await spediamoproSearchStocks(cred.authcode, String(code))
-        // "Ferma" = stock ATTIVO SENZA svincolo richiesto: SpediamoPro usa status 1 = giacenza da lavorare
-        // (releaseAction nullo), 2 = "Richiesta svincolo ELABORATA" (svincolo GIA' fatto da noi, in attesa
-        // che il corriere lo registri), 3 = svincolo COMPLETATO. status 2 e 3 NON sono ferme (svincolate
-        // correttamente). Guardo solo status 1 + releaseAction nullo -> niente falsi "ferma" sulle svincolate.
-        const attivo = (stocks || []).find((st: any) => Number(st.status) === 1 && !st.releaseAction && (!spid || Number(st.shipmentId) === Number(spid)))
-        esito = attivo ? 'ferma' : 'ok'
+        const stocks = ((await spediamoproSearchStocks(cred.authcode, String(code))) || [])
+          .filter((st: any) => !spid || Number(st.shipmentId) === Number(spid))
+        // SpediamoPro tiene lo STORICO degli stock: dopo lo svincolo RESTA anche il vecchio record
+        // status 1 -> "esiste uno status 1" NON basta. Status: 1 = giacenza da lavorare (releaseAction
+        // nullo), 2 = "Richiesta svincolo ELABORATA", 3 = "Svincolata". Se ANCHE UN solo stock e' >=2
+        // SpediamoPro la mostra svincolata (es. Michele De Cesare: status 1 storico + status 3) -> NON e'
+        // ferma. Ferma = attiva (status 1, releaseAction nullo) e MAI arrivata a >=2 (svincolo mai
+        // registrato su SpediamoPro = il nostro rilascio non e' passato -> serve davvero ri-svincolare).
+        const svincolatoSuSped = stocks.some((st: any) => Number(st.status) >= 2)
+        const attivaSenzaSvincolo = stocks.some((st: any) => Number(st.status) === 1 && !st.releaseAction)
+        esito = (attivaSenzaSvincolo && !svincolatoSuSped) ? 'ferma' : 'ok'
       } else if (tipo === 'easyparcel' && cred.apikey) {
         const { stati } = await easyparcelTracking(cred.apikey, { ldv: String(s.tracking_number || s.numero) })
         const mappati = (stati || []).map((t: string) => mapStatoEasyparcel(t))

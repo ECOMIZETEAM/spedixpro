@@ -28,19 +28,26 @@ export default function ControlloGiacenzePage() {
     await carica()
   }
 
-  // RI-SVINCOLA una giacenza ancora "ferma": ri-chiede a SpediamoPro il rilascio dello stock ANCORA
-  // ATTIVO (le re-giacenze = 2° fallimento consegna hanno un nuovo stock che il sistema non gestiva).
-  // Riusa POST /api/giacenze azione='svincola' (trova lo stock attivo + rilascia); la guardia
-  // giacenza_addebito_effettuato evita il doppio addebito. releaseAction 1=riconsegna, 3=reso.
-  async function riSvincola(p: any, releaseAction: number) {
+  // RI-SVINCOLA una giacenza ancora "ferma" (attiva su SpediamoPro senza svincolo registrato) col FLUSSO
+  // COMPLETO, lo stesso di cliente/master: 'richiesta' (calcola i costi) + 'conferma_svincolo' (corriere +
+  // addebito del servizio a CASCATA + distinta reso, via lib/giacenza-svincolo). Cosi' il reso e' "vero"
+  // (prezzo reso a norma + stato reso_mittente + distinta), non un semplice rilascio al corriere.
+  async function riSvincola(p: any, operazione: 'riconsegna' | 'reso') {
     if (!p.id || busy) return
-    const che = releaseAction === 3 ? 'RESO al mittente' : 'RICONSEGNA'
-    if (!confirm(`Ri-svincolare ${p.ldv} come ${che}?\n\nRichiede di nuovo a SpediamoPro il rilascio dello stock ancora attivo (2ª giacenza). NON ri-addebita (già addebitata).`)) return
+    const che = operazione === 'reso' ? 'RESO al mittente' : 'RICONSEGNA'
+    if (!confirm(`${che} per ${p.ldv}?\n\nParte lo svincolo COMPLETO: chiamata al corriere + addebito del servizio a cascata${operazione === 'reso' ? ' + distinta reso' : ''}.`)) return
     setBusy(p.id); setMsg('')
     try {
-      const r = await fetch('/api/giacenze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spedizioneId: p.id, azione: 'svincola', releaseAction }) })
-      const j = await r.json().catch(() => ({}))
-      setMsg(j?.success ? `Ri-svincolata ${p.ldv} come ${che}: il corriere la rilavora — ricontrolla tra qualche ora.` : (j?.error || 'Ri-svincolo non riuscito'))
+      // 1) richiesta operazione (crea la richiesta + calcola i costi)
+      const r1 = await fetch(`/api/giacenze/${p.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ azione: 'richiesta', operazione }) })
+      const j1 = await r1.json().catch(() => ({}))
+      if (!j1?.id) { setMsg(j1?.error || 'Richiesta non riuscita'); setBusy(null); return }
+      // 2) conferma svincolo (svincolo vero: corriere + addebito a cascata + distinta reso)
+      const r2 = await fetch(`/api/giacenze/${p.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ azione: 'conferma_svincolo', richiestaId: j1.id }) })
+      const j2 = await r2.json().catch(() => ({}))
+      setMsg(j2?.success
+        ? `${che} eseguito per ${p.ldv}${j2.addebito ? ` (addebito € ${Number(j2.addebito).toFixed(2)})` : ''}${j2.avviso ? ` — ${j2.avviso}` : ''}.`
+        : (j2?.error || 'Svincolo non riuscito'))
     } catch { setMsg('Errore di rete') }
     setBusy(null)
     await carica()
@@ -121,9 +128,9 @@ export default function ControlloGiacenzePage() {
                       <td style={td}>
                         {p.corriere_tipo === 'spediamopro' && p.id ? (
                           <span style={{ display: 'inline-flex', gap: 6 }}>
-                            <button onClick={() => riSvincola(p, 1)} disabled={busy === p.id} title="Ri-chiede a SpediamoPro la riconsegna dello stock ancora attivo"
+                            <button onClick={() => riSvincola(p, 'riconsegna')} disabled={busy === p.id} title="Svincolo completo: riconsegna al destinatario (corriere + addebito a cascata)"
                               style={{ background: '#eef2ff', color: '#3730a3', border: '1px solid #c7d2fe', borderRadius: 6, padding: '5px 9px', fontSize: 12, fontWeight: 600, cursor: busy === p.id ? 'default' : 'pointer', opacity: busy === p.id ? .5 : 1 }}>Riconsegna</button>
-                            <button onClick={() => riSvincola(p, 3)} disabled={busy === p.id} title="Rilascia lo stock come reso al mittente"
+                            <button onClick={() => riSvincola(p, 'reso')} disabled={busy === p.id} title="Svincolo completo: reso al mittente (corriere + addebito reso a cascata + distinta reso)"
                               style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', borderRadius: 6, padding: '5px 9px', fontSize: 12, fontWeight: 600, cursor: busy === p.id ? 'default' : 'pointer', opacity: busy === p.id ? .5 : 1 }}>Reso</button>
                           </span>
                         ) : <span style={{ color: '#bbb' }}>—</span>}
