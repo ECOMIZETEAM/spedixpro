@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
   const agIds = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
   const buildBase = () => {
     let q = db.from('spedizioni')
-      .select(`${SPED_COLS}, clienti(ragione_sociale,agente), corrieri(id,nome_contratto), distinte(data,bordero_id)`)
+      .select(`${SPED_COLS}, clienti(ragione_sociale,agente), corrieri(id,nome_contratto)`)
       .order('created_at', { ascending: false }).order('id', { ascending: false })
     if (subtreeSel) q = q.in('master_id', subtreeSel)
     else if (clienteId) q = q.eq('cliente_id', clienteId).eq('master_id', mine)
@@ -179,6 +179,16 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // DISTINTA (data + bordero) per le colonne Data_distinta/bda: NON esiste una FK spedizioni->distinte,
+  // quindi NIENTE embed PostgREST `distinte(...)` (romperebbe TUTTA la query -> report vuoto). Lookup in
+  // blocco per distinta_id.
+  const distMap = new Map<string, any>()
+  const distIds = Array.from(new Set((spedizioni || []).map((s: any) => s.distinta_id).filter(Boolean)))
+  for (let i = 0; i < distIds.length; i += 300) {
+    const { data: ds } = await adminDb.from('distinte').select('id,data,bordero_id').in('id', distIds.slice(i, i + 300))
+    for (const d of (ds || [])) distMap.set((d as any).id, { data: (d as any).data, bordero_id: (d as any).bordero_id })
+  }
+
   const rows = (spedizioni || []).map((s: any) => {
     // PREZZO CORRIERE = quello che ho pagato IO (mio movimento reale). Per l'agente = suo listino;
     // se il listino agente non copre quel corriere, ripiego sul costo reale (non 0, che gonfierebbe il margine).
@@ -245,6 +255,7 @@ export async function GET(req: NextRequest) {
       prezzo_corriere,                        // "Prezzo Corriere" (quello che pago io)
       rettifica,                              // colonna "Rettifica" (aumento/variazione di prezzo)
       data_consegna: consegnaMap.get(s.id) || null,   // colonna "Data_consegna" del report
+      distinte: distMap.get(s.distinta_id) || null,   // { data, bordero_id } per Data_distinta/bda (lookup, non embed)
       dett_corriere: null,
       cli_nolo: calcAgente ? (prezzo_corriere ?? 0) : (eCliente ? 0 : Number(s.costo_spedizione || 0)),
       cli_supplementi: 0,

@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
       // corrieri(nome_contratto) e distinte(data,bordero_id) servono al report (colonne Corriere/
       // Contratto/Data_distinta/bda). NON esce mai il costo del master: SPED_COLS_CLIENTE gia' toglie
       // costo_spedizione, e non si joina niente che riveli il provider (nome_contratto e' il brand).
-      .select(`${SPED_COLS_CLIENTE}, clienti(ragione_sociale), corrieri(nome_contratto), distinte(data,bordero_id)`)
+      .select(`${SPED_COLS_CLIENTE}, clienti(ragione_sociale), corrieri(nome_contratto)`)
       .eq('cliente_id', clienteId)
       .order('created_at', { ascending: false })
     if (stato) q = q.eq('stato', stato)
@@ -49,5 +49,13 @@ export async function GET(req: NextRequest) {
       if (!p || d > p) consegnaMap.set((e as any).spedizione_id, d)
     }
   }
-  return NextResponse.json((spedizioni || []).map((s: any) => ({ ...s, data_consegna: consegnaMap.get(s.id) || null })))
+  // DISTINTA (data + bordero) per Data_distinta/bda: nessuna FK spedizioni->distinte, niente embed (che
+  // vuoterebbe il report): lookup in blocco per distinta_id. RLS: il cliente legge solo le proprie.
+  const distMap = new Map<string, any>()
+  const distIds = Array.from(new Set((spedizioni || []).map((s: any) => s.distinta_id).filter(Boolean)))
+  for (let i = 0; i < distIds.length; i += 300) {
+    const { data: ds } = await supabase.from('distinte').select('id,data,bordero_id').in('id', distIds.slice(i, i + 300))
+    for (const d of (ds || [])) distMap.set((d as any).id, { data: (d as any).data, bordero_id: (d as any).bordero_id })
+  }
+  return NextResponse.json((spedizioni || []).map((s: any) => ({ ...s, data_consegna: consegnaMap.get(s.id) || null, distinte: distMap.get(s.distinta_id) || null })))
 }
