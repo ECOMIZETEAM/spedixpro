@@ -200,11 +200,22 @@ async function recuperaSpediamoproSospese(admin: any): Promise<number> {
   for (const c of (cor || [])) if (c?.credenziali?.authcode) authDi.set(c.id, c.credenziali.authcode)
   if (!authDi.size) return 0
 
-  // Attive, recenti (7gg) e su un contratto SpediamoPro. Il filtro "ferma sulla referenza"
-  // (numero === code del provider) si fa in memoria: PostgREST non confronta colonna e campo JSON.
+  // Attive, recenti (7gg) e su un contratto SpediamoPro, FERME SUL CODICE PROVVISORIO.
+  //
+  // Il codice provvisorio SpediamoPro (il `code` del provider) inizia per "6A"; la LDV Poste vera e'
+  // "050...". Quindi `numero LIKE '6A%'` individua esattamente le spedizioni ancora ferme, e si filtra
+  // direttamente in query — non piu' "le 400 piu' recenti + confronto in memoria".
+  //
+  // GUASTO CHE QUESTA RIGA RIPARA: prima si prendevano le 400 SpediamoPro piu' recenti e si teneva chi
+  // aveva numero === code. A 1.500 pacchi/giorno le 400 piu' recenti coprono poche ore, ma la LDV Poste
+  // puo' tardare 18h+ (async): quando la LDV era finalmente pronta, la spedizione era gia' USCITA dalla
+  // finestra delle 400 e non veniva mai recuperata — restava sul 6A per sempre, con un tracking che non
+  // esiste. E' successo il 31/08: ~17 spedizioni ferme sul 6A con la LDV gia' pronta su SpediamoPro.
+  // Il confronto in memoria `numero === sp_code` resta come conferma (belt & suspenders).
   const { data: righe } = await admin.from('spedizioni')
     .select('id,numero,etichetta_url,corriere_id,sp_id:raw_response->id,sp_id2:raw_response->raw->data->id,sp_code:raw_response->code')
     .in('corriere_id', [...authDi.keys()])
+    .ilike('numero', '6A%')
     .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
     .gte('created_at', new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString())
     .order('created_at', { ascending: false })
