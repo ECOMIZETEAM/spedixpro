@@ -82,7 +82,7 @@ async function cartaDa(s: any, sub: any): Promise<string | null> {
 async function analizza(admin: any, s: any, rootId: string) {
   const ids = await sottoAlberoMasterIds(admin, rootId)
   const { data: masters } = await admin.from('masters')
-    .select('id,nome,abbonamento_prezzo,abbonamento_esente,stripe_subscription_id,stripe_stato')
+    .select('id,nome,abbonamento_prezzo,abbonamento_esente,stripe_subscription_id,stripe_stato,pagamento_scaduto_dal')
     .in('id', ids).neq('id', rootId)
   const paganti = (masters || []).filter((m: any) =>
     !m.abbonamento_esente && m.stripe_subscription_id && m.stripe_stato !== 'canceled')
@@ -103,7 +103,13 @@ async function analizza(admin: any, s: any, rootId: string) {
 
     // Motivi per NON toccarlo (lo schedule residuo NON esclude: lo si rilascia).
     let escluso: string | null = null
-    if (sub.collection_method && sub.collection_method !== 'charge_automatically') escluso = 'bonifico'
+    // PAGAMENTO GIA' FALLITO: il webhook ha messo past_due + avviato il congelamento. FUORI dal batch:
+    // non lo si ri-addebita in automatico (paga a mano / aggiorna la carta, e il congelamento fa il
+    // resto). Ci si fida del nostro stato in DB, non del live sub.status: a fallire e' stata una fattura
+    // MANUALE (la una-tantum), quindi la subscription su Stripe resta 'active' e senza questo controllo
+    // ricomparirebbe come pagabile. Il webhook AZZERA past_due/scaduto_dal all'incasso -> torna dentro.
+    if (m.stripe_stato === 'past_due' || m.pagamento_scaduto_dal) escluso = 'pagamento_non_riuscito'
+    else if (sub.collection_method && sub.collection_method !== 'charge_automatically') escluso = 'bonifico'
     else if (!pm) escluso = 'no_carta'
     else if (sub.discount) escluso = 'sconto'
     else if (!(sub.status === 'active' || (sub.status === 'trialing' && sub.trial_end === pausa))) escluso = 'stato_' + sub.status
