@@ -63,10 +63,11 @@ export async function GET() {
   let pagamenti: any[] = []
   let storicoIncassi: any[] = []
   let incassatoMese = 0, incassatoAnno = 0, previstoProssimoMese = 0, abbonatiAttivi = 0
+  let incassoRealeStimato = 0, conguagliRete = 0
   if (isRoot) {
     // Pagamenti della rete (per stato incasso). I record ORFANI (master cancellato) vengono scartati sotto.
     const { data: pagTutti } = await admin.from('abbonamenti_pagamenti')
-      .select('id,master_id,piano,mese,importo,pagato,pagato_il,metodo')
+      .select('id,master_id,piano,mese,importo,pagato,pagato_il,metodo,created_at')
       .eq('root_id', utente.master_id).order('mese', { ascending: true }).limit(1000)
     // Le righe a 0€ sono le fatture-FANTASMA del cambio piano (Stripe emette un'invoice a zero quando
     // si fa l'upgrade): non sono incassi, non vanno né in lista né nei conteggi. Restano nel DB perché
@@ -153,6 +154,24 @@ export async function GET() {
       .map(([mese, v]) => ({ mese, incassato: Math.round(v.incassato * 100) / 100, n: v.n }))
       .sort((a, b) => b.mese.localeCompare(a.mese))
     for (const m of attiviRete) if (m.abbonamento_piano && !m.abbonamento_esente) { previstoProssimoMese += Number(m.abbonamento_prezzo || 0); abbonatiAttivi++ }
+
+    // PROSSIMO INCASSO STIMATO (reale, non teorico). previstoProssimoMese e' il VALORE della rete —
+    // i canoni pieni di TUTTI, congelati e senza-carta compresi. Qui invece si stima quanto si
+    // incassera' DAVVERO: solo i master con carta ATTIVA e non in ritardo (quelli che pagano) + i
+    // conguagli in sospeso dei cambi piano del mese (che si incassano al prossimo rinnovo).
+    const meseC = meseCorrente()
+    const rowsPerMaster = new Map<string, any[]>()
+    for (const p of (pagTutti || [])) {
+      if (p.mese !== meseC) continue
+      if (!rowsPerMaster.has(p.master_id)) rowsPerMaster.set(p.master_id, [])
+      rowsPerMaster.get(p.master_id)!.push(p)
+    }
+    for (const rows of rowsPerMaster.values()) conguagliRete += conguaglioDelMese(rows, meseC).totale
+    conguagliRete = Math.round(conguagliRete * 100) / 100
+    const canoniSolidi = abbonati
+      .filter((a: any) => !a.esente && a.carta && !a.scaduto_dal)   // carta attiva, non in ritardo/congelato
+      .reduce((t: number, a: any) => t + Number(a.prezzo || 0), 0)
+    incassoRealeStimato = Math.round((canoniSolidi + conguagliRete) * 100) / 100
   }
 
   return NextResponse.json({
@@ -187,6 +206,8 @@ export async function GET() {
     incassatoAnno: Math.round(incassatoAnno * 100) / 100,
     annoCorrente: new Date().getFullYear(),
     previstoProssimoMese: Math.round(previstoProssimoMese * 100) / 100,
+    incassoRealeStimato,
+    conguagliRete,
     abbonatiAttivi,
     storicoIncassi,
     pagamenti,

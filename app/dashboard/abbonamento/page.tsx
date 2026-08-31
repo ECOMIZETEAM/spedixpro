@@ -320,9 +320,14 @@ export default function AbbonamentoPage() {
             <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>totale anno in corso</div>
           </div>
           <div style={card}>
-            <div style={{fontSize:'12px',color:'#777'}}>Previsto prossimo mese</div>
+            <div style={{fontSize:'12px',color:'#777'}}>Prossimo incasso stimato</div>
+            <div style={{fontSize:'22px',fontWeight:800,color:'#16a34a'}}>€ {Number(stato?.incassoRealeStimato||0).toFixed(2)}</div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>solo carte attive + conguagli (€ {Number(stato?.conguagliRete||0).toFixed(2)})</div>
+          </div>
+          <div style={card}>
+            <div style={{fontSize:'12px',color:'#777'}}>Valore rete</div>
             <div style={{fontSize:'22px',fontWeight:800,color:ACCENT}}>€ {Number(stato?.previstoProssimoMese||0).toFixed(2)}</div>
-            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>{stato?.abbonatiAttivi||0} abbonati (esclusi gli esenti)</div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>canoni pieni di tutti · {stato?.abbonatiAttivi||0} abbonati (esclusi esenti)</div>
           </div>
           <div style={{...card, borderColor: (nSenzaCarta+nRitardo)>0 ? '#fed7aa' : '#e8e8e8'}}>
             <div style={{fontSize:'12px',color:'#777'}}>Non stanno pagando</div>
