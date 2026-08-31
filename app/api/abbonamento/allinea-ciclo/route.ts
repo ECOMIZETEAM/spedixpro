@@ -148,8 +148,32 @@ export async function POST(req: NextRequest) {
   const escludiManuale: Set<string> = new Set(Array.isArray(corpo?.escludi) ? corpo.escludi : [])
   const limite = Number.isFinite(corpo?.limite) ? Math.max(0, Number(corpo.limite)) : Infinity
   const solo: string | null = corpo?.solo ? String(corpo.solo) : null   // CANARY mirato
+  const soloPausa: string | null = corpo?.soloPausa ? String(corpo.soloPausa) : null  // allinea al 1° SENZA addebito
 
   const { righe, pausa, mese, CAMPAGNA } = await analizza(g.admin, s, g.rootId)
+
+  // SOLO PAUSA al 1°, NIENTE addebito. Per chi si e' abbonato TARDI nel mese: ha gia' pagato il suo
+  // primo periodo (es. rinnovo il 24/27), quindi addebitargli il canone del mese ora sarebbe farglielo
+  // pagare due volte. Lo si allinea al 1° (pausa fino al 1°, il rinnovo dell'anniversario e' soppresso)
+  // e paghera' il canone nuovo il 1° con tutti gli altri. Rilascia un eventuale schedule residuo prima.
+  if (soloPausa) {
+    const r = righe.find((x) => x.master_id === soloPausa)
+    if (!r) return NextResponse.json({ error: 'Master non in elenco' }, { status: 404 })
+    if (r.escluso === 'bonifico') return NextResponse.json({ error: 'Paga con bonifico: la pausa carta non si applica' }, { status: 400 })
+    try {
+      if (r.schedule) { try { await s.subscriptionSchedules.release(r.schedule) } catch {} }
+      if (r.sub_trial_end !== pausa) {
+        await s.subscriptions.update(r.subscription, { trial_end: pausa, proration_behavior: 'none' })
+      }
+      return NextResponse.json({
+        ok: true, pausa_fino_al: new Date(pausa * 1000).toISOString().slice(0, 10),
+        fatti: [{ nome: r.nome, esito: 'pausa_senza_addebito' }], n_fatti: 0,
+      })
+    } catch (e: any) {
+      return NextResponse.json({ error: e?.message || 'Spostamento al 1° non riuscito' }, { status: 400 })
+    }
+  }
+
   const fatti: any[] = []
   let tentati = 0
   for (const r of righe) {

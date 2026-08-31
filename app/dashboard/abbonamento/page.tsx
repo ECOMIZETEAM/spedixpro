@@ -126,8 +126,22 @@ export default function AbbonamentoPage() {
     const d = await fetch('/api/abbonamento/allinea-ciclo').then(r=>r.json()).catch(()=>({error:'Errore nel controllo'}))
     setAllinea(d); setAllineaAzione('')
   }
-  async function applicaAllinea(opts?:{solo?:string, nome?:string}) {
+  async function applicaAllinea(opts?:{solo?:string, soloPausa?:string, nome?:string}) {
     const solo = opts?.solo
+    const soloPausa = opts?.soloPausa
+    // SOLO PAUSA al 1°, niente addebito: per chi si è abbonato tardi nel mese (ha già pagato il suo
+    // periodo). Lo allinea al 1° e pagherà il canone nuovo il 1°, senza pagare due volte il mese.
+    if (soloPausa) {
+      if (!await dialog.confirm({ title:`Sposta ${opts?.nome} al 1°?`,
+        message:`Metto ${opts?.nome} in pausa fino al ${allinea?.pausa_fino_al} SENZA addebito: si è abbonato tardi e ha già pagato il suo periodo, quindi salta il canone di questo mese e paga il 1° con gli altri.`,
+        confirmText:'Sposta al 1°', danger:false })) return
+      setAllineaAzione(soloPausa); setMsg('')
+      const d = await fetch('/api/abbonamento/allinea-ciclo', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({soloPausa}) }).then(r=>r.json()).catch(()=>({error:'errore'}))
+      setAllineaAzione('')
+      if (d.error) { setMsg(d.error); return }
+      setMsg(`✓ ${opts?.nome} allineato al 1° (nessun addebito): pagherà il ${d.pausa_fino_al}.`)
+      caricaAllinea(); return
+    }
     const attivi = (allinea?.righe||[]).filter((r:any)=>!r.gia_al_primo && !r.gia_pagato && !r.escluso)
     if (!await dialog.confirm({ title: solo?`Prova su ${opts?.nome}?`:`Incasso ${allinea?.mese_una_tantum} e pausa al ${allinea?.pausa_fino_al}?`,
       message: solo
@@ -287,6 +301,7 @@ export default function AbbonamentoPage() {
                             : r.gia_pagato ? <span style={{fontSize:'11px',color:'#16a34a'}}>già pagato · intatto</span>
                             : <span style={{fontSize:'11px',color:'#2563eb',display:'inline-flex',alignItems:'center',gap:'7px'}}>addebito + pausa
                                 <button onClick={()=>applicaAllinea({solo:r.master_id, nome:r.nome})} disabled={!!allineaAzione} title="Fai partire SOLO questo master, per verificarlo su Stripe" style={{fontSize:'10px',padding:'2px 8px',border:'1px solid #fed7aa',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',cursor:'pointer',fontWeight:700}}>{allineaAzione===r.master_id?'…':'🧪 prova'}</button>
+                                <button onClick={()=>applicaAllinea({soloPausa:r.master_id, nome:r.nome})} disabled={!!allineaAzione} title="Abbonato tardi: allinea al 1° SENZA addebito (salta il mese, paga il 1°)" style={{fontSize:'10px',padding:'2px 8px',border:'1px solid #bfdbfe',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',cursor:'pointer',fontWeight:700}}>{allineaAzione===r.master_id?'…':'→ 1° ott'}</button>
                               </span>}
                         </td>
                       </tr>
