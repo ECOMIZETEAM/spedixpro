@@ -48,52 +48,35 @@ export async function POST(req: NextRequest) {
     .select('*, clienti(ragione_sociale), corrieri(tipo,credenziali,nome_contratto)')
     .eq('id', spedizioneId).eq('cliente_id', clienteId).single()
   if (!spedizione) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
-  const dataGiacenza = spedizione.giacenza_data ? new Date(spedizione.giacenza_data) : new Date(spedizione.created_at)
-  const giorni = Math.max(1, Math.ceil((new Date().getTime() - dataGiacenza.getTime()) / (1000*60*60*24)))
-  const costoGiornaliero = parseFloat(spedizione.giacenza_costo_giornaliero || 0)
-  const costoRiconsegna = parseFloat(spedizione.giacenza_costo_riconsegna || 0)
-  const costoTotale = (costoGiornaliero * giorni) + costoRiconsegna
   if (azione === 'svincola') {
-    const cred = spedizione.corrieri?.credenziali as Record<string,string>
-    if (cred?.apikey && spedizione.corrieri?.tipo === 'easyparcel') {
-      // Contratto V: anche dal portale del cliente lo svincolo deve arrivare al corriere. Senza
-      // questo ramo la richiesta restava dentro casa nostra e il pacco fermo in deposito.
-      // Da qui l'operazione e' una sola, la riconsegna al destinatario (come nel ramo qui sotto):
-      // reso e nuovo indirizzo passano dalla richiesta che conferma il master.
-      try {
-        const { easyparcelSvincolo } = await import('@/lib/easyparcel')
-        await easyparcelSvincolo(cred.apikey, String(spedizione.numero || spedizione.tracking_number), 'D', {
-          note: istruzioni || 'Riconsegnare al destinatario',
-          telefonoDestinatario: spedizione.dest_telefono || '',
-        })
-      } catch (e) { console.error('Errore svincolo contratto V (portale cliente):', e) }
-    } else if (cred?.master_domain && cred?.password && (spedizione.tracking_number || spedizione.numero)) {
-      // Spedisci.online: rilascio via /api/v2/stock/update (endpoint corretto; il vecchio
-      // /shipping/delivery-instructions dava 404). Dal portale cliente l'operazione è la riconsegna = RETRY.
-      try {
-        const oggi = new Date()
-        const sched = `${String(oggi.getDate()).padStart(2, '0')}/${String(oggi.getMonth() + 1).padStart(2, '0')}/${oggi.getFullYear()}`
-        await fetch(`https://${cred.master_domain}/api/v2/stock/update`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ldv: String(spedizione.tracking_number || spedizione.numero), action: 'RETRY', scheduled_at: sched, note: (istruzioni || 'Riconsegnare al destinatario').slice(0, 200) })
-        })
-      } catch(e) { console.error('Errore svincolo Spedisci:', e) }
+    // PORTA UNICA: lo svincolo del cliente passa dallo STESSO motore del master (lib/giacenza-svincolo).
+    // Prima questa rotta duplicava la logica ed era rotta: (1) NON gestiva SpediamoPro (mancava il ramo
+    // authcode) -> il cliente marcava "svincolata" senza mai chiamare SpediamoPro, e il pacco restava in
+    // giacenza dal corriere (fonte delle "ferme"); (2) gli errori corriere (DVA/Spedisci) erano solo
+    // loggati -> "svincolata" anche se il corriere rifiutava. Ora: eseguiSvincolo chiama DAVVERO il
+    // corriere (tutti e 3 i provider), BLOCCA se rifiuta (niente svincolata finta), addebita a cascata
+    // IDENTICO al master, e marca la spedizione (una riga sola -> lo stato si aggiorna per cliente e per
+    // TUTTI i master della catena che la vedono). Il cliente svincola in AUTONOMIA (riconsegna al
+    // destinatario); reso / nuovo indirizzo restano scelte del master.
+    const admin = createAdminSupabase()
+    const { leggiPrezzi, calcolaCosti, noloClienteSpedizione } = await import('@/lib/giacenza-prezzi')
+    const { eseguiSvincolo } = await import('@/lib/giacenza-svincolo')
+    const prezzi = await leggiPrezzi(admin, spedizione)
+    const costi = calcolaCosti('riconsegna', prezzi, spedizione, await noloClienteSpedizione(admin, spedizione))
+    const { data: rich, error: eRich } = await admin.from('giacenza_richieste').insert({
+      spedizione_id: spedizioneId, master_id: spedizione.master_id, cliente_id: spedizione.cliente_id,
+      operazione: 'riconsegna', note: istruzioni || null, ...costi,
+      richiesta_da: 'cliente', creata_da: 'Cliente', stato: 'da_confermare',
+    }).select('*').single()
+    if (eRich || !rich) return NextResponse.json({ error: 'Richiesta svincolo non creata' }, { status: 400 })
+    try {
+      const { addebito, avviso } = await eseguiSvincolo(admin, spedizione, rich, 'Cliente')
+      return NextResponse.json({ success: true, costoAddebitato: addebito, avviso })
+    } catch (e: any) {
+      // Corriere ha rifiutato: annullo la richiesta e NON marco svincolata (niente svincolata finta).
+      await admin.from('giacenza_richieste').update({ stato: 'annullata' }).eq('id', rich.id)
+      return NextResponse.json({ error: e?.message || 'Svincolo non riuscito' }, { status: 400 })
     }
-    await supabase.from('spedizioni').update({
-      giacenza_stato: 'svincolata', giacenza_istruzioni: istruzioni, giacenza_giorni: giorni, stato: 'in_consegna'
-    }).eq('id', spedizioneId)
-    // Addebito SVINCOLO (servizio riconsegna) UNIFICATO: cascata rete su `movimenti` (non più
-    // movimenti_clienti). L'apertura è già addebitata all'entrata. Guard giacenza_addebito_effettuato.
-    if (!spedizione.giacenza_addebito_effettuato) {
-      const { addebitaServizioGiacenza } = await import('@/lib/giacenza-cascata')
-      await addebitaServizioGiacenza(
-        { id: spedizioneId, numero: spedizione.numero, cliente_id: spedizione.cliente_id, master_id: spedizione.master_id, corriere_id: spedizione.corriere_id },
-        'riconsegna', costoRiconsegna
-      )
-      await supabase.from('spedizioni').update({ giacenza_addebito_effettuato: true }).eq('id', spedizioneId)
-    }
-    return NextResponse.json({ success: true, costoAddebitato: costoRiconsegna, giorni })
   }
   if (azione === 'chiudi') {
     await supabase.from('spedizioni').update({ giacenza_stato: 'chiusa' }).eq('id', spedizioneId)
