@@ -64,7 +64,9 @@ export async function sincronizzaOrdiniEbay(db: any, integr: any, range?: { dal?
       provincia: addr.stateOrProvince || '',
       cap: addr.postalCode || '',
       paese: addr.countryCode || 'IT',
-      email: shipTo.email || o.buyer?.buyerRegistrationAddress?.email || '',
+      // eBay maschera spesso l'email (alias privacy o vuota): placeholder valido per non far fallire
+      // l'etichetta dei corrieri con email obbligatoria. Il tracking al cliente lo fa il nostro sistema.
+      email: shipTo.email || o.buyer?.buyerRegistrationAddress?.email || 'noreply@moovexpress.com',
       telefono: shipTo.primaryPhone?.phoneNumber || '',
     }
     const articoli = (o.lineItems || []).map((li: any) => ({

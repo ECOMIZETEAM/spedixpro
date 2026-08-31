@@ -21,14 +21,17 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
   // ripescare, non cosa visualizzare.
   const filtroData = `updated_at:>=${daISO} updated_at:<=${aISO}`
 
-  // Ordini via GraphQL (immagini inline), i piu' RECENTI prima, paginati fino a ~300. Prendiamo sia
+  // Ordini via GraphQL (immagini inline), i piu' RECENTI prima, paginati fino a ~3000. Prendiamo sia
   // gli EVASI sia i NON evasi (status:open, senza filtro fulfillment): cosi' anche gli ordini gia'
   // evasi su Shopify entrano con la loro DATA e gateway veri (prima, prendendo solo i non-evasi, gli
   // evasi non venivano mai riletti e restavano con la data di IMPORT). Gli evasi li marchiamo spediti.
   const ordini: any[] = []
   let cursor: string | null = null
   let completa = false   // true se abbiamo scaricato TUTTI gli ordini aperti (nessuna pagina troncata)
-  for (let page = 0; page < 3; page++) {
+  // Tetto a 30 pagine (~3000 ordini nella finestra date scelta): prima era 3 (300) e chi aveva piu' di
+  // 300 ordini modificati nella finestra ne perdeva una parte. Il flag `completa` resta corretto (true
+  // solo se non c'e' piu' pagina), quindi la chiusura degli archiviati non fa falsi positivi.
+  for (let page = 0; page < 30; page++) {
     const data: any = await shopifyGraphQL(shop, token, `
       query($cursor: String){
         orders(first: 100, after: $cursor, query: "status:open ${filtroData}", sortKey: UPDATED_AT, reverse: true){

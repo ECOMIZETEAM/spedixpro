@@ -7,24 +7,41 @@ export async function sincronizzaOrdiniTiktok(db: any, integr: any): Promise<{ l
   const shopCipher = cred.shop_cipher
   if (!shopCipher) throw new Error('TikTok: shop non autorizzato, ricollega il negozio')
 
-  // 1) Cerco gli ordini da evadere
-  const search = await tiktokRequest('POST', '/order/202309/orders/search', {
-    token, shopCipher,
-    query: { page_size: 50, sort_field: 'create_time', sort_order: 'DESC' },
-    body: { order_status: 'AWAITING_SHIPMENT' },
-  })
-  const lista: any[] = search?.data?.orders || []
+  // 1) Cerco gli ordini da evadere, PAGINATI. Prima si leggeva SOLO la 1a pagina (max 50): gli ordini
+  // oltre il 50° si PERDEVANO. Ora scorro con next_page_token, con dedup di sicurezza (se il token non
+  // avanzasse, il ciclo si ferma senza doppioni ne' loop).
+  const lista: any[] = []
+  const vistiTk = new Set<string>()
+  let pageToken = ''
+  for (let page = 0; page < 40; page++) {
+    const query: any = { page_size: 50, sort_field: 'create_time', sort_order: 'DESC' }
+    if (pageToken) query.page_token = pageToken
+    const search = await tiktokRequest('POST', '/order/202309/orders/search', {
+      token, shopCipher, query, body: { order_status: 'AWAITING_SHIPMENT' },
+    })
+    const batch: any[] = search?.data?.orders || []
+    const nuovi = batch.filter((o: any) => { const id = String(o.id || ''); if (!id || vistiTk.has(id)) return false; vistiTk.add(id); return true })
+    lista.push(...nuovi)
+    pageToken = search?.data?.next_page_token || ''
+    if (!pageToken || nuovi.length === 0) break
+  }
   if (!lista.length) {
     await db.from('integrazioni').update({ ultimo_sync: new Date().toISOString(), ordini_totali: 0, errore: null, stato: 'attivo' }).eq('id', integr.id)
     return { letti: 0, importati: 0 }
   }
 
-  // 2) Dettaglio ordini (indirizzo destinatario + line items completi)
+  // 2) Dettaglio ordini (indirizzo destinatario + line items completi). L'endpoint ha un tetto di ids per
+  // chiamata: li richiedo a BLOCCHI di 50 (una sola chiamata con TUTTI gli id troncava i dettagli oltre
+  // il primo blocco quando gli ordini superano la cinquantina).
   const ids = lista.map(o => o.id).filter(Boolean)
   let dettagli: any[] = lista
   try {
-    const det = await tiktokRequest('GET', '/order/202309/orders', { token, shopCipher, query: { ids: ids.join(',') } })
-    if (det?.data?.orders?.length) dettagli = det.data.orders
+    const acc: any[] = []
+    for (let i = 0; i < ids.length; i += 50) {
+      const det = await tiktokRequest('GET', '/order/202309/orders', { token, shopCipher, query: { ids: ids.slice(i, i + 50).join(',') } })
+      if (det?.data?.orders?.length) acc.push(...det.data.orders)
+    }
+    if (acc.length) dettagli = acc
   } catch { /* uso i dati della search */ }
 
   let importati = 0
@@ -44,7 +61,9 @@ export async function sincronizzaOrdiniTiktok(db: any, integr: any): Promise<{ l
       provincia: parti.provincia || '',
       cap: addr.postal_code || addr.zipcode || '',
       paese: addr.region_code || 'IT',
-      email: '',
+      // TikTok maschera l'email del compratore (non la espone): placeholder valido per non far fallire
+      // l'etichetta dei corrieri con email obbligatoria. Il tracking al cliente lo fa il nostro sistema.
+      email: addr.email || 'noreply@moovexpress.com',
       telefono: addr.phone_number || '',
     }
     const articoli = (o.line_items || []).map((li: any) => ({
