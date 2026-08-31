@@ -73,30 +73,15 @@ export default function ReportSpedizioniPage() {
 
     if (formato === 'xlsx' || formato === 'csv') {
       const { utils, writeFile } = await import('xlsx')
-      const rows = spedizioni.map((s: any) => ({
-        'N. Spedizione': s.numero,
-        'Cliente': s.clienti?.ragione_sociale || s.mitt_nome,
-        'Destinatario': s.dest_nome,
-        'Città': s.dest_citta,
-        'Provincia': s.dest_provincia,
-        'CAP': s.dest_cap,
-        'Paese': s.dest_paese,
-        'Peso (kg)': s.peso_reale,
-        'Colli': s.colli,
-        'Contrassegno (€)': s.contrassegno,
-        'Data': new Date(s.created_at).toLocaleDateString('it-IT'),
-        'Stato': s.stato,
-        'Rettifica (€)': s.rettifica || 0,
-        'Prezzo Cliente (€)': s.costo_totale,
-        'Prezzo Corriere (€)': s.prezzo_corriere != null ? s.prezzo_corriere : '',
-        'Margine (€)': s.prezzo_corriere != null ? Math.round((Number(s.costo_totale || 0) - Number(s.prezzo_corriere || 0)) * 100) / 100 : '',
-        'Tracking': s.tracking_number,
-      }))
-      // Riga totali: SOLO Prezzo Cliente, Prezzo Corriere e Margine (non le singole voci)
+      // COLONNE DEL TEMPLATE MASTER (34) + nostre extra (Margine/Rettifica). Builder condiviso col
+      // portale cliente, che pero' NON include prezzo_corriere/Margine/Rettifica (affari del master).
+      const { righeReportSpedizioni } = await import('@/lib/report-spedizioni-cols')
+      const rows = righeReportSpedizioni(spedizioni, { master: true })
+      // Riga totali: costo cliente, prezzo corriere e margine (chiavi = colonne del template).
       const totCli = spedizioni.reduce((a: number, s: any) => a + Number(s.costo_totale || 0), 0)
       const totCor = spedizioni.reduce((a: number, s: any) => a + Number(s.prezzo_corriere || 0), 0)
       rows.push({} as any)
-      rows.push({ 'Stato': 'TOTALE', 'Prezzo Cliente (€)': Math.round(totCli * 100) / 100, 'Prezzo Corriere (€)': Math.round(totCor * 100) / 100, 'Margine (€)': Math.round((totCli - totCor) * 100) / 100 } as any)
+      rows.push({ status: 'TOTALE', costo_cliente: Math.round(totCli * 100) / 100, costo: Math.round(totCli * 100) / 100, prezzo_corriere: Math.round(totCor * 100) / 100, Margine: Math.round((totCli - totCor) * 100) / 100 } as any)
       const ws = utils.json_to_sheet(rows)
       const wb = utils.book_new()
       utils.book_append_sheet(wb, ws, 'Spedizioni')

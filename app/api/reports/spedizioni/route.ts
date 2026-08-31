@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
   const agIds = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
   const buildBase = () => {
     let q = db.from('spedizioni')
-      .select(`${SPED_COLS}, clienti(ragione_sociale,agente), corrieri(id,nome_contratto)`)
+      .select(`${SPED_COLS}, clienti(ragione_sociale,agente), corrieri(id,nome_contratto), distinte(data,bordero_id)`)
       .order('created_at', { ascending: false }).order('id', { ascending: false })
     if (subtreeSel) q = q.in('master_id', subtreeSel)
     else if (clienteId) q = q.eq('cliente_id', clienteId).eq('master_id', mine)
@@ -166,6 +166,19 @@ export async function GET(req: NextRequest) {
     for (const lid of Array.from(new Set(Array.from(parentListinoOf.values()).filter(Boolean))) as string[]) calcPerListino.set(lid, await creaCalcolatoreListinoCliente(adminDb, lid))
   }
 
+  // DATA CONSEGNA (colonna del report): per le spedizioni CONSEGNATE, la data_evento piu' recente dei
+  // tracking_events (l'evento di consegna e' l'ultimo). Le non-consegnate restano senza data.
+  const consegnaMap = new Map<string, string>()
+  const deliveredIds = (spedizioni || []).filter((s: any) => /conseg/i.test(s.stato || '') && !/in[\s_]?conseg/i.test(s.stato || '')).map((s: any) => s.id)
+  for (let i = 0; i < deliveredIds.length; i += 300) {
+    const { data: ev } = await adminDb.from('tracking_events').select('spedizione_id,data_evento').in('spedizione_id', deliveredIds.slice(i, i + 300))
+    for (const e of (ev || [])) {
+      const d = (e as any).data_evento; if (!d) continue
+      const p = consegnaMap.get((e as any).spedizione_id)
+      if (!p || d > p) consegnaMap.set((e as any).spedizione_id, d)
+    }
+  }
+
   const rows = (spedizioni || []).map((s: any) => {
     // PREZZO CORRIERE = quello che ho pagato IO (mio movimento reale). Per l'agente = suo listino;
     // se il listino agente non copre quel corriere, ripiego sul costo reale (non 0, che gonfierebbe il margine).
@@ -231,6 +244,7 @@ export async function GET(req: NextRequest) {
       costo_totale: prezzo_cliente,          // "Prezzo Cliente" nel report (già comprensivo della rettifica)
       prezzo_corriere,                        // "Prezzo Corriere" (quello che pago io)
       rettifica,                              // colonna "Rettifica" (aumento/variazione di prezzo)
+      data_consegna: consegnaMap.get(s.id) || null,   // colonna "Data_consegna" del report
       dett_corriere: null,
       cli_nolo: calcAgente ? (prezzo_corriere ?? 0) : (eCliente ? 0 : Number(s.costo_spedizione || 0)),
       cli_supplementi: 0,

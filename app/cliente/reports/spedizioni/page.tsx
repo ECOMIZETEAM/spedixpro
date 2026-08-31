@@ -68,25 +68,13 @@ export default function ReportSpedizioniPage() {
 
     if (formato === 'xlsx' || formato === 'csv') {
       const { utils, writeFile } = await import('xlsx')
-      const rows = spedizioni.map((s: any) => ({
-        'N. Spedizione': s.numero,
-        'Cliente': s.clienti?.ragione_sociale || s.mitt_nome,
-        'Destinatario': s.dest_nome,
-        'Città': s.dest_citta,
-        'Provincia': s.dest_provincia,
-        'CAP': s.dest_cap,
-        'Paese': s.dest_paese,
-        'Peso (kg)': s.peso_reale,
-        'Colli': s.colli,
-        'Contrassegno (€)': s.contrassegno,
-        'Assicurazione (€)': s.assicurazione,
-        'Data': new Date(s.created_at).toLocaleDateString('it-IT'),
-        'Stato': s.stato,
-        'Extra (servizi accessori)': (s.servizi_accessori||[]).map((e:any)=>`${e.nome}: € ${Number(e.importo||0).toFixed(2)}`).join('; '),
-        'Tot. Extra (€)': (s.servizi_accessori||[]).reduce((a:number,e:any)=>a+Number(e.importo||0),0) || '',
-        'Totale (€)': s.costo_totale,
-        'Tracking': s.tracking_number,
-      }))
+      // STESSE colonne del report master (builder condiviso), MA con master:false: niente prezzo_corriere,
+      // Margine, Rettifica — quelli sono affari del master, il cliente non li deve vedere.
+      const { righeReportSpedizioni } = await import('@/lib/report-spedizioni-cols')
+      const rows = righeReportSpedizioni(spedizioni, { master: false })
+      const totCli = spedizioni.reduce((a: number, s: any) => a + Number(s.costo_totale || 0), 0)
+      rows.push({} as any)
+      rows.push({ status: 'TOTALE', costo_cliente: Math.round(totCli * 100) / 100, costo: Math.round(totCli * 100) / 100 } as any)
       const ws = utils.json_to_sheet(rows)
       const wb = utils.book_new()
       utils.book_append_sheet(wb, ws, 'Spedizioni')

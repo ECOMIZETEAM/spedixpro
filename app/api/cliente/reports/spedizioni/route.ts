@@ -21,7 +21,10 @@ export async function GET(req: NextRequest) {
       // costo_spedizione (il costo del MASTER, quindi il suo guadagno), raw_response (dati del
       // provider) e etichetta_url (154 kB di PDF per riga). La pagina non li mostrava, ma
       // bastava aprire gli strumenti per sviluppatori.
-      .select(`${SPED_COLS_CLIENTE}, clienti(ragione_sociale)`)
+      // corrieri(nome_contratto) e distinte(data,bordero_id) servono al report (colonne Corriere/
+      // Contratto/Data_distinta/bda). NON esce mai il costo del master: SPED_COLS_CLIENTE gia' toglie
+      // costo_spedizione, e non si joina niente che riveli il provider (nome_contratto e' il brand).
+      .select(`${SPED_COLS_CLIENTE}, clienti(ragione_sociale), corrieri(nome_contratto), distinte(data,bordero_id)`)
       .eq('cliente_id', clienteId)
       .order('created_at', { ascending: false })
     if (stato) q = q.eq('stato', stato)
@@ -33,5 +36,18 @@ export async function GET(req: NextRequest) {
     return q
   }
   // Report COMPLETO a blocchi (il DB tronca a 1000/query). Nessun limite pratico.
-  return NextResponse.json(await fetchAll(buildBase))
+  const spedizioni = await fetchAll(buildBase)
+  // DATA CONSEGNA (colonna del report): data_evento piu' recente per le CONSEGNATE. Via RLS (supabase):
+  // il cliente legge solo gli eventi delle proprie spedizioni.
+  const consegnaMap = new Map<string, string>()
+  const deliveredIds = (spedizioni || []).filter((s: any) => /conseg/i.test(s.stato || '') && !/in[\s_]?conseg/i.test(s.stato || '')).map((s: any) => s.id)
+  for (let i = 0; i < deliveredIds.length; i += 300) {
+    const { data: ev } = await supabase.from('tracking_events').select('spedizione_id,data_evento').in('spedizione_id', deliveredIds.slice(i, i + 300))
+    for (const e of (ev || [])) {
+      const d = (e as any).data_evento; if (!d) continue
+      const p = consegnaMap.get((e as any).spedizione_id)
+      if (!p || d > p) consegnaMap.set((e as any).spedizione_id, d)
+    }
+  }
+  return NextResponse.json((spedizioni || []).map((s: any) => ({ ...s, data_consegna: consegnaMap.get(s.id) || null })))
 }
