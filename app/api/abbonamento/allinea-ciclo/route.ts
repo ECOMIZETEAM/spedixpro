@@ -146,12 +146,14 @@ export async function POST(req: NextRequest) {
   const s = stripeClient()
   const corpo = await req.json().catch(() => ({} as any))
   const escludiManuale: Set<string> = new Set(Array.isArray(corpo?.escludi) ? corpo.escludi : [])
-  const limite = Number.isFinite(corpo?.limite) ? Math.max(0, Number(corpo.limite)) : Infinity  // CANARY
+  const limite = Number.isFinite(corpo?.limite) ? Math.max(0, Number(corpo.limite)) : Infinity  // CANARY per numero
+  const solo: string | null = corpo?.solo ? String(corpo.solo) : null                            // CANARY mirato: un master scelto
 
   const { righe, pausa, mese, CAMPAGNA } = await analizza(g.admin, s, g.rootId)
   const fatti: any[] = []
   let tentati = 0
   for (const r of righe) {
+    if (solo && r.master_id !== solo) continue                 // canary mirato: si esegue SOLO il master scelto
     if (r.escluso) { fatti.push({ nome: r.nome, esito: 'saltato_' + r.escluso }); continue }
     if (escludiManuale.has(r.master_id)) { fatti.push({ nome: r.nome, esito: 'escluso_manuale' }); continue }
     if (r.gia_al_primo) { fatti.push({ nome: r.nome, esito: 'gia_al_primo' }); continue }

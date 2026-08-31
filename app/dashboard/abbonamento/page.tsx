@@ -126,15 +126,16 @@ export default function AbbonamentoPage() {
     const d = await fetch('/api/abbonamento/allinea-ciclo').then(r=>r.json()).catch(()=>({error:'Errore nel controllo'}))
     setAllinea(d); setAllineaAzione('')
   }
-  async function applicaAllinea(limite?:number) {
+  async function applicaAllinea(opts?:{solo?:string, nome?:string}) {
+    const solo = opts?.solo
     const attivi = (allinea?.righe||[]).filter((r:any)=>!r.gia_al_primo && !r.gia_pagato && !r.escluso)
-    if (!await dialog.confirm({ title: limite?`Prova su ${limite} master?`:`Incasso ${allinea?.mese_una_tantum} e pausa al ${allinea?.pausa_fino_al}?`,
-      message: limite
-        ? `CANARY: eseguo solo sul primo master, così verifichiamo su Stripe che addebito e pausa siano giusti PRIMA di toccare gli altri ${attivi.length-1}. Addebita canone + conguaglio e mette in pausa fino al ${allinea?.pausa_fino_al}.`
+    if (!await dialog.confirm({ title: solo?`Prova su ${opts?.nome}?`:`Incasso ${allinea?.mese_una_tantum} e pausa al ${allinea?.pausa_fino_al}?`,
+      message: solo
+        ? `CANARY su ${opts?.nome}: addebita canone + conguaglio sulla sua carta salvata e lo mette in pausa fino al ${allinea?.pausa_fino_al}. SOLO lui — così lo verifichiamo su Stripe prima di toccare gli altri.`
         : `Addebito SUBITO ${attivi.length} master (canone + conguaglio, tot € ${Number(allinea?.totale_addebito||0).toFixed(2)}) e metto l'abbonamento in pausa fino al ${allinea?.pausa_fino_al}, poi rinnovano il 1°. Di cui ~€ ${Number(allinea?.totale_overlap||0).toFixed(2)} su giorni già coperti (doppio addebito, accettato). ${(allinea?.esclusi||[]).length} esclusi. Procedere?`,
-      confirmText: limite?'Prova su 1':'Addebita e allinea', danger:true })) return
-    setAllineaAzione(limite?'canary':'applico'); setMsg('')
-    const d = await fetch('/api/abbonamento/allinea-ciclo', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(limite?{limite}:{}) }).then(r=>r.json()).catch(()=>({error:'errore'}))
+      confirmText: solo?'Prova questo':'Addebita e allinea', danger:true })) return
+    setAllineaAzione(solo||'applico'); setMsg('')
+    const d = await fetch('/api/abbonamento/allinea-ciclo', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(solo?{solo}:{}) }).then(r=>r.json()).catch(()=>({error:'errore'}))
     setAllineaAzione('')
     if (d.error) { setMsg(d.error); return }
     setMsg(`✓ Fatti ${d.n_fatti} master · pausa fino al ${d.pausa_fino_al}${d.non_incassati?.length?` · ⚠️ ${d.non_incassati.length} NON incassati: ${d.non_incassati.join(', ')}`:''}${d.errori?.length?` · ${d.errori.length} errori`:''}.`)
@@ -285,7 +286,9 @@ export default function AbbonamentoPage() {
                           {r.escluso ? <span style={{fontSize:'11px',color:'#b45309'}}>fuori · {r.escluso.replace(/_/g,' ')}</span>
                             : r.gia_al_primo ? <span style={{fontSize:'11px',color:'#16a34a'}}>già al 1°</span>
                             : r.gia_pagato ? <span style={{fontSize:'11px',color:'#16a34a'}}>già pagato · intatto</span>
-                            : <span style={{fontSize:'11px',color:'#2563eb'}}>addebito + pausa</span>}
+                            : <span style={{fontSize:'11px',color:'#2563eb',display:'inline-flex',alignItems:'center',gap:'7px'}}>addebito + pausa
+                                <button onClick={()=>applicaAllinea({solo:r.master_id, nome:r.nome})} disabled={!!allineaAzione} title="Fai partire SOLO questo master, per verificarlo su Stripe" style={{fontSize:'10px',padding:'2px 8px',border:'1px solid #fed7aa',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',cursor:'pointer',fontWeight:700}}>{allineaAzione===r.master_id?'…':'🧪 prova'}</button>
+                              </span>}
                         </td>
                       </tr>
                     ))}
@@ -296,7 +299,6 @@ export default function AbbonamentoPage() {
                 <div style={{fontSize:'12.5px',color:'#555'}}>Addebito ora <b style={{color:'#1a1a1a'}}>€ {Number(allinea.totale_addebito||0).toFixed(2)}</b> · di cui ~<b style={{color:'#dc2626'}}>€ {Number(allinea.totale_overlap||0).toFixed(2)}</b> già coperti · pausa fino al <b>{allinea.pausa_fino_al}</b>{(allinea.esclusi||[]).length?<> · {allinea.esclusi.length} esclusi</>:''}</div>
                 <div style={{display:'flex',gap:'8px'}}>
                   <button onClick={caricaAllinea} disabled={!!allineaAzione} style={{background:'#fff',color:'#555',border:'1px solid #d1d5db',borderRadius:'6px',padding:'9px 16px',fontSize:'13px',fontWeight:600,cursor:'pointer'}}>{allineaAzione==='carico'?'…':'Ricontrolla'}</button>
-                  <button onClick={()=>applicaAllinea(1)} disabled={!!allineaAzione} title="Esegue su 1 solo master per verificarlo su Stripe prima del resto" style={{background:'#fff',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>{allineaAzione==='canary'?'Provo…':'Prova su 1'}</button>
                   <button onClick={()=>applicaAllinea()} disabled={!!allineaAzione} style={{background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',padding:'9px 18px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>{allineaAzione==='applico'?'Eseguo…':'Addebita e allinea tutti'}</button>
                 </div>
               </div>
