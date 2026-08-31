@@ -58,7 +58,13 @@ function meseCoperto(pausa: number): string {
 async function conguaglioInSospeso(s: any, customer: string): Promise<number> {
   try {
     const items = await s.invoiceItems.list({ customer, limit: 50 })
-    return items.data.filter((it: any) => !it.invoice).reduce((t: number, it: any) => t + (it.amount || 0), 0) / 100
+    // SOLO i conguagli VERI (tipo 'conguaglio'), non ogni voce pending. Il canone una-tantum e' anch'esso
+    // una voce pending: se un tentativo precedente e' fallito (fattura uscita vuota) la sua voce resta
+    // orfana e, sommata qui, veniva contata DUE volte — canone (dal prezzo) + "conguaglio" (la voce
+    // orfana) — gonfiando l'anteprima a 278 su un addebito reale di 139. Il canone lo conto a parte.
+    return items.data
+      .filter((it: any) => !it.invoice && it.metadata?.tipo === 'conguaglio')
+      .reduce((t: number, it: any) => t + (it.amount || 0), 0) / 100
   } catch { return 0 }
 }
 
@@ -175,6 +181,12 @@ export async function POST(req: NextRequest) {
         const inv = await s.invoices.create({
           customer: r.customer, collection_method: 'charge_automatically', auto_advance: false,
           default_payment_method: r.pm || undefined, metadata: { campagna: CAMPAGNA, master_id: r.master_id },
+          // OBBLIGATORIO: dall'API 2026-07 di Stripe questo parametro default a 'exclude' (prima era
+          // 'include'). Omettendolo la fattura nasceva VUOTA — la voce del canone (e i conguagli in
+          // sospeso) restava pending, finalizzava/pagava 0€ e il canary "non incassava" (il master
+          // non veniva messo in pausa). Con 'include' la fattura raccoglie il canone una-tantum + i
+          // conguagli pending: e' esattamente il "mese + conguaglio" che vogliamo addebitare.
+          pending_invoice_items_behavior: 'include',
         })
         if (inv.id) await s.invoices.finalizeInvoice(inv.id)
         try { const p = await s.invoices.pay(inv.id!, { off_session: true, payment_method: r.pm || undefined }); incassato = p.status === 'paid' } catch { incassato = false }
