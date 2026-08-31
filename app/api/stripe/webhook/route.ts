@@ -289,9 +289,16 @@ export async function POST(req: NextRequest) {
         // registrano i pagamenti con bonifico (139 €, non 113,93), altrimenti gli incassi della
         // pagina Abbonamenti sarebbero la somma di due grandezze diverse.
         const incassato = Number(inv.amount_paid ?? inv.total ?? 0) / 100
+        // MESE DI COMPETENZA. Per la una-tantum di allineamento e' il mese che COPRE (metadata.mese
+        // della riga canone), NON la data di creazione della fattura. Le una-tantum partono a cavallo
+        // della mezzanotte del 1° (creazione 31/08 22:xx UTC = 1/09 in Italia): con la sola data di
+        // creazione (UTC, server) finivano contate in AGOSTO e "Pagamenti di settembre" restava vuoto
+        // pur avendo incassato. I rinnovi normali non hanno quella riga -> restano sul mese della fattura.
+        const rigaUna = inv.lines?.data?.find((l: any) => l.metadata?.tipo === 'canone_una_tantum')
+        const meseIncasso = rigaUna?.metadata?.mese || meseCorrente(new Date(Number(inv.created || 0) * 1000))
         await admin.from('abbonamenti_pagamenti').upsert({
           master_id: m.id, root_id: root, piano: piano?.id || m.abbonamento_piano || null,
-          mese: meseCorrente(new Date(Number(inv.created || 0) * 1000)),
+          mese: meseIncasso,
           importo: incassato, pagato: true, pagato_il: new Date(Number(inv.created || 0) * 1000).toISOString(),
           metodo: 'carta', stripe_invoice_id: inv.id,
         }, { onConflict: 'stripe_invoice_id' })

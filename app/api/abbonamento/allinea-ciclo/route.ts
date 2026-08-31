@@ -57,13 +57,21 @@ function meseCoperto(pausa: number): string {
 
 async function conguaglioInSospeso(s: any, customer: string): Promise<number> {
   try {
-    const items = await s.invoiceItems.list({ customer, limit: 50 })
-    // SOLO i conguagli VERI (tipo 'conguaglio'), non ogni voce pending. Il canone una-tantum e' anch'esso
-    // una voce pending: se un tentativo precedente e' fallito (fattura uscita vuota) la sua voce resta
-    // orfana e, sommata qui, veniva contata DUE volte — canone (dal prezzo) + "conguaglio" (la voce
-    // orfana) — gonfiando l'anteprima a 278 su un addebito reale di 139. Il canone lo conto a parte.
-    return items.data
-      .filter((it: any) => !it.invoice && it.metadata?.tipo === 'conguaglio')
+    const items = (await s.invoiceItems.list({ customer, limit: 50 })).data
+      .filter((it: any) => it.metadata?.tipo === 'conguaglio')   // SOLO i conguagli veri, MAI il canone
+    // (il canone si conta a parte: sommarlo qui lo raddoppiava — anteprima 278 su addebito reale 139.)
+    if (!items.length) return 0
+    // Un conguaglio e' DOVUTO se e' in sospeso (nessuna fattura) O su una fattura ancora NON pagata
+    // (open/draft): dopo un tentativo fallito il conguaglio resta agganciato alla fattura APERTA -> non e'
+    // piu' 'pending' ma e' ancora da incassare (era il caso di spedizioni 2000: 97,13 sulla fattura aperta
+    // da 437,13, che in tabella sparivano). Quelli su fattura gia' PAGATA non si contano: gia' incassati.
+    const statoFatt = new Map<string, string>()
+    if (items.some((it: any) => it.invoice)) {
+      const invs = await s.invoices.list({ customer, limit: 20 })
+      for (const iv of invs.data as any[]) statoFatt.set(iv.id, iv.status)
+    }
+    return items
+      .filter((it: any) => !it.invoice || ['open', 'draft', 'uncollectible'].includes(statoFatt.get(idDi(it.invoice) || '') || ''))
       .reduce((t: number, it: any) => t + (it.amount || 0), 0) / 100
   } catch { return 0 }
 }
