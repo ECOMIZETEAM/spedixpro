@@ -132,7 +132,7 @@ export default function AbbonamentoPage() {
     if (!await dialog.confirm({ title: solo?`Prova su ${opts?.nome}?`:`Incasso ${allinea?.mese_una_tantum} e pausa al ${allinea?.pausa_fino_al}?`,
       message: solo
         ? `CANARY su ${opts?.nome}: addebita canone + conguaglio sulla sua carta salvata e lo mette in pausa fino al ${allinea?.pausa_fino_al}. SOLO lui — così lo verifichiamo su Stripe prima di toccare gli altri.`
-        : `Addebito SUBITO ${attivi.length} master (canone + conguaglio, tot € ${Number(allinea?.totale_addebito||0).toFixed(2)}) e metto l'abbonamento in pausa fino al ${allinea?.pausa_fino_al}, poi rinnovano il 1°. Di cui ~€ ${Number(allinea?.totale_overlap||0).toFixed(2)} su giorni già coperti (doppio addebito, accettato). ${(allinea?.esclusi||[]).length} esclusi. Procedere?`,
+        : `Addebito SUBITO ${attivi.length} master (canone + conguaglio, tot € ${Number(allinea?.totale_addebito||0).toFixed(2)}) e metto l'abbonamento in pausa fino al ${allinea?.pausa_fino_al}, poi rinnovano il 1°. ${(allinea?.esclusi||[]).length} esclusi. Se una carta rifiuta, quel master resta sul suo ciclo (congelamento normale). Procedere?`,
       confirmText: solo?'Prova questo':'Addebita e allinea', danger:true })) return
     setAllineaAzione(solo||'applico'); setMsg('')
     const d = await fetch('/api/abbonamento/allinea-ciclo', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(solo?{solo}:{}) }).then(r=>r.json()).catch(()=>({error:'errore'}))
@@ -271,7 +271,7 @@ export default function AbbonamentoPage() {
               <div style={{overflowX:'auto' as const,marginTop:'12px'}}>
                 <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
                   <thead><tr style={{background:'#fafafa'}}>
-                    {['Master','Canone','Conguaglio','Addebito ora','Di cui già coperto','Pagato fino a','Stato'].map(h=>(<th key={h} style={{textAlign:'left' as const,padding:'8px 12px',fontSize:'11px',fontWeight:600,color:'#777',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap' as const}}>{h}</th>))}
+                    {['Master','Canone','Conguaglio','Addebito ora','Pagato fino a','Stato'].map(h=>(<th key={h} style={{textAlign:'left' as const,padding:'8px 12px',fontSize:'11px',fontWeight:600,color:'#777',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap' as const}}>{h}</th>))}
                   </tr></thead>
                   <tbody>
                     {allinea.righe.map((r:any)=>(
@@ -280,7 +280,6 @@ export default function AbbonamentoPage() {
                         <td style={{padding:'8px 12px',whiteSpace:'nowrap' as const}}>€ {Number(r.canone).toFixed(2)}</td>
                         <td style={{padding:'8px 12px',whiteSpace:'nowrap' as const,color:r.conguaglio>0?'#ea580c':'#999'}}>{r.conguaglio>0?'€ '+Number(r.conguaglio).toFixed(2):'—'}</td>
                         <td style={{padding:'8px 12px',fontWeight:700,whiteSpace:'nowrap' as const}}>{(r.escluso||r.gia_al_primo||r.gia_pagato)?'—':'€ '+Number(r.addebito).toFixed(2)}</td>
-                        <td style={{padding:'8px 12px',whiteSpace:'nowrap' as const,color:r.overlap_importo>0?'#dc2626':'#999'}}>{(!r.escluso&&!r.gia_al_primo&&!r.gia_pagato&&r.overlap_importo>0)?`~€ ${Number(r.overlap_importo).toFixed(2)} (${r.overlap_giorni}g)`:'—'}</td>
                         <td style={{padding:'8px 12px',color:'#555',whiteSpace:'nowrap' as const}}>{r.rinnovo_attuale||'—'}</td>
                         <td style={{padding:'8px 12px',whiteSpace:'nowrap' as const}}>
                           {r.escluso ? <span style={{fontSize:'11px',color:'#b45309'}}>fuori · {r.escluso.replace(/_/g,' ')}</span>
@@ -296,7 +295,7 @@ export default function AbbonamentoPage() {
                 </table>
               </div>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'10px',marginTop:'12px'}}>
-                <div style={{fontSize:'12.5px',color:'#555'}}>Addebito ora <b style={{color:'#1a1a1a'}}>€ {Number(allinea.totale_addebito||0).toFixed(2)}</b> · di cui ~<b style={{color:'#dc2626'}}>€ {Number(allinea.totale_overlap||0).toFixed(2)}</b> già coperti · pausa fino al <b>{allinea.pausa_fino_al}</b>{(allinea.esclusi||[]).length?<> · {allinea.esclusi.length} esclusi</>:''}</div>
+                <div style={{fontSize:'12.5px',color:'#555'}}>Addebito ora <b style={{color:'#1a1a1a'}}>€ {Number(allinea.totale_addebito||0).toFixed(2)}</b> · pausa fino al <b>{allinea.pausa_fino_al}</b>, poi rinnovo il 1°{(allinea.esclusi||[]).length?<> · {allinea.esclusi.length} esclusi</>:''}</div>
                 <div style={{display:'flex',gap:'8px'}}>
                   <button onClick={caricaAllinea} disabled={!!allineaAzione} style={{background:'#fff',color:'#555',border:'1px solid #d1d5db',borderRadius:'6px',padding:'9px 16px',fontSize:'13px',fontWeight:600,cursor:'pointer'}}>{allineaAzione==='carico'?'…':'Ricontrolla'}</button>
                   <button onClick={()=>applicaAllinea()} disabled={!!allineaAzione} style={{background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',padding:'9px 18px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>{allineaAzione==='applico'?'Eseguo…':'Addebita e allinea tutti'}</button>
