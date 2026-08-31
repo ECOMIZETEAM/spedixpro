@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json()
-  const { spedizioneId, istruzioni, azione } = body
+  const { spedizioneId, istruzioni, azione, releaseAction } = body
 
   // Il master gestisce le giacenze di TUTTA la sua rete (non solo le proprie): autorizzo sul
   // sotto-albero e uso l'admin per leggere/scrivere cross-master (come per la visibilità in GET).
@@ -131,8 +131,12 @@ export async function POST(req: NextRequest) {
         const stocks = await spediamoproSearchStocks(cred.authcode, String(code))
         const attivo = (stocks || []).find((st: any) => Number(st.status) === 1 && (!spid || Number(st.shipmentId) === Number(spid)))
         if (attivo?.id) {
-          // releaseAction 1 = riconsegna allo stesso indirizzo (default). instructions opzionale.
-          await spediamoproReleaseStock(cred.authcode, Number(attivo.id), 1, istruzioni ? { instructions: istruzioni } : {})
+          // releaseAction: 1 = riconsegna stesso indirizzo (default), 3 = reso al mittente. Serve al
+          // "Ri-svincola" del Controllo Giacenze: le re-giacenze (2° fallimento consegna) spesso vanno a
+          // RESO. instructions opzionale. Nota: l'addebito e' gia' stato fatto (guard sotto) -> il
+          // ri-svincolo non ri-addebita.
+          const ra = Number(releaseAction) === 3 ? 3 : 1
+          await spediamoproReleaseStock(cred.authcode, Number(attivo.id), ra, istruzioni ? { instructions: istruzioni } : {})
         }
       } catch (e) { console.error('Errore svincolo SpediamoPro:', e) }
     } else if (tipoCorr === 'easyparcel' && cred?.apikey) {

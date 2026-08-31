@@ -19,7 +19,7 @@ export async function GET(_req: NextRequest) {
   const rows: any[] = []
   for (let off = 0; ; off += 1000) {
     const { data } = await admin.from('spedizioni')
-      .select('numero,tracking_number,giacenza_stato,giacenza_data,giacenza_verifica_esito,giacenza_verifica_at,giacenza_motivo,corrieri(tipo,nome_contratto),clienti(ragione_sociale),masters:master_id(nome)')
+      .select('id,numero,tracking_number,giacenza_stato,giacenza_data,giacenza_verifica_esito,giacenza_verifica_at,giacenza_motivo,corrieri(tipo,nome_contratto),clienti(ragione_sociale),masters:master_id(nome)')
       .eq('giacenza_stato', 'svincolata')
       .order('giacenza_verifica_at', { ascending: false, nullsFirst: false })
       .range(off, off + 999)
@@ -45,6 +45,7 @@ export async function GET(_req: NextRequest) {
     else if (es === 'ferma') {
       ferma++; perCorriere[prov].ferma++
       problemi.push({
+        id: r.id, corriere_tipo: r.corrieri?.tipo,   // per il bottone "Ri-svincola" (solo SpediamoPro ha il re-release da UI)
         ldv: r.numero || r.tracking_number, corriere: prov,
         cliente: r.clienti?.ragione_sociale || '—', master: r.masters?.nome || '—',
         in_giacenza_dal: r.giacenza_data, controllata: r.giacenza_verifica_at, motivo: r.giacenza_motivo || null,

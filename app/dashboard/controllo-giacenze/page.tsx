@@ -8,6 +8,7 @@ export default function ControlloGiacenzePage() {
   const [loading, setLoading] = useState(true)
   const [controllando, setControllando] = useState(false)
   const [msg, setMsg] = useState<string>('')
+  const [busy, setBusy] = useState<string | null>(null)
 
   async function carica() {
     setLoading(true)
@@ -24,6 +25,24 @@ export default function ControlloGiacenzePage() {
     if (r && !r.error) setMsg(`Giro fatto: ${r.controllate} controllate · ${r.ok} ok · ${r.ferme} ferme${r.saltate ? ` · ${r.saltate} troppo recenti (riprovo dopo)` : ''}.`)
     else setMsg(r?.error || 'Errore nel controllo')
     setControllando(false)
+    await carica()
+  }
+
+  // RI-SVINCOLA una giacenza ancora "ferma": ri-chiede a SpediamoPro il rilascio dello stock ANCORA
+  // ATTIVO (le re-giacenze = 2° fallimento consegna hanno un nuovo stock che il sistema non gestiva).
+  // Riusa POST /api/giacenze azione='svincola' (trova lo stock attivo + rilascia); la guardia
+  // giacenza_addebito_effettuato evita il doppio addebito. releaseAction 1=riconsegna, 3=reso.
+  async function riSvincola(p: any, releaseAction: number) {
+    if (!p.id || busy) return
+    const che = releaseAction === 3 ? 'RESO al mittente' : 'RICONSEGNA'
+    if (!confirm(`Ri-svincolare ${p.ldv} come ${che}?\n\nRichiede di nuovo a SpediamoPro il rilascio dello stock ancora attivo (2ª giacenza). NON ri-addebita (già addebitata).`)) return
+    setBusy(p.id); setMsg('')
+    try {
+      const r = await fetch('/api/giacenze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spedizioneId: p.id, azione: 'svincola', releaseAction }) })
+      const j = await r.json().catch(() => ({}))
+      setMsg(j?.success ? `Ri-svincolata ${p.ldv} come ${che}: il corriere la rilavora — ricontrolla tra qualche ora.` : (j?.error || 'Ri-svincolo non riuscito'))
+    } catch { setMsg('Errore di rete') }
+    setBusy(null)
     await carica()
   }
 
@@ -89,7 +108,7 @@ export default function ControlloGiacenzePage() {
             </div>
             {d.problemi?.length > 0 && (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead><tr><th style={th}>LDV</th><th style={th}>Corriere</th><th style={th}>Cliente</th><th style={th}>Master</th><th style={th}>Controllata</th></tr></thead>
+                <thead><tr><th style={th}>LDV</th><th style={th}>Corriere</th><th style={th}>Cliente</th><th style={th}>Master</th><th style={th}>Controllata</th><th style={th}>Motivo</th><th style={th}>Azione</th></tr></thead>
                 <tbody>
                   {d.problemi.map((p: any, i: number) => (
                     <tr key={i}>
@@ -98,6 +117,17 @@ export default function ControlloGiacenzePage() {
                       <td style={td}>{p.cliente}</td>
                       <td style={td}>{p.master}</td>
                       <td style={td}>{p.controllata ? new Date(p.controllata).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                      <td style={{ ...td, color: '#6b7280', fontSize: 12, maxWidth: 220 }}>{p.motivo || '—'}</td>
+                      <td style={td}>
+                        {p.corriere_tipo === 'spediamopro' && p.id ? (
+                          <span style={{ display: 'inline-flex', gap: 6 }}>
+                            <button onClick={() => riSvincola(p, 1)} disabled={busy === p.id} title="Ri-chiede a SpediamoPro la riconsegna dello stock ancora attivo"
+                              style={{ background: '#eef2ff', color: '#3730a3', border: '1px solid #c7d2fe', borderRadius: 6, padding: '5px 9px', fontSize: 12, fontWeight: 600, cursor: busy === p.id ? 'default' : 'pointer', opacity: busy === p.id ? .5 : 1 }}>Riconsegna</button>
+                            <button onClick={() => riSvincola(p, 3)} disabled={busy === p.id} title="Rilascia lo stock come reso al mittente"
+                              style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', borderRadius: 6, padding: '5px 9px', fontSize: 12, fontWeight: 600, cursor: busy === p.id ? 'default' : 'pointer', opacity: busy === p.id ? .5 : 1 }}>Reso</button>
+                          </span>
+                        ) : <span style={{ color: '#bbb' }}>—</span>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
