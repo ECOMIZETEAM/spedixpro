@@ -7,6 +7,7 @@ import { normalizzaPaese } from '@/lib/paesi'
 import comuniIT from '@/lib/data/comuni.json'
 import frazioniIT from '@/lib/data/frazioni.json'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { eSpartoo, rimappaSpartoo } from '@/lib/import-spartoo'
 
 export const runtime = 'nodejs'
 
@@ -163,6 +164,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'File non leggibile: ' + (e?.message || e) }, { status: 400 })
   }
   if (!rows.length) return NextResponse.json({ error: 'File vuoto o non leggibile' }, { status: 400 })
+
+  // SPARTOO: export a colonne proprie (customers_/delivery_/products_, ';', ordine multi-riga, nome
+  // destinatario spezzato, estero). Lo riconosco e lo rimappo sulle colonne CANONICHE PRIMA
+  // dell'auto-mapping (vedi lib/import-spartoo): cosi' riusa la stessa pipeline e NON tocco gli alias
+  // di Shopify/Amazon/Temu. Salta gli ordini annullati.
+  if (eSpartoo(rows[0])) {
+    rows = rimappaSpartoo(rows)
+    if (!rows.length) return NextResponse.json({ error: 'Tutti gli ordini del file risultano annullati: niente da importare.' }, { status: 400 })
+  }
 
   // Risolvo le colonne per NOME (auto-mapping)
   const headers = new Set(Object.keys(rows[0] || {}))
