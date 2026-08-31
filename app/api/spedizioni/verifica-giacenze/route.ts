@@ -87,7 +87,11 @@ export async function GET(req: NextRequest) {
         const code = raw.code || raw?.raw?.data?.code || s.tracking_number
         const spid = raw.id || raw?.raw?.data?.id
         const stocks = await spediamoproSearchStocks(cred.authcode, String(code))
-        const attivo = (stocks || []).find((st: any) => Number(st.status) === 1 && (!spid || Number(st.shipmentId) === Number(spid)))
+        // "Ferma" = stock ATTIVO SENZA svincolo richiesto: SpediamoPro usa status 1 = giacenza da lavorare
+        // (releaseAction nullo), 2 = "Richiesta svincolo ELABORATA" (svincolo GIA' fatto da noi, in attesa
+        // che il corriere lo registri), 3 = svincolo COMPLETATO. status 2 e 3 NON sono ferme (svincolate
+        // correttamente). Guardo solo status 1 + releaseAction nullo -> niente falsi "ferma" sulle svincolate.
+        const attivo = (stocks || []).find((st: any) => Number(st.status) === 1 && !st.releaseAction && (!spid || Number(st.shipmentId) === Number(spid)))
         esito = attivo ? 'ferma' : 'ok'
       } else if (tipo === 'easyparcel' && cred.apikey) {
         const { stati } = await easyparcelTracking(cred.apikey, { ldv: String(s.tracking_number || s.numero) })

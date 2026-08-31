@@ -169,6 +169,9 @@ export async function eseguiSvincolo(
 
   await admin.from('spedizioni').update({
     giacenza_stato: 'svincolata', giacenza_istruzioni: istr, giacenza_addebito_effettuato: true,
+    // Svincolo appena fatto: azzero l'esito del Controllo Giacenze (altrimenti un vecchio "ferma" resta
+    // appiccicato e la grace <12h salta la riverifica -> falso "ferma" su una gia' svincolata).
+    giacenza_verifica_esito: null, giacenza_verifica_at: null,
     ...(rich.operazione === 'reso' ? { stato: 'reso_mittente', ...(resoAddebitato ? { giacenza_reso_addebitato: true } : {}) } : {}),
   }).eq('id', id)
 

@@ -169,7 +169,10 @@ export async function POST(req: NextRequest) {
       giacenza_stato: 'svincolata',
       giacenza_istruzioni: istruzioni,
       giacenza_giorni: giorni,
-      stato: 'in_consegna'
+      stato: 'in_consegna',
+      // Svincolo appena fatto: azzero l'esito del Controllo Giacenze, altrimenti un vecchio "ferma"
+      // resta appiccicato (e la grace <12h salta la riverifica) -> falso "ferma" su una gia' svincolata.
+      giacenza_verifica_esito: null, giacenza_verifica_at: null,
     }).eq('id', spedizioneId)
 
     // Addebito SVINCOLO (servizio riconsegna) — UNIFICATO col flusso corretto: usa la cascata rete
