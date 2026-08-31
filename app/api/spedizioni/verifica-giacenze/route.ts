@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
   // sbloccarsi più tardi). Un lotto per giro, così non va in timeout.
   const seiOreFa = new Date(Date.now() - 6 * 3600e3).toISOString()
   const { data: spedRaw } = await admin.from('spedizioni')
-    .select('id,numero,tracking_number,raw_response,corrieri(tipo,credenziali)')
+    .select('id,numero,tracking_number,stato,raw_response,corrieri(tipo,credenziali)')
     .eq('giacenza_stato', 'svincolata')
     .or(`giacenza_verifica_at.is.null,giacenza_verifica_at.lt.${seiOreFa}`)
     .limit(120)
@@ -72,6 +72,14 @@ export async function GET(req: NextRequest) {
     const svAt = svincoloAt.get(s.id)
     if (svAt && (Date.now() - svAt) < 12 * 3600e3) { saltate++; continue }   // < 12h: troppo recente
 
+    // GIA' CONSEGNATA (o resa al mittente): ha per forza LASCIATO la giacenza del corriere -> 'ok', senza
+    // nemmeno interrogare l'API. Evita anche il falso "ferma" per DVA/easyparcel, il cui tracking conserva
+    // in eterno il vecchio evento di giacenza (uno storico) anche a pacco ormai consegnato.
+    if (s.stato === 'consegnata' || s.stato === 'reso_mittente') {
+      await admin.from('spedizioni').update({ giacenza_verifica_at: now, giacenza_verifica_esito: 'ok' }).eq('id', s.id)
+      controllate++; ok++; continue
+    }
+
     let esito: 'ok' | 'ferma' | 'errore' = 'ok'
     try {
       if (cred.authcode) {
@@ -83,7 +91,13 @@ export async function GET(req: NextRequest) {
         esito = attivo ? 'ferma' : 'ok'
       } else if (tipo === 'easyparcel' && cred.apikey) {
         const { stati } = await easyparcelTracking(cred.apikey, { ldv: String(s.tracking_number || s.numero) })
-        esito = (stati || []).some((t: string) => mapStatoEasyparcel(t) === 'in_giacenza') ? 'ferma' : 'ok'
+        const mappati = (stati || []).map((t: string) => mapStatoEasyparcel(t))
+        // NON basta un evento di giacenza nello STORICO (resta li' per sempre, anche dopo la ripartenza:
+        // dava un falso "ferma" al 100%). E' "ferma" solo se e' in giacenza E NON ha ripreso la corsa:
+        // cioe' manca qualunque evento POST-giacenza (in consegna / consegnata / reso / tentativo consegna).
+        const ripresa = mappati.some((m) => m === 'consegnata' || m === 'in_consegna' || m === 'non_consegnato' || m === 'reso_mittente')
+        const inGiacenza = mappati.some((m) => m === 'in_giacenza')
+        esito = (inGiacenza && !ripresa) ? 'ferma' : 'ok'
       } else if (cred.master_domain && cred.password) {
         const key = String(cred.master_domain)
         let aperti = spedisciCache.get(key)
