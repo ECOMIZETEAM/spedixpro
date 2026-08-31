@@ -40,6 +40,7 @@ const STATO: Record<string, { t: string; c: string; bg: string }> = {
   spedito:    { t: 'Spedito',    c: '#15803d', bg: '#dcfce7' },
   errore:     { t: 'Errore',     c: '#b91c1c', bg: '#fee2e2' },
   archiviato: { t: 'Archiviato', c: '#6b7280', bg: '#f3f4f6' },
+  unito:      { t: 'Unito',      c: '#6b7280', bg: '#f3f4f6' },   // assorbito da "Unisci" nel capofila: non era in mappa -> appariva "Da spedire"
 }
 
 const card: React.CSSProperties = {
@@ -702,6 +703,7 @@ export default function ImportaOrdiniPage() {
               <option value="da_spedire">Da spedire</option>
               <option value="spedito">Spedito</option>
               <option value="errore">Errore</option>
+              <option value="unito">Unito</option>
               <option value="archiviato">Archiviato</option>
             </select>
             {(q || filtroStato !== 'tutti') && (

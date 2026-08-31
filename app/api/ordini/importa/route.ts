@@ -223,7 +223,7 @@ export async function POST(req: NextRequest) {
   // Raggruppo gli ordini multi-riga (Shopify: 1 riga per prodotto, dati spedizione solo sulla 1a).
   // Attivo il raggruppamento solo quando c'è la colonna line item + un identificativo ordine.
   const lineMode = !!A.lineitem_name && !!M.order_id
-  type Gruppo = { oid: string; header: any; items: string[]; articoli: any[] }
+  type Gruppo = { oid: string; header: any; items: string[]; articoli: any[]; totaleSum: number | null }
   const gruppi: Gruppo[] = []
   if (lineMode) {
     // Raggruppo per order_id usando una MAPPA, non solo il confronto con la riga precedente: cosi'
@@ -243,18 +243,24 @@ export async function POST(req: NextRequest) {
           cur = esistente
           if (haDest && !g(cur.header, 'destinatario')) cur.header = r
         } else {
-          cur = { oid, header: r, items: [], articoli: [] }
+          cur = { oid, header: r, items: [], articoli: [], totaleSum: null }
           perOid.set(oid, cur)
           gruppi.push(cur)
         }
       } else if (!cur) {
         // Riga senza id ordine e nessun gruppo aperto: ordine a se'.
-        cur = { oid: 'r' + gruppi.length, header: r, items: [], articoli: [] }
+        cur = { oid: 'r' + gruppi.length, header: r, items: [], articoli: [], totaleSum: null }
         gruppi.push(cur)
       } else if (haDest && !g(cur.header, 'destinatario')) {
         // Riga di continuazione (id ordine vuoto) che porta il destinatario: promuovila a header.
         cur.header = r
       }
+      // TOTALE ordine SOMMATO su tutte le righe del gruppo: Shopify mette il "Total" solo sulla 1a riga
+      // (le altre vuote = +0), Amazon mette "item-price" PER RIGA -> la somma = totale ordine. Prima si
+      // leggeva SOLO la riga header: con Amazon multi-articolo il totale (e il COD dedotto) era il prezzo
+      // del solo 1° articolo -> sotto-incasso alla consegna.
+      const tRiga = M.totale_ordine ? toNum(r[M.totale_ordine!]) : null
+      if (tRiga != null) cur.totaleSum = (cur.totaleSum || 0) + tRiga
       // Accumulo il prodotto di questa riga (stringa contenuto + articolo strutturato per il riepilogo)
       const li = A.lineitem_name ? String(r[A.lineitem_name] ?? '').trim() : ''
       if (li) {
@@ -268,7 +274,7 @@ export async function POST(req: NextRequest) {
       }
     }
   } else {
-    for (const r of rows) gruppi.push({ oid: g(r, 'order_id'), header: r, items: [], articoli: [] })
+    for (const r of rows) gruppi.push({ oid: g(r, 'order_id'), header: r, items: [], articoli: [], totaleSum: null })
   }
 
   const records: any[] = []
@@ -307,7 +313,8 @@ export async function POST(req: NextRequest) {
     // Regola: se il pagamento non è ancora incassato (pending/unpaid/authorized) o il metodo è
     // esplicitamente COD, l'intero TOTALE dell'ordine va in contrassegno (da incassare alla consegna).
     let contrassegno = M.contrassegno ? (toNum(r[M.contrassegno!]) ?? 0) : 0
-    const totale = M.totale_ordine ? toNum(r[M.totale_ordine!]) : null
+    // Totale = somma su tutte le righe del gruppo (multi-riga); ripiego alla riga header per i non-raggruppati.
+    const totale = grp.totaleSum != null ? grp.totaleSum : (M.totale_ordine ? toNum(r[M.totale_ordine!]) : null)
     if (!contrassegno && totale) {
       const metodo = (A.payment ? String(r[A.payment] ?? '') : '') + ' ' + (A.shippingm ? String(r[A.shippingm] ?? '') : '')
       const fin = (A.financial ? String(r[A.financial] ?? '') : '').trim().toLowerCase()

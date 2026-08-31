@@ -60,8 +60,10 @@ export async function GET(req: NextRequest) {
     nome_negozio: nomeNegozio, identificativo: cred.shop_id || 'tiktok',
     credenziali: cred, stato: 'attivo', errore: null,
   }
+  // Multi-shop: la lookup deve includere l'identificativo (shop_id), come eBay. Senza, collegare un
+  // SECONDO negozio TikTok faceva UPDATE sulla riga del primo, perdendone credenziali/shop_cipher.
   const { data: existing } = await supabase.from('integrazioni').select('id')
-    .eq('cliente_id', st.cliente_id).eq('piattaforma', 'tiktok').maybeSingle()
+    .eq('cliente_id', st.cliente_id).eq('piattaforma', 'tiktok').eq('identificativo', cred.shop_id || 'tiktok').maybeSingle()
   if (existing?.id) await supabase.from('integrazioni').update(payload).eq('id', existing.id)
   else await supabase.from('integrazioni').insert(payload)
 
