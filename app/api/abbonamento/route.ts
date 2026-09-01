@@ -100,7 +100,11 @@ export async function GET() {
 
     const nomeDi = (m: any) => (m?.nome && String(m.nome).trim()) || (m?.email && String(m.email).trim()) || ('Master #' + String(m?.id).slice(0, 6))
     abbonati = attiviRete.map((m: any) => {
-      const nonPagati = (nonPagatiByMaster.get(m.id) || [])
+      // ESENTE = niente da incassare, nemmeno l'arretrato: l'esenzione CONDONA anche i vecchi bonifici
+      // aperti da prima (decisione Lorenzo 01/09 sul caso Giga Express, canone luglio mai pagato). Senza
+      // questo l'esente restava nei "Vecchi bonifici aperti" e nella lista da incassare, in contrasto con
+      // tutte le altre caselle che gli esenti li escludono.
+      const nonPagati = m.abbonamento_esente ? [] : (nonPagatiByMaster.get(m.id) || [])
       const daPagare = nonPagati[0] || null   // il più vecchio non saldato
       const prezzo = m.abbonamento_esente ? 0 : Number(m.abbonamento_prezzo || 0)
       return {
