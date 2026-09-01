@@ -127,11 +127,14 @@ export async function GET() {
     const esentiIds = new Set(attiviRete.filter((m: any) => m.abbonamento_esente).map((m: any) => m.id))
     const mm = new Date().toISOString().slice(0, 7)
     const annoCorr = new Date().getFullYear().toString()
-    // Storico incassi mese per mese (per data di incasso), escludendo gli esenti.
+    // Storico incassi per MESE DI COMPETENZA (p.mese), NON per data di incasso: la una-tantum di
+    // allineamento è pagata il 31/08 sera in UTC ma copre settembre (mese='2026-09'); raggruppando per
+    // pagato_il finiva in agosto e settembre spariva dallo storico (mentre "Pagamenti di settembre",
+    // che usa p.mese, lo mostrava — incoerenza). Fallback a pagato_il per le righe vecchie senza mese.
     const storicoMap = new Map<string, { incassato: number; n: number }>()
     for (const p of (pag || [])) {
       if (!attiviIds.has(p.master_id) || esentiIds.has(p.master_id) || !p.pagato) continue
-      const k = String(p.pagato_il || '').slice(0, 7)
+      const k = p.mese ? String(p.mese) : String(p.pagato_il || '').slice(0, 7)
       if (!k) continue
       const cur = storicoMap.get(k) || { incassato: 0, n: 0 }
       cur.incassato += Number(p.importo || 0); cur.n++
