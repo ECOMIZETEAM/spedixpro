@@ -1070,6 +1070,15 @@ export async function POST(req: NextRequest) {
         await stornaPrenotazione()
         return NextResponse.json({ error: 'Assicurazione non disponibile su questo contratto per questa destinazione.' }, { status: 400 })
       }
+      // Modalità d'incasso del contrassegno: contante (C, default) o assegno (A). L'assegno esiste solo
+      // se il vettore lo espone — serviziopzionali.contrassegno.servizi contiene 'A' (es. "C-A"). Se il
+      // cliente chiede l'assegno ma il contratto incassa solo in contanti, si ferma QUI: consegnare per
+      // assegno un corriere che vuole i contanti significherebbe non incassare affatto il contrassegno.
+      const incassoModalita: 'C' | 'A' = body.incassoModalita === 'A' ? 'A' : 'C'
+      if (codRichiesto && incassoModalita === 'A' && !/A/i.test(String(opz?.contrassegno?.servizi || ''))) {
+        await stornaPrenotazione()
+        return NextResponse.json({ error: 'Incasso con assegno non disponibile su questo contratto: scegli contante oppure un altro contratto.' }, { status: 400 })
+      }
 
       // DOGANA (solo estero): i corrieri internazionali di questo provider rifiutano l'ordine senza
       // i codici HS/TARIC. Si prepara PRIMA di comprare: se mancano i dati indispensabili si blocca
@@ -1113,6 +1122,7 @@ export async function POST(req: NextRequest) {
         note: body.notes || undefined,
         custom: rifBreve,
         contrassegno: codRichiesto,
+        contrassegnoModalita: incassoModalita,
         assicurazione: assRichiesta,
         ...(dogana ? { dogana } : {}),
       })

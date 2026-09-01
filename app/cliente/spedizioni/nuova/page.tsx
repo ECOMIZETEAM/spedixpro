@@ -11,7 +11,7 @@ import { PAESI_MONDO } from '@/lib/paesi-elenco'
 // il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
 // all'utente ('EASYPARCEL'). Ogni provider ha la sua sigla neutra.
 const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':t==='easyparcel'?'V':(t||'').toUpperCase()
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; _corriere_id?:string; corriere_nome?:string }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; _corriere_id?:string; _corriere_tipo?:string; corriere_nome?:string }
 interface Collo { lunghezza:string; larghezza:string; altezza:string; peso?:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -145,7 +145,10 @@ export default function NuovaSpedizioneCliente() {
   const [selected, setSelected] = useState<Tariffa|null>(null)
   // Extra / servizi accessori scelti sul corriere selezionato (li paga il cliente)
   const [extraNomi, setExtraNomi] = useState<string[]>([])
-  useEffect(() => { setExtraNomi([]) }, [selected?._corriere_id])
+  // Modalità d'incasso del contrassegno: contante (C, default) o assegno (A). L'assegno è possibile solo
+  // su alcuni corrieri (_corriere_tipo 'V'); sugli altri resta contante. Si azzera al cambio corriere.
+  const [incassoModalita, setIncassoModalita] = useState<'C'|'A'>('C')
+  useEffect(() => { setExtraNomi([]); setIncassoModalita('C') }, [selected?._corriere_id])
   const accDisponibili = (selected?.accessori_disponibili || [])
   const extraScelti = accDisponibili
     .filter(a => extraNomi.includes(a.nome))
@@ -335,6 +338,7 @@ export default function NuovaSpedizioneCliente() {
         shipFrom:{name:mitt.nome,company:mitt.nome,street1:mitt.indirizzo,street2:'',city:mitt.citta,state:mitt.provincia,postalCode:mitt.cap,country:'IT',phone:mitt.telefono,email:mitt.email},
         shipTo:{name:dest.nome,company:'',street1:dest.indirizzo,street2:'',city:dest.citta,state:dest.provincia,postalCode:dest.cap,country:dest.paese,phone:dest.telefono,email:dest.email},
         notes:dest.note, insuranceValue:+assicurazione, codValue:+contrassegno,
+        incassoModalita: +contrassegno > 0 ? incassoModalita : 'C',
         contenuto, tipoContenuto, valoreMerce, hscode, rifOrdine,
         // Ritiro: sui contratti DVA si prenota SOLO insieme all'ordine (il corriere non ha una
         // chiamata per aggiungerlo dopo), quindi la richiesta va passata gia' qui.
@@ -870,7 +874,14 @@ export default function NuovaSpedizioneCliente() {
                   {Number(contrassegno) > 0 && (
                     <div>
                       <label style={lbl}>Modalità di incasso contrassegno</label>
-                      <select style={inp} defaultValue="contante"><option value="contante">CONTANTE</option></select>
+                      {selected?._corriere_tipo === 'V' ? (
+                        <select style={inp} value={incassoModalita} onChange={e=>setIncassoModalita(e.target.value==='A'?'A':'C')}>
+                          <option value="C">CONTANTE</option>
+                          <option value="A">ASSEGNO</option>
+                        </select>
+                      ) : (
+                        <select style={inp} defaultValue="contante"><option value="contante">CONTANTE</option></select>
+                      )}
                     </div>
                   )}
                 </div>

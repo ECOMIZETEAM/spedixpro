@@ -163,7 +163,10 @@ export default function NuovaSpedizionePage() {
   const [selected, setSelected] = useState<Tariffa|null>(null)
   // Extra / servizi accessori scelti sul corriere selezionato (li paga il cliente)
   const [extraNomi, setExtraNomi] = useState<string[]>([])
-  useEffect(() => { setExtraNomi([]) }, [selected?._corriere_id])
+  // Modalità d'incasso contrassegno: contante (C) o assegno (A). L'assegno è possibile solo su alcuni
+  // corrieri (_corriere_tipo 'V'); sugli altri resta contante. Si azzera al cambio corriere.
+  const [incassoModalita, setIncassoModalita] = useState<'C'|'A'>('C')
+  useEffect(() => { setExtraNomi([]); setIncassoModalita('C') }, [selected?._corriere_id])
   const accDisponibili = (selected?.accessori_disponibili || [])
   const extraScelti = accDisponibili
     .filter(a => extraNomi.includes(a.nome))
@@ -375,6 +378,7 @@ export default function NuovaSpedizionePage() {
         shipFrom:{name:mitt.nome,company:mitt.nome,street1:mitt.indirizzo,street2:'',city:mitt.citta,state:mitt.provincia,postalCode:mitt.cap,country:'IT',phone:mitt.telefono,email:mitt.email},
         shipTo:{name:dest.nome,company:'',street1:dest.indirizzo,street2:'',city:dest.citta,state:dest.provincia,postalCode:dest.cap,country:dest.paese,phone:dest.telefono,email:dest.email},
         notes:dest.note, insuranceValue:+assicurazione, codValue:+contrassegno,
+        incassoModalita: +contrassegno > 0 ? incassoModalita : 'C',
         contenuto, tipoContenuto, valoreMerce, hscode,
         rifOrdine:dest.ordine, rifDestinatario:dest.rif,
         // Ritiro: sui contratti DVA si prenota SOLO insieme all'ordine (il corriere non ha
@@ -900,7 +904,14 @@ export default function NuovaSpedizionePage() {
                   {Number(contrassegno) > 0 && (
                     <div>
                       <label style={{display:'block',fontSize:'12px',color:'#000',marginBottom:'4px',fontWeight:'600'}}>Modalità di incasso contrassegno</label>
-                      <select style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#000'}} defaultValue="contante"><option value="contante">CONTANTE</option></select>
+                      {selected?._corriere_tipo === 'V' ? (
+                        <select value={incassoModalita} onChange={e=>setIncassoModalita(e.target.value==='A'?'A':'C')} style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#000'}}>
+                          <option value="C">CONTANTE</option>
+                          <option value="A">ASSEGNO</option>
+                        </select>
+                      ) : (
+                        <select style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#000'}} defaultValue="contante"><option value="contante">CONTANTE</option></select>
+                      )}
                     </div>
                   )}
                 </div>
