@@ -40,12 +40,12 @@ export async function POST(req: NextRequest) {
       || oggetto?.subscription_details?.metadata?.master_id
       || oggetto?.lines?.data?.[0]?.metadata?.master_id
     if (id) {
-      const { data } = await admin.from('masters').select('id,nome,parent_master_id,abbonamento_piano,abbonamento_prezzo,abbonamento_piano_programmato').eq('id', id).maybeSingle()
+      const { data } = await admin.from('masters').select('id,nome,parent_master_id,abbonamento_piano,abbonamento_prezzo,abbonamento_piano_programmato,stripe_subscription_id').eq('id', id).maybeSingle()
       if (data) return data
     }
     const cust = typeof oggetto?.customer === 'string' ? oggetto.customer : oggetto?.customer?.id
     if (!cust) return null
-    const { data } = await admin.from('masters').select('id,nome,parent_master_id,abbonamento_piano,abbonamento_prezzo,abbonamento_piano_programmato').eq('stripe_customer_id', cust).maybeSingle()
+    const { data } = await admin.from('masters').select('id,nome,parent_master_id,abbonamento_piano,abbonamento_prezzo,abbonamento_piano_programmato,stripe_subscription_id').eq('stripe_customer_id', cust).maybeSingle()
     return data || null
   }
 
@@ -307,6 +307,27 @@ export async function POST(req: NextRequest) {
         await admin.from('masters').update({
           abbonamento_mese: meseCorrente(), stripe_stato: 'active', pagamento_scaduto_dal: null,
         }).eq('id', m.id)
+
+        // AUTO-ALLINEA AL 1°. Se questo incasso è la una-tantum di allineamento (fattura con
+        // metadata.campagna = 'allinea_<pausa>'), metti la subscription in pausa fino a QUEL 1°. Vale
+        // anche quando il pagamento arriva TARDI (carta sistemata dopo un tentativo fallito): chi salda
+        // settembre + conguaglio prima del congelamento finisce sul ciclo del 1° come tutti, senza il
+        // doppio addebito col rinnovo del suo vecchio ciclo (che la pausa sopprime). Idempotente: se è
+        // già lì non tocca nulla; salta se il 1° è già passato (< ora) — a quel punto rinnova da sé.
+        const camp = String(inv.metadata?.campagna || '')
+        const mCamp = /^allinea_(\d+)$/.exec(camp)
+        if (mCamp && m.stripe_subscription_id) {
+          const pausa = Number(mCamp[1])
+          if (pausa > Math.floor(Date.now() / 1000) + 3600) {
+            try {
+              const sub = await s.subscriptions.retrieve(m.stripe_subscription_id)
+              if (sub.status !== 'canceled' && sub.trial_end !== pausa) {
+                if (sub.schedule) { try { await s.subscriptionSchedules.release(typeof sub.schedule === 'string' ? sub.schedule : (sub.schedule as any).id) } catch {} }
+                await s.subscriptions.update(m.stripe_subscription_id, { trial_end: pausa, proration_behavior: 'none' })
+              }
+            } catch {}
+          }
+        }
         break
       }
 
