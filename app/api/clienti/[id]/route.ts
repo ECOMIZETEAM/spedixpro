@@ -140,6 +140,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     vieta_inserimento: datiCliente.vieta_inserimento??false,
     interno_esclusivo: datiCliente.interno_esclusivo??false,
     gestione_logistica: datiCliente.gestione_logistica??false,
+    // Freno ticket per questo cliente (impostato dal master).
+    ticket_bloccato: datiCliente.ticket_bloccato??false,
+    ticket_limite_giornaliero: (datiCliente.ticket_limite_giornaliero===''||datiCliente.ticket_limite_giornaliero==null) ? null : Math.max(0, parseInt(String(datiCliente.ticket_limite_giornaliero),10)||0),
     updated_at: new Date().toISOString(),
   }
   if (datiCliente.impostazioni !== undefined) aggiornamento.impostazioni =datiCliente.impostazioni

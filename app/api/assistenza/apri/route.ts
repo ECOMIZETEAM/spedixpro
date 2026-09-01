@@ -29,7 +29,24 @@ export async function POST(req: NextRequest) {
 
   if (ruolo === 'cliente') {
     if (!utente?.cliente_id) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
-    const { data: cli } = await admin.from('clienti').select('ragione_sociale').eq('id', utente.cliente_id).maybeSingle()
+    const { data: cli } = await admin.from('clienti')
+      .select('ragione_sociale,ticket_bloccato,ticket_limite_giornaliero').eq('id', utente.cliente_id).maybeSingle()
+    // FRENO impostato dal master su QUESTO cliente (alcuni abusano dei ticket). Vale SOLO sui ticket di
+    // assistenza, non sulle richieste POD (prova di consegna = diritto del cliente, non si blocca).
+    if (categoria === 'ticket') {
+      if (cli?.ticket_bloccato) {
+        return NextResponse.json({ error: 'L\'apertura di nuove richieste di assistenza è stata sospesa dal tuo referente. Contattalo direttamente.' }, { status: 403 })
+      }
+      const limite = Number(cli?.ticket_limite_giornaliero || 0)
+      if (limite > 0) {
+        const oggi = new Date(); oggi.setHours(0, 0, 0, 0)
+        const { count } = await admin.from('tickets').select('id', { count: 'exact', head: true })
+          .eq('cliente_id', utente.cliente_id).eq('categoria', 'ticket').gte('created_at', oggi.toISOString())
+        if ((count || 0) >= limite) {
+          return NextResponse.json({ error: `Hai raggiunto il limite di ${limite} richieste al giorno concordato col tuo referente. Riprova domani.` }, { status: 429 })
+        }
+      }
+    }
     record.owner_master_id = masterId
     record.cliente_id = utente.cliente_id
     record.aperto_da = cli?.ragione_sociale || 'Cliente'

@@ -35,6 +35,7 @@ const ADMIN_FIELDS = [
   {key:'visualizza_fatture', label:'Visualizza fatture', desc:'Visualizza / Nascondi la sezione Fatture.'},
   {key:'vieta_inserimento', label:'Vieta inserimento Spedizione', desc:'Se attivo, il cliente NON puo creare spedizioni.'},
   {key:'gestione_logistica', label:'Spedizioni preparate dalla logistica', desc:'Se attivo, la merce di questo cliente sta nel nostro magazzino: ogni sua spedizione arriva come "da preparare" alla logistica, che la prepara e la segna fatta. Se spento, il cliente spedisce in autonomia.'},
+  {key:'ticket_bloccato', label:'Blocca apertura ticket', desc:'Se attivo, il cliente NON puo aprire nuovi ticket di assistenza (le richieste POD restano consentite).'},
 ]
 
 const DEF_SETT: Record<string,string> = { contrassegno:'si', inserimento_ritiri:'predefinito', autogenera_distinta:'predefinito', formato_stampa:'A4' }
@@ -192,6 +193,16 @@ export default function ImpostazioniClientePage() {
                 </select>
               </div>
             ))}
+            {/* Limite ticket/giorno: numero (non booleano come gli altri) */}
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'16px',padding:'12px 18px'}}>
+              <div>
+                <div style={lblStrong}>Limite ticket al giorno</div>
+                <div style={{fontSize:'11.5px',color:'#888',marginTop:'2px'}}>Massimo di ticket apribili in un giorno da questo cliente. Vuoto o 0 = illimitato. Non vale per le richieste POD.</div>
+              </div>
+              <input type="number" min={0} step={1} placeholder="∞" value={cliente.ticket_limite_giornaliero ?? ''}
+                onChange={e=>setCliente((prev:any)=>({...prev, ticket_limite_giornaliero: e.target.value===''?null:Math.max(0,parseInt(e.target.value,10)||0)}))}
+                style={{...sel, textAlign:'right' as const, width:'80px', minWidth:'0'}} />
+            </div>
           </div>
         </div>
       </div>
