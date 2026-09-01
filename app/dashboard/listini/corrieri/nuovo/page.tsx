@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
-import { logoCorriere } from '@/lib/corriere-logo'
+import { logoCorriere, serviziAccessoriDefault } from '@/lib/corriere-logo'
 import EditorMarkupFasce, { type MarkupOut } from '@/app/components/EditorMarkupFasce'
 
 const inp = {padding:'6px 8px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -114,14 +114,8 @@ export default function ListinoCorrierePage() {
   const [zoneCorr, setZoneCorr] = useState<any[]>([])   // zone reali del corriere selezionato
   const [righeAssic, setRigheAssic] = useState<RigaSuppl[]>([rigaVuota()])
   const [righeContr, setRigheContr] = useState<RigaSuppl[]>([rigaVuota(), rigaVuota()])
-  const [serviziAccessori, setServiziAccessori] = useState([
-    {nome:'Reverse A Domicilio',prezzo:0,perc:0},
-    {nome:'Andata & Ritorno',prezzo:0,perc:0},
-    {nome:'Reverse PuntoPoste',prezzo:0,perc:0},
-    {nome:'Reverse PuntoPoste Locker',prezzo:0,perc:0},
-    {nome:'Reverse Ufficio Postale',prezzo:0,perc:0},
-    {nome:'Consegna su appuntamento',prezzo:0,perc:0},
-  ])
+  // Vuoto all'avvio: il default giusto (per marca del corriere) lo mette carica() appena carica il corriere.
+  const [serviziAccessori, setServiziAccessori] = useState<{nome:string;prezzo:number;perc:number}[]>([])
   const [giacenzeServizi, setGiacenzeServizi] = useState([
     {nome:'Riconsegna',prezzo:0,perc:0},
     {nome:'Riconsegna al nuovo destinatario',prezzo:0,perc:0},
@@ -196,7 +190,10 @@ export default function ListinoCorrierePage() {
     setZoneCorr((Array.isArray(zTutte) ? zTutte : []).filter((z: any) => z.corriere_id === (data.corriereSelezionatoId || '')))
     setRigheAssic(buildRigheDa(data.supplementi||[], 'assicurazione', [rigaVuota()]))
     setRigheContr(buildRigheDa(data.supplementi||[], 'contrassegno', [rigaVuota(), rigaVuota()]))
-    setServiziAccessori(prev => buildServiziDa(data.supplementi||[], 'accessorio', prev))
+    // Servizi accessori DIVERSI per marca del corriere caricato (GLS≠Poste≠SDA): il master vede subito i
+    // servizi giusti da prezzare. Sui listini già compilati buildServiziDa tiene i valori salvati.
+    const nomeCorr = (data.corrieri||[]).find((c:any)=>c.id===(data.corriereSelezionatoId||corriereDaSelezionare||''))?.nome_contratto || ''
+    setServiziAccessori(buildServiziDa(data.supplementi||[], 'accessorio', serviziAccessoriDefault(nomeCorr)))
     setGiacenzeServizi(prev => buildServiziDa(data.supplementi||[], 'giacenza', prev))
     const aperturaRiga = (data.supplementi||[]).find((s:any) => s.tipo === 'giacenza_apertura')
     setAperturaGiacenza(aperturaRiga ? Number(aperturaRiga.valore)||0 : 0)

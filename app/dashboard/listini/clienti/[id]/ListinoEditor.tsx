@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
-import { logoCorriere } from '@/lib/corriere-logo'
+import { logoCorriere, serviziAccessoriDefault } from '@/lib/corriere-logo'
 import { setFlash } from '@/lib/flash'
 import { useDialog } from '@/app/components/DialogProvider'
 import EditorMarkupFasce, { type MarkupOut } from '@/app/components/EditorMarkupFasce'
@@ -325,14 +325,9 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
 
   const [righeAssic, setRigheAssic] = useState<RigaSuppl[]>(() => bozza?.righeAssic ?? buildRigheDa(supplementiEsistenti||[], 'assicurazione', [rigaVuota()]))
   const [righeContr, setRigheContr] = useState<RigaSuppl[]>(() => bozza?.righeContr ?? buildRigheDa(supplementiEsistenti||[], 'contrassegno', [rigaVuota(), rigaVuota()]))
-  const [serviziAccessori, setServiziAccessori] = useState(() => bozza?.serviziAccessori ?? buildAccessoriDa(supplementiEsistenti||[], [
-    {nome:'Reverse A Domicilio',prezzo:0,perc:0},
-    {nome:'Andata & Ritorno',prezzo:0,perc:0},
-    {nome:'Reverse PuntoPoste',prezzo:0,perc:0},
-    {nome:'Reverse PuntoPoste Locker',prezzo:0,perc:0},
-    {nome:'Reverse Ufficio Postale',prezzo:0,perc:0},
-    {nome:'Consegna su appuntamento',prezzo:0,perc:0},
-  ]))
+  // Default dei servizi accessori DIVERSO per marca del corriere in modifica (GLS≠Poste≠SDA): il master
+  // vede subito i servizi giusti da prezzare. Sui listini già compilati buildAccessoriDa tiene il salvato.
+  const [serviziAccessori, setServiziAccessori] = useState(() => bozza?.serviziAccessori ?? buildAccessoriDa(supplementiEsistenti||[], serviziAccessoriDefault(corrieri.find(c => c.id === corriereId)?.nome_contratto)))
   const [giacenzeServizi, setGiacenzeServizi] = useState(() => bozza?.giacenzeServizi ?? buildServiziDa(supplementiEsistenti||[], 'giacenza', [
     {nome:'Riconsegna',prezzo:0,perc:0},
     {nome:'Riconsegna al nuovo destinatario',prezzo:0,perc:0},

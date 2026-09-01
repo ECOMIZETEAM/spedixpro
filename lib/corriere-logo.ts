@@ -36,6 +36,36 @@ export function marchioCorriere(nomeContratto: string): string {
   return nome
 }
 
+// Servizi accessori NATIVI proposti come DEFAULT nel listino, DIVERSI per marca del corriere: SDA ha i
+// suoi, Poste altri, GLS altri. Il master ne decide il prezzo (Prezzo € + % del valore) e li vende. Per
+// le marche non elencate qui nessun default: il master aggiunge le voci a mano. ATTENZIONE: questa è la
+// lista di ciò che il master può VENDERE, NON la lista di ciò che l'API sa trasmettere al corriere — la
+// trasmissione dipende dal provider (oggi solo alcuni, es. DVA per contante/assegno e consegna su
+// appuntamento; per gli altri il servizio va gestito col corriere fuori dall'API).
+const SERVIZI_ACCESSORI_MARCA: Record<string, { nome: string; prezzo: number; perc: number }[]> = {
+  Poste: [
+    { nome: 'Reverse A Domicilio', prezzo: 0, perc: 0 },
+    { nome: 'Andata & Ritorno', prezzo: 0, perc: 0 },
+    { nome: 'Reverse PuntoPoste', prezzo: 0, perc: 0 },
+    { nome: 'Reverse PuntoPoste Locker', prezzo: 0, perc: 0 },
+    { nome: 'Reverse Ufficio Postale', prezzo: 0, perc: 0 },
+    { nome: 'Consegna su appuntamento', prezzo: 0, perc: 0 },
+  ],
+  GLS: [
+    { nome: 'Exchange', prezzo: 0, perc: 0 },
+    { nome: 'Document Return', prezzo: 0, perc: 0 },
+    { nome: 'Saturday Service', prezzo: 0, perc: 0 },
+    { nome: 'Express12', prezzo: 0, perc: 0 },
+    { nome: 'Preavviso Telefonico', prezzo: 0, perc: 0 },
+  ],
+  SDA: [
+    { nome: 'Time Definite ore 10', prezzo: 0, perc: 0 },
+  ],
+}
+export function serviziAccessoriDefault(nomeContratto?: string | null): { nome: string; prezzo: number; perc: number }[] {
+  return (SERVIZI_ACCESSORI_MARCA[marchioCorriere(nomeContratto || '')] || []).map(s => ({ ...s }))
+}
+
 // Elenco UNICO dei provider tecnici a valle. Serve alle schermate che mostrano il tipo del
 // contratto solo quando e' un'etichetta innocua (es. 'generico'): il tipo di un provider vero
 // non va mai stampato. Tenerlo in un posto solo evita che l'aggiunta del prossimo provider
