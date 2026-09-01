@@ -35,10 +35,9 @@ export default function ReportAgentiPage() {
   const th: React.CSSProperties = { textAlign: 'left', padding: '10px 12px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .4, color: '#8a8a8a', borderBottom: '1px solid #eee' }
   const td: React.CSSProperties = { padding: '10px 12px', fontSize: 13, borderBottom: '1px solid #f4f4f4' }
 
-  const baseTxt = (a: any) => a.metodo === 'fisso' ? `${a.base} sped.`
-    : a.metodo === 'perc_lordo' ? `${eur(a.base)} lordo × ${a.valore}%`
-      : a.metodo === 'perc_netto' ? `${eur(a.base)} netto × ${a.valore}%`
-        : `${eur(a.lordo)} − ${eur(a.base)} costo`
+  // MARGINE DELL'AGENTE sui suoi clienti = prezzo cliente − costo del SUO listino. È il dato del report,
+  // MAI il "netto" del master. Se l'agente non ha un listino assegnato non è calcolabile → "—".
+  const baseTxt = (a: any) => a.margineAgente != null ? eur(a.margineAgente) : '—'
 
   async function scarica() {
     const righe = (d?.agenti || [])
@@ -50,7 +49,7 @@ export default function ReportAgentiPage() {
       const rows = righe.map((a: any) => ({
         Agente: a.nome, Metodo: a.metodoLabel,
         Valore: a.metodo === 'fisso' ? a.valore + ' €/sped' : (a.metodo.startsWith('perc') ? a.valore + '%' : '—'),
-        Spedizioni: a.numSpedizioni, Base: baseTxt(a).replace(/€\s?/g, ''),
+        Spedizioni: a.numSpedizioni, 'Margine agente': baseTxt(a).replace(/€\s?/g, ''),
         'Da dargli (€)': Number(a.guadagno).toFixed(2),
       }))
       if (fmt === 'xlsx' || fmt === 'csv') {
@@ -69,7 +68,7 @@ export default function ReportAgentiPage() {
         autoTable(doc, {
           startY: 34, styles: { fontSize: 8, cellPadding: 2, textColor: [80, 80, 80] },
           headStyles: { fillColor: [255, 255, 255], textColor: [80, 80, 80], fontStyle: 'bold', lineWidth: 0 },
-          head: [['Agente', 'Metodo', 'Spedizioni', 'Base', 'Da dargli']],
+          head: [['Agente', 'Metodo', 'Spedizioni', 'Margine agente', 'Da dargli']],
           body: righe.map((a: any) => [a.nome, a.metodoLabel, String(a.numSpedizioni), baseTxt(a), a.guadagno.toFixed(2) + ' EUR']),
         })
         const fy = (doc as any).lastAutoTable.finalY + 12
@@ -117,7 +116,7 @@ export default function ReportAgentiPage() {
           <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 10, overflow: 'hidden' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr>
-                <th style={th}>Agente</th><th style={th}>Metodo</th><th style={th}>Spedizioni</th><th style={th}>Base</th><th style={{ ...th, textAlign: 'right' }}>Da dargli</th>
+                <th style={th}>Agente</th><th style={th}>Metodo</th><th style={th}>Spedizioni</th><th style={th}>Margine agente</th><th style={{ ...th, textAlign: 'right' }}>Da dargli</th>
               </tr></thead>
               <tbody>
                 {d.agenti.map((a: any) => (
@@ -146,7 +145,7 @@ export default function ReportAgentiPage() {
               {scaricando ? 'Scarico…' : '⬇ Scarica ' + (filtri.agenteId ? "l'agente" : 'tutti')}
             </button>
           </div>
-          <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 10 }}>Calcolato sui movimenti reali dei clienti dell&apos;agente (rettifiche e resi compresi). Il &quot;netto&quot; è il margine tuo (prezzo cliente − tuo costo).</p>
+          <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 10 }}>Calcolato sui movimenti reali dei clienti dell&apos;agente (rettifiche e resi compresi). Il &quot;Margine agente&quot; è il guadagno dell&apos;agente sui suoi clienti (prezzo cliente − costo del suo listino), non il tuo margine di master; &quot;—&quot; se all&apos;agente non è assegnato un listino.</p>
         </>
       )}
     </div>

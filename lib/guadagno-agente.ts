@@ -27,6 +27,10 @@ export type EsitoGuadagnoAgente = {
   numSpedizioni: number
   lordo: number          // quello che i clienti dell'agente hanno pagato
   base: number           // la base su cui è calcolato il compenso (margine, lordo, o n. sped)
+  // MARGINE DELL'AGENTE sui suoi clienti = lordo − costo del SUO listino. SEMPRE (qualunque metodo di
+  // compenso): è il dato che il master vuole nel report, MAI il netto del master (che è il margine di M).
+  // null se l'agente non ha un listino assegnato → non calcolabile.
+  margineAgente: number | null
   metodo: string
   valore: number
   senzaListino?: boolean  // metodo 'listino' ma senza listino assegnato → guadagno non calcolabile
@@ -41,7 +45,7 @@ export async function calcolaGuadagnoAgente(
   const M = agente.master_id
   const metodo = (agente.agente_metodo || 'listino')
   const valore = Number(agente.agente_valore) || 0
-  const vuoto: EsitoGuadagnoAgente = { guadagno: 0, numSpedizioni: 0, lordo: 0, base: 0, metodo, valore }
+  const vuoto: EsitoGuadagnoAgente = { guadagno: 0, numSpedizioni: 0, lordo: 0, base: 0, margineAgente: null, metodo, valore }
 
   const clienti = await clientiAgente(admin, agente as any)
   if (!clienti.length) return vuoto
@@ -56,13 +60,9 @@ export async function calcolaGuadagnoAgente(
   if (!numSpedizioni) return vuoto
   const spedIds = (sped || []).map((s: any) => s.id)
 
-  // FISSO: basta il numero di spedizioni.
-  if (metodo === 'fisso') {
-    return { guadagno: r2(valore * numSpedizioni), numSpedizioni, lordo: 0, base: numSpedizioni, metodo, valore }
-  }
-
   // LORDO per spedizione = quello che il cliente ha pagato DAVVERO (movimenti del cliente), come i
-  // report. Segno: addebito negativo → +, rimborso positivo → − (le annullate si nettano a 0).
+  // report. Segno: addebito negativo → +, rimborso positivo → − (le annullate si nettano a 0). Serve a
+  // TUTTI i metodi — ora anche al FISSO — perché il margine dell'agente si calcola sempre.
   const lordoPerSped = new Map<string, number>()
   for (let i = 0; i < spedIds.length; i += 300) {
     const chunk = spedIds.slice(i, i + 300)
@@ -82,8 +82,28 @@ export async function calcolaGuadagnoAgente(
   }
   lordoTot = r2(lordoTot)
 
+  // MARGINE DELL'AGENTE (sempre, qualunque sia il metodo di compenso): lordo − costo del SUO listino.
+  // È il dato che entra nel report ("Margine agente"), MAI il netto del master. Senza listino agente
+  // assegnato non è calcolabile → null (il report mostra "—", non il margine del master).
+  const listinoAg = agente.listino_agente_id || null
+  let costoAgTot: number | null = null
+  if (listinoAg) {
+    const calcCosto = await creaCalcolatoreListinoCliente(admin, listinoAg)
+    let t = 0
+    for (const s of (sped || [])) {
+      const cAg = calcCosto(s)?.totale
+      t += (cAg != null) ? cAg : Number((s as any).costo_spedizione || 0)
+    }
+    costoAgTot = r2(t)
+  }
+  const margineAgente = costoAgTot != null ? r2(lordoTot - costoAgTot) : null
+
+  // FISSO: compenso fisso per spedizione (il margine agente resta quello calcolato sopra).
+  if (metodo === 'fisso') {
+    return { guadagno: r2(valore * numSpedizioni), numSpedizioni, lordo: lordoTot, base: numSpedizioni, margineAgente, metodo, valore }
+  }
   if (metodo === 'perc_lordo') {
-    return { guadagno: r2(valore / 100 * lordoTot), numSpedizioni, lordo: lordoTot, base: lordoTot, metodo, valore }
+    return { guadagno: r2(valore / 100 * lordoTot), numSpedizioni, lordo: lordoTot, base: lordoTot, margineAgente, metodo, valore }
   }
 
   if (metodo === 'perc_netto') {
@@ -109,18 +129,12 @@ export async function calcolaGuadagnoAgente(
       nettoTot += l - (costoMasterPerSped.get(id) || 0)
     }
     nettoTot = r2(nettoTot)
-    return { guadagno: r2(valore / 100 * nettoTot), numSpedizioni, lordo: lordoTot, base: nettoTot, metodo, valore }
+    // base = netto del MASTER (serve solo a spiegare il calcolo del %); il report però mostra margineAgente.
+    return { guadagno: r2(valore / 100 * nettoTot), numSpedizioni, lordo: lordoTot, base: nettoTot, margineAgente, metodo, valore }
   }
 
-  // LISTINO (default): margine = lordo − costo dal listino agente.
-  const listinoAg = agente.listino_agente_id || null
-  if (!listinoAg) return { ...vuoto, numSpedizioni, lordo: lordoTot, senzaListino: true }
-  const calcCosto = await creaCalcolatoreListinoCliente(admin, listinoAg)
-  let costoTot = 0
-  for (const s of (sped || [])) {
-    const cAg = calcCosto(s)?.totale
-    costoTot += (cAg != null) ? cAg : Number((s as any).costo_spedizione || 0)
-  }
-  costoTot = r2(costoTot)
-  return { guadagno: r2(lordoTot - costoTot), numSpedizioni, lordo: lordoTot, base: costoTot, metodo, valore }
+  // LISTINO (default): il compenso È il margine dell'agente = lordo − costo del suo listino, cioè
+  // esattamente margineAgente già calcolato sopra. Senza listino il guadagno non è calcolabile.
+  if (costoAgTot == null || margineAgente == null) return { ...vuoto, numSpedizioni, lordo: lordoTot, senzaListino: true }
+  return { guadagno: margineAgente, numSpedizioni, lordo: lordoTot, base: costoAgTot, margineAgente, metodo, valore }
 }

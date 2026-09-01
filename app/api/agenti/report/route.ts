@@ -46,6 +46,7 @@ export async function GET(req: NextRequest) {
       nome: [(a as any).nome, (a as any).cognome].filter(Boolean).join(' ').trim() || '—',
       metodo: esito.metodo, metodoLabel: LABEL_METODO[esito.metodo] || esito.metodo, valore: esito.valore,
       guadagno: esito.guadagno, numSpedizioni: esito.numSpedizioni, lordo: esito.lordo, base: esito.base,
+      margineAgente: esito.margineAgente,   // prezzo cliente − costo del listino dell'agente (mai il netto del master)
       senzaListino: !!esito.senzaListino,
     })
   }
