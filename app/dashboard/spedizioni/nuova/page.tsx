@@ -896,10 +896,13 @@ export default function NuovaSpedizionePage() {
                       </>
                     )}
                   </div>
-                  <div>
-                    <label style={{display:'block',fontSize:'12px',color:'#000',marginBottom:'4px',fontWeight:'600'}}>Modalità di incasso contrassegno</label>
-                    <select style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#000'}} defaultValue="contante"><option value="contante">CONTANTE</option></select>
-                  </div>
+                  {/* Modalità d'incasso solo col contrassegno: senza importo non c'è nulla da incassare. */}
+                  {Number(contrassegno) > 0 && (
+                    <div>
+                      <label style={{display:'block',fontSize:'12px',color:'#000',marginBottom:'4px',fontWeight:'600'}}>Modalità di incasso contrassegno</label>
+                      <select style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#000'}} defaultValue="contante"><option value="contante">CONTANTE</option></select>
+                    </div>
+                  )}
                 </div>
                 <div style={{fontSize:'15px',fontWeight:'700',color:'#1a1a1a',marginBottom:'8px'}}>Costi</div>
                 <div style={{border:'1px solid #000',borderRadius:'8px',overflow:'hidden',marginBottom:'14px'}}>

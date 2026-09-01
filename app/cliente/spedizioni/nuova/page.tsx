@@ -865,10 +865,14 @@ export default function NuovaSpedizioneCliente() {
                       </>
                     )}
                   </div>
-                  <div>
-                    <label style={lbl}>Modalità di incasso contrassegno</label>
-                    <select style={inp} defaultValue="contante"><option value="contante">CONTANTE</option></select>
-                  </div>
+                  {/* La modalità d'incasso ha senso SOLO col contrassegno: senza importo non c'è nulla da
+                      incassare, quindi la tendina compare solo quando il contrassegno è valorizzato. */}
+                  {Number(contrassegno) > 0 && (
+                    <div>
+                      <label style={lbl}>Modalità di incasso contrassegno</label>
+                      <select style={inp} defaultValue="contante"><option value="contante">CONTANTE</option></select>
+                    </div>
+                  )}
                 </div>
                 <div style={{fontSize:'15px',fontWeight:'700',color:'#1a1a1a',marginBottom:'8px'}}>Costi</div>
                 <div style={{border:'1px solid #eee',borderRadius:'8px',overflow:'hidden',marginBottom:'14px'}}>
