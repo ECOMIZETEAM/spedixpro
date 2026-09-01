@@ -27,7 +27,13 @@ export async function POST(req: NextRequest) {
   if (!integr) return NextResponse.json({ error: 'Integrazione non trovata' }, { status: 404 })
 
   try {
-    const res = await sincronizzaOrdiniEbay(supabase, integr, { dal: body.dal, al: body.al })
+    const res = await sincronizzaOrdiniEbay(supabase, integr, {
+      dal: body.dal, al: body.al,
+      // Asse data (vendita/evasione) e "prepara i già-spediti come da spedire": scelte del venditore,
+      // passate dalla pagina ordini. Default = comportamento storico (vendita, non tocca i già-spediti).
+      perData: body.perData === 'evasione' ? 'evasione' : 'vendita',
+      importaGiaSpediti: !!body.importaGiaSpediti,
+    })
     return NextResponse.json({ ok: true, ...res })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Errore sincronizzazione' }, { status: 502 })

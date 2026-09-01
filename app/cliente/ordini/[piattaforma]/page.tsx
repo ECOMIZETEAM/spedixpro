@@ -45,6 +45,12 @@ export default function OrdiniPage() {
   const [loading, setLoading] = useState(true)
   const [sincronizzando, setSincronizzando] = useState(false)
   const [msg, setMsg] = useState('')
+  // eBay: asse data (vendita/evasione) + "prepara i già-spediti come da spedire". La scelta si RICORDA
+  // (localStorage), così il venditore non deve rimetterla a ogni sync. Init SSR-safe (niente window sul server).
+  const [perData, setPerData] = useState<'vendita' | 'evasione'>(() =>
+    (typeof window !== 'undefined' && localStorage.getItem('ebay_perData') === 'evasione') ? 'evasione' : 'vendita')
+  const [giaSpediti, setGiaSpediti] = useState(() =>
+    typeof window !== 'undefined' && localStorage.getItem('ebay_giaSpediti') === '1')
 
   const [fStore, setFStore] = useState('')
   const [fStatoPag, setFStatoPag] = useState('')
@@ -125,6 +131,8 @@ export default function OrdiniPage() {
           integrazione_id: id,
           dal: fDa || trentaGiorniFa,
           al: fA || oggi,
+          // Solo eBay: asse data + prepara i già-spediti (vedi lib/ebaySync).
+          ...(piattaforma === 'ebay' ? { perData, importaGiaSpediti: giaSpediti } : {}),
         })
       })
       const d = await res.json()
@@ -421,6 +429,18 @@ export default function OrdiniPage() {
         <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'16px'}}>▾ Filtri</div>
         <div style={{display:'flex',gap:'14px',flexWrap:'wrap',marginBottom:'14px'}}>
           <DateRangePicker dal={fDa} al={fA} onChange={(d,a)=>{setFDa(d);setFA(a)}} />
+          {piattaforma === 'ebay' && (<>
+            <div style={field}><label style={lbl}>Filtra per data</label>
+              <select value={perData} onChange={e=>{const v=e.target.value as 'vendita'|'evasione'; setPerData(v); try{localStorage.setItem('ebay_perData',v)}catch{}}} style={inp}>
+                <option value="vendita">Data ordine (vendita)</option>
+                <option value="evasione">Data spedizione (evasione)</option>
+              </select>
+            </div>
+            <label title="Se i tuoi ordini eBay risultano già 'spediti' perché li segni tu appena arrivano, attivalo: entrano tra i «da spedire» e puoi creare l'etichetta." style={{display:'inline-flex',alignItems:'center',gap:'7px',fontSize:'12.5px',color:'#374151',cursor:'pointer',alignSelf:'flex-end',paddingBottom:'8px',maxWidth:'280px'}}>
+              <input type="checkbox" checked={giaSpediti} onChange={e=>{const v=e.target.checked; setGiaSpediti(v); try{localStorage.setItem('ebay_giaSpediti', v?'1':'0')}catch{}}} />
+              Prepara anche gli ordini già segnati <b>spediti</b> su eBay
+            </label>
+          </>)}
           <div style={field}><label style={lbl}>{nome} Store</label>
             <select value={fStore} onChange={e=>setFStore(e.target.value)} style={inp}>
               <option value="">Tutti</option>

@@ -19,14 +19,18 @@ export function rangeGiorniISO(dal?: string | null, al?: string | null, defaultG
 // Sincronizza gli ordini eBay in ordini_ecommerce (spediti e non, qualunque pagamento, contrassegno
 // incluso) NELLA FINESTRA DATE RICHIESTA: si importa SOLO l'intervallo selezionato in pagina
 // (oggi -> solo oggi; ieri -> solo ieri; il mese -> il mese). Default: ultimi 30 giorni.
-export async function sincronizzaOrdiniEbay(db: any, integr: any, range?: { dal?: string | null; al?: string | null }): Promise<{ letti: number; importati: number }> {
+export async function sincronizzaOrdiniEbay(db: any, integr: any, range?: { dal?: string | null; al?: string | null; perData?: 'vendita' | 'evasione'; importaGiaSpediti?: boolean }): Promise<{ letti: number; importati: number }> {
   const token = await getValidEbayToken(db, integr)
   const ordini: any[] = []
   const LIMIT = 200
   const { daISO, aISO } = rangeGiorniISO(range?.dal, range?.al)
   // Nessun filtro di stato/pagamento (spediti E non, contrassegno incluso): SOLO la finestra data.
-  // Niente fallback "senza data": importare tutto lo storico a prescindere non è mai desiderato.
-  const filtro = `creationdate:[${daISO}..${aISO}]`
+  // ASSE DATA: 'vendita' = quando l'ordine è stato fatto (creationdate, default); 'evasione' = quando è
+  // stato segnato spedito/ultima modifica (lastmodifieddate). Alcuni venditori marcano "spedito" su eBay
+  // APPENA ricevono l'ordine (organizzazione interna) e lavorano per data di EVASIONE: filtrare per
+  // creationdate gli farebbe perdere un ordine venduto giorni prima ma lavorato oggi.
+  const campoData = range?.perData === 'evasione' ? 'lastmodifieddate' : 'creationdate'
+  const filtro = `${campoData}:[${daISO}..${aISO}]`
   let totApi = 0
   for (let offset = 0; offset < 10000; offset += LIMIT) {
     const data: any = await ebayGet(token, `/sell/fulfillment/v1/order?filter=${encodeURIComponent(filtro)}&limit=${LIMIT}&offset=${offset}`)
@@ -89,10 +93,12 @@ export async function sincronizzaOrdiniEbay(db: any, integr: any, range?: { dal?
       stato_pagamento: o.orderPaymentStatus || '',
       raw: o,
     }
-    // Già evaso su eBay → lo marchiamo 'spedito' così NON compare tra i "da spedire". Gli ordini non
-    // evasi NON toccano lo stato (nuovo = default 'da_spedire'; esistente = mantiene il suo, così non
-    // riportiamo a "da spedire" un ordine già spedito da MoovExpress).
-    if (o.orderFulfillmentStatus === 'FULFILLED') payload.stato = 'spedito'
+    // Già evaso su eBay → di norma lo marchiamo 'spedito' così NON compare tra i "da spedire" (evita di
+    // rispedire un ordine già spedito). ECCEZIONE `importaGiaSpediti`: chi su eBay marca "spedito" appena
+    // riceve l'ordine e POI crea l'etichetta da noi vuole quegli ordini tra i "da spedire" → NON tocchiamo
+    // lo stato (nuovo = default 'da_spedire'; esistente = mantiene il suo). La guardia anti-duplicato in
+    // creazione resta la rete di sicurezza contro il doppio invio. Gli ordini non evasi non lo toccano mai.
+    if (o.orderFulfillmentStatus === 'FULFILLED' && !range?.importaGiaSpediti) payload.stato = 'spedito'
     const { error } = await db.from('ordini_ecommerce').upsert(payload, {
       onConflict: 'integrazione_id,ordine_esterno_id', ignoreDuplicates: false,
     })
