@@ -257,7 +257,10 @@ export default function OrdiniPage() {
       let fatte = 0
       for (const id of ids) {
         const o = ordini.find(x=>x.id===id)
-        if (!o || o.stato==='spedito') continue
+        // Salta solo i GIÀ SPEDITI DA NOI (hanno la spedizione Moove collegata). Un ordine "spedito"
+        // solo sul marketplace (es. import eBay dei già-evasi: stato spedito ma senza spedizione_id) va
+        // comunque spedibile — l'ha segnato spedito il venditore, non l'abbiamo spedito noi.
+        if (!o || (o.stato==='spedito' && o.spedizione_id)) continue
         const d = o.destinatario || {}
         const num = o.numero_ordine || id
         fatte++
@@ -553,8 +556,12 @@ export default function OrdiniPage() {
                     <td style={{...td,color:'#6b7280',maxWidth:'140px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{getTags(o)||'—'}</td>
                     <td style={{...td,color:'#6b7280'}}>{o.spedizione_id?String(o.spedizione_id).slice(0,8):'—'}</td>
                     <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>
-                      {o.stato!=='spedito'
-                        ? <button onClick={()=>creaSpedizione(o)} style={{background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>Crea spedizione</button>
+                      {/* "Spedito" solo se lo abbiamo spedito NOI (ha la spedizione Moove): allora niente
+                          ri-spedizione. Se è "spedito" solo sul marketplace (import eBay dei già-evasi,
+                          senza spedizione_id) mostro comunque "Crea spedizione" → si fa l'etichetta e nel
+                          form si può modificare l'ordine. */}
+                      {(o.stato!=='spedito' || !o.spedizione_id)
+                        ? <button onClick={()=>creaSpedizione(o)} title={o.stato==='spedito'?'Già segnato spedito sul marketplace: crea comunque l\'etichetta e modifica i dati nel form':undefined} style={{background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>Crea spedizione</button>
                         : <span style={{display:'inline-flex',flexDirection:'column',alignItems:'flex-end',gap:'3px'}}>
                             <span style={{color:'#166534',fontSize:'12px',fontWeight:600}}>✓ Spedito</span>
                             {/* Write-back allo store fallito (es. chiavi negozio in sola lettura): il tracking

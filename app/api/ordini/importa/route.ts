@@ -291,10 +291,18 @@ export async function POST(req: NextRequest) {
     const loc = g(r, 'localita')
     const prov = g(r, 'provincia')
 
-    // La provincia si ricava dal CAP quando manca o non e' una sigla valida (Amazon scrive il nome
-    // esteso, o niente del tutto). Solo dopo si decide se la riga e' completa.
-    let provFinale = siglaProvincia(prov)
-    if (!SIGLE_IT.has(provFinale)) provFinale = CAP_PROVINCIA.get(cap) || ''
+    // PROVINCIA. Per l'ITALIA si normalizza a sigla a 2 lettere (o si ricava dal CAP quando manca/non è
+    // valida: Amazon scrive il nome esteso o niente). Per l'ESTERO le sigle italiane NON esistono: si
+    // TIENE lo stato/regione così com'è dal file (es. dipartimento francese "34", provincia spagnola).
+    // Prima l'estero veniva forzato sulle sigle IT e, non trovandole, AZZERATO → la provincia estera si
+    // perdeva e l'etichetta internazionale restava senza il dato (segnalato dal cliente KEGGOL su Spartoo).
+    let provFinale: string
+    if ((paese || 'IT') === 'IT') {
+      provFinale = siglaProvincia(prov)
+      if (!SIGLE_IT.has(provFinale)) provFinale = CAP_PROVINCIA.get(cap) || ''
+    } else {
+      provFinale = prov   // estero: stato/regione dal file, intatto
+    }
 
     // IL MESSAGGIO DICE QUALE CAMPO MANCA. Prima diceva solo "dati destinatario incompleti", e chi
     // lo leggeva non aveva modo di sapere cosa correggere nel proprio gestionale.
