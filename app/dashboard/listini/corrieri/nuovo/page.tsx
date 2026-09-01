@@ -153,7 +153,7 @@ export default function ListinoCorrierePage() {
   // Fasce per l'editor markup: costo d'esempio = il piu' basso fra le zone della fascia.
   const fasceMarkup = useMemo(() => fasce.map(f => {
     const costi = Object.values(f.prezzi || {}).map((v: any) => parseFloat(v)).filter((n: number) => isFinite(n) && n > 0)
-    return { key: keyFascia(f), label: f.tipo === 'oltre' ? `oltre, ogni ${f.kg || '?'} kg` : `fino a ${f.kg || '?'} kg`, tipo: f.tipo, peso: Number(f.kg), costo: costi.length ? Math.min(...costi) : 0 }
+    return { key: keyFascia(f), label: f.tipo === 'oltre' ? `oltre, ogni ${f.kg || '?'} kg` : `fino a ${f.kg || '?'} kg`, tipo: f.tipo, peso: Number(f.kg), costo: costi.length ? Math.min(...costi) : 0, costoMax: costi.length ? Math.max(...costi) : 0 }
   }), [fasce])
   function apriDuplica() {
     setDupTargetMode('nuovo'); setDupNome(`${corrieri.find((c: any) => c.id === corriereId)?.nome_contratto || 'Listino'} (cliente)`)

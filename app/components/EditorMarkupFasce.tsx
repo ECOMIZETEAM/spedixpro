@@ -9,7 +9,10 @@ import { normalizzaMarkup, creaApplicaMarkup } from '@/lib/markup-fasce'
 // fascia, calcolata con la STESSA funzione del server (creaApplicaMarkup): quello che vedi qui e' quello
 // che verra' salvato. Cosi' un valore inatteso si vede PRIMA di confermare — parliamo di soldi.
 
-export type FasciaMarkup = { key: string; label: string; tipo: string; peso: number; costo: number }
+// `costo` = prezzo della zona più ECONOMICA della fascia; `costoMax` = della più CARA. La maggiorazione
+// vale UGUALE su OGNI zona, ma le zone hanno costi molto diversi (es. da 48€ a 368€ nella stessa fascia):
+// mostrare solo il minimo faceva sembrare il salvato "sbagliato". Con min–max si vede il range reale.
+export type FasciaMarkup = { key: string; label: string; tipo: string; peso: number; costo: number; costoMax?: number }
 export type MarkupOut = { default: { mode: 'perc' | 'fisso'; valore: number } | null; perFascia: Record<string, { mode: string; valore: number }> }
 
 const num = (v: string) => Number(String(v).replace(',', '.')) || 0
@@ -89,13 +92,18 @@ export default function EditorMarkupFasce({ fasce, onChange, valoreIniziale }: {
             <th style={{ textAlign: 'left', padding: '7px 10px', fontWeight: 700, color: '#666', borderBottom: '1px solid #eee' }}>Fascia</th>
             <th style={{ textAlign: 'left', padding: '7px 8px', fontWeight: 700, color: '#666', borderBottom: '1px solid #eee' }}>Modo</th>
             <th style={{ textAlign: 'left', padding: '7px 8px', fontWeight: 700, color: '#666', borderBottom: '1px solid #eee' }}>Valore</th>
-            <th style={{ textAlign: 'right', padding: '7px 10px', fontWeight: 700, color: '#666', borderBottom: '1px solid #eee' }}>Anteprima (costo → cliente)</th>
+            <th style={{ textAlign: 'right', padding: '7px 10px', fontWeight: 700, color: '#666', borderBottom: '1px solid #eee' }}>Anteprima costo → cliente (min – max zone)</th>
           </tr></thead>
           <tbody>
             {fasce.map(f => {
               const cur = pf[f.key]
-              const nuovo = applica(f.costo, f.tipo, f.peso)
-              const sottocosto = num(cur?.valore || '') > 0 && nuovo < f.costo
+              const cMax = f.costoMax ?? f.costo
+              const haRange = cMax > f.costo + 0.001
+              const nuovoMin = applica(f.costo, f.tipo, f.peso)
+              const nuovoMax = applica(cMax, f.tipo, f.peso)
+              // "sotto costo" se la zona più economica scende sotto il suo costo (col fisso può capitare).
+              const sottocosto = num(cur?.valore || '') > 0 && nuovoMin < f.costo
+              const su = nuovoMin > f.costo
               return (
                 <tr key={f.key} style={{ borderBottom: '1px solid #f4f4f4' }}>
                   <td style={{ padding: '6px 10px', color: '#1a1a1a', fontWeight: 600 }}>{f.label}</td>
@@ -108,10 +116,10 @@ export default function EditorMarkupFasce({ fasce, onChange, valoreIniziale }: {
                     <input type="number" step="0.01" value={cur?.valore ?? ''} onChange={e => setPerFascia(f.key, { valore: e.target.value })} placeholder="0" style={{ ...inp, width: '80px', textAlign: 'right' }} />
                   </td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <span style={{ color: '#9ca3af' }}>{eur(f.costo)}</span>
+                    <span style={{ color: '#9ca3af' }}>{eur(f.costo)}{haRange ? ' – ' + eur(cMax) : ''}</span>
                     <span style={{ color: '#9ca3af' }}> → </span>
-                    <span style={{ fontWeight: 700, color: sottocosto ? '#b91c1c' : nuovo > f.costo ? '#15803d' : '#1a1a1a' }}>{eur(nuovo)}</span>
-                    {sottocosto && <span title="Sotto il costo: ci rimetti" style={{ marginLeft: '4px' }}>⚠</span>}
+                    <span style={{ fontWeight: 700, color: sottocosto ? '#b91c1c' : su ? '#15803d' : '#1a1a1a' }}>{eur(nuovoMin)}{haRange ? ' – ' + eur(nuovoMax) : ''}</span>
+                    {sottocosto && <span title="La zona più economica va sotto costo: ci rimetti" style={{ marginLeft: '4px' }}>⚠</span>}
                   </td>
                 </tr>
               )
@@ -119,7 +127,7 @@ export default function EditorMarkupFasce({ fasce, onChange, valoreIniziale }: {
           </tbody>
         </table>
       </div>
-      <div style={{ fontSize: '11px', color: '#888', marginTop: '6px' }}>L’anteprima usa un costo d’esempio per fascia (la stessa maggiorazione vale su tutte le zone di quella fascia).</div>
+      <div style={{ fontSize: '11px', color: '#888', marginTop: '6px' }}>La maggiorazione vale UGUALE su ogni zona della fascia. L’anteprima mostra il range <b>min – max</b> fra tutte le zone: nel listino finiscono valori dalla cifra minima alla massima qui sopra (non solo una).</div>
     </div>
   )
 }

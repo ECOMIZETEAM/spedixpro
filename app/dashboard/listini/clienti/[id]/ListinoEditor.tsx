@@ -219,7 +219,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       const raw = Array.isArray(d?.fasce) ? d.fasce : []
       const map = new Map<string, { tipo: string; peso: number; costi: number[] }>()
       for (const f of raw) { const tipo = f.tipo === 'oltre' ? 'oltre' : 'fino_a'; const peso = Number(f.peso_max); const k = `${tipo}_${peso}`; const pr = parseFloat(f.prezzo); if (!map.has(k)) map.set(k, { tipo, peso, costi: [] }); if (isFinite(pr) && pr > 0) map.get(k)!.costi.push(pr) }
-      setDcFasce(Array.from(map.values()).sort((a, b) => a.tipo === 'oltre' ? 1 : b.tipo === 'oltre' ? -1 : a.peso - b.peso).map(g => ({ key: `${g.tipo}_${g.peso}`, label: g.tipo === 'oltre' ? `oltre ${g.peso} kg` : `fino a ${g.peso} kg`, tipo: g.tipo, peso: g.peso, costo: g.costi.length ? Math.min(...g.costi) : 0 })))
+      setDcFasce(Array.from(map.values()).sort((a, b) => a.tipo === 'oltre' ? 1 : b.tipo === 'oltre' ? -1 : a.peso - b.peso).map(g => ({ key: `${g.tipo}_${g.peso}`, label: g.tipo === 'oltre' ? `oltre ${g.peso} kg` : `fino a ${g.peso} kg`, tipo: g.tipo, peso: g.peso, costo: g.costi.length ? Math.min(...g.costi) : 0, costoMax: g.costi.length ? Math.max(...g.costi) : 0 })))
     } catch { setDcFasce([]) }
     setDcLoad(false)
   }
@@ -237,7 +237,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   // Fasce per l'editor markup: base = i prezzi del listino di ORIGINE (il piu' basso fra le zone della fascia).
   const fasceMarkupCopia = useMemo(() => fasce.map(f => {
     const costi = Object.values(f.prezzi || {}).map((v:any)=>parseFloat(v)).filter((n:number)=>isFinite(n)&&n>0)
-    return { key: keyFasciaCopia(f), label: f.tipo==='oltre'?`oltre, ogni ${f.peso||'?'} kg`:`fino a ${f.peso||'?'} kg`, tipo: f.tipo, peso: Number(f.peso), costo: costi.length?Math.min(...costi):0 }
+    return { key: keyFasciaCopia(f), label: f.tipo==='oltre'?`oltre, ogni ${f.peso||'?'} kg`:`fino a ${f.peso||'?'} kg`, tipo: f.tipo, peso: Number(f.peso), costo: costi.length?Math.min(...costi):0, costoMax: costi.length?Math.max(...costi):0 }
   }), [fasce])
   async function apriCopia(c: any) {
     setCopia(c); setCopiaModo('esistente'); setCopiaTarget(''); setCopiaNome(''); setCopiaErr(''); setCopiaOk(''); setCopiaMarkup({ default: null, perFascia: {} })
@@ -274,7 +274,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   function dlSelCorr(id: string) {
     setDlCorrId(id); setDlMarkup({ default: null, perFascia: {} })
     const c = dlCorrieri.find((x:any)=>x.id===id)
-    const ff = (c?.fasce||[]).map((g:any)=>({ key: `${g.tipo}_${g.peso}`, label: g.tipo==='oltre'?`oltre ${g.peso} kg`:`fino a ${g.peso} kg`, tipo: g.tipo, peso: g.peso, costo: g.costo||0 }))
+    const ff = (c?.fasce||[]).map((g:any)=>({ key: `${g.tipo}_${g.peso}`, label: g.tipo==='oltre'?`oltre ${g.peso} kg`:`fino a ${g.peso} kg`, tipo: g.tipo, peso: g.peso, costo: g.costo||0, costoMax: g.costoMax ?? g.costo ?? 0 }))
     setDlFasce(ff)
   }
   async function confermaDaListino() {

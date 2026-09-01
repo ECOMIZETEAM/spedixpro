@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
     const m = byCorr.get(c.id) || new Map()
     const ff = Array.from(m.values())
       .sort((a: any, b: any) => a.tipo === 'oltre' ? 1 : b.tipo === 'oltre' ? -1 : a.peso - b.peso)
-      .map((g: any) => ({ tipo: g.tipo, peso: g.peso, costo: g.costi.length ? Math.min(...g.costi) : 0 }))
+      .map((g: any) => ({ tipo: g.tipo, peso: g.peso, costo: g.costi.length ? Math.min(...g.costi) : 0, costoMax: g.costi.length ? Math.max(...g.costi) : 0 }))
     return { id: c.id, nome_contratto: c.nome_contratto, fasce: ff }
   }).filter((c: any) => c.fasce.length > 0)
   // SOLO i corrieri con prezzi veri: un corriere agganciato ma SENZA fasce, offerto qui come sorgente
