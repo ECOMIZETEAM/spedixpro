@@ -1,5 +1,6 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 
 // La campanella legge /api/notifiche/mie e le divide in TAB per categoria, così i "Spedizione
 // consegnata" (ad alto volume) non affogano gli AVVISI importanti del master. Il pallino conta solo
@@ -27,6 +28,13 @@ export default function CampanellaNotifiche() {
   const [vistoAl, setVistoAl] = useState<string>('')   // created_at dell'ultima vista
   const [tab, setTab] = useState('avvisi')
   const box = useRef<HTMLDivElement>(null)
+  // Il pannello si disegna FUORI dal riquadro (createPortal su document.body): la topbar e le card
+  // hanno overflow:hidden e la tendina, restando dentro, veniva TAGLIATA. Posizionandola in fondo
+  // alla pagina e agganciandola al trigger, nessun contenitore la può più ritagliare.
+  const pannello = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const [montato, setMontato] = useState(false)
+  useEffect(() => { setMontato(true) }, [])
 
   useEffect(() => { try { setVistoAl(localStorage.getItem(VISTE_KEY) || '') } catch {} }, [])
 
@@ -43,11 +51,33 @@ export default function CampanellaNotifiche() {
 
   useEffect(() => {
     if (!aperto) return
-    const fuori = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setAperto(false) }
+    // Il pannello è portato fuori da `box`: un click al suo interno non è "fuori", va risparmiato.
+    const fuori = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (box.current?.contains(t) || pannello.current?.contains(t)) return
+      setAperto(false)
+    }
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setAperto(false) }
     document.addEventListener('mousedown', fuori)
     document.addEventListener('keydown', esc)
     return () => { document.removeEventListener('mousedown', fuori); document.removeEventListener('keydown', esc) }
+  }, [aperto])
+
+  // La posizione si aggancia al trigger all'apertura e si ricalcola mentre la pagina scorre: senza,
+  // il pannello (position:fixed) resterebbe fermo mentre tutto scivola sotto. Resta allineato a
+  // destra del trigger, come faceva il vecchio `right:0`.
+  useLayoutEffect(() => {
+    if (!aperto) { setPos(null); return }
+    const misura = () => {
+      const r = box.current?.getBoundingClientRect()
+      if (!r) return
+      const width = Math.min(360, window.innerWidth * 0.92)
+      setPos({ top: r.bottom + 8, left: Math.max(8, r.right - width) })
+    }
+    misura()
+    window.addEventListener('scroll', misura, true)
+    window.addEventListener('resize', misura)
+    return () => { window.removeEventListener('scroll', misura, true); window.removeEventListener('resize', misura) }
   }, [aperto])
 
   // Il pallino: solo le NON lette che contano davvero (tutto tranne le semplici consegne).
@@ -83,11 +113,11 @@ export default function CampanellaNotifiche() {
         )}
       </button>
 
-      {aperto && (
-        <div style={{
-          position: 'absolute', right: 0, top: 'calc(100% + 8px)', width: '360px', maxWidth: '92vw',
+      {aperto && montato && pos && createPortal(
+        <div ref={pannello} style={{
+          position: 'fixed', top: pos.top, left: pos.left, width: '360px', maxWidth: '92vw',
           background: '#fff', border: '1px solid #eee', borderRadius: '12px',
-          boxShadow: '0 8px 30px rgba(0,0,0,0.12)', overflow: 'hidden', zIndex: 50,
+          boxShadow: '0 8px 30px rgba(0,0,0,0.12)', overflow: 'hidden', zIndex: 1000000,
         }}>
           <div style={{ padding: '12px 16px 0', fontWeight: 700, fontSize: '14px', color: '#1a1a1a' }}>Notifiche</div>
           {/* TAB per categoria: le consegne (tante) non coprono più avvisi e contrassegni. */}
@@ -131,7 +161,7 @@ export default function CampanellaNotifiche() {
                 : <div key={n.id} style={base}>{contenuto}</div>
             })}
           </div>
-        </div>
+        </div>, document.body
       )}
     </div>
   )

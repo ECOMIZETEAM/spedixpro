@@ -1,5 +1,6 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
 import SelettoreArticoli, { type RigaArticolo, type ArticoloCat } from '@/app/components/SelettoreArticoli'
@@ -45,10 +46,47 @@ function iconaCorriere(nome:string): string | null {
   for (const [chiave,file] of regole) { if (n.includes(chiave)) return `/corrieri/${file}.png` }
   return null
 }
+
+// TENDINA DEI SUGGERIMENTI DISEGNATA FUORI DALLA CARD.
+// Le card di questa pagina hanno overflow:hidden, quindi una tendina di suggerimenti disegnata
+// dentro con position:absolute veniva TAGLIATA al bordo della card: si vedeva solo la prima riga.
+// La si disegna in fondo alla pagina (createPortal su document.body) con position:fixed, piazzata
+// sul campo con getBoundingClientRect e ricalcolata su scroll/resize, cosi' nessun contenitore la
+// puo' piu' ritagliare. Apre verso l'alto se sotto non c'e' spazio. Modello: SelectCercabile.tsx.
+function TendinaPortata({ anchor, aperta, maxHeight = 240, children }: { anchor: { current: HTMLInputElement | null }; aperta: boolean; maxHeight?: number; children: React.ReactNode }) {
+  const [pos, setPos] = useState<{top:number;left:number;width:number}|null>(null)
+  const [montato, setMontato] = useState(false)
+  useEffect(() => { setMontato(true) }, [])
+  useLayoutEffect(() => {
+    if (!aperta) { setPos(null); return }
+    const misura = () => {
+      const r = anchor.current?.getBoundingClientRect()
+      if (!r) return
+      const spazioSotto = window.innerHeight - r.bottom
+      const versoAlto = spazioSotto < maxHeight + 20 && r.top > spazioSotto
+      setPos({ top: versoAlto ? Math.max(8, r.top - maxHeight - 4) : r.bottom + 4, left: r.left, width: r.width })
+    }
+    misura()
+    window.addEventListener('scroll', misura, true)
+    window.addEventListener('resize', misura)
+    return () => { window.removeEventListener('scroll', misura, true); window.removeEventListener('resize', misura) }
+  }, [aperta, maxHeight, anchor])
+  if (!aperta || !montato || !pos) return null
+  return createPortal(
+    <div style={{position:'fixed',zIndex:1000000,top:pos.top,left:pos.left,width:pos.width,background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',maxHeight:maxHeight+'px',overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}}>
+      {children}
+    </div>, document.body)
+}
+
 export default function NuovaSpedizioneCliente() {
   const dialog = useDialog()
   const router = useRouter()
   const [clienteData, setClienteData] = useState<any>(null)
+  // Ancore per le tendine dei suggerimenti: servono a piazzare il pannello portato sul campo giusto.
+  const refMittNome = useRef<HTMLInputElement>(null)
+  const refMittCitta = useRef<HTMLInputElement>(null)
+  const refDestNome = useRef<HTMLInputElement>(null)
+  const refDestCitta = useRef<HTMLInputElement>(null)
   const [mitt, setMitt] = useState({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',email:'',telefono:''})
   const [suggMitt, setSuggMitt] = useState<any[]>([])   // rubrica mittenti
   const [showSuggMitt, setShowSuggMitt] = useState(false)
@@ -424,7 +462,7 @@ export default function NuovaSpedizioneCliente() {
             <div style={cardB}>
               <div style={{marginBottom:'12px',position:'relative'}}>
                 <label style={lbl}>Rif. Mittente</label>
-                <input value={mitt.nome} autoComplete="off"
+                <input ref={refMittNome} value={mitt.nome} autoComplete="off"
                   onChange={async e=>{
                     const v=e.target.value
                     setMitt(m=>({...m,nome:v}))
@@ -435,25 +473,23 @@ export default function NuovaSpedizioneCliente() {
                   onFocus={()=>{ if(suggMitt.length) setShowSuggMitt(true) }}
                   onBlur={()=>setTimeout(()=>setShowSuggMitt(false),200)}
                   style={inp}/>
-                {showSuggMitt && suggMitt.length>0 && (
-                  <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:50,background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',maxHeight:'240px',overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}}>
-                    {suggMitt.map((c:any,i:number)=>(
-                      <div key={i} onMouseDown={()=>{ setMitt(m=>({...m,nome:c.nome,indirizzo:c.indirizzo||m.indirizzo,citta:c.citta||m.citta,provincia:c.provincia||m.provincia,cap:c.cap||m.cap,email:c.email||m.email,telefono:c.telefono||m.telefono})); setShowSuggMitt(false) }}
-                        style={{padding:'8px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
-                        onMouseEnter={e=>(e.currentTarget.style.background='#f9fafb')}
-                        onMouseLeave={e=>(e.currentTarget.style.background='#fff')}>
-                        <div style={{fontWeight:600}}>{c.nome}</div>
-                        <div style={{color:'#999',fontSize:'11px'}}>{[c.indirizzo,c.citta,c.provincia&&`(${c.provincia})`,c.cap].filter(Boolean).join(' ')}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <TendinaPortata anchor={refMittNome} aperta={showSuggMitt && suggMitt.length>0} maxHeight={240}>
+                  {suggMitt.map((c:any,i:number)=>(
+                    <div key={i} onMouseDown={()=>{ setMitt(m=>({...m,nome:c.nome,indirizzo:c.indirizzo||m.indirizzo,citta:c.citta||m.citta,provincia:c.provincia||m.provincia,cap:c.cap||m.cap,email:c.email||m.email,telefono:c.telefono||m.telefono})); setShowSuggMitt(false) }}
+                      style={{padding:'8px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
+                      onMouseEnter={e=>(e.currentTarget.style.background='#f9fafb')}
+                      onMouseLeave={e=>(e.currentTarget.style.background='#fff')}>
+                      <div style={{fontWeight:600}}>{c.nome}</div>
+                      <div style={{color:'#999',fontSize:'11px'}}>{[c.indirizzo,c.citta,c.provincia&&`(${c.provincia})`,c.cap].filter(Boolean).join(' ')}</div>
+                    </div>
+                  ))}
+                </TendinaPortata>
               </div>
               <div style={{marginBottom:'12px'}}><label style={lbl}>Indirizzo</label><input value={mitt.indirizzo} onChange={e=>setMitt({...mitt,indirizzo:e.target.value})} style={inp}/></div>
               <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'8px',marginBottom:'12px'}}>
                 <div style={{position:'relative'}}>
                   <label style={lbl}>Città</label>
-                  <input value={mitt.citta} autoComplete="off"
+                  <input ref={refMittCitta} value={mitt.citta} autoComplete="off"
                     onChange={async e=>{
                       const v=e.target.value
                       setMitt(m=>({...m,citta:v}))
@@ -464,18 +500,16 @@ export default function NuovaSpedizioneCliente() {
                     onFocus={()=>{ if(suggComuniMitt.length) setShowComuneMitt(true) }}
                     onBlur={()=>setTimeout(()=>setShowComuneMitt(false),200)}
                     style={inp}/>
-                  {showComuneMitt && suggComuniMitt.length>0 && (
-                    <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:50,background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',maxHeight:'220px',overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}}>
-                      {suggComuniMitt.map((c:any,i:number)=>(
-                        <div key={i} onMouseDown={()=>{ setMitt(m=>({...m,citta:c.nome,provincia:c.sigla,cap:c.cap})); setShowComuneMitt(false) }}
-                          style={{padding:'7px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
-                          onMouseEnter={e=>(e.currentTarget.style.background='#f9fafb')}
-                          onMouseLeave={e=>(e.currentTarget.style.background='#fff')}>
-                          {c.nome} <span style={{color:'#999'}}>({c.sigla}) - {c.cap}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <TendinaPortata anchor={refMittCitta} aperta={showComuneMitt && suggComuniMitt.length>0} maxHeight={220}>
+                    {suggComuniMitt.map((c:any,i:number)=>(
+                      <div key={i} onMouseDown={()=>{ setMitt(m=>({...m,citta:c.nome,provincia:c.sigla,cap:c.cap})); setShowComuneMitt(false) }}
+                        style={{padding:'7px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
+                        onMouseEnter={e=>(e.currentTarget.style.background='#f9fafb')}
+                        onMouseLeave={e=>(e.currentTarget.style.background='#fff')}>
+                        {c.nome} <span style={{color:'#999'}}>({c.sigla}) - {c.cap}</span>
+                      </div>
+                    ))}
+                  </TendinaPortata>
                 </div>
                 <div><label style={lbl}>Prov.</label><input value={mitt.provincia} onChange={e=>setMitt({...mitt,provincia:e.target.value})} style={inp}/></div>
                 <div><label style={lbl}>CAP</label><input value={mitt.cap} onChange={e=>setMitt({...mitt,cap:e.target.value})} style={inp}/></div>
@@ -514,7 +548,7 @@ export default function NuovaSpedizioneCliente() {
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'12px'}}>
                 <div style={{position:'relative'}}>
                   <label style={lbl}>Nominativo *</label>
-                  <input value={dest.nome} autoComplete="off" placeholder="Mario Rossi"
+                  <input ref={refDestNome} value={dest.nome} autoComplete="off" placeholder="Mario Rossi"
                     onChange={async e=>{
                       const v=e.target.value
                       setDest(d=>({...d,nome:v}))
@@ -525,19 +559,17 @@ export default function NuovaSpedizioneCliente() {
                     onFocus={()=>{ if(suggDest.length) setShowSuggDest(true) }}
                     onBlur={()=>setTimeout(()=>setShowSuggDest(false),200)}
                     style={inp}/>
-                  {showSuggDest && suggDest.length>0 && (
-                    <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:50,background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',maxHeight:'240px',overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}}>
-                      {suggDest.map((c:any,i:number)=>(
-                        <div key={i} onMouseDown={()=>{ setDest(d=>({...d,nome:c.nome,indirizzo:c.indirizzo||d.indirizzo,citta:c.citta||d.citta,provincia:c.provincia||d.provincia,cap:c.cap||d.cap,email:c.email||d.email,telefono:c.telefono||d.telefono})); setShowSuggDest(false); setTariffe([]); setSelected(null) }}
-                          style={{padding:'8px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
-                          onMouseEnter={e=>(e.currentTarget.style.background='#f9fafb')}
-                          onMouseLeave={e=>(e.currentTarget.style.background='#fff')}>
-                          <div style={{fontWeight:600}}>{c.nome}</div>
-                          <div style={{color:'#999',fontSize:'11px'}}>{[c.indirizzo,c.citta,c.provincia&&`(${c.provincia})`,c.cap].filter(Boolean).join(' ')}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <TendinaPortata anchor={refDestNome} aperta={showSuggDest && suggDest.length>0} maxHeight={240}>
+                    {suggDest.map((c:any,i:number)=>(
+                      <div key={i} onMouseDown={()=>{ setDest(d=>({...d,nome:c.nome,indirizzo:c.indirizzo||d.indirizzo,citta:c.citta||d.citta,provincia:c.provincia||d.provincia,cap:c.cap||d.cap,email:c.email||d.email,telefono:c.telefono||d.telefono})); setShowSuggDest(false); setTariffe([]); setSelected(null) }}
+                        style={{padding:'8px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
+                        onMouseEnter={e=>(e.currentTarget.style.background='#f9fafb')}
+                        onMouseLeave={e=>(e.currentTarget.style.background='#fff')}>
+                        <div style={{fontWeight:600}}>{c.nome}</div>
+                        <div style={{color:'#999',fontSize:'11px'}}>{[c.indirizzo,c.citta,c.provincia&&`(${c.provincia})`,c.cap].filter(Boolean).join(' ')}</div>
+                      </div>
+                    ))}
+                  </TendinaPortata>
                 </div>
                 <div><label style={lbl}>Paese</label>
                   <select value={dest.paese} onChange={e=>{ const paese=e.target.value; setDest(d=>({...d, paese, provincia: paese==='IT' ? (d.paese==='IT'?d.provincia:'') : paese})); setTariffe([]); setSelected(null) }} style={inp}>
@@ -549,7 +581,7 @@ export default function NuovaSpedizioneCliente() {
               <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'8px',marginBottom:'12px'}}>
                 <div style={{position:'relative'}}>
                   <label style={lbl}>Città *</label>
-                  <input value={dest.citta} autoComplete="off"
+                  <input ref={refDestCitta} value={dest.citta} autoComplete="off"
                     onChange={async e=>{
                       const v=e.target.value
                       setDest(d=>({...d,citta:v}))
@@ -560,18 +592,16 @@ export default function NuovaSpedizioneCliente() {
                     onFocus={()=>{ if(suggComuni.length) setShowSugg(true) }}
                     onBlur={()=>setTimeout(()=>setShowSugg(false),200)}
                     placeholder="Roma" style={inp}/>
-                  {showSugg && suggComuni.length>0 && (
-                    <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:50,background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',maxHeight:'220px',overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}}>
-                      {suggComuni.map((c:any,i:number)=>(
-                        <div key={i} onMouseDown={()=>{ setDest(d=>({...d,citta:c.nome,provincia:c.sigla,cap:c.cap})); setShowSugg(false) }}
-                          style={{padding:'7px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
-                          onMouseEnter={e=>(e.currentTarget.style.background='#f9fafb')}
-                          onMouseLeave={e=>(e.currentTarget.style.background='#fff')}>
-                          {c.nome} <span style={{color:'#999'}}>({c.sigla}) - {c.cap}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <TendinaPortata anchor={refDestCitta} aperta={showSugg && suggComuni.length>0} maxHeight={220}>
+                    {suggComuni.map((c:any,i:number)=>(
+                      <div key={i} onMouseDown={()=>{ setDest(d=>({...d,citta:c.nome,provincia:c.sigla,cap:c.cap})); setShowSugg(false) }}
+                        style={{padding:'7px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
+                        onMouseEnter={e=>(e.currentTarget.style.background='#f9fafb')}
+                        onMouseLeave={e=>(e.currentTarget.style.background='#fff')}>
+                        {c.nome} <span style={{color:'#999'}}>({c.sigla}) - {c.cap}</span>
+                      </div>
+                    ))}
+                  </TendinaPortata>
                 </div>
                 <div><label style={lbl}>Prov. *</label><input value={dest.provincia} onChange={e=>setDest({...dest,provincia:e.target.value})} placeholder="RM" style={inp}/></div>
                 <div><label style={lbl}>CAP *</label><input value={dest.cap} onChange={e=>setDest({...dest,cap:e.target.value})} placeholder="00100" style={inp}/></div>

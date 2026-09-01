@@ -1,5 +1,6 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 
 type Props = { dal: string, al: string, onChange: (dal: string, al: string) => void }
 
@@ -28,12 +29,16 @@ function inRange(d: Date, s: Date | null, e: Date | null) {
 export default function DateRangePicker({ dal, al, onChange }: Props) {
   const oggi = new Date()
   const [open, setOpen] = useState(false)
-  const [alignRight, setAlignRight] = useState(true)
   const [start, setStart] = useState<Date | null>(fromStr(dal) || oggi)
   const [end, setEnd] = useState<Date | null>(fromStr(al) || oggi)
   const [meseSx, setMeseSx] = useState(new Date(oggi.getFullYear(), oggi.getMonth()-1, 1))
   const [meseDx, setMeseDx] = useState(new Date(oggi.getFullYear(), oggi.getMonth(), 1))
   const ref = useRef<HTMLDivElement>(null)
+  const pannelloRef = useRef<HTMLDivElement>(null)
+  // IL PANNELLO SI DISEGNA FUORI DAL RIQUADRO: schede/topbar/card hanno overflow:hidden e tagliavano
+  // il calendario. Portato su document.body con position:fixed, nessun contenitore lo ritaglia piu'.
+  const [pos, setPos] = useState<{ top: number, left?: number, right?: number } | null>(null)
+  const [montato, setMontato] = useState(false)
 
   // default: se non c'e' nulla, imposta oggi-oggi
   useEffect(() => {
@@ -41,13 +46,37 @@ export default function DateRangePicker({ dal, al, onChange }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => { setMontato(true) }, [])
+
   useEffect(() => {
+    if (!open) return
     function onClickFuori(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      const t = e.target as Node
+      // Il pannello e' portato su document.body: senza controllarlo, un click al suo interno
+      // (scelta giorno, preset) risulterebbe "fuori" dal riquadro e chiuderebbe la tendina.
+      if (ref.current?.contains(t) || pannelloRef.current?.contains(t)) return
+      setOpen(false)
     }
     document.addEventListener('mousedown', onClickFuori)
     return () => document.removeEventListener('mousedown', onClickFuori)
-  }, [])
+  }, [open])
+
+  // Posizione calcolata dal trigger, ricalcolata su scroll(capture)+resize: come SelectCercabile,
+  // altrimenti il pannello resterebbe fermo mentre la pagina scivola sotto.
+  useLayoutEffect(() => {
+    if (!open) { setPos(null); return }
+    const misura = () => {
+      const r = ref.current?.getBoundingClientRect()
+      if (!r) return
+      // Allineamento a destra se il campo sta nella meta' destra dello schermo, come prima.
+      const versoDx = r.left > window.innerWidth / 2
+      setPos({ top: r.bottom + 4, ...(versoDx ? { right: window.innerWidth - r.right } : { left: r.left }) })
+    }
+    misura()
+    window.addEventListener('scroll', misura, true)
+    window.addEventListener('resize', misura)
+    return () => { window.removeEventListener('scroll', misura, true); window.removeEventListener('resize', misura) }
+  }, [open])
 
   function clickGiorno(d: Date) {
     if (!start || (start && end)) { setStart(d); setEnd(null) }
@@ -125,14 +154,14 @@ export default function DateRangePicker({ dal, al, onChange }: Props) {
 
   return (
     <div ref={ref} style={{ position:'relative', display:'inline-block' }}>
-      <div onClick={(e)=>{ if(!open){ const r=(e.currentTarget as HTMLElement).getBoundingClientRect(); setAlignRight(r.left > window.innerWidth/2) } setOpen(!open) }} style={{
+      <div onClick={()=> setOpen(o=>!o)} style={{
         padding:'7px 12px', border:'1px solid #d1d5db', borderRadius:'6px', fontSize:'13px',
         color:'#1a1a1a', background:'#fff', cursor:'pointer', display:'flex', alignItems:'center', gap:'8px', whiteSpace:'nowrap'
       }}>
         <span>📅</span><span style={{ color:'#1a1a1a' }}>{labelText}</span><span style={{ color:'#1a1a1a' }}>▾</span>
       </div>
-      {open && (
-        <div style={{ position:'absolute', top:'40px', ...(alignRight ? { right:0 } : { left:0 }), zIndex:1000, background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px', boxShadow:'0 8px 24px rgba(0,0,0,0.15)', display:'flex' }}>
+      {open && montato && pos && createPortal(
+        <div ref={pannelloRef} style={{ position:'fixed', top: pos.top, ...(pos.right!=null ? { right: pos.right } : { left: pos.left }), zIndex:1000000, background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px', boxShadow:'0 8px 24px rgba(0,0,0,0.15)', display:'flex' }}>
           <div style={{ display:'flex' }}>
             {calendario(meseSx, setMeseSx, true)}
             {calendario(meseDx, setMeseDx, false)}
@@ -146,8 +175,7 @@ export default function DateRangePicker({ dal, al, onChange }: Props) {
               <button onClick={applica} style={{ flex:1, padding:'6px', background:'#f97316', color:'#fff', border:'none', borderRadius:'5px', fontSize:'12px', fontWeight:'700', cursor:'pointer' }}>Applica</button>
             </div>
           </div>
-        </div>
-      )}
+        </div>, document.body)}
     </div>
   )
 }

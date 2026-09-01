@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import SelectCercabile from '@/app/components/SelectCercabile'
 
 const inp = {width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const lbl = {fontSize:'11.5px',fontWeight:'600' as const,color:'#666',display:'block' as const,marginBottom:'4px'}
@@ -206,12 +207,12 @@ export default function NuovoRitiroPage() {
             <div style={cardTitle}>Dati Mittente</div>
             <div style={{ marginBottom: '14px' }}>
               <label style={lbl}>Ritiro per</label>
-              <select value={ritiroPer} onChange={e => selezionaRitiroPer(e.target.value)} style={inp}>
+              <SelectCercabile value={ritiroPer} onChange={e => selezionaRitiroPer(e.target.value)} style={inp}>
                 <option value="__proprio__">— Io (ritiro per me) —</option>
                 {clientiList.map((c: any) => (
                   <option key={c.id} value={c.id}>{c.ragione_sociale || c.nome}{c.is_master ? ' — sotto-master' : ''}</option>
                 ))}
-              </select>
+              </SelectCercabile>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
               <div><label style={lbl}>Rif. Mittente *</label><input value={mittNome} onChange={e => setMittNome(e.target.value)} style={inp} /></div>
@@ -277,10 +278,10 @@ export default function NuovoRitiroPage() {
 
           {!loadingSped && spedizioni.length > 0 && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '8px' }}>
-              <select value={fCliente} onChange={e=>setFCliente(e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
+              <SelectCercabile value={fCliente} onChange={e=>setFCliente(e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
                 <option value="">Tutti i clienti/master</option>
                 {optClienti.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
-              </select>
+              </SelectCercabile>
               <select value={fCorriere} onChange={e=>setFCorriere(e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
                 <option value="">Tutti i contratti</option>
                 {optCorrieri.map(c => <option key={c} value={c}>{c}</option>)}

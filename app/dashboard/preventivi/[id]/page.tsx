@@ -1,5 +1,6 @@
 'use client'
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams } from 'next/navigation'
 
 // EDITOR PREVENTIVO (Fase 2 + prezzi completi): dettagli + sezioni customizzabili + PREZZI = listino
@@ -45,6 +46,11 @@ export default function EditorPreventivo() {
   const [entitaLoad, setEntitaLoad] = useState(false)
   const [cercaCli, setCercaCli] = useState('')
   const [pickFocus, setPickFocus] = useState(false)
+  // Il pannello dei suggerimenti si disegna via portal su document.body (position:fixed): dentro la
+  // card ha overflow che lo taglierebbe. Ref sul campo per calcolarne la posizione dal rect.
+  const pickRef = useRef<HTMLDivElement>(null)
+  const [pickPos, setPickPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const [montato, setMontato] = useState(false)
   const [listinoConsigliato, setListinoConsigliato] = useState<{ id: string; nome: string } | null>(null)
   // dest_tipo per il backend, derivato dai due switch.
   const destTipoSave = destKind === 'cliente' ? (entMode === 'nuovo' ? 'cliente_nuovo' : 'cliente') : (entMode === 'nuovo' ? 'master_nuovo' : 'master')
@@ -113,6 +119,24 @@ export default function EditorPreventivo() {
   }
   useEffect(() => { carica() }, [id])
   useEffect(() => { fetch('/api/listini/lista').then(r => r.json()).then(d => setListiniDisp(Array.isArray(d) ? d : [])).catch(() => {}) }, [])
+  useEffect(() => { setMontato(true) }, [])
+  // Posizione del pannello suggerimenti calcolata dal campo, ricalcolata su scroll(capture)+resize;
+  // se sotto non c'e' spazio si apre verso l'alto (come SelectCercabile).
+  useEffect(() => {
+    if (!pickFocus) { setPickPos(null); return }
+    const misura = () => {
+      const r = pickRef.current?.getBoundingClientRect()
+      if (!r) return
+      const alto = 260
+      const spazioSotto = window.innerHeight - r.bottom
+      const versoAlto = spazioSotto < alto + 20 && r.top > spazioSotto
+      setPickPos({ top: versoAlto ? Math.max(8, r.top - alto - 4) : r.bottom + 4, left: r.left, width: r.width })
+    }
+    misura()
+    window.addEventListener('scroll', misura, true)
+    window.addEventListener('resize', misura)
+    return () => { window.removeEventListener('scroll', misura, true); window.removeEventListener('resize', misura) }
+  }, [pickFocus])
 
   // ── Sezioni ──
   function aggiungiSezione(preset?: 'termini' | 'contatti') {
@@ -183,10 +207,10 @@ export default function EditorPreventivo() {
       <button onClick={cambiaEntita} style={{ background: 'none', border: 'none', color: '#f97316', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>cambia</button>
     </div>
   ) : (
-    <div style={{ position: 'relative' }}>
+    <div ref={pickRef} style={{ position: 'relative' }}>
       <input value={cercaCli} onChange={e => setCercaCli(e.target.value)} onFocus={() => { setPickFocus(true); caricaEntita() }} onBlur={() => setTimeout(() => setPickFocus(false), 150)} placeholder={entitaLoad ? 'Carico…' : (destKind === 'master' ? '🔍  Cerca un sotto-master…' : '🔍  Cerca cliente per nome, codice o email…')} style={inp} />
-      {pickFocus && (
-        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, background: '#fff', border: '1px solid #d5d5d5', borderTop: 'none', borderRadius: '0 0 8px 8px', maxHeight: '260px', overflow: 'auto', boxShadow: '0 8px 22px rgba(0,0,0,0.12)' }}>
+      {pickFocus && montato && pickPos && createPortal(
+        <div style={{ position: 'fixed', top: pickPos.top, left: pickPos.left, width: pickPos.width, zIndex: 1000000, background: '#fff', border: '1px solid #d5d5d5', borderRadius: '8px', maxHeight: '260px', overflow: 'auto', boxShadow: '0 8px 22px rgba(0,0,0,0.12)' }}>
           {entitaFiltrate.length === 0 ? <div style={{ padding: '10px 12px', fontSize: '12.5px', color: '#999' }}>{entitaLoad ? 'Carico…' : 'Nessun risultato.'}</div> : entitaFiltrate.slice(0, 50).map((c: any) => (
             <div key={c.id} onMouseDown={e => e.preventDefault()} onClick={() => scegliEntita(c)} style={{ padding: '9px 12px', fontSize: '13px', color: '#1a1a1a', cursor: 'pointer', borderBottom: '1px solid #f2f2f2' }}>
               <span style={{ fontWeight: 600 }}>{c.ragione_sociale}</span>
@@ -194,7 +218,7 @@ export default function EditorPreventivo() {
             </div>
           ))}
           {entitaFiltrate.length > 50 && <div style={{ padding: '8px 12px', fontSize: '11.5px', color: '#999' }}>…affina la ricerca ({entitaFiltrate.length} risultati)</div>}
-        </div>
+        </div>, document.body
       )}
     </div>
   )

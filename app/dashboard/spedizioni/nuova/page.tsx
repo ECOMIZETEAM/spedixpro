@@ -1,5 +1,6 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import { useRouter } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
@@ -48,6 +49,47 @@ const CARRIERS: Record<string,{nome:string,colore:string}> = {
 // all'utente ('EASYPARCEL'). Ogni provider ha la sua sigla neutra.
 const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':t==='easyparcel'?'V':(t||'').toUpperCase()
 
+// I SUGGERIMENTI SI DISEGNANO FUORI DAL RIQUADRO.
+// Le card di questa pagina nascondono cio' che esce dai bordi (overflow:hidden): un pannello di
+// autocomplete disegnato dentro con position:absolute veniva TAGLIATO al bordo della card — si
+// vedevano una o due voci, il resto no. Come in SelectCercabile lo si disegna in fondo alla pagina
+// (createPortal su document.body) con position:fixed, posizionato sul campo con getBoundingClientRect
+// e ricalcolato mentre si scorre: cosi' nessun contenitore lo puo' piu' ritagliare. Comportamento
+// identico a prima (apertura/chiusura e scelta restano nei gestori dell'input): cambia solo DOVE
+// viene disegnato il pannello.
+function TendinaSugg({ anchorRef, aperto, children }: {
+  anchorRef: { current: HTMLInputElement | null }
+  aperto: boolean
+  children: React.ReactNode
+}) {
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const [montato, setMontato] = useState(false)
+  useEffect(() => { setMontato(true) }, [])
+  useLayoutEffect(() => {
+    if (!aperto) { setPos(null); return }
+    const misura = () => {
+      const r = anchorRef.current?.getBoundingClientRect()
+      if (!r) return
+      // Se sotto non c'e' spazio si apre VERSO L'ALTO (campo in fondo alla pagina / schermo corto),
+      // altrimenti il pannello finirebbe fuori dallo schermo.
+      const spazioSotto = window.innerHeight - r.bottom
+      const versoAlto = spazioSotto < 200 && r.top > spazioSotto
+      setPos({ top: versoAlto ? Math.max(8, r.top - 244) : r.bottom + 2, left: r.left, width: r.width })
+    }
+    misura()
+    window.addEventListener('scroll', misura, true)
+    window.addEventListener('resize', misura)
+    return () => { window.removeEventListener('scroll', misura, true); window.removeEventListener('resize', misura) }
+  }, [aperto, anchorRef])
+  if (!aperto || !montato || !pos) return null
+  return createPortal(
+    <div style={{ position: 'fixed', zIndex: 1000000, top: pos.top, left: pos.left, width: pos.width, maxWidth: 'calc(100vw - 16px)', background: '#fff', border: '1px solid #d1d5db', borderRadius: '6px', maxHeight: '240px', overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+      {children}
+    </div>,
+    document.body
+  )
+}
+
 export default function NuovaSpedizionePage() {
   const dialog = useDialog()
   const router = useRouter()
@@ -88,6 +130,12 @@ export default function NuovaSpedizionePage() {
   }, [dest.telefono])
   const [suggMitt, setSuggMitt] = useState<any[]>([])   // rubrica mittenti
   const [showSuggMitt, setShowSuggMitt] = useState(false)
+  // Riferimenti ai campi che aprono un autocomplete: servono a posizionare il pannello portato in
+  // fondo alla pagina (getBoundingClientRect), cosi' l'overflow:hidden delle card non lo taglia piu'.
+  const rifMittRef = useRef<HTMLInputElement>(null)     // Rif. Mittente (rubrica mittenti)
+  const cittaMittRef = useRef<HTMLInputElement>(null)   // Citta' mittente (comuni)
+  const nomeDestRef = useRef<HTMLInputElement>(null)    // Nominativo destinatario (rubrica destinatari)
+  const cittaDestRef = useRef<HTMLInputElement>(null)   // Citta' destinatario (comuni)
   const [richiediRitiro, setRichiediRitiro] = useState(false)
   const [ritiroData, setRitiroData] = useState(() => { const d = new Date(); while ([0,6].includes(d.getDay())) d.setDate(d.getDate()+1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })   // weekend -> primo giorno lavorativo (data LOCALE, non UTC)
   const [ritiroOrario, setRitiroOrario] = useState('mattina')
@@ -443,7 +491,7 @@ export default function NuovaSpedizionePage() {
               </div>
               <div style={{marginBottom:'12px',position:'relative'}}>
                 <label style={lbl}>Rif. Mittente</label>
-                <input value={mitt.nome} autoComplete="off"
+                <input ref={rifMittRef} value={mitt.nome} autoComplete="off"
                   onChange={async e=>{
                     const v=e.target.value
                     setMitt(m=>({...m,nome:v}))
@@ -454,8 +502,7 @@ export default function NuovaSpedizionePage() {
                   onFocus={()=>{ if(suggMitt.length) setShowSuggMitt(true) }}
                   onBlur={()=>setTimeout(()=>setShowSuggMitt(false),200)}
                   style={inp}/>
-                {showSuggMitt && suggMitt.length>0 && (
-                  <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:50,background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',maxHeight:'240px',overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}}>
+                <TendinaSugg anchorRef={rifMittRef} aperto={showSuggMitt && suggMitt.length>0}>
                     {suggMitt.map((c:any,i:number)=>(
                       <div key={i} onMouseDown={()=>{ setMitt(m=>({...m,nome:c.nome,indirizzo:c.indirizzo||m.indirizzo,citta:c.citta||m.citta,provincia:c.provincia||m.provincia,cap:c.cap||m.cap,email:c.email||m.email,telefono:c.telefono||m.telefono})); setShowSuggMitt(false) }}
                         style={{padding:'8px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
@@ -465,14 +512,13 @@ export default function NuovaSpedizionePage() {
                         <div style={{color:'#999',fontSize:'11px'}}>{[c.indirizzo,c.citta,c.provincia&&`(${c.provincia})`,c.cap].filter(Boolean).join(' ')}</div>
                       </div>
                     ))}
-                  </div>
-                )}
+                </TendinaSugg>
               </div>
               <div style={{marginBottom:'12px'}}><label style={lbl}>Indirizzo</label><input value={mitt.indirizzo} onChange={e=>setMitt({...mitt,indirizzo:e.target.value})} style={inp}/></div>
               <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'8px',marginBottom:'12px'}}>
                 <div style={{position:'relative'}}>
                   <label style={lbl}>Città</label>
-                  <input value={mitt.citta} autoComplete="off"
+                  <input ref={cittaMittRef} value={mitt.citta} autoComplete="off"
                     onChange={async e=>{
                       const v=e.target.value
                       setMitt(m=>({...m,citta:v}))
@@ -483,8 +529,7 @@ export default function NuovaSpedizionePage() {
                     onFocus={()=>{ if(suggComuniMitt.length) setShowComuneMitt(true) }}
                     onBlur={()=>setTimeout(()=>setShowComuneMitt(false),200)}
                     style={inp}/>
-                  {showComuneMitt && suggComuniMitt.length>0 && (
-                    <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:50,background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',maxHeight:'220px',overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}}>
+                  <TendinaSugg anchorRef={cittaMittRef} aperto={showComuneMitt && suggComuniMitt.length>0}>
                       {suggComuniMitt.map((c:any,i:number)=>(
                         <div key={i} onMouseDown={()=>{ setMitt(m=>({...m,citta:c.nome,provincia:c.sigla,cap:c.cap})); setShowComuneMitt(false) }}
                           style={{padding:'7px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
@@ -493,8 +538,7 @@ export default function NuovaSpedizionePage() {
                           {c.nome} <span style={{color:'#999'}}>({c.sigla}) - {c.cap}</span>
                         </div>
                       ))}
-                    </div>
-                  )}
+                  </TendinaSugg>
                 </div>
                 <div><label style={lbl}>Prov.</label><input value={mitt.provincia} onChange={e=>setMitt({...mitt,provincia:e.target.value})} style={inp}/></div>
                 <div><label style={lbl}>CAP</label><input value={mitt.cap} onChange={e=>setMitt({...mitt,cap:e.target.value})} style={inp}/></div>
@@ -533,7 +577,7 @@ export default function NuovaSpedizionePage() {
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'12px'}}>
                 <div style={{position:'relative'}}>
                   <label style={lbl}>Nominativo *</label>
-                  <input value={dest.nome} autoComplete="off"
+                  <input ref={nomeDestRef} value={dest.nome} autoComplete="off"
                     onChange={async e=>{
                       const v=e.target.value
                       setDest(d=>({...d,nome:v}))
@@ -544,8 +588,7 @@ export default function NuovaSpedizionePage() {
                     onFocus={()=>{ if(suggDest.length) setShowSuggDest(true) }}
                     onBlur={()=>setTimeout(()=>setShowSuggDest(false),200)}
                     placeholder="Mario Rossi" style={inp}/>
-                  {showSuggDest && suggDest.length>0 && (
-                    <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:50,background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',maxHeight:'240px',overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}}>
+                  <TendinaSugg anchorRef={nomeDestRef} aperto={showSuggDest && suggDest.length>0}>
                       {suggDest.map((c:any,i:number)=>(
                         <div key={i} onMouseDown={()=>{ setDest(d=>({...d,nome:c.nome,indirizzo:c.indirizzo||d.indirizzo,citta:c.citta||d.citta,provincia:c.provincia||d.provincia,cap:c.cap||d.cap,paese:c.paese||d.paese,email:c.email||d.email,telefono:c.telefono||d.telefono})); setShowSuggDest(false) }}
                           style={{padding:'8px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
@@ -558,8 +601,7 @@ export default function NuovaSpedizionePage() {
                           <div style={{color:'#999',fontSize:'11px'}}>{[c.indirizzo,c.citta,c.provincia&&`(${c.provincia})`,c.cap].filter(Boolean).join(' ')}</div>
                         </div>
                       ))}
-                    </div>
-                  )}
+                  </TendinaSugg>
                 </div>
                 <div><label style={lbl}>Paese</label>
                   <select value={dest.paese} onChange={e=>{ const paese=e.target.value; setDest(d=>({...d, paese, provincia: paese==='IT' ? (d.paese==='IT'?d.provincia:'') : paese})); setTariffe([]); setSelected(null) }} style={inp}>
@@ -571,7 +613,7 @@ export default function NuovaSpedizionePage() {
               <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'8px',marginBottom:'12px'}}>
                 <div style={{position:'relative'}}>
                   <label style={lbl}>Città *</label>
-                  <input value={dest.citta} autoComplete="off"
+                  <input ref={cittaDestRef} value={dest.citta} autoComplete="off"
                     onChange={async e=>{
                       const v=e.target.value
                       setDest(d=>({...d,citta:v}))
@@ -582,8 +624,7 @@ export default function NuovaSpedizionePage() {
                     onFocus={()=>{ if(suggComuni.length) setShowSugg(true) }}
                     onBlur={()=>setTimeout(()=>setShowSugg(false),200)}
                     placeholder="Roma" style={inp}/>
-                  {showSugg && suggComuni.length>0 && (
-                    <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:50,background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',maxHeight:'220px',overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}}>
+                  <TendinaSugg anchorRef={cittaDestRef} aperto={showSugg && suggComuni.length>0}>
                       {suggComuni.map((c:any,i:number)=>(
                         <div key={i} onMouseDown={()=>{ setDest(d=>({...d,citta:c.nome,provincia:c.sigla,cap:c.cap})); setShowSugg(false) }}
                           style={{padding:'7px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
@@ -592,8 +633,7 @@ export default function NuovaSpedizionePage() {
                           {c.nome} <span style={{color:'#999'}}>({c.sigla}) - {c.cap}</span>
                         </div>
                       ))}
-                    </div>
-                  )}
+                  </TendinaSugg>
                 </div>
                 <div><label style={lbl}>Prov. *</label><input value={dest.provincia} onChange={e=>setDest({...dest,provincia:e.target.value})} placeholder="RM" style={inp}/></div>
                 <div><label style={lbl}>CAP *</label><input value={dest.cap} onChange={e=>setDest({...dest,cap:e.target.value})} placeholder="00100" style={inp}/></div>

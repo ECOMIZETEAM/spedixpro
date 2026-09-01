@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
+import SelectCercabile from '@/app/components/SelectCercabile'
 
 interface Cliente { id: string; ragione_sociale: string; credito_sms: number }
 interface Mov { tipo: string; descrizione: string; importo: number; quantita_sms: number | null; saldo_dopo: number | null; cliente_id: string | null; created_at: string }
@@ -160,10 +161,10 @@ export default function NotificheSmsPage() {
         <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', marginBottom: '4px' }}>Dai SMS a un cliente</div>
         <div style={{ fontSize: '12.5px', color: '#6b7280', marginBottom: '12px' }}>I tuoi clienti non comprano da soli: gli SMS glieli giri tu, dal tuo credito.</div>
         <label style={lbl}>Cliente</label>
-        <select value={clienteSel} onChange={e => setClienteSel(e.target.value)} style={{ ...inp, width: '100%', marginBottom: '10px' }}>
+        <SelectCercabile value={clienteSel} onChange={e => setClienteSel(e.target.value)} style={{ ...inp, width: '100%', marginBottom: '10px' }}>
           <option value="">— seleziona —</option>
           {(dati?.clienti || []).map(c => <option key={c.id} value={c.id}>{c.ragione_sociale} ({Math.floor(Number(c.credito_sms || 0) / costoSms)} SMS)</option>)}
-        </select>
+        </SelectCercabile>
         <div style={{ display: 'flex', gap: '8px' }}>
           <input value={smsTrasf} onChange={e => setSmsTrasf(e.target.value)} placeholder="Quanti SMS" inputMode="numeric" style={{ ...inp, flex: 1 }} />
           <button onClick={trasferisci} disabled={busy} style={btn}>Dai</button>
