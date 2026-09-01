@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
+import DestinazioniWidget from '@/app/components/DestinazioniWidget'
 export default function ClienteDashboard() {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -189,6 +190,9 @@ export default function ClienteDashboard() {
           </table>
         </div>
       </div>
+
+      {/* Destinazioni principali — solo le spedizioni di questo cliente */}
+      <DestinazioniWidget />
     </div>
   )
 }

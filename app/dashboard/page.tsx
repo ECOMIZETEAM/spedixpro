@@ -5,6 +5,7 @@ import ReportGuadagno from '@/app/components/ReportGuadagno'
 import GuadagnoChart from '@/app/components/GuadagnoChart'
 import BannerSms from '@/app/components/BannerSms'
 import GuadagnoAgente from '@/app/components/GuadagnoAgente'
+import DestinazioniWidget from '@/app/components/DestinazioniWidget'
 
 export default function Dashboard() {
   const [data, setData] = useState<any>(null)
@@ -349,6 +350,9 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
+
+      {/* Destinazioni principali — mappa Italia (master vede la rete, agente i suoi clienti) */}
+      <DestinazioniWidget />
 
       {/* Report Guadagno — l'agente vede il PROPRIO margine (prezzo cliente − suo costo) */}
       {data?.ruolo === 'agente' ? (
