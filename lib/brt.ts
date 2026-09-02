@@ -51,6 +51,9 @@ export type ParcelBrt = {
   assicurazione?: number         // EUR
   note?: string
   rifOrdine?: string             // alphanumericSenderReference (max 15)
+  // TIPO SERVIZIO (serviceType): '' standard, 'E' Priority, 'H' 10:30. È a scelta singola (un solo valore),
+  // non additivo: lo decide il servizio accessorio scelto in creazione.
+  serviceType?: string
 }
 
 export type RisultatoBrt = {
@@ -123,7 +126,7 @@ export async function creaSpedizioneBrt(cred: CredenzialiBrt, p: ParcelBrt): Pro
     consigneeEMail: s(p.email, 70) || undefined,
     isAlertRequired: '0',
     pricingConditionCode: s(cred.codice_tariffa, 3) || '',
-    serviceType: '',
+    serviceType: s(p.serviceType, 1) || '',
     insuranceAmount: p.assicurazione && p.assicurazione > 0 ? Number(p.assicurazione.toFixed(2)) : undefined,
     insuranceAmountCurrency: p.assicurazione && p.assicurazione > 0 ? 'EUR' : undefined,
     cashOnDelivery: conCod ? Number(p.importoContrassegno!.toFixed(2)) : undefined,

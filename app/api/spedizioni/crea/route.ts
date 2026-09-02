@@ -1742,6 +1742,13 @@ export async function POST(req: NextRequest) {
       }, 0)
       const bda = (body.rifOrdine ? String(body.rifOrdine) : '').trim().substring(0, 15) || undefined
 
+      // TRASMISSIONE SERVIZI BRT: il servizio accessorio scelto diventa il serviceType (scelta singola).
+      // Priority → 'E', Consegna 10:30 → 'H'. Fresh (B20) NON qui: vuole la data di scadenza, che il form
+      // non raccoglie → resta a listino finché non aggiungiamo quel campo. Gli altri servizi non-BRT: ignorati.
+      const nomiSvc: string[] = (serviziAccessori || []).map((x: any) => String(x?.nome || '').toLowerCase())
+      const brtServiceType = nomiSvc.some((n: string) => n.includes('priority')) ? 'E'
+        : nomiSvc.some((n: string) => n.includes('10:30') || n.includes('10.30')) ? 'H' : ''
+
       const ris = await creaSpedizioneBrt(credBrt, {
         ragioneSociale: body.shipTo.name, indirizzo: body.shipTo.street1,
         localita: body.shipTo.city, cap: body.shipTo.postalCode, provincia: body.shipTo.state,
@@ -1751,6 +1758,7 @@ export async function POST(req: NextRequest) {
         importoContrassegno: body.codValue ? Number(body.codValue) : undefined,
         assicurazione: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         note: body.notes ? String(body.notes) : undefined, rifOrdine: bda,
+        serviceType: brtServiceType || undefined,
       })
 
       if (!ris.parcelID) {

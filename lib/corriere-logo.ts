@@ -61,6 +61,13 @@ const SERVIZI_ACCESSORI_MARCA: Record<string, { nome: string; prezzo: number; pe
   SDA: [
     { nome: 'Time Definite ore 10', prezzo: 0, perc: 0 },
   ],
+  // BRT: i servizi TRASMISSIBILI via API (doc BRT REST). Priority/10:30 = serviceType E/H; Fresh = brtServiceCode
+  // B20 (catena del freddo, richiede data scadenza). NB: il RESO NON è qui — sta nella sezione Giacenze.
+  BRT: [
+    { nome: 'Consegna Priority', prezzo: 0, perc: 0 },
+    { nome: 'Consegna 10:30', prezzo: 0, perc: 0 },
+    { nome: 'Fresh', prezzo: 0, perc: 0 },
+  ],
 }
 export function serviziAccessoriDefault(nomeContratto?: string | null): { nome: string; prezzo: number; perc: number }[] {
   return (SERVIZI_ACCESSORI_MARCA[marchioCorriere(nomeContratto || '')] || []).map(s => ({ ...s }))
