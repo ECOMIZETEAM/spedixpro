@@ -91,6 +91,9 @@ export default function StaffPage() {
                   <td style={{ ...td, whiteSpace:'nowrap' }}>{u.ultimo_accesso ? new Date(u.ultimo_accesso).toLocaleString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-'}</td>
                   <td style={td}>
                     <div style={{ display:'flex', gap:'6px' }}>
+                      {(u.ruolo||'').toLowerCase() === 'agente' && (
+                        <a href={`/api/agenti/${u.id}/impersona`} target="_blank" rel="noopener noreferrer" style={{ padding:'6px 12px', background:'#eef2ff', color:'#4338ca', border:'1px solid #c7d2fe', borderRadius:'5px', fontSize:'12px', fontWeight:'600', cursor:'pointer', textDecoration:'none' }} title="Entra nel portale dell'agente (sola lettura, come lo vede lui)">&#8618; Entra</a>
+                      )}
                       <a href={`/dashboard/impostazioni/staff/${u.id}`} style={{ padding:'6px 12px', background:'#fff7ed', color:'#ea580c', border:'1px solid #fed7aa', borderRadius:'5px', fontSize:'12px', fontWeight:'600', cursor:'pointer', textDecoration:'none' }} title="Modifica dati e reset password">Modifica</a>
                       <button onClick={()=>elimina(u.id)} style={{ padding:'6px 10px', background:'#dc2626', color:'#fff', border:'none', borderRadius:'5px', fontSize:'13px', cursor:'pointer' }} title="Elimina">&#128465;</button>
                     </div>
