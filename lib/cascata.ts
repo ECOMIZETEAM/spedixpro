@@ -162,6 +162,28 @@ export async function costruisciCatena(
     currentId = m.parent_master_id
   }
 
+  // ── RETE DI SICUREZZA ANTI VENDITA SOTTO COSTO ──
+  // Ogni livello COMPRA dal livello sotto di lui (piu' vicino al detentore, che paga il costo reale
+  // del provider): il suo prezzo NON puo' essere INFERIORE a quello di chi gli sta sotto, altrimenti
+  // rivende in perdita. Succedeva quando il peso fatturato usato per la rivendita risultava piu' basso
+  // di quello con cui il provider fatturava davvero (fattore-volume di catena piu' generoso, o
+  // agevolazione peso-reale su una scatola oltre la sagoma): il sub-master pagava la fascia "fino a 10"
+  // mentre il costo reale era della fascia "fino a 20". Misurato: ~2.660 EUR persi su 1.064 spedizioni
+  // dei canali rivenditore (lug-set 2026). Qui si livella dove passano TUTTE le porte (verifica credito
+  // + addebito): il prezzo di ogni livello e' ALMENO quello del livello sotto. catena e' ordinata dal
+  // creatore (0) al detentore (ultimo). NON tocca i clienti (il prezzo cliente e' calcolato a parte):
+  // corregge solo i costi INTERNI tra master, che non devono mai stare sotto il costo reale.
+  for (let i = catena.length - 2; i >= 0; i--) {
+    const sotto = catena[i + 1].prezzo
+    if (catena[i].prezzo < sotto - 0.005) {
+      console.warn('[CATENA][SOTTO-COSTO] livellato al costo del livello sotto', {
+        contratto: params.corriereNome, master: catena[i].nome,
+        prezzo_calcolato: catena[i].prezzo, alzato_a: sotto, delta: Math.round((sotto - catena[i].prezzo) * 100) / 100,
+      })
+      catena[i].prezzo = sotto
+    }
+  }
+
   return { catena }
 }
 
