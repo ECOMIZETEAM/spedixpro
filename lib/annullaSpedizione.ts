@@ -76,6 +76,19 @@ export async function annullaSpedizioneSulCorriere(
     return { ok: false, reason: 'questo corriere non consente l\'annullo automatico' }
   }
 
+  // GLS diretto: prima della chiusura (CloseWorkDay) la spedizione NON è ancora trasmessa a GLS, quindi
+  // annullarla lato Moove è già sicuro (GLS non passa a ritirarla). La si rimuove comunque da GLS con
+  // DeleteSped (best-effort) per non lasciare numeri appesi. L'esito NON blocca il rimborso: il modello
+  // GLS (attesa-chiusura) lo rende sicuro, a differenza di BRT (auto-conferma) qui sotto.
+  if (corr.tipo === 'gls') {
+    const numeroNudo = raw.numero ? String(raw.numero) : ''
+    if (numeroNudo) {
+      try { const { annullaSpedizioneGls } = await import('@/lib/gls'); await annullaSpedizioneGls(cred, numeroNudo) }
+      catch (e) { console.error('[ANNULLO][GLS] DeleteSped:', e) }
+    }
+    return { ok: true }
+  }
+
   // BRT diretto: l'annullo esiste (PUT /delete), ma va tentato DAVVERO — il ritorno generico ok:true
   // qui sotto rimborserebbe tutta la catena mentre BRT (auto-conferma) consegna il pacco. Subito dopo la
   // creazione BRT risponde -153 "in processing" (~1min) e più tardi "già spedita": in entrambi i casi
