@@ -64,7 +64,7 @@ export async function middleware(req: NextRequest) {
     )
     const { data: { user } } = await sb.auth.getUser()
     if (!user) return risposta
-    const { data: u } = await sb.from('utenti').select('ruolo, masters(pagamento_scaduto_dal, demo, demo_scadenza)').eq('id', user.id).single()
+    const { data: u } = await sb.from('utenti').select('ruolo, masters(pagamento_scaduto_dal, demo, demo_scadenza, abbonamento_piano, abbonamento_esente, parent_master_id)').eq('id', user.id).single()
     if ((u?.ruolo || '').toLowerCase() === 'agente' && !consentita) {
       return NextResponse.json({ error: 'Operazione non consentita: gli agenti hanno accesso in sola lettura.' }, { status: 403 })
     }
@@ -103,6 +103,21 @@ export async function middleware(req: NextRequest) {
     if (scaduto && (Date.now() - new Date(scaduto).getTime()) > 3 * 86400000
         && !pathname.startsWith('/api/stripe/') && !pathname.startsWith('/api/auth/')) {
       return NextResponse.json({ error: 'Account sospeso: il canone non risulta pagato. Riattiva il pagamento per continuare.' }, { status: 402 })
+    }
+
+    // ACCOUNT SENZA PIANO: chi non ha MAI scelto un piano non deve poter operare. La regola
+    // commerciale "senza piano non spedisci" non puo' vivere solo nella tendina a schermo — quella si
+    // aggira dagli strumenti del browser, e i form restano renderizzati sotto l'overlay. Sta qui,
+    // davanti a tutte le scritture, come il blocco canone. Vale SOLO per chi il piano lo deve scegliere
+    // (master e chi lavora per lui); i suoi CLIENTI hanno lo stesso master_id ma non c'entrano e devono
+    // continuare a spedire. Esclusi: il ROOT (parent nullo, non paga canone), gli ESENTI (gratis) e la
+    // DEMO in prova (opera senza piano per definizione, il suo confino e' quello demo qui sopra). Restano
+    // aperte le rotte per SCEGLIERE e PAGARE il piano, altrimenti sarebbe un blocco senza uscita.
+    const senzaPiano = deveLuiPagare && md && md.parent_master_id != null
+      && !md.abbonamento_piano && md.abbonamento_esente !== true && md.demo !== true
+    if (senzaPiano
+        && !pathname.startsWith('/api/abbonamento') && !pathname.startsWith('/api/stripe/') && !pathname.startsWith('/api/auth/')) {
+      return NextResponse.json({ error: 'Scegli un piano di abbonamento per iniziare a spedire.' }, { status: 402 })
     }
     return risposta
   }

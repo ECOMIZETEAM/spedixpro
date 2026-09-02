@@ -4,7 +4,6 @@ import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import { calcolaPrezzoCorriere, calcolaPrezzoCorriereDettaglio, calcolaSupplementiCliente, fattoreVolumeCliente, fattoreVolumeCorriere, calcolaPesoFatturato, calcolaPrezzoListino } from '@/lib/pricing'
 import { isAgente, nomeAgente } from '@/lib/agente'
-import { statoPiano, messaggioBlocco } from '@/lib/limite-piano'
 import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation,
   spediamoproCreateShipment,
@@ -33,12 +32,27 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
 
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti')
+    .select('master_id,ruolo,cliente_id,nome,cognome, masters(abbonamento_piano,abbonamento_esente,parent_master_id,demo)')
+    .eq('id', user.id).single()
   const body = await req.json()
   // L'agente può creare spedizioni SOLO per i SUOI clienti: niente spedizione propria (__proprio__)
   // né per sotto-master (m:); il cliente dev'essere assegnato a lui (verifica sotto).
   if (isAgente(utente) && (body.clienteId === '__proprio__' || (typeof body.clienteId === 'string' && body.clienteId.startsWith('m:')))) {
     return NextResponse.json({ error: 'Operazione non consentita.' }, { status: 403 })
+  }
+
+  // DIFESA IN PROFONDITA' — senza piano non si spedisce. Il blocco vero e' nel middleware, davanti a
+  // TUTTE le porte; questa e' la rete di sicurezza sulla porta piu' calda: se un master/operatore che
+  // non ha mai scelto un piano arriva comunque fin qui (es. middleware Edge non eseguito), la creazione
+  // lo ferma lo stesso. Non tocca i CLIENTI (la rete lavora), ne' root/esenti/demo — stesse identiche
+  // condizioni del middleware, cosi' i due controlli non possono divergere.
+  const mst: any = (utente as any)?.masters
+  const deveSceglierePiano = ['master', 'admin', 'operatore'].includes(String(utente?.ruolo || '').toLowerCase())
+    && mst && mst.parent_master_id != null && !mst.abbonamento_piano
+    && mst.abbonamento_esente !== true && mst.demo !== true
+  if (deveSceglierePiano) {
+    return NextResponse.json({ error: 'Scegli un piano di abbonamento per iniziare a spedire.' }, { status: 402 })
   }
 
   // Extra/servizi accessori scelti per questa spedizione (li paga il cliente): [{nome, importo}].
