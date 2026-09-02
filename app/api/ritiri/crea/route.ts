@@ -266,6 +266,19 @@ export async function POST(req: NextRequest) {
   }
 
   // ══════════════════════════════════════════════════════
+  // GLS / BRT DIRETTI: il ritiro NON è un'operazione on-demand dell'API (il BRT REST ha solo
+  // Create/Confirm/Delete/Routing/Tracking; il GLS labelservice non ha pickup). La raccolta avviene
+  // con l'accordo standard del contratto: BRT dal DEPOSITO di partenza, GLS alla CHIUSURA della
+  // distinta (CloseWorkDay). Quindi non c'è nessuno a cui mandare la richiesta: si dice chiaro, invece
+  // del criptico "Impossibile recuperare il corriere" (che è il fallback Spedisci più sotto).
+  // ══════════════════════════════════════════════════════
+  if (corriere.tipo === 'gls' || corriere.tipo === 'brt') {
+    return NextResponse.json({
+      error: 'Per i contratti GLS/BRT diretti il ritiro non si richiede da qui: la raccolta avviene con l\'accordo standard del corriere — BRT dal deposito di partenza, GLS alla chiusura della distinta.',
+    }, { status: 400 })
+  }
+
+  // ══════════════════════════════════════════════════════
   // RAMO SPEDISCI.ONLINE (flusso esistente)
   // ══════════════════════════════════════════════════════
   const carrierCode = raw?._carrierCode
