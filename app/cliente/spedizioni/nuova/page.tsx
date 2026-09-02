@@ -145,8 +145,9 @@ export default function NuovaSpedizioneCliente() {
   const [selected, setSelected] = useState<Tariffa|null>(null)
   // Extra / servizi accessori scelti sul corriere selezionato (li paga il cliente)
   const [extraNomi, setExtraNomi] = useState<string[]>([])
-  // Modalità d'incasso del contrassegno: contante (C, default) o assegno (A). L'assegno è possibile solo
-  // su alcuni corrieri (_corriere_tipo 'V'); sugli altri resta contante. Si azzera al cambio corriere.
+  // Modalità d'incasso del contrassegno: contante (C, default) o assegno (A). L'assegno è possibile sui
+  // canali che lo trasmettono: DVA ('V', validato sull'offerta) e GLS diretto ('gls', ModalitaIncasso AB).
+  // Sugli altri resta contante. Si azzera al cambio corriere.
   const [incassoModalita, setIncassoModalita] = useState<'C'|'A'>('C')
   useEffect(() => { setExtraNomi([]); setIncassoModalita('C') }, [selected?._corriere_id])
   const accDisponibili = (selected?.accessori_disponibili || [])
@@ -874,7 +875,7 @@ export default function NuovaSpedizioneCliente() {
                   {Number(contrassegno) > 0 && (
                     <div>
                       <label style={lbl}>Modalità di incasso contrassegno</label>
-                      {selected?._corriere_tipo === 'V' ? (
+                      {(selected?._corriere_tipo === 'V' || selected?._corriere_tipo === 'gls') ? (
                         <select style={inp} value={incassoModalita} onChange={e=>setIncassoModalita(e.target.value==='A'?'A':'C')}>
                           <option value="C">CONTANTE</option>
                           <option value="A">ASSEGNO</option>
