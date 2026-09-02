@@ -305,7 +305,11 @@ export async function POST(req: NextRequest) {
         await admin.from('abbonamenti_pagamenti').upsert({
           master_id: m.id, root_id: root, piano: piano?.id || m.abbonamento_piano || null,
           mese: meseIncasso,
-          importo: incassato, pagato: true, pagato_il: new Date(Number(inv.created || 0) * 1000).toISOString(),
+          // DATA DI PAGAMENTO, non di creazione fattura. Una fattura può nascere il 31/08 (una-tantum di
+          // allineamento) ed essere PAGATA il 2/09: con inv.created la pagina mostrava "incassato il 31/08"
+          // mentre Stripe (e il cliente) vedono il 2/09. Si usa il timestamp del passaggio a "paid".
+          importo: incassato, pagato: true,
+          pagato_il: new Date(Number(inv.status_transitions?.paid_at || inv.created || 0) * 1000).toISOString(),
           metodo: 'carta', stripe_invoice_id: inv.id,
         }, { onConflict: 'stripe_invoice_id' })
         // Canone del mese gia' assolto: il rinnovo automatico interno non deve riaddebitarlo.

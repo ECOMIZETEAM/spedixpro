@@ -5,6 +5,14 @@ const ACCENT = '#f97316'
 const card = { background:'#fff', borderRadius:'8px', border:'1px solid #e8e8e8', padding:'16px' as const }
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre']
 const meseLabel = (mm:string) => { const [y,m]=(mm||'').split('-'); return (MESI[Number(m)-1]||m||'')+' '+(y||'') }
+// Ultima sessione = ultimo login. "3g fa" dice a colpo d'occhio chi è attivo e chi non entra da mesi
+// (o non è mai entrato). Verde = entrato negli ultimi 7g, grigio = più vecchio, "mai" = mai loggato.
+const sessioneLabel = (iso:string|null) => {
+  if (!iso) return { txt:'mai entrato', gg:Infinity }
+  const gg = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)
+  const txt = gg <= 0 ? 'oggi' : gg === 1 ? 'ieri' : gg < 30 ? `${gg}g fa` : gg < 365 ? `${Math.floor(gg/30)} mesi fa` : `${Math.floor(gg/365)} anni fa`
+  return { txt, gg }
+}
 
 import { useDialog } from '@/app/components/DialogProvider'
 export default function AbbonamentoPage() {
@@ -183,16 +191,29 @@ export default function AbbonamentoPage() {
     const attesoMese = delMese.reduce((s:number,p:any)=>s+Number(p.importo||0),0)
     const apertiMese = delMese.filter((p:any)=>!p.pagato)
 
-    const statoDi = (a:any) => a.esente ? 'esente' : a.congelato ? 'congelato'
-      : a.scaduto_dal ? 'ritardo' : a.carta ? 'carta' : 'senza_carta'
+    // Categoria di ogni master. Ordine di priorità pensato per la domanda di Lorenzo: prima chi non è
+    // nemmeno partito (senza piano), poi chi è bloccato/deve pagare, poi chi è a posto.
+    const statoDi = (a:any) => a.esente ? 'esente'
+      : a.senza_piano ? 'senza_piano'   // posizione aperta ma non ha MAI scelto un piano
+      : a.congelato ? 'congelato'       // bloccato: non paga da oltre la tolleranza
+      : a.scaduto_dal ? 'ritardo'       // deve pagare (in ritardo, non ancora bloccato)
+      : a.carta ? 'carta' : 'senza_carta'
+    // "Mai usato" è trasversale allo stato di pagamento: posizione aperta ma zero spedizioni fatte.
+    const maiUsato = (a:any) => (a.spedizioni_totali||0) === 0
     const FILTRI: {k:string,l:string}[] = [
-      {k:'tutti',l:'Tutti'}, {k:'senza_carta',l:'Senza carta'}, {k:'ritardo',l:'In ritardo'},
-      {k:'congelato',l:'Congelati'}, {k:'carta',l:'Carta attiva'}, {k:'esente',l:'Esenti'},
+      {k:'tutti',l:'Tutti'}, {k:'senza_piano',l:'Senza piano'}, {k:'mai_usato',l:'Mai usato'},
+      {k:'ritardo',l:'Da incassare'}, {k:'congelato',l:'Congelati'}, {k:'senza_carta',l:'Senza carta'},
+      {k:'carta',l:'Carta attiva'}, {k:'esente',l:'Esenti'},
     ]
-    const conta = (k:string) => k==='tutti' ? abbonati.length : abbonati.filter((a:any)=>statoDi(a)===k).length
-    const visibili = filtro==='tutti' ? abbonati : abbonati.filter((a:any)=>statoDi(a)===filtro)
+    const conta = (k:string) => k==='tutti' ? abbonati.length
+      : k==='mai_usato' ? abbonati.filter(maiUsato).length
+      : abbonati.filter((a:any)=>statoDi(a)===k).length
+    const visibili = filtro==='tutti' ? abbonati
+      : filtro==='mai_usato' ? abbonati.filter(maiUsato)
+      : abbonati.filter((a:any)=>statoDi(a)===filtro)
 
     const nCongelati = conta('congelato'), nSenzaCarta = conta('senza_carta'), nRitardo = conta('ritardo')
+    const nSenzaPiano = conta('senza_piano'), nMaiUsato = abbonati.filter(maiUsato).length
 
     return (
       <div>
@@ -354,6 +375,16 @@ export default function AbbonamentoPage() {
             <div style={{fontSize:'22px',fontWeight:800,color:nCongelati>0?'#b91c1c':'#16a34a'}}>{nCongelati}</div>
             <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>rete ferma finché non pagano</div>
           </div>
+          <div style={{...card, cursor:'pointer', borderColor: filtro==='senza_piano'?'#c7d2fe':'#e8e8e8'}} onClick={()=>setFiltro('senza_piano')}>
+            <div style={{fontSize:'12px',color:'#777'}}>Senza piano</div>
+            <div style={{fontSize:'22px',fontWeight:800,color:nSenzaPiano>0?'#4338ca':'#16a34a'}}>{nSenzaPiano}</div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>posizione aperta, mai scelto un piano</div>
+          </div>
+          <div style={{...card, cursor:'pointer', borderColor: filtro==='mai_usato'?'#fed7aa':'#e8e8e8'}} onClick={()=>setFiltro('mai_usato')}>
+            <div style={{fontSize:'12px',color:'#777'}}>Mai usato</div>
+            <div style={{fontSize:'22px',fontWeight:800,color:nMaiUsato>0?'#b45309':'#16a34a'}}>{nMaiUsato}</div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>zero spedizioni fatte, in tutta la vita</div>
+          </div>
           {totaleAperto > 0 && (
             <div style={card}>
               <div style={{fontSize:'12px',color:'#777'}}>Vecchi bonifici aperti</div>
@@ -381,27 +412,40 @@ export default function AbbonamentoPage() {
           <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
             <thead>
               <tr style={{background:'#fafafa'}}>
-                {['Master','Piano','Canone/mese','Ultimo pagamento','Stato',''].map(h=>(
+                {['Master','Piano','Canone/mese','Ultimo pagamento','Ultima sessione','Usato','Stato'].map(h=>(
                   <th key={h} style={{textAlign:'left' as const,padding:'9px 14px',fontSize:'11px',fontWeight:600,color:'#777',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap' as const}}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {!visibili.length ? (
-                <tr><td colSpan={6} style={{padding:'30px',textAlign:'center' as const,color:'#999',fontSize:'12px'}}>Nessun master in questo filtro</td></tr>
-              ) : visibili.map((a:any)=>(
+                <tr><td colSpan={7} style={{padding:'30px',textAlign:'center' as const,color:'#999',fontSize:'12px'}}>Nessun master in questo filtro</td></tr>
+              ) : visibili.map((a:any)=>{
+                const ses = sessioneLabel(a.ultima_sessione)
+                return (
                 <tr key={a.master_id} style={{borderBottom:'1px solid #f5f5f5'}}>
                   <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:600}}>{a.master_nome}</td>
-                  <td style={{padding:'9px 14px',color:'#555',whiteSpace:'nowrap' as const}}>{(a.piano||'').replace('enterprise_','Enterprise ').toUpperCase() || '—'}</td>
+                  <td style={{padding:'9px 14px',color:'#555',whiteSpace:'nowrap' as const}}>{(a.piano||'').replace('enterprise_','Enterprise ').toUpperCase() || <span style={{color:'#c7d2fe',fontWeight:700}}>—</span>}</td>
                   <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:700,whiteSpace:'nowrap' as const}}>€ {Number(a.prezzo||0).toFixed(2)}{a.esente && <span style={{fontSize:'10px',color:'#4338ca',fontWeight:600}}> (gratis)</span>}</td>
                   <td style={{padding:'9px 14px',color:'#555',whiteSpace:'nowrap' as const}}>
                     {a.ultimo_mese_pagato
                       ? <>{meseLabel(a.ultimo_mese_pagato)}<div style={{fontSize:'10.5px',color:'#999'}}>{a.ultimo_metodo === 'carta' ? 'carta' : a.ultimo_metodo || ''}{a.ultimo_pagamento_il ? ` · ${new Date(a.ultimo_pagamento_il).toLocaleDateString('it-IT')}` : ''}</div></>
                       : <span style={{color:'#bbb'}}>mai</span>}
                   </td>
+                  <td style={{padding:'9px 14px',whiteSpace:'nowrap' as const,color: ses.gg===Infinity ? '#dc2626' : ses.gg<=7 ? '#16a34a' : ses.gg<=60 ? '#555' : '#b45309', fontWeight: ses.gg<=7?700:500}}>
+                    {ses.txt}
+                    {a.ultima_sessione && <div style={{fontSize:'10.5px',color:'#999',fontWeight:400}}>{new Date(a.ultima_sessione).toLocaleDateString('it-IT')}</div>}
+                  </td>
+                  <td style={{padding:'9px 14px',whiteSpace:'nowrap' as const}}>
+                    {a.spedizioni_totali>0
+                      ? <span style={{color:'#1a1a1a',fontWeight:700}}>{Number(a.spedizioni_totali).toLocaleString('it-IT')}</span>
+                      : <span style={{background:'#fef3c7',color:'#b45309',borderRadius:'999px',padding:'2px 8px',fontSize:'10.5px',fontWeight:700}}>mai usato</span>}
+                  </td>
                   <td style={{padding:'9px 14px',whiteSpace:'nowrap' as const}}>
                     {a.esente
                       ? <span style={{background:'#eef2ff',color:'#4338ca',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Esente</span>
+                      : a.senza_piano
+                        ? <span style={{background:'#eef2ff',color:'#4338ca',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Senza piano</span>
                       : a.congelato
                         ? <span style={{background:'#fef2f2',color:'#b91c1c',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Congelato</span>
                       : a.scaduto_dal
@@ -410,9 +454,8 @@ export default function AbbonamentoPage() {
                         ? <span style={{background:'#dcfce7',color:'#16a34a',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Carta attiva</span>
                         : <span style={{background:'#fef3c7',color:'#b45309',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Nessuna carta</span>}
                   </td>
-                  <td style={{padding:'9px 14px',textAlign:'right' as const}}></td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
           </div>

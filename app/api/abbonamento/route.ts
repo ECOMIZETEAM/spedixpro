@@ -80,6 +80,15 @@ export async function GET() {
     const attiviRete = (mastersRete || []).filter((x: any) => x.abbonamento_piano || x.abbonamento_esente)
     const attiviIds = new Set(attiviRete.map((x: any) => x.id))
 
+    // ARRICCHIMENTO per la panoramica: ultima SESSIONE (login) e spedizioni TOTALI di OGNI master della
+    // rete — così il root vede chi usa e paga, chi ha la posizione aperta ma è fermo, chi non ha mai
+    // scelto un piano. La sessione arriva da auth.users via fn_ultima_sessione (SECURITY DEFINER).
+    const { data: sessioni } = await admin.rpc('fn_ultima_sessione', { p_masters: reteIds })
+    const ultimaSessione = new Map<string, string>((sessioni || []).map((r: any) => [r.master_id, r.ultima_sessione]))
+    const { data: contTot } = await admin.from('contatori_spedizioni').select('master_id,n').in('master_id', reteIds)
+    const spedTot = new Map<string, number>()
+    for (const c of (contTot || [])) spedTot.set(c.master_id, (spedTot.get(c.master_id) || 0) + Number((c as any).n || 0))
+
     // Pagamenti non pagati raggruppati per master (solo di master ESISTENTI e attivi → esclude orfani)
     const nonPagatiByMaster = new Map<string, any[]>()
     for (const p of (pag || [])) {
@@ -99,7 +108,9 @@ export async function GET() {
     }
 
     const nomeDi = (m: any) => (m?.nome && String(m.nome).trim()) || (m?.email && String(m.email).trim()) || ('Master #' + String(m?.id).slice(0, 6))
-    abbonati = attiviRete.map((m: any) => {
+    // TUTTI i master della rete (non solo quelli con piano/esenti): così compaiono anche chi ha la
+    // posizione aperta ma non ha mai scelto un piano / non ha mai spedito.
+    abbonati = (mastersRete || []).map((m: any) => {
       // ESENTE = niente da incassare, nemmeno l'arretrato: l'esenzione CONDONA anche i vecchi bonifici
       // aperti da prima (decisione Lorenzo 01/09 sul caso Giga Express, canone luglio mai pagato). Senza
       // questo l'esente restava nei "Vecchi bonifici aperti" e nella lista da incassare, in contrasto con
@@ -124,6 +135,10 @@ export async function GET() {
         importo_da_incassare: daPagare ? Number(daPagare.importo || 0) : 0,
         mese_da_incassare: daPagare?.mese || null,
         n_da_incassare: nonPagati.length,
+        // Panoramica: senza piano (mai scelto), ultima sessione (login), spedizioni totali (usato o mai).
+        senza_piano: !m.abbonamento_piano && !m.abbonamento_esente,
+        ultima_sessione: ultimaSessione.get(m.id) || null,
+        spedizioni_totali: spedTot.get(m.id) || 0,
       }
     }).sort((a, b) => b.importo_da_incassare - a.importo_da_incassare)
 
