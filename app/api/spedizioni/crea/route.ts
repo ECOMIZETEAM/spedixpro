@@ -1540,7 +1540,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Contratto GLS non configurato correttamente. Contatta l\'assistenza.' }, { status: 400 })
     }
     try {
-      const { creaSpedizioneGls, etichetteGls, annullaSpedizioneGls } = await import('@/lib/gls')
+      const { creaSpedizioneGls, etichetteGls, annullaSpedizioneGls, codiceServizioGls } = await import('@/lib/gls')
 
       // Prezzo dal listino PRIMA della creazione (come il circuito interno).
       let costoCorrente = costoMaster
@@ -1558,6 +1558,13 @@ export async function POST(req: NextRequest) {
       // MULTICOLLO: un peso per collo (GLS crea un <Parcel> per collo). Contrassegno/assicurazione
       // vanno solo sul primo collo (li mette lib/gls).
       const pesiColli = packages.map((p: any) => parseFloat(p?.weight) || 1)
+      // SERVIZI ACCESSORI GLS trasmessi via <ServiziAccessori> (tabella codici GLS, verificata 2/9).
+      // (1) modalità CONTRASSEGNO: 01 contanti, 02 assegno bancario (il form ha C/A → 01/02).
+      // (2) servizi scelti (Sabato 23, Exchange 24, Preavviso 14, …) mappati per nome.
+      const codiciGls: string[] = []
+      if (body.codValue && Number(body.codValue) > 0) codiciGls.push(String(body.incassoModalita) === 'A' ? '02' : '01')
+      for (const sv of (serviziAccessori || [])) { const cod = codiceServizioGls(String((sv as any)?.nome || '')); if (cod) codiciGls.push(cod) }
+
       const ris = await creaSpedizioneGls(credGls, {
         ragioneSociale: body.shipTo.name,
         indirizzo: body.shipTo.street1,
@@ -1566,10 +1573,9 @@ export async function POST(req: NextRequest) {
         provincia: body.shipTo.state,
         pesiColli,
         importoContrassegno: body.codValue ? Number(body.codValue) : undefined,
-        // MODALITA INCASSO GLS (verificata sull'API vera di Quick 2/9: Q GLS CE LIGHT accetta CONT e
-        // gli assegni ASS/AB/AC/AP). 'A' (assegno dal form) → 'ASS' (assegni, generico); default CONT.
-        // lib/gls emette <ModalitaIncasso> solo sul primo collo e solo se c'è il contrassegno.
-        modalitaIncasso: body.codValue ? (String(body.incassoModalita) === 'A' ? 'ASS' : 'CONT') : undefined,
+        // ModalitaIncasso coerente col codice ServiziAccessori: contante→CONT, assegno→AB (bancario=02).
+        modalitaIncasso: body.codValue ? (String(body.incassoModalita) === 'A' ? 'AB' : 'CONT') : undefined,
+        serviziAccessori: codiciGls.length ? codiciGls : undefined,
         assicurazione: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         note: body.notes ? String(body.notes) : undefined,
         bda,

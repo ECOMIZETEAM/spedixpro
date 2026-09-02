@@ -49,6 +49,25 @@ export type ParcelGls = {
   modalitaIncasso?: string       // codice metodo incasso (dipende dal contratto)
   assicurazione?: number         // EUR (solo sul primo collo)
   note?: string                  // Notespedizione
+  serviziAccessori?: string[]    // codici GLS 2-cifre (max 6): Sabato 23, Exchange 24, Preavviso 14, ...
+}
+
+// NOME servizio accessorio (come sta a listino/nel form) → CODICE GLS ServiziAccessori (tabella GLS,
+// verificata sul contratto Quick 2/9). I codici sono 2 cifre; il tag ne accetta max 6 separati da virgola.
+// 01/02/03 sono le modalità del CONTRASSEGNO (contanti/assegno banc./assegno circ.), qui NON mappate:
+// la modalità COD la mette il ramo crea a parte. Torna null se il nome non è un servizio GLS trasmissibile.
+export function codiceServizioGls(nome: string): string | null {
+  const n = (nome || '').toLowerCase()
+  if (/exchange|cambio/.test(n)) return '24'
+  if (/sabato|saturday/.test(n)) return '23'
+  if (/preavviso/.test(n)) return '14'
+  if (/infoservice|info service|sms/.test(n)) return '15'
+  if (/appuntamento/.test(n)) return '16'
+  if (/flex|e-?commerce/.test(n)) return '21'
+  if (/consegna al piano|al piano/.test(n)) return '22'
+  if (/ident/.test(n)) return '25'
+  if (/return|reso/.test(n)) return '27'
+  return null   // es. "Express12"/"Document Return": nessun codice ServiziAccessori → non trasmesso
 }
 
 export type RisultatoGls = {
@@ -123,6 +142,8 @@ export function costruisciXmlInfoParcel(cred: CredenzialiGls, p: ParcelGls): str
       primo && p.importoContrassegno && p.importoContrassegno > 0 ? tag('Importocontrassegno', euroIt(p.importoContrassegno)) : '',
       primo && p.importoContrassegno && p.importoContrassegno > 0 && p.modalitaIncasso ? tag('ModalitaIncasso', p.modalitaIncasso) : '',
       primo && p.assicurazione && p.assicurazione > 0 ? tag('Assicurazione', euroIt(p.assicurazione)) : '',
+      // Servizi accessori (Sabato/Exchange/Preavviso…): codici 2-cifre, max 6, separati da virgola. Solo primo collo.
+      primo && p.serviziAccessori && p.serviziAccessori.length ? tag('ServiziAccessori', Array.from(new Set(p.serviziAccessori)).slice(0, 6).join(',')) : '',
       primo && p.note ? tag('Notespedizione', p.note.substring(0, 100)) : '',
       primo && p.bda ? tag('Bda', String(p.bda).substring(0, 20)) : '',
     ].filter(Boolean).join('')

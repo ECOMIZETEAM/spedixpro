@@ -51,12 +51,16 @@ const SERVIZI_ACCESSORI_MARCA: Record<string, { nome: string; prezzo: number; pe
     { nome: 'Reverse Ufficio Postale', prezzo: 0, perc: 0 },
     { nome: 'Consegna su appuntamento', prezzo: 0, perc: 0 },
   ],
+  // GLS: solo i servizi con un CODICE ServiziAccessori vero (tabella GLS), così sono TRASMISSIBILI.
+  // (Via 'Express12'/'Document Return': non hanno un codice accessorio.) Mappa nome→codice in lib/gls.
   GLS: [
-    { nome: 'Exchange', prezzo: 0, perc: 0 },
-    { nome: 'Document Return', prezzo: 0, perc: 0 },
-    { nome: 'Saturday Service', prezzo: 0, perc: 0 },
-    { nome: 'Express12', prezzo: 0, perc: 0 },
-    { nome: 'Preavviso Telefonico', prezzo: 0, perc: 0 },
+    { nome: 'Exchange', prezzo: 0, perc: 0 },                 // 24
+    { nome: 'Saturday Service', prezzo: 0, perc: 0 },         // 23
+    { nome: 'Preavviso Telefonico', prezzo: 0, perc: 0 },     // 14
+    { nome: 'Consegna su appuntamento', prezzo: 0, perc: 0 }, // 16
+    { nome: 'Consegna al piano', prezzo: 0, perc: 0 },        // 22
+    { nome: 'Ident Delivery', prezzo: 0, perc: 0 },           // 25
+    { nome: 'Return Service', prezzo: 0, perc: 0 },           // 27
   ],
   SDA: [
     { nome: 'Time Definite ore 10', prezzo: 0, perc: 0 },
