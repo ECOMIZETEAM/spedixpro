@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
 
   const ruolo = (utente?.ruolo || '').toLowerCase()
   // Campi extra per l'eventuale "riepilogo ordine" (packing slip) da anteporre alle etichette.
-  const cols = 'id,numero,etichetta_url,etichetta_path,colli_dettaglio,cliente_id,created_at,rif_ordine,rif_destinatario,contenuto,colli,peso_reale,peso_fatturato,contrassegno,dest_nome,dest_indirizzo,dest_citta,dest_cap,dest_provincia,dest_paese,dest_telefono,mitt_nome,corriere_id,corrieri(nome_contratto)'
+  const cols = 'id,numero,etichetta_url,etichetta_path,raw_response,colli_dettaglio,cliente_id,created_at,rif_ordine,rif_destinatario,contenuto,colli,peso_reale,peso_fatturato,contrassegno,dest_nome,dest_indirizzo,dest_citta,dest_cap,dest_provincia,dest_paese,dest_telefono,mitt_nome,corriere_id,corrieri(nome_contratto)'
   let spedizioni: any[] | null = null
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
@@ -76,6 +76,19 @@ export async function POST(req: NextRequest) {
       const { leggiEtichetta } = await import('@/lib/etichette')
       const et = await leggiEtichetta(admin, s as any)
       if (et) daStorage.push(new Uint8Array(et.buffer))
+    }
+
+    // RIPIEGO GLS: se non c'e' ancora nessuna etichetta (ne' inline ne' Storage) e la spedizione e' GLS
+    // proprietaria, il PDF puo' non essere stato salvato alla creazione (GLS lo genera in ritardo dopo
+    // AddParcel). Lo recuperiamo ORA da GLS e lo salviamo, esattamente come fa l'apertura singola: senza
+    // questo, la stampa in blocco produceva il foglio "ETICHETTA NON DISPONIBILE" mentre aprendo la stessa
+    // spedizione da sola l'etichetta si auto-riparava — incoerenza + rischio pacco GLS senza etichetta.
+    if (!urls.length && !daStorage.length && (s as any).raw_response?._gls) {
+      try {
+        const { recuperaEtichettaGlsSalvando } = await import('@/lib/gls')
+        const buf = await recuperaEtichettaGlsSalvando(admin, s as any)
+        if (buf) daStorage.push(new Uint8Array(buf))
+      } catch (e) { console.error('[ETICHETTE-BULK][GLS] recupero on-demand:', e) }
     }
 
     // Prima le pagine ETICHETTA...
