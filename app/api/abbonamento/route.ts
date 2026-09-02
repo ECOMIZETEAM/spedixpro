@@ -132,7 +132,10 @@ export async function GET() {
         ultimo_pagamento_il: ultimoPagato.get(m.id)?.pagato_il || null,
         ultimo_metodo: ultimoPagato.get(m.id)?.metodo || null,
         pagamento_id: daPagare?.id || null,
-        importo_da_incassare: daPagare ? Number(daPagare.importo || 0) : 0,
+        // Somma di TUTTE le righe aperte del master, non solo la più vecchia: se un master accumula 2+
+        // mesi non pagati, il totale "Vecchi bonifici aperti" deve mostrarli tutti. pagamento_id/mese qui
+        // restano il più vecchio, perché l'incasso si segna una riga (un mese) alla volta.
+        importo_da_incassare: nonPagati.reduce((t: number, p: any) => t + Number(p.importo || 0), 0),
         mese_da_incassare: daPagare?.mese || null,
         n_da_incassare: nonPagati.length,
         // Panoramica: senza piano (mai scelto), ultima sessione (login), spedizioni totali (usato o mai).

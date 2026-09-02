@@ -64,7 +64,26 @@ export async function middleware(req: NextRequest) {
     )
     const { data: { user } } = await sb.auth.getUser()
     if (!user) return risposta
-    const { data: u } = await sb.from('utenti').select('ruolo, masters(pagamento_scaduto_dal, demo, demo_scadenza, abbonamento_piano, abbonamento_esente, parent_master_id)').eq('id', user.id).single()
+    const { data: u, error: uErr } = await sb.from('utenti').select('ruolo, masters(pagamento_scaduto_dal, demo, demo_scadenza, abbonamento_piano, abbonamento_esente, parent_master_id)').eq('id', user.id).single()
+    // FAIL-CLOSED. Le quattro guardie qui sotto (agente, demo, canone, senza-piano) vivono TUTTE su
+    // questa lettura. Se il select FALLISCE — tipicamente un grant per-COLONNA su masters che smette di
+    // coprire una di queste colonne: PostgREST allora rifiuta l'INTERO select con 403 (la stessa trappola
+    // gia' vista su 'corrieri') — ignorarlo le spegnerebbe TUTTE in silenzio, e un master congelato o
+    // senza piano tornerebbe a operare senza che nessuno se ne accorga. Meglio un errore visibile:
+    // recuperiamo il solo ruolo (colonna sempre concessa) e, se e' uno che il canone lo deve pagare,
+    // blocchiamo cautelativamente con 503 tranne le rotte per pagare/uscire. Chi non deve pagare
+    // (cliente/agente/autista) non dipende da questo stato: le sue scritture non vanno fermate per un
+    // guasto che non lo riguarda.
+    if (uErr) {
+      const solo = await sb.from('utenti').select('ruolo').eq('id', user.id).single()
+      const rr = (solo.data?.ruolo || '').toLowerCase()
+      const escap = pathname.startsWith('/api/abbonamento') || pathname.startsWith('/api/stripe/') || pathname.startsWith('/api/auth/')
+      if ((rr === 'master' || rr === 'admin' || rr === 'operatore') && !escap) {
+        console.error('[MIDDLEWARE] stato account illeggibile → blocco cautelativo', user.id, uErr.message)
+        return NextResponse.json({ error: 'Verifica dell\'account non riuscita, riprova tra poco.' }, { status: 503 })
+      }
+      return risposta
+    }
     if ((u?.ruolo || '').toLowerCase() === 'agente' && !consentita) {
       return NextResponse.json({ error: 'Operazione non consentita: gli agenti hanno accesso in sola lettura.' }, { status: 403 })
     }

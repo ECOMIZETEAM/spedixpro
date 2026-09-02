@@ -193,17 +193,23 @@ export default function AbbonamentoPage() {
 
     // Categoria di ogni master. Ordine di priorità pensato per la domanda di Lorenzo: prima chi non è
     // nemmeno partito (senza piano), poi chi è bloccato/deve pagare, poi chi è a posto.
+    // Scadenza NEL FUTURO = periodo di grazia/prova, NON un ritardo: un master con la scadenza fissata
+    // più avanti (es. una prova gratuita) non "sta non pagando", semplicemente non è ancora dovuto.
+    // Va tenuto fuori dai conteggi "Non stanno pagando".
+    const inProva = (a:any) => a.scaduto_dal && new Date(a.scaduto_dal).getTime() > Date.now()
+    const scadutoPassato = (a:any) => a.scaduto_dal && new Date(a.scaduto_dal).getTime() <= Date.now()
     const statoDi = (a:any) => a.esente ? 'esente'
       : a.senza_piano ? 'senza_piano'   // posizione aperta ma non ha MAI scelto un piano
       : a.congelato ? 'congelato'       // bloccato: non paga da oltre la tolleranza
-      : a.scaduto_dal ? 'ritardo'       // deve pagare (in ritardo, non ancora bloccato)
+      : inProva(a) ? 'in_prova'         // scadenza futura = grazia/prova, non ancora dovuto
+      : scadutoPassato(a) ? 'ritardo'   // scaduto_dal ormai passato: deve pagare
       : a.carta ? 'carta' : 'senza_carta'
     // "Mai usato" è trasversale allo stato di pagamento: posizione aperta ma zero spedizioni fatte.
     const maiUsato = (a:any) => (a.spedizioni_totali||0) === 0
     const FILTRI: {k:string,l:string}[] = [
       {k:'tutti',l:'Tutti'}, {k:'senza_piano',l:'Senza piano'}, {k:'mai_usato',l:'Mai usato'},
-      {k:'ritardo',l:'Da incassare'}, {k:'congelato',l:'Congelati'}, {k:'senza_carta',l:'Senza carta'},
-      {k:'carta',l:'Carta attiva'}, {k:'esente',l:'Esenti'},
+      {k:'ritardo',l:'Da incassare'}, {k:'congelato',l:'Congelati'}, {k:'in_prova',l:'In prova'},
+      {k:'senza_carta',l:'Senza carta'}, {k:'carta',l:'Carta attiva'}, {k:'esente',l:'Esenti'},
     ]
     const conta = (k:string) => k==='tutti' ? abbonati.length
       : k==='mai_usato' ? abbonati.filter(maiUsato).length
@@ -448,6 +454,8 @@ export default function AbbonamentoPage() {
                         ? <span style={{background:'#eef2ff',color:'#4338ca',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Senza piano</span>
                       : a.congelato
                         ? <span style={{background:'#fef2f2',color:'#b91c1c',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Congelato</span>
+                      : (a.scaduto_dal && new Date(a.scaduto_dal).getTime() > Date.now())
+                        ? <span style={{background:'#eff6ff',color:'#1d4ed8',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>In prova fino al {new Date(a.scaduto_dal).toLocaleDateString('it-IT')}</span>
                       : a.scaduto_dal
                         ? <span style={{background:'#fef2f2',color:'#b91c1c',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>In ritardo dal {new Date(a.scaduto_dal).toLocaleDateString('it-IT')}</span>
                       : a.carta
