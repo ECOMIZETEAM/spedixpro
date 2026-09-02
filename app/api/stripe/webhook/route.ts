@@ -267,7 +267,13 @@ export async function POST(req: NextRequest) {
       case 'invoice.paid': {
         const inv = evento.data.object
         const m = await masterDi(inv)
-        if (!m) break
+        // Un incasso non attribuibile a nessun master NON deve sparire in silenzio (prima: break muto,
+        // e il pagamento non compariva da nessuna parte). Lo si logga forte per accorgersene subito.
+        if (!m) {
+          console.error('[STRIPE][INVOICE NON MAPPATA] invoice.paid senza master — invoice=%s customer=%s importo=%s: incasso NON registrato',
+            inv.id, typeof inv.customer === 'string' ? inv.customer : inv.customer?.id, Number(inv.amount_paid ?? 0) / 100)
+          break
+        }
         const root = await rootId()
         // Da quale piano viene questo incasso. Il punto in cui il circuito espone il prezzo della
         // riga e' cambiato fra le versioni della sua interfaccia: si provano le forme note e, se

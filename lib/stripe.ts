@@ -109,6 +109,20 @@ export async function aliquotaIva(): Promise<string[]> {
 export async function clienteStripe(admin: any, master: { id: string; nome?: string | null; email?: string | null; stripe_customer_id?: string | null }): Promise<string> {
   if (master.stripe_customer_id) return master.stripe_customer_id
   const s = stripeClient()
+  // TRIPWIRE DOPPIONE-EMAIL. Stripe NON deduplica per email: se un ALTRO master ha già un customer con
+  // questa STESSA email, creare qui un secondo customer significa che la stessa carta finisce a pagare
+  // DUE abbonamenti diversi (è successo: GTS EXPRESS + AGENZIA ENTRATE RISCOSSIONE, stessa email GTS, due
+  // sub). Non blocco (a volte è voluto: un cliente con più società), ma lo segnalo forte così si intercetta
+  // prima che addebiti, invece di scoprirlo dal pagamento "che non torna".
+  if (master.email) {
+    const { data: gemelli } = await admin.from('masters')
+      .select('id,nome').neq('id', master.id).eq('email', master.email).not('stripe_customer_id', 'is', null)
+    if (gemelli && gemelli.length) {
+      console.error('[STRIPE][DOPPIONE-EMAIL] nuovo customer per', master.nome, master.id,
+        '— la stessa email', master.email, 'è già usata da:', gemelli.map((g: any) => `${g.nome}(${g.id})`).join(', '),
+        '→ la stessa carta pagherà più abbonamenti')
+    }
+  }
   const c = await s.customers.create({
     name: master.nome || undefined,
     email: master.email || undefined,
