@@ -1566,6 +1566,10 @@ export async function POST(req: NextRequest) {
         provincia: body.shipTo.state,
         pesiColli,
         importoContrassegno: body.codValue ? Number(body.codValue) : undefined,
+        // MODALITA INCASSO GLS (verificata sull'API vera di Quick 2/9: Q GLS CE LIGHT accetta CONT e
+        // gli assegni ASS/AB/AC/AP). 'A' (assegno dal form) → 'ASS' (assegni, generico); default CONT.
+        // lib/gls emette <ModalitaIncasso> solo sul primo collo e solo se c'è il contrassegno.
+        modalitaIncasso: body.codValue ? (String(body.incassoModalita) === 'A' ? 'ASS' : 'CONT') : undefined,
         assicurazione: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         note: body.notes ? String(body.notes) : undefined,
         bda,
