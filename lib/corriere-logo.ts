@@ -72,7 +72,18 @@ const SERVIZI_ACCESSORI_MARCA: Record<string, { nome: string; prezzo: number; pe
     { nome: 'Consegna 10:30', prezzo: 0, perc: 0 },
   ],
 }
-export function serviziAccessoriDefault(nomeContratto?: string | null): { nome: string; prezzo: number; perc: number }[] {
+// I CANALI che sanno DAVVERO trasmettere il servizio scelto all'API del corriere: solo i contratti
+// DIRETTI. gls → tag ServiziAccessori (codici), brt → serviceType. Sui canali rivenditore (provider a
+// valle) l'API NON espone i codici servizio — verificato leggendo la creazione: spedisci manda
+// accessoriServices vuoto, DVA e SpediamoPro non hanno proprio il campo. Offrirli lì sarebbe una
+// promessa che non parte: il cliente paga un "Exchange"/"Priority" che al corriere non arriva.
+const CANALI_TRASMETTONO_SERVIZI = new Set(['gls', 'brt'])
+// Servizi accessori proposti come DEFAULT nel listino: SOLO dove il canale li trasmette (sopra) e diversi
+// per MARCA del corriere. Sui canali che non trasmettono si torna vuoto: niente default = niente promessa
+// a vuoto. Il `tipo` è il canale tecnico del contratto (corrieri.tipo). Retro-compatibile: senza `tipo`
+// (chiamante che non lo conosce) si ripiega sul comportamento per marca di prima.
+export function serviziAccessoriDefault(nomeContratto?: string | null, tipo?: string | null): { nome: string; prezzo: number; perc: number }[] {
+  if (tipo != null && !CANALI_TRASMETTONO_SERVIZI.has(String(tipo).toLowerCase())) return []
   return (SERVIZI_ACCESSORI_MARCA[marchioCorriere(nomeContratto || '')] || []).map(s => ({ ...s }))
 }
 

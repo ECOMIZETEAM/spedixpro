@@ -25,7 +25,7 @@ function NumInput({ value, onChange, style, placeholder }: { value: number; onCh
 }
 
 interface Zona { id: string; nome: string }
-interface Corriere { id: string; nome_contratto: string }
+interface Corriere { id: string; nome_contratto: string; tipo?: string }
 interface Fascia { tipo: 'fino_a' | 'oltre'; peso: number; prezzi: Record<string, string>; fuel?: string }
 interface Props {
   listino: any; corrieri: Corriere[]; zone: Zona[]
@@ -327,7 +327,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   const [righeContr, setRigheContr] = useState<RigaSuppl[]>(() => bozza?.righeContr ?? buildRigheDa(supplementiEsistenti||[], 'contrassegno', [rigaVuota(), rigaVuota()]))
   // Default dei servizi accessori DIVERSO per marca del corriere in modifica (GLS≠Poste≠SDA): il master
   // vede subito i servizi giusti da prezzare. Sui listini già compilati buildAccessoriDa tiene il salvato.
-  const [serviziAccessori, setServiziAccessori] = useState(() => bozza?.serviziAccessori ?? buildAccessoriDa(supplementiEsistenti||[], serviziAccessoriDefault(corrieri.find(c => c.id === corriereId)?.nome_contratto)))
+  const [serviziAccessori, setServiziAccessori] = useState(() => { const _c = corrieri.find(c => c.id === corriereId); return bozza?.serviziAccessori ?? buildAccessoriDa(supplementiEsistenti||[], serviziAccessoriDefault(_c?.nome_contratto, _c?.tipo)) })
   const [giacenzeServizi, setGiacenzeServizi] = useState(() => bozza?.giacenzeServizi ?? buildServiziDa(supplementiEsistenti||[], 'giacenza', [
     {nome:'Riconsegna',prezzo:0,perc:0},
     {nome:'Riconsegna al nuovo destinatario',prezzo:0,perc:0},

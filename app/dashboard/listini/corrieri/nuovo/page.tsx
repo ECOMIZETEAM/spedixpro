@@ -192,8 +192,8 @@ export default function ListinoCorrierePage() {
     setRigheContr(buildRigheDa(data.supplementi||[], 'contrassegno', [rigaVuota(), rigaVuota()]))
     // Servizi accessori DIVERSI per marca del corriere caricato (GLS≠Poste≠SDA): il master vede subito i
     // servizi giusti da prezzare. Sui listini già compilati buildServiziDa tiene i valori salvati.
-    const nomeCorr = (data.corrieri||[]).find((c:any)=>c.id===(data.corriereSelezionatoId||corriereDaSelezionare||''))?.nome_contratto || ''
-    setServiziAccessori(buildServiziDa(data.supplementi||[], 'accessorio', serviziAccessoriDefault(nomeCorr)))
+    const corrSel = (data.corrieri||[]).find((c:any)=>c.id===(data.corriereSelezionatoId||corriereDaSelezionare||''))
+    setServiziAccessori(buildServiziDa(data.supplementi||[], 'accessorio', serviziAccessoriDefault(corrSel?.nome_contratto || '', corrSel?.tipo)))
     setGiacenzeServizi(prev => buildServiziDa(data.supplementi||[], 'giacenza', prev))
     const aperturaRiga = (data.supplementi||[]).find((s:any) => s.tipo === 'giacenza_apertura')
     setAperturaGiacenza(aperturaRiga ? Number(aperturaRiga.valore)||0 : 0)
