@@ -134,6 +134,32 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200 })
     }
 
+    // GLS / BRT DIRETTI: non c'è webhook e nessuno riempie tracking_events → senza questo ramo il popup
+    // cadrebbe sulla lettura (vuota) qui sotto e mostrerebbe "nessun evento" per SEMPRE, pur avendo il
+    // badge di stato giusto. Si chiede il tracking LIVE al corriere (come DVA/SpediamoPro). Gli eventi sono
+    // i testi di transito del T&T (senza data: il T&T che interroghiamo espone solo la descrizione dello
+    // stato; la data richiederebbe i campi grezzi del corriere, da mappare su un pacco tracciato reale).
+    if (corriere.tipo === 'gls' || corriere.tipo === 'brt') {
+      const raw: any = spedizione.raw_response || {}
+      let stati: string[] = []
+      if (corriere.tipo === 'gls' && raw.numero && cred?.sigla_sede) {
+        const { trackingGls, mapStatoGls } = await import('@/lib/gls')
+        const r = await trackingGls(cred as any, String(raw.numero)); stati = r.stati
+        let av: string | null = null
+        for (const s of stati) { const m = mapStatoGls(s); if (m && prioritaStato(m) > prioritaStato(av)) av = m }
+        await persistiStato(av)
+      } else if (corriere.tipo === 'brt' && raw.parcelID) {
+        const { trackingBrt, mapStatoBrt } = await import('@/lib/brt')
+        const r = await trackingBrt(String(raw.parcelID)); stati = r.stati
+        let av: string | null = null
+        for (const s of stati) { const m = mapStatoBrt(s); if (m && prioritaStato(m) > prioritaStato(av)) av = m }
+        await persistiStato(av)
+      }
+      const uniq = stati.filter((s, i) => s && stati.indexOf(s) === i)   // dedup, ordine cronologico
+      const eventi = uniq.map(s => ({ date: '', description: s, location: '' })).reverse()   // più recente in alto
+      return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200 })
+    }
+
     // Spedisci.online ha CHIUSO il polling del tracking (403 "For tracking please use the Webhooks
     // events"): gli eventi arrivano in tempo reale dal WEBHOOK e vengono salvati in tracking_events.
     // Il popup mostra quelli (lo stato è già allineato dal webhook stesso, solo-in-avanti).
