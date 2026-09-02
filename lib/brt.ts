@@ -201,18 +201,17 @@ export async function annullaSpedizioneBrt(
   }
 }
 
-// Conferma esplicita di una o più spedizioni (PUT /confirm) — per i contratti a Conferma Esplicita.
-// Best-effort: torna gli esiti per riferimento. Chi ha Auto Conferma non la usa (e BRT risponderà che
-// sono già confermate/inesistenti in quel flusso — non è un errore da propagare).
+// Conferma esplicita — per i contratti a Conferma Esplicita. È lo shipment in PUT (stesso path della
+// create): "Servizio necessario per confermare una spedizione creata con Create non autoconfermata".
+// Chi ha Auto Conferma non la usa (Quick è auto: la create è già confermata). Best-effort.
 export async function confermaSpedizioniBrt(
   cred: CredenzialiBrt, refs: { numericRef: number; alphaRef?: string | null }[]
 ): Promise<{ ok: boolean; errore: string | null; raw: string }> {
   if (!refs.length) return { ok: true, errore: null, raw: '' }
-  // Una chiamata per riferimento (l'API conferma per spedizione).
   let okTot = true, ultimoErr: string | null = null, raw = ''
   for (const ref of refs) {
     try {
-      const r = await chiamaBrt('confirm', {
+      const r = await chiamaBrt('shipment', {
         account: { userID: cred.user, password: cred.password },
         confirmData: {
           senderCustomerCode: num(cred.cod_cliente),
@@ -221,7 +220,7 @@ export async function confermaSpedizioniBrt(
         },
       }, 'PUT')
       raw = (r.txt || '').substring(0, 1000)
-      const em = r.j?.confirmResponse?.executionMessage
+      const em = r.j?.confirmResponse?.executionMessage || r.j?.createResponse?.executionMessage
       const code = num(em?.code)
       if (code === undefined || code < 0) { okTot = false; ultimoErr = em ? `${em.codeDesc || ''} ${em.message || ''}`.trim() : `HTTP ${r.status}` }
     } catch (e) { okTot = false; ultimoErr = e instanceof Error ? e.message : String(e) }
@@ -230,25 +229,43 @@ export async function confermaSpedizioniBrt(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TRACKING — BRT trackingByParcelID (REST). Il codice viene salvato alla creazione (trackingByParcelID).
+// TRACKING — GET /rest/v1/tracking/parcelID/{parcelID} (STRUTTURA VERIFICATA sulla doc BRT).
+// Interroga col parcelID (barcode 18 char) salvato alla creazione. Risposta: lista_eventi[].evento
+// (data/ora/descrizione) + descrizione_stato_sped_parte1/2 + data_consegna_merce (valorizzata = consegnata).
 // Ritorna gli eventi come stringhe, che il cron mappa con mapStatoBrt + prioritaStato.
 // ─────────────────────────────────────────────────────────────────────────────
-const BRT_TRACK = 'https://api.brt.it/rest/v1/tracking/trackingByParcelID'
+const BRT_TRACK = 'https://api.brt.it/rest/v1/tracking/parcelID'
 
-export async function trackingBrt(trackingByParcelID: string, timeoutMs = 15000): Promise<{ stati: string[]; raw: string }> {
-  const id = String(trackingByParcelID || '').trim()
-  if (!id) return { stati: [], raw: '' }
+// La risposta può essere avvolta in un oggetto (es. parcelIDResponse): si trova il nodo che porta i
+// campi del tracking ovunque sia annidato, senza dipendere dal nome esatto del wrapper.
+function trovaNodoTracking(j: any): any {
+  if (!j || typeof j !== 'object') return null
+  if (Array.isArray(j.lista_eventi) || j.data_consegna_merce !== undefined || j.spedizione_data !== undefined) return j
+  for (const k of Object.keys(j)) { const r = trovaNodoTracking(j[k]); if (r) return r }
+  return null
+}
+
+export async function trackingBrt(parcelID: string, timeoutMs = 15000): Promise<{ stati: string[]; consegnata: boolean; raw: string }> {
+  const id = String(parcelID || '').trim()
+  if (!id) return { stati: [], consegnata: false, raw: '' }
   const ctrl = new AbortController()
   const t = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
     const res = await fetch(`${BRT_TRACK}/${encodeURIComponent(id)}`, { signal: ctrl.signal, headers: { Accept: 'application/json' } })
     const txt = await res.text()
-    let j: any = null; try { j = JSON.parse(txt) } catch { /* */ }
-    const eventi: any[] = j?.trackingByParcelIDResponse?.events || j?.events || []
-    const stati = eventi.map((e: any) => String(e?.statusDescription || e?.description || e?.status || '').replace(/\s+/g, ' ').trim()).filter(Boolean)
-    return { stati, raw: (txt || '').substring(0, 2000) }
+    let j: any = null; try { j = JSON.parse(txt) } catch { /* non-JSON */ }
+    const root = trovaNodoTracking(j) || {}
+    const eventi: any[] = Array.isArray(root.lista_eventi) ? root.lista_eventi : []
+    const stati = eventi.map((e: any) => String(e?.evento?.descrizione || e?.descrizione || '').replace(/\s+/g, ' ').trim()).filter(Boolean)
+    // Stato sintetico (parte1/parte2) come ulteriori righe da mappare.
+    for (const v of [root.descrizione_stato_sped_parte1, root.descrizione_stato_sped_parte2]) {
+      const s2 = String(v || '').replace(/\s+/g, ' ').trim(); if (s2) stati.push(s2)
+    }
+    const consegnata = !!String(root.data_consegna_merce || '').trim()
+    if (consegnata) stati.push('consegnata')
+    return { stati, consegnata, raw: (txt || '').substring(0, 2000) }
   } catch {
-    return { stati: [], raw: '' }
+    return { stati: [], consegnata: false, raw: '' }
   } finally {
     clearTimeout(t)
   }
