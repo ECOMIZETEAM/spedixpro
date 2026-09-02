@@ -46,9 +46,6 @@ async function salvaCorriere(formData: FormData) {
     credenziali.orm_api_key = formData.get('orm_api_key') as string || ''
     settings.network = (formData.get('network') as string) || 'Italia'
     settings.sms_destinatario = formData.get('sms_destinatario') === 'on'
-    // Metodi di incasso COD ammessi (checkbox multipli).
-    settings.cod_contante = formData.get('cod_contante') === 'on'
-    settings.cod_ass_banc_mittente = formData.get('cod_ass_banc_mittente') === 'on'
   } else {
     credenziali.utente = formData.get('utente') as string || ''
     credenziali.password = formData.get('password') as string || ''
@@ -220,15 +217,6 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
               <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>
                 <input type="checkbox" name="sms_destinatario" defaultChecked={!!settingsEsistenti.sms_destinatario}/> Notifiche via SMS al destinatario
               </label>
-              <div>
-                <div style={{fontSize:'11.5px',fontWeight:'600',color:'#666',marginBottom:'6px'}}>Metodi di incasso COD</div>
-                <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'#1a1a1a',cursor:'pointer',marginBottom:'4px'}}>
-                  <input type="checkbox" name="cod_contante" defaultChecked={settingsEsistenti.cod_contante !== false}/> Contante
-                </label>
-                <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>
-                  <input type="checkbox" name="cod_ass_banc_mittente" defaultChecked={!!settingsEsistenti.cod_ass_banc_mittente}/> Assegno bancario al mittente
-                </label>
-              </div>
             </>
           )}
           {tipo === 'gls' && (
