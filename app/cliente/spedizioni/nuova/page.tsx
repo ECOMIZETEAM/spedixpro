@@ -145,11 +145,15 @@ export default function NuovaSpedizioneCliente() {
   const [selected, setSelected] = useState<Tariffa|null>(null)
   // Extra / servizi accessori scelti sul corriere selezionato (li paga il cliente)
   const [extraNomi, setExtraNomi] = useState<string[]>([])
-  // Modalità d'incasso del contrassegno: contante (C, default) o assegno (A). L'assegno è possibile sui
-  // canali che lo trasmettono: DVA ('V', validato sull'offerta) e GLS diretto ('gls', ModalitaIncasso AB).
-  // Sugli altri resta contante. Si azzera al cambio corriere.
-  const [incassoModalita, setIncassoModalita] = useState<'C'|'A'>('C')
+  // Modalità d'incasso del contrassegno. Le opzioni dipendono dal CANALE: GLS diretto ha Contante + Assegno
+  // bancario (AB) + Assegno circolare (AC) — codici ServiziAccessori 01/02/03; DVA solo Contante/Assegno
+  // (la sua API ha 2 valori); gli altri solo Contante. Il valore è il codice modalità. Si azzera al cambio.
+  const [incassoModalita, setIncassoModalita] = useState<string>('C')
   useEffect(() => { setExtraNomi([]); setIncassoModalita('C') }, [selected?._corriere_id])
+  const codModalitaOpts: [string,string][] = selected?._corriere_tipo === 'gls'
+    ? [['C','CONTANTE'],['AB','ASSEGNO BANCARIO'],['AC','ASSEGNO CIRCOLARE']]
+    : selected?._corriere_tipo === 'V' ? [['C','CONTANTE'],['A','ASSEGNO']]
+    : [['C','CONTANTE']]
   const accDisponibili = (selected?.accessori_disponibili || [])
   const extraScelti = accDisponibili
     .filter(a => extraNomi.includes(a.nome))
@@ -875,13 +879,12 @@ export default function NuovaSpedizioneCliente() {
                   {Number(contrassegno) > 0 && (
                     <div>
                       <label style={lbl}>Modalità di incasso contrassegno</label>
-                      {(selected?._corriere_tipo === 'V' || selected?._corriere_tipo === 'gls') ? (
-                        <select style={inp} value={incassoModalita} onChange={e=>setIncassoModalita(e.target.value==='A'?'A':'C')}>
-                          <option value="C">CONTANTE</option>
-                          <option value="A">ASSEGNO</option>
+                      {codModalitaOpts.length > 1 ? (
+                        <select style={inp} value={incassoModalita} onChange={e=>setIncassoModalita(e.target.value)}>
+                          {codModalitaOpts.map(([v,l])=><option key={v} value={v}>{l}</option>)}
                         </select>
                       ) : (
-                        <select style={inp} defaultValue="contante"><option value="contante">CONTANTE</option></select>
+                        <select style={inp} disabled value="C"><option value="C">CONTANTE</option></select>
                       )}
                     </div>
                   )}

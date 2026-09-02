@@ -1562,7 +1562,12 @@ export async function POST(req: NextRequest) {
       // (1) modalità CONTRASSEGNO: 01 contanti, 02 assegno bancario (il form ha C/A → 01/02).
       // (2) servizi scelti (Sabato 23, Exchange 24, Preavviso 14, …) mappati per nome.
       const codiciGls: string[] = []
-      if (body.codValue && Number(body.codValue) > 0) codiciGls.push(String(body.incassoModalita) === 'A' ? '02' : '01')
+      // Modalità contrassegno GLS: 'C' contanti (01/CONT), 'AB' assegno bancario (02/AB), 'AC' assegno
+      // circolare (03/AC). 'A' (vecchio valore generico del form) = bancario, per retro-compatibilità.
+      const _im = String(body.incassoModalita || 'C')
+      const _codModalita = (_im === 'AB' || _im === 'A') ? '02' : _im === 'AC' ? '03' : '01'
+      const _modalitaIncassoGls = (_im === 'AB' || _im === 'A') ? 'AB' : _im === 'AC' ? 'AC' : 'CONT'
+      if (body.codValue && Number(body.codValue) > 0) codiciGls.push(_codModalita)
       for (const sv of (serviziAccessori || [])) { const cod = codiceServizioGls(String((sv as any)?.nome || '')); if (cod) codiciGls.push(cod) }
 
       const ris = await creaSpedizioneGls(credGls, {
@@ -1574,7 +1579,7 @@ export async function POST(req: NextRequest) {
         pesiColli,
         importoContrassegno: body.codValue ? Number(body.codValue) : undefined,
         // ModalitaIncasso coerente col codice ServiziAccessori: contante→CONT, assegno→AB (bancario=02).
-        modalitaIncasso: body.codValue ? (String(body.incassoModalita) === 'A' ? 'AB' : 'CONT') : undefined,
+        modalitaIncasso: body.codValue ? _modalitaIncassoGls : undefined,
         serviziAccessori: codiciGls.length ? codiciGls : undefined,
         assicurazione: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         note: body.notes ? String(body.notes) : undefined,

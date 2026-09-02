@@ -163,11 +163,15 @@ export default function NuovaSpedizionePage() {
   const [selected, setSelected] = useState<Tariffa|null>(null)
   // Extra / servizi accessori scelti sul corriere selezionato (li paga il cliente)
   const [extraNomi, setExtraNomi] = useState<string[]>([])
-  // Modalità d'incasso contrassegno: contante (C) o assegno (A). L'assegno è possibile sui canali che lo
-  // trasmettono davvero: DVA ('V', validato sull'offerta) e GLS diretto ('gls', ModalitaIncasso AB). Sugli
-  // altri resta contante. Si azzera al cambio corriere.
-  const [incassoModalita, setIncassoModalita] = useState<'C'|'A'>('C')
+  // Modalità d'incasso contrassegno. Le opzioni dipendono dal CANALE: GLS diretto ha Contante + Assegno
+  // bancario (AB) + Assegno circolare (AC) — codici ServiziAccessori 01/02/03; DVA solo Contante/Assegno
+  // (la sua API ha 2 valori); gli altri solo Contante. Il valore è il codice modalità. Si azzera al cambio.
+  const [incassoModalita, setIncassoModalita] = useState<string>('C')
   useEffect(() => { setExtraNomi([]); setIncassoModalita('C') }, [selected?._corriere_id])
+  const codModalitaOpts: [string,string][] = selected?._corriere_tipo === 'gls'
+    ? [['C','CONTANTE'],['AB','ASSEGNO BANCARIO'],['AC','ASSEGNO CIRCOLARE']]
+    : selected?._corriere_tipo === 'V' ? [['C','CONTANTE'],['A','ASSEGNO']]
+    : [['C','CONTANTE']]
   const accDisponibili = (selected?.accessori_disponibili || [])
   const extraScelti = accDisponibili
     .filter(a => extraNomi.includes(a.nome))
@@ -905,13 +909,12 @@ export default function NuovaSpedizionePage() {
                   {Number(contrassegno) > 0 && (
                     <div>
                       <label style={{display:'block',fontSize:'12px',color:'#000',marginBottom:'4px',fontWeight:'600'}}>Modalità di incasso contrassegno</label>
-                      {(selected?._corriere_tipo === 'V' || selected?._corriere_tipo === 'gls') ? (
-                        <select value={incassoModalita} onChange={e=>setIncassoModalita(e.target.value==='A'?'A':'C')} style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#000'}}>
-                          <option value="C">CONTANTE</option>
-                          <option value="A">ASSEGNO</option>
+                      {codModalitaOpts.length > 1 ? (
+                        <select value={incassoModalita} onChange={e=>setIncassoModalita(e.target.value)} style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#000'}}>
+                          {codModalitaOpts.map(([v,l])=><option key={v} value={v}>{l}</option>)}
                         </select>
                       ) : (
-                        <select style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#000'}} defaultValue="contante"><option value="contante">CONTANTE</option></select>
+                        <select style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#000'}} disabled value="C"><option value="C">CONTANTE</option></select>
                       )}
                     </div>
                   )}
