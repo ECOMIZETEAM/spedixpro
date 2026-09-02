@@ -475,7 +475,11 @@ export async function calcolaTariffeCliente(
       corriere_nome: corriere?.nome_contratto || 'Corriere',
       limiti_collo: descriviLimiti(settsC, pesoReale),   // indicazione limiti collo (scaglione applicabile al peso)
       listino_fascia: `fino a ${fasciaGiusta.peso_max}kg`,
-      accessori_disponibili: accessoriPerCorriere.get(corriereId) || [],
+      // I servizi accessori si OFFRONO solo dove si TRASMETTONO davvero: canali diretti gls/brt (stessa
+      // regola di CANALI_TRASMETTONO_SERVIZI in corriere-logo). Sui rivenditori (DVA/Spedisci/SpediamoPro)
+      // l'API non li invia e a mano non si fa nulla → non si vendono: sarebbe una promessa che il cliente
+      // paga e non parte. (Chiude la sorgente; le righe già a listino sui rivenditori sono state rimosse.)
+      accessori_disponibili: (corriere?.tipo === 'gls' || corriere?.tipo === 'brt') ? (accessoriPerCorriere.get(corriereId) || []) : [],
       _corriere_tipo: siglaContratto(corriere?.tipo),
       _corriere_id: corriere?.id,
       // NON esporre la quotazione SpediamoPro: contiene totalPrice/priceBreakdown = il COSTO REALE
