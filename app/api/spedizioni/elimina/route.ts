@@ -22,7 +22,7 @@ export async function DELETE(req: NextRequest) {
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
   const { data: sped } = await admin.from('spedizioni')
-    .select('id,master_id,cliente_id,stato,corriere_id,raw_response,tracking_number,numero,dest_nome,created_at')
+    .select('id,master_id,cliente_id,stato,corriere_id,raw_response,tracking_number,numero,dest_nome,created_at,distinta_id,confermata_vettore')
     .eq('id', spedizioneId).single()
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 
@@ -91,6 +91,36 @@ export async function DELETE(req: NextRequest) {
     }).eq('id', spedizioneId)
     if (manErr) return NextResponse.json({ error: manErr.message }, { status: 400 })
     return NextResponse.json({ success: true, manuale: true, message: 'Richiesta di annullo inviata: questo corriere non consente la cancellazione automatica, quindi verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
+  }
+
+  // ── GLS / BRT DIRETTI: annullo IMMEDIATO, mai la coda 48h. ──
+  // GLS è "attesa-chiusura": PRIMA della chiusura distinta (confermata_vettore) la spedizione NON è ancora
+  // trasmessa a GLS, quindi si annulla in sicurezza (DeleteSped) e si rimborsa; DOPO la chiusura GLS
+  // consegna il pacco → non si annulla a vuoto. BRT AUTO-CONFERMA alla creazione, annullabile solo subito
+  // (retry sul -153); poco dopo risponde "già spedita". Prima cadevano nel ramo 48h generico: il cron
+  // tentava l'annullo due giorni dopo — BRT diceva "già spedita" (l'utente aspettava 2 giorni per un
+  // rifiuto, pacco già partito) e la GLS, ormai in distinta, veniva marcata annullata e RIMBORSATA a tutta
+  // la catena mentre GLS la consegnava. Ora si tenta subito, nella finestra in cui l'annullo vale davvero.
+  if (corr?.tipo === 'gls' || corr?.tipo === 'brt') {
+    if (corr.tipo === 'gls' && (sped as any).confermata_vettore) {
+      const msg = 'Spedizione GLS già trasmessa al corriere (distinta chiusa): non è più annullabile in automatico. Va gestita direttamente col corriere.'
+      await admin.from('spedizioni').update({ annullamento_errore: msg }).eq('id', spedizioneId)
+      return NextResponse.json({ error: msg }, { status: 400 })
+    }
+    const esito = await annullaSpedizioneSulCorriere(admin, sped as any)
+    if (esito.ok) {
+      await admin.from('spedizioni').update({
+        stato: 'annullata', stato_precedente: sped.stato,
+        annullamento_richiesto_at: new Date().toISOString(), annullamento_da: user.id, annullamento_errore: null,
+      }).eq('id', spedizioneId)
+      await rimborsaAnnulloSpedizione(admin, sped as any, user.id)
+      return NextResponse.json({ success: true, annullata: true, message: 'Spedizione annullata e credito stornato a tutta la rete.' })
+    }
+    // Non annullabile ORA (BRT ancora "in processing"/già spedita, o GLS che non conferma): niente rimborso
+    // a vuoto e niente attesa 48h. Resta valida, con l'errore in chiaro; l'utente può riprovare a breve.
+    const msg = `Annullo non riuscito: ${esito.reason || 'il corriere non consente la cancellazione (spedizione già in lavorazione)'}. La spedizione resta valida.`
+    await admin.from('spedizioni').update({ annullamento_errore: msg }).eq('id', spedizioneId)
+    return NextResponse.json({ error: msg }, { status: 400 })
   }
 
   // ── SpediamoPro oltre 15 giorni: il corriere NON annulla più (limite fisso di Poste, mostrato

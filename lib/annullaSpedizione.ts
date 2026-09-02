@@ -81,7 +81,13 @@ export async function annullaSpedizioneSulCorriere(
   // DeleteSped (best-effort) per non lasciare numeri appesi. L'esito NON blocca il rimborso: il modello
   // GLS (attesa-chiusura) lo rende sicuro, a differenza di BRT (auto-conferma) qui sotto.
   if (corr.tipo === 'gls') {
+    // GIÀ TRASMESSA (distinta chiusa = confermata_vettore): GLS consegna il pacco → non annullare a vuoto,
+    // mai rimborso su merce che parte. La porta elimina lo blocca già prima; questa è la rete di sicurezza
+    // anche per il cron e i percorsi legacy che dovessero passare di qui.
+    if ((sped as any).confermata_vettore) return { ok: false, reason: 'GLS già trasmessa (distinta chiusa): non annullabile in automatico' }
     const numeroNudo = raw.numero ? String(raw.numero) : ''
+    // Pre-chiusura la spedizione NON è trasmessa a GLS: l'annullo lato Moove è già sicuro anche se DeleteSped
+    // non risponde (GLS non passa a ritirarla). DeleteSped best-effort, per non lasciare numeri appesi.
     if (numeroNudo) {
       try { const { annullaSpedizioneGls } = await import('@/lib/gls'); await annullaSpedizioneGls(cred, numeroNudo) }
       catch (e) { console.error('[ANNULLO][GLS] DeleteSped:', e) }
