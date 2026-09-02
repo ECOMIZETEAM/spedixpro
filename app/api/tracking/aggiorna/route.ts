@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
       // direttamente dal JSON, e l'etichetta si guarda a parte (solo gli id di chi non ce l'ha).
       // ep_offerta/ep_ordine: i due riferimenti del terzo provider. Il tracking si interroga col
       // CODICE OFFERTA (per LDV risponde "Spedizione non trovata"), l'etichetta con l'id ordine.
-      .select('id,numero,stato,tracking_number,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali,nome_contratto),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code,ep_offerta:raw_response->_codiceOfferta,ep_ordine:raw_response->_idOrdine,gls_numero:raw_response->numero,richiedi_ritiro,ritiro_id,created_at,ep_ritiro:raw_response->_codiceRitiro')
+      .select('id,numero,stato,tracking_number,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali,nome_contratto),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code,ep_offerta:raw_response->_codiceOfferta,ep_ordine:raw_response->_idOrdine,gls_numero:raw_response->numero,brt_track:raw_response->trackingByParcelID,richiedi_ritiro,ritiro_id,created_at,ep_ritiro:raw_response->_codiceRitiro')
       .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
       .order('tracking_check_at', { ascending: true, nullsFirst: true })
       .order('id', { ascending: true })
@@ -161,6 +161,19 @@ export async function GET(req: NextRequest) {
         const { stati } = await trackingGls(cred, String(numeroNudo))
         for (const str of stati) {
           const m = mapStatoGls(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
+
+      } else if (tipo === 'brt') {
+        // BRT DIRETTO: lo stato di consegna si legge dal tracking REST BRT per trackingByParcelID
+        // (15 char), salvato in raw_response alla creazione. Best-effort: se la risposta non torna,
+        // nessun aggiornamento (mai declassa). NB: struttura risposta tracking da confermare sul campo.
+        const brtTrack = (s as any).brt_track
+        if (!brtTrack) return
+        const { trackingBrt, mapStatoBrt } = await import('@/lib/brt')
+        const { stati } = await trackingBrt(String(brtTrack))
+        for (const str of stati) {
+          const m = mapStatoBrt(str)
           if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
         }
 

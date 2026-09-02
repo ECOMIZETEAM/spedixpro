@@ -76,6 +76,19 @@ export async function annullaSpedizioneSulCorriere(
     return { ok: false, reason: 'questo corriere non consente l\'annullo automatico' }
   }
 
+  // BRT diretto: l'annullo esiste (PUT /delete), ma va tentato DAVVERO — il ritorno generico ok:true
+  // qui sotto rimborserebbe tutta la catena mentre BRT (auto-conferma) consegna il pacco. Subito dopo la
+  // creazione BRT risponde -153 "in processing" (~1min) e più tardi "già spedita": in entrambi i casi
+  // NON è annullabile, quindi ok:false col motivo (resta in coda / da riprovare), mai rimborso a vuoto.
+  if (corr.tipo === 'brt') {
+    const numericRef = raw.numericRef
+    if (!numericRef) return { ok: false, reason: 'riferimento BRT mancante per l\'annullo' }
+    const { annullaSpedizioneBrt } = await import('@/lib/brt')
+    const a = await annullaSpedizioneBrt(cred, { numericRef, alphaRef: raw.alphaRef })
+    if (a.ok || giaEliminataSulCorriere(a.errore || '')) return { ok: true }
+    return { ok: false, reason: (a.errore || 'BRT non consente l\'annullo in questo momento').slice(0, 160) }
+  }
+
   // CIRCUITO INTERNO: non c'e' nessuno a cui mandare l'annullo, il corriere siamo noi. Basta non
   // farlo partire — ma se e' gia' stato consegnato non c'e' piu' niente da fermare, e dire ok
   // qui vorrebbe dire rimborsare cliente e catena per un pacco che il destinatario ha in casa.
