@@ -318,6 +318,54 @@ export async function chiudiGiornataGls(supabase: any, distintaId: string) {
   }
 }
 
+// RECUPERO ON-DEMAND dell'etichetta GLS, con salvataggio. GLS genera il PDF con un attimo di ritardo
+// dopo AddParcel: se alla creazione (tentativo sincrono + ripresa in background) era ancora troppo
+// presto, l'etichetta non veniva mai salvata e il tasto "Etichetta" restava "non disponibile" per
+// sempre — non essendoci, per GLS, il ripiego on-demand che invece hanno DVA e SpediamoPro. Questo lo
+// aggiunge: quando manca, la si scarica ORA e la si salva (etichetta_url + per-collo), come fa la crea.
+// Torna il PDF (unito se multicollo) o null. `admin` deve avere il service role (legge le credenziali).
+export async function recuperaEtichettaGlsSalvando(
+  admin: any,
+  sped: { id: string; corriere_id?: string | null; colli?: number | null; raw_response?: any; colli_dettaglio?: any }
+): Promise<Buffer | null> {
+  const raw = (sped?.raw_response || {}) as any
+  if (!raw._gls || !sped?.corriere_id || !sped?.id) return null
+  const numeroBare = raw.numero ? String(raw.numero) : ''
+  if (!numeroBare) return null
+  const { data: corr } = await admin.from('corrieri').select('tipo,credenziali').eq('id', sped.corriere_id).maybeSingle()
+  if (corr?.tipo !== 'gls') return null
+  const cred = (corr.credenziali || {}) as CredenzialiGls
+  if (!cred.sigla_sede || !cred.user_webservice || !cred.password_webservice) return null
+
+  const nColli = Math.max(1, Math.round(Number(sped.colli) || 1))
+  const et = await etichetteGls(cred, numeroBare, nColli)
+  if (!et.etichette.length) return null
+
+  // Unione multicollo (una pagina per collo), come alla creazione; mono-collo = diretta.
+  let b64unico = et.etichette[0]
+  if (et.etichette.length > 1) {
+    try {
+      const { unisciEtichette } = await import('@/lib/easyparcel')
+      b64unico = (await unisciEtichette(et.etichette)) || et.etichette[0]
+    } catch { /* ripiega sul primo collo */ }
+  }
+  const etichettaUrl = `data:application/pdf;base64,${b64unico}`
+
+  // Salva l'etichetta unica + quelle per-collo (se colli_dettaglio è presente), così le prossime
+  // aperture la trovano già pronta e non richiamano GLS.
+  const colli = Array.isArray(sped.colli_dettaglio) ? (sped.colli_dettaglio as any[]) : null
+  const nuoviColli = colli && colli.length
+    ? colli.map((c: any, i: number) => ({ ...c, etichetta_url: et.etichette[i] ? `data:application/pdf;base64,${et.etichette[i]}` : (c.etichetta_url || null) }))
+    : null
+  try {
+    await admin.from('spedizioni').update({
+      etichetta_url: etichettaUrl, ...(nuoviColli ? { colli_dettaglio: nuoviColli } : {}),
+    }).eq('id', sped.id)
+  } catch { /* il salvataggio è best-effort: l'importante è restituire il PDF adesso */ }
+
+  return Buffer.from(b64unico, 'base64')
+}
+
 // Comodo per il percorso di creazione: crea + scarica subito l'etichetta.
 export async function creaSpedizioneConEtichettaGls(cred: CredenzialiGls, parcel: ParcelGls): Promise<RisultatoGls> {
   const ris = await creaSpedizioneGls(cred, parcel)

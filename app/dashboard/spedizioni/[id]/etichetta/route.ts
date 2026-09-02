@@ -12,13 +12,25 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!user) return new NextResponse('Non autenticato', { status: 401 })
   // Lettura sotto RLS: se l'utente non può vedere la spedizione, torna null → 404 (auth per tenant).
   const { data: sped } = await supabase.from('spedizioni')
-    .select('raw_response,tracking_number,numero,etichetta_url,etichetta_path,colli_dettaglio')
+    .select('raw_response,tracking_number,numero,etichetta_url,etichetta_path,colli_dettaglio,corriere_id,colli')
     .eq('id', id).single()
   if (!sped) return new NextResponse('Non trovata', { status: 404 })
 
   const { leggiEtichettaCompleta } = await import('@/lib/etichette')
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
-  const et = await leggiEtichettaCompleta(createAdminSupabase(), sped as any)
+  const admin = createAdminSupabase()
+  let et = await leggiEtichettaCompleta(admin, sped as any)
+
+  // Ripiego GLS on-demand: l'etichetta del contratto proprio può non essere pronta subito dopo la
+  // creazione (GLS la genera con un attimo di ritardo). Se manca, la si scarica ORA e la si salva —
+  // così il tasto non resta "non disponibile" per un problema di sola tempistica.
+  if (!et && (sped as any)?.raw_response?._gls) {
+    try {
+      const { recuperaEtichettaGlsSalvando } = await import('@/lib/gls')
+      const buf = await recuperaEtichettaGlsSalvando(admin, { id, ...(sped as any) })
+      if (buf?.length) et = { buffer: buf, mime: 'application/pdf', ext: 'pdf' }
+    } catch (e) { console.error('[ETICHETTA][GLS] recupero on-demand:', e) }
+  }
 
   if (!et) {
     return new NextResponse(`

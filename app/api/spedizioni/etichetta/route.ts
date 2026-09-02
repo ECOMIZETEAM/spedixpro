@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
 
   const { data: sped } = await supabase
     .from('spedizioni')
-    .select('etichetta_url, etichetta_path, colli_dettaglio, cliente_id, master_id, numero, raw_response, corriere_id')
+    .select('etichetta_url, etichetta_path, colli_dettaglio, cliente_id, master_id, numero, raw_response, corriere_id, colli')
     .eq('id', id)
     .single()
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
@@ -89,6 +89,23 @@ export async function GET(req: NextRequest) {
         'Cache-Control': 'private, max-age=0, no-store',
       } })
     }
+  }
+
+  // Ripiego GLS on-demand (contratto proprio): l'etichetta GLS può non essere pronta subito dopo la
+  // creazione. Se manca, la si scarica ORA da GLS e la si salva, come per DVA/SpediamoPro qui sotto.
+  if ((sped as any)?.raw_response?._gls) {
+    try {
+      const { recuperaEtichettaGlsSalvando } = await import('@/lib/gls')
+      const buf = await recuperaEtichettaGlsSalvando(createAdminSupabase(), { id, ...(sped as any) })
+      if (buf?.length) {
+        const out = await conRiepilogo(buf)
+        return new NextResponse(new Uint8Array(out), { status: 200, headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.pdf"`,
+          'Cache-Control': 'private, max-age=0, no-store',
+        } })
+      }
+    } catch (e) { console.error('[ETICHETTA][GLS] recupero on-demand:', e) }
   }
 
   // Un collo solo (o etichette tutte identiche): prima quella della spedizione, poi quella del collo.
