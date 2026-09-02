@@ -114,10 +114,19 @@ export async function GET(req: NextRequest) {
   let movSub: any[] = []
   if (subIds.size) {
     movSub = await fetchAll(() => admin.from('movimenti')
-      .select('master_id,master_target_id,importo,tipo,created_at')
+      .select('master_id,master_target_id,importo,tipo,created_at,spedizione_id')
       .in('master_id', Array.from(subIds)).not('spedizione_id', 'is', null).gte('created_at', dal).lte('created_at', alEnd).in('tipo', TIPI)
       .order('created_at', { ascending: false }).order('id', { ascending: false }))
   }
+  // Chiavi (spedizione, sotto-master) già contate come ricavo via il SELF del sotto-master (movSub sotto):
+  // servono a NON contare due volte quelle poche spedizioni che hanno SIA il self del figlio SIA un mio
+  // addebito diretto (master_id=M, target=figlio) per lo stesso evento. Le due forme convivono per motivi
+  // storici; qui si tiene una sola strada.
+  // Chiave col TIPO: la spedizione base ha SEMPRE un self di tipo 'spedizione' del figlio (è il ricavo
+  // base, giusto contarlo da movSub); senza il tipo nella chiave bloccherei per sbaglio la rettifica
+  // dello stesso pacco. Il doppio vero c'è solo quando lo STESSO tipo esiste in entrambe le forme.
+  const selfSubKeys = new Set<string>()
+  for (const m of movSub) if (m.master_id === m.master_target_id && (m as any).spedizione_id) selfSubKeys.add((m as any).spedizione_id + '|' + m.master_id + '|' + m.tipo)
 
   const n = (x: any) => Number(x || 0)
   // Serie temporale: ricavi/costi per giorno (per mese/settimana/oggi) o per mese (annuale)
@@ -157,6 +166,16 @@ export async function GET(req: NextRequest) {
       costoM += v; acc(m.created_at, 'costi', v)                                                            // costo di M
       // Spedizione propria: entrata = uscita → margine 0 (non riduce il guadagno).
       if ((m as any).spedizione_id && propriaSet.has((m as any).spedizione_id)) { ricaviPropria += v; acc(m.created_at, 'ricavi', v) }
+    }
+    // RICAVO da un SUB-MASTER DIRETTO addebitato SUI MIEI libri: rettifiche/resi/giacenze/rimborsi che
+    // carico IO al sotto-master (master_id=M, target=sub diretto, niente cliente). Senza questo ramo, un
+    // master che rettifica ai suoi sotto-master vedeva il Report Guadagno FERMO (il ricavo cadeva fuori da
+    // entrambi i rami sopra) — capitava a MULTIEXPRESS, che rivende a sotto-master invece che a clienti,
+    // mentre chi rettifica ai CLIENTI (ramo cliente_id) lo vedeva già. La spedizione BASE è ESCLUSA: il suo
+    // ricavo arriva dai movimenti del sotto-master (self, in movSub) — includerla qui la conterebbe due volte.
+    else if (m.tipo !== 'spedizione' && m.master_target_id && subIds.has(m.master_target_id)
+             && !selfSubKeys.has((m as any).spedizione_id + '|' + m.master_target_id + '|' + m.tipo)) {
+      ricaviSub += -n(m.importo); acc(m.created_at, 'ricavi', -n(m.importo))
     }
   }
   for (const m of movSub) {
