@@ -1707,5 +1707,165 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  if (corriereRecord.tipo === 'brt') {
+    const credBrt = {
+      user: cred.user, password: cred.password, cod_cliente: cred.cod_cliente,
+      cod_filiale: cred.cod_filiale, codice_tariffa: cred.codice_tariffa, orm_api_key: cred.orm_api_key,
+    }
+    if (!credBrt.user || !credBrt.password || !credBrt.cod_cliente || !credBrt.cod_filiale) {
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Contratto BRT non configurato correttamente. Contatta l\'assistenza.' }, { status: 400 })
+    }
+    try {
+      const { creaSpedizioneBrt, annullaSpedizioneBrt } = await import('@/lib/brt')
+
+      let costoCorrente = costoMaster
+      if (!isProprio) {
+        costoCorrente = (await calcolaPrezzoCorriere(adminCrea, {
+          corriereId: corriereRecord.id, masterId,
+          provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
+          pesoReale, packages,
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+        })) ?? 0
+      }
+      const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
+
+      // BRT vuole PESO TOTALE della spedizione e NUMERO COLLI (max 30). Il volume è la somma dei m³ dei colli.
+      const pesoTot = packages.reduce((t: number, p: any) => t + (parseFloat(p?.weight) || 1), 0)
+      const volTot = packages.reduce((t: number, p: any) => {
+        const l = parseFloat(p?.length) || 0, w = parseFloat(p?.width) || 0, h = parseFloat(p?.height) || 0
+        return t + (l * w * h) / 1_000_000   // cm³ → m³
+      }, 0)
+      const bda = (body.rifOrdine ? String(body.rifOrdine) : '').trim().substring(0, 15) || undefined
+
+      const ris = await creaSpedizioneBrt(credBrt, {
+        ragioneSociale: body.shipTo.name, indirizzo: body.shipTo.street1,
+        localita: body.shipTo.city, cap: body.shipTo.postalCode, provincia: body.shipTo.state,
+        paese: body.shipTo.country || 'IT',
+        contatto: body.shipTo.name, telefono: body.shipTo.phone || undefined, email: body.shipTo.email || undefined,
+        pesoTotKg: pesoTot, numeroColli: packages.length, volumeM3: volTot > 0 ? volTot : undefined,
+        importoContrassegno: body.codValue ? Number(body.codValue) : undefined,
+        assicurazione: body.insuranceValue ? Number(body.insuranceValue) : undefined,
+        note: body.notes ? String(body.notes) : undefined, rifOrdine: bda,
+      })
+
+      if (!ris.parcelID) {
+        await stornaPrenotazione()
+        return NextResponse.json({ error: erroreCorrierePulito(ris.errore || 'BRT: creazione non riuscita') }, { status: 400 })
+      }
+      const numeroFinale = ris.parcelID
+
+      // L'etichetta BRT torna GIÀ nella create (una per collo): niente chiamata separata come il GLS.
+      let etichettaUrl: string | null = null
+      const etichettePerCollo = ris.etichette.map(b => `data:application/pdf;base64,${b}`)
+      if (ris.etichette.length) {
+        const { unisciEtichette } = await import('@/lib/easyparcel')
+        const merged = ris.etichette.length > 1 ? await unisciEtichette(ris.etichette) : ris.etichette[0]
+        etichettaUrl = merged ? `data:application/pdf;base64,${merged}` : (etichettePerCollo[0] || null)
+      }
+
+      const colliDettaglio = (body.colliDettaglio || packages.map((p: any) => ({ lunghezza: p.length, larghezza: p.width, altezza: p.height })))
+        .map((c: any, i: number) => ({
+          numero: i + 1,
+          lunghezza: c.lunghezza || packages[i]?.length || null,
+          larghezza: c.larghezza || packages[i]?.width || null,
+          altezza: c.altezza || packages[i]?.height || null,
+          peso: packages[i]?.weight || null,
+          etichetta_url: etichettePerCollo[i] || (packages.length === 1 ? etichettaUrl : null),
+        }))
+
+      const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
+        master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id,
+        numero: numeroFinale,
+        mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
+        mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
+        mitt_email: body.shipFrom.email || null, mitt_telefono: body.shipFrom.phone || null,
+        dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_citta: body.shipTo.city,
+        dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
+        dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
+        colli: packages.length, peso_reale: pesoReale,
+        peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
+        lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
+        contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
+        tracking_number: numeroFinale,
+        etichetta_url: etichettaUrl,
+        colli_dettaglio: colliDettaglio,
+        // numericRef/alphaRef servono all'ANNULLO (delete BRT li usa per ritrovare la spedizione);
+        // trackingByParcelID serve al tracking. _brt marca il contratto proprio.
+        raw_response: {
+          _brt: true, parcelID: ris.parcelID, parcelIDs: ris.parcelIDs,
+          trackingByParcelID: ris.trackingByParcelID, numericRef: ris.numericRef, alphaRef: ris.alphaRef,
+          warning: ris.warning || undefined,
+        },
+        stato: 'in_lavorazione',
+        costo_spedizione: costoCorrente, costo_totale: costoCliente,
+        servizi_accessori: serviziAccessori,
+        richiedi_ritiro: _vuoleRitiro || false,
+        data_ritiro: _vuoleRitiro ? String(body.dataRitiro) : null,
+        intervallo_ritiro: _vuoleRitiro ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
+        note: body.notes || null, contenuto: body.contenuto || null,
+        rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
+      }).select('id').single()
+
+      if (insertError) {
+        // La spedizione esiste su BRT ma non da noi. BRT però tiene la spedizione "in processing" per
+        // ~1 minuto e rifiuta l'annullo immediato (-153): si ritenta in background. Non si lascia un
+        // pacco fantasma che BRT ritirerebbe (è auto-conferma).
+        console.error('[CREA][BRT][INSERT]', numeroFinale, insertError.message)
+        const refAnn = { numericRef: ris.numericRef, alphaRef: ris.alphaRef }
+        after(async () => {
+          for (let i = 0; i < 8; i++) {
+            const a = await annullaSpedizioneBrt(credBrt, refAnn)
+            if (a.ok) { console.log('[CREA][BRT] pacco fantasma annullato', numeroFinale); return }
+            if (!a.inLavorazione) break
+            await new Promise(r => setTimeout(r, 12000))
+          }
+          console.error('[CREA][BRT] pacco fantasma NON annullato, annullare a mano', numeroFinale, ris.numericRef)
+        })
+        return NextResponse.json({
+          error: `Spedizione non registrata a sistema (rif. ${numeroFinale}): riprova. Se ricompare, contatta l'assistenza.`,
+          numero: numeroFinale,
+        }, { status: 500 })
+      }
+
+      await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
+      try {
+        await addebitaCatena(adminCrea, {
+          masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
+          costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
+          cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
+          corriereNome: corriereRecord.nome_contratto,
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+          numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
+        })
+      } catch (e) { console.error('[CREA][BRT] cascata catena:', e) }
+
+      after(async () => {
+        try {
+          const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
+          let notificaDest = true
+          if (clienteId) {
+            const { data: cli } = await adminCrea.from('clienti').select('impostazioni').eq('id', clienteId).maybeSingle()
+            notificaDest = (cli?.impostazioni as any)?.notifica_email_dest !== false
+          }
+          await inviaEmailSpedizioneCreata({
+            mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
+            mittNome: body.shipFrom?.name, destNome: body.shipTo?.name,
+            numero: numeroFinale, corriere: corriereRecord.nome_contratto, destCitta: body.shipTo?.city,
+            notificaDest, spedizioneId: inserted?.id || null, masterId,
+          })
+        } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
+      })
+
+      return NextResponse.json({
+        numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2), spedizioneId: inserted?.id || null,
+      })
+    } catch (err: any) {
+      console.error('[CREA][BRT]', err?.message)
+      await stornaPrenotazione()
+      return NextResponse.json({ error: erroreCorrierePulito(err?.message) }, { status: 400 })
+    }
+  }
+
   { await stornaPrenotazione(); return NextResponse.json({ error: `Tipo corriere non supportato: ${corriereRecord.tipo}` }, { status: 400 }) }
 }
