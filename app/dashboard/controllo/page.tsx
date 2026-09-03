@@ -8,7 +8,7 @@ import { useState } from 'react'
 type Controllo = { id: string; nome: string; descrizione: string; icona: string; pronto: boolean }
 const CONTROLLI: Controllo[] = [
   { id: 'spedizioni-in-perdita', nome: 'Spedizioni in perdita', icona: '📉', pronto: true,
-    descrizione: 'Trova i master che vanno sotto su una spedizione (pagano piu\' di quanto incassano dal livello sotto) e il perche\': listino sotto costo o anomalia peso/volume.' },
+    descrizione: 'Trova i master che vanno sotto STRUTTURALMENTE su una spedizione (pagano piu\' di quanto incassano dal livello sotto) e il perche\': listino sotto costo o anomalia peso/volume. Esclude le rettifiche in transito (ricevute ma non ancora girate al livello sotto): quelle sono normali.' },
 ]
 
 const eur = (n: number) => (n < 0 ? '−' : '') + '€ ' + Math.abs(n).toFixed(2)

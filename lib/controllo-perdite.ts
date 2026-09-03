@@ -2,10 +2,17 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 
 // CONTROLLO "Spedizioni in perdita" (Centrale di Controllo, super master).
 // Per ogni spedizione ricostruisce la catena dai MOVIMENTI (ogni livello ha il suo costo = quanto
-// PAGA; il cliente paga in cima) e trova i master la cui MARGINE < 0 su quella spedizione:
+// PAGA; il cliente paga in cima) e trova i master la cui MARGINE STRUTTURALE < 0 su quella spedizione:
 //   margine(X) = quanto INCASSA dal livello sotto − quanto PAGA X.
 // Poi categorizza il PERCHE': listino sotto costo vs anomalia peso/volume (ripesatura falsa).
 // Sola lettura, nessun addebito. Il credito NON si tocca: e' solo diagnosi.
+//
+// SOLO movimenti 'spedizione' (NON 'rettifica'): le rettifiche sono correzioni in TRANSITO nella
+// catena — se un master (es. Ecomize Solution) riceve una rettifica da MULTIEXPRESS ma non l'ha
+// ancora GIRATA al livello sotto (Ecomize LL), risulterebbe temporaneamente "sotto" pur non avendo
+// un problema di listino/peso: e' normale, la girera'. Il margine "a rettifiche tutte propagate"
+// coincide col margine BASE (pass-through), quindi guardando solo la 'spedizione' quel falso allarme
+// sparisce e restano i veri problemi strutturali. Le rettifiche in transito sono un altro controllo.
 
 export type PerditaRiga = {
   numero: string; spedizione_id: string; master: string; master_id: string
@@ -47,7 +54,7 @@ export async function trovaSpedizioniInPerdita(giorni = 14, limitRighe = 3000): 
     const chunk = ids.slice(i, i + 300)
     for (let from = 0; ; from += 1000) {
       const { data: mvs } = await admin.from('movimenti').select('spedizione_id,master_target_id,cliente_id,importo')
-        .in('tipo', ['spedizione', 'rettifica']).in('spedizione_id', chunk).order('id').range(from, from + 999)
+        .eq('tipo', 'spedizione').in('spedizione_id', chunk).order('id').range(from, from + 999)
       if (!mvs?.length) break
       for (const mv of mvs) {
         const imp = Number((mv as any).importo || 0)
