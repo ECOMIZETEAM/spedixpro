@@ -1,4 +1,5 @@
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { ControlloRisultato, eur, r2 } from '@/lib/controllo-tipi'
 
 // CONTROLLO "Spedizioni in perdita" (Centrale di Controllo, super master).
 // Per ogni spedizione ricostruisce la catena dai MOVIMENTI (ogni livello ha il suo costo = quanto
@@ -20,14 +21,8 @@ export type PerditaRiga = {
   peso_reale: number; peso_onesto: number; peso_fatturato: number
   causa: string; dettaglio: string; stato: string; created_at: string
 }
-export type RisultatoPerdite = {
-  righe: PerditaRiga[]; perCausa: Record<string, { n: number; tot: number }>
-  perMaster: Record<string, { n: number; tot: number }>; totale: number; spedizioniScansionate: number; giorni: number
-}
 
-const r2 = (n: number) => Math.round(n * 100) / 100
-
-export async function trovaSpedizioniInPerdita(giorni = 14, limitRighe = 3000): Promise<RisultatoPerdite> {
+export async function trovaSpedizioniInPerdita(giorni = 14, limitRighe = 3000): Promise<ControlloRisultato> {
   const admin = createAdminSupabase()
   const dal = new Date(Date.now() - giorni * 864e5).toISOString()
 
@@ -98,11 +93,26 @@ export async function trovaSpedizioniInPerdita(giorni = 14, limitRighe = 3000): 
   righe.sort((a, b) => a.margine - b.margine)
 
   const perCausa: Record<string, { n: number; tot: number }> = {}
-  const perMaster: Record<string, { n: number; tot: number }> = {}
-  for (const r of righe) {
-    const c = perCausa[r.causa] || { n: 0, tot: 0 }; c.n++; c.tot = r2(c.tot + r.margine); perCausa[r.causa] = c
-    const m = perMaster[r.master] || { n: 0, tot: 0 }; m.n++; m.tot = r2(m.tot + r.margine); perMaster[r.master] = m
-  }
+  for (const r of righe) { const c = perCausa[r.causa] || { n: 0, tot: 0 }; c.n++; c.tot = r2(c.tot + r.margine); perCausa[r.causa] = c }
   const totale = r2(righe.reduce((s, r) => s + r.margine, 0))
-  return { righe: righe.slice(0, limitRighe), perCausa, perMaster, totale, spedizioniScansionate: speds.length, giorni }
+  return {
+    kpi: [
+      { label: 'Righe in perdita', valore: righe.length.toLocaleString('it-IT'), colore: '#b91c1c' },
+      { label: 'Perdita totale', valore: eur(totale), colore: '#b91c1c' },
+      ...Object.entries(perCausa).map(([k, v]) => ({ label: k, valore: `${v.n} · ${eur(v.tot)}`, colore: '#c2410c' })),
+    ],
+    colonne: [
+      { key: 'numero', label: 'Spedizione', tipo: 'mono' },
+      { key: 'master', label: 'Master (in perdita)' },
+      { key: 'paga', label: 'Paga', align: 'right', tipo: 'eur' },
+      { key: 'incassa', label: 'Incassa', align: 'right', tipo: 'eur' },
+      { key: 'margine', label: 'Margine', align: 'right', tipo: 'eur' },
+      { key: 'peso_onesto', label: 'Peso vero', align: 'right', tipo: 'peso' },
+      { key: 'causa', label: 'Causa', tipo: 'badge' },
+      { key: 'dettaglio', label: 'Dettaglio' },
+    ],
+    righe: righe.slice(0, limitRighe),
+    categoriaKey: 'causa', cercaKeys: ['numero', 'master'], csvNome: 'spedizioni-in-perdita', finestra: true,
+    nota: `${speds.length.toLocaleString('it-IT')} spedizioni scansionate (${giorni} gg).`,
+  }
 }
