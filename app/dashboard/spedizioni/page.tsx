@@ -638,6 +638,9 @@ async function apriTracking(s: any) {
                           {s.stato==='annullamento_pending' ? (
                             <button onClick={()=>ripristina(s.id,s.numero)} disabled={eliminando===s.id}
                               style={{padding:'4px 10px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'12px',fontWeight:'700',border:'1px solid #fed7aa',cursor:'pointer',whiteSpace:'nowrap',opacity:eliminando===s.id?0.5:1}} title="Ripristina spedizione">↩︎ Ripristina</button>
+                          ) : s.no_annullo_15gg ? (
+                            <span title="Dopo i 15 giorni non è più possibile annullare: il corriere non lo consente."
+                              style={{padding:'4px 8px',background:'#f5f5f5',color:'#c4c4c4',borderRadius:'4px',fontSize:'14px',border:'1px solid #eee',cursor:'not-allowed'}}>🗑️</span>
                           ) : (
                             <button onClick={()=>elimina(s.id,s.numero)} disabled={eliminando===s.id}
                               style={{padding:'4px 8px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'14px',border:'1px solid #fecaca',cursor:'pointer',opacity:eliminando===s.id?0.5:1}} title="Elimina">🗑️</button>

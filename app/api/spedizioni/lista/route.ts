@@ -401,6 +401,21 @@ export async function GET(req: NextRequest) {
     try { calcAgente = await creaCalcolatoreListinoCliente(db, (utente as any).listino_agente_id) } catch { calcAgente = null }
   }
 
+  // Flag "annullo bloccato oltre 15 giorni": SOLO SpediamoPro (limite fisso di Poste), stessa condizione
+  // della porta /elimina. Serve ai portali a NASCONDERE il cestino su queste e spiegare il perche' al
+  // passaggio del cursore, cosi' il cliente non ci prova (e non tartassa). Tipo corriere via chiave di
+  // servizio: il grant per-colonna su corrieri puo' negare 'tipo' alla sessione, qui torna solo un flag.
+  const corrTipo = new Map<string, string>()
+  {
+    const corrIds = Array.from(new Set((spedizioni || []).map((s: any) => s.corriere_id).filter(Boolean)))
+    if (corrIds.length) {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const { data: cc } = await createAdminSupabase().from('corrieri').select('id,tipo').in('id', corrIds as string[])
+      for (const c of (cc || [])) corrTipo.set((c as any).id, (c as any).tipo)
+    }
+  }
+  const OLTRE_15GG = Date.now() - 15 * 24 * 60 * 60 * 1000
+
   // master_rete = nome della MIA prima linea per le spedizioni dei sotto-master (null per le mie)
   const rows = (spedizioni || []).map((s: any) => {
     let master_rete: string | null = null
@@ -460,7 +475,8 @@ export async function GET(req: NextRequest) {
     const margine = agenteSenzaCosto ? null : Math.round((prezzo_cliente - (prezzo_corriere as number)) * 100) / 100
     const id_ordine = idOrdine.get(s.id) || (s as any).id_ordine_esterno || (s as any).rif_ordine || null
     const distinta_reso = distintaReso.get(s.id) || null
-    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, id_ordine, distinta_reso, ticket: ticketPerSped.get(s.id) || null }
+    const no_annullo_15gg = corrTipo.get(s.corriere_id) === 'spediamopro' && !!s.created_at && new Date(s.created_at).getTime() < OLTRE_15GG
+    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, id_ordine, distinta_reso, no_annullo_15gg, ticket: ticketPerSped.get(s.id) || null }
   })
   // ── CONTRASSEGNO PER-LIVELLO: il badge è verde solo se IO ho incassato. ──
   // Per un MASTER: verde se la rimessa indirizzata a ME (target_master_id) è pagata; arancio se
