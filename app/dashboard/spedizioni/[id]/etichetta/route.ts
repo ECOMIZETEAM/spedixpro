@@ -12,7 +12,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!user) return new NextResponse('Non autenticato', { status: 401 })
   // Lettura sotto RLS: se l'utente non può vedere la spedizione, torna null → 404 (auth per tenant).
   const { data: sped } = await supabase.from('spedizioni')
-    .select('raw_response,tracking_number,numero,etichetta_url,etichetta_path,colli_dettaglio,corriere_id,colli')
+    .select('raw_response,tracking_number,numero,etichetta_url,etichetta_path,colli_dettaglio,corriere_id,colli,contenuto,rif_ordine')
     .eq('id', id).single()
   if (!sped) return new NextResponse('Non trovata', { status: 404 })
 
@@ -40,6 +40,23 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         <p>L'etichetta non è stata salvata. Ricreare la spedizione.</p>
       </body></html>
     `, { headers: { 'Content-Type': 'text/html' } })
+  }
+
+  // RISCRITTURA ETICHETTA SpediamoPro: sul PDF sostituisci il CODICE interno del provider col nostro
+  // RIFERIMENTO ORDINE e la "campionatura generica" col CONTENUTO dichiarato dal mittente su MoovExpress.
+  // Solo spediamopro, solo PDF; ogni errore -> etichetta ORIGINALE (mai degradare la LDV).
+  if (et && et.mime === 'application/pdf') {
+    try {
+      const { data: corr } = await admin.from('corrieri').select('tipo').eq('id', (sped as any).corriere_id).maybeSingle()
+      if ((corr as any)?.tipo === 'spediamopro' && ((sped as any).rif_ordine || (sped as any).contenuto)) {
+        const { riscriviEtichettaSpediamopro, codiceProviderSpediamopro } = await import('@/lib/etichetta-spediamopro')
+        const nuovo = await riscriviEtichettaSpediamopro(et.buffer, {
+          code: codiceProviderSpediamopro((sped as any).raw_response),
+          rifOrdine: (sped as any).rif_ordine, contenuto: (sped as any).contenuto,
+        })
+        et = { ...et, buffer: nuovo }
+      }
+    } catch (e) { console.error('[ETICHETTA][SPEDIAMOPRO] rewrite serve:', e) }
   }
 
   return new NextResponse(new Uint8Array(et.buffer), {
