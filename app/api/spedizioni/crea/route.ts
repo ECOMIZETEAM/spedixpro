@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
   // Extra/servizi accessori scelti per questa spedizione (li paga il cliente): [{nome, importo}].
   // L'importo è già incluso in body.totalPrice (calcolato lato frontend dal listino); qui salviamo
   // il dettaglio per riga così il report può riportarlo voce per voce.
-  const serviziAccessori = Array.isArray(body.serviziAccessori)
+  let serviziAccessori = Array.isArray(body.serviziAccessori)
     ? body.serviziAccessori
         .map((s:any) => ({ nome: String(s?.nome || '').slice(0,120), importo: Math.round((Number(s?.importo)||0)*100)/100 }))
         .filter((s:any) => s.nome && s.importo)
@@ -335,7 +335,30 @@ export async function POST(req: NextRequest) {
       contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
       valoreMerce: Number(body.valoreMerce || 0), nolo: risPrezzo.prezzo,
     })
-    prezzoServerCliente = Math.round((risPrezzo.prezzo + suppPrezzo.contrassegno + suppPrezzo.assicurazione) * 100) / 100
+    // Servizi accessori RICALCOLATI lato SERVER: non fidarsi dell'importo mandato dal browser. Rileggo le
+    // righe accessorie del listino cliente per QUESTO corriere e riapplico prezzo + perc% del NOLO
+    // (risPrezzo.prezzo = nolo+fuel+sponda, la stessa base del frontend). Un accessorio non a listino → 0.
+    // Cosi' il pavimento server include gli accessori: "pago meno sull'extra" o "extra inventato" non passano.
+    let accessoriServer = 0
+    if (serviziAccessori && serviziAccessori.length) {
+      const { data: accRows } = await adminCrea.from('listini_clienti_supplementi')
+        .select('nome,descrizione,valore').eq('listino_id', cliente.listino_cliente_id)
+        .eq('corriere_id', corriereRecord.id).eq('tipo', 'accessorio')
+      const mappaAcc = new Map<string, { prezzo: number; perc: number }>()
+      for (const s of (accRows || [])) {
+        let d: any = null; try { d = JSON.parse((s as any).descrizione) } catch {}
+        const nome = String((s as any).nome || d?.nome || '').trim().toLowerCase()
+        if (nome) mappaAcc.set(nome, { prezzo: Number(d?.prezzo ?? (s as any).valore ?? 0) || 0, perc: Number(d?.perc ?? 0) || 0 })
+      }
+      // Riscrivo gli importi con quelli AUTOREVOLI (base nolo): cosi' anche lo storico non e' del browser.
+      serviziAccessori = serviziAccessori.map((v: any) => {
+        const m = mappaAcc.get(String(v.nome || '').trim().toLowerCase())
+        const importo = m ? Math.round((m.prezzo + (m.perc / 100) * risPrezzo.prezzo) * 100) / 100 : 0
+        return { nome: v.nome, importo }
+      })
+      accessoriServer = serviziAccessori.reduce((s: number, v: any) => s + (Number(v.importo) || 0), 0)
+    }
+    prezzoServerCliente = Math.round((risPrezzo.prezzo + suppPrezzo.contrassegno + suppPrezzo.assicurazione + accessoriServer) * 100) / 100
     zonaCliente = risPrezzo.zona
     const dichiarato = parseFloat(body.totalPrice) || 0
     if (dichiarato > 0 && dichiarato < prezzoServerCliente - 0.01) {
