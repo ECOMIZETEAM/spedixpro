@@ -22,7 +22,7 @@ export async function DELETE(req: NextRequest) {
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
   const { data: sped } = await admin.from('spedizioni')
-    .select('id,master_id,cliente_id,stato,corriere_id,raw_response,tracking_number,numero,dest_nome,created_at,distinta_id,confermata_vettore')
+    .select('id,master_id,cliente_id,stato,corriere_id,raw_response,tracking_number,numero,dest_nome,created_at,distinta_id')
     .eq('id', spedizioneId).single()
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 
@@ -102,10 +102,16 @@ export async function DELETE(req: NextRequest) {
   // rifiuto, pacco già partito) e la GLS, ormai in distinta, veniva marcata annullata e RIMBORSATA a tutta
   // la catena mentre GLS la consegnava. Ora si tenta subito, nella finestra in cui l'annullo vale davvero.
   if (corr?.tipo === 'gls' || corr?.tipo === 'brt') {
-    if (corr.tipo === 'gls' && (sped as any).confermata_vettore) {
-      const msg = 'Spedizione GLS già trasmessa al corriere (distinta chiusa): non è più annullabile in automatico. Va gestita direttamente col corriere.'
-      await admin.from('spedizioni').update({ annullamento_errore: msg }).eq('id', spedizioneId)
-      return NextResponse.json({ error: msg }, { status: 400 })
+    // "Trasmessa a GLS" = la sua DISTINTA e' confermata_vettore (il flag vive sulla distinta, NON sulla
+    // spedizione). Lo leggo qui e lo attacco a `sped`, cosi' vale anche la guardia in annullaSpedizione.
+    if (corr.tipo === 'gls' && (sped as any).distinta_id) {
+      const { data: dist } = await admin.from('distinte').select('confermata_vettore').eq('id', (sped as any).distinta_id).maybeSingle()
+      ;(sped as any).confermata_vettore = !!dist?.confermata_vettore
+      if ((sped as any).confermata_vettore) {
+        const msg = 'Spedizione GLS già trasmessa al corriere (distinta confermata): non è più annullabile in automatico. Va gestita direttamente col corriere.'
+        await admin.from('spedizioni').update({ annullamento_errore: msg }).eq('id', spedizioneId)
+        return NextResponse.json({ error: msg }, { status: 400 })
+      }
     }
     const esito = await annullaSpedizioneSulCorriere(admin, sped as any)
     if (esito.ok) {
