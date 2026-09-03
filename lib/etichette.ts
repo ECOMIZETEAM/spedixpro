@@ -126,7 +126,30 @@ export async function leggiEtichetta(
 // storica (data URL nel collo) sia quella nuova (percorso su Storage per collo). Se non c'è nulla da
 // unire, ripiega su leggiEtichetta (etichetta unica). Le etichette non-PDF (immagini/zip) non si
 // uniscono: si va all'unica.
+// Etichetta completa + RISCRITTURA SpediamoPro: sostituisce sul PDF il codice interno del provider col
+// nostro rif_ordine e "campionatura generica" col contenuto dichiarato. UN SOLO PUNTO: tutte le porte che
+// servono la LDV (dashboard, API pubblica, bulk, cliente) passano di qui. Solo tipo='spediamopro' e solo
+// PDF; ogni errore -> etichetta ORIGINALE (una LDV rotta blocca la spedizione, mai degradarla).
 export async function leggiEtichettaCompleta(
+  admin: any,
+  sped: { etichetta_path?: string | null; etichetta_url?: string | null; colli_dettaglio?: any; raw_response?: any; corriere_id?: string | null; rif_ordine?: string | null; contenuto?: string | null }
+): Promise<EtichettaLetta | null> {
+  const et = await leggiEtichettaGrezza(admin, sped)
+  if (et && et.mime === 'application/pdf' && sped?.corriere_id && (sped.rif_ordine || sped.contenuto)) {
+    try {
+      const { data: corr } = await admin.from('corrieri').select('tipo').eq('id', sped.corriere_id).maybeSingle()
+      if ((corr as any)?.tipo === 'spediamopro') {
+        const { riscriviEtichettaSpediamopro, codiceProviderSpediamopro } = await import('@/lib/etichetta-spediamopro')
+        return { ...et, buffer: await riscriviEtichettaSpediamopro(et.buffer, {
+          code: codiceProviderSpediamopro(sped.raw_response), rifOrdine: sped.rif_ordine, contenuto: sped.contenuto,
+        }) }
+      }
+    } catch (e: any) { console.error('[ETICHETTA][SPEDIAMOPRO] rewrite:', e?.message) }
+  }
+  return et
+}
+
+async function leggiEtichettaGrezza(
   admin: any,
   sped: { etichetta_path?: string | null; etichetta_url?: string | null; colli_dettaglio?: any; raw_response?: any }
 ): Promise<EtichettaLetta | null> {

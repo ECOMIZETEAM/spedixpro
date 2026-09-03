@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
 
   const { data: sped } = await supabase
     .from('spedizioni')
-    .select('etichetta_url, etichetta_path, colli_dettaglio, cliente_id, master_id, numero, raw_response, corriere_id, colli')
+    .select('etichetta_url, etichetta_path, colli_dettaglio, cliente_id, master_id, numero, raw_response, corriere_id, colli, rif_ordine, contenuto')
     .eq('id', id)
     .single()
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })

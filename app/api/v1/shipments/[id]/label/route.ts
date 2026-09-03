@@ -11,7 +11,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params
   const admin = createAdminSupabase()
   const { data: s } = await admin.from('spedizioni')
-    .select('id,numero,etichetta_url,etichetta_path,colli_dettaglio,raw_response,cliente_id').eq('id', id).maybeSingle()
+    .select('id,numero,etichetta_url,etichetta_path,colli_dettaglio,raw_response,cliente_id,corriere_id,rif_ordine,contenuto').eq('id', id).maybeSingle()
   if (!s || s.cliente_id !== ctx.clienteId) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
   // leggiEtichettaCompleta sa dove vive il PDF (Storage o base64) ED è MULTICOLLO: su una spedizione
   // a più colli unisce tutte le etichette in un unico PDF, così chi si integra via API non riceve il
