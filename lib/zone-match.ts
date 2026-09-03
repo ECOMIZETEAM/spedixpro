@@ -136,6 +136,22 @@ export async function trovaZoneMatchDett(
 
   righe = filtraCapCondiviso(righe, cap, (dest as any).citta)
 
+  // PROVINCIA sul CAP-esatto. Lo stesso CAP puo' essere segnato in righe con PROVINCE diverse: 07024
+  // La Maddalena sta in "Isole Minori"/SS (la provincia attuale, Sassari) E in "SCS"/OT (Olbia-Tempio,
+  // provincia soppressa nel 2016). Il match a cap-esatto ignorava la provincia -> agganciava anche la
+  // riga SCS/OT, e siccome quella era prezzata l'isola minore veniva venduta al prezzo SCS (sotto costo)
+  // invece di essere ESCLUSA. La destinazione con la SUA provincia vince: le righe cap-esatto di
+  // un'ALTRA provincia non agganciano. SOLO se almeno una riga cap-esatto combacia con la provincia;
+  // se nessuna combacia (dato incoerente) si lasciano tutte (fallback, comportamento invariato).
+  if (provincia) {
+    const capEsatte = righe.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap)
+    const combacia = capEsatte.some((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia)
+    if (combacia) {
+      const scarta = new Set(capEsatte.filter((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() !== provincia))
+      if (scarta.size) righe = righe.filter((r: any) => !scarta.has(r))
+    }
+  }
+
   // Esclusione PER-CORRIERE: la destinazione è "esclusiva" per un corriere SOLO se appartiene a
   // una zona esclusiva DI QUEL corriere (Isole/Disagiate/Livigno per CAP-ESATTO; Sardegna/Sicilia/
   // Calabria per PROVINCIA). Così un CAP disagiato per BRT non toglie il jolly "Italia" a Poste.
