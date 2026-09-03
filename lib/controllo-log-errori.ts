@@ -54,7 +54,7 @@ export async function trovaLogErrori(giorni = 14): Promise<ControlloRisultato> {
       { key: 'errore', label: 'Errore' },
       { key: 'quando', label: 'Quando', align: 'right' },
     ],
-    righe, categoriaKey: 'fonte', cercaKeys: ['riferimento', 'errore'], csvNome: 'log-errori', finestra: true, finestra: true,
+    righe, categoriaKey: 'fonte', cercaKeys: ['riferimento', 'errore'], csvNome: 'log-errori', finestra: true,
     nota: 'Stati d\'errore raccolti da tutto il sistema (ultimi giorni). Se una fonte e\' a 0, quel pezzo gira pulito.',
   }
 }
