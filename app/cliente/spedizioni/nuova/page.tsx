@@ -155,9 +155,11 @@ export default function NuovaSpedizioneCliente() {
     : selected?._corriere_tipo === 'V' ? [['C','CONTANTE'],['A','ASSEGNO']]
     : [['C','CONTANTE']]
   const accDisponibili = (selected?.accessori_disponibili || [])
+  // Importo accessorio = prezzo fisso + % del PREZZO SPEDIZIONE (nolo+fuel+sponda), come dice il campo
+  // "+% del valore della spedizione" a listino. NON del valore merce: era quasi sempre 0 e la % spariva.
   const extraScelti = accDisponibili
     .filter(a => extraNomi.includes(a.nome))
-    .map(a => ({ nome: a.nome, importo: Math.round((Number(a.prezzo||0) + (Number(a.perc||0)/100)*(Number(valoreMerce)||0))*100)/100 }))
+    .map(a => ({ nome: a.nome, importo: Math.round((Number(a.prezzo||0) + (Number(a.perc||0)/100)*(Number(selected?.prezzo_spedizione)||0))*100)/100 }))
   const extraTot = extraScelti.reduce((s,e)=>s+e.importo, 0)
   const totaleConExtra = selected ? (Number(selected.total_price||0) + extraTot) : 0
   const [loading, setLoading] = useState(false)
@@ -857,7 +859,7 @@ export default function NuovaSpedizioneCliente() {
                         <select value="" onChange={e=>{ const n=e.target.value; if(n) setExtraNomi(prev=>prev.includes(n)?prev:[...prev,n]) }} style={inp}>
                           <option value="">Aggiungi servizio…</option>
                           {accDisponibili.filter(a=>!extraNomi.includes(a.nome)).map((a,i)=>{
-                            const imp = Math.round((Number(a.prezzo||0)+(Number(a.perc||0)/100)*(Number(valoreMerce)||0))*100)/100
+                            const imp = Math.round((Number(a.prezzo||0)+(Number(a.perc||0)/100)*(Number(selected?.prezzo_spedizione)||0))*100)/100
                             return <option key={i} value={a.nome}>{a.nome} — € {imp.toFixed(2)}</option>
                           })}
                         </select>
