@@ -18,22 +18,41 @@ function F({ label, value, full }: { label: string; value: any; full?: boolean }
 }
 
 export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModificata }: { s: any; onClose: () => void; etichettaHref?: string; onModificata?: () => void }) {
-  // Correzione peso/misure (solo master creatore, spedizione con cliente, mono-collo). L'etichetta NON
-  // cambia: si ricalcola solo il costo e la differenza va in rettifica (addebito o rimborso) sul cliente.
+  // Correzione peso/misure (solo master creatore, spedizione con cliente). L'etichetta NON cambia: si
+  // ricalcola solo il costo e la differenza va in rettifica su tutta la catena (addebito o rimborso).
+  // MULTICOLLO: si corregge ogni collo. colli_dettaglio non e' in SPED_COLS -> lo prendo da /[id].
   const [mod, setMod] = React.useState(false)
-  const [fPeso, setFPeso] = React.useState(''); const [fL, setFL] = React.useState(''); const [fW, setFW] = React.useState(''); const [fH, setFH] = React.useState('')
+  const [dett, setDett] = React.useState<any>(null)
+  const [colliForm, setColliForm] = React.useState<{ peso: string; lunghezza: string; larghezza: string; altezza: string }[]>([])
   const [ant, setAnt] = React.useState<any>(null)
   const [busy, setBusy] = React.useState(false)
   const [msg, setMsg] = React.useState('')
   React.useEffect(() => {
-    if (s) { setFPeso(String(s.peso_reale ?? '')); setFL(String(s.lunghezza ?? '')); setFW(String(s.larghezza ?? '')); setFH(String(s.altezza ?? '')); setMod(false); setAnt(null); setMsg('') }
+    setMod(false); setAnt(null); setMsg(''); setDett(null); setColliForm([])
+    if (!s?.id) return
+    let vivo = true
+    fetch(`/api/spedizioni/${s.id}`).then(r => r.ok ? r.json() : null).then(d => {
+      if (!vivo || !d) return
+      setDett(d)
+      const cd = Array.isArray(d.colli_dettaglio) ? d.colli_dettaglio : []
+      const n = Math.max(Number(d.colli) || 0, cd.length, 1)
+      // pre-riempio i colli: dal dettaglio se c'e', altrimenti (mono) dai campi della spedizione
+      setColliForm(Array.from({ length: n }, (_, i) => {
+        const c = cd[i] || {}
+        const g = (k: string, mono: any) => { const v = c[k] != null ? c[k] : (n === 1 ? mono : ''); return String(v ?? '') }
+        return { peso: g('peso', d.peso_reale), lunghezza: g('lunghezza', d.lunghezza), larghezza: g('larghezza', d.larghezza), altezza: g('altezza', d.altezza) }
+      }))
+    }).catch(() => {})
+    return () => { vivo = false }
   }, [s?.id])
+  function setCollo(i: number, k: string, v: string) { setColliForm(prev => prev.map((c, idx) => idx === i ? { ...c, [k]: v } : c)); setAnt(null) }
   async function invia(dry: boolean) {
     setBusy(true); setMsg('')
     try {
+      const colli = colliForm.map(c => ({ peso: Number(c.peso), lunghezza: Number(c.lunghezza), larghezza: Number(c.larghezza), altezza: Number(c.altezza) }))
       const r = await fetch('/api/spedizioni/modifica', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ spedizioneId: s.id, dryRun: dry, colli: [{ peso: Number(fPeso), lunghezza: Number(fL), larghezza: Number(fW), altezza: Number(fH) }] }),
+        body: JSON.stringify({ spedizioneId: s.id, dryRun: dry, colli }),
       })
       const d = await r.json()
       if (!r.ok) { setMsg(d.error || 'Errore'); setAnt(null); return }
@@ -46,8 +65,9 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
   const eur = (x: any) => '€ ' + Number(x || 0).toFixed(2)
   const dims = [s.lunghezza, s.larghezza, s.altezza].every((x: any) => Number(x) > 0) ? `${s.lunghezza} × ${s.larghezza} × ${s.altezza} cm` : '—'
   const accessori = (s.servizi_accessori || []).map((e: any) => `${e.nome}${e.importo ? ' (€' + Number(e.importo).toFixed(2) + ')' : ''}`).join(', ')
-  const monoCollo = !s.colli || Number(s.colli) <= 1
-  const puoCorreggere = !!onModificata && !!s.cliente_id && s.stato !== 'annullata' && monoCollo
+  const colliDett = Array.isArray(dett?.colli_dettaglio) ? dett.colli_dettaglio : []
+  const multicollo = Number(s.colli) > 1
+  const puoCorreggere = !!onModificata && !!s.cliente_id && s.stato !== 'annullata'
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '30px 16px', overflowY: 'auto' }}>
@@ -106,6 +126,20 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
             </div>
           </div>
 
+          {multicollo && colliDett.length > 0 && (
+            <div style={card}>
+              <div style={cardH}>Colli ({colliDett.length})</div>
+              <div style={{ padding: '8px 15px 12px' }}>
+                {colliDett.map((c: any, i: number) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: i < colliDett.length - 1 ? '1px solid #f0f0f0' : 'none', fontSize: '13px' }}>
+                    <span style={{ color: '#666' }}>Collo {c.numero || i + 1}</span>
+                    <span style={{ fontWeight: 600, color: '#1a1a1a' }}>{c.peso != null && c.peso !== '' ? `${c.peso} kg` : '—'} · {[c.lunghezza, c.larghezza, c.altezza].every((x: any) => Number(x) > 0) ? `${c.lunghezza}×${c.larghezza}×${c.altezza} cm` : '— cm'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div style={card}>
             <div style={cardH}>Costo</div>
             <div style={cardB}>
@@ -119,14 +153,19 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
               <div style={{ ...cardH, background: '#fff7ed', color: '#ea580c' }}>Correggi peso / misure</div>
               <div style={{ padding: '14px 15px' }}>
                 <div style={{ fontSize: '12px', color: '#666', marginBottom: '10px' }}>L'etichetta <b>non</b> cambia. Si ricalcola il costo: la differenza va in rettifica sul cliente (addebito se sale, rimborso se scende).</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
-                  {[['Peso kg', fPeso, setFPeso], ['Lungh. cm', fL, setFL], ['Largh. cm', fW, setFW], ['Alt. cm', fH, setFH]].map(([lab, val, set]: any, i) => (
-                    <div key={i}>
-                      <div style={lblS}>{lab}</div>
-                      <input type="number" value={val} onChange={e => { set(e.target.value); setAnt(null) }} style={{ width: '100%', padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }} />
+                {colliForm.map((c, i) => (
+                  <div key={i} style={{ marginBottom: '10px' }}>
+                    {colliForm.length > 1 && <div style={{ ...lblS, marginBottom: '4px', color: '#ea580c' }}>Collo {i + 1}</div>}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
+                      {([['Peso kg', 'peso'], ['Lungh. cm', 'lunghezza'], ['Largh. cm', 'larghezza'], ['Alt. cm', 'altezza']] as [string, string][]).map(([lab, k]) => (
+                        <div key={k}>
+                          <div style={lblS}>{lab}</div>
+                          <input type="number" value={(c as any)[k]} onChange={e => setCollo(i, k, e.target.value)} style={{ width: '100%', padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }} />
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ))}
                 {ant && (
                   <div style={{ marginTop: '12px', padding: '10px 12px', background: ant.tipo === 'addebito' ? '#fef2f2' : ant.tipo === 'rimborso' ? '#f0fdf4' : '#f8fafc', borderRadius: '7px', fontSize: '13px' }}>
                     <div>Peso: <b>{ant.pesoPrima} kg → {ant.pesoDopo} kg</b></div>
