@@ -72,19 +72,49 @@ const SERVIZI_ACCESSORI_MARCA: Record<string, { nome: string; prezzo: number; pe
     { nome: 'Consegna 10:30', prezzo: 0, perc: 0 },
   ],
 }
-// I CANALI che sanno DAVVERO trasmettere il servizio scelto all'API del corriere: solo i contratti
-// DIRETTI. gls → tag ServiziAccessori (codici), brt → serviceType. Sui canali rivenditore (provider a
-// valle) l'API NON espone i codici servizio — verificato leggendo la creazione: spedisci manda
-// accessoriServices vuoto, DVA e SpediamoPro non hanno proprio il campo. Offrirli lì sarebbe una
-// promessa che non parte: il cliente paga un "Exchange"/"Priority" che al corriere non arriva.
+// I CANALI DIRETTI che trasmettono il servizio con i codici del CORRIERE: gls → tag ServiziAccessori
+// (codici GLS), brt → serviceType. Mappa nome→codice in lib/gls / lib/brt.
 const CANALI_TRASMETTONO_SERVIZI = new Set(['gls', 'brt'])
-// Servizi accessori proposti come DEFAULT nel listino: SOLO dove il canale li trasmette (sopra) e diversi
-// per MARCA del corriere. Sui canali che non trasmettono si torna vuoto: niente default = niente promessa
-// a vuoto. Il `tipo` è il canale tecnico del contratto (corrieri.tipo). Retro-compatibile: senza `tipo`
-// (chiamante che non lo conosce) si ripiega sul comportamento per marca di prima.
+
+// ── SERVIZI ACCESSORI VIA SPEDISCI.ONLINE (rivenditore) ──────────────────────
+// Sui contratti 'spedisci' i codici NON sono quelli GLS diretti: sono i CODICI PROPRI di spedisci,
+// quelli che tornano nella risposta /shipping/rates (campo `services`, es. {"200001":"Exchange"}).
+// spedisci li traduce lui verso il corriere (200001 → GLS 24 sull'etichetta). PROVATO con create+delete
+// reali il 3/9: il commento storico "spedisci manda accessoriServices vuoto" era una NOSTRA scelta, non
+// un limite di spedisci — il campo esiste e funziona.
+// ATTIVI ORA: Exchange + Saturday (provati puliti). DA ATTIVARE dopo una consegna di prova: Document
+// Return (200002, codice etichetta anomalo), Preavviso (200005, codice anomalo), Express12 (200004,
+// no-op sui contratti Light).
+const SERVIZI_SPEDISCI_GLS: { nome: string; prezzo: number; perc: number }[] = [
+  { nome: 'Exchange', prezzo: 0, perc: 0 },
+  { nome: 'Saturday Service', prezzo: 0, perc: 0 },
+]
+// NOME del servizio (come sta a listino/nel form) → CODICE spedisci da mandare in accessoriServices
+// alla CREAZIONE su un contratto 'spedisci'. null se non è fra quelli attivi/trasmissibili via spedisci.
+export function codiceServizioSpedisci(nome: string): string | null {
+  const n = (nome || '').toLowerCase()
+  if (/exchange|cambio/.test(n)) return '200001'
+  if (/sabato|saturday/.test(n)) return '200003'
+  // (dopo, con calma, ognuno dietro una consegna di prova vera):
+  // if (/document\s*return/.test(n)) return '200002'
+  // if (/preavviso/.test(n)) return '200005'
+  // if (/express\s*12/.test(n)) return '200004'   // NB: no-op sui contratti Light
+  return null
+}
+
+// Servizi accessori proposti come DEFAULT nel listino, diversi per canale/marca. Il `tipo` è il canale
+// tecnico del contratto (corrieri.tipo). Retro-compatibile: senza `tipo` si ripiega sul comportamento
+// per marca di prima.
 export function serviziAccessoriDefault(nomeContratto?: string | null, tipo?: string | null): { nome: string; prezzo: number; perc: number }[] {
-  if (tipo != null && !CANALI_TRASMETTONO_SERVIZI.has(String(tipo).toLowerCase())) return []
-  return (SERVIZI_ACCESSORI_MARCA[marchioCorriere(nomeContratto || '')] || []).map(s => ({ ...s }))
+  const t = tipo == null ? null : String(tipo).toLowerCase()
+  const marca = marchioCorriere(nomeContratto || '')
+  // Rivenditore spedisci di marca GLS: SOLO i servizi che spedisci sa trasmettere davvero (provati),
+  // mandati a creazione con codiceServizioSpedisci. Gli altri contratti spedisci (Poste/SDA) non li hanno.
+  if (t === 'spedisci') return marca === 'GLS' ? SERVIZI_SPEDISCI_GLS.map(s => ({ ...s })) : []
+  // Altri canali non-diretti (DVA/SpediamoPro): l'API non espone i codici servizio → niente default.
+  if (t != null && !CANALI_TRASMETTONO_SERVIZI.has(t)) return []
+  // Contratti DIRETTI (gls/brt) o chiamante senza tipo: default per MARCA.
+  return (SERVIZI_ACCESSORI_MARCA[marca] || []).map(s => ({ ...s }))
 }
 
 // Elenco UNICO dei provider tecnici a valle. Serve alle schermate che mostrano il tipo del

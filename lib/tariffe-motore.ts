@@ -23,7 +23,7 @@ import { normalizzaPaese } from '@/lib/paesi'
 import { calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
 // La sigla neutra al posto del tipo del contratto: il nome del sistema tecnico a valle non deve
 // arrivare al browser, nemmeno dentro il JSON (vedi lib/corriere-logo.ts).
-import { siglaContratto } from '@/lib/corriere-logo'
+import { siglaContratto, marchioCorriere } from '@/lib/corriere-logo'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
 export const ZONE_MAP: Record<string,string> = {
@@ -475,11 +475,14 @@ export async function calcolaTariffeCliente(
       corriere_nome: corriere?.nome_contratto || 'Corriere',
       limiti_collo: descriviLimiti(settsC, pesoReale),   // indicazione limiti collo (scaglione applicabile al peso)
       listino_fascia: `fino a ${fasciaGiusta.peso_max}kg`,
-      // I servizi accessori si OFFRONO solo dove si TRASMETTONO davvero: canali diretti gls/brt (stessa
-      // regola di CANALI_TRASMETTONO_SERVIZI in corriere-logo). Sui rivenditori (DVA/Spedisci/SpediamoPro)
-      // l'API non li invia e a mano non si fa nulla → non si vendono: sarebbe una promessa che il cliente
-      // paga e non parte. (Chiude la sorgente; le righe già a listino sui rivenditori sono state rimosse.)
-      accessori_disponibili: (corriere?.tipo === 'gls' || corriere?.tipo === 'brt') ? (accessoriPerCorriere.get(corriereId) || []) : [],
+      // I servizi accessori si OFFRONO solo dove si TRASMETTONO davvero: canali diretti gls/brt, E
+      // SPEDISCI di marca GLS (PROVATO 3/9: spedisci inoltra i codici al corriere, es. Exchange 200001 →
+      // GLS 24 sull'etichetta — vedi codiceServizioSpedisci in corriere-logo). Sugli altri rivenditori
+      // (DVA/SpediamoPro/Poste via spedisci) l'API non li invia → non si offrono: sarebbe una promessa che
+      // il cliente paga e al corriere non arriva.
+      accessori_disponibili: (corriere?.tipo === 'gls' || corriere?.tipo === 'brt'
+        || (corriere?.tipo === 'spedisci' && marchioCorriere(corriere?.nome_contratto || '') === 'GLS'))
+        ? (accessoriPerCorriere.get(corriereId) || []) : [],
       _corriere_tipo: siglaContratto(corriere?.tipo),
       _corriere_id: corriere?.id,
       // NON esporre la quotazione SpediamoPro: contiene totalPrice/priceBreakdown = il COSTO REALE

@@ -611,6 +611,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Contratto non disponibile per questa spedizione: il codice contratto configurato non corrisponde a nessuna tariffa. Segnalalo all\'assistenza.' }, { status: 400 })
     }
 
+    // Servizi accessori da TRASMETTERE al corriere via spedisci (Exchange/Saturday per ora): mappa il
+    // NOME scelto → CODICE proprio di spedisci. Il sovrapprezzo torna già in r.shipmentCost (costoCorrente),
+    // quindi il costo del master lo cattura da solo; al cliente il servizio è già fatturato via il listino.
+    // I contratti DIRETTI (tipo 'gls') passano invece da lib/gls con i codici GLS. Provato 3/9.
+    const { codiceServizioSpedisci } = await import('@/lib/corriere-logo')
+    const accessoriSpedisci = Array.from(new Set(
+      (serviziAccessori || []).map((s: any) => codiceServizioSpedisci(s.nome)).filter(Boolean)
+    )) as string[]
+
     const res = await fetch(`${baseUrl}/shipping/create`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
@@ -627,7 +636,7 @@ export async function POST(req: NextRequest) {
         // dedicato, a differenza di SpediamoPro): il contenuto vero viaggia qui, non serve metterlo in NOTE.
         ...(String(body.contenuto || '').trim() ? { content: String(body.contenuto).trim() } : {}),
         insuranceValue: body.insuranceValue || 0,
-        codValue: body.codValue || 0, accessoriServices: []
+        codValue: body.codValue || 0, accessoriServices: accessoriSpedisci
       }),
     })
 
