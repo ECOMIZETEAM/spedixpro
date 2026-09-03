@@ -136,21 +136,27 @@ export async function trovaZoneMatchDett(
 
   righe = filtraCapCondiviso(righe, cap, (dest as any).citta)
 
-  // PROVINCIA sul CAP-esatto. Lo stesso CAP puo' essere segnato in righe con PROVINCE diverse: 07024
-  // La Maddalena sta in "Isole Minori"/SS (la provincia attuale, Sassari) E in "SCS"/OT (Olbia-Tempio,
-  // provincia soppressa nel 2016). Il match a cap-esatto ignorava la provincia -> agganciava anche la
-  // riga SCS/OT, e siccome quella era prezzata l'isola minore veniva venduta al prezzo SCS (sotto costo)
-  // invece di essere ESCLUSA. La destinazione con la SUA provincia vince: le righe cap-esatto di
-  // un'ALTRA provincia non agganciano. SOLO se almeno una riga cap-esatto combacia con la provincia;
-  // se nessuna combacia (dato incoerente) si lasciano tutte (fallback, comportamento invariato).
-  if (provincia) {
-    const capEsatte = righe.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap)
-    const combacia = capEsatte.some((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia)
-    if (combacia) {
-      const scarta = new Set(capEsatte.filter((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() !== provincia))
-      if (scarta.size) righe = righe.filter((r: any) => !scarta.has(r))
-    }
-  }
+  // ISOLA BATTE REGIONE (sul CAP-esatto). Lo stesso CAP puo' essere rivendicato, PER LO STESSO CORRIERE,
+  // sia da una zona "punto" (Isole Minori / Cap Disagiati: un singolo luogo) sia da una "regionale"
+  // (SCS/Sardegna/Sicilia/Calabria: tutta l'area): 07024 La Maddalena e' un'isola minore DENTRO la
+  // Sardegna, quindi sta in "Isole Minori" E in "SCS". Se vincono entrambe e il listino prezza SCS ma
+  // non l'isola, l'isola viene venduta al prezzo della Sardegna — sotto costo. Un CAP-isola dentro la
+  // regione va trattato come ISOLA: se per quel corriere c'e' una riga "punto" sul cap-esatto, le righe
+  // "regionali" dello stesso cap-esatto non contano.
+  //
+  // NB: la PROVINCIA scritta sulla riga NON e' un discriminante affidabile. La sigla soppressa (OT
+  // Olbia-Tempio, CI Carbonia-Iglesias) a volte sta sulla riga GIUSTA (Isole Minori/CI a Sant'Antioco),
+  // a volte su quella SBAGLIATA (SCS/OT a La Maddalena): un primo tentativo "rispetta la provincia"
+  // alzava certi CAP ma ne ABBASSAVA altri (Isole Minori->SCS) — verificato prima/dopo in produzione.
+  // Questa regola guarda la NATURA della zona, non la sigla, ed e' corretta per tutti i contratti.
+  const { data: zNomi } = await supabase.from('zone').select('id,nome').in('id', ids)
+  const nomeZona = new Map<string, string>((zNomi || []).map((z: any) => [z.id, String(z.nome || '')]))
+  const isPuntoSpeciale = (zid: string) => { const n = nomeZona.get(zid) || ''; return /isole?\s*minori/i.test(n) || isZonaDisagiata(n) }
+  const isRegionale = (zid: string) => /\b(sardegna|sicilia|calabria|scs)\b/i.test(nomeZona.get(zid) || '')
+  // Da applicare SEMPRE a righe cap-esatto di UN SOLO corriere (come piuSpecifica): un "punto" di un
+  // corriere non deve sopprimere la "regionale" di un ALTRO corriere (stesso danno del comune scritto).
+  const isolaBatteRegione = (capRows: any[]): any[] =>
+    capRows.some((r: any) => isPuntoSpeciale(r.zona_id)) ? capRows.filter((r: any) => !isRegionale(r.zona_id)) : capRows
 
   // Esclusione PER-CORRIERE: la destinazione è "esclusiva" per un corriere SOLO se appartiene a
   // una zona esclusiva DI QUEL corriere (Isole/Disagiate/Livigno per CAP-ESATTO; Sardegna/Sicilia/
@@ -203,7 +209,7 @@ export async function trovaZoneMatchDett(
       perCorriere.get(cc)!.push(r)
     }
     const capEsatte = new Set<any>()
-    for (const gruppo of perCorriere.values()) for (const r of piuSpecifica(gruppo)) capEsatte.add(r)
+    for (const gruppo of perCorriere.values()) for (const r of piuSpecifica(isolaBatteRegione(gruppo))) capEsatte.add(r)
     for (const r of righe) {
       if (r.cap && r.cap !== '*' && r.cap === cap && !capEsatte.has(r)) continue
       const cc = esclCorr.get(r.zona_id)
@@ -236,7 +242,7 @@ export async function trovaZoneMatchDett(
 
   // Applica i 3 tier (CAP esatto > provincia+cap* > jolly totale) su un insieme di righe.
   const pickTier = (rows: any[]): any[] => {
-    let m = piuSpecifica(rows.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap))                    // 1) CAP esatto
+    let m = piuSpecifica(isolaBatteRegione(rows.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap)))  // 1) CAP esatto
     // 2) provincia — ma una riga che nomina un comune vale solo per quel comune (vedi rigaValePerCitta)
     if (!m.length) m = rows.filter((r: any) => r.provincia && r.provincia !== '*' && r.provincia.toUpperCase() === provincia && (!r.cap || r.cap === '*') && rigaValePerCitta(r, (dest as any).citta))
     if (!m.length) m = rows.filter((r: any) => (!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*'))  // 3) jolly
