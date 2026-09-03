@@ -865,11 +865,11 @@ export async function POST(req: NextRequest) {
       // cliente va in NOTE (troncata a 20). Prima ENTRAMBI prendevano l'id ordine → la nota del cliente
       // spariva e in NOTE usciva l'id ordine. Stessa regola del ramo API v1 (se scrivi in note → in note).
       const externalRef = (body.rifOrdine ? String(body.rifOrdine) : '').substring(0, 64) || undefined
-      // NOTE è l'UNICO campo libero stampato (max 20). Su un ordine IMPORTATO non c'è una nota a mano
-      // ma serve il RIF ORDINE per abbinare il pacco: quindi in NOTE mettiamo nota + rif + contenuto in
-      // quest'ordine, troncati a 20 (la nota manuale ha la precedenza; se non c'è, esce il rif). Il
-      // "CONTENUTO" e il "Rif" veri di SpediamoPro non sono impostabili (categoria fissa + codice interno).
-      const noteEtichetta = [body.notes, body.rifOrdine, body.contenuto].filter(Boolean).map((s: any) => String(s).trim()).join(' ').substring(0, 20) || undefined
+      // NOTE (max 20) = SOLO la nota del cliente. Prima ci spremevamo anche rif ordine + contenuto perché
+      // "CONTENUTO" e "Rif" di SpediamoPro non erano impostabili (categoria fissa + codice interno). Ora il
+      // riferimento e il contenuto veri li mettiamo sull'etichetta RISCRIVENDO il PDF a serve-time (vedi
+      // lib/etichetta-spediamopro.ts): quindi la nota torna a essere solo la nota. (Come il ramo API v1.)
+      const noteEtichetta = body.notes ? String(body.notes).trim().substring(0, 20) || undefined : undefined
 
       const shipment = await spediamoproCreateShipment(cred.authcode, {
         parcels, sender, consignee, quotation, cashOnDeliveryAmount, insuredAmount,
