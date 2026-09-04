@@ -17,7 +17,7 @@ function F({ label, value, full }: { label: string; value: any; full?: boolean }
   )
 }
 
-export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModificata }: { s: any; onClose: () => void; etichettaHref?: string; onModificata?: () => void }) {
+export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModificata, apriCorrezione }: { s: any; onClose: () => void; etichettaHref?: string; onModificata?: () => void; apriCorrezione?: boolean }) {
   // Correzione peso/misure (solo master creatore, spedizione con cliente). L'etichetta NON cambia: si
   // ricalcola solo il costo e la differenza va in rettifica su tutta la catena (addebito o rimborso).
   // MULTICOLLO: si corregge ogni collo. colli_dettaglio non e' in SPED_COLS -> lo prendo da /[id].
@@ -28,7 +28,7 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
   const [busy, setBusy] = React.useState(false)
   const [msg, setMsg] = React.useState('')
   React.useEffect(() => {
-    setMod(false); setAnt(null); setMsg(''); setDett(null); setColliForm([])
+    setMod(!!apriCorrezione); setAnt(null); setMsg(''); setDett(null); setColliForm([])
     if (!s?.id) return
     let vivo = true
     fetch(`/api/spedizioni/${s.id}`).then(r => r.ok ? r.json() : null).then(d => {
@@ -44,7 +44,11 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
       }))
     }).catch(() => {})
     return () => { vivo = false }
-  }, [s?.id])
+  }, [s?.id, apriCorrezione])
+  // Quando si apre in correzione (es. dal tasto ✏️ della riga), porta la card di correzione in vista:
+  // altrimenti resterebbe in fondo al modale, sotto tutte le altre card.
+  const modRef = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => { if (mod) { const t = setTimeout(() => modRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80); return () => clearTimeout(t) } }, [mod, dett])
   function setCollo(i: number, k: string, v: string) { setColliForm(prev => prev.map((c, idx) => idx === i ? { ...c, [k]: v } : c)); setAnt(null) }
   async function invia(dry: boolean) {
     setBusy(true); setMsg('')
@@ -149,7 +153,7 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
           </div>
 
           {mod && (
-            <div style={{ ...card, border: '1px solid #fed7aa' }}>
+            <div ref={modRef} style={{ ...card, border: '1px solid #fed7aa' }}>
               <div style={{ ...cardH, background: '#fff7ed', color: '#ea580c' }}>Correggi peso / misure</div>
               <div style={{ padding: '14px 15px' }}>
                 <div style={{ fontSize: '12px', color: '#666', marginBottom: '10px' }}>L'etichetta <b>non</b> cambia. Si ricalcola il costo: la differenza va in rettifica sul cliente (addebito se sale, rimborso se scende).</div>

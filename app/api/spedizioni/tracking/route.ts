@@ -6,6 +6,7 @@ import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { spediamoproGetTracking, mapStatoSpediamopro, spediamoproEventiIndicanoReso } from '@/lib/spediamopro'
 import { prioritaStato } from '@/lib/spedisci'
 import { erroreTrackingPulito } from '@/lib/errore-corriere'
+import { colliDaRaw } from '@/lib/colli-dettaglio'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -67,7 +68,11 @@ export async function GET(req: NextRequest) {
       telefono: spedizione.dest_telefono,
       email: spedizione.dest_email,
     },
-    colli_dettaglio: spedizione.colli_dettaglio || [],
+    // Multicollo senza colli_dettaglio salvato (SpediamoPro): ricostruisco dai parcels del raw,
+    // così il tab "Colli" mostra i colli veri invece di "singolo collo".
+    colli_dettaglio: (Array.isArray(spedizione.colli_dettaglio) && spedizione.colli_dettaglio.length)
+      ? spedizione.colli_dettaglio
+      : colliDaRaw(spedizione.raw_response),
   }
 
   try {

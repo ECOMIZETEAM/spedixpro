@@ -84,6 +84,7 @@ export default function SpedizioniPage() {
   const [totale, setTotale] = useState(0)   // conteggio TOTALE dal server (paginazione server-side)
   const [trackingModal, setTrackingModal] = useState<any>(null)
   const [dettaglio, setDettaglio] = useState<any>(null)
+  const [correggiOpen, setCorreggiOpen] = useState(false)   // apre il dettaglio già in modalità "Correggi peso/misure"
   const [trackingData, setTrackingData] = useState<any>(null)
   const [trackingLoading, setTrackingLoading] = useState(false)
   const [trackingTab, setTrackingTab] = useState<'tracking'|'colli'>('tracking')
@@ -641,6 +642,7 @@ async function apriTracking(s: any) {
                         <div style={{display:'flex',gap:'4px'}}>
                           <button onClick={()=>stampaEtichetta(s.id)} disabled={stampandoId===s.id} style={{padding:'4px 8px',background:'#fff7ed',color:'#f97316',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}} title={zplOn?'Stampa etichetta su Zebra (ZPL)':'Scarica etichetta PDF'}>{stampandoId===s.id?'⏳':'🖨️'}</button>
                           <button onClick={()=>setDettaglio(s)} title="Vedi dettagli spedizione" style={{padding:'4px 8px',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',fontSize:'14px',border:'1px solid #bfdbfe',cursor:'pointer'}}>👁</button>
+                          {s.cliente_id && s.stato!=='annullata' && <button onClick={()=>{ setCorreggiOpen(true); setDettaglio(s) }} title="Correggi peso/misure (ricalcola il costo, l'etichetta non cambia)" style={{padding:'4px 8px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}}>✏️</button>}
 
                           {s.stato==='annullamento_pending' ? (
                             <button onClick={()=>ripristina(s.id,s.numero)} disabled={eliminando===s.id}
@@ -798,7 +800,7 @@ async function apriTracking(s: any) {
         </div>
       )}
 
-      {dettaglio && <DettaglioSpedizione s={dettaglio} onClose={()=>setDettaglio(null)} etichettaHref={`/dashboard/spedizioni/${dettaglio.id}/etichetta`} onModificata={()=>carica(pagina)} />}
+      {dettaglio && <DettaglioSpedizione s={dettaglio} apriCorrezione={correggiOpen} onClose={()=>{setDettaglio(null); setCorreggiOpen(false)}} etichettaHref={`/dashboard/spedizioni/${dettaglio.id}/etichetta`} onModificata={()=>carica(pagina)} />}
       {resoModal && (
         <div onClick={()=>!resoBusy&&setResoModal(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'20px'}}>
           <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',padding:'24px',maxWidth:'430px',width:'100%'}}>
