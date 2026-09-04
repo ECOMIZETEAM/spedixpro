@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
 
   const ruolo = (utente?.ruolo || '').toLowerCase()
   // Campi extra per l'eventuale "riepilogo ordine" (packing slip) da anteporre alle etichette.
-  const cols = 'id,numero,etichetta_url,etichetta_path,raw_response,colli_dettaglio,cliente_id,created_at,rif_ordine,rif_destinatario,contenuto,colli,peso_reale,peso_fatturato,contrassegno,dest_nome,dest_indirizzo,dest_citta,dest_cap,dest_provincia,dest_paese,dest_telefono,mitt_nome,corriere_id,corrieri(nome_contratto)'
+  const cols = 'id,numero,etichetta_url,etichetta_path,raw_response,colli_dettaglio,cliente_id,created_at,rif_ordine,rif_destinatario,contenuto,colli,peso_reale,peso_fatturato,contrassegno,dest_nome,dest_indirizzo,dest_citta,dest_cap,dest_provincia,dest_paese,dest_telefono,mitt_nome,corriere_id,corrieri(nome_contratto,tipo)'
   let spedizioni: any[] | null = null
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
@@ -52,6 +52,17 @@ export async function POST(req: NextRequest) {
     // ATTENZIONE: il ripiego DEVE dipendere dall'aver trovato o no delle etichette, non dal solo
     // fatto che colli_dettaglio esista. Con il controllo sbagliato una spedizione monocollo con
     // dettaglio colli valorizzato usciva dalla stampa SENZA ETICHETTA e senza alcun errore.
+    // RISCRITTURA SpediamoPro anche in blocco: la stampa SINGOLA passa da leggiEtichettaCompleta e
+    // sostituisce il codice provider col rif_ordine e "campionatura generica" col contenuto; QUI si
+    // fondevano i PDF grezzi, quindi la stampa in blocco (tipica dopo un IMPORT) usciva coi valori
+    // standard del provider. Stessa regola, un solo effetto ovunque. Gate: tipo='spediamopro' + un
+    // riferimento/contenuto da scrivere; ogni errore -> etichetta originale (mai degradare la LDV).
+    const _corr: any = Array.isArray((s as any).corrieri) ? (s as any).corrieri[0] : (s as any).corrieri
+    const rewSpediamopro = _corr?.tipo === 'spediamopro' && (s.rif_ordine || s.contenuto)
+    let codeProv: string | null = null
+    if (rewSpediamopro) {
+      try { const { codiceProviderSpediamopro } = await import('@/lib/etichetta-spediamopro'); codeProv = codiceProviderSpediamopro(s.raw_response) } catch {}
+    }
     const colli = (s.colli_dettaglio as any[]) || []
     const urls: string[] = []
     // UNA ETICHETTA UGUALE NON SI STAMPA DUE VOLTE.
@@ -119,6 +130,13 @@ export async function POST(req: NextRequest) {
         const impronta = createHash('sha1').update(pdfBytes).digest('hex')
         if (impronte.has(impronta)) continue
         impronte.add(impronta)
+        // SpediamoPro: riscrivi codice->rif_ordine e "campionatura generica"->contenuto (come la singola).
+        if (rewSpediamopro) {
+          try {
+            const { riscriviEtichettaSpediamopro } = await import('@/lib/etichetta-spediamopro')
+            pdfBytes = new Uint8Array(await riscriviEtichettaSpediamopro(Buffer.from(pdfBytes), { code: codeProv, rifOrdine: s.rif_ordine, contenuto: s.contenuto }))
+          } catch (e) { console.error('[ETICHETTE-BULK][SPEDIAMOPRO] rewrite:', e) }
+        }
         const pdf = await PDFDocument.load(pdfBytes)
         const pages = await pdfMerged.copyPages(pdf, pdf.getPageIndices())
         pages.forEach(p => pdfMerged.addPage(p))
