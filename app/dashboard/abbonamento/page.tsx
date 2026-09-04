@@ -32,6 +32,7 @@ export default function AbbonamentoPage() {
   // Allinea ciclo fatturazione al 1°
   const [allinea, setAllinea] = useState<any>(null)
   const [allineaAzione, setAllineaAzione] = useState('')
+  const [sospeso, setSospeso] = useState<any>(null)   // canone Stripe non pagato (addebito fallito)
 
   async function carica() {
     setLoading(true)
@@ -39,6 +40,7 @@ export default function AbbonamentoPage() {
     setStato(d); setLoading(false)
   }
   useEffect(()=>{ carica() }, [])
+  useEffect(()=>{ fetch('/api/abbonamento/paga-sospeso').then(r=>r.json()).then(d=>{ if(d?.sospeso) setSospeso(d) }).catch(()=>{}) }, [])
   // Tornato dalla cassa senza aver pagato: la banca ha rifiutato il rinnovo automatico.
   useEffect(()=>{ if (new URLSearchParams(window.location.search).get('rifiutato')) setRifiutato(true) }, [])
   useEffect(()=>{
@@ -536,6 +538,15 @@ export default function AbbonamentoPage() {
       <div style={{marginBottom:'16px'}}>
         <h1 style={{fontSize:'20px',fontWeight:700,color:'#1a1a1a',margin:0}}>Abbonamento</h1>
       </div>
+      {sospeso?.sospeso && (
+        <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'8px',padding:'14px 16px',marginBottom:'14px',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'10px'}}>
+          <div>
+            <div style={{fontSize:'14px',fontWeight:800,color:'#dc2626'}}>Canone in sospeso: € {Number(sospeso.importo||0).toFixed(2)}</div>
+            <div style={{fontSize:'12.5px',color:'#7f1d1d',marginTop:'2px'}}>L&apos;ultimo addebito non è andato a buon fine. Paga ora per non restare bloccato — puoi usare anche un&apos;altra carta.</div>
+          </div>
+          <a href={sospeso.url} target="_blank" rel="noreferrer" style={{background:'#dc2626',color:'#fff',borderRadius:'7px',padding:'9px 18px',fontSize:'13px',fontWeight:700,textDecoration:'none',whiteSpace:'nowrap'}}>Paga il canone →</a>
+        </div>
+      )}
       {msg && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px',marginBottom:'14px',fontSize:'13px',color:'#ea580c'}}>{msg}</div>}
 
       <div style={{...card, marginBottom:'16px'}}>

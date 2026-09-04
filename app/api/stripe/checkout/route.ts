@@ -42,7 +42,18 @@ export async function POST(req: NextRequest) {
   if (!m) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
   if (!m.parent_master_id) return NextResponse.json({ error: 'Il master principale non ha canone.' }, { status: 400 })
   if (m.abbonamento_esente) return NextResponse.json({ error: 'Il tuo abbonamento è gratuito: nessun pagamento da fare.' }, { status: 400 })
-  if (m.abbonamento_piano === pianoId && m.stripe_subscription_id) return NextResponse.json({ error: 'Hai già questo piano' }, { status: 400 })
+  if (m.abbonamento_piano === pianoId && m.stripe_subscription_id) {
+    // "Hai già questo piano" NON deve bloccare chi ha il canone NON pagato (addebito fallito, es. fondi
+    // insufficienti): se c'è una fattura Stripe APERTA, mando a saldarla (anche con un'altra carta). La UI
+    // redirige su `url`. Così chi ha un addebito fallito può ri-pagare invece di restare bloccato.
+    try {
+      const sTmp = stripeClient()
+      const aperte = await sTmp.invoices.list({ customer: m.stripe_customer_id!, status: 'open', limit: 1 })
+      const inv = aperte.data[0] as any
+      if (inv?.hosted_invoice_url) return NextResponse.json({ url: inv.hosted_invoice_url })
+    } catch (e: any) { console.error('[CHECKOUT][sospeso]', e?.message) }
+    return NextResponse.json({ error: 'Hai già questo piano' }, { status: 400 })
+  }
 
   // IL MESE IN CORSO E' GIA' SALDATO: l'abbonamento parte dal mese prossimo.
   //
