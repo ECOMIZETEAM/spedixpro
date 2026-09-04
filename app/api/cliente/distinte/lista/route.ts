@@ -65,7 +65,7 @@ export async function GET() {
   for (const d of distinte || []) {
     const a = perDistinta.get(d.id) || nuovoAgg()
     result.push({
-      id: d.id, numero: d.numero, data: d.data || d.created_at, stato: d.stato,
+      id: d.id, numero: d.numero, data: d.data || d.created_at, created_at: d.created_at, stato: d.stato,
       // MAI corrieri.tipo: contiene il provider tecnico ('spediamopro', 'spedisci') e finiva
       // stampato al cliente nella colonna "Vettore". Il vettore e' il marchio del contratto.
       vettore: marchioCorriere(nomeContrattoDi(d)), contratto: nomeContrattoDi(d),

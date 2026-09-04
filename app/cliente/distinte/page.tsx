@@ -117,7 +117,10 @@ export default function ListaDistinteCliente() {
                     <td style={{...td}}><span style={{background:'#f97316',color:'#fff',padding:'4px 10px',borderRadius:'6px',fontWeight:'700',fontSize:'12px'}}>{d.numero}</span></td>
                     <td style={td}>{d.vettore}</td>
                     <td style={td}>{d.contratto}</td>
-                    <td style={td}>{new Date(d.data).toLocaleDateString('it-IT')}</td>
+                    <td style={{...td,whiteSpace:'nowrap'}}>
+                      {new Date(d.data).toLocaleDateString('it-IT')}
+                      {d.created_at && <div style={{fontSize:'11px',color:'#94a3b8',marginTop:'2px'}}>ore {new Date(d.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</div>}
+                    </td>
                     <td style={td}>{d.spedizioni}</td>
                     <td style={td}>{d.colli}</td>
                     <td style={td}>{Number(d.contrassegni||0).toFixed(2)} €</td>
