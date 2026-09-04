@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
@@ -8,6 +8,8 @@ import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 
 const sel = {padding:'6px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff',width:'100%',boxSizing:'border-box' as const}
 const inp = {padding:'6px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}
+// Etichettina della SECONDA riga (colli/peso/richiesto il sotto): piccola e tenue, non deve pesare.
+const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
 
 export default function ElencoRitiriPage() {
   const searchParams = useSearchParams()
@@ -166,7 +168,7 @@ export default function ElencoRitiriPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
               <thead>
                 <tr>
-                  {['ID Pickup', 'Cliente', 'Mittente', 'Colli', 'Peso', 'Data Ritiro', 'Stato', 'Richiesto il'].map(h => (
+                  {['ID Pickup', 'Cliente', 'Mittente', 'Data Ritiro', 'Stato'].map(h => (
                     <th key={h} style={{ textAlign: 'left', padding: '9px 14px', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', color: '#1a1a1a', borderBottom: '1px solid #f0f0f0', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -174,22 +176,39 @@ export default function ElencoRitiriPage() {
               <tbody>
                 {ritiriPaginate.map(r => {
                   const st = STATO_LABELS[r.stato] || { label: r.stato, bg: '#f3f4f6', color: '#6b7280' }
+                  // Valori della SECONDA riga (colli/peso/quando è stato richiesto), come array così i
+                  // divisori verticali saltano i campi assenti senza lasciare linee a vuoto.
+                  const secItems: { l: any; v: any }[] = [
+                    { l: 'Colli', v: r.colli },
+                    { l: 'Peso', v: `${r.peso} kg` },
+                    { l: 'Richiesto il', v: new Date(r.created_at).toLocaleDateString('it-IT') },
+                  ]
                   return (
-                    <tr key={r.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                      <td style={{ padding: '10px 14px', fontWeight: '600', color: '#1a1a1a' }}>{r.cod_ritiro || r.tracking_ritiro || '-'}</td>
-                      <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>
+                    <Fragment key={r.id}>
+                    <tr style={{ background: '#fff' }}>
+                      <td style={{ padding: '9px 14px', fontWeight: '600', color: '#1a1a1a' }}>{r.cod_ritiro || r.tracking_ritiro || '-'}</td>
+                      <td style={{ padding: '9px 14px', color: '#1a1a1a' }}>
                         {r.clienti?.ragione_sociale || '-'}
                         {r.master_rete && <div style={{ fontSize: '11px', color: '#4f46e5', fontWeight: 600 }}>▸ {r.master_rete}</div>}
                       </td>
-                      <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>{r.mitt_nome}</td>
-                      <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>{r.colli}</td>
-                      <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>{r.peso} kg</td>
-                      <td style={{ padding: '10px 14px', color: '#1a1a1a' }}>{r.data_ritiro ? new Date(r.data_ritiro).toLocaleDateString('it-IT') : '-'}</td>
-                      <td style={{ padding: '10px 14px' }}>
+                      <td style={{ padding: '9px 14px', color: '#1a1a1a' }}>{r.mitt_nome}</td>
+                      <td style={{ padding: '9px 14px', color: '#1a1a1a' }}>{r.data_ritiro ? new Date(r.data_ritiro).toLocaleDateString('it-IT') : '-'}</td>
+                      <td style={{ padding: '9px 14px 3px' }}>
                         <span style={{ background: st.bg, color: st.color, padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: '600' }}>{st.label}</span>
                       </td>
-                      <td style={{ padding: '10px 14px', color: '#999', fontSize: '12px' }}>{new Date(r.created_at).toLocaleDateString('it-IT')}</td>
                     </tr>
+                    <tr style={{ background: '#fff', borderBottom: '2px solid #cbd5e1' }}>
+                      <td colSpan={5} style={{ padding: '4px 12px 10px 44px', borderTop: '1px solid #f1f2f4' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap' as const, alignItems: 'center', rowGap: '4px', fontSize: '12px', color: '#374151' }}>
+                          {secItems.map((it, i) => (
+                            <span key={i} style={{ display: 'inline-flex', alignItems: 'baseline', gap: '4px', padding: '0 14px', borderLeft: i > 0 ? '1px solid #e5e7eb' : 'none' }}>
+                              <span style={secLbl}>{it.l}</span>{it.v}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                    </Fragment>
                   )
                 })}
               </tbody>

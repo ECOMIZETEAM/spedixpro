@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AssistenzaTicketButton from '@/app/components/AssistenzaTicketButton'
@@ -58,6 +58,8 @@ const ORDINABILE: Record<string,string> = {
   'N. Spedizione':'numero', 'Destinatario':'destinatario', 'Corriere':'vettore', 'Peso':'peso',
   'Colli':'colli', 'Contrassegno':'contrassegno', 'Data e Ora':'data', 'Stato':'stato', 'Totale':'prezzo',
 }
+// Etichettina della SECONDA riga (corriere/valori sotto): piccola e tenue, non deve pesare.
+const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
 
 import { useDialog } from '@/app/components/DialogProvider'
 export default function SpedizioniPage() {
@@ -468,7 +470,7 @@ async function apriTracking(s: any) {
             </select>{' '}elementi
             </span>
           </div>
-          <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+          <div style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
             <button onClick={stampaZebraSelezionati} disabled={selectedIds.length===0}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#f97316':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
               🖨️ Stampa Selezionati{selectedIds.length>0?` (${selectedIds.length})`:''}
@@ -477,6 +479,24 @@ async function apriTracking(s: any) {
               style={{padding:'6px 14px',background:selectedIds.length>0?'#0d9488':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
               ↩︎ Etichetta di reso{selectedIds.length>0?` (${selectedIds.length})`:''}
             </button>
+            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+              <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Ordina:</span>
+              <select value={filtri.ordina} onChange={e=>setFiltri(f=>({...f,ordina:e.target.value}))}
+                style={{padding:'5px 8px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}}>
+                <option value="">Data (recente)</option>
+                <option value="numero">N. Spedizione</option>
+                <option value="destinatario">Destinatario</option>
+                <option value="vettore">Corriere</option>
+                <option value="peso">Peso</option>
+                <option value="colli">Colli</option>
+                <option value="contrassegno">Contrassegno</option>
+                <option value="data">Data</option>
+                <option value="stato">Stato</option>
+                <option value="prezzo">Totale</option>
+              </select>
+              <button onClick={()=>setFiltri(f=>({...f,dir:f.dir==='asc'?'desc':'asc'}))} title="Inverti ordine (crescente/decrescente)"
+                style={{padding:'5px 9px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',background:'#fff',color:'#1a1a1a',cursor:'pointer'}}>{filtri.dir==='asc'?'↑':'↓'}</button>
+            </div>
             <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
               <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Cerca:</span>
               <input value={cerca} onChange={e=>setCerca(e.target.value)}
@@ -501,7 +521,7 @@ async function apriTracking(s: any) {
                   <th style={{padding:'9px 12px',borderBottom:'1px solid #d1d5db',width:'36px'}}>
                     <input type="checkbox" checked={selectedIds.length===spedizioniPaginate.length&&spedizioniPaginate.length>0} onChange={toggleAll}/>
                   </th>
-                  {['N. Spedizione','Cliente','Destinatario','Corriere','Peso','Colli','Contrassegno','Data e Ora','Stato','ID Ordine','Totale','Distinta N.','Azioni'].map(h=>{
+                  {['N. Spedizione','Cliente','Destinatario','Data e Ora','Stato','Azioni'].map(h=>{
                     const key = ORDINABILE[h]
                     const attivo = !!key && filtri.ordina === key
                     const freccia = attivo ? (filtri.dir==='asc'?' ↑':' ↓') : (key?' ↕':'')
@@ -519,9 +539,20 @@ async function apriTracking(s: any) {
                 {spedizioniPaginate.map(s => {
                   const st = STATI[s.stato] || STATI['annullata']
                   const isSelected = selectedIds.includes(s.id)
+                  // Valori della SECONDA riga (corriere/peso/colli/contrassegno/ordine/totale), come array così
+                  // i divisori verticali saltano i campi assenti (contrassegno/ordine) senza lasciare linee a vuoto.
+                  const secItems: { l: any; v: any }[] = [
+                    { l: '🚚', v: <b style={{color:'#1a1a1a'}}>{s.corrieri?.nome_contratto||'—'}</b> },
+                    { l: 'Peso', v: fmtPeso(s) },
+                    { l: 'Colli', v: s.colli },
+                    ...(Number(s.contrassegno)>0 ? [{ l: 'Contrassegno', v: <span style={{...codBadgeStyle(s.stato_contrassegno),padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{Number(s.contrassegno).toFixed(2)}</span> }] : []),
+                    ...(s.id_ordine ? [{ l: 'Ordine', v: s.id_ordine }] : []),
+                    { l: 'Totale', v: <span><b style={{color:'#1a1a1a'}}>€ {Number(s.costo_totale||0).toFixed(2)}</b>{Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span> },
+                  ]
                   return (
-                    <tr key={s.id} style={{borderBottom:'1px solid #d1d5db',background:isSelected?'#fff7ed':'#fff'}}>
-                      <td style={{padding:'9px 12px'}}>
+                    <Fragment key={s.id}>
+                    <tr style={{background:isSelected?'#fff7ed':'#fff'}}>
+                      <td style={{padding:'9px 12px 3px'}}>
                         <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(s.id)}/>
                       </td>
                       <td style={{padding:'9px 12px'}}>
@@ -543,15 +574,7 @@ async function apriTracking(s: any) {
                         <div style={{color:'#1a1a1a',fontWeight:'500'}}>{s.dest_nome}</div>
                         <div style={{color:'#1a1a1a',fontSize:'11px'}}>{s.dest_citta}, {s.dest_provincia}({s.dest_cap}), {s.dest_paese}</div>
                       </td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.corrieri?.nome_contratto||'—'}</td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{fmtPeso(s)}</td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.colli}</td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a'}}>
-                        {Number(s.contrassegno)>0
-                          ? <span style={{...codBadgeStyle(s.stato_contrassegno),padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{Number(s.contrassegno).toFixed(2)}</span>
-                          : '—'}
-                      </td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px',whiteSpace:'nowrap' as const}}>
+                      <td style={{padding:'9px 12px 3px',color:'#1a1a1a',fontSize:'12px',whiteSpace:'nowrap' as const}}>
                         {new Date(s.created_at).toLocaleDateString('it-IT')} {new Date(s.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}
                       </td>
                       <td style={{padding:'9px 12px'}}>
@@ -560,18 +583,12 @@ async function apriTracking(s: any) {
                         {s.stato==='reso_mittente' && s.distinta_reso && <div style={{fontSize:'10px',color:'#374151',marginTop:'3px',fontWeight:'600',whiteSpace:'nowrap' as const}}>Distinta {s.distinta_reso}</div>}
                         {s.annullamento_errore && s.stato!=='annullamento_pending' && s.stato!=='annullamento_manuale' && <div title={s.annullamento_errore} style={{fontSize:'10px',color:'#b91c1c',marginTop:'3px',fontWeight:'600',whiteSpace:'nowrap' as const,cursor:'help'}}>⚠ Non annullabile</div>}
                       </td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.id_ordine||'—'}</td>
-                      <td style={{padding:'9px 12px',fontWeight:'700',color:'#1a1a1a'}}>
-                        € {Number(s.costo_totale||0).toFixed(2)}
-                        {Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}}>R</span>}
-                      </td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>—</td>
-                      <td style={{padding:'9px 12px'}}>
+                      <td style={{padding:'9px 12px 3px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
                           <button onClick={()=>stampaEtichetta(s.id)} disabled={stampandoId===s.id}
                             style={{padding:'4px 8px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}} title={zplOn?'Stampa etichetta su Zebra (ZPL)':'Scarica etichetta PDF'}>{stampandoId===s.id?'⏳':'🖨️'}</button>
                           <button onClick={()=>setDettaglio(s)} title="Vedi dettagli spedizione" style={{padding:'4px 8px',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',fontSize:'14px',border:'1px solid #bfdbfe',cursor:'pointer'}}>👁</button>
-                  
+
                           {s.stato==='annullamento_pending' ? (
                             <button onClick={()=>ripristina(s.id,s.numero)} disabled={eliminando===s.id}
                               style={{padding:'4px 10px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'12px',fontWeight:'700',border:'1px solid #fed7aa',cursor:'pointer',whiteSpace:'nowrap',opacity:eliminando===s.id?0.5:1}} title="Ripristina spedizione">↩︎ Ripristina</button>
@@ -586,6 +603,18 @@ async function apriTracking(s: any) {
                         </div>
                       </td>
                     </tr>
+                    <tr style={{background:isSelected?'#fff7ed':'#fff',borderBottom:'2px solid #cbd5e1'}}>
+                      <td colSpan={7} style={{padding:'4px 12px 10px 44px',borderTop:'1px solid #f1f2f4'}}>
+                        <div style={{display:'flex',flexWrap:'wrap' as const,alignItems:'center',rowGap:'4px',fontSize:'12px',color:'#374151'}}>
+                          {secItems.map((it,i)=>(
+                            <span key={i} style={{display:'inline-flex',alignItems:'baseline',gap:'4px',padding:'0 14px',borderLeft:i>0?'1px solid #e5e7eb':'none'}}>
+                              <span style={secLbl}>{it.l}</span>{it.v}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                    </Fragment>
                   )
                 })}
               </tbody>

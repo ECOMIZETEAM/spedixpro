@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { useDialog } from '@/app/components/DialogProvider'
@@ -17,6 +17,8 @@ const field: React.CSSProperties = { flex:'1 1 160px', minWidth:'150px' }
 const card: React.CSSProperties = { background:'#fff', border:'1px solid '+BORDER, borderRadius:'10px', padding:'18px' }
 const th: React.CSSProperties = { padding:'11px 14px', color:'#6b7280', fontSize:'11px', fontWeight:700, textTransform:'uppercase', letterSpacing:'.3px', whiteSpace:'nowrap', userSelect:'none' }
 const td: React.CSSProperties = { padding:'12px 14px', fontSize:'13px', color:'#1a1a1a', borderTop:'1px solid #f0f0f0', verticalAlign:'middle' }
+// Etichettina della SECONDA riga (valori sotto: articoli/importi/tags): piccola e tenue, non deve pesare.
+const secLbl: React.CSSProperties = { fontSize:'10px', textTransform:'uppercase', letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
 
 function fmtData(v:any){
   if(!v) return '—'
@@ -507,8 +509,25 @@ export default function OrdiniPage() {
               {[10,25,50,100].map(n=><option key={n} value={n}>{n}</option>)}
             </select>&nbsp;elementi
           </div>
-          <div style={{fontSize:'13px',color:'#6b7280'}}>Cerca:&nbsp;
-            <input value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,width:'auto',display:'inline-block',padding:'6px 10px'}}/>
+          <div style={{display:'flex',alignItems:'center',gap:'16px',flexWrap:'wrap'}}>
+            {/* Ordina per: le colonne "valore" (pagamento/totale) stanno nella seconda riga e non hanno
+                più l'header cliccabile — qui non si perde il loro ordinamento. Pilota lo stesso stato `sort`. */}
+            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+              <span style={{fontSize:'13px',color:'#6b7280'}}>Ordina:</span>
+              <select value={sort?.k||''} onChange={e=>{const k=e.target.value; setSort(k?{k,d:(sort?.d ?? 1) as 1|-1}:null)}} style={{...inp,width:'auto',display:'inline-block',padding:'6px 8px'}}>
+                <option value="">Data (recente)</option>
+                <option value="data">Data</option>
+                <option value="numero_ordine">ID Ordine</option>
+                <option value="destinatario">Destinatario</option>
+                <option value="stato_pagamento">Stato pagamento</option>
+                <option value="stato">Stato evasione</option>
+                <option value="totale">Totale</option>
+              </select>
+              <button onClick={()=>setSort(s=> s ? {k:s.k,d:(s.d===1?-1:1) as 1|-1} : {k:'data',d:1})} title="Inverti ordine (crescente/decrescente)" style={{...inp,width:'auto',padding:'6px 10px',cursor:'pointer',fontWeight:700}}>{sort?(sort.d===1?'↑':'↓'):'↕'}</button>
+            </div>
+            <div style={{fontSize:'13px',color:'#6b7280'}}>Cerca:&nbsp;
+              <input value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,width:'auto',display:'inline-block',padding:'6px 10px'}}/>
+            </div>
           </div>
         </div>
 
@@ -522,44 +541,46 @@ export default function OrdiniPage() {
                 <Th k="data">Data e Ora</Th>
                 <Th k="numero_ordine">ID Ordine</Th>
                 <Th k="destinatario">Destinatario</Th>
-                <Th>Articoli</Th>
-                <Th k="stato_pagamento">Stato pagamento</Th>
-                <Th k="stato">Stato evasione</Th>
-                <Th k="totale" right>Totale</Th>
-                <Th>Tags</Th>
-                <Th>N. Spedizione</Th>
+                <Th k="stato">Stato</Th>
                 <Th right>Azioni</Th>
               </tr></thead>
               <tbody>
                 {pagina.length===0 ? (
-                  <tr><td colSpan={11} style={{...td,textAlign:'center',color:'#999',padding:'40px'}}>Nessun dato disponibile nella tabella</td></tr>
+                  <tr><td colSpan={6} style={{...td,textAlign:'center',color:'#999',padding:'40px'}}>Nessun dato disponibile nella tabella</td></tr>
                 ) : pagina.map((o:any)=>{
                   const d = o.destinatario||{}; const cp = coloriPag(o.stato_pagamento)
+                  const isSel = !!sel[o.id]
+                  const arts = Array.isArray(o.articoli)?o.articoli:[]
+                  const cod = codDaOrdine(o)
+                  // Valori della SECONDA riga (articoli/importi/tags), come array così i divisori verticali
+                  // saltano i campi assenti (tags/n.spedizione) senza lasciare linee a vuoto.
+                  const secItems: { l:any; v:any }[] = [
+                    ...(arts.length ? [{ l:'Articoli', v:(
+                      <span style={{display:'inline-flex',alignItems:'center',gap:'12px',flexWrap:'wrap' as const}}>
+                        {arts.map((a:any,i:number)=>(
+                          <span key={i} style={{display:'inline-flex',alignItems:'center',gap:'6px'}}>
+                            {a.immagine
+                              ? <img src={a.immagine} alt="" style={{width:'26px',height:'26px',objectFit:'cover',borderRadius:'5px',border:'1px solid #e8e8e8',flexShrink:0}}/>
+                              : <span style={{width:'26px',height:'26px',borderRadius:'5px',border:'1px solid #e8e8e8',background:'#f9fafb',display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:'13px',flexShrink:0}}>📦</span>}
+                            <span style={{color:'#1a1a1a',fontWeight:600}}>{a.quantita}× {a.nome}{a.sku?' · '+a.sku:''}</span>
+                          </span>
+                        ))}
+                      </span>
+                    )}] : []),
+                    { l:'Pagamento', v:<span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:cp.bg,color:cp.fg}}>{labelPag(o.stato_pagamento)}</span> },
+                    { l:'Totale', v:<span style={{fontWeight:700,color:'#1a1a1a'}}>{o.totale?Number(o.totale).toFixed(2):'—'} {o.valuta||''}{cod>0 && <span title="Ordine in contrassegno: l'importo verrà applicato alla spedizione" style={{marginLeft:'6px',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fff7ed',color:'#c2410c',border:'1px solid #fed7aa'}}>COD</span>}</span> },
+                    ...(getTags(o) ? [{ l:'Tags', v:<span style={{color:'#6b7280'}}>{getTags(o)}</span> }] : []),
+                    ...(o.spedizione_id ? [{ l:'N. Spedizione', v:<span style={{color:'#6b7280'}}>{String(o.spedizione_id).slice(0,8)}</span> }] : []),
+                  ]
                   return (
-                  <tr key={o.id} style={{background:sel[o.id]?'#fff7ed':'#fff'}}>
-                    <td style={td}><input type="checkbox" checked={!!sel[o.id]} onChange={()=>toggleUno(o.id)} style={{accentColor:ACCENT,width:'16px',height:'16px'}}/></td>
-                    <td style={{...td,color:'#6b7280',whiteSpace:'nowrap'}}>{fmtData(getData(o))}</td>
-                    <td style={{...td,fontWeight:600}}>{o.numero_ordine}</td>
-                    <td style={td}>{d.nome||'—'}<div style={{fontSize:'11px',color:'#999'}}>{d.citta}{d.provincia?' ('+d.provincia+')':''} {d.paese||''}</div></td>
-                    <td style={{...td,maxWidth:'240px'}}>
-                      {(Array.isArray(o.articoli)?o.articoli:[]).map((a:any,i:number)=>(
-                        <div key={i} style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px'}}>
-                          {a.immagine
-                            ? <img src={a.immagine} alt="" style={{width:'32px',height:'32px',objectFit:'cover',borderRadius:'6px',border:'1px solid #e8e8e8',flexShrink:0}}/>
-                            : <div style={{width:'32px',height:'32px',borderRadius:'6px',border:'1px solid #e8e8e8',background:'#f9fafb',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'14px',flexShrink:0}}>📦</div>}
-                          <div style={{minWidth:0}}>
-                            <div style={{fontSize:'12px',color:'#1a1a1a',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.quantita}× {a.nome}</div>
-                            {a.sku && <div style={{fontSize:'10px',color:'#999'}}>SKU: {a.sku}</div>}
-                          </div>
-                        </div>
-                      ))}
-                    </td>
-                    <td style={td}><span style={{fontSize:'11px',fontWeight:600,padding:'3px 9px',borderRadius:'999px',background:cp.bg,color:cp.fg}}>{labelPag(o.stato_pagamento)}</span></td>
-                    <td style={td}><span style={{fontSize:'11px',fontWeight:600,padding:'3px 9px',borderRadius:'999px',background:o.stato==='spedito'?'#dcfce7':'#fef3c7',color:o.stato==='spedito'?'#166534':'#92400e'}}>{o.stato==='spedito'?'Spedito':'Da spedire'}</span></td>
-                    <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>{o.totale?Number(o.totale).toFixed(2):'—'} {o.valuta||''}{codDaOrdine(o)>0 && <span title="Ordine in contrassegno: l'importo verrà applicato alla spedizione" style={{marginLeft:'6px',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fff7ed',color:'#c2410c',border:'1px solid #fed7aa'}}>COD</span>}</td>
-                    <td style={{...td,color:'#6b7280',maxWidth:'140px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{getTags(o)||'—'}</td>
-                    <td style={{...td,color:'#6b7280'}}>{o.spedizione_id?String(o.spedizione_id).slice(0,8):'—'}</td>
-                    <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>
+                  <Fragment key={o.id}>
+                  <tr style={{background:isSel?'#fff7ed':'#fff'}}>
+                    <td style={{...td,borderTop:'none',padding:'9px 12px 3px'}}><input type="checkbox" checked={isSel} onChange={()=>toggleUno(o.id)} style={{accentColor:ACCENT,width:'16px',height:'16px'}}/></td>
+                    <td style={{...td,borderTop:'none',padding:'9px 12px 3px',color:'#6b7280',whiteSpace:'nowrap'}}>{fmtData(getData(o))}</td>
+                    <td style={{...td,borderTop:'none',padding:'9px 12px 3px',fontWeight:600}}>{o.numero_ordine}</td>
+                    <td style={{...td,borderTop:'none',padding:'9px 12px 3px'}}>{d.nome||'—'}<div style={{fontSize:'11px',color:'#999'}}>{d.citta}{d.provincia?' ('+d.provincia+')':''} {d.paese||''}</div></td>
+                    <td style={{...td,borderTop:'none',padding:'9px 12px 3px'}}><span style={{fontSize:'11px',fontWeight:600,padding:'3px 9px',borderRadius:'999px',background:o.stato==='spedito'?'#dcfce7':'#fef3c7',color:o.stato==='spedito'?'#166534':'#92400e'}}>{o.stato==='spedito'?'Spedito':'Da spedire'}</span></td>
+                    <td style={{...td,borderTop:'none',padding:'9px 12px 3px',textAlign:'right',whiteSpace:'nowrap'}}>
                       {/* "Spedito" solo se lo abbiamo spedito NOI (ha la spedizione Moove): allora niente
                           ri-spedizione. Se è "spedito" solo sul marketplace (import eBay dei già-evasi,
                           senza spedizione_id) mostro comunque "Crea spedizione" → si fa l'etichetta e nel
@@ -573,7 +594,19 @@ export default function OrdiniPage() {
                             {o.fulfillment_stato==='errore' && <span title={o.fulfillment_errore || 'Il tracking non e\' stato inviato al negozio: verifica che le chiavi API del negozio siano in lettura E SCRITTURA (read-write).'} style={{color:'#b45309',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fffbeb',border:'1px solid #fde68a',cursor:'help',whiteSpace:'nowrap'}}>⚠ Store non aggiornato</span>}
                           </span>}
                     </td>
-                  </tr>)
+                  </tr>
+                  <tr style={{background:isSel?'#fff7ed':'#fff',borderBottom:'2px solid #cbd5e1'}}>
+                    <td colSpan={6} style={{padding:'4px 12px 10px 44px',borderTop:'1px solid #f1f2f4'}}>
+                      <div style={{display:'flex',flexWrap:'wrap' as const,alignItems:'center',rowGap:'4px',fontSize:'12px',color:'#374151'}}>
+                        {secItems.map((it,i)=>(
+                          <span key={i} style={{display:'inline-flex',alignItems:'baseline',gap:'4px',padding:'0 14px',borderLeft:i>0?'1px solid #e5e7eb':'none'}}>
+                            <span style={secLbl}>{it.l}</span>{it.v}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                  </Fragment>)
                 })}
               </tbody>
             </table>

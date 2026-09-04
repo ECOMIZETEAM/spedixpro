@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
@@ -7,6 +7,8 @@ import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
+// Etichettina della SECONDA riga (importo/stati sotto): piccola e tenue, non deve pesare.
+const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
 
 const STATI_SPED: Record<string,{bg:string,color:string,label:string}> = {
   in_lavorazione:{bg:'#fefce8',color:'#ca8a04',label:'In Lavorazione'},
@@ -232,7 +234,7 @@ export default function ListaContrassegniPage() {
                   <th style={{padding:'9px 12px',borderBottom:'1px solid #d1d5db',width:'36px'}}>
                     <input type="checkbox" title="Seleziona tutti gli in attesa" checked={selectedIds.length===selezionabili.length&&selezionabili.length>0} onChange={toggleAll} disabled={selezionabili.length===0}/>
                   </th>
-                  {['N. Spedizione','Mittente','Destinatario','Data Spedizione','Contrassegno','Stato spedizione','N. Dist.','Stato contrassegno','Ultimo aggiornamento',''].map(h=>(
+                  {['N. Spedizione','Mittente','Destinatario','Data Spedizione','Stato contrassegno',''].map(h=>(
                     <th key={h} style={{textAlign:'left' as const,padding:'9px 12px',fontSize:'11px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
                   ))}
                 </tr>
@@ -243,23 +245,40 @@ export default function ListaContrassegniPage() {
                   const stCod = STATI_COD[s.stato_contrassegno||'in_attesa'] || STATI_COD['in_attesa']
                   const isSelected = selectedIds.includes(s.id)
                   const puoSel = selezionabile(s)
+                  // Valori della SECONDA riga (importo, stato spedizione, distinta, aggiornamento): array
+                  // con divisori verticali, così un campo assente (distinta) non lascia una linea a vuoto.
+                  const secItems: { l: any; v: any }[] = [
+                    { l: 'Contrassegno', v: <b style={{color:'#1a1a1a'}}>€ {Number(s.contrassegno).toFixed(2)}</b> },
+                    { l: 'Stato spedizione', v: <span style={{background:stSped.bg,color:stSped.color,padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>{stSped.label}</span> },
+                    { l: 'N. Distinta', v: <span style={{color:s.distinta_numero?'#f97316':'#9ca3af',fontWeight:s.distinta_numero?'700':'400'}}>{s.distinta_numero||'—'}</span> },
+                    { l: 'Aggiornato', v: new Date(s.updated_at||s.created_at).toLocaleDateString('it-IT') },
+                  ]
                   return (
-                    <tr key={s.id} style={{borderBottom:'1px solid #d1d5db',background:isSelected?'#fff7ed':'#fff'}}>
-                      <td style={{padding:'9px 12px'}}><input type="checkbox" checked={isSelected} disabled={!puoSel} onChange={()=>toggleSelect(s.id)} title={puoSel?'':'Solo i contrassegni "in attesa" si possono mettere in distinta'} style={{cursor:puoSel?'pointer':'not-allowed',opacity:puoSel?1:0.4}}/></td>
-                      <td style={{padding:'9px 12px'}}><span style={{color:'#f97316',fontWeight:'700'}}>{s.numero}</span></td>
-                      <td style={{padding:'9px 12px',fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>{s.clienti?.ragione_sociale||s.mitt_nome}</td>
-                      <td style={{padding:'9px 12px'}}>
+                    <Fragment key={s.id}>
+                    <tr style={{background:isSelected?'#fff7ed':'#fff'}}>
+                      <td style={{padding:'9px 12px 3px'}}><input type="checkbox" checked={isSelected} disabled={!puoSel} onChange={()=>toggleSelect(s.id)} title={puoSel?'':'Solo i contrassegni "in attesa" si possono mettere in distinta'} style={{cursor:puoSel?'pointer':'not-allowed',opacity:puoSel?1:0.4}}/></td>
+                      <td style={{padding:'9px 12px 3px'}}><span style={{color:'#f97316',fontWeight:'700'}}>{s.numero}</span></td>
+                      <td style={{padding:'9px 12px 3px',fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>{s.clienti?.ragione_sociale||s.mitt_nome}</td>
+                      <td style={{padding:'9px 12px 3px'}}>
                         <div style={{fontWeight:'600',color:'#1a1a1a',fontSize:'12px'}}>{s.dest_nome}</div>
                         <div style={{color:'#1a1a1a',fontSize:'11px'}}>{s.dest_indirizzo}, {s.dest_citta}, {s.dest_cap}, {s.dest_provincia}</div>
                       </td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px',whiteSpace:'nowrap' as const}}>{new Date(s.created_at).toLocaleDateString('it-IT')}</td>
-                      <td style={{padding:'9px 12px',fontWeight:'700',color:'#1a1a1a'}}>€ {Number(s.contrassegno).toFixed(2)}</td>
-                      <td style={{padding:'9px 12px'}}><span style={{background:stSped.bg,color:stSped.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>{stSped.label}</span></td>
-                      <td style={{padding:'9px 12px',color:s.distinta_numero?'#f97316':'#9ca3af',fontSize:'12px',fontWeight:s.distinta_numero?'700':'400'}}>{s.distinta_numero||'—'}</td>
-                      <td style={{padding:'9px 12px'}}><span style={{background:stCod.bg,color:stCod.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>{stCod.label}</span></td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{new Date(s.updated_at||s.created_at).toLocaleDateString('it-IT')}</td>
-                      <td style={{padding:'9px 12px'}}><span style={{color:'#dc2626',fontSize:'16px',cursor:'pointer'}}>⊘</span></td>
+                      <td style={{padding:'9px 12px 3px',color:'#1a1a1a',fontSize:'12px',whiteSpace:'nowrap' as const}}>{new Date(s.created_at).toLocaleDateString('it-IT')}</td>
+                      <td style={{padding:'9px 12px 3px'}}><span style={{background:stCod.bg,color:stCod.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>{stCod.label}</span></td>
+                      <td style={{padding:'9px 12px 3px'}}><span style={{color:'#dc2626',fontSize:'16px',cursor:'pointer'}}>⊘</span></td>
                     </tr>
+                    <tr style={{background:isSelected?'#fff7ed':'#fff',borderBottom:'2px solid #cbd5e1'}}>
+                      <td colSpan={7} style={{padding:'4px 12px 10px 44px',borderTop:'1px solid #f1f2f4'}}>
+                        <div style={{display:'flex',flexWrap:'wrap' as const,alignItems:'center',rowGap:'4px',fontSize:'12px',color:'#374151'}}>
+                          {secItems.map((it,i)=>(
+                            <span key={i} style={{display:'inline-flex',alignItems:'baseline',gap:'4px',padding:'0 14px',borderLeft:i>0?'1px solid #e5e7eb':'none'}}>
+                              <span style={secLbl}>{it.l}</span>{it.v}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                    </Fragment>
                   )
                 })}
               </tbody>

@@ -8,6 +8,8 @@ import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
+// Etichettina della SECONDA riga (importi/metodo/data sotto): piccola e tenue, non deve pesare.
+const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
 
 import { useDialog } from '@/app/components/DialogProvider'
 export default function DistinteContrassegniPage() {
@@ -535,24 +537,29 @@ export default function DistinteContrassegniPage() {
         ) : (
           <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
             <thead><tr style={{background:'#f9fafb'}}>
-              {['Nr','Cliente','Data creazione','Totale iniziale contr.','Totale contr. rimborsati','Metodo pagamento','Stato','Data pagamento','Azioni'].map(h=>(
+              {['Nr','Cliente','Data creazione','Stato','Azioni'].map(h=>(
                 <th key={h} style={{textAlign:'left' as const,padding:'9px 14px',fontSize:'11px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
               ))}
             </tr></thead>
             <tbody>
               {!distinteFiltrate.length ? (
-                <tr><td colSpan={9} style={{padding:'30px',textAlign:'center' as const,color:'#f97316',fontSize:'13px'}}>Nessun dato disponibile nella tabella</td></tr>
-              ) : distinteFiltrate.map((d:any)=>(
-                <tr key={d.id} style={{borderBottom:'1px solid #d1d5db'}}>
-                  <td style={{padding:'9px 14px',fontWeight:'700',color:'#f97316'}}>{d.numero}</td>
-                  <td style={{padding:'9px 14px',color:d.stato==='pagata'?'#f97316':'#1a1a1a',fontWeight:'500'}}>{d.clienti?.ragione_sociale || d.target_master?.nome || '—'}</td>
-                  <td style={{padding:'9px 14px',color:'#1a1a1a',fontSize:'12px'}}>{new Date(d.created_at).toLocaleString('it-IT')}</td>
-                  <td style={{padding:'9px 14px',fontWeight:'600',color:'#1a1a1a'}}>€ {Number(d.totale_iniziale).toFixed(2)}</td>
-                  <td style={{padding:'9px 14px',fontWeight:'600',color:'#1a1a1a'}}>€ {Number(d.totale_rimborsato).toFixed(2)}</td>
-                  <td style={{padding:'9px 14px'}}>
-                    {d.metodo_pagamento && <span style={{background:'#e0f2fe',color:'#0369a1',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>{d.metodo_pagamento.toUpperCase()}</span>}
-                  </td>
-                  <td style={{padding:'9px 14px'}}>
+                <tr><td colSpan={5} style={{padding:'30px',textAlign:'center' as const,color:'#f97316',fontSize:'13px'}}>Nessun dato disponibile nella tabella</td></tr>
+              ) : distinteFiltrate.map((d:any)=>{
+                // Valori della SECONDA riga (importi/metodo/data), come array così i divisori verticali
+                // saltano i campi assenti (metodo pagamento) senza lasciare linee a vuoto.
+                const secItems: { l: any; v: any }[] = [
+                  { l: 'Totale iniziale', v: <b style={{color:'#1a1a1a'}}>€ {Number(d.totale_iniziale).toFixed(2)}</b> },
+                  { l: 'Rimborsato', v: <b style={{color:'#1a1a1a'}}>€ {Number(d.totale_rimborsato).toFixed(2)}</b> },
+                  ...(d.metodo_pagamento ? [{ l: 'Metodo', v: <span style={{background:'#e0f2fe',color:'#0369a1',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>{d.metodo_pagamento.toUpperCase()}</span> }] : []),
+                  { l: 'Data pagamento', v: d.data_pagamento?new Date(d.data_pagamento).toLocaleDateString('it-IT'):'—' },
+                ]
+                return (
+                <Fragment key={d.id}>
+                <tr style={{background:'#fff'}}>
+                  <td style={{padding:'9px 14px 3px',fontWeight:'700',color:'#f97316'}}>{d.numero}</td>
+                  <td style={{padding:'9px 14px 3px',color:d.stato==='pagata'?'#f97316':'#1a1a1a',fontWeight:'500'}}>{d.clienti?.ragione_sociale || d.target_master?.nome || '—'}</td>
+                  <td style={{padding:'9px 14px 3px',color:'#1a1a1a',fontSize:'12px'}}>{new Date(d.created_at).toLocaleString('it-IT')}</td>
+                  <td style={{padding:'9px 14px 3px'}}>
                     {d.stato==='pagata' ? (
                       <span style={{background:'#f0fdf4',color:'#16a34a',padding:'3px 10px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>Pagata</span>
                     ) : d.stato==='parziale' ? (
@@ -561,8 +568,7 @@ export default function DistinteContrassegniPage() {
                       <span style={{background:'#fffbeb',color:'#d97706',padding:'3px 10px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>In lavorazione</span>
                     )}
                   </td>
-                  <td style={{padding:'9px 14px',color:'#1a1a1a',fontSize:'12px'}}>{d.data_pagamento?new Date(d.data_pagamento).toLocaleDateString('it-IT'):'—'}</td>
-                  <td style={{padding:'9px 14px'}}>
+                  <td style={{padding:'9px 14px 3px'}}>
                     <div style={{display:'flex',gap:'6px',flexWrap:'wrap' as const}}>
                       {d.stato!=='pagata' && (
                         <button onClick={()=>{setModalPagamento(d);setMetodoPagamento('')}}
@@ -585,7 +591,20 @@ export default function DistinteContrassegniPage() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                <tr style={{background:'#fff',borderBottom:'2px solid #cbd5e1'}}>
+                  <td colSpan={5} style={{padding:'4px 12px 10px 44px',borderTop:'1px solid #f1f2f4'}}>
+                    <div style={{display:'flex',flexWrap:'wrap' as const,alignItems:'center',rowGap:'4px',fontSize:'12px',color:'#374151'}}>
+                      {secItems.map((it,i)=>(
+                        <span key={i} style={{display:'inline-flex',alignItems:'baseline',gap:'4px',padding:'0 14px',borderLeft:i>0?'1px solid #e5e7eb':'none'}}>
+                          <span style={secLbl}>{it.l}</span>{it.v}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+                </Fragment>
+                )
+              })}
             </tbody>
           </table>
         )}

@@ -1,10 +1,14 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 
 import { useDialog } from '@/app/components/DialogProvider'
+
+// Etichettina della SECONDA riga (contratto/importi sotto): piccola e tenue, non deve pesare.
+const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
+
 export default function ElencoDistintePage() {
   const dialog = useDialog()
   const [distinte, setDistinte] = useState<any[]>([])
@@ -135,34 +139,55 @@ export default function ElencoDistintePage() {
             <thead>
               <tr style={{ background: '#f9fafb' }}>
                 <th style={th}></th>
-                {['Nr', 'Cliente', 'Contratto', 'Data', 'Totale Ldv', 'Prezzo totale', 'Confermata al vettore', 'Data conferma', 'Azioni'].map((h, i) => <th key={i} style={th}>{h}</th>)}
+                {['Nr', 'Cliente', 'Data', 'Confermata al vettore', 'Azioni'].map((h, i) => <th key={i} style={th}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={10} style={{ ...td, textAlign: 'center', padding: '20px' }}>Caricamento...</td></tr>
+                <tr><td colSpan={6} style={{ ...td, textAlign: 'center', padding: '20px' }}>Caricamento...</td></tr>
               ) : !filtrate.length ? (
-                <tr><td colSpan={10} style={{ ...td, textAlign: 'center', padding: '20px' }}>Nessuna distinta creata</td></tr>
-              ) : distintePaginate.map(d => (
-                <tr key={d.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                  <td style={td}><input type="checkbox" checked={selezionate.has(d.id)} onChange={() => toggle(d.id)} /></td>
-                  <td style={{ ...td, fontWeight: '700' }}>{d.numero}</td>
-                  <td style={td}>
-                    {d.cliente_label || d.clienti?.ragione_sociale || '-'}
-                    {d.master_rete && <div style={{ fontSize: '10px', color: '#ea580c', fontWeight: 600, marginTop: '2px' }}>Rete: {d.master_rete}</div>}
-                  </td>
-                  <td style={td}>{d.corrieri?.nome_contratto || '-'}</td>
-                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{d.created_at ? new Date(d.created_at).toLocaleString('it-IT') : '-'}</td>
-                  <td style={td}>{d.totale_ldv || 0}</td>
-                  <td style={td}>{Number(d.prezzo_totale || 0).toFixed(2)} {'\u20AC'}</td>
-                  <td style={td}>{d.confermata_vettore ? <span style={{ background: '#16a34a', color: '#fff', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>Confermati</span> : <span style={{ background: '#f59e0b', color: '#fff', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>In attesa</span>}</td>
-                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{d.data_conferma ? new Date(d.data_conferma).toLocaleString('it-IT') : '-'}</td>
-                  <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                    <button style={bIco} onClick={() => stampaPDF(d)} title="Stampa PDF">{'\uD83D\uDDA8'}</button>
-                    <button style={{ ...bIco, background: '#15803d' }} onClick={() => esportaExcel(d)} title="Excel">{'\uD83D\uDCCA'}</button>
-                  </td>
-                </tr>
-              ))}
+                <tr><td colSpan={6} style={{ ...td, textAlign: 'center', padding: '20px' }}>Nessuna distinta creata</td></tr>
+              ) : distintePaginate.map(d => {
+                const isSelected = selezionate.has(d.id)
+                const td1 = { ...td, padding: '9px 12px 3px' }
+                // Valori della SECONDA riga (contratto/conteggi/importi): array cos\u00EC i divisori verticali
+                // saltano i campi assenti (data conferma) senza lasciare linee a vuoto.
+                const secItems: { l: any; v: any }[] = [
+                  { l: 'Contratto', v: <b style={{ color: '#1a1a1a' }}>{d.corrieri?.nome_contratto || '\u2014'}</b> },
+                  { l: 'Totale LDV', v: d.totale_ldv || 0 },
+                  { l: 'Prezzo totale', v: <b style={{ color: '#1a1a1a' }}>{Number(d.prezzo_totale || 0).toFixed(2)} {'\u20AC'}</b> },
+                  ...(d.data_conferma ? [{ l: 'Data conferma', v: new Date(d.data_conferma).toLocaleString('it-IT') }] : []),
+                ]
+                return (
+                  <Fragment key={d.id}>
+                    <tr style={{ background: isSelected ? '#fff7ed' : '#fff' }}>
+                      <td style={td1}><input type="checkbox" checked={isSelected} onChange={() => toggle(d.id)} /></td>
+                      <td style={{ ...td1, fontWeight: '700' }}>{d.numero}</td>
+                      <td style={td1}>
+                        {d.cliente_label || d.clienti?.ragione_sociale || '-'}
+                        {d.master_rete && <div style={{ fontSize: '10px', color: '#ea580c', fontWeight: 600, marginTop: '2px' }}>Rete: {d.master_rete}</div>}
+                      </td>
+                      <td style={{ ...td1, whiteSpace: 'nowrap' }}>{d.created_at ? new Date(d.created_at).toLocaleString('it-IT') : '-'}</td>
+                      <td style={td1}>{d.confermata_vettore ? <span style={{ background: '#16a34a', color: '#fff', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>Confermati</span> : <span style={{ background: '#f59e0b', color: '#fff', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>In attesa</span>}</td>
+                      <td style={{ ...td1, whiteSpace: 'nowrap' }}>
+                        <button style={bIco} onClick={() => stampaPDF(d)} title="Stampa PDF">{'\uD83D\uDDA8'}</button>
+                        <button style={{ ...bIco, background: '#15803d' }} onClick={() => esportaExcel(d)} title="Excel">{'\uD83D\uDCCA'}</button>
+                      </td>
+                    </tr>
+                    <tr style={{ background: isSelected ? '#fff7ed' : '#fff', borderBottom: '2px solid #cbd5e1' }}>
+                      <td colSpan={6} style={{ padding: '4px 12px 10px 44px', borderTop: '1px solid #f1f2f4' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap' as const, alignItems: 'center', rowGap: '4px', fontSize: '12px', color: '#374151' }}>
+                          {secItems.map((it, i) => (
+                            <span key={i} style={{ display: 'inline-flex', alignItems: 'baseline', gap: '4px', padding: '0 14px', borderLeft: i > 0 ? '1px solid #e5e7eb' : 'none' }}>
+                              <span style={secLbl}>{it.l}</span>{it.v}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </div>

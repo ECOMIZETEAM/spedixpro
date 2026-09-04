@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
@@ -7,6 +7,8 @@ import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
 const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
+// Etichettina della SECONDA riga (contratto/importi sotto): piccola e tenue, non deve pesare.
+const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
 
 export default function GiacenzePage() {
   const [giacenze, setGiacenze] = useState<any[]>([])
@@ -170,7 +172,7 @@ export default function GiacenzePage() {
             <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
               <thead>
                 <tr style={{background:'#f9fafb'}}>
-                  {['N. Spedizione','Mittente','Contratto','Destinatario','Motivo','Data e Ora','Totale','Contrassegno','Stato','Azioni'].map(h=>(
+                  {['N. Spedizione','Mittente','Destinatario','Data e Ora','Stato','Azioni'].map(h=>(
                     <th key={h} style={{textAlign:'left' as const,padding:'9px 12px',fontSize:'11px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
                   ))}
                 </tr>
@@ -180,37 +182,37 @@ export default function GiacenzePage() {
                   const stSt = statoStyle[g.giacenza_stato||'aperta'] || statoStyle['aperta']
                   const giorni = calcolaGiorni(g)
                   const costo = calcolaCosto(g)
+                  // Valori della SECONDA riga (contratto/motivo/importi), come array così i divisori
+                  // verticali saltano i campi assenti (contrassegno) senza lasciare linee a vuoto.
+                  const secItems: { l: any; v: any }[] = [
+                    { l: 'Contratto', v: g.corrieri?.nome_contratto || '—' },
+                    { l: 'Motivo', v: <span style={{color:'#f97316',fontWeight:'500'}}>{g.giacenza_motivo||'INIZIO GIACENZA'}</span> },
+                    { l: 'Totale', v: costo > 0 ? <span style={{color:'#dc2626',fontWeight:'600'}}>€ {costo.toFixed(2)}{giorni>1?` · ${giorni} giorni`:''}</span> : '0.00 €' },
+                    ...(Number(g.contrassegno)>0 ? [{ l: 'Contrassegno', v: <span style={{background:'#fef9c3',color:'#854d0e',padding:'2px 6px',borderRadius:'4px',fontSize:'11px'}}>€{Number(g.contrassegno).toFixed(2)}</span> }] : []),
+                  ]
                   return (
-                    <tr key={g.id} style={{borderBottom:'1px solid #d1d5db'}}>
-                      <td style={{padding:'9px 12px'}}>
+                    <Fragment key={g.id}>
+                    <tr>
+                      <td style={{padding:'9px 12px 3px'}}>
                         <a href={`/cliente/spedizioni/giacenze/${g.id}`} style={{fontWeight:'700',color:'#f97316',fontSize:'13px',textDecoration:'none'}}>{g.numero}</a>
                       </td>
-                      <td style={{padding:'9px 12px',fontSize:'12px'}}>
+                      <td style={{padding:'9px 12px 3px',fontSize:'12px'}}>
                         <div style={{fontWeight:'500',color:'#1a1a1a'}}>{g.mitt_nome}</div>
                         {g.clienti?.ragione_sociale && <div style={{fontSize:'11px',color:'#1a1a1a'}}>{g.clienti.ragione_sociale}</div>}
                       </td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{g.corrieri?.nome_contratto||'—'}</td>
-                      <td style={{padding:'9px 12px'}}>
+                      <td style={{padding:'9px 12px 3px'}}>
                         <div style={{color:'#1a1a1a',fontWeight:'500'}}>{g.dest_nome}</div>
                         <div style={{color:'#1a1a1a',fontSize:'11px'}}>{g.dest_citta}</div>
                       </td>
-                      <td style={{padding:'9px 12px',color:'#f97316',fontSize:'12px',fontWeight:'500'}}>{g.giacenza_motivo||'INIZIO GIACENZA'}</td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px',whiteSpace:'nowrap' as const}}>
+                      <td style={{padding:'9px 12px 3px',color:'#1a1a1a',fontSize:'12px',whiteSpace:'nowrap' as const}}>
                         {new Date(g.created_at).toLocaleDateString('it-IT')} {new Date(g.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}
                       </td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>
-                        {costo > 0 ? <span style={{color:'#dc2626',fontWeight:'600'}}>€ {costo.toFixed(2)}</span> : '0.00 €'}
-                        {giorni > 1 && <div style={{fontSize:'10px',color:'#1a1a1a'}}>{giorni} giorni</div>}
-                      </td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>
-                        {Number(g.contrassegno)>0 ? <span style={{background:'#fef9c3',color:'#854d0e',padding:'2px 6px',borderRadius:'4px',fontSize:'11px'}}>€{Number(g.contrassegno).toFixed(2)}</span> : '—'}
-                      </td>
-                      <td style={{padding:'9px 12px'}}>
+                      <td style={{padding:'9px 12px 3px'}}>
                         <span style={{background:stSt.bg,color:stSt.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600',whiteSpace:'nowrap' as const}}>
                           {statoLabel[g.giacenza_stato||'aperta']||'Aperta - In attesa di istruzioni'}
                         </span>
                       </td>
-                      <td style={{padding:'9px 12px'}}>
+                      <td style={{padding:'9px 12px 3px'}}>
                         {g.giacenza_stato!=='chiusa' && (() => {
                           const daGestire = ['aperta','in_gestione'].includes(g.giacenza_stato||'aperta')
                           return (
@@ -222,6 +224,18 @@ export default function GiacenzePage() {
                         })()}
                       </td>
                     </tr>
+                    <tr style={{borderBottom:'2px solid #cbd5e1'}}>
+                      <td colSpan={6} style={{padding:'4px 12px 10px 44px',borderTop:'1px solid #f1f2f4'}}>
+                        <div style={{display:'flex',flexWrap:'wrap' as const,alignItems:'center',rowGap:'4px',fontSize:'12px',color:'#374151'}}>
+                          {secItems.map((it,i)=>(
+                            <span key={i} style={{display:'inline-flex',alignItems:'baseline',gap:'4px',padding:'0 14px',borderLeft:i>0?'1px solid #e5e7eb':'none'}}>
+                              <span style={secLbl}>{it.l}</span>{it.v}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                    </Fragment>
                   )
                 })}
               </tbody>

@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import SelectCercabile from '@/app/components/SelectCercabile'
@@ -18,6 +18,8 @@ import { useDialog } from '@/app/components/DialogProvider'
 // poche). Prima si scaricavano e arricchivano TUTTE le annullate di sempre -> pagina sempre piu' lenta.
 const _oggiC = new Date().toISOString().slice(0, 10)
 const _da60C = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+// Etichettina della SECONDA riga (valori sotto): piccola e tenue, non deve pesare.
+const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
 export default function SpedizioniCancellatePage() {
   const dialog = useDialog()
   const [spedizioni, setSpedizioni] = useState<any[]>([])
@@ -301,27 +303,46 @@ export default function SpedizioniCancellatePage() {
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
               <thead>
                 <tr style={{background:'#f9fafb'}}>
-                  {['N. Spedizione','Cliente','Destinatario','Citta','CAP','Peso','Colli','Data','Totale'].map(h=>(
+                  {['N. Spedizione','Cliente','Destinatario','Data'].map(h=>(
                     <th key={h} style={{textAlign:'left',padding:'9px 12px',fontSize:'11px',fontWeight:'700',textTransform:'uppercase',letterSpacing:'0.4px',color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap'}}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {visibiliPaginate.map(s => (
-                  <tr key={s.id} style={{borderBottom:'1px solid #eee'}}>
-                    <td style={{padding:'9px 12px',fontWeight:'700',color:'#1a1a1a'}}>{s.numero}</td>
-                    <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.clienti?.ragione_sociale || '-'}</td>
-                    <td style={{padding:'9px 12px'}}>
-                      <div style={{color:'#1a1a1a',fontWeight:'500'}}>{s.dest_nome}</div>
-                    </td>
-                    <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.dest_citta} {s.dest_provincia && `(${s.dest_provincia})`}</td>
-                    <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.dest_cap}</td>
-                    <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.peso_reale}kg</td>
-                    <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.colli}</td>
-                    <td style={{padding:'9px 12px',color:'#666',fontSize:'12px',whiteSpace:'nowrap'}}>{new Date(s.updated_at || s.created_at).toLocaleDateString('it-IT')} {new Date(s.updated_at || s.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</td>
-                    <td style={{padding:'9px 12px',fontWeight:'700',color:'#1a1a1a'}}>{'€'} {Number(s.costo_totale||0).toFixed(2)}</td>
-                  </tr>
-                ))}
+                {visibiliPaginate.map(s => {
+                  // Valori della SECONDA riga (destinazione/peso/colli/importo), come array così i
+                  // divisori verticali saltano i campi assenti senza lasciare linee a vuoto.
+                  const secItems: { l: any; v: any }[] = [
+                    { l:'Città', v: <span>{s.dest_citta}{s.dest_provincia ? ` (${s.dest_provincia})` : ''}</span> },
+                    { l:'CAP', v: s.dest_cap || '—' },
+                    { l:'Peso', v: `${s.peso_reale}kg` },
+                    { l:'Colli', v: s.colli },
+                    { l:'Totale', v: <b style={{color:'#1a1a1a'}}>{'€'} {Number(s.costo_totale||0).toFixed(2)}</b> },
+                  ]
+                  return (
+                    <Fragment key={s.id}>
+                    <tr style={{background:'#fff'}}>
+                      <td style={{padding:'9px 12px 3px',fontWeight:'700',color:'#1a1a1a'}}>{s.numero}</td>
+                      <td style={{padding:'9px 12px 3px',color:'#1a1a1a',fontSize:'12px'}}>{s.clienti?.ragione_sociale || '-'}</td>
+                      <td style={{padding:'9px 12px 3px'}}>
+                        <div style={{color:'#1a1a1a',fontWeight:'500'}}>{s.dest_nome}</div>
+                      </td>
+                      <td style={{padding:'9px 12px 3px',color:'#666',fontSize:'12px',whiteSpace:'nowrap'}}>{new Date(s.updated_at || s.created_at).toLocaleDateString('it-IT')} {new Date(s.updated_at || s.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</td>
+                    </tr>
+                    <tr style={{background:'#fff',borderBottom:'2px solid #cbd5e1'}}>
+                      <td colSpan={4} style={{padding:'4px 12px 10px 44px',borderTop:'1px solid #f1f2f4'}}>
+                        <div style={{display:'flex',flexWrap:'wrap' as const,alignItems:'center',rowGap:'4px',fontSize:'12px',color:'#374151'}}>
+                          {secItems.map((it,i)=>(
+                            <span key={i} style={{display:'inline-flex',alignItems:'baseline',gap:'4px',padding:'0 14px',borderLeft:i>0?'1px solid #e5e7eb':'none'}}>
+                              <span style={secLbl}>{it.l}</span>{it.v}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                    </Fragment>
+                  )
+                })}
               </tbody>
             </table>
             {totalePagine > 0 && (
