@@ -88,13 +88,28 @@ export async function POST(req: NextRequest) {
   // Secret: dal DB (uno per ciascun account Spedisci) + fallback su env. Provo tutti finché uno verifica.
   const { data: righe } = await admin.from('webhook_secrets').select('secret').eq('provider', 'spedisci')
   const candidati = [...(righe || []).map((r: any) => r.secret), process.env.SPEDISCI_WEBHOOK_SECRET].filter(Boolean) as string[]
+  // ...e ANCHE i token API degli account spedisci (corrieri.credenziali.password): alcuni pannelli
+  // NON danno un "whsec_" separato ma firmano il webhook con il token dell'account stesso — quello
+  // che salviamo gia' all'onboarding. Aggiungerli qui fa verificare quegli account SENZA dover
+  // copiare a mano un secret dal pannello (che via API non e' nemmeno leggibile: /api/v2/webhooks
+  // e' 404 e /tracking risponde "use the Webhooks"). Additivo: piu' chiavi valide, nessuna difesa
+  // indebolita. Vale per QUALUNQUE account, anche quelli che nascono domani.
+  const { data: contiSped } = await admin.from('corrieri').select('credenziali').eq('tipo', 'spedisci')
+  const tokenAccount = Array.from(new Set(
+    (contiSped || []).map((c: any) => c?.credenziali?.password).filter((p: any) => typeof p === 'string' && p.length > 20)
+  )) as string[]
+  candidati.push(...tokenAccount)
   if (!candidati.length) return new NextResponse('Webhook non configurato', { status: 500 })
 
   const wid = req.headers.get('webhook-id') || req.headers.get('svix-id')
   const ts = req.headers.get('webhook-timestamp') || req.headers.get('svix-timestamp')
   const sig = req.headers.get('webhook-signature') || req.headers.get('svix-signature')
   if (!candidati.some(sec => verifica(raw, wid, ts, sig, sec))) {
-    console.log('[WEBHOOK][SPEDISCI] firma NON verificata. id:', wid, 'ts:', ts, 'sig:', String(sig).slice(0, 80))
+    // Sul rifiuto, provo a dire QUALE account e' (dal prefisso dell'ldv nel corpo): senza questo il
+    // 401 e' muto e un account rotto resta invisibile. Best-effort, non cambia l'esito.
+    let ldvRifiutata = '-'
+    try { const b = JSON.parse(raw); ldvRifiutata = b?.data?.ldv || b?.ldv || b?.data?.tracking_number || b?.tracking_number || '-' } catch {}
+    console.log('[WEBHOOK][SPEDISCI] firma NON verificata. ldv:', ldvRifiutata, 'id:', wid, 'ts:', ts, 'sig:', String(sig).slice(0, 80))
     // Confronto delle combinazioni possibili: dice subito quale schema usa il pannello.
     const pres = (String(sig || '').split(/[\s,]+/).find(p => p.startsWith('v1=') || p.startsWith('v1,')) || '').slice(3)
     if (pres) console.log('[WEBHOOK][SPEDISCI] confronto:', diagnosticaFirma(raw, wid, ts, pres, candidati).join(' '))
