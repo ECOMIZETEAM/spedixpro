@@ -61,6 +61,14 @@ export default function ClienteDashboard() {
                 <span style={{marginLeft:'auto',fontSize:'11px',color:'#64748b'}}>{new Date(n.created_at).toLocaleDateString('it-IT')}</span>
               </div>
               <div style={{color:'#1e293b',fontSize:'13px'}} dangerouslySetInnerHTML={{__html: n.messaggio || ''}} />
+              {Array.isArray(n.allegati) && n.allegati.length > 0 && (
+                <div style={{display:'flex',flexWrap:'wrap',gap:'8px',marginTop:'10px'}}>
+                  {n.allegati.map((a:any,i:number)=>(
+                    <a key={i} href={`/api/file?n=${n.id}&f=${encodeURIComponent(a.url || a.path || '')}`} target="_blank" rel="noopener noreferrer"
+                      style={{display:'inline-flex',alignItems:'center',gap:'4px',background:'#fff',border:'1px solid #fed7aa',color:'#9a3412',borderRadius:'6px',padding:'5px 10px',fontSize:'12px',textDecoration:'none',fontWeight:600,maxWidth:'220px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>📎 {a.nome || 'allegato'}</a>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
