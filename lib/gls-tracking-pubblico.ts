@@ -73,9 +73,13 @@ export async function glsTrackingPubblico(ldv: string, tipo: string = 'NAT'): Pr
 // stato con le STESSE guardie del webhook (mai declassare, consegnata/annullata terminali, la consegna
 // del reso non riapre). Le meno aggiornate per prime (tracking_check_at) -> round-robin.
 //
-// SOLDI: NON tocca MAI `giacenza_data` (il trigger di addebito scatta solo su quella colonna). Quindi
-// registra lo stato 'in_giacenza' per la visibilita', ma NON addebita retroattivamente le giacenze
-// vecchie del backfill. L'eventuale addebito delle giacenze su questi account e' una scelta a parte.
+// GIACENZE: come il webhook, imposta `giacenza_data` alla PRIMA rilevazione (stato piu' avanzato
+// = in_giacenza e giacenza_data nulla). Necessario perche' la lista giacenze FILTRA su giacenza_data:
+// senza, la giacenza NON compare e non e' svincolabile — e gli operatori devono poter operare. Il
+// trigger addebita l'apertura UNA sola volta (guard: giacenza_data era nulla). Lo svincolo GLS-spedisci
+// e' gia' cablato (eseguiSvincolo -> POST /api/v2/stock/update, RETRY/NEWADDRESS/RETURN). Il primo
+// backfill NON aveva impostato giacenza_data (0 addebiti retroattivi in blocco): da qui in poi solo le
+// giacenze CORRENTI (poche) diventano visibili/operabili e pagano l'apertura, come su ogni altro account.
 export async function aggiornaGlsSpedisci(
   admin: any,
   opts: { limit?: number; dryRun?: boolean; concorrenza?: number; soloCorriereIds?: string[]; soloSenzaEventi?: boolean } = {}
@@ -94,7 +98,7 @@ export async function aggiornaGlsSpedisci(
   if (opts.soloCorriereIds?.length) q = q.in('corriere_id', opts.soloCorriereIds)
   const { data: speds } = await q
   const lista: any[] = speds || []
-  let esaminate = 0, con_eventi = 0, aggiornate = 0, non_trovate = 0, errori = 0, giacenze = 0
+  let esaminate = 0, con_eventi = 0, aggiornate = 0, non_trovate = 0, errori = 0, giacenze = 0, giacenze_nuove = 0
   const cambi: any[] = []
 
   for (let i = 0; i < lista.length; i += conc) {
@@ -120,11 +124,13 @@ export async function aggiornaGlsSpedisci(
       } catch { /* best-effort: l'evento non salvato non blocca l'avanzamento */ }
       const upd: any = { tracking_check_at: new Date().toISOString() }
       if (deveAvanzare) { upd.stato = avanzato; aggiornate++ }
-      // NB: MAI upd.giacenza_data -> nessun addebito (vedi sopra).
+      // Giacenza (come il webhook): alla PRIMA rilevazione rende la giacenza visibile+operabile+svincolabile.
+      // Indipendente da deveAvanzare, cosi' copre anche le gia' 'in_giacenza' rilevate dal backfill senza data.
+      if (avanzato === 'in_giacenza' && !s.giacenza_data) { upd.giacenza_data = new Date().toISOString(); giacenze_nuove++ }
       await admin.from('spedizioni').update(upd).eq('id', s.id)
     }))
   }
-  const esito: any = { esaminate, con_eventi, aggiornate, non_trovate, errori, giacenze }
+  const esito: any = { esaminate, con_eventi, aggiornate, non_trovate, errori, giacenze, giacenze_nuove }
   if (opts.dryRun) esito.cambi = cambi
   return esito
 }
