@@ -138,10 +138,34 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { credenziali: _chiavi, ...corriereSenzaChiavi } = (sped.corrieri || {}) as any
   const spedPulita = { ...sped, corrieri: corriereSenzaChiavi }
 
+  // NOMI DELLA RETE A MONTE NON ESCONO VERSO IL CLIENTE (nè l'agente).
+  // Lo "Storico Azioni" mostra chi ha creato/confermato l'azione: quando la giacenza viene
+  // lavorata da un master SOPRA (es. la root E&A MULTIEXPRESS conferma lo svincolo di un cliente
+  // di Velox), il suo nome finiva nella colonna "Utente" del portale cliente. Il cliente non deve
+  // MAI vedere la rete sopra il proprio master diretto: le sue azioni restano com'erano
+  // (richiesta_da='cliente'), tutto ciò che è lato-rete si mostra col nome del SUO master diretto.
+  // Sanitizzato qui, nella risposta, così il nome grezzo non raggiunge nemmeno il JSON del browser.
+  let storicoOut: any[] = storico || []
+  let costiOut: any[] = costi || []
+  if (ruolo === 'cliente' || agente) {
+    let nomeMasterDiretto = 'Master'
+    const idMasterDiretto = masterId || (sped as any).master_id
+    if (idMasterDiretto) {
+      const { data: mst } = await admin.from('masters').select('nome').eq('id', idMasterDiretto).maybeSingle()
+      nomeMasterDiretto = (mst as any)?.nome || 'Master'
+    }
+    storicoOut = storicoOut.map((r: any) => ({
+      ...r,
+      creata_da: r.richiesta_da === 'cliente' ? r.creata_da : nomeMasterDiretto,
+      confermata_da: r.confermata_da ? nomeMasterDiretto : r.confermata_da,
+    }))
+    costiOut = costiOut.map((c: any) => ({ ...c, creato_da: c.creato_da ? nomeMasterDiretto : c.creato_da }))
+  }
+
   return NextResponse.json({
     sped: spedPulita, prezzi, prezziControparte, etichettaControparte,
     noloBase: base, noloBaseControparte: baseControparte,
-    storico: storico || [], costi: costi || [], ruolo,
+    storico: storicoOut, costi: costiOut, ruolo,
   })
 }
 

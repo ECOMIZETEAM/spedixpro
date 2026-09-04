@@ -1,11 +1,12 @@
 import { BUCKET_RISERVATI } from '@/lib/file-riservati'
 
-// Carica gli allegati (foto/PDF/qualsiasi file) di un ticket sullo storage privato e ritorna i
-// riferimenti da salvare ({url,nome,tipo}). Il bucket è privato: il file si scarica solo da
-// /api/file, che verifica che chi scarica sia parte del ticket. Si conserva il TIPO REALE del file
-// (image/…, application/pdf, …), così una foto non viene mai salvata come PDF illeggibile.
-// Usata sia all'apertura del ticket sia nei messaggi della chat.
-export async function caricaAllegatiTicket(admin: any, folderId: string, allegatiIn: any[]): Promise<Array<{ url: string; nome: string; tipo: string }>> {
+// Carica gli allegati (foto/PDF/qualsiasi file) sullo storage privato e ritorna i riferimenti da
+// salvare ({url,nome,tipo}). Il bucket è privato: il file si scarica solo da /api/file, che
+// verifica chi lo chiede. Si conserva il TIPO REALE del file (image/…, application/pdf, …), così
+// una foto non viene mai salvata come PDF illeggibile. Il percorso è `allegati/<folderId>/…`:
+// chi serve i file usa quel prefisso per delimitare cosa può uscire (ticket, notifiche, …).
+// Usata dai ticket (apertura + chat) e dalle notifiche broadcast del master.
+export async function caricaAllegati(admin: any, folderId: string, allegatiIn: any[]): Promise<Array<{ url: string; nome: string; tipo: string }>> {
   const out: Array<{ url: string; nome: string; tipo: string }> = []
   const arr = Array.isArray(allegatiIn) ? allegatiIn.slice(0, 10) : []
   for (let i = 0; i < arr.length; i++) {
@@ -25,3 +26,6 @@ export async function caricaAllegatiTicket(admin: any, folderId: string, allegat
   }
   return out
 }
+
+// Alias storico: i ticket continuano a chiamare questo nome.
+export const caricaAllegatiTicket = caricaAllegati

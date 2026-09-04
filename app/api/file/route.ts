@@ -119,5 +119,38 @@ export async function GET(req: NextRequest) {
     return servi(admin, chiesto)
   }
 
+  // ── ALLEGATI DELLE NOTIFICHE (moduli inviati dal master in broadcast) ──────
+  // Il bucket è privato: l'allegato di una notifica esce solo a chi quella notifica raggiunge.
+  // Destinatari = utenti dello STESSO master il cui gruppo/ruolo è tra i destinatari (o, per una
+  // notifica per-cliente, quello specifico cliente). Lo staff interno del master (chi la invia e
+  // la vede nell'Elenco) può sempre scaricarla. Il percorso chiesto deve essere DAVVERO uno degli
+  // allegati di QUELLA notifica: conoscere il path di un'altra non basta.
+  const notificaId = req.nextUrl.searchParams.get('n')
+  if (notificaId) {
+    const chiesto = pathDaUrl(req.nextUrl.searchParams.get('f'))
+    if (!chiesto) return NextResponse.json({ error: 'Percorso mancante' }, { status: 400 })
+    const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+    const { data: n } = await admin.from('notifiche')
+      .select('id,master_id,cliente_id,gruppi,allegati')
+      .eq('id', notificaId).maybeSingle()
+    if (!n) return NextResponse.json({ error: 'Notifica non trovata' }, { status: 404 })
+
+    const mappaGruppo: Record<string, string> = { cliente: 'Cliente', admin: 'Amministratore', master: 'Amministratore', operatore: 'Operatore', agente: 'Agente' }
+    const ruolo = (utente?.ruolo || '').toLowerCase()
+    const gruppo = mappaGruppo[ruolo] || 'Cliente'
+    const stessoMaster = !!utente?.master_id && utente.master_id === n.master_id
+    const staffInterno = ['master', 'admin', 'operatore'].includes(ruolo)
+    const destinatario = stessoMaster && (
+      staffInterno ||
+      (n.cliente_id ? n.cliente_id === utente?.cliente_id : (Array.isArray(n.gruppi) && n.gruppi.includes(gruppo)))
+    )
+    if (!destinatario) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+
+    const ammessi = new Set<string>()
+    for (const a of (Array.isArray(n.allegati) ? n.allegati : [])) { const p = pathDaUrl(a?.url || a?.path); if (p) ammessi.add(p) }
+    if (!ammessi.has(chiesto)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    return servi(admin, chiesto)
+  }
+
   return NextResponse.json({ error: 'Richiesta incompleta' }, { status: 400 })
 }

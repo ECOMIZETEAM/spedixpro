@@ -5,7 +5,8 @@ import { createPortal } from 'react-dom'
 // La campanella legge /api/notifiche/mie e le divide in TAB per categoria, così i "Spedizione
 // consegnata" (ad alto volume) non affogano gli AVVISI importanti del master. Il pallino conta solo
 // le NON lette IMPORTANTI (avvisi, contrassegni, giacenze): una consegna non fa suonare la campana.
-type Notifica = { id: string; oggetto: string; messaggio: string; created_at: string; link?: string | null; categoria?: string }
+type Allegato = { url?: string; path?: string; nome?: string; tipo?: string }
+type Notifica = { id: string; oggetto: string; messaggio: string; created_at: string; link?: string | null; categoria?: string; allegati?: Allegato[] }
 
 const VISTE_KEY = 'spx_notifiche_viste'   // ricorda l'ultima notifica vista (per contare le nuove)
 
@@ -151,10 +152,20 @@ export default function CampanellaNotifiche() {
                   </div>
                   <div style={{ fontSize: '12.5px', color: '#666', marginTop: '4px', lineHeight: 1.45 }}
                     dangerouslySetInnerHTML={{ __html: n.messaggio || '' }} />
+                  {Array.isArray(n.allegati) && n.allegati.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+                      {n.allegati.map((a, i) => (
+                        <a key={i} href={`/api/file?n=${n.id}&f=${encodeURIComponent(a.url || a.path || '')}`} target="_blank" rel="noopener noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#f0f9ff', border: '1px solid #bae6fd', color: '#0369a1', borderRadius: '5px', padding: '3px 8px', fontSize: '12px', textDecoration: 'none', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📎 {a.nome || 'allegato'}</a>
+                      ))}
+                    </div>
+                  )}
                 </>
               )
               const base: React.CSSProperties = { display: 'block', padding: '12px 16px', borderBottom: '1px solid #f5f5f5', textDecoration: 'none' }
-              return n.link
+              // Con allegati la riga NON è un <a> (evita link dentro link): i chip devono restare cliccabili.
+              return n.link && !(n.allegati && n.allegati.length)
                 ? <a key={n.id} href={n.link} onClick={() => setAperto(false)} style={{ ...base, cursor: 'pointer' }}
                     onMouseEnter={e => (e.currentTarget.style.background = '#faf7f4')}
                     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{contenuto}</a>
