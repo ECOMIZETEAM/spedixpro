@@ -3,6 +3,8 @@ import { useState, useEffect, useRef, Fragment } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import BarraAvanzamento from '@/app/components/BarraAvanzamento'
+import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
+import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -24,7 +26,7 @@ export default function DistinteContrassegniPage() {
   const [selSped, setSelSped] = useState<Record<string, Set<string>>>({}) // spedizioni singole per gruppo
   const [espansi, setEspansi] = useState<Set<string>>(new Set())          // tendine aperte
   const [dettGruppo, setDettGruppo] = useState<Record<string, any>>({})   // dettaglio paginato per gruppo
-  const [cerca, setCerca] = useState('')
+  const [cerca, setCerca] = useFiltriPersistenti('contrassegni-distinte-master:cerca', '')
   const [modalPagamento, setModalPagamento] = useState<any>(null)
   const [metodoPagamento, setMetodoPagamento] = useState('')
   const [importoPag, setImportoPag] = useState('')   // importo del pagamento (parziale); vuoto = salda il residuo
@@ -32,7 +34,7 @@ export default function DistinteContrassegniPage() {
   const [righePag, setRighePag] = useState<{metodo:string,importo:string}[]>([{metodo:'',importo:''},{metodo:'',importo:''}])
   const [confermando, setConfermando] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-  const [filtri, setFiltri] = useState({
+  const [filtri, setFiltri] = useFiltriPersistenti('contrassegni-distinte-master:filtri', {
     clienteId:'', stato:'',
     dal: new Date().toISOString().split('T')[0],
     al: new Date().toISOString().split('T')[0],
@@ -490,7 +492,7 @@ export default function DistinteContrassegniPage() {
 
 <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
         <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'10px'}}>▼ Filtri</div>
-        <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr',gap:'12px',alignItems:'end'}}>
+        <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr auto',gap:'12px',alignItems:'end'}}>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Data distinta</div>
             <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal:string,al:string)=>setFiltri(f=>({...f,dal,al}))} />
@@ -511,6 +513,7 @@ export default function DistinteContrassegniPage() {
               <option value="pagata">Pagata</option>
             </select>
           </div>
+          <AzzeraFiltri prefix="contrassegni-distinte-master" />
         </div>
       </div>
 

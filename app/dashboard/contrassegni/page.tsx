@@ -2,6 +2,8 @@
 import { useState, useEffect } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import AzzeraFiltri from '@/app/components/AzzeraFiltri'
+import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -32,11 +34,11 @@ export default function ListaContrassegniPage() {
   const [corrieri, setCorrieri] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [cerca, setCerca] = useState('')
-  const [perPage, setPerPage] = useState(10)
+  const [cerca, setCerca] = useFiltriPersistenti('contrassegni-master:cerca', '')
+  const [perPage, setPerPage] = useFiltriPersistenti('contrassegni-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
   const [creandoDistinta, setCreandoDistinta] = useState(false)
-  const [filtri, setFiltri] = useState({
+  const [filtri, setFiltri] = useFiltriPersistenti('contrassegni-master:filtri', {
     numero:'', clienteId:'', vettore:'', contratto:'', statoSpedizione:'', statoContrassegno:'',
     dal: new Date().toISOString().split('T')[0],
     al: new Date().toISOString().split('T')[0],
@@ -189,6 +191,9 @@ export default function ListaContrassegniPage() {
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Data Spedizione:</div>
             <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} />
           </div>
+        </div>
+        <div style={{display:'flex',justifyContent:'flex-end',marginTop:'10px'}}>
+          <AzzeraFiltri prefix="contrassegni-master" />
         </div>
       </div>
 

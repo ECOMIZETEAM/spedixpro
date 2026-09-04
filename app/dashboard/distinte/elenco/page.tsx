@@ -1,17 +1,19 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 
 import { useDialog } from '@/app/components/DialogProvider'
 export default function ElencoDistintePage() {
   const dialog = useDialog()
   const [distinte, setDistinte] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [cerca, setCerca] = useState('')
-  const [dal, setDal] = useState('')
-  const [al, setAl] = useState('')
+  const [cerca, setCerca] = useFiltriPersistenti('distinte-elenco-master:cerca', '')
+  const [dal, setDal] = useFiltriPersistenti('distinte-elenco-master:dal', '')
+  const [al, setAl] = useFiltriPersistenti('distinte-elenco-master:al', '')
   const [selezionate, setSelezionate] = useState<Set<string>>(new Set())
-  const [perPage, setPerPage] = useState(10)
+  const [perPage, setPerPage] = useFiltriPersistenti('distinte-elenco-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
 
   useEffect(() => { carica() }, [dal, al])
@@ -124,6 +126,7 @@ export default function ElencoDistintePage() {
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
           <button onClick={confermaSelezionate} style={{ padding: '8px 14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }}>Conferma Selezionate</button>
           <div><div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Cerca</div><input value={cerca} onChange={e => {setCerca(e.target.value);setPagina(1)}} placeholder="Numero o cliente..." style={{ ...inp, width: '220px' }} /></div>
+          <AzzeraFiltri prefix="distinte-elenco-master" />
         </div>
       </div>
       <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #d1d5db', overflow: 'hidden' }}>

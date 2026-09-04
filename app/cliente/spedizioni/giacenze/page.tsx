@@ -1,6 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import AzzeraFiltri from '@/app/components/AzzeraFiltri'
+import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -10,14 +12,14 @@ export default function GiacenzePage() {
   const [giacenze, setGiacenze] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [cerca, setCerca] = useState('')
-  const [perPage, setPerPage] = useState(10)
+  const [cerca, setCerca] = useFiltriPersistenti('giacenze-cliente:cerca', '')
+  const [perPage, setPerPage] = useFiltriPersistenti('giacenze-cliente:perPage', 10)
   const [pagina, setPagina] = useState(1)
   const [modal, setModal] = useState<any>(null)
   const [istruzioni, setIstruzioni] = useState('')
   const [elaborando, setElaborando] = useState(false)
   const [esito, setEsito] = useState<any>(null)
-  const [filtri, setFiltri] = useState({
+  const [filtri, setFiltri] = useFiltriPersistenti('giacenze-cliente:filtri', {
     clienteId:'', vettore:'', contratto:'',
     // Default AMPIO (ultimo anno): le giacenze aperte/svincolate vanno viste tutte, non solo di oggi.
     // Il server filtra per giacenza_data (entrata in giacenza).
@@ -132,10 +134,13 @@ export default function GiacenzePage() {
             </select>
           </div>
         </div>
-        <button onClick={carica}
-          style={{padding:'7px 20px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer'}}>
-          ▼ Filtra
-        </button>
+        <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+          <button onClick={carica}
+            style={{padding:'7px 20px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer'}}>
+            ▼ Filtra
+          </button>
+          <AzzeraFiltri prefix="giacenze-cliente" />
+        </div>
       </div>
 
       <div style={{marginBottom:'12px',fontSize:'12px',color:'#1a1a1a'}}>Mostra{' '}<select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}} style={{padding:'4px 8px',border:'1px solid #d1d5db',borderRadius:'5px',color:'#1a1a1a'}}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option></select>{' '}elementi</div>

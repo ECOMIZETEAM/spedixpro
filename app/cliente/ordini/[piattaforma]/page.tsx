@@ -4,6 +4,8 @@ import { useParams, useRouter } from 'next/navigation'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { useDialog } from '@/app/components/DialogProvider'
 import PagaConCarta from '@/app/cliente/PagaConCarta'
+import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
+import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 
 const NOMI: Record<string,string> = { shopify:'Shopify', prestashop:'PrestaShop', woocommerce:'WooCommerce' }
 const ACCENT = '#f97316'
@@ -52,19 +54,20 @@ export default function OrdiniPage() {
   const [giaSpediti, setGiaSpediti] = useState(() =>
     typeof window !== 'undefined' && localStorage.getItem('ebay_giaSpediti') === '1')
 
-  const [fStore, setFStore] = useState('')
-  const [fStatoPag, setFStatoPag] = useState('')
-  const [fStatoEv, setFStatoEv] = useState('da_spedire')   // default: solo i NON evasi (da spedire). "Tutti" mostra anche gli spediti.
-  const [fPaese, setFPaese] = useState('')
-  const [fNum, setFNum] = useState('')
-  const [fSku, setFSku] = useState('')
-  const [fTags, setFTags] = useState('')
-  const [fArch, setFArch] = useState(false)
-  const [fDa, setFDa] = useState('')
-  const [fA, setFA] = useState('')
+  // Filtri persistenti: non si azzerano cambiando pagina o dopo un'azione (localStorage, prefisso 'flt:ordini-cliente:*').
+  const [fStore, setFStore] = useFiltriPersistenti('ordini-cliente:store', '')
+  const [fStatoPag, setFStatoPag] = useFiltriPersistenti('ordini-cliente:statoPag', '')
+  const [fStatoEv, setFStatoEv] = useFiltriPersistenti('ordini-cliente:statoEv', 'da_spedire')   // default: solo i NON evasi (da spedire). "Tutti" mostra anche gli spediti.
+  const [fPaese, setFPaese] = useFiltriPersistenti('ordini-cliente:paese', '')
+  const [fNum, setFNum] = useFiltriPersistenti('ordini-cliente:num', '')
+  const [fSku, setFSku] = useFiltriPersistenti('ordini-cliente:sku', '')
+  const [fTags, setFTags] = useFiltriPersistenti('ordini-cliente:tags', '')
+  const [fArch, setFArch] = useFiltriPersistenti('ordini-cliente:arch', false)
+  const [fDa, setFDa] = useFiltriPersistenti('ordini-cliente:da', '')
+  const [fA, setFA] = useFiltriPersistenti('ordini-cliente:a', '')
 
-  const [search, setSearch] = useState('')
-  const [perPage, setPerPage] = useState(10)
+  const [search, setSearch] = useFiltriPersistenti('ordini-cliente:cerca', '')
+  const [perPage, setPerPage] = useFiltriPersistenti('ordini-cliente:perPage', 10)
   const [page, setPage] = useState(1)
   const [sel, setSel] = useState<Record<string,boolean>>({})
   const [sort, setSort] = useState<{k:string,d:1|-1}|null>(null)
@@ -477,6 +480,7 @@ export default function OrdiniPage() {
           <label style={{...field, display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'#1a1a1a',cursor:'pointer',paddingBottom:'9px'}}>
             <input type="checkbox" checked={fArch} onChange={e=>setFArch(e.target.checked)} style={{accentColor:ACCENT,width:'16px',height:'16px'}}/> Ordini Archiviati
           </label>
+          <AzzeraFiltri prefix="ordini-cliente" style={{padding:'9px 14px',alignSelf:'flex-end'}} />
         </div>
       </div>
 

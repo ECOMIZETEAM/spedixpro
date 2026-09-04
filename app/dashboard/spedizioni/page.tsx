@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AssistenzaTicketButton from '@/app/components/AssistenzaTicketButton'
@@ -74,9 +75,9 @@ export default function SpedizioniPage() {
   const [clienti, setClienti] = useState<any[]>([])
   const [staff, setStaff] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [cerca, setCerca] = useState('')
+  const [cerca, setCerca] = useFiltriPersistenti('spedizioni-master:cerca', '')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [perPage, setPerPage] = useState(10)
+  const [perPage, setPerPage] = useFiltriPersistenti('spedizioni-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
   const [totale, setTotale] = useState(0)   // conteggio TOTALE dal server (paginazione server-side)
   const [trackingModal, setTrackingModal] = useState<any>(null)
@@ -86,7 +87,7 @@ export default function SpedizioniPage() {
   const [trackingTab, setTrackingTab] = useState<'tracking'|'colli'>('tracking')
   const [eliminando, setEliminando] = useState<string|null>(null)
   const [eliminandoBulk, setEliminandoBulk] = useState(false)
-  const [filtri, setFiltri] = useState(FILTRI_DEFAULT)
+  const [filtri, setFiltri, azzeraFiltri] = useFiltriPersistenti('spedizioni-master:filtri', FILTRI_DEFAULT)
   const [resoModal, setResoModal] = useState(false)
   const [resoBusy, setResoBusy] = useState(false)
   const [resoOpts, setResoOpts] = useState({ assicura: false, ritiro: false, dataRitiro: '', orarioRitiro: 'mattina' })
@@ -499,7 +500,7 @@ async function apriTracking(s: any) {
             </select>
           </div>
           <div>
-            <button onClick={()=>setFiltri(FILTRI_DEFAULT)} style={btnFiltri}>Azzera filtri</button>
+            <button onClick={()=>{ azzeraFiltri(); setCerca('') }} style={btnFiltri}>Azzera filtri</button>
           </div>
         </div>
       </div>

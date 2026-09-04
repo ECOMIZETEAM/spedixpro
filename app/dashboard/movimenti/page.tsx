@@ -1,5 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
+import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 
 type Movimento = {
   id: string
@@ -46,10 +48,10 @@ export default function MovimentiMasterPage() {
   const [saldoCommissioni, setSaldoCommissioni] = useState<number|null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
-  const [cerca, setCerca] = useState('')
-  const [corriereFiltro, setCorriereFiltro] = useState('')
-  const [gruppoFiltro, setGruppoFiltro] = useState('')       // E&A: filtra la lista per portale/sotto-account
-  const [perPage, setPerPage] = useState(10)
+  const [cerca, setCerca] = useFiltriPersistenti('movimenti-master:cerca', '')
+  const [corriereFiltro, setCorriereFiltro] = useFiltriPersistenti('movimenti-master:corriere', '')
+  const [gruppoFiltro, setGruppoFiltro] = useFiltriPersistenti('movimenti-master:gruppo', '')       // E&A: filtra la lista per portale/sotto-account
+  const [perPage, setPerPage] = useFiltriPersistenti('movimenti-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
   const [total, setTotal] = useState(0)
   const [somma, setSomma] = useState(0)
@@ -269,6 +271,7 @@ export default function MovimentiMasterPage() {
           <span style={{fontSize:'12.5px',color:'#666'}}>Cerca:</span>
           <input value={cerca} onChange={e=>setCerca(e.target.value)} placeholder="Movimento o riferimento…"
             style={{padding:'7px 10px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',width:'200px',color:'#1a1a1a',background:'#fff'}}/>
+          <AzzeraFiltri prefix="movimenti-master" />
         </div>
       </div>
 

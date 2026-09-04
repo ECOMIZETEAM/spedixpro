@@ -6,6 +6,7 @@ import AssistenzaTicketButton from '@/app/components/AssistenzaTicketButton'
 import DettaglioSpedizione from '@/app/components/DettaglioSpedizione'
 import { fmtPeso } from '@/lib/peso'
 import { ldvProvvisoria, LDV_IN_ELABORAZIONE } from '@/lib/numero-spedizione'
+import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
@@ -66,9 +67,9 @@ export default function SpedizioniPage() {
   const [notifica, setNotifica] = useState<string>('')
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [cerca, setCerca] = useState('')
+  const [cerca, setCerca] = useFiltriPersistenti('spedizioni-cliente:cerca', '')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [perPage, setPerPage] = useState(10)
+  const [perPage, setPerPage] = useFiltriPersistenti('spedizioni-cliente:perPage', 10)
   const [pagina, setPagina] = useState(1)
   const [totale, setTotale] = useState(0)   // conteggio TOTALE dal server (paginazione server-side)
   const [contrattiCliente, setContrattiCliente] = useState<string[]>([])
@@ -78,7 +79,7 @@ export default function SpedizioniPage() {
   const [trackingLoading, setTrackingLoading] = useState(false)
   const [trackingTab, setTrackingTab] = useState<'tracking'|'colli'>('tracking')
   const [eliminando, setEliminando] = useState<string|null>(null)
-  const [filtri, setFiltri] = useState(FILTRI_DEFAULT)
+  const [filtri, setFiltri, azzeraFiltri] = useFiltriPersistenti('spedizioni-cliente:filtri', FILTRI_DEFAULT)
   const [resoModal, setResoModal] = useState(false)
   const [resoBusy, setResoBusy] = useState(false)
   const [resoOpts, setResoOpts] = useState({ assicura: false, ritiro: false, dataRitiro: '', orarioRitiro: 'mattina' })
@@ -445,7 +446,7 @@ async function apriTracking(s: any) {
             </select>
           </div>
           <div>
-            <button onClick={()=>setFiltri(FILTRI_DEFAULT)} style={btnFiltri}>Azzera filtri</button>
+            <button onClick={()=>{azzeraFiltri(); setCerca('')}} style={btnFiltri}>Azzera filtri</button>
           </div>
         </div>
       </div>

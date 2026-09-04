@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import SelectCercabile from '@/app/components/SelectCercabile'
 
@@ -24,11 +25,12 @@ export default function SpedizioniCancellatePage() {
   const [manuali, setManuali] = useState<any[]>([])   // annullo manuale in sola lettura (nel mio ambito)
   const [codaOwner, setCodaOwner] = useState<any[]>([]) // annulli Spedisci che DEVO richiedere io (detentore)
   const [loading, setLoading] = useState(true)
-  const [cerca, setCerca] = useState('')
-  const [filtroCliente, setFiltroCliente] = useState('')
-  const [dal, setDal] = useState(_da60C)
-  const [al, setAl] = useState(_oggiC)
-  const [perPage, setPerPage] = useState(10)
+  // Filtri persistiti: restano finché l'utente non preme "Azzera" (chiave unica per questa pagina).
+  const [cerca, setCerca, azzeraCerca] = useFiltriPersistenti('spedizioni-cancellate-master:cerca', '')
+  const [filtroCliente, setFiltroCliente, azzeraCliente] = useFiltriPersistenti('spedizioni-cancellate-master:cliente', '')
+  const [dal, setDal, azzeraDal] = useFiltriPersistenti('spedizioni-cancellate-master:dal', _da60C)
+  const [al, setAl, azzeraAl] = useFiltriPersistenti('spedizioni-cancellate-master:al', _oggiC)
+  const [perPage, setPerPage] = useFiltriPersistenti('spedizioni-cancellate-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
   const [paginaPending, setPaginaPending] = useState(1)   // paginazione sezione "in attesa di annullo"
   const [paginaCoda, setPaginaCoda] = useState(1)         // paginazione coda annulli del detentore
@@ -151,7 +153,7 @@ export default function SpedizioniCancellatePage() {
               style={{padding:'8px 10px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',width:'100%',color:'#1a1a1a',background:'#fff',boxSizing:'border-box'}}/>
           </div>
           {filtriAttivi && (
-            <button onClick={()=>{setFiltroCliente('');setDal('');setAl('');setCerca('');setPagina(1)}}
+            <button onClick={()=>{azzeraCliente();azzeraDal();azzeraAl();azzeraCerca();setPagina(1)}}
               style={{padding:'8px 14px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>Azzera</button>
           )}
         </div>

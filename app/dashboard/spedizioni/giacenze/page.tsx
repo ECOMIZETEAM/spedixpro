@@ -1,7 +1,9 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -11,14 +13,14 @@ export default function GiacenzePage() {
   const [giacenze, setGiacenze] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [cerca, setCerca] = useState('')
+  const [cerca, setCerca] = useFiltriPersistenti('giacenze-master:cerca', '')
   const [modal, setModal] = useState<any>(null)
   const [istruzioni, setIstruzioni] = useState('')
   const [elaborando, setElaborando] = useState(false)
   const [esito, setEsito] = useState<any>(null)
-  const [perPage, setPerPage] = useState(10)
+  const [perPage, setPerPage] = useFiltriPersistenti('giacenze-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
-  const [filtri, setFiltri] = useState({
+  const [filtri, setFiltri] = useFiltriPersistenti('giacenze-master:filtri', {
     clienteId:'', vettore:'', contratto:'',
     // Default AMPIO (ultimo anno): le giacenze aperte vanno viste tutte, non solo quelle di oggi.
     // Il filtro lato server è su giacenza_data (entrata in giacenza), non sulla data di spedizione.
@@ -139,10 +141,13 @@ export default function GiacenzePage() {
             </select>
           </div>
         </div>
-        <button onClick={carica}
-          style={{padding:'7px 20px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer'}}>
-          ▼ Filtra
-        </button>
+        <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+          <button onClick={carica}
+            style={{padding:'7px 20px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer'}}>
+            ▼ Filtra
+          </button>
+          <AzzeraFiltri prefix="giacenze-master" />
+        </div>
       </div>
 
       {/* Tabella */}

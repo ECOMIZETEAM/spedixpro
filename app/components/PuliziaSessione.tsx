@@ -13,6 +13,13 @@ export default function PuliziaSessione() {
       sessionStorage.removeItem('dash_master_v1')
       sessionStorage.removeItem('dash_cliente_v1')
     } catch {}
+    // Filtri di lista ricordati (useFiltriPersistenti, chiavi 'flt:...'): su una postazione condivisa
+    // chi entra dopo non deve ereditare i filtri di chi c'era prima. Si azzerano all'ACCESSO.
+    try {
+      const daTogliere: string[] = []
+      for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('flt:')) daTogliere.push(k) }
+      daTogliere.forEach(k => localStorage.removeItem(k))
+    } catch {}
   }, [])
   return null
 }

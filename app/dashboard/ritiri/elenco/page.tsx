@@ -2,7 +2,9 @@
 import { useState, useEffect } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 import { useSearchParams } from 'next/navigation'
+import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 
 const sel = {padding:'6px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff',width:'100%',boxSizing:'border-box' as const}
 const inp = {padding:'6px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}
@@ -13,10 +15,10 @@ export default function ElencoRitiriPage() {
   const [ritiri, setRitiri] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [cerca, setCerca] = useState('')
-  const [perPage, setPerPage] = useState(10)
+  const [cerca, setCerca] = useFiltriPersistenti('ritiri-elenco-master:cerca', '')
+  const [perPage, setPerPage] = useFiltriPersistenti('ritiri-elenco-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
-  const [filtri, setFiltri] = useState({
+  const [filtri, setFiltri] = useFiltriPersistenti('ritiri-elenco-master:filtri', {
     clienteId: '', vettore: '', codRitiro: '', stato: '',
     dal: '', al: '',
   })
@@ -133,11 +135,12 @@ export default function ElencoRitiriPage() {
             <input value={filtri.codRitiro} onChange={e => setF('codRitiro', e.target.value)}
               style={{ ...inp, width: '100%', boxSizing: 'border-box' as const }} placeholder="es. CP123..." />
           </div>
-          <div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <button onClick={carica}
               style={{ padding: '7px 20px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }}>
               Filtra
             </button>
+            <AzzeraFiltri prefix="ritiri-elenco-master" />
           </div>
         </div>
       </div>

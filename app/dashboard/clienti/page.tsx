@@ -1,6 +1,8 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
 import { isProviderTecnico } from '@/lib/corriere-logo'
+import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
+import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'12.5px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#999',display:'block' as const,marginBottom:'4px',textTransform:'uppercase' as const,letterSpacing:'0.4px'}
@@ -41,10 +43,10 @@ export default function ClientiPage() {
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
-  const [search, setSearch] = useState('')
-  const [filtroStato, setFiltroStato] = useState('tutti')
-  const [filtroContratto, setFiltroContratto] = useState('tutti')
-  const [filtroListino, setFiltroListino] = useState('tutti')
+  const [search, setSearch] = useFiltriPersistenti('clienti-master:cerca', '')
+  const [filtroStato, setFiltroStato] = useFiltriPersistenti('clienti-master:stato', 'tutti')
+  const [filtroContratto, setFiltroContratto] = useFiltriPersistenti('clienti-master:contratto', 'tutti')
+  const [filtroListino, setFiltroListino] = useFiltriPersistenti('clienti-master:listino', 'tutti')
   const [pagina, setPagina] = useState(1)
   const PER_PAGINA = 10
 
@@ -218,6 +220,9 @@ export default function ClientiPage() {
             <label style={lbl}>🔍 Cerca</label>
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Nome, email, telefono..." style={inp} />
           </div>
+        </div>
+        <div style={{display:'flex',justifyContent:'flex-end',marginTop:'12px'}}>
+          <AzzeraFiltri prefix="clienti-master" />
         </div>
       </div>
 
