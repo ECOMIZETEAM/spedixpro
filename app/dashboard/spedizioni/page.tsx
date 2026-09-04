@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
@@ -65,6 +65,8 @@ const ORDINABILE: Record<string,string> = {
   'Colli':'colli', 'Contrassegno':'contrassegno', 'Data e Ora':'data', 'Stato':'stato',
   'Prezzo Cliente':'prezzo', 'Margine':'margine',
 }
+// Etichettina della SECONDA riga (corriere/guadagni sotto): piccola e tenue, non deve pesare.
+const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
 
 export default function SpedizioniPage() {
   const dialog = useDialog()
@@ -540,6 +542,25 @@ async function apriTracking(s: any) {
               ↩︎ Etichetta di reso{selectedIds.length>0?` (${selectedIds.length})`:''}
             </button>
             <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+              <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Ordina:</span>
+              <select value={filtri.ordina} onChange={e=>setFiltri(f=>({...f,ordina:e.target.value}))}
+                style={{padding:'5px 8px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}}>
+                <option value="">Data (recente)</option>
+                <option value="numero">N. Spedizione</option>
+                <option value="destinatario">Destinatario</option>
+                <option value="vettore">Corriere</option>
+                <option value="peso">Peso</option>
+                <option value="colli">Colli</option>
+                <option value="contrassegno">Contrassegno</option>
+                <option value="data">Data</option>
+                <option value="stato">Stato</option>
+                <option value="prezzo">Prezzo Cliente</option>
+                <option value="margine">Margine</option>
+              </select>
+              <button onClick={()=>setFiltri(f=>({...f,dir:f.dir==='asc'?'desc':'asc'}))} title="Inverti ordine (crescente/decrescente)"
+                style={{padding:'5px 9px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',background:'#fff',color:'#1a1a1a',cursor:'pointer'}}>{filtri.dir==='asc'?'↑':'↓'}</button>
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
               <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Cerca:</span>
               <input value={cerca} onChange={e=>setCerca(e.target.value)}
                 placeholder="N. spedizione o destinatario..."
@@ -563,7 +584,7 @@ async function apriTracking(s: any) {
                   <th style={{padding:'9px 12px',borderBottom:'1px solid #d1d5db',width:'36px'}}>
                     <input type="checkbox" checked={selectedIds.length===spedizioniPaginate.length&&spedizioniPaginate.length>0} onChange={toggleAll}/>
                   </th>
-                  {['N. Spedizione','Cliente','Destinatario','Corriere','Peso','Colli','Contrassegno','Data e Ora','Stato','ID Ordine','Prezzo Cliente','Prezzo Corriere','Margine','Distinta N.','Azioni'].map(h=>{
+                  {['N. Spedizione','Cliente','Destinatario','Data e Ora','Stato','Azioni'].map(h=>{
                     const key = ORDINABILE[h]
                     const attivo = !!key && filtri.ordina === key
                     const freccia = attivo ? (filtri.dir==='asc'?' ↑':' ↓') : (key?' ↕':'')
@@ -582,8 +603,9 @@ async function apriTracking(s: any) {
                   const st = STATI[s.stato] || STATI['annullata']
                   const isSelected = selectedIds.includes(s.id)
                   return (
-                    <tr key={s.id} style={{borderBottom:'1px solid #d1d5db',background:isSelected?'#fff7ed':'#fff'}}>
-                      <td style={{padding:'9px 12px'}}>
+                    <Fragment key={s.id}>
+                    <tr style={{background:isSelected?'#fff7ed':'#fff'}}>
+                      <td style={{padding:'9px 12px 3px'}}>
                         <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(s.id)}/>
                       </td>
                       <td style={{padding:'9px 12px'}}>
@@ -606,15 +628,7 @@ async function apriTracking(s: any) {
                         <div style={{color:'#1a1a1a',fontWeight:'500'}}>{s.dest_nome}</div>
                         <div style={{color:'#1a1a1a',fontSize:'11px'}}>{s.dest_citta}, {s.dest_provincia}({s.dest_cap}), {s.dest_paese}</div>
                       </td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.corrieri?.nome_contratto||'—'}</td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{fmtPeso(s)}</td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.colli}</td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a'}}>
-                        {Number(s.contrassegno)>0
-                          ? <span style={{...codBadgeStyle(s.stato_contrassegno),padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{Number(s.contrassegno).toFixed(2)}</span>
-                          : '—'}
-                      </td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px',whiteSpace:'nowrap' as const}}>
+                      <td style={{padding:'9px 12px 3px',color:'#1a1a1a',fontSize:'12px',whiteSpace:'nowrap' as const}}>
                         {new Date(s.created_at).toLocaleDateString('it-IT')} {new Date(s.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}
                       </td>
                       <td style={{padding:'9px 12px'}}>
@@ -623,15 +637,7 @@ async function apriTracking(s: any) {
                         {s.stato==='reso_mittente' && s.distinta_reso && <div style={{fontSize:'10px',color:'#374151',marginTop:'3px',fontWeight:'600',whiteSpace:'nowrap' as const}}>Distinta {s.distinta_reso}</div>}
                         {s.annullamento_errore && s.stato!=='annullamento_pending' && s.stato!=='annullamento_manuale' && <div title={s.annullamento_errore} style={{fontSize:'10px',color:'#b91c1c',marginTop:'3px',fontWeight:'600',whiteSpace:'nowrap' as const,cursor:'help'}}>⚠ Non annullabile</div>}
                       </td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.id_ordine||'—'}</td>
-                      <td style={{padding:'9px 12px',fontWeight:'700',color:'#1a1a1a',whiteSpace:'nowrap' as const}}>
-                        € {Number(s.prezzo_cliente ?? s.costo_mostrato ?? s.costo_totale ?? 0).toFixed(2)}
-                        {Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}}>R</span>}
-                      </td>
-                      <td style={{padding:'9px 12px',color:'#6b7280',fontSize:'12px',whiteSpace:'nowrap' as const}}>{s.prezzo_corriere!=null?`€ ${Number(s.prezzo_corriere).toFixed(2)}`:'—'}</td>
-                      <td style={{padding:'9px 12px',fontWeight:'700',fontSize:'12px',whiteSpace:'nowrap' as const,color:s.margine==null?'#9ca3af':(Number(s.margine)<0?'#dc2626':'#16a34a')}}>{s.margine!=null?`€ ${Number(s.margine).toFixed(2)}`:'—'}</td>
-                      <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>—</td>
-                      <td style={{padding:'9px 12px'}}>
+                      <td style={{padding:'9px 12px 3px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
                           <button onClick={()=>stampaEtichetta(s.id)} disabled={stampandoId===s.id} style={{padding:'4px 8px',background:'#fff7ed',color:'#f97316',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}} title={zplOn?'Stampa etichetta su Zebra (ZPL)':'Scarica etichetta PDF'}>{stampandoId===s.id?'⏳':'🖨️'}</button>
                           <button onClick={()=>setDettaglio(s)} title="Vedi dettagli spedizione" style={{padding:'4px 8px',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',fontSize:'14px',border:'1px solid #bfdbfe',cursor:'pointer'}}>👁</button>
@@ -650,6 +656,21 @@ async function apriTracking(s: any) {
                         </div>
                       </td>
                     </tr>
+                    <tr style={{background:isSelected?'#fff7ed':'#fff',borderBottom:'1px solid #d1d5db'}}>
+                      <td colSpan={7} style={{padding:'0 12px 9px 44px'}}>
+                        <div style={{display:'flex',flexWrap:'wrap' as const,gap:'3px 18px',alignItems:'baseline',fontSize:'12px',color:'#374151'}}>
+                          <span><span style={secLbl}>🚚</span><b style={{color:'#1a1a1a'}}>{s.corrieri?.nome_contratto||'—'}</b></span>
+                          <span><span style={secLbl}>Peso</span>{fmtPeso(s)}</span>
+                          <span><span style={secLbl}>Colli</span>{s.colli}</span>
+                          {Number(s.contrassegno)>0 && <span><span style={secLbl}>Contrassegno</span><span style={{...codBadgeStyle(s.stato_contrassegno),padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{Number(s.contrassegno).toFixed(2)}</span></span>}
+                          {s.id_ordine && <span><span style={secLbl}>Ordine</span>{s.id_ordine}</span>}
+                          <span><span style={secLbl}>Cliente</span><b style={{color:'#1a1a1a'}}>€ {Number(s.prezzo_cliente ?? s.costo_mostrato ?? s.costo_totale ?? 0).toFixed(2)}</b>{Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span>
+                          <span><span style={secLbl}>Costo</span>{s.prezzo_corriere!=null?`€ ${Number(s.prezzo_corriere).toFixed(2)}`:'—'}</span>
+                          <span><span style={secLbl}>Margine</span><b style={{color:s.margine==null?'#9ca3af':(Number(s.margine)<0?'#dc2626':'#16a34a')}}>{s.margine!=null?`€ ${Number(s.margine).toFixed(2)}`:'—'}</b></span>
+                        </div>
+                      </td>
+                    </tr>
+                    </Fragment>
                   )
                 })}
               </tbody>
