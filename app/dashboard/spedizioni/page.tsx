@@ -603,6 +603,18 @@ async function apriTracking(s: any) {
                 {spedizioniPaginate.map(s => {
                   const st = STATI[s.stato] || STATI['annullata']
                   const isSelected = selectedIds.includes(s.id)
+                  // Valori della SECONDA riga (corriere/guadagni), come array così i divisori verticali
+                  // saltano i campi assenti (contrassegno/ordine) senza lasciare linee a vuoto.
+                  const secItems: { l: any; v: any }[] = [
+                    { l: '🚚', v: <b style={{color:'#1a1a1a'}}>{s.corrieri?.nome_contratto||'—'}</b> },
+                    { l: 'Peso', v: fmtPeso(s) },
+                    { l: 'Colli', v: s.colli },
+                    ...(Number(s.contrassegno)>0 ? [{ l: 'Contrassegno', v: <span style={{...codBadgeStyle(s.stato_contrassegno),padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{Number(s.contrassegno).toFixed(2)}</span> }] : []),
+                    ...(s.id_ordine ? [{ l: 'Ordine', v: s.id_ordine }] : []),
+                    { l: 'Cliente', v: <span><b style={{color:'#1a1a1a'}}>€ {Number(s.prezzo_cliente ?? s.costo_mostrato ?? s.costo_totale ?? 0).toFixed(2)}</b>{Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span> },
+                    { l: 'Costo', v: s.prezzo_corriere!=null?`€ ${Number(s.prezzo_corriere).toFixed(2)}`:'—' },
+                    { l: 'Margine', v: <b style={{color:s.margine==null?'#9ca3af':(Number(s.margine)<0?'#dc2626':'#16a34a')}}>{s.margine!=null?`€ ${Number(s.margine).toFixed(2)}`:'—'}</b> },
+                  ]
                   return (
                     <Fragment key={s.id}>
                     <tr style={{background:isSelected?'#fff7ed':'#fff'}}>
@@ -658,17 +670,14 @@ async function apriTracking(s: any) {
                         </div>
                       </td>
                     </tr>
-                    <tr style={{background:isSelected?'#fff7ed':'#fff',borderBottom:'1px solid #d1d5db'}}>
-                      <td colSpan={7} style={{padding:'0 12px 9px 44px'}}>
-                        <div style={{display:'flex',flexWrap:'wrap' as const,gap:'3px 18px',alignItems:'baseline',fontSize:'12px',color:'#374151'}}>
-                          <span><span style={secLbl}>🚚</span><b style={{color:'#1a1a1a'}}>{s.corrieri?.nome_contratto||'—'}</b></span>
-                          <span><span style={secLbl}>Peso</span>{fmtPeso(s)}</span>
-                          <span><span style={secLbl}>Colli</span>{s.colli}</span>
-                          {Number(s.contrassegno)>0 && <span><span style={secLbl}>Contrassegno</span><span style={{...codBadgeStyle(s.stato_contrassegno),padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{Number(s.contrassegno).toFixed(2)}</span></span>}
-                          {s.id_ordine && <span><span style={secLbl}>Ordine</span>{s.id_ordine}</span>}
-                          <span><span style={secLbl}>Cliente</span><b style={{color:'#1a1a1a'}}>€ {Number(s.prezzo_cliente ?? s.costo_mostrato ?? s.costo_totale ?? 0).toFixed(2)}</b>{Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span>
-                          <span><span style={secLbl}>Costo</span>{s.prezzo_corriere!=null?`€ ${Number(s.prezzo_corriere).toFixed(2)}`:'—'}</span>
-                          <span><span style={secLbl}>Margine</span><b style={{color:s.margine==null?'#9ca3af':(Number(s.margine)<0?'#dc2626':'#16a34a')}}>{s.margine!=null?`€ ${Number(s.margine).toFixed(2)}`:'—'}</b></span>
+                    <tr style={{background:isSelected?'#fff7ed':'#fff',borderBottom:'2px solid #cbd5e1'}}>
+                      <td colSpan={7} style={{padding:'4px 12px 10px 44px',borderTop:'1px solid #f1f2f4'}}>
+                        <div style={{display:'flex',flexWrap:'wrap' as const,alignItems:'center',rowGap:'4px',fontSize:'12px',color:'#374151'}}>
+                          {secItems.map((it,i)=>(
+                            <span key={i} style={{display:'inline-flex',alignItems:'baseline',gap:'4px',padding:'0 14px',borderLeft:i>0?'1px solid #e5e7eb':'none'}}>
+                              <span style={secLbl}>{it.l}</span>{it.v}
+                            </span>
+                          ))}
                         </div>
                       </td>
                     </tr>
