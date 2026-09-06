@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { pavimentiAttivi, pavimentoPerPeso } from '@/lib/pavimenti'
+import { pavimentiAttivi, pavimentoPerPeso, masterEsentePavimento } from '@/lib/pavimenti'
 import { fetchAll } from '@/lib/fetch-all'
 
 // I TUOI LISTINI CLIENTE SOTTO IL MINIMO DEL CONTRATTO — resoconto per-master, in casa sua.
@@ -25,6 +25,8 @@ export async function GET(_req: NextRequest) {
 
   const pav = await pavimentiAttivi(admin)
   if (!pav.size) return NextResponse.json({ totaleFasce: 0, totaleListini: 0, gruppi: [] })
+  // Master esente (es. Agenzia Entrate): non ha nulla da adeguare.
+  if (await masterEsentePavimento(admin, mio)) return NextResponse.json({ totaleFasce: 0, totaleListini: 0, gruppi: [] })
 
   // Listini del master assegnati a un CLIENTE (M2C). Escludo quelli assegnati a un sotto-master.
   const { data: mieiListini } = await admin.from('listini_clienti').select('id,nome').eq('master_id', mio)

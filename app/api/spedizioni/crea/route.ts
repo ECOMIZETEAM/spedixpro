@@ -335,8 +335,9 @@ export async function POST(req: NextRequest) {
     // sotto-master) è esente. Inerte finché il contratto non ha un pavimento attivo. Le tariffe già
     // nascondono la fascia; qui si blocca anche la chiamata diretta.
     if (!masterSub) {
-      const { pavimentoContratto, pavimentoPerPeso } = await import('@/lib/pavimenti')
-      const bandePav = await pavimentoContratto(adminCrea, (corriereRecord as any).nome_contratto)
+      const { pavimentoContratto, pavimentoPerPeso, masterEsentePavimento } = await import('@/lib/pavimenti')
+      const esente = await masterEsentePavimento(adminCrea, cliente?.master_id)
+      const bandePav = esente ? [] : await pavimentoContratto(adminCrea, (corriereRecord as any).nome_contratto)
       const pav = bandePav.length ? pavimentoPerPeso(bandePav, Number((risPrezzo as any).fascia_peso_max)) : null
       if (pav != null) {
         const { data: fz } = await adminCrea.from('listini_clienti_fasce')

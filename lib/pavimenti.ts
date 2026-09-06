@@ -8,6 +8,21 @@
 
 export type BandaPavimento = { peso_max: number; prezzo_min: number }
 
+// Master esente dal pavimento: lui e tutta la sua discendenza (es. AGENZIA ENTRATE RISCOSSIONE).
+// Si risale la catena finché non si trova un antenato marcato `pavimento_esente`. Flag, non id/nome.
+export async function masterEsentePavimento(admin: any, masterId: string | null | undefined): Promise<boolean> {
+  if (!masterId) return false
+  let cur: string | null = masterId
+  for (let i = 0; i < 20 && cur; i++) {
+    const res: any = await admin.from('masters').select('parent_master_id,pavimento_esente').eq('id', cur).maybeSingle()
+    const row: any = res?.data
+    if (!row) break
+    if (row.pavimento_esente === true) return true
+    cur = row.parent_master_id || null
+  }
+  return false
+}
+
 // Bande attive del pavimento per un contratto (per nome), ordinate per peso. [] se nessun pavimento.
 export async function pavimentoContratto(admin: any, nomeContratto: string | null | undefined): Promise<BandaPavimento[]> {
   if (!nomeContratto) return []

@@ -36,8 +36,10 @@ export async function GET() {
   // PAVIMENTO PREZZO: le fasce/zone sotto il minimo del contratto non si vendono → il cliente NON
   // ne vede il prezzo (cella oscurata). Tabella admin-only: la leggo col service role.
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
-  const { pavimentiAttivi, sottoPavimento } = await import('@/lib/pavimenti')
-  const pav = await pavimentiAttivi(createAdminSupabase())
+  const { pavimentiAttivi, sottoPavimento, masterEsentePavimento } = await import('@/lib/pavimenti')
+  const adminPav = createAdminSupabase()
+  // Master esente (es. Agenzia Entrate): niente pavimento → non oscuro nulla.
+  const pav = (await masterEsentePavimento(adminPav, u.master_id)) ? new Map() : await pavimentiAttivi(adminPav)
 
   const defFattore = parseFloat((listino as any)?.fattore_volume) || 5000
   const perCorr = new Map<string, any>()

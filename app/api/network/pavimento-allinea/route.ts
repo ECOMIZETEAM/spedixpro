@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { pavimentiAttivi, pavimentoPerPeso } from '@/lib/pavimenti'
+import { pavimentiAttivi, pavimentoPerPeso, masterEsentePavimento } from '@/lib/pavimenti'
 import { fetchAll } from '@/lib/fetch-all'
 
 // ALLINEA i listini CLIENTE sotto il minimo del contratto. Money-safe:
@@ -30,6 +30,7 @@ export async function POST(req: NextRequest) {
   const soloContratto: string | null = body?.corriereNome || null
 
   const admin = createAdminSupabase()
+  if (await masterEsentePavimento(admin, mio)) return NextResponse.json({ success: true, aggiornate: 0, esente: true })
   const pav = await pavimentiAttivi(admin)
   if (!pav.size) return NextResponse.json({ error: 'Nessun pavimento attivo' }, { status: 400 })
 
