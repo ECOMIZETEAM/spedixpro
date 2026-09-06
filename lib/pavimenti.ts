@@ -48,3 +48,16 @@ export function sottoPavimento(bande: BandaPavimento[], pesoFascia: number, prez
   if (pav == null || prezzo == null) return false
   return Number(prezzo) < pav - 0.0001
 }
+
+// Toglie dai risultati tariffa (vista/creazione CLIENTE) le opzioni sotto il pavimento: per quella
+// fascia/zona il cliente non vede il prezzo e non può spedire. Confronto sul NOLO (weight_price),
+// col pavimento della fascia che copre il peso fatturato (arrotondamento in su). NON chiamare per
+// spedizione propria del master o per il listino all'ingrosso di un sotto-master (M2M esenti).
+export function filtraRisultatiSottoPavimento(pav: Map<string, BandaPavimento[]>, risultati: any[]): any[] {
+  if (!pav || !pav.size || !Array.isArray(risultati)) return risultati
+  return risultati.filter((r: any) => {
+    const bande = pav.get(String(r?.corriere_nome || ''))
+    if (!bande) return true
+    return !sottoPavimento(bande, Number(r?.peso_fatturato) || 0, Number(r?.weight_price))
+  })
+}
