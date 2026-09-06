@@ -149,9 +149,9 @@ export async function POST(req: NextRequest) {
   // del master è già uscita prima (ramo isProprio).
   if (!subMatch) {
     try {
-      const { pavimentiAttivi, filtraRisultatiSottoPavimento, masterEsentePavimento } = await import('@/lib/pavimenti')
+      const { pavimentiAttivi, filtraRisultatiSottoPavimento, clienteEsentePavimento } = await import('@/lib/pavimenti')
       const adminPav = createAdminSupabase()
-      if (!(await masterEsentePavimento(adminPav, cliente?.master_id))) {
+      if (!(await clienteEsentePavimento(adminPav, clienteId))) {
         const pav = await pavimentiAttivi(adminPav)
         risultati = filtraRisultatiSottoPavimento(pav, risultati)
       }

@@ -137,8 +137,8 @@ export async function POST(req: NextRequest) {
   // PAVIMENTO PREZZO (backstop): via API il cliente è sempre finale (Master->Cliente), quindi il
   // minimo vale. Inerte finché il contratto non ha un pavimento attivo.
   {
-    const { pavimentoContratto, pavimentoPerPeso, masterEsentePavimento } = await import('@/lib/pavimenti')
-    const esente = await masterEsentePavimento(admin, cliente?.master_id)
+    const { pavimentoContratto, pavimentoPerPeso, clienteEsentePavimento } = await import('@/lib/pavimenti')
+    const esente = await clienteEsentePavimento(admin, ctx.clienteId)
     const bandePav = esente ? [] : await pavimentoContratto(admin, (corriere as any).nome_contratto)
     const pav = bandePav.length ? pavimentoPerPeso(bandePav, Number((ris as any).fascia_peso_max)) : null
     if (pav != null) {

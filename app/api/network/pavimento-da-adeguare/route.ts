@@ -37,8 +37,9 @@ export async function GET(_req: NextRequest) {
   // Clienti per listino (solo assegnati); e i listini all'ingrosso (parent_listino_id) da escludere.
   const clientiPerListino = new Map<string, string[]>()
   for (let i = 0; i < tuttiIds.length; i += 100) {
-    const { data } = await admin.from('clienti').select('ragione_sociale,listino_cliente_id').in('listino_cliente_id', tuttiIds.slice(i, i + 100))
+    const { data } = await admin.from('clienti').select('ragione_sociale,listino_cliente_id,pavimento_esente').in('listino_cliente_id', tuttiIds.slice(i, i + 100))
     for (const c of (data || [])) {
+      if ((c as any).pavimento_esente === true) continue   // cliente esente: non conta come "da adeguare"
       const k = (c as any).listino_cliente_id
       if (!clientiPerListino.has(k)) clientiPerListino.set(k, [])
       clientiPerListino.get(k)!.push((c as any).ragione_sociale)

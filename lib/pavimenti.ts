@@ -23,6 +23,17 @@ export async function masterEsentePavimento(admin: any, masterId: string | null 
   return false
 }
 
+// Cliente esente dal pavimento: o è marcato lui stesso (clienti.pavimento_esente), o lo è il suo
+// master (o un antenato). Es.: uffici Agenzia Entrate sotto un master non esente.
+export async function clienteEsentePavimento(admin: any, clienteId: string | null | undefined): Promise<boolean> {
+  if (!clienteId) return false
+  const res: any = await admin.from('clienti').select('pavimento_esente,master_id').eq('id', clienteId).maybeSingle()
+  const row: any = res?.data
+  if (!row) return false
+  if (row.pavimento_esente === true) return true
+  return masterEsentePavimento(admin, row.master_id)
+}
+
 // Bande attive del pavimento per un contratto (per nome), ordinate per peso. [] se nessun pavimento.
 export async function pavimentoContratto(admin: any, nomeContratto: string | null | undefined): Promise<BandaPavimento[]> {
   if (!nomeContratto) return []

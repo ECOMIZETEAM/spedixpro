@@ -41,8 +41,8 @@ export async function POST(req: NextRequest) {
   if (!ids.length) return NextResponse.json({ error: 'Nessun listino' }, { status: 400 })
   const assegnati = new Set<string>()
   for (let i = 0; i < ids.length; i += 100) {
-    const { data } = await admin.from('clienti').select('listino_cliente_id').in('listino_cliente_id', ids.slice(i, i + 100))
-    for (const c of (data || [])) if ((c as any).listino_cliente_id) assegnati.add((c as any).listino_cliente_id)
+    const { data } = await admin.from('clienti').select('listino_cliente_id,pavimento_esente').in('listino_cliente_id', ids.slice(i, i + 100))
+    for (const c of (data || [])) if ((c as any).listino_cliente_id && (c as any).pavimento_esente !== true) assegnati.add((c as any).listino_cliente_id)
   }
   const m2m = new Set<string>()
   for (let i = 0; i < ids.length; i += 100) {
