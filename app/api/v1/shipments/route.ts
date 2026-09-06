@@ -134,6 +134,25 @@ export async function POST(req: NextRequest) {
   })
   if (!ris) return NextResponse.json({ error: 'Destinazione non coperta dal listino per questo contratto (zona non prezzata): spedizione non creabile con questo corriere.' }, { status: 400 })
 
+  // PAVIMENTO PREZZO (backstop): via API il cliente è sempre finale (Master->Cliente), quindi il
+  // minimo vale. Inerte finché il contratto non ha un pavimento attivo.
+  {
+    const { pavimentoContratto, pavimentoPerPeso } = await import('@/lib/pavimenti')
+    const bandePav = await pavimentoContratto(admin, (corriere as any).nome_contratto)
+    const pav = bandePav.length ? pavimentoPerPeso(bandePav, Number((ris as any).fascia_peso_max)) : null
+    if (pav != null) {
+      const { data: fz } = await admin.from('listini_clienti_fasce')
+        .select('prezzo, zone(nome)')
+        .eq('listino_id', cliente.listino_cliente_id).eq('corriere_id', ctx.corriereId)
+        .eq('tipo', 'fino_a').eq('peso_max', (ris as any).fascia_peso_max)
+      const riga = (fz || []).find((r: any) => String(r?.zone?.nome || '') === String((ris as any).zona)) || (fz || [])[0]
+      const base = riga ? Number((riga as any).prezzo) : null
+      if (base != null && base < pav - 0.0001) {
+        return NextResponse.json({ error: `Prezzo sotto il minimo consentito per questo contratto (min ${pav.toFixed(2)} € per questa fascia): contatta il tuo referente per adeguare il listino.` }, { status: 400 })
+      }
+    }
+  }
+
   // Supplementi contrassegno/assicurazione dal listino cliente (stessa logica del portale)
   const supp = await calcolaSupplementiCliente(admin, {
     listinoId: cliente.listino_cliente_id, corriereId: ctx.corriereId,

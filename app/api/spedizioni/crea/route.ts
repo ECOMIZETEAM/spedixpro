@@ -330,6 +330,26 @@ export async function POST(req: NextRequest) {
     if (!risPrezzo) {
       return NextResponse.json({ error: 'Destinazione non coperta dal listino per questo contratto: spedizione non creabile.' }, { status: 400 })
     }
+    // PAVIMENTO PREZZO (backstop money-safe): un contratto col pavimento attivo non si vende sotto il
+    // minimo della fascia. Vale SOLO Master->Cliente: il ramo `masterSub` (listino all'ingrosso al
+    // sotto-master) è esente. Inerte finché il contratto non ha un pavimento attivo. Le tariffe già
+    // nascondono la fascia; qui si blocca anche la chiamata diretta.
+    if (!masterSub) {
+      const { pavimentoContratto, pavimentoPerPeso } = await import('@/lib/pavimenti')
+      const bandePav = await pavimentoContratto(adminCrea, (corriereRecord as any).nome_contratto)
+      const pav = bandePav.length ? pavimentoPerPeso(bandePav, Number((risPrezzo as any).fascia_peso_max)) : null
+      if (pav != null) {
+        const { data: fz } = await adminCrea.from('listini_clienti_fasce')
+          .select('prezzo, zone(nome)')
+          .eq('listino_id', cliente.listino_cliente_id).eq('corriere_id', corriereRecord.id)
+          .eq('tipo', 'fino_a').eq('peso_max', (risPrezzo as any).fascia_peso_max)
+        const riga = (fz || []).find((r: any) => String(r?.zone?.nome || '') === String((risPrezzo as any).zona)) || (fz || [])[0]
+        const base = riga ? Number((riga as any).prezzo) : null
+        if (base != null && base < pav - 0.0001) {
+          return NextResponse.json({ error: `Prezzo sotto il minimo consentito per questo contratto (min ${pav.toFixed(2).replace('.', ',')} € per questa fascia): adegua il listino del cliente prima di spedire.` }, { status: 400 })
+        }
+      }
+    }
     const suppPrezzo = await calcolaSupplementiCliente(adminCrea, {
       listinoId: cliente.listino_cliente_id, corriereId: corriereRecord.id,
       contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
