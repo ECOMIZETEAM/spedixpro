@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import ReportGuadagno from '@/app/components/ReportGuadagno'
 import GuadagnoChart from '@/app/components/GuadagnoChart'
 import BannerSms from '@/app/components/BannerSms'
+import BannerPavimento from '@/app/components/BannerPavimento'
 import GuadagnoAgente from '@/app/components/GuadagnoAgente'
 import DestinazioniWidget from '@/app/components/DestinazioniWidget'
 
@@ -79,6 +80,9 @@ export default function Dashboard() {
         <h1 style={{fontSize:'18px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Ciao, {data.masterNome}</h1>
         <p style={{color:'#999',fontSize:'12px',margin:'4px 0 0'}}>{new Date().toLocaleDateString('it-IT',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
       </div>
+
+      {/* Banner listini sotto il prezzo minimo del contratto (pavimento) */}
+      <BannerPavimento />
 
       {/* Banner SMS: quanti ne restano / invito ad attivare */}
       <BannerSms />
