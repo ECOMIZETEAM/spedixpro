@@ -7,7 +7,7 @@ import { useDialog } from '@/app/components/DialogProvider'
 // ma scoped al corriere aperto. Inerte finché il pavimento è dormiente (l'endpoint torna vuoto).
 export default function AllineaPavimentoEditor({ listinoId, corriereNome }: { listinoId: string; corriereNome: string }) {
   const dialog = useDialog()
-  const [fasce, setFasce] = useState<{ peso_max: number; prezzo: number; pavimento: number }[]>([])
+  const [fasce, setFasce] = useState<{ peso_max: number; zona?: string | null; prezzo: number; pavimento: number }[]>([])
   const [base, setBase] = useState<'pavimento' | 'attuale'>('pavimento')
   const [margineTipo, setMargineTipo] = useState<'fisso' | 'perc'>('perc')
   const [margineValore, setMargineValore] = useState('0')
@@ -44,7 +44,7 @@ export default function AllineaPavimentoEditor({ listinoId, corriereNome }: { li
     <div style={{ background: '#fff7ed', border: '1px solid #fdba74', borderRadius: '10px', padding: '14px 16px', marginBottom: '14px' }}>
       <div style={{ fontSize: '13px', fontWeight: 700, color: '#9a3412', marginBottom: '4px' }}>⚠️ {fasce.length} {fasce.length === 1 ? 'fascia' : 'fasce'} sotto il prezzo minimo del contratto</div>
       <div style={{ fontSize: '12px', color: '#7c2d12', marginBottom: '10px' }}>
-        Su queste fasce il cliente non vede il prezzo e non può spedire. Fasce: {fasce.map(f => `${f.peso_max}kg (${eur(f.prezzo)}→min ${eur(f.pavimento)})`).join(', ')}
+        Su queste fasce il cliente non vede il prezzo e non può spedire. Fasce: {fasce.map(f => `${f.peso_max}kg${f.zona ? ' ' + f.zona : ''} (${eur(f.prezzo)}→min ${eur(f.pavimento)})`).join(', ')}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
         <div style={{ display: 'flex', gap: '6px' }}>

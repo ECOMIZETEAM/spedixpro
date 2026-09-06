@@ -469,6 +469,7 @@ export async function calcolaTariffeCliente(
       total_price: (prezzoSped + (calcolaContrassegno(corriereId, prezzoSped) ?? 0) + (calcolaAssicurazione(corriereId, prezzoSped) ?? 0)).toFixed(2),
       fuel: costoFuel.toFixed(2),
       zona: isEstero ? (PAESI[paeseDest] || paeseDest) : ((fasciaGiusta as any)?.zone?.nome || zonaNome),
+      _zona_listino: (fasciaGiusta as any)?.zone?.nome || null,   // nome ZONA del listino (per il pavimento a zona)
       peso_reale: pesoReale,
       peso_volume: pesoVolumeC.toFixed(2),
       peso_fatturato: pesoPerFascia.toFixed(2),   // peso EFFETTIVO su cui è calcolato il prezzo (reale se agevolazione)

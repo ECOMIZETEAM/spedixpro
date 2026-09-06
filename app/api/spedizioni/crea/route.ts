@@ -337,7 +337,7 @@ export async function POST(req: NextRequest) {
     if (!masterSub) {
       const { pavimentoContratto, pavimentoPerPeso, clienteEsentePavimento } = await import('@/lib/pavimenti')
       const esente = await clienteEsentePavimento(adminCrea, clienteId)
-      const bandePav = esente ? [] : await pavimentoContratto(adminCrea, (corriereRecord as any).nome_contratto)
+      const bandePav = esente ? [] : await pavimentoContratto(adminCrea, (corriereRecord as any).nome_contratto, (risPrezzo as any).zona)
       const pav = bandePav.length ? pavimentoPerPeso(bandePav, Number((risPrezzo as any).fascia_peso_max)) : null
       if (pav != null) {
         const { data: fz } = await adminCrea.from('listini_clienti_fasce')

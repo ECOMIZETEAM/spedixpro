@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { pavimentiAttivi, pavimentoPerPeso, masterEsentePavimento } from '@/lib/pavimenti'
+import { pavimentiAttivi, pavimentoPerPeso, masterEsentePavimento, bandeDaMappa } from '@/lib/pavimenti'
 import { fetchAll } from '@/lib/fetch-all'
 
 // ALLINEA i listini CLIENTE sotto il minimo del contratto. Money-safe:
@@ -68,11 +68,11 @@ export async function POST(req: NextRequest) {
   for (let i = 0; i < m2cIds.length; i += 50) {
     const chunk = m2cIds.slice(i, i + 50)
     const fasce = await fetchAll(() => admin.from('listini_clienti_fasce')
-      .select('id,corriere_id,peso_max,prezzo')
+      .select('id,corriere_id,peso_max,prezzo,zone(nome)')
       .in('listino_id', chunk).in('corriere_id', corriereIds).eq('tipo', 'fino_a'))
     for (const f of fasce) {
       const nomeC = nomeDiCorriere.get((f as any).corriere_id) || ''
-      const bande = pav.get(nomeC); if (!bande) continue
+      const bande = bandeDaMappa(pav, nomeC, (f as any).zone?.nome); if (!bande.length) continue
       const min = pavimentoPerPeso(bande, Number((f as any).peso_max)); if (min == null) continue
       const attuale = Number((f as any).prezzo)
       if (attuale >= min - 0.0001) continue   // già a pavimento o sopra: non tocco

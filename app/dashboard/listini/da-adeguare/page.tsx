@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
 
-type Fascia = { peso_max: number; prezzo: number; pavimento: number }
+type Fascia = { peso_max: number; zona?: string | null; prezzo: number; pavimento: number }
 type Gruppo = { listino_id: string; listino_nome: string; corriere_nome: string; clienti: string[]; fasce: Fascia[] }
 
 export default function ListiniDaAdeguare() {
@@ -108,7 +108,7 @@ export default function ListiniDaAdeguare() {
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr>{['Fascia', 'Prezzo attuale', 'Minimo', 'Nuovo prezzo'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <thead><tr>{['Fascia', 'Zona', 'Prezzo attuale', 'Minimo', 'Nuovo prezzo'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
               <tbody>
                 {g.fasce.map((f, i) => {
                   const np = nuovoPrezzo(f)
@@ -116,6 +116,7 @@ export default function ListiniDaAdeguare() {
                   return (
                     <tr key={i}>
                       <td style={td}>fino a {f.peso_max} kg</td>
+                      <td style={{ ...td, color: '#6b7280' }}>{f.zona || '—'}</td>
                       <td style={{ ...td, color: '#dc2626' }}>{eur(f.prezzo)}</td>
                       <td style={td}>{eur(f.pavimento)}</td>
                       <td style={{ ...td, fontWeight: 700, color: ancoraSotto ? '#dc2626' : '#16a34a' }}>{eur(np)}{ancoraSotto ? ' ⚠️ ancora sotto' : ''}</td>

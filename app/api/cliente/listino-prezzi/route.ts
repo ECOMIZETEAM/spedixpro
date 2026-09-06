@@ -36,7 +36,7 @@ export async function GET() {
   // PAVIMENTO PREZZO: le fasce/zone sotto il minimo del contratto non si vendono → il cliente NON
   // ne vede il prezzo (cella oscurata). Tabella admin-only: la leggo col service role.
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
-  const { pavimentiAttivi, sottoPavimento, clienteEsentePavimento } = await import('@/lib/pavimenti')
+  const { pavimentiAttivi, sottoPavimento, clienteEsentePavimento, bandeDaMappa } = await import('@/lib/pavimenti')
   const adminPav = createAdminSupabase()
   // Cliente esente (es. Agenzia Entrate, per master o per singolo cliente): non oscuro nulla.
   const pav = (await clienteEsentePavimento(adminPav, u.cliente_id)) ? new Map() : await pavimentiAttivi(adminPav)
@@ -50,8 +50,8 @@ export async function GET() {
     if (cRec?.attivo === false) continue
     if (sospesoDallaCatena(cRec?.nome_contratto, sospesiSopra)) continue
     // Cella (fascia+zona) sotto il pavimento del contratto: non mostrarla. Solo fasce "fino_a".
-    const bandeF = pav.get(String(cRec?.nome_contratto || ''))
-    if (bandeF && (f as any).tipo === 'fino_a' && sottoPavimento(bandeF, Number((f as any).peso_max), Number((f as any).prezzo))) continue
+    const bandeF = bandeDaMappa(pav as any, cRec?.nome_contratto, (f as any).zone?.nome)
+    if (bandeF.length && (f as any).tipo === 'fino_a' && sottoPavimento(bandeF, Number((f as any).peso_max), Number((f as any).prezzo))) continue
     if (!perCorr.has(cid)) {
       perCorr.set(cid, {
         nome_contratto: (f as any).corrieri?.nome_contratto || 'Corriere',

@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { pavimentiAttivi, pavimentoPerPeso, masterEsentePavimento } from '@/lib/pavimenti'
+import { pavimentiAttivi, pavimentoPerPeso, masterEsentePavimento, bandeDaMappa } from '@/lib/pavimenti'
 import { fetchAll } from '@/lib/fetch-all'
 
 // I TUOI LISTINI CLIENTE SOTTO IL MINIMO DEL CONTRATTO — resoconto per-master, in casa sua.
@@ -61,37 +61,33 @@ export async function GET(_req: NextRequest) {
   const corriereIds = [...nomeDiCorriere.keys()]
   if (!corriereIds.length) return NextResponse.json({ totaleFasce: 0, totaleListini: 0, gruppi: [] })
 
-  // Fasce fino_a di questi listini per questi corrieri → collasso per (listino,corriere,peso_max) min prezzo.
-  const perLBC = new Map<string, { listino_id: string; corriere_id: string; peso_max: number; prezzo: number }>()
+  // Fasce fino_a di questi listini per questi corrieri, PER ZONA (il pavimento Europa cambia per zona).
+  // Ogni riga (listino, corriere, zona, peso) è confrontata col suo pavimento (per i contratti
+  // nazionali la zona ricade sul pavimento "tutte le zone").
+  const grp = new Map<string, any>()
+  let totaleFasce = 0
   for (let i = 0; i < m2cIds.length; i += 50) {
     const chunk = m2cIds.slice(i, i + 50)
     const fasce = await fetchAll(() => admin.from('listini_clienti_fasce')
-      .select('id,listino_id,corriere_id,peso_max,prezzo')
+      .select('id,listino_id,corriere_id,peso_max,prezzo,zone(nome)')
       .in('listino_id', chunk).in('corriere_id', corriereIds).eq('tipo', 'fino_a'))
     for (const f of fasce) {
-      const kk = (f as any).listino_id + '|' + (f as any).corriere_id + '|' + (f as any).peso_max
-      const p = Number((f as any).prezzo); const cur = perLBC.get(kk)
-      if (!cur || p < cur.prezzo) perLBC.set(kk, { listino_id: (f as any).listino_id, corriere_id: (f as any).corriere_id, peso_max: Number((f as any).peso_max), prezzo: p })
+      const nomeC = nomeDiCorriere.get((f as any).corriere_id) || ''
+      const zonaNome = (f as any).zone?.nome || null
+      const bande = bandeDaMappa(pav, nomeC, zonaNome); if (!bande.length) continue
+      const peso = Number((f as any).peso_max); const prezzo = Number((f as any).prezzo)
+      const min = pavimentoPerPeso(bande, peso)
+      if (min == null || prezzo >= min - 0.0001) continue
+      totaleFasce++
+      const k = (f as any).listino_id + '|' + (f as any).corriere_id
+      if (!grp.has(k)) grp.set(k, {
+        listino_id: (f as any).listino_id, listino_nome: listinoNome.get((f as any).listino_id) || 'Listino',
+        corriere_nome: nomeC, clienti: clientiPerListino.get((f as any).listino_id) || [], fasce: [],
+      })
+      grp.get(k).fasce.push({ peso_max: peso, zona: zonaNome, prezzo: Math.round(prezzo * 100) / 100, pavimento: min })
     }
   }
-
-  // Sotto pavimento → raggruppo per (listino, corriere).
-  const grp = new Map<string, any>()
-  let totaleFasce = 0
-  for (const v of perLBC.values()) {
-    const nomeC = nomeDiCorriere.get(v.corriere_id) || ''
-    const bande = pav.get(nomeC); if (!bande) continue
-    const min = pavimentoPerPeso(bande, v.peso_max)
-    if (min == null || v.prezzo >= min - 0.0001) continue
-    totaleFasce++
-    const k = v.listino_id + '|' + v.corriere_id
-    if (!grp.has(k)) grp.set(k, {
-      listino_id: v.listino_id, listino_nome: listinoNome.get(v.listino_id) || 'Listino',
-      corriere_nome: nomeC, clienti: clientiPerListino.get(v.listino_id) || [], fasce: [],
-    })
-    grp.get(k).fasce.push({ peso_max: v.peso_max, prezzo: Math.round(v.prezzo * 100) / 100, pavimento: min })
-  }
-  const gruppi = [...grp.values()].map(g => ({ ...g, fasce: g.fasce.sort((a: any, b: any) => a.peso_max - b.peso_max) }))
+  const gruppi = [...grp.values()].map(g => ({ ...g, fasce: g.fasce.sort((a: any, b: any) => a.peso_max - b.peso_max || String(a.zona).localeCompare(String(b.zona))) }))
     .sort((a, b) => a.corriere_nome.localeCompare(b.corriere_nome) || a.listino_nome.localeCompare(b.listino_nome))
 
   return NextResponse.json({ totaleFasce, totaleListini: gruppi.length, gruppi })
