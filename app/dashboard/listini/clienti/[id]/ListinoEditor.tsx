@@ -4,6 +4,7 @@ import { logoCorriere, serviziAccessoriDefault } from '@/lib/corriere-logo'
 import { setFlash } from '@/lib/flash'
 import { useDialog } from '@/app/components/DialogProvider'
 import EditorMarkupFasce, { type MarkupOut } from '@/app/components/EditorMarkupFasce'
+import AllineaPavimentoEditor from '@/app/components/AllineaPavimentoEditor'
 
 // Input decimale che accetta virgola o punto e valori parziali (es. "0.", "0,5")
 // mentre scrivi, restituendo comunque il NUMERO al parent (nessuna modifica al salvataggio).
@@ -443,6 +444,13 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
           {saving?'Salvo...':'Salva'}
         </button>
       </div>
+
+      {/* Allinea al pavimento (solo listini cliente): compare se questo corriere ha fasce sotto minimo */}
+      {!isCorriere && corriereId && (
+        <div style={{ padding: '14px 18px 0' }}>
+          <AllineaPavimentoEditor listinoId={listino.id} corriereNome={corrieri.find(c => c.id === corriereId)?.nome_contratto || ''} />
+        </div>
+      )}
 
       {/* Tabs */}
       <div style={{display:'flex',borderBottom:'1px solid #d1d5db',padding:'0 16px',overflowX:'auto' as const}}>
