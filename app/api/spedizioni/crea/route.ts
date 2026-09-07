@@ -669,22 +669,17 @@ export async function POST(req: NextRequest) {
       headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         carrierCode: rate.carrierCode, contractCode: rate.contractCode,
-        // CAMPI DEDICATI + fallback sicuro. Ogni cosa al suo campo, come SpediamoPro:
-        //  - CONTENUTO  → `content` (campo dedicato di Spedisci: verificato che ESCE in etichetta).
-        //  - RIF ORDINE → `reference` PER-COLLO (campo dedicato: Spedisci lo accetta e lo rimanda nel
-        //    raw_response; MAI valorizzato prima, 0/8382). NB: una vecchia ispezione delle etichette
-        //    diceva che Spedisci NON stampa un riferimento separato → finché non è VERIFICATO su
-        //    un'etichetta vera che il `reference` compare, il rif si tiene ANCHE nelle note (sotto),
-        //    così non sparisce mai. Confermato che stampa → togliere il rif dalle note (nota piena).
-        label_format: 'PDF',
-        packages: (String(body.rifOrdine || '').trim()
-          ? packages.map((p: any) => ({ ...p, reference: String(body.rifOrdine).trim() }))
-          : packages),
+        // OGNI CAMPO AL SUO CAMPO, come SpediamoPro:
+        //  - CONTENUTO  → `content` (campo dedicato di Spedisci: esce in etichetta).
+        //  - RIF ORDINE → NON è pilotabile via API (il "Rif." in etichetta è un token interno di
+        //    Spedisci/Poste, non nel raw_response): lo scriviamo col RE-PRINT del PDF a serve-time
+        //    (lib/etichetta-spedisci → riscriviEtichettaSpedisci), come per SpediamoPro. Perciò NON va
+        //    più nelle note (prima stava lì e con nota lunga veniva tagliato).
+        //  - NOTA       → `notes` (SOLO la nota del cliente).
+        label_format: 'PDF', packages,
         // EMAIL SCHERMO: al provider va SEMPRE l'email di servizio (mai quelle vere di mitt/dest).
         shipFrom: { ...body.shipFrom, email: EMAIL_PER_CORRIERE }, shipTo: { ...body.shipTo, email: EMAIL_PER_CORRIERE },
-        // NOTE = rif ordine (davanti, così non viene tagliato) + nota del cliente. Resta finché il campo
-        // `reference` non è verificato in etichetta.
-        notes: [body.rifOrdine, body.notes].filter(Boolean).map((s: any) => String(s).trim()).join(' '),
+        notes: String(body.notes || '').trim() || undefined,
         ...(String(body.contenuto || '').trim() ? { content: String(body.contenuto).trim() } : {}),
         insuranceValue: body.insuranceValue || 0,
         codValue: body.codValue || 0, accessoriServices: accessoriSpedisci

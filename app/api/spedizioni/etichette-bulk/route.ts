@@ -59,6 +59,7 @@ export async function POST(req: NextRequest) {
     // riferimento/contenuto da scrivere; ogni errore -> etichetta originale (mai degradare la LDV).
     const _corr: any = Array.isArray((s as any).corrieri) ? (s as any).corrieri[0] : (s as any).corrieri
     const rewSpediamopro = _corr?.tipo === 'spediamopro' && (s.rif_ordine || s.contenuto)
+    const rewSpedisci = _corr?.tipo === 'spedisci' && !!s.rif_ordine   // "Rif." token → rif_ordine
     let codeProv: string | null = null
     if (rewSpediamopro) {
       try { const { codiceProviderSpediamopro } = await import('@/lib/etichetta-spediamopro'); codeProv = codiceProviderSpediamopro(s.raw_response) } catch {}
@@ -136,6 +137,13 @@ export async function POST(req: NextRequest) {
             const { riscriviEtichettaSpediamopro } = await import('@/lib/etichetta-spediamopro')
             pdfBytes = new Uint8Array(await riscriviEtichettaSpediamopro(Buffer.from(pdfBytes), { code: codeProv, rifOrdine: s.rif_ordine, contenuto: s.contenuto }))
           } catch (e) { console.error('[ETICHETTE-BULK][SPEDIAMOPRO] rewrite:', e) }
+        }
+        // Spedisci: il "Rif." in etichetta è un token interno → riscrivilo col rif_ordine (come la singola).
+        if (rewSpedisci) {
+          try {
+            const { riscriviEtichettaSpedisci } = await import('@/lib/etichetta-spedisci')
+            pdfBytes = new Uint8Array(await riscriviEtichettaSpedisci(Buffer.from(pdfBytes), { rifOrdine: s.rif_ordine }))
+          } catch (e) { console.error('[ETICHETTE-BULK][SPEDISCI] rewrite:', e) }
         }
         const pdf = await PDFDocument.load(pdfBytes)
         const pages = await pdfMerged.copyPages(pdf, pdf.getPageIndices())

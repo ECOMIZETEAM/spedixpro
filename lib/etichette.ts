@@ -144,7 +144,13 @@ export async function leggiEtichettaCompleta(
           code: codiceProviderSpediamopro(sped.raw_response), rifOrdine: sped.rif_ordine, contenuto: sped.contenuto,
         }) }
       }
-    } catch (e: any) { console.error('[ETICHETTA][SPEDIAMOPRO] rewrite:', e?.message) }
+      // SPEDISCI: il "Rif." in etichetta è un token interno di Spedisci/Poste, non il rif ordine → lo
+      // riscriviamo col rif_ordine dichiarato (il contenuto esce già dal campo dedicato `content`).
+      if ((corr as any)?.tipo === 'spedisci' && sped.rif_ordine) {
+        const { riscriviEtichettaSpedisci } = await import('@/lib/etichetta-spedisci')
+        return { ...et, buffer: await riscriviEtichettaSpedisci(et.buffer, { rifOrdine: sped.rif_ordine }) }
+      }
+    } catch (e: any) { console.error('[ETICHETTA][REWRITE]', e?.message) }
   }
   return et
 }
