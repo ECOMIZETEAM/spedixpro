@@ -8,6 +8,8 @@ type Racc = {
 }
 type Cli = { listino_id: string; clienti: string[]; spedizioni_90gg: number; stima_guadagno_90gg: number; raccomandazioni: Racc[] }
 
+const TOP = 6
+
 export default function OttimizzaMargini() {
   const [attivo, setAttivo] = useState(true)
   const [totale, setTotale] = useState(0)
@@ -15,6 +17,7 @@ export default function OttimizzaMargini() {
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
   const [aperto, setAperto] = useState<string | null>(null)
+  const [tutti, setTutti] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     fetch('/api/network/ottimizza-margini').then(r => r.json()).then(j => {
@@ -27,63 +30,94 @@ export default function OttimizzaMargini() {
   const nomeCli = (c: Cli) => (c.clienti || []).join(', ') || 'Listino'
   const visibili = useMemo(() => data.filter(c => !cerca || nomeCli(c).toLowerCase().includes(cerca.toLowerCase())), [data, cerca])
 
-  const card = { background: '#fff', borderRadius: '10px', border: '1px solid #e5e7eb', marginBottom: '12px', overflow: 'hidden' } as const
+  if (!loading && !attivo) return (
+    <div style={{ maxWidth: 760 }}>
+      <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a' }}>Ottimizza margini</h1>
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, padding: 24, color: '#94a3b8', marginTop: 12 }}>Funzione non attiva per questo master.</div>
+    </div>
+  )
 
-  if (!loading && !attivo) return <div style={{ maxWidth: 800 }}><h1 style={{ fontSize: 20, fontWeight: 800 }}>Ottimizza margini</h1><div style={{ ...card, padding: 20, color: '#9ca3af' }}>Funzione non attiva per questo master.</div></div>
+  const pill = (bg: string, col: string) => ({ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 999, background: bg, color: col, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' as const })
 
   return (
-    <div style={{ maxWidth: '1000px' }}>
-      <h1 style={{ fontSize: '20px', fontWeight: 800, color: '#1a1a1a', margin: '0 0 6px' }}>Ottimizza margini</h1>
-      <p style={{ fontSize: '13px', color: '#6b7280', margin: '0 0 14px' }}>
-        Per ogni cliente ti dico <b>quale corriere usare</b> (e quali <b>aggiungere</b>) per guadagnare di più, con il <b>guadagno per spedizione</b>.
-        Margine tutto incluso (prezzo cliente − tuo costo, nolo+fuel). Solo consiglio: nessun prezzo viene modificato.
+    <div style={{ maxWidth: 980 }}>
+      <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: '0 0 4px', letterSpacing: '-0.01em' }}>Ottimizza margini</h1>
+      <p style={{ fontSize: 13.5, color: '#64748b', margin: '0 0 20px', lineHeight: 1.5 }}>
+        Per ogni cliente ti diciamo <b style={{ color: '#334155' }}>cosa fare</b> per guadagnare di più — quale corriere usare e quali attivare — con il guadagno per spedizione. Solo consiglio: nessun prezzo viene modificato.
       </p>
 
-      {!loading && totale > 0 && (
-        <div style={{ background: 'linear-gradient(100deg,#f0fdf4,#dcfce7)', border: '1px solid #86efac', borderRadius: '10px', padding: '14px 18px', marginBottom: '16px' }}>
-          <div style={{ fontSize: '12px', fontWeight: 700, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Guadagno potenziale stimato</div>
-          <div style={{ fontSize: '26px', fontWeight: 800, color: '#15803d' }}>{eur(totale)} <span style={{ fontSize: '13px', fontWeight: 500, color: '#4b5563' }}>in 90 giorni</span></div>
-          <div style={{ fontSize: '12px', color: '#4b5563', marginTop: '2px' }}>Stima sul tuo volume reale (spedizioni ultimi 90 giorni) spostando ogni rotta sul corriere a margine più alto.</div>
+      {/* HERO: guadagno potenziale */}
+      {!loading && (
+        <div style={{ background: 'linear-gradient(135deg,#065f46,#10b981)', borderRadius: 16, padding: '22px 26px', marginBottom: 18, color: '#fff', boxShadow: '0 10px 30px -12px rgba(16,185,129,0.5)' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.9 }}>Guadagno potenziale — ultimi 90 giorni</div>
+          <div style={{ fontSize: 40, fontWeight: 800, lineHeight: 1.1, marginTop: 4, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>{eur(totale)}</div>
+          <div style={{ fontSize: 13, opacity: 0.92, marginTop: 4 }}>Stima sul tuo volume reale, spostando ogni rotta sul corriere a margine più alto. {data.length} clienti con opportunità.</div>
         </div>
       )}
 
-      <input value={cerca} onChange={e => setCerca(e.target.value)} placeholder="Cerca cliente…"
-        style={{ width: '100%', maxWidth: '340px', padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', color: '#1a1a1a', marginBottom: '16px' }} />
+      {/* Legenda + ricerca */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
+        <span style={pill('#eff6ff', '#1d4ed8')}>● CAMBIA — usa un corriere che hai già</span>
+        <span style={pill('#fff7ed', '#c2410c')}>+ AGGIUNGI — attiva un corriere nuovo</span>
+        <input value={cerca} onChange={e => setCerca(e.target.value)} placeholder="Cerca cliente…"
+          style={{ marginLeft: 'auto', width: 260, padding: '9px 13px', border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 14, color: '#0f172a', outline: 'none' }} />
+      </div>
 
       {loading ? (
-        <div style={{ padding: '40px', textAlign: 'center', color: '#9ca3af' }}>Calcolo margini…</div>
+        <div style={{ padding: 60, textAlign: 'center', color: '#94a3b8' }}>Calcolo margini…</div>
       ) : !visibili.length ? (
-        <div style={{ ...card, padding: '20px', textAlign: 'center', color: '#9ca3af' }}>Nessuna opportunità: i corrieri attuali sono già i migliori su ogni rotta.</div>
+        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, padding: 28, textAlign: 'center', color: '#16a34a', fontWeight: 600 }}>✓ Tutto ottimizzato: i corrieri attuali sono già i migliori su ogni rotta.</div>
       ) : visibili.map(c => {
         const isOpen = aperto === c.listino_id
+        const mostraTutti = !!tutti[c.listino_id]
+        const lista = mostraTutti ? c.raccomandazioni : c.raccomandazioni.slice(0, TOP)
         return (
-          <div key={c.listino_id} style={card}>
+          <div key={c.listino_id} style={{ background: '#fff', borderRadius: 14, border: '1px solid #e5e7eb', marginBottom: 12, overflow: 'hidden', boxShadow: isOpen ? '0 8px 24px -14px rgba(15,23,42,0.25)' : 'none' }}>
+            {/* header cliente */}
             <button onClick={() => setAperto(isOpen ? null : c.listino_id)}
-              style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <span style={{ fontWeight: 700, color: '#1a1a1a' }}>{nomeCli(c)}</span>
-              <span style={{ display: 'flex', gap: '14px', alignItems: 'center', fontSize: '12px', color: '#6b7280' }}>
-                <span>{c.spedizioni_90gg} sped./90gg</span>
-                {c.stima_guadagno_90gg > 0 && <span style={{ color: '#15803d', fontWeight: 700 }}>+{eur(c.stima_guadagno_90gg)} potenziali</span>}
-                <span>{c.raccomandazioni.length} consigli · {isOpen ? '▲' : '▼'}</span>
+              style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: '16px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 800, fontSize: 15.5, color: '#0f172a' }}>{nomeCli(c)}</span>
+              <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={pill('#f1f5f9', '#475569')}>📦 {c.spedizioni_90gg} sped./90gg</span>
+                {c.stima_guadagno_90gg > 0 && <span style={pill('#dcfce7', '#15803d')}>▲ +{eur(c.stima_guadagno_90gg)} potenziali</span>}
+                <span style={pill('#f1f5f9', '#475569')}>{c.raccomandazioni.length} consigli</span>
+                <span style={{ color: '#94a3b8', fontSize: 13, width: 16, textAlign: 'center' }}>{isOpen ? '▲' : '▼'}</span>
               </span>
             </button>
+
             {isOpen && (
-              <div style={{ borderTop: '1px solid #eee', padding: '8px 16px 14px' }}>
-                {c.raccomandazioni.map((r, i) => (
-                  <div key={i} style={{ display: 'flex', gap: '10px', alignItems: 'baseline', padding: '8px 0', borderBottom: '1px solid #f5f5f5', fontSize: '13px', flexWrap: 'wrap' }}>
-                    <span style={{ minWidth: '150px', color: '#6b7280' }}>{r.zona} · fino a {r.peso}kg</span>
-                    {r.tipo === 'cambia' ? (
-                      <span style={{ flex: 1, color: '#1a1a1a' }}>
-                        Usa <b style={{ color: '#0369a1' }}>{r.usa}</b> ({eur(r.margine_usa!)}) anziché {r.invece_di} ({eur(r.margine_invece!)})
-                      </span>
-                    ) : (
-                      <span style={{ flex: 1, color: '#1a1a1a' }}>
-                        <b style={{ color: '#9a3412' }}>Vendigli anche {r.corriere}</b> — margine stimato {eur(r.margine_stimato!)} vs il tuo migliore {r.invece_di} ({eur(r.margine_invece!)})
-                      </span>
-                    )}
-                    <span style={{ fontWeight: 700, color: '#15803d', whiteSpace: 'nowrap' }}>+{eur(r.per_spedizione)}/sped.</span>
-                  </div>
-                ))}
+              <div style={{ borderTop: '1px solid #f1f5f9' }}>
+                {lista.map((r, i) => {
+                  const isCambia = r.tipo === 'cambia'
+                  const accent = isCambia ? '#3b82f6' : '#f97316'
+                  return (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '13px 18px 13px 0', borderBottom: '1px solid #f6f7f9', borderLeft: `3px solid ${accent}` }}>
+                      <div style={{ paddingLeft: 15, minWidth: 150 }}>
+                        <span style={pill(isCambia ? '#eff6ff' : '#fff7ed', isCambia ? '#1d4ed8' : '#c2410c')}>{isCambia ? '● CAMBIA' : '+ AGGIUNGI'}</span>
+                        <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 5 }}>{r.zona} · ≤{r.peso} kg</div>
+                      </div>
+                      <div style={{ flex: 1, fontSize: 14, color: '#0f172a', lineHeight: 1.45 }}>
+                        {isCambia ? (
+                          <>Sposta su <b style={{ color: '#0369a1' }}>{r.usa}</b> <span style={{ color: '#94a3b8' }}>invece di {r.invece_di}</span>
+                            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>margine {eur(r.margine_invece!)} → <b style={{ color: '#16a34a' }}>{eur(r.margine_usa!)}</b></div></>
+                        ) : (
+                          <>Attiva <b style={{ color: '#c2410c' }}>{r.corriere}</b> <span style={{ color: '#94a3b8' }}>(non nel suo listino)</span>
+                            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>renderebbe <b style={{ color: '#16a34a' }}>{eur(r.margine_stimato!)}</b> vs il tuo migliore {r.invece_di} ({eur(r.margine_invece!)})</div></>
+                        )}
+                      </div>
+                      <div style={{ textAlign: 'right', paddingRight: 18, whiteSpace: 'nowrap' }}>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: '#15803d', fontVariantNumeric: 'tabular-nums' }}>+{eur(r.per_spedizione)}</div>
+                        <div style={{ fontSize: 11, color: '#94a3b8' }}>a spedizione</div>
+                      </div>
+                    </div>
+                  )
+                })}
+                {c.raccomandazioni.length > TOP && (
+                  <button onClick={() => setTutti(t => ({ ...t, [c.listino_id]: !mostraTutti }))}
+                    style={{ width: '100%', padding: '11px', background: '#fafafa', border: 'none', borderTop: '1px solid #f1f5f9', color: '#2563eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                    {mostraTutti ? 'Mostra solo i migliori' : `Mostra tutti i ${c.raccomandazioni.length} consigli`}
+                  </button>
+                )}
               </div>
             )}
           </div>

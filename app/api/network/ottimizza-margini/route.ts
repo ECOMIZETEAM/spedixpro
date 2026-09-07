@@ -31,7 +31,10 @@ export async function GET(_req: NextRequest) {
 
   const { data: corr } = await admin.from('corrieri').select('id,nome_contratto,attivo').eq('master_id', mio)
   const nomeCorr = new Map<string, string>()
-  for (const c of (corr || [])) if ((c as any).attivo !== false) nomeCorr.set((c as any).id, (c as any).nome_contratto || 'Corriere')
+  // Escludo i servizi NON comparabili con una spedizione standard (fuori-sagoma "Extralarge"):
+  // consigliarli su un collo normale è fuorviante e fa sembrare lo strumento inaffidabile.
+  const nonComparabile = (n: string) => /extralarge|fuori\s*sagoma|pallet/i.test(n)
+  for (const c of (corr || [])) if ((c as any).attivo !== false && !nonComparabile((c as any).nome_contratto || '')) nomeCorr.set((c as any).id, (c as any).nome_contratto || 'Corriere')
   if (!nomeCorr.size) return NextResponse.json({ attivo: true, clienti: [] })
 
   const { data: zone } = await admin.from('zone').select('id,nome').eq('master_id', mio)
