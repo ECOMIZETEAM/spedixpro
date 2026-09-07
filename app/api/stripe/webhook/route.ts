@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { stripeConfigurato, stripeClient, pianoDaPrezzo, pianoApiDaPrezzo } from '@/lib/stripe'
+import { stripeConfigurato, stripeClient, pianoDaPrezzo, pianoApiDaPrezzo, primoAllineamentoCiclo } from '@/lib/stripe'
 import { pianoById, meseCorrente } from '@/lib/piani'
 import { COSTO_SMS_EUR } from '@/lib/sms'
 
@@ -331,12 +331,63 @@ export async function POST(req: NextRequest) {
           if (pausa > Math.floor(Date.now() / 1000) + 3600) {
             try {
               const sub = await s.subscriptions.retrieve(m.stripe_subscription_id)
-              if (sub.status !== 'canceled' && sub.trial_end !== pausa) {
+              const daFare: any = {}
+              if (sub.trial_end !== pausa) { daFare.trial_end = pausa; daFare.proration_behavior = 'none' }
+              // RISCOSSIONE RIAPERTA. Chi non incassa la una-tantum e ha il rinnovo del vecchio ciclo
+              // in arrivo va fermato con `pause_collection`, altrimenti il circuito gli fattura il mese
+              // nuovo mentre quello vecchio e' ancora aperto: due fatture per lo stesso mese. Ma quel
+              // blocco NON si toglie da solo, e un master che poi paga resterebbe fermo per sempre —
+              // servito, mai piu' fatturato. Si toglie qui, dove l'incasso e' certo: e' l'unico punto
+              // che sa che il conto e' stato saldato.
+              if (sub.pause_collection) daFare.pause_collection = ''
+              if (sub.status !== 'canceled' && Object.keys(daFare).length) {
                 if (sub.schedule) { try { await s.subscriptionSchedules.release(typeof sub.schedule === 'string' ? sub.schedule : (sub.schedule as any).id) } catch {} }
-                await s.subscriptions.update(m.stripe_subscription_id, { trial_end: pausa, proration_behavior: 'none' })
+                await s.subscriptions.update(m.stripe_subscription_id, daFare)
               }
             } catch {}
           }
+        }
+
+        // NUOVO ABBONATO: SI AGGANCIA DA SE' AL CICLO DEL 1°.
+        //
+        // L'allineamento al 1° non e' una campagna una-tantum, e' LA regola. Senza questo ogni nuovo
+        // abbonato nasceva sul proprio anniversario e il ciclo tornava a sparpagliarsi: e' successo con
+        // due master abbonati il 7/09, finiti a rinnovare il 7 di ogni mese mentre tutti gli altri
+        // pagano il 1°. Il conteggio delle spedizioni va per mese di calendario: un canone che scavalca
+        // il mese non si sa piu' quale limite stia comprando.
+        //
+        // L'ordine e' quello dell'allinea-ciclo, e non e' invertibile: si aggancia SOLO qui, a incasso
+        // avvenuto. Mettere trial_end alla cassa farebbe scrivere al circuito "0,00 € dovuti oggi" e
+        // regalerebbe il mese in corso a chi non lo ha ancora pagato.
+        //
+        // Quanto copre il primo canone lo decide il giorno di attivazione (regola del 15, in
+        // lib/stripe.ts): si passa la data di PARTENZA dell'abbonamento, non "adesso" — se questo
+        // evento arriva in ritardo, o viene rigiocato dal circuito, l'aggancio non deve spostarsi.
+        // Idempotente: se e' gia' li' non tocca niente.
+        //
+        // L'abbonamento si prende dalla FATTURA, non da `masters.stripe_subscription_id`: e' il primo
+        // incasso, e l'id in tabella lo scrive un altro evento (subscription.created / checkout
+        // completed) di cui il circuito non garantisce l'ordine. Fidandosi della tabella, l'aggancio
+        // sarebbe saltato in silenzio proprio sui nuovi — cioe' negli unici casi che deve coprire.
+        const rifSub = inv.subscription || inv.parent?.subscription_details?.subscription
+          || riga?.subscription || riga?.parent?.subscription_item_details?.subscription
+        const idSub = (typeof rifSub === 'string' ? rifSub : rifSub?.id) || m.stripe_subscription_id
+        if (inv.billing_reason === 'subscription_create' && idSub) {
+          try {
+            const sub = await s.subscriptions.retrieve(idSub)
+            const aggancio = primoAllineamentoCiclo(new Date(Number(sub.start_date || inv.created || 0) * 1000))
+            // NATO GIA' CON UNA PAUSA: non lo si tocca. E' il caso di chi ha saldato il mese per altra
+            // via (un bonifico segnato a mano) e poi mette la carta: la cassa gli ha gia' calcolato
+            // l'inizio addebiti su quel presupposto, e riscriverlo qui — dove quel presupposto non si
+            // vede — vorrebbe dire spostare una data che qualcun altro ha deciso sapendone di piu'.
+            const nasceConPausa = !!sub.trial_start
+            if (nasceConPausa) console.log('[STRIPE] aggancio saltato: pausa gia impostata alla cassa', m.nome)
+            if (!nasceConPausa && sub.status !== 'canceled' && sub.trial_end !== aggancio) {
+              if (sub.schedule) { try { await s.subscriptionSchedules.release(typeof sub.schedule === 'string' ? sub.schedule : (sub.schedule as any).id) } catch {} }
+              await s.subscriptions.update(idSub, { trial_end: aggancio, proration_behavior: 'none' })
+              console.log('[STRIPE] nuovo abbonato agganciato al 1°', m.nome, new Date(aggancio * 1000).toISOString().slice(0, 10))
+            }
+          } catch (e: any) { console.error('[STRIPE][AGGANCIO 1°]', m.id, e?.message) }
         }
         break
       }

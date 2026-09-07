@@ -146,6 +146,34 @@ export function primoDelProssimoMese(d = new Date()): number {
   return Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1, 0, 0, 0) / 1000)
 }
 
+// IL 1° A CUI SI AGGANCIA UN ABBONATO NUOVO. Il canone è MENSILE A FORFAIT, e a decidere quanto copre
+// il primo pagamento è il GIORNO di attivazione:
+//  · attivazione PRIMA del 15 — il canone pagato alla cassa vale il MESE IN CORSO, e il primo rinnovo
+//    cade il 1° del mese prossimo;
+//  · attivazione DAL 15 in poi — mezzo mese non si fa pagare come un mese intero: quel canone copre
+//    anche il mese dopo, e il primo rinnovo cade il 1° del mese SUCCESSIVO a quello.
+// Non è una regola inventata qui: è quella applicata a mano a chi si era abbonato il 24 e il 27 agosto
+// (allineati al 1° ottobre senza riaddebito, non al 1° settembre). Da lì in poi si rinnova sempre il
+// 1°, come tutti — il contatore delle spedizioni va per mese di calendario e il ciclo dell'anniversario
+// lo scavallava.
+//
+// Il giorno si legge in ORA ITALIANA, il server gira a UTC: chi si abbona il 15 alle 00:30 da noi è
+// ancora il 14 per il server, e finirebbe dalla parte sbagliata del taglio. Stesso inciampo già visto
+// sui mesi di competenza delle fatture nate a cavallo della mezzanotte.
+//
+// L'istante restituito è mezzanotte UTC del 1° (= le 02:00 italiane): lo stesso a cui sono già
+// agganciati i master allineati a fine agosto, e un aggancio solo per tutti vale più di due ore.
+// NIENTE correzione per il limite delle 48h di Stripe: col taglio del 15 il 1° più vicino dista
+// comunque 17 giorni. Quella correzione serve all'allinea-ciclo, che parte quando decide il master.
+export function primoAllineamentoCiclo(d = new Date()): number {
+  const parti = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(d)
+  const n = (tipo: string) => Number(parti.find(x => x.type === tipo)?.value)
+  const mesiAvanti = n('day') < 15 ? 1 : 2
+  return Math.floor(Date.UTC(n('year'), n('month') - 1 + mesiAvanti, 1, 0, 0, 0) / 1000)
+}
+
 // Dal prezzo pagato si risale al piano: e' cosi' che il webhook sa quale pacchetto attivare,
 // anche quando il cambio piano e' stato fatto dal portale fatture del circuito e non dal nostro.
 export function pianoDaPrezzo(price: Stripe.Price | null | undefined): Piano | null {

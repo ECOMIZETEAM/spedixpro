@@ -133,6 +133,10 @@ async function analizza(admin: any, s: any, rootId: string) {
       addebito: (giaAlPrimo || giaPagato || escluso) ? 0 : Math.round((canone + conguaglio) * 100) / 100,
       stato: sub.status, rinnovo_attuale: fine ? new Date(fine * 1000).toISOString().slice(0, 10) : null,
       escluso, gia_al_primo: giaAlPrimo, gia_pagato: giaPagato, sub_trial_end: sub.trial_end,
+      // Istante PIENO, non solo il giorno: la data si taglia in schermata. Con la sola data un ciclo
+      // sbagliato di poche ore (o agganciato al 1° ma alle 10:58 invece che alle 02:00) sembrava
+      // identico a uno giusto, e questa tabella serve proprio a vedere se qualcuno e' fuori riga.
+      rinnovo_il: fine ? new Date(fine * 1000).toISOString() : null,
     })
   }
   righe.sort((a, b) => (a.rinnovo_attuale || '').localeCompare(b.rinnovo_attuale || ''))

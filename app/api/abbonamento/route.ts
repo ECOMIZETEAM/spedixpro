@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { PIANI_ENTERPRISE, pianoById, meseCorrente } from '@/lib/piani'
-import { stripeConfigurato, IVA_PERCENTUALE } from '@/lib/stripe'
+import { stripeConfigurato, stripeClient, IVA_PERCENTUALE } from '@/lib/stripe'
 import { descriviCambio, primoDelMeseProssimo, conguaglioDelMese } from '@/lib/abbonamento-cambi'
 import { GIORNI_TOLLERANZA } from '@/lib/limite-piano'
 
@@ -42,6 +42,26 @@ export async function GET() {
     prossimoPagamento = {
       totale: Math.round((rinnovo + conguaglio) * 100) / 100,
       rinnovo, conguaglio, dettaglio, pianoRinnovo: pianoRinnovo?.nome || null,
+      quando: null as string | null,
+    }
+
+    // QUANDO, non solo quanto. La schermata diceva l'importo e taceva la data: chi ha appena visto
+    // spostare il proprio ciclo al 1° non aveva modo di verificarlo, e "fidati" non e' una risposta.
+    //
+    // La data si LEGGE DAL CIRCUITO, non si calcola: e' quella che fara' partire l'addebito davvero.
+    // Ricalcolarla qui vorrebbe dire mostrare cio' che ci aspettiamo invece di cio' che succedera' —
+    // e sarebbe proprio il caso in cui un disallineamento resterebbe invisibile.
+    // Con la pausa attiva il periodo finisce al trial_end: le due date coincidono, si prende la fine
+    // periodo che vale in entrambi i casi. Il punto in cui vive e' cambiato fra le versioni
+    // dell'interfaccia (ora sulla voce, prima sull'abbonamento): si provano tutte e due.
+    // Se il circuito non risponde la schermata resta com'era: una data mancante non deve far fallire
+    // la pagina dell'abbonamento.
+    if (stripeConfigurato() && (m as any)?.stripe_subscription_id && (m as any)?.stripe_stato !== 'canceled') {
+      try {
+        const sub: any = await stripeClient().subscriptions.retrieve((m as any).stripe_subscription_id)
+        const fine = sub?.items?.data?.[0]?.current_period_end || sub?.current_period_end
+        if (fine) prossimoPagamento.quando = new Date(Number(fine) * 1000).toISOString()
+      } catch (e: any) { console.error('[ABBONAMENTO] data rinnovo non letta:', e?.message) }
     }
   }
 
@@ -287,7 +307,6 @@ export async function POST(req: NextRequest) {
 
   const mese = meseCorrente()
   const prezzoAttuale = Number(m?.abbonamento_prezzo || 0)
-  const haPianoQuestoMese = !!m?.abbonamento_piano && m?.abbonamento_mese === mese
   if (m?.abbonamento_piano === nuovo.id) return NextResponse.json({ error: 'Hai già questo piano' }, { status: 400 })
 
   // Importo da addebitare ORA:
@@ -310,7 +329,15 @@ export async function POST(req: NextRequest) {
   // limite subito significherebbe togliere qualcosa di gia' pagato — e magari bloccare una rete che
   // quel mese aveva gia' spedito oltre il nuovo limite. Si scrive l'intenzione e la applica il giro
   // del primo del mese. L'upgrade invece vale subito: serve proprio a non doversi fermare.
-  if (haPianoQuestoMese && nuovo.prezzo < prezzoAttuale) {
+  //
+  // La condizione NON guarda piu' se il mese risulta pagato. Guardava `abbonamento_mese`, che il
+  // webhook scrive col mese del SERVER al momento dell'incasso: i pagamenti entrati il 31/08 alle
+  // 22-23 UTC (la campagna di allineamento) l'hanno lasciato ad "agosto" su 9 master che settembre
+  // l'avevano pagato eccome. Con quel campo indietro il downgrade scivolava nel ramo immediato e il
+  // limite si abbassava a mese iniziato. Il downgrade parte dal 1°, punto: che il mese risulti
+  // saldato o no non cambia la regola, e una regola che dipende da un campo che puo' restare
+  // indietro non e' una regola.
+  if (m?.abbonamento_piano && nuovo.prezzo < prezzoAttuale) {
     const dal = primoDelMeseProssimo().toISOString()
     await admin.from('masters').update({
       abbonamento_piano_programmato: nuovo.id, abbonamento_programmato_dal: dal,

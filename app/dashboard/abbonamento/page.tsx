@@ -323,11 +323,23 @@ export default function AbbonamentoPage() {
                         <td style={{padding:'8px 12px',whiteSpace:'nowrap' as const}}>€ {Number(r.canone).toFixed(2)}</td>
                         <td style={{padding:'8px 12px',whiteSpace:'nowrap' as const,color:r.conguaglio>0?'#ea580c':'#999'}}>{r.conguaglio>0?'€ '+Number(r.conguaglio).toFixed(2):'—'}</td>
                         <td style={{padding:'8px 12px',fontWeight:700,whiteSpace:'nowrap' as const}}>{(r.escluso||r.gia_al_primo||r.gia_pagato)?'—':'€ '+Number(r.addebito).toFixed(2)}</td>
-                        <td style={{padding:'8px 12px',color:'#555',whiteSpace:'nowrap' as const}}>{r.rinnovo_attuale||'—'}</td>
+                        <td style={{padding:'8px 12px',color:'#555',whiteSpace:'nowrap' as const}}>
+                          {r.rinnovo_il
+                            ? <>{new Date(r.rinnovo_il).toLocaleDateString('it-IT',{timeZone:'Europe/Rome',day:'2-digit',month:'2-digit',year:'2-digit'})}
+                                <span style={{color:'#999',marginLeft:'5px'}}>{new Date(r.rinnovo_il).toLocaleTimeString('it-IT',{timeZone:'Europe/Rome',hour:'2-digit',minute:'2-digit'})}</span></>
+                            : (r.rinnovo_attuale || '—')}
+                        </td>
                         <td style={{padding:'8px 12px',whiteSpace:'nowrap' as const}}>
                           {r.escluso ? <span style={{fontSize:'11px',color:'#b45309'}}>fuori · {r.escluso.replace(/_/g,' ')}</span>
                             : r.gia_al_primo ? <span style={{fontSize:'11px',color:'#16a34a'}}>già al 1°</span>
-                            : r.gia_pagato ? <span style={{fontSize:'11px',color:'#16a34a'}}>già pagato · intatto</span>
+                            : r.gia_pagato ? <span style={{fontSize:'11px',color:'#16a34a',display:'inline-flex',alignItems:'center',gap:'7px'}}>già pagato · intatto
+                                {/* Il batch non li tocca — mai troncare d'ufficio un periodo pagato. Ma il pulsante ci
+                                    vuole: chi si abbona a inizio mese ha un periodo che scavalca il 1° (paga il 7,
+                                    coperto fino al 7), e per la regola del forfait quel canone vale il MESE, non i 30
+                                    giorni. Senza pulsante la riga era solo leggibile e i due abbonati del 7/09 non
+                                    erano allineabili dal portale. Resta una scelta a mano, master per master. */}
+                                <button onClick={()=>applicaAllinea({soloPausa:r.master_id, nome:r.nome})} disabled={!!allineaAzione} title="Sposta al 1° SENZA addebito: il canone gia' versato vale il mese in corso" style={{fontSize:'10px',padding:'2px 8px',border:'1px solid #bfdbfe',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',cursor:'pointer',fontWeight:700}}>{allineaAzione===r.master_id?'…':'→ 1°'}</button>
+                              </span>
                             : <span style={{fontSize:'11px',color:'#2563eb',display:'inline-flex',alignItems:'center',gap:'7px'}}>addebito + pausa
                                 <button onClick={()=>applicaAllinea({solo:r.master_id, nome:r.nome})} disabled={!!allineaAzione} title="Fai partire SOLO questo master, per verificarlo su Stripe" style={{fontSize:'10px',padding:'2px 8px',border:'1px solid #fed7aa',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',cursor:'pointer',fontWeight:700}}>{allineaAzione===r.master_id?'…':'🧪 prova'}</button>
                                 <button onClick={()=>applicaAllinea({soloPausa:r.master_id, nome:r.nome})} disabled={!!allineaAzione} title="Abbonato tardi: allinea al 1° SENZA addebito (salta il mese, paga il 1°)" style={{fontSize:'10px',padding:'2px 8px',border:'1px solid #bfdbfe',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',cursor:'pointer',fontWeight:700}}>{allineaAzione===r.master_id?'…':'→ 1° ott'}</button>
@@ -594,6 +606,17 @@ export default function AbbonamentoPage() {
             <div style={{fontSize:'12px',fontWeight:700,textTransform:'uppercase',letterSpacing:'.4px',color:'#9a3412'}}>Prossimo pagamento</div>
             <div style={{fontSize:'26px',fontWeight:800,color:'#ea580c'}}>€ {Number(stato.prossimoPagamento.totale).toFixed(2)}</div>
           </div>
+          {/* QUANDO parte l'addebito. La data arriva dal circuito (vedi /api/abbonamento), non è
+              calcolata qui: è quella che farà davvero partire il pagamento, quindi se un ciclo non
+              fosse allineato al 1° si vedrebbe subito invece di restare nascosto dietro un conto
+              che torna. L'ora è quella italiana: gli abbonamenti agganciati al 1° scattano alle
+              02:00, perché il circuito ragiona a mezzanotte UTC. */}
+          {stato.prossimoPagamento.quando && (
+            <div style={{fontSize:'13.5px',color:'#7c2d12',marginTop:'8px',display:'flex',alignItems:'center',gap:'7px',flexWrap:'wrap'}}>
+              <span>🗓️</span>
+              <span>Prossimo rinnovo <strong>{new Date(stato.prossimoPagamento.quando).toLocaleDateString('it-IT',{timeZone:'Europe/Rome',weekday:'long',day:'numeric',month:'long',year:'numeric'})}</strong> alle <strong>{new Date(stato.prossimoPagamento.quando).toLocaleTimeString('it-IT',{timeZone:'Europe/Rome',hour:'2-digit',minute:'2-digit'})}</strong></span>
+            </div>
+          )}
           <div style={{fontSize:'13px',color:'#7c2d12',marginTop:'10px',lineHeight:1.7}}>
             <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
               <span>Rinnovo {stato.prossimoPagamento.pianoRinnovo || ''}</span>
