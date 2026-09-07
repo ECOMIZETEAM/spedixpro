@@ -49,6 +49,7 @@ const NAV: NavItem[] = [
     { label: 'Listini Clienti', href: '/dashboard/listini', perm: 'admin.pricelists.index' },
     { label: 'Listino Corrieri', href: '/dashboard/listini/corrieri/nuovo', perm: 'admin.pricelists.vector' },
     { label: 'Listini da adeguare', href: '/dashboard/listini/da-adeguare', perm: 'admin.pricelists.index' },
+    { label: 'Ottimizza margini', href: '/dashboard/margini', perm: 'admin.pricelists.index' },
     { label: 'Gestione Zone', href: '/dashboard/zone', perm: 'admin.pricelists.zones.index' },
   ]},
   { label: 'Preventivi', href: '/dashboard/preventivi', icon: '✎', perm: 'admin.pricelists.create' },
