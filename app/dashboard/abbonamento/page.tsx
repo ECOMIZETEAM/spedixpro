@@ -270,6 +270,27 @@ export default function AbbonamentoPage() {
             riall.error ? <div style={{marginTop:'10px',fontSize:'13px',color:'#dc2626'}}>{riall.error}</div>
             : !riall.righe?.length ? <div style={{marginTop:'10px',fontSize:'13px',color:'#16a34a',fontWeight:600}}>✓ Tutto già allineato, niente da fare.</div>
             : <>
+              {/* CANONE SU STRIPE DIVERSO DAL LISTINO. A fatturare e' il prezzo agganciato alla
+                  subscription, non quello in tabella, e i due possono divergere senza che nulla
+                  protesti (il webhook ripiega su metadata.piano e riscrive il piano vecchio). Il
+                  2/09/2026 su un canone master e' finito un prezzo di un piano API da 31 euro: la
+                  tabella diceva 139 e si e' visto solo cercandolo a mano. Qui si vede da solo. */}
+              {!!(allinea.anomalie||[]).length && (
+                <div style={{marginTop:'12px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'8px',padding:'12px 14px'}}>
+                  <div style={{fontSize:'13px',fontWeight:800,color:'#b91c1c',display:'flex',alignItems:'center',gap:'7px'}}>
+                    <span>⚠️</span> Canone su Stripe diverso dal listino — {allinea.anomalie.length} {allinea.anomalie.length===1?'master':'master'}
+                  </div>
+                  <div style={{fontSize:'12.5px',color:'#7f1d1d',marginTop:'7px',lineHeight:1.7}}>
+                    {allinea.anomalie.map((a:any,i:number)=>(
+                      <div key={i}><strong>{a.nome}</strong> — {a.problema}</div>
+                    ))}
+                  </div>
+                  <div style={{fontSize:'11.5px',color:'#991b1b',marginTop:'8px',lineHeight:1.6}}>
+                    Ad addebitare è il prezzo che sta su Stripe, non quello qui in tabella: finché non lo
+                    correggi sulla subscription, al rinnovo partirà quella cifra.
+                  </div>
+                </div>
+              )}
               <div style={{overflowX:'auto' as const,marginTop:'12px'}}>
                 <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
                   <thead><tr style={{background:'#fafafa'}}>
@@ -320,7 +341,9 @@ export default function AbbonamentoPage() {
                     {allinea.righe.map((r:any)=>(
                       <tr key={r.master_id} style={{borderBottom:'1px solid #f5f5f5',opacity:(r.gia_al_primo||r.gia_pagato||r.escluso)?0.55:1}}>
                         <td style={{padding:'8px 12px',fontWeight:600}}>{r.nome}</td>
-                        <td style={{padding:'8px 12px',whiteSpace:'nowrap' as const}}>€ {Number(r.canone).toFixed(2)}</td>
+                        <td style={{padding:'8px 12px',whiteSpace:'nowrap' as const,color:r.anomalia_canone?'#b91c1c':undefined,fontWeight:r.anomalia_canone?800:undefined}} title={r.anomalia_canone||''}>
+                          € {Number(r.canone).toFixed(2)}{r.anomalia_canone && ' ⚠️'}
+                        </td>
                         <td style={{padding:'8px 12px',whiteSpace:'nowrap' as const,color:r.conguaglio>0?'#ea580c':'#999'}}>{r.conguaglio>0?'€ '+Number(r.conguaglio).toFixed(2):'—'}</td>
                         <td style={{padding:'8px 12px',fontWeight:700,whiteSpace:'nowrap' as const}}>{(r.escluso||r.gia_al_primo||r.gia_pagato)?'—':'€ '+Number(r.addebito).toFixed(2)}</td>
                         <td style={{padding:'8px 12px',color:'#555',whiteSpace:'nowrap' as const}}>

@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { stripeConfigurato, stripeClient, primoDelProssimoMese } from '@/lib/stripe'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
+import { PIANI_ENTERPRISE } from '@/lib/piani'
 
 // ALLINEA LA FATTURAZIONE AL 1° — solo il master principale.
 //
@@ -21,6 +22,29 @@ import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 //  - fuori: bonifico/senza-carta/sconti/stati non attivi/chi rinnova gia' il 1°/chi ha gia' pagato
 //    oltre la pausa (mai troncare un periodo gia' pagato senza credito);
 //  - `solo`=<master_id> per il CANARY mirato: il super master sceglie chi far partire per primo.
+
+// IL CANONE VERO E' QUELLO SU STRIPE, NON QUELLO IN TABELLA.
+//
+// `masters.abbonamento_prezzo` dice quanto DOVREBBE pagare; a fatturare e' il prezzo agganciato alla
+// subscription. Le due cose possono divergere in silenzio: il webhook, quando non riconosce il prezzo
+// come piano master, ripiega su `metadata.piano` (che nessuno aggiorna) e riscrive in tabella il piano
+// vecchio — nessun errore da nessuna parte. E' successo il 2/09/2026: sulla subscription del canone di
+// un master e' finito il prezzo di un piano API da clienti (€ 31), la tabella continuava a dire € 139,
+// e si e' visto solo confrontando a mano 24 giorni prima che diventasse un addebito.
+//
+// Il confronto sta QUI perche' questa funzione le subscription le scarica gia' tutte: costa zero.
+const PREZZI_MASTER = new Set(PIANI_ENTERPRISE.map(p => Number(p.prezzo)))
+const MINIMO_MASTER = Math.min(...PIANI_ENTERPRISE.map(p => Number(p.prezzo)))
+
+// Un master non puo' stare sotto il piano piu' economico: qualunque cifra inferiore su una
+// subscription master e' un errore, non una scelta commerciale.
+function anomaliaCanone(suStripe: number | null, inTabella: number): string | null {
+  if (suStripe == null) return null
+  if (suStripe < MINIMO_MASTER) return `su Stripe € ${suStripe.toFixed(2)}: sotto il minimo dei piani master (€ ${MINIMO_MASTER.toFixed(2)})`
+  if (!PREZZI_MASTER.has(suStripe)) return `su Stripe € ${suStripe.toFixed(2)}: non corrisponde a nessun piano master`
+  if (inTabella > 0 && Math.abs(suStripe - inTabella) >= 0.01) return `Stripe € ${suStripe.toFixed(2)} ≠ listino € ${inTabella.toFixed(2)}`
+  return null
+}
 
 const RUOLI_OK = new Set(['master', 'admin'])   // azione di massa sui pagamenti: NON operatore
 
@@ -104,7 +128,10 @@ async function analizza(admin: any, s: any, rootId: string) {
     let sub: any = null
     try { sub = await s.subscriptions.retrieve(m.stripe_subscription_id, { expand: ['items.data.price'] }) } catch { continue }
     const voce = sub.items?.data?.[0]
-    const canone = Number(voce?.price?.unit_amount || 0) / 100 || Number(m.abbonamento_prezzo || 0)
+    // Il prezzo COSI' COM'E' su Stripe, senza ripiegare sulla tabella: il ripiego serve a far quadrare
+    // l'addebito, ma qui e' proprio la differenza fra i due che si vuole vedere.
+    const canoneStripe = (voce as any)?.price?.unit_amount != null ? Number((voce as any).price.unit_amount) / 100 : null
+    const canone = canoneStripe ?? Number(m.abbonamento_prezzo || 0)
     const fine = (voce as any)?.current_period_end || sub.current_period_end
     const conguaglio = await conguaglioInSospeso(s, String(sub.customer))
     const pm = await cartaDa(s, sub)
@@ -137,6 +164,8 @@ async function analizza(admin: any, s: any, rootId: string) {
       // sbagliato di poche ore (o agganciato al 1° ma alle 10:58 invece che alle 02:00) sembrava
       // identico a uno giusto, e questa tabella serve proprio a vedere se qualcuno e' fuori riga.
       rinnovo_il: fine ? new Date(fine * 1000).toISOString() : null,
+      canone_stripe: canoneStripe, canone_listino: Number(m.abbonamento_prezzo || 0),
+      anomalia_canone: anomaliaCanone(canoneStripe, Number(m.abbonamento_prezzo || 0)),
     })
   }
   righe.sort((a, b) => (a.rinnovo_attuale || '').localeCompare(b.rinnovo_attuale || ''))
@@ -155,6 +184,9 @@ export async function GET() {
     righe, n: righe.length, n_da_fare: daFare.length,
     totale_addebito: Math.round(daFare.reduce((t, r) => t + r.addebito, 0) * 100) / 100,
     esclusi: righe.filter(r => r.escluso).map(r => ({ nome: r.nome, motivo: r.escluso })),
+    // Si segnalano SEMPRE, anche per i master esclusi dal batch: un canone sbagliato addebita comunque,
+    // che quel master lo si stia allineando oppure no.
+    anomalie: righe.filter(r => r.anomalia_canone).map(r => ({ nome: r.nome, problema: r.anomalia_canone })),
   })
 }
 
