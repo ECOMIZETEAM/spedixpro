@@ -114,6 +114,12 @@ export async function GET() {
     for (const p of (pag || [])) {
       if (!attiviIds.has(p.master_id)) continue
       if (p.pagato) continue
+      // ANNULLATO = non e' un credito, ma la riga RESTA. Sono i canoni di luglio 2026, i primi giorni
+      // di MoovExpress: quel mese e' nato con errori grossi nostri e non si va a chiederlo a nessuno
+      // (decisione di Lorenzo, 7/09/2026 — stessa strada gia' presa per Giga Express). Non si
+      // cancellano: la riga dice cosa e' successo quel mese, e lo storico non si cancella. Smette
+      // solo di comparire fra i soldi da incassare, che e' l'unica cosa che di quel mese era falsa.
+      if (String(p.metodo || '') === 'annullato') continue
       if (!nonPagatiByMaster.has(p.master_id)) nonPagatiByMaster.set(p.master_id, [])
       nonPagatiByMaster.get(p.master_id)!.push(p)
     }
