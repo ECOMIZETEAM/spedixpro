@@ -672,10 +672,12 @@ export async function POST(req: NextRequest) {
         label_format: 'PDF', packages,
         // EMAIL SCHERMO: al provider va SEMPRE l'email di servizio (mai quelle vere di mitt/dest).
         shipFrom: { ...body.shipFrom, email: EMAIL_PER_CORRIERE }, shipTo: { ...body.shipTo, email: EMAIL_PER_CORRIERE },
-        // NOTE = nota del cliente + rif ordine (Spedisci NON ha un campo riferimento separato, quindi
-        // per far comparire il rif sull'etichetta va qui). Nota prima, poi rif: su un ordine importato
-        // senza nota esce il rif; su una spedizione manuale con nota esce la nota (+ rif se ci sta).
-        notes: [body.notes, body.rifOrdine].filter(Boolean).map((s: any) => String(s).trim()).join(' '),
+        // NOTE = rif ordine + nota del cliente (Spedisci NON ha un campo riferimento separato: il rif
+        // sull'etichetta esce da qui). RIF PRIMA della nota: prima era in coda e, con una nota lunga,
+        // veniva TAGLIATO dallo spazio dell'etichetta → "alcune etichette senza riferimento" (caso Epos:
+        // "#18125" perso dietro "Casa gialla COD. Armadio consegne 2021"). Il rif è corto: davanti c'è
+        // sempre; semmai si accorcia la nota (meno critica del riferimento d'ordine).
+        notes: [body.rifOrdine, body.notes].filter(Boolean).map((s: any) => String(s).trim()).join(' '),
         // content = descrizione merce inserita dall'utente → esce in etichetta (Spedisci ha il campo
         // dedicato, a differenza di SpediamoPro): il contenuto vero viaggia qui, non serve metterlo in NOTE.
         ...(String(body.contenuto || '').trim() ? { content: String(body.contenuto).trim() } : {}),
