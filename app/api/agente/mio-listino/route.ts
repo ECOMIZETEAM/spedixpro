@@ -18,8 +18,15 @@ export async function GET() {
   for (const a of (aggCorr || [])) { const fv = parseFloat((a as any)?.fattore_volume); if ((a as any)?.corriere_id && fv > 0) fattorePerCorr.set((a as any).corriere_id, fv) }
 
   const { data: fasce } = await supabase.from('listini_clienti_fasce')
-    .select('corriere_id,peso_max,prezzo,tipo,fuel,zone(nome),corrieri(nome_contratto)')
+    .select('corriere_id,peso_max,prezzo,tipo,fuel,zone(nome),corrieri(nome_contratto,attivo,master_id)')
     .eq('listino_id', listinoId).order('peso_max', { ascending: true })
+
+  // NASCONDE i contratti IN PAUSA: pausa propria del master (attivo=false) + sospesi a monte
+  // (pausa/disattiva/elimina di un antenato), come /api/cliente/listino-prezzi. Un contratto in pausa
+  // non è vendibile → non deve comparire; alla riattivazione riappare (filtro alla lettura).
+  const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
+  const masterDelContratto = (fasce || []).map((f: any) => (f as any).corrieri?.master_id).find(Boolean) || null
+  const sospesiSopra = await contrattiSospesiSopra(masterDelContratto)
 
   const defFattore = parseFloat((listino as any)?.fattore_volume) || 5000
   // Griglia come il listino corrieri del master: righe = fasce peso, colonne = zone.
@@ -27,6 +34,9 @@ export async function GET() {
   for (const f of (fasce || [])) {
     const cid = (f as any).corriere_id
     if (!cid) continue
+    const cRec = (f as any).corrieri
+    if (cRec?.attivo === false) continue                              // pausa propria del master
+    if (sospesoDallaCatena(cRec?.nome_contratto, sospesiSopra)) continue   // sospeso a monte
     if (!perCorr.has(cid)) {
       perCorr.set(cid, {
         nome_contratto: (f as any).corrieri?.nome_contratto || 'Corriere',
