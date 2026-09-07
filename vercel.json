@@ -78,6 +78,10 @@
     {
       "path": "/api/tracking/gls-spedisci",
       "schedule": "50 * * * *"
+    },
+    {
+      "path": "/api/cron/riallinea-contrassegni-m",
+      "schedule": "40 * * * *"
     }
   ]
 }
