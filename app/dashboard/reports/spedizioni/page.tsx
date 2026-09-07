@@ -19,19 +19,21 @@ export default function ReportSpedizioniPage() {
   const [reports, setReports] = useState<any[]>([])
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
-  const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [intest, setIntest] = useState<any>({ nome: '', indirizzo: '', email: '', piva: '', logo_url: null })
   const [filtri, setFiltri] = useState({
     clienteId: '', tipoContratto: '', vettore: '', contratto: '',
     dal: new Date().toISOString().split('T')[0],
     al: new Date().toISOString().split('T')[0],
-    agente: '', provincia: '', stato: '', contrassegno: '', formato: 'PDF'
+    agente: '', provincia: '', stato: '', contrassegno: '', formato: 'PDF',
+    suddivisione: '', fatturazione: '', canale: '', statoContrassegno: ''
   })
 
   useEffect(() => {
     fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
     fetch('/api/corrieri/lista').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d)?d:[]))
     fetch('/api/staff').then(r=>r.json()).then(d=>setStaff(Array.isArray(d)?d.filter((u:any)=>{const ru=(u.ruolo||'').toLowerCase();return ru!=='cliente'&&ru!=='master'}):[]))
+    fetch('/api/reports/intestazione').then(r=>r.json()).then(d=>setIntest(d||{})).catch(()=>{})
     caricaReports()
   }, [])
 
@@ -43,131 +45,95 @@ export default function ReportSpedizioniPage() {
 
   const setF = (k: string, v: string) => setFiltri(f => ({...f, [k]: v}))
 
+  // Testo filtri per l'elenco report: token separati da spazio (l'elenco li mostra uno per riga),
+  // valori senza spazi interni (underscore) così non si spezzano.
+  function filtriTesto(): string {
+    const t: string[] = ['periodo=' + (filtri.dal||'') + '→' + (filtri.al||'')]
+    if (filtri.clienteId) { const c = clienti.find((x:any)=>x.id===filtri.clienteId); t.push('cliente=' + String(c?.ragione_sociale||filtri.clienteId).replace(/\s+/g,'_')) }
+    if (filtri.vettore) t.push('vettore=' + filtri.vettore)
+    if (filtri.agente) t.push('agente=' + filtri.agente.replace(/\s+/g,'_'))
+    if (filtri.provincia) t.push('provincia=' + filtri.provincia)
+    if (filtri.stato) t.push('stato=' + filtri.stato)
+    if (filtri.contrassegno) t.push('contrassegno=' + filtri.contrassegno)
+    if (filtri.fatturazione) t.push('fatturazione=' + filtri.fatturazione)
+    if (filtri.canale) t.push('canale=' + filtri.canale)
+    if (filtri.statoContrassegno) t.push('cod=' + filtri.statoContrassegno)
+    t.push('suddivisione=' + (filtri.suddivisione||'file_unico'))
+    t.push('formato=' + filtri.formato)
+    return t.join(' ')
+  }
+
   async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
-    const filtriTxt = 'dalla_data=' + (filtri.dal||'') + ' alla_data=' + (filtri.al||'')
-    const j = await inviaReport({ tipo: 'spedizioni', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
+    const j = await inviaReport({ tipo: 'spedizioni', filtri: filtriTesto(), formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
     if (!j.success) { await dialog.alert({ title: 'Errore', message: 'Errore salvataggio report: ' + (j.error||'') }); return }
     const lista = await fetch('/api/reports/lista?tipo=spedizioni').then(x=>x.json())
     setReports(Array.isArray(lista) ? lista : [])
   }
+
   async function generaReport() {
     setGenerating(true)
-    const params = new URLSearchParams()
-    if (filtri.clienteId) params.set('clienteId', filtri.clienteId)
-    if (filtri.stato) params.set('stato', filtri.stato)
-    if (filtri.dal) params.set('dal', filtri.dal)
-    if (filtri.al) params.set('al', filtri.al + 'T23:59:59')
-    if (filtri.contrassegno) params.set('contrassegno', filtri.contrassegno)
-    if (filtri.provincia) params.set('provincia', filtri.provincia)
+    try {
+      const params = new URLSearchParams()
+      if (filtri.clienteId) params.set('clienteId', filtri.clienteId)
+      if (filtri.stato) params.set('stato', filtri.stato)
+      if (filtri.dal) params.set('dal', filtri.dal)
+      if (filtri.al) params.set('al', filtri.al + 'T23:59:59')
+      if (filtri.contrassegno) params.set('contrassegno', filtri.contrassegno)
+      if (filtri.provincia) params.set('provincia', filtri.provincia)
+      if (filtri.fatturazione) params.set('fatturazione', filtri.fatturazione)
+      if (filtri.canale) params.set('canale', filtri.canale)
+      if (filtri.statoContrassegno) params.set('statoContrassegno', filtri.statoContrassegno)
 
-    const res = await fetch(`/api/reports/spedizioni?${params}`)
-    let spedizioni = await res.json()
-    // Filtro vettore client-side (stessa logica della lista spedizioni)
-    if (filtri.vettore) spedizioni = spedizioni.filter((s:any) => String(s.corrieri?.nome_contratto||'').split(' ')[0] === filtri.vettore)
-    // Filtro agente: match sul campo agente del cliente (= "Nome Cognome")
-    if (filtri.agente) spedizioni = spedizioni.filter((s:any) => (s.clienti?.agente||'') === filtri.agente)
+      const res = await fetch(`/api/reports/spedizioni?${params}`)
+      let spedizioni = await res.json()
+      if (filtri.vettore) spedizioni = spedizioni.filter((s:any) => String(s.corrieri?.nome_contratto||'').split(' ')[0] === filtri.vettore)
+      if (filtri.agente) spedizioni = spedizioni.filter((s:any) => (s.clienti?.agente||'') === filtri.agente)
+      if (!spedizioni.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna spedizione trovata con i filtri selezionati.' }); return }
 
-    if (!spedizioni.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna spedizione trovata con i filtri selezionati.' }); setGenerating(false); return }
+      const gen = await import('@/lib/report-spedizioni-genera')
+      const formato = filtri.formato.toLowerCase() as 'pdf' | 'xlsx' | 'csv'
+      const ext = gen.estFormato(formato)
+      const periodo = gen.periodoStr(filtri.dal, filtri.al)
+      const base = 'report_spedizioni_' + filtri.dal + '_' + filtri.al
 
-    const formato = filtri.formato.toLowerCase()
-
-    if (formato === 'xlsx' || formato === 'csv') {
-      const { utils, writeFile } = await import('xlsx')
-      // COLONNE DEL TEMPLATE MASTER (34) + nostre extra (Margine/Rettifica). Builder condiviso col
-      // portale cliente, che pero' NON include prezzo_corriere/Margine/Rettifica (affari del master).
-      const { righeReportSpedizioni } = await import('@/lib/report-spedizioni-cols')
-      const rows = righeReportSpedizioni(spedizioni, { master: true })
-      // Riga totali: costo cliente, prezzo corriere e margine (chiavi = colonne del template).
-      const totCli = spedizioni.reduce((a: number, s: any) => a + Number(s.costo_totale || 0), 0)
-      const totCor = spedizioni.reduce((a: number, s: any) => a + Number(s.prezzo_corriere || 0), 0)
-      rows.push({} as any)
-      rows.push({ status: 'TOTALE', costo_cliente: Math.round(totCli * 100) / 100, costo: Math.round(totCli * 100) / 100, prezzo_corriere: Math.round(totCor * 100) / 100, Margine: Math.round((totCli - totCor) * 100) / 100 } as any)
-      const ws = utils.json_to_sheet(rows)
-      const wb = utils.book_new()
-      utils.book_append_sheet(wb, ws, 'Spedizioni')
-      const XLSX = await import('xlsx')
-      const b64 = XLSX.write(wb, { bookType: formato === 'csv' ? 'csv' : 'xlsx', type: 'base64' })
-      await salvaReport(b64, 'report_spedizioni_' + filtri.dal + '_' + filtri.al + '.' + (formato === 'xlsx' ? 'xlsx' : 'csv'), formato)
-    } else if (formato === 'pdf') {
-      const { default: jsPDF } = await import('jspdf')
-      const { default: autoTable } = await import('jspdf-autotable')
-      const doc = new jsPDF({ orientation: 'landscape' })
-      doc.setFontSize(14)
-      doc.text(`Report Spedizioni — ${filtri.dal} / ${filtri.al}`, 14, 15)
-      doc.setFontSize(10)
-      doc.text(`Totale: ${spedizioni.length} spedizioni`, 14, 22)
-      autoTable(doc, {
-        startY: 28,
-        head: [['N. Spedizione','Cliente','Destinatario','Città','Peso','Stato','Rettifica €','Prezzo Cliente €','Prezzo Corriere €','Margine €']],
-        body: spedizioni.map((s: any) => {
-          const cli = Number(s.costo_totale || 0)
-          const cor = s.prezzo_corriere != null ? Number(s.prezzo_corriere) : null
-          const rett = Number(s.rettifica || 0)
-          return [
-            s.numero, s.clienti?.ragione_sociale||s.mitt_nome, s.dest_nome,
-            `${s.dest_citta} (${s.dest_provincia})`, `${s.peso_reale}kg`,
-            s.stato.replace(/_/g,' '), (rett ? `€${rett.toFixed(2)}` : '-'), `€${cli.toFixed(2)}`,
-            (cor != null ? `€${cor.toFixed(2)}` : '-'),
-            (cor != null ? `€${(cli - cor).toFixed(2)}` : '-'),
-          ]
-        }),
-        styles: { fontSize: 7 },
-        headStyles: { fillColor: [249, 115, 22] },
-      })
-      // Riepilogo subtotale/IVA/totale
-      const totCliente = spedizioni.reduce((acc: number, s: any) => acc + Number(s.costo_totale||0), 0)
-      const totCorriere = spedizioni.reduce((acc: number, s: any) => acc + Number(s.prezzo_corriere||0), 0)
-      const pageH = doc.internal.pageSize.getHeight()
-      let finalY = (doc as any).lastAutoTable.finalY + 20
-      if (finalY + 20 > pageH - 15) { doc.addPage(); finalY = 30 }
-      const pageW = doc.internal.pageSize.getWidth()
-      const col1 = pageW - 120
-      const col2 = pageW - 20
-      doc.setDrawColor(200,200,200)
-      doc.line(col1 - 10, finalY - 4, col2, finalY - 4)
-      doc.setFontSize(10)
-      doc.setTextColor(30,30,30)
-      doc.setFont('helvetica','bold')
-      doc.text('TOTALE PREZZO CLIENTE', col1, finalY)
-      doc.text(`EUR ${totCliente.toFixed(2)}`, col2, finalY, {align:'right'})
-      doc.text('TOTALE PREZZO CORRIERE', col1, finalY + 10)
-      doc.text(`EUR ${totCorriere.toFixed(2)}`, col2, finalY + 10, {align:'right'})
-      doc.setTextColor((totCliente-totCorriere)<0?200:22, (totCliente-totCorriere)<0?38:163, (totCliente-totCorriere)<0?38:74)
-      doc.text('MARGINE', col1, finalY + 20)
-      doc.text(`EUR ${(totCliente - totCorriere).toFixed(2)}`, col2, finalY + 20, {align:'right'})
-      const pdfB64 = doc.output('datauristring')
-      await salvaReport(pdfB64, 'report_spedizioni_' + filtri.dal + '_' + filtri.al + '.pdf', 'pdf')
-    } else if (formato === 'zip') {
-      const { default: JSZip } = await import('jszip' as any)
-      const zip = new JSZip()
-      const csv = ['N. Spedizione,Cliente,Destinatario,Città,Peso,Colli,Contrassegno,Data,Stato,Rettifica,Prezzo Cliente,Prezzo Corriere,Margine']
-      spedizioni.forEach((s: any) => {
-        const cli = Number(s.costo_totale || 0)
-        const cor = s.prezzo_corriere != null ? Number(s.prezzo_corriere) : null
-        csv.push(`${s.numero},${s.clienti?.ragione_sociale||s.mitt_nome},${s.dest_nome},${s.dest_citta},${s.peso_reale},${s.colli},${s.contrassegno},${new Date(s.created_at).toLocaleDateString('it-IT')},${s.stato},${Number(s.rettifica||0)},${cli},${cor != null ? cor : ''},${cor != null ? Math.round((cli - cor) * 100) / 100 : ''}`)
-      })
-      // Riga totali: SOLO Prezzo Cliente, Prezzo Corriere e Margine
-      const totCli = spedizioni.reduce((a: number, s: any) => a + Number(s.costo_totale || 0), 0)
-      const totCor = spedizioni.reduce((a: number, s: any) => a + Number(s.prezzo_corriere || 0), 0)
-      const rowT = Array(13).fill('')
-      rowT[8] = 'TOTALE'; rowT[10] = String(Math.round(totCli * 100) / 100); rowT[11] = String(Math.round(totCor * 100) / 100); rowT[12] = String(Math.round((totCli - totCor) * 100) / 100)
-      csv.push(''); csv.push(rowT.join(','))
-      zip.file('spedizioni.csv', csv.join('\n'))
-      const blob = await zip.generateAsync({type:'blob'})
-      const nomeZip = `report_spedizioni_${filtri.dal}.zip`
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url; a.download = nomeZip
-      document.body.appendChild(a); a.click(); document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      // Anche lo ZIP va conservato: prima questo ramo registrava la riga senza il file, e in
-      // elenco restava un report che non si poteva riscaricare.
-      const b64 = await new Promise<string>(res => {
-        const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.readAsDataURL(blob)
-      })
-      await salvaReport(b64, nomeZip, 'zip')
+      if (!filtri.suddivisione) {
+        // FILE UNICO = riepilogo per cliente (come Spedisci.online).
+        const agg = gen.aggregaPerCliente(spedizioni)
+        const b64 = formato === 'pdf'
+          ? await gen.pdfRiepilogoB64(intest, periodo, agg)
+          : await gen.excelRiepilogoB64(agg, formato)
+        await salvaReport(b64, base + '.' + ext, formato)
+      } else {
+        // SUDDIVISO = un file di DETTAGLIO per gruppo, raccolti in ZIP.
+        const gruppi = gen.raggruppa(spedizioni, filtri.suddivisione as any)
+        const { default: JSZip } = await import('jszip' as any)
+        const zip = new JSZip()
+        let i = 0
+        for (const g of gruppi) {
+          i++
+          const titolo = [g.cliente, g.contratto].filter(Boolean).join(' — ')
+          const nome = `${i}_${gen.nomeFileSicuro([g.cliente, g.contratto].filter(Boolean).join('_'))}.${ext}`
+          if (formato === 'pdf') {
+            const uri = await gen.pdfDettaglioB64(intest, periodo, titolo, g.righe)
+            zip.file(nome, uri.split(',')[1], { base64: true })
+          } else {
+            zip.file(nome, await gen.excelDettaglioB64(g.righe, formato), { base64: true })
+          }
+        }
+        const blob = await zip.generateAsync({ type: 'blob' })
+        const suff = filtri.suddivisione === 'cliente' ? 'per_cliente' : filtri.suddivisione === 'contratto' ? 'per_contratto' : 'per_cliente_contratto'
+        const nomeZip = `${base}_${suff}.zip`
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a'); a.href = url; a.download = nomeZip
+        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
+        const b64 = await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r(String(fr.result)); fr.readAsDataURL(blob) })
+        await salvaReport(b64, nomeZip, 'zip')
+      }
+    } catch (e:any) {
+      await dialog.alert({ title: 'Errore', message: 'Generazione non riuscita: ' + (e?.message || '') })
+    } finally {
+      setGenerating(false)
     }
-    setGenerating(false)
   }
 
   const totalePagine = Math.max(1, Math.ceil(reports.length / perPage))
@@ -177,7 +143,7 @@ export default function ReportSpedizioniPage() {
   return (
     <div>
       <div style={{marginBottom:'16px'}}>
-        <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Genera Report Spedizioni PDF</h1>
+        <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Genera Report Spedizioni</h1>
       </div>
 
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'16px',marginBottom:'16px'}}>
@@ -207,6 +173,7 @@ export default function ReportSpedizioniPage() {
           <div><label style={lbl}>Contratto</label>
             <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={sel}>
               <option value="">Tutti</option>
+              {Array.from(new Set(corrieri.map((c:any)=>String(c.nome_contratto||'')))).filter(Boolean).map((v:any)=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
         </div>
@@ -236,8 +203,8 @@ export default function ReportSpedizioniPage() {
           </div>
         </div>
 
-        {/* Riga 3 */}
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 6fr',gap:'12px',marginBottom:'16px'}}>
+        {/* Riga 3 — filtri nuovi */}
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'12px',marginBottom:'12px'}}>
           <div><label style={lbl}>Contrassegno</label>
             <select value={filtri.contrassegno} onChange={e=>setF('contrassegno',e.target.value)} style={sel}>
               <option value="">Tutti</option>
@@ -245,15 +212,56 @@ export default function ReportSpedizioniPage() {
               <option value="no">Senza contrassegno</option>
             </select>
           </div>
+          <div><label style={lbl}>Fatturazione</label>
+            <select value={filtri.fatturazione} onChange={e=>setF('fatturazione',e.target.value)} style={sel}>
+              <option value="">Tutte</option>
+              <option value="si">Fatturate</option>
+              <option value="no">Non fatturate</option>
+            </select>
+          </div>
+          <div><label style={lbl}>Canale</label>
+            <select value={filtri.canale} onChange={e=>setF('canale',e.target.value)} style={sel}>
+              <option value="">Tutti</option>
+              <option value="portale">Portale</option>
+              <option value="api">API</option>
+              <option value="Reso">Reso</option>
+              <option value="Demo">Demo</option>
+            </select>
+          </div>
+          <div><label style={lbl}>Stato Contrassegno</label>
+            <select value={filtri.statoContrassegno} onChange={e=>setF('statoContrassegno',e.target.value)} style={sel}>
+              <option value="">Tutti</option>
+              <option value="in_attesa">In attesa</option>
+              <option value="pagato">Pagato</option>
+              <option value="in_distinta">In distinta</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Riga 4 — suddivisione + formato */}
+        <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 3fr',gap:'12px',marginBottom:'16px'}}>
+          <div><label style={lbl}>Suddivisione</label>
+            <select value={filtri.suddivisione} onChange={e=>setF('suddivisione',e.target.value)} style={sel}>
+              <option value="">File unico (riepilogo per cliente)</option>
+              <option value="cliente">Diviso per cliente (ZIP)</option>
+              <option value="contratto">Diviso per contratto (ZIP)</option>
+              <option value="cliente_contratto">Diviso per cliente e contratto (ZIP)</option>
+            </select>
+          </div>
           <div><label style={lbl}>Formato</label>
             <select value={filtri.formato} onChange={e=>setF('formato',e.target.value)} style={sel}>
               <option value="PDF">PDF</option>
               <option value="XLSX">Excel (XLSX)</option>
               <option value="CSV">CSV</option>
-              <option value="ZIP">ZIP</option>
             </select>
           </div>
-          <div></div>
+          <div style={{display:'flex',alignItems:'flex-end'}}>
+            <span style={{fontSize:'11px',color:'#666'}}>
+              {filtri.suddivisione
+                ? 'Un file per ' + (filtri.suddivisione==='cliente'?'cliente':filtri.suddivisione==='contratto'?'contratto':'cliente+contratto') + ', raccolti in ZIP.'
+                : 'Riepilogo aggregato per cliente (Spedizioni, Colli, Prezzo, Iva, Totale).'}
+            </span>
+          </div>
         </div>
 
         <button onClick={generaReport} disabled={generating}
@@ -296,7 +304,6 @@ export default function ReportSpedizioniPage() {
                 <td style={{padding:'9px 14px',color:'#1a1a1a',fontSize:'12px'}}>{r.size_bytes ? `${Math.max(1,Math.round(r.size_bytes/1024))} KB` : '—'}</td>
                 <td style={{padding:'9px 14px',color:'#16a34a',fontSize:'12px',fontWeight:'500'}}>{r.status||'—'}</td>
                 <td style={{padding:'9px 14px'}}>
-                  {/* Senza file non si mette un link: porterebbe a una pagina di errore. */}
                   {r.file_url
                     ? <a href={r.file_url} target="_blank" rel="noopener noreferrer" download style={{color:'#f97316',fontWeight:'600',fontSize:'13px',cursor:'pointer',textDecoration:'none'}}>Scarica</a>
                     : <span style={{color:'#9ca3af',fontSize:'12px'}}>non conservato</span>}

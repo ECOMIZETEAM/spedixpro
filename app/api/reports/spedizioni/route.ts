@@ -88,6 +88,14 @@ export async function GET(req: NextRequest) {
     if (contrassegno === 'si') q = q.gt('contrassegno', 0)
     if (contrassegno === 'no') q = q.eq('contrassegno', 0)
     if (provincia) q = q.eq('dest_provincia', provincia)
+    // NUOVI FILTRI: fatturazione (fatturato true/false), canale (marketplace/origine),
+    // stato contrassegno (esito incasso COD).
+    const fatt = p.get('fatturazione')
+    if (fatt === 'si') q = q.eq('fatturato', true)
+    if (fatt === 'no') q = q.eq('fatturato', false)
+    const canale = p.get('canale')
+    if (canale === 'portale') q = q.is('canale', null); else if (canale) q = q.eq('canale', canale)
+    const statoCod = p.get('statoContrassegno'); if (statoCod) q = q.eq('stato_contrassegno', statoCod)
     return q
   }
   // Report COMPLETO: carico a blocchi (il DB tronca a 1000/query), altrimenti i totali/margini
