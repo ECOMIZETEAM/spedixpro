@@ -1,9 +1,11 @@
 // REGOLA CONTRASSEGNO POSTE EXPRESS M (clienti Ecomize) — resa DUREVOLE.
 //
 // Il contrassegno del "Poste Express M" di un cliente di Ecomize Solution/LL è DERIVATO dal suo
-// "Poste Delivery Business S": stessi scaglioni e prezzi, con **+1,5% sul totale SOLO sull'ultimo
-// scaglione**. Se l'S ha un solo scaglione (cap C, prezzo P) si creano due gradini: {300@P, no%} +
-// {C@P, +1,5%}, così i piccoli importi non pagano la maggiorazione; se C<=300, unico {C@P, +1,5%}.
+// "Poste Delivery Business S": stessi prezzi, con **+1,5% sul totale SOLO sull'ultimo scaglione**.
+// Il breakpoint INTERMEDIO è 300 (non il 500 dell'S): il "fino a 500" dell'S diventa "fino a 300"
+// (è lo scaglione vero del contratto M). Se l'S ha un solo scaglione (cap C, prezzo P) si creano due
+// gradini: {300@P, no%} + {C@P, +1,5%}, così i piccoli importi non pagano la maggiorazione; se C<=300,
+// unico {C@P, +1,5%}. Il TOP non si tocca mai (non si riduce il tetto COD).
 //
 // PERCHÉ NON BASTA FARLO UNA VOLTA: un salvataggio del listino dal portale riscrive i contrassegni
 // senza sapere dell'1,5% e lo PERDE (successo davvero: BRILLITALIA in mezza giornata). La regola
@@ -28,17 +30,40 @@ function parseDescr(d: any): { vm: number; vmt: string; pf: string; perc: string
 }
 
 // Deriva gli scaglioni dell'M da quelli dell'S (già la regola scritta sopra).
+// BREAKPOINT INTERMEDIO = 300 (non 500): il "fino a 500" ereditato dal Poste S va riportato a 300,
+// che è lo scaglione vero del contratto M — così anche i multi-scaglione hanno lo stesso gradino dei
+// mono (che il 300 lo iniettano). Il TOP non si tocca mai (altrimenti si ridurrebbe il tetto COD).
 export function derivaScaglioniM(scaglioniS: { vm: number; vmt: string; pf: string }[]): Scagl[] {
   const s = scaglioniS.filter(x => x.vm > 0).sort((a, b) => a.vm - b.vm)
   if (!s.length) return []
   const max = s[s.length - 1].vm
-  if (s.length >= 2) return s.map(x => ({ valore_max: x.vmt, prezzo_fisso: x.pf, perc: x.vm === max ? '1.5' : '' }))
-  const o = s[0]
-  if (o.vm > 300) return [
-    { valore_max: '300', prezzo_fisso: o.pf, perc: '' },
-    { valore_max: o.vmt, prezzo_fisso: o.pf, perc: '1.5' },
-  ]
-  return [{ valore_max: o.vmt, prezzo_fisso: o.pf, perc: '1.5' }]
+  let out: Scagl[]
+  if (s.length >= 2) {
+    out = s.map(x => {
+      const isTop = x.vm === max
+      const vm = (!isTop && (x.vm === 500 || x.vm === 510)) ? '300' : x.vmt
+      return { valore_max: vm, prezzo_fisso: x.pf, perc: isTop ? '1.5' : '' }
+    })
+  } else {
+    const o = s[0]
+    out = o.vm > 300
+      ? [{ valore_max: '300', prezzo_fisso: o.pf, perc: '' }, { valore_max: o.vmt, prezzo_fisso: o.pf, perc: '1.5' }]
+      : [{ valore_max: o.vmt, prezzo_fisso: o.pf, perc: '1.5' }]
+  }
+  // Dedup di sicurezza per valore_max (se un S avesse già 300 accanto al 500): una sola fascia, prezzo
+  // più alto e maggiorazione conservata, così non nasce una fascia doppia né si sotto-fattura.
+  const byVm = new Map<string, Scagl>()
+  for (const x of out) {
+    const k = String(parseFloat(x.valore_max))
+    const ex = byVm.get(k)
+    if (!ex) byVm.set(k, x)
+    else byVm.set(k, {
+      valore_max: x.valore_max,
+      prezzo_fisso: parseFloat(x.prezzo_fisso) >= parseFloat(ex.prezzo_fisso) ? x.prezzo_fisso : ex.prezzo_fisso,
+      perc: parseFloat(x.perc) > 0 || parseFloat(ex.perc) > 0 ? '1.5' : '',
+    })
+  }
+  return [...byVm.values()].sort((a, b) => parseFloat(a.valore_max) - parseFloat(b.valore_max))
 }
 
 // Firma canonica per confronto robusto al formato (2.5 vs 2.50, "" vs "0").
