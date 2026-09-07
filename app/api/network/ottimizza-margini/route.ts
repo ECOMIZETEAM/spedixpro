@@ -29,12 +29,24 @@ export async function GET(_req: NextRequest) {
   const { data: mst } = await admin.from('masters').select('ottimizza_margini').eq('id', mio).maybeSingle()
   if ((mst as any)?.ottimizza_margini !== true) return NextResponse.json({ attivo: false, clienti: [] })
 
+  // Contratti sospesi da un master A MONTE (pausa/disattiva/elimina): la riga del master può essere
+  // attivo=true ma il contratto è di fatto non disponibile (es. POSTE DELIVERY EXPRESS D in pausa su
+  // MULTIEXPRESS). Stessa regola della pagina Corrieri: se non li escludo, consiglio corrieri che il
+  // cliente non può nemmeno usare.
+  const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
+  const sospesiSopra = await contrattiSospesiSopra(mio)
   const { data: corr } = await admin.from('corrieri').select('id,nome_contratto,attivo').eq('master_id', mio)
   const nomeCorr = new Map<string, string>()
-  // Escludo i servizi NON comparabili con una spedizione standard (fuori-sagoma "Extralarge"):
+  // Escludo anche i servizi NON comparabili con una spedizione standard (fuori-sagoma "Extralarge"):
   // consigliarli su un collo normale è fuorviante e fa sembrare lo strumento inaffidabile.
   const nonComparabile = (n: string) => /extralarge|fuori\s*sagoma|pallet/i.test(n)
-  for (const c of (corr || [])) if ((c as any).attivo !== false && !nonComparabile((c as any).nome_contratto || '')) nomeCorr.set((c as any).id, (c as any).nome_contratto || 'Corriere')
+  for (const c of (corr || [])) {
+    const nome = (c as any).nome_contratto || 'Corriere'
+    if ((c as any).attivo === false) continue
+    if (nonComparabile(nome)) continue
+    if (sospesoDallaCatena(nome, sospesiSopra)) continue   // in pausa da un master superiore
+    nomeCorr.set((c as any).id, nome)
+  }
   if (!nomeCorr.size) return NextResponse.json({ attivo: true, clienti: [] })
 
   const { data: zone } = await admin.from('zone').select('id,nome').eq('master_id', mio)
