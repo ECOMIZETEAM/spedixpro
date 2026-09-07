@@ -173,5 +173,39 @@ export async function excelDettaglioB64(righe: SpedRow[], formato: 'xlsx' | 'csv
   return foglioB64(['Spedizioni', 'Data', 'Rif. Mittente', 'Destinatario', 'Colli', 'Prezzo'], corpo, tot, formato)
 }
 
+// ── TABELLA GENERICA (altri report con la STESSA grafica, es. Report Agenti) ──
+// Intestazione master + tabella + riga totale (verde) in fondo. `totaleRiga` opzionale.
+export async function pdfTabellaB64(
+  intest: Intestazione, periodo: string, titolo: string,
+  headers: string[], rows: (string | number)[][], totaleRiga?: (string | number)[],
+  align?: Record<number, 'left' | 'center' | 'right'>
+): Promise<string> {
+  const { default: autoTable } = await import('jspdf-autotable')
+  const doc = await nuovoDoc()
+  const startY = await headerPDF(doc, intest, titolo, periodo)
+  const columnStyles: any = {}
+  for (const k of Object.keys(align || {})) columnStyles[k] = { halign: (align as any)[k] }
+  autoTable(doc, {
+    startY,
+    head: [headers],
+    body: rows.map(r => r.map(x => String(x))),
+    foot: totaleRiga ? [totaleRiga.map(x => String(x))] : undefined,
+    styles: { fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: [245, 245, 245], textColor: [80, 80, 80], fontStyle: 'bold' },
+    footStyles: { fillColor: [255, 255, 255], textColor: [34, 163, 74], fontStyle: 'bold' },
+    columnStyles,
+    theme: 'plain',
+  })
+  return doc.output('datauristring')
+}
+export async function excelTabellaB64(headers: string[], rows: (string | number)[][], totaleRiga: (string | number)[] | undefined, formato: 'xlsx' | 'csv'): Promise<string> {
+  const XLSX = await import('xlsx')
+  const aoa: any[][] = [headers, ...rows]
+  if (totaleRiga) { aoa.push([]); aoa.push(totaleRiga) }
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Report')
+  return XLSX.write(wb, { bookType: formato === 'csv' ? 'csv' : 'xlsx', type: 'base64' })
+}
+
 // estensione per il nome file
 export const estFormato = (f: string) => f === 'xlsx' ? 'xlsx' : f === 'csv' ? 'csv' : 'pdf'
