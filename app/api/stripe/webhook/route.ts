@@ -165,6 +165,23 @@ export async function POST(req: NextRequest) {
             : oggetto.id
           if (!subId) break
           const sub = await s.subscriptions.retrieve(subId, { expand: ['items.data.price'] })
+          // UN CANONE MASTER NON SI ADOTTA COME ABBONAMENTO API.
+          //
+          // Se la subscription porta un `master_id` nella metadata e' il canone di un master, e basta.
+          // Scriverla in `clienti.api_stripe_subscription_id` vorrebbe dire che al primo cambio di
+          // pacchetto API /api/cliente/api-piano andrebbe a riscrivere il PREZZO del canone di quel
+          // master — facendo esattamente il suo mestiere, senza sbagliare una riga, e nessuno se ne
+          // accorgerebbe: il canone diventerebbe quello di un piano API da clienti.
+          //
+          // Il 2/09/2026 su un canone master e' finito il prezzo di un piano API (31 EUR contro 139).
+          // Non e' stato questo ramo — il customer non risultava a nessun cliente, quindi l'evento e'
+          // caduto nel ramo master — ma e' la stessa forma, ed e' l'unica porta da cui il NOSTRO codice
+          // avrebbe potuto farlo davvero. Si chiude qui, prima che serva.
+          if ((sub.metadata as any)?.master_id) {
+            console.error('[STRIPE][API] NON adottata: e\' il canone di un master, non un piano API — sub=%s master=%s cliente=%s',
+              sub.id, (sub.metadata as any).master_id, clienteId)
+            break
+          }
           const codice = pianoApiDaPrezzo(sub.items.data[0]?.price as any) || String(oggetto?.metadata?.piano_api || '')
           const attivo = ['active', 'trialing', 'past_due'].includes(sub.status)
           if (!attivo || !codice) break
