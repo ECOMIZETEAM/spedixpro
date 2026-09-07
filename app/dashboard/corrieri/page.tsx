@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { isProviderTecnico } from '@/lib/corriere-logo'
+import WebhookSecretsPanel from '@/app/components/WebhookSecretsPanel'
 
 const DISPONIBILI = [
   // Il circuito interno sta per primo: e' l'unico che non dipende da nessuno.
@@ -90,7 +91,7 @@ export default function CorrieriPage() {
 
   function apriImpostazioni(c:any) {
     setPopup({
-      id: c.id, nome_contratto: c.nome_contratto,
+      id: c.id, nome_contratto: c.nome_contratto, tipo: c.tipo,
       multicollo: c.multicollo !== false,
       inserimento_ritiri: c.inserimento_ritiri !== false,
       mittente: (c.settings && c.settings.mittente) || 'cliente',
@@ -278,6 +279,9 @@ export default function CorrieriPage() {
                 </select>
               </div>
             </div>
+            {popup.tipo === 'spedisci' && (
+              <div style={{padding:'0 22px 4px'}}><WebhookSecretsPanel provider="spedisci" contrattoNome={popup.nome_contratto} /></div>
+            )}
             <div style={{display:'flex',justifyContent:'space-between',padding:'16px 22px',borderTop:'1px solid #f0f0f0',position:'sticky',bottom:0,background:'#fff',zIndex:2}}>
               <button onClick={()=>setPopup(null)} style={{padding:'9px 20px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'8px',fontSize:'13px',fontWeight:'600',color:'#1a1a1a',cursor:'pointer'}}>Chiudi</button>
               <button onClick={salvaImpostazioni} disabled={salvandoPopup} style={{padding:'9px 22px',background:'#f97316',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'700',cursor:'pointer',opacity:salvandoPopup?0.7:1}}>{salvandoPopup?'Salvataggio...':'Salva'}</button>
