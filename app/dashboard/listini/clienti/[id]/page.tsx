@@ -34,11 +34,21 @@ export default async function ModificaListinoPage({
     }
   }
 
-  const { data: tuttiICorrieri } = await supabase.from('corrieri').select('id,nome_contratto').eq('master_id', utente?.master_id)
+  const { data: tuttiICorrieri } = await supabase.from('corrieri').select('id,nome_contratto,attivo').eq('master_id', utente?.master_id)
   // Mostra solo i corrieri POSSEDUTI dal master (no residui estranei da duplicazioni).
   const posseduti = new Set((tuttiICorrieri||[]).map((c:any) => c.id))
   corrieri = corrieri.filter((c:any) => posseduti.has(c.id))
-  const corrieriDisponibiliDaAggiungere = (tuttiICorrieri||[]).filter(c => !corrieri.some((x:any) => x.id === c.id))
+  // NASCONDE i contratti IN PAUSA: sia quelli messi in pausa dal master (attivo=false), sia quelli
+  // SOSPESI A MONTE (pausa/disattiva/elimina di un antenato, riconosciuti per NOME). Non devono
+  // comparire nell'editor finché sono in pausa; alla riattivazione riappaiono da soli (la pausa è
+  // dinamica, i prezzi restano salvati). Stessa regola di Corrieri/Ottimizza margini [[catena-corrieri-no-listino]].
+  const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
+  const sospesiSopra = await contrattiSospesiSopra(utente?.master_id)
+  const attivoById = new Map<string, boolean>((tuttiICorrieri||[]).map((c:any) => [c.id, c.attivo !== false]))
+  const nomeById = new Map<string, string>((tuttiICorrieri||[]).map((c:any) => [c.id, c.nome_contratto]))
+  const usabile = (c:any) => attivoById.get(c.id) !== false && !sospesoDallaCatena(nomeById.get(c.id) || c.nome_contratto, sospesiSopra)
+  corrieri = corrieri.filter(usabile)
+  const corrieriDisponibiliDaAggiungere = (tuttiICorrieri||[]).filter(c => usabile(c) && !corrieri.some((x:any) => x.id === c.id))
   const corriereSelezionato = corrieri?.find((c:any) => c.id === corriereQuery) || corrieri?.[0]
   const { data: zone } = await supabase.from('zone').select('id,nome').eq('master_id', utente?.master_id).eq('corriere_id', corriereSelezionato?.id||'').order('nome')
   const { data: fasceEsistenti } = await supabase.from('listini_clienti_fasce').select('*').eq('listino_id', id).eq('corriere_id', corriereSelezionato?.id||'').order('peso_max')
