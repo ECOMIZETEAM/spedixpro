@@ -10,8 +10,8 @@ import SupportoButton from './SupportoButton'
 // perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
 // always: sempre visibile a chiunque abbia accesso al portale.
 // rete: visibile solo ai master che possono gestire la propria rete di sotto-master.
-type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean }
-type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, external?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, sub?: NavSub[] }
+type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean }
+type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, external?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean, sub?: NavSub[] }
 
 const NAV: NavItem[] = [
   { label: 'Spedizioni', href: '/dashboard/spedizioni', icon: '◫', sub: [
@@ -49,7 +49,7 @@ const NAV: NavItem[] = [
     { label: 'Listini Clienti', href: '/dashboard/listini', perm: 'admin.pricelists.index' },
     { label: 'Listino Corrieri', href: '/dashboard/listini/corrieri/nuovo', perm: 'admin.pricelists.vector' },
     { label: 'Listini da adeguare', href: '/dashboard/listini/da-adeguare', perm: 'admin.pricelists.index' },
-    { label: 'Ottimizza margini', href: '/dashboard/margini', perm: 'admin.pricelists.index' },
+    { label: 'Ottimizza margini', href: '/dashboard/margini', soloOttimizzaMargini: true },
     { label: 'Gestione Zone', href: '/dashboard/zone', perm: 'admin.pricelists.zones.index' },
   ]},
   { label: 'Preventivi', href: '/dashboard/preventivi', icon: '✎', perm: 'admin.pricelists.create' },
@@ -128,7 +128,7 @@ const NAV: NavItem[] = [
   { label: 'Documentazione', href: 'https://docs.moovexpress.com', icon: '📖', always: true, external: true },
 ]
 
-export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, gestioneRete?: boolean, permessi?: Record<string, boolean>, superMaster?: boolean, isMultiexpress?: boolean } }) {
+export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, gestioneRete?: boolean, permessi?: Record<string, boolean>, superMaster?: boolean, isMultiexpress?: boolean, ottimizzaMargini?: boolean } }) {
   const path = usePathname()
   const isFull = user?.isFull ?? true
   const gestioneRete = user?.gestioneRete ?? false
@@ -136,11 +136,13 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   const ruolo = (user?.ruolo || '').toLowerCase()
   const superMaster = user?.superMaster ?? false
   const isMultiexpress = user?.isMultiexpress ?? false
+  const ottimizzaMargini = user?.ottimizzaMargini ?? false
 
   // Un elemento e visibile se: admin/master (isFull), oppure marcato always,
   // oppure ha una chiave permesso attiva. Senza perm e non-full = nascosto (solo admin).
   // Le voci "rete" (gestione sotto-master) richiedono in più il flag gestioneRete.
-  const puoVedere = (x: { perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean }) => {
+  const puoVedere = (x: { perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean }) => {
+    if (x.soloOttimizzaMargini) return ottimizzaMargini   // voce riservata ai master col flag (oggi solo Ecomize LL)
     if (x.soloMultiexpress) return isMultiexpress   // voce riservata a MULTIEXPRESS (Rettifiche automatiche)
     if (x.superMaster) return superMaster       // voce riservata al SUPER master (es. Registro Attività)
     if (x.agente) return ruolo === 'agente'   // voce esclusiva dell'agente (mai al master)
