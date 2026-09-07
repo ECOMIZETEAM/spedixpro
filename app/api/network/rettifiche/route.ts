@@ -92,6 +92,11 @@ export async function POST(req: NextRequest) {
   const { calcolaRipesature } = await import('@/lib/ripesature-calcolo')
   let create = 0
   const saltate: { ldv: string; perche: string }[] = []
+  // SCARTO PULITO ≠ problema. Quando il collo ripesato cade nello STESSO scaglione/blocco del
+  // listino del cliente dell'addebito originale, riprezzato dà lo stesso identico prezzo (o meno):
+  // non c'è un euro in più da chiedergli — il suo listino dice così. Non è una fascia mancante da
+  // aggiungere né una perdita da segnalare: si scarta in silenzio (assorbita), fuori dagli avvisi ⚠️.
+  const scartate: { ldv: string; perche: string }[] = []
   const idFatte: string[] = []      // figlia creata (o già esistente) → 'propagata'
   const idAzzerate: string[] = []   // differenza a zero → 'assorbita'. Tutte le ALTRE saltate NON
                                     // vengono più marcate: restano propagazione=null e ritentabili.
@@ -155,7 +160,10 @@ export async function POST(req: NextRequest) {
         saltate.push({ ldv: r.numero_spedizione, perche: `il listino di ${liv.chi || 'questo cliente'} non copre ${pesoFatt ? pesoFatt.toFixed(0) + ' kg' : 'questo peso'} (peso ripesato oltre l'ultima fascia, o zona non prevista) → aggiungi la fascia mancante al suo listino e ripremi Accetta: passerà.` })
         continue
       }
-      saltate.push({ ldv: r.numero_spedizione, perche: 'niente da recuperare al livello sotto (rimborso o zero): tenuta a tuo carico' }); idAzzerate.push(r.id); continue
+      // Il listino del figlio prezza il collo (differenza != null) ma riprezzando esce <= 0: stesso
+      // scaglione dell'addebito, il cliente pagherebbe uguale. Niente da recuperare → SCARTO pulito
+      // (assorbita), non un avviso: non ha senso dire "alza la fascia" (la fascia c'è, è la stessa).
+      scartate.push({ ldv: r.numero_spedizione, perche: 'il cliente pagherebbe uguale col suo listino (stesso scaglione di peso): niente da recuperare' }); idAzzerate.push(r.id); continue
     }
     // reweighGirabile garantisce già differenza != null, ma TS non lo propaga: fisso a numero.
     const diffFiglia = reweighGirabile && liv.differenza != null ? liv.differenza : 0
@@ -194,6 +202,8 @@ export async function POST(req: NextRequest) {
     // NON troncato più a 20: chi deve sistemare le saltate (misure mancanti, listino sotto, catena)
     // deve poterle vedere TUTTE, altrimenti oltre la ventesima "spariscono" e sembrano perse.
     dettaglio: saltate,
+    // Scarti puliti (cliente paga uguale): si contano e si dicono con calma, NON tra gli avvisi.
+    scartate,
     inAttesaSopra: attesaLdv.length, dettaglioAttesaSopra: attesaLdv.slice(0, 100),
   })
 }

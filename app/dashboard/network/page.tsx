@@ -100,7 +100,7 @@ export default function NetworkRicevutiPage() {
       // così su 196 rettifiche si vede l'avanzamento invece di sembrare piantato — e un lotto lungo
       // non rischia il timeout della funzione.
       const BATCH = 12
-      let create = 0, nonProp = 0, giaDecise = 0, inAttesa = 0
+      let create = 0, nonProp = 0, giaDecise = 0, inAttesa = 0, scart = 0
       const dettaglio: any[] = []
       setAvanz({ k: b.k, fatti: 0, totale: ids.length, da: Date.now() })
       for (let i = 0; i < ids.length; i += BATCH) {
@@ -113,21 +113,26 @@ export default function NetworkRicevutiPage() {
         // "In attesa sopra" NON è un errore: la 404 con inAttesaSopra dice solo che quel lotto era tutto
         // da confermare più in alto → si conta e si continua. Ci si ferma solo su un errore vero.
         if (d.error && !d.inAttesaSopra) { setMsg('Errore: ' + d.error); break }
-        create += d.create || 0; nonProp += d.nonPropagate || 0; giaDecise += d.giaDecise || 0; inAttesa += d.inAttesaSopra || 0
+        create += d.create || 0; nonProp += d.nonPropagate || 0; giaDecise += d.giaDecise || 0; inAttesa += d.inAttesaSopra || 0; scart += Array.isArray(d.scartate) ? d.scartate.length : 0
         if (Array.isArray(d.dettaglio)) dettaglio.push(...d.dettaglio)
         setAvanz(a => a ? { ...a, fatti: Math.min(i + BATCH, ids.length) } : a)
       }
       const parti: string[] = []
       if (create > 0) parti.push(`✓ Accettate ${create}: sono in Spedizioni › Rettifica Costi, divise per cliente e sotto-master — da lì scegli a chi caricarle (fino ad allora non scende niente a nessuno).`)
+      // Scartate = il cliente pagherebbe uguale (stesso scaglione): niente da recuperare. NON è un
+      // problema né una perdita da sistemare — si dice con calma, non fra gli avvisi ⚠️.
+      if (scart) parti.push(`✓ ${scart} scartate: col suo listino il cliente pagherebbe uguale (stesso scaglione di peso) — niente da recuperare, niente da fare.`)
       if (nonProp) {
         // TUTTE, non solo le prime 30: oltre il taglio "sparivano" e sembravano perse. Cap alto + conteggio.
+        // Il motivo è per RIGA (il listino non copre quel peso/zona, misure mancanti, catena incompleta):
+        // non si mette più un consiglio unico "alza la fascia" a tappeto, che era sbagliato per metà dei casi.
         const CAP = 100
         const elenco = dettaglio.slice(0, CAP).map((x: any) => `${x.ldv} — ${x.perche}`).join('\n• ')
         const extra = dettaglio.length > CAP ? `\n• … e altre ${dettaglio.length - CAP}` : ''
-        parti.push(`⚠️ ${nonProp} non si possono girare perché il listino del cliente non arriva a quel peso/zona:\n• ${elenco}${extra}\n👉 Alza la fascia sul listino del cliente (aggiungi il peso o la zona che manca), poi ripremi Accetta: passeranno. Solo se decidi di non addebitarle, "Le assorbo io".`)
+        parti.push(`⚠️ ${nonProp} non girate — il motivo di ognuna (dove dice "aggiungi la fascia", alzala sul listino del cliente e ripremi Accetta):\n• ${elenco}${extra}`)
       }
       if (inAttesa) parti.push(`⏳ ${inAttesa} in attesa che il livello sopra le confermi: NON sono perse — riprova quando saranno confermate.`)
-      if (!create && !nonProp && !inAttesa) parti.push(giaDecise ? 'Queste rettifiche erano già state decise.' : 'Nessuna rettifica da decidere.')
+      if (!create && !nonProp && !inAttesa && !scart) parti.push(giaDecise ? 'Queste rettifiche erano già state decise.' : 'Nessuna rettifica da decidere.')
       setMsg(parti.join('\n\n'))
       carica()
     } catch { setMsg('Errore di connessione') }
