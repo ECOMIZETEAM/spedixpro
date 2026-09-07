@@ -50,6 +50,16 @@ export function derivaScaglioniM(scaglioniS: { vm: number; vmt: string; pf: stri
       ? [{ valore_max: '300', prezzo_fisso: o.pf, perc: '' }, { valore_max: o.vmt, prezzo_fisso: o.pf, perc: '1.5' }]
       : [{ valore_max: o.vmt, prezzo_fisso: o.pf, perc: '1.5' }]
   }
+  // Se il TOP dell'M sarebbe 500/510 (l'S si ferma lì, es. Epos Caffè), il contratto M vuole comunque
+  // il tetto a 2900: quel top diventa il gradino intermedio 300 (stesso prezzo, senza maggiorazione)
+  // e si aggiunge {2900 @ stesso prezzo, +1,5%}. Così il cliente incassa COD fino a 2900.
+  const topIdx = out.reduce((bi, x, i, a) => parseFloat(x.valore_max) > parseFloat(a[bi].valore_max) ? i : bi, 0)
+  const topVm = parseFloat(out[topIdx]?.valore_max)
+  if (topVm === 500 || topVm === 510) {
+    const prezzo = out[topIdx].prezzo_fisso
+    out[topIdx] = { valore_max: '300', prezzo_fisso: prezzo, perc: '' }
+    out.push({ valore_max: '2900', prezzo_fisso: prezzo, perc: '1.5' })
+  }
   // Dedup di sicurezza per valore_max (se un S avesse già 300 accanto al 500): una sola fascia, prezzo
   // più alto e maggiorazione conservata, così non nasce una fascia doppia né si sotto-fattura.
   const byVm = new Map<string, Scagl>()
