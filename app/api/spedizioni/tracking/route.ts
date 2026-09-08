@@ -157,6 +157,7 @@ export async function GET(req: NextRequest) {
       } else if (corriere.tipo === 'brt' && raw.parcelID && cred?.user && cred?.password) {
         const { trackingBrt, mapStatoBrt } = await import('@/lib/brt')
         const r = await trackingBrt(cred as any, String(raw.parcelID)); stati = r.stati; eventiBrt = r.eventi
+        console.log('[BRT][TRACK]', String(raw.parcelID), '-> spedizione_id:', r.spedizioneId || '-', '| eventi:', r.eventi.length, '| primo:', JSON.stringify(r.eventi[0] || null))
         let av: string | null = null
         for (const s of stati) { const m = mapStatoBrt(s); if (m && prioritaStato(m) > prioritaStato(av)) av = m }
         if (r.consegnata && prioritaStato('consegnata') > prioritaStato(av)) av = 'consegnata'

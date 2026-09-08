@@ -278,7 +278,7 @@ function trovaNodoTracking(j: any): any {
   return null
 }
 
-export async function trackingBrt(cred: CredenzialiBrt, parcelID: string, timeoutMs = 15000): Promise<{ stati: string[]; eventi: { data: string; descrizione: string; luogo: string }[]; consegnata: boolean; raw: string }> {
+export async function trackingBrt(cred: CredenzialiBrt, parcelID: string, timeoutMs = 15000): Promise<{ stati: string[]; eventi: { data: string; descrizione: string; luogo: string }[]; consegnata: boolean; raw: string; spedizioneId?: string }> {
   const id = String(parcelID || '').trim()
   // Header userID+password OBBLIGATORI (vedi sopra): senza credenziali non ha senso chiamare.
   if (!id || !cred?.user || !cred?.password) return { stati: [], eventi: [], consegnata: false, raw: '' }
@@ -313,7 +313,9 @@ export async function trackingBrt(cred: CredenzialiBrt, parcelID: string, timeou
     // Consegna dal campo dedicato. NIENTE evento sintetico "consegnata" (creava un doppione con
     // l'evento reale "CONSEGNATA" nel popup): il cron la rileva dal boolean qui restituito.
     const consegnata = !!String(bolla?.dati_consegna?.data_consegna_merce || '').trim()
-    return { stati, eventi, consegnata, raw: (txt || '').substring(0, 2000) }
+    // spedizione_id = "numero spedizione" lato BRT (quello mostrato su brt.it). Per ora solo per verifica.
+    const spedizioneId = String(bolla?.dati_spedizione?.spedizione_id || '').trim()
+    return { stati, eventi, consegnata, spedizioneId, raw: (txt || '').substring(0, 2000) }
   } catch {
     return { stati: [], eventi: [], consegnata: false, raw: '' }
   } finally {
