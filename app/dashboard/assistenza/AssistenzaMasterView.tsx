@@ -174,6 +174,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
           <p style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>{isPod ? 'Richieste POD dei tuoi clienti e sotto-master: carica il PDF della prova di consegna.' : 'Ticket aperti dai tuoi clienti e dai sotto-master della tua rete.'}</p>
         </div>
         {!isPod && <button onClick={() => { setApri(true); setMsg('') }} style={{ padding: '9px 18px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>+ Apri un ticket</button>}
+        {isPod && <a href="/dashboard/assistenza/prezzi-pod" style={{ padding: '9px 18px', background: '#fff', color: '#c2410c', border: '1px solid #fed7aa', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', textDecoration: 'none' }}>💶 Prezzi POD</a>}
       </div>
 
       {/* RICEVUTI */}
@@ -411,6 +412,14 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   onDrop={e => { e.preventDefault(); setDragPod(false); const f = e.dataTransfer.files?.[0]; if (f) caricaPodDentro(f) }}
                   style={{ background: dragPod ? '#dbeafe' : '#f0f9ff', border: dragPod ? '2px dashed #2563eb' : '2px dashed #bae6fd', borderRadius: '8px', padding: '16px' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px', textAlign: 'center' }}>Prova di consegna (POD) — LDV {sel.oggetto}</div>
+                  {/* Solo l'owner (chi ha il cliente e il listino POD) vede l'addebito: non si mostra alla catena a monte. */}
+                  {ruoloChat === 'master' && sel.pod_prezzo != null && Number(sel.pod_prezzo) > 0 && (
+                    <div style={{ marginBottom: '10px', textAlign: 'center', fontSize: '12px', fontWeight: 700, color: sel.pod_addebitato_il ? '#15803d' : '#c2410c' }}>
+                      {sel.pod_addebitato_il
+                        ? `✓ Addebitati ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))} al cliente per questa POD.`
+                        : `Inviando la POD verranno addebitati ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))} al cliente.`}
+                    </div>
+                  )}
                   {sel.pod_url && !podFile && <div style={{ marginBottom: '10px', textAlign: 'center' }}><a href={linkAllegato(sel.id, sel.pod_url)} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD già inviata</a></div>}
 
                   {podFile ? (

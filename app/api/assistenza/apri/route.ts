@@ -74,10 +74,11 @@ export async function POST(req: NextRequest) {
     const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
     return (await sottoAlberoMasterIds(admin, masterId)).includes(sp.master_id)
   }
+  let spCorriereId: string | null = null   // corriere della spedizione collegata: serve per il prezzo POD
   const spedIdIn = String(body?.spedizione_id || '').trim()
   if (spedIdIn) {
-    const { data: sp } = await admin.from('spedizioni').select('id,cliente_id,master_id').eq('id', spedIdIn).maybeSingle()
-    if (await autorizzatoSp(sp)) record.spedizione_id = (sp as any).id
+    const { data: sp } = await admin.from('spedizioni').select('id,cliente_id,master_id,corriere_id').eq('id', spedIdIn).maybeSingle()
+    if (await autorizzatoSp(sp)) { record.spedizione_id = (sp as any).id; spCorriereId = (sp as any).corriere_id || null }
   }
   // Fallback: nessun id esplicito ma l'oggetto è una LDV → collega solo se combacia UNA sola
   // spedizione autorizzata (evita ambiguità se due master hanno numeri simili).
@@ -85,9 +86,21 @@ export async function POST(req: NextRequest) {
     const ldv = oggetto.trim()
     if (ldv.length >= 4 && ldv.length <= 40) {
       // case-insensitive: l'oggetto può essere minuscolo (es. 1uw07wf…), il numero è maiuscolo.
-      const { data: sps } = await admin.from('spedizioni').select('id,cliente_id,master_id').ilike('numero', ldv).limit(2)
-      if (sps && sps.length === 1 && await autorizzatoSp(sps[0])) record.spedizione_id = (sps[0] as any).id
+      const { data: sps } = await admin.from('spedizioni').select('id,cliente_id,master_id,corriere_id').ilike('numero', ldv).limit(2)
+      if (sps && sps.length === 1 && await autorizzatoSp(sps[0])) { record.spedizione_id = (sps[0] as any).id; spCorriereId = (sps[0] as any).corriere_id || null }
     }
+  }
+
+  // PREZZO POD BLOCCATO ALL'APERTURA: la POD di un cliente costa quanto dice il listino POD del suo
+  // master (lib/pod-prezzo). Si congela qui, così il cliente lo sa PRIMA e un cambio di listino non lo
+  // sorprende; l'addebito effettivo (alla stessa cifra) avviene quando il master carica la POD.
+  if (categoria === 'pod' && record.cliente_id && record.spedizione_id) {
+    const { risolviPrezzoPod } = await import('@/lib/pod-prezzo')
+    record.pod_prezzo = await risolviPrezzoPod(admin, {
+      masterId: record.owner_master_id,
+      clienteId: record.cliente_id,
+      corriereId: spCorriereId,
+    })
   }
 
   // ── UNA RICHIESTA APERTA PER SPEDIZIONE: se chi apre ha già una richiesta 'aperta'/'in_lavorazione'
@@ -147,5 +160,5 @@ export async function POST(req: NextRequest) {
       allegati: allegatiOut.length ? allegatiOut : null,
     })
   }
-  return NextResponse.json({ success: true, id: data?.id, codice: data?.codice })
+  return NextResponse.json({ success: true, id: data?.id, codice: data?.codice, pod_prezzo: record.pod_prezzo ?? null })
 }

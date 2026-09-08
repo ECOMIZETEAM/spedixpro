@@ -29,6 +29,19 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
   const [pagina, setPagina] = useState(1)
   const [nuoviIds, setNuoviIds] = useState<Set<string>>(new Set())
   const inputRef = useRef<HTMLInputElement>(null)
+  // Anteprima del costo POD mentre il cliente digita la LDV: lo sa PRIMA di aprire la richiesta.
+  const [podPrezzo, setPodPrezzo] = useState<{ trovata: boolean; prezzo?: number } | null>(null)
+  useEffect(() => {
+    if (!isPod) return
+    const ldv = nuovo.oggetto.trim()
+    if (ldv.length < 4) { setPodPrezzo(null); return }
+    let vivo = true
+    const h = setTimeout(async () => {
+      const d = await fetch('/api/assistenza/pod-prezzo?ldv=' + encodeURIComponent(ldv)).then(r => r.json()).catch(() => null)
+      if (vivo) setPodPrezzo(d && typeof d.trovata === 'boolean' ? d : null)
+    }, 400)
+    return () => { vivo = false; clearTimeout(h) }
+  }, [nuovo.oggetto, isPod])
   // Chat modale
   const [chat, setChat] = useState<any>(null)         // { ticket, messaggi }
   const [chatLoad, setChatLoad] = useState(false)
@@ -122,6 +135,16 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
         {msg && <div style={{ padding: '9px 12px', borderRadius: '6px', marginBottom: '12px', fontSize: '12.5px', color: '#fff', background: msg.t === 'ok' ? '#16a34a' : '#dc2626' }}>{msg.x}</div>}
         <div style={{ marginBottom: '12px' }}><label style={lbl}>LDV</label><input value={nuovo.oggetto} onChange={e => setNuovo(n => ({ ...n, oggetto: e.target.value }))} placeholder="Numero LDV della spedizione" style={inp} /></div>
 
+        {isPod && podPrezzo?.trovata && (
+          <div style={{ marginBottom: '12px', padding: '9px 12px', borderRadius: '6px', fontSize: '12.5px', fontWeight: 600,
+            background: (podPrezzo.prezzo || 0) > 0 ? '#fff7ed' : '#f0fdf4', color: (podPrezzo.prezzo || 0) > 0 ? '#c2410c' : '#15803d',
+            border: `1px solid ${(podPrezzo.prezzo || 0) > 0 ? '#fed7aa' : '#bbf7d0'}` }}>
+            {(podPrezzo.prezzo || 0) > 0
+              ? `Questa richiesta POD ha un costo di ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(podPrezzo.prezzo || 0)}, addebitato quando riceverai la prova di consegna.`
+              : 'Questa richiesta POD è gratuita.'}
+          </div>
+        )}
+
         {!isPod && <>
           <div style={{ marginBottom: '12px' }}><label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>Messaggio <span style={{ color: '#dc2626', fontWeight: 700 }}>fornire imballo e contenuto obbligatorio</span></label><textarea value={nuovo.messaggio} onChange={e => setNuovo(n => ({ ...n, messaggio: e.target.value }))} rows={4} placeholder="Descrivi il problema o la richiesta…" style={{ ...inp, resize: 'vertical' as const }} /></div>
           <div style={{ marginBottom: '14px' }}>
@@ -170,12 +193,12 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr style={{ background: '#f9fafb' }}>{['Codice', 'Data', 'LDV', 'Stato', isPod ? 'POD' : 'Chat'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ background: '#f9fafb' }}>{['Codice', 'Data', 'LDV', 'Stato', ...(isPod ? ['Costo'] : []), isPod ? 'POD' : 'Chat'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: '#999' }}>Caricamento…</td></tr>
+                <tr><td colSpan={isPod ? 6 : 5} style={{ ...td, textAlign: 'center', color: '#999' }}>Caricamento…</td></tr>
               ) : !filtrati.length ? (
-                <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: '#999' }}>{cerca ? 'Nessuna richiesta per questa LDV' : 'Nessuna richiesta ancora'}</td></tr>
+                <tr><td colSpan={isPod ? 6 : 5} style={{ ...td, textAlign: 'center', color: '#999' }}>{cerca ? 'Nessuna richiesta per questa LDV' : 'Nessuna richiesta ancora'}</td></tr>
               ) : visibili.map(t => (
                 <tr key={t.id} onClick={() => apriChat(t.id)} style={{ cursor: 'pointer' }}>
                   <td style={{ ...td, whiteSpace: 'nowrap', fontWeight: 700, color: '#f97316', fontSize: '12.5px' }}>{t.codice || '—'}</td>
@@ -188,6 +211,13 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
                     {!isPod && <div style={{ fontSize: '11.5px', color: '#888', marginTop: '2px', maxWidth: '340px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.messaggio}</div>}
                   </td>
                   <td style={td}><Badge stato={t.stato} /></td>
+                  {isPod && (
+                    <td style={{ ...td, fontSize: '12.5px', fontWeight: 700, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                      {t.pod_prezzo == null ? <span style={{ color: '#9ca3af', fontWeight: 400 }}>—</span>
+                        : Number(t.pod_prezzo) === 0 ? <span style={{ color: '#16a34a' }}>Gratuita</span>
+                        : new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(t.pod_prezzo))}
+                    </td>
+                  )}
                   <td style={{ ...td, fontSize: '12.5px' }} onClick={e => { if (isPod) e.stopPropagation() }}>
                     {/* Scaricare la POD vale come "l'ho vista": senza questo l'etichetta di
                         aggiornamento restava accesa a chi ha gia' preso il documento. */}

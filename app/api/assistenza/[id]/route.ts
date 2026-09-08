@@ -16,7 +16,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params
   const admin = createAdminSupabase()
   const { data: t } = await admin.from('tickets')
-    .select('id,codice,oggetto,stato,categoria,tipo_apertura,aperto_da,cliente_id,owner_master_id,aperto_master_id,pod_url,created_at,updated_at,inoltrato_a_master_id,rete_master_ids,rete_non_letti,assegnazioni')
+    .select('id,codice,oggetto,stato,categoria,tipo_apertura,aperto_da,cliente_id,owner_master_id,aperto_master_id,pod_url,pod_prezzo,pod_addebitato_il,created_at,updated_at,inoltrato_a_master_id,rete_master_ids,rete_non_letti,assegnazioni')
     .eq('id', id).maybeSingle()
   if (!t) return NextResponse.json({ error: 'Ticket non trovato' }, { status: 404 })
   const ruolo = await partecipante(utente, t)
@@ -152,7 +152,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const body = await req.json()
   const admin = createAdminSupabase()
 
-  const { data: t } = await admin.from('tickets').select('owner_master_id,rete_master_ids,rete_non_letti,assegnazioni').eq('id', id).maybeSingle()
+  const { data: t } = await admin.from('tickets').select('owner_master_id,rete_master_ids,rete_non_letti,assegnazioni,categoria,cliente_id,spedizione_id,oggetto,pod_prezzo,pod_addebitato_il').eq('id', id).maybeSingle()
   if (!t) return NextResponse.json({ error: 'Ticket non trovato' }, { status: 404 })
   const inCatena = Array.isArray(t.rete_master_ids) && t.rete_master_ids.includes(masterId)
   const sonoOwner = t.owner_master_id === masterId
@@ -217,6 +217,35 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       upd.stato = 'risolto'
     } catch (e: any) {
       return NextResponse.json({ error: 'Errore caricamento POD: ' + (e?.message || 'sconosciuto') }, { status: 400 })
+    }
+  }
+
+  // ADDEBITO POD: caricando la POD, il cliente paga la cifra BLOCCATA all'apertura (tickets.pod_prezzo).
+  // Addebita il MASTER OWNER (chi ha la relazione col cliente e il listino POD), non chi la carica in
+  // catena. Una sola volta (guardia pod_addebitato_il). NON blocca mai la POD: e' un diritto del cliente
+  // — se l'addebito fallisce, la POD parte comunque e l'addebito resta "da fare" (timestamp nullo).
+  if (upd.pod_url && t.categoria === 'pod' && t.cliente_id && !t.pod_addebitato_il) {
+    const prezzo = Number(t.pod_prezzo) || 0
+    if (prezzo > 0) {
+      try {
+        const { registraMovimento } = await import('@/lib/movimenti')
+        const ldv = String(t.oggetto || '').trim().slice(0, 40)
+        await registraMovimento(admin, {
+          masterId: t.owner_master_id,
+          clienteId: t.cliente_id,
+          tipo: 'rettifica',                       // stessa convenzione dei POD storici; entra nell'estratto conto
+          descrizione: 'POD ' + ldv,
+          importo: -prezzo,                        // addebito
+          riferimento: ldv || null,
+          spedizioneId: t.spedizione_id || null,
+          createdBy: user.id,
+        })
+        upd.pod_addebitato_il = new Date().toISOString()
+      } catch (e: any) {
+        console.error('[POD][ADDEBITO] fallito, POD consegnata comunque — ticket', id, e?.message)
+      }
+    } else {
+      upd.pod_addebitato_il = new Date().toISOString()   // POD gratuita: nessun movimento, ma marcata evasa
     }
   }
 

@@ -41,6 +41,7 @@ const NAV: NavItem[] = [
   { label: 'Assistenza Clienti', icon: '☏', always: true, sub: [
     { label: 'Ticket', href: '/dashboard/assistenza', always: true },
     { label: 'POD', href: '/dashboard/assistenza/pod', always: true },
+    { label: 'Prezzi POD', href: '/dashboard/assistenza/prezzi-pod', always: true },
   ]},
   { label: 'Circuito interno', href: '/dashboard/tracking', icon: '◎', perm: 'admin.interno.deliveries.out' },
   { label: 'Il mio listino', href: '/dashboard/listini/mio', icon: '€', agente: true },

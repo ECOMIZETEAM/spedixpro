@@ -16,7 +16,7 @@ export async function GET(_req: NextRequest) {
   const ruolo = (utente?.ruolo || '').toLowerCase()
   const admin = createAdminSupabase()
 
-  const cols = 'id,codice,oggetto,messaggio,stato,risposta,aperto_da,tipo_apertura,cliente_id,owner_master_id,aperto_master_id,aperto_letto,non_letto_owner,categoria,pod_url,allegati,created_at,updated_at,inoltrato_a_master_id,rete_master_ids,rete_non_letti,assegnazioni'
+  const cols = 'id,codice,oggetto,messaggio,stato,risposta,aperto_da,tipo_apertura,cliente_id,owner_master_id,aperto_master_id,aperto_letto,non_letto_owner,categoria,pod_url,pod_prezzo,pod_addebitato_il,allegati,created_at,updated_at,inoltrato_a_master_id,rete_master_ids,rete_non_letti,assegnazioni'
 
   // Ordinamento per ULTIMA ATTIVITA' (updated_at): un ticket vecchio con una risposta fresca
   // del cliente deve risalire in cima, non restare sepolto (prima "spariva" dalla vista).
