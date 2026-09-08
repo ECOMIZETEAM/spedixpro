@@ -169,9 +169,9 @@ export async function GET(req: NextRequest) {
         // char) salvato in raw_response alla creazione. Best-effort: se la risposta non torna, nessun
         // aggiornamento (mai declassa).
         const brtParcel = (s as any).brt_parcel
-        if (!brtParcel) return
+        if (!brtParcel || !cred?.user || !cred?.password) return
         const { trackingBrt, mapStatoBrt } = await import('@/lib/brt')
-        const { stati } = await trackingBrt(String(brtParcel))
+        const { stati } = await trackingBrt(cred, String(brtParcel))
         for (const str of stati) {
           const m = mapStatoBrt(str)
           if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m

@@ -153,9 +153,9 @@ export async function GET(req: NextRequest) {
         let av: string | null = null
         for (const s of stati) { const m = mapStatoGls(s); if (m && prioritaStato(m) > prioritaStato(av)) av = m }
         await persistiStato(av)
-      } else if (corriere.tipo === 'brt' && raw.parcelID) {
+      } else if (corriere.tipo === 'brt' && raw.parcelID && cred?.user && cred?.password) {
         const { trackingBrt, mapStatoBrt } = await import('@/lib/brt')
-        const r = await trackingBrt(String(raw.parcelID)); stati = r.stati
+        const r = await trackingBrt(cred as any, String(raw.parcelID)); stati = r.stati
         let av: string | null = null
         for (const s of stati) { const m = mapStatoBrt(s); if (m && prioritaStato(m) > prioritaStato(av)) av = m }
         await persistiStato(av)

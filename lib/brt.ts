@@ -232,10 +232,12 @@ export async function confermaSpedizioniBrt(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TRACKING — GET /rest/v1/tracking/parcelID/{parcelID} (STRUTTURA VERIFICATA sulla doc BRT).
-// Interroga col parcelID (barcode 18 char) salvato alla creazione. Risposta: lista_eventi[].evento
-// (data/ora/descrizione) + descrizione_stato_sped_parte1/2 + data_consegna_merce (valorizzata = consegnata).
-// Ritorna gli eventi come stringhe, che il cron mappa con mapStatoBrt + prioritaStato.
+// TRACKING — GET /rest/v1/tracking/parcelID/{parcelID} con header OBBLIGATORI userID+password (come la
+// create): senza, BRT risponde executionMessage.code=-57 "MISSING PARAM" e non legge nulla — era la causa
+// del tracking fermo da sempre sui contratti BRT diretti. Risposta reale: ttParcelIdResponse.lista_eventi[]
+// .evento.descrizione (transito) e, ANNIDATI in ttParcelIdResponse.bolla: dati_spedizione.descrizione_stato_
+// sped_parte1/2 (stato sintetico) + dati_consegna.data_consegna_merce (valorizzata = consegnata). Il cron
+// mappa gli stati con mapStatoBrt + prioritaStato.
 // ─────────────────────────────────────────────────────────────────────────────
 const BRT_TRACK = 'https://api.brt.it/rest/v1/tracking/parcelID'
 
@@ -248,23 +250,32 @@ function trovaNodoTracking(j: any): any {
   return null
 }
 
-export async function trackingBrt(parcelID: string, timeoutMs = 15000): Promise<{ stati: string[]; consegnata: boolean; raw: string }> {
+export async function trackingBrt(cred: CredenzialiBrt, parcelID: string, timeoutMs = 15000): Promise<{ stati: string[]; consegnata: boolean; raw: string }> {
   const id = String(parcelID || '').trim()
-  if (!id) return { stati: [], consegnata: false, raw: '' }
+  // Header userID+password OBBLIGATORI (vedi sopra): senza credenziali non ha senso chiamare.
+  if (!id || !cred?.user || !cred?.password) return { stati: [], consegnata: false, raw: '' }
   const ctrl = new AbortController()
   const t = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
-    const res = await fetch(`${BRT_TRACK}/${encodeURIComponent(id)}`, { signal: ctrl.signal, headers: { Accept: 'application/json' } })
+    const res = await fetch(`${BRT_TRACK}/${encodeURIComponent(id)}`, {
+      signal: ctrl.signal,
+      headers: { Accept: 'application/json', userID: String(cred.user || ''), password: String(cred.password || '') },
+    })
     const txt = await res.text()
     let j: any = null; try { j = JSON.parse(txt) } catch { /* non-JSON */ }
-    const root = trovaNodoTracking(j) || {}
+    // Struttura reale: { ttParcelIdResponse: { lista_eventi[], bolla:{dati_spedizione,dati_consegna}, executionMessage } }.
+    const root: any = (j && j.ttParcelIdResponse) || trovaNodoTracking(j) || {}
+    const code = num(root?.executionMessage?.code)
+    // Chiamata rifiutata (login errata / param mancante): nessuno stato -> mai declassare il badge.
+    if (code !== undefined && code < 0) return { stati: [], consegnata: false, raw: (txt || '').substring(0, 2000) }
     const eventi: any[] = Array.isArray(root.lista_eventi) ? root.lista_eventi : []
     const stati = eventi.map((e: any) => String(e?.evento?.descrizione || e?.descrizione || '').replace(/\s+/g, ' ').trim()).filter(Boolean)
-    // Stato sintetico (parte1/parte2) come ulteriori righe da mappare.
-    for (const v of [root.descrizione_stato_sped_parte1, root.descrizione_stato_sped_parte2]) {
+    // Stato sintetico e consegna stanno ANNIDATI in bolla, non a livello root.
+    const bolla: any = root.bolla || {}
+    for (const v of [bolla?.dati_spedizione?.descrizione_stato_sped_parte1, bolla?.dati_spedizione?.descrizione_stato_sped_parte2]) {
       const s2 = String(v || '').replace(/\s+/g, ' ').trim(); if (s2) stati.push(s2)
     }
-    const consegnata = !!String(root.data_consegna_merce || '').trim()
+    const consegnata = !!String(bolla?.dati_consegna?.data_consegna_merce || '').trim()
     if (consegnata) stati.push('consegnata')
     return { stati, consegnata, raw: (txt || '').substring(0, 2000) }
   } catch {
