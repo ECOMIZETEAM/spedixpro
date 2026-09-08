@@ -360,3 +360,82 @@ export async function inviaEmailSpedizioneCreata(p: {
     } catch { /* best-effort */ }
   }
 }
+
+// AVVISO DI GIACENZA AL DESTINATARIO.
+//
+// Quando il corriere non consegna, Poste e BRT mandano al destinatario un link per riprogrammare —
+// nuova data, oppure ritiro in un punto vicino. Quel link al destinatario NON arriva mai: ai provider
+// passiamo l'email di servizio (EMAIL_PER_CORRIERE), non quella vera. E' voluto, il provider non deve
+// poter contattare il cliente finale del nostro cliente. Ma il risultato e' che il destinatario non
+// sa di avere un pacco fermo e non ha modo di dire dove vuole che glielo portino: il pacco resta li'
+// finche' scade e torna indietro. Su 387 giacenze in 30 giorni, 133 non sono mai state svincolate.
+//
+// Allora glielo scriviamo NOI, che le email vere le abbiamo. Stessa scelta gia' fatta per la
+// spedizione creata: ai clienti finali scriviamo noi, mai il provider.
+//
+// NON offre un pulsante per riprogrammare: riconsegna e cambio indirizzo COSTANO e li addebita il
+// cliente. Farli partire dal destinatario vorrebbe dire addebitare il mittente senza chiederglielo.
+// Il reply-to e' il mittente: il destinatario risponde dicendo cosa vuole, e il mittente esegue lo
+// svincolo dal portale, dove quel flusso esiste gia'.
+export async function inviaEmailGiacenza(p: {
+  destEmail?: string | null; destNome?: string | null
+  mittEmail?: string | null; mittNome?: string | null
+  numero: string; corriere?: string | null; motivo?: string | null
+  trackingToken?: string | null
+  masterId?: string | null
+  notificaDest?: boolean
+}): Promise<{ ok: boolean; error?: string }> {
+  const dest = String(p.destEmail || '').trim().toLowerCase()
+  if (!(p.notificaDest ?? true)) return { ok: false, error: 'notifiche disattivate dal cliente' }
+  if (!EMAIL_RE.test(dest)) return { ok: false, error: 'email destinatario non valida' }
+  // Master in prova: non si scrive a nessuno di vero.
+  if (p.masterId) {
+    try { const { masterEDemo } = await import('@/lib/demo'); if (await masterEDemo(p.masterId)) return { ok: false, error: 'master demo' } } catch { /* best-effort */ }
+  }
+
+  // Marchio del master, come per la spedizione creata: il destinatario non ha mai sentito nominare
+  // MoovExpress, conosce il negozio da cui ha comprato e il corriere che glielo porta.
+  let brandLogo: string | null = null, brandNome: string | null = null
+  if (p.masterId) {
+    try {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const { data: mb } = await createAdminSupabase().from('masters').select('logo_url,nome').eq('id', p.masterId).maybeSingle()
+      brandLogo = (mb as any)?.logo_url || null
+      brandNome = (mb as any)?.nome || null
+    } catch { /* best-effort */ }
+  }
+
+  const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://moovexpress.com').replace(/\/$/, '')
+  const bottone = p.trackingToken
+    ? `<a href="${base}/traccia/${p.trackingToken}" style="display:inline-block;background:#f97316;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;font-size:14px;margin-top:6px">Vedi la spedizione \u2192</a>`
+    : ''
+  const mitt = esc(p.mittNome || 'il mittente')
+  const corriere = esc((p.corriere || '').trim())
+  const corpo = `
+          <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Il tuo pacco \u00e8 in attesa \ud83d\udce6</h2>
+          <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 10px">Il corriere non \u00e8 riuscito a consegnarti la spedizione <strong>${esc(p.numero)}</strong>${corriere ? ` (${corriere})` : ''}, che ora \u00e8 in giacenza.</p>
+          ${p.motivo ? `<p style="color:#666;font-size:14px;margin:0 0 10px">Motivo: <strong>${esc(p.motivo)}</strong></p>` : ''}
+          <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:14px 16px;margin:14px 0">
+            <p style="color:#7c2d12;font-size:14px;line-height:1.6;margin:0"><strong>Rispondi a questa email</strong> dicendo come preferisci:
+            una nuova data di consegna, un altro indirizzo, oppure il ritiro in un punto vicino a te.
+            La richiesta arriva direttamente a ${mitt}, che la gira al corriere.</p>
+          </div>
+          <p style="color:#999;font-size:13px;line-height:1.6;margin:0 0 6px">Se non ci dici nulla, dopo qualche giorno il pacco torna al mittente.</p>
+          ${bottone}
+        `
+  const fromAddr = FROM.match(/<([^>]+)>/)?.[1] || FROM
+  const fromBrand = brandNome ? `${brandNome.replace(/["<>]/g, '').slice(0, 60)} <${fromAddr}>` : FROM
+  // REPLY-TO = il mittente: e' lui che puo' davvero muovere la giacenza dal portale.
+  const replyTo = EMAIL_RE.test(String(p.mittEmail || '').trim().toLowerCase())
+    ? String(p.mittEmail).trim().toLowerCase() : undefined
+  try {
+    await resend.emails.send({
+      from: fromBrand, to: dest, replyTo,
+      subject: `Il tuo pacco \u00e8 in attesa \u2014 spedizione ${p.numero}`,
+      html: (brandLogo || brandNome) ? wrapBrand(corpo, { logo: brandLogo, nome: brandNome }) : wrap(corpo),
+    })
+    return { ok: true }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || 'invio non riuscito' }
+  }
+}
