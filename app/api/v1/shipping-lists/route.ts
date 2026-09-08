@@ -74,6 +74,11 @@ export async function POST(req: NextRequest) {
     const { chiudiGiornataGls } = await import('@/lib/gls')
     await chiudiGiornataGls(admin, distinta.id)
   } catch (e) { console.error('API close-day gls:', e) }
+  // BRT diretto: auto-conferma (pacchi gia' a BRT alla creazione) -> attesta la distinta.
+  try {
+    const { chiudiDistintaBrt } = await import('@/lib/brt')
+    await chiudiDistintaBrt(admin, distinta.id)
+  } catch (e) { console.error('API close-day brt:', e) }
 
   // Rileggo il borderò eventualmente prodotto (spedisci): lo restituisco come PDF base64.
   // NB: non esiste un endpoint /pdf per le distinte via API — restituisco direttamente il documento del corriere.

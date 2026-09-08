@@ -57,5 +57,6 @@ export async function POST(req: NextRequest) {
   // GLS: mancava qui (e in cliente/conferma e API v1) → un contratto GLS non chiudeva mai la giornata.
   // I flussi master la chiamano su OGNI distinta e l'altro provider fa skip da solo. (audit #2)
   try { const { chiudiGiornataGls } = await import('@/lib/gls'); await chiudiGiornataGls(_adminChiusura, distinta.id) } catch {}
+  try { const { chiudiDistintaBrt } = await import('@/lib/brt'); await chiudiDistintaBrt(_adminChiusura, distinta.id) } catch {}
   return NextResponse.json({ ok: true, distintaId: distinta.id, numero: distinta.numero, totali: { colli: totaleColli, peso: totalePeso, spedizioni: validIds.length }, fulfill: fulfillEsiti })
 }

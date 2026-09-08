@@ -231,6 +231,34 @@ export async function confermaSpedizioniBrt(
   return { ok: okTot, errore: okTot ? null : ultimoErr, raw }
 }
 
+// Chiusura distinta per BRT DIRETTO (contratto proprio). I contratti BRT diretti sono ad AUTO-CONFERMA:
+// ogni spedizione e' gia' registrata e prenotata al ritiro da BRT al momento della create (POST /shipment)
+// — la prova e' in crea/route: se il nostro salvataggio DB fallisce, ANNULLIAMO il "pacco fantasma"
+// proprio perche' BRT lo ritirerebbe. Nella REST BRT NON esiste un borderò/manifest da trasmettere a
+// parte. Quindi qui si ATTESTA la distinta (confermata_vettore + bordero_id), come GLS/SDA quando non
+// c'e' un PDF, cosi' non resta "In attesa" per sempre. FUTURO: se un contratto BRT sara' a "Conferma
+// Esplicita" (oggi nessuno lo e'), qui andra' chiamata confermaSpedizioniBrt(cred, refs) coi riferimenti
+// {numericRef, alphaRef} delle spedizioni della distinta, altrimenti BRT non passerebbe a ritirare —
+// servira' prima un flag sul contratto per distinguerli. Guardia tipo==='brt': non tocca altri corrieri.
+export async function chiudiDistintaBrt(supabase: any, distintaId: string) {
+  try {
+    const { data: distinta } = await supabase
+      .from('distinte').select('id, corriere_id, bordero_id').eq('id', distintaId).maybeSingle()
+    if (!distinta || (distinta.bordero_id && !String(distinta.bordero_id).startsWith('ERRORE'))) return { skip: true }
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { data: corriere } = await createAdminSupabase()
+      .from('corrieri').select('id, tipo').eq('id', distinta.corriere_id).maybeSingle()
+    if (!corriere || corriere.tipo !== 'brt') return { skip: true }
+    await supabase.from('distinte').update({
+      bordero_id: 'N/A', confermata_vettore: true, data_conferma: new Date().toISOString(),
+    }).eq('id', distintaId)
+    return { ok: true }
+  } catch (e: any) {
+    try { await supabase.from('distinte').update({ bordero_id: 'ERRORE: ' + String(e?.message || e).slice(0, 150) }).eq('id', distintaId) } catch {}
+    return { errore: String(e?.message || e) }
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TRACKING — GET /rest/v1/tracking/parcelID/{parcelID} con header OBBLIGATORI userID+password (come la
 // create): senza, BRT risponde executionMessage.code=-57 "MISSING PARAM" e non legge nulla — era la causa

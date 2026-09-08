@@ -118,5 +118,6 @@ export async function POST(req: NextRequest) {
   try { const { chiudiBorderoSpedisci } = await import('@/lib/spedisci'); await chiudiBorderoSpedisci(_dbChiusura, distinta.id) } catch {}
   try { const { chiudiBordereauSpediamopro } = await import('@/lib/spediamopro'); await chiudiBordereauSpediamopro(_dbChiusura, distinta.id) } catch {}
   try { const { chiudiGiornataGls } = await import('@/lib/gls'); await chiudiGiornataGls(_dbChiusura, distinta.id) } catch {}
+  try { const { chiudiDistintaBrt } = await import('@/lib/brt'); await chiudiDistintaBrt(_dbChiusura, distinta.id) } catch {}
   return NextResponse.json({ success: true, distintaId: distinta.id, numero: numeroDistinta })
 }
