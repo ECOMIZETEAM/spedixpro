@@ -44,15 +44,25 @@ export default function NetworkRicevutiPage() {
       const giorno = new Date(r.created_at).toLocaleDateString('it-IT')
       const da = r.masters?.nome || '—'
       const k = da + '|' + giorno
-      if (!m.has(k)) m.set(k, { k, da, giorno, righe: [], totale: 0, totaleDaDecidere: 0, daDecidere: [] })
+      if (!m.has(k)) m.set(k, { k, da, giorno, ts: 0, righe: [], totale: 0, totaleDaDecidere: 0, daDecidere: [] })
       const b = m.get(k)
+      b.ts = Math.max(b.ts, new Date(r.created_at).getTime())   // data VERA del blocco, per l'ordinamento
       const addebito = (Number(r.differenza) || 0) - (Number(r.fuori_sagoma) || 0)   // addebito vero = ripesatura + fuori sagoma
       b.righe.push(r); b.totale += addebito
       // Il totale che conta è quello del DA DECIDERE, non di tutto il blocco: 578 già decise + 2 nuove
       // mostravano "580 · €1957" accanto a "Accetta (2)" — sembrava un errore. Ora il blocco grida i 2.
       if (!r.propagazione) { b.daDecidere.push(r.id); b.totaleDaDecidere += addebito }
     }
-    return { blocchi: Array.from(m.values()).sort((a, b) => (a.giorno < b.giorno ? 1 : -1)), proprie }
+    // ORDINE come i contrassegni: prima i blocchi con rettifiche ANCORA DA DECIDERE (le NUOVE), poi per
+    // DATA vera decrescente. Prima si ordinava per la STRINGA "GG/MM/AAAA" → ordinava per giorno del mese
+    // (27/08 prima di 08/09) e le vecchie GIÀ DECISE finivano in cima, sembrando ri-addebitate.
+    return {
+      blocchi: Array.from(m.values()).sort((a, b) => {
+        const an = a.daDecidere.length > 0 ? 1 : 0, bn = b.daDecidere.length > 0 ? 1 : 0
+        return an !== bn ? bn - an : b.ts - a.ts
+      }),
+      proprie,
+    }
   })()
   const totaleProprie = proprie.reduce((a: number, r: any) => a + ((Number(r.differenza) || 0) - (Number(r.fuori_sagoma) || 0)), 0)
 
