@@ -250,3 +250,78 @@ export async function inviaSmsCreazione(spedizioneId: string | null | undefined)
     }
   } catch { /* best-effort: la spedizione è già creata */ }
 }
+
+// ── SMS "pacco in giacenza" al destinatario ─────────────────────────────────────────────────────
+// Stesso identico meccanismo dell'SMS di creazione, con un testo diverso: preferenza del titolare,
+// 1 SMS scalato dal SUO credito (RPC atomica), rimborso se l'invio fallisce. Il costo non e' nostro:
+// lo paga chi lo attiva, ed e' il motivo per cui questo canale ha senso accanto all'email.
+//
+// PERCHE' SERVE QUI PIU' CHE ALTROVE: il link per riprogrammare la consegna che manda il corriere
+// non arriva mai al destinatario (ai provider passiamo l'email schermo). L'email nostra lo raggiunge
+// solo se abbiamo un indirizzo vero, e un quarto degli indirizzi sono alias di marketplace. Il
+// cellulare invece ce l'ha il 92% delle spedizioni: su una giacenza e' il canale che arriva davvero.
+//
+// Ritorna true SOLO se l'SMS e' partito davvero: il cron lo usa per decidere se il destinatario e'
+// stato avvisato, e non deve segnare un avviso che non c'e' stato.
+export async function inviaSmsGiacenza(spedizioneId: string | null | undefined): Promise<boolean> {
+  if (!spedizioneId || !smsConfigurato()) return false
+  try {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const { data: sp } = await admin.from('spedizioni')
+      .select('id,cliente_id,master_id,dest_telefono,tracking_token,numero')
+      .eq('id', spedizioneId).maybeSingle()
+    if (!sp || !sp.tracking_token) return false
+
+    const { masterEDemo } = await import('@/lib/demo')
+    if (await masterEDemo(sp.master_id, admin)) return false
+
+    const tel = normalizzaTelefonoIT(sp.dest_telefono)
+    if (!tel) return false   // niente cellulare: non si consuma credito
+
+    // Stessa preferenza dell'SMS di creazione: chi ha acceso le notifiche SMS le vuole anche — anzi
+    // SOPRATTUTTO — quando il pacco si ferma. Un secondo interruttore solo per la giacenza vorrebbe
+    // dire che qualcuno lo lascia spento senza accorgersene, proprio nel caso che conta.
+    let abilitato = false, testo: string | null = null
+    if (sp.cliente_id) {
+      const { data: c } = await admin.from('clienti').select('impostazioni').eq('id', sp.cliente_id).maybeSingle()
+      const imp = (c?.impostazioni as any) || {}
+      abilitato = imp.notifica_sms === true
+      testo = imp.testo_sms_giacenza || null
+    } else if (sp.master_id) {
+      const { data: m } = await admin.from('masters').select('impostazioni').eq('id', sp.master_id).maybeSingle()
+      const imp = (m?.impostazioni as any) || {}
+      abilitato = imp.notifica_sms === true
+      testo = imp.testo_sms_giacenza || null
+    }
+    if (!abilitato) return false
+
+    let brand = 'MoovExpress'
+    if (sp.master_id) {
+      const { data: mb } = await admin.from('masters').select('nome').eq('id', sp.master_id).maybeSingle()
+      if (mb?.nome) brand = mb.nome
+    }
+
+    const { data: ok } = await admin.rpc('sms_consuma', { p_spedizione_id: sp.id, p_costo: COSTO_SMS_EUR, p_quantita: 1 })
+    if (ok !== true) return false
+
+    // Testo corto di proposito: con l'URL del tracking si resta dentro il singolo SMS, che e' anche
+    // l'unico che il titolare ha pagato.
+    const base = String(testo || '').trim()
+      || `${brand}: consegna non riuscita, il pacco {numero-spedizione} e' in giacenza. Come riceverlo: {tracking}`
+    const messaggio = costruisciMessaggio(base, sp.numero || '', urlTracking(sp.tracking_token), brand)
+    const esito = await inviaSms(tel, messaggio)
+    if (esito.ok) {
+      if (sp.cliente_id) await autoRicaricaSeServe(admin, 'cliente', sp.cliente_id)
+      else if (sp.master_id) await autoRicaricaSeServe(admin, 'master', sp.master_id)
+      return true
+    }
+    // Consumato ma non partito: si rimborsa, come per la creazione. Non si fa pagare un SMS mai inviato.
+    console.error('[SMS][GIACENZA] invio non riuscito per spedizione ' + sp.id + ': ' + esito.error)
+    await admin.rpc('sms_rettifica', {
+      p_master_id: sp.master_id, p_cliente_id: sp.cliente_id,
+      p_importo: COSTO_SMS_EUR, p_note: 'Rimborso SMS giacenza non inviato', p_created_by: null,
+    })
+    return false
+  } catch { return false }
+}

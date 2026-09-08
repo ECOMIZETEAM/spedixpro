@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { inviaEmailGiacenza } from '@/lib/email'
+import { inviaSmsGiacenza } from '@/lib/sms'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -15,7 +16,12 @@ export const dynamic = 'force-dynamic'
 // non sa di avere un pacco fermo, e il pacco resta li' finche' scade e torna indietro: su 387
 // giacenze in 30 giorni, 133 non sono mai state svincolate.
 //
-// Allora scriviamo noi, che le email vere le abbiamo. Solo email: nessun SMS (costa 0,10 a invio).
+// Allora avvisiamo noi, sui DUE canali, che i contatti veri li abbiamo.
+//
+// EMAIL + SMS, non uno solo. L'email arriva a chi ha un indirizzo vero, ma un quarto degli indirizzi
+// sono alias di marketplace (marketplace.amazon.it, members.ebay.com): li' l'email la riceve un relay,
+// non il destinatario. Il CELLULARE invece c'e' sul 92% delle spedizioni. L'SMS non ci costa nulla:
+// lo scala dal credito del titolare che l'ha attivato (sms_consuma), e se non c'e' credito non parte.
 //
 // DUE PROTEZIONI CONTRO LA RAFFICA, imparate a caro prezzo altrove:
 //  - FINESTRA: si guardano solo le giacenze aperte di recente. Senza, al primo giro dopo il rilascio
@@ -55,7 +61,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  let inviate = 0, saltate = 0
+  let inviate = 0, saltate = 0, perEmail = 0, perSms = 0
   const problemi: any[] = []
   for (const s of (aperte || [])) {
     // Gia' svincolata fra il rilevamento e adesso: il pacco si e' rimesso in moto da solo, non si
@@ -63,6 +69,9 @@ export async function GET(req: NextRequest) {
     if (s.giacenza_stato === 'svincolata') { saltate++; continue }
     if (s.cliente_id && spente.has(s.cliente_id)) { saltate++; continue }
 
+    // I due canali sono INDIPENDENTI: si provano sempre entrambi. L'SMS si gatea da solo (preferenza
+    // del titolare, cellulare valido, credito) e l'email pure (indirizzo valido, preferenza).
+    const sms = await inviaSmsGiacenza(s.id)
     const esito = await inviaEmailGiacenza({
       destEmail: s.dest_email, destNome: s.dest_nome,
       mittEmail: s.mitt_email, mittNome: s.mitt_nome,
@@ -71,9 +80,12 @@ export async function GET(req: NextRequest) {
       masterId: s.master_id,
     })
 
-    // Il segno si mette SOLO a invio riuscito. Se l'email non parte (indirizzo non valido, gateway
-    // giu'), la spedizione resta in coda e il giro dopo ci riprova — finche' resta nella finestra.
-    if (esito.ok) {
+    // Il segno si mette se ALMENO UNO dei due e' partito: il destinatario e' stato avvisato, e non lo
+    // si avvisa due volte. Se non parte NIENTE (nessun contatto valido, gateway giu'), la spedizione
+    // resta in coda e il giro dopo ci riprova — finche' resta nella finestra dei 3 giorni.
+    if (sms) perSms++
+    if (esito.ok) perEmail++
+    if (sms || esito.ok) {
       await admin.from('spedizioni').update({ giacenza_email_dest_at: new Date().toISOString() }).eq('id', s.id)
       inviate++
     } else {
@@ -83,5 +95,5 @@ export async function GET(req: NextRequest) {
   }
 
   if (problemi.length) console.error('[GIACENZE][AVVISO] invii non riusciti:', JSON.stringify(problemi))
-  return NextResponse.json({ success: true, trovate: (aperte || []).length, inviate, saltate, problemi: problemi.length })
+  return NextResponse.json({ success: true, trovate: (aperte || []).length, inviate, perEmail, perSms, saltate, problemi: problemi.length })
 }
