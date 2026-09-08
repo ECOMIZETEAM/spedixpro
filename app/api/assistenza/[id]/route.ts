@@ -184,11 +184,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   const caricaPod = typeof body?.podBase64 === 'string' && !!body.podBase64
-  // Un master della catena può SOLO caricare la POD (è il senso dell'inoltro: ce l'ha lui e la
-  // mette su questa richiesta). NON deve poter cambiare stato né archiviare il ticket di un
-  // cliente che non è suo: quella resta una decisione dell'assistenza diretta.
-  if (!sonoOwner && !caricaPod) {
-    return NextResponse.json({ error: 'Da qui puoi solo caricare la POD: lo stato lo gestisce chi ha ricevuto la richiesta.' }, { status: 403 })
+  const cambiaStato = !!body?.stato
+  // Un master della CATENA (a cui il ticket è stato inoltrato) può caricare la POD e — novità —
+  // anche CHIUDERE / cambiare lo stato del ticket inoltrato: es. Solution risponde e lo chiude
+  // "per conto" di Ecomize LL che non l'ha chiuso. Nient'altro (assegnazioni ecc. restano locali).
+  if (!sonoOwner && !caricaPod && !(inCatena && cambiaStato)) {
+    return NextResponse.json({ error: 'Da qui puoi solo caricare la POD o chiudere/aggiornare lo stato del ticket inoltrato.' }, { status: 403 })
   }
 
   const upd: any = { updated_at: new Date().toISOString(), aperto_letto: false }
@@ -203,8 +204,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     upd.non_letto_owner = true                                            // avviso l'assistenza diretta
     upd.rete_non_letti = altriInCatena                                    // e tolgo me dai non letti
   }
-  // 'chiuso' = archiviato (termina la chat, sola lettura). Solo l'assistenza diretta.
-  if (sonoOwner && body?.stato && ['aperto', 'in_lavorazione', 'risolto', 'chiuso'].includes(body.stato)) upd.stato = body.stato
+  // 'chiuso' = archiviato (termina la chat, sola lettura). Lo cambia l'owner O un master della catena
+  // (chi ha in mano il ticket inoltrato può chiuderlo/segnarlo per conto dell'assistenza diretta).
+  if ((sonoOwner || inCatena) && body?.stato && ['aperto', 'in_lavorazione', 'risolto', 'chiuso'].includes(body.stato)) upd.stato = body.stato
 
   // Caricamento POD (base64) -> storage -> pod_url. Caricare la POD chiude la richiesta.
   // PDF **o IMMAGINE** (jpg/png/webp): BRT manda FOTO, non PDF. Si conserva il tipo REALE del file

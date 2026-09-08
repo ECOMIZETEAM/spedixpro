@@ -178,11 +178,21 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   // le tabelle — ricevuti, miei E rete — perché per un master alto (es. E&A) la gran parte dei
   // ticket sta in "rete" (inoltrati): cercando lì la ricerca prima era morta.
   const q = cerca.trim().toLowerCase()
-  const matchCerca = (t: any) => !q || [t.codice, t.oggetto, t.aperto_da].some(v => String(v || '').toLowerCase().includes(q))
-  const filtrati = ricevuti
+  // Ricerca su codice, LDV (oggetto), cliente (aperto_da) E testo del primo messaggio.
+  const matchCerca = (t: any) => !q || [t.codice, t.oggetto, t.aperto_da, t.messaggio].some(v => String(v || '').toLowerCase().includes(q))
+  const cercati = ricevuti
     .filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod'))
-    .filter(t => filtroStato === 'tutti' || t.stato === filtroStato)
     .filter(matchCerca)
+  // Contatori per i tab di stato ("Nuovi" = non ancora letti dall'assistenza diretta).
+  const conta: Record<string, number> = {
+    tutti: cercati.length,
+    nuovi: cercati.filter((t: any) => t.non_letto_owner).length,
+    aperto: cercati.filter((t: any) => t.stato === 'aperto').length,
+    in_lavorazione: cercati.filter((t: any) => t.stato === 'in_lavorazione').length,
+    risolto: cercati.filter((t: any) => t.stato === 'risolto').length,
+    chiuso: cercati.filter((t: any) => t.stato === 'chiuso').length,
+  }
+  const filtrati = cercati.filter((t: any) => filtroStato === 'tutti' ? true : filtroStato === 'nuovi' ? !!t.non_letto_owner : t.stato === filtroStato)
   const mieiFiltrati = miei.filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod')).filter(matchCerca)
   const reteFiltrati = rete.filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod')).filter(matchCerca)
   const totalePagine = Math.max(1, Math.ceil(filtrati.length / perPage))
@@ -205,20 +215,33 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
 
       {/* RICEVUTI */}
       <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', overflow: 'hidden', marginBottom: '20px' }}>
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>{isPod ? 'Richieste POD ricevute' : 'Ticket ricevuti'}</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <input value={cerca} onChange={e => { setCerca(e.target.value); setPagina(1) }} placeholder="🔎 Cerca LDV, pratica o cliente…"
-              style={{ padding: '7px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', minWidth: '230px' }} />
-            <select value={filtroStato} onChange={e => { setFiltroStato(e.target.value); setPagina(1) }} style={{ padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '12.5px', color: '#1a1a1a', background: '#fff' }}>
-              <option value="tutti">Tutti gli stati</option><option value="aperto">Aperti</option><option value="in_lavorazione">In lavorazione</option><option value="risolto">Risolti</option><option value="chiuso">Chiusi (archivio)</option>
-            </select>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#666' }}>
-              Mostra
-              <select value={perPage} onChange={e => { setPerPage(Number(e.target.value)); setPagina(1) }} style={{ padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: '5px', fontSize: '12px', color: '#1a1a1a', background: '#fff' }}>
-                <option value={10}>10</option><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option>
-              </select>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>{isPod ? 'Richieste POD ricevute' : 'Ticket ricevuti'}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <input value={cerca} onChange={e => { setCerca(e.target.value); setPagina(1) }} placeholder="🔎 Cerca LDV, pratica, cliente o testo…"
+                style={{ padding: '7px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', minWidth: '240px' }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#666' }}>
+                Mostra
+                <select value={perPage} onChange={e => { setPerPage(Number(e.target.value)); setPagina(1) }} style={{ padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: '5px', fontSize: '12px', color: '#1a1a1a', background: '#fff' }}>
+                  <option value={10}>10</option><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option>
+                </select>
+              </div>
             </div>
+          </div>
+          {/* Tab di stato con contatori: filtro rapido + colpo d'occhio su quanti ce ne sono. */}
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {[{ k: 'tutti', label: 'Tutti' }, { k: 'nuovi', label: 'Nuovi' }, { k: 'aperto', label: 'Aperti' }, { k: 'in_lavorazione', label: 'In lavorazione' }, { k: 'risolto', label: 'Risolti' }, { k: 'chiuso', label: 'Chiusi' }].map(tab => {
+              const attivo = filtroStato === tab.k
+              const n = conta[tab.k] || 0
+              const evidNuovi = tab.k === 'nuovi' && n > 0 && !attivo
+              return (
+                <button key={tab.k} onClick={() => { setFiltroStato(tab.k); setPagina(1) }} style={{ padding: '5px 11px', borderRadius: '999px', border: '1px solid', borderColor: attivo ? '#f97316' : (evidNuovi ? '#fecaca' : '#e5e7eb'), background: attivo ? '#f97316' : (evidNuovi ? '#fef2f2' : '#fff'), color: attivo ? '#fff' : (evidNuovi ? '#b91c1c' : '#374151'), fontSize: '12px', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {tab.label}
+                  <span style={{ fontSize: '11px', fontWeight: 700, background: attivo ? 'rgba(255,255,255,0.25)' : '#f1f5f9', color: attivo ? '#fff' : '#6b7280', borderRadius: '999px', padding: '0 6px', minWidth: '16px', textAlign: 'center' }}>{n}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
         <div style={{ overflowX: 'auto' }}>
@@ -542,12 +565,14 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                 </div>
               )}
 
-              {/* Stato del ticket — solo il lato ASSISTENZA (owner) cambia stato/chiude */}
-              {ruoloChat === 'master' && (
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
+              {/* Stato del ticket — lo cambia l'owner (assistenza diretta) E ANCHE il master a monte
+                  (rete) a cui è stato inoltrato: può chiuderlo/segnarlo per conto del master diretto. */}
+              {(ruoloChat === 'master' || ruoloChat === 'rete') && (
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', borderTop: '1px solid #f1f5f9', paddingTop: '12px', alignItems: 'center' }}>
                   {!isPod && !['chiuso', 'in_lavorazione', 'risolto'].includes(sel.stato) && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'in_lavorazione' })) setSel((s: any) => ({ ...s, stato: 'in_lavorazione' })) }} style={{ padding: '8px 14px', border: 'none', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>In lavorazione</button>}
                   {!['risolto', 'chiuso'].includes(sel.stato) && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'risolto' })) setSel((s: any) => ({ ...s, stato: 'risolto' })) }} style={{ padding: '8px 14px', border: 'none', background: '#16a34a', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Segna risolto</button>}
                   {sel.stato !== 'chiuso' && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'chiuso' })) setSel(null) }} style={{ padding: '8px 14px', border: '1px solid #d1d5db', background: '#fff', color: '#6b7280', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>🔒 Chiudi e archivia</button>}
+                  {ruoloChat === 'rete' && sel.stato !== 'chiuso' && <span style={{ fontSize: '11px', color: '#888' }}>Puoi chiuderlo anche per conto del master a cui è stato inoltrato.</span>}
                 </div>
               )}
             </div>
