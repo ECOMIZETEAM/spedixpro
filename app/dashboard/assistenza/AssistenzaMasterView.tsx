@@ -30,6 +30,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   const [msg, setMsg] = useState('')
   const [cerca, setCerca] = useState('')             // ricerca per LDV
   const [filtroStato, setFiltroStato] = useState('tutti')   // lo storico resta sempre: 'tutti' include i chiusi
+  const [filtroGestore, setFiltroGestore] = useState('tutti')   // "gestito da": chi ha in carico al mio livello
   const [perPage, setPerPage] = useState(25)
   const [pagina, setPagina] = useState(1)
   const [dragPod, setDragPod] = useState(false)
@@ -192,9 +193,13 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
     risolto: cercati.filter((t: any) => t.stato === 'risolto').length,
     chiuso: cercati.filter((t: any) => t.stato === 'chiuso').length,
   }
-  const filtrati = cercati.filter((t: any) => filtroStato === 'tutti' ? true : filtroStato === 'nuovi' ? !!t.non_letto_owner : t.stato === filtroStato)
+  const reteCercati = rete.filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod')).filter(matchCerca)
+  // Filtro "gestito da": chi ha in carico il ticket al MIO livello (assegnato_nome, es. Sara/Giuliana).
+  const gestori = (Array.from(new Set([...cercati, ...reteCercati].map((t: any) => t.assegnato_nome).filter(Boolean))) as string[]).sort()
+  const matchGestore = (t: any) => filtroGestore === 'tutti' || (filtroGestore === '__nessuno__' ? !t.assegnato_nome : t.assegnato_nome === filtroGestore)
+  const filtrati = cercati.filter((t: any) => (filtroStato === 'tutti' ? true : filtroStato === 'nuovi' ? !!t.non_letto_owner : t.stato === filtroStato) && matchGestore(t))
   const mieiFiltrati = miei.filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod')).filter(matchCerca)
-  const reteFiltrati = rete.filter(t => (isPod ? t.categoria === 'pod' : t.categoria !== 'pod')).filter(matchCerca)
+  const reteFiltrati = reteCercati.filter(matchGestore)
   const totalePagine = Math.max(1, Math.ceil(filtrati.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
   const visibili = filtrati.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
@@ -221,6 +226,13 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               <input value={cerca} onChange={e => { setCerca(e.target.value); setPagina(1) }} placeholder="🔎 Cerca LDV, pratica, cliente o testo…"
                 style={{ padding: '7px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', minWidth: '240px' }} />
+              {gestori.length > 0 && (
+                <select value={filtroGestore} onChange={e => { setFiltroGestore(e.target.value); setPagina(1) }} title="Filtra per chi ha in carico il ticket" style={{ padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '12.5px', color: '#1a1a1a', background: '#fff' }}>
+                  <option value="tutti">Gestito da: tutti</option>
+                  {gestori.map(g => <option key={g} value={g}>{g}</option>)}
+                  <option value="__nessuno__">Non assegnati</option>
+                </select>
+              )}
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#666' }}>
                 Mostra
                 <select value={perPage} onChange={e => { setPerPage(Number(e.target.value)); setPagina(1) }} style={{ padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: '5px', fontSize: '12px', color: '#1a1a1a', background: '#fff' }}>
@@ -513,8 +525,9 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
 
               {msg && <div style={{ fontSize: '12px', color: '#dc2626' }}>{msg}</div>}
 
-              {/* Input chat (ticket): scrivi finché non è chiuso */}
-              {!isPod && (sel.stato === 'chiuso' ? (
+              {/* Input chat: si scrive finché non è chiuso — anche sulle richieste POD (cliente e
+                  master possono scriversi, non solo scambiarsi il PDF). */}
+              {(sel.stato === 'chiuso' ? (
                 <div style={{ padding: '12px', borderRadius: '8px', background: '#f3f4f6', color: '#6b7280', fontSize: '12.5px', textAlign: 'center' }}>🔒 Ticket chiuso e archiviato — sola lettura.</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
