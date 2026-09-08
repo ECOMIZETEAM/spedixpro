@@ -278,10 +278,10 @@ function trovaNodoTracking(j: any): any {
   return null
 }
 
-export async function trackingBrt(cred: CredenzialiBrt, parcelID: string, timeoutMs = 15000): Promise<{ stati: string[]; consegnata: boolean; raw: string }> {
+export async function trackingBrt(cred: CredenzialiBrt, parcelID: string, timeoutMs = 15000): Promise<{ stati: string[]; eventi: { data: string; descrizione: string; luogo: string }[]; consegnata: boolean; raw: string }> {
   const id = String(parcelID || '').trim()
   // Header userID+password OBBLIGATORI (vedi sopra): senza credenziali non ha senso chiamare.
-  if (!id || !cred?.user || !cred?.password) return { stati: [], consegnata: false, raw: '' }
+  if (!id || !cred?.user || !cred?.password) return { stati: [], eventi: [], consegnata: false, raw: '' }
   const ctrl = new AbortController()
   const t = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
@@ -295,19 +295,27 @@ export async function trackingBrt(cred: CredenzialiBrt, parcelID: string, timeou
     const root: any = (j && j.ttParcelIdResponse) || trovaNodoTracking(j) || {}
     const code = num(root?.executionMessage?.code)
     // Chiamata rifiutata (login errata / param mancante): nessuno stato -> mai declassare il badge.
-    if (code !== undefined && code < 0) return { stati: [], consegnata: false, raw: (txt || '').substring(0, 2000) }
-    const eventi: any[] = Array.isArray(root.lista_eventi) ? root.lista_eventi : []
-    const stati = eventi.map((e: any) => String(e?.evento?.descrizione || e?.descrizione || '').replace(/\s+/g, ' ').trim()).filter(Boolean)
-    // Stato sintetico e consegna stanno ANNIDATI in bolla, non a livello root.
+    if (code !== undefined && code < 0) return { stati: [], eventi: [], consegnata: false, raw: (txt || '').substring(0, 2000) }
+    // Eventi STRUTTURATI con DATA/ORA/filiale: BRT li restituisce dal piu' recente. Servono al popup tracking.
+    const eventi = (Array.isArray(root.lista_eventi) ? root.lista_eventi : []).map((e: any) => {
+      const ev = e?.evento || e || {}
+      const data = [String(ev.data || '').trim(), String(ev.ora || '').trim()].filter(Boolean).join(' ')
+      const descrizione = String(ev.descrizione || e?.descrizione || '').replace(/\s+/g, ' ').trim()
+      const luogo = String(ev.filiale || ev.luogo || '').replace(/\s+/g, ' ').trim()
+      return { data, descrizione, luogo }
+    }).filter((e: any) => e.descrizione)
+    // stati = solo descrizioni, per la mappatura del cron; + stato sintetico (parte1/2) ANNIDATO in bolla.
+    const stati = eventi.map((e: any) => e.descrizione)
     const bolla: any = root.bolla || {}
     for (const v of [bolla?.dati_spedizione?.descrizione_stato_sped_parte1, bolla?.dati_spedizione?.descrizione_stato_sped_parte2]) {
       const s2 = String(v || '').replace(/\s+/g, ' ').trim(); if (s2) stati.push(s2)
     }
+    // Consegna dal campo dedicato. NIENTE evento sintetico "consegnata" (creava un doppione con
+    // l'evento reale "CONSEGNATA" nel popup): il cron la rileva dal boolean qui restituito.
     const consegnata = !!String(bolla?.dati_consegna?.data_consegna_merce || '').trim()
-    if (consegnata) stati.push('consegnata')
-    return { stati, consegnata, raw: (txt || '').substring(0, 2000) }
+    return { stati, eventi, consegnata, raw: (txt || '').substring(0, 2000) }
   } catch {
-    return { stati: [], consegnata: false, raw: '' }
+    return { stati: [], eventi: [], consegnata: false, raw: '' }
   } finally {
     clearTimeout(t)
   }

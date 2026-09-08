@@ -171,11 +171,13 @@ export async function GET(req: NextRequest) {
         const brtParcel = (s as any).brt_parcel
         if (!brtParcel || !cred?.user || !cred?.password) return
         const { trackingBrt, mapStatoBrt } = await import('@/lib/brt')
-        const { stati } = await trackingBrt(cred, String(brtParcel))
+        const { stati, consegnata: brtConseg } = await trackingBrt(cred, String(brtParcel))
         for (const str of stati) {
           const m = mapStatoBrt(str)
           if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
         }
+        // Consegna dal campo dedicato di BRT (non serve l'evento testuale "CONSEGNATA").
+        if (brtConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
 
       } else {
         return

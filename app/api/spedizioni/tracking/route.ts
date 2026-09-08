@@ -147,6 +147,7 @@ export async function GET(req: NextRequest) {
     if (corriere.tipo === 'gls' || corriere.tipo === 'brt') {
       const raw: any = spedizione.raw_response || {}
       let stati: string[] = []
+      let eventiBrt: { data: string; descrizione: string; luogo: string }[] | null = null
       if (corriere.tipo === 'gls' && raw.numero && cred?.sigla_sede) {
         const { trackingGls, mapStatoGls } = await import('@/lib/gls')
         const r = await trackingGls(cred as any, String(raw.numero)); stati = r.stati
@@ -155,13 +156,17 @@ export async function GET(req: NextRequest) {
         await persistiStato(av)
       } else if (corriere.tipo === 'brt' && raw.parcelID && cred?.user && cred?.password) {
         const { trackingBrt, mapStatoBrt } = await import('@/lib/brt')
-        const r = await trackingBrt(cred as any, String(raw.parcelID)); stati = r.stati
+        const r = await trackingBrt(cred as any, String(raw.parcelID)); stati = r.stati; eventiBrt = r.eventi
         let av: string | null = null
         for (const s of stati) { const m = mapStatoBrt(s); if (m && prioritaStato(m) > prioritaStato(av)) av = m }
+        if (r.consegnata && prioritaStato('consegnata') > prioritaStato(av)) av = 'consegnata'
         await persistiStato(av)
       }
-      const uniq = stati.filter((s, i) => s && stati.indexOf(s) === i)   // dedup, ordine cronologico
-      const eventi = uniq.map(s => ({ date: '', description: s, location: '' })).reverse()   // più recente in alto
+      // BRT: eventi reali con DATA/ORA/filiale, gia' dal piu' recente (niente doppione "consegnata").
+      // Altri (GLS): solo descrizioni, dedup, invertiti per mostrare il piu' recente in alto.
+      const eventi = eventiBrt
+        ? eventiBrt.map(e => ({ date: e.data || '', description: e.descrizione, location: e.luogo || '' }))
+        : stati.filter((s, i) => s && stati.indexOf(s) === i).map(s => ({ date: '', description: s, location: '' })).reverse()
       return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200 })
     }
 

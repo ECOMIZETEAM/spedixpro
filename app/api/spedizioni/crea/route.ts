@@ -1831,7 +1831,9 @@ export async function POST(req: NextRequest) {
         await stornaPrenotazione()
         return NextResponse.json({ error: erroreCorrierePulito(ris.errore || 'BRT: creazione non riuscita') }, { status: 400 })
       }
-      const numeroFinale = ris.parcelID
+      // Numero MOSTRATO = trackingByParcelID (15 cifre): e' il tracking BRT vero (quello che funziona
+      // su brt.it). Il parcelID (18) e' l'id del COLLO e resta in raw_response.parcelID per l'API tracking.
+      const numeroFinale = ris.trackingByParcelID || ris.parcelID
 
       // L'etichetta BRT torna GIÀ nella create (una per collo): niente chiamata separata come il GLS.
       let etichettaUrl: string | null = null
