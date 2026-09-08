@@ -18,7 +18,7 @@ import { BUCKET_RISERVATI, pathDaUrl, nomeDaPath } from '@/lib/file-riservati'
 // usarlo come chiave per leggere gli allegati di tutti gli altri.
 
 function inline(mime: string) {
-  return mime === 'application/pdf' || mime.startsWith('image/')
+  return mime === 'application/pdf' || mime.startsWith('image/') || mime.startsWith('video/')
 }
 
 async function servi(admin: any, path: string) {

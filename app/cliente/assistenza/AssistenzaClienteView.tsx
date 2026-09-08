@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import { fileToAllegato } from '@/app/components/fileAllegato'
+import { fileToAllegato, preparaAllegatoChat } from '@/app/components/fileAllegato'
+import { AllegatoChat } from '@/app/components/AllegatoChat'
 // Allegati e POD escono da /api/file, che verifica chi li sta scaricando (lib/file-riservati.ts).
 import { linkAllegato } from '@/lib/file-riservati'
 
@@ -48,11 +49,33 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
   const [testo, setTesto] = useState('')
   const [inviando, setInviando] = useState(false)
   const [chatFiles, setChatFiles] = useState<any[]>([])   // allegati del messaggio in composizione
+  const [caricandoFile, setCaricandoFile] = useState(false)
+  const [editId, setEditId] = useState<string | null>(null)   // messaggio in modifica
+  const [editTesto, setEditTesto] = useState('')
   const fondoRef = useRef<HTMLDivElement>(null)
   async function aggiungiChatFile(list: FileList | File[]) {
     const arr = Array.from(list).slice(0, 10)
-    const objs = await Promise.all(arr.map(fileToAllegato))
-    setChatFiles(f => [...f, ...objs].slice(0, 10))
+    setCaricandoFile(true)
+    try {
+      const objs = await Promise.all(arr.map(preparaAllegatoChat))   // foto→base64, video/file→upload diretto
+      setChatFiles(f => [...f, ...objs].slice(0, 10))
+    } catch (e: any) {
+      setMsg({ t: 'err', x: e?.message || 'Allegato non caricato' })
+    } finally { setCaricandoFile(false) }
+  }
+  async function salvaModifica(mid: string) {
+    const t = editTesto.trim(); if (!t) return
+    const r = await fetch('/api/assistenza/messaggio/' + mid, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ testo: t }) })
+    const j = await r.json().catch(() => ({}))
+    if (j?.error) { setMsg({ t: 'err', x: j.error }); return }
+    setEditId(null); setEditTesto(''); if (chat?.ticket?.id) await apriChat(chat.ticket.id)
+  }
+  async function eliminaMsg(mid: string) {
+    if (!confirm('Eliminare questo messaggio per tutti?')) return
+    const r = await fetch('/api/assistenza/messaggio/' + mid, { method: 'DELETE' })
+    const j = await r.json().catch(() => ({}))
+    if (j?.error) { setMsg({ t: 'err', x: j.error }); return }
+    if (chat?.ticket?.id) await apriChat(chat.ticket.id)
   }
 
   async function apriChat(id: string) {
@@ -264,22 +287,38 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
             <div style={{ flex: 1, overflowY: 'auto', padding: '16px 18px', background: '#f8fafc', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {chatLoad ? <div style={{ textAlign: 'center', color: '#999', fontSize: '13px' }}>Caricamento…</div> : (chat.messaggi || []).map((m: any) => {
                 const mio = m.autore === chat.ruolo
+                const elim = !!m.eliminato_il
                 return (
                   <div key={m.id} style={{ alignSelf: mio ? 'flex-end' : 'flex-start', maxWidth: '78%' }}>
                     <div style={{ fontSize: '10.5px', color: '#94a3b8', margin: mio ? '0 4px 3px 0' : '0 0 3px 4px', textAlign: mio ? 'right' : 'left', fontWeight: 600 }}>{mio ? 'Tu' : (m.autore_nome || 'Assistenza')}</div>
-                    <div style={{ background: mio ? '#f97316' : '#fff', color: mio ? '#fff' : '#1a1a1a', border: mio ? 'none' : '1px solid #e5e7eb', padding: '9px 13px', borderRadius: '12px', fontSize: '13px', lineHeight: 1.45, whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const }}>
-                      {m.testo}
-                      {Array.isArray(m.allegati) && m.allegati.length > 0 && (
-                        <div style={{ display: 'flex', gap: '6px', marginTop: m.testo ? '6px' : '0', flexWrap: 'wrap' }}>
-                          {m.allegati.map((a: any, i: number) => (
-                            (String(a?.tipo || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|heic|heif|bmp|avif)(\?|$)/i.test(String(a?.nome || a?.url || '')))
-                              ? <a key={i} href={linkAllegato(chat.ticket?.id, a.url)} target="_blank" rel="noopener noreferrer"><img src={linkAllegato(chat.ticket?.id, a.url)} alt={a.nome} style={{ width: '84px', height: '84px', objectFit: 'cover', borderRadius: '8px', border: mio ? '1px solid rgba(255,255,255,0.45)' : '1px solid #e5e7eb', display: 'block' }} /></a>
-                              : <a key={i} href={linkAllegato(chat.ticket?.id, a.url)} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: mio ? '#fff' : '#2563eb', textDecoration: 'underline' }}>📎 {a.nome}</a>
-                          ))}
+                    {editId === m.id ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <textarea value={editTesto} onChange={e => setEditTesto(e.target.value)} rows={2} style={{ padding: '8px 11px', border: '1px solid #d1d5db', borderRadius: '10px', fontSize: '13px', color: '#1a1a1a', resize: 'none' as const, minWidth: '220px' }} />
+                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                          <button onClick={() => { setEditId(null); setEditTesto('') }} style={{ border: '1px solid #d1d5db', background: '#fff', color: '#6b7280', borderRadius: '6px', fontSize: '11.5px', padding: '4px 10px', cursor: 'pointer' }}>Annulla</button>
+                          <button onClick={() => salvaModifica(m.id)} style={{ border: 'none', background: '#f97316', color: '#fff', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, padding: '4px 12px', cursor: 'pointer' }}>Salva</button>
                         </div>
-                      )}
+                      </div>
+                    ) : (
+                      <div style={{ background: elim ? '#eef2f6' : (mio ? '#f97316' : '#fff'), color: elim ? '#94a3b8' : (mio ? '#fff' : '#1a1a1a'), border: (mio && !elim) ? 'none' : '1px solid #e5e7eb', padding: '9px 13px', borderRadius: '12px', fontSize: '13px', lineHeight: 1.45, whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const, fontStyle: elim ? 'italic' : 'normal' }}>
+                        {elim ? '🚫 messaggio eliminato' : (<>
+                          {m.testo}
+                          {m.modificato_il && <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '6px' }}>(modificato)</span>}
+                          {Array.isArray(m.allegati) && m.allegati.length > 0 && (
+                            <div style={{ display: 'flex', gap: '6px', marginTop: m.testo ? '6px' : '0', flexWrap: 'wrap' }}>
+                              {m.allegati.map((a: any, i: number) => <AllegatoChat key={i} ticketId={chat.ticket?.id} a={a} mio={mio} />)}
+                            </div>
+                          )}
+                        </>)}
+                      </div>
+                    )}
+                    <div style={{ fontSize: '10px', color: '#b6c0cc', margin: mio ? '2px 4px 0 0' : '2px 0 0 4px', display: 'flex', gap: '8px', alignItems: 'center', justifyContent: mio ? 'flex-end' : 'flex-start' }}>
+                      <span>{new Date(m.created_at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                      {m.tu && !elim && editId !== m.id && chat.ticket?.stato !== 'chiuso' && (<>
+                        <button onClick={() => { setEditId(m.id); setEditTesto(m.testo || '') }} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '10.5px', padding: 0 }}>Modifica</button>
+                        <button onClick={() => eliminaMsg(m.id)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#dc2626', fontSize: '10.5px', padding: 0 }}>Elimina</button>
+                      </>)}
                     </div>
-                    <div style={{ fontSize: '10px', color: '#b6c0cc', margin: mio ? '2px 4px 0 0' : '2px 0 0 4px', textAlign: mio ? 'right' : 'left' }}>{new Date(m.created_at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
                   </div>
                 )
               })}
@@ -294,7 +333,7 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
                     {chatFiles.map((f, i) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f3f4f6', borderRadius: '6px', padding: '4px 8px', fontSize: '11px', color: '#1a1a1a' }}>
-                        {String(f.tipo).startsWith('image/') ? <img src={f.dati} alt="" style={{ width: 22, height: 22, objectFit: 'cover', borderRadius: 4 }} /> : <span>📄</span>}
+                        {String(f.tipo).startsWith('image/') && f.dati ? <img src={f.dati} alt="" style={{ width: 22, height: 22, objectFit: 'cover', borderRadius: 4 }} /> : <span>{String(f.tipo).startsWith('video/') ? '🎬' : '📄'}</span>}
                         <span style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.nome}</span>
                         <button onClick={() => setChatFiles(a => a.filter((_, j) => j !== i))} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#dc2626', fontSize: '13px' }}>✕</button>
                       </div>
@@ -302,11 +341,11 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-                  <label title="Allega foto o PDF" style={{ padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', cursor: 'pointer', fontSize: '16px', color: '#6b7280', background: '#fff', lineHeight: 1 }}>📎
-                    <input type="file" accept="image/*,application/pdf" multiple onChange={e => { if (e.target.files?.length) aggiungiChatFile(e.target.files); e.currentTarget.value = '' }} style={{ display: 'none' }} />
+                  <label title="Allega foto, video o file (max 25 MB)" style={{ padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', cursor: caricandoFile ? 'default' : 'pointer', fontSize: '16px', color: '#6b7280', background: '#fff', lineHeight: 1, opacity: caricandoFile ? 0.6 : 1 }}>{caricandoFile ? '⏳' : '📎'}
+                    <input type="file" accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.zip" multiple disabled={caricandoFile} onChange={e => { if (e.target.files?.length) aggiungiChatFile(e.target.files); e.currentTarget.value = '' }} style={{ display: 'none' }} />
                   </label>
                   <textarea value={testo} onChange={e => setTesto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); inviaMsg() } }} rows={2} placeholder="Scrivi un messaggio…" style={{ flex: 1, padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', color: '#1a1a1a', resize: 'none' as const, boxSizing: 'border-box' as const }} />
-                  <button disabled={inviando || (!testo.trim() && !chatFiles.length)} onClick={inviaMsg} style={{ padding: '10px 18px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: inviando || (!testo.trim() && !chatFiles.length) ? 'default' : 'pointer', opacity: inviando || (!testo.trim() && !chatFiles.length) ? 0.6 : 1 }}>{inviando ? '…' : 'Invia'}</button>
+                  <button disabled={inviando || caricandoFile || (!testo.trim() && !chatFiles.length)} onClick={inviaMsg} style={{ padding: '10px 18px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: (inviando || caricandoFile || (!testo.trim() && !chatFiles.length)) ? 'default' : 'pointer', opacity: (inviando || caricandoFile || (!testo.trim() && !chatFiles.length)) ? 0.6 : 1 }}>{inviando ? '…' : 'Invia'}</button>
                 </div>
               </div>
             )}

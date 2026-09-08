@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react'
 // Allegati e POD non hanno più un link diretto allo storage: passano da /api/file, che controlla
 // che chi scarica sia parte di quella richiesta (vedi lib/file-riservati.ts).
 import { linkAllegato } from '@/lib/file-riservati'
-import { fileToAllegato } from '@/app/components/fileAllegato'
+import { preparaAllegatoChat } from '@/app/components/fileAllegato'
+import { AllegatoChat } from '@/app/components/AllegatoChat'
 
 const STATI: Record<string, { label: string; bg: string; color: string }> = {
   aperto: { label: 'Aperto', bg: '#fff7ed', color: '#ea580c' },
@@ -46,10 +47,35 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   const [rete, setRete] = useState<any[]>([])           // ticket inoltrati a me dalla rete
   const [internoMsg, setInternoMsg] = useState(false)   // owner: messaggio interno alla rete (invisibile al cliente)
   const [chatFiles, setChatFiles] = useState<any[]>([]) // allegati del messaggio in composizione
+  const [caricandoFile, setCaricandoFile] = useState(false)
+  const [editId, setEditId] = useState<string | null>(null)   // messaggio in modifica
+  const [editTesto, setEditTesto] = useState('')
   async function aggiungiChatFile(list: FileList | File[]) {
     const arr = Array.from(list).slice(0, 10)
-    const objs = await Promise.all(arr.map(fileToAllegato))
-    setChatFiles(f => [...f, ...objs].slice(0, 10))
+    setCaricandoFile(true)
+    try {
+      const objs = await Promise.all(arr.map(preparaAllegatoChat))   // foto→base64, video/file→upload diretto
+      setChatFiles(f => [...f, ...objs].slice(0, 10))
+    } catch (e: any) { setMsg(e?.message || 'Allegato non caricato') } finally { setCaricandoFile(false) }
+  }
+  async function ricaricaThread() {
+    if (!sel?.id) return
+    const d = await fetch('/api/assistenza/' + sel.id).then(r => r.json()).catch(() => null)
+    if (d && !d.error) { setThread(d.messaggi || []); setRuoloChat(d.ruolo || 'master'); setIoId(d.io_id || ''); setSel((s: any) => s ? { ...s, ...d.ticket } : s) }
+  }
+  async function salvaModifica(mid: string) {
+    const t = editTesto.trim(); if (!t) return
+    const r = await fetch('/api/assistenza/messaggio/' + mid, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ testo: t }) })
+    const j = await r.json().catch(() => ({}))
+    if (j?.error) { setMsg(j.error); return }
+    setEditId(null); setEditTesto(''); await ricaricaThread()
+  }
+  async function eliminaMsg(mid: string) {
+    if (!confirm('Eliminare questo messaggio per tutti?')) return
+    const r = await fetch('/api/assistenza/messaggio/' + mid, { method: 'DELETE' })
+    const j = await r.json().catch(() => ({}))
+    if (j?.error) { setMsg(j.error); return }
+    await ricaricaThread()
   }
 
   async function apriDettaglio(t: any) {
@@ -355,6 +381,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                 {threadLoad ? <div style={{ textAlign: 'center', color: '#999', fontSize: '13px' }}>Caricamento…</div> : (thread.length ? thread.map((m: any) => {
                   const mio = m.mio ?? (m.autore === ruoloChat)   // calcolato dal server (fallback legacy)
                   const interno = m.visibilita === 'rete'
+                  const elim = !!m.eliminato_il
                   return (
                     <div key={m.id} style={{ alignSelf: mio ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
                       <div style={{ fontSize: '10.5px', color: '#94a3b8', margin: mio ? '0 4px 3px 0' : '0 0 3px 4px', textAlign: mio ? 'right' : 'left', fontWeight: 600 }}>
@@ -363,17 +390,31 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                         {m.autore_nome || (m.autore === 'cliente' ? 'Cliente' : m.autore === 'rete' ? 'Rete' : 'Assistenza')}{m.tu ? ' · tu' : ''}
                         {interno && <span style={{ marginLeft: '5px', background: '#1a1a1a', color: '#fff', fontSize: '9px', fontWeight: 700, padding: '1px 6px', borderRadius: '8px' }}>🔒 RETE</span>}
                       </div>
-                      {m.testo && <div style={{ background: interno ? (mio ? '#334155' : '#f1f5f9') : (mio ? '#f97316' : '#fff'), color: interno ? (mio ? '#fff' : '#334155') : (mio ? '#fff' : '#1a1a1a'), border: interno && !mio ? '1px dashed #94a3b8' : (mio ? 'none' : '1px solid #e5e7eb'), padding: '9px 13px', borderRadius: '12px', fontSize: '13px', lineHeight: 1.45, whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const }}>{m.testo}</div>}
-                      {Array.isArray(m.allegati) && m.allegati.length > 0 && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '5px', justifyContent: mio ? 'flex-end' : 'flex-start' }}>
-                          {m.allegati.map((a: any, i: number) => (
-                            isImg(a)
-                              ? <img key={i} src={linkAllegato(sel.id, a.url)} alt={a.nome} onClick={() => setViewImg(linkAllegato(sel.id, a.url))} title="Clicca per ingrandire" style={{ width: '82px', height: '82px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #e5e7eb', cursor: 'zoom-in' }} />
-                              : <a key={i} href={linkAllegato(sel.id, a.url)} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#2563eb', textDecoration: 'none', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', padding: '4px 8px' }}>📎 {a.nome}</a>
-                          ))}
+                      {editId === m.id ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <textarea value={editTesto} onChange={e => setEditTesto(e.target.value)} rows={2} style={{ padding: '8px 11px', border: '1px solid #d1d5db', borderRadius: '10px', fontSize: '13px', color: '#1a1a1a', resize: 'none' as const, minWidth: '240px' }} />
+                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                            <button onClick={() => { setEditId(null); setEditTesto('') }} style={{ border: '1px solid #d1d5db', background: '#fff', color: '#6b7280', borderRadius: '6px', fontSize: '11.5px', padding: '4px 10px', cursor: 'pointer' }}>Annulla</button>
+                            <button onClick={() => salvaModifica(m.id)} style={{ border: 'none', background: '#f97316', color: '#fff', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, padding: '4px 12px', cursor: 'pointer' }}>Salva</button>
+                          </div>
                         </div>
-                      )}
-                      <div style={{ fontSize: '10px', color: '#b6c0cc', margin: mio ? '2px 4px 0 0' : '2px 0 0 4px', textAlign: mio ? 'right' : 'left' }}>{new Date(m.created_at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
+                      ) : elim ? (
+                        <div style={{ background: '#eef2f6', color: '#94a3b8', border: '1px solid #e5e7eb', padding: '9px 13px', borderRadius: '12px', fontSize: '13px', fontStyle: 'italic' }}>🚫 messaggio eliminato</div>
+                      ) : (<>
+                        {m.testo && <div style={{ background: interno ? (mio ? '#334155' : '#f1f5f9') : (mio ? '#f97316' : '#fff'), color: interno ? (mio ? '#fff' : '#334155') : (mio ? '#fff' : '#1a1a1a'), border: interno && !mio ? '1px dashed #94a3b8' : (mio ? 'none' : '1px solid #e5e7eb'), padding: '9px 13px', borderRadius: '12px', fontSize: '13px', lineHeight: 1.45, whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const }}>{m.testo}{m.modificato_il && <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '6px' }}>(modificato)</span>}</div>}
+                        {Array.isArray(m.allegati) && m.allegati.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '5px', justifyContent: mio ? 'flex-end' : 'flex-start' }}>
+                            {m.allegati.map((a: any, i: number) => <AllegatoChat key={i} ticketId={sel.id} a={a} mio={mio} />)}
+                          </div>
+                        )}
+                      </>)}
+                      <div style={{ fontSize: '10px', color: '#b6c0cc', margin: mio ? '2px 4px 0 0' : '2px 0 0 4px', display: 'flex', gap: '8px', alignItems: 'center', justifyContent: mio ? 'flex-end' : 'flex-start' }}>
+                        <span>{new Date(m.created_at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                        {m.tu && !elim && editId !== m.id && sel.stato !== 'chiuso' && (<>
+                          <button onClick={() => { setEditId(m.id); setEditTesto(m.testo || '') }} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '10.5px', padding: 0 }}>Modifica</button>
+                          <button onClick={() => eliminaMsg(m.id)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#dc2626', fontSize: '10.5px', padding: 0 }}>Elimina</button>
+                        </>)}
+                      </div>
                     </div>
                   )
                 }) : <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: '8px', padding: '12px 14px', fontSize: '13px', color: '#1a1a1a', whiteSpace: 'pre-wrap' }}>{sel.messaggio}</div>)}
@@ -467,7 +508,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                       {chatFiles.map((f, i) => (
                         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f3f4f6', borderRadius: '6px', padding: '4px 8px', fontSize: '11px', color: '#1a1a1a' }}>
-                          {String(f.tipo).startsWith('image/') ? <img src={f.dati} alt="" style={{ width: '22px', height: '22px', objectFit: 'cover', borderRadius: '4px' }} /> : <span>📄</span>}
+                          {String(f.tipo).startsWith('image/') && f.dati ? <img src={f.dati} alt="" style={{ width: '22px', height: '22px', objectFit: 'cover', borderRadius: '4px' }} /> : <span>{String(f.tipo).startsWith('video/') ? '🎬' : '📄'}</span>}
                           <span style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.nome}</span>
                           <button onClick={() => setChatFiles(a => a.filter((_, j) => j !== i))} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#dc2626', fontSize: '13px' }}>✕</button>
                         </div>
@@ -475,11 +516,11 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-                    <label title="Allega foto o PDF" style={{ padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', cursor: 'pointer', fontSize: '16px', color: '#6b7280', background: '#fff', lineHeight: 1 }}>📎
-                      <input type="file" accept="image/*,application/pdf" multiple onChange={e => { if (e.target.files?.length) aggiungiChatFile(e.target.files); e.currentTarget.value = '' }} style={{ display: 'none' }} />
+                    <label title="Allega foto, video o file (max 25 MB)" style={{ padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', cursor: caricandoFile ? 'default' : 'pointer', fontSize: '16px', color: '#6b7280', background: '#fff', lineHeight: 1, opacity: caricandoFile ? 0.6 : 1 }}>{caricandoFile ? '⏳' : '📎'}
+                      <input type="file" accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.zip" multiple disabled={caricandoFile} onChange={e => { if (e.target.files?.length) aggiungiChatFile(e.target.files); e.currentTarget.value = '' }} style={{ display: 'none' }} />
                     </label>
                     <textarea value={testo} onChange={e => setTesto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); inviaMsg() } }} rows={2} placeholder={ruoloChat === 'rete' ? 'Rispondi al master che ti ha inoltrato il ticket…' : (internoMsg ? 'Messaggio interno alla rete…' : 'Rispondi al cliente…')} style={{ flex: 1, padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'none' as const }} />
-                    <button disabled={inviando || (!testo.trim() && !chatFiles.length)} onClick={inviaMsg} style={{ padding: '10px 18px', background: (ruoloChat === 'rete' || internoMsg) ? '#1a1a1a' : '#f97316', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: inviando || (!testo.trim() && !chatFiles.length) ? 'default' : 'pointer', opacity: inviando || (!testo.trim() && !chatFiles.length) ? 0.6 : 1 }}>{inviando ? '…' : 'Invia'}</button>
+                    <button disabled={inviando || caricandoFile || (!testo.trim() && !chatFiles.length)} onClick={inviaMsg} style={{ padding: '10px 18px', background: (ruoloChat === 'rete' || internoMsg) ? '#1a1a1a' : '#f97316', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: (inviando || caricandoFile || (!testo.trim() && !chatFiles.length)) ? 'default' : 'pointer', opacity: (inviando || caricandoFile || (!testo.trim() && !chatFiles.length)) ? 0.6 : 1 }}>{inviando ? '…' : 'Invia'}</button>
                   </div>
                 </div>
               ))}

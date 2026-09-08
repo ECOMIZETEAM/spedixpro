@@ -22,7 +22,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const ruolo = await partecipante(utente, t)
   if (!ruolo) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   let q = admin.from('ticket_messaggi')
-    .select('id,autore,autore_id,autore_nome,testo,allegati,created_at,visibilita,autore_master_id').eq('ticket_id', id).order('created_at', { ascending: true })
+    .select('id,autore,autore_id,autore_nome,testo,allegati,created_at,visibilita,autore_master_id,modificato_il,eliminato_il').eq('ticket_id', id).order('created_at', { ascending: true })
   // Il RICHIEDENTE (cliente o master che ha aperto) NON vede i messaggi interni della rete:
   // per lui esiste solo la conversazione con la sua assistenza diretta.
   if (ruolo === 'cliente') q = q.eq('visibilita', 'pubblico')
@@ -82,7 +82,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // soli allegati (es. una foto), o entrambi.
   const allegatiIn = Array.isArray(body?.allegati) ? body.allegati.slice(0, 10) : []
   if (!testo && !allegatiIn.length) return NextResponse.json({ error: 'Messaggio vuoto' }, { status: 400 })
-  const allegatiOut = allegatiIn.length ? await caricaAllegatiTicket(admin, utente?.master_id || t.owner_master_id || 'x', allegatiIn) : []
+  // Due tipi di allegato: (a) foto piccole in base64 -> caricate ORA lato server; (b) video/file
+  // grandi GIA' caricati via URL firmato -> arrivano come riferimento {url,nome,tipo}. Per (b) si
+  // accetta SOLO un path dentro la cartella dell'utente (allegati/<user.id>/): nessun riferimento a
+  // file di altri (anti-IDOR, /api/file poi serve solo ciò che è referenziato dal ticket).
+  const prefissoUtente = `allegati/${user.id}/`
+  const giaCaricati = allegatiIn
+    .filter((a: any) => a && a.url && !a.dati && String(a.url).startsWith(prefissoUtente))
+    .map((a: any) => ({ url: String(a.url), nome: String(a.nome || 'file'), tipo: String(a.tipo || 'application/octet-stream') }))
+  const daCaricare = allegatiIn.filter((a: any) => a && a.dati)
+  const caricatiOra = daCaricare.length ? await caricaAllegatiTicket(admin, utente?.master_id || t.owner_master_id || 'x', daCaricare) : []
+  const allegatiOut = [...giaCaricati, ...caricatiOra]
 
   // Nome autore: cliente = ragione sociale; master = nome utente o "Assistenza".
   let autoreNome = 'Assistenza'
