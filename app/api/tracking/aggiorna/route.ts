@@ -78,6 +78,12 @@ export async function GET(req: NextRequest) {
 
   let aggiornate = 0, errori = 0
   let spedisciBloccato = false   // breaker: al primo 403 di policy niente altre chiamate Spedisci nel giro
+  // BUDGET DI RECUPERO DELLE CRONOLOGIE (solo terzo provider, vedi il ramo 'easyparcel').
+  // Le spedizioni gia' esistenti non hanno mai avuto eventi salvati: sono migliaia, e riscriverle
+  // tutte in un giro solo ucciderebbe questa funzione, che va gia' in timeout. Se ne recupera un
+  // pezzo per volta; le spedizioni che si MUOVONO passano sempre, fuori budget.
+  let budgetCronologie = 300
+  let chiaviEventoIgnote: string[] = []
   const lavora = async (s: any) => {
     const corr: any = (s as any).corrieri
     const tipo = corr?.tipo
@@ -149,6 +155,38 @@ export async function GET(req: NextRequest) {
         // seconda occasione per rimpiazzare il numero provvisorio "DVA-<ordine>".
         const ldv = (raw as any)?.tracking?.lettera_vettura
         if (ldv) nuovoTracking = String(ldv)
+
+        // CRONOLOGIA DEGLI EVENTI — l'unico provider che non la salvava.
+        //
+        // Di questa stessa risposta si teneva solo il testo per calcolare lo stato, e `raw` — che
+        // contiene la cronologia completa — veniva buttato via. Cosi' per OGNI spedizione di questo
+        // provider (8.013 in dieci giorni, contate) il cliente e il destinatario vedevano lo stato
+        // avanzare ma la pagina di tracking con la cronologia vuota. Gli altri due provider gli
+        // eventi li scrivono da sempre (webhook Spedisci, poller GLS): qui non era rotto niente,
+        // semplicemente non era mai stato fatto.
+        //
+        // CANCELLA E RISCRIVI, come nel poller Poste: la risposta arriva COMPLETA a ogni giro, e
+        // aggiungere in coda riempirebbe il popup di doppioni.
+        //
+        // Quando: sempre se lo stato e' cambiato — li' c'e' davvero qualcosa di nuovo — e per il
+        // resto a piccole dosi (budgetCronologie), per recuperare lo storico vecchio senza far
+        // scadere il giro.
+        try {
+          const cambiato = nuovo !== s.stato
+          if (cambiato || budgetCronologie > 0) {
+            const { eventiEasyparcel } = await import('@/lib/easyparcel')
+            const { eventi, chiaviIgnote } = eventiEasyparcel(raw)
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length) {
+              if (!cambiato) budgetCronologie--
+              await admin.from('tracking_events').delete().eq('spedizione_id', s.id)
+              await admin.from('tracking_events').insert(eventi.map(e => ({ spedizione_id: s.id, ...e })))
+            }
+          }
+        } catch (e: any) {
+          // La cronologia e' un di piu': se non si scrive, lo STATO deve aggiornarsi lo stesso.
+          console.error('[TRACKING][EP][EVENTI]', s.numero, e?.message)
+        }
 
       } else if (tipo === 'gls') {
         // GLS DIRETTO (contratto proprio): il webservice di creazione non dà lo stato di consegna,
@@ -381,5 +419,13 @@ export async function GET(req: NextRequest) {
   } catch (e: any) { console.error('[RESO][ADDEBITO] coda non svuotata:', e?.message) }
 
   console.log(`[TRACKING] esaminate=${lista.length} aggiornate=${aggiornate} errori=${errori} giacenze=${giacenzeAddebitate} resi=${resiAddebitati} durata=${Math.round((Date.now() - inizioMs) / 1000)}s`)
-  return NextResponse.json({ ok: true, esaminate: lista.length, aggiornate, errori, giacenzeAddebitate, resiAddebitati, durataSec: Math.round((Date.now() - inizioMs) / 1000) })
+  // IL NOME DEL CAMPO DATA DEGLI EVENTI non e' documentato nella sezione tracking del provider: si
+  // provano `data` (la forma usata da getorder e listorder nella stessa API) e le varianti note. Se
+  // NESSUNA risponde, gli eventi vengono scartati invece di ricevere una data inventata — e qui si
+  // stampano le chiavi VERE, cosi' la cosa si chiude al primo giro invece di restare un mistero.
+  if (chiaviEventoIgnote.length) {
+    console.error('[TRACKING][EP][EVENTI] nessun campo data riconosciuto. Chiavi presenti nell\'evento:',
+      chiaviEventoIgnote.join(', '))
+  }
+  return NextResponse.json({ ok: true, esaminate: lista.length, aggiornate, errori, giacenzeAddebitate, resiAddebitati, cronologieDaRecuperare: budgetCronologie <= 0, durataSec: Math.round((Date.now() - inizioMs) / 1000) })
 }
