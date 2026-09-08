@@ -237,7 +237,7 @@ export default function CorrieriPage() {
               </div>
               <div style={{fontSize:'11.5px',color:'#888',marginBottom:'14px'}}>Se attivo: fino a quel peso reale si tassa sul <b>peso reale</b> (niente volumetrico); oltre, torna al peso volumetrico. Vale per il master e i suoi clienti.</div>
               <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',margin:'14px 0 4px'}}>Misure massime per peso (cm)</div>
-              <div style={{fontSize:'11.5px',color:'#888',marginBottom:'12px'}}>Limiti diversi in base al <b>peso reale</b> dichiarato dal cliente (non il volumetrico). Una spedizione oltre i limiti del suo scaglione non mostrerà questo corriere. Lascia vuoto per nessun limite.</div>
+              <div style={{fontSize:'11.5px',color:'#888',marginBottom:'12px'}}>Limiti diversi in base al <b>peso reale</b> dichiarato dal cliente (non il volumetrico). Una spedizione oltre i limiti del suo scaglione non mostrerà questo corriere. Lascia vuoto per nessun limite. <b>L'ordine dei lati non conta</b>: si confronta il lato più lungo del pacco col limite più alto (un pacco si può girare) — es. un max 30×70×90 accetta anche 90×70×30.</div>
               <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'14px'}}>
                 <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>Soglia di peso</label>
                 <input type="number" value={popup.misura_soglia||''} onChange={e=>setPopup({...popup,misura_soglia:e.target.value})} placeholder="es. 30" style={{...selStyle,width:'110px'}}/>
