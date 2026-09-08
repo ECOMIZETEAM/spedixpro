@@ -21,9 +21,9 @@ export async function GET() {
     .select('corriere_id,peso_max,prezzo,tipo,fuel,zone(nome),corrieri(nome_contratto,attivo,master_id)')
     .eq('listino_id', listinoId).order('peso_max', { ascending: true })
 
-  // NASCONDE i contratti IN PAUSA: pausa propria del master (attivo=false) + sospesi a monte
-  // (pausa/disattiva/elimina di un antenato), come /api/cliente/listino-prezzi. Un contratto in pausa
-  // non è vendibile → non deve comparire; alla riattivazione riappare (filtro alla lettura).
+  // MOSTRA i contratti in pausa col FLAG (come il master, non come il cliente): l'agente vede il
+  // listino anche a contratto in pausa; il CLIENTE finale invece non li vede (lo filtra
+  // /api/cliente/listino-prezzi). pausa propria (attivo=false) o da un livello superiore (catena).
   const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
   const masterDelContratto = (fasce || []).map((f: any) => (f as any).corrieri?.master_id).find(Boolean) || null
   const sospesiSopra = await contrattiSospesiSopra(masterDelContratto)
@@ -35,14 +35,16 @@ export async function GET() {
     const cid = (f as any).corriere_id
     if (!cid) continue
     const cRec = (f as any).corrieri
-    if (cRec?.attivo === false) continue                              // pausa propria del master
-    if (sospesoDallaCatena(cRec?.nome_contratto, sospesiSopra)) continue   // sospeso a monte
+    const pausaCatena = sospesoDallaCatena(cRec?.nome_contratto, sospesiSopra)
+    const pausaPropria = cRec?.attivo === false
     if (!perCorr.has(cid)) {
       perCorr.set(cid, {
         nome_contratto: (f as any).corrieri?.nome_contratto || 'Corriere',
         fattore: fattorePerCorr.get(cid) || defFattore,
         zoneSet: new Set<string>(),
         fasce: new Map<string, any>(),
+        pausa: pausaCatena || pausaPropria,
+        pausaMotivo: pausaCatena ? 'catena' : (pausaPropria ? 'propria' : null),
       })
     }
     const e = perCorr.get(cid)
@@ -81,12 +83,14 @@ export async function GET() {
 
   const ordZona = (a: string, b: string) => (a === 'Italia' ? -1 : b === 'Italia' ? 1 : a.localeCompare(b))
   const corrieri = Array.from(perCorr.entries())
-    .sort((a, b) => a[1].nome_contratto.localeCompare(b[1].nome_contratto))
+    .sort((a, b) => ((a[1].pausa ? 1 : 0) - (b[1].pausa ? 1 : 0)) || a[1].nome_contratto.localeCompare(b[1].nome_contratto))
     .map(([cid, c]) => {
       const sup = supplPerCorr.get(cid) || []
       const perTipo = (t: string) => sup.filter((r: any) => r.tipo === t)
       return {
         nome_contratto: c.nome_contratto,
+        pausa: !!c.pausa,
+        pausaMotivo: c.pausaMotivo || null,
         fattore: c.fattore,
         zone: Array.from(c.zoneSet).sort(ordZona as any),
         fasce: Array.from(c.fasce.values()).sort((a: any, b: any) => (a.tipo === 'oltre' ? 1 : 0) - (b.tipo === 'oltre' ? 1 : 0) || a.peso_max - b.peso_max),
