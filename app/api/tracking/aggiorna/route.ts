@@ -126,6 +126,27 @@ export async function GET(req: NextRequest) {
         if (spediamoproEventiIndicanoReso(tr.events)) nuovo = 'reso_mittente'
         if (tr.trackingCode) nuovoTracking = tr.trackingCode
 
+        // CRONOLOGIA. Gli eventi erano gia' qui — `tr.events`, usati sopra per riconoscere il reso —
+        // e finivano nel nulla: 9.190 spedizioni in cinque giorni con lo stato che avanzava e la
+        // pagina di tracking vuota. La forma e' documentata in lib/spediamopro: { at, title,
+        // description }. Regole e scrittura in lib/tracking-eventi, uguali per tutti i provider.
+        try {
+          const cambiatoSp = nuovo !== s.stato
+          if (cambiatoSp || budgetCronologie > 0) {
+            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(tr.events, {
+              data: ['at', 'date', 'datetime', 'data'],
+              descrizione: ['description', 'title'],
+              luogo: ['location', 'place', 'luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length) {
+              if (!cambiatoSp) budgetCronologie--
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][SP][EVENTI]', s.numero, e?.message) }
+
       } else if (tipo === 'spedisci') {
         // Il provider ha CHIUSO il polling (403 "use the Webhooks events"): il WEBHOOK resta la
         // fonte primaria. Qui TENTIAMO comunque a ogni giro: se il blocco viene rimosso, il polling
@@ -175,12 +196,12 @@ export async function GET(req: NextRequest) {
           const cambiato = nuovo !== s.stato
           if (cambiato || budgetCronologie > 0) {
             const { eventiEasyparcel } = await import('@/lib/easyparcel')
+            const { scriviCronologia } = await import('@/lib/tracking-eventi')
             const { eventi, chiaviIgnote } = eventiEasyparcel(raw)
             if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
             if (eventi.length) {
               if (!cambiato) budgetCronologie--
-              await admin.from('tracking_events').delete().eq('spedizione_id', s.id)
-              await admin.from('tracking_events').insert(eventi.map(e => ({ spedizione_id: s.id, ...e })))
+              await scriviCronologia(admin, s.id, eventi)
             }
           }
         } catch (e: any) {
@@ -209,13 +230,33 @@ export async function GET(req: NextRequest) {
         const brtParcel = (s as any).brt_parcel
         if (!brtParcel || !cred?.user || !cred?.password) return
         const { trackingBrt, mapStatoBrt } = await import('@/lib/brt')
-        const { stati, consegnata: brtConseg } = await trackingBrt(cred, String(brtParcel))
+        const { stati, consegnata: brtConseg, eventi: brtEventi } = await trackingBrt(cred, String(brtParcel))
         for (const str of stati) {
           const m = mapStatoBrt(str)
           if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
         }
         // Consegna dal campo dedicato di BRT (non serve l'evento testuale "CONSEGNATA").
         if (brtConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
+
+        // CRONOLOGIA. trackingBrt torna gia' `eventi` nella forma giusta ({ data, descrizione,
+        // luogo }) e nessuno li salvava: stato che avanza, pagina di tracking vuota. Come per gli
+        // altri, la data si legge e si scrive con le regole di lib/tracking-eventi.
+        try {
+          const cambiatoBrt = nuovo !== s.stato
+          if (cambiatoBrt || budgetCronologie > 0) {
+            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(brtEventi, {
+              data: ['data', 'dataOra', 'datetime'],
+              descrizione: ['descrizione'],
+              luogo: ['luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length) {
+              if (!cambiatoBrt) budgetCronologie--
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][BRT][EVENTI]', s.numero, e?.message) }
 
       } else {
         return

@@ -23,6 +23,8 @@
 // Quindi la chiave finisce nella riga di richiesta: mai loggare l'URL per intero.
 // ═══════════════════════════════════════════════════════════════════════════
 
+import { normalizzaEventi } from '@/lib/tracking-eventi'
+
 const BASE = 'https://api.easyparcel.it'
 
 // Il provider non ha annullo: costante esportata per non ripetere la spiegazione nei chiamanti.
@@ -590,57 +592,20 @@ export async function unisciEtichette(pdfBase64: string[]): Promise<string | nul
 // risponde "Spedizione non trovata" mentre quella per codice_offerta funziona. Il codice offerta
 // e' anche l'unico riferimento che possediamo con certezza dal momento dell'ordine, mentre la LDV
 // arriva solo dopo la waybill. La ricerca per LDV resta come ultimo tentativo.
-// DATA/ORA DEL PROVIDER → ISTANTE VERO.
-//
-// Le date di questa API arrivano nella forma "2026-01-03 10:41:08", SENZA fuso (verificato sulla
-// documentazione di getorder e listorder, che usano lo stesso formato). E' ora ITALIANA: leggerla
-// con `new Date(...)` su un server che gira a UTC — il nostro — sposterebbe ogni evento di una o
-// due ore, e una cronologia sfasata e' peggio di nessuna cronologia.
-// Lo scarto Roma/UTC si misura NELL'ISTANTE dell'evento, cosi' vale sia in ora legale che solare.
-export function istanteDaDataProvider(v: any): string | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(v ?? '').trim())
-  if (!m) return null
-  const comeUtc = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0))
-  if (!Number.isFinite(comeUtc)) return null
-  const parti = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Europe/Rome', hour12: false,
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
-  }).formatToParts(new Date(comeUtc))
-  const g = (t: string) => Number(parti.find(x => x.type === t)?.value)
-  const romaComeUtc = Date.UTC(g('year'), g('month') - 1, g('day'), g('hour'), g('minute'), g('second'))
-  if (!Number.isFinite(romaComeUtc)) return null
-  return new Date(comeUtc - (romaComeUtc - comeUtc)).toISOString()
-}
-
 // EVENTI DI TRACCIAMENTO dalla risposta grezza.
 //
 // `dettagli` e' la cronologia completa, e fin qui se ne teneva solo il testo per calcolare lo stato:
 // il resto finiva in `raw` e non lo leggeva nessuno. Risultato: su questo provider la pagina di
 // tracking mostrava lo stato ma la cronologia VUOTA.
 // Il nome del campo data non e' documentato nella sezione tracking: si prova `data` (la forma usata
-// da getorder e listorder nella stessa API) e le varianti plausibili. Se non se ne trova NESSUNA,
-// l'evento si SCARTA — mai inventare una data, una cronologia falsa e' peggio del buco — e chi
-// chiama riceve le chiavi vere in `chiaviIgnote` per chiudere la cosa al primo giro.
-export function eventiEasyparcel(raw: any): {
-  eventi: Array<{ descrizione: string; luogo: string | null; data_evento: string }>
-  chiaviIgnote: string[]
-} {
-  const righe: any[] = Array.isArray(raw?.dettagli) ? raw.dettagli : []
-  const eventi: Array<{ descrizione: string; luogo: string | null; data_evento: string }> = []
-  const chiaviIgnote = new Set<string>()
-  for (const ev of righe) {
-    if (!ev || typeof ev !== 'object') continue
-    const descrizione = String(ev.descrizione || ev.note || '').trim().slice(0, 300)
-    if (!descrizione) continue
-    let quando: string | null = null
-    for (const k of ['data', 'data_evento', 'data_ora', 'datetime', 'timestamp', 'dataora']) {
-      quando = istanteDaDataProvider(ev[k]); if (quando) break
-    }
-    if (!quando) { for (const k of Object.keys(ev)) chiaviIgnote.add(k); continue }
-    const luogo = String(ev.luogo || ev.localita || ev.filiale || ev.sede || '').trim().slice(0, 200) || null
-    eventi.push({ descrizione, luogo, data_evento: quando })
-  }
-  return { eventi, chiaviIgnote: Array.from(chiaviIgnote) }
+// da getorder e listorder nella stessa API) e le varianti plausibili. La regola su come si legge una
+// data e su cosa fare se non si riconosce sta in lib/tracking-eventi, uguale per tutti i provider.
+export function eventiEasyparcel(raw: any) {
+  return normalizzaEventi(raw?.dettagli, {
+    data: ['data', 'data_evento', 'data_ora', 'datetime', 'timestamp', 'dataora'],
+    descrizione: ['descrizione', 'note'],
+    luogo: ['luogo', 'localita', 'filiale', 'sede'],
+  })
 }
 
 export async function easyparcelTracking(
