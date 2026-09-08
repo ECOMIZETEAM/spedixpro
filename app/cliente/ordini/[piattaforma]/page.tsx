@@ -80,6 +80,28 @@ export default function OrdiniPage() {
   const [articoliCat, setArticoliCat] = useState<any[]>([])   // catalogo SKU -> peso/misure
   const [pacchi, setPacchi] = useState<any[]>([])             // pacchi predefiniti (SKU -> scatola)
 
+  // IL NEGOZIO SELEZIONATO DEVE ESSERE DI QUESTA PIATTAFORMA.
+  //
+  // Il filtro negozio e' persistente in localStorage e la chiave e' la STESSA per tutte le
+  // piattaforme ('ordini-cliente:store'): scegli un negozio sulla pagina eBay, passi a WooCommerce, e
+  // quell'id eBay e' ancora nello stato. La tendina mostra "Tutti" — l'id non e' fra le sue opzioni —
+  // quindi sembra tutto a posto, ma fa due danni insieme:
+  //  · il filtro qui sotto confronta integrazione_id e nasconde OGNI riga -> "Nessun dato disponibile";
+  //  · Sincronizza manda quell'id, il server cerca (id + piattaforma) e risponde 404 "Integrazione non
+  //    trovata".
+  // E' il motivo per cui "oggi va e domani no": dipende solo da dove hai toccato il filtro l'ultima
+  // volta. Vale anche per un negozio RICOLLEGATO, che cambia id e lascia il vecchio salvato.
+  //
+  // Non basta cambiare la chiave per piattaforma: l'hook, quando per la chiave nuova non trova nulla
+  // salvato, TIENE il valore precedente. L'unico controllo che regge e' questo — l'id vale solo se e'
+  // fra i negozi caricati per questa piattaforma.
+  const fStoreValido = (fStore && integrazioni.some((i:any)=>i.id===fStore)) ? fStore : ''
+  // E si ripulisce anche il salvato, cosi' il problema non si ripresenta al ricaricamento della pagina.
+  // Solo a elenco CARICATO: durante il caricamento e' vuoto e cancellerebbe una scelta valida.
+  useEffect(()=>{
+    if (fStore && integrazioni.length > 0 && !integrazioni.some((i:any)=>i.id===fStore)) setFStore('')
+  }, [fStore, integrazioni, setFStore])
+
   async function carica() {
     setLoading(true)
     const [ord, integr] = await Promise.all([
@@ -120,7 +142,7 @@ export default function OrdiniPage() {
 
   async function sincronizza() {
     const attiva = integrazioni.find((i:any)=>i.stato==='attivo')
-    const id = fStore || attiva?.id
+    const id = fStoreValido || attiva?.id
     if (!id) { setMsg('Nessun negozio '+nome+' collegato'); return }
     setSincronizzando(true); setMsg('')
     try {
@@ -171,7 +193,7 @@ export default function OrdiniPage() {
   const filtrati = useMemo(()=>{
     let arr = ordini.filter(o=>{
       const d = o.destinatario || {}
-      if (fStore && o.integrazione_id !== fStore) return false
+      if (fStoreValido && o.integrazione_id !== fStoreValido) return false
       if (fStatoPag && o.stato_pagamento !== fStatoPag) return false
       if (fStatoEv && o.stato !== fStatoEv) return false
       if (fPaese && d.paese !== fPaese) return false
@@ -208,13 +230,15 @@ export default function OrdiniPage() {
       arr = [...arr].sort((a,b)=> new Date(getData(b)||0).getTime() - new Date(getData(a)||0).getTime())
     }
     return arr
-  }, [ordini, fStore, fStatoPag, fStatoEv, fPaese, fNum, fSku, fTags, fArch, fDa, fA, search, sort])
+  // fStoreValido, non fStore: l'elenco negozi arriva DOPO i filtri, quindi la validita' dell'id puo'
+  // cambiare senza che fStore si muova. Con la dipendenza sbagliata il filtro resterebbe indietro.
+  }, [ordini, fStoreValido, fStatoPag, fStatoEv, fPaese, fNum, fSku, fTags, fArch, fDa, fA, search, sort])
 
   const totale = filtrati.length
   const nPagine = Math.max(1, Math.ceil(totale/perPage))
   const start = (page-1)*perPage
   const pagina = filtrati.slice(start, start+perPage)
-  useEffect(()=>{ setPage(1) }, [fStore,fStatoPag,fStatoEv,fPaese,fNum,fSku,fTags,fArch,fDa,fA,search,perPage])
+  useEffect(()=>{ setPage(1) }, [fStoreValido,fStatoPag,fStatoEv,fPaese,fNum,fSku,fTags,fArch,fDa,fA,search,perPage])
 
   const idsPagina = pagina.map(o=>o.id)
   const tuttiSel = idsPagina.length>0 && idsPagina.every(id=>sel[id])
@@ -450,7 +474,7 @@ export default function OrdiniPage() {
             </label>
           </>)}
           <div style={field}><label style={lbl}>{nome} Store</label>
-            <select value={fStore} onChange={e=>setFStore(e.target.value)} style={inp}>
+            <select value={fStoreValido} onChange={e=>setFStore(e.target.value)} style={inp}>
               <option value="">Tutti</option>
               {integrazioni.map(i=><option key={i.id} value={i.id}>{i.nome_negozio||i.identificativo||i.id}</option>)}
             </select>
