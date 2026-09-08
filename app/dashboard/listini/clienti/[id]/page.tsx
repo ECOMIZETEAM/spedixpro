@@ -38,16 +38,21 @@ export default async function ModificaListinoPage({
   // Mostra solo i corrieri POSSEDUTI dal master (no residui estranei da duplicazioni).
   const posseduti = new Set((tuttiICorrieri||[]).map((c:any) => c.id))
   corrieri = corrieri.filter((c:any) => posseduti.has(c.id))
-  // NASCONDE i contratti IN PAUSA: sia quelli messi in pausa dal master (attivo=false), sia quelli
-  // SOSPESI A MONTE (pausa/disattiva/elimina di un antenato, riconosciuti per NOME). Non devono
-  // comparire nell'editor finché sono in pausa; alla riattivazione riappaiono da soli (la pausa è
-  // dinamica, i prezzi restano salvati). Stessa regola di Corrieri/Ottimizza margini [[catena-corrieri-no-listino]].
+  // I contratti IN PAUSA NON si nascondono piu' al master: deve poter vedere (e tenere) il listino
+  // che ha fatto ai clienti anche a contratto in pausa. Al CLIENTE finale restano nascosti (lo filtra
+  // /api/cliente/listino-prezzi: attivo=false + sospesoDallaCatena). Qui si ANNOTA solo lo stato:
+  //  - pausa PROPRIA (attivo=false): riattivabile dal master in Corrieri;
+  //  - pausa DA UN LIVELLO SUPERIORE (sospesoDallaCatena): non riattivabile finche' l'antenato non la
+  //    toglie (segue la gerarchia). I prezzi restano salvati; alla riattivazione tornano spendibili.
   const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
   const sospesiSopra = await contrattiSospesiSopra(utente?.master_id)
   const attivoById = new Map<string, boolean>((tuttiICorrieri||[]).map((c:any) => [c.id, c.attivo !== false]))
   const nomeById = new Map<string, string>((tuttiICorrieri||[]).map((c:any) => [c.id, c.nome_contratto]))
-  const usabile = (c:any) => attivoById.get(c.id) !== false && !sospesoDallaCatena(nomeById.get(c.id) || c.nome_contratto, sospesiSopra)
-  corrieri = corrieri.filter(usabile)
+  const pausaCatena = (c:any) => sospesoDallaCatena(nomeById.get(c.id) || c.nome_contratto, sospesiSopra)
+  const usabile = (c:any) => attivoById.get(c.id) !== false && !pausaCatena(c)
+  corrieri = corrieri.map((c:any) => ({ ...c, pausa: !usabile(c), pausaMotivo: pausaCatena(c) ? 'catena' : (attivoById.get(c.id) === false ? 'propria' : null) }))
+    .sort((a:any,b:any) => (a.pausa?1:0) - (b.pausa?1:0))
+  // Da AGGIUNGERE al listino: solo i contratti usabili (non si aggiunge un contratto in pausa ex novo).
   const corrieriDisponibiliDaAggiungere = (tuttiICorrieri||[]).filter(c => usabile(c) && !corrieri.some((x:any) => x.id === c.id))
   const corriereSelezionato = corrieri?.find((c:any) => c.id === corriereQuery) || corrieri?.[0]
   const { data: zone } = await supabase.from('zone').select('id,nome').eq('master_id', utente?.master_id).eq('corriere_id', corriereSelezionato?.id||'').order('nome')

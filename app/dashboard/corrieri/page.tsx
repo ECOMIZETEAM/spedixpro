@@ -169,16 +169,22 @@ export default function CorrieriPage() {
                 <div style={{minWidth:0}}>
                   <div style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>{c.nome_contratto}</div>
                   <div style={{display:'flex',alignItems:'center',gap:'6px',marginTop:'4px'}}>
-                    <span style={{background:c.attivo?'#f0fdf4':'#fef2f2',color:c.attivo?'#16a34a':'#dc2626',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>{c.attivo?'Attivo':'In pausa'}</span>
+                    {c.sospeso_sopra
+                      ? <span title="Un master superiore lo ha messo in pausa: lo sblocco tocca a lui. Il cliente non lo vede; il tuo listino resta salvato." style={{background:'#fef3c7',color:'#b45309',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>⏸ In pausa (livello superiore)</span>
+                      : <span style={{background:c.attivo?'#f0fdf4':'#fef2f2',color:c.attivo?'#16a34a':'#dc2626',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>{c.attivo?'Attivo':'In pausa'}</span>}
                     <span style={{background:'#fff7ed',color:'#f97316',padding:'2px 8px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>L{c.livello}</span>
                   </div>
                 </div>
               </div>
               <div style={{display:'flex',alignItems:'center',gap:'6px',flexShrink:0}}>
-                <button onClick={() => toggleAttivo(c.id, c.attivo)}
-                  style={{background:c.attivo?'#fef2f2':'#f0fdf4',color:c.attivo?'#dc2626':'#16a34a',padding:'5px 10px',borderRadius:'6px',fontSize:'11px',fontWeight:'600',border:'none',cursor:'pointer'}}>
-                  {c.attivo?'|| In pausa':'▶ Riattiva'}
-                </button>
+                {c.sospeso_sopra ? (
+                  <span title="Riattivabile solo dal master che lo ha messo in pausa (segue la gerarchia)." style={{padding:'5px 10px',borderRadius:'6px',fontSize:'11px',fontWeight:'600',background:'#f3f4f6',color:'#9ca3af',cursor:'not-allowed'}}>🔒 In pausa a monte</span>
+                ) : (
+                  <button onClick={() => toggleAttivo(c.id, c.attivo)}
+                    style={{background:c.attivo?'#fef2f2':'#f0fdf4',color:c.attivo?'#dc2626':'#16a34a',padding:'5px 10px',borderRadius:'6px',fontSize:'11px',fontWeight:'600',border:'none',cursor:'pointer'}}>
+                    {c.attivo?'|| In pausa':'▶ Riattiva'}
+                  </button>
+                )}
                 {c.proprio && (
                   <a href={`/dashboard/corrieri/aggiungi?tipo=${c.tipo}&id=${c.id}`} title="Modifica credenziali del contratto (solo il proprietario)"
                     style={{padding:'5px 10px',background:'#eff6ff',color:'#2563eb',borderRadius:'6px',fontSize:'11px',border:'1px solid #bfdbfe',cursor:'pointer',textDecoration:'none'}}>✎ Modifica</a>
