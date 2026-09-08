@@ -182,6 +182,22 @@ export async function GET(req: NextRequest) {
     if (m.master_id === m.master_target_id) { ricaviSub += -n(m.importo); acc(m.created_at, 'ricavi', -n(m.importo)) } // cascata sotto-master
   }
 
+  // COSTO addebitato dal LIVELLO SUPERIORE (ripesature / resi / giacenze che il PADRE addebita a M):
+  // il movimento ha master_id=PADRE, target=M → NON è in movM (che filtra master_id=M), e costoM sopra
+  // vede solo i SELF (master_id=M, target=M). Risultato: il costo della RIPESATURA (che scende dal padre)
+  // non veniva contato e il margine usciva GONFIATO — verificato ~€4.050/mese su Ecomize Solution (978
+  // rettifiche). Qui si sommano quegli addebiti come costo di M. `master_id≠M` esclude i self già contati;
+  // il ricavo corrispondente (M che riaddebita al figlio/cliente) è già nei rami ricavi qui sopra.
+  const movCostoSopra = await fetchAll(() => admin.from('movimenti')
+    .select('importo,tipo,created_at,spedizione_id')
+    .eq('master_target_id', M).neq('master_id', M).not('spedizione_id', 'is', null)
+    .gte('created_at', dal).lte('created_at', alEnd).in('tipo', TIPI)
+    .order('created_at', { ascending: false }).order('id', { ascending: false }))
+  for (const m of movCostoSopra) {
+    const v = -n(m.importo)
+    costoM += v; acc((m as any).created_at, 'costi', v)
+  }
+
   const ricavi = Math.round((ricaviClienti + ricaviSub + ricaviPropria) * 100) / 100
   const costi = Math.round(costoM * 100) / 100
   const guadagno = Math.round((ricavi - costi) * 100) / 100
