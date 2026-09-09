@@ -4,10 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/controlla-credenziali.mjs && next build",
+    "build": "node scripts/controlla-credenziali.mjs && node scripts/controlla-scope-shopify.mjs && next build",
     "start": "next start",
     "lint": "eslint",
-    "controlla-credenziali": "node scripts/controlla-credenziali.mjs"
+    "controlla-credenziali": "node scripts/controlla-credenziali.mjs",
+    "controlla-scope-shopify": "node scripts/controlla-scope-shopify.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

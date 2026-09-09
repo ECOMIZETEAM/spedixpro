@@ -29,7 +29,12 @@ export async function GET(req: NextRequest) {
   if (clienteIds.length) {
     const r2 = await supabase.from('clienti_corrieri_abilitati').select('cliente_id, corriere_id, abilitato').in('cliente_id', clienteIds)
     stati = r2.data || []
-    const r3 = await supabase.from('integrazioni').select('cliente_id,piattaforma,nome_negozio,identificativo,stato,credenziali').in('cliente_id', clienteIds)
+    // Il campo `credenziali` serve solo a ricavare l'URL del negozio (cred.shop / cred.site_url), e
+    // lo legge il SERVICE_ROLE: la chiave che il negoziante ha dato al suo negozio non deve essere
+    // leggibile dalla sessione di chi sta a monte nella rete. Il perimetro non cambia — `clienteIds`
+    // arriva dalla lista gia' filtrata dalla RLS qui sopra.
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const r3 = await createAdminSupabase().from('integrazioni').select('cliente_id,piattaforma,nome_negozio,identificativo,stato,credenziali').in('cliente_id', clienteIds)
     integrazioni = r3.data || []
   }
   // Negozi collegati per cliente (URL sicuro calcolato server-side, mai le credenziali)

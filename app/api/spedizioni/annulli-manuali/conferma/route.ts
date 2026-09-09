@@ -49,9 +49,12 @@ export async function POST(req: NextRequest) {
   }
 
   const { error } = await admin.from('spedizioni').update({ stato: 'annullata', annullamento_errore: null }).eq('id', spedizioneId)
-  // Lo store non deve restare con l'ordine "Fulfilled" e un tracking morto (vedi lib/shopify).
-  try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, [spedizioneId]) } catch {}
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  // Lo store non deve restare con l'ordine "Fulfilled" e un tracking morto (vedi lib/shopify).
+  // DOPO l'errore, non prima: se l'annullo nostro non e' andato, la spedizione e' ancora viva e
+  // disfare l'evasione sullo store avrebbe rimesso il negoziante davanti a un ordine da spedire per
+  // un pacco che sta partendo davvero.
+  try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, [spedizioneId]) } catch {}
   await rimborsaAnnulloSpedizione(admin, sped as any, (sped as any).annullamento_da || null)
   return NextResponse.json({ success: true })
 }

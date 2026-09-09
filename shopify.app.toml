@@ -4,15 +4,22 @@ application_url = "https://moovexpress.com/api/integrazioni/shopify/enter"
 embedded = false
 
 [access_scopes]
-scopes = "read_orders,read_assigned_fulfillment_orders,read_merchant_managed_fulfillment_orders,read_third_party_fulfillment_orders,write_assigned_fulfillment_orders,write_merchant_managed_fulfillment_orders,write_third_party_fulfillment_orders"
+# QUESTA STRINGA DEVE ESSERE IDENTICA a SHOPIFY_SCOPES in lib/shopify.ts (la' c'e' scritto perche'
+# sono tre e non sette). Se le due divergono, l'authorize chiede scope diversi da quelli approvati.
+scopes = "read_orders,write_merchant_managed_fulfillment_orders,write_third_party_fulfillment_orders"
 optional_scopes = [ ]
 # use_legacy_install_flow = FALSE (Shopify Managed Installation). Verificato che va bene anche per
 # questa app NON-embedded: all'apertura, /enter non trova il token, avvia il nostro OAuth classico
 # (/install -> /admin/oauth/authorize -> /callback) e ottiene il token con l'authorization code grant
 # — e' cosi' che sono stati provisionati i clienti Shopify (il callback prende il token). NON mettere
-# true: la legacy flow NON supporta i webhook app-specific dichiarati qui sotto (deploy rifiutato), e
-# il "la pagina non funziona" della review era un HTTP 431 (header/cookie troppo grandi sul collegamento
-# dal portale), non un problema di install flow.
+# true: la legacy flow NON supporta i webhook app-specific dichiarati qui sotto (deploy rifiutato).
+#
+# SUL "la pagina non funziona" DELLA REVIEW: era stato scritto qui che si trattava di un HTTP 431 da
+# cookie troppo grandi, e NON e' accertato. Misurato in produzione: Vercel rifiuta sopra ~32,7 KB di
+# header con 494 REQUEST_HEADER_TOO_LARGE (non 431) e senza invocare ne' la funzione ne' il
+# middleware; i chunk di sessione Supabase hanno nomi fissi, quindi si sovrascrivono invece di
+# sommarsi, e @supabase/ssr 0.12 li ripulisce gia' da solo. La causa vera non e' dimostrata: non
+# darla per chiusa, va riprodotta su un dev store guardando codice HTTP e header Cookie.
 use_legacy_install_flow = false
 
 [auth]

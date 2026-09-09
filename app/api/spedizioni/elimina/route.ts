@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { annullaSpedizioneSulCorriere, rimborsaAnnulloSpedizione, trovaOwnerContratto } from '@/lib/annullaSpedizione'
@@ -68,7 +68,13 @@ export async function DELETE(req: NextRequest) {
       }).eq('id', spedizioneId)
       await rimborsaAnnulloSpedizione(admin, sped as any, user.id)
       // Lo store non deve restare con l'ordine "Fulfilled" e un tracking morto (vedi lib/shopify).
-      try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, [spedizioneId]) } catch {}
+      // In after(): sono due chiamate a Shopify (query + mutation) senza timeout, dentro la richiesta
+      // di CANCELLAZIONE dell'utente. Se lo store e' lento, l'utente vede fallire una cancellazione
+      // che invece e' gia' avvenuta e gia' stornata — e prova a rifarla.
+      after(async () => {
+        try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, [spedizioneId]) }
+        catch (e: any) { console.error('[SHOPIFY][ANNULLO da elimina]', spedizioneId, e?.message) }
+      })
       return NextResponse.json({ success: true, annullata: true, message: 'Spedizione annullata e credito stornato a tutta la rete.' })
     }
     // 2) Non annullabile via API -> coda manuale del DETENTORE, SUBITO (niente attesa 48h).
@@ -123,7 +129,13 @@ export async function DELETE(req: NextRequest) {
       }).eq('id', spedizioneId)
       await rimborsaAnnulloSpedizione(admin, sped as any, user.id)
       // Lo store non deve restare con l'ordine "Fulfilled" e un tracking morto (vedi lib/shopify).
-      try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, [spedizioneId]) } catch {}
+      // In after(): sono due chiamate a Shopify (query + mutation) senza timeout, dentro la richiesta
+      // di CANCELLAZIONE dell'utente. Se lo store e' lento, l'utente vede fallire una cancellazione
+      // che invece e' gia' avvenuta e gia' stornata — e prova a rifarla.
+      after(async () => {
+        try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, [spedizioneId]) }
+        catch (e: any) { console.error('[SHOPIFY][ANNULLO da elimina]', spedizioneId, e?.message) }
+      })
       return NextResponse.json({ success: true, annullata: true, message: 'Spedizione annullata e credito stornato a tutta la rete.' })
     }
     // Non annullabile ORA (BRT ancora "in processing"/già spedita, o GLS che non conferma): niente rimborso

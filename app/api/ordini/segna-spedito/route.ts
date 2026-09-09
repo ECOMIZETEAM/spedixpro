@@ -20,6 +20,19 @@ export async function POST(req: NextRequest) {
 
   // L'ordine puo' venire dalla sync API (ordini_ecommerce) o dall'import CSV (ordini_importati):
   // aggiorno per id in entrambe, aggiorna solo la tabella che contiene davvero quell'id.
+  // SPEDIZIONE RIFATTA: l'esito dell'evasione VECCHIA non vale piu'.
+  //
+  // Se l'ordine viene rispedito (la prima spedizione annullata, o rifatta), qui cambiava solo
+  // spedizione_id e restavano fulfillment_stato/errore/tentativi della volta prima. Con 'ok' vecchio
+  // il tracking NUOVO non veniva mandato allo store mai piu' (l'evasione salta i gia' 'ok'), e con i
+  // tentativi al massimo il recupero non lo ripescava. Si azzerano solo quando la spedizione cambia
+  // davvero: un doppio clic sullo stesso ordine non deve far ripartire niente.
+  if (spedizioneId) {
+    await supabase.from('ordini_ecommerce')
+      .update({ stato: 'spedito', spedizione_id: spedizioneId, fulfillment_stato: null, fulfillment_errore: null, fulfillment_tentativi: 0 })
+      .eq('id', ordineId).eq('cliente_id', utente.cliente_id)
+      .or(`spedizione_id.is.null,spedizione_id.neq.${spedizioneId}`)
+  }
   await supabase.from('ordini_ecommerce')
     .update({ stato: 'spedito', spedizione_id: spedizioneId })
     .eq('id', ordineId).eq('cliente_id', utente.cliente_id)

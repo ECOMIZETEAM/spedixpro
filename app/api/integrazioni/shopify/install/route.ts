@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { SHOPIFY_SCOPES } from '@/lib/shopify'
 import crypto from 'crypto'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-// Scope allineati a quelli impostati sulla app Shopify (Partner Dashboard)
-const SCOPES = 'read_orders,read_assigned_fulfillment_orders,read_merchant_managed_fulfillment_orders,read_third_party_fulfillment_orders,write_assigned_fulfillment_orders,write_merchant_managed_fulfillment_orders,write_third_party_fulfillment_orders'
+// Gli scope NON si riscrivono qui: la stringa e' una sola, in lib/shopify.ts, e la stessa deve
+// stare in shopify.app.toml. Quando erano due copie battute a mano, chi correggeva l'una e non
+// l'altra collegava male i negozi e nessuno se ne accorgeva finche' un'evasione non falliva.
 const SHOP_RE = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/
 
 export async function GET(req: NextRequest) {
@@ -60,7 +62,7 @@ export async function GET(req: NextRequest) {
   const authorize =
     `https://${shop}/admin/oauth/authorize` +
     `?client_id=${encodeURIComponent(apiKey)}` +
-    `&scope=${encodeURIComponent(SCOPES)}` +
+    `&scope=${encodeURIComponent(SHOPIFY_SCOPES)}` +
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
     `&state=${encodeURIComponent(state)}`
 

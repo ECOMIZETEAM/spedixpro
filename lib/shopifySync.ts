@@ -94,7 +94,21 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
       totale: money?.amount ? Number(money.amount) : null,
       valuta: money?.currencyCode || 'EUR',
       stato_pagamento: (o.displayFinancialStatus || '').toLowerCase(),
-      raw: o,
+      // `raw` POTATO, non l'ordine intero.
+      //
+      // Prima ci finiva `o` per intero: nome, indirizzo di spedizione E di fatturazione, email e
+      // telefono del compratore duplicati una seconda volta, dentro un campo che nessuna schermata
+      // mostra. Il primo requisito dei dati protetti di Shopify e' non tenere piu' di quello che
+      // serve, e qui a valle servono sei chiavi, tutte non personali: la data vera dell'ordine
+      // (usata dal filtro periodo) e il metodo di pagamento (per riconoscere il contrassegno).
+      // Il destinatario resta nel suo campo, uno solo, che il purge sa azzerare.
+      raw: {
+        createdAt: o.createdAt, updatedAt: o.updatedAt,
+        paymentGatewayNames: o.paymentGatewayNames,
+        displayFinancialStatus: o.displayFinancialStatus,
+        displayFulfillmentStatus: o.displayFulfillmentStatus,
+        totalPriceSet: o.totalPriceSet,
+      },
     }
     // Gia' evaso su Shopify -> "spedito" (sparisce dal default "da spedire"). Gli ordini NON evasi
     // non toccano lo stato: nuovo = default 'da_spedire'; esistente = mantiene il suo (non riportiamo

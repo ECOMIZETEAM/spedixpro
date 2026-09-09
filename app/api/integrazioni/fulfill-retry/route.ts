@@ -32,13 +32,17 @@ export async function GET(req: NextRequest) {
     // qui dentro e il cron rievadeva una spedizione appena annullata — seconda email al compratore
     // con un tracking morto. Rete di sicurezza: chi annulla sgancia gia' spedizione_id, ma questa
     // riga protegge anche le piattaforme che dovessero usare lo stesso stato senza sganciarlo.
-    .or('fulfillment_stato.is.null,and(fulfillment_stato.neq.ok,fulfillment_stato.neq.annullato)')
+    // Fuori anche gli stati TERMINALI introdotti con la revisione Shopify: 'annullato_store'
+    // (l'ordine l'ha annullato il negoziante) ed 'esterno' (la merce sta in un magazzino di terzi
+    // e l'evasione la registra quel servizio). Ritentarli non li sistemerebbe mai.
+    .or('fulfillment_stato.is.null,and(fulfillment_stato.neq.ok,fulfillment_stato.neq.annullato,fulfillment_stato.neq.annullato_store,fulfillment_stato.neq.esterno)')
     .lt('fulfillment_tentativi', MAX_TENTATIVI)                         // salta gli irrecuperabili (cap raggiunto)
     .gte('created_at', new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString())
     .order('created_at', { ascending: true })   // i PIÙ VECCHI prima: si svuota la coda, non si perdono gli arretrati
     .limit(1000)
 
   const candidati = (ordini || []).filter((o: any) => o.fulfillment_stato !== 'ok')
+  const TERMINALI = ['ok', 'annullato', 'annullato_store', 'esterno']
   const spedIds = Array.from(new Set(candidati.map((o: any) => o.spedizione_id)))
   if (!spedIds.length) return NextResponse.json({ ok: true, candidate: 0, evase: 0 })
 
@@ -64,7 +68,13 @@ export async function GET(req: NextRequest) {
       .select('id,fulfillment_stato').in('id', prontiCand.map((o: any) => o.id))
     const statoOra = new Map((dopo || []).map((o: any) => [o.id, o.fulfillment_stato]))
     for (const o of prontiCand) {
-      if (statoOra.get(o.id) === 'ok') continue   // evaso in questo giro: non incremento
+      const st = String(statoOra.get(o.id) || '')
+      if (TERMINALI.includes(st)) continue   // evaso o chiuso in questo giro: non incremento
+      // 'attesa' = stiamo aspettando il NEGOZIANTE (ordine trattenuto su Shopify), non abbiamo
+      // sbagliato niente noi. Bruciarci un tentativo ogni 20 minuti significava arrendersi dopo
+      // ~2h40 su un blocco che dura giorni, e l'ordine restava Unfulfilled per sempre. Stessa
+      // ragione per cui le LDV provvisorie non consumano tentativi: aspettare non e' fallire.
+      if (st === 'attesa') continue
       const n = Number(o.fulfillment_tentativi || 0) + 1
       await admin.from('ordini_ecommerce').update({ fulfillment_tentativi: n }).eq('id', o.id)
       if (n >= MAX_TENTATIVI) esauriti++
