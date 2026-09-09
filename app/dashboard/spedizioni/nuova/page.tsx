@@ -185,6 +185,15 @@ export default function NuovaSpedizionePage() {
   const [errore, setErrore] = useState('')
   const [vista, setVista] = useState<'dati'|'contratto'>('dati')
   const [successo, setSuccesso] = useState<{numero:string,id:string,ritiro?:{ok?:boolean,pickupId?:string,errore?:string}}|null>(null)
+  // SICUREZZA LDV: appena si comincia una NUOVA spedizione (si compila il destinatario) dopo una
+  // creazione, si toglie il banner con "Scarica LDV" della spedizione PRECEDENTE. Senza, chi non
+  // ricaricava con "Nuova spedizione" poteva ristampare per abitudine la LDV VECCHIA e appiccicarla al
+  // pacco nuovo → due colli con la stessa lettera di vettura, respinti dal corriere (segnalato 9/9).
+  // Il form viene svuotato da resetForm() (destinatario vuoto) subito dopo la creazione, quindi qui
+  // scatta solo quando è l'operatore a scrivere il nuovo destinatario, non per lo svuotamento.
+  useEffect(() => {
+    if (dest.nome || dest.indirizzo || dest.cap) setSuccesso(s => (s ? null : s))
+  }, [dest.nome, dest.indirizzo, dest.cap])
   // Reset tariffe/corrieri quando cambiano dati destinatario/mittente/spedizione:
   // costringe a ricalcolare "Seleziona Corriere" sui nuovi dati (no tariffe stale)
   useEffect(() => {
