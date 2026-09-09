@@ -59,6 +59,60 @@ export default function ElencoDistintePage() {
     else { await dialog.alert({ title: 'Errore', message: d.error || 'Conferma fallita.' }) }
   }
 
+  // STAMPA UNICA di più distinte selezionate (assemblamento): un solo borderò che unisce tutte le
+  // spedizioni delle distinte scelte, con la colonna "Distinta" e il totale complessivo. Serve a
+  // consegnare al corriere un unico documento per più distinte dello stesso vettore (GLS+GLS, BRT+BRT).
+  async function stampaSelezionate() {
+    if (!selezionate.size) { await dialog.alert({ title: 'Nessuna distinta selezionata', message: 'Seleziona almeno una distinta.' }); return }
+    const sel = distinte.filter(d => selezionate.has(d.id))
+    const vettori = Array.from(new Set(sel.map(d => d.vettore).filter(Boolean)))
+    if (vettori.length > 1) {
+      const ok = await dialog.confirm({ title: 'Vettori diversi', message: `Le distinte selezionate sono di vettori diversi (${vettori.join(', ')}). Di solito un borderò si consegna a un solo corriere. Vuoi comunque un unico file?` })
+      if (!ok) return
+    }
+    // Scarico le righe di ogni distinta (nell'ordine dell'elenco).
+    const blocchi: { dist: any; righe: any[] }[] = []
+    for (const d of sel) {
+      const res = await fetch('/api/distinte/dettaglio?id=' + d.id)
+      const righe = await res.json()
+      blocchi.push({ dist: d, righe: Array.isArray(righe) ? righe : [] })
+    }
+    const { default: jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+    const doc = new jsPDF()
+    const numeri = sel.map(d => d.numero).join(', ')
+    const titolo = (vettori.length === 1 ? 'Bordero ' + vettori[0] : 'Bordero') + ' — distinte ' + numeri
+    doc.setFontSize(13); doc.setFont('helvetica', 'bold')
+    doc.text(titolo, 105, 16, { align: 'center', maxWidth: 185 })
+    const body: any[] = []
+    let totColli = 0
+    for (const b of blocchi) {
+      for (const r of b.righe) {
+        totColli += Number(r.colli || 1)
+        body.push([
+          b.dist.numero || '',
+          r.numero || '',
+          r.dest_nome || '',
+          ((r.dest_indirizzo || '') + '\n' + (r.dest_cap || '') + ' ' + (r.dest_citta || '') + ' (' + (r.dest_provincia || '') + ')'),
+          (Number(r.contrassegno || 0)).toFixed(2) + ' €',
+          r.colli || 1,
+          (Number(r.peso_reale || 0)).toFixed(0) + ' kg',
+        ])
+      }
+    }
+    autoTable(doc, {
+      startY: 26,
+      head: [['Distinta', 'Spedizione', 'Destinatario', 'Indirizzo Cap localita', 'C/Assegno', 'Colli', 'Peso']],
+      body,
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], fontStyle: 'bold' },
+    })
+    const endY = (doc as any).lastAutoTable.finalY + 10
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10)
+    doc.text('Distinte: ' + sel.length + '   —   Spedizioni: ' + body.length + '   —   Colli totali: ' + totColli, 14, endY)
+    doc.save('Bordero_unico_' + sel.map(d => d.numero).join('-').slice(0, 60) + '.pdf')
+  }
+
   async function stampaPDF(dist: any) {
     const res = await fetch('/api/distinte/dettaglio?id=' + dist.id)
     const righe = await res.json()
@@ -153,6 +207,7 @@ export default function ElencoDistintePage() {
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
           <button onClick={confermaSelezionate} style={{ padding: '8px 14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }}>Conferma Selezionate</button>
+          <button onClick={stampaSelezionate} title="Un unico borderò per le distinte selezionate" style={{ padding: '8px 14px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }}>🖨 Stampa Selezionate</button>
           <div><div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Cerca</div><input value={cerca} onChange={e => {setCerca(e.target.value);setPagina(1)}} placeholder="Numero o cliente..." style={{ ...inp, width: '220px' }} /></div>
           <AzzeraFiltri prefix="distinte-elenco-master" />
         </div>
