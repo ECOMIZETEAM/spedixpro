@@ -296,6 +296,15 @@ export async function chiudiSpedizioniGls(
   return { ok, esiti, errore: ok ? null : (descr || 'chiusura GLS non confermata'), raw: soap.substring(0, 2000) }
 }
 
+// Numero GLS "nudo" (quello che vuole la CloseWorkDay) di una spedizione: sta in raw_response.numero,
+// altrimenti le prime 6+ cifre di numero/tracking. Estratto per condividerlo con la chiusura MISTA.
+export function numeroNudoGls(s: { numero?: string | null; tracking_number?: string | null; raw_response?: any }): string {
+  const raw = (s?.raw_response || {}) as any
+  let n = raw?.numero ? String(raw.numero) : ''
+  if (!n) { const mm = String(s?.numero || s?.tracking_number || '').match(/\d{6,}/); n = mm ? mm[0] : '' }
+  return n
+}
+
 // Chiusura GLS di una DISTINTA (stessa forma di chiudiBorderoSpedisci/chiudiBordereauSpediamopro).
 // Best-effort, mai bloccante. Solo per corrieri di tipo 'gls'. Il numero NUDO sta in
 // raw_response.numero (fallback: le cifre del numero/tracking). GLS non produce un PDF di borderò:
@@ -317,12 +326,7 @@ export async function chiudiGiornataGls(supabase: any, distintaId: string) {
     const { data: speds } = await supabase
       .from('spedizioni').select('id, numero, tracking_number, raw_response').eq('distinta_id', distintaId)
     const numeri: string[] = []
-    for (const s of speds || []) {
-      const raw = (s.raw_response || {}) as any
-      let n = raw?.numero ? String(raw.numero) : ''
-      if (!n) { const mm = String(s.numero || s.tracking_number || '').match(/\d{6,}/); n = mm ? mm[0] : '' }
-      if (n) numeri.push(n)
-    }
+    for (const s of speds || []) { const n = numeroNudoGls(s); if (n) numeri.push(n) }
     if (!numeri.length) return { errore: 'nessuna spedizione GLS con numero' }
 
     const r = await chiudiSpedizioniGls(cred, numeri)

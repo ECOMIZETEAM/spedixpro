@@ -142,6 +142,61 @@ export async function spedisciStocksAperti(
   } catch { return { ldv: out, ok: false } }
 }
 
+// Raggruppa le spedizioni per contract_code (shipmentId + _contractCode stanno nel raw_response).
+// Estratta per essere condivisa fra la chiusura di una distinta mono-contratto e quella MISTA.
+export function raggruppaPerContractCodeSpedisci(speds: { raw_response?: any }[]): Map<string, number[]> {
+  const gruppi = new Map<string, number[]>()
+  for (const s of speds || []) {
+    const raw = (s.raw_response || {}) as any
+    const sid = raw.shipmentId
+    const cc = raw._contractCode
+    if (!sid || !cc) continue
+    if (!gruppi.has(cc)) gruppi.set(cc, [])
+    gruppi.get(cc)!.push(Number(sid))
+  }
+  return gruppi
+}
+
+// Trasmette a Spedisci il borderò (Close Day) per gruppi gia' pronti {contract_code -> shipmentIds},
+// con UN account (master_domain/password). NON tocca il DB: torna l'esito aggregato. Condivisa fra
+// la chiusura di una distinta mono-contratto (chiudiBorderoSpedisci) e quella MISTA (chiudiDistintaMista),
+// cosi' la logica di trasmissione vive in un posto solo.
+export async function trasmettiBorderoSpedisci(
+  cred: { master_domain?: string; password?: string },
+  gruppi: Map<string, number[]>
+): Promise<{ ok: boolean; ids: string[]; pdf: string | null; errore: string | null; giaChiusa: boolean }> {
+  const ids: string[] = []
+  let pdf: string | null = null
+  let errore: string | null = null
+  let giaChiusa = false
+  for (const [contractCode, shipmentIds] of gruppi) {
+    const r = await fetch(`https://${cred.master_domain}/api/v2/shippinglist/create`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shipment_ids: shipmentIds, contract_code: contractCode }),
+    })
+    const text = await r.text()
+    let d: any = {}
+    try { d = JSON.parse(text) } catch { d = {} }
+    if (!r.ok || d.error) {
+      const msg = (d.error || text).toString()
+      // "Nessuna spedizione trovata": Spedisci ha GIA' chiuso il bordero' dal lato suo (chiusura
+      // automatica serale loro) -> non c'e' piu' nulla da trasmettere, non e' un guasto.
+      // Succedeva a TUTTE le distinte del cron delle 23: le manuali diurne chiudono regolarmente.
+      if (/nessuna spedizione trovata/i.test(msg)) { giaChiusa = true; continue }
+      errore = 'HTTP ' + r.status + ': ' + msg.slice(0, 200)
+      continue
+    }
+    const bid = d.bordero ?? d.id ?? d.shippingListId ?? d.shipping_list_id ?? null
+    if (bid != null) ids.push(String(bid))
+    const b64 = d.pdf || d.labelData || d.base64 || null
+    if (b64 && !pdf) pdf = 'data:application/pdf;base64,' + b64
+  }
+  // confermata = TRASMESSA davvero al provider (o gia' chiusa dal lato loro).
+  const ok = ids.length > 0 || (giaChiusa && !errore)
+  return { ok, ids, pdf, errore, giaChiusa }
+}
+
 // Chiusura borderò (Close Day) su spedisci.online per una distinta.
 // Best-effort: mai bloccante. Salva bordero_id/bordero_pdf sulla distinta.
 // Solo per corrieri di tipo 'spedisci'. shipmentId e _contractCode da raw_response.
@@ -164,56 +219,17 @@ export async function chiudiBorderoSpedisci(supabase: any, distintaId: string) {
 
     const { data: speds } = await supabase
       .from('spedizioni').select('id, numero, raw_response').eq('distinta_id', distintaId)
-
-    // Raggruppa per contract_code (di norma uno solo per distinta)
-    const gruppi = new Map<string, number[]>()
-    for (const s of speds || []) {
-      const raw = (s.raw_response || {}) as any
-      const sid = raw.shipmentId
-      const cc = raw._contractCode
-      if (!sid || !cc) continue
-      if (!gruppi.has(cc)) gruppi.set(cc, [])
-      gruppi.get(cc)!.push(Number(sid))
-    }
+    const gruppi = raggruppaPerContractCodeSpedisci(speds || [])
     if (!gruppi.size) return { errore: 'nessuna spedizione con shipmentId/contractCode' }
 
-    const ids: string[] = []
-    let pdf: string | null = null
-    let errore: string | null = null
-    let giaChiusa = false
-    for (const [contractCode, shipmentIds] of gruppi) {
-      const r = await fetch(`https://${cred.master_domain}/api/v2/shippinglist/create`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shipment_ids: shipmentIds, contract_code: contractCode }),
-      })
-      const text = await r.text()
-      let d: any = {}
-      try { d = JSON.parse(text) } catch { d = {} }
-      if (!r.ok || d.error) {
-        const msg = (d.error || text).toString()
-        // "Nessuna spedizione trovata": Spedisci ha GIA' chiuso il bordero' dal lato suo (chiusura
-        // automatica serale loro) -> non c'e' piu' nulla da trasmettere, non e' un guasto.
-        // Succedeva a TUTTE le distinte del cron delle 23: le manuali diurne chiudono regolarmente.
-        if (/nessuna spedizione trovata/i.test(msg)) { giaChiusa = true; continue }
-        errore = 'HTTP ' + r.status + ': ' + msg.slice(0, 200)
-        continue
-      }
-      const bid = d.bordero ?? d.id ?? d.shippingListId ?? d.shipping_list_id ?? null
-      if (bid != null) ids.push(String(bid))
-      const b64 = d.pdf || d.labelData || d.base64 || null
-      if (b64 && !pdf) pdf = 'data:application/pdf;base64,' + b64
-    }
-
-    // confermata_vettore = TRASMESSA davvero al provider (o gia' chiusa dal lato loro).
-    const chiusaOk = ids.length > 0 || (giaChiusa && !errore)
+    const r = await trasmettiBorderoSpedisci(cred, gruppi)
     await supabase.from('distinte').update({
-      bordero_id: ids.length ? ids.join(',') : (giaChiusa && !errore ? 'N/A' : (errore ? 'ERRORE: ' + errore : null)),
-      bordero_pdf: pdf,
-      ...(chiusaOk ? { confermata_vettore: true, data_conferma: new Date().toISOString() } : {}),
+      bordero_id: r.ids.length ? r.ids.join(',') : (r.giaChiusa && !r.errore ? 'N/A' : (r.errore ? 'ERRORE: ' + r.errore : null)),
+      bordero_pdf: r.pdf,
+      ...(r.ok ? { confermata_vettore: true, data_conferma: new Date().toISOString() } : {}),
     }).eq('id', distintaId)
 
-    return { ok: chiusaOk, bordero_id: ids.join(','), errore }
+    return { ok: r.ok, bordero_id: r.ids.join(','), errore: r.errore }
   } catch (e: any) {
     try {
       await supabase.from('distinte').update({ bordero_id: 'ERRORE: ' + String(e?.message || e).slice(0, 150) }).eq('id', distintaId)

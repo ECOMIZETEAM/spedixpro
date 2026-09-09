@@ -38,12 +38,30 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminSupabase()
   const { data: integr } = await admin.from('integrazioni')
-    .select('cliente_id,clienti(email)')
+    .select('cliente_id,stato,credenziali,clienti(email)')
     .eq('piattaforma', 'shopify').eq('identificativo', shop).maybeSingle()
 
-  // negozio non collegato → avvia l'installazione/OAuth
+  // NEGOZIO NON COLLEGATO → si riparte dall'OAuth.
+  //
+  // "Non collegato" NON e' solo "riga assente". Alla disinstallazione il webhook app/uninstalled
+  // NON cancella la riga: la marca `stato='disconnesso'` e SVUOTA le credenziali, per non perdere
+  // lo storico del cliente. Guardando solo cliente_id, alla REINSTALLAZIONE trovavamo la riga
+  // vecchia, saltavamo l'OAuth e facevamo entrare il merchant nel portale — con un'integrazione
+  // senza token. Da li' in poi ogni sync e ogni evasione morivano su "Credenziali Shopify
+  // mancanti", e l'unico modo di rientrare era ridigitare il dominio a mano dalle Integrazioni.
+  //
+  // Due requisiti di review in un colpo solo: 2.3.4 ("must immediately authenticate using OAuth
+  // before any other steps occur, EVEN IF the merchant has previously installed and then
+  // uninstalled your app") e, di rimbalzo, 2.1.4 — l'app reinstallata non mostrava piu' un ordine.
+  // Installa → disinstalla → reinstalla e' un passaggio standard di chi fa la revisione.
+  //
+  // Il callback e' gia' idempotente sul riaggancio (aggiorna la riga esistente per identificativo),
+  // quindi ripassare dall'OAuth non crea doppioni. E con la managed installation il consenso e'
+  // gia' dato: l'authorize torna subito il codice, il merchant non vede nessuna schermata in piu'.
   const email = (integr as any)?.clienti?.email
-  if (!integr?.cliente_id || !email) {
+  const token = ((integr as any)?.credenziali || {}).access_token
+  const vivo = !!integr?.cliente_id && !!email && (integr as any)?.stato === 'attivo' && !!token
+  if (!vivo) {
     return NextResponse.redirect(`${appUrl}/api/integrazioni/shopify/install?shop=${encodeURIComponent(shop)}`)
   }
 
