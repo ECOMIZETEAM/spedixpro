@@ -295,6 +295,18 @@ export default function OrdiniPage() {
         fatte++
         setMsg('Calcolo tariffe '+fatte+'/'+ids.length+'…')
         if (!d.nome || !d.indirizzo || !d.citta || !d.cap) { errori.push(num+': destinatario incompleto'); continue }
+        // TELEFONO DEL DESTINATARIO: si dice PRIMA, non a meta' lotto.
+        //
+        // Diversi corrieri lo pretendono (senza, la creazione risponde 400) perche' serve al fattorino
+        // per la consegna. Il negozio online quasi mai lo rende obbligatorio alla cassa, quindi
+        // l'ordine arriva senza. Finora il controllo scattava solo a spedizione gia' avviata: il
+        // cliente vedeva un errore secco su una riga a meta' di un lotto, senza capire cosa fare.
+        // Qui si dice cosa manca e dove metterlo: il pulsante "Crea spedizione" della riga apre il
+        // modulo gia' compilato, e li' il numero si aggiunge a mano.
+        if (String(d.telefono||'').replace(/[^0-9]/g,'').length < 6) {
+          errori.push(num+': manca il telefono del destinatario (il corriere lo richiede) — usa "Crea spedizione" sulla riga e aggiungilo')
+          continue
+        }
         const arts = Array.isArray(o.articoli)?o.articoli:[]
         const rp = risolviPeso(o)   // peso+misure dal catalogo SKU/pacco (fallback grammi/1kg)
         const packages = [{ length:rp.l, width:rp.w, height:rp.h, weight:rp.peso }]
