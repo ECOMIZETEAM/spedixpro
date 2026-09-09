@@ -64,7 +64,7 @@ export default function ElencoDistintePage() {
     const { default: autoTable } = await import('jspdf-autotable')
     const doc = new jsPDF()
     const dataDist = dist.data ? new Date(dist.data).toLocaleDateString('it-IT') : ''
-    const nomeContr = (dist.corrieri?.nome_contratto || 'CORRIERE').toUpperCase()
+    const nomeContr = (dist.contratto_label || dist.corrieri?.nome_contratto || 'CORRIERE').toUpperCase()
     doc.setFontSize(15); doc.setFont('helvetica', 'bold')
     doc.text('Bordero ' + nomeContr + ' numero ' + dist.numero + ' Del ' + dataDist, 105, 18, { align: 'center' })
     autoTable(doc, {
@@ -155,7 +155,7 @@ export default function ElencoDistintePage() {
                 // Valori della SECONDA riga (contratto/conteggi/importi): array cos\u00EC i divisori verticali
                 // saltano i campi assenti (data conferma) senza lasciare linee a vuoto.
                 const secItems: { l: any; v: any }[] = [
-                  { l: 'Contratto', v: <b style={{ color: '#1a1a1a' }}>{d.corrieri?.nome_contratto || '\u2014'}</b> },
+                  { l: 'Contratto', v: <b style={{ color: '#1a1a1a' }}>{d.contratto_label || d.corrieri?.nome_contratto || '\u2014'}</b> },
                   { l: 'Totale LDV', v: d.totale_ldv || 0 },
                   { l: 'Prezzo totale', v: <b style={{ color: '#1a1a1a' }}>{Number(d.prezzo_totale || 0).toFixed(2)} {'\u20AC'}</b> },
                   ...(d.data_conferma ? [{ l: 'Data conferma', v: new Date(d.data_conferma).toLocaleString('it-IT') }] : []),

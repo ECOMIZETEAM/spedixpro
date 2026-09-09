@@ -36,8 +36,8 @@ export async function GET(req: NextRequest) {
   let corriereIdsVettore: string[] | null = null
   if (vettore) {
     const { data: corrs } = await db.from('corrieri').select('id,tipo,nome_contratto').in('master_id', masterFilter)
-    corriereIdsVettore = (corrs || []).filter((c: any) => vettoreFisico(c) === vettore).map((c: any) => c.id)
-    if (!corriereIdsVettore.length) corriereIdsVettore = ['00000000-0000-0000-0000-000000000000']
+    const ids = (corrs || []).filter((c: any) => vettoreFisico(c) === vettore).map((c: any) => c.id)
+    corriereIdsVettore = ids.length ? ids : ['00000000-0000-0000-0000-000000000000']
   }
   // fetchAll: senza, la lista dei candidati da mettere in distinta troncava a 1000 → in una giornata
   // intensa l'operatore non vedeva (né poteva selezionare) le spedizioni oltre la millesima.
@@ -90,10 +90,25 @@ export async function POST(req: NextRequest) {
     masterFilterPost = await sottoAlberoMasterIds(admin, masterSel)
     db = admin
   }
-  let spedQ = db.from('spedizioni').select('id,colli,peso_reale,costo_totale').in('id', spedizioniIds)
+  let spedQ = db.from('spedizioni').select('id,colli,peso_reale,costo_totale,corriere_id').in('id', spedizioniIds)
   if (agente) spedQ = spedQ.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
   const { data: speds } = masterSel ? await spedQ.in('master_id', masterFilterPost) : await spedQ.eq('master_id', utente?.master_id)
   if (!speds?.length) return NextResponse.json({ error: 'Nessuna spedizione valida da chiudere' }, { status: 400 })
+
+  // COERENZA CONTRATTO/VETTORE — la regola-soldi che finora sul portale master mancava (le altre 3
+  // porte gia' la fanno): ogni spedizione deve stare nel contratto/vettore dichiarato, altrimenti la
+  // chiusura borderò la trasmetterebbe col contratto sbagliato o la lascerebbe non trasmessa.
+  const cidSel = Array.from(new Set(speds.map((s: any) => s.corriere_id).filter(Boolean)))
+  if (vettore) {
+    // Merge: tutte le spedizioni devono essere dello STESSO vettore fisico (es. tutti GLS).
+    const { createAdminSupabase: _admV } = await import('@/lib/supabase-admin')
+    const { data: corrs } = await _admV().from('corrieri').select('id,tipo,nome_contratto').in('id', cidSel)
+    const fuori = (corrs || []).filter((c: any) => vettoreFisico(c) !== vettore)
+    if (!corrs?.length || fuori.length) return NextResponse.json({ error: `Le spedizioni selezionate non sono tutte del vettore ${vettore}.` }, { status: 400 })
+  } else {
+    // Contratto singolo: nessuna spedizione di un altro contratto.
+    if (cidSel.some(c => c !== corriereId)) return NextResponse.json({ error: 'Alcune spedizioni selezionate non appartengono al contratto scelto.' }, { status: 400 })
+  }
   const spedIdsValidi = speds.map((s: any) => s.id)
   const totaleColli = (speds || []).reduce((s: number, x: any) => s + Number(x.colli || 1), 0)
   const totalePeso = (speds || []).reduce((s: number, x: any) => s + Number(x.peso_reale || 0), 0)
@@ -103,7 +118,7 @@ export async function POST(req: NextRequest) {
   const { data: numSeq } = await supabase.rpc('prossimo_numero_distinta')
   const numeroDistinta = String(numSeq || Date.now())
   const { data: distinta, error } = await supabase.from('distinte').insert({
-    master_id: utente?.master_id, cliente_id: masterSel ? null : (clienteId || null), master_rete_id: masterSel || null, corriere_id: corriereId || null,
+    master_id: utente?.master_id, cliente_id: masterSel ? null : (clienteId || null), master_rete_id: masterSel || null, corriere_id: vettore ? null : (corriereId || null),
     numero: numeroDistinta, data: new Date().toISOString().split('T')[0], stato: 'chiusa',
     totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: (speds||[]).length, prezzo_totale: prezzoTotale,
   }).select().single()
@@ -132,5 +147,8 @@ export async function POST(req: NextRequest) {
   try { const { chiudiBordereauSpediamopro } = await import('@/lib/spediamopro'); await chiudiBordereauSpediamopro(_dbChiusura, distinta.id) } catch {}
   try { const { chiudiGiornataGls } = await import('@/lib/gls'); await chiudiGiornataGls(_dbChiusura, distinta.id) } catch {}
   try { const { chiudiDistintaBrt } = await import('@/lib/brt'); await chiudiDistintaBrt(_dbChiusura, distinta.id) } catch {}
+  // Distinta MISTA (vettore): la chiusura per-contratto. Le 4 sopra fanno skip (corriere_id null); questa
+  // fa skip sulle mono-contratto. Cosi' vale sia il caso normale sia il merge, senza rami separati.
+  try { const { chiudiDistintaMista } = await import('@/lib/distinte-chiusura'); await chiudiDistintaMista(_dbChiusura, distinta.id) } catch {}
   return NextResponse.json({ success: true, distintaId: distinta.id, numero: numeroDistinta })
 }

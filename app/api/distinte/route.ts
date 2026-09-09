@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { fetchAll } from '@/lib/fetch-all'
+import { vettoreFisico } from '@/lib/vettore'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -75,6 +76,21 @@ export async function GET(req: NextRequest) {
       if (nome) clientiPerDistinta.get(did)!.add(nome)
     }
   }
+  // Etichetta "Contratto" per le distinte MISTE (corriere_id null, es. merge di più contratti GLS):
+  // la derivo dai contratti reali delle spedizioni -> "GLS (N contratti)".
+  const distMiste = distinte.filter((d: any) => !d.corriere_id).map((d: any) => d.id)
+  const contrattiPerDistinta = new Map<string, Set<string>>()
+  const vettoriPerDistinta = new Map<string, Set<string>>()
+  if (distMiste.length) {
+    const { data: spc } = await admin.from('spedizioni').select('distinta_id, corrieri(nome_contratto,tipo)').in('distinta_id', distMiste)
+    for (const s of (spc || [])) {
+      const did = (s as any).distinta_id; const c = (s as any).corrieri
+      if (!did || !c) continue
+      if (!contrattiPerDistinta.has(did)) { contrattiPerDistinta.set(did, new Set()); vettoriPerDistinta.set(did, new Set()) }
+      if (c.nome_contratto) contrattiPerDistinta.get(did)!.add(c.nome_contratto)
+      vettoriPerDistinta.get(did)!.add(vettoreFisico(c))
+    }
+  }
   const out = distinte.map((d: any) => {
     let cliente_label = d.clienti?.ragione_sociale || null
     if (!cliente_label && d.master_rete_id) cliente_label = 'Rete: ' + (nomeRete.get(d.master_rete_id) || 'sotto-master')
@@ -90,7 +106,14 @@ export async function GET(req: NextRequest) {
       const flId = primaLineaId.get(d.master_id)
       master_rete = flId ? (nomeMaster.get(flId) || nomeMaster.get(d.master_id) || null) : (nomeMaster.get(d.master_id) || null)
     }
-    return { ...d, cliente_label, master_rete }
+    // Contratto: singolo dal corriere della distinta, oppure — se MISTA — "Vettore (N contratti)".
+    let contratto_label = d.corrieri?.nome_contratto || null
+    if (!contratto_label && !d.corriere_id) {
+      const set = contrattiPerDistinta.get(d.id); const vset = vettoriPerDistinta.get(d.id)
+      const vett = vset && vset.size === 1 ? Array.from(vset)[0] : (vset && vset.size ? 'Misto' : '')
+      if (set && set.size) contratto_label = `${vett} (${set.size} contratt${set.size === 1 ? 'o' : 'i'})`.trim()
+    }
+    return { ...d, cliente_label, master_rete, contratto_label }
   })
   return NextResponse.json(out)
 }

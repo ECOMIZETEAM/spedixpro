@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
+import { vettoreFisico } from '@/lib/vettore'
 
 import { useDialog } from '@/app/components/DialogProvider'
 import DateRangePicker from '@/app/components/DateRangePicker'
@@ -46,7 +47,9 @@ export default function CreaDistintaPage() {
     setLoading(true)
     const params = new URLSearchParams()
     if (clienteId) params.set('clienteId', clienteId)
-    if (corriereId) params.set('corriereId', corriereId)
+    // corriereId può essere un contratto singolo, oppure "v:<VETTORE>" (unisci tutti i contratti GLS).
+    if (corriereId.startsWith('v:')) params.set('vettore', corriereId.slice(2))
+    else if (corriereId) params.set('corriereId', corriereId)
     if (dal) params.set('dal', dal)
     if (al) params.set('al', al)
     const res = await fetch('/api/distinte/spedizioni?' + params.toString())
@@ -70,12 +73,17 @@ export default function CreaDistintaPage() {
 
   async function creaDistinta() {
     if (!selezionate.size) { await dialog.alert({ title: 'Nessuna spedizione selezionata', message: 'Seleziona almeno una spedizione.' }); return }
-    if (!corriereId) { await dialog.alert({ title: 'Contratto mancante', message: 'Seleziona un Contratto: ogni distinta deve essere di un solo contratto.' }); return }
+    if (!corriereId) { await dialog.alert({ title: 'Contratto mancante', message: 'Seleziona un Contratto o un Vettore.' }); return }
+    const isVettore = corriereId.startsWith('v:')
     setCreando(true)
     const res = await fetch('/api/distinte/spedizioni', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ spedizioniIds: Array.from(selezionate), clienteId: clienteId || null, corriereId: corriereId || null })
+      body: JSON.stringify({
+        spedizioniIds: Array.from(selezionate), clienteId: clienteId || null,
+        corriereId: isVettore ? null : corriereId,
+        vettore: isVettore ? corriereId.slice(2) : null,
+      })
     })
     const d = await res.json()
     setCreando(false)
@@ -89,6 +97,25 @@ export default function CreaDistintaPage() {
   const filtrate = spedizioni.filter(s => !cerca ||
     String(s.numero || '').toLowerCase().includes(cerca.toLowerCase()) ||
     String(s.dest_nome || '').toLowerCase().includes(cerca.toLowerCase()))
+
+  // Gruppi VETTORE per il merge: vettori con ≥2 contratti e almeno una spedizione da chiudere. Selezionando
+  // "v:<VETTORE>" si uniscono in un'unica distinta le spedizioni di TUTTI i contratti di quel vettore.
+  const vettoriMerge = (() => {
+    const m = new Map<string, number>()
+    for (const c of contratti) {
+      const v = vettoreFisico({ tipo: c.tipo, nome_contratto: c.nome_contratto })
+      m.set(v, (m.get(v) || 0) + 1)
+    }
+    const tot = new Map<string, number>()
+    for (const c of contratti) {
+      const v = vettoreFisico({ tipo: c.tipo, nome_contratto: c.nome_contratto })
+      tot.set(v, (tot.get(v) || 0) + (c.da_chiudere || 0))
+    }
+    return Array.from(m.entries())
+      .filter(([v, n]) => n >= 2 && (tot.get(v) || 0) > 0)
+      .map(([v]) => ({ vettore: v, totale: tot.get(v) || 0 }))
+      .sort((a, b) => a.vettore.localeCompare(b.vettore))
+  })()
 
   const lbl = { fontSize: '12px', fontWeight: '600', color: '#1a1a1a', display: 'block', marginBottom: '4px' } as const
   const inp = { width: '100%', padding: '8px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', background: '#fff', boxSizing: 'border-box' } as const
@@ -118,7 +145,14 @@ export default function CreaDistintaPage() {
             <label style={lbl}>Contratto</label>
             <select value={corriereId} onChange={e => setCorriereId(e.target.value)} style={inp}>
               <option value="">Seleziona un contratto...</option>
-              {contratti.map(c => <option key={c.id} value={c.id}>{c.nome_contratto} ({c.da_chiudere})</option>)}
+              {vettoriMerge.length > 0 && (
+                <optgroup label="Unisci per vettore (più contratti in un'unica distinta)">
+                  {vettoriMerge.map(v => <option key={'v:' + v.vettore} value={'v:' + v.vettore}>🚚 {v.vettore} — tutti i contratti ({v.totale})</option>)}
+                </optgroup>
+              )}
+              <optgroup label="Contratto singolo">
+                {contratti.map(c => <option key={c.id} value={c.id}>{c.nome_contratto} ({c.da_chiudere})</option>)}
+              </optgroup>
             </select>
           </div>
         </div>

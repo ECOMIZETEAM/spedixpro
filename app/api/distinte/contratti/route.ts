@@ -44,14 +44,15 @@ export async function GET(req: NextRequest) {
     conteggio[c] = (conteggio[c] || 0) + 1
   }
 
-  // recupero i nomi dei corrieri
+  // recupero i nomi dei corrieri (+ tipo, per raggruppare i contratti per VETTORE fisico nella UI)
   const { data: corrieri } = await db.from('corrieri')
-    .select('id,nome_contratto')
+    .select('id,nome_contratto,tipo')
     .in('master_id', masterFilter)
 
   const risultato = (corrieri || []).map((c: any) => ({
     id: c.id,
     nome_contratto: c.nome_contratto,
+    tipo: c.tipo,
     da_chiudere: conteggio[c.id] || 0,
   }))
   return NextResponse.json(risultato)
