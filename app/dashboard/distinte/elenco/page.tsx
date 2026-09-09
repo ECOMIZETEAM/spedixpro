@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, Fragment } from 'react'
+import { useRouter } from 'next/navigation'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
@@ -11,6 +12,7 @@ const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpac
 
 export default function ElencoDistintePage() {
   const dialog = useDialog()
+  const router = useRouter()
   const [distinte, setDistinte] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useFiltriPersistenti('distinte-elenco-master:cerca', '')
@@ -170,6 +172,7 @@ export default function ElencoDistintePage() {
                       <td style={{ ...td1, whiteSpace: 'nowrap' }}>{d.created_at ? new Date(d.created_at).toLocaleString('it-IT') : '-'}</td>
                       <td style={td1}>{d.confermata_vettore ? <span style={{ background: '#16a34a', color: '#fff', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>Confermati</span> : <span style={{ background: '#f59e0b', color: '#fff', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>In attesa</span>}</td>
                       <td style={{ ...td1, whiteSpace: 'nowrap' }}>
+                        <button style={{ ...bIco, background: '#2563eb' }} onClick={() => router.push('/dashboard/distinte/' + d.id)} title="Dettaglio">{'\uD83D\uDC41'}</button>
                         <button style={bIco} onClick={() => stampaPDF(d)} title="Stampa PDF">{'\uD83D\uDDA8'}</button>
                         <button style={{ ...bIco, background: '#15803d' }} onClick={() => esportaExcel(d)} title="Excel">{'\uD83D\uDCCA'}</button>
                       </td>
