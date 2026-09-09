@@ -9,9 +9,22 @@ export async function sincronizzaOrdiniWoo(db: any, integr: any, range?: { dal?:
   const url = cred?.url, ck = cred?.ck, cs = cred?.cs
   if (!url || !ck || !cs) throw new Error('Credenziali WooCommerce mancanti')
 
-  // Ordini "da spedire" = non ancora evasi: stati processing (pagato) + on-hold (bonifico/COD in
-  // attesa, che molti negozi spediscono comunque). Gli spediti (completed) NON si importano.
-  // Finestra data su date_created (after/before). Paginazione completa (tetto sicurezza 50 pagine).
+  // Ordini "da spedire" = non ancora evasi: default stati processing (pagato) + on-hold (bonifico/COD
+  // in attesa, che molti negozi spediscono comunque). Gli spediti (completed) NON si importano.
+  // STATI CONFIGURABILI per negozio (credenziali.stati_ordini): un negozio che usa uno STATO
+  // PERSONALIZZATO (che il default non intercetta) lo aggiunge qui e i suoi ordini tornano a comparire
+  // nel portale. Si toglie un eventuale prefisso 'wc-' (la REST vuole lo slug nudo) e si scarta
+  // 'completed' (sono gli spediti, gestiti a parte sotto: non vanno importati come "da spedire").
+  const statiRaw = String(cred?.stati_ordini || '').trim().toLowerCase()
+  // 'any' (o 'tutti'/'*') = importa TUTTI gli stati Woo, custom compresi — come faceva il vecchio
+  // provider. Si scartano solo i terminali/non pagati/bozze/gia' spediti (ESCLUSI_ANY, filtrati sotto).
+  const tuttiStati = statiRaw === 'any' || statiRaw === 'tutti' || statiRaw === '*'
+  const stati = tuttiStati
+    ? 'any'
+    : (statiRaw
+        ? (statiRaw.split(',').map((x: string) => x.trim().replace(/^wc-/, '')).filter(Boolean).filter((x: string) => x !== 'completed').join(',') || 'processing,on-hold')
+        : 'processing,on-hold')
+  const ESCLUSI_ANY = new Set(['completed', 'cancelled', 'refunded', 'failed', 'trash', 'checkout-draft', 'auto-draft', 'pending'])
   const { daISO, aISO } = rangeGiorniISO(range?.dal, range?.al)
   const ordini: any[] = []
   const visti = new Set<string>()
@@ -19,7 +32,7 @@ export async function sincronizzaOrdiniWoo(db: any, integr: any, range?: { dal?:
 
   // 1) La FINESTRA scelta (per data di creazione).
   for (let page = 1; page <= 50; page++) {
-    const batch = await wooGet(url, ck, cs, `/orders?status=processing,on-hold&after=${encodeURIComponent(daISO)}&before=${encodeURIComponent(aISO)}&per_page=100&page=${page}&orderby=date&order=desc`)
+    const batch = await wooGet(url, ck, cs, `/orders?status=${stati}&after=${encodeURIComponent(daISO)}&before=${encodeURIComponent(aISO)}&per_page=100&page=${page}&orderby=date&order=desc`)
     if (!Array.isArray(batch) || !batch.length) break
     aggiungi(batch)
     if (batch.length < 100) break
@@ -31,7 +44,7 @@ export async function sincronizzaOrdiniWoo(db: any, integr: any, range?: { dal?:
   //    esattamente quelli da spedire. Best-effort + DEDUP: se fallisce, l'import della finestra resta.
   try {
     for (let page = 1; page <= 50; page++) {
-      const batch = await wooGet(url, ck, cs, `/orders?status=processing,on-hold&per_page=100&page=${page}&orderby=date&order=desc`)
+      const batch = await wooGet(url, ck, cs, `/orders?status=${stati}&per_page=100&page=${page}&orderby=date&order=desc`)
       if (!Array.isArray(batch) || !batch.length) break
       aggiungi(batch)
       if (batch.length < 100) break
@@ -40,6 +53,8 @@ export async function sincronizzaOrdiniWoo(db: any, integr: any, range?: { dal?:
 
   let importati = 0
   for (const o of ordini) {
+    // Con 'any' si esclude qui cio' che non e' "da spedire" (terminali, non pagati, bozze, gia' spediti).
+    if (tuttiStati && ESCLUSI_ANY.has(String(o.status || '').toLowerCase())) continue
     const sh = o.shipping || {}
     const bi = o.billing || {}
     const src = sh.address_1 ? sh : bi   // usa spedizione se presente, altrimenti fatturazione

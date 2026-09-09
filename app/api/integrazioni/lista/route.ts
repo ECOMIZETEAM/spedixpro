@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,5 +23,16 @@ export async function GET() {
     .order('created_at', { ascending: false })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ integrazioni: data || [] })
+
+  // Espone SOLO stati_ordini (non sensibile) dei negozi WooCommerce, leggendo credenziali via
+  // service-role (le chiavi API non escono mai verso il client). Serve alla UI per mostrare/modificare
+  // gli stati ordine da importare (custom compresi).
+  const rows = data || []
+  const wooIds = rows.filter((r: any) => r.piattaforma === 'woocommerce').map((r: any) => r.id)
+  if (wooIds.length) {
+    const { data: creds } = await createAdminSupabase().from('integrazioni').select('id, credenziali').in('id', wooIds)
+    const statiDi = new Map<string, string>((creds || []).map((c: any) => [c.id, String(c.credenziali?.stati_ordini || '')]))
+    for (const r of rows as any[]) if (r.piattaforma === 'woocommerce') r.stati_ordini = statiDi.get(r.id) || ''
+  }
+  return NextResponse.json({ integrazioni: rows })
 }

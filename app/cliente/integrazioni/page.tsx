@@ -14,6 +14,7 @@ type Integrazione = {
   ordini_totali: number
   errore: string | null
   created_at: string
+  stati_ordini?: string   // solo WooCommerce: stati ordine da importare (custom compresi)
 }
 
 // Piattaforme del popup — solo Shopify attivo, resto "Prossimamente"
@@ -60,6 +61,24 @@ export default function IntegrazioniPage() {
   const [wooForm, setWooForm] = useState({ nome_negozio: '', url: '', consumer_key: '', consumer_secret: '' })
   const [shop, setShop] = useState('')
   const [connecting, setConnecting] = useState(false)
+  const [statiEdit, setStatiEdit] = useState<Record<string, string>>({})
+  const [salvandoStati, setSalvandoStati] = useState('')
+
+  async function salvaStati(it: Integrazione) {
+    setSalvandoStati(it.id)
+    try {
+      const val = statiEdit[it.id] ?? (it.stati_ordini || '')
+      const res = await fetch('/api/integrazioni/woocommerce/stati', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ integrazione_id: it.id, stati: val }),
+      })
+      const d = await res.json()
+      if (res.ok) { setMsg({ type: 'ok', text: 'Stati ordine salvati. Al prossimo sync verranno importati.' }); await load() }
+      else setMsg({ type: 'err', text: d.error || 'Errore salvataggio stati' })
+    } catch {
+      setMsg({ type: 'err', text: 'Errore di rete' })
+    } finally { setSalvandoStati('') }
+  }
 
   async function load() {
     setLoading(true)
@@ -219,7 +238,8 @@ export default function IntegrazioniPage() {
               const p = PLATFORMS.find(x => x.id === it.piattaforma)
               const s = STATO[it.stato] || STATO.disconnesso
               return (
-                <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '14px', border: '1px solid #eee', borderRadius: '8px' }}>
+                <div key={it.id} style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '14px', border: '1px solid #eee', borderRadius: '8px' }}>
+                 <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
                   <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: (p?.colore || '#999') + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 800, color: p?.colore || '#666', flexShrink: 0 }}>
                     {(p?.nome || it.piattaforma).slice(0, 2).toUpperCase()}
                   </div>
@@ -251,6 +271,28 @@ export default function IntegrazioniPage() {
                   >
                     Scollega
                   </button>
+                 </div>
+                 {it.piattaforma === 'woocommerce' && (
+                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', borderTop: '1px solid #f3f4f6', paddingTop: '10px' }}>
+                     <label style={{ fontSize: '11.5px', color: '#6b7280', fontWeight: 600 }}>Stati ordine da importare</label>
+                     <input
+                       value={statiEdit[it.id] ?? (it.stati_ordini || '')}
+                       onChange={e => setStatiEdit(prev => ({ ...prev, [it.id]: e.target.value }))}
+                       placeholder="processing,on-hold"
+                       style={{ flex: 1, minWidth: '220px', padding: '6px 10px', border: '1px solid #ddd', borderRadius: '6px', fontSize: '12.5px', color: '#1a1a1a' }}
+                     />
+                     <button
+                       onClick={() => salvaStati(it)}
+                       disabled={salvandoStati === it.id}
+                       style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '6px', padding: '6px 14px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', opacity: salvandoStati === it.id ? 0.6 : 1 }}
+                     >
+                       {salvandoStati === it.id ? 'Salvo…' : 'Salva'}
+                     </button>
+                     <span style={{ fontSize: '11px', color: '#9ca3af', width: '100%' }}>
+                       Default: processing, on-hold. Aggiungi lo slug del tuo stato personalizzato (es. <b>in-preparazione</b>), separati da virgola. Scrivi <b>any</b> per importare TUTTI gli stati (esclusi annullati/rimborsati/completati). Vuoto = default.
+                     </span>
+                   </div>
+                 )}
                 </div>
               )
             })}
