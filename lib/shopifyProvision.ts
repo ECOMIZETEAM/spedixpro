@@ -54,6 +54,21 @@ export async function provisionShopifyCliente(
   const masterId = await onboardingMasterId(admin)
   if (!masterId) return { error: 'Master di destinazione non trovato' }
 
+  // RIGA INTEGRAZIONE SPARITA, MA IL CLIENTE C'E' ANCORA.
+  //
+  // Succede dopo uno `shop/redact`: quel webhook cancella l'integrazione (obbligo GDPR) ma NON il
+  // cliente, che ha spedizioni e movimenti suoi e non si tocca. Se lo stesso negozio reinstalla,
+  // il controllo qui sopra non trova piu' l'integrazione e si passava dritti alla creazione di un
+  // cliente NUOVO — con la stessa email derivata dal dominio, che ha un vincolo di unicita':
+  // l'insert falliva e l'installazione moriva con un errore incomprensibile.
+  // L'email e' derivata dal dominio del negozio, quindi e' la chiave giusta per ritrovarlo.
+  const emailNegozio = emailDaShop(shop)
+  const { data: giaCliente } = await admin.from('clienti')
+    .select('id,master_id').eq('email', emailNegozio).maybeSingle()
+  if (giaCliente?.id) {
+    return { clienteId: giaCliente.id, masterId: giaCliente.master_id || masterId, email: emailNegozio }
+  }
+
   const info = await fetchShopInfo(shop, token)
   const nome = info?.name || shop.replace('.myshopify.com', '')
   const addr = info?.billingAddress || {}

@@ -206,3 +206,55 @@ export async function fulfillSpedizioniShopify(supabase: any, spedizioneIds: str
   }
   return esiti
 }
+
+// ANNULLO DEL FULFILLMENT SU SHOPIFY.
+//
+// Quando una spedizione viene annullata da noi, l'ordine su Shopify restava "Fulfilled" con un
+// numero di tracking che non esiste piu': il merchant vede spedito, il compratore clicca un link
+// morto. E' un caso di 2.1.4 ("ensuring that all synchronized data is consistent across the Shopify
+// admin, your app, and any additional platforms") preso al contrario rispetto a quello contestato:
+// non un'evasione che non arriva, ma un'evasione che resta quando non dovrebbe.
+//
+// Sta in un posto solo perche' le spedizioni si annullano da QUATTRO punti diversi (elimina x2,
+// conferma manuale, cron degli annullamenti): una regola ripetuta quattro volte e' una regola che
+// prima o poi in uno dei quattro si dimentica.
+//
+// Best-effort: se l'annullo su Shopify non riesce, la spedizione resta annullata da noi lo stesso —
+// lo stato dell'ordine sullo store si sistema a mano, ma non si blocca l'annullo di una spedizione
+// vera per un problema dello store.
+export async function annullaFulfillmentShopify(supabase: any, spedizioneIds: string[]) {
+  if (!spedizioneIds?.length) return
+  const { data: ordini } = await supabase
+    .from('ordini_ecommerce').select('*')
+    .in('spedizione_id', spedizioneIds)
+    .eq('piattaforma', 'shopify')
+    .eq('fulfillment_stato', 'ok')   // solo quelli che avevamo davvero evaso
+  for (const ordine of ordini || []) {
+    try {
+      const { data: integr } = await supabase
+        .from('integrazioni').select('*').eq('id', ordine.integrazione_id).maybeSingle()
+      const shop = (integr?.credenziali as any)?.shop
+      if (!integr || !shop) continue
+      const tk = await getValidShopifyToken(integr, supabase)
+      if (tk.error || !tk.token) continue
+
+      // I fulfillment dell'ordine: si annullano solo quelli ancora annullabili.
+      const gid = `gid://shopify/Order/${ordine.ordine_esterno_id}`
+      const d = await shopifyGraphQL(shop, tk.token,
+        `query($id: ID!){ order(id:$id){ fulfillments(first:20){ id status } } }`, { id: gid })
+      const daAnnullare = ((d?.order?.fulfillments) || []).filter((f: any) => f.status !== 'CANCELLED')
+      for (const f of daAnnullare) {
+        await shopifyGraphQL(shop, tk.token,
+          `mutation($id: ID!){ fulfillmentCancel(id:$id){ fulfillment{ id status } userErrors{ field message } } }`,
+          { id: f.id })
+      }
+      // Torna evadibile: se la spedizione viene rifatta, il write-back riparte da zero invece di
+      // saltarla perche' risultava gia' 'ok'.
+      await supabase.from('ordini_ecommerce')
+        .update({ fulfillment_stato: 'annullato', fulfillment_errore: 'spedizione annullata: fulfillment annullato su Shopify' })
+        .eq('id', ordine.id)
+    } catch (e: any) {
+      console.error('[SHOPIFY][ANNULLO FULFILLMENT]', ordine.numero_ordine, e?.message)
+    }
+  }
+}

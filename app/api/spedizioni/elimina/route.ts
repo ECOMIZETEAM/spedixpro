@@ -67,6 +67,8 @@ export async function DELETE(req: NextRequest) {
         annullamento_richiesto_at: new Date().toISOString(), annullamento_da: user.id, annullamento_errore: null,
       }).eq('id', spedizioneId)
       await rimborsaAnnulloSpedizione(admin, sped as any, user.id)
+      // Lo store non deve restare con l'ordine "Fulfilled" e un tracking morto (vedi lib/shopify).
+      try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, [spedizioneId]) } catch {}
       return NextResponse.json({ success: true, annullata: true, message: 'Spedizione annullata e credito stornato a tutta la rete.' })
     }
     // 2) Non annullabile via API -> coda manuale del DETENTORE, SUBITO (niente attesa 48h).
@@ -120,6 +122,8 @@ export async function DELETE(req: NextRequest) {
         annullamento_richiesto_at: new Date().toISOString(), annullamento_da: user.id, annullamento_errore: null,
       }).eq('id', spedizioneId)
       await rimborsaAnnulloSpedizione(admin, sped as any, user.id)
+      // Lo store non deve restare con l'ordine "Fulfilled" e un tracking morto (vedi lib/shopify).
+      try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, [spedizioneId]) } catch {}
       return NextResponse.json({ success: true, annullata: true, message: 'Spedizione annullata e credito stornato a tutta la rete.' })
     }
     // Non annullabile ORA (BRT ancora "in processing"/già spedita, o GLS che non conferma): niente rimborso

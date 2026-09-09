@@ -26,6 +26,18 @@ export async function POST(req: NextRequest) {
   let body: any = {}
   try { body = JSON.parse(raw) } catch {}
 
+  // ESITO DELLE CANCELLAZIONI: si guarda.
+  //
+  // Prima le delete partivano e nessuno controllava se avessero funzionato: se una falliva si
+  // rispondeva comunque 200 e i dati restavano li', con Shopify convinto che fossero stati
+  // cancellati. Un buco GDPR che non lasciava traccia. Ora un fallimento si annota e si risponde
+  // 500: Shopify RITENTA i webhook di conformita', quindi un errore vero e' meglio di un falso ok.
+  const guasti: string[] = []
+  const cancella = async (q: any, cosa: string) => {
+    const { error } = await q
+    if (error) { guasti.push(`${cosa}: ${error.message}`); console.error('[SHOPIFY][GDPR] cancellazione fallita', cosa, error.message) }
+  }
+
   try {
     const admin = createAdminSupabase()
 
@@ -39,9 +51,9 @@ export async function POST(req: NextRequest) {
         const ids = (ints || []).map((i: any) => i.id)
         if (ids.length) {
           // ordini_ecommerce = tabella attuale (con i dati destinatario); ordini_importati = legacy
-          await admin.from('ordini_ecommerce').delete().in('integrazione_id', ids)
-          await admin.from('ordini_importati').delete().in('integrazione_id', ids)
-          await admin.from('integrazioni').delete().in('id', ids)
+          await cancella(admin.from('ordini_ecommerce').delete().in('integrazione_id', ids), 'ordini_ecommerce')
+          await cancella(admin.from('ordini_importati').delete().in('integrazione_id', ids), 'ordini_importati')
+          await cancella(admin.from('integrazioni').delete().in('id', ids), 'integrazioni')
         }
       }
     }
@@ -61,18 +73,35 @@ export async function POST(req: NextRequest) {
           .eq('piattaforma', 'shopify').eq('identificativo', shop)
         const ids = (ints || []).map((i: any) => i.id)
         if (ids.length) {
-          await admin.from('ordini_ecommerce').delete()
-            .in('integrazione_id', ids).in('ordine_esterno_id', ordersToRedact)
+          await cancella(admin.from('ordini_ecommerce').delete()
+            .in('integrazione_id', ids).in('ordine_esterno_id', ordersToRedact), 'ordini_ecommerce (cliente)')
         }
       }
     }
 
-    // customers/data_request: non conserviamo un profilo cliente separato dagli ordini
-    // (i dati sono nell'ordine, gia' visibile al merchant nel suo admin Shopify): ack 200.
-  } catch (e) {
-    // Non blocchiamo l'ack: Shopify richiede comunque 200 e ritenta in caso di errore.
+    // customers/data_request: il merchant chiede i dati che teniamo su un suo cliente.
+    //
+    // L'obbligo non e' rispondere, e' CONSEGNARE. Prima si rispondeva 200 e basta, quindi nessuno
+    // sapeva nemmeno che la richiesta fosse arrivata: se un merchant l'avesse fatta davvero, si
+    // sarebbe persa. Ora resta scritta con chi l'ha chiesta e per quali ordini, e si evade a mano
+    // entro i termini (shopify_richieste_dati, `evasa_il` NULL = ancora da evadere).
+    if (topic === 'customers/data_request') {
+      const shop = body.shop_domain || req.headers.get('x-shopify-shop-domain') || ''
+      const { error } = await admin.from('shopify_richieste_dati').insert({
+        shop: String(shop || 'sconosciuto'),
+        cliente_shopify_id: body?.customer?.id ? String(body.customer.id) : null,
+        email: body?.customer?.email || null,
+        ordini: Array.isArray(body?.orders_requested) ? body.orders_requested.map((x: any) => String(x)) : [],
+        payload: body || {},
+      })
+      if (error) { guasti.push('richiesta dati: ' + error.message); console.error('[SHOPIFY][GDPR] richiesta dati non registrata', error.message) }
+    }
+  } catch (e: any) {
+    guasti.push(String(e?.message || e))
     console.error('shopify compliance webhook error', topic, e)
   }
 
+  // Un guasto NON si nasconde dietro un 200: Shopify ritenta, ed e' esattamente cio' che serve.
+  if (guasti.length) return new NextResponse('Retry: ' + guasti.join(' | ').slice(0, 200), { status: 500 })
   return new NextResponse('OK', { status: 200 })
 }

@@ -49,6 +49,8 @@ export async function POST(req: NextRequest) {
   }
 
   const { error } = await admin.from('spedizioni').update({ stato: 'annullata', annullamento_errore: null }).eq('id', spedizioneId)
+  // Lo store non deve restare con l'ordine "Fulfilled" e un tracking morto (vedi lib/shopify).
+  try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, [spedizioneId]) } catch {}
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   await rimborsaAnnulloSpedizione(admin, sped as any, (sped as any).annullamento_da || null)
   return NextResponse.json({ success: true })
