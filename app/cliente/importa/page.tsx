@@ -51,10 +51,16 @@ const th: React.CSSProperties = {
   textTransform: 'uppercase', letterSpacing: '.03em', padding: '10px 12px',
   borderBottom: '1px solid #eee', whiteSpace: 'nowrap',
 }
+// NIENTE `nowrap` sulle celle: era la causa principale dello scorrimento orizzontale — con 14
+// colonne che non potevano andare a capo la tabella era per forza piu' larga dello schermo.
+// Il nowrap resta SOLO dove serve davvero (badge, numeri), messo sulla singola cella.
 const td: React.CSSProperties = {
-  fontSize: '13px', color: '#333', padding: '11px 12px', borderBottom: '1px solid #f2f2f2',
-  whiteSpace: 'nowrap',
+  fontSize: '13px', color: '#333', padding: '10px 12px', borderBottom: '1px solid #f2f2f2',
+  verticalAlign: 'top',
 }
+// Sottoriga dentro la cella: e' cosi' che l'elenco spedizioni tiene 6 colonne invece di 14 —
+// il dettaglio non prende una colonna sua, sta sotto il dato principale.
+const sub: React.CSSProperties = { fontSize: '11.5px', color: '#999', fontWeight: 400, marginTop: '2px' }
 const lbl: React.CSSProperties = {
   display: 'block', fontSize: '11px', fontWeight: 600, color: '#888',
   textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '4px',
@@ -735,17 +741,10 @@ export default function ImportaOrdiniPage() {
                   <th style={{ ...th, width: '36px' }}>
                     <input type="checkbox" checked={allChecked} onChange={toggleAll} />
                   </th>
+                  <th style={th}>Ordine</th>
                   <th style={th}>Destinatario</th>
                   <th style={th}>Prodotti</th>
-                  <th style={th}>Mittente</th>
-                  <th style={th}>Località</th>
-                  <th style={th}>CAP</th>
-                  <th style={th}>Prov</th>
-                  <th style={th}>Telefono</th>
-                  <th style={th}>Peso</th>
-                  <th style={th}>Colli</th>
-                  <th style={th}>Contrassegno</th>
-                  <th style={th}>Order ID</th>
+                  <th style={th}>Collo</th>
                   <th style={th}>Stato</th>
                   <th style={{ ...th, width: '60px', textAlign: 'center' }}>Azioni</th>
                 </tr>
@@ -758,11 +757,23 @@ export default function ImportaOrdiniPage() {
                       <td style={td}>
                         <input type="checkbox" checked={sel.has(o.id)} onChange={() => toggle(o.id)} disabled={spedendo} />
                       </td>
-                      <td style={{ ...td, fontWeight: 600, color: '#1a1a1a' }}>
-                        {o.destinatario}
-                        <div style={{ fontSize: '11.5px', color: '#999', fontWeight: 400 }}>{o.indirizzo}</div>
+                      {/* ORDINE — id e mittente insieme: sono due riferimenti, non due colonne. */}
+                      <td style={td}>
+                        <span style={{ fontFamily: 'monospace', fontSize: '12px', color: '#1a1a1a' }}>{o.order_id || '—'}</span>
+                        <div style={sub}>{o.rif_mittente || mittenteNome || '—'}</div>
                       </td>
-                      <td style={{ ...td, minWidth: '240px' }}>
+                      {/* DESTINATARIO — nome, via, comune e telefono in una cella sola: prima erano
+                          cinque colonne (Destinatario, Località, CAP, Prov, Telefono) e da sole
+                          bastavano a mandare la tabella fuori schermo. */}
+                      <td style={{ ...td, fontWeight: 600, color: '#1a1a1a', minWidth: '190px' }}>
+                        {o.destinatario}
+                        <div style={sub}>{o.indirizzo}</div>
+                        <div style={sub}>
+                          {[o.localita, o.cap ? '(' + o.cap + ')' : '', o.provincia].filter(Boolean).join(' ')}
+                        </div>
+                        {o.telefono ? <div style={sub}>☎ {o.telefono}</div> : null}
+                      </td>
+                      <td style={{ ...td, minWidth: '200px' }}>
                         {Array.isArray(o.articoli) && o.articoli.length ? (
                           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', border: '1px solid #eee', borderRadius: '4px', overflow: 'hidden' }}>
                             <thead><tr style={{ background: '#f9fafb' }}>
@@ -782,12 +793,8 @@ export default function ImportaOrdiniPage() {
                           </table>
                         ) : <span style={{ fontSize: '11.5px', color: '#999' }}>{o.contenuto || '—'}</span>}
                       </td>
-                      <td style={td}>{o.rif_mittente || mittenteNome || '—'}</td>
-                      <td style={td}>{o.localita}</td>
-                      <td style={td}>{o.cap}</td>
-                      <td style={td}>{o.provincia}</td>
-                      <td style={td}>{o.telefono || '—'}</td>
-                      <td style={td}>
+                      {/* COLLO — peso, colli e contrassegno erano tre colonne per tre numeri corti. */}
+                      <td style={{ ...td, whiteSpace: 'nowrap' }}>
                         {(() => {
                           const box = paccoPerOrdine(o)
                           const art = articoloPerOrdine(o)
@@ -803,12 +810,13 @@ export default function ImportaOrdiniPage() {
                               </span>
                             )
                           }
-                          return o.peso != null ? `${o.peso} kg` : '—'
+                          return <span>{o.peso != null ? `${o.peso} kg` : '—'}</span>
                         })()}
+                        <div style={sub}>{o.colli || 1} {Number(o.colli) === 1 ? 'collo' : 'colli'}</div>
+                        {o.contrassegno ? (
+                          <div style={{ ...sub, color: '#b45309', fontWeight: 600 }}>COD € {Number(o.contrassegno).toFixed(2)}</div>
+                        ) : null}
                       </td>
-                      <td style={td}>{o.colli}</td>
-                      <td style={td}>{o.contrassegno ? `€ ${Number(o.contrassegno).toFixed(2)}` : '—'}</td>
-                      <td style={td}>{o.order_id || '—'}</td>
                       <td style={td}>
                         <span
                           title={o.stato === 'errore' && o.errore ? o.errore : undefined}

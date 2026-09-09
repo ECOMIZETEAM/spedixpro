@@ -12,8 +12,9 @@
 //  • PUT  /delete    — annulla. Identifica la spedizione con senderCustomerCode + numericSenderReference
 //      (+ alphanumericSenderReference se passato in creazione): vanno quindi SALVATI. Subito dopo la
 //      creazione torna -153 "still in processing": l'annullo va RITENTATO dopo qualche secondo.
-//  • PUT  /confirm   — conferma (solo se il contratto è a "Conferma Esplicita"): senza, per quei contratti
-//      BRT non passa a ritirare. Best-effort in chiusura distinta, come la CloseWorkDay del GLS.
+//  • PUT  /confirm   — conferma la spedizione (shipment in PUT). Il contratto BRT diretto (Quick) è a
+//      "Conferma Esplicita" (verificato 9/9): senza questo, BRT NON passa a ritirare e i pacchi restano
+//      fermi a "spedita". Si chiama in chiusura distinta (chiudiDistintaBrt), come la CloseWorkDay del GLS.
 //
 // Le credenziali di produzione stanno in corrieri.credenziali (dal pannello), MAI in chat. Qui arrivano
 // già lette da chi chiama. numericSenderReference è OBBLIGATORIO e numerico: lo generiamo univoco.
@@ -204,9 +205,12 @@ export async function annullaSpedizioneBrt(
   }
 }
 
-// Conferma esplicita — per i contratti a Conferma Esplicita. È lo shipment in PUT (stesso path della
-// create): "Servizio necessario per confermare una spedizione creata con Create non autoconfermata".
-// Chi ha Auto Conferma non la usa (Quick è auto: la create è già confermata). Best-effort.
+// Conferma esplicita — È lo shipment in PUT (stesso path della create): "Servizio necessario per
+// confermare una spedizione creata con Create non autoconfermata". VERIFICATO il 9/9 sul contratto di
+// Quick (l'unico BRT diretto): è a CONFERMA ESPLICITA — senza questo PUT /confirm BRT NON passa a
+// ritirare e i pacchi restano fermi a "spedita" (11 pacchi bloccati il 7-8/9, ripartiti solo dopo la
+// conferma: code 0 "SHIPMENT CONFIRMED"). Idempotente: riconfermare una già confermata torna -102
+// "SHIPMENT NOT CONFIRMABLE" — che NON è un errore. Chiamata alla chiusura distinta (vedi sotto).
 export async function confermaSpedizioniBrt(
   cred: CredenzialiBrt, refs: { numericRef: number; alphaRef?: string | null }[]
 ): Promise<{ ok: boolean; errore: string | null; raw: string }> {
@@ -225,34 +229,57 @@ export async function confermaSpedizioniBrt(
       raw = (r.txt || '').substring(0, 1000)
       const em = r.j?.confirmResponse?.executionMessage || r.j?.createResponse?.executionMessage
       const code = num(em?.code)
-      if (code === undefined || code < 0) { okTot = false; ultimoErr = em ? `${em.codeDesc || ''} ${em.message || ''}`.trim() : `HTTP ${r.status}` }
+      // code 0 = confermata; -102 "SHIPMENT NOT CONFIRMABLE" = GIÀ confermata (idempotente, verificato
+      // 9/9): la spedizione è comunque prenotata al ritiro, non è un fallimento. Solo gli altri code<0
+      // (login errata, param mancante, rete) sono errori veri da ritentare.
+      if (code === undefined || (code < 0 && code !== -102)) { okTot = false; ultimoErr = em ? `${em.codeDesc || ''} ${em.message || ''}`.trim() : `HTTP ${r.status}` }
     } catch (e) { okTot = false; ultimoErr = e instanceof Error ? e.message : String(e) }
   }
   return { ok: okTot, errore: okTot ? null : ultimoErr, raw }
 }
 
-// Chiusura distinta per BRT DIRETTO (contratto proprio). I contratti BRT diretti sono ad AUTO-CONFERMA:
-// ogni spedizione e' gia' registrata e prenotata al ritiro da BRT al momento della create (POST /shipment)
-// — la prova e' in crea/route: se il nostro salvataggio DB fallisce, ANNULLIAMO il "pacco fantasma"
-// proprio perche' BRT lo ritirerebbe. Nella REST BRT NON esiste un borderò/manifest da trasmettere a
-// parte. Quindi qui si ATTESTA la distinta (confermata_vettore + bordero_id), come GLS/SDA quando non
-// c'e' un PDF, cosi' non resta "In attesa" per sempre. FUTURO: se un contratto BRT sara' a "Conferma
-// Esplicita" (oggi nessuno lo e'), qui andra' chiamata confermaSpedizioniBrt(cred, refs) coi riferimenti
-// {numericRef, alphaRef} delle spedizioni della distinta, altrimenti BRT non passerebbe a ritirare —
-// servira' prima un flag sul contratto per distinguerli. Guardia tipo==='brt': non tocca altri corrieri.
+// Chiusura distinta per BRT DIRETTO (contratto proprio). Il contratto BRT diretto (Quick, l'unico) è a
+// CONFERMA ESPLICITA: la create (POST /shipment) registra la spedizione ma NON la conferma — senza un
+// PUT /confirm BRT non passa a ritirarla e resta ferma a "spedita" (verificato 9/9: 11 pacchi bloccati
+// il 7-8/9, ripartiti solo confermandoli). Nella REST BRT non esiste un borderò/manifest a parte: la
+// distinta È il batch da consegnare a BRT, quindi qui CONFERMIAMO tutte le sue spedizioni (i riferimenti
+// numericRef/alphaRef sono salvati nel raw_response alla creazione) e SOLO se BRT accetta attestiamo la
+// distinta (confermata_vettore + bordero_id='N/A'), come la CloseWorkDay del GLS. Se BRT rifiuta, la
+// distinta resta ritentabile (bordero_id='ERRORE: …', che la guardia qui sotto lascia ripassare).
+// confermaSpedizioniBrt tollera il -102 "già confermata" (idempotente): riprocessare la stessa distinta
+// non fa danni. Guardia tipo==='brt': non tocca gli altri corrieri. Un eventuale futuro contratto BRT
+// ad auto-conferma tornerebbe -102 su ognuna → trattato come ok, quindi non serve un flag per contratto.
 export async function chiudiDistintaBrt(supabase: any, distintaId: string) {
   try {
     const { data: distinta } = await supabase
       .from('distinte').select('id, corriere_id, bordero_id').eq('id', distintaId).maybeSingle()
     if (!distinta || (distinta.bordero_id && !String(distinta.bordero_id).startsWith('ERRORE'))) return { skip: true }
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const { data: corriere } = await createAdminSupabase()
-      .from('corrieri').select('id, tipo').eq('id', distinta.corriere_id).maybeSingle()
+    const admin = createAdminSupabase()
+    const { data: corriere } = await admin
+      .from('corrieri').select('id, tipo, credenziali').eq('id', distinta.corriere_id).maybeSingle()
     if (!corriere || corriere.tipo !== 'brt') return { skip: true }
+
+    // Riferimenti delle spedizioni della distinta (salvati nel raw_response alla creazione).
+    const { data: speds } = await admin
+      .from('spedizioni').select('raw_response').eq('distinta_id', distintaId)
+    const refs = (speds || [])
+      .map((s: any) => s?.raw_response)
+      .filter((r: any) => r && typeof r === 'object' && r.numericRef)
+      .map((r: any) => ({ numericRef: Number(r.numericRef), alphaRef: r.alphaRef || null }))
+
+    const conf = refs.length
+      ? await confermaSpedizioniBrt((corriere.credenziali || {}) as CredenzialiBrt, refs)
+      : { ok: true, errore: null as string | null }
+    if (!conf.ok) {
+      // BRT ha rifiutato (login/param/rete): non attestare, lascia la distinta ritentabile.
+      await supabase.from('distinte').update({ bordero_id: 'ERRORE: conferma BRT — ' + String(conf.errore || '').slice(0, 120) }).eq('id', distintaId)
+      return { errore: conf.errore }
+    }
     await supabase.from('distinte').update({
       bordero_id: 'N/A', confermata_vettore: true, data_conferma: new Date().toISOString(),
     }).eq('id', distintaId)
-    return { ok: true }
+    return { ok: true, confermate: refs.length }
   } catch (e: any) {
     try { await supabase.from('distinte').update({ bordero_id: 'ERRORE: ' + String(e?.message || e).slice(0, 150) }).eq('id', distintaId) } catch {}
     return { errore: String(e?.message || e) }
