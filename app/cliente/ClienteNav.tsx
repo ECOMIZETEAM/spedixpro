@@ -61,7 +61,11 @@ const NAV_BASE: NavItem[] = [
   {
     id: 'account', label: 'Mio Account', icon: '⊙',
     sub: [
-      // 'Ricarica Credito' nascosta: ricariche self-service sospese (vedi RICARICHE_SOSPESE nelle rotte).
+      // 'Ricarica Credito' era NASCOSTA perche' le ricariche con carta sono sospese. Ma senza credito
+      // non si spedisce, e senza questa voce il cliente non aveva nessun posto dove scoprire COME
+      // ricaricare: la pagina ora mostra le coordinate per il BONIFICO del suo master, quindi
+      // nasconderla lasciava solo un vicolo cieco.
+      { label: 'Ricarica Credito', href: '/cliente/ricarica' },
       { label: 'Listino Prezzi', href: '/cliente/listino' },
       { label: 'Lista Movimenti', href: '/cliente/movimenti' },
     ],
