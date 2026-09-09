@@ -94,6 +94,19 @@ export async function provisionShopifyCliente(
     telefono: addr.phone || null,
     sl_paese: addr.country || 'Italia', sl_indirizzo: addr.address1 || null,
     sl_citta: addr.city || null, sl_provincia: addr.provinceCode || addr.province || null, sl_cap: addr.zip || null,
+    // SEDE OPERATIVA, non solo sede legale: e' da qui che parte il pacco.
+    //
+    // Finora si compilavano solo i campi sl_* e i so_* restavano vuoti. Ma il mittente di ogni
+    // spedizione si costruisce SOLO dai so_* (pagina ordini e nuova spedizione), quindi un
+    // negoziante che installava dall'App Store non riusciva a spedire NIENTE: la creazione
+    // rispondeva 400 "Provincia mittente obbligatoria", e non poteva nemmeno rimediare da solo —
+    // nel portale cliente non esiste una schermata per compilare la sede operativa, la vede solo
+    // il suo master. Misurato il 9/09/2026: tre negozi auto-creati, tutti con so_* NULL, zero
+    // spedizioni e zero ordini fra tutti e tre. Uno era il revisore Shopify di luglio.
+    // L'indirizzo del negozio e' il mittente giusto per chi spedisce la propria merce; se non lo e',
+    // il master lo corregge dalla scheda cliente.
+    so_paese: addr.country || 'Italia', so_indirizzo: addr.address1 || null,
+    so_citta: addr.city || null, so_provincia: addr.provinceCode || addr.province || null, so_cap: addr.zip || null,
     listino_cliente_id: await onboardingListinoId(admin, masterId),
     tipo_contratto: 'credito_scalare',
     aliquota_iva: '22',

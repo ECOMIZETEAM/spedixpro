@@ -278,6 +278,21 @@ export default function OrdiniPage() {
       const cli = await fetch('/api/cliente/dati').then(r=>r.json())
       if (!cli || cli.error) { setMsg('Errore: dati cliente non disponibili'); setSpedendo(false); return }
       const shipFrom = { name:cli.ragione_sociale||'', company:cli.ragione_sociale||'', street1:cli.so_indirizzo||'', street2:'', city:cli.so_citta||'', state:cli.so_provincia||'', postalCode:cli.so_cap||'', country:'IT', phone:cli.telefono||'', email:cli.email||'' }
+      // SENZA INDIRIZZO DI PARTENZA NON SI SPEDISCE: si dice qui, una volta, con parole chiare.
+      //
+      // Il mittente si costruisce dalla sede operativa del cliente. Se manca, la creazione risponde
+      // 400 "Provincia mittente obbligatoria" — un messaggio che non dice ne' di chi sia la
+      // provincia ne' dove metterla, e per giunta lo dice una volta per ogni riga del lotto. Chi
+      // arriva qui appena registrato (l'app dello store crea l'account da sola) si trova quel muro
+      // senza nessuna indicazione.
+      if (!shipFrom.street1 || !shipFrom.city || !shipFrom.postalCode || !shipFrom.state) {
+        setMsg('Manca l\'indirizzo di partenza del tuo magazzino (via, città, CAP, provincia): è il mittente di ogni spedizione. Scrivi al tuo referente per farlo completare, poi riprova.')
+        setSpedendo(false); return
+      }
+      if (String(shipFrom.phone||'').replace(/[^0-9]/g,'').length < 6) {
+        setMsg('Manca il tuo numero di telefono: alcuni corrieri lo richiedono per il ritiro. Scrivi al tuo referente per farlo aggiungere, poi riprova.')
+        setSpedendo(false); return
+      }
 
       // ── PRE-PASSAGGIO: calcolo tariffe e scelgo il corriere per TUTTO il lotto una volta sola.
       //    Serve il TOTALE del lotto (per il pagamento unico) e a non richiedere le tariffe due
