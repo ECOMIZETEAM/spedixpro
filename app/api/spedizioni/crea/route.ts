@@ -906,8 +906,21 @@ export async function POST(req: NextRequest) {
       //    in background dopo la risposta (after) — nessuna funzione rimossa. ──
       let trackingReale = shipment.trackingCode
       if (!trackingReale) {
-        // attesa breve (il polling completo lo fa il background qui sotto)
-        trackingReale = await spediamoproWaitForTracking(cred.authcode, shipment.id, 3, 1500)
+        // SI ASPETTA IL NUMERO VERO FINO A 12 SECONDI, non 4,5.
+        //
+        // Il provider non manda mai il tracking nella risposta alla creazione: arriva a una
+        // interrogazione successiva. Con tre tentativi da 1,5s si rinunciava troppo presto e la
+        // spedizione nasceva col code provvisorio "6A…" — misurato sui movimenti, che per questo
+        // ramo conservano il numero di allora: 36 addebiti su 532 in 30 giorni, il 6,8%. Ogni volta
+        // che succede l'ordine sul negozio online resta "Unfulfilled" finche' il numero vero non
+        // arriva, perche' un tracking finto al compratore non si manda: e' il rilievo per cui
+        // l'app Shopify e' stata sospesa.
+        //
+        // Non e' una scommessa: la nostra API pubblica (/api/v1/shipments) usa da sempre l'attesa
+        // predefinita, fino a 20 secondi, sullo stesso provider. Era il PORTALE a essere impaziente.
+        // Il costo e' zero per chi risponde subito — si esce appena il numero c'e' — e il budget
+        // tiene la richiesta lontana dal limite di 60s della funzione.
+        trackingReale = await spediamoproWaitForTracking(cred.authcode, shipment.id, 8, 1500, 12000)
       }
       const numeroFinale = trackingReale || shipment.code || `SP-${shipment.id}`
 

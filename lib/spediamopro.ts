@@ -339,7 +339,13 @@ export async function spediamoproGetShipment(authcode: string, shipmentId: numbe
   return res.json()
 }
 
-export async function spediamoproWaitForTracking(authcode: string, shipmentId: number, maxAttempts = 10, delayMs = 2000): Promise<string | null> {
+// budgetMs: tetto di tempo TOTALE dell'attesa. Serve dove si sta dentro una richiesta con un
+// limite di durata (la creazione ha 60s): si esce appena il numero c'e' — quindi chi risponde in
+// fretta non aspetta niente — ma se il provider e' lento non si arriva a sfiorare il limite della
+// funzione, che vorrebbe dire una spedizione pagata e mai salvata. Stessa idea del budget su
+// easyparcelWaybill. 0 = nessun tetto (com'era).
+export async function spediamoproWaitForTracking(authcode: string, shipmentId: number, maxAttempts = 10, delayMs = 2000, budgetMs = 0): Promise<string | null> {
+  const scade = budgetMs > 0 ? Date.now() + budgetMs : 0
   for (let i = 0; i < maxAttempts; i++) {
     try {
       const json = await spediamoproGetShipment(authcode, shipmentId)
@@ -349,7 +355,10 @@ export async function spediamoproWaitForTracking(authcode: string, shipmentId: n
     } catch (e) {
       console.error('Polling tracking error:', e)
     }
-    if (i < maxAttempts - 1) await new Promise(r => setTimeout(r, delayMs))
+    if (i < maxAttempts - 1) {
+      if (scade && Date.now() + delayMs > scade) break
+      await new Promise(r => setTimeout(r, delayMs))
+    }
   }
   return null
 }
