@@ -124,7 +124,7 @@ export async function fulfillSpedizioniShopify(supabase: any, spedizioneIds: str
     }
     try {
       const { data: sped } = await supabase
-        .from('spedizioni').select('tracking_number, corrieri(nome_contratto)')
+        .from('spedizioni').select('tracking_number, tracking_token, corrieri(nome_contratto)')
         .eq('id', ordine.spedizione_id).maybeSingle()
       const tracking = sped?.tracking_number
       if (!tracking) { await segna('errore', 'tracking number mancante'); continue }
@@ -149,14 +149,27 @@ export async function fulfillSpedizioniShopify(supabase: any, spedizioneIds: str
         .filter((f: any) => ['OPEN', 'IN_PROGRESS', 'SCHEDULED'].includes(f.status))
       if (!aperti.length) { await segna('ok', 'gia evaso su Shopify'); continue }
       // 2) crea fulfillment con tracking su tutti i fulfillment orders aperti (GraphQL)
+      //
+      // `fulfillmentCreate`, NON `fulfillmentCreateV2`: quest'ultima e' DEPRECATA da Shopify ("Use
+      // fulfillmentCreate instead"). Funziona ancora, ma su una app in revisione una chiamata
+      // deprecata e' un rilievo gratuito — e prima o poi viene rimossa e l'evasione si ferma.
+      // L'input ha la stessa identica forma (FulfillmentInput), quindi e' una sostituzione secca.
+      //
+      // URL DI TRACCIAMENTO: senza, il numero NON e' cliccabile per il compratore. Shopify lo rende
+      // cliccabile solo se gli si passa un `url`, oppure un nome corriere che conosce LUI, preso
+      // dalla sua lista: il nostro `nome_contratto` (es. "Poste Express M") per Shopify non vuole
+      // dire niente. Gli diamo la nostra pagina pubblica di tracciamento, che e' brandizzata col
+      // master e mostra lo stato aggiornato — meglio del sito del corriere, e non nomina il provider.
+      const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://moovexpress.com').replace(/\/$/, '')
+      const urlTracking = (sped as any)?.tracking_token ? `${base}/traccia/${(sped as any).tracking_token}` : undefined
       const dF = await shopifyGraphQL(shop, tk.token,
-        `mutation($f: FulfillmentV2Input!){ fulfillmentCreateV2(fulfillment:$f){ fulfillment{ id status } userErrors{ field message } } }`,
+        `mutation($f: FulfillmentInput!){ fulfillmentCreate(fulfillment:$f){ fulfillment{ id status } userErrors{ field message } } }`,
         { f: {
             notifyCustomer: true,
-            trackingInfo: { number: tracking, company },
+            trackingInfo: { number: tracking, company, ...(urlTracking ? { url: urlTracking } : {}) },
             lineItemsByFulfillmentOrder: aperti.map((f: any) => ({ fulfillmentOrderId: f.id })),
         } })
-      const errs = dF?.fulfillmentCreateV2?.userErrors || []
+      const errs = dF?.fulfillmentCreate?.userErrors || []
       if (errs.length) { await segna('errore', errs.map((e: any) => e.message).join('; ').slice(0, 150)); continue }
       await segna('ok', null)
     } catch (e: any) {

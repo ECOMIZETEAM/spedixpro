@@ -38,22 +38,27 @@ export async function GET(req: NextRequest) {
   const corrIds = (corr || []).map((c: any) => c.id)
   if (!corrIds.length) return NextResponse.json({ ok: true, fatte: 0 })
 
-  // Candidate: attive (Poste le conosce solo dopo la presa in carico: escludo in_lavorazione)
+  // Candidate. Includo ANCHE gli 'in_lavorazione' VECCHI: quando il webhook Spedisci non consegna
+  // (verificato su amas: ~45% degli eventi non arriva), la spedizione resta ferma su 'in_lavorazione'
+  // anche se il corriere l'ha presa in carico da giorni → Poste la conosce e ce la racconta. Gli
+  // 'in_lavorazione' FRESCHI (< 2 giorni) li salto: quelli Poste non li ha ancora, sprecherebbero quota.
   const { data: cand } = await admin.from('spedizioni')
-    .select('id,numero,tracking_number,stato')
+    .select('id,numero,tracking_number,stato,created_at')
     .in('corriere_id', corrIds)
-    .in('stato', ['spedita', 'in_transito', 'in_consegna', 'non_consegnato', 'in_giacenza'])
+    .in('stato', ['in_lavorazione', 'spedita', 'in_transito', 'in_consegna', 'non_consegnato', 'in_giacenza'])
     .order('created_at', { ascending: true })
-    .limit(400)
+    .limit(600)
   if (!cand?.length) return NextResponse.json({ ok: true, fatte: 0 })
 
   // Solo quelle SENZA cronologia
   const { data: gia } = await admin.from('tracking_events').select('spedizione_id').in('spedizione_id', cand.map((c: any) => c.id))
   const conEventi = new Set((gia || []).map((g: any) => g.spedizione_id))
+  const dueGiorniFa = Date.now() - 2 * 86400000
   // Priorita' agli stati piu' avanzati (in consegna prima di spedita): sono i piu' guardati dai clienti
   const lista = cand.filter((c: any) => !conEventi.has(c.id))
+    .filter((c: any) => !(c.stato === 'in_lavorazione' && new Date(c.created_at).getTime() > dueGiorniFa))
     .sort((a: any, b: any) => prioritaStato(b.stato) - prioritaStato(a.stato))
-    .slice(0, 15)
+    .slice(0, 40)
   if (!lista.length) return NextResponse.json({ ok: true, fatte: 0, messaggio: 'bonifica esaurita' })
 
   let cronologie = 0, stati = 0, vuote = 0

@@ -21,7 +21,7 @@
     },
     {
       "path": "/api/tracking/bonifica-poste",
-      "schedule": "7,37 * * * *"
+      "schedule": "3,18,33,48 * * * *"
     },
     {
       "path": "/api/privacy/purge-pii",
