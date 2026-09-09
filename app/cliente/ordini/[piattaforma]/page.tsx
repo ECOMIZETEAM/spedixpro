@@ -616,6 +616,14 @@ export default function OrdiniPage() {
                             {/* Write-back allo store fallito (es. chiavi negozio in sola lettura): il tracking
                                 NON e' arrivato al negozio ne' al compratore. Prima "✓ Spedito" lo nascondeva. */}
                             {o.fulfillment_stato==='errore' && <span title={o.fulfillment_errore || 'Il tracking non e\' stato inviato al negozio: verifica che le chiavi API del negozio siano in lettura E SCRITTURA (read-write).'} style={{color:'#b45309',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fffbeb',border:'1px solid #fde68a',cursor:'help',whiteSpace:'nowrap'}}>⚠ Store non aggiornato</span>}
+                            {/* ASPETTARE NON E' UN GUASTO, e non deve avere il colore del guasto.
+                                'attesa' = l'ordine e' trattenuto sul negozio (blocco antifrode,
+                                richiesta del compratore): tocca al negoziante sbloccarlo, noi
+                                riproviamo da soli. 'esterno' = la merce sta in un magazzino gestito
+                                da un servizio di evasione del negozio, che registra lui l'evasione.
+                                Con l'arancione dell'errore il negoziante andava a cercare un guasto
+                                nostro che non c'e'. */}
+                            {(o.fulfillment_stato==='attesa' || o.fulfillment_stato==='esterno') && <span title={o.fulfillment_errore || ''} style={{color:'#1d4ed8',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#eff6ff',border:'1px solid #bfdbfe',cursor:'help',whiteSpace:'nowrap'}}>{o.fulfillment_stato==='attesa' ? '⏳ In attesa dal negozio' : 'ℹ Evasione del magazzino esterno'}</span>}
                           </span>}
                     </td>
                   </tr>
