@@ -45,13 +45,23 @@ export async function POST(req: NextRequest) {
     if (topic === 'shop/redact') {
       const shop = body.shop_domain || req.headers.get('x-shopify-shop-domain') || ''
       if (shop) {
+        // SI CANCELLA PER DOMINIO DEL NEGOZIO, non passando da `integrazioni`.
+        //
+        // Prima si risolveva shop -> integrazioni -> ids e si filtrava su integrazione_id: se
+        // l'integrazione era stata cancellata dal portale (nessuna FK porta via gli ordini) la
+        // lista usciva vuota, non si cancellava NULLA e si rispondeva 200 OK — cioe' si dichiarava
+        // a Shopify di aver cancellato dati che restavano li'. Misurato il 9/09/2026: 19 ordini
+        // Shopify su 23 erano gia' irraggiungibili cosi'.
+        // Il dominio ora sta SULLA riga dell'ordine: nessuna cancellazione altrove lo porta via.
+        await cancella(admin.from('ordini_ecommerce').delete().eq('shop', shop), 'ordini_ecommerce (per negozio)')
+
         const { data: ints } = await admin
           .from('integrazioni').select('id')
           .eq('piattaforma', 'shopify').eq('identificativo', shop)
         const ids = (ints || []).map((i: any) => i.id)
         if (ids.length) {
-          // ordini_ecommerce = tabella attuale (con i dati destinatario); ordini_importati = legacy
-          await cancella(admin.from('ordini_ecommerce').delete().in('integrazione_id', ids), 'ordini_ecommerce')
+          // Rete di sicurezza per le righe vecchie, scritte prima che esistesse la colonna `shop`.
+          await cancella(admin.from('ordini_ecommerce').delete().in('integrazione_id', ids), 'ordini_ecommerce (per integrazione)')
           await cancella(admin.from('ordini_importati').delete().in('integrazione_id', ids), 'ordini_importati')
           await cancella(admin.from('integrazioni').delete().in('id', ids), 'integrazioni')
         }
@@ -68,13 +78,18 @@ export async function POST(req: NextRequest) {
       const ordersToRedact: string[] = Array.isArray(body.orders_to_redact)
         ? body.orders_to_redact.map((x: any) => String(x)) : []
       if (shop && ordersToRedact.length) {
+        // Per dominio, come sopra: se l'integrazione non c'e' piu', gli ordini di quel compratore
+        // restavano intoccabili e rispondevamo comunque 200.
+        await cancella(admin.from('ordini_ecommerce').delete()
+          .eq('shop', shop).in('ordine_esterno_id', ordersToRedact), 'ordini_ecommerce (cliente, per negozio)')
+
         const { data: ints } = await admin
           .from('integrazioni').select('id')
           .eq('piattaforma', 'shopify').eq('identificativo', shop)
         const ids = (ints || []).map((i: any) => i.id)
         if (ids.length) {
           await cancella(admin.from('ordini_ecommerce').delete()
-            .in('integrazione_id', ids).in('ordine_esterno_id', ordersToRedact), 'ordini_ecommerce (cliente)')
+            .in('integrazione_id', ids).in('ordine_esterno_id', ordersToRedact), 'ordini_ecommerce (cliente, righe vecchie)')
         }
       }
     }

@@ -105,6 +105,10 @@ export async function sincronizzaOrdiniPrestashop(db: any, integr: any, range?: 
       cliente_id: integr.cliente_id,
       master_id: integr.master_id,
       integrazione_id: integr.id,
+      // Dominio del negozio SULLA riga: i redact GDPR filtrano su questo. Non su integrazione_id,
+      // che sparisce se qualcuno cancella l'integrazione e lascia gli ordini orfani — e un ordine
+      // orfano nessuna cancellazione lo raggiunge piu' (erano 4.147 il 9/09/2026).
+      shop: integr.identificativo,
       piattaforma: 'prestashop',
       ordine_esterno_id: String(o.id),
       numero_ordine: o.reference || `#${o.id}`,
