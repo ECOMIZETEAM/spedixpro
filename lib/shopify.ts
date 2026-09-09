@@ -139,15 +139,43 @@ export async function fulfillSpedizioniShopify(supabase: any, spedizioneIds: str
       // se il nuovo non si salva, al giro dopo il refresh fallisce e il negozio "si scollega" da solo.
       const tk = await getValidShopifyToken(integr, supabase)
       if (tk.error || !tk.token) { await segna('errore', tk.error || 'token non disponibile'); continue }
-      // 1) fulfillment orders aperti dell'ordine (GraphQL)
+      // 1) fulfillment orders dell'ordine (GraphQL)
+      //
+      // `first: 50`, non 10: oltre il decimo la lista si troncava e i fulfillment order rimasti
+      // fuori sembravano non esistere — con l'effetto descritto qui sotto.
       const gid = `gid://shopify/Order/${ordine.ordine_esterno_id}`
       const dFo = await shopifyGraphQL(shop, tk.token,
-        `query($id: ID!){ order(id:$id){ fulfillmentOrders(first:10){ edges{ node{ id status } } } } }`,
+        `query($id: ID!){ order(id:$id){ displayFulfillmentStatus fulfillmentOrders(first:50){ edges{ node{ id status } } } } }`,
         { id: gid })
-      const aperti = ((dFo?.order?.fulfillmentOrders?.edges) || [])
-        .map((e: any) => e.node)
-        .filter((f: any) => ['OPEN', 'IN_PROGRESS', 'SCHEDULED'].includes(f.status))
-      if (!aperti.length) { await segna('ok', 'gia evaso su Shopify'); continue }
+      const tutti = ((dFo?.order?.fulfillmentOrders?.edges) || []).map((e: any) => e.node)
+      const aperti = tutti.filter((f: any) => ['OPEN', 'IN_PROGRESS', 'SCHEDULED'].includes(f.status))
+
+      if (!aperti.length) {
+        // QUI STAVA LA BOCCIATURA 2.1.4, ed era invisibile.
+        //
+        // Prima: nessun fulfillment order evadibile => `ok, gia evaso su Shopify`. Ma "non
+        // evadibile" NON vuol dire "evaso": nell'enum di Shopify `ON_HOLD` significa che l'evasione
+        // e' TRATTENUTA e `INCOMPLETE` che non si puo' completare come richiesto. In quei casi
+        // l'ordine sull'admin resta Unfulfilled — e noi lo marcavamo 'ok', quindi il recupero
+        // automatico non lo riprendeva piu' (salta gli 'ok'). Il merchant vedeva "spedito" da noi e
+        // "Unfulfilled" su Shopify, per sempre. E' esattamente cio' che ha visto il revisore.
+        //
+        // Ora la verita' la dice Shopify: si guarda `displayFulfillmentStatus` dell'ORDINE.
+        const stato = String((dFo as any)?.order?.displayFulfillmentStatus || '')
+        if (stato === 'FULFILLED') { await segna('ok', 'gia evaso su Shopify'); continue }
+        const trattenuti = tutti.filter((f: any) => ['ON_HOLD', 'INCOMPLETE'].includes(f.status)).map((f: any) => f.status)
+        if (trattenuti.length) {
+          // NON e' 'ok': si lascia in coda, cosi' il recupero ogni 20 minuti ci riprova da solo
+          // appena il merchant toglie il blocco su Shopify.
+          await segna('errore', `evasione trattenuta su Shopify (${Array.from(new Set(trattenuti)).join(', ')}): sblocca l'ordine e riproveremo`)
+          continue
+        }
+        // Nessun fulfillment order evadibile, nessuno trattenuto e l'ordine non risulta evaso:
+        // caso strano (annullato, o righe tutte rimosse). Si lascia detto cosa si e' visto invece
+        // di dichiarare un successo che non c'e'.
+        await segna('errore', `nessun fulfillment order da evadere (ordine: ${stato || 'stato sconosciuto'})`)
+        continue
+      }
       // 2) crea fulfillment con tracking su tutti i fulfillment orders aperti (GraphQL)
       //
       // `fulfillmentCreate`, NON `fulfillmentCreateV2`: quest'ultima e' DEPRECATA da Shopify ("Use

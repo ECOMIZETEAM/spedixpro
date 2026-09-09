@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { vedeLaRete } from '@/lib/perimetro'
 import { fetchAll } from '@/lib/fetch-all'
+import { vettoreFisico } from '@/lib/vettore'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -14,6 +15,9 @@ export async function GET(req: NextRequest) {
   const masterSel = clienteIdRaw && clienteIdRaw.startsWith('m:') ? clienteIdRaw.slice(2) : null
   const clienteId = masterSel ? null : clienteIdRaw
   const corriereId = p.get('corriereId')
+  // MERGE per vettore: quando l'operatore sceglie "unisci tutti i GLS", si passa vettore=GLS invece del
+  // singolo corriereId, e i candidati sono le spedizioni di TUTTI i contratti di quel vettore fisico.
+  const vettore = p.get('vettore')
   const dal = p.get('dal')
   const al = p.get('al')
   let db: any = supabase
@@ -28,6 +32,13 @@ export async function GET(req: NextRequest) {
   }
   // Filtro agente calcolato UNA volta (è async), poi riusato dentro build().
   const filtroAgente = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
+  // Merge per vettore: i corrieri (di tutta la perimetro) il cui vettore fisico e' quello scelto.
+  let corriereIdsVettore: string[] | null = null
+  if (vettore) {
+    const { data: corrs } = await db.from('corrieri').select('id,tipo,nome_contratto').in('master_id', masterFilter)
+    corriereIdsVettore = (corrs || []).filter((c: any) => vettoreFisico(c) === vettore).map((c: any) => c.id)
+    if (!corriereIdsVettore.length) corriereIdsVettore = ['00000000-0000-0000-0000-000000000000']
+  }
   // fetchAll: senza, la lista dei candidati da mettere in distinta troncava a 1000 → in una giornata
   // intensa l'operatore non vedeva (né poteva selezionare) le spedizioni oltre la millesima.
   const build = () => {
@@ -38,7 +49,8 @@ export async function GET(req: NextRequest) {
       .order('created_at', { ascending: false })
     if (filtroAgente) q = q.in('cliente_id', filtroAgente)
     if (clienteId) q = q.eq('cliente_id', clienteId)
-    if (corriereId) q = q.eq('corriere_id', corriereId)
+    if (corriereIdsVettore) q = q.in('corriere_id', corriereIdsVettore)
+    else if (corriereId) q = q.eq('corriere_id', corriereId)
     if (dal) q = q.gte('created_at', dal)
     if (al) q = q.lte('created_at', al + 'T23:59:59')
     return q
@@ -53,8 +65,9 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
   const body = await req.json()
-  const { spedizioniIds, clienteId, corriereId } = body
+  const { spedizioniIds, clienteId, corriereId, vettore } = body
   if (!spedizioniIds?.length) return NextResponse.json({ error: 'Nessuna spedizione selezionata' }, { status: 400 })
+  if (!vettore && !corriereId) return NextResponse.json({ error: 'Seleziona un contratto o un vettore' }, { status: 400 })
   // Sotto-master (clienteId = "m:<id>"): le spedizioni sono sue -> admin, cliente_id distinta = null
   const masterSel = typeof clienteId === 'string' && clienteId.startsWith('m:') ? clienteId.slice(2) : null
   // Anche l'agente può chiudere la distinta, ma SOLO per i propri clienti (mai per la rete/sotto-master).
