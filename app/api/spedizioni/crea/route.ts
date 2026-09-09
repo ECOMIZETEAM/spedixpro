@@ -1004,6 +1004,22 @@ export async function POST(req: NextRequest) {
               } catch { /* la prende la riscarica on-demand */ }
             }
             if (Object.keys(upd).length) await adminCrea.from('spedizioni').update(upd).eq('id', spedIdBg)
+            // LA LDV VERA E' ARRIVATA ADESSO: il negozio va aggiornato adesso, non fra venti minuti.
+            //
+            // L'evasione verso lo store parte da /api/ordini/segna-spedito, che gira subito dopo la
+            // creazione: se in quel momento il numero era ancora provvisorio, la guardia di
+            // fulfillMarketplace lo scartava di proposito (mai un tracking finto al compratore) e
+            // l'ordine restava "Unfulfilled" fino al giro di recupero. E' la bocciatura 2.1.4 vista
+            // da un'altra porta. Qui il numero definitivo c'e': si ritenta.
+            // Idempotente e senza corse: se segna-spedito non e' ancora passato, non esiste ancora
+            // un ordine legato a questa spedizione e non succede nulla — a quel punto sara' lui,
+            // trovando il numero gia' buono, a evadere.
+            if (upd.tracking_number) {
+              try {
+                const { fulfillMarketplace } = await import('@/lib/fulfillMarketplace')
+                await fulfillMarketplace(adminCrea, [spedIdBg])
+              } catch (e: any) { console.error('[CREA][SPEDIAMOPRO] evasione store dopo LDV:', e?.message) }
+            }
           } catch (e) { console.error('Completamento background spedizione SpediamoPro:', e) }
         })
       }
@@ -1369,6 +1385,20 @@ export async function POST(req: NextRequest) {
               }))
             }
             if (Object.keys(upd).length) await adminCrea.from('spedizioni').update(upd).eq('id', spedIdBg)
+            // ...E COL NUMERO VERO SI AGGIORNA ANCHE IL NEGOZIO ONLINE.
+            //
+            // Stessa ragione della mail qui sotto, dall'altro lato: l'evasione verso lo store parte
+            // da /api/ordini/segna-spedito subito dopo la creazione, e se in quel momento il numero
+            // era ancora provvisorio la guardia di fulfillMarketplace lo scartava — giustamente,
+            // per non mandare al compratore un tracking che non esiste. L'ordine pero' restava
+            // "Unfulfilled" sul negozio fino al giro di recupero, venti minuti dopo: e' la
+            // bocciatura 2.1.4 vista da un'altra porta. Adesso il numero c'e', quindi si evade.
+            if (upd.tracking_number) {
+              try {
+                const { fulfillMarketplace } = await import('@/lib/fulfillMarketplace')
+                await fulfillMarketplace(adminCrea, [spedIdBg])
+              } catch (e: any) { console.error('[CREA][EASYPARCEL] evasione store dopo LDV:', e?.message) }
+            }
             // LA MAIL AL DESTINATARIO PARTE DA QUI, QUANDO IL NUMERO NON C'ERA PRIMA.
             // Alla creazione le avremmo scritto il numero provvisorio, e una mail spedita non la
             // richiama indietro nessuno: il destinatario prova a tracciare, non trova niente e
