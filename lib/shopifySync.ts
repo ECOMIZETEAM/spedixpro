@@ -36,11 +36,11 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
       query($cursor: String){
         orders(first: 100, after: $cursor, query: "status:open ${filtroData}", sortKey: UPDATED_AT, reverse: true){
           edges { node {
-            legacyResourceId name email phone createdAt updatedAt paymentGatewayNames displayFinancialStatus displayFulfillmentStatus
+            legacyResourceId name email phone note createdAt updatedAt paymentGatewayNames displayFinancialStatus displayFulfillmentStatus
             totalPriceSet { shopMoney { amount currencyCode } }
             shippingAddress { name address1 address2 city province provinceCode zip country countryCodeV2 phone }
             billingAddress { name address1 address2 city province provinceCode zip country countryCodeV2 phone }
-            lineItems(first: 100){ edges { node { title quantity sku image { url } } } }
+            lineItems(first: 100){ edges { node { title name variantTitle quantity sku image { url } } } }
           } }
           pageInfo { hasNextPage endCursor }
         }
@@ -72,8 +72,15 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
       email: o.email || '',
       telefono: ship.phone || bill.phone || o.phone || '',
     }
+    // NOME CON LA VARIANTE. `title` e' il solo nome del prodotto: un ordine di "The Complete
+    // Snowboard" nella variante "Ice" arrivava come "The Complete Snowboard", e chi prepara il pacco
+    // non sa quale prendere. Si usa `name`, che Shopify compone gia' col nome della variante quando
+    // ce n'e' una vera — e a differenza di `variantTitle` non scrive "Default Title" sui prodotti
+    // che varianti non ne hanno.
     const articoli = (o.lineItems?.edges || []).map((e: any) => ({
-      nome: e.node.title, quantita: e.node.quantity, grammi: 0, sku: e.node.sku || '',
+      nome: e.node.name || e.node.title,
+      variante: e.node.variantTitle && e.node.variantTitle !== 'Default Title' ? e.node.variantTitle : null,
+      quantita: e.node.quantity, grammi: 0, sku: e.node.sku || '',
       immagine: e.node.image?.url || null,
     }))
     const money = o.totalPriceSet?.shopMoney
@@ -104,6 +111,10 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
       // Il destinatario resta nel suo campo, uno solo, che il purge sa azzerare.
       raw: {
         createdAt: o.createdAt, updatedAt: o.updatedAt,
+        // La NOTA che il negoziante (o il compratore) ha scritto sull'ordine. Prima non la
+        // chiedevamo nemmeno: chi spediva dal portale non la vedeva, e istruzioni tipo "citofono
+        // rotto, chiamare prima" restavano sul negozio. Va al corriere insieme all'indirizzo.
+        note: o.note || null,
         paymentGatewayNames: o.paymentGatewayNames,
         displayFinancialStatus: o.displayFinancialStatus,
         displayFulfillmentStatus: o.displayFulfillmentStatus,

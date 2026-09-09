@@ -140,9 +140,14 @@ export async function POST(req: NextRequest) {
     const { rifOrdineAffidabile } = await import('@/lib/rif-ordine')
     if (clienteId && rifOrdineAffidabile(rifOrd)) {
       const capDest = String(body.shipTo?.postalCode || '').trim()
+      // IL CANCELLETTO NON DEVE CONTARE. Lo stesso ordine Shopify arriva "#1019" o "1019" a seconda
+      // di come e' stato creato (e di come lo mandava il portale prima); confrontando alla lettera,
+      // la seconda forma non trovava la prima e il doppione passava. Si cercano entrambe.
+      const rifNudo = rifOrd.replace(/^#/, '')
       const { data: giaSpedite } = await adminCrea.from('spedizioni')
         .select('id,numero,stato,cancellata_il')
-        .eq('cliente_id', clienteId).eq('rif_ordine', rifOrd).eq('dest_cap', capDest)
+        .eq('cliente_id', clienteId).eq('dest_cap', capDest)
+        .in('rif_ordine', Array.from(new Set([rifOrd, rifNudo, '#' + rifNudo])))
         .limit(5)
       const attiva = (giaSpedite || []).find((s: any) => !s.cancellata_il
         && !['annullata', 'annullamento_pending', 'annullamento_manuale'].includes(String(s.stato || '')))

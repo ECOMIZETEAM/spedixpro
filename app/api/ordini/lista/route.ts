@@ -32,12 +32,12 @@ export async function GET(req: NextRequest) {
   if (!integrIds.length) return NextResponse.json([])
   const ordini = await fetchAll(() => supabase
     .from('ordini_ecommerce')
-    .select('id,integrazione_id,piattaforma,ordine_esterno_id,numero_ordine,cliente_nome,destinatario,articoli,totale,valuta,stato,stato_pagamento,spedizione_id,fulfillment_stato,fulfillment_errore,created_at,d1:raw->>creationDate,d2:raw->>date_created,d3:raw->>created_at,d4:raw->>createdDate,d5:raw->>create_time,d6:raw->>date_add,p1:raw->>payment_method,p2:raw->>payment_method_title,p3:raw->>module,p4:raw->>payment,p5:raw->paymentSummary,d7:raw->>createdAt,p6:raw->paymentGatewayNames')
+    .select('id,integrazione_id,piattaforma,ordine_esterno_id,numero_ordine,cliente_nome,destinatario,articoli,totale,valuta,stato,stato_pagamento,spedizione_id,fulfillment_stato,fulfillment_errore,created_at,d1:raw->>creationDate,d2:raw->>date_created,d3:raw->>created_at,d4:raw->>createdDate,d5:raw->>create_time,d6:raw->>date_add,p1:raw->>payment_method,p2:raw->>payment_method_title,p3:raw->>module,p4:raw->>payment,p5:raw->paymentSummary,d7:raw->>createdAt,p6:raw->paymentGatewayNames,n1:raw->>note')
     .eq('cliente_id', utente.cliente_id)
     .eq('piattaforma', piattaforma)
     .in('integrazione_id', integrIds)
     .order('created_at', { ascending: false }))
-  const rows = (ordini as any[]).map(({ d1, d2, d3, d4, d5, d6, d7, p1, p2, p3, p4, p5, p6, ...o }: any) => {
+  const rows = (ordini as any[]).map(({ d1, d2, d3, d4, d5, d6, d7, p1, p2, p3, p4, p5, p6, n1, ...o }: any) => {
     let t: any = d1 || d2 || d3 || d4 || d5 || d6 || d7 || null   // d7 = Shopify createdAt (camelCase)
     // epoch (TikTok/Temu): secondi o millisecondi -> ISO
     if (t && /^\d{9,13}$/.test(String(t))) t = new Date(Number(t) * (String(t).length <= 10 ? 1000 : 1)).toISOString()
@@ -50,7 +50,9 @@ export async function GET(req: NextRequest) {
     // in altre lingue (nachnahme DE, contre remboursement FR, contra reembolso ES).
     const isCod = /cash[\s_-]?on[\s_-]?(delivery|pickup)|cashondelivery|\bcod\b|[_-]cod\b|\bcod[_-]|contrassegn|(pagamento|paghi)[\s_]*(alla|in)?[\s_]*consegna|alla consegna|payment on delivery|nachnahme|contre[\s_-]?remboursement|contra[\s_-]?reembolso/i.test(firma)
     const cod = isCod ? (Number(o.totale) || 0) : 0
-    return { ...o, data_ordine: t || o.created_at, cod, metodo_pagamento: p2 || p1 || p4 || p3 || null }
+    // La nota dell'ordine si restituisce a parte: `raw` non esce mai da qui (pesante), ma questa
+    // serve a chi spedisce — sono le istruzioni per il corriere.
+    return { ...o, data_ordine: t || o.created_at, cod, nota: n1 || null, metodo_pagamento: p2 || p1 || p4 || p3 || null }
   })
   return NextResponse.json(rows)
 }

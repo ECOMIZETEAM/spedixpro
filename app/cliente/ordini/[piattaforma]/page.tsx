@@ -179,7 +179,18 @@ export default function OrdiniPage() {
       provincia: d.provincia||'', cap: d.cap||'', paese: d.paese||'IT',
       email: d.email||'', telefono: d.telefono||'',
       peso: String(rp.peso), l: String(rp.l), w: String(rp.w), h: String(rp.h),
-      rif: String(o.numero_ordine || o.ordine_esterno_id || '').replace(/^#/,''),
+      // IL RIFERIMENTO E' IL NUMERO D'ORDINE COM'E' SCRITTO SUL NEGOZIO, cancelletto compreso.
+      // Prima lo si toglieva: sull'etichetta compariva "1019" mentre sul negozio l'ordine si chiama
+      // "#1019", e chi cerca un ordine cerca il nome che vede. La guardia anti-doppione se lo
+      // aspetta gia' in questa forma (lib/rif-ordine.ts: /^#?\d{3,}$/ "Shopify #1234").
+      rif: String(o.numero_ordine || o.ordine_esterno_id || ''),
+      // CONTENUTO E VALORE: li mandava gia' "Spedisci selezionati", non questo percorso. Stessa
+      // azione, due comportamenti diversi — e chi apriva il modulo trovava il contenuto vuoto,
+      // che per i servizi internazionali e' anche un blocco alla creazione.
+      contenuto: (Array.isArray(o.articoli) ? o.articoli : []).map((a:any)=>a.nome).filter(Boolean).join(', ').slice(0,100),
+      valore: String(o.totale || ''),
+      // La nota dell'ordine sono le istruzioni per il corriere: si portano dietro.
+      note: String(o.nota || ''),
     })
     if (spedisciCon && spedisciCon !== 'auto') qs.set('corriere', spedisciCon)
     const cod = codDaOrdine(o)
@@ -383,8 +394,11 @@ export default function OrdiniPage() {
             clienteId:cliId, carrierCode:t.carrierCode, contractCode:t.contractCode, totalPrice:t.total_price,
             _corriere_id: t._corriere_id || t.corriere_id || null, _spediamopro_quotation: t._spediamopro_quotation || null,
             packages, colliDettaglio:[{lunghezza:String(rp.l),larghezza:String(rp.w),altezza:String(rp.h)}],
-            shipFrom, shipTo, notes:'', insuranceValue:0, codValue: codDaOrdine(o),
-            rifOrdine: String(o.numero_ordine || o.ordine_esterno_id || num || '').replace(/^#/,''),
+            // La nota dell'ordine e il numero COM'E' SCRITTO SUL NEGOZIO (cancelletto compreso):
+            // stessi valori del percorso "Crea spedizione", che e' la stessa azione fatta su una riga
+            // sola. Finora questo ramo mandava sempre notes:'' e toglieva il cancelletto.
+            shipFrom, shipTo, notes:String(o.nota||''), insuranceValue:0, codValue: codDaOrdine(o),
+            rifOrdine: String(o.numero_ordine || o.ordine_esterno_id || num || ''),
             contenuto: arts.map((a:any)=>a.nome).join(', ').slice(0,100), tipoContenuto:'Merce destinata alla vendita', valoreMerce:String(o.totale||''), hscode: hscodeOrd
           })
         }).then(r=>r.json()).catch(()=>null)
