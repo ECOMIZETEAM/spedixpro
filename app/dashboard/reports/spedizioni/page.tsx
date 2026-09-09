@@ -26,7 +26,11 @@ export default function ReportSpedizioniPage() {
     dal: new Date().toISOString().split('T')[0],
     al: new Date().toISOString().split('T')[0],
     agente: '', provincia: '', stato: '', contrassegno: '', formato: 'PDF',
-    suddivisione: '', fatturazione: '', canale: '', statoContrassegno: ''
+    suddivisione: '', fatturazione: '', canale: '', statoContrassegno: '',
+    // CONTENUTO del file, scelta INDIPENDENTE dalla suddivisione (prima erano incollate: file unico
+    // dava per forza il solo riepilogo, e il diviso per forza il dettaglio dentro uno ZIP — quindi
+    // il dettaglio di UN cliente solo non si poteva avere se non impacchettato in uno zip da un file).
+    contenuto: 'riepilogo' as 'riepilogo' | 'dettaglio'
   })
 
   useEffect(() => {
@@ -58,6 +62,7 @@ export default function ReportSpedizioniPage() {
     if (filtri.fatturazione) t.push('fatturazione=' + filtri.fatturazione)
     if (filtri.canale) t.push('canale=' + filtri.canale)
     if (filtri.statoContrassegno) t.push('cod=' + filtri.statoContrassegno)
+    t.push('contenuto=' + filtri.contenuto)
     t.push('suddivisione=' + (filtri.suddivisione||'file_unico'))
     t.push('formato=' + filtri.formato)
     return t.join(' ')
@@ -96,15 +101,26 @@ export default function ReportSpedizioniPage() {
       const periodo = gen.periodoStr(filtri.dal, filtri.al)
       const base = 'report_spedizioni_' + filtri.dal + '_' + filtri.al
 
+      // CONTENUTO e SUDDIVISIONE sono due domande diverse, e ora si rispondono separatamente:
+      //   Riepilogo = una riga per cliente col totale
+      //   Dettaglio = tutte le spedizioni, totale in fondo
+      // per ognuna delle due, in un file solo oppure divisa in piu' file dentro uno ZIP.
+      // Prima erano una cosa sola: chi voleva il dettaglio di UN cliente era costretto a scaricare
+      // uno ZIP che conteneva un unico file.
+      const soloRiepilogo = filtri.contenuto === 'riepilogo'
+
       if (!filtri.suddivisione) {
-        // FILE UNICO = riepilogo per cliente (come Spedisci.online).
-        const agg = gen.aggregaPerCliente(spedizioni)
-        const b64 = formato === 'pdf'
-          ? await gen.pdfRiepilogoB64(intest, periodo, agg)
-          : await gen.excelRiepilogoB64(agg, formato)
+        const b64 = soloRiepilogo
+          ? (formato === 'pdf'
+              ? await gen.pdfRiepilogoB64(intest, periodo, gen.aggregaPerCliente(spedizioni))
+              : await gen.excelRiepilogoB64(gen.aggregaPerCliente(spedizioni), formato))
+          // DETTAGLIO IN UN FILE SOLO: e' il caso che mancava — il conto di un singolo cliente,
+          // spedizione per spedizione, senza passare da uno zip.
+          : (formato === 'pdf'
+              ? (await gen.pdfDettaglioB64(intest, periodo, '', spedizioni)).split(',')[1]
+              : await gen.excelDettaglioB64(spedizioni, formato))
         await salvaReport(b64, base + '.' + ext, formato)
       } else {
-        // SUDDIVISO = un file di DETTAGLIO per gruppo, raccolti in ZIP.
         const gruppi = gen.raggruppa(spedizioni, filtri.suddivisione as any)
         const { default: JSZip } = await import('jszip' as any)
         const zip = new JSZip()
@@ -113,7 +129,15 @@ export default function ReportSpedizioniPage() {
           i++
           const titolo = [g.cliente, g.contratto].filter(Boolean).join(' — ')
           const nome = `${i}_${gen.nomeFileSicuro([g.cliente, g.contratto].filter(Boolean).join('_'))}.${ext}`
-          if (formato === 'pdf') {
+          if (soloRiepilogo) {
+            // Un RIEPILOGO per ogni gruppo: l'altro incrocio che prima non esisteva (es. uno zip
+            // con il totale di ciascun contratto, senza l'elenco delle singole spedizioni).
+            const aggG = gen.aggregaPerCliente(g.righe)
+            const b64g = formato === 'pdf'
+              ? await gen.pdfRiepilogoB64(intest, periodo, aggG)
+              : await gen.excelRiepilogoB64(aggG, formato)
+            zip.file(nome, b64g.includes(',') ? b64g.split(',')[1] : b64g, { base64: true })
+          } else if (formato === 'pdf') {
             const uri = await gen.pdfDettaglioB64(intest, periodo, titolo, g.righe)
             zip.file(nome, uri.split(',')[1], { base64: true })
           } else {
@@ -238,11 +262,25 @@ export default function ReportSpedizioniPage() {
           </div>
         </div>
 
-        {/* Riga 4 — suddivisione + formato */}
-        <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 3fr',gap:'12px',marginBottom:'16px'}}>
+        {/* Riga 4 — contenuto + suddivisione + formato */}
+        <div style={{display:'grid',gridTemplateColumns:'1.6fr 2fr 1fr 2.4fr',gap:'12px',marginBottom:'16px'}}>
+          <div><label style={lbl}>Contenuto</label>
+            <select value={filtri.contenuto} onChange={e=>setF('contenuto',e.target.value)} style={sel}>
+              <option value="riepilogo">Riepilogo</option>
+              <option value="dettaglio">Dettaglio</option>
+            </select>
+          </div>
           <div><label style={lbl}>Suddivisione</label>
-            <select value={filtri.suddivisione} onChange={e=>setF('suddivisione',e.target.value)} style={sel}>
-              <option value="">File unico (riepilogo per cliente)</option>
+            {/* Cambiando suddivisione si porta dietro il contenuto CHE SI AVEVA PRIMA: file unico ->
+                Riepilogo, diviso -> Dettaglio. Sono le due combinazioni che esistevano finora, quindi
+                chi non tocca nulla ottiene esattamente il file di sempre; le altre due restano a un
+                clic di distanza. */}
+            <select value={filtri.suddivisione} onChange={e=>{
+              const v = e.target.value
+              setF('suddivisione', v)
+              setF('contenuto', v ? 'dettaglio' : 'riepilogo')
+            }} style={sel}>
+              <option value="">File unico</option>
               <option value="cliente">Diviso per cliente (ZIP)</option>
               <option value="contratto">Diviso per contratto (ZIP)</option>
               <option value="cliente_contratto">Diviso per cliente e contratto (ZIP)</option>
@@ -256,10 +294,14 @@ export default function ReportSpedizioniPage() {
             </select>
           </div>
           <div style={{display:'flex',alignItems:'flex-end'}}>
-            <span style={{fontSize:'11px',color:'#666'}}>
+            <span style={{fontSize:'11px',color:'#666',lineHeight:1.5}}>
+              {filtri.contenuto === 'riepilogo'
+                ? 'Una riga per cliente col totale (Spedizioni, Colli, Prezzo, Iva, Totale).'
+                : 'Tutte le spedizioni una per riga, con il totale in fondo.'}
+              {' '}
               {filtri.suddivisione
                 ? 'Un file per ' + (filtri.suddivisione==='cliente'?'cliente':filtri.suddivisione==='contratto'?'contratto':'cliente+contratto') + ', raccolti in ZIP.'
-                : 'Riepilogo aggregato per cliente (Spedizioni, Colli, Prezzo, Iva, Totale).'}
+                : 'Un unico file.'}
             </span>
           </div>
         </div>
