@@ -619,7 +619,17 @@ export default function OrdiniPage() {
                       </span>
                     )}] : []),
                     { l:'Pagamento', v:<span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:cp.bg,color:cp.fg}}>{labelPag(o.stato_pagamento)}</span> },
-                    { l:'Totale', v:<span style={{fontWeight:700,color:'#1a1a1a'}}>{o.totale?Number(o.totale).toFixed(2):'—'} {o.valuta||''}{cod>0 && <span title="Ordine in contrassegno: l'importo verrà applicato alla spedizione" style={{marginLeft:'6px',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fff7ed',color:'#c2410c',border:'1px solid #fed7aa'}}>COD</span>}</span> },
+                    { l:'Totale', v:<span style={{fontWeight:700,color:'#1a1a1a'}}>{o.totale?Number(o.totale).toFixed(2):'—'} {o.valuta||''}{cod>0 && <span title="Ordine in contrassegno: l'importo verrà applicato alla spedizione" style={{marginLeft:'6px',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fff7ed',color:'#c2410c',border:'1px solid #fed7aa'}}>COD</span>}
+                      {/* NON PAGATO E SENZA METODO DI PAGAMENTO: qui si perdono soldi in silenzio.
+                          Il contrassegno lo riconosciamo dal metodo che il negozio ci dice (per un
+                          ordine passato dalla cassa Shopify arriva "Cash on Delivery (COD)", e lo
+                          leggiamo). Ma un ordine creato a mano nel pannello del negozio, o pagato
+                          "piu' tardi" senza scegliere un metodo, arriva SENZA nessun metodo: noi non
+                          possiamo sapere se e' in contrassegno, e mettere l'importo a indovinare
+                          sarebbe peggio (si chiederebbero soldi al destinatario di un ordine gia'
+                          pagato). Prima non si diceva niente e l'ordine partiva come prepagato: chi
+                          spediva scopriva di non aver incassato a consegna avvenuta. */}
+                      {cod===0 && ['pending','unpaid','partially_paid','authorized'].includes(String(o.stato_pagamento||'')) && <span title={"Il negozio non indica il metodo di pagamento di quest'ordine, e risulta non pagato. Se e' in contrassegno l'importo NON viene applicato da solo: apri \u00ab Crea spedizione \u00bb su questa riga e scrivilo a mano, altrimenti il pacco parte come prepagato e non incassi niente alla consegna."} style={{marginLeft:'6px',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fffbeb',color:'#b45309',border:'1px solid #fde68a',cursor:'help'}}>contrassegno? da verificare</span>}</span> },
                     ...(getTags(o) ? [{ l:'Tags', v:<span style={{color:'#6b7280'}}>{getTags(o)}</span> }] : []),
                     ...(o.spedizione_id ? [{ l:'N. Spedizione', v:<span style={{color:'#6b7280'}}>{String(o.spedizione_id).slice(0,8)}</span> }] : []),
                   ]
