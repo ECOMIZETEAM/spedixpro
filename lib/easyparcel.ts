@@ -523,11 +523,22 @@ export function ritiroEasyparcel(dal: string, pomeriggio: boolean) {
 // in produzione ha fatto scendere il provvisorio da 15 spedizioni su 16 a 8 su 17 — cosi' chi non
 // specifica niente eredita il valore giusto invece di quello sbagliato.
 export async function easyparcelWaybill(
-  apikey: string, idOrdine: string, tentativi = 8, attesaMs = 1200, attendiRitiro = false
+  apikey: string, idOrdine: string, tentativi = 8, attesaMs = 1200, attendiRitiro = false, budgetMs = 0
 ): Promise<{ numero: string; pdfBase64: string | null; singole: { numero: string; pdfBase64: string }[]; borderoUrl: string | null; codiceRitiro: string | null }> {
+  // BUDGET DI TEMPO TOTALE (facoltativo). Quando DVA rallenta, ogni getwaybill diventa lento e gli 8
+  // tentativi possono sforare i 60s della funzione di creazione: se accade PRIMA di salvare la
+  // spedizione, l'ordine resta pagato ma senza riga a sistema (orfano). Col tetto ci si ferma prima,
+  // si esce (numero provvisorio) e la lettera di vettura la prende il recupero/background. L'uscita
+  // anticipata appena la LDV c'e' resta: quando DVA e' veloce non si aspetta nulla.
+  const inizio = Date.now()
+  const scaduto = () => budgetMs > 0 && (Date.now() - inizio) >= budgetMs
   let ultimo: any = null
   for (let i = 0; i < Math.max(1, tentativi); i++) {
-    if (i > 0) await new Promise(r => setTimeout(r, attesaMs))
+    if (i > 0) {
+      if (scaduto()) break
+      await new Promise(r => setTimeout(r, attesaMs))
+    }
+    if (scaduto()) break
     try {
       const d = await chiama(apikey, 'getwaybill', {
         details: { order_id: Number(idOrdine) || idOrdine, waybill_base64: 'Y', single_waybills: 'Y' },

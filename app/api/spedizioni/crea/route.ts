@@ -1224,7 +1224,9 @@ export async function POST(req: NextRequest) {
         //
         // Il costo e' sotto controllo: il tetto di durata di 60 secondi non viene mai toccato, e
         // si esce appena il numero c'e'. Chi risponde subito non aspetta niente.
-        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _vuoleRitiro ? 6 : 8, 1200, _vuoleRitiro)
+        // Budget totale ~18s: quando DVA rallenta non si aspetta fino al timeout di 60s (rischio ordine
+        // orfano prima del salvataggio). Si esce col provvisorio e la LDV la prende background/recupero.
+        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _vuoleRitiro ? 6 : 8, 1200, _vuoleRitiro, 18000)
         ldv = w.numero || null
         // Il codice di prenotazione del ritiro arriva QUI, non con l'ordine: e' l'unico posto in cui
         // il corriere lo comunica. Senza salvarlo, il ritiro risulta prenotato ma senza numero, e
@@ -1337,7 +1339,7 @@ export async function POST(req: NextRequest) {
         after(async () => {
           try {
             const { easyparcelWaybill: wb, unisciEtichette: unisci } = await import('@/lib/easyparcel')
-            const w = await wb(apikey, idOrdineBg, 8, 4000, vuoleRitiroBg)
+            const w = await wb(apikey, idOrdineBg, 8, 4000, vuoleRitiroBg, 30000)
             const upd: any = {}
             if (w.numero) { upd.numero = w.numero; upd.tracking_number = w.numero }
             // Il codice di prenotazione del ritiro viaggia con la lettera di vettura: se non era

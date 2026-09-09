@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
         const { easyparcelWaybill } = await import('@/lib/easyparcel')
         const apikey = String((corriere.credenziali as any)?.apikey || '')
         if (apikey) {
-          const w = await easyparcelWaybill(apikey, String((prima.raw_response as any)._idOrdine), 5, 2000, true)
+          const w = await easyparcelWaybill(apikey, String((prima.raw_response as any)._idOrdine), 5, 2000, true, 18000)
           if (w.codiceRitiro) {
             _cr = w.codiceRitiro
             const agg: any = { raw_response: { ...(prima.raw_response as any), _codiceRitiro: _cr } }

@@ -398,7 +398,9 @@ export async function POST(req: NextRequest) {
         // produzione: con otto tentativi il provvisorio tocca 8 spedizioni su 17, con due 15 su 16.
         // Qui erano rimasti 2 x 1500 — la correzione era stata fatta su una porta sola, e su questa
         // NESSUNA delle 48 spedizioni ha preso il numero al primo colpo.
-        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _vuoleRitiro ? 6 : 8, 1200, _vuoleRitiro)
+        // Budget ~18s: come nella creazione dal portale, evita il timeout a 60s durante i rallentamenti
+        // DVA (rischio ordine orfano). Si esce col provvisorio e la LDV la prende il recupero/background.
+        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _vuoleRitiro ? 6 : 8, 1200, _vuoleRitiro, 18000)
         ldv = w.numero || null
         codiceRitiro = w.codiceRitiro || null
         // MULTICOLLO: il provider torna una etichetta per collo in w.singole. Come il portale: si
