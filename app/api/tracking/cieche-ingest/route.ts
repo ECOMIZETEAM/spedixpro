@@ -23,7 +23,12 @@ export async function POST(req: NextRequest) {
     const sid = r?.spedizione_id
     if (!sid) continue
     const eventi = eventiDaFullTracking(r?.tracking || [])
-    if (!eventi.length) { vuote++; continue }
+    if (!eventi.length) {
+      // Poste non la conosce ancora: la segno controllata-vuota così non la si ri-interroga per 3
+      // giorni (la esclude prossime_cieche_spedisci). Best-effort.
+      try { await admin.from('cieche_ot_check').upsert({ spedizione_id: sid, ultimo_check: new Date().toISOString() }) } catch { /* best-effort */ }
+      vuote++; continue
+    }
     const { data: sp } = await admin.from('spedizioni').select('stato').eq('id', sid).maybeSingle()
     if (!sp) continue
     // Sostituisco la cronologia (arriva completa: niente duplicati) e riallineo lo stato.
