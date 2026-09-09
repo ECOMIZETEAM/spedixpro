@@ -8,6 +8,7 @@ import comuniIT from '@/lib/data/comuni.json'
 import frazioniIT from '@/lib/data/frazioni.json'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { eSpartoo, rimappaSpartoo } from '@/lib/import-spartoo'
+import { eMagento, rimappaMagento } from '@/lib/import-magento'
 
 export const runtime = 'nodejs'
 
@@ -182,6 +183,19 @@ export async function POST(req: NextRequest) {
   if (eSpartoo(rows[0])) {
     rows = rimappaSpartoo(rows)
     if (!rows.length) return NextResponse.json({ error: 'Tutti gli ordini del file risultano annullati: niente da importare.' }, { status: 400 })
+  }
+
+  // MAGENTO 2: export griglia ordini. Come Spartoo, lo riconosco e lo rimappo sulle canoniche PRIMA
+  // dell'auto-mapping (vedi lib/import-magento). Due cose sue: l'indirizzo di spedizione e' un unico
+  // blob (via+citta+prov+CAP) che va spaccato, e il file e' lo STORICO COMPLETO — importa SOLO gli
+  // ordini da spedire (pending/processing), salta gli evasi/annullati/chiusi. Non tocca gli altri.
+  if (eMagento(rows[0])) {
+    const tot = rows.length
+    rows = rimappaMagento(rows)
+    if (!rows.length) return NextResponse.json({
+      error: `Nel file Magento non c'e' nessun ordine da spedire: tutti i ${tot} risultano gia' evasi, annullati o chiusi. `
+        + 'Esporta da Magento gli ordini con stato "Processing"/"Pending" (in lavorazione / in attesa) e ricarica.',
+    }, { status: 400 })
   }
 
   // Risolvo le colonne per NOME (auto-mapping)

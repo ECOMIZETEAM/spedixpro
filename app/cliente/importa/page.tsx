@@ -598,9 +598,11 @@ export default function ImportaOrdiniPage() {
 
           <div style={{ flex: '1 1 320px', fontSize: '12.5px', color: '#666', lineHeight: 1.6 }}>
             Puoi caricare direttamente l&apos;<b>export ordini di Shopify</b>, il file di{' '}
-            <b>Amazon</b> (il .txt originale, senza convertirlo) o l&apos;export di{' '}
+            <b>Amazon</b> (il .txt originale, senza convertirlo), l&apos;export di{' '}
+            <b>Magento</b> (Vendite → Ordini → Esporta CSV) o quello di{' '}
             <b>Spartoo</b>: il sistema riconosce da solo le colonne e il separatore, e raggruppa
-            gli ordini con più prodotti.<br />
+            gli ordini con più prodotti. Da Magento importa solo gli ordini{' '}
+            <b>da spedire</b> (Processing / Pending), saltando quelli già evasi o annullati.<br />
             In alternativa usa il nostro <b>template</b> — colonne obbligatorie:{' '}
             <b style={{ color: '#b45309' }}>destinatario, indirizzo, cap, localita, provincia</b>.<br />
             Formati: <b>.csv</b>, <b>.txt</b> (tab) o <b>.xlsx</b>.
