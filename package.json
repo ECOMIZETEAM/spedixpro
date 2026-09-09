@@ -11,7 +11,7 @@
     "controlla-scope-shopify": "node scripts/controlla-scope-shopify.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.110.0",
+    "@anthropic-ai/sdk": "^0.115.0",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.108.2",
     "@vercel/speed-insights": "^2.0.0",
