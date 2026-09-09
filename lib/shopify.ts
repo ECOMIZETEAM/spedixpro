@@ -243,15 +243,38 @@ export async function annullaFulfillmentShopify(supabase: any, spedizioneIds: st
       const d = await shopifyGraphQL(shop, tk.token,
         `query($id: ID!){ order(id:$id){ fulfillments(first:20){ id status } } }`, { id: gid })
       const daAnnullare = ((d?.order?.fulfillments) || []).filter((f: any) => f.status !== 'CANCELLED')
+      const rifiuti: string[] = []
       for (const f of daAnnullare) {
-        await shopifyGraphQL(shop, tk.token,
+        const r = await shopifyGraphQL(shop, tk.token,
           `mutation($id: ID!){ fulfillmentCancel(id:$id){ fulfillment{ id status } userErrors{ field message } } }`,
           { id: f.id })
+        // L'esito si guarda: Shopify RIFIUTA di annullare un fulfillment gia' consegnato o
+        // consolidato. Marcarlo 'annullato' lo stesso avrebbe scritto nei nostri dati una cosa
+        // che sullo store non e' successa.
+        const errs = (r as any)?.fulfillmentCancel?.userErrors || []
+        if (errs.length) rifiuti.push(errs.map((e: any) => e.message).join('; '))
       }
-      // Torna evadibile: se la spedizione viene rifatta, il write-back riparte da zero invece di
-      // saltarla perche' risultava gia' 'ok'.
+
+      if (rifiuti.length) {
+        await supabase.from('ordini_ecommerce')
+          .update({ fulfillment_errore: ('Shopify non ha annullato il fulfillment: ' + rifiuti.join(' | ')).slice(0, 200) })
+          .eq('id', ordine.id)
+        continue
+      }
+
+      // SI SCOLLEGA L'ORDINE DALLA SPEDIZIONE ANNULLATA. Senza questo, la correzione si disfaceva
+      // da sola entro venti minuti: il cron di recupero pesca tutto cio' che non e' 'ok'
+      // (fulfill-retry: `fulfillment_stato.neq.ok`) e richiede solo che spedizione_id ci sia. Con
+      // 'annullato' e il link ancora al suo posto, rievadeva la spedizione appena annullata e
+      // mandava al compratore una SECONDA email di spedizione, con un tracking che non esiste piu'.
+      // Sganciando il link l'ordine torna anche spedibile: e' quello che serve dopo un annullo.
       await supabase.from('ordini_ecommerce')
-        .update({ fulfillment_stato: 'annullato', fulfillment_errore: 'spedizione annullata: fulfillment annullato su Shopify' })
+        .update({
+          fulfillment_stato: 'annullato',
+          fulfillment_errore: 'spedizione annullata: fulfillment annullato su Shopify',
+          spedizione_id: null,
+          stato: 'da_spedire',
+        })
         .eq('id', ordine.id)
     } catch (e: any) {
       console.error('[SHOPIFY][ANNULLO FULFILLMENT]', ordine.numero_ordine, e?.message)

@@ -112,17 +112,30 @@ export async function GET(req: NextRequest) {
     errore: null,
   }
 
+  // UN NEGOZIO APPARTIENE A UN CLIENTE SOLO.
+  //
+  // Prima la riga esistente si cercava per (cliente_id + piattaforma + identificativo): bastava che
+  // a fare l'OAuth fosse una sessione di un ALTRO cliente perche' non la trovasse e ne inserisse una
+  // seconda per lo stesso negozio. Non esiste alcun vincolo di unicita' che lo impedisca (verificato
+  // su pg_constraint: su `integrazioni` c'e' solo la chiave primaria), quindi lo stesso shop
+  // finiva collegato a due clienti e da li' in poi ordini e token andavano al posto sbagliato.
+  // Si cerca per NEGOZIO e si aggiorna quella riga: la reinstallazione riaggancia, non duplica.
+  // Lo stesso vale per l'admin del CASO B piu' sotto, che gia' faceva cosi'.
   const { data: existing } = await supabase
     .from('integrazioni').select('id')
-    .eq('cliente_id', st.cliente_id)
     .eq('piattaforma', 'shopify')
     .eq('identificativo', shop)
     .maybeSingle()
 
-  if (existing?.id) {
-    await supabase.from('integrazioni').update(payload).eq('id', existing.id)
-  } else {
-    await supabase.from('integrazioni').insert(payload)
+  // L'esito si guarda: al ritorno cross-site dall'OAuth il cookie di sessione puo' mancare (vedi il
+  // commento sullo state qui sopra) e la RLS farebbe fallire la scrittura in SILENZIO — merchant
+  // rimandato su "?connected=" con un'integrazione senza token.
+  const esito = existing?.id
+    ? await supabase.from('integrazioni').update(payload).eq('id', existing.id)
+    : await supabase.from('integrazioni').insert(payload)
+  if ((esito as any)?.error) {
+    console.error('[SHOPIFY][CALLBACK] integrazione non salvata', shop, (esito as any).error.message)
+    return NextResponse.redirect(`${appUrl}/cliente/integrazioni?error=${encodeURIComponent('Collegamento non salvato, riprova dalle Integrazioni')}`)
   }
 
   return NextResponse.redirect(`${appUrl}/cliente/integrazioni?connected=${encodeURIComponent(shop)}`)

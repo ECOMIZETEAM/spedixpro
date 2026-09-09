@@ -28,7 +28,11 @@ export async function GET(req: NextRequest) {
   const { data: ordini } = await admin.from('ordini_ecommerce')
     .select('id,spedizione_id,fulfillment_stato,fulfillment_tentativi')
     .not('spedizione_id', 'is', null)
-    .or('fulfillment_stato.is.null,fulfillment_stato.neq.ok')          // tutto tranne i già evasi
+    // Tutto tranne i gia' evasi E tranne gli ANNULLATI: 'annullato' non e' 'ok', quindi rientrava
+    // qui dentro e il cron rievadeva una spedizione appena annullata — seconda email al compratore
+    // con un tracking morto. Rete di sicurezza: chi annulla sgancia gia' spedizione_id, ma questa
+    // riga protegge anche le piattaforme che dovessero usare lo stesso stato senza sganciarlo.
+    .or('fulfillment_stato.is.null,and(fulfillment_stato.neq.ok,fulfillment_stato.neq.annullato)')
     .lt('fulfillment_tentativi', MAX_TENTATIVI)                         // salta gli irrecuperabili (cap raggiunto)
     .gte('created_at', new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString())
     .order('created_at', { ascending: true })   // i PIÙ VECCHI prima: si svuota la coda, non si perdono gli arretrati

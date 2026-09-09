@@ -37,9 +37,19 @@ export async function GET(req: NextRequest) {
   }
 
   const admin = createAdminSupabase()
+  // NIENTE EMBED `clienti(email)`: PostgREST risolve gli embed SOLO attraverso una foreign key, e
+  // `integrazioni` non ne ha nessuna (verificato su pg_constraint: c'e' solo la chiave primaria).
+  // Quella select falliva SEMPRE, quindi `integr` era sempre nullo e l'auto-login del merchant non
+  // ha mai funzionato: chi apriva l'app da Shopify finiva comunque sull'installazione. Due letture
+  // separate costano una query in piu' e funzionano.
   const { data: integr } = await admin.from('integrazioni')
-    .select('cliente_id,stato,credenziali,clienti(email)')
+    .select('cliente_id,stato,credenziali')
     .eq('piattaforma', 'shopify').eq('identificativo', shop).maybeSingle()
+  let emailCliente: string | null = null
+  if (integr?.cliente_id) {
+    const { data: cli } = await admin.from('clienti').select('email').eq('id', integr.cliente_id).maybeSingle()
+    emailCliente = (cli as any)?.email || null
+  }
 
   // NEGOZIO NON COLLEGATO → si riparte dall'OAuth.
   //
@@ -58,7 +68,7 @@ export async function GET(req: NextRequest) {
   // Il callback e' gia' idempotente sul riaggancio (aggiorna la riga esistente per identificativo),
   // quindi ripassare dall'OAuth non crea doppioni. E con la managed installation il consenso e'
   // gia' dato: l'authorize torna subito il codice, il merchant non vede nessuna schermata in piu'.
-  const email = (integr as any)?.clienti?.email
+  const email = emailCliente
   const token = ((integr as any)?.credenziali || {}).access_token
   const vivo = !!integr?.cliente_id && !!email && (integr as any)?.stato === 'attivo' && !!token
   if (!vivo) {

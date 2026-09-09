@@ -44,10 +44,14 @@ export async function provisionShopifyCliente(
   admin: any, shop: string, token: string
 ): Promise<{ clienteId: string; masterId: string; email: string } | { error: string }> {
   // già collegato? riuso il cliente e la sua email di login
+  // Niente embed `clienti(email)`: `integrazioni` non ha foreign key, quindi PostgREST non lo sa
+  // risolvere e la select falliva in silenzio (qui il ripiego su emailDaShop lo mascherava, ma il
+  // riuso del cliente partiva comunque con l'email sbagliata se quella vera era diversa).
   const { data: integr } = await admin.from('integrazioni')
-    .select('cliente_id,master_id,clienti(email)').eq('piattaforma', 'shopify').eq('identificativo', shop).maybeSingle()
+    .select('cliente_id,master_id').eq('piattaforma', 'shopify').eq('identificativo', shop).maybeSingle()
   if (integr?.cliente_id) {
-    const email = (integr as any)?.clienti?.email || emailDaShop(shop)
+    const { data: cli } = await admin.from('clienti').select('email').eq('id', integr.cliente_id).maybeSingle()
+    const email = (cli as any)?.email || emailDaShop(shop)
     return { clienteId: integr.cliente_id, masterId: integr.master_id, email }
   }
 
