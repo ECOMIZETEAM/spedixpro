@@ -18,6 +18,8 @@ export default function ElencoDistintePage() {
   const [cerca, setCerca] = useFiltriPersistenti('distinte-elenco-master:cerca', '')
   const [dal, setDal] = useFiltriPersistenti('distinte-elenco-master:dal', '')
   const [al, setAl] = useFiltriPersistenti('distinte-elenco-master:al', '')
+  const [fVettore, setFVettore] = useFiltriPersistenti('distinte-elenco-master:vettore', '')
+  const [fContratto, setFContratto] = useFiltriPersistenti('distinte-elenco-master:contratto', '')
   const [selezionate, setSelezionate] = useState<Set<string>>(new Set())
   const [perPage, setPerPage] = useFiltriPersistenti('distinte-elenco-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
@@ -99,9 +101,17 @@ export default function ElencoDistintePage() {
     writeFile(wb, 'Distinta_' + dist.numero + '.xlsx')
   }
 
-  const filtrate = distinte.filter(d => !cerca ||
+  // Opzioni filtri: VETTORE fisico (GLS/BRT/POSTE/SDA…, mai PF/Q) e CONTRATTO (nome esatto).
+  const vettoriPresenti = Array.from(new Set(distinte.map(d => d.vettore).filter(Boolean))).sort()
+  const contrattiPresenti = Array.from(new Set(distinte.map(d => d.corrieri?.nome_contratto).filter(Boolean))).sort()
+  // Contratti mostrati nel dropdown coerenti col vettore scelto.
+  const contrattiFiltrati = fVettore ? contrattiPresenti.filter(n => distinte.some(d => d.corrieri?.nome_contratto === n && d.vettore === fVettore)) : contrattiPresenti
+
+  const filtrate = distinte.filter(d => (!cerca ||
     String(d.numero || '').toLowerCase().includes(cerca.toLowerCase()) ||
     String(d.cliente_label || d.clienti?.ragione_sociale || '').toLowerCase().includes(cerca.toLowerCase()))
+    && (!fVettore || d.vettore === fVettore)
+    && (!fContratto || d.corrieri?.nome_contratto === fContratto))
 
   const totalePagine = Math.max(1, Math.ceil(filtrate.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
@@ -129,6 +139,18 @@ export default function ElencoDistintePage() {
       </div>
       <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #d1d5db', padding: '14px', marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div><div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Data</div><DateRangePicker dal={dal} al={al} onChange={(d1,d2)=>{setDal(d1);setAl(d2)}} /></div>
+        <div><div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Vettore</div>
+          <select value={fVettore} onChange={e=>{setFVettore(e.target.value);setFContratto('');setPagina(1)}} style={{ ...inp, width: '150px' }}>
+            <option value="">Tutti</option>
+            {vettoriPresenti.map((v:any)=><option key={v} value={v}>{v}</option>)}
+          </select>
+        </div>
+        <div><div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Contratto</div>
+          <select value={fContratto} onChange={e=>{setFContratto(e.target.value);setPagina(1)}} style={{ ...inp, width: '190px' }}>
+            <option value="">Tutti</option>
+            {contrattiFiltrati.map((n:any)=><option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
           <button onClick={confermaSelezionate} style={{ padding: '8px 14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }}>Conferma Selezionate</button>
           <div><div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Cerca</div><input value={cerca} onChange={e => {setCerca(e.target.value);setPagina(1)}} placeholder="Numero o cliente..." style={{ ...inp, width: '220px' }} /></div>

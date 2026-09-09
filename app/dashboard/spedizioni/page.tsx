@@ -7,6 +7,7 @@ import AssistenzaTicketButton from '@/app/components/AssistenzaTicketButton'
 import DettaglioSpedizione from '@/app/components/DettaglioSpedizione'
 import { fmtPeso } from '@/lib/peso'
 import { ldvProvvisoria, LDV_IN_ELABORAZIONE } from '@/lib/numero-spedizione'
+import { vettoreFisico } from '@/lib/vettore'
 import { useDialog } from '@/app/components/DialogProvider'
 
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
@@ -200,8 +201,10 @@ export default function SpedizioniPage() {
   const setF = (k: string, v: string) => setFiltri(f => ({...f, [k]: v}))
 
   // Opzioni Vettore/Contratto dai MIEI corrieri (in rete i nomi contratto combaciano); negozi = piattaforme note.
-  const vettoriPresenti = Array.from(new Set((corrieri||[]).map((c:any)=>String(c.nome_contratto||'').split(' ')[0].toUpperCase()).filter(Boolean))).sort()
+  // VETTORE = vettore FISICO (BRT PF -> BRT), non la prima parola del nome (che dava PF, Q…).
+  const vettoriPresenti = Array.from(new Set((corrieri||[]).map((c:any)=>vettoreFisico(c)).filter(Boolean))).sort()
   const contrattiPresenti = Array.from(new Set((corrieri||[]).map((c:any)=>c.nome_contratto).filter(Boolean))).sort()
+  const vettorePerContratto = new Map<string,string>((corrieri||[]).map((c:any)=>[c.nome_contratto, vettoreFisico(c)]))
   const negoziPresenti = ['shopify','woocommerce','prestashop','ebay','tiktok','temu','amazon','csv']
 
   function toggleSelect(id: string) {
@@ -432,7 +435,7 @@ async function apriTracking(s: any) {
           <div><label style={lbl}>Contratto</label>
             <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={sel}>
               <option value="">Tutti</option>
-              {contrattiPresenti.filter((n:any)=>!filtri.vettore || String(n||'').split(' ')[0].toUpperCase()===filtri.vettore).map((n:any)=><option key={n} value={n}>{n}</option>)}
+              {contrattiPresenti.filter((n:any)=>!filtri.vettore || vettorePerContratto.get(n)===filtri.vettore).map((n:any)=><option key={n} value={n}>{n}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Stato</label>

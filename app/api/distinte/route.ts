@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
   // fetchAll: senza, oltre 1000 distinte non comparivano più nell'elenco.
   const build = () => {
     let q = db.from('distinte')
-      .select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
+      .select('*, clienti(ragione_sociale), corrieri(nome_contratto,tipo)')
       .in('master_id', masterIds.length ? masterIds : ['00000000-0000-0000-0000-000000000000'])
       .order('created_at', { ascending: false })
     if (filtroAgente) q = q.in('cliente_id', filtroAgente)
@@ -107,13 +107,17 @@ export async function GET(req: NextRequest) {
       master_rete = flId ? (nomeMaster.get(flId) || nomeMaster.get(d.master_id) || null) : (nomeMaster.get(d.master_id) || null)
     }
     // Contratto: singolo dal corriere della distinta, oppure — se MISTA — "Vettore (N contratti)".
+    // vettore = vettore FISICO (per il filtro Vettore dell'elenco): dal corriere per le mono-contratto,
+    // dalle spedizioni per le miste (una sola voce se coerenti, altrimenti 'Misto').
     let contratto_label = d.corrieri?.nome_contratto || null
+    let vettore: string | null = d.corrieri ? vettoreFisico(d.corrieri) : null
     if (!contratto_label && !d.corriere_id) {
       const set = contrattiPerDistinta.get(d.id); const vset = vettoriPerDistinta.get(d.id)
       const vett = vset && vset.size === 1 ? Array.from(vset)[0] : (vset && vset.size ? 'Misto' : '')
+      if (!vettore) vettore = vett || null
       if (set && set.size) contratto_label = `${vett} (${set.size} contratt${set.size === 1 ? 'o' : 'i'})`.trim()
     }
-    return { ...d, cliente_label, master_rete, contratto_label }
+    return { ...d, cliente_label, master_rete, contratto_label, vettore }
   })
   return NextResponse.json(out)
 }

@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
 import { creaCalcolatoreListinoCliente, creaCalcolatoreCorriere } from '@/lib/pricing'
 import { fetchAll } from '@/lib/fetch-all'
+import { vettoreFisico } from '@/lib/vettore'
 
 // L'ordinamento per MARGINE (sotto) calcola sul MOVIMENTI di tutto il periodo filtrato: sul network
 // intero legge molte righe, quindi serve più della finestra breve di default.
@@ -159,6 +160,16 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Filtro VETTORE per vettore FISICO (BRT PF -> BRT), non per prefisso del nome (PF): risolvo il
+  // vettore all'insieme dei NOMI CONTRATTO di quel vettore (i nomi combaciano in tutta la rete) e
+  // filtro corrieri.nome_contratto IN (...). Cosi' "PF CE LIGHT"/"Q GLS.." (tipo='gls') stanno sotto GLS.
+  let nomiVettore: string[] | null = null
+  if (fVettore) {
+    const { data: csV } = await db.from('corrieri').select('nome_contratto,tipo').eq('master_id', utente?.master_id)
+    nomiVettore = Array.from(new Set((csV || []).filter((c: any) => vettoreFisico(c) === fVettore).map((c: any) => c.nome_contratto).filter(Boolean)))
+    if (!nomiVettore.length) nomiVettore = ['__NESSUNO__']
+  }
+
   // Solo colonne leggere (SPED_COLS): esclusi etichetta_url/raw_response/colli_dettaglio.
   // Costruisco una query FRESCA a ogni chiamata (i builder Supabase sono monouso).
   const buildBase = (contaTotale = false) => {
@@ -197,7 +208,7 @@ export async function GET(req: NextRequest) {
     if (agenteClienteIds !== null) q = q.in('cliente_id', agenteClienteIds.length ? agenteClienteIds : ['00000000-0000-0000-0000-000000000000'])
     // ── Filtri aggiuntivi (prima applicati in memoria dal browser; identica semantica) ──
     if (fContratto) q = q.eq('corrieri.nome_contratto', fContratto)
-    if (fVettore) q = q.ilike('corrieri.nome_contratto', `${sanitizza(fVettore)}%`)
+    if (fVettore && nomiVettore) q = q.in('corrieri.nome_contratto', nomiVettore)
     if (fNegozio) q = q.eq('canale', fNegozio)
     if (fAgente) q = q.eq('clienti.agente', fAgente)
     // Master: prendo tutto il COD e filtro in memoria dopo l'override per-livello (vedi filtroCodPerViewer).
