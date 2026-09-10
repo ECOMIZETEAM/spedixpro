@@ -88,8 +88,9 @@ export default function SpedizioniPage() {
   // Stampa ZPL/Zebra SOLO se il cliente l'ha attivata in Impostazioni → Stampa (zpl_abilita).
   // Altrimenti: PDF normale (scaricabile). Default OFF, così nessuno resta bloccato.
   const [zplOn, setZplOn] = useState(false)
+  const [zplStampante, setZplStampante] = useState('')   // nome stampante Zebra configurata (facoltativo)
   useEffect(() => {
-    fetch('/api/cliente/dati').then(r=>r.json()).then(d=>{ setZplOn(d?.impostazioni?.zpl_abilita === 'si') }).catch(()=>{})
+    fetch('/api/cliente/dati').then(r=>r.json()).then(d=>{ setZplOn(d?.impostazioni?.zpl_abilita === 'si'); setZplStampante(d?.impostazioni?.zpl_stampante || '') }).catch(()=>{})
     // Nomi contratto del cliente per i filtri Vettore/Contratto (le righe caricate sono solo 10)
     fetch('/api/cliente/corrieri-abilitati').then(r=>r.json()).then(d=>{ if(Array.isArray(d)) setContrattiCliente(d.map((c:any)=>c.nome_contratto).filter(Boolean)) }).catch(()=>{})
   }, [])
@@ -225,7 +226,7 @@ export default function SpedizioniPage() {
     setStampandoId(id)
     try {
       const { stampaEtichettaZebra } = await import('@/lib/zebra-print')
-      await stampaEtichettaZebra(url)
+      await stampaEtichettaZebra(url, { stampante: zplStampante })
       setNotifica('🖨️ Etichetta inviata alla stampante Zebra.')
     } catch (e: any) {
       setNotifica((e?.message || 'Stampa Zebra non disponibile') + ' — apro il PDF.')
@@ -246,7 +247,7 @@ export default function SpedizioniPage() {
     setNotifica('🖨️ Invio ' + selectedIds.length + ' etichette alla Zebra…')
     try {
       const { stampaEtichetteZebra } = await import('@/lib/zebra-print')
-      const r = await stampaEtichetteZebra(idsInOrdineElenco().map(id => `/api/spedizioni/etichetta?id=${id}`))
+      const r = await stampaEtichetteZebra(idsInOrdineElenco().map(id => `/api/spedizioni/etichetta?id=${id}`), { stampante: zplStampante })
       setNotifica(`🖨️ Zebra: ${r.ok} stampate${r.errori ? ', ' + r.errori + ' errori' : ''}.`)
     } catch (e: any) {
       setNotifica((e?.message || 'Stampa Zebra non disponibile') + ' — scarico il PDF.')

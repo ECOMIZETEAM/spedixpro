@@ -220,8 +220,9 @@ export default function SpedizioniPage() {
   // Stampa ZPL/Zebra SOLO se attivata in Impostazioni (zpl_abilita). Altrimenti PDF normale
   // (scaricabile). Default OFF così nessuno resta bloccato sul download.
   const [zplOn, setZplOn] = useState(false)
+  const [zplStampante, setZplStampante] = useState('')   // nome stampante Zebra configurata (facoltativo)
   useEffect(() => {
-    fetch('/api/master').then(r=>r.json()).then(d=>{ setZplOn(d?.impostazioni?.zpl_abilita === 'si') }).catch(()=>{})
+    fetch('/api/master').then(r=>r.json()).then(d=>{ setZplOn(d?.impostazioni?.zpl_abilita === 'si'); setZplStampante(d?.impostazioni?.zpl_stampante || '') }).catch(()=>{})
   }, [])
   // Scarica l'etichetta come file sul PC (PDF o immagine), con messaggio chiaro se non è pronta.
   async function scaricaEtichetta(id: string) {
@@ -250,7 +251,7 @@ export default function SpedizioniPage() {
     setStampandoId(id)
     try {
       const { stampaEtichettaZebra } = await import('@/lib/zebra-print')
-      await stampaEtichettaZebra(url)
+      await stampaEtichettaZebra(url, { stampante: zplStampante })
       setNotifica('🖨️ Etichetta inviata alla stampante Zebra.')
     } catch (e: any) {
       setNotifica((e?.message || 'Stampa Zebra non disponibile') + ' — apro il PDF.')
@@ -271,7 +272,7 @@ export default function SpedizioniPage() {
     try {
       const { stampaEtichetteZebra } = await import('@/lib/zebra-print')
       const urls = idsInOrdineElenco().map(id => `/api/spedizioni/etichetta?id=${id}`)
-      const r = await stampaEtichetteZebra(urls)
+      const r = await stampaEtichetteZebra(urls, { stampante: zplStampante })
       setNotifica(`🖨️ Zebra: ${r.ok} stampate${r.errori ? ', ' + r.errori + ' errori' : ''}.`)
     } catch (e: any) {
       setNotifica((e?.message || 'Stampa Zebra non disponibile') + ' — scarico il PDF.')

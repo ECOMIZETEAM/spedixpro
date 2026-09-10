@@ -79,12 +79,30 @@ async function bpFetch(path: string, init?: RequestInit): Promise<Response> {
   throw new Error('Zebra Browser Print non raggiungibile: installalo e avvialo, poi riprova.')
 }
 
-async function getStampante(): Promise<any> {
+// Stampante da usare: se in Impostazioni è configurato un nome (zpl_stampante), lo si cerca tra quelle
+// note a Browser Print (per nome o uid) e si usa QUELLA; altrimenti si usa la predefinita (come prima).
+// Il nome configurato prima era scritto ma MAI usato: si stampava sempre sulla predefinita.
+async function getStampante(nome?: string): Promise<any> {
+  const voluta = String(nome || '').trim()
+  if (voluta) {
+    try {
+      const r = await bpFetch('/available?type=printer')
+      const txt = await r.text()
+      if (r.ok && txt) {
+        let d: any = null; try { d = JSON.parse(txt) } catch {}
+        const lista: any[] = Array.isArray(d) ? d : (Array.isArray(d?.printer) ? d.printer : (Array.isArray(d?.deviceList) ? d.deviceList : []))
+        const found = lista.find((x: any) => String(x?.name || '').trim() === voluta || String(x?.uid || '').trim() === voluta)
+        if (found) return found
+      }
+    } catch { /* Browser Print non elenca: ripiego sulla predefinita */ }
+  }
   const r = await bpFetch('/default?type=printer')
   const txt = await r.text()
   if (!r.ok || !txt) throw new Error('Nessuna stampante Zebra predefinita in Browser Print.')
   try { return JSON.parse(txt) } catch { return { name: txt.trim(), uid: txt.trim(), connection: 'driver', deviceType: 'printer', version: 0, provider: 'com.zebra.ds.webdriver.desktop.provider.DefaultDeviceProvider', manufacturer: 'Zebra Technologies' } }
 }
+
+export type ZebraOpts = { dpi?: number; larghezzaMm?: number; stampante?: string }
 
 async function inviaZpl(zpl: string, device?: any): Promise<void> {
   const dev = device || await getStampante()
@@ -95,7 +113,9 @@ async function inviaZpl(zpl: string, device?: any): Promise<void> {
 // Stampa UNA etichetta (dato l'URL che ritorna il PDF/immagine). dpi = risoluzione stampante (203 std).
 // larghezzaMm = larghezza dell'etichetta (10 cm standard): oltre, il contenuto viene ridotto per non
 // finire tagliato a destra.
-export async function stampaEtichettaZebra(labelUrl: string, dpi = 203, larghezzaMm = 100): Promise<void> {
+export async function stampaEtichettaZebra(labelUrl: string, opts: ZebraOpts = {}): Promise<void> {
+  const { dpi = 203, larghezzaMm = 100, stampante } = opts
+  const device = await getStampante(stampante)
   const res = await fetch(labelUrl)
   if (!res.ok) throw new Error('Etichetta non disponibile.')
   const ct = (res.headers.get('content-type') || '').toLowerCase()
@@ -104,12 +124,13 @@ export async function stampaEtichettaZebra(labelUrl: string, dpi = 203, larghezz
   const isPdf = ct.includes('pdf') || (head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46) // %PDF
   const maxW = Math.round(dpi * larghezzaMm / 25.4)
   const zpl = isPdf ? await pdfToZpl(buf, dpi, maxW) : await imageToZpl(new Blob([buf], { type: ct || 'image/png' }), dpi, maxW)
-  await inviaZpl(zpl)
+  await inviaZpl(zpl, device)
 }
 
 // Stampa PIÙ etichette in sequenza (una chiamata write per ognuna). Ritorna quante ok/errore.
-export async function stampaEtichetteZebra(labelUrls: string[], dpi = 203, larghezzaMm = 100): Promise<{ ok: number; errori: number }> {
-  const device = await getStampante()   // una volta sola
+export async function stampaEtichetteZebra(labelUrls: string[], opts: ZebraOpts = {}): Promise<{ ok: number; errori: number }> {
+  const { dpi = 203, larghezzaMm = 100, stampante } = opts
+  const device = await getStampante(stampante)   // una volta sola
   const maxW = Math.round(dpi * larghezzaMm / 25.4)
   let ok = 0, errori = 0
   for (const u of labelUrls) {
