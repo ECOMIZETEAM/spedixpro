@@ -1232,7 +1232,12 @@ export async function POST(req: NextRequest) {
         },
         destinatario: {
           nominativo: body.shipTo.name, indirizzo: body.shipTo.street1,
-          email: EMAIL_PER_CORRIERE, cellulare: cellDest, contatto: body.shipTo.name,
+          // Estero: il corriere/la dogana devono poter contattare il destinatario per lo sdoganamento,
+          // quindi si manda la SUA email vera (ripiego sull'email di servizio se non c'e'). Sul
+          // nazionale resta l'email di servizio (vedi memoria "email schermo corriere": i link di
+          // riprogrammazione non devono arrivare al destinatario, avvisiamo noi).
+          email: estero ? (String(body.shipTo?.email || '').trim() || EMAIL_PER_CORRIERE) : EMAIL_PER_CORRIERE,
+          cellulare: cellDest, contatto: body.shipTo.name,
         },
         note: body.notes || undefined,
         custom: rifBreve,

@@ -379,12 +379,17 @@ export async function POST(req: NextRequest) {
       } catch (e: any) {
         return errore(String(e?.message || 'Dati doganali mancanti per la spedizione internazionale'))
       }
+      // Estero: al destinatario va la SUA email vera (serve al corriere/dogana per lo sdoganamento),
+      // con ripiego sull'email di servizio se manca; sul nazionale resta l'email di servizio (stessa
+      // scelta del portale, vedi memoria "email schermo corriere").
+      const esteroDest = String(body.shipTo.country || 'IT').toUpperCase() !== 'IT'
+      const emailDest = esteroDest ? (String(body.shipTo?.email || '').trim() || EMAIL_PER_CORRIERE) : EMAIL_PER_CORRIERE
       const ordine = await easyparcelOrder(apikey, {
         codiceOfferta: String(offerta.codice_offerta),
         ...(_vuoleRitiro ? { ritiro: ritiroEasyparcel(_dataRitiro, _pomeriggio) } : {}),
         // Il "presso" non ha un campo dedicato: si accoda all'indirizzo, come per l'altro provider.
         mittente: { nominativo: body.shipFrom.name, indirizzo: conPresso(body.shipFrom.street1 || '', pressoFrom), email: EMAIL_PER_CORRIERE, cellulare: cellM, contatto: body.shipFrom.name },
-        destinatario: { nominativo: body.shipTo.name, indirizzo: conPresso(body.shipTo.street1 || '', pressoTo), email: EMAIL_PER_CORRIERE, cellulare: cellD, contatto: body.shipTo.name },
+        destinatario: { nominativo: body.shipTo.name, indirizzo: conPresso(body.shipTo.street1 || '', pressoTo), email: emailDest, cellulare: cellD, contatto: body.shipTo.name },
         note: body.notes || undefined,
         contrassegno: codReq, assicurazione: assReq,
         ...(dogana ? { dogana } : {}),
