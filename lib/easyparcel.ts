@@ -350,11 +350,45 @@ export async function easyparcelTaric(apikey: string, descrizione: string): Prom
 //   indispensabili SOLLEVA un errore ADESSO: il provider non ha annullo, quindi un ordine partito
 //   senza dogana sarebbe comprato, fermo e irrecuperabile — meglio fermarsi prima con un messaggio
 //   che dice cosa manca.
+// Riga doganale per-articolo (dal catalogo del cliente): valore e peso sono UNITARI, si moltiplicano
+// per la quantita' per ottenere il totale della voce.
+export type ArticoloDogana = {
+  hscode?: string; descrizione?: string; quantita?: number; valoreUnitario?: number; peso?: number; origine?: string
+}
+
 export async function preparaDoganaEasyparcel(apikey: string, dati: {
   estero: boolean; contenuto?: string; valore?: number; peso?: number; nrColli?: number
-  hscode?: string; origine?: string
+  hscode?: string; origine?: string; articoli?: ArticoloDogana[]
 }): Promise<MerceDogana[] | undefined> {
   if (!dati.estero) return undefined
+
+  // PER-ARTICOLO (preferito): se arrivano righe dal catalogo con dati doganali COMPLETI, si dichiara
+  // una voce per articolo — quantita', valore e origine reali. La dogana chiede il contenuto pezzo per
+  // pezzo con il valore di ciascuno, e una dichiarazione dettagliata riduce i fermi doganali. Verificato
+  // sul campo (ordine reale PDBPLUS): hscodes[] con piu' voci viene accettato ("ACQUISTO OK").
+  const righe = dati.articoli || []
+  if (righe.length) {
+    const voci: MerceDogana[] = []
+    let tutteValide = true
+    for (const a of righe) {
+      const hs = String(a.hscode || '').replace(/[^0-9]/g, '')
+      const desc = String(a.descrizione || '').trim()
+      const q = Math.max(1, Math.round(Number(a.quantita) || 1))
+      const val = Number(a.valoreUnitario) || 0
+      if (!hs || !desc || val <= 0) { tutteValide = false; break }
+      voci.push({
+        hscode: hs, descrizione: desc, quantita: q,
+        importo: Number((val * q).toFixed(2)),
+        peso: Number(((Number(a.peso) || 0) * q).toFixed(3)) || 0.1,
+        origine: String(a.origine || 'IT'),
+      })
+    }
+    // Solo se OGNI riga e' completa: una dichiarazione parziale sotto-dichiarerebbe la spedizione.
+    // Altrimenti si ripiega sulla voce aggregata qui sotto (comportamento storico).
+    if (tutteValide && voci.length) return voci
+  }
+
+  // AGGREGATA (ripiego): una sola voce col totale, come prima.
   const descrizione = String(dati.contenuto || '').trim()
   const valore = Number(dati.valore) || 0
   let hscode = String(dati.hscode || '').replace(/[^0-9]/g, '')

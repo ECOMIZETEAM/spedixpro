@@ -368,6 +368,14 @@ export async function POST(req: NextRequest) {
       // questo provider non ha annullo. Si prepara PRIMA di comprare e si blocca qui se mancano i dati.
       let dogana
       try {
+        // Righe doganali per-articolo dal partner (facoltative): una voce hscode per articolo. Se
+        // incomplete, preparaDoganaEasyparcel ripiega sulla voce aggregata (contenuto/valore/hscode).
+        const customsItems = Array.isArray(body.customsItems) ? body.customsItems.map((it: any) => ({
+          hscode: it?.hscode ?? it?.hsCode, descrizione: it?.description ?? it?.descrizione,
+          quantita: Number(it?.quantity ?? it?.quantita) || 1,
+          valoreUnitario: Number(it?.unitValue ?? it?.value ?? it?.valore) || 0,
+          peso: Number(it?.weight ?? it?.peso) || 0, origine: it?.origin ?? it?.origine,
+        })) : undefined
         dogana = await preparaDoganaEasyparcel(apikey, {
           estero: String(body.shipTo.country || 'IT').toUpperCase() !== 'IT',
           contenuto: body.contenuto,
@@ -375,6 +383,7 @@ export async function POST(req: NextRequest) {
           peso: packages.reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0),
           nrColli: packages.length,
           hscode: body.hscode, origine: body.origineMerce,
+          articoli: customsItems,
         })
       } catch (e: any) {
         return errore(String(e?.message || 'Dati doganali mancanti per la spedizione internazionale'))

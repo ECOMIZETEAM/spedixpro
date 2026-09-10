@@ -1200,6 +1200,28 @@ export async function POST(req: NextRequest) {
       // qui — dopo l'ordine non c'e' annullo e il pacco resterebbe pagato e fermo. Il codice HS si
       // prende dal campo del form se c'e', altrimenti viene cercato dalla descrizione della merce.
       const estero = String(body.shipTo?.country || 'IT').toUpperCase() !== 'IT'
+      // DOGANA PER-ARTICOLO: se il pacco ha articoli dal catalogo, si dichiara una voce per articolo
+      // (contenuto pezzo per pezzo con valore, come chiede la dogana) leggendo i dati doganali dal
+      // catalogo LATO SERVER (fonte di verita', non falsificabile dal client). Il ripiego alla voce
+      // aggregata (contenuto/valoreMerce/hscode) resta in preparaDoganaEasyparcel se le righe non sono
+      // complete. Le righe arrivano come [{articolo_id, quantita}] (le stesse che scaricano il magazzino).
+      let articoliDogana: any[] | undefined
+      if (estero && Array.isArray(body.articoli) && body.articoli.length) {
+        const ids = [...new Set(body.articoli.map((a: any) => a?.articolo_id).filter(Boolean))]
+        if (ids.length) {
+          const { data: cat } = await adminCrea.from('articoli_cliente')
+            .select('id,codice_hs,descrizione_doganale,nome,paese_origine,peso,valore_dichiarato').in('id', ids)
+          const perId = new Map((cat || []).map((c: any) => [c.id, c]))
+          articoliDogana = body.articoli.map((a: any) => {
+            const c: any = perId.get(a?.articolo_id); if (!c) return null
+            return {
+              hscode: c.codice_hs, descrizione: c.descrizione_doganale || c.nome,
+              quantita: Number(a?.quantita) || 1, valoreUnitario: Number(c.valore_dichiarato) || 0,
+              peso: Number(c.peso) || 0, origine: c.paese_origine || 'IT',
+            }
+          }).filter(Boolean)
+        }
+      }
       let dogana
       try {
         dogana = await preparaDoganaEasyparcel(apikey, {
@@ -1210,6 +1232,7 @@ export async function POST(req: NextRequest) {
           nrColli: packages.length,
           hscode: body.hscode,
           origine: body.origineMerce,
+          articoli: articoliDogana,
         })
       } catch (e: any) {
         await stornaPrenotazione()

@@ -396,6 +396,9 @@ export default function NuovaSpedizionePage() {
         notes:dest.note, insuranceValue:+assicurazione, codValue:+contrassegno,
         incassoModalita: +contrassegno > 0 ? incassoModalita : 'C',
         contenuto, tipoContenuto, valoreMerce, hscode,
+        // Righe articolo: servono alla DOGANA estero (una voce hscode per articolo, lato server dal
+        // catalogo). Sono le stesse che poi scaricano il magazzino.
+        articoli: articoliScelti.map(r=>({ articolo_id:r.id, quantita:r.qta })),
         rifOrdine:dest.ordine, rifDestinatario:dest.rif,
         // Ritiro: sui contratti DVA si prenota SOLO insieme all'ordine (il corriere non ha
         // una chiamata per aggiungerlo dopo), quindi la richiesta va passata gia' qui.
