@@ -64,13 +64,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const body = await req.json()
   const authId = await authUserIdDelMaster(admin, id)
 
+  // Stato attuale: serve per capire se il LISTINO assegnato sta davvero CAMBIANDO. Solo in quel caso
+  // va rimaterializzato (vedi sotto): rifarlo a ogni salvataggio anagrafica sarebbe inutile e costoso.
+  const { data: mAttuale } = await admin.from('masters').select('parent_listino_id').eq('id', id).maybeSingle()
+  const listinoInBody = 'parent_listino_id' in body
+  const listinoNuovo = listinoInBody ? (body.parent_listino_id || null) : undefined
+  const listinoAttuale = mAttuale?.parent_listino_id || null
+  const listinoCambiato = listinoInBody && listinoNuovo !== listinoAttuale
+
+  // Se si ASSEGNA un nuovo listino, dev'essere un listino di CHI assegna (come in /api/master/crea):
+  // impedisce di puntare un sotto-master al listini_clienti di un altro (IDOR).
+  if (listinoCambiato && listinoNuovo) {
+    const { data: lisOk } = await admin.from('listini_clienti').select('id').eq('id', listinoNuovo).eq('master_id', utente.master_id).maybeSingle()
+    if (!lisOk) return NextResponse.json({ error: 'Listino non valido o non tuo' }, { status: 400 })
+  }
+
   // anagrafica
   const upd: any = {}
   if (typeof body.nome === 'string' && body.nome.trim()) upd.nome = body.nome.trim()
   if ('telefono' in body) upd.telefono = body.telefono || null
   if ('piva' in body) upd.piva = body.piva || null
   if (body.tipo_contratto === 'credito_scalare' || body.tipo_contratto === 'fattura_mensile') upd.tipo_contratto = body.tipo_contratto
-  if ('parent_listino_id' in body) upd.parent_listino_id = body.parent_listino_id || null
+  if (listinoInBody) upd.parent_listino_id = listinoNuovo
   // Sede operativa (mittente quando si spedisce per conto del sotto-master)
   if ('indirizzo_operativo' in body) upd.indirizzo_operativo = body.indirizzo_operativo || null
   if ('citta_operativo' in body) upd.citta_operativo = body.citta_operativo || null
@@ -90,6 +105,32 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (Object.keys(upd).length) {
     const { error } = await admin.from('masters').update(upd).eq('id', id)
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  }
+
+  // RIMATERIALIZZA il listino quando l'assegnazione CAMBIA. Prima la PATCH aggiornava solo il
+  // puntatore parent_listino_id senza ricopiare le fasce: il sotto-master restava "tutto a 0"
+  // (o col vecchio listino) finché qualcuno non premeva "Risincronizza" a mano. È il buco per cui
+  // un contratto appena assegnato risultava senza prezzi. Stessa verifica fasce di /api/master/crea.
+  let avvisoListino: string | null = null
+  if (listinoCambiato) {
+    if (listinoNuovo) {
+      try {
+        const { copiaListinoAlSottoMaster } = await import('@/lib/copia-listino-submaster')
+        let res: any = await copiaListinoAlSottoMaster(admin, id, { force: true })
+        if (!res?.ok) res = await copiaListinoAlSottoMaster(admin, id, { force: true })  // un retry
+        const { data: liste } = await admin.from('listini_corrieri').select('id').eq('master_id', id)
+        const listeIds = (liste || []).map((l: any) => l.id)
+        const { count } = listeIds.length
+          ? await admin.from('listini_corrieri_fasce').select('id', { count: 'exact', head: true }).in('listino_id', listeIds)
+          : { count: 0 }
+        if (!count) avvisoListino = 'ATTENZIONE: il listino assegnato non ha prodotto prezzi (il sotto-master resta senza tariffe). Verifica che il listino non sia vuoto e usa "Risincronizza listino".'
+      } catch (e: any) {
+        console.error('Rimaterializza listino sotto-master:', e)
+        avvisoListino = 'ATTENZIONE: errore nella copia del listino. Usa "Risincronizza listino" nell\'Elenco Master.'
+      }
+    } else {
+      avvisoListino = 'Listino rimosso: il sotto-master non potrà spedire finché non gliene assegni uno.'
+    }
   }
 
   // reset password MANUALE (password digitata a mano)
@@ -126,5 +167,5 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  return NextResponse.json({ ok: true, emailInviata, ...(passwordImpostata ? { password: passwordImpostata } : {}) })
+  return NextResponse.json({ ok: true, emailInviata, ...(avvisoListino ? { avvisoListino } : {}), ...(passwordImpostata ? { password: passwordImpostata } : {}) })
 }

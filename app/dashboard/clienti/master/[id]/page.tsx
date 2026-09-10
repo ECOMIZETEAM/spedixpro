@@ -77,6 +77,9 @@ export default function ModificaMasterPage() {
     const d = await res.json(); setSaving(false)
     if (d.error) { setErrore(d.error); return }
     setMsg(d.emailInviata ? '✓ Modifiche salvate — credenziali inviate via email' : '✓ Modifiche salvate')
+    // Cambio listino: l'API ha rimaterializzato i prezzi del sotto-master. Se è rimasto senza tariffe
+    // (listino vuoto o errore di copia) l'avviso arriva qui e va mostrato: prima passava inosservato.
+    if (d.avvisoListino) setErrore(d.avvisoListino)
     if (d.password) setPasswordMostrata(d.password)
     if (nuovaEmail.trim()) setM({...m, login_email: nuovaEmail.trim(), email: nuovaEmail.trim()})
     setResetPassword(false)

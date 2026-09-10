@@ -254,10 +254,13 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
 
   const subCorrIds = [...new Set(mapCorr.values())]
 
-  // Risincronizzazione: rimuovo SOLO le fasce/supplementi dei corrieri ereditati dal master
+  // Risincronizzazione: rimuovo SOLO i supplementi dei corrieri ereditati dal master
   // (così i contratti aggiunti dal sotto-master restano intatti), poi li reinserisco aggiornati.
+  // La cancellazione delle FASCE è spostata più giù, DENTRO la guardia `fasceIns.length` (sez. 5):
+  // cancellare qui e poi non avere nulla di valido da reinserire lasciava il sotto-master con i
+  // contratti materializzati ma ZERO fasce = "tutto a 0". I supplementi (accessori) possono invece
+  // essere legittimamente vuoti, quindi la loro pulizia resta qui.
   if (opts?.force && subCorrIds.length && mieiIds.length) {
-    await admin.from('listini_corrieri_fasce').delete().in('listino_id', mieiIds).in('corriere_id', subCorrIds)
     await admin.from('listini_corrieri_supplementi').delete().in('listino_id', mieiIds).in('corriere_id', subCorrIds)
   }
 
@@ -313,8 +316,25 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   // logga per accorgersene, invece di sparire senza traccia.
   const zonaMancante = fasceMappate.filter((f: any) => f.corriere_id && !f.zona_id).length
   if (zonaMancante > 0) console.error('[propaga] sub', subMasterId, ':', zonaMancante, 'fasce scartate per ZONA non mappata (prezzi persi) dal listino', parentListinoId)
-  if (subCorrIds.length) await admin.from('listini_corrieri_fasce').delete().eq('listino_id', subListinoId).in('corriere_id', subCorrIds)
-  if (fasceIns.length) await admin.from('listini_corrieri_fasce').insert(fasceIns)
+  // SICUREZZA "tutto a 0": qui fasceSrc è SEMPRE non vuoto (return anticipato più su se il listino
+  // assegnato è vuoto). Quindi fasceIns vuoto significa ANOMALIA di mappatura (corriere/zona non
+  // risolti), NON un legittimo "niente da vendere": in quel caso NON cancello le fasce esistenti —
+  // cancellare-e-non-reinserire è proprio ciò che lasciava il contratto senza prezzi (tutto a 0).
+  if (fasceIns.length && subCorrIds.length) {
+    // Ripulisco le fasce ereditate PRIMA di reinserire (evita duplicati). In force pulisco su TUTTI
+    // i miei listini per quei corrieri; sempre su questo listino.
+    if (opts?.force && mieiIds.length) await admin.from('listini_corrieri_fasce').delete().in('listino_id', mieiIds).in('corriere_id', subCorrIds)
+    await admin.from('listini_corrieri_fasce').delete().eq('listino_id', subListinoId).in('corriere_id', subCorrIds)
+    // INSERT SPEZZATO a blocchi di 1000 (come zone_cap e la route duplica): oltre ~1000 righe un
+    // unico insert può fallire (payload/timeout) e, con la delete già fatta, azzerare il contratto.
+    // L'esito di OGNI blocco va controllato: prima l'errore era ignorato e si tornava ok "mentendo".
+    for (let i = 0; i < fasceIns.length; i += 1000) {
+      const { error } = await admin.from('listini_corrieri_fasce').insert(fasceIns.slice(i, i + 1000))
+      if (error) throw new Error('insert fasce sub ' + subMasterId + ': ' + (error.message || error))
+    }
+  } else if (!fasceIns.length && subCorrIds.length) {
+    console.error('[propaga] sub', subMasterId, ': 0 fasce mappate da', fasceSrc.length, 'sorgenti — anomalia mappatura, NON azzero il contratto (tengo le esistenti). listino', parentListinoId)
+  }
 
   // 6) SUPPLEMENTI (assicurazione, contrassegno, giacenze, ritiro, accessori) — IDEMPOTENTE come le fasce.
   const supplIns = (supplSrc || []).map((s: any) => ({ listino_id: listinoDi(mapCorr.get(s.corriere_id) || ''), corriere_id: mapCorr.get(s.corriere_id) || null, tipo: s.tipo, nome: s.nome, valore: s.valore, tipo_calcolo: s.tipo_calcolo, descrizione: s.descrizione })).filter((s: any) => s.corriere_id)
