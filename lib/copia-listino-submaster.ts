@@ -3,7 +3,11 @@ import { fetchAll } from '@/lib/fetch-all'
 // Chiavi di IMPOSTAZIONI DI CONTRATTO che si propagano al sotto-master (NON il mittente,
 // che è specifico di ogni master). agevolazione peso, misure/volume massimo, scaglioni misure,
 // peso reale fino a X kg.
-const CONTRACT_SETTINGS_KEYS = ['agevolazione_peso_reale', 'misure_max', 'misure_scaglioni', 'peso_reale_soglia', 'limite_combinato', 'peso_max_collo', 'colli_max']
+// NB: qui vanno TUTTI i limiti di lib/limiti-collo.ts, altrimenti restano solo sul detentore e non
+// scendono a valle. 'somma_lati_max' mancava: per questo il limite "somma dei 3 lati" del PDB
+// Internazionale era impostato solo sui 4 master originali e assente sui 23 propagati dopo — su un
+// provider senza annullo (DVA) significa poter comprare un collo fuori misura e non recuperarlo.
+const CONTRACT_SETTINGS_KEYS = ['agevolazione_peso_reale', 'misure_max', 'misure_scaglioni', 'peso_reale_soglia', 'limite_combinato', 'somma_lati_max', 'peso_max_collo', 'colli_max']
 function settingsContratto(src: any): any {
   const out: any = {}
   if (src && typeof src === 'object') {
