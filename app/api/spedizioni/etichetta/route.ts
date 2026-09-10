@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
       return new NextResponse(new Uint8Array(out), { status: 200, headers: {
         'Content-Type': et.mime,
         'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.${et.ext}"`,
-        'Cache-Control': 'private, max-age=0, no-store',
+        'Cache-Control': 'private, max-age=600',
       } })
     }
   }
@@ -102,7 +102,7 @@ export async function GET(req: NextRequest) {
         return new NextResponse(new Uint8Array(out), { status: 200, headers: {
           'Content-Type': 'application/pdf',
           'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.pdf"`,
-          'Cache-Control': 'private, max-age=0, no-store',
+          'Cache-Control': 'private, max-age=600',
         } })
       }
     } catch (e) { console.error('[ETICHETTA][GLS] recupero on-demand:', e) }
@@ -188,7 +188,7 @@ export async function GET(req: NextRequest) {
       headers: {
         'Content-Type': m[1],
         'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.${ext}"`,
-        'Cache-Control': 'private, max-age=0, no-store',
+        'Cache-Control': 'private, max-age=600',
       },
     })
   }
@@ -207,7 +207,7 @@ export async function GET(req: NextRequest) {
         headers: {
           'Content-Type': ct,
           'Content-Disposition': `attachment; filename="${filename}"`,
-          'Cache-Control': 'private, max-age=0, no-store',
+          'Cache-Control': 'private, max-age=600',
         },
       })
     } catch {
