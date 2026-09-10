@@ -399,6 +399,9 @@ export async function POST(req: NextRequest) {
   let r: any
   try { r = JSON.parse(text) } catch { r = { error: text.substring(0, 300) } }
   if (!res.ok || r.error) {
+    // Diagnostica (solo il MESSAGGIO d'errore del corriere, non il payload coi dati personali): serve a
+    // capire perché stamattina i ritiri Spedisci tornano 400. Da rimuovere dopo aver risolto.
+    console.error('[RITIRO] pickup KO', res.status, String(r?.error || '').replace(cred?.password || ' ', '***').slice(0, 220))
     return NextResponse.json({ error: erroreRitiroPulito(r?.error || `Errore ${res.status}`) }, { status: 400 })
   }
 
