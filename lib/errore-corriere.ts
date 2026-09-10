@@ -147,8 +147,14 @@ export function erroreCorrierePulito(raw: any): string {
     return 'Il corriere non ha risposto in tempo (rallentamento momentaneo dei suoi sistemi). Riprova tra qualche istante.'
   if (/\bphone\b|telefono/.test(t))
     return 'Telefono del mittente mancante o non valido: inserisci un numero di telefono (solo cifre) e riprova.'
-  if (/dimension|misur|measure|\bsize\b|volume|lato|length|width|height|weight|\bpeso\b|\bkg\b|oversiz|too (large|big|heavy)/.test(t))
-    return 'Collo non ammesso dal corriere: verifica misure e peso (potrebbe essere fuori misura).'
+  if (/dimension|misur|measure|\bsize\b|volume|lato|length|width|height|weight|\bpeso\b|\bkg\b|oversiz|too (large|big|heavy)/.test(t)) {
+    // NON dire seccamente "fuori misura": il corriere mette una parola tipo "weight/height" anche in
+    // errori di VALIDAZIONE che non c'entrano con l'ingombro (verificato: un pacco 23×16×7 da 170g,
+    // che parte ogni giorno, veniva etichettato "fuori misura"). Si allega il motivo VERO del corriere
+    // ripulito dal nome del fornitore, così si vede la causa reale invece di un'ipotesi sbagliata.
+    const dett = String(raw || '').replace(NOMI_FORNITORI, 'corriere').replace(/https?:\/\/[^\s]+/gi, '').replace(/\s+/g, ' ').trim().slice(0, 140)
+    return 'Il corriere ha rifiutato la spedizione (verifica misure, peso e indirizzo, o prova un altro contratto)' + (dett ? `: ${dett}` : '.')
+  }
   if (/provinc|state|postal|\bzip\b|address|indiriz|\bcap\b|city|citt|recipient|consignee|sender|destinat|mittent/.test(t))
     return 'Indirizzo non valido: controlla nome, indirizzo, città, provincia e CAP di mittente e destinatario.'
   if (/\bcod\b|cash.?on.?delivery|contrassegn/.test(t))

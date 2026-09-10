@@ -694,7 +694,19 @@ export async function POST(req: NextRequest) {
     const text = await res.text()
     let r: any
     try { r = JSON.parse(text) } catch { r = { error: text } }
-    if (!res.ok || r.error) { await stornaPrenotazione(); return NextResponse.json({ error: erroreCorrierePulito(r?.error || text) }, { status: 400 }) }
+    if (!res.ok || r.error) {
+      // L'errore grezzo del corriere veniva INGHIOTTITO (tradotto e basta): quando "collo non ammesso"
+      // era una falsa pista (pacco regolare che parte ogni giorno) non c'era modo di sapere il motivo
+      // vero. Ora lo si logga (solo server) col contratto e la destinazione, così si diagnostica al volo.
+      console.error('[CREA][SPEDISCI] create rifiutata', {
+        contratto: corriereRecord.nome_contratto,
+        dest: `${body.shipTo?.postalCode || ''} ${body.shipTo?.city || ''} ${body.shipTo?.state || ''}`.trim(),
+        http: res.status,
+        raw: String(r?.error ?? text).slice(0, 400),
+      })
+      await stornaPrenotazione()
+      return NextResponse.json({ error: erroreCorrierePulito(r?.error || text) }, { status: 400 })
+    }
 
     const numero = r.trackingNumber
     // L'importo ADDEBITATO deve essere quello calcolato dal SERVER. Il controllo del credito piu'
