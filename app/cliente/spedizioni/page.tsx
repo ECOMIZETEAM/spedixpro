@@ -6,6 +6,7 @@ import AssistenzaTicketButton from '@/app/components/AssistenzaTicketButton'
 import DettaglioSpedizione from '@/app/components/DettaglioSpedizione'
 import { fmtPeso } from '@/lib/peso'
 import { ldvProvvisoria, LDV_IN_ELABORAZIONE } from '@/lib/numero-spedizione'
+import { dataEventoIt } from '@/lib/tracking-eventi'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
@@ -691,7 +692,7 @@ async function apriTracking(s: any) {
                           {trackingData.eventi.map((e:any,i:number)=>(
                             <tr key={i} style={{borderBottom:'1px solid #f0f0f0',background:i===0?'#fff7ed':'#fff'}}>
                               <td style={{padding:'10px 16px',color:'#1a1a1a',whiteSpace:'nowrap' as const,fontWeight:i===0?'600':'400',width:'160px'}}>
-                                {e.date||e.data||e.datetime||e.timestamp||e.eventDate||'—'}
+                                {dataEventoIt(e.date||e.data||e.datetime||e.timestamp||e.eventDate)||'—'}
                               </td>
                               <td style={{padding:'10px 16px',color:'#1a1a1a',fontWeight:i===0?'700':'400'}}>
                                 {e.description||e.descrizione||e.status||e.evento||e.message||e.eventDescription||JSON.stringify(e)}

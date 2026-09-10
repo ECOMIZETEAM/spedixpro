@@ -37,6 +37,24 @@ export function istanteDaTesto(v: any): string | null {
   return new Date(comeUtc - (romaComeUtc - comeUtc)).toISOString()
 }
 
+// L'ISTANTE → COME LO LEGGE CHI GUARDA IL POPUP.
+// In `tracking_events` la data è ISO in UTC: stampata com'è, il popup mostrava
+// "2026-09-10T09:39:00+00:00" per un evento delle 11:39 — due ore indietro e in un formato che
+// nessuno legge. Gli altri corrieri mandano al popup date già scritte ("10/09/2026 11:39"): quelle
+// NON vanno passate a new Date(), che le leggerebbe all'americana (9 ottobre) — si riconoscono
+// dal formato e si lasciano stare.
+export function dataEventoIt(v: any): string {
+  const s = String(v ?? '').trim()
+  if (!s) return ''
+  if (!/^\d{4}-\d{2}-\d{2}[T ]/.test(s)) return s
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime())) return s
+  return d.toLocaleString('it-IT', {
+    timeZone: 'Europe/Rome',
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+}
+
 export type EventoTracking = { descrizione: string; luogo: string | null; data_evento: string }
 
 // Normalizza gli eventi di QUALSIASI provider: si passano i nomi dei campi, non la loro forma.

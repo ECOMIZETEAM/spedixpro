@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { prioritaStato, testoIndicaReso } from '@/lib/spedisci'
+import { prioritaStato } from '@/lib/spedisci'
+import { mappaStatoPoste } from '@/lib/tracking-poste'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -13,19 +14,9 @@ export const maxDuration = 120
 // stato. Si esaurisce da sola: quando tutte hanno la cronologia non fa piu' nulla.
 // NB: quota volutamente minuscola per non far scattare il rate-limit di Poste (400 = bloccati).
 
-function mappaFrase(str: string): string | null {
-  const t = (str || '').toLowerCase()
-  if (!t) return null
-  if (t.includes('non consegnat') || t.includes('mancata') || t.includes('tentativo di consegna')) return 'non_consegnato'
-  if (t.includes('consegnat')) return 'consegnata'
-  if (t.includes('giacenz')) return 'in_giacenza'
-  // Regola reso UNICA e blindata (evita 'dal mittente'/'preso'/'reso disponibile'), come le altre porte.
-  if (testoIndicaReso(t)) return 'reso_mittente'
-  if (t.includes('in consegna')) return 'in_consegna'
-  if (t.includes('transito')) return 'in_transito'
-  if (t.includes('presa in carico') || t.includes('accettat')) return 'spedita'
-  return null
-}
+// La frase Poste -> stato la decide mappaStatoPoste (lib/tracking-poste.ts): qui c'era una copia
+// quasi identica ma piu' povera, e le due si erano gia' allontanate (le mancavano 'arrivata',
+// 'partita', 'smistamento'). La regola del reso e' blindata li' dentro, una volta sola per tutte le porte.
 
 export async function GET(req: NextRequest) {
   const auth = req.headers.get('authorization')
@@ -75,7 +66,7 @@ export async function GET(req: NextRequest) {
       if (!evs.length) { vuote++; if (vuote >= 6) break; continue }
       vuote = 0
       const eventi = evs.map((e: any) => ({
-        stato: mappaFrase(e?.statoLavorazione),
+        stato: mappaStatoPoste(e?.statoLavorazione),
         descrizione: String(e?.statoLavorazione || '').slice(0, 300),
         luogo: (String(e?.luogo || '').slice(0, 200)) || null,
         data_evento: new Date(Number(e?.dataOra) || Date.now()).toISOString(),
