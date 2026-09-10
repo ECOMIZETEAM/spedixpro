@@ -36,6 +36,19 @@ function normalizzaOrario(v: any): string | null {
   return null
 }
 
+// pickupTime per il RITIRO SPEDISCI.online: dal 10/9 il provider vuole un ENUM (AM/PM/AMPM), non più
+// un orario "HH:MM" — con "09:00" rispondeva 400 "pickupTime must be one of AM, PM, AMPM". Mattina→AM,
+// pomeriggio→PM, sconosciuto→AMPM (tutto il giorno). NB: SpediamoPro usa ancora fasciaOraria (from/to):
+// quella NON si tocca, è un altro provider con un altro formato.
+function pickupTimeSpedisci(v: any): 'AM' | 'PM' | 'AMPM' {
+  const s = String(v || '').trim().toLowerCase()
+  if (s.includes('matt')) return 'AM'
+  if (s.includes('pome')) return 'PM'
+  const m = s.match(/^(\d{1,2}):/)
+  if (m) return parseInt(m[1], 10) < 13 ? 'AM' : 'PM'
+  return 'AMPM'
+}
+
 // Fascia oraria (from/to) richiesta da SpediamoPro
 function fasciaOraria(v: any): { from: string; to: string } {
   const s = String(v || '').trim().toLowerCase()
@@ -291,7 +304,8 @@ export async function POST(req: NextRequest) {
   if (!carrierCode) return NextResponse.json({ error: 'Impossibile recuperare il corriere dalla spedizione.' }, { status: 400 })
 
   const baseUrl = `https://${cred.master_domain}/api/v2`
-  const pickupTime = normalizzaOrario(body.orarioRitiro)
+  // Spedisci vuole AM/PM/AMPM (non più "HH:MM"): vedi pickupTimeSpedisci. È sempre valorizzato.
+  const pickupTime = pickupTimeSpedisci(body.orarioRitiro)
 
   const shipFrom = {
     name: body.mittNome, company: body.mittNome, street1: body.mittIndirizzo, street2: '',
