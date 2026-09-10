@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { normalizzaMarkup, creaApplicaMarkup } from '@/lib/markup-fasce'
+import { propagaListinoACascata } from '@/lib/copia-listino-submaster'
 
 // Duplica UN corriere (fasce + supplementi + config) da un listino a:
 //  - un listino ESISTENTE (targetListinoId), oppure
@@ -82,6 +83,17 @@ export async function POST(req: NextRequest) {
     .select('tipo,descrizione,valore,tipo_calcolo,nome').eq('listino_id', sourceListinoId).eq('corriere_id', corriereId)
   await admin.from('listini_clienti_supplementi').delete().eq('listino_id', targetId).eq('corriere_id', corriereId)
   if (sup?.length) await admin.from('listini_clienti_supplementi').insert(sup.map((s: any) => ({ ...s, listino_id: targetId, corriere_id: corriereId })))
+
+  // Se questo listino è ASSEGNATO a dei sotto-master (masters.parent_listino_id = targetId), il
+  // corriere appena duplicato deve SCENDERE nella loro copia materializzata: senza, il sotto-master
+  // non lo vede (era il caso "MULTIEXPRESS duplica un Poste a Ecomize e Ecomize non lo vede"). Come
+  // il salvataggio del listino cliente, la cascata gira DOPO la risposta (after) per non far
+  // aspettare l'utente; se il listino non è assegnato a nessuno è un no-op.
+  const listinoFinale = targetId as string
+  after(async () => {
+    try { await propagaListinoACascata(createAdminSupabase(), listinoFinale) }
+    catch (e) { console.error('propaga dopo duplica-corriere ai sotto-master:', e) }
+  })
 
   return NextResponse.json({ id: targetId, creato, nome_corriere: corr.nome_contratto })
 }
