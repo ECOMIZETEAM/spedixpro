@@ -88,20 +88,46 @@ export async function fetchDettaglioOT(sess: SessioneOT, ldv: string): Promise<E
 
 export type Rilevato = { peso: number | null; lunghezza: number | null; larghezza: number | null; altezza: number | null }
 
-// La rimisura PIU' ALTA fra le righe RILEVATO (il "valore piu' alto" che vuole Lorenzo): confronto
-// per valore effettivo max(peso, volume/4000) — solo per SCEGLIERE; il motore ricalcola col fattore vero.
-export function miglioreRilevato(json: any): Rilevato | null {
+// Una riga di `pesoDim` come la manda Poste, gia' in numeri (li scrive con la virgola: "1,00").
+// `quando`/`dove` ci sono solo sulle righe RILEVATO: sono la misura fatta in impianto.
+export type MisuraColo = Rilevato & { quando: string | null; dove: string | null; volume: number | null; colli: number | null }
+
+// IL COLLO VIENE MISURATO PIU' VOLTE LUNGO IL GIRO, e le letture non coincidono: sulla stessa LDV
+// si vedono 31,5x27,5x10 in un hub e 32,5x29x10,5 in quello dopo. Quella che conta e' la PIU' ALTA:
+// e' il valore su cui il fornitore fattura, quindi e' il valore che deve vedere anche il cliente.
+// Il confronto si fa sul valore effettivo max(peso, volume/4000): il peso da nastro spesso e' 0,00
+// o 0,16 kg (la bilancia non pesa i colli leggeri) e da solo direbbe che la misura non esiste.
+// NB: il 4000 serve SOLO a ordinare le righe fra loro — il prezzo lo ricalcola il motore col
+// fattore vero del contratto, che cambia per corriere e per master.
+export function rimisureDaDettaglio(json: any): { dichiarato: MisuraColo | null; rilevati: MisuraColo[]; migliore: MisuraColo | null } {
   const righe = Array.isArray(json?.pesoDim) ? json.pesoDim : []
-  let best: Rilevato | null = null
-  let bestEff = -1
-  for (const r of righe) {
-    if (r?.tipo !== 'RILEVATO') continue
-    const peso = num(r?.peso)
+  const leggi = (r: any): MisuraColo => {
+    // Poste chiama i tre lati altezza/larghezza/profondita: quello che conta e' il prodotto.
     const L = num(r?.altezza), W = num(r?.larghezza), H = num(r?.profondita)
-    const vol = (L && W && H) ? (L * W * H) / 4000 : 0
-    const eff = Math.max(peso || 0, vol)
-    if (eff <= 0) continue
-    if (eff > bestEff) { bestEff = eff; best = { peso, lunghezza: L, larghezza: W, altezza: H } }
+    const quando = (String(r?.data || '').trim().replace(/^-$/, '')) || null
+    const dove = (String(r?.filiale || '').trim().replace(/^-$/, '')) || null
+    return { peso: num(r?.peso), lunghezza: L, larghezza: W, altezza: H,
+      volume: (L && W && H) ? Math.round(L * W * H) : null, quando, dove, colli: num(r?.numColli) }
   }
-  return best
+  const efficace = (m: MisuraColo) => Math.max(m.peso || 0, m.volume ? m.volume / 4000 : 0)
+  let dichiarato: MisuraColo | null = null
+  const rilevati: MisuraColo[] = []
+  for (const r of righe) {
+    if (r?.tipo === 'DICHIARATO') { if (!dichiarato) dichiarato = leggi(r); continue }
+    if (r?.tipo !== 'RILEVATO') continue
+    const m = leggi(r)
+    if (efficace(m) <= 0) continue      // riga tutta a "-": scansione senza misura, non dice niente
+    rilevati.push(m)
+  }
+  // Piu' alta prima: la prima e' quella che vale.
+  rilevati.sort((a, b) => efficace(b) - efficace(a))
+  return { dichiarato, rilevati, migliore: rilevati[0] || null }
+}
+
+// La rimisura PIU' ALTA fra le righe RILEVATO. Resta come prima per chi la usa (rettifiche), ma la
+// regola sta ORA in rimisureDaDettaglio: una sola definizione di "piu' alta" per il ricalcolo e per
+// quello che si mostra al cliente, altrimenti il popup e l'addebito raccontano numeri diversi.
+export function miglioreRilevato(json: any): Rilevato | null {
+  const m = rimisureDaDettaglio(json).migliore
+  return m ? { peso: m.peso, lunghezza: m.lunghezza, larghezza: m.larghezza, altezza: m.altezza } : null
 }

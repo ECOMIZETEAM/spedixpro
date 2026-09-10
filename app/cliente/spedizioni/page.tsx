@@ -4,6 +4,7 @@ import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AssistenzaTicketButton from '@/app/components/AssistenzaTicketButton'
 import DettaglioSpedizione from '@/app/components/DettaglioSpedizione'
+import SchedaRipesatura from '@/app/components/SchedaRipesatura'
 import { fmtPeso } from '@/lib/peso'
 import { ldvProvvisoria, LDV_IN_ELABORAZIONE } from '@/lib/numero-spedizione'
 import { dataEventoIt } from '@/lib/tracking-eventi'
@@ -80,7 +81,7 @@ export default function SpedizioniPage() {
   const [trackingData, setTrackingData] = useState<any>(null)
   const [dettaglio, setDettaglio] = useState<any>(null)
   const [trackingLoading, setTrackingLoading] = useState(false)
-  const [trackingTab, setTrackingTab] = useState<'tracking'|'colli'>('tracking')
+  const [trackingTab, setTrackingTab] = useState<'tracking'|'colli'|'ripesature'>('tracking')
   const [eliminando, setEliminando] = useState<string|null>(null)
   const [filtri, setFiltri, azzeraFiltri] = useFiltriPersistenti('spedizioni-cliente:filtri', FILTRI_DEFAULT)
   const [resoModal, setResoModal] = useState(false)
@@ -662,6 +663,7 @@ async function apriTracking(s: any) {
             <div style={{display:'flex',borderBottom:'1px solid #d1d5db',padding:'0 20px'}}>
               <button onClick={()=>setTrackingTab('tracking')} style={{padding:'10px 16px',background:'none',border:'none',cursor:'pointer',fontSize:'13px',fontWeight:trackingTab==='tracking'?'700':'400',color:trackingTab==='tracking'?'#f97316':'#666',borderBottom:trackingTab==='tracking'?'2px solid #f97316':'2px solid transparent'}}>Tracking</button>
               <button onClick={()=>setTrackingTab('colli')} style={{padding:'10px 16px',background:'none',border:'none',cursor:'pointer',fontSize:'13px',fontWeight:trackingTab==='colli'?'700':'400',color:trackingTab==='colli'?'#f97316':'#666',borderBottom:trackingTab==='colli'?'2px solid #f97316':'2px solid transparent'}}>Colli</button>
+              <button onClick={()=>setTrackingTab('ripesature')} style={{padding:'10px 16px',background:'none',border:'none',cursor:'pointer',fontSize:'13px',fontWeight:trackingTab==='ripesature'?'700':'400',color:trackingTab==='ripesature'?'#f97316':'#666',borderBottom:trackingTab==='ripesature'?'2px solid #f97316':'2px solid transparent'}}>Ripesature</button>
             </div>
             <div style={{overflowY:'auto',flex:1,padding:'16px 20px'}}>
               {trackingTab==='tracking'&&(
@@ -738,6 +740,9 @@ async function apriTracking(s: any) {
                     </div>
                   )}
                 </div>
+              )}
+              {trackingTab==='ripesature'&&(
+                <SchedaRipesatura dati={trackingData?.ripesatura} />
               )}
             </div>
           </div>

@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   const masterIds = isCliente ? [utente.master_id] : await sottoAlberoMasterIds(admin, utente.master_id)
 
   let spedQuery = admin.from('spedizioni')
-    .select('id,stato,tracking_number,corriere_id,numero,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_telefono,dest_email,raw_response,colli_dettaglio,mitt_nome,cliente_id,contenuto')
+    .select('id,stato,tracking_number,corriere_id,numero,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_telefono,dest_email,raw_response,colli_dettaglio,mitt_nome,cliente_id,contenuto,lunghezza,larghezza,altezza,peso_reale,peso_volume,peso_fatturato,colli')
     .eq('id', spedizioneId).in('master_id', masterIds)
   if (isCliente) spedQuery = spedQuery.eq('cliente_id', utente.cliente_id)
   // Agente: solo tracking di un suo cliente.
@@ -52,6 +52,31 @@ export async function GET(req: NextRequest) {
   const { data: corriere } = await admin.from('corrieri').select('credenziali,tipo,nome_contratto').eq('id', spedizione.corriere_id).single()
   if (!corriere) return NextResponse.json({ error: 'Corriere non trovato' }, { status: 404 })
 
+  // RIPESATURA: la rimisura fatta dal corriere in impianto, quella PIU' ALTA fra le letture (il collo
+  // viene misurato piu' volte lungo il giro e i numeri non coincidono). E' il valore su cui il
+  // fornitore fattura, quindi e' quello che deve poter vedere anche il cliente — la legge il giro
+  // OneTracking e la scrive in ripesature_misure, qui si mostra e basta.
+  const { data: mis } = await admin.from('ripesature_misure')
+    .select('peso,lunghezza,larghezza,altezza,volume,misurata_il,filiale,righe,letto_il,esito')
+    .eq('spedizione_id', spedizione.id).maybeSingle()
+  const ripesatura = {
+    dichiarato: {
+      lunghezza: (spedizione as any).lunghezza, larghezza: (spedizione as any).larghezza,
+      altezza: (spedizione as any).altezza, peso: (spedizione as any).peso_reale,
+      colli: (spedizione as any).colli || 1,
+    },
+    // Il peso su cui si fattura oggi da noi: serve al cliente per capire da dove esce il numero.
+    peso_volume: (spedizione as any).peso_volume,
+    peso_fatturato: (spedizione as any).peso_fatturato,
+    rilevata: mis && mis.esito === 'misurata' ? {
+      peso: mis.peso, lunghezza: mis.lunghezza, larghezza: mis.larghezza, altezza: mis.altezza,
+      volume: mis.volume, quando: mis.misurata_il, dove: mis.filiale,
+    } : null,
+    // Le altre letture restano visibili: se un giorno un cliente contesta, la storia e' li'.
+    altre: Array.isArray(mis?.righe) ? (mis!.righe as any[]).slice(1) : [],
+    controllata_il: mis?.letto_il || null,
+  }
+
   const cred = corriere.credenziali as Record<string,string>
   const base = {
     numero: spedizione.numero,
@@ -73,6 +98,7 @@ export async function GET(req: NextRequest) {
     colli_dettaglio: (Array.isArray(spedizione.colli_dettaglio) && spedizione.colli_dettaglio.length)
       ? spedizione.colli_dettaglio
       : colliDaRaw(spedizione.raw_response),
+    ripesatura,
   }
 
   try {
