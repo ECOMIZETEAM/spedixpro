@@ -86,6 +86,9 @@ export default function PreventivoPubblico() {
                   </tbody>
                 </table>
               </div>
+              {Number(c.fuel) > 0 && (
+                <div style={{ marginTop: '8px', fontSize: '12px', color: '#555' }}><b>Carburante:</b> + {Number(c.fuel).toLocaleString('it-IT', { maximumFractionDigits: 2 })}% sul prezzo</div>
+              )}
               {(c.supplementi || []).length > 0 && (
                 <div style={{ marginTop: '8px', fontSize: '12px', color: '#555' }}>
                   {c.supplementi.map((s: any, k: number) => <span key={k} style={{ marginRight: '14px' }}><b>{s.nome}:</b> {s.dettaglio || '—'}</span>)}

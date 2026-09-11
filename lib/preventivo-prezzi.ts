@@ -20,7 +20,7 @@ export async function leggiGrigliaListino(admin: any, listinoId: string) {
   if (!listinoId) return { corrieri: [] as any[] }
   const [{ data: lcc }, { data: fasce }, { data: supp }] = await Promise.all([
     admin.from('listini_clienti_corrieri').select('corriere_id, corrieri(nome_contratto)').eq('listino_id', listinoId),
-    admin.from('listini_clienti_fasce').select('corriere_id, peso_max, prezzo, tipo, zona_id, zone(nome)').eq('listino_id', listinoId).order('peso_max'),
+    admin.from('listini_clienti_fasce').select('corriere_id, peso_max, prezzo, tipo, zona_id, fuel, zone(nome)').eq('listino_id', listinoId).order('peso_max'),
     admin.from('listini_clienti_supplementi').select('corriere_id, tipo, descrizione, valore, tipo_calcolo, nome').eq('listino_id', listinoId),
   ])
 
@@ -28,10 +28,12 @@ export async function leggiGrigliaListino(admin: any, listinoId: string) {
   for (const c of (lcc || [])) nomeCorr.set(c.corriere_id, (c as any).corrieri?.nome_contratto || 'Corriere')
 
   // Per corriere: zone (ordine di prima apparizione) + fasce (tipo+peso) con prezzi per zona.
-  type Corr = { corriere_id: string; nome: string; zone: string[]; fasce: { label: string; peso: number; tipo: string; prezzi: Record<string, number> }[]; supplementi: { nome: string; dettaglio: string }[] }
+  // `fuel` = supplemento carburante, una % sul prezzo di fascia (di norma uguale su tutte le fasce del
+  // corriere). Va MOSTRATO anche nel preventivo: prima non usciva e il cliente non lo vedeva.
+  type Corr = { corriere_id: string; nome: string; zone: string[]; fuel: number; fasce: { label: string; peso: number; tipo: string; prezzi: Record<string, number> }[]; supplementi: { nome: string; dettaglio: string }[] }
   const corr = new Map<string, Corr>()
   const getCorr = (cid: string) => {
-    if (!corr.has(cid)) corr.set(cid, { corriere_id: cid, nome: nomeCorr.get(cid) || 'Corriere', zone: [], fasce: [], supplementi: [] })
+    if (!corr.has(cid)) corr.set(cid, { corriere_id: cid, nome: nomeCorr.get(cid) || 'Corriere', zone: [], fuel: 0, fasce: [], supplementi: [] })
     return corr.get(cid)!
   }
   const fasciaKey = (f: any) => `${f.tipo === 'oltre' ? 'oltre' : 'fino_a'}_${Number(f.peso_max)}`
@@ -39,6 +41,8 @@ export async function leggiGrigliaListino(admin: any, listinoId: string) {
 
   for (const f of (fasce || [])) {
     const c = getCorr(f.corriere_id)
+    const fpct = Number((f as any).fuel) || 0
+    if (fpct > c.fuel) c.fuel = fpct   // rappresentativo: il fuel del corriere (di norma uniforme)
     const zona = (f as any).zone?.nome || 'Italia'
     if (!c.zone.includes(zona)) c.zone.push(zona)
     const key = `${f.corriere_id}|${fasciaKey(f)}`
