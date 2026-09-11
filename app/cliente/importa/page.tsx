@@ -504,9 +504,13 @@ export default function ImportaOrdiniPage() {
     setProgress(null)
     setSel(new Set())
     await loadOrdini()
+    // Se qualcuna è fallita porto il filtro su "Errore": altrimenti gli ordini falliti (ora stato
+    // 'errore') sparirebbero dalla vista "Da spedire" e l'utente vedrebbe una lista vuota nonostante
+    // il banner gli dica di guardarli. Così compaiono subito, con il motivo accanto allo stato.
+    if (ko) setFiltroStato('errore')
     setMsg({
       type: ko ? 'err' : 'ok',
-      text: `Spedizioni completate: ${ok} riuscite${ko ? `, ${ko} in errore (vedi colonna Stato)` : ''}`,
+      text: `Spedizioni completate: ${ok} riuscite${ko ? `, ${ko} in errore — le trovi qui sotto, con il motivo accanto allo stato` : ''}`,
     })
   }
 
@@ -819,16 +823,20 @@ export default function ImportaOrdiniPage() {
                           <div style={{ ...sub, color: '#b45309', fontWeight: 600 }}>COD € {Number(o.contrassegno).toFixed(2)}</div>
                         ) : null}
                       </td>
-                      <td style={td}>
+                      {/* STATO — per gli errori il motivo va mostrato QUI, non solo nel tooltip: il
+                          cliente deve poterlo leggere senza sapere di dover passare il mouse. */}
+                      <td style={{ ...td, minWidth: '220px' }}>
                         <span
-                          title={o.stato === 'errore' && o.errore ? o.errore : undefined}
                           style={{
                             fontSize: '11.5px', fontWeight: 600, padding: '3px 9px', borderRadius: '999px',
-                            color: s.c, background: s.bg, cursor: o.stato === 'errore' ? 'help' : 'default',
+                            color: s.c, background: s.bg,
                           }}
                         >
                           {s.t}
                         </span>
+                        {o.stato === 'errore' && o.errore ? (
+                          <div style={{ ...sub, color: '#b91c1c', whiteSpace: 'normal', marginTop: '4px', maxWidth: '280px' }}>{o.errore}</div>
+                        ) : null}
                       </td>
                       <td style={{ ...td, textAlign: 'center' }}>
                         {modificabile(o) ? (
