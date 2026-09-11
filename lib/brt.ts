@@ -116,7 +116,10 @@ export async function creaSpedizioneBrt(cred: CredenzialiBrt, p: ParcelBrt): Pro
     departureDepot: num(cred.cod_filiale),
     senderCustomerCode: num(cred.cod_cliente),
     deliveryFreightTypeCode: 'DAP',   // porto franco: paga il mittente (il nostro modello)
-    consigneeCompanyName: s(p.ragioneSociale, 70),
+    // BRT limita a 35 caratteri TUTTI i campi destinatario (nome, indirizzo, città): oltre, rifiuta
+    // o tronca la spedizione. Il nome era a 70 (il doppio) → un destinatario con ragione sociale lunga
+    // faceva rifiutare la spedizione da BRT. Allineato a 35 come indirizzo/città.
+    consigneeCompanyName: s(p.ragioneSociale, 35),
     consigneeAddress: s(p.indirizzo, 35),
     consigneeZIPCode: s(p.cap, 9),
     consigneeCity: s(p.localita, 35),
