@@ -56,10 +56,16 @@ export async function GET(req: NextRequest) {
   // viene misurato piu' volte lungo il giro e i numeri non coincidono). E' il valore su cui il
   // fornitore fattura, quindi e' quello che deve poter vedere anche il cliente — la legge il giro
   // OneTracking e la scrive in ripesature_misure, qui si mostra e basta.
-  const { data: mis } = await admin.from('ripesature_misure')
-    .select('peso,lunghezza,larghezza,altezza,volume,misurata_il,filiale,righe,letto_il,esito')
-    .eq('spedizione_id', spedizione.id).maybeSingle()
+  // SOLO A CONSEGNA AVVENUTA: finche' il collo viaggia le letture cambiano (e quella di oggi puo'
+  // essere piu' bassa di quella di domani). Mostrarne una a meta' strada vorrebbe dire far vedere al
+  // cliente un numero che poi si smentisce da solo. Le altre letture NON escono di qui: nel popup
+  // deve comparire una misura sola, quella che conta.
+  const consegnata = (spedizione as any).stato === 'consegnata'
+  const { data: mis } = consegnata ? await admin.from('ripesature_misure')
+    .select('peso,lunghezza,larghezza,altezza,volume,misurata_il,filiale,letto_il,esito')
+    .eq('spedizione_id', spedizione.id).maybeSingle() : { data: null as any }
   const ripesatura = {
+    consegnata,
     dichiarato: {
       lunghezza: (spedizione as any).lunghezza, larghezza: (spedizione as any).larghezza,
       altezza: (spedizione as any).altezza, peso: (spedizione as any).peso_reale,
@@ -72,8 +78,6 @@ export async function GET(req: NextRequest) {
       peso: mis.peso, lunghezza: mis.lunghezza, larghezza: mis.larghezza, altezza: mis.altezza,
       volume: mis.volume, quando: mis.misurata_il, dove: mis.filiale,
     } : null,
-    // Le altre letture restano visibili: se un giorno un cliente contesta, la storia e' li'.
-    altre: Array.isArray(mis?.righe) ? (mis!.righe as any[]).slice(1) : [],
     controllata_il: mis?.letto_il || null,
   }
 
