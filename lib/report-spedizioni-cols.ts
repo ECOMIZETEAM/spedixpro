@@ -33,8 +33,12 @@ function servicesTxt(v: any): string {
   return String(v)
 }
 
-export function righeReportSpedizioni(spedizioni: any[], opts?: { master?: boolean }): any[] {
+export function righeReportSpedizioni(spedizioni: any[], opts?: { master?: boolean; extra?: boolean }): any[] {
   const master = !!opts?.master
+  // Le colonne EXTRA (Margine, Rettifica) sono numeri del master. Di default ci sono solo per il
+  // master; il report master a "34 colonne come il file" le disattiva con extra:false per restare
+  // identico al tracciato foto (34 colonne, senza le due extra).
+  const conExtra = master && opts?.extra !== false
   return (spedizioni || []).map((s: any) => {
     const contratto = s.corrieri?.nome_contratto || ''
     const riga: Record<string, any> = {
@@ -74,11 +78,29 @@ export function righeReportSpedizioni(spedizioni: any[], opts?: { master?: boole
     riga.order_tags = ''
     riga.costo = Number(s.costo_totale || 0)
     riga.Services = servicesTxt(s.servizi_accessori)
-    // EXTRA nostri (dopo le 34 del template), solo per il MASTER (sono i suoi numeri).
-    if (master) {
+    // EXTRA nostri (dopo le 34 del template), solo per il MASTER e solo se richieste (sono i suoi numeri).
+    if (conExtra) {
       riga.Margine = s.prezzo_corriere != null ? Math.round((Number(s.costo_totale || 0) - Number(s.prezzo_corriere || 0)) * 100) / 100 : ''
       riga.Rettifica = Number(s.rettifica || 0)
     }
     return riga
   })
+}
+
+// Excel/CSV del report spedizioni in formato "foto" (le 34 colonne del tracciato). È il DETTAGLIO:
+// una riga per spedizione, più una riga TOTALE in fondo (come nel report cliente). Lo usano sia il
+// report cliente (master:false → senza prezzo_corriere) sia il report master (master:true, extra:false
+// → esattamente le 34 colonne, con prezzo_corriere e senza Margine/Rettifica). Torna base64 grezzo.
+export async function excelReportSpedizioniB64(
+  spedizioni: any[], opts: { master?: boolean; extra?: boolean }, formato: 'xlsx' | 'csv'
+): Promise<string> {
+  const XLSX = await import('xlsx')
+  const rows: any[] = righeReportSpedizioni(spedizioni, opts)
+  const tot = (spedizioni || []).reduce((a: number, s: any) => a + Number(s.costo_totale || 0), 0)
+  rows.push({})   // riga vuota di stacco
+  rows.push({ status: 'TOTALE', costo_cliente: Math.round(tot * 100) / 100, costo: Math.round(tot * 100) / 100 })
+  const ws = XLSX.utils.json_to_sheet(rows)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Spedizioni')
+  return XLSX.write(wb, { bookType: formato === 'csv' ? 'csv' : 'xlsx', type: 'base64' })
 }

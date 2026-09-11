@@ -5,6 +5,10 @@
 // Intestazione = dati del MASTER loggato (ragione sociale, indirizzo, email, PIVA, logo).
 // Il "Prezzo" è il NETTO (prezzo cliente); l'IVA è al 22%; il Totale = Prezzo × 1,22.
 
+// Il DETTAGLIO Excel/CSV usa il tracciato "foto" a 34 colonne (builder condiviso col report cliente),
+// non le 6 colonne corte: ri-esportato qui così la pagina master lo chiama come le altre funzioni gen.*.
+export { excelReportSpedizioniB64, righeReportSpedizioni } from '@/lib/report-spedizioni-cols'
+
 export type Intestazione = { nome: string; indirizzo: string; email: string; piva: string; logo_url?: string | null }
 export type SpedRow = {
   numero?: string; created_at?: string; mitt_nome?: string; dest_nome?: string; dest_citta?: string;
@@ -166,12 +170,8 @@ export async function excelRiepilogoB64(righe: RigaRiepilogo[], formato: 'xlsx' 
   const { corpo, tot } = riepilogoRighe(righe)
   return foglioB64(['Cliente', 'Spedizioni', 'Colli', 'Prezzo', 'Iva', 'Totale'], corpo, tot, formato)
 }
-export async function excelDettaglioB64(righe: SpedRow[], formato: 'xlsx' | 'csv') {
-  const corpo = righe.map(s => [s.numero || '', dataIt(s.created_at), s.mitt_nome || '', [s.dest_nome, s.dest_citta, s.dest_provincia].filter(Boolean).join(', '), Number(s.colli) || 0, Math.round((Number(s.costo_totale) || 0) * 100) / 100])
-  const tp = righe.reduce((a, s) => a + (Number(s.costo_totale) || 0), 0)
-  const tot = ['', '', '', 'TOTALE', righe.reduce((a, s) => a + (Number(s.colli) || 0), 0), Math.round(tp * 100) / 100]
-  return foglioB64(['Spedizioni', 'Data', 'Rif. Mittente', 'Destinatario', 'Colli', 'Prezzo'], corpo, tot, formato)
-}
+// (excelDettaglioB64 — le vecchie 6 colonne corte — RIMOSSA: il dettaglio Excel/CSV ora usa il
+//  tracciato "foto" a 34 colonne via excelReportSpedizioniB64. Il PDF resta pdfDettaglioB64.)
 
 // ── TABELLA GENERICA (altri report con la STESSA grafica, es. Report Agenti) ──
 // Intestazione master + tabella + riga totale (verde) in fondo. `totaleRiga` opzionale.

@@ -118,7 +118,8 @@ export default function ReportSpedizioniPage() {
           // spedizione per spedizione, senza passare da uno zip.
           : (formato === 'pdf'
               ? (await gen.pdfDettaglioB64(intest, periodo, '', spedizioni)).split(',')[1]
-              : await gen.excelDettaglioB64(spedizioni, formato))
+              // Excel/CSV = tracciato "foto" a 34 colonne (con prezzo_corriere, è il master), non le 6 corte.
+              : await gen.excelReportSpedizioniB64(spedizioni, { master: true, extra: false }, formato))
         await salvaReport(b64, base + '.' + ext, formato)
       } else {
         const gruppi = gen.raggruppa(spedizioni, filtri.suddivisione as any)
@@ -141,7 +142,8 @@ export default function ReportSpedizioniPage() {
             const uri = await gen.pdfDettaglioB64(intest, periodo, titolo, g.righe)
             zip.file(nome, uri.split(',')[1], { base64: true })
           } else {
-            zip.file(nome, await gen.excelDettaglioB64(g.righe, formato), { base64: true })
+            // Excel/CSV = tracciato "foto" a 34 colonne, anche nei file divisi per cliente/contratto.
+            zip.file(nome, await gen.excelReportSpedizioniB64(g.righe, { master: true, extra: false }, formato), { base64: true })
           }
         }
         const blob = await zip.generateAsync({ type: 'blob' })
