@@ -131,7 +131,7 @@ export async function GET(req: NextRequest) {
     if (!chiesto) return NextResponse.json({ error: 'Percorso mancante' }, { status: 400 })
     const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
     const { data: n } = await admin.from('notifiche')
-      .select('id,master_id,cliente_id,gruppi,allegati')
+      .select('id,master_id,cliente_id,gruppi,allegati,target_master_ids')
       .eq('id', notificaId).maybeSingle()
     if (!n) return NextResponse.json({ error: 'Notifica non trovata' }, { status: 404 })
 
@@ -140,10 +140,13 @@ export async function GET(req: NextRequest) {
     const gruppo = mappaGruppo[ruolo] || 'Cliente'
     const stessoMaster = !!utente?.master_id && utente.master_id === n.master_id
     const staffInterno = ['master', 'admin', 'operatore'].includes(ruolo)
-    const destinatario = stessoMaster && (
+    // Notifica di RETE ricevuta da un ANTENATO: il mio master è tra i destinatari e sono STAFF
+    // (master/admin/operatore) — coerente con /api/notifiche/mie (i clienti del sotto-master non la ricevono).
+    const destinatarioRete = staffInterno && !n.cliente_id && Array.isArray(n.target_master_ids) && !!utente?.master_id && n.target_master_ids.includes(utente.master_id)
+    const destinatario = destinatarioRete || (stessoMaster && (
       staffInterno ||
       (n.cliente_id ? n.cliente_id === utente?.cliente_id : (Array.isArray(n.gruppi) && n.gruppi.includes(gruppo)))
-    )
+    ))
     if (!destinatario) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
     const ammessi = new Set<string>()

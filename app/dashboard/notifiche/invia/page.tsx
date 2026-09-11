@@ -8,6 +8,8 @@ export default function InviaNotifica() {
   const dialog = useDialog()
   const [oggetto, setOggetto] = useState('')
   const [gruppi, setGruppi] = useState<string[]>([])
+  // Destinatari di RETE (sotto-master): '' = nessuno | 'diretti' | 'tutti' | 'contratto'
+  const [reteModo, setReteModo] = useState<'' | 'diretti' | 'tutti' | 'contratto'>('')
   const [inviando, setInviando] = useState(false)
   const [msg, setMsg] = useState('')
   const [allegati, setAllegati] = useState<{ nome: string; tipo: string; dati: string }[]>([])
@@ -55,18 +57,18 @@ export default function InviaNotifica() {
   async function invia() {
     const messaggio = editorRef.current?.innerHTML || ''
     if (!oggetto.trim()) { setMsg('Inserisci un oggetto'); return }
-    if (!gruppi.length) { setMsg('Seleziona almeno un gruppo di utenti'); return }
+    if (!gruppi.length && !reteModo) { setMsg('Seleziona almeno un destinatario (un gruppo del tuo portale o i sotto-master)'); return }
     setInviando(true); setMsg('')
     const r = await fetch('/api/notifiche', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ oggetto, messaggio, gruppi, allegati })
+      body: JSON.stringify({ oggetto, messaggio, gruppi, allegati, reteModo: reteModo || undefined })
     })
     const j = await r.json()
     setInviando(false)
     if (j.success) {
-      setMsg('Notifica inviata con successo')
+      setMsg('Notifica inviata con successo' + (j.masterRaggiunti ? ` (${j.masterRaggiunti} sotto-master raggiunti)` : ''))
       caricaLista()
-      setOggetto(''); setGruppi([]); setAllegati([]); if (editorRef.current) editorRef.current.innerHTML = ''
+      setOggetto(''); setGruppi([]); setReteModo(''); setAllegati([]); if (editorRef.current) editorRef.current.innerHTML = ''
     } else {
       setMsg('Errore: ' + (j.error || 'invio fallito'))
     }
@@ -84,12 +86,34 @@ export default function InviaNotifica() {
           <label style={{ display:'block', fontWeight:'700', color:'#1a1a1a', marginBottom:'6px', fontSize:'14px' }}>Oggetto:</label>
           <input value={oggetto} onChange={e=>setOggetto(e.target.value)} style={{ width:'100%', padding:'9px 12px', border:'1px solid #d1d5db', borderRadius:'6px', fontSize:'14px', color:'#1a1a1a', boxSizing:'border-box', marginBottom:'20px' }} />
 
-          <div style={{ fontWeight:'700', color:'#1a1a1a', marginBottom:'10px', fontSize:'14px' }}>Gruppo di utenti</div>
-          <div style={{ marginBottom:'20px' }}>
+          <div style={{ fontWeight:'700', color:'#1a1a1a', marginBottom:'4px', fontSize:'14px' }}>Destinatari</div>
+          <div style={{ fontSize:'12.5px', color:'#6b7280', marginBottom:'12px' }}>Scegli chi riceve la notifica. Puoi combinare gli utenti del tuo portale con i sotto-master della tua rete.</div>
+
+          {/* 1) Utenti del PROPRIO portale (com'era): clienti, staff, agenti diretti. */}
+          <div style={{ border:'1px solid #e5e7eb', borderRadius:'8px', padding:'12px 14px', marginBottom:'12px' }}>
+            <div style={{ fontWeight:'700', color:'#374151', marginBottom:'2px', fontSize:'13px' }}>Nel tuo portale</div>
+            <div style={{ fontSize:'12px', color:'#9ca3af', marginBottom:'8px' }}>I tuoi utenti diretti. «Cliente» = i tuoi clienti.</div>
             {GRUPPI.map(g => (
               <label key={g} style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px', fontSize:'14px', color:'#1a1a1a', cursor:'pointer' }}>
                 <input type="checkbox" checked={gruppi.includes(g)} onChange={()=>toggleGruppo(g)} />
-                {g}
+                {g === 'Cliente' ? 'Clienti' : g === 'Amministratore' ? 'Amministratori' : g === 'Operatore' ? 'Operatori' : 'Agenti'}
+              </label>
+            ))}
+          </div>
+
+          {/* 2) SOTTO-MASTER della rete a valle. Ricevono il sotto-master e il suo staff, NON i suoi clienti. */}
+          <div style={{ border:'1px solid #e5e7eb', borderRadius:'8px', padding:'12px 14px', marginBottom:'20px' }}>
+            <div style={{ fontWeight:'700', color:'#374151', marginBottom:'2px', fontSize:'13px' }}>La tua rete (sotto-master)</div>
+            <div style={{ fontSize:'12px', color:'#9ca3af', marginBottom:'8px' }}>La ricevono il sotto-master e il suo staff (amministratori/operatori) — <b>non</b> i clienti del sotto-master.</div>
+            {[
+              { v:'', t:'Nessuno', d:'Non mandare ai sotto-master.' },
+              { v:'diretti', t:'Solo i sotto-master diretti', d:'Solo quelli che hai creato tu, primo livello.' },
+              { v:'tutti', t:'Tutta la rete a valle', d:'Tutti i sotto-master, anche i sotto-master dei tuoi sotto-master (a scendere).' },
+              { v:'contratto', t:'Solo chi ha un contratto proprio', d:'Fra tutta la rete a valle, solo i master che possiedono un contratto proprio.' },
+            ].map(o => (
+              <label key={o.v} style={{ display:'flex', alignItems:'flex-start', gap:'8px', marginBottom:'8px', fontSize:'14px', color:'#1a1a1a', cursor:'pointer' }}>
+                <input type="radio" name="reteModo" checked={reteModo === o.v} onChange={()=>setReteModo(o.v as any)} style={{ marginTop:'3px' }} />
+                <span><span style={{ fontWeight:600 }}>{o.t}</span><span style={{ display:'block', fontSize:'12px', color:'#9ca3af' }}>{o.d}</span></span>
               </label>
             ))}
           </div>
@@ -149,7 +173,12 @@ export default function InviaNotifica() {
               ) : lista.map((n:any)=>(
                 <tr key={n.id} style={{ borderBottom:'1px solid #f1f5f9' }}>
                   <td style={{ padding:'10px 14px', color:'#1a1a1a', whiteSpace:'nowrap' }}>{new Date(n.created_at).toLocaleDateString('it-IT')} {new Date(n.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</td>
-                  <td style={{ padding:'10px 14px', color:'#1a1a1a' }}>{(n.gruppi||[]).join(', ')}</td>
+                  <td style={{ padding:'10px 14px', color:'#1a1a1a' }}>
+                    {(n.gruppi||[]).map((g:string)=> g==='Cliente'?'Clienti':g==='Amministratore'?'Amministratori':g==='Operatore'?'Operatori':g==='Agente'?'Agenti':g).join(', ') || (Array.isArray(n.target_master_ids)&&n.target_master_ids.length ? '' : '—')}
+                    {Array.isArray(n.target_master_ids) && n.target_master_ids.length > 0 && (
+                      <span style={{ display:'inline-block', marginLeft:(n.gruppi||[]).length?'6px':0, background:'#eef2ff', color:'#4338ca', borderRadius:'5px', padding:'1px 7px', fontSize:'11px', fontWeight:700 }}>+{n.target_master_ids.length} sotto-master</span>
+                    )}
+                  </td>
                   <td style={{ padding:'10px 14px', color:'#1a1a1a', fontWeight:'600' }}>{n.oggetto}</td>
                   <td style={{ padding:'10px 14px', color:'#555', maxWidth:'300px' }}>
                     <div dangerouslySetInnerHTML={{__html: n.messaggio || ''}} />

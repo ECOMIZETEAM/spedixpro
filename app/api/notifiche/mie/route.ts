@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 
 // Notifiche destinate all'utente, con una CATEGORIA calcolata così le schermate possono dividerle in
 // tab (gli avvisi importanti non devono più sparire sotto la valanga di "Spedizione consegnata").
@@ -39,8 +40,21 @@ export async function GET(_req: NextRequest) {
         .order('created_at', { ascending: false }).limit(60)
     : Promise.resolve({ data: [] as any[] })
 
-  const [{ data: avvisi }, { data: eventi }] = await Promise.all([avvisiQ, eventiP])
-  const tutte = [...(avvisi || []), ...(eventi || [])]
+  // NOTIFICHE DI RETE da un ANTENATO: un master superiore ha mandato un broadcast ai sotto-master, e
+  // la nostra master_id è nei destinatari (target_master_ids). Le legge solo lo STAFF (master/admin/
+  // operatore): sono messaggi da master a master, non per i clienti del sotto-master. Via admin perché
+  // l'RLS di notifiche mostra a ciascuno solo la propria rete a valle, non le notifiche degli antenati.
+  const ruolo = (utente.ruolo || '').toLowerCase()
+  const staffMaster = ['master', 'admin', 'operatore'].includes(ruolo)
+  const reteP = staffMaster
+    ? createAdminSupabase().from('notifiche').select('*')
+        .contains('target_master_ids', [utente.master_id])
+        .is('cliente_id', null)
+        .order('created_at', { ascending: false }).limit(30)
+    : Promise.resolve({ data: [] as any[] })
+
+  const [{ data: avvisi }, { data: eventi }, { data: rete }] = await Promise.all([avvisiQ, eventiP, reteP])
+  const tutte = [...(avvisi || []), ...(eventi || []), ...(rete || [])]
     .map(n => ({ ...n, categoria: categoria(n) }))
     .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
 

@@ -10,15 +10,30 @@ export async function POST(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
 
   const body = await req.json()
-  const { oggetto, messaggio, gruppi, allegati } = body
+  const { oggetto, messaggio, gruppi, allegati, reteModo } = body
   if (!oggetto || !oggetto.trim()) return NextResponse.json({ error: 'Oggetto obbligatorio' }, { status: 400 })
-  if (!Array.isArray(gruppi) || !gruppi.length) return NextResponse.json({ error: 'Seleziona almeno un gruppo di utenti' }, { status: 400 })
+  const gruppiArr: string[] = Array.isArray(gruppi) ? gruppi : []
+  // Destinatari di RETE (sotto-master): 'diretti' | 'tutti' | 'contratto'. Calcolati ORA (snapshot) e
+  // salvati in target_master_ids; li leggerà /api/notifiche/mie via admin (l'RLS non mostra a un
+  // sotto-master le notifiche di un antenato). Vedi lib/rete-notifiche.
+  const modo: 'diretti' | 'tutti' | 'contratto' | null = ['diretti', 'tutti', 'contratto'].includes(reteModo) ? reteModo : null
+  let target_master_ids: string[] | null = null
+  if (modo && utente?.master_id) {
+    const { masterDestinatariRete } = await import('@/lib/rete-notifiche')
+    const ids = await masterDestinatariRete(createAdminSupabase(), utente.master_id, modo)
+    target_master_ids = ids.length ? ids : null
+  }
+  // Serve almeno un destinatario: un gruppo del proprio portale OPPURE dei sotto-master raggiunti.
+  if (!gruppiArr.length && !target_master_ids) {
+    return NextResponse.json({ error: modo ? 'Nessun sotto-master da raggiungere con questa scelta. Seleziona anche un gruppo del tuo portale.' : 'Seleziona almeno un destinatario (un gruppo del tuo portale o i sotto-master)' }, { status: 400 })
+  }
 
   const { data, error } = await supabase.from('notifiche').insert({
     master_id: utente?.master_id,
     oggetto: oggetto.trim(),
     messaggio: messaggio || '',
-    gruppi,
+    gruppi: gruppiArr,
+    target_master_ids,
     created_by: user.id,
   }).select().single()
 
@@ -38,7 +53,7 @@ export async function POST(req: NextRequest) {
       if (agg) notifica = agg
     }
   }
-  return NextResponse.json({ success: true, notifica })
+  return NextResponse.json({ success: true, notifica, masterRaggiunti: target_master_ids?.length || 0 })
 }
 
 export async function GET(req: NextRequest) {
