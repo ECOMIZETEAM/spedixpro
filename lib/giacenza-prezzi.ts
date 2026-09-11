@@ -75,11 +75,15 @@ export async function noloClienteSpedizione(admin: any, sped: any): Promise<numb
 // L'apertura giacenza è addebitata a parte all'ENTRATA in giacenza (dal cron), quindi NON entra
 // nel totale dell'operazione di svincolo. costo_apertura resta come info (già addebitata).
 //
-// La base "solo nolo" vale SOLO PER IL RESO. Su una riconsegna il pacco riparte per essere
-// consegnato: il contrassegno si incassa lo stesso e la sponda serve di nuovo, quindi la base
-// resta il prezzo pieno che il cliente aveva pagato.
+// LA % SI APPLICA SEMPRE SUL NOLO (fascia/zona + fuel), per TUTTE le operazioni — riconsegna, nuovo
+// destinatario e reso — e UGUALE per il cliente e per la catena dei master (Lorenzo 11/09: "si paga
+// sul nolo fascia/zona + fuel come il reso"). Prima solo il reso usava il nolo; riconsegna/nuovo
+// usavano costo_totale (col contrassegno/assicurazione/sponda dentro), così il CLIENTE pagava la %
+// su costo_totale mentre i MASTER a monte (addebitaGiacenzaCatena → noloMaster) la pagavano sul nolo
+// fascia/zona: stessa operazione, due basi diverse. `baseNolo` è il nolo fascia/zona già calcolato da
+// chi chiama (noloClienteSpedizione); il ripiego a costo_totale vale solo se il nolo non è ricalcolabile.
 export function calcolaCosti(operazione: string, prezzi: any, sped: any, baseNolo?: number | null) {
-  const base = operazione === 'reso' && baseNolo != null && baseNolo >= 0 ? baseNolo : noloBase(sped)
+  const base = baseNolo != null && baseNolo >= 0 ? baseNolo : noloBase(sped)
   const serv = prezzi.servizi[operazione] || { valore: 0, perc: 0 }
   const costoServizio = (Number(serv.valore) || 0) + ((Number(serv.perc) || 0) / 100) * base
   const costoApertura = operazione === 'reso' ? 0 : (Number(prezzi.apertura) || 0)
