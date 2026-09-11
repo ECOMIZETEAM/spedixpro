@@ -5,6 +5,7 @@ import SelectCercabile from '@/app/components/SelectCercabile'
 import { useRouter } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
 import SelettoreArticoli, { type RigaArticolo, type ArticoloCat } from '@/app/components/SelettoreArticoli'
+import { isExtraUe } from '@/lib/paesi-ue'
 import { PAESI_MONDO } from '@/lib/paesi-elenco'
 
 function iconaCorriere(nome:string): string | null {
@@ -810,6 +811,13 @@ export default function NuovaSpedizionePage() {
                   <label style={lbl}>Codice HS/TARIC (dogana)</label>
                   <input value={hscode} onChange={e=>setHscode(e.target.value)} placeholder="es. 61091000 — solo cifre" style={inp}/>
                   <div style={{fontSize:'11px',color:'#888',marginTop:'4px'}}>Obbligatorio per le spedizioni fuori Italia. Se lo lasci vuoto proviamo a ricavarlo dalla descrizione, ma potrebbe non bastare (in quel caso la spedizione non parte).</div>
+                </div>
+              )}
+              {isExtraUe(dest.paese) && (
+                <div style={{marginTop:'10px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px 12px',fontSize:'12px',color:'#9a3412',lineHeight:1.5}}>
+                  <b>Destinazione fuori UE — passa dalla dogana.</b> Compila bene contenuto, valore e codice HS di ogni articolo:
+                  la spedizione richiede lo sdoganamento e <b>potrebbe non partire subito</b> (a volte servono documenti aggiuntivi,
+                  es. EORI, che vanno caricati a parte). Le destinazioni UE partono invece regolarmente.
                 </div>
               )}
             </div>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { inviaEmailDoganaFerma } from '@/lib/email'
+import { isExtraUe } from '@/lib/paesi-ue'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -15,7 +16,11 @@ export const maxDuration = 120
 // tracking_number da oltre qualche ora è quasi certamente "inserita con anomalie" doganali.
 // dogana_bloccata_at fa da flag (badge in lista + niente re-invio): si scrive SOLO dopo aver aperto il
 // ticket, così un errore lascia la riga ripescabile al giro dopo.
-const ORE_SOGLIA = 6
+// SOGLIA 2h (era 6h): verificato sul campo (11/9) che gli extra-UE su DVA NON prendono MAI la LDV da
+// soli — un ordine di prova con dati doganali perfetti era ancora senza LDV dopo 21h. Le UE-estero
+// invece la prendono in pochi minuti. Quindi una TMP- estera oltre 2h è già un caso dogana: si apre
+// prima il ticket "servono documenti" invece di far perdere mezza giornata.
+const ORE_SOGLIA = 2
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export async function GET(req: NextRequest) {
@@ -40,8 +45,9 @@ export async function GET(req: NextRequest) {
     .order('created_at', { ascending: true })
     .limit(200)
 
-  // Estero = dest_paese != IT (in memoria, robusto a null/maiuscole, come il resto del codice).
-  const candidate = (ferme || []).filter((s: any) => String(s.dest_paese || 'IT').toUpperCase() !== 'IT')
+  // Solo EXTRA-UE: la dogana (e i documenti EORI/contenuto) riguarda le destinazioni fuori UE. Un raro
+  // stallo su una UE-estero non deve ricevere il ticket "carica i documenti doganali" (non ne ha).
+  const candidate = (ferme || []).filter((s: any) => isExtraUe(s.dest_paese))
 
   let ticketAperti = 0, emailInviate = 0, marcate = 0
   for (const s of candidate) {
