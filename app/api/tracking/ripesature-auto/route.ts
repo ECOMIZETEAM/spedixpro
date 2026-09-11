@@ -48,9 +48,17 @@ export async function GET(req: NextRequest) {
 
   // Candidati: consegnate PDB, le piu' RECENTI prima (le nuove consegne hanno priorita'), non ancora
   // controllate. L'anti-join su ripesature_check fa avanzare il giro da solo.
+  //
+  // SOLO COLLO SINGOLO. Su un multicollo il dettaglio OneTracking da' una misura sola e non dice a
+  // quale collo appartiene (le righe RILEVATO hanno numColli "-", il numero sta solo sul
+  // DICHIARATO) e i codici dei colli figli non esistono ne' da Poste ne' dal fornitore. Riprezzare
+  // un collo di N e' una base sbagliata: dal 21 al 24/08/2026 sono uscite 79 rettifiche cosi'
+  // (354,68 EUR) — in DIFETTO, perche' un collo pesa meno della somma, ma sempre su un numero
+  // inventato. Il multicollo torna quando si potranno leggere le misure collo per collo.
   const { data: cand } = await admin.from('spedizioni')
     .select('id,tracking_number')
     .in('corriere_id', pdbIds).eq('stato', 'consegnata').not('tracking_number', 'is', null)
+    .or('colli.is.null,colli.eq.1')
     .order('created_at', { ascending: false }).limit(400)
   const ids = (cand || []).map((c: any) => c.id)
   const { data: giaCheck } = ids.length
