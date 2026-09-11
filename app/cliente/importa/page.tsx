@@ -96,6 +96,8 @@ export default function ImportaOrdiniPage() {
   const [q, setQ] = useState('')                       // ricerca libera (ordine, destinatario, località, cap, telefono)
   const [ordina, setOrdina] = useState<'data_desc'|'data_asc'|'dest_az'|'dest_za'|'localita'>('data_desc')
   const [soloDoppi, setSoloDoppi] = useState(false)
+  const [fDa, setFDa] = useState('')   // "2026-09-11T08:00" — data E ora: in un giorno si caricano piu' file
+  const [fA, setFA] = useState('')
   const [filtroStato, setFiltroStato] = useState('da_spedire') // default: solo i NON evasi. tutti | da_spedire | spedito | errore | archiviato
   const [spedendo, setSpedendo] = useState(false)
   const [unendo, setUnendo] = useState(false)
@@ -526,6 +528,14 @@ export default function ImportaOrdiniPage() {
         .map(v => String(v ?? '').toLowerCase())
       if (!campi.some(v => v.includes(s))) return false
     }
+    // Data E ORA del caricamento: in una giornata si importano piu' file, e "quelli di stamattina"
+    // e' la domanda vera quando si cerca un ordine da annullare.
+    if (fDa || fA) {
+      const t = new Date(String((o as any).created_at || '')).getTime()
+      if (!t) return false
+      if (fDa && t < new Date(fDa).getTime()) return false
+      if (fA && t > new Date(fA).getTime()) return false
+    }
     return true
   })
   // CHI HA PIU' DI UN ORDINE DA SPEDIRE. La chiave e' la STESSA che usa l'unione: se la calcolassi
@@ -737,6 +747,10 @@ export default function ImportaOrdiniPage() {
               placeholder="🔍 Cerca per ordine, destinatario, località, CAP, telefono…"
               style={{ ...inp, flex: 1, minWidth: '240px', padding: '8px 11px' }}
             />
+            <input type="datetime-local" value={fDa} onChange={e => setFDa(e.target.value)} title="Importati da"
+              style={{ ...inp, width: 'auto', padding: '7px 9px', fontSize: '12px' }} />
+            <input type="datetime-local" value={fA} onChange={e => setFA(e.target.value)} title="Importati fino a"
+              style={{ ...inp, width: 'auto', padding: '7px 9px', fontSize: '12px' }} />
             <select value={ordina} onChange={e => setOrdina(e.target.value as any)} style={{ ...inp, width: 'auto', minWidth: '170px', padding: '8px 10px' }}>
               <option value="data_desc">Data ↓ (piu' recenti)</option>
               <option value="data_asc">Data ↑ (piu' vecchi)</option>
@@ -761,8 +775,8 @@ export default function ImportaOrdiniPage() {
               <option value="unito">Unito</option>
               <option value="archiviato">Archiviato</option>
             </select>
-            {(q || filtroStato !== 'tutti' || soloDoppi || ordina !== 'data_desc') && (
-              <button onClick={() => { setQ(''); setFiltroStato('tutti'); setSoloDoppi(false); setOrdina('data_desc') }}
+            {(q || filtroStato !== 'tutti' || soloDoppi || ordina !== 'data_desc' || fDa || fA) && (
+              <button onClick={() => { setQ(''); setFiltroStato('tutti'); setSoloDoppi(false); setOrdina('data_desc'); setFDa(''); setFA('') }}
                 style={{ background: '#fff', color: '#666', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 12px', fontSize: '12.5px', cursor: 'pointer' }}>
                 Azzera filtri
               </button>
@@ -791,6 +805,7 @@ export default function ImportaOrdiniPage() {
                     <input type="checkbox" checked={allChecked} onChange={toggleAll} />
                   </th>
                   <th style={th}>Ordine</th>
+                  <th style={{ ...th, whiteSpace: 'nowrap' as const }}>Importato</th>
                   <th style={th}>Destinatario</th>
                   <th style={th}>Prodotti</th>
                   <th style={th}>Collo</th>
@@ -810,6 +825,18 @@ export default function ImportaOrdiniPage() {
                       <td style={td}>
                         <span style={{ fontFamily: 'monospace', fontSize: '12px', color: '#1a1a1a' }}>{o.order_id || '—'}</span>
                         <div style={sub}>{o.rif_mittente || mittenteNome || '—'}</div>
+                      </td>
+                      <td style={{ ...td, whiteSpace: 'nowrap' as const, color: '#6b7280', fontSize: '12px' }}>
+                        {(() => {
+                          const t = String((o as any).created_at || '')
+                          if (!t) return '—'
+                          const d = new Date(t)
+                          if (Number.isNaN(d.getTime())) return '—'
+                          return (<>
+                            {d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                            <div style={sub}>{d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</div>
+                          </>)
+                        })()}
                       </td>
                       {/* DESTINATARIO — nome, via, comune e telefono in una cella sola: prima erano
                           cinque colonne (Destinatario, Località, CAP, Prov, Telefono) e da sole
