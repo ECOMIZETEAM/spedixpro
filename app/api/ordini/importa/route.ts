@@ -166,8 +166,18 @@ export async function POST(req: NextRequest) {
       })
     } else {
       const text = await file.text()
+      // Amazon (e altri report gestionali) sono TAB-separati e NON quotano i campi: un " dentro un
+      // indirizzo (es. '"Castello Di Monterinaldi"  Case Sparse...') faceva credere a Papa di aprire
+      // un campo quotato e gli faceva INGHIOTTIRE tutto il resto del file come un unico campo non
+      // terminato -> restava 1 sola riga malformata, senza CAP/citta, scartata -> "nessun ordine
+      // valido" e l'intero file non si importava. Se la prima riga e' TAB-separata forzo il tab e
+      // DISABILITO le virgolette (qui sono caratteri letterali). Per i CSV veri (Shopify, virgola) le
+      // virgolette servono a contenere le virgole nei campi: restano attive.
+      const nl = text.indexOf('\n')
+      const eTsv = text.slice(0, nl >= 0 ? nl : text.length).includes('\t')
       const parsed = Papa.parse<Record<string, string>>(text, {
         header: true, skipEmptyLines: true, transformHeader: normHeader,
+        ...(eTsv ? { delimiter: '\t', quoteChar: '' } : {}),
       })
       rows = (parsed.data || []).filter(Boolean)
     }
