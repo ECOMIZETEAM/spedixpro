@@ -73,15 +73,16 @@ export default function ReportAgentiPage() {
       const periodo = gen.periodoStr(filtri.dal, filtri.al)
       const nomeBase = `report_agenti_${filtri.dal}_${filtri.al}`
       const headers = ['Agente', 'Metodo', 'Spedizioni', 'Margine agente', 'Da dargli']
+      const sumSped = righe.reduce((a: number, x: any) => a + (Number(x.numSpedizioni) || 0), 0)
       let b64: string
       if (fmt === 'pdf') {
         const rows = righe.map((a: any) => [a.nome, [a.metodoLabel, valoreMetodo(a)].filter(Boolean).join(' '), a.numSpedizioni, baseTxt(a), eur(a.guadagno)])
-        const tot = ['TOTALE', '', '', '', eur(d.totale)]
+        const tot = ['TOTALE', '', sumSped, '', eur(d.totale)]
         const titolo = filtri.agenteId ? (agentiLista.find((x: any) => x.id === filtri.agenteId)?.nome || '') : ''
         b64 = await gen.pdfTabellaB64(intest, periodo, titolo, headers, rows, tot, { 2: 'center', 3: 'right', 4: 'right' })
       } else {
         const rows = righe.map((a: any) => [a.nome, [a.metodoLabel, valoreMetodo(a)].filter(Boolean).join(' '), a.numSpedizioni, a.margineAgente != null ? Math.round(a.margineAgente * 100) / 100 : '', Math.round(a.guadagno * 100) / 100])
-        const tot = ['TOTALE', '', '', '', Math.round(d.totale * 100) / 100]
+        const tot = ['TOTALE', '', sumSped, '', Math.round(d.totale * 100) / 100]
         b64 = await gen.excelTabellaB64(headers, rows, tot, fmt)
       }
       await salvaReport(b64, nomeBase + '.' + ext, fmt)
@@ -162,6 +163,17 @@ export default function ReportAgentiPage() {
                   </tr>
                 ))}
               </tbody>
+              {/* Riga TOTALE in fondo alla tabella (come nei file PDF/Excel): prima c'era solo il
+                  riquadro verde in alto, e in fondo alla tabella il totale mancava. */}
+              <tfoot>
+                <tr style={{ borderTop: '2px solid #e5e7eb' }}>
+                  <td style={{ ...td, fontWeight: 800 }}>TOTALE</td>
+                  <td style={td}></td>
+                  <td style={{ ...td, fontWeight: 700 }}>{d.agenti.reduce((a: number, x: any) => a + (Number(x.numSpedizioni) || 0), 0)}</td>
+                  <td style={td}></td>
+                  <td style={{ ...td, textAlign: 'right', fontWeight: 800, color: '#16a34a', fontSize: 15 }}>{eur(d.totale)}</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
           <p style={{ fontSize: 12, color: '#9ca3af', margin: '0 0 16px' }}>Calcolato sui movimenti reali dei clienti dell&apos;agente (rettifiche e resi compresi). Il &quot;Margine agente&quot; è il guadagno dell&apos;agente sui suoi clienti (prezzo cliente − costo del suo listino), non il tuo margine di master; &quot;—&quot; se all&apos;agente non è assegnato un listino.</p>
