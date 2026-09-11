@@ -86,6 +86,10 @@
     {
       "path": "/api/cron/riallinea-contrassegni-m",
       "schedule": "40 * * * *"
+    },
+    {
+      "path": "/api/tracking/ripesature-auto",
+      "schedule": "*/20 * * * *"
     }
   ]
 }

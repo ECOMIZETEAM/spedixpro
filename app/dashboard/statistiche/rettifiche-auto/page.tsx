@@ -6,7 +6,6 @@ const card = { background: '#fff', borderRadius: '10px', border: '1px solid #e8e
 
 export default function RettificheAutoPage() {
   const [dati, setDati] = useState<any>(null)
-  const [copiato, setCopiato] = useState(false)
 
   async function carica() {
     const d = await fetch('/api/tracking/onetracking-sessione').then(r => r.json()).catch(() => null)
@@ -15,35 +14,28 @@ export default function RettificheAutoPage() {
   useEffect(() => { carica(); const t = setInterval(carica, 20000); return () => clearInterval(t) }, [])
 
   const st = dati?.statistiche || {}
-  const token = dati?.token || '—'
 
   return (
     <div style={{ maxWidth: '820px' }}>
       <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: '0 0 4px' }}>Rettifiche automatiche</h1>
       <p style={{ color: '#999', fontSize: '13px', margin: '0 0 18px' }}>
-        Ogni PDB consegnata viene controllata: se il ripesato è più alto, nasce una rettifica <b>in attesa</b>
-        (la confermi tu in <b>Rettifica Costi</b>). Solo recuperi, mai rimborsi. La lettura del ripesato la fa
-        lo <b>script sul tuo Mac</b> (Poste blocca i server esteri), che manda qui solo il peso/misure.
+        Ogni consegnata dei contratti Poste di MULTIEXPRESS viene ricontrollata sulla misura vera del
+        corriere: se il collo è <b>più grande</b> di quello pagato <i>e</i> col listino di quel livello
+        cambia il prezzo, nasce una rettifica <b>in attesa</b> (la confermi tu in <b>Rettifica Costi</b>).
+        Se resta nello stesso scaglione non nasce niente. <b>Solo recuperi, mai rimborsi.</b>
       </p>
 
-      {/* Come si lancia */}
+      {/* Come funziona — non c'è piu' niente da lanciare a mano */}
       <div style={{ ...card, marginBottom: '16px' }}>
-        <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', marginBottom: '10px' }}>Come si avvia (dal tuo Mac)</div>
+        <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', marginBottom: '10px' }}>Gira da solo</div>
         <ol style={{ fontSize: '13px', color: '#374151', lineHeight: 1.8, margin: 0, paddingLeft: '20px' }}>
-          <li>Su <b>OneTracking</b> (loggato): F12 → Network → tasto destro su una richiesta a <code>one-tracking-filiali</code> → <b>Copy as cURL</b>.</li>
-          <li>Incollalo nel file <code>onetracking.curl</code> accanto allo script <code>~/Desktop/moove-harvester-ripesature.py</code>.</li>
-          <li>Nel Terminale: <code style={{ background: '#f3f4f6', padding: '2px 6px', borderRadius: '4px' }}>python3 ~/Desktop/moove-harvester-ripesature.py</code></li>
+          <li>Il Mac legge le misure del corriere e le porta qui (login automatico, 3 volte al giorno).</li>
+          <li>Ogni 20 minuti il conto viene rifatto sulle consegnate che hanno una misura nuova.</li>
+          <li>Quello che esce lo trovi in <b>Rettifica Costi</b>, da confermare.</li>
         </ol>
-        <div style={{ marginTop: '14px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '12px', color: '#6b7280' }}>Token (già dentro lo script):</span>
-          <code style={{ background: '#111', color: '#fff', padding: '5px 10px', borderRadius: '6px', fontSize: '12px', userSelect: 'all' }}>{token}</code>
-          <button onClick={() => { navigator.clipboard?.writeText(token); setCopiato(true); setTimeout(() => setCopiato(false), 1500) }}
-            style={{ padding: '5px 12px', background: '#fff', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', color: '#374151' }}>
-            {copiato ? '✓ copiato' : 'copia'}
-          </button>
-        </div>
         <div style={{ marginTop: '10px', fontSize: '12px', color: '#8a8a8a' }}>
-          Lo script si ferma da solo quando la sessione OneTracking scade: rifai il Copy-as-cURL nel file e rilancialo.
+          Restano fuori: i <b>multicollo</b> (una misura sola non è la spedizione) e i contratti Poste di
+          altri master, che pagano il proprio fornitore.
         </div>
       </div>
 
