@@ -1,9 +1,14 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
-import { spediamoproSearchStocks, spediamoproReleaseStock } from '@/lib/spediamopro'
+import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { vedeLaRete } from '@/lib/perimetro'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
+
+// Elenco giacenze (lista master). La GESTIONE (svincolo/riconsegna/reso/nuovo indirizzo + addebito)
+// NON sta più qui: passa dalla porta unica eseguiSvincolo via /api/giacenze/[id] (dettaglio), il
+// portale cliente (/api/cliente/giacenze) e l'API v1. Il vecchio POST di questa rotta — svincolo
+// rapido a sola "riconsegna", senza scelta reso/nuovo indirizzo e con un costo giornaliero mai
+// addebitato — era rimasto agganciato solo a un modal ORMAI MORTO della lista: rimosso (11/09/2026).
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -73,127 +78,4 @@ export async function GET(req: NextRequest) {
 
   const { data } = await query
   return NextResponse.json(data || [])
-}
-
-export async function POST(req: NextRequest) {
-  const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
-  const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
-
-  // LE GIACENZE DELLA RETE LE GESTISCE CHI LA RETE LA VEDE.
-  // Il controllo piu' sotto e' "la spedizione sta nel sotto-albero del MIO master": corretto per un
-  // master, rovinoso per un cliente — che un master_id ce l'ha anche lui, tutti e 634. E siccome
-  // questa rotta legge e scrive con l'accesso pieno, le regole per-inquilino non lo fermavano: un
-  // cliente qualsiasi poteva svincolare o chiudere la giacenza di QUALUNQUE spedizione della rete
-  // del suo master — non solo le proprie — facendo partire la chiamata al corriere e l'addebito su
-  // tutta la catena. Il cliente la sua giacenza la CHIEDE, da /api/giacenze/[id]: e' li' che il
-  // master la conferma.
-  // Il portale cliente questa rotta non la chiama affatto: la usa solo la dashboard del master.
-  if (!vedeLaRete(utente)) {
-    return NextResponse.json({ error: 'Operazione riservata al master.' }, { status: 403 })
-  }
-
-  const body = await req.json()
-  const { spedizioneId, istruzioni, azione, releaseAction } = body
-
-  // Il master gestisce le giacenze di TUTTA la sua rete (non solo le proprie): autorizzo sul
-  // sotto-albero e uso l'admin per leggere/scrivere cross-master (come per la visibilità in GET).
-  const { createAdminSupabase } = await import('@/lib/supabase-admin')
-  const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
-  const adminDb = createAdminSupabase()
-  const subtree = utente?.master_id ? await sottoAlberoMasterIds(adminDb, utente.master_id) : []
-
-  // Carica spedizione (deve appartenere alla mia rete)
-  const { data: spedizione } = await adminDb.from('spedizioni')
-    .select('*, clienti(ragione_sociale), corrieri(credenziali,nome_contratto,tipo)')
-    .eq('id', spedizioneId).in('master_id', subtree.length ? subtree : ['00000000-0000-0000-0000-000000000000']).single()
-  if (!spedizione) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
-
-  // Calcola giorni giacenza e costi
-  const dataGiacenza = spedizione.giacenza_data ? new Date(spedizione.giacenza_data) : new Date(spedizione.created_at)
-  const giorni = Math.max(1, Math.ceil((new Date().getTime() - dataGiacenza.getTime()) / (1000 * 60 * 60 * 24)))
-  const costoGiornaliero = parseFloat(spedizione.giacenza_costo_giornaliero || 0)
-  const costoRiconsegna = parseFloat(spedizione.giacenza_costo_riconsegna || 0)
-  const costoTotale = (costoGiornaliero * giorni) + costoRiconsegna
-
-  if (azione === 'svincola') {
-    // Chiama l'API del corriere per svincolare
-    const cred = spedizione.corrieri?.credenziali as Record<string,string>
-    const tipoCorr = spedizione.corrieri?.tipo
-    if (tipoCorr === 'spediamopro' && cred?.authcode) {
-      // SpediamoPro: cerca lo stock attivo della spedizione e lo rilascia
-      try {
-        const raw: any = spedizione.raw_response || {}
-        const spid = raw.id || raw?.raw?.data?.id
-        const code = raw.code || raw?.raw?.data?.code || spedizione.tracking_number
-        const stocks = await spediamoproSearchStocks(cred.authcode, String(code))
-        const attivo = (stocks || []).find((st: any) => Number(st.status) === 1 && (!spid || Number(st.shipmentId) === Number(spid)))
-        if (attivo?.id) {
-          // releaseAction: 1 = riconsegna stesso indirizzo (default), 3 = reso al mittente. Serve al
-          // "Ri-svincola" del Controllo Giacenze: le re-giacenze (2° fallimento consegna) spesso vanno a
-          // RESO. instructions opzionale. Nota: l'addebito e' gia' stato fatto (guard sotto) -> il
-          // ri-svincolo non ri-addebita.
-          const ra = Number(releaseAction) === 3 ? 3 : 1
-          await spediamoproReleaseStock(cred.authcode, Number(attivo.id), ra, istruzioni ? { instructions: istruzioni } : {})
-        }
-      } catch (e) { console.error('Errore svincolo SpediamoPro:', e) }
-    } else if (tipoCorr === 'easyparcel' && cred?.apikey) {
-      // Contratto V: anche questa strada deve arrivare al corriere, altrimenti il pacco resta
-      // fermo in deposito mentre da noi risulta svincolato. Qui l'azione e' sempre la riconsegna
-      // al destinatario, come nel ramo dell'altro contratto qui sopra.
-      try {
-        const { easyparcelSvincolo } = await import('@/lib/easyparcel')
-        await easyparcelSvincolo(cred.apikey, String(spedizione.numero || spedizione.tracking_number), 'D', {
-          note: istruzioni || 'Riconsegnare al destinatario',
-          telefonoDestinatario: spedizione.dest_telefono || '',
-        })
-      } catch (e) { console.error('Errore svincolo contratto V:', e) }
-    } else if (cred?.master_domain && cred?.password && (spedizione.tracking_number || spedizione.numero)) {
-      // Spedisci.online: rilascio giacenza via /api/v2/stock/update (endpoint corretto; il vecchio
-      // /shipping/delivery-instructions dava 404, il pacco restava fermo). Qui è sempre riconsegna = RETRY.
-      try {
-        const oggi = new Date()
-        const sched = `${String(oggi.getDate()).padStart(2, '0')}/${String(oggi.getMonth() + 1).padStart(2, '0')}/${oggi.getFullYear()}`
-        await fetch(`https://${cred.master_domain}/api/v2/stock/update`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ldv: String(spedizione.tracking_number || spedizione.numero), action: 'RETRY', scheduled_at: sched, note: (istruzioni || 'Riconsegnare al destinatario').slice(0, 200) })
-        })
-      } catch(e) { console.error('Errore svincolo Spedisci:', e) }
-    }
-
-    // Aggiorna stato spedizione (admin: può essere di un sotto-master della rete)
-    await adminDb.from('spedizioni').update({
-      giacenza_stato: 'svincolata',
-      giacenza_istruzioni: istruzioni,
-      giacenza_giorni: giorni,
-      stato: 'in_consegna',
-      // Svincolo appena fatto: azzero l'esito del Controllo Giacenze, altrimenti un vecchio "ferma"
-      // resta appiccicato (e la grace <12h salta la riverifica) -> falso "ferma" su una gia' svincolata.
-      giacenza_verifica_esito: null, giacenza_verifica_at: null,
-    }).eq('id', spedizioneId)
-
-    // Addebito SVINCOLO (servizio riconsegna) — UNIFICATO col flusso corretto: usa la cascata rete
-    // (lib/giacenza-cascata) sulla tabella `movimenti`, non più `movimenti_clienti` senza cascata.
-    // L'APERTURA è già stata addebitata all'ENTRATA in giacenza (cron). Guard giacenza_addebito_effettuato.
-    if (!spedizione.giacenza_addebito_effettuato) {
-      const { addebitaServizioGiacenza } = await import('@/lib/giacenza-cascata')
-      await addebitaServizioGiacenza(
-        { id: spedizioneId, numero: spedizione.numero, cliente_id: spedizione.cliente_id, master_id: spedizione.master_id, corriere_id: spedizione.corriere_id },
-        'riconsegna', costoRiconsegna
-      )
-      await adminDb.from('spedizioni').update({ giacenza_addebito_effettuato: true }).eq('id', spedizioneId)
-    }
-
-    return NextResponse.json({ success: true, costoAddebitato: costoRiconsegna, giorni })
-  }
-
-  if (azione === 'chiudi') {
-    await adminDb.from('spedizioni').update({ giacenza_stato: 'chiusa' }).eq('id', spedizioneId)
-    return NextResponse.json({ success: true })
-  }
-
-  return NextResponse.json({ error: 'Azione non valida' }, { status: 400 })
 }

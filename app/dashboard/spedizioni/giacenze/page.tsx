@@ -16,10 +16,6 @@ export default function GiacenzePage() {
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useFiltriPersistenti('giacenze-master:cerca', '')
-  const [modal, setModal] = useState<any>(null)
-  const [istruzioni, setIstruzioni] = useState('')
-  const [elaborando, setElaborando] = useState(false)
-  const [esito, setEsito] = useState<any>(null)
   const [perPage, setPerPage] = useFiltriPersistenti('giacenze-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
   const [filtri, setFiltri] = useFiltriPersistenti('giacenze-master:filtri', {
@@ -69,26 +65,10 @@ export default function GiacenzePage() {
   }
 
   function calcolaCosto(g: any) {
-    const giorni = calcolaGiorni(g)
-    const costoG = parseFloat(g.giacenza_costo_giornaliero || 0)
-    const costoR = parseFloat(g.giacenza_costo_riconsegna || 0)
-    return (costoG * giorni) + costoR
-  }
-
-  async function svincola() {
-    if (!modal) return
-    setElaborando(true)
-    const res = await fetch('/api/giacenze', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ spedizioneId: modal.id, istruzioni, azione: 'svincola' })
-    })
-    const data = await res.json()
-    setElaborando(false)
-    if (data.success) {
-      setEsito(data)
-      carica()
-    }
+    // SOLO il costo di riconsegna: il "costo giornaliero" NON viene mai addebitato (si paga apertura
+    // all'ENTRATA + servizio allo SVINCOLO, a cascata), quindi non deve comparire come se maturasse a
+    // giorni. Lo svincolo vero (con reso/nuovo indirizzo e addebito) si fa dal dettaglio della giacenza.
+    return parseFloat(g.giacenza_costo_riconsegna || 0)
   }
 
   const statoStyle: Record<string,{bg:string,color:string}> = {
@@ -274,70 +254,10 @@ export default function GiacenzePage() {
               </div>
             )}
       </div>
-
-      {/* Modal Gestisci Giacenza */}
-      {modal && (
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}} onClick={()=>{setModal(null);setEsito(null)}}>
-          <div style={{background:'#fff',borderRadius:'10px',width:'550px',maxWidth:'95vw',overflow:'hidden'}} onClick={e=>e.stopPropagation()}>
-            <div style={{padding:'16px 20px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-              <span style={{fontWeight:'700',color:'#1a1a1a',fontSize:'15px'}}>Gestisci Giacenza — {modal.numero}</span>
-              <button onClick={()=>{setModal(null);setEsito(null)}} style={{background:'none',border:'none',fontSize:'18px',cursor:'pointer',color:'#1a1a1a'}}>✕</button>
-            </div>
-            <div style={{padding:'20px'}}>
-              {esito ? (
-                <div>
-                  <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',padding:'16px',marginBottom:'16px',fontSize:'13px',color:'#16a34a',textAlign:'center' as const}}>
-                    <div style={{fontSize:'28px',marginBottom:'8px'}}>✅</div>
-                    <div style={{fontWeight:'700',marginBottom:'4px'}}>Svincolo effettuato!</div>
-                    {esito.costoAddebitato > 0 && (
-                      <div style={{color:'#1a1a1a',marginTop:'8px'}}>
-                        <strong>Addebito cliente:</strong> € {esito.costoAddebitato.toFixed(2)} ({esito.giorni} giorni giacenza)
-                      </div>
-                    )}
-                  </div>
-                  <button onClick={()=>{setModal(null);setEsito(null)}} style={{width:'100%',padding:'10px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>
-                    Chiudi
-                  </button>
-                </div>
-              ) : (
-                <div>
-                  <div style={{background:'#f9fafb',borderRadius:'8px',padding:'14px',marginBottom:'16px',border:'1px solid #d1d5db',fontSize:'13px'}}>
-                    <div style={{fontWeight:'700',marginBottom:'8px',color:'#1a1a1a'}}>📦 Dettagli Giacenza</div>
-                    <div style={{color:'#1a1a1a',lineHeight:1.8}}>
-                      <div><strong>Destinatario:</strong> {modal.dest_nome}</div>
-                      <div><strong>Indirizzo:</strong> {modal.dest_indirizzo}, {modal.dest_citta} ({modal.dest_provincia})</div>
-                      <div><strong>Motivo:</strong> {modal.giacenza_motivo||'INIZIO GIACENZA'}</div>
-                      <div><strong>Cliente:</strong> {modal.clienti?.ragione_sociale||'—'}</div>
-                      <div><strong>Giorni in giacenza:</strong> {calcolaGiorni(modal)}</div>
-                      {calcolaCosto(modal) > 0 && (
-                        <div><strong>Costo da addebitare:</strong> <span style={{color:'#dc2626',fontWeight:'700'}}>€ {calcolaCosto(modal).toFixed(2)}</span></div>
-                      )}
-                    </div>
-                  </div>
-                  <div style={{marginBottom:'16px'}}>
-                    <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Istruzioni per il corriere</label>
-                    <textarea value={istruzioni} onChange={e=>setIstruzioni(e.target.value)}
-                      rows={3} placeholder="es. Riconsegnare al destinatario, lasciare al vicino, ecc."
-                      style={{width:'100%',padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',resize:'vertical' as const,boxSizing:'border-box' as const}}/>
-                  </div>
-                  <div style={{display:'flex',gap:'10px'}}>
-                    <button onClick={svincola} disabled={elaborando}
-                      style={{flex:1,padding:'10px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer',opacity:elaborando?0.7:1}}>
-                      {elaborando?'Svincolo in corso...':'✅ Svincola'}
-                    </button>
-                    <button onClick={async()=>{
-                      await fetch('/api/giacenze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spedizioneId:modal.id,azione:'chiudi'})})
-                      setModal(null); carica()
-                    }} style={{padding:'10px 16px',background:'#f5f5f5',color:'#1a1a1a',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',fontWeight:'600',cursor:'pointer'}}>
-                      Chiudi giacenza
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* La gestione della giacenza (svincolo/riconsegna/reso/nuovo indirizzo + addebito) si fa dal
+          DETTAGLIO: "Gestisci" apre /dashboard/spedizioni/giacenze/[id] (porta unica eseguiSvincolo).
+          Il vecchio modal rapido a sola "riconsegna" è stato rimosso: era codice morto e non chiamava
+          il corriere per tutti i casi. */}
     </div>
   )
 }

@@ -68,10 +68,9 @@ export default function GiacenzePage() {
   }
 
   function calcolaCosto(g: any) {
-    const giorni = calcolaGiorni(g)
-    const costoG = parseFloat(g.giacenza_costo_giornaliero || 0)
-    const costoR = parseFloat(g.giacenza_costo_riconsegna || 0)
-    return (costoG * giorni) + costoR
+    // SOLO il costo di riconsegna: il "costo giornaliero" non viene mai addebitato (si paga apertura
+    // all'entrata + servizio allo svincolo), quindi non deve comparire come se maturasse a giorni.
+    return parseFloat(g.giacenza_costo_riconsegna || 0)
   }
 
   async function svincola() {
