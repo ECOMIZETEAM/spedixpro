@@ -113,14 +113,29 @@ export function rimisureDaDettaglio(json: any): { dichiarato: MisuraColo | null;
   let dichiarato: MisuraColo | null = null
   const rilevati: MisuraColo[] = []
   for (const r of righe) {
-    if (r?.tipo === 'DICHIARATO') { if (!dichiarato) dichiarato = leggi(r); continue }
-    if (r?.tipo !== 'RILEVATO') continue
+    const tipo = String(r?.tipo || '').trim().toUpperCase()
+    if (tipo === 'DICHIARATO') { if (!dichiarato) dichiarato = leggi(r); continue }
+    // TUTTO QUELLO CHE COMINCIA PER "RILEVATO" E' UNA MISURA, non solo `RILEVATO`. Esiste anche
+    // `RILEVATO MANUALE`: la misura presa a mano in filiale, rara (2 spedizioni su 150) ma proprio
+    // quella dei colli fuori sagoma, con il peso vero invece dello 0,00 del nastro. Leggendo solo
+    // `RILEVATO` si prendeva la scansione del documento (43x33x1) e si buttava via la misura del
+    // pacco (100x77x74): il fornitore fatturava 142 kg e il popup ne avrebbe mostrati 0,35.
+    if (!tipo.startsWith('RILEVATO')) continue
     const m = leggi(r)
     if (efficace(m) <= 0) continue      // riga tutta a "-": scansione senza misura, non dice niente
     rilevati.push(m)
   }
-  // Piu' alta prima: la prima e' quella che vale.
-  rilevati.sort((a, b) => efficace(b) - efficace(a))
+  // Piu' alta prima: la prima e' quella che vale. A PARI VALORE (entro il 2%) vince quella che ha un
+  // peso vero: lo stesso collo viene registrato due volte, dal nastro con peso 0,00 e a mano con
+  // 7,25 kg, e mostrare "40x31x25 · 0 kg" al cliente sembra un dato rotto — fatturare cambia nulla,
+  // capirci cambia tutto.
+  rilevati.sort((a, b) => {
+    const ea = efficace(a), eb = efficace(b)
+    if (Math.max(ea, eb) > 0 && Math.abs(ea - eb) / Math.max(ea, eb) <= 0.02) {
+      return (b.peso || 0) - (a.peso || 0) || eb - ea
+    }
+    return eb - ea
+  })
   return { dichiarato, rilevati, migliore: rilevati[0] || null }
 }
 
