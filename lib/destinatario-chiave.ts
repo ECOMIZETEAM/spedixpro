@@ -75,3 +75,27 @@ export function stessoDestinatario(chiavi: string[]): boolean {
   if (chiavi.length < 2) return false
   return chiavi.every(k => k === chiavi[0]) && chiavi[0].replace(/\|/g, '').trim().length > 0
 }
+
+/**
+ * CHI HA PIU' DI UN ORDINE DA SPEDIRE, raggruppato per destinatario.
+ *
+ * Serve agli elenchi: senza questo, per accorgersi che lo stesso compratore ha ordinato due volte
+ * bisogna leggersi tutte le righe a occhio — ed e' esattamente quello che succede con i file Amazon,
+ * che arrivano in ordine di data. Qui si dice chi sta insieme; unirli resta una scelta di chi guarda.
+ *
+ * La chiave e' la STESSA di `chiaveDestinatario` (che decide anche se l'unione e' permessa): se i
+ * due elenchi la calcolassero per conto loro, la pagina proporrebbe accoppiate che poi l'unione
+ * rifiuta.
+ */
+export function gruppiStessoDestinatario(righe: { id: string; chiave: string }[]): Map<string, string[]> {
+  const gruppi = new Map<string, string[]>()
+  for (const r of righe) {
+    // Una chiave di soli separatori vuol dire destinatario vuoto: non e' "uguale a un altro vuoto".
+    if (!r.chiave || !r.chiave.replace(/\|/g, '').trim()) continue
+    const insieme = gruppi.get(r.chiave) || []
+    insieme.push(r.id)
+    gruppi.set(r.chiave, insieme)
+  }
+  for (const [k, v] of gruppi) if (v.length < 2) gruppi.delete(k)
+  return gruppi
+}

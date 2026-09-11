@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
 import PagaConCarta from '@/app/cliente/PagaConCarta'
+import { chiaveDestinatario, destinatarioDaImportato, gruppiStessoDestinatario } from '@/lib/destinatario-chiave'
 
 const ACCENT = '#f97316'
 
@@ -93,6 +94,8 @@ export default function ImportaOrdiniPage() {
   const [mittenteNome, setMittenteNome] = useState('')  // nome mittente (profilo cliente) mostrato in colonna
   const [filtro, setFiltro] = useState<string>('min') // 'min' | corriere_id
   const [q, setQ] = useState('')                       // ricerca libera (ordine, destinatario, località, cap, telefono)
+  const [ordina, setOrdina] = useState<'data_desc'|'data_asc'|'dest_az'|'dest_za'|'localita'>('data_desc')
+  const [soloDoppi, setSoloDoppi] = useState(false)
   const [filtroStato, setFiltroStato] = useState('da_spedire') // default: solo i NON evasi. tutti | da_spedire | spedito | errore | archiviato
   const [spedendo, setSpedendo] = useState(false)
   const [unendo, setUnendo] = useState(false)
@@ -241,8 +244,8 @@ export default function ImportaOrdiniPage() {
     })
   }
   function toggleAll() {
-    // Seleziona/deseleziona tutti gli ordini ATTUALMENTE VISIBILI (rispetta i filtri).
-    const visibili = ordiniFiltrati.map(o => o.id)
+    // Seleziona/deseleziona tutti gli ordini ATTUALMENTE VISIBILI (rispetta filtri e ordinamento).
+    const visibili = ordiniVisti.map(o => o.id)
     setSel(prev => {
       const tuttiSel = visibili.length > 0 && visibili.every(id => prev.has(id))
       const next = new Set(prev)
@@ -525,7 +528,31 @@ export default function ImportaOrdiniPage() {
     }
     return true
   })
-  const allChecked = ordiniFiltrati.length > 0 && ordiniFiltrati.every(o => sel.has(o.id))
+  // CHI HA PIU' DI UN ORDINE DA SPEDIRE. La chiave e' la STESSA che usa l'unione: se la calcolassi
+  // qui a modo mio, la pagina proporrebbe accoppiate che poi l'unione rifiuta.
+  const unibile = (o: Ordine) => !o.spedizione_id && (o.stato === 'da_spedire' || o.stato === 'errore')
+  const chiaveDi = (o: Ordine) => chiaveDestinatario(destinatarioDaImportato(o))
+  const gruppi = gruppiStessoDestinatario(ordini.filter(unibile).map(o => ({ id: o.id, chiave: chiaveDi(o) })))
+  const gruppoDi = (o: Ordine): string[] | undefined => (unibile(o) ? gruppi.get(chiaveDi(o)) : undefined)
+  const quantiDoppi = ordini.filter(o => gruppoDi(o)).length
+
+  // I file Amazon arrivano in ordine di data: senza un alfabetico i due ordini della stessa persona
+  // finiscono lontanissimi nell'elenco, e per trovarli bisogna leggere riga per riga.
+  const ordiniVisti = [...ordiniFiltrati]
+    .filter(o => !soloDoppi || gruppoDi(o))
+    .sort((a, b) => {
+      const testo = (v: any) => String(v ?? '')
+      switch (ordina) {
+        case 'dest_az': return testo(a.destinatario).localeCompare(testo(b.destinatario), 'it')
+        case 'dest_za': return testo(b.destinatario).localeCompare(testo(a.destinatario), 'it')
+        case 'localita': return testo(a.localita).localeCompare(testo(b.localita), 'it')
+          || testo(a.destinatario).localeCompare(testo(b.destinatario), 'it')
+        case 'data_asc': return testo((a as any).created_at).localeCompare(testo((b as any).created_at))
+        default: return testo((b as any).created_at).localeCompare(testo((a as any).created_at))
+      }
+    })
+
+  const allChecked = ordiniVisti.length > 0 && ordiniVisti.every(o => sel.has(o.id))
   const modificabile = (o: Ordine) => o.stato === 'da_spedire' || o.stato === 'errore'
 
   // Catalogo SKU → pacco (per l'indicatore in tabella). Il pacco scelto a mano ha comunque la priorità.
@@ -622,7 +649,7 @@ export default function ImportaOrdiniPage() {
               ? (progress.fase === 'tariffe'
                   ? `Calcolo tariffe ${progress.done}/${progress.total}…`
                   : `Spedizione ${progress.done}/${progress.total} in corso…`)
-              : (sel.size > 0 ? `${sel.size} selezionati` : `${ordiniFiltrati.length}${ordiniFiltrati.length !== ordini.length ? ` di ${ordini.length}` : ''} ordini`)}
+              : (sel.size > 0 ? `${sel.size} selezionati` : `${ordiniVisti.length}${ordiniVisti.length !== ordini.length ? ` di ${ordini.length}` : ''} ordini`)}
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button
@@ -710,6 +737,22 @@ export default function ImportaOrdiniPage() {
               placeholder="🔍 Cerca per ordine, destinatario, località, CAP, telefono…"
               style={{ ...inp, flex: 1, minWidth: '240px', padding: '8px 11px' }}
             />
+            <select value={ordina} onChange={e => setOrdina(e.target.value as any)} style={{ ...inp, width: 'auto', minWidth: '170px', padding: '8px 10px' }}>
+              <option value="data_desc">Data ↓ (piu' recenti)</option>
+              <option value="data_asc">Data ↑ (piu' vecchi)</option>
+              <option value="dest_az">Destinatario A → Z</option>
+              <option value="dest_za">Destinatario Z → A</option>
+              <option value="localita">Località</option>
+            </select>
+            {quantiDoppi > 0 && (
+              <button onClick={() => setSoloDoppi(v => !v)}
+                title="Chi ha piu' di un ordine da spedire: uniscili in un pacco solo"
+                style={{ background: soloDoppi ? '#f97316' : '#fff', color: soloDoppi ? '#fff' : '#c2410c',
+                  border: '1px solid ' + (soloDoppi ? '#f97316' : '#fdba74'), borderRadius: '8px',
+                  padding: '8px 12px', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                👥 Stesso destinatario ({quantiDoppi})
+              </button>
+            )}
             <select value={filtroStato} onChange={e => setFiltroStato(e.target.value)} style={{ ...inp, width: 'auto', minWidth: '150px', padding: '8px 10px' }}>
               <option value="tutti">Tutti gli stati</option>
               <option value="da_spedire">Da spedire</option>
@@ -718,8 +761,8 @@ export default function ImportaOrdiniPage() {
               <option value="unito">Unito</option>
               <option value="archiviato">Archiviato</option>
             </select>
-            {(q || filtroStato !== 'tutti') && (
-              <button onClick={() => { setQ(''); setFiltroStato('tutti') }}
+            {(q || filtroStato !== 'tutti' || soloDoppi || ordina !== 'data_desc') && (
+              <button onClick={() => { setQ(''); setFiltroStato('tutti'); setSoloDoppi(false); setOrdina('data_desc') }}
                 style={{ background: '#fff', color: '#666', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 12px', fontSize: '12.5px', cursor: 'pointer' }}>
                 Azzera filtri
               </button>
@@ -734,7 +777,7 @@ export default function ImportaOrdiniPage() {
             <div style={{ fontSize: '40px', marginBottom: '12px' }}>📦</div>
             <div style={{ fontSize: '14px', fontWeight: 500, color: '#999' }}>Nessun ordine importato</div>
           </div>
-        ) : ordiniFiltrati.length === 0 ? (
+        ) : ordiniVisti.length === 0 ? (
           <div style={{ padding: '50px', textAlign: 'center' }}>
             <div style={{ fontSize: '40px', marginBottom: '12px' }}>🔍</div>
             <div style={{ fontSize: '14px', fontWeight: 500, color: '#999' }}>Nessun ordine corrisponde ai filtri</div>
@@ -756,7 +799,7 @@ export default function ImportaOrdiniPage() {
                 </tr>
               </thead>
               <tbody>
-                {ordiniFiltrati.map(o => {
+                {ordiniVisti.map(o => {
                   const s = STATO[o.stato] || STATO.da_spedire
                   return (
                     <tr key={o.id} style={{ background: sel.has(o.id) ? '#fff7ed' : '#fff' }}>
@@ -773,6 +816,20 @@ export default function ImportaOrdiniPage() {
                           bastavano a mandare la tabella fuori schermo. */}
                       <td style={{ ...td, fontWeight: 600, color: '#1a1a1a', minWidth: '190px' }}>
                         {o.destinatario}
+                        {(() => {
+                          const g = gruppoDi(o)
+                          if (!g) return null
+                          const tuttiSel = g.every(id => sel.has(id))
+                          return (
+                            <button
+                              onClick={() => setSel(prev => { const n = new Set(prev); g.forEach(id => tuttiSel ? n.delete(id) : n.add(id)); return n })}
+                              title={tuttiSel ? 'Togli la selezione' : 'Seleziona tutti i suoi ordini, poi premi Unisci'}
+                              style={{ marginLeft: '6px', background: '#fff7ed', color: '#c2410c', border: '1px solid #fdba74',
+                                borderRadius: '999px', padding: '1px 8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+                              {g.length} ordini{tuttiSel ? ' ✓' : ''}
+                            </button>
+                          )
+                        })()}
                         <div style={sub}>{o.indirizzo}</div>
                         <div style={sub}>
                           {[o.localita, o.cap ? '(' + o.cap + ')' : '', o.provincia].filter(Boolean).join(' ')}

@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
+import { chiaveDestinatario, destinatarioDaEcommerce, gruppiStessoDestinatario } from '@/lib/destinatario-chiave'
 import { useParams, useRouter } from 'next/navigation'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { useDialog } from '@/app/components/DialogProvider'
@@ -73,6 +74,7 @@ export default function OrdiniPage() {
   const [page, setPage] = useState(1)
   const [sel, setSel] = useState<Record<string,boolean>>({})
   const [sort, setSort] = useState<{k:string,d:1|-1}|null>(null)
+  const [soloDoppi, setSoloDoppi] = useState(false)
 
   const [spedisciCon, setSpedisciCon] = useState('auto')
   const [sms, setSms] = useState('no')
@@ -201,8 +203,19 @@ export default function OrdiniPage() {
   const paesi = useMemo(()=>Array.from(new Set(ordini.map(o=>o.destinatario?.paese).filter(Boolean))), [ordini])
   const statiPag = useMemo(()=>Array.from(new Set(ordini.map(o=>o.stato_pagamento).filter(Boolean))), [ordini])
 
+  // CHI HA PIU' DI UN ORDINE DA SPEDIRE. Stessa chiave dell'unione: se la pagina la calcolasse a
+  // modo suo, proporrebbe accoppiate che poi l'unione rifiuta.
+  const gruppi = useMemo(() => gruppiStessoDestinatario(
+    ordini.filter((o:any) => !o.spedizione_id && o.stato !== 'unito')
+      .map((o:any) => ({ id: o.id, chiave: chiaveDestinatario(destinatarioDaEcommerce(o)) }))
+  ), [ordini])
+  const gruppoDi = (o:any): string[] | undefined =>
+    (!o.spedizione_id && o.stato !== 'unito') ? gruppi.get(chiaveDestinatario(destinatarioDaEcommerce(o))) : undefined
+  const quantiDoppi = useMemo(() => ordini.filter((o:any) => gruppoDi(o)).length, [ordini, gruppi])
+
   const filtrati = useMemo(()=>{
     let arr = ordini.filter(o=>{
+      if (soloDoppi && !gruppoDi(o)) return false
       const d = o.destinatario || {}
       if (fStoreValido && o.integrazione_id !== fStoreValido) return false
       if (fStatoPag && o.stato_pagamento !== fStatoPag) return false
@@ -243,7 +256,7 @@ export default function OrdiniPage() {
     return arr
   // fStoreValido, non fStore: l'elenco negozi arriva DOPO i filtri, quindi la validita' dell'id puo'
   // cambiare senza che fStore si muova. Con la dipendenza sbagliata il filtro resterebbe indietro.
-  }, [ordini, fStoreValido, fStatoPag, fStatoEv, fPaese, fNum, fSku, fTags, fArch, fDa, fA, search, sort])
+  }, [ordini, fStoreValido, fStatoPag, fStatoEv, fPaese, fNum, fSku, fTags, fArch, fDa, fA, search, sort, soloDoppi, gruppi])
 
   const totale = filtrati.length
   const nPagine = Math.max(1, Math.ceil(totale/perPage))
@@ -592,6 +605,13 @@ export default function OrdiniPage() {
             </div>
             <div style={{fontSize:'13px',color:'#6b7280'}}>Cerca:&nbsp;
               <input value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,width:'auto',display:'inline-block',padding:'6px 10px'}}/>
+              {quantiDoppi>0 && (
+                <button onClick={()=>setSoloDoppi(v=>!v)}
+                  title="Chi ha piu' di un ordine da spedire: uniscili in un pacco solo"
+                  style={{marginLeft:'8px',background:soloDoppi?'#f97316':'#fff',color:soloDoppi?'#fff':'#c2410c',border:'1px solid '+(soloDoppi?'#f97316':'#fdba74'),borderRadius:'8px',padding:'6px 10px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>
+                  👥 Stesso destinatario ({quantiDoppi})
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -653,7 +673,12 @@ export default function OrdiniPage() {
                     <td style={{...td,borderTop:'none',padding:'9px 12px 3px'}}><input type="checkbox" checked={isSel} onChange={()=>toggleUno(o.id)} style={{accentColor:ACCENT,width:'16px',height:'16px'}}/></td>
                     <td style={{...td,borderTop:'none',padding:'9px 12px 3px',color:'#6b7280',whiteSpace:'nowrap'}}>{fmtData(getData(o))}</td>
                     <td style={{...td,borderTop:'none',padding:'9px 12px 3px',fontWeight:600}}>{o.numero_ordine}</td>
-                    <td style={{...td,borderTop:'none',padding:'9px 12px 3px'}}>{d.nome||'—'}<div style={{fontSize:'11px',color:'#999'}}>{d.citta}{d.provincia?' ('+d.provincia+')':''} {d.paese||''}</div></td>
+                    <td style={{...td,borderTop:'none',padding:'9px 12px 3px'}}>{d.nome||'—'}{(()=>{ const g=gruppoDi(o); if(!g) return null; const tutti=g.every(id=>sel[id]); return (
+                      <button onClick={()=>setSel(prev=>{ const n={...prev}; g.forEach(id=>{ if(tutti) delete n[id]; else n[id]=true }); return n })}
+                        title={tutti?'Togli la selezione':'Seleziona tutti i suoi ordini, poi premi Unisci'}
+                        style={{marginLeft:'6px',background:'#fff7ed',color:'#c2410c',border:'1px solid #fdba74',borderRadius:'999px',padding:'1px 8px',fontSize:'11px',fontWeight:700,cursor:'pointer'}}>
+                        {g.length} ordini{tutti?' ✓':''}
+                      </button>) })()}<div style={{fontSize:'11px',color:'#999'}}>{d.citta}{d.provincia?' ('+d.provincia+')':''} {d.paese||''}</div></td>
                     <td style={{...td,borderTop:'none',padding:'9px 12px 3px'}}><span style={{fontSize:'11px',fontWeight:600,padding:'3px 9px',borderRadius:'999px',background:o.stato==='spedito'?'#dcfce7':'#fef3c7',color:o.stato==='spedito'?'#166534':'#92400e'}}>{o.stato==='spedito'?'Spedito':'Da spedire'}</span></td>
                     <td style={{...td,borderTop:'none',padding:'9px 12px 3px',textAlign:'right',whiteSpace:'nowrap'}}>
                       {/* "Spedito" solo se lo abbiamo spedito NOI (ha la spedizione Moove): allora niente
