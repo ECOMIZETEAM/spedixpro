@@ -154,16 +154,58 @@ export async function inviaAllertaOneTracking(to: string, arretrato?: number): P
   try {
     await resend.emails.send({
       from: FROM, to,
-      subject: '⚠️ OneTracking scaduta — rettifiche automatiche in pausa',
+      subject: '⚠️ OneTracking: sessione non valida — ripesature in pausa',
       html: wrap(`
-        <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Sessione OneTracking scaduta</h2>
-        <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 12px">Il controllo automatico delle ripesature è <strong>in pausa</strong>: serve un cookie fresco.${arretrato ? ` In coda ci sono <strong>${arretrato}</strong> consegne da controllare.` : ''}</p>
-        <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 12px">Vai su <strong>Statistiche › Rettifiche automatiche</strong>, incolla il nuovo cURL di OneTracking (Copy as cURL sulla riga <em>full-tracking</em>) e riparte da solo, smaltendo l'arretrato.</p>
+        <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Sessione OneTracking non valida</h2>
+        <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 12px">La lettura delle misure dal corriere è <strong>ferma</strong>.${arretrato ? ` In coda ci sono <strong>${arretrato}</strong> consegne da controllare.` : ''}</p>
+        <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 12px">Il login si rifà da solo sul Mac tre volte al giorno: se l'avviso torna domani, guarda <code>/tmp/moove-onetracking.log</code> — vuol dire che le credenziali o il form di Poste sono cambiati.</p>
       `),
     })
     return { ok: true }
   } catch (err: any) {
     console.error('[OT] allerta email non inviata:', err?.message || err)
+    return { ok: false }
+  }
+}
+
+// LA SENTINELLA, una volta al giorno. Si manda ANCHE quando e' tutto verde, di proposito: una
+// sentinella silenziosa non si distingue da una morta, e il guasto che ha fatto nascere tutto questo
+// (il recupero ripesature fermo dal 31/08/2026 al 11/09) non produceva errori — produceva silenzio.
+export async function inviaControlloGiornaliero(to: string, righe: { area: string; controllo: string; valore: number; atteso: string; allarme: boolean }[]): Promise<{ ok: boolean }> {
+  if (!to || !righe.length) return { ok: false }
+  const allarmi = righe.filter(r => r.allarme)
+  const num = (v: number) => Number(v).toLocaleString('it-IT')
+  const riga = (r: typeof righe[number]) => `
+    <tr>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:13px;color:${r.allarme ? '#b91c1c' : '#374151'}">${r.allarme ? '⚠️ ' : ''}${r.controllo}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:13px;text-align:right;font-weight:700;color:${r.allarme ? '#b91c1c' : '#1a1a1a'}">${num(r.valore)}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:12px;color:#9ca3af">${r.atteso}</td>
+    </tr>`
+  try {
+    await resend.emails.send({
+      from: FROM, to,
+      subject: allarmi.length
+        ? `⚠️ MoovExpress — ${allarmi.length} ${allarmi.length === 1 ? 'cosa da guardare' : 'cose da guardare'}`
+        : '✅ MoovExpress — tutto a posto',
+      html: wrap(`
+        <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 4px">Controllo giornaliero</h2>
+        <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 16px">
+          ${allarmi.length
+            ? `<strong style="color:#b91c1c">${allarmi.length} ${allarmi.length === 1 ? 'punto' : 'punti'} da guardare</strong>, in cima all'elenco.`
+            : 'Nessun problema: soldi, tracking e ripesature hanno lavorato tutti nelle ultime 24 ore.'}
+        </p>
+        <table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #eee;border-radius:8px">
+          ${[...allarmi, ...righe.filter(r => !r.allarme)].map(riga).join('')}
+        </table>
+        <p style="color:#9ca3af;font-size:12px;line-height:1.6;margin:14px 0 0">
+          Quasi tutte le voci guardano se <em>e' successo qualcosa</em>, non se c'e' un errore: un giro
+          che smette di partire non lascia errori, lascia silenzio.
+        </p>
+      `),
+    })
+    return { ok: true }
+  } catch (err: any) {
+    console.error('[SENTINELLA] email non inviata:', err?.message || err)
     return { ok: false }
   }
 }
