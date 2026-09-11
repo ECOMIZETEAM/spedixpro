@@ -1,18 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { vedeLaRete } from '@/lib/perimetro'
 import { leggiGrigliaListino } from '@/lib/preventivo-prezzi'
+import { attorePreventivi } from '@/lib/preventivo-attore'
 
 // Singolo preventivo: GET (con il branding del master per l'anteprima) + PATCH (dettagli + contenuto).
-// Il contenuto e' un jsonb flessibile: { sezioni: [{id,tipo,titolo,testo}], corrieri: [{corriere_id,nome,markup,righe}] }.
+// Master vede/gestisce tutti i suoi; l'AGENTE solo i propri (tag agente). Perimetro in preventivo-attore.
 
-async function staff(supabase: any) {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
-  const { data: u } = await supabase.from('utenti').select('ruolo,master_id').eq('id', user.id).single()
-  return vedeLaRete(u) ? { user, master_id: u.master_id } : null
-}
+const staff = attorePreventivi
+// true se questo attore NON può toccare questo preventivo (agente su un preventivo non suo).
+const nonSuo = (s: any, p: any) => !p || p.master_id !== s.master_id || (s.isAgente && p.agente !== s.agenteNome)
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createServerSupabase()
@@ -21,7 +18,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params
   const admin = createAdminSupabase()
   const { data: p } = await admin.from('preventivi').select('*').eq('id', id).maybeSingle()
-  if (!p || p.master_id !== s.master_id) return NextResponse.json({ error: 'Preventivo non trovato' }, { status: 404 })
+  if (nonSuo(s, p)) return NextResponse.json({ error: 'Preventivo non trovato' }, { status: 404 })
   // Branding del master per l'anteprima (logo, nome, colori). Vive su masters.
   const { data: m } = await admin.from('masters').select('nome,logo_url,colore_primario,colore_secondario,email,telefono,indirizzo,citta,cap,provincia,pec,partita_iva,piva').eq('id', s.master_id).maybeSingle()
   const prezzi = await leggiGrigliaListino(admin, p.listino_template_id)
@@ -38,8 +35,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params
   const admin = createAdminSupabase()
   const b = await req.json().catch(() => ({}))
-  const { data: p } = await admin.from('preventivi').select('id,master_id,stato,listino_template_id,dest_nome,dest_email,oggetto,token').eq('id', id).maybeSingle()
-  if (!p || p.master_id !== s.master_id) return NextResponse.json({ error: 'Preventivo non trovato' }, { status: 404 })
+  const { data: p } = await admin.from('preventivi').select('id,master_id,stato,listino_template_id,dest_nome,dest_email,oggetto,token,agente').eq('id', id).maybeSingle()
+  if (nonSuo(s, p)) return NextResponse.json({ error: 'Preventivo non trovato' }, { status: 404 })
 
   if (b.azione === 'invia') {
     if (p.stato === 'accettato') return NextResponse.json({ error: 'Preventivo gia\' accettato.' }, { status: 400 })
@@ -62,7 +59,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (p.stato !== 'accettato_da_confermare') return NextResponse.json({ error: 'Il preventivo non è in attesa di conferma (il destinatario non l\'ha ancora accettato).' }, { status: 400 })
     // Ricarico il preventivo COMPLETO (servono dest_tipo, cliente_id, master_target_id, created_by...).
     const { data: pieno } = await admin.from('preventivi').select('*').eq('id', id).maybeSingle()
-    if (!pieno || pieno.master_id !== s.master_id) return NextResponse.json({ error: 'Preventivo non trovato' }, { status: 404 })
+    if (nonSuo(s, pieno)) return NextResponse.json({ error: 'Preventivo non trovato' }, { status: 404 })
     const { attivaPreventivo } = await import('@/lib/preventivo-attiva')
     const esito = await attivaPreventivo(admin, pieno)
     if ('error' in esito) return NextResponse.json({ error: esito.error }, { status: esito.status })
@@ -90,7 +87,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // supplementi): il listino di origine resta intatto, la bozza è modificabile e all'accettazione
     // diventa il listino del cliente. Senza sourceListinoId la bozza è vuota (compilata da zero).
     let srcCfg: any = null
-    const srcId = b.sourceListinoId ? String(b.sourceListinoId) : null
+    // AGENTE: la bozza parte SEMPRE dal suo listino (il suo costo, i suoi corrieri + fuel + supplementi);
+    // non vede/usa mai il listino del master. Poi rincara col markup/"Da costo".
+    if (s.isAgente && !s.listinoAgenteId) return NextResponse.json({ error: 'Non hai un listino assegnato: chiedi al master di assegnartene uno prima di fare un preventivo.' }, { status: 400 })
+    const srcId = s.isAgente ? s.listinoAgenteId : (b.sourceListinoId ? String(b.sourceListinoId) : null)
     if (srcId) {
       const { data: src } = await admin.from('listini_clienti').select('id,fattore_volume,solo_peso_reale')
         .eq('id', srcId).eq('master_id', s.master_id).maybeSingle()
@@ -128,13 +128,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!s) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const { id } = await params
   const admin = createAdminSupabase()
-  const { data: p } = await admin.from('preventivi').select('id,master_id,stato').eq('id', id).maybeSingle()
-  if (!p || p.master_id !== s.master_id) return NextResponse.json({ error: 'Preventivo non trovato' }, { status: 404 })
+  const { data: p } = await admin.from('preventivi').select('id,master_id,stato,agente').eq('id', id).maybeSingle()
+  if (nonSuo(s, p)) return NextResponse.json({ error: 'Preventivo non trovato' }, { status: 404 })
   if (p.stato === 'accettato') return NextResponse.json({ error: 'Un preventivo accettato non si modifica.' }, { status: 400 })
 
   const b = await req.json().catch(() => ({}))
   const patch: any = { updated_at: new Date().toISOString() }
-  if (b.dest_tipo && ['cliente_nuovo', 'cliente', 'master', 'master_nuovo'].includes(b.dest_tipo)) patch.dest_tipo = b.dest_tipo
+  // L'agente può indirizzare SOLO a clienti (mai sotto-master).
+  const tipiAmmessi = s.isAgente ? ['cliente_nuovo', 'cliente'] : ['cliente_nuovo', 'cliente', 'master', 'master_nuovo']
+  if (b.dest_tipo && tipiAmmessi.includes(b.dest_tipo)) patch.dest_tipo = b.dest_tipo
   if (b.dest_nome !== undefined) patch.dest_nome = b.dest_nome ? String(b.dest_nome).slice(0, 200) : null
   if (b.dest_email !== undefined) patch.dest_email = b.dest_email ? String(b.dest_email).slice(0, 200).trim() : null
   if (b.cliente_id !== undefined) patch.cliente_id = b.cliente_id || null

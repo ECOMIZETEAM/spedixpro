@@ -138,6 +138,9 @@ export async function attivaPreventivo(admin: any, p: any): Promise<Esito> {
         const { data, error } = await admin.from('clienti').insert({
           master_id: p.master_id, ragione_sociale: p.dest_nome || email, email,
           listino_cliente_id: draftId, tipo_contratto: 'credito_scalare', codice_cliente: codice, attivo: true,
+          // Preventivo fatto da un AGENTE → il cliente nasce sotto il MASTER ma con il tag agente
+          // (clienti.agente = nome+cognome): l'agente ci guadagna il margine, il cliente è del master.
+          agente: p.agente || null,
           // Anagrafica dal preventivo → cliente completo/fatturabile. Sede legale e operativa uguali
           // (il preventivo raccoglie un indirizzo solo); il cliente le affina dal suo profilo se serve.
           piva: p.dest_piva || null, cod_sdi: p.dest_cod_sdi || null, pec: p.dest_pec || null, telefono: p.dest_telefono || null,
@@ -172,7 +175,8 @@ export async function attivaPreventivo(admin: any, p: any): Promise<Esito> {
 
   if (!clienteId) return { error: 'Non riusciamo a completare l\'attivazione.', status: 500 }
   await rinomina()
-  await admin.from('clienti').update({ listino_cliente_id: draftId }).eq('id', clienteId).eq('master_id', p.master_id)
+  // Aggancia il listino reale + (se il preventivo è di un agente) il tag agente anche su cliente esistente.
+  await admin.from('clienti').update({ listino_cliente_id: draftId, ...(p.agente ? { agente: p.agente } : {}) }).eq('id', clienteId).eq('master_id', p.master_id)
   await finalizza(admin, p, draftId, clienteCreatoId)
   return { ok: true }
 }
