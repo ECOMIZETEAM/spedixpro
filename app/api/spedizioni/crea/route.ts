@@ -1715,6 +1715,14 @@ export async function POST(req: NextRequest) {
       if (body.codValue && Number(body.codValue) > 0) codiciGls.push(_codModalita)
       for (const sv of (serviziAccessori || [])) { const cod = codiceServizioGls(String((sv as any)?.nome || '')); if (cod) codiciGls.push(cod) }
 
+      // FLEX DELIVERY SERVICE (FDS): GLS manda al DESTINATARIO email/SMS con il link per gestirsi la
+      // consegna (riprogramma, dirotta a punto GLS, deposito sicuro, vicino, rifiuta). GLS lo attiva da
+      // solo quando riceve Email/Cellulare1 e il servizio è abilitato sul contratto (lato GLS). Siccome
+      // è l'OPPOSTO della regola "email schermo corriere" (di norma al corriere diamo l'email di
+      // servizio così i suoi link non arrivano al cliente), lo accendiamo di proposito PER CONTRATTO:
+      // settings.flex_delivery = true (oggi i GLS diretti di Quick). Spento = non mandiamo i contatti e
+      // GLS consegna standard. Verificato sull'API GLS vera di Quick (AddParcel di prova + annullo).
+      const fdsAttivo = (corriereRecord as any)?.settings?.flex_delivery === true
       const ris = await creaSpedizioneGls(credGls, {
         ragioneSociale: body.shipTo.name,
         indirizzo: body.shipTo.street1,
@@ -1729,6 +1737,10 @@ export async function POST(req: NextRequest) {
         assicurazione: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         note: body.notes ? String(body.notes) : undefined,
         bda,
+        // Contatti VERI del destinatario solo se FDS è acceso su questo contratto (qui shipTo NON è
+        // mascherato: il mascheramento con l'email di servizio è solo nel ramo SpediamoPro).
+        email: fdsAttivo ? (body.shipTo.email || undefined) : undefined,
+        cellulare: fdsAttivo ? (body.shipTo.phone || undefined) : undefined,
       })
 
       if (!ris.numeroSpedizione) {
