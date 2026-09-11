@@ -6,8 +6,11 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 // Badge "Giacenze" del menu cliente (come il pallino rosso dell'assistenza):
-// GET  -> quante giacenze NUOVE (entrate DOPO l'ultima visita alla pagina Giacenze)
-// POST -> segna viste adesso (chiamata all'apertura della pagina Giacenze)
+// GET  -> quante giacenze DA SVINCOLARE (spedizioni attualmente in giacenza). Prima contava solo le
+//         NUOVE (entrate dopo l'ultima visita): una giacenza vecchia ma ancora aperta NON compariva
+//         (es. una di luglio mai svincolata). Ora il pallino mostra il pendente totale, che cala da
+//         solo quando la giacenza si svincola o quando il pacco arriva/torna (trigger DB che la chiude).
+// POST -> resta per compatibilita' (segnava la visita); non incide piu' sul conteggio.
 // Il "visto" vive in clienti.impostazioni.giacenze_viste_al (merge, non sovrascrive le altre impostazioni).
 
 async function clienteId(supabase: any): Promise<string | null> {
@@ -22,13 +25,12 @@ export async function GET() {
   const id = await clienteId(supabase)
   if (!id) return NextResponse.json({ count: 0 })
   const admin = createAdminSupabase()
-  const { data: cli } = await admin.from('clienti').select('impostazioni').eq('id', id).maybeSingle()
-  const vistoAl = (cli?.impostazioni as any)?.giacenze_viste_al || '1970-01-01T00:00:00Z'
+  // DA SVINCOLARE = attualmente in giacenza. Niente filtro sulla data di ultima visita: il pallino
+  // deve restare finche' la giacenza non e' risolta, non sparire dopo aver aperto la pagina.
   const { count } = await admin.from('spedizioni')
     .select('id', { count: 'exact', head: true })
     .eq('cliente_id', id)
     .eq('stato', 'in_giacenza')
-    .gt('giacenza_data', vistoAl)
   return NextResponse.json({ count: count || 0 })
 }
 
