@@ -29,6 +29,7 @@ const NAV_BASE: NavItem[] = [
       { label: 'Negozi collegati', href: '/cliente/integrazioni' },
     ],
   },
+  { id: 'rubrica', label: 'Rubrica destinatari', icon: '☰', href: '/cliente/rubrica' },
   {
     id: 'ritiri', label: 'Ritiri', icon: '↩',
     sub: [
