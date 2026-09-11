@@ -18,6 +18,7 @@ type Misura = {
 }
 export type DatiRipesatura = {
   consegnata?: boolean
+  multicollo?: boolean
   dichiarato?: { lunghezza?: number | null; larghezza?: number | null; altezza?: number | null; peso?: number | null; colli?: number | null }
   peso_volume?: number | null
   peso_fatturato?: number | null
@@ -69,9 +70,11 @@ export default function SchedaRipesatura({ dati }: { dati?: DatiRipesatura | nul
       ) : (
         <div style={{ ...box, textAlign: 'center', color: '#6b7280', fontSize: '13px', padding: '24px' }}>
           <div style={{ fontSize: '28px', marginBottom: '8px' }}>⚖️</div>
-          {dati?.consegnata === false
-            ? <>La misura del corriere compare a consegna avvenuta.</>
-            : <>Nessuna misurazione del corriere disponibile per questa spedizione.</>}
+          {dati?.multicollo
+            ? <>Spedizione multicollo: il corriere misura i colli singolarmente e non è possibile attribuire le misure ai singoli colli.</>
+            : dati?.consegnata === false
+              ? <>La misura del corriere compare a consegna avvenuta.</>
+              : <>Nessuna misurazione del corriere disponibile per questa spedizione.</>}
         </div>
       )}
 

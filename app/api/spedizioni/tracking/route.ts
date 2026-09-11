@@ -61,11 +61,17 @@ export async function GET(req: NextRequest) {
   // cliente un numero che poi si smentisce da solo. Le altre letture NON escono di qui: nel popup
   // deve comparire una misura sola, quella che conta.
   const consegnata = (spedizione as any).stato === 'consegnata'
-  const { data: mis } = consegnata ? await admin.from('ripesature_misure')
+  // MULTICOLLO: nessuna misura. OneTracking non dice a quale collo appartiene una lettura (le righe
+  // RILEVATO hanno numColli "-") e i codici dei colli figli non esistono da nessuna parte: mostrare
+  // la misura di UN collo come se fosse la spedizione e' falso, e il peso fatturato di un multicollo
+  // e' la SOMMA dei volumi, non il collo piu' grande.
+  const multicollo = Number((spedizione as any).colli || 1) > 1
+  const { data: mis } = (consegnata && !multicollo) ? await admin.from('ripesature_misure')
     .select('peso,lunghezza,larghezza,altezza,volume,misurata_il,filiale,letto_il,esito')
     .eq('spedizione_id', spedizione.id).maybeSingle() : { data: null as any }
   const ripesatura = {
     consegnata,
+    multicollo,
     dichiarato: {
       lunghezza: (spedizione as any).lunghezza, larghezza: (spedizione as any).larghezza,
       altezza: (spedizione as any).altezza, peso: (spedizione as any).peso_reale,
