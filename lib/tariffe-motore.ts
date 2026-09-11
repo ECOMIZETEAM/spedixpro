@@ -302,13 +302,9 @@ export async function calcolaTariffeCliente(
     return { pesoVolume: pv, pesoFatturato: listino?.solo_peso_reale ? pesoReale : Math.max(pesoReale, pv) }
   }
 
-  let pesoVolume = 0
-  for (const p of tuttiColli) {
-    if (p?.length && p?.width && p?.height) pesoVolume += (p.length * p.width * p.height) / fattore
-  }
-  // Se il listino è "solo peso reale", il volumetrico viene ignorato: si paga sempre sul peso reale.
-  const pesoFatturato = listino?.solo_peso_reale ? pesoReale : Math.max(pesoReale, pesoVolume)
-  // La scatola dell'agevolazione dipende dal CONTRATTO: si valuta piu' sotto, per corriere.
+  // Peso fatturato e volumetrico si calcolano PER CORRIERE (ognuno col suo fattore volume) più sotto,
+  // con pesoFatturatoCon(): il fattore "generico" del listino non basta. La scatola dell'agevolazione
+  // dipende anch'essa dal CONTRATTO e si valuta lì.
 
   // Client ADMIN per questa lettura: porta dentro `corrieri.credenziali`, che non deve essere
   // leggibile col token di chi chiama. Il perimetro non cambia — resta il listino assegnato a
@@ -398,11 +394,11 @@ export async function calcolaTariffeCliente(
   }
 
   if (!fascePerCorriere.size) {
-    return { errore: isEstero ? `Nessuna tariffa disponibile per spedizioni verso ${paeseDest}` : `Nessuna fascia prezzo per zona ${zonaNome}`, stato: 400 }
+    return { errore: isEstero ? `Nessuna tariffa disponibile per spedizioni verso ${paeseDest}` : `Nessun corriere disponibile per questa spedizione.`, stato: 400 }
   }
 
   const risultati: any[] = []
-  let esclusiContrassegno = 0, esclusiAssic = 0, esclusiMisura = 0, esclusiFascia = 0, esclusiQuota = 0
+  let esclusiContrassegno = 0, esclusiAssic = 0, esclusiQuota = 0
   let ultimoErroreQuota = ''
 
   // CONTRATTI IN PAUSA — ramo CLIENTE (qui passa la quasi totalita' delle spedizioni).
@@ -435,13 +431,13 @@ export async function calcolaTariffeCliente(
     // Peso fatturato con il fattore volume DI QUESTO corriere (override per-corriere).
     const { pesoVolume: pesoVolumeC, pesoFatturato: pesoFatturatoC } = pesoFatturatoCon(fattorePerCorr.get(corriereId) || fattore)
     // Limite misure per scaglione di PESO REALE: se un collo eccede, il corriere non è disponibile.
-    if (superaMisureMax(settsC, pesoReale, tuttiColli)) { esclusiMisura++; continue }
+    if (superaMisureMax(settsC, pesoReale, tuttiColli)) continue   // collo fuori misura per questo corriere → escluso
     // Peso su cui si tassa: reale se agevolazione misure (≤50x32x28) OPPURE "peso reale fino a X kg" (≤ soglia); altrimenti volumetrico.
     const _prs = settsC?.peso_reale_soglia
     const _usaRealeSoglia = !!_prs?.attivo && Number(_prs.kg) > 0 && pesoReale <= Number(_prs.kg)
     const pesoPerFascia = ((!!settsC.agevolazione_peso_reale && entroMisureAgevolate(settsC, tuttiColli)) || _usaRealeSoglia) ? pesoReale : pesoFatturatoC
     const fasciaGiusta = trovaFascia(fasceDelCorriere, pesoPerFascia)
-    if (!fasciaGiusta) { esclusiFascia++; continue }   // peso oltre l'ultima fascia e nessuna "oltre X ogni"
+    if (!fasciaGiusta) continue   // peso oltre l'ultima fascia e nessuna "oltre X ogni" → corriere escluso
     if (Number(fasciaGiusta.prezzo) <= 0) continue   // prezzo 0 per questa zona/peso -> non mostrare il corriere
     if (codRichiesto && contrassegnoOff.has(corriereId)) continue
 
@@ -492,25 +488,27 @@ export async function calcolaTariffeCliente(
   }
 
   if (!risultati.length) {
-    const pf = pesoFatturato.toFixed(2)
-    if (esclusiFascia > 0) return { errore: `Peso fatturato ${pf}kg (reale ${pesoReale.toFixed(2)}kg / volume ${pesoVolume.toFixed(2)}kg) oltre l'ultima fascia del listino. Aggiungi una fascia "oltre X ogni" nel listino per coprire i pesi/misure maggiori.`, stato: 400 }
-    if (esclusiMisura > 0) return { errore: `Le misure del collo superano le misure massime consentite dal corriere per questo peso (Impostazioni corriere → Misure massime).`, stato: 400 }
+    // REGOLA (Lorenzo 11/09): se non resta nessun corriere, il messaggio è UNO e semplice —
+    // "Nessun corriere disponibile". Prima si guardava PRIMA l'esclusione per fascia, ma un contratto
+    // a soglia bassa (il servizio piccoli pacchi a 5 kg è in quasi tutti i listini) la fa scattare
+    // sempre per qualunque peso sopra i 5 kg: così l'operatore si vedeva "aggiungi una fascia oltre X"
+    // anche quando il vero motivo era tutt'altro (collo fuori misura, zona non coperta, contratto in
+    // pausa a monte) e quel consiglio non serviva a niente. Quando invece un corriere c'è (es. BRT),
+    // esce e basta: questo ramo non viene nemmeno toccato.
+    //
+    // Restano a parte SOLO i due casi che non sono "manca il corriere" e hanno un'azione chiara:
+    // il corriere che non ha risposto in tempo (riprova) e il contrassegno/assicurazione richiesti ma
+    // non configurati. Mai il testo grezzo o il nome del provider.
     if (esclusiQuota > 0) {
-      // Messaggio pulito: mai il testo grezzo/nome del provider.
       const t = (ultimoErroreQuota || '').toLowerCase()
-      if (/timed\s*out|timeout|0 bytes received/.test(t)) {
+      if (/timed\s*out|timeout|0 bytes received/.test(t))
         return { errore: 'Il corriere non ha risposto in tempo (rallentamento momentaneo dei suoi sistemi). Riprova tra qualche istante.', stato: 400 }
-      }
-      const dett = /province|provincia|state/.test(t)
-        ? ' Manca la PROVINCIA del mittente o del destinatario: completa l\'indirizzo (provincia obbligatoria per l\'Italia).'
-        : /dimension|misur|measure|size|volume|lato|length|width|height|weight|peso|oversiz/.test(t)
-        ? ' Il collo è fuori misura o troppo pesante per questo corriere: verifica misure e peso.'
-        : ' Verifica misure, peso e indirizzo, oppure scegli un altro corriere.'
-      return { errore: `Il corriere non può gestire questa spedizione (${pf}kg).${dett}`, stato: 400 }
+      if (/province|provincia|state/.test(t))
+        return { errore: 'Manca la PROVINCIA del mittente o del destinatario: completa l\'indirizzo (provincia obbligatoria per l\'Italia).', stato: 400 }
     }
     if (esclusiContrassegno > 0) return { errore: 'Nessun corriere disponibile per il contrassegno richiesto: configura la tariffa contrassegno sul listino (tab Contrassegni) o riduci l\'importo.', stato: 400 }
     if (esclusiAssic > 0) return { errore: 'Nessun corriere disponibile per l\'assicurazione richiesta: configura la tariffa assicurazione sul listino o riduci il valore.', stato: 400 }
-    return { errore: `Nessuna tariffa disponibile per ${pf}kg in zona ${zonaNome}`, stato: 400 }
+    return { errore: 'Nessun corriere disponibile per questa spedizione.', stato: 400 }
   }
 
   risultati.sort((a,b)=>Number(a.total_price)-Number(b.total_price))
