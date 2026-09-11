@@ -48,6 +48,11 @@ export default function ReportContrassegniPage() {
     if (filtri.dalSpedizione) params.set('dal', filtri.dalSpedizione)
     if (filtri.alSpedizione) params.set('al', filtri.alSpedizione + 'T23:59:59')
     params.set('contrassegno', 'si')
+    // Filtri STATO SPEDIZIONE e VETTORE: prima non venivano MAI applicati (né passati all'API né
+    // filtrati) — "Consegnata" dava comunque tutti gli stati. Ora l'API filtra server-side (eq stato,
+    // vettore fisico), come nella lista spedizioni.
+    if (filtri.statoSpedizione) params.set('stato', filtri.statoSpedizione)
+    if (filtri.vettore) params.set('vettore', filtri.vettore)
     const res = await fetch(`/api/spedizioni/lista?${params}`)
     let spedizioni = await res.json()
     // Filtro per stato contrassegno (stessa logica della lista spedizioni)
