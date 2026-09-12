@@ -28,10 +28,12 @@ export async function GET(_req: NextRequest) {
     await admin.from('preventivi').update({ stato: 'scaduto', updated_at: new Date().toISOString() }).in('id', daScadere)
     for (const r of righe) if (daScadere.includes(r.id)) r.stato = 'scaduto'
   }
-  // Split come chiesto: destinatari clienti vs sotto-master.
+  // Split come chiesto: destinatari clienti vs sotto-master. isAgente serve alla lista per nascondere
+  // la sezione sotto-master (l'agente non ne fa mai) e adattare i testi.
   return NextResponse.json({
     clienti: righe.filter((r: any) => !String(r.dest_tipo || '').startsWith('master')),
     master: righe.filter((r: any) => String(r.dest_tipo || '').startsWith('master')),
+    isAgente: s.isAgente,
   })
 }
 

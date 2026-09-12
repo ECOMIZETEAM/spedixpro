@@ -24,6 +24,7 @@ export default function Preventivi() {
   const dialog = useDialog()
   const [clienti, setClienti] = useState<any[]>([])
   const [master, setMaster] = useState<any[]>([])
+  const [isAgente, setIsAgente] = useState(false)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [creando, setCreando] = useState(false)
@@ -35,6 +36,7 @@ export default function Preventivi() {
       if (d?.error) { setErr(d.error); setLoading(false); return }
       setClienti(Array.isArray(d?.clienti) ? d.clienti : [])
       setMaster(Array.isArray(d?.master) ? d.master : [])
+      setIsAgente(!!d?.isAgente)
       setLoading(false)
     }).catch(() => { setErr('Errore nel caricamento'); setLoading(false) })
   }
@@ -128,7 +130,7 @@ export default function Preventivi() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '8px', flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Preventivi</h1>
-          <p style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>Crea e invia preventivi brandizzati a clienti e sotto-master. All'accettazione diventano il loro listino.</p>
+          <p style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>Crea e invia preventivi brandizzati {isAgente ? 'ai tuoi clienti' : 'a clienti e sotto-master'}. All'accettazione diventano il loro listino.</p>
         </div>
         <button onClick={creaDiretto} disabled={creando} style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', opacity: creando ? 0.6 : 1 }}>{creando ? 'Creo…' : '+ Crea preventivo'}</button>
       </div>
@@ -144,10 +146,12 @@ export default function Preventivi() {
         {loading ? <div style={{ padding: '30px', textAlign: 'center', color: '#999' }}>Carico…</div> : <Tabella righe={clienti} vuoto="Nessun preventivo a clienti. Creane uno con + Crea preventivo." />}
       </div>
 
-      <div style={card}>
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>Preventivi a sotto-master {!loading && `(${master.length})`}</div>
-        {loading ? <div style={{ padding: '30px', textAlign: 'center', color: '#999' }}>Carico…</div> : <Tabella righe={master} vuoto="Nessun preventivo a sotto-master." />}
-      </div>
+      {!isAgente && (
+        <div style={card}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>Preventivi a sotto-master {!loading && `(${master.length})`}</div>
+          {loading ? <div style={{ padding: '30px', textAlign: 'center', color: '#999' }}>Carico…</div> : <Tabella righe={master} vuoto="Nessun preventivo a sotto-master." />}
+        </div>
+      )}
 
     </div>
   )
