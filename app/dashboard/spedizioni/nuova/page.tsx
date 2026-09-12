@@ -107,6 +107,9 @@ export default function NuovaSpedizionePage() {
   // PuntoPoste: dove si DEPOSITA (tipologia 'FMP'/'APT') e il punto di CONSEGNA (P2TAB/P2UP, dal selettore).
   const [depositoTipo, setDepositoTipo] = useState<'FMP'|'APT'|''>('')
   const [puntoArrivo, setPuntoArrivo] = useState<PuntoScelto | null>(null)
+  // Consegna a DOMICILIO (default, come sempre) o a un PUNTO (PuntoPoste/Ufficio Postale): nel secondo
+  // caso l'indirizzo del destinatario non serve (il pacco va al punto), quindi si nasconde.
+  const [consegnaA, setConsegnaA] = useState<'domicilio'|'punto'>('domicilio')
   useEffect(() => {
     setArticoliScelti([])
     if (!clienteId || clienteId === '__proprio__' || clienteId.startsWith('m:')) { setCatalogo([]); return }
@@ -206,7 +209,10 @@ export default function NuovaSpedizionePage() {
   // costringe a ricalcolare "Seleziona Corriere" sui nuovi dati (no tariffe stale)
   useEffect(() => {
     setTariffe([]); setSelected(null); setVista('dati')
-  }, [dest, mitt, clienteId, peso, colli, numColli, contrassegno, assicurazione])
+  }, [dest, mitt, clienteId, peso, colli, numColli, contrassegno, assicurazione, consegnaA])
+  // Tariffe da mostrare in base alla modalità: "a un punto" → solo i contratti che consegnano a un
+  // punto (P2TAB/P2UP); "a domicilio" → tutti gli altri (esclusi quelli a punto).
+  const tariffeVis = tariffe.filter((t:any) => consegnaA==='punto' ? !!t._consegna_punto : !t._consegna_punto)
 
   useEffect(() => { fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[])) }, [])
   const [isAgente, setIsAgente] = useState(false)
@@ -330,7 +336,7 @@ export default function NuovaSpedizionePage() {
   async function calcolaTariffe() {
     if (!clienteId) { setErrore('Seleziona un cliente'); return }
     if (!mitt.nome||!mitt.indirizzo||!mitt.citta||!mitt.cap||!mitt.provincia) { setErrore('Dati mittente incompleti: compila indirizzo, città, CAP e PROVINCIA del mittente (obbligatori per l\'Italia).'); return }
-    if (!dest.nome||!dest.indirizzo||!dest.citta||!dest.cap||!dest.telefono) { setErrore('Compila tutti i dati destinatario (incluso il telefono)'); return }
+    if (consegnaA==='punto' ? (!dest.nome||!dest.cap||!dest.telefono) : (!dest.nome||!dest.indirizzo||!dest.citta||!dest.cap||!dest.telefono)) { setErrore(consegnaA==='punto' ? 'Per la consegna a un punto servono nome, CAP e telefono del destinatario.' : 'Compila tutti i dati destinatario (incluso il telefono)'); return }
     if (dest.paese==='IT' && !dest.provincia) { setErrore('La provincia è obbligatoria per le spedizioni in Italia'); return }
     if (esteroMulti && colli.some(c => !(+(c.peso||0)>0))) { setErrore('Spedizione estera multicollo: indica il peso (kg) di OGNI collo'); return }
     setErrore(''); setLoading(true); setTariffe([]); setSelected(null)
@@ -349,7 +355,9 @@ export default function NuovaSpedizionePage() {
     if (data.error) { setErrore(data.error); return }
     if (!Array.isArray(data)||!data.length) { setErrore('Nessuna tariffa disponibile'); return }
     setTariffe(data)
-    if (Array.isArray(data) && data.length) setSelected(data[0])
+    const vis = data.filter((t:any) => consegnaA==='punto' ? !!t._consegna_punto : !t._consegna_punto)
+    if (!vis.length) { setErrore(consegnaA==='punto' ? 'Nessun corriere per la consegna a un punto: servono i contratti PuntoPoste, chiedili al tuo master.' : 'Nessun corriere disponibile per questi dati.'); return }
+    setSelected(vis[0])
     setVista('contratto')
   }
 
@@ -612,6 +620,20 @@ export default function NuovaSpedizionePage() {
           <div style={card}>
             <div style={cardH}>Dati Destinatario</div>
             <div style={cardB}>
+              {/* Consegna a domicilio (indirizzo) o a un punto (PuntoPoste/Ufficio Postale): nel secondo
+                  caso l'indirizzo non serve, il pacco va al punto scelto dopo aver scelto il corriere. */}
+              <div style={{display:'flex',gap:'8px',marginBottom:'12px'}}>
+                {([['domicilio','🏠 A domicilio'],['punto','📦 A un PuntoPoste / Ufficio Postale']] as const).map(([v,l])=>(
+                  <button key={v} type="button" onClick={()=>setConsegnaA(v)}
+                    style={{flex:1,padding:'8px 10px',borderRadius:'6px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',border:'1px solid '+(consegnaA===v?'#f97316':'#ddd'),background:consegnaA===v?'#fff7ed':'#fff',color:consegnaA===v?'#f97316':'#666'}}>{l}</button>
+                ))}
+              </div>
+              {consegnaA==='punto' && (
+                <div style={{marginBottom:'12px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'9px 11px',fontSize:'12px',color:'#9a3412',lineHeight:1.5}}>
+                  Il pacco va a un <b>PuntoPoste o Ufficio Postale</b> che sceglierai (con la mappa) dopo aver selezionato il corriere.
+                  Del destinatario bastano <b>nome, telefono ed email</b>: l'indirizzo di casa non serve.
+                </div>
+              )}
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'12px'}}>
                 <div style={{position:'relative'}}>
                   <label style={lbl}>Nominativo *</label>
@@ -647,6 +669,7 @@ export default function NuovaSpedizionePage() {
                   </select>
                 </div>
               </div>
+              {consegnaA==='domicilio' ? (<>
               <div style={{marginBottom:'12px'}}><label style={lbl}>Indirizzo *</label><input value={dest.indirizzo} onChange={e=>setDest({...dest,indirizzo:e.target.value})} placeholder="Via Roma 1" style={inp}/></div>
               <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'8px',marginBottom:'12px'}}>
                 <div style={{position:'relative'}}>
@@ -676,6 +699,12 @@ export default function NuovaSpedizionePage() {
                 <div><label style={lbl}>Prov. *</label><input value={dest.provincia} onChange={e=>setDest({...dest,provincia:e.target.value})} placeholder="RM" style={inp}/></div>
                 <div><label style={lbl}>CAP *</label><input value={dest.cap} onChange={e=>setDest({...dest,cap:e.target.value})} placeholder="00100" style={inp}/></div>
               </div>
+              </>) : (
+              <div style={{maxWidth:'200px',marginBottom:'12px'}}>
+                <label style={lbl}>CAP * <span style={{fontWeight:400,color:'#999'}}>(zona e ricerca punti)</span></label>
+                <input value={dest.cap} onChange={e=>setDest({...dest,cap:e.target.value})} placeholder="00100" style={inp}/>
+              </div>
+              )}
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'12px'}}>
                 <div><label style={lbl}>Email</label><input value={dest.email} onChange={e=>setDest({...dest,email:e.target.value})} style={inp}/></div>
                 <div><label style={lbl}>Telefono</label><input value={dest.telefono} onChange={e=>setDest({...dest,telefono:e.target.value})} style={inp}/></div>
@@ -847,7 +876,7 @@ export default function NuovaSpedizionePage() {
             </div>
             <div style={cardB}>
               {!tariffe.length&&!loading && <div style={{textAlign:'center',color:'#1a1a1a',fontSize:'13px',padding:'12px 0'}}>Compila i dati e clicca "Seleziona Corriere"</div>}
-              {tariffe.map((r,i)=>{
+              {tariffeVis.map((r,i)=>{
                 const chiave = r._corriere_tipo || r.carrierCode
                 const c = CARRIERS[chiave]||{nome:r.corriere_nome||codiceProv(chiave),colore:'#666'}
                 const isSel = selected?._corriere_id===r._corriere_id && selected?.zona===r.zona
@@ -885,7 +914,7 @@ export default function NuovaSpedizionePage() {
             </button>
           </div>
           <div style={cardB}>
-            {tariffe.map((r,i)=>{
+            {tariffeVis.map((r,i)=>{
               const chiave = r._corriere_tipo || r.carrierCode
               const c = CARRIERS[chiave]||{nome:r.corriere_nome||codiceProv(chiave),colore:'#000'}
               const isSel = selected?._corriere_id===r._corriere_id && selected?.zona===r.zona

@@ -130,6 +130,7 @@ export default function NuovaSpedizioneCliente() {
   const [articoliScelti, setArticoliScelti] = useState<RigaArticolo[]>([])
   const [depositoTipo, setDepositoTipo] = useState<'FMP'|'APT'|''>('')
   const [puntoArrivo, setPuntoArrivo] = useState<PuntoScelto | null>(null)
+  const [consegnaA, setConsegnaA] = useState<'domicilio'|'punto'>('domicilio')
   useEffect(() => { fetch('/api/cliente/articoli').then(r=>r.json()).then(d=>setCatalogo(Array.isArray(d)?d:[])).catch(()=>{}) }, [])
   // Precompila il codice HS dalla merce del catalogo (colonna codice_hs), senza sovrascrivere quello
   // digitato a mano: la dogana usa una voce aggregata, quindi basta il primo articolo che ce l'ha.
@@ -220,7 +221,9 @@ export default function NuovaSpedizioneCliente() {
   }, [])
   useEffect(() => {
     setTariffe([]); setSelected(null); setVista('dati')
-  }, [dest, mitt, peso, colli, numColli, contrassegno, assicurazione])
+  }, [dest, mitt, peso, colli, numColli, contrassegno, assicurazione, consegnaA])
+  // Tariffe da mostrare in base alla modalità: "a un punto" → solo contratti a punto (P2TAB/P2UP).
+  const tariffeVis = tariffe.filter((t:any) => consegnaA==='punto' ? !!t._consegna_punto : !t._consegna_punto)
 
   // Se il cliente modifica un dato che cambia il prezzo mentre la lista e' visibile,
   // azzera le tariffe: dovra' ricliccare "Seleziona Corriere" per vedere il prezzo aggiornato.
@@ -280,10 +283,10 @@ export default function NuovaSpedizioneCliente() {
   }
 
   async function calcolaTariffe() {
-    if (!dest.nome||!dest.indirizzo||!dest.citta||!dest.cap||!dest.telefono) {
-      setErrore('Compila tutti i dati del destinatario (incluso il telefono)'); return
+    if (consegnaA==='punto' ? (!dest.nome||!dest.cap||!dest.telefono) : (!dest.nome||!dest.indirizzo||!dest.citta||!dest.cap||!dest.telefono)) {
+      setErrore(consegnaA==='punto' ? 'Per la consegna a un punto servono nome, CAP e telefono del destinatario.' : 'Compila tutti i dati del destinatario (incluso il telefono)'); return
     }
-    if (dest.paese==='IT' && !dest.provincia) {
+    if (consegnaA==='domicilio' && dest.paese==='IT' && !dest.provincia) {
       setErrore('La provincia è obbligatoria per le spedizioni in Italia'); return
     }
     if (esteroMulti && colli.some(c => !(+(c.peso||0)>0))) {
@@ -305,10 +308,10 @@ export default function NuovaSpedizioneCliente() {
     if (data.error) { setErrore(data.error); return }
     if (!Array.isArray(data)||!data.length) { setErrore('Nessuna tariffa disponibile'); return }
     setTariffe(data)
-    if (Array.isArray(data) && data.length) {
-      const pref = corrierePref ? data.find((t:any)=>t.corriere_id===corrierePref || t._corriere_id===corrierePref) : null
-      setSelected(pref || data[0])
-    }
+    const vis = data.filter((t:any) => consegnaA==='punto' ? !!t._consegna_punto : !t._consegna_punto)
+    if (!vis.length) { setErrore(consegnaA==='punto' ? 'Nessun corriere per la consegna a un punto: chiedi al tuo master i contratti PuntoPoste.' : 'Nessun corriere disponibile per questi dati.'); return }
+    const pref = corrierePref ? vis.find((t:any)=>t.corriere_id===corrierePref || t._corriere_id===corrierePref) : null
+    setSelected(pref || vis[0])
     setVista('contratto')
   }
 
@@ -580,6 +583,19 @@ export default function NuovaSpedizioneCliente() {
           <div style={card}>
             <div style={cardH}>Dati Destinatario</div>
             <div style={cardB}>
+              {/* Consegna a domicilio o a un punto (PuntoPoste/Ufficio Postale): a un punto l'indirizzo non serve. */}
+              <div style={{display:'flex',gap:'8px',marginBottom:'12px'}}>
+                {([['domicilio','🏠 A domicilio'],['punto','📦 A un PuntoPoste / Ufficio Postale']] as const).map(([v,l])=>(
+                  <button key={v} type="button" onClick={()=>setConsegnaA(v)}
+                    style={{flex:1,padding:'8px 10px',borderRadius:'6px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',border:'1px solid '+(consegnaA===v?'#f97316':'#ddd'),background:consegnaA===v?'#fff7ed':'#fff',color:consegnaA===v?'#f97316':'#666'}}>{l}</button>
+                ))}
+              </div>
+              {consegnaA==='punto' && (
+                <div style={{marginBottom:'12px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'9px 11px',fontSize:'12px',color:'#9a3412',lineHeight:1.5}}>
+                  Il pacco va a un <b>PuntoPoste o Ufficio Postale</b> che sceglierai (con la mappa) dopo aver scelto il corriere.
+                  Del destinatario bastano <b>nome, telefono ed email</b>: l'indirizzo di casa non serve.
+                </div>
+              )}
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'12px'}}>
                 <div style={{position:'relative'}}>
                   <label style={lbl}>Nominativo *</label>
@@ -612,6 +628,7 @@ export default function NuovaSpedizioneCliente() {
                   </select>
                 </div>
               </div>
+              {consegnaA==='domicilio' ? (<>
               <div style={{marginBottom:'12px'}}><label style={lbl}>Indirizzo *</label><input value={dest.indirizzo} onChange={e=>setDest({...dest,indirizzo:e.target.value})} placeholder="Via Roma 1" style={inp}/></div>
               <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'8px',marginBottom:'12px'}}>
                 <div style={{position:'relative'}}>
@@ -641,6 +658,12 @@ export default function NuovaSpedizioneCliente() {
                 <div><label style={lbl}>Prov. *</label><input value={dest.provincia} onChange={e=>setDest({...dest,provincia:e.target.value})} placeholder="RM" style={inp}/></div>
                 <div><label style={lbl}>CAP *</label><input value={dest.cap} onChange={e=>setDest({...dest,cap:e.target.value})} placeholder="00100" style={inp}/></div>
               </div>
+              </>) : (
+              <div style={{maxWidth:'200px',marginBottom:'12px'}}>
+                <label style={lbl}>CAP * <span style={{fontWeight:400,color:'#999'}}>(zona e ricerca punti)</span></label>
+                <input value={dest.cap} onChange={e=>setDest({...dest,cap:e.target.value})} placeholder="00100" style={inp}/>
+              </div>
+              )}
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'12px'}}>
                 <div><label style={lbl}>Email</label><input value={dest.email} onChange={e=>setDest({...dest,email:e.target.value})} style={inp}/></div>
                 <div><label style={lbl}>Telefono</label><input value={dest.telefono} onChange={e=>setDest({...dest,telefono:e.target.value})} style={inp}/></div>
@@ -799,7 +822,7 @@ export default function NuovaSpedizioneCliente() {
                   Compila i dati e clicca "Seleziona Corriere"
                 </div>
               )}
-              {tariffe.map((r,i)=>{
+              {tariffeVis.map((r,i)=>{
                 const carrier = CARRIER_LABELS[r.carrierCode]||{nome:r.corriere_nome||codiceProv(r.carrierCode),colore:'#666'}
                 const isSelected = ((selected as any)?._corriere_id && (r as any)?._corriere_id) ? ((selected as any)._corriere_id===(r as any)._corriere_id && selected?.zona===r.zona) : (selected?.carrierCode===r.carrierCode&&selected?.contractCode===r.contractCode&&selected?.zona===r.zona)
                 return (
@@ -856,7 +879,7 @@ export default function NuovaSpedizioneCliente() {
             </button>
           </div>
           <div style={cardB}>
-            {tariffe.map((r,i)=>{
+            {tariffeVis.map((r,i)=>{
               const carrier = CARRIER_LABELS[r.carrierCode]||{nome:r.corriere_nome||codiceProv(r.carrierCode),colore:'#666'}
               const isSelected = ((selected as any)?._corriere_id && (r as any)?._corriere_id) ? ((selected as any)._corriere_id===(r as any)._corriere_id && selected?.zona===r.zona) : (selected?.carrierCode===r.carrierCode&&selected?.contractCode===r.contractCode&&selected?.zona===r.zona)
               return (
