@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
 import SelettoreArticoli, { type RigaArticolo, type ArticoloCat } from '@/app/components/SelettoreArticoli'
 import { isExtraUe } from '@/lib/paesi-ue'
+import PuntoPosteSelettore, { type PuntoScelto } from '@/app/components/PuntoPosteSelettore'
 import PagaConCarta from '@/app/cliente/PagaConCarta'
 import { PAESI_MONDO } from '@/lib/paesi-elenco'
 
@@ -12,7 +13,7 @@ import { PAESI_MONDO } from '@/lib/paesi-elenco'
 // il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
 // all'utente ('EASYPARCEL'). Ogni provider ha la sua sigla neutra.
 const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':t==='easyparcel'?'V':(t||'').toUpperCase()
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; _corriere_id?:string; _corriere_tipo?:string; corriere_nome?:string }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; _corriere_id?:string; _corriere_tipo?:string; corriere_nome?:string; _punto_partenza?:string; _punto_arrivo?:string }
 interface Collo { lunghezza:string; larghezza:string; altezza:string; peso?:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -124,6 +125,8 @@ export default function NuovaSpedizioneCliente() {
   // articoli il selettore non compare nemmeno, quindi per chi non lo usa la pagina resta identica.
   const [catalogo, setCatalogo] = useState<ArticoloCat[]>([])
   const [articoliScelti, setArticoliScelti] = useState<RigaArticolo[]>([])
+  const [puntoPartenza, setPuntoPartenza] = useState<PuntoScelto | null>(null)
+  const [puntoArrivo, setPuntoArrivo] = useState<PuntoScelto | null>(null)
   useEffect(() => { fetch('/api/cliente/articoli').then(r=>r.json()).then(d=>setCatalogo(Array.isArray(d)?d:[])).catch(()=>{}) }, [])
   // Precompila il codice HS dalla merce del catalogo (colonna codice_hs), senza sovrascrivere quello
   // digitato a mano: la dogana usa una voce aggregata, quindi basta il primo articolo che ce l'ha.
@@ -150,7 +153,7 @@ export default function NuovaSpedizioneCliente() {
   // bancario (AB) + Assegno circolare (AC) — codici ServiziAccessori 01/02/03; DVA solo Contante/Assegno
   // (la sua API ha 2 valori); gli altri solo Contante. Il valore è il codice modalità. Si azzera al cambio.
   const [incassoModalita, setIncassoModalita] = useState<string>('C')
-  useEffect(() => { setExtraNomi([]); setIncassoModalita('C') }, [selected?._corriere_id])
+  useEffect(() => { setExtraNomi([]); setIncassoModalita('C'); setPuntoPartenza(null); setPuntoArrivo(null) }, [selected?._corriere_id])
   const codModalitaOpts: [string,string][] = selected?._corriere_tipo === 'gls'
     ? [['C','CONTANTE'],['AB','ASSEGNO BANCARIO'],['AC','ASSEGNO CIRCOLARE']]
     : selected?._corriere_tipo === 'V' ? [['C','CONTANTE'],['A','ASSEGNO']]
@@ -339,6 +342,9 @@ export default function NuovaSpedizioneCliente() {
 
   async function creaSpedizione() {
     if (!selected) return
+    // PuntoPoste: blocca prima di comprare se manca un punto obbligatorio (il server ricontrolla).
+    if (selected._punto_partenza && !puntoPartenza) { setErrore('Seleziona il PuntoPoste di partenza (dove consegni il pacco).'); return }
+    if (selected._punto_arrivo && !puntoArrivo) { setErrore('Seleziona il punto di consegna (PuntoPoste o Ufficio Postale).'); return }
     setCreating(true); setCreditoKO(null); setErrore('')
     const res = await fetch('/api/spedizioni/crea', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -358,6 +364,8 @@ export default function NuovaSpedizioneCliente() {
         // Righe articolo: servono alla DOGANA estero (una voce hscode per articolo, lato server dal
         // catalogo). Sono le stesse che poi scaricano il magazzino.
         articoli: articoliScelti.map(r=>({ articolo_id:r.id, quantita:r.qta })),
+        // PuntoPoste: codici del punto di partenza/arrivo (solo contratti P2H/P2TAB/P2UP).
+        puntoPartenza: puntoPartenza?.codice || undefined, puntoArrivo: puntoArrivo?.codice || undefined,
         // Ritiro: sui contratti DVA si prenota SOLO insieme all'ordine (il corriere non ha una
         // chiamata per aggiungerlo dopo), quindi la richiesta va passata gia' qui.
         richiediRitiro, dataRitiro:ritiroData, orarioRitiro:ritiroOrario
@@ -867,6 +875,22 @@ export default function NuovaSpedizioneCliente() {
 
             {selected && (
               <div style={{marginTop:'8px',borderTop:'1px solid #eee',paddingTop:'14px'}}>
+                {(selected._punto_partenza || selected._punto_arrivo) && selected._corriere_id && (
+                  <div style={{display:'flex',flexDirection:'column',gap:'10px',marginBottom:'14px'}}>
+                    {selected._punto_partenza && (
+                      <div>
+                        <label style={lbl}>Punto di partenza — dove consegni il pacco *</label>
+                        <PuntoPosteSelettore corriereId={selected._corriere_id} lato="partenza" tipologia={selected._punto_partenza} capIniziale={mitt.cap} valore={puntoPartenza} onChange={setPuntoPartenza} />
+                      </div>
+                    )}
+                    {selected._punto_arrivo && (
+                      <div>
+                        <label style={lbl}>Punto di consegna — dove ritira il destinatario *</label>
+                        <PuntoPosteSelettore corriereId={selected._corriere_id} lato="arrivo" tipologia={selected._punto_arrivo} capIniziale={dest.cap} valore={puntoArrivo} onChange={setPuntoArrivo} />
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'14px',alignItems:'end' as const}}>
                   <div>
                     <label style={lbl}>Servizi accessori</label>

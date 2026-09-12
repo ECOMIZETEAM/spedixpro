@@ -4,6 +4,22 @@ import { calcolaTariffeCliente, ZONE_MAP, PAESI, superaMisureMax, descriviLimiti
 import { calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
 import { siglaContratto } from '@/lib/corriere-logo'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { pudoConfigDaVettore } from '@/lib/punti-poste'
+
+// Marca le tariffe dei contratti "PuntoPoste" (PDB-P2H/P2TAB/P2UP) coi flag _punto_partenza/_punto_arrivo
+// (tipologia RTZ/FMP), così il form sa quando mostrare il selettore-punto. Il vettore sta nelle
+// credenziali (service_role): lookup via admin. Nessun segreto esce (solo la tipologia).
+async function annotaPuntoPoste(admin: any, risultati: any[]) {
+  const ids = [...new Set(risultati.map((r: any) => r._corriere_id).filter(Boolean))]
+  if (!ids.length) return
+  const { data: corr } = await admin.from('corrieri').select('id,credenziali').in('id', ids)
+  const vettPerId = new Map<string, string>((corr || []).map((c: any) => [c.id, String((c.credenziali || {}).vettore || '')]))
+  for (const r of risultati) {
+    const cfg = pudoConfigDaVettore(vettPerId.get(r._corriere_id))
+    if (cfg.partenza) r._punto_partenza = cfg.partenza
+    if (cfg.arrivo) r._punto_arrivo = cfg.arrivo
+  }
+}
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -97,6 +113,7 @@ export async function POST(req: NextRequest) {
     }
     if (!risultati.length) return NextResponse.json({ error: 'Nessuna tariffa dal listino corriere per questa destinazione' }, { status: 400 })
     risultati.sort((a, b) => Number(a.total_price) - Number(b.total_price))
+    await annotaPuntoPoste(createAdminSupabase(), risultati)
     return NextResponse.json(risultati)
   }
 
@@ -158,5 +175,6 @@ export async function POST(req: NextRequest) {
     } catch { /* mai rompere la pagina per il pavimento */ }
   }
 
+  try { await annotaPuntoPoste(createAdminSupabase(), risultati) } catch { /* i flag punto non bloccano la lista */ }
   return NextResponse.json(risultati)
 }
