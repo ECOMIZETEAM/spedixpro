@@ -588,15 +588,16 @@ export default function NuovaSpedizioneCliente() {
             <div style={cardB}>
               {/* Consegna a domicilio o a un punto (PuntoPoste/Ufficio Postale): a un punto l'indirizzo non serve. */}
               <div style={{display:'flex',gap:'8px',marginBottom:'12px'}}>
-                {([['domicilio','🏠 A domicilio'],['punto','📦 A un PuntoPoste / Ufficio Postale']] as const).map(([v,l])=>(
+                {([['domicilio','🏠 A domicilio'],['punto','📦 A un punto (PuntoPoste, Ufficio Postale, Locker…)']] as const).map(([v,l])=>(
                   <button key={v} type="button" onClick={()=>setConsegnaA(v)}
                     style={{flex:1,padding:'8px 10px',borderRadius:'6px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',border:'1px solid '+(consegnaA===v?'#f97316':'#ddd'),background:consegnaA===v?'#fff7ed':'#fff',color:consegnaA===v?'#f97316':'#666'}}>{l}</button>
                 ))}
               </div>
               {consegnaA==='punto' && (
                 <div style={{marginBottom:'12px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'9px 11px',fontSize:'12px',color:'#9a3412',lineHeight:1.5}}>
-                  Il pacco va a un <b>PuntoPoste o Ufficio Postale</b> che sceglierai (con la mappa) dopo aver scelto il corriere.
-                  Del destinatario bastano <b>nome, telefono ed email</b>: l'indirizzo di casa non serve.
+                  Il pacco va a un <b>punto</b> (PuntoPoste, Ufficio Postale o Locker) che sceglierai con la mappa dopo aver scelto il corriere.
+                  L'indirizzo di casa non serve: bastano <b>nome, telefono ed email</b> del destinatario.
+                  <br/><b>Importante:</b> il corriere manda al destinatario, via SMS ed email, l'avviso e il <b>codice per ritirare o aprire il locker</b> — inserisci telefono ed email <b>veri del destinatario</b>.
                 </div>
               )}
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'12px'}}>

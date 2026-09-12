@@ -888,6 +888,11 @@ export async function POST(req: NextRequest) {
         if (paSp.localita) consignee.city = String(paSp.localita).substring(0, 35)
         if (paSp.provincia) consignee.province = String(paSp.provincia).substring(0, 2).toUpperCase()
       }
+      // ECCEZIONE "email schermo" per la consegna a un PUNTO: il codice per ritirare / aprire il LOCKER lo
+      // genera e lo invia il CORRIERE al destinatario (verificato: NON torna dall'API), quindi qui gli serve
+      // l'email VERA — altrimenti il cliente non riceve il codice e non apre l'armadietto. Il telefono è già
+      // quello vero (l'SMS col codice arriva comunque). Sulla consegna a domicilio resta l'email di servizio.
+      if (consegnaAlPuntoSp) consignee.email = String(body.shipTo?.email || '').trim() || EMAIL_PER_CORRIERE
 
       // MULTICOLLO: un parcel per OGNI collo (prima si inviava solo il primo -> 1 sola etichetta)
       // NB: SpediamoPro non supporta una descrizione merce a testo libero sul collo (verificato via API):
@@ -1324,7 +1329,9 @@ export async function POST(req: NextRequest) {
           // quindi si manda la SUA email vera (ripiego sull'email di servizio se non c'e'). Sul
           // nazionale resta l'email di servizio (vedi memoria "email schermo corriere": i link di
           // riprogrammazione non devono arrivare al destinatario, avvisiamo noi).
-          email: estero ? (String(body.shipTo?.email || '').trim() || EMAIL_PER_CORRIERE) : EMAIL_PER_CORRIERE,
+          // CONSEGNA A UN PUNTO (P2TAB/P2UP): come per il locker, l'avviso di giacenza / il codice di
+          // ritiro lo manda il CORRIERE al destinatario → gli serve l'email VERA (il telefono è già vero).
+          email: (estero || consegnaAlPunto) ? (String(body.shipTo?.email || '').trim() || EMAIL_PER_CORRIERE) : EMAIL_PER_CORRIERE,
           cellulare: cellDest, contatto: body.shipTo.name,
         },
         note: body.notes || undefined,
