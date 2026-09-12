@@ -101,7 +101,11 @@ export default function Preventivi() {
                 <td style={td}>
                   <div style={{ fontWeight: 600 }}>{r.dest_nome || '—'}</div>
                   {r.dest_email && <div style={{ fontSize: '11px', color: '#999' }}>{r.dest_email}</div>}
-                  {r.dest_tipo === 'cliente_nuovo' && <span style={{ fontSize: '10px', fontWeight: 700, color: '#0891b2', background: '#ecfeff', padding: '1px 6px', borderRadius: '4px' }}>cliente nuovo</span>}
+                  <span style={{ display: 'inline-flex', gap: '5px', flexWrap: 'wrap' as const }}>
+                    {r.dest_tipo === 'cliente_nuovo' && <span style={{ fontSize: '10px', fontWeight: 700, color: '#0891b2', background: '#ecfeff', padding: '1px 6px', borderRadius: '4px' }}>cliente nuovo</span>}
+                    {/* Tag agente: solo il master lo vede (distingue i preventivi portati dai suoi agenti). */}
+                    {!isAgente && r.agente && <span style={{ fontSize: '10px', fontWeight: 700, color: '#7c3aed', background: '#f5f3ff', padding: '1px 6px', borderRadius: '4px' }}>agente: {r.agente}</span>}
+                  </span>
                 </td>
                 <td style={td}>{r.oggetto || '—'}</td>
                 <td style={td}>{badge(r.stato)}</td>
