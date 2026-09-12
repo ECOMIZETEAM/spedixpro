@@ -7,6 +7,9 @@ import { useDialog } from '@/app/components/DialogProvider'
 import SelettoreArticoli, { type RigaArticolo, type ArticoloCat } from '@/app/components/SelettoreArticoli'
 import { isExtraUe } from '@/lib/paesi-ue'
 import PuntoPosteSelettore, { type PuntoScelto } from '@/app/components/PuntoPosteSelettore'
+
+// Deposito PuntoPoste preferito (FMP/APT): ricordato per comodità, come i filtri persistenti.
+const depSalvato = (): 'FMP'|'APT'|'' => { try { const v = localStorage.getItem('puntoposte:deposito'); return v === 'FMP' || v === 'APT' ? v : '' } catch { return '' } }
 import { PAESI_MONDO } from '@/lib/paesi-elenco'
 
 function iconaCorriere(nome:string): string | null {
@@ -172,7 +175,7 @@ export default function NuovaSpedizionePage() {
   // bancario (AB) + Assegno circolare (AC) — codici ServiziAccessori 01/02/03; DVA solo Contante/Assegno
   // (la sua API ha 2 valori); gli altri solo Contante. Il valore è il codice modalità. Si azzera al cambio.
   const [incassoModalita, setIncassoModalita] = useState<string>('C')
-  useEffect(() => { setExtraNomi([]); setIncassoModalita('C'); setDepositoTipo(''); setPuntoArrivo(null) }, [selected?._corriere_id])
+  useEffect(() => { setExtraNomi([]); setIncassoModalita('C'); setDepositoTipo(depSalvato()); setPuntoArrivo(null) }, [selected?._corriere_id])
   const codModalitaOpts: [string,string][] = selected?._corriere_tipo === 'gls'
     ? [['C','CONTANTE'],['AB','ASSEGNO BANCARIO'],['AC','ASSEGNO CIRCOLARE']]
     : selected?._corriere_tipo === 'V' ? [['C','CONTANTE'],['A','ASSEGNO']]
@@ -913,7 +916,7 @@ export default function NuovaSpedizionePage() {
                     {selected._deposito && (
                       <div>
                         <label style={{display:'block',fontSize:'12px',color:'#000',marginBottom:'4px',fontWeight:600}}>Dove depositi il pacco *</label>
-                        <select value={depositoTipo} onChange={e=>setDepositoTipo(e.target.value as any)} style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#000'}}>
+                        <select value={depositoTipo} onChange={e=>{ const v=e.target.value as any; setDepositoTipo(v); try{ if(v) localStorage.setItem('puntoposte:deposito', v) }catch{} }} style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#000'}}>
                           <option value="">Scegli dove consegni il pacco…</option>
                           <option value="APT">Punto Poste (tabaccheria / negozio)</option>
                           <option value="FMP">Ufficio Postale</option>
