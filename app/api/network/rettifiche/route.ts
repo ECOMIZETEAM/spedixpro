@@ -156,8 +156,13 @@ export async function POST(req: NextRequest) {
         // "oltre") o a questa zona. NON è un vicolo cieco: il master alza la fascia sul listino del
         // suo cliente e RIPREME Accetta — allora prezza e passa. Il messaggio glielo dice, col peso
         // vero, invece di suggerire di assorbire (che sarebbe farsi carico di un costo del cliente).
+        // IL PESO SI SCRIVE PER INTERO, con il decimale. Arrotondato faceva impazzire chi leggeva:
+        // un collo da 5,34 kg usciva come «non copre 5 kg» su un listino che la fascia 0–5 ce l'ha
+        // eccome — sembrava un guasto nostro, ed era solo il collo che la supera di tre etti
+        // (visto il 12/09/2026 su BRILLITALIA, Epos Caffè, FEDEL FARMA).
         const pesoFatt = Math.max(Number(esito.pesoDopo) || 0, Number(esito.pesoVolumeDopo) || 0)
-        saltate.push({ ldv: r.numero_spedizione, perche: `il listino di ${liv.chi || 'questo cliente'} non copre ${pesoFatt ? pesoFatt.toFixed(0) + ' kg' : 'questo peso'} (peso ripesato oltre l'ultima fascia, o zona non prevista) → aggiungi la fascia mancante al suo listino e ripremi Accetta: passerà.` })
+        const quanto = pesoFatt ? pesoFatt.toFixed(1).replace('.', ',') + ' kg' : 'questo peso'
+        saltate.push({ ldv: r.numero_spedizione, perche: `il listino di ${liv.chi || 'questo cliente'} si ferma prima di ${quanto}: il collo ripesato lo supera (o la sua zona non è prevista) → alza l'ultima fascia sul suo listino e ripremi Accetta, passerà.` })
         continue
       }
       // Il listino del figlio prezza il collo (differenza != null) ma riprezzando esce <= 0: stesso
