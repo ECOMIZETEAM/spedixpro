@@ -261,6 +261,9 @@ export async function spediamoproCreateShipment(
     insuredAmount?: number
     externalReference?: string
     notes?: string
+    // Consegna a un PUNTO (deliveryPudo): id del PUDO scelto (Fermopoint BRT / Locker InPost / ecc.).
+    // Obbligatorio sui servizi che lo richiedono (BRTPUDO, INPOSTSTD, SDAHTSSTD, SDASTS); assente sugli altri.
+    deliveryPudo?: string
   }
 ): Promise<{
   id: number
@@ -289,6 +292,8 @@ export async function spediamoproCreateShipment(
       // NOTE SpediamoPro: max ~20 caratteri, oltre → 422 "invalid data". Normalizzo i caratteri (apostrofo
       // curvo/ᵒ romperebbero la STAMPA dell'etichetta) e tronco a 20.
       consigneeNote: params.notes ? (normalizzaTestoCorriere(params.notes).substring(0, 20) || null) : null,
+      // Punto di consegna (Fermopoint/Locker): solo sui servizi pudo. Sugli altri va OMESSO (null).
+      ...(params.deliveryPudo ? { deliveryPudo: String(params.deliveryPudo).trim() } : {}),
     })
 
   // Retry SOLO sul timeout transitorio lato corriere (vedi isTimeoutCorriere): in quel caso il
@@ -325,6 +330,47 @@ export async function spediamoproCreateShipment(
     code: d.code || null,
     raw: json, // risposta grezza completa per debug
   }
+}
+
+// Cerca i PUNTI di consegna (Fermopoint BRT / Locker InPost / ecc.) per un CAP. POST /pudo-points/search
+// vuole country+postalCode+city+courier (NIENTE lat/lon: la ricerca è per CAP). `city` non è vincolante
+// (verificato: con CAP valido e city qualsiasi torna i punti vicini). Normalizzo alla stessa forma del
+// selettore DVA (codice/nome/indirizzo/cap/localita/provincia/lat/lon/distanzaKm) così il componente è unico.
+export async function spediamoproPudoSearch(
+  authcode: string,
+  dati: { courier: string; cap: string; city?: string; address?: string }
+): Promise<Array<{ codice: string; tipologia: string; nome: string; indirizzo: string; cap: string; localita: string; provincia: string; lat: number | null; lon: number | null; distanzaKm: number | null }>> {
+  const token = await getSpediamoproToken(authcode)
+  const res = await fetch(`${BASE_URL}/pudo-points/search`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      country: 'IT',
+      postalCode: String(dati.cap || '').trim(),
+      city: String(dati.city || dati.cap || '.').substring(0, 35),
+      ...(dati.address ? { address: String(dati.address).substring(0, 60) } : {}),
+      courier: dati.courier,
+    }),
+  })
+  const json = await res.json().catch(() => null)
+  if (!res.ok || json?.error) throw new Error(json?.error?.message || 'SpediamoPro pudo search failed')
+  const arr = Array.isArray(json?.data) ? json.data : []
+  return arr.map((it: any) => {
+    const p = it.pudoPoint || it
+    return {
+      codice: String(p.id || ''),
+      tipologia: String(p.courier || dati.courier),
+      nome: String(p.name || ''),
+      indirizzo: String(p.address || ''),
+      cap: String(p.postalCode || ''),
+      localita: String(p.city || ''),
+      provincia: String(p.province || ''),
+      lat: p.latitude != null ? Number(p.latitude) : null,
+      lon: p.longitude != null ? Number(p.longitude) : null,
+      // distance è in METRI (verificato: ~135–309 per punti nello stesso CAP) → km (1 decimale) per il selettore.
+      distanzaKm: it.distance != null ? Math.round(Number(it.distance) / 100) / 10 : null,
+    }
+  }).filter((p: any) => p.codice)
 }
 
 export async function spediamoproGetShipment(authcode: string, shipmentId: number): Promise<any> {

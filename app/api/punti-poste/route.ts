@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { pudoConfigDaVettore } from '@/lib/punti-poste'
+import { pudoConfigDaVettore, spediamoproPudoCourier } from '@/lib/punti-poste'
 import { easyparcelPudo } from '@/lib/easyparcel'
+import { spediamoproPudoSearch } from '@/lib/spediamopro'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -21,6 +22,7 @@ export async function GET(req: NextRequest) {
   const p = req.nextUrl.searchParams
   const corriereId = p.get('corriereId') || ''
   const cap = (p.get('cap') || '').trim()
+  const citta = (p.get('city') || '').trim()
   const lat = p.get('lat') ? Number(p.get('lat')) : undefined
   const lon = p.get('lon') ? Number(p.get('lon')) : undefined
   if (!corriereId) return NextResponse.json({ error: 'Contratto mancante' }, { status: 400 })
@@ -29,7 +31,7 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminSupabase()
   const { data: corr } = await admin.from('corrieri').select('id,master_id,tipo,credenziali').eq('id', corriereId).maybeSingle()
-  if (!corr || corr.tipo !== 'easyparcel') return NextResponse.json({ error: 'Contratto non valido' }, { status: 404 })
+  if (!corr || (corr.tipo !== 'easyparcel' && corr.tipo !== 'spediamopro')) return NextResponse.json({ error: 'Contratto non valido' }, { status: 404 })
 
   // Perimetro: il contratto dev'essere del master del chiamante o di un suo ANTENATO (i contratti
   // condivisi scendono lungo la catena). Vale per master/agente/cliente (tutti hanno master_id).
@@ -43,6 +45,24 @@ export async function GET(req: NextRequest) {
   if (!catena.has(corr.master_id)) return NextResponse.json({ error: 'Contratto non disponibile' }, { status: 403 })
 
   const cred = (corr.credenziali || {}) as any
+
+  // ── SpediamoPro: ricerca per CAP (l'API non accetta lat/lon). Il corriere (brt/inpost/sda) esce dal
+  //    service_id. Solo punto di CONSEGNA (deliveryPudo), nessun deposito. ──
+  if (corr.tipo === 'spediamopro') {
+    const courier = spediamoproPudoCourier(cred.service_id)
+    if (!courier) return NextResponse.json({ error: 'Questo contratto non prevede un punto di consegna da scegliere.' }, { status: 400 })
+    if (!cred.authcode) return NextResponse.json({ error: 'Contratto non configurato.' }, { status: 400 })
+    if (!cap) return NextResponse.json({ error: 'Cerca il punto inserendo il CAP del destinatario.' }, { status: 400 })
+    try {
+      const punti = await spediamoproPudoSearch(cred.authcode, { courier, cap, city: citta || undefined })
+      return NextResponse.json({ punti, tipologia: courier })
+    } catch (e: any) {
+      console.error('[PUNTI-POSTE][SP] pudo KO', String(e?.message || e).slice(0, 150))
+      return NextResponse.json({ error: 'Ricerca punti non disponibile in questo momento.' }, { status: 502 })
+    }
+  }
+
+  // ── DVA (easyparcel) ──
   // Cerca i punti di CONSEGNA (dove ritira il destinatario): P2TAB→RTZ, P2UP→FMP. L'origine (deposito)
   // non passa di qui: è una semplice scelta FMP/APT nel form.
   const tipologia = pudoConfigDaVettore(cred.vettore).consegnaTipologia

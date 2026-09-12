@@ -39,12 +39,31 @@ export function eContrattoPuntoPoste(vettore?: string | null): boolean {
   return c.deposito || !!c.consegnaTipologia
 }
 
+// ── SpediamoPro (provider diverso da DVA) ────────────────────────────────────
+// Qui il punto è SOLO in CONSEGNA: `deliveryPudo` nell'ordine (niente deposito in partenza, a
+// differenza dei contratti DVA). Il servizio si riconosce dal `service_id` in credenziali. La ricerca
+// dei punti (POST /pudo-points/search) vuole il CORRIERE (brt/inpost/sda). Verificato 12/9:
+//   30 BRTPUDO → brt (Fermopoint) • 18 INPOSTSTD → inpost (Locker) • 27/32 → sda (non attivi sul conto).
+export type CorrierePudoSp = 'brt' | 'inpost' | 'sda'
+export function spediamoproPudoCourier(serviceId?: string | number | null): CorrierePudoSp | null {
+  switch (String(serviceId ?? '').trim()) {
+    case '30': return 'brt'
+    case '18': return 'inpost'
+    case '27': case '32': return 'sda'
+    default: return null
+  }
+}
+
 // Etichetta leggibile del tipo di punto (UI, senza nominare il provider tecnico).
+// Copre sia le tipologie DVA (RTZ/FMP/APT) sia i corrieri SpediamoPro (brt/inpost/sda).
 export function etichettaTipologia(t?: string | null): string {
   switch (String(t || '').toUpperCase()) {
     case 'RTZ': return 'PuntoPoste'
     case 'FMP': return 'Ufficio Postale'
     case 'APT': return 'Punto Poste'
+    case 'BRT': return 'Fermopoint'
+    case 'INPOST': return 'Locker'
+    case 'SDA': return 'PuntoPoste'
     default: return 'Punto di ritiro'
   }
 }

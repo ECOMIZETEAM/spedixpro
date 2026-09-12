@@ -4,7 +4,7 @@ import { calcolaTariffeCliente, ZONE_MAP, PAESI, superaMisureMax, descriviLimiti
 import { calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
 import { siglaContratto } from '@/lib/corriere-logo'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { pudoConfigDaVettore } from '@/lib/punti-poste'
+import { pudoConfigDaVettore, spediamoproPudoCourier } from '@/lib/punti-poste'
 
 // Marca le tariffe dei contratti "PuntoPoste" (PDB-P2H/P2TAB/P2UP) coi flag _deposito (il mittente
 // sceglie dove depositare: Ufficio Postale/Punto Poste) e _consegna_punto (tipologia RTZ/FMP del punto
@@ -13,12 +13,21 @@ import { pudoConfigDaVettore } from '@/lib/punti-poste'
 async function annotaPuntoPoste(admin: any, risultati: any[]) {
   const ids = [...new Set(risultati.map((r: any) => r._corriere_id).filter(Boolean))]
   if (!ids.length) return
-  const { data: corr } = await admin.from('corrieri').select('id,credenziali').in('id', ids)
-  const vettPerId = new Map<string, string>((corr || []).map((c: any) => [c.id, String((c.credenziali || {}).vettore || '')]))
+  const { data: corr } = await admin.from('corrieri').select('id,tipo,credenziali').in('id', ids)
+  const perId = new Map<string, any>((corr || []).map((c: any) => [c.id, c]))
   for (const r of risultati) {
-    const cfg = pudoConfigDaVettore(vettPerId.get(r._corriere_id))
-    if (cfg.deposito) r._deposito = true
-    if (cfg.consegnaTipologia) r._consegna_punto = cfg.consegnaTipologia
+    const c = perId.get(r._corriere_id); if (!c) continue
+    const cred = c.credenziali || {}
+    if (c.tipo === 'spediamopro') {
+      // SpediamoPro: SOLO consegna a un punto (deliveryPudo), nessun deposito. _consegna_punto = il
+      // corriere per la ricerca punti (brt/inpost/sda). Serve al form per mostrare il selettore-punto.
+      const courier = spediamoproPudoCourier(cred.service_id)
+      if (courier) r._consegna_punto = courier
+    } else {
+      const cfg = pudoConfigDaVettore(cred.vettore)
+      if (cfg.deposito) r._deposito = true
+      if (cfg.consegnaTipologia) r._consegna_punto = cfg.consegnaTipologia
+    }
   }
 }
 

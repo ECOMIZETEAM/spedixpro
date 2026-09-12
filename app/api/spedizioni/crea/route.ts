@@ -4,7 +4,7 @@ import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import { calcolaPrezzoCorriere, calcolaPrezzoCorriereDettaglio, calcolaSupplementiCliente, fattoreVolumeCliente, fattoreVolumeCorriere, calcolaPesoFatturato, calcolaPrezzoListino } from '@/lib/pricing'
 import { isAgente, nomeAgente } from '@/lib/agente'
-import { pudoConfigDaVettore } from '@/lib/punti-poste'
+import { pudoConfigDaVettore, spediamoproPudoCourier } from '@/lib/punti-poste'
 import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation,
   spediamoproCreateShipment,
@@ -871,6 +871,24 @@ export async function POST(req: NextRequest) {
       // noi, col brand MoovExpress) e l'email vera del destinatario non lascia mai la piattaforma.
       consignee.email = EMAIL_PER_CORRIERE
 
+      // PUNTOPOSTE SpediamoPro (BRT Fermopoint / InPost Locker): consegna a un PUNTO. Il servizio ESIGE
+      // il punto (deliveryPudo) → si blocca se manca (dopo l'ordine si paga). L'indirizzo di consegna sul
+      // preventivo e sull'etichetta è quello del PUNTO scelto; NOME e contatti restano del destinatario
+      // reale (è chi ritira e riceve l'avviso). A differenza di DVA, qui NON c'è deposito in partenza.
+      const pudoCourierSp = spediamoproPudoCourier(cred.service_id)
+      const paSp: any = body.puntoArrivoAddr
+      const consegnaAlPuntoSp = !!pudoCourierSp && !!String(body.puntoArrivo || '').trim()
+      if (pudoCourierSp && !String(body.puntoArrivo || '').trim()) {
+        await stornaPrenotazione()
+        return NextResponse.json({ error: 'Seleziona il punto di consegna (Fermopoint / Locker).' }, { status: 400 })
+      }
+      if (consegnaAlPuntoSp && paSp) {
+        if (paSp.indirizzo) consignee.address = String(paSp.indirizzo).substring(0, 35)
+        if (paSp.cap) consignee.postalCode = paSp.cap
+        if (paSp.localita) consignee.city = String(paSp.localita).substring(0, 35)
+        if (paSp.provincia) consignee.province = String(paSp.provincia).substring(0, 2).toUpperCase()
+      }
+
       // MULTICOLLO: un parcel per OGNI collo (prima si inviava solo il primo -> 1 sola etichetta)
       // NB: SpediamoPro non supporta una descrizione merce a testo libero sul collo (verificato via API):
       // il contenuto inserito dall'utente non può comparire in etichetta, dove resta "campionatura generica".
@@ -918,6 +936,7 @@ export async function POST(req: NextRequest) {
         parcels, sender, consignee, quotation, cashOnDeliveryAmount, insuredAmount,
         externalReference: externalRef,
         notes: noteEtichetta,
+        ...(consegnaAlPuntoSp ? { deliveryPudo: String(body.puntoArrivo).trim() } : {}),
       })
 
       // ── Tracking + etichetta OTTIMIZZATI: prima la risposta all'utente è restata bloccata
@@ -966,8 +985,13 @@ export async function POST(req: NextRequest) {
         mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
         mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
         mitt_email: body.shipFrom.email || null, mitt_telefono: body.shipFrom.phone || null,
-        dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_citta: body.shipTo.city,
-        dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
+        dest_nome: body.shipTo.name,
+        // Consegna a un PUNTO: sulla scheda spedizione l'indirizzo è quello del PUNTO scelto (la via di
+        // casa non serve, il pacco va al punto). Nome e contatti restano del destinatario reale.
+        dest_indirizzo: (consegnaAlPuntoSp && paSp?.indirizzo) ? [paSp.nome, paSp.indirizzo].filter(Boolean).join(' - ').slice(0, 100) : body.shipTo.street1,
+        dest_citta: (consegnaAlPuntoSp && paSp?.localita) ? paSp.localita : body.shipTo.city,
+        dest_provincia: (consegnaAlPuntoSp && paSp?.provincia) ? paSp.provincia : body.shipTo.state,
+        dest_cap: (consegnaAlPuntoSp && paSp?.cap) ? paSp.cap : body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
         dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
         colli: packages.length, peso_reale: (packages.reduce((s:number,p:any)=>s+(parseFloat(p?.weight)||0),0) || pesoReale),
         peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
