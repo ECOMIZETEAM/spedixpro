@@ -24,6 +24,10 @@ export default function EditorPreventivo() {
 
   const [brand, setBrand] = useState<any>({})
   const [prezzi, setPrezzi] = useState<any>({ corrieri: [] })
+  // AGENTE: non usa l'editor listino del master; parte dal SUO listino (costo) e applica un rincaro.
+  const [isAgente, setIsAgente] = useState(false)
+  const [mkMode, setMkMode] = useState<'perc' | 'fisso'>('perc')
+  const [mkVal, setMkVal] = useState('')
   const [listinoId, setListinoId] = useState<string | null>(null)
   // A chi: prima lo switch destinatario (cliente / sotto-master), poi — per il cliente — nuovo o esistente.
   const [destKind, setDestKind] = useState<'cliente' | 'master'>('cliente')
@@ -66,7 +70,7 @@ export default function EditorPreventivo() {
     fetch(`/api/preventivi/${id}`).then(r => r.json()).then(d => {
       if (d?.error) { setMsg({ t: 'err', x: d.error }); setLoading(false); return }
       const p = d.preventivo || {}
-      setStato(p.stato || 'bozza'); setBrand(d.branding || {}); setPrezzi(d.prezzi || { corrieri: [] }); setListinoId(p.listino_template_id || null)
+      setStato(p.stato || 'bozza'); setBrand(d.branding || {}); setPrezzi(d.prezzi || { corrieri: [] }); setListinoId(p.listino_template_id || null); setIsAgente(!!d.isAgente)
       if (p.dest_tipo === 'master' || p.dest_tipo === 'master_nuovo') { setDestKind('master'); setEntMode(p.dest_tipo === 'master' ? 'esistente' : 'nuovo'); setMasterTargetId(p.master_target_id || '') }
       else { setDestKind('cliente'); setEntMode(p.dest_tipo === 'cliente' ? 'esistente' : 'nuovo'); setClienteId(p.cliente_id || '') }
       setDestNome(p.dest_nome || ''); setDestEmail(p.dest_email || '')
@@ -194,6 +198,28 @@ export default function EditorPreventivo() {
     window.location.href = `/dashboard/listini/clienti/${lid}?preventivo=${id}`
   }
 
+  // AGENTE: crea la bozza dal SUO listino (costo) e applica un rincaro (markup) → prezzi di vendita.
+  // Non passa mai dall'editor/da-costo del master, quindi non vede i prezzi del master.
+  async function applicaDaCosto() {
+    const v = Number(String(mkVal).replace(',', '.'))
+    if (!(v > 0)) { setMsg({ t: 'err', x: 'Inserisci un rincaro maggiore di zero.' }); return }
+    setSalvando(true); setMsg(null)
+    if (!(await salva(true))) { setSalvando(false); return }
+    let lid = listinoId
+    if (!lid) {
+      const r1 = await fetch(`/api/preventivi/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ azione: 'crea_listino' }) })
+      const d1 = await r1.json().catch(() => ({}))
+      if (!r1.ok || d1?.error) { setMsg({ t: 'err', x: d1?.error || 'Errore creazione listino' }); setSalvando(false); return }
+      lid = d1.listino_id; setListinoId(lid)
+    }
+    const r2 = await fetch(`/api/preventivi/${id}/da-costo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ markup: { default: { mode: mkMode, valore: v } } }) })
+    const d2 = await r2.json().catch(() => ({}))
+    setSalvando(false)
+    if (!r2.ok || d2?.error) { setMsg({ t: 'err', x: d2?.error || 'Rincaro non riuscito' }); return }
+    setMsg({ t: 'ok', x: `Prezzi aggiornati dal tuo listino +${v}${mkMode === 'perc' ? '%' : ' €'}.` })
+    carica()
+  }
+
   const colP = brand.colore_primario || '#f97316'
   const colS = brand.colore_secondario || '#1a1a1a'
   const corrieri = prezzi?.corrieri || []
@@ -248,7 +274,7 @@ export default function EditorPreventivo() {
                 <label style={lbl}>A chi</label>
                 <div style={{ display: 'flex', gap: '6px' }}>
                   <button onClick={() => scegliKind('cliente')} style={{ flex: 1, padding: '9px', borderRadius: '6px', border: destKind === 'cliente' ? '2px solid #f97316' : '1px solid #d5d5d5', background: destKind === 'cliente' ? '#fff7ed' : '#fff', color: '#1a1a1a', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Cliente</button>
-                  <button onClick={() => scegliKind('master')} style={{ flex: 1, padding: '9px', borderRadius: '6px', border: destKind === 'master' ? '2px solid #f97316' : '1px solid #d5d5d5', background: destKind === 'master' ? '#fff7ed' : '#fff', color: '#1a1a1a', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Sotto-master</button>
+                  {!isAgente && <button onClick={() => scegliKind('master')} style={{ flex: 1, padding: '9px', borderRadius: '6px', border: destKind === 'master' ? '2px solid #f97316' : '1px solid #d5d5d5', background: destKind === 'master' ? '#fff7ed' : '#fff', color: '#1a1a1a', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Sotto-master</button>}
                 </div>
               </div>
               <div><label style={lbl}>Valido fino al</label><input type="date" value={validoFino || ''} onChange={e => setValidoFino(e.target.value)} style={inp} /></div>
@@ -284,34 +310,50 @@ export default function EditorPreventivo() {
 
           {/* Prezzi = listino completo */}
           <div style={card}>
-            <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a', marginBottom: '6px' }}>Prezzi — listino completo</div>
-            <p style={{ fontSize: '12.5px', color: '#666', margin: '0 0 12px' }}>I prezzi si compilano come un listino vero: <b>tutte le zone</b> (Italia, SCS, Zone Disagiate, Isole…) e i <b>supplementi</b> (contrassegno, assicurazione, sponda…). All'accettazione diventano il listino del cliente.</p>
-            {(listinoId || corrieri.length) ? (
-              <button onClick={() => apriListino()} disabled={salvando} style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.6 : 1 }}>
-                ✎ Modifica prezzi (listino completo)
-              </button>
-            ) : (
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a', marginBottom: '6px' }}>{isAgente ? 'Prezzi — dal tuo listino' : 'Prezzi — listino completo'}</div>
+            {isAgente ? (
               <div>
-                <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px' }}>Come vuoi partire?</div>
-                {listinoConsigliato && <div style={{ marginBottom: '10px', fontSize: '12px', color: '#15803d', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '8px 10px' }}>★ Consigliato: parti da <b>{listinoConsigliato.nome}</b> — è il listino già agganciato a questo destinatario (l'ho pre-selezionato qui sotto).</div>}
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' as const }}>
-                  <button onClick={() => setSrcMode('nuovo')} style={{ flex: 1, minWidth: '150px', padding: '10px', borderRadius: '8px', border: srcMode === 'nuovo' ? '2px solid #f97316' : '1px solid #ddd', background: srcMode === 'nuovo' ? '#fff7ed' : '#fff', color: '#1a1a1a', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Nuovo listino</button>
-                  <button onClick={() => setSrcMode('esistente')} style={{ flex: 1, minWidth: '150px', padding: '10px', borderRadius: '8px', border: srcMode === 'esistente' ? '2px solid #f97316' : '1px solid #ddd', background: srcMode === 'esistente' ? '#fff7ed' : '#fff', color: '#1a1a1a', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Parti da un listino esistente</button>
+                <p style={{ fontSize: '12.5px', color: '#666', margin: '0 0 12px' }}>Il preventivo parte dal <b>tuo listino</b> (il tuo costo, i tuoi corrieri e supplementi). Applica un <b>rincaro</b> per ottenere i prezzi di vendita al cliente. Puoi riapplicarlo quando vuoi: riparte sempre dal tuo costo.</p>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' as const, alignItems: 'center' }}>
+                  <div style={{ display: 'inline-flex', gap: '6px' }}>
+                    <button onClick={() => setMkMode('perc')} style={{ padding: '9px 14px', borderRadius: '6px', border: mkMode === 'perc' ? '2px solid #f97316' : '1px solid #d5d5d5', background: mkMode === 'perc' ? '#fff7ed' : '#fff', color: '#1a1a1a', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>%</button>
+                    <button onClick={() => setMkMode('fisso')} style={{ padding: '9px 14px', borderRadius: '6px', border: mkMode === 'fisso' ? '2px solid #f97316' : '1px solid #d5d5d5', background: mkMode === 'fisso' ? '#fff7ed' : '#fff', color: '#1a1a1a', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>€ fisso</button>
+                  </div>
+                  <input value={mkVal} onChange={e => setMkVal(e.target.value)} placeholder={mkMode === 'perc' ? 'es. 20  (+20%)' : 'es. 1,50  (+1,50 €)'} style={{ ...inp, maxWidth: '170px' }} />
+                  <button onClick={applicaDaCosto} disabled={salvando || stato === 'accettato'} style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: (salvando || stato === 'accettato') ? 0.6 : 1 }}>{salvando ? 'Applico…' : '€ Applica dal mio listino'}</button>
                 </div>
-                {srcMode === 'esistente' && (
-                  <select value={srcListino} onChange={e => setSrcListino(e.target.value)} style={{ ...inp, marginBottom: '10px' }}>
-                    <option value="">Seleziona un listino…</option>
-                    {listiniDisp.map((l: any) => <option key={l.id} value={l.id}>{l.nome}{listinoConsigliato && l.id === listinoConsigliato.id ? ' — consigliato' : ''}</option>)}
-                  </select>
-                )}
-                <button onClick={() => apriListino(srcMode === 'esistente' ? srcListino : undefined)} disabled={salvando || (srcMode === 'esistente' && !srcListino)} style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: (salvando || (srcMode === 'esistente' && !srcListino)) ? 0.6 : 1 }}>
-                  {srcMode === 'esistente' ? 'Usa questo listino e compila →' : '＋ Crea e compila i prezzi →'}
-                </button>
-                {srcMode === 'esistente' && <div style={{ marginTop: '8px', fontSize: '11.5px', color: '#666' }}>Copio quel listino nella bozza: puoi ancora modificarlo o aggiungere altri corrieri.</div>}
               </div>
+            ) : (
+              <>
+                <p style={{ fontSize: '12.5px', color: '#666', margin: '0 0 12px' }}>I prezzi si compilano come un listino vero: <b>tutte le zone</b> (Italia, SCS, Zone Disagiate, Isole…) e i <b>supplementi</b> (contrassegno, assicurazione, sponda…). All'accettazione diventano il listino del cliente.</p>
+                {(listinoId || corrieri.length) ? (
+                  <button onClick={() => apriListino()} disabled={salvando} style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.6 : 1 }}>
+                    ✎ Modifica prezzi (listino completo)
+                  </button>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px' }}>Come vuoi partire?</div>
+                    {listinoConsigliato && <div style={{ marginBottom: '10px', fontSize: '12px', color: '#15803d', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '8px 10px' }}>★ Consigliato: parti da <b>{listinoConsigliato.nome}</b> — è il listino già agganciato a questo destinatario (l'ho pre-selezionato qui sotto).</div>}
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' as const }}>
+                      <button onClick={() => setSrcMode('nuovo')} style={{ flex: 1, minWidth: '150px', padding: '10px', borderRadius: '8px', border: srcMode === 'nuovo' ? '2px solid #f97316' : '1px solid #ddd', background: srcMode === 'nuovo' ? '#fff7ed' : '#fff', color: '#1a1a1a', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Nuovo listino</button>
+                      <button onClick={() => setSrcMode('esistente')} style={{ flex: 1, minWidth: '150px', padding: '10px', borderRadius: '8px', border: srcMode === 'esistente' ? '2px solid #f97316' : '1px solid #ddd', background: srcMode === 'esistente' ? '#fff7ed' : '#fff', color: '#1a1a1a', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Parti da un listino esistente</button>
+                    </div>
+                    {srcMode === 'esistente' && (
+                      <select value={srcListino} onChange={e => setSrcListino(e.target.value)} style={{ ...inp, marginBottom: '10px' }}>
+                        <option value="">Seleziona un listino…</option>
+                        {listiniDisp.map((l: any) => <option key={l.id} value={l.id}>{l.nome}{listinoConsigliato && l.id === listinoConsigliato.id ? ' — consigliato' : ''}</option>)}
+                      </select>
+                    )}
+                    <button onClick={() => apriListino(srcMode === 'esistente' ? srcListino : undefined)} disabled={salvando || (srcMode === 'esistente' && !srcListino)} style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: (salvando || (srcMode === 'esistente' && !srcListino)) ? 0.6 : 1 }}>
+                      {srcMode === 'esistente' ? 'Usa questo listino e compila →' : '＋ Crea e compila i prezzi →'}
+                    </button>
+                    {srcMode === 'esistente' && <div style={{ marginTop: '8px', fontSize: '11.5px', color: '#666' }}>Copio quel listino nella bozza: puoi ancora modificarlo o aggiungere altri corrieri.</div>}
+                  </div>
+                )}
+              </>
             )}
             {corrieri.length > 0 && <div style={{ marginTop: '10px', fontSize: '12px', color: '#15803d' }}>✓ {corrieri.length} corriere{corrieri.length > 1 ? 'i' : ''} impostat{corrieri.length > 1 ? 'i' : 'o'} — vedi l'anteprima a destra.</div>}
-            <div style={{ marginTop: '8px', fontSize: '11.5px', color: '#999' }}>Salvo il preventivo e apro l'editor listini; poi torni qui col link in alto.</div>
+            {!isAgente && <div style={{ marginTop: '8px', fontSize: '11.5px', color: '#999' }}>Salvo il preventivo e apro l'editor listini; poi torni qui col link in alto.</div>}
           </div>
 
           {/* Sezioni */}

@@ -53,7 +53,7 @@ const NAV: NavItem[] = [
     { label: 'Ottimizza margini', href: '/dashboard/margini', soloOttimizzaMargini: true },
     { label: 'Gestione Zone', href: '/dashboard/zone', perm: 'admin.pricelists.zones.index' },
   ]},
-  { label: 'Preventivi', href: '/dashboard/preventivi', icon: '✎', perm: 'admin.pricelists.create' },
+  { label: 'Preventivi', href: '/dashboard/preventivi', icon: '✎', perm: 'admin.pricelists.create', agenteOk: true },
   { label: 'Clienti', href: '/dashboard/clienti', icon: '⊙', sub: [
     { label: 'Nuovo Cliente', href: '/dashboard/clienti/nuovo', perm: 'admin.clients.create' },
     { label: 'Elenco Clienti', href: '/dashboard/clienti', perm: 'admin.clients.index' },

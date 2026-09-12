@@ -22,7 +22,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // Branding del master per l'anteprima (logo, nome, colori). Vive su masters.
   const { data: m } = await admin.from('masters').select('nome,logo_url,colore_primario,colore_secondario,email,telefono,indirizzo,citta,cap,provincia,pec,partita_iva,piva').eq('id', s.master_id).maybeSingle()
   const prezzi = await leggiGrigliaListino(admin, p.listino_template_id)
-  return NextResponse.json({ preventivo: p, branding: m || {}, prezzi })
+  // isAgente serve alla pagina editor: l'agente non usa l'editor listino del master (né la sua "Da
+  // costo", che leggerebbe i prezzi del master) ma un rincaro dal SUO costo.
+  return NextResponse.json({ preventivo: p, branding: m || {}, prezzi, isAgente: s.isAgente, agente: s.agenteNome })
 }
 
 // POST azione 'crea_listino': crea (o ritorna) il listino-BOZZA collegato al preventivo, da compilare
