@@ -952,10 +952,11 @@ export default function NuovaSpedizionePage() {
                       <div>
                         <label style={{display:'block',fontSize:'12px',color:'#000',marginBottom:'4px',fontWeight:600}}>Dove depositi il pacco *</label>
                         <select value={depositoTipo} onChange={e=>{ const v=e.target.value as any; setDepositoTipo(v); try{ if(v) localStorage.setItem('puntoposte:deposito', v) }catch{} }} style={{width:'100%',padding:'8px 11px',border:'1px solid #000',borderRadius:'6px',fontSize:'13px',color:'#000'}}>
-                          <option value="">Scegli dove consegni il pacco…</option>
+                          <option value="">Scegli dove depositi il pacco…</option>
                           <option value="APT">Punto Poste (tabaccheria / negozio)</option>
                           <option value="FMP">Ufficio Postale</option>
                         </select>
+                        <div style={{fontSize:'11px',color:'#666',marginTop:'4px'}}>Scegli dove ti è più comodo lasciare il pacco: è una tua scelta, non cambia la consegna.</div>
                       </div>
                     )}
                     {selected._consegna_punto && (
