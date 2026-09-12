@@ -367,8 +367,10 @@ export default function NuovaSpedizioneCliente() {
         // Righe articolo: servono alla DOGANA estero (una voce hscode per articolo, lato server dal
         // catalogo). Sono le stesse che poi scaricano il magazzino.
         articoli: articoliScelti.map(r=>({ articolo_id:r.id, quantita:r.qta })),
-        // PuntoPoste: dove depositi (FMP/APT) + codice punto di consegna (solo P2TAB/P2UP).
+        // PuntoPoste: dove depositi (FMP/APT) + codice punto di consegna (solo P2TAB/P2UP) + indirizzo
+        // del punto (per l'etichetta: il pacco va al punto, non alla via del destinatario).
         depositoTipo: depositoTipo || undefined, puntoArrivo: puntoArrivo?.codice || undefined,
+        puntoArrivoAddr: puntoArrivo ? { nome: puntoArrivo.nome, indirizzo: puntoArrivo.indirizzo, cap: puntoArrivo.cap, localita: puntoArrivo.localita, provincia: puntoArrivo.provincia } : undefined,
         // Ritiro: sui contratti DVA si prenota SOLO insieme all'ordine (il corriere non ha una
         // chiamata per aggiungerlo dopo), quindi la richiesta va passata gia' qui.
         richiediRitiro, dataRitiro:ritiroData, orarioRitiro:ritiroOrario

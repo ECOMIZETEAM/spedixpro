@@ -1259,6 +1259,13 @@ export async function POST(req: NextRequest) {
         pudoDestinatario = String(body.puntoArrivo || '').trim() || undefined
         if (!pudoDestinatario) { await stornaPrenotazione(); return NextResponse.json({ error: 'Seleziona il punto di consegna (PuntoPoste o Ufficio Postale).' }, { status: 400 }) }
       }
+      // Consegna a un PUNTO (P2TAB/P2UP): l'indirizzo destinatario sull'etichetta è quello del PUNTO
+      // scelto (la via di casa del destinatario non serve — il pacco va al punto). Il NOME e i contatti
+      // restano del destinatario reale (è chi ritira e riceve l'avviso). Consegna a casa (P2H): via normale.
+      const pa: any = body.puntoArrivoAddr
+      const indirizzoDest = (pudoDestinatario && pa && pa.indirizzo)
+        ? [pa.nome, pa.indirizzo, [pa.cap, pa.localita].filter(Boolean).join(' ')].filter(Boolean).join(' - ').slice(0, 100)
+        : body.shipTo.street1
       // RITIRO: su questi contratti si prenota SOLO qui — il corriere non ha una chiamata per
       // aggiungerlo dopo, e infatti /api/ritiri/crea lo rifiuta di proposito.
       const ordine = await easyparcelOrder(apikey, {
@@ -1272,7 +1279,7 @@ export async function POST(req: NextRequest) {
           email: EMAIL_PER_CORRIERE, cellulare: cellMitt, contatto: body.shipFrom.name,
         },
         destinatario: {
-          nominativo: body.shipTo.name, indirizzo: body.shipTo.street1,
+          nominativo: body.shipTo.name, indirizzo: indirizzoDest,
           // Estero: il corriere/la dogana devono poter contattare il destinatario per lo sdoganamento,
           // quindi si manda la SUA email vera (ripiego sull'email di servizio se non c'e'). Sul
           // nazionale resta l'email di servizio (vedi memoria "email schermo corriere": i link di
