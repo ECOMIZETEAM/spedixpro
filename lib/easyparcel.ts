@@ -24,6 +24,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { normalizzaEventi } from '@/lib/tracking-eventi'
+import { categoriaDaTipologia } from '@/lib/punti-poste'
 
 const BASE = 'https://api.easyparcel.it'
 
@@ -299,6 +300,7 @@ export type PuntoPudo = {
   codice: string; tipologia: string; nome: string; indirizzo: string
   cap: string; localita: string; provincia: string
   lat: number | null; lon: number | null; distanzaKm: number | null
+  categoria: string   // 'locker' | 'ufficio_postale' | 'negozio' — per il filtro nel selettore
 }
 
 export async function easyparcelPudo(apikey: string, dati: {
@@ -323,6 +325,7 @@ export async function easyparcelPudo(apikey: string, dati: {
     lat: p.latitudine != null ? Number(p.latitudine) : null,
     lon: p.longitudine != null ? Number(p.longitudine) : null,
     distanzaKm: p.distanza_km != null ? Number(p.distanza_km) : null,
+    categoria: categoriaDaTipologia(p.tipologia),
   })).filter((p: PuntoPudo) => p.codice)
 }
 

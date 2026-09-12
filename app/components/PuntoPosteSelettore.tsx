@@ -1,6 +1,6 @@
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { etichettaTipologia } from '@/lib/punti-poste'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { etichettaTipologia, etichettaCategoria } from '@/lib/punti-poste'
 
 // Punto scelto (quello che serve alla creazione: il codice va in pudo_destinatario).
 export type PuntoScelto = { codice: string; nome: string; indirizzo: string; cap: string; localita: string; provincia: string }
@@ -44,6 +44,16 @@ export default function PuntoPosteSelettore({ corriereId, lato, capIniziale, tip
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
   const [evid, setEvid] = useState('')   // codice del punto evidenziato (hover lista ↔ pin)
+  const [filtroCat, setFiltroCat] = useState<string | null>(null)   // filtro categoria: locker / ufficio_postale / negozio
+
+  // Categorie presenti nei risultati (per mostrare il filtro solo quando c'è più di un tipo).
+  const categoriePresenti = useMemo(() => {
+    const s: string[] = []
+    for (const p of punti) { const c = p.categoria || 'negozio'; if (!s.includes(c)) s.push(c) }
+    return s
+  }, [punti])
+  // Punti da mostrare (lista + mappa): filtrati per categoria se un filtro è attivo.
+  const puntiVis = useMemo(() => filtroCat ? punti.filter((p: any) => (p.categoria || 'negozio') === filtroCat) : punti, [punti, filtroCat])
   const mapDiv = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<any>(null)
   const layerRef = useRef<any>(null)
@@ -53,7 +63,7 @@ export default function PuntoPosteSelettore({ corriereId, lato, capIniziale, tip
 
   const cerca = useCallback(async (q: { cap?: string; lat?: number; lon?: number }) => {
     if (q.cap != null && !/^\d{5}$/.test(q.cap)) { setErr('Inserisci un CAP di 5 cifre'); setPunti([]); return }
-    setErr(''); setLoading(true); setEvid('')
+    setErr(''); setLoading(true); setEvid(''); setFiltroCat(null)
     const qs = q.cap != null ? `cap=${q.cap}` : `lat=${q.lat}&lon=${q.lon}`
     try {
       const r = await fetch(`/api/punti-poste?corriereId=${encodeURIComponent(corriereId)}&lato=${lato}&${qs}`)
@@ -84,7 +94,7 @@ export default function PuntoPosteSelettore({ corriereId, lato, capIniziale, tip
     if (mk && mapRef.current && p.lat && p.lon) { mapRef.current.panTo([p.lat, p.lon]); mk.openPopup() }
   }
 
-  const haCoord = punti.some((p: any) => p.lat && p.lon)
+  const haCoord = puntiVis.some((p: any) => p.lat && p.lon)
 
   // MAPPA: ricreata da zero a ogni apertura/ricerca (così non resta legata a un div staccato dopo
   // "Cambia") e con zoom pieno (rotella + pulsanti + pinch). Pin numerati come la lista, popup con "Scegli".
@@ -100,7 +110,7 @@ export default function PuntoPosteSelettore({ corriereId, lato, capIniziale, tip
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map)
       layerRef.current = L.layerGroup().addTo(map)
       const bounds: any[] = []
-      punti.forEach((p: any, i: number) => {
+      puntiVis.forEach((p: any, i: number) => {
         if (!p.lat || !p.lon) return
         const icon = L.divIcon({ className: '', iconSize: [26, 26], iconAnchor: [13, 24], popupAnchor: [0, -22],
           html: `<div style="background:#f97316;color:#fff;width:24px;height:24px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"><span style="transform:rotate(45deg);font:700 11px system-ui">${i + 1}</span></div>` })
@@ -122,7 +132,7 @@ export default function PuntoPosteSelettore({ corriereId, lato, capIniziale, tip
     }).catch(() => { /* mappa non disponibile: resta la lista */ })
     return () => { annullato = true }
     // eslint-disable-next-line
-  }, [aperto, punti])
+  }, [aperto, puntiVis])
 
   useEffect(() => () => { try { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null } } catch {} }, [])
 
@@ -165,11 +175,23 @@ export default function PuntoPosteSelettore({ corriereId, lato, capIniziale, tip
             <button type="button" onClick={() => cerca({ cap })} style={btn}>Cerca</button>
             <button type="button" onClick={vicinoAMe} style={btn2}>📍 Vicino a me</button>
           </div>
+          {/* Filtro categoria: appare solo se i risultati contengono più di un tipo (es. InPost: locker + negozi). */}
+          {categoriePresenti.length > 1 && (
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
+              {[null, ...categoriePresenti].map(c => (
+                <button key={c ?? 'all'} type="button" onClick={() => setFiltroCat(c)}
+                  style={{ padding: '4px 10px', borderRadius: '999px', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer',
+                    border: '1px solid ' + (filtroCat === c ? '#f97316' : '#ddd'), background: filtroCat === c ? '#fff7ed' : '#fff', color: filtroCat === c ? '#f97316' : '#666' }}>
+                  {c ? etichettaCategoria(c) : 'Tutti'}
+                </button>
+              ))}
+            </div>
+          )}
           {loading && <div style={{ fontSize: '12px', color: '#666' }}>Ricerca in corso…</div>}
           {err && <div style={{ fontSize: '12px', color: '#dc2626' }}>{err}</div>}
           {haCoord && <div ref={mapDiv} style={{ height: '260px', width: '100%', borderRadius: '8px', overflow: 'hidden', marginBottom: '8px', border: '1px solid #eef2f6' }} />}
           <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
-            {punti.map((p: any, i: number) => (
+            {puntiVis.map((p: any, i: number) => (
               <div key={p.codice}
                 onMouseEnter={() => vaiAlPunto(p)}
                 onClick={() => scegli(p)}
@@ -178,7 +200,10 @@ export default function PuntoPosteSelettore({ corriereId, lato, capIniziale, tip
                   ? <span style={{ flexShrink: 0, width: '20px', height: '20px', borderRadius: '50%', background: '#f97316', color: '#fff', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
                   : <span style={{ flexShrink: 0, width: '20px' }} />}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#1a1a1a' }}>{p.nome || p.codice}</div>
+                  <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#1a1a1a' }}>
+                    {p.nome || p.codice}
+                    <span style={{ marginLeft: '6px', fontSize: '10.5px', fontWeight: 700, color: p.categoria === 'locker' ? '#7c3aed' : '#0369a1', background: p.categoria === 'locker' ? '#f3e8ff' : '#e0f2fe', borderRadius: '4px', padding: '1px 6px', whiteSpace: 'nowrap' }}>{etichettaCategoria(p.categoria)}</span>
+                  </div>
                   <div style={{ fontSize: '11.5px', color: '#666' }}>{p.indirizzo}, {p.cap} {p.localita} ({p.provincia}){p.distanzaKm != null ? ` · ${p.distanzaKm} km` : ''}</div>
                 </div>
                 <span style={{ flexShrink: 0, alignSelf: 'center', fontSize: '11.5px', fontWeight: 700, color: '#f97316' }}>Scegli</span>

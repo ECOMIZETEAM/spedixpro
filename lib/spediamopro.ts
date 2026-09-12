@@ -339,7 +339,7 @@ export async function spediamoproCreateShipment(
 export async function spediamoproPudoSearch(
   authcode: string,
   dati: { courier: string; cap: string; city?: string; address?: string }
-): Promise<Array<{ codice: string; tipologia: string; nome: string; indirizzo: string; cap: string; localita: string; provincia: string; lat: number | null; lon: number | null; distanzaKm: number | null }>> {
+): Promise<Array<{ codice: string; tipologia: string; nome: string; indirizzo: string; cap: string; localita: string; provincia: string; lat: number | null; lon: number | null; distanzaKm: number | null; categoria: string }>> {
   const token = await getSpediamoproToken(authcode)
   const res = await fetch(`${BASE_URL}/pudo-points/search`, {
     method: 'POST',
@@ -369,6 +369,8 @@ export async function spediamoproPudoSearch(
       lon: p.longitude != null ? Number(p.longitude) : null,
       // distance è in METRI (verificato: ~135–309 per punti nello stesso CAP) → km (1 decimale) per il selettore.
       distanzaKm: it.distance != null ? Math.round(Number(it.distance) / 100) / 10 : null,
+      // types del punto: 1 = locker automatico, 0 = negozio/punto in esercizio (per il filtro nel selettore).
+      categoria: Array.isArray(p.types) && p.types.includes(1) ? 'locker' : 'negozio',
     }
   }).filter((p: any) => p.codice)
 }

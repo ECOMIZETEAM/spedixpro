@@ -54,6 +54,26 @@ export function spediamoproPudoCourier(serviceId?: string | number | null): Corr
   }
 }
 
+// CATEGORIA del punto, trasversale ai provider — per il filtro nel selettore (Locker / Ufficio Postale /
+// Negozio-Tabaccheria). DVA: dalla tipologia (RTZ=negozio, FMP=ufficio postale, APT=locker). SpediamoPro:
+// dal campo types del punto (1=locker, 0=negozio) — lì si passa già 'locker'/'negozio' calcolato a monte.
+export type CategoriaPunto = 'locker' | 'ufficio_postale' | 'negozio'
+export function categoriaDaTipologia(tipologia?: string | null): CategoriaPunto {
+  switch (String(tipologia || '').toUpperCase()) {
+    case 'FMP': return 'ufficio_postale'
+    case 'APT': return 'locker'
+    case 'RTZ': return 'negozio'
+    default: return 'negozio'
+  }
+}
+export function etichettaCategoria(c?: string | null): string {
+  switch (String(c || '')) {
+    case 'locker': return '🔒 Locker'
+    case 'ufficio_postale': return '🏤 Ufficio Postale'
+    default: return '🏪 Negozio / Tabaccheria'
+  }
+}
+
 // Etichetta leggibile del tipo di punto (UI, senza nominare il provider tecnico).
 // Copre sia le tipologie DVA (RTZ/FMP/APT) sia i corrieri SpediamoPro (brt/inpost/sda).
 export function etichettaTipologia(t?: string | null): string {
