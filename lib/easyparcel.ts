@@ -787,6 +787,18 @@ export function erroreEasyparcelPulito(e: any): string {
       for (const [re, testo] of CAMPI) if (re.test(dettagli)) return `Dati non accettati dal corriere: ${testo}. Correggi e riprova.`
       return 'Dati non accettati dal corriere: verifica indirizzo, CAP, città, provincia, telefono ed email e riprova.'
     }
+    case 175: {
+      // VALIDAZIONE del servizio: il messaggio dice la causa esatta (es. "Ritiro non attivabile per
+      // questo vettore" sui contratti PuntoPoste). Va tradotto e MOSTRATO, non sepolto nel generico
+      // "non disponibile": è proprio così che un ritiro chiesto su un contratto a deposito restava
+      // invisibile a chi doveva correggerlo.
+      if (/ritiro/i.test(dettagli)) return 'Questo contratto non prevede il ritiro a domicilio: il pacco si deposita al punto indicato. Togli il ritiro e riprova.'
+      if (/pudo|punto\s*poste|locker/i.test(dettagli)) return 'Punto di deposito o di consegna non valido per questo contratto: riselezionalo e riprova.'
+      if (/hs\s*code|taric/i.test(dettagli)) return 'Per questa spedizione servono i codici doganali (HS/TARIC) della merce: compilali e riprova.'
+      for (const [re, testo] of CAMPI) if (re.test(dettagli)) return `Dati non accettati dal corriere: ${testo}. Correggi e riprova.`
+      const pulito = ripuliscEasyparcel(dettagli).replace(/^\s*SERVIZI\s*-\s*/i, '').trim()
+      return pulito ? `Spedizione non accettata dal corriere: ${pulito}. Verifica i dati e riprova.` : 'Corriere non disponibile per questa spedizione. Riprova o scegli un altro corriere.'
+    }
     case 0:
       return 'Il corriere non ha risposto in tempo. Riprova tra qualche istante.'
     case -98: {

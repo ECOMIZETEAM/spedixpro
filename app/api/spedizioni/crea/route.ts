@@ -1119,6 +1119,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Questo contratto è ancora in configurazione e non può essere usato per spedizioni reali.' }, { status: 400 })
     }
 
+    // PUNTOPOSTE: il pacco lo DEPOSITA il mittente a un punto (Ufficio Postale/Punto Poste), non lo
+    // ritira il corriere a domicilio. DVA rifiuta l'ordine con 175 "Ritiro non attivabile per questo
+    // vettore" se gli chiediamo un ritiro lo stesso — errore che finiva mascherato in un generico
+    // "corriere non disponibile". Su questi contratti il ritiro va SEMPRE spento, comunque sia arrivato
+    // dal form. Sugli altri easyparcel resta identico a _vuoleRitiro (pudoConfig.deposito = false).
+    const _ritiroDva = _vuoleRitiro && !pudoConfigDaVettore(vettore).deposito
+
     // LIMITI FISICI DEL CONTRATTO, controllati QUI e non solo nel preventivo. Ogni corriere di
     // questo provider dichiara i suoi (numero colli, lato massimo, somma dei lati, peso per collo)
     // e li rifiuta a valle. Con un corriere che non permette l'annullo, accorgersene dopo l'acquisto
@@ -1282,7 +1289,7 @@ export async function POST(req: NextRequest) {
         // Stessa funzione dell'API pubblica: il blocco del ritiro si costruisce in un posto solo,
         // altrimenti la prossima porta lo riscrive male — o non lo scrive affatto, che e' quello
         // che e' successo.
-        ...(_vuoleRitiro ? { ritiro: ritiroEasyparcel(String(body.dataRitiro), _pomeriggio) } : {}),
+        ...(_ritiroDva ? { ritiro: ritiroEasyparcel(String(body.dataRitiro), _pomeriggio) } : {}),
         mittente: {
           nominativo: body.shipFrom.name, indirizzo: body.shipFrom.street1,
           email: EMAIL_PER_CORRIERE, cellulare: cellMitt, contatto: body.shipFrom.name,
@@ -1336,7 +1343,7 @@ export async function POST(req: NextRequest) {
         // si esce appena il numero c'e'. Chi risponde subito non aspetta niente.
         // Budget totale ~18s: quando DVA rallenta non si aspetta fino al timeout di 60s (rischio ordine
         // orfano prima del salvataggio). Si esce col provvisorio e la LDV la prende background/recupero.
-        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _vuoleRitiro ? 6 : 8, 1200, _vuoleRitiro, 18000)
+        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _ritiroDva ? 6 : 8, 1200, _ritiroDva, 18000)
         ldv = w.numero || null
         // Il codice di prenotazione del ritiro arriva QUI, non con l'ordine: e' l'unico posto in cui
         // il corriere lo comunica. Senza salvarlo, il ritiro risulta prenotato ma senza numero, e
@@ -1402,9 +1409,9 @@ export async function POST(req: NextRequest) {
         stato: 'in_lavorazione',
         costo_spedizione: costoCorrente, costo_totale: costoCliente,
         servizi_accessori: serviziAccessori,
-        richiedi_ritiro: _vuoleRitiro || false,
-        data_ritiro: _vuoleRitiro ? String(body.dataRitiro) : null,
-        intervallo_ritiro: _vuoleRitiro ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
+        richiedi_ritiro: _ritiroDva || false,
+        data_ritiro: _ritiroDva ? String(body.dataRitiro) : null,
+        intervallo_ritiro: _ritiroDva ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
         note: body.notes || null, contenuto: body.contenuto || null,
         rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
       }).select('id').single()
@@ -1441,11 +1448,11 @@ export async function POST(req: NextRequest) {
       // Recupero in background di cio' che non era ancora pronto (stesso schema dell'altro provider).
       // Il recupero in background serve anche quando la LDV c'e' ma manca il codice del ritiro:
       // il corriere lo assegna anche minuti dopo, e senza questo non lo prendeva piu' nessuno.
-      if (inserted?.id && (!ldv || !etichettaUrl || (_vuoleRitiro && !_codiceRitiro))) {
+      if (inserted?.id && (!ldv || !etichettaUrl || (_ritiroDva && !_codiceRitiro))) {
         const spedIdBg = inserted.id
         const ldvAllaCreazione = !!ldv
         const idOrdineBg = ordine.idOrdine
-        const vuoleRitiroBg = _vuoleRitiro
+        const vuoleRitiroBg = _ritiroDva
         after(async () => {
           try {
             const { easyparcelWaybill: wb, unisciEtichette: unisci } = await import('@/lib/easyparcel')

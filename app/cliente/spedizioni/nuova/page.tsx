@@ -403,8 +403,11 @@ export default function NuovaSpedizioneCliente() {
     }
 
     // Ritiro: mostro l'esito all'utente (niente più silenzio se fallisce).
+    // PuntoPoste (contratti a deposito): niente ritiro a domicilio — il pacco si porta al punto. Non
+    // chiamo /api/ritiri/crea (lo rifiuterebbe): eviterei solo un falso "ritiro non prenotato".
+    const conRitiro = richiediRitiro && !selected?._deposito
     let ritiroEsito: {ok?:boolean,pickupId?:string,errore?:string}|undefined
-    if (richiediRitiro && data.spedizioneId) {
+    if (conRitiro && data.spedizioneId) {
       try {
         const rr = await fetch('/api/ritiri/crea', {
           method:'POST', headers:{'Content-Type':'application/json'},
@@ -437,8 +440,8 @@ export default function NuovaSpedizioneCliente() {
     // Finché non c'è, la spedizione porta un numero provvisorio: mostrarlo qui vorrebbe dire dare
     // all'utente un numero che il corriere non conosce. Quindi lo si richiede finché non arriva
     // quello vero (e con lui il codice del ritiro) e il messaggio si aggiorna da solo.
-    if (data.spedizioneId && (data.provvisorio || (richiediRitiro && !ritiroEsito?.pickupId))) {
-      attendiDatiCorriere(data.spedizioneId, richiediRitiro)
+    if (data.spedizioneId && (data.provvisorio || (conRitiro && !ritiroEsito?.pickupId))) {
+      attendiDatiCorriere(data.spedizioneId, conRitiro)
     }
     resetForm()   // form pulito per la prossima spedizione (il banner successo resta visibile)
   }

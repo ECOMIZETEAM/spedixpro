@@ -444,8 +444,12 @@ export default function NuovaSpedizionePage() {
 
     // Ritiro: NON ingoio più l'esito. Se fallisce (es. Poste in giornata, provincia errata) lo mostro
     // all'utente nel banner, così sa che la spedizione è creata ma il ritiro no (e perché).
+    // PuntoPoste (contratti a deposito): NON esiste ritiro a domicilio — il pacco lo si porta al punto.
+    // Non si chiama nemmeno /api/ritiri/crea (lo rifiuterebbe), così non compare un falso "ritiro non
+    // prenotato" per una spedizione che non prevede il ritiro.
+    const conRitiro = richiediRitiro && !selected?._deposito
     let ritiroEsito: {ok?:boolean,pickupId?:string,errore?:string}|undefined
-    if (richiediRitiro && data.spedizioneId) {
+    if (conRitiro && data.spedizioneId) {
       try {
         const rr = await fetch('/api/ritiri/crea', {
           method:'POST', headers:{'Content-Type':'application/json'},
@@ -471,8 +475,8 @@ export default function NuovaSpedizionePage() {
     // Finché non c'è, la spedizione porta un numero provvisorio: mostrarlo qui vorrebbe dire dare
     // all'utente un numero che il corriere non conosce. Quindi lo si richiede finché non arriva
     // quello vero (e con lui il codice del ritiro) e il messaggio si aggiorna da solo.
-    if (data.spedizioneId && (data.provvisorio || (richiediRitiro && !ritiroEsito?.pickupId))) {
-      attendiDatiCorriere(data.spedizioneId, richiediRitiro)
+    if (data.spedizioneId && (data.provvisorio || (conRitiro && !ritiroEsito?.pickupId))) {
+      attendiDatiCorriere(data.spedizioneId, conRitiro)
     }
     resetForm()   // form pulito per la prossima spedizione (il banner successo resta visibile)
   }
