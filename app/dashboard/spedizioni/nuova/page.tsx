@@ -337,7 +337,7 @@ export default function NuovaSpedizionePage() {
     if (!clienteId) { setErrore('Seleziona un cliente'); return }
     if (!mitt.nome||!mitt.indirizzo||!mitt.citta||!mitt.cap||!mitt.provincia) { setErrore('Dati mittente incompleti: compila indirizzo, città, CAP e PROVINCIA del mittente (obbligatori per l\'Italia).'); return }
     if (consegnaA==='punto' ? (!dest.nome||!dest.cap||!dest.telefono) : (!dest.nome||!dest.indirizzo||!dest.citta||!dest.cap||!dest.telefono)) { setErrore(consegnaA==='punto' ? 'Per la consegna a un punto servono nome, CAP e telefono del destinatario.' : 'Compila tutti i dati destinatario (incluso il telefono)'); return }
-    if (dest.paese==='IT' && !dest.provincia) { setErrore('La provincia è obbligatoria per le spedizioni in Italia'); return }
+    if (consegnaA==='domicilio' && dest.paese==='IT' && !dest.provincia) { setErrore('La provincia è obbligatoria per le spedizioni in Italia'); return }
     if (esteroMulti && colli.some(c => !(+(c.peso||0)>0))) { setErrore('Spedizione estera multicollo: indica il peso (kg) di OGNI collo'); return }
     setErrore(''); setLoading(true); setTariffe([]); setSelected(null)
     const res = await fetch('/api/spedizioni/tariffe', {
