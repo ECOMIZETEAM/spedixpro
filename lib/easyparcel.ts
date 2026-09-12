@@ -462,9 +462,9 @@ export async function easyparcelOrder(apikey: string, dati: {
   contrassegno?: boolean
   contrassegnoModalita?: 'C' | 'A'
   assicurazione?: boolean
-  // PuntoPoste / Ufficio Postale: codice del punto di PARTENZA (dove il cliente deposita) e/o di
-  // ARRIVO (dove ritira il destinatario). Ottenuti dalla chiamata pudo. Su PDB il pudo_mittente
-  // richiede reverse=S (da doc DVA); lo impostiamo quando c'è un punto di partenza.
+  // PuntoPoste: pudo_mittente = TIPOLOGIA del deposito ('FMP' Ufficio Postale / 'APT' Punto Poste),
+  // NON un codice punto (verificato con ordini reali). pudo_destinatario = codice del punto di consegna
+  // (P2TAB=PuntoPoste RTZ, P2UP=Ufficio Postale FMP). Nessun reverse necessario (param tenuto per usi futuri).
   pudoMittente?: string
   pudoDestinatario?: string
   reverse?: boolean

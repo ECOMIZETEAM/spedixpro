@@ -6,9 +6,10 @@ import { siglaContratto } from '@/lib/corriere-logo'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { pudoConfigDaVettore } from '@/lib/punti-poste'
 
-// Marca le tariffe dei contratti "PuntoPoste" (PDB-P2H/P2TAB/P2UP) coi flag _punto_partenza/_punto_arrivo
-// (tipologia RTZ/FMP), così il form sa quando mostrare il selettore-punto. Il vettore sta nelle
-// credenziali (service_role): lookup via admin. Nessun segreto esce (solo la tipologia).
+// Marca le tariffe dei contratti "PuntoPoste" (PDB-P2H/P2TAB/P2UP) coi flag _deposito (il mittente
+// sceglie dove depositare: Ufficio Postale/Punto Poste) e _consegna_punto (tipologia RTZ/FMP del punto
+// di consegna, o assente per P2H a casa). Così il form sa cosa mostrare. Il vettore sta nelle
+// credenziali (service_role): lookup via admin. Nessun segreto esce (solo i flag).
 async function annotaPuntoPoste(admin: any, risultati: any[]) {
   const ids = [...new Set(risultati.map((r: any) => r._corriere_id).filter(Boolean))]
   if (!ids.length) return
@@ -16,8 +17,8 @@ async function annotaPuntoPoste(admin: any, risultati: any[]) {
   const vettPerId = new Map<string, string>((corr || []).map((c: any) => [c.id, String((c.credenziali || {}).vettore || '')]))
   for (const r of risultati) {
     const cfg = pudoConfigDaVettore(vettPerId.get(r._corriere_id))
-    if (cfg.partenza) r._punto_partenza = cfg.partenza
-    if (cfg.arrivo) r._punto_arrivo = cfg.arrivo
+    if (cfg.deposito) r._deposito = true
+    if (cfg.consegnaTipologia) r._consegna_punto = cfg.consegnaTipologia
   }
 }
 

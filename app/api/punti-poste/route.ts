@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { pudoConfigDaVettore, type LatoPunto } from '@/lib/punti-poste'
+import { pudoConfigDaVettore } from '@/lib/punti-poste'
 import { easyparcelPudo } from '@/lib/easyparcel'
 
 export const runtime = 'nodejs'
@@ -20,7 +20,6 @@ export async function GET(req: NextRequest) {
 
   const p = req.nextUrl.searchParams
   const corriereId = p.get('corriereId') || ''
-  const lato = (p.get('lato') === 'arrivo' ? 'arrivo' : 'partenza') as LatoPunto
   const cap = (p.get('cap') || '').trim()
   const lat = p.get('lat') ? Number(p.get('lat')) : undefined
   const lon = p.get('lon') ? Number(p.get('lon')) : undefined
@@ -44,8 +43,10 @@ export async function GET(req: NextRequest) {
   if (!catena.has(corr.master_id)) return NextResponse.json({ error: 'Contratto non disponibile' }, { status: 403 })
 
   const cred = (corr.credenziali || {}) as any
-  const tipologia = pudoConfigDaVettore(cred.vettore)[lato]
-  if (!tipologia) return NextResponse.json({ error: 'Questo contratto non prevede un punto su questo lato.' }, { status: 400 })
+  // Cerca i punti di CONSEGNA (dove ritira il destinatario): P2TAB→RTZ, P2UP→FMP. L'origine (deposito)
+  // non passa di qui: è una semplice scelta FMP/APT nel form.
+  const tipologia = pudoConfigDaVettore(cred.vettore).consegnaTipologia
+  if (!tipologia) return NextResponse.json({ error: 'Questo contratto non prevede un punto di consegna da scegliere.' }, { status: 400 })
   if (!cred.apikey) return NextResponse.json({ error: 'Contratto non configurato.' }, { status: 400 })
 
   try {

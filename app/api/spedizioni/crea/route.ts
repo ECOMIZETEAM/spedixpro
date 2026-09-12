@@ -1243,18 +1243,19 @@ export async function POST(req: NextRequest) {
       // ── 2) ORDINE — oltre questa riga il pacco e' comprato e non si torna indietro ──
       const rifBreve = String(body.rifOrdine || '').trim().slice(0, 40) || undefined
 
-      // PUNTOPOSTE: se il contratto "porta a un PuntoPoste" (PDB-P2H/P2TAB/P2UP), servono i codici
-      // punto scelti dal selettore in creazione. Si BLOCCA qui se mancano: dopo l'ordine il pacco è
-      // comprato e su questo provider non c'è annullo. La partenza è sempre un PuntoPoste (pudo_mittente,
-      // reverse=S da doc DVA); la destinazione solo per P2TAB/P2UP (pudo_destinatario).
+      // PUNTOPOSTE (PDB-P2H/P2TAB/P2UP): verificato con ordini reali. Il DEPOSITO (pudo_mittente) è una
+      // TIPOLOGIA scelta — 'FMP' (Ufficio Postale) o 'APT' (Punto Poste), obbligatoria per tutti e tre.
+      // La CONSEGNA (pudo_destinatario) è un PUNTO preciso solo per P2TAB (PuntoPoste) e P2UP (Ufficio
+      // Postale); P2H consegna a casa. Si BLOCCA qui se manca il dato: dopo l'ordine non c'è annullo.
       const pudoCfg = pudoConfigDaVettore(vettore)
       let pudoMittente: string | undefined
       let pudoDestinatario: string | undefined
-      if (pudoCfg.partenza) {
-        pudoMittente = String(body.puntoPartenza || '').trim() || undefined
-        if (!pudoMittente) { await stornaPrenotazione(); return NextResponse.json({ error: 'Seleziona il PuntoPoste di partenza (dove consegni il pacco).' }, { status: 400 }) }
+      if (pudoCfg.deposito) {
+        const dep = String(body.depositoTipo || '').trim().toUpperCase()
+        if (dep !== 'FMP' && dep !== 'APT') { await stornaPrenotazione(); return NextResponse.json({ error: 'Scegli dove depositare il pacco: Ufficio Postale o Punto Poste.' }, { status: 400 }) }
+        pudoMittente = dep
       }
-      if (pudoCfg.arrivo) {
+      if (pudoCfg.consegnaTipologia) {
         pudoDestinatario = String(body.puntoArrivo || '').trim() || undefined
         if (!pudoDestinatario) { await stornaPrenotazione(); return NextResponse.json({ error: 'Seleziona il punto di consegna (PuntoPoste o Ufficio Postale).' }, { status: 400 }) }
       }
@@ -1287,9 +1288,6 @@ export async function POST(req: NextRequest) {
         ...(dogana ? { dogana } : {}),
         ...(pudoMittente ? { pudoMittente } : {}),
         ...(pudoDestinatario ? { pudoDestinatario } : {}),
-        // pudo_mittente su PDB richiede reverse=S (doc DVA). DA CONFERMARE con un ordine di prova
-        // per servizio: se P2TAB/P2UP non lo vogliono, si condiziona a pudoCfg.arrivo===null.
-        ...(pudoMittente ? { reverse: true } : {}),
       })
 
       // ── 3) LETTERA DI VETTURA: numero di tracking e PDF nascono solo qui.
