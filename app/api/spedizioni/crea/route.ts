@@ -238,7 +238,9 @@ export async function POST(req: NextRequest) {
 
   const cred = corriereRecord.credenziali as Record<string, string>
 
-  if (!body.shipTo?.state?.trim()) return NextResponse.json({ error: 'Provincia destinatario obbligatoria' }, { status: 400 })
+  // Consegna a un PUNTO (PuntoPoste/Ufficio Postale): il destinatario non ha una provincia (il pacco va
+  // al punto, la zona la dà il CAP). Si riconosce da body.puntoArrivo. La consegna a casa la richiede.
+  if (!body.shipTo?.state?.trim() && !String(body.puntoArrivo || '').trim()) return NextResponse.json({ error: 'Provincia destinatario obbligatoria' }, { status: 400 })
   if (!body.shipFrom?.state?.trim()) return NextResponse.json({ error: 'Provincia mittente obbligatoria' }, { status: 400 })
 
   const packages = body.packages || [{ length: 20, width: 15, height: 10, weight: 1 }]
@@ -1148,6 +1150,13 @@ export async function POST(req: NextRequest) {
     }
 
     try {
+      // Consegna a un PUNTO: il destinatario è il PUNTO scelto. La quotation DVA vuole località/provincia
+      // valorizzate (con vuote non torna offerte per i PDB), quindi si usa CAP/località/provincia del PUNTO.
+      const paQ: any = body.puntoArrivoAddr
+      const consegnaAlPunto = !!pudoConfigDaVettore(vettore).consegnaTipologia && !!String(body.puntoArrivo || '').trim()
+      const destQuote = (consegnaAlPunto && paQ && paQ.cap)
+        ? { cap: paQ.cap, localita: paQ.localita || body.shipTo.city, provincia: paQ.provincia || body.shipTo.state }
+        : { cap: body.shipTo.postalCode, localita: body.shipTo.city, provincia: body.shipTo.state }
       // ── 1) PREVENTIVO: serve solo a ottenere il codice offerta, non a fare il prezzo
       //    (quello resta il nostro listino, come per ogni altro contratto). ──
       const offerte = await easyparcelQuotation(apikey, {
@@ -1158,7 +1167,7 @@ export async function POST(req: NextRequest) {
           altezza: parseFloat(p?.height) || 10,
         })),
         mittente: { cap: body.shipFrom.postalCode, localita: body.shipFrom.city, provincia: body.shipFrom.state, nazione: 'IT' },
-        destinatario: { cap: body.shipTo.postalCode, localita: body.shipTo.city, provincia: body.shipTo.state, nazione: (body.shipTo.country || 'IT').toUpperCase() },
+        destinatario: { cap: destQuote.cap, localita: destQuote.localita, provincia: destQuote.provincia, nazione: (body.shipTo.country || 'IT').toUpperCase() },
         contenuto: body.contenuto,
         contrassegno: Number(body.codValue || 0),
         assicurazione: Number(body.insuranceValue || 0),
