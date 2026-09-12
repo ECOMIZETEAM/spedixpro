@@ -290,6 +290,42 @@ export function trovaOffertaVettore(offerte: any[], vettore: string, consegna?: 
   return stessoVettore.length === 1 ? stessoVettore[0] : null
 }
 
+// ── PUDO (punti di ritiro/consegna: PuntoPoste, Uffici Postali, Locker) ──────
+// La chiamata `pudo` cerca i punti vicino a una posizione per i vettori PDB (Poste) e INPOST.
+// Ricerca per CAP+raggio o per coordinate GPS+raggio; filtro per tipologia (RTZ=PuntoPoste,
+// FMP=Ufficio Postale — verificate sul campo). Torna i punti ordinati per distanza, CON coordinate:
+// il `codice` di ogni punto è quello da mettere in pudo_mittente/pudo_destinatario dell'ordine.
+export type PuntoPudo = {
+  codice: string; tipologia: string; nome: string; indirizzo: string
+  cap: string; localita: string; provincia: string
+  lat: number | null; lon: number | null; distanzaKm: number | null
+}
+
+export async function easyparcelPudo(apikey: string, dati: {
+  vettore: string; tipologia?: string; cap?: string; lat?: number; lon?: number; radius?: number; limit?: number
+}): Promise<PuntoPudo[]> {
+  const corpo: any = { vettore: dati.vettore }
+  if (dati.tipologia) corpo.tipologia = dati.tipologia
+  if (dati.lat != null && dati.lon != null) { corpo.lat = dati.lat; corpo.lon = dati.lon }
+  else if (dati.cap) corpo.cap = String(dati.cap).trim()
+  corpo.radius = dati.radius && dati.radius > 0 ? dati.radius : 15
+  corpo.limit = Math.min(Math.max(1, dati.limit || 30), 100)
+  const d = await chiama(apikey, 'pudo', corpo)
+  const punti = Array.isArray(d?.punti) ? d.punti : []
+  return punti.map((p: any) => ({
+    codice: String(p.codice || ''),
+    tipologia: String(p.tipologia || ''),
+    nome: String(p.nome || ''),
+    indirizzo: String(p.indirizzo || ''),
+    cap: String(p.cap || ''),
+    localita: String(p.localita || ''),
+    provincia: String(p.provincia || ''),
+    lat: p.latitudine != null ? Number(p.latitudine) : null,
+    lon: p.longitudine != null ? Number(p.longitudine) : null,
+    distanzaKm: p.distanza_km != null ? Number(p.distanza_km) : null,
+  })).filter((p: PuntoPudo) => p.codice)
+}
+
 // ── DOGANA (spedizioni internazionali con sdoganamento) ─────────────────────
 // I corrieri DVA verso destinazioni che passano la dogana (PDBPLUS internazionale) RIFIUTANO
 // l'ordine senza i codici HS/TARIC della merce: errorcode 175 "SERVIZI - HS Codes/TARIC obbligatori".
@@ -426,6 +462,12 @@ export async function easyparcelOrder(apikey: string, dati: {
   contrassegno?: boolean
   contrassegnoModalita?: 'C' | 'A'
   assicurazione?: boolean
+  // PuntoPoste / Ufficio Postale: codice del punto di PARTENZA (dove il cliente deposita) e/o di
+  // ARRIVO (dove ritira il destinatario). Ottenuti dalla chiamata pudo. Su PDB il pudo_mittente
+  // richiede reverse=S (da doc DVA); lo impostiamo quando c'è un punto di partenza.
+  pudoMittente?: string
+  pudoDestinatario?: string
+  reverse?: boolean
   // Dichiarazione doganale (solo estero): senza, i corrieri internazionali rifiutano con errore 175.
   dogana?: MerceDogana[]
   ritiro?: { dal: string; dalleMattina?: string; alleMattina?: string; dallePomeriggio?: string; allePomeriggio?: string }
@@ -433,6 +475,10 @@ export async function easyparcelOrder(apikey: string, dati: {
   const accessori: any = {}
   if (dati.contrassegno) { accessori.contrassegno = 'S'; accessori.contrassegno_modalita = dati.contrassegnoModalita || 'C' }
   if (dati.assicurazione) accessori.assicurazione = 'S'
+  // PuntoPoste: codici punto in accessori.pudo_mittente / pudo_destinatario (come nell'esempio DVA).
+  if (dati.pudoMittente) accessori.pudo_mittente = String(dati.pudoMittente).trim()
+  if (dati.pudoDestinatario) accessori.pudo_destinatario = String(dati.pudoDestinatario).trim()
+  if (dati.reverse) accessori.reverse = 'S'
 
   const corpo: any = {
     dettagli: {
