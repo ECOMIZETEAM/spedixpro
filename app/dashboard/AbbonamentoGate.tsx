@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useAppNativa, ABBONAMENTO_NON_IN_APP } from '@/lib/app-nativa'
 
 const ACCENT = '#f97316'
 
@@ -10,6 +11,7 @@ export default function AbbonamentoGate() {
   const [loading, setLoading] = useState(true)
   const [scegliendo, setScegliendo] = useState('')
   const [msg, setMsg] = useState('')
+  const app = useAppNativa()
 
   async function carica() {
     const d = await fetch('/api/abbonamento').then(r=>r.json()).catch(()=>null)
@@ -38,6 +40,18 @@ export default function AbbonamentoGate() {
   }
 
   if (loading || !stato || stato.error || stato.attivo) return null // esente o già attivo -> nessun blocco
+
+  // Nell'app il blocco resta, ma senza piani, prezzi né pulsanti: per gli store sarebbe un acquisto
+  // fuori dal loro sistema (lib/app-nativa). Le scritture senza piano le ferma comunque il middleware.
+  if (app) return (
+    <div style={{position:'fixed',inset:0,background:'rgba(15,15,15,0.72)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px',fontFamily:'var(--font-geist-sans),system-ui,sans-serif'}}>
+      <div style={{background:'#fff',borderRadius:'14px',maxWidth:'460px',width:'100%',boxShadow:'0 20px 60px rgba(0,0,0,.4)',padding:'24px 28px',textAlign:'center'}}>
+        <div style={{fontSize:'22px',fontWeight:800,color:'#1a1a1a'}}>Moov<span style={{color:ACCENT}}>Express</span></div>
+        <div style={{fontSize:'15px',fontWeight:700,color:'#1a1a1a',marginTop:'10px'}}>Abbonamento non attivo</div>
+        <div style={{fontSize:'13px',color:'#777',marginTop:'6px',lineHeight:1.55}}>Il tuo account non ha ancora un abbonamento attivo. {ABBONAMENTO_NON_IN_APP}</div>
+      </div>
+    </div>
+  )
 
   return (
     <div style={{position:'fixed',inset:0,background:'rgba(15,15,15,0.72)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px',fontFamily:'var(--font-geist-sans),system-ui,sans-serif'}}>

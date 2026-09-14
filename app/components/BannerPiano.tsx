@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useAppNativa } from '@/lib/app-nativa'
 
 // AVVISO SUL PIANO, in cima a ogni pagina del portale.
 //
@@ -27,6 +28,7 @@ function tempoMancante(scadenza: string | null, ora: number): string {
 export default function BannerPiano({ linkUpgrade = null }: { linkUpgrade?: string | null }) {
   const [s, setS] = useState<any>(null)
   const [ora, setOra] = useState(() => Date.now())
+  const app = useAppNativa()
 
   // Il conto alla rovescia scende mentre lo si guarda: un numero fermo lo si legge come una data
   // lontana. Ogni minuto basta — sotto l'ora si vedono i minuti scalare, ed e' quello che serve.
@@ -100,7 +102,9 @@ export default function BannerPiano({ linkUpgrade = null }: { linkUpgrade?: stri
           </div>
         )}
       </div>
-      {linkUpgrade && (s.bloccatoDaMe || avviso) && (
+      {/* Nell'app niente pulsante: porterebbe a pagare fuori dal sistema degli store (lib/app-nativa).
+          L'avviso resta, perché spiega perché le spedizioni si fermano. */}
+      {linkUpgrade && !app && (s.bloccatoDaMe || avviso) && (
         <a href={linkUpgrade} style={{
           background: rosso ? '#b91c1c' : '#f97316', color: '#fff', textDecoration: 'none',
           borderRadius: '6px', padding: '7px 14px', fontSize: '13px', fontWeight: 700, whiteSpace: 'nowrap',

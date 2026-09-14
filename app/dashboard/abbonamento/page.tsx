@@ -15,8 +15,10 @@ const sessioneLabel = (iso:string|null) => {
 }
 
 import { useDialog } from '@/app/components/DialogProvider'
+import { useAppNativa, ABBONAMENTO_NON_IN_APP } from '@/lib/app-nativa'
 export default function AbbonamentoPage() {
   const dialog = useDialog()
+  const app = useAppNativa()
   const [stato, setStato] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [azione, setAzione] = useState('')
@@ -165,6 +167,15 @@ export default function AbbonamentoPage() {
     setMsg(`✓ Fatti ${d.n_fatti} master · pausa fino al ${d.pausa_fino_al}${d.non_incassati?.length?` · ⚠️ ${d.non_incassati.length} NON incassati: ${d.non_incassati.join(', ')}`:''}${d.errori?.length?` · ${d.errori.length} errori`:''}.`)
     caricaAllinea()
   }
+
+  // Nell'app la pagina non si apre: piani, prezzi e cassa sono un acquisto fuori dal sistema degli
+  // store (lib/app-nativa). Vale anche per il pannello incassi del root, che dal telefono non serve.
+  if (app) return (
+    <div style={{...card, maxWidth:'520px', margin:'24px auto', textAlign:'center', padding:'28px 24px'}}>
+      <div style={{fontSize:'16px', fontWeight:700, color:'#1a1a1a'}}>Abbonamento</div>
+      <div style={{fontSize:'13.5px', color:'#666', marginTop:'8px', lineHeight:1.55}}>{ABBONAMENTO_NON_IN_APP}</div>
+    </div>
+  )
 
   if (loading) return <div style={{padding:'40px',textAlign:'center',color:'#666'}}>Caricamento...</div>
 

@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
 import SelectCercabile from '@/app/components/SelectCercabile'
+import { useAppNativa } from '@/lib/app-nativa'
 
 interface Cliente { id: string; ragione_sociale: string; credito_sms: number }
 interface Mov { tipo: string; descrizione: string; importo: number; quantita_sms: number | null; saldo_dopo: number | null; cliente_id: string | null; created_at: string }
@@ -21,6 +22,9 @@ export default function NotificheSmsPage() {
   const [aSoglia, setASoglia] = useState(100)
   const [aPacchetto, setAPacchetto] = useState(1000)
   const [busy, setBusy] = useState(false)
+  // Nell'app niente acquisto né auto-ricarica con carta: per gli store sono servizi digitali da
+  // pagare col loro sistema (lib/app-nativa). Il trasferimento ai clienti resta: usa credito già tuo.
+  const app = useAppNativa()
 
   const carica = useCallback(async () => {
     try {
@@ -113,7 +117,7 @@ export default function NotificheSmsPage() {
       <div style={{ marginBottom: '18px' }}>
         <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Notifiche SMS</h1>
         <span style={{ display: 'block', marginTop: '4px', fontSize: '13px', color: '#666' }}>
-          Compra i tuoi SMS con carta: sono per te e per i tuoi <b>clienti diretti</b> (mai i sotto-master). Ogni SMS di notifica costa {eur(costoSms)}.
+          {app ? 'Gli SMS' : 'Compra i tuoi SMS con carta:'} sono per te e per i tuoi <b>clienti diretti</b> (mai i sotto-master). Ogni SMS di notifica costa {eur(costoSms)}.
         </span>
       </div>
 
@@ -145,16 +149,19 @@ export default function NotificheSmsPage() {
         </div>
       )}
 
-      {/* Compra SMS (carta / Stripe) */}
-      <div style={{ ...card, marginBottom: '16px', maxWidth: '420px' }}>
-        <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', marginBottom: '4px' }}>Compra SMS</div>
-        <div style={{ fontSize: '12.5px', color: '#6b7280', marginBottom: '12px' }}>Pagamento con carta. Gli SMS restano tuoi: nessun trasferimento, ognuno compra i suoi.</div>
-        <label style={lbl}>Pacchetto</label>
-        <select value={pacchetto} onChange={e => setPacchetto(Number(e.target.value))} style={{ ...inp, width: '100%', marginBottom: '10px' }}>
-          {[1000, 5000, 10000].map(n => <option key={n} value={n}>{n.toLocaleString('it-IT')} SMS — {eur(n * costoSms)}</option>)}
-        </select>
-        <button onClick={acquista} disabled={busy} style={{ ...btn, width: '100%' }}>Paga con carta ({eur(pacchetto * costoSms)})</button>
-      </div>
+      {/* Compra SMS (carta / Stripe). Aspetta i dati anche sul web: così non finisce nell'HTML del
+          server, e nell'app non compare nemmeno per l'istante prima dell'idratazione. */}
+      {dati && !app && (
+        <div style={{ ...card, marginBottom: '16px', maxWidth: '420px' }}>
+          <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', marginBottom: '4px' }}>Compra SMS</div>
+          <div style={{ fontSize: '12.5px', color: '#6b7280', marginBottom: '12px' }}>Pagamento con carta. Gli SMS restano tuoi: nessun trasferimento, ognuno compra i suoi.</div>
+          <label style={lbl}>Pacchetto</label>
+          <select value={pacchetto} onChange={e => setPacchetto(Number(e.target.value))} style={{ ...inp, width: '100%', marginBottom: '10px' }}>
+            {[1000, 5000, 10000].map(n => <option key={n} value={n}>{n.toLocaleString('it-IT')} SMS — {eur(n * costoSms)}</option>)}
+          </select>
+          <button onClick={acquista} disabled={busy} style={{ ...btn, width: '100%' }}>Paga con carta ({eur(pacchetto * costoSms)})</button>
+        </div>
+      )}
 
       {/* Dai SMS a un cliente (frazionamento) */}
       <div style={{ ...card, marginBottom: '16px', maxWidth: '420px' }}>
@@ -172,28 +179,30 @@ export default function NotificheSmsPage() {
         {Number(smsTrasf) > 0 && <div style={{ fontSize: '11.5px', color: '#9ca3af', marginTop: '6px' }}>= {eur(Math.floor(Number(smsTrasf)) * costoSms)} dal tuo credito SMS</div>}
       </div>
 
-      {/* Auto-ricarica */}
-      <div style={{ ...card, marginBottom: '16px', maxWidth: '420px' }}>
-        <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', marginBottom: '4px' }}>Auto-ricarica</div>
-        <div style={{ fontSize: '12.5px', color: '#6b7280', marginBottom: '12px' }}>Sotto la soglia, ricarico il pacchetto sulla carta salvata.</div>
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
-          <div style={{ flex: 1 }}>
-            <label style={lbl}>Sotto (SMS)</label>
-            <input type="number" min={0} value={aSoglia} onChange={e => setASoglia(Math.max(0, Math.floor(Number(e.target.value)) || 0))} style={{ ...inp, width: '100%' }} />
+      {/* Auto-ricarica (addebita la carta salvata): stessa regola dell'acquisto qui sopra. */}
+      {dati && !app && (
+        <div style={{ ...card, marginBottom: '16px', maxWidth: '420px' }}>
+          <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', marginBottom: '4px' }}>Auto-ricarica</div>
+          <div style={{ fontSize: '12.5px', color: '#6b7280', marginBottom: '12px' }}>Sotto la soglia, ricarico il pacchetto sulla carta salvata.</div>
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+            <div style={{ flex: 1 }}>
+              <label style={lbl}>Sotto (SMS)</label>
+              <input type="number" min={0} value={aSoglia} onChange={e => setASoglia(Math.max(0, Math.floor(Number(e.target.value)) || 0))} style={{ ...inp, width: '100%' }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={lbl}>Ricarica</label>
+              <select value={aPacchetto} onChange={e => setAPacchetto(Number(e.target.value))} style={{ ...inp, width: '100%' }}>
+                {[1000, 5000, 10000].map(n => <option key={n} value={n}>{n.toLocaleString('it-IT')} SMS</option>)}
+              </select>
+            </div>
           </div>
-          <div style={{ flex: 1 }}>
-            <label style={lbl}>Ricarica</label>
-            <select value={aPacchetto} onChange={e => setAPacchetto(Number(e.target.value))} style={{ ...inp, width: '100%' }}>
-              {[1000, 5000, 10000].map(n => <option key={n} value={n}>{n.toLocaleString('it-IT')} SMS</option>)}
-            </select>
-          </div>
+          {!dati?.cartaSalvata && <div style={{ fontSize: '11.5px', color: '#9a3412', marginBottom: '10px' }}>Fai un primo acquisto: la carta viene salvata e l'auto-ricarica può funzionare.</div>}
+          {aAttiva
+            ? <button onClick={() => salvaAuto(false)} disabled={busy} style={{ ...btn, background: '#fff', color: '#dc2626', border: '1px solid #fecaca' }}>Disattiva</button>
+            : <button onClick={() => salvaAuto(true)} disabled={busy || !dati?.cartaSalvata} style={{ ...btn, opacity: (busy || !dati?.cartaSalvata) ? 0.6 : 1 }}>Attiva auto-ricarica</button>}
+          {aAttiva && <span style={{ marginLeft: '10px', fontSize: '12px', color: '#16a34a', fontWeight: 600 }}>● Attiva</span>}
         </div>
-        {!dati?.cartaSalvata && <div style={{ fontSize: '11.5px', color: '#9a3412', marginBottom: '10px' }}>Fai un primo acquisto: la carta viene salvata e l'auto-ricarica può funzionare.</div>}
-        {aAttiva
-          ? <button onClick={() => salvaAuto(false)} disabled={busy} style={{ ...btn, background: '#fff', color: '#dc2626', border: '1px solid #fecaca' }}>Disattiva</button>
-          : <button onClick={() => salvaAuto(true)} disabled={busy || !dati?.cartaSalvata} style={{ ...btn, opacity: (busy || !dati?.cartaSalvata) ? 0.6 : 1 }}>Attiva auto-ricarica</button>}
-        {aAttiva && <span style={{ marginLeft: '10px', fontSize: '12px', color: '#16a34a', fontWeight: 600 }}>● Attiva</span>}
-      </div>
+      )}
 
       {/* Storico */}
       <div style={{ ...card, padding: 0, overflow: 'hidden' }}>

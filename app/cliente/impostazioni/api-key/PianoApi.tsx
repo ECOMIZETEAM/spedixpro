@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { useAppNativa } from '@/lib/app-nativa'
 
 const ACCENT = '#f97316'
 
@@ -15,6 +16,7 @@ export default function PianoApi() {
   // rifiutano il mandato ricorrente pur avendo i soldi sopra, e con il pagamento singolo passano.
   const [modo, setModo] = useState<'abbonamento' | 'singolo'>('abbonamento')
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
+  const app = useAppNativa()
 
   async function carica() {
     const x = await fetch('/api/cliente/api-piano').then(r => r.json()).catch(() => null)
@@ -87,6 +89,10 @@ export default function PianoApi() {
       </div>
     )
   }
+
+  // Nell'app i pacchetti non si mostrano: prezzi e "Attiva" aprono la cassa, e per gli store è un
+  // acquisto fuori dal loro sistema (lib/app-nativa). Le chiavi API restano nella pagina.
+  if (app) return null
 
   const pieno = limite > 0 ? Math.min(100, Math.round((usate / limite) * 100)) : 0
   const oltre = !!s.oltre_limite

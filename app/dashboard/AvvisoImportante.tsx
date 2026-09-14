@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useAppNativa } from '@/lib/app-nativa'
 
 const ACCENT = '#f97316'
 
@@ -15,8 +16,11 @@ export default function AvvisoImportante() {
   useEffect(() => {
     fetch('/api/avvisi').then(r => r.json()).then(d => { if (d?.avviso) setA(d) }).catch(() => {})
   }, [])
+  const app = useAppNativa()
 
-  if (!a) return null
+  // Nell'app l'avviso non si apre: parla solo di attivare il pagamento, e per gli store sarebbe un
+  // invito a pagare fuori dal loro sistema (lib/app-nativa). Resta non letto e compare sul web.
+  if (!a || app) return null
 
   async function hoCapito() {
     setChiudendo(true)

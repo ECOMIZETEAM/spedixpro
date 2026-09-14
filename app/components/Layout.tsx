@@ -6,6 +6,7 @@ import Moovy from './Moovy'
 import MenuProfilo from './MenuProfilo'
 import CampanellaNotifiche from './CampanellaNotifiche'
 import SupportoButton from './SupportoButton'
+import { useAppNativa } from '@/lib/app-nativa'
 
 // perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
 // always: sempre visibile a chiunque abbia accesso al portale.
@@ -138,11 +139,14 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   const superMaster = user?.superMaster ?? false
   const isMultiexpress = user?.isMultiexpress ?? false
   const ottimizzaMargini = user?.ottimizzaMargini ?? false
+  // Nell'app la voce Abbonamento non c'è: la pagina è un acquisto per gli store (lib/app-nativa).
+  const app = useAppNativa()
 
   // Un elemento e visibile se: admin/master (isFull), oppure marcato always,
   // oppure ha una chiave permesso attiva. Senza perm e non-full = nascosto (solo admin).
   // Le voci "rete" (gestione sotto-master) richiedono in più il flag gestioneRete.
-  const puoVedere = (x: { perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean }) => {
+  const puoVedere = (x: { href?: string, perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean }) => {
+    if (app && x.href === '/dashboard/abbonamento') return false
     if (x.soloOttimizzaMargini) return ottimizzaMargini   // voce riservata ai master col flag (oggi solo Ecomize LL)
     if (x.soloMultiexpress) return isMultiexpress   // voce riservata a MULTIEXPRESS (Rettifiche automatiche)
     if (x.superMaster) return superMaster       // voce riservata al SUPER master (es. Registro Attività)
@@ -402,7 +406,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
             <CampanellaNotifiche />
             <MenuProfilo nome={user?.nome} ruolo={user?.ruolo} voci={[
               { label: 'Impostazioni', href: '/dashboard/impostazioni', icona: '◉' },
-              ...((ruolo === 'master' || ruolo === 'admin') ? [{ label: 'Abbonamento', href: '/dashboard/abbonamento', icona: '★' }] : []),
+              ...((ruolo === 'master' || ruolo === 'admin') && !app ? [{ label: 'Abbonamento', href: '/dashboard/abbonamento', icona: '★' }] : []),
               { label: 'Cambia password', href: '/dashboard/impostazioni/password', icona: '🔑' },
             ]} />
           </div>

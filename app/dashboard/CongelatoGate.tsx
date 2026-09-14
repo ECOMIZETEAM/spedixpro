@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
+import { useAppNativa, ABBONAMENTO_NON_IN_APP } from '@/lib/app-nativa'
 
 const ACCENT = '#f97316'
 
@@ -17,6 +18,9 @@ export default function CongelatoGate() {
   const percorso = usePathname()
   const [attesa, setAttesa] = useState(false)
   const [msg, setMsg] = useState('')
+  // Nell'app il blocco resta ma senza pulsanti né prezzi: per gli store pagare da qui sarebbe un
+  // acquisto fuori dal loro sistema (lib/app-nativa).
+  const app = useAppNativa()
 
   async function carica() {
     try {
@@ -61,15 +65,17 @@ export default function CongelatoGate() {
               : <>Hai esaurito le <strong>{Number(s.limite || 0).toLocaleString('it-IT')}</strong> spedizioni del tuo piano
                  ({Number(s.usato || 0).toLocaleString('it-IT')} questo mese, contando anche quelle della tua rete):
                  il tuo accesso al portale resta sospeso finché non passi a un piano più capiente.</>}
-            {s.piano ? <> Il tuo piano è <strong>{String(s.piano).replace('enterprise_', 'Enterprise ').toUpperCase()}</strong>{s.prezzo ? <> — € {s.prezzo} al mese</> : null}.</> : null}
+            {s.piano ? <> Il tuo piano è <strong>{String(s.piano).replace('enterprise_', 'Enterprise ').toUpperCase()}</strong>{s.prezzo && !app ? <> — € {s.prezzo} al mese</> : null}.</> : null}
           </p>
           <p style={{ fontSize: '14px', color: '#333', lineHeight: 1.65, margin: '0 0 18px' }}>
             <strong>I tuoi clienti e i tuoi sotto-master continuano a spedire normalmente</strong>, e le loro
-            spedizioni continuano a entrare nei tuoi conti: il blocco riguarda solo il tuo accesso. Appena
-            {s.congelato ? ' il pagamento va a buon fine' : ' fai l\'upgrade'} si riattiva tutto, senza aver perso nulla.
+            spedizioni continuano a entrare nei tuoi conti: il blocco riguarda solo il tuo accesso.
+            {app
+              ? <> {ABBONAMENTO_NON_IN_APP}</>
+              : <> Appena{s.congelato ? ' il pagamento va a buon fine' : ' fai l\'upgrade'} si riattiva tutto, senza aver perso nulla.</>}
           </p>
           {msg && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '10px', marginBottom: '14px', fontSize: '13px', color: '#b91c1c' }}>{msg}</div>}
-          {s.congelato ? (
+          {app ? null : s.congelato ? (
             <button onClick={paga} disabled={attesa || !s.piano}
               style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '8px', padding: '12px 22px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', opacity: attesa ? .6 : 1 }}>
               {attesa ? 'Attendere…' : 'Paga e riattiva subito'}
