@@ -34,7 +34,7 @@ type Ordine = {
   created_at: string
 }
 
-type Corriere = { id: string; nome: string; tipo: string }
+type Corriere = { id: string; nome: string; tipo?: string; punto?: boolean }
 
 const STATO: Record<string, { t: string; c: string; bg: string }> = {
   da_spedire: { t: 'Da spedire', c: '#b45309', bg: '#fef3c7' },
@@ -702,7 +702,9 @@ export default function ImportaOrdiniPage() {
               style={{ ...inp, width: 'auto', minWidth: '200px', padding: '8px 10px' }}
             >
               <option value="min">Prezzo minore (automatico)</option>
-              {corrieri.map(c => (
+              {/* Niente contratti "a un punto" (PuntoPoste/Locker) nell'import di massa: richiedono di
+                  scegliere il punto per ogni ordine, impossibile da file. */}
+              {corrieri.filter(c => !c.punto).map(c => (
                 <option key={c.id} value={c.id}>{c.nome}</option>
               ))}
             </select>

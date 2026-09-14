@@ -569,7 +569,8 @@ export default function OrdiniPage() {
           <span style={{fontSize:'13px',fontWeight:700,color:'#6b7280'}}>Spedisci con:</span>
           <select value={spedisciCon} onChange={e=>setSpedisciCon(e.target.value)} style={{...inp,width:'auto',minWidth:'260px'}}>
             <option value="auto">Assegnazione automatica (prezzo minore)</option>
-            {corrieri.map((c:any)=><option key={c.id} value={c.id}>{c.nome}</option>)}
+            {/* Niente contratti "a un punto" (richiedono di scegliere il punto per ogni ordine). */}
+            {corrieri.filter((c:any)=>!c.punto).map((c:any)=><option key={c.id} value={c.id}>{c.nome}</option>)}
           </select>
           <span style={{fontSize:'13px',fontWeight:700,color:'#6b7280'}}>Notifiche SMS</span>
           <select value={sms} onChange={e=>setSms(e.target.value)} style={{...inp,width:'auto',minWidth:'80px'}}>

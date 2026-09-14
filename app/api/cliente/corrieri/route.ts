@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
+import { eContrattoPuntoPoste, spediamoproPudoCourier } from '@/lib/punti-poste'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,13 +39,29 @@ export async function GET() {
   const disattivati = new Set((abil || []).filter((a: any) => a.abilitato === false).map((a: any) => a.corriere_id))
 
   // Corrieri distinti presenti nel listino, esclusi i disattivati
-  const map = new Map<string, { id: string; nome: string }>()
+  const map = new Map<string, { id: string; nome: string; punto: boolean }>()
   for (const f of fasce || []) {
     const c = (f as any).corrieri
     if (!c?.id || map.has(c.id) || disattivati.has(c.id)) continue
     if (c.attivo === false) continue                                    // in pausa dal proprio master
     if (sospesoDallaCatena(c.nome_contratto, sospesiSopra)) continue    // in pausa da un livello sopra
-    map.set(c.id, { id: c.id, nome: c.nome_contratto || 'Corriere' })
+    map.set(c.id, { id: c.id, nome: c.nome_contratto || 'Corriere', punto: false })
+  }
+
+  // Flag "punto" (consegna a PuntoPoste/Ufficio Postale/Fermopoint/Locker): questi contratti richiedono
+  // di scegliere il punto e NON vanno nell'import di massa. Lo capisco solo dalle credenziali (vettore
+  // DVA / service_id SpediamoPro), che stanno fuori dal grant del cliente → le leggo con la service-role
+  // e ritorno SOLO il booleano, mai il provider (vedi CLAUDE.md: i nomi dei fornitori non escono).
+  const ids = Array.from(map.keys())
+  if (ids.length) {
+    try {
+      const { data: creds } = await createAdminSupabase().from('corrieri').select('id,credenziali').in('id', ids)
+      for (const r of creds || []) {
+        const cr = (r as any).credenziali || {}
+        const punto = eContrattoPuntoPoste(cr.vettore) || !!spediamoproPudoCourier(cr.service_id)
+        const v = map.get((r as any).id); if (v) v.punto = punto
+      }
+    } catch { /* se il flag non si calcola, meglio mostrarli che nasconderli per errore */ }
   }
 
   return NextResponse.json({ corrieri: Array.from(map.values()) })
