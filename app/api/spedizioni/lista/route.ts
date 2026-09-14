@@ -66,6 +66,12 @@ export async function GET(req: NextRequest) {
   const fAssic = p.get('assicurazione')
   const fFatt = p.get('fatturato')
   const fCerca = p.get('cerca')
+  // ── MODALITÀ LIGHT (?light=1): SALTA tutto l'arricchimento post-fetch (movimenti, id ordine, resi,
+  //    ticket, prezzi/margine, contrassegno per-livello). La usa chi mostra SOLO i campi base (numero,
+  //    cliente, destinatario, date, totale) — es. la pagina "Spedizioni Cancellate": su MULTIEXPRESS le
+  //    annullate sono migliaia e l'arricchimento (100+ round-trip) rendeva la pagina lentissima, tutto
+  //    per colonne che quella pagina non mostra nemmeno. Gli embed base (clienti/corrieri) restano.
+  const light = p.get('light') === '1'
   // Selezione RETE/CLIENTE in modalità paginata: parametri DEDICATI che NON sostituiscono lo scope
   // di rete (così prezzi/margini per prima-linea restano identici a prima, quando il filtro era in
   // memoria sul browser sopra le righe già arricchite).
@@ -375,12 +381,13 @@ export async function GET(req: NextRequest) {
   }
 
   // I blocchi di arricchimento sono INDIPENDENTI tra loro → girano in PARALLELO (prima in serie).
-  await Promise.all([caricaMovimenti(), caricaIdOrdine(), caricaResi(), caricaTicket()])
+  // In LIGHT si saltano del tutto: chi la chiede mostra solo i campi base.
+  if (!light) await Promise.all([caricaMovimenti(), caricaIdOrdine(), caricaResi(), caricaTicket()])
 
   // Fallback PIGRI (DOPO i movimenti: dipendono dai prezzi reali): i calcolatori listino (query
   // pesanti su fasce/zone) si costruiscono SOLO se esiste almeno una riga senza prezzo reale.
   // 1) Listino cliente verso la prima linea: serve alle righe di RETE senza movimento del diretto.
-  const serveListinoFallback = isMasterRete && targetIds.size && (spedizioni || []).some((s: any) => {
+  const serveListinoFallback = !light && isMasterRete && targetIds.size && (spedizioni || []).some((s: any) => {
     if (!s.master_id || s.master_id === mineId) return false
     const fl = primaLineaId.get(s.master_id)
     return !!fl && !costoTarget.has(s.id + '|' + fl)
@@ -397,7 +404,7 @@ export async function GET(req: NextRequest) {
   //    tracciata): calcolo il MIO listino corriere. Per le spedizioni di rete il corriere è del
   //    sotto-master -> lo rimappo al MIO corriere con lo stesso nome_contratto.
   let calcMioCorr: ((s: any) => any) | null = null
-  if (mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).some((s: any) => !costoMine.has(s.id))) {
+  if (!light && mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).some((s: any) => !costoMine.has(s.id))) {
     try { calcMioCorr = await creaCalcolatoreCorriere(db, mineId) } catch { calcMioCorr = null }
     if (!nomeToMioCorr.size) {
       const { data: miei } = await db.from('corrieri').select('id,nome_contratto').eq('master_id', mineId)
@@ -408,7 +415,7 @@ export async function GET(req: NextRequest) {
   // (utenti.listino_agente_id), come nel report guadagno. Senza questo, prezzo_corriere restava
   // null → pareggiato al prezzo cliente → elenco TUTTO a margine 0.
   let calcAgente: ((s: any) => any) | null = null
-  if (ruolo === 'agente' && (utente as any)?.listino_agente_id && (spedizioni || []).length) {
+  if (!light && ruolo === 'agente' && (utente as any)?.listino_agente_id && (spedizioni || []).length) {
     try { calcAgente = await creaCalcolatoreListinoCliente(db, (utente as any).listino_agente_id) } catch { calcAgente = null }
   }
 
@@ -417,7 +424,7 @@ export async function GET(req: NextRequest) {
   // passaggio del cursore, cosi' il cliente non ci prova (e non tartassa). Tipo corriere via chiave di
   // servizio: il grant per-colonna su corrieri puo' negare 'tipo' alla sessione, qui torna solo un flag.
   const corrTipo = new Map<string, string>()
-  {
+  if (!light) {
     const corrIds = Array.from(new Set((spedizioni || []).map((s: any) => s.corriere_id).filter(Boolean)))
     if (corrIds.length) {
       const { createAdminSupabase } = await import('@/lib/supabase-admin')
@@ -506,7 +513,7 @@ export async function GET(req: NextRequest) {
     })
   }
   let rowsOut: any[] = rows
-  if (mineId && ruolo !== 'cliente' && ruolo !== 'agente') {
+  if (!light && mineId && ruolo !== 'cliente' && ruolo !== 'agente') {
     const codIds = rows.filter((r: any) => Number(r.contrassegno) > 0).map((r: any) => r.id)
     if (codIds.length) {
       const { createAdminSupabase } = await import('@/lib/supabase-admin')
