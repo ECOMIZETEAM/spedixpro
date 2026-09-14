@@ -347,7 +347,11 @@ export default function NuovaSpedizionePage() {
         packages: buildPackages(),
         shipFrom:{name:mitt.nome,company:mitt.nome,street1:mitt.indirizzo,street2:'',city:mitt.citta,state:mitt.provincia,postalCode:mitt.cap,country:'IT',phone:mitt.telefono,email:mitt.email},
         shipTo:{name:dest.nome,company:'',street1:dest.indirizzo,street2:'',city:dest.citta,state:dest.provincia,postalCode:dest.cap,country:dest.paese,phone:dest.telefono,email:dest.email},
-        notes:dest.note, insuranceValue:+assicurazione, codValue:+contrassegno
+        notes:dest.note, insuranceValue:+assicurazione, codValue:+contrassegno,
+        // Creazione MANUALE: qui il punto (PuntoPoste/Locker) lo si sceglie, quindi mostro anche i
+        // contratti "a un punto". Le porte automatiche (import/marketplace) NON passano questo flag,
+        // così non li assegnano mai col "prezzo più basso" mandando il pacco a un punto.
+        includiPunto: true
       })
     })
     const data = await res.json()

@@ -300,7 +300,10 @@ export default function NuovaSpedizioneCliente() {
         packages: buildPackages(),
         shipFrom:{name:mitt.nome,company:mitt.nome,street1:mitt.indirizzo,street2:'',city:mitt.citta,state:mitt.provincia,postalCode:mitt.cap,country:'IT',phone:mitt.telefono,email:mitt.email},
         shipTo:{name:dest.nome,company:'',street1:dest.indirizzo,street2:'',city:dest.citta,state:dest.provincia,postalCode:dest.cap,country:dest.paese,phone:dest.telefono,email:dest.email},
-        notes:dest.note, insuranceValue:+assicurazione, codValue:+contrassegno
+        notes:dest.note, insuranceValue:+assicurazione, codValue:+contrassegno,
+        // Creazione MANUALE: qui il punto lo si sceglie → mostro anche i contratti "a un punto".
+        // Import/marketplace NON passano questo flag → niente contratti a punto col prezzo più basso.
+        includiPunto: true
       })
     })
     const data = await res.json()

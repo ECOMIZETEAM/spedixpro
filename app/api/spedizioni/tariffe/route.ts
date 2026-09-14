@@ -37,6 +37,13 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
 
   const body = await req.json()
+  // CONTRATTI "A UN PUNTO" (PuntoPoste/Ufficio Postale/Fermopoint/Locker): richiedono di SCEGLIERE un
+  // punto (o un deposito) che esiste solo nella creazione manuale. Vanno quindi ESCLUSI di default dalle
+  // tariffe, così le porte che scelgono in automatico "il prezzo più basso" (import da file, ordini
+  // marketplace) non li assegnano mai per errore mandando un pacco a un punto. Solo la creazione manuale
+  // passa includiPunto:true (lì il punto lo si sceglie). Default-safe: una porta nuova non li vede.
+  const includiPunto = body?.includiPunto === true
+  const soloDomicilio = (r: any[]) => includiPunto ? r : r.filter((x: any) => !x._deposito && !x._consegna_punto)
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
 
   // Spedizione PER CONTO DI UN SOTTO-MASTER (clienteId = "m:<id>"): la trattiamo come un cliente,
@@ -124,7 +131,7 @@ export async function POST(req: NextRequest) {
     if (!risultati.length) return NextResponse.json({ error: 'Nessuna tariffa dal listino corriere per questa destinazione' }, { status: 400 })
     risultati.sort((a, b) => Number(a.total_price) - Number(b.total_price))
     await annotaPuntoPoste(createAdminSupabase(), risultati)
-    return NextResponse.json(risultati)
+    return NextResponse.json(soloDomicilio(risultati))
   }
 
   const clienteId = utente?.ruolo === 'cliente' ? utente.cliente_id : body.clienteId
@@ -186,5 +193,5 @@ export async function POST(req: NextRequest) {
   }
 
   try { await annotaPuntoPoste(createAdminSupabase(), risultati) } catch { /* i flag punto non bloccano la lista */ }
-  return NextResponse.json(risultati)
+  return NextResponse.json(soloDomicilio(risultati))
 }
