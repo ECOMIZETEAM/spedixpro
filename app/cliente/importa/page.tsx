@@ -31,6 +31,7 @@ type Ordine = {
   fonte: string
   stato: string
   errore: string | null
+  spedizione_id: string | null
   created_at: string
 }
 
