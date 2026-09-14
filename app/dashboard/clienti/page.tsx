@@ -47,6 +47,8 @@ export default function ClientiPage() {
   const [filtroStato, setFiltroStato] = useFiltriPersistenti('clienti-master:stato', 'tutti')
   const [filtroContratto, setFiltroContratto] = useFiltriPersistenti('clienti-master:contratto', 'tutti')
   const [filtroListino, setFiltroListino] = useFiltriPersistenti('clienti-master:listino', 'tutti')
+  // Filtro SALDO pilotato dai riquadri sopra l'elenco: 'positivo' = in credito, 'negativo' = a debito.
+  const [filtroSaldo, setFiltroSaldo] = useFiltriPersistenti('clienti-master:saldo', 'tutti')
   const [pagina, setPagina] = useState(1)
   const PER_PAGINA = 10
 
@@ -132,7 +134,9 @@ export default function ClientiPage() {
     return Array.from(set)
   }, [clienti])
 
-  const clientiFiltrati = useMemo(() => {
+  // Popolazione filtrata da TUTTO tranne il saldo: è su questa che i riquadri contano credito/debito
+  // (così i totali riflettono i filtri attivi ma non si azzerano quando clicco un riquadro).
+  const clientiPreSaldo = useMemo(() => {
     return clienti.filter(c => {
       if (filtroStato === 'attivo' && !c.attivo) return false
       if (filtroStato === 'inattivo' && c.attivo) return false
@@ -151,8 +155,22 @@ export default function ClientiPage() {
     })
   }, [clienti, search, filtroStato, filtroContratto, filtroListino])
 
+  // Totali per i riquadri: credito = somma dei positivi, debito = somma dei negativi (chi sta sotto),
+  // differenza = netto (credito + debito, col debito negativo). NB: il saldo del cliente è `credito`.
+  const saldoTotali = useMemo(() => {
+    let credito = 0, debito = 0
+    for (const c of clientiPreSaldo) { const v = Number(c.credito || 0); if (v > 0) credito += v; else if (v < 0) debito += v }
+    return { credito, debito, differenza: credito + debito }
+  }, [clientiPreSaldo])
+
+  const clientiFiltrati = useMemo(() => {
+    if (filtroSaldo === 'positivo') return clientiPreSaldo.filter(c => Number(c.credito || 0) > 0)
+    if (filtroSaldo === 'negativo') return clientiPreSaldo.filter(c => Number(c.credito || 0) < 0)
+    return clientiPreSaldo
+  }, [clientiPreSaldo, filtroSaldo])
+
   // Paginazione 10/pagina. Torno a pagina 1 quando cambiano ricerca/filtri.
-  useEffect(() => { setPagina(1) }, [search, filtroStato, filtroContratto, filtroListino])
+  useEffect(() => { setPagina(1) }, [search, filtroStato, filtroContratto, filtroListino, filtroSaldo])
   const totPagine = Math.max(1, Math.ceil(clientiFiltrati.length / PER_PAGINA))
   const paginaCorr = Math.min(pagina, totPagine)
   const clientiPagina = clientiFiltrati.slice((paginaCorr - 1) * PER_PAGINA, paginaCorr * PER_PAGINA)
@@ -225,6 +243,39 @@ export default function ClientiPage() {
           <AzzeraFiltri prefix="clienti-master" />
         </div>
       </div>
+
+      {/* RIQUADRI SALDO: Credito (positivi) / Debito (chi sta sotto) / Differenza. Credito e Debito
+          filtrano l'elenco al click (toggle); Differenza è solo informativa, non cliccabile. */}
+      {!loading && (
+        <div style={{display:'grid',gridTemplateColumns:'repeat(3, 1fr)',gap:'12px',marginBottom:'16px'}}>
+          {(() => {
+            const fmt = (n:number) => '€ ' + Number(n).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})
+            const box:any = {borderRadius:'8px',padding:'14px 16px',border:'1px solid #e8e8e8',background:'#fff',textAlign:'left',width:'100%',display:'block'}
+            const aCred = filtroSaldo==='positivo', aDeb = filtroSaldo==='negativo'
+            return (<>
+              <button onClick={()=>setFiltroSaldo(aCred?'tutti':'positivo')}
+                style={{...box,cursor:'pointer',borderColor:aCred?'#16a34a':'#e8e8e8',background:aCred?'#f0fdf4':'#fff'}}
+                title="Clienti in credito (saldo positivo)">
+                <div style={{fontSize:'11px',fontWeight:700,textTransform:'uppercase' as const,letterSpacing:'0.4px',color:'#16a34a'}}>Credito clienti</div>
+                <div style={{fontSize:'21px',fontWeight:800,color:'#16a34a',marginTop:'4px'}}>{fmt(saldoTotali.credito)}</div>
+                <div style={{fontSize:'11px',color:'#9ca3af',marginTop:'3px'}}>{aCred?'✓ filtro attivo · clicca per togliere':'clicca per vedere chi è in positivo'}</div>
+              </button>
+              <button onClick={()=>setFiltroSaldo(aDeb?'tutti':'negativo')}
+                style={{...box,cursor:'pointer',borderColor:aDeb?'#dc2626':'#e8e8e8',background:aDeb?'#fef2f2':'#fff'}}
+                title="Clienti a debito (saldo sotto zero)">
+                <div style={{fontSize:'11px',fontWeight:700,textTransform:'uppercase' as const,letterSpacing:'0.4px',color:'#dc2626'}}>Debito clienti</div>
+                <div style={{fontSize:'21px',fontWeight:800,color:'#dc2626',marginTop:'4px'}}>{fmt(Math.abs(saldoTotali.debito))}</div>
+                <div style={{fontSize:'11px',color:'#9ca3af',marginTop:'3px'}}>{aDeb?'✓ filtro attivo · clicca per togliere':'clicca per vedere chi è sotto'}</div>
+              </button>
+              <div style={{...box,cursor:'default'}} title="Differenza netta: credito meno debito">
+                <div style={{fontSize:'11px',fontWeight:700,textTransform:'uppercase' as const,letterSpacing:'0.4px',color:'#6b7280'}}>Differenza</div>
+                <div style={{fontSize:'21px',fontWeight:800,color:saldoTotali.differenza<0?'#dc2626':'#1a1a1a',marginTop:'4px'}}>{fmt(saldoTotali.differenza)}</div>
+                <div style={{fontSize:'11px',color:'#9ca3af',marginTop:'3px'}}>credito meno debito</div>
+              </div>
+            </>)
+          })()}
+        </div>
+      )}
 
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
         {loading ? (
