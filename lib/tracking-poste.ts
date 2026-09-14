@@ -1,6 +1,6 @@
 // Mapping/parse del tracking POSTE (usato sia dal ripiego pubblico bonifica-poste sia dal backfill
 // OneTracking dell'harvester tracking). Un posto solo: la regola che decide lo stato non va duplicata.
-import { testoIndicaReso } from '@/lib/spedisci'
+import { prioritaStato, testoIndicaReso } from '@/lib/spedisci'
 import { istanteDaTesto } from '@/lib/tracking-eventi'
 
 // Frase Poste → stato interno. Ordine importante: 'mancata/non consegnata' prima di 'consegnata',
@@ -170,4 +170,35 @@ export function eventiDaFullTracking(tracking: any[]): EventoTracking[] {
     eventi.push({ stato: statoDaEventoOT(e), descrizione, luogo, data_evento })
   }
   return eventi
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// UNA LETTURA DI POSTE NON APRE MAI UNA GIACENZA
+//
+// La giacenza la apre il FORNITORE (stock SpediamoPro, stock Spedisci, giacenza DVA): è lì che
+// arrivano le istruzioni ed è da lì che passa lo svincolo. Poste scrive "INIZIO GIACENZA" prima — a
+// volte giorni prima — che il fornitore la registri. Dal 9 al 14/09/2026 le letture OneTracking
+// hanno messo "in giacenza" 123 spedizioni che nessun fornitore aveva, e il database ha mandato a
+// 112 clienti 188 avvisi "scegli come procedere": istruzioni che non avevano dove arrivare.
+//
+// L'evento resta nella cronologia (è vero, e il destinatario lo legge); lo STATO della spedizione no.
+// Si avanza fino all'ultimo passo che non è la giacenza, così il pacco non resta fermo su "spedita".
+// Il database ha la stessa regola (trg_giacenza_solo_dal_fornitore): questa funzione serve a tutte
+// le porte che leggono Poste — sweep dal Mac, cieche-ingest, bonifica-poste — per non doverla
+// ricopiare in ognuna.
+// ═══════════════════════════════════════════════════════════════════════════════════════
+const TERMINALI_LETTURA = new Set(['consegnata', 'annullata', 'annullamento_manuale'])
+
+export function statoDaLetturaPoste(eventi: { stato: string | null }[], statoAttuale: string | null): string | null {
+  if (statoAttuale && TERMINALI_LETTURA.has(statoAttuale)) return null
+  let avanzato: string | null = null
+  for (const e of eventi) {
+    if (!e.stato || e.stato === 'in_giacenza') continue
+    if (prioritaStato(e.stato) > prioritaStato(avanzato)) avanzato = e.stato
+  }
+  // Solo avanti: il corriere può raccontare un passo che noi abbiamo già superato.
+  if (!avanzato || prioritaStato(avanzato) <= prioritaStato(statoAttuale)) return null
+  // Reso appiccicoso: dopo il reso, "consegnata" è la consegna del RITORNO al mittente.
+  if (statoAttuale === 'reso_mittente' && avanzato === 'consegnata') return null
+  return avanzato
 }

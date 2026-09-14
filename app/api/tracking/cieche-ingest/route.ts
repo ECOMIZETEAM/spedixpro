@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { autorizzaHarvester } from '@/lib/ripesature-harvester'
-import { prioritaStato } from '@/lib/spedisci'
-import { eventiDaFullTracking } from '@/lib/tracking-poste'
+import { eventiDaFullTracking, statoDaLetturaPoste } from '@/lib/tracking-poste'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -12,11 +11,11 @@ export const maxDuration = 120
 // cronologia + avanza lo stato SOLO-AVANTI (mai declassare, terminali intoccabili, reso appiccicoso).
 // NON tocca giacenza_data: un backfill di una giacenza vecchia datandola "ora" falserebbe l'addebito
 // a giornate — le giacenze restano al flusso normale del webhook/cron.
-// E per lo stesso motivo NON marca 'in_giacenza': senza giacenza_data sarebbe una "mezza giacenza"
-// (stato in giacenza ma FUORI dalla lista, che filtra giacenza_data) → il cliente vedeva il pallino
-// e poi la lista vuota. La giacenza VERA la registra `bonifica-poste` (giacenza_data + addebito),
-// che pesca proprio le LDV Poste ancora senza cronologia. Qui, se il picco è la giacenza, si lascia
-// lo stato com'è e ci pensa quel cron.
+// E NON marca 'in_giacenza': senza giacenza_data sarebbe una "mezza giacenza" (stato in giacenza ma
+// FUORI dalla lista, che filtra giacenza_data) → il cliente vedeva il pallino e poi la lista vuota.
+// Soprattutto, la giacenza la apre solo il FORNITORE: un'istruzione data su una giacenza che lui non
+// ha ancora aperto non ha dove arrivare. Qui prima c'era scritto che la giacenza "vera" la registrava
+// bonifica-poste: era la stessa lettura di Poste da un'altra porta. Regola in `statoDaLetturaPoste`.
 // body: { righe: [{ spedizione_id, ldv, tracking: [...] }] }  (tracking = array `tracking` del full-tracking)
 export async function POST(req: NextRequest) {
   const admin = createAdminSupabase()
@@ -40,13 +39,9 @@ export async function POST(req: NextRequest) {
     await admin.from('tracking_events').delete().eq('spedizione_id', sid)
     await admin.from('tracking_events').insert(eventi.map((e) => ({ spedizione_id: sid, ...e })))
     cronologie++
-    let avanzato: string | null = null
-    for (const e of eventi) if (e.stato && prioritaStato(e.stato) > prioritaStato(avanzato)) avanzato = e.stato
-    if (avanzato && avanzato !== 'in_giacenza'   // giacenza: la registra bonifica-poste con giacenza_data (vedi testa)
-        && (sp as any).stato !== 'consegnata' && (sp as any).stato !== 'annullata'
-        && prioritaStato(avanzato) > prioritaStato((sp as any).stato)
-        && !((sp as any).stato === 'reso_mittente' && avanzato === 'consegnata')) {
-      await admin.from('spedizioni').update({ stato: avanzato }).eq('id', sid)
+    const nuovo = statoDaLetturaPoste(eventi, (sp as any).stato)
+    if (nuovo) {
+      await admin.from('spedizioni').update({ stato: nuovo }).eq('id', sid)
       avanzati++
     }
   }

@@ -26,10 +26,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { data: sped } = await admin.from('spedizioni')
     // Destinazione e colli servono a ricalcolare il NOLO (base del reso). numero/tracking/raw_response
     // + credenziali corriere servono a eseguiSvincolo per parlare col corriere (restano lato server).
-    .select('id,master_id,cliente_id,corriere_id,stato,giacenza_stato,costo_totale,assicurazione,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta,numero,tracking_number,raw_response,dest_nome,dest_telefono,dest_email,giacenza_addebito_effettuato, corrieri(tipo,credenziali,nome_contratto,master_id)')
+    .select('id,master_id,cliente_id,corriere_id,stato,giacenza_stato,giacenza_data,costo_totale,assicurazione,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta,numero,tracking_number,raw_response,dest_nome,dest_telefono,dest_email,giacenza_addebito_effettuato, corrieri(tipo,credenziali,nome_contratto,master_id)')
     .eq('id', id).maybeSingle()
   if (!sped || sped.cliente_id !== ctx.clienteId) return NextResponse.json({ error: 'Giacenza non trovata' }, { status: 404 })
-  if (sped.stato !== 'in_giacenza') return NextResponse.json({ error: 'La spedizione non è in giacenza' }, { status: 409 })
+  // giacenza_data = la giacenza l'ha aperta il fornitore. Senza, lo svincolo partirebbe verso un
+  // fornitore che non ha niente in giacenza (istruzioni date prima che la apra).
+  if (sped.stato !== 'in_giacenza' || !(sped as any).giacenza_data) return NextResponse.json({ error: 'La spedizione non è in giacenza' }, { status: 409 })
 
   // "mantieni" = nessuna richiesta di svincolo: resta in giacenza.
   if (action === 'mantieni') {

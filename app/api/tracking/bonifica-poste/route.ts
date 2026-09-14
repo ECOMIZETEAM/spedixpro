@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { prioritaStato } from '@/lib/spedisci'
-import { mappaStatoPoste } from '@/lib/tracking-poste'
+import { mappaStatoPoste, statoDaLetturaPoste } from '@/lib/tracking-poste'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -75,14 +75,13 @@ export async function GET(req: NextRequest) {
       await admin.from('tracking_events').delete().eq('spedizione_id', sp.id)
       await admin.from('tracking_events').insert(eventi.map((e: any) => ({ spedizione_id: sp.id, ...e })))
       cronologie++
-      let avanzato: string | null = null
-      for (const e of eventi) if (e.stato && prioritaStato(e.stato) > prioritaStato(avanzato)) avanzato = e.stato
-      // Regole di sempre: solo avanti, terminali intoccabili, reso appiccicoso
-      if (avanzato && avanzato !== sp.stato && prioritaStato(avanzato) > prioritaStato(sp.stato)
-          && !(sp.stato === 'reso_mittente' && avanzato === 'consegnata')) {
-        const upd: any = { stato: avanzato }
-        if (avanzato === 'in_giacenza') upd.giacenza_data = new Date().toISOString()
-        await admin.from('spedizioni').update(upd).eq('id', sp.id)
+      // Regole di sempre (solo avanti, terminali intoccabili, reso appiccicoso) e MAI in giacenza.
+      // Qui, se poste.it diceva giacenza, si datava giacenza_data: il database la metteva in coda di
+      // addebito e il cliente riceveva l'avviso, su un pacco che il fornitore non aveva in giacenza.
+      // La giacenza la apre solo il fornitore (vedi statoDaLetturaPoste).
+      const nuovo = statoDaLetturaPoste(eventi, sp.stato)
+      if (nuovo) {
+        await admin.from('spedizioni').update({ stato: nuovo }).eq('id', sp.id)
         stati++
       }
     } catch { /* singola LDV: pazienza, riprova al giro dopo */ }

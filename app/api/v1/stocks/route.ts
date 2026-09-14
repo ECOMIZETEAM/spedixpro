@@ -18,6 +18,9 @@ export async function GET(req: NextRequest) {
     .eq('cliente_id', ctx.clienteId)
     .eq('corriere_id', ctx.corriereId)
     .eq('stato', 'in_giacenza')
+    // Solo quelle che il FORNITORE ha aperto (giacenza_data), come la lista del portale: un partner che
+    // riceve una giacenza letta solo da Poste ci manda le istruzioni, e il fornitore non ha niente da svincolare.
+    .not('giacenza_data', 'is', null)
     .order('created_at', { ascending: false })
   if (stato) q = q.eq('giacenza_stato', stato)
 

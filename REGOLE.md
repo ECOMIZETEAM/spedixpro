@@ -25,6 +25,7 @@ Qui non serve ricordarsene: il database le applica da solo, da qualunque strada 
 | Il credito si muove solo dalle funzioni dei movimenti | trigger `fn_credito_solo_via_rpc` su `clienti` e `masters` |
 | Un reso non si addebita due volte | indici unici parziali `uniq_mov_reso_cliente` / `uniq_mov_reso_master` |
 | Il prezzo del reso: percentuale, ripiego, transazione unica | `fn_addebita_resi` |
+| Una giacenza la apre solo il fornitore, mai una lettura di Poste | trigger `trg_giacenza_solo_dal_fornitore`: `in_giacenza` senza `giacenza_data` non passa (fuori il circuito interno) |
 | Una giacenza aperta va addebitata, sempre | trigger `trg_giacenza_da_addebitare` → coda `giacenze_da_addebitare` |
 | Un reso va addebitato, anche se arriva dal corriere | trigger `trg_reso_da_addebitare` → coda `resi_da_addebitare` |
 | A quale conto appartiene un movimento | trigger `trg_conto_movimento` → `fn_conto_di` |
