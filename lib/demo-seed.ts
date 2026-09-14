@@ -63,6 +63,32 @@ function numeroDemo(masterId: string, i: number): string {
   return `DMO${short}${String(i).padStart(3, '0')}`
 }
 
+// Clienti finti: listino di vendita assegnato, corriere abilitato, credito finto.
+//
+// L'email del cliente è UNICA in tutta la tabella (clienti_email_key). Qui era fissa per nome
+// (demo-bottegadelcaffsrl@example.com): la prima demo del 13/08 li ha creati, e da allora ogni demo
+// nuova falliva l'inserimento in silenzio — zero clienti, quindi "Nuova Spedizione" inutilizzabile
+// per chi prova il gestionale. Ora l'email porta un pezzo dell'id del master, e un errore ferma la
+// creazione invece di consegnare una demo vuota.
+export async function seminaClientiDemo(admin: Admin, masterId: string, corriereId: string, listinoClientiId: string): Promise<string[]> {
+  const suffisso = masterId.replace(/-/g, '').slice(0, 8)
+  const ids: string[] = []
+  for (const c of CLIENTI_DEMO) {
+    const { data: cli, error } = await admin.from('clienti').insert({
+      master_id: masterId, ragione_sociale: c.rag, email: `demo-${c.rag.toLowerCase().replace(/[^a-z0-9]+/g, '')}-${suffisso}@example.com`,
+      listino_cliente_id: listinoClientiId, tipo_contratto: 'credito_scalare', credito: 2500, attivo: true,
+      so_indirizzo: c.ind, so_citta: c.citta, so_provincia: c.prov, so_cap: c.cap, so_paese: 'Italia',
+      sl_indirizzo: c.ind, sl_citta: c.citta, sl_provincia: c.prov, sl_cap: c.cap, sl_paese: 'Italia',
+      // In demo niente notifiche reali al destinatario, doppia cintura oltre alle guardie di codice.
+      impostazioni: { notifica_email_dest: false, notifica_sms: false },
+    }).select('id').single()
+    if (error || !cli?.id) throw new Error(`cliente demo "${c.rag}": ${error?.message || 'non creato'}`)
+    ids.push(cli.id)
+    await admin.from('clienti_corrieri_abilitati').insert({ cliente_id: cli.id, corriere_id: corriereId, abilitato: true, settings: {} })
+  }
+  return ids
+}
+
 export async function seminaDemo(admin: Admin, masterId: string): Promise<{ corriereId: string; clienti: number; spedizioni: number }> {
   const mitt = { nome: 'MoovExpress Demo', ind: 'Via Roma 1', citta: 'Milano', prov: 'MI', cap: '20100', tel: '0200000000', email: 'demo@moovexpress.com' }
 
@@ -104,21 +130,7 @@ export async function seminaDemo(admin: Admin, masterId: string): Promise<{ corr
   })))
 
   // 5) Clienti finti (con listino di vendita assegnato + corriere abilitato + credito finto).
-  const clientiIds: string[] = []
-  for (const c of CLIENTI_DEMO) {
-    const { data: cli } = await admin.from('clienti').insert({
-      master_id: masterId, ragione_sociale: c.rag, email: `demo-${c.rag.toLowerCase().replace(/[^a-z0-9]+/g, '')}@example.com`,
-      listino_cliente_id: listinoClientiId, tipo_contratto: 'credito_scalare', credito: 2500, attivo: true,
-      so_indirizzo: c.ind, so_citta: c.citta, so_provincia: c.prov, so_cap: c.cap, so_paese: 'Italia',
-      sl_indirizzo: c.ind, sl_citta: c.citta, sl_provincia: c.prov, sl_cap: c.cap, sl_paese: 'Italia',
-      // In demo niente notifiche reali al destinatario, doppia cintura oltre alle guardie di codice.
-      impostazioni: { notifica_email_dest: false, notifica_sms: false },
-    }).select('id').single()
-    if (cli?.id) {
-      clientiIds.push(cli.id)
-      await admin.from('clienti_corrieri_abilitati').insert({ cliente_id: cli.id, corriere_id: corriereId, abilitato: true, settings: {} })
-    }
-  }
+  const clientiIds = await seminaClientiDemo(admin, masterId, corriereId, listinoClientiId)
 
   // 6) Spedizioni finte in vari stati, sparse negli ultimi giorni; alcune di clienti, alcune "proprie".
   const oggi = Date.now()
