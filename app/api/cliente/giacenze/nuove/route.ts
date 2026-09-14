@@ -27,10 +27,16 @@ export async function GET() {
   const admin = createAdminSupabase()
   // DA SVINCOLARE = attualmente in giacenza. Niente filtro sulla data di ultima visita: il pallino
   // deve restare finche' la giacenza non e' risolta, non sparire dopo aver aperto la pagina.
+  // `giacenza_data IS NOT NULL` OBBLIGATORIO: la lista cliente (/api/cliente/giacenze) mostra SOLO le
+  // giacenze con `giacenza_data` valorizzata (è entrata davvero in giacenza). L'harvester Poste/SDA
+  // (cieche-ingest) avanza lo stato a 'in_giacenza' SENZA datare la giacenza (per non falsare
+  // l'addebito apertura): quelle righe non sono in lista → contarle qui accendeva un pallino che poi
+  // portava a una lista vuota. Il conteggio deve contare esattamente ciò che il cliente può vedere.
   const { count } = await admin.from('spedizioni')
     .select('id', { count: 'exact', head: true })
     .eq('cliente_id', id)
     .eq('stato', 'in_giacenza')
+    .not('giacenza_data', 'is', null)
   return NextResponse.json({ count: count || 0 })
 }
 
