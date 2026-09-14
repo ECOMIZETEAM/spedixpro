@@ -18,7 +18,7 @@ export default function PrivacyPage() {
     <div style={{ background: '#fff', minHeight: '100vh' }}>
       <div style={box}>
         <h1 style={h1}>Privacy Policy</h1>
-        <div style={small}>MoovExpress — Ultimo aggiornamento: 31 luglio 2026</div>
+        <div style={small}>MoovExpress — Ultimo aggiornamento: 14 settembre 2026</div>
 
         <h2 style={h2}>1. Titolare del trattamento</h2>
         <p style={p}>
@@ -93,7 +93,24 @@ export default function PrivacyPage() {
           dell'app, l'accesso al negozio viene revocato e i relativi dati vengono rimossi.
         </p>
 
-        <h2 style={h2}>9. Modifiche</h2>
+        <h2 style={h2}>9. App MoovExpress per smartphone</h2>
+        <p style={p}>
+          L'app MoovExpress per iOS e Android apre lo stesso portale disponibile sul web e ne tratta gli stessi
+          dati. In più, solo quando serve e dopo il permesso concesso sul dispositivo:
+        </p>
+        <ul>
+          <li style={li}><strong>Fotocamera</strong>: per leggere il codice a barre dei pacchi e per fotografare documenti da allegare. Le immagini della lettura restano sul dispositivo; una foto viene inviata solo se la si allega.</li>
+          <li style={li}><strong>Posizione</strong>: solo per gli autisti, nel momento in cui registrano l'esito di una consegna. Viene salvata insieme a quell'esito come prova del luogo della consegna. L'app non rileva la posizione in background.</li>
+          <li style={li}><strong>File</strong>: etichette e documenti scaricati vengono salvati temporaneamente sul dispositivo per poterli condividere o stampare.</li>
+        </ul>
+        <p style={p}>
+          L'app non contiene pubblicità, non traccia gli utenti su app e siti di terzi e non vende dati. I permessi
+          si possono revocare in qualsiasi momento dalle impostazioni del telefono. Per chiedere la cancellazione
+          dell'account e dei dati collegati è possibile scrivere a{' '}
+          <a href="mailto:info@moovexpress.com" style={{ color: '#f97316' }}>info@moovexpress.com</a>.
+        </p>
+
+        <h2 style={h2}>10. Modifiche</h2>
         <p style={p}>
           La presente informativa può essere aggiornata nel tempo. Le modifiche saranno pubblicate su questa
           pagina con la relativa data di aggiornamento.
