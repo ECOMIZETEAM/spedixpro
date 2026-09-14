@@ -73,6 +73,31 @@ export default function SpedizioniCancellatePage() {
     else { const d = await res.json().catch(() => ({})); await dialog.alert({ title: 'Errore', message: d.error || 'Errore durante la conferma.' }) }
   }
 
+  // Export CSV degli annulli da richiedere all'assistenza, UNO per CONTRATTO (es. Poste Express M,
+  // GLS…): l'assistenza di ogni fornitore vuole la SUA lista. Esporta TUTTA la coda del contratto
+  // (non la vista filtrata/paginata): serve la lista completa da mandare a quel fornitore. Le ripesate
+  // restano ma segnate in Note (sono partite → verificare prima di chiederne l'annullo). ; + BOM per Excel IT.
+  function csvCampo(v: any): string {
+    const s = v == null ? '' : String(v)
+    return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
+  }
+  function scaricaCsvContratto(nomeContratto: string) {
+    const righe = codaOwner.filter(s => (s.corrieri?.nome_contratto || 'Senza contratto') === nomeContratto)
+    const intest = ['Numero', 'Tracking', 'Destinatario', 'Città', 'Provincia', 'Data richiesta annullo', 'Note']
+    const corpo = righe.map(s => [
+      s.numero, s.tracking_number || '', s.dest_nome || '', s.dest_citta || '', s.dest_provincia || '',
+      s.annullamento_richiesto_at ? new Date(s.annullamento_richiesto_at).toLocaleString('it-IT') : '',
+      s.ripesata ? 'RIPESATA - PARTITA: verificare' : '',
+    ].map(csvCampo).join(';'))
+    const csv = '\uFEFF' + [intest.join(';'), ...corpo].join('\r\n')   // BOM: Excel IT apre gli accenti giusti
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const safe = (nomeContratto || 'contratto').replace(/[^\w\-]+/g, '_').slice(0, 40)
+    a.href = url; a.download = `annulli_${safe}_${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
+  }
+
   const ownerIds = new Set(codaOwner.map(s => s.id))
   const manualiAltri = manuali.filter(s => !ownerIds.has(s.id))  // manuali non miei (sola lettura)
 
@@ -107,6 +132,12 @@ export default function SpedizioniCancellatePage() {
   const pagCodaCorr = Math.min(paginaCoda, totPagCoda)
   const codaOwnerPaginata = codaOwnerVis.slice((pagCodaCorr - 1) * CODA_PER_PAGE, pagCodaCorr * CODA_PER_PAGE)
   const filtriAttivi = !!(filtroCliente || dal || al || cerca)
+  // Contratti presenti nella coda annulli (per il download CSV per-corriere): conteggio sul set COMPLETO,
+  // così ogni bottone scarica TUTTA la lista di quel contratto da mandare all'assistenza.
+  const contrattiCoda = Array.from(codaOwner.reduce((m: Map<string, number>, s: any) => {
+    const k = s.corrieri?.nome_contratto || 'Senza contratto'
+    return m.set(k, (m.get(k) || 0) + 1)
+  }, new Map<string, number>())).sort((a, b) => a[0].localeCompare(b[0]))
 
   const totalePagine = Math.max(1, Math.ceil(visibili.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
@@ -167,6 +198,20 @@ export default function SpedizioniCancellatePage() {
           <div style={{padding:'12px 16px',borderBottom:'1px solid #fecaca',background:'#fef2f2'}}>
             <span style={{fontSize:'13px',fontWeight:'700',color:'#b91c1c'}}>Annulli da richiedere all'assistenza <span style={{color:'#991b1b',fontWeight:'400',fontSize:'12px'}}>({codaOwnerVis.length}{filtriAttivi && codaOwnerVis.length !== codaOwner.length ? ` di ${codaOwner.length}` : ''})</span></span>
             <span style={{display:'block',marginTop:'2px',fontSize:'12px',color:'#991b1b'}}>Queste spedizioni non si annullano in automatico: richiedi l'annullo all'assistenza (WhatsApp) usando numero e tracking, poi premi "Segna annullato".</span>
+            {contrattiCoda.length > 0 && (
+              <div style={{marginTop:'8px'}}>
+                <span style={{fontSize:'11px',fontWeight:700,color:'#991b1b',marginRight:'8px'}}>⬇ Scarica CSV per corriere:</span>
+                <span style={{display:'inline-flex',flexWrap:'wrap',gap:'6px',verticalAlign:'middle'}}>
+                  {contrattiCoda.map(([nome, n]) => (
+                    <button key={nome} onClick={()=>scaricaCsvContratto(nome)}
+                      style={{padding:'4px 10px',background:'#fff',color:'#b91c1c',border:'1px solid #fca5a5',borderRadius:'6px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}
+                      title={`Scarica il CSV di tutti gli annulli da richiedere per ${nome}`}>
+                      {nome} ({n})
+                    </button>
+                  ))}
+                </span>
+              </div>
+            )}
           </div>
           {!codaOwnerVis.length ? (
             <div style={{padding:'20px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessun annullo da richiedere con i filtri attivi.</div>
