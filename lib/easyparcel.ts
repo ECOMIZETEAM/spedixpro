@@ -182,6 +182,7 @@ export async function easyparcelQuotation(apikey: string, dati: {
   contenuto?: string
   contrassegno?: number
   assicurazione?: number
+  cosaSpedire?: 'M' | 'P'   // forza pacco/pallet; default: 'M' con auto-retry 'P' solo su errore -98
 }): Promise<any[]> {
   const estero = (dati.destinatario.nazione || 'IT').toUpperCase() !== 'IT'
   const accessori: any = {}
@@ -210,6 +211,15 @@ export async function easyparcelQuotation(apikey: string, dati: {
     colli, mittente, destinatario,
   })
 
+  // Forzatura esplicita del tipo (la creazione riprova come 'P' quando il contratto scelto non è tra le
+  // offerte 'pacco'): DVA accetta un collo pesante come pacco (es. 100 kg) e torna SOLO i corrieri che
+  // fanno pacchi pesanti (BRT), OK e senza errore -98 → il retry automatico non scatta e l'offerta
+  // PALLET del contratto (Poste V, SDA…) resta invisibile. Verificato sul campo: 'M' → solo BRT;
+  // 'P' → PDBX(Poste)/BRT/SDA. Quindi qui si può chiedere direttamente il pallet.
+  if (dati.cosaSpedire) {
+    const d = await chiama(apikey, 'quotation', richiesta(dati.cosaSpedire))
+    return Array.isArray(d.quotation) ? d.quotation : []
+  }
   try {
     const d = await chiama(apikey, 'quotation', richiesta('M'))
     return Array.isArray(d.quotation) ? d.quotation : []

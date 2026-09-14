@@ -1195,7 +1195,7 @@ export async function POST(req: NextRequest) {
         : { cap: body.shipTo.postalCode, localita: body.shipTo.city, provincia: body.shipTo.state }
       // ── 1) PREVENTIVO: serve solo a ottenere il codice offerta, non a fare il prezzo
       //    (quello resta il nostro listino, come per ogni altro contratto). ──
-      const offerte = await easyparcelQuotation(apikey, {
+      const quoteArgs = {
         colli: packages.map((p: any) => ({
           peso: parseFloat(p?.weight) || 1,
           larghezza: parseFloat(p?.width) || 10,
@@ -1207,13 +1207,23 @@ export async function POST(req: NextRequest) {
         contenuto: body.contenuto,
         contrassegno: Number(body.codValue || 0),
         assicurazione: Number(body.insuranceValue || 0),
-      })
+      }
+      const offerte = await easyparcelQuotation(apikey, quoteArgs)
       // Sulla stessa chiave rispondono TUTTI i vettori agganciati (verificato: 19 offerte in una
       // sola risposta). Si prende quello del contratto venduto, mai il primo della lista: sarebbe
       // come stampare un corriere diverso da quello che il cliente ha scelto e pagato.
       // Anche il SERVIZIO, non solo il vettore: lo stesso codice corriere torna piu' volte con
       // livelli di servizio e prezzi diversi (vedi lib/easyparcel.ts).
-      const offerta = trovaOffertaVettore(offerte, vettore, String(cred?.consegna || ''))
+      const servizio = String(cred?.consegna || '')
+      let offerta = trovaOffertaVettore(offerte, vettore, servizio)
+      if (!offerta) {
+        // Il contratto scelto può mancare dalle offerte 'pacco' se per DVA questa merce è un PALLET
+        // (es. 100 kg su un collo): la richiesta 'M' torna solo i corrieri pacchi-pesanti (BRT) e OK,
+        // senza l'errore -98 che fa scattare il retry automatico → l'offerta pallet del contratto
+        // (Poste V ecc.) resta invisibile. Riprovo forzando il pallet prima di arrendermi.
+        const offertePallet = await easyparcelQuotation(apikey, { ...quoteArgs, cosaSpedire: 'P' })
+        offerta = trovaOffertaVettore(offertePallet, vettore, servizio)
+      }
       if (!offerta) {
         await stornaPrenotazione()
         return NextResponse.json({ error: 'Nessuna tariffa disponibile per questa destinazione con il contratto scelto: prova un altro contratto.' }, { status: 400 })

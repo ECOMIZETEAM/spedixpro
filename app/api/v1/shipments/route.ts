@@ -345,13 +345,21 @@ export async function POST(req: NextRequest) {
     if (cellM.length < 6) return errore('Telefono mittente obbligatorio per questo contratto (solo cifre, minimo 6)')
     if (cellD.length < 6) return errore('Telefono destinatario obbligatorio per questo contratto (solo cifre, minimo 6)')
     try {
-      const offerte = await easyparcelQuotation(apikey, {
+      const quoteArgs = {
         colli: packages.map((p: any) => ({ peso: parseFloat(p?.weight) || 1, larghezza: parseFloat(p?.width) || 10, profondita: parseFloat(p?.length) || 10, altezza: parseFloat(p?.height) || 10 })),
         mittente: { cap: body.shipFrom.postalCode, localita: body.shipFrom.city, provincia: body.shipFrom.state, nazione: 'IT' },
         destinatario: { cap: body.shipTo.postalCode, localita: body.shipTo.city, provincia: body.shipTo.state, nazione: (body.shipTo.country || 'IT').toUpperCase() },
         contenuto: body.contenuto, contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
-      })
-      const offerta = trovaOffertaVettore(offerte, vettore, String(cred?.consegna || ''))
+      }
+      const offerte = await easyparcelQuotation(apikey, quoteArgs)
+      const servizio = String(cred?.consegna || '')
+      let offerta = trovaOffertaVettore(offerte, vettore, servizio)
+      if (!offerta) {
+        // Merce pesante per collo = PALLET per DVA: 'M' torna solo i corrieri pacchi-pesanti senza
+        // errore -98, quindi l'offerta pallet del contratto scelto sta solo sotto 'P'. Riprovo pallet.
+        const offertePallet = await easyparcelQuotation(apikey, { ...quoteArgs, cosaSpedire: 'P' })
+        offerta = trovaOffertaVettore(offertePallet, vettore, servizio)
+      }
       if (!offerta) return errore('Nessuna tariffa disponibile per questa destinazione con il contratto scelto')
       const opz = offerta.serviziopzionali || {}
       const codReq = Number(body.codValue || 0) > 0, assReq = Number(body.insuranceValue || 0) > 0
