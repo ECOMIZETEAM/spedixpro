@@ -12,6 +12,11 @@ export const maxDuration = 120
 // cronologia + avanza lo stato SOLO-AVANTI (mai declassare, terminali intoccabili, reso appiccicoso).
 // NON tocca giacenza_data: un backfill di una giacenza vecchia datandola "ora" falserebbe l'addebito
 // a giornate — le giacenze restano al flusso normale del webhook/cron.
+// E per lo stesso motivo NON marca 'in_giacenza': senza giacenza_data sarebbe una "mezza giacenza"
+// (stato in giacenza ma FUORI dalla lista, che filtra giacenza_data) → il cliente vedeva il pallino
+// e poi la lista vuota. La giacenza VERA la registra `bonifica-poste` (giacenza_data + addebito),
+// che pesca proprio le LDV Poste ancora senza cronologia. Qui, se il picco è la giacenza, si lascia
+// lo stato com'è e ci pensa quel cron.
 // body: { righe: [{ spedizione_id, ldv, tracking: [...] }] }  (tracking = array `tracking` del full-tracking)
 export async function POST(req: NextRequest) {
   const admin = createAdminSupabase()
@@ -37,7 +42,8 @@ export async function POST(req: NextRequest) {
     cronologie++
     let avanzato: string | null = null
     for (const e of eventi) if (e.stato && prioritaStato(e.stato) > prioritaStato(avanzato)) avanzato = e.stato
-    if (avanzato && (sp as any).stato !== 'consegnata' && (sp as any).stato !== 'annullata'
+    if (avanzato && avanzato !== 'in_giacenza'   // giacenza: la registra bonifica-poste con giacenza_data (vedi testa)
+        && (sp as any).stato !== 'consegnata' && (sp as any).stato !== 'annullata'
         && prioritaStato(avanzato) > prioritaStato((sp as any).stato)
         && !((sp as any).stato === 'reso_mittente' && avanzato === 'consegnata')) {
       await admin.from('spedizioni').update({ stato: avanzato }).eq('id', sid)
