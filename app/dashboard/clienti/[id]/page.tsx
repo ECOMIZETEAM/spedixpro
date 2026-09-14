@@ -45,8 +45,29 @@ export default function ClienteProfiloPage() {
   const [errore, setErrore] = useState<string | null>(null)
   const [successo, setSuccesso] = useState<string | null>(null)
 
+  // Nota PRIVATA del master su questo cliente (mai visibile al cliente): vive in note_clienti.
+  const [nota, setNota] = useState('')
+  const [notaSalvata, setNotaSalvata] = useState('')
+  const [salvandoNota, setSalvandoNota] = useState(false)
+  const [notaMsg, setNotaMsg] = useState('')
+
   function caricaCliente() {
     fetch(`/api/clienti/${id}`).then(r => r.json()).then(d => { setCliente(d); setLoading(false) })
+  }
+  function caricaNota() {
+    fetch(`/api/clienti/${id}/nota`).then(r => r.json()).then(d => {
+      if (d && !d.error) { setNota(d.testo || ''); setNotaSalvata(d.testo || '') }
+    }).catch(() => {})
+  }
+  async function salvaNota() {
+    setSalvandoNota(true); setNotaMsg('')
+    try {
+      const res = await fetch(`/api/clienti/${id}/nota`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ testo: nota }) })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok || d?.error) setNotaMsg(d?.error || 'Errore nel salvataggio')
+      else { setNotaSalvata(nota); setNotaMsg('✓ Nota salvata'); setTimeout(() => setNotaMsg(''), 2500) }
+    } catch { setNotaMsg('Errore di rete') }
+    finally { setSalvandoNota(false) }
   }
   // TUTTO lo storico, non le ultime 100: la pagina si sposta sul SERVER (una pagina alla volta),
   // cosi' anche i clienti con migliaia di movimenti sono navigabili per intero e la ricerca
@@ -79,6 +100,7 @@ export default function ClienteProfiloPage() {
 
   useEffect(() => {
     caricaCliente()
+    caricaNota()
     caricaMovimenti()
     // Solo le ULTIME 10, chieste al server (page=1&perPage=10): senza ?page la rotta entra nel ramo
     // legacy che scarica TUTTO lo storico del cliente e gira l'intera pipeline di arricchimento
@@ -181,6 +203,26 @@ export default function ClienteProfiloPage() {
               {cliente.telefono&&<div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>TELEFONO</div><div style={{color:'#1a1a1a'}}>{cliente.telefono}</div></div>}
               <div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>LISTINO PREZZI</div><div style={{color:cliente.listino_cliente_id?'#f97316':'#bbb',fontWeight:'600'}}>{cliente.listini_clienti?.nome || (cliente.listino_cliente_id?'Assegnato':'— nessun listino —')}</div></div>
               <div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>TIPO CONTRATTO</div><div style={{color:'#1a1a1a'}}>{cliente.tipo_contratto?.replace(/_/g,' ')||'—'}</div></div>
+            </div>
+          </div>
+
+          {/* NOTE PRIVATE del master su questo cliente: mai visibili al cliente. */}
+          <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
+            <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'8px'}}>
+              <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>📝 Note</span>
+              <span style={{fontSize:'11px',fontWeight:400,color:'#9ca3af'}}>private · visibili solo a te, non al cliente</span>
+            </div>
+            <div style={{padding:'16px'}}>
+              <textarea value={nota} onChange={e=>setNota(e.target.value)} rows={4}
+                placeholder="Annota qui qualcosa su questo cliente (accordi, promemoria, avvisi interni)…"
+                style={{width:'100%',padding:'10px 12px',border:'1px solid #e0e0e0',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box',resize:'vertical' as const,fontFamily:'inherit',lineHeight:1.5}}/>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',gap:'10px',marginTop:'10px'}}>
+                {notaMsg && <span style={{fontSize:'12px',fontWeight:600,color:notaMsg.startsWith('✓')?'#16a34a':'#dc2626'}}>{notaMsg}</span>}
+                <button onClick={salvaNota} disabled={salvandoNota || nota===notaSalvata}
+                  style={{padding:'8px 18px',background:(salvandoNota||nota===notaSalvata)?'#f2f2f2':'#f97316',color:(salvandoNota||nota===notaSalvata)?'#999':'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:700,cursor:(salvandoNota||nota===notaSalvata)?'default':'pointer'}}>
+                  {salvandoNota?'Salvataggio…':'Salva nota'}
+                </button>
+              </div>
             </div>
           </div>
 
