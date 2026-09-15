@@ -30,26 +30,19 @@ export async function sincronizzaOrdiniWoo(db: any, integr: any, range?: { dal?:
   const visti = new Set<string>()
   const aggiungi = (batch: any[]) => { for (const o of batch) { const id = String(o.id); if (!visti.has(id)) { visti.add(id); ordini.push(o) } } }
 
-  // 1) La FINESTRA scelta (per data di creazione).
+  // SOLO la FINESTRA scelta (per data di creazione): "oggi" chiede a Woo gli ordini di oggi, una
+  // settimana quelli della settimana. NIENTE giro aggiuntivo "tutti i da spedire a prescindere dalla
+  // data": c'era, e "sono pochi" non era vero — un negozio che non chiude mai gli ordini su Woo se ne
+  // porta dietro centinaia (Deinature.it: 467, quasi tutti 2024-2025, 5 pagine da ~1,8 MB) e li
+  // riscaricava a OGNI sync, manuale e cron. Il negozio andava in timeout (15/09/2026) e con lui
+  // saltava anche la chiusura dei completed. Gli ordini nuovi li prende comunque il cron a rotazione
+  // (finestra 7 giorni, sync-cron).
   for (let page = 1; page <= 50; page++) {
     const batch = await wooGet(url, ck, cs, `/orders?status=${stati}&after=${encodeURIComponent(daISO)}&before=${encodeURIComponent(aISO)}&per_page=100&page=${page}&orderby=date&order=desc`)
     if (!Array.isArray(batch) || !batch.length) break
     aggiungi(batch)
     if (batch.length < 100) break
   }
-
-  // 2) TUTTI gli ordini ANCORA DA SPEDIRE (processing/on-hold) a PRESCINDERE dalla data: un ordine
-  //    pagato ma non ancora evaso puo' essere piu' VECCHIO della finestra e va comunque importato —
-  //    era il "non me li importa tutti" (stessa cosa gia' risolta per eBay). Sono pochi ed
-  //    esattamente quelli da spedire. Best-effort + DEDUP: se fallisce, l'import della finestra resta.
-  try {
-    for (let page = 1; page <= 50; page++) {
-      const batch = await wooGet(url, ck, cs, `/orders?status=${stati}&per_page=100&page=${page}&orderby=date&order=desc`)
-      if (!Array.isArray(batch) || !batch.length) break
-      aggiungi(batch)
-      if (batch.length < 100) break
-    }
-  } catch (e: any) { console.error('[WOO SYNC] fetch ordini da evadere (best-effort):', e?.message) }
 
   let importati = 0
   for (const o of ordini) {
