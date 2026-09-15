@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   const admin = createAdminSupabase()
 
   const { data: ordini } = await admin.from('ordini_ecommerce')
-    .select('id,spedizione_id,fulfillment_stato,fulfillment_tentativi')
+    .select('id,spedizione_id,fulfillment_stato,fulfillment_tentativi,shop')
     .not('spedizione_id', 'is', null)
     // Tutto tranne i gia' evasi E tranne gli ANNULLATI: 'annullato' non e' 'ok', quindi rientrava
     // qui dentro e il cron rievadeva una spedizione appena annullata — seconda email al compratore
@@ -63,10 +63,18 @@ export async function GET(req: NextRequest) {
   // buon fine. Al raggiungimento del cap l'ordine esce dai retry (resta 'errore', ricreabile a mano).
   const prontiCand = candidati.filter((o: any) => prontiSet.has(o.spedizione_id))
   let esauriti = 0
+  // Store che in QUESTO giro hanno avuto almeno un ordine 'ok': la scrittura sullo store e' passata,
+  // cioe' la chiave/il negozio ora funziona. Serve sotto per riesumare il pregresso al tetto.
+  const shopsSani = new Set<string>()
   if (prontiCand.length) {
     const { data: dopo } = await admin.from('ordini_ecommerce')
       .select('id,fulfillment_stato').in('id', prontiCand.map((o: any) => o.id))
     const statoOra = new Map((dopo || []).map((o: any) => [o.id, o.fulfillment_stato]))
+    const shopById = new Map(prontiCand.map((o: any) => [o.id, o.shop]))
+    for (const [id, st] of statoOra) {
+      const sh = shopById.get(id)
+      if (st === 'ok' && sh) shopsSani.add(String(sh))
+    }
     for (const o of prontiCand) {
       const st = String(statoOra.get(o.id) || '')
       if (TERMINALI.includes(st)) continue   // evaso o chiuso in questo giro: non incremento
@@ -81,5 +89,28 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, candidate: spedIds.length, esiti: esiti.length, evase_ok: ok, esauriti })
+  // AUTO-RECUPERO DEL PREGRESSO QUANDO LO STORE TORNA SANO.
+  // Il fallimento tipico (chiave webservice PrestaShop senza permesso PUT, o store giu' per giorni) e'
+  // PER-STORE, non per-ordine: quando il merchant sistema, l'intero negozio riparte insieme. Ma gli
+  // ordini che nel frattempo avevano toccato il tetto di tentativi restavano fuori dai retry PER SEMPRE
+  // (.lt(tentativi, MAX)) e il loro tracking non tornava mai al negozio nemmeno dopo il fix — si
+  // sbloccavano solo rifacendo la spedizione a mano. Qui: se in questo giro un ordine di uno store e'
+  // andato a buon fine ('ok' = lo store ha ACCETTATO la scrittura ⇒ la chiave ora funziona), rimetto in
+  // pista i suoi ordini ancora 'errore' e al tetto, azzerando i tentativi; il giro dopo rientrano tra i
+  // candidati e vengono ritentati. Uno store ancora rotto non produce nessun 'ok', quindi non entra qui
+  // e il cap continua a proteggerlo dagli sprechi. Il segnale e' un successo REALE appena visto, non una
+  // stima: niente ripescaggi a vuoto sui negozi davvero morti.
+  let recuperati = 0
+  if (shopsSani.size) {
+    const { data: capRes } = await admin.from('ordini_ecommerce')
+      .update({ fulfillment_tentativi: 0 })
+      .eq('fulfillment_stato', 'errore')
+      .gte('fulfillment_tentativi', MAX_TENTATIVI)
+      .gte('created_at', new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString())
+      .in('shop', Array.from(shopsSani))
+      .select('id')
+    recuperati = (capRes || []).length
+  }
+
+  return NextResponse.json({ ok: true, candidate: spedIds.length, esiti: esiti.length, evase_ok: ok, esauriti, recuperati })
 }
