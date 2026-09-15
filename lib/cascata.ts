@@ -163,24 +163,36 @@ export async function costruisciCatena(
   }
 
   // ── RETE DI SICUREZZA ANTI VENDITA SOTTO COSTO ──
-  // Ogni livello COMPRA dal livello sotto di lui (piu' vicino al detentore, che paga il costo reale
-  // del provider): il suo prezzo NON puo' essere INFERIORE a quello di chi gli sta sotto, altrimenti
-  // rivende in perdita. Succedeva quando il peso fatturato usato per la rivendita risultava piu' basso
-  // di quello con cui il provider fatturava davvero (fattore-volume di catena piu' generoso, o
-  // agevolazione peso-reale su una scatola oltre la sagoma): il sub-master pagava la fascia "fino a 10"
-  // mentre il costo reale era della fascia "fino a 20". Misurato: ~2.660 EUR persi su 1.064 spedizioni
-  // dei canali rivenditore (lug-set 2026). Qui si livella dove passano TUTTE le porte (verifica credito
-  // + addebito): il prezzo di ogni livello e' ALMENO quello del livello sotto. catena e' ordinata dal
-  // creatore (0) al detentore (ultimo). NON tocca i clienti (il prezzo cliente e' calcolato a parte):
-  // corregge solo i costi INTERNI tra master, che non devono mai stare sotto il costo reale.
-  for (let i = catena.length - 2; i >= 0; i--) {
-    const sotto = catena[i + 1].prezzo
-    if (catena[i].prezzo < sotto - 0.005) {
-      console.warn('[CATENA][SOTTO-COSTO] livellato al costo del livello sotto', {
-        contratto: params.corriereNome, master: catena[i].nome,
-        prezzo_calcolato: catena[i].prezzo, alzato_a: sotto, delta: Math.round((sotto - catena[i].prezzo) * 100) / 100,
-      })
-      catena[i].prezzo = sotto
+  // Il vincolo VERO è UNO: nessun livello paga meno del COSTO REALE del provider — `costoSpedizione`
+  // (= quotation/shipmentCost per i rivenduti SpediamoPro/DVA/Spedisci; il listino del master per i
+  // diretti GLS/BRT). Serviva perché il PESO usato per la rivendita a volte usciva più basso di quello
+  // con cui il provider fatturava davvero (fattore-volume di catena più generoso, o agevolazione
+  // peso-reale su scatola fuori sagoma) → il sub-master pagava la fascia "fino a 10" col costo reale
+  // "fino a 20" (~2.660 EUR persi su 1.064 sped lug-set 2026).
+  //
+  // ⚠️ Prima si livellava al LISTINO del livello SOTTO (più a monte). SBAGLIATO: quel listino può stare
+  // SOPRA il costo reale e allora gonfia i sotto-master. Caso reale (15/09): BRT Express, Velox floorato
+  // al listino di MULTIEXPRESS 270,52 mentre SpediamoPro costava davvero 141,59 → Velox −106,92 di
+  // troppo, pur avendo il suo listino a 163,60 (già sopra il costo vero). Il listino di ogni livello è
+  // la SUA verità; l'unico confronto sensato è col costo reale del provider, che ce l'ha il detentore.
+  // Quindi si ancora a `costoSpedizione`, non ai listini intermedi. NON tocca i clienti (calcolati a parte).
+  const costoReale = Number(params.costoSpedizione || 0)
+  if (costoReale > 0) {
+    for (let i = 0; i < catena.length; i++) {
+      if (catena[i].prezzo < costoReale - 0.005) {
+        console.warn('[CATENA][SOTTO-COSTO] livellato al COSTO REALE del provider', {
+          contratto: params.corriereNome, master: catena[i].nome,
+          prezzo_calcolato: catena[i].prezzo, costo_reale: costoReale, delta: Math.round((costoReale - catena[i].prezzo) * 100) / 100,
+        })
+        catena[i].prezzo = costoReale
+      }
+    }
+  } else {
+    // Costo reale non disponibile (es. verifica credito PRIMA della creazione dal provider, che non
+    // conosce ancora shipmentCost): ripiego sul vecchio livellamento monotono come rete minima, senza
+    // muovere soldi (l'addebito vero passa sempre il costoSpedizione e usa il ramo sopra).
+    for (let i = catena.length - 2; i >= 0; i--) {
+      if (catena[i].prezzo < catena[i + 1].prezzo - 0.005) catena[i].prezzo = catena[i + 1].prezzo
     }
   }
 
