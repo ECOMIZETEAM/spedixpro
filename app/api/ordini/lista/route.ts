@@ -37,6 +37,16 @@ export async function GET(req: NextRequest) {
     .eq('piattaforma', piattaforma)
     .in('integrazione_id', integrIds)
     .order('created_at', { ascending: false }))
+  // DATA SPEDIZIONE = quando la spedizione l'abbiamo creata NOI. E' il secondo filtro della pagina
+  // ("quando e' stato spedito"): uguale per tutti i canali e senza chiedere niente ai negozi. Lettura a
+  // parte perche' spedizione_id non ha una FK (niente embed); la sessione del cliente, per RLS, vede
+  // solo le sue spedizioni. A blocchi di 200 id per non allungare troppo la URL.
+  const spedIds = Array.from(new Set((ordini as any[]).map((o: any) => o.spedizione_id).filter(Boolean)))
+  const dataSpedizione = new Map<string, string>()
+  for (let i = 0; i < spedIds.length; i += 200) {
+    const { data } = await supabase.from('spedizioni').select('id,created_at').in('id', spedIds.slice(i, i + 200))
+    for (const s of (data || [])) dataSpedizione.set(String(s.id), s.created_at)
+  }
   const rows = (ordini as any[]).map(({ d1, d2, d3, d4, d5, d6, d7, p1, p2, p3, p4, p5, p6, n1, ...o }: any) => {
     let t: any = d1 || d2 || d3 || d4 || d5 || d6 || d7 || null   // d7 = Shopify createdAt (camelCase)
     // epoch (TikTok/Temu): secondi o millisecondi -> ISO
@@ -52,7 +62,7 @@ export async function GET(req: NextRequest) {
     const cod = isCod ? (Number(o.totale) || 0) : 0
     // La nota dell'ordine si restituisce a parte: `raw` non esce mai da qui (pesante), ma questa
     // serve a chi spedisce — sono le istruzioni per il corriere.
-    return { ...o, data_ordine: t || o.created_at, cod, nota: n1 || null, metodo_pagamento: p2 || p1 || p4 || p3 || null }
+    return { ...o, data_ordine: t || o.created_at, data_spedizione: o.spedizione_id ? (dataSpedizione.get(String(o.spedizione_id)) || null) : null, cod, nota: n1 || null, metodo_pagamento: p2 || p1 || p4 || p3 || null }
   })
   return NextResponse.json(rows)
 }

@@ -50,10 +50,8 @@ export default function OrdiniPage() {
   const [loading, setLoading] = useState(true)
   const [sincronizzando, setSincronizzando] = useState(false)
   const [msg, setMsg] = useState('')
-  // eBay: asse data (vendita/evasione) + "prepara i già-spediti come da spedire". La scelta si RICORDA
-  // (localStorage), così il venditore non deve rimetterla a ogni sync. Init SSR-safe (niente window sul server).
-  const [perData, setPerData] = useState<'vendita' | 'evasione'>(() =>
-    (typeof window !== 'undefined' && localStorage.getItem('ebay_perData') === 'evasione') ? 'evasione' : 'vendita')
+  // eBay: "prepara i già-spediti come da spedire". La scelta si RICORDA (localStorage), così il
+  // venditore non deve rimetterla a ogni sync. Init SSR-safe (niente window sul server).
   const [giaSpediti, setGiaSpediti] = useState(() =>
     typeof window !== 'undefined' && localStorage.getItem('ebay_giaSpediti') === '1')
 
@@ -68,6 +66,11 @@ export default function OrdiniPage() {
   const [fArch, setFArch] = useFiltriPersistenti('ordini-cliente:arch', false)
   const [fDa, setFDa] = useFiltriPersistenti('ordini-cliente:da', '')
   const [fA, setFA] = useFiltriPersistenti('ordini-cliente:a', '')
+  // DUE DATE, due compiti. Data ordine (sopra): decide cosa si importa con Sincronizza e cosa si vede.
+  // Data spedizione: quando la spedizione l'abbiamo creata NOI — solo filtro di lista, nessuna chiamata
+  // ai negozi. Vuota = non filtra (gli ordini da spedire una data di spedizione non ce l'hanno ancora).
+  const [fSpDa, setFSpDa] = useFiltriPersistenti('ordini-cliente:spDa', '')
+  const [fSpA, setFSpA] = useFiltriPersistenti('ordini-cliente:spA', '')
 
   const [search, setSearch] = useFiltriPersistenti('ordini-cliente:cerca', '')
   const [perPage, setPerPage] = useFiltriPersistenti('ordini-cliente:perPage', 10)
@@ -160,8 +163,8 @@ export default function OrdiniPage() {
           integrazione_id: id,
           dal: fDa || trentaGiorniFa,
           al: fA || oggi,
-          // Solo eBay: asse data + prepara i già-spediti (vedi lib/ebaySync).
-          ...(piattaforma === 'ebay' ? { perData, importaGiaSpediti: giaSpediti } : {}),
+          // Solo eBay: prepara i già-spediti (vedi lib/ebaySync).
+          ...(piattaforma === 'ebay' ? { importaGiaSpediti: giaSpediti } : {}),
         })
       })
       const d = await res.json()
@@ -233,6 +236,13 @@ export default function OrdiniPage() {
         if (fDa && ts < new Date(fDa).getTime()) return false
         if (fA && ts > new Date(fA).getTime()+86400000) return false
       }
+      if (fSpDa || fSpA) {
+        // Senza una spedizione nostra non c'e' data di spedizione: con questo filtro attivo l'ordine esce.
+        if (!o.data_spedizione) return false
+        const ts = new Date(o.data_spedizione).getTime()
+        if (fSpDa && ts < new Date(fSpDa).getTime()) return false
+        if (fSpA && ts > new Date(fSpA).getTime()+86400000) return false
+      }
       if (search) {
         const blob = (o.numero_ordine+' '+(d.nome||'')+' '+(d.citta||'')+' '+(d.email||'')).toLowerCase()
         if (!blob.includes(search.toLowerCase())) return false
@@ -256,13 +266,13 @@ export default function OrdiniPage() {
     return arr
   // fStoreValido, non fStore: l'elenco negozi arriva DOPO i filtri, quindi la validita' dell'id puo'
   // cambiare senza che fStore si muova. Con la dipendenza sbagliata il filtro resterebbe indietro.
-  }, [ordini, fStoreValido, fStatoPag, fStatoEv, fPaese, fNum, fSku, fTags, fArch, fDa, fA, search, sort, soloDoppi, gruppi])
+  }, [ordini, fStoreValido, fStatoPag, fStatoEv, fPaese, fNum, fSku, fTags, fArch, fDa, fA, fSpDa, fSpA, search, sort, soloDoppi, gruppi])
 
   const totale = filtrati.length
   const nPagine = Math.max(1, Math.ceil(totale/perPage))
   const start = (page-1)*perPage
   const pagina = filtrati.slice(start, start+perPage)
-  useEffect(()=>{ setPage(1) }, [fStoreValido,fStatoPag,fStatoEv,fPaese,fNum,fSku,fTags,fArch,fDa,fA,search,perPage])
+  useEffect(()=>{ setPage(1) }, [fStoreValido,fStatoPag,fStatoEv,fPaese,fNum,fSku,fTags,fArch,fDa,fA,fSpDa,fSpA,search,perPage])
 
   const idsPagina = pagina.map(o=>o.id)
   const tuttiSel = idsPagina.length>0 && idsPagina.every(id=>sel[id])
@@ -514,14 +524,21 @@ export default function OrdiniPage() {
       <div style={{...card, marginBottom:'20px'}}>
         <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'16px'}}>▾ Filtri</div>
         <div style={{display:'flex',gap:'14px',flexWrap:'wrap',marginBottom:'14px'}}>
-          <DateRangePicker dal={fDa} al={fA} onChange={(d,a)=>{setFDa(d);setFA(a)}} />
+          <div><label style={lbl}>Data ordine</label>
+            <DateRangePicker dal={fDa} al={fA} onChange={(d,a)=>{setFDa(d);setFA(a)}} />
+          </div>
+          <div><label style={lbl}>Data spedizione</label>
+            {/* Il selettore, montato senza date, si imposta da solo su OGGI: sempre montato, questo filtro
+                partirebbe attivo e nasconderebbe tutti gli ordini da spedire. Finche' non lo si sceglie
+                resta il bottone "Qualsiasi"; la × lo toglie. */}
+            {(fSpDa || fSpA)
+              ? <span style={{display:'inline-flex',alignItems:'center',gap:'6px'}}>
+                  <DateRangePicker dal={fSpDa} al={fSpA} onChange={(d,a)=>{setFSpDa(d);setFSpA(a)}} />
+                  <button type="button" title="Togli il filtro per data di spedizione" onClick={()=>{setFSpDa('');setFSpA('')}} style={{border:'1px solid #d1d5db',background:'#fff',borderRadius:'6px',padding:'6px 10px',cursor:'pointer',color:'#6b7280',fontSize:'13px'}}>×</button>
+                </span>
+              : <button type="button" onClick={()=>{const n=new Date(); const g=n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0'); setFSpDa(g); setFSpA(g)}} style={{padding:'7px 12px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#6b7280',background:'#fff',cursor:'pointer',whiteSpace:'nowrap'}}>📅 Qualsiasi ▾</button>}
+          </div>
           {piattaforma === 'ebay' && (<>
-            <div style={field}><label style={lbl}>Filtra per data</label>
-              <select value={perData} onChange={e=>{const v=e.target.value as 'vendita'|'evasione'; setPerData(v); try{localStorage.setItem('ebay_perData',v)}catch{}}} style={inp}>
-                <option value="vendita">Data ordine (vendita)</option>
-                <option value="evasione">Data spedizione (evasione)</option>
-              </select>
-            </div>
             <label title="Se i tuoi ordini eBay risultano già 'spediti' perché li segni tu appena arrivano, attivalo: entrano tra i «da spedire» e puoi creare l'etichetta." style={{display:'inline-flex',alignItems:'center',gap:'7px',fontSize:'12.5px',color:'#374151',cursor:'pointer',alignSelf:'flex-end',paddingBottom:'8px',maxWidth:'280px'}}>
               <input type="checkbox" checked={giaSpediti} onChange={e=>{const v=e.target.checked; setGiaSpediti(v); try{localStorage.setItem('ebay_giaSpediti', v?'1':'0')}catch{}}} />
               Prepara anche gli ordini già segnati <b>spediti</b> su eBay
@@ -666,6 +683,7 @@ export default function OrdiniPage() {
                           spediva scopriva di non aver incassato a consegna avvenuta. */}
                       {cod===0 && ['pending','unpaid','partially_paid','authorized'].includes(String(o.stato_pagamento||'')) && <span title={"Il negozio non indica il metodo di pagamento di quest'ordine, e risulta non pagato. Se e' in contrassegno l'importo NON viene applicato da solo: apri \u00ab Crea spedizione \u00bb su questa riga e scrivilo a mano, altrimenti il pacco parte come prepagato e non incassi niente alla consegna."} style={{marginLeft:'6px',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fffbeb',color:'#b45309',border:'1px solid #fde68a',cursor:'help'}}>contrassegno? da verificare</span>}</span> },
                     ...(getTags(o) ? [{ l:'Tags', v:<span style={{color:'#6b7280'}}>{getTags(o)}</span> }] : []),
+                    ...(o.data_spedizione ? [{ l:'Spedito il', v:<span style={{color:'#6b7280'}}>{fmtData(o.data_spedizione)}</span> }] : []),
                     ...(o.spedizione_id ? [{ l:'N. Spedizione', v:<span style={{color:'#6b7280'}}>{String(o.spedizione_id).slice(0,8)}</span> }] : []),
                   ]
                   return (

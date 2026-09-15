@@ -8,9 +8,9 @@ export async function sincronizzaOrdiniPrestashop(db: any, integr: any, range?: 
   const url = cred?.url, key = cred?.key
   if (!url || !key) throw new Error('Credenziali PrestaShop mancanti')
 
-  // STATI ORDINE del negozio PRIMA di tutto: servono sia a marcare gli evasi sia al catch-all dei NON
-  // evasi qui sotto. 'shipped'=1 → lo stato equivale a "spedito" (NON usare 'delivery': su negozi reali
-  // "Preparazione in corso" ha delivery=1 ma shipped=0). Serve anche per mostrare il NOME dello stato.
+  // STATI ORDINE del negozio PRIMA di tutto: servono a marcare gli evasi. 'shipped'=1 → lo stato
+  // equivale a "spedito" (NON usare 'delivery': su negozi reali "Preparazione in corso" ha delivery=1
+  // ma shipped=0). Serve anche per mostrare il NOME dello stato.
   const statoInfo = new Map<string, { nome: string; spedito: boolean }>()
   try {
     const st = await psGet(url, key, 'order_states?display=full')
@@ -40,20 +40,16 @@ export async function sincronizzaOrdiniPrestashop(db: any, integr: any, range?: 
   const visti = new Set<string>()
   const aggiungi = (arr: any[]) => { for (const o of arr) { const id = String(o.id); if (!visti.has(id)) { visti.add(id); ordini.push(o) } } }
 
-  // 1) FINESTRA: ordini validi nell'intervallo scelto (default ultimi 30 giorni, come gli altri sync).
+  // SOLO la FINESTRA scelta (per data ordine, default ultimi 30 giorni): "oggi" chiede gli ordini di
+  // oggi, una settimana quelli della settimana. NIENTE catch-all "tutti i non spediti a prescindere
+  // dalla data": "la coda e' piccola" non era vero — i negozi che non chiudono gli ordini se ne portano
+  // dietro centinaia (15/09/2026: 3.542 righe "da spedire" oltre i 30 giorni sui negozi PrestaShop), e
+  // qui ogni ordine costa altre due chiamate (indirizzo + cliente). Su Woo lo stesso giro mandava il
+  // negozio in timeout. Chi cerca un ordine vecchio allarga il periodo; i nuovi li prende il cron.
   const oggi = new Date().toISOString().slice(0, 10)
   const dal = (range?.dal && /^\d{4}-\d{2}-\d{2}$/.test(range.dal)) ? range.dal : new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
   const al = (range?.al && /^\d{4}-\d{2}-\d{2}$/.test(range.al)) ? range.al : oggi
   aggiungi(await fetchPaginato(`filter[valid]=[1]&filter[date_add]=[${dal},${al}]&date=1&`))
-
-  // 2) CATCH-ALL: tutti gli ordini validi ANCORA DA SPEDIRE a prescindere dalla data (stati non
-  //    'shipped'). Un ordine pagato ma non evaso puo' essere piu' vecchio della finestra e va comunque
-  //    importato — come per eBay/Woo. La coda dei non evasi e' piccola, quindi il costo e' contenuto.
-  const nonSpediti = [...statoInfo.entries()].filter(([, v]) => !v.spedito).map(([id]) => id)
-  if (nonSpediti.length) {
-    try { aggiungi(await fetchPaginato(`filter[valid]=[1]&filter[current_state]=[${nonSpediti.join('|')}]&`)) }
-    catch (e: any) { console.error('[PRESTA SYNC] catch-all non evasi (best-effort):', e?.message) }
-  }
 
   // Ordini gia' spediti DA NOI (spedizione collegata o stato spedito): mai declassare a 'da_spedire'
   // per colpa di un negozio non ancora aggiornato.

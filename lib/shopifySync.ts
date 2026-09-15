@@ -14,12 +14,12 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
   // FINESTRA DATE: si importa SOLO l'intervallo scelto in pagina (oggi -> solo oggi; il mese -> il
   // mese). created_at di Shopify e' un timestamp: uso gli estremi ISO gia' pronti (margine orario).
   const { daISO, aISO } = rangeGiorniISO(range?.dal, range?.al)
-  // FILTRO SU updated_at, NON created_at: cosi' una ri-sincronizzazione RIPESCA e AGGIORNA gli ordini
-  // MODIFICATI dopo la creazione (destinatario aggiunto dopo, evasione cambiata, indirizzo corretto…),
-  // non solo quelli nuovi. Un ordine creato ieri ma cambiato oggi rientra nella finestra "oggi" e si
-  // aggiorna. La DATA mostrata in lista resta quella di creazione (createdAt): qui si decide solo COSA
-  // ripescare, non cosa visualizzare.
-  const filtroData = `updated_at:>=${daISO} updated_at:<=${aISO}`
+  // FILTRO SU created_at, come la lista e come gli altri canali: il periodo scelto e' la DATA ORDINE.
+  // Prima era updated_at, per ripescare gli ordini modificati dopo la creazione — ma cosi' "la
+  // settimana scorsa" perdeva gli ordini creati la settimana scorsa e toccati dopo (evasi, indirizzo
+  // corretto), e "oggi" importava ordini vecchi che la lista, filtrando per data ordine, non mostrava.
+  // Le modifiche successive le riprende il cron, che rilegge gli ultimi 30 giorni a ogni giro.
+  const filtroData = `created_at:>=${daISO} created_at:<=${aISO}`
 
   // Ordini via GraphQL (immagini inline), i piu' RECENTI prima, paginati fino a ~3000. Prendiamo sia
   // gli EVASI sia i NON evasi (status:open, senza filtro fulfillment): cosi' anche gli ordini gia'
@@ -34,7 +34,7 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
   for (let page = 0; page < 30; page++) {
     const data: any = await shopifyGraphQL(shop, token, `
       query($cursor: String){
-        orders(first: 100, after: $cursor, query: "status:open ${filtroData}", sortKey: UPDATED_AT, reverse: true){
+        orders(first: 100, after: $cursor, query: "status:open ${filtroData}", sortKey: CREATED_AT, reverse: true){
           edges { node {
             legacyResourceId name email phone note createdAt updatedAt paymentGatewayNames displayFinancialStatus displayFulfillmentStatus
             totalPriceSet { shopMoney { amount currencyCode } }
@@ -140,7 +140,7 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
     const { data: giaDaSpedire } = await db.from('ordini_ecommerce')
       .select('id,ordine_esterno_id')
       .eq('integrazione_id', integr.id).eq('stato', 'da_spedire')
-      .gte('raw->>updatedAt', daISO).lte('raw->>updatedAt', aISO)   // finestra su updated_at come il fetch: gli ordini NON toccati non si chiudono per sbaglio
+      .gte('raw->>createdAt', daISO).lte('raw->>createdAt', aISO)   // stessa finestra del fetch (data ordine): un ordine fuori finestra non e' "sparito", non l'abbiamo chiesto
     const daChiudere = (giaDaSpedire || [])
       .filter((r: any) => !vistiIds.has(String(r.ordine_esterno_id)))
       .map((r: any) => r.id)

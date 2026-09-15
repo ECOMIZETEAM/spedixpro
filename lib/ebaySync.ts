@@ -19,18 +19,18 @@ export function rangeGiorniISO(dal?: string | null, al?: string | null, defaultG
 // Sincronizza gli ordini eBay in ordini_ecommerce (spediti e non, qualunque pagamento, contrassegno
 // incluso) NELLA FINESTRA DATE RICHIESTA: si importa SOLO l'intervallo selezionato in pagina
 // (oggi -> solo oggi; ieri -> solo ieri; il mese -> il mese). Default: ultimi 30 giorni.
-export async function sincronizzaOrdiniEbay(db: any, integr: any, range?: { dal?: string | null; al?: string | null; perData?: 'vendita' | 'evasione'; importaGiaSpediti?: boolean }): Promise<{ letti: number; importati: number }> {
+export async function sincronizzaOrdiniEbay(db: any, integr: any, range?: { dal?: string | null; al?: string | null; importaGiaSpediti?: boolean }): Promise<{ letti: number; importati: number }> {
   const token = await getValidEbayToken(db, integr)
   const ordini: any[] = []
   const LIMIT = 200
   const { daISO, aISO } = rangeGiorniISO(range?.dal, range?.al)
-  // Nessun filtro di stato/pagamento (spediti E non, contrassegno incluso): SOLO la finestra data.
-  // ASSE DATA: 'vendita' = quando l'ordine è stato fatto (creationdate, default); 'evasione' = quando è
-  // stato segnato spedito/ultima modifica (lastmodifieddate). Alcuni venditori marcano "spedito" su eBay
-  // APPENA ricevono l'ordine (organizzazione interna) e lavorano per data di EVASIONE: filtrare per
-  // creationdate gli farebbe perdere un ordine venduto giorni prima ma lavorato oggi.
-  const campoData = range?.perData === 'evasione' ? 'lastmodifieddate' : 'creationdate'
-  const filtro = `${campoData}:[${daISO}..${aISO}]`
+  // Nessun filtro di stato/pagamento (spediti E non, contrassegno incluso): SOLO la finestra per DATA
+  // ORDINE, la stessa su cui filtra la lista. C'era un secondo asse, "evasione", che a eBay chiedeva
+  // lastmodifieddate: e' l'ULTIMA MODIFICA, che si muove anche per un messaggio o un rimborso, non la
+  // spedizione — e la lista filtrava comunque per data ordine, quindi un ordine importato "per
+  // evasione" poi spariva dalla lista. Quando e' stato spedito lo dice il filtro "Data spedizione" della
+  // pagina, sulle NOSTRE spedizioni, uguale per tutti i canali.
+  const filtro = `creationdate:[${daISO}..${aISO}]`
   let totApi = 0
   for (let offset = 0; offset < 10000; offset += LIMIT) {
     const data: any = await ebayGet(token, `/sell/fulfillment/v1/order?filter=${encodeURIComponent(filtro)}&limit=${LIMIT}&offset=${offset}`)
@@ -40,22 +40,11 @@ export async function sincronizzaOrdiniEbay(db: any, integr: any, range?: { dal?
     if (batch.length < LIMIT || (totApi && offset + LIMIT >= totApi)) break
   }
 
-  // Oltre alla finestra date: gli ordini ANCORA DA EVADERE, a prescindere dalla data. Un ordine
-  // pagato ma non spedito puo' essere piu' VECCHIO della finestra e va comunque importato — era il
-  // "non me li importa tutti" (21 ordini, solo 13 dentro i 30 giorni). Qui NON allarghiamo lo storico
-  // di TUTTI gli ordini (quello resta indesiderato): prendiamo solo i non evasi, che sono pochi ed
-  // esattamente quelli da spedire. Best-effort + DEDUP: se la query fallisce o l'ordine c'e' gia',
-  // l'import della finestra resta valido.
-  const visti = new Set(ordini.map((o: any) => String(o.orderId)))
-  try {
-    for (let offset = 0; offset < 2000; offset += LIMIT) {
-      const data: any = await ebayGet(token, `/sell/fulfillment/v1/order?filter=${encodeURIComponent('orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}')}&limit=${LIMIT}&offset=${offset}`)
-      const batch: any[] = data?.orders || []
-      for (const o of batch) { const id = String(o.orderId); if (!visti.has(id)) { visti.add(id); ordini.push(o) } }
-      const tot = Number(data?.total || 0)
-      if (batch.length < LIMIT || (tot && offset + LIMIT >= tot)) break
-    }
-  } catch (e: any) { console.error('[EBAY SYNC] fetch ordini da evadere (best-effort):', e?.message) }
+  // NIENTE giro "ordini ancora da evadere a prescindere dalla data". Era nato dal "non me li importa
+  // tutti" (21 ordini, solo 13 dentro i 30 giorni), ma riscaricava a ogni sync — manuale e cron — gli
+  // ordini vecchi mai chiusi sul marketplace: su Woo lo stesso giro mandava il negozio in timeout
+  // (15/09/2026). Il periodo scelto decide cosa si importa, su tutti i canali: chi cerca un ordine piu'
+  // vecchio allarga il periodo, i nuovi li prende il cron a rotazione.
 
   let importati = 0, errori = 0
   for (const o of ordini) {

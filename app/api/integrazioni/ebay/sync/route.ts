@@ -33,9 +33,8 @@ export async function POST(req: NextRequest) {
   try {
     const res = await sincronizzaOrdiniEbay(supabase, integr, {
       dal: body.dal, al: body.al,
-      // Asse data (vendita/evasione) e "prepara i già-spediti come da spedire": scelte del venditore,
-      // passate dalla pagina ordini. Default = comportamento storico (vendita, non tocca i già-spediti).
-      perData: body.perData === 'evasione' ? 'evasione' : 'vendita',
+      // "Prepara i già-spediti come da spedire": scelta del venditore, passata dalla pagina ordini.
+      // Default = non tocca i già-spediti.
       importaGiaSpediti: !!body.importaGiaSpediti,
     })
     return NextResponse.json({ ok: true, ...res })
