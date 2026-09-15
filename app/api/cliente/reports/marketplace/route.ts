@@ -39,13 +39,33 @@ export async function GET() {
     .order('created_at', { ascending: false })
     .order('id', { ascending: true }))
 
+  // Ordini "uniti" (accoppiati nel capofila): niente spedizione propria, ma vanno CONTATI e messi nel
+  // file col tracking del capofila (vedi la rotta download). Senza, il numero a video < record nel file.
+  const uniti = await fetchAll(() => supabase
+    .from('ordini_importati')
+    .select('id, raw, articoli, unito_in')
+    .eq('cliente_id', utente.cliente_id)
+    .eq('stato', 'unito')
+    .is('integrazione_id', null)
+    .not('unito_in', 'is', null)
+    .order('id', { ascending: true }))
+  const capoIds = Array.from(new Set((uniti || []).map((u: any) => u.unito_in).filter(Boolean)))
+  const spedDiCapo = new Map<string, any>()
+  if (capoIds.length) {
+    const capi = await fetchAll(() => supabase.from('ordini_importati')
+      .select('id, spedizioni(created_at, stato, cancellata_il)').in('id', capoIds))
+    for (const c of (capi || [])) if ((c as any).spedizioni) spedDiCapo.set((c as any).id, (c as any).spedizioni)
+  }
+  const unitiConSped = (uniti || []).map((u: any) => ({ ...u, spedizioni: spedDiCapo.get(u.unito_in) })).filter((u: any) => u.spedizioni)
+  const righeTutte = [...(righe || []), ...unitiConSped]
+
   const ANNULLATI = ['annullata', 'annullamento_pending', 'annullamento_manuale']
   // Raggruppo per piattaforma + data di spedizione. Conto ORDINI e RIGHE: Amazon evade per
   // ARTICOLO, quindi un ordine multi-prodotto vale piu' righe nel file. Mostrare solo gli ordini
   // faceva sembrare sbagliato il conteggio di Amazon (113 ordini -> 114 record).
   const mappa = new Map<string, { piattaforma: string; data: string; n: number; righe: number }>()
   const totali: Record<string, number> = { amazon: 0, shopify: 0, altro: 0 }
-  for (const r of (righe || [])) {
+  for (const r of righeTutte) {
     const sp: any = (r as any).spedizioni
     if (sp?.cancellata_il || ANNULLATI.includes(String(sp?.stato || ''))) continue
     const piatt = piattaformaDa((r as any).raw)

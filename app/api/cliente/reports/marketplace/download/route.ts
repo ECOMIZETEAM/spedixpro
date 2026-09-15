@@ -62,9 +62,36 @@ export async function GET(req: NextRequest) {
     .order('created_at', { ascending: false })
     .order('id', { ascending: true }))
 
+  // ORDINI "UNITI" (accoppiati nel capofila con "Unisci"): non hanno spedizione propria
+  // (spedizione_id null, stato 'unito'), ma vanno confermati al marketplace con il tracking del
+  // CAPOFILA — altrimenti restano "non spediti" su Amazon anche se il pacco è partito col capo, e il
+  // cliente prende metriche a rischio / reclami su ordini in realtà evasi. Il puntatore è `unito_in`
+  // (vedi /api/ordini/unisci). Uso i dati dell'ordine unito (order-id, articoli) + la spedizione del capo.
+  const uniti = await fetchAll(() => supabase
+    .from('ordini_importati')
+    .select('order_id, contenuto, colli, raw, articoli, unito_in')
+    .eq('cliente_id', utente.cliente_id)
+    .eq('stato', 'unito')
+    .is('integrazione_id', null)
+    .not('unito_in', 'is', null)
+    .order('id', { ascending: true }))
+  const capoIds = Array.from(new Set((uniti || []).map((u: any) => u.unito_in).filter(Boolean)))
+  const spedDiCapo = new Map<string, any>()
+  if (capoIds.length) {
+    const capi = await fetchAll(() => supabase
+      .from('ordini_importati')
+      .select('id, spedizioni(tracking_number, created_at, stato, cancellata_il, corrieri(nome_contratto))')
+      .in('id', capoIds))
+    for (const c of (capi || [])) if ((c as any).spedizioni) spedDiCapo.set((c as any).id, (c as any).spedizioni)
+  }
+  const unitiConSped = (uniti || [])
+    .map((u: any) => ({ ...u, spedizioni: spedDiCapo.get(u.unito_in) }))
+    .filter((u: any) => u.spedizioni)   // solo se il capofila ha davvero una spedizione
+  const righeTutte = [...(righe || []), ...unitiConSped]
+
   const ANNULLATI = ['annullata', 'annullamento_pending', 'annullamento_manuale']
   // Filtro per piattaforma (dal raw), data di spedizione e spedizione ancora valida
-  const filtrate = (righe || []).filter((r: any) => {
+  const filtrate = righeTutte.filter((r: any) => {
     if (piattaformaDa(r.raw) !== piatt) return false
     const sp = r.spedizioni || {}
     if (sp.cancellata_il || ANNULLATI.includes(String(sp.stato || ''))) return false
