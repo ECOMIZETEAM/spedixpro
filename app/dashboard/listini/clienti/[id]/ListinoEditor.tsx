@@ -754,7 +754,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
               style={{padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',flex:1}}>
               <option value="">Seleziona contratto da aggiungere...</option>
               {(corrieriDisponibili||[]).map(c=>(
-                <option key={c.id} value={c.id}>{c.nome_contratto}</option>
+                <option key={c.id} value={c.id}>{c.nome_contratto}{c.pausa ? (c.pausaMotivo==='catena' ? ' — ⏸ in pausa da un livello superiore' : ' — ⏸ in pausa') : ''}</option>
               ))}
             </select>
             <button onClick={confermaAggiungiContratto} disabled={aggiungendoSaving || !nuovoContrattoId}

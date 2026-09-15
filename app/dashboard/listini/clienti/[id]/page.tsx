@@ -52,8 +52,13 @@ export default async function ModificaListinoPage({
   const usabile = (c:any) => attivoById.get(c.id) !== false && !pausaCatena(c)
   corrieri = corrieri.map((c:any) => ({ ...c, pausa: !usabile(c), pausaMotivo: pausaCatena(c) ? 'catena' : (attivoById.get(c.id) === false ? 'propria' : null) }))
     .sort((a:any,b:any) => (a.pausa?1:0) - (b.pausa?1:0))
-  // Da AGGIUNGERE al listino: solo i contratti usabili (non si aggiunge un contratto in pausa ex novo).
-  const corrieriDisponibiliDaAggiungere = (tuttiICorrieri||[]).filter(c => usabile(c) && !corrieri.some((x:any) => x.id === c.id))
+  // Da AGGIUNGERE al listino: ANCHE i contratti in pausa. Il master deve poter CREARE/preparare i prezzi
+  // di un contratto sospeso; il CLIENTE non lo vedrà comunque (lo filtra /api/cliente/listino-prezzi).
+  // Si annota pausa/pausaMotivo così l'editor segnala "(in pausa)" nell'elenco da aggiungere.
+  const corrieriDisponibiliDaAggiungere = (tuttiICorrieri||[])
+    .filter((c:any) => !corrieri.some((x:any) => x.id === c.id))
+    .map((c:any) => ({ ...c, pausa: !usabile(c), pausaMotivo: pausaCatena(c) ? 'catena' : (attivoById.get(c.id) === false ? 'propria' : null) }))
+    .sort((a:any,b:any) => (a.pausa?1:0) - (b.pausa?1:0))
   const corriereSelezionato = corrieri?.find((c:any) => c.id === corriereQuery) || corrieri?.[0]
   const { data: zone } = await supabase.from('zone').select('id,nome').eq('master_id', utente?.master_id).eq('corriere_id', corriereSelezionato?.id||'').order('nome')
   const { data: fasceEsistenti } = await supabase.from('listini_clienti_fasce').select('*').eq('listino_id', id).eq('corriere_id', corriereSelezionato?.id||'').order('peso_max')

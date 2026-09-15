@@ -45,22 +45,27 @@ export async function GET(req: NextRequest) {
     const { data: _dc } = await _admin.from('corrieri').select('nome_contratto').in('id', Array.from(_disId))
     _disNomi = new Set((_dc || []).map((c: any) => (c.nome_contratto || '').trim().toLowerCase()))
   }
-  // Oltre ai contratti spenti dal padre per questo master, si nascondono anche quelli che un master
-  // SOPRA ha messo IN PAUSA: chi sta sotto non deve nemmeno vederli, perche' a monte la merce non
-  // partirebbe. Chi ha messo in pausa continua a vederli (la funzione guarda solo gli antenati).
+  // DUE cose diverse, non piu' accorpate:
+  //  - SPENTO DAL PADRE (masters_corrieri_abilitati.abilitato=false): il padre ha TOLTO l'accesso a
+  //    questo master -> resta nascosto (non lo possiede).
+  //  - SOSPESO A MONTE (un antenato l'ha messo IN PAUSA, sospesoDallaCatena): il MASTER deve comunque
+  //    VEDERLO nel suo Listino Corrieri (lo gestisce, ne prepara i prezzi) — e' il CLIENTE finale a non
+  //    vederlo (lo filtra /api/cliente/listino-prezzi). Prima erano accorpati e la pausa a monte lo
+  //    nascondeva anche al master (segnalato da "The Shipping Company"). Lo si mostra col flag sospeso_sopra.
   const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
   const _sospesiSopra = await contrattiSospesiSopra(utente?.master_id)
-  const _spento = (c: any) => _disId.has(c.id) || _disNomi.has((c.nome_contratto || '').trim().toLowerCase())
-    || sospesoDallaCatena(c.nome_contratto, _sospesiSopra)
-  const tuttiICorrieri = (tuttiICorrieriRaw || []).filter((c: any) => !_spento(c))
+  const _spentoDalPadre = (c: any) => _disId.has(c.id) || _disNomi.has((c.nome_contratto || '').trim().toLowerCase())
+  const _sospesoSopra = (c: any) => sospesoDallaCatena(c.nome_contratto, _sospesiSopra)
+  const tuttiICorrieri = (tuttiICorrieriRaw || []).filter((c: any) => !_spentoDalPadre(c))
   const posseduti = new Set((tuttiICorrieri || []).map((c:any) => c.id))
   // Mostra SOLO i corrieri realmente POSSEDUTI dal master e non spenti dal padre: no righe/agganci
   // "estranei" (residui di duplicazioni/ereditarietà che puntano a corrieri di altri master).
-  const corrieriBase = [..._mappaCorr.values()].filter(Boolean).filter((c:any) => posseduti.has(c.id) && !_spento(c))
+  const corrieriBase = [..._mappaCorr.values()].filter(Boolean).filter((c:any) => posseduti.has(c.id) && !_spentoDalPadre(c))
   // Marca ogni corriere come PROPRIO o EREDITATO dal master sopra: l'editor blocca i soli ereditati.
+  // sospeso_sopra: in pausa da un livello superiore -> lo vede col badge, prezzi in sola lettura (è ereditato).
   const { corrieriEreditatiIds } = await import('@/lib/rete-masters')
   const _ereditatiIds = await corrieriEreditatiIds(_admin, utente?.master_id)
-  const corrieri = corrieriBase.map((c:any) => ({ ...c, ereditato: _ereditatiIds.has(c.id) }))
+  const corrieri = corrieriBase.map((c:any) => ({ ...c, ereditato: _ereditatiIds.has(c.id), sospeso_sopra: _sospesoSopra(c) }))
   const corrieriDisponibili = (tuttiICorrieri||[]).filter(c => !corrieri.some((x:any) => x.id === c.id))
 
   const corriereSelezionato = corrieri.find((c:any) => c.id === corriereId) || corrieri[0]
