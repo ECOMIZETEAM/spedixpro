@@ -658,10 +658,24 @@ async function creaCalcolatoreCorriereBase(
     .from('listini_corrieri').select('id,corriere_id,fattore_volume')
     .eq('master_id', masterId).eq('attivo', true)
   const listinoIds: string[] = (listini || []).map((l: any) => l.id)
-  // Fattore volume PER-CORRIERE: override salvato in listini_corrieri_corrieri (non nel default del listino).
-  const { data: aggFv } = listinoIds.length
-    ? await supabase.from('listini_corrieri_corrieri').select('corriere_id,fattore_volume').in('listino_id', listinoIds)
-    : { data: [] }
+  // IN PARALLELO: override del fattore volume (listini_corrieri_corrieri), fasce e supplementi
+  // dipendono tutti e tre SOLO dai listini, non l'uno dall'altro. Prima erano tre attese in fila —
+  // dentro un blocco che in produzione costa 207-273 ms a ogni apertura dell'elenco.
+  const [aggFvRes, fasce, supplRes] = await Promise.all([
+    listinoIds.length
+      ? supabase.from('listini_corrieri_corrieri').select('corriere_id,fattore_volume').in('listino_id', listinoIds)
+      : Promise.resolve({ data: [] as any[] }),
+    // fetchAll: le fasce possono superare le 1000 righe (limite PostgREST) — prima venivano TRONCATE
+    // e il fallback prezzava con fasce incomplete (margine sbagliato oltre le prime 1000).
+    listinoIds.length
+      ? fetchAll(() => supabase.from('listini_corrieri_fasce').select('listino_id,peso_max,prezzo,tipo,zona_id,fuel,zone(id,nome)').in('listino_id', listinoIds))
+      : Promise.resolve([] as any[]),
+    listinoIds.length
+      ? supabase.from('listini_corrieri_supplementi').select('listino_id,tipo,valore,tipo_calcolo,descrizione').in('listino_id', listinoIds)
+      : Promise.resolve({ data: [] as any[] }),
+  ])
+  const aggFv = (aggFvRes as any).data
+  const suppl = (supplRes as any).data
   const overridePerCorr = new Map<string, number>()
   for (const a of aggFv || []) { const fv = parseFloat(a?.fattore_volume); if (a?.corriere_id && fv > 0) overridePerCorr.set(a.corriere_id, fv) }
   const listinoPerCorriere = new Map<string, { id: string; fattore: number }>()
@@ -670,20 +684,12 @@ async function creaCalcolatoreCorriereBase(
     listinoPerCorriere.set(l.corriere_id, { id: l.id, fattore })
   }
 
-  // fetchAll: fasce e zone_cap possono superare le 1000 righe (limite PostgREST) — prima venivano
-  // TRONCATE e il fallback prezzava con zone/fasce incomplete (margine sbagliato sui CAP oltre i primi 1000).
-  const fasce: any[] = listinoIds.length
-    ? await fetchAll(() => supabase.from('listini_corrieri_fasce').select('listino_id,peso_max,prezzo,tipo,zona_id,fuel,zone(id,nome)').in('listino_id', listinoIds))
-    : []
   const fascePerListino = new Map<string, any[]>()
   for (const f of fasce || []) {
     if (!fascePerListino.has(f.listino_id)) fascePerListino.set(f.listino_id, [])
     fascePerListino.get(f.listino_id)!.push(f)
   }
 
-  const { data: suppl } = listinoIds.length
-    ? await supabase.from('listini_corrieri_supplementi').select('listino_id,tipo,valore,tipo_calcolo,descrizione').in('listino_id', listinoIds)
-    : { data: [] }
   const supplPerListino = new Map<string, any[]>()
   for (const s of suppl || []) {
     if (!supplPerListino.has(s.listino_id)) supplPerListino.set(s.listino_id, [])
@@ -793,19 +799,23 @@ async function creaCalcolatoreListinoClienteBase(
   capDaPrezzare?: string[] | null
 ): Promise<(s: any) => DettaglioPrezzo | null> {
   if (!listinoId) return () => null
-  const { data: listino } = await supabase.from('listini_clienti').select('fattore_volume,solo_peso_reale').eq('id', listinoId).single()
+  // IN PARALLELO: il listino, l'override per-corriere del fattore volume e le fasce dipendono solo
+  // da listinoId. Prima erano tre attese in fila.
+  const [listinoRes, aggCorrRes, fasce] = await Promise.all([
+    supabase.from('listini_clienti').select('fattore_volume,solo_peso_reale').eq('id', listinoId).single(),
+    supabase.from('listini_clienti_corrieri').select('corriere_id,fattore_volume').eq('listino_id', listinoId),
+    // fetchAll: oltre 1000 fasce venivano TRONCATE (limite PostgREST) → prezzi fallback incompleti.
+    fetchAll(() => supabase
+      .from('listini_clienti_fasce').select('corriere_id,zona_id,peso_max,prezzo,tipo,fuel,zone(id,nome)')
+      .eq('listino_id', listinoId)),
+  ])
+  const listino = (listinoRes as any).data
+  const aggCorr = (aggCorrRes as any).data
   const fattore = parseFloat(listino?.fattore_volume) || 5000
   const soloPesoReale = !!listino?.solo_peso_reale
-  // Fattore volume PER-CORRIERE (override del default del listino): stesso comportamento del
-  // listino corriere, così il peso fatturato coincide (altrimenti il report mostra margini falsati).
-  const { data: aggCorr } = await supabase.from('listini_clienti_corrieri').select('corriere_id,fattore_volume').eq('listino_id', listinoId)
   const fattorePerCorr = new Map<string, number>()
   for (const a of (aggCorr || [])) { const fv = parseFloat(a?.fattore_volume); if (a?.corriere_id && fv > 0) fattorePerCorr.set(a.corriere_id, fv) }
 
-  // fetchAll: oltre 1000 fasce venivano TRONCATE (limite PostgREST) → prezzi fallback incompleti.
-  const fasce: any[] = await fetchAll(() => supabase
-    .from('listini_clienti_fasce').select('corriere_id,zona_id,peso_max,prezzo,tipo,fuel,zone(id,nome)')
-    .eq('listino_id', listinoId))
   const fascePerCorriere = new Map<string, any[]>()
   for (const f of fasce || []) {
     if (!fascePerCorriere.has(f.corriere_id)) fascePerCorriere.set(f.corriere_id, [])
@@ -988,11 +998,16 @@ export async function creaCalcolatoreCorriere(
   masterId: string,
   capDaPrezzare?: string[] | null
 ): Promise<(s: any) => DettaglioPrezzo | null> {
-  // MIRATO = costruito sui soli CAP di una pagina: non va in cache, altrimenti un report che chiede
-  // lo stesso master si ritroverebbe le zone parziali e prezzerebbe sbagliato. Costa poco comunque.
-  if (capDaPrezzare && capDaPrezzare.length) return creaCalcolatoreCorriereBase(supabase, masterId, capDaPrezzare)
+  // PRIMA LA CACHE: se c'e' gia' un calcolatore INTERO per questo master si usa quello — vale per
+  // qualunque CAP e non costa nessuna query. Prima il ramo mirato stava sopra e scavalcava sempre la
+  // cache: sul percorso dell'elenco si ricostruiva a ogni richiesta (207-273 ms misurati).
   const k = 'corr:' + masterId
-  return dallaCache(k) || inCache(k, await creaCalcolatoreCorriereBase(supabase, masterId))
+  const pronto = dallaCache(k)
+  if (pronto) return pronto
+  // MIRATO = costruito sui soli CAP di una pagina: NON va in cache, altrimenti un report che chiede
+  // lo stesso master si ritroverebbe le zone parziali e prezzerebbe sbagliato.
+  if (capDaPrezzare && capDaPrezzare.length) return creaCalcolatoreCorriereBase(supabase, masterId, capDaPrezzare)
+  return inCache(k, await creaCalcolatoreCorriereBase(supabase, masterId))
 }
 
 export async function creaCalcolatoreListinoCliente(
@@ -1001,7 +1016,9 @@ export async function creaCalcolatoreListinoCliente(
   capDaPrezzare?: string[] | null
 ): Promise<(s: any) => DettaglioPrezzo | null> {
   if (!listinoId) return () => null
-  if (capDaPrezzare && capDaPrezzare.length) return creaCalcolatoreListinoClienteBase(supabase, listinoId, capDaPrezzare)
   const k = 'cli:' + listinoId
-  return dallaCache(k) || inCache(k, await creaCalcolatoreListinoClienteBase(supabase, listinoId))
+  const pronto = dallaCache(k)
+  if (pronto) return pronto
+  if (capDaPrezzare && capDaPrezzare.length) return creaCalcolatoreListinoClienteBase(supabase, listinoId, capDaPrezzare)
+  return inCache(k, await creaCalcolatoreListinoClienteBase(supabase, listinoId))
 }
