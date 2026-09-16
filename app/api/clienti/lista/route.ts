@@ -4,6 +4,8 @@ import { isProviderTecnico } from '@/lib/corriere-logo'
 import { isAgente, nomeAgente } from '@/lib/agente'
 import { vedeLaRete } from '@/lib/perimetro'
 export async function GET(req: NextRequest) {
+  const _t0 = Date.now()
+  const _log = (esito: string) => { const ms = Date.now() - _t0; if (ms > 300) console.log('[CLIENTI][TEMPI]', ms + 'ms', 'istanza=' + Math.round(process.uptime()) + 's', esito) }
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
@@ -102,8 +104,10 @@ export async function GET(req: NextRequest) {
       so_provincia: m.provincia_operativo || m.provincia || '',
       so_cap: m.cap_operativo || m.cap || '',
     }))
+    _log('clienti=' + clientiOut.length + ' sottomaster=' + masterOut.length)
     return NextResponse.json([...clientiOut, ...masterOut])
   }
+  _log('clienti=' + clientiOut.length)
   return NextResponse.json(clientiOut)
 }
 

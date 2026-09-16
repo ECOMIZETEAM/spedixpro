@@ -4,6 +4,8 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 
 // Lista staff del master: utenti + email/ultimo_accesso da auth
 export async function GET(_req: NextRequest) {
+  const _t0 = Date.now()
+  const _log = (esito: string) => { const ms = Date.now() - _t0; if (ms > 300) console.log('[STAFF][TEMPI]', ms + 'ms', 'istanza=' + Math.round(process.uptime()) + 's', esito) }
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
@@ -17,17 +19,29 @@ export async function GET(_req: NextRequest) {
     .order('nome', { ascending: true })
 
   const admin = createAdminSupabase()
-  const risultato = []
-  for (const u of (utenti || [])) {
-    let email = ''
-    let ultimoAccesso = null
-    try {
-      const { data: au } = await admin.auth.admin.getUserById(u.id)
-      email = au?.user?.email || ''
-      ultimoAccesso = au?.user?.last_sign_in_at || null
-    } catch {}
-    risultato.push({ ...u, email, ultimo_accesso: ultimoAccesso })
+  // EMAIL E ULTIMO ACCESSO: una chiamata all'API di autenticazione PER OGNI collaboratore, e prima
+  // erano IN FILA. Misurato sui master veri: il piu' grande ne ha 11 (QUICK 8), quindi 8-11 chiamate
+  // HTTP una dietro l'altra — circa mezzo secondo, pagato a OGNI apertura della pagina, perche'
+  // questa rotta parte insieme all'elenco spedizioni. (Attenzione: i 67 utenti staff che si leggono
+  // in giro sono il totale della PIATTAFORMA, non di un master: sono due numeri diversi.)
+  // A gruppi di 10 in parallelo il risultato e' identico. Il gruppo resta piccolo di proposito: non
+  // si martella l'API di autenticazione con decine di richieste insieme.
+  const lista = (utenti || []) as any[]
+  const risultato: any[] = []
+  for (let i = 0; i < lista.length; i += 10) {
+    const blocco = await Promise.all(lista.slice(i, i + 10).map(async (u: any) => {
+      let email = ''
+      let ultimoAccesso = null
+      try {
+        const { data: au } = await admin.auth.admin.getUserById(u.id)
+        email = au?.user?.email || ''
+        ultimoAccesso = au?.user?.last_sign_in_at || null
+      } catch {}
+      return { ...u, email, ultimo_accesso: ultimoAccesso }
+    }))
+    risultato.push(...blocco)
   }
+  _log('staff=' + risultato.length)
   return NextResponse.json(risultato)
 }
 
