@@ -56,6 +56,11 @@ export async function GET(req: NextRequest) {
   //    SENZA ?page il comportamento resta IDENTICO a prima (array completo) per le altre pagine.
   const pageParam = parseInt(p.get('page') || '')
   const paged = Number.isFinite(pageParam) && pageParam > 0
+  // CONTEGGIO TOTALE SOLO QUANDO SERVE (?conta=0 per saltarlo). Il count esatto costa: sulla vista di
+  // rete scansiona 92.575 righe (71 ms misurati) e veniva rifatto a OGNI cambio pagina, a OGNI click
+  // sull'ordinamento e su OGNI prefetch — sempre per lo stesso numero, che dipende solo dai FILTRI.
+  // La pagina lo chiede una volta per set di filtri e se lo tiene; qui, se non serve, torna null.
+  const contaTot = p.get('conta') !== '0'
   const perPage = Math.min(200, Math.max(1, parseInt(p.get('perPage') || '') || 10))
   const fContratto = p.get('contratto')
   const fVettore = p.get('vettore')
@@ -243,9 +248,9 @@ export async function GET(req: NextRequest) {
   let spedizioni: any[]
   if (paged && !filtroCodPerViewer && !ordinaMargine) {
     const from = (pageParam - 1) * perPage
-    const { data, count } = await buildBase(true).range(from, from + perPage - 1)
+    const { data, count } = await buildBase(contaTot).range(from, from + perPage - 1)
     spedizioni = data || []
-    totalePaginato = count || 0
+    totalePaginato = contaTot ? (count || 0) : -1   // -1 = non richiesto: la pagina usa quello che ha già
   } else {
     // Legacy (array completo) O filtro contrassegni del master: prendo tutto il candidato COD e
     // pagino in memoria DOPO l'override per-livello (più sotto), così i due stati non divergono.
@@ -575,6 +580,6 @@ export async function GET(req: NextRequest) {
     rowsOut = (rowsOut || []).map((r: any) => { const { costo_spedizione, ...resto } = r; return resto })
   }
 
-  if (paged) return NextResponse.json({ rows: rowsOut, total: totalePaginato, page: pageParam, perPage })
+  if (paged) return NextResponse.json({ rows: rowsOut, total: totalePaginato < 0 ? null : totalePaginato, page: pageParam, perPage })
   return NextResponse.json(rowsOut)
 }

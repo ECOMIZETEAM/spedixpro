@@ -109,6 +109,10 @@ export default function SpedizioniPage() {
   // successiva; debounce SOLO sui campi di testo (i click su select/date/pagine partono subito);
   // la tabella non si svuota mai durante il caricamento (spinner solo al primissimo giro).
   const cacheRef = useRef<Map<string, { rows: any[]; total: number }>>(new Map())
+  // Il TOTALE dipende solo dai FILTRI: non dalla pagina, non dall'ordinamento. Lo si chiede una volta
+  // per set di filtri e lo si riusa (?conta=0), invece di farlo ricalcolare a ogni pagina e a ogni
+  // click sull'intestazione: sulla vista di rete sono 71 ms di database ogni volta, per lo stesso numero.
+  const totaliRef = useRef<Map<string, number>>(new Map())
   const seqRef = useRef(0)
   const prevFiltriRef = useRef<any>(null)
   useEffect(() => {
@@ -151,12 +155,25 @@ export default function SpedizioniPage() {
     return q
   }
 
+  // Chiave del SET DI FILTRI (senza pagina, righe per pagina e ordinamento): identifica il totale.
+  function chiaveFiltri() {
+    const q = buildParams(1)
+    q.delete('page'); q.delete('perPage'); q.delete('ordina'); q.delete('dir')
+    return q.toString()
+  }
+
   async function fetchPagina(paginaReq: number): Promise<{ rows: any[]; total: number } | null> {
     try {
-      const res = await fetch('/api/spedizioni/lista?' + buildParams(paginaReq).toString())
+      const kf = chiaveFiltri()
+      const giaNoto = totaliRef.current.get(kf)
+      // La chiave della cache pagine NON cambia: 'conta' si aggiunge solo alla URL.
+      const url = '/api/spedizioni/lista?' + buildParams(paginaReq).toString() + (giaNoto === undefined ? '' : '&conta=0')
+      const res = await fetch(url)
       const data = await res.json()
       if (!Array.isArray(data?.rows)) return null
-      return { rows: data.rows, total: Number(data?.total) || 0 }
+      const tot = data?.total == null ? (giaNoto ?? 0) : (Number(data.total) || 0)
+      totaliRef.current.set(kf, tot)
+      return { rows: data.rows, total: tot }
     } catch { return null }
   }
 
@@ -181,7 +198,7 @@ export default function SpedizioniPage() {
   }
 
   // Dopo un'azione che modifica i dati (elimina/ripristina): cache azzerata + ricarico la pagina.
-  function ricarica() { cacheRef.current.clear(); carica(pagina) }
+  function ricarica() { cacheRef.current.clear(); totaliRef.current.clear(); carica(pagina) }
   // Click sull'header: 1° click ordina discendente, 2° ascendente, 3° torna al default (data recente).
   // L'ordine e' applicato a DB su tutto il periodo filtrato (non solo la pagina); il ricalcolo e il
   // reset a pagina 1 li fa l'effetto sui filtri.

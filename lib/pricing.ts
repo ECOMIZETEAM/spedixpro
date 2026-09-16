@@ -638,7 +638,7 @@ export async function calcolaSupplementiCliente(
 // Versione BATCH: precarica UNA volta i listini/fasce/supplementi/zone_cap del master
 // e ritorna una funzione che calcola il prezzo corriere per una spedizione in memoria,
 // senza query per riga. Risultato identico a calcolaPrezzoCorriere (usato dai report).
-export async function creaCalcolatoreCorriere(
+async function creaCalcolatoreCorriereBase(
   supabase: any,
   masterId: string
 ): Promise<(s: any) => DettaglioPrezzo | null> {
@@ -774,7 +774,7 @@ export async function creaCalcolatoreCorriere(
 // Calcolatore batch sul LISTINO CLIENTE (listini_clienti). Usato per il COSTO dei
 // sotto-master: il loro costo è il listino che il master padre gli ha assegnato
 // (masters.parent_listino_id). Stessa logica di calcolaPrezzoListino, ma in memoria.
-export async function creaCalcolatoreListinoCliente(
+async function creaCalcolatoreListinoClienteBase(
   supabase: any,
   listinoId: string
 ): Promise<(s: any) => DettaglioPrezzo | null> {
@@ -931,4 +931,56 @@ export async function creaCalcolatoreListinoCliente(
     const _r2 = (n: number) => Math.round(n * 100) / 100
     return { totale: _r2(noloBase + spondaAmt + feeContr + feeAss), nolo: _r2(noloBase), sponda: _r2(spondaAmt), contrassegno: _r2(feeContr), assicurazione: _r2(feeAss) }
   }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+// CACHE A TEMPO DEI CALCOLATORI.
+//
+// Costruirne uno non e' gratis: per un master reale sono 26 listini, 1.129 fasce e 19.225 righe di
+// zone_cap, e zone_cap si legge a blocchi da 1.000 — una ventina di round-trip IN FILA. L'elenco
+// spedizioni li costruisce come RIPIEGO per le righe senza movimento reale: sulla vista di rete
+// capita su ~3 righe su 100, quindi praticamente a ogni apertura e a ogni cambio pagina.
+//
+// I listini cambiano raramente (li modifica un master a mano); una pagina aperta due secondi dopo
+// puo' usare la stessa copia. TTL corto: una modifica al listino si vede entro un minuto, e comunque
+// questo e' solo il PREZZO DI RIPIEGO mostrato in elenco — gli addebiti veri vengono dai movimenti,
+// che non passano di qui.
+//
+// La chiave include l'id del master/listino. La cache vive nell'istanza serverless: se l'istanza e'
+// nuova si ricostruisce, come prima.
+const TTL_CALCOLATORE_MS = 60_000
+const MAX_CALCOLATORI = 8
+const cacheCalcolatori = new Map<string, { at: number; calc: (s: any) => DettaglioPrezzo | null }>()
+
+function dallaCache(chiave: string) {
+  const hit = cacheCalcolatori.get(chiave)
+  if (hit && Date.now() - hit.at < TTL_CALCOLATORE_MS) return hit.calc
+  if (hit) cacheCalcolatori.delete(chiave)
+  return null
+}
+
+function inCache(chiave: string, calc: (s: any) => DettaglioPrezzo | null) {
+  cacheCalcolatori.set(chiave, { at: Date.now(), calc })
+  // Tetto: i calcolatori tengono in memoria le zone_cap, non se ne accumulano a decine.
+  while (cacheCalcolatori.size > MAX_CALCOLATORI) {
+    const piuVecchia = cacheCalcolatori.keys().next().value as string
+    cacheCalcolatori.delete(piuVecchia)
+  }
+  return calc
+}
+
+export async function creaCalcolatoreCorriere(
+  supabase: any,
+  masterId: string
+): Promise<(s: any) => DettaglioPrezzo | null> {
+  const k = 'corr:' + masterId
+  return dallaCache(k) || inCache(k, await creaCalcolatoreCorriereBase(supabase, masterId))
+}
+
+export async function creaCalcolatoreListinoCliente(
+  supabase: any,
+  listinoId: string
+): Promise<(s: any) => DettaglioPrezzo | null> {
+  if (!listinoId) return () => null
+  const k = 'cli:' + listinoId
+  return dallaCache(k) || inCache(k, await creaCalcolatoreListinoClienteBase(supabase, listinoId))
 }
