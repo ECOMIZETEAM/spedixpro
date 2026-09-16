@@ -2,6 +2,7 @@ import { calcolaPrezzoListino, calcolaPrezzoCorriereDettaglio } from '@/lib/pric
 import { registraMovimentoMaster, descrizioneSpedizione } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
+import { pesoSuReale } from '@/lib/agevolazione-misure'
 
 export type LivelloCatena = {
   masterId: string
@@ -110,12 +111,31 @@ export async function costruisciCatena(
       if (mCorrId) {
         const mCorr = { id: mCorrId }
         const pesoReale = (params.packages || []).reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
+        // REGOLA AGEVOLAZIONE (Moove): il COSTO di questo livello segue il flag del FORNITORE (il
+        // livello sopra che gli vende il contratto), non il suo. Es. Velox OFF → il suo sotto-master
+        // paga OFF (volumetrico) anche se sul proprio ha messo ON; l'ON del sotto-master vale solo per
+        // cosa regala ai SUOI clienti (prezzo cliente, calcolato a parte), e se lo assorbe lui.
+        // Il detentore NON entra qui (paga il provider col suo flag). Se non leggo il fornitore, resto
+        // sul comportamento normale (nessun override → il livello usa il proprio flag come prima).
+        let pesoSuRealeCost: boolean | undefined = undefined
+        if (!isProprietario && m.parent_master_id) {
+          const supCorrId = await corriereDiMasterPerNome(adminDb, m.parent_master_id, params.corriereNome)
+          if (supCorrId) {
+            const [supCorrRes, supListRes]: any = await Promise.all([
+              adminDb.from('corrieri').select('settings').eq('id', supCorrId).maybeSingle(),
+              adminDb.from('listini_corrieri').select('solo_peso_reale').eq('master_id', m.parent_master_id).eq('corriere_id', supCorrId),
+            ])
+            const supSolo = (supListRes?.data || []).some((l: any) => l.solo_peso_reale)
+            pesoSuRealeCost = pesoSuReale(supCorrRes?.data?.settings || {}, params.packages, pesoReale, supSolo)
+          }
+        }
         const pz = await calcolaPrezzoCorriereDettaglio(adminDb, {
           corriereId: mCorr.id, masterId: m.id,
           provincia: params.provincia, cap: params.cap, paese: params.paese, citta: params.citta,
           pesoReale, packages: params.packages,
           contrassegno: params.contrassegno, assicurazione: params.assicurazione,
           zonaForzata: params.zonaForzata,
+          pesoSuRealeCost,
         })
         if (pz != null) { prezzo = pz.totale; zonaLivello = pz.zona; calcolato = true }
       }

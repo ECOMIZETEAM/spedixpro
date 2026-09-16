@@ -380,6 +380,11 @@ export async function calcolaPrezzoCorriereDettaglio(
     // SOLO ricalcolo RETTIFICHE: come in calcolaPrezzoListino — forza la fascia di UNA zona (di norma
     // 'Italia') per tutti i livelli, bypassando match CAP + esclusione. Default assente = normale.
     zonaForzata?: string
+    // SOLO cascata costi (costruisciCatena): la scelta reale/volumetrico del COSTO di un livello la
+    // decide il FORNITORE (il livello sopra che gli vende il contratto), non questo livello. Quando è
+    // passato, sostituisce del tutto la valutazione locale dell'agevolazione (settings + solo_peso_reale).
+    // Il divisore volumetrico resta comunque il SUO (fattore per-corriere). Default assente = normale.
+    pesoSuRealeCost?: boolean
   }
 ): Promise<DettaglioCorriere | null> {
   const { corriereId, masterId, provincia } = params
@@ -414,12 +419,20 @@ export async function calcolaPrezzoCorriereDettaglio(
   // Il peso reale arriva dal chiamante e vince sul ricavato dai colli: c'e' chi passa il peso senza
   // il dettaglio dei colli, e in quel caso dai pacchi non si ricava niente.
   const pesoReale = Number(params.pesoReale) || _pfm.pesoReale || 1
-  let pesoFatturato = soloPesoReale ? pesoReale : Math.max(_pfm.pesoFatturato, pesoReale)
-  // Agevolazione peso reale: se il corriere ha il flag e OGNI collo è entro 50x32x28 cm,
-  // si tassa sul peso reale (come nel preventivo cliente).
-  const { data: corrSett } = await supabase.from('corrieri').select('settings').eq('id', corriereId).maybeSingle()
-  const _sett: any = corrSett?.settings || {}
-  if (pesoSuReale(_sett, packages, pesoReale, soloPesoReale)) pesoFatturato = pesoReale
+  let pesoFatturato: number
+  if (params.pesoSuRealeCost !== undefined) {
+    // COSTO IN CASCATA: reale/volumetrico lo decide il FORNITORE (regola Moove). Il flag di QUESTO
+    // livello (settings + solo_peso_reale) vale solo per cosa regala ai suoi clienti, non per il suo
+    // costo. Il divisore volumetrico resta il suo (fattore per-corriere → pesoVolume qui sopra).
+    pesoFatturato = params.pesoSuRealeCost ? pesoReale : Math.max(pesoVolume, pesoReale)
+  } else {
+    pesoFatturato = soloPesoReale ? pesoReale : Math.max(_pfm.pesoFatturato, pesoReale)
+    // Agevolazione peso reale: se il corriere ha il flag e OGNI collo è entro 50x32x28 cm,
+    // si tassa sul peso reale (come nel preventivo cliente).
+    const { data: corrSett } = await supabase.from('corrieri').select('settings').eq('id', corriereId).maybeSingle()
+    const _sett: any = corrSett?.settings || {}
+    if (pesoSuReale(_sett, packages, pesoReale, soloPesoReale)) pesoFatturato = pesoReale
+  }
 
   const { data: fasce } = await supabase
     .from('listini_corrieri_fasce')
