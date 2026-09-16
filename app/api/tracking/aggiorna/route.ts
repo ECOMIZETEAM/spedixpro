@@ -329,9 +329,37 @@ export async function GET(req: NextRequest) {
         } catch { /* non ancora pronta: riprovo al giro dopo */ }
       }
 
+      // AUTO-PULIZIA DEL TRACKING "COMPOSITO" (quirk SpediamoPro Poste). Alla creazione il provider a
+      // volte restituisce il tracking SPORCO = <code interno>+<LDV vera> (es. "07WFM2EEW1UW07WF403279");
+      // poco dopo lo pulisce, ma uno dei due campi resta sulla forma sporca → numero e tracking_number
+      // divergono, con la LDV vera come SUFFISSO comune. Qui, SOLO quando un campo è suffisso dell'altro
+      // (identica LDV, cambia solo il prefisso spurio), si allineano entrambi alla forma PULITA. La
+      // guardia del suffisso è ciò che rende sicura questa pulizia: i casi a codici DAVVERO DISTINTI (es.
+      // UPS che ri-emette l'etichetta all'Access Point: due 1Z diversi, nessuno suffisso dell'altro) NON
+      // vengono toccati — lì non si può sapere a tavolino quale sia il buono. (16/09)
+      {
+        const a = String(upd.numero ?? s.numero ?? '')
+        const b = String(upd.tracking_number ?? s.tracking_number ?? '')
+        if (a && b && a !== b) {
+          let pulito: string | null = null
+          if (a.length > b.length && a.endsWith(b) && b.length >= 6) pulito = b
+          else if (b.length > a.length && b.endsWith(a) && a.length >= 6) pulito = a
+          if (pulito) { upd.numero = pulito; upd.tracking_number = pulito }
+        }
+      }
+
       if (Object.keys(upd).length) {
         await admin.from('spedizioni').update(upd).eq('id', s.id)
         aggiornate++
+        // Se il NUMERO è cambiato, la descrizione dei movimenti cita ancora la forma vecchia: la
+        // riallineo (solo il testo, mai importi/date). Scatta di rado, non appesantisce il giro.
+        if (upd.numero && s.numero && upd.numero !== s.numero) {
+          const { data: mv } = await admin.from('movimenti').select('id,descrizione').eq('spedizione_id', s.id)
+          for (const m of (mv || [])) {
+            const t = String((m as any).descrizione || '')
+            if (t.includes(s.numero)) await admin.from('movimenti').update({ descrizione: t.split(s.numero).join(upd.numero) }).eq('id', (m as any).id)
+          }
+        }
       }
 
       // AUTO-ANNULLO DEL CORRIERE = ANCHE STORNO DEL CREDITO.
