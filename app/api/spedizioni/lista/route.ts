@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
 import { creaCalcolatoreListinoCliente, creaCalcolatoreCorriere } from '@/lib/pricing'
 import { fetchAll } from '@/lib/fetch-all'
@@ -17,6 +18,10 @@ export async function GET(req: NextRequest) {
   const tempi: string[] = []
   const segna = (fase: string) => { const ora = Date.now(); tempi.push(`${fase} ${ora - tPrec}`); tPrec = ora }
   const supabase = await createServerSupabase()
+  // UN SOLO client di servizio per tutta la richiesta: prima ogni blocco ne apriva uno suo (fino a
+  // otto) e il primo uso di ognuno pagava l'apertura della connessione — 240-299 ms misurati sul
+  // blocco del tipo corriere, che a database costa 0,010 ms per riga.
+  const admin = createAdminSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   segna('auth')
@@ -95,8 +100,7 @@ export async function GET(req: NextRequest) {
   const sanitizza = (v: string) => v.replace(/[,()"\\%]/g, ' ').trim()
   let idOrdineSpedIds: string[] = []
   if (fIdOrdine) {
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const adminIO = createAdminSupabase()
+    const adminIO = admin
     const cIO = sanitizza(fIdOrdine)
     const [a, b] = await Promise.all([
       adminIO.from('ordini_importati').select('spedizione_id').ilike('order_id', `%${cIO}%`).not('spedizione_id', 'is', null).limit(200),
@@ -123,9 +127,8 @@ export async function GET(req: NextRequest) {
 
   // Selezione di un sotto-master agganciato: mostro le spedizioni del suo sotto-albero
   if (masterSel && ruolo !== 'cliente' && ruolo !== 'agente' && utente?.master_id) {
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const { sottoAlberoMasterIds, masterIdsVisibili } = await import('@/lib/rete-masters')
-    const adminDb = createAdminSupabase()
+    const adminDb = admin
     const mieiDiscendenti = await masterIdsVisibili(adminDb, utente.master_id)   // solo se privilegiato include i figli
     if (mieiDiscendenti.includes(masterSel)) {   // autorizzazione: dev'essere un mio discendente
       subtreeSel = await sottoAlberoMasterIds(adminDb, masterSel)
@@ -138,8 +141,7 @@ export async function GET(req: NextRequest) {
   const nomeMaster = new Map<string, string>()     // master id -> nome
   if (isMasterRete && utente?.master_id) {
     const mine = utente.master_id
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const adminDb = createAdminSupabase()
+    const adminDb = admin
     masterIds = [mine]
     // La volumetria della rete sotto un master risale sempre a lui (tutti i livelli).
     // UNA sola query sui masters (tabella piccola) invece di una per livello: il BFS resta identico.
@@ -290,8 +292,7 @@ export async function GET(req: NextRequest) {
   const costoMinSped = new Map<string, number>()   // costo corriere REALE = movimento più profondo (min)
   const caricaMovimenti = async () => {
     if (!(mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).length)) return
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const adminMov = createAdminSupabase()
+    const adminMov = admin
     const spedIds = (spedizioni || []).map((s: any) => s.id)
     // SOMMO gli importi SIGNED di 'spedizione' + 'rettifica' (le rettifiche allineano il prezzo dopo
     // una correzione: es. sotto costo). Charge = negativo, credito = positivo. Il totale addebitato è
@@ -333,8 +334,7 @@ export async function GET(req: NextRequest) {
   const idOrdine = new Map<string, string>()
   const caricaIdOrdine = async () => {
     if (!(spedizioni || []).length) return
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const adminOrd = createAdminSupabase()
+    const adminOrd = admin
     const ids = (spedizioni || []).map((s: any) => s.id)
     // Chunk in PARALLELO (ogni spedizione sta in UN solo chunk → il "primo vince" resta identico;
     // dentro al chunk l'ordine CSV-prima-di-ecommerce è preservato).
@@ -357,8 +357,7 @@ export async function GET(req: NextRequest) {
   const spedReso = (spedizioni || []).filter((s: any) => s.stato === 'reso_mittente')
   const caricaResi = async () => {
     if (!spedReso.length) return
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const adminR = createAdminSupabase()
+    const adminR = admin
     const mastersDelleSped = Array.from(new Set((spedizioni || []).map((s: any) => s.master_id).filter(Boolean)))
     if (mastersDelleSped.length) {
       const { data: dr } = await adminR.from('distinte_resi').select('numero,voci').in('master_id', mastersDelleSped)
@@ -372,8 +371,7 @@ export async function GET(req: NextRequest) {
   const ticketPerSped = new Map<string, { id: string; codice: any; stato: string }>()
   const caricaTicket = async () => {
     if (!(spedizioni || []).length) return
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const adminT = createAdminSupabase()
+    const adminT = admin
     const ids = (spedizioni || []).map((s: any) => s.id)
     const clienteIdViewer = (utente as any)?.cliente_id
     for (let i = 0; i < ids.length; i += 300) {
@@ -450,8 +448,7 @@ export async function GET(req: NextRequest) {
   if (!light) {
     const corrIds = Array.from(new Set((spedizioni || []).map((s: any) => s.corriere_id).filter(Boolean)))
     if (corrIds.length) {
-      const { createAdminSupabase } = await import('@/lib/supabase-admin')
-      const { data: cc } = await createAdminSupabase().from('corrieri').select('id,tipo').in('id', corrIds as string[])
+      const { data: cc } = await admin.from('corrieri').select('id,tipo').in('id', corrIds as string[])
       for (const c of (cc || [])) corrTipo.set((c as any).id, (c as any).tipo)
     }
   }
@@ -540,8 +537,7 @@ export async function GET(req: NextRequest) {
   if (!light && mineId && ruolo !== 'cliente' && ruolo !== 'agente') {
     const codIds = rows.filter((r: any) => Number(r.contrassegno) > 0).map((r: any) => r.id)
     if (codIds.length) {
-      const { createAdminSupabase } = await import('@/lib/supabase-admin')
-      const adminCod = createAdminSupabase()
+      const adminCod = admin
       const inEntrata = new Map<string, string>()   // spedId -> stato distinta verso di me (dal livello sopra)
       const inUscita = new Set<string>()            // spedId in una distinta creata da me
       const inUscitaPagata = new Set<string>()      // spedId in una MIA distinta già 'pagata' (ho pagato il mio cliente)
