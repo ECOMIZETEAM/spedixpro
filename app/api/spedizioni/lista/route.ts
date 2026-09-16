@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
@@ -432,6 +432,8 @@ export async function GET(req: NextRequest) {
     const listini = Array.from(new Set(Array.from(parentListinoOf.values()).filter(Boolean))) as string[]
     for (const lid of listini) calcPerListino.set(lid, await creaCalcolatoreListinoCliente(db, lid, capPagina))
     segna('calc-listino(' + listini.length + ')')
+    // Scalda la cache DOPO la risposta (vedi sotto, stesso motivo del calcolatore corriere).
+    after(async () => { for (const lid of listini) { try { await creaCalcolatoreListinoCliente(db, lid) } catch { /* scaldare non deve rompere */ } } })
   }
   // 2) Fallback PREZZO CORRIERE quando manca il MIO movimento (spedizioni vecchie / rete non
   //    tracciata): calcolo il MIO listino corriere. Per le spedizioni di rete il corriere è del
@@ -440,6 +442,12 @@ export async function GET(req: NextRequest) {
   if (!light && mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).some((s: any) => !costoMine.has(s.id))) {
     try { calcMioCorr = await creaCalcolatoreCorriere(db, mineId, capPagina) } catch { calcMioCorr = null }
     segna('calc-corriere')
+    // SCALDA LA CACHE A RISPOSTA GIA' INVIATA. Quello qui sopra e' MIRATO ai CAP di questa pagina e
+    // per forza non entra in cache: senza questo la cache resta vuota per sempre e OGNI richiesta
+    // ricostruisce il calcolatore (179-273 ms misurati in produzione). Con after() la versione
+    // INTERA si costruisce dopo aver risposto: nessuno aspetta, e le richieste successive su questa
+    // istanza la trovano pronta e non fanno nemmeno una query.
+    after(async () => { try { await creaCalcolatoreCorriere(db, mineId) } catch { /* scaldare non deve rompere la lista */ } })
     if (!nomeToMioCorr.size) {
       const { data: miei } = await db.from('corrieri').select('id,nome_contratto').eq('master_id', mineId)
       for (const c of (miei || [])) nomeToMioCorr.set((c as any).nome_contratto, (c as any).id)

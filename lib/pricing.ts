@@ -966,13 +966,15 @@ async function creaCalcolatoreListinoClienteBase(
 // capita su ~3 righe su 100, quindi praticamente a ogni apertura e a ogni cambio pagina.
 //
 // I listini cambiano raramente (li modifica un master a mano); una pagina aperta due secondi dopo
-// puo' usare la stessa copia. TTL corto: una modifica al listino si vede entro un minuto, e comunque
-// questo e' solo il PREZZO DI RIPIEGO mostrato in elenco — gli addebiti veri vengono dai movimenti,
-// che non passano di qui.
+// puo' usare la stessa copia. TTL di CINQUE MINUTI: una modifica al listino si vede entro cinque
+// minuti, e comunque questo e' solo il PREZZO DI RIPIEGO mostrato in elenco — gli addebiti veri
+// vengono dai movimenti, che non passano di qui.
+// Era un minuto: troppo corto perche' le istanze servono richieste a raffica per qualche minuto e
+// poi restano ferme, quindi la copia scadeva quasi sempre prima di essere riusata.
 //
 // La chiave include l'id del master/listino. La cache vive nell'istanza serverless: se l'istanza e'
 // nuova si ricostruisce, come prima.
-const TTL_CALCOLATORE_MS = 60_000
+const TTL_CALCOLATORE_MS = 300_000
 const MAX_CALCOLATORI = 8
 const cacheCalcolatori = new Map<string, { at: number; calc: (s: any) => DettaglioPrezzo | null }>()
 
