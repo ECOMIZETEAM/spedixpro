@@ -10,10 +10,18 @@ import { vettoreFisico } from '@/lib/vettore'
 export const maxDuration = 60
 
 export async function GET(req: NextRequest) {
+  // TEMPI: una riga sola in fondo, con i ms di ogni fase. Serve a sapere DOVE va il tempo in
+  // produzione (i log di Vercel non danno la durata, e misurare da fuori non dice quante chiamate
+  // fa una pagina). Costo: zero query in più.
+  const t0 = Date.now(); let tPrec = t0
+  const tempi: string[] = []
+  const segna = (fase: string) => { const ora = Date.now(); tempi.push(`${fase} ${ora - tPrec}`); tPrec = ora }
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
+  segna('auth')
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome,listino_agente_id').eq('id', user.id).single()
+  segna('utente')
   let agenteClienteIds: string[] | null = null
   if ((utente?.ruolo || '').toLowerCase() === 'agente') {
     const nomeAg = (((utente as any)?.nome || '') + ' ' + ((utente as any)?.cognome || '')).trim()
@@ -156,6 +164,7 @@ export async function GET(req: NextRequest) {
       frontier = nuovi
     }
     if (masterIds.length > 1) db = adminDb  // servono i permessi cross-master (RLS)
+    segna('rete(' + masterIds.length + ')')
     // Filtro RETE (paginato): restringo al sotto-albero del sotto-master selezionato, MANTENENDO
     // l'arricchimento di rete (prima linea/prezzi) — dev'essere un master della mia rete.
     if (fRete && masterIds.includes(fRete)) {
@@ -251,10 +260,12 @@ export async function GET(req: NextRequest) {
     const { data, count } = await buildBase(contaTot).range(from, from + perPage - 1)
     spedizioni = data || []
     totalePaginato = contaTot ? (count || 0) : -1   // -1 = non richiesto: la pagina usa quello che ha già
+    segna(contaTot ? 'query+conteggio' : 'query')
   } else {
     // Legacy (array completo) O filtro contrassegni del master: prendo tutto il candidato COD e
     // pagino in memoria DOPO l'override per-livello (più sotto), così i due stati non divergono.
     spedizioni = await fetchAll(buildBase)
+    segna('query-tutto(' + spedizioni.length + ')')
   }
 
   // Costo da mostrare = il PREZZO CLIENTE che ti paga il tuo DIRETTO:
@@ -387,7 +398,7 @@ export async function GET(req: NextRequest) {
 
   // I blocchi di arricchimento sono INDIPENDENTI tra loro → girano in PARALLELO (prima in serie).
   // In LIGHT si saltano del tutto: chi la chiede mostra solo i campi base.
-  if (!light) await Promise.all([caricaMovimenti(), caricaIdOrdine(), caricaResi(), caricaTicket()])
+  if (!light) { await Promise.all([caricaMovimenti(), caricaIdOrdine(), caricaResi(), caricaTicket()]); segna('arricchimento') }
 
   // CAP DELLA PAGINA: i calcolatori qui sotto devono prezzare SOLO queste righe, quindi si portano
   // dietro i loro CAP e leggono le zone mirate invece di tutte quelle del listino (per un master vero
@@ -409,6 +420,7 @@ export async function GET(req: NextRequest) {
     for (const c of (miei || [])) nomeToMioCorr.set(c.nome_contratto, c.id)
     const listini = Array.from(new Set(Array.from(parentListinoOf.values()).filter(Boolean))) as string[]
     for (const lid of listini) calcPerListino.set(lid, await creaCalcolatoreListinoCliente(db, lid, capPagina))
+    segna('calc-listino(' + listini.length + ')')
   }
   // 2) Fallback PREZZO CORRIERE quando manca il MIO movimento (spedizioni vecchie / rete non
   //    tracciata): calcolo il MIO listino corriere. Per le spedizioni di rete il corriere è del
@@ -416,6 +428,7 @@ export async function GET(req: NextRequest) {
   let calcMioCorr: ((s: any) => any) | null = null
   if (!light && mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).some((s: any) => !costoMine.has(s.id))) {
     try { calcMioCorr = await creaCalcolatoreCorriere(db, mineId, capPagina) } catch { calcMioCorr = null }
+    segna('calc-corriere')
     if (!nomeToMioCorr.size) {
       const { data: miei } = await db.from('corrieri').select('id,nome_contratto').eq('master_id', mineId)
       for (const c of (miei || [])) nomeToMioCorr.set((c as any).nome_contratto, (c as any).id)
@@ -442,6 +455,7 @@ export async function GET(req: NextRequest) {
       for (const c of (cc || [])) corrTipo.set((c as any).id, (c as any).tipo)
     }
   }
+  segna('tipo-corriere')
   const OLTRE_15GG = Date.now() - 15 * 24 * 60 * 60 * 1000
 
   // master_rete = nome della MIA prima linea per le spedizioni dei sotto-master (null per le mie)
@@ -585,6 +599,10 @@ export async function GET(req: NextRequest) {
     rowsOut = (rowsOut || []).map((r: any) => { const { costo_spedizione, ...resto } = r; return resto })
   }
 
+  segna('fine')
+  const totMs = Date.now() - t0
+  // Si logga solo quando vale la pena guardare (sopra mezzo secondo): i giri veloci non sporcano i log.
+  if (totMs > 500) console.log('[LISTA][TEMPI]', totMs + 'ms', 'pag=' + (pageParam || '-'), 'righe=' + (rowsOut || []).length, '|', tempi.join(' '))
   if (paged) return NextResponse.json({ rows: rowsOut, total: totalePaginato < 0 ? null : totalePaginato, page: pageParam, perPage })
   return NextResponse.json(rowsOut)
 }
