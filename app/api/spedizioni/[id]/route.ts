@@ -13,7 +13,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data, error } = await supabase.from('spedizioni')
-    .select('id,colli,colli_dettaglio,peso_reale,peso_volume,peso_fatturato,lunghezza,larghezza,altezza,contenuto,note,raw_response')
+    .select('id,colli,colli_dettaglio,peso_reale,peso_volume,peso_fatturato,lunghezza,larghezza,altezza,raw_response')
     .eq('id', id).maybeSingle()
   if (error || !data) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
   // MULTICOLLO senza colli_dettaglio salvato (tipico SpediamoPro): ricostruisco i colli dal raw_response
