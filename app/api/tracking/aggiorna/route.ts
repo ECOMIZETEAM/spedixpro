@@ -279,7 +279,14 @@ export async function GET(req: NextRequest) {
       // correggo il numero mostrato (così in elenco appare la LDV vera, non il codice interno).
       // 'DVA-<ordine>' e' il numero provvisorio del terzo provider, assegnato quando la lettera di
       // vettura non era ancora pronta: va sostituito appena arriva quella vera, come per 'SP-'.
-      if (nuovoTracking && nuovoTracking !== s.numero && (s.numero === spCode || /^(SP|DVA|TMP)-/.test(String(s.numero || '')))) {
+      // Aggiorno il numero se è ancora provvisorio/interno (SP-/DVA-/TMP-/code) OPPURE se era ALLINEATO
+      // al tracking (numero === tracking_number) e il provider ha RI-EMESSO la LDV. Senza il secondo caso,
+      // tracking_number (riga sopra) prendeva la LDV nuova ma numero restava sulla vecchia — ormai morta:
+      // in elenco e AL COMPRATORE finiva un tracking che non esiste più. Tipico: UPS/SpediamoPro rigenera
+      // l'etichetta (due "etichetta creata" nel T&T) o cambia la LDV Poste dopo l'assegnazione. La guardia
+      // "erano uguali" evita di toccare numeri divergenti per altri motivi. (284 sped disallineate, 16/09.)
+      if (nuovoTracking && nuovoTracking !== s.numero
+          && (s.numero === spCode || /^(SP|DVA|TMP)-/.test(String(s.numero || '')) || s.numero === s.tracking_number)) {
         upd.numero = nuovoTracking
       }
 
@@ -332,6 +339,16 @@ export async function GET(req: NextRequest) {
       if (Object.keys(upd).length) {
         await admin.from('spedizioni').update(upd).eq('id', s.id)
         aggiornate++
+        // Se il NUMERO è cambiato, la descrizione dei movimenti cita ancora la LDV vecchia: la si
+        // riallinea (solo il testo, mai importi/date). Raro (scatta solo sulla ri-emissione), quindi
+        // non appesantisce il giro. Stessa logica del recupero TMP.
+        if (upd.numero && s.numero && upd.numero !== s.numero) {
+          const { data: mv } = await admin.from('movimenti').select('id,descrizione').eq('spedizione_id', s.id)
+          for (const m of (mv || [])) {
+            const t = String((m as any).descrizione || '')
+            if (t.includes(s.numero)) await admin.from('movimenti').update({ descrizione: t.split(s.numero).join(upd.numero) }).eq('id', (m as any).id)
+          }
+        }
       }
 
       // AUTO-ANNULLO DEL CORRIERE = ANCHE STORNO DEL CREDITO.
