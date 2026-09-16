@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { SPED_COLS } from '@/lib/spedizioni-cols'
+import { SPED_COLS, SPED_COLS_LISTA } from '@/lib/spedizioni-cols'
 import { creaCalcolatoreListinoCliente, creaCalcolatoreCorriere } from '@/lib/pricing'
 import { fetchAll } from '@/lib/fetch-all'
 import { vettoreFisico } from '@/lib/vettore'
@@ -93,6 +93,12 @@ export async function GET(req: NextRequest) {
   //    annullate sono migliaia e l'arricchimento (100+ round-trip) rendeva la pagina lentissima, tutto
   //    per colonne che quella pagina non mostra nemmeno. Gli embed base (clienti/corrieri) restano.
   const light = p.get('light') === '1'
+  // ?colonne=lista -> solo le colonne che la TABELLA disegna (30 invece di 70). Lo chiede la pagina
+  // master; ogni altro consumatore riceve esattamente quello che riceveva prima.
+  // ATTENZIONE a ridurre ancora il set: qui sotto l'arricchimento legge dalla riga campi che in
+  // tabella NON si vedono (id_ordine_esterno/rif_ordine per il chip Ordine, i sei pesi/misure per
+  // fmtPeso). Se ne manca uno non esplode niente: sparisce un dato, in silenzio.
+  const colonneLista = p.get('colonne') === 'lista'
   // Selezione RETE/CLIENTE in modalità paginata: parametri DEDICATI che NON sostituiscono lo scope
   // di rete (così prezzi/margini per prima-linea restano identici a prima, quando il filtro era in
   // memoria sul browser sopra le righe già arricchite).
@@ -205,7 +211,7 @@ export async function GET(req: NextRequest) {
     // join !inner: attivato SOLO quando quel filtro è presente (altrimenti embed normale, invariato).
     const embCorr = (fContratto || fVettore || ordinaVettore) ? 'corrieri!inner(id,nome_contratto)' : 'corrieri(id,nome_contratto)'
     const embCli = fAgente ? 'clienti!inner(ragione_sociale,agente)' : 'clienti(ragione_sociale,agente)'
-    let q = db.from('spedizioni').select(`${SPED_COLS},${embCli},${embCorr}`, contaTotale ? { count: 'exact' } : undefined)
+    let q = db.from('spedizioni').select(`${colonneLista ? SPED_COLS_LISTA : SPED_COLS},${embCli},${embCorr}`, contaTotale ? { count: 'exact' } : undefined)
     // Ordine scelto dall'utente (default: data più recente). Tie-breaker 'id' → paginazione stabile.
     if (ordinaVettore) q = q.order('nome_contratto', { referencedTable: 'corrieri', ascending: dirAsc })
     else if (colOrdine) q = q.order(colOrdine, { ascending: dirAsc })

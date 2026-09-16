@@ -132,6 +132,9 @@ export default function SpedizioniPage() {
   function buildParams(paginaReq: number) {
     const q = new URLSearchParams()
     q.set('page', String(paginaReq)); q.set('perPage', String(perPage))
+    // Riga leggera: la tabella disegna 30 campi, non 70. Il resto se lo legge la finestra di
+    // dettaglio dalla sua chiamata per-id, quando la apri.
+    q.set('colonne', 'lista')
     const num = (filtri.numero || '').trim()
     if (num) {
       // ricerca per numero su tutto lo storico: NIENTE filtro data

@@ -15,3 +15,27 @@ export const SPED_COLS_CLIENTE = SPED_COLS
   .split(',')
   .filter(c => c !== 'costo_spedizione')
   .join(',')
+
+// Colonne che servono DAVVERO alla tabella dell'elenco master (?colonne=lista).
+// Le 70 di SPED_COLS le chiede la finestra di dettaglio, non la tabella: da quando la finestra si
+// legge i suoi campi dalla chiamata per-id, la riga puo' viaggiare leggera. Misurato: a 200 righe la
+// risposta pesa 397 KB e la sola serializzazione costa 144 ms.
+// NB: pesi e MISURE servono tutti e sei. La colonna Peso chiama fmtPeso(RIGA), non un campo: se
+// `peso_fatturato` non c'e' il peso si ricava dal volumetrico e, sulle spedizioni vecchie che non
+// ce l'hanno salvato, si stima da L×W×H (vedi lib/peso.ts).
+// master_id e corriere_id non si vedono in tabella ma servono ai calcoli della rotta (rete, prezzi).
+// id_ordine_esterno e rif_ordine idem: sono il RIPIEGO della colonna Ordine quando la spedizione non
+// ha un ordine collegato (lista/route.ts). Tolti, il chip si svuotava in silenzio: nessun errore,
+// nessun tipo sbagliato, solo un dato sparito dalla tabella.
+// NIENTE costo_spedizione: sul percorso master non lo legge nessuno (la tabella mostra
+// `costo_mostrato`), e al cliente la rotta lo toglie comunque in fondo.
+export const SPED_COLS_LISTA = [
+  'id', 'master_id', 'cliente_id', 'corriere_id',
+  'numero', 'tracking_number', 'stato', 'created_at',
+  'mitt_nome', 'dest_nome', 'dest_citta', 'dest_provincia', 'dest_cap', 'dest_paese',
+  'id_ordine_esterno', 'rif_ordine',
+  'colli', 'peso_fatturato', 'peso_reale', 'peso_volume', 'lunghezza', 'larghezza', 'altezza',
+  'contrassegno', 'stato_contrassegno', 'assicurazione',
+  'costo_totale',
+  'annullamento_richiesto_at', 'annullamento_errore', 'dogana_bloccata_at',
+].join(',')

@@ -17,7 +17,7 @@ function F({ label, value, full }: { label: string; value: any; full?: boolean }
   )
 }
 
-export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModificata, apriCorrezione }: { s: any; onClose: () => void; etichettaHref?: string; onModificata?: () => void; apriCorrezione?: boolean }) {
+export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, onModificata, apriCorrezione }: { s: any; onClose: () => void; etichettaHref?: string; onModificata?: () => void; apriCorrezione?: boolean }) {
   // Correzione peso/misure (solo master creatore, spedizione con cliente). L'etichetta NON cambia: si
   // ricalcola solo il costo e la differenza va in rettifica su tutta la catena (addebito o rimborso).
   // MULTICOLLO: si corregge ogni collo. colli_dettaglio non e' in SPED_COLS -> lo prendo da /[id].
@@ -32,6 +32,12 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
   const [ant, setAnt] = React.useState<any>(null)
   const [busy, setBusy] = React.useState(false)
   const [msg, setMsg] = React.useState('')
+  // RIGA + DETTAGLIO FUSI. L'elenco master ora manda la riga LEGGERA (28 campi): mittente,
+  // destinatario, contenuto, note, accessori e ritiro non ci sono piu'. Li porta la chiamata per-id
+  // che questa finestra fa gia' all'apertura, e qui i due oggetti si sovrappongono — cosi' ogni
+  // punto che legge `s.` continua a funzionare senza modifiche, sia dal portale master sia da quello
+  // cliente (che manda ancora la riga intera: in quel caso il dettaglio conferma gli stessi valori).
+  const s = React.useMemo(() => ({ ...(sRiga || {}), ...(dett || {}) }), [sRiga, dett])
   React.useEffect(() => {
     setMod(!!apriCorrezione); setAnt(null); setMsg(''); setDett(null); setColliForm([])
     setInterne({ contenuto: '', note: '' }); setInterneIniz({ contenuto: '', note: '' }); setSalvaMsg('')
@@ -96,7 +102,7 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
     } catch (e: any) { setSalvaMsg(String(e?.message || e)) }
     finally { setSalvando(false) }
   }
-  if (!s) return null
+  if (!sRiga) return null
   const eur = (x: any) => '€ ' + Number(x || 0).toFixed(2)
   const dims = [s.lunghezza, s.larghezza, s.altezza].every((x: any) => Number(x) > 0) ? `${s.lunghezza} × ${s.larghezza} × ${s.altezza} cm` : '—'
   const accessori = (s.servizi_accessori || []).map((e: any) => `${e.nome}${e.importo ? ' (€' + Number(e.importo).toFixed(2) + ')' : ''}`).join(', ')

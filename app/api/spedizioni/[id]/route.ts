@@ -13,7 +13,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data, error } = await supabase.from('spedizioni')
-    .select('id,colli,colli_dettaglio,peso_reale,peso_volume,peso_fatturato,lunghezza,larghezza,altezza,raw_response')
+    // Tutti i campi che la FINESTRA di dettaglio mostra: da quando l'elenco manda la riga leggera
+    // (?colonne=lista) questi non arrivano piu' dalla lista, e li porta questa chiamata — che il
+    // dettaglio fa comunque all'apertura. Niente costo_spedizione: e' il costo del master, e questa
+    // rotta la chiama anche il portale cliente.
+    .select('id,numero,tracking_number,stato,created_at,cliente_id,colli,colli_dettaglio,peso_reale,peso_volume,peso_fatturato,lunghezza,larghezza,altezza,contenuto,note,servizi_accessori,contrassegno,assicurazione,valore_merce,costo_totale,richiedi_ritiro,data_ritiro,intervallo_ritiro,mitt_nome,mitt_indirizzo,mitt_citta,mitt_provincia,mitt_cap,mitt_paese,mitt_telefono,mitt_email,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_telefono,dest_email,raw_response')
     .eq('id', id).maybeSingle()
   if (error || !data) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
   // MULTICOLLO senza colli_dettaglio salvato (tipico SpediamoPro): ricostruisco i colli dal raw_response
