@@ -36,6 +36,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     .select('id,master_id,cliente_id,numero,dest_nome,dest_provincia,dest_cap,dest_paese,costo_totale,costo_spedizione,corriere_id,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,stato')
     .eq('id', id).maybeSingle()
   if (!sped || sped.cliente_id !== ctx.clienteId) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
+  // Stessa guardia del portale: se il master ha acceso "vieta cancellazione" su questo cliente, la
+  // chiave API non e' una scorciatoia per aggirarlo (la chiave agisce PER CONTO del cliente).
+  const { clienteNonPuoCancellare, MSG_CANCELLAZIONE_VIETATA } = await import('@/lib/cancellazione-cliente')
+  if (await clienteNonPuoCancellare(admin, sped.cliente_id))
+    return NextResponse.json({ error: MSG_CANCELLAZIONE_VIETATA }, { status: 403 })
   if (sped.stato === 'annullata') return NextResponse.json({ success: true, already: true })
   if (sped.stato === 'annullamento_pending') return NextResponse.json({ success: true, pending: true })
 

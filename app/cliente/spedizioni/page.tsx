@@ -89,10 +89,12 @@ export default function SpedizioniPage() {
   const [resoOpts, setResoOpts] = useState({ assicura: false, ritiro: false, dataRitiro: '', orarioRitiro: 'mattina' })
   // Stampa ZPL/Zebra SOLO se il cliente l'ha attivata in Impostazioni → Stampa (zpl_abilita).
   // Altrimenti: PDF normale (scaricabile). Default OFF, così nessuno resta bloccato.
+  // "Vieta cancellazione LDV" acceso dal master: il cestino non si mostra (la rotta lo blocca comunque).
+  const [vietaCanc, setVietaCanc] = useState(false)
   const [zplOn, setZplOn] = useState(false)
   const [zplStampante, setZplStampante] = useState('')   // nome stampante Zebra configurata (facoltativo)
   useEffect(() => {
-    fetch('/api/cliente/dati').then(r=>r.json()).then(d=>{ setZplOn(d?.impostazioni?.zpl_abilita === 'si'); setZplStampante(d?.impostazioni?.zpl_stampante || '') }).catch(()=>{})
+    fetch('/api/cliente/dati').then(r=>r.json()).then(d=>{ setZplOn(d?.impostazioni?.zpl_abilita === 'si'); setZplStampante(d?.impostazioni?.zpl_stampante || ''); setVietaCanc(d?.vieta_cancellazione === true) }).catch(()=>{})
     // Nomi contratto del cliente per i filtri Vettore/Contratto (le righe caricate sono solo 10)
     fetch('/api/cliente/corrieri-abilitati').then(r=>r.json()).then(d=>{ if(Array.isArray(d)) setContrattiCliente(d.map((c:any)=>c.nome_contratto).filter(Boolean)) }).catch(()=>{})
   }, [])
@@ -599,8 +601,13 @@ async function apriTracking(s: any) {
                             <span title="Dopo i 15 giorni non è più possibile annullare: il corriere non lo consente."
                               style={{padding:'4px 8px',background:'#f5f5f5',color:'#c4c4c4',borderRadius:'4px',fontSize:'14px',border:'1px solid #eee',cursor:'not-allowed'}}>🗑️</span>
                           ) : (
-                            <button onClick={()=>elimina(s.id,s.numero)} disabled={eliminando===s.id}
-                              style={{padding:'4px 8px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'14px',border:'1px solid #fecaca',cursor:'pointer',opacity:eliminando===s.id?0.5:1}} title="Elimina">🗑️</button>
+                            vietaCanc ? (
+                              <span title="Il tuo master ha disattivato la cancellazione: comunicagli quale spedizione annullare e la cancella lui."
+                                style={{padding:'4px 8px',background:'#f5f5f5',color:'#9ca3af',borderRadius:'4px',fontSize:'14px',border:'1px solid #e5e7eb',cursor:'not-allowed'}}>🔒</span>
+                            ) : (
+                              <button onClick={()=>elimina(s.id,s.numero)} disabled={eliminando===s.id}
+                                style={{padding:'4px 8px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'14px',border:'1px solid #fecaca',cursor:'pointer',opacity:eliminando===s.id?0.5:1}} title="Elimina">🗑️</button>
+                            )
                           )}
                           <AssistenzaTicketButton ldv={s.numero} spedizioneId={s.id} />
                         </div>

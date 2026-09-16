@@ -34,6 +34,7 @@ const ADMIN_FIELDS = [
   {key:'prezzi_in_distinta', label:'Prezzi in distinta', desc:'Visualizza / Nascondi i prezzi nella distinta di spedizione PDF.'},
   {key:'visualizza_fatture', label:'Visualizza fatture', desc:'Visualizza / Nascondi la sezione Fatture.'},
   {key:'vieta_inserimento', label:'Vieta inserimento Spedizione', desc:'Se attivo, il cliente NON puo creare spedizioni.'},
+  {key:'vieta_cancellazione', label:'Vieta cancellazione LDV', desc:'Se attivo, il cliente NON puo cancellare le spedizioni: te lo comunica e le cancelli tu. Vale anche per le sue chiamate API.'},
   {key:'gestione_logistica', label:'Spedizioni preparate dalla logistica', desc:'Se attivo, la merce di questo cliente sta nel nostro magazzino: ogni sua spedizione arriva come "da preparare" alla logistica, che la prepara e la segna fatta. Se spento, il cliente spedisce in autonomia.'},
   {key:'ticket_bloccato', label:'Blocca apertura ticket', desc:'Se attivo, il cliente NON puo aprire nuovi ticket di assistenza (le richieste POD restano consentite).'},
 ]

@@ -56,6 +56,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!user) return NextResponse.json({ error: 'Non autenticato'}, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
+  // IL RUOLO, non la sola appartenenza: master_id ce l'hanno anche i clienti, e le regole per riga di
+  // `clienti` lasciano al cliente la SUA riga — senza questo, un cliente poteva chiamare questa rotta
+  // col proprio id e cambiarsi i campi che decide il master (a partire dai blocchi e dal listino).
+  if (!gestisceLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const body = await req.json()
   const { resetPassword, email_conferma, ...datiCliente } = body
 
@@ -138,6 +142,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     visualizza_fatture: datiCliente.visualizza_fatture??true,
     spedizione_custom: datiCliente.spedizione_custom??false,
     vieta_inserimento: datiCliente.vieta_inserimento??false,
+    // Vieta al cliente di cancellare le LDV: le annulla il master, su sua comunicazione.
+    vieta_cancellazione: datiCliente.vieta_cancellazione??false,
     interno_esclusivo: datiCliente.interno_esclusivo??false,
     gestione_logistica: datiCliente.gestione_logistica??false,
     // Freno ticket per questo cliente (impostato dal master).

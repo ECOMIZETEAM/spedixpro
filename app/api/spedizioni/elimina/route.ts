@@ -27,9 +27,13 @@ export async function DELETE(req: NextRequest) {
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 
   // ── Permessi: cliente = le proprie; master = le sue + quelle dei discendenti ──
-  // (Il blocco "vieta_cancellazione" è stato RIMOSSO: non serve più, vale la regola 48h di SpediamoPro.)
   if (utente?.ruolo === 'cliente') {
     if (sped.cliente_id !== utente.cliente_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    // "Vieta cancellazione LDV" acceso dal master su questo cliente: la cancella lui, non il cliente.
+    // La stessa guardia sta anche sulla porta API (v1/shipments): la regola vive in lib/cancellazione-cliente.
+    const { clienteNonPuoCancellare, MSG_CANCELLAZIONE_VIETATA } = await import('@/lib/cancellazione-cliente')
+    if (await clienteNonPuoCancellare(admin, sped.cliente_id))
+      return NextResponse.json({ error: MSG_CANCELLAZIONE_VIETATA }, { status: 403 })
   } else {
     let autorizzato = sped.master_id === utente?.master_id
     if (!autorizzato && utente?.master_id) {
