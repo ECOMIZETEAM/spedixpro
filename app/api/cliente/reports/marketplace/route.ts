@@ -16,6 +16,63 @@ export function piattaformaDa(raw: any): 'amazon' | 'shopify' | 'temu' | 'altro'
   return 'altro'
 }
 
+// Recupera gli ordini importati DA FILE che NON risultano spediti (restano 'da_spedire'/'errore',
+// senza spedizione_id) ma il cui PACCO È GIÀ PARTITO: il cliente ha creato la spedizione a mano da
+// "Nuova Spedizione" mettendo il codice ordine nel riferimento, POI ha importato il file del
+// marketplace → la riga importata non si è mai agganciata alla spedizione e sparisce dal report anche
+// se spedita (spesso già consegnata). Li riaggancio per rif_ordine = ordine, così tornano nel report
+// e nel file di conferma. (Causa dei "dopo aver spedito non trovo tutti gli ordini nel report".)
+// Perché lo stato è rimasto indietro: quel pacco è nato da un'ALTRA porta (Nuova Spedizione), non
+// dalla lista ordini, quindi lo stato dell'ordine importato non è mai passato a 'spedito'.
+// Finestra 120gg: una conferma più vecchia è fuori dai tempi utili di Amazon, e non vale il costo di
+// scandagliare backlog enormi di 'da spedire' MAI spediti (clienti con migliaia di righe). Due sole
+// query (ordini + spedizioni del cliente) con aggancio in memoria: niente .in() a blocchi sui rif.
+export async function ordiniSpeditiPerRiferimento(supabase: any, clienteId: string, spedSelect: string) {
+  const DA = new Date(Date.now() - 120 * 24 * 3600 * 1000).toISOString()
+  const orfani = await fetchAll(() => supabase
+    .from('ordini_importati')
+    .select('id, order_id, contenuto, colli, raw, articoli')
+    .eq('cliente_id', clienteId)
+    .in('stato', ['da_spedire', 'errore'])
+    .is('integrazione_id', null)
+    .is('spedizione_id', null)
+    .gte('created_at', DA)
+    .order('id', { ascending: true }))
+  const rifDi = (o: any) => o.order_id || o.raw?.amazonorderid || o.raw?.amazon_order_id || o.raw?.orderid || null
+  const conRif = (orfani || []).map((o: any) => ({ o, rif: rifDi(o) })).filter((x: any) => x.rif)
+  if (!conRif.length) return []
+
+  // Tutte le spedizioni valide del cliente (120gg) con un riferimento: UNA fetch, poi aggancio in
+  // memoria per rif_ordine. Ordinate desc → per ogni rif tengo la spedizione più recente.
+  const speds = await fetchAll(() => supabase
+    .from('spedizioni')
+    .select(spedSelect + ', rif_ordine')
+    .eq('cliente_id', clienteId)
+    .not('rif_ordine', 'is', null)
+    .is('cancellata_il', null)
+    .gte('created_at', DA)
+    .order('created_at', { ascending: false }))
+  const ANN = ['annullata', 'annullamento_pending', 'annullamento_manuale']
+  const spedDiRif = new Map<string, any>()
+  for (const s of (speds || [])) {
+    if (ANN.includes(String((s as any).stato || ''))) continue
+    const rif = (s as any).rif_ordine
+    if (rif && !spedDiRif.has(rif)) spedDiRif.set(rif, s)
+  }
+
+  // Aggancio + dedup per riferimento: non confermare due volte lo stesso ordine col medesimo tracking.
+  const visti = new Set<string>()
+  const out: any[] = []
+  for (const { o, rif } of conRif) {
+    if (visti.has(rif as string)) continue
+    const sp = spedDiRif.get(rif as string)
+    if (!sp) continue
+    visti.add(rif as string)
+    out.push({ ...o, spedizioni: sp })
+  }
+  return out
+}
+
 // Report degli ordini importati DA FILE (non dai negozi collegati) e già SPEDITI:
 // raggruppati per piattaforma (Amazon/Shopify) e per data di spedizione, con i conteggi.
 export async function GET() {
@@ -57,7 +114,12 @@ export async function GET() {
     for (const c of (capi || [])) if ((c as any).spedizioni) spedDiCapo.set((c as any).id, (c as any).spedizioni)
   }
   const unitiConSped = (uniti || []).map((u: any) => ({ ...u, spedizioni: spedDiCapo.get(u.unito_in) })).filter((u: any) => u.spedizioni)
-  const righeTutte = [...(righe || []), ...unitiConSped]
+
+  // Ordini spediti "per riferimento" (pacco partito da Nuova Spedizione, ordine importato dopo → mai
+  // agganciato): vanno CONTATI come gli altri, se no il numero a video < record nel file scaricabile.
+  const orfani = await ordiniSpeditiPerRiferimento(supabase, utente.cliente_id, 'created_at, stato, cancellata_il')
+
+  const righeTutte = [...(righe || []), ...unitiConSped, ...orfani]
 
   const ANNULLATI = ['annullata', 'annullamento_pending', 'annullamento_manuale']
   // Raggruppo per piattaforma + data di spedizione. Conto ORDINI e RIGHE: Amazon evade per

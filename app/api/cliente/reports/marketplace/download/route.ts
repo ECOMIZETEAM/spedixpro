@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { piattaformaDa } from '../route'
+import { piattaformaDa, ordiniSpeditiPerRiferimento } from '../route'
 import { fetchAll } from '@/lib/fetch-all'
 
 export const dynamic = 'force-dynamic'
@@ -87,7 +87,15 @@ export async function GET(req: NextRequest) {
   const unitiConSped = (uniti || [])
     .map((u: any) => ({ ...u, spedizioni: spedDiCapo.get(u.unito_in) }))
     .filter((u: any) => u.spedizioni)   // solo se il capofila ha davvero una spedizione
-  const righeTutte = [...(righe || []), ...unitiConSped]
+
+  // Ordini spediti "per riferimento" (pacco creato da Nuova Spedizione col codice ordine nel
+  // riferimento, ordine importato dopo → mai agganciato): vanno confermati al marketplace col tracking
+  // di quella spedizione, altrimenti restano "non spediti" pur essendo partiti (spesso già consegnati).
+  const orfani = await ordiniSpeditiPerRiferimento(
+    supabase, utente.cliente_id,
+    'tracking_number, created_at, stato, cancellata_il, corrieri(nome_contratto)')
+
+  const righeTutte = [...(righe || []), ...unitiConSped, ...orfani]
 
   const ANNULLATI = ['annullata', 'annullamento_pending', 'annullamento_manuale']
   // Filtro per piattaforma (dal raw), data di spedizione e spedizione ancora valida
