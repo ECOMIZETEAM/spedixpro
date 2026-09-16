@@ -433,7 +433,11 @@ export async function GET(req: NextRequest) {
     for (const lid of listini) calcPerListino.set(lid, await creaCalcolatoreListinoCliente(db, lid, capPagina))
     segna('calc-listino(' + listini.length + ')')
     // Scalda la cache DOPO la risposta (vedi sotto, stesso motivo del calcolatore corriere).
-    after(async () => { for (const lid of listini) { try { await creaCalcolatoreListinoCliente(db, lid) } catch { /* scaldare non deve rompere */ } } })
+    after(async () => {
+      const tW = Date.now()
+      for (const lid of listini) { try { await creaCalcolatoreListinoCliente(db, lid) } catch { /* scaldare non deve rompere */ } }
+      console.log('[LISTA][SCALDA] listini', listini.length, Date.now() - tW + 'ms')
+    })
   }
   // 2) Fallback PREZZO CORRIERE quando manca il MIO movimento (spedizioni vecchie / rete non
   //    tracciata): calcolo il MIO listino corriere. Per le spedizioni di rete il corriere è del
@@ -447,7 +451,13 @@ export async function GET(req: NextRequest) {
     // ricostruisce il calcolatore (179-273 ms misurati in produzione). Con after() la versione
     // INTERA si costruisce dopo aver risposto: nessuno aspetta, e le richieste successive su questa
     // istanza la trovano pronta e non fanno nemmeno una query.
-    after(async () => { try { await creaCalcolatoreCorriere(db, mineId) } catch { /* scaldare non deve rompere la lista */ } })
+    after(async () => {
+      const tW = Date.now()
+      try { await creaCalcolatoreCorriere(db, mineId) } catch { /* scaldare non deve rompere la lista */ }
+      // Se questo dura secondi e cade mentre l'istanza serve altre richieste, il costo non e' stato
+      // tolto ma spostato addosso alla richiesta successiva: e' l'ipotesi da confermare.
+      console.log('[LISTA][SCALDA] corriere', Date.now() - tW + 'ms')
+    })
     if (!nomeToMioCorr.size) {
       const { data: miei } = await db.from('corrieri').select('id,nome_contratto').eq('master_id', mineId)
       for (const c of (miei || [])) nomeToMioCorr.set((c as any).nome_contratto, (c as any).id)
