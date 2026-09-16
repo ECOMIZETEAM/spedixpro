@@ -5,7 +5,7 @@ import { fetchAll } from '@/lib/fetch-all'
 
 // STATISTICHE — CLIENTI del master (sola lettura). Solo i PROPRI clienti diretti (analisi per cliente)
 // + i sotto-master diretti come entità. Fatturato/profitto = margine del master su ciascuno.
-const TIPI = ['spedizione', 'rimborso', 'rettifica']
+const TIPI = ['spedizione', 'rimborso', 'rettifica', 'reso', 'giacenza']  // come Profitto/Report Guadagno (resi+giacenze inclusi)
 const n = (x: any) => Number(x || 0)
 const r2 = (x: number) => Math.round(x * 100) / 100
 
@@ -32,16 +32,26 @@ export async function GET(req: NextRequest) {
   const movM = await fetchAll(() => admin.from('movimenti').select('cliente_id,master_target_id,importo,tipo,spedizione_id,created_at')
     .eq('master_id', M).not('spedizione_id', 'is', null).gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI).order('created_at', { ascending: false }))
   let movSub: any[] = []
-  if (subIds.length) movSub = await fetchAll(() => admin.from('movimenti').select('master_id,master_target_id,importo,spedizione_id')
+  if (subIds.length) movSub = await fetchAll(() => admin.from('movimenti').select('master_id,master_target_id,importo,spedizione_id,tipo')
     .in('master_id', subIds).not('spedizione_id', 'is', null).gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI))
 
+  // Dedup: la spedizione base è già contata nel self del figlio (movSub); qui aggiungo SOLO il ri-addebito
+  // (reweight/reso/giacenza) che M carica al sotto-master (master_id=M, target=figlio, tipo≠spedizione),
+  // altrimenti quel ricavo cade fuori dal conteggio come nella statistica Profitto. Come Report Guadagno.
+  const selfSubKeys = new Set<string>()
+  for (const m of movSub) if (m.master_id === m.master_target_id && (m as any).spedizione_id) selfSubKeys.add((m as any).spedizione_id + '|' + m.master_id + '|' + (m as any).tipo)
+
   const ricavoCli = new Map<string, number>(), costoSped = new Map<string, number>(), cliDiSped = new Map<string, string>()
+  const ricavoSub = new Map<string, number>()
   for (const m of movM) {
     const sid = (m as any).spedizione_id
     if (m.cliente_id) { const v = -n(m.importo); ricavoCli.set(m.cliente_id, (ricavoCli.get(m.cliente_id) || 0) + v); if (sid) cliDiSped.set(sid, m.cliente_id) }
     else if (m.master_target_id === M && sid) costoSped.set(sid, (costoSped.get(sid) || 0) + (-n(m.importo)))
+    else if ((m as any).tipo !== 'spedizione' && m.master_target_id && subDiretti.has(m.master_target_id)
+             && !selfSubKeys.has(sid + '|' + m.master_target_id + '|' + (m as any).tipo)) {
+      ricavoSub.set(m.master_target_id, (ricavoSub.get(m.master_target_id) || 0) + (-n(m.importo)))
+    }
   }
-  const ricavoSub = new Map<string, number>()
   for (const m of movSub) if (m.master_id === m.master_target_id) ricavoSub.set(m.master_id, (ricavoSub.get(m.master_id) || 0) + (-n(m.importo)))
   const costoPerCli = new Map<string, number>()
   for (const [sid, c] of costoSped) { const cli = cliDiSped.get(sid); if (cli) costoPerCli.set(cli, (costoPerCli.get(cli) || 0) + c) }

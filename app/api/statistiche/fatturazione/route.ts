@@ -5,7 +5,7 @@ import { fetchAll } from '@/lib/fetch-all'
 
 // STATISTICHE — FATTURAZIONE (sola lettura). Fatturato del master ai propri clienti/sotto-master
 // diretti, con quota "da fatturare" (clienti a fattura mensile).
-const TIPI = ['spedizione', 'rimborso', 'rettifica']
+const TIPI = ['spedizione', 'rimborso', 'rettifica', 'reso', 'giacenza']  // come Profitto/Report Guadagno
 const n = (x: any) => Number(x || 0)
 const r2 = (x: number) => Math.round(x * 100) / 100
 
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
   const movM = await fetchAll(() => admin.from('movimenti').select('cliente_id,importo,tipo,created_at').eq('master_id', M)
     .not('cliente_id', 'is', null).not('spedizione_id', 'is', null).gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI).order('created_at', { ascending: true }))
   let movSub: any[] = []
-  if (subIds.length) movSub = await fetchAll(() => admin.from('movimenti').select('master_id,master_target_id,importo,created_at')
+  if (subIds.length) movSub = await fetchAll(() => admin.from('movimenti').select('master_id,master_target_id,importo,created_at,spedizione_id,tipo')
     .in('master_id', subIds).not('spedizione_id', 'is', null).gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI))
 
   const perMese = new Map<string, number>()
@@ -36,6 +36,23 @@ export async function GET(req: NextRequest) {
   for (const m of movM) { const v = -n(m.importo); ricavoCli.set(m.cliente_id, (ricavoCli.get(m.cliente_id) || 0) + v); const k = m.created_at.slice(0, 7); perMese.set(k, (perMese.get(k) || 0) + v) }
   const ricavoSub = new Map<string, number>()
   for (const m of movSub) if (m.master_id === m.master_target_id) { const v = -n(m.importo); ricavoSub.set(m.master_id, (ricavoSub.get(m.master_id) || 0) + v); const k = m.created_at.slice(0, 7); perMese.set(k, (perMese.get(k) || 0) + v) }
+
+  // Ricavo del RI-ADDEBITO ai sotto-master (reweight/reso/giacenza che M carica al figlio: master_id=M,
+  // target=figlio, niente cliente, tipo≠spedizione). movM qui prende solo i movimenti cliente, quindi
+  // serve una fetch dedicata; senza, il fatturato di rete era sottostimato (come nella statistica Profitto).
+  // Dedup su selfSubKeys: la spedizione base è già nel self del figlio (movSub).
+  const selfSubKeys = new Set<string>()
+  for (const m of movSub) if (m.master_id === m.master_target_id && (m as any).spedizione_id) selfSubKeys.add((m as any).spedizione_id + '|' + m.master_id + '|' + (m as any).tipo)
+  if (subIds.length) {
+    const movRi = await fetchAll(() => admin.from('movimenti').select('master_target_id,importo,created_at,spedizione_id,tipo')
+      .eq('master_id', M).is('cliente_id', null).in('master_target_id', subIds).neq('tipo', 'spedizione')
+      .not('spedizione_id', 'is', null).gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI))
+    for (const m of movRi) {
+      if (selfSubKeys.has((m as any).spedizione_id + '|' + m.master_target_id + '|' + (m as any).tipo)) continue
+      const v = -n(m.importo); ricavoSub.set(m.master_target_id, (ricavoSub.get(m.master_target_id) || 0) + v)
+      const k = (m as any).created_at.slice(0, 7); perMese.set(k, (perMese.get(k) || 0) + v)
+    }
+  }
 
   // Clienti (nome + tipo contratto per il "da fatturare")
   const cliIds = Array.from(ricavoCli.keys())
