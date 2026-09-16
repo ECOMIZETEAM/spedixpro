@@ -24,13 +24,28 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
   const [mod, setMod] = React.useState(false)
   const [dett, setDett] = React.useState<any>(null)
   const [colliForm, setColliForm] = React.useState<{ peso: string; lunghezza: string; larghezza: string; altezza: string }[]>([])
+  // Appunti del master: valore in modifica + valore salvato (per sapere se c'e' qualcosa da salvare).
+  const [interne, setInterne] = React.useState<{ contenuto: string; note: string }>({ contenuto: '', note: '' })
+  const [interneIniz, setInterneIniz] = React.useState<{ contenuto: string; note: string }>({ contenuto: '', note: '' })
+  const [salvando, setSalvando] = React.useState(false)
+  const [salvaMsg, setSalvaMsg] = React.useState('')
   const [ant, setAnt] = React.useState<any>(null)
   const [busy, setBusy] = React.useState(false)
   const [msg, setMsg] = React.useState('')
   React.useEffect(() => {
     setMod(!!apriCorrezione); setAnt(null); setMsg(''); setDett(null); setColliForm([])
+    setInterne({ contenuto: '', note: '' }); setInterneIniz({ contenuto: '', note: '' }); setSalvaMsg('')
     if (!s?.id) return
     let vivo = true
+    // Gli appunti stanno in una tabella a parte (il cliente non li vede): lettura a parte. Solo dal
+    // portale master — nel portale cliente onModificata non c'e' e la rotta risponderebbe 403.
+    if (onModificata) {
+      fetch('/api/spedizioni/nota-interna?spedizione_id=' + s.id).then(r => r.ok ? r.json() : null).then(d => {
+        if (!vivo || !d) return
+        const v = { contenuto: String(d.contenuto || ''), note: String(d.note || '') }
+        setInterne(v); setInterneIniz(v)
+      }).catch(() => {})
+    }
     fetch(`/api/spedizioni/${s.id}`).then(r => r.ok ? r.json() : null).then(d => {
       if (!vivo || !d) return
       setDett(d)
@@ -64,6 +79,22 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
       else { onModificata?.(); onClose() }
     } catch (e: any) { setMsg(String(e?.message || e)) }
     finally { setBusy(false) }
+  }
+  // SALVATAGGIO SEPARATO dal ricalcolo: due righe di appunti non devono far ripartire il calcolo del
+  // costo — con un listino cambiato nel frattempo riscriverebbe il prezzo di una spedizione gia' fatta.
+  async function salvaInterne() {
+    setSalvando(true); setSalvaMsg('')
+    try {
+      const r = await fetch('/api/spedizioni/nota-interna', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ spedizioneId: s.id, contenuto: interne.contenuto, note: interne.note }),
+      })
+      const d = await r.json()
+      if (!r.ok) { setSalvaMsg(d.error || 'Errore'); return }
+      setInterneIniz({ contenuto: interne.contenuto, note: interne.note })
+      setSalvaMsg('Salvato')
+    } catch (e: any) { setSalvaMsg(String(e?.message || e)) }
+    finally { setSalvando(false) }
   }
   if (!s) return null
   const eur = (x: any) => '€ ' + Number(x || 0).toFixed(2)
@@ -151,6 +182,34 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
               {s.richiedi_ritiro ? <F label="Ritiro richiesto" value={`${s.data_ritiro || ''} ${s.intervallo_ritiro || ''}`.trim() || 'Sì'} /> : <div />}
             </div>
           </div>
+
+          {puoCorreggere && (
+            <div style={card}>
+              <div style={cardH}>Appunti del master</div>
+              <div style={{ padding: '14px 15px' }}>
+                <div style={{ fontSize: '12px', color: '#666', marginBottom: '10px' }}>Solo per te: non vanno al corriere, non finiscono sull'etichetta e il cliente non li vede. Contenuto e note dichiarati dal cliente restano quelli qui sopra.</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div>
+                    <div style={lblS}>Contenuto</div>
+                    <input value={interne.contenuto} maxLength={2000} onChange={e => setInterne(v => ({ ...v, contenuto: e.target.value }))}
+                      placeholder="cosa c'era davvero nel pacco" style={{ width: '100%', padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }} />
+                  </div>
+                  <div>
+                    <div style={lblS}>Note</div>
+                    <textarea value={interne.note} maxLength={2000} rows={2} onChange={e => setInterne(v => ({ ...v, note: e.target.value }))}
+                      placeholder="promemoria, accordi col cliente, cos'è successo…" style={{ width: '100%', padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', fontFamily: 'inherit', resize: 'vertical' }} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px' }}>
+                  <button onClick={salvaInterne} disabled={salvando || (interne.contenuto === interneIniz.contenuto && interne.note === interneIniz.note)}
+                    style={{ padding: '8px 14px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: salvando ? 'default' : 'pointer', opacity: (interne.contenuto === interneIniz.contenuto && interne.note === interneIniz.note) ? 0.5 : 1 }}>
+                    {salvando ? '…' : 'Salva appunti'}
+                  </button>
+                  {salvaMsg && <span style={{ fontSize: '12px', fontWeight: 600, color: salvaMsg === 'Salvato' ? '#16a34a' : '#dc2626' }}>{salvaMsg}</span>}
+                </div>
+              </div>
+            </div>
+          )}
 
           {mod && (
             <div ref={modRef} style={{ ...card, border: '1px solid #fed7aa' }}>
