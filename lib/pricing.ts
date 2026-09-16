@@ -635,12 +635,24 @@ export async function calcolaSupplementiCliente(
   return { contrassegno: feeCod, assicurazione: feeAss, disponibile: true }
 }
 
+// Restringe una query zone_cap ai soli CAP da prezzare, PIU' le righe senza CAP (provincia e jolly),
+// che matchZona usa quando il CAP esatto non c'e'. Senza elenco — o con troppi CAP, es. un report su
+// tutto il mese — si legge tutto come prima: meglio una query grossa che mille piccole.
+function zoneCapMirate(q: any, cap?: string[] | null) {
+  const lista = Array.from(new Set((cap || [])
+    .map(c => String(c || '').trim())
+    .filter(c => /^[A-Za-z0-9-]{1,10}$/.test(c))))
+  if (!lista.length || lista.length > 200) return q
+  return q.or(`cap.is.null,cap.eq.*,cap.in.(${lista.join(',')})`)
+}
+
 // Versione BATCH: precarica UNA volta i listini/fasce/supplementi/zone_cap del master
 // e ritorna una funzione che calcola il prezzo corriere per una spedizione in memoria,
 // senza query per riga. Risultato identico a calcolaPrezzoCorriere (usato dai report).
 async function creaCalcolatoreCorriereBase(
   supabase: any,
-  masterId: string
+  masterId: string,
+  capDaPrezzare?: string[] | null
 ): Promise<(s: any) => DettaglioPrezzo | null> {
   const { data: listini } = await supabase
     .from('listini_corrieri').select('id,corriere_id,fattore_volume')
@@ -680,7 +692,8 @@ async function creaCalcolatoreCorriereBase(
 
   const zonaIds = Array.from(new Set((fasce || []).map((f: any) => f.zone?.id).filter(Boolean)))
   const zc: any[] = zonaIds.length
-    ? await fetchAll(() => supabase.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', zonaIds))
+    ? await fetchAll(() => zoneCapMirate(
+        supabase.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', zonaIds), capDaPrezzare))
     : []
   const zcByPaese = new Map<string, any[]>()
   for (const r of zc || []) {
@@ -776,7 +789,8 @@ async function creaCalcolatoreCorriereBase(
 // (masters.parent_listino_id). Stessa logica di calcolaPrezzoListino, ma in memoria.
 async function creaCalcolatoreListinoClienteBase(
   supabase: any,
-  listinoId: string
+  listinoId: string,
+  capDaPrezzare?: string[] | null
 ): Promise<(s: any) => DettaglioPrezzo | null> {
   if (!listinoId) return () => null
   const { data: listino } = await supabase.from('listini_clienti').select('fattore_volume,solo_peso_reale').eq('id', listinoId).single()
@@ -818,7 +832,8 @@ async function creaCalcolatoreListinoClienteBase(
 
   const zonaIds = Array.from(new Set((fasce || []).map((f: any) => f.zone?.id).filter(Boolean)))
   const zc: any[] = zonaIds.length
-    ? await fetchAll(() => supabase.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', zonaIds))
+    ? await fetchAll(() => zoneCapMirate(
+        supabase.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', zonaIds), capDaPrezzare))
     : []
   const zcByPaese = new Map<string, any[]>()
   for (const r of zc || []) {
@@ -970,17 +985,23 @@ function inCache(chiave: string, calc: (s: any) => DettaglioPrezzo | null) {
 
 export async function creaCalcolatoreCorriere(
   supabase: any,
-  masterId: string
+  masterId: string,
+  capDaPrezzare?: string[] | null
 ): Promise<(s: any) => DettaglioPrezzo | null> {
+  // MIRATO = costruito sui soli CAP di una pagina: non va in cache, altrimenti un report che chiede
+  // lo stesso master si ritroverebbe le zone parziali e prezzerebbe sbagliato. Costa poco comunque.
+  if (capDaPrezzare && capDaPrezzare.length) return creaCalcolatoreCorriereBase(supabase, masterId, capDaPrezzare)
   const k = 'corr:' + masterId
   return dallaCache(k) || inCache(k, await creaCalcolatoreCorriereBase(supabase, masterId))
 }
 
 export async function creaCalcolatoreListinoCliente(
   supabase: any,
-  listinoId: string
+  listinoId: string,
+  capDaPrezzare?: string[] | null
 ): Promise<(s: any) => DettaglioPrezzo | null> {
   if (!listinoId) return () => null
+  if (capDaPrezzare && capDaPrezzare.length) return creaCalcolatoreListinoClienteBase(supabase, listinoId, capDaPrezzare)
   const k = 'cli:' + listinoId
   return dallaCache(k) || inCache(k, await creaCalcolatoreListinoClienteBase(supabase, listinoId))
 }

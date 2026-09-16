@@ -389,6 +389,11 @@ export async function GET(req: NextRequest) {
   // In LIGHT si saltano del tutto: chi la chiede mostra solo i campi base.
   if (!light) await Promise.all([caricaMovimenti(), caricaIdOrdine(), caricaResi(), caricaTicket()])
 
+  // CAP DELLA PAGINA: i calcolatori qui sotto devono prezzare SOLO queste righe, quindi si portano
+  // dietro i loro CAP e leggono le zone mirate invece di tutte quelle del listino (per un master vero
+  // sono 19.225 righe, ~20 round-trip in fila: 1.956 ms misurati per prezzarne una).
+  const capPagina = Array.from(new Set((spedizioni || []).map((s: any) => s.dest_cap).filter(Boolean)))
+
   // Fallback PIGRI (DOPO i movimenti: dipendono dai prezzi reali): i calcolatori listino (query
   // pesanti su fasce/zone) si costruiscono SOLO se esiste almeno una riga senza prezzo reale.
   // 1) Listino cliente verso la prima linea: serve alle righe di RETE senza movimento del diretto.
@@ -403,14 +408,14 @@ export async function GET(req: NextRequest) {
     const { data: miei } = await db.from('corrieri').select('id,nome_contratto').eq('master_id', utente?.master_id)
     for (const c of (miei || [])) nomeToMioCorr.set(c.nome_contratto, c.id)
     const listini = Array.from(new Set(Array.from(parentListinoOf.values()).filter(Boolean))) as string[]
-    for (const lid of listini) calcPerListino.set(lid, await creaCalcolatoreListinoCliente(db, lid))
+    for (const lid of listini) calcPerListino.set(lid, await creaCalcolatoreListinoCliente(db, lid, capPagina))
   }
   // 2) Fallback PREZZO CORRIERE quando manca il MIO movimento (spedizioni vecchie / rete non
   //    tracciata): calcolo il MIO listino corriere. Per le spedizioni di rete il corriere è del
   //    sotto-master -> lo rimappo al MIO corriere con lo stesso nome_contratto.
   let calcMioCorr: ((s: any) => any) | null = null
   if (!light && mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).some((s: any) => !costoMine.has(s.id))) {
-    try { calcMioCorr = await creaCalcolatoreCorriere(db, mineId) } catch { calcMioCorr = null }
+    try { calcMioCorr = await creaCalcolatoreCorriere(db, mineId, capPagina) } catch { calcMioCorr = null }
     if (!nomeToMioCorr.size) {
       const { data: miei } = await db.from('corrieri').select('id,nome_contratto').eq('master_id', mineId)
       for (const c of (miei || [])) nomeToMioCorr.set((c as any).nome_contratto, (c as any).id)
@@ -421,7 +426,7 @@ export async function GET(req: NextRequest) {
   // null → pareggiato al prezzo cliente → elenco TUTTO a margine 0.
   let calcAgente: ((s: any) => any) | null = null
   if (!light && ruolo === 'agente' && (utente as any)?.listino_agente_id && (spedizioni || []).length) {
-    try { calcAgente = await creaCalcolatoreListinoCliente(db, (utente as any).listino_agente_id) } catch { calcAgente = null }
+    try { calcAgente = await creaCalcolatoreListinoCliente(db, (utente as any).listino_agente_id, capPagina) } catch { calcAgente = null }
   }
 
   // Flag "annullo bloccato oltre 15 giorni": SOLO SpediamoPro (limite fisso di Poste), stessa condizione
