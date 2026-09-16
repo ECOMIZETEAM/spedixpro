@@ -162,37 +162,30 @@ export async function costruisciCatena(
     currentId = m.parent_master_id
   }
 
-  // ── RETE DI SICUREZZA ANTI VENDITA SOTTO COSTO ──
-  // Il vincolo VERO è UNO: nessun livello paga meno del COSTO REALE del provider — `costoSpedizione`
-  // (= quotation/shipmentCost per i rivenduti SpediamoPro/DVA/Spedisci; il listino del master per i
-  // diretti GLS/BRT). Serviva perché il PESO usato per la rivendita a volte usciva più basso di quello
-  // con cui il provider fatturava davvero (fattore-volume di catena più generoso, o agevolazione
-  // peso-reale su scatola fuori sagoma) → il sub-master pagava la fascia "fino a 10" col costo reale
-  // "fino a 20" (~2.660 EUR persi su 1.064 sped lug-set 2026).
+  // ── FLOOR ANTI-SOTTO-COSTO: SOLO SUL DETENTORE DEL CONTRATTO ──
+  // Il costo reale del provider (`costoSpedizione` = quotation/shipmentCost per SpediamoPro/DVA/Spedisci)
+  // lo paga materialmente CHI POSSIEDE il contratto: MULTIEXPRESS per i contratti di rete, o il master
+  // stesso per i suoi contratti propri. Il suo movimento DEVE riflettere quanto ha pagato davvero, quindi
+  // se il suo listino è più basso del costo reale si alza al costo reale.
   //
-  // ⚠️ Prima si livellava al LISTINO del livello SOTTO (più a monte). SBAGLIATO: quel listino può stare
-  // SOPRA il costo reale e allora gonfia i sotto-master. Caso reale (15/09): BRT Express, Velox floorato
-  // al listino di MULTIEXPRESS 270,52 mentre SpediamoPro costava davvero 141,59 → Velox −106,92 di
-  // troppo, pur avendo il suo listino a 163,60 (già sopra il costo vero). Il listino di ogni livello è
-  // la SUA verità; l'unico confronto sensato è col costo reale del provider, che ce l'ha il detentore.
-  // Quindi si ancora a `costoSpedizione`, non ai listini intermedi. NON tocca i clienti (calcolati a parte).
+  // I master A VALLE, invece, pagano il LORO listino e basta. Se quel listino risulta sotto il costo reale
+  // NON è una perdita da scaricare sul rivenditore: è il segnale che la piattaforma ha prezzato male quella
+  // fascia (listino di rivendita al sub-master troppo basso, o peso volumetrico sottostimato rispetto a
+  // quello con cui il provider fattura). Il DETENTORE del contratto assorbe la differenza e la vede nel suo
+  // margine → così capisce che deve correggere il prezzo. Livellare anche i sub-master al costo reale
+  // spostava la perdita sul rivenditore e gli faceva pagare PIÙ del suo listino ("ho 5€ sulla fascia ma
+  // ne pago 6?"). Deciso 16/09 su segnalazione: "il contratto è del detentore, solo lui deve vedere il
+  // costo DVA; gli altri pagano il loro listino". NON tocca i clienti (calcolati a parte).
   const costoReale = Number(params.costoSpedizione || 0)
   if (costoReale > 0) {
     for (let i = 0; i < catena.length; i++) {
-      if (catena[i].prezzo < costoReale - 0.005) {
-        console.warn('[CATENA][SOTTO-COSTO] livellato al COSTO REALE del provider', {
+      if (catena[i].isProprietario && catena[i].prezzo < costoReale - 0.005) {
+        console.warn('[CATENA][SOTTO-COSTO] detentore livellato al COSTO REALE del provider', {
           contratto: params.corriereNome, master: catena[i].nome,
           prezzo_calcolato: catena[i].prezzo, costo_reale: costoReale, delta: Math.round((costoReale - catena[i].prezzo) * 100) / 100,
         })
         catena[i].prezzo = costoReale
       }
-    }
-  } else {
-    // Costo reale non disponibile (es. verifica credito PRIMA della creazione dal provider, che non
-    // conosce ancora shipmentCost): ripiego sul vecchio livellamento monotono come rete minima, senza
-    // muovere soldi (l'addebito vero passa sempre il costoSpedizione e usa il ramo sopra).
-    for (let i = catena.length - 2; i >= 0; i--) {
-      if (catena[i].prezzo < catena[i + 1].prezzo - 0.005) catena[i].prezzo = catena[i + 1].prezzo
     }
   }
 
