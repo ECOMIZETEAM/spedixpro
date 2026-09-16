@@ -601,8 +601,12 @@ export async function GET(req: NextRequest) {
 
   segna('fine')
   const totMs = Date.now() - t0
-  // Si logga solo quando vale la pena guardare (sopra mezzo secondo): i giri veloci non sporcano i log.
-  if (totMs > 500) console.log('[LISTA][TEMPI]', totMs + 'ms', 'pag=' + (pageParam || '-'), 'righe=' + (rowsOut || []).length, '|', tempi.join(' '))
+  // ETA' DELL'ISTANZA: process.uptime() piccolo = funzione appena accesa, e allora l'utente ha pagato
+  // anche l'avvio a freddo, che questo cronometro NON misura (parte a funzione gia' viva). Serve a
+  // capire se i secondi percepiti sono accensioni: un totale basso su istanza appena nata lo dice.
+  const eta = Math.round(process.uptime())
+  // Si logga quando vale la pena guardare: giro lento OPPURE istanza appena accesa.
+  if (totMs > 500 || eta < 5) console.log('[LISTA][TEMPI]', totMs + 'ms', 'istanza=' + eta + 's', 'pag=' + (pageParam || '-'), 'perPage=' + perPage, 'righe=' + (rowsOut || []).length, '|', tempi.join(' '))
   if (paged) return NextResponse.json({ rows: rowsOut, total: totalePaginato < 0 ? null : totalePaginato, page: pageParam, perPage })
   return NextResponse.json(rowsOut)
 }
