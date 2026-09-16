@@ -32,7 +32,7 @@ export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, 
   const [ant, setAnt] = React.useState<any>(null)
   const [busy, setBusy] = React.useState(false)
   const [msg, setMsg] = React.useState('')
-  // RIGA + DETTAGLIO FUSI. L'elenco master ora manda la riga LEGGERA (28 campi): mittente,
+  // RIGA + DETTAGLIO FUSI. L'elenco master ora manda la riga LEGGERA (30 campi): mittente,
   // destinatario, contenuto, note, accessori e ritiro non ci sono piu'. Li porta la chiamata per-id
   // che questa finestra fa gia' all'apertura, e qui i due oggetti si sovrappongono — cosi' ogni
   // punto che legge `s.` continua a funzionare senza modifiche, sia dal portale master sia da quello
