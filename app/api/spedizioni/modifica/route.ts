@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   if (!gestisceLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const body = await req.json().catch(() => ({}))
-  const { spedizioneId, colli, dryRun } = body || {}
+  const { spedizioneId, colli, dryRun, contenuto, note } = body || {}
   if (!spedizioneId) return NextResponse.json({ error: 'spedizioneId mancante' }, { status: 400 })
   if (!Array.isArray(colli) || !colli.length) return NextResponse.json({ error: 'Indica almeno un collo' }, { status: 400 })
   const colliNorm = colli.map((c: any) => ({
@@ -39,6 +39,14 @@ export async function POST(req: NextRequest) {
   }))
   if (colliNorm.some(c => c.peso <= 0 || c.lunghezza <= 0 || c.larghezza <= 0 || c.altezza <= 0))
     return NextResponse.json({ error: 'Peso e misure di ogni collo devono essere maggiori di 0' }, { status: 400 })
+
+  // CONTENUTO e NOTE si correggono da qui, insieme a peso/misure. Al corriere NON si rimanda niente: i
+  // suoi dati sono quelli della creazione. Questi valgono per cio' che risulta a NOI — dettaglio,
+  // riepilogo ordine, report — e per l'etichetta quando viene ristampata (alcuni contratti ci
+  // stampano sopra il contenuto dichiarato). Campo assente = non si tocca; stringa vuota = si svuota.
+  const testi: { contenuto?: string | null; note?: string | null } = {}
+  if (typeof contenuto === 'string') testi.contenuto = contenuto.trim().slice(0, 1500) || null
+  if (typeof note === 'string') testi.note = note.trim().slice(0, 1000) || null
 
   const admin = createAdminSupabase()
   const { data: sped } = await admin.from('spedizioni')
@@ -143,6 +151,7 @@ export async function POST(req: NextRequest) {
     colli: colliNorm.length,
     colli_dettaglio: colliNorm.map((c, i) => ({ numero: i + 1, lunghezza: c.lunghezza, larghezza: c.larghezza, altezza: c.altezza, peso: c.peso })),
     costo_totale: nuovoCostoCliente,
+    ...testi,
     updated_at: new Date().toISOString(),
   }).eq('id', spedizioneId)
 

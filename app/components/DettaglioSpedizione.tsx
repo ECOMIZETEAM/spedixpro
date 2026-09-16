@@ -24,16 +24,18 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
   const [mod, setMod] = React.useState(false)
   const [dett, setDett] = React.useState<any>(null)
   const [colliForm, setColliForm] = React.useState<{ peso: string; lunghezza: string; larghezza: string; altezza: string }[]>([])
+  const [testi, setTesti] = React.useState<{ contenuto: string; note: string }>({ contenuto: '', note: '' })
   const [ant, setAnt] = React.useState<any>(null)
   const [busy, setBusy] = React.useState(false)
   const [msg, setMsg] = React.useState('')
   React.useEffect(() => {
-    setMod(!!apriCorrezione); setAnt(null); setMsg(''); setDett(null); setColliForm([])
+    setMod(!!apriCorrezione); setAnt(null); setMsg(''); setDett(null); setColliForm([]); setTesti({ contenuto: '', note: '' })
     if (!s?.id) return
     let vivo = true
     fetch(`/api/spedizioni/${s.id}`).then(r => r.ok ? r.json() : null).then(d => {
       if (!vivo || !d) return
       setDett(d)
+      setTesti({ contenuto: String(d.contenuto ?? ''), note: String(d.note ?? '') })
       const cd = Array.isArray(d.colli_dettaglio) ? d.colli_dettaglio : []
       const n = Math.max(Number(d.colli) || 0, cd.length, 1)
       // pre-riempio i colli: dal dettaglio se c'e', altrimenti (mono) dai campi della spedizione
@@ -56,7 +58,7 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
       const colli = colliForm.map(c => ({ peso: Number(c.peso), lunghezza: Number(c.lunghezza), larghezza: Number(c.larghezza), altezza: Number(c.altezza) }))
       const r = await fetch('/api/spedizioni/modifica', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ spedizioneId: s.id, dryRun: dry, colli }),
+        body: JSON.stringify({ spedizioneId: s.id, dryRun: dry, colli, contenuto: testi.contenuto, note: testi.note }),
       })
       const d = await r.json()
       if (!r.ok) { setMsg(d.error || 'Errore'); setAnt(null); return }
@@ -72,6 +74,9 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
   const colliDett = Array.isArray(dett?.colli_dettaglio) ? dett.colli_dettaglio : []
   const multicollo = Number(s.colli) > 1
   const puoCorreggere = !!onModificata && !!s.cliente_id && s.stato !== 'annullata'
+  // Contenuto/note cambiati senza toccare peso e misure: il costo resta identico, ma c'e' comunque
+  // qualcosa da salvare — altrimenti il tasto Conferma non comparirebbe mai per questa correzione.
+  const testiCambiati = !!dett && (String(dett.contenuto ?? '') !== testi.contenuto || String(dett.note ?? '') !== testi.note)
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '30px 16px', overflowY: 'auto' }}>
@@ -154,9 +159,9 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
 
           {mod && (
             <div ref={modRef} style={{ ...card, border: '1px solid #fed7aa' }}>
-              <div style={{ ...cardH, background: '#fff7ed', color: '#ea580c' }}>Correggi peso / misure</div>
+              <div style={{ ...cardH, background: '#fff7ed', color: '#ea580c' }}>Correggi spedizione</div>
               <div style={{ padding: '14px 15px' }}>
-                <div style={{ fontSize: '12px', color: '#666', marginBottom: '10px' }}>L'etichetta <b>non</b> cambia. Si ricalcola il costo: la differenza va in rettifica sul cliente (addebito se sale, rimborso se scende).</div>
+                <div style={{ fontSize: '12px', color: '#666', marginBottom: '10px' }}>Il pacco <b>è già partito col corriere</b>: quello che si corregge qui vale per i nostri documenti (dettaglio, riepilogo, report) e per l'etichetta ristampata. Se cambi peso o misure si ricalcola il costo: la differenza va in rettifica sul cliente (addebito se sale, rimborso se scende).</div>
                 {colliForm.map((c, i) => (
                   <div key={i} style={{ marginBottom: '10px' }}>
                     {colliForm.length > 1 && <div style={{ ...lblS, marginBottom: '4px', color: '#ea580c' }}>Collo {i + 1}</div>}
@@ -170,6 +175,18 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
                     </div>
                   </div>
                 ))}
+                <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div>
+                    <div style={lblS}>Contenuto</div>
+                    <input value={testi.contenuto} maxLength={1500} onChange={e => setTesti(t => ({ ...t, contenuto: e.target.value }))}
+                      placeholder="es. Integratori alimentari" style={{ width: '100%', padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }} />
+                  </div>
+                  <div>
+                    <div style={lblS}>Note</div>
+                    <textarea value={testi.note} maxLength={1000} rows={2} onChange={e => setTesti(t => ({ ...t, note: e.target.value }))}
+                      placeholder="es. Citofono rotto, chiamare prima" style={{ width: '100%', padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', fontFamily: 'inherit', resize: 'vertical' }} />
+                  </div>
+                </div>
                 {ant && (
                   <div style={{ marginTop: '12px', padding: '10px 12px', background: ant.tipo === 'addebito' ? '#fef2f2' : ant.tipo === 'rimborso' ? '#f0fdf4' : '#f8fafc', borderRadius: '7px', fontSize: '13px' }}>
                     <div>Peso: <b>{ant.pesoPrima} kg → {ant.pesoDopo} kg</b></div>
@@ -182,7 +199,7 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
                 {msg && <div style={{ color: '#dc2626', fontSize: '12px', marginTop: '8px' }}>{msg}</div>}
                 <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
                   <button onClick={() => invia(true)} disabled={busy} style={{ padding: '8px 14px', background: '#fff', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: busy ? 'default' : 'pointer' }}>{busy ? '…' : 'Calcola'}</button>
-                  {ant && ant.tipo !== 'nessuna variazione' && <button onClick={() => invia(false)} disabled={busy} style={{ padding: '8px 14px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: busy ? 'default' : 'pointer' }}>{busy ? '…' : 'Conferma correzione'}</button>}
+                  {ant && (ant.tipo !== 'nessuna variazione' || testiCambiati) && <button onClick={() => invia(false)} disabled={busy} style={{ padding: '8px 14px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: busy ? 'default' : 'pointer' }}>{busy ? '…' : 'Conferma correzione'}</button>}
                   <button onClick={() => { setMod(false); setAnt(null); setMsg('') }} style={{ padding: '8px 14px', background: 'none', color: '#666', border: 'none', fontSize: '13px', cursor: 'pointer' }}>Annulla</button>
                 </div>
               </div>
@@ -191,7 +208,7 @@ export default function DettaglioSpedizione({ s, onClose, etichettaHref, onModif
         </div>
 
         <div style={{ padding: '14px 20px', borderTop: '1px solid #e8e8e8', display: 'flex', justifyContent: 'flex-end', gap: '10px', background: '#fff', borderRadius: '0 0 12px 12px' }}>
-          {puoCorreggere && !mod && <button onClick={() => setMod(true)} style={{ marginRight: 'auto', padding: '9px 16px', background: '#fff', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>✏️ Correggi peso/misure</button>}
+          {puoCorreggere && !mod && <button onClick={() => setMod(true)} style={{ marginRight: 'auto', padding: '9px 16px', background: '#fff', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>✏️ Correggi spedizione</button>}
           {etichettaHref && <a href={etichettaHref} download style={{ padding: '9px 16px', background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '7px', fontSize: '13px', fontWeight: 700, textDecoration: 'none' }}>🖨️ Etichetta</a>}
           <button onClick={onClose} style={{ padding: '9px 18px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Chiudi</button>
         </div>
