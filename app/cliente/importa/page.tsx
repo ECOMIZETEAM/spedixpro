@@ -79,6 +79,10 @@ export default function ImportaOrdiniPage() {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  // Righe che NON sono entrate: per correggere il file il cliente deve sapere QUALI e PERCHE'.
+  const [nonImportate, setNonImportate] = useState<{ riga: number | null; ordine: string | null; motivo: string }[]>([])
+  const thNI = { textAlign: 'left' as const, padding: '7px 10px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' as const, letterSpacing: '.3px' }
+  const tdNI = { padding: '6px 10px', color: '#1a1a1a', verticalAlign: 'top' as const }
   const fileRef = useRef<HTMLInputElement>(null)
 
   // Modal modifica
@@ -212,6 +216,7 @@ export default function ImportaOrdiniPage() {
     if (!file) return
     setUploading(true)
     setMsg(null)
+    setNonImportate([])
     try {
       const fd = new FormData()
       fd.append('file', file)
@@ -222,14 +227,16 @@ export default function ImportaOrdiniPage() {
           // Tutti gli ordini del file erano già stati importati: messaggio chiaro, non un muto "0".
           setMsg({ type: 'ok', text: data.messaggio })
         } else {
-          const motivi = (data.errori || []).map((e: any) => e.motivo).filter(Boolean)
           const gia = data.giaPresenti ? ` — ${data.giaPresenti} già importati (saltati)` : ''
-          const extra = data.scartati ? ` — ${data.scartati} righe scartate${motivi.length ? ' (' + Array.from(new Set(motivi)).slice(0, 3).join('; ') + ')' : ''}` : ''
+          const extra = data.scartati ? ` — ${data.scartati} righe scartate` : ''
           setMsg({ type: 'ok', text: `${data.importati} ordini importati${gia}${extra}` })
         }
+        // I motivi non si riassumono piu' in una riga di testo: sotto c'e' l'elenco completo.
+        setNonImportate(Array.isArray(data.errori) ? data.errori : [])
         loadOrdini()
       } else {
         setMsg({ type: 'err', text: data.error || 'Errore durante l\'importazione' })
+        setNonImportate(Array.isArray(data.errori) ? data.errori : [])
       }
     } catch {
       setMsg({ type: 'err', text: 'Errore di rete durante l\'upload' })
@@ -237,6 +244,16 @@ export default function ImportaOrdiniPage() {
       setUploading(false)
       if (fileRef.current) fileRef.current.value = ''
     }
+  }
+
+  function scaricaNonImportate() {
+    const righe = [['Riga', 'Ordine', 'Motivo'], ...nonImportate.map(e => [e.riga ?? '', e.ordine || '', e.motivo || ''])]
+    const csv = righe.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(';')).join('\n')
+    // BOM: senza, Excel apre gli accenti come caratteri strani.
+    const url = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }))
+    const a = document.createElement('a')
+    a.href = url; a.download = 'righe-non-importate.csv'; a.click()
+    URL.revokeObjectURL(url)
   }
 
   function toggle(id: string) {
@@ -597,6 +614,38 @@ export default function ImportaOrdiniPage() {
           color: msg.type === 'ok' ? '#15803d' : '#b91c1c',
         }}>
           {msg.text}
+        </div>
+      )}
+
+      {nonImportate.length > 0 && (
+        <div style={{ ...card, marginBottom: '16px', border: '1px solid #fed7aa' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#c2410c' }}>
+              {nonImportate.length === 1 ? '1 riga non importata' : nonImportate.length + ' righe non importate'}
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button onClick={scaricaNonImportate} style={{ padding: '6px 12px', background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '6px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>⬇ Scarica elenco (CSV)</button>
+              <button onClick={() => setNonImportate([])} style={{ padding: '6px 10px', background: 'none', color: '#6b7280', border: 'none', fontSize: '12px', cursor: 'pointer' }}>Chiudi</button>
+            </div>
+          </div>
+          <div style={{ maxHeight: '260px', overflowY: 'auto', border: '1px solid #f1f2f4', borderRadius: '6px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+              <thead>
+                <tr style={{ background: '#fafafa' }}>
+                  <th style={thNI}>Riga</th><th style={thNI}>Ordine</th><th style={thNI}>Perché non è entrato</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nonImportate.map((e, i) => (
+                  <tr key={i} style={{ borderTop: '1px solid #f1f2f4' }}>
+                    <td style={tdNI}>{e.riga ?? '—'}</td>
+                    <td style={tdNI}>{e.ordine || '—'}</td>
+                    <td style={{ ...tdNI, color: '#b45309' }}>{e.motivo}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

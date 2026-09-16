@@ -302,7 +302,14 @@ export async function POST(req: NextRequest) {
   }
 
   const records: any[] = []
-  const errori: { riga: number; motivo: string }[] = []
+  // ELENCO DELLE RIGHE NON IMPORTATE — riga del file, ordine, motivo — che la pagina mostra al cliente.
+  // Prima usciva solo il CONTEGGIO con tre motivi accorpati: chi caricava 200 ordini e ne vedeva
+  // entrare 197 non sapeva QUALI tre mancassero, quindi non aveva modo di correggere il suo file.
+  const errori: { riga: number | null; ordine: string | null; motivo: string }[] = []
+  // Riga del file per numero d'ordine: serve a dire "riga 42" anche per quelli saltati dal dedup.
+  const rigaPerOrdine = new Map<string, number>()
+  // Solo le righe MALFORMATE: `scartati` non deve gonfiarsi con i "gia' importati", che sono un'altra cosa.
+  let malformati = 0
 
   gruppi.forEach((grp, i) => {
     const r = grp.header
@@ -334,7 +341,8 @@ export async function POST(req: NextRequest) {
       !dest && 'nome destinatario', !ind && 'indirizzo', !cap && 'CAP', !loc && 'citta',
     ].filter(Boolean) as string[]
     if (mancanti.length) {
-      errori.push({ riga: i + 2, motivo: `Ordine ${grp.oid || i + 1}: manca ${mancanti.join(', ')}` })
+      errori.push({ riga: i + 2, ordine: grp.oid ? String(grp.oid) : null, motivo: `Manca ${mancanti.join(', ')}` })
+      malformati++
       return
     }
 
@@ -358,6 +366,7 @@ export async function POST(req: NextRequest) {
       if (isCod(metodo) || inAttesa) contrassegno = totale
     }
 
+    if (grp.oid) rigaPerOrdine.set(String(grp.oid), i + 2)
     records.push({
       master_id: masterId,
       cliente_id: clienteId,
@@ -409,7 +418,12 @@ export async function POST(req: NextRequest) {
       }
       if (esistenti.size) {
         for (let k = records.length - 1; k >= 0; k--) {
-          if (records[k].order_id && esistenti.has(records[k].order_id)) { records.splice(k, 1); giaPresenti++ }
+          if (records[k].order_id && esistenti.has(records[k].order_id)) {
+            const oid = String(records[k].order_id)
+            // Anche questo e' un ordine NON importato: nell'elenco col suo perche', non solo contato.
+            errori.push({ riga: rigaPerOrdine.get(oid) ?? null, ordine: oid, motivo: 'Già importato in precedenza' })
+            records.splice(k, 1); giaPresenti++
+          }
         }
       }
     }
@@ -419,8 +433,8 @@ export async function POST(req: NextRequest) {
     // Tutti gli ordini del file erano gia' stati importati: non e' un errore, e' un "niente di nuovo".
     // Status 200 con un messaggio comprensibile, non un 400 secco.
     return NextResponse.json({
-      importati: 0, scartati: errori.length, giaPresenti, errori,
-      messaggio: `Questi ordini erano già stati importati in precedenza (${giaPresenti} su ${giaPresenti + errori.length}): non c'è nessun nuovo ordine da caricare.`,
+      importati: 0, scartati: malformati, giaPresenti, errori,
+      messaggio: `Questi ordini erano già stati importati in precedenza (${giaPresenti} su ${giaPresenti + malformati}): non c'è nessun nuovo ordine da caricare.`,
     })
   }
 
@@ -450,7 +464,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     importati: inserted?.length || 0,
-    scartati: errori.length,
+    scartati: malformati,
     giaPresenti,
     errori,
   })
