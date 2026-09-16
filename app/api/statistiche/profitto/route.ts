@@ -50,6 +50,14 @@ export async function GET(req: NextRequest) {
       .order('created_at', { ascending: false }))
   }
 
+  // Ri-addebito diretto a un sotto-master (reweight/reso/giacenza che M carica al sub: master_id=M,
+  // target=sub, niente cliente) = RICAVO di M. Senza contarlo, il costo del reweight entrava ma il ricavo
+  // no → profitto sottostimato (MULTIEXPRESS mostrato ~€30k/mese più povero del vero, il "V in perdita").
+  // La spedizione BASE è ESCLUSA (tipo='spedizione'): il suo ricavo arriva dal self del figlio (movSub);
+  // selfSubKeys blocca il doppio solo quando lo STESSO tipo esiste in entrambe le forme. Come Report Guadagno.
+  const selfSubKeys = new Set<string>()
+  for (const m of movSub) if (m.master_id === m.master_target_id && (m as any).spedizione_id) selfSubKeys.add((m as any).spedizione_id + '|' + m.master_id + '|' + m.tipo)
+
   // Aggregazioni per spedizione (costo/ricavo del master) + per cliente + serie
   const costoSped = new Map<string, number>()   // costo di M per spedizione
   const ricavoSped = new Map<string, number>()  // ricavo di M per spedizione
@@ -83,6 +91,13 @@ export async function GET(req: NextRequest) {
       accG(m.created_at, 'costo', v)
       // Propria: ricavo = costo → margine 0 (non riduce il profitto).
       if (sid && propriaSet.has(sid)) { ricavoSped.set(sid, (ricavoSped.get(sid) || 0) + v); accG(m.created_at, 'fatturato', v) }
+    } else if (m.tipo !== 'spedizione' && m.master_target_id && subDiretti.has(m.master_target_id)
+               && !selfSubKeys.has(sid + '|' + m.master_target_id + '|' + m.tipo)) {
+      // Ricavo del ri-addebito al sotto-master diretto (vedi selfSubKeys sopra).
+      const v = -n(m.importo)
+      if (sid) ricavoSped.set(sid, (ricavoSped.get(sid) || 0) + v)
+      ricavoSub.set(m.master_target_id, (ricavoSub.get(m.master_target_id) || 0) + v)
+      accG(m.created_at, 'fatturato', v)
     }
   }
   for (const m of movSub) {
@@ -92,6 +107,21 @@ export async function GET(req: NextRequest) {
       if (sid) ricavoSped.set(sid, (ricavoSped.get(sid) || 0) + v)
       accG(m.created_at, 'fatturato', v)
     }
+  }
+
+  // COSTO che il livello SUPERIORE (padre) addebita a M (ripesature/resi/giacenze che scendono dal padre):
+  // movimento master_id=PADRE, target=M → NON è in movM (che filtra master_id=M). Senza, il costo della
+  // ripesatura dal padre non veniva contato e il margine usciva GONFIATO. Il ricavo corrispondente (M che
+  // riaddebita il figlio/cliente) è già nei rami sopra. Come Report Guadagno.
+  const movCostoSopra = await fetchAll(() => admin.from('movimenti')
+    .select('importo,tipo,created_at,spedizione_id')
+    .eq('master_target_id', M).neq('master_id', M).not('spedizione_id', 'is', null)
+    .gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI)
+    .order('created_at', { ascending: false }))
+  for (const m of movCostoSopra) {
+    const v = -n(m.importo); const sid = (m as any).spedizione_id
+    if (sid) costoSped.set(sid, (costoSped.get(sid) || 0) + v)
+    accG(m.created_at, 'costo', v)
   }
 
   const fatturato = r2(Array.from(ricavoSped.values()).reduce((a, b) => a + b, 0))
