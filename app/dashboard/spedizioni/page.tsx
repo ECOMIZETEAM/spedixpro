@@ -162,35 +162,56 @@ export default function SpedizioniPage() {
     return q.toString()
   }
 
+  // LE RIGHE NON ASPETTANO IL CONTEGGIO. Il conteggio esatto costa 234-639 ms (misurato in
+  // produzione) e veniva pagato dentro la stessa richiesta delle righe, che invece sono pronte in
+  // poco piu' di cento: la tabella restava ferma ad aspettare un numero. Ora le righe arrivano
+  // sempre senza conteggio, e il totale lo chiede una chiamata a parte, in parallelo, una volta per
+  // set di filtri. Finche' non arriva si usa l'ultimo totale noto (o zero al primo giro).
   async function fetchPagina(paginaReq: number): Promise<{ rows: any[]; total: number } | null> {
     try {
       const kf = chiaveFiltri()
-      const giaNoto = totaliRef.current.get(kf)
-      // La chiave della cache pagine NON cambia: 'conta' si aggiunge solo alla URL.
-      const url = '/api/spedizioni/lista?' + buildParams(paginaReq).toString() + (giaNoto === undefined ? '' : '&conta=0')
+      const url = '/api/spedizioni/lista?' + buildParams(paginaReq).toString() + '&conta=0'
       const res = await fetch(url)
       const data = await res.json()
       if (!Array.isArray(data?.rows)) return null
-      const tot = data?.total == null ? (giaNoto ?? 0) : (Number(data.total) || 0)
-      totaliRef.current.set(kf, tot)
-      return { rows: data.rows, total: tot }
+      return { rows: data.rows, total: totaliRef.current.get(kf) ?? 0 }
     } catch { return null }
+  }
+
+  // Il solo totale, in parallelo alle righe. Una volta per set di filtri: non dipende ne' dalla
+  // pagina ne' dall'ordinamento.
+  async function fetchTotale(): Promise<void> {
+    const kf = chiaveFiltri()
+    if (totaliRef.current.has(kf)) return
+    try {
+      const q = buildParams(1)
+      q.set('perPage', '1'); q.set('soloConteggio', '1')
+      const res = await fetch('/api/spedizioni/lista?' + q.toString())
+      const data = await res.json()
+      const tot = Number(data?.total) || 0
+      totaliRef.current.set(kf, tot)
+      setTotale(tot)
+    } catch { /* il totale resta quello noto: la tabella funziona lo stesso */ }
   }
 
   async function carica(paginaReq: number) {
     const k = buildParams(paginaReq).toString()
     const seq = ++seqRef.current
+    fetchTotale()   // parte in parallelo: la tabella non lo aspetta
     const hit = cacheRef.current.get(k)
-    if (hit) { setSpedizioni(hit.rows); setSpedizioniFiltrate(hit.rows); setTotale(hit.total); setLoading(false) }  // ISTANTANEO
+    if (hit) { setSpedizioni(hit.rows); setSpedizioniFiltrate(hit.rows); setTotale(totaliRef.current.get(chiaveFiltri()) ?? hit.total); setLoading(false) }  // ISTANTANEO
     else setLoading(true)
     const fresh = await fetchPagina(paginaReq)
     if (fresh) {
       cacheRef.current.set(k, fresh)
       if (cacheRef.current.size > 40) cacheRef.current.delete(cacheRef.current.keys().next().value as string)
-      if (seq === seqRef.current) { setSpedizioni(fresh.rows); setSpedizioniFiltrate(fresh.rows); setTotale(fresh.total); setLoading(false) }
+      if (seq === seqRef.current) { setSpedizioni(fresh.rows); setSpedizioniFiltrate(fresh.rows); setTotale(totaliRef.current.get(chiaveFiltri()) ?? fresh.total); setLoading(false) }
     } else if (seq === seqRef.current) setLoading(false)
     // PREFETCH della pagina successiva: quando clicchi "Successivo" è già in memoria.
-    const tot = fresh?.total ?? hit?.total ?? 0
+    // Il totale si legge da totaliRef, non da `fresh`: il conteggio ora viaggia per conto suo e puo'
+    // non essere ancora arrivato (total 0) — con 0 il prefetch non partirebbe MAI, cioe' proprio il
+    // salto di pagina lento che si sta togliendo di mezzo.
+    const tot = totaliRef.current.get(chiaveFiltri()) ?? fresh?.total ?? hit?.total ?? 0
     if (paginaReq * perPage < tot) {
       const kn = buildParams(paginaReq + 1).toString()
       if (!cacheRef.current.has(kn)) fetchPagina(paginaReq + 1).then(d => { if (d) cacheRef.current.set(kn, d) })

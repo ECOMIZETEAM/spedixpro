@@ -74,6 +74,9 @@ export async function GET(req: NextRequest) {
   // sull'ordinamento e su OGNI prefetch — sempre per lo stesso numero, che dipende solo dai FILTRI.
   // La pagina lo chiede una volta per set di filtri e se lo tiene; qui, se non serve, torna null.
   const contaTot = p.get('conta') !== '0'
+  // ?soloConteggio=1 -> si risponde SOLO col totale, senza righe e senza arricchimento: e' la
+  // chiamata che la pagina fa in parallelo alle righe, cosi' la tabella non aspetta il conteggio.
+  const soloConteggio = p.get('soloConteggio') === '1'
   const perPage = Math.min(200, Math.max(1, parseInt(p.get('perPage') || '') || 10))
   const fContratto = p.get('contratto')
   const fVettore = p.get('vettore')
@@ -257,6 +260,16 @@ export async function GET(req: NextRequest) {
   // a blocchi (PostgREST tronca a 1000/query) come prima, per le pagine che si aspettano l'array.
   let totalePaginato = 0
   let spedizioni: any[]
+  if (soloConteggio) {
+    // Solo il numero: una riga sola richiesta al database, il resto della rotta non viene nemmeno
+    // toccato (niente movimenti, ordini, ticket, calcolatori).
+    const { count } = await buildBase(true).range(0, 0)
+    segna('solo-conteggio')
+    const msC = Date.now() - t0
+    if (msC > 500) console.log('[LISTA][TEMPI] soloConteggio', msC + 'ms', 'istanza=' + Math.round(process.uptime()) + 's', '|', tempi.join(' '))
+    return NextResponse.json({ total: count || 0, soloConteggio: true })
+  }
+
   if (paged && !filtroCodPerViewer && !ordinaMargine) {
     const from = (pageParam - 1) * perPage
     const { data, count } = await buildBase(contaTot).range(from, from + perPage - 1)
