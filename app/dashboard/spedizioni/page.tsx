@@ -359,7 +359,10 @@ export default function SpedizioniPage() {
       setResoModal(false); setSelectedIds([])
       const ritFalliti = creati.filter((c: any) => c.ritiro && !c.ritiro.ok)
       let msg = `${creati.length} etichett${creati.length === 1 ? 'a' : 'e'} di reso creat${creati.length === 1 ? 'a' : 'e'}.`
-      if (errori.length) msg += ` ${errori.length} non riuscit${errori.length === 1 ? 'a' : 'e'} (${errori.map((e: any) => e.originale).join(', ')}).`
+      // IL MOTIVO, NON SOLO IL NUMERO. La rotta manda per ogni riga fallita il perche' (credito
+      // insufficiente, destinazione non a listino, rifiuto del corriere...) e qui si buttava via:
+      // restava "1 non riuscita (05017...)", che non dice cosa correggere.
+      if (errori.length) msg += ` ${errori.length} non riuscit${errori.length === 1 ? 'a' : 'e'}: ${errori.map((e: any) => `${e.originale} — ${e.error || 'motivo non indicato dal corriere'}`).join(' · ')}`
       if (ritFalliti.length) msg += ` Ritiro non prenotato per ${ritFalliti.length} (vedi elenco Ritiri).`
       setNotifica(msg)
       ricarica()
