@@ -21,7 +21,9 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const { id } = await params
   const admin = createAdminSupabase()
   const { data: t } = await admin.from('tickets')
-    .select('id,stato,owner_master_id,aperto_master_id,rete_master_ids,rete_non_letti,spedizione_id')
+    // oggetto/messaggio/cliente_id servono alla guardia qui sotto: i ticket aperti dal modulo libero
+    // non hanno spedizione_id e portano il numero del pacco scritto nel testo.
+    .select('id,stato,owner_master_id,aperto_master_id,rete_master_ids,rete_non_letti,spedizione_id,cliente_id,oggetto,messaggio')
     .eq('id', id).maybeSingle()
   if (!t) return NextResponse.json({ error: 'Ticket non trovato' }, { status: 404 })
   if (t.stato === 'chiuso') return NextResponse.json({ error: 'Ticket chiuso: non inoltrabile.' }, { status: 400 })
@@ -30,33 +32,60 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const inCatena = mio === t.owner_master_id || rete.includes(mio)
   if (!inCatena) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
-  // ── CONTRATTO PROPRIO: non si inoltra sopra. Se questo ticket riguarda una spedizione fatta su un
-  //    contratto di PROPRIETÀ di chi sta inoltrando (corriere `proprio=true` col suo stesso nome), il
-  //    master superiore NON detiene quel contratto e non può farci nulla: l'assistenza si ferma al
-  //    proprietario, che se la vede col suo fornitore diretto. (Es.: Quick vende GLS suo a un cliente →
-  //    il cliente apre il ticket a Quick, ma Quick non lo inoltra a MULTIEXPRESS.) ──
-  if (t.spedizione_id) {
-    const { data: sped } = await admin.from('spedizioni').select('corriere_id').eq('id', t.spedizione_id).maybeSingle()
-    const corrId = (sped as any)?.corriere_id
-    if (corrId) {
-      const { data: corr } = await admin.from('corrieri').select('nome_contratto').eq('id', corrId).maybeSingle()
-      const nome = (corr as any)?.nome_contratto
-      if (nome) {
-        const { data: mioProprio } = await admin.from('corrieri').select('id')
-          .eq('master_id', mio).eq('nome_contratto', nome).eq('proprio', true).limit(1).maybeSingle()
-        if (mioProprio) {
-          return NextResponse.json({ error: 'Questa spedizione è su un tuo contratto: il master superiore non lo gestisce, quindi non si inoltra sopra. L\'assistenza la chiudi tu, col tuo fornitore diretto.' }, { status: 400 })
-        }
-      }
-    }
-  }
-
   // Il master superiore di CHI inoltra (escalation a salire, un gradino alla volta).
+  // NB: si calcola PRIMA della guardia qui sotto, che deve sapere chi è il destinatario.
   const { data: me } = await admin.from('masters').select('id,nome,parent_master_id').eq('id', mio).maybeSingle()
   const padreId = me?.parent_master_id
   if (!padreId) return NextResponse.json({ error: 'Sei al vertice della rete: non c\'è un master superiore a cui inoltrare.' }, { status: 400 })
   if (padreId === t.owner_master_id || rete.includes(padreId) || padreId === t.aperto_master_id) {
     return NextResponse.json({ error: 'Il ticket è già stato inoltrato a quel master.' }, { status: 400 })
+  }
+
+  // ── FIN DOVE PUÒ SALIRE: AL DETENTORE DEL CONTRATTO, NON OLTRE. ──────────────────────────────
+  // Chi detiene il contratto è l'ultimo che può farci qualcosa: sopra di lui nessuno ha quel
+  // rapporto col fornitore, quindi il ticket non deve arrivare al vertice della rete.
+  // Due controlli, per ogni contratto a cui il ticket si riferisce:
+  //   1) chi inoltra è il DETENTORE (riga `proprio=true` sua, quel contratto) → si ferma a lui;
+  //   2) il DESTINATARIO non ha quel contratto nel suo catalogo → non può gestirlo, non sale.
+  // Il (2) copre anche il caso in cui il detentore stia più in basso nella catena.
+  //
+  // PERCHÉ IL CONTRATTO SI CERCA SEMPRE PER MASTER, e mai "di chi è" in assoluto: lo stesso
+  // nome può essere proprio di PIÙ master (i portali demo hanno tutti "MoovExpress Express", uno
+  // per demo). Un detentore globale non esiste: esiste "questo master ce l'ha / è suo".
+  //
+  // TICKET SENZA SPEDIZIONE COLLEGATA: prima uscivano dalla guardia senza alcun controllo (`if
+  // (t.spedizione_id)` e basta). Sono quelli aperti dal modulo libero, e in produzione parlano
+  // eccome di pacchi: il numero sta scritto nell'oggetto. Qui si risale da lì.
+  // Il client di servizio scavalca le regole per riga: la ricerca va RICHIUSA a mano nel
+  // perimetro del ticket (suo cliente, o suo master), altrimenti un codice scritto a caso
+  // aggancerebbe la spedizione di un altro e bloccherebbe l'inoltro per sbaglio.
+  const contratti = new Set<string>()
+  if (t.spedizione_id) {
+    const { data: sped } = await admin.from('spedizioni').select('corrieri(nome_contratto)').eq('id', t.spedizione_id).maybeSingle()
+    const nome = (sped as any)?.corrieri?.nome_contratto
+    if (nome) contratti.add(nome)
+  } else {
+    const testo = `${t.oggetto || ''} ${t.messaggio || ''}`.toUpperCase()
+    const codici = Array.from(new Set(testo.split(/[^A-Z0-9]+/).filter(x => x.length >= 6))).slice(0, 15)
+    if (codici.length) {
+      let q = admin.from('spedizioni').select('corrieri(nome_contratto)')
+        .or(`numero.in.(${codici.join(',')}),tracking_number.in.(${codici.join(',')})`)
+      q = t.cliente_id ? q.eq('cliente_id', t.cliente_id) : q.eq('master_id', t.owner_master_id)
+      const { data: sps } = await q.limit(25)
+      for (const s of (sps || []) as any[]) { const n = s?.corrieri?.nome_contratto; if (n) contratti.add(n) }
+    }
+  }
+  for (const nome of contratti) {
+    const { data: mioProprio } = await admin.from('corrieri').select('id')
+      .eq('master_id', mio).eq('nome_contratto', nome).eq('proprio', true).limit(1).maybeSingle()
+    if (mioProprio) {
+      return NextResponse.json({ error: `Questo ticket riguarda un tuo contratto (${nome}): l'assistenza si ferma a te, che lo detieni. Il master superiore non ha quel rapporto col fornitore e non può gestirlo — vedila col tuo fornitore diretto.` }, { status: 400 })
+    }
+    const { data: padreHa } = await admin.from('corrieri').select('id')
+      .eq('master_id', padreId).eq('nome_contratto', nome).limit(1).maybeSingle()
+    if (!padreHa) {
+      return NextResponse.json({ error: `Il master superiore non ha il contratto ${nome}: il ticket non può salire oltre chi lo detiene. Gestiscilo tu, o giralo a chi te lo fornisce.` }, { status: 400 })
+    }
   }
   const { data: padre } = await admin.from('masters').select('nome').eq('id', padreId).maybeSingle()
 
