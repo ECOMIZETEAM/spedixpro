@@ -2001,6 +2001,14 @@ export async function POST(req: NextRequest) {
       const brtServiceType = nomiSvc.some((n: string) => n.includes('priority')) ? 'E'
         : nomiSvc.some((n: string) => n.includes('10:30') || n.includes('10.30')) ? 'H' : ''
 
+      // MODALITÀ INCASSO CONTRASSEGNO BRT: 'BM' = assegno bancario intestato al mittente (verificato
+      // sull'API BRT il 17/9 con create+delete sul conto di Quick: code 0, accettato). Contante = campo
+      // vuoto (default BRT). Si applica solo se il cliente sceglie l'assegno E il contratto lo abilita
+      // (settings.cod_ass_banc_mittente): un valore d'incasso di un altro corriere che dovesse restare
+      // nel form (es. 'AB' del GLS) NON diventa mai assegno qui → contante, la scelta sicura.
+      const _codPaymentTypeBrt = (Number(body.codValue) > 0
+        && String(body.incassoModalita || '') === 'BM'
+        && (corriereRecord as any)?.settings?.cod_ass_banc_mittente === true) ? 'BM' : undefined
       const ris = await creaSpedizioneBrt(credBrt, {
         ragioneSociale: body.shipTo.name, indirizzo: body.shipTo.street1,
         localita: body.shipTo.city, cap: body.shipTo.postalCode, provincia: body.shipTo.state,
@@ -2008,6 +2016,7 @@ export async function POST(req: NextRequest) {
         contatto: body.shipTo.name, telefono: body.shipTo.phone || undefined, email: body.shipTo.email || undefined,
         pesoTotKg: pesoTot, numeroColli: packages.length, volumeM3: volTot > 0 ? volTot : undefined,
         importoContrassegno: body.codValue ? Number(body.codValue) : undefined,
+        codPaymentType: _codPaymentTypeBrt,
         assicurazione: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         note: body.notes ? String(body.notes) : undefined, rifOrdine: bda,
         serviceType: brtServiceType || undefined,

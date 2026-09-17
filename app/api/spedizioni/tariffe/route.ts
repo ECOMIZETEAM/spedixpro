@@ -126,6 +126,7 @@ export async function POST(req: NextRequest) {
         peso_reale: pesoRealeP, peso_volume: (dett.peso_volume || 0).toFixed(2), peso_fatturato: (dett.peso_fatturato || pesoRealeP).toFixed(2),
         corriere_nome: corr.nome_contratto || 'Corriere', listino_fascia: 'Listino corriere', limiti_collo: descriviLimiti(corr.settings, pesoRealeP),
         _corriere_tipo: siglaContratto(corr.tipo), _corriere_id: corr.id,
+        _brt_assegno: corr.tipo === 'brt' && (corr.settings as any)?.cod_ass_banc_mittente === true,
       })
     }
     if (!risultati.length) return NextResponse.json({ error: 'Nessuna tariffa dal listino corriere per questa destinazione' }, { status: 400 })

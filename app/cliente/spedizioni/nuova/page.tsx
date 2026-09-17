@@ -16,7 +16,7 @@ import { PAESI_MONDO } from '@/lib/paesi-elenco'
 // il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
 // all'utente ('EASYPARCEL'). Ogni provider ha la sua sigla neutra.
 const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':t==='easyparcel'?'V':(t||'').toUpperCase()
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; _corriere_id?:string; _corriere_tipo?:string; corriere_nome?:string; _deposito?:boolean; _consegna_punto?:string }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; corriere_nome?:string; _deposito?:boolean; _consegna_punto?:string }
 interface Collo { lunghezza:string; larghezza:string; altezza:string; peso?:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -161,6 +161,7 @@ export default function NuovaSpedizioneCliente() {
   const codModalitaOpts: [string,string][] = selected?._corriere_tipo === 'gls'
     ? [['C','CONTANTE'],['AB','ASSEGNO BANCARIO'],['AC','ASSEGNO CIRCOLARE']]
     : selected?._corriere_tipo === 'V' ? [['C','CONTANTE'],['A','ASSEGNO']]
+    : (selected?._corriere_tipo === 'brt' && selected?._brt_assegno) ? [['C','CONTANTE'],['BM','ASSEGNO BANCARIO']]
     : [['C','CONTANTE']]
   const accDisponibili = (selected?.accessori_disponibili || [])
   // Importo accessorio = prezzo fisso + % del PREZZO SPEDIZIONE (nolo+fuel+sponda), come dice il campo

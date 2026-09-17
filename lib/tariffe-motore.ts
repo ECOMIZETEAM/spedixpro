@@ -482,6 +482,8 @@ export async function calcolaTariffeCliente(
         ? (accessoriPerCorriere.get(corriereId) || []) : [],
       _corriere_tipo: siglaContratto(corriere?.tipo),
       _corriere_id: corriere?.id,
+      // BRT diretto: l'assegno bancario al mittente si offre solo se abilitato sul contratto (settings).
+      _brt_assegno: corriere?.tipo === 'brt' && (settsC as any)?.cod_ass_banc_mittente === true,
       // NON esporre la quotazione SpediamoPro: contiene totalPrice/priceBreakdown = il COSTO REALE
       // che paga il master (info riservata). La creazione ri-quota da sola, quindi qui non serve.
     })
