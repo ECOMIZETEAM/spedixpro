@@ -72,8 +72,12 @@ export async function GET(req: NextRequest) {
         data_evento: new Date(Number(e?.dataOra) || Date.now()).toISOString(),
       })).filter((e: any) => e.descrizione)
       if (!eventi.length) continue
-      await admin.from('tracking_events').delete().eq('spedizione_id', sp.id)
-      await admin.from('tracking_events').insert(eventi.map((e: any) => ({ spedizione_id: sp.id, ...e })))
+      // Si AGGIUNGE quello che manca, non si riscrive (vedi lib/tracking-eventi): una lettura piu'
+      // povera cancellava descrizioni gia' scritte. I doppioni li ferma la chiave unica del database.
+      await admin.from('tracking_events').upsert(
+        eventi.map((e: any) => ({ spedizione_id: sp.id, ...e, luogo: e.luogo ?? '' })),
+        { onConflict: 'spedizione_id,data_evento,descrizione,luogo', ignoreDuplicates: true },
+      )
       cronologie++
       // Regole di sempre (solo avanti, terminali intoccabili, reso appiccicoso) e MAI in giacenza.
       // Qui, se poste.it diceva giacenza, si datava giacenza_data: il database la metteva in coda di

@@ -8,10 +8,21 @@ import { istanteDaTesto } from '@/lib/tracking-eventi'
 export function mappaStatoPoste(testo: string): string | null {
   const t = (testo || '').toLowerCase()
   if (!t) return null
-  if (t.includes('non consegnat') || t.includes('mancata') || t.includes('tentativo di consegna')) return 'non_consegnato'
-  if (t.includes('consegnat')) return 'consegnata'
-  if (t.includes('giacenz')) return 'in_giacenza'
+  // IL RESO PER PRIMO. "Resa al mittente per fine giacenza" contiene 'giacenz' e finiva letta come
+  // giacenza (152 spedizioni al 17/09/2026); con la stessa logica "consegnata al mittente" sarebbe
+  // letta come consegna. La regola del reso e' quella blindata (testoIndicaReso): pretende
+  // "<verbo> al mittente", quindi non prende "creata DAL mittente" — la frase che il 6-7/08 aveva
+  // fatto scambiare per resi 4.985 spedizioni appena create.
   if (testoIndicaReso(t)) return 'reso_mittente'
+  if (t.includes('non consegnat') || t.includes('mancata') || t.includes('tentativo di consegna')) return 'non_consegnato'
+  if (t.includes('consegnat')) {
+    // CONSEGNATA A CHI. "Consegnata all'ufficio postale" e' un DEPOSITO: il pacco aspetta il
+    // destinatario allo sportello, non e' stato consegnato (167 spedizioni segnate consegnate:
+    // solo 25 ritirate davvero, 35 finite rese al mittente). Il destinatario deve ancora andarci.
+    if (/ufficio postale|punto di giacenza|fermo deposito|fermoposta|punto di ritiro|locker/.test(t)) return 'in_consegna'
+    return 'consegnata'
+  }
+  if (t.includes('giacenz')) return 'in_giacenza'
   if (t.includes('in consegna')) return 'in_consegna'
   if (t.includes('transito') || t.includes('arrivat') || t.includes('partit') || t.includes('smistament') || t.includes('in lavorazione')) return 'in_transito'
   if (t.includes('presa in carico') || t.includes('preso in caric') || t.includes('accettat') || t.includes('spedit')) return 'spedita'
@@ -190,6 +201,16 @@ export function eventiDaFullTracking(tracking: any[]): EventoTracking[] {
 const TERMINALI_LETTURA = new Set(['consegnata', 'annullata', 'annullamento_manuale'])
 
 export function statoDaLetturaPoste(eventi: { stato: string | null }[], statoAttuale: string | null): string | null {
+  // IL RESO VINCE SULLA CONSEGNA, ANCHE SE ARRIVA PRIMA.
+  // Un pacco rifiutato torna indietro e il viaggio di ritorno finisce con "Consegnata (firma: ...)":
+  // quella e' la consegna AL MITTENTE. Prendendo lo stato piu' avanzato, consegnata (7) batteva
+  // reso (6) e il pacco risultava consegnato: 221 spedizioni al 17/09/2026, con il costo del reso
+  // mai addebitato alla rete. Se nella cronologia c'e' un reso, lo stato e' reso — e qui si
+  // DECLASSA anche da 'consegnata', perche' e' l'unico modo di correggere quelle gia' sbagliate.
+  if (eventi.some((e) => e.stato === 'reso_mittente')) {
+    return (statoAttuale === 'reso_mittente' || statoAttuale === 'annullata' || statoAttuale === 'annullamento_manuale')
+      ? null : 'reso_mittente'
+  }
   if (statoAttuale && TERMINALI_LETTURA.has(statoAttuale)) return null
   let avanzato: string | null = null
   for (const e of eventi) {

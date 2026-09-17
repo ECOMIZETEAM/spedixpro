@@ -160,6 +160,8 @@ export async function GET(req: NextRequest) {
           const m = mapStatoSpedisci(str)
           if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
         }
+        // Il reso vince sulla consegna del ritorno (vedi sotto, dove si applica lo stato).
+        if (stati.some((str) => mapStatoSpedisci(str) === 'reso_mittente')) nuovo = 'reso_mittente'
 
       } else if (tipo === 'easyparcel') {
         // Si interroga col CODICE OFFERTA, non con la LDV (verificato sul campo: la ricerca per
@@ -172,6 +174,8 @@ export async function GET(req: NextRequest) {
           const m = mapStatoEasyparcel(str)
           if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
         }
+        // Il reso vince sulla consegna del ritorno (vedi sotto, dove si applica lo stato).
+        if (stati.some((str) => mapStatoEasyparcel(str) === 'reso_mittente')) nuovo = 'reso_mittente'
         // La LDV compare nel tracking anche quando alla creazione non era ancora pronta: e' la
         // seconda occasione per rimpiazzare il numero provvisorio "DVA-<ordine>".
         const ldv = (raw as any)?.tracking?.lettera_vettura
@@ -222,6 +226,8 @@ export async function GET(req: NextRequest) {
           const m = mapStatoGls(str)
           if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
         }
+        // Il reso vince sulla consegna del ritorno (vedi sotto, dove si applica lo stato).
+        if (stati.some((str) => mapStatoGls(str) === 'reso_mittente')) nuovo = 'reso_mittente'
 
       } else if (tipo === 'brt') {
         // BRT DIRETTO: lo stato di consegna si legge da GET /tracking/parcelID/{parcelID} (barcode 18
@@ -237,6 +243,8 @@ export async function GET(req: NextRequest) {
         }
         // Consegna dal campo dedicato di BRT (non serve l'evento testuale "CONSEGNATA").
         if (brtConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
+        // ...ma se il pacco e' tornato al mittente, quella consegna e' il RITORNO: vince il reso.
+        if (stati.some((str) => mapStatoBrt(str) === 'reso_mittente')) nuovo = 'reso_mittente'
 
         // CRONOLOGIA. trackingBrt torna gia' `eventi` nella forma giusta ({ data, descrizione,
         // luogo }) e nessuno li salvava: stato che avanza, pagina di tracking vuota. Come per gli
@@ -268,7 +276,12 @@ export async function GET(req: NextRequest) {
       // "in lavorazione") e NON deve declassare. Era la causa dei badge che regredivano.
       // RESO APPICCICOSO: se e' 'reso_mittente', la 'consegnata' del corriere e' la consegna del
       // RITORNO al mittente -> NON e' una consegna al destinatario, lo stato resta reso.
-      if (nuovo && nuovo !== s.stato && (nuovo === 'annullata' || prioritaStato(nuovo) > prioritaStato(s.stato))
+      // UNICA ECCEZIONE AL "SOLO IN AVANTI": il RESO. Il pacco rifiutato torna indietro e il ritorno
+      // si chiude con una "consegnata" — che e' la consegna AL MITTENTE. Chi era gia' segnato
+      // consegnato va quindi CORRETTO all'indietro, se no il reso non si addebita mai alla rete
+      // (231 spedizioni cosi' al 17/09/2026, di cui 2 sole addebitate).
+      if (nuovo && nuovo !== s.stato
+          && (nuovo === 'annullata' || nuovo === 'reso_mittente' || prioritaStato(nuovo) > prioritaStato(s.stato))
           && !(s.stato === 'reso_mittente' && nuovo === 'consegnata')) upd.stato = nuovo
       if (nuovo === 'in_giacenza' && !s.giacenza_data) upd.giacenza_data = new Date().toISOString()
       if (motivoGiacenza && motivoGiacenza !== (s as any).giacenza_motivo) upd.giacenza_motivo = motivoGiacenza

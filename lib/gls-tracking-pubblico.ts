@@ -119,8 +119,12 @@ export async function aggiornaGlsSpedisci(
       if (r.eventi.some((e: GlsEvento) => e.stato === 'in_giacenza')) giacenze++
       if (opts.dryRun) { cambi.push({ ldv: s.tracking_number, da: s.stato, a: deveAvanzare ? avanzato : s.stato, eventi: r.eventi.length }); return }
       try {
-        await admin.from('tracking_events').delete().eq('spedizione_id', s.id)
-        if (r.eventi.length) await admin.from('tracking_events').insert(r.eventi.map((e: GlsEvento) => ({ spedizione_id: s.id, ...e })))
+        // Si AGGIUNGE quello che manca, non si riscrive (vedi lib/tracking-eventi): una lettura piu'
+        // povera portava via descrizioni gia' buone. I doppioni li ferma la chiave unica del database.
+        if (r.eventi.length) await admin.from('tracking_events').upsert(
+          r.eventi.map((e: GlsEvento) => ({ spedizione_id: s.id, ...e, luogo: (e as any).luogo ?? '' })),
+          { onConflict: 'spedizione_id,data_evento,descrizione,luogo', ignoreDuplicates: true },
+        )
       } catch { /* best-effort: l'evento non salvato non blocca l'avanzamento */ }
       const upd: any = { tracking_check_at: new Date().toISOString() }
       if (deveAvanzare) { upd.stato = avanzato; aggiornate++ }

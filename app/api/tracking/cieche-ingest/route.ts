@@ -36,8 +36,12 @@ export async function POST(req: NextRequest) {
     const { data: sp } = await admin.from('spedizioni').select('stato').eq('id', sid).maybeSingle()
     if (!sp) continue
     // Sostituisco la cronologia (arriva completa: niente duplicati) e riallineo lo stato.
-    await admin.from('tracking_events').delete().eq('spedizione_id', sid)
-    await admin.from('tracking_events').insert(eventi.map((e) => ({ spedizione_id: sid, ...e })))
+    // Si AGGIUNGE quello che manca, non si riscrive: una lettura piu' povera di quella di prima
+    // portava via descrizioni gia' buone. I doppioni li ferma la chiave unica del database.
+    await admin.from('tracking_events').upsert(
+      eventi.map((e) => ({ spedizione_id: sid, ...e, luogo: e.luogo ?? '' })),
+      { onConflict: 'spedizione_id,data_evento,descrizione,luogo', ignoreDuplicates: true },
+    )
     cronologie++
     const nuovo = statoDaLetturaPoste(eventi, (sp as any).stato)
     if (nuovo) {

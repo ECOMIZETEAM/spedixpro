@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
+import { resoTraGliStati } from '@/lib/tracking-eventi'
 import crypto from 'crypto'
 
 export const runtime = 'nodejs'
@@ -164,8 +165,12 @@ export async function POST(req: NextRequest) {
     const ids = (speds2 || []).map((sp: any) => sp.id)
     // Sostituisco lo storico (arriva completo a ogni giro: cosi' niente duplicati nel popup)
     try {
-      await admin.from('tracking_events').delete().in('spedizione_id', ids)
-      if (eventi.length) await admin.from('tracking_events').insert(ids.flatMap((id: string) => eventi.map((e: any) => ({ spedizione_id: id, ...e }))))
+      // Si AGGIUNGE quello che manca, non si riscrive: il webhook a volte rimanda una cronologia
+      // piu' corta e cosi' sparivano descrizioni gia' scritte. Doppioni fermati dalla chiave unica.
+      if (eventi.length) await admin.from('tracking_events').upsert(
+        ids.flatMap((id: string) => eventi.map((e: any) => ({ spedizione_id: id, ...e, luogo: e.luogo ?? '' }))),
+        { onConflict: 'spedizione_id,data_evento,descrizione,luogo', ignoreDuplicates: true },
+      )
     } catch { /* best-effort */ }
     // Stato piu' avanzato della cronologia, con le regole di sempre
     // GIACENZA DALLA CRONOLOGIA: stessa regola del ramo eventi qui sotto — la data si scrive anche
@@ -183,10 +188,16 @@ export async function POST(req: NextRequest) {
     }
     let avanzato: string | null = null
     for (const e of eventi) if (e.stato && prioritaStato(e.stato) > prioritaStato(avanzato)) avanzato = e.stato
+    // IL RESO VINCE: la "consegnata" che segue "Resa al mittente" e' la consegna AL MITTENTE.
+    if (resoTraGliStati(eventi.map((e: any) => e.stato))) avanzato = 'reso_mittente'
     if (avanzato) {
       const upd2: any = { stato: avanzato }
       const daAgg = (speds2 || []).filter((sp: any) =>
-        sp.stato !== 'consegnata' && sp.stato !== 'annullata' && prioritaStato(avanzato!) > prioritaStato(sp.stato)
+        sp.stato !== 'annullata'
+        // Un reso si applica anche a chi risulta gia' 'consegnata': e' la correzione di quel caso.
+        && (avanzato === 'reso_mittente'
+              ? sp.stato !== 'reso_mittente'
+              : sp.stato !== 'consegnata' && prioritaStato(avanzato!) > prioritaStato(sp.stato))
         && !(sp.stato === 'reso_mittente' && avanzato === 'consegnata')   // consegna del ritorno, non del pacco
       )
       const idsAgg = daAgg.map((sp: any) => sp.id)

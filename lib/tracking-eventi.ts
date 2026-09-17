@@ -57,6 +57,15 @@ export function dataEventoIt(v: any): string {
 
 export type EventoTracking = { descrizione: string; luogo: string | null; data_evento: string }
 
+// IL RESO VINCE SULLA CONSEGNA — per TUTTI i corrieri, non solo per Poste.
+// Il pacco rifiutato torna al mittente e il ritorno si chiude con una "consegnata": chi sceglie lo
+// stato piu' avanzato la prende per buona (consegnata 7 batte reso 6) e il pacco risulta arrivato a
+// destinazione. Al 17/09/2026 erano 231 spedizioni, con il costo del reso mai addebitato alla rete.
+// Si passa qui l'elenco degli stati gia' mappati dal ramo del corriere: se uno e' un reso, e' reso.
+export function resoTraGliStati(stati: (string | null | undefined)[]): boolean {
+  return (stati || []).some((s) => s === 'reso_mittente')
+}
+
 // Normalizza gli eventi di QUALSIASI provider: si passano i nomi dei campi, non la loro forma.
 // Un evento SENZA data riconoscibile viene SCARTATO: mai inventarne una: una cronologia falsa e'
 // peggio del buco. Le chiavi degli scartati tornano al chiamante, che le puo' loggare e chiudere
@@ -82,13 +91,21 @@ export function normalizzaEventi(
   return { eventi, chiaviIgnote: Array.from(chiaviIgnote) }
 }
 
-// CANCELLA E RISCRIVI, come fa il poller Poste. Le risposte dei corrieri arrivano COMPLETE a ogni
-// giro: aggiungere in coda riempirebbe di doppioni il popup del cliente. Torna quanti eventi ha
-// scritto (0 = niente da scrivere, e in quel caso non cancella nulla: meglio la cronologia vecchia
-// che nessuna cronologia, se per un giro il corriere risponde vuoto).
+// SI AGGIUNGE, NON SI RISCRIVE.
+// Prima qui c'era "cancella tutto e reinserisci", perche' i corrieri rimandano la cronologia
+// completa a ogni giro e aggiungere in coda faceva doppioni. Ma una risposta piu' povera della
+// precedente — il corriere che per un giro manda meno righe, o una lettura andata male a meta' —
+// portava via eventi buoni: il cliente riapriva il tracking e non trovava piu' le descrizioni
+// (Lorenzo, 17/09/2026: "una volta che scrivi non dovresti cancellarle al giro dopo").
+// Adesso si scrive solo quello che manca: i doppioni li ferma la chiave unica del database
+// (spedizione + istante + frase + luogo), non la cancellazione.
+// `luogo` va a stringa vuota e mai a NULL: in un indice unico due NULL non sono uguali fra loro,
+// e lo stesso evento senza luogo rientrerebbe a ogni giro.
 export async function scriviCronologia(admin: any, spedizioneId: string, eventi: EventoTracking[]): Promise<number> {
   if (!spedizioneId || !eventi.length) return 0
-  await admin.from('tracking_events').delete().eq('spedizione_id', spedizioneId)
-  await admin.from('tracking_events').insert(eventi.map(e => ({ spedizione_id: spedizioneId, ...e })))
+  await admin.from('tracking_events').upsert(
+    eventi.map(e => ({ spedizione_id: spedizioneId, ...e, luogo: e.luogo ?? '' })),
+    { onConflict: 'spedizione_id,data_evento,descrizione,luogo', ignoreDuplicates: true },
+  )
   return eventi.length
 }
