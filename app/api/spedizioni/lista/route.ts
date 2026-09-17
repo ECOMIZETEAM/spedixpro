@@ -482,11 +482,12 @@ export async function GET(req: NextRequest) {
   // passaggio del cursore, cosi' il cliente non ci prova (e non tartassa). Tipo corriere via chiave di
   // servizio: il grant per-colonna su corrieri puo' negare 'tipo' alla sessione, qui torna solo un flag.
   const corrTipo = new Map<string, string>()
+  const corrProprio = new Map<string, boolean>()   // contratto PROPRIO del master? (costo vero = costo_spedizione)
   if (!light) {
     const corrIds = Array.from(new Set((spedizioni || []).map((s: any) => s.corriere_id).filter(Boolean)))
     if (corrIds.length) {
-      const { data: cc } = await admin.from('corrieri').select('id,tipo').in('id', corrIds as string[])
-      for (const c of (cc || [])) corrTipo.set((c as any).id, (c as any).tipo)
+      const { data: cc } = await admin.from('corrieri').select('id,tipo,proprio').in('id', corrIds as string[])
+      for (const c of (cc || [])) { corrTipo.set((c as any).id, (c as any).tipo); corrProprio.set((c as any).id, !!(c as any).proprio) }
     }
   }
   segna('tipo-corriere')
@@ -532,6 +533,14 @@ export async function GET(req: NextRequest) {
     // semplice passaggio: prezzo corriere = prezzo cliente -> margine 0 (non guadagno su un contratto
     // che non è mio, e NON mostro il margine totale della rete sotto).
     let prezzo_corriere: number | null = costoMine.has(s.id) ? costoMine.get(s.id)! : null
+    // CONTRATTO PROPRIO del master detentore: paga il provider DIRETTO, quindi nei movimenti c'è solo la
+    // commissione (niente movimento di nolo → costoMine assente). Il costo VERO è `costo_spedizione`. Senza
+    // questo prezzo_corriere ripiegava sul prezzo cliente → COSTO = CLIENTE, margine 0 FALSO, mentre il
+    // margine reale c'è (es. Velox su Poste STANDARD I: +0,26/0,75 a spedizione). Solo per le PROPRIE
+    // spedizioni del master (s.master_id === mineId) su un corriere marcato proprio.
+    if (prezzo_corriere == null && s.master_id === mineId && corrProprio.get(s.corriere_id) && Number((s as any).costo_spedizione) > 0) {
+      prezzo_corriere = Number((s as any).costo_spedizione)
+    }
     if (prezzo_corriere == null && calcMioCorr) {
       const nome = (s.corrieri as any)?.nome_contratto
       const mioCorr = (s.master_id === mineId) ? s.corriere_id : (nome ? nomeToMioCorr.get(nome) : null)
