@@ -75,7 +75,15 @@ function diagnosticaFirma(raw: string, id: string | null, timestamp: string | nu
 // Mappa evento + stato Spedisci.online allo stato interno.
 // Eventi reali del pannello: tracking.update, shipment.created, stock.created (giacenza), invoice.created.
 function mapStato(event: string, statusStr: string): string | null {
-  if (event === 'stock.created') return 'in_giacenza'   // Nuova giacenza
+  // NOMI DELL'EVENTO DI APERTURA: il pannello manda 'stock.opened', noi conoscevamo solo
+  // 'stock.created'. Misurato il 17/09 sui log di produzione: 'stock.opened' arriva e VERIFICA la
+  // firma, ma cadeva nel ramo "non riconosciuto" e non apriva niente — nessun `giacenza_data`,
+  // quindi nemmeno l'addebito, che si arma su quel campo. Si accettano entrambi i nomi: chi manda
+  // ancora il vecchio continua a funzionare.
+  // NB: 'stock.closed' NON sta qui di proposito. Chiudere una giacenza non e' uno stato di
+  // tracking e non ha una logica collaudata da riusare: prima si guarda un payload vero (loggato
+  // qui sotto), poi si scrive. Indovinare, su qualcosa che tocca gli addebiti, no.
+  if (event === 'stock.created' || event === 'stock.opened') return 'in_giacenza'   // Nuova giacenza
   const m = mapStatoSpedisci(statusStr)                  // tracking.update porta la stringa di stato
   if (m) return m
   return null   // shipment.created / invoice.created / stati non riconosciuti: non tocco
@@ -125,6 +133,12 @@ export async function POST(req: NextRequest) {
   // (rimandano TUTTA la cronologia a ogni aggiornamento; niente campo "event").
   const tracking = d?.ldv || d?.tracking_number || d?.tracking || d?.trackingNumber || d?.shipment?.tracking_number || d?.code
   console.log('[WEBHOOK][SPEDISCI] evento:', event || 'tracking-cronologia', 'ldv:', tracking || '-')
+  // CORPO DEGLI EVENTI DI GIACENZA. Nei log si vedeva solo il nome dell'evento, quindi di
+  // 'stock.closed' non sappiamo NIENTE: se porti il motivo, la data vera, l'esito (svincolata?
+  // resa al mittente?). Senza quei campi la chiusura si scriverebbe a intuito. Qui si stampa il
+  // corpo (troncato) solo per gli eventi stock.*, che sono pochi: serve a vedere la forma reale
+  // prima di gestirla. Da togliere quando la chiusura sara' implementata.
+  if (String(event).startsWith('stock.')) console.log('[WEBHOOK][SPEDISCI] corpo', event, raw.slice(0, 600))
   if (!tracking) { console.log('[WEBHOOK][SPEDISCI] payload sconosciuto:', raw.slice(0, 400)); return new NextResponse('OK', { status: 200 }) }
 
   const dettagli: any[] = Array.isArray(d?.TrackingDettaglio) ? d.TrackingDettaglio : []
@@ -190,7 +204,7 @@ export async function POST(req: NextRequest) {
   const luogo = (String(d?.location || d?.office || d?.officeDescription || '').slice(0, 200)) || null
   let dataEvento = new Date(d?.date || d?.data || d?.timestamp || Date.now())
   if (isNaN(dataEvento.getTime())) dataEvento = new Date()
-  if ((speds || []).length && descrizione && (event === 'tracking.update' || event === 'stock.created')) {
+  if ((speds || []).length && descrizione && (event === 'tracking.update' || event === 'stock.created' || event === 'stock.opened')) {
     try {
       await admin.from('tracking_events').insert((speds || []).map((sp: any) => ({
         spedizione_id: sp.id, stato: nuovo, descrizione, luogo, data_evento: dataEvento.toISOString(),
