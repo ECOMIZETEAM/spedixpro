@@ -168,6 +168,19 @@ export async function POST(req: NextRequest) {
       if (eventi.length) await admin.from('tracking_events').insert(ids.flatMap((id: string) => eventi.map((e: any) => ({ spedizione_id: id, ...e }))))
     } catch { /* best-effort */ }
     // Stato piu' avanzato della cronologia, con le regole di sempre
+    // GIACENZA DALLA CRONOLOGIA: stessa regola del ramo eventi qui sotto — la data si scrive anche
+    // se lo stato non avanza, perche' una mancata consegna (priorita' 5) copre la giacenza (4) e
+    // altrimenti la giacenza non verrebbe mai registrata. Solo se manca, e con la data dell'evento
+    // vero, non con l'ora della notifica.
+    const eventiGiacenza = eventi.filter((e: any) => e.stato === 'in_giacenza')
+    if (eventiGiacenza.length) {
+      const senzaData = (speds2 || []).filter((sp: any) => !sp.giacenza_data).map((sp: any) => sp.id)
+      if (senzaData.length) {
+        const quando = eventiGiacenza.map((e: any) => e.data_evento).sort()[0] || new Date().toISOString()
+        await admin.from('spedizioni').update({ giacenza_data: quando }).in('id', senzaData)
+        console.log('[WEBHOOK][SPEDISCI] giacenza aperta (cronologia)', tracking, 'il', quando, `(${senzaData.length})`)
+      }
+    }
     let avanzato: string | null = null
     for (const e of eventi) if (e.stato && prioritaStato(e.stato) > prioritaStato(avanzato)) avanzato = e.stato
     if (avanzato) {
@@ -178,9 +191,11 @@ export async function POST(req: NextRequest) {
       )
       const idsAgg = daAgg.map((sp: any) => sp.id)
       if (idsAgg.length) {
-        // giacenza_data solo alla PRIMA rilevazione (non ri-datare giacenze gia' note)
-        const primaGiacenza = avanzato === 'in_giacenza' && daAgg.every((sp: any) => !sp.giacenza_data)
-        if (primaGiacenza) upd2.giacenza_data = new Date().toISOString()
+        // NB: `giacenza_data` NON si scrive piu' qui. Lo fa il blocco qui sopra, che guarda gli
+        // eventi di giacenza e non l'avanzamento di stato, e usa la data VERA dell'evento invece di
+        // now(). Lasciare anche la vecchia riga significava riscrivere il campo subito dopo con
+        // l'ora della notifica — per giunta senza accorgersene, perche' `daAgg` viene da una
+        // lettura precedente e vede ancora il campo nullo.
         await admin.from('spedizioni').update(upd2).in('id', idsAgg)
         console.log('[WEBHOOK][SPEDISCI]', tracking, '-> stato', avanzato, `(${idsAgg.length} agg.)`)
 
@@ -196,7 +211,7 @@ export async function POST(req: NextRequest) {
   const nuovo = mapStato(event, d?.status || d?.stato || d?.description || '')
 
   // Spedizioni interessate (per id): servono sia per l'avanzamento stato sia per SALVARE L'EVENTO.
-  const { data: speds } = await admin.from('spedizioni').select('id,stato').eq('tracking_number', tracking)
+  const { data: speds } = await admin.from('spedizioni').select('id,stato,giacenza_data').eq('tracking_number', tracking)
 
   // SALVA L'EVENTO in tracking_events: Spedisci ha CHIUSO il polling del tracking (403 "For tracking
   // please use the Webhooks events") → il popup tracking mostra QUESTI eventi. Best-effort.
@@ -212,9 +227,31 @@ export async function POST(req: NextRequest) {
     } catch { /* l'evento non salvato non blocca l'aggiornamento stato */ }
   }
 
+  // ── LA DATA DELLA GIACENZA E' UN FATTO, NON UNO STATO ────────────────────────────────────────
+  // Stava dentro `upd` qui sotto, quindi era ostaggio della regola "lo stato avanza solo in
+  // avanti". Ma la scala e': spedita 1, in_transito 2, in_consegna 3, in_giacenza 4,
+  // non_consegnato 5, reso_mittente 6, consegnata 7 — e nella realta' del corriere la MANCATA
+  // CONSEGNA (5) precede quasi sempre la giacenza (4). Quindi `prioritaStato(4) > prioritaStato(5)`
+  // era falso, l'update non partiva, e `giacenza_data` non si scriveva MAI per quel percorso:
+  // nemmeno quando l'evento si chiamava 'stock.created' ed era riconosciuto.
+  // Verificato in produzione il 17/09 su 3UW1UHA236635: 'stock.opened' ricevuto, firma verificata,
+  // risposta 200 — e giacenza_data rimasta nulla perche' la spedizione era gia' 'non_consegnato'.
+  // Si scrive SOLO se manca: ri-datare una giacenza gia' nota ri-armerebbe l'addebito (il trigger
+  // trg_giacenza_da_addebitare si arma proprio su questo campo).
+  // La data e' quella VERA del fornitore (`opened_at` nel payload di stock.opened), non l'ora in cui
+  // ci arriva la notifica.
+  if (nuovo === 'in_giacenza') {
+    const senzaData = (speds || []).filter((sp: any) => !sp.giacenza_data).map((sp: any) => sp.id)
+    if (senzaData.length) {
+      const apertura = new Date(d?.opened_at || d?.date || d?.data || Date.now())
+      const quando = isNaN(apertura.getTime()) ? new Date().toISOString() : apertura.toISOString()
+      await admin.from('spedizioni').update({ giacenza_data: quando }).in('id', senzaData)
+      console.log('[WEBHOOK][SPEDISCI] giacenza aperta', tracking, 'il', quando, `(${senzaData.length})`)
+    }
+  }
+
   if (nuovo) {
     const upd: any = { stato: nuovo }
-    if (nuovo === 'in_giacenza') upd.giacenza_data = new Date().toISOString()
     // Lo stato avanza SOLO IN AVANTI (mai declassare: es. 'spedita' dopo la distinta non deve tornare
     // 'in lavorazione' per un evento vecchio); consegnate/annullate restano terminali.
     const daAggiornare = (speds || []).filter((sp: any) =>
