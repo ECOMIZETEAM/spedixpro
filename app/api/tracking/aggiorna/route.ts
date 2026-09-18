@@ -307,7 +307,21 @@ export async function GET(req: NextRequest) {
       // una decisione a parte, non un effetto collaterale del cron.
       const fermo = s.stato !== 'consegnata' && s.stato !== 'reso_mittente' && s.stato !== 'annullata'
       if ((vistaGiacenza || nuovo === 'in_giacenza') && !s.giacenza_data && fermo) {
-        upd.giacenza_data = new Date().toISOString()
+        // ...E SOLO SE E' APERTA ADESSO. `vistaGiacenza` dice che una giacenza c'e' stata, non che ci
+        // sia ancora. Misurato il 18/09 PRIMA che il cron la usasse: su 438 pacchi fermi con una
+        // giacenza nella cronologia, solo 115 avevano la giacenza come ULTIMO evento; 122 si erano gia'
+        // mossi dopo (ripartiti, in consegna, consegnati) e 173 erano fermi da settimane su eventi non
+        // riconosciuti. Aprirli tutti avrebbe addebitato giacenze gia' finite.
+        // Se lo stato del corriere e' gia' 'in_giacenza' basta quello; altrimenti decide l'ultimo
+        // evento della cronologia. Una "mancata consegna" arrivata DOPO la giacenza non basta: non e'
+        // certo che il pacco sia tornato in giacenza, e qui si apre solo cio' che e' sicuro.
+        let apertaAdesso = nuovo === 'in_giacenza'
+        if (!apertaAdesso) {
+          const { data: ult } = await admin.from('tracking_events').select('stato,descrizione')
+            .eq('spedizione_id', s.id).order('data_evento', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
+          apertaAdesso = (ult as any)?.stato === 'in_giacenza' || /giacenz/i.test(String((ult as any)?.descrizione || ''))
+        }
+        if (apertaAdesso) upd.giacenza_data = new Date().toISOString()
       }
       if (motivoGiacenza && motivoGiacenza !== (s as any).giacenza_motivo) upd.giacenza_motivo = motivoGiacenza
       if (nuovoTracking && nuovoTracking !== s.tracking_number) upd.tracking_number = nuovoTracking
