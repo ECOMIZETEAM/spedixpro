@@ -18,13 +18,25 @@
 export function istanteDaTesto(v: any): string | null {
   const s = String(v ?? '').trim()
   if (!s) return null
-  // Con fuso esplicito (Z oppure ±hh:mm): non c'e' niente da interpretare.
-  if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(s)) {
+  // Con fuso esplicito (Z oppure ±hh:mm) DOPO UN ORARIO: non c'e' niente da interpretare.
+  // L'orario prima del fuso e' obbligatorio. Senza, "10-09-2026" (la data italiana di DVA, col
+  // trattino) veniva presa per una data col fuso "-20:26" e passata a new Date(), che la legge
+  // ALL'AMERICANA: 9 ottobre invece del 10 settembre, a mezzanotte. E "15-09-2026" (mese 15) non
+  // si leggeva affatto: l'evento spariva. Misurato il 18/09: 13.767 eventi DVA con la data
+  // sbagliata (10.606 nel futuro, 3.161 prima della nascita della spedizione) e tutti quelli dal
+  // 13 al 31 del mese mai salvati.
+  if (/\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?\s*(?:Z|[+-]\d{2}:?\d{2})$/i.test(s)) {
     const d = new Date(s)
     return Number.isNaN(d.getTime()) ? null : d.toISOString()
   }
-  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/.exec(s)
+  // Data ITALIANA (giorno-mese-anno, col trattino, la barra o il punto), con o senza orario: e' ora
+  // di Roma. Non passa MAI da new Date(), che la leggerebbe mese-giorno.
+  const it = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})(?:[T ,]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/.exec(s)
+  const m: any = it
+    ? [s, it[3], it[2].padStart(2, '0'), it[1].padStart(2, '0'), (it[4] || '00').padStart(2, '0'), it[5] || '00', it[6]]
+    : /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/.exec(s)
   if (!m) return null
+  if (+m[2] < 1 || +m[2] > 12 || +m[3] < 1 || +m[3] > 31) return null
   const comeUtc = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0))
   if (!Number.isFinite(comeUtc)) return null
   const parti = new Intl.DateTimeFormat('en-GB', {

@@ -706,8 +706,14 @@ export async function unisciEtichette(pdfBase64: string[]): Promise<string | nul
 // da getorder e listorder nella stessa API) e le varianti plausibili. La regola su come si legge una
 // data e su cosa fare se non si riconosce sta in lib/tracking-eventi, uguale per tutti i provider.
 export function eventiEasyparcel(raw: any) {
-  return normalizzaEventi(raw?.dettagli, {
-    data: ['data', 'data_evento', 'data_ora', 'datetime', 'timestamp', 'dataora'],
+  // DATA E ORA STANNO IN DUE CAMPI: { data: "10-09-2026", ora: "16:11:00" } (risposta reale, vista
+  // il 18/09). Leggendo solo `data` si perdeva l'orario — ogni evento finiva a mezzanotte — e la
+  // data stessa veniva letta male (vedi istanteDaTesto). Qui si ricompongono in
+  // "10-09-2026 16:11:00", che istanteDaTesto legge come data italiana, in ora di Roma.
+  const righe = (Array.isArray(raw?.dettagli) ? raw.dettagli : []).map((e: any) =>
+    e && typeof e === 'object' && e.data && e.ora ? { ...e, _data_ora_it: `${e.data} ${e.ora}` } : e)
+  return normalizzaEventi(righe, {
+    data: ['_data_ora_it', 'data', 'data_evento', 'data_ora', 'datetime', 'timestamp', 'dataora'],
     descrizione: ['descrizione', 'note'],
     luogo: ['luogo', 'localita', 'filiale', 'sede'],
   })
