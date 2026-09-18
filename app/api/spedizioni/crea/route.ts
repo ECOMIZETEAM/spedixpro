@@ -1930,7 +1930,11 @@ export async function POST(req: NextRequest) {
       try {
         await addebitaCatena(adminCrea, {
           masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
-          costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
+          // costoSpedizione=0: GLS è DIRETTO, non c'è una quotazione esterna. costoCorrente qui è il
+          // prezzo del master DIRETTO (il rivenditore), non un costo reale: passarlo faceva scattare il
+          // floor anti-sotto-costo che alzava il DETENTORE al prezzo del rivenditore, azzerandogli il
+          // margine. Ogni livello paga il suo listino; il floor non serve ai diretti (il loro listino È il costo).
+          costoSpedizione: 0, provincia: body.shipTo.state, packages,
           cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           corriereNome: corriereRecord.nome_contratto,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
@@ -2130,7 +2134,9 @@ export async function POST(req: NextRequest) {
       try {
         await addebitaCatena(adminCrea, {
           masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
-          costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
+          // costoSpedizione=0: BRT DIRETTO, nessuna quotazione esterna (vedi nota GLS sopra). Il floor
+          // non deve alzare il detentore al prezzo del rivenditore: ogni livello paga il suo listino.
+          costoSpedizione: 0, provincia: body.shipTo.state, packages,
           cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           corriereNome: corriereRecord.nome_contratto,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
@@ -2306,7 +2312,11 @@ export async function POST(req: NextRequest) {
       try {
         await addebitaCatena(adminCrea, {
           masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
-          costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
+          // costoSpedizione=0: FedEx DIRETTO, nessuna quotazione esterna (vedi nota GLS sopra). Passare
+          // costoCorrente (il prezzo del rivenditore) faceva alzare il DETENTORE dal suo costo reale al
+          // prezzo del rivenditore via floor, azzerando il margine di MULTIEXPRESS (2,80→4,50). Ogni
+          // livello paga il suo listino; per i diretti il listino È il costo, il floor non serve.
+          costoSpedizione: 0, provincia: body.shipTo.state, packages,
           cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           corriereNome: corriereRecord.nome_contratto,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
