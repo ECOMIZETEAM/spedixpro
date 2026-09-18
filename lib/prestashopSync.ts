@@ -3,7 +3,7 @@ import { psGet } from '@/lib/prestashop'
 // Sincronizza gli ordini PrestaShop pagati/validi in ordini_ecommerce.
 // PrestaShop normalizza i dati: ordine → indirizzo → cliente → stato/paese (risorse separate),
 // quindi per ogni ordine risolviamo indirizzo + email + provincia + paese (con cache).
-export async function sincronizzaOrdiniPrestashop(db: any, integr: any, range?: { dal?: string; al?: string }): Promise<{ letti: number; importati: number }> {
+export async function sincronizzaOrdiniPrestashop(db: any, integr: any, range?: { dal?: string; al?: string }): Promise<{ letti: number; importati: number; spediti: number; daSpedire: number }> {
   const cred = integr.credenziali as any
   const url = cred?.url, key = cred?.key
   if (!url || !key) throw new Error('Credenziali PrestaShop mancanti')
@@ -75,7 +75,7 @@ export async function sincronizzaOrdiniPrestashop(db: any, integr: any, range?: 
     try { const d = await psGet(url, key, `countries/${k}`); const iso = d?.country?.iso_code || 'IT'; countryCache.set(k, iso); return iso } catch { return 'IT' }
   }
 
-  let importati = 0
+  let importati = 0, spediti = 0, daSpedire = 0
   for (const o of ordini) {
     let addr: any = null, cust: any = null
     try { const a = await psGet(url, key, `addresses/${o.id_address_delivery}`); addr = a?.address } catch {}
@@ -97,6 +97,8 @@ export async function sincronizzaOrdiniPrestashop(db: any, integr: any, range?: 
     const articoli = rows.map((r: any) => ({
       nome: r.product_name, quantita: Number(r.product_quantity) || 1, grammi: 0, sku: r.product_reference || '', immagine: null,
     }))
+    // Spedito se lo stato del negozio ha il flag shipped, o se lo abbiamo già spedito noi.
+    const statoOrdine = (statoInfo.get(String(o.current_state || ''))?.spedito || giaSpediti.has(String(o.id))) ? 'spedito' : 'da_spedire'
     const payload: any = {
       cliente_id: integr.cliente_id,
       master_id: integr.master_id,
@@ -114,18 +116,18 @@ export async function sincronizzaOrdiniPrestashop(db: any, integr: any, range?: 
       totale: o.total_paid ? Number(o.total_paid) : null,
       valuta: 'EUR',
       stato_pagamento: statoInfo.get(String(o.current_state || ''))?.nome || String(o.current_state || ''),
-      stato: (statoInfo.get(String(o.current_state || ''))?.spedito || giaSpediti.has(String(o.id))) ? 'spedito' : 'da_spedire',
+      stato: statoOrdine,
       raw: o,
     }
     const { error } = await db.from('ordini_ecommerce').upsert(payload, {
       onConflict: 'integrazione_id,ordine_esterno_id', ignoreDuplicates: false,
     })
-    if (!error) importati++
+    if (!error) { importati++; if (statoOrdine === 'spedito') spediti++; else daSpedire++ }
   }
 
   await db.from('integrazioni')
     .update({ ultimo_sync: new Date().toISOString(), ordini_totali: ordini.length, errore: null })   // sync riuscita: azzera un errore precedente (non piu' appiccicato quando lo store rientra)
     .eq('id', integr.id)
 
-  return { letti: ordini.length, importati }
+  return { letti: ordini.length, importati, spediti, daSpedire }
 }

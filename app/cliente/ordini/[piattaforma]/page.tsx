@@ -169,7 +169,13 @@ export default function OrdiniPage() {
       })
       const d = await res.json()
       if (d.error) setMsg('Errore: '+d.error)
-      else setMsg('Sincronizzati '+d.importati+' ordini'+(d.letti!==undefined?' (letti '+d.letti+')':''))
+      // Messaggio chiaro: quanti dei sincronizzati sono GIA' SPEDITI (sul negozio) e quanti DA SPEDIRE,
+      // così non sembra un bug quando si sincronizzano N ordini ma la lista "Da spedire" resta a 0
+      // (i recenti sono spesso già spediti sul negozio). Fallback su "(letti N)" se la piattaforma non manda ancora il dettaglio.
+      else setMsg('Sincronizzati '+d.importati+' ordini'
+        + ((d.spediti!==undefined || d.daSpedire!==undefined)
+            ? ' ('+(d.spediti||0)+' già spediti · '+(d.daSpedire||0)+' da spedire)'
+            : (d.letti!==undefined?' (letti '+d.letti+')':'')))
       carica()
     } catch { setMsg('Errore di connessione') }
     setSincronizzando(false)
