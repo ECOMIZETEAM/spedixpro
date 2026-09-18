@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
     }
   }
   // ── DISTINTE DEI RESI (stesso giro delle 23: chiudo in distinta anche i resi rientrati) ──
-  // Il reso e' GIA' addebitato dalla coda (resi_da_addebitare -> cron tracking), e l'addebito sale
+  // Il reso e' GIA' addebitato dalla coda (resi_da_addebitare -> cron addebiti-code), e l'addebito sale
   // gia' tutta la catena: qui NON si tocca il credito, si crea solo il DOCUMENTO che mancava. Il
   // numero distinta compare in elenco spedizioni agganciato al master DELLA SPEDIZIONE, quindi
   // "sale la rete" da solo: lo vede anche il master sopra guardando la stessa spedizione.

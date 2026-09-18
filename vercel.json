@@ -16,6 +16,10 @@
       "schedule": "*/30 * * * *"
     },
     {
+      "path": "/api/cron/addebiti-code",
+      "schedule": "5,15,25,35,45,55 * * * *"
+    },
+    {
       "path": "/api/spedizioni/annullamenti-cron",
       "schedule": "30 * * * *"
     },
