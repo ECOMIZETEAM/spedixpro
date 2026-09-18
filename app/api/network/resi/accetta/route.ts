@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { noloCliente, noloMaster, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
+import { noloClienteDopoPartenza, noloMaster, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 
 // Il master accetta un RESO ricevuto dalla rete e lo PROPAGA:
@@ -94,10 +94,10 @@ export async function POST(req: NextRequest) {
     const righe: RigaReso[] = []
     for (const s of arr) {
       await admin.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', s.id)
-      const nolo = await noloCliente(admin, s, cli?.listino_cliente_id)
       righe.push({
         spedizione_id: s.id, cliente_id: clienteId, master_owner_id: mio, corriere_id: s.corriere_id || null,
-        nolo: nolo != null ? nolo : Math.max(0, Number(s.costo_totale || 0)),
+        // Contratto tolto dal listino del cliente = nolo 0: vedi noloClienteDopoPartenza.
+        nolo: await noloClienteDopoPartenza(admin, s, cli?.listino_cliente_id),
       })
     }
     // La percentuale, la guardia contro il doppio addebito (compreso il reso già pagato allo

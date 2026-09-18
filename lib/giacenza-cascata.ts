@@ -1,7 +1,7 @@
 import { registraMovimentoMaster, registraMovimento } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
-import { noloMaster, noloCliente, applicaServizio, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
+import { noloMaster, noloClienteDopoPartenza, applicaServizio, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
 
 // Mappa il "nome" di un supplemento giacenza (sia lato cliente sia lato master) sull'operazione.
 // Es. "Riconsegna al nuovo destinatario" -> riconsegna_nuovo, "Reso al mittente" -> reso.
@@ -182,11 +182,11 @@ async function addebitaResoGiacenza(admin: any, sped: SpedGiac, corriereNome: st
 
   if (full.cliente_id) {
     const { data: cli } = await admin.from('clienti').select('listino_cliente_id').eq('id', full.cliente_id).maybeSingle()
-    const nolo = await noloCliente(admin, full, cli?.listino_cliente_id)
     righe.push({
       spedizione_id: full.id, cliente_id: full.cliente_id, master_owner_id: full.master_id,
       corriere_id: full.corriere_id,
-      nolo: nolo != null ? nolo : Math.max(0, Number(full.costo_totale || 0)),
+      // Contratto tolto dal listino del cliente = nolo 0: vedi noloClienteDopoPartenza.
+      nolo: await noloClienteDopoPartenza(admin, full, cli?.listino_cliente_id),
       da_giacenza: daGiacenza,
     })
   }

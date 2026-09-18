@@ -7,7 +7,7 @@
 // e tutta la catena sopra pagavano lo stesso: riconsegne e resi gratis, a spese del master.
 // Il calcolo deve essere UNO solo, per il portale e per l'API.
 
-import { noloCliente } from '@/lib/reso-prezzi'
+import { noloClienteDopoPartenza } from '@/lib/reso-prezzi'
 
 // Mappa i nomi dei servizi giacenza del listino sulle 3 operazioni
 export function chiaveServizio(nome: string): string | null {
@@ -47,7 +47,8 @@ export async function leggiPrezzi(admin: any, sped: any) {
   return leggiPrezziDaListino(admin, cliente?.listino_cliente_id, sped.corriere_id)
 }
 
-// RIPIEGO, quando il nolo non e' ricalcolabile dal listino: quanto il cliente aveva pagato.
+// RIPIEGO per le spedizioni SENZA cliente (del master stesso): quanto era costata l'andata. Per un
+// cliente non si usa piu': se il suo listino non da' il nolo, paga zero (noloClienteDopoPartenza).
 //
 // ATTENZIONE — qui c'era una trappola di unita' di misura. `spedizioni.assicurazione` NON e' la
 // commissione dell'assicurazione: e' il VALORE dichiarato della merce (lo stesso numero che parte
@@ -67,8 +68,9 @@ export function noloBase(sped: any) {
 export async function noloClienteSpedizione(admin: any, sped: any): Promise<number> {
   if (!sped?.cliente_id) return noloBase(sped)
   const { data: cliente } = await admin.from('clienti').select('listino_cliente_id').eq('id', sped.cliente_id).maybeSingle()
-  const n = await noloCliente(admin, sped, cliente?.listino_cliente_id)
-  return n != null ? n : noloBase(sped)
+  // Contratto tolto dal listino del cliente = nolo 0 (niente ripiego sul prezzo pieno): vedi
+  // noloClienteDopoPartenza. Senza cliente (spedizione del master stesso) resta il ripiego sopra.
+  return noloClienteDopoPartenza(admin, sped, cliente?.listino_cliente_id)
 }
 
 // Costi dell'operazione di SVINCOLO = SOLO il servizio scelto (riconsegna/reso/…).
@@ -81,7 +83,7 @@ export async function noloClienteSpedizione(admin: any, sped: any): Promise<numb
 // usavano costo_totale (col contrassegno/assicurazione/sponda dentro), così il CLIENTE pagava la %
 // su costo_totale mentre i MASTER a monte (addebitaGiacenzaCatena → noloMaster) la pagavano sul nolo
 // fascia/zona: stessa operazione, due basi diverse. `baseNolo` è il nolo fascia/zona già calcolato da
-// chi chiama (noloClienteSpedizione); il ripiego a costo_totale vale solo se il nolo non è ricalcolabile.
+// chi chiama (noloClienteSpedizione); il ripiego a costo_totale vale solo senza cliente.
 export function calcolaCosti(operazione: string, prezzi: any, sped: any, baseNolo?: number | null) {
   const base = baseNolo != null && baseNolo >= 0 ? baseNolo : noloBase(sped)
   const serv = prezzi.servizi[operazione] || { valore: 0, perc: 0 }

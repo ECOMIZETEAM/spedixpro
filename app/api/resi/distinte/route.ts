@@ -4,7 +4,7 @@ import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
-import { noloCliente, noloMaster, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
+import { noloClienteDopoPartenza, noloMaster, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 
 export async function GET(req: NextRequest) {
@@ -204,14 +204,13 @@ export async function POST(req: NextRequest) {
     const { data: sp } = await supabase.from('spedizioni')
       .select('costo_totale,dest_provincia,dest_cap,dest_paese,dest_citta,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id')
       .eq('id', v.id).single()
-    const nolo = await noloCliente(adminDb, sp, cliRec?.listino_cliente_id)
     righeCli.push({
       spedizione_id: v.id,
       cliente_id: clienteId,
       master_owner_id: utente!.master_id!,
       corriere_id: sp?.corriere_id || null,
-      // ripiego se il listino non e' calcolabile: il costo totale, mai negativo
-      nolo: nolo != null ? nolo : Math.max(0, Number(sp?.costo_totale || 0)),
+      // Contratto tolto dal listino del cliente = nolo 0: vedi noloClienteDopoPartenza.
+      nolo: await noloClienteDopoPartenza(adminDb, sp, cliRec?.listino_cliente_id),
     })
   }
 

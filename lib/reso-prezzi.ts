@@ -72,6 +72,24 @@ export async function noloCliente(admin: any, sped: any, listinoId: string | nul
   return Math.max(0, r2(ris.prezzo - sponda)) || null
 }
 
+// IL NOLO DEL CLIENTE PER CIO' CHE SUCCEDE DOPO LA PARTENZA (reso, riconsegna, nuovo destinatario):
+// dal listino che il cliente ha OGGI. Se da li' non esce, al cliente non si addebita niente.
+//
+// Prima, in quattro punti, si ripiegava su quanto aveva pagato l'andata (costo_totale): dentro ci
+// sono la commissione contrassegno e l'assicurazione, che su un ritorno non si pagano mai. Caso
+// vero del 18/09/2026, NN668406880: il 17/09 il master aveva tolto il contratto dal listino del
+// cliente, il reso del giorno dopo non trovava fasce e gli ha addebitato 17,41 EUR — nolo piu'
+// commissione su 407 EUR di contrassegno.
+// La regola (Lorenzo, 18/09): contratto CANCELLATO dal listino del cliente = al cliente non si
+// addebita niente; lo assorbe il master che l'ha cancellato, come gia' succede per le rettifiche.
+// PAUSA e "nascosto per quel cliente" non toccano le fasce (valgono solo quando si offrono le
+// tariffe in creazione), quindi li' il nolo si ricalcola normalmente.
+// Il reso resta comunque registrato: con nolo 0 fn_addebita_resi scrive al cliente una riga a
+// -0 EUR, e la catena sopra paga ciascuno il proprio nolo come sempre.
+export async function noloClienteDopoPartenza(admin: any, sped: any, listinoId: string | null | undefined): Promise<number> {
+  return (await noloCliente(admin, sped, listinoId)) ?? 0
+}
+
 // Sponda idraulica del listino cliente: sopra la soglia, tot € per ogni kg fatturato.
 // Serve solo per RIMUOVERLA dalla base del reso (stessa formula del motore prezzi).
 async function spondaListinoCliente(admin: any, listinoId: string, corriereId: string | null, pesoFatturato: number): Promise<number> {
