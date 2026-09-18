@@ -328,6 +328,105 @@ export async function annullaSpedizioneFedex(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// RITIRO ON-DEMAND — POST /pickup/v1/pickups (prenota) / /pickup/v1/pickups/cancel (annulla).
+// FedEx richiede un carrierCode: FDXG per i servizi Ground, FDXE per tutto il resto (Express).
+// readyDateTimestamp vuole l'offset del fuso: lo calcoliamo su Europe/Rome (gestisce l'ora legale).
+// ─────────────────────────────────────────────────────────────────────────────
+export type RitiroFedex = {
+  ragioneSociale: string; contatto?: string; telefono?: string
+  indirizzo: string; localita: string; cap: string; provincia: string; paese?: string
+  dataRitiro: string          // YYYY-MM-DD
+  readyTime?: string          // HH:MM, default 09:00
+  closeTime?: string          // HH:MM (chiusura sede), default 18:00
+  colli: number; pesoKg: number
+  serviceType?: string        // per dedurre il carrierCode (Ground → FDXG, altrimenti FDXE)
+  note?: string
+  test?: boolean
+}
+
+export function carrierCodeFedex(serviceType?: string): 'FDXE' | 'FDXG' {
+  return /GROUND|HOME_DELIVERY/i.test(String(serviceType || '')) ? 'FDXG' : 'FDXE'
+}
+
+// Offset del fuso Europe/Rome per una data (gestisce ora solare/legale). Es. '+02:00' a settembre.
+function offsetRome(dateStr: string): string {
+  try {
+    const d = new Date(`${dateStr}T12:00:00Z`)
+    const s = d.toLocaleString('en-US', { timeZone: 'Europe/Rome', timeZoneName: 'longOffset' })
+    const m = s.match(/GMT([+-]\d{2}:\d{2})/)
+    if (m) return m[1]
+  } catch { /* fallback sotto */ }
+  return '+01:00'
+}
+
+// Prenota un ritiro FedEx. Torna il codice di conferma (da esibire) + `location` (serve all'annullo).
+export async function creaRitiroFedex(
+  cred: CredenzialiFedex, p: RitiroFedex
+): Promise<{ confirmationCode: string | null; location: string | null; carrierCode: string; errore: string | null; raw: string }> {
+  const carrierCode = carrierCodeFedex(p.serviceType)
+  if (!cred.api_key || !cred.api_secret || !cred.account_number) {
+    return { confirmationCode: null, location: null, carrierCode, errore: 'credenziali FedEx incomplete', raw: '' }
+  }
+  let token: string
+  try { token = await getToken(cred.api_key, cred.api_secret, p.test) }
+  catch (e) { return { confirmationCode: null, location: null, carrierCode, errore: 'FedEx (autenticazione): ' + (e instanceof Error ? e.message : String(e)), raw: '' } }
+
+  const ready = (p.readyTime && /^\d{1,2}:\d{2}$/.test(p.readyTime)) ? p.readyTime.padStart(5, '0') : '09:00'
+  const close = (p.closeTime && /^\d{1,2}:\d{2}$/.test(p.closeTime)) ? p.closeTime.padStart(5, '0') : '18:00'
+  const body = {
+    associatedAccountNumber: { value: String(cred.account_number) },
+    originDetail: {
+      pickupLocation: {
+        contact: contatto(p.contatto || p.ragioneSociale, p.telefono, p.ragioneSociale),
+        address: indirizzo(p.indirizzo, p.localita, p.provincia, p.cap, (s(p.paese, 2) || 'IT').toUpperCase(), false),
+      },
+      readyDateTimestamp: `${p.dataRitiro}T${ready}:00${offsetRome(p.dataRitiro)}`,
+      customerCloseTime: `${close}:00`,
+    },
+    totalWeight: { units: 'KG', value: Number((p.pesoKg > 0 ? p.pesoKg : 1).toFixed(1)) },
+    packageCount: Math.max(1, Math.round(p.colli || 1)),
+    carrierCode,
+    remarks: s(p.note, 60) || undefined,
+    countryRelationships: 'DOMESTIC',
+  }
+  try {
+    const r = await chiamaFedex(token, '/pickup/v1/pickups', body, 'POST', p.test)
+    const out = r.j?.output
+    const code = out?.pickupConfirmationCode ? String(out.pickupConfirmationCode) : null
+    if (r.status >= 400 || !code) {
+      return { confirmationCode: null, location: null, carrierCode, errore: erroreFedex(r.j, r.status), raw: (r.txt || '').substring(0, 2000) }
+    }
+    return { confirmationCode: code, location: out?.location ? String(out.location) : null, carrierCode, errore: null, raw: (r.txt || '').substring(0, 2000) }
+  } catch (e) {
+    return { confirmationCode: null, location: null, carrierCode, errore: e instanceof Error ? e.message : String(e), raw: '' }
+  }
+}
+
+// Annulla un ritiro FedEx prenotato.
+export async function annullaRitiroFedex(
+  cred: CredenzialiFedex, p: { confirmationCode: string; scheduledDate: string; location?: string | null; carrierCode?: string; test?: boolean }
+): Promise<{ ok: boolean; errore: string | null }> {
+  if (!p.confirmationCode || !cred.api_key || !cred.api_secret || !cred.account_number) return { ok: false, errore: 'dati annullo ritiro incompleti' }
+  let token: string
+  try { token = await getToken(cred.api_key, cred.api_secret, p.test) }
+  catch (e) { return { ok: false, errore: 'FedEx (autenticazione): ' + (e instanceof Error ? e.message : String(e)) } }
+  try {
+    const r = await chiamaFedex(token, '/pickup/v1/pickups/cancel', {
+      associatedAccountNumber: { value: String(cred.account_number) },
+      pickupConfirmationCode: String(p.confirmationCode),
+      scheduledDate: p.scheduledDate,
+      ...(p.location ? { location: p.location } : {}),
+      carrierCode: p.carrierCode || 'FDXE',
+    }, 'PUT', p.test)
+    if (r.status < 400 && /success|cancel/i.test(String(r.j?.output?.pickupConfirmationCode || r.j?.output?.message || 'ok'))) return { ok: true, errore: null }
+    if (r.status < 400) return { ok: true, errore: null }
+    return { ok: false, errore: erroreFedex(r.j, r.status) }
+  } catch (e) {
+    return { ok: false, errore: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TRACKING — POST /track/v1/trackingnumbers. Usa le chiavi Track del contratto se presenti, altrimenti
 // le Ship. Torna scanEvents (data/descrizione/luogo) + lo stato sintetico (latestStatusDetail): il cron
 // mappa con mapStatoFedex + prioritaStato, e `consegnata` dal codice 'DL'.

@@ -39,8 +39,9 @@ export async function GET(req: NextRequest) {
   const { data: spedizioni, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
-  // Solo spedizioni spedisci.online / spediamopro hanno i dati per il ritiro
-  const raw = (spedizioni || []).filter((s: any) => (s.corrieri?.tipo === 'spedisci' || s.corrieri?.tipo === 'spediamopro'))
+  // Corrieri con ritiro ON-DEMAND: spedisci.online / spediamopro (pickup provider) e FedEx diretto
+  // (Pickup API). GLS/BRT no: la raccolta è con l'accordo standard, non si prenota da qui.
+  const raw = (spedizioni || []).filter((s: any) => ['spedisci', 'spediamopro', 'fedex'].includes(s.corrieri?.tipo))
 
   // Risolvo i nomi di master e clienti per il filtro "cliente/master" (solo master)
   const mastMap = new Map<string, string>()

@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
   const masterId = primaSped.master_id
   const clienteId = primaSped.cliente_id || null
 
-  const { data: corriere } = await admin.from('corrieri').select('id,tipo,credenziali').eq('id', primaSped.corriere_id).single()
+  const { data: corriere } = await admin.from('corrieri').select('id,tipo,credenziali,settings').eq('id', primaSped.corriere_id).single()
   if (!corriere) return NextResponse.json({ error: 'Corriere non trovato' }, { status: 400 })
 
   // CONTRATTI DVA: il ritiro si prenota SOLO insieme alla spedizione, non dopo — il corriere non
@@ -279,19 +279,48 @@ export async function POST(req: NextRequest) {
   }
 
   // ══════════════════════════════════════════════════════
-  // GLS / BRT / FEDEX DIRETTI: il ritiro NON è un'operazione on-demand dell'API (il BRT REST ha solo
+  // FEDEX DIRETTO: ritiro ON-DEMAND via Pickup API (POST /pickup/v1/pickups). A differenza di GLS/BRT,
+  // FedEx ha una chiamata per prenotare il ritiro: la usiamo così il "richiedi ritiro" funziona davvero.
+  // Il carrierCode (FDXE/FDXG) lo deduce lib/fedex dal tipo servizio del contratto (settings).
+  // ══════════════════════════════════════════════════════
+  if (corriere.tipo === 'fedex') {
+    const { creaRitiroFedex } = await import('@/lib/fedex')
+    const st: any = corriere.settings || {}
+    const readyTime = normalizzaOrario(body.orarioRitiro) || '09:00'
+    const ris = await creaRitiroFedex(cred as any, {
+      ragioneSociale: body.mittNome, contatto: body.mittNome, telefono: pulisciTelefono(body.mittTelefono),
+      indirizzo: body.mittIndirizzo, localita: body.mittCitta, cap: body.mittCap,
+      provincia: siglaProvincia(body.mittProvincia || '') || (body.mittProvincia || ''), paese: body.mittPaese || 'IT',
+      dataRitiro: body.dataRitiro, readyTime,
+      colli: colliTotali, pesoKg: pesoTotale,
+      serviceType: st.tipo_servizio, test: st.test_mode === true, note: body.istruzioni,
+    })
+    if (!ris.confirmationCode) {
+      // FedEx abilita ogni API per progetto: se la Pickup API non è ancora attiva sul progetto, FedEx
+      // risponde FORBIDDEN "could not authorize your credentials" pur avendo OAuth valido. Messaggio chiaro
+      // (non il criptico grezzo) + la via alternativa che intanto funziona (ritiro programmato del conto).
+      const nonAbilitato = /authoriz|forbidden|permission/i.test(String(ris.errore || ''))
+      const msg = nonAbilitato
+        ? 'Ritiro FedEx on-demand non ancora abilitato su questo contratto: va attivata la Pickup API sul portale FedEx. Nel frattempo FedEx ritira col ritiro programmato concordato sul conto.'
+        : erroreRitiroPulito(ris.errore || 'FedEx: ritiro non riuscito')
+      return NextResponse.json({ error: msg }, { status: 400 })
+    }
+    const { data: nuovoRitiro, error: insErr } = await salvaRitiro(ris.confirmationCode)
+    if (insErr) return NextResponse.json({ error: `Ritiro creato (${ris.confirmationCode}) ma errore DB: ${insErr.message}` }, { status: 500 })
+    return NextResponse.json({ id: nuovoRitiro.id, pickupId: ris.confirmationCode })
+  }
+
+  // ══════════════════════════════════════════════════════
+  // GLS / BRT DIRETTI: il ritiro NON è un'operazione on-demand dell'API (il BRT REST ha solo
   // Create/Confirm/Delete/Routing/Tracking; il GLS labelservice non ha pickup). La raccolta avviene
   // con l'accordo standard del contratto: BRT dal DEPOSITO di partenza, GLS alla CHIUSURA della
-  // distinta (CloseWorkDay), FedEx col RITIRO PROGRAMMATO del conto (pickupType USE_SCHEDULED_PICKUP:
-  // FedEx passa ogni giorno, non serve una richiesta per spedizione). Quindi non c'è nessuno a cui
-  // mandare la richiesta: si dice chiaro, invece del criptico "Impossibile recuperare il corriere"
-  // (il fallback Spedisci più sotto, dove FedEx finiva senza _carrierCode → errore fuorviante).
+  // distinta (CloseWorkDay). Quindi non c'è nessuno a cui mandare la richiesta: si dice chiaro, invece
+  // del criptico "Impossibile recuperare il corriere" (che è il fallback Spedisci più sotto).
   // ══════════════════════════════════════════════════════
-  if (corriere.tipo === 'gls' || corriere.tipo === 'brt' || corriere.tipo === 'fedex') {
-    const msg = corriere.tipo === 'fedex'
-      ? 'Per il contratto FedEx il ritiro non si richiede da qui: FedEx passa a ritirare col ritiro programmato concordato sul conto (non serve una richiesta per singola spedizione).'
-      : 'Per i contratti GLS/BRT diretti il ritiro non si richiede da qui: la raccolta avviene con l\'accordo standard del corriere — BRT dal deposito di partenza, GLS alla chiusura della distinta.'
-    return NextResponse.json({ error: msg }, { status: 400 })
+  if (corriere.tipo === 'gls' || corriere.tipo === 'brt') {
+    return NextResponse.json({
+      error: 'Per i contratti GLS/BRT diretti il ritiro non si richiede da qui: la raccolta avviene con l\'accordo standard del corriere — BRT dal deposito di partenza, GLS alla chiusura della distinta.',
+    }, { status: 400 })
   }
 
   // ══════════════════════════════════════════════════════
