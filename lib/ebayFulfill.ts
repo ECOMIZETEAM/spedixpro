@@ -13,6 +13,7 @@ const EBAY_VETTORE: Record<string, string> = {
   SDA: 'SDA',
   UPS: 'UPS',
   DHL: 'DHL',
+  FEDEX: 'FedEx',
 }
 function codiceVettoreEbay(corr: { tipo?: string | null; nome_contratto?: string | null } | null): string {
   if (!corr) return 'Other'
