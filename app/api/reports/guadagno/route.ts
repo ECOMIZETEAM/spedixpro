@@ -92,127 +92,33 @@ export async function GET(req: NextRequest) {
   }
 
   // Il GUADAGNO totale include: spedizioni + rettifiche (correzioni prezzo) + RESI + GIACENZE.
-  // Ognuno ha la stessa struttura (movimento cliente = ricavo, movimento master_target = costo),
-  // quindi il margine di resi e giacenze entra automaticamente. Il 'rimborso' netta le annullate a 0.
-  // (Per questo Report Guadagno ≠ Report Spedizioni: quest'ultimo è SOLO spedizioni.)
+  // Struttura (movimento cliente/sotto-master = ricavo, movimento master_target = costo, più il costo
+  // che scende dal livello superiore); il margine di resi e giacenze entra automaticamente, il
+  // 'rimborso' netta le annullate a 0. (Per questo Report Guadagno ≠ Report Spedizioni.)
+  //
+  // Aggregazione nel DB: la serie ricavi/costi per giorno (o mese) la somma la RPC guadagno_master_serie_v1,
+  // il numero spedizioni guadagno_num_spedizioni_v1. Prima si scaricavano in memoria TUTTI i movimenti del
+  // periodo, mille per round-trip (per E&A MULTIEXPRESS ~90.000 righe = ~90 chiamate, più le spedizioni a
+  // blocchi di 300 e il giro provider): decine di secondi. Ora poche query. La logica (ricavi clienti +
+  // ricavi sotto-master + propria a margine 0, costo self + costo dal livello superiore) è identica ed è
+  // stata verificata prima/dopo sui dati veri.
+  const [{ data: serieRows, error: errSerie }, numSpedizioni] = await Promise.all([
+    admin.rpc('guadagno_master_serie_v1', { p_master: M, p_dal: dal, p_al: alEnd, p_per_mese: perMese, p_tipi: TIPI }),
+    admin.rpc('guadagno_num_spedizioni_v1', { p_master: M, p_dal: dal, p_al: alEnd }).then((r: any) => Number(r?.data || 0)),
+  ])
+  if (errSerie) return NextResponse.json({ error: errSerie.message }, { status: 500 })
 
-  // sotto-master diretti
-  const { data: figli } = await admin.from('masters').select('id').eq('parent_master_id', M)
-  const subIds = new Set((figli || []).map((f: any) => f.id))
-
-  // movimenti sui libri del master M (TUTTI: senza range PostgREST taglierebbe a 1000 -> totali errati)
-  // SOLO movimenti legati a una SPEDIZIONE (spedizione_id NOT NULL): il guadagno = margine sulle
-  // spedizioni, come l'Elenco Spedizioni. Gli aggiustamenti manuali di saldo (es. "Accredito credito
-  // a scalare", rettifiche senza spedizione) NON sono margine di spedizione → esclusi. Così Report ed
-  // Elenco combaciano per tutti.
-  const movM = await fetchAll(() => admin.from('movimenti')
-    .select('master_target_id,cliente_id,importo,tipo,created_at,spedizione_id')
-    .eq('master_id', M).not('spedizione_id', 'is', null).gte('created_at', dal).lte('created_at', alEnd).in('tipo', TIPI)
-    .order('created_at', { ascending: false }).order('id', { ascending: false }))
-
-  // movimenti dei sotto-master diretti (per i loro pagamenti a cascata verso M)
-  let movSub: any[] = []
-  if (subIds.size) {
-    movSub = await fetchAll(() => admin.from('movimenti')
-      .select('master_id,master_target_id,importo,tipo,created_at,spedizione_id')
-      .in('master_id', Array.from(subIds)).not('spedizione_id', 'is', null).gte('created_at', dal).lte('created_at', alEnd).in('tipo', TIPI)
-      .order('created_at', { ascending: false }).order('id', { ascending: false }))
-  }
-  // Chiavi (spedizione, sotto-master) già contate come ricavo via il SELF del sotto-master (movSub sotto):
-  // servono a NON contare due volte quelle poche spedizioni che hanno SIA il self del figlio SIA un mio
-  // addebito diretto (master_id=M, target=figlio) per lo stesso evento. Le due forme convivono per motivi
-  // storici; qui si tiene una sola strada.
-  // Chiave col TIPO: la spedizione base ha SEMPRE un self di tipo 'spedizione' del figlio (è il ricavo
-  // base, giusto contarlo da movSub); senza il tipo nella chiave bloccherei per sbaglio la rettifica
-  // dello stesso pacco. Il doppio vero c'è solo quando lo STESSO tipo esiste in entrambe le forme.
-  const selfSubKeys = new Set<string>()
-  for (const m of movSub) if (m.master_id === m.master_target_id && (m as any).spedizione_id) selfSubKeys.add((m as any).spedizione_id + '|' + m.master_id + '|' + m.tipo)
-
-  const n = (x: any) => Number(x || 0)
-  // Serie temporale: ricavi/costi per giorno (per mese/settimana/oggi) o per mese (annuale)
-  const perGiorno = new Map<string, { ricavi: number; costi: number }>()
-  const chiave = (iso: string) => perMese ? iso.slice(0, 7) : iso.slice(0, 10)  // YYYY-MM oppure YYYY-MM-DD
-  const acc = (iso: string, campo: 'ricavi' | 'costi', v: number) => {
-    const k = chiave(iso); const cur = perGiorno.get(k) || { ricavi: 0, costi: 0 }
-    cur[campo] += v; perGiorno.set(k, cur)
-  }
-
-  // SPEDIZIONI PROPRIE (master_id = M, senza cliente): il master spedisce per sé. Contano SIA l'uscita
-  // SIA un'entrata pari (paga a se stesso) → margine 0 (come nell'Elenco). Senza questo, il costo della
-  // propria ridurrebbe il guadagno e Report ed Elenco non tornerebbero. Individuo le proprie dalle spedizioni.
-  // Una sola lettura delle spedizioni per TUTTI gli id citati dai movimenti: serve sia a
-  // riconoscere le spedizioni proprie, sia a escludere le ANNULLATE dal conteggio (vedi sotto).
-  const idsDaLeggere = Array.from(new Set(
-    (movM || []).filter((m: any) => m.spedizione_id).map((m: any) => m.spedizione_id)
-  ))
-  const propriaSet = new Set<string>()
-  const annullateSet = new Set<string>()
-  for (let i = 0; i < idsDaLeggere.length; i += 300) {
-    const chunk = idsDaLeggere.slice(i, i + 300)
-    const { data: sps } = await admin.from('spedizioni').select('id,master_id,cliente_id,stato').in('id', chunk)
-    for (const sp of (sps || [])) {
-      const s: any = sp
-      if (s.master_id === M && !s.cliente_id) propriaSet.add(s.id)
-      if (s.stato === 'annullata' || s.stato === 'annullamento_manuale') annullateSet.add(s.id)
-    }
-  }
-
-  let ricaviClienti = 0, costoM = 0, ricaviSub = 0, ricaviPropria = 0
-  for (const m of (movM || [])) {
-    // addebito e rimborso si annullano da soli (storno esatto in annullo) -> annullate = netto 0
-    if (m.cliente_id) { ricaviClienti += -n(m.importo); acc(m.created_at, 'ricavi', -n(m.importo)) }       // incasso dai clienti diretti
-    else if (m.master_target_id === M) {
-      const v = -n(m.importo)
-      costoM += v; acc(m.created_at, 'costi', v)                                                            // costo di M
-      // Spedizione propria: entrata = uscita → margine 0 (non riduce il guadagno).
-      if ((m as any).spedizione_id && propriaSet.has((m as any).spedizione_id)) { ricaviPropria += v; acc(m.created_at, 'ricavi', v) }
-    }
-    // RICAVO da un SUB-MASTER DIRETTO addebitato SUI MIEI libri: rettifiche/resi/giacenze/rimborsi che
-    // carico IO al sotto-master (master_id=M, target=sub diretto, niente cliente). Senza questo ramo, un
-    // master che rettifica ai suoi sotto-master vedeva il Report Guadagno FERMO (il ricavo cadeva fuori da
-    // entrambi i rami sopra) — capitava a MULTIEXPRESS, che rivende a sotto-master invece che a clienti,
-    // mentre chi rettifica ai CLIENTI (ramo cliente_id) lo vedeva già. La spedizione BASE è ESCLUSA: il suo
-    // ricavo arriva dai movimenti del sotto-master (self, in movSub) — includerla qui la conterebbe due volte.
-    else if (m.tipo !== 'spedizione' && m.master_target_id && subIds.has(m.master_target_id)
-             && !selfSubKeys.has((m as any).spedizione_id + '|' + m.master_target_id + '|' + m.tipo)) {
-      ricaviSub += -n(m.importo); acc(m.created_at, 'ricavi', -n(m.importo))
-    }
-  }
-  for (const m of movSub) {
-    if (m.master_id === m.master_target_id) { ricaviSub += -n(m.importo); acc(m.created_at, 'ricavi', -n(m.importo)) } // cascata sotto-master
-  }
-
-  // COSTO addebitato dal LIVELLO SUPERIORE (ripesature / resi / giacenze che il PADRE addebita a M):
-  // il movimento ha master_id=PADRE, target=M → NON è in movM (che filtra master_id=M), e costoM sopra
-  // vede solo i SELF (master_id=M, target=M). Risultato: il costo della RIPESATURA (che scende dal padre)
-  // non veniva contato e il margine usciva GONFIATO — verificato ~€4.050/mese su Ecomize Solution (978
-  // rettifiche). Qui si sommano quegli addebiti come costo di M. `master_id≠M` esclude i self già contati;
-  // il ricavo corrispondente (M che riaddebita al figlio/cliente) è già nei rami ricavi qui sopra.
-  const movCostoSopra = await fetchAll(() => admin.from('movimenti')
-    .select('importo,tipo,created_at,spedizione_id')
-    .eq('master_target_id', M).neq('master_id', M).not('spedizione_id', 'is', null)
-    .gte('created_at', dal).lte('created_at', alEnd).in('tipo', TIPI)
-    .order('created_at', { ascending: false }).order('id', { ascending: false }))
-  for (const m of movCostoSopra) {
-    const v = -n(m.importo)
-    costoM += v; acc((m as any).created_at, 'costi', v)
-  }
-
-  const ricavi = Math.round((ricaviClienti + ricaviSub + ricaviPropria) * 100) / 100
-  const costi = Math.round(costoM * 100) / 100
-  const guadagno = Math.round((ricavi - costi) * 100) / 100
-  // Numero di spedizioni del periodo (distinte) per la media per spedizione.
-  // Le ANNULLATE sono ESCLUSE, come nell'Elenco Spedizioni: i loro movimenti restano (addebito +
-  // storno, netto zero, quindi il guadagno non cambia) ma facevano gonfiare il conteggio. Il
-  // confronto fra le due schermate non tornava mai: su Ecomize Solution erano 7.221 qui contro
-  // 7.011 nell'Elenco, e le 210 di differenza erano esattamente le annullate.
-  const spedSet = new Set<string>()
-  for (const m of (movM || [])) {
-    if (m.tipo === 'spedizione' && m.spedizione_id && !annullateSet.has(m.spedizione_id)) spedSet.add(m.spedizione_id)
-  }
-  const numSpedizioni = spedSet.size
-  const mediaSped = numSpedizioni > 0 ? Math.round((guadagno / numSpedizioni) * 100) / 100 : 0
   const r2 = (x: number) => Math.round(x * 100) / 100
+  const perGiorno = new Map<string, { ricavi: number; costi: number }>()
+  for (const row of (serieRows || [])) perGiorno.set((row as any).bucket, { ricavi: Number((row as any).ricavi || 0), costi: Number((row as any).costi || 0) })
+
+  let ricaviTot = 0, costiTot = 0
+  for (const v of perGiorno.values()) { ricaviTot += v.ricavi; costiTot += v.costi }
+  const ricavi = r2(ricaviTot)
+  const costi = r2(costiTot)
+  const guadagno = r2(ricavi - costi)
+  const mediaSped = numSpedizioni > 0 ? r2(guadagno / numSpedizioni) : 0
+
   // Riempio TUTTI i punti dell'intervallo (0 dove non ci sono movimenti) così il grafico è continuo
   const startD = new Date(dal), endD = new Date(alEnd)
   const keys: string[] = []
@@ -247,34 +153,19 @@ export async function GET(req: NextRequest) {
   if (M === EA_MULTI_ID && vedeLaRete(utente)) {
     const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
     const sub = await sottoAlberoMasterIds(admin, M)
-    const sp = await fetchAll(() => admin.from('spedizioni')
-      .select('costo_spedizione, stato, corrieri(tipo)')
-      .in('master_id', sub.length ? sub : [M])
-      .gte('created_at', dal).lte('created_at', alEnd)
-      .order('created_at', { ascending: false }).order('id', { ascending: false }))
-    const agg = new Map<string, { costo: number; n: number }>()
-    for (const s of (sp || [])) {
-      // Escludo SOLO le 'annullata' (effettivamente cancellate + riaccreditate = netto 0).
-      // Le 'annullamento_pending'/'annullamento_manuale' NON sono ancora annullate sul corriere
-      // (nessun riaccredito): restano un COSTO reale e vanno contate.
-      if ((s as any).stato === 'annullata') continue
-      const tipo = (s as any).corrieri?.tipo || 'altro'
-      const cur = agg.get(tipo) || { costo: 0, n: 0 }
-      cur.costo += Number((s as any).costo_spedizione || 0); cur.n++
-      agg.set(tipo, cur)
-    }
+    // Costo per fornitore aggregato nel DB (group by): prima si scaricava tutto il sotto-albero.
+    const { data: prov } = await admin.rpc('guadagno_costi_provider_v1', { p_sub: sub.length ? sub : [M], p_dal: dal, p_al: alEnd })
     // Ogni fornitore col suo nome. Chi non era nell'elenco usciva col nome tecnico del tipo
-    // ('easyparcel'), che oltretutto non e' il nome con cui quel conto si chiama davvero: la voce
-    // c'era, ma sembrava mancare.
+    // ('easyparcel'), che oltretutto non e' il nome con cui quel conto si chiama davvero.
     const LABEL: Record<string, string> = {
       spediamopro: 'SpediamoPro',
       spedisci: 'Spedisci.online',
       easyparcel: 'DVA',
       interno: 'Circuito interno',
     }
-    costiProvider = Array.from(agg.entries())
-      .map(([tipo, v]) => ({ provider: LABEL[tipo] || tipo, costo: r2(v.costo), n: v.n }))
-      .sort((a, b) => b.costo - a.costo)
+    costiProvider = (prov || [])
+      .map((p: any) => ({ provider: LABEL[p.tipo] || p.tipo, costo: r2(Number(p.costo || 0)), n: Number(p.n || 0) }))
+      .sort((a: any, b: any) => b.costo - a.costo)
   }
 
   return NextResponse.json({ guadagno, ricavi, costi, periodo, serie, numSpedizioni, mediaSped, costiProvider })
