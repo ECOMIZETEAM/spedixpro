@@ -59,9 +59,21 @@ export function trovaRateContratto(rates: any[], cred: any): any | null {
 // REGOLA UNICA condivisa da TUTTI i corrieri (sta in un posto solo): spedisci la usa nella mappatura
 // stati; spediamopro la applica sugli EVENTI, perche' il suo stato numerico non distingue il reso
 // (una riconsegna al mittente registra come "consegnata").
+//
+// DUE FRASI VERE CHE L'ADIACENZA NON PRENDEVA (misurato il 18/09/2026 su tutto lo storico):
+//   - GLS "Abbiamo restituito LA SPEDIZIONE al mittente": il complemento sta in mezzo. 26 spedizioni,
+//     18 mai passate a reso e mai addebitate. Si ammette in mezzo SOLO il pacco, nominato: un "fra
+//     una e tre parole qualsiasi" avrebbe preso anche "restituito L'IMPORTO DEL CONTRASSEGNO al
+//     mittente", che e' la rimessa dei soldi e non il ritorno del pacco. Solo participi: "Restituiremo
+//     il pacco al mittente" (UPS) e' un annuncio, il reso lo dira' l'evento dopo.
+//   - BRT "RESO MITTENTE", senza "al": 4 spedizioni via Spedisci mai passate a reso. In tutto lo
+//     storico la frase compare solo cosi', come evento a se'.
+// Verificato sulla stessa base: le due aggiunte prendono queste due frasi e nient'altro.
 export function testoIndicaReso(testo: string): boolean {
   const s = (testo || '').toLowerCase()
   return /(res[oa]|ritorn\w*|rientr\w*|restitu\w*|respint\w*|rispedit\w*|consegn\w*|rinvi\w*) al mittente/.test(s)
+    || /(restituit|respint|rispedit|ritornat|rinviat)[oaie] (la spedizione|il pacco|la merce|il collo|i colli) al mittente/.test(s)
+    || /\bres[oa] mittente\b/.test(s)
     || /return(ed|ing)? to sender/.test(s)
 }
 
@@ -73,12 +85,20 @@ export function mapStatoSpedisci(statusStr: string): string | null {
   // tornato indietro risultava arrivato e il reso non si addebitava (231 spedizioni al 17/09/2026).
   // Stessa correzione gia' fatta nel dizionario Poste; GLS e BRT avevano gia' il reso in testa.
   if (testoIndicaReso(s)) return 'reso_mittente'
-  if (s.includes('consegnat') || s.includes('delivered')) {
+  // "NON consegnata per mancato pagamento" contiene 'consegnat': senza la negazione sarebbe una
+  // consegna. Mai successo finora (le frasi arrivavano da un'altra strada), ma basta che il fornitore
+  // la mandi una volta per chiudere come consegnato un pacco fermo.
+  if ((s.includes('consegnat') || s.includes('delivered')) && !s.includes('non consegnat')) {
     // "Consegnata all'ufficio postale" e' un DEPOSITO: il destinatario deve ancora andare a ritirare.
     if (/ufficio postale|punto di giacenza|fermo deposito|fermoposta|punto di ritiro|locker/.test(s)) return 'in_consegna'
     return 'consegnata'  // NB: 'delivered' (non 'deliver') per non catturare "out for delivery"
   }
   if (s.includes('giacenz') || s.includes('stock') || s.includes('deposit') || s.includes('giacenza')) return 'in_giacenza'
+  // CONSEGNA FALLITA, prima di 'in consegna': "Consegna non andata a buon fine. La spedizione sara'
+  // in consegna il primo giorno utile" e' un tentativo fallito, non un giro in corso. Frasi Poste
+  // che finivano nel vuoto (1.188 spedizioni al 18/09/2026): il cliente vedeva ancora "in consegna"
+  // un pacco tornato indietro dal destinatario assente o dall'indirizzo sbagliato.
+  if (/non andata a buon fine|consegna non riuscita|non consegnat/.test(s)) return 'non_consegnato'
   if (s.includes('in consegna') || s.includes('out for delivery') || s.includes('distribuzione') || s.includes('in distribuzione')) return 'in_consegna'
   if (s.includes('transit') || s.includes('transito') || s.includes('arrivat') || s.includes('hub') || s.includes('partenz') || s.includes('viaggio') || s.includes('smistament')) return 'in_transito'
   if (s.includes('presa in carico') || s.includes('preso in caric') || s.includes('spedit') || s.includes('accettat') || s.includes('ritirat') || s.includes('partita') || s.includes('picked') || s.includes('lavorazione')) return 'spedita'

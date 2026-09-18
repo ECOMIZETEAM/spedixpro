@@ -753,12 +753,17 @@ export function mapStatoEasyparcel(testo: string): string | null {
   // "consegnata al mittente" da 'consegnat': il pacco tornato indietro risultava arrivato e il reso
   // non si addebitava. Stessa correzione gia' fatta nei dizionari Poste e Spedisci.
   if (testoIndicaReso(s)) return 'reso_mittente'
-  if (/consegnat|delivered/.test(s)) {
+  // "NON consegnata" contiene 'consegnat': vedi la stessa guardia nel dizionario Spedisci.
+  if (/consegnat|delivered/.test(s) && !/non consegnat/.test(s)) {
     // "Consegnata all'ufficio postale" e' un DEPOSITO: il destinatario deve ancora ritirare.
     if (/ufficio postale|punto di giacenza|fermo deposito|fermoposta|punto di ritiro|locker/.test(s)) return 'in_consegna'
     return 'consegnata'
   }
   if (/giacenz|deposit|fermo deposito/.test(s)) return 'in_giacenza'
+  // CONSEGNA FALLITA, prima di "in consegna": stessa regola e stesso motivo del dizionario Spedisci
+  // ("Consegna non andata a buon fine perche' l'indirizzo del destinatario risulta errato" non
+  // conteneva nessuna delle parole sotto e restava senza stato: 131 spedizioni al 18/09/2026).
+  if (/non andata a buon fine|consegna non riuscita|non consegnat/.test(s)) return 'non_consegnato'
   // "in consegna" prima di "transito": molti eventi contengono entrambe le parole.
   if (/in consegna|out for delivery|in distribuzione|consegna prevista/.test(s)) return 'in_consegna'
   if (/mancata|fallit|rifiut|anomal|indirizzo errato|destinatario assente|non consegnat/.test(s)) return 'non_consegnato'
