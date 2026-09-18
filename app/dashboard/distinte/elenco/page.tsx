@@ -14,8 +14,12 @@ export default function ElencoDistintePage() {
   const dialog = useDialog()
   const router = useRouter()
   const [distinte, setDistinte] = useState<any[]>([])
+  const [total, setTotal] = useState(0)
+  const [vettoriSrv, setVettoriSrv] = useState<string[]>([])
+  const [contrattiSrv, setContrattiSrv] = useState<{ nome: string; vettore: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useFiltriPersistenti('distinte-elenco-master:cerca', '')
+  const [cercaDeb, setCercaDeb] = useState('')
   const [dal, setDal] = useFiltriPersistenti('distinte-elenco-master:dal', '')
   const [al, setAl] = useFiltriPersistenti('distinte-elenco-master:al', '')
   const [fVettore, setFVettore] = useFiltriPersistenti('distinte-elenco-master:vettore', '')
@@ -24,16 +28,26 @@ export default function ElencoDistintePage() {
   const [perPage, setPerPage] = useFiltriPersistenti('distinte-elenco-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
 
-  useEffect(() => { carica() }, [dal, al])
+  // Cerca con debounce: niente una chiamata a ogni tasto; una nuova ricerca riparte da pagina 1.
+  useEffect(() => { const t = setTimeout(() => { setCercaDeb(cerca); setPagina(1) }, 350); return () => clearTimeout(t) }, [cerca])
+  // Paginazione + filtri lato SERVER: si ricarica al cambio di uno qualsiasi (niente più 26k righe in memoria).
+  useEffect(() => { carica() }, [dal, al, cercaDeb, fVettore, fContratto, perPage, pagina])
 
   async function carica() {
     setLoading(true)
     const params = new URLSearchParams()
+    params.set('page', String(pagina)); params.set('perPage', String(perPage))
     if (dal) params.set('dal', dal)
     if (al) params.set('al', al)
+    if (cercaDeb) params.set('cerca', cercaDeb)
+    if (fVettore) params.set('vettore', fVettore)
+    if (fContratto) params.set('contratto', fContratto)
     const res = await fetch('/api/distinte?' + params.toString())
     const d = await res.json()
-    setDistinte(Array.isArray(d) ? d : [])
+    setDistinte(Array.isArray(d?.rows) ? d.rows : [])
+    setTotal(Number(d?.total || 0))
+    setVettoriSrv(Array.isArray(d?.vettori) ? d.vettori : [])
+    setContrattiSrv(Array.isArray(d?.contratti) ? d.contratti : [])
     setLoading(false)
   }
 
@@ -155,21 +169,15 @@ export default function ElencoDistintePage() {
     writeFile(wb, 'Distinta_' + dist.numero + '.xlsx')
   }
 
-  // Opzioni filtri: VETTORE fisico (GLS/BRT/POSTE/SDA…, mai PF/Q) e CONTRATTO (nome esatto).
-  const vettoriPresenti = Array.from(new Set(distinte.map(d => d.vettore).filter(Boolean))).sort()
-  const contrattiPresenti = Array.from(new Set(distinte.map(d => d.corrieri?.nome_contratto).filter(Boolean))).sort()
-  // Contratti mostrati nel dropdown coerenti col vettore scelto.
-  const contrattiFiltrati = fVettore ? contrattiPresenti.filter(n => distinte.some(d => d.corrieri?.nome_contratto === n && d.vettore === fVettore)) : contrattiPresenti
+  // Opzioni filtri dal SERVER: VETTORE fisico (GLS/BRT/POSTE/SDA…, mai PF/Q) dai corrieri usati nel
+  // periodo, e CONTRATTO (nome esatto) coerente col vettore scelto.
+  const vettoriPresenti = vettoriSrv
+  const contrattiFiltrati = (fVettore ? contrattiSrv.filter(c => c.vettore === fVettore) : contrattiSrv).map(c => c.nome)
 
-  const filtrate = distinte.filter(d => (!cerca ||
-    String(d.numero || '').toLowerCase().includes(cerca.toLowerCase()) ||
-    String(d.cliente_label || d.clienti?.ragione_sociale || '').toLowerCase().includes(cerca.toLowerCase()))
-    && (!fVettore || d.vettore === fVettore)
-    && (!fContratto || d.corrieri?.nome_contratto === fContratto))
-
-  const totalePagine = Math.max(1, Math.ceil(filtrate.length / perPage))
+  // Filtri e paginazione li fa già il server: qui la pagina è pronta.
+  const totalePagine = Math.max(1, Math.ceil(total / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
-  const distintePaginate = filtrate.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
+  const distintePaginate = distinte
 
   const inp = { padding: '8px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', background: '#fff' } as const
   const th = { padding: '9px 12px', textAlign: 'left' as const, fontSize: '11px', fontWeight: '700', color: '#1a1a1a', borderBottom: '1px solid #d1d5db', whiteSpace: 'nowrap' as const }
@@ -192,7 +200,7 @@ export default function ElencoDistintePage() {
         </span>
       </div>
       <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #d1d5db', padding: '14px', marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <div><div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Data</div><DateRangePicker dal={dal} al={al} onChange={(d1,d2)=>{setDal(d1);setAl(d2)}} /></div>
+        <div><div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Data</div><DateRangePicker dal={dal} al={al} onChange={(d1,d2)=>{setDal(d1);setAl(d2);setPagina(1)}} /></div>
         <div><div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Vettore</div>
           <select value={fVettore} onChange={e=>{setFVettore(e.target.value);setFContratto('');setPagina(1)}} style={{ ...inp, width: '150px' }}>
             <option value="">Tutti</option>
@@ -224,7 +232,7 @@ export default function ElencoDistintePage() {
             <tbody>
               {loading ? (
                 <tr><td colSpan={6} style={{ ...td, textAlign: 'center', padding: '20px' }}>Caricamento...</td></tr>
-              ) : !filtrate.length ? (
+              ) : !distinte.length ? (
                 <tr><td colSpan={6} style={{ ...td, textAlign: 'center', padding: '20px' }}>Nessuna distinta creata</td></tr>
               ) : distintePaginate.map(d => {
                 const isSelected = selezionate.has(d.id)
@@ -273,7 +281,7 @@ export default function ElencoDistintePage() {
         </div>
         {totalePagine > 0 && (
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap',gap:'8px'}}>
-            <span style={{fontSize:'12px',color:'#666'}}>{(paginaCorr - 1) * perPage + 1}-{Math.min(paginaCorr * perPage, filtrate.length)} di {filtrate.length}</span>
+            <span style={{fontSize:'12px',color:'#666'}}>{total === 0 ? 0 : (paginaCorr - 1) * perPage + 1}-{Math.min(paginaCorr * perPage, total)} di {total}</span>
             <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
               <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr<=1?'default':'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
               {Array.from({length: totalePagine}, (_,i)=>i+1).filter(n => n===1 || n===totalePagine || Math.abs(n-paginaCorr)<=2).map((n,idx,arr)=>(
@@ -286,7 +294,7 @@ export default function ElencoDistintePage() {
             </div>
           </div>
         )}
-        <div style={{ padding: '10px 16px', fontSize: '12px', color: '#1a1a1a', borderTop: '1px solid #f0f0f0' }}>Risultati: {filtrate.length} distinte</div>
+        <div style={{ padding: '10px 16px', fontSize: '12px', color: '#1a1a1a', borderTop: '1px solid #f0f0f0' }}>Risultati: {total} distinte</div>
       </div>
     </div>
   )
