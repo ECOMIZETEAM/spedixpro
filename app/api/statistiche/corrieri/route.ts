@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
-import { fetchAll } from '@/lib/fetch-all'
 
 // STATISTICHE — CORRIERI (sola lettura). Efficienza costi e SLA su TUTTO il sottoalbero del master.
 const n = (x: any) => Number(x || 0)
@@ -21,43 +20,29 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminSupabase()
   const sub = await sottoAlberoMasterIds(admin, M)
-  const sp = await fetchAll(() => admin.from('spedizioni')
-    .select('stato,costo_spedizione,peso_reale,contrassegno,assicurazione,servizi_accessori,updated_at,created_at,corrieri(nome_contratto,tipo)')
-    .in('master_id', sub.length ? sub : [M]).gte('created_at', dalISO).lte('created_at', alISO)
-    .order('created_at', { ascending: false }))
+  // Costo REALE dai movimenti (target = questo master), non dalla colonna nominale costo_spedizione:
+  // cosi' le RIPESATURE e le rettifiche entrano nel costo del corriere. Aggregazione in SQL (stat_corrieri_v1)
+  // — prima si caricavano in memoria tutte le spedizioni del sottoalbero. SECURITY DEFINER: chiamabile solo
+  // via service_role (revoke da anon/authenticated).
+  const { data: rows, error } = await admin.rpc('stat_corrieri_v1', {
+    p_sub: sub.length ? sub : [M], p_master: M, p_dal: dalISO, p_al: alISO,
+  })
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const CONSEGNATA = 'consegnata'
-  const agg = new Map<string, any>()
   let totSped = 0, totConsegnate = 0, totResi = 0, totCosto = 0, totPeso = 0, totTransito = 0, nTransito = 0
-  for (const s of (sp || [])) {
-    if ((s as any).stato === 'annullata') continue
-    const corr = (s as any).corrieri?.nome_contratto || '—'
-    const costo = n((s as any).costo_spedizione), peso = n((s as any).peso_reale)
-    const consegnata = (s as any).stato === CONSEGNATA
-    const reso = (s as any).stato === 'reso_mittente'
-    // transito ≈ created_at → updated_at per le consegnate (approssimazione)
-    let transito = 0
-    if (consegnata && (s as any).updated_at && (s as any).created_at) {
-      transito = Math.max(0, (Date.parse((s as any).updated_at) - Date.parse((s as any).created_at)) / 86400000)
-      if (transito > 0 && transito < 60) { totTransito += transito; nTransito++ }
+  const perCorriere = (rows || []).map((v: any) => {
+    const sped = n(v.spedizioni), costo = n(v.costo), peso = n(v.peso)
+    const consegnate = n(v.consegnate), resi = n(v.resi)
+    const transitoSum = n(v.transito_sum), transitoN = n(v.transito_n)
+    totSped += sped; totConsegnate += consegnate; totResi += resi
+    totCosto += costo; totPeso += peso; totTransito += transitoSum; nTransito += transitoN
+    return {
+      corriere: v.corriere || '—', spedizioni: sped, costo: r2(costo), costoMedio: sped ? r2(costo / sped) : 0,
+      costoKg: peso ? r2(costo / peso) : 0, consegna: sped ? r2((consegnate / sped) * 100) : 0,
+      resi: sped ? r2((resi / sped) * 100) : 0, transito: transitoN ? r2(transitoSum / transitoN) : 0,
+      pesoCarb: r2(costo), assicurazione: r2(n(v.assic)), contrassegno: r2(n(v.cod)), servizi: r2(n(v.serv)),
     }
-    const cur = agg.get(corr) || { sped: 0, consegnate: 0, resi: 0, costo: 0, peso: 0, transito: 0, nTransito: 0, assic: 0, cod: 0, serv: 0 }
-    cur.sped++; if (consegnata) cur.consegnate++; if (reso) cur.resi++
-    cur.costo += costo; cur.peso += peso
-    if (transito > 0 && transito < 60) { cur.transito += transito; cur.nTransito++ }
-    cur.assic += n((s as any).assicurazione); cur.cod += n((s as any).contrassegno)
-    const serv = Array.isArray((s as any).servizi_accessori) ? (s as any).servizi_accessori.reduce((a: number, x: any) => a + n(x?.importo), 0) : 0
-    cur.serv += serv
-    agg.set(corr, cur)
-    totSped++; if (consegnata) totConsegnate++; if (reso) totResi++; totCosto += costo; totPeso += peso
-  }
-
-  const perCorriere = Array.from(agg.entries()).map(([corriere, v]) => ({
-    corriere, spedizioni: v.sped, costo: r2(v.costo), costoMedio: v.sped ? r2(v.costo / v.sped) : 0,
-    costoKg: v.peso ? r2(v.costo / v.peso) : 0, consegna: v.sped ? r2((v.consegnate / v.sped) * 100) : 0,
-    resi: v.sped ? r2((v.resi / v.sped) * 100) : 0, transito: v.nTransito ? r2(v.transito / v.nTransito) : 0,
-    pesoCarb: r2(v.costo), assicurazione: r2(v.assic), contrassegno: r2(v.cod), servizi: r2(v.serv),
-  })).sort((a, b) => b.spedizioni - a.spedizioni)
+  }).sort((a: any, b: any) => b.spedizioni - a.spedizioni)
 
   return NextResponse.json({
     kpi: {
