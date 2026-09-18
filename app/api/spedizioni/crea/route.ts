@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
   if (masterSub) {
     cliente = { master_id: utente!.master_id, listino_cliente_id: subListino, tipo_contratto: subTipo, credito: subCredito, ragione_sociale: 'Sotto-master' }
   } else if (!isProprio) {
-    const { data } = await supabase.from('clienti').select('master_id,ragione_sociale,listino_cliente_id,vieta_inserimento,tipo_contratto,credito,agente,gestione_logistica').eq('id', clienteId).single()
+    const { data } = await supabase.from('clienti').select('master_id,ragione_sociale,listino_cliente_id,vieta_inserimento,tipo_contratto,credito,agente,gestione_logistica,impostazioni').eq('id', clienteId).single()
     cliente = data
     if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
     // Agente: il cliente dev'essere assegnato a lui.
@@ -295,6 +295,22 @@ export async function POST(req: NextRequest) {
         if (!sup.disponibile) return NextResponse.json({ error: 'Il contratto non prevede il contrassegno o l\'assicurazione per questo importo. Rimuovili o scegli un altro corriere.' }, { status: 400 })
       }
     }
+  }
+
+  // *** INTERNO ESCLUSIVO ***
+  // Se il cliente ha l'opzione attiva e la destinazione è coperta dal circuito interno del suo master,
+  // per quel comune si spedisce SOLO con l'interno. Il motore tariffe già nasconde gli altri corrieri;
+  // questa è la guardia SERVER (vale per portale master e cliente), che blocca anche la creazione
+  // diretta o da un preventivo vecchio con un corriere diverso. Non tocca le spedizioni proprie del
+  // master, l'estero, o i casi in cui l'interno non copre la destinazione.
+  if (!isProprio && cliente && (body.shipTo.country || 'IT').toUpperCase() === 'IT') {
+    const { internoEsclusivoViola } = await import('@/lib/interno-esclusivo')
+    const viola = await internoEsclusivoViola(adminCrea, {
+      cliente, corriereSceltoTipo: (corriereRecord as any)?.tipo,
+      provincia: body.shipTo.state, cap: body.shipTo.postalCode, citta: body.shipTo.city,
+      paese: body.shipTo.country || 'IT', packages,
+    })
+    if (viola) return NextResponse.json({ error: 'Per questa destinazione è previsto solo il circuito interno: seleziona il corriere interno.' }, { status: 400 })
   }
 
   // *** Blocco ZONA ESCLUSIVA senza prezzo a listino (Zone Disagiate / Isole / …) ***

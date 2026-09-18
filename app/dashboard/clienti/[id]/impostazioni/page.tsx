@@ -54,6 +54,7 @@ const DEF_IMP: Record<string,any> = {
   autodistinta:'si',   // 'si' = chiusura automatica distinte alle 23:00; 'no' = il cliente chiude da solo
   testo_sms:'Gentile Cliente, la spedizione {numero-spedizione} e stata creata. Segui il tracking sul sito del corriere {sito-corriere}.',
   peso_minimo:1,
+  interno_esclusivo:false,  // ON: sui comuni coperti dal circuito interno esce SOLO l'interno (no BRT/Poste/…)
 }
 
 function Toggle({on, onToggle}:{on:boolean,onToggle:()=>void}) {
@@ -271,6 +272,14 @@ export default function ImpostazioniClientePage() {
           <div style={cardHead}>Peso minimo predefinito</div>
           <div style={{...rowFull,borderBottom:'none'}}><span style={lblStrong}>Peso minimo (kg)</span>
             <input type="number" step="0.1" value={imp('peso_minimo')} onChange={e=>setImp('peso_minimo', e.target.value===''?'':Number(e.target.value))} style={inpWide} /></div>
+        </div>
+
+        <div style={card}>
+          <div style={cardHead}>Circuito interno</div>
+          <div style={{...rowFull,borderBottom:'none'}}>
+            <span style={lblStrong}>Interno esclusivo<br/><span style={{fontSize:'11px',fontWeight:400,color:'#888'}}>ON: quando la destinazione è coperta dal circuito interno, al cliente esce SOLO il circuito interno (niente BRT/Poste/DVA ecc.). Sui comuni non coperti restano tutti i corrieri.</span></span>
+            <Toggle on={imp('interno_esclusivo')===true} onToggle={()=>setImp('interno_esclusivo', !(imp('interno_esclusivo')===true))} />
+          </div>
         </div>
 
         {/* Rimossa la card "Formato di stampa per contratto": era finta (A4/A6/10x15 non venivano MAI

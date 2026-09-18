@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
     // Sotto-master trattato come cliente: listino = quello assegnato (di tua proprietà → query ok)
     cliente = { master_id: utente!.master_id, listino_cliente_id: subListinoId }
   } else {
-    const { data } = await supabase.from('clienti').select('master_id,listino_cliente_id').eq('id', clienteId).single()
+    const { data } = await supabase.from('clienti').select('master_id,listino_cliente_id,impostazioni').eq('id', clienteId).single()
     cliente = data
   }
   if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })

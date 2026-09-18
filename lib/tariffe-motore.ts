@@ -513,6 +513,15 @@ export async function calcolaTariffeCliente(
     return { errore: 'Nessun corriere disponibile per questa spedizione.', stato: 400 }
   }
 
+  // INTERNO ESCLUSIVO: se il cliente ha l'opzione attiva e per questa destinazione c'è il circuito
+  // interno tra i risultati (= lo copre), si mostra SOLO l'interno — niente BRT/Poste/DVA ecc. Se
+  // l'interno NON copre la destinazione (nessun risultato interno), non si tocca nulla e restano tutti.
+  // La copertura è già "giusta" qui: un risultato interno esiste solo se abilitato + con fascia a listino.
+  if (cliente?.impostazioni?.interno_esclusivo === true) {
+    const soloInterno = risultati.filter((r: any) => r._corriere_tipo === 'interno')
+    if (soloInterno.length) { risultati.length = 0; risultati.push(...soloInterno) }
+  }
+
   risultati.sort((a,b)=>Number(a.total_price)-Number(b.total_price))
   return { risultati }
 }
