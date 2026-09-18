@@ -222,7 +222,9 @@ export async function POST(req: NextRequest) {
   const nuovo = mapStato(event, d?.status || d?.stato || d?.description || '')
 
   // Spedizioni interessate (per id): servono sia per l'avanzamento stato sia per SALVARE L'EVENTO.
-  const { data: speds } = await admin.from('spedizioni').select('id,stato,giacenza_data').eq('tracking_number', tracking)
+  // `giacenza_stato` serve alla chiusura qui sotto: una giacenza gia' 'svincolata' o 'chiusa' non si
+  // tocca — quelli sono esiti veri, decisi da un operatore, e sovrascriverli perderebbe informazione.
+  const { data: speds } = await admin.from('spedizioni').select('id,stato,giacenza_data,giacenza_stato').eq('tracking_number', tracking)
 
   // SALVA L'EVENTO in tracking_events: Spedisci ha CHIUSO il polling del tracking (403 "For tracking
   // please use the Webhooks events") → il popup tracking mostra QUESTI eventi. Best-effort.
@@ -258,6 +260,43 @@ export async function POST(req: NextRequest) {
       const quando = isNaN(apertura.getTime()) ? new Date().toISOString() : apertura.toISOString()
       await admin.from('spedizioni').update({ giacenza_data: quando }).in('id', senzaData)
       console.log('[WEBHOOK][SPEDISCI] giacenza aperta', tracking, 'il', quando, `(${senzaData.length})`)
+    }
+  }
+
+  // ── GIACENZA CHIUSA DAL FORNITORE ('stock.closed') ───────────────────────────────────────────
+  // Payload reale (17-18/09, raccolto loggandolo): stessa forma dell'apertura —
+  //   { event, timestamp, ldv, opened_at, stock_id, shipping_id, statusCode, contractCode, domain }
+  // Niente `closed_at` (vale il `timestamp`) e NESSUN motivo testuale.
+  //
+  // `statusCode` NON viene usato, di proposito. Porta l'esito lato fornitore (osservati 3,4,5,6,7 su
+  // 10 chiusure) ma NON e' biunivoco col nostro stato: 3 e 7 finiscono entrambi in reso, 4 e 6 in
+  // "non consegnato". Tradurlo a intuito, su un flusso che muove addebiti, no: serve la tabella dei
+  // codici del fornitore. Finche' non c'e', ci si limita ai due fatti certi che l'evento porta.
+  //
+  // 1) RECUPERO DELL'APERTURA MAI REGISTRATA. L'evento porta `opened_at`, quindi una giacenza che
+  //    non abbiamo mai visto (i due difetti chiusi il 17/09) si puo' scrivere con la sua data VERA.
+  //    ATTENZIONE: scrivere `giacenza_data` arma l'addebito dell'apertura (trg_giacenza_da_addebitare).
+  //    E' voluto — una giacenza c'e' stata davvero — ma vale la pena saperlo quando si guardano i conti.
+  // 2) CHIUSURA. Solo da 'aperta'/'in gestione'/nulla: 'svincolata' e 'chiusa' sono esiti gia' decisi.
+  //    Non si guarda lo stato della spedizione: se e' terminale ci ha gia' pensato il trigger
+  //    trg_chiudi_giacenza_terminale, e se quel trigger non e' scattato (perche' la data l'abbiamo
+  //    scritta solo ora) questa e' l'unica strada che la chiude.
+  if (event === 'stock.closed' && (speds || []).length) {
+    const ap = new Date(d?.opened_at || '')
+    const quandoAperta = isNaN(ap.getTime()) ? null : ap.toISOString()
+    if (quandoAperta) {
+      const daRecuperare = (speds || []).filter((sp: any) => !sp.giacenza_data).map((sp: any) => sp.id)
+      if (daRecuperare.length) {
+        await admin.from('spedizioni').update({ giacenza_data: quandoAperta }).in('id', daRecuperare)
+        console.log('[WEBHOOK][SPEDISCI] giacenza RECUPERATA da stock.closed', tracking, 'aperta il', quandoAperta, `(${daRecuperare.length})`)
+      }
+    }
+    const daChiudere = (speds || [])
+      .filter((sp: any) => !sp.giacenza_stato || sp.giacenza_stato === 'aperta' || sp.giacenza_stato === 'in_gestione')
+      .map((sp: any) => sp.id)
+    if (daChiudere.length) {
+      await admin.from('spedizioni').update({ giacenza_stato: 'chiusa' }).in('id', daChiudere)
+      console.log('[WEBHOOK][SPEDISCI] giacenza chiusa', tracking, `(${daChiudere.length})`)
     }
   }
 
