@@ -56,7 +56,8 @@ export default function ReportContrassegniPage() {
     const res = await fetch(`/api/spedizioni/lista?${params}`)
     let spedizioni = await res.json()
     // Filtro per stato contrassegno (stessa logica della lista spedizioni)
-    if (filtri.statoContrassegni === 'da_pagare') spedizioni = spedizioni.filter((s:any) => Number(s.contrassegno)>0 && s.stato_contrassegno!=='in_distinta' && s.stato_contrassegno!=='pagato')
+    // 'annullato' = pacco reso/annullato: non si incassera' mai, fuori dai "da pagare".
+    if (filtri.statoContrassegni === 'da_pagare') spedizioni = spedizioni.filter((s:any) => Number(s.contrassegno)>0 && s.stato_contrassegno!=='in_distinta' && s.stato_contrassegno!=='pagato' && s.stato_contrassegno!=='annullato')
     else if (filtri.statoContrassegni === 'in_attesa') spedizioni = spedizioni.filter((s:any) => s.stato_contrassegno==='in_distinta')
     else if (filtri.statoContrassegni === 'pagato') spedizioni = spedizioni.filter((s:any) => s.stato_contrassegno==='pagato')
     if (!spedizioni.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna spedizione con contrassegno trovata per i filtri selezionati.' }); setGenerating(false); return }

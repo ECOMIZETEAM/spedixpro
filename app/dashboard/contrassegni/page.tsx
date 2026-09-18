@@ -23,6 +23,9 @@ const STATI_COD: Record<string,{bg:string,color:string,label:string}> = {
   in_attesa:{bg:'#f1f5f9',color:'#475569',label:'In attesa'},
   in_distinta:{bg:'#fff7ed',color:'#ea580c',label:'In lavorazione'},
   pagato:{bg:'#f0fdf4',color:'#16a34a',label:'Pagato'},
+  // Il pacco e' tornato al mittente (o e' stato annullato): quel contrassegno non si incassera' mai.
+  // Prima restava "In attesa" per sempre e sporcava le liste: 611 pacchi per 35.137,91 € al 18/09/2026.
+  annullato:{bg:'#fef2f2',color:'#dc2626',label:'Annullato (reso)'},
 }
 // Un contrassegno e' selezionabile per una distinta solo se e' ancora IN ATTESA (non gia' in una
 // distinta, non pagato). Gli altri hanno la checkbox disattivata, come su Spedisci.
@@ -181,6 +184,7 @@ export default function ListaContrassegniPage() {
               <option value="in_attesa">In attesa</option>
               <option value="in_distinta">In distinta</option>
               <option value="pagato">Pagato</option>
+              <option value="annullato">Annullato (reso)</option>
             </select>
           </div>
         </div>

@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   const dal = p.get('dal'); const al = p.get('al')
   const statoSped = p.get('statoSpedizione')
   let query = supabase.from('spedizioni')
-    .select('numero,dest_nome,contrassegno,stato,created_at')
+    .select('numero,dest_nome,contrassegno,stato,stato_contrassegno,created_at')
     .eq('cliente_id', clienteId)
     .gt('contrassegno', 0)
     .order('created_at', { ascending: true })
@@ -24,9 +24,18 @@ export async function GET(req: NextRequest) {
   if (al) query = query.lte('created_at', al + 'T23:59:59')
   if (statoSped && statoSped !== 'tutti') query = query.eq('stato', statoSped)
   const { data: speds } = await query
+  // LO STATO VERO, NON "In attesa" PER TUTTI. Qui c'era la stringa fissa: nel PDF del cliente
+  // risultavano da incassare anche i contrassegni gia' rimborsati (2.885 per 202.639 € al
+  // 18/09/2026), quelli in distinta (174) e quelli annullati perche' il pacco e' tornato indietro
+  // (791 per 57.497,91 €). Le etichette sono le stesse della lista del portale.
+  const ETICHETTA: Record<string, string> = {
+    in_attesa: 'In attesa', in_distinta: 'In lavorazione', pagato: 'Pagato', annullato: 'Annullato (reso)',
+  }
   const righe = (speds || []).map(s => ({
     data: s.created_at, spedizione: (s.numero||'') + ' - ' + (s.dest_nome||''),
-    contrassegno: Number(s.contrassegno||0), statoContr: 'In attesa', statoSpedizione: s.stato||'',
+    contrassegno: Number(s.contrassegno||0),
+    statoContr: ETICHETTA[(s as any).stato_contrassegno || 'in_attesa'] || 'In attesa',
+    statoSpedizione: s.stato||'',
   }))
   return NextResponse.json({ righe, master: master || {}, cliente: { ragione_sociale: cliente?.ragione_sociale || '' } })
 }

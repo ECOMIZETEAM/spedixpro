@@ -68,9 +68,17 @@ export function testoIndicaReso(testo: string): boolean {
 export function mapStatoSpedisci(statusStr: string): string | null {
   const s = (statusStr || '').toLowerCase()
   if (!s) return null
-  if (s.includes('consegnat') || s.includes('delivered')) return 'consegnata'  // NB: 'delivered' (non 'deliver') per non catturare "out for delivery"
-  if (s.includes('giacenz') || s.includes('stock') || s.includes('deposit') || s.includes('giacenza')) return 'in_giacenza'
+  // IL RESO PER PRIMO. "in restituzione al mittente per scadenza dei termini di giacenza" contiene
+  // 'giacenz' e finiva letta come giacenza, e "consegnata al mittente" come consegna: il pacco
+  // tornato indietro risultava arrivato e il reso non si addebitava (231 spedizioni al 17/09/2026).
+  // Stessa correzione gia' fatta nel dizionario Poste; GLS e BRT avevano gia' il reso in testa.
   if (testoIndicaReso(s)) return 'reso_mittente'
+  if (s.includes('consegnat') || s.includes('delivered')) {
+    // "Consegnata all'ufficio postale" e' un DEPOSITO: il destinatario deve ancora andare a ritirare.
+    if (/ufficio postale|punto di giacenza|fermo deposito|fermoposta|punto di ritiro|locker/.test(s)) return 'in_consegna'
+    return 'consegnata'  // NB: 'delivered' (non 'deliver') per non catturare "out for delivery"
+  }
+  if (s.includes('giacenz') || s.includes('stock') || s.includes('deposit') || s.includes('giacenza')) return 'in_giacenza'
   if (s.includes('in consegna') || s.includes('out for delivery') || s.includes('distribuzione') || s.includes('in distribuzione')) return 'in_consegna'
   if (s.includes('transit') || s.includes('transito') || s.includes('arrivat') || s.includes('hub') || s.includes('partenz') || s.includes('viaggio') || s.includes('smistament')) return 'in_transito'
   if (s.includes('presa in carico') || s.includes('preso in caric') || s.includes('spedit') || s.includes('accettat') || s.includes('ritirat') || s.includes('partita') || s.includes('picked') || s.includes('lavorazione')) return 'spedita'

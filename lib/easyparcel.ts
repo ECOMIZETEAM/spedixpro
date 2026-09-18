@@ -24,6 +24,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { normalizzaEventi } from '@/lib/tracking-eventi'
+import { testoIndicaReso } from '@/lib/spedisci'   // la regola del reso e' una sola per tutti i corrieri
 import { categoriaDaTipologia } from '@/lib/punti-poste'
 
 const BASE = 'https://api.easyparcel.it'
@@ -739,11 +740,21 @@ export async function easyparcelTracking(
 export function mapStatoEasyparcel(testo: string): string | null {
   const s = (testo || '').toLowerCase()
   if (!s) return null
-  if (/consegnat|delivered/.test(s)) return 'consegnata'
+  // IL RESO PER PRIMO, e con la regola BLINDATA. Qui c'era /reso|rientro|al mittente|restituit/, che
+  // prende "al mittente" da solo: "La spedizione e' stata creata DAL mittente" (4.985 righe) sarebbe
+  // diventata un reso — l'errore del 6-7/08. E stando in fondo non scattava comunque, perche'
+  // "in restituzione al mittente per scadenza dei termini di giacenza" veniva presa da 'giacenz' e
+  // "consegnata al mittente" da 'consegnat': il pacco tornato indietro risultava arrivato e il reso
+  // non si addebitava. Stessa correzione gia' fatta nei dizionari Poste e Spedisci.
+  if (testoIndicaReso(s)) return 'reso_mittente'
+  if (/consegnat|delivered/.test(s)) {
+    // "Consegnata all'ufficio postale" e' un DEPOSITO: il destinatario deve ancora ritirare.
+    if (/ufficio postale|punto di giacenza|fermo deposito|fermoposta|punto di ritiro|locker/.test(s)) return 'in_consegna'
+    return 'consegnata'
+  }
   if (/giacenz|deposit|fermo deposito/.test(s)) return 'in_giacenza'
   // "in consegna" prima di "transito": molti eventi contengono entrambe le parole.
   if (/in consegna|out for delivery|in distribuzione|consegna prevista/.test(s)) return 'in_consegna'
-  if (/reso|rientro|al mittente|restituit/.test(s)) return 'reso_mittente'
   if (/mancata|fallit|rifiut|anomal|indirizzo errato|destinatario assente|non consegnat/.test(s)) return 'non_consegnato'
   if (/transito|smistat|hub|partita|in viaggio|arrivat|inoltrat/.test(s)) return 'in_transito'
   if (/ritirat|presa in carico|accettat|spedit|affidat/.test(s)) return 'spedita'

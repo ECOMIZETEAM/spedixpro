@@ -246,7 +246,8 @@ export async function GET(req: NextRequest) {
     // Cliente/agente: lo stato mostrato È quello globale, quindi filtro a DB come prima.
     if (fStatoContr) {
       if (filtroCodPerViewer) q = q.gt('contrassegno', 0)
-      else if (fStatoContr === 'da_pagare') q = q.gt('contrassegno', 0).or('stato_contrassegno.is.null,and(stato_contrassegno.neq.in_distinta,stato_contrassegno.neq.pagato)')
+      // 'annullato' = pacco reso/annullato: quel contrassegno non si incassera' mai, fuori dai "da pagare".
+      else if (fStatoContr === 'da_pagare') q = q.gt('contrassegno', 0).or('stato_contrassegno.is.null,and(stato_contrassegno.neq.in_distinta,stato_contrassegno.neq.pagato,stato_contrassegno.neq.annullato)')
       else if (fStatoContr === 'in_attesa') q = q.eq('stato_contrassegno', 'in_distinta')
       else if (fStatoContr === 'pagato') q = q.eq('stato_contrassegno', 'pagato')
     }
