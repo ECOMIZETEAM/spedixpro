@@ -4,7 +4,7 @@ import { rangeGiorniISO } from '@/lib/ebaySync'
 // Sincronizza gli ordini di Shopify in ordini_ecommerce NELLA FINESTRA DATE richiesta (default 30gg).
 // db: client Supabase (user-scoped dal portale, admin dall'app embedded).
 // L'integrazione porta con sé cliente_id/master_id: funziona in entrambi i contesti.
-export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { dal?: string | null; al?: string | null }): Promise<{ letti: number; importati: number }> {
+export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { dal?: string | null; al?: string | null }): Promise<{ letti: number; importati: number; spediti: number; daSpedire: number }> {
   const cred = integr.credenziali as any
   const shop = cred?.shop
   if (!shop) throw new Error('Credenziali Shopify mancanti')
@@ -151,5 +151,20 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
     .update({ ultimo_sync: new Date().toISOString(), ordini_totali: ordini.length, errore: null })   // sync riuscita: azzera un errore precedente (non piu' appiccicato quando lo store rientra)
     .eq('id', integr.id)
 
-  return { letti: ordini.length, importati }
+  // Quanti dei sincronizzati risultano GIA' SPEDITI vs DA SPEDIRE: leggo lo stato FINALE dal DB (così
+  // rispetta la protezione anti-downgrade e la chiusura in blocco qui sopra). Chunk sull'.in() (tronca oltre ~100).
+  const { spediti, daSpedire } = await contaStatiSincronizzati(db, integr.id, ordini.map((o: any) => String(o.legacyResourceId)))
+  return { letti: ordini.length, importati, spediti, daSpedire }
+}
+
+// Conta, tra gli ordini appena sincronizzati (per id esterno), quanti sono 'spedito' e quanti 'da_spedire'
+// leggendo lo stato reale dal DB. Condiviso: serve al messaggio "X già spediti · Y da spedire".
+export async function contaStatiSincronizzati(db: any, integrazioneId: string, idsEsterni: string[]): Promise<{ spediti: number; daSpedire: number }> {
+  let spediti = 0, daSpedire = 0
+  for (let i = 0; i < idsEsterni.length; i += 100) {
+    const chunk = idsEsterni.slice(i, i + 100)
+    const { data } = await db.from('ordini_ecommerce').select('stato').eq('integrazione_id', integrazioneId).in('ordine_esterno_id', chunk)
+    for (const r of (data || [])) { if ((r as any).stato === 'spedito') spediti++; else daSpedire++ }
+  }
+  return { spediti, daSpedire }
 }

@@ -1,8 +1,9 @@
 import { getValidTemuToken, temuRequest } from '@/lib/temu'
+import { contaStatiSincronizzati } from '@/lib/shopifySync'
 
 // Sincronizza gli ordini Temu da spedire in ordini_ecommerce.
 // NB: nomi API/campi ("bg.order.list.get") da confermare sui doc partner Temu una volta approvata l'app.
-export async function sincronizzaOrdiniTemu(db: any, integr: any): Promise<{ letti: number; importati: number }> {
+export async function sincronizzaOrdiniTemu(db: any, integr: any): Promise<{ letti: number; importati: number; spediti: number; daSpedire: number }> {
   const token = await getValidTemuToken(db, integr)
 
   // Ordini in attesa di spedizione, PAGINATI (status/parametri da adattare ai doc Temu). Prima si leggeva
@@ -79,5 +80,6 @@ export async function sincronizzaOrdiniTemu(db: any, integr: any): Promise<{ let
     .update({ ultimo_sync: new Date().toISOString(), ordini_totali: lista.length, errore: null, stato: 'attivo' })
     .eq('id', integr.id)
 
-  return { letti: lista.length, importati }
+  const { spediti, daSpedire } = await contaStatiSincronizzati(db, integr.id, lista.map((o: any) => String(o.order_sn || o.order_id || o.parent_order_sn || o.id)))
+  return { letti: lista.length, importati, spediti, daSpedire }
 }

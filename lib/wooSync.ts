@@ -1,10 +1,11 @@
 import { wooGet } from '@/lib/woo'
 import { rangeGiorniISO } from '@/lib/ebaySync'
+import { contaStatiSincronizzati } from '@/lib/shopifySync'
 
 // Sincronizza gli ordini WooCommerce NON SPEDITI (status processing + on-hold) in ordini_ecommerce,
 // NELLA FINESTRA DATE RICHIESTA: si importa SOLO l'intervallo selezionato in pagina (oggi -> solo
 // oggi; ieri -> solo ieri; il mese -> il mese). Default: ultimi 30 giorni.
-export async function sincronizzaOrdiniWoo(db: any, integr: any, range?: { dal?: string | null; al?: string | null }): Promise<{ letti: number; importati: number }> {
+export async function sincronizzaOrdiniWoo(db: any, integr: any, range?: { dal?: string | null; al?: string | null }): Promise<{ letti: number; importati: number; spediti: number; daSpedire: number }> {
   const cred = integr.credenziali as any
   const url = cred?.url, ck = cred?.ck, cs = cred?.cs
   if (!url || !ck || !cs) throw new Error('Credenziali WooCommerce mancanti')
@@ -115,5 +116,6 @@ export async function sincronizzaOrdiniWoo(db: any, integr: any, range?: { dal?:
     .update({ ultimo_sync: new Date().toISOString(), ordini_totali: ordini.length, errore: null })   // sync riuscita: azzera un errore precedente
     .eq('id', integr.id)
 
-  return { letti: ordini.length, importati }
+  const { spediti, daSpedire } = await contaStatiSincronizzati(db, integr.id, ordini.map((o: any) => String(o.id)))
+  return { letti: ordini.length, importati, spediti, daSpedire }
 }

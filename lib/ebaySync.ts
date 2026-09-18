@@ -1,4 +1,5 @@
 import { getValidEbayToken, ebayGet } from '@/lib/ebay'
+import { contaStatiSincronizzati } from '@/lib/shopifySync'
 
 // Giorno italiano -> ISO UTC per i filtri data dei marketplace (con margine orario: gli ordini sono
 // timestampati in UTC, il giorno "italiano" parte ~2h prima in UTC d'estate, 1h d'inverno).
@@ -19,7 +20,7 @@ export function rangeGiorniISO(dal?: string | null, al?: string | null, defaultG
 // Sincronizza gli ordini eBay in ordini_ecommerce (spediti e non, qualunque pagamento, contrassegno
 // incluso) NELLA FINESTRA DATE RICHIESTA: si importa SOLO l'intervallo selezionato in pagina
 // (oggi -> solo oggi; ieri -> solo ieri; il mese -> il mese). Default: ultimi 30 giorni.
-export async function sincronizzaOrdiniEbay(db: any, integr: any, range?: { dal?: string | null; al?: string | null; importaGiaSpediti?: boolean }): Promise<{ letti: number; importati: number }> {
+export async function sincronizzaOrdiniEbay(db: any, integr: any, range?: { dal?: string | null; al?: string | null; importaGiaSpediti?: boolean }): Promise<{ letti: number; importati: number; spediti: number; daSpedire: number }> {
   const token = await getValidEbayToken(db, integr)
   const ordini: any[] = []
   const LIMIT = 200
@@ -107,5 +108,6 @@ export async function sincronizzaOrdiniEbay(db: any, integr: any, range?: { dal?
     .update({ ultimo_sync: new Date().toISOString(), ordini_totali: ordini.length, errore: null })   // sync riuscita: azzera un errore precedente (non piu' appiccicato quando lo store rientra)
     .eq('id', integr.id)
 
-  return { letti: ordini.length, importati }
+  const { spediti, daSpedire } = await contaStatiSincronizzati(db, integr.id, ordini.map((o: any) => String(o.orderId)))
+  return { letti: ordini.length, importati, spediti, daSpedire }
 }

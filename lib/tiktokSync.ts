@@ -1,7 +1,8 @@
 import { getValidTiktokToken, tiktokRequest } from '@/lib/tiktok'
+import { contaStatiSincronizzati } from '@/lib/shopifySync'
 
 // Sincronizza gli ordini TikTok Shop da spedire (AWAITING_SHIPMENT) in ordini_ecommerce.
-export async function sincronizzaOrdiniTiktok(db: any, integr: any): Promise<{ letti: number; importati: number }> {
+export async function sincronizzaOrdiniTiktok(db: any, integr: any): Promise<{ letti: number; importati: number; spediti: number; daSpedire: number }> {
   const token = await getValidTiktokToken(db, integr)
   const cred = (integr.credenziali || {}) as any
   const shopCipher = cred.shop_cipher
@@ -27,7 +28,7 @@ export async function sincronizzaOrdiniTiktok(db: any, integr: any): Promise<{ l
   }
   if (!lista.length) {
     await db.from('integrazioni').update({ ultimo_sync: new Date().toISOString(), ordini_totali: 0, errore: null, stato: 'attivo' }).eq('id', integr.id)
-    return { letti: 0, importati: 0 }
+    return { letti: 0, importati: 0, spediti: 0, daSpedire: 0 }
   }
 
   // 2) Dettaglio ordini (indirizzo destinatario + line items completi). L'endpoint ha un tetto di ids per
@@ -101,5 +102,6 @@ export async function sincronizzaOrdiniTiktok(db: any, integr: any): Promise<{ l
     .update({ ultimo_sync: new Date().toISOString(), ordini_totali: lista.length, errore: null, stato: 'attivo' })
     .eq('id', integr.id)
 
-  return { letti: lista.length, importati }
+  const { spediti, daSpedire } = await contaStatiSincronizzati(db, integr.id, lista.map((o: any) => String(o.id)))
+  return { letti: lista.length, importati, spediti, daSpedire }
 }
