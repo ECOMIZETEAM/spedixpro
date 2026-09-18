@@ -46,6 +46,17 @@ async function salvaCorriere(formData: FormData) {
     credenziali.orm_api_key = formData.get('orm_api_key') as string || ''
     settings.network = (formData.get('network') as string) || 'Italia'
     settings.sms_destinatario = formData.get('sms_destinatario') === 'on'
+  } else if (tipo === 'fedex') {
+    // FedEx REST diretto: chiavi OAuth del progetto Ship + conto; chiavi Track SEPARATE facoltative.
+    credenziali.api_key = formData.get('api_key') as string || ''
+    credenziali.api_secret = formData.get('api_secret') as string || ''
+    credenziali.account_number = formData.get('account_number') as string || ''
+    credenziali.track_api_key = formData.get('track_api_key') as string || ''
+    credenziali.track_api_secret = formData.get('track_api_secret') as string || ''
+    // serviceType/pickupType/test governano la creazione: stanno nel contratto (settings).
+    settings.tipo_servizio = (formData.get('tipo_servizio') as string) || 'FEDEX_REGIONAL_ECONOMY'
+    settings.tipo_ritiro = (formData.get('tipo_ritiro') as string) || 'USE_SCHEDULED_PICKUP'
+    settings.test_mode = formData.get('test_mode') === 'on'
   } else {
     credenziali.utente = formData.get('utente') as string || ''
     credenziali.password = formData.get('password') as string || ''
@@ -134,6 +145,18 @@ const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,str
       ['cod_filiale','Cod Filiale partenza','es. 123','text',true],
       ['codice_tariffa','Codice tariffa','codice tariffa contrattuale','text',true],
       ['orm_api_key','ORM API Key','chiave ORM (facoltativa)','text',true],
+    ],
+  },
+  fedex: {
+    titolo: 'FedEx',
+    info: 'Credenziali API FedEx (developer.fedex.com → progetto Ship): API Key, Secret Key e numero conto. Le chiavi Track sono facoltative (solo se hai un progetto Track separato).',
+    campi: [
+      ['nome_contratto','Nome Contratto','es. FedEx Italia','text'],
+      ['api_key','API Key','client_id del progetto Ship','text'],
+      ['api_secret','Secret Key','••••••••','password'],
+      ['account_number','Numero conto spedizione','es. 123456789','text'],
+      ['track_api_key','Tracking API Key','solo se progetto Track separato','text',true],
+      ['track_api_secret','Tracking Secret Key','••••••••','password',true],
     ],
   },
   dhl: {
@@ -234,6 +257,36 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
                 <option value="ZERO_TRE">ZERO TRE</option><option value="STANDARD">STANDARD</option>
               </select>
             </div>
+          )}
+          {tipo === 'fedex' && (
+            <>
+              <div>
+                <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Tipo Servizio</label>
+                <select name="tipo_servizio" defaultValue={settingsEsistenti.tipo_servizio || 'FEDEX_REGIONAL_ECONOMY'} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
+                  <option value="FEDEX_REGIONAL_ECONOMY">FedEx Regional Economy (Italia)</option>
+                  <option value="FIRST_OVERNIGHT">FedEx First</option>
+                  <option value="PRIORITY_OVERNIGHT">FedEx Priority</option>
+                  <option value="STANDARD_OVERNIGHT">FedEx Standard Overnight</option>
+                  <option value="FEDEX_2_DAY">FedEx 2Day</option>
+                  <option value="FEDEX_GROUND">FedEx Ground</option>
+                  <option value="GROUND_HOME_DELIVERY">FedEx Home Delivery</option>
+                  <option value="FEDEX_INTERNATIONAL_PRIORITY">FedEx International Priority</option>
+                  <option value="INTERNATIONAL_ECONOMY">FedEx International Economy</option>
+                  <option value="FEDEX_INTERNATIONAL_CONNECT_PLUS">FedEx International Connect Plus</option>
+                </select>
+              </div>
+              <div>
+                <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Tipo Ritiro</label>
+                <select name="tipo_ritiro" defaultValue={settingsEsistenti.tipo_ritiro || 'USE_SCHEDULED_PICKUP'} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
+                  <option value="USE_SCHEDULED_PICKUP">Usa ritiro programmato</option>
+                  <option value="CONTACT_FEDEX_TO_SCHEDULE">Contatta FedEx per programmare</option>
+                  <option value="DROPOFF_AT_FEDEX_LOCATION">Deposita presso punto FedEx</option>
+                </select>
+              </div>
+              <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>
+                <input type="checkbox" name="test_mode" defaultChecked={!!settingsEsistenti.test_mode}/> Modalità test (sandbox FedEx)
+              </label>
+            </>
           )}
           <div style={{display:'flex',gap:'10px',justifyContent:'flex-end',marginTop:'8px'}}>
             <a href="/dashboard/corrieri" style={{padding:'9px 18px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'8px',fontSize:'13px',fontWeight:'600',color:'#666',textDecoration:'none'}}>Annulla</a>

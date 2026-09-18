@@ -206,6 +206,22 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200 })
     }
 
+    if (corriere.tipo === 'fedex') {
+      const raw: any = spedizione.raw_response || {}
+      const tn = raw.trackingNumber || spedizione.tracking_number
+      let eventiFx: { data: string; descrizione: string; luogo: string }[] = []
+      if (tn && (cred?.track_api_key || cred?.api_key)) {
+        const { trackingFedex, mapStatoFedex } = await import('@/lib/fedex')
+        const r = await trackingFedex(cred as any, String(tn), raw.test === true); eventiFx = r.eventi
+        let av: string | null = null
+        for (const st of r.stati) { const m = mapStatoFedex(st); if (m && prioritaStato(m) > prioritaStato(av)) av = m }
+        if (r.consegnata && prioritaStato('consegnata') > prioritaStato(av)) av = 'consegnata'
+        await persistiStato(av)
+      }
+      const eventi = eventiFx.map(e => ({ date: e.data || '', description: e.descrizione, location: e.luogo || '' }))
+      return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200 })
+    }
+
     // Spedisci.online ha CHIUSO il polling del tracking (403 "For tracking please use the Webhooks
     // events"): gli eventi arrivano in tempo reale dal WEBHOOK e vengono salvati in tracking_events.
     // Il popup mostra quelli (lo stato è già allineato dal webhook stesso, solo-in-avanti).

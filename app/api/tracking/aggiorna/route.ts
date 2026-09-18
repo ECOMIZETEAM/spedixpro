@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
       // direttamente dal JSON, e l'etichetta si guarda a parte (solo gli id di chi non ce l'ha).
       // ep_offerta/ep_ordine: i due riferimenti del terzo provider. Il tracking si interroga col
       // CODICE OFFERTA (per LDV risponde "Spedizione non trovata"), l'etichetta con l'id ordine.
-      .select('id,numero,stato,tracking_number,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali,nome_contratto),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code,ep_offerta:raw_response->_codiceOfferta,ep_ordine:raw_response->_idOrdine,gls_numero:raw_response->numero,brt_parcel:raw_response->parcelID,richiedi_ritiro,ritiro_id,created_at,ep_ritiro:raw_response->_codiceRitiro')
+      .select('id,numero,stato,tracking_number,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali,nome_contratto),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code,ep_offerta:raw_response->_codiceOfferta,ep_ordine:raw_response->_idOrdine,gls_numero:raw_response->numero,brt_parcel:raw_response->parcelID,fedex_test:raw_response->test,richiedi_ritiro,ritiro_id,created_at,ep_ritiro:raw_response->_codiceRitiro')
       .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
       .order('tracking_check_at', { ascending: true, nullsFirst: true })
       .order('id', { ascending: true })
@@ -281,6 +281,40 @@ export async function GET(req: NextRequest) {
             }
           }
         } catch (e: any) { console.error('[TRACKING][BRT][EVENTI]', s.numero, e?.message) }
+
+      } else if (tipo === 'fedex') {
+        // FedEx DIRETTO: lo stato si legge da POST /track/v1/trackingnumbers col tracking_number (che
+        // per FedEx È il masterTrackingNumber). Le chiavi Track del contratto (o le Ship) arrivano dalla
+        // join credenziali. Best-effort: nessuna risposta = nessun aggiornamento (mai declassa).
+        const fedexTn = (s as any).tracking_number
+        if (!fedexTn || !(cred?.track_api_key || cred?.api_key)) return
+        const { trackingFedex, mapStatoFedex } = await import('@/lib/fedex')
+        const { stati, consegnata: fxConseg, eventi: fxEventi } = await trackingFedex(cred, String(fedexTn), (s as any).fedex_test === true)
+        for (const str of stati) {
+          const m = mapStatoFedex(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
+        if (fxConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
+        if (stati.some((str) => mapStatoFedex(str) === 'in_giacenza')) vistaGiacenza = true
+        // ...ma se il pacco e' tornato al mittente, quella consegna e' il RITORNO: vince il reso.
+        if (stati.some((str) => mapStatoFedex(str) === 'reso_mittente')) nuovo = 'reso_mittente'
+
+        try {
+          const cambiatoFx = nuovo !== s.stato
+          if (cambiatoFx || budgetCronologie > 0) {
+            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(fxEventi, {
+              data: ['data', 'dataOra', 'datetime'],
+              descrizione: ['descrizione'],
+              luogo: ['luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length) {
+              if (!cambiatoFx) budgetCronologie--
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][FEDEX][EVENTI]', s.numero, e?.message) }
 
       } else {
         return

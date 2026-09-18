@@ -5,6 +5,7 @@ import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
 import { chiudiGiornataGls } from '@/lib/gls'
 import { chiudiDistintaBrt } from '@/lib/brt'
+import { chiudiDistintaFedex } from '@/lib/fedex'
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
 
 // Conferma (= trasmetti/ritenta la chiusura al provider) di UNA distinta del cliente loggato.
@@ -32,9 +33,10 @@ export async function POST(req: NextRequest) {
   // GLS: mancava (come in cliente/crea e API v1) → un contratto GLS non chiudeva mai la giornata. (audit #2)
   const r3: any = await chiudiGiornataGls(admin, d.id).catch((e: any) => ({ errore: String(e?.message || e) }))
   const r4: any = await chiudiDistintaBrt(admin, d.id).catch((e: any) => ({ errore: String(e?.message || e) }))
+  const r4b: any = await chiudiDistintaFedex(admin, d.id).catch((e: any) => ({ errore: String(e?.message || e) }))
   const { data: dopo } = await admin.from('distinte').select('confermata_vettore').eq('id', d.id).maybeSingle()
   if (dopo?.confermata_vettore) return NextResponse.json({ success: true })
-  const err = r1?.errore || r2?.errore || r3?.errore || r4?.errore
+  const err = r1?.errore || r2?.errore || r3?.errore || r4?.errore || r4b?.errore
   // Il messaggio del provider NON esce cosi' com'e': arrivava al cliente in un popup e conteneva
   // il nome del sistema tecnico dietro le quinte ("authcode spediamopro mancante", "credenziali
   // spedisci mancanti", "HTTP 401: <risposta grezza>"). Il cliente deve vedere solo il marchio del

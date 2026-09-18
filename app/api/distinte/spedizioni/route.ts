@@ -147,6 +147,7 @@ export async function POST(req: NextRequest) {
   try { const { chiudiBordereauSpediamopro } = await import('@/lib/spediamopro'); await chiudiBordereauSpediamopro(_dbChiusura, distinta.id) } catch {}
   try { const { chiudiGiornataGls } = await import('@/lib/gls'); await chiudiGiornataGls(_dbChiusura, distinta.id) } catch {}
   try { const { chiudiDistintaBrt } = await import('@/lib/brt'); await chiudiDistintaBrt(_dbChiusura, distinta.id) } catch {}
+  try { const { chiudiDistintaFedex } = await import('@/lib/fedex'); await chiudiDistintaFedex(_dbChiusura, distinta.id) } catch {}
   // Distinta MISTA (vettore): la chiusura per-contratto. Le 4 sopra fanno skip (corriere_id null); questa
   // fa skip sulle mono-contratto. Cosi' vale sia il caso normale sia il merge, senza rami separati.
   try { const { chiudiDistintaMista } = await import('@/lib/distinte-chiusura'); await chiudiDistintaMista(_dbChiusura, distinta.id) } catch {}

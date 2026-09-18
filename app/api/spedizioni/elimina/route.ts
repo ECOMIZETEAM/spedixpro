@@ -105,15 +105,15 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true, manuale: true, message: 'Richiesta di annullo inviata: questo corriere non consente la cancellazione automatica, quindi verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
   }
 
-  // ── GLS / BRT DIRETTI: annullo IMMEDIATO, mai la coda 48h. ──
+  // ── GLS / BRT / FEDEX DIRETTI: annullo IMMEDIATO, mai la coda 48h. ──
   // GLS è "attesa-chiusura": PRIMA della chiusura distinta (confermata_vettore) la spedizione NON è ancora
   // trasmessa a GLS, quindi si annulla in sicurezza (DeleteSped) e si rimborsa; DOPO la chiusura GLS
-  // consegna il pacco → non si annulla a vuoto. BRT AUTO-CONFERMA alla creazione, annullabile solo subito
-  // (retry sul -153); poco dopo risponde "già spedita". Prima cadevano nel ramo 48h generico: il cron
-  // tentava l'annullo due giorni dopo — BRT diceva "già spedita" (l'utente aspettava 2 giorni per un
+  // consegna il pacco → non si annulla a vuoto. BRT e FEDEX AUTO-CONFERMANO alla creazione, annullabili solo
+  // subito; poco dopo il corriere risponde "già spedita". Prima cadevano nel ramo 48h generico: il cron
+  // tentava l'annullo due giorni dopo — il corriere diceva "già spedita" (l'utente aspettava 2 giorni per un
   // rifiuto, pacco già partito) e la GLS, ormai in distinta, veniva marcata annullata e RIMBORSATA a tutta
   // la catena mentre GLS la consegnava. Ora si tenta subito, nella finestra in cui l'annullo vale davvero.
-  if (corr?.tipo === 'gls' || corr?.tipo === 'brt') {
+  if (corr?.tipo === 'gls' || corr?.tipo === 'brt' || corr?.tipo === 'fedex') {
     // "Trasmessa a GLS" = la sua DISTINTA e' confermata_vettore (il flag vive sulla distinta, NON sulla
     // spedizione). Lo leggo qui e lo attacco a `sped`, cosi' vale anche la guardia in annullaSpedizione.
     if (corr.tipo === 'gls' && (sped as any).distinta_id) {

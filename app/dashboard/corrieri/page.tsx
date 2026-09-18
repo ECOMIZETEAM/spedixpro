@@ -22,7 +22,7 @@ const DISPONIBILI = [
   {tipo:'poste',nome:'Poste Delivery Business',icona:'poste_delivery_business'},
   {tipo:'generico',nome:'GTech Group',icona:'gtechgroup'},
   {tipo:'generico',nome:'HR Parcel',icona:'hrp'},
-  {tipo:'generico',nome:'FedEx',icona:'fedex'},
+  {tipo:'fedex',nome:'FedEx',icona:'fedex'},
   {tipo:'generico',nome:'Palletways',icona:'palletways'},
   {tipo:'generico',nome:'Correos Express',icona:'correos_express'},
   {tipo:'generico',nome:'InPost',icona:'inpost'},

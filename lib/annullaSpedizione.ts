@@ -108,6 +108,18 @@ export async function annullaSpedizioneSulCorriere(
     return { ok: false, reason: (a.errore || 'BRT non consente l\'annullo in questo momento').slice(0, 160) }
   }
 
+  // FedEx diretto: come BRT, FedEx AUTO-CONFERMA alla creazione → l'annullo va tentato DAVVERO (PUT
+  // /shipments/cancel), mai un rimborso a vuoto mentre il pacco viaggia. Se FedEx conferma l'annullo (o
+  // risulta già inesistente) ok:true; altrimenti ok:false col motivo (resta in coda / da riprovare).
+  if (corr.tipo === 'fedex') {
+    const tn = raw.trackingNumber || sped.tracking_number
+    if (!tn) return { ok: false, reason: 'tracking FedEx mancante per l\'annullo' }
+    const { annullaSpedizioneFedex } = await import('@/lib/fedex')
+    const a = await annullaSpedizioneFedex(cred, String(tn), raw.test === true)
+    if (a.ok || giaEliminataSulCorriere(a.errore || '')) return { ok: true }
+    return { ok: false, reason: (a.errore || 'FedEx non consente l\'annullo in questo momento').slice(0, 160) }
+  }
+
   // CIRCUITO INTERNO: non c'e' nessuno a cui mandare l'annullo, il corriere siamo noi. Basta non
   // farlo partire — ma se e' gia' stato consegnato non c'e' piu' niente da fermare, e dire ok
   // qui vorrebbe dire rimborsare cliente e catena per un pacco che il destinatario ha in casa.

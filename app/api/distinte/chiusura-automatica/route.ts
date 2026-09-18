@@ -72,6 +72,7 @@ export async function GET(req: NextRequest) {
       try { await chiudiBordereauSpediamopro(supabase, distinta.id) } catch {}
       try { const { chiudiGiornataGls } = await import('@/lib/gls'); await chiudiGiornataGls(supabase, distinta.id) } catch {}
       try { const { chiudiDistintaBrt } = await import('@/lib/brt'); await chiudiDistintaBrt(supabase, distinta.id) } catch {}
+      try { const { chiudiDistintaFedex } = await import('@/lib/fedex'); await chiudiDistintaFedex(supabase, distinta.id) } catch {}
     }
   }
   // ── DISTINTE DEI RESI (stesso giro delle 23: chiudo in distinta anche i resi rientrati) ──

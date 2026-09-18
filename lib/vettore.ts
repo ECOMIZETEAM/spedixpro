@@ -11,6 +11,7 @@ export function vettoreFisico(c: { tipo?: string | null; nome_contratto?: string
   const t = (c?.tipo || '').toLowerCase()
   if (t === 'gls') return 'GLS'
   if (t === 'brt') return 'BRT'
+  if (t === 'fedex') return 'FEDEX'
   const n = (c?.nome_contratto || '').toUpperCase()
   const regole: [RegExp, string][] = [
     [/GLS/, 'GLS'],

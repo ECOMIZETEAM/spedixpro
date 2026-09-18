@@ -79,6 +79,11 @@ export async function POST(req: NextRequest) {
     const { chiudiDistintaBrt } = await import('@/lib/brt')
     await chiudiDistintaBrt(admin, distinta.id)
   } catch (e) { console.error('API close-day brt:', e) }
+  // FedEx diretto: auto-conferma alla creazione, ritiro programmato a parte -> attesta la distinta (documento).
+  try {
+    const { chiudiDistintaFedex } = await import('@/lib/fedex')
+    await chiudiDistintaFedex(admin, distinta.id)
+  } catch (e) { console.error('API close-day fedex:', e) }
 
   // Rileggo il borderò eventualmente prodotto (spedisci): lo restituisco come PDF base64.
   // NB: non esiste un endpoint /pdf per le distinte via API — restituisco direttamente il documento del corriere.

@@ -63,6 +63,9 @@ export async function chiudiDistintaMista(supabase: any, distintaId: string) {
           .map((r: any) => ({ numericRef: Number(r.numericRef), alphaRef: r.alphaRef || null }))
         const r = await confermaSpedizioniBrt(cred, refs)
         if (!r.ok) errori.push('BRT: ' + (r.errore || 'conferma non riuscita'))
+      } else if (corr.tipo === 'fedex') {
+        // FedEx auto-conferma alla creazione e il ritiro è programmato a parte sul conto: nessuna
+        // trasmissione da fare qui, il gruppo è già "chiuso" lato corriere (come SDA).
       } else {
         // Difensivo: non deve capitare (il merge e' vincolato a un solo vettore fisico), ma se un tipo
         // non e' gestito lo diciamo forte invece di far finta di aver trasmesso.
