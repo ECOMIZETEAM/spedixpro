@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { fetchAll } from '@/lib/fetch-all'
 
 // STATISTICHE — FATTURAZIONE (sola lettura). Fatturato del master ai propri clienti/sotto-master
 // diretti, con quota "da fatturare" (clienti a fattura mensile).
-const TIPI = ['spedizione', 'rimborso', 'rettifica', 'reso', 'giacenza']  // come Profitto/Report Guadagno
+//
+// Aggregazione nel DB (RPC fatturazione_dettaglio_v1): per cliente il fatturato + flag fattura mensile,
+// i sotto-master come entità (self + ri-addebiti), e la serie per mese. Prima si scaricavano in memoria
+// TUTTI i movimenti del periodo (default: l'anno) mille per round-trip: lento sul super-master. Logica
+// del ricavo = Report Guadagno/Profitto; l'aritmetica finale (totali, da fatturare) resta qui.
+const TIPI = ['spedizione', 'rimborso', 'rettifica', 'reso', 'giacenza']
 const n = (x: any) => Number(x || 0)
 const r2 = (x: number) => Math.round(x * 100) / 100
 
@@ -21,54 +25,22 @@ export async function GET(req: NextRequest) {
   const alISO = req.nextUrl.searchParams.get('al') ? new Date(req.nextUrl.searchParams.get('al') + 'T23:59:59Z').toISOString() : new Date().toISOString()
 
   const admin = createAdminSupabase()
-  const { data: figli } = await admin.from('masters').select('id,nome').eq('parent_master_id', M)
-  const subDiretti = new Map<string, string>((figli || []).map((f: any) => [f.id, f.nome]))
-  const subIds = Array.from(subDiretti.keys())
+  const { data: d, error } = await admin.rpc('fatturazione_dettaglio_v1', { p_master: M, p_dal: dalISO, p_al: alISO, p_tipi: TIPI })
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  const j: any = d || {}
 
-  const movM = await fetchAll(() => admin.from('movimenti').select('cliente_id,importo,tipo,created_at').eq('master_id', M)
-    .not('cliente_id', 'is', null).not('spedizione_id', 'is', null).gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI).order('created_at', { ascending: true }))
-  let movSub: any[] = []
-  if (subIds.length) movSub = await fetchAll(() => admin.from('movimenti').select('master_id,master_target_id,importo,created_at,spedizione_id,tipo')
-    .in('master_id', subIds).not('spedizione_id', 'is', null).gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI))
+  const righe = (j.clienti || []).map((c: any) => ({
+    nome: c.nome || 'Cliente', fatturato: r2(n(c.fatturato)), tipo: c.mensile ? 'Fattura mensile' : 'Credito',
+  }))
+  for (const s of (j.sub || [])) righe.push({ nome: s.nome, fatturato: r2(n(s.fatturato)), tipo: 'Rete' })
+  righe.sort((a: any, b: any) => b.fatturato - a.fatturato)
 
-  const perMese = new Map<string, number>()
-  const ricavoCli = new Map<string, number>()
-  for (const m of movM) { const v = -n(m.importo); ricavoCli.set(m.cliente_id, (ricavoCli.get(m.cliente_id) || 0) + v); const k = m.created_at.slice(0, 7); perMese.set(k, (perMese.get(k) || 0) + v) }
-  const ricavoSub = new Map<string, number>()
-  for (const m of movSub) if (m.master_id === m.master_target_id) { const v = -n(m.importo); ricavoSub.set(m.master_id, (ricavoSub.get(m.master_id) || 0) + v); const k = m.created_at.slice(0, 7); perMese.set(k, (perMese.get(k) || 0) + v) }
-
-  // Ricavo del RI-ADDEBITO ai sotto-master (reweight/reso/giacenza che M carica al figlio: master_id=M,
-  // target=figlio, niente cliente, tipo≠spedizione). movM qui prende solo i movimenti cliente, quindi
-  // serve una fetch dedicata; senza, il fatturato di rete era sottostimato (come nella statistica Profitto).
-  // Dedup su selfSubKeys: la spedizione base è già nel self del figlio (movSub).
-  const selfSubKeys = new Set<string>()
-  for (const m of movSub) if (m.master_id === m.master_target_id && (m as any).spedizione_id) selfSubKeys.add((m as any).spedizione_id + '|' + m.master_id + '|' + (m as any).tipo)
-  if (subIds.length) {
-    const movRi = await fetchAll(() => admin.from('movimenti').select('master_target_id,importo,created_at,spedizione_id,tipo')
-      .eq('master_id', M).is('cliente_id', null).in('master_target_id', subIds).neq('tipo', 'spedizione')
-      .not('spedizione_id', 'is', null).gte('created_at', dalISO).lte('created_at', alISO).in('tipo', TIPI))
-    for (const m of movRi) {
-      if (selfSubKeys.has((m as any).spedizione_id + '|' + m.master_target_id + '|' + (m as any).tipo)) continue
-      const v = -n(m.importo); ricavoSub.set(m.master_target_id, (ricavoSub.get(m.master_target_id) || 0) + v)
-      const k = (m as any).created_at.slice(0, 7); perMese.set(k, (perMese.get(k) || 0) + v)
-    }
-  }
-
-  // Clienti (nome + tipo contratto per il "da fatturare")
-  const cliIds = Array.from(ricavoCli.keys())
-  const cliInfo = new Map<string, { nome: string; mensile: boolean }>()
-  if (cliIds.length) { const { data: cs } = await admin.from('clienti').select('id,ragione_sociale,tipo_contratto').in('id', cliIds); for (const c of (cs || [])) cliInfo.set((c as any).id, { nome: (c as any).ragione_sociale, mensile: (c as any).tipo_contratto === 'fattura_mensile' }) }
-
-  const righe = cliIds.map(cid => ({ nome: cliInfo.get(cid)?.nome || 'Cliente', fatturato: r2(ricavoCli.get(cid) || 0), tipo: cliInfo.get(cid)?.mensile ? 'Fattura mensile' : 'Credito' }))
-  for (const [smid, v] of ricavoSub) righe.push({ nome: (subDiretti.get(smid) || 'Sotto-master') + ' (rete)', fatturato: r2(v), tipo: 'Rete' })
-  righe.sort((a, b) => b.fatturato - a.fatturato)
-
-  const fatturatoTot = r2(righe.reduce((a, r) => a + r.fatturato, 0))
-  const daFatturare = r2(cliIds.filter(cid => cliInfo.get(cid)?.mensile).reduce((a, cid) => a + (ricavoCli.get(cid) || 0), 0))
+  const fatturatoTot = r2(righe.reduce((a: number, r: any) => a + r.fatturato, 0))
+  const daFatturare = r2((j.clienti || []).filter((c: any) => c.mensile).reduce((a: number, c: any) => a + n(c.fatturato), 0))
 
   return NextResponse.json({
     kpi: { fatturatoTot, daFatturare, clienti: righe.length },
-    serieMese: Array.from(perMese.entries()).sort().map(([mese, v]) => ({ mese, fatturato: r2(v) })),
+    serieMese: (j.serieMese || []).map((s: any) => ({ mese: s.mese, fatturato: r2(n(s.fatturato)) })),
     righe,
   })
 }
