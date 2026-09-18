@@ -93,6 +93,14 @@ export async function GET(req: NextRequest) {
       let nuovo: string | null = null
       let nuovoTracking: string | null = null
       let motivoGiacenza: string | null = null   // causale del corriere (rifiuto, assente, indirizzo errato…)
+      // LA GIACENZA E' UN FATTO, NON IL MASSIMO DI UNA CLASSIFICA. `nuovo` qui sotto e' lo stato PIU'
+      // AVANZATO fra quelli letti dal corriere, e nella scala in_giacenza vale 4 mentre
+      // non_consegnato vale 5: siccome la mancata consegna accompagna SEMPRE la giacenza, `nuovo`
+      // diventa 'non_consegnato' e la giacenza non veniva registrata mai (misurato il 18/09: 256
+      // spedizioni con l'evento di giacenza scritto e `giacenza_data` nulla, 101 delle quali su
+      // corrieri che passano SOLO di qui, senza webhook). Questo flag dice "la giacenza l'abbiamo
+      // vista", a prescindere da chi vince la classifica degli stati.
+      let vistaGiacenza = false
       // Contesto SpediamoPro per il recupero di numero/etichetta rimasti indietro (vedi sotto).
       let spAuth: string | null = null
       let spId: number | null = null
@@ -113,6 +121,10 @@ export async function GET(req: NextRequest) {
             const stocks = await spediamoproSearchStocks(authcode, tr.shipmentCode || (s as any).sp_code || String(spid))
             const attivo = (stocks || []).find((st: any) => Number(st.status) === 1 && Number(st.shipmentId) === Number(spid))
             nuovo = attivo ? 'in_giacenza' : 'non_consegnato'
+            // Solo lo stock ATTIVO, di proposito: qui la data sarebbe "adesso", e una giacenza gia'
+            // chiusa verrebbe aperta con una data falsa (e addebitata). Il recupero delle giacenze
+            // passate e' un'altra cosa, e si fa col webhook che porta `opened_at`.
+            if (attivo) vistaGiacenza = true
             // MOTIVO dichiarato dal corriere (es. "Rifiuto del destinatario"): serve all'operatore
             // per scegliere lo svincolo GIUSTO — su un pacco rifiutato la riconsegna viene respinta
             // dal corriere, l'unica strada e' il reso al mittente.
@@ -160,6 +172,7 @@ export async function GET(req: NextRequest) {
           const m = mapStatoSpedisci(str)
           if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
         }
+        if (stati.some((str) => mapStatoSpedisci(str) === 'in_giacenza')) vistaGiacenza = true
         // Il reso vince sulla consegna del ritorno (vedi sotto, dove si applica lo stato).
         if (stati.some((str) => mapStatoSpedisci(str) === 'reso_mittente')) nuovo = 'reso_mittente'
 
@@ -174,6 +187,7 @@ export async function GET(req: NextRequest) {
           const m = mapStatoEasyparcel(str)
           if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
         }
+        if (stati.some((str) => mapStatoEasyparcel(str) === 'in_giacenza')) vistaGiacenza = true
         // Il reso vince sulla consegna del ritorno (vedi sotto, dove si applica lo stato).
         if (stati.some((str) => mapStatoEasyparcel(str) === 'reso_mittente')) nuovo = 'reso_mittente'
         // La LDV compare nel tracking anche quando alla creazione non era ancora pronta: e' la
@@ -226,6 +240,7 @@ export async function GET(req: NextRequest) {
           const m = mapStatoGls(str)
           if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
         }
+        if (stati.some((str) => mapStatoGls(str) === 'in_giacenza')) vistaGiacenza = true
         // Il reso vince sulla consegna del ritorno (vedi sotto, dove si applica lo stato).
         if (stati.some((str) => mapStatoGls(str) === 'reso_mittente')) nuovo = 'reso_mittente'
 
@@ -243,6 +258,7 @@ export async function GET(req: NextRequest) {
         }
         // Consegna dal campo dedicato di BRT (non serve l'evento testuale "CONSEGNATA").
         if (brtConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
+        if (stati.some((str) => mapStatoBrt(str) === 'in_giacenza')) vistaGiacenza = true
         // ...ma se il pacco e' tornato al mittente, quella consegna e' il RITORNO: vince il reso.
         if (stati.some((str) => mapStatoBrt(str) === 'reso_mittente')) nuovo = 'reso_mittente'
 
@@ -283,7 +299,16 @@ export async function GET(req: NextRequest) {
       if (nuovo && nuovo !== s.stato
           && (nuovo === 'annullata' || nuovo === 'reso_mittente' || prioritaStato(nuovo) > prioritaStato(s.stato))
           && !(s.stato === 'reso_mittente' && nuovo === 'consegnata')) upd.stato = nuovo
-      if (nuovo === 'in_giacenza' && !s.giacenza_data) upd.giacenza_data = new Date().toISOString()
+      // GIACENZA: si registra se l'abbiamo VISTA (vedi `vistaGiacenza` sopra), non solo quando vince
+      // la classifica degli stati. SOLO SE IL PACCO E' ANCORA FERMO, pero': qui la data sarebbe
+      // "adesso" e non quella vera (la porta solo il webhook, col campo `opened_at`), quindi su un
+      // pacco gia' consegnato o reso si scriverebbe una giacenza con data falsa — e si farebbe
+      // partire un addebito per una giacenza finita chissa' quando. Il recupero di quelle passate e'
+      // una decisione a parte, non un effetto collaterale del cron.
+      const fermo = s.stato !== 'consegnata' && s.stato !== 'reso_mittente' && s.stato !== 'annullata'
+      if ((vistaGiacenza || nuovo === 'in_giacenza') && !s.giacenza_data && fermo) {
+        upd.giacenza_data = new Date().toISOString()
+      }
       if (motivoGiacenza && motivoGiacenza !== (s as any).giacenza_motivo) upd.giacenza_motivo = motivoGiacenza
       if (nuovoTracking && nuovoTracking !== s.tracking_number) upd.tracking_number = nuovoTracking
 
