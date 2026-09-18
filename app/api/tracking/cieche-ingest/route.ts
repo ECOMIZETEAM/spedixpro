@@ -16,12 +16,19 @@ export const maxDuration = 120
 // Soprattutto, la giacenza la apre solo il FORNITORE: un'istruzione data su una giacenza che lui non
 // ha ancora aperto non ha dove arrivare. Qui prima c'era scritto che la giacenza "vera" la registrava
 // bonifica-poste: era la stessa lettura di Poste da un'altra porta. Regola in `statoDaLetturaPoste`.
-// body: { righe: [{ spedizione_id, ldv, tracking: [...] }] }  (tracking = array `tracking` del full-tracking)
+// body: { righe: [{ spedizione_id, ldv, tracking: [...] }], soloCronologia? }
+//   (tracking = array `tracking` del full-tracking)
+// soloCronologia: scrive la storia e NON tocca lo stato. Serve al recupero delle consegnate senza
+// cronologia (66.918 al 18/09/2026): li' lo stato e' gia' terminale e va bene com'e'; un reso
+// trovato dentro una storia vecchia farebbe scattare addebiti a catena su migliaia di pacchi tutti
+// insieme, senza che nessuno se ne sia accorto. Prima si riempie la storia, poi si contano i resi
+// veri e si decide con i numeri davanti.
 export async function POST(req: NextRequest) {
   const admin = createAdminSupabase()
   if (!(await autorizzaHarvester(req, admin))) return NextResponse.json({ error: 'Non autorizzato' }, { status: 401 })
   const body = await req.json().catch(() => ({}))
   const righe = Array.isArray(body?.righe) ? body.righe : []
+  const soloCronologia = body?.soloCronologia === true
   let cronologie = 0, avanzati = 0, vuote = 0
   for (const r of righe) {
     const sid = r?.spedizione_id
@@ -43,7 +50,7 @@ export async function POST(req: NextRequest) {
       { onConflict: 'spedizione_id,data_evento,descrizione,luogo', ignoreDuplicates: true },
     )
     cronologie++
-    const nuovo = statoDaLetturaPoste(eventi, (sp as any).stato)
+    const nuovo = soloCronologia ? null : statoDaLetturaPoste(eventi, (sp as any).stato)
     if (nuovo) {
       await admin.from('spedizioni').update({ stato: nuovo }).eq('id', sid)
       avanzati++
