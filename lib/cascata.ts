@@ -21,6 +21,13 @@ export type LivelloCatena = {
   // controllo credito saltano questo livello; le RIPESATURE no (usano la stessa catena ma per loro
   // il detentore-proprio paga comunque il riprezzo al corriere).
   pagaDalSuoConto?: boolean
+  // Contrassegno/assicurazione RICHIESTI ma NON prezzati (o oltre il massimo) sul listino di QUESTO
+  // livello: il suo costo non li conterrebbe. Su un rivenditore significa che venderebbe al cliente un
+  // servizio che non ha prezzato in acquisto e la differenza la assorbirebbe il detentore (che il costo
+  // reale col contrassegno lo paga sempre). Popolati solo quando il livello è prezzato dal suo listino
+  // corrieri (non dal ripiego calcolaPrezzoListino, che non li espone): undefined = non pervenuto.
+  contrassegnoOltreMax?: boolean
+  assicurazioneOltreMax?: boolean
 }
 
 // ESPORTATA perche' serve anche a RIPREZZARE.
@@ -106,6 +113,8 @@ export async function costruisciCatena(
     // è il costo che vede nella sua lista movimenti.
     let calcolato = false
     let zonaLivello: string | undefined
+    let codOltreMax: boolean | undefined
+    let assOltreMax: boolean | undefined
     if (params.corriereNome) {
       const mCorrId = await corriereDiMasterPerNome(adminDb, m.id, params.corriereNome)
       if (mCorrId) {
@@ -137,7 +146,7 @@ export async function costruisciCatena(
           zonaForzata: params.zonaForzata,
           pesoSuRealeCost,
         })
-        if (pz != null) { prezzo = pz.totale; zonaLivello = pz.zona; calcolato = true }
+        if (pz != null) { prezzo = pz.totale; zonaLivello = pz.zona; calcolato = true; codOltreMax = pz.contrassegnoOltreMax; assOltreMax = pz.assicurazioneOltreMax }
       }
     }
     // Fallback se il master non ha il listino corrieri per questo contratto:
@@ -176,6 +185,7 @@ export async function costruisciCatena(
       credito: Number((pagaDalSuoConto ? m.credito_proprio : m.credito) || 0),
       prezzo, isProprietario, zona: zonaLivello,
       pagaDalSuoConto,
+      contrassegnoOltreMax: codOltreMax, assicurazioneOltreMax: assOltreMax,
     })
 
     if (isProprietario) break
@@ -261,7 +271,7 @@ export async function verificaCreditoCatena(
     zonaCliente?: string
     prezzoCliente?: number
   }
-): Promise<{ ok: boolean; errore?: string; masterInsufficiente?: string }> {
+): Promise<{ ok: boolean; errore?: string; masterInsufficiente?: string; servizioNonPrezzato?: boolean }> {
   const { catena, errore } = await costruisciCatena(supabase, {
     masterDirettoId: params.masterDirettoId,
     corriereOwnerId: params.corriereOwnerId,
@@ -307,6 +317,22 @@ export async function verificaCreditoCatena(
         errore: `Destinazione fuori zona: al cliente risulta "${params.zonaCliente}" (€ ${Number(params.prezzoCliente).toFixed(2)}) ma per il contratto e' "${diretto.zona}" (€ ${diretto.prezzo.toFixed(2)}). Spedizione non creabile: allinea la zona sul listino del cliente, oppure scegli un altro corriere.`,
       }
     }
+  }
+
+  // ── CONTRASSEGNO / ASSICURAZIONE VENDUTI MA NON PREZZATI IN ACQUISTO ──
+  // Come una zona senza prezzo (REGOLE.md §1: "il corriere va escluso, non venduto"): se il
+  // contrassegno (o l'assicurazione) è richiesto ma un RIVENDITORE della catena non lo prezza sul
+  // proprio listino corrieri, il suo costo non lo conterrebbe e la differenza la assorbirebbe il
+  // detentore — che il costo reale col contrassegno lo paga sempre (è successo a MULTIEXPRESS sul
+  // contratto DVA: il sub vendeva il COD al cliente senza averlo in acquisto, e il floor alzava il
+  // detentore al costo reale a sua perdita). Il DETENTORE si salta: il suo COD viene dal costo reale
+  // del fornitore, non dal listino. `=== true` apposta: undefined (livello prezzato dal ripiego, che
+  // non espone il flag) NON blocca, così non si fermano spedizioni che oggi passano.
+  if ((params.contrassegno || 0) > 0 && catena.some(l => !l.isProprietario && l.contrassegnoOltreMax === true)) {
+    return { ok: false, servizioNonPrezzato: true, errore: 'Contrassegno non disponibile su questo contratto per questa destinazione: rimuovilo o scegli un altro corriere.' }
+  }
+  if ((params.assicurazione || 0) > 0 && catena.some(l => !l.isProprietario && l.assicurazioneOltreMax === true)) {
+    return { ok: false, servizioNonPrezzato: true, errore: 'Assicurazione non disponibile su questo contratto per questa destinazione: rimuovila o scegli un altro corriere.' }
   }
 
   for (const liv of catena) {

@@ -628,6 +628,13 @@ export async function POST(req: NextRequest) {
       // problema di soldi, e lui ricaricava il credito senza che cambiasse nulla.
       // `masterInsufficiente` e' valorizzato SOLO nel caso credito: e' quello che distingue.
       const perCredito = !!catenaCheck.masterInsufficiente
+      // Contrassegno/assicurazione richiesti ma non prezzati lungo la catena (come una zona senza
+      // prezzo): messaggio DIRETTO e azionabile, non il generico "livello superiore". È già ripulito
+      // (non nomina master né provider), quindi si mostra così com'è a chiunque crei.
+      if (catenaCheck.servizioNonPrezzato) {
+        await stornaPrenotazione()
+        return NextResponse.json({ error: catenaCheck.errore }, { status: 400 })
+      }
       if (!perCredito) {
         console.error('[CREA][CATENA] configurazione incompleta:', catenaCheck.errore)
         await stornaPrenotazione()
