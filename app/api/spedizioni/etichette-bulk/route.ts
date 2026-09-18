@@ -179,7 +179,11 @@ export async function POST(req: NextRequest) {
   }
 
   const mergedBytes = await pdfMerged.save()
-  const buffer = Buffer.from(mergedBytes)
+  // FORMATO DI STAMPA di chi stampa (cliente→suo, master→suo): riadatta ogni pagina (etichetta +
+  // riepilogo) al formato scelto. Assente = nativo (nessun cambiamento per chi non ha scelto).
+  const { formatoStampaUtente, applicaFormatoEtichetta } = await import('@/lib/formato-etichetta')
+  const fmt = await formatoStampaUtente(admin, utente as any)
+  const buffer = fmt ? Buffer.from(await applicaFormatoEtichetta(mergedBytes, fmt)) : Buffer.from(mergedBytes)
 
   return new NextResponse(buffer, {
     headers: {

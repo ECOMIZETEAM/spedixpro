@@ -47,6 +47,9 @@ export async function POST(req: NextRequest) {
     so_paese: body.so_paese||'Italia', so_indirizzo: body.so_indirizzo||null,
     so_citta: body.so_citta||null, so_provincia: body.so_provincia||null, so_cap: body.so_cap||null,
     listino_cliente_id: body.listino_cliente_id||null,
+    // Nuovi clienti: formato etichetta di default 10x11 (deciso 18/9). Gli esistenti restano al formato
+    // nativo del corriere finché non scelgono (il campo assente = nativo). Vedi lib/formato-etichetta.
+    impostazioni: { formato_stampa: '10x11' },
     tipo_contratto: body.tipo_contratto||'credito_scalare',
     aliquota_iva: body.aliquota_iva||'22',
     fattura_auto: body.fattura_auto||false,

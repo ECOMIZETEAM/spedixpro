@@ -251,6 +251,19 @@ export default function ImpostazioniClientePage() {
         </div>
 
         <div style={card}>
+          <div style={cardHead}>Formato stampa etichetta</div>
+          <div style={{...rowFull,borderBottom:'none'}}>
+            <span style={lblStrong}>Formato del PDF etichetta<br/><span style={{fontSize:'11px',fontWeight:400,color:'#888'}}>Il PDF viene adattato al formato scelto (proporzioni mantenute). "Nativo" = come lo dà il corriere. Non tocca la stampa ZPL.</span></span>
+            <select value={imp('formato_stampa') || 'nativo'} onChange={e=>setImp('formato_stampa', e.target.value)} style={selWide}>
+              <option value="10x11">10×11 cm</option>
+              <option value="10x15">10×15 cm</option>
+              <option value="a4">A4</option>
+              <option value="nativo">Nativo (corriere)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style={card}>
           <div style={cardHead}>Notifiche email & sms</div>
           <div style={rowFull}><span style={lblStrong}>Attiva notifica email destinatario</span>
             <Toggle on={imp('notifica_email_dest')===true} onToggle={()=>setImp('notifica_email_dest', !(imp('notifica_email_dest')===true))} /></div>

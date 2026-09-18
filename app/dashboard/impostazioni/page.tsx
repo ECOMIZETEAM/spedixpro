@@ -18,7 +18,8 @@ export default function ImpostazioniPage() {
     iban:'', banca:'', intestatario:'',
     indirizzo_fatturazione:'', cap_fatturazione:'', citta_fatturazione:'', provincia_fatturazione:'',
     pec:'', codice_sdi:'',
-    indirizzo_operativo:'', cap_operativo:'', citta_operativo:'', provincia_operativo:'', telefono_operativo:''
+    indirizzo_operativo:'', cap_operativo:'', citta_operativo:'', provincia_operativo:'', telefono_operativo:'',
+    impostazioni:{} as Record<string,any>
   })
 
   useEffect(() => {
@@ -112,6 +113,18 @@ export default function ImpostazioniPage() {
                 </div>
                 <div><label style={lbl}>E-Mail Supporto Tecnico</label>
                   <input value={dati.email_supporto} onChange={e=>setF('email_supporto',e.target.value)} style={inp}/>
+                </div>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'16px'}}>
+                <div><label style={lbl}>Formato stampa etichetta</label>
+                  <select value={(dati.impostazioni?.formato_stampa)||'nativo'}
+                    onChange={e=>setDati(f=>({...f, impostazioni:{...(f.impostazioni||{}), formato_stampa:e.target.value}}))} style={inp}>
+                    <option value="10x11">10×11 cm</option>
+                    <option value="10x15">10×15 cm</option>
+                    <option value="a4">A4</option>
+                    <option value="nativo">Nativo (corriere)</option>
+                  </select>
+                  <div style={{fontSize:'11px',color:'#888',marginTop:'4px'}}>Formato dei PDF etichetta che stampi tu (rete inclusa). Il PDF viene adattato mantenendo le proporzioni; "Nativo" = come lo dà il corriere. Non tocca la stampa ZPL.</div>
                 </div>
               </div>
             </div>

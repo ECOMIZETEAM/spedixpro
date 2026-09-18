@@ -10,6 +10,7 @@ const COLONNE = [
   'indirizzo_operativo','cap_operativo','citta_operativo','provincia_operativo','telefono_operativo',
   'logo_url','tipo_contratto',
   'colore_primario','colore_secondario',
+  'impostazioni',   // JSON impostazioni del master (es. formato_stampa etichette)
 ]
 
 export async function GET() {
