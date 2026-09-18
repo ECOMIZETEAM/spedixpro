@@ -7,7 +7,14 @@ import { fetchAll } from '@/lib/fetch-all'
 // scendono a valle. 'somma_lati_max' mancava: per questo il limite "somma dei 3 lati" del PDB
 // Internazionale era impostato solo sui 4 master originali e assente sui 23 propagati dopo — su un
 // provider senza annullo (DVA) significa poter comprare un collo fuori misura e non recuperarlo.
-const CONTRACT_SETTINGS_KEYS = ['agevolazione_peso_reale', 'misure_max', 'misure_scaglioni', 'peso_reale_soglia', 'limite_combinato', 'somma_lati_max', 'peso_max_collo', 'colli_max']
+// + CONFIG DI SERVIZIO DEI CORRIERI DIRETTI: il sotto-master spedisce sull'ACCOUNT del detentore
+// (le credenziali gli vengono copiate), quindi anche la config di servizio del contratto deve
+// scendere con la copia, o a valle manca. Per FedEx `tipo_servizio` è OBBLIGATORIO (senza, la
+// creazione si ferma con "senza tipo di servizio"): era il motivo per cui i sotto-master non
+// riuscivano a spedire FedEx. tipo_ritiro/test_mode idem. (GLS/BRT tollerano l'assenza col default,
+// per questo non bloccavano.)
+const CONTRACT_SETTINGS_KEYS = ['agevolazione_peso_reale', 'misure_max', 'misure_scaglioni', 'peso_reale_soglia', 'limite_combinato', 'somma_lati_max', 'peso_max_collo', 'colli_max',
+  'tipo_servizio', 'tipo_ritiro', 'test_mode']
 function settingsContratto(src: any): any {
   const out: any = {}
   if (src && typeof src === 'object') {
