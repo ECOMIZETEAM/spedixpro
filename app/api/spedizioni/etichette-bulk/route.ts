@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
 
   const ruolo = (utente?.ruolo || '').toLowerCase()
   // Campi extra per l'eventuale "riepilogo ordine" (packing slip) da anteporre alle etichette.
-  const cols = 'id,numero,etichetta_url,etichetta_path,raw_response,colli_dettaglio,cliente_id,created_at,rif_ordine,rif_destinatario,contenuto,colli,peso_reale,peso_fatturato,contrassegno,dest_nome,dest_indirizzo,dest_citta,dest_cap,dest_provincia,dest_paese,dest_telefono,mitt_nome,corriere_id,corrieri(nome_contratto,tipo)'
+  const cols = 'id,numero,etichetta_url,etichetta_path,raw_response,colli_dettaglio,cliente_id,master_id,created_at,rif_ordine,rif_destinatario,contenuto,colli,peso_reale,peso_fatturato,contrassegno,dest_nome,dest_indirizzo,dest_citta,dest_cap,dest_provincia,dest_paese,dest_telefono,mitt_nome,corriere_id,corrieri(nome_contratto,tipo)'
   let spedizioni: any[] | null = null
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
@@ -59,7 +59,10 @@ export async function POST(req: NextRequest) {
     // riferimento/contenuto da scrivere; ogni errore -> etichetta originale (mai degradare la LDV).
     const _corr: any = Array.isArray((s as any).corrieri) ? (s as any).corrieri[0] : (s as any).corrieri
     const rewSpediamopro = _corr?.tipo === 'spediamopro' && (s.rif_ordine || s.contenuto)
-    const rewSpedisci = _corr?.tipo === 'spedisci' && !!s.rif_ordine   // "Rif." token → rif_ordine
+    // Spedisci: oltre al "Rif." si riscrive il NOME DEL MITTENTE in etichetta (di default e' quello
+    // dell'intestatario del conto del fornitore, non del master). Quindi il gate non e' piu' il solo
+    // rif_ordine: vedi lib/etichetta-spedisci.
+    const rewSpedisci = _corr?.tipo === 'spedisci'
     let codeProv: string | null = null
     if (rewSpediamopro) {
       try { const { codiceProviderSpediamopro } = await import('@/lib/etichetta-spediamopro'); codeProv = codiceProviderSpediamopro(s.raw_response) } catch {}
@@ -142,7 +145,9 @@ export async function POST(req: NextRequest) {
         if (rewSpedisci) {
           try {
             const { riscriviEtichettaSpedisci } = await import('@/lib/etichetta-spedisci')
-            pdfBytes = new Uint8Array(await riscriviEtichettaSpedisci(Buffer.from(pdfBytes), { rifOrdine: s.rif_ordine }))
+            const { nomeMasterEtichetta } = await import('@/lib/etichette')
+            const mittente = await nomeMasterEtichetta(admin, (s as any).master_id)
+            pdfBytes = new Uint8Array(await riscriviEtichettaSpedisci(Buffer.from(pdfBytes), { rifOrdine: s.rif_ordine, mittente }))
           } catch (e) { console.error('[ETICHETTE-BULK][SPEDISCI] rewrite:', e) }
         }
         const pdf = await PDFDocument.load(pdfBytes)

@@ -130,12 +130,30 @@ export async function leggiEtichetta(
 // nostro rif_ordine e "campionatura generica" col contenuto dichiarato. UN SOLO PUNTO: tutte le porte che
 // servono la LDV (dashboard, API pubblica, bulk, cliente) passano di qui. Solo tipo='spediamopro' e solo
 // PDF; ogni errore -> etichetta ORIGINALE (una LDV rotta blocca la spedizione, mai degradarla).
+// NOME DEL MASTER da stampare sull'etichetta (vedi lib/etichetta-spedisci): piccola cache in memoria
+// perche' la stampa in blocco lo chiederebbe per ogni spedizione dello stesso master.
+const nomiMaster = new Map<string, { nome: string; at: number }>()
+export async function nomeMasterEtichetta(admin: any, masterId?: string | null): Promise<string | null> {
+  const id = String(masterId || '')
+  if (!id) return null
+  const gia = nomiMaster.get(id)
+  if (gia && Date.now() - gia.at < 5 * 60_000) return gia.nome || null
+  try {
+    const { data } = await admin.from('masters').select('nome').eq('id', id).maybeSingle()
+    const nome = String((data as any)?.nome || '').trim()
+    nomiMaster.set(id, { nome, at: Date.now() })
+    return nome || null
+  } catch { return null }
+}
+
 export async function leggiEtichettaCompleta(
   admin: any,
-  sped: { etichetta_path?: string | null; etichetta_url?: string | null; colli_dettaglio?: any; raw_response?: any; corriere_id?: string | null; rif_ordine?: string | null; contenuto?: string | null }
+  sped: { etichetta_path?: string | null; etichetta_url?: string | null; colli_dettaglio?: any; raw_response?: any; corriere_id?: string | null; rif_ordine?: string | null; contenuto?: string | null; master_id?: string | null }
 ): Promise<EtichettaLetta | null> {
   const et = await leggiEtichettaGrezza(admin, sped)
-  if (et && et.mime === 'application/pdf' && sped?.corriere_id && (sped.rif_ordine || sped.contenuto)) {
+  // Il gate NON guarda piu' solo rif_ordine/contenuto: su Spedisci si riscrive anche il nome del
+  // mittente in etichetta, che dipende dal master e non da quei due campi.
+  if (et && et.mime === 'application/pdf' && sped?.corriere_id && (sped.rif_ordine || sped.contenuto || sped.master_id)) {
     try {
       const { data: corr } = await admin.from('corrieri').select('tipo').eq('id', sped.corriere_id).maybeSingle()
       if ((corr as any)?.tipo === 'spediamopro') {
@@ -146,9 +164,12 @@ export async function leggiEtichettaCompleta(
       }
       // SPEDISCI: il "Rif." in etichetta è un token interno di Spedisci/Poste, non il rif ordine → lo
       // riscriviamo col rif_ordine dichiarato (il contenuto esce già dal campo dedicato `content`).
-      if ((corr as any)?.tipo === 'spedisci' && sped.rif_ordine) {
-        const { riscriviEtichettaSpedisci } = await import('@/lib/etichetta-spedisci')
-        return { ...et, buffer: await riscriviEtichettaSpedisci(et.buffer, { rifOrdine: sped.rif_ordine }) }
+      if ((corr as any)?.tipo === 'spedisci') {
+        const mittente = await nomeMasterEtichetta(admin, sped.master_id)
+        if (sped.rif_ordine || mittente) {
+          const { riscriviEtichettaSpedisci } = await import('@/lib/etichetta-spedisci')
+          return { ...et, buffer: await riscriviEtichettaSpedisci(et.buffer, { rifOrdine: sped.rif_ordine, mittente }) }
+        }
       }
     } catch (e: any) { console.error('[ETICHETTA][REWRITE]', e?.message) }
   }

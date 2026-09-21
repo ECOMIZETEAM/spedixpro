@@ -7,12 +7,24 @@
 // buttata via. "Villa Sant'Antonio" e' un comune in provincia di Oristano, quindi la frazione di
 // Ascoli e' sparita. Misurato il 21/09/2026: 405 localita' perse cosi'.
 //
-// LA REGOLA DI SICUREZZA, ed e' il motivo per cui questo script non aggiunge tutto quello che
-// trova: si aggiunge una localita' SOLO SE IL SUO CAP E' GIA' NOTO all'archivio per quella
-// provincia. Cosi' si rendono trovabili dei NOMI senza far entrare nel sistema nessun CAP nuovo —
-// e quindi senza toccare il prezzo di niente. I CAP nuovi sono un'altra storia: le zone dei listini
-// li conoscono uno per uno, e un CAP che le zone non hanno viene prezzato come "Italia" (cioe'
-// sottocosto su isole e zone disagiate). Quelli vanno guardati a mano, contratto per contratto.
+// DUE COSE DIVERSE, DUE REGOLE DIVERSE.
+//
+// (A) LOCALITA' MANCANTI -> si aggiungono a frazioni.json, ma SOLO SE IL LORO CAP E' GIA' NOTO
+//     all'archivio per quella provincia. Cosi' si rendono trovabili dei NOMI senza far entrare nel
+//     sistema nessun CAP nuovo.
+//
+// (B) CAP MANCANTI SU COMUNI GIA' PRESENTI (i generici delle citta': 10100 Torino, 80100 Napoli,
+//     40100 Bologna) -> si aggiungono all'array `cap` del comune, TRANNE quelli che renderebbero
+//     AMBIGUA la corrispondenza CAP->provincia. Quella corrispondenza non serve solo alla tendina:
+//     app/api/ordini/importa la usa per ricavare la provincia dagli ordini che non ce l'hanno
+//     (Amazon non la scrive), e un CAP attribuito a due province viene scartato come ambiguo,
+//     lasciando la provincia vuota. Meglio un CAP in meno che un import peggiore.
+//
+// NOTA su un allarme che si era rivelato infondato: si era temuto che aggiungere CAP generici
+// facesse prezzare sottocosto, perche' pochi di quei CAP compaiono in `zone_cap`. Non e' cosi':
+// zone_cap abbina CAP esatto -> PROVINCIA -> jolly, quindi un CAP senza riga esatta viene preso
+// dalla riga di provincia e finisce nella zona giusta (verificato: CT->SICILIA, CA/SS->SARDEGNA,
+// TO->PIEMONTE). La quasi totalita' dei CAP non ha una riga esatta, ed e' normale.
 //
 //   node scripts/aggiorna-archivio-cap.mjs           -> solo referto, non scrive
 //   node scripts/aggiorna-archivio-cap.mjs --scrivi  -> applica le aggiunte sicure
@@ -82,12 +94,46 @@ if (conCapNuovo.length) {
   for (const g of conCapNuovo.slice(0, 20)) console.log(`     ${g.nome} (${g.sigla}) ${g.cap}`)
 }
 
+// CASO B: i CAP da appendere ai comuni, saltando quelli che creerebbero un'ambiguita' nuova.
+const capProvincia = new Map()
+const ambigui = new Set()
+const mappa = (cap, sigla) => {
+  if (!/^\d{5}$/.test(cap) || sigla.length !== 2 || ambigui.has(cap)) return
+  const gia = capProvincia.get(cap)
+  if (gia && gia !== sigla) { ambigui.add(cap); capProvincia.delete(cap); return }
+  capProvincia.set(cap, sigla)
+}
+for (const c of comuni) for (const cap of c.cap) mappa(cap, c.sigla)
+for (const f of frazioni) mappa(f.cap, f.sigla)
+
+const capDaAggiungere = [], capScartati = []
+for (const g of sonoComuni) {
+  const gia = capProvincia.get(g.cap)
+  if (gia && gia !== g.sigla) capScartati.push({ ...g, conflitto: gia })
+  else capDaAggiungere.push(g)
+}
+console.log(`\n  CAP da appendere ai comuni: ${capDaAggiungere.length} (scartati per ambiguita' CAP->provincia: ${capScartati.length})`)
+for (const g of capScartati) console.log(`     scartato ${g.nome} (${g.sigla}) ${g.cap} — il CAP risulta gia' di ${g.conflitto}`)
+
+
 if (!SCRIVI) {
   console.log('\nReferto soltanto. Per applicare le aggiunte sicure: node scripts/aggiorna-archivio-cap.mjs --scrivi')
   process.exit(0)
 }
 
-if (!daAggiungere.length) { console.log('\nNiente da aggiungere: archivio gia' + "' allineato."); process.exit(0) }
+if (!daAggiungere.length && !capDaAggiungere.length) { console.log('\nNiente da aggiungere: archivio allineato.'); process.exit(0) }
+
+if (capDaAggiungere.length) {
+  const perNomeProvincia = new Map(comuni.map((c) => [`${norm(c.nome)}|${c.sigla}`, c]))
+  for (const g of capDaAggiungere) {
+    const c = perNomeProvincia.get(`${norm(g.nome)}|${g.sigla}`)
+    if (c && !c.cap.includes(g.cap)) { c.cap.push(g.cap); c.cap.sort() }
+  }
+  writeFileSync('lib/data/comuni.json', JSON.stringify(comuni))
+  console.log(`Scritti ${capDaAggiungere.length} CAP su comuni.json`)
+}
+
+if (!daAggiungere.length) process.exit(0)
 
 // Si inserisce mantenendo l'ordine alfabetico del file (diff piccolo e leggibile).
 const nuovo = frazioni.concat(daAggiungere.map((g) => ({
