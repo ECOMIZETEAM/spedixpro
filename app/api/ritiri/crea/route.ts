@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
   const masterId = primaSped.master_id
   const clienteId = primaSped.cliente_id || null
 
-  const { data: corriere } = await admin.from('corrieri').select('id,tipo,credenziali,settings').eq('id', primaSped.corriere_id).single()
+  const { data: corriere } = await admin.from('corrieri').select('id,tipo,nome_contratto,credenziali,settings').eq('id', primaSped.corriere_id).single()
   if (!corriere) return NextResponse.json({ error: 'Corriere non trovato' }, { status: 400 })
 
   // CONTRATTI DVA: il ritiro si prenota SOLO insieme alla spedizione, non dopo — il corriere non
@@ -296,6 +296,12 @@ export async function POST(req: NextRequest) {
       serviceType: st.tipo_servizio, test: st.test_mode === true, note: body.istruzioni,
     })
     if (!ris.confirmationCode) {
+      // Come sulla create: l'errore vero di FedEx va scritto, altrimenti resta solo il messaggio
+      // ripulito e non si distingue una Pickup API non attiva da una data/fascia non accettata.
+      console.error('[RITIRO][FEDEX] pickup KO', {
+        contratto: corriere.nome_contratto, carrierCode: ris.carrierCode, data: body.dataRitiro,
+        errore: ris.errore, raw: (ris.raw || '').substring(0, 500),
+      })
       // FedEx abilita ogni API per progetto: se la Pickup API non è ancora attiva sul progetto, FedEx
       // risponde FORBIDDEN "could not authorize your credentials" pur avendo OAuth valido. Messaggio chiaro
       // (non il criptico grezzo) + la via alternativa che intanto funziona (ritiro programmato del conto).

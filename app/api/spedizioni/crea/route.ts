@@ -2235,8 +2235,29 @@ export async function POST(req: NextRequest) {
       })
 
       if (!ris.tracking) {
+        // Quando FedEx rifiutava non restava traccia da NESSUNA parte: l'utente vedeva solo il
+        // messaggio ripulito (che per un FORBIDDEN diventa "contratto non configurato" e per un
+        // servizio non abilitato "nessuna tariffa disponibile"), e nei log non compariva nulla —
+        // il 21/09, a integrazione ferma dopo 16 spedizioni riuscite, non c'era un solo errore da
+        // leggere. Il codice FedEx (es. SERVICE.TYPE.NOTALLOWED) dice in un colpo di quale dei due
+        // si tratta: va scritto, come già fa il ramo Spedisci.
+        console.error('[CREA][FEDEX] create rifiutata', {
+          contratto: corriereRecord.nome_contratto,
+          servizio: serviceType,
+          dest: `${body.shipTo.postalCode} ${body.shipTo.city} ${body.shipTo.state}`,
+          errore: ris.errore,
+          raw: (ris.raw || '').substring(0, 500),
+        })
         await stornaPrenotazione()
-        return NextResponse.json({ error: erroreCorrierePulito(ris.errore || 'FedEx: creazione non riuscita') }, { status: 400 })
+        // FedEx abilita le API per PROGETTO, non per conto: con chiavi nuove (o un progetto appena
+        // passato in produzione) la Ship API può non essere ancora attiva e FedEx risponde FORBIDDEN
+        // "could not authorize your credentials" pur avendo l'OAuth valido. È la stessa distinzione
+        // già fatta sul ritiro: senza, il messaggio manda a cercare credenziali mancanti che ci sono.
+        const nonAbilitato = /authoriz|forbidden|permission/i.test(String(ris.errore || ''))
+        const msgFx = nonAbilitato
+          ? 'Contratto FedEx: le chiavi non sono (ancora) abilitate a creare spedizioni. Sul portale FedEx il progetto va passato in produzione con la Ship API attiva per queste chiavi.'
+          : erroreCorrierePulito(ris.errore || 'FedEx: creazione non riuscita')
+        return NextResponse.json({ error: msgFx }, { status: 400 })
       }
       const numeroFinale = ris.tracking
 
