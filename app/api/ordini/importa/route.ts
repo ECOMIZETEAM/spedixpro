@@ -152,6 +152,10 @@ export async function POST(req: NextRequest) {
 
   // Leggo CSV o Excel (Amazon/eBay esportano spesso .xlsx)
   let rows: Record<string, string>[] = []
+  // Intestazioni VERE del file (dal lettore CSV). Prima si ricavavano dalle chiavi della prima riga
+  // di dati: se quella riga ha meno campi dell'intestazione, le colonne successive sparivano e il
+  // file risultava "senza destinatario" pur avendone la colonna.
+  let intestazioni: string[] | null = null
   const fname = (file.name || '').toLowerCase()
   try {
     if (fname.endsWith('.xlsx') || fname.endsWith('.xls')) {
@@ -175,11 +179,41 @@ export async function POST(req: NextRequest) {
       // virgolette servono a contenere le virgole nei campi: restano attive.
       const nl = text.indexOf('\n')
       const eTsv = text.slice(0, nl >= 0 ? nl : text.length).includes('\t')
-      const parsed = Papa.parse<Record<string, string>>(text, {
-        header: true, skipEmptyLines: true, transformHeader: normHeader,
+      const opzioni = {
+        header: true as const, skipEmptyLines: true as const, transformHeader: normHeader,
         ...(eTsv ? { delimiter: '\t', quoteChar: '' } : {}),
-      })
+      }
+      const parsed = Papa.parse<Record<string, string>>(text, opzioni)
       rows = (parsed.data || []).filter(Boolean)
+      intestazioni = (parsed.meta as any)?.fields || null
+
+      // RIGA INTERA DENTRO UNA COPPIA DI VIRGOLETTE (export Temu, visto il 21/09/2026).
+      // L'intestazione e' normale — 53 colonne separate da virgola — ma OGNI riga di dati e'
+      // racchiusa tutta in "..." con le virgolette interne raddoppiate. Per un lettore CSV quella
+      // riga e' UN CAMPO SOLO: il file arrivava con 1 colonna (id_ordine) e l'import rispondeva
+      // "mancano destinatario, indirizzo, cap, localita" su un file che invece li ha tutti.
+      // Qui si toglie un livello di virgolettatura e si rilegge. NON si indovina: si interviene solo
+      // quando l'intestazione ha piu' colonne e TUTTE le righe ne hanno una sola, e il risultato si
+      // tiene solo se davvero migliora — altrimenti resta la lettura di prima.
+      const monoCampo = rows.length > 0 && rows.every(r => Object.keys(r).length <= 1)
+      if (monoCampo && (intestazioni?.length || 0) > 1) {
+        const smontato = text.split(/\r?\n/).map((riga, i) => {
+          if (i === 0) return riga
+          const s = riga.trim()
+          return (s.length > 1 && s.startsWith('"') && s.endsWith('"'))
+            ? s.slice(1, -1).replace(/""/g, '"')
+            : riga
+        }).join('\n')
+        const riletto = Papa.parse<Record<string, string>>(smontato, opzioni)
+        const righeRilette = (riletto.data || []).filter(Boolean)
+        const campiPrima = Object.keys(rows[0] || {}).length
+        const campiDopo = Object.keys(righeRilette[0] || {}).length
+        if (righeRilette.length && campiDopo > campiPrima) {
+          rows = righeRilette
+          intestazioni = (riletto.meta as any)?.fields || intestazioni
+          console.log('[IMPORT] righe virgolettate per intero: rilette', righeRilette.length, 'righe da', campiDopo, 'colonne')
+        }
+      }
     }
   } catch (e: any) {
     return NextResponse.json({ error: 'File non leggibile: ' + (e?.message || e) }, { status: 400 })
@@ -209,7 +243,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Risolvo le colonne per NOME (auto-mapping)
-  const headers = new Set(Object.keys(rows[0] || {}))
+  const headers = new Set(intestazioni?.length ? intestazioni : Object.keys(rows[0] || {}))
   const M: Record<string, string | null> = {}
   for (const field of Object.keys(ALIAS)) M[field] = pick(headers, ALIAS[field])
   const A: Record<string, string | null> = {}
