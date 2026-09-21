@@ -8,8 +8,10 @@ import { annullaSpedizioneSulCorriere, rimborsaAnnulloSpedizione, trovaOwnerCont
 //   -> 'annullata' + storno a tutta la rete. Se NON riesce (tipico: contratto della rete, non
 //   annullabile via API) -> 'annullamento_manuale' SUBITO, in coda al DETENTORE del contratto,
 //   che la annulla su Spedisci col suo capo e poi conferma su Moove (storno a tutta la rete).
-// - ALTRI CORRIERI (SpediamoPro): ATTESA 48h in 'annullamento_pending' (ripristinabile), poi il
-//   cron /api/spedizioni/annullamenti-cron annulla via API + storno.
+// - GLS / BRT DIRETTI: annullo IMMEDIATO (auto-confermano alla creazione, annullabili solo subito).
+// - ALTRI CORRIERI (SpediamoPro, FEDEX): ATTESA 48h in 'annullamento_pending' (ripristinabile), poi il
+//   cron /api/spedizioni/annullamenti-cron annulla via API + storno. FedEx è annullabile finché non
+//   ritira il pacco (come SpediamoPro), quindi NON va nell'immediato di BRT.
 export async function DELETE(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -105,15 +107,19 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true, manuale: true, message: 'Richiesta di annullo inviata: questo corriere non consente la cancellazione automatica, quindi verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
   }
 
-  // ── GLS / BRT / FEDEX DIRETTI: annullo IMMEDIATO, mai la coda 48h. ──
+  // ── GLS / BRT DIRETTI: annullo IMMEDIATO, mai la coda 48h. ──
   // GLS è "attesa-chiusura": PRIMA della chiusura distinta (confermata_vettore) la spedizione NON è ancora
   // trasmessa a GLS, quindi si annulla in sicurezza (DeleteSped) e si rimborsa; DOPO la chiusura GLS
-  // consegna il pacco → non si annulla a vuoto. BRT e FEDEX AUTO-CONFERMANO alla creazione, annullabili solo
-  // subito; poco dopo il corriere risponde "già spedita". Prima cadevano nel ramo 48h generico: il cron
-  // tentava l'annullo due giorni dopo — il corriere diceva "già spedita" (l'utente aspettava 2 giorni per un
-  // rifiuto, pacco già partito) e la GLS, ormai in distinta, veniva marcata annullata e RIMBORSATA a tutta
-  // la catena mentre GLS la consegnava. Ora si tenta subito, nella finestra in cui l'annullo vale davvero.
-  if (corr?.tipo === 'gls' || corr?.tipo === 'brt' || corr?.tipo === 'fedex') {
+  // consegna il pacco → non si annulla a vuoto. BRT AUTO-CONFERMA alla creazione, annullabile solo subito;
+  // poco dopo risponde "già spedita". Cadendo nel ramo 48h generico il cron tenterebbe l'annullo due giorni
+  // dopo, il corriere direbbe "già spedita" e la GLS ormai in distinta verrebbe marcata annullata e
+  // rimborsata mentre GLS la consegna. Ora si tenta subito, nella finestra in cui l'annullo vale davvero.
+  //
+  // FEDEX invece NON è come BRT: la LDV si crea ma il pacco è annullabile finché FedEx non lo RITIRA (come
+  // SpediamoPro). Quindi NON è qui: cade nel ramo 48h (pending, ripristinabile) e il cron manda l'annullo
+  // vero dopo. Se FedEx lo rifiuta (già ritirato) la spedizione torna valida SENZA rimborso e le consegnate
+  // sono escluse dal cron: nessun rimborso a vuoto. (Scelta 21/09/2026, coerente col comportamento reale.)
+  if (corr?.tipo === 'gls' || corr?.tipo === 'brt') {
     // "Trasmessa a GLS" = la sua DISTINTA e' confermata_vettore (il flag vive sulla distinta, NON sulla
     // spedizione). Lo leggo qui e lo attacco a `sped`, cosi' vale anche la guardia in annullaSpedizione.
     if (corr.tipo === 'gls' && (sped as any).distinta_id) {
