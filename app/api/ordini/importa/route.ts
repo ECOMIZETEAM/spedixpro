@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 import { siglaProvincia, SIGLE_IT } from '@/lib/province-it'
-import { normalizzaPaese } from '@/lib/paesi'
+import { normalizzaPaese, paeseDaCap, capPuoEssereItaliano } from '@/lib/paesi'
 import comuniIT from '@/lib/data/comuni.json'
 import frazioniIT from '@/lib/data/frazioni.json'
 import { createAdminSupabase } from '@/lib/supabase-admin'
@@ -367,7 +367,26 @@ export async function POST(req: NextRequest) {
     const a1 = g(r, 'indirizzo')
     const a2 = M.indirizzo2 ? String(r[M.indirizzo2!] ?? '').trim() : ''
     const ind = [a1, a2].filter(Boolean).join(' ')
-    const paese = normalizzaPaese(g(r, 'country'))   // "Italia"/"Italy"/"DE" -> ISO2 (Temu esporta esteso)
+    // NAZIONE. "Italia"/"Italy"/"Deutschland"/"DE" -> ISO2 (i marketplace la scrivono per esteso).
+    // MAI ITALIA PER DIFETTO SU UN INDIRIZZO CHE ITALIANO NON E': quando il file non ha la colonna
+    // nazione, prima si metteva 'IT' e basta. Due ordini polacchi (CAP 60-326 POZNAN e 52-317
+    // WROCLAW) sono entrati come italiani: prezzo, corriere e provincia sbagliati in partenza.
+    // Ora, se la nazione non c'e', la si legge dalla forma del CAP dove non ci sono dubbi; se
+    // nemmeno quella basta, la riga si ferma e chiede la nazione invece di inventarla.
+    const paeseScritto = g(r, 'country')
+    const capGrezzo = String(M.cap ? r[M.cap] ?? '' : '').replace(/^'/, '').replace(/\s+/g, '').trim()
+    let paese = normalizzaPaese(paeseScritto)
+    let nazioneIncerta = ''
+    if (!paeseScritto) {
+      if (capGrezzo && !capPuoEssereItaliano(capGrezzo)) {
+        const dedotto = paeseDaCap(capGrezzo)
+        if (dedotto) paese = dedotto
+        else { paese = ''; nazioneIncerta = `la nazione (nel file non c'e' e il CAP ${capGrezzo} non e' italiano)` }
+      }
+    } else if (!/^[A-Z]{2}$/.test(paese)) {
+      paese = ''
+      nazioneIncerta = `una nazione riconoscibile (nel file c'e' "${paeseScritto}")`
+    }
     const cap = cleanCap(M.cap ? r[M.cap] : '', paese)   // padStart a 5 cifre solo per l'Italia
     const loc = g(r, 'localita')
     const prov = g(r, 'provincia')
@@ -440,7 +459,11 @@ export async function POST(req: NextRequest) {
       articoli: grp.articoli.length ? grp.articoli : null,   // righe prodotto strutturate per il riepilogo ordine
       sku: (A.sku ? String(r[A.sku] ?? '').trim() : '') || null,   // SKU per il match automatico col catalogo pacchi
       fonte: 'csv',
-      stato: 'da_spedire',
+      // La nazione non deducibile NON fa scartare la riga: l'ordine entra segnato in errore, con
+      // scritto cosa manca, e dalla lista si corregge in due clic. Scartarlo costringerebbe a
+      // rifare il file per un dato che noi non possiamo indovinare.
+      stato: nazioneIncerta ? 'errore' : 'da_spedire',
+      errore: nazioneIncerta ? `Manca ${nazioneIncerta}: indicala qui prima di spedire.` : null,
       raw: r,
     })
   })

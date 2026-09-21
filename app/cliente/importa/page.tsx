@@ -346,6 +346,15 @@ export default function ImportaOrdiniPage() {
     const targets = ordini.filter(o => sel.has(o.id) && (o.stato === 'da_spedire' || o.stato === 'errore'))
     if (!targets.length) { setMsg({ type: 'err', text: 'Nessun ordine spedibile selezionato' }); return }
 
+    // SENZA NAZIONE NON SI SPEDISCE. Qui sotto il paese finiva a 'IT' per difetto: un ordine estero
+    // arrivato da un file che la nazione non ce l'ha (o la scrive in modo che non riconosciamo)
+    // sarebbe stato quotato e creato come italiano — corriere e prezzo di un'altra spedizione.
+    const senzaNazione = targets.filter(o => !String(o.country || '').trim())
+    if (senzaNazione.length) {
+      setMsg({ type: 'err', text: `${senzaNazione.length} ordini senza nazione (${senzaNazione.slice(0, 3).map(o => o.destinatario).join(', ')}${senzaNazione.length > 3 ? '…' : ''}): aprili con Modifica e indica la nazione, poi riprova.` })
+      return
+    }
+
     // Mittente dal profilo cliente (route dedicata)
     setMsg(null)
     let mitt: any
