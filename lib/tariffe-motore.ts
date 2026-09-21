@@ -12,7 +12,7 @@
  *
  * Chi lo modifica tocca ENTRAMBE le porte. */
 
-import { superaLimitiCollo } from '@/lib/limiti-collo'
+import { superaLimitiCollo, avvisoFuoriSagoma } from '@/lib/limiti-collo'
 import { entroMisureAgevolate } from '@/lib/agevolazione-misure'
 import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation,
@@ -471,6 +471,9 @@ export async function calcolaTariffeCliente(
       peso_fatturato: pesoPerFascia.toFixed(2),   // peso EFFETTIVO su cui è calcolato il prezzo (reale se agevolazione)
       corriere_nome: corriere?.nome_contratto || 'Corriere',
       limiti_collo: descriviLimiti(settsC, pesoReale),   // indicazione limiti collo (scaglione applicabile al peso)
+      // Avviso fuori sagoma (solo dove il contratto ha la regola, es. GLS di MULTIEXPRESS): NON blocca e
+      // NON addebita — il supplemento lo fattura il corriere (rientra post-fattura). Solo un cartello.
+      avviso_fuori_sagoma: avvisoFuoriSagoma(settsC, tuttiColli),
       listino_fascia: `fino a ${fasciaGiusta.peso_max}kg`,
       // I servizi accessori si OFFRONO solo dove si TRASMETTONO davvero: canali diretti gls/brt, E
       // SPEDISCI di marca GLS (PROVATO 3/9: spedisci inoltra i codici al corriere, es. Exchange 200001 →

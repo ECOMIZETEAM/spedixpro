@@ -60,3 +60,28 @@ export function motivoLimiteCollo(settings: any, pesoReale: number, colli: any[]
   if (superaLimitiCollo(settings, pesoReale, arr)) return 'le misure del collo superano i limiti di questo contratto'
   return null
 }
+
+// SUPPLEMENTO FUORI SAGOMA (avviso, NON blocco, NON addebito): se il contratto ha la regola
+// `settings.supplemento_fuori_sagoma` e un collo la supera, torna il testo dell'avviso da mostrare in
+// creazione. Il supplemento NON si addebita qui: sui contratti GLS il €10 lo fattura il corriere e
+// rientra post-fattura (file ripesature) — addebitarlo anche adesso sarebbe un doppio addebito. Questo
+// è solo un cartello: "occhio, GLS ti metterà il fuori sagoma". Regola GLS: collo singolo con peso
+// REALE oltre la soglia (70 kg) o LATO PIÙ LUNGO oltre la soglia (150 cm). La variante pallet (base
+// oltre 120×80 E lato >150) è un sottoinsieme del lato>150, quindi per l'avviso basta questo controllo.
+export function avvisoFuoriSagoma(settings: any, colli: any[]): string | null {
+  const fs = settings?.supplemento_fuori_sagoma
+  if (!fs || fs.attivo === false) return null
+  const pesoMax = Number(fs.collo_peso_max_reale_kg) || 0
+  const latoMax = Number(fs.collo_lato_max_cm) || 0
+  if (!(pesoMax > 0) && !(latoMax > 0)) return null
+  const importo = Number(fs.importo) || 0
+  const superato = (colli || []).some((c: any) => {
+    const peso = Number(c.weight) || Number(c.peso) || 0
+    const lati = [Number(c.length) || Number(c.lunghezza) || 0, Number(c.width) || Number(c.larghezza) || 0, Number(c.height) || Number(c.altezza) || 0]
+    const latoMaggiore = Math.max(...lati)
+    return (pesoMax > 0 && peso > pesoMax) || (latoMax > 0 && latoMaggiore > latoMax)
+  })
+  if (!superato) return null
+  const soglie = [pesoMax > 0 ? `${pesoMax} kg reali` : '', latoMax > 0 ? `${latoMax} cm sul lato più lungo` : ''].filter(Boolean).join(' o ')
+  return `Fuori sagoma: un collo supera ${soglie} → il corriere applicherà un supplemento${importo > 0 ? ` di € ${importo}${fs.iva ? ' + IVA' : ''}` : ''}, che ti sarà addebitato in fattura.`
+}

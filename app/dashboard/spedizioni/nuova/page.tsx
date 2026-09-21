@@ -31,7 +31,7 @@ function iconaCorriere(nome:string): string | null {
 }
 
 interface Cliente { id:string; ragione_sociale:string; so_indirizzo:string|null;so_citta:string|null; so_provincia:string|null; so_cap:string|null; email:string; telefono:string|null }
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string;zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; corriere_nome?:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; _spediamopro_quotation?:any; _deposito?:boolean; _consegna_punto?:string }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string;zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; corriere_nome?:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; avviso_fuori_sagoma?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; _spediamopro_quotation?:any; _deposito?:boolean; _consegna_punto?:string }
 interface Collo { lunghezza:string; larghezza:string; altezza:string; peso?:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -943,6 +943,9 @@ export default function NuovaSpedizionePage() {
                     <div style={{fontSize:'11px',color:'#000',marginTop:'1px'}}>{r.peso_fatturato}kg · zona {r.zona}</div>
                     {r.limiti_collo && (
                       <div style={{fontSize:'10.5px',color:'#b45309',marginTop:'2px'}}>Limiti collo: {r.limiti_collo}</div>
+                    )}
+                    {r.avviso_fuori_sagoma && (
+                      <div style={{fontSize:'10.5px',color:'#b45309',marginTop:'2px'}}>⚠ {r.avviso_fuori_sagoma}</div>
                     )}
                   </div>
                   <div style={{fontSize:'18px',fontWeight:'800',color:'#f97316',flexShrink:0}}>€ {r.total_price}</div>
