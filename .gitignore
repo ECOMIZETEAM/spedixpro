@@ -37,3 +37,8 @@ blocco_contratto.txt
 # export ripesature/transazioni SpediamoPro: DATI REALI dei clienti (repo pubblico)
 /rettifiche/
 /Rettifiche/
+
+# Script di prova usa-e-getta nella root (._nome.mjs): servono a eseguire le lib con la
+# service-role e si cancellano a mano. Ignorati perche" un "git add -A" di chiunque li portava
+# dentro un commit (successo il 21/09/2026 col commit 155bffe1).
+._*
