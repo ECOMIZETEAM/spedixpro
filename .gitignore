@@ -38,7 +38,7 @@ blocco_contratto.txt
 /rettifiche/
 /Rettifiche/
 
-# Script di prova usa-e-getta nella root (._nome.mjs): servono a eseguire le lib con la
-# service-role e si cancellano a mano. Ignorati perche" un "git add -A" di chiunque li portava
-# dentro un commit (successo il 21/09/2026 col commit 155bffe1).
+# Script di prova usa-e-getta nella root (._nome.mjs): eseguono le lib della piattaforma con la
+# service-role e si cancellano a mano. Ignorati perche' un "git add -A" di chiunque li portava
+# dentro un commit: successo il 21/09/2026 (155bffe1), e il repository e' pubblico.
 ._*
