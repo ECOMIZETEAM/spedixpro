@@ -78,6 +78,15 @@ async function salvaCorriere(formData: FormData) {
     }).eq('id', corriereId).eq('master_id', utente.master_id).eq('proprio', true)
 
     if (error) redirect(`/dashboard/corrieri?error=${encodeURIComponent(error.message)}`)
+    // Propaga le credenziali aggiornate alle COPIE rivendute nella discendenza (come le zone): stesso
+    // contratto = stesso account = stesse chiavi. Senza, quando il proprietario rinnova le API key i
+    // sotto-master che lo rivendono restano con quelle scadute e i loro CLIENTI non spediscono più
+    // (bug FedEx 21/09/2026: 401 sui sotto-master, la "propria" del master passava, il cliente no).
+    try {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const { sincronizzaCredenzialiAiDiscendenti } = await import('@/lib/propaga-credenziali')
+      await sincronizzaCredenzialiAiDiscendenti(createAdminSupabase(), corriereId)
+    } catch (e) { console.error('propaga credenziali ai sotto-master:', e) }
     redirect('/dashboard/corrieri?success=corriere_aggiornato')
   } else {
     // CREAZIONE: nuovo corriere
