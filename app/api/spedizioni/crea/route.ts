@@ -724,7 +724,10 @@ export async function POST(req: NextRequest) {
         // EMAIL SCHERMO: al provider va SEMPRE l'email di servizio (mai quelle vere di mitt/dest).
         shipFrom: { ...body.shipFrom, email: EMAIL_PER_CORRIERE }, shipTo: { ...body.shipTo, email: EMAIL_PER_CORRIERE },
         notes: String(body.notes || '').trim() || undefined,
-        ...(String(body.contenuto || '').trim() ? { content: String(body.contenuto).trim() } : {}),
+        // Il "×" del contenuto ("1× 3000BX") il fornitore lo stampa in etichetta come "1Ã—": scrive
+        // UTF-8 dentro un PDF latin1. Glielo mandiamo gia' come "x" — sull'etichetta la legge il
+        // destinatario, e un carattere rotto su un pacco e' scritto male per sempre.
+        ...(String(body.contenuto || '').trim() ? { content: String(body.contenuto).replace(/×/g, 'x').trim() } : {}),
         insuranceValue: body.insuranceValue || 0,
         codValue: body.codValue || 0, accessoriServices: accessoriSpedisci
       }),
