@@ -19,7 +19,7 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
   const isPod = categoria === 'pod'
   const [miei, setMiei] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [nuovo, setNuovo] = useState({ oggetto: '', messaggio: '' })
+  const [nuovo, setNuovo] = useState({ oggetto: '', messaggio: '', contenuto: '', imballaggio: '' })
   const [files, setFiles] = useState<any[]>([])
   const [drag, setDrag] = useState(false)
   const [salvando, setSalvando] = useState(false)
@@ -124,13 +124,21 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
 
   async function invia() {
     if (!nuovo.oggetto.trim()) { setMsg({ t: 'err', x: 'Inserisci la LDV' }); return }
+    // Sui ticket (non POD) contenuto e imballaggio sono OBBLIGATORI: senza, il master non può gestire il
+    // reclamo col corriere (per un danno servono sempre cosa c'era dentro e com'era imballato).
+    if (!isPod && !nuovo.contenuto.trim()) { setMsg({ t: 'err', x: 'Inserisci il contenuto del collo' }); return }
+    if (!isPod && !nuovo.imballaggio.trim()) { setMsg({ t: 'err', x: 'Inserisci il tipo di imballaggio' }); return }
     if (!isPod && !nuovo.messaggio.trim()) { setMsg({ t: 'err', x: 'Inserisci il messaggio' }); return }
     setSalvando(true); setMsg(null)
-    const r = await fetch('/api/assistenza/apri', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...nuovo, categoria, allegati: isPod ? [] : files }) })
+    // Contenuto e imballaggio viaggiano IN TESTA al messaggio (nessun campo DB nuovo): il master li vede
+    // subito nel primo messaggio del ticket. Solo per i ticket, non per le richieste POD.
+    const messaggioFinale = isPod ? nuovo.messaggio
+      : `Contenuto: ${nuovo.contenuto.trim()}\nImballaggio: ${nuovo.imballaggio.trim()}\n\n${nuovo.messaggio.trim()}`
+    const r = await fetch('/api/assistenza/apri', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oggetto: nuovo.oggetto, messaggio: messaggioFinale, categoria, allegati: isPod ? [] : files }) })
     const j = await r.json()
     setSalvando(false)
     if (j.error) { setMsg({ t: 'err', x: j.error }); return }
-    setNuovo({ oggetto: '', messaggio: '' }); setFiles([])
+    setNuovo({ oggetto: '', messaggio: '', contenuto: '', imballaggio: '' }); setFiles([])
     setMsg({ t: 'ok', x: isPod ? 'Richiesta POD inviata!' : 'Richiesta inviata! La trovi qui sotto con lo stato.' })
     carica()
   }
@@ -169,7 +177,9 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
         )}
 
         {!isPod && <>
-          <div style={{ marginBottom: '12px' }}><label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>Messaggio <span style={{ color: '#dc2626', fontWeight: 700 }}>fornire imballo e contenuto obbligatorio</span></label><textarea value={nuovo.messaggio} onChange={e => setNuovo(n => ({ ...n, messaggio: e.target.value }))} rows={4} placeholder="Descrivi il problema o la richiesta…" style={{ ...inp, resize: 'vertical' as const }} /></div>
+          <div style={{ marginBottom: '12px' }}><label style={lbl}>Contenuto <span style={{ color: '#dc2626', fontWeight: 700 }}>* obbligatorio</span></label><input value={nuovo.contenuto} onChange={e => setNuovo(n => ({ ...n, contenuto: e.target.value }))} placeholder="Cosa c'era nel collo (es. 2 vasi in ceramica)" style={inp} /></div>
+          <div style={{ marginBottom: '12px' }}><label style={lbl}>Imballaggio <span style={{ color: '#dc2626', fontWeight: 700 }}>* obbligatorio</span></label><input value={nuovo.imballaggio} onChange={e => setNuovo(n => ({ ...n, imballaggio: e.target.value }))} placeholder="Com'era imballato (es. scatola doppia con pluriball)" style={inp} /></div>
+          <div style={{ marginBottom: '12px' }}><label style={lbl}>Messaggio <span style={{ color: '#dc2626', fontWeight: 700 }}>*</span></label><textarea value={nuovo.messaggio} onChange={e => setNuovo(n => ({ ...n, messaggio: e.target.value }))} rows={4} placeholder="Descrivi il problema o la richiesta…" style={{ ...inp, resize: 'vertical' as const }} /></div>
           <div style={{ marginBottom: '14px' }}>
             <label style={lbl}>Allegati (foto/PDF)</label>
             <div
