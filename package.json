@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "controlla-credenziali": "node scripts/controlla-credenziali.mjs",
-    "controlla-scope-shopify": "node scripts/controlla-scope-shopify.mjs"
+    "controlla-scope-shopify": "node scripts/controlla-scope-shopify.mjs",
+    "archivio-cap": "node scripts/aggiorna-archivio-cap.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
