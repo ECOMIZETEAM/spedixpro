@@ -127,6 +127,9 @@ export async function POST(req: NextRequest) {
         corriere_nome: corr.nome_contratto || 'Corriere', listino_fascia: 'Listino corriere', limiti_collo: descriviLimiti(corr.settings, pesoRealeP),
         _corriere_tipo: siglaContratto(corr.tipo), _corriere_id: corr.id,
         _brt_assegno: corr.tipo === 'brt' && (corr.settings as any)?.cod_ass_banc_mittente === true,
+        // Assegno via Spedisci: offerto solo se il contratto ha il flag (attivabile quando Spedisci abilita
+        // il metodo COD-type sull'account; l'API espone cashOnDeliveryMode ma il create lo blocca senza).
+        _spedisci_assegno: corr.tipo === 'spedisci' && (corr.settings as any)?.cod_assegno_abilitato === true,
       })
     }
     if (!risultati.length) return NextResponse.json({ error: 'Nessuna tariffa dal listino corriere per questa destinazione' }, { status: 400 })

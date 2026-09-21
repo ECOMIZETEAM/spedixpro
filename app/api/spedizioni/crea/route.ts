@@ -695,11 +695,24 @@ export async function POST(req: NextRequest) {
       (serviziAccessori || []).map((s: any) => codiceServizioSpedisci(s.nome)).filter(Boolean)
     )) as string[]
 
+    // MODALITÀ INCASSO CONTRASSEGNO via Spedisci: l'API espone `cashOnDeliveryMode` (CONT/AB/AC/AP…)
+    // nelle rate, ma il create lo accetta solo se Spedisci ha ABILITATO il metodo COD-type sul contratto
+    // (senza, risponde "getCodTypeFromApi is not a valid method for this service"). Quindi lo mandiamo
+    // SOLO quando (1) il contratto ha il flag settings.cod_assegno_abilitato e (2) il cliente ha scelto
+    // un assegno (AB banc./AC circ./AP post.). Contante = non lo mandiamo (default Spedisci), così il COD
+    // normale non tocca il metodo bloccato. Finché il flag è spento (default) resta inerte: pronto ad
+    // accendersi appena Spedisci conferma l'abilitazione, senza rompere nulla adesso.
+    const _codModeSpedisci = (
+      Number(body.codValue) > 0
+      && (corriereRecord as any)?.settings?.cod_assegno_abilitato === true
+      && ['AB', 'AC', 'AP'].includes(String(body.incassoModalita || ''))
+    ) ? String(body.incassoModalita) : undefined
     const res = await fetch(`${baseUrl}/shipping/create`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         carrierCode: rate.carrierCode, contractCode: rate.contractCode,
+        ...(_codModeSpedisci ? { cashOnDeliveryMode: _codModeSpedisci } : {}),
         // OGNI CAMPO AL SUO CAMPO, come SpediamoPro:
         //  - CONTENUTO  → `content` (campo dedicato di Spedisci: esce in etichetta).
         //  - RIF ORDINE → NON è pilotabile via API (il "Rif." in etichetta è un token interno di

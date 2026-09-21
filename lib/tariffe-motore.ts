@@ -487,6 +487,9 @@ export async function calcolaTariffeCliente(
       _corriere_id: corriere?.id,
       // BRT diretto: l'assegno bancario al mittente si offre solo se abilitato sul contratto (settings).
       _brt_assegno: corriere?.tipo === 'brt' && (settsC as any)?.cod_ass_banc_mittente === true,
+      // Assegno via Spedisci: offerto solo col flag sul contratto (Spedisci espone cashOnDeliveryMode ma il
+      // create lo accetta solo se hanno abilitato il metodo COD-type — vedi crea/route ramo spedisci).
+      _spedisci_assegno: corriere?.tipo === 'spedisci' && (settsC as any)?.cod_assegno_abilitato === true,
       // NON esporre la quotazione SpediamoPro: contiene totalPrice/priceBreakdown = il COSTO REALE
       // che paga il master (info riservata). La creazione ri-quota da sola, quindi qui non serve.
     })
