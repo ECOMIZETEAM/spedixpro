@@ -22,27 +22,53 @@ const STATO_LABEL: Record<string, string> = {
 
 const COLS = 'id,master_id,stato,numero,tracking_number,dest_citta,dest_provincia,updated_at,created_at'
 
+// "NON TROVATA" E "NON SONO RIUSCITO A GUARDARE" SONO DUE COSE DIVERSE.
+//
+// Prima l'errore della query veniva buttato via (`const { data } = await ...`): se il database aveva
+// un singhiozzo — e ne capitano, nei log ci sono ECONNRESET a pacchi — `data` restava vuoto e al
+// DESTINATARIO rispondevamo "Spedizione non trovata". Cioe' dicevamo a chi aspetta un pacco che il
+// suo pacco non esiste, per un problema nostro durato un secondo. Visto succedere il 21/09/2026 su
+// una spedizione che esisteva benissimo, mentre si registrava il video per la revisione Shopify.
+// Ora si ritenta una volta e, se ancora non si riesce, si risponde 503: la pagina dira' "riprova",
+// che e' la verita'.
+async function cerca(q: () => any): Promise<{ riga?: any; guasto?: string }> {
+  for (let tentativo = 0; tentativo < 2; tentativo++) {
+    try {
+      const { data, error } = await q()
+      if (!error) return { riga: data || null }
+      if (tentativo === 1) return { guasto: String(error.message || error) }
+    } catch (e: any) {
+      if (tentativo === 1) return { guasto: String(e?.message || e) }
+    }
+    await new Promise((r) => setTimeout(r, 300))
+  }
+  return { guasto: 'database non raggiungibile' }
+}
+
 export async function GET(req: NextRequest) {
   const token = (req.nextUrl.searchParams.get('t') || '').trim()
   const numero = (req.nextUrl.searchParams.get('n') || '').trim()
   const admin = createAdminSupabase()
 
-  let s: any = null
+  let esito: { riga?: any; guasto?: string }
   if (token) {
     // Token = esadecimale di un uuid (32 char). Regex stretta: niente lookup su input sospetti.
     if (!/^[a-f0-9]{20,40}$/.test(token)) return NextResponse.json({ error: 'Codice non valido' }, { status: 400 })
-    const { data } = await admin.from('spedizioni').select(COLS).eq('tracking_token', token).maybeSingle()
-    s = data
+    esito = await cerca(() => admin.from('spedizioni').select(COLS).eq('tracking_token', token).maybeSingle())
   } else if (numero) {
     // Ricerca dal PORTALE (/traccia): il cliente digita la LDV / numero. Alfanumerico + trattini.
     if (!/^[A-Za-z0-9_-]{5,40}$/.test(numero)) return NextResponse.json({ error: 'Numero non valido' }, { status: 400 })
-    const { data } = await admin.from('spedizioni').select(COLS)
+    esito = await cerca(() => admin.from('spedizioni').select(COLS)
       .or(`numero.eq.${numero},tracking_number.eq.${numero}`)
-      .order('created_at', { ascending: false }).limit(1).maybeSingle()
-    s = data
+      .order('created_at', { ascending: false }).limit(1).maybeSingle())
   } else {
     return NextResponse.json({ error: 'Manca il codice' }, { status: 400 })
   }
+  if (esito.guasto) {
+    console.error('[TRACKING PUBBLICO] lettura non riuscita:', esito.guasto)
+    return NextResponse.json({ error: 'non_disponibile' }, { status: 503 })
+  }
+  const s: any = esito.riga
   if (!s) return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
   // WHITE-LABEL: il destinatario vede il marchio del master della spedizione (come nel portale
