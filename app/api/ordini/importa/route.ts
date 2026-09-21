@@ -195,8 +195,10 @@ export async function POST(req: NextRequest) {
       // Qui si toglie un livello di virgolettatura e si rilegge. NON si indovina: si interviene solo
       // quando l'intestazione ha piu' colonne e TUTTE le righe ne hanno una sola, e il risultato si
       // tiene solo se davvero migliora — altrimenti resta la lettura di prima.
-      const monoCampo = rows.length > 0 && rows.every(r => Object.keys(r).length <= 1)
-      if (monoCampo && (intestazioni?.length || 0) > 1) {
+      // Quasi tutte, non tutte: se un export virgolettasse solo le righe con una virgola dentro,
+      // le altre si leggerebbero bene e la correzione non partirebbe piu'.
+      const monoCampo = rows.filter(r => Object.keys(r).length <= 1).length
+      if (rows.length > 0 && monoCampo >= rows.length * 0.9 && (intestazioni?.length || 0) > 1) {
         const smontato = text.split(/\r?\n/).map((riga, i) => {
           if (i === 0) return riga
           const s = riga.trim()
