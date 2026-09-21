@@ -234,6 +234,20 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
 
+    // TEMU: un file con i soli NUMERI D'ORDINE (l'elenco che Temu da' per la spedizione combinata,
+    // o un export con le sole colonne spuntate) non ha nessun indirizzo dentro. Elencargli le
+    // colonne mancanti non aiuta: nel suo file non possono esserci, e riprova con lo stesso file
+    // (21/09/2026: un cliente fermo cosi', mentre altri importano Temu ogni giorno con l'export
+    // completo, quello da 53 colonne che parte da "Nome completo del destinatario").
+    if (h.has('id_ordine') && missing.length === REQUIRED.length && h.size <= 4) {
+      return NextResponse.json({
+        error: 'Questo file contiene solo i numeri d\'ordine, senza nessun indirizzo: con questo non si possono creare spedizioni. '
+          + 'Da Temu serve l\'export COMPLETO degli ordini, quello con le colonne "Nome completo del destinatario", '
+          + '"Indirizzo di spedizione 1", "Città di spedizione", "Codice postale di spedizione" e "Numero di telefono del destinatario". '
+          + 'Si carica così com\'è, senza toccarlo.',
+      }, { status: 400 })
+    }
+
     // Caso generico: si dice anche cosa il file CONTIENE, così si vede subito se e' il file giusto.
     const trovate = [...headers].slice(0, 12).join(', ')
     return NextResponse.json({
