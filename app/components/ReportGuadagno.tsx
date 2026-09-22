@@ -1,23 +1,27 @@
 'use client'
 import { useEffect, useState } from 'react'
+import DateRangePicker from './DateRangePicker'
 
-const PERIODI = [
-  { v: 'giornaliero', l: 'Giorno' },
-  { v: 'settimanale', l: 'Settimana' },
-  { v: 'mensile', l: 'Mese' },
-  { v: 'annuale', l: 'Anno' },
-]
+// Stesso calendario del Guadagno Spedizioni: prima c'era solo Giorno/Settimana/Mese/Anno "fino a
+// oggi", e un mese chiuso (agosto) non si poteva guardare — quindi Guadagno e Rettifiche non si
+// potevano confrontare sullo stesso periodo.
+function meseCorrente(): { dal: string; al: string } {
+  const oggi = new Date()
+  const str = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return { dal: str(new Date(oggi.getFullYear(), oggi.getMonth(), 1)), al: str(oggi) }
+}
 
 export default function ReportGuadagno({ titolo = 'Spedizioni', endpoint = '/api/reports/guadagno' }: { titolo?: string, endpoint?: string }) {
-  const [periodo, setPeriodo] = useState('mensile')
+  const [range, setRange] = useState(meseCorrente)
   const [d, setD] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (!range.dal || !range.al) return
     setLoading(true)
-    fetch(endpoint + '?periodo=' + periodo)
+    fetch(`${endpoint}?dal=${range.dal}&al=${range.al}`)
       .then(r => r.json()).then(x => { setD(x); setLoading(false) }).catch(() => setLoading(false))
-  }, [periodo, endpoint])
+  }, [range.dal, range.al, endpoint])
 
   const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const g = Number(d?.guadagno || 0)
@@ -30,10 +34,7 @@ export default function ReportGuadagno({ titolo = 'Spedizioni', endpoint = '/api
           <span style={{ width: '22px', height: '22px', borderRadius: '6px', background: '#dcfce7', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', flexShrink: 0 }}>💰</span>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{titolo}</span>
         </span>
-        <select value={periodo} onChange={e => setPeriodo(e.target.value)}
-          style={{ padding: '4px 7px', borderRadius: '6px', border: '1px solid #d1d5db', background: '#fff', color: '#1a1a1a', fontSize: '11px', fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>
-          {PERIODI.map(p => <option key={p.v} value={p.v} style={{ color: '#1a1a1a' }}>{p.l}</option>)}
-        </select>
+        <DateRangePicker dal={range.dal} al={range.al} onChange={(dal, al) => setRange({ dal, al })} />
       </div>
 
       <div style={{ fontSize: '24px', fontWeight: 800, color: colore, lineHeight: 1.05 }}>{loading ? '…' : eur(g)}</div>

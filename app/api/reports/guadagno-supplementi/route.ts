@@ -28,7 +28,11 @@ export async function GET(req: NextRequest) {
   if (!M || ['cliente','agente'].includes((utente?.ruolo || '').toLowerCase())) return NextResponse.json({ guadagno: 0, ricavi: 0, costi: 0 })
 
   const periodo = req.nextUrl.searchParams.get('periodo') || 'mensile'
-  const dal = dataDa(periodo)
+  const dalParam = req.nextUrl.searchParams.get('dal')   // 'YYYY-MM-DD'
+  const alParam = req.nextUrl.searchParams.get('al')     // 'YYYY-MM-DD'
+  // Calendario come Guadagno e Rettifiche: dal/al se arrivano, altrimenti il periodo predefinito.
+  const dal = dalParam ? new Date(dalParam + 'T00:00:00.000Z').toISOString() : dataDa(periodo)
+  const alEnd = dalParam ? new Date((alParam || dalParam) + 'T23:59:59.999Z').toISOString() : new Date().toISOString()
   const admin = createAdminSupabase()
 
   // I supplementi stanno in 'movimenti': prima si leggeva 'movimenti_clienti', un registro
@@ -38,7 +42,7 @@ export async function GET(req: NextRequest) {
   const SUPPL = 'descrizione.ilike.%giacenz%,descrizione.ilike.%riconsegn%,descrizione.ilike.%supplement%'
   const query = (col: string) => admin.from('movimenti')
     .select('descrizione,importo,created_at,master_id,master_target_id')
-    .eq(col, M).gte('created_at', dal).or(SUPPL).order('id', { ascending: true })
+    .eq(col, M).gte('created_at', dal).lte('created_at', alEnd).or(SUPPL).order('id', { ascending: true })
   // fetchAll: su un anno di supplementi si supera il taglio silenzioso a 1000 righe.
   const [movRicavi, movCosti] = await Promise.all([
     fetchAll(() => query('master_id')), fetchAll(() => query('master_target_id')),
