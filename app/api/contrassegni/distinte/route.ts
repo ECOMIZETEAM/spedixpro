@@ -67,7 +67,16 @@ export async function POST(req: NextRequest) {
     .is('distinta_contrassegno_id', null)
     .or('stato_contrassegno.is.null,stato_contrassegno.eq.in_attesa')
 
-  if (!spedizioni?.length) return NextResponse.json({ error: 'Nessun contrassegno in attesa tra quelli selezionati (già in distinta o pagati).' }, { status: 400 })
+  // QUELLI SCARTATI PERCHE' NON SONO TUOI. Il filtro su master_id qui sopra esclude in silenzio le
+  // spedizioni della rete di un sotto-master (la lista contrassegni le mostra, se scegli il sotto-master
+  // nel filtro). Prima non venivano contate da nessuna parte e il messaggio diceva "gia' in distinta o
+  // pagati", che era falso: il master cercava una distinta che non era mai nata. Si contano e si dice.
+  const escluse = Math.max(0, spedizioneIds.length - (spedizioni?.length || 0))
+  if (!spedizioni?.length) return NextResponse.json({
+    error: 'Nessuna distinta creata: nessuno dei contrassegni selezionati è utilizzabile. '
+      + 'Possono essere già in distinta o già pagati, oppure appartenere alla rete di un sotto-master: '
+      + 'in quel caso la distinta la crea il sotto-master, oppure la carichi tu da Distinte contrassegni › Da caricare.',
+  }, { status: 400 })
 
   // Raggruppa per cliente (i COD propri del master, senza cliente, non fanno una distinta cliente).
   const clientiMap: Record<string, any[]> = {}
@@ -114,5 +123,6 @@ export async function POST(req: NextRequest) {
     distinte.push(distinta)
   }
 
-  return NextResponse.json({ success: true, distinte, create: distinte.length, saltate })
+  return NextResponse.json({ success: true, distinte, create: distinte.length, saltate, escluse,
+    numeri: distinte.map((d: any) => d.numero) })
 }

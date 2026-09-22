@@ -94,10 +94,18 @@ export default function ListaContrassegniPage() {
   const totalePagine = Math.max(1, Math.ceil(visibili.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
   const visibiliPag = visibili.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
-  const selezionabili = visibili.filter(selezionabile)
+  // STAI GUARDANDO LA RETE DI UN SOTTO-MASTER (filtro "m:<id>"): quei contrassegni NON sono tuoi.
+  // La distinta di un contrassegno la fa il master DIRETTO del cliente — qui il sotto-master — oppure
+  // tu la carichi dalla sezione "Da caricare" di Distinte contrassegni. Prima le caselle restavano
+  // attive: si selezionava, si cliccava "Crea Distinte", la creazione scartava in silenzio tutto
+  // quello che non aveva il tuo master e la distinta "spariva". Ora non si possono selezionare, e la
+  // pagina dice perche'.
+  const vistaRete = String(filtri.clienteId || '').startsWith('m:')
+  const puoSelezionare = (s:any) => !vistaRete && selezionabile(s)
+  const selezionabili = visibili.filter(puoSelezionare)
   function toggleSelect(id:string) {
     const s = spedizioni.find(x=>x.id===id)
-    if (s && !selezionabile(s)) return                 // solo i "in attesa" si selezionano
+    if (s && !puoSelezionare(s)) return               // solo i "in attesa" di TUOI clienti si selezionano
     setSelectedIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id])
   }
   function toggleAll() {
@@ -116,9 +124,13 @@ export default function ListaContrassegniPage() {
     setCreandoDistinta(false)
     if (data.success) {
       setSelectedIds([]); carica()
-      await dialog.alert({ title: 'Distinte create', message:
-        'Distinte create: ' + (data.create ?? data.distinte?.length ?? 0)
-        + (data.saltate ? '\nContrassegni saltati (già in distinta o senza cliente): ' + data.saltate : '') })
+      // Il TITOLO dice cosa e' successo davvero: prima era sempre "Distinte create", anche con zero
+      // distinte create — chi leggeva il titolo e chiudeva andava a cercare una distinta mai nata.
+      const n = Number(data.create ?? data.distinte?.length ?? 0)
+      await dialog.alert({ title: n > 0 ? 'Distinte create' : 'Nessuna distinta creata', message:
+        (n > 0 ? 'Distinte create: ' + n + (data.numeri?.length ? ' (n. ' + data.numeri.join(', ') + ')' : '') : 'Nessuna distinta è stata creata.')
+        + (data.saltate ? '\nContrassegni saltati (già in distinta o senza cliente): ' + data.saltate : '')
+        + (data.escluse ? '\nContrassegni non tuoi (della rete di un sotto-master): ' + data.escluse + ' — la distinta la crea il sotto-master.' : '') })
     } else await dialog.alert({ title: 'Nessuna distinta creata', message: data.error || 'Errore durante la creazione.' })
   }
 
@@ -203,6 +215,12 @@ export default function ListaContrassegniPage() {
         </div>
       </div>
 
+      {vistaRete && (
+        <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',color:'#1e40af',borderRadius:'8px',padding:'10px 14px',fontSize:'12.5px',marginBottom:'10px',lineHeight:1.5}}>
+          Stai guardando i contrassegni della rete di un <b>sotto-master</b>: sono dei suoi clienti, quindi la distinta la crea lui.
+          Per incassarli tu, vai su <b>Distinte contrassegni › Da caricare</b>.
+        </div>
+      )}
       <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',gap:'10px',marginBottom:'12px'}}>
         <button onClick={creaDistinta} disabled={creandoDistinta||selectedIds.length===0}
           style={{padding:'7px 16px',background:selectedIds.length>0?'#f97316':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
@@ -248,7 +266,7 @@ export default function ListaContrassegniPage() {
                   const stSped = STATI_SPED[s.stato] || {bg:'#f5f5f5',color:'#1a1a1a',label:s.stato}
                   const stCod = STATI_COD[s.stato_contrassegno||'in_attesa'] || STATI_COD['in_attesa']
                   const isSelected = selectedIds.includes(s.id)
-                  const puoSel = selezionabile(s)
+                  const puoSel = puoSelezionare(s)
                   // Valori della SECONDA riga (importo, stato spedizione, distinta, aggiornamento): array
                   // con divisori verticali, così un campo assente (distinta) non lascia una linea a vuoto.
                   const secItems: { l: any; v: any }[] = [
@@ -260,7 +278,7 @@ export default function ListaContrassegniPage() {
                   return (
                     <Fragment key={s.id}>
                     <tr style={{background:isSelected?'#fff7ed':'#fff'}}>
-                      <td style={{padding:'9px 12px 3px'}}><input type="checkbox" checked={isSelected} disabled={!puoSel} onChange={()=>toggleSelect(s.id)} title={puoSel?'':'Solo i contrassegni "in attesa" si possono mettere in distinta'} style={{cursor:puoSel?'pointer':'not-allowed',opacity:puoSel?1:0.4}}/></td>
+                      <td style={{padding:'9px 12px 3px'}}><input type="checkbox" checked={isSelected} disabled={!puoSel} onChange={()=>toggleSelect(s.id)} title={puoSel?'':(vistaRete?'Contrassegno della rete di un sotto-master: la distinta la crea lui, oppure la carichi da Distinte contrassegni › Da caricare':'Solo i contrassegni "in attesa" si possono mettere in distinta')} style={{cursor:puoSel?'pointer':'not-allowed',opacity:puoSel?1:0.4}}/></td>
                       <td style={{padding:'9px 12px 3px'}}><span style={{color:'#f97316',fontWeight:'700'}}>{s.numero}</span></td>
                       <td style={{padding:'9px 12px 3px',fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>{s.clienti?.ragione_sociale||s.mitt_nome}</td>
                       <td style={{padding:'9px 12px 3px'}}>
