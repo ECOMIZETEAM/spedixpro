@@ -310,13 +310,20 @@ export async function GET(req: NextRequest) {
   const costoTarget = new Map<string, number>()
   const pagatoCliente = new Map<string, number>()
   const costoMinSped = new Map<string, number>()   // costo corriere REALE = movimento più profondo (min)
+  // RETTIFICHE a parte (addebitato = positivo, storno = negativo): non entrano in prezzo/costo/margine
+  // della spedizione, si mostrano sulla riga come voce separata.
+  const rettCli = new Map<string, number>()      // spedId -> rettifica addebitata al cliente diretto
+  const rettTarget = new Map<string, number>()   // spedId|target -> rettifica addebitata a quel master
   const caricaMovimenti = async () => {
     if (!(mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).length)) return
     const adminMov = admin
     const spedIds = (spedizioni || []).map((s: any) => s.id)
-    // SOMMO gli importi SIGNED di 'spedizione' + 'rettifica' (le rettifiche allineano il prezzo dopo
-    // una correzione: es. sotto costo). Charge = negativo, credito = positivo. Il totale addebitato è
-    // -(somma). Prima si leggeva solo 'spedizione' e si sovrascriveva -> le rettifiche non si vedevano.
+    // Importi SIGNED: charge = negativo, credito = positivo; il totale addebitato è -(somma).
+    // Prezzo, costo e margine sono SOLO quelli del movimento 'spedizione'; le 'rettifica' (ripesature,
+    // allineamenti) si sommano a parte. Prima entravano nel margine della riga: una ripesatura
+    // riaddebitata il giorno dopo faceva sembrare la spedizione in perdita o in utile a seconda di
+    // quando la si guardava, e l'Elenco non tornava col Guadagno in home, che le rettifiche le tiene
+    // nel loro riquadro (stessa separazione del Report Spedizioni).
     const sumCli = new Map<string, number>()      // spedId -> somma signed (movimenti cliente)
     const sumTarget = new Map<string, number>()   // spedId|target -> somma signed (movimenti master)
     // Chunk in PARALLELO (prima in sequenza: con migliaia di spedizioni erano decine di round-trip
@@ -326,13 +333,20 @@ export async function GET(req: NextRequest) {
     await Promise.all(chunksMov.map(async (chunk) => {
       for (let from = 0; ; from += 1000) {
         const { data: mvs } = await adminMov.from('movimenti')
-          .select('spedizione_id,master_target_id,cliente_id,importo').in('tipo', ['spedizione', 'rettifica'])
+          .select('spedizione_id,master_target_id,cliente_id,importo,tipo').in('tipo', ['spedizione', 'rettifica'])
           .in('spedizione_id', chunk).order('id', { ascending: true }).range(from, from + 999)
         if (!mvs?.length) break
         for (const mv of mvs) {
           const imp = Number(mv.importo || 0)   // SIGNED
-          if (mv.cliente_id) sumCli.set(mv.spedizione_id, (sumCli.get(mv.spedizione_id) || 0) + imp)
-          else if (mv.master_target_id) { const k = mv.spedizione_id + '|' + mv.master_target_id; sumTarget.set(k, (sumTarget.get(k) || 0) + imp) }
+          const rett = (mv as any).tipo === 'rettifica'
+          if (mv.cliente_id) {
+            if (rett) rettCli.set(mv.spedizione_id, (rettCli.get(mv.spedizione_id) || 0) - imp)
+            else sumCli.set(mv.spedizione_id, (sumCli.get(mv.spedizione_id) || 0) + imp)
+          } else if (mv.master_target_id) {
+            const k = mv.spedizione_id + '|' + mv.master_target_id
+            if (rett) rettTarget.set(k, (rettTarget.get(k) || 0) - imp)
+            else sumTarget.set(k, (sumTarget.get(k) || 0) + imp)
+          }
         }
         if (mvs.length < 1000) break
       }
@@ -559,10 +573,24 @@ export async function GET(req: NextRequest) {
     const agenteSenzaCosto = ruolo === 'agente' && prezzo_corriere == null
     if (prezzo_corriere == null && !agenteSenzaCosto) prezzo_corriere = prezzo_cliente
     const margine = agenteSenzaCosto ? null : Math.round((prezzo_cliente - (prezzo_corriere as number)) * 100) / 100
+    // Rettifica della riga, dal punto di vista di chi guarda: quanto l'ha addebitata al SUO diretto
+    // (cliente, o figlio di prima linea per le spedizioni di rete) e quanto l'ha pagata lui. Solo
+    // movimenti, come il riquadro Rettifiche: se non ha pagato niente, il costo e' 0.
+    const flRett = s.master_id === mineId ? null : primaLineaId.get(s.master_id)
+    const rettVenduta = s.master_id === mineId ? (rettCli.get(s.id) || 0) : (flRett ? (rettTarget.get(s.id + '|' + flRett) || 0) : 0)
+    let rettPagata = mineId ? (rettTarget.get(s.id + '|' + mineId) || 0) : 0
+    // SOPRA il detentore (nessun mio movimento sulla spedizione): semplice passaggio come per il prezzo
+    // qui sopra, margine 0. Senza, la radice vedeva la ripesatura PAGATA da MULTIEXPRESS al fornitore
+    // come un suo guadagno (set 2026: 2.707 rettifiche, 10.391 €).
+    if (s.master_id !== mineId && !costoMine.has(s.id) && Math.abs(rettPagata) < 0.005) rettPagata = rettVenduta
+    const r2 = (x: number) => Math.round(x * 100) / 100
+    const rettifica = (Math.abs(rettVenduta) >= 0.005 || Math.abs(rettPagata) >= 0.005)
+      ? { cliente: r2(rettVenduta), costo: r2(rettPagata), margine: r2(rettVenduta - rettPagata) }
+      : null
     const id_ordine = idOrdine.get(s.id) || (s as any).id_ordine_esterno || (s as any).rif_ordine || null
     const distinta_reso = distintaReso.get(s.id) || null
     const no_annullo_15gg = corrTipo.get(s.corriere_id) === 'spediamopro' && !!s.created_at && new Date(s.created_at).getTime() < OLTRE_15GG
-    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, id_ordine, distinta_reso, no_annullo_15gg, ticket: ticketPerSped.get(s.id) || null }
+    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, rettifica, id_ordine, distinta_reso, no_annullo_15gg, ticket: ticketPerSped.get(s.id) || null }
   })
   // ── CONTRASSEGNO PER-LIVELLO: il badge è verde solo se IO ho incassato. ──
   // Per un MASTER: verde se la rimessa indirizzata a ME (target_master_id) è pagata; arancio se
@@ -639,7 +667,9 @@ export async function GET(req: NextRequest) {
   // master. La colonna grezza vanificava quel lavoro: bastava guardare la risposta.
   const _ruoloOut = (utente?.ruolo || '').toLowerCase()
   if (_ruoloOut === 'cliente' || _ruoloOut === 'agente') {
-    rowsOut = (rowsOut || []).map((r: any) => { const { costo_spedizione, ...resto } = r; return resto })
+    // `rettifica` porta il costo del master sulla ripesatura: per loro e' sempre vuota (i movimenti non
+    // si caricano), si toglie lo stesso perche' non dipenda da quello.
+    rowsOut = (rowsOut || []).map((r: any) => { const { costo_spedizione, rettifica, ...resto } = r; return resto })
   }
 
   segna('fine')
