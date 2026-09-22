@@ -53,8 +53,9 @@ export async function GET(req: NextRequest) {
     if (agIds) q = q.in('cliente_id', agIds)
     if (clienteId) q = q.eq('cliente_id', clienteId)
     if (stato) q = q.eq('stato', stato)
-    // Nella rete lo stato si ricalcola per livello (sotto): il filtro si applica dopo, non qui.
-    if (statoContrassegno && !subtreeSel) q = q.eq('stato_contrassegno', statoContrassegno)
+    // Il master vede lo stato PER LIVELLO (ricalcolato sotto), diverso da quello salvato: pre-filtrare
+    // qui farebbe sparire proprio le righe in cui i due divergono. Per agente e cliente resta a DB.
+    if (statoContrassegno && (!utente?.master_id || isAgente(utente))) q = q.eq('stato_contrassegno', statoContrassegno)
     if (contratto) q = q.eq('corrieri.nome_contratto', contratto)                        // contratto esatto
     if (vettore) q = q.ilike('corrieri.nome_contratto', `${sanitizza(vettore)}%`)          // vettore = prima parola
     // N. Spedizione: cerca su TUTTO lo storico (la pagina non manda dal/al quando c'e' il numero).
@@ -66,54 +67,37 @@ export async function GET(req: NextRequest) {
   // Carico TUTTI i contrassegni (prima .limit(500) tagliava): sono spedizioni normali.
   const lista = await fetchAll(buildBase)
 
+  // Chi vede lo stato PER LIVELLO (il master) prende anche il numero di distinta da lì, sotto.
+  const perLivello = !!utente?.master_id && !isAgente(utente)
   // Numero della distinta contrassegni per le spedizioni gia' in distinta (colonna "N. Dist.").
-  const distIds = [...new Set((lista as any[]).map(s => s.distinta_contrassegno_id).filter(Boolean))]
+  const distIds = perLivello ? [] : [...new Set((lista as any[]).map((s: any) => s.distinta_contrassegno_id).filter(Boolean))]
   if (distIds.length) {
     const { data: dist } = await db.from('distinte_contrassegni').select('id,numero').in('id', distIds)
     const numById = new Map((dist || []).map((d: any) => [d.id, d.numero]))
     for (const s of (lista as any[])) if (s.distinta_contrassegno_id) s.distinta_numero = numById.get(s.distinta_contrassegno_id) ?? null
   }
 
-  // OGNI LIVELLO VEDE IL COLORE DELLA SUA DISTINTA.
-  //
-  // Sulla spedizione lo stato del contrassegno è quello del CLIENTE finale (lo muove chi paga il
-  // cliente). Il detentore che guarda la rete di un sotto-master non paga il cliente: paga il
-  // sotto-master. Per lui "pagato" vuol dire "ho pagato il sotto-master", e prima vedeva invece lo
-  // stato del cliente: verde perché il sotto-master aveva anticipato ai suoi clienti, quando lui non
-  // aveva ancora pagato niente. E dopo il suo anticipo il contrassegno restava grigio e selezionabile.
-  // Qui, per le spedizioni della rete, lo stato è quello della MIA distinta: nessuna = in attesa,
-  // in lavorazione = arancio, pagata = verde.
-  const altrui = subtreeSel ? (lista as any[]).filter(s => s.master_id !== utente?.master_id) : []
-  if (altrui.length) {
-    const mieRighe = new Map<string, string>()   // spedizione → mia distinta
-    const ids = altrui.map(s => s.id)
-    for (let i = 0; i < ids.length; i += 300) {
-      const { data: r } = await db.from('distinte_contrassegni_righe').select('spedizione_id,distinta_id')
-        .eq('distinta_master_id', utente?.master_id).in('spedizione_id', ids.slice(i, i + 300))
-      for (const x of (r || [])) mieRighe.set((x as any).spedizione_id, (x as any).distinta_id)
+  // OGNI LIVELLO VEDE I SUOI SOLDI (lib/contrassegni-stato-livello.ts): verde solo quando ha incassato
+  // lui. Chi ha qualcuno sopra guarda la distinta in entrata, il detentore la propria. Lo stato salvato
+  // sulla spedizione resta quello del cliente finale, che è quello che vede il cliente nel suo portale.
+  if (perLivello) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { statiCodPerLivello } = await import('@/lib/contrassegni-stato-livello')
+    const stati = await statiCodPerLivello(createAdminSupabase(), utente!.master_id, lista as any[])
+    for (const s of (lista as any[])) {
+      const v = stati.get(s.id); if (!v) continue
+      s.stato_contrassegno = v.stato
+      s.cod_selezionabile = v.selezionabile
+      // "N. Dist." = la MIA distinta (quella con cui pago chi sta sotto); se non l'ho ancora fatta,
+      // quella con cui mi paga il livello sopra: sono i due numeri che il master cerca.
+      const d = v.mia || v.inEntrata
+      s.distinta_contrassegno_id = d?.id ?? null
+      s.distinta_numero = d?.numero ?? null
     }
-    const mieDist = new Map<string, any>()
-    const mieIds = [...new Set(mieRighe.values())]
-    for (let i = 0; i < mieIds.length; i += 300) {
-      const { data: d } = await db.from('distinte_contrassegni').select('id,numero,stato').in('id', mieIds.slice(i, i + 300))
-      for (const x of (d || [])) mieDist.set((x as any).id, x)
+    // Il filtro stato è stato tolto dalla query (vedi sopra): si applica ORA, sullo stato per livello.
+    if (statoContrassegno) {
+      return NextResponse.json((lista as any[]).filter(s => (s.stato_contrassegno || 'in_attesa') === statoContrassegno))
     }
-    for (const s of altrui) {
-      const d = mieDist.get(mieRighe.get(s.id) || '')
-      if (d) {
-        s.stato_contrassegno = d.stato === 'pagata' ? 'pagato' : 'in_distinta'
-        s.distinta_contrassegno_id = d.id
-        s.distinta_numero = d.numero
-      } else {
-        // Il reso resta reso: quel contrassegno non si incasserà a nessun livello.
-        s.stato_contrassegno = s.stato_contrassegno === 'annullato' ? 'annullato' : 'in_attesa'
-        s.distinta_contrassegno_id = null
-        s.distinta_numero = null
-      }
-    }
-  }
-  if (statoContrassegno && subtreeSel) {
-    return NextResponse.json((lista as any[]).filter(s => (s.stato_contrassegno || 'in_attesa') === statoContrassegno))
   }
   return NextResponse.json(lista)
 }

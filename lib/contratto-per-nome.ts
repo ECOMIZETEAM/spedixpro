@@ -40,28 +40,78 @@ export async function corriereDiMasterPerNome(
 // stesso contratto. Il detentore però SI DICHIARA: se una copia lungo la strada è marcata `proprio`,
 // la salita si ferma lì — un contratto con lo stesso nome più in alto non se lo può prendere.
 //
-// Sta qui, e non dentro chi la usa, perché decide chi paga cosa: il costo a cascata (lib/cascata.ts)
-// e l'anticipo dei contrassegni lungo la rete devono vedere lo STESSO detentore.
-export async function detentoreContratto(
-  adminDb: any, corriereOwnerId: string, nomeContratto: string | null | undefined
+// Sta qui, e non dentro chi la usa, perché decide chi paga cosa: il costo a cascata (lib/cascata.ts),
+// l'anticipo dei contrassegni lungo la rete e il colore del contrassegno a ogni livello devono vedere
+// lo STESSO detentore.
+//
+// La salita ha DUE sorgenti, non due copie: una interroga il database un livello alla volta (una
+// spedizione sola), l'altra legge un indice già caricato (una lista intera: con le query per livello
+// una pagina da 50 righe farebbe decine di viaggi, 75-330 ms l'uno).
+export type SorgenteCatena = {
+  padreDi: (masterId: string) => Promise<string | null> | string | null
+  copiaDi: (masterId: string, nomeContratto: string) => Promise<{ proprio: boolean } | null> | { proprio: boolean } | null
+}
+
+export async function detentoreContrattoCon(
+  sorgente: SorgenteCatena, corriereOwnerId: string, nomeContratto: string | null | undefined
 ): Promise<{ detentore: string; dichiaratoProprio: boolean }> {
   let detentore = corriereOwnerId
   let dichiaratoProprio = false
   if (!nomeContratto) return { detentore, dichiaratoProprio }
   let cur: string | null = corriereOwnerId
   for (let i = 0; i < 20 && cur; i++) {
-    const cid = await corriereDiMasterPerNome(adminDb, cur, nomeContratto)
-    if (cid) {
-      const { data: cc }: any = await adminDb.from('corrieri').select('proprio').eq('id', cid).maybeSingle()
-      if (cc?.proprio) { detentore = cur; dichiaratoProprio = true; break }
-    }
-    const { data: mm }: any = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
-    const parent: string | null = mm?.parent_master_id || null
+    const mia = await sorgente.copiaDi(cur, nomeContratto)
+    if (mia?.proprio) { detentore = cur; dichiaratoProprio = true; break }
+    const parent: string | null = await sorgente.padreDi(cur)
     if (!parent) break
-    // Confronto NORMALIZZATO: con l'uguaglianza esatta un nome salvato con uno spazio finale su un
-    // livello e senza sull'altro faceva perdere il detentore vero (vedi in cima al file).
-    const pcId = await corriereDiMasterPerNome(adminDb, parent, nomeContratto)
-    if (pcId) { detentore = parent; cur = parent } else break
+    // Confronto NORMALIZZATO (vedi in cima al file): con l'uguaglianza esatta un nome salvato con uno
+    // spazio finale su un livello e senza sull'altro faceva perdere il detentore vero.
+    const delPadre = await sorgente.copiaDi(parent, nomeContratto)
+    if (delPadre) { detentore = parent; cur = parent } else break
   }
   return { detentore, dichiaratoProprio }
+}
+
+// Sorgente "una riga alla volta": per una spedizione sola (es. la guardia dell'anticipo).
+export function sorgenteDaDatabase(adminDb: any): SorgenteCatena {
+  return {
+    padreDi: async (id) => {
+      const { data }: any = await adminDb.from('masters').select('parent_master_id').eq('id', id).maybeSingle()
+      return data?.parent_master_id || null
+    },
+    copiaDi: async (id, nome) => {
+      const cid = await corriereDiMasterPerNome(adminDb, id, nome)
+      if (!cid) return null
+      const { data }: any = await adminDb.from('corrieri').select('proprio').eq('id', cid).maybeSingle()
+      return { proprio: !!data?.proprio }
+    },
+  }
+}
+
+export async function detentoreContratto(
+  adminDb: any, corriereOwnerId: string, nomeContratto: string | null | undefined
+): Promise<{ detentore: string; dichiaratoProprio: boolean }> {
+  return detentoreContrattoCon(sorgenteDaDatabase(adminDb), corriereOwnerId, nomeContratto)
+}
+
+// Sorgente "tutto in memoria": due letture (masters + corrieri) e poi nessun altro viaggio.
+// Si leggono TUTTI i corrieri, non solo quelli dei nomi che servono: i nomi vanno confrontati
+// normalizzati, e un filtro per nome esatto perderebbe proprio la copia scritta in modo diverso.
+export async function caricaSorgenteCatena(adminDb: any): Promise<SorgenteCatena> {
+  const [mRes, cRes]: any = await Promise.all([
+    adminDb.from('masters').select('id,parent_master_id'),
+    adminDb.from('corrieri').select('master_id,nome_contratto,proprio'),
+  ])
+  const padri = new Map<string, string | null>()
+  for (const m of (mRes.data || [])) padri.set(m.id, m.parent_master_id || null)
+  const copie = new Map<string, { proprio: boolean }>()
+  for (const c of (cRes.data || [])) {
+    const k = c.master_id + '|' + nomeContrattoNormalizzato(c.nome_contratto)
+    // Fra due copie collo stesso nome vince quella dichiarata propria: è la dichiarazione che conta.
+    if (!copie.get(k)?.proprio) copie.set(k, { proprio: !!c.proprio })
+  }
+  return {
+    padreDi: (id) => padri.get(id) ?? null,
+    copiaDi: (id, nome) => copie.get(id + '|' + nomeContrattoNormalizzato(nome)) || null,
+  }
 }

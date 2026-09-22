@@ -610,35 +610,17 @@ export async function GET(req: NextRequest) {
   }
   let rowsOut: any[] = rows
   if (!light && mineId && ruolo !== 'cliente' && ruolo !== 'agente') {
-    const codIds = rows.filter((r: any) => Number(r.contrassegno) > 0).map((r: any) => r.id)
-    if (codIds.length) {
-      const adminCod = admin
-      const inEntrata = new Map<string, string>()   // spedId -> stato distinta verso di me (dal livello sopra)
-      const inUscita = new Set<string>()            // spedId in una distinta creata da me
-      const inUscitaPagata = new Set<string>()      // spedId in una MIA distinta già 'pagata' (ho pagato il mio cliente)
-      // Chunk PICCOLI + fetchAll: ogni spedizione ha UNA riga distinta PER LIVELLO della catena,
-      // quindi un chunk grande può superare le 1000 righe (cap PostgREST) e perdere pezzi.
-      for (let i = 0; i < codIds.length; i += 150) {
-        const rr = await fetchAll(() => adminCod.from('distinte_contrassegni_righe')
-          .select('id, spedizione_id, distinte_contrassegni!inner(stato,master_id,target_master_id)')
-          .in('spedizione_id', codIds.slice(i, i + 150)).order('id', { ascending: true }))
-        for (const r of (rr || [])) {
-          const d: any = (r as any).distinte_contrassegni
-          if (!d || !(r as any).spedizione_id) continue
-          if (d.target_master_id === mineId) inEntrata.set((r as any).spedizione_id, d.stato)
-          else if (d.master_id === mineId) { inUscita.add((r as any).spedizione_id); if (d.stato === 'pagata') inUscitaPagata.add((r as any).spedizione_id) }
-        }
-      }
-      for (const r of rows as any[]) {
-        if (!(Number(r.contrassegno) > 0)) continue
-        // Se ho GIÀ PAGATO il mio cliente (mia distinta 'pagata'), per me questo contrassegno è CHIUSO
-        // = pagato, anche se la rimessa che mi deve il livello sopra non è ancora saldata (è un conto a
-        // parte, non lo stato di QUESTA spedizione verso il mio cliente). Prima vinceva la rimessa in
-        // ingresso e la riga restava arancio pur avendo pagato: 40 spedizioni di un solo master così,
-        // e sparivano anche dai filtri.
-        if (inUscitaPagata.has(r.id)) r.stato_contrassegno = 'pagato'
-        else if (inEntrata.has(r.id)) r.stato_contrassegno = inEntrata.get(r.id) === 'pagata' ? 'pagato' : 'in_distinta'
-        else if (inUscita.has(r.id)) r.stato_contrassegno = 'pagato'   // sono il caricatore: incassato dal corriere
+    const codCod = rows.filter((r: any) => Number(r.contrassegno) > 0)
+    if (codCod.length) {
+      // STATO PER LIVELLO: verde solo quando ho incassato io (lib/contrassegni-stato-livello.ts).
+      // Chi ha qualcuno sopra guarda la distinta in ENTRATA, il detentore — che incassa dal corriere —
+      // guarda la propria. Sostituisce la precedenza del 13/08, che dava verde a chi aveva pagato il suo
+      // cliente anche senza aver ricevuto niente dall'alto: quei soldi lui non ce li ha ancora.
+      const { statiCodPerLivello } = await import('@/lib/contrassegni-stato-livello')
+      const stati = await statiCodPerLivello(admin, mineId, codCod as any[])
+      for (const r of codCod as any[]) {
+        const v = stati.get(r.id)
+        if (v) r.stato_contrassegno = v.stato
       }
       // Il filtro contrassegni a DB lavora sullo stato GLOBALE (= del cliente): dopo l'override
       // per-viewer RIFILTRO le righe così un master che filtra "pagato" vede il SUO pagato, non

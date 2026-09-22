@@ -38,8 +38,9 @@ function oreAllAnnullo(richiestoAt?: string): string {
   return `tra ${h}h ${m}m`
 }
 
-// Colore badge contrassegno in base allo stato di pagamento:
-// grigio = da pagare, arancione = distinta caricata, verde = pagato
+// Colore badge contrassegno, dal punto di vista di CHI GUARDA (lib/contrassegni-stato-livello.ts):
+// grigio = nessuno me l'ha ancora messo in distinta, arancione = distinta che mi riguarda non ancora
+// pagata, verde = incassato da me (il cliente finale vede invece il suo, nel portale cliente)
 function codBadgeStyle(stato?: string) {
   if (stato === 'pagato') return { background:'#dcfce7', color:'#166534' }   // verde
   if (stato === 'in_distinta') return { background:'#ffedd5', color:'#c2410c' } // arancione

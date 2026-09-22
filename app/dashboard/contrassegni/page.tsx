@@ -17,19 +17,23 @@ const STATI_SPED: Record<string,{bg:string,color:string,label:string}> = {
   in_transito:{bg:'#eff6ff',color:'#2563eb',label:'In transito'},
   in_consegna:{bg:'#fff7ed',color:'#ea580c',label:'In Consegna'},
 }
-// In attesa = COD non ancora ricevuto (grigio, selezionabile) · In lavorazione = messo in distinta
-// (arancio) · Pagato = rimborsato al cliente (verde). Stesso codice colore di Spedisci.
+// IL COLORE DICE SE I SOLDI SONO ARRIVATI A ME (regola 22/09, lib/contrassegni-stato-livello.ts).
+// In attesa = nessuno me l'ha ancora messo in distinta (grigio) · In lavorazione = sono in una distinta
+// che mi riguarda, non ancora pagata (arancio) · Incassato = quella distinta è pagata (verde).
+// "Incassato" e non "Pagato": un contrassegno verde può essere ancora da girare al proprio cliente —
+// la checkbox infatti resta attiva. Chi paga chi lo decide il livello (detentore ↔ corriere).
 const STATI_COD: Record<string,{bg:string,color:string,label:string}> = {
   in_attesa:{bg:'#f1f5f9',color:'#475569',label:'In attesa'},
   in_distinta:{bg:'#fff7ed',color:'#ea580c',label:'In lavorazione'},
-  pagato:{bg:'#f0fdf4',color:'#16a34a',label:'Pagato'},
+  pagato:{bg:'#f0fdf4',color:'#16a34a',label:'Incassato'},
   // Il pacco e' tornato al mittente (o e' stato annullato): quel contrassegno non si incassera' mai.
   // Prima restava "In attesa" per sempre e sporcava le liste: 611 pacchi per 35.137,91 € al 18/09/2026.
   annullato:{bg:'#fef2f2',color:'#dc2626',label:'Annullato (reso)'},
 }
-// Un contrassegno e' selezionabile per una distinta solo se e' ancora IN ATTESA (non gia' in una
-// distinta, non pagato). Gli altri hanno la checkbox disattivata, come su Spedisci.
-const selezionabile = (s:any) => !s.distinta_contrassegno_id && (!s.stato_contrassegno || s.stato_contrassegno==='in_attesa')
+// SELEZIONABILE LO DICE IL SERVER (`cod_selezionabile`), non il colore. Da quando il colore racconta
+// "ho incassato io", un contrassegno che ho già messo in distinta resta grigio finché il livello sopra
+// non mi paga: dedurre la selezione dal colore lo farebbe rimettere in una seconda distinta.
+const selezionabile = (s:any) => !!s.cod_selezionabile
 
 import { useDialog } from '@/app/components/DialogProvider'
 export default function ListaContrassegniPage() {
@@ -188,8 +192,8 @@ export default function ListaContrassegniPage() {
             <select value={filtri.statoContrassegno} onChange={e=>setF('statoContrassegno',e.target.value)} style={sel}>
               <option value="">Tutti</option>
               <option value="in_attesa">In attesa</option>
-              <option value="in_distinta">In distinta</option>
-              <option value="pagato">Pagato</option>
+              <option value="in_distinta">In lavorazione</option>
+              <option value="pagato">Incassato</option>
               <option value="annullato">Annullato (reso)</option>
             </select>
           </div>
