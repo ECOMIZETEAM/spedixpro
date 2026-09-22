@@ -389,10 +389,15 @@ export async function addebitaCatena(
 
   for (const liv of catena) {
     if (!(liv.prezzo > 0)) continue
-    // CONTRATTI PROPRI: NIENTE NOLO. Il detentore-proprio paga il corriere per conto suo; qui non si
-    // addebita. MoovExpress incassa solo la commissione fissa (trigger fee su spedizioni). Vale sia
-    // per la spedizione propria del master sia per quella di un suo cliente sul suo contratto.
-    if (liv.pagaDalSuoConto) continue
+    // CONTRATTI PROPRI: il COSTO (nolo) del detentore SI registra, sul suo conto proprio — cosi' vede
+    // quanto gli costa il corriere e il suo margine, come il vertice (MULTIEXPRESS) e come funzionava
+    // prima del 17/08. Il movimento e' taggato conto='proprio' da fn_conto_di, quindi
+    // registra_movimento_master scala `credito_proprio` (conto di TRACCIA, mai ricaricato) e NON il
+    // credito prepagato della rete: il master paga il corriere per conto suo, questo e' solo il registro
+    // del suo costo. E NON blocca la spedizione: verificaCreditoCatena salta i livelli pagaDalSuoConto.
+    // MoovExpress incassa comunque la commissione fissa (trigger fee su spedizioni), che resta a parte.
+    // (Il 17/08 un salto aveva spento questa traccia lasciando solo la commissione; ripristinato il
+    //  22/09 con l'owner: il detentore deve vedere il suo costo, non €64 di sole commissioni.)
     try {
       await registraMovimentoMaster(adminMov, {
         masterOwnerId: liv.masterId,
