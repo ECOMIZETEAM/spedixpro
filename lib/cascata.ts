@@ -1,7 +1,7 @@
 import { calcolaPrezzoListino, calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
 import { registraMovimentoMaster, descrizioneSpedizione } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
+import { corriereDiMasterPerNome, detentoreContratto } from '@/lib/contratto-per-nome'
 import { pesoSuReale } from '@/lib/agevolazione-misure'
 
 export type LivelloCatena = {
@@ -74,28 +74,10 @@ export async function costruisciCatena(
   const { data: radice }: any = await adminDb.from('masters').select('id').is('parent_master_id', null).limit(1).maybeSingle()
   const radiceId: string | null = radice?.id || null
 
-  let ownerReale = params.corriereOwnerId
-  let contrattoDichiaratoProprio = false
-  if (params.corriereNome) {
-    let cur: string | null = params.corriereOwnerId
-    for (let i = 0; i < 20 && cur; i++) {
-      // IL DETENTORE SI DICHIARA. Se il contratto di questo master e' marcato come SUO, la risalita
-      // finisce qui: un contratto con lo stesso nome piu' in alto non se lo puo' prendere.
-      const cid = await corriereDiMasterPerNome(adminDb, cur, params.corriereNome)
-      if (cid) {
-        const { data: cc }: any = await adminDb.from('corrieri').select('proprio').eq('id', cid).maybeSingle()
-        if (cc?.proprio) { ownerReale = cur; contrattoDichiaratoProprio = true; break }
-      }
-      const { data: mm }: any = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
-      const parent: string | null = mm?.parent_master_id || null
-      if (!parent) break
-      // Confronto NORMALIZZATO (vedi lib/contratto-per-nome.ts): con l'uguaglianza esatta un nome
-      // salvato con uno spazio finale su un livello e senza sull'altro faceva perdere il detentore
-      // vero del contratto — che quindi non veniva addebitato.
-      const pcId = await corriereDiMasterPerNome(adminDb, parent, params.corriereNome)
-      if (pcId) { ownerReale = parent; cur = parent } else break
-    }
-  }
+  // IL DETENTORE SI DICHIARA (copia marcata `proprio`), altrimenti è il più in alto che ha lo stesso
+  // contratto. La regola sta in lib/contratto-per-nome.ts: la usa anche l'anticipo dei contrassegni.
+  const { detentore: ownerReale, dichiaratoProprio: contrattoDichiaratoProprio } =
+    await detentoreContratto(adminDb, params.corriereOwnerId, params.corriereNome)
 
   for (let i = 0; i < 20 && currentId; i++) {
     const { data: m }: any = await adminDb

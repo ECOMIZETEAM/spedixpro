@@ -112,14 +112,20 @@ export default function ListaContrassegniPage() {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ spedizioneIds: selectedIds })
     })
-    const data = await res.json()
+    const data = await res.json().catch(() => ({}))
     setCreandoDistinta(false)
+    // Gli esclusi si raccontano raggruppati per motivo: "3 — reso: il contrassegno non si incasserà".
+    const perMotivo = new Map<string, number>()
+    for (const e of (data.escluse || [])) perMotivo.set(e.motivo, (perMotivo.get(e.motivo) || 0) + 1)
+    const esclusi = [...perMotivo].map(([m, n]) => `• ${n} — ${m}`).join('\n')
     if (data.success) {
       setSelectedIds([]); carica()
-      await dialog.alert({ title: 'Distinte create', message:
+      await dialog.alert({ title: 'Distinte create', message: <span style={{whiteSpace:'pre-line'}}>{
         'Distinte create: ' + (data.create ?? data.distinte?.length ?? 0)
-        + (data.saltate ? '\nContrassegni saltati (già in distinta o senza cliente): ' + data.saltate : '') })
-    } else await dialog.alert({ title: 'Nessuna distinta creata', message: data.error || 'Errore durante la creazione.' })
+        + ' (le trovi in Distinte contrassegni)'
+        + (esclusi ? '\n\nContrassegni non inseriti:\n' + esclusi : '')}</span> })
+    } else await dialog.alert({ title: 'Nessuna distinta creata', message: <span style={{whiteSpace:'pre-line'}}>{
+      esclusi ? 'Contrassegni non inseriti:\n' + esclusi : (data.error || 'Errore durante la creazione.')}</span> })
   }
 
   async function esportaExcel() {

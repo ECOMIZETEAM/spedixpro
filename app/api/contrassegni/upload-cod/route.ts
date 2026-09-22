@@ -3,18 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
-
-// Risale la catena dei master: [masterId, padre, nonno, ...]
-async function risaliCatena(adminDb: any, masterId: string): Promise<string[]> {
-  const path: string[] = []
-  let cur: string | null = masterId
-  for (let i = 0; i < 20 && cur; i++) {
-    path.push(cur)
-    const { data: m } = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
-    cur = m?.parent_master_id || null
-  }
-  return path
-}
+import { risaliCatena, destinatarioCod } from '@/lib/contrassegni-catena'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -134,14 +123,13 @@ export async function POST(req: NextRequest) {
     if (giaInSostaSet.has(spedizione.id)) { giaInSostaCount++; continue }
 
     // Solo discesa: chi carica deve essere il master della spedizione o un antenato
-    const catena = await getCatena(spedizione.master_id)
-    const idx = catena.indexOf(masterId)
-    if (idx === -1) { segnaErrore(spedizione.numero || ldv, 'fuori dalla tua rete'); continue }
+    const dest = destinatarioCod(await getCatena(spedizione.master_id), masterId, spedizione.cliente_id)
+    if (dest.fuori) { segnaErrore(spedizione.numero || ldv, 'fuori dalla tua rete'); continue }
 
-    // SPEDIZIONE PROPRIA del master (idx=0 e nessun cliente sotto): il COD è già suo, non c'è nessuno da
-    // pagare. NON è un errore: si registra a parte (cliente_id e target entrambi null = "proprio"), così è
-    // visibile e caricabile nel riquadro "Propri — già incassati", ma senza pagamento a valle.
-    if (idx === 0 && !spedizione.cliente_id) {
+    // SPEDIZIONE PROPRIA del master (nessun cliente e nessun sotto-master sotto): il COD è già suo, non
+    // c'è nessuno da pagare. NON è un errore: si registra a parte (cliente_id e target entrambi null =
+    // "proprio"), così è visibile e caricabile nel riquadro "Propri — già incassati", ma senza pagamento a valle.
+    if (!dest.cliente_id && !dest.target_master_id) {
       inSosta.push({ master_id: masterId, spedizione_id: spedizione.id, importo: importoCod,
         cliente_id: null, target_master_id: null, origine: 'file' })
       propri++
@@ -150,13 +138,8 @@ export async function POST(req: NextRequest) {
     // AREA DI SOSTA: il contrassegno NON scende subito al livello sotto. Si registra qui col suo
     // destinatario (cliente diretto oppure primo master sotto di me) e sara' il master, dopo le
     // sue verifiche, a decidere A CHI caricarlo da Distinte Contrassegni.
-    if (idx === 0) {
-      inSosta.push({ master_id: masterId, spedizione_id: spedizione.id, importo: importoCod,
-        cliente_id: spedizione.cliente_id, target_master_id: null, origine: 'file' })
-    } else {
-      inSosta.push({ master_id: masterId, spedizione_id: spedizione.id, importo: importoCod,
-        cliente_id: null, target_master_id: catena[idx - 1], origine: 'file' })
-    }
+    inSosta.push({ master_id: masterId, spedizione_id: spedizione.id, importo: importoCod,
+      cliente_id: dest.cliente_id, target_master_id: dest.target_master_id, origine: 'file' })
     // Conta SOLO le righe davvero messe in sosta (DOPO tutti i filtri): cosi' ogni riga del file
     // finisce in UNA categoria sola e il totale torna sempre (niente riga contata due volte).
     spedizioniProcessate++

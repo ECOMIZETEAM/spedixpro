@@ -32,3 +32,36 @@ export async function corriereDiMasterPerNome(
   }
   return null
 }
+
+// DETENTORE di un contratto: chi lo ha col corriere, e quindi chi riceve dal corriere i soldi
+// (contrassegni compresi) e ne paga il costo reale.
+//
+// Si parte dal master che possiede la copia usata dalla spedizione e si sale finché il padre ha lo
+// stesso contratto. Il detentore però SI DICHIARA: se una copia lungo la strada è marcata `proprio`,
+// la salita si ferma lì — un contratto con lo stesso nome più in alto non se lo può prendere.
+//
+// Sta qui, e non dentro chi la usa, perché decide chi paga cosa: il costo a cascata (lib/cascata.ts)
+// e l'anticipo dei contrassegni lungo la rete devono vedere lo STESSO detentore.
+export async function detentoreContratto(
+  adminDb: any, corriereOwnerId: string, nomeContratto: string | null | undefined
+): Promise<{ detentore: string; dichiaratoProprio: boolean }> {
+  let detentore = corriereOwnerId
+  let dichiaratoProprio = false
+  if (!nomeContratto) return { detentore, dichiaratoProprio }
+  let cur: string | null = corriereOwnerId
+  for (let i = 0; i < 20 && cur; i++) {
+    const cid = await corriereDiMasterPerNome(adminDb, cur, nomeContratto)
+    if (cid) {
+      const { data: cc }: any = await adminDb.from('corrieri').select('proprio').eq('id', cid).maybeSingle()
+      if (cc?.proprio) { detentore = cur; dichiaratoProprio = true; break }
+    }
+    const { data: mm }: any = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+    const parent: string | null = mm?.parent_master_id || null
+    if (!parent) break
+    // Confronto NORMALIZZATO: con l'uguaglianza esatta un nome salvato con uno spazio finale su un
+    // livello e senza sull'altro faceva perdere il detentore vero (vedi in cima al file).
+    const pcId = await corriereDiMasterPerNome(adminDb, parent, nomeContratto)
+    if (pcId) { detentore = parent; cur = parent } else break
+  }
+  return { detentore, dichiaratoProprio }
+}
