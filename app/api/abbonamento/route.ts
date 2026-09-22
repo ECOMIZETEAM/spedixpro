@@ -17,7 +17,7 @@ export async function GET() {
 
   const admin = createAdminSupabase()
   const { data: m } = await admin.from('masters')
-    .select('parent_master_id,abbonamento_piano,abbonamento_limite,abbonamento_prezzo,abbonamento_mese,abbonamento_attivato_il,credito,abbonamento_esente,stripe_customer_id,stripe_subscription_id,stripe_stato,abbonamento_piano_programmato,abbonamento_programmato_dal')
+    .select('parent_master_id,abbonamento_piano,abbonamento_limite,abbonamento_prezzo,abbonamento_mese,abbonamento_attivato_il,credito,abbonamento_esente,stripe_customer_id,stripe_subscription_id,stripe_stato,abbonamento_piano_programmato,abbonamento_programmato_dal,piani_visibili')
     .eq('id', utente.master_id).single()
 
   const isRoot = !m?.parent_master_id  // il master principale: illimitato e gratis, mai bloccato
@@ -234,7 +234,11 @@ export async function GET() {
     prezzo: Number(m?.abbonamento_prezzo || 0),
     spedizioni_mese: count || 0,
     credito: Number(m?.credito || 0),
-    piani: PIANI_ENTERPRISE,
+    // Piani NASCOSTI (riservati): non compaiono nella lista che il master sceglie, tranne se root,
+    // se il master li ha in `piani_visibili`, o se è già il suo piano corrente (così non "sparisce").
+    piani: PIANI_ENTERPRISE.filter(p => !p.nascosto || isRoot
+      || (Array.isArray((m as any)?.piani_visibili) && (m as any).piani_visibili.includes(p.id))
+      || p.id === m?.abbonamento_piano),
     // Lo storico dei PROPRI pagamenti: il master lo chiedeva e non lo vedeva da nessuna parte —
     // sapeva di aver pagato solo perche' se lo ricordava.
     // Nascondi le righe-fantasma a 0€ (cambio piano) anche dallo storico del singolo master: mostra i
@@ -281,7 +285,7 @@ export async function POST(req: NextRequest) {
   const admin = createAdminSupabase()
   const payer = utente.master_id
   const { data: m } = await admin.from('masters')
-    .select('nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese,abbonamento_esente,stripe_subscription_id,stripe_stato').eq('id', payer).single()
+    .select('nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese,abbonamento_esente,stripe_subscription_id,stripe_stato,piani_visibili').eq('id', payer).single()
 
   // Trova il SUPERROOT (M1): risalgo la catena fino al master senza padre.
   let rootId = payer
@@ -293,6 +297,14 @@ export async function POST(req: NextRequest) {
     }
   }
   const isRoot = rootId === payer  // il master principale è la piattaforma: esente
+
+  // PIANO NASCOSTO (riservato): non ci si assegna da soli un piano fuori listino indovinandone l'id.
+  // Solo root, chi ce l'ha in `piani_visibili`, o chi ce l'ha già come piano corrente.
+  if (nuovo.nascosto && !isRoot
+      && !(Array.isArray((m as any)?.piani_visibili) && (m as any).piani_visibili.includes(nuovo.id))
+      && m?.abbonamento_piano !== nuovo.id) {
+    return NextResponse.json({ error: 'Piano non disponibile' }, { status: 403 })
+  }
 
   // IL CANONE SI PAGA CON CARTA, punto. La vecchia strada — scalarlo dal credito interno e poi
   // rincorrere il bonifico a mano — non e' piu' un'alternativa offerta: toglierla solo dalle

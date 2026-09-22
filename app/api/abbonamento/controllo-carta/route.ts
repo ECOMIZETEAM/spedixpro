@@ -23,12 +23,19 @@ export async function GET(req: NextRequest) {
   const admin = createAdminSupabase()
   const mese = meseCorrente()
   const { data: attivi } = await admin.from('masters')
-    .select('id,nome,parent_master_id,abbonamento_esente,abbonamento_mese,stripe_subscription_id,stripe_stato,pagamento_scaduto_dal')
+    .select('id,nome,parent_master_id,abbonamento_esente,abbonamento_esente_fino_a,abbonamento_mese,stripe_subscription_id,stripe_stato,pagamento_scaduto_dal')
     .not('abbonamento_piano', 'is', null)
 
   const segnati: string[] = []
   for (const m of (attivi || [])) {
     if (!m.parent_master_id) continue                                   // il principale e' la piattaforma
+    // ESENTE A TERMINE scaduto: smette di essere esente e da oggi conta come tutti (qui sotto, se senza
+    // carta, parte il conto alla rovescia). I permanenti hanno esente_fino_a = NULL → mai qui.
+    if (m.abbonamento_esente && (m as any).abbonamento_esente_fino_a
+        && new Date((m as any).abbonamento_esente_fino_a) <= new Date()) {
+      await admin.from('masters').update({ abbonamento_esente: false, abbonamento_esente_fino_a: null }).eq('id', m.id)
+      ;(m as any).abbonamento_esente = false
+    }
     if (m.abbonamento_esente) continue                                  // tiene il piano, non paga
     // QUESTO MESE RISULTA GIA' PAGATO — comunque sia arrivato il pagamento.
     //

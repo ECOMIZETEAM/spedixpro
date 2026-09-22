@@ -27,10 +27,10 @@ export async function GET(req: NextRequest) {
   const mese = meseCorrente()
 
   const { data: attivi } = await admin.from('masters')
-    .select('id,nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese,parent_master_id,abbonamento_esente,stripe_subscription_id,stripe_stato,abbonamento_piano_programmato,abbonamento_programmato_dal,pagamento_scaduto_dal')
+    .select('id,nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese,parent_master_id,abbonamento_esente,abbonamento_esente_fino_a,stripe_subscription_id,stripe_stato,abbonamento_piano_programmato,abbonamento_programmato_dal,pagamento_scaduto_dal')
     .not('abbonamento_piano', 'is', null)
 
-  let cambiApplicati = 0, esentiSaltati = 0, senzaCarta = 0, conCarta = 0
+  let cambiApplicati = 0, esentiSaltati = 0, senzaCarta = 0, conCarta = 0, esenzioniScadute = 0
 
   for (const m of (attivi || [])) {
     // 1) Downgrade e disdette programmati: e' adesso che entrano in vigore.
@@ -43,6 +43,18 @@ export async function GET(req: NextRequest) {
     }
 
     if (!m.parent_master_id) continue                  // il master principale e' la piattaforma
+
+    // 2-bis) ESENTE A TERMINE (piano gratuito fino a una data, es. prova fino al 1° del mese): quando
+    // la data è passata smette di essere esente e da qui in poi entra nel ciclo come tutti — se ha la
+    // carta paga (circuito), altrimenti lo prende il controllo giornaliero → tolleranza → congelamento.
+    // I permanenti (Ecomize, MULTIEXPRESS, Giga) hanno esente_fino_a = NULL → non entrano mai qui.
+    if (m.abbonamento_esente && (m as any).abbonamento_esente_fino_a
+        && new Date((m as any).abbonamento_esente_fino_a) <= new Date()) {
+      await admin.from('masters').update({ abbonamento_esente: false, abbonamento_esente_fino_a: null }).eq('id', m.id)
+      ;(m as any).abbonamento_esente = false
+      esenzioniScadute++
+      // NON fa `continue`: prosegue sotto come un master normale (carta / senza-carta).
+    }
 
     // 3) Esenti: tengono il piano, non pagano, non si congelano.
     if (m.abbonamento_esente) {
@@ -60,5 +72,5 @@ export async function GET(req: NextRequest) {
     senzaCarta++
   }
 
-  return NextResponse.json({ success: true, mese, cambiApplicati, esentiSaltati, conCarta, senzaCarta })
+  return NextResponse.json({ success: true, mese, cambiApplicati, esentiSaltati, esenzioniScadute, conCarta, senzaCarta })
 }

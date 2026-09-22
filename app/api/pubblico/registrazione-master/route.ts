@@ -90,6 +90,9 @@ export async function POST(req: NextRequest) {
   if (!piva || !/^\d{11}$/.test(piva)) return no('Serve la partita IVA (11 cifre).', 400)
   const piano = pianoById(pianoId)
   if (!piano) return no('Piano non valido.', 400)
+  // Piani NASCOSTI (riservati a singoli master concordati fuori listino): non richiedibili in
+  // autoregistrazione pubblica — li assegna la piattaforma.
+  if ((piano as any).nascosto) return no('Piano non valido.', 400)
 
   const admin = createAdminSupabase()
 

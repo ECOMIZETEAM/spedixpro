@@ -1,7 +1,12 @@
 // Piani di abbonamento. Per ora solo Enterprise (master); gli Smart (clienti) verranno dopo.
-export type Piano = { id: string; nome: string; limite: number; prezzo: number }
+// `nascosto`: il piano NON compare nella lista pubblica che il master sceglie. Diventa scegliibile
+// solo dai master la cui `masters.piani_visibili` lo contiene (o se e' gia' il loro piano corrente).
+// Serve per piani riservati a singoli master concordati fuori listino (vedi filtro in
+// app/api/abbonamento GET, `piani`).
+export type Piano = { id: string; nome: string; limite: number; prezzo: number; nascosto?: boolean }
 
 export const PIANI_ENTERPRISE: Piano[] = [
+  { id: 'enterprise_1k',   nome: 'Enterprise 1K',   limite: 1000,   prezzo: 50, nascosto: true },
   { id: 'enterprise_5k',   nome: 'Enterprise 5K',   limite: 5000,   prezzo: 139 },
   { id: 'enterprise_10k',  nome: 'Enterprise 10K',  limite: 10000,  prezzo: 230 },
   { id: 'enterprise_20k',  nome: 'Enterprise 20K',  limite: 20000,  prezzo: 340 },

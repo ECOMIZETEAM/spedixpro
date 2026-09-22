@@ -37,11 +37,19 @@ export async function POST(req: NextRequest) {
 
   const admin = createAdminSupabase()
   const { data: m } = await admin.from('masters')
-    .select('id,nome,email,parent_master_id,abbonamento_esente,abbonamento_piano,abbonamento_mese,stripe_customer_id,stripe_subscription_id,stripe_stato')
+    .select('id,nome,email,parent_master_id,abbonamento_esente,abbonamento_piano,abbonamento_mese,stripe_customer_id,stripe_subscription_id,stripe_stato,piani_visibili')
     .eq('id', utente.master_id).single()
   if (!m) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
   if (!m.parent_master_id) return NextResponse.json({ error: 'Il master principale non ha canone.' }, { status: 400 })
   if (m.abbonamento_esente) return NextResponse.json({ error: 'Il tuo abbonamento è gratuito: nessun pagamento da fare.' }, { status: 400 })
+  // Piano NASCOSTO (riservato): niente checkout su un piano fuori listino indovinandone l'id — solo
+  // se il master ce l'ha in `piani_visibili` o è già il suo piano corrente (il caso normale: gliel'ha
+  // assegnato il root e ora lo paga).
+  if ((piano as any).nascosto
+      && !(Array.isArray((m as any)?.piani_visibili) && (m as any).piani_visibili.includes(pianoId))
+      && m.abbonamento_piano !== pianoId) {
+    return NextResponse.json({ error: 'Piano non disponibile' }, { status: 403 })
+  }
   if (m.abbonamento_piano === pianoId && m.stripe_subscription_id) {
     // "Hai già questo piano" NON deve bloccare chi ha il canone NON pagato (addebito fallito, es. fondi
     // insufficienti): se c'è una fattura Stripe APERTA, mando a saldarla (anche con un'altra carta). La UI
