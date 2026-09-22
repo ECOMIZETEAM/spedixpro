@@ -88,6 +88,8 @@ export default function ReportSpedizioniPage() {
       if (filtri.fatturazione) params.set('fatturazione', filtri.fatturazione)
       if (filtri.canale) params.set('canale', filtri.canale)
       if (filtri.statoContrassegno) params.set('statoContrassegno', filtri.statoContrassegno)
+      // Solo spedizioni: le rettifiche hanno il loro report (Report Rettifiche).
+      params.set('rettifiche', 'escluse')
 
       const res = await fetch(`/api/reports/spedizioni?${params}`)
       let spedizioni = await res.json()

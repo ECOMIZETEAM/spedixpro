@@ -44,6 +44,7 @@ export default function GuadagnoChart() {
         <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 800, color: '#1a1a1a' }}>
           <span style={{ width: '26px', height: '26px', borderRadius: '7px', background: '#dcfce7', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>💰</span>
           Guadagno Spedizioni
+          <span style={{ fontSize: '11px', fontWeight: 500, color: '#8a8a8a' }}>· rettifiche escluse, le trovi nel riquadro Rettifiche</span>
         </span>
         <DateRangePicker dal={range.dal} al={range.al} onChange={(dal, al) => setRange({ dal, al })} />
       </div>

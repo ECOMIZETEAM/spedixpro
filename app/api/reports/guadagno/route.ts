@@ -34,7 +34,13 @@ export async function GET(req: NextRequest) {
   const alEnd = dalParam ? new Date((alParam || dalParam) + 'T23:59:59.999Z').toISOString() : new Date().toISOString()
   // Aggregazione: per giorno se l'intervallo è breve, per mese se è lungo (o periodo annuale).
   const perMese = dalParam ? ((Date.parse(alEnd) - Date.parse(dal)) / 86400000 > 92) : (periodo === 'annuale')
-  const TIPI = ['spedizione', 'rimborso', 'rettifica', 'reso', 'giacenza']
+  // Le RETTIFICHE (ripesature, allineamenti, correzioni di prezzo) qui NON entrano: hanno il loro
+  // riquadro in home (/api/reports/guadagno-rettifiche, stessa struttura ristretta a tipo='rettifica').
+  // Mescolate al margine delle spedizioni lo facevano oscillare a ondate — il fornitore rifattura a
+  // blocchi e il master riaddebita il giorno dopo — e "il guadagno è dimezzato" non si capiva se
+  // fossero le spedizioni o le ripesature. Verificato 22/09 su tutti i master, settembre: guadagno con
+  // rettifiche = questo + riquadro Rettifiche, scarto 0,00.
+  const TIPI = ['spedizione', 'rimborso', 'reso', 'giacenza']
   const admin = createAdminSupabase()
 
   // ── AGENTE ────────────────────────────────────────────────────────────────
@@ -59,7 +65,9 @@ export async function GET(req: NextRequest) {
       .in('cliente_id', idsCli).gte('created_at', dal).lte('created_at', alEnd)
       .order('created_at', { ascending: false }).order('id', { ascending: false }))
     // Quello che il cliente ha pagato DAVVERO (movimenti), non il campo sulla spedizione: cosi'
-    // rettifiche, resi e giacenze entrano nel conto come nell'elenco.
+    // resi e giacenze entrano nel conto come nell'elenco. Le rettifiche no (vedi TIPI): il costo
+    // dell'agente e' il listino sulla spedizione originale, e contare la ripesatura pagata dal
+    // cliente senza il suo costo gonfiava il margine.
     const movCli = await fetchAll(() => admin.from('movimenti')
       .select('spedizione_id,importo').in('cliente_id', idsCli).not('spedizione_id', 'is', null)
       .gte('created_at', dal).lte('created_at', alEnd).in('tipo', TIPI)
@@ -91,7 +99,7 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  // Il GUADAGNO totale include: spedizioni + rettifiche (correzioni prezzo) + RESI + GIACENZE.
+  // Il GUADAGNO include: spedizioni + RESI + GIACENZE (le rettifiche hanno il loro riquadro, vedi TIPI).
   // Struttura (movimento cliente/sotto-master = ricavo, movimento master_target = costo, più il costo
   // che scende dal livello superiore); il margine di resi e giacenze entra automaticamente, il
   // 'rimborso' netta le annullate a 0. (Per questo Report Guadagno ≠ Report Spedizioni.)

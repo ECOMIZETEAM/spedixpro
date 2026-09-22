@@ -113,6 +113,11 @@ export async function GET(req: NextRequest) {
   // Chunk piccoli (300 id) + paginazione: ogni spedizione ha più movimenti (uno per livello) e un
   // chunk grande supererebbe le 1000 righe/query di PostgREST -> movimenti TRONCATI -> margini errati.
   // SOMMO 'spedizione' + 'rettifica' (signed): le rettifiche allineano il prezzo dopo una correzione.
+  // ?rettifiche=escluse (lo passa la pagina Report Spedizioni): SOLO il movimento della spedizione, cosi'
+  // prezzo cliente, prezzo corriere e margine sono quelli della spedizione e le ripesature stanno nel
+  // Report Rettifiche. Senza parametro resta il prezzo comprensivo: il Report Fatture lo usa per
+  // fatturare, e li' le rettifiche devono esserci (colonna "di cui rettifiche").
+  const tipiMov = p.get('rettifiche') === 'escluse' ? ['spedizione'] : ['spedizione', 'rettifica']
   const sumCliR = new Map<string, number>()
   const sumTargetR = new Map<string, number>()
   const sumRettCli = new Map<string, number>()   // solo RETTIFICHE lato cliente (l'aumento/variazione di prezzo)
@@ -125,7 +130,7 @@ export async function GET(req: NextRequest) {
       // (costoMine) NON gli arrivano.
       const mvDb = ruolo === 'cliente' ? db : adminDb
       const { data: mvs } = await mvDb.from('movimenti')
-        .select('spedizione_id,master_target_id,cliente_id,importo,tipo').in('tipo', ['spedizione', 'rettifica'])
+        .select('spedizione_id,master_target_id,cliente_id,importo,tipo').in('tipo', tipiMov)
         .in('spedizione_id', chunk).order('id', { ascending: true }).range(from, from + 999)
       if (!mvs?.length) break
       for (const mv of mvs) {
