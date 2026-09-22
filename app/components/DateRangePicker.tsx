@@ -1,5 +1,5 @@
 'use client'
-import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 
 type Props = { dal: string, al: string, onChange: (dal: string, al: string) => void }
@@ -37,7 +37,7 @@ export default function DateRangePicker({ dal, al, onChange }: Props) {
   const pannelloRef = useRef<HTMLDivElement>(null)
   // IL PANNELLO SI DISEGNA FUORI DAL RIQUADRO: schede/topbar/card hanno overflow:hidden e tagliavano
   // il calendario. Portato su document.body con position:fixed, nessun contenitore lo ritaglia piu'.
-  const [pos, setPos] = useState<{ top: number, left?: number, right?: number } | null>(null)
+  const [pos, setPos] = useState<{ top?: number, bottom?: number, left?: number, right?: number, maxH: number } | null>(null)
   const [montato, setMontato] = useState(false)
 
   // default: se non c'e' nulla, imposta oggi-oggi
@@ -63,20 +63,33 @@ export default function DateRangePicker({ dal, al, onChange }: Props) {
 
   // Posizione calcolata dal trigger, ricalcolata su scroll(capture)+resize: come SelectCercabile,
   // altrimenti il pannello resterebbe fermo mentre la pagina scivola sotto.
+  //
+  // SOPRA SE SOTTO NON CI STA. Il pannello e' fixed, quindi fuori dallo scorrimento della pagina: un
+  // calendario aperto in fondo allo schermo (i riquadri Rettifiche/Supplementi in home) finiva tagliato
+  // e non c'era modo di scorrere fino ai giorni. Si apre verso l'alto quando sotto manca spazio e sopra
+  // ce n'e' di piu'; in ogni caso l'altezza e' limitata allo spazio che c'e', con lo scorrimento interno.
+  const misura = useCallback(() => {
+    const r = ref.current?.getBoundingClientRect()
+    if (!r) return
+    // Allineamento a destra se il campo sta nella meta' destra dello schermo, come prima.
+    const versoDx = r.left > window.innerWidth / 2
+    const oriz = versoDx ? { right: window.innerWidth - r.right } : { left: r.left }
+    const alto = pannelloRef.current?.offsetHeight || 300   // al primo giro il pannello non c'e' ancora
+    const sotto = window.innerHeight - r.bottom - 8
+    const sopra = r.top - 8
+    if (alto > sotto && sopra > sotto) setPos({ bottom: window.innerHeight - r.top + 4, maxH: sopra, ...oriz })
+    else setPos({ top: r.bottom + 4, maxH: sotto, ...oriz })
+  }, [])
   useLayoutEffect(() => {
     if (!open) { setPos(null); return }
-    const misura = () => {
-      const r = ref.current?.getBoundingClientRect()
-      if (!r) return
-      // Allineamento a destra se il campo sta nella meta' destra dello schermo, come prima.
-      const versoDx = r.left > window.innerWidth / 2
-      setPos({ top: r.bottom + 4, ...(versoDx ? { right: window.innerWidth - r.right } : { left: r.left }) })
-    }
     misura()
     window.addEventListener('scroll', misura, true)
     window.addEventListener('resize', misura)
     return () => { window.removeEventListener('scroll', misura, true); window.removeEventListener('resize', misura) }
-  }, [open])
+  }, [open, misura])
+  // Appena il pannello e' disegnato si rimisura con la sua altezza vera (il primo giro la stimava).
+  const pannelloVisibile = open && !!pos
+  useLayoutEffect(() => { if (pannelloVisibile) misura() }, [pannelloVisibile, misura])
 
   function clickGiorno(d: Date) {
     if (!start || (start && end)) { setStart(d); setEnd(null) }
@@ -161,7 +174,7 @@ export default function DateRangePicker({ dal, al, onChange }: Props) {
         <span>📅</span><span style={{ color:'#1a1a1a' }}>{labelText}</span><span style={{ color:'#1a1a1a' }}>▾</span>
       </div>
       {open && montato && pos && createPortal(
-        <div ref={pannelloRef} style={{ position:'fixed', top: pos.top, ...(pos.right!=null ? { right: pos.right } : { left: pos.left }), zIndex:1000000, background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px', boxShadow:'0 8px 24px rgba(0,0,0,0.15)', display:'flex' }}>
+        <div ref={pannelloRef} style={{ position:'fixed', ...(pos.bottom!=null ? { bottom: pos.bottom } : { top: pos.top }), ...(pos.right!=null ? { right: pos.right } : { left: pos.left }), maxHeight: pos.maxH, overflowY:'auto', zIndex:1000000, background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px', boxShadow:'0 8px 24px rgba(0,0,0,0.15)', display:'flex' }}>
           <div style={{ display:'flex' }}>
             {calendario(meseSx, setMeseSx, true)}
             {calendario(meseDx, setMeseDx, false)}
