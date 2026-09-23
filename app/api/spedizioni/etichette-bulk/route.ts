@@ -106,6 +106,26 @@ export async function POST(req: NextRequest) {
       } catch (e) { console.error('[ETICHETTE-BULK][GLS] recupero on-demand:', e) }
     }
 
+    // RIPIEGO DVA: la spedizione e' ancora ferma sul numero provvisorio, quindi l'etichetta non c'e'
+    // ancora. Prima usciva il foglio "ETICHETTA NON DISPONIBILE" e basta: il 23/09 un utente ha
+    // ristampato OTTO volte di fila due spedizioni cosi' (TMP-26248189 e TMP-26248175), senza che
+    // nessuno gli dicesse che doveva solo aspettare il corriere. Qui si prova a completarla ADESSO,
+    // come fa il pulsante "Riprova adesso" e come gia' faceva il ripiego GLS qui sopra: se il
+    // corriere ha la lettera di vettura, l'etichetta esce in questa stessa stampa.
+    if (!urls.length && !daStorage.length && String(s.numero || '').startsWith('TMP-')) {
+      try {
+        const { completaTmp } = await import('@/lib/tmp-completa')
+        await completaTmp(admin, { spedizioneId: s.id })
+        const { data: ri } = await admin.from('spedizioni')
+          .select('numero,etichetta_url,etichetta_path,colli_dettaglio,raw_response,corriere_id,rif_ordine,contenuto,master_id').eq('id', s.id).maybeSingle()
+        if (ri && (ri.etichetta_url || ri.etichetta_path)) {
+          const { leggiEtichettaCompleta } = await import('@/lib/etichette')
+          const et = await leggiEtichettaCompleta(admin, ri as any)
+          if (et) { daStorage.push(new Uint8Array(et.buffer)); s.numero = ri.numero }
+        }
+      } catch (e) { console.error('[ETICHETTE-BULK][DVA] completamento on-demand:', e) }
+    }
+
     // Prima le pagine ETICHETTA...
     const sorgenti: Array<{ url?: string; bytes?: Uint8Array }> = [
       ...urls.map(u => ({ url: u })), ...daStorage.map(b => ({ bytes: b })),
