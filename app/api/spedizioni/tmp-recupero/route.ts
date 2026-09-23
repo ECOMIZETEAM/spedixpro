@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
     const ordine = String(s.numero).replace(/^TMP-/, '')
     let w: any = null
     try {
-      w = await easyparcelWaybillGrezza(apikey, ordine)
+      w = await easyparcelWaybillGrezza(apikey, ordine, Number((s as any).colli) || 1)
     } catch (e: any) {
       console.warn('[TMP] waybill non ancora disponibile', s.numero, e?.message)
       ancoraNulla++
@@ -333,7 +333,7 @@ async function recuperaMulticollo(admin: any): Promise<number> {
     if (!ordine) continue
 
     let w: any = null
-    try { w = await easyparcelWaybillGrezza(chiaveDi.get(s.corriere_id)!, ordine) } catch { continue }
+    try { w = await easyparcelWaybillGrezza(chiaveDi.get(s.corriere_id)!, ordine, Number(s.colli) || 2) } catch { continue }
 
     // LA PROVA CHE E' PROPRIO QUESTA SPEDIZIONE. Il riferimento e' stato letto da un PDF: se per
     // qualsiasi motivo fosse quello di un altro ordine, scriveremmo su un pacco le etichette di un

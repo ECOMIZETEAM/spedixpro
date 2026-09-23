@@ -577,12 +577,35 @@ export function codiceRitiroValido(v: any): string | null {
 // rimaste ferme un giorno intero con le loro etichette gia' disponibili dall'altra parte.
 // Questa restituisce quello che c'e', numero compreso se c'e'. La usa solo il recupero delle
 // spedizioni ferme su un numero provvisorio: la creazione continua a usare quella sopra.
+// CHIAMATA getwaybill, CON UNA GUARDIA SU `single_waybills`.
+//
+// Su alcuni prodotti DVA quel parametro fa cadere il loro server: "Poste da PuntoPoste a Domicilio"
+// risponde HTTP 500 col corpo VUOTO ogni volta che glielo si chiede, e risponde 200 con la lettera
+// di vettura appena lo si toglie (verificato il 23/09/2026 due volte di fila su tre ordini: PuntoPoste
+// 500/200, BRT 200/200). Risultato: quelle spedizioni restavano tutte "LDV in elaborazione" con la
+// LDV gia' pronta dall'altra parte.
+//
+// Quindi: le etichette per-collo si chiedono SOLO quando i colli sono piu' di uno (per un collo solo
+// non servono: l'etichetta e' gia' quella della spedizione), e se la chiamata cade si riprova una
+// volta SENZA il parametro. Meglio l'etichetta unica che nessuna etichetta.
+async function chiamaWaybill(apikey: string, idOrdine: string, base64: boolean, singole: boolean): Promise<any> {
+  const details: any = { order_id: Number(idOrdine) || idOrdine, waybill_base64: base64 ? 'Y' : 'N' }
+  if (singole) details.single_waybills = 'Y'
+  try {
+    return await chiama(apikey, 'getwaybill', details)
+  } catch (e: any) {
+    if (!singole) throw e
+    delete details.single_waybills
+    const d = await chiama(apikey, 'getwaybill', details)
+    console.warn('[DVA] getwaybill rifiutato con single_waybills, ripreso senza (ordine ' + idOrdine + ')')
+    return d
+  }
+}
+
 export async function easyparcelWaybillGrezza(
-  apikey: string, idOrdine: string
+  apikey: string, idOrdine: string, colli = 1
 ): Promise<{ numero: string; pdfBase64: string | null; singole: { numero: string; pdfBase64: string }[]; codiceRitiro: string | null }> {
-  const d = await chiama(apikey, 'getwaybill', {
-    details: { order_id: Number(idOrdine) || idOrdine, waybill_base64: 'Y', single_waybills: 'Y' },
-  })
+  const d = await chiamaWaybill(apikey, idOrdine, true, colli > 1)
   const singole = (Array.isArray(d.single_waybills) ? d.single_waybills : [])
     .map((s: any) => ({ numero: String(s?.waybill_number || ''), pdfBase64: String(s?.waybill_base64 || '') }))
     .filter((s: any) => s.pdfBase64)
@@ -617,7 +640,7 @@ export function ritiroEasyparcel(dal: string, pomeriggio: boolean) {
 // in produzione ha fatto scendere il provvisorio da 15 spedizioni su 16 a 8 su 17 — cosi' chi non
 // specifica niente eredita il valore giusto invece di quello sbagliato.
 export async function easyparcelWaybill(
-  apikey: string, idOrdine: string, tentativi = 8, attesaMs = 1200, attendiRitiro = false, budgetMs = 0
+  apikey: string, idOrdine: string, tentativi = 8, attesaMs = 1200, attendiRitiro = false, budgetMs = 0, colli = 1
 ): Promise<{ numero: string; pdfBase64: string | null; singole: { numero: string; pdfBase64: string }[]; borderoUrl: string | null; codiceRitiro: string | null }> {
   // BUDGET DI TEMPO TOTALE (facoltativo). Quando DVA rallenta, ogni getwaybill diventa lento e gli 8
   // tentativi possono sforare i 60s della funzione di creazione: se accade PRIMA di salvare la
@@ -634,9 +657,7 @@ export async function easyparcelWaybill(
     }
     if (scaduto()) break
     try {
-      const d = await chiama(apikey, 'getwaybill', {
-        details: { order_id: Number(idOrdine) || idOrdine, waybill_base64: 'Y', single_waybills: 'Y' },
-      })
+      const d = await chiamaWaybill(apikey, idOrdine, true, colli > 1)
       ultimo = d
       const numero = String(d.waybill_number || '')
       if (!numero) continue          // ancora in lavorazione: si riprova

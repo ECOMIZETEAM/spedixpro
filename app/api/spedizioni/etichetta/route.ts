@@ -133,7 +133,7 @@ export async function GET(req: NextRequest) {
       if (corrEP?.tipo === 'easyparcel' && apikeyEP) {
         try {
           const { easyparcelWaybill } = await import('@/lib/easyparcel')
-          const w = await easyparcelWaybill(apikeyEP, String(idOrdine), 2, 1500)
+          const w = await easyparcelWaybill(apikeyEP, String(idOrdine), 2, 1500, false, 0, Number((sped as any).colli) || 1)
           // Multicollo: le etichette dei singoli colli vanno unite in un PDF unico multipagina,
           // altrimenti si scaricherebbe solo quella del primo collo.
           const { unisciEtichette } = await import('@/lib/easyparcel')

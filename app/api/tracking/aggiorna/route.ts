@@ -397,7 +397,7 @@ export async function GET(req: NextRequest) {
       if (tipo === 'easyparcel' && (senzaEtichetta.has(s.id) || ritiroSenzaCodice) && (s as any).ep_ordine && cred?.apikey) {
         try {
           const { easyparcelWaybill } = await import('@/lib/easyparcel')
-          const w = await easyparcelWaybill(cred.apikey, String((s as any).ep_ordine), 1, 0)
+          const w = await easyparcelWaybill(cred.apikey, String((s as any).ep_ordine), 1, 0, false, 0, Number((s as any).colli) || 1)
           const b64 = w.singole[0]?.pdfBase64 || w.pdfBase64
           if (b64 && senzaEtichetta.has(s.id)) upd.etichetta_url = `data:application/pdf;base64,${b64}`
           if (w.numero && w.numero !== s.tracking_number) {

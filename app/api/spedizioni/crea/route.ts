@@ -1423,7 +1423,7 @@ export async function POST(req: NextRequest) {
         // si esce appena il numero c'e'. Chi risponde subito non aspetta niente.
         // Budget totale ~18s: quando DVA rallenta non si aspetta fino al timeout di 60s (rischio ordine
         // orfano prima del salvataggio). Si esce col provvisorio e la LDV la prende background/recupero.
-        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _ritiroDva ? 6 : 8, 1200, _ritiroDva, 18000)
+        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _ritiroDva ? 6 : 8, 1200, _ritiroDva, 18000, packages.length)
         ldv = w.numero || null
         // Il codice di prenotazione del ritiro arriva QUI, non con l'ordine: e' l'unico posto in cui
         // il corriere lo comunica. Senza salvarlo, il ritiro risulta prenotato ma senza numero, e
