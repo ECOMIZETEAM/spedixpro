@@ -250,6 +250,18 @@ export default function AbbonamentoPage() {
     const anomalie = allinea?.anomalie || []   // canone su Stripe ≠ listino (allarme che addebita comunque)
     const pianoTag = (p?: string) => (p || '').replace(/^enterprise_/, '').toUpperCase()   // enterprise_20k → 20K
 
+    // PROSSIMO INCASSO — dal prossimo giro di rinnovi (il prossimo 1°), da STRIPE e SOLO di quel mese.
+    // Perché non il valore del server (`incassoRealeStimato`): quello somma i conguagli dal DB, che è cieco
+    // sugli upgrade a proration differita (Velox: il conguaglio vive solo su Stripe) → usciva ~40€ sotto; e
+    // contava anche chi rinnova un mese più in là (LOGIXIA/di Simine, rinnovo 1/11). Qui si legge il canone
+    // e il conguaglio VERI da Stripe (uguali per tutti, nessuno "fuori dal DB") e si tiene SOLO chi rinnova
+    // nel mese del prossimo 1°. Finché i dati Stripe non sono arrivati, si mostra la stima DB come ripiego.
+    const stripePronto = !!allinea && !allinea.error && Array.isArray(allinea?.righe)
+    const meseProssimo = (allinea?.pausa_fino_al || '').slice(0, 7)   // es. '2026-10'
+    const righeMese = (allinea?.righe || []).filter((r: any) => !r.escluso && (r.rinnovo_attuale || '').slice(0, 7) === meseProssimo)
+    const incassoProssimo = Math.round(righeMese.reduce((t: number, r: any) => t + Number(r.canone || 0) + Number(r.conguaglio || 0), 0) * 100) / 100
+    const congProssimo = Math.round(righeMese.reduce((t: number, r: any) => t + Number(r.conguaglio || 0), 0) * 100) / 100
+
     return (
       <div>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'10px',marginBottom:'16px'}}>
@@ -424,9 +436,13 @@ export default function AbbonamentoPage() {
             <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>totale anno in corso</div>
           </div>
           <div style={card}>
-            <div style={{fontSize:'12px',color:'#777'}}>Prossimo incasso stimato</div>
-            <div style={{fontSize:'22px',fontWeight:800,color:'#16a34a'}}>€ {Number(stato?.incassoRealeStimato||0).toFixed(2)}</div>
-            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>solo carte attive + conguagli (€ {Number(stato?.conguagliRete||0).toFixed(2)})</div>
+            <div style={{fontSize:'12px',color:'#777'}}>Prossimo incasso{stripePronto && meseProssimo ? ` · ${meseLabel(meseProssimo)}` : ' stimato'}</div>
+            <div style={{fontSize:'22px',fontWeight:800,color:'#16a34a'}}>€ {(stripePronto ? incassoProssimo : Number(stato?.incassoRealeStimato||0)).toFixed(2)}</div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>
+              {stripePronto
+                ? <>{righeMese.length} master che rinnovano questo mese · conguagli € {congProssimo.toFixed(2)} <span style={{color:'#bbb'}}>(da Stripe)</span></>
+                : <>stima dal database, aggiorno da Stripe…</>}
+            </div>
           </div>
           <div style={card}>
             <div style={{fontSize:'12px',color:'#777'}}>Valore rete</div>
