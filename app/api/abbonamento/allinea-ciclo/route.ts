@@ -79,12 +79,17 @@ function meseCoperto(pausa: number): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
-async function conguaglioInSospeso(s: any, customer: string): Promise<number> {
+// Ritorna il totale in sospeso E le singole voci (descrizione + importo): la descrizione dell'invoiceItem
+// su Stripe E' il "perche'" del conguaglio ("11 giorni Enterprise 20K" ecc.) — la fonte autorevole,
+// non il ricalcolo dal DB (che per gli upgrade con proration differita puo' mancare). Serve alla
+// schermata Abbonamenti per spiegare al root, master per master, da dove esce la cifra.
+type Conguaglio = { totale: number, voci: { descrizione: string, importo: number }[] }
+async function conguaglioInSospeso(s: any, customer: string): Promise<Conguaglio> {
   try {
     const items = (await s.invoiceItems.list({ customer, limit: 50 })).data
       .filter((it: any) => it.metadata?.tipo === 'conguaglio')   // SOLO i conguagli veri, MAI il canone
     // (il canone si conta a parte: sommarlo qui lo raddoppiava — anteprima 278 su addebito reale 139.)
-    if (!items.length) return 0
+    if (!items.length) return { totale: 0, voci: [] }
     // Un conguaglio e' DOVUTO se e' in sospeso (nessuna fattura) O su una fattura ancora NON pagata
     // (open/draft): dopo un tentativo fallito il conguaglio resta agganciato alla fattura APERTA -> non e'
     // piu' 'pending' ma e' ancora da incassare (era il caso di spedizioni 2000: 97,13 sulla fattura aperta
@@ -94,10 +99,12 @@ async function conguaglioInSospeso(s: any, customer: string): Promise<number> {
       const invs = await s.invoices.list({ customer, limit: 20 })
       for (const iv of invs.data as any[]) statoFatt.set(iv.id, iv.status)
     }
-    return items
-      .filter((it: any) => !it.invoice || ['open', 'draft', 'uncollectible'].includes(statoFatt.get(idDi(it.invoice) || '') || ''))
-      .reduce((t: number, it: any) => t + (it.amount || 0), 0) / 100
-  } catch { return 0 }
+    const dovuti = items.filter((it: any) => !it.invoice || ['open', 'draft', 'uncollectible'].includes(statoFatt.get(idDi(it.invoice) || '') || ''))
+    return {
+      totale: dovuti.reduce((t: number, it: any) => t + (it.amount || 0), 0) / 100,
+      voci: dovuti.map((it: any) => ({ descrizione: String(it.description || 'Conguaglio'), importo: (it.amount || 0) / 100 })),
+    }
+  } catch { return { totale: 0, voci: [] } }
 }
 
 const idDi = (v: any): string | null => (typeof v === 'string' ? v : v?.id) || null
@@ -114,7 +121,7 @@ async function cartaDa(s: any, sub: any): Promise<string | null> {
 async function analizza(admin: any, s: any, rootId: string) {
   const ids = await sottoAlberoMasterIds(admin, rootId)
   const { data: masters } = await admin.from('masters')
-    .select('id,nome,abbonamento_prezzo,abbonamento_esente,stripe_subscription_id,stripe_stato,pagamento_scaduto_dal')
+    .select('id,nome,abbonamento_prezzo,abbonamento_piano,abbonamento_limite,abbonamento_esente,stripe_subscription_id,stripe_stato,pagamento_scaduto_dal')
     .in('id', ids).neq('id', rootId)
   const paganti = (masters || []).filter((m: any) =>
     !m.abbonamento_esente && m.stripe_subscription_id && m.stripe_stato !== 'canceled')
@@ -133,7 +140,8 @@ async function analizza(admin: any, s: any, rootId: string) {
     const canoneStripe = (voce as any)?.price?.unit_amount != null ? Number((voce as any).price.unit_amount) / 100 : null
     const canone = canoneStripe ?? Number(m.abbonamento_prezzo || 0)
     const fine = (voce as any)?.current_period_end || sub.current_period_end
-    const conguaglio = await conguaglioInSospeso(s, String(sub.customer))
+    const cong = await conguaglioInSospeso(s, String(sub.customer))
+    const conguaglio = cong.totale
     const pm = await cartaDa(s, sub)
 
     // Motivi per NON toccarlo (lo schedule residuo NON esclude: lo si rilascia).
@@ -156,7 +164,8 @@ async function analizza(admin: any, s: any, rootId: string) {
     righe.push({
       master_id: m.id, subscription: sub.id, customer: String(sub.customer), pm,
       schedule: idDi(sub.schedule),
-      nome: m.nome, canone, conguaglio,
+      nome: m.nome, canone, conguaglio, conguaglio_voci: cong.voci,
+      piano: m.abbonamento_piano || null, limite: m.abbonamento_limite || null,
       addebito: (giaAlPrimo || giaPagato || escluso) ? 0 : Math.round((canone + conguaglio) * 100) / 100,
       stato: sub.status, rinnovo_attuale: fine ? new Date(fine * 1000).toISOString().slice(0, 10) : null,
       escluso, gia_al_primo: giaAlPrimo, gia_pagato: giaPagato, sub_trial_end: sub.trial_end,

@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Fragment } from 'react'
 
 const ACCENT = '#f97316'
 const card = { background:'#fff', borderRadius:'8px', border:'1px solid #e8e8e8', padding:'16px' as const }
@@ -35,6 +35,7 @@ export default function AbbonamentoPage() {
   const [allinea, setAllinea] = useState<any>(null)
   const [allineaAzione, setAllineaAzione] = useState('')
   const [sospeso, setSospeso] = useState<any>(null)   // canone Stripe non pagato (addebito fallito)
+  const [conguaglioAperto, setConguaglioAperto] = useState('')  // master_id col dettaglio "perché" aperto
 
   async function carica() {
     setLoading(true)
@@ -51,6 +52,14 @@ export default function AbbonamentoPage() {
     if (esito === 'annullato') setMsg('Pagamento annullato: nessun addebito.')
     if (esito) window.history.replaceState({}, '', window.location.pathname)
   }, [])
+  // Il canone VERO e i conguagli in sospeso stanno su STRIPE, non in tabella (la tabella dice quanto
+  // DOVREBBE pagare, a fatturare è il prezzo agganciato alla subscription: possono divergere in silenzio).
+  // Li carico in silenzio all'apertura (solo root) e li aggancio alla lista per master, così si vede a
+  // colpo d'occhio — master per master — canone reale + conguaglio + il perché, senza premere "Controlla".
+  useEffect(()=>{
+    if (!stato?.isRoot) return
+    fetch('/api/abbonamento/allinea-ciclo').then(r=>r.json()).then(d=>{ if(d && !d.error) setAllinea(d) }).catch(()=>{})
+  }, [stato?.isRoot])
 
   async function cambia(pianoId:string, prezzoNuovo:number) {
     const prezzoAttuale = Number(stato?.prezzo||0)
@@ -234,6 +243,13 @@ export default function AbbonamentoPage() {
     const nCongelati = conta('congelato'), nSenzaCarta = conta('senza_carta'), nRitardo = conta('ritardo')
     const nSenzaPiano = conta('senza_piano'), nMaiUsato = abbonati.filter(maiUsato).length
 
+    // Dato Stripe (canone reale + conguaglio + perché) per master, agganciato alla lista. Fonte autorevole:
+    // a fatturare è il prezzo sulla subscription, non `abbonamento_prezzo`. Vuoto finché non arriva il fetch.
+    const stripeDi: Record<string, any> = {}
+    for (const r of (allinea?.righe || [])) stripeDi[r.master_id] = r
+    const anomalie = allinea?.anomalie || []   // canone su Stripe ≠ listino (allarme che addebita comunque)
+    const pianoTag = (p?: string) => (p || '').replace(/^enterprise_/, '').toUpperCase()   // enterprise_20k → 20K
+
     return (
       <div>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'10px',marginBottom:'16px'}}>
@@ -268,6 +284,25 @@ export default function AbbonamentoPage() {
       )}
       {msg && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px',marginBottom:'14px',fontSize:'13px',color:'#ea580c'}}>{msg}</div>}
 
+        {/* CANONE SU STRIPE ≠ LISTINO. A fatturare è il prezzo agganciato alla subscription, non quello
+            in tabella: possono divergere senza che nulla protesti (il webhook ripiega su metadata.piano e
+            riscrive il piano vecchio — 2/09/2026 su un canone finì un prezzo API da 31€, la tabella diceva
+            139). Ora l'allarme è SEMPRE in cima, non più solo dietro un bottone. */}
+        {!!anomalie.length && (
+          <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'8px',padding:'14px 16px',marginBottom:'14px'}}>
+            <div style={{fontSize:'14px',fontWeight:800,color:'#b91c1c',display:'flex',alignItems:'center',gap:'8px'}}>
+              <span>⚠️</span> Canone su Stripe diverso dal listino — {anomalie.length} master
+            </div>
+            <div style={{fontSize:'12.5px',color:'#7f1d1d',marginTop:'8px',lineHeight:1.7}}>
+              {anomalie.map((a:any,i:number)=>(<div key={i}><strong>{a.nome}</strong> — {a.problema}</div>))}
+            </div>
+            <div style={{fontSize:'11.5px',color:'#991b1b',marginTop:'8px',lineHeight:1.6}}>
+              Ad addebitare è il prezzo che sta su Stripe, non quello in tabella: finché non lo correggi sulla
+              subscription, al rinnovo partirà quella cifra.
+            </div>
+          </div>
+        )}
+
         <div style={{...card, marginBottom:'16px', borderColor:'#fed7aa'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'10px'}}>
             <div style={{flex:1,minWidth:'240px'}}>
@@ -281,27 +316,6 @@ export default function AbbonamentoPage() {
             riall.error ? <div style={{marginTop:'10px',fontSize:'13px',color:'#dc2626'}}>{riall.error}</div>
             : !riall.righe?.length ? <div style={{marginTop:'10px',fontSize:'13px',color:'#16a34a',fontWeight:600}}>✓ Tutto già allineato, niente da fare.</div>
             : <>
-              {/* CANONE SU STRIPE DIVERSO DAL LISTINO. A fatturare e' il prezzo agganciato alla
-                  subscription, non quello in tabella, e i due possono divergere senza che nulla
-                  protesti (il webhook ripiega su metadata.piano e riscrive il piano vecchio). Il
-                  2/09/2026 su un canone master e' finito un prezzo di un piano API da 31 euro: la
-                  tabella diceva 139 e si e' visto solo cercandolo a mano. Qui si vede da solo. */}
-              {!!(allinea.anomalie||[]).length && (
-                <div style={{marginTop:'12px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'8px',padding:'12px 14px'}}>
-                  <div style={{fontSize:'13px',fontWeight:800,color:'#b91c1c',display:'flex',alignItems:'center',gap:'7px'}}>
-                    <span>⚠️</span> Canone su Stripe diverso dal listino — {allinea.anomalie.length} {allinea.anomalie.length===1?'master':'master'}
-                  </div>
-                  <div style={{fontSize:'12.5px',color:'#7f1d1d',marginTop:'7px',lineHeight:1.7}}>
-                    {allinea.anomalie.map((a:any,i:number)=>(
-                      <div key={i}><strong>{a.nome}</strong> — {a.problema}</div>
-                    ))}
-                  </div>
-                  <div style={{fontSize:'11.5px',color:'#991b1b',marginTop:'8px',lineHeight:1.6}}>
-                    Ad addebitare è il prezzo che sta su Stripe, non quello qui in tabella: finché non lo
-                    correggi sulla subscription, al rinnovo partirà quella cifra.
-                  </div>
-                </div>
-              )}
               <div style={{overflowX:'auto' as const,marginTop:'12px'}}>
                 <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
                   <thead><tr style={{background:'#fafafa'}}>
@@ -466,7 +480,7 @@ export default function AbbonamentoPage() {
           <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
             <thead>
               <tr style={{background:'#fafafa'}}>
-                {['Master','Piano','Canone/mese','Ultimo pagamento','Ultima sessione','Usato','Stato'].map(h=>(
+                {['Master','Piano','Prossimo addebito','Ultimo pagamento','Ultima sessione','Usato','Stato'].map(h=>(
                   <th key={h} style={{textAlign:'left' as const,padding:'9px 14px',fontSize:'11px',fontWeight:600,color:'#777',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap' as const}}>{h}</th>
                 ))}
               </tr>
@@ -476,26 +490,54 @@ export default function AbbonamentoPage() {
                 <tr><td colSpan={7} style={{padding:'30px',textAlign:'center' as const,color:'#999',fontSize:'12px'}}>Nessun master in questo filtro</td></tr>
               ) : visibili.map((a:any)=>{
                 const ses = sessioneLabel(a.ultima_sessione)
+                // Aggancio Stripe: canone VERO (agganciato alla subscription) + conguaglio in sospeso + il
+                // perché. Assente per esenti/senza-carta (nessuna subscription) → ripiego sul listino DB.
+                const sr = stripeDi[a.master_id]
+                const canone = sr ? Number(sr.canone||0) : Number(a.prezzo||0)
+                const conguaglio = sr ? Number(sr.conguaglio||0) : 0
+                const anomalia = sr?.anomalia_canone as string | undefined
+                const voci = (sr?.conguaglio_voci || []) as {descrizione:string,importo:number}[]
+                const aperto = conguaglioAperto === a.master_id && conguaglio > 0
                 return (
-                <tr key={a.master_id} style={{borderBottom:'1px solid #f5f5f5'}}>
-                  <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:600}}>{a.master_nome}</td>
-                  <td style={{padding:'9px 14px',color:'#555',whiteSpace:'nowrap' as const}}>{(a.piano||'').replace('enterprise_','Enterprise ').toUpperCase() || <span style={{color:'#c7d2fe',fontWeight:700}}>—</span>}</td>
-                  <td style={{padding:'9px 14px',color:'#1a1a1a',fontWeight:700,whiteSpace:'nowrap' as const}}>€ {Number(a.prezzo||0).toFixed(2)}{a.esente && <span style={{fontSize:'10px',color:'#4338ca',fontWeight:600}}> (gratis)</span>}</td>
-                  <td style={{padding:'9px 14px',color:'#555',whiteSpace:'nowrap' as const}}>
+                <Fragment key={a.master_id}>
+                <tr style={{borderBottom: aperto ? 'none' : '1px solid #f5f5f5'}}>
+                  <td style={{padding:'11px 14px',color:'#1a1a1a',fontWeight:600}}>{a.master_nome}</td>
+                  <td style={{padding:'11px 14px',whiteSpace:'nowrap' as const}}>
+                    {a.piano
+                      ? <span style={{background:'#f1f5f9',color:'#334155',borderRadius:'6px',padding:'3px 9px',fontSize:'11.5px',fontWeight:700}}>Enterprise {pianoTag(a.piano)}</span>
+                      : <span style={{color:'#c7d2fe',fontWeight:700}}>—</span>}
+                  </td>
+                  {/* PROSSIMO ADDEBITO: canone VERO (Stripe) + conguaglio in sospeso + il perché (▾).
+                      Il canone è quello sulla subscription, non `abbonamento_prezzo`: se divergono → rosso ⚠️. */}
+                  <td style={{padding:'11px 14px',whiteSpace:'nowrap' as const}}>
+                    {a.esente
+                      ? <span style={{fontSize:'12.5px',color:'#4338ca',fontWeight:700}}>Gratis{a.scaduto_dal && new Date(a.scaduto_dal).getTime()>Date.now() ? ` · fino al ${new Date(a.scaduto_dal).toLocaleDateString('it-IT')}` : ''}</span>
+                      : <div style={{display:'flex',flexDirection:'column' as const,gap:'3px',alignItems:'flex-start'}}>
+                          <span style={{fontSize:'14px',fontWeight:800,color:anomalia?'#b91c1c':'#1a1a1a'}} title={anomalia||''}>€ {canone.toFixed(2)}{anomalia && ' ⚠️'}</span>
+                          {conguaglio>0 && (
+                            <button onClick={()=>setConguaglioAperto(aperto?'':a.master_id)}
+                              style={{display:'inline-flex',alignItems:'center',gap:'5px',background:'#fff7ed',color:'#c2410c',border:'1px solid #fed7aa',borderRadius:'999px',padding:'2px 9px',fontSize:'11px',fontWeight:700,cursor:'pointer'}}>
+                              + € {conguaglio.toFixed(2)} conguaglio <span style={{opacity:.7,fontWeight:600}}>{aperto?'▾':'perché ›'}</span>
+                            </button>
+                          )}
+                          {conguaglio>0 && <span style={{fontSize:'11px',color:'#777'}}>= € {(canone+conguaglio).toFixed(2)} al prossimo rinnovo</span>}
+                        </div>}
+                  </td>
+                  <td style={{padding:'11px 14px',color:'#555',whiteSpace:'nowrap' as const}}>
                     {a.ultimo_mese_pagato
                       ? <>{meseLabel(a.ultimo_mese_pagato)}<div style={{fontSize:'10.5px',color:'#999'}}>{a.ultimo_metodo === 'carta' ? 'carta' : a.ultimo_metodo || ''}{a.ultimo_pagamento_il ? ` · ${new Date(a.ultimo_pagamento_il).toLocaleDateString('it-IT')}` : ''}</div></>
                       : <span style={{color:'#bbb'}}>mai</span>}
                   </td>
-                  <td style={{padding:'9px 14px',whiteSpace:'nowrap' as const,color: ses.gg===Infinity ? '#dc2626' : ses.gg<=7 ? '#16a34a' : ses.gg<=60 ? '#555' : '#b45309', fontWeight: ses.gg<=7?700:500}}>
+                  <td style={{padding:'11px 14px',whiteSpace:'nowrap' as const,color: ses.gg===Infinity ? '#dc2626' : ses.gg<=7 ? '#16a34a' : ses.gg<=60 ? '#555' : '#b45309', fontWeight: ses.gg<=7?700:500}}>
                     {ses.txt}
                     {a.ultima_sessione && <div style={{fontSize:'10.5px',color:'#999',fontWeight:400}}>{new Date(a.ultima_sessione).toLocaleDateString('it-IT')}</div>}
                   </td>
-                  <td style={{padding:'9px 14px',whiteSpace:'nowrap' as const}}>
+                  <td style={{padding:'11px 14px',whiteSpace:'nowrap' as const}}>
                     {a.spedizioni_totali>0
                       ? <span style={{color:'#1a1a1a',fontWeight:700}}>{Number(a.spedizioni_totali).toLocaleString('it-IT')}</span>
                       : <span style={{background:'#fef3c7',color:'#b45309',borderRadius:'999px',padding:'2px 8px',fontSize:'10.5px',fontWeight:700}}>mai usato</span>}
                   </td>
-                  <td style={{padding:'9px 14px',whiteSpace:'nowrap' as const}}>
+                  <td style={{padding:'11px 14px',whiteSpace:'nowrap' as const}}>
                     {a.esente
                       ? <span style={{background:'#eef2ff',color:'#4338ca',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Esente</span>
                       : a.senza_piano
@@ -511,6 +553,20 @@ export default function AbbonamentoPage() {
                         : <span style={{background:'#fef3c7',color:'#b45309',borderRadius:'999px',padding:'3px 10px',fontSize:'11px',fontWeight:700}}>Nessuna carta</span>}
                   </td>
                 </tr>
+                {aperto && (
+                  <tr style={{borderBottom:'1px solid #f5f5f5',background:'#fffbf5'}}>
+                    <td colSpan={7} style={{padding:'0 14px 12px 14px'}}>
+                      <div style={{fontSize:'12px',color:'#7c2d12',lineHeight:1.7}}>
+                        <div style={{fontWeight:800,marginBottom:'3px'}}>Perché il conguaglio di € {conguaglio.toFixed(2)}</div>
+                        {voci.length
+                          ? voci.map((v,i)=>(<div key={i}>• {v.descrizione} — <b>€ {Number(v.importo).toFixed(2)}</b></div>))
+                          : <div>• Differenza di piano proporzionata ai giorni dell'upgrade, ancora in sospeso.</div>}
+                        <div style={{color:'#9a6b4a',marginTop:'4px'}}>Upgrade a metà mese: si paga solo la differenza sui giorni che restano nel mese, incassata col prossimo rinnovo{sr?.rinnovo_attuale?` (${new Date(sr.rinnovo_attuale).toLocaleDateString('it-IT')})`:''}.</div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               )})}
             </tbody>
           </table>
