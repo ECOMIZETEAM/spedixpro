@@ -140,9 +140,23 @@ export async function costruisciCatena(
         if (!m.parent_listino_id) {
           return { catena, errore: `Il master "${m.nome}" non ha un listino corrieri né un listino assegnato.` }
         }
+        // IL RIPIEGO SUL LISTINO DEL PADRE DEVE PREZZARE QUESTO CONTRATTO, NON IL PIU' ECONOMICO.
+        // Senza corriereId, calcolaPrezzoListino sceglie la tariffa piu' bassa di TUTTO il listino: una
+        // spedizione Poste Express M il cui contratto NON copre la destinazione (es. il sotto-master non
+        // prezza Venezia/Laguna → il suo listino corrieri la esclude, calcolato=false) finiva prezzata con
+        // "ITALIA V" di Poste Business Express V a 3,40 €, mentre a MULTIEXPRESS quella spedizione costa
+        // 12,63 €: la differenza la assorbiva il detentore, in silenzio (caso vero 3UW1UHA260742, Caorle VE;
+        // ~1.275 € in 14 giorni). La guardia per-corriere ESISTE gia' in calcolaPrezzoListino ma scatta solo
+        // se le passi il corriere. Il corriere da prezzare e' quello del PADRE che ha assegnato il listino
+        // (le fasce di parent_listino usano il corriere del padre). Se quel contratto non prezza la
+        // destinazione → niente tariffa → la catena si ferma qui: un sotto-master non rivende cio' che non ha.
+        const corrPadre = params.corriereNome
+          ? await corriereDiMasterPerNome(adminDb, m.parent_master_id, params.corriereNome)
+          : null
         const ris = await calcolaPrezzoListino(adminDb, {
           listinoId: m.parent_listino_id, provincia: params.provincia,
           packages: params.packages, cap: params.cap, paese: params.paese, citta: params.citta,
+          corriereId: corrPadre,
           zonaForzata: params.zonaForzata,
         })
         if (!ris) return { catena, errore: `Nessuna tariffa nel listino del master "${m.nome}".` }
