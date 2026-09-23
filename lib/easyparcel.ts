@@ -592,11 +592,11 @@ async function chiamaWaybill(apikey: string, idOrdine: string, base64: boolean, 
   const details: any = { order_id: Number(idOrdine) || idOrdine, waybill_base64: base64 ? 'Y' : 'N' }
   if (singole) details.single_waybills = 'Y'
   try {
-    return await chiama(apikey, 'getwaybill', details)
+    return await chiama(apikey, 'getwaybill', { details })
   } catch (e: any) {
     if (!singole) throw e
     delete details.single_waybills
-    const d = await chiama(apikey, 'getwaybill', details)
+    const d = await chiama(apikey, 'getwaybill', { details })
     console.warn('[DVA] getwaybill rifiutato con single_waybills, ripreso senza (ordine ' + idOrdine + ')')
     return d
   }
