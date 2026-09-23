@@ -71,6 +71,22 @@ export default function CondivisioniPage() {
     setCodice(''); setRisolto(null); setCorriereSel(''); setMarkupVal(''); carica()
   }
 
+  async function accetta(id: string, contratto: string, fornitore: string) {
+    if (!await dialog.confirm({ title: 'Accettare il contratto?', message: `Accetti "${contratto}" da ${fornitore}. Comparirà tra i tuoi corrieri e potrai rivenderlo. Il costo per te è il listino d'ingrosso del fornitore.`, confirmText: 'Accetta' })) return
+    setAzione('acc_' + id); setMsg('')
+    const d = await fetch(`/api/condivisioni/${id}/accetta`, { method: 'POST' }).then(r => r.json()).catch(() => ({})); setAzione('')
+    if (d?.error) { setMsg(d.error); return }
+    setMsg(`✓ Accettato "${d.contratto}". Lo trovi tra i tuoi corrieri (in attivazione).`)
+    carica()
+  }
+  async function rifiuta(id: string, contratto: string, fornitore: string) {
+    if (!await dialog.confirm({ title: 'Rifiutare il contratto?', message: `Rifiuti "${contratto}" da ${fornitore}. Potrà ricondividertelo più avanti.`, danger: true, confirmText: 'Rifiuta' })) return
+    setAzione('rif_' + id)
+    const d = await fetch(`/api/condivisioni/${id}/rifiuta`, { method: 'POST' }).then(r => r.json()).catch(() => ({})); setAzione('')
+    if (d?.error) { setMsg(d.error); return }
+    carica()
+  }
+
   async function revoca(id: string, contratto: string, compratore: string) {
     if (!await dialog.confirm({ title: 'Revocare la condivisione?', message: `Revochi "${contratto}" a ${compratore}. Resta nello storico, ma non sarà più utilizzabile.`, danger: true, confirmText: 'Revoca' })) return
     setAzione('rev_' + id)
@@ -196,8 +212,13 @@ export default function CondivisioniPage() {
                     <td style={{ padding: '9px 12px', fontWeight: 600, color: '#1a1a1a' }}>{r.contratto}</td>
                     <td style={{ padding: '9px 12px', color: '#555' }}>{r.fornitore}</td>
                     <td style={{ padding: '9px 12px' }}>{badge(r.stato)}</td>
-                    <td style={{ padding: '9px 12px', textAlign: 'right' }}>
-                      {r.stato === 'in_attesa' && <span style={{ fontSize: '11px', color: '#9a6b4a' }}>Accetta — a breve</span>}
+                    <td style={{ padding: '9px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {r.stato === 'in_attesa' && <span style={{ display: 'inline-flex', gap: '6px' }}>
+                        <button onClick={() => accetta(r.id, r.contratto, r.fornitore)} disabled={!!azione}
+                          style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>{azione === 'acc_' + r.id ? '…' : 'Accetta'}</button>
+                        <button onClick={() => rifiuta(r.id, r.contratto, r.fornitore)} disabled={!!azione}
+                          style={{ background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>{azione === 'rif_' + r.id ? '…' : 'Rifiuta'}</button>
+                      </span>}
                     </td>
                   </tr>
                 ))}

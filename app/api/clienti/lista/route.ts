@@ -15,6 +15,7 @@ export async function GET(req: NextRequest) {
   let qCli = supabase.from('clienti')
     .select('id,ragione_sociale,so_indirizzo,so_citta,so_provincia,so_cap,sl_citta,email,telefono,piva,codice_cliente,attivo,listino_cliente_id,tipo_contratto,credito,listini_clienti(nome)')
     .eq('master_id', utente?.master_id)
+    .eq('ledger', false)   // i clienti-ledger (contabilità delle condivisioni) non compaiono nella lista
   // Agente: solo i clienti a lui assegnati.
   if (isAgente(utente)) qCli = qCli.eq('agente', nomeAgente(utente))
   const { data } = await qCli.order('ragione_sociale')
