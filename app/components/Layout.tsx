@@ -118,6 +118,7 @@ const NAV: NavItem[] = [
     { label: 'Logo', href: '/dashboard/impostazioni/logo' },
     { label: 'Filiale / Rete Interna', href: '/dashboard/impostazioni/filiale' },
     { label: 'Corrieri', href: '/dashboard/corrieri' },
+    { label: 'Condivisione contratti', href: '/dashboard/condivisioni' },
     { label: 'SMS', href: '/dashboard/reports/storico-sms' },
     { label: 'Staff', href: '/dashboard/impostazioni/staff' },
     { label: 'Permessi', href: '/dashboard/impostazioni/permessi' },
