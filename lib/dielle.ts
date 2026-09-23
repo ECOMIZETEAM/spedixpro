@@ -93,7 +93,8 @@ export type DielleSpedInput = {
 }
 
 const oggiYmd = () => { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}` }
-const due = (n: unknown) => (Number(n) || 0).toFixed(2)
+// Dielle vuole il decimale con la VIRGOLA (esempio reale della doc: pesocolli "10,00"), non col punto.
+const due = (n: unknown) => (Number(n) || 0).toFixed(2).replace('.', ',')
 const recapito = (r: DielleRecapito) => ({
   ragione_sociale: r.ragione_sociale, indirizzo: r.indirizzo, civico: r.civico || '',
   comune: r.comune, cap: String(r.cap || ''), provincia: (r.provincia || '').toUpperCase(),
