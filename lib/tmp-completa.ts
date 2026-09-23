@@ -29,7 +29,7 @@ export async function completaTmp(
   const esito: EsitoTmp = { esaminate: 0, completate: 0, soloEtichette: 0, ancoraNulla: 0, saltate: 0 }
 
   let q = admin.from('spedizioni')
-    .select('id,numero,colli,corriere_id,stato,colli_dettaglio,created_at,corrieri(tipo,credenziali)')
+    .select('id,numero,colli,corriere_id,stato,colli_dettaglio,created_at,dest_nome,corrieri(tipo,credenziali)')
     .like('numero', 'TMP-%')
     // UNA SPEDIZIONE IN CODA DI ANNULLO MANUALE E' ANCORA VIVA PRESSO IL FORNITORE, e va completata
     // come le altre: senza il numero vero nemmeno i suoi movimenti verrebbero risistemati, e chi deve
@@ -115,11 +115,20 @@ export async function completaTmp(
       // ANCHE L'ESTRATTO CONTO: il movimento porta il numero nella descrizione e nel riferimento. Se
       // resta quello provvisorio, il cliente si ritrova addebitata una spedizione con un numero che
       // non esiste da nessuna parte. Cambia solo il testo — mai l'importo.
+      //
+      // DUE MODI DI SCRIVERE QUELLA RIGA, e servono entrambi. Le righe vecchie hanno il numero
+      // provvisorio dentro al testo e si sistemano sostituendolo. Quelle nuove NON lo nominano: dicono
+      // "In attesa di lettera di vettura", e vanno RICOSTRUITE dal numero vero. Guardare solo le prime
+      // e' il guasto del 23/09: il riferimento veniva corretto qui, e proprio per questo la rete di
+      // sicurezza del cron — che pesca le righe dal riferimento ancora provvisorio — non le ritrovava
+      // piu'. Dodici righe su quattro spedizioni sono rimaste senza numero in modo definitivo.
+      const { descrizioneSpedizione, ATTESA_LDV } = await import('@/lib/movimenti')
       const { data: mv } = await admin.from('movimenti').select('id,descrizione,riferimento').eq('spedizione_id', s.id)
       for (const m of (mv || [])) {
         const t = String(m.descrizione || '')
         const upd: any = {}
         if (t.includes(s.numero)) upd.descrizione = t.split(s.numero).join(patch.numero)
+        else if (t.startsWith(ATTESA_LDV)) upd.descrizione = descrizioneSpedizione(patch.numero, (s as any).dest_nome)
         if (String(m.riferimento || '') === s.numero) upd.riferimento = patch.numero
         if (Object.keys(upd).length) await admin.from('movimenti').update(upd).eq('id', m.id)
       }

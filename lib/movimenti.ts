@@ -84,8 +84,15 @@ export async function registraMovimentoMaster(
 //
 // Sta qui e non nelle tre rotte che lo scrivevano a mano: e' la stessa lezione del comune mancante
 // nella cascata — un testo copiato in tre punti diventa tre testi diversi al primo ritocco.
+// La frase e' una COSTANTE e non un letterale ripetuto perche' chi ripara queste righe piu' tardi
+// (il completamento del numero provvisorio, la rete di sicurezza del cron) deve riconoscerle: la
+// descrizione NON contiene il numero provvisorio, quindi cercarlo dentro non le trova. E' successo:
+// dodici righe di estratto conto sono rimaste intestate a questa frase su spedizioni che la lettera
+// di vettura ce l'avevano gia'.
+export const ATTESA_LDV = 'In attesa di lettera di vettura'
+
 export function descrizioneSpedizione(numero: string, destNome?: string | null): string {
-  const testa = String(numero || '').startsWith('TMP-') ? 'In attesa di lettera di vettura' : String(numero || '')
+  const testa = String(numero || '').startsWith('TMP-') ? ATTESA_LDV : String(numero || '')
   const coda = String(destNome || '').trim()
   return coda ? `${testa} - ${coda}` : testa
 }

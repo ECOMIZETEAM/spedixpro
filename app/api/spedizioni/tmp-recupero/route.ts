@@ -180,12 +180,26 @@ async function sistemaMovimenti(admin: any): Promise<number> {
   // La descrizione ora dice "In attesa di lettera di vettura" invece di esibire il TMP: e' quello
   // che legge il cliente, e un codice che non esiste da nessuna parte lo mandava in confusione.
   // Il riferimento resta il TMP — e' interno — ed e' l'aggancio buono per ritrovare queste righe.
-  const { data: mv } = await admin.from('movimenti')
+  const { ATTESA_LDV } = await import('@/lib/movimenti')
+  const { data: perRiferimento } = await admin.from('movimenti')
     .select('id,descrizione,riferimento,spedizione_id')
     .like('riferimento', 'TMP-%')
     .not('spedizione_id', 'is', null)
     .limit(300)
-  if (!mv?.length) return 0
+
+  // E ANCHE QUELLE CHE IL RIFERIMENTO NON CE L'HANNO PIU'. Chi completa il numero corregge il
+  // riferimento subito; se in quel passaggio la descrizione non viene ricostruita, la riga esce dalla
+  // ricerca qui sopra e nessuno la guarda mai piu'. Sono rimaste cosi' per giorni, con l'addebito
+  // giusto e nessun numero accanto. Si pescano dalla frase, che e' l'unica traccia che resta.
+  const { data: perFrase } = await admin.from('movimenti')
+    .select('id,descrizione,riferimento,spedizione_id')
+    .like('descrizione', ATTESA_LDV + '%')
+    .not('spedizione_id', 'is', null)
+    .limit(300)
+
+  const mv = [...(perRiferimento || []), ...(perFrase || [])]
+    .filter((m: any, i: number, a: any[]) => a.findIndex((x: any) => x.id === m.id) === i)
+  if (!mv.length) return 0
 
   const { data: sped } = await admin.from('spedizioni')
     .select('id,numero,dest_nome').in('id', [...new Set(mv.map((m: any) => m.spedizione_id))])
