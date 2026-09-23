@@ -75,6 +75,27 @@ export default function PuntoPosteSelettore({ corriereId, lato, capIniziale, tip
 
   useEffect(() => { if (aperto && cap && !punti.length && !loading) cerca({ cap }) /* eslint-disable-next-line */ }, [aperto])
 
+  // IL CONTRATTO CAMBIA SOTTO I PIEDI DEL SELETTORE, E LA LISTA DEVE MORIRE CON LUI.
+  //
+  // Quando l'utente torna indietro e sceglie un altro contratto, questo componente NON viene
+  // ricostruito: resta lo stesso nodo, cambia solo `corriereId`. La lista `punti` era rimasta quella
+  // della ricerca precedente, e il punto scelto da lì apparteneva a un ALTRO corriere. Ogni corriere
+  // ha i suoi codici e non si mescolano: il fornitore rifiuta la creazione con "nessun PUDO trovato
+  // per ID ...", e la spedizione non parte.
+  //
+  // GUASTO VERO (23/09/2026, segnalato da un master): creazioni su Fermopoint BRT — che usa codici
+  // tipo IT23558 — arrivate con ITEBO09208P (un Locker) e con 11017 (un Ufficio Postale). Entrambi
+  // codici validi, ma del corriere sbagliato: erano i risultati rimasti a video dal contratto di prima.
+  const ultimoCorriere = useRef(corriereId)
+  useEffect(() => {
+    if (ultimoCorriere.current === corriereId) return   // primo montaggio: non si tocca niente
+    ultimoCorriere.current = corriereId
+    setPunti([]); setErr(''); setEvid(''); setFiltroCat(null); setAperto(false)
+    setCap((capIniziale || '').replace(/\D/g, '').slice(0, 5))
+    onChange(null)
+    /* eslint-disable-next-line */
+  }, [corriereId])
+
   function vicinoAMe() {
     if (!navigator.geolocation) { setErr('Geolocalizzazione non disponibile: cerca per CAP.'); return }
     setErr(''); setLoading(true)

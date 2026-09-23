@@ -57,7 +57,13 @@ export async function GET(req: NextRequest) {
       const punti = await spediamoproPudoSearch(cred.authcode, { courier, cap, city: citta || undefined })
       return NextResponse.json({ punti, tipologia: courier })
     } catch (e: any) {
-      console.error('[PUNTI-POSTE][SP] pudo KO', String(e?.message || e).slice(0, 150))
+      const msg = String(e?.message || e)
+      console.error('[PUNTI-POSTE][SP] pudo KO', msg.slice(0, 150))
+      // UN CAP CHE IL CORRIERE NON CONOSCE NON E' UN GUASTO NOSTRO. Il fornitore risponde 400 sui CAP
+      // generici di citta' (40100 Bologna: rifiutato, mentre 40121 torna 100 punti). Dire "servizio non
+      // disponibile" manda l'utente a cercare un problema che non c'e': la cosa da correggere e' il CAP.
+      if (/status code 400|bad request/i.test(msg))
+        return NextResponse.json({ error: 'Nessun punto per questo CAP: controlla il CAP del destinatario (i CAP generici di città non sono validi).' }, { status: 400 })
       return NextResponse.json({ error: 'Ricerca punti non disponibile in questo momento.' }, { status: 502 })
     }
   }

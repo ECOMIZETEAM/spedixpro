@@ -145,6 +145,12 @@ export function erroreCorrierePulito(raw: any): string {
   const t = String(raw || '').toLowerCase()
   if (/timed\s*out|timeout|0 bytes received/.test(t))
     return 'Il corriere non ha risposto in tempo (rallentamento momentaneo dei suoi sistemi). Riprova tra qualche istante.'
+  // PUNTO DI RITIRO DI UN ALTRO CORRIERE. Ogni corriere ha i suoi codici (Fermopoint IT23558, Locker
+  // ITEBO09208P, Ufficio Postale 11017) e non si mescolano: se il punto arriva dalla lista di un
+  // contratto diverso, il corriere risponde "nessun PUDO trovato per ID ...". Il messaggio grezzo non
+  // dice all'utente cosa fare — e la cosa da fare e' una sola: riscegliere il punto.
+  if (/pudo|punto di ritiro|fermopoint|locker/.test(t))
+    return 'Il punto di ritiro selezionato non è valido per questo contratto: riscegli il punto di consegna (ogni corriere ha i suoi punti).'
   if (/\bphone\b|telefono/.test(t))
     return 'Telefono del mittente mancante o non valido: inserisci un numero di telefono (solo cifre) e riprova.'
   if (/dimension|misur|measure|\bsize\b|volume|lato|length|width|height|weight|\bpeso\b|\bkg\b|oversiz|too (large|big|heavy)/.test(t)) {
