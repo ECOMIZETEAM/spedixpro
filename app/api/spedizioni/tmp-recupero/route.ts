@@ -25,106 +25,13 @@ export async function GET(req: NextRequest) {
   const _cron = bloccaCronNonAutorizzato(req); if (_cron) return _cron
   const admin = createAdminSupabase()
 
-  // SOLO chi ha il numero provvisorio, e solo sul contratto che lo produce.
-  const { data: ferme } = await admin.from('spedizioni')
-    .select('id,numero,colli,corriere_id,stato,colli_dettaglio,created_at,corrieri(tipo,credenziali)')
-    .like('numero', 'TMP-%')
-    // UNA SPEDIZIONE IN CODA DI ANNULLO MANUALE E' ANCORA VIVA PRESSO IL FORNITORE, e va recuperata
-    // come le altre. Escluderla creava un anello chiuso: il recupero non la guardava piu', e senza
-    // il numero vero nemmeno i suoi movimenti venivano risistemati (riga piu' sotto: si salta
-    // finche' il numero comincia per TMP). Restava un numero provvisorio per sempre, nessuna
-    // etichetta, e l'addebito gia' fatto a tutti e tre i livelli con un riferimento che il fornitore
-    // non conosce — quindi l'annullo manuale non era nemmeno eseguibile, perche' chi lo deve fare
-    // non ha una lettera di vettura da citare. E' il caso di TMP-25681381, 18,52 euro fermi li'.
-    .not('stato', 'in', '(annullata)')
-    // Oltre una settimana la lettera di vettura non arriva piu': quella spedizione va guardata a
-    // mano, non ritentata all'infinito. Il limite tiene anche la ricerca leggera su una tabella
-    // che cresce di 1.500 righe al giorno.
-    .gte('created_at', new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString())
-    .order('created_at', { ascending: true })
-    .limit(50)
-
-  let completate = 0, soloEtichette = 0, ancoraNulla = 0, saltate = 0
-  const { easyparcelWaybillGrezza, unisciEtichette } = await import('@/lib/easyparcel')
-
-  for (const s of (ferme || [])) {
-    const corr: any = (s as any).corrieri
-    // Il numero provvisorio nasce solo sul ramo DVA: su qualsiasi altro tipo non si tocca niente.
-    if (corr?.tipo !== 'easyparcel') { saltate++; continue }
-    const apikey = corr?.credenziali?.apikey
-    if (!apikey) { saltate++; continue }
-
-    const ordine = String(s.numero).replace(/^TMP-/, '')
-    let w: any = null
-    try {
-      w = await easyparcelWaybillGrezza(apikey, ordine, Number((s as any).colli) || 1)
-    } catch (e: any) {
-      console.warn('[TMP] waybill non ancora disponibile', s.numero, e?.message)
-      ancoraNulla++
-      continue
-    }
-
-    const patch: any = {}
-
-    // LE ETICHETTE SI SALVANO ANCHE SENZA LETTERA DI VETTURA.
-    // Sono valide di per se': il pacco con quelle parte. Buttarle perche' manca un altro campo
-    // e' il motivo per cui questi pacchi sono rimasti fermi.
-    const singole: string[] = (w?.singole || []).map((x: any) => x?.pdfBase64).filter(Boolean)
-    if (singole.length) {
-      const unito = (await unisciEtichette(singole)) || w?.pdfBase64
-      if (unito) patch.etichetta_url = `data:application/pdf;base64,${unito}`
-      const dett = Array.isArray(s.colli_dettaglio) ? [...s.colli_dettaglio] : []
-      if (dett.length) {
-        for (let i = 0; i < dett.length; i++) {
-          if (singole[i]) dett[i] = {
-            ...dett[i],
-            etichetta_url: `data:application/pdf;base64,${singole[i]}`,
-            numero: w.singole[i]?.numero || dett[i]?.numero,
-          }
-        }
-        patch.colli_dettaglio = dett
-      }
-    } else if (w?.pdfBase64) {
-      patch.etichetta_url = `data:application/pdf;base64,${w.pdfBase64}`
-    }
-
-    // IL NUMERO si cambia solo se la LDV c'e' davvero ed e' diversa. Un numero e' l'identita' della
-    // spedizione: sta nei movimenti, nelle distinte, sull'etichetta gia' stampata. Non si tocca
-    // per un valore vuoto o dubbio.
-    const ldv = String(w?.numero || '').trim()
-    if (ldv && ldv !== s.numero) {
-      // Se quel numero esiste gia' su un'altra spedizione, non si sovrascrive niente: si segnala.
-      const { data: gia } = await admin.from('spedizioni').select('id').eq('numero', ldv).neq('id', s.id).maybeSingle()
-      if (gia) {
-        console.error('[TMP] LDV gia in uso da un altra spedizione, non riassegnata', ldv, s.numero)
-      } else {
-        patch.numero = ldv
-        patch.tracking_number = ldv
-      }
-    }
-    // Il codice di ritiro NON si scrive qui: vive sulla riga del ritiro, non sulla spedizione, e
-    // ha gia' il suo recupero. Toccarlo da qui vorrebbe dire scrivere su una colonna che non esiste.
-
-    if (!Object.keys(patch).length) { ancoraNulla++; continue }
-    const { error } = await admin.from('spedizioni').update(patch).eq('id', s.id)
-    if (error) { console.error('[TMP] aggiornamento fallito', s.numero, error.message); continue }
-
-    if (patch.numero) {
-      completate++
-      console.log('[TMP] completata', s.numero, '->', patch.numero)
-      // ANCHE L'ESTRATTO CONTO. Il movimento porta il numero scritto nella descrizione: se resta
-      // quello provvisorio, il cliente si ritrova addebitata una spedizione con un numero che non
-      // esiste da nessuna parte e non sa a cosa corrisponde. Cambia solo il testo — mai l'importo.
-      const { data: mv } = await admin.from('movimenti').select('id,descrizione').eq('spedizione_id', s.id)
-      for (const m of (mv || [])) {
-        const t = String(m.descrizione || '')
-        if (t.includes(s.numero)) {
-          await admin.from('movimenti').update({ descrizione: t.split(s.numero).join(patch.numero) }).eq('id', m.id)
-        }
-      }
-    }
-    else { soloEtichette++; console.log('[TMP] recuperate solo le etichette', s.numero) }
-  }
+  // I NUMERI PROVVISORI LI COMPLETA IL GIRO VELOCE (/api/spedizioni/tmp-lampo, ogni 2 minuti):
+  // la regola sta in lib/tmp-completa, chiamata da li', da qui e dal pulsante "Riprova adesso" del
+  // cliente. Qui resta come RETE DI SICUREZZA — se il giro veloce saltasse, ogni quarto d'ora si
+  // rimedia — ed e' innocuo ripeterlo: chi ha gia' il numero vero non viene piu' selezionato.
+  const { completaTmp } = await import('@/lib/tmp-completa')
+  const tmp = await completaTmp(admin, { limite: 50 })
+  const { esaminate, completate, soloEtichette, ancoraNulla, saltate } = tmp
 
   // ── SECONDA PARTE: I MULTICOLLO SENZA LE ETICHETTE DEI SINGOLI COLLI ──
   //
@@ -179,7 +86,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     etichetteArchiviate, etichetteLiberate,
-    esaminate: (ferme || []).length,
+    esaminate,
     completate,            // numero provvisorio sostituito con la LDV vera
     soloEtichette,         // etichette recuperate, la LDV non c'e' ancora
     ancoraNulla,           // il provider non ha ancora niente

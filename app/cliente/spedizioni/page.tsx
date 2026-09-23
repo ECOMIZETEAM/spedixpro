@@ -6,7 +6,8 @@ import AssistenzaTicketButton from '@/app/components/AssistenzaTicketButton'
 import DettaglioSpedizione from '@/app/components/DettaglioSpedizione'
 import SchedaRipesatura from '@/app/components/SchedaRipesatura'
 import { fmtPeso } from '@/lib/peso'
-import { ldvProvvisoria, LDV_IN_ELABORAZIONE } from '@/lib/numero-spedizione'
+import { ldvProvvisoria } from '@/lib/numero-spedizione'
+import LdvInElaborazione from '@/app/components/LdvInElaborazione'
 import { dataEventoIt } from '@/lib/tracking-eventi'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 
@@ -562,7 +563,7 @@ async function apriTracking(s: any) {
                       </td>
                       <td style={{padding:'9px 12px'}}>
                         {ldvProvvisoria(s.numero)
-                          ? <span title="Il corriere sta ancora assegnando la lettera di vettura: il numero definitivo comparirà a breve." style={{display:'inline-flex',alignItems:'center',gap:'4px',fontWeight:'700',color:'#b45309',background:'#fef3c7',border:'1px solid #fde68a',borderRadius:'10px',padding:'2px 8px',fontSize:'11px',whiteSpace:'nowrap' as const}}>⏳ {LDV_IN_ELABORAZIONE}</span>
+                          ? <LdvInElaborazione id={s.id} createdAt={s.created_at} onCompletata={()=>carica(pagina)} />
                           : <button onClick={()=>apriTracking(s)} style={{fontWeight:'700',color:'#f97316',background:'none',border:'none',cursor:'pointer',fontSize:'13px',padding:0,textDecoration:'underline'}}>
                               {s.numero}
                             </button>}

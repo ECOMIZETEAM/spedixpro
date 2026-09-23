@@ -44,6 +44,10 @@
       "schedule": "0 6 * * *"
     },
     {
+      "path": "/api/spedizioni/tmp-lampo",
+      "schedule": "*/2 * * * *"
+    },
+    {
       "path": "/api/spedizioni/tmp-recupero",
       "schedule": "*/15 * * * *"
     },
