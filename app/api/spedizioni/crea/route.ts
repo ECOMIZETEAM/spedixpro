@@ -1533,10 +1533,11 @@ export async function POST(req: NextRequest) {
         const ldvAllaCreazione = !!ldv
         const idOrdineBg = ordine.idOrdine
         const vuoleRitiroBg = _ritiroDva
+        const colliBg = packages.length   // multicollo: servono le etichette per-collo (vedi lib/easyparcel)
         after(async () => {
           try {
             const { easyparcelWaybill: wb, unisciEtichette: unisci } = await import('@/lib/easyparcel')
-            const w = await wb(apikey, idOrdineBg, 8, 4000, vuoleRitiroBg, 30000)
+            const w = await wb(apikey, idOrdineBg, 8, 4000, vuoleRitiroBg, 30000, colliBg)
             const upd: any = {}
             if (w.numero) { upd.numero = w.numero; upd.tracking_number = w.numero }
             // Il codice di prenotazione del ritiro viaggia con la lettera di vettura: se non era
