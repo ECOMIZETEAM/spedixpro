@@ -41,8 +41,11 @@ La condivisione è **per-contratto**, decisa dal venditore: marca quali suoi con
 ## Connettersi: il codice master (niente elenco di aziende)
 
 Nessuno naviga la lista dei master registrati. Ogni master ha un **codice** (`masters.codice_condivisione`),
-**lungo e casuale** (non enumerabile), **rigenerabile**. Per condividere, il venditore deve **avere il
-codice** del compratore — che glielo passa fuori piattaforma.
+**lungo e casuale** (non enumerabile) e **PERMANENTE** — niente "rigenera": è come un numero di conto, lo
+dai e non cambia (cambiarlo dopo averlo distribuito è un footgun senza vantaggi; contro un codice molesto
+basta l'ACCETTA). L'unicità a qualunque scala la garantisce il DB: **UNIQUE index** + un **trigger** che
+alla creazione di ogni master genera un codice non ancora usato (loop di collisione). Per condividere, il
+venditore deve **avere il codice** del compratore — che glielo passa fuori piattaforma.
 
 Flusso:
 1. Il compratore copia il **suo codice** dal portale, lo passa al venditore.
@@ -112,8 +115,10 @@ riusa il canale **webhook in uscita** (4 eventi, HMAC) già esistente.
 
 Additivo, non tocca nulla di esistente:
 
-- `masters.codice_condivisione text` — unico, casuale (non enumerabile), rigenerabile. Scritto solo
-  da service-role (non nel set auto-scrivibile dal master). Generato per tutti i master esistenti.
+- `masters.codice_condivisione text` — unico, casuale (non enumerabile), **permanente** (niente
+  rigenera). Unicità garantita da **UNIQUE index** + trigger `trg_masters_codice_condivisione` che alla
+  creazione genera un codice libero (`fn_codice_condivisione_unico`, loop di collisione, security definer,
+  non RPC-callable). Generato per tutti i master esistenti (41/41 distinti).
 - `corrieri_condivisi` (oggi scheletro: id, corriere_id [del venditore], master_id [compratore],
   created_at) — si estende con:
   - `stato text default 'in_attesa'` — in_attesa | attiva | rifiutata | revocata
