@@ -249,6 +249,23 @@ export async function POST(req: NextRequest) {
   // tutti gli altri per lasciare traccia sulla spedizione che il ritiro e' stato chiesto.
   const _vuoleRitiro = body.richiediRitiro === true && !!body.dataRitiro
   const _pomeriggio = String(body.orarioRitiro || '').toLowerCase().startsWith('pom')
+
+  // IL PUNTO DI CONSEGNA DEVE VENIRE DAL CONTRATTO CON CUI SI SPEDISCE.
+  //
+  // Ogni corriere ha i suoi codici e non si mescolano: Fermopoint IT23558, Locker ITEBO09208P,
+  // PuntoPoste ZA045, Ufficio Postale 11017. Un codice giusto ma del corriere sbagliato fa rifiutare
+  // la creazione ("nessun PUDO trovato per ID ..."), e la spedizione non nasce.
+  //
+  // E' SUCCESSO DAVVERO (21-23/09): creazioni su Fermopoint e su PuntoPoste arrivate con codici
+  // InPost. Il selettore ora azzera la lista quando cambia contratto, ma quella difesa vive nel
+  // browser — e un browser con la pagina aperta da prima del rilascio continua a sbagliare, come si e'
+  // visto nei minuti successivi. Qui il punto porta con se' il contratto da cui e' stato pescato e si
+  // controlla PRIMA di comprare: e' l'unica porta da cui passano tutti, vecchi browser compresi.
+  const _puntoDaAltroContratto = String(body.puntoArrivoCorriereId || '').trim()
+  if (_puntoDaAltroContratto && String(body.puntoArrivo || '').trim() && _puntoDaAltroContratto !== String(corriereRecord.id)) {
+    console.warn('[CREA][PUNTO] punto di un altro contratto', { scelto_su: _puntoDaAltroContratto, si_spedisce_con: corriereRecord.id, codice: String(body.puntoArrivo) })
+    return NextResponse.json({ error: 'Il punto di consegna selezionato appartiene a un altro contratto: riscegli il punto (ogni corriere ha i suoi punti).' }, { status: 400 })
+  }
   // *** Controllo misure massime del corriere (settings.misure_max) ***
   // *** Controllo multicollo ***
   if (packages.length > 1 && (corriereRecord as any)?.multicollo === false) {

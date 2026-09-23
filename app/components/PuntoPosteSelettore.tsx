@@ -3,7 +3,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { etichettaTipologia, etichettaCategoria } from '@/lib/punti-poste'
 
 // Punto scelto (quello che serve alla creazione: il codice va in pudo_destinatario).
-export type PuntoScelto = { codice: string; nome: string; indirizzo: string; cap: string; localita: string; provincia: string }
+//
+// `corriereId` NON serve alla creazione: serve a DIMOSTRARLA. Il punto si porta dietro da quale
+// contratto e' stato pescato, e il server rifiuta se non e' quello con cui si sta spedendo. Senza
+// questa firma l'unica difesa e' il browser, e un browser con la pagina aperta da prima di un
+// rilascio continua a sbagliare: e' esattamente quello che e' successo il 23/09.
+export type PuntoScelto = { codice: string; nome: string; indirizzo: string; cap: string; localita: string; provincia: string; corriereId?: string }
 
 // Leaflet caricato da CDN al volo (nessuna dipendenza npm): la mappa è un DI PIÙ sopra la lista —
 // se il CDN non è raggiungibile, resta la lista per distanza e la ricerca funziona lo stesso.
@@ -106,7 +111,7 @@ export default function PuntoPosteSelettore({ corriereId, lato, capIniziale, tip
     )
   }
 
-  const scegli = (p: any) => { onChange({ codice: p.codice, nome: p.nome, indirizzo: p.indirizzo, cap: p.cap, localita: p.localita, provincia: p.provincia }); setAperto(false) }
+  const scegli = (p: any) => { onChange({ codice: p.codice, nome: p.nome, indirizzo: p.indirizzo, cap: p.cap, localita: p.localita, provincia: p.provincia, corriereId }); setAperto(false) }
 
   // Porta la mappa su un punto e apre il popup (usato dall'hover/click sulla lista).
   const vaiAlPunto = (p: any) => {

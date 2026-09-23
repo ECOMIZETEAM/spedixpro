@@ -379,6 +379,8 @@ export default function NuovaSpedizioneCliente() {
         // del punto (per l'etichetta: il pacco va al punto, non alla via del destinatario).
         depositoTipo: depositoTipo || undefined, puntoArrivo: puntoArrivo?.codice || undefined,
         puntoArrivoAddr: puntoArrivo ? { nome: puntoArrivo.nome, indirizzo: puntoArrivo.indirizzo, cap: puntoArrivo.cap, localita: puntoArrivo.localita, provincia: puntoArrivo.provincia } : undefined,
+        // Da quale contratto viene il punto: il server rifiuta se non e' quello con cui si spedisce.
+        puntoArrivoCorriereId: puntoArrivo?.corriereId || undefined,
         // Ritiro: sui contratti DVA si prenota SOLO insieme all'ordine (il corriere non ha una
         // chiamata per aggiungerlo dopo), quindi la richiesta va passata gia' qui.
         richiediRitiro, dataRitiro:ritiroData, orarioRitiro:ritiroOrario
