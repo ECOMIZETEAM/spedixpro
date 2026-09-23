@@ -20,7 +20,7 @@ import { EMAIL_PER_CORRIERE,
 } from '@/lib/spediamopro'
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
 import { normalizzaPaese } from '@/lib/paesi'
-import { calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
+import { calcolaPrezzoCorriereDettaglio, parseScaglioniSupp, scaglioniPerPeso } from '@/lib/pricing'
 // La sigla neutra al posto del tipo del contratto: il nome del sistema tecnico a valle non deve
 // arrivare al browser, nemmeno dentro il JSON (vedi lib/corriere-logo.ts).
 import { siglaContratto, marchioCorriere } from '@/lib/corriere-logo'
@@ -99,25 +99,18 @@ export async function calcolaTariffeCliente(
 
   // Scaglioni contrassegno per corriere (dal listino del cliente)
   const codImporto = Number(body.codValue || 0)
+  // Righe GREZZE per corriere: gli scaglioni li scegliamo per BANDA-PESO al momento del calcolo
+  // (la commissione COD dipende dal peso reale — vedi commissioneSupp in pricing).
   const scaglioniContrPerCorriere = new Map<string, any[]>()
   if (cliente.listino_cliente_id && codImporto > 0) {
     const { data: suppl } = await supabase
       .from('listini_clienti_supplementi')
-      .select('corriere_id, descrizione, valore, tipo_calcolo')
+      .select('corriere_id, tipo, descrizione, valore, tipo_calcolo')
       .eq('listino_id', cliente.listino_cliente_id).eq('tipo', 'contrassegno')
     for (const s of (suppl || [])) {
-      let d:any = null; try { d = JSON.parse(s.descrizione) } catch {}
-      const scal = {
-        valore_max: parseFloat(d?.valore_max ?? '') || 0,
-        prezzo_fisso: parseFloat(d?.prezzo_fisso ?? s.valore ?? '') || 0,
-        perc: parseFloat(d?.perc ?? '') || 0,
-        calcolo_su: d?.calcolo_su || s.tipo_calcolo || 'totale',
-      }
-      if (!(scal.valore_max > 0)) continue   // valore_max 0/vuoto = scaglione inesistente (regola: =0 non valido)
       if (!scaglioniContrPerCorriere.has(s.corriere_id)) scaglioniContrPerCorriere.set(s.corriere_id, [])
-      scaglioniContrPerCorriere.get(s.corriere_id)!.push(scal)
+      scaglioniContrPerCorriere.get(s.corriere_id)!.push(s)
     }
-    for (const arr of scaglioniContrPerCorriere.values()) arr.sort((a,b)=>a.valore_max - b.valore_max)
   }
 
   // Scaglioni assicurazione per corriere (stessa dinamica del contrassegno)
@@ -126,21 +119,12 @@ export async function calcolaTariffeCliente(
   if (cliente.listino_cliente_id && assicImporto > 0) {
     const { data: supplA } = await supabase
       .from('listini_clienti_supplementi')
-      .select('corriere_id, descrizione, valore, tipo_calcolo')
+      .select('corriere_id, tipo, descrizione, valore, tipo_calcolo')
       .eq('listino_id', cliente.listino_cliente_id).eq('tipo', 'assicurazione')
     for (const s of (supplA || [])) {
-      let d:any = null; try { d = JSON.parse(s.descrizione) } catch {}
-      const scal = {
-        valore_max: parseFloat(d?.valore_max ?? '') || 0,
-        prezzo_fisso: parseFloat(d?.prezzo_fisso ?? s.valore ?? '') || 0,
-        perc: parseFloat(d?.perc ?? '') || 0,
-        calcolo_su: d?.calcolo_su || s.tipo_calcolo || 'totale',
-      }
-      if (!(scal.valore_max > 0)) continue   // valore_max 0/vuoto = scaglione inesistente (regola: =0 non valido)
       if (!scaglioniAssicPerCorriere.has(s.corriere_id)) scaglioniAssicPerCorriere.set(s.corriere_id, [])
-      scaglioniAssicPerCorriere.get(s.corriere_id)!.push(scal)
+      scaglioniAssicPerCorriere.get(s.corriere_id)!.push(s)
     }
-    for (const arr of scaglioniAssicPerCorriere.values()) arr.sort((a,b)=>a.valore_max - b.valore_max)
   }
 
   // Sponda idraulica: sopra soglia_kg si aggiunge prezzo_kg € per ogni kg oltre la soglia (peso fatturato).
@@ -186,12 +170,14 @@ export async function calcolaTariffeCliente(
 
   // Base percentuale: 'totale' = intero importo del supplemento; 'differenza' = importo
   // meno il massimo della PRIMA fascia (es. franchigia 500€ → % solo sull'eccedenza).
+  // NB: la banda-peso usa `pesoReale` (const più in basso): queste funzioni sono chiamate DOPO, nel
+  // loop dei risultati, quando pesoReale è già inizializzato.
   function calcolaAssicurazione(corriereId: string, _prezzoSped: number): number | null {
     if (assicImporto <= 0) return 0
-    const scal = scaglioniAssicPerCorriere.get(corriereId)
-    // Assicurazione richiesta ma NESSUNA tariffa configurata sul listino → corriere non disponibile
-    // (regola uniforme come il contrassegno: servizio inesistente = non si può spedire).
-    if (!scal || !scal.length) return null
+    const raw = scaglioniAssicPerCorriere.get(corriereId)
+    if (!raw || !raw.length) return null
+    const scal = scaglioniPerPeso(parseScaglioniSupp(raw, 'assicurazione'), pesoReale).filter(x => x.valore_max > 0).sort((a,b)=>a.valore_max-b.valore_max)
+    if (!scal.length) return null
     const s = scal.find(x => assicImporto <= x.valore_max)
     if (!s) return null
     const primaFasciaMax = Number(scal[0]?.valore_max) || 0
@@ -201,9 +187,11 @@ export async function calcolaTariffeCliente(
 
   function calcolaContrassegno(corriereId: string, _prezzoSped: number): number | null {
     if (codImporto <= 0) return 0
-    const scal = scaglioniContrPerCorriere.get(corriereId)
-    // COD richiesto ma NESSUNA tariffa contrassegno configurata sul listino → corriere non disponibile.
-    if (!scal || !scal.length) return null
+    const raw = scaglioniContrPerCorriere.get(corriereId)
+    if (!raw || !raw.length) return null
+    // banda-peso sul PESO REALE (la commissione COD dipende dal servizio = dal peso reale)
+    const scal = scaglioniPerPeso(parseScaglioniSupp(raw, 'contrassegno'), pesoReale).filter(x => x.valore_max > 0).sort((a,b)=>a.valore_max-b.valore_max)
+    if (!scal.length) return null
     const s = scal.find(x => codImporto <= x.valore_max)
     if (!s) return null // importo oltre il massimo → corriere non disponibile
     const primaFasciaMax = Number(scal[0]?.valore_max) || 0

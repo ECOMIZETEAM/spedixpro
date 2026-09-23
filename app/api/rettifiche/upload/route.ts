@@ -421,6 +421,7 @@ export async function POST(req: NextRequest) {
             contrassegno: Number((spedizione as any).contrassegno || 0),
             assicurazione: Number((spedizione as any).assicurazione || 0),
             valoreMerce: Number((spedizione as any).valore_merce || 0), nolo: ris.prezzo,
+            pesoReale: Number((spedizione as any).peso_reale || 0),
           })
           // `disponibile: false` non vuol dire "fee zero", vuol dire "questo listino non prezza
           // contrassegno o assicurazione per questo contratto" — e le due fee tornano 0 senza

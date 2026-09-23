@@ -181,6 +181,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
               listinoId: cl.listino_cliente_id, corriereId: s.corriere_id,
               contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0),
               valoreMerce: Number(s.valore_merce || 0), nolo: ris.prezzo,
+              pesoReale: Number(s.peso_reale || 0),
             })
             // `disponibile: false` NON e' "fee zero", e' "non so quanto vale": quel listino non
             // prezza contrassegno o assicurazione per quel contratto, e la funzione lo dice cosi',

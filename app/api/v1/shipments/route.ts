@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
   const supp = await calcolaSupplementiCliente(admin, {
     listinoId: cliente.listino_cliente_id, corriereId: ctx.corriereId,
     contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
-    valoreMerce: Number(body.valoreMerce || 0), nolo: ris.prezzo,
+    valoreMerce: Number(body.valoreMerce || 0), nolo: ris.prezzo, pesoReale,
   })
   if (!supp.disponibile) return NextResponse.json({ error: 'Importo contrassegno/assicurazione oltre il massimo consentito per questo contratto' }, { status: 400 })
   const costoCliente = Math.round((ris.prezzo + supp.contrassegno + supp.assicurazione) * 100) / 100

@@ -68,8 +68,8 @@ function buildFasceInit(fasceEsistenti: any[]): Fascia[] {
   })
 }
 
-type RigaSuppl = { valore_max: string; prezzo_fisso: string; perc: string; calcolo_su: string }
-const rigaVuota = (): RigaSuppl => ({ valore_max:'', prezzo_fisso:'', perc:'', calcolo_su:'totale' })
+type RigaSuppl = { valore_max: string; prezzo_fisso: string; perc: string; calcolo_su: string; peso_min?: string; peso_max?: string }
+const rigaVuota = (): RigaSuppl => ({ valore_max:'', prezzo_fisso:'', perc:'', calcolo_su:'totale', peso_min:'', peso_max:'' })
 
 function parseDescr(s: any): any {
   try { return JSON.parse(s) } catch { return null }
@@ -85,8 +85,8 @@ function buildRigheDa(supplementi: any[], tipo: string, fallback: RigaSuppl[]): 
   if (!righe.length) return fallback
   return righe.map(r => {
     const d = parseDescr(r.descrizione)
-    if (d) return { valore_max: String(d.valore_max ?? ''), prezzo_fisso: String(d.prezzo_fisso ?? r.valore ?? ''), perc: String(d.perc ?? ''), calcolo_su: d.calcolo_su || r.tipo_calcolo || 'totale' }
-    return { valore_max:'', prezzo_fisso: String(r.valore ?? ''), perc:'', calcolo_su: r.tipo_calcolo || 'totale' }
+    if (d) return { valore_max: String(d.valore_max ?? ''), prezzo_fisso: String(d.prezzo_fisso ?? r.valore ?? ''), perc: String(d.perc ?? ''), calcolo_su: d.calcolo_su || r.tipo_calcolo || 'totale', peso_min: String(d.peso_min ?? ''), peso_max: String(d.peso_max ?? '') }
+    return { valore_max:'', prezzo_fisso: String(r.valore ?? ''), perc:'', calcolo_su: r.tipo_calcolo || 'totale', peso_min:'', peso_max:'' }
   })
   // Ordine CRESCENTE per valore massimo (fascia più bassa in alto). Le righe vuote/senza valore in coda.
   .sort((a,b) => {
@@ -602,6 +602,8 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
           </div>
           <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
             <thead><tr style={{background:'#fafafa'}}>
+              <th style={{textAlign:'left' as const,padding:'8px 10px',fontWeight:'700',color:'#1a1a1a',borderBottom:'1px solid #d1d5db'}}>Peso da <span style={{color:'#666',fontWeight:'400'}}>kg</span></th>
+              <th style={{textAlign:'left' as const,padding:'8px 10px',fontWeight:'700',color:'#1a1a1a',borderBottom:'1px solid #d1d5db'}}>Peso a <span style={{color:'#666',fontWeight:'400'}}>kg</span></th>
               <th style={{textAlign:'left' as const,padding:'8px 10px',fontWeight:'700',color:'#1a1a1a',borderBottom:'1px solid #d1d5db'}}>Valore massimo <span style={{color:'#666',fontWeight:'400'}}>€</span></th>
               <th style={{textAlign:'left' as const,padding:'8px 10px',fontWeight:'700',color:'#1a1a1a',borderBottom:'1px solid #d1d5db'}}>Prezzo fisso <span style={{color:'#666',fontWeight:'400'}}>€</span></th>
               <th style={{textAlign:'left' as const,padding:'8px 10px',fontWeight:'700',color:'#1a1a1a',borderBottom:'1px solid #d1d5db'}}>+ % del valore</th>
@@ -611,6 +613,8 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
             <tbody>
               {righeContr.map((r,i)=>(
                 <tr key={i} style={{borderBottom:'1px solid #e5e7eb'}}>
+                  <td style={{padding:'6px 8px'}}><input type="number" value={r.peso_min||''} onChange={e=>setRigaContr(i,'peso_min',e.target.value)} style={inpFull} placeholder="0"/></td>
+                  <td style={{padding:'6px 8px'}}><input type="number" value={r.peso_max||''} onChange={e=>setRigaContr(i,'peso_max',e.target.value)} style={inpFull} placeholder="∞"/></td>
                   <td style={{padding:'6px 8px'}}><input type="number" value={r.valore_max} onChange={e=>setRigaContr(i,'valore_max',e.target.value)} style={inpFull} placeholder="0"/></td>
                   <td style={{padding:'6px 8px'}}><input type="number" value={r.prezzo_fisso} onChange={e=>setRigaContr(i,'prezzo_fisso',e.target.value)} style={inpFull} placeholder="0"/></td>
                   <td style={{padding:'6px 8px'}}><input type="number" value={r.perc} onChange={e=>setRigaContr(i,'perc',e.target.value)} style={inpFull} placeholder="0"/></td>

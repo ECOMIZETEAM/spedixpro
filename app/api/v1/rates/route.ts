@@ -65,6 +65,7 @@ export async function POST(req: NextRequest) {
   const supp = await calcolaSupplementiCliente(admin, {
     listinoId: cliente.listino_cliente_id, corriereId: ctx.corriereId,
     contrassegno: cod, assicurazione: ass, valoreMerce: Number(body.valoreMerce || 0), nolo: ris.prezzo,
+    pesoReale: pesoRealeTot,
   })
   if (!supp.disponibile) return NextResponse.json({ error: 'Importo contrassegno/assicurazione oltre il massimo consentito per questo contratto' }, { status: 400 })
 

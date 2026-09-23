@@ -311,6 +311,7 @@ export async function POST(req: NextRequest) {
         const sup = await calcolaSupplementiCliente(adminCrea, {
           listinoId: cliente.listino_cliente_id, corriereId: corriereRecord.id,
           contrassegno: codReq, assicurazione: assReq, valoreMerce: Number(body.valoreMerce || 0), nolo: 0,
+          pesoReale,
         })
         if (!sup.disponibile) return NextResponse.json({ error: 'Il contratto non prevede il contrassegno o l\'assicurazione per questo importo. Rimuovili o scegli un altro corriere.' }, { status: 400 })
       }
@@ -398,7 +399,7 @@ export async function POST(req: NextRequest) {
     const suppPrezzo = await calcolaSupplementiCliente(adminCrea, {
       listinoId: cliente.listino_cliente_id, corriereId: corriereRecord.id,
       contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
-      valoreMerce: Number(body.valoreMerce || 0), nolo: risPrezzo.prezzo,
+      valoreMerce: Number(body.valoreMerce || 0), nolo: risPrezzo.prezzo, pesoReale,
     })
     // Servizi accessori RICALCOLATI lato SERVER: non fidarsi dell'importo mandato dal browser. Rileggo le
     // righe accessorie del listino cliente per QUESTO corriere e riapplico prezzo + perc% del NOLO

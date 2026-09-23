@@ -150,6 +150,68 @@ function trovaFascia(fasce: any[], peso: number) {
   return null
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SCAGLIONI SUPPLEMENTO (contrassegno / assicurazione) — UNA logica sola.
+//
+// Prima questo blocco era COPIATO in ~6 rami (calcolaPrezzoCorriereDettaglio, i due calcolatori
+// batch, calcolaSupplementiCliente, tariffe-motore): al primo ritocco divergevano. Ora sta qui.
+//
+// descrizione = { valore_max, prezzo_fisso, perc, calcolo_su, peso_min?, peso_max? }.
+// peso_min/peso_max (kg, sul PESO REALE) = banda di peso in cui lo scaglione vale. Serve perché la
+// commissione contrassegno di alcuni corrieri DIPENDE DAL PESO: VERIFICATO 24/09 su BRT (via
+// SpediamoPro), peso reale ≤5kg = servizio "small" (commissione fissa €1,97 a qualsiasi COD),
+// >5kg = servizio pesante (fisso fino a €1.000, poi 1%). Con un solo scaglione per valore non si
+// poteva esprimere: il €1,97 fisso perdeva sui pacchi pesanti con COD alto (>€1.000).
+// Gli scaglioni SENZA peso valgono per TUTTI i pesi → i listini esistenti non cambiano.
+export type ScaglioneSupp = { valore_max: number; prezzo_fisso: number; perc: number; calcolo_su: string; peso_min: number | null; peso_max: number | null }
+
+export function parseScaglioniSupp(suppl: any[], tipo: string): ScaglioneSupp[] {
+  return (suppl || []).filter((s: any) => s.tipo === tipo).map((s: any) => {
+    let d: any = null; try { d = JSON.parse(s.descrizione) } catch {}
+    const pmin = d?.peso_min, pmax = d?.peso_max
+    return {
+      valore_max: parseFloat(d?.valore_max ?? '') || 0,
+      prezzo_fisso: parseFloat(d?.prezzo_fisso ?? s.valore ?? '') || 0,
+      perc: parseFloat(d?.perc ?? '') || 0,
+      calcolo_su: d?.calcolo_su || s.tipo_calcolo || 'totale',
+      peso_min: (pmin === '' || pmin == null) ? null : (parseFloat(pmin) || 0),
+      peso_max: (pmax === '' || pmax == null) ? null : (parseFloat(pmax) || 0),
+    }
+  })
+}
+
+// Sceglie gli scaglioni applicabili al PESO REALE. Nessuna banda peso configurata (o peso non noto)
+// → valgono tutti (comportamento storico). Se una banda contiene il peso si usa quella; se nessuna
+// banda lo contiene si ripiega sugli scaglioni SENZA peso (universali). Banda = (peso_min, peso_max].
+export function scaglioniPerPeso(scal: ScaglioneSupp[], pesoReale?: number | null): ScaglioneSupp[] {
+  const conPeso = scal.filter(s => s.peso_min != null || s.peso_max != null)
+  if (!conPeso.length || pesoReale == null) return scal
+  const p = Number(pesoReale)
+  const match = scal.filter(s => (s.peso_min == null || p > s.peso_min + 1e-9) && (s.peso_max == null || p <= s.peso_max + 1e-9))
+  return match.length ? match : scal.filter(s => s.peso_min == null && s.peso_max == null)
+}
+
+// Commissione supplemento (fee). Ritorna 0 se non configurato. `soloValidi` scarta gli scaglioni con
+// valore_max 0 (regola del ramo cliente: 0/vuoto = inesistente).
+export function commissioneSupp(suppl: any[], tipo: string, importo: number, pesoReale?: number | null, soloValidi = false): number {
+  if (!(importo > 0)) return 0
+  let scal = scaglioniPerPeso(parseScaglioniSupp(suppl, tipo), pesoReale)
+  if (soloValidi) scal = scal.filter(s => s.valore_max > 0)
+  scal = scal.sort((a, b) => a.valore_max - b.valore_max)
+  if (!scal.length) return 0
+  const s = scal.find(x => importo <= x.valore_max) || scal[scal.length - 1]
+  const primaFasciaMax = Number(scal[0]?.valore_max) || 0
+  const base = s.calcolo_su === 'differenza' ? Math.max(0, importo - primaFasciaMax) : importo
+  return s.prezzo_fisso + (s.perc / 100) * base
+}
+
+// Presente/max per un tipo, ristretto alla banda di peso (serve al gate "COD/assic oltre il max → escludi").
+export function supplPresenteMax(suppl: any[], tipo: string, pesoReale?: number | null): { presente: boolean; max: number } {
+  const scal = scaglioniPerPeso(parseScaglioniSupp(suppl, tipo), pesoReale)
+  let max = 0; for (const s of scal) if (s.valore_max > max) max = s.valore_max
+  return { presente: max > 0, max }
+}
+
 export type RisultatoPrezzo = {
   prezzo: number
   zona: string
@@ -506,29 +568,7 @@ export async function calcolaPrezzoCorriereDettaglio(
   const cod = Number(params.contrassegno) || 0
   const ass = Number(params.assicurazione) || 0
 
-  // Scaglioni contrassegno/assicurazione, stesso formato del listino cliente:
-  // descrizione = { valore_max, prezzo_fisso, perc, calcolo_su }
-  function applicaScaglione(tipo: string, importo: number): number {
-    if (importo <= 0) return 0
-    const scal = (suppl || [])
-      .filter((s: any) => s.tipo === tipo)
-      .map((s: any) => {
-        let d: any = null; try { d = JSON.parse(s.descrizione) } catch {}
-        return {
-          valore_max: parseFloat(d?.valore_max ?? '') || 0,
-          prezzo_fisso: parseFloat(d?.prezzo_fisso ?? s.valore ?? '') || 0,
-          perc: parseFloat(d?.perc ?? '') || 0,
-          calcolo_su: d?.calcolo_su || s.tipo_calcolo || 'totale',
-        }
-      })
-      .sort((a: any, b: any) => a.valore_max - b.valore_max)
-    if (!scal.length) return 0
-    const s = scal.find((x: any) => importo <= x.valore_max) || scal[scal.length - 1]
-    // 'totale' = intero importo; 'differenza' = importo meno il massimo della prima fascia
-    const primaFasciaMax = Number(scal[0]?.valore_max) || 0
-    const base = s.calcolo_su === 'differenza' ? Math.max(0, importo - primaFasciaMax) : importo
-    return s.prezzo_fisso + (s.perc / 100) * base
-  }
+  // Scaglioni contrassegno/assicurazione: logica UNICA in commissioneSupp (con banda-peso).
   // Sponda: sopra soglia_kg, +prezzo_kg € per ogni kg (peso fatturato).
   let spondaAmt = 0
   const spondaRow = (suppl || []).find((s: any) => s.tipo === 'sponda')
@@ -538,24 +578,15 @@ export async function calcolaPrezzoCorriereDettaglio(
     const prezzoKg = Number(spondaRow.valore) || 0
     if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) spondaAmt = pesoFatturato * prezzoKg
   }
-  const feeCod = applicaScaglione('contrassegno', cod)
-  const feeAss = applicaScaglione('assicurazione', ass)
+  // COMMISSIONE sul PESO REALE: la banda-peso del contrassegno la sceglie il peso reale (vedi commissioneSupp).
+  const feeCod = commissioneSupp(suppl || [], 'contrassegno', cod, pesoReale)
+  const feeAss = commissioneSupp(suppl || [], 'assicurazione', ass, pesoReale)
 
-  // Massimo valore ammesso per tipo (il valore_max più alto tra gli scaglioni configurati).
-  // Servizio "presente" SOLO se ha almeno uno scaglione con valore_max > 0 (regola uniforme:
-  // valore_max 0/vuoto = scaglione inesistente/non valido).
-  function maxScaglione(tipo: string): { presente: boolean; max: number } {
-    const scal = (suppl || []).filter((s: any) => s.tipo === tipo)
-    let max = 0
-    for (const s of scal) { let d: any = null; try { d = JSON.parse(s.descrizione) } catch {}; const v = parseFloat(d?.valore_max ?? '') || 0; if (v > max) max = v }
-    return { presente: max > 0, max }
-  }
-  // Contrassegno: se richiesto ma senza tariffa OPPURE oltre il max -> corriere non disponibile.
-  const scC = maxScaglione('contrassegno')
+  // Contrassegno/assicurazione: se richiesti ma senza tariffa (nella banda peso) OPPURE oltre il max
+  // -> corriere non disponibile. Il max è ristretto alla banda di peso applicabile.
+  const scC = supplPresenteMax(suppl || [], 'contrassegno', pesoReale)
   const contrassegnoOltreMax = cod > 0 && (!scC.presente || cod > scC.max)
-  // Assicurazione: STESSA regola del contrassegno — se richiesta ma il servizio non esiste
-  // (nessuno scaglione valido) OPPURE l'importo supera il max -> corriere non disponibile.
-  const scA = maxScaglione('assicurazione')
+  const scA = supplPresenteMax(suppl || [], 'assicurazione', pesoReale)
   const assicurazioneOltreMax = ass > 0 && (!scA.presente || ass > scA.max)
 
   const r2 = (n: number) => Math.round(n * 100) / 100
@@ -601,7 +632,7 @@ export async function calcolaPrezzoCorriere(
 // supera il massimo scaglione (il contratto non copre quell'importo).
 export async function calcolaSupplementiCliente(
   supabase: any,
-  params: { listinoId: string; corriereId: string; contrassegno?: number; assicurazione?: number; valoreMerce?: number; nolo: number }
+  params: { listinoId: string; corriereId: string; contrassegno?: number; assicurazione?: number; valoreMerce?: number; nolo: number; pesoReale?: number }
 ): Promise<{ contrassegno: number; assicurazione: number; disponibile: boolean }> {
   const cod = Number(params.contrassegno) || 0
   const ass = Number(params.assicurazione) || 0
@@ -616,27 +647,15 @@ export async function calcolaSupplementiCliente(
     .eq('corriere_id', params.corriereId)
     .in('tipo', ['contrassegno', 'assicurazione'])
 
-  const scaglioni = (tipo: string) => (suppl || [])
-    .filter((s: any) => s.tipo === tipo)
-    .map((s: any) => {
-      let d: any = null; try { d = JSON.parse(s.descrizione) } catch {}
-      return {
-        valore_max: parseFloat(d?.valore_max ?? '') || 0,
-        prezzo_fisso: parseFloat(d?.prezzo_fisso ?? s.valore ?? '') || 0,
-        perc: parseFloat(d?.perc ?? '') || 0,
-        calcolo_su: d?.calcolo_su || s.tipo_calcolo || 'totale',
-      }
-    })
-    .sort((a: any, b: any) => a.valore_max - b.valore_max)
-
+  // STESSA logica a scaglioni condivisa (con banda-peso), ma qui null = contratto NON disponibile
+  // (servizio richiesto ma non prezzato, o importo oltre il max della banda peso applicabile).
   const applica = (tipo: string, importo: number): number | null => {
     if (importo <= 0) return 0
-    // Solo scaglioni validi (valore_max > 0): 0/vuoto = inesistente.
-    const scal = scaglioni(tipo).filter((x: any) => x.valore_max > 0)
-    if (!scal.length) return null   // servizio richiesto ma non configurato -> contratto non disponibile
-    const s = scal.find((x: any) => importo <= x.valore_max)
-    if (!s) return null // oltre il massimo -> contratto non disponibile per quell'importo
-    // 'totale' = intero importo del supplemento; 'differenza' = importo meno il massimo della prima fascia
+    const scal = scaglioniPerPeso(parseScaglioniSupp(suppl || [], tipo), params.pesoReale)
+      .filter(x => x.valore_max > 0).sort((a, b) => a.valore_max - b.valore_max)
+    if (!scal.length) return null   // servizio richiesto ma non configurato (nella banda peso) -> non disponibile
+    const s = scal.find(x => importo <= x.valore_max)
+    if (!s) return null // oltre il massimo -> non disponibile per quell'importo
     const primaFasciaMax = Number(scal[0]?.valore_max) || 0
     const base = s.calcolo_su === 'differenza' ? Math.max(0, importo - primaFasciaMax) : importo
     return s.prezzo_fisso + (s.perc / 100) * base
@@ -773,19 +792,6 @@ async function creaCalcolatoreCorriereBase(
     const nolo = prezzo
     const supplList = supplPerListino.get(lc.id) || []
     const cod = Number(s.contrassegno) || 0, ass = Number(s.assicurazione) || 0
-    const applica = (tipo: string, importo: number): number => {
-      if (importo <= 0) return 0
-      const scal = supplList.filter((x: any) => x.tipo === tipo).map((x: any) => {
-        let d: any = null; try { d = JSON.parse(x.descrizione) } catch {}
-        return { vm: parseFloat(d?.valore_max ?? '') || 0, pf: parseFloat(d?.prezzo_fisso ?? x.valore ?? '') || 0, pc: parseFloat(d?.perc ?? '') || 0, cs: d?.calcolo_su || x.tipo_calcolo || 'totale' }
-      }).sort((a: any, b: any) => a.vm - b.vm)
-      if (!scal.length) return 0
-      const sc = scal.find((x: any) => importo <= x.vm) || scal[scal.length - 1]
-      // 'totale' = intero importo; 'differenza' = importo meno il massimo della prima fascia
-      const primaFasciaMax = Number(scal[0]?.vm) || 0
-      const base = sc.cs === 'differenza' ? Math.max(0, importo - primaFasciaMax) : importo
-      return sc.pf + (sc.pc / 100) * base
-    }
     // Sponda: la soglia è solo il trigger, poi prezzo/kg sul TOTALE dei kg (peso fatturato).
     const noloBase = prezzo
     let spondaAmt = 0
@@ -796,8 +802,9 @@ async function creaCalcolatoreCorriereBase(
       const prezzoKg = Number(spRow.valore) || 0
       if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) spondaAmt = pesoFatturato * prezzoKg
     }
-    const feeContr = applica('contrassegno', cod)
-    const feeAss = applica('assicurazione', ass)
+    // Commissione COD/assic: logica UNICA, banda-peso sul PESO REALE.
+    const feeContr = commissioneSupp(supplList, 'contrassegno', cod, pesoReale)
+    const feeAss = commissioneSupp(supplList, 'assicurazione', ass, pesoReale)
     const _r2 = (n: number) => Math.round(n * 100) / 100
     return { totale: _r2(noloBase + spondaAmt + feeContr + feeAss), nolo: _r2(noloBase), sponda: _r2(spondaAmt), contrassegno: _r2(feeContr), assicurazione: _r2(feeAss) }
   }
@@ -942,18 +949,6 @@ async function creaCalcolatoreListinoClienteBase(
 
     const supplList = supplPerCorriere.get(s.corriere_id) || []
     const cod = Number(s.contrassegno) || 0, ass = Number(s.assicurazione) || 0
-    const applica = (tipo: string, importo: number): number => {
-      if (importo <= 0) return 0
-      const scal = supplList.filter((x: any) => x.tipo === tipo).map((x: any) => {
-        let d: any = null; try { d = JSON.parse(x.descrizione) } catch {}
-        return { vm: parseFloat(d?.valore_max ?? '') || 0, pf: parseFloat(d?.prezzo_fisso ?? x.valore ?? '') || 0, pc: parseFloat(d?.perc ?? '') || 0, cs: d?.calcolo_su || x.tipo_calcolo || 'totale' }
-      }).sort((a: any, b: any) => a.vm - b.vm)
-      if (!scal.length) return 0
-      const sc = scal.find((x: any) => importo <= x.vm) || scal[scal.length - 1]
-      const primaFasciaMax = Number(scal[0]?.vm) || 0
-      const base = sc.cs === 'differenza' ? Math.max(0, importo - primaFasciaMax) : importo
-      return sc.pf + (sc.pc / 100) * base
-    }
     // Sponda: la soglia è solo il trigger, poi prezzo/kg sul TOTALE dei kg (peso fatturato).
     const noloBase = prezzo
     let spondaAmt = 0
@@ -964,8 +959,9 @@ async function creaCalcolatoreListinoClienteBase(
       const prezzoKg = Number(spRow.valore) || 0
       if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) spondaAmt = pesoFatturato * prezzoKg
     }
-    const feeContr = applica('contrassegno', cod)
-    const feeAss = applica('assicurazione', ass)
+    // Commissione COD/assic: logica UNICA, banda-peso sul PESO REALE.
+    const feeContr = commissioneSupp(supplList, 'contrassegno', cod, pesoReale)
+    const feeAss = commissioneSupp(supplList, 'assicurazione', ass, pesoReale)
     const _r2 = (n: number) => Math.round(n * 100) / 100
     return { totale: _r2(noloBase + spondaAmt + feeContr + feeAss), nolo: _r2(noloBase), sponda: _r2(spondaAmt), contrassegno: _r2(feeContr), assicurazione: _r2(feeAss) }
   }
