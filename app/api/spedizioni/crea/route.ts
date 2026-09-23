@@ -263,7 +263,10 @@ export async function POST(req: NextRequest) {
   // controlla PRIMA di comprare: e' l'unica porta da cui passano tutti, vecchi browser compresi.
   const _puntoDaAltroContratto = String(body.puntoArrivoCorriereId || '').trim()
   if (_puntoDaAltroContratto && String(body.puntoArrivo || '').trim() && _puntoDaAltroContratto !== String(corriereRecord.id)) {
-    console.warn('[CREA][PUNTO] punto di un altro contratto', { scelto_su: _puntoDaAltroContratto, si_spedisce_con: corriereRecord.id, codice: String(body.puntoArrivo) })
+    // console.ERROR e non warn: una guardia che blocca una spedizione deve essere VISIBILE nel
+    // cruscotto degli errori. Gli avvisi non ci finiscono, e una guardia che blocca in silenzio —
+    // giusta o sbagliata che sia — non si distingue da "non ha provato nessuno".
+    console.error('[CREA][PUNTO] punto di un altro contratto', { scelto_su: _puntoDaAltroContratto, si_spedisce_con: corriereRecord.id, codice: String(body.puntoArrivo) })
     return NextResponse.json({ error: 'Il punto di consegna selezionato appartiene a un altro contratto: riscegli il punto (ogni corriere ha i suoi punti).' }, { status: 400 })
   }
   // *** Controllo misure massime del corriere (settings.misure_max) ***
