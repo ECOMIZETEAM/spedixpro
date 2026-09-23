@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { getPermessiUtente } from '@/lib/permessi'
+import { generaListinoIngrosso, ListinoIngrossoError } from '@/lib/listino-ingrosso'
 
 /* CONDIVISIONE CONTRATTI TRA MASTER — lato venditore (Fase 2).
  *
@@ -37,7 +38,7 @@ export async function GET() {
 
   // Condivisioni che HO CREATO io (sono il venditore).
   const { data: rivendoRaw } = await admin.from('corrieri_condivisi')
-    .select('id,corriere_id,master_id,stato,credito_modo,created_at,accettata_il,revocata_il')
+    .select('id,corriere_id,master_id,stato,credito_modo,created_at,accettata_il,revocata_il,markup')
     .eq('fornitore_master_id', a.masterId).order('created_at', { ascending: false })
 
   // Condivisioni RICEVUTE (sono il compratore/acquirente).
@@ -58,9 +59,15 @@ export async function GET() {
   const nomeCorriere = new Map((corrieriNomi || []).map((c: any) => [c.id, c.nome_contratto]))
   const nomeMaster = new Map((mastersNomi || []).map((m: any) => [m.id, m.nome]))
 
+  const descriviMarkup = (m: any): string => {
+    const d = m?.default
+    if (!d || !Number(d.valore)) return '—'
+    return d.mode === 'fisso' ? `+ € ${Number(d.valore).toFixed(2)}` : `+ ${Number(d.valore)}%`
+  }
   const rivendo = (rivendoRaw || []).map(r => ({
     id: r.id, stato: r.stato, credito_modo: r.credito_modo, creata_il: r.created_at,
     accettata_il: r.accettata_il, revocata_il: r.revocata_il,
+    ricarico: descriviMarkup(r.markup),
     contratto: nomeCorriere.get(r.corriere_id) || '—',
     compratore: nomeMaster.get(r.master_id) || '—',
   }))
@@ -86,6 +93,7 @@ export async function POST(req: NextRequest) {
   const corpo = await req.json().catch(() => ({} as any))
   const codice = String(corpo?.codice || '').trim().toUpperCase()
   const corriereId = String(corpo?.corriere_id || '').trim()
+  const markup = corpo?.markup ?? null   // { default:{mode,valore}, perFascia } — il prezzo d'ingrosso
   if (!codice || !corriereId) return NextResponse.json({ error: 'Serve il codice del compratore e il contratto.' }, { status: 400 })
 
   // Il compratore, dal codice. Mai esposto un elenco: si risolve solo un codice che già si possiede.
@@ -94,7 +102,7 @@ export async function POST(req: NextRequest) {
   if (compratore.id === a.masterId) return NextResponse.json({ error: 'Non puoi condividere un contratto con te stesso.' }, { status: 400 })
 
   // Il contratto DEVE essere del mio master (perimetro a mano: il service-role bypassa la RLS).
-  const { data: corriere } = await admin.from('corrieri').select('id,master_id,attivo,tipo').eq('id', corriereId).maybeSingle()
+  const { data: corriere } = await admin.from('corrieri').select('id,master_id,attivo,tipo,nome_contratto').eq('id', corriereId).maybeSingle()
   if (!corriere || corriere.master_id !== a.masterId) return NextResponse.json({ error: 'Contratto non trovato tra i tuoi.' }, { status: 404 })
   if (!corriere.attivo) return NextResponse.json({ error: 'Il contratto non è attivo.' }, { status: 400 })
   if (corriere.tipo === 'moovexpress') return NextResponse.json({ error: 'Un contratto ricevuto da un altro master non è ri-condivisibile qui.' }, { status: 400 })
@@ -105,14 +113,36 @@ export async function POST(req: NextRequest) {
     .in('stato', ['in_attesa', 'attiva']).maybeSingle()
   if (gia) return NextResponse.json({ error: `Questo contratto è già condiviso con ${compratore.nome} (${gia.stato === 'attiva' ? 'attivo' : 'in attesa'}).` }, { status: 409 })
 
+  // Genera il LISTINO D'INGROSSO (costo del venditore + ricarico) PRIMA di creare la condivisione: se
+  // manca il costo da cui partire, non si crea nulla di monco. È il prezzo che pagherà il compratore.
+  let listinoIngrossoId: string
+  try {
+    const r = await generaListinoIngrosso(admin, {
+      fornitoreMasterId: a.masterId, corriereId, markup,
+      nome: `Ingrosso ${compratore.nome} · ${corriere.nome_contratto || ''}`.trim(),
+    })
+    listinoIngrossoId = r.listinoId
+  } catch (e: any) {
+    if (e instanceof ListinoIngrossoError) return NextResponse.json({ error: e.message }, { status: 400 })
+    console.error('[condivisioni] listino ingrosso', e)
+    return NextResponse.json({ error: 'Non sono riuscito a preparare il listino d’ingrosso.' }, { status: 500 })
+  }
+
   const { data: creata, error } = await admin.from('corrieri_condivisi').insert({
     corriere_id: corriereId,
     master_id: compratore.id,          // ACQUIRENTE (semantica della tabella scheletro)
     fornitore_master_id: a.masterId,   // VENDITORE
     stato: 'in_attesa',
     credito_modo: 'prepagato',
+    listino_ingrosso_id: listinoIngrossoId,
+    markup: markup || null,
   }).select('id').single()
-  if (error) { console.error('[condivisioni] insert', error); return NextResponse.json({ error: 'Creazione non riuscita.' }, { status: 500 }) }
+  if (error) {
+    console.error('[condivisioni] insert', error)
+    // Niente condivisione = niente listino orfano: pulisco quello appena creato.
+    await admin.from('listini_clienti').delete().eq('id', listinoIngrossoId)
+    return NextResponse.json({ error: 'Creazione non riuscita.' }, { status: 500 })
+  }
 
   // Marca il contratto come condivisibile (era il flag dormiente `condivisibile`).
   await admin.from('corrieri').update({ condivisibile: true }).eq('id', corriereId)

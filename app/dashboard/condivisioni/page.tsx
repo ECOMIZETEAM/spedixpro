@@ -28,6 +28,8 @@ export default function CondivisioniPage() {
   const [risolvendo, setRisolvendo] = useState(false)
   const [erroreCodice, setErroreCodice] = useState('')
   const [corriereSel, setCorriereSel] = useState('')
+  const [markupMode, setMarkupMode] = useState<'perc' | 'fisso'>('perc')
+  const [markupVal, setMarkupVal] = useState('')
   const [azione, setAzione] = useState('')
 
   async function carica() {
@@ -55,15 +57,18 @@ export default function CondivisioniPage() {
     setRisolto({ nome: d.nome })
   }
 
+  const markupValido = markupVal.trim() !== '' && Number.isFinite(Number(markupVal)) && Number(markupVal) >= 0
   async function crea() {
-    if (!risolto || !corriereSel) return
-    if (!await dialog.confirm({ title: 'Condividere il contratto?', message: `Condividi questo contratto con ${risolto.nome}. Dovrà accettarlo prima che diventi operativo. Il listino d'ingrosso lo imposti dopo.`, confirmText: 'Condividi' })) return
+    if (!risolto || !corriereSel || !markupValido) return
+    const ricaricoTxt = markupMode === 'fisso' ? `+ € ${Number(markupVal).toFixed(2)} a fascia` : `+ ${Number(markupVal)}% sul tuo costo`
+    if (!await dialog.confirm({ title: 'Condividere il contratto?', message: `Condividi questo contratto con ${risolto.nome} a ${ricaricoTxt}. Dovrà accettarlo prima che diventi operativo.`, confirmText: 'Condividi' })) return
     setAzione('crea'); setMsg('')
-    const r = await fetch('/api/condivisioni', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codice: codice.trim().toUpperCase(), corriere_id: corriereSel }) })
+    const markup = { default: { mode: markupMode, valore: Number(markupVal) } }
+    const r = await fetch('/api/condivisioni', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codice: codice.trim().toUpperCase(), corriere_id: corriereSel, markup }) })
     const d = await r.json().catch(() => ({})); setAzione('')
     if (d?.error) { setMsg(d.error); return }
     setMsg(`✓ Condiviso con ${d.compratore} — in attesa che accetti.`)
-    setCodice(''); setRisolto(null); setCorriereSel(''); carica()
+    setCodice(''); setRisolto(null); setCorriereSel(''); setMarkupVal(''); carica()
   }
 
   async function revoca(id: string, contratto: string, compratore: string) {
@@ -127,23 +132,38 @@ export default function CondivisioniPage() {
             </select>
           </div>
 
-          <button onClick={crea} disabled={!risolto || !corriereSel || !!azione}
-            style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '7px', padding: '9px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: (!risolto || !corriereSel || !!azione) ? .5 : 1, whiteSpace: 'nowrap' }}>
+          {/* RICARICO: il prezzo d'ingrosso = tuo costo + questo. Sul tuo costo del contratto, per ogni fascia. */}
+          <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ display: 'inline-flex', border: '1px solid #e2e2e2', borderRadius: '7px', overflow: 'hidden' }}>
+              {(['perc', 'fisso'] as const).map(m => (
+                <button key={m} type="button" onClick={() => setMarkupMode(m)} disabled={!risolto}
+                  style={{ padding: '9px 10px', fontSize: '13px', fontWeight: 700, border: 'none', cursor: 'pointer', background: markupMode === m ? '#1a1a1a' : '#fff', color: markupMode === m ? '#fff' : '#888' }}>{m === 'perc' ? '%' : '€'}</button>
+              ))}
+            </div>
+            <input value={markupVal} onChange={e => setMarkupVal(e.target.value.replace(',', '.'))} disabled={!risolto}
+              inputMode="decimal" placeholder="ricarico"
+              style={{ width: '90px', padding: '9px 11px', border: '1px solid #e2e2e2', borderRadius: '7px', fontSize: '13px', background: risolto ? '#fff' : '#f7f7f7' }} />
+          </div>
+
+          <button onClick={crea} disabled={!risolto || !corriereSel || !markupValido || !!azione}
+            style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '7px', padding: '9px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: (!risolto || !corriereSel || !markupValido || !!azione) ? .5 : 1, whiteSpace: 'nowrap' }}>
             {azione === 'crea' ? 'Condivido…' : 'Condividi'}
           </button>
         </div>
+        <div style={{ fontSize: '11.5px', color: '#999', marginTop: '8px' }}>Il compratore pagherà il tuo <b>costo</b> del contratto + il ricarico che imposti qui (per ogni fascia di peso). Zone e supplementi restano i tuoi.</div>
 
         {!!(dati.rivendo || []).length && (
           <div style={{ overflowX: 'auto', marginTop: '16px' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
               <thead><tr style={{ background: '#fafafa' }}>
-                {['Contratto', 'Compratore', 'Stato', ''].map(h => <th key={h} style={{ textAlign: 'left', padding: '8px 12px', fontSize: '11px', fontWeight: 600, color: '#777', borderBottom: '1px solid #f0f0f0' }}>{h}</th>)}
+                {['Contratto', 'Compratore', 'Ricarico', 'Stato', ''].map(h => <th key={h} style={{ textAlign: 'left', padding: '8px 12px', fontSize: '11px', fontWeight: 600, color: '#777', borderBottom: '1px solid #f0f0f0' }}>{h}</th>)}
               </tr></thead>
               <tbody>
                 {dati.rivendo.map((r: any) => (
                   <tr key={r.id} style={{ borderBottom: '1px solid #f5f5f5', opacity: ['revocata', 'rifiutata'].includes(r.stato) ? .55 : 1 }}>
                     <td style={{ padding: '9px 12px', fontWeight: 600, color: '#1a1a1a' }}>{r.contratto}</td>
                     <td style={{ padding: '9px 12px', color: '#555' }}>{r.compratore}</td>
+                    <td style={{ padding: '9px 12px', color: '#c2410c', fontWeight: 700, whiteSpace: 'nowrap' }}>{r.ricarico}</td>
                     <td style={{ padding: '9px 12px' }}>{badge(r.stato)}</td>
                     <td style={{ padding: '9px 12px', textAlign: 'right' }}>
                       {['in_attesa', 'attiva'].includes(r.stato) &&
