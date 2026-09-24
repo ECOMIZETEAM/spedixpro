@@ -106,25 +106,29 @@ const recapito = (r: DielleRecapito) => ({
 // Crea la spedizione (/insSped → torna `ldv`). Lancia Error con errorMessage se il provider dà errore.
 export async function creaSpedizioneDielle(c: DielleCred, dati: DielleSpedInput): Promise<{ ldv: string; raw: any }> {
   const pesoTot = dati.colli.reduce((s, p) => s + (Number(p.peso) || 0), 0)
+  // OPZIONI solo se valorizzate: Dielle rifiuta i campi vuoti (verificato — un `importoContrassegno`/
+  // `tipoPagamento` vuoto dà errorCode 119 "metodo di pagamento e importo devono essere entrambi
+  // valorizzati per spedizioni in contrassegno", anche senza contrassegno). E se c'è il contrassegno,
+  // vogliono ENTRAMBI i campi (importo + metodo): default 'WITH' (contanti) se il metodo non è dato.
+  const opzioni: Record<string, string> = {}
+  if (dati.contrassegno) { opzioni.importoContrassegno = due(dati.contrassegno); opzioni.tipoPagamento = dati.tipoPagamento || 'WITH' }
+  if (dati.assicurata) opzioni.importoAssicurata = due(dati.assicurata)
+  if (dati.codiceServizio) opzioni.codiceServizio = dati.codiceServizio
+  if (dati.accessorioCrono) opzioni.accessorio_crono = dati.accessorioCrono
+
   const data: any = {
     tipoSpedizione: dati.tipoSpedizione || 'Standard',
     servizio: dati.servizio,
     dataSpedizione: dati.dataSpedizione || oggiYmd(),
-    numeroOrdine: dati.numeroOrdine || '',
     mittente: recapito(dati.mittente),
     destinatario: recapito(dati.destinatario),
     numerocolli: String(dati.colli.length),
     pesocolli: due(pesoTot),
     colli: dati.colli.map(p => ({ altezza: String(p.altezza ?? ''), larghezza: String(p.larghezza ?? ''), profondita: String(p.profondita ?? ''), peso: due(p.peso) })),
-    opzioni: {
-      importoContrassegno: dati.contrassegno ? due(dati.contrassegno) : '',
-      tipoPagamento: dati.tipoPagamento || '',
-      importoAssicurata: dati.assicurata ? due(dati.assicurata) : '',
-      codiceServizio: dati.codiceServizio || '',
-      accessorio_crono: dati.accessorioCrono || '',
-    },
-    note: dati.note || '',
   }
+  if (dati.numeroOrdine) data.numeroOrdine = dati.numeroOrdine
+  if (Object.keys(opzioni).length) data.opzioni = opzioni
+  if (dati.note) data.note = dati.note
   const { ok, status, j } = await chiama(c, 'insSped', data)
   if (!ok) throw new Error(j?.errorMessage || j?.error || `Dielle: errore ${status}`)
   if (j?.errorCode || !j?.ldv) throw new Error(j?.errorMessage || 'Dielle: creazione non riuscita')
