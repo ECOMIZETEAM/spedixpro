@@ -17,7 +17,9 @@ import { createHash } from 'crypto'
 
 const BASE = {
   prod: 'https://mydiellebe.it/ws',
-  staging: 'https://www.tsm-staging.twssoftware.it:8085/ws',
+  // ATTENZIONE: lo staging è in CHIARO (HTTP), non HTTPS — la doc dice "https" ma il server su :8085
+  // non parla TLS (verificato 24/9: TLS handshake fallisce, HTTP risponde). La prod è su un altro host.
+  staging: 'http://www.tsm-staging.twssoftware.it:8085/ws',
 }
 
 export type DielleCred = {
@@ -31,8 +33,8 @@ function base(c: DielleCred): string { return BASE[c.ambiente === 'staging' ? 's
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex')
 
 // Schema Dielle: SHA-256(password), SHA-256(username), si concatenano, poi SHA-256 della concatenazione
-// 5 volte. VALIDARE SU STAGING: l'ordine (password+username) e il fatto che si lavori sulle stringhe HEX
-// sono l'interpretazione più comune della doc; se l'auth di test fallisce, è il primo posto da rileggere.
+// 5 volte. VALIDATO su staging il 24/9: stringhe HEX, ordine password+username (le altre combinazioni
+// danno "Credenziali non presenti"). Questa è quella giusta.
 export function hashPasswordDielle(username: string, password: string): string {
   let x = sha256(password) + sha256(username)
   for (let i = 0; i < 5; i++) x = sha256(x)
@@ -130,8 +132,8 @@ export async function creaSpedizioneDielle(c: DielleCred, dati: DielleSpedInput)
 }
 
 // Etichetta. formato: 'pdf' (getSpedLdvZebra, PDF Zebra) | 'a4' (getSpedA4) | 'zpl' (getSpedZplZebra).
-// La spedizione si identifica passando l'`ldv` come `data` (stringa). VALIDARE SU STAGING la codifica
-// del ritorno: la doc dice "byte array"; in JSON arriva o come base64 (stringa) o come array di numeri.
+// La spedizione si identifica passando l'`ldv` come `data` (stringa). VALIDATO su staging il 24/9: il
+// campo `ldv` torna come STRINGA base64 che decodifica in un PDF (%PDF-). Gestiamo comunque anche l'array.
 export async function etichettaDielle(c: DielleCred, ldv: string, formato: 'pdf' | 'a4' | 'zpl' = 'pdf'): Promise<{ contentType: string; bytes?: Buffer; zpl?: string }> {
   const path = formato === 'zpl' ? 'getSpedZplZebra' : formato === 'a4' ? 'getSpedA4' : 'getSpedLdvZebra'
   const { ok, status, j } = await chiama(c, path, ldv)
