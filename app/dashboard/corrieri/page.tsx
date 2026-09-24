@@ -62,12 +62,14 @@ export default function CorrieriPage() {
   const [eliminando, setEliminando] = useState(false)
   const [popup, setPopup] = useState<any>(null)
   const [salvandoPopup, setSalvandoPopup] = useState(false)
+  const [puoDielle, setPuoDielle] = useState(false)   // integrazione riservata: mostra Dielle solo se autorizzato
 
   useEffect(() => {
     fetch('/api/corrieri/lista').then(r => r.json()).then(d => {
       setCorrieri(Array.isArray(d) ? d : [])
       setLoading(false)
     }).catch(() => setLoading(false))
+    fetch('/api/corrieri/integrazioni').then(r => r.json()).then(d => setPuoDielle(Array.isArray(d?.riservate) && d.riservate.includes('dielle'))).catch(() => {})
   }, [])
 
   async function toggleAttivo(id: string, attivoAttuale: boolean) {
@@ -201,15 +203,22 @@ export default function CorrieriPage() {
         <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
           <div style={{padding:'14px 18px',borderBottom:'1px solid #f0f0f0',fontSize:'13.5px',fontWeight:'600',color:'#1a1a1a'}}>Aggiungi Corriere</div>
           <div style={{padding:'16px',display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'12px'}}>
-            {DISPONIBILI.map((c,i) => (
+            {(puoDielle ? [...DISPONIBILI, {tipo:'dielle',nome:'Dielle',icona:'dielle'}] : DISPONIBILI).map((c,i) => (
               <a key={i} href={'/dashboard/corrieri/aggiungi?tipo='+c.tipo}
-                style={{border:c.tipo==='interno'?'1px solid #f97316':'1px solid #e8e8e8',borderRadius:'8px',textDecoration:'none',display:'block',overflow:'hidden',background:'#fff'}}>
+                style={{border:(c.tipo==='interno'||c.tipo==='dielle')?'1px solid #f97316':'1px solid #e8e8e8',borderRadius:'8px',textDecoration:'none',display:'block',overflow:'hidden',background:'#fff'}}>
                 {/* Il circuito interno non ha un logo da mettere: il marchio e' quello del master. */}
                 {c.tipo === 'interno' ? (
                   <div style={{height:'90px',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:'4px',padding:'8px'}}>
                     <div style={{fontSize:'22px',lineHeight:1}}>⬢</div>
                     <div style={{fontSize:'12px',fontWeight:700,color:'#1a1a1a',textAlign:'center'}}>Circuito interno</div>
                     <div style={{fontSize:'10px',color:'#8a8a8a',textAlign:'center'}}>la tua rete</div>
+                  </div>
+                ) : c.tipo === 'dielle' ? (
+                  // Dielle non ha un logo da mostrare (è un aggregatore): tile testuale, visibile solo a chi è autorizzato.
+                  <div style={{height:'90px',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:'4px',padding:'8px'}}>
+                    <div style={{fontSize:'22px',lineHeight:1}}>📦</div>
+                    <div style={{fontSize:'12px',fontWeight:700,color:'#1a1a1a',textAlign:'center'}}>Dielle</div>
+                    <div style={{fontSize:'10px',color:'#8a8a8a',textAlign:'center'}}>più corrieri</div>
                   </div>
                 ) : (
                   <img src={'/corrieri/'+c.icona+'.png'} alt={c.nome} style={{width:'100%',height:'90px',objectFit:'contain',display:'block'}}/>

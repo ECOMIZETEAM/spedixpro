@@ -121,7 +121,7 @@ export function serviziAccessoriDefault(nomeContratto?: string | null, tipo?: st
 // contratto solo quando e' un'etichetta innocua (es. 'generico'): il tipo di un provider vero
 // non va mai stampato. Tenerlo in un posto solo evita che l'aggiunta del prossimo provider
 // ricrei la fuga in tre pagine diverse — e' esattamente com'e' successo aggiungendo il terzo.
-export const PROVIDER_TECNICI = ['spediamopro', 'spedisci', 'easyparcel']
+export const PROVIDER_TECNICI = ['spediamopro', 'spedisci', 'easyparcel', 'dielle']
 export function isProviderTecnico(tipo?: string | null): boolean {
   return PROVIDER_TECNICI.includes(String(tipo || '').toLowerCase())
 }
@@ -132,7 +132,7 @@ export function isProviderTecnico(tipo?: string | null): boolean {
 // queste sigle, quindi il comportamento non cambia — cambia solo cosa viaggia sulla rete.
 // 'V' e' la lettera con cui questi contratti sono gia' contrassegnati in Gestione Zone: dice a noi
 // di quale canale si tratta senza nominare nessun fornitore, che al cliente non deve arrivare mai.
-const SIGLA: Record<string, string> = { spediamopro: 'SP', spedisci: 'SO', easyparcel: 'V' }
+const SIGLA: Record<string, string> = { spediamopro: 'SP', spedisci: 'SO', easyparcel: 'V', dielle: 'DL' }
 export function siglaContratto(tipo?: string | null): string {
   const t = String(tipo || '').toLowerCase()
   return SIGLA[t] || t

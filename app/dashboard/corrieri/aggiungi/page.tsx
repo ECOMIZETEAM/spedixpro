@@ -15,6 +15,16 @@ async function salvaCorriere(formData: FormData) {
   const credenziali: Record<string,string> = {}
   const settings: Record<string,string|boolean> = {}
 
+  // DIELLE è un'integrazione RISERVATA: la può aggiungere/modificare solo un master in
+  // masters.integrazioni_riservate (difesa server, oltre a non mostrarla nel menu). Così non ci si
+  // aggancia Dielle indovinando l'URL ?tipo=dielle. La lista la decide il super master (colonna protetta).
+  if (tipo === 'dielle') {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { data: m } = await createAdminSupabase().from('masters').select('integrazioni_riservate').eq('id', utente.master_id).maybeSingle()
+    const ris = (m as any)?.integrazioni_riservate
+    if (!(Array.isArray(ris) && ris.includes('dielle'))) redirect('/dashboard/corrieri?error=' + encodeURIComponent('Integrazione non disponibile'))
+  }
+
   // Circuito interno: non c'e' nessun provider a cui chiedere le chiavi, il corriere siamo noi.
   // Il contratto serve comunque, perche' e' quello che porta zone, listino, credito e cascata.
   if (tipo === 'interno') {
@@ -57,6 +67,15 @@ async function salvaCorriere(formData: FormData) {
     settings.tipo_servizio = (formData.get('tipo_servizio') as string) || 'FEDEX_REGIONAL_ECONOMY'
     settings.tipo_ritiro = (formData.get('tipo_ritiro') as string) || 'USE_SCHEDULED_PICKUP'
     settings.test_mode = formData.get('test_mode') === 'on'
+  } else if (tipo === 'dielle') {
+    // Dielle/TWS (mydielle): aggregatore. UN account (username/password/ambiente) = una credenziale; OGNI
+    // riga corrieri = un corriere reale, identificato dai suoi codici servizio nelle settings (lib/dielle.ts).
+    credenziali.username = formData.get('username') as string || ''
+    credenziali.password = formData.get('password') as string || ''
+    credenziali.ambiente = (formData.get('ambiente') as string) === 'prod' ? 'prod' : 'staging'
+    settings.servizio = formData.get('servizio') as string || ''
+    settings.codiceServizio = formData.get('codiceServizio') as string || ''
+    settings.accessorio_crono = formData.get('accessorio_crono') as string || ''
   } else {
     credenziali.utente = formData.get('utente') as string || ''
     credenziali.password = formData.get('password') as string || ''
@@ -178,6 +197,18 @@ const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,str
       ['api_secret','API Secret','••••••••','password'],
     ],
   },
+  dielle: {
+    titolo: 'Dielle',
+    info: 'Un account (username/password) con dentro più corrieri. Crea un contratto per OGNI corriere reale (BRT, GLS, UPS…) indicando il suo codice servizio. Scegli l’ambiente: Test per collaudare, Produzione quando è tutto pronto.',
+    campi: [
+      ['nome_contratto','Nome del contratto','es. BRT, GLS, UPS','text'],
+      ['username','Username','fornito dal fornitore','text'],
+      ['password','Password','••••••••','password'],
+      ['servizio','Codice servizio','es. ESPRESSOBRT, ESPRESSOGLS, STANDARD','text'],
+      ['codiceServizio','Codice servizio opzioni','es. T09, PIA, SAT','text',true],
+      ['accessorio_crono','Accessorio crono','es. LK, FP','text',true],
+    ],
+  },
 }
 
 export default async function AggiungiCorrierePage({ searchParams }: { searchParams: Promise<{tipo?:string,id?:string}> }) {
@@ -296,6 +327,15 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
                 <input type="checkbox" name="test_mode" defaultChecked={!!settingsEsistenti.test_mode}/> Modalità test (sandbox FedEx)
               </label>
             </>
+          )}
+          {tipo === 'dielle' && (
+            <div>
+              <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Ambiente</label>
+              <select name="ambiente" defaultValue={credenzialiEsistenti.ambiente || 'staging'} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
+                <option value="staging">Test</option>
+                <option value="prod">Produzione</option>
+              </select>
+            </div>
           )}
           <div style={{display:'flex',gap:'10px',justifyContent:'flex-end',marginTop:'8px'}}>
             <a href="/dashboard/corrieri" style={{padding:'9px 18px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'8px',fontSize:'13px',fontWeight:'600',color:'#666',textDecoration:'none'}}>Annulla</a>
