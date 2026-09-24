@@ -355,6 +355,40 @@ export async function GET(req: NextRequest) {
           }
         } catch (e: any) { console.error('[TRACKING][DIELLE][EVENTI]', s.numero, e?.message) }
 
+      } else if (tipo === 'poste') {
+        // POSTE Delivery Business diretto via KSync/ParcelPilot: lo stato si legge da /tracking (formato
+        // Poste PDB) con la LDV. Credenziali (clientId/secretId/costCenterCode/ambiente) dalla join. Sul
+        // demo l'auth è disabilitata (nessuna credenziale) → si interroga lo stesso. Mappa sulla DESCRIZIONE.
+        if (!s.tracking_number) return
+        if (!cred?.clientId && cred?.ambiente !== 'demo') return
+        const { trackingKsync, mapStatoKsync } = await import('@/lib/ksync')
+        const { stati, consegnata: poConseg, eventi: poEventi } = await trackingKsync(cred, String(s.tracking_number))
+        for (const str of stati) {
+          const m = mapStatoKsync(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
+        if (poConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
+        if (stati.some((str) => mapStatoKsync(str) === 'in_giacenza')) vistaGiacenza = true
+        // ...ma se il pacco e' tornato al mittente, quella "consegnata" e' il RITORNO: vince il reso.
+        if (stati.some((str) => mapStatoKsync(str) === 'reso_mittente')) nuovo = 'reso_mittente'
+
+        try {
+          const cambiatoPo = nuovo !== s.stato
+          if (cambiatoPo || budgetCronologie > 0) {
+            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(poEventi, {
+              data: ['data', 'dataOra', 'datetime'],
+              descrizione: ['descrizione'],
+              luogo: ['luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length) {
+              if (!cambiatoPo) budgetCronologie--
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][POSTE][EVENTI]', s.numero, e?.message) }
+
       } else {
         return
       }

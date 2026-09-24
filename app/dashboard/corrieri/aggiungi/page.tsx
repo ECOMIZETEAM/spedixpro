@@ -15,14 +15,14 @@ async function salvaCorriere(formData: FormData) {
   const credenziali: Record<string,string> = {}
   const settings: Record<string,string|boolean> = {}
 
-  // DIELLE è un'integrazione RISERVATA: la può aggiungere/modificare solo un master in
-  // masters.integrazioni_riservate (difesa server, oltre a non mostrarla nel menu). Così non ci si
-  // aggancia Dielle indovinando l'URL ?tipo=dielle. La lista la decide il super master (colonna protetta).
-  if (tipo === 'dielle') {
+  // INTEGRAZIONI RISERVATE (dielle, poste-diretto/KSync): le può aggiungere/modificare solo un master in
+  // masters.integrazioni_riservate (difesa server, oltre a non mostrarle nel menu). Così non ci si aggancia
+  // indovinando l'URL ?tipo=. La lista la decide il super master (colonna protetta dal trigger).
+  if (tipo === 'dielle' || tipo === 'poste') {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const { data: m } = await createAdminSupabase().from('masters').select('integrazioni_riservate').eq('id', utente.master_id).maybeSingle()
     const ris = (m as any)?.integrazioni_riservate
-    if (!(Array.isArray(ris) && ris.includes('dielle'))) redirect('/dashboard/corrieri?error=' + encodeURIComponent('Integrazione non disponibile'))
+    if (!(Array.isArray(ris) && ris.includes(tipo))) redirect('/dashboard/corrieri?error=' + encodeURIComponent('Integrazione non disponibile'))
   }
 
   // Circuito interno: non c'e' nessun provider a cui chiedere le chiavi, il corriere siamo noi.
@@ -76,6 +76,19 @@ async function salvaCorriere(formData: FormData) {
     settings.servizio = formData.get('servizio') as string || ''
     settings.codiceServizio = formData.get('codiceServizio') as string || ''
     settings.accessorio_crono = formData.get('accessorio_crono') as string || ''
+  } else if (tipo === 'poste') {
+    // Poste Delivery Business DIRETTO via KSync/ParcelPilot. UN account (clientId/secretId/costCenterCode/
+    // ambiente) = una credenziale; OGNI riga corrieri = un PRODOTTO Poste, nel settings.product (lib/ksync.ts).
+    // Ambiente 'demo' = auth disabilitata (prove); 'prod' = OAuth con le chiavi. baseUrl override facoltativo.
+    credenziali.clientId = formData.get('clientId') as string || ''
+    credenziali.secretId = formData.get('secretId') as string || ''
+    credenziali.costCenterCode = formData.get('costCenterCode') as string || ''
+    credenziali.ambiente = (formData.get('ambiente') as string) === 'prod' ? 'prod' : 'demo'
+    credenziali.baseUrl = formData.get('baseUrl') as string || ''
+    settings.product = formData.get('product') as string || ''
+    settings.codice_contrassegno = formData.get('codice_contrassegno') as string || ''
+    settings.modalita_pagamento_cod = formData.get('modalita_pagamento_cod') as string || ''
+    settings.codice_assicurazione = formData.get('codice_assicurazione') as string || ''
   } else {
     credenziali.utente = formData.get('utente') as string || ''
     credenziali.password = formData.get('password') as string || ''
@@ -209,6 +222,21 @@ const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,str
       ['accessorio_crono','Accessorio crono','es. LK, FP','text',true],
     ],
   },
+  poste: {
+    titolo: 'Poste Delivery Business',
+    info: 'Contratto Poste Delivery Business diretto. Un account (Client ID/Secret ID/centro di costo) con dentro più prodotti: crea un contratto per OGNI prodotto Poste indicando il suo codice. Scegli l’ambiente: Demo per collaudare, Produzione quando è tutto pronto.',
+    campi: [
+      ['nome_contratto','Nome del contratto','es. Poste Delivery Business Standard','text'],
+      ['clientId','Client ID','fornito dal fornitore','text'],
+      ['secretId','Secret ID','••••••••','password'],
+      ['costCenterCode','Codice centro di costo','es. CDC-00073352','text'],
+      ['product','Codice prodotto','es. APT000901','text'],
+      ['codice_contrassegno','Codice servizio contrassegno','es. APT000918','text',true],
+      ['modalita_pagamento_cod','Modalità pagamento contrassegno','es. CON','text',true],
+      ['codice_assicurazione','Codice servizio assicurazione','opzionale','text',true],
+      ['baseUrl','URL server (override)','solo se diverso dal default','text',true],
+    ],
+  },
 }
 
 export default async function AggiungiCorrierePage({ searchParams }: { searchParams: Promise<{tipo?:string,id?:string}> }) {
@@ -333,6 +361,15 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
               <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Ambiente</label>
               <select name="ambiente" defaultValue={credenzialiEsistenti.ambiente || 'staging'} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
                 <option value="staging">Test</option>
+                <option value="prod">Produzione</option>
+              </select>
+            </div>
+          )}
+          {tipo === 'poste' && (
+            <div>
+              <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Ambiente</label>
+              <select name="ambiente" defaultValue={credenzialiEsistenti.ambiente || 'demo'} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
+                <option value="demo">Demo</option>
                 <option value="prod">Produzione</option>
               </select>
             </div>

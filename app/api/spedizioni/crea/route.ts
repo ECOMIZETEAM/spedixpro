@@ -2538,5 +2538,154 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  if (corriereRecord.tipo === 'poste') {
+    // POSTE Delivery Business DIRETTO via KSync/ParcelPilot (come FedEx/BRT: costo = listino, costoSpedizione:0).
+    // ATTENZIONE: come gli altri Poste NON c'è annullo via API: se l'insert a sistema fallisce dopo la
+    // creazione, la LDV resta emessa e va annullata a mano dal portale (lo diciamo nell'errore).
+    const settingsPo = (corriereRecord as any)?.settings || {}
+    const credPo = {
+      clientId: cred.clientId, secretId: cred.secretId,
+      costCenterCode: cred.costCenterCode || settingsPo.cost_center_code,
+      ambiente: (cred.ambiente === 'demo' ? 'demo' : 'prod') as 'prod' | 'demo', baseUrl: cred.baseUrl, scope: cred.scope,
+    }
+    const productPo = String(settingsPo.product || '').trim()
+    if (!productPo) {
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Contratto senza prodotto impostato. Contatta l\'assistenza.' }, { status: 400 })
+    }
+    try {
+      const { creaKsync, etichettaKsync } = await import('@/lib/ksync')
+
+      let costoCorrente = costoMaster
+      if (!isProprio) {
+        costoCorrente = (await calcolaPrezzoCorriere(adminCrea, {
+          corriereId: corriereRecord.id, masterId,
+          provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
+          pesoReale, packages,
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+        })) ?? 0
+      }
+      const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
+
+      const colliPo = packages.map((p: any) => ({
+        altezza: parseFloat(p?.height) || undefined, larghezza: parseFloat(p?.width) || undefined,
+        profondita: parseFloat(p?.length) || undefined, peso: parseFloat(p?.weight) || 1,   // kg: creaKsync converte in grammi
+      }))
+
+      const ris = await creaKsync(credPo, {
+        product: productPo,
+        clientReferenceId: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
+        contenuto: body.contenuto ? String(body.contenuto) : undefined,
+        note: body.notes ? String(body.notes) : undefined,
+        mittente: {
+          ragioneSociale: body.shipFrom.name, indirizzo: body.shipFrom.street1, citta: body.shipFrom.city,
+          cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, paese: 'IT',
+          telefono: body.shipFrom.phone || undefined, email: body.shipFrom.email || undefined,
+        },
+        destinatario: {
+          ragioneSociale: body.shipTo.name, indirizzo: body.shipTo.street1, citta: body.shipTo.city,
+          cap: body.shipTo.postalCode, provincia: body.shipTo.state, paese: body.shipTo.country || 'IT',
+          telefono: body.shipTo.phone || undefined, email: body.shipTo.email || undefined,
+        },
+        colli: colliPo,
+        contrassegno: body.codValue ? Number(body.codValue) : undefined,
+        codiceContrassegno: settingsPo.codice_contrassegno ? String(settingsPo.codice_contrassegno) : undefined,
+        modalitaPagamentoCod: settingsPo.modalita_pagamento_cod ? String(settingsPo.modalita_pagamento_cod) : undefined,
+        assicurata: body.insuranceValue ? Number(body.insuranceValue) : undefined,
+        codiceAssicurazione: settingsPo.codice_assicurazione ? String(settingsPo.codice_assicurazione) : undefined,
+      })
+      const numeroFinale = ris.ldv
+
+      // Etichetta: scaricata dal downloadURL della create e salvata (il token può scadere).
+      let etichettaUrl: string | null = null
+      try {
+        const lab = await etichettaKsync(credPo, ris.downloadUrl, 'pdf')
+        if (lab.bytes?.length) etichettaUrl = `data:application/pdf;base64,${lab.bytes.toString('base64')}`
+      } catch (e) { console.error('[CREA][POSTE] etichetta:', (e as any)?.message) }
+
+      const colliDettaglio = (body.colliDettaglio || packages.map((p: any) => ({ lunghezza: p.length, larghezza: p.width, altezza: p.height })))
+        .map((c: any, i: number) => ({
+          numero: i + 1,
+          lunghezza: c.lunghezza || packages[i]?.length || null,
+          larghezza: c.larghezza || packages[i]?.width || null,
+          altezza: c.altezza || packages[i]?.height || null,
+          peso: packages[i]?.weight || null,
+          etichetta_url: etichettaUrl,   // una LDV, un PDF per l'intera spedizione
+        }))
+
+      const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
+        master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id,
+        numero: numeroFinale,
+        mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
+        mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
+        mitt_email: body.shipFrom.email || null, mitt_telefono: body.shipFrom.phone || null,
+        dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_citta: body.shipTo.city,
+        dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
+        dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
+        colli: packages.length, peso_reale: pesoReale,
+        peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
+        lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
+        contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
+        tracking_number: numeroFinale,
+        etichetta_url: etichettaUrl,
+        colli_dettaglio: colliDettaglio,
+        raw_response: { _ksync: true, ldv: numeroFinale, downloadUrl: ris.downloadUrl, ambiente: credPo.ambiente },
+        stato: 'in_lavorazione',
+        costo_spedizione: costoCorrente, costo_totale: costoCliente,
+        servizi_accessori: serviziAccessori,
+        richiedi_ritiro: _vuoleRitiro || false,
+        data_ritiro: _vuoleRitiro ? String(body.dataRitiro) : null,
+        intervallo_ritiro: _vuoleRitiro ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
+        note: body.notes || null, contenuto: body.contenuto || null,
+        rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
+      }).select('id').single()
+
+      if (insertError) {
+        console.error('[CREA][POSTE][INSERT]', numeroFinale, insertError.message)
+        return NextResponse.json({
+          error: `Spedizione creata sul corriere (${numeroFinale}) ma non registrata a sistema: contatta l'assistenza indicando il numero ${numeroFinale} (questo contratto non si annulla via API, va annullato dal portale del fornitore).`,
+          numero: numeroFinale,
+        }, { status: 500 })
+      }
+
+      await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
+      try {
+        await addebitaCatena(adminCrea, {
+          masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
+          costoSpedizione: 0, provincia: body.shipTo.state, packages,
+          cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
+          corriereNome: corriereRecord.nome_contratto,
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+          numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
+        })
+      } catch (e) { console.error('[CREA][POSTE] cascata catena:', e) }
+
+      after(async () => {
+        try {
+          const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
+          let notificaDest = true
+          if (clienteId) {
+            const { data: cli } = await adminCrea.from('clienti').select('impostazioni').eq('id', clienteId).maybeSingle()
+            notificaDest = (cli?.impostazioni as any)?.notifica_email_dest !== false
+          }
+          await inviaEmailSpedizioneCreata({
+            mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
+            mittNome: body.shipFrom?.name, destNome: body.shipTo?.name,
+            numero: numeroFinale, corriere: corriereRecord.nome_contratto, destCitta: body.shipTo?.city,
+            notificaDest, spedizioneId: inserted?.id || null, masterId,
+          })
+        } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
+      })
+
+      return NextResponse.json({
+        numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2), spedizioneId: inserted?.id || null,
+      })
+    } catch (err: any) {
+      console.error('[CREA][POSTE]', err?.message)
+      await stornaPrenotazione()
+      return NextResponse.json({ error: erroreCorrierePulito(err?.message) }, { status: 400 })
+    }
+  }
+
   { await stornaPrenotazione(); return NextResponse.json({ error: `Tipo corriere non supportato: ${corriereRecord.tipo}` }, { status: 400 }) }
 }

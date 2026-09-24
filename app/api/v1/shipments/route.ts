@@ -485,6 +485,37 @@ export async function POST(req: NextRequest) {
       console.error('[V1][DIELLE]', e?.message)
       return errore(erroreCorrierePulito(e?.message))
     }
+  } else if (corriere.tipo === 'poste') {
+    // POSTE Delivery Business diretto via KSync/ParcelPilot: diretto (costoCorrente=0). Il prodotto è nel
+    // `product` (settings). Etichetta dal downloadURL. Niente annullo via API (come gli altri Poste).
+    const settingsPo = (corriere as any)?.settings || {}
+    const credPo = { clientId: cred.clientId, secretId: cred.secretId, costCenterCode: cred.costCenterCode || settingsPo.cost_center_code, ambiente: (cred.ambiente === 'demo' ? 'demo' : 'prod') as 'prod' | 'demo', baseUrl: cred.baseUrl, scope: cred.scope }
+    const productPo = String(settingsPo.product || '').trim()
+    if (!productPo) return errore('Contratto non configurato correttamente')
+    try {
+      const { creaKsync, etichettaKsync } = await import('@/lib/ksync')
+      const risPo = await creaKsync(credPo, {
+        product: productPo,
+        clientReferenceId: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
+        contenuto: body.contenuto ? String(body.contenuto) : undefined,
+        note: body.notes ? String(body.notes) : undefined,
+        mittente: { ragioneSociale: body.shipFrom.name, indirizzo: conPresso(body.shipFrom.street1 || '', pressoFrom), citta: body.shipFrom.city, cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, paese: 'IT', telefono: body.shipFrom.phone || undefined, email: body.shipFrom.email || undefined },
+        destinatario: { ragioneSociale: body.shipTo.name, indirizzo: conPresso(body.shipTo.street1 || '', pressoTo), citta: body.shipTo.city, cap: body.shipTo.postalCode, provincia: body.shipTo.state, paese: body.shipTo.country || 'IT', telefono: body.shipTo.phone || undefined, email: body.shipTo.email || undefined },
+        colli: packages.map((p: any) => ({ altezza: parseFloat(p?.height) || undefined, larghezza: parseFloat(p?.width) || undefined, profondita: parseFloat(p?.length) || undefined, peso: parseFloat(p?.weight) || 1 })),
+        contrassegno: body.codValue ? Number(body.codValue) : undefined,
+        codiceContrassegno: settingsPo.codice_contrassegno ? String(settingsPo.codice_contrassegno) : undefined,
+        modalitaPagamentoCod: settingsPo.modalita_pagamento_cod ? String(settingsPo.modalita_pagamento_cod) : undefined,
+        assicurata: body.insuranceValue ? Number(body.insuranceValue) : undefined,
+        codiceAssicurazione: settingsPo.codice_assicurazione ? String(settingsPo.codice_assicurazione) : undefined,
+      })
+      numero = risPo.ldv
+      costoCorrente = 0
+      try { const lab = await etichettaKsync(credPo, risPo.downloadUrl, 'pdf'); if (lab.bytes?.length) etichettaUrl = `data:application/pdf;base64,${lab.bytes.toString('base64')}` } catch (e) { console.error('[V1][POSTE] etichetta:', (e as any)?.message) }
+      raw = { _ksync: true, ldv: numero, downloadUrl: risPo.downloadUrl, ambiente: credPo.ambiente }
+    } catch (e: any) {
+      console.error('[V1][POSTE]', e?.message)
+      return errore(erroreCorrierePulito(e?.message))
+    }
   } else {
     return errore('Tipo contratto non supportato')
   }
