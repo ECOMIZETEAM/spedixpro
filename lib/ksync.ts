@@ -254,10 +254,16 @@ export async function giacenzeListaKsync(c: KsyncCred, filtro?: { dateFrom?: str
   return { raw: j }
 }
 
-// Svincolo di una giacenza (/deposits/release). `releaseAct` decide cosa fare (riconsegna/reso); per la
-// riconsegna a un nuovo indirizzo si passa `address`. Torna l'esito grezzo (la cascata la fa il chiamante).
-export async function svincolaKsync(c: KsyncCred, req: { shipmentId: string; releaseAct: string; nuovoIndirizzo?: KsyncRecapito; officeId?: string }): Promise<{ ok: boolean; descrizione: string; raw: any }> {
-  const body: any = { releaseAct: req.releaseAct, shipmentId: req.shipmentId }
+// Svincolo di una giacenza (/deposits/release). Forma verificata dallo swagger:
+//   { releaseAct: { shipmentId, releaseAction: "AZ0001" }, shipmentId: { item: [{ barcode }] }, address? }
+// `releaseAction` è un codice PDB (es. AZ0001 = riconsegna, l'unico noto dall'esempio): i codici di
+// reso/nuovo indirizzo li deve dare ParcelPilot, NON si inventano (muovono soldi). Per il nuovo indirizzo
+// si passa `address`. Torna l'esito grezzo (la cascata/addebito li fa il chiamante).
+export async function svincolaKsync(c: KsyncCred, req: { shipmentId: string; releaseAction: string; nuovoIndirizzo?: KsyncRecapito; officeId?: string }): Promise<{ ok: boolean; descrizione: string; raw: any }> {
+  const body: any = {
+    releaseAct: { shipmentId: req.shipmentId, releaseAction: req.releaseAction },
+    shipmentId: { item: [{ barcode: req.shipmentId }] },
+  }
   if (req.officeId) body.officeId = req.officeId
   if (req.nuovoIndirizzo) {
     const r = req.nuovoIndirizzo
@@ -294,22 +300,31 @@ export async function podScaricaKsync(c: KsyncCred, ldv: string): Promise<{ cont
 }
 
 // ── RITIRI (pickup) ──────────────────────────────────────────────────────────
-// Prenota un ritiro (/pickup/booking). `bookingType` = tipo ritiro (es. RIT0003). `where` = indirizzo di
-// ritiro. operation 'I' = inserimento. Torna l'esito grezzo (bookingId da tenere per il report/annullo).
-export async function ritiroPrenotaKsync(c: KsyncCred, req: { bookingType?: string; indirizzo: KsyncRecapito; shipmentId?: string; dataRitiro?: string; note?: string }): Promise<{ raw: any }> {
+// Prenota un ritiro (/pickup/booking). `bookingType` = tipo ritiro (RIT0001/2/3). `where` = indirizzo di
+// ritiro, `content` = i colli. operation 'I' = inserimento. Verificato su demo: risposta { bookingId,
+// result: { item: [{ result: 'OK', errorDescription }] } }. Torna { ok, bookingId, errore, raw }.
+export async function ritiroPrenotaKsync(c: KsyncCred, req: { bookingType?: string; indirizzo: KsyncRecapito; colli?: KsyncCollo[]; numColli?: number; pesoKg?: number; shipmentId?: string; dataRitiro?: string; timeSlot?: string; note?: string }): Promise<{ ok: boolean; bookingId: string; errore: string; raw: any }> {
   const r = req.indirizzo
+  const colli = req.colli && req.colli.length ? req.colli : [{ peso: req.pesoKg || 1 }]
+  const content = {
+    item: colli.map(p => ({ containerType: 'P', tipocontText: 'pacchi', quantity: req.numColli || colli.length || 1, weight: Number(p.peso) || 1, height: Math.round(Number(p.altezza) || 1) || 1, width: Math.round(Number(p.larghezza) || 1) || 1, length: Math.round(Number(p.profondita) || 1) || 1 })),
+  }
   const body: any = {
     pickup: {
       item: [{
         operation: 'I', bookingType: req.bookingType || 'RIT0003', bookingId: '', pickupId: '',
         shipmentId: req.shipmentId || '', customerShipmentId: '',
         where: { item: [{ givenName: r.ragioneSociale || '', surname: r.referente || '', streetNumber: r.civico || '', streetName: r.indirizzo || '', town: r.citta || '', region: (r.provincia || '').toUpperCase(), postCode: r.cap || '', country: nazione(r.paese), phone: r.telefono || '', email: r.email || '' }] },
+        content,
+        pickupDate: req.dataRitiro || '', timeSlot: req.timeSlot || 'AM', note1: req.note || '', note2: '', note3: '',
       }],
     },
   }
-  if (req.dataRitiro) body.pickup.item[0].pickupDate = req.dataRitiro
   const { j } = await chiama(c, 'pickup/booking', body)
-  return { raw: j }
+  const it = j?.result?.item?.[0]
+  const bookingId = String(j?.bookingId || it?.bookingId || j?.pickupId || '')
+  const ok = !!bookingId && String(it?.result || '').toUpperCase() !== 'KO'
+  return { ok, bookingId, errore: String(it?.errorDescription || j?.errorDescription || (Array.isArray(j?.errors) ? j.errors.join(' ') : '') || ''), raw: j }
 }
 // Report dei ritiri prenotati in un intervallo (/pickup/report).
 export async function ritiroReportKsync(c: KsyncCred, filtro: { bookingType?: string; dateFrom: string; dateTo: string; status?: string }): Promise<{ raw: any }> {

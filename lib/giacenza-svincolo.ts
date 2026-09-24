@@ -120,6 +120,34 @@ export async function eseguiSvincolo(
     } catch (e: any) {
       throw new Error(erroreSvincoloPulito(e))
     }
+  } else if (sped.corrieri?.tipo === 'poste' && (cred?.clientId || cred?.ambiente === 'demo')) {
+    // Poste Delivery Business (KSync): svincolo via /deposits/release. `releaseAction` è un codice PDB per
+    // operazione: la riconsegna è AZ0001 (dall'esempio), gli altri li dà ParcelPilot e stanno nei settings
+    // del contratto. Se manca il codice per l'operazione richiesta NON si indovina (rischio azione
+    // sbagliata su un pacco vero): ci si ferma con un avviso chiaro.
+    const settingsPo = (sped.corrieri as any)?.settings || {}
+    const codiciPo: Record<string, string> = {
+      riconsegna: String(settingsPo.release_action_riconsegna || 'AZ0001'),
+      riconsegna_nuovo: String(settingsPo.release_action_nuovo || ''),
+      reso: String(settingsPo.release_action_reso || ''),
+    }
+    const releaseAction = codiciPo[rich.operazione] || ''
+    if (!releaseAction) throw new Error(`Svincolo "${opLabel[rich.operazione] || rich.operazione}" non ancora configurato per questo contratto: manca il codice azione (da impostare nel contratto).`)
+    const { svincolaKsync } = await import('@/lib/ksync')
+    const credPo = { clientId: cred.clientId, secretId: cred.secretId, costCenterCode: cred.costCenterCode, ambiente: (cred.ambiente === 'demo' ? 'demo' : 'prod') as 'prod' | 'demo', baseUrl: cred.baseUrl, scope: cred.scope }
+    const ndP = rich.nuovo_destinatario || {}
+    try {
+      const esito = await svincolaKsync(credPo, {
+        shipmentId: String(sped.tracking_number || sped.numero),
+        releaseAction,
+        nuovoIndirizzo: rich.operazione === 'riconsegna_nuovo'
+          ? { ragioneSociale: ndP.nome || sped.dest_nome || '', indirizzo: ndP.indirizzo || '', cap: ndP.cap || '', citta: ndP.citta || '', provincia: ndP.provincia || '', paese: 'IT', telefono: ndP.telefono || sped.dest_telefono || '', email: ndP.email || sped.dest_email || '' }
+          : undefined,
+      })
+      if (!esito.ok) throw new Error(esito.descrizione || 'Svincolo non riuscito')
+    } catch (e: any) {
+      throw new Error(erroreSvincoloPulito(e))
+    }
   }
 
   // ADDEBITO: solo il servizio scelto (l'apertura è già stata addebitata all'ENTRATA in giacenza).

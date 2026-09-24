@@ -324,6 +324,37 @@ export async function POST(req: NextRequest) {
   }
 
   // ══════════════════════════════════════════════════════
+  // POSTE Delivery Business (KSync/ParcelPilot): ritiro ON-DEMAND via /pickup/booking (come FedEx).
+  // bookingType RIT0001/2/3 dal contratto (settings, default RIT0003). Torna un bookingId.
+  // ══════════════════════════════════════════════════════
+  if (corriere.tipo === 'poste') {
+    const { ritiroPrenotaKsync } = await import('@/lib/ksync')
+    const st: any = corriere.settings || {}
+    const credPo = { clientId: cred.clientId, secretId: cred.secretId, costCenterCode: cred.costCenterCode, ambiente: (cred.ambiente === 'demo' ? 'demo' : 'prod') as 'prod' | 'demo', baseUrl: cred.baseUrl, scope: cred.scope }
+    const ts = pickupTimeSpedisci(body.orarioRitiro)
+    try {
+      const ris = await ritiroPrenotaKsync(credPo, {
+        bookingType: st.booking_type || 'RIT0003',
+        indirizzo: {
+          ragioneSociale: body.mittNome, referente: body.mittNome, indirizzo: body.mittIndirizzo,
+          cap: body.mittCap, citta: body.mittCitta,
+          provincia: siglaProvincia(body.mittProvincia || '') || (body.mittProvincia || ''), paese: body.mittPaese || 'IT',
+          telefono: pulisciTelefono(body.mittTelefono) || '', email: body.mittEmail || '',
+        },
+        numColli: colliTotali, pesoKg: pesoTotale,
+        shipmentId: primaSped.tracking_number || primaSped.numero || '',
+        dataRitiro: body.dataRitiro, timeSlot: ts === 'PM' ? 'PM' : 'AM', note: body.istruzioni,
+      })
+      if (!ris.ok || !ris.bookingId) return NextResponse.json({ error: erroreRitiroPulito(ris.errore || 'Poste: ritiro non riuscito') }, { status: 400 })
+      const { data: nuovoRitiro, error: insErr } = await salvaRitiro(ris.bookingId)
+      if (insErr) return NextResponse.json({ error: `Ritiro creato (${ris.bookingId}) ma errore DB: ${insErr.message}` }, { status: 500 })
+      return NextResponse.json({ id: nuovoRitiro.id, pickupId: ris.bookingId })
+    } catch (e: any) {
+      return NextResponse.json({ error: erroreRitiroPulito(e) }, { status: 400 })
+    }
+  }
+
+  // ══════════════════════════════════════════════════════
   // RAMO SPEDISCI.ONLINE (flusso esistente)
   // ══════════════════════════════════════════════════════
   const carrierCode = raw?._carrierCode
