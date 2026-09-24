@@ -82,6 +82,7 @@ async function salvaCorriere(formData: FormData) {
     // Ambiente 'demo' = auth disabilitata (prove); 'prod' = OAuth con le chiavi. baseUrl override facoltativo.
     credenziali.clientId = formData.get('clientId') as string || ''
     credenziali.secretId = formData.get('secretId') as string || ''
+    credenziali.scope = formData.get('scope') as string || ''
     credenziali.costCenterCode = formData.get('costCenterCode') as string || ''
     credenziali.ambiente = (formData.get('ambiente') as string) === 'prod' ? 'prod' : 'demo'
     credenziali.baseUrl = formData.get('baseUrl') as string || ''
@@ -229,6 +230,7 @@ const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,str
       ['nome_contratto','Nome del contratto','es. Poste Delivery Business Standard','text'],
       ['clientId','Client ID','fornito dal fornitore','text'],
       ['secretId','Secret ID','••••••••','password'],
+      ['scope','Scope OAuth','es. api://…/.default (se richiesto)','text',true],
       ['costCenterCode','Codice centro di costo','es. CDC-00073352','text'],
       ['product','Codice prodotto','es. APT000901','text'],
       ['codice_contrassegno','Codice servizio contrassegno','es. APT000918','text',true],
