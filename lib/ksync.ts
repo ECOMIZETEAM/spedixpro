@@ -9,10 +9,13 @@ import { testoIndicaReso, prioritaStato } from '@/lib/spedisci'
  * `corrieri` `tipo='poste'` col suo `product` in settings (es. APT000901). Il nome tecnico "ParcelPilot/
  * KSync" NON si mostra mai (regola #8): a valle si vede il brand "Poste" — che è LECITO mostrare.
  *
- * Auth: OAuth2 client_credentials su /token → access_token; poi header `PosteClientId` + `AccessToken`
- * (come FedEx). Sul DEMO l'auth è disabilitata: senza clientId/secretId non si chiama /token e si va
- * lisci. VALIDATO sul demo il 24/9 (create+etichetta+tracking): create torna l'LDV Poste (13 cifre) e un
- * `downloadURL`; l'etichetta è un PDF/ZPL; il tracking è nel dizionario Poste (StatusDescription+status).
+ * Auth: OAuth2 client_credentials su /token → access_token (valido ~3599s); poi gli header `POSTE_clientID`
+ * (il clientId) e `Authorization: Bearer <token>` sulle altre chiamate. NB: i NOMI header veri sono questi,
+ * non i nomi degli schema swagger (PosteClientId/AccessToken). Sul DEMO l'auth è disabilitata: senza
+ * clientId/secretId non si chiama /token e si va lisci. VALIDATO sul demo il 24/9 (create+etichetta+tracking).
+ * PROD: https://ksyncwrapper.parcelpilot.it (confermato risponde). L'etichetta GET /labels/{token} è PUBBLICA
+ * (nessun auth). Con provider=KSync molte operazioni non ci sono (501): deposits/giacenze, digipod/POD,
+ * pickup/report, transittimes, international; pickup/booking solo operation=I. Create/etichetta/tracking sì.
  *
  * ATTENZIONE (differenze dal resto): il PESO è in GRAMMI ("1000"=1kg), la nazione Italia è "ITA1"
  * (dall'esempio ufficiale, accettato dal server), il contrassegno sta in `services` (codice APT… +
@@ -67,7 +70,7 @@ async function accessToken(c: KsyncCred): Promise<string | null> {
 async function chiama(c: KsyncCred, path: string, body: unknown): Promise<{ ok: boolean; status: number; j: any }> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   const tok = await accessToken(c)
-  if (tok) { headers['AccessToken'] = tok; if (c.clientId) headers['PosteClientId'] = c.clientId }
+  if (tok) { headers['Authorization'] = 'Bearer ' + tok; if (c.clientId) headers['POSTE_clientID'] = c.clientId }
   let r: Response
   try {
     r = await fetch(`${base(c)}/${path}`, { method: 'POST', headers, body: JSON.stringify(body) })
@@ -174,7 +177,7 @@ export async function etichettaKsync(c: KsyncCred, downloadUrlOrToken: string, f
   if (!/^https?:\/\//.test(url)) url = `${base(c)}/labels/${url.replace(/^\/?(labels\/)?/, '')}`
   const headers: Record<string, string> = {}
   const tok = await accessToken(c)
-  if (tok) { headers['AccessToken'] = tok; if (c.clientId) headers['PosteClientId'] = c.clientId }
+  if (tok) { headers['Authorization'] = 'Bearer ' + tok; if (c.clientId) headers['POSTE_clientID'] = c.clientId }
   const r = await fetch(url, { headers })
   if (!r.ok) throw new Error(`KSync: etichetta non disponibile (${r.status})`)
   if (formato === 'zpl') return { contentType: 'text/plain', zpl: await r.text() }
@@ -288,7 +291,7 @@ export async function podRichiediKsync(c: KsyncCred, ldv: string | string[], mai
 export async function podScaricaKsync(c: KsyncCred, ldv: string): Promise<{ contentType: string; bytes?: Buffer; raw?: any }> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   const tok = await accessToken(c)
-  if (tok) { headers['AccessToken'] = tok; if (c.clientId) headers['PosteClientId'] = c.clientId }
+  if (tok) { headers['Authorization'] = 'Bearer ' + tok; if (c.clientId) headers['POSTE_clientID'] = c.clientId }
   const r = await fetch(`${base(c)}/digipod/download`, { method: 'POST', headers, body: JSON.stringify({ barcode: String(ldv) }) })
   const ct = r.headers.get('content-type') || ''
   if (ct.includes('application/pdf')) return { contentType: 'application/pdf', bytes: Buffer.from(await r.arrayBuffer()) }
