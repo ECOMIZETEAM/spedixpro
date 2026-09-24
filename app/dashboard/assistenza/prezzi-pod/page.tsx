@@ -19,6 +19,83 @@ const eur = (n: number) => new Intl.NumberFormat('it-IT', { style: 'currency', c
 const inp: React.CSSProperties = { padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', background: '#fff', width: '100%' }
 const lbl: React.CSSProperties = { display: 'block', fontSize: '11px', fontWeight: 700, color: '#6b7280', marginBottom: '5px', textTransform: 'uppercase', letterSpacing: '0.03em' }
 
+// Chiude la tendina quando si clicca fuori. Sta qui perche' la usano in due: se resta dentro a un
+// componente solo, la seconda tendina nasce senza e resta aperta sopra il resto della pagina.
+function useChiudiFuori(aperto: boolean, chiudi: () => void) {
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!aperto) return
+    const fuori = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) chiudi() }
+    document.addEventListener('mousedown', fuori)
+    return () => document.removeEventListener('mousedown', fuori)
+    // eslint-disable-next-line
+  }, [aperto])
+  return box
+}
+
+const rigaTendina: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', fontSize: '13px', cursor: 'pointer', color: '#1a1a1a' }
+const pannello: React.CSSProperties = { position: 'absolute', zIndex: 30, top: 'calc(100% + 4px)', left: 0, right: 0, minWidth: '320px', maxHeight: '340px', overflowY: 'auto',
+  background: '#fff', border: '1px solid #d1d5db', borderRadius: '8px', boxShadow: '0 10px 30px rgba(0,0,0,0.12)', padding: '8px' }
+
+// Selettore a caselle dei CLIENTI: se ne spuntano quanti se ne vuole e il prezzo si scrive una volta
+// per tutti — "questi dieci clienti, tutti i BRT, 3 €".
+//
+// Nessuna spunta NON vuol dire "nessun cliente": vuol dire la regola generica, quella che vale per
+// tutti e che si applica a chi non ne ha una sua. E' la stessa logica dei corrieri qui sotto, e per
+// un master con 600 clienti resta anche il modo piu' economico di dire "tutti": una regola, non 600.
+function SelettoreClienti({ clienti, sel, setSel }: { clienti: Opz[]; sel: string[]; setSel: (v: string[]) => void }) {
+  const [aperto, setAperto] = useState(false)
+  const [cerca, setCerca] = useState('')
+  const box = useChiudiFuori(aperto, () => setAperto(false))
+
+  const q = cerca.trim().toLowerCase()
+  const filtrati = useMemo(() => q ? clienti.filter(c => c.nome.toLowerCase().includes(q)) : clienti, [clienti, q])
+  const toggle = (id: string) => setSel(sel.includes(id) ? sel.filter(x => x !== id) : [...sel, id])
+  const tuttiFiltratiSel = !!filtrati.length && filtrati.every(c => sel.includes(c.id))
+
+  const riassunto = sel.length === 0 ? 'Tutti i clienti (predefinito)'
+    : sel.length === 1 ? (clienti.find(c => c.id === sel[0])?.nome || '1 cliente')
+    : `${sel.length} clienti`
+
+  return (
+    <div ref={box} style={{ position: 'relative' }}>
+      <button type="button" onClick={() => setAperto(a => !a)}
+        style={{ ...inp, textAlign: 'left', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: sel.length ? '#1a1a1a' : '#6b7280' }}>{riassunto}</span>
+        <span style={{ color: '#9ca3af', fontSize: '11px' }}>▾</span>
+      </button>
+      {aperto && (
+        <div style={pannello}>
+          <input autoFocus value={cerca} onChange={e => setCerca(e.target.value)} placeholder="Cerca cliente…"
+            style={{ ...inp, padding: '7px 10px', marginBottom: '6px' }} />
+          {sel.length > 0 && (
+            <button type="button" onClick={() => setSel([])}
+              style={{ ...rigaTendina, width: '100%', background: 'none', border: 'none', color: '#b91c1c', fontWeight: 600 }}>
+              ✕ Togli la selezione (vale per tutti i clienti)
+            </button>
+          )}
+          {filtrati.length > 1 && (
+            <button type="button"
+              onClick={() => setSel(tuttiFiltratiSel
+                ? sel.filter(id => !filtrati.some(c => c.id === id))
+                : [...new Set([...sel, ...filtrati.map(c => c.id)])])}
+              style={{ ...rigaTendina, width: '100%', background: 'none', border: 'none', color: '#c2410c', fontWeight: 600 }}>
+              {tuttiFiltratiSel ? '□' : '☑'} {tuttiFiltratiSel ? 'Deseleziona' : 'Seleziona'} i {filtrati.length} {q ? 'trovati' : 'clienti'}
+            </button>
+          )}
+          {!filtrati.length && <div style={{ ...rigaTendina, color: '#9ca3af' }}>Nessun cliente trovato.</div>}
+          {filtrati.map(c => (
+            <label key={c.id} style={{ ...rigaTendina, borderRadius: '5px', background: sel.includes(c.id) ? '#fff7ed' : 'transparent' }}>
+              <input type="checkbox" checked={sel.includes(c.id)} onChange={() => toggle(c.id)} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.nome}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Selettore a caselle: contratti raggruppati per vettore, con la riga "tutti i <vettore>".
 function SelettoreCorrieri({ corrieri, selCorr, setSelCorr, selVett, setSelVett }: {
   corrieri: Corr[]
@@ -27,13 +104,7 @@ function SelettoreCorrieri({ corrieri, selCorr, setSelCorr, selVett, setSelVett 
 }) {
   const [aperto, setAperto] = useState(false)
   const [cerca, setCerca] = useState('')
-  const box = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!aperto) return
-    const fuori = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setAperto(false) }
-    document.addEventListener('mousedown', fuori)
-    return () => document.removeEventListener('mousedown', fuori)
-  }, [aperto])
+  const box = useChiudiFuori(aperto, () => setAperto(false))
 
   const gruppi = useMemo(() => {
     const g = new Map<string, Corr[]>()
@@ -59,7 +130,7 @@ function SelettoreCorrieri({ corrieri, selCorr, setSelCorr, selVett, setSelVett 
     : [selVett.length ? `${selVett.length} ${selVett.length > 1 ? 'vettori' : 'vettore'}` : '', selCorr.length ? `${selCorr.length} contratt${selCorr.length > 1 ? 'i' : 'o'}` : '']
       .filter(Boolean).join(' + ')
 
-  const riga: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', fontSize: '13px', cursor: 'pointer', color: '#1a1a1a' }
+  const riga = rigaTendina
 
   return (
     <div ref={box} style={{ position: 'relative' }}>
@@ -69,8 +140,7 @@ function SelettoreCorrieri({ corrieri, selCorr, setSelCorr, selVett, setSelVett 
         <span style={{ color: '#9ca3af', fontSize: '11px' }}>▾</span>
       </button>
       {aperto && (
-        <div style={{ position: 'absolute', zIndex: 30, top: 'calc(100% + 4px)', left: 0, right: 0, minWidth: '320px', maxHeight: '340px', overflowY: 'auto',
-          background: '#fff', border: '1px solid #d1d5db', borderRadius: '8px', boxShadow: '0 10px 30px rgba(0,0,0,0.12)', padding: '8px' }}>
+        <div style={pannello}>
           <input autoFocus value={cerca} onChange={e => setCerca(e.target.value)} placeholder="Cerca contratto o vettore…"
             style={{ ...inp, padding: '7px 10px', marginBottom: '6px' }} />
           {nSel > 0 && (
@@ -113,7 +183,7 @@ export default function PrezziPodPage() {
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
   const [salvando, setSalvando] = useState(false)
-  const [clienteId, setClienteId] = useState('')
+  const [selCli, setSelCli] = useState<string[]>([])
   const [prezzo, setPrezzo] = useState('')
   const [selCorr, setSelCorr] = useState<string[]>([])
   const [selVett, setSelVett] = useState<string[]>([])
@@ -145,13 +215,14 @@ export default function PrezziPodPage() {
     setSalvando(true); setMsg(null)
     const r = await fetch('/api/assistenza/pod-prezzi', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cliente_id: clienteId || null, corriere_ids: selCorr, vettori: selVett, prezzo: p }),
+      body: JSON.stringify({ cliente_ids: selCli, corriere_ids: selCorr, vettori: selVett, prezzo: p }),
     })
     const j = await r.json().catch(() => ({}))
     setSalvando(false)
     if (r.ok) {
-      setMsg({ t: 'ok', x: `${j.totale} regol${j.totale > 1 ? 'e' : 'a'}: ${j.create} nuov${j.create === 1 ? 'a' : 'e'}, ${j.aggiornate} aggiornat${j.aggiornate === 1 ? 'a' : 'e'}` })
-      setPrezzo(''); setSelCorr([]); setSelVett([]); carica()
+      const suClienti = j.clienti > 1 ? ` su ${j.clienti} clienti` : ''
+      setMsg({ t: 'ok', x: `${j.totale} regol${j.totale > 1 ? 'e' : 'a'}${suClienti}: ${j.create} nuov${j.create === 1 ? 'a' : 'e'}, ${j.aggiornate} aggiornat${j.aggiornate === 1 ? 'a' : 'e'}` })
+      setPrezzo(''); setSelCorr([]); setSelVett([]); setSelCli([]); carica()
     } else setMsg({ t: 'err', x: j.error || 'Errore nel salvataggio' })
   }
 
@@ -199,11 +270,8 @@ export default function PrezziPodPage() {
         <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a', marginBottom: '14px' }}>Aggiungi o aggiorna una regola</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 140px auto', gap: '12px', alignItems: 'end' }}>
           <div>
-            <label style={lbl}>Cliente</label>
-            <select value={clienteId} onChange={e => setClienteId(e.target.value)} style={inp}>
-              <option value="">Tutti i clienti</option>
-              {clienti.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
-            </select>
+            <label style={lbl}>Clienti</label>
+            <SelettoreClienti clienti={clienti} sel={selCli} setSel={setSelCli} />
           </div>
           <div>
             <label style={lbl}>Corrieri</label>
@@ -218,8 +286,10 @@ export default function PrezziPodPage() {
           </button>
         </div>
         <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '10px', marginBottom: 0 }}>
-          Un prezzo, quanti corrieri vuoi: spunta i contratti oppure <b>Tutti i GLS</b> / <b>Tutti i BRT</b> — la regola sul vettore
-          prende anche i contratti aggiunti in futuro. Prezzo <b>0</b> = POD gratuita esplicita (per esentare un cliente pur avendo un predefinito a pagamento).
+          Un prezzo, quanti clienti e quanti corrieri vuoi: spunta i clienti e i contratti — oppure <b>Tutti i GLS</b> / <b>Tutti i BRT</b>,
+          che prendono anche i contratti aggiunti in futuro. Esempio: dieci clienti + <b>Tutti i BRT</b> + 3 € = dieci regole in un colpo.
+          Non spuntare nessun cliente significa <b>tutti</b> (una regola sola, vale anche per chi arriverà domani).
+          Prezzo <b>0</b> = POD gratuita esplicita (per esentare un cliente pur avendo un predefinito a pagamento).
         </p>
       </div>
 

@@ -43,11 +43,13 @@ export async function GET() {
   })
 }
 
-// POST: crea o aggiorna le regole di UN prezzo su PIU' bersagli in una volta sola.
+// POST: crea o aggiorna le regole di UN prezzo su PIU' bersagli e PIU' clienti in una volta sola.
+// `cliente_ids` = i clienti scelti (vuoto = "tutti i clienti", la regola generica),
 // `corriere_ids` = singoli contratti, `vettori` = tutti i contratti di quel vettore (anche i futuri),
-// nessuno dei due = "tutti i corrieri" (predefinito). cliente_id nullo = "tutti i clienti".
-// Prima si poteva salvare un bersaglio alla volta: con 38 contratti significava rifare 38 volte
-// la stessa regola a mano.
+// nessuno dei due = "tutti i corrieri" (predefinito).
+// Si scrive una regola per ogni COPPIA cliente × bersaglio: "10 clienti, tutti i BRT, 3 €" = 10 regole.
+// Prima si poteva salvare un bersaglio alla volta, e un cliente alla volta: con 38 contratti e 10
+// clienti significava rifare 380 volte la stessa regola a mano.
 export async function POST(req: NextRequest) {
   const ctx = await masterCorrente()
   if ('err' in ctx) return ctx.err
@@ -55,7 +57,12 @@ export async function POST(req: NextRequest) {
   const M = ctx.masterId
   const body = await req.json().catch(() => ({}))
 
-  const clienteId = body?.cliente_id ? String(body.cliente_id) : null
+  // `cliente_id` singolo resta accettato: una pagina aperta prima del rilascio manda ancora quello,
+  // e rifiutarla vorrebbe dire rompere il salvataggio a chi non ha ancora ricaricato.
+  const clienteIds: string[] = [...new Set<string>([
+    ...(Array.isArray(body?.cliente_ids) ? body.cliente_ids : []),
+    body?.cliente_id,
+  ].filter(Boolean).map((x: any) => String(x)))]
   const corriereIds: string[] = [...new Set<string>((Array.isArray(body?.corriere_ids) ? body.corriere_ids : [])
     .filter(Boolean).map((x: any) => String(x)))]
   const vettori: string[] = [...new Set<string>((Array.isArray(body?.vettori) ? body.vettori : [])
@@ -67,9 +74,11 @@ export async function POST(req: NextRequest) {
   // Perimetro: cliente e contratti, se indicati, devono essere del master (mai di un altro). I vettori
   // devono essere fra quelli che il master ha davvero: una regola su un vettore inesistente non
   // sbaglia i soldi, ma resta lì a far credere che copra qualcosa.
-  if (clienteId) {
-    const { data } = await admin.from('clienti').select('id').eq('id', clienteId).eq('master_id', M).maybeSingle()
-    if (!data) return NextResponse.json({ error: 'Cliente non valido' }, { status: 400 })
+  if (clienteIds.length) {
+    const { data } = await admin.from('clienti').select('id').eq('master_id', M).in('id', clienteIds)
+    const miei = new Set((data || []).map((c: any) => c.id))
+    const estranei = clienteIds.filter(id => !miei.has(id))
+    if (estranei.length) return NextResponse.json({ error: `${estranei.length > 1 ? 'Clienti non validi' : 'Cliente non valido'}` }, { status: 400 })
   }
   const { data: mieiCorr } = await admin.from('corrieri').select('id,nome_contratto,tipo').eq('master_id', M)
   const idsMiei = new Set((mieiCorr || []).map((c: any) => c.id))
@@ -84,27 +93,59 @@ export async function POST(req: NextRequest) {
   ]
   if (!bersagli.length) bersagli.push({ corriere_id: null, vettore: null })
 
-  let create = 0, aggiornate = 0
-  for (const b of bersagli) {
-    // Upsert manuale: la unique e' su un'espressione (coalesce dei NULL), quindi cerco a mano la gemella.
-    let q = admin.from('pod_prezzi').select('id').eq('master_id', M)
-    q = clienteId ? q.eq('cliente_id', clienteId) : q.is('cliente_id', null)
-    q = b.corriere_id ? q.eq('corriere_id', b.corriere_id) : q.is('corriere_id', null)
-    q = b.vettore ? q.eq('vettore', b.vettore) : q.is('vettore', null)
-    const { data: ex } = await q.maybeSingle()
-    if (ex) {
-      const { error } = await admin.from('pod_prezzi')
-        .update({ prezzo, attivo, updated_at: new Date().toISOString() }).eq('id', (ex as any).id)
-      if (error) return NextResponse.json({ error: error.message, create, aggiornate }, { status: 400 })
-      aggiornate++
-    } else {
-      const { error } = await admin.from('pod_prezzi')
-        .insert({ master_id: M, cliente_id: clienteId, corriere_id: b.corriere_id, vettore: b.vettore, prezzo, attivo })
-      if (error) return NextResponse.json({ error: error.message, create, aggiornate }, { status: 400 })
-      create++
-    }
+  // Ogni COPPIA cliente × bersaglio e' una regola. Nessun cliente scelto = una riga sola col cliente
+  // nullo, cioe' "vale per tutti".
+  const clientiBersaglio: (string | null)[] = clienteIds.length ? clienteIds : [null]
+  const coppie = clientiBersaglio.flatMap(cli => bersagli.map(b => ({ cliente_id: cli, ...b })))
+
+  // TETTO. Un master con 600 clienti che spunta tutto insieme a 38 contratti chiederebbe 22.800
+  // regole in una richiesta sola: la pagina va in timeout a meta' lavoro e restano scritte solo le
+  // prime. Meglio dirlo prima, e ricordare che "tutti i clienti" si ottiene NON scegliendone nessuno.
+  const TETTO = 1000
+  if (coppie.length > TETTO) {
+    return NextResponse.json({
+      error: `Sono ${coppie.length} regole in un colpo solo (${clientiBersaglio.length} clienti × ${bersagli.length} bersagli): troppe. `
+        + `Per valere su tutti i clienti non sceglierne nessuno — è una regola sola. Altrimenti falle a gruppi, massimo ${TETTO} per volta.`,
+    }, { status: 400 })
   }
-  return NextResponse.json({ success: true, create, aggiornate, totale: bersagli.length })
+
+  // Le gemelle si cercano TUTTE IN UNA VOLTA, non una query per regola: a 300 regole erano 600
+  // andate e ritorno al database dentro una richiesta che ne ha 60 di tempo. La unique e' su
+  // un'espressione (coalesce dei NULL), quindi l'upsert del database non si puo' usare: la
+  // corrispondenza la si fa qui, su una chiave costruita a mano.
+  const chiave = (c: any) => `${c.cliente_id || ''}|${c.corriere_id || ''}|${c.vettore || ''}`
+  const { data: esistenti, error: errLettura } = await admin.from('pod_prezzi')
+    .select('id,cliente_id,corriere_id,vettore').eq('master_id', M)
+  if (errLettura) return NextResponse.json({ error: errLettura.message }, { status: 400 })
+  const idDi = new Map((esistenti || []).map((r: any) => [chiave(r), r.id as string]))
+
+  const daAggiornare: string[] = []
+  const daCreare: any[] = []
+  for (const c of coppie) {
+    const id = idDi.get(chiave(c))
+    if (id) daAggiornare.push(id)
+    else daCreare.push({ master_id: M, cliente_id: c.cliente_id, corriere_id: c.corriere_id, vettore: c.vettore, prezzo, attivo })
+  }
+
+  // Il prezzo e' lo stesso per tutte: un solo UPDATE su tutti gli id, non uno per riga.
+  const aPezzi = <T,>(a: T[], n: number) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n))
+  for (const pezzo of aPezzi(daAggiornare, 500)) {
+    const { error } = await admin.from('pod_prezzi')
+      .update({ prezzo, attivo, updated_at: new Date().toISOString() }).in('id', pezzo)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  }
+  for (const pezzo of aPezzi(daCreare, 500)) {
+    const { error } = await admin.from('pod_prezzi').insert(pezzo)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  }
+
+  return NextResponse.json({
+    success: true,
+    create: daCreare.length,
+    aggiornate: daAggiornare.length,
+    totale: coppie.length,
+    clienti: clienteIds.length,
+  })
 }
 
 // PATCH: sospende/riattiva una regola. Per id: il bersaglio (cliente/contratto/vettore) non si tocca,
