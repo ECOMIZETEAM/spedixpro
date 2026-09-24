@@ -130,8 +130,11 @@ export async function POST(req: NextRequest) {
   // Il prezzo e' lo stesso per tutte: un solo UPDATE su tutti gli id, non uno per riga.
   const aPezzi = <T,>(a: T[], n: number) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n))
   for (const pezzo of aPezzi(daAggiornare, 500)) {
+    // `master_id` ripetuto anche qui: gli id arrivano gia' da una lettura filtrata sul master, ma si
+    // scrive col service-role, che ignora l'isolamento del database. Il filtro costa zero e regge
+    // anche se un domani questi id arrivassero da un'altra strada.
     const { error } = await admin.from('pod_prezzi')
-      .update({ prezzo, attivo, updated_at: new Date().toISOString() }).in('id', pezzo)
+      .update({ prezzo, attivo, updated_at: new Date().toISOString() }).in('id', pezzo).eq('master_id', M)
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   }
   for (const pezzo of aPezzi(daCreare, 500)) {
