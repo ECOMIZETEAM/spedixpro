@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { sottoAlberoMasterIds } from '@/lib/rete-masters'
+import { sottoAlberoMasterIds, contrattiPossedutiNomi } from '@/lib/rete-masters'
 
 // STATISTICHE — CORRIERI (sola lettura). Efficienza costi e SLA su TUTTO il sottoalbero del master.
 const n = (x: any) => Number(x || 0)
@@ -20,12 +20,16 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminSupabase()
   const sub = await sottoAlberoMasterIds(admin, M)
+  // VISIBILITÀ PER CONTRATTO: le statistiche di rete contano SOLO i contratti che il master possiede
+  // (non i privati dei sub). p_contratti null se il master non ha contratti → nessun filtro.
+  const nomiPosseduti = await contrattiPossedutiNomi(admin, M)
   // Costo REALE dai movimenti (target = questo master), non dalla colonna nominale costo_spedizione:
-  // cosi' le RIPESATURE e le rettifiche entrano nel costo del corriere. Aggregazione in SQL (stat_corrieri_v1)
+  // cosi' le RIPESATURE e le rettifiche entrano nel costo del corriere. Aggregazione in SQL (stat_corrieri_v2)
   // — prima si caricavano in memoria tutte le spedizioni del sottoalbero. SECURITY DEFINER: chiamabile solo
   // via service_role (revoke da anon/authenticated).
-  const { data: rows, error } = await admin.rpc('stat_corrieri_v1', {
+  const { data: rows, error } = await admin.rpc('stat_corrieri_v2', {
     p_sub: sub.length ? sub : [M], p_master: M, p_dal: dalISO, p_al: alISO,
+    p_contratti: nomiPosseduti.length ? nomiPosseduti : null,
   })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

@@ -26,15 +26,18 @@ export async function GET(req: NextRequest) {
 
   let db: any = supabase
   let subtreeSel: string[] | null = null
+  let ownedContractNames: string[] | null = null   // filtro visibilità rete (contratti posseduti)
   if (masterSel && vedeLaRete(utente)) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const { sottoAlberoMasterIds, masterIdsVisibili } = await import('@/lib/rete-masters')
+    const { sottoAlberoMasterIds, masterIdsVisibili, contrattiPossedutiNomi } = await import('@/lib/rete-masters')
     const adminDb = createAdminSupabase()
     const mieiDiscendenti = await masterIdsVisibili(adminDb, utente.master_id)
     subtreeSel = mieiDiscendenti.includes(masterSel)
       ? await sottoAlberoMasterIds(adminDb, masterSel)
       : ['00000000-0000-0000-0000-000000000000']
     db = adminDb
+    const nn = await contrattiPossedutiNomi(adminDb, utente.master_id)
+    ownedContractNames = nn.length ? nn : null
   // Elencare "cliente per cliente" i ruoli esclusi a mano (agente, cliente) lasciava dentro
   // l'AUTISTA, che un master_id ce l'ha come tutti: con l'accesso pieno vedeva le giacenze
   // dell'intera rete, prezzi e clienti compresi. La regola sta in lib/perimetro.ts, dove e' una
@@ -44,11 +47,14 @@ export async function GET(req: NextRequest) {
     // le proprie: prima si vedeva solo master_id === il mio, quindi le giacenze dei sotto-master
     // (es. Ecomize LL) non comparivano.
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+    const { sottoAlberoMasterIds, contrattiPossedutiNomi } = await import('@/lib/rete-masters')
     const adminDb = createAdminSupabase()
     subtreeSel = await sottoAlberoMasterIds(adminDb, utente.master_id)
     if (subtreeSel.length > 1) db = adminDb
+    const nn = await contrattiPossedutiNomi(adminDb, utente.master_id)
+    ownedContractNames = nn.length ? nn : null
   }
+  const filtroContratti = !!ownedContractNames && ownedContractNames.length > 0
 
   // Filtro "è entrata in giacenza" (giacenza_data valorizzata), NON lo stato corrente: dopo lo
   // svincolo il cron sposta spedizioni.stato (in_giacenza -> non_consegnato/in_consegna) ma la
@@ -57,12 +63,14 @@ export async function GET(req: NextRequest) {
   // blob PDF/base64). Includono già tutti i campi giacenza_* che la pagina usa. Era `*`: su una rete
   // con molte giacenze la lista trasferiva decine di MB → "veramente lenta". La rotta cliente lo faceva già.
   let query = db.from('spedizioni')
-    .select(`${SPED_COLS}, clienti(ragione_sociale), corrieri(nome_contratto)`)
+    .select(`${SPED_COLS}, clienti(ragione_sociale), ${filtroContratti ? 'corrieri!inner(nome_contratto)' : 'corrieri(nome_contratto)'}`)
     .not('giacenza_data', 'is', null)
     .order('giacenza_data', { ascending: false })
 
   if (subtreeSel) query = query.in('master_id', subtreeSel)
   else query = query.eq('master_id', utente?.master_id)
+  // Rete: solo giacenze su contratti che possiedo (non i privati del sub).
+  if (filtroContratti) query = query.in('corrieri.nome_contratto', ownedContractNames as string[])
   // Agente: solo giacenze dei suoi clienti (copre anche l'eventuale ramo rete).
   if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
   if (clienteId) query = query.eq('cliente_id', clienteId)

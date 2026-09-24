@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { sottoAlberoMasterIds } from '@/lib/rete-masters'
+import { sottoAlberoMasterIds, contrattiPossedutiNomi } from '@/lib/rete-masters'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 
 export async function GET(req: NextRequest) {
@@ -17,6 +17,9 @@ export async function GET(req: NextRequest) {
 
   // Master: vede tutta la propria rete (sotto-albero). Cliente: solo le proprie.
   const masterIds = isCliente ? [utente.master_id] : await sottoAlberoMasterIds(admin, utente.master_id)
+  // VISIBILITÀ PER CONTRATTO: un master vede/ritira i pacchi dei discendenti SOLO sui contratti che
+  // possiede (i privati dei sub non sono roba sua). Cliente/agente: filtrati per cliente, non serve.
+  const ownedContractNames = isCliente ? null : await contrattiPossedutiNomi(admin, utente.master_id)
 
   // Ritirabile = spedizione non ancora presa in carico dal corriere e NON già in un ritiro
   // (ritiro_id null). Include anche le 'spedita': la distinta serale marca 'spedita' pure i colli
@@ -25,7 +28,7 @@ export async function GET(req: NextRequest) {
   // (in_transito e oltre).
   let query = admin
     .from('spedizioni')
-    .select('id,numero,dest_nome,dest_citta,colli,peso_reale,corriere_id,cliente_id,master_id,raw_response,created_at,corrieri(tipo,nome_contratto)')
+    .select(`id,numero,dest_nome,dest_citta,colli,peso_reale,corriere_id,cliente_id,master_id,raw_response,created_at,${ownedContractNames && ownedContractNames.length ? 'corrieri!inner(tipo,nome_contratto)' : 'corrieri(tipo,nome_contratto)'}`)
     .in('master_id', masterIds)
     .in('stato', ['in_lavorazione', 'spedita'])
     .is('ritiro_id', null)
@@ -33,6 +36,7 @@ export async function GET(req: NextRequest) {
     .limit(1000)
 
   if (isCliente) query = query.eq('cliente_id', utente.cliente_id)
+  else if (ownedContractNames && ownedContractNames.length) query = query.in('corrieri.nome_contratto', ownedContractNames)
   // Agente: solo spedizioni dei suoi clienti.
   if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
 

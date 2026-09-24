@@ -22,13 +22,17 @@ export async function GET(req: NextRequest) {
   const al = p.get('al')
   let db: any = supabase
   let masterFilter: string[] = [utente?.master_id]
+  let ownedContractNames: string[] | null = null   // filtro visibilità rete (drill su un sub)
   if (masterSel && vedeLaRete(utente)) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const { sottoAlberoMasterIds, masterIdsVisibili } = await import('@/lib/rete-masters')
+    const { sottoAlberoMasterIds, masterIdsVisibili, contrattiPossedutiNomi } = await import('@/lib/rete-masters')
     const admin = createAdminSupabase()
     const mieiDiscendenti = await masterIdsVisibili(admin, utente.master_id)
     masterFilter = mieiDiscendenti.includes(masterSel) ? await sottoAlberoMasterIds(admin, masterSel) : ['00000000-0000-0000-0000-000000000000']
     db = admin
+    // Drill su un sub: metto in distinta solo i pacchi sui contratti che POSSIEDO (non i privati del sub).
+    const nn = await contrattiPossedutiNomi(admin, utente.master_id)
+    ownedContractNames = nn.length ? nn : null
   }
   // Filtro agente calcolato UNA volta (è async), poi riusato dentro build().
   const filtroAgente = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
@@ -41,12 +45,14 @@ export async function GET(req: NextRequest) {
   }
   // fetchAll: senza, la lista dei candidati da mettere in distinta troncava a 1000 → in una giornata
   // intensa l'operatore non vedeva (né poteva selezionare) le spedizioni oltre la millesima.
+  const filtroContratti = !!ownedContractNames && ownedContractNames.length > 0
   const build = () => {
     let q = db.from('spedizioni')
-      .select('id,numero,mitt_nome,dest_nome,dest_citta,dest_cap,dest_provincia,peso_reale,peso_fatturato,colli,created_at,cliente_id,corriere_id,clienti(ragione_sociale)')
+      .select(`id,numero,mitt_nome,dest_nome,dest_citta,dest_cap,dest_provincia,peso_reale,peso_fatturato,colli,created_at,cliente_id,corriere_id,clienti(ragione_sociale)${filtroContratti ? ',corrieri!inner(nome_contratto)' : ''}`)
       .in('master_id', masterFilter)
       .is('distinta_id', null)
       .order('created_at', { ascending: false })
+    if (filtroContratti) q = q.in('corrieri.nome_contratto', ownedContractNames as string[])
     if (filtroAgente) q = q.in('cliente_id', filtroAgente)
     if (clienteId) q = q.eq('cliente_id', clienteId)
     if (corriereIdsVettore) q = q.in('corriere_id', corriereIdsVettore)
@@ -94,6 +100,20 @@ export async function POST(req: NextRequest) {
   if (agente) spedQ = spedQ.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
   const { data: speds } = masterSel ? await spedQ.in('master_id', masterFilterPost) : await spedQ.eq('master_id', utente?.master_id)
   if (!speds?.length) return NextResponse.json({ error: 'Nessuna spedizione valida da chiudere' }, { status: 400 })
+
+  // VISIBILITÀ/PROPRIETÀ CONTRATTO: sul drill di rete si mettono in distinta SOLO pacchi su contratti
+  // che il master POSSIEDE (non i privati del sub) — vale anche per una richiesta creata a mano che
+  // aggira l'elenco (già filtrato). Il path "contratto singolo" è coperto dal check corriereId sotto;
+  // questo chiude il path "vettore" (merge), dove basterebbe lo stesso vettore fisico.
+  if (masterSel && utente?.master_id) {
+    const { contrattiPossedutiNomi } = await import('@/lib/rete-masters')
+    const posseduti = new Set(await contrattiPossedutiNomi(db, utente.master_id))
+    const cidTutti = Array.from(new Set(speds.map((s: any) => s.corriere_id).filter(Boolean)))
+    const { data: corrN } = await db.from('corrieri').select('id,nome_contratto').in('id', cidTutti)
+    const nomeById = new Map<string, string>((corrN || []).map((c: any) => [String(c.id), String(c.nome_contratto || '').trim()] as [string, string]))
+    if (speds.some((s: any) => !posseduti.has(nomeById.get(String(s.corriere_id)) || '')))
+      return NextResponse.json({ error: 'Alcune spedizioni sono su un contratto non tuo (privato del sotto-master): non possono entrare nella tua distinta.' }, { status: 403 })
+  }
 
   // COERENZA CONTRATTO/VETTORE — la regola-soldi che finora sul portale master mancava (le altre 3
   // porte gia' la fanno): ogni spedizione deve stare nel contratto/vettore dichiarato, altrimenti la

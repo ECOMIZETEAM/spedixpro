@@ -78,9 +78,14 @@ export async function GET() {
 
   // Rete: la volumetria (piano + spedizioni recenti) considera TUTTO il sotto-albero del master.
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
-  const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+  const { sottoAlberoMasterIds, contrattiPossedutiNomi } = await import('@/lib/rete-masters')
   const admin = createAdminSupabase()
   const reteIds = masterId ? await sottoAlberoMasterIds(admin, masterId) : []
+  // Visibilità rete: le spedizioni della rete che mostro/conto sono SOLO sui contratti che possiedo
+  // (non i privati dei sub). NB: i contatori di VOLUMETRIA (RPC) restano su tutto il sotto-albero:
+  // servono all'abbonamento, non alla vista delle spedizioni.
+  const ownNomi = masterId ? await contrattiPossedutiNomi(admin, masterId) : []
+  const filtroContr = ownNomi.length > 0
   // Contatori + statistiche aggregati nel DB (una query ciascuno) invece di scaricare
   // le righe grezze: le liste PostgREST sono limitate a 1000 righe e falsavano i totali a volume.
   const [
@@ -99,9 +104,15 @@ export async function GET() {
     admin.rpc('dashboard_statistiche_master', { p_master: masterId }),
     admin.rpc('dashboard_kpi_master', { p_master: masterId }),
     // Spedizioni recenti di tutta la rete (sé + discendenza), via admin per i permessi cross-master.
-    admin.from('spedizioni').select(SPED_COLS).in('master_id', reteIds.length ? reteIds : [masterId]).order('created_at',{ascending:false}).limit(10),
+    (filtroContr
+      ? admin.from('spedizioni').select(`${SPED_COLS},corrieri!inner(nome_contratto)`).in('master_id', reteIds.length ? reteIds : [masterId]).in('corrieri.nome_contratto', ownNomi)
+      : admin.from('spedizioni').select(SPED_COLS).in('master_id', reteIds.length ? reteIds : [masterId])
+    ).order('created_at',{ascending:false}).limit(10),
     // LDV di TUTTA la rete ancora da chiudere in distinta (era una query in coda: ora nel batch).
-    admin.from('spedizioni').select('id', { count: 'exact', head: true })
+    (filtroContr
+      ? admin.from('spedizioni').select('id,corrieri!inner(nome_contratto)', { count: 'exact', head: true }).in('corrieri.nome_contratto', ownNomi)
+      : admin.from('spedizioni').select('id', { count: 'exact', head: true })
+    )
       .in('master_id', reteIds.length ? reteIds : [masterId])
       .is('distinta_id', null)
       .not('stato', 'in', '(annullata)'),

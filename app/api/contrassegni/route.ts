@@ -26,22 +26,27 @@ export async function GET(req: NextRequest) {
 
   let db: any = supabase
   let subtreeSel: string[] | null = null
+  let ownedContractNames: string[] | null = null   // contratti posseduti dal master che guarda (filtro rete)
   if (masterSel && vedeLaRete(utente)) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const { sottoAlberoMasterIds, masterIdsVisibili } = await import('@/lib/rete-masters')
+    const { sottoAlberoMasterIds, masterIdsVisibili, contrattiPossedutiNomi } = await import('@/lib/rete-masters')
     const adminDb = createAdminSupabase()
     const mieiDiscendenti = await masterIdsVisibili(adminDb, utente.master_id)
     subtreeSel = mieiDiscendenti.includes(masterSel)
       ? await sottoAlberoMasterIds(adminDb, masterSel)
       : ['00000000-0000-0000-0000-000000000000']
     db = adminDb
+    // Drill su un sub: vedo solo i contrassegni sui contratti che POSSIEDO (non i privati del sub).
+    const nn = await contrattiPossedutiNomi(adminDb, utente.master_id)
+    ownedContractNames = nn.length ? nn : null
   }
 
   // Agente: solo contrassegni dei suoi clienti (calcolato una volta, fuori dal loop).
   const agIds = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
   const buildBase = () => {
-    // Filtro su corrieri (vettore/contratto) → il join deve essere INNER, altrimenti passa tutto.
-    const embCorr = (vettore || contratto) ? 'corrieri!inner(nome_contratto)' : 'corrieri(nome_contratto)'
+    // Filtro su corrieri (vettore/contratto/visibilità-rete) → il join deve essere INNER.
+    const filtroContratti = !!subtreeSel && !!ownedContractNames && ownedContractNames.length > 0
+    const embCorr = (vettore || contratto || filtroContratti) ? 'corrieri!inner(nome_contratto)' : 'corrieri(nome_contratto)'
     // Colonne LEGGERE (SPED_COLS): niente raw_response/etichetta/colli_dettaglio (blob da ~300KB/riga)
     // — era la causa della lentezza. Tutte le colonne che la pagina usa ci sono.
     let q = db.from('spedizioni')
@@ -50,6 +55,7 @@ export async function GET(req: NextRequest) {
       .order('created_at', { ascending: false })
     if (subtreeSel) q = q.in('master_id', subtreeSel)
     else q = q.eq('master_id', utente?.master_id)
+    if (filtroContratti) q = q.in('corrieri.nome_contratto', ownedContractNames as string[])
     if (agIds) q = q.in('cliente_id', agIds)
     if (clienteId) q = q.eq('cliente_id', clienteId)
     if (stato) q = q.eq('stato', stato)

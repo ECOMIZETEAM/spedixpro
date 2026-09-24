@@ -57,6 +57,20 @@ export async function sottoAlberoMasterIds(adminDb: any, rootId: string): Promis
   return ids
 }
 
+// NOMI DEI CONTRATTI CHE UN MASTER POSSIEDE (li detiene o li rivende: ha una riga in `corrieri`
+// con quel `nome_contratto`). È la chiave della VISIBILITÀ DI RETE: un master vede le spedizioni
+// dei suoi discendenti SOLO su questi contratti. Se il sub ha spedito con un contratto PRIVATO suo
+// (un nome che il master non possiede), il master non c'entra — nessun suo movimento — e non deve
+// vederla. Verificato sui movimenti reali: "ho un movimento sulla spedizione" ⇒ "possiedo quel
+// nome_contratto" (0 eccezioni su 351.985 coppie), quindi filtrare per nome NON nasconde mai a un
+// master una spedizione che lo riguarda. Il match è per stringa ESATTA (i nomi si propagano uguali
+// lungo la catena di rivendita). Ritorna [] se il master non ha contratti (raro: non spedisce).
+export async function contrattiPossedutiNomi(adminDb: any, masterId?: string | null): Promise<string[]> {
+  if (!masterId) return []
+  const { data } = await adminDb.from('corrieri').select('nome_contratto').eq('master_id', masterId)
+  return Array.from(new Set((data || []).map((c: any) => (c.nome_contratto || '').trim()).filter(Boolean)))
+}
+
 // true se `targetId` sta SOTTO `masterId` nella catena (figlio diretto o più in basso).
 // Risale dal target: poche letture anche su reti profonde. Usato per autorizzare la lettura
 // dei dati di un sotto-master: limitarsi ai figli DIRETTI faceva tornare liste vuote, senza

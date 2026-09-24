@@ -134,6 +134,19 @@ export async function GET(req: NextRequest) {
   let subtreeSel: string[] | null = null  // sotto-albero del sotto-master selezionato
   let reteSubtree: string[] | null = null // filtro rete (paginato): sotto-albero DENTRO la mia rete
 
+  // VISIBILITÀ PER CONTRATTO POSSEDUTO. Un master vede le spedizioni dei DISCENDENTI solo sui
+  // contratti che possiede/rivende (stesso nome_contratto). Senza, il filtro "tutto il sotto-albero"
+  // mostrava anche i contratti PRIVATI dei sub (quelli che il sub NON ha comprato da lui: nessun suo
+  // movimento sulla spedizione) — es. E&A che vedeva "Poste STANDARD I" di Velox. Le proprie
+  // spedizioni restano sempre visibili (sono sui suoi stessi contratti). Se un domani un master
+  // rivende un contratto a un altro, quel nome compare tra i suoi e torna visibile da solo.
+  let ownedContractNames: string[] | null = null
+  if (utente?.master_id && ruolo !== 'cliente' && ruolo !== 'agente') {
+    const { contrattiPossedutiNomi } = await import('@/lib/rete-masters')
+    const nn = await contrattiPossedutiNomi(admin, utente.master_id)
+    ownedContractNames = nn.length ? nn : null
+  }
+
   // Selezione di un sotto-master agganciato: mostro le spedizioni del suo sotto-albero
   if (masterSel && ruolo !== 'cliente' && ruolo !== 'agente' && utente?.master_id) {
     const { sottoAlberoMasterIds, masterIdsVisibili } = await import('@/lib/rete-masters')
@@ -209,7 +222,10 @@ export async function GET(req: NextRequest) {
     // (fetchAll >1000) → l'elenco "balla". Con l'id la paginazione è stabile e completa.
     // I filtri su tabelle collegate (contratto/vettore → corrieri, agente → clienti) richiedono il
     // join !inner: attivato SOLO quando quel filtro è presente (altrimenti embed normale, invariato).
-    const embCorr = (fContratto || fVettore || ordinaVettore) ? 'corrieri!inner(id,nome_contratto)' : 'corrieri(id,nome_contratto)'
+    // Visibilità per contratto posseduto: si applica SOLO ai rami di RETE (discendenti). Le viste
+    // "solo mie"/cliente/agente non filtrano (nessun discendente da nascondere).
+    const filtroContratti = ownedContractNames != null && (!!subtreeSel || !!reteSubtree || (!!masterIds && masterIds.length > 1))
+    const embCorr = (fContratto || fVettore || ordinaVettore || filtroContratti) ? 'corrieri!inner(id,nome_contratto)' : 'corrieri(id,nome_contratto)'
     const embCli = fAgente ? 'clienti!inner(ragione_sociale,agente)' : 'clienti(ragione_sociale,agente)'
     let q = db.from('spedizioni').select(`${colonneLista ? SPED_COLS_LISTA : SPED_COLS},${embCli},${embCorr}`, contaTotale ? { count: 'exact' } : undefined)
     // Ordine scelto dall'utente (default: data più recente). Tie-breaker 'id' → paginazione stabile.
@@ -223,6 +239,8 @@ export async function GET(req: NextRequest) {
     else if (reteSubtree) q = q.in('master_id', reteSubtree)
     else if (masterIds && masterIds.length > 1) q = q.in('master_id', masterIds)
     else q = q.eq('master_id', utente?.master_id)
+    // Rete: nascondi le spedizioni dei discendenti sui contratti che NON possiedi (privati del sub).
+    if (filtroContratti) q = q.in('corrieri.nome_contratto', ownedContractNames as string[])
     if (fClienteEq) q = q.eq('cliente_id', fClienteEq)
     // Filtro stato: se richiesto uno stato preciso lo applico; se non richiesto, mostro anche le
     // spedizioni in annullamento_pending (ripristinabili). Escludo solo annullate e coda manuale.

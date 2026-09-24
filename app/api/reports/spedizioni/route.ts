@@ -65,18 +65,24 @@ export async function GET(req: NextRequest) {
   }
   const reteIds = isMaster && !clienteId && !masterSel ? [mine as string, ...primaLineaId.keys()] : null
   if (reteIds && reteIds.length > 1) db = adminDb
+  // VISIBILITÀ PER CONTRATTO: sui rami di RETE il master vede solo i contratti che possiede
+  // (non i privati dei sub). Stessa regola della lista spedizioni.
+  const { contrattiPossedutiNomi } = await import('@/lib/rete-masters')
+  const ownedContractNames = isMaster && mine ? await contrattiPossedutiNomi(adminDb, mine) : []
 
   // Agente: solo i suoi clienti (calcolato una volta, fuori dal loop).
   const agIds = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
   const buildBase = () => {
+    const filtroContratti = ownedContractNames.length > 0 && (!!subtreeSel || (!!reteIds && reteIds.length > 1))
     let q = db.from('spedizioni')
-      .select(`${SPED_COLS}, clienti(ragione_sociale,agente), corrieri(id,nome_contratto)`)
+      .select(`${SPED_COLS}, clienti(ragione_sociale,agente), ${filtroContratti ? 'corrieri!inner(id,nome_contratto)' : 'corrieri(id,nome_contratto)'}`)
       .order('created_at', { ascending: false }).order('id', { ascending: false })
     if (subtreeSel) q = q.in('master_id', subtreeSel)
     else if (clienteId) q = q.eq('cliente_id', clienteId).eq('master_id', mine)
     else if (ruolo === 'cliente') q = q.eq('cliente_id', utente?.cliente_id)
     else if (reteIds && reteIds.length > 1) q = q.in('master_id', reteIds)
     else q = q.eq('master_id', mine)
+    if (filtroContratti) q = q.in('corrieri.nome_contratto', ownedContractNames)
     if (agIds) q = q.in('cliente_id', agIds)
     // Escludo le ANNULLATE (salvo filtro stato esplicito): sono rimborsate (addebito+rimborso = 0),
     // quindi il widget "Report Guadagno" (basato sui movimenti) le netta a 0. Contarle qui riga-per-riga
