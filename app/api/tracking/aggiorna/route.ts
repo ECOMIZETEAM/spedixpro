@@ -4,7 +4,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { spediamoproGetTracking, spediamoproSearchStocks, mapStatoSpediamopro, spediamoproEventiIndicanoReso, spediamoproGetLabel, normalizzaEtichetta } from '@/lib/spediamopro'
 import { rimborsaAnnulloSpedizione } from '@/lib/annullaSpedizione'
 import { spedisciTrackingStati, mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
-import { inviaWebhook } from '@/lib/webhooks'
+import { notificaCambioStato } from '@/lib/tracking-notifica'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -470,19 +470,7 @@ export async function GET(req: NextRequest) {
       // davvero gli stati — questo — non ne mandava nessuna. Risultato: per sapere di una
       // consegna il cliente doveva fare polling su ogni spedizione, esattamente cio' che il
       // webhook serve a evitare. Best-effort: non blocca ne' fa fallire il giro.
-      if (upd.stato && (s as any).cliente_id) {
-        const evento = upd.stato === 'consegnata' ? 'tracking.delivered'
-          : (upd.stato === 'in_giacenza' || upd.stato === 'non_consegnato' || upd.stato === 'reso_mittente') ? 'tracking.exception'
-          : 'tracking.updated'
-        inviaWebhook({
-          clienteId: (s as any).cliente_id, corriereId: s.corriere_id, evento,
-          data: {
-            tracking_number: upd.tracking_number || s.tracking_number || (s as any).numero,
-            carrier: (s as any).corrieri?.nome_contratto || null,
-            status: upd.stato, location: '', events: [],
-          },
-        }).catch(() => {})
-      }
+      if (upd.stato) await notificaCambioStato(admin, s.id, upd.stato, s.stato)
 
       // L'apertura giacenza non si addebita piu' da qui: la registra il database da solo (trigger
       // trg_giacenza_da_addebitare) appena una spedizione entra in giacenza, da qualunque strada.

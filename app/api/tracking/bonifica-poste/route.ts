@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { prioritaStato } from '@/lib/spedisci'
 import { mappaStatoPoste, statoDaLetturaPoste } from '@/lib/tracking-poste'
+import { notificaCambioStato } from '@/lib/tracking-notifica'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -84,9 +85,12 @@ export async function GET(req: NextRequest) {
       // addebito e il cliente riceveva l'avviso, su un pacco che il fornitore non aveva in giacenza.
       // La giacenza la apre solo il fornitore (vedi statoDaLetturaPoste).
       const nuovo = statoDaLetturaPoste(eventi, sp.stato)
-      if (nuovo) {
+      if (nuovo && nuovo !== sp.stato) {
         await admin.from('spedizioni').update({ stato: nuovo }).eq('id', sp.id)
         stati++
+        // Il cambio stato dei contratti Poste (via Spedisci) lo scrive QUI: qui va anche avvisato il
+        // cliente, come fa la cron aggiorna per i fornitori diretti (prima non partiva → Edit Shop 23/9).
+        await notificaCambioStato(admin, sp.id, nuovo, sp.stato)
       }
     } catch { /* singola LDV: pazienza, riprova al giro dopo */ }
     await new Promise(res => setTimeout(res, 1500))

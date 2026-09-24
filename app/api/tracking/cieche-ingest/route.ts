@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { autorizzaHarvester } from '@/lib/ripesature-harvester'
 import { eventiDaFullTracking, statoDaLetturaPoste } from '@/lib/tracking-poste'
+import { notificaCambioStato } from '@/lib/tracking-notifica'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -51,9 +52,11 @@ export async function POST(req: NextRequest) {
     )
     cronologie++
     const nuovo = soloCronologia ? null : statoDaLetturaPoste(eventi, (sp as any).stato)
-    if (nuovo) {
+    if (nuovo && nuovo !== (sp as any).stato) {
       await admin.from('spedizioni').update({ stato: nuovo }).eq('id', sid)
       avanzati++
+      // Anche questa porta scrive lo stato dei contratti Poste: avvisa il cliente come le altre.
+      await notificaCambioStato(admin, sid, nuovo, (sp as any).stato)
     }
   }
   return NextResponse.json({ ok: true, cronologie, avanzati, vuote })
