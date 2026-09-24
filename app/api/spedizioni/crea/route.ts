@@ -2389,5 +2389,154 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  if (corriereRecord.tipo === 'dielle') {
+    // Dielle/TWS: aggregatore DIRETTO (come FedEx/BRT) — un account, il corriere reale è nel `servizio`.
+    // ATTENZIONE: Dielle NON permette l'annullo via API (solo dal portale). Se l'insert a sistema fallisce
+    // dopo la creazione, la LDV resta sul fornitore e va annullata a mano (lo diciamo nell'errore).
+    const credDl = { username: cred.username, password: cred.password, ambiente: (cred.ambiente === 'prod' ? 'prod' : 'staging') as 'prod' | 'staging' }
+    if (!credDl.username || !credDl.password) {
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Contratto non configurato correttamente. Contatta l\'assistenza.' }, { status: 400 })
+    }
+    const settingsDl = (corriereRecord as any)?.settings || {}
+    const servizioDl = String(settingsDl.servizio || '').trim()
+    if (!servizioDl) {
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Contratto senza servizio impostato. Contatta l\'assistenza.' }, { status: 400 })
+    }
+    try {
+      const { creaSpedizioneDielle, etichettaDielle } = await import('@/lib/dielle')
+
+      let costoCorrente = costoMaster
+      if (!isProprio) {
+        costoCorrente = (await calcolaPrezzoCorriere(adminCrea, {
+          corriereId: corriereRecord.id, masterId,
+          provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
+          pesoReale, packages,
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+        })) ?? 0
+      }
+      const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
+
+      const colliDl = packages.map((p: any) => ({
+        altezza: parseFloat(p?.height) || undefined, larghezza: parseFloat(p?.width) || undefined,
+        profondita: parseFloat(p?.length) || undefined, peso: parseFloat(p?.weight) || 1,
+      }))
+
+      const ris = await creaSpedizioneDielle(credDl, {
+        servizio: servizioDl,
+        codiceServizio: settingsDl.codiceServizio ? String(settingsDl.codiceServizio) : undefined,
+        accessorioCrono: settingsDl.accessorio_crono ? String(settingsDl.accessorio_crono) : undefined,
+        mittente: {
+          ragione_sociale: body.shipFrom.name, indirizzo: body.shipFrom.street1, comune: body.shipFrom.city,
+          cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, nazione: 'IT',
+          telefono: body.shipFrom.phone || undefined, email: body.shipFrom.email || undefined,
+        },
+        destinatario: {
+          ragione_sociale: body.shipTo.name, indirizzo: body.shipTo.street1, comune: body.shipTo.city,
+          cap: body.shipTo.postalCode, provincia: body.shipTo.state, nazione: body.shipTo.country || 'IT',
+          telefono: body.shipTo.phone || undefined, email: body.shipTo.email || undefined,
+        },
+        colli: colliDl,
+        contrassegno: body.codValue ? Number(body.codValue) : undefined,
+        tipoPagamento: body.codValue ? 'WITH' : undefined,   // WITH = contanti (Dielle)
+        assicurata: body.insuranceValue ? Number(body.insuranceValue) : undefined,
+        note: body.notes ? String(body.notes) : undefined,
+        numeroOrdine: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
+      })
+      const numeroFinale = ris.ldv
+
+      // Etichetta: chiamata SEPARATA (come GLS). PDF base64 dal fornitore → data URL.
+      let etichettaUrl: string | null = null
+      try {
+        const lab = await etichettaDielle(credDl, numeroFinale, 'pdf')
+        if (lab.bytes?.length) etichettaUrl = `data:application/pdf;base64,${lab.bytes.toString('base64')}`
+      } catch (e) { console.error('[CREA][DIELLE] etichetta:', (e as any)?.message) }
+
+      const colliDettaglio = (body.colliDettaglio || packages.map((p: any) => ({ lunghezza: p.length, larghezza: p.width, altezza: p.height })))
+        .map((c: any, i: number) => ({
+          numero: i + 1,
+          lunghezza: c.lunghezza || packages[i]?.length || null,
+          larghezza: c.larghezza || packages[i]?.width || null,
+          altezza: c.altezza || packages[i]?.height || null,
+          peso: packages[i]?.weight || null,
+          etichetta_url: etichettaUrl,   // Dielle: una LDV, un PDF per l'intera spedizione
+        }))
+
+      const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
+        master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id,
+        numero: numeroFinale,
+        mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
+        mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
+        mitt_email: body.shipFrom.email || null, mitt_telefono: body.shipFrom.phone || null,
+        dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_citta: body.shipTo.city,
+        dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
+        dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
+        colli: packages.length, peso_reale: pesoReale,
+        peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
+        lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
+        contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
+        tracking_number: numeroFinale,
+        etichetta_url: etichettaUrl,
+        colli_dettaglio: colliDettaglio,
+        raw_response: { _dielle: true, ldv: numeroFinale, ambiente: credDl.ambiente },
+        stato: 'in_lavorazione',
+        costo_spedizione: costoCorrente, costo_totale: costoCliente,
+        servizi_accessori: serviziAccessori,
+        richiedi_ritiro: _vuoleRitiro || false,
+        data_ritiro: _vuoleRitiro ? String(body.dataRitiro) : null,
+        intervallo_ritiro: _vuoleRitiro ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
+        note: body.notes || null, contenuto: body.contenuto || null,
+        rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
+      }).select('id').single()
+
+      if (insertError) {
+        console.error('[CREA][DIELLE][INSERT]', numeroFinale, insertError.message)
+        return NextResponse.json({
+          error: `Spedizione creata sul corriere (${numeroFinale}) ma non registrata a sistema: contatta l'assistenza indicando il numero ${numeroFinale} (Dielle non si annulla via API, va annullata dal portale del fornitore).`,
+          numero: numeroFinale,
+        }, { status: 500 })
+      }
+
+      await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
+      try {
+        await addebitaCatena(adminCrea, {
+          masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
+          // Diretto: nessuna quotazione esterna, il listino È il costo → costoSpedizione:0 (come FedEx/GLS).
+          costoSpedizione: 0, provincia: body.shipTo.state, packages,
+          cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
+          corriereNome: corriereRecord.nome_contratto,
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+          numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
+        })
+      } catch (e) { console.error('[CREA][DIELLE] cascata catena:', e) }
+
+      after(async () => {
+        try {
+          const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
+          let notificaDest = true
+          if (clienteId) {
+            const { data: cli } = await adminCrea.from('clienti').select('impostazioni').eq('id', clienteId).maybeSingle()
+            notificaDest = (cli?.impostazioni as any)?.notifica_email_dest !== false
+          }
+          await inviaEmailSpedizioneCreata({
+            mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
+            mittNome: body.shipFrom?.name, destNome: body.shipTo?.name,
+            numero: numeroFinale, corriere: corriereRecord.nome_contratto, destCitta: body.shipTo?.city,
+            notificaDest, spedizioneId: inserted?.id || null, masterId,
+          })
+        } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
+      })
+
+      return NextResponse.json({
+        numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2), spedizioneId: inserted?.id || null,
+      })
+    } catch (err: any) {
+      console.error('[CREA][DIELLE]', err?.message)
+      await stornaPrenotazione()
+      return NextResponse.json({ error: erroreCorrierePulito(err?.message) }, { status: 400 })
+    }
+  }
+
   { await stornaPrenotazione(); return NextResponse.json({ error: `Tipo corriere non supportato: ${corriereRecord.tipo}` }, { status: 400 }) }
 }
