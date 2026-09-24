@@ -29,6 +29,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
     .limit(1).maybeSingle()
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 
+  // Cronologia SALVATA (tracking_events) = la stessa che mostra il portale, tenuta fresca dal giro di
+  // aggiornamento e dai backfill. È la fonte AFFIDABILE: la chiamata live al fornitore, sotto, per certi
+  // contratti (es. Poste Express M via Spedisci) torna vuota, e il cliente vedeva `events: []` mentre a
+  // portale la timeline era completa (segnalato da Edit Shop, 23/09). Si usa come ripiego quando il live
+  // non restituisce nulla, così l'API non è mai più povera del portale.
+  const eventiSalvati = async () => {
+    const { data } = await admin.from('tracking_events')
+      .select('stato,descrizione,luogo,data_evento')
+      .eq('spedizione_id', sped.id)
+      .order('data_evento', { ascending: false })   // dal più recente, come da schema OpenAPI
+    return (data || []).map((e: any) => ({
+      timestamp: e.data_evento || '',
+      status: e.descrizione || e.stato || 'Evento',
+      location: e.luogo || '',
+    }))
+  }
+
   const { data: corriere } = await admin.from('corrieri')
     .select('credenziali,tipo,nome_contratto').eq('id', sped.corriere_id).maybeSingle()
 
@@ -38,7 +55,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
     status: sped.stato,
     location: sped.dest_citta || '',
   }
-  if (!corriere) return NextResponse.json({ ...base, events: [] })
+  if (!corriere) return NextResponse.json({ ...base, events: await eventiSalvati() })
 
   const cred = (corriere.credenziali || {}) as Record<string, string>
 
@@ -71,7 +88,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
     if (corriere.tipo === 'spediamopro') {
       const raw: any = sped.raw_response || {}
       const spid = raw.id || raw?.raw?.data?.id
-      if (!spid || !cred.authcode) return NextResponse.json({ ...base, events: [] })
+      if (!spid || !cred.authcode) return NextResponse.json({ ...base, events: await eventiSalvati() })
       const tr = await spediamoproGetTracking(cred.authcode, Number(spid))
       // Reso al mittente: sta negli eventi, non nello status numerico (che registra "consegnata").
       let nuovo = mapStatoSpediamopro(tr.status)
@@ -82,7 +99,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
         location: '',
       })).reverse()
       await persistiStato(nuovo, events)
-      return NextResponse.json({ ...base, status: nuovo || sped.stato, events })
+      return NextResponse.json({ ...base, status: nuovo || sped.stato, events: events.length ? events : await eventiSalvati() })
     }
 
     // Spedisci: tracking sul dominio del contratto
@@ -112,6 +129,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
     await persistiStato(nuovo, events)
     return NextResponse.json({ ...base, status: nuovo || sped.stato, events })
   } catch (e: any) {
-    return NextResponse.json({ ...base, events: [], error: 'Tracking non disponibile al momento' })
+    // Live non disponibile: torna comunque la cronologia salvata, mai vuoto se ci sono eventi.
+    return NextResponse.json({ ...base, events: await eventiSalvati() })
   }
 }
