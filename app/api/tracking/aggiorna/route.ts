@@ -319,6 +319,42 @@ export async function GET(req: NextRequest) {
           }
         } catch (e: any) { console.error('[TRACKING][FEDEX][EVENTI]', s.numero, e?.message) }
 
+      } else if (tipo === 'dielle') {
+        // DIELLE (aggregatore TWS, dentro BRT/GLS/UPS…): lo stato si legge da /extracking/trackingStatus
+        // con la LDV (= tracking_number salvato alla creazione). username/password/ambiente arrivano dalla
+        // join corrieri.credenziali. Lo stato si mappa sulla DESCRIZIONE (non sui 816 codici). Best-effort:
+        // nessuna risposta = nessun aggiornamento (mai declassa), come per gli altri diretti.
+        if (!s.tracking_number || !cred?.username || !cred?.password) return
+        const { trackingDielle, mapStatoDielle } = await import('@/lib/dielle')
+        const { stati, consegnata: dlConseg, eventi: dlEventi } = await trackingDielle(cred, String(s.tracking_number))
+        for (const str of stati) {
+          const m = mapStatoDielle(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
+        if (dlConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
+        if (stati.some((str) => mapStatoDielle(str) === 'in_giacenza')) vistaGiacenza = true
+        // ...ma se il pacco e' tornato al mittente, quella "consegnata" e' il RITORNO: vince il reso.
+        if (stati.some((str) => mapStatoDielle(str) === 'reso_mittente')) nuovo = 'reso_mittente'
+
+        // CRONOLOGIA: trackingDielle torna gia' `eventi` {data:"DD-MM-YYYY HH:mm:ss", descrizione, luogo}.
+        // La data italiana la gestisce istanteDaTesto (mai new Date(), che leggerebbe mese-giorno).
+        try {
+          const cambiatoDl = nuovo !== s.stato
+          if (cambiatoDl || budgetCronologie > 0) {
+            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(dlEventi, {
+              data: ['data', 'dataOra', 'datetime'],
+              descrizione: ['descrizione'],
+              luogo: ['luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length) {
+              if (!cambiatoDl) budgetCronologie--
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][DIELLE][EVENTI]', s.numero, e?.message) }
+
       } else {
         return
       }

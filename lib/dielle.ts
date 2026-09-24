@@ -1,4 +1,5 @@
 import { createHash } from 'crypto'
+import { testoIndicaReso, prioritaStato } from '@/lib/spedisci'
 
 /* Provider DIELLE / TWS Software (documentazione.twssoftware.it/documentation/dielle/api).
  *
@@ -9,17 +10,22 @@ import { createHash } from 'crypto'
  * si mostra mai (regola #8): a video escono i brand (BRT/GLS/UPS).
  *
  * Auth: nel BODY (non header) `{ username, password: <hash>, data }`. La password si hasha con lo schema
- * loro. base_url per ambiente (staging TWS / prod Dielle).
+ * loro. Due host per ambiente: la ROOT (staging TWS / prod Dielle) e sotto il modulo `/ws`.
  *
- * ISOLATO: non ancora collegato al flusso di creazione. Le parti marcate "VALIDARE SU STAGING" vanno
- * confermate col primo test reale (schema hash, codifica etichetta, forma tracking).
+ * COLLEGATO E VALIDATO SU STAGING (24/9): creazione (crea/route.ts + /api/v1/shipments), etichetta e
+ * TRACKING (cron aggiorna). Auth v1, decimali con la virgola, etichetta base64→PDF, tracking sotto la
+ * ROOT (non /ws). Resta da validare sulla PROD (host diverso) al primo contratto reale. Nessun ANNULLO
+ * via API: Dielle non ce l'ha, si fa solo dal portale.
  */
 
-const BASE = {
-  prod: 'https://mydiellebe.it/ws',
+// Due host: la ROOT del server e, sotto, il modulo /ws. I servizi di CREAZIONE/etichetta/conferma
+// stanno sotto `/ws` (es. .../ws/insSped); il TRACKING sta sotto la ROOT (.../extracking/trackingStatus,
+// SENZA /ws — verificato 24/9: /ws/extracking/trackingStatus dà 404, /extracking/trackingStatus dà 200).
+const ROOT = {
+  prod: 'https://mydiellebe.it',
   // ATTENZIONE: lo staging è in CHIARO (HTTP), non HTTPS — la doc dice "https" ma il server su :8085
   // non parla TLS (verificato 24/9: TLS handshake fallisce, HTTP risponde). La prod è su un altro host.
-  staging: 'http://www.tsm-staging.twssoftware.it:8085/ws',
+  staging: 'http://www.tsm-staging.twssoftware.it:8085',
 }
 
 export type DielleCred = {
@@ -28,7 +34,8 @@ export type DielleCred = {
   ambiente?: 'prod' | 'staging' // default 'prod'
 }
 
-function base(c: DielleCred): string { return BASE[c.ambiente === 'staging' ? 'staging' : 'prod'] }
+function root(c: DielleCred): string { return ROOT[c.ambiente === 'staging' ? 'staging' : 'prod'] }
+function base(c: DielleCred): string { return root(c) + '/ws' }
 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex')
 
@@ -41,10 +48,11 @@ export function hashPasswordDielle(username: string, password: string): string {
   return x
 }
 
-async function chiama(c: DielleCred, path: string, data: unknown): Promise<{ ok: boolean; status: number; j: any }> {
+// `path` sotto /ws (default) oppure sotto la ROOT del server (extracking) se `radice` è true.
+async function chiama(c: DielleCred, path: string, data: unknown, radice = false): Promise<{ ok: boolean; status: number; j: any }> {
   let r: Response
   try {
-    r = await fetch(`${base(c)}/${path}`, {
+    r = await fetch(`${radice ? root(c) : base(c)}/${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: c.username, password: hashPasswordDielle(c.username, c.password), data }),
@@ -148,10 +156,58 @@ export async function etichettaDielle(c: DielleCred, ldv: string, formato: 'pdf'
   return { contentType: 'application/pdf', bytes }
 }
 
-// Tracking (/extracking/trackingStatus). Forma della richiesta/risposta da VALIDARE SU STAGING: qui si
-// passa l'ldv e si torna il grezzo, da normalizzare quando vediamo un tracking reale.
-export async function trackingDielle(c: DielleCred, ldv: string): Promise<any> {
-  const { ok, status, j } = await chiama(c, 'extracking/trackingStatus', ldv)
+// Mappa la DESCRIZIONE dello stato Dielle sui nostri stati. Si mappa sul TESTO (`stato`), non sul
+// `codiceStato`: i codici sono 816, duplicati fra i corrieri dentro l'aggregatore (BRT/GLS/UPS…) e non
+// verificabili live, mentre la descrizione è in chiaro e autoesplicativa. Stesso impianto di
+// mapStatoSpedisci: RESO PER PRIMO (il ritorno al mittente si chiude con una "consegnata" che NON è la
+// consegna al destinatario), poi consegna, giacenza, e i movimenti. "NUOVA"/registrata → nessun
+// avanzamento (la spedizione esiste ma non si è ancora mossa): torna null, resta solo l'evento.
+export function mapStatoDielle(testo: string): string | null {
+  const s = (testo || '').toLowerCase().trim()
+  if (!s) return null
+  if (testoIndicaReso(s)) return 'reso_mittente'
+  if ((s.includes('consegnat') || s.includes('delivered')) && !s.includes('non consegnat')) {
+    // Deposito/punto di ritiro: il destinatario deve ancora ritirare, non è consegna a domicilio.
+    if (/ufficio postale|punto di giacenza|fermo deposito|fermoposta|punto di ritiro|locker|punto di consegna|fermopoint/.test(s)) return 'in_consegna'
+    return 'consegnata'
+  }
+  if (s.includes('giacenz')) return 'in_giacenza'
+  // Consegna fallita PRIMA di "in consegna": un tentativo andato male non è un giro in corso.
+  if (/non andata a buon fine|consegna non riuscita|non consegnat|mancata consegna|tentata consegna|tentativo di consegna|destinatario assente|\bassente\b/.test(s)) return 'non_consegnato'
+  if (s.includes('in consegna') || s.includes('in distribuzione') || s.includes('distribuzione') || s.includes('out for delivery')) return 'in_consegna'
+  if (/svincol/.test(s)) return 'in_transito'   // svincolata: dopo la giacenza torna a viaggiare
+  if (s.includes('transit') || s.includes('transito') || s.includes('arrivat') || s.includes('hub') || s.includes('partenz') || s.includes('partit') || s.includes('viaggio') || s.includes('smistament') || s.includes('in filiale') || s.includes('presso filiale')) return 'in_transito'
+  if (s.includes('presa in carico') || s.includes('preso in caric') || s.includes('spedit') || s.includes('accettat') || s.includes('ritirat') || s.includes('picked') || s.includes('lavorazione') || s.includes('prelevat')) return 'spedita'
+  if (s.includes('rifiut') || s.includes('respint') || s.includes('exception') || s.includes('anomal') || s.includes('problema') || s.includes('indirizzo errato') || s.includes('indirizzo insufficiente') || s.includes('fallit') || s.includes('mancata')) return 'non_consegnato'
+  return null
+}
+
+// Tracking (/extracking/trackingStatus — NB: sotto la ROOT, non /ws). Verificato su staging il 24/9:
+// risposta `ActionStatusDao` = { stato:"OK", errors, response: List<TrackingDao> }. Il PRIMO TrackingDao
+// è la LDV madre (gli altri sono i singoli colli, spesso con ldv="collo" e stati vuoti). Ogni evento
+// (`stati_tracking[]`) ha { stato (testo), codiceStato, data (DD-MM-YYYY), ora (HH:mm:ss), firma, filiale }.
+// DATA E ORA SEPARATE, GIORNO-MESE-ANNO: le RICOMBINO in "DD-MM-YYYY HH:mm:ss" e la passo come `data` a
+// normalizzaEventi, che riconosce la forma italiana e NON la dà mai a new Date() (che la leggerebbe
+// all'americana — la stessa trappola di DVA). Torno la forma che si aspetta la cron (come trackingBrt).
+export async function trackingDielle(
+  c: DielleCred, ldv: string,
+): Promise<{ stati: string[]; consegnata: boolean; eventi: { data: string; descrizione: string; luogo: string }[] }> {
+  const { ok, status, j } = await chiama(c, 'extracking/trackingStatus', ldv, true)
   if (!ok) throw new Error(j?.errorMessage || `Dielle: tracking errore ${status}`)
-  return j
+  const lista: any[] = Array.isArray(j?.response) ? j.response : []
+  // La LDV madre: quella col numero uguale a quello cercato (o, in mancanza, la prima con eventi).
+  const madre = lista.find(t => String(t?.ldv || '') === String(ldv)) || lista.find(t => Array.isArray(t?.stati_tracking) && t.stati_tracking.length) || lista[0]
+  const righe: any[] = Array.isArray(madre?.stati_tracking) ? madre.stati_tracking : []
+  const stati: string[] = []
+  const eventi: { data: string; descrizione: string; luogo: string }[] = []
+  for (const ev of righe) {
+    const testo = String(ev?.stato || '').trim()
+    if (testo) stati.push(testo)
+    const d = String(ev?.data || '').trim()
+    const ora = String(ev?.ora || '').trim()
+    const descr = testo || String(ev?.note || '').trim()
+    if (d && descr) eventi.push({ data: ora ? `${d} ${ora}` : d, descrizione: descr, luogo: String(ev?.filiale || '').trim() })
+  }
+  const consegnata = stati.some(str => mapStatoDielle(str) === 'consegnata')
+  return { stati, consegnata, eventi }
 }
