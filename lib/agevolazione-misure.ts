@@ -17,6 +17,15 @@ const PREDEFINITA = { lunghezza: 50, larghezza: 32, altezza: 28 }
 // lungo al più corto: un collo si può girare, quindi conta la sagoma, non l'ordine dei campi.
 // Un collo senza misure non fa decadere l'agevolazione (non c'è volumetrico da calcolare).
 export function entroMisureAgevolate(settings: any, colli: any[]): boolean {
+  // L'agevolazione-scatola vale per UN SOLO collo. Su un multi-collo il fornitore fattura il
+  // VOLUMETRICO, non il reale — verificato sui costi reali di E&A: Poste Express M / Poste Business
+  // Express V (e gli altri contratti con l'agevolazione) su collo singolo ≤5kg tassano il REALE, ma
+  // sui multi-collo tassano SEMPRE il volumetrico (0 casi su reale). Senza questa riga un 2-colli
+  // veniva prezzato sul reale mentre lo pagavamo a volume → E&A sotto costo (es. 3UW1UHA262213:
+  // 2,5kg reali su 2 colli, prezzato 5,10 ma pagato 6,12). I contratti SENZA agevolazione (es. BRT
+  // Express, che sui multi-collo fa il reale) non passano di qui: questa funzione la chiama solo il
+  // ramo `agevolazione_peso_reale`.
+  if ((colli || []).length > 1) return false
   const box = settings?.agevolazione_misure || PREDEFINITA
   const lim = [Number(box.lunghezza) || 0, Number(box.larghezza) || 0, Number(box.altezza) || 0]
     .filter(n => n > 0).sort((a, b) => b - a)
