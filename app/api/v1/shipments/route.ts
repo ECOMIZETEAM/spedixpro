@@ -454,6 +454,37 @@ export async function POST(req: NextRequest) {
       console.error('[V1][EASYPARCEL]', e?.codice ?? '-', e?.message, e?.dettagli || '')
       return errore(erroreEasyparcelPulito(e))
     }
+  } else if (corriere.tipo === 'dielle') {
+    // Dielle/TWS: diretto (costoCorrente=0, come i diretti). Il corriere reale è nel `servizio` (settings).
+    // Etichetta con chiamata separata. NB: niente annullo via API (solo portale) → su insertError, come
+    // gli altri, si risponde col numero e la LDV va annullata a mano dal portale del fornitore.
+    const credDl = { username: cred.username, password: cred.password, ambiente: (cred.ambiente === 'prod' ? 'prod' : 'staging') as 'prod' | 'staging' }
+    const settingsDl = (corriere as any)?.settings || {}
+    const servizioDl = String(settingsDl.servizio || '').trim()
+    if (!credDl.username || !credDl.password || !servizioDl) return errore('Contratto non configurato correttamente')
+    try {
+      const { creaSpedizioneDielle, etichettaDielle } = await import('@/lib/dielle')
+      const risDl = await creaSpedizioneDielle(credDl, {
+        servizio: servizioDl,
+        codiceServizio: settingsDl.codiceServizio ? String(settingsDl.codiceServizio) : undefined,
+        accessorioCrono: settingsDl.accessorio_crono ? String(settingsDl.accessorio_crono) : undefined,
+        mittente: { ragione_sociale: body.shipFrom.name, indirizzo: conPresso(body.shipFrom.street1 || '', pressoFrom), comune: body.shipFrom.city, cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, nazione: 'IT', telefono: body.shipFrom.phone || undefined, email: body.shipFrom.email || undefined },
+        destinatario: { ragione_sociale: body.shipTo.name, indirizzo: conPresso(body.shipTo.street1 || '', pressoTo), comune: body.shipTo.city, cap: body.shipTo.postalCode, provincia: body.shipTo.state, nazione: body.shipTo.country || 'IT', telefono: body.shipTo.phone || undefined, email: body.shipTo.email || undefined },
+        colli: packages.map((p: any) => ({ altezza: parseFloat(p?.height) || undefined, larghezza: parseFloat(p?.width) || undefined, profondita: parseFloat(p?.length) || undefined, peso: parseFloat(p?.weight) || 1 })),
+        contrassegno: body.codValue ? Number(body.codValue) : undefined,
+        tipoPagamento: body.codValue ? 'WITH' : undefined,
+        assicurata: body.insuranceValue ? Number(body.insuranceValue) : undefined,
+        note: body.notes ? String(body.notes) : undefined,
+        numeroOrdine: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
+      })
+      numero = risDl.ldv
+      costoCorrente = 0
+      try { const lab = await etichettaDielle(credDl, numero, 'pdf'); if (lab.bytes?.length) etichettaUrl = `data:application/pdf;base64,${lab.bytes.toString('base64')}` } catch (e) { console.error('[V1][DIELLE] etichetta:', (e as any)?.message) }
+      raw = { _dielle: true, ldv: numero, ambiente: credDl.ambiente }
+    } catch (e: any) {
+      console.error('[V1][DIELLE]', e?.message)
+      return errore(erroreCorrierePulito(e?.message))
+    }
   } else {
     return errore('Tipo contratto non supportato')
   }
