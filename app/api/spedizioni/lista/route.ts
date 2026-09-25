@@ -302,7 +302,62 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ total: count || 0, soloConteggio: true })
   }
 
-  if (paged && !filtroCodPerViewer && !ordinaMargine) {
+  // ── ORDINE PER MARGINE SENZA SCARICARE TUTTO (25/09).
+  // Il margine non e' una colonna, quindi per ordinarlo la rotta si portava in memoria l'INTERO
+  // periodo: per MULTIEXPRESS a 30 giorni sono 110.000 righe in 110 blocchi da 1.000 (635 ms l'uno,
+  // ~70 secondi misurati), piu' i movimenti, e da capo a ogni cambio pagina. Ora l'ordine e quali
+  // righe mostrare li decide il DATABASE (spedizioni_margine_ids: 0,4-1,1 s misurati su 13k-110k
+  // righe) e qui si caricano solo le 10 della pagina.
+  // I NUMERI MOSTRATI restano quelli calcolati piu' sotto: la RPC ordina, non prezza. Verificato il
+  // 25/09 su 28.343 spedizioni vere (finestre 3 e 7 giorni): margini identici al centesimo, prime 50
+  // peggiori e prime 50 migliori uguali, conteggi uguali con e senza filtri.
+  // La via veloce vale SOLO se i filtri attivi sono quelli che la RPC applica: con gli altri (ricerca
+  // libera, citta'/CAP, contenuto, id ordine, negozio, agente, assicurazione, fatturato, stato
+  // contrassegni per livello) si resta come prima, perche' ordinare bene delle righe sbagliate
+  // sarebbe peggio che aspettare.
+  const filtriFuoriRpc = !!(numero || destCitta || destCap || contenuto || fCerca || fIdOrdine || fNegozio
+    || fAgente || fAssic || fFatt || fStatoContr || agenteClienteIds !== null || light)
+  const perimetroRpc: string[] | null = subtreeSel ? subtreeSel
+    : (clienteId ? (utente?.master_id ? [utente.master_id] : null)
+    : (reteSubtree ? reteSubtree
+    : ((masterIds && masterIds.length > 1) ? masterIds : (utente?.master_id ? [utente.master_id] : null))))
+  // Contratti: l'intersezione dei vincoli attivi (visibilita' di rete, contratto scelto, vettore).
+  const listeContratti: string[][] = []
+  if (ownedContractNames != null && (!!subtreeSel || !!reteSubtree || (!!masterIds && masterIds.length > 1))) listeContratti.push(ownedContractNames)
+  if (fContratto) listeContratti.push([fContratto])
+  if (fVettore && nomiVettore) listeContratti.push(nomiVettore)
+  const contrattiRpc = listeContratti.length ? listeContratti.reduce((a, b) => a.filter(x => b.includes(x))) : null
+  let margineDaDb = paged && ordinaMargine && !filtriFuoriRpc && !!perimetroRpc
+    && ruolo !== 'cliente' && ruolo !== 'agente'
+
+  if (margineDaDb) {
+    const { data: ord, error: errOrd } = await admin.rpc('spedizioni_margine_ids', {
+      p_mine: utente!.master_id, p_masters: perimetroRpc,
+      p_dal: dal || null, p_al: al || null,
+      p_stato: (stato && stato !== 'tutti') ? stato : null,
+      p_cliente: clienteId || fClienteEq || null,
+      p_contratti: contrattiRpc,
+      p_contrassegno: contrassegno === 'si' ? 'si' : (contrassegno === 'no' ? 'no' : null),
+      p_asc: dirAsc, p_limit: perPage, p_offset: (pageParam - 1) * perPage,
+    })
+    if (errOrd || !ord) {
+      // SE IL DATABASE NON RISPONDE, L'ELENCO NON SI ROMPE: si torna al calcolo in memoria di prima.
+      // Lento, ma nessuno resta senza lista per un ordinamento.
+      console.error('[LISTA] ordine per margine dal DB non riuscito, ripiego sul calcolo in memoria:', errOrd?.message)
+      margineDaDb = false
+      spedizioni = await fetchAll(buildBase)
+      segna('margine-ripiego(' + spedizioni.length + ')')
+    } else {
+      const idsOrd = (ord as any[]).map((r: any) => r.id)
+      totalePaginato = contaTot ? Number((ord as any[])[0]?.totale || 0) : -1
+      // Le righe si rileggono con la query di SEMPRE (stessi filtri, stesse colonne): se per qualunque
+      // motivo un id non li passasse, sparisce invece di comparire per sbaglio.
+      const { data: righeOrd } = idsOrd.length ? await buildBase().in('id', idsOrd) : { data: [] as any[] }
+      const perId = new Map((righeOrd || []).map((r: any) => [r.id, r]))
+      spedizioni = idsOrd.map((id: string) => perId.get(id)).filter(Boolean)
+      segna('margine-db(' + spedizioni.length + '/' + totalePaginato + ')')
+    }
+  } else if (paged && !filtroCodPerViewer && !ordinaMargine) {
     const from = (pageParam - 1) * perPage
     const { data, count } = await buildBase(contaTot).range(from, from + perPage - 1)
     spedizioni = data || []
@@ -658,7 +713,9 @@ export async function GET(req: NextRequest) {
 
   // Filtro contrassegni del master: ho preso TUTTO il COD e filtrato in memoria (rowsOut) sullo stato
   // per-livello. Se paginato, pagino ORA sul filtrato — il totale è quello filtrato, non il conteggio DB.
-  if (paged && (filtroCodPerViewer || ordinaMargine)) {
+  // L'impaginazione in memoria NON vale quando la pagina l'ha gia' scelta il database (margineDaDb):
+  // li' `rowsOut` sono gia' le 10 righe giuste, e tagliarle di nuovo a `offset` le farebbe sparire.
+  if (paged && (filtroCodPerViewer || (ordinaMargine && !margineDaDb))) {
     totalePaginato = rowsOut.length
     const from = (pageParam - 1) * perPage
     rowsOut = rowsOut.slice(from, from + perPage)
