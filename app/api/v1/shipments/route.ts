@@ -131,6 +131,7 @@ export async function POST(req: NextRequest) {
     paese: (body.shipTo.country || 'IT').toUpperCase().trim(),
     citta: (body.shipTo.city || '').toString().trim(),   // CAP condivisi tra più comuni
     packages, corriereId: ctx.corriereId,
+    mittCap: (body.shipFrom.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom.state || '').toUpperCase().trim(), mittPaese: 'IT',
   })
   if (!ris) return NextResponse.json({ error: 'Destinazione non coperta dal listino per questo contratto (zona non prezzata): spedizione non creabile con questo corriere.' }, { status: 400 })
 
@@ -176,6 +177,7 @@ export async function POST(req: NextRequest) {
     citta: body.shipTo.city,
     corriereNome: corriere.nome_contratto,
     contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+    mittCap: (body.shipFrom.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom.state || '').toUpperCase().trim(), mittPaese: 'IT',
     // Con che zona e a che prezzo e' stato calcolato il cliente: serve al controllo "due zone sulla
     // stessa spedizione" dentro verificaCreditoCatena, che vale per tutte le porte insieme.
     zonaCliente: ris.zona, prezzoCliente: costoCliente,
@@ -598,7 +600,7 @@ export async function POST(req: NextRequest) {
   // Misurato: 28 spedizioni in perdita su 31, 156,97 euro in trenta giorni, tutte da questa porta.
   // Dal portale, nella identica situazione, 536 spedizioni e 2 sole in perdita per 0,62 euro.
   try {
-    await addebitaCatena(admin, { masterDirettoId: masterId, corriereOwnerId: corriere.master_id, costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city, corriereNome: corriere.nome_contratto, contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0), numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: null })
+    await addebitaCatena(admin, { masterDirettoId: masterId, corriereOwnerId: corriere.master_id, costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city, corriereNome: corriere.nome_contratto, contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0), mittCap: (body.shipFrom.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom.state || '').toUpperCase().trim(), mittPaese: 'IT', numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: null })
   } catch (e) { console.error('API cascata:', e) }
 
   // Notifica ai webhook del cliente (best-effort: non blocca né fa fallire la creazione)

@@ -20,7 +20,7 @@ import { EMAIL_PER_CORRIERE,
 } from '@/lib/spediamopro'
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
 import { normalizzaPaese } from '@/lib/paesi'
-import { calcolaPrezzoCorriereDettaglio, parseScaglioniSupp, scaglioniPerPeso } from '@/lib/pricing'
+import { calcolaPrezzoCorriereDettaglio, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente } from '@/lib/pricing'
 // La sigla neutra al posto del tipo del contratto: il nome del sistema tecnico a valle non deve
 // arrivare al browser, nemmeno dentro il JSON (vedi lib/corriere-logo.ts).
 import { siglaContratto, marchioCorriere } from '@/lib/corriere-logo'
@@ -301,7 +301,7 @@ export async function calcolaTariffeCliente(
     .from('listini_clienti_fasce')
     // `attivo` serve al gate dei contratti in pausa qui sotto: senza, il ramo CLIENTE quotava anche
     // i contratti messi in pausa dal proprio master.
-    .select('*, zone(id,nome), corrieri(id,tipo,nome_contratto,attivo,credenziali,settings)')
+    .select('*, zone(id,nome,su_mittente), corrieri(id,tipo,nome_contratto,attivo,credenziali,settings)')
     .eq('listino_id', cliente.listino_cliente_id)
     .order('peso_max', { ascending: true })
 
@@ -323,8 +323,10 @@ export async function calcolaTariffeCliente(
   // Match zona via zone_cap (CAP esatto > provincia > jolly), ristretto alle zone del listino.
   // Mappa zona->corriere così i tier si applicano PER CORRIERE (un CAP esatto di un corriere non
   // deve escludere gli altri corrieri che coprono la destinazione a provincia/jolly).
+  // Le zone su_mittente (partenza) sono fuori dal match destinazione: il loro supplemento si somma
+  // a parte, in base al mittente. Escluderle qui evita che una dest a un CAP-mittente le agganci.
   const zonaCorr = new Map<string, string>()
-  for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid) zonaCorr.set(zid, cid) }
+  for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid && !(f.zone as any)?.su_mittente) zonaCorr.set(zid, cid) }
   // Zone "esclusive" (Isole Minori + Zone Disagiate): se il CAP vi appartiene, il jolly "Italia"
   // NON lo copre. Includo anche le zone esclusive del MASTER (non solo quelle già prezzate nel
   // listino del cliente): così una destinazione isola/disagiata viene riconosciuta come esclusiva
@@ -338,13 +340,13 @@ export async function calcolaTariffeCliente(
   const esclCorr = new Map<string, string>()
   for (const f of fasce) {
     const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id
-    if (zid && cid && isZonaEsclusiva((f.zone as any)?.nome)) esclCorr.set(zid, cid)
+    if (zid && cid && !(f.zone as any)?.su_mittente && isZonaEsclusiva((f.zone as any)?.nome)) esclCorr.set(zid, cid)
   }
   for (const z of esclMaster) esclCorr.set(z.id, z.corriere_id)
   // Le zone esclusive del master vanno tra le candidate (per caricare le righe) ma NON nella mappa
   // di MATCH (zonaCorr): servono solo all'esclusione per-corriere, non a creare tariffe.
   const candidateZonaIds = Array.from(new Set([
-    ...fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean),
+    ...fasce.filter((f: any) => !(f.zone as any)?.su_mittente).map((f: any) => (f.zone as any)?.id).filter(Boolean),
     ...esclMaster.map((z) => z.id),
   ]))
   const { ids: zoneMatchIds, corrieriEsclusi } = await trovaZoneMatchDett(
@@ -365,6 +367,7 @@ export async function calcolaTariffeCliente(
   for (const f of fasce) {
     const cid = (f.corrieri as any)?.id
     if (!cid) continue
+    if ((f.zone as any)?.su_mittente) continue   // fasce ORIGINE: non sono prezzo destinazione
     if (!tuttePerCorriere.has(cid)) tuttePerCorriere.set(cid, [])
     tuttePerCorriere.get(cid)!.push(f)
   }
@@ -439,13 +442,21 @@ export async function calcolaTariffeCliente(
     const fuelPct = Number((fasciaGiusta as any).fuel) || 0
     const costoFuel = nolo * fuelPct / 100
     const sponda = calcolaSponda(corriereId, pesoPerFascia)
-    const prezzoSped = nolo + costoFuel + sponda
+    // Supplemento ORIGINE (zona mittente disagiato) di QUESTO corriere. 0 se non configurato.
+    const mittSupp = await supplementoMittente(
+      createAdminSupabase(),
+      fasce.filter((f: any) => (f.corrieri as any)?.id === corriereId),
+      { cap: body.shipFrom?.postalCode, provincia: body.shipFrom?.state, paese: 'IT' },
+      pesoPerFascia
+    )
+    const prezzoSped = nolo + costoFuel + sponda + mittSupp
     risultati.push({
       carrierCode: siglaContratto(corriere?.tipo) || 'sda',
       contractCode: '',
       weight_price: nolo.toFixed(2),
       prezzo_spedizione: prezzoSped.toFixed(2),
       costo_sponda: sponda.toFixed(2),
+      costo_mittente: mittSupp.toFixed(2),   // supplemento origine (zona mittente disagiato)
       costo_fuel: costoFuel.toFixed(2),
       fuel_pct: fuelPct,
       costo_contrassegno: (calcolaContrassegno(corriereId, prezzoSped) ?? 0).toFixed(2),

@@ -318,8 +318,9 @@ export async function zoneEsclusiveMaster(
   if (!ids.length) return []
   const out = new Map<string, string>()
 
-  const { data } = await supabase.from('zone').select('id,nome,corriere_id').in('corriere_id', ids)
-  for (const z of (data || [])) if (isZonaEsclusiva((z as any).nome)) out.set((z as any).id, (z as any).corriere_id)
+  // Le zone su_mittente (partenza) non c'entrano con la destinazione: mai tra le esclusive di dest.
+  const { data } = await supabase.from('zone').select('id,nome,corriere_id,su_mittente').in('corriere_id', ids)
+  for (const z of (data || [])) if (!(z as any).su_mittente && isZonaEsclusiva((z as any).nome)) out.set((z as any).id, (z as any).corriere_id)
 
   // REGOLA UNIVERSALE: se una zona elenca ESPLICITAMENTE questo CAP, per quella destinazione vale
   // quella zona e nessun'altra — come si chiami la zona non conta.
@@ -333,9 +334,9 @@ export async function zoneEsclusiveMaster(
   const c = String(cap || '').trim()
   if (c) {
     const { data: perCap } = await supabase.from('zone')
-      .select('id,corriere_id, zone_cap!inner(cap)')
+      .select('id,corriere_id,su_mittente, zone_cap!inner(cap)')
       .in('corriere_id', ids).eq('zone_cap.cap', c)
-    for (const z of (perCap || [])) out.set((z as any).id, (z as any).corriere_id)
+    for (const z of (perCap || [])) if (!(z as any).su_mittente) out.set((z as any).id, (z as any).corriere_id)
   }
   return Array.from(out, ([id, corriere_id]) => ({ id, corriere_id }))
 }

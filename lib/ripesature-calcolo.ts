@@ -82,7 +82,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     }
 
     const { data: s } = await admin.from('spedizioni')
-      .select('id,cliente_id,master_id,corriere_id,stato,peso_fatturato,peso_reale,peso_volume,dest_provincia,dest_cap,dest_citta,dest_paese,contrassegno,assicurazione,valore_merce,servizi_accessori')
+      .select('id,cliente_id,master_id,corriere_id,stato,peso_fatturato,peso_reale,peso_volume,dest_provincia,dest_cap,dest_citta,dest_paese,mitt_cap,mitt_provincia,contrassegno,assicurazione,valore_merce,servizi_accessori')
       .eq('tracking_number', r.ldv).maybeSingle()
     if (!s) { out.push({ ...base, motivo: 'spedizione non trovata' }); continue }
     if (s.stato === 'annullata') { out.push({ ...base, spedizioneId: s.id, motivo: 'spedizione annullata' }); continue }
@@ -110,6 +110,9 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     const dest = {
       provincia: s.dest_provincia || '', cap: s.dest_cap || '',
       citta: s.dest_citta || '', paese: s.dest_paese || 'IT',
+      // MITTENTE della spedizione originale: il riprezzo deve includere lo stesso supplemento origine
+      // usato alla creazione, altrimenti una ripesatura lo toglierebbe (differenza fasulla).
+      mittCap: s.mitt_cap || '', mittProvincia: s.mitt_provincia || '', mittPaese: 'IT',
     }
 
     // Quanto risulta addebitato: dai MOVIMENTI, che sono l'unico posto dove c'e' scritto davvero.
@@ -222,6 +225,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           cap: dest.cap, citta: dest.citta, paese: dest.paese,
           corriereNome: corr.nome_contratto,
           contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0),
+          mittCap: s.mitt_cap || '', mittProvincia: s.mitt_provincia || '', mittPaese: 'IT',
           zonaForzata,
         })
         if (errore) { motivo = errore; bloccato = true }

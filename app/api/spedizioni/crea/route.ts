@@ -348,6 +348,7 @@ export async function POST(req: NextRequest) {
       provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
       citta: body.shipTo.city,   // CAP condivisi (es. 65010 Spoltore/Civitella Casanova): senza città il gate vedeva disagiata anche per il comune normale
       packages,
+      mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
     })
     if (!risCli || risCli.corriere_id !== corriereRecord.id) {
       return NextResponse.json({ error: 'Destinazione in zona disagiata: nessun prezzo a listino per questo corriere. Spedizione non consentita — scegli un altro corriere o aggiungi la fascia della zona al listino.' }, { status: 400 })
@@ -371,6 +372,7 @@ export async function POST(req: NextRequest) {
       listinoId: cliente.listino_cliente_id, corriereId: corriereRecord.id,
       provincia: body.shipTo.state, cap: body.shipTo.postalCode,
       paese: body.shipTo.country || 'IT', citta: body.shipTo.city, packages,
+      mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
     })
     if (!risPrezzo) {
       return NextResponse.json({ error: 'Destinazione non coperta dal listino per questo contratto: spedizione non creabile.' }, { status: 400 })
@@ -637,6 +639,7 @@ export async function POST(req: NextRequest) {
       citta: body.shipTo.city,
       corriereNome: corriereRecord.nome_contratto,
       contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+      mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
       // Con che zona e a che prezzo e' stato calcolato il cliente: serve al controllo "due zone
       // sulla stessa spedizione" dentro verificaCreditoCatena, comune a tutte le porte.
       zonaCliente, prezzoCliente: prezzoServerCliente || undefined,
@@ -865,6 +868,7 @@ export async function POST(req: NextRequest) {
       cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
       corriereNome: corriereRecord.nome_contratto,
       contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+      mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
       numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
     })
 
@@ -1100,6 +1104,7 @@ export async function POST(req: NextRequest) {
         cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
         corriereNome: corriereRecord.nome_contratto,
         contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+        mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
         numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
       })
 
@@ -1783,6 +1788,7 @@ export async function POST(req: NextRequest) {
         cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
         corriereNome: corriereRecord.nome_contratto,
         contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+        mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
         numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
       })
     } catch (e) { console.error('[CREA][INTERNO] cascata catena:', e) }

@@ -59,6 +59,11 @@ export async function costruisciCatena(
     // SOLO ricalcolo RETTIFICHE: forza la stessa fascia (di norma 'Italia') su TUTTI i livelli della
     // catena, così non si mescolano zone diverse (MULTI su SCS, Ecomize su Italia). Default assente.
     zonaForzata?: string
+    // MITTENTE (partenza): per il supplemento "zona mittente disagiato". Va a OGNI livello, perché è
+    // un costo reale del corriere che ogni livello paga. Assente = nessun supplemento (invariato).
+    mittCap?: string
+    mittProvincia?: string
+    mittPaese?: string
   }
 ): Promise<{ catena: LivelloCatena[]; errore?: string }> {
   const catena: LivelloCatena[] = []
@@ -127,6 +132,7 @@ export async function costruisciCatena(
           contrassegno: params.contrassegno, assicurazione: params.assicurazione,
           zonaForzata: params.zonaForzata,
           pesoSuRealeCost,
+          mittCap: params.mittCap, mittProvincia: params.mittProvincia, mittPaese: params.mittPaese,
         })
         if (pz != null) { prezzo = pz.totale; zonaLivello = pz.zona; calcolato = true; codOltreMax = pz.contrassegnoOltreMax; assOltreMax = pz.assicurazioneOltreMax }
       }
@@ -158,6 +164,7 @@ export async function costruisciCatena(
           packages: params.packages, cap: params.cap, paese: params.paese, citta: params.citta,
           corriereId: corrPadre,
           zonaForzata: params.zonaForzata,
+          mittCap: params.mittCap, mittProvincia: params.mittProvincia, mittPaese: params.mittPaese,
         })
         if (!ris) return { catena, errore: `Nessuna tariffa nel listino del master "${m.nome}".` }
         prezzo = ris.prezzo
@@ -266,6 +273,10 @@ export async function verificaCreditoCatena(
     // La zona e il prezzo con cui e' stato calcolato il CLIENTE. Servono al controllo qui sotto.
     zonaCliente?: string
     prezzoCliente?: number
+    // MITTENTE (partenza): supplemento zona mittente disagiato. Assente = nessun supplemento.
+    mittCap?: string
+    mittProvincia?: string
+    mittPaese?: string
   }
 ): Promise<{ ok: boolean; errore?: string; masterInsufficiente?: string; servizioNonPrezzato?: boolean }> {
   const { catena, errore } = await costruisciCatena(supabase, {
@@ -280,6 +291,7 @@ export async function verificaCreditoCatena(
     corriereNome: params.corriereNome,
     contrassegno: params.contrassegno,
     assicurazione: params.assicurazione,
+    mittCap: params.mittCap, mittProvincia: params.mittProvincia, mittPaese: params.mittPaese,
   })
   if (errore) return { ok: false, errore }
 
@@ -366,6 +378,9 @@ export async function addebitaCatena(
     corriereNome?: string
     contrassegno?: number
     assicurazione?: number
+    mittCap?: string
+    mittProvincia?: string
+    mittPaese?: string
   }
 ): Promise<void> {
   const adminMov = createAdminSupabase()
@@ -381,6 +396,7 @@ export async function addebitaCatena(
     corriereNome: params.corriereNome,
     contrassegno: params.contrassegno,
     assicurazione: params.assicurazione,
+    mittCap: params.mittCap, mittProvincia: params.mittProvincia, mittPaese: params.mittPaese,
   })
 
   for (const liv of catena) {

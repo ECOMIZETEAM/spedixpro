@@ -150,6 +150,49 @@ function trovaFascia(fasce: any[], peso: number) {
   return null
 }
 
+// SUPPLEMENTO ORIGINE ("zona mittente disagiato").
+//
+// Alcuni corrieri fanno pagare di piu' quando il pacco PARTE da certe aree (Sicilia, Sardegna,
+// Calabria, isole, comuni remoti): e' un costo reale che dipende dal MITTENTE, non dalla
+// destinazione. Il listino nasce tutto sulla destinazione, quindi questo costo, se non lo si
+// aggiunge, lo assorbe il detentore in silenzio (BRT da Sicilia +2,71; UPS da Basilicata +1,77,
+// misurati sui costi reali). Lo modelliamo come una ZONA marcata `su_mittente`: i suoi CAP/province
+// sono di PARTENZA e le sue fasce sono il supplemento (piatto o per peso). Il match e' additivo,
+// senza esclusione (a differenza delle zone speciali di destinazione): o c'e' il supplemento o e' 0.
+//
+// SICUREZZA: finche' non esiste NESSUNA zona `su_mittente` (o il mittente non ci cade), torna 0 →
+// il prezzo e' identico a prima. Nessuna spedizione cambia finche' non si configurano le zone.
+//
+// `fasce` sono gia' quelle caricate dal chiamante (listino corriere O cliente), ognuna con
+// `zone(id,su_mittente)`. Cosi' il supplemento del livello esce dallo STESSO listino del suo prezzo.
+export async function supplementoMittente(
+  supabase: any,
+  fasce: any[],
+  mitt: { cap?: string; provincia?: string; paese?: string } | undefined,
+  pesoFatturato: number
+): Promise<number> {
+  if (!mitt?.cap && !mitt?.provincia) return 0
+  const origIds = Array.from(new Set(
+    (fasce || []).filter((f: any) => (f.zone as any)?.su_mittente).map((f: any) => (f.zone as any)?.id).filter(Boolean)
+  ))
+  if (!origIds.length) return 0
+  const paese = (mitt.paese || 'IT').toUpperCase().trim()
+  const cap = (mitt.cap || '').trim()
+  const prov = (mitt.provincia || '').toUpperCase().trim()
+  // Match sul MITTENTE: CAP esatto > provincia (cap jolly) > jolly totale. Nessuna esclusione.
+  const { data: zc } = await supabase
+    .from('zone_cap').select('zona_id,provincia,cap').eq('paese', paese)
+    .in('zona_id', origIds).in('cap', Array.from(new Set([cap, '*'].filter(Boolean))))
+  let m = (zc || []).filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap)
+  if (!m.length) m = (zc || []).filter((r: any) => r.provincia && r.provincia !== '*' && String(r.provincia).toUpperCase() === prov && (!r.cap || r.cap === '*'))
+  if (!m.length) m = (zc || []).filter((r: any) => (!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*'))
+  if (!m.length) return 0
+  const zoneMatch = new Set(m.map((r: any) => r.zona_id))
+  const origFasce = (fasce || []).filter((f: any) => zoneMatch.has((f.zone as any)?.id))
+  const f = trovaFascia(origFasce, pesoFatturato)   // a parita' di scaglione vince il piu' alto
+  return f ? Number((f as any).prezzo) || 0 : 0
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SCAGLIONI SUPPLEMENTO (contrassegno / assicurazione) — UNA logica sola.
 //
@@ -239,6 +282,7 @@ export type DettaglioCorriere = {
   sponda: number
   contrassegno: number
   assicurazione: number
+  mittente?: number        // supplemento ORIGINE (zona mittente disagiato); 0 se non configurato
   peso_reale: number       // somma pesi reali dei colli
   peso_volume: number      // somma volumetrici dei colli col fattore del corriere
   peso_fatturato: number   // peso EFFETTIVO su cui è tassato (reale se agevolazione, altrimenti volumetrico)
@@ -268,6 +312,10 @@ export async function calcolaPrezzoListino(
     // per CAP e l'esclusione zona-disagiata. Serve a rettificare su una fascia UNICA e coerente per
     // tutta la catena. Default assente = comportamento normale (la creazione NON lo passa mai).
     zonaForzata?: string
+    // MITTENTE (partenza): per il supplemento "zona mittente disagiato". Assente = nessun supplemento.
+    mittCap?: string
+    mittProvincia?: string
+    mittPaese?: string
   }
 ): Promise<RisultatoPrezzo> {
   const { listinoId, provincia } = params
@@ -301,7 +349,7 @@ export async function calcolaPrezzoListino(
 
   const { data: fasce } = await supabase
     .from('listini_clienti_fasce')
-    .select('*, zone(id,nome), corrieri(id,tipo,nome_contratto,settings)')
+    .select('*, zone(id,nome,su_mittente), corrieri(id,tipo,nome_contratto,settings)')
     .eq('listino_id', listinoId)
     .order('peso_max', { ascending: true })
 
@@ -315,19 +363,22 @@ export async function calcolaPrezzoListino(
   // destinazione disagiata quando al cliente manca la fascia speciale → il corriere viene ESCLUSO
   // (niente vendita sotto costo). Senza questo, un CAP disagiato (es. 09038 in "Zone Disagiate")
   // ripiegava sulla fascia regionale (Sardegna) e si vendeva sotto costo.
+  // Le zone MITTENTE (su_mittente) hanno CAP di PARTENZA: fuori dal match destinazione. Il loro
+  // supplemento si calcola a parte, sul mittente, dopo aver scelto il corriere.
+  const isMittL = (zid: string | undefined) => !!zid && (fasce as any[]).some((f: any) => (f.zone as any)?.id === zid && (f.zone as any)?.su_mittente)
   const corrIdsListino = Array.from(new Set<string>(fasce.map((f: any) => (f.corrieri as any)?.id).filter(Boolean)))
-  const esclMaster = await zoneEsclusiveMaster(supabase, corrIdsListino, params.cap)
+  const esclMaster = (await zoneEsclusiveMaster(supabase, corrIdsListino, params.cap)).filter((z: any) => !isMittL(z.id))
   const candidateZonaIds = Array.from(new Set<string>([
-    ...fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean),
+    ...fasce.filter((f: any) => !(f.zone as any)?.su_mittente).map((f: any) => (f.zone as any)?.id).filter(Boolean),
     ...esclMaster.map((z) => z.id),
   ]))
   const zonaCorr = new Map<string, string>()
-  for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid) zonaCorr.set(zid, cid) }
+  for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid && !(f.zone as any)?.su_mittente) zonaCorr.set(zid, cid) }
   // Mappa zona_id -> corriere_id delle zone ESCLUSIVE: le fasce esclusive del listino + le zone
   // esclusive del MASTER (così l'esclusione scatta anche se il cliente non ha la fascia speciale).
   // L'esclusione dal jolly "Italia" è PER-CORRIERE (un CAP disagiato per BRT non tocca Poste).
   const esclCorr = new Map<string, string>()
-  for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid && isZonaEsclusiva((f.zone as any)?.nome)) esclCorr.set(zid, cid) }
+  for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid && !(f.zone as any)?.su_mittente && isZonaEsclusiva((f.zone as any)?.nome)) esclCorr.set(zid, cid) }
   for (const z of esclMaster) esclCorr.set(z.id, z.corriere_id)
   const { ids: zoneMatchIds, corrieriEsclusi } = await trovaZoneMatchDett(
     supabase,
@@ -343,6 +394,7 @@ export async function calcolaPrezzoListino(
   for (const f of fasce) {
     const cId = (f.corrieri as any)?.id
     if (!cId) continue
+    if ((f.zone as any)?.su_mittente) continue   // fasce ORIGINE: non sono prezzo destinazione
     if (!tuttePerCorr.has(cId)) tuttePerCorr.set(cId, [])
     tuttePerCorr.get(cId)!.push(f)
   }
@@ -412,8 +464,16 @@ export async function calcolaPrezzoListino(
 
   const zonaRisolta = (fascePerCorriere.get(miglior.corriereId)?.[0]?.zone as any)?.nome || zonaNome
 
+  // SUPPLEMENTO ORIGINE (zona mittente disagiato) del corriere scelto. 0 se non configurato.
+  const mittAmt = await supplementoMittente(
+    supabase,
+    fasce.filter((f: any) => (f.corrieri as any)?.id === miglior!.corriereId),
+    { cap: params.mittCap, provincia: params.mittProvincia, paese: params.mittPaese },
+    pesoFatturato
+  )
+
   return {
-    prezzo: Math.round((miglior.prezzo + sponda) * 100) / 100,
+    prezzo: Math.round((miglior.prezzo + sponda + mittAmt) * 100) / 100,
     zona: zonaRisolta,
     peso_reale: pesoReale,
     peso_volume: Math.round(pesoVolume * 100) / 100,
@@ -447,6 +507,10 @@ export async function calcolaPrezzoCorriereDettaglio(
     // passato, sostituisce del tutto la valutazione locale dell'agevolazione (settings + solo_peso_reale).
     // Il divisore volumetrico resta comunque il SUO (fattore per-corriere). Default assente = normale.
     pesoSuRealeCost?: boolean
+    // MITTENTE (partenza): per il supplemento "zona mittente disagiato". Assente = nessun supplemento.
+    mittCap?: string
+    mittProvincia?: string
+    mittPaese?: string
   }
 ): Promise<DettaglioCorriere | null> {
   const { corriereId, masterId, provincia } = params
@@ -498,21 +562,27 @@ export async function calcolaPrezzoCorriereDettaglio(
 
   const { data: fasce } = await supabase
     .from('listini_corrieri_fasce')
-    .select('*, zone(id,nome)')
+    .select('*, zone(id,nome,su_mittente)')
     .in('listino_id', listinoIds)
     .eq('corriere_id', corriereId)
     .order('peso_max', { ascending: true })
   if (!fasce?.length) return null
 
+  // Le zone MITTENTE (su_mittente) non c'entrano con la destinazione: i loro CAP sono di PARTENZA.
+  // Vanno tenute fuori dal match destinazione, altrimenti una spedizione DIRETTA a un CAP che sta
+  // in una zona mittente prenderebbe quel supplemento come prezzo di zona. Il supplemento origine si
+  // calcola a parte, sul mittente, più sotto.
+  const isMitt = (zid: string | undefined) => !!zid && (fasce as any[]).some((f: any) => (f.zone as any)?.id === zid && (f.zone as any)?.su_mittente)
+
   // Zone ESCLUSIVE del corriere (isole/disagiate/…), anche se questo listino NON le prezza: servono
   // a NON far cadere su "Italia" una destinazione esclusiva (es. 30126 disagiata) quando manca la
   // fascia speciale → il corriere semplicemente non copre quella destinazione (niente sotto-costo).
-  const esclZone = await zoneEsclusiveMaster(supabase, [corriereId], params.cap)
+  const esclZone = (await zoneEsclusiveMaster(supabase, [corriereId], params.cap)).filter((z: any) => !isMitt(z.id))
   const esclCorr = new Map<string, string>()
   for (const z of esclZone) esclCorr.set(z.id, z.corriere_id)
   const zonaCorr = new Map<string, string>()
-  const candidateZonaIds = Array.from(new Set<string>([...fasce.map((f: any) => (f.zone as any)?.id).filter(Boolean), ...esclZone.map((z) => z.id)]))
-  for (const f of fasce) { const zid = (f.zone as any)?.id; if (zid) zonaCorr.set(zid, corriereId) }
+  const candidateZonaIds = Array.from(new Set<string>([...fasce.filter((f: any) => !(f.zone as any)?.su_mittente).map((f: any) => (f.zone as any)?.id).filter(Boolean), ...esclZone.map((z) => z.id)]))
+  for (const f of fasce) { const zid = (f.zone as any)?.id; if (zid && !(f.zone as any)?.su_mittente) zonaCorr.set(zid, corriereId) }
   const { ids: zoneMatchIds, corrieriEsclusi } = await trovaZoneMatchDett(
     supabase,
     { paese: params.paese, provincia, cap: params.cap, citta: (params as any).citta },
@@ -589,14 +659,23 @@ export async function calcolaPrezzoCorriereDettaglio(
   const scA = supplPresenteMax(suppl || [], 'assicurazione', pesoReale)
   const assicurazioneOltreMax = ass > 0 && (!scA.presente || ass > scA.max)
 
+  // SUPPLEMENTO ORIGINE: se il pacco PARTE da una zona mittente disagiata di questo corriere.
+  // Esce dalle STESSE fasce già caricate (quelle marcate su_mittente). 0 se non configurato.
+  const mittAmt = await supplementoMittente(
+    supabase, fasce,
+    { cap: params.mittCap, provincia: params.mittProvincia, paese: params.mittPaese },
+    pesoFatturato
+  )
+
   const r2 = (n: number) => Math.round(n * 100) / 100
   return {
-    totale: r2(noloBase + fuelAmt + spondaAmt + feeCod + feeAss),
+    totale: r2(noloBase + fuelAmt + spondaAmt + feeCod + feeAss + mittAmt),
     nolo: r2(noloBase),
     fuel: r2(fuelAmt),
     sponda: r2(spondaAmt),
     contrassegno: r2(feeCod),
     assicurazione: r2(feeAss),
+    mittente: r2(mittAmt),
     peso_reale: r2(pesoReale),
     peso_volume: r2(pesoVolume),
     peso_fatturato: r2(pesoFatturato),
