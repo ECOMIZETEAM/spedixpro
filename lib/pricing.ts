@@ -169,7 +169,12 @@ export async function supplementoMittente(
   supabase: any,
   fasce: any[],
   mitt: { cap?: string; provincia?: string; paese?: string } | undefined,
-  pesoFatturato: number
+  pesoFatturato: number,
+  // NO-STACKING: se la DESTINAZIONE è già nella STESSA zona-mittente (stessa regione surchargata),
+  // il fornitore applica il supplemento UNA volta sola — la fascia di destinazione (es. "Sicilia")
+  // già lo contiene, quindi NON si somma anche l'origine. Verificato su DVA: Sicilia→isola-siciliana
+  // costa 6,67 (una volta), non 6,78+1,36. Senza `dest`, comportamento invariato (nessun controllo).
+  dest?: { cap?: string; provincia?: string; paese?: string }
 ): Promise<number> {
   if (!mitt?.cap && !mitt?.provincia) return 0
   const origIds = Array.from(new Set(
@@ -188,6 +193,22 @@ export async function supplementoMittente(
   if (!m.length) m = (zc || []).filter((r: any) => (!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*'))
   if (!m.length) return 0
   const zoneMatch = new Set(m.map((r: any) => r.zona_id))
+
+  // NO-STACKING: la destinazione cade nella STESSA zona-mittente? Allora il supplemento regionale è
+  // già nel prezzo di destinazione → non lo si aggiunge di nuovo (una volta sola, come fa il fornitore).
+  if (dest?.cap || dest?.provincia) {
+    const dPaese = (dest.paese || 'IT').toUpperCase().trim()
+    const dCap = (dest.cap || '').trim()
+    const dProv = (dest.provincia || '').toUpperCase().trim()
+    const { data: zcD } = await supabase
+      .from('zone_cap').select('zona_id,provincia,cap').eq('paese', dPaese)
+      .in('zona_id', Array.from(zoneMatch)).in('cap', Array.from(new Set([dCap, '*'].filter(Boolean))))
+    const destInStessaZona = (zcD || []).some((r: any) =>
+      (r.cap && r.cap !== '*' && r.cap === dCap) ||
+      (r.provincia && r.provincia !== '*' && String(r.provincia).toUpperCase() === dProv && (!r.cap || r.cap === '*')))
+    if (destInStessaZona) return 0
+  }
+
   const origFasce = (fasce || []).filter((f: any) => zoneMatch.has((f.zone as any)?.id))
   const f = trovaFascia(origFasce, pesoFatturato)   // a parita' di scaglione vince il piu' alto
   return f ? Number((f as any).prezzo) || 0 : 0
@@ -469,7 +490,8 @@ export async function calcolaPrezzoListino(
     supabase,
     fasce.filter((f: any) => (f.corrieri as any)?.id === miglior!.corriereId),
     { cap: params.mittCap, provincia: params.mittProvincia, paese: params.mittPaese },
-    pesoFatturato
+    pesoFatturato,
+    { cap: params.cap, provincia, paese: params.paese }   // no-stacking se dest è nella stessa regione
   )
 
   return {
@@ -664,7 +686,8 @@ export async function calcolaPrezzoCorriereDettaglio(
   const mittAmt = await supplementoMittente(
     supabase, fasce,
     { cap: params.mittCap, provincia: params.mittProvincia, paese: params.mittPaese },
-    pesoFatturato
+    pesoFatturato,
+    { cap: params.cap, provincia, paese: params.paese }   // no-stacking se dest è nella stessa regione
   )
 
   const r2 = (n: number) => Math.round(n * 100) / 100

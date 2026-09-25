@@ -447,7 +447,8 @@ export async function calcolaTariffeCliente(
       createAdminSupabase(),
       fasce.filter((f: any) => (f.corrieri as any)?.id === corriereId),
       { cap: body.shipFrom?.postalCode, provincia: body.shipFrom?.state, paese: 'IT' },
-      pesoPerFascia
+      pesoPerFascia,
+      { cap: capDest, provincia, paese: paeseDest }   // no-stacking se dest è nella stessa regione
     )
     const prezzoSped = nolo + costoFuel + sponda + mittSupp
     risultati.push({
