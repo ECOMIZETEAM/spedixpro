@@ -97,7 +97,21 @@ export async function detentoreContratto(
 // Sorgente "tutto in memoria": due letture (masters + corrieri) e poi nessun altro viaggio.
 // Si leggono TUTTI i corrieri, non solo quelli dei nomi che servono: i nomi vanno confrontati
 // normalizzati, e un filtro per nome esatto perderebbe proprio la copia scritta in modo diverso.
+//
+// TENUTA IN CALDO PER UN MINUTO. Le due letture costavano 229 ms a OGNI apertura dell'elenco
+// spedizioni (misurato il 25/09 su MULTIEXPRESS: un quarto del tempo della pagina), e i master e i
+// contratti cambiano qualche volta al giorno, non a ogni clic. Il prezzo del ritardo e' che un
+// contratto appena creato entra nei colori dei contrassegni entro un minuto: nessun conto ne dipende
+// — chi decide i SOLDI (cascata, anticipo) legge sempre dal database, non da qui.
+let cacheCatena: { at: number; sorgente: SorgenteCatena } | null = null
 export async function caricaSorgenteCatena(adminDb: any): Promise<SorgenteCatena> {
+  if (cacheCatena && Date.now() - cacheCatena.at < 60_000) return cacheCatena.sorgente
+  const fresca = await costruisciSorgenteCatena(adminDb)
+  cacheCatena = { at: Date.now(), sorgente: fresca }
+  return fresca
+}
+
+async function costruisciSorgenteCatena(adminDb: any): Promise<SorgenteCatena> {
   const [mRes, cRes]: any = await Promise.all([
     adminDb.from('masters').select('id,parent_master_id'),
     adminDb.from('corrieri').select('master_id,nome_contratto,proprio'),
