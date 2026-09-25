@@ -24,6 +24,20 @@ export function ldvProvvisoria(numero?: string | null): boolean {
 // Etichetta di stato da mostrare all'utente quando il numero è ancora provvisorio.
 export const LDV_IN_ELABORAZIONE = 'LDV in elaborazione'
 
+// IL CODICE CON CUI CERCARE LA SPEDIZIONE SUL PORTALE DEL FORNITORE, quando la lettera di vettura
+// non c'e' ancora. Dentro "TMP-25871575" c'e' il numero d'ordine del fornitore: e' quello che si
+// digita nel suo pannello per trovarla e cancellarla a mano. Finche' restava incollato al prefisso,
+// in coda annulli si leggeva "TMP-25871575" e nessuno sapeva cosa fosse (segnalato il 25/09: la coda
+// DVA e' fatta quasi solo di queste, perche' l'ordine annullato la LDV non la produce piu').
+// Torna stringa vuota se il numero e' gia' una lettera di vettura vera: non c'e' niente da spiegare.
+export function riferimentoFornitore(numero?: string | null): string {
+  const n = String(numero || '').trim()
+  if (!n) return ''
+  if (PREFISSI_LDV_PROVVISORIA.test(n)) return n.replace(PREFISSI_LDV_PROVVISORIA, '')
+  if (CODICE_SPEDIAMOPRO_PROVVISORIO.test(n)) return n
+  return ''
+}
+
 // Numero da mostrare in UI: quello vero, oppure lo stato se ancora provvisorio.
 export function numeroVisibile(numero?: string | null): string {
   return ldvProvvisoria(numero) ? LDV_IN_ELABORAZIONE : String(numero || '')

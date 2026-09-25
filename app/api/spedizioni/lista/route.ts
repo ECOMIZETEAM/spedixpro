@@ -242,10 +242,17 @@ export async function GET(req: NextRequest) {
     // Rete: nascondi le spedizioni dei discendenti sui contratti che NON possiedi (privati del sub).
     if (filtroContratti) q = q.in('corrieri.nome_contratto', ownedContractNames as string[])
     if (fClienteEq) q = q.eq('cliente_id', fClienteEq)
-    // Filtro stato: se richiesto uno stato preciso lo applico; se non richiesto, mostro anche le
-    // spedizioni in annullamento_pending (ripristinabili). Escludo solo annullate e coda manuale.
+    // Filtro stato: se richiesto uno stato preciso lo applico; se non richiesto, l'unico stato che
+    // sparisce dall'elenco e' 'annullata' — cioe' quando la cancellazione e' AVVENUTA DAVVERO presso
+    // il corriere (risposta dell'API, oppure il detentore che conferma di averla annullata sul
+    // portale del fornitore). Le richieste di annullo NON ancora eseguite restano in elenco:
+    // 'annullamento_pending' (attesa 48h, ripristinabile) e 'annullamento_manuale' (coda del
+    // detentore: DVA non ha proprio una chiamata di annullo, e su certi contratti Spedisci l'API non
+    // la accetta, quindi qualcuno deve andare a cancellarla a mano sul portale). Prima sparivano
+    // anche quelle: 415 spedizioni il 25/09, 150 su DVA — il pacco era ancora vivo presso il
+    // fornitore, poteva partire ed essere consegnato, ma chi l'aveva richiesta non la vedeva piu'.
     if (stato && stato !== 'tutti') q = q.eq('stato', stato)
-    else q = q.not('stato', 'in', '(annullata,annullamento_manuale)')
+    else q = q.not('stato', 'in', '(annullata)')
     if (dal) q = q.gte('created_at', dal)
     if (al) q = q.lte('created_at', al)
     if (numero) q = q.ilike('numero', `%${numero}%`)

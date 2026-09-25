@@ -14,6 +14,7 @@ function oreRestanti(richiestoAt: string): { txt: string; pronto: boolean } {
 }
 
 import { useDialog } from '@/app/components/DialogProvider'
+import { riferimentoFornitore } from '@/lib/numero-spedizione'
 // Default: ultimi 60 giorni di annullate (le code pending/manuali restano complete: sono attive e
 // poche). Prima si scaricavano e arricchivano TUTTE le annullate di sempre -> pagina sempre piu' lenta.
 const _oggiC = new Date().toISOString().slice(0, 10)
@@ -86,9 +87,10 @@ export default function SpedizioniCancellatePage() {
   }
   function scaricaCsvContratto(nomeContratto: string) {
     const righe = codaOwner.filter(s => (s.corrieri?.nome_contratto || 'Senza contratto') === nomeContratto)
-    const intest = ['Numero', 'Tracking', 'Destinatario', 'Città', 'Provincia', 'Data richiesta annullo', 'Note']
+    const intest = ['Numero', 'Ordine sul portale', 'Tracking', 'Destinatario', 'Città', 'Provincia', 'Data richiesta annullo', 'Note']
     const corpo = righe.map(s => [
-      s.numero, s.tracking_number || '', s.dest_nome || '', s.dest_citta || '', s.dest_provincia || '',
+      riferimentoFornitore(s.numero) ? 'LDV non emessa' : s.numero, riferimentoFornitore(s.numero),
+      s.tracking_number || '', s.dest_nome || '', s.dest_citta || '', s.dest_provincia || '',
       s.annullamento_richiesto_at ? new Date(s.annullamento_richiesto_at).toLocaleString('it-IT') : '',
       s.ripesata ? 'RIPESATA - PARTITA: verificare' : '',
     ].map(csvCampo).join(';'))
@@ -224,7 +226,18 @@ export default function SpedizioniCancellatePage() {
               <tbody>
                 {codaOwnerPaginata.map(s => (
                   <tr key={s.id} style={{borderBottom:'1px solid #fee2e2'}}>
-                    <td style={{padding:'9px 16px',fontWeight:'700',color:'#1a1a1a'}}>{s.numero}</td>
+                    {/* LA LETTERA DI VETTURA PUO' NON ESSERCI: su questi contratti il numero arriva dopo
+                        l'ordine, e su un ordine annullato non arriva piu'. Allora si cerca per NUMERO
+                        D'ORDINE sul pannello del fornitore — ed e' quello che qui va scritto in chiaro,
+                        altrimenti si legge "TMP-25871575" e non si sa cosa cercare. */}
+                    <td style={{padding:'9px 16px',fontWeight:'700',color:'#1a1a1a'}}>
+                      {riferimentoFornitore(s.numero) ? 'LDV non emessa' : s.numero}
+                      {riferimentoFornitore(s.numero) && (
+                        <div style={{marginTop:'2px',fontSize:'11px',fontWeight:600,color:'#b91c1c',whiteSpace:'nowrap' as const}}>
+                          Ordine sul portale: {riferimentoFornitore(s.numero)}
+                        </div>
+                      )}
+                    </td>
                     <td style={{padding:'9px 12px',color:'#666',fontSize:'12px'}}>Tracking: {s.tracking_number || '—'}</td>
                     <td style={{padding:'9px 12px',color:'#666',fontSize:'12px'}}>{s.corrieri?.nome_contratto || '—'}</td>
                     <td style={{padding:'9px 12px',color:'#1a1a1a'}}>
