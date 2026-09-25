@@ -99,6 +99,17 @@ Queste sono decisioni del committente, non scelte tecniche. Il codice deve rispe
     *Dashboard → Abbonamenti API*, che accanto all'interruttore mostra l'indizio: la quota di
     spedizioni partite dal mittente più usato. Vicino al 100% è un magazzino solo (merce propria),
     sotto il 70% con molti mittenti diversi sono spedizioni di altri.
+11. **La commissione contrassegno di BRT dipende dal PESO REALE, e il costo reale è questo**
+    (contratto "BRT Express" via SpediamoPro, servizi 29 ≤5kg e 28 >5kg — verificato dal vivo il
+    25/09 su ogni importo da 40 € a 3.000 €):
+    - **peso reale ≤ 5 kg → € 1,97 fissi**, qualunque sia l'importo del contrassegno;
+    - **peso reale > 5 kg → € 1,97 fino a 1.000 € di contrassegno, poi l'1% dell'INTERO importo**
+      (non della sola parte oltre i 1.000 €: a 1.100 € sono 11,00 €, a 1.500 € sono 15,00 €).
+    Un solo scaglione per valore non basta: si configura in `listini_corrieri_supplementi`
+    (`tipo=contrassegno`) con la banda peso (`peso_min`/`peso_max`, sul peso reale) e, per il peso
+    pesante, due scaglioni per importo (`valore_max` 1000 fisso 1,97 · `valore_max` 5000 `perc`=1
+    `calcolo_su=totale`). L'errore già visto: l'1% messo sulla banda ≤5kg invece che su quella >5kg
+    (sped. 050011292960895, MULTI addebitava 6,90 invece di 6,47) — corretto il 25/09.
 
 ---
 
