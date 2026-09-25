@@ -67,42 +67,25 @@ export async function POST(req: NextRequest) {
     if (rewSpediamopro) {
       try { const { codiceProviderSpediamopro } = await import('@/lib/etichetta-spediamopro'); codeProv = codiceProviderSpediamopro(s.raw_response) } catch {}
     }
-    const colli = (s.colli_dettaglio as any[]) || []
-    const urls: string[] = []
-    // UNA ETICHETTA UGUALE NON SI STAMPA DUE VOLTE.
-    //
-    // Alcuni contratti non mandano un'etichetta per collo: mandano UN SOLO PDF con dentro gia' una
-    // pagina per ogni collo. La creazione lo copia identico su tutti i colli, e qui si finiva a
-    // impilare N volte un documento che di pagine ne ha gia' N: una spedizione da 13 colli usciva
-    // di 169 fogli invece di 13, e chi stampava se ne accorgeva dalla stampante.
-    // Sono byte identici, quindi togliere i doppioni non fa perdere nulla: se le etichette sono
-    // davvero diverse una per collo, restano tutte.
-    const visti = new Set<string>()
-    colli.forEach((c: any) => {
-      if (!c.etichetta_url || visti.has(c.etichetta_url)) return
-      visti.add(c.etichetta_url)
-      urls.push(c.etichetta_url)
-    })
-    if (!urls.length && s.etichetta_url) urls.push(s.etichetta_url)
-
-    // Forma nuova (PDF su Storage): non e' una stringa da decodificare, si scarica.
-    const daStorage: Uint8Array[] = []
-    if (!urls.length && (s as any).etichetta_path) {
-      const { leggiEtichetta } = await import('@/lib/etichette')
-      const et = await leggiEtichetta(admin, s as any)
-      if (et) daStorage.push(new Uint8Array(et.buffer))
-    }
+    // DOVE SONO LE ETICHETTE DI QUESTA SPEDIZIONE: lo dice lib/etichette (sorgentiEtichettePerStampa),
+    // la stessa libreria da cui passa la stampa singola. Prima il conto si faceva qui, e guardava solo
+    // il base64 dentro i colli: dopo l'archiviazione su Storage i colli sparivano e usciva l'etichetta
+    // della spedizione al posto loro. Le etichette uguali su piu' colli restano scartate (una volta per
+    // chiave qui, e comunque per BYTE piu' sotto: e' l'unica difesa che regge quando le chiavi sono
+    // percorsi diversi dello stesso documento).
+    const { sorgentiEtichettePerStampa } = await import('@/lib/etichette')
+    const sorgenti: Array<{ url?: string; bytes?: Uint8Array }> = await sorgentiEtichettePerStampa(admin, s as any)
 
     // RIPIEGO GLS: se non c'e' ancora nessuna etichetta (ne' inline ne' Storage) e la spedizione e' GLS
     // proprietaria, il PDF puo' non essere stato salvato alla creazione (GLS lo genera in ritardo dopo
     // AddParcel). Lo recuperiamo ORA da GLS e lo salviamo, esattamente come fa l'apertura singola: senza
     // questo, la stampa in blocco produceva il foglio "ETICHETTA NON DISPONIBILE" mentre aprendo la stessa
     // spedizione da sola l'etichetta si auto-riparava — incoerenza + rischio pacco GLS senza etichetta.
-    if (!urls.length && !daStorage.length && (s as any).raw_response?._gls) {
+    if (!sorgenti.length && (s as any).raw_response?._gls) {
       try {
         const { recuperaEtichettaGlsSalvando } = await import('@/lib/gls')
         const buf = await recuperaEtichettaGlsSalvando(admin, s as any)
-        if (buf) daStorage.push(new Uint8Array(buf))
+        if (buf) sorgenti.push({ bytes: new Uint8Array(buf) })
       } catch (e) { console.error('[ETICHETTE-BULK][GLS] recupero on-demand:', e) }
     }
 
@@ -112,7 +95,7 @@ export async function POST(req: NextRequest) {
     // nessuno gli dicesse che doveva solo aspettare il corriere. Qui si prova a completarla ADESSO,
     // come fa il pulsante "Riprova adesso" e come gia' faceva il ripiego GLS qui sopra: se il
     // corriere ha la lettera di vettura, l'etichetta esce in questa stessa stampa.
-    if (!urls.length && !daStorage.length && String(s.numero || '').startsWith('TMP-')) {
+    if (!sorgenti.length && String(s.numero || '').startsWith('TMP-')) {
       try {
         const { completaTmp } = await import('@/lib/tmp-completa')
         await completaTmp(admin, { spedizioneId: s.id })
@@ -121,15 +104,12 @@ export async function POST(req: NextRequest) {
         if (ri && (ri.etichetta_url || ri.etichetta_path)) {
           const { leggiEtichettaCompleta } = await import('@/lib/etichette')
           const et = await leggiEtichettaCompleta(admin, ri as any)
-          if (et) { daStorage.push(new Uint8Array(et.buffer)); s.numero = ri.numero }
+          if (et) { sorgenti.push({ bytes: new Uint8Array(et.buffer) }); s.numero = ri.numero }
         }
       } catch (e) { console.error('[ETICHETTE-BULK][DVA] completamento on-demand:', e) }
     }
 
     // Prima le pagine ETICHETTA...
-    const sorgenti: Array<{ url?: string; bytes?: Uint8Array }> = [
-      ...urls.map(u => ({ url: u })), ...daStorage.map(b => ({ bytes: b })),
-    ]
     let stampate = 0
     // IL DOPPIONE SI RICONOSCE DAL CONTENUTO, NON DALLA STRINGA.
     // Il filtro qui sopra confronta i valori: funziona finche' il valore E' il PDF (un data URL).

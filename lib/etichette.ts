@@ -146,6 +146,69 @@ export async function nomeMasterEtichetta(admin: any, masterId?: string | null):
   } catch { return null }
 }
 
+// LE ETICHETTE DA STAMPARE, IN ORDINE DI COLLO — per la stampa IN BLOCCO.
+//
+// La stampa in blocco impila i PDF uno dietro l'altro e applica a ciascuno le riscritture
+// (SpediamoPro/Spedisci), quindi non puo' usare leggiEtichettaCompleta, che restituisce gia' tutto
+// unito in un documento solo: le sorgenti le vuole separate. Qui si dice DOVE stanno.
+//
+// L'etichetta di un collo puo' essere in DUE forme: base64 dentro la riga (forma storica) oppure un
+// file su Storage (forma nuova, scritta da liberaEtichetteArchiviate). La stampa in blocco guardava
+// solo il base64: su un multicollo GIA' ARCHIVIATO non trovava piu' i colli e ripiegava sull'etichetta
+// della spedizione — che per molti corrieri e' quella del PRIMO collo. Al 25/09/2026 erano 54
+// spedizioni con etichette davvero diverse per collo: pacchi che sarebbero partiti con l'etichetta
+// di un altro collo. La stampa SINGOLA non aveva il problema (passa da leggiEtichettaCompleta, che
+// il percorso lo legge): le due strade dicevano cose diverse sulla stessa spedizione.
+export async function sorgentiEtichettePerStampa(
+  admin: any,
+  sped: { etichetta_url?: string | null; etichetta_path?: string | null; colli_dettaglio?: any; raw_response?: any }
+): Promise<Array<{ url?: string; bytes?: Uint8Array }>> {
+  const colli = Array.isArray(sped?.colli_dettaglio) ? (sped!.colli_dettaglio as any[]) : []
+  const sorgenti: Array<{ url?: string; bytes?: Uint8Array }> = []
+  // Stessa chiave (data URL o percorso) = stesso documento: si prende una volta sola. Il doppione per
+  // BYTE lo toglie comunque chi stampa, ma cosi' non si scarica due volte lo stesso file.
+  const visti = new Set<string>()
+  const daScaricare: { posto: number; path: string }[] = []
+  for (const c of colli) {
+    const chiave = String(c?.etichetta_url || c?.etichetta_path || '')
+    if (!chiave || visti.has(chiave)) continue
+    visti.add(chiave)
+    if (c?.etichetta_url) sorgenti.push({ url: String(c.etichetta_url) })
+    else { daScaricare.push({ posto: sorgenti.length, path: String(c.etichetta_path) }); sorgenti.push({}) }
+  }
+  // In parallelo: in fila indiana un multicollo da 10 colli allungherebbe la stampa di 10 viaggi.
+  let mancante = false
+  if (daScaricare.length) {
+    const letti = await Promise.all(daScaricare.map(d => scaricaEtichetta(admin, d.path)))
+    // SECONDO TENTATIVO, uno alla volta. Scaricando in parallelo una lettura puo' fallire per un
+    // intoppo momentaneo (successo in prova il 25/09 su un file che c'era ed era integro): senza
+    // riprova quel collo uscirebbe dalla stampa senza etichetta, e il pacco partirebbe cosi'.
+    for (let k = 0; k < daScaricare.length; k++) {
+      if (!letti[k]?.buffer?.length) letti[k] = await scaricaEtichetta(admin, daScaricare[k].path)
+    }
+    daScaricare.forEach((d, k) => {
+      const b = letti[k]?.buffer
+      if (b?.length) sorgenti[d.posto] = { bytes: new Uint8Array(b) }
+      else { mancante = true; console.error('[ETICHETTE] collo illeggibile su Storage', d.path) }
+    })
+  }
+  const perCollo = sorgenti.filter(x => x.url || x.bytes)   // via i buchi: chi stampa li conterebbe
+  if (perCollo.length) {
+    // Se un collo non si e' letto, si aggiunge in coda l'etichetta della spedizione: su molti
+    // contratti e' il documento completo, quindi meglio una pagina in piu' che un pacco senza
+    // etichetta. Se e' lo stesso documento, chi stampa la scarta confrontando i byte.
+    if (mancante) {
+      if (sped?.etichetta_url) perCollo.push({ url: String(sped.etichetta_url) })
+      else { const et = await leggiEtichetta(admin, sped as any); if (et) perCollo.push({ bytes: new Uint8Array(et.buffer) }) }
+    }
+    return perCollo
+  }
+  // Nessuna etichetta per collo (il monocollo non la porta): quella della spedizione, in qualunque forma.
+  if (sped?.etichetta_url) return [{ url: String(sped.etichetta_url) }]
+  const et = await leggiEtichetta(admin, sped as any)
+  return et ? [{ bytes: new Uint8Array(et.buffer) }] : []
+}
+
 export async function leggiEtichettaCompleta(
   admin: any,
   sped: { etichetta_path?: string | null; etichetta_url?: string | null; colli_dettaglio?: any; raw_response?: any; corriere_id?: string | null; rif_ordine?: string | null; contenuto?: string | null; master_id?: string | null }
