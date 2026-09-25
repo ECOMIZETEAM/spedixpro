@@ -2,9 +2,21 @@
 import { useState, useEffect } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
+import BadgeFiltri from '@/app/components/BadgeFiltri'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
+
+// I valori di PARTENZA dei filtri. Stanno in una funzione perche' servono due volte: come stato
+// iniziale e per capire quali filtri ha toccato chi guarda (contatore + caselle accese).
+function filtriDefault() {
+  return {
+    clienteId: '', vettore: '', codRitiro: '',
+    dal: new Date().toISOString().split('T')[0],
+    al: new Date().toISOString().split('T')[0],
+  }
+}
 
 export default function RitiriPage() {
   const [ritiri, setRitiri] = useState<any[]>([])
@@ -14,11 +26,9 @@ export default function RitiriPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [pagina, setPagina] = useState(1)
   const [perPagina, setPerPagina] = useState(10)
-  const [filtri, setFiltri] = useState({
-    clienteId: '', vettore: '', codRitiro: '',
-    dal: new Date().toISOString().split('T')[0],
-    al: new Date().toISOString().split('T')[0],
-  })
+  const [filtri, setFiltri] = useState(filtriDefault())
+  const filtriAttivi = filtriToccati(filtri, filtriDefault())
+  const attivo = (k: string) => filtriAttivi.has(k)
 
   useEffect(() => {
     carica()
@@ -68,18 +78,18 @@ export default function RitiriPage() {
 
       {/* Filtri */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
-        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'10px'}}>▼ Filtri</div>
+        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'10px'}}>▼ Filtri<BadgeFiltri n={filtriAttivi.size} /></div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr auto',gap:'12px',alignItems:'end'}}>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Cliente</div>
-            <SelectCercabile value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={sel}>
+            <SelectCercabile value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={stileFiltro(sel, attivo('clienteId'))}>
               <option value="">Tutti</option>
               {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
             </SelectCercabile>
           </div>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Vettore</div>
-            <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
+            <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={stileFiltro(sel, attivo('vettore'))}>
               <option value="">Tutti</option>
               <option value="sda">SDA</option>
               <option value="gls">GLS</option>
@@ -89,12 +99,12 @@ export default function RitiriPage() {
           </div>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Data:</div>
-            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} />
+            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} attivo={attivo('data')} />
           </div>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>COD Ritiro</div>
             <input value={filtri.codRitiro} onChange={e=>setF('codRitiro',e.target.value)}
-              style={{...inp,width:'100%',boxSizing:'border-box' as const}} placeholder="es. CP123..."/>
+              style={{...stileFiltro(inp, attivo('codRitiro')),width:'100%',boxSizing:'border-box' as const}} placeholder="es. CP123..."/>
           </div>
           <div>
             <button onClick={carica}

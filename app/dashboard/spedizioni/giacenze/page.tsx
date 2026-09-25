@@ -4,12 +4,27 @@ import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
+import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
+import BadgeFiltri from '@/app/components/BadgeFiltri'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
 const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
 // Etichettina della SECONDA riga (contratto/motivo/importi sotto): piccola e tenue, non deve pesare.
 const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
+
+// I valori di PARTENZA dei filtri. Stanno in una funzione perche' servono due volte: come stato
+// iniziale e per capire quali filtri ha toccato chi guarda (contatore + caselle accese).
+function filtriDefault() {
+  return {
+    clienteId:'', vettore:'', contratto:'',
+    // Default AMPIO (ultimo anno): le giacenze aperte vanno viste tutte, non solo quelle di oggi.
+    // Il filtro lato server è su giacenza_data (entrata in giacenza), non sulla data di spedizione.
+    dal: new Date(Date.now() - 365*24*60*60*1000).toISOString().split('T')[0],
+    al: new Date().toISOString().split('T')[0],
+    stato:''
+  }
+}
 
 export default function GiacenzePage() {
   const [giacenze, setGiacenze] = useState<any[]>([])
@@ -18,14 +33,9 @@ export default function GiacenzePage() {
   const [cerca, setCerca] = useFiltriPersistenti('giacenze-master:cerca', '')
   const [perPage, setPerPage] = useFiltriPersistenti('giacenze-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
-  const [filtri, setFiltri] = useFiltriPersistenti('giacenze-master:filtri', {
-    clienteId:'', vettore:'', contratto:'',
-    // Default AMPIO (ultimo anno): le giacenze aperte vanno viste tutte, non solo quelle di oggi.
-    // Il filtro lato server è su giacenza_data (entrata in giacenza), non sulla data di spedizione.
-    dal: new Date(Date.now() - 365*24*60*60*1000).toISOString().split('T')[0],
-    al: new Date().toISOString().split('T')[0],
-    stato:''
-  })
+  const [filtri, setFiltri] = useFiltriPersistenti('giacenze-master:filtri', filtriDefault())
+  const filtriAttivi = filtriToccati(filtri, filtriDefault())
+  const attivo = (k: string) => filtriAttivi.has(k)
 
   useEffect(() => {
     fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
@@ -90,31 +100,31 @@ export default function GiacenzePage() {
 
       {/* Filtri */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
-        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'10px'}}>▼ Filtri</div>
+        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'10px'}}>▼ Filtri<BadgeFiltri n={filtriAttivi.size} /></div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr',gap:'10px',marginBottom:'10px'}}>
           <div><label style={lbl}>Cliente</label>
-            <SelectCercabile value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={sel}>
+            <SelectCercabile value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={stileFiltro(sel, attivo('clienteId'))}>
               <option value="">Tutti i Clienti</option>
               {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
             </SelectCercabile>
           </div>
           <div><label style={lbl}>Vettore</label>
-            <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
+            <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={stileFiltro(sel, attivo('vettore'))}>
               <option value="">Tutti</option>
               <option value="sda">SDA</option><option value="gls">GLS</option>
               <option value="brt">BRT</option><option value="poste">Poste Italiane</option>
             </select>
           </div>
           <div><label style={lbl}>Contratto</label>
-            <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={sel}>
+            <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={stileFiltro(sel, attivo('contratto'))}>
               <option value="">Tutti</option>
             </select>
           </div>
           <div><label style={lbl}>Data Spedizione:</label>
-            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} />
+            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} attivo={attivo('data')} />
           </div>
           <div><label style={lbl}>Stato</label>
-            <select value={filtri.stato} onChange={e=>setF('stato',e.target.value)} style={sel}>
+            <select value={filtri.stato} onChange={e=>setF('stato',e.target.value)} style={stileFiltro(sel, attivo('stato'))}>
               <option value="">Tutte</option>
               <option value="aperta">In attesa di istruzioni</option>
               <option value="in_gestione">In gestione</option>

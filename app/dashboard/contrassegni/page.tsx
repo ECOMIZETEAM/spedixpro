@@ -36,6 +36,18 @@ const STATI_COD: Record<string,{bg:string,color:string,label:string}> = {
 const selezionabile = (s:any) => !!s.cod_selezionabile
 
 import { useDialog } from '@/app/components/DialogProvider'
+import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
+import BadgeFiltri from '@/app/components/BadgeFiltri'
+// I valori di PARTENZA dei filtri. Stanno in una funzione perche' servono due volte: come stato
+// iniziale e per capire quali filtri ha toccato chi guarda (contatore + caselle accese).
+function filtriDefault() {
+  return {
+    numero:'', clienteId:'', vettore:'', contratto:'', statoSpedizione:'', statoContrassegno:'',
+    dal: new Date().toISOString().split('T')[0],
+    al: new Date().toISOString().split('T')[0],
+  }
+}
+
 export default function ListaContrassegniPage() {
   const dialog = useDialog()
   const [spedizioni, setSpedizioni] = useState<any[]>([])
@@ -47,11 +59,9 @@ export default function ListaContrassegniPage() {
   const [perPage, setPerPage] = useFiltriPersistenti('contrassegni-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
   const [creandoDistinta, setCreandoDistinta] = useState(false)
-  const [filtri, setFiltri] = useFiltriPersistenti('contrassegni-master:filtri', {
-    numero:'', clienteId:'', vettore:'', contratto:'', statoSpedizione:'', statoContrassegno:'',
-    dal: new Date().toISOString().split('T')[0],
-    al: new Date().toISOString().split('T')[0],
-  })
+  const [filtri, setFiltri] = useFiltriPersistenti('contrassegni-master:filtri', filtriDefault())
+  const filtriAttivi = filtriToccati(filtri, filtriDefault())
+  const attivo = (k: string) => filtriAttivi.has(k)
 
   useEffect(() => {
     fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
@@ -156,32 +166,32 @@ export default function ListaContrassegniPage() {
       <div style={{marginBottom:'16px'}}><h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Lista contrassegni</h1></div>
 
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
-        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'10px'}}>▼ Filtri</div>
+        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'10px'}}>▼ Filtri<BadgeFiltri n={filtriAttivi.size} /></div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr',gap:'10px',marginBottom:'10px'}}>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Cliente</div>
-            <SelectCercabile value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={sel}>
+            <SelectCercabile value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={stileFiltro(sel, attivo('clienteId'))}>
               <option value="">Tutti i Clienti</option>
               {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
             </SelectCercabile>
           </div>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Vettore</div>
-            <select value={filtri.vettore} onChange={e=>setFiltri(f=>({...f,vettore:e.target.value,contratto:''}))} style={sel}>
+            <select value={filtri.vettore} onChange={e=>setFiltri(f=>({...f,vettore:e.target.value,contratto:''}))} style={stileFiltro(sel, attivo('vettore'))}>
               <option value="">Tutti</option>
               {vettoriPresenti.map((v:string)=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Contratto</div>
-            <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={sel}>
+            <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={stileFiltro(sel, attivo('contratto'))}>
               <option value="">Tutti</option>
               {contrattiPresenti.filter((n:string)=>!filtri.vettore || String(n||'').split(' ')[0].toUpperCase()===filtri.vettore).map((n:string)=><option key={n} value={n}>{n}</option>)}
             </select>
           </div>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Stato spedizioni</div>
-            <select value={filtri.statoSpedizione} onChange={e=>setF('statoSpedizione',e.target.value)} style={sel}>
+            <select value={filtri.statoSpedizione} onChange={e=>setF('statoSpedizione',e.target.value)} style={stileFiltro(sel, attivo('statoSpedizione'))}>
               <option value="">Tutti</option>
               <option value="in_lavorazione">In Lavorazione</option>
               <option value="consegnata">Consegnata</option>
@@ -189,7 +199,7 @@ export default function ListaContrassegniPage() {
           </div>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Stato contrassegni</div>
-            <select value={filtri.statoContrassegno} onChange={e=>setF('statoContrassegno',e.target.value)} style={sel}>
+            <select value={filtri.statoContrassegno} onChange={e=>setF('statoContrassegno',e.target.value)} style={stileFiltro(sel, attivo('statoContrassegno'))}>
               <option value="">Tutti</option>
               <option value="in_attesa">In attesa</option>
               <option value="in_distinta">In lavorazione</option>
@@ -201,11 +211,11 @@ export default function ListaContrassegniPage() {
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',alignItems:'end'}}>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>N. Spedizione</div>
-            <input value={filtri.numero} onChange={e=>setF('numero',e.target.value)} placeholder="Cerca su tutto lo storico (ignora la data)" style={sel}/>
+            <input value={filtri.numero} onChange={e=>setF('numero',e.target.value)} placeholder="Cerca su tutto lo storico (ignora la data)" style={stileFiltro(sel, attivo('numero'))}/>
           </div>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Data Spedizione:</div>
-            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} />
+            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} attivo={attivo('data')} />
           </div>
         </div>
         <div style={{display:'flex',justifyContent:'flex-end',marginTop:'10px'}}>

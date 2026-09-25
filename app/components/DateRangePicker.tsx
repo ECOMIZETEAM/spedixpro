@@ -2,7 +2,9 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 
-type Props = { dal: string, al: string, onChange: (dal: string, al: string) => void }
+// `attivo`: la data e' stata cambiata rispetto al default della pagina -> il pulsante si accende
+// come le altre caselle filtro (vedi app/components/filtri-attivi.ts).
+type Props = { dal: string, al: string, onChange: (dal: string, al: string) => void, attivo?: boolean }
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre']
 const GIORNI = ['Lu','Ma','Me','Gi','Ve','Sa','Do']
@@ -26,7 +28,7 @@ function inRange(d: Date, s: Date | null, e: Date | null) {
   return t > Math.min(s.getTime(),e.getTime()) && t < Math.max(s.getTime(),e.getTime())
 }
 
-export default function DateRangePicker({ dal, al, onChange }: Props) {
+export default function DateRangePicker({ dal, al, onChange, attivo }: Props) {
   const oggi = new Date()
   const [open, setOpen] = useState(false)
   const [start, setStart] = useState<Date | null>(fromStr(dal) || oggi)
@@ -168,10 +170,11 @@ export default function DateRangePicker({ dal, al, onChange }: Props) {
   return (
     <div ref={ref} style={{ position:'relative', display:'inline-block' }}>
       <div onClick={()=> setOpen(o=>!o)} style={{
-        padding:'7px 12px', border:'1px solid #d1d5db', borderRadius:'6px', fontSize:'13px',
-        color:'#1a1a1a', background:'#fff', cursor:'pointer', display:'flex', alignItems:'center', gap:'8px', whiteSpace:'nowrap'
+        padding:'7px 12px', border:'1px solid ' + (attivo ? '#f97316' : '#d1d5db'), borderRadius:'6px', fontSize:'13px',
+        color: attivo ? '#9a3412' : '#1a1a1a', background: attivo ? '#fff7ed' : '#fff', fontWeight: attivo ? 600 : 400,
+        cursor:'pointer', display:'flex', alignItems:'center', gap:'8px', whiteSpace:'nowrap'
       }}>
-        <span>📅</span><span style={{ color:'#1a1a1a' }}>{labelText}</span><span style={{ color:'#1a1a1a' }}>▾</span>
+        <span>📅</span><span style={{ color: attivo ? '#9a3412' : '#1a1a1a' }}>{labelText}</span><span style={{ color: attivo ? '#9a3412' : '#1a1a1a' }}>▾</span>
       </div>
       {open && montato && pos && createPortal(
         <div ref={pannelloRef} style={{ position:'fixed', ...(pos.bottom!=null ? { bottom: pos.bottom } : { top: pos.top }), ...(pos.right!=null ? { right: pos.right } : { left: pos.left }), maxHeight: pos.maxH, overflowY:'auto', zIndex:1000000, background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px', boxShadow:'0 8px 24px rgba(0,0,0,0.15)', display:'flex' }}>

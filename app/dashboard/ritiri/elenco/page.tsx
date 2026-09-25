@@ -5,11 +5,22 @@ import DateRangePicker from '@/app/components/DateRangePicker'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 import { useSearchParams } from 'next/navigation'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
+import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
+import BadgeFiltri from '@/app/components/BadgeFiltri'
 
 const sel = {padding:'6px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff',width:'100%',boxSizing:'border-box' as const}
 const inp = {padding:'6px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}
 // Etichettina della SECONDA riga (colli/peso/richiesto il sotto): piccola e tenue, non deve pesare.
 const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
+
+// I valori di PARTENZA dei filtri. Stanno in una funzione perche' servono due volte: come stato
+// iniziale e per capire quali filtri ha toccato chi guarda (contatore + caselle accese).
+function filtriDefault() {
+  return {
+    clienteId: '', vettore: '', codRitiro: '', stato: '',
+    dal: '', al: '',
+  }
+}
 
 export default function ElencoRitiriPage() {
   const searchParams = useSearchParams()
@@ -20,10 +31,9 @@ export default function ElencoRitiriPage() {
   const [cerca, setCerca] = useFiltriPersistenti('ritiri-elenco-master:cerca', '')
   const [perPage, setPerPage] = useFiltriPersistenti('ritiri-elenco-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
-  const [filtri, setFiltri] = useFiltriPersistenti('ritiri-elenco-master:filtri', {
-    clienteId: '', vettore: '', codRitiro: '', stato: '',
-    dal: '', al: '',
-  })
+  const [filtri, setFiltri] = useFiltriPersistenti('ritiri-elenco-master:filtri', filtriDefault())
+  const filtriAttivi = filtriToccati(filtri, filtriDefault())
+  const attivo = (k: string) => filtriAttivi.has(k)
 
   useEffect(() => {
     carica()
@@ -99,18 +109,18 @@ export default function ElencoRitiriPage() {
 
       {/* Filtri */}
       <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #d1d5db', padding: '14px 16px', marginBottom: '16px' }}>
-        <div style={{ fontSize: '12px', fontWeight: '700', color: '#1a1a1a', marginBottom: '10px' }}>{'\u25BC'} Filtri</div>
+        <div style={{ fontSize: '12px', fontWeight: '700', color: '#1a1a1a', marginBottom: '10px' }}>{'\u25BC'} Filtri<BadgeFiltri n={filtriAttivi.size} /></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr auto', gap: '12px', alignItems: 'end' }}>
           <div>
             <div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Cliente</div>
-            <SelectCercabile value={filtri.clienteId} onChange={e => setF('clienteId', e.target.value)} style={sel}>
+            <SelectCercabile value={filtri.clienteId} onChange={e => setF('clienteId', e.target.value)} style={stileFiltro(sel, attivo('clienteId'))}>
               <option value="">Tutti</option>
               {clienti.map((c: any) => <option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
             </SelectCercabile>
           </div>
           <div>
             <div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Vettore</div>
-            <select value={filtri.vettore} onChange={e => setF('vettore', e.target.value)} style={sel}>
+            <select value={filtri.vettore} onChange={e => setF('vettore', e.target.value)} style={stileFiltro(sel, attivo('vettore'))}>
               <option value="">Tutti</option>
               <option value="sda">SDA</option>
               <option value="gls">GLS</option>
@@ -120,7 +130,7 @@ export default function ElencoRitiriPage() {
           </div>
           <div>
             <div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Stato</div>
-            <select value={filtri.stato} onChange={e => setF('stato', e.target.value)} style={sel}>
+            <select value={filtri.stato} onChange={e => setF('stato', e.target.value)} style={stileFiltro(sel, attivo('stato'))}>
               <option value="">Tutti</option>
               <option value="richiesto">Richiesto</option>
               <option value="prenotato">Prenotato</option>
@@ -130,12 +140,12 @@ export default function ElencoRitiriPage() {
           </div>
           <div>
             <div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Data:</div>
-            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} />
+            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} attivo={attivo('data')} />
           </div>
           <div>
             <div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>COD Ritiro</div>
             <input value={filtri.codRitiro} onChange={e => setF('codRitiro', e.target.value)}
-              style={{ ...inp, width: '100%', boxSizing: 'border-box' as const }} placeholder="es. CP123..." />
+              style={{ ...stileFiltro(inp, attivo('codRitiro')), width: '100%', boxSizing: 'border-box' as const }} placeholder="es. CP123..." />
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <button onClick={carica}

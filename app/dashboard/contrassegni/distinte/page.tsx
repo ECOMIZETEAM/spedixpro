@@ -12,6 +12,18 @@ const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fo
 const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
 
 import { useDialog } from '@/app/components/DialogProvider'
+import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
+import BadgeFiltri from '@/app/components/BadgeFiltri'
+// I valori di PARTENZA dei filtri. Stanno in una funzione perche' servono due volte: come stato
+// iniziale e per capire quali filtri ha toccato chi guarda (contatore + caselle accese).
+function filtriDefault() {
+  return {
+    clienteId:'', stato:'',
+    dal: new Date().toISOString().split('T')[0],
+    al: new Date().toISOString().split('T')[0],
+  }
+}
+
 export default function DistinteContrassegniPage() {
   const dialog = useDialog()
   const [distinte, setDistinte] = useState<any[]>([])
@@ -36,11 +48,9 @@ export default function DistinteContrassegniPage() {
   const [righePag, setRighePag] = useState<{metodo:string,importo:string}[]>([{metodo:'',importo:''},{metodo:'',importo:''}])
   const [confermando, setConfermando] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-  const [filtri, setFiltri] = useFiltriPersistenti('contrassegni-distinte-master:filtri', {
-    clienteId:'', stato:'',
-    dal: new Date().toISOString().split('T')[0],
-    al: new Date().toISOString().split('T')[0],
-  })
+  const [filtri, setFiltri] = useFiltriPersistenti('contrassegni-distinte-master:filtri', filtriDefault())
+  const filtriAttivi = filtriToccati(filtri, filtriDefault())
+  const attivo = (k: string) => filtriAttivi.has(k)
 
   useEffect(() => {
     fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
@@ -493,22 +503,22 @@ export default function DistinteContrassegniPage() {
       })()}
 
 <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
-        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'10px'}}>▼ Filtri</div>
+        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'10px'}}>▼ Filtri<BadgeFiltri n={filtriAttivi.size} /></div>
         <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr auto',gap:'12px',alignItems:'end'}}>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Data distinta</div>
-            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal:string,al:string)=>setFiltri(f=>({...f,dal,al}))} />
+            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal:string,al:string)=>setFiltri(f=>({...f,dal,al}))} attivo={attivo('data')} />
           </div>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Cliente</div>
-            <SelectCercabile value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={sel}>
+            <SelectCercabile value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={stileFiltro(sel, attivo('clienteId'))}>
               <option value="">Tutti</option>
               {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
             </SelectCercabile>
           </div>
           <div>
             <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Stato distinta</div>
-            <select value={filtri.stato} onChange={e=>setF('stato',e.target.value)} style={sel}>
+            <select value={filtri.stato} onChange={e=>setF('stato',e.target.value)} style={stileFiltro(sel, attivo('stato'))}>
               <option value="">Tutti</option>
               <option value="in_lavorazione">In lavorazione</option>
               <option value="parziale">Parziale</option>

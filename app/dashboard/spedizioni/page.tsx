@@ -12,6 +12,8 @@ import LdvInElaborazione from '@/app/components/LdvInElaborazione'
 import { vettoreFisico } from '@/lib/vettore'
 import { dataEventoIt } from '@/lib/tracking-eventi'
 import { useDialog } from '@/app/components/DialogProvider'
+import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
+import BadgeFiltri from '@/app/components/BadgeFiltri'
 
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
@@ -96,6 +98,9 @@ export default function SpedizioniPage() {
   const [eliminando, setEliminando] = useState<string|null>(null)
   const [eliminandoBulk, setEliminandoBulk] = useState(false)
   const [filtri, setFiltri, azzeraFiltri] = useFiltriPersistenti('spedizioni-master:filtri', FILTRI_DEFAULT)
+  // I filtri che ho toccato (diversi dal default): il contatore e le caselle accese partono da qui.
+  const filtriAttivi = filtriToccati(filtri, FILTRI_DEFAULT)
+  const attivo = (k: string) => filtriAttivi.has(k)
   const [resoModal, setResoModal] = useState(false)
   const [resoBusy, setResoBusy] = useState(false)
   const [resoOpts, setResoOpts] = useState({ assicura: false, ritiro: false, dataRitiro: '', orarioRitiro: 'mattina' })
@@ -467,62 +472,62 @@ async function apriTracking(s: any) {
 
       {/* FILTRI */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
-        <div style={{fontWeight:'700',color:'#1a1a1a',marginBottom:'10px',fontSize:'12px'}}>▼ Filtri</div>
+        <div style={{fontWeight:'700',color:'#1a1a1a',marginBottom:'10px',fontSize:'12px'}}>▼ Filtri<BadgeFiltri n={filtriAttivi.size} /></div>
 
         {/* Riga 1 */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr 1fr',gap:'8px',marginBottom:'8px'}}>
           <div><label style={lbl}>Cliente</label>
-            <SelectCercabile value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={sel}>
+            <SelectCercabile value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={stileFiltro(sel, attivo('clienteId'))}>
               <option value="">Tutti</option>
               {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
             </SelectCercabile>
           </div>
           <div><label style={lbl}>Negozio</label>
-            <select value={filtri.negozio} onChange={e=>setF('negozio',e.target.value)} style={sel}>
+            <select value={filtri.negozio} onChange={e=>setF('negozio',e.target.value)} style={stileFiltro(sel, attivo('negozio'))}>
               <option value="">Tutti</option>
               {negoziPresenti.map((n:any)=><option key={n} value={n}>{n}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Vettore</label>
-            <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
+            <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={stileFiltro(sel, attivo('vettore'))}>
               <option value="">Tutti</option>
               {vettoriPresenti.map((v:any)=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Contratto</label>
-            <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={sel}>
+            <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={stileFiltro(sel, attivo('contratto'))}>
               <option value="">Tutti</option>
               {contrattiPresenti.filter((n:any)=>!filtri.vettore || vettorePerContratto.get(n)===filtri.vettore).map((n:any)=><option key={n} value={n}>{n}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Stato</label>
-            <select value={filtri.stato} onChange={e=>setF('stato',e.target.value)} style={sel}>
+            <select value={filtri.stato} onChange={e=>setF('stato',e.target.value)} style={stileFiltro(sel, attivo('stato'))}>
               <option value="">Tutti</option>
               {Object.entries(STATI).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
             </select>
           </div>
           <div><label style={lbl}>ID Ordine</label>
-            <input value={filtri.id_ordine} onChange={e=>setF('id_ordine',e.target.value)} style={inp}/>
+            <input value={filtri.id_ordine} onChange={e=>setF('id_ordine',e.target.value)} style={stileFiltro(inp, attivo('id_ordine'))}/>
           </div>
         </div>
 
         {/* Riga 2 */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 2fr 1fr 1fr 1fr',gap:'8px',marginBottom:'8px'}}>
           <div><label style={lbl}>N. Spedizione</label>
-            <input value={filtri.numero} onChange={e=>setF('numero',e.target.value)} style={inp}/>
+            <input value={filtri.numero} onChange={e=>setF('numero',e.target.value)} style={stileFiltro(inp, attivo('numero'))}/>
           </div>
           <div><label style={lbl}>Data Spedizione:</label>
-            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} />
+            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} attivo={attivo('data')} />
           </div>
           <div><label style={lbl}>Contrassegno:</label>
-            <select value={filtri.contrassegno} onChange={e=>setF('contrassegno',e.target.value)} style={sel}>
+            <select value={filtri.contrassegno} onChange={e=>setF('contrassegno',e.target.value)} style={stileFiltro(sel, attivo('contrassegno'))}>
               <option value="">Qualsiasi</option>
               <option value="si">Con contrassegno</option>
               <option value="no">Senza</option>
             </select>
           </div>
           <div><label style={lbl}>Stato Contrassegni:</label>
-            <select value={filtri.stato_contrassegni} onChange={e=>setF('stato_contrassegni',e.target.value)} style={sel}>
+            <select value={filtri.stato_contrassegni} onChange={e=>setF('stato_contrassegni',e.target.value)} style={stileFiltro(sel, attivo('stato_contrassegni'))}>
               <option value="">Qualsiasi</option>
               <option value="da_pagare">Da pagare</option>
               <option value="in_attesa">In attesa</option>
@@ -530,7 +535,7 @@ async function apriTracking(s: any) {
             </select>
           </div>
           <div><label style={lbl}>Assicurazione:</label>
-            <select value={filtri.assicurazione} onChange={e=>setF('assicurazione',e.target.value)} style={sel}>
+            <select value={filtri.assicurazione} onChange={e=>setF('assicurazione',e.target.value)} style={stileFiltro(sel, attivo('assicurazione'))}>
               <option value="">Qualsiasi</option>
               <option value="si">Con assicurazione</option>
               <option value="no">Senza</option>
@@ -541,23 +546,23 @@ async function apriTracking(s: any) {
         {/* Riga 3 */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr auto',gap:'8px',alignItems:'end'}}>
           <div><label style={lbl}>Città</label>
-            <input value={filtri.dest_citta} onChange={e=>setF('dest_citta',e.target.value)} style={inp}/>
+            <input value={filtri.dest_citta} onChange={e=>setF('dest_citta',e.target.value)} style={stileFiltro(inp, attivo('dest_citta'))}/>
           </div>
           <div><label style={lbl}>CAP</label>
-            <input value={filtri.dest_cap} onChange={e=>setF('dest_cap',e.target.value)} style={inp}/>
+            <input value={filtri.dest_cap} onChange={e=>setF('dest_cap',e.target.value)} style={stileFiltro(inp, attivo('dest_cap'))}/>
           </div>
           <div><label style={lbl}>Contenuto</label>
-            <input value={filtri.contenuto} onChange={e=>setF('contenuto',e.target.value)} style={inp}/>
+            <input value={filtri.contenuto} onChange={e=>setF('contenuto',e.target.value)} style={stileFiltro(inp, attivo('contenuto'))}/>
           </div>
           <div><label style={lbl}>Fatturato:</label>
-            <select value={filtri.fatturato} onChange={e=>setF('fatturato',e.target.value)} style={sel}>
+            <select value={filtri.fatturato} onChange={e=>setF('fatturato',e.target.value)} style={stileFiltro(sel, attivo('fatturato'))}>
               <option value="">Qualsiasi</option>
               <option value="si">Fatturato</option>
               <option value="no">Non fatturato</option>
             </select>
           </div>
           <div><label style={lbl}>Agente</label>
-            <select value={filtri.agente} onChange={e=>setF('agente',e.target.value)} style={sel}>
+            <select value={filtri.agente} onChange={e=>setF('agente',e.target.value)} style={stileFiltro(sel, attivo('agente'))}>
               <option value="">Tutti</option>
               {staff.map((u:any)=>{const nome=[u.nome,u.cognome].filter(Boolean).join(' ');return <option key={u.id} value={nome}>{nome||u.email||u.id}</option>})}
             </select>
