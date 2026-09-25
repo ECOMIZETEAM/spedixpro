@@ -179,6 +179,11 @@ export default function SpedizioniPage() {
       const res = await fetch(url)
       const data = await res.json()
       if (!Array.isArray(data?.rows)) return null
+      // IL TOTALE PUO' ARRIVARE CON LE RIGHE. Succede quando il server ha dovuto filtrare in memoria
+      // (filtro "Stato Contrassegni" del master: lo stato e' per-livello): li' il conteggio del
+      // database sarebbe un altro numero, piu' alto, e le ultime pagine uscivano vuote. Quando c'e',
+      // quello comanda — ed e' esatto, perche' il server ha contato le righe filtrate.
+      if (typeof data.total === 'number') totaliRef.current.set(kf, data.total)
       return { rows: data.rows, total: totaliRef.current.get(kf) ?? 0 }
     } catch { return null }
   }
@@ -193,7 +198,10 @@ export default function SpedizioniPage() {
       q.set('perPage', '1'); q.set('soloConteggio', '1')
       const res = await fetch('/api/spedizioni/lista?' + q.toString())
       const data = await res.json()
-      const tot = Number(data?.total) || 0
+      // total null = "questo conteggio lo porta la risposta delle righe" (vedi fetchPagina): non si
+      // mette a zero il totale, altrimenti la paginazione sparirebbe per un attimo a ogni giro.
+      if (data?.total == null) return
+      const tot = Number(data.total) || 0
       totaliRef.current.set(kf, tot)
       setTotale(tot)
     } catch { /* il totale resta quello noto: la tabella funziona lo stesso */ }

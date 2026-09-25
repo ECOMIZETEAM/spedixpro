@@ -293,6 +293,15 @@ export async function GET(req: NextRequest) {
   let totalePaginato = 0
   let spedizioni: any[]
   if (soloConteggio) {
+    // IL CONTEGGIO DEVE ESSERE QUELLO DELLE RIGHE CHE SI VEDRANNO.
+    // Col filtro "Stato Contrassegni" di un MASTER lo stato e' PER-LIVELLO e si applica DOPO, in
+    // memoria (qui sotto): il database conosce solo lo stato del CLIENTE finale, quindi contarlo qui
+    // darebbe un numero piu' alto delle righe. E' cosi' che nascevano le pagine vuote in fondo —
+    // segnalato il 25/09 su Ecomize LL, cliente Blood, contrassegni consegnati: 23 pagine (226 righe
+    // a database) ma con "Pagato" le righe vere sono 58, con "In attesa" 34, con "Da pagare" 134.
+    // In quel caso non si conta qui: il totale esatto lo porta la risposta delle righe (total), che
+    // quel filtro l'ha gia' applicato.
+    if (filtroCodPerViewer) return NextResponse.json({ total: null, soloConteggio: true, daRighe: true })
     // Solo il numero: una riga sola richiesta al database, il resto della rotta non viene nemmeno
     // toccato (niente movimenti, ordini, ticket, calcolatori).
     const { count } = await buildBase(true).range(0, 0)
