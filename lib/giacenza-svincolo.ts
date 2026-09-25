@@ -148,6 +148,24 @@ export async function eseguiSvincolo(
     } catch (e: any) {
       throw new Error(erroreSvincoloPulito(e))
     }
+  } else {
+    // NESSUN CORRIERE CONTATTATO: ci si ferma QUI, prima di addebitare.
+    //
+    // I rami sopra coprono i contratti che sanno ricevere uno svincolo (SpediamoPro, DVA, Spedisci,
+    // Poste diretto). Su tutti gli altri — GLS diretto, BRT diretto, FedEx, Dielle, circuito interno —
+    // non esiste una chiamata di svincolo, e senza questo blocco la funzione tirava dritto: addebitava
+    // il servizio, segnava la richiesta "confermata" e la spedizione "svincolata" SENZA che nessuna
+    // istruzione fosse partita. Il cliente avrebbe pagato una riconsegna che nessuno ha chiesto, e il
+    // pacco sarebbe rimasto fermo con a video scritto che era stato svincolato.
+    //
+    // Non e' ancora successo (al 25/09/2026: GLS diretto ha 3 giacenze e zero richieste, gli altri
+    // zero), ma il giorno che un master apre una giacenza su un contratto diretto succede in silenzio.
+    // Meglio un errore chiaro: la giacenza si lavora col corriere, e a video non compare un falso fatto.
+    const nomeContratto = String(sped.corrieri?.nome_contratto || 'questo contratto')
+    throw new Error(
+      `Lo svincolo automatico non è disponibile su ${nomeContratto}: questo corriere non riceve le istruzioni dal gestionale. `
+      + `Contatta il corriere per la ${(opLabel[rich.operazione] || rich.operazione).toLowerCase()}, poi chiudi la giacenza a mano.`,
+    )
   }
 
   // ADDEBITO: solo il servizio scelto (l'apertura è già stata addebitata all'ENTRATA in giacenza).
