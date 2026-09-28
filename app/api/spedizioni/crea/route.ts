@@ -18,6 +18,8 @@ import { EMAIL_PER_CORRIERE,
 // Il sanificatore dei messaggi del corriere ora sta in lib/errore-corriere.ts: lo usano anche
 // l'API pubblica e la conferma distinte, che prima rimandavano il testo grezzo del provider.
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
+import { validaCittaCap } from '@/lib/valida-citta'
+import { capHaZonaSpeciale } from '@/lib/cap-speciali'
 import { motivoLimiteCollo } from '@/lib/limiti-collo'
 import { vedeLaRete } from '@/lib/perimetro'
 
@@ -242,6 +244,23 @@ export async function POST(req: NextRequest) {
   // al punto, la zona la dà il CAP). Si riconosce da body.puntoArrivo. La consegna a casa la richiede.
   if (!body.shipTo?.state?.trim() && !String(body.puntoArrivo || '').trim()) return NextResponse.json({ error: 'Provincia destinatario obbligatoria' }, { status: 400 })
   if (!body.shipFrom?.state?.trim()) return NextResponse.json({ error: 'Provincia mittente obbligatoria' }, { status: 400 })
+
+  // ── CITTÀ SCRITTA MALE SU UN CAP CON ZONA SPECIALE → SI FERMA QUI ──
+  // Le zone disagiata/isole nel DB sono scritte col nome UFFICIALE del comune. Se la città in
+  // spedizione è un'altra scrittura ("Castelnuovo Monti" per "Castelnovo ne' Monti"), il match
+  // città-condiviso scarta la riga speciale e la destinazione cade sul jolly "Italia": venduta a
+  // prezzo pianura, pagata a prezzo disagiata (caso vero 3UW1UHA272704, −7,61 a MULTIEXPRESS).
+  // Blocco MIRATO: solo se la città NON è un nome noto per quel CAP (archivio comuni+frazioni) E
+  // quel CAP ha davvero una zona speciale — così una frazione valida o una città su CAP normale
+  // (che comunque prezza Italia, senza perdita) NON viene fermata. Chi spedisce corregge o seleziona
+  // dall'elenco (l'autocomplete /api/comuni è già nel form). Solo Italia; l'estero non si valida.
+  {
+    const vc = validaCittaCap(body.shipTo?.postalCode, body.shipTo?.city, body.shipTo?.country)
+    if (vc.validabile && !vc.ok && await capHaZonaSpeciale(body.shipTo?.postalCode)) {
+      const suggeriti = vc.noti.slice(0, 6).join(', ')
+      return NextResponse.json({ error: `Città "${String(body.shipTo?.city).trim()}" non riconosciuta per il CAP ${String(body.shipTo?.postalCode).trim()}. Selezionala dall'elenco o scrivila correttamente${suggeriti ? ` (per questo CAP: ${suggeriti})` : ''}. È una zona con tariffa speciale: un nome errato la farebbe prezzare come destinazione normale.` }, { status: 400 })
+    }
+  }
 
   const packages = body.packages || [{ length: 20, width: 15, height: 10, weight: 1 }]
   // RITIRO richiesto insieme alla spedizione. Serve a due cose: ai contratti DVA, dove e' l'UNICO

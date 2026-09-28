@@ -7,6 +7,8 @@ import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import { inviaWebhook } from '@/lib/webhooks'
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
 import { statoPiano, messaggioBlocco } from '@/lib/limite-piano'
+import { validaCittaCap } from '@/lib/valida-citta'
+import { capHaZonaSpeciale } from '@/lib/cap-speciali'
 import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation, spediamoproCreateShipment, spediamoproGetLabel,
   spediamoproWaitForTracking, kgToGrams, cmToMm, euroToCents, centsToEuro,
@@ -58,6 +60,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Provincia destinatario obbligatoria (shipTo.state)' }, { status: 400 })
   if (!body.shipTo?.postalCode) return NextResponse.json({ error: 'CAP destinatario obbligatorio (shipTo.postalCode)' }, { status: 400 })
   if (!body.shipFrom?.name || !body.shipFrom?.postalCode) return NextResponse.json({ error: 'Mittente incompleto (shipFrom)' }, { status: 400 })
+
+  // Città ↔ CAP su zona speciale: un nome errato farebbe cadere la disagiata/isola su "Italia"
+  // (venduto pianura, pagato disagiata). Stessa guardia del portale (vedi lib/valida-citta e
+  // app/api/spedizioni/crea). Solo Italia + CAP con zona speciale; frazioni valide e CAP normali passano.
+  {
+    const vc = validaCittaCap(body.shipTo?.postalCode, body.shipTo?.city, body.shipTo?.country)
+    if (vc.validabile && !vc.ok && await capHaZonaSpeciale(body.shipTo?.postalCode)) {
+      const suggeriti = vc.noti.slice(0, 6).join(', ')
+      return NextResponse.json({ error: `Città "${String(body.shipTo?.city).trim()}" non valida per il CAP ${String(body.shipTo?.postalCode).trim()} (shipTo.city): correggila${suggeriti ? ` (per questo CAP: ${suggeriti})` : ''}. Zona a tariffa speciale: un nome errato la prezzerebbe come destinazione normale.` }, { status: 400 })
+    }
+  }
 
   // "Presso" (c/o): seconda riga dell'indirizzo. Accetto `presso` e, come alias, `street2`
   // (così chi arriva da altre piattaforme non deve cambiare payload). Su Spedisci finisce in
