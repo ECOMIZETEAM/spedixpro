@@ -318,6 +318,22 @@ export async function POST(req: NextRequest) {
     if (body.shipTo.email) consignee.email = body.shipTo.email.substring(0,50)
     // MULTICOLLO: un parcel per OGNI collo (prima si inviava un solo parcel col peso totale).
     const parcels = packages.map((p: any) => ({ weight: kgToGrams(parseFloat(p?.weight)||1), length: cmToMm(p?.length||10), width: cmToMm(p?.width||10), height: cmToMm(p?.height||10) }))
+    // GUARDIA DIMENSIONI LOCKER S (gemella del portale, vedi crea/route.ts): il costo InPost dipende
+    // dalla TAGLIA del locker (misure), il listino e' a peso e non la conosce -> un pacco fuori misura
+    // finisce in un locker piu' grande, costa di piu' ma verrebbe venduto a tariffa Locker S (sotto costo).
+    // Limite misurato via API: entra un collo fino a 64x38x19 cm. Se un collo non ci sta -> si ferma.
+    if (/\blocker\s*s\b/i.test(String(corriere.nome_contratto || ''))) {
+      const LOCKER_S_MM = [190, 380, 640]   // 19x38x64 cm, lato corto->lungo
+      const fuori = parcels.find((p: any) => {
+        const d = [p.length, p.width, p.height].sort((a: number, b: number) => a - b)
+        return d[0] > LOCKER_S_MM[0] || d[1] > LOCKER_S_MM[1] || d[2] > LOCKER_S_MM[2]
+      })
+      if (fuori) {
+        await stornaPrenotazione()
+        const cm = (mm: number) => Math.round(mm / 10)
+        return NextResponse.json({ error: `Pacco troppo grande per InPost Locker S (max 64x38x19 cm): ${cm(fuori.length)}x${cm(fuori.width)}x${cm(fuori.height)} cm. Scegli un altro corriere o riduci le misure.` }, { status: 400 })
+      }
+    }
     const cod = body.codValue ? euroToCents(body.codValue) : undefined
     const ins = body.insuranceValue ? euroToCents(body.insuranceValue) : undefined
     // BRT ha due service BRTEXP: quale sia disponibile dipende da peso/misure e colli. Se il

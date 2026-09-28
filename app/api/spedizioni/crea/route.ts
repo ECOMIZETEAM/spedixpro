@@ -1060,6 +1060,28 @@ export async function POST(req: NextRequest) {
       // costo live). Il controllo sulle destinazioni disagiate è ora PER-ZONA (zone disagiate), non
       // per confronto di prezzo.
 
+      // ── GUARDIA DIMENSIONI LOCKER S ── Il costo InPost dipende dalla TAGLIA DEL LOCKER (dalle
+      // MISURE), non dal peso; il listino invece è a PESO e non la conosce. Un pacco troppo grande per
+      // il locker S viene messo da InPost in un locker più capiente e costa di più, MA verrebbe venduto
+      // a tariffa "Locker S" → sotto costo (caso vero 28/09, ordine 2424: 33×31×26 / 12 kg, cliente
+      // 5,16, costo reale 5,26 = tariffa del locker più grande, margine −0,10). Il servizio 18 non
+      // fallisce: cambia locker in silenzio e alza il prezzo. Misurato via preventivo InPost (28/09) il
+      // limite del locker "S" prezzato dal listino: entra un collo fino a 64×38×19 cm (a 20 cm di lato
+      // corto il costo sale, oltre 64/38 non c'è locker). Se un collo non ci sta → NON si vende Locker S:
+      // si ferma (come per la disagiata: non si vende ciò che non è di questo servizio).
+      if (/\blocker\s*s\b/i.test(String(corriereRecord.nome_contratto || ''))) {
+        const LOCKER_S_MM = [190, 380, 640]   // 19×38×64 cm, lato corto→lungo (misurato via API 28/09)
+        const fuori = parcels.find((p: any) => {
+          const d = [p.length, p.width, p.height].sort((a: number, b: number) => a - b)
+          return d[0] > LOCKER_S_MM[0] || d[1] > LOCKER_S_MM[1] || d[2] > LOCKER_S_MM[2]
+        })
+        if (fuori) {
+          await stornaPrenotazione()
+          const cm = (mm: number) => Math.round(mm / 10)
+          return NextResponse.json({ error: `Pacco troppo grande per InPost Locker S (max 64×38×19 cm): ${cm(fuori.length)}×${cm(fuori.width)}×${cm(fuori.height)} cm. Un locker più capiente costa di più della tariffa Locker S: scegli un altro corriere o riduci le misure.` }, { status: 400 })
+        }
+      }
+
       // VERIFICATO via API su Poste Delivery Business (SpediamoPro):
       //  - "Rif." in etichetta = codice interno del corriere, NON impostabile;
       //  - "CONTENUTO" = categoria del parcel (type), non testo libero;
