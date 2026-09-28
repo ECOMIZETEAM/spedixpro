@@ -18,7 +18,7 @@ import { EMAIL_PER_CORRIERE,
 // Il sanificatore dei messaggi del corriere ora sta in lib/errore-corriere.ts: lo usano anche
 // l'API pubblica e la conferma distinte, che prima rimandavano il testo grezzo del provider.
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
-import { validaCittaCap } from '@/lib/valida-citta'
+import { validaCittaCap, normalizzaCittaUfficiale } from '@/lib/valida-citta'
 import { capHaZonaSpeciale } from '@/lib/cap-speciali'
 import { motivoLimiteCollo } from '@/lib/limiti-collo'
 import { vedeLaRete } from '@/lib/perimetro'
@@ -257,8 +257,17 @@ export async function POST(req: NextRequest) {
   {
     const vc = validaCittaCap(body.shipTo?.postalCode, body.shipTo?.city, body.shipTo?.country)
     if (vc.validabile && !vc.ok && await capHaZonaSpeciale(body.shipTo?.postalCode)) {
-      const suggeriti = vc.noti.slice(0, 6).join(', ')
-      return NextResponse.json({ error: `Città "${String(body.shipTo?.city).trim()}" non riconosciuta per il CAP ${String(body.shipTo?.postalCode).trim()}. Selezionala dall'elenco o scrivila correttamente${suggeriti ? ` (per questo CAP: ${suggeriti})` : ''}. È una zona con tariffa speciale: un nome errato la farebbe prezzare come destinazione normale.` }, { status: 400 })
+      // IMPORT (città dal negozio, non "scritta a mano" → non si può selezionare): si NORMALIZZA al
+      // nome ufficiale quando il CAP è di UN SOLO comune (senza ambiguità). Se il CAP è condiviso e la
+      // città non combacia con nessuno, non si può decidere → si blocca anche l'import (errore sul
+      // singolo ordine, mostrato nella pagina ordini). Manuale: si blocca sempre (deve correggere/selezionare).
+      const norm = body._daImport ? normalizzaCittaUfficiale(body.shipTo?.postalCode, body.shipTo?.city, body.shipTo?.country) : null
+      if (norm) {
+        body.shipTo.city = norm   // prosegue col nome ufficiale: la zona speciale ora aggancia
+      } else {
+        const suggeriti = vc.noti.slice(0, 6).join(', ')
+        return NextResponse.json({ error: `Città "${String(body.shipTo?.city).trim()}" non riconosciuta per il CAP ${String(body.shipTo?.postalCode).trim()}. Selezionala dall'elenco o scrivila correttamente${suggeriti ? ` (per questo CAP: ${suggeriti})` : ''}. È una zona con tariffa speciale: un nome errato la farebbe prezzare come destinazione normale.` }, { status: 400 })
+      }
     }
   }
 

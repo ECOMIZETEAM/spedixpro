@@ -427,6 +427,7 @@ export default function OrdiniPage() {
             // stessi valori del percorso "Crea spedizione", che e' la stessa azione fatta su una riga
             // sola. Finora questo ramo mandava sempre notes:'' e toglieva il cancelletto.
             shipFrom, shipTo, notes:String(o.nota||''), insuranceValue:0, codValue: codDaOrdine(o),
+            _daImport: true,   // città dal negozio: il server la normalizza al nome ufficiale (non la blocca) sui CAP con zona speciale
             rifOrdine: String(o.numero_ordine || o.ordine_esterno_id || num || ''),
             contenuto: arts.map((a:any)=>a.nome).join(', ').slice(0,100), tipoContenuto:'Merce destinata alla vendita', valoreMerce:String(o.totale||''), hscode: hscodeOrd
           })

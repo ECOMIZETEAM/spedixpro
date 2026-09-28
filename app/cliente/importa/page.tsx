@@ -498,6 +498,7 @@ export default function ImportaOrdiniPage() {
             shipFrom, shipTo,
             notes: o.note || '', insuranceValue: 0, codValue: o.contrassegno || 0,
             contenuto: o.contenuto || '',
+            _daImport: true,   // città dal CSV: normalizzata al nome ufficiale (non bloccata) sui CAP con zona speciale
             rifOrdine: o.order_id || '',   // → "Rif." in etichetta (SpediamoPro externalReference)
           }),
         })
