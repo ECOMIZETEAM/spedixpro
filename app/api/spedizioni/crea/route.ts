@@ -20,7 +20,11 @@ import { EMAIL_PER_CORRIERE,
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
 import { validaCittaCap, normalizzaCittaUfficiale } from '@/lib/valida-citta'
 import { capHaZonaSpeciale } from '@/lib/cap-speciali'
-import { isZonaEsclusiva } from '@/lib/zone-match'
+import { isZonaDisagiata } from '@/lib/zone-match'
+// La zona di vendita "copre" il supplemento disagiata/isola SOLO se è una zona disagiata/periferica o
+// isole. Le zone regionali base (Sicilia/Sardegna/Calabria) NON lo coprono: lì il corriere può ancora
+// addebitare il supplemento disagiata (es. Villasmundo risolve "Sicilia" base 5,64 ma costa 13,60).
+const zonaCopreDisagiata = (z: string | undefined | null): boolean => !!z && (isZonaDisagiata(z) || /isol/i.test(String(z)))
 import { motivoLimiteCollo } from '@/lib/limiti-collo'
 import { vedeLaRete } from '@/lib/perimetro'
 
@@ -1010,6 +1014,33 @@ export async function POST(req: NextRequest) {
         parcels, sender, consignee, cashOnDeliveryAmount, insuredAmount
       })
 
+      // ── GUARDIA DISAGIATA/ISOLA DA SUPPLEMENTO SpediamoPro: destinazione periferica venduta come
+      //    pianura → SI FERMA ── (gemella della guardia flag su DVA). SpediamoPro espone il supplemento
+      // della DESTINAZIONE in priceBreakdown.accessoryServicePrice (centesimi): disagiata/isola ~9,10 €
+      // (910), base Sicilia ~1,10 € (110), pianura 0. Se c'è un supplemento vero (≥3 €) MA la vendita è
+      // uscita da una zona NORMALE (non isole/disagiata), il CAP non è nelle zone speciali di questo
+      // contratto (o la destinazione è una FRAZIONE non elencata — es. Villasmundo di Melilli, 96010:
+      // la zona ha "Melilli" ma non le sue frazioni, e NON esiste una mappa frazione→comune per
+      // completare le liste) → venduta a tariffa pianura sotto costo. Serve il segnale del corriere,
+      // non la lista città (incompletabile). accessoryServicePrice include anche COD/assicurazione:
+      // se presenti, si riconferma con un preventivo pulito per isolare il supplemento di DESTINAZIONE.
+      {
+        const accessory = Number((quotation.priceBreakdown as any)?.accessoryServicePrice) || 0
+        if (zonaCliente && !zonaCopreDisagiata(zonaCliente) && accessory >= 300) {
+          let supplDest = accessory
+          if (cashOnDeliveryAmount || insuredAmount) {
+            try {
+              const pulito = await spediamoproGetQuotation(cred.authcode, serviceId, { parcels, sender, consignee })
+              supplDest = Number((pulito.priceBreakdown as any)?.accessoryServicePrice) || 0
+            } catch { supplDest = 0 }   // non riesco a isolare → non blocco (prudente)
+          }
+          if (supplDest >= 300) {
+            await stornaPrenotazione()
+            return NextResponse.json({ error: `Destinazione periferica/isola (${String(body.shipTo?.city || body.shipTo?.postalCode).trim()}): questo contratto non la prezza come zona speciale e verrebbe venduta a tariffa pianura sotto costo. Scegli un altro corriere che copre questa destinazione.` }, { status: 400 })
+          }
+        }
+      }
+
       // NB: nessun blocco "vendita sotto costo" basato sul confronto costo-live vs prezzo listino:
       // dava troppi falsi positivi (bloccava destinazioni legittime dove il listino è più basso del
       // costo live). Il controllo sulle destinazioni disagiate è ora PER-ZONA (zone disagiate), non
@@ -1333,7 +1364,7 @@ export async function POST(req: NextRequest) {
       // speciale): qui copre il caso in cui il CAP NON è in nessuna zona speciale del contratto. Preciso:
       // il flag DVA è true SOLO sulle periferiche vere (18–46 €), non sulle Sicilia/Sardegna base (6,67,
       // flag=false), e non blocca se la vendita è già su una zona speciale (isZonaEsclusiva).
-      if ((offerta.flag_localitaperiferica || offerta.flag_localitadisagiata) && zonaCliente && !isZonaEsclusiva(zonaCliente)) {
+      if ((offerta.flag_localitaperiferica || offerta.flag_localitadisagiata) && zonaCliente && !zonaCopreDisagiata(zonaCliente)) {
         await stornaPrenotazione()
         return NextResponse.json({ error: `Destinazione periferica/isola (${String(body.shipTo?.city || body.shipTo?.postalCode).trim()}): questo contratto non la prezza come zona speciale e verrebbe venduta a tariffa pianura sotto costo. Scegli un altro corriere che copre questa destinazione.` }, { status: 400 })
       }
