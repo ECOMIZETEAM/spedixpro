@@ -744,6 +744,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Contratto non disponibile per questa spedizione: il codice contratto configurato non corrisponde a nessuna tariffa. Segnalalo all\'assistenza.' }, { status: 400 })
     }
 
+    // ── GUARDIA DISAGIATA/ISOLA DA zone_name SpediamoPro/Spedisci: destinazione periferica venduta come
+    //    pianura → SI FERMA ── (gemella delle guardie DVA/spediamopro). Spedisci dice da solo la zona che
+    // assegna alla destinazione in `rate.zone_name` (es. "ZONE DISAGIATE"/"ISOLE"/"PERIFERICHE" vs
+    // "Italia"/"SCS"). Se è una zona speciale MA la nostra vendita è uscita da una zona NORMALE (non
+    // disagiata/isole), il CAP/la frazione non è tra le zone speciali di questo contratto (o è una
+    // frazione non elencata) → venduta a tariffa pianura sotto costo. Il flag disagiata è per-corriere
+    // (Villasmundo è SCS per Poste ma disagiata per BRT): qui vale quello che dice QUESTO contratto.
+    if (rate && zonaCliente && !zonaCopreDisagiata(zonaCliente) && /disagiat|periferic|isol/i.test(String((rate as any).zone_name || ''))) {
+      await stornaPrenotazione()
+      return NextResponse.json({ error: `Destinazione periferica/isola (${String(body.shipTo?.city || body.shipTo?.postalCode).trim()}): questo contratto non la prezza come zona speciale e verrebbe venduta a tariffa pianura sotto costo. Scegli un altro corriere che copre questa destinazione.` }, { status: 400 })
+    }
+
     // Servizi accessori da TRASMETTERE al corriere via spedisci (Exchange/Saturday per ora): mappa il
     // NOME scelto → CODICE proprio di spedisci. Il sovrapprezzo torna già in r.shipmentCost (costoCorrente),
     // quindi il costo del master lo cattura da solo; al cliente il servizio è già fatturato via il listino.
