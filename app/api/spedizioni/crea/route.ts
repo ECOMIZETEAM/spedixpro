@@ -20,6 +20,7 @@ import { EMAIL_PER_CORRIERE,
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
 import { validaCittaCap, normalizzaCittaUfficiale } from '@/lib/valida-citta'
 import { capHaZonaSpeciale } from '@/lib/cap-speciali'
+import { isZonaEsclusiva } from '@/lib/zone-match'
 import { motivoLimiteCollo } from '@/lib/limiti-collo'
 import { vedeLaRete } from '@/lib/perimetro'
 
@@ -1321,6 +1322,22 @@ export async function POST(req: NextRequest) {
         await stornaPrenotazione()
         return NextResponse.json({ error: 'Nessuna tariffa disponibile per questa destinazione con il contratto scelto: prova un altro contratto.' }, { status: 400 })
       }
+
+      // ── GUARDIA DISAGIATA/ISOLA DA FLAG DVA: destinazione periferica venduta come pianura → SI FERMA ──
+      // DVA dice da solo se una destinazione è periferica/disagiata (flag sull'offerta): lì costa 18–46 €
+      // invece di ~5. Se lo è MA il prezzo di vendita è uscito da una zona NORMALE (non isole/disagiata),
+      // vuol dire che questo contratto non ha quel CAP tra le sue zone speciali (lista isole/disagiata
+      // vuota o incompleta — è il buco di BRT 2025 V su Ventotene, 142149228584931280: venduto Italia 5,87,
+      // pagato 45,09, −39,22 al detentore). Si esclude: chi spedisce usa un corriere che copre l'isola.
+      // Complementare al gate "zona esclusiva senza prezzo" (che scatta solo se il CAP È già in una zona
+      // speciale): qui copre il caso in cui il CAP NON è in nessuna zona speciale del contratto. Preciso:
+      // il flag DVA è true SOLO sulle periferiche vere (18–46 €), non sulle Sicilia/Sardegna base (6,67,
+      // flag=false), e non blocca se la vendita è già su una zona speciale (isZonaEsclusiva).
+      if ((offerta.flag_localitaperiferica || offerta.flag_localitadisagiata) && zonaCliente && !isZonaEsclusiva(zonaCliente)) {
+        await stornaPrenotazione()
+        return NextResponse.json({ error: `Destinazione periferica/isola (${String(body.shipTo?.city || body.shipTo?.postalCode).trim()}): questo contratto non la prezza come zona speciale e verrebbe venduta a tariffa pianura sotto costo. Scegli un altro corriere che copre questa destinazione.` }, { status: 400 })
+      }
+
       // Servizi richiesti ma non attivabili su questa offerta: va fermato ORA. Ordinare comunque
       // significherebbe consegnare senza incassare il contrassegno.
       const opz = offerta.serviziopzionali || {}
