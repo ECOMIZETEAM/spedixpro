@@ -20,7 +20,7 @@ import { EMAIL_PER_CORRIERE,
 } from '@/lib/spediamopro'
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
 import { normalizzaPaese } from '@/lib/paesi'
-import { calcolaPrezzoCorriereDettaglio, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente } from '@/lib/pricing'
+import { calcolaPrezzoCorriereDettaglio, calcolaPesoFatturato, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente } from '@/lib/pricing'
 // La sigla neutra al posto del tipo del contratto: il nome del sistema tecnico a valle non deve
 // arrivare al browser, nemmeno dentro il JSON (vedi lib/corriere-logo.ts).
 import { siglaContratto, marchioCorriere } from '@/lib/corriere-logo'
@@ -285,9 +285,13 @@ export async function calcolaTariffeCliente(
   const fattorePerCorr = new Map<string, number>()
   for (const a of (_aggCorrCli || [])) { const fv = parseFloat((a as any)?.fattore_volume); if ((a as any)?.corriere_id && fv > 0) fattorePerCorr.set((a as any).corriere_id, fv) }
   const pesoFatturatoCon = (fatt: number) => {
-    let pv = 0
-    for (const p of tuttiColli) { if (p?.length && p?.width && p?.height) pv += (p.length * p.width * p.height) / fatt }
-    return { pesoVolume: pv, pesoFatturato: listino?.solo_peso_reale ? pesoReale : Math.max(pesoReale, pv) }
+    // STESSA funzione dell'addebito, così preventivo e addebito non divergono MAI: peso fatturato
+    // COLLO-PER-COLLO (Σ max(peso, volume) per collo), come fattura il corriere. Il "totale"
+    // (max(Σreale, Σvolume)) sottofatturava i multicollo a densità mista → MULTI sotto costo. Vedi
+    // calcolaPesoFatturato in lib/pricing.ts. (Il disallineamento preventivo/addebito era la ragione
+    // per cui il 10/8 si era tornati al totale: ora entrambi usano questa funzione.)
+    const pf = calcolaPesoFatturato(tuttiColli, fatt, !!listino?.solo_peso_reale)
+    return { pesoVolume: pf.pesoVolume, pesoFatturato: pf.pesoFatturato }
   }
 
   // Peso fatturato e volumetrico si calcolano PER CORRIERE (ognuno col suo fattore volume) più sotto,

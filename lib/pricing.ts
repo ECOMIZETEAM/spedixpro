@@ -104,7 +104,7 @@ export async function fattoreVolumeCorriere(supabase: any, masterId: string, cor
 export function calcolaPesoFatturato(packages: any[], fattore: number, soloPesoReale = false): { pesoReale: number; pesoVolume: number; pesoFatturato: number } {
   const pks = Array.isArray(packages) ? packages : []
   const f = fattore > 0 ? fattore : 5000
-  let pesoReale = 0, pesoVolume = 0
+  let pesoReale = 0, pesoVolume = 0, perCollo = 0
   for (const p of pks) {
     const peso = parseFloat(p?.weight) || 0
     const L = parseFloat(p?.length) || 0, W = parseFloat(p?.width) || 0, H = parseFloat(p?.height) || 0
@@ -112,14 +112,19 @@ export function calcolaPesoFatturato(packages: any[], fattore: number, soloPesoR
     const vol = (L && W && H) ? (L * W * H) / f : 0
     pesoReale += peso
     pesoVolume += vol
+    // PESO FATTURATO COLLO-PER-COLLO: per OGNI collo il maggiore fra il suo peso e il suo volume, poi
+    // si somma — e' come fattura il corriere. Verificato dal vivo su DVA/Poste il 28/9 (divisore /5000):
+    // un collo denso conta il PESO (30 kg reali → 30, non il volume 1,6), uno ingombrante conta il
+    // VOLUME; poi somma. Il metodo a somme — max(Σreale, Σvolume) — su una multicollo con un collo
+    // denso e uno ingombrante NASCONDE il volume del secondo dietro il peso del primo e SOTTOFATTURA:
+    // caso vero 3UW1WLJ055319 (14 kg 75x40x27 + 14 kg 40x40x26 → Milano) a somme = 28 kg (fascia 30,
+    // 8,23) ma il corriere fattura 16,2+14 = 30,2 kg (fascia 50, 14,51) → MULTI ci perdeva 5,96. Su
+    // mono-collo i due metodi COINCIDONO sempre (nessuna spedizione a un collo cambia). Gia' corretto
+    // cosi' il 6/8 (commit 4eb0bfcd), poi tornato "a somme" il 10/8 perche' preventivo e display non
+    // erano allineati: ora lo sono (tariffe-motore usa questa stessa funzione, peso.ts il valore salvato).
+    perCollo += soloPesoReale ? peso : Math.max(peso, vol)
   }
-  // PESO FATTURATO = SOMMA DEI VOLUMI, non collo-per-collo.
-  // Si confronta il peso REALE TOTALE col VOLUME TOTALE e si prende il più alto — è la regola del
-  // gestionale. Prima si sommava il massimo(reale,volume) di OGNI collo: su una multicollo con una
-  // scatola densa e una ingombrante il risultato usciva più alto della regola (es. 30 kg reali
-  // fatturati 30,48), sovra-fatturando il cliente. Su una spedizione mono-collo i due metodi danno
-  // lo stesso identico numero (nessuna spedizione a un collo cambia).
-  const pesoFatturato = soloPesoReale ? pesoReale : Math.max(pesoReale, pesoVolume)
+  const pesoFatturato = soloPesoReale ? pesoReale : perCollo
   return { pesoReale, pesoVolume, pesoFatturato }
 }
 
