@@ -448,8 +448,12 @@ export async function calcolaTariffeCliente(
       fasce.filter((f: any) => (f.corrieri as any)?.id === corriereId),
       { cap: body.shipFrom?.postalCode, provincia: body.shipFrom?.state, paese: 'IT' },
       pesoPerFascia,
-      { cap: capDest, provincia, paese: paeseDest }   // no-stacking se dest è nella stessa regione
+      { cap: capDest, provincia, paese: paeseDest },   // no-stacking se dest è nella stessa regione
+      [corriereId]   // per vedere anche le zone su_mittente NON prezzate di questo corriere
     )
+    // REGOLA ORIGINE ("non hai il prezzo? non usi e non vendi"): mittente in una zona su_mittente
+    // NON prezzata di questo corriere → corriere ESCLUSO dal preventivo (non lo si può vendere).
+    if (mittSupp === null) { esclusiQuota++; ultimoErroreQuota = 'origine non prezzata per questo corriere'; continue }
     const prezzoSped = nolo + costoFuel + sponda + mittSupp
     risultati.push({
       carrierCode: siglaContratto(corriere?.tipo) || 'sda',

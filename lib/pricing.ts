@@ -174,12 +174,29 @@ export async function supplementoMittente(
   // il fornitore applica il supplemento UNA volta sola — la fascia di destinazione (es. "Sicilia")
   // già lo contiene, quindi NON si somma anche l'origine. Verificato su DVA: Sicilia→isola-siciliana
   // costa 6,67 (una volta), non 6,78+1,36. Senza `dest`, comportamento invariato (nessun controllo).
-  dest?: { cap?: string; provincia?: string; paese?: string }
-): Promise<number> {
+  dest?: { cap?: string; provincia?: string; paese?: string },
+  // Corriere/i di cui valutare le zone su_mittente. SERVE per vedere anche le zone NON prezzate
+  // (0 fasce → invisibili in `fasce`): senza, una zona mittente senza prezzo non escluderebbe mai.
+  corriereIds?: string[]
+): Promise<number | null> {
+  // Ritorno: 0 = nessuna zona mittente aggancia (o no-stacking) → nessun supplemento, corriere OK.
+  //          numero>0 = supplemento origine. **null = il mittente CADE in una zona su_mittente ma
+  //          quella zona NON è prezzata (nessuna fascia per il peso) → CORRIERE DA ESCLUDERE**
+  //          ("non hai il prezzo? non usi e non vendi", regola Lorenzo 28/9). I chiamanti trattano
+  //          null come esclusione (come già fanno per gli altri return null del motore).
   if (!mitt?.cap && !mitt?.provincia) return 0
-  const origIds = Array.from(new Set(
-    (fasce || []).filter((f: any) => (f.zone as any)?.su_mittente).map((f: any) => (f.zone as any)?.id).filter(Boolean)
-  ))
+  // Zone su_mittente del corriere. Se ho i corriereIds le leggo dal DB (COMPRESE quelle senza fascia:
+  // una zona mittente non prezzata deve poter escludere). Altrimenti ripiego sulle zone presenti in `fasce`.
+  let origIds: string[]
+  const cIds = Array.from(new Set((corriereIds || []).filter(Boolean)))
+  if (cIds.length) {
+    const { data: zsm } = await supabase.from('zone').select('id').eq('su_mittente', true).in('corriere_id', cIds)
+    origIds = Array.from(new Set((zsm || []).map((z: any) => z.id).filter(Boolean)))
+  } else {
+    origIds = Array.from(new Set(
+      (fasce || []).filter((f: any) => (f.zone as any)?.su_mittente).map((f: any) => (f.zone as any)?.id).filter(Boolean)
+    ))
+  }
   if (!origIds.length) return 0
   const paese = (mitt.paese || 'IT').toUpperCase().trim()
   const cap = (mitt.cap || '').trim()
@@ -211,7 +228,8 @@ export async function supplementoMittente(
 
   const origFasce = (fasce || []).filter((f: any) => zoneMatch.has((f.zone as any)?.id))
   const f = trovaFascia(origFasce, pesoFatturato)   // a parita' di scaglione vince il piu' alto
-  return f ? Number((f as any).prezzo) || 0 : 0
+  // Zona mittente AGGANCIATA ma SENZA fascia/prezzo per questo peso → null = escludi il corriere.
+  return f ? Number((f as any).prezzo) || 0 : null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -440,6 +458,25 @@ export async function calcolaPrezzoListino(
   }
   if (!fascePerCorriere.size) return null
 
+  // REGOLA ORIGINE ("non hai il prezzo? non usi e non vendi", Lorenzo 28/9): un corriere il cui
+  // MITTENTE cade in una SUA zona su_mittente NON prezzata va ESCLUSO (come la disagiata destinazione
+  // senza fascia). Si valuta PER-CORRIERE prima di scegliere il migliore; il valore (0/supplemento)
+  // si riusa per il corriere scelto. Bypass nei ricalcoli rettifiche (zonaForzata), che non escludono.
+  const mittByCorr = new Map<string, number>()
+  for (const cId of Array.from(fascePerCorriere.keys())) {
+    const amt = await supplementoMittente(
+      supabase,
+      fasce.filter((f: any) => (f.corrieri as any)?.id === cId),
+      { cap: params.mittCap, provincia: params.mittProvincia, paese: params.mittPaese },
+      pesoFatturato,
+      { cap: params.cap, provincia, paese: params.paese },   // no-stacking se dest è nella stessa regione
+      [cId]   // per vedere anche le zone su_mittente NON prezzate di questo corriere
+    )
+    if (amt === null) { if (params.zonaForzata) mittByCorr.set(cId, 0); else fascePerCorriere.delete(cId) }
+    else mittByCorr.set(cId, amt)
+  }
+  if (!fascePerCorriere.size) return null
+
   // Se è indicato un corriere preciso, usa quello; altrimenti scegli il prezzo più basso.
   // CORRIERE RICHIESTO ma NON disponibile qui (escluso: zona disagiata non prezzata al cliente,
   // o zona non coperta) -> NIENTE prezzo. MAI ripiegare sui contratti degli ALTRI corrieri:
@@ -485,14 +522,9 @@ export async function calcolaPrezzoListino(
 
   const zonaRisolta = (fascePerCorriere.get(miglior.corriereId)?.[0]?.zone as any)?.nome || zonaNome
 
-  // SUPPLEMENTO ORIGINE (zona mittente disagiato) del corriere scelto. 0 se non configurato.
-  const mittAmt = await supplementoMittente(
-    supabase,
-    fasce.filter((f: any) => (f.corrieri as any)?.id === miglior!.corriereId),
-    { cap: params.mittCap, provincia: params.mittProvincia, paese: params.mittPaese },
-    pesoFatturato,
-    { cap: params.cap, provincia, paese: params.paese }   // no-stacking se dest è nella stessa regione
-  )
+  // SUPPLEMENTO ORIGINE del corriere scelto: già calcolato sopra (mittByCorr), qui si riusa.
+  // Il corriere scelto NON può avere origine null (i null sono stati esclusi da fascePerCorriere).
+  const mittAmt = mittByCorr.get(miglior.corriereId) ?? 0
 
   return {
     prezzo: Math.round((miglior.prezzo + sponda + mittAmt) * 100) / 100,
@@ -683,12 +715,18 @@ export async function calcolaPrezzoCorriereDettaglio(
 
   // SUPPLEMENTO ORIGINE: se il pacco PARTE da una zona mittente disagiata di questo corriere.
   // Esce dalle STESSE fasce già caricate (quelle marcate su_mittente). 0 se non configurato.
-  const mittAmt = await supplementoMittente(
+  const mittRaw = await supplementoMittente(
     supabase, fasce,
     { cap: params.mittCap, provincia: params.mittProvincia, paese: params.mittPaese },
     pesoFatturato,
-    { cap: params.cap, provincia, paese: params.paese }   // no-stacking se dest è nella stessa regione
+    { cap: params.cap, provincia, paese: params.paese },   // no-stacking se dest è nella stessa regione
+    [params.corriereId]   // per vedere anche le zone su_mittente NON prezzate di questo corriere
   )
+  // REGOLA ORIGINE ("non hai il prezzo? non usi e non vendi"): se il MITTENTE cade in una zona
+  // su_mittente di questo corriere NON prezzata → corriere NON disponibile (come per la disagiata
+  // destinazione senza fascia). Bypass nei ricalcoli rettifiche (zonaForzata), che non escludono.
+  if (mittRaw === null && !params.zonaForzata) return null
+  const mittAmt = mittRaw === null ? 0 : mittRaw
 
   const r2 = (n: number) => Math.round(n * 100) / 100
   return {
