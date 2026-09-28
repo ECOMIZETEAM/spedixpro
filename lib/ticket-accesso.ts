@@ -86,3 +86,41 @@ export function assegnatoPer(ticket: any, masterId: string | null | undefined): 
   const voce = masterId && mappa && typeof mappa === 'object' ? mappa[masterId] : null
   return { assegnato_id: voce?.id || null, assegnato_nome: voce?.nome || null }
 }
+
+// IL NOME DI CHI HA APERTO E' QUELLO DI OGGI, NON QUELLO DI ALLORA.
+//
+// `tickets.aperto_da` e' una COPIA del nome scattata quando la richiesta e' nata, e non si aggiorna
+// piu'. Chi si rinomina resta con due identita' in elenco: un master si e' chiamato "Central Poste
+// di Cervasio L." fino al 16/09 e "C&V EXPRESS LOGISITCS" dal 17, e le sue 19 richieste uscivano
+// spezzate in due nomi — cercando quello nuovo le vecchie non si trovavano.
+//
+// Si risolve dal COLLEGAMENTO, che c'e' quasi sempre: 638 ticket di master su 638 hanno
+// aperto_master_id, 3.705 su 3.707 hanno cliente_id. La copia resta solo come ripiego per i due
+// senza aggancio — buttarla vorrebbe dire lasciare quelle righe senza nome.
+//
+// Due letture in tutto, non una per ticket: gli id si raccolgono prima.
+export async function risolviNomiAttuali(admin: any, tickets: any[]): Promise<(t: any) => any> {
+  const righe = Array.isArray(tickets) ? tickets : []
+  const idCli = [...new Set(righe.map(t => t?.cliente_id).filter(Boolean))]
+  const idMas = [...new Set(righe.map(t => t?.aperto_master_id).filter(Boolean))]
+  const nomeCli = new Map<string, string>()
+  const nomeMas = new Map<string, string>()
+  await Promise.all([
+    idCli.length
+      ? admin.from('clienti').select('id,ragione_sociale').in('id', idCli)
+          .then(({ data }: any) => { for (const c of (data || [])) if (c?.ragione_sociale) nomeCli.set(c.id, c.ragione_sociale) })
+      : Promise.resolve(),
+    idMas.length
+      ? admin.from('masters').select('id,nome').in('id', idMas)
+          .then(({ data }: any) => { for (const m of (data || [])) if (m?.nome) nomeMas.set(m.id, m.nome) })
+      : Promise.resolve(),
+  ])
+  return (t: any) => {
+    if (!t) return t
+    // Un ticket aperto da un cliente porta il nome del cliente; uno aperto da un sotto-master il
+    // nome del master. Si guarda il collegamento presente, non `tipo_apertura`, che su due righe
+    // storiche non ha nessuno dei due.
+    const attuale = (t.cliente_id && nomeCli.get(t.cliente_id)) || (t.aperto_master_id && nomeMas.get(t.aperto_master_id))
+    return attuale ? { ...t, aperto_da: attuale } : t
+  }
+}

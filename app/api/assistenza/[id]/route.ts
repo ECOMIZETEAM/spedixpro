@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 // La regola su chi puo' stare dentro un ticket ora vive in lib/ticket-accesso.ts, perche' la usa
 // anche /api/file per gli allegati e la POD: una sola definizione, nessuna copia da tenere allineata.
-import { partecipanteTicket as partecipante, posizioneCatena, messaggioVisibileCatena, mascheraCatena, assegnatoPer } from '@/lib/ticket-accesso'
+import { partecipanteTicket as partecipante, posizioneCatena, messaggioVisibileCatena, mascheraCatena, assegnatoPer, risolviNomiAttuali } from '@/lib/ticket-accesso'
 import { BUCKET_RISERVATI } from '@/lib/file-riservati'
 import { caricaAllegatiTicket } from '@/lib/allegati-ticket'
 
@@ -35,8 +35,21 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // 'mio' calcolato lato server (il browser non conosce il proprio master_id): serve al LATO del
   // fumetto (destra/arancio). 'tu' invece è l'UTENTE preciso che ha scritto — con Sara e Giuliana
   // sullo stesso master, 'mio' è vero per entrambe, ma 'tu' solo per chi guarda.
+  // Nome di chi ha aperto = quello di OGGI, come nell'elenco (lib/ticket-accesso): l'intestazione
+  // del dettaglio leggeva la copia congelata all'apertura, e su chi si era rinominato mostrava un
+  // nome che non esiste piu'.
+  const conNome = await risolviNomiAttuali(admin, [t])
+  const tAgg = conNome(t)
+  const nomeVecchio = String(t.aperto_da || '')
+  const nomeAttuale = String((tAgg as any).aperto_da || '')
+
   const msgOut = messaggiVisti.map((m: any) => ({
     ...m,
+    // ANCHE NELLA CHAT, ma SOLO il nome di chi ha aperto. Gli altri `autore_nome` sono PERSONE
+    // ("TODINI GIACOMO", "LUCA ONOFRI"): sostituirli con la ragione sociale cancellerebbe chi ha
+    // risposto. Si riconosce l'azienda dal fatto che il nome salvato e' identico a quello congelato
+    // sul ticket — una persona non coincide mai con quello.
+    autore_nome: nomeAttuale && nomeVecchio && m.autore_nome === nomeVecchio ? nomeAttuale : m.autore_nome,
     mio: ruolo === 'cliente' ? m.autore === 'cliente'
       : (m.autore !== 'cliente' && (m.autore_master_id ? m.autore_master_id === utente?.master_id : ruolo === 'master' && m.autore === 'master')),
     tu: !!m.autore_id && m.autore_id === user.id,
@@ -54,8 +67,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // Al cliente: via del tutto i campi catena. Al master della catena: mascherati oltre il suo
   // bersaglio d'inoltro (vede di aver inoltrato, non a chi altro è stato girato più su).
   const ticketOut = ruolo === 'cliente'
-    ? { ...t, inoltrato_a_master_id: undefined, rete_master_ids: undefined, rete_non_letti: undefined, assegnazioni: undefined }
-    : { ...mascheraCatena(t, utente?.master_id), ...assegnatoPer(t, utente?.master_id), assegnazioni: undefined }
+    ? { ...tAgg, inoltrato_a_master_id: undefined, rete_master_ids: undefined, rete_non_letti: undefined, assegnazioni: undefined }
+    : { ...mascheraCatena(tAgg, utente?.master_id), ...assegnatoPer(tAgg, utente?.master_id), assegnazioni: undefined }
   // io_id: chi sta guardando. Serve alla chat per marcare "· tu" e all'header per capire se il
   // ticket è già in carico a me (mostra "Prendi in carico" solo se lo tiene un altro / nessuno).
   return NextResponse.json({ ticket: ticketOut, messaggi: msgOut, ruolo, io_id: user.id })

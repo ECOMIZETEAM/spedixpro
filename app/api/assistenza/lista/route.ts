@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
-import { mascheraCatena, assegnatoPer } from '@/lib/ticket-accesso'
+import { mascheraCatena, assegnatoPer, risolviNomiAttuali } from '@/lib/ticket-accesso'
 
 // Lista ticket:
 // - ricevuti: ticket che il MIO master deve gestire (aperti da miei clienti o sotto-master)
@@ -28,7 +28,8 @@ export async function GET(_req: NextRequest) {
       .eq('cliente_id', utente.cliente_id).order('updated_at', { ascending: false }))
     // Al cliente la catena di inoltro non va mostrata: uscivano nel corpo della risposta e
     // bastava guardarla per sapere che la richiesta era stata girata più in alto, e a chi.
-    const puliti = (miei || []).map((r: any) => ({ ...r, inoltrato_a_master_id: undefined, rete_master_ids: undefined, rete_non_letti: undefined, assegnazioni: undefined, assegnato_id: undefined, assegnato_nome: undefined }))
+    const nome = await risolviNomiAttuali(admin, miei || [])
+    const puliti = (miei || []).map(nome).map((r: any) => ({ ...r, inoltrato_a_master_id: undefined, rete_master_ids: undefined, rete_non_letti: undefined, assegnazioni: undefined, assegnato_id: undefined, assegnato_nome: undefined }))
     return NextResponse.json({ ricevuti: [], miei: puliti })
   }
   // Agente: sola lettura sui SUOI clienti, niente dati del master né della rete (lib/agente.ts).
@@ -54,5 +55,8 @@ export async function GET(_req: NextRequest) {
   // ricevuti (sono owner): maschero la catena oltre il mio bersaglio d'inoltro + assegnazione mia.
   // miei (richiedente): via del tutto i campi catena. rete (partecipo): rete_nuovo + maschera + mia.
   const conMia = (r: any) => ({ ...mascheraCatena(r, masterId), ...assegnatoPer(r, masterId), assegnazioni: undefined })
-  return NextResponse.json({ ricevuti: (ricevuti || []).map(conMia), miei: (miei || []).map(senzaCatenaSopra), rete: (rete || []).map(conNuovo) })
+  // Nome di chi ha aperto = quello di OGGI (vedi risolviNomiAttuali): una sola risoluzione per
+  // tutte e tre le liste, cosi' lo stesso master non esce con due nomi in due schede diverse.
+  const nome = await risolviNomiAttuali(admin, [...(ricevuti || []), ...(miei || []), ...(rete || [])])
+  return NextResponse.json({ ricevuti: (ricevuti || []).map(nome).map(conMia), miei: (miei || []).map(nome).map(senzaCatenaSopra), rete: (rete || []).map(nome).map(conNuovo) })
 }
