@@ -672,6 +672,7 @@ export async function POST(req: NextRequest) {
       citta: body.shipTo.city,
       corriereNome: corriereRecord.nome_contratto,
       contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+      serviziAccessori,
       mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
       // Con che zona e a che prezzo e' stato calcolato il cliente: serve al controllo "due zone
       // sulla stessa spedizione" dentro verificaCreditoCatena, comune a tutte le porte.
@@ -901,6 +902,7 @@ export async function POST(req: NextRequest) {
       cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
       corriereNome: corriereRecord.nome_contratto,
       contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+      serviziAccessori,
       mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
       numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
     })
@@ -1164,6 +1166,7 @@ export async function POST(req: NextRequest) {
         cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
         corriereNome: corriereRecord.nome_contratto,
         contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+        serviziAccessori,
         mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
         numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
       })
@@ -1623,6 +1626,7 @@ export async function POST(req: NextRequest) {
           cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           corriereNome: corriereRecord.nome_contratto,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+          serviziAccessori,
           numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
         })
       } catch (e) { console.error('[CREA][EASYPARCEL] cascata catena:', e) }
@@ -1864,6 +1868,7 @@ export async function POST(req: NextRequest) {
         cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
         corriereNome: corriereRecord.nome_contratto,
         contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+        serviziAccessori,
         mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
         numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
       })
@@ -2058,6 +2063,7 @@ export async function POST(req: NextRequest) {
           cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           corriereNome: corriereRecord.nome_contratto,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+          serviziAccessori,
           numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
         })
       } catch (e) { console.error('[CREA][GLS] cascata catena:', e) }
@@ -2260,6 +2266,7 @@ export async function POST(req: NextRequest) {
           cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           corriereNome: corriereRecord.nome_contratto,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+          serviziAccessori,
           numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
         })
       } catch (e) { console.error('[CREA][BRT] cascata catena:', e) }
@@ -2440,6 +2447,7 @@ export async function POST(req: NextRequest) {
           cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           corriereNome: corriereRecord.nome_contratto,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+          serviziAccessori,
           numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
         })
       } catch (e) { console.error('[CREA][FEDEX] cascata catena:', e) }
@@ -2589,6 +2597,7 @@ export async function POST(req: NextRequest) {
           cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           corriereNome: corriereRecord.nome_contratto,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+          serviziAccessori,
           numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
         })
       } catch (e) { console.error('[CREA][DIELLE] cascata catena:', e) }
@@ -2738,6 +2747,7 @@ export async function POST(req: NextRequest) {
           cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           corriereNome: corriereRecord.nome_contratto,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+          serviziAccessori,
           numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
         })
       } catch (e) { console.error('[CREA][POSTE] cascata catena:', e) }

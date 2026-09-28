@@ -28,6 +28,73 @@ export type LivelloCatena = {
   // corrieri (non dal ripiego calcolaPrezzoListino, che non li espone): undefined = non pervenuto.
   contrassegnoOltreMax?: boolean
   assicurazioneOltreMax?: boolean
+  // Servizi accessori RICHIESTI che QUESTO livello non ha a listino: li vende senza averli in
+  // acquisto, quindi il suo costo non li contiene e la differenza la assorbe il detentore (che al
+  // fornitore l'accessorio lo paga sempre). Oggi si limita a segnalarlo — vedi la nota in
+  // verificaCreditoCatena sul perche' non blocca.
+  accessoriNonPrezzati?: string[]
+}
+
+// COSTO DEI SERVIZI ACCESSORI PER UN LIVELLO DELLA CATENA.
+//
+// Gli accessori (Exchange, Consegna di Sabato, …) erano prezzati SOLO nel listino del cliente: la
+// creazione li sommava al prezzo cliente e nessuno li guardava piu'. La catena dei master li
+// ignorava del tutto — `costruisciCatena` non aveva nemmeno il parametro — quindi il sotto-master
+// pagava il nolo nudo e il DETENTORE si trovava in fattura il supplemento del fornitore.
+// Caso vero (28/09, CE664979213, Exchange su GLS CASERTA Consegna Diretta): cliente 8,22 con dentro
+// 4,00 di Exchange, GTS EXPRESS paga 3,75 SENZA i 4,00, MULTIEXPRESS paga 7,60 CON i 4,00 = 3,85 di
+// perdita secca. Su 12 spedizioni Exchange, 12 sotto costo. Il listino del master era giusto (4,00,
+// esattamente quanto costa): mancava chi lo leggesse.
+//
+// Il supplemento del fornitore si legge confrontando a pari peso e contratto le spedizioni con e
+// senza: GLS CASERTA 3,60→7,60 (+4,00), GLS Light e Standard Napoli +1,50.
+async function accessoriDelLivello(
+  adminDb: any,
+  masterId: string,
+  corriereId: string,
+  serviziAccessori: { nome?: string }[],
+  baseNolo: number,
+): Promise<{ totale: number; nonPrezzati: string[] }> {
+  const richiesti = (serviziAccessori || [])
+    .map(s => String(s?.nome || '').trim())
+    .filter(Boolean)
+  if (!richiesti.length) return { totale: 0, nonPrezzati: [] }
+
+  // I LISTINI DEL MASTER, NON LE RIGHE CHE PUNTANO AL CORRIERE. Esistono righe accessorio appese al
+  // listino di un ALTRO master che puntano a questo stesso corriere: leggere per solo `corriere_id`
+  // le farebbe scavalcare il listino configurato (stesso inciampo gia' visto sulle giacenze, dove
+  // nell'editor c'era "Riconsegna 0" e in addebito usciva 0,70). Vale cio' che sta nel listino di
+  // QUESTO master, punto.
+  const { data: listini } = await adminDb.from('listini_corrieri').select('id').eq('master_id', masterId)
+  const listinoIds = (listini || []).map((l: any) => l.id)
+  if (!listinoIds.length) return { totale: 0, nonPrezzati: richiesti }
+
+  const { data: righe } = await adminDb.from('listini_corrieri_supplementi')
+    .select('id,nome,valore,descrizione')
+    .in('listino_id', listinoIds).eq('corriere_id', corriereId).eq('tipo', 'accessorio')
+    .order('id', { ascending: true })   // DETERMINISTICO: con righe doppie vince sempre la stessa
+
+  const mappa = new Map<string, { prezzo: number; perc: number }>()
+  for (const r of (righe || [])) {
+    let d: any = null; try { d = JSON.parse((r as any).descrizione) } catch { /* descrizione non JSON */ }
+    const nome = String((r as any).nome || d?.nome || '').trim().toLowerCase()
+    if (!nome || mappa.has(nome)) continue   // la prima riga vince
+    mappa.set(nome, {
+      prezzo: Number(d?.prezzo ?? (r as any).valore ?? 0) || 0,
+      perc: Number(d?.perc ?? 0) || 0,
+    })
+  }
+
+  let totale = 0
+  const nonPrezzati: string[] = []
+  for (const nome of richiesti) {
+    const m = mappa.get(nome.toLowerCase())
+    // Non a listino su questo livello: 0 e lo si segnala. Zero E' un prezzo valido (accessorio
+    // regalato di proposito), quindi "manca la riga" e "la riga dice 0" sono cose diverse.
+    if (!m) { nonPrezzati.push(nome); continue }
+    totale += m.prezzo + (m.perc / 100) * baseNolo
+  }
+  return { totale: Math.round(totale * 100) / 100, nonPrezzati }
 }
 
 // ESPORTATA perche' serve anche a RIPREZZARE.
@@ -56,6 +123,9 @@ export async function costruisciCatena(
     corriereNome?: string
     contrassegno?: number
     assicurazione?: number
+    // Servizi accessori scelti per questa spedizione: servono i NOMI, l'importo lo decide il listino
+    // di OGNI livello (come il contrassegno). Assenti = nessun accessorio, comportamento invariato.
+    serviziAccessori?: { nome?: string }[]
     // SOLO ricalcolo RETTIFICHE: forza la stessa fascia (di norma 'Italia') su TUTTI i livelli della
     // catena, così non si mescolano zone diverse (MULTI su SCS, Ecomize su Italia). Default assente.
     zonaForzata?: string
@@ -102,6 +172,7 @@ export async function costruisciCatena(
     let zonaLivello: string | undefined
     let codOltreMax: boolean | undefined
     let assOltreMax: boolean | undefined
+    let accNonPrezzati: string[] | undefined
     if (params.corriereNome) {
       const mCorrId = await corriereDiMasterPerNome(adminDb, m.id, params.corriereNome)
       if (mCorrId) {
@@ -134,7 +205,21 @@ export async function costruisciCatena(
           pesoSuRealeCost,
           mittCap: params.mittCap, mittProvincia: params.mittProvincia, mittPaese: params.mittPaese,
         })
-        if (pz != null) { prezzo = pz.totale; zonaLivello = pz.zona; calcolato = true; codOltreMax = pz.contrassegnoOltreMax; assOltreMax = pz.assicurazioneOltreMax }
+        if (pz != null) {
+          prezzo = pz.totale; zonaLivello = pz.zona; calcolato = true
+          codOltreMax = pz.contrassegnoOltreMax; assOltreMax = pz.assicurazioneOltreMax
+          // ACCESSORI SUL COSTO DI QUESTO LIVELLO. La base della percentuale e' nolo+fuel+sponda, la
+          // stessa che usa il prezzo al cliente (crea/route.ts): senza contrassegno ne' assicurazione,
+          // altrimenti un accessorio a % crescerebbe col valore incassato, che non c'entra.
+          if ((params.serviziAccessori || []).length) {
+            const acc = await accessoriDelLivello(
+              adminDb, m.id, mCorr.id, params.serviziAccessori!,
+              (pz.nolo || 0) + (pz.fuel || 0) + (pz.sponda || 0),
+            )
+            prezzo = Math.round((prezzo + acc.totale) * 100) / 100
+            if (acc.nonPrezzati.length) accNonPrezzati = acc.nonPrezzati
+          }
+        }
       }
     }
     // Fallback se il master non ha il listino corrieri per questo contratto:
@@ -189,6 +274,7 @@ export async function costruisciCatena(
       prezzo, isProprietario, zona: zonaLivello,
       pagaDalSuoConto,
       contrassegnoOltreMax: codOltreMax, assicurazioneOltreMax: assOltreMax,
+      accessoriNonPrezzati: accNonPrezzati,
     })
 
     if (isProprietario) break
@@ -270,6 +356,7 @@ export async function verificaCreditoCatena(
     corriereNome?: string
     contrassegno?: number
     assicurazione?: number
+    serviziAccessori?: { nome?: string }[]
     // La zona e il prezzo con cui e' stato calcolato il CLIENTE. Servono al controllo qui sotto.
     zonaCliente?: string
     prezzoCliente?: number
@@ -291,6 +378,7 @@ export async function verificaCreditoCatena(
     corriereNome: params.corriereNome,
     contrassegno: params.contrassegno,
     assicurazione: params.assicurazione,
+    serviziAccessori: params.serviziAccessori,
     mittCap: params.mittCap, mittProvincia: params.mittProvincia, mittPaese: params.mittPaese,
   })
   if (errore) return { ok: false, errore }
@@ -342,6 +430,19 @@ export async function verificaCreditoCatena(
   if ((params.assicurazione || 0) > 0 && catena.some(l => !l.isProprietario && l.assicurazioneOltreMax === true)) {
     return { ok: false, servizioNonPrezzato: true, errore: 'Assicurazione non disponibile su questo contratto per questa destinazione: rimuovila o scegli un altro corriere.' }
   }
+  // ── ACCESSORIO VENDUTO MA NON PREZZATO IN ACQUISTO: SI SEGNALA, NON SI BLOCCA ──
+  // Stessa forma del contrassegno qui sopra, dove pero' la spedizione non nasce. Qui NO, di proposito:
+  // il contrassegno e' vecchio e i listini lo hanno tutti, gli accessori sono nati il 3/9 e nessuno li
+  // ha ancora prezzati su tutta la catena — un blocco fermerebbe spedizioni che oggi passano, cioe' la
+  // cosa che REGOLE.md dice di non fare a occhio. Il buco dei soldi lo chiude l'addebito (il livello
+  // che ha la riga ora la paga); questo log dice a chi manca, cosi' la si aggiunge e solo DOPO, con i
+  // numeri di quante ne bloccherebbe, si decide se diventare un blocco.
+  for (const l of catena) {
+    if (l.isProprietario || !(l.accessoriNonPrezzati || []).length) continue
+    console.warn('[CATENA][ACCESSORIO-NON-PREZZATO] lo vende senza averlo in acquisto: lo assorbe il detentore', {
+      contratto: params.corriereNome, master: l.nome, masterId: l.masterId, servizi: l.accessoriNonPrezzati,
+    })
+  }
 
   for (const liv of catena) {
     // Contratti PROPRI: non si bloccano mai (il master paga il corriere per conto suo).
@@ -378,6 +479,7 @@ export async function addebitaCatena(
     corriereNome?: string
     contrassegno?: number
     assicurazione?: number
+    serviziAccessori?: { nome?: string }[]
     mittCap?: string
     mittProvincia?: string
     mittPaese?: string
@@ -396,6 +498,7 @@ export async function addebitaCatena(
     corriereNome: params.corriereNome,
     contrassegno: params.contrassegno,
     assicurazione: params.assicurazione,
+    serviziAccessori: params.serviziAccessori,
     mittCap: params.mittCap, mittProvincia: params.mittProvincia, mittPaese: params.mittPaese,
   })
 
