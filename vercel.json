@@ -96,10 +96,6 @@
       "schedule": "40 * * * *"
     },
     {
-      "path": "/api/tracking/ripesature-auto",
-      "schedule": "*/20 * * * *"
-    },
-    {
       "path": "/api/controllo/sentinella",
       "schedule": "0 7 * * *"
     },

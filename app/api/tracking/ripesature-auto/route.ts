@@ -43,9 +43,31 @@ async function autorizzato(req: NextRequest): Promise<boolean> {
   return u.master_id === MASTER_DETENTORE   // SOLO MULTIEXPRESS (detentore dei contratti Poste)
 }
 
+// ═══ IN PAUSA PER DECISIONE DI LORENZO (29/09/2026) ═══
+// "metti in pausa le rettifiche one tracking, ti dico io poi quando dovra' riniziare."
+// Il motore non calcola e non crea piu' niente finche' non lo dice lui. La pausa e' in DUE punti
+// apposta: qui dentro e nel cron di vercel.json (tolto). Cosi' non riparte ne' da sola ne' per una
+// chiamata a mano, e riaccenderla e' una scelta esplicita, non una dimenticanza.
+//
+// COSA CONTINUA A GIRARE, ed e' giusto cosi':
+//  * le MISURE dal Mac (misure.mjs → ripesature_misure): servono alla scheda "Ripesature" del popup
+//    e non addebitano niente;
+//  * le rettifiche che arrivano dai FILE dei fornitori, che sono un'altra strada.
+// Le misure intanto si accumulano in coda (8.115 al 29/09/2026) e NON si perdono: alla riaccensione
+// il motore le lavora dalla piu' vecchia. Le 673 rettifiche gia' create e in attesa di conferma
+// restano dove sono: questa pausa non le tocca e non muove un euro.
+//
+// PER RIACCENDERE: rimettere IN_PAUSA = false e rimettere il cron in vercel.json
+// ({ "path": "/api/tracking/ripesature-auto", "schedule": "*/20 * * * *" }).
+const IN_PAUSA = true
+
 export async function GET(req: NextRequest) {
   const admin = createAdminSupabase()
   if (!(await autorizzato(req))) return NextResponse.json({ error: 'Non autorizzato' }, { status: 401 })
+  if (IN_PAUSA) {
+    console.log('[RIPESATURE-AUTO] in pausa per decisione del 29/09/2026: nessun calcolo, nessuna rettifica')
+    return NextResponse.json({ ok: true, in_pausa: true, messaggio: 'Recupero ripesature in pausa: riprende quando lo decide Lorenzo.' })
+  }
 
   const { data: coda, error: erroreCoda } = await admin.rpc('prossime_ripesature_da_calcolare', {
     p_master: MASTER_DETENTORE, lim: PER_GIRO,
