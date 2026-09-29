@@ -54,19 +54,31 @@ export async function POST(req: NextRequest) {
   // SOLO LE MIE, E SOLO QUELLE GIA' ADDEBITATE.
   // Una rettifica che il livello di sopra non ha ancora confermato non e' mia: non mi e' stato
   // tolto un euro, e girarla al livello sotto vorrebbe dire incassare qualcosa che non ho pagato.
-  const { data: tutteMie } = await adminDb.from('rettifiche')
-    .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_reale,colli_ripesati,rif_fornitore,propagazione,fuori_sagoma,supplementi_nomi')
-    .in('id', ids).eq('target_master_id', mio).eq('confermata', true)
+  // A BLOCCHI DI 500: anche chiedendo per id, il database ne torna al massimo mille per volta. Con
+  // 2.215 righe selezionate (successo il 29/09/2026) se ne sarebbero girate mille e le altre
+  // sarebbero rimaste ferme, senza un errore da nessuna parte.
+  const tutteMie: any[] = []
+  for (let i = 0; i < ids.length; i += 500) {
+    const { data, error } = await adminDb.from('rettifiche')
+      .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_reale,colli_ripesati,rif_fornitore,propagazione,fuori_sagoma,supplementi_nomi')
+      .in('id', ids.slice(i, i + 500)).eq('target_master_id', mio).eq('confermata', true)
+    if (error) { console.error('[NETWORK] lettura rettifiche selezionate:', error.message); break }
+    tutteMie.push(...(data || []))
+  }
 
   // IN ATTESA SOPRA: rettifiche che HAI selezionato, tue (target=mio), ma che il livello di SOPRA non
   // ha ancora CONFERMATO. Non sono girabili (non ti è stato scalato niente) — ma NON sono perse: prima
   // sparivano in silenzio dal conteggio, ed è ESATTAMENTE la sensazione "non me le porta tutte". Ora si
   // contano e si dicono, così sai che aspettano solo una conferma sopra e le ritenti dopo.
-  const { data: attesaSopra } = await adminDb.from('rettifiche')
-    .select('numero_spedizione').in('id', ids).eq('target_master_id', mio).eq('confermata', false)
-  const attesaLdv = (attesaSopra || []).map((r: any) => r.numero_spedizione)
+  const attesaSopra: any[] = []
+  for (let i = 0; i < ids.length; i += 500) {
+    const { data } = await adminDb.from('rettifiche')
+      .select('numero_spedizione').in('id', ids.slice(i, i + 500)).eq('target_master_id', mio).eq('confermata', false)
+    attesaSopra.push(...(data || []))
+  }
+  const attesaLdv = attesaSopra.map((r: any) => r.numero_spedizione)
 
-  if (!tutteMie?.length) {
+  if (!tutteMie.length) {
     return NextResponse.json({
       error: attesaLdv.length
         ? `Nessuna girabile adesso: ${attesaLdv.length} ${attesaLdv.length === 1 ? 'è in attesa' : 'sono in attesa'} che il livello sopra le confermi. NON sono perse — riprova quando saranno confermate.`

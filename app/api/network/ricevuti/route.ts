@@ -49,12 +49,28 @@ export async function GET(_req: NextRequest) {
     // decise (che restano qui) riempivano il tetto e spingevano FUORI dalle 200 le nuove ancora da
     // decidere: il sotto-master smetteva di vederle e non poteva più addebitarle. Ora le null
     // (da decidere) vengono sempre prima e il tetto è ampio, così non spariscono mai.
-    adminDb.from('rettifiche')
-      .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,fuori_sagoma,confermata,stato,propagazione,created_at,masters:master_id(nome)')
-      .eq('target_master_id', mio)
-      .eq('confermata', true)
-      .order('propagazione', { ascending: true, nullsFirst: true })
-      .order('created_at', { ascending: false }).limit(1000),
+    // IL TETTO NON BASTA MAI. Anche a mille righe: il 29/09/2026 il livello di sopra ne ha
+    // confermate 2.215 in un pomeriggio verso un solo sotto-master, che ne ha viste 999 — e quelle
+    // che non vede non puo' accettarle, quindi non puo' nemmeno girarle ai suoi clienti: il
+    // recupero si ferma li'. Le righe DA DECIDERE si prendono TUTTE, pagina per pagina; le
+    // storiche (gia' decise) restano col loro tetto, che li' serve solo a mostrare lo scorso.
+    (async () => {
+      const daDecidere: any[] = []
+      for (let da = 0; ; da += 1000) {
+        const { data, error } = await adminDb.from('rettifiche')
+          .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,fuori_sagoma,confermata,stato,propagazione,created_at,masters:master_id(nome)')
+          .eq('target_master_id', mio).eq('confermata', true).is('propagazione', null)
+          .order('created_at', { ascending: false }).range(da, da + 999)
+        if (error) { console.error('[NETWORK] rettifiche da decidere:', error.message); break }
+        daDecidere.push(...(data || []))
+        if (!data || data.length < 1000) break
+      }
+      const { data: storiche } = await adminDb.from('rettifiche')
+        .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,fuori_sagoma,confermata,stato,propagazione,created_at,masters:master_id(nome)')
+        .eq('target_master_id', mio).eq('confermata', true).not('propagazione', 'is', null)
+        .order('created_at', { ascending: false }).limit(500)
+      return { data: [...daDecidere, ...(storiche || [])], error: null }
+    })(),
     adminDb.from('distinte_contrassegni')
       .select('id,numero,totale_iniziale,totale_rimborsato,metodo_pagamento,stato,data_pagamento,accettata_target,created_at,masters:master_id(nome),distinte_contrassegni_righe(numero_spedizione,importo_cod)')
       .eq('target_master_id', mio)

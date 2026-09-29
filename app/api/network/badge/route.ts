@@ -32,16 +32,25 @@ export async function GET(_req: NextRequest) {
   // Rettifiche ricevute, confermate dal livello sopra (mi è già stato scalato), ancora da decidere.
   // Escludo quelle che HANNO già una figlia (propagate a metà da un giro interrotto): non sono "da
   // decidere", darebbero "già propagata" — è la stessa esclusione del self-heal di ricevuti.
-  const { data: rettPend } = await adminDb.from('rettifiche')
-    .select('id,differenza,fuori_sagoma')
-    .eq('target_master_id', mio).eq('confermata', true).is('propagazione', null)
-  const idsPend = (rettPend || []).map((r: any) => r.id)
+  // SI PAGINA: senza .range il database ne torna mille e basta, e il numero sul badge diventa una
+  // bugia — il 29/09/2026 un sotto-master ne aveva 2.215 e ne vedeva 1.000.
+  const rettPend: any[] = []
+  for (let da = 0; ; da += 1000) {
+    const { data, error } = await adminDb.from('rettifiche')
+      .select('id,differenza,fuori_sagoma')
+      .eq('target_master_id', mio).eq('confermata', true).is('propagazione', null)
+      .order('id').range(da, da + 999)
+    if (error) { console.error('[BADGE] rettifiche da accettare:', error.message); break }
+    rettPend.push(...(data || []))
+    if (!data || data.length < 1000) break
+  }
+  const idsPend = rettPend.map((r: any) => r.id)
   const conFiglia = new Set<string>()
   for (let i = 0; i < idsPend.length; i += 400) {
     const { data } = await adminDb.from('rettifiche').select('origine_rettifica_id').in('origine_rettifica_id', idsPend.slice(i, i + 400))
     for (const f of (data || [])) if ((f as any).origine_rettifica_id) conFiglia.add((f as any).origine_rettifica_id)
   }
-  const rettDaAccettare = (rettPend || []).filter((r: any) => !conFiglia.has(r.id))
+  const rettDaAccettare = rettPend.filter((r: any) => !conFiglia.has(r.id))
   const rettAccettareImporto = rettDaAccettare.reduce((a: number, r: any) =>
     a + (Number(r.differenza) < 0 ? -Number(r.differenza) : 0) + (Number(r.fuori_sagoma) || 0), 0)
 
