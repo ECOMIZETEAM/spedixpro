@@ -250,14 +250,24 @@ export default function AbbonamentoPage() {
     const anomalie = allinea?.anomalie || []   // canone su Stripe ≠ listino (allarme che addebita comunque)
     const pianoTag = (p?: string) => (p || '').replace(/^enterprise_/, '').toUpperCase()   // enterprise_20k → 20K
 
-    // PROSSIMO INCASSO — dal prossimo giro di rinnovi (il prossimo 1°), da STRIPE e SOLO di quel mese.
+    // PROSSIMO INCASSO — il PRIMO giro di rinnovi in arrivo, da STRIPE e SOLO di quel mese.
     // Perché non il valore del server (`incassoRealeStimato`): quello somma i conguagli dal DB, che è cieco
     // sugli upgrade a proration differita (Velox: il conguaglio vive solo su Stripe) → usciva ~40€ sotto; e
     // contava anche chi rinnova un mese più in là (LOGIXIA/di Simine, rinnovo 1/11). Qui si legge il canone
     // e il conguaglio VERI da Stripe (uguali per tutti, nessuno "fuori dal DB") e si tiene SOLO chi rinnova
-    // nel mese del prossimo 1°. Finché i dati Stripe non sono arrivati, si mostra la stima DB come ripiego.
+    // nel mese del prossimo rinnovo. Finché i dati Stripe non sono arrivati, si mostra la stima DB come ripiego.
+    //
+    // IL MESE È QUELLO DEL RINNOVO PIÙ VICINO NEL FUTURO, **non** `pausa_fino_al`. pausa_fino_al è il
+    // bersaglio dell'AZIONE "allinea": quando il 1° del mese è a <48h, Stripe rifiuta quel trial_end e si
+    // salta al 1° del mese DOPO (giusto per l'allinea). Usarlo come "prossimo incasso" nascondeva l'incasso
+    // IMMINENTE: il 29/09 mostrava novembre (€417, i 3 già su nov) e nascondeva i €3.815 dei 20 che
+    // rinnovano il 1° ottobre. Ora si prende il mese del rinnovo (`rinnovo_attuale`) più prossimo da oggi.
     const stripePronto = !!allinea && !allinea.error && Array.isArray(allinea?.righe)
-    const meseProssimo = (allinea?.pausa_fino_al || '').slice(0, 7)   // es. '2026-10'
+    const oggiISO = new Date().toISOString().slice(0, 10)
+    const meseProssimo = (allinea?.righe || [])
+      .filter((r: any) => !r.escluso && r.rinnovo_attuale && r.rinnovo_attuale >= oggiISO)
+      .map((r: any) => String(r.rinnovo_attuale).slice(0, 7))
+      .sort()[0] || (allinea?.pausa_fino_al || '').slice(0, 7)
     const righeMese = (allinea?.righe || []).filter((r: any) => !r.escluso && (r.rinnovo_attuale || '').slice(0, 7) === meseProssimo)
     const incassoProssimo = Math.round(righeMese.reduce((t: number, r: any) => t + Number(r.canone || 0) + Number(r.conguaglio || 0), 0) * 100) / 100
     const congProssimo = Math.round(righeMese.reduce((t: number, r: any) => t + Number(r.conguaglio || 0), 0) * 100) / 100
