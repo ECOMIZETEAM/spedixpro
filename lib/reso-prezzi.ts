@@ -50,6 +50,37 @@ export function pacchiSpedizione(sped: any): any[] {
   }))
 }
 
+// I COLLI VERI: quelli RIMISURATI dal corriere, se il pacco e' stato ripesato; altrimenti quelli
+// dichiarati alla partenza.
+//
+// E' il conto che mancava sul reso. Il ritorno il corriere lo fa pagare sul peso VERO: un pacco
+// partito come 1 kg e rimisurato 5,72 torna indietro come un 5,72, e ce lo addebita 7,34 EUR.
+// Noi invece calcolavamo il nolo del reso sul peso DICHIARATO e ne incassavamo 3,90: la differenza
+// restava a chi detiene il contratto, su ogni singolo reso. Il caso peggiore trovato:
+// 050123152870354, partita per 50 kg e rimisurata 141,2 — reso incassato 20,68 contro 41,23 di costo.
+//
+// Le misure del corriere viaggiano gia' con la rettifica (colli_ripesati): si prende la piu'
+// recente. Vale anche se la rettifica e' ancora in attesa di conferma: il peso e' un fatto, non
+// dipende da chi l'ha accettata.
+export async function pacchiVeri(admin: any, sped: any): Promise<any[]> {
+  const num = (v: any) => Number(v) || 0
+  try {
+    if (sped?.id) {
+      const { data } = await admin.from('rettifiche')
+        .select('colli_ripesati').eq('spedizione_id', sped.id)
+        .not('colli_ripesati', 'is', null)
+        .order('created_at', { ascending: false }).limit(1)
+      const colli = data?.[0]?.colli_ripesati
+      if (Array.isArray(colli) && colli.length && colli.some((c: any) => num(c?.weight) > 0)) {
+        return colli.map((c: any) => ({
+          weight: num(c?.weight), length: num(c?.length), width: num(c?.width), height: num(c?.height),
+        }))
+      }
+    }
+  } catch { /* se la lettura non riesce si resta ai colli dichiarati: meglio poco che niente */ }
+  return pacchiSpedizione(sped)
+}
+
 // NOLO del cliente per quella spedizione: SOLO il prezzo di fascia/zona (col fuel, che è una
 // percentuale della fascia stessa e non un servizio a parte). Niente contrassegno, niente
 // assicurazione, niente sponda: il pacco torna indietro e basta, non c'è niente da incassare, da
@@ -63,7 +94,7 @@ export async function noloCliente(admin: any, sped: any, listinoId: string | nul
     cap: sped?.dest_cap || '',
     paese: sped?.dest_paese || 'IT',
     citta: sped?.dest_citta || '',   // CAP condivisi fra piu' comuni
-    packages: pacchiSpedizione(sped),
+    packages: await pacchiVeri(admin, sped),
     corriereId: sped?.corriere_id,
   })
   if (!ris || !(ris.prezzo > 0)) return null
@@ -109,7 +140,7 @@ async function spondaListinoCliente(admin: any, listinoId: string, corriereId: s
 // Stessa regola del cliente — sul ritorno non si paga ne' contrassegno ne' assicurazione ne'
 // sponda. null se non calcolabile.
 export async function noloMaster(admin: any, masterId: string, corriereId: string, sped: any): Promise<number | null> {
-  const pacchi = pacchiSpedizione(sped)
+  const pacchi = await pacchiVeri(admin, sped)
   const pesoReale = pacchi.reduce((s: number, p: any) => s + (Number(p?.weight) || 0), 0) || 1
   const d = await calcolaPrezzoCorriereDettaglio(admin, {
     corriereId, masterId,
