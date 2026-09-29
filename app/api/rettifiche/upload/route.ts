@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
   // ("senza misure: nessun volumetrico"), mentre su quel file e' proprio il volume a fare il
   // supplemento: su 45 spedizioni su 106 il pacco pesa MENO del dichiarato e paga lo stesso.
   {
-    const { sembraRipesature, sembraRipesatureSP, leggiRipesature, FUORI_SAGOMA_EUR } = await import('@/lib/ripesature')
+    const { sembraRipesature, sembraRipesatureSP, leggiRipesature } = await import('@/lib/ripesature')
     if (sembraRipesature(righe || [])) {
       const { calcolaRipesature } = await import('@/lib/ripesature-calcolo')
       const lette = leggiRipesature(righe || [])
@@ -227,10 +227,11 @@ export async function POST(req: NextRequest) {
           // dovuto, e l'anti-doppione impedirebbe di correggerla dopo). Il costo del fornitore si
           // scala lo stesso, piu' sotto: quello e' uscito davvero.
           if (attesaMisureLdv.has(e.ldv)) { attesaMisure++; continue }
-          // FUORI SAGOMA: supplemento FISSO da addebitare in aggiunta e far cascare invariato. Va
-          // creata la rettifica ANCHE quando la ripesatura non produce differenza (Amount = solo il
-          // supplemento), altrimenti i 16,39 non verrebbero mai recuperati.
-          const fs = rip?.fuoriSagoma ? FUORI_SAGOMA_EUR : 0
+          // SUPPLEMENTI: importi FISSI da addebitare in aggiunta e far cascare invariati (fuori
+          // sagoma, non sovrapponibile, consegna su appuntamento — la tabella sta in lib/ripesature).
+          // Va creata la rettifica ANCHE quando la ripesatura non produce differenza (l'importo del
+          // fornitore e' solo il supplemento), altrimenti non verrebbe mai recuperato.
+          const fs = Number(rip?.supplementi || 0)
           // A CHI VA INDIRIZZATA: al FIGLIO DIRETTO di chi carica, non al fondo della catena.
           // La catena arriva dal basso verso il detentore; il figlio diretto e' quello che sta
           // subito PRIMA di me. Se non ci sono master sotto, il destinatario e' il cliente.
@@ -350,7 +351,12 @@ export async function POST(req: NextRequest) {
           const c0: any = (r.colli || [])[0] || {}
           const dimTxt = (c0.lunghezza && c0.larghezza && c0.altezza) ? ` dim ${c0.lunghezza}x${c0.larghezza}x${c0.altezza}cm` : ''
           const parti: string[] = []
-          if ((r as any).fuoriSagoma) parti.push('fuori sagoma €16,39')
+          const sup: string[] = (r as any).supplementiNomi || []
+          if (sup.length) parti.push(`${sup.join(' + ')} €${Number((r as any).supplementi || 0).toFixed(2)}`)
+          // Riconosciuto ma senza tariffa: si scrive nel movimento com'e', cosi' chi legge il conto
+          // sa perche' il costo del fornitore e' piu' alto della differenza girata.
+          const senza: string[] = (r as any).supplementiSenzaTariffa || []
+          if (senza.length) parti.push(`${senza.join(' + ')}: tariffa non nota, non girato`)
           if ((r as any).reso) parti.push('reso: gestito dal flusso reso')
           const descrizione = (r as any).codiceProvider
             ? `Ripesatura ${r.ldv}${dimTxt} - costo fornitore €${r.addebitoFornitore.toFixed(2)}${parti.length ? ` [${parti.join(' + ')}]` : ''}`
@@ -399,7 +405,11 @@ export async function POST(req: NextRequest) {
           fuoriCatena, costoFornitoreScalato: Math.round(fornitoreScalato * 100) / 100,
           attesaMisure,                      // multicollo senza misure: in coda, si caricano al prossimo giro
           sopraIlTriplo: sopraIlTriplo.slice(0, 50),
-          fuoriSagoma: (fetta as any[]).filter(r => r.fuoriSagoma).length,   // supplemento €16,39 che ora cascata
+          fuoriSagoma: (fetta as any[]).filter(r => Number(r.supplementi || 0) > 0).length,   // righe con un supplemento che ora cascata
+          supplementiEuro: Math.round((fetta as any[]).reduce((a, r) => a + Number(r.supplementi || 0), 0) * 100) / 100,
+          // Voci che il fornitore addebita ma di cui non conosciamo la tariffa: il costo lo paghiamo,
+          // a valle non lo giriamo. Vanno a vista, altrimenti nessuno le chiede mai al fornitore.
+          supplementiSenzaTariffa: Array.from(new Set((fetta as any[]).flatMap(r => r.supplementiSenzaTariffa || []))),
           reso: (fetta as any[]).filter(r => r.reso).length,                 // reso nel file (costo fornitore scalato)
           resoSaltate,                                                       // reso NON rettificati al cliente (flusso reso a parte)
           totali: {

@@ -47,7 +47,7 @@ export default function NetworkRicevutiPage() {
       if (!m.has(k)) m.set(k, { k, da, giorno, ts: 0, righe: [], totale: 0, totaleDaDecidere: 0, daDecidere: [] })
       const b = m.get(k)
       b.ts = Math.max(b.ts, new Date(r.created_at).getTime())   // data VERA del blocco, per l'ordinamento
-      const addebito = (Number(r.differenza) || 0) - (Number(r.fuori_sagoma) || 0)   // addebito vero = ripesatura + fuori sagoma
+      const addebito = (Number(r.differenza) || 0) - (Number(r.fuori_sagoma) || 0)   // addebito vero = ripesatura + supplementi fissi
       b.righe.push(r); b.totale += addebito
       // Il totale che conta è quello del DA DECIDERE, non di tutto il blocco: 578 già decise + 2 nuove
       // mostravano "580 · €1957" accanto a "Accetta (2)" — sembrava un errore. Ora il blocco grida i 2.
@@ -362,7 +362,7 @@ export default function NetworkRicevutiPage() {
                                 <td style={{...td,fontWeight:700,color:add<0?'#dc2626':'#16a34a'}}>
                                   € {add.toFixed(2)}
                                   {Number(r.fuori_sagoma || 0) > 0 && (
-                                    <span style={{display:'block',fontSize:'10px',fontWeight:600,color:'#7c2d12'}}>di cui fuori sagoma € {Number(r.fuori_sagoma).toFixed(2)}</span>
+                                    <span style={{display:'block',fontSize:'10px',fontWeight:600,color:'#7c2d12'}}>di cui supplementi € {Number(r.fuori_sagoma).toFixed(2)}</span>
                                   )}
                                 </td>
                               )

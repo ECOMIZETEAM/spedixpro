@@ -89,6 +89,8 @@ export default function RettificaCostiPage() {
         // quando il collo dichiarato era molto piu' piccolo del vero. Non e' un errore, ma chi paga
         // deve vederle prima di confermare.
         let sopra: any[] = data.sopraIlTriplo || []
+        let supEuro = data.supplementiEuro || 0
+        let supIgnoti: string[] = data.supplementiSenzaTariffa || []
         let da = (data.da || 0) + (data.quante || 0)
         const totale = data.totaleDaFare ?? 0
         const fileId = data.fileId
@@ -103,6 +105,7 @@ export default function RettificaCostiPage() {
           if (d2?.error) break
           creati += d2.creato || 0; gia += d2.giaCaricate || 0; fornitore += d2.costoFornitoreScalato || 0
           attesa += d2.attesaMisure || 0; sopra = sopra.concat(d2.sopraIlTriplo || [])
+          supEuro += d2.supplementiEuro || 0; supIgnoti = supIgnoti.concat(d2.supplementiSenzaTariffa || [])
           const avanti = (d2.da || 0) + (d2.quante || 0)
           // Se il segnaposto non si muove il file non finirebbe mai di essere chiesto: meglio
           // fermarsi e dire quante ne sono entrate che restare a girare a vuoto.
@@ -128,6 +131,8 @@ export default function RettificaCostiPage() {
             + (fornitore ? ` Il conto del fornitore, € ${fornitore.toFixed(2)}, è stato scalato dal tuo credito: è la fattura che hai già ricevuto.` : '')
             + (attesa ? ` ${attesa} spedizioni con più colli sono in attesa delle misure collo per collo e NON sono state addebitate: le misure si leggono stanotte, ricarica lo stesso file domani e si caricheranno per intero.` : '')
             + (sopra.length ? ` Attenzione: ${sopra.length} rettifiche chiedono più del triplo di quanto ha addebitato il corriere (il collo dichiarato era molto più piccolo del vero) — per esempio ${sopra[0].ldv}, € ${Number(sopra[0].costoFornitore).toFixed(2)} di costo contro € ${Number(sopra[0].differenza).toFixed(2)} da girare. Controllale prima di confermare.` : '')
+            + (supEuro ? ` Compresi € ${supEuro.toFixed(2)} di supplementi fissi (fuori sagoma, non sovrapponibile, consegna su appuntamento), che scendono invariati.` : '')
+            + (supIgnoti.length ? ` Il corriere ha addebitato anche ${Array.from(new Set(supIgnoti)).join(' e ')}: di questi non conosciamo la tariffa, il costo resta a noi e NON è stato girato — vanno chiesti al corriere.` : '')
             + ' Scegli a chi girarle e premi Conferma: fino a quel momento non viene scalato nulla a loro.',
         })
         return
@@ -398,9 +403,9 @@ export default function RettificaCostiPage() {
                 ), ...(aperti[chiave] ? g.righe : []).map((r:any)=>{
                   const isSelected = selectedIds.includes(r.id)
                   const diff = Number(r.differenza || 0)
-                  // L'addebito vero = ripesatura + supplemento fuori sagoma (fisso, in aggiunta). Una
-                  // riga di solo fuori sagoma ha differenza 0 ma addebita comunque i 16,39: va mostrato
-                  // questo, non uno "0" che sembrerebbe un errore.
+                  // L'addebito vero = ripesatura + supplementi fissi (fuori sagoma, non sovrapponibile,
+                  // consegna su appuntamento: in aggiunta). Una riga di solo supplemento ha differenza 0
+                  // ma addebita comunque: va mostrato questo, non uno "0" che sembrerebbe un errore.
                   const fs = Number(r.fuori_sagoma || 0)
                   const addebito = Math.round((diff - fs) * 100) / 100
                   const isDaRett = r.stato === 'da_rettificare'

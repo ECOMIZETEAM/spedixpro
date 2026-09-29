@@ -33,7 +33,9 @@ export type Ripesatura = {
   destinatario: string
   // ── Solo per il formato TRANSAZIONI SpediamoPro (dato nel testo Details) ──
   codiceProvider?: string   // il "6A..." = raw_response.code: NON è il tracking, la rotta lo risolve
-  fuoriSagoma?: boolean     // il testo contiene "supplemento fuori sagoma": extra FISSO in cascata
+  supplementi?: number      // supplementi FISSI riconosciuti (euro): si addebitano in aggiunta e cascatano invariati
+  supplementiNomi?: string[]        // quali sono, per scriverlo nella descrizione del movimento
+  supplementiSenzaTariffa?: string[]// riconosciuti ma senza importo certo: si segnalano, non si indovinano
   reso?: boolean            // il testo contiene "reso": il cliente non lo paga qui (flusso reso a parte)
 }
 
@@ -78,10 +80,35 @@ const RE_SP_DIM   = /(?:dim:|dimensioni:)\s*([0-9.]+x[0-9.]+x[0-9.]+)/i
 // Amount di SpediamoPro: punto decimale ("7.45"), importi piccoli (nessuna migliaia).
 const importoSP = (v: any) => Math.abs(Number(String(v ?? '0').replace(',', '.')) || 0)
 
-// Supplemento FUORI SAGOMA di SpediamoPro: importo FISSO, misurato sui dati veri 3/3 identici a
-// 16,39 € (righe con Amount = 16,39 esatto, zero ripesatura dentro). Non entra nel listino: si
-// addebita in aggiunta alla differenza e cascata INVARIATO lungo la catena (scelta dell'utente).
-// Se un domani il fornitore lo cambia, si tocca solo qui.
+// ── I SUPPLEMENTI DEL FORNITORE ──
+//
+// Oltre alla ripesatura, nella stessa riga il fornitore puo' addebitare dei supplementi fissi. Il
+// testo li nomina ma non ne scrive l'importo: l'Amount e' ripesatura + supplementi tutto insieme.
+// L'importo si legge dalle righe in cui il supplemento e' l'UNICA cosa (peso rimisurato che non fa
+// differenza): li' l'Amount E' il supplemento. Misurato sul conto intero (97.910 righe, luglio →
+// 29/09/2026):
+//   fuori sagoma        16,39 €  — 14 righe esatte a 16,39
+//   non sovrapponibile  16,39 €  — 2 righe nette; una riga con tutti e due fa 32,78, che torna
+//   consegna su appuntamento 2,46 € — 5 righe esatte a 2,46
+// Non entrano nel listino: si addebitano in aggiunta alla differenza e cascatano INVARIATI lungo la
+// catena. Se il fornitore li cambia, si tocca solo questa tabella.
+export const SUPPLEMENTI_SP: { nome: string; re: RegExp; euro: number }[] = [
+  { nome: 'fuori sagoma', re: /fuori\s*sagoma/i, euro: 16.39 },
+  { nome: 'non sovrapponibile', re: /non\s*sovrapponibile/i, euro: 16.39 },
+  { nome: 'consegna su appuntamento', re: /consegna\s*su\s*appuntamento/i, euro: 2.46 },
+]
+
+// RICONOSCIUTI MA SENZA TARIFFA CERTA. Esistono, li paghiamo, ma nel conto non c'e' una sola riga
+// pulita da cui ricavare l'importo: "fuori dimensione" compare 3 volte a 25,82 / 46,14 / 78,40 e
+// "super gdo" 3 volte con importi che non tornano fra loro. Indovinare vorrebbe dire addebitare a
+// caso a un cliente: si segnalano a chi carica, e quando il fornitore dara' la tariffa passano
+// nella tabella sopra.
+export const SUPPLEMENTI_SENZA_TARIFFA: { nome: string; re: RegExp }[] = [
+  { nome: 'fuori dimensione', re: /fuori\s*dimensione/i },
+  { nome: 'super gdo', re: /super\s*gdo/i },
+]
+
+// Resta esportato: e' il fuori sagoma, e fuori di qui qualcuno lo cita ancora per nome.
 export const FUORI_SAGOMA_EUR = 16.39
 
 // E' una riga del formato TRANSAZIONI SpediamoPro (dato nel testo)?
@@ -130,7 +157,9 @@ function leggiRipesatureSP(righe: any[]): { righe: Ripesatura[]; scartate: numbe
       addebitoFornitore: importoSP(c.amounteur ?? c.amount ?? c.importo),
       colli: [collo], dataChiusura: '', mittente: '', destinatario: '',
       codiceProvider: code,
-      fuoriSagoma: /fuori\s*sagoma/i.test(details),
+      supplementi: Math.round(SUPPLEMENTI_SP.filter(s2 => s2.re.test(details)).reduce((a, s2) => a + s2.euro, 0) * 100) / 100,
+      supplementiNomi: SUPPLEMENTI_SP.filter(s2 => s2.re.test(details)).map(s2 => s2.nome),
+      supplementiSenzaTariffa: SUPPLEMENTI_SENZA_TARIFFA.filter(s2 => s2.re.test(details)).map(s2 => s2.nome),
       reso: /(^|[^a-z])reso([^a-z]|$)/i.test(details),
     })
   }
