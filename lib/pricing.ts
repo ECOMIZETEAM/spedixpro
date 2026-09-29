@@ -606,15 +606,20 @@ export async function calcolaPrezzoCorriereDettaglio(
   const pesoReale = Number(params.pesoReale) || _pfm.pesoReale || 1
   let pesoFatturato: number
   if (params.pesoSuRealeCost !== undefined) {
-    // COSTO IN CASCATA: reale/volumetrico lo decide il FORNITORE (regola Moove). Il flag di QUESTO
-    // livello (settings + solo_peso_reale) vale solo per cosa regala ai suoi clienti, non per il suo
-    // costo. Il divisore volumetrico resta il suo (fattore per-corriere → _pfm qui sopra).
-    // COLLO-PER-COLLO come il ramo `else` e come fattura il corriere (dc000a54): `_pfm.pesoFatturato`
-    // (Σ max(peso_collo, volume_collo)), NON `Math.max(pesoVolume, pesoReale)` totale. Il fix per-collo
-    // aveva dimenticato QUESTO ramo (quello della cascata): un multi-collo a densità mista finiva in una
-    // fascia più bassa del costo reale DVA e il detentore assorbiva la differenza (caso 3UW1WLJ055934,
-    // 29/9: sub 8,33 fascia 30 [totale 27] vs costo reale 14,51 fascia 50 [per-collo 30,2] → MULTI −6,18).
-    pesoFatturato = params.pesoSuRealeCost ? pesoReale : Math.max(_pfm.pesoFatturato, pesoReale)
+    // COSTO IN CASCATA: reale/volumetrico lo decide il FORNITORE (regola Moove, via pesoSuRealeCost).
+    // Il flag di QUESTO livello (settings + solo_peso_reale) vale solo per cosa regala ai suoi CLIENTI,
+    // NON per il suo costo. Il peso è COLLO-PER-COLLO (Σ max(peso_collo, volume_collo), come fattura il
+    // corriere e come il ramo `else`) MA calcolato IGNORANDO il solo_peso_reale del livello: perciò NON
+    // `_pfm.pesoFatturato` (che quel flag lo include → se il livello ha solo_peso_reale=ON sarebbe già
+    // collassato al reale, e su un collo ingombrante-leggero uscirebbe una fascia troppo bassa). Due
+    // casi veri chiusi così:
+    //  - multi-collo densità mista (3UW1WLJ055934, 29/9): sub 8,33 fascia 30 [totale 27] vs costo reale
+    //    14,51 fascia 50 [per-collo 30,2] → il fix per-collo aveva dimenticato QUESTO ramo (la cascata);
+    //  - collo ingombrante-leggero con solo_peso_reale del SUB ON (3UW1UHA276489: QUICK, Poste Express M,
+    //    55×65×10 = 7,15 vol, 1 kg reale): con `_pfm.pesoFatturato` usciva 1 kg → 5,83 invece di 7,15 →
+    //    7,60, e MULTI (detentore) assorbiva 1,25. Il volumetrico per-collo puro lo riporta a 7,60.
+    const pfVolPerCollo = calcolaPesoFatturato(packages, fattore, false).pesoFatturato
+    pesoFatturato = params.pesoSuRealeCost ? pesoReale : Math.max(pfVolPerCollo, pesoReale)
   } else {
     pesoFatturato = soloPesoReale ? pesoReale : Math.max(_pfm.pesoFatturato, pesoReale)
     // Agevolazione peso reale: se il corriere ha il flag e OGNI collo è entro 50x32x28 cm,
