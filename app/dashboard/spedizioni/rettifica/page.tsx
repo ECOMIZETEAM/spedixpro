@@ -68,7 +68,11 @@ export default function RettificaCostiPage() {
       const res = await fetch('/api/rettifiche/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nomeFile: file.name, righe, da: 0, quante: 15 })
+        // CINQUANTA PER VOLTA (erano 15). Dal 29/09/2026 il calcolo fa otto righe insieme e costa
+        // ~0,8 s a riga invece di 6,3: con pacchetti da 15 il tempo se ne andava nelle andate e
+        // ritorni (67 per mille lettere di vettura). Cinquanta stanno abbondantemente dentro il
+        // tempo massimo della richiesta e la barra continua a muoversi.
+        body: JSON.stringify({ nomeFile: file.name, righe, da: 0, quante: 50 })
       })
       const data = await res.json()
       if (data?.tipo === 'ripesature') {
@@ -86,7 +90,7 @@ export default function RettificaCostiPage() {
         while (!finito && da < totale) {
           const r2 = await fetch('/api/rettifiche/upload', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nomeFile: file.name, righe, da, quante: 15, fileId }),
+            body: JSON.stringify({ nomeFile: file.name, righe, da, quante: 50, fileId }),
           })
           const d2 = await r2.json()
           if (d2?.error) break

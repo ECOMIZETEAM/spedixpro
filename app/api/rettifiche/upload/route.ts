@@ -222,14 +222,22 @@ export async function POST(req: NextRequest) {
             colli_ripesati: e.colli_ripesati || null,
           })
         }
+        // OTTO SCRITTURE ALLA VOLTA, una riga per volta come prima. Righe diverse, spedizioni
+        // diverse: non si pestano i piedi, e il doppione lo ferma comunque l'indice unico del
+        // database (che e' la garanzia vera, non l'ordine in cui si scrive). In fila indiana mille
+        // righe erano mille viaggi al database uno dopo l'altro.
         let scritte = 0, doppioni = 0
-        for (const riga of daScrivere) {
-          const { error } = await adminRip.from('rettifiche').insert(riga)
-          // 23505 = l'indice unico ha respinto un doppione. E' il comportamento voluto, non un guasto.
-          if (!error) scritte++
-          else if (error.code === '23505') doppioni++
-          else console.error('[RIPESATURE] riga non scritta', riga.numero_spedizione, error.message)
-        }
+        let iScrittura = 0
+        await Promise.all(Array.from({ length: Math.min(8, daScrivere.length) }, async () => {
+          while (iScrittura < daScrivere.length) {
+            const riga = daScrivere[iScrittura++]
+            const { error } = await adminRip.from('rettifiche').insert(riga)
+            // 23505 = l'indice unico ha respinto un doppione. E' il comportamento voluto, non un guasto.
+            if (!error) scritte++
+            else if (error.code === '23505') doppioni++
+            else console.error('[RIPESATURE] riga non scritta', riga.numero_spedizione, error.message)
+          }
+        }))
 
         // ── IL CONTO DEL FORNITORE LO PAGA CHI CARICA, E LO PAGA ADESSO ──
         //
@@ -261,7 +269,16 @@ export async function POST(req: NextRequest) {
             .select('id,tracking_number').in('tracking_number', fetta.slice(i, i + 200).map(r => r.ldv))
           for (const s of (ss || [])) spedPerLdv.set((s as any).tracking_number, (s as any).id)
         }
-        for (const r of fetta) {
+        // QUATTRO ALLA VOLTA, non di piu': qui si muove CREDITO, e tutte queste righe scalano lo
+        // stesso conto. La funzione dei movimenti e' atomica e il database mette in fila chi tocca la
+        // stessa riga di credito, quindi il saldo resta giusto comunque; con quattro si guadagna
+        // tempo senza mettersi a spingere in venti sulla stessa porta. Il doppio addebito lo impedisce
+        // come prima l'indice unico sul riferimento RIPFORN-.
+        const daScalare = fetta.filter((r: any) => spedPerLdv.get(r.ldv) && r.addebitoFornitore > 0)
+        let iScalo = 0
+        await Promise.all(Array.from({ length: Math.min(4, daScalare.length) }, async () => {
+          while (iScalo < daScalare.length) {
+          const r = daScalare[iScalo++]
           const sid = spedPerLdv.get(r.ldv)
           if (!sid || !(r.addebitoFornitore > 0)) continue
           // Descrizione del costo fornitore: per il file SpediamoPro dettaglio dimensioni + flag (fuori
@@ -293,7 +310,8 @@ export async function POST(req: NextRequest) {
               console.error('[RIPESATURE] costo fornitore non scalato', r.ldv, m)
             }
           }
-        }
+          }
+        }))
         // I conteggi si SOMMANO a quelli gia' scritti dalle fette precedenti.
         if (creaturaFile) {
           const { data: pre } = await supabase.from('rettifiche_files')
