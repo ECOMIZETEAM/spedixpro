@@ -16,6 +16,10 @@
       "schedule": "*/30 * * * *"
     },
     {
+      "path": "/api/cron/costi-fornitore",
+      "schedule": "40 5 * * *"
+    },
+    {
       "path": "/api/cron/addebiti-code",
       "schedule": "5,15,25,35,45,55 * * * *"
     },
