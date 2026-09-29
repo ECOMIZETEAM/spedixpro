@@ -82,6 +82,13 @@ export default function RettificaCostiPage() {
         // inutile: la stessa scelta si fa gia' selezionando i gruppi e premendo Conferma, e fino a
         // quel momento non si muove un euro.
         let creati = data.creato || 0, gia = data.giaCaricate || 0, fornitore = data.costoFornitoreScalato || 0
+        // Multicollo senza misure collo per collo: NON addebitate (sarebbe meno del dovuto, e
+        // l'anti-doppione impedirebbe di correggerle dopo). Le legge il giro di stanotte.
+        let attesa = data.attesaMisure || 0
+        // Righe dove si chiede alla rete piu' del triplo di quanto ha addebitato il corriere: succede
+        // quando il collo dichiarato era molto piu' piccolo del vero. Non e' un errore, ma chi paga
+        // deve vederle prima di confermare.
+        let sopra: any[] = data.sopraIlTriplo || []
         let da = (data.da || 0) + (data.quante || 0)
         const totale = data.totaleDaFare ?? 0
         const fileId = data.fileId
@@ -95,6 +102,7 @@ export default function RettificaCostiPage() {
           const d2 = await r2.json()
           if (d2?.error) break
           creati += d2.creato || 0; gia += d2.giaCaricate || 0; fornitore += d2.costoFornitoreScalato || 0
+          attesa += d2.attesaMisure || 0; sopra = sopra.concat(d2.sopraIlTriplo || [])
           const avanti = (d2.da || 0) + (d2.quante || 0)
           // Se il segnaposto non si muove il file non finirebbe mai di essere chiesto: meglio
           // fermarsi e dire quante ne sono entrate che restare a girare a vuoto.
@@ -118,6 +126,8 @@ export default function RettificaCostiPage() {
           message: `Create ${creati} rettifiche su ${totale} spedizioni nel file.`
             + (gia ? ` ${gia} erano già state caricate da un file precedente e sono state saltate.` : '')
             + (fornitore ? ` Il conto del fornitore, € ${fornitore.toFixed(2)}, è stato scalato dal tuo credito: è la fattura che hai già ricevuto.` : '')
+            + (attesa ? ` ${attesa} spedizioni con più colli sono in attesa delle misure collo per collo e NON sono state addebitate: le misure si leggono stanotte, ricarica lo stesso file domani e si caricheranno per intero.` : '')
+            + (sopra.length ? ` Attenzione: ${sopra.length} rettifiche chiedono più del triplo di quanto ha addebitato il corriere (il collo dichiarato era molto più piccolo del vero) — per esempio ${sopra[0].ldv}, € ${Number(sopra[0].costoFornitore).toFixed(2)} di costo contro € ${Number(sopra[0].differenza).toFixed(2)} da girare. Controllale prima di confermare.` : '')
             + ' Scegli a chi girarle e premi Conferma: fino a quel momento non viene scalato nulla a loro.',
         })
         return

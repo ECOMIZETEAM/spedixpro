@@ -91,15 +91,18 @@ export async function POST(req: NextRequest) {
       // statement timeout (57014) → l'aggancio torna a vuoto e l'import muore con "Nessuna spedizione
       // agganciata". E' il guasto vero del "non riesco a caricarlo": il vecchio batch da 100 andava
       // SEMPRE in timeout (verificato: 5/5 batch a 500, 0 codici agganciati su 500).
+      const attesaMisureLdv = new Set<string>()
+      const spPerCode = new Map<string, { id: string; colli: number }>()
       if (isSP) {
         const codiciFetta = Array.from(new Set(fetta.map(r => r.codiceProvider || r.ldv)))
         const codeToTrack = new Map<string, string>()
         const { data: sp } = await adminRip.from('spedizioni')
-          .select('tracking_number,code:raw_response->>code')
+          .select('id,colli,tracking_number,code:raw_response->>code')
           .in('raw_response->>code', codiciFetta)
         for (const s of (sp || [])) {
           const code = (s as any).code, tn = (s as any).tracking_number
           if (code && tn) codeToTrack.set(code, tn)
+          if (code) spPerCode.set(code, { id: (s as any).id, colli: Number((s as any).colli || 1) })
         }
         for (const r of fetta) { const t = codeToTrack.get(r.codiceProvider || r.ldv); if (t) r.ldv = t }
       }
@@ -115,6 +118,55 @@ export async function POST(req: NextRequest) {
         for (const g of (gia || [])) viste.add((g as any).rif_fornitore)
       }
       const nuove = fetta.filter(r => !viste.has(r.idOrdine))
+
+      // ── MULTICOLLO: il totale del fornitore NON e' un collo solo ──
+      //
+      // La riga del fornitore porta il peso di TUTTA la spedizione. Metterlo in un collo unico fa
+      // perdere il volume degli altri colli, e alla rete si chiede molto meno del dovuto: su 40
+      // multicollo veri (conto 499,72 EUR) si recuperavano 419,81 EUR invece di 564,16.
+      // Le misure vere, collo per collo, le legge il Mac dal portale filiali (Poste blocca gli IP
+      // dei server) e stanno in misure_colli. Se non ci sono ancora, la riga NON si addebita: si
+      // mette in coda e si aspetta il giro di stanotte — l'export del fornitore e' cumulativo,
+      // domani la riga ritorna e verra' caricata giusta. Dopo tre tentativi a vuoto (spedizioni
+      // che il portale filiali non copre) si rinuncia e si torna a fare come prima, col totale in
+      // un collo solo: meglio recuperare meno che non recuperare niente.
+      const { colliDaMisure } = await import('@/lib/misure-colli')
+      const multi = nuove.filter(r => (spPerCode.get(r.codiceProvider || '')?.colli || 1) > 1)
+      if (multi.length) {
+        const idsMulti = multi.map(r => spPerCode.get(r.codiceProvider || '')!.id)
+        const misurePerSped = new Map<string, any[]>()
+        const rinunciate = new Set<string>()
+        for (let i = 0; i < idsMulti.length; i += 200) {
+          const fettaIds = idsMulti.slice(i, i + 200)
+          const { data: mis } = await adminRip.from('misure_colli')
+            .select('spedizione_id,codice,peso,lunghezza,larghezza,altezza').in('spedizione_id', fettaIds)
+          for (const m of (mis || [])) {
+            const k = (m as any).spedizione_id
+            if (!misurePerSped.has(k)) misurePerSped.set(k, [])
+            misurePerSped.get(k)!.push(m)
+          }
+          const { data: ric } = await adminRip.from('misure_colli_richieste')
+            .select('spedizione_id,esito').in('spedizione_id', fettaIds)
+          for (const x of (ric || [])) if ((x as any).esito === 'senza-misure') rinunciate.add((x as any).spedizione_id)
+        }
+        const daMettereInCoda: any[] = []
+        for (const r of multi) {
+          const sped = spPerCode.get(r.codiceProvider || '')!
+          const mis = misurePerSped.get(sped.id) || []
+          if (mis.length >= sped.colli) {
+            r.colli = colliDaMisure(mis, r.colli.reduce((s: number, c: any) => s + (c.peso || 0), 0))
+            continue
+          }
+          if (rinunciate.has(sped.id)) continue     // il portale filiali non ce le da': si fa come prima
+          daMettereInCoda.push({ spedizione_id: sped.id, colli_attesi: sped.colli })
+          attesaMisureLdv.add(r.ldv)
+        }
+        if (daMettereInCoda.length) {
+          await adminRip.from('misure_colli_richieste')
+            .upsert(daMettereInCoda, { onConflict: 'spedizione_id', ignoreDuplicates: true })
+        }
+      }
+
       // Il flag fuori sagoma / reso vive sulla Ripesatura letta dal file; l'esito del motore porta
       // solo idOrdine → si rimappa qui per sapere, riga per riga, se aggiungere il supplemento fisso
       // o se saltarla (reso).
@@ -156,7 +208,11 @@ export async function POST(req: NextRequest) {
           creaturaFile = fileRip?.id || null
         }
         const daScrivere: any[] = []
-        let fuoriCatena = 0, resoSaltate = 0
+        let fuoriCatena = 0, resoSaltate = 0, attesaMisure = 0
+        // Righe dove la differenza chiesta alla rete supera di molto il costo del fornitore: non e'
+        // un errore (succede quando il cliente ha dichiarato scatole molto piu' piccole del vero e
+        // il fornitore ci ha addebitato poco), ma chi carica deve vederle prima di confermare.
+        const sopraIlTriplo: { ldv: string; costoFornitore: number; differenza: number }[] = []
         for (const e of esiti) {
           if (!e.trovata || !e.spedizioneId) continue
           // Già rettificata (OneTracking o import precedente) → non se ne crea una seconda.
@@ -167,6 +223,10 @@ export async function POST(req: NextRequest) {
           // (prezzo = nolo di fascia), quindi qui NON si crea un addebito cliente. Il costo fornitore
           // (quello che E&A ha davvero pagato per il ritorno) resta scalato sotto, come per tutte.
           if (rip?.reso) { resoSaltate++; continue }
+          // In attesa delle misure collo per collo: non si addebita adesso (sarebbe meno del
+          // dovuto, e l'anti-doppione impedirebbe di correggerla dopo). Il costo del fornitore si
+          // scala lo stesso, piu' sotto: quello e' uscito davvero.
+          if (attesaMisureLdv.has(e.ldv)) { attesaMisure++; continue }
           // FUORI SAGOMA: supplemento FISSO da addebitare in aggiunta e far cascare invariato. Va
           // creata la rettifica ANCHE quando la ripesatura non produce differenza (Amount = solo il
           // supplemento), altrimenti i 16,39 non verrebbero mai recuperati.
@@ -199,6 +259,9 @@ export async function POST(req: NextRequest) {
           // stesso, con differenza a zero, per far scendere il supplemento.
           if (liv.differenza < 0.01 && fs === 0) continue
           const diffRett = liv.differenza >= 0.01 ? liv.differenza : 0
+          if (e.addebitoFornitore > 0 && diffRett > e.addebitoFornitore * 3) {
+            sopraIlTriplo.push({ ldv: e.ldv, costoFornitore: e.addebitoFornitore, differenza: Math.round(diffRett * 100) / 100 })
+          }
           daScrivere.push({
             master_id: myMaster, file_id: creaturaFile,
             spedizione_id: e.spedizioneId, numero_spedizione: e.ldv,
@@ -334,6 +397,8 @@ export async function POST(req: NextRequest) {
           creato: scritte, doppioniRespinti: doppioni, giaCaricate: fetta.length - nuove.length,
           giaRettificate: giaRettificateCount,   // già fatte da OneTracking/import: saltate (no doppio)
           fuoriCatena, costoFornitoreScalato: Math.round(fornitoreScalato * 100) / 100,
+          attesaMisure,                      // multicollo senza misure: in coda, si caricano al prossimo giro
+          sopraIlTriplo: sopraIlTriplo.slice(0, 50),
           fuoriSagoma: (fetta as any[]).filter(r => r.fuoriSagoma).length,   // supplemento €16,39 che ora cascata
           reso: (fetta as any[]).filter(r => r.reso).length,                 // reso nel file (costo fornitore scalato)
           resoSaltate,                                                       // reso NON rettificati al cliente (flusso reso a parte)
