@@ -66,10 +66,10 @@ async function leggiConto(authcode: string, pagine: number): Promise<RigaConto[]
   return out
 }
 
-export type EsitoRiconciliazione = { lette: number; costi: number; scritti: number; euro: number; senzaSpedizione: number }
+export type EsitoRiconciliazione = { lette: number; costi: number; scritti: number; euro: number; senzaSpedizione: number; inAttesa: number }
 
 export async function riconciliaCostiConto(admin: any, opts: { pagine?: number; createdBy?: string | null } = {}): Promise<EsitoRiconciliazione> {
-  const esito: EsitoRiconciliazione = { lette: 0, costi: 0, scritti: 0, euro: 0, senzaSpedizione: 0 }
+  const esito: EsitoRiconciliazione = { lette: 0, costi: 0, scritti: 0, euro: 0, senzaSpedizione: 0, inAttesa: 0 }
 
   // CHI PAGA IL CONTO E' CHI POSSIEDE IL CONTRATTO. Le credenziali sono le sue: i master che lo
   // rivendono usano la stessa chiave ma il conto non e' il loro. Una chiave = un pagatore.
@@ -85,7 +85,7 @@ export async function riconciliaCostiConto(admin: any, opts: { pagine?: number; 
     const righe = await leggiConto(authcode, Math.max(1, opts.pagine || 30))
     esito.lette += righe.length
 
-    const costi: { tipo: string; prefisso: string; code: string; euro: number; riga: string; testo: (ldv: string, eur: string) => string }[] = []
+    const costi: { tipo: string; prefisso: string; code: string; euro: number; riga: string; quando?: string; testo: (ldv: string, eur: string) => string }[] = []
     for (const m of righe) {
       const t = String(m?.reason || '')
       const voce = VOCI.find(v => v.re.test(t))
@@ -93,7 +93,7 @@ export async function riconciliaCostiConto(admin: any, opts: { pagine?: number; 
       const code = codiceDi(t)
       const euro = Math.abs(Number(m?.amount || 0)) / 100
       if (!code || !(euro > 0) || !m?.id) continue
-      costi.push({ tipo: voce.tipo, prefisso: voce.prefisso, code, euro, testo: voce.testo, riga: String(m.id) })
+      costi.push({ tipo: voce.tipo, prefisso: voce.prefisso, code, euro, testo: voce.testo, riga: String(m.id), quando: m.createdAt })
     }
     esito.costi += costi.length
     if (!costi.length) continue
@@ -108,6 +108,29 @@ export async function riconciliaCostiConto(admin: any, opts: { pagine?: number; 
       for (const s of (data || [])) if ((s as any).code) sped.set((s as any).code, { id: (s as any).id, numero: (s as any).numero })
     }
 
+    // ── SI SCALA SOLO QUELLO CHE MANCA ──
+    //
+    // Il flusso dei resi e delle giacenze addebita GIA' al detentore il suo nolo per la stessa cosa
+    // (movimento reso/giacenza con master_target_id = lui, e registra_movimento_master scala il
+    // conto del TARGET). Registrando qui il costo per intero la spesa risultava DOPPIA: il
+    // 29/09/2026 sono stati scalati 2.473,24 EUR di troppo a MULTIEXPRESS, stornati subito.
+    // Si scala la DIFFERENZA fra quello che chiede il corriere e quello che il detentore ha gia'
+    // pagato — che e' esattamente il supplemento che il corriere mette sul ritorno.
+    const SETTIMANA = 7 * 24 * 60 * 60 * 1000
+    const giaAddebitato = new Map<string, number>()
+    {
+      const idSped = Array.from(new Set(costi.map(c => sped.get(c.code)?.id).filter(Boolean))) as string[]
+      for (let k = 0; k < idSped.length; k += 200) {
+        const { data } = await admin.from('movimenti').select('spedizione_id,tipo,importo')
+          .in('spedizione_id', idSped.slice(k, k + 200)).in('tipo', ['reso', 'giacenza'])
+          .eq('master_target_id', pagatore)
+        for (const m of (data || [])) {
+          const key = `${(m as any).spedizione_id}|${(m as any).tipo}`
+          giaAddebitato.set(key, (giaAddebitato.get(key) || 0) + Math.abs(Number((m as any).importo || 0)))
+        }
+      }
+    }
+
     // QUATTRO ALLA VOLTA: qui si muove credito e tutte queste righe scalano lo stesso conto.
     let i = 0
     await Promise.all(Array.from({ length: Math.min(4, costi.length) }, async () => {
@@ -115,19 +138,30 @@ export async function riconciliaCostiConto(admin: any, opts: { pagine?: number; 
         const c = costi[i++]
         const s = sped.get(c.code)
         if (!s) { esito.senzaSpedizione++; continue }
+        const gia = giaAddebitato.get(`${s.id}|${c.tipo}`) || 0
+        const daScalare = Math.round((c.euro - gia) * 100) / 100
+        if (daScalare < 0.01) {
+          // Il detentore ha gia' pagato almeno quanto gli chiede il corriere: niente da aggiungere.
+          // Se non ha pagato NULLA ed e' roba fresca, si aspetta il nostro addebito e si riprova al
+          // giro dopo (il conto e' cumulativo).
+          if (gia <= 0 && c.quando && Date.now() - new Date(c.quando).getTime() < SETTIMANA) esito.inAttesa++
+          continue
+        }
         try {
           await registraMovimentoMaster(admin, {
             masterOwnerId: pagatore, masterTargetId: pagatore, tipo: 'rettifica',
-            descrizione: c.testo(s.numero, c.euro.toFixed(2)),
+            descrizione: gia > 0
+              ? `${c.testo(s.numero, c.euro.toFixed(2))} — gia' conteggiati €${gia.toFixed(2)} nel nolo, si scala la differenza`
+              : c.testo(s.numero, c.euro.toFixed(2)),
             // IL RIFERIMENTO E' LA RIGA DEL CONTO, NON LA SPEDIZIONE. Lo stesso pacco puo' andare in
             // giacenza due volte (24 casi nel conto: due aperture in date diverse, 0,99 EUR
             // ciascuna): con la spedizione come chiave la seconda non si scalerebbe mai, e non solo
             // oggi — per sempre. L'id della riga del conto e' suo e non cambia.
             riferimento: `${c.prefisso}-${c.riga}`,
-            importo: -Math.abs(c.euro),
+            importo: -Math.abs(daScalare),
             spedizioneId: s.id, createdBy: opts.createdBy ?? null,
           })
-          esito.scritti++; esito.euro += c.euro
+          esito.scritti++; esito.euro += daScalare
         } catch (err: any) {
           // Gia' scalato da un giro precedente: e' il comportamento voluto, non un guasto.
           const m = String(err?.message || '')
