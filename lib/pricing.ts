@@ -608,8 +608,13 @@ export async function calcolaPrezzoCorriereDettaglio(
   if (params.pesoSuRealeCost !== undefined) {
     // COSTO IN CASCATA: reale/volumetrico lo decide il FORNITORE (regola Moove). Il flag di QUESTO
     // livello (settings + solo_peso_reale) vale solo per cosa regala ai suoi clienti, non per il suo
-    // costo. Il divisore volumetrico resta il suo (fattore per-corriere → pesoVolume qui sopra).
-    pesoFatturato = params.pesoSuRealeCost ? pesoReale : Math.max(pesoVolume, pesoReale)
+    // costo. Il divisore volumetrico resta il suo (fattore per-corriere → _pfm qui sopra).
+    // COLLO-PER-COLLO come il ramo `else` e come fattura il corriere (dc000a54): `_pfm.pesoFatturato`
+    // (Σ max(peso_collo, volume_collo)), NON `Math.max(pesoVolume, pesoReale)` totale. Il fix per-collo
+    // aveva dimenticato QUESTO ramo (quello della cascata): un multi-collo a densità mista finiva in una
+    // fascia più bassa del costo reale DVA e il detentore assorbiva la differenza (caso 3UW1WLJ055934,
+    // 29/9: sub 8,33 fascia 30 [totale 27] vs costo reale 14,51 fascia 50 [per-collo 30,2] → MULTI −6,18).
+    pesoFatturato = params.pesoSuRealeCost ? pesoReale : Math.max(_pfm.pesoFatturato, pesoReale)
   } else {
     pesoFatturato = soloPesoReale ? pesoReale : Math.max(_pfm.pesoFatturato, pesoReale)
     // Agevolazione peso reale: se il corriere ha il flag e OGNI collo è entro 50x32x28 cm,
