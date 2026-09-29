@@ -910,7 +910,12 @@ async function creaCalcolatoreCorriereBase(
     const L = Number(s.lunghezza) || 0, W = Number(s.larghezza) || 0, H = Number(s.altezza) || 0
     const pesoVolume = (L && W && H) ? (L * W * H) / lc.fattore : 0
     const pesoReale = Number(s.peso_reale) || 1
-    const pesoFatturato = Math.max(pesoReale, pesoVolume)
+    // COLLO-PER-COLLO come l'addebito reale (dc000a54/a75f0ca0): l'elenco NON carica colli_dettaglio,
+    // ma `peso_fatturato` salvato è già Σ max(peso_collo, volume_collo) → usarlo, invece del totale
+    // max(Σreale,Σvol) che sui multi-collo a densità mista mostrava una fascia più bassa del costo
+    // reale (il display divergeva dai movimenti). Mono-collo: i due coincidono. Vecchie senza il
+    // campo: ripiego sul totale (come prima).
+    const pesoFatturato = Number(s.peso_fatturato) > 0 ? Number(s.peso_fatturato) : Math.max(pesoReale, pesoVolume)
 
     const provincia = (s.dest_provincia || '').toUpperCase().trim()
     const cap = (s.dest_cap || '').trim()
@@ -1068,7 +1073,15 @@ async function creaCalcolatoreListinoClienteBase(
     // 50×32×28 cm, oppure "peso reale fino a X kg" sotto soglia, si tassa sul PESO REALE.
     const settC = settPerCorrL.get(s.corriere_id) || {}
     const usaReale = pesoSuReale(settC, pacchi, pesoReale, soloPesoReale)
-    const pesoFatturato = usaReale ? pesoReale : Math.max(pesoReale, pesoVolume)
+    // COLLO-PER-COLLO come l'addebito reale (dc000a54/a75f0ca0): salvo agevolazione (usaReale→reale),
+    // il peso fatturato è Σ max(peso_collo, volume_collo), NON il totale max(Σreale,Σvol) che sui
+    // multi-collo a densità mista mostrava una fascia più bassa. Il valore autorevole è il
+    // `peso_fatturato` salvato (già per-collo, e aggiornato dalle ripesature); l'elenco non carica
+    // colli_dettaglio quindi non lo si può ricalcolare qui. Ripiego sul totale solo per le righe
+    // vecchie senza il campo. Mono-collo: i due coincidono.
+    const pesoFatturato = usaReale
+      ? pesoReale
+      : (Number(s.peso_fatturato) > 0 ? Number(s.peso_fatturato) : Math.max(pesoReale, pesoVolume))
 
     const provincia = (s.dest_provincia || '').toUpperCase().trim()
     const cap = (s.dest_cap || '').trim()
