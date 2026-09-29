@@ -480,9 +480,14 @@ export async function addebitaCatena(
     contrassegno?: number
     assicurazione?: number
     serviziAccessori?: { nome?: string }[]
-    mittCap?: string
-    mittProvincia?: string
-    mittPaese?: string
+    // MITTENTE OBBLIGATORIO (come `packages` in verificaCreditoCatena): è il supplemento origine (zona
+    // mittente disagiata, es. Sicilia/Sardegna su DVA). Era opzionale e SEI rami su nove della creazione
+    // se lo dimenticavano → l'addebito non applicava l'origine e il detentore la assorbiva in silenzio
+    // (caso 142080228585009251). Reso obbligatorio: una rotta nuova che lo scorda NON COMPILA. Chi non
+    // ha davvero un mittente passa stringa vuota (supplementoMittente non matcha → 0, comportamento invariato).
+    mittCap: string
+    mittProvincia: string
+    mittPaese: string
   }
 ): Promise<void> {
   const adminMov = createAdminSupabase()

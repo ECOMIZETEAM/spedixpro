@@ -1661,6 +1661,10 @@ export async function POST(req: NextRequest) {
           corriereNome: corriereRecord.nome_contratto,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
           serviziAccessori,
+          // MITTENTE: supplemento origine (zona mittente disagiata, es. Sicilia/Sardegna su DVA). DEVE
+          // stare qui come nel credito e nel prezzo cliente, altrimenti l'addebito NON applica l'origine
+          // e il DETENTORE la assorbe (caso 142080228585009251, mittente Trapani → MULTI −0,80).
+          mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
           numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
         })
       } catch (e) { console.error('[CREA][EASYPARCEL] cascata catena:', e) }
@@ -2098,6 +2102,9 @@ export async function POST(req: NextRequest) {
           corriereNome: corriereRecord.nome_contratto,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
           serviziAccessori,
+          // MITTENTE: supplemento origine anche qui (vedi nota ramo EASYPARCEL). Innocuo se il corriere
+          // non ha zone su_mittente; corretto se le ha.
+          mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
           numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
         })
       } catch (e) { console.error('[CREA][GLS] cascata catena:', e) }
@@ -2301,6 +2308,8 @@ export async function POST(req: NextRequest) {
           corriereNome: corriereRecord.nome_contratto,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
           serviziAccessori,
+          // MITTENTE: supplemento origine anche qui (vedi nota ramo EASYPARCEL).
+          mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
           numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
         })
       } catch (e) { console.error('[CREA][BRT] cascata catena:', e) }
@@ -2482,6 +2491,8 @@ export async function POST(req: NextRequest) {
           corriereNome: corriereRecord.nome_contratto,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
           serviziAccessori,
+          // MITTENTE: supplemento origine anche qui (vedi nota ramo EASYPARCEL).
+          mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
           numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
         })
       } catch (e) { console.error('[CREA][FEDEX] cascata catena:', e) }
@@ -2632,6 +2643,8 @@ export async function POST(req: NextRequest) {
           corriereNome: corriereRecord.nome_contratto,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
           serviziAccessori,
+          // MITTENTE: supplemento origine anche qui (vedi nota ramo EASYPARCEL).
+          mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
           numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
         })
       } catch (e) { console.error('[CREA][DIELLE] cascata catena:', e) }
@@ -2782,6 +2795,8 @@ export async function POST(req: NextRequest) {
           corriereNome: corriereRecord.nome_contratto,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
           serviziAccessori,
+          // MITTENTE: supplemento origine anche qui (vedi nota ramo EASYPARCEL).
+          mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
           numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
         })
       } catch (e) { console.error('[CREA][POSTE] cascata catena:', e) }
