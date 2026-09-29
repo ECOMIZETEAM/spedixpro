@@ -96,17 +96,21 @@ export const SUPPLEMENTI_SP: { nome: string; re: RegExp; euro: number }[] = [
   { nome: 'fuori sagoma', re: /fuori\s*sagoma/i, euro: 16.39 },
   { nome: 'non sovrapponibile', re: /non\s*sovrapponibile/i, euro: 16.39 },
   { nome: 'consegna su appuntamento', re: /consegna\s*su\s*appuntamento/i, euro: 2.46 },
+  // Queste due non avevano nessuna riga pulita: la tariffa e' stata CALCOLATA rifacendo fare al
+  // fornitore il preventivo della stessa spedizione col peso che ha rimisurato lui, e togliendo
+  // quello che ci aveva addebitato alla partenza — quel che resta nella riga e' il supplemento
+  // (tariffa-supplementi.mjs). Il metodo si e' validato sul fuori sagoma, dove deve restituire
+  // 16,39 e restituisce 13,80-16,39 (i preventivi di oggi non sono le tariffe di allora).
+  //   fuori dimensione 25,82  — due righe indipendenti danno 25,82 ESATTO; la terza e' 25,82 +
+  //                             52,58 di reso = 78,40, e il reso costa quanto l'andata
+  //   super gdo         7,37  — due righe danno 7,25, cioe' 7,37 meno 0,12 di aggiornamento
+  { nome: 'fuori dimensione', re: /fuori\s*dimensione/i, euro: 25.82 },
+  { nome: 'super gdo', re: /super\s*gdo/i, euro: 7.37 },
 ]
 
-// RICONOSCIUTI MA SENZA TARIFFA CERTA. Esistono, li paghiamo, ma nel conto non c'e' una sola riga
-// pulita da cui ricavare l'importo: "fuori dimensione" compare 3 volte a 25,82 / 46,14 / 78,40 e
-// "super gdo" 3 volte con importi che non tornano fra loro. Indovinare vorrebbe dire addebitare a
-// caso a un cliente: si segnalano a chi carica, e quando il fornitore dara' la tariffa passano
-// nella tabella sopra.
-export const SUPPLEMENTI_SENZA_TARIFFA: { nome: string; re: RegExp }[] = [
-  { nome: 'fuori dimensione', re: /fuori\s*dimensione/i },
-  { nome: 'super gdo', re: /super\s*gdo/i },
-]
+// Nessuna voce del conto e' piu' senza tariffa. Il meccanismo resta: il giorno che il fornitore ne
+// inventa una nuova, finisce qui e viene segnalata a chi carica invece di sparire dentro il costo.
+export const SUPPLEMENTI_SENZA_TARIFFA: { nome: string; re: RegExp }[] = []
 
 // Resta esportato: e' il fuori sagoma, e fuori di qui qualcuno lo cita ancora per nome.
 export const FUORI_SAGOMA_EUR = 16.39
@@ -157,7 +161,14 @@ function leggiRipesatureSP(righe: any[]): { righe: Ripesatura[]; scartate: numbe
       addebitoFornitore: importoSP(c.amounteur ?? c.amount ?? c.importo),
       colli: [collo], dataChiusura: '', mittente: '', destinatario: '',
       codiceProvider: code,
-      supplementi: Math.round(SUPPLEMENTI_SP.filter(s2 => s2.re.test(details)).reduce((a, s2) => a + s2.euro, 0) * 100) / 100,
+      // MAI PIU' DI QUELLO CHE CI HANNO ADDEBITATO. Il supplemento e' una PARTE dell'importo della
+      // riga: se la tariffa che conosciamo fosse piu' alta (il fornitore l'ha scontata, o la riga e'
+      // di un periodo con un prezzo diverso) girarla intera vorrebbe dire chiedere a valle piu' di
+      // quanto e' uscito. Sul conto vero succede una volta: una riga di super gdo da 5,73.
+      supplementi: Math.min(
+        Math.round(SUPPLEMENTI_SP.filter(s2 => s2.re.test(details)).reduce((a, s2) => a + s2.euro, 0) * 100) / 100,
+        importoSP(c.amounteur ?? c.amount ?? c.importo),
+      ),
       supplementiNomi: SUPPLEMENTI_SP.filter(s2 => s2.re.test(details)).map(s2 => s2.nome),
       supplementiSenzaTariffa: SUPPLEMENTI_SENZA_TARIFFA.filter(s2 => s2.re.test(details)).map(s2 => s2.nome),
       reso: /(^|[^a-z])reso([^a-z]|$)/i.test(details),
