@@ -174,9 +174,10 @@ export async function POST(req: NextRequest) {
     return c && Number(c.length) && Number(c.width) && Number(c.height) ? ` dim ${c.length}x${c.width}x${c.height}cm` : ''
   }
   // La descrizione MOTIVA il movimento: la parte ripesatura (peso inserito → ripesato) e, se c'e', il
-  // supplemento fuori sagoma come voce a sé con le sue dimensioni — così un addebito da 16,39 su un
-  // pacco lungo si spiega da solo. Se la riga è SOLO fuori sagoma (nessuna ripesatura) si scrive solo
-  // quella, senza il fuorviante "peso inserito X - peso ripesato X".
+  // supplemento COL SUO NOME e le sue dimensioni — così un addebito da 7,37 di super gdo o da 25,82
+  // di fuori dimensione si spiega da solo, invece di chiamarsi "fuori sagoma" come tutti gli altri.
+  // Se la riga è SOLO supplemento (nessuna ripesatura) si scrive solo quella, senza il fuorviante
+  // "peso inserito X - peso ripesato X". Sulle righe vecchie il nome non c'è: si scrive "Supplemento".
   const descrizione = (r: any) => {
     const extraFS = Number(r.fuori_sagoma) || 0
     const haReweigh = Number(r.differenza || 0) < -0.005
@@ -186,7 +187,10 @@ export async function POST(req: NextRequest) {
       const vol = (Number(r.peso_volume_reale) || 0) > (Number(r.peso_reale) || 0)
       parti.push(`Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso ripesato: ${f} Kg${vol ? ' volumetrico' : ''} )`)
     }
-    if (extraFS > 0) parti.push(`Supplemento fuori sagoma ${r.numero_spedizione} €${extraFS.toFixed(2)}${dimDi(r)}`)
+    if (extraFS > 0) {
+      const nomi = String(r.supplementi_nomi || '').trim()
+      parti.push(`Supplemento${nomi ? ' ' + nomi : ''} ${r.numero_spedizione} €${extraFS.toFixed(2)}${dimDi(r)}`)
+    }
     return parti.length ? parti.join(' + ') : `Rettifica ${r.numero_spedizione}`
   }
 

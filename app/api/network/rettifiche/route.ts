@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
   // Una rettifica che il livello di sopra non ha ancora confermato non e' mia: non mi e' stato
   // tolto un euro, e girarla al livello sotto vorrebbe dire incassare qualcosa che non ho pagato.
   const { data: tutteMie } = await adminDb.from('rettifiche')
-    .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_reale,colli_ripesati,rif_fornitore,propagazione,fuori_sagoma')
+    .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_reale,colli_ripesati,rif_fornitore,propagazione,fuori_sagoma,supplementi_nomi')
     .in('id', ids).eq('target_master_id', mio).eq('confermata', true)
 
   // IN ATTESA SOPRA: rettifiche che HAI selezionato, tue (target=mio), ma che il livello di SOPRA non
@@ -182,6 +182,7 @@ export async function POST(req: NextRequest) {
       costo_iniziale: liv.pagato, costo_finale: liv.dovuto ?? liv.pagato,   // dovuto null (collo oltre fascia, solo fuori sagoma) → pari a pagato, differenza 0
       differenza: -diffFiglia,            // la colonna e' "quanto restituisco": un addebito e' negativo (0 se solo fuori sagoma)
       fuori_sagoma: fs,                   // il supplemento fisso scende INVARIATO, NON si riprezza
+      supplementi_nomi: (r as any).supplementi_nomi || null,   // e col nome, altrimenti sotto si legge "fuori sagoma" per tutto
       stato: 'da_rettificare', confermata: false,
       colli_ripesati: colli,              // le misure continuano a scendere, per il livello dopo
       origine_rettifica_id: r.id,         // l'anti-doppione: si propaga una volta sola

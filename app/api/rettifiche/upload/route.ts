@@ -278,6 +278,9 @@ export async function POST(req: NextRequest) {
             costo_iniziale: liv.pagato, costo_finale: liv.dovuto,
             differenza: -diffRett,   // la colonna e' "quanto restituisco": un addebito e' negativo (0 se solo fuori sagoma)
             fuori_sagoma: fs,        // supplemento FISSO, si addebita in aggiunta e cascata invariato
+            // QUALE supplemento: senza il nome, il movimento del cliente diceva "fuori sagoma"
+            // anche quando aveva pagato un super gdo o una consegna su appuntamento.
+            supplementi_nomi: ((rip as any)?.supplementiNomi || []).join(' + ') || null,
             stato: 'da_rettificare',
             rif_fornitore: e.idOrdine,     // l'anti-doppione: indice unico sul database
             // Le misure viaggiano con la riga: servono a chi la ricevera' per riprezzare col
