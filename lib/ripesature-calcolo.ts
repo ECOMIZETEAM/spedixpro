@@ -70,9 +70,10 @@ const arrotonda = (n: number) => Math.round(n * 100) / 100
 // cambia un centesimo — cambia solo il tempo. Misurato il 29/09/2026 su 20 righe vere: 6,33 s a riga
 // una alla volta, 0,93 s a riga a otto per volta (6,8 volte piu' veloce), con esiti IDENTICI riga per
 // riga. E' il motivo per cui MULTIEXPRESS ci metteva mezz'ora a caricare mille lettere di vettura.
-// Otto e non di piu': oltre, si comincia a far la fila sulle connessioni del database e non si
-// guadagna altro.
-const RIGHE_INSIEME = 8
+// SEDICI, non otto: rimisurato il 29/09/2026 sulle rettifiche vere di un sotto-master — 0,98 s a
+// riga con otto, 0,60 con sedici, 0,59 con ventiquattro. Oltre sedici non si guadagna piu' niente
+// (si fa solo la fila sulle connessioni del database), sotto si aspetta e basta.
+const RIGHE_INSIEME = 16
 
 export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promise<EsitoRipesatura[]> {
   // Il risultato torna NELLO STESSO ORDINE in cui sono arrivate le righe, anche se finiscono in

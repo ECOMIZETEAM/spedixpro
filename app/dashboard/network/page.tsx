@@ -109,7 +109,11 @@ export default function NetworkRicevutiPage() {
       // ACCETTA/PROPAGA: ognuna ricostruisce la cascata (lento). Si lavora A LOTTI con una barra,
       // così su 196 rettifiche si vede l'avanzamento invece di sembrare piantato — e un lotto lungo
       // non rischia il timeout della funzione.
-      const BATCH = 12
+      // CINQUANTA PER VOLTA (erano 12). Dal 29/09/2026 il riprezzo gira a sedici righe insieme e
+      // costa ~0,6 s a riga invece di 4,7: con lotti da dodici il tempo se ne andava nelle andate e
+      // ritorni (186 richieste per 2.228 rettifiche). Cinquanta stanno dentro il tempo massimo della
+      // richiesta (~30 s contro i 300 concessi) e la barra continua a muoversi.
+      const BATCH = 50
       let create = 0, nonProp = 0, giaDecise = 0, inAttesa = 0, scart = 0
       const dettaglio: any[] = []
       setAvanz({ k: b.k, fatti: 0, totale: ids.length, da: Date.now() })

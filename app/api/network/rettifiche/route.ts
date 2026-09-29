@@ -113,29 +113,43 @@ export async function POST(req: NextRequest) {
   const idAzzerate: string[] = []   // differenza a zero → 'assorbita'. Tutte le ALTRE saltate NON
                                     // vengono più marcate: restano propagazione=null e ritentabili.
 
-  for (const r of righe as any[]) {
+  // ── TUTTE LE RIGHE IN UN COLPO SOLO ──
+  //
+  // Il motore sa gia' fare otto riprezzi insieme (ogni riga e' un conto a se' e fa solo letture):
+  // chiamandolo una riga per volta si aspettava un viaggio al database dopo l'altro, ~6 secondi a
+  // riga invece di ~0,9. Su un pomeriggio da 2.228 rettifiche accettare voleva dire ore, ed e'
+  // esattamente la differenza che si sentiva con i contrassegni, dove accettare e' solo un flag.
+  // Il motore torna gli esiti NELLO STESSO ORDINE in cui gli sono arrivate le righe.
+  const lavorabili = (righe as any[]).filter((r: any) => {
     const colli = Array.isArray(r.colli_ripesati) ? r.colli_ripesati : []
     if (!colli.length) {
       // Senza le misure si potrebbe riprezzare col solo peso, ma il supplemento lo fa il VOLUME:
       // meta' delle righe uscirebbe negativa, cioe' un rimborso al posto di un addebito. Meglio
       // dirlo che tirare a indovinare su dei soldi.
       saltate.push({ ldv: r.numero_spedizione, perche: 'senza le misure ripesate: caricata prima che venissero conservate' })
-      continue
+      return false
     }
-    if (!r.spedizione_id) { saltate.push({ ldv: r.numero_spedizione, perche: 'spedizione non collegata' }); continue }
+    if (!r.spedizione_id) { saltate.push({ ldv: r.numero_spedizione, perche: 'spedizione non collegata' }); return false }
+    return true
+  })
+  // Si riusa lo STESSO motore del caricamento del file: ricostruisce la catena, legge dai
+  // movimenti quello che ogni livello ha gia' pagato — rettifiche comprese, cosi' la stessa
+  // differenza non si chiede due volte — e riprezza il collo vero a ogni livello col suo listino.
+  const esiti = await calcolaRipesature(adminDb, lavorabili.map((r: any) => ({
+    idOrdine: r.rif_fornitore || r.id, idVerifiche: [], ldv: r.numero_spedizione,
+    addebitoFornitore: 0,
+    colli: (r.colli_ripesati as any[]).map((c: any) => ({
+      peso: Number(c.weight) || 0, lunghezza: Number(c.length) || 0,
+      larghezza: Number(c.width) || 0, altezza: Number(c.height) || 0,
+    })),
+    dataChiusura: '', mittente: '', destinatario: '',
+  })))
 
-    // Si riusa lo STESSO motore del caricamento del file: ricostruisce la catena, legge dai
-    // movimenti quello che ogni livello ha gia' pagato — rettifiche comprese, cosi' la stessa
-    // differenza non si chiede due volte — e riprezza il collo vero a ogni livello col suo listino.
-    const [esito] = await calcolaRipesature(adminDb, [{
-      idOrdine: r.rif_fornitore || r.id, idVerifiche: [], ldv: r.numero_spedizione,
-      addebitoFornitore: 0,
-      colli: colli.map((c: any) => ({
-        peso: Number(c.weight) || 0, lunghezza: Number(c.length) || 0,
-        larghezza: Number(c.width) || 0, altezza: Number(c.height) || 0,
-      })),
-      dataChiusura: '', mittente: '', destinatario: '',
-    }])
+  const daScrivere: any[] = []
+  for (let iRiga = 0; iRiga < lavorabili.length; iRiga++) {
+    const r = lavorabili[iRiga]
+    const colli = r.colli_ripesati as any[]
+    const esito = esiti[iRiga]
     if (!esito?.trovata) { saltate.push({ ldv: r.numero_spedizione, perche: esito?.motivo || 'spedizione non trovata' }); continue }
     if (esito.catenaCompleta === false) { saltate.push({ ldv: r.numero_spedizione, perche: 'catena dei listini incompleta' }); continue }
 
@@ -185,7 +199,7 @@ export async function POST(req: NextRequest) {
     // reweighGirabile garantisce già differenza != null, ma TS non lo propaga: fisso a numero.
     const diffFiglia = reweighGirabile && liv.differenza != null ? liv.differenza : 0
 
-    const { error } = await adminDb.from('rettifiche').insert({
+    daScrivere.push({
       master_id: mio, spedizione_id: esito.spedizioneId, numero_spedizione: esito.ldv,
       cliente_id: figlio ? null : liv.clienteId,
       target_master_id: figlio,
@@ -199,10 +213,25 @@ export async function POST(req: NextRequest) {
       colli_ripesati: colli,              // le misure continuano a scendere, per il livello dopo
       origine_rettifica_id: r.id,         // l'anti-doppione: si propaga una volta sola
     })
-    // 23505 = l'indice unico ha respinto una seconda propagazione della stessa riga. Voluto.
-    if (!error) { create++; idFatte.push(r.id) }
-    else if (error.code === '23505') { saltate.push({ ldv: r.numero_spedizione, perche: 'gia\' propagata' }); idFatte.push(r.id) }
-    else { console.error('[RETTIFICHE][PROPAGA]', r.numero_spedizione, error.message); saltate.push({ ldv: r.numero_spedizione, perche: 'non riuscita' }) }
+    daScrivere[daScrivere.length - 1]._riga = r    // serve solo qui sotto, per dire chi e' andata
+  }
+
+  // OTTO SCRITTURE ALLA VOLTA. Righe diverse, spedizioni diverse: non si pestano i piedi, e il
+  // doppione lo ferma comunque l'indice unico su origine_rettifica_id, che e' la garanzia vera.
+  {
+    let i = 0
+    await Promise.all(Array.from({ length: Math.min(8, daScrivere.length) }, async () => {
+      while (i < daScrivere.length) {
+        const riga = daScrivere[i++]
+        const r = riga._riga
+        const { _riga, ...daInserire } = riga
+        const { error } = await adminDb.from('rettifiche').insert(daInserire)
+        // 23505 = l'indice unico ha respinto una seconda propagazione della stessa riga. Voluto.
+        if (!error) { create++; idFatte.push(r.id) }
+        else if (error.code === '23505') { saltate.push({ ldv: r.numero_spedizione, perche: 'gia\' propagata' }); idFatte.push(r.id) }
+        else { console.error('[RETTIFICHE][PROPAGA]', r.numero_spedizione, error.message); saltate.push({ ldv: r.numero_spedizione, perche: 'non riuscita' }) }
+      }
+    }))
   }
 
   // Si segna lo stato SOLO su chi è stato davvero deciso: 'propagata' chi ha (o già aveva) una figlia,
@@ -211,8 +240,9 @@ export async function POST(req: NextRequest) {
   // sotto mancante, misure non salvate, catena incompleta), invece di sparire assorbite in silenzio —
   // era il motivo per cui la rettifica arrivava a un sotto-master (es. Ecomize LL) ma lui non poteva
   // né vederla né addebitarla, e non era più recuperabile.
-  if (idFatte.length) await adminDb.from('rettifiche').update({ propagazione: 'propagata' }).in('id', idFatte)
-  if (idAzzerate.length) await adminDb.from('rettifiche').update({ propagazione: 'assorbita' }).in('id', idAzzerate)
+  // A BLOCCHI: con migliaia di id un solo .in() diventa una richiesta enorme e il database la rifiuta.
+  for (let i = 0; i < idFatte.length; i += 500) await adminDb.from('rettifiche').update({ propagazione: 'propagata' }).in('id', idFatte.slice(i, i + 500))
+  for (let i = 0; i < idAzzerate.length; i += 500) await adminDb.from('rettifiche').update({ propagazione: 'assorbita' }).in('id', idAzzerate.slice(i, i + 500))
 
   const ritentabili = righe.length - idFatte.length - idAzzerate.length
   return NextResponse.json({
