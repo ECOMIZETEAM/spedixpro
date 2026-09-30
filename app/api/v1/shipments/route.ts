@@ -547,6 +547,30 @@ export async function POST(req: NextRequest) {
       console.error('[V1][POSTE]', e?.message)
       return errore(erroreCorrierePulito(e?.message))
     }
+  } else if (corriere.tipo === 'inpost') {
+    // INPOST diretto (Global API): diretto (costoCorrente=0). Creazione sincrona. Verso locker se il body
+    // porta un pointId (inpostPointId/pointId), altrimenti a domicilio. Niente annullo via API.
+    const credIp = { clientId: cred.clientId, secretId: cred.secretId, organizationId: cred.organizationId, ambiente: (cred.ambiente === 'prod' ? 'prod' : 'stage') as 'prod' | 'stage' }
+    if (!credIp.clientId || !credIp.secretId || !credIp.organizationId) return errore('Contratto non configurato correttamente')
+    const pointId = String(body.inpostPointId || body.pointId || '').trim() || undefined
+    try {
+      const { creaSpedizioneInpost, etichettaInpost } = await import('@/lib/inpost')
+      const risIp = await creaSpedizioneInpost(credIp, {
+        mittente: { ragioneSociale: body.shipFrom.name, indirizzo: conPresso(body.shipFrom.street1 || '', pressoFrom), civico: body.shipFrom.streetNumber || '', citta: body.shipFrom.city, cap: body.shipFrom.postalCode, paese: 'IT', telefono: body.shipFrom.phone || undefined, email: body.shipFrom.email || undefined },
+        destinatario: { ragioneSociale: body.shipTo.company || undefined, nome: body.shipTo.name, indirizzo: conPresso(body.shipTo.street1 || '', pressoTo), civico: body.shipTo.streetNumber || '', citta: body.shipTo.city, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', telefono: body.shipTo.phone || undefined, email: body.shipTo.email || undefined },
+        colli: packages.map((p: any) => ({ altezza: parseFloat(p?.height) || undefined, larghezza: parseFloat(p?.width) || undefined, profondita: parseFloat(p?.length) || undefined, peso: parseFloat(p?.weight) || 1 })),
+        pointIdDestinazione: pointId,
+        reference: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
+        note: body.notes ? String(body.notes) : undefined,
+      })
+      numero = risIp.trackingNumber
+      costoCorrente = 0
+      try { const lab = await etichettaInpost(credIp, numero, 'pdf'); if (lab.bytes?.length) etichettaUrl = `data:application/pdf;base64,${lab.bytes.toString('base64')}` } catch (e) { console.error('[V1][INPOST] etichetta:', (e as any)?.message) }
+      raw = { _inpost: true, trackingNumber: numero, pointId: pointId || null, ambiente: credIp.ambiente }
+    } catch (e: any) {
+      console.error('[V1][INPOST]', e?.message)
+      return errore(erroreCorrierePulito(e?.message))
+    }
   } else {
     return errore('Tipo contratto non supportato')
   }

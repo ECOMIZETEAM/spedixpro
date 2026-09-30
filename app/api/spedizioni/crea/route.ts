@@ -2863,5 +2863,145 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  if (corriereRecord.tipo === 'inpost') {
+    // INPOST diretto — Global API OAuth2 (diretto: costo = listino, costoSpedizione:0). Creazione SINCRONA:
+    // il trackingNumber torna subito. Verso LOCKER se la spedizione porta un punto scelto (body.inpostPointId
+    // / dest_punto_id); altrimenti a DOMICILIO (indirizzo). NIENTE annullo via API (come gli altri Poste).
+    const credIp = {
+      clientId: cred.clientId, secretId: cred.secretId, organizationId: cred.organizationId,
+      ambiente: (cred.ambiente === 'prod' ? 'prod' : 'stage') as 'prod' | 'stage',
+    }
+    if (!credIp.clientId || !credIp.secretId || !credIp.organizationId) {
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Contratto InPost non configurato correttamente. Contatta l\'assistenza.' }, { status: 400 })
+    }
+    const pointId = String(body.inpostPointId || body.pointId || '').trim() || undefined
+    try {
+      const { creaSpedizioneInpost, etichettaInpost } = await import('@/lib/inpost')
+
+      let costoCorrente = costoMaster
+      if (!isProprio) {
+        costoCorrente = (await calcolaPrezzoCorriere(adminCrea, {
+          corriereId: corriereRecord.id, masterId,
+          provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
+          pesoReale, packages,
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+        })) ?? 0
+      }
+      const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
+
+      const colliIp = packages.map((p: any) => ({
+        altezza: parseFloat(p?.height) || undefined, larghezza: parseFloat(p?.width) || undefined,
+        profondita: parseFloat(p?.length) || undefined, peso: parseFloat(p?.weight) || 1,
+      }))
+
+      const ris = await creaSpedizioneInpost(credIp, {
+        mittente: {
+          ragioneSociale: body.shipFrom.name, indirizzo: body.shipFrom.street1, civico: body.shipFrom.streetNumber || '',
+          citta: body.shipFrom.city, cap: body.shipFrom.postalCode, paese: 'IT',
+          telefono: body.shipFrom.phone || undefined, email: body.shipFrom.email || undefined,
+        },
+        destinatario: {
+          ragioneSociale: body.shipTo.company || undefined, nome: body.shipTo.name, indirizzo: body.shipTo.street1,
+          civico: body.shipTo.streetNumber || '', citta: body.shipTo.city, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
+          telefono: body.shipTo.phone || undefined, email: body.shipTo.email || undefined,
+        },
+        colli: colliIp,
+        pointIdDestinazione: pointId,
+        reference: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
+        note: body.notes ? String(body.notes) : undefined,
+      })
+      const numeroFinale = ris.trackingNumber
+
+      let etichettaUrl: string | null = null
+      try {
+        const lab = await etichettaInpost(credIp, numeroFinale, 'pdf')
+        if (lab.bytes?.length) etichettaUrl = `data:application/pdf;base64,${lab.bytes.toString('base64')}`
+      } catch (e) { console.error('[CREA][INPOST] etichetta:', (e as any)?.message) }
+
+      const colliDettaglio = (body.colliDettaglio || packages.map((p: any) => ({ lunghezza: p.length, larghezza: p.width, altezza: p.height })))
+        .map((c: any, i: number) => ({
+          numero: i + 1,
+          lunghezza: c.lunghezza || packages[i]?.length || null, larghezza: c.larghezza || packages[i]?.width || null,
+          altezza: c.altezza || packages[i]?.height || null, peso: packages[i]?.weight || null,
+          etichetta_url: etichettaUrl,
+        }))
+
+      const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
+        master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id,
+        numero: numeroFinale,
+        mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
+        mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
+        mitt_email: body.shipFrom.email || null, mitt_telefono: body.shipFrom.phone || null,
+        dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_citta: body.shipTo.city,
+        dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
+        dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
+        colli: packages.length, peso_reale: pesoReale,
+        peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
+        lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
+        contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
+        tracking_number: numeroFinale,
+        etichetta_url: etichettaUrl,
+        colli_dettaglio: colliDettaglio,
+        raw_response: { _inpost: true, trackingNumber: numeroFinale, pointId: pointId || null, ambiente: credIp.ambiente },
+        stato: 'in_lavorazione',
+        costo_spedizione: costoCorrente, costo_totale: costoCliente,
+        servizi_accessori: serviziAccessori,
+        richiedi_ritiro: _vuoleRitiro || false,
+        data_ritiro: _vuoleRitiro ? String(body.dataRitiro) : null,
+        intervallo_ritiro: _vuoleRitiro ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
+        note: body.notes || null, contenuto: body.contenuto || null,
+        rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
+      }).select('id').single()
+
+      if (insertError) {
+        console.error('[CREA][INPOST][INSERT]', numeroFinale, insertError.message)
+        return NextResponse.json({
+          error: `Spedizione creata sul corriere (${numeroFinale}) ma non registrata a sistema: contatta l'assistenza indicando il numero ${numeroFinale}.`,
+          numero: numeroFinale,
+        }, { status: 500 })
+      }
+
+      await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
+      try {
+        await addebitaCatena(adminCrea, {
+          masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
+          costoSpedizione: 0, provincia: body.shipTo.state, packages,
+          cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
+          corriereNome: corriereRecord.nome_contratto,
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+          serviziAccessori,
+          mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
+          numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
+        })
+      } catch (e) { console.error('[CREA][INPOST] cascata catena:', e) }
+
+      after(async () => {
+        try {
+          const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
+          let notificaDest = true
+          if (clienteId) {
+            const { data: cli } = await adminCrea.from('clienti').select('impostazioni').eq('id', clienteId).maybeSingle()
+            notificaDest = (cli?.impostazioni as any)?.notifica_email_dest !== false
+          }
+          await inviaEmailSpedizioneCreata({
+            mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
+            mittNome: body.shipFrom?.name, destNome: body.shipTo?.name,
+            numero: numeroFinale, corriere: corriereRecord.nome_contratto, destCitta: body.shipTo?.city,
+            notificaDest, spedizioneId: inserted?.id || null, masterId,
+          })
+        } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
+      })
+
+      return NextResponse.json({
+        numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2), spedizioneId: inserted?.id || null,
+      })
+    } catch (err: any) {
+      console.error('[CREA][INPOST]', err?.message)
+      await stornaPrenotazione()
+      return NextResponse.json({ error: erroreCorrierePulito(err?.message) }, { status: 400 })
+    }
+  }
+
   { await stornaPrenotazione(); return NextResponse.json({ error: `Tipo corriere non supportato: ${corriereRecord.tipo}` }, { status: 400 }) }
 }

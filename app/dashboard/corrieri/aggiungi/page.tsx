@@ -90,6 +90,14 @@ async function salvaCorriere(formData: FormData) {
     settings.codice_contrassegno = formData.get('codice_contrassegno') as string || ''
     settings.modalita_pagamento_cod = formData.get('modalita_pagamento_cod') as string || ''
     settings.codice_assicurazione = formData.get('codice_assicurazione') as string || ''
+  } else if (tipo === 'inpost') {
+    // InPost diretto — Global API OAuth2 (merchant.inpost-group.com). Un account = clientId/secretId/
+    // organizationId + ambiente (stage per collaudo, prod per il live). Le spedizioni verso locker usano
+    // il selettore punti; a domicilio l'indirizzo. NIENTE brand/productVariant (lib/inpost.ts).
+    credenziali.clientId = formData.get('clientId') as string || ''
+    credenziali.secretId = formData.get('secretId') as string || ''
+    credenziali.organizationId = formData.get('organizationId') as string || ''
+    credenziali.ambiente = (formData.get('ambiente') as string) === 'prod' ? 'prod' : 'stage'
   } else {
     credenziali.utente = formData.get('utente') as string || ''
     credenziali.password = formData.get('password') as string || ''
@@ -239,6 +247,16 @@ const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,str
       ['baseUrl','URL server (override)','solo se diverso dal default','text',true],
     ],
   },
+  inpost: {
+    titolo: 'InPost',
+    info: 'InPost diretto. Un account (Client ID/Secret ID/ID organizzazione) dal Merchant Portal InPost (sezione API → Crea app, Client Credentials Flow). Scegli l’ambiente: Stage per collaudare, Produzione per spedire davvero. Le consegne possono essere a locker/punto (il cliente sceglie dal selettore) o a domicilio.',
+    campi: [
+      ['nome_contratto','Nome del contratto','es. InPost Locker','text'],
+      ['clientId','Client ID','es. app-i0ccwqmxuf','text'],
+      ['secretId','Client Secret','••••••••','password'],
+      ['organizationId','ID organizzazione','es. c28bfc02-fad0-44c7-8207-b6867535dae2','text'],
+    ],
+  },
 }
 
 export default async function AggiungiCorrierePage({ searchParams }: { searchParams: Promise<{tipo?:string,id?:string}> }) {
@@ -372,6 +390,15 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
               <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Ambiente</label>
               <select name="ambiente" defaultValue={credenzialiEsistenti.ambiente || 'demo'} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
                 <option value="demo">Demo</option>
+                <option value="prod">Produzione</option>
+              </select>
+            </div>
+          )}
+          {tipo === 'inpost' && (
+            <div>
+              <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Ambiente</label>
+              <select name="ambiente" defaultValue={credenzialiEsistenti.ambiente || 'stage'} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
+                <option value="stage">Stage (test)</option>
                 <option value="prod">Produzione</option>
               </select>
             </div>

@@ -389,6 +389,38 @@ export async function GET(req: NextRequest) {
           }
         } catch (e: any) { console.error('[TRACKING][POSTE][EVENTI]', s.numero, e?.message) }
 
+      } else if (tipo === 'inpost') {
+        // INPOST diretto (Global API): lo stato si legge da /tracking/v1/parcels con il trackingNumber.
+        // credenziali (clientId/secretId/organizationId/ambiente) dalla join. `trackingInpost` torna GIA' i
+        // nostri stati (mappa sull'eventCode). InPost NON ha giacenza tradizionale (il locker che attende il
+        // ritiro è consegna normale): nessun vistaGiacenza.
+        if (!s.tracking_number || !cred?.clientId || !cred?.organizationId) return
+        const { trackingInpost } = await import('@/lib/inpost')
+        const { stati, consegnata: ipConseg, eventi: ipEventi } = await trackingInpost(cred, String(s.tracking_number))
+        for (const st of stati) {
+          if (st && prioritaStato(st) > prioritaStato(nuovo)) nuovo = st
+        }
+        if (ipConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
+        // ...ma se il pacco è tornato al mittente, quella "consegnata" è il RITORNO: vince il reso.
+        if (stati.some((st) => st === 'reso_mittente')) nuovo = 'reso_mittente'
+
+        try {
+          const cambiatoIp = nuovo !== s.stato
+          if (cambiatoIp || budgetCronologie > 0) {
+            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(ipEventi, {
+              data: ['data', 'dataOra', 'datetime'],
+              descrizione: ['descrizione'],
+              luogo: ['luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length) {
+              if (!cambiatoIp) budgetCronologie--
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][INPOST][EVENTI]', s.numero, e?.message) }
+
       } else {
         return
       }
