@@ -352,7 +352,7 @@ export default function RettificaCostiPage() {
           </div>
         </div>
         <div style={{padding:'7px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'11px',color:'#8a8a8a',lineHeight:1.5}}>
-          Si fattura sul <strong style={{color:'#1a1a1a'}}>maggiore fra peso reale e volume</strong>: in grassetto quello su cui si paga, in <strong style={{color:'#dc2626'}}>rosso</strong> il peso ripesato che fa salire il costo. La colonna <strong style={{color:'#1a1a1a'}}>Differenza</strong> è quanto recuperi.
+          In grassetto <strong style={{color:'#1a1a1a'}}>il peso su cui si paga davvero</strong>: di norma il maggiore fra reale e volume, ma sul <strong style={{color:'#1a1a1a'}}>peso reale</strong> quando il collo sta nella scatola agevolata del contratto. In <strong style={{color:'#dc2626'}}>rosso</strong> il peso dopo la ripesatura. Se il collo misurato esce dalla scatola si passa al volume: lo trovi scritto sulla riga. La colonna <strong style={{color:'#1a1a1a'}}>Differenza</strong> è quanto recuperi.
         </div>
 
         {loading ? (
@@ -409,14 +409,17 @@ export default function RettificaCostiPage() {
                   const fs = Number(r.fuori_sagoma || 0)
                   const addebito = Math.round((diff - fs) * 100) / 100
                   const isDaRett = r.stato === 'da_rettificare'
-                  // Si FATTURA sul MAGGIORE fra reale e volume: evidenzio quella misura (il perché del
-                  // costo) e smorzo l'altra. Prima = grassetto scuro, Dopo = grassetto ROSSO (il peso
-                  // ripesato che fa salire). A colpo d'occhio: "prima pagavi su X, ora su Y". Il vecchio
-                  // rosso (reale ripesato > reale dichiarato) confondeva: non seguiva il recupero, che
-                  // quasi sempre lo fa il volume.
+                  // SI EVIDENZIA IL PESO SU CUI SI PAGA DAVVERO, non il piu' alto dei due.
+                  // "Il maggiore fra reale e volume" e' falso quando vale l'agevolazione del contratto:
+                  // se il collo sta nella scatola si paga sul REALE anche col volume piu' alto. Cosi' una
+                  // rettifica giusta sembrava un errore — 1UW07WF292297 mostrava "prima 6,89 → ora 6,30"
+                  // con un addebito, mentre prima si pagava su 5,00 kg reali (collo dentro la scatola) e
+                  // ora sul volume 6,30 (misurato mezzo centimetro fuori). La base la dice la rotta, che
+                  // la chiede alla regola unica (pesoSuReale); senza quel dato si torna al vecchio modo.
                   const pIni = Number(r.peso_iniziale)||0, pvIni = Number(r.peso_volume_iniziale)||0
                   const pRe  = Number(r.peso_reale)||0,    pvRe  = Number(r.peso_volume_reale)||0
-                  const volIni = pvIni > pIni, volRe = pvRe > pRe
+                  const volIni = r.base_prima ? r.base_prima === 'volume' : pvIni > pIni
+                  const volRe  = r.base_dopo  ? r.base_dopo  === 'volume' : pvRe > pRe
                   const cIni = (on:boolean) => ({padding:'8px 10px', color: on?'#1a1a1a':'#b0b4bb', fontWeight: on?700:400})
                   const cRe  = (on:boolean) => ({padding:'8px 10px', color: on?'#dc2626':'#b0b4bb', fontWeight: on?700:400})
                   return (
@@ -434,9 +437,16 @@ export default function RettificaCostiPage() {
                             ⏸ {r.blocco}
                           </div>
                         )}
+                        {/* PERCHE' IL PREZZO CAMBIA QUANDO IL PESO SCENDE: senza questa riga la
+                            rettifica sembra inventata, e chi la riceve la contesta (giustamente). */}
+                        {r.nota_peso && (
+                          <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#1e40af',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'4px',padding:'2px 6px',whiteSpace:'normal',maxWidth:'300px'}}>
+                            ⓘ {r.nota_peso}
+                          </div>
+                        )}
                         {fs > 0 && (
                           <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:600,color:'#7c2d12',background:'#ffedd5',border:'1px solid #fdba74',borderRadius:'4px',padding:'2px 6px',display:'inline-block'}}>
-                            + fuori sagoma € {fs.toFixed(2)}
+                            + {r.supplementi_nomi || 'fuori sagoma'} € {fs.toFixed(2)}
                           </div>
                         )}
                       </td>

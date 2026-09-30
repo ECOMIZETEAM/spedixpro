@@ -54,13 +54,61 @@ export async function GET(req: NextRequest) {
   // guasto. Ora lo stato della spedizione arriva insieme alla riga.
   const idSped = [...new Set(righeGrezze.map((r: any) => r.spedizione_id).filter(Boolean))]
   const statoSped = new Map<string, string>()
+  const spedDati = new Map<string, any>()
   if (idSped.length) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const adm = createAdminSupabase()
     for (let i = 0; i < idSped.length; i += 300) {
-      const { data: ss } = await adm.from('spedizioni').select('id,stato').in('id', idSped.slice(i, i + 300))
-      for (const s of (ss || [])) statoSped.set((s as any).id, (s as any).stato)
+      const { data: ss } = await adm.from('spedizioni')
+        .select('id,stato,peso_reale,lunghezza,larghezza,altezza,colli,colli_dettaglio,corriere_id').in('id', idSped.slice(i, i + 300))
+      for (const s of (ss || [])) { statoSped.set((s as any).id, (s as any).stato); spedDati.set((s as any).id, s) }
     }
+  }
+
+  // ── SU COSA SI PAGAVA PRIMA, E SU COSA SI PAGA ORA ──
+  //
+  // La tabella mostrava in grassetto "il maggiore fra peso reale e volume", dicendo che e' quello su
+  // cui si paga. NON E' VERO quando vale l'agevolazione: se il collo sta nella scatola del contratto
+  // si paga sul REALE anche se il volume e' piu' alto. Cosi' una rettifica legittima sembrava un
+  // errore: 1UW07WF292297 mostrava "prima 6,89 → ora 6,30" con un addebito, quando in realta' prima
+  // si pagava su 5,00 kg reali (collo 41x32x21, dentro la scatola 50x32x28) e ora si paga sul volume
+  // 6,30 perche' il corriere l'ha misurato 40x32,5x19,4 — mezzo centimetro fuori dalla scatola.
+  // La regola di "su cosa si tassa" vive in un posto solo (pesoSuReale): si chiede a lei.
+  const { pesoSuReale, descriviAgevolazione } = await import('@/lib/agevolazione-misure')
+  const settsCorr = new Map<string, any>()
+  {
+    const idCorr = [...new Set(Array.from(spedDati.values()).map((s: any) => s.corriere_id).filter(Boolean))]
+    if (idCorr.length) {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const adm2 = createAdminSupabase()
+      for (let i = 0; i < idCorr.length; i += 300) {
+        const { data: cc } = await adm2.from('corrieri').select('id,settings').in('id', idCorr.slice(i, i + 300))
+        for (const c of (cc || [])) settsCorr.set((c as any).id, (c as any).settings || {})
+      }
+    }
+  }
+  const baseDi = (r: any) => {
+    const s: any = r.spedizione_id ? spedDati.get(r.spedizione_id) : null
+    if (!s) return { prima: null, dopo: null, nota: null }
+    const sett = settsCorr.get(s.corriere_id) || {}
+    const dett = Array.isArray(s.colli_dettaglio) ? s.colli_dettaglio : []
+    const colliPrima = dett.length
+      ? dett.map((c: any) => ({ length: Number(c?.lunghezza ?? c?.length) || 0, width: Number(c?.larghezza ?? c?.width) || 0, height: Number(c?.altezza ?? c?.height) || 0 }))
+      : [{ length: Number(s.lunghezza) || 0, width: Number(s.larghezza) || 0, height: Number(s.altezza) || 0 }]
+    const colliDopo = Array.isArray(r.colli_ripesati) ? r.colli_ripesati : []
+    const pesoPrima = Number(s.peso_reale) || 0
+    const pesoDopo = colliDopo.reduce((a: number, c: any) => a + (Number(c?.weight) || 0), 0)
+    const prima = pesoSuReale(sett, colliPrima, pesoPrima) ? 'reale' : 'volume'
+    const dopo = colliDopo.length ? (pesoSuReale(sett, colliDopo, pesoDopo) ? 'reale' : 'volume') : prima
+    let nota: string | null = null
+    if (prima === 'reale' && dopo === 'volume') {
+      const m = colliDopo[0]
+      const mis = m ? `${Number(m.length) || 0}×${Number(m.width) || 0}×${Number(m.height) || 0}` : 'misurato'
+      nota = `Il collo misurato ${mis} cm esce dalla scatola agevolata ${descriviAgevolazione(sett)}: prima si pagava sul peso reale, ora sul volume.`
+    } else if (prima === 'volume' && dopo === 'reale') {
+      nota = `Il collo misurato rientra nella scatola agevolata ${descriviAgevolazione(sett)}: ora si paga sul peso reale.`
+    }
+    return { prima, dopo, nota }
   }
   const bloccoDi = (r: any) => {
     const st = r.spedizione_id ? statoSped.get(r.spedizione_id) : null
@@ -84,12 +132,18 @@ export async function GET(req: NextRequest) {
       for (const c of (cc || [])) nomi.set(c.id, c.ragione_sociale)
     }
   }
-  const righe = righeGrezze.map((r: any) => ({
-    ...r,
-    destinatario_nome: nomi.get(r.target_master_id) || nomi.get(r.cliente_id) || null,
-    destinatario_tipo: r.target_master_id ? 'master' : (r.cliente_id ? 'cliente' : null),
-    blocco: bloccoDi(r),
-  }))
+  const righe = righeGrezze.map((r: any) => {
+    const b = baseDi(r)
+    return {
+      ...r,
+      destinatario_nome: nomi.get(r.target_master_id) || nomi.get(r.cliente_id) || null,
+      destinatario_tipo: r.target_master_id ? 'master' : (r.cliente_id ? 'cliente' : null),
+      blocco: bloccoDi(r),
+      base_prima: b.prima,     // 'reale' | 'volume': su cosa si pagava DAVVERO
+      base_dopo: b.dopo,       // e su cosa si paga ora
+      nota_peso: b.nota,       // perche' e' cambiato, quando cambia la base
+    }
+  })
   return NextResponse.json(righe)
 }
 
