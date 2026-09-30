@@ -80,18 +80,17 @@ export async function POST(req: NextRequest) {
     const paeseP = (body.shipTo?.country || 'IT').toUpperCase().trim()
     const isEsteroP = paeseP !== 'IT'
 
-    // Corrieri da quotare = quelli che hanno delle fasce prezzo nei listini del master
-    // (indipendentemente da quale listino_id: l'editor salva sotto un listino unico).
-    const { data: listiniM } = await supabase.from('listini_corrieri').select('id').eq('master_id', masterIdP)
-    const listinoIdsM = (listiniM || []).map((l: any) => l.id)
+    // Corrieri da quotare = quelli per cui il master ha una riga listini_corrieri (una per corriere).
+    // NB: si legge il corriere_id DALL'HEADER, non facendo distinct sulle FASCE: quella query, con .in()
+    // e senza paginazione, tornava max 1000 righe e con >1000 fasce (MULTI ne ha ~1650) i corrieri "in
+    // coda" — es. quelli aggiunti da poco, InPost — sparivano dalla lista. L'header non ha questo limite
+    // (una riga per corriere) e copre gli stessi corrieri (verificato: 0 fasce senza header).
+    const { data: listiniM } = await supabase.from('listini_corrieri').select('corriere_id').eq('master_id', masterIdP)
+    const ids = [...new Set((listiniM || []).map((l: any) => l.corriere_id).filter(Boolean))]
     let corrieriDaQuotare: any[] = []
-    if (listinoIdsM.length) {
-      const { data: fasceCorr } = await supabase.from('listini_corrieri_fasce').select('corriere_id').in('listino_id', listinoIdsM)
-      const ids = [...new Set((fasceCorr || []).map((f: any) => f.corriere_id).filter(Boolean))]
-      if (ids.length) {
-        const { data: cs } = await supabase.from('corrieri').select('id,tipo,nome_contratto,attivo,settings').in('id', ids)
-        corrieriDaQuotare = (cs || []).map((c: any) => ({ corriere_id: c.id, corrieri: c }))
-      }
+    if (ids.length) {
+      const { data: cs } = await supabase.from('corrieri').select('id,tipo,nome_contratto,attivo,settings').in('id', ids)
+      corrieriDaQuotare = (cs || []).map((c: any) => ({ corriere_id: c.id, corrieri: c }))
     }
 
     // Nessun listino corrieri (con prezzi) assegnato al master → niente tariffe.

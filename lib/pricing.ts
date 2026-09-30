@@ -432,11 +432,13 @@ export async function calcolaPrezzoListino(
   // agevolazione peso reale: valida solo se OGNI pacco e' entro 50x28x32 cm
   // La scatola dell'agevolazione dipende dal CONTRATTO: valutata per corriere piu' sotto.
 
-  const { data: fasce } = await supabase
+  // fetchAll: un listino cliente può superare le 1000 fasce (PostgREST tronca a 1000/query) → i corrieri
+  // "in coda" sparivano dal calcolo. Tiebreaker `id` per paginazione stabile (peso_max non è univoco).
+  const fasce = await fetchAll(() => supabase
     .from('listini_clienti_fasce')
     .select('*, zone(id,nome,su_mittente), corrieri(id,tipo,nome_contratto,settings)')
     .eq('listino_id', listinoId)
-    .order('peso_max', { ascending: true })
+    .order('peso_max', { ascending: true }).order('id', { ascending: true }))
 
   if (!fasce?.length) return null
 

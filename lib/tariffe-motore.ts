@@ -301,13 +301,27 @@ export async function calcolaTariffeCliente(
   // Client ADMIN per questa lettura: porta dentro `corrieri.credenziali`, che non deve essere
   // leggibile col token di chi chiama. Il perimetro non cambia — resta il listino assegnato a
   // QUESTO cliente, filtrato qui sotto per listino_id.
-  const { data: fasce, error: errFasce } = await createAdminSupabase()
+  // `attivo` serve al gate dei contratti in pausa qui sotto: senza, il ramo CLIENTE quotava anche
+  // i contratti messi in pausa dal proprio master.
+  // PAGINAZIONE: un listino cliente può superare le 1000 fasce (PostgREST tronca a 1000/query). Con il
+  // troncamento i corrieri "in coda" (es. aggiunti da poco) sparivano dalla lista → tariffa mancante.
+  // Prima pagina DA SOLA per distinguere ERRORE tecnico da listino vuoto (vedi nota sotto); si continua
+  // solo se piena. Tiebreaker `id` per una paginazione stabile (peso_max non è univoco).
+  const buildFasce = () => createAdminSupabase()
     .from('listini_clienti_fasce')
-    // `attivo` serve al gate dei contratti in pausa qui sotto: senza, il ramo CLIENTE quotava anche
-    // i contratti messi in pausa dal proprio master.
     .select('*, zone(id,nome,su_mittente), corrieri(id,tipo,nome_contratto,attivo,credenziali,settings)')
     .eq('listino_id', cliente.listino_cliente_id)
-    .order('peso_max', { ascending: true })
+    .order('peso_max', { ascending: true }).order('id', { ascending: true })
+  const { data: fasce0, error: errFasce } = await buildFasce().range(0, 999)
+  let fasce = fasce0 || []
+  if (!errFasce && fasce0?.length === 1000) {
+    for (let base = 1000; ; base += 1000) {
+      const { data: pg } = await buildFasce().range(base, base + 999)
+      if (!pg?.length) break
+      fasce = fasce.concat(pg)
+      if (pg.length < 1000) break
+    }
+  }
 
   // UNA QUERY FALLITA NON E' UN LISTINO VUOTO.
   // Prima si guardava solo `data`: se la query andava in errore (un permesso mancante su una
