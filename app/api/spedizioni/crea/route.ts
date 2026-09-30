@@ -2875,6 +2875,12 @@ export async function POST(req: NextRequest) {
       await stornaPrenotazione()
       return NextResponse.json({ error: 'Contratto InPost non configurato correttamente. Contatta l\'assistenza.' }, { status: 400 })
     }
+    // InPost NON gestisce il contrassegno (confermato da InPost): meglio bloccare che far credere di
+    // incassare un COD che non verrà mai raccolto.
+    if (Number(body.codValue || 0) > 0) {
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'InPost non gestisce il contrassegno: togli l\'importo del contrassegno per spedire con InPost.' }, { status: 400 })
+    }
     const pointId = String(body.inpostPointId || body.pointId || '').trim() || undefined
     try {
       const { creaSpedizioneInpost, etichettaInpost } = await import('@/lib/inpost')

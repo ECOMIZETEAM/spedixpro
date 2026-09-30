@@ -552,6 +552,7 @@ export async function POST(req: NextRequest) {
     // porta un pointId (inpostPointId/pointId), altrimenti a domicilio. Niente annullo via API.
     const credIp = { clientId: cred.clientId, secretId: cred.secretId, organizationId: cred.organizationId, ambiente: (cred.ambiente === 'prod' ? 'prod' : 'stage') as 'prod' | 'stage' }
     if (!credIp.clientId || !credIp.secretId || !credIp.organizationId) return errore('Contratto non configurato correttamente')
+    if (Number(body.codValue || 0) > 0) return errore('InPost non gestisce il contrassegno')
     const pointId = String(body.inpostPointId || body.pointId || '').trim() || undefined
     try {
       const { creaSpedizioneInpost, etichettaInpost } = await import('@/lib/inpost')
