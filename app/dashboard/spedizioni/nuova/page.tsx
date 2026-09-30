@@ -7,6 +7,7 @@ import { useDialog } from '@/app/components/DialogProvider'
 import SelettoreArticoli, { type RigaArticolo, type ArticoloCat } from '@/app/components/SelettoreArticoli'
 import { isExtraUe } from '@/lib/paesi-ue'
 import PuntoPosteSelettore, { type PuntoScelto } from '@/app/components/PuntoPosteSelettore'
+import InpostLockerPicker, { type InpostPuntoScelto } from '@/app/components/InpostLockerPicker'
 
 // Deposito PuntoPoste preferito (FMP/APT): ricordato per comodità, come i filtri persistenti.
 const depSalvato = (): 'FMP'|'APT'|'' => { try { const v = localStorage.getItem('puntoposte:deposito'); return v === 'FMP' || v === 'APT' ? v : '' } catch { return '' } }
@@ -107,6 +108,7 @@ export default function NuovaSpedizionePage() {
   // PuntoPoste: dove si DEPOSITA (tipologia 'FMP'/'APT') e il punto di CONSEGNA (P2TAB/P2UP, dal selettore).
   const [depositoTipo, setDepositoTipo] = useState<'FMP'|'APT'|''>('')
   const [puntoArrivo, setPuntoArrivo] = useState<PuntoScelto | null>(null)
+  const [inpostPunto, setInpostPunto] = useState<InpostPuntoScelto | null>(null)   // locker InPost scelto (opzionale)
   // Consegna a DOMICILIO (default, come sempre) o a un PUNTO (PuntoPoste/Ufficio Postale): nel secondo
   // caso l'indirizzo del destinatario non serve (il pacco va al punto), quindi si nasconde.
   const [consegnaA, setConsegnaA] = useState<'domicilio'|'punto'>('domicilio')
@@ -414,6 +416,7 @@ export default function NuovaSpedizionePage() {
         _corriere_id: selected._corriere_id,
         _corriere_tipo: selected._corriere_tipo,
         _spediamopro_quotation: selected._spediamopro_quotation,
+        inpostPointId: selected._corriere_tipo === 'inpost' ? (inpostPunto?.id || undefined) : undefined,   // locker/punto InPost (se vuoto = domicilio)
         packages: buildPackages(),
         colliDettaglio: colli,
         shipFrom:{name:mitt.nome,company:mitt.nome,street1:mitt.indirizzo,street2:'',city:mitt.citta,state:mitt.provincia,postalCode:mitt.cap,country:'IT',phone:mitt.telefono,email:mitt.email},
@@ -977,6 +980,12 @@ export default function NuovaSpedizionePage() {
                         <PuntoPosteSelettore corriereId={selected._corriere_id} lato="arrivo" tipologia={selected._consegna_punto} capIniziale={dest.cap} valore={puntoArrivo} onChange={setPuntoArrivo} />
                       </div>
                     )}
+                  </div>
+                )}
+                {selected._corriere_tipo === 'inpost' && (
+                  <div style={{marginBottom:'14px'}}>
+                    <InpostLockerPicker corriereId={selected._corriere_id} capIniziale={dest.cap} valore={inpostPunto} onSelect={setInpostPunto} />
+                    <div style={{fontSize:'11px',color:'#666',marginTop:'4px'}}>Scegli un locker/punto InPost per la consegna, oppure lascialo vuoto per consegnare all’indirizzo del destinatario.</div>
                   </div>
                 )}
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'14px',alignItems:'end' as const}}>
