@@ -367,6 +367,8 @@ export default function Dashboard() {
           <GuadagnoChart />
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:'14px'}}>
             <ReportGuadagno titolo="Rettifiche" endpoint="/api/reports/guadagno-rettifiche" />
+            <ReportGuadagno titolo="Resi" endpoint="/api/reports/guadagno-resi" />
+            <ReportGuadagno titolo="Giacenze" endpoint="/api/reports/guadagno-giacenze" />
             <ReportGuadagno titolo="Supplementi" endpoint="/api/reports/guadagno-supplementi" />
           </div>
         </>

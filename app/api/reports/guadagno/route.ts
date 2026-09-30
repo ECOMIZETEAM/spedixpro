@@ -34,13 +34,14 @@ export async function GET(req: NextRequest) {
   const alEnd = dalParam ? new Date((alParam || dalParam) + 'T23:59:59.999Z').toISOString() : new Date().toISOString()
   // Aggregazione: per giorno se l'intervallo è breve, per mese se è lungo (o periodo annuale).
   const perMese = dalParam ? ((Date.parse(alEnd) - Date.parse(dal)) / 86400000 > 92) : (periodo === 'annuale')
-  // Le RETTIFICHE (ripesature, allineamenti, correzioni di prezzo) qui NON entrano: hanno il loro
-  // riquadro in home (/api/reports/guadagno-rettifiche, stessa struttura ristretta a tipo='rettifica').
-  // Mescolate al margine delle spedizioni lo facevano oscillare a ondate — il fornitore rifattura a
-  // blocchi e il master riaddebita il giorno dopo — e "il guadagno è dimezzato" non si capiva se
-  // fossero le spedizioni o le ripesature. Verificato 22/09 su tutti i master, settembre: guadagno con
-  // rettifiche = questo + riquadro Rettifiche, scarto 0,00.
-  const TIPI = ['spedizione', 'rimborso', 'reso', 'giacenza']
+  // "GUADAGNO SPEDIZIONI" = SOLO le spedizioni. Rettifiche, RESI e GIACENZE hanno ciascuno il PROPRIO
+  // riquadro in home (/api/reports/guadagno-rettifiche, -resi, -giacenze), col loro calendario. Mescolati
+  // qui: (1) il margine e il fatturato NON tornavano con l'elenco spedizioni (che resi/giacenze non li
+  // conta) — es. Ecomize LL 30/9: card 6,45 (43,50/37,05) ma elenco 4,60 (26,40/21,80), la differenza
+  // erano 3 resi; (2) la "media/spedizione" usciva gonfiata (guadagno coi resi diviso il numero delle SOLE
+  // spedizioni: 6,45/4=1,61 invece di 4,60/4=1,15). Il 'rimborso' resta: netta a 0 le annullate, che SONO
+  // spedizioni. (Le rettifiche erano già fuori dal 22/09 per lo stesso motivo — oscillavano a ondate.)
+  const TIPI = ['spedizione', 'rimborso']
   const admin = createAdminSupabase()
 
   // ── AGENTE ────────────────────────────────────────────────────────────────
