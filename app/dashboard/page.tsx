@@ -124,7 +124,7 @@ export default function Dashboard() {
           <div style={kpiIconDark}>📦</div>
           <div style={{flex:1,minWidth:0}}>
             <div style={{fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,letterSpacing:'0.6px',color:'#999',marginBottom:'3px'}}>
-              SPEDIZIONI {new Date().toLocaleString('it-IT',{month:'short'}).toUpperCase()}
+              CREATE A {new Date().toLocaleString('it-IT',{month:'short'}).toUpperCase()}
             </div>
             <div style={{fontSize:'20px',fontWeight:'800',lineHeight:1,color:'#fff'}}>{data.spedizioniMese?.toLocaleString()} <span style={{fontSize:'13px',color:'#999'}}>/ {data.illimitato ? '∞' : data.limiteMese?.toLocaleString()}</span></div>
             {data.illimitato ? (
@@ -141,7 +141,7 @@ export default function Dashboard() {
         {/* Spedite oggi */}
         <div style={kpiCardLight}>
           <div style={kpiIconLight}>🚚</div>
-          <div style={kpiLabel}>SPEDIZIONI SPEDITE<br/><span style={{color:'#bbb'}}>(OGGI)</span></div>
+          <div style={kpiLabel}>PARTITE<br/><span style={{color:'#bbb'}}>OGGI</span></div>
           <div style={kpiValue}>{data.spediteOggi}</div>
         </div>
 
@@ -162,23 +162,29 @@ export default function Dashboard() {
         {/* LDV da chiudere in distinta — cliccabile: porta alla creazione distinta */}
         <a href="/dashboard/distinte/crea" style={{...kpiCardLight, textDecoration:'none', display:'block', ...(Number(data.daMettereInDistinta||0) > 0 ? {borderColor:'#fed7aa', background:'#fff7ed'} : {})}}>
           <div style={kpiIconLight}>🧾</div>
-          <div style={kpiLabel}>DA CHIUDERE<br/><span style={{color:'#bbb'}}>IN DISTINTA</span></div>
+          <div style={kpiLabel}>DA CHIUDERE<br/><span style={{color:'#bbb'}}>IN DISTINTA (ORA)</span></div>
           <div style={{...kpiValue, color: Number(data.daMettereInDistinta||0) > 0 ? '#ea580c' : '#1a1a1a'}}>{data.daMettereInDistinta ?? 0}</div>
         </a>
 
         {/* Clienti */}
         <div style={kpiCardLight}>
           <div style={kpiIconLight}>👥</div>
-          <div style={kpiLabel}>CLIENTI<br/><span style={{color:'#bbb'}}>REGISTRATI</span></div>
+          <div style={kpiLabel}>CLIENTI<br/><span style={{color:'#bbb'}}>TUOI DIRETTI</span></div>
           <div style={kpiValue}>{data.totClienti}</div>
         </div>
       </div>
 
-      {/* KPI globali di tutta la rete (spedizioni proprie + improprie) */}
+      {/* DI QUANDO PARLA OGNI NUMERO. Senza, la stessa schermata mescolava mese, ultimi 30 giorni,
+          "adesso" e "da sempre" senza dirlo, e non si capiva se un numero fosse mensile o totale. */}
+      <div style={{fontSize:'11px',color:'#6b7280',margin:'2px 2px 6px'}}>
+        Tutti i numeri sono di <strong>te e della tua rete</strong>. In alto: il mese in corso, oggi e gli ultimi 30 giorni.
+        Qui sotto: <strong>da sempre</strong> (spedizioni rete, contrassegni) e <strong>adesso</strong> (in transito, in giacenza).
+        I <strong>contrassegni da rimettere</strong> sono solo quelli di pacchi <strong>consegnati</strong>: quelli tornati al mittente o ancora in viaggio non ci sono, perché il corriere non li ha incassati.
+      </div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:'12px'}}>
         <div style={kpiCardLight}>
           <div style={kpiIconLight}>📦</div>
-          <div style={kpiLabel}>SPEDIZIONI<br/><span style={{color:'#bbb'}}>TOTALI RETE</span></div>
+          <div style={kpiLabel}>SPEDIZIONI<br/><span style={{color:'#bbb'}}>RETE (DA SEMPRE)</span></div>
           <div style={kpiValue}>{Number(data.spedizioniTotali||0).toLocaleString()}</div>
         </div>
         <div style={kpiCardLight}>
@@ -193,17 +199,17 @@ export default function Dashboard() {
         </div>
         <div style={kpiCardLight}>
           <div style={{...kpiIconLight,background:'#eff6ff',border:'1px solid #bfdbfe',color:'#2563eb'}}>🚛</div>
-          <div style={kpiLabel}>IN TRANSITO</div>
+          <div style={kpiLabel}>IN TRANSITO<br/><span style={{color:'#bbb'}}>(ORA)</span></div>
           <div style={kpiValue}>{Number(data.inTransito||0).toLocaleString()}</div>
         </div>
         <div style={kpiCardLight}>
           <div style={{...kpiIconLight,background:'#fef2f2',border:'1px solid #fecaca',color:'#dc2626'}}>⏸️</div>
-          <div style={kpiLabel}>IN GIACENZA</div>
+          <div style={kpiLabel}>IN GIACENZA<br/><span style={{color:'#bbb'}}>(ORA)</span></div>
           <div style={kpiValue}>{Number(data.inGiacenza||0).toLocaleString()}</div>
         </div>
         <div style={kpiCardLight}>
           <div style={kpiIconLight}>💵</div>
-          <div style={kpiLabel}>CONTRASSEGNI<br/><span style={{color:'#bbb'}}>DA RIMETTERE</span></div>
+          <div style={kpiLabel}>CONTRASSEGNI<br/><span style={{color:'#bbb'}}>DA RIMETTERE (INCASSATI)</span></div>
           <div style={{...kpiValue,fontSize:'20px',color:Number(data.codDaRimettere)>0?'#ea580c':'#1a1a1a'}}>€ {Number(data.codDaRimettere||0).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
         </div>
       </div>
