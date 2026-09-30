@@ -837,7 +837,7 @@ export default function NuovaSpedizioneCliente() {
                 const carrier = CARRIER_LABELS[r.carrierCode]||{nome:r.corriere_nome||codiceProv(r.carrierCode),colore:'#666'}
                 const isSelected = ((selected as any)?._corriere_id && (r as any)?._corriere_id) ? ((selected as any)._corriere_id===(r as any)._corriere_id && selected?.zona===r.zona) : (selected?.carrierCode===r.carrierCode&&selected?.contractCode===r.contractCode&&selected?.zona===r.zona)
                 return (
-                  <div key={i} onClick={()=>setSelected(r)}
+                  <div key={i} onClick={()=>{ setSelected(r); setErrore('') }}
                     style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px',border:`2px solid ${isSelected?'#f97316':'#e8e8e8'}`,borderRadius:'8px',marginBottom:'8px',cursor:'pointer',background:isSelected?'#fffbeb':'#fff',transition:'all .15s'}}>
                     {iconaCorriere(r.corriere_nome||r.carrierCode||carrier.nome) ? (
                       <img src={iconaCorriere(r.corriere_nome||r.carrierCode||carrier.nome)!} alt="" style={{width:'56px',height:'34px',objectFit:'contain',border:'1px solid #e8e8e8',borderRadius:'5px',background:'#fff',padding:'2px',flexShrink:0}}/>
@@ -897,7 +897,7 @@ export default function NuovaSpedizioneCliente() {
               const carrier = CARRIER_LABELS[r.carrierCode]||{nome:r.corriere_nome||codiceProv(r.carrierCode),colore:'#666'}
               const isSelected = ((selected as any)?._corriere_id && (r as any)?._corriere_id) ? ((selected as any)._corriere_id===(r as any)._corriere_id && selected?.zona===r.zona) : (selected?.carrierCode===r.carrierCode&&selected?.contractCode===r.contractCode&&selected?.zona===r.zona)
               return (
-                <div key={i} onClick={()=>setSelected(r)}
+                <div key={i} onClick={()=>{ setSelected(r); setErrore('') }}
                   style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px',border:`2px solid ${isSelected?'#f97316':'#e8e8e8'}`,borderRadius:'8px',marginBottom:'8px',cursor:'pointer',background:isSelected?'#fffbeb':'#fff'}}>
                   {iconaCorriere(r.corriere_nome||r.carrierCode||carrier.nome) ? (
                     <img src={iconaCorriere(r.corriere_nome||r.carrierCode||carrier.nome)!} alt="" style={{width:'56px',height:'34px',objectFit:'contain',border:'1px solid #e8e8e8',borderRadius:'5px',background:'#fff',padding:'2px',flexShrink:0}}/>

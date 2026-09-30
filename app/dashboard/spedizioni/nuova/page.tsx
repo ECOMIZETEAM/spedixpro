@@ -894,7 +894,7 @@ export default function NuovaSpedizionePage() {
                 const c = CARRIERS[chiave]||{nome:r.corriere_nome||codiceProv(chiave),colore:'#666'}
                 const isSel = selected?._corriere_id===r._corriere_id && selected?.zona===r.zona
                 return (
-                  <div key={i} onClick={()=>setSelected(r)}
+                  <div key={i} onClick={()=>{ setSelected(r); setErrore('') }}
                     style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px',border:`2px solid ${isSel?'#f97316':'#e8e8e8'}`,borderRadius:'8px',marginBottom:'8px',cursor:'pointer',background:isSel?'#fffbeb':'#fff'}}>
                     {iconaCorriere(r.corriere_nome||chiave) && <img src={iconaCorriere(r.corriere_nome||chiave)!} alt="" style={{width:'56px',height:'34px',objectFit:'contain',border:'1px solid #e8e8e8',borderRadius:'5px',background:'#fff',padding:'2px',flexShrink:0}}/>}
                     {!iconaCorriere(r.corriere_nome||chiave) && (<div style={{width:'48px',height:'30px',border:'1px solid #e8e8e8',borderRadius:'5px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
@@ -932,7 +932,7 @@ export default function NuovaSpedizionePage() {
               const c = CARRIERS[chiave]||{nome:r.corriere_nome||codiceProv(chiave),colore:'#000'}
               const isSel = selected?._corriere_id===r._corriere_id && selected?.zona===r.zona
               return (
-                <div key={i} onClick={()=>setSelected(r)}
+                <div key={i} onClick={()=>{ setSelected(r); setErrore('') }}
                   style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px',border:`2px solid ${isSel?'#f97316':'#000'}`,borderRadius:'8px',marginBottom:'8px',cursor:'pointer',background:isSel?'#fffbeb':'#fff'}}>
                   {iconaCorriere(r.corriere_nome||chiave) ? (
                     <img src={iconaCorriere(r.corriere_nome||chiave)!} alt="" style={{width:'56px',height:'34px',objectFit:'contain',border:'1px solid #000',borderRadius:'5px',background:'#fff',padding:'2px',flexShrink:0}}/>
