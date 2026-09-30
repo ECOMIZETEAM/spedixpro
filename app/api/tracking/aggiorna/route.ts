@@ -52,8 +52,11 @@ export async function GET(req: NextRequest) {
       // direttamente dal JSON, e l'etichetta si guarda a parte (solo gli id di chi non ce l'ha).
       // ep_offerta/ep_ordine: i due riferimenti del terzo provider. Il tracking si interroga col
       // CODICE OFFERTA (per LDV risponde "Spedizione non trovata"), l'etichetta con l'id ordine.
-      .select('id,numero,stato,tracking_number,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali,nome_contratto),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code,ep_offerta:raw_response->_codiceOfferta,ep_ordine:raw_response->_idOrdine,gls_numero:raw_response->numero,brt_parcel:raw_response->parcelID,fedex_test:raw_response->test,richiedi_ritiro,ritiro_id,created_at,ep_ritiro:raw_response->_codiceRitiro')
-      .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
+      .select('id,numero,stato,stato_precedente,tracking_number,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali,nome_contratto),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code,ep_offerta:raw_response->_codiceOfferta,ep_ordine:raw_response->_idOrdine,gls_numero:raw_response->numero,brt_parcel:raw_response->parcelID,fedex_test:raw_response->test,richiedi_ritiro,ritiro_id,created_at,ep_ritiro:raw_response->_codiceRitiro')
+      // La coda d'annullo (annullamento_pending/manuale) ora VIENE tracciata, per accorgersi se un
+      // pacco e' PARTITO e riportarlo buono (vedi la guardia piu' sotto). Restano fuori solo i due
+      // stati davvero finali: consegnata e annullata.
+      .not('stato', 'in', '(consegnata,annullata)')
       .order('tracking_check_at', { ascending: true, nullsFirst: true })
       .order('id', { ascending: true })
       .range(pag * 1000, pag * 1000 + 999)
@@ -537,6 +540,32 @@ export async function GET(req: NextRequest) {
           else if (b.length > a.length && b.endsWith(a) && a.length >= 6) pulito = a
           if (pulito) { upd.numero = pulito; upd.tracking_number = pulito }
         }
+      }
+
+      // ── SPEDIZIONE IN CODA D'ANNULLO ─────────────────────────────────────────────────────────
+      // E' inclusa nel tracking apposta, per accorgersi se e' PARTITA. Non va pero' trattata come le
+      // altre: se il corriere la da' in transito/consegna/giacenza/reso, ha viaggiato → la RIPRISTINO
+      // (tolgo la richiesta d'annullo) e la lascio 'in_lavorazione'; cosi' non e' piu' esclusa e il
+      // giro dopo il tracking normale le da' lo stato reale coi suoi effetti (giacenza, notifiche),
+      // senza doverli innescare da qui (nessun addebito/storno inatteso nel ripristino). Se NON risulta
+      // mossa, la lascio ESATTAMENTE com'e': lo stato d'annullo resta, cosi' rimane in coda e il cron
+      // annulli la trova ancora (si basa su annullamento_richiesto_at). In entrambi i casi NON applico
+      // l'update normale, che declasserebbe lo stato d'annullo o toccherebbe la coda.
+      if (s.stato === 'annullamento_manuale' || s.stato === 'annullamento_pending') {
+        const PARTITA = ['in_transito', 'in_consegna', 'consegnata', 'in_giacenza', 'non_consegnato', 'reso_mittente']
+        if (nuovo && PARTITA.includes(nuovo)) {
+          await admin.from('spedizioni').update({
+            stato: (s as any).stato_precedente || 'in_lavorazione',
+            stato_precedente: null,
+            annullamento_richiesto_at: null,
+            annullamento_da: null,
+            annullamento_errore: null,
+            annullamento_owner_id: null,
+          }).eq('id', s.id)
+          aggiornate++
+          console.warn('[TRACKING][ANNULLO] partita (' + nuovo + ') → ripristinata:', (s as any).numero)
+        }
+        return
       }
 
       if (Object.keys(upd).length) {
