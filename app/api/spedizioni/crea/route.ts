@@ -714,6 +714,25 @@ export async function POST(req: NextRequest) {
   if (corriereRecord.tipo === 'spedisci') {
     const baseUrl = `https://${cred.master_domain}/api/v2`
 
+    // MANCANO LE MISURE? LO SI DICE, invece di far fallire la chiamata al corriere.
+    //
+    // Un collo senza lunghezza/larghezza/altezza fa rispondere al corriere ZERO tariffe, e l'errore
+    // che arrivava era "Nessuna tariffa dal corriere": incomprensibile, perche' il prezzo a video
+    // c'era (il preventivo lo calcoliamo noi col nostro listino, al corriere non lo chiediamo).
+    // Succede con gli ordini importati dai negozi, dove le misure non arrivano.
+    // E chiederle non e' pignoleria: senza, il prezzo esce sul solo peso reale e se il pacco e'
+    // voluminoso il corriere lo rimisura e ce lo riaddebita dopo — e' la ripesatura.
+    const senzaMisure = (packages || []).filter((p: any) =>
+      !(Number(p?.length) > 0) && !(Number(p?.width) > 0) && !(Number(p?.height) > 0))
+    if (senzaMisure.length) {
+      await stornaPrenotazione()
+      return NextResponse.json({
+        error: (packages || []).length > 1
+          ? `Mancano le misure di ${senzaMisure.length} colli su ${(packages || []).length}: inserisci lunghezza, larghezza e altezza di ogni collo. Senza, il corriere non calcola la tariffa (e il prezzo verrebbe fatto sul solo peso, con il rischio di una ripesatura dopo).`
+          : 'Mancano le misure del collo: inserisci lunghezza, larghezza e altezza. Senza, il corriere non calcola la tariffa (e il prezzo verrebbe fatto sul solo peso, con il rischio di una ripesatura dopo).',
+      }, { status: 400 })
+    }
+
     // I TRE LATI CI DEVONO ESSERE, ANCHE A ZERO.
     //
     // Un collo che arriva col SOLO peso — succede con gli ordini importati dai negozi, dove le
