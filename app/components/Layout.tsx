@@ -70,6 +70,7 @@ const NAV: NavItem[] = [
     { label: 'Da preparare', href: '/dashboard/logistica/da-preparare', perm: 'admin.clients.index' },
     { label: 'Catalogo prodotti', href: '/dashboard/catalogo', perm: 'admin.clients.index' },
     { label: 'Carico merce', href: '/dashboard/logistica/carico', perm: 'admin.clients.index' },
+    { label: 'Stock clienti', href: '/dashboard/logistica/stock', perm: 'admin.clients.index' },
     { label: 'Magazzino', href: '/dashboard/logistica/posti', perm: 'admin.clients.index' },
     { label: 'Listino logistica', href: '/dashboard/logistica/listino', perm: 'admin.clients.index' },
     { label: 'Addebiti', href: '/dashboard/logistica/addebiti', perm: 'admin.clients.index' },
