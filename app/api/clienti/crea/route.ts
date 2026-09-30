@@ -39,19 +39,33 @@ export async function POST(req: NextRequest) {
       : 'Questa email è già usata da un altro account sulla piattaforma e non può essere riassegnata a un nuovo cliente. Usa un\'altra email.' },
       { status: 400 })
   }
-  // Codice progressivo PER MASTER: prendo il massimo esistente e vado avanti
-  const { data: ultimi } = await supabase.from('clienti')
-    .select('codice_cliente').eq('master_id', utente.master_id)
-    .order('codice_cliente', { ascending: false }).limit(1)
+  // CODICE PROGRESSIVO PER MASTER, calcolato SOLO sui codici della serie e in NUMERICO.
+  //
+  // Prima si prendeva il massimo in ordine ALFABETICO su tutti i codici, comunque fossero fatti, e da
+  // quella stringa si tiravano fuori le cifre. Bastava un codice fuori serie per rompere tutto: Velox
+  // aveva "LDG-9F9FA70C" (un cliente d'ingrosso), che in alfabeto viene dopo ogni "CLI-…"; le sue
+  // cifre sono 9,9,7,0 -> 9970, quindi proponeva sempre CLI-9971, che esisteva gia'. Non una corsa:
+  // un blocco FISSO, a ogni tentativo, e il master non poteva piu' creare clienti. Stessa cosa per
+  // MoovExpress con "TIKTOKREV" (nessuna cifra -> ripartiva da CLI-0001, gia' preso).
+  //
+  // Quindi: si guardano solo i "CLI-<numero>", si confronta il NUMERO e non il testo, e i codici
+  // personalizzati restano fuori dalla serie — che e' quello che sono.
+  const { data: codici } = await supabase.from('clienti')
+    .select('codice_cliente').eq('master_id', utente.master_id).like('codice_cliente', 'CLI-%')
   let prossimo = 1
-  const ultimoCod = ultimi?.[0]?.codice_cliente
-  if (ultimoCod) {
-    const n = parseInt(String(ultimoCod).replace(/\D/g, ''), 10)
-    if (!isNaN(n)) prossimo = n + 1
+  for (const r of (codici || [])) {
+    const m = /^CLI-(\d+)$/.exec(String((r as any).codice_cliente || '').trim())
+    if (m) prossimo = Math.max(prossimo, parseInt(m[1], 10) + 1)
   }
-  const codice = `CLI-${String(prossimo).padStart(4, '0')}`
   const password = generaPassword()
-  const { data: nuovoCliente, error } = await supabase.from('clienti').insert({
+  // E SE DUE CREAZIONI SI SCONTRANO DAVVERO, si riprova col numero dopo invece di rimandare indietro
+  // l'utente: e' il caso che il messaggio raccontava gia' prima, ma senza farci niente.
+  let nuovoCliente: any = null
+  let error: any = null
+  let codice = ''
+  for (let tent = 0; tent < 5; tent++) {
+    codice = `CLI-${String(prossimo + tent).padStart(4, '0')}`
+    const res = await supabase.from('clienti').insert({
     master_id: utente.master_id,
     ragione_sociale: ragioneSociale,
     piva: body.piva||null, cf: body.cf||null, pec: body.pec||null,
@@ -76,15 +90,20 @@ export async function POST(req: NextRequest) {
     iban: body.iban||null, abi: body.abi||null, cab: body.cab||null,
     bic_swift: body.bic_swift||null, note_rimborso: body.note_rimborso||null,
     codice_cliente: codice, attivo: true,
-  }).select().single()
+    }).select().single()
+    nuovoCliente = res.data; error = res.error
+    if (!error && nuovoCliente) break
+    const collisioneCodice = (res.error as any)?.code === '23505' && /codice/i.test(res.error?.message || '')
+    if (!collisioneCodice) break        // un altro errore non si risolve riprovando
+  }
   if (error || !nuovoCliente) {
-    // L'email duplicata è già intercettata sopra; qui resta soprattutto la corsa sul codice
-    // progressivo (due creazioni nello stesso istante → stesso CLI-000X → viola
-    // clienti_codice_master_unici). Niente errore grezzo del DB all'utente: messaggio chiaro + log.
+    // L'email duplicata è già intercettata sopra. Sul codice si è già riprovato cinque volte qui
+    // sopra: se si arriva fin qui non è più "riprova", è qualcosa che non si sblocca da solo — e il
+    // messaggio non deve mandare l'utente a ritentare all'infinito come faceva prima.
     console.error('[CLIENTE][CREA] insert KO', (error as any)?.code, error?.message)
     const codiceInUso = (error as any)?.code === '23505' && /codice/i.test(error?.message || '')
     return NextResponse.json({ error: codiceInUso
-      ? 'Due clienti creati nello stesso istante hanno preso lo stesso codice: riprova, partirà dal numero successivo.'
+      ? 'Non sono riuscito ad assegnare un codice cliente libero. Riprova fra un istante; se continua, segnalalo all\'assistenza.'
       : 'Non è stato possibile creare il cliente. Riprova; se il problema persiste contatta l\'assistenza.' },
       { status: 400 })
   }
