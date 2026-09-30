@@ -28,6 +28,10 @@
       "schedule": "30 * * * *"
     },
     {
+      "path": "/api/spedizioni/annulli-recupero-cron",
+      "schedule": "20 * * * *"
+    },
+    {
       "path": "/api/tracking/bonifica-poste",
       "schedule": "3,18,33,48 * * * *"
     },

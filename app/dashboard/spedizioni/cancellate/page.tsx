@@ -87,10 +87,13 @@ export default function SpedizioniCancellatePage() {
   }
   function scaricaCsvContratto(nomeContratto: string) {
     const righe = codaOwner.filter(s => (s.corrieri?.nome_contratto || 'Senza contratto') === nomeContratto)
-    const intest = ['Numero', 'Ordine sul portale', 'Tracking', 'Destinatario', 'Città', 'Provincia', 'Data richiesta annullo', 'Note']
+    const intest = ['Numero', 'Ordine sul portale', 'Tracking', 'Prezzo pagato €', 'Destinatario', 'Città', 'Provincia', 'Data richiesta annullo', 'Note']
     const corpo = righe.map(s => [
       riferimentoFornitore(s.numero) ? 'LDV non emessa' : s.numero, riferimentoFornitore(s.numero),
-      s.tracking_number || '', s.dest_nome || '', s.dest_citta || '', s.dest_provincia || '',
+      s.tracking_number || '',
+      // Prezzo che il DETENTORE ha pagato per la LDV (decimale con la virgola per Excel IT).
+      String(Number(s.costo_pagato || 0).toFixed(2)).replace('.', ','),
+      s.dest_nome || '', s.dest_citta || '', s.dest_provincia || '',
       s.annullamento_richiesto_at ? new Date(s.annullamento_richiesto_at).toLocaleString('it-IT') : '',
       s.ripesata ? 'RIPESATA - PARTITA: verificare' : '',
     ].map(csvCampo).join(';'))
@@ -250,6 +253,28 @@ export default function SpedizioniCancellatePage() {
                           ✓ Ripesata dal corriere: è partita
                         </div>
                       )}
+                    </td>
+                    {/* STATO DAL CORRIERE: i pacchi in coda non vengono piu' tracciati, ma l'ultimo stato
+                        gia' ricevuto (webhook/cronologia) resta e lo mostriamo qui: cosi', anche se il cron
+                        non ha ancora rimesso in piedi il pacco, il detentore vede a colpo d'occhio se e' in
+                        transito o gia' consegnato — cioe' partito e da NON annullare. */}
+                    <td style={{padding:'9px 12px',whiteSpace:'nowrap'}}>
+                      {(() => {
+                        const st: string | null = s.stato_tracking
+                        if (!st) return <span style={{color:'#9ca3af',fontSize:'12px'}}>Non tracciato</span>
+                        const M: Record<string, {t:string;c:string;b:string;br:string}> = {
+                          consegnata:{t:'Consegnata',c:'#166534',b:'#f0fdf4',br:'#bbf7d0'},
+                          in_consegna:{t:'In consegna',c:'#1d4ed8',b:'#eff6ff',br:'#bfdbfe'},
+                          in_transito:{t:'In transito',c:'#1d4ed8',b:'#eff6ff',br:'#bfdbfe'},
+                          spedita:{t:'Spedita',c:'#1d4ed8',b:'#eff6ff',br:'#bfdbfe'},
+                          in_giacenza:{t:'In giacenza',c:'#b45309',b:'#fffbeb',br:'#fde68a'},
+                          non_consegnato:{t:'Mancata consegna',c:'#b91c1c',b:'#fef2f2',br:'#fecaca'},
+                          reso_mittente:{t:'Reso al mittente',c:'#7c2d12',b:'#fff7ed',br:'#fed7aa'},
+                        }
+                        const m = M[st] || {t: st.replace(/_/g,' '), c:'#374151', b:'#f3f4f6', br:'#e5e7eb'}
+                        return <span title={s.stato_tracking_data ? new Date(s.stato_tracking_data).toLocaleString('it-IT') : ''}
+                          style={{color:m.c,background:m.b,border:`1px solid ${m.br}`,borderRadius:'4px',padding:'2px 7px',fontWeight:600,fontSize:'11px'}}>{m.t}</span>
+                      })()}
                     </td>
                     <td style={{padding:'9px 16px',textAlign:'right',whiteSpace:'nowrap'}}>
                       <button onClick={()=>ripristina(s.id)} disabled={ripristinando===s.id}
