@@ -68,7 +68,12 @@ export default function ListiniPage() {
           <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Listini Clienti</h1>
           <p style={{color:'#1a1a1a',fontSize:'13px',marginTop:'4px'}}>{listini.length} listini totali</p>
         </div>
-        <a href="/dashboard/listini/clienti/nuovo" style={{background:'#f97316',color:'#fff',padding:'8px 18px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>+ Nuovo Listino</a>
+        <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
+          {/* CHECK SOTTO COSTO: le righe che vendi sotto quello che paghi. Sta qui perche' e' una
+              cosa di prezzi, e si sistema da qui — una riga alla volta o tutte insieme. */}
+          <a href="/dashboard/listini/check-sotto-costo" style={{background:'#fff',color:'#b91c1c',border:'1px solid #fecaca',padding:'8px 16px',borderRadius:'6px',fontSize:'13px',fontWeight:'700',textDecoration:'none'}}>⚠ Check sotto costo</a>
+          <a href="/dashboard/listini/clienti/nuovo" style={{background:'#f97316',color:'#fff',padding:'8px 18px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>+ Nuovo Listino</a>
+        </div>
       </div>
 
       {!loading && listini.length > 0 && (
