@@ -210,6 +210,49 @@ export async function trackingInpost(c: InpostCred, trackingNumber: string): Pro
   return { stati, consegnata, eventi }
 }
 
+// ── RESI (Returns API) ───────────────────────────────────────────────────────
+// Crea una spedizione di RESO (/returns/v1/organizations/{org}/shipments). Il cliente (sender) rimanda al
+// magazzino/merchant (recipient+destination). `dropOffCode:true` = reso SENZA etichetta (label-less).
+// `expirationDate` obbligatoria, 7-720 giorni avanti. `trackingOriginale` = LDV della spedizione andata (opz).
+// Il cliente riceve via email l'etichetta di reso. Torna il trackingNumber del reso.
+export async function creaResoInpost(c: InpostCred, req: {
+  cliente: InpostRecapito           // chi rende (sender)
+  magazzino: InpostRecapito         // dove torna (recipient + destination address)
+  colli: InpostCollo[]
+  trackingOriginale?: string
+  orderReference?: string
+  senzaEtichetta?: boolean
+  scadenzaGiorni?: number           // default 30
+}): Promise<{ trackingNumber: string; raw: any }> {
+  const giorni = Math.min(720, Math.max(7, req.scadenzaGiorni || 30))
+  const scad = new Date(Date.now() + giorni * 86400000).toISOString().replace(/\.\d+Z$/, '+00:00')
+  const body: any = {
+    sender: persona(req.cliente),
+    recipient: persona(req.magazzino),
+    origin: { countryCode: (req.cliente.paese || 'IT').toUpperCase() },
+    destination: indirizzo(req.magazzino),
+    references: { ...(req.orderReference ? { orderReference: String(req.orderReference) } : {}) },
+    enableDropOffCode: !!req.senzaEtichetta,
+    parcels: req.colli.map((p) => ({
+      weight: { amount: Math.max(0.1, Number(p.peso) || 0.1), unit: 'KG' },
+      dimensions: { length: Math.max(1, Math.round(Number(p.profondita) || 0)) || 1, width: Math.max(1, Math.round(Number(p.larghezza) || 0)) || 1, height: Math.max(1, Math.round(Number(p.altezza) || 0)) || 1, unit: 'CM' },
+      contents: 'reso',
+      ...(req.trackingOriginale ? { trackingNumber: String(req.trackingOriginale) } : {}),
+    })),
+    expirationDate: scad,
+  }
+  const { ok, status, j } = await chiama(c, 'POST', `/returns/v1/organizations/${c.organizationId}/shipments`, body)
+  if (!ok || !j?.trackingNumber) throw new Error(erroreInpost(j, status))
+  return { trackingNumber: String(j.trackingNumber), raw: j }
+}
+// Etichetta del reso (PDF). Disponibile solo per i resi CON etichetta (non label-less).
+export async function etichettaResoInpost(c: InpostCred, trackingNumber: string): Promise<{ contentType: string; bytes?: Buffer }> {
+  const tok = await accessToken(c)
+  const r = await fetch(`${base(c)}/returns/v1/organizations/${c.organizationId}/shipments/${encodeURIComponent(trackingNumber)}/label`, { headers: { 'Authorization': `Bearer ${tok}`, 'Accept': 'application/pdf' } })
+  if (!r.ok) throw new Error(`InPost: etichetta reso non disponibile (${r.status})`)
+  return { contentType: 'application/pdf', bytes: Buffer.from(await r.arrayBuffer()) }
+}
+
 // ── PUNTI / LOCKER (Location API) ────────────────────────────────────────────
 export type InpostPunto = { id: string; nome: string; tipo: string; indirizzo: string; citta: string; cap: string; lat?: number; lng?: number; h247?: boolean }
 // Cerca i punti (APM=locker, PUDO) vicino a coordinate o CAP. Il `id` del punto va in pointIdDestinazione.
