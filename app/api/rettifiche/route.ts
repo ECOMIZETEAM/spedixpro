@@ -232,14 +232,99 @@ export async function POST(req: NextRequest) {
   // di fuori dimensione si spiega da solo, invece di chiamarsi "fuori sagoma" come tutti gli altri.
   // Se la riga è SOLO supplemento (nessuna ripesatura) si scrive solo quella, senza il fuorviante
   // "peso inserito X - peso ripesato X". Sulle righe vecchie il nome non c'è: si scrive "Supplemento".
+  // Il peso fatturato di un gruppo di colli: per ognuno il maggiore fra peso e volume, poi si somma.
+  const fattDi = (colli: any[], fattore: number) => (colli || []).reduce((tot: number, c: any) => {
+    const p = Number(c?.weight ?? c?.peso) || 0
+    const L = Number(c?.length ?? c?.lunghezza) || 0, W = Number(c?.width ?? c?.larghezza) || 0, H = Number(c?.height ?? c?.altezza) || 0
+    const v = (L && W && H && fattore > 0) ? (L * W * H) / fattore : 0
+    return tot + Math.max(p, v)
+  }, 0)
+
+  // I PESI FATTURATI, riga per riga: quello dichiarato alla partenza e quello dopo la ripesatura,
+  // calcolati come li calcola il motore (per collo, col fattore volumetrico DEL CONTRATTO).
+  const pesiDi = new Map<string, { prima: number; dopo: number; colli: number[]; nota: string }>()
+  {
+    const { fattoreVolumeCorriere } = await import('@/lib/pricing')
+    const { pesoSuReale, descriviAgevolazione } = await import('@/lib/agevolazione-misure')
+    const idS = [...new Set(rettifiche.map((r: any) => r.spedizione_id).filter(Boolean))]
+    const spedInfo = new Map<string, any>()
+    for (let i = 0; i < idS.length; i += 300) {
+      const { data } = await adminDb.from('spedizioni')
+        .select('id,peso_reale,colli,colli_dettaglio,lunghezza,larghezza,altezza,corriere_id,master_id,corrieri(settings)')
+        .in('id', idS.slice(i, i + 300))
+      for (const x of (data || [])) spedInfo.set((x as any).id, x)
+    }
+    const fattori = new Map<string, number>()
+    const fattoreDi = async (sp: any) => {
+      const k = `${sp.master_id}|${sp.corriere_id}`
+      if (fattori.has(k)) return fattori.get(k)!
+      let f = 4000
+      try { f = Number(await fattoreVolumeCorriere(adminDb, sp.master_id, sp.corriere_id)) || 4000 } catch { /* resta il predefinito */ }
+      fattori.set(k, f); return f
+    }
+    for (const r of rettifiche as any[]) {
+      const sp = r.spedizione_id ? spedInfo.get(r.spedizione_id) : null
+      const dopoColli = Array.isArray(r.colli_ripesati) ? r.colli_ripesati : []
+      if (!sp || !dopoColli.length) continue
+      const f = await fattoreDi(sp)
+      const dett = Array.isArray(sp.colli_dettaglio) ? sp.colli_dettaglio : []
+      const n = Math.max(1, Number(sp.colli) || 1)
+      const primaColli = dett.length ? dett : Array.from({ length: n }, () => ({
+        peso: (Number(sp.peso_reale) || 0) / n, lunghezza: sp.lunghezza, larghezza: sp.larghezza, altezza: sp.altezza,
+      }))
+      // QUANDO VALE L'AGEVOLAZIONE SI PAGA SUL PESO REALE, non sul maggiore fra peso e volume:
+      // scrivere il fatturato senza tenerne conto fa sembrare che il peso scenda mentre il prezzo
+      // sale (1UW07WF292297: «da 6,89 a 6,30» con 2,50 EUR di addebito). La verita' e' che il collo
+      // misurato esce dalla scatola del contratto e da li' in poi si paga a volume.
+      const sett = ((sp as any).corrieri || {}).settings || {}
+      const perAgev = (colli: any[]) => colli.map((c: any) => ({
+        length: Number(c?.length ?? c?.lunghezza) || 0, width: Number(c?.width ?? c?.larghezza) || 0, height: Number(c?.height ?? c?.altezza) || 0,
+      }))
+      const pesoReale = (colli: any[]) => colli.reduce((t: number, c: any) => t + (Number(c?.weight ?? c?.peso) || 0), 0)
+      const agevPrima = pesoSuReale(sett, perAgev(primaColli), pesoReale(primaColli))
+      const agevDopo = pesoSuReale(sett, perAgev(dopoColli), pesoReale(dopoColli))
+      const nota = (agevPrima && !agevDopo)
+        ? ` — il collo misurato esce dalla scatola agevolata ${descriviAgevolazione(sett)}, quindi ora si paga sul volume`
+        : (!agevPrima && agevDopo) ? ` — il collo misurato rientra nella scatola agevolata ${descriviAgevolazione(sett)}, quindi ora si paga sul peso reale` : ''
+      pesiDi.set(r.id, {
+        prima: agevPrima ? pesoReale(primaColli) : fattDi(primaColli, f),
+        dopo: agevDopo ? pesoReale(dopoColli) : fattDi(dopoColli, f),
+        nota,
+        colli: agevDopo ? dopoColli.map((c: any) => Number(c?.weight) || 0) : dopoColli.map((c: any) => {
+          const p = Number(c?.weight) || 0
+          const L = Number(c?.length) || 0, W = Number(c?.width) || 0, H = Number(c?.height) || 0
+          return Math.max(p, (L && W && H) ? (L * W * H) / f : 0)
+        }),
+      })
+    }
+  }
+
+  // IL PESO CHE SI PAGA NON E' LA SOMMA DEI CHILI.
+  //
+  // Si fattura COLLO PER COLLO il maggiore fra peso e volume, e poi si somma. Scrivendo i chili
+  // reali la rettifica diventava indifendibile: 3UW1WLJ036611 diceva «Peso inserito: 50 Kg - peso
+  // ripesato: 49,25 Kg» e addebitava 4,80 EUR — il cliente legge che pesa MENO e paga di piu'.
+  // La verita' e' che i tre colli rimisurati fatturano 18,50 + 20,25 + 11,88 (il terzo sul suo
+  // volume, 32x58x32) = 50,63 contro i 50,00 dichiarati, e quei 63 grammi cambiano fascia.
+  // Qui si scrive quello: il peso FATTURATO, e i colli che lo compongono.
+  const kg = (n: number) => `${(Math.round(n * 100) / 100).toString().replace('.', ',')} kg`
   const descrizione = (r: any) => {
     const extraFS = Number(r.fuori_sagoma) || 0
     const haReweigh = Number(r.differenza || 0) < -0.005
     const parti: string[] = []
     if (haReweigh) {
-      const f = pesoFatt(r)
-      const vol = (Number(r.peso_volume_reale) || 0) > (Number(r.peso_reale) || 0)
-      parti.push(`Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso ripesato: ${f} Kg${vol ? ' volumetrico' : ''} )`)
+      const info = pesiDi.get(r.id)
+      if (info && info.dopo > 0) {
+        const dettaglio = info.colli.length > 1
+          ? ` — ${info.colli.length} colli: ${info.colli.map((x: number) => kg(x)).join(' + ')}`
+          : ''
+        parti.push(`Rettifica ${r.numero_spedizione} (si paga sul peso fatturato: da ${kg(info.prima)} a ${kg(info.dopo)}${dettaglio}${info.nota})`)
+      } else {
+        // Senza le misure non si puo' ricostruire il fatturato: si resta ai chili, com'era.
+        const f = pesoFatt(r)
+        const vol = (Number(r.peso_volume_reale) || 0) > (Number(r.peso_reale) || 0)
+        parti.push(`Rettifica ${r.numero_spedizione} ( Peso inserito: ${r.peso_iniziale} Kg - peso ripesato: ${f} Kg${vol ? ' volumetrico' : ''} )`)
+      }
     }
     if (extraFS > 0) {
       const nomi = String(r.supplementi_nomi || '').trim()
