@@ -553,7 +553,11 @@ export async function POST(req: NextRequest) {
     const credIp = { clientId: cred.clientId, secretId: cred.secretId, organizationId: cred.organizationId, ambiente: (cred.ambiente === 'prod' ? 'prod' : 'stage') as 'prod' | 'stage' }
     if (!credIp.clientId || !credIp.secretId || !credIp.organizationId) return errore('Contratto non configurato correttamente')
     if (Number(body.codValue || 0) > 0) return errore('InPost non gestisce il contrassegno')
-    const pointId = String(body.inpostPointId || body.pointId || '').trim() || undefined
+    // Il MODO lo decide il CONTRATTO: locker = solo a locker (serve il punto), domicilio = solo a casa
+    // (pointId ignorato). Coerente col portale, così l'API non manda un Domicilio a un locker o viceversa.
+    const contrattoLocker = String((corriere as any)?.settings?.consegna || '') === 'locker'
+    const pointId = contrattoLocker ? (String(body.inpostPointId || body.pointId || '').trim() || undefined) : undefined
+    if (contrattoLocker && !pointId) return errore('Questo contratto InPost consegna solo a locker: indica il locker di destinazione (inpostPointId). Per il domicilio usa il contratto InPost Domicilio.')
     try {
       const { creaSpedizioneInpost, etichettaInpost } = await import('@/lib/inpost')
       const risIp = await creaSpedizioneInpost(credIp, {

@@ -17,7 +17,7 @@ import { PAESI_MONDO } from '@/lib/paesi-elenco'
 // il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
 // all'utente ('EASYPARCEL'). Ogni provider ha la sua sigla neutra.
 const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':t==='easyparcel'?'V':(t||'').toUpperCase()
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; avviso_fuori_sagoma?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; _spedisci_assegno?:boolean; corriere_nome?:string; _deposito?:boolean; _consegna_punto?:string }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; avviso_fuori_sagoma?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; _spedisci_assegno?:boolean; corriere_nome?:string; _deposito?:boolean; _consegna_punto?:string; _inpost_locker?:boolean }
 interface Collo { lunghezza:string; larghezza:string; altezza:string; peso?:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -227,7 +227,8 @@ export default function NuovaSpedizioneCliente() {
     setTariffe([]); setSelected(null); setVista('dati')
   }, [dest, mitt, peso, colli, numColli, contrassegno, assicurazione, consegnaA])
   // Tariffe da mostrare in base alla modalità: "a un punto" → solo contratti a punto (P2TAB/P2UP).
-  const tariffeVis = tariffe.filter((t:any) => consegnaA==='punto' ? !!t._consegna_punto : !t._consegna_punto)
+  // Il Locker InPost è consegna A UN PUNTO (come PuntoPoste): sta nella tab "a un punto", non a domicilio.
+  const tariffeVis = tariffe.filter((t:any) => consegnaA==='punto' ? (!!t._consegna_punto || !!t._inpost_locker) : (!t._consegna_punto && !t._inpost_locker))
 
   // Se il cliente modifica un dato che cambia il prezzo mentre la lista e' visibile,
   // azzera le tariffe: dovra' ricliccare "Seleziona Corriere" per vedere il prezzo aggiornato.
@@ -315,8 +316,8 @@ export default function NuovaSpedizioneCliente() {
     if (data.error) { setErrore(data.error); return }
     if (!Array.isArray(data)||!data.length) { setErrore('Nessuna tariffa disponibile'); return }
     setTariffe(data)
-    const vis = data.filter((t:any) => consegnaA==='punto' ? !!t._consegna_punto : !t._consegna_punto)
-    if (!vis.length) { setErrore(consegnaA==='punto' ? 'Nessun corriere per la consegna a un punto: chiedi al tuo master i contratti PuntoPoste.' : 'Nessun corriere disponibile per questi dati.'); return }
+    const vis = data.filter((t:any) => consegnaA==='punto' ? (!!t._consegna_punto || !!t._inpost_locker) : (!t._consegna_punto && !t._inpost_locker))
+    if (!vis.length) { setErrore(consegnaA==='punto' ? 'Nessun corriere per la consegna a un punto: chiedi al tuo master i contratti PuntoPoste o InPost Locker.' : 'Nessun corriere disponibile per questi dati.'); return }
     const pref = corrierePref ? vis.find((t:any)=>t.corriere_id===corrierePref || t._corriere_id===corrierePref) : null
     setSelected(pref || vis[0])
     setVista('contratto')
@@ -358,6 +359,7 @@ export default function NuovaSpedizioneCliente() {
     // PuntoPoste: blocca prima di comprare se manca il deposito o il punto di consegna (il server ricontrolla).
     if (selected._deposito && !depositoTipo) { setErrore('Scegli dove depositare il pacco (Ufficio Postale o Punto Poste).'); return }
     if (selected._consegna_punto && !puntoArrivo) { setErrore('Seleziona il punto di consegna (PuntoPoste o Ufficio Postale).'); return }
+    if (selected._inpost_locker && !inpostPunto) { setErrore('Seleziona il locker InPost dove sarà consegnato il pacco.'); return }
     setCreating(true); setCreditoKO(null); setErrore('')
     const res = await fetch('/api/spedizioni/crea', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -941,10 +943,11 @@ export default function NuovaSpedizioneCliente() {
                     )}
                   </div>
                 )}
-                {selected._corriere_tipo === 'inpost' && selected._corriere_id && (
+                {selected._inpost_locker && selected._corriere_id && (
                   <div style={{marginBottom:'14px'}}>
+                    <label style={lbl}>Locker InPost — dove ritira il destinatario *</label>
                     <InpostLockerPicker corriereId={selected._corriere_id} capIniziale={dest.cap} valore={inpostPunto} onSelect={setInpostPunto} />
-                    <div style={{fontSize:'11px',color:'#666',marginTop:'4px'}}>Scegli un locker/punto InPost per la consegna, oppure lascialo vuoto per consegnare all’indirizzo del destinatario.</div>
+                    <div style={{fontSize:'11px',color:'#666',marginTop:'4px'}}>Scegli il locker InPost dove sarà consegnato il pacco. È obbligatorio: questo contratto consegna solo a locker.</div>
                   </div>
                 )}
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'14px',alignItems:'end' as const}}>

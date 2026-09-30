@@ -467,8 +467,11 @@ export async function calcolaPrezzoListino(
       sel = fasceC.filter((f: any) => (f.zone as any)?.nome === params.zonaForzata)
       if (!sel.length && params.zonaForzata !== 'Italia') sel = fasceC.filter((f: any) => (f.zone as any)?.nome === 'Italia')
     } else {
+      // COPERTURA A CAP (InPost): niente ripiego su "Italia" fuori dai CAP coperti → corriere escluso.
+      const cRec: any = fasceC[0]?.corrieri
+      const soloCapCoperti = cRec?.tipo === 'inpost' || !!(cRec?.settings as any)?.solo_cap_coperti
       sel = fasceC.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id))
-      if (!sel.length && !isEsteroL && !corrieriEsclusi.has(cId)) {
+      if (!sel.length && !isEsteroL && !corrieriEsclusi.has(cId) && !soloCapCoperti) {
         sel = fasceC.filter((f: any) => (f.zone as any)?.nome === zonaNome)
         if (!sel.length) sel = fasceC.filter((f: any) => (f.zone as any)?.nome === 'Italia')
       }
@@ -590,6 +593,13 @@ export async function calcolaPrezzoCorriereDettaglio(
   const { corriereId, masterId, provincia } = params
   const zonaNome = zonaDaProvincia(provincia)
 
+  // COPERTURA A CAP (InPost): certi corrieri NON coprono tutta Italia, ma solo un elenco di CAP (le
+  // zone_cap del contratto). Per loro il ripiego automatico su "Italia" va SPENTO: un CAP fuori
+  // elenco non è "Italia a tariffa base", è semplicemente NON COPERTO → corriere escluso (niente
+  // vendita/costo su una destinazione dove il corriere non ritira/consegna). Vale per tipo o flag.
+  const { data: corrRec } = await supabase.from('corrieri').select('tipo,settings').eq('id', corriereId).maybeSingle()
+  const soloCapCoperti = corrRec?.tipo === 'inpost' || !!(corrRec?.settings as any)?.solo_cap_coperti
+
   // Le fasce del listino corriere possono essere salvate sotto uno qualsiasi dei
   // listini del master (l'editor usa un listino unico + corriere_id). Cerchiamo
   // quindi in TUTTI i listini del master, filtrando per corriere_id.
@@ -638,9 +648,8 @@ export async function calcolaPrezzoCorriereDettaglio(
   } else {
     pesoFatturato = soloPesoReale ? pesoReale : Math.max(_pfm.pesoFatturato, pesoReale)
     // Agevolazione peso reale: se il corriere ha il flag e OGNI collo è entro 50x32x28 cm,
-    // si tassa sul peso reale (come nel preventivo cliente).
-    const { data: corrSett } = await supabase.from('corrieri').select('settings').eq('id', corriereId).maybeSingle()
-    const _sett: any = corrSett?.settings || {}
+    // si tassa sul peso reale (come nel preventivo cliente). Riusa corrRec (già letto sopra).
+    const _sett: any = corrRec?.settings || {}
     if (pesoSuReale(_sett, packages, pesoReale, soloPesoReale)) pesoFatturato = pesoReale
   }
 
@@ -680,9 +689,10 @@ export async function calcolaPrezzoCorriereDettaglio(
     if (!fasceZona.length && params.zonaForzata !== 'Italia') fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
   } else {
     fasceZona = zoneMatchIds.length ? fasce.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id)) : []
-    // Per l'ESTERO niente fallback su Italia; e nemmeno se la dest è ESCLUSIVA per questo corriere.
+    // Per l'ESTERO niente fallback su Italia; e nemmeno se la dest è ESCLUSIVA per questo corriere;
+    // e nemmeno per i corrieri a COPERTURA-CAP (InPost): fuori dai CAP coperti = non coperto = escluso.
     const isEsteroC = (params.paese || 'IT').toUpperCase().trim() !== 'IT'
-    if (!isEsteroC && !corrieriEsclusi.has(corriereId)) {
+    if (!isEsteroC && !corrieriEsclusi.has(corriereId) && !soloCapCoperti) {
       if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === zonaNome)
       if (!fasceZona.length) fasceZona = fasce.filter((f: any) => (f.zone as any)?.nome === 'Italia')
     }

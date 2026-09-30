@@ -381,7 +381,10 @@ export async function calcolaTariffeCliente(
     // 2) fallback per nome SOLO Italia — MA NON se la dest è esclusiva PER QUESTO corriere (isole/
     //    disagiate/sardegna…): lì il corriere senza la zona speciale non deve agganciare via "Italia".
     //    L'esclusione è per-corriere: un CAP disagiato per BRT non toglie il jolly a Poste.
-    if (!sel.length && !isEstero && !corrieriEsclusi.has(cid)) {
+    //    E NON per i corrieri a COPERTURA-CAP (InPost): fuori dai CAP coperti = non coperto = escluso.
+    const cRec: any = fasceC[0]?.corrieri
+    const soloCapCoperti = cRec?.tipo === 'inpost' || !!(cRec?.settings as any)?.solo_cap_coperti
+    if (!sel.length && !isEstero && !corrieriEsclusi.has(cid) && !soloCapCoperti) {
       sel = fasceC.filter(f => (f.zone as any)?.nome === zonaNome)
       if (!sel.length) sel = fasceC.filter(f => (f.zone as any)?.nome === 'Italia')
     }

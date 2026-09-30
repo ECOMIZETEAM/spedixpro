@@ -2881,7 +2881,15 @@ export async function POST(req: NextRequest) {
       await stornaPrenotazione()
       return NextResponse.json({ error: 'InPost non gestisce il contrassegno: togli l\'importo del contrassegno per spedire con InPost.' }, { status: 400 })
     }
-    const pointId = String(body.inpostPointId || body.pointId || '').trim() || undefined
+    // Il MODO lo decide il CONTRATTO, non chi chiama: il contratto LOCKER consegna solo a locker (serve
+    // il punto), il contratto DOMICILIO consegna solo a casa (un pointId eventuale viene ignorato). Così
+    // nessuna porta (portale, API v1, import) può mandare un Domicilio a un locker o viceversa.
+    const contrattoLocker = String((corriereRecord as any)?.settings?.consegna || '') === 'locker'
+    const pointId = contrattoLocker ? (String(body.inpostPointId || body.pointId || '').trim() || undefined) : undefined
+    if (contrattoLocker && !pointId) {
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Questo contratto InPost consegna solo a locker: scegli il locker di destinazione. Per la consegna a domicilio usa il contratto InPost Domicilio.' }, { status: 400 })
+    }
     try {
       const { creaSpedizioneInpost, etichettaInpost, entraNelLockerInpost } = await import('@/lib/inpost')
 
@@ -2897,12 +2905,18 @@ export async function POST(req: NextRequest) {
 
       let costoCorrente = costoMaster
       if (!isProprio) {
-        costoCorrente = (await calcolaPrezzoCorriere(adminCrea, {
+        const costoInpost = await calcolaPrezzoCorriere(adminCrea, {
           corriereId: corriereRecord.id, masterId,
           provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           pesoReale, packages,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
-        })) ?? 0
+        })
+        // COPERTURA: null = InPost NON copre questo CAP (fuori dai CAP coperti). Non si crea a costo 0.
+        if (costoInpost == null) {
+          await stornaPrenotazione()
+          return NextResponse.json({ error: 'InPost non copre questo CAP di destinazione: scegli un altro corriere.' }, { status: 400 })
+        }
+        costoCorrente = costoInpost
       }
       const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
 

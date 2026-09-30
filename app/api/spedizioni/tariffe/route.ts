@@ -13,12 +13,17 @@ import { pudoConfigDaVettore, spediamoproPudoCourier } from '@/lib/punti-poste'
 async function annotaPuntoPoste(admin: any, risultati: any[]) {
   const ids = [...new Set(risultati.map((r: any) => r._corriere_id).filter(Boolean))]
   if (!ids.length) return
-  const { data: corr } = await admin.from('corrieri').select('id,tipo,credenziali').in('id', ids)
+  const { data: corr } = await admin.from('corrieri').select('id,tipo,credenziali,settings').in('id', ids)
   const perId = new Map<string, any>((corr || []).map((c: any) => [c.id, c]))
   for (const r of risultati) {
     const c = perId.get(r._corriere_id); if (!c) continue
     const cred = c.credenziali || {}
-    if (c.tipo === 'spediamopro') {
+    if (c.tipo === 'inpost' && (c.settings as any)?.consegna === 'locker') {
+      // InPost LOCKER: consegna a un LOCKER/PUDO (non a domicilio). Flag distinto dal PuntoPoste perché
+      // usa il SUO selettore (InpostLockerPicker) e la SUA ricerca punti. Il Domicilio InPost (stesso
+      // tipo, senza consegna=locker) resta consegna a casa e NON mostra alcun punto.
+      r._inpost_locker = true
+    } else if (c.tipo === 'spediamopro') {
       // SpediamoPro: SOLO consegna a un punto (deliveryPudo), nessun deposito. _consegna_punto = il
       // corriere per la ricerca punti (brt/inpost/sda). Serve al form per mostrare il selettore-punto.
       const courier = spediamoproPudoCourier(cred.service_id)
@@ -43,7 +48,7 @@ export async function POST(req: NextRequest) {
   // marketplace) non li assegnano mai per errore mandando un pacco a un punto. Solo la creazione manuale
   // passa includiPunto:true (lì il punto lo si sceglie). Default-safe: una porta nuova non li vede.
   const includiPunto = body?.includiPunto === true
-  const soloDomicilio = (r: any[]) => includiPunto ? r : r.filter((x: any) => !x._deposito && !x._consegna_punto)
+  const soloDomicilio = (r: any[]) => includiPunto ? r : r.filter((x: any) => !x._deposito && !x._consegna_punto && !x._inpost_locker)
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
 
   // Spedizione PER CONTO DI UN SOTTO-MASTER (clienteId = "m:<id>"): la trattiamo come un cliente,
