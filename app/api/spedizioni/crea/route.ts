@@ -714,11 +714,26 @@ export async function POST(req: NextRequest) {
   if (corriereRecord.tipo === 'spedisci') {
     const baseUrl = `https://${cred.master_domain}/api/v2`
 
+    // I TRE LATI CI DEVONO ESSERE, ANCHE A ZERO.
+    //
+    // Un collo che arriva col SOLO peso — succede con gli ordini importati dai negozi, dove le
+    // misure non ci sono — fa rispondere al corriere ZERO tariffe, e la creazione muore con
+    // "Nessuna tariffa dal corriere" mentre a video il prezzo c'era (il preventivo lo calcoliamo
+    // noi, col nostro listino: al corriere non lo chiediamo). Verificato il 30/09 sullo stesso
+    // account: stessi dati con i tre lati a 0 → tariffe regolari, senza i campi → array vuoto.
+    // Il peso NON si tocca: si aggiungono solo i lati mancanti.
+    const packagesSpedisci = (packages || []).map((p: any) => ({
+      ...p,
+      length: Number(p?.length) || 0,
+      width: Number(p?.width) || 0,
+      height: Number(p?.height) || 0,
+    }))
+
     const ratesRes = await fetch(`${baseUrl}/shipping/rates`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        packages, shipFrom: body.shipFrom, shipTo: body.shipTo,
+        packages: packagesSpedisci, shipFrom: body.shipFrom, shipTo: body.shipTo,
         notes: body.notes || '', insuranceValue: body.insuranceValue || 0,
         codValue: body.codValue || 0, accessoriServices: []
       }),
@@ -790,7 +805,8 @@ export async function POST(req: NextRequest) {
         //    (lib/etichetta-spedisci → riscriviEtichettaSpedisci), come per SpediamoPro. Perciò NON va
         //    più nelle note (prima stava lì e con nota lunga veniva tagliato).
         //  - NOTA       → `notes` (SOLO la nota del cliente).
-        label_format: 'PDF', packages,
+        // stessi colli del preventivo: coi tre lati sempre presenti (vedi sopra)
+        label_format: 'PDF', packages: packagesSpedisci,
         // EMAIL SCHERMO: al provider va SEMPRE l'email di servizio (mai quelle vere di mitt/dest).
         shipFrom: { ...body.shipFrom, email: EMAIL_PER_CORRIERE }, shipTo: { ...body.shipTo, email: EMAIL_PER_CORRIERE },
         notes: String(body.notes || '').trim() || undefined,
