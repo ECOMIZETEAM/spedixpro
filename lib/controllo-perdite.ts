@@ -154,6 +154,8 @@ export async function trovaSpedizioniInPerdita(giorni = 14, limitRighe = 3000): 
       numero: s.numero, spedizione_id: s.id, master: nome.get(p.X) || p.X, master_id: p.X,
       dest: `${s.dest_citta || ''} (${s.dest_provincia || ''}) ${s.dest_cap || ''}`.trim(),
       paga: p.paga, incassa: p.incassa, margine: p.margine, peso_onesto: p.pesoOnesto, causa, dettaglio, stato: s.stato,
+      // il contratto serve a capire se una destinazione perde su TUTTI i corrieri o su uno solo
+      contratto: contrattoDi.get(s.corriere_id) || '',
     })
   }
   righe.sort((a, b) => a.margine - b.margine)
@@ -162,11 +164,29 @@ export async function trovaSpedizioniInPerdita(giorni = 14, limitRighe = 3000): 
   for (const r of righe) { const c = perCausa[r.causa] || { n: 0, tot: 0 }; c.n++; c.tot = r2(c.tot + r.margine); perCausa[r.causa] = c }
   const totale = r2(righe.reduce((s, r) => s + r.margine, 0))
 
+  // ── LE DESTINAZIONI CHE PERDONO SEMPRE ──
+  //
+  // Una riga in perdita e' un caso; la stessa destinazione che perde ogni volta e' un BUCO di
+  // configurazione, e vale molte volte tanto. Venezia e' stata li' per mesi: il controllo la
+  // elencava riga per riga (paga 12,26, incassa 4,55) ma dentro settemila righe non la notava
+  // nessuno, e alla fine erano 848 spedizioni e 3.490 EUR. Raggruppate per CAP e contratto, quei
+  // casi diventano una riga sola che grida.
+  const perDest = new Map<string, { n: number; tot: number; dest: string; contratto: string; master: string }>()
+  for (const r of righe) {
+    const cap = String(r.dest || '').match(/(\d{5})\s*$/)?.[1] || String(r.dest || '')
+    const k = `${cap}|${r.contratto || ''}`
+    const g = perDest.get(k) || { n: 0, tot: 0, dest: String(r.dest || ''), contratto: String(r.contratto || ''), master: String(r.master || '') }
+    g.n++; g.tot = r2(g.tot + r.margine); perDest.set(k, g)
+  }
+  const sistemiche = [...perDest.values()].filter(g => g.n >= 5).sort((a, b) => a.tot - b.tot)
+  const totSistemiche = r2(sistemiche.reduce((s, g) => s + g.tot, 0))
+
   return {
     kpi: [
       { label: 'Righe in perdita', valore: righe.length.toLocaleString('it-IT'), colore: '#b91c1c' },
       { label: 'Perdita totale', valore: eur(totale), colore: '#b91c1c' },
       ...Object.entries(perCausa).sort((a, b) => a[1].tot - b[1].tot).map(([k, v]) => ({ label: k, valore: `${v.n} · ${eur(v.tot)}`, colore: '#c2410c' })),
+      ...(sistemiche.length ? [{ label: 'destinazioni che perdono SEMPRE', valore: `${sistemiche.length} · ${eur(totSistemiche)}`, colore: '#7f1d1d' }] : []),
     ],
     colonne: [
       { key: 'numero', label: 'Spedizione', tipo: 'mono' },
@@ -180,6 +200,11 @@ export async function trovaSpedizioniInPerdita(giorni = 14, limitRighe = 3000): 
     ],
     righe: righe.slice(0, limitRighe),
     categoriaKey: 'causa', cercaKeys: ['numero', 'master', 'dest'], csvNome: 'spedizioni-in-perdita', finestra: true,
-    nota: `${speds.length.toLocaleString('it-IT')} spedizioni scansionate (${giorni} gg). Margine TOTALE (base + rettifiche, settled): esclude le gia' corrette e le rettifiche in transito.`,
+    nota: `${speds.length.toLocaleString('it-IT')} spedizioni scansionate (${giorni} gg). Margine TOTALE (base + rettifiche, settled): esclude le gia' corrette e le rettifiche in transito.`
+      + (sistemiche.length
+        ? ` ⚠️ ${sistemiche.length} destinazioni perdono SEMPRE (5+ spedizioni ciascuna, ${eur(totSistemiche)} in tutto): `
+          + sistemiche.slice(0, 6).map(g => `${g.dest}${g.contratto ? ' · ' + g.contratto : ''} (${g.n}× ${eur(g.tot)})`).join(' — ')
+          + '. Quando la stessa destinazione perde ogni volta non e\' un caso: e\' il listino o la zona di quel contratto.'
+        : ''),
   }
 }
