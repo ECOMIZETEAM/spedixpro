@@ -2883,7 +2883,17 @@ export async function POST(req: NextRequest) {
     }
     const pointId = String(body.inpostPointId || body.pointId || '').trim() || undefined
     try {
-      const { creaSpedizioneInpost, etichettaInpost } = await import('@/lib/inpost')
+      const { creaSpedizioneInpost, etichettaInpost, entraNelLockerInpost } = await import('@/lib/inpost')
+
+      // MISURE LOCKER: pre-check al portale col messaggio chiaro (la stessa guardia è nella lib, per
+      // le altre porte). erroreCorrierePulito leggerebbe "locker" come "punto errato" → qui lo evito.
+      if (pointId) {
+        const fuori = packages.find((p: any) => !entraNelLockerInpost({ altezza: p?.height, larghezza: p?.width, profondita: p?.length, peso: p?.weight }))
+        if (fuori) {
+          await stornaPrenotazione()
+          return NextResponse.json({ error: `Pacco troppo grande per un locker InPost (box massimo 41×38×64 cm): ${Math.round(parseFloat(fuori.length) || 0)}×${Math.round(parseFloat(fuori.width) || 0)}×${Math.round(parseFloat(fuori.height) || 0)} cm. Scegli la consegna a domicilio o riduci le misure.` }, { status: 400 })
+        }
+      }
 
       let costoCorrente = costoMaster
       if (!isProprio) {

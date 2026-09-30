@@ -8,7 +8,10 @@ export type MarkupConfig = { default: MarkupFascia | null; perFascia: Record<str
 
 // Chiave stabile per fascia: tipo ('fino_a'|'oltre') + peso massimo numerico. DEVE combaciare con
 // la chiave usata lato UI, altrimenti le sovrascritture per-fascia non aggancerebbero nulla.
+// Le fasce a TAGLIA (locker: piccola/media/grande) non hanno peso: la chiave è la taglia stessa,
+// altrimenti collasserebbero tutte in "fino_a_0" e il markup per-taglia non aggancerebbe.
 export function chiaveFascia(tipo: string, peso_max: unknown): string {
+  if (tipo === 'piccola' || tipo === 'media' || tipo === 'grande') return tipo
   return `${tipo === 'oltre' ? 'oltre' : 'fino_a'}_${Number(peso_max)}`
 }
 

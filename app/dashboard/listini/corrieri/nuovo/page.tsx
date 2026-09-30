@@ -19,6 +19,11 @@ const rigaVuota = (): RigaSuppl => ({ valore_max:'', prezzo_fisso:'', perc:'', c
 
 type Fascia = { tipo:string; kg:string; prezzi:Record<string,string>; fuel:string }
 
+// Prezzo a TAGLIA del box (locker: InPost & simili): la fascia non è a peso, ma alla taglia del contenitore.
+// La taglia si ricava dalle dimensioni del collo nel motore prezzi (tagliaDaColli); qui è solo il valore.
+const TAGLIE = ['piccola', 'media', 'grande']
+const labelTaglia = (t: string) => t === 'piccola' ? 'Piccola (box S)' : t === 'media' ? 'Media (box M)' : 'Grande (box L)'
+
 function parseDescr(s: any): any {
   try { return JSON.parse(s) } catch { return null }
 }
@@ -35,16 +40,20 @@ function buildFasceInit(fasceEsistenti: any[]): Fascia[] {
   ]
   const map = new Map<string, Fascia>()
   for (const f of fasceEsistenti) {
-    const kg = String(Number(f.peso_max))
-    const tipo = f.tipo === 'oltre' ? 'oltre' : 'fino_a'
-    const key = `${tipo}_${kg}`
+    const isTaglia = TAGLIE.includes(String(f.tipo))
+    const tipo = f.tipo === 'oltre' ? 'oltre' : isTaglia ? String(f.tipo) : 'fino_a'
+    const kg = isTaglia ? '' : String(Number(f.peso_max))   // le fasce a taglia non hanno peso
+    const key = isTaglia ? tipo : `${tipo}_${kg}`
     if (!map.has(key)) map.set(key, { tipo, kg, prezzi: {}, fuel: String(f.fuel ?? '0') })
     if (f.fuel != null && Number(f.fuel) > 0) map.get(key)!.fuel = String(f.fuel)
     const zonaId = f.zona_id || 'MULTI'
     if (zonaId !== 'MULTI') map.get(key)!.prezzi[zonaId] = String(f.prezzo ?? '')
   }
-  // "fino_a" ordinate per peso; la "oltre" (incrementale) sempre in fondo.
+  // Taglie (S/M/L) prima nell'ordine naturale, poi le "fino_a" per peso, la "oltre" sempre in fondo.
+  const ordTaglia = (t: string) => TAGLIE.indexOf(t)
   return Array.from(map.values()).sort((a,b) => {
+    const at = TAGLIE.includes(a.tipo), bt = TAGLIE.includes(b.tipo)
+    if (at || bt) { if (at && bt) return ordTaglia(a.tipo) - ordTaglia(b.tipo); return at ? -1 : 1 }
     if (a.tipo === 'oltre') return 1
     if (b.tipo === 'oltre') return -1
     return Number(a.kg) - Number(b.kg)
@@ -143,11 +152,12 @@ export default function ListinoCorrierePage() {
   // Modale aperto → blocca lo scroll della pagina sotto: la tabella per-fascia è lunga e senza questo
   // la rotella scorre il listino dietro invece del popup (stesso pattern del widget Supporto).
   useEffect(() => { if (!dupOpen) return; document.body.style.overflow = 'hidden'; return () => { document.body.style.overflow = '' } }, [dupOpen])
-  const keyFascia = (f: Fascia) => `${f.tipo === 'oltre' ? 'oltre' : 'fino_a'}_${Number(f.kg)}`
+  const keyFascia = (f: Fascia) => TAGLIE.includes(f.tipo) ? f.tipo : `${f.tipo === 'oltre' ? 'oltre' : 'fino_a'}_${Number(f.kg)}`
   // Fasce per l'editor markup: costo d'esempio = il piu' basso fra le zone della fascia.
   const fasceMarkup = useMemo(() => fasce.map(f => {
     const costi = Object.values(f.prezzi || {}).map((v: any) => parseFloat(v)).filter((n: number) => isFinite(n) && n > 0)
-    return { key: keyFascia(f), label: f.tipo === 'oltre' ? `oltre, ogni ${f.kg || '?'} kg` : `fino a ${f.kg || '?'} kg`, tipo: f.tipo, peso: Number(f.kg), costo: costi.length ? Math.min(...costi) : 0, costoMax: costi.length ? Math.max(...costi) : 0 }
+    const label = TAGLIE.includes(f.tipo) ? labelTaglia(f.tipo) : f.tipo === 'oltre' ? `oltre, ogni ${f.kg || '?'} kg` : `fino a ${f.kg || '?'} kg`
+    return { key: keyFascia(f), label, tipo: f.tipo, peso: Number(f.kg), costo: costi.length ? Math.min(...costi) : 0, costoMax: costi.length ? Math.max(...costi) : 0 }
   }), [fasce])
   function apriDuplica() {
     setDupTargetMode('nuovo'); setDupNome(`${corrieri.find((c: any) => c.id === corriereId)?.nome_contratto || 'Listino'} (cliente)`)
@@ -356,13 +366,20 @@ export default function ListinoCorrierePage() {
                       <select value={f.tipo} onChange={e=>setFasciaTipo(i,e.target.value)} style={{padding:'4px 6px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px',color:'#1a1a1a'}}>
                         <option value="fino_a">Fino a:</option>
                         <option value="oltre">oltre X ogni</option>
+                        <option value="piccola">Piccola (box S)</option>
+                        <option value="media">Media (box M)</option>
+                        <option value="grande">Grande (box L)</option>
                       </select>
                     </td>
                     <td style={{padding:'6px 6px'}}>
+                      {TAGLIE.includes(f.tipo) ? (
+                        <span style={{fontSize:'11px',color:'#999',fontStyle:'italic'}}>a taglia box</span>
+                      ) : (
                       <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
                         <input type="number" value={f.kg} onChange={e=>setFasciaKg(i,e.target.value)} style={{...inp,width:'65px',textAlign:'right' as const}}/>
                         <span style={{fontSize:'11px',color:'#666'}}>kg</span>
                       </div>
+                      )}
                     </td>
                     {zoneCorr.map(z=>(
                       <td key={z.id} style={{padding:'4px 4px',textAlign:'center' as const}}>
@@ -382,7 +399,7 @@ export default function ListinoCorrierePage() {
           </div>
           <div style={{padding:'10px 16px',borderTop:'1px solid #e5e7eb',display:'flex',gap:'16px',alignItems:'center'}}>
             <button onClick={addFascia} style={{background:'none',border:'none',color:'#f97316',fontSize:'13px',fontWeight:'600',cursor:'pointer',padding:0}}>+ Aggiungi fascia</button>
-            <span style={{fontSize:'11px',color:'#999'}}>Usa "oltre X ogni" per i pesi oltre l'ultima fascia (es. oltre 50kg, +0,38 € ogni 1 kg). Così copri anche i 1000 kg.</span>
+            <span style={{fontSize:'11px',color:'#999'}}>Usa "oltre X ogni" per i pesi oltre l'ultima fascia (es. oltre 50kg, +0,38 € ogni 1 kg). Così copri anche i 1000 kg. Per i locker (InPost) usa Piccola/Media/Grande: il prezzo va a taglia del box, non a peso.</span>
           </div>
         </div>
       )}

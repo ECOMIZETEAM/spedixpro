@@ -126,8 +126,24 @@ export type InpostSpedInput = {
   dropOffCode?: boolean             // label-less
 }
 
+// Box locker InPost: Piccola 8×38×64, Media 19×38×64, Grande 41×38×64 cm. Il collo entra nel Grande
+// (il più capiente) se i suoi lati ORDINATI stanno in 38×41×64. È il vincolo che decide se un pacco è
+// spedibile a locker: sta qui, nel punto che TUTTE le porte attraversano (portale, API v1, import, negozi),
+// non solo nella creazione dal portale.
+const LOCKER_MAX_ORDINATO = [38, 41, 64]
+export function entraNelLockerInpost(collo: InpostCollo): boolean {
+  const d = [Number(collo.altezza) || 0, Number(collo.larghezza) || 0, Number(collo.profondita) || 0].sort((a, b) => a - b)
+  return d[0] <= LOCKER_MAX_ORDINATO[0] && d[1] <= LOCKER_MAX_ORDINATO[1] && d[2] <= LOCKER_MAX_ORDINATO[2]
+}
+
 // Crea la spedizione (sincrona). Torna { trackingNumber, raw }.
 export async function creaSpedizioneInpost(c: InpostCred, dati: InpostSpedInput): Promise<{ trackingNumber: string; raw: any }> {
+  // A LOCKER (pointId valorizzato): il collo deve entrare nel box più grande, altrimenti non è spedibile
+  // a locker e verrebbe venduto a tariffa taglia inesistente. A domicilio (senza pointId) nessun limite.
+  if (dati.pointIdDestinazione) {
+    const fuori = dati.colli.find((p) => !entraNelLockerInpost(p))
+    if (fuori) throw new Error(`Pacco troppo grande per un locker InPost (box massimo 41×38×64 cm): ${Math.round(Number(fuori.profondita) || 0)}×${Math.round(Number(fuori.larghezza) || 0)}×${Math.round(Number(fuori.altezza) || 0)} cm. Scegli la consegna a domicilio o riduci le misure.`)
+  }
   const parcels = dati.colli.map((p) => ({
     type: 'STANDARD',
     dimensions: { height: Math.max(1, Math.round(Number(p.altezza) || 0)) || 1, width: Math.max(1, Math.round(Number(p.larghezza) || 0)) || 1, length: Math.max(1, Math.round(Number(p.profondita) || 0)) || 1, unit: 'CM' },

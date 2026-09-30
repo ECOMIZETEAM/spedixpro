@@ -128,8 +128,22 @@ export function calcolaPesoFatturato(packages: any[], fattore: number, soloPesoR
   return { pesoReale, pesoVolume, pesoFatturato }
 }
 
-function trovaFascia(fasce: any[], peso: number) {
-  const finoA = fasce.filter(f => f.tipo !== 'oltre').sort((a, b) => a.peso_max - b.peso_max)
+// Taglia del box InPost dalle DIMENSIONI del collo (Piccola 8x38x64 / Media 19x38x64 / Grande 41x38x64).
+// Serve al prezzo del LOCKER, che è a taglia e non a peso (fasce con tipo piccola/media/grande).
+export function tagliaDaColli(packages: any[]): 'piccola' | 'media' | 'grande' {
+  const p0: any = (Array.isArray(packages) && packages[0]) || {}
+  const dims = [Number(p0.height) || 0, Number(p0.width) || 0, Number(p0.length) || 0].sort((a, b) => a - b)
+  const entra = (mx: number[]) => { const s = [...mx].sort((a, b) => a - b); return dims[0] <= s[0] && dims[1] <= s[1] && dims[2] <= s[2] }
+  return entra([8, 38, 64]) ? 'piccola' : entra([19, 38, 64]) ? 'media' : 'grande'
+}
+const SIZE_TIPI = ['piccola', 'media', 'grande']
+
+function trovaFascia(fasce: any[], peso: number, taglia?: string) {
+  // FASCE A TAGLIA (locker): se le fasce sono per taglia, la sceglie la TAGLIA del box, non il peso.
+  if (taglia && fasce.some(f => SIZE_TIPI.includes(String(f.tipo)))) {
+    return fasce.find(f => String(f.tipo) === taglia) || fasce.find(f => String(f.tipo) === 'grande') || null
+  }
+  const finoA = fasce.filter(f => f.tipo !== 'oltre' && !SIZE_TIPI.includes(String(f.tipo))).sort((a, b) => a.peso_max - b.peso_max)
   // PIU' ZONE PER LO STESSO CAP: succede spesso che un CAP compaia sia in "Isole Minori" sia in
   // "Zone Disagiate" dello stesso contratto (in produzione capita su 2.336 CAP). In quel caso qui
   // arrivavano le fasce di ENTRAMBE le zone e vinceva quella che il database restituiva per prima:
@@ -500,13 +514,14 @@ export async function calcolaPrezzoListino(
     // il punto che decide quanto si paga davvero.
     const usaPesoReale = pesoSuReale(settsC, packages, pesoReale)
     const pesoPerFascia = usaPesoReale ? pesoReale : pesoFatturato
-    const fascia = trovaFascia(fasceDelCorriere, pesoPerFascia)
+    // LOCKER (fasce a taglia): trovaFascia sceglie per taglia solo se il listino è a taglia; altrove ignora.
+    const fascia = trovaFascia(fasceDelCorriere, pesoPerFascia, tagliaDaColli(packages))
     if (!fascia) continue
     const _fuelPct = Number((fascia as any).fuel) || 0
     const prezzo = Number(fascia.prezzo) * (1 + _fuelPct / 100)
     if (!isFinite(prezzo)) continue
     if (!miglior || prezzo < miglior.prezzo) {
-      miglior = { prezzo, corriereId: cId, pesoMax: parseFloat(fascia.peso_max) }
+      miglior = { prezzo, corriereId: cId, pesoMax: parseFloat(fascia.peso_max) || 0 }
     }
   }
 
@@ -574,30 +589,6 @@ export async function calcolaPrezzoCorriereDettaglio(
 ): Promise<DettaglioCorriere | null> {
   const { corriereId, masterId, provincia } = params
   const zonaNome = zonaDaProvincia(provincia)
-
-  // INPOST LOCKER — prezzo per TAGLIA del box, NON a peso (contratto Hub-to-Point: Piccola/Media/Grande →
-  // prezzo fisso, 0-25kg piatto). Se il contratto ha `settings.prezzi_taglia`, la taglia si ricava dalle
-  // DIMENSIONI reali del collo (nessun peso/volumetrico) e si applica il prezzo + supplemento isole. Sta
-  // qui, prima del listino a fasce, perché il locker non ha fasce a peso.
-  {
-    const { data: cs } = await supabase.from('corrieri').select('tipo,settings').eq('id', corriereId).maybeSingle()
-    const pt: any = (cs?.settings as any)?.prezzi_taglia
-    if (cs?.tipo === 'inpost' && pt && typeof pt === 'object') {
-      const p0: any = (Array.isArray(params.packages) && params.packages[0]) || {}
-      const dims = [Number(p0.height) || 0, Number(p0.width) || 0, Number(p0.length) || 0].sort((a, b) => a - b)
-      const entra = (mx: number[]) => { const s = [...mx].sort((a, b) => a - b); return dims[0] <= s[0] && dims[1] <= s[1] && dims[2] <= s[2] }
-      const taglia = entra([8, 38, 64]) ? 'piccola' : entra([19, 38, 64]) ? 'media' : 'grande'
-      let prezzo = Number(pt[taglia]) || Number(pt.grande) || 0
-      const ISOLE = new Set(['AG', 'CL', 'CT', 'EN', 'ME', 'PA', 'RG', 'SR', 'TP', 'CA', 'CI', 'NU', 'OG', 'OR', 'OT', 'SS', 'SU', 'VS'])
-      const isIsola = ISOLE.has(String(provincia || '').toUpperCase())
-      if (isIsola) prezzo += Number(pt.supplemento_isole) || 0
-      prezzo = Math.round(prezzo * 100) / 100
-      if (prezzo > 0) {
-        const pr = Number(params.pesoReale) || 1
-        return { totale: prezzo, nolo: prezzo, fuel: 0, sponda: 0, contrassegno: 0, assicurazione: 0, peso_reale: pr, peso_volume: 0, peso_fatturato: pr, zona: isIsola ? 'Sicilia e Sardegna' : 'Italia' }
-      }
-    }
-  }
 
   // Le fasce del listino corriere possono essere salvate sotto uno qualsiasi dei
   // listini del master (l'editor usa un listino unico + corriere_id). Cerchiamo
@@ -698,21 +689,31 @@ export async function calcolaPrezzoCorriereDettaglio(
   }
   if (!fasceZona.length) return null
 
-  const finoA = fasceZona.filter((f: any) => f.tipo !== 'oltre').sort((a: any, b: any) => a.peso_max - b.peso_max)
-  const oltre = fasceZona.find((f: any) => f.tipo === 'oltre')
   let prezzo = 0
   let trovata = false
   let fuelPct = 0
-  for (const f of finoA) {
-    if (pesoFatturato <= parseFloat(f.peso_max)) { prezzo = parseFloat(f.prezzo); fuelPct = Number(f.fuel) || 0; trovata = true; break }
-  }
-  if (!trovata) {
-    if (oltre && finoA.length) {
-      const ultima = finoA[finoA.length - 1]
-      const kgExtra = pesoFatturato - parseFloat(ultima.peso_max)
-      prezzo = parseFloat(ultima.prezzo) + Math.ceil(kgExtra / parseFloat(oltre.peso_max)) * parseFloat(oltre.prezzo)
-      fuelPct = Number(ultima.fuel) || 0
-    } else return null   // peso oltre l'ultima fascia e nessuna "oltre": nessun prezzo
+  // FASCE A TAGLIA (InPost Locker): se le fasce di questa zona hanno tipo piccola/media/grande, il prezzo
+  // lo decide la TAGLIA del box (dalle dimensioni reali del collo), NON il peso. Il supplemento isole è già
+  // nel prezzo della zona "Sicilia e Sardegna".
+  if (fasceZona.some((f: any) => SIZE_TIPI.includes(String(f.tipo)))) {
+    const taglia = tagliaDaColli(packages)
+    const f = fasceZona.find((x: any) => String(x.tipo) === taglia) || fasceZona.find((x: any) => String(x.tipo) === 'grande')
+    if (!f) return null
+    prezzo = parseFloat(f.prezzo); fuelPct = Number(f.fuel) || 0; trovata = true
+  } else {
+    const finoA = fasceZona.filter((f: any) => f.tipo !== 'oltre').sort((a: any, b: any) => a.peso_max - b.peso_max)
+    const oltre = fasceZona.find((f: any) => f.tipo === 'oltre')
+    for (const f of finoA) {
+      if (pesoFatturato <= parseFloat(f.peso_max)) { prezzo = parseFloat(f.prezzo); fuelPct = Number(f.fuel) || 0; trovata = true; break }
+    }
+    if (!trovata) {
+      if (oltre && finoA.length) {
+        const ultima = finoA[finoA.length - 1]
+        const kgExtra = pesoFatturato - parseFloat(ultima.peso_max)
+        prezzo = parseFloat(ultima.prezzo) + Math.ceil(kgExtra / parseFloat(oltre.peso_max)) * parseFloat(oltre.prezzo)
+        fuelPct = Number(ultima.fuel) || 0
+      } else return null   // peso oltre l'ultima fascia e nessuna "oltre": nessun prezzo
+    }
   }
   // Fuel %: supplemento percentuale sul nolo di fascia (scorporato).
   const noloBase = prezzo

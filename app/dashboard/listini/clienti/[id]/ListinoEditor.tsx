@@ -27,7 +27,12 @@ function NumInput({ value, onChange, style, placeholder }: { value: number; onCh
 
 interface Zona { id: string; nome: string }
 interface Corriere { id: string; nome_contratto: string; tipo?: string; pausa?: boolean; pausaMotivo?: string | null }
-interface Fascia { tipo: 'fino_a' | 'oltre'; peso: number; prezzi: Record<string, string>; fuel?: string }
+type TipoFascia = 'fino_a' | 'oltre' | 'piccola' | 'media' | 'grande'
+// Fasce a TAGLIA (locker InPost & simili): il prezzo va alla taglia del box, non al peso.
+const TAGLIE: TipoFascia[] = ['piccola', 'media', 'grande']
+const isTaglia = (t: string): boolean => t === 'piccola' || t === 'media' || t === 'grande'
+const labelTaglia = (t: string) => t === 'piccola' ? 'Piccola (box S)' : t === 'media' ? 'Media (box M)' : 'Grande (box L)'
+interface Fascia { tipo: TipoFascia; peso: number; prezzi: Record<string, string>; fuel?: string }
 interface Props {
   listino: any; corrieri: Corriere[]; zone: Zona[]
   fasceEsistenti: any[]; clientiAssegnati: any[]; tipoListino: string
@@ -54,14 +59,18 @@ function buildFasceInit(fasceEsistenti: any[]): Fascia[] {
   if (!fasceEsistenti?.length) return [2,5,10,20,30,50].map(p => ({ tipo:'fino_a', peso:p, prezzi:{}, fuel:'' }))
   const map = new Map<string, Fascia>()
   for (const f of fasceEsistenti) {
-    const peso = Number(f.peso_max); if (isNaN(peso)) continue
-    const tipo = f.tipo === 'oltre' ? 'oltre' : 'fino_a'
-    const key = `${tipo}_${peso}`
+    const taglia = isTaglia(String(f.tipo))
+    const tipo: TipoFascia = f.tipo === 'oltre' ? 'oltre' : taglia ? (String(f.tipo) as TipoFascia) : 'fino_a'
+    const peso = taglia ? 0 : Number(f.peso_max)
+    if (!taglia && isNaN(peso)) continue
+    const key = taglia ? tipo : `${tipo}_${peso}`
     if (!map.has(key)) map.set(key, { tipo, peso, prezzi: {}, fuel: String(f.fuel ?? '') })
     if (f.fuel != null && Number(f.fuel) > 0) map.get(key)!.fuel = String(f.fuel)
     map.get(key)!.prezzi[f.zona_id] = String(f.prezzo ?? '')
   }
   return Array.from(map.values()).sort((a,b) => {
+    const at = isTaglia(a.tipo), bt = isTaglia(b.tipo)
+    if (at || bt) { if (at && bt) return TAGLIE.indexOf(a.tipo) - TAGLIE.indexOf(b.tipo); return at ? -1 : 1 }
     if (a.tipo === 'oltre') return 1
     if (b.tipo === 'oltre') return -1
     return a.peso - b.peso
@@ -234,11 +243,12 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       window.location.reload()   // ricarica: le celle si riempiono coi prezzi (costo + margine)
     } catch { await dialog.alert({ title: 'Errore', message: 'Errore di rete' }); setDcSaving(false) }
   }
-  const keyFasciaCopia = (f: Fascia) => `${f.tipo==='oltre'?'oltre':'fino_a'}_${Number(f.peso)}`
+  const keyFasciaCopia = (f: Fascia) => isTaglia(f.tipo) ? f.tipo : `${f.tipo==='oltre'?'oltre':'fino_a'}_${Number(f.peso)}`
   // Fasce per l'editor markup: base = i prezzi del listino di ORIGINE (il piu' basso fra le zone della fascia).
   const fasceMarkupCopia = useMemo(() => fasce.map(f => {
     const costi = Object.values(f.prezzi || {}).map((v:any)=>parseFloat(v)).filter((n:number)=>isFinite(n)&&n>0)
-    return { key: keyFasciaCopia(f), label: f.tipo==='oltre'?`oltre, ogni ${f.peso||'?'} kg`:`fino a ${f.peso||'?'} kg`, tipo: f.tipo, peso: Number(f.peso), costo: costi.length?Math.min(...costi):0, costoMax: costi.length?Math.max(...costi):0 }
+    const label = isTaglia(f.tipo) ? labelTaglia(f.tipo) : f.tipo==='oltre'?`oltre, ogni ${f.peso||'?'} kg`:`fino a ${f.peso||'?'} kg`
+    return { key: keyFasciaCopia(f), label, tipo: f.tipo, peso: Number(f.peso), costo: costi.length?Math.min(...costi):0, costoMax: costi.length?Math.max(...costi):0 }
   }), [fasce])
   async function apriCopia(c: any) {
     setCopia(c); setCopiaModo('esistente'); setCopiaTarget(''); setCopiaNome(''); setCopiaErr(''); setCopiaOk(''); setCopiaMarkup({ default: null, perFascia: {} })
@@ -376,7 +386,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   function aggiungiFascia() { setFasce(prev => [...prev, { tipo:'fino_a', peso:0, prezzi:{}, fuel:'' }]) }
   function aggiornaFuel(idx: number, raw: string) { setFasce(prev => prev.map((f,i) => i===idx ? {...f, fuel: raw} : f)) }
   function rimuoviFascia(idx: number) { setFasce(prev => prev.filter((_,i) => i !== idx)) }
-  function aggiornaTipo(idx: number, tipo: 'fino_a'|'oltre') { setFasce(prev => prev.map((f,i) => i===idx ? {...f, tipo} : f)) }
+  function aggiornaTipo(idx: number, tipo: TipoFascia) { setFasce(prev => prev.map((f,i) => i===idx ? {...f, tipo} : f)) }
   function aggiornaPeso(idx: number, raw: string) { const peso = parseFloat(raw); setFasce(prev => prev.map((f,i) => i===idx ? {...f, peso: isNaN(peso)?0:peso} : f)) }
   function aggiornaPrezzo(idx: number, zonaId: string, raw: string) { setFasce(prev => prev.map((f,i) => i===idx ? {...f, prezzi:{...f.prezzi,[zonaId]:raw}} : f)) }
 
@@ -510,12 +520,19 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
                   <tr key={idx} style={{borderBottom:'1px solid #e5e7eb',background:idx%2===0?'#fff':'#fafafa'}}>
                     <td style={{padding:'6px 10px'}}>
                       <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-                        <select value={fascia.tipo} onChange={e=>aggiornaTipo(idx,e.target.value as 'fino_a'|'oltre')} style={{...inp,fontSize:'12px',width:'130px'}}>
+                        <select value={fascia.tipo} onChange={e=>aggiornaTipo(idx,e.target.value as TipoFascia)} style={{...inp,fontSize:'12px',width:'130px'}}>
                           <option value="fino_a">Fino a:</option>
                           <option value="oltre">Oltre X ogni</option>
+                          <option value="piccola">Piccola (box S)</option>
+                          <option value="media">Media (box M)</option>
+                          <option value="grande">Grande (box L)</option>
                         </select>
+                        {isTaglia(fascia.tipo) ? (
+                          <span style={{fontSize:'11px',color:'#999',fontStyle:'italic'}}>a taglia box</span>
+                        ) : (<>
                         <input type="number" value={fascia.peso===0?'':String(fascia.peso)} onChange={e=>aggiornaPeso(idx,e.target.value)} placeholder="0" min="0" step="0.5" style={{...inp,width:'65px',textAlign:'center' as const}}/>
                         <span style={{fontSize:'12px',color:'#666'}}>kg</span>
+                        </>)}
                       </div>
                     </td>
                     {zone.map(z=>{
