@@ -54,6 +54,11 @@ export async function GET(_req: NextRequest) {
         cliente: nomeCliente.get(a.cliente_id) || 'Cliente',
         pezzi: 0, referenze: 0, referenze_senza_posto: 0,
         ubicazioni: [] as string[], articoli: [] as any[],
+        // I posti di QUESTO cliente, gia' pronti: la tendina per assegnare si apre senza un'altra
+        // chiamata, e non puo' proporre il posto di un altro (che il server rifiuterebbe comunque).
+        posti: (blocchi.data || [])
+          .filter((b: any) => b.cliente_id === a.cliente_id && !b.liberato_il)
+          .map((b: any) => ({ id: b.id, ubicazione: b.ubicazione || 'senza nome' })),
       })
     }
     const r = perCliente.get(a.cliente_id)
@@ -96,4 +101,55 @@ export async function GET(_req: NextRequest) {
       posti_liberi: liberi,
     },
   })
+}
+
+// ASSEGNARE IL POSTO DA QUI, non solo durante il carico.
+//
+// Prima l'ubicazione si poteva dire in un momento solo: mentre si registrava la merce in entrata. Chi
+// se ne dimenticava (quasi tutti: 24 referenze su 28) non aveva piu' modo di rimediare se non
+// facendo un finto carico. Il posto e' un'informazione che si scopre DOPO — si sistema lo scaffale,
+// si sposta un cliente — e va potuta correggere dove la si guarda.
+//
+// Stessi controlli del carico: l'articolo dev'essere della rete di chi scrive, e il posto dello
+// STESSO cliente dell'articolo, altrimenti l'ubicazione direbbe una bugia.
+export async function PATCH(req: NextRequest) {
+  const supabase = await createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
+  const { data: u } = await supabase.from('utenti').select('ruolo,master_id').eq('id', user.id).single()
+  if (!vedeLaRete(u)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+
+  const b = await req.json().catch(() => ({}))
+  const articoloId = String(b?.articolo_id || '').trim()
+  const bloccoId = b?.blocco_id ? String(b.blocco_id).trim() : null
+  if (!articoloId) return NextResponse.json({ error: 'Articolo mancante' }, { status: 400 })
+
+  const admin = createAdminSupabase()
+  const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+  const rete = await sottoAlberoMasterIds(admin, (u as any).master_id)
+
+  // service-role: il perimetro si rifa' a mano, il database qui non isola piu' nulla.
+  const { data: art } = await admin.from('articoli_cliente')
+    .select('id,cliente_id,master_id').eq('id', articoloId).maybeSingle()
+  if (!art || !rete.includes((art as any).master_id)) {
+    return NextResponse.json({ error: 'Articolo non trovato' }, { status: 404 })
+  }
+
+  if (bloccoId) {
+    const { data: bl } = await admin.from('logistica_blocchi')
+      .select('id,cliente_id,liberato_il,ubicazione').eq('id', bloccoId).maybeSingle()
+    if (!bl) return NextResponse.json({ error: 'Posto non trovato' }, { status: 404 })
+    if ((bl as any).cliente_id !== (art as any).cliente_id) {
+      return NextResponse.json({ error: 'Quel posto è di un altro cliente: scegline uno suo, o creane uno nuovo.' }, { status: 400 })
+    }
+    // Un posto liberato non e' piu' in uso: metterci merce dentro lo farebbe sparire dal magazzino
+    // (e dal conto di fine mese, che guarda solo i posti occupati).
+    if ((bl as any).liberato_il) {
+      return NextResponse.json({ error: 'Quel posto risulta liberato: riaprilo dal Magazzino, oppure scegline un altro.' }, { status: 400 })
+    }
+  }
+
+  const { error } = await admin.from('articoli_cliente').update({ blocco_id: bloccoId }).eq('id', articoloId)
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  return NextResponse.json({ success: true })
 }

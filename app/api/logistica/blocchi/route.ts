@@ -81,13 +81,19 @@ export async function POST(req: NextRequest) {
   }
   if (b.occupato_dal) record.occupato_dal = b.occupato_dal
 
+  // L'ID DEL POSTO TORNA INDIETRO: chi lo crea di solito lo vuole usare SUBITO (lo Stock clienti
+  // crea il posto e ci mette dentro l'articolo nello stesso gesto). Senza l'id bisognava ricaricare
+  // l'elenco e ritrovarlo per nome — e due posti possono chiamarsi uguale. E' un campo in piu':
+  // chi guardava solo `ok` continua a funzionare.
+  let idPosto = String(b.id || '')
   if (b.id) {
     const { error } = await admin.from('logistica_blocchi').update(record).eq('id', b.id)
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   } else {
     record.created_by = s.user.id
-    const { error } = await admin.from('logistica_blocchi').insert(record)
+    const { data, error } = await admin.from('logistica_blocchi').insert(record).select('id').single()
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    idPosto = (data as any)?.id || ''
   }
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, id: idPosto })
 }
