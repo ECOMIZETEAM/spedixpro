@@ -443,11 +443,15 @@ export async function POST(req: NextRequest) {
   let text = await res.text()
   console.log('[RITIRO] risposta corriere status:', res.status)
 
-  // Spedisci NON accetta piu' il ritiro IN GIORNATA ("PICKUP_DATE = today is no longer possible"):
-  // riprovo in automatico col primo giorno LAVORATIVO utile, cosi' il ritiro parte comunque
-  // (il "richiedi ritiro" da nuova spedizione propone oggi come data).
+  // Spedisci NON accetta piu' il ritiro IN GIORNATA: riprovo in automatico col primo giorno
+  // LAVORATIVO utile, cosi' il ritiro parte comunque (il "richiedi ritiro" da nuova spedizione
+  // propone OGGI come data). Il rifiuto arriva con testi diversi a seconda del corriere e cambia
+  // nel tempo: prima "PICKUP_DATE = today is no longer possible", poi "Time slot not compatible
+  // with today's date" — quest'ultimo da solo ha fatto fallire 591 ritiri di 174 clienti, tutti
+  // persi perche' la vecchia regex prendeva solo il primo; e in italiano "...non e' possibile
+  // effettuare il ritiro nella mattina stessa". Basta che il messaggio dica che OGGI non va.
   let dataSpostata: string | null = null
-  if (!res.ok && /PICKUP_DATE\s*=\s*today/i.test(text)) {
+  if (!res.ok && /PICKUP_DATE\s*=\s*today|time slot not compatible with today|nella mattina stessa/i.test(text)) {
     const prossimo = new Date(String(body.dataRitiro) + 'T12:00:00')
     do { prossimo.setDate(prossimo.getDate() + 1) } while ([0, 6].includes(prossimo.getDay()))
     dataSpostata = prossimo.toISOString().slice(0, 10)

@@ -84,13 +84,26 @@ export function erroreRitiroPulito(raw: any): string {
   if (/postalcode|\bcap\b|zip/i.test(campi)) {
     return 'CAP del mittente mancante o non valido: correggilo e riprova.'
   }
+  // Spedisci/Poste rifiutano nome, ragione sociale o via del mittente oltre i 35 caratteri
+  // ("...compName / contactPerson / address.street: size must be between 0 and 35"): non e' un
+  // guasto, e' un limite di campo del corriere — va detto CHIARO cosa accorciare, non un generico
+  // "dati non accettati" che lascia l'utente a indovinare.
+  if (/size must be between 0 and 35/i.test(s) || /compName|contactPerson|address\.street/i.test(s)) {
+    return 'Nome, ragione sociale o indirizzo del mittente troppo lungo per questo corriere (massimo 35 caratteri): accorcialo nei dati del mittente e riprova.'
+  }
   if (!msg) msg = s.replace(/^.*?failed[^:]*:\s*/i, '').replace(/\{[\s\S]*\}/, '').trim()
   msg = msg.replace(NOMI_FORNITORI, '').replace(/pickup failed[^:]*:?/ig, '').replace(/\s{2,}/g, ' ').trim()
   // Messaggi tipici del corriere → testo chiaro in italiano per l'utente.
-  if (/pickup_date\s*=\s*today.*no longer possible/i.test(msg) || /today.*no longer possible/i.test(msg)) {
+  if (/pickup_date\s*=\s*today.*no longer possible/i.test(msg) || /today.*no longer possible/i.test(msg) || /time slot not compatible with today/i.test(msg) || /nella mattina stessa/i.test(msg)) {
     return 'Il ritiro in giornata non è più disponibile per questo corriere: scegli una data futura (di norma il giorno lavorativo successivo).'
   }
-  if (/nessun prezzo impostato nel listino/i.test(msg)) {
+  // "Nessun prezzo impostato nel listino per il contratto X per il peso inserito" e la variante
+  // "Contratto X non ha un prezzo impostato per fascia di peso o per questa zona di consegna": il
+  // corriere non sa prezzare IL RITIRO (non la spedizione, che parte lo stesso). Il testo grezzo
+  // nomina il contratto (es. "Poste Delivery Business vi.ma.s.r.l.") che l'utente non deve vedere:
+  // lo sostituisco PER INTERO con un messaggio pulito e operativo — la seconda variante prima
+  // sfuggiva e lasciava passare il nome del contratto in chiaro.
+  if (/nessun prezzo impostato|non ha un prezzo impostato|prezzo impostato per (fascia|questa zona)/i.test(msg)) {
     return 'Il corriere non ha una tariffa di ritiro per questo contratto/peso: programma il ritiro dal portale del corriere.'
   }
   if (/non idonea al ritiro/i.test(msg)) {
