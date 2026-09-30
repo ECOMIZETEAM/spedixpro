@@ -366,10 +366,10 @@ export default function Dashboard() {
           <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginTop:'2px'}}>Report Guadagno</div>
           <GuadagnoChart />
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:'14px'}}>
-            <ReportGuadagno titolo="Rettifiche" endpoint="/api/reports/guadagno-rettifiche" />
-            <ReportGuadagno titolo="Resi" endpoint="/api/reports/guadagno-resi" />
-            <ReportGuadagno titolo="Giacenze" endpoint="/api/reports/guadagno-giacenze" />
-            <ReportGuadagno titolo="Supplementi" endpoint="/api/reports/guadagno-supplementi" />
+            <ReportGuadagno titolo="Rettifiche" endpoint="/api/reports/guadagno-rettifiche" icona="⚖️" />
+            <ReportGuadagno titolo="Resi" endpoint="/api/reports/guadagno-resi" icona="↩️" />
+            <ReportGuadagno titolo="Giacenze" endpoint="/api/reports/guadagno-giacenze" icona="📦" />
+            <ReportGuadagno titolo="Supplementi" endpoint="/api/reports/guadagno-supplementi" icona="➕" />
           </div>
         </>
       )}

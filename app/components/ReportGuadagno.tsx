@@ -11,7 +11,7 @@ function meseCorrente(): { dal: string; al: string } {
   return { dal: str(new Date(oggi.getFullYear(), oggi.getMonth(), 1)), al: str(oggi) }
 }
 
-export default function ReportGuadagno({ titolo = 'Spedizioni', endpoint = '/api/reports/guadagno' }: { titolo?: string, endpoint?: string }) {
+export default function ReportGuadagno({ titolo = 'Spedizioni', endpoint = '/api/reports/guadagno', icona = '💰' }: { titolo?: string, endpoint?: string, icona?: string }) {
   const [range, setRange] = useState(meseCorrente)
   const [d, setD] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -29,9 +29,12 @@ export default function ReportGuadagno({ titolo = 'Spedizioni', endpoint = '/api
 
   return (
     <div style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '10px', padding: '13px 15px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', fontWeight: 700, color: '#1a1a1a', minWidth: 0 }}>
-          <span style={{ width: '22px', height: '22px', borderRadius: '6px', background: '#dcfce7', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', flexShrink: 0 }}>💰</span>
+      {/* Titolo su una riga a sé (a piena larghezza, MAI troncato) e calendario sotto: con più card
+          affiancate quelle strette accorciavano il titolo alla prima lettera — "Rettifiche" e "Resi"
+          diventavano due "R" indistinguibili. Impilando, il nome si legge sempre. */}
+      <div style={{ marginBottom: '10px' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px' }}>
+          <span style={{ width: '22px', height: '22px', borderRadius: '6px', background: '#dcfce7', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', flexShrink: 0 }}>{icona}</span>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{titolo}</span>
         </span>
         <DateRangePicker dal={range.dal} al={range.al} onChange={(dal, al) => setRange({ dal, al })} />
