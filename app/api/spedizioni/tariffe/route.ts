@@ -114,6 +114,8 @@ export async function POST(req: NextRequest) {
         corriereId: (lc as any).corriere_id, masterId: masterIdP,
         provincia: provinciaP, cap: capP, paese: paeseP, citta: (body.shipTo?.city || ''),
         pesoReale: pesoRealeP, packages: colliP,
+        // mittente: serve alla copertura in partenza dei corrieri a copertura-CAP (InPost)
+        mittCap: (body.shipFrom?.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom?.state || '').toUpperCase().trim(), mittPaese: 'IT',
         contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
       })
       if (!dett || dett.totale <= 0) continue   // nessun listino/fascia per questa zona o prezzo 0 -> non mostrare

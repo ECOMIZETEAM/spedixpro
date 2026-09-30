@@ -251,6 +251,33 @@ export async function supplementoMittente(
   return f ? Number((f as any).prezzo) || 0 : null
 }
 
+// COPERTURA IN PARTENZA (mittente) per i corrieri domicilio→domicilio a copertura-CAP (InPost
+// Domicilio, "come Poste Express M"): NON copre tutta Italia, e vale sia in partenza CHE a destinazione
+// (regola Lorenzo). Qui si verifica che ANCHE il CAP del MITTENTE sia nei CAP coperti del contratto
+// (le stesse zone_cap della destinazione). I LOCKER non la usano (partono da hub/punto di ritiro).
+// Ritorno: true = coperto (o mittente ignoto → permissivo, la creazione ricontrolla); false = mittente
+// NOTO ma fuori copertura → corriere da ESCLUDERE.
+export async function origineCopertaCap(
+  supabase: any,
+  corriereId: string,
+  mitt: { cap?: string; provincia?: string; paese?: string } | undefined,
+): Promise<boolean> {
+  const cap = String(mitt?.cap || '').trim()
+  if (!cap) return true   // senza CAP mittente non escludo qui
+  const paese = String(mitt?.paese || 'IT').toUpperCase().trim()
+  const prov = String(mitt?.provincia || '').toUpperCase().trim()
+  const { data: zone } = await supabase.from('zone').select('id').eq('corriere_id', corriereId).eq('su_mittente', false)
+  const zoneIds = (zone || []).map((z: any) => z.id)
+  if (!zoneIds.length) return true
+  const { data: zc } = await supabase.from('zone_cap').select('cap,provincia').eq('paese', paese)
+    .in('zona_id', zoneIds).in('cap', Array.from(new Set([cap, '*'])))
+  const rows = zc || []
+  if (rows.some((r: any) => r.cap && r.cap !== '*' && r.cap === cap)) return true
+  if (prov && rows.some((r: any) => r.provincia && r.provincia !== '*' && String(r.provincia).toUpperCase() === prov && (!r.cap || r.cap === '*'))) return true
+  if (rows.some((r: any) => (!r.provincia || r.provincia === '*') && (!r.cap || r.cap === '*'))) return true
+  return false
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SCAGLIONI SUPPLEMENTO (contrassegno / assicurazione) — UNA logica sola.
 //
@@ -458,6 +485,9 @@ export async function calcolaPrezzoListino(
   }
   const fascePerCorriere = new Map<string, any[]>()
   for (const [cId, fasceC] of tuttePerCorr) {
+    // COPERTURA A CAP (InPost, Domicilio e Locker): CAP coperti in partenza E a destinazione.
+    const cRec: any = fasceC[0]?.corrieri
+    const soloCapCoperti = cRec?.tipo === 'inpost' || !!(cRec?.settings as any)?.solo_cap_coperti
     let sel: any[]
     if (params.zonaForzata) {
       // RICALCOLO RETTIFICHE: fascia forzata su UNA zona (di norma 'Italia'), stessa per tutti i livelli.
@@ -467,14 +497,14 @@ export async function calcolaPrezzoListino(
       sel = fasceC.filter((f: any) => (f.zone as any)?.nome === params.zonaForzata)
       if (!sel.length && params.zonaForzata !== 'Italia') sel = fasceC.filter((f: any) => (f.zone as any)?.nome === 'Italia')
     } else {
-      // COPERTURA A CAP (InPost): niente ripiego su "Italia" fuori dai CAP coperti → corriere escluso.
-      const cRec: any = fasceC[0]?.corrieri
-      const soloCapCoperti = cRec?.tipo === 'inpost' || !!(cRec?.settings as any)?.solo_cap_coperti
+      // niente ripiego su "Italia" fuori dai CAP coperti → corriere escluso (destinazione non coperta).
       sel = fasceC.filter((f: any) => zoneMatchIds.includes((f.zone as any)?.id))
       if (!sel.length && !isEsteroL && !corrieriEsclusi.has(cId) && !soloCapCoperti) {
         sel = fasceC.filter((f: any) => (f.zone as any)?.nome === zonaNome)
         if (!sel.length) sel = fasceC.filter((f: any) => (f.zone as any)?.nome === 'Italia')
       }
+      // ORIGINE: mittente NOTO ma fuori copertura → escludi (partenza non coperta). Non nei ricalcoli.
+      if (sel.length && soloCapCoperti && !(await origineCopertaCap(supabase, cId, { cap: params.mittCap, provincia: params.mittProvincia, paese: params.mittPaese }))) sel = []
     }
     if (sel.length) fascePerCorriere.set(cId, sel)
   }
@@ -599,6 +629,10 @@ export async function calcolaPrezzoCorriereDettaglio(
   // vendita/costo su una destinazione dove il corriere non ritira/consegna). Vale per tipo o flag.
   const { data: corrRec } = await supabase.from('corrieri').select('tipo,settings').eq('id', corriereId).maybeSingle()
   const soloCapCoperti = corrRec?.tipo === 'inpost' || !!(corrRec?.settings as any)?.solo_cap_coperti
+  // Copertura-CAP (InPost, sia Domicilio sia Locker): valgono i CAP coperti SIA in partenza SIA a
+  // destinazione (regola Lorenzo: stessi CAP per mittente e destinatario, per entrambi i servizi). La
+  // destinazione la filtra il match zona; qui si esclude se il MITTENTE è noto ma fuori copertura.
+  if (soloCapCoperti && !(await origineCopertaCap(supabase, corriereId, { cap: params.mittCap, provincia: params.mittProvincia, paese: params.mittPaese }))) return null
 
   // Le fasce del listino corriere possono essere salvate sotto uno qualsiasi dei
   // listini del master (l'editor usa un listino unico + corriere_id). Cerchiamo
@@ -809,6 +843,8 @@ export async function calcolaPrezzoCorriere(
     // costo di catena poteva agganciare la zona sbagliata, cioe' addebitare un importo diverso da
     // quello calcolato per il cliente.
     citta?: string
+    // Mittente: serve alla copertura in partenza dei corrieri a copertura-CAP (InPost).
+    mittCap?: string; mittProvincia?: string; mittPaese?: string
   }
 ): Promise<number | null> {
   const d = await calcolaPrezzoCorriereDettaglio(supabase, params)

@@ -2909,12 +2909,14 @@ export async function POST(req: NextRequest) {
           corriereId: corriereRecord.id, masterId,
           provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           pesoReale, packages,
+          // mittente: InPost copre solo certi CAP anche in PARTENZA (Domicilio e Locker)
+          mittCap: (body.shipFrom?.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom?.state || '').toUpperCase().trim(), mittPaese: 'IT',
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
         })
-        // COPERTURA: null = InPost NON copre questo CAP (fuori dai CAP coperti). Non si crea a costo 0.
+        // COPERTURA: null = InPost NON copre questo CAP (mittente o destinatario fuori copertura). Non a costo 0.
         if (costoInpost == null) {
           await stornaPrenotazione()
-          return NextResponse.json({ error: 'InPost non copre questo CAP di destinazione: scegli un altro corriere.' }, { status: 400 })
+          return NextResponse.json({ error: 'InPost non copre questo CAP (mittente o destinatario fuori dalle località servite): scegli un altro corriere.' }, { status: 400 })
         }
         costoCorrente = costoInpost
       }

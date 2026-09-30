@@ -20,7 +20,7 @@ import { EMAIL_PER_CORRIERE,
 } from '@/lib/spediamopro'
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
 import { normalizzaPaese } from '@/lib/paesi'
-import { calcolaPrezzoCorriereDettaglio, calcolaPesoFatturato, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente } from '@/lib/pricing'
+import { calcolaPrezzoCorriereDettaglio, calcolaPesoFatturato, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente, origineCopertaCap } from '@/lib/pricing'
 // La sigla neutra al posto del tipo del contratto: il nome del sistema tecnico a valle non deve
 // arrivare al browser, nemmeno dentro il JSON (vedi lib/corriere-logo.ts).
 import { siglaContratto, marchioCorriere } from '@/lib/corriere-logo'
@@ -388,6 +388,9 @@ export async function calcolaTariffeCliente(
       sel = fasceC.filter(f => (f.zone as any)?.nome === zonaNome)
       if (!sel.length) sel = fasceC.filter(f => (f.zone as any)?.nome === 'Italia')
     }
+    // ORIGINE (InPost, Domicilio e Locker): i CAP coperti valgono anche in PARTENZA → se il mittente è
+    // noto ma fuori copertura, il corriere non si mostra (stessa regola della destinazione).
+    if (sel.length && soloCapCoperti && !(await origineCopertaCap(supabase, cid, { cap: body.shipFrom?.postalCode, provincia: body.shipFrom?.state, paese: 'IT' }))) sel = []
     if (sel.length) fascePerCorriere.set(cid, sel)   // altrimenti il corriere non copre la destinazione -> escluso
   }
 
