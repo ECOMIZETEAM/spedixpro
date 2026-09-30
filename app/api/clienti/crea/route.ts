@@ -22,8 +22,23 @@ export async function POST(req: NextRequest) {
   const ragioneSociale = body.ragione_sociale
   if (!email) return NextResponse.json({ error: 'Email obbligatoria' }, { status: 400 })
   if (!ragioneSociale) return NextResponse.json({ error: 'Ragione sociale obbligatoria' }, { status: 400 })
-  const { data: existing } = await supabase.from('clienti').select('id').eq('email', email).single()
-  if (existing) return NextResponse.json({ error: 'Email già registrata' }, { status: 400 })
+  // Duplicato email: il vincolo `clienti_email_key` è GLOBALE (una email = un cliente su TUTTA la
+  // piattaforma). Il controllo va fatto col client ADMIN, non con quello RLS-scoped: altrimenti
+  // un'email già usata sotto un ALTRO master — o sotto un proprio agente/sotto-account non visibile —
+  // non veniva vista qui e la creazione falliva più sotto con l'errore GREZZO del DB ("duplicate key
+  // value violates unique constraint clienti_email_key"), incomprensibile: è IL motivo per cui la
+  // creazione "non funzionava". Ora: messaggio chiaro + log per misurare quanto capita.
+  const { createAdminSupabase } = await import('@/lib/supabase-admin')
+  const adminClient = createAdminSupabase()
+  const { data: existing } = await adminClient.from('clienti').select('id, master_id').eq('email', email).maybeSingle()
+  if (existing) {
+    const tuo = existing.master_id === utente.master_id
+    console.error('[CLIENTE][CREA] 400 email duplicata', { tuo })
+    return NextResponse.json({ error: tuo
+      ? 'Hai già un cliente con questa email (può essere sotto un tuo agente o non più attivo): cercalo nell\'Elenco Clienti invece di ricrearlo.'
+      : 'Questa email è già usata da un altro account sulla piattaforma e non può essere riassegnata a un nuovo cliente. Usa un\'altra email.' },
+      { status: 400 })
+  }
   // Codice progressivo PER MASTER: prendo il massimo esistente e vado avanti
   const { data: ultimi } = await supabase.from('clienti')
     .select('codice_cliente').eq('master_id', utente.master_id)
@@ -62,15 +77,23 @@ export async function POST(req: NextRequest) {
     bic_swift: body.bic_swift||null, note_rimborso: body.note_rimborso||null,
     codice_cliente: codice, attivo: true,
   }).select().single()
-  if (error || !nuovoCliente) return NextResponse.json({ error: error?.message||'Errore creazione' }, { status: 400 })
+  if (error || !nuovoCliente) {
+    // L'email duplicata è già intercettata sopra; qui resta soprattutto la corsa sul codice
+    // progressivo (due creazioni nello stesso istante → stesso CLI-000X → viola
+    // clienti_codice_master_unici). Niente errore grezzo del DB all'utente: messaggio chiaro + log.
+    console.error('[CLIENTE][CREA] insert KO', (error as any)?.code, error?.message)
+    const codiceInUso = (error as any)?.code === '23505' && /codice/i.test(error?.message || '')
+    return NextResponse.json({ error: codiceInUso
+      ? 'Due clienti creati nello stesso istante hanno preso lo stesso codice: riprova, partirà dal numero successivo.'
+      : 'Non è stato possibile creare il cliente. Riprova; se il problema persiste contatta l\'assistenza.' },
+      { status: 400 })
+  }
   // L'accesso va creato PRIMA di spedire le credenziali. Se qui falliva (indirizzo già usato da
   // un altro account, ecc.) l'errore non veniva letto e l'email partiva lo stesso: al cliente
   // arrivava una password di un account inesistente e non riusciva ad entrare.
   let accessoCreato = false
   let motivoAccesso = ''
   try {
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const adminClient = createAdminSupabase()
     const { data: authUser, error: aErr } = await adminClient.auth.admin.createUser({ email, password, email_confirm: true })
     if (aErr || !authUser?.user) {
       motivoAccesso = aErr?.message || 'creazione utente non riuscita'

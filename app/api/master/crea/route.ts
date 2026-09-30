@@ -92,7 +92,16 @@ export async function POST(req: NextRequest) {
 
     if (authError || !authUser?.user) {
       await admin.from('masters').delete().eq('id', nuovoMaster.id)
-      return NextResponse.json({ error: authError?.message || 'Errore creazione utente auth' }, { status: 400 })
+      // Email già in uso su un ALTRO account: l'auth è GLOBALE, quindi un'email già usata da un
+      // CLIENTE (che il controllo su masters.email qui sopra non vede) fa fallire qui. Messaggio
+      // chiaro invece del testo grezzo di Supabase ("A user with this email address has already been
+      // registered"), che al master non dice cosa fare. + log per misurare.
+      console.error('[MASTER][CREA] auth KO', authError?.message)
+      const giaUsata = /already.*regist|already.*exist|email.*exist/i.test(authError?.message || '')
+      return NextResponse.json({ error: giaUsata
+        ? 'Questa email è già usata da un altro account (cliente o master) sulla piattaforma: usane un\'altra.'
+        : 'Non è stato possibile attivare l\'accesso del master. Riprova; se persiste contatta l\'assistenza.' },
+        { status: 400 })
     }
 
     // L'esito di questo insert va CONTROLLATO: senza la riga in `utenti` l'account esiste in
