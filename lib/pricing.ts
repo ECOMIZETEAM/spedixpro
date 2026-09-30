@@ -575,6 +575,30 @@ export async function calcolaPrezzoCorriereDettaglio(
   const { corriereId, masterId, provincia } = params
   const zonaNome = zonaDaProvincia(provincia)
 
+  // INPOST LOCKER — prezzo per TAGLIA del box, NON a peso (contratto Hub-to-Point: Piccola/Media/Grande →
+  // prezzo fisso, 0-25kg piatto). Se il contratto ha `settings.prezzi_taglia`, la taglia si ricava dalle
+  // DIMENSIONI reali del collo (nessun peso/volumetrico) e si applica il prezzo + supplemento isole. Sta
+  // qui, prima del listino a fasce, perché il locker non ha fasce a peso.
+  {
+    const { data: cs } = await supabase.from('corrieri').select('tipo,settings').eq('id', corriereId).maybeSingle()
+    const pt: any = (cs?.settings as any)?.prezzi_taglia
+    if (cs?.tipo === 'inpost' && pt && typeof pt === 'object') {
+      const p0: any = (Array.isArray(params.packages) && params.packages[0]) || {}
+      const dims = [Number(p0.height) || 0, Number(p0.width) || 0, Number(p0.length) || 0].sort((a, b) => a - b)
+      const entra = (mx: number[]) => { const s = [...mx].sort((a, b) => a - b); return dims[0] <= s[0] && dims[1] <= s[1] && dims[2] <= s[2] }
+      const taglia = entra([8, 38, 64]) ? 'piccola' : entra([19, 38, 64]) ? 'media' : 'grande'
+      let prezzo = Number(pt[taglia]) || Number(pt.grande) || 0
+      const ISOLE = new Set(['AG', 'CL', 'CT', 'EN', 'ME', 'PA', 'RG', 'SR', 'TP', 'CA', 'CI', 'NU', 'OG', 'OR', 'OT', 'SS', 'SU', 'VS'])
+      const isIsola = ISOLE.has(String(provincia || '').toUpperCase())
+      if (isIsola) prezzo += Number(pt.supplemento_isole) || 0
+      prezzo = Math.round(prezzo * 100) / 100
+      if (prezzo > 0) {
+        const pr = Number(params.pesoReale) || 1
+        return { totale: prezzo, nolo: prezzo, fuel: 0, sponda: 0, contrassegno: 0, assicurazione: 0, peso_reale: pr, peso_volume: 0, peso_fatturato: pr, zona: isIsola ? 'Sicilia e Sardegna' : 'Italia' }
+      }
+    }
+  }
+
   // Le fasce del listino corriere possono essere salvate sotto uno qualsiasi dei
   // listini del master (l'editor usa un listino unico + corriere_id). Cerchiamo
   // quindi in TUTTI i listini del master, filtrando per corriere_id.
