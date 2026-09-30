@@ -104,6 +104,14 @@ export function erroreRitiroPulito(raw: any): string {
   // lo sostituisco PER INTERO con un messaggio pulito e operativo — la seconda variante prima
   // sfuggiva e lasciava passare il nome del contratto in chiaro.
   if (/nessun prezzo impostato|non ha un prezzo impostato|prezzo impostato per (fascia|questa zona)/i.test(msg)) {
+    // POSTE: dal 30/9/2026 il corriere non prezza più il RITIRO a domicilio (la spedizione parte
+    // regolare, è solo la richiesta di ritiro a non essere disponibile). Messaggio specifico così il
+    // cliente NON ritenta a vuoto — con 87 clienti a martellare l'errore in una mattina. "Poste" è il
+    // brand del corriere e si può mostrare; il nome del contratto (vi.ma.s.r.l.) resta nascosto perché
+    // qui il testo grezzo viene sostituito per intero.
+    if (/poste/i.test(msg)) {
+      return 'Il ritiro a domicilio con Poste non è prenotabile da qui in questo momento (la spedizione resta regolare, è solo la richiesta di ritiro a non essere disponibile ora). Riprova più tardi, oppure consegna il pacco in un ufficio Poste.'
+    }
     return 'Il corriere non ha una tariffa di ritiro per questo contratto/peso: programma il ritiro dal portale del corriere.'
   }
   if (/non idonea al ritiro/i.test(msg)) {
