@@ -6,6 +6,7 @@ import { useDialog } from '@/app/components/DialogProvider'
 import SelettoreArticoli, { type RigaArticolo, type ArticoloCat } from '@/app/components/SelettoreArticoli'
 import { isExtraUe } from '@/lib/paesi-ue'
 import PuntoPosteSelettore, { type PuntoScelto } from '@/app/components/PuntoPosteSelettore'
+import InpostLockerPicker, { type InpostPuntoScelto } from '@/app/components/InpostLockerPicker'
 
 // Deposito PuntoPoste preferito (FMP/APT): ricordato per comodità, come i filtri persistenti.
 const depSalvato = (): 'FMP'|'APT'|'' => { try { const v = localStorage.getItem('puntoposte:deposito'); return v === 'FMP' || v === 'APT' ? v : '' } catch { return '' } }
@@ -130,6 +131,7 @@ export default function NuovaSpedizioneCliente() {
   const [articoliScelti, setArticoliScelti] = useState<RigaArticolo[]>([])
   const [depositoTipo, setDepositoTipo] = useState<'FMP'|'APT'|''>('')
   const [puntoArrivo, setPuntoArrivo] = useState<PuntoScelto | null>(null)
+  const [inpostPunto, setInpostPunto] = useState<InpostPuntoScelto | null>(null)   // locker InPost scelto (opzionale)
   const [consegnaA, setConsegnaA] = useState<'domicilio'|'punto'>('domicilio')
   useEffect(() => { fetch('/api/cliente/articoli').then(r=>r.json()).then(d=>setCatalogo(Array.isArray(d)?d:[])).catch(()=>{}) }, [])
   // Precompila il codice HS dalla merce del catalogo (colonna codice_hs), senza sovrascrivere quello
@@ -363,6 +365,7 @@ export default function NuovaSpedizioneCliente() {
         clienteId: clienteData?.id,
         carrierCode:selected.carrierCode, contractCode:selected.contractCode,
         _corriere_id: (selected as any)._corriere_id || (selected as any).corriere_id || null, _spediamopro_quotation: (selected as any)._spediamopro_quotation || null,
+        inpostPointId: (selected as any)?._corriere_tipo === 'inpost' ? (inpostPunto?.id || undefined) : undefined,   // locker/punto InPost (vuoto = domicilio)
         totalPrice: totaleConExtra.toFixed(2),
         serviziAccessori: extraScelti,
         packages: buildPackages(),
@@ -936,6 +939,12 @@ export default function NuovaSpedizioneCliente() {
                         <PuntoPosteSelettore corriereId={selected._corriere_id} lato="arrivo" tipologia={selected._consegna_punto} capIniziale={dest.cap} valore={puntoArrivo} onChange={setPuntoArrivo} />
                       </div>
                     )}
+                  </div>
+                )}
+                {selected._corriere_tipo === 'inpost' && selected._corriere_id && (
+                  <div style={{marginBottom:'14px'}}>
+                    <InpostLockerPicker corriereId={selected._corriere_id} capIniziale={dest.cap} valore={inpostPunto} onSelect={setInpostPunto} />
+                    <div style={{fontSize:'11px',color:'#666',marginTop:'4px'}}>Scegli un locker/punto InPost per la consegna, oppure lascialo vuoto per consegnare all’indirizzo del destinatario.</div>
                   </div>
                 )}
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'14px',alignItems:'end' as const}}>
