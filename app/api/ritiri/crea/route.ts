@@ -7,6 +7,7 @@ import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { erroreRitiroPulito } from '@/lib/errore-corriere'
 import { codiceRitiroValido } from '@/lib/easyparcel'
 import { siglaProvincia } from '@/lib/province-it'
+import { pickupTimeSpedisci } from '@/lib/spedisci'
 
 // Provincia a ESATTAMENTE 2 lettere per SpediamoPro (che rifiuta con 422 "province should have
 // exactly 2 characters" se riceve il nome esteso o con spazi). Se non risolvo a 2, torno undefined
@@ -36,18 +37,9 @@ function normalizzaOrario(v: any): string | null {
   return null
 }
 
-// pickupTime per il RITIRO SPEDISCI.online: dal 10/9 il provider vuole un ENUM (AM/PM/AMPM), non più
-// un orario "HH:MM" — con "09:00" rispondeva 400 "pickupTime must be one of AM, PM, AMPM". Mattina→AM,
-// pomeriggio→PM, sconosciuto→AMPM (tutto il giorno). NB: SpediamoPro usa ancora fasciaOraria (from/to):
-// quella NON si tocca, è un altro provider con un altro formato.
-function pickupTimeSpedisci(v: any): 'AM' | 'PM' | 'AMPM' {
-  const s = String(v || '').trim().toLowerCase()
-  if (s.includes('matt')) return 'AM'
-  if (s.includes('pome')) return 'PM'
-  const m = s.match(/^(\d{1,2}):/)
-  if (m) return parseInt(m[1], 10) < 13 ? 'AM' : 'PM'
-  return 'AMPM'
-}
+// pickupTime SPEDISCI.online (AM/PM/AMPM): ora è condiviso in lib/spedisci.ts così vale per TUTTE le
+// porte (portale + API pubblica). NB: SpediamoPro usa ancora fasciaOraria (from/to): altro provider,
+// altro formato, non si tocca.
 
 // Fascia oraria (from/to) richiesta da SpediamoPro
 function fasciaOraria(v: any): { from: string; to: string } {

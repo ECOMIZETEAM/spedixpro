@@ -24,6 +24,21 @@ export function codiceContrattoCifrato(v: any): boolean {
   } catch { return false }
 }
 
+// pickupTime per il RITIRO Spedisci.online: dal 10/9/2026 il provider vuole un ENUM (AM/PM/AMPM),
+// non più un orario "HH:MM" — con "09:00" risponde 400 "pickupTime must be one of AM, PM, AMPM".
+// Mattina→AM, pomeriggio→PM, sconosciuto→AMPM (tutto il giorno). Accetta sia "mattina/pomeriggio"
+// (portale) sia un "HH:MM" (API pubblica), così vale per TUTTE le porte da cui nasce un ritiro.
+// Sta qui, condivisa, apposta: quando è rimasta solo nel portale, l'API pubblica ha continuato a
+// mandare "09:00" e i ritiri spedisci via API sono falliti in silenzio dal 10/9.
+export function pickupTimeSpedisci(v: any): 'AM' | 'PM' | 'AMPM' {
+  const s = String(v || '').trim().toLowerCase()
+  if (s.includes('matt')) return 'AM'
+  if (s.includes('pome')) return 'PM'
+  const m = s.match(/^(\d{1,2}):/)
+  if (m) return parseInt(m[1], 10) < 13 ? 'AM' : 'PM'
+  return 'AMPM'
+}
+
 export function trovaRateContratto(rates: any[], cred: any): any | null {
   if (!Array.isArray(rates) || !rates.length) return null
   // 1) Match ESATTO sul codice salvato (pannelli con codici stabili in chiaro).

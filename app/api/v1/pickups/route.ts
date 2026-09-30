@@ -3,6 +3,7 @@ import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { spediamoproCreatePickup, spediamoproWaitPickupCode } from '@/lib/spediamopro'
 import { erroreRitiroPulito } from '@/lib/errore-corriere'
+import { pickupTimeSpedisci } from '@/lib/spedisci'
 
 // API pubblica MoovExpress — richiede un ritiro per spedizioni del contratto della API key.
 // Auth: Authorization: Bearer <api_key>
@@ -63,14 +64,14 @@ export async function POST(req: NextRequest) {
   const pesoTotale = spedizioni.reduce((s: number, x: any) => s + (parseFloat(String(x.peso_reale)) || 1), 0)
   const fascia = fasciaOraria(body.timeFrom, body.timeTo)
 
-  async function salvaRitiro(pickupCode: string) {
+  async function salvaRitiro(pickupCode: string, dataRitiro: string = body.date) {
     return await admin.from('ritiri').insert({
       master_id: ctx!.masterId, cliente_id: ctx!.clienteId, corriere_id: corriere!.id,
       tracking_ritiro: pickupCode || null, cod_ritiro: pickupCode || null,
       mitt_nome: from.name, mitt_indirizzo: from.street1, mitt_citta: from.city,
       mitt_provincia: from.state || null, mitt_cap: from.postalCode, mitt_telefono: pulisciTelefono(from.phone) || null,
       colli: colliTotali, peso: pesoTotale, contenuto: body.notes || null,
-      data_ritiro: body.date, stato: 'richiesto',
+      data_ritiro: dataRitiro, stato: 'richiesto',
     }).select('id').single()
   }
 
@@ -147,8 +148,10 @@ export async function POST(req: NextRequest) {
   } catch (e: any) { console.error('API pickup rates:', e?.message) }
   if (!contractCode) return NextResponse.json({ error: 'Impossibile recuperare il codice contratto per il ritiro' }, { status: 400 })
 
-  const payload: any = { contractCode, carrierCode, pickupDate: body.date, shipFrom, packagesDetails: [{ weight: String(pesoTotale || 1) }] }
-  if (fascia.from) payload.pickupTime = fascia.from
+  // pickupTime come ENUM AM/PM/AMPM (dal 10/9 spedisci rifiuta "HH:MM" con 400 "pickupTime must be
+  // one of AM, PM, AMPM"). Il portale era stato corretto, questa porta no: i ritiri spedisci via API
+  // fallivano tutti da allora. Funzione condivisa, così le due porte restano allineate.
+  const payload: any = { contractCode, carrierCode, pickupDate: body.date, shipFrom, packagesDetails: [{ weight: String(pesoTotale || 1) }], pickupTime: pickupTimeSpedisci(body.timeFrom) }
   if (body.notes) payload.specialInstruction = body.notes
   if (shipmentId) payload.shipmentId = shipmentId
 
@@ -165,7 +168,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Il corriere non ha risposto in tempo per il ritiro. Riprova; se persiste, quel contratto va gestito dal portale del corriere (es. Poste).' }, { status: 504 })
   }
   clearTimeout(toId)
-  const text = await res.text()
+  let text = await res.text()
+
+  // RITIRO IN GIORNATA rifiutato: come il portale (/api/ritiri/crea), riprovo col primo giorno
+  // LAVORATIVO utile invece di far fallire il ritiro. Qui però è un partner API che ha chiesto una
+  // data precisa: se la sposto glielo DICO (data reale in risposta + avviso), non in silenzio. Il
+  // rifiuto arriva con testi diversi e che cambiano nel tempo: "PICKUP_DATE = today...", "Time slot
+  // not compatible with today's date", "...ritiro nella mattina stessa".
+  let dataRitiroFinale = String(body.date)
+  if (!res.ok && /PICKUP_DATE\s*=\s*today|time slot not compatible with today|nella mattina stessa/i.test(text)) {
+    const prossimo = new Date(String(body.date) + 'T12:00:00')
+    do { prossimo.setDate(prossimo.getDate() + 1) } while ([0, 6].includes(prossimo.getDay()))
+    dataRitiroFinale = prossimo.toISOString().slice(0, 10)
+    payload.pickupDate = dataRitiroFinale
+    const ctrl2 = new AbortController()
+    const to2 = setTimeout(() => ctrl2.abort(), 25000)
+    try {
+      res = await fetch(`${baseUrl}/pickup/create`, {
+        method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctrl2.signal,
+      })
+      text = await res.text()
+      if (!res.ok) dataRitiroFinale = String(body.date)   // fallito anche il giorno dopo: la data non è cambiata
+    } catch {
+      clearTimeout(to2)
+      return NextResponse.json({ error: 'Il corriere non ha risposto in tempo per il ritiro. Riprova tra qualche minuto.' }, { status: 504 })
+    }
+    clearTimeout(to2)
+  }
+
   let r: any; try { r = JSON.parse(text) } catch { r = { error: text.substring(0, 300) } }
   // L'errore del fornitore a valle va SEMPRE ripulito (nomi tecnici/dominio) prima di uscire — come
   // fa il ramo SpediamoPro qui sopra. Senza, il testo grezzo del provider arriverebbe al partner.
@@ -174,8 +204,11 @@ export async function POST(req: NextRequest) {
   // Codice ritiro del corriere: spedisci può restituirlo come pickupId (CP…) o, in alcune versioni,
   // come id/uuid/code/reference. Prendo il primo disponibile così salviamo sempre il riferimento giusto.
   const codiceCorriere = r.pickupId ?? r.pickup_id ?? r.id ?? r.uuid ?? r.code ?? r.reference ?? null
-  const { data: nuovo, error } = await salvaRitiro(codiceCorriere)
+  const { data: nuovo, error } = await salvaRitiro(codiceCorriere, dataRitiroFinale)
   if (error) { console.error('[API][PICKUP] salvataggio ritiro fallito:', error.message); return NextResponse.json({ error: `Ritiro creato presso il corriere (${codiceCorriere}) ma non registrato a sistema: contatta l'assistenza indicando questo codice.` }, { status: 500 }) }
   // NB: `id` = riferimento interno MoovExpress (UUID). `codice_ritiro`/`pickupId` = codice del CORRIERE (es. CP…).
-  return NextResponse.json({ id: nuovo.id, codice_ritiro: codiceCorriere, pickupId: codiceCorriere, stato: 'richiesto', date: body.date })
+  return NextResponse.json({
+    id: nuovo.id, codice_ritiro: codiceCorriere, pickupId: codiceCorriere, stato: 'richiesto', date: dataRitiroFinale,
+    ...(dataRitiroFinale !== String(body.date) ? { avviso: `Ritiro in giornata non disponibile: spostato al primo giorno lavorativo utile (${dataRitiroFinale}).` } : {}),
+  })
 }
