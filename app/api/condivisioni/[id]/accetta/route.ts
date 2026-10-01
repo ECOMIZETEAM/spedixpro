@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { getPermessiUtente } from '@/lib/permessi'
 import { generaApiKey } from '@/lib/api-auth'
+import { propagaCostoCondivisione } from '@/lib/condivisione-propaga'
 
 /* ACCETTA una condivisione ricevuta (Fase 3). Il COMPRATORE (acquirente = corrieri_condivisi.master_id)
  * consente, e al consenso si monta la contabilità — riusando i meccanismi esistenti (vedi CONDIVISIONE-
@@ -87,5 +88,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'Questa condivisione è già stata gestita.' }, { status: 409 })
   }
 
-  return NextResponse.json({ ok: true, contratto: contratto?.nome_contratto || 'Contratto partner' })
+  // 5) PROPAGA IL COSTO sul corriere appena materializzato: il compratore deve VEDERE quanto paga (il
+  //    listino d'ingrosso = W) e le ZONE del contratto sul SUO "Listino Corrieri"/"Gestione Zone", o non
+  //    può costruirci sopra il listino clienti (era il buco: corriere acceso ma vuoto). Stessa idea della
+  //    cascata padre→figlio, ma sorgente oltre il ponte API. Best-effort: se fallisce, il corriere resta
+  //    spento e lo si dice, invece di accendere un contratto senza prezzi.
+  let propagazione: any = { ok: false }
+  try { propagazione = await propagaCostoCondivisione(admin, id) }
+  catch (e: any) { console.error('[condivisioni/accetta] propaga', e?.message); propagazione = { ok: false, reason: e?.message } }
+
+  // 6) ACCENDI il corriere solo se il costo è stato propagato (Fase 4 è viva: niente più contratto monco).
+  if (propagazione.ok) {
+    await admin.from('corrieri').update({ attivo: true }).eq('id', corrNuovo.id)
+  }
+
+  return NextResponse.json({
+    ok: true, contratto: contratto?.nome_contratto || 'Contratto partner',
+    attivo: !!propagazione.ok, propagazione,
+    ...(propagazione.ok ? {} : { avviso: 'Contratto accettato ma senza costo: il fornitore deve completare il listino d’ingrosso, poi ri-sincronizza.' }),
+  })
 }
