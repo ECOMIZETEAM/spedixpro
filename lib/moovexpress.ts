@@ -34,6 +34,10 @@ export type MoovexpressCreaInput = {
   insuranceValue?: number
   notes?: string
   contenuto?: string
+  // Riferimento ordine e valore merce: il VENDITORE li usa come un'integrazione qualsiasi (numRif,
+  // supplemento contrassegno/assicurazione dal suo listino). Passarli = il prezzo W torna completo.
+  rifOrdine?: string
+  valoreMerce?: number
   pickup?: { requested: boolean; date?: string; time?: string }
 }
 export type MoovexpressCreaResult = {
@@ -106,4 +110,38 @@ export async function etichettaMoovexpress(cred: MoovexpressCred, labelUrl: stri
   const r = await fetch(url, { headers: { Authorization: `Bearer ${cred.api_key}` } })
   if (!r.ok) throw new Error(`Etichetta non disponibile dal fornitore (${r.status})`)
   return Buffer.from(await r.arrayBuffer())
+}
+
+export type MoovexpressTracking = {
+  // Lo stato arriva GIA' nel nostro vocabolario (il venditore l'ha già mappato dal corriere reale
+  // quando il suo giro di tracking ha aggiornato la sua spedizione): si usa tale e quale.
+  stato: string | null
+  consegnata: boolean
+  eventi: { data: string; descrizione: string; luogo: string }[]
+}
+
+// TRACKING: chiede al venditore lo stato della spedizione (GET /api/v1/tracking/<numero>). Il venditore
+// risponde con lo stato della SUA spedizione (già nostro enum) + la cronologia del corriere reale. A più
+// salti la catena resta fresca: ogni livello interroga quello sotto (il cron gira su tutte le spedizioni).
+// Best-effort: su errore LANCIA (il chiamante, cron o /api/v1, non declassa lo stato se non arriva nulla).
+export async function trackingMoovexpress(cred: MoovexpressCred, tracking: string): Promise<MoovexpressTracking> {
+  if (!cred?.api_key) throw new Error('Contratto senza chiave: rifare la condivisione.')
+  if (!tracking) return { stato: null, consegnata: false, eventi: [] }
+  let r: Response
+  try {
+    r = await fetch(`${baseUrl(cred)}/api/v1/tracking/${encodeURIComponent(tracking)}`, {
+      headers: { Authorization: `Bearer ${cred.api_key}` },
+    })
+  } catch (e: any) {
+    throw new Error('Fornitore non raggiungibile: ' + (e?.message || 'rete'))
+  }
+  const j: any = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(j?.error || `Errore dal fornitore (${r.status})`)
+  const stato = typeof j?.status === 'string' && j.status ? j.status : null
+  const eventi = Array.isArray(j?.events) ? j.events.map((e: any) => ({
+    data: String(e?.timestamp || ''),
+    descrizione: String(e?.status || ''),
+    luogo: String(e?.location || ''),
+  })) : []
+  return { stato, consegnata: stato === 'consegnata', eventi }
 }

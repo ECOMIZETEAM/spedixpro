@@ -424,6 +424,37 @@ export async function GET(req: NextRequest) {
           }
         } catch (e: any) { console.error('[TRACKING][INPOST][EVENTI]', s.numero, e?.message) }
 
+      } else if (tipo === 'moovexpress') {
+        // CONDIVISIONE CONTRATTI: lo stato si chiede al VENDITORE (GET /api/v1/tracking/<numero>) con la
+        // api_key del contratto. Il venditore risponde con lo stato della SUA spedizione — GIA' nel nostro
+        // vocabolario (lui l'ha già mappato dal corriere reale) — più la cronologia. A più salti la catena
+        // resta fresca da sé, perché ogni livello interroga quello sotto e il cron gira su tutte le spedizioni.
+        if (!s.tracking_number || !cred?.api_key) return
+        const { trackingMoovexpress } = await import('@/lib/moovexpress')
+        const { stato: mvStato, consegnata: mvConseg, eventi: mvEventi } = await trackingMoovexpress(cred, String(s.tracking_number))
+        if (mvStato && prioritaStato(mvStato) > prioritaStato(nuovo)) nuovo = mvStato
+        if (mvStato === 'in_giacenza') vistaGiacenza = true
+        // ...ma se il pacco e' tornato al mittente, quella "consegnata" e' il RITORNO: vince il reso.
+        if (mvStato === 'reso_mittente') nuovo = 'reso_mittente'
+        if (mvConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
+
+        try {
+          const cambiatoMv = nuovo !== s.stato
+          if (cambiatoMv || budgetCronologie > 0) {
+            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(mvEventi, {
+              data: ['data', 'dataOra', 'datetime'],
+              descrizione: ['descrizione'],
+              luogo: ['luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length) {
+              if (!cambiatoMv) budgetCronologie--
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][MOOVEXPRESS][EVENTI]', s.numero, e?.message) }
+
       } else {
         return
       }

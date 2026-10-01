@@ -3035,5 +3035,136 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  if (corriereRecord.tipo === 'moovexpress') {
+    // CONDIVISIONE CONTRATTI (CONDIVISIONE-CONTRATTI.md): questo master RIVENDE il contratto di un altro
+    // master. Il corriere punta all'`/api/v1` del VENDITORE con la api_key ricevuta all'Accetta: il venditore
+    // crea la spedizione VERA sul suo contratto (smistando al corriere reale) e torna numero + etichetta +
+    // prezzo W. È un provider a COSTO ESTERNO come Spedisci.online: costoCorrente = W (NON 0 come i diretti),
+    // così la cascata lo usa come base e ci marca sopra il ricarico del compratore. A più salti funziona da
+    // sé: il venditore può essere a sua volta un compratore, e ogni livello addebita col W del livello sotto.
+    // ATTENZIONE: niente annullo via API al volo (lo gestisce il ciclo di vita a webhook) → su insertError si
+    // risponde col numero, come gli altri provider senza annullo.
+    const credMv = { api_key: cred.api_key, base_url: cred.base_url }
+    if (!credMv.api_key) {
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Contratto non configurato correttamente. Contatta l\'assistenza.' }, { status: 400 })
+    }
+    try {
+      const { creaSpedizioneMoovexpress, etichettaMoovexpress } = await import('@/lib/moovexpress')
+
+      const ris = await creaSpedizioneMoovexpress(credMv, {
+        packages: packages.map((p: any) => ({
+          weight: parseFloat(p?.weight) || 1,
+          length: parseFloat(p?.length) || undefined, width: parseFloat(p?.width) || undefined, height: parseFloat(p?.height) || undefined,
+        })),
+        shipFrom: body.shipFrom, shipTo: body.shipTo,
+        codValue: body.codValue ? Number(body.codValue) : undefined,
+        insuranceValue: body.insuranceValue ? Number(body.insuranceValue) : undefined,
+        valoreMerce: body.valoreMerce ? Number(body.valoreMerce) : undefined,
+        notes: body.notes ? String(body.notes) : undefined,
+        contenuto: body.contenuto ? String(body.contenuto) : undefined,
+        rifOrdine: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
+        pickup: _vuoleRitiro ? { requested: true, date: String(body.dataRitiro), time: _pomeriggio ? 'pomeriggio' : 'mattina' } : undefined,
+      })
+      const numeroFinale = ris.tracking
+      // W = quanto il venditore addebita al compratore = il COSTO per questo master.
+      const costoCorrente = ris.prezzo
+      const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
+
+      // Etichetta del venditore (il PDF del corriere reale, propagato su per ogni salto): scaricata subito e
+      // salvata come data URL, così non dipende da una chiamata live dopo.
+      let etichettaUrl: string | null = null
+      try {
+        const lab = await etichettaMoovexpress(credMv, ris.label_url)
+        if (lab?.length) etichettaUrl = `data:application/pdf;base64,${lab.toString('base64')}`
+      } catch (e) { console.error('[CREA][MOOVEXPRESS] etichetta:', (e as any)?.message) }
+
+      const colliDettaglio = (body.colliDettaglio || packages.map((p: any) => ({ lunghezza: p.length, larghezza: p.width, altezza: p.height })))
+        .map((c: any, i: number) => ({
+          numero: i + 1,
+          lunghezza: c.lunghezza || packages[i]?.length || null,
+          larghezza: c.larghezza || packages[i]?.width || null,
+          altezza: c.altezza || packages[i]?.height || null,
+          peso: packages[i]?.weight || null,
+          etichetta_url: etichettaUrl,   // una LDV, un PDF per l'intera spedizione
+        }))
+
+      const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
+        master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id,
+        numero: numeroFinale,
+        mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
+        mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
+        mitt_email: body.shipFrom.email || null, mitt_telefono: body.shipFrom.phone || null,
+        dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_citta: body.shipTo.city,
+        dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
+        dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
+        colli: packages.length, peso_reale: pesoReale,
+        peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
+        lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
+        contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
+        tracking_number: numeroFinale,
+        etichetta_url: etichettaUrl,
+        colli_dettaglio: colliDettaglio,
+        raw_response: { _moovexpress: true, tracking: numeroFinale, venditore_spedizione_id: ris.id || null, label_url: ris.label_url || null },
+        stato: 'in_lavorazione',
+        costo_spedizione: costoCorrente, costo_totale: costoCliente,
+        servizi_accessori: serviziAccessori,
+        richiedi_ritiro: _vuoleRitiro || false,
+        data_ritiro: _vuoleRitiro ? String(body.dataRitiro) : null,
+        intervallo_ritiro: _vuoleRitiro ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
+        note: body.notes || null, contenuto: body.contenuto || null,
+        rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
+      }).select('id').single()
+
+      if (insertError) {
+        console.error('[CREA][MOOVEXPRESS][INSERT]', numeroFinale, insertError.message)
+        return NextResponse.json({
+          error: `Spedizione creata sul corriere (${numeroFinale}) ma non registrata a sistema: contatta l'assistenza indicando il numero ${numeroFinale}.`,
+          numero: numeroFinale,
+        }, { status: 500 })
+      }
+
+      await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
+      try {
+        await addebitaCatena(adminCrea, {
+          masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
+          // Costo ESTERNO (W tornato dal venditore), come Spedisci.online — non 0 come i diretti.
+          costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
+          cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
+          corriereNome: corriereRecord.nome_contratto,
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+          serviziAccessori,
+          mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
+          numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
+        })
+      } catch (e) { console.error('[CREA][MOOVEXPRESS] cascata catena:', e) }
+
+      after(async () => {
+        try {
+          const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
+          let notificaDest = true
+          if (clienteId) {
+            const { data: cli } = await adminCrea.from('clienti').select('impostazioni').eq('id', clienteId).maybeSingle()
+            notificaDest = (cli?.impostazioni as any)?.notifica_email_dest !== false
+          }
+          await inviaEmailSpedizioneCreata({
+            mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
+            mittNome: body.shipFrom?.name, destNome: body.shipTo?.name,
+            numero: numeroFinale, corriere: corriereRecord.nome_contratto, destCitta: body.shipTo?.city,
+            notificaDest, spedizioneId: inserted?.id || null, masterId,
+          })
+        } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
+      })
+
+      return NextResponse.json({
+        numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2), spedizioneId: inserted?.id || null,
+      })
+    } catch (err: any) {
+      console.error('[CREA][MOOVEXPRESS]', err?.message)
+      await stornaPrenotazione()
+      return NextResponse.json({ error: erroreCorrierePulito(err?.message) }, { status: 400 })
+    }
+  }
+
   { await stornaPrenotazione(); return NextResponse.json({ error: `Tipo corriere non supportato: ${corriereRecord.tipo}` }, { status: 400 }) }
 }

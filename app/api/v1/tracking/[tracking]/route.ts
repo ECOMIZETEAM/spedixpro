@@ -102,6 +102,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
       return NextResponse.json({ ...base, status: nuovo || sped.stato, events: events.length ? events : await eventiSalvati() })
     }
 
+    if (corriere.tipo === 'moovexpress') {
+      // CONDIVISIONE CONTRATTI: si rilancia la domanda al VENDITORE (la sua `/api/v1/tracking`) con la
+      // api_key del contratto. Lo stato torna già nel nostro vocabolario; a più salti ogni livello inoltra
+      // a quello sotto. Se il venditore non risponde, il catch sotto ripiega sulla cronologia salvata.
+      if (!cred.api_key) return NextResponse.json({ ...base, events: await eventiSalvati() })
+      const { trackingMoovexpress } = await import('@/lib/moovexpress')
+      const tr = await trackingMoovexpress(cred as any, String(sped.tracking_number || sped.numero || ''))
+      const events = (tr.eventi || []).map((e) => ({ timestamp: e.data, status: e.descrizione, location: e.luogo }))
+      await persistiStato(tr.stato, events)
+      return NextResponse.json({ ...base, status: tr.stato || sped.stato, events: events.length ? events : await eventiSalvati() })
+    }
+
     // Spedisci: tracking sul dominio del contratto
     const res = await fetch(`https://${cred.master_domain}/api/v2/shipping/tracking/${encodeURIComponent(sped.tracking_number || '')}`, {
       headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },

@@ -576,6 +576,36 @@ export async function POST(req: NextRequest) {
       console.error('[V1][INPOST]', e?.message)
       return errore(erroreCorrierePulito(e?.message))
     }
+  } else if (corriere.tipo === 'moovexpress') {
+    // CONDIVISIONE CONTRATTI: provider a COSTO ESTERNO (W) — il corriere punta all'`/api/v1` del VENDITORE
+    // con la api_key ricevuta all'Accetta. Diversamente dai diretti, costoCorrente = W (il prezzo che il
+    // venditore addebita): la cascata lo usa come base del ricarico. A più salti funziona da sé (il venditore
+    // può essere a sua volta compratore). È questa stessa porta a essere chiamata dal venditore un livello sotto.
+    const credMv = { api_key: cred.api_key, base_url: cred.base_url }
+    if (!credMv.api_key) return errore('Contratto non configurato correttamente')
+    try {
+      const { creaSpedizioneMoovexpress, etichettaMoovexpress } = await import('@/lib/moovexpress')
+      const risMv = await creaSpedizioneMoovexpress(credMv, {
+        packages: packages.map((p: any) => ({ weight: parseFloat(p?.weight) || 1, length: parseFloat(p?.length) || undefined, width: parseFloat(p?.width) || undefined, height: parseFloat(p?.height) || undefined })),
+        shipFrom: { ...body.shipFrom, street1: conPresso(body.shipFrom.street1 || '', pressoFrom) },
+        shipTo: { ...body.shipTo, street1: conPresso(body.shipTo.street1 || '', pressoTo) },
+        codValue: body.codValue ? Number(body.codValue) : undefined,
+        insuranceValue: body.insuranceValue ? Number(body.insuranceValue) : undefined,
+        valoreMerce: body.valoreMerce ? Number(body.valoreMerce) : undefined,
+        notes: body.notes ? String(body.notes) : undefined,
+        contenuto: body.contenuto ? String(body.contenuto) : undefined,
+        rifOrdine: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
+        pickup: _vuoleRitiro ? { requested: true, date: _dataRitiro, time: _pomeriggio ? 'pomeriggio' : 'mattina' } : undefined,
+      })
+      numero = risMv.tracking
+      costoCorrente = risMv.prezzo   // W: costo esterno (come spedisci), NON 0
+      codiceRitiro = risMv.ritiro?.codice || null
+      try { const lab = await etichettaMoovexpress(credMv, risMv.label_url); if (lab?.length) etichettaUrl = `data:application/pdf;base64,${lab.toString('base64')}` } catch (e) { console.error('[V1][MOOVEXPRESS] etichetta:', (e as any)?.message) }
+      raw = { _moovexpress: true, tracking: numero, venditore_spedizione_id: risMv.id || null, label_url: risMv.label_url || null }
+    } catch (e: any) {
+      console.error('[V1][MOOVEXPRESS]', e?.message)
+      return errore(erroreCorrierePulito(e?.message))
+    }
   } else {
     return errore('Tipo contratto non supportato')
   }
