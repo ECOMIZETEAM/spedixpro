@@ -95,6 +95,21 @@ export async function abilitaContrattoCondiviso(
     listino_id: listinoIngrosso, corriere_id: corriereId, tipo: s.tipo, descrizione: s.descrizione, valore: s.valore, tipo_calcolo: s.tipo_calcolo, nome: s.nome,
   })))
 
+  const m = await materializzaContratto(admin, { seller, buyer, ledgerId, ledgerNome: ledger.ragione_sociale, corr, listinoIngrosso: listinoIngrosso! })
+  return m
+}
+
+/* Materializza sul COMPRATORE un contratto il cui prezzo W è GIÀ nel listino d'ingrosso del ledger:
+ * abilita il corriere al ledger, crea la chiave, crea/riusa il corriere moovexpress del compratore e
+ * propaga costo+zone (accendendolo se riesce). NON tocca le fasce del listino (le mette chi chiama:
+ * abilita le genera da costo+ricarico, assegna-listino le prende dal listino scelto). */
+async function materializzaContratto(
+  admin: any,
+  p: { seller: string; buyer: string; ledgerId: string; ledgerNome?: string; corr: any; listinoIngrosso: string },
+): Promise<{ ok: boolean; reason?: string; propagazione?: any; buyerCorriereId?: string }> {
+  const { seller, buyer, ledgerId, ledgerNome, corr, listinoIngrosso } = p
+  const corriereId = corr.id as string
+
   // Il ledger "vede" il contratto (clienti_corrieri_abilitati) — come un cliente qualsiasi.
   const { data: ab } = await admin.from('clienti_corrieri_abilitati').select('cliente_id').eq('cliente_id', ledgerId).eq('corriere_id', corriereId).maybeSingle()
   if (!ab) await admin.from('clienti_corrieri_abilitati').insert({ cliente_id: ledgerId, corriere_id: corriereId, abilitato: true })
@@ -105,7 +120,7 @@ export async function abilitaContrattoCondiviso(
   let chiave = keyEsist?.chiave as string | undefined
   if (!chiave) {
     chiave = generaApiKey()
-    const { error: eK } = await admin.from('api_keys').insert({ master_id: seller, cliente_id: ledgerId, corriere_id: corriereId, chiave, nome: `moovexpress ${ledger.ragione_sociale || ''}`.slice(0, 80), attivo: true })
+    const { error: eK } = await admin.from('api_keys').insert({ master_id: seller, cliente_id: ledgerId, corriere_id: corriereId, chiave, nome: `moovexpress ${ledgerNome || ''}`.slice(0, 80), attivo: true })
     if (eK) return { ok: false, reason: 'Emissione chiave non riuscita.' }
   } else if (keyEsist?.attivo === false) {
     await admin.from('api_keys').update({ attivo: true }).eq('cliente_id', ledgerId).eq('corriere_id', corriereId)
@@ -127,10 +142,60 @@ export async function abilitaContrattoCondiviso(
   }
 
   // PROPAGA costo + zone sul corriere del compratore, e lo ACCENDE solo se è andata (niente contratto monco).
-  const propagazione = await propagaCosto(admin, { corriereVenditore: corriereId, corriereAcquirente: buyerCorrId!, masterAcquirente: buyer, listinoIngrosso: listinoIngrosso! })
+  const propagazione = await propagaCosto(admin, { corriereVenditore: corriereId, corriereAcquirente: buyerCorrId!, masterAcquirente: buyer, listinoIngrosso })
   if (propagazione.ok) await admin.from('corrieri').update({ attivo: true }).eq('id', buyerCorrId)
 
   return { ok: true, propagazione, buyerCorriereId: buyerCorrId }
+}
+
+/* ASSEGNA un listino GIÀ FATTO dal venditore (Listini Clienti) al master collegato: diventa il prezzo
+ * d'ingrosso (quello che il compratore paga), e OGNI contratto condivisibile dentro al listino viene
+ * materializzato sul compratore (chiave + corriere + propagazione). È il flusso normale "assegna un
+ * listino a un cliente", applicato al ledger. Salta i contratti che il compratore ha già o che vengono
+ * da lui (non si rivende all'origine). Idempotente. */
+export async function assegnaListinoCondivisione(
+  admin: any,
+  opts: { linkId: string; listinoId: string },
+): Promise<{ ok: boolean; reason?: string; condivisi?: string[]; saltati?: { nome: string; motivo: string }[] }> {
+  const { linkId, listinoId } = opts
+  const { data: link } = await admin.from('corrieri_condivisi')
+    .select('id,stato,fornitore_master_id,master_id,cliente_ledger_id').eq('id', linkId).maybeSingle()
+  if (!link) return { ok: false, reason: 'Collegamento non trovato.' }
+  if (link.stato !== 'attiva') return { ok: false, reason: 'Il master non ha ancora approvato il collegamento.' }
+  if (!link.cliente_ledger_id) return { ok: false, reason: 'Collegamento senza conto.' }
+  const seller = link.fornitore_master_id as string
+  const buyer = link.master_id as string
+  const ledgerId = link.cliente_ledger_id as string
+
+  const { data: listino } = await admin.from('listini_clienti').select('id,master_id,nome').eq('id', listinoId).maybeSingle()
+  if (!listino || listino.master_id !== seller) return { ok: false, reason: 'Listino non trovato tra i tuoi.' }
+
+  const { data: ledger } = await admin.from('clienti').select('id,ragione_sociale').eq('id', ledgerId).maybeSingle()
+  // Il listino scelto DIVENTA il prezzo d'ingrosso del collegato (quello che lui paga).
+  await admin.from('clienti').update({ listino_cliente_id: listinoId }).eq('id', ledgerId)
+
+  // Corrieri col prezzo dentro al listino.
+  const { data: fasce } = await admin.from('listini_clienti_fasce').select('corriere_id').eq('listino_id', listinoId)
+  const corriereIds = Array.from(new Set((fasce || []).map((f: any) => f.corriere_id).filter(Boolean)))
+  if (!corriereIds.length) return { ok: false, reason: 'Il listino scelto non ha prezzi: aggiungi almeno un contratto con le fasce.' }
+
+  const { data: corrDett } = await admin.from('corrieri').select('id,master_id,tipo,nome_contratto,credenziali').in('id', corriereIds)
+  // Contratti che il compratore ha GIÀ (per nome, anche disattivati) → non glieli rivendo.
+  const { data: buyerPropri } = await admin.from('corrieri').select('nome_contratto').eq('master_id', buyer).neq('tipo', 'moovexpress')
+  const giaSuoi = new Set((buyerPropri || []).map((c: any) => (c.nome_contratto || '').trim().toLowerCase()))
+
+  const condivisi: string[] = []
+  const saltati: { nome: string; motivo: string }[] = []
+  for (const corr of (corrDett || [])) {
+    const nome = corr.nome_contratto || '—'
+    if (corr.master_id !== seller) { saltati.push({ nome, motivo: 'non è un tuo contratto' }); continue }
+    if (corr.tipo === 'moovexpress' && (corr.credenziali || {}).fornitore_master_id === buyer) { saltati.push({ nome, motivo: 'arriva da quel master' }); continue }
+    if (giaSuoi.has((nome || '').trim().toLowerCase())) { saltati.push({ nome, motivo: 'il master ce l’ha già' }); continue }
+    const m = await materializzaContratto(admin, { seller, buyer, ledgerId, ledgerNome: ledger?.ragione_sociale, corr, listinoIngrosso: listinoId })
+    if (m.ok && m.propagazione?.ok) condivisi.push(nome)
+    else saltati.push({ nome, motivo: m.reason || m.propagazione?.reason || 'propagazione non riuscita' })
+  }
+  return { ok: true, condivisi, saltati }
 }
 
 /* Ri-propaga il listino d'ingrosso ATTUALE del ledger a TUTTI i corrieri del compratore (senza rigenerare

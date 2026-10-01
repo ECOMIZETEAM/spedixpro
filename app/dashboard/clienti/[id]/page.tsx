@@ -24,32 +24,30 @@ function ContrattiCondivisi({ clienteId }: { clienteId: string }) {
   const [data, setData] = useState<any>(null)
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState('')
-  const [markup, setMarkup] = useState<Record<string, { mode: string; val: string }>>({})
+  const [sel, setSel] = useState('')
 
-  function carica() { fetch(`/api/condivisioni/scheda?cliente_id=${clienteId}`).then(r => r.json()).then(setData).catch(() => {}) }
+  function carica() { fetch(`/api/condivisioni/scheda?cliente_id=${clienteId}`).then(r => r.json()).then((d: any) => { setData(d); setSel(d?.listino_corrente || '') }).catch(() => {}) }
   useEffect(() => { carica() }, [clienteId])
   if (!data?.link) return null
 
-  const mk = (id: string) => markup[id] || { mode: 'fisso', val: '0' }
-  const setMk = (id: string, patch: any) => setMarkup(m => ({ ...m, [id]: { ...mk(id), ...patch } }))
+  const listini = data.listini || []
+  const corrente = listini.find((l: any) => l.id === data.listino_corrente) || null
+  const shared = (data.contratti || []).filter((c: any) => c.abilitato)
 
-  async function abilita(cid: string) {
-    setBusy(cid); setMsg('')
-    const m = mk(cid)
-    const res = await fetch(`/api/condivisioni/${data.link.id}/abilita-contratto`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ corriere_id: cid, markup: { default: { mode: m.mode, valore: Number(m.val) || 0 } } }),
-    })
+  async function assegna() {
+    if (!sel) return
+    setBusy('assegna'); setMsg('')
+    const res = await fetch(`/api/condivisioni/${data.link.id}/assegna-listino`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listino_id: sel }) })
     const d = await res.json().catch(() => ({})); setBusy('')
     if (!res.ok || d?.error) { setMsg(d?.error || 'Errore'); return }
-    setMsg(d.avviso || 'Contratto abilitato: costo e zone propagati sul suo portale. Rifinisci il prezzo in Listini Clienti.')
+    const cond = (d.condivisi || []).join(', ')
+    const salt = (d.saltati || []).map((s: any) => `${s.nome} (${s.motivo})`).join(', ')
+    setMsg(`Listino assegnato.${cond ? ` Condivisi: ${cond}.` : ''}${salt ? ` Saltati: ${salt}.` : ''}`)
     carica()
   }
   async function disabilita(cid: string) {
     setBusy(cid); setMsg('')
-    const res = await fetch(`/api/condivisioni/${data.link.id}/disabilita-contratto`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ corriere_id: cid }),
-    })
+    const res = await fetch(`/api/condivisioni/${data.link.id}/disabilita-contratto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ corriere_id: cid }) })
     const d = await res.json().catch(() => ({})); setBusy('')
     if (!res.ok || d?.error) { setMsg(d?.error || 'Errore'); return }
     carica()
@@ -61,41 +59,43 @@ function ContrattiCondivisi({ clienteId }: { clienteId: string }) {
     if (!res.ok || d?.error) { setMsg(d?.error || 'Errore'); return }
     setMsg(`Costi ri-sincronizzati sul portale del collegato (${d.contratti || 0} contratti).`)
   }
-  const haAbilitati = (data.contratti || []).some((c: any) => c.abilitato)
 
   return (
     <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e8e8e8', overflow: 'hidden' }}>
       <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', fontSize: '13px', fontWeight: 700, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '8px' }}>
         🔗 Contratti condivisi con {data.link.compratore}
-        <span style={{ fontSize: '11px', fontWeight: 400, color: '#9ca3af' }}>abilita un tuo contratto: gli arriva pronto da rivendere</span>
-        {haAbilitati && <button onClick={risincronizza} disabled={busy === 'sync'} title="Dopo aver ritoccato i prezzi d'ingrosso, aggiorna il costo mostrato sul portale del collegato" style={{ marginLeft: 'auto', background: '#fff', border: '1px solid #ddd', borderRadius: '6px', padding: '4px 10px', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', color: '#4f46e5' }}>{busy === 'sync' ? '…' : '↻ Ri-sincronizza costi'}</button>}
+        {shared.length > 0 && <button onClick={risincronizza} disabled={busy === 'sync'} title="Dopo aver ritoccato i prezzi del listino, aggiorna il costo mostrato sul portale del collegato" style={{ marginLeft: 'auto', background: '#fff', border: '1px solid #ddd', borderRadius: '6px', padding: '4px 10px', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', color: '#4f46e5' }}>{busy === 'sync' ? '…' : '↻ Ri-sincronizza costi'}</button>}
       </div>
       <div style={{ padding: '12px 16px' }}>
-        {msg && <div style={{ fontSize: '12px', color: msg.toLowerCase().includes('err') ? '#dc2626' : '#15803d', marginBottom: '10px' }}>{msg}</div>}
-        {(!data.contratti || !data.contratti.length) && <div style={{ fontSize: '12.5px', color: '#888' }}>Non hai contratti condivisibili.</div>}
-        <div style={{ display: 'grid', gap: '8px' }}>
-          {(data.contratti || []).map((c: any) => (
-            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', border: '1px solid #f0f0f0', borderRadius: '8px', padding: '9px 12px' }}>
-              <span style={{ fontSize: '13px', color: '#1a1a1a' }}>{c.tipo && <b style={{ textTransform: 'uppercase' }}>{c.tipo} </b>}{c.nome_contratto}</span>
-              {c.abilitato ? (
-                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#059669', background: '#ecfdf5', padding: '2px 8px', borderRadius: '10px' }}>Abilitato ✓</span>
-                  <button onClick={() => disabilita(c.id)} disabled={busy === c.id} style={{ background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>{busy === c.id ? '…' : 'Disabilita'}</button>
-                </span>
-              ) : (
-                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '11px', color: '#888' }}>ricarico</span>
-                  <input value={mk(c.id).val} onChange={e => setMk(c.id, { val: e.target.value })} style={{ width: '58px', border: '1px solid #ddd', borderRadius: '6px', padding: '4px 6px', fontSize: '12px' }} />
-                  <select value={mk(c.id).mode} onChange={e => setMk(c.id, { mode: e.target.value })} style={{ border: '1px solid #ddd', borderRadius: '6px', padding: '4px 6px', fontSize: '12px' }}>
-                    <option value="fisso">€</option>
-                    <option value="percentuale">%</option>
-                  </select>
-                  <button onClick={() => abilita(c.id)} disabled={busy === c.id} style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 12px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', opacity: busy === c.id ? 0.6 : 1 }}>{busy === c.id ? '…' : 'Abilita'}</button>
-                </span>
-              )}
-            </div>
-          ))}
+        {msg && <div style={{ fontSize: '12px', color: (msg.toLowerCase().includes('err') || msg.toLowerCase().includes('salt')) ? '#b45309' : '#15803d', marginBottom: '10px' }}>{msg}</div>}
+
+        <div style={{ fontSize: '12.5px', color: '#444', marginBottom: '6px' }}>Listino d'ingrosso <span style={{ color: '#888' }}>(il prezzo che <b>{data.link.compratore}</b> paga a te)</span></div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '8px' }}>
+          <select value={sel} onChange={e => setSel(e.target.value)} style={{ flex: '1 1 220px', border: '1px solid #ddd', borderRadius: '6px', padding: '7px 10px', fontSize: '13px' }}>
+            <option value="">— scegli un tuo listino —</option>
+            {listini.map((l: any) => <option key={l.id} value={l.id}>{l.nome}</option>)}
+          </select>
+          <button onClick={assegna} disabled={busy === 'assegna' || !sel} style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', padding: '7px 16px', fontSize: '13px', fontWeight: 700, cursor: (busy === 'assegna' || !sel) ? 'default' : 'pointer', opacity: (busy === 'assegna' || !sel) ? 0.6 : 1 }}>{busy === 'assegna' ? '…' : 'Assegna'}</button>
+          {corrente && <a href={`/dashboard/listini/clienti/${corrente.id}`} className="lst-link" style={{ fontSize: '12px' }}>apri “{corrente.nome}”</a>}
         </div>
+        <div style={{ fontSize: '11.5px', color: '#9ca3af', marginBottom: shared.length ? '14px' : 0 }}>Il listino lo crei in <b>Listini Clienti</b> (coi tuoi prezzi) e lo assegni qui: i contratti dentro vengono condivisi col collegato. I suoi contratti, e quelli che arrivano da lui, vengono saltati da soli.</div>
+
+        {shared.length > 0 && (
+          <div>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '6px' }}>Contratti condivisi ({shared.length})</div>
+            <div style={{ display: 'grid', gap: '8px' }}>
+              {shared.map((c: any) => (
+                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', border: '1px solid #f0f0f0', borderRadius: '8px', padding: '9px 12px' }}>
+                  <span style={{ fontSize: '13px', color: '#1a1a1a' }}>{c.tipo && <b style={{ textTransform: 'uppercase' }}>{c.tipo} </b>}{c.nome_contratto}</span>
+                  <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#059669', background: '#ecfdf5', padding: '2px 8px', borderRadius: '10px' }}>Condiviso ✓</span>
+                    <button onClick={() => disabilita(c.id)} disabled={busy === c.id} style={{ background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>{busy === c.id ? '…' : 'Disabilita'}</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

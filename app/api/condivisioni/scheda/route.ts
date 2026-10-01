@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     .eq('fornitore_master_id', perm.masterId).is('corriere_id', null).eq('stato', 'attiva').maybeSingle()
   if (!link) return NextResponse.json({ link: null })
 
-  const [{ data: buyer }, { data: miei }, { data: buyerMoov }, { data: buyerPropri }] = await Promise.all([
+  const [{ data: buyer }, { data: miei }, { data: buyerMoov }, { data: buyerPropri }, { data: ledgerRow }, { data: listini }] = await Promise.all([
     admin.from('masters').select('nome').eq('id', link.master_id).maybeSingle(),
     // TUTTI i miei contratti attivi (anche moovexpress: un contratto comprato da un ALTRO master — es.
     // la Triangolazioni presa da LOGIXIA — è proprio quello che rivendo al collegato, la catena a 3 livelli).
@@ -33,6 +33,10 @@ export async function GET(req: NextRequest) {
     // attivo=false su di lui ma attivi come copia su di me → vanno comunque esclusi). Resta solo ciò che è
     // davvero mio da vendergli (la Triangolazioni di LOGIXIA, o un mio contratto che lui non ha proprio).
     admin.from('corrieri').select('nome_contratto').eq('master_id', link.master_id).neq('tipo', 'moovexpress'),
+    // Il listino d'ingrosso attualmente assegnato al collegato (= quello che lui paga).
+    admin.from('clienti').select('listino_cliente_id').eq('id', clienteId).maybeSingle(),
+    // I listini che il venditore ha già fatto (Listini Clienti): da assegnare al collegato.
+    admin.from('listini_clienti').select('id,nome').eq('master_id', perm.masterId).eq('attivo', true).order('nome'),
   ])
   const abilitati = new Set((buyerMoov || [])
     .filter((c: any) => c.attivo && (c.credenziali || {}).corriere_origine_id)
@@ -51,5 +55,10 @@ export async function GET(req: NextRequest) {
       tipo: isProviderTecnico(c.tipo) ? null : c.tipo,
       abilitato: abilitati.has(c.id),
     }))
-  return NextResponse.json({ link: { id: link.id, compratore: buyer?.nome || '—' }, contratti })
+  return NextResponse.json({
+    link: { id: link.id, compratore: buyer?.nome || '—' },
+    contratti,
+    listini: listini || [],
+    listino_corrente: (ledgerRow as any)?.listino_cliente_id || null,
+  })
 }
