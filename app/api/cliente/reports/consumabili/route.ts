@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
     let q = supabase.from('movimenti')
       .select('descrizione,importo,created_at,tipo,spedizione_id')
       .eq('cliente_id', clienteId)
-      .in('tipo', ['rettifica', 'giacenza', 'reso'])
+      .in('tipo', ['consumabile', 'rettifica', 'giacenza', 'reso'])
       .order('created_at', { ascending: true })
     if (dal) q = q.gte('created_at', dal)
     if (al) q = q.lte('created_at', al + 'T23:59:59')

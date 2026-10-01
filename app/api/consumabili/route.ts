@@ -8,7 +8,7 @@ import { isAgente } from '@/lib/agente'
 // Le SPESE (quello che questa pagina chiama "consumabili"): tutto ciò che viene addebitato
 // fuori dalla spedizione. Restano fuori spedizioni, ricariche e abbonamenti, che hanno
 // le loro liste dedicate.
-const TIPI_SPESA = ['rettifica', 'giacenza', 'reso']
+const TIPI_SPESA = ['consumabile', 'rettifica', 'giacenza', 'reso']
 
 // Rotta dell'area MASTER: legge e scrive col client admin (RLS bypassata) filtrando per
 // master_id, quindi DEVE essere chiusa a chi non è staff del master. Gli utenti del portale
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     if (!sub || sub.parent_master_id !== utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
     try {
       const { registraMovimentoMaster } = await import('@/lib/movimenti')
-      await registraMovimentoMaster(admin, { masterOwnerId: utente!.master_id!, masterTargetId: targetMasterId, tipo: 'rettifica', descrizione, importo: -totale, riferimento: vettore || null })
+      await registraMovimentoMaster(admin, { masterOwnerId: utente!.master_id!, masterTargetId: targetMasterId, tipo: 'consumabile', descrizione, importo: -totale, riferimento: vettore || null })
     } catch (e: any) { return NextResponse.json({ error: e.message || 'Errore movimento' }, { status: 400 }) }
     return NextResponse.json({ success: true })
   }
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
     await registraMovimento(createAdminSupabase(), {
       masterId: utente?.master_id,
       clienteId,
-      tipo: 'rettifica',
+      tipo: 'consumabile',
       descrizione,
       importo: -totale,
       riferimento: vettore || null,
