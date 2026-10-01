@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
   const conPresso = (via: string, presso: string) => (presso ? `${via} c/o ${presso}`.trim() : via)
 
   const { data: cliente } = await admin.from('clienti')
-    .select('master_id,ragione_sociale,listino_cliente_id,tipo_contratto,credito').eq('id', ctx.clienteId).single()
+    .select('master_id,ragione_sociale,listino_cliente_id,tipo_contratto,credito,ledger').eq('id', ctx.clienteId).single()
   if (!cliente?.listino_cliente_id) return NextResponse.json({ error: 'Cliente senza listino' }, { status: 400 })
   const masterId = cliente.master_id
 
@@ -610,8 +610,15 @@ export async function POST(req: NextRequest) {
     return errore('Tipo contratto non supportato')
   }
 
+  // NUMERO UNICO PER IL LEDGER (condivisione contratti): `numero` ha un UNIQUE globale, ma nel ponte la
+  // STESSA LDV viene registrata a OGNI livello (il venditore per il suo cliente-ledger, e il compratore
+  // sopra). Se tutti usassero la LDV come `numero`, il 2° insert violerebbe l'unicità ("non registrata").
+  // Quindi il LEDGER salva un numero unico (LDV + suo id); il `tracking_number` resta la LDV VERA (non è
+  // unico, e serve condiviso: il tracking a salire interroga il venditore con quel numero). La LDV pulita
+  // resta così libera per il compratore FINALE (master reale), che la vede come suo numero.
+  const numeroDb = (cliente as any)?.ledger && numero ? `${numero}-${String(ctx.clienteId).slice(0, 8)}` : numero
   const { data: inserted, error: insErr } = await admin.from('spedizioni').insert({
-    master_id: masterId, cliente_id: ctx.clienteId, corriere_id: corriere.id, numero,
+    master_id: masterId, cliente_id: ctx.clienteId, corriere_id: corriere.id, numero: numeroDb,
     mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_presso: pressoFrom || null, mitt_citta: body.shipFrom.city,
     mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
     mitt_email: body.shipFrom.email || null, mitt_telefono: body.shipFrom.phone || null,
