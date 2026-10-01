@@ -28,13 +28,36 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .eq('id', id).maybeSingle()
   if (!c || c.master_id !== perm.masterId) return NextResponse.json({ error: 'Condivisione non trovata.' }, { status: 404 })
   if (c.stato !== 'in_attesa') return NextResponse.json({ error: 'Questa condivisione è già stata gestita.' }, { status: 409 })
-  if (!c.listino_ingrosso_id) return NextResponse.json({ error: 'Manca il listino d’ingrosso: chiedi al fornitore di rifare la condivisione.' }, { status: 400 })
 
-  const [{ data: contratto }, { data: compratore }] = await Promise.all([
-    admin.from('corrieri').select('nome_contratto').eq('id', c.corriere_id).maybeSingle(),
-    admin.from('masters').select('nome').eq('id', c.master_id).maybeSingle(),
-  ])
+  const { data: compratore } = await admin.from('masters').select('nome').eq('id', c.master_id).maybeSingle()
   const nomeCompratore = compratore?.nome || 'Master'
+
+  // FLUSSO NUOVO — COLLEGAMENTO master↔master (corriere_id NULL): l'approvazione del collegato è SOLO
+  // questa. Si crea solo il CLIENTE-LEDGER (vuoto: niente listino/chiave/corriere); i contratti li abilita
+  // poi il venditore dalla scheda del collegato, senza che lui riapprovi ogni volta (scelta dell'utente).
+  if (!c.corriere_id) {
+    const { data: ledgerL, error: eLL } = await admin.from('clienti').insert({
+      master_id: c.fornitore_master_id,
+      ragione_sociale: `${nomeCompratore} (ingrosso)`,
+      email: `ledger-${c.id}@ledger.moovexpress.app`,
+      codice_cliente: 'LDG-' + c.id.slice(0, 8).toUpperCase(),
+      tipo_contratto: c.credito_modo === 'fattura' ? 'fattura' : 'credito_scalare',
+      attivo: true, ledger: true,
+    }).select('id').single()
+    if (eLL || !ledgerL) { console.error('[condivisioni/accetta] ledger-link', eLL); return NextResponse.json({ error: 'Non sono riuscito a preparare il conto.' }, { status: 500 }) }
+    const { data: updL } = await admin.from('corrieri_condivisi')
+      .update({ stato: 'attiva', accettata_il: new Date().toISOString(), cliente_ledger_id: ledgerL.id })
+      .eq('id', id).eq('stato', 'in_attesa').select('id')
+    if (!updL || !updL.length) {
+      await admin.from('clienti').delete().eq('id', ledgerL.id)
+      return NextResponse.json({ error: 'Questo collegamento è già stato gestito.' }, { status: 409 })
+    }
+    return NextResponse.json({ ok: true, collegamento: true })
+  }
+
+  // ── FLUSSO LEGACY (per-contratto): condivisione con contratto già scelto all'origine. ────────────────
+  if (!c.listino_ingrosso_id) return NextResponse.json({ error: 'Manca il listino d’ingrosso: chiedi al fornitore di rifare la condivisione.' }, { status: 400 })
+  const { data: contratto } = await admin.from('corrieri').select('nome_contratto').eq('id', c.corriere_id).maybeSingle()
 
   // 1) CLIENTE-LEDGER sotto il venditore, SENZA login (niente auth.createUser né riga utenti).
   //    credito parte da 0 (trigger fn_credito_solo_via_rpc), api_esente=true di default. Email sintetica

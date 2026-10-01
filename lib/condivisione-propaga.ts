@@ -19,6 +19,7 @@ import { fetchAll } from '@/lib/fetch-all'
  * Il costo VERO addebitato alla spedizione resta `ris.prezzo` dall'/api/v1 del venditore (autorevole, nessun
  * disallineamento): questa copia serve a VISIBILITÀ, base del margine nell'editor e risoluzione zona a CAP.
  */
+// Wrapper storico (vecchio modello per-contratto): legge i campi dalla riga corrieri_condivisi.
 export async function propagaCostoCondivisione(admin: any, condivisioneId: string): Promise<{ ok: boolean; reason?: string; zone?: number; fasce?: number }> {
   const { data: cc } = await admin.from('corrieri_condivisi')
     .select('id,stato,corriere_id,master_id,listino_ingrosso_id,corriere_acquirente_id,cliente_ledger_id')
@@ -26,11 +27,26 @@ export async function propagaCostoCondivisione(admin: any, condivisioneId: strin
   if (!cc) return { ok: false, reason: 'condivisione non trovata' }
   if (!cc.corriere_acquirente_id) return { ok: false, reason: 'corriere acquirente non ancora materializzato (serve l’Accetta)' }
   if (!cc.listino_ingrosso_id) return { ok: false, reason: 'manca il listino d’ingrosso' }
+  return propagaCosto(admin, {
+    corriereVenditore: cc.corriere_id as string,
+    corriereAcquirente: cc.corriere_acquirente_id as string,
+    masterAcquirente: cc.master_id as string,
+    listinoIngrosso: cc.listino_ingrosso_id as string,
+  })
+}
 
-  const corriereVenditore = cc.corriere_id as string       // corriere REALE del venditore (sorgente zone/fasce)
-  const corriereAcquirente = cc.corriere_acquirente_id as string  // riga moovexpress del compratore (destinazione)
-  const masterAcquirente = cc.master_id as string          // il compratore
-  const listinoIngrosso = cc.listino_ingrosso_id as string // listini_clienti sotto il venditore = W
+/* Cuore della propagazione, con parametri ESPLICITI (lo usa l'abilitazione per-contratto del flusso nuovo:
+ * il listino d'ingrosso è quello del cliente-ledger, che copre più corrieri; qui si propaga UN contratto).
+ *   corriereVenditore  = corriere REALE del venditore (sorgente zone + quali fasce dell'ingrosso)
+ *   corriereAcquirente = riga moovexpress del compratore (destinazione)
+ *   masterAcquirente   = il compratore
+ *   listinoIngrosso    = listini_clienti (sotto il venditore) col prezzo W per quel corriere
+ */
+export async function propagaCosto(admin: any, p: { corriereVenditore: string; corriereAcquirente: string; masterAcquirente: string; listinoIngrosso: string }): Promise<{ ok: boolean; reason?: string; zone?: number; fasce?: number }> {
+  const corriereVenditore = p.corriereVenditore
+  const corriereAcquirente = p.corriereAcquirente
+  const masterAcquirente = p.masterAcquirente
+  const listinoIngrosso = p.listinoIngrosso
 
   // W: le fasce del listino d'ingrosso per il corriere del venditore.
   const fasceSrc = await fetchAll(() => admin.from('listini_clienti_fasce')
@@ -138,16 +154,17 @@ export async function propagaCostoCondivisione(admin: any, condivisioneId: strin
     .map((f: any) => ({ listino_id: listinoId, corriere_id: corriereAcquirente, zona_id: mapZona.get(f.zona_id) || null, peso_min: 0, peso_max: f.peso_max, prezzo: f.prezzo, tipo: f.tipo, fuel: Number(f.fuel) || 0 }))
     .filter((f: any) => f.zona_id)
   const scartate = fasceSrc.length - fasceIns.length
-  if (scartate > 0) console.error('[condivisione-propaga]', condivisioneId, ':', scartate, 'fasce scartate per ZONA non mappata (prezzi persi)')
+  const rif = `${corriereVenditore}->${corriereAcquirente}`
+  if (scartate > 0) console.error('[condivisione-propaga]', rif, ':', scartate, 'fasce scartate per ZONA non mappata (prezzi persi)')
   if (fasceIns.length) {
     await admin.from('listini_corrieri_fasce').delete().eq('listino_id', listinoId).eq('corriere_id', corriereAcquirente)
     for (let i = 0; i < fasceIns.length; i += 1000) {
       const { error } = await admin.from('listini_corrieri_fasce').insert(fasceIns.slice(i, i + 1000))
-      if (error) throw new Error('insert fasce condivisione ' + condivisioneId + ': ' + (error.message || error))
+      if (error) throw new Error('insert fasce condivisione ' + rif + ': ' + (error.message || error))
     }
   } else {
     // fasceSrc è non vuoto (return anticipato sopra): 0 mappate = anomalia zone, NON azzero.
-    console.error('[condivisione-propaga]', condivisioneId, ': 0 fasce mappate da', fasceSrc.length, '— anomalia zone, non azzero')
+    console.error('[condivisione-propaga]', rif, ': 0 fasce mappate da', fasceSrc.length, '— anomalia zone, non azzero')
     return { ok: false, reason: 'nessuna fascia mappata (zone non risolte)' }
   }
 
