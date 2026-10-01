@@ -380,6 +380,7 @@ export default function Dashboard() {
             <ReportGuadagno titolo="Rettifiche" endpoint="/api/reports/guadagno-rettifiche" icona="⚖️" />
             <ReportGuadagno titolo="Resi" endpoint="/api/reports/guadagno-resi" icona="↩️" />
             <ReportGuadagno titolo="Giacenze" endpoint="/api/reports/guadagno-giacenze" icona="📦" />
+            <ReportGuadagno titolo="Logistica" endpoint="/api/reports/guadagno-logistica" icona="🏬" />
             <ReportGuadagno titolo="Supplementi" endpoint="/api/reports/guadagno-supplementi" icona="➕" />
           </div>
         </>
