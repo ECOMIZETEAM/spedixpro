@@ -154,7 +154,9 @@ export async function creaKsync(c: KsyncCred, dati: KsyncInput): Promise<{ ldv: 
     paperless: dati.paperless ? 'true' : 'false',
     shipmentDate: dati.shipmentDate || new Date().toISOString(),
     waybills: [{
-      clientReferenceId: dati.clientReferenceId || '',
+      // Il nostro riferimento interno (es. rif. ordine) → ksync lo mappa su numRifInterno, MAX 50 char
+      // (confermato da ParcelPilot 1/10): tronco qui, nel punto unico, così crea e API v1 sono protette.
+      clientReferenceId: String(dati.clientReferenceId || '').slice(0, 50),
       printFormat: dati.printFormat || 'A4',
       product: dati.product,
       data,
