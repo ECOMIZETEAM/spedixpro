@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminSupabase()
   const { data: link } = await admin.from('corrieri_condivisi')
-    .select('id,master_id,stato').eq('cliente_ledger_id', clienteId)
+    .select('id,master_id,stato,credito_modo').eq('cliente_ledger_id', clienteId)
     .eq('fornitore_master_id', perm.masterId).is('corriere_id', null).eq('stato', 'attiva').maybeSingle()
   if (!link) return NextResponse.json({ link: null })
 
@@ -60,5 +60,6 @@ export async function GET(req: NextRequest) {
     contratti,
     listini: listini || [],
     listino_corrente: (ledgerRow as any)?.listino_cliente_id || null,
+    credito_modo: link.credito_modo || 'prepagato',
   })
 }

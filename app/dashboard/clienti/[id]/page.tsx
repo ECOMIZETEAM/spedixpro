@@ -59,6 +59,21 @@ function ContrattiCondivisi({ clienteId }: { clienteId: string }) {
     if (!res.ok || d?.error) { setMsg(d?.error || 'Errore'); return }
     setMsg(`Costi ri-sincronizzati sul portale del collegato (${d.contratti || 0} contratti).`)
   }
+  async function salvaCredito(modo: string) {
+    if (modo === data.credito_modo) return
+    setBusy('credito'); setMsg('')
+    const res = await fetch(`/api/condivisioni/${data.link.id}/credito-modo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modo }) })
+    const d = await res.json().catch(() => ({})); setBusy('')
+    if (!res.ok || d?.error) { setMsg(d?.error || 'Errore'); return }
+    setMsg(modo === 'fattura' ? 'Impostato a fattura: il suo conto può andare sotto zero.' : 'Impostato prepagato: il suo conto si ferma a zero.')
+    carica()
+  }
+  const bottoneCredito = (modo: string, label: string) => (
+    <button onClick={() => salvaCredito(modo)} disabled={busy === 'credito'} style={{
+      border: '1px solid ' + (data.credito_modo === modo ? '#4f46e5' : '#ddd'), background: data.credito_modo === modo ? '#eef2ff' : '#fff',
+      color: data.credito_modo === modo ? '#4f46e5' : '#555', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+    }}>{label}</button>
+  )
 
   return (
     <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e8e8e8', overflow: 'hidden' }}>
@@ -68,6 +83,13 @@ function ContrattiCondivisi({ clienteId }: { clienteId: string }) {
       </div>
       <div style={{ padding: '12px 16px' }}>
         {msg && <div style={{ fontSize: '12px', color: (msg.toLowerCase().includes('err') || msg.toLowerCase().includes('salt')) ? '#b45309' : '#15803d', marginBottom: '10px' }}>{msg}</div>}
+
+        <div style={{ fontSize: '12.5px', color: '#444', marginBottom: '6px' }}>Condizioni di pagamento <span style={{ color: '#888' }}>(come <b>{data.link.compratore}</b> paga te)</span></div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '14px' }}>
+          {bottoneCredito('prepagato', 'Prepagato (ricarica)')}
+          {bottoneCredito('fattura', 'A fattura (fine mese)')}
+          <span style={{ fontSize: '11px', color: '#9ca3af' }}>{data.credito_modo === 'fattura' ? 'il suo conto può andare sotto zero' : 'si ferma a zero finché non ricarica'}</span>
+        </div>
 
         <div style={{ fontSize: '12.5px', color: '#444', marginBottom: '6px' }}>Listino d'ingrosso <span style={{ color: '#888' }}>(il prezzo che <b>{data.link.compratore}</b> paga a te)</span></div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '8px' }}>

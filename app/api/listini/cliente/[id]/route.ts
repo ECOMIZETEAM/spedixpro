@@ -204,6 +204,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
     } catch (e) { console.error('Propagazione listino ai sotto-master:', e) }
   })
 
+  // AUTO RE-SYNC CONDIVISIONE: se questo listino è il prezzo d'ingrosso di un master collegato (è il
+  // listino_cliente_id di un cliente-ledger), ri-propaga i costi al suo portale — così ritoccare i prezzi
+  // qui aggiorna da solo il costo mostrato al collegato, senza premere "Ri-sincronizza". L'addebito era già
+  // live. Background, best-effort.
+  after(async () => {
+    try {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const { risincronizzaCondivisione } = await import('@/lib/condivisione-engine')
+      const admin = createAdminSupabase()
+      const { data: ledgers } = await admin.from('clienti').select('id').eq('ledger', true).eq('listino_cliente_id', id)
+      for (const l of (ledgers || [])) {
+        const { data: link } = await admin.from('corrieri_condivisi').select('id').eq('cliente_ledger_id', (l as any).id).eq('stato', 'attiva').is('corriere_id', null).maybeSingle()
+        if (link?.id) await risincronizzaCondivisione(admin, link.id)
+      }
+    } catch (e) { console.error('Re-sync condivisione dopo salvataggio listino:', e) }
+  })
+
   return NextResponse.json({ ok: true, propagazione: 'in corso' })
 }
 
