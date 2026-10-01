@@ -133,7 +133,12 @@ async function materializzaContratto(
     const { data: nc, error: eC } = await admin.from('corrieri').insert({
       master_id: buyer, tipo: 'moovexpress', nome_contratto: corr.nome_contratto,
       credenziali: { api_key: chiave, fornitore_master_id: seller, corriere_origine_id: corriereId },
-      settings: {}, multicollo: true, inserimento_ritiri: true, attivo: false, livello: 1, proprio: false,
+      // proprio=TRUE: il corriere-ponte È il contratto proprio del compratore (lui tiene la chiave verso il
+      // venditore e lo rivende). Così il suo COSTO cade su credito_proprio (lista separata, come QUICK) e
+      // la cascata NON lo gata dal conto-albero (fn_conto_di/pagaDalSuoConto): il gate vero è il ledger al
+      // venditore (che il DISPATCH addebita). Con proprio=false un compratore NON-vertice verrebbe gatato
+      // sul suo credito verso il PADRE, che è il rapporto sbagliato. Vedi lib/cascata.ts + fn_conto_di.
+      settings: {}, multicollo: true, inserimento_ritiri: true, attivo: false, livello: 1, proprio: true,
     }).select('id').single()
     if (eC || !nc) return { ok: false, reason: 'Creazione corriere sul compratore non riuscita.' }
     buyerCorrId = nc.id
