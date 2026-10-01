@@ -111,11 +111,21 @@ export async function GET(req: NextRequest) {
   // blocchi di 300 e il giro provider): decine di secondi. Ora poche query. La logica (ricavi clienti +
   // ricavi sotto-master + propria a margine 0, costo self + costo dal livello superiore) è identica ed è
   // stata verificata prima/dopo sui dati veri.
-  const [{ data: serieRows, error: errSerie }, numSpedizioni] = await Promise.all([
+  // NUMERO SPEDIZIONI = volume di RETE non annullato, come la barra ABBONAMENTO e il Report Spedizioni.
+  // Prima si contavano i MOVIMENTI 'spedizione' del master (per data movimento): per l'apex usciva sotto
+  // il volume di rete — 6.000 su contratti PROPRI dei sotto-master (il master non e' nella catena, non ha
+  // un suo movimento) + le code d'annullo escluse — e non combaciava con l'abbonamento. Ora i tre numeri
+  // coincidono: spedizioni della RETE (sotto-albero) CREATE nel periodo e NON annullate. (Le annullate si
+  // escludono anche dal margine: col 'rimborso' si nettano a 0. Le in coda d'annullo restano contate.)
+  const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+  const subIds = await sottoAlberoMasterIds(admin, M)
+  const [{ data: serieRows, error: errSerie }, { count: numSpedizioniRaw }] = await Promise.all([
     admin.rpc('guadagno_master_serie_v1', { p_master: M, p_dal: dal, p_al: alEnd, p_per_mese: perMese, p_tipi: TIPI }),
-    admin.rpc('guadagno_num_spedizioni_v1', { p_master: M, p_dal: dal, p_al: alEnd }).then((r: any) => Number(r?.data || 0)),
+    admin.from('spedizioni').select('id', { count: 'exact', head: true })
+      .in('master_id', subIds).gte('created_at', dal).lte('created_at', alEnd).neq('stato', 'annullata'),
   ])
   if (errSerie) return NextResponse.json({ error: errSerie.message }, { status: 500 })
+  const numSpedizioni = Number(numSpedizioniRaw || 0)
 
   const r2 = (x: number) => Math.round(x * 100) / 100
   const perGiorno = new Map<string, { ricavi: number; costi: number }>()
@@ -160,8 +170,7 @@ export async function GET(req: NextRequest) {
   // dei fornitori a valle — l'unica cosa che non deve uscire da qui. I clienti erano gia' fermati
   // piu' sopra; gli agenti no, perche' li' si guarda solo il ruolo 'cliente'.
   if (M === EA_MULTI_ID && vedeLaRete(utente)) {
-    const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
-    const sub = await sottoAlberoMasterIds(admin, M)
+    const sub = subIds   // stesso sotto-albero gia' calcolato per il conteggio spedizioni
     // Costo per fornitore aggregato nel DB (group by): prima si scaricava tutto il sotto-albero.
     const { data: prov } = await admin.rpc('guadagno_costi_provider_v1', { p_sub: sub.length ? sub : [M], p_dal: dal, p_al: alEnd })
     // Ogni fornitore col suo nome. Chi non era nell'elenco usciva col nome tecnico del tipo
