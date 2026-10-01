@@ -370,6 +370,11 @@ export default function Dashboard() {
       ) : (
         <>
           <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginTop:'2px'}}>Report Guadagno</div>
+          {/* IL CALDERONE: guadagno TOTALE del master = spedizioni + rettifiche + rimborsi + resi +
+              giacenze + commissioni + accessori + logistica + canone abbonamento. UNA cifra, senza doppi
+              conteggi ed esclusi i pass-through (ricarica, cassa COD) — vedi /api/reports/guadagno-totale.
+              Il grafico e le card qui sotto sono il DETTAGLIO per voce. */}
+          <ReportGuadagno titolo="Guadagno Totale" endpoint="/api/reports/guadagno-totale" icona="💰" />
           <GuadagnoChart />
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:'14px'}}>
             <ReportGuadagno titolo="Rettifiche" endpoint="/api/reports/guadagno-rettifiche" icona="⚖️" />
