@@ -66,6 +66,37 @@ export async function GET(req: NextRequest) {
     }).map((co:any)=>({ nome_contratto: co.nome_contratto, tipo: isProviderTecnico(co.tipo) ? null : co.tipo }))
     return { ...c, contratti_attivi: attivi, negozi: negoziMap.get(c.id) || [] }
   })
+
+  // MASTER COLLEGATI (condivisione contratti): il "ledger" è il compratore visto come cliente di QUESTO
+  // master. Prima lo nascondevo (vedi .eq('ledger',false) sopra); va invece mostrato come un cliente con
+  // badge "Master collegato", così il venditore vede movimenti/credito e gli aggancia il suo listino —
+  // come ha chiesto il flusso nuovo (niente pagina condivisioni a parte). Isolato: è un clienti del
+  // venditore (RLS per master_id); l'agente non lo vede. corrieri_condivisi è solo service-role.
+  let ledgerOut: any[] = []
+  if (!isAgente(utente) && utente?.master_id) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const { data: ledgers } = await admin.from('clienti')
+      .select('id,ragione_sociale,so_indirizzo,so_citta,so_provincia,so_cap,sl_citta,email,telefono,piva,codice_cliente,attivo,listino_cliente_id,tipo_contratto,credito,listini_clienti(nome)')
+      .eq('master_id', utente.master_id).eq('ledger', true).order('ragione_sociale')
+    if (ledgers?.length) {
+      const lids = ledgers.map((l:any)=>l.id)
+      const { data: links } = await admin.from('corrieri_condivisi')
+        .select('cliente_ledger_id,master_id,stato').in('cliente_ledger_id', lids).neq('stato','revocata')
+      const buyerIds = Array.from(new Set((links||[]).map((l:any)=>l.master_id).filter(Boolean)))
+      const nomi = new Map<string,string>()
+      if (buyerIds.length) {
+        const { data: ms } = await admin.from('masters').select('id,nome').in('id', buyerIds)
+        for (const m of (ms||[])) nomi.set(m.id, m.nome)
+      }
+      const linkPerLedger = new Map<string,any>()
+      for (const l of (links||[])) if (!linkPerLedger.has(l.cliente_ledger_id)) linkPerLedger.set(l.cliente_ledger_id, l)
+      ledgerOut = ledgers.map((l:any)=>{
+        const lk = linkPerLedger.get(l.id)
+        return { ...l, is_ledger: true, master_collegato: lk ? (nomi.get(lk.master_id) || '—') : '—', contratti_attivi: [], negozi: [] }
+      })
+    }
+  }
   if (conMaster && vedeLaRete(utente)) {
     // I sotto-master agganciati compaiono come pseudo-clienti (id = "m:<masterId>")
     // (mai per l'agente: non deve vedere la rete/sotto-master)
@@ -105,11 +136,11 @@ export async function GET(req: NextRequest) {
       so_provincia: m.provincia_operativo || m.provincia || '',
       so_cap: m.cap_operativo || m.cap || '',
     }))
-    _log('clienti=' + clientiOut.length + ' sottomaster=' + masterOut.length)
-    return NextResponse.json([...clientiOut, ...masterOut])
+    _log('clienti=' + clientiOut.length + ' sottomaster=' + masterOut.length + ' collegati=' + ledgerOut.length)
+    return NextResponse.json([...clientiOut, ...masterOut, ...ledgerOut])
   }
-  _log('clienti=' + clientiOut.length)
-  return NextResponse.json(clientiOut)
+  _log('clienti=' + clientiOut.length + ' collegati=' + ledgerOut.length)
+  return NextResponse.json([...clientiOut, ...ledgerOut])
 }
 
 // Link "vai al negozio" per piattaforma. Non espone mai token/segreti.

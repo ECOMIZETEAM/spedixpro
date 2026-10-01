@@ -308,6 +308,7 @@ export default function ClientiPage() {
                       <div style={{fontWeight:'600',color:'#1a1a1a',display:'flex',alignItems:'center',gap:'7px'}}>
                         {c.ragione_sociale}
                         {c.is_master && <span style={{background:'#eef2ff',color:'#4f46e5',padding:'1px 7px',borderRadius:'10px',fontSize:'10px',fontWeight:'700',whiteSpace:'nowrap'}}>Sotto-master</span>}
+                        {c.is_ledger && <span style={{background:'#ecfdf5',color:'#059669',padding:'1px 7px',borderRadius:'10px',fontSize:'10px',fontWeight:'700',whiteSpace:'nowrap'}} title="Master collegato tramite codice (condivisione contratti): vedi movimenti e aggancia il tuo listino.">Master collegato{c.master_collegato && c.master_collegato !== '—' ? `: ${c.master_collegato}` : ''}</span>}
                       </div>
                       <div style={{fontSize:'11px',color:'#1a1a1a'}}>{c.email}</div>
                       {c.telefono && <div style={{fontSize:'11px',color:'#1a1a1a'}}>{c.telefono}</div>}
@@ -334,7 +335,12 @@ export default function ClientiPage() {
                     </td>
                     <td style={{padding:'10px 14px'}}>
                       <div style={{display:'flex',gap:'14px',alignItems:'center'}}>
-                        {c.is_master ? (
+                        {c.is_ledger ? (
+                          // Master collegato (ledger condivisione): vede movimenti e aggancia il listino (colonna
+                          // Listino). NIENTE impersona/modifica-accesso/elimina: non è un cliente con login e
+                          // cancellarlo romperebbe il collegamento (lo si scollega dalla condivisione — Fase D).
+                          <a href={`/dashboard/clienti/${c.id}`} title="Credito e movimenti del master collegato" className="cli-act">▤</a>
+                        ) : c.is_master ? (
                           <>
                             <a href={`/dashboard/clienti/${c.id}`} title="Credito, movimenti e dati" className="cli-act">▤</a>
                             <a href={`/dashboard/clienti/master/${String(c.id).slice(2)}`} title="Modifica dati e accesso" className="cli-act">✎</a>
