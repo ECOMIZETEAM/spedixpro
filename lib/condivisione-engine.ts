@@ -117,6 +117,31 @@ export async function abilitaContrattoCondiviso(
   return { ok: true, propagazione, buyerCorriereId: buyerCorrId }
 }
 
+/* Ri-propaga il listino d'ingrosso ATTUALE del ledger a TUTTI i corrieri del compratore (senza rigenerare
+ * le fasce dal costo: usa i prezzi come stanno ora, anche se ritoccati a mano nell'editor). Chiude il
+ * caveat "costo mostrato stale" quando il venditore cambia i prezzi d'ingrosso. L'addebito era già live. */
+export async function risincronizzaCondivisione(admin: any, linkId: string): Promise<{ ok: boolean; reason?: string; contratti?: number }> {
+  const { data: link } = await admin.from('corrieri_condivisi')
+    .select('id,fornitore_master_id,master_id,cliente_ledger_id,stato').eq('id', linkId).maybeSingle()
+  if (!link) return { ok: false, reason: 'Collegamento non trovato.' }
+  if (!link.cliente_ledger_id) return { ok: false, reason: 'Collegamento senza conto.' }
+  const { data: ledger } = await admin.from('clienti').select('listino_cliente_id').eq('id', link.cliente_ledger_id).maybeSingle()
+  const listinoIngrosso = ledger?.listino_cliente_id
+  if (!listinoIngrosso) return { ok: true, contratti: 0 }
+
+  const { data: corrBuyers } = await admin.from('corrieri').select('id,credenziali').eq('master_id', link.master_id).eq('tipo', 'moovexpress')
+  let n = 0
+  for (const cb of (corrBuyers || [])) {
+    const cred = (cb.credenziali || {}) as any
+    if (cred.fornitore_master_id !== link.fornitore_master_id || !cred.corriere_origine_id) continue
+    try {
+      const r = await propagaCosto(admin, { corriereVenditore: cred.corriere_origine_id, corriereAcquirente: cb.id, masterAcquirente: link.master_id, listinoIngrosso })
+      if (r.ok) n++
+    } catch (e: any) { console.error('[risincronizza]', cb.id, e?.message) }
+  }
+  return { ok: true, contratti: n }
+}
+
 export async function disabilitaContrattoCondiviso(
   admin: any,
   opts: { linkId: string; corriereId: string },

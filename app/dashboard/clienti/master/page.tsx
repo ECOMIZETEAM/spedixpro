@@ -173,6 +173,94 @@ function NuoviMaster() {
   )
 }
 
+// Pannello "Collegamenti tra master" (condivisione contratti). Qui si COLLEGA un master col suo codice
+// (lui poi approva) e si APPROVANO le richieste ricevute. Una volta collegato, il master compare in
+// Elenco Clienti col badge "Master collegato": da lì gli si abilitano i contratti e si aggancia il listino.
+function Collegamenti() {
+  const dialog = useDialog()
+  const [codice, setCodice] = useState<string | null>(null)
+  const [ricevuti, setRicevuti] = useState<any[]>([])
+  const [inviati, setInviati] = useState<any[]>([])
+  const [input, setInput] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  async function carica() {
+    const d = await fetch('/api/condivisioni').then(r => r.json()).catch(() => ({}))
+    setCodice(d?.codice || null)
+    setRicevuti((d?.ricevuti || []).filter((r: any) => r.stato === 'in_attesa'))
+    setInviati((d?.rivendo || []).filter((r: any) => r.stato === 'in_attesa'))
+  }
+  useEffect(() => { carica() }, [])
+
+  async function collega() {
+    const code = input.trim().toUpperCase()
+    if (!code) return
+    setBusy(true); setMsg('')
+    const res = await fetch('/api/condivisioni/collega', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codice: code }) })
+    const d = await res.json().catch(() => ({}))
+    setBusy(false)
+    if (!res.ok || d?.error) { await dialog.alert({ title: 'Errore', message: d?.error || 'Collegamento non riuscito' }); return }
+    setInput(''); setMsg(`Richiesta inviata a ${d.compratore}: comparirà tra i tuoi clienti quando l'avrà approvata dal suo portale.`)
+    carica()
+  }
+
+  async function rispondi(id: string, nome: string, tipo: 'accetta' | 'rifiuta') {
+    const ok = await dialog.confirm({
+      title: tipo === 'accetta' ? `Collegarti a ${nome}?` : `Rifiutare ${nome}?`,
+      message: tipo === 'accetta' ? 'Potrà condividerti i suoi contratti. Comparirai come suo cliente collegato.' : 'La richiesta viene chiusa.',
+      danger: tipo === 'rifiuta', confirmText: tipo === 'accetta' ? 'Collega' : 'Rifiuta',
+    })
+    if (!ok) return
+    setBusy(true)
+    const res = await fetch(`/api/condivisioni/${id}/${tipo}`, { method: 'POST' })
+    const d = await res.json().catch(() => ({}))
+    setBusy(false)
+    if (!res.ok || d?.error) { await dialog.alert({ title: 'Errore', message: d?.error || 'Operazione non riuscita' }); return }
+    carica()
+  }
+
+  async function copia() { try { await navigator.clipboard.writeText(codice || ''); setMsg('Codice copiato negli appunti.') } catch { /* no-op */ } }
+
+  return (
+    <div style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '8px', padding: '16px 18px', marginBottom: '18px' }}>
+      <div style={{ fontSize: '14px', fontWeight: 800, color: '#1a1a1a', marginBottom: '12px' }}>🔗 Collegamenti tra master</div>
+      <div style={{ fontSize: '12.5px', color: '#444', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        <span>Il tuo codice:</span>
+        <code style={{ background: '#f4f4f5', border: '1px solid #e4e4e7', borderRadius: '6px', padding: '3px 8px', fontWeight: 700, letterSpacing: '1px' }}>{codice || '…'}</code>
+        <button onClick={copia} style={{ background: '#fff', border: '1px solid #ddd', borderRadius: '6px', padding: '3px 10px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>Copia</button>
+        <span style={{ color: '#888' }}>— dallo a un master perché ti colleghi; o incolla il suo qui sotto.</span>
+      </div>
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: msg ? '8px' : 0 }}>
+        <input value={input} onChange={e => setInput(e.target.value)} placeholder="Codice del master da collegare"
+          style={{ flex: '1 1 240px', border: '1px solid #ddd', borderRadius: '6px', padding: '7px 10px', fontSize: '13px', textTransform: 'uppercase' }} />
+        <button onClick={collega} disabled={busy || !input.trim()} style={{ background: '#4f46e5', color: '#fff', border: 'none', borderRadius: '6px', padding: '7px 16px', fontSize: '13px', fontWeight: 700, cursor: busy || !input.trim() ? 'default' : 'pointer', opacity: busy || !input.trim() ? 0.6 : 1 }}>Collega master</button>
+      </div>
+      {msg && <div style={{ fontSize: '12px', color: '#15803d', marginBottom: '6px' }}>{msg}</div>}
+
+      {ricevuti.length > 0 && (
+        <div style={{ marginTop: '12px', borderTop: '1px solid #f0f0f0', paddingTop: '12px' }}>
+          <div style={{ fontSize: '12.5px', fontWeight: 800, color: '#9a3412', marginBottom: '8px' }}>Richieste di collegamento da approvare ({ricevuti.length})</div>
+          <div style={{ display: 'grid', gap: '8px' }}>
+            {ricevuti.map(r => (
+              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '8px', padding: '10px 12px' }}>
+                <span style={{ fontSize: '13px', color: '#1a1a1a' }}><b>{r.fornitore}</b> ti vuole collegare come suo cliente.</span>
+                <span style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
+                  <button onClick={() => rispondi(r.id, r.fornitore, 'accetta')} disabled={busy} style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>✓ Collega</button>
+                  <button onClick={() => rispondi(r.id, r.fornitore, 'rifiuta')} disabled={busy} style={{ background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>Rifiuta</button>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {inviati.length > 0 && (
+        <div style={{ fontSize: '12px', color: '#888', marginTop: '10px' }}>In attesa che approvino: {inviati.map((r: any) => r.compratore).join(', ')}</div>
+      )}
+    </div>
+  )
+}
+
 export default function ElencoMasterPage() {
   const dialog = useDialog()
   const [root, setRoot] = useState<{ id: string; nome: string } | null>(null)
@@ -195,6 +283,7 @@ export default function ElencoMasterPage() {
       </div>
 
       <NuoviMaster />
+      <Collegamenti />
 
       <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e8e8e8', padding: '20px' }}>
         {loading ? (

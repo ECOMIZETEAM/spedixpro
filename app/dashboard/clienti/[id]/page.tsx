@@ -16,6 +16,91 @@ function fmtData(iso: string) {
   return `${d.toLocaleDateString('it-IT')} ${d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`
 }
 
+// Sezione "Contratti condivisi" — compare SOLO sulla scheda di un master collegato (cliente-ledger).
+// Qui il venditore abilita/disabilita i suoi contratti per il collegato: abilitare mette il prezzo W nel
+// listino d'ingrosso, crea la chiave e il corriere sul compratore, e propaga costo/zone. Niente
+// riapprovazione (il consenso è stato dato al collegamento). Il listino poi si rifinisce in Listini Clienti.
+function ContrattiCondivisi({ clienteId }: { clienteId: string }) {
+  const [data, setData] = useState<any>(null)
+  const [busy, setBusy] = useState('')
+  const [msg, setMsg] = useState('')
+  const [markup, setMarkup] = useState<Record<string, { mode: string; val: string }>>({})
+
+  function carica() { fetch(`/api/condivisioni/scheda?cliente_id=${clienteId}`).then(r => r.json()).then(setData).catch(() => {}) }
+  useEffect(() => { carica() }, [clienteId])
+  if (!data?.link) return null
+
+  const mk = (id: string) => markup[id] || { mode: 'fisso', val: '0' }
+  const setMk = (id: string, patch: any) => setMarkup(m => ({ ...m, [id]: { ...mk(id), ...patch } }))
+
+  async function abilita(cid: string) {
+    setBusy(cid); setMsg('')
+    const m = mk(cid)
+    const res = await fetch(`/api/condivisioni/${data.link.id}/abilita-contratto`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ corriere_id: cid, markup: { default: { mode: m.mode, valore: Number(m.val) || 0 } } }),
+    })
+    const d = await res.json().catch(() => ({})); setBusy('')
+    if (!res.ok || d?.error) { setMsg(d?.error || 'Errore'); return }
+    setMsg(d.avviso || 'Contratto abilitato: costo e zone propagati sul suo portale. Rifinisci il prezzo in Listini Clienti.')
+    carica()
+  }
+  async function disabilita(cid: string) {
+    setBusy(cid); setMsg('')
+    const res = await fetch(`/api/condivisioni/${data.link.id}/disabilita-contratto`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ corriere_id: cid }),
+    })
+    const d = await res.json().catch(() => ({})); setBusy('')
+    if (!res.ok || d?.error) { setMsg(d?.error || 'Errore'); return }
+    carica()
+  }
+  async function risincronizza() {
+    setBusy('sync'); setMsg('')
+    const res = await fetch(`/api/condivisioni/${data.link.id}/risincronizza`, { method: 'POST' })
+    const d = await res.json().catch(() => ({})); setBusy('')
+    if (!res.ok || d?.error) { setMsg(d?.error || 'Errore'); return }
+    setMsg(`Costi ri-sincronizzati sul portale del collegato (${d.contratti || 0} contratti).`)
+  }
+  const haAbilitati = (data.contratti || []).some((c: any) => c.abilitato)
+
+  return (
+    <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e8e8e8', overflow: 'hidden' }}>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', fontSize: '13px', fontWeight: 700, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        🔗 Contratti condivisi con {data.link.compratore}
+        <span style={{ fontSize: '11px', fontWeight: 400, color: '#9ca3af' }}>abilita un tuo contratto: gli arriva pronto da rivendere</span>
+        {haAbilitati && <button onClick={risincronizza} disabled={busy === 'sync'} title="Dopo aver ritoccato i prezzi d'ingrosso, aggiorna il costo mostrato sul portale del collegato" style={{ marginLeft: 'auto', background: '#fff', border: '1px solid #ddd', borderRadius: '6px', padding: '4px 10px', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', color: '#4f46e5' }}>{busy === 'sync' ? '…' : '↻ Ri-sincronizza costi'}</button>}
+      </div>
+      <div style={{ padding: '12px 16px' }}>
+        {msg && <div style={{ fontSize: '12px', color: msg.toLowerCase().includes('err') ? '#dc2626' : '#15803d', marginBottom: '10px' }}>{msg}</div>}
+        {(!data.contratti || !data.contratti.length) && <div style={{ fontSize: '12.5px', color: '#888' }}>Non hai contratti condivisibili.</div>}
+        <div style={{ display: 'grid', gap: '8px' }}>
+          {(data.contratti || []).map((c: any) => (
+            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', border: '1px solid #f0f0f0', borderRadius: '8px', padding: '9px 12px' }}>
+              <span style={{ fontSize: '13px', color: '#1a1a1a' }}>{c.tipo && <b style={{ textTransform: 'uppercase' }}>{c.tipo} </b>}{c.nome_contratto}</span>
+              {c.abilitato ? (
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#059669', background: '#ecfdf5', padding: '2px 8px', borderRadius: '10px' }}>Abilitato ✓</span>
+                  <button onClick={() => disabilita(c.id)} disabled={busy === c.id} style={{ background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>{busy === c.id ? '…' : 'Disabilita'}</button>
+                </span>
+              ) : (
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '11px', color: '#888' }}>ricarico</span>
+                  <input value={mk(c.id).val} onChange={e => setMk(c.id, { val: e.target.value })} style={{ width: '58px', border: '1px solid #ddd', borderRadius: '6px', padding: '4px 6px', fontSize: '12px' }} />
+                  <select value={mk(c.id).mode} onChange={e => setMk(c.id, { mode: e.target.value })} style={{ border: '1px solid #ddd', borderRadius: '6px', padding: '4px 6px', fontSize: '12px' }}>
+                    <option value="fisso">€</option>
+                    <option value="percentuale">%</option>
+                  </select>
+                  <button onClick={() => abilita(c.id)} disabled={busy === c.id} style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 12px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', opacity: busy === c.id ? 0.6 : 1 }}>{busy === c.id ? '…' : 'Abilita'}</button>
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function ClienteProfiloPage() {
   const { id: idUrl } = useParams()
   // L'indirizzo di un sotto-master è /dashboard/clienti/m:<id> e il browser codifica i due punti:
@@ -205,6 +290,8 @@ export default function ClienteProfiloPage() {
               <div><div style={{color:'#1a1a1a',fontSize:'11px',fontWeight:'600',marginBottom:'4px'}}>TIPO CONTRATTO</div><div style={{color:'#1a1a1a'}}>{cliente.tipo_contratto?.replace(/_/g,' ')||'—'}</div></div>
             </div>
           </div>
+
+          <ContrattiCondivisi clienteId={String(id)} />
 
           {/* NOTE PRIVATE del master su questo cliente: mai visibili al cliente. */}
           <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
