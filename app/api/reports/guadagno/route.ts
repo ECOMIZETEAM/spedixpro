@@ -119,8 +119,14 @@ export async function GET(req: NextRequest) {
   // escludono anche dal margine: col 'rimborso' si nettano a 0. Le in coda d'annullo restano contate.)
   const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
   const subIds = await sottoAlberoMasterIds(admin, M)
+  // MARGINE/SERIE col METODO ESATTO del Report Spedizioni (guadagno_spedizioni_serie_v1): SOLO movimenti
+  // 'spedizione', per DATA DI CREAZIONE della spedizione, non annullate. Prima si usava
+  // guadagno_master_serie_v1 (per data MOVIMENTO, +'rimborso'): combaciava col Report solo a meno di
+  // ~0,1-1,5% (rimborsi a cavallo del mese). Ora card e Report Spedizioni coincidono al centesimo
+  // (verificato: MULTI set. 39.217,49 = 39.217,49). I RESI/RETTIFICHE/GIACENZE/RIMBORSI restano nei loro
+  // riquadri. Il NUMERO spedizioni e' invece il volume di RETE non annullato (= barra abbonamento).
   const [{ data: serieRows, error: errSerie }, { count: numSpedizioniRaw }] = await Promise.all([
-    admin.rpc('guadagno_master_serie_v1', { p_master: M, p_dal: dal, p_al: alEnd, p_per_mese: perMese, p_tipi: TIPI }),
+    admin.rpc('guadagno_spedizioni_serie_v1', { p_master: M, p_dal: dal, p_al: alEnd, p_per_mese: perMese }),
     admin.from('spedizioni').select('id', { count: 'exact', head: true })
       .in('master_id', subIds).gte('created_at', dal).lte('created_at', alEnd).neq('stato', 'annullata'),
   ])
