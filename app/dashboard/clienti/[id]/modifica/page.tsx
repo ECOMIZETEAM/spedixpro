@@ -25,6 +25,9 @@ export default function ModificaClientePage() {
 
   useEffect(() => {
     fetch(`/api/clienti/${id}`).then(r => r.json()).then(d => {
+      // Un master collegato (ledger) non si modifica da qui: è lo specchio di un altro master (nessun login,
+      // niente reset password). Si gestisce dalla sua scheda (sezione "Contratti condivisi").
+      if (d?.ledger) { router.replace(`/dashboard/clienti/${id}`); return }
       setCliente(d)
       setForm(d || {})
       setLoading(false)

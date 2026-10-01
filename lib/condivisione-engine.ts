@@ -12,6 +12,18 @@ import { propagaCosto } from '@/lib/condivisione-propaga'
  * disabilitaContrattoCondiviso = toglie quel contratto (spegne il corriere del compratore, revoca la
  * chiave, ripulisce il listino). Lo STORICO non si cancella: se il corriere ha spedizioni, si DISATTIVA. */
 
+/* Anagrafica del master collegato riportata sul suo cliente-ledger, così il venditore vede CHI è (sola
+ * lettura: il ledger non si modifica, è lo specchio del master). Mappa masters → colonne clienti. */
+export function anagraficaMasterPerLedger(m: any): Record<string, any> {
+  if (!m) return {}
+  return {
+    piva: m.piva || null, cf: m.codice_fiscale || null, pec: m.pec || null, telefono: m.telefono || null,
+    sl_indirizzo: m.indirizzo || null, sl_citta: m.citta || null, sl_provincia: m.provincia || null, sl_cap: m.cap || null, sl_paese: 'IT',
+    so_indirizzo: m.indirizzo_operativo || m.indirizzo || null, so_citta: m.citta_operativo || m.citta || null,
+    so_provincia: m.provincia_operativo || m.provincia || null, so_cap: m.cap_operativo || m.cap || null, so_paese: 'IT',
+  }
+}
+
 export async function abilitaContrattoCondiviso(
   admin: any,
   opts: { linkId: string; corriereId: string; markup?: any },
@@ -29,9 +41,13 @@ export async function abilitaContrattoCondiviso(
   const ledgerId = link.cliente_ledger_id as string
 
   const { data: corr } = await admin.from('corrieri')
-    .select('id,master_id,tipo,nome_contratto,attivo').eq('id', corriereId).maybeSingle()
+    .select('id,master_id,tipo,nome_contratto,attivo,credenziali').eq('id', corriereId).maybeSingle()
   if (!corr || corr.master_id !== seller) return { ok: false, reason: 'Contratto non trovato tra i tuoi.' }
-  if (corr.tipo === 'moovexpress') return { ok: false, reason: 'Un contratto ricevuto da un altro master non è ri-condivisibile.' }
+  // Un contratto moovexpress SI RI-CONDIVIDE (catena a 3+ livelli: la Triangolazioni presa da LOGIXIA la
+  // rivendo a MULTI). Unico divieto: ri-venderlo all'ORIGINE stessa (loop: lo vendo a chi me l'ha dato).
+  if (corr.tipo === 'moovexpress' && (corr.credenziali || {}).fornitore_master_id === buyer) {
+    return { ok: false, reason: 'Questo contratto arriva proprio da quel master: non glielo puoi rivendere.' }
+  }
 
   // Listino d'ingrosso del ledger (ne copre più d'uno): si crea alla prima abilitazione.
   const { data: ledger } = await admin.from('clienti').select('id,listino_cliente_id,ragione_sociale').eq('id', ledgerId).maybeSingle()

@@ -155,8 +155,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   // ── Cambio email di accesso (login) ────────────────────────────────
   // L'email è anche lo username di login: se cambia va aggiornata su auth + utenti + clienti.
-  const { data: cliCorr } = await supabase.from('clienti').select('email').eq('id', id).eq('master_id', utente?.master_id).maybeSingle()
+  const { data: cliCorr } = await supabase.from('clienti').select('email,ledger').eq('id', id).eq('master_id', utente?.master_id).maybeSingle()
   if (!cliCorr) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 404 })
+  // Un master collegato (ledger condivisione) non si modifica/reset da qui: è lo specchio di un altro
+  // master, senza login. Si gestisce dal collegamento (vedi CONDIVISIONE-CONTRATTI.md).
+  if ((cliCorr as any).ledger) return NextResponse.json({ error: 'Questo è un master collegato: si gestisce dal collegamento, non si modifica da qui.' }, { status: 400 })
   const emailVecchia = (cliCorr.email || '').trim().toLowerCase()
   const emailNuova = (datiCliente.email || '').trim().toLowerCase()
   const cambioEmail = !!emailNuova && emailNuova !== emailVecchia

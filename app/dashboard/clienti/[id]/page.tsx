@@ -270,8 +270,17 @@ export default function ClienteProfiloPage() {
             {cliente.attivo?'Attivo':'Inattivo'}
           </span>
           <span style={{fontSize:'13px',color:'#1a1a1a'}}>Credito: <strong style={{color:'#f97316'}}>{fmtEuro(creditoView)}</strong></span>
-          <a href={cliente.is_master ? `/dashboard/clienti/master/${String(id).slice(2)}` : `/dashboard/clienti/${id}/modifica`} style={{padding:'8px 16px',background:'#f97316',color:'#fff',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>✏️ Modifica Anagrafica</a>
-          <a href={`/dashboard/clienti/${id}/impostazioni`} style={{padding:'8px 16px',background:'#1a1a1a',color:'#fff',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>⚙️ Impostazioni</a>
+          {cliente.ledger ? (
+            // Master collegato (condivisione): è lo specchio di un altro master, NON un cliente con login →
+            // niente Modifica anagrafica / Impostazioni / reset password. Si gestisce dalla sezione
+            // "Contratti condivisi" qui sotto.
+            <span style={{padding:'6px 12px',background:'#ecfdf5',color:'#059669',borderRadius:'20px',fontSize:'12px',fontWeight:700}}>Master collegato · sola lettura</span>
+          ) : (
+            <>
+              <a href={cliente.is_master ? `/dashboard/clienti/master/${String(id).slice(2)}` : `/dashboard/clienti/${id}/modifica`} style={{padding:'8px 16px',background:'#f97316',color:'#fff',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>✏️ Modifica Anagrafica</a>
+              <a href={`/dashboard/clienti/${id}/impostazioni`} style={{padding:'8px 16px',background:'#1a1a1a',color:'#fff',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>⚙️ Impostazioni</a>
+            </>
+          )}
         </div>
       </div>
 
