@@ -9,11 +9,11 @@ import { EMAIL_PER_CORRIERE } from '@/lib/spediamopro'
 //
 // ECCEZIONI, decise dall'owner, contratto per contratto. Su questi servizi gli avvisi del corriere
 // DEVONO arrivare a mittente e destinatario, quindi gli si mandano le email vere:
-//  - "Poste CRONOBS" (Crono BS), chiesto il 2/10/2026.
+//  - tutti i contratti Crono di Poste: "Poste CRONOBS", "Poste CRONOBM", "POSTE CRONO" (2-3/10/2026).
 // Il nome si confronta normalizzato (senza spazi, maiuscole ignorate) perche' ogni master ha la SUA
 // riga `corrieri` per lo stesso contratto e i nomi girano con spazi diversi ("Poste CRONOBS",
 // "POSTE CRONO BS"): lo stesso criterio di lib/contratto-per-nome.
-const CONTRATTI_EMAIL_VERE = [/cronobs/];
+const CONTRATTI_EMAIL_VERE = [/crono/];
 
 export function emailVereAlCorriere(nomeContratto?: string | null): boolean {
   const n = String(nomeContratto || '').toLowerCase().replace(/\s+/g, '')
