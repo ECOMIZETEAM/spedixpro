@@ -6,22 +6,24 @@ import DateRangePicker from '@/app/components/DateRangePicker'
 const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const ARANCIO = '#f97316', VERDE = '#16a34a', NERO = '#1a1a1a'
 const oggi = () => new Date().toISOString().slice(0, 10)
-const inizioAnno = () => new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10)
+const primoMese = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10) }
 
 export default function StatFatturazionePage() {
-  const [dal, setDal] = useState(inizioAnno()); const [al, setAl] = useState(oggi())
+  const [dal, setDal] = useState(primoMese()); const [al, setAl] = useState(oggi())
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(true)
-  async function carica() { setLoading(true); try { const r = await fetch(`/api/statistiche/fatturazione?dal=${dal}&al=${al}`); const j = await r.json(); setD(j.error ? null : j) } catch { setD(null) } setLoading(false) }
+  async function carica(da = dal, a = al) { setLoading(true); try { const r = await fetch(`/api/statistiche/fatturazione?dal=${da}&al=${a}`); const j = await r.json(); setD(j.error ? null : j) } catch { setD(null) } setLoading(false) }
   useEffect(() => { carica() }, [])  // eslint-disable-line
+  function range(t: string) { const dd = new Date(); let s = new Date(), e = new Date(); if (t === 'oggi') { } else if (t === 'ieri') { s.setDate(dd.getDate() - 1); e.setDate(dd.getDate() - 1) } else if (t === 'mese') s = new Date(dd.getFullYear(), dd.getMonth(), 1); else if (t === 'mesescorso') { s = new Date(dd.getFullYear(), dd.getMonth() - 1, 1); e = new Date(dd.getFullYear(), dd.getMonth(), 0) } else if (t === '7') s.setDate(dd.getDate() - 6); else if (t === '30') s.setDate(dd.getDate() - 29); else if (t === '90') s.setDate(dd.getDate() - 89); else if (t === 'anno') s = new Date(dd.getFullYear(), 0, 1); const da = s.toISOString().slice(0, 10), a = e.toISOString().slice(0, 10); setDal(da); setAl(a); carica(da, a) }
   const k = d?.kpi
   return (
     <div>
       <h1 style={{ fontSize: '20px', fontWeight: 700, color: NERO, margin: '0 0 2px' }}>Fatturazione</h1>
-      <p style={{ fontSize: '13px', color: '#8a8a8a', margin: '0 0 16px' }}>Fatturato ai tuoi clienti e alla tua rete diretta.</p>
+      <p style={{ fontSize: '13px', color: '#8a8a8a', margin: '0 0 16px' }}>Quello che <b>incassi</b> dai clienti e dalla rete diretta (ricavo, non il guadagno — per il guadagno vai su Report Guadagno).</p>
       <div style={card}>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>{[['oggi', 'Oggi'], ['ieri', 'Ieri'], ['mese', 'Questo mese'], ['mesescorso', 'Mese scorso'], ['7', 'Ultimi 7 gg'], ['30', 'Ultimi 30 gg'], ['90', 'Ultimi 90 gg'], ['anno', "Quest'anno"]].map(([t, l]) => <button key={t} onClick={() => range(t)} style={chip}>{l}</button>)}</div>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div><label style={lbl}>Periodo</label><DateRangePicker dal={dal} al={al} onChange={(d, a) => { setDal(d); setAl(a) }} /></div>
-          <button onClick={carica} style={btnP}>Filtra</button>
+          <button onClick={() => carica()} style={btnP}>Filtra</button>
         </div>
       </div>
       {loading ? <div style={{ padding: '40px', textAlign: 'center', color: '#999' }}>Caricamento…</div> : !d ? <div style={{ ...card, textAlign: 'center', color: '#999' }}>Nessun dato.</div> : (
@@ -49,3 +51,4 @@ const titolo = { fontSize: '13px', fontWeight: 700, color: NERO, marginBottom: '
 const lbl = { fontSize: '11px', fontWeight: 600 as const, color: '#9ca3af', display: 'block' as const, marginBottom: '4px', textTransform: 'uppercase' as const }
 const inp = { padding: '8px 11px', border: '1px solid #e2e2e2', borderRadius: '8px', fontSize: '13px', color: NERO }
 const btnP = { background: ARANCIO, color: '#fff', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '13px', fontWeight: 700 as const, cursor: 'pointer', height: '38px' }
+const chip = { background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: '999px', padding: '6px 12px', fontSize: '12px', color: '#374151', cursor: 'pointer' }
