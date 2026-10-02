@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { getPermessiUtente } from '@/lib/permessi'
+import { tipoContrattoDaCreditoModo } from '@/lib/condivisione-credito'
 
 /* Imposta le CONDIZIONI DI PAGAMENTO di un master collegato: prepagato (il suo conto si ferma a zero) o
  * a fattura (può andare sotto zero, es. fine mese). Aggiorna sia il collegamento (credito_modo) sia il
@@ -22,7 +23,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   await admin.from('corrieri_condivisi').update({ credito_modo: modo }).eq('id', id)
   if (link.cliente_ledger_id) {
     // prepagato = credito_scalare (il motore prenota e si ferma a zero); fattura = può andare sotto.
-    await admin.from('clienti').update({ tipo_contratto: modo === 'fattura' ? 'fattura' : 'credito_scalare' }).eq('id', link.cliente_ledger_id)
+    // La parola la decide lib/condivisione-credito: 'fattura' scritta qui dentro non esiste nel resto
+    // della piattaforma (tendina della scheda cliente, fatture, report) e faceva sembrare che il tipo
+    // contratto tornasse indietro da solo.
+    await admin.from('clienti').update({ tipo_contratto: tipoContrattoDaCreditoModo(modo) }).eq('id', link.cliente_ledger_id)
   }
   return NextResponse.json({ ok: true, modo })
 }

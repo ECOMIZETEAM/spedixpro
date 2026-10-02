@@ -4,6 +4,7 @@ import { getPermessiUtente } from '@/lib/permessi'
 import { generaApiKey } from '@/lib/api-auth'
 import { propagaCostoCondivisione } from '@/lib/condivisione-propaga'
 import { anagraficaMasterPerLedger } from '@/lib/condivisione-engine'
+import { tipoContrattoDaCreditoModo } from '@/lib/condivisione-credito'
 
 /* ACCETTA una condivisione ricevuta (Fase 3). Il COMPRATORE (acquirente = corrieri_condivisi.master_id)
  * consente, e al consenso si monta la contabilità — riusando i meccanismi esistenti (vedi CONDIVISIONE-
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       ragione_sociale: `${nomeCompratore} (ingrosso)`,
       email: `ledger-${c.id}@ledger.moovexpress.app`,
       codice_cliente: 'LDG-' + c.id.slice(0, 8).toUpperCase(),
-      tipo_contratto: c.credito_modo === 'fattura' ? 'fattura' : 'credito_scalare',
+      tipo_contratto: tipoContrattoDaCreditoModo(c.credito_modo),
       attivo: true, ledger: true,
       ...anagraficaMasterPerLedger(compratore),   // lo specchio dell'anagrafica del collegato (sola lettura)
     }).select('id').single()
@@ -71,7 +72,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     ragione_sociale: `${nomeCompratore} (ingrosso)`,
     email: `ledger-${c.id}@ledger.moovexpress.app`,
     codice_cliente: 'LDG-' + c.id.slice(0, 8).toUpperCase(),
-    tipo_contratto: c.credito_modo === 'fattura' ? 'fattura' : 'credito_scalare',
+    tipo_contratto: tipoContrattoDaCreditoModo(c.credito_modo),
     attivo: true, ledger: true,
     listino_cliente_id: c.listino_ingrosso_id,
   }).select('id').single()
