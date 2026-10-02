@@ -110,8 +110,21 @@ export async function GET(req: NextRequest) {
     supplementi = s || []
   }
 
+  // SI MOSTRA IL DIVISORE CHE SI PAGA, non quello scritto sulla riga del listino.
+  // `fattoreVolumeCorriere` e' la stessa funzione che usa il motore dei prezzi: dentro ha la
+  // precedenza vera (override per-corriere, poi default, poi eredita' dalla catena). Leggendo a mano
+  // il solo default, sei contratti mostravano un numero diverso da quello con cui venivano prezzati
+  // — BRT PF di QUICK diceva 6666 e pagava come 5000, su 187 spedizioni in trenta giorni.
+  // Un posto solo decide il divisore: le pagine lo chiedono a lui, non lo ricalcolano.
+  let listinoOut = listino
+  if (listino && corriereSelezionato?.id) {
+    const { fattoreVolumeCorriere } = await import('@/lib/pricing')
+    const effettivo = await fattoreVolumeCorriere(supabase, utente!.master_id!, corriereSelezionato.id)
+    if (effettivo > 0) listinoOut = { ...listino, fattore_volume: effettivo }
+  }
+
   return NextResponse.json({
-    listino, corrieri, corrieriDisponibili,
+    listino: listinoOut, corrieri, corrieriDisponibili,
     corriereSelezionatoId: corriereSelezionato?.id || '',
     corriereEreditato: !!corriereSelezionato?.ereditato,
     fasce, supplementi,
@@ -143,6 +156,26 @@ export async function POST(req: NextRequest) {
   }
 
   await supabase.from('listini_corrieri').update({ fattore_volume, solo_peso_reale: !!solo_peso_reale }).eq('id', listinoId)
+
+  // IL DIVISORE SI SALVA IN DUE POSTI, PERCHE' IL MOTORE NE LEGGE DUE.
+  //
+  // Qui si scriveva solo il default del listino, ma `fattoreVolumeCorriere` (lib/pricing) guarda
+  // PRIMA l'override per-corriere in `listini_corrieri_corrieri`: se c'e', il default non conta.
+  // Quindi si salvava 6666, si tornava a vedere 6666, e si continuava a pagare col 5000 di prima —
+  // su QUICK/BRT PF sono 187 spedizioni in trenta giorni. Chi cerca un errore nel divisore guarda
+  // questa pagina, e la pagina gli dava ragione mentre il conto diceva altro.
+  // (Ci sono inciampato anch'io correggendo Poste Delivery Business Triangolazioni a mano: il
+  //  default a 6000, l'override rimasto a 5000, e la correzione senza effetto.)
+  // Si allinea l'override di QUESTO corriere su tutti i listini del master: il valore salvato e il
+  // valore applicato tornano a essere lo stesso numero, qualunque strada legga il motore.
+  {
+    const { data: _lm } = await supabase.from('listini_corrieri').select('id').eq('master_id', utente?.master_id)
+    const _ids = [...new Set([...(_lm || []).map((l: any) => l.id), listinoId].filter(Boolean))]
+    if (_ids.length) {
+      await supabase.from('listini_corrieri_corrieri')
+        .update({ fattore_volume }).in('listino_id', _ids).eq('corriere_id', corriereId)
+    }
+  }
 
   // Cancella le fasce/supplementi di questo corriere in TUTTI i listini del master
   // (potevano essere sparse sotto listino_id diversi): evita duplicati/orfani e le riconsolida.
