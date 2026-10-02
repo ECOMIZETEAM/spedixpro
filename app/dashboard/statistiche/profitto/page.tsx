@@ -1,24 +1,25 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import DateRangePicker from '@/app/components/DateRangePicker'
 
 const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const ARANCIO = '#f97316', VERDE = '#16a34a', NERO = '#1a1a1a', GRIGIO = '#9ca3af'
+const ARANCIO = '#f97316', VERDE = '#16a34a', ROSSO = '#dc2626', NERO = '#1a1a1a'
+const col = (x: number) => (x >= 0 ? VERDE : ROSSO)
 
-function oggi() { return new Date().toISOString().slice(0, 10) }
+function oggiStr() { return new Date().toISOString().slice(0, 10) }
 function primoMese() { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10) }
 
 export default function StatProfittoPage() {
   const [dal, setDal] = useState(primoMese())
-  const [al, setAl] = useState(oggi())
+  const [al, setAl] = useState(oggiStr())
   const [d, setD] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
-  async function carica() {
+  async function carica(da = dal, a = al) {
     setLoading(true)
     try {
-      const res = await fetch(`/api/statistiche/profitto?dal=${dal}&al=${al}`)
+      const res = await fetch(`/api/statistiche/profitto?dal=${da}&al=${a}`)
       const j = await res.json()
       setD(j.error ? null : j)
     } catch { setD(null) }
@@ -26,33 +27,37 @@ export default function StatProfittoPage() {
   }
   useEffect(() => { carica() }, [])  // eslint-disable-line
 
+  // Imposta un range rapido E ricarica subito (come la dashboard).
   function rangeVeloce(tipo: string) {
-    const d = new Date(); let start = new Date()
-    if (tipo === 'mese') start = new Date(d.getFullYear(), d.getMonth(), 1)
-    else if (tipo === 'mesescorso') { start = new Date(d.getFullYear(), d.getMonth() - 1, 1); const fine = new Date(d.getFullYear(), d.getMonth(), 0); setAl(fine.toISOString().slice(0, 10)); setDal(start.toISOString().slice(0, 10)); return }
-    else if (tipo === '7') start.setDate(d.getDate() - 6)
-    else if (tipo === '30') start.setDate(d.getDate() - 29)
-    else if (tipo === '90') start.setDate(d.getDate() - 89)
-    else if (tipo === 'anno') start = new Date(d.getFullYear(), 0, 1)
-    setDal(start.toISOString().slice(0, 10)); setAl(oggi())
+    const oggi = new Date(); let start = new Date(), end = new Date()
+    if (tipo === 'oggi') { /* start=end=oggi */ }
+    else if (tipo === 'ieri') { start.setDate(oggi.getDate() - 1); end.setDate(oggi.getDate() - 1) }
+    else if (tipo === 'mese') start = new Date(oggi.getFullYear(), oggi.getMonth(), 1)
+    else if (tipo === 'mesescorso') { start = new Date(oggi.getFullYear(), oggi.getMonth() - 1, 1); end = new Date(oggi.getFullYear(), oggi.getMonth(), 0) }
+    else if (tipo === '7') start.setDate(oggi.getDate() - 6)
+    else if (tipo === '30') start.setDate(oggi.getDate() - 29)
+    else if (tipo === '90') start.setDate(oggi.getDate() - 89)
+    else if (tipo === 'anno') start = new Date(oggi.getFullYear(), 0, 1)
+    const da = start.toISOString().slice(0, 10), a = end.toISOString().slice(0, 10)
+    setDal(da); setAl(a); carica(da, a)
   }
 
-  const k = d?.kpi
+  const t = d?.totale
   return (
     <div>
-      <h1 style={{ fontSize: '20px', fontWeight: 700, color: NERO, margin: '0 0 2px' }}>Dashboard Profitto</h1>
-      <p style={{ fontSize: '13px', color: '#8a8a8a', margin: '0 0 16px' }}>Costi e margine per spedizione — solo i tuoi clienti e la tua rete diretta.</p>
+      <h1 style={{ fontSize: '20px', fontWeight: 700, color: NERO, margin: '0 0 2px' }}>Report Guadagno</h1>
+      <p style={{ fontSize: '13px', color: '#8a8a8a', margin: '0 0 16px' }}>Il calderone: tutto il guadagno del periodo, per voce, per contratto e per cliente. Combacia col Guadagno Totale della dashboard.</p>
 
       {/* Filtri */}
       <div style={card}>
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
-          {[['mese', 'Questo mese'], ['mesescorso', 'Mese scorso'], ['7', 'Ultimi 7 giorni'], ['30', 'Ultimi 30 giorni'], ['90', 'Ultimi 90 giorni'], ['anno', "Quest'anno"]].map(([t, l]) => (
-            <button key={t} onClick={() => rangeVeloce(t)} style={chip}>{l}</button>
+          {[['oggi', 'Oggi'], ['ieri', 'Ieri'], ['mese', 'Questo mese'], ['mesescorso', 'Mese scorso'], ['7', 'Ultimi 7 gg'], ['30', 'Ultimi 30 gg'], ['90', 'Ultimi 90 gg'], ['anno', "Quest'anno"]].map(([ti, l]) => (
+            <button key={ti} onClick={() => rangeVeloce(ti)} style={chip}>{l}</button>
           ))}
         </div>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div><label style={lbl}>Periodo</label><DateRangePicker dal={dal} al={al} onChange={(d, a) => { setDal(d); setAl(a) }} /></div>
-          <button onClick={carica} style={{ ...btnPrimario, height: '38px' }}>Filtra</button>
+          <div><label style={lbl}>Periodo</label><DateRangePicker dal={dal} al={al} onChange={(da, a) => { setDal(da); setAl(a) }} /></div>
+          <button onClick={() => carica()} style={{ ...btnPrimario, height: '38px' }}>Filtra</button>
         </div>
       </div>
 
@@ -60,79 +65,74 @@ export default function StatProfittoPage() {
         : !d ? <div style={{ ...card, textAlign: 'center', color: '#999' }}>Nessun dato disponibile.</div>
           : (
             <>
-              {/* KPI */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: '12px', marginBottom: '16px' }}>
-                <Kpi label="Profitto netto" value={eur(k.profitto)} color={k.profitto >= 0 ? VERDE : '#dc2626'} big />
-                <Kpi label="Fatturato (ai clienti)" value={eur(k.fatturato)} color={ARANCIO} />
-                <Kpi label="Costo corriere" value={eur(k.costo)} color="#dc2626" />
-                <Kpi label="Margine" value={`${k.margine}%`} color={NERO} />
-                <Kpi label="Spedizioni" value={String(k.spedizioni)} color={NERO} />
-                <Kpi label="Costo medio / sped." value={eur(k.costoMedio)} color={NERO} />
-                <Kpi label="Profitto medio / sped." value={eur(k.profittoMedio)} color={k.profittoMedio >= 0 ? VERDE : '#dc2626'} />
-                <Kpi label="Costo singolo più alto" value={eur(k.costoMax)} color={NERO} hint={d.costoMaxDettaglio?.cliente} />
+              {/* KPI totali */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: '12px', marginBottom: '16px' }}>
+                <Kpi label="Guadagno Totale" value={eur(t.guadagno)} color={col(t.guadagno)} big />
+                <Kpi label="Incassato (ricavi)" value={eur(t.ricavi)} color={ARANCIO} />
+                <Kpi label="Speso (costi)" value={eur(t.costi)} color={ROSSO} />
+                <Kpi label="Margine" value={`${t.margine}%`} color={NERO} />
+                <Kpi label="Spedizioni" value={Number(d.spedizioni).toLocaleString('it-IT')} color={NERO} />
+                <Kpi label="Guadagno medio / sped." value={eur(d.guadagnoMedio)} color={col(d.guadagnoMedio)} />
               </div>
 
-              {/* Serie temporale */}
-              <div style={{ ...card, height: '340px' }}>
-                <div style={titolo}>Fatturato, costo e profitto nel tempo</div>
-                <ResponsiveContainer width="100%" height="88%">
-                  <LineChart data={d.serie} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-                    <XAxis dataKey="giorno" tick={{ fontSize: 11 }} tickFormatter={(v) => v.slice(8) + '/' + v.slice(5, 7)} />
-                    <YAxis tick={{ fontSize: 11 }} />
-                    <Tooltip formatter={(v: any) => eur(v)} labelFormatter={(l) => l} />
-                    <Legend />
-                    <Line type="monotone" dataKey="fatturato" name="Fatturato" stroke={ARANCIO} strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="costo" name="Costo" stroke="#dc2626" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="profitto" name="Profitto" stroke={VERDE} strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
+              {/* Per voce (il calderone scomposto) */}
+              <div style={card}>
+                <div style={titolo}>Da dove viene il guadagno</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '10px' }}>
+                  {d.perVoce.map((v: any) => (
+                    <div key={v.tipo} style={{ border: '1px solid #eee', borderRadius: '9px', padding: '11px 13px' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280' }}>{v.label}</div>
+                      <div style={{ fontSize: '17px', fontWeight: 800, color: col(v.guadagno), marginTop: '3px' }}>{eur(v.guadagno)}</div>
+                      <div style={{ fontSize: '10.5px', color: '#9ca3af', marginTop: '2px' }}>incassa {eur(v.ricavi)} · spende {eur(v.costi)}</div>
+                    </div>
+                  ))}
+                  {!d.perVoce.length && <div style={{ color: '#9ca3af', fontSize: '13px' }}>Nessun movimento nel periodo.</div>}
+                </div>
               </div>
 
-              {/* Profitto per corriere: grafico + tabella */}
+              {/* Per contratto */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }} className="grid2">
-                <div style={{ ...card, height: '320px' }}>
-                  <div style={titolo}>Profitto per corriere</div>
-                  <ResponsiveContainer width="100%" height="86%">
-                    <BarChart data={d.perCorriere} layout="vertical" margin={{ left: 20, right: 12 }}>
+                <div style={{ ...card, height: '380px' }}>
+                  <div style={titolo}>Guadagno per contratto (top 15)</div>
+                  <ResponsiveContainer width="100%" height="90%">
+                    <BarChart data={d.perContratto.slice(0, 15)} layout="vertical" margin={{ left: 20, right: 12 }}>
                       <XAxis type="number" tick={{ fontSize: 11 }} />
-                      <YAxis type="category" dataKey="corriere" tick={{ fontSize: 11 }} width={110} />
+                      <YAxis type="category" dataKey="contratto" tick={{ fontSize: 10 }} width={140} />
                       <Tooltip formatter={(v: any) => eur(v)} />
-                      <Bar dataKey="profitto" name="Profitto" fill={VERDE} radius={[0, 4, 4, 0]} />
+                      <Bar dataKey="guadagno" name="Guadagno" radius={[0, 4, 4, 0]}>
+                        {d.perContratto.slice(0, 15).map((c: any, i: number) => <Cell key={i} fill={col(c.guadagno)} />)}
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
                 <div style={card}>
-                  <div style={titolo}>Dettaglio per corriere</div>
-                  <Tabella cols={['Vettore', 'Sped.', 'Fatturato', 'Costo', 'Profitto', 'Margine']}
-                    rows={d.perCorriere.map((c: any) => [c.corriere, c.spedizioni, eur(c.fatturato), eur(c.costo),
-                    <span style={{ color: c.profitto >= 0 ? VERDE : '#dc2626', fontWeight: 700 }}>{eur(c.profitto)}</span>, `${c.margine}%`])} />
+                  <div style={titolo}>Dettaglio per contratto</div>
+                  <Tabella cols={['Contratto', 'Sped.', 'Incassato', 'Speso', 'Guadagno', 'Margine']}
+                    rows={d.perContratto.map((c: any) => [c.contratto, Number(c.spedizioni).toLocaleString('it-IT'), eur(c.ricavi), eur(c.costi),
+                    <span style={{ color: col(c.guadagno), fontWeight: 700 }}>{eur(c.guadagno)}</span>, `${c.margine}%`])} />
                 </div>
               </div>
 
-              {/* Top clienti */}
+              {/* Per cliente */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }} className="grid2">
-                <div style={{ ...card, height: '340px' }}>
-                  <div style={titolo}>Top clienti (fatturato)</div>
-                  <ResponsiveContainer width="100%" height="88%">
-                    <BarChart data={d.topFatturato} layout="vertical" margin={{ left: 20, right: 12 }}>
+                <div style={{ ...card, height: '400px' }}>
+                  <div style={titolo}>Guadagno per cliente (top 15)</div>
+                  <ResponsiveContainer width="100%" height="90%">
+                    <BarChart data={d.perCliente.slice(0, 15)} layout="vertical" margin={{ left: 20, right: 12 }}>
                       <XAxis type="number" tick={{ fontSize: 11 }} />
-                      <YAxis type="category" dataKey="nome" tick={{ fontSize: 10 }} width={130} />
+                      <YAxis type="category" dataKey="nome" tick={{ fontSize: 10 }} width={150} />
                       <Tooltip formatter={(v: any) => eur(v)} />
-                      <Bar dataKey="fatturato" name="Fatturato" fill={ARANCIO} radius={[0, 4, 4, 0]} />
+                      <Bar dataKey="guadagno" name="Guadagno" radius={[0, 4, 4, 0]}>
+                        {d.perCliente.slice(0, 15).map((c: any, i: number) => <Cell key={i} fill={col(c.guadagno)} />)}
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-                <div style={{ ...card, height: '340px' }}>
-                  <div style={titolo}>Clienti più redditizi</div>
-                  <ResponsiveContainer width="100%" height="88%">
-                    <BarChart data={d.topProfitto} layout="vertical" margin={{ left: 20, right: 12 }}>
-                      <XAxis type="number" tick={{ fontSize: 11 }} />
-                      <YAxis type="category" dataKey="nome" tick={{ fontSize: 10 }} width={130} />
-                      <Tooltip formatter={(v: any) => eur(v)} />
-                      <Bar dataKey="profitto" name="Profitto" fill={VERDE} radius={[0, 4, 4, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                <div style={card}>
+                  <div style={titolo}>Dettaglio per cliente ({d.perCliente.length})</div>
+                  <Tabella cols={['Cliente / entità', 'Sped.', 'Incassato', 'Speso', 'Guadagno', 'Margine']}
+                    rows={d.perCliente.map((c: any) => [c.nome, Number(c.spedizioni).toLocaleString('it-IT'), eur(c.ricavi), eur(c.costi),
+                    <span style={{ color: col(c.guadagno), fontWeight: 700 }}>{eur(c.guadagno)}</span>, `${c.margine}%`])} />
                 </div>
               </div>
             </>
@@ -142,20 +142,19 @@ export default function StatProfittoPage() {
   )
 }
 
-function Kpi({ label, value, color, big, hint }: any) {
+function Kpi({ label, value, color, big }: any) {
   return (
     <div style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '10px', padding: '14px 16px' }}>
       <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.4px' }}>{label}</div>
-      <div style={{ fontSize: big ? '24px' : '19px', fontWeight: 800, color, marginTop: '4px' }}>{value}</div>
-      {hint && <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '2px' }}>{hint}</div>}
+      <div style={{ fontSize: big ? '26px' : '19px', fontWeight: 800, color, marginTop: '4px' }}>{value}</div>
     </div>
   )
 }
 function Tabella({ cols, rows }: { cols: string[]; rows: any[][] }) {
   return (
-    <div style={{ overflowX: 'auto' }}>
+    <div style={{ overflowX: 'auto', maxHeight: '360px', overflowY: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
-        <thead><tr>{cols.map((c, i) => <th key={i} style={{ textAlign: i === 0 ? 'left' : 'right', padding: '8px 10px', fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase', borderBottom: '1px solid #eee', whiteSpace: 'nowrap' }}>{c}</th>)}</tr></thead>
+        <thead><tr>{cols.map((c, i) => <th key={i} style={{ textAlign: i === 0 ? 'left' : 'right', padding: '8px 10px', fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase', borderBottom: '1px solid #eee', whiteSpace: 'nowrap', position: 'sticky', top: 0, background: '#fff' }}>{c}</th>)}</tr></thead>
         <tbody>
           {rows.map((r, i) => <tr key={i}>{r.map((cell, j) => <td key={j} style={{ textAlign: j === 0 ? 'left' : 'right', padding: '8px 10px', color: NERO, borderBottom: '1px solid #f6f6f6', whiteSpace: 'nowrap' }}>{cell}</td>)}</tr>)}
           {!rows.length && <tr><td colSpan={cols.length} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>Nessun dato</td></tr>}
@@ -168,6 +167,5 @@ function Tabella({ cols, rows }: { cols: string[]; rows: any[][] }) {
 const card = { background: '#fff', border: '1px solid #e8e8e8', borderRadius: '10px', padding: '16px', marginBottom: '16px' }
 const titolo = { fontSize: '13px', fontWeight: 700, color: NERO, marginBottom: '10px' }
 const lbl = { fontSize: '11px', fontWeight: 600 as const, color: '#9ca3af', display: 'block' as const, marginBottom: '4px', textTransform: 'uppercase' as const }
-const inp = { padding: '8px 11px', border: '1px solid #e2e2e2', borderRadius: '8px', fontSize: '13px', color: NERO }
 const chip = { background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: '999px', padding: '6px 12px', fontSize: '12px', color: '#374151', cursor: 'pointer' }
 const btnPrimario = { background: ARANCIO, color: '#fff', border: 'none', borderRadius: '8px', padding: '0 18px', fontSize: '13px', fontWeight: 700 as const, cursor: 'pointer' }
