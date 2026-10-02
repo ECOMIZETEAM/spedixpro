@@ -655,7 +655,16 @@ export async function calcolaPrezzoCorriereDettaglio(
   // Un solo posto decide il divisore, con l'eredita' dalla catena (vedi fattoreVolumeCorriere).
   const fattore = await fattoreVolumeCorriere(supabase, masterId, corriereId)
 
-  const soloPesoReale = listini.some((l: any) => l.solo_peso_reale)
+  // "TASSA SOLO SUL PESO REALE" E' DI QUESTO CONTRATTO, NON DEL MASTER.
+  //
+  // Qui c'era `listini.some(...)` su TUTTI i listini del master: bastava UN contratto col flag e il
+  // volumetrico si spegneva su tutti gli altri. Non e' un caso di scuola — MULTIEXPRESS ha il flag
+  // sui due InPost (che il peso reale ce l'hanno per contratto) e si portava dietro gli altri 38
+  // contratti; QUICK ne ha uno, "INTERNO SOLO PESO", e con quello 34. In trenta giorni sono 23.687 kg
+  // di volumetrico ignorato fra i due. Il detentore oggi e' coperto dal floor che lo rialza al costo
+  // vero del fornitore, ma i livelli a valle no, e un contratto nuovo col flag spegnerebbe la rete.
+  // Il flag va letto dalla riga di QUESTO corriere, come il fattore volume qui sopra.
+  const soloPesoReale = listini.some((l: any) => l.corriere_id === corriereId && l.solo_peso_reale)
 
   const packages = Array.isArray(params.packages) && params.packages.length ? params.packages : []
   // Stessa funzione del prezzo cliente (vedi la nota li' sopra): il peso fatturato si conta collo
