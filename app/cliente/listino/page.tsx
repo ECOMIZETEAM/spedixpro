@@ -101,7 +101,19 @@ export default function ClienteListinoPage() {
                           <thead>
                             <tr>
                               <th style={thL}>Peso (kg)</th>
-                              {(c.zone || []).map((z: string, k: number) => <th key={k} style={th}>{z}</th>)}
+                              {/* Alcune colonne non sono zone di ARRIVO: sono supplementi che
+                                  scattano in base a DOVE PARTE la spedizione (il motore le tiene
+                                  fuori dal match della destinazione). Senza dirlo, si legge il
+                                  prezzo per la Sicilia come se fosse una consegna in Sicilia. */}
+                              {(c.zone || []).map((z: string, k: number) => {
+                                const daPartenza = (c.zoneMittente || []).includes(z)
+                                return (
+                                  <th key={k} style={th} title={daPartenza ? 'Supplemento in base alla località di PARTENZA' : undefined}>
+                                    {z}
+                                    {daPartenza && <div style={{ fontSize: '9.5px', fontWeight: 400, color: '#b45309', textTransform: 'none' }}>alla partenza</div>}
+                                  </th>
+                                )
+                              })}
                               <th style={th}>Fuel</th>
                             </tr>
                           </thead>
@@ -117,6 +129,12 @@ export default function ClienteListinoPage() {
                         </table>
                       ) : (
                         <SupplTable tipo={tab} righe={(c.supplementi || {})[tab] || []} />
+                      )}
+                      {tab === 'pesi' && (c.zoneMittente || []).length > 0 && (
+                        <div style={{ fontSize: '11.5px', color: '#666', padding: '10px 16px 0' }}>
+                          Le colonne segnate <b>“alla partenza”</b> non sono destinazioni: si aggiungono
+                          quando la spedizione <b>parte</b> da quelle località.
+                        </div>
                       )}
                     </div>
                   </div>

@@ -23,7 +23,10 @@ export async function GET() {
   const disattivati = new Set((abil || []).filter((a: any) => a.abilitato === false).map((a: any) => a.corriere_id))
 
   const { data: fasce } = await supabase.from('listini_clienti_fasce')
-    .select('corriere_id,peso_max,prezzo,tipo,fuel,zone(nome),corrieri(nome_contratto,attivo,master_id)')
+    // `su_mittente` serve per DIRE quali colonne dipendono dalla partenza: il motore le esclude dal
+    // match della destinazione (lib/pricing: `if (f.zone.su_mittente) continue`) e le usa come
+    // supplemento d'origine, ma qui finivano nella griglia come se fossero zone di arrivo.
+    .select('corriere_id,peso_max,prezzo,tipo,fuel,zone(nome,su_mittente),corrieri(nome_contratto,attivo,master_id)')
     .eq('listino_id', listinoId).order('peso_max', { ascending: true })
 
   // Contratti in pausa (al proprio livello o SOPRA nella catena): i loro prezzi non devono
@@ -57,12 +60,14 @@ export async function GET() {
         nome_contratto: (f as any).corrieri?.nome_contratto || 'Corriere',
         fattore: fattorePerCorr.get(cid) || defFattore,
         zoneSet: new Set<string>(),
+        zoneMittenteSet: new Set<string>(),
         fasce: new Map<string, any>(),
       })
     }
     const e = perCorr.get(cid)
     const zonaNome = (f as any).zone?.nome || '—'
     e.zoneSet.add(zonaNome)
+    if ((f as any).zone?.su_mittente) e.zoneMittenteSet.add(zonaNome)
     const key = (f as any).tipo + '|' + (f as any).peso_max
     if (!e.fasce.has(key)) e.fasce.set(key, { peso_max: Number((f as any).peso_max), tipo: (f as any).tipo, fuel: Number((f as any).fuel) || 0, prezzi: {} as Record<string, number> })
     e.fasce.get(key).prezzi[zonaNome] = Number((f as any).prezzo)
@@ -116,6 +121,7 @@ export async function GET() {
         nome_contratto: c.nome_contratto,
         fattore: c.fattore,
         zone: Array.from(c.zoneSet).sort(ordZona as any),
+        zoneMittente: Array.from(c.zoneMittenteSet),
         fasce: Array.from(c.fasce.values()).sort((a: any, b: any) => (a.tipo === 'oltre' ? 1 : 0) - (b.tipo === 'oltre' ? 1 : 0) || a.peso_max - b.peso_max),
         supplementi: {
           assicurazione: perTipo('assicurazione').sort(ordScaglioni),
