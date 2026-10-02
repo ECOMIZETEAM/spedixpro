@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
 const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const ARANCIO = '#f97316', VERDE = '#16a34a', NERO = '#1a1a1a', BLU = '#2563eb'
@@ -10,17 +10,17 @@ const primoMese = () => { const d = new Date(); return new Date(d.getFullYear(),
 export default function StatCorrieriPage() {
   const [dal, setDal] = useState(primoMese()); const [al, setAl] = useState(oggi())
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(true)
-  async function carica() { setLoading(true); try { const r = await fetch(`/api/statistiche/corrieri?dal=${dal}&al=${al}`); const j = await r.json(); setD(j.error ? null : j) } catch { setD(null) } setLoading(false) }
+  async function carica(da = dal, a = al) { setLoading(true); try { const r = await fetch(`/api/statistiche/corrieri?dal=${da}&al=${a}`); const j = await r.json(); setD(j.error ? null : j) } catch { setD(null) } setLoading(false) }
   useEffect(() => { carica() }, [])  // eslint-disable-line
-  function range(t: string) { const dd = new Date(); let s = new Date(); if (t === 'mese') s = new Date(dd.getFullYear(), dd.getMonth(), 1); else if (t === '7') s.setDate(dd.getDate() - 6); else if (t === '30') s.setDate(dd.getDate() - 29); else if (t === '90') s.setDate(dd.getDate() - 89); else if (t === 'anno') s = new Date(dd.getFullYear(), 0, 1); setDal(s.toISOString().slice(0, 10)); setAl(oggi()) }
+  function range(t: string) { const dd = new Date(); let s = new Date(), e = new Date(); if (t === 'oggi') { } else if (t === 'ieri') { s.setDate(dd.getDate() - 1); e.setDate(dd.getDate() - 1) } else if (t === 'mese') s = new Date(dd.getFullYear(), dd.getMonth(), 1); else if (t === 'mesescorso') { s = new Date(dd.getFullYear(), dd.getMonth() - 1, 1); e = new Date(dd.getFullYear(), dd.getMonth(), 0) } else if (t === '7') s.setDate(dd.getDate() - 6); else if (t === '30') s.setDate(dd.getDate() - 29); else if (t === '90') s.setDate(dd.getDate() - 89); else if (t === 'anno') s = new Date(dd.getFullYear(), 0, 1); const da = s.toISOString().slice(0, 10), a = e.toISOString().slice(0, 10); setDal(da); setAl(a); carica(da, a) }
   const k = d?.kpi
   return (
     <div>
       <h1 style={{ fontSize: '20px', fontWeight: 700, color: NERO, margin: '0 0 2px' }}>Performance Corrieri</h1>
-      <p style={{ fontSize: '13px', color: '#8a8a8a', margin: '0 0 16px' }}>Efficienza costi e consegna — tutta la tua rete.</p>
+      <p style={{ fontSize: '13px', color: '#8a8a8a', margin: '0 0 16px' }}>Efficienza costi e consegna — tutta la tua rete. Su periodi recenti il tasso di consegna è fisiologicamente basso: i pacchi sono ancora in transito.</p>
       <div style={card}>
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>{[['mese', 'Questo mese'], ['7', 'Ultimi 7 giorni'], ['30', 'Ultimi 30 giorni'], ['90', 'Ultimi 90 giorni'], ['anno', "Quest'anno"]].map(([t, l]) => <button key={t} onClick={() => range(t)} style={chip}>{l}</button>)}</div>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}><div><label style={lbl}>Data inizio</label><input type="date" value={dal} onChange={e => setDal(e.target.value)} style={inp} /></div><div><label style={lbl}>Data fine</label><input type="date" value={al} onChange={e => setAl(e.target.value)} style={inp} /></div><button onClick={carica} style={btnP}>Filtra</button></div>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>{[['oggi', 'Oggi'], ['ieri', 'Ieri'], ['mese', 'Questo mese'], ['mesescorso', 'Mese scorso'], ['7', 'Ultimi 7 gg'], ['30', 'Ultimi 30 gg'], ['90', 'Ultimi 90 gg'], ['anno', "Quest'anno"]].map(([t, l]) => <button key={t} onClick={() => range(t)} style={chip}>{l}</button>)}</div>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}><div><label style={lbl}>Data inizio</label><input type="date" value={dal} onChange={e => setDal(e.target.value)} style={inp} /></div><div><label style={lbl}>Data fine</label><input type="date" value={al} onChange={e => setAl(e.target.value)} style={inp} /></div><button onClick={() => carica()} style={btnP}>Filtra</button></div>
       </div>
       {loading ? <div style={{ padding: '40px', textAlign: 'center', color: '#999' }}>Caricamento…</div> : !d ? <div style={{ ...card, textAlign: 'center', color: '#999' }}>Nessun dato.</div> : (
         <>
@@ -38,9 +38,8 @@ export default function StatCorrieriPage() {
               <ResponsiveContainer width="100%" height="86%"><BarChart data={d.perCorriere} layout="vertical" margin={{ left: 20 }}><XAxis type="number" tick={{ fontSize: 11 }} /><YAxis type="category" dataKey="corriere" tick={{ fontSize: 10 }} width={130} /><Tooltip formatter={(v: any) => `${v} gg`} /><Bar dataKey="transito" fill={BLU} radius={[0, 4, 4, 0]} /></BarChart></ResponsiveContainer>
             </div>
           </div>
-          <div style={{ ...card, height: '340px' }}><div style={titolo}>Composizione costi per corriere</div>
-            <ResponsiveContainer width="100%" height="86%"><BarChart data={d.perCorriere} margin={{ left: 0 }}><XAxis dataKey="corriere" tick={{ fontSize: 10 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip formatter={(v: any) => eur(v)} /><Legend />
-              <Bar dataKey="pesoCarb" name="Peso & carburante" stackId="a" fill={ARANCIO} /><Bar dataKey="assicurazione" name="Assicurazione" stackId="a" fill={VERDE} /><Bar dataKey="contrassegno" name="Contrassegno" stackId="a" fill={BLU} /><Bar dataKey="servizi" name="Servizi" stackId="a" fill="#a855f7" /></BarChart></ResponsiveContainer>
+          <div style={{ ...card, height: '340px' }}><div style={titolo}>Costo totale per corriere</div>
+            <ResponsiveContainer width="100%" height="86%"><BarChart data={d.perCorriere} layout="vertical" margin={{ left: 20 }}><XAxis type="number" tick={{ fontSize: 11 }} /><YAxis type="category" dataKey="corriere" tick={{ fontSize: 10 }} width={130} /><Tooltip formatter={(v: any) => eur(v)} /><Bar dataKey="costo" name="Costo" fill={ARANCIO} radius={[0, 4, 4, 0]} /></BarChart></ResponsiveContainer>
           </div>
           <div style={card}><div style={titolo}>Dettaglio per corriere</div>
             <Tabella cols={['Vettore', 'Sped.', 'Costo', 'Costo medio', 'Costo / kg', 'Consegna', 'Resi', 'Transito']}
