@@ -155,10 +155,16 @@ export async function addebitaGiacenzaCatena(
  */
 export async function addebitaResoDaTracking(admin: any, spedizioneId: string): Promise<EsitoAddebito> {
   const { data: sp } = await admin.from('spedizioni')
-    .select('id,numero,cliente_id,master_id,corriere_id,giacenza_apertura_addebitata,corrieri(nome_contratto,master_id)')
+    .select('id,numero,cliente_id,master_id,corriere_id,giacenza_apertura_addebitata,corrieri(nome_contratto,master_id,tipo)')
     .eq('id', spedizioneId).maybeSingle()
   if (!sp) return { addebitato: false, importoCliente: 0 }
   const corr: any = (sp as any).corrieri
+  // CONDIVISIONE: una gamba-ponte (tipo='moovexpress') NON passa di qui. La catena vera non è l'albero:
+  // ogni gamba risalirebbe l'albero fino al master-hub (es. MULTIEXPRESS) e, con più gambe dello stesso
+  // pacco (stesso tracking), lo addebiterebbe PIÙ volte (doppio sul reso). Il reso del condiviso va fatto
+  // gamba-per-gamba sulla catena-fornitore (feature deferita); il costo reale resta sulla gamba dell'owner
+  // (corriere reale, non-moovexpress, che passa di qui normalmente). Qui si salta: niente doppio.
+  if (corr?.tipo === 'moovexpress') return { addebitato: false, importoCliente: 0 }
   return addebitaResoGiacenza(
     admin,
     sp as any,
@@ -294,7 +300,11 @@ type SpedGiac = { id: string; numero: string; cliente_id: string | null; master_
 export async function addebitaAperturaGiacenza(sped: SpedGiac): Promise<void> {
   if (sped.giacenza_apertura_addebitata) return
   const admin = createAdminSupabase()
-  const { data: corr } = await admin.from('corrieri').select('master_id,nome_contratto').eq('id', sped.corriere_id).maybeSingle()
+  const { data: corr } = await admin.from('corrieri').select('master_id,nome_contratto,tipo').eq('id', sped.corriere_id).maybeSingle()
+  // CONDIVISIONE: gamba-ponte (tipo='moovexpress') → salto. Le gambe dello stesso pacco risalgono tutte
+  // l'albero fino al master-hub e lo addebiterebbero più volte (doppio apertura giacenza). Il costo reale
+  // resta sulla gamba dell'owner (corriere reale); la giacenza del condiviso va gamba-per-gamba (feature deferita).
+  if ((corr as any)?.tipo === 'moovexpress') return
   if (sped.cliente_id) {
     const pr = await prezzoGiacenzaClienteListino(admin, sped.cliente_id, sped.corriere_id, 'riconsegna')
     if (pr.apertura > 0) {
@@ -318,7 +328,11 @@ export async function addebitaAperturaGiacenza(sped: SpedGiac): Promise<void> {
  */
 export async function addebitaServizioGiacenza(sped: SpedGiac, operazione: string, importoServizioCliente: number): Promise<EsitoAddebito> {
   const admin = createAdminSupabase()
-  const { data: corr } = await admin.from('corrieri').select('master_id,nome_contratto').eq('id', sped.corriere_id).maybeSingle()
+  const { data: corr } = await admin.from('corrieri').select('master_id,nome_contratto,tipo').eq('id', sped.corriere_id).maybeSingle()
+  // CONDIVISIONE: gamba-ponte (tipo='moovexpress') → salto (sia reso sia servizio): la catena-fornitore va
+  // fatta gamba-per-gamba (feature deferita), non con il tree-walk che addebiterebbe il master-hub più volte.
+  // Il costo reale resta sulla gamba dell'owner (corriere reale, che passa di qui normalmente).
+  if ((corr as any)?.tipo === 'moovexpress') return { addebitato: false, importoCliente: 0 }
 
   // IL RESO NON PASSA DA QUI: lo decide il database (fn_addebita_resi), cosi' costa uguale che
   // arrivi dallo svincolo giacenza o dalla scansione in sede, e cliente e catena si addebitano in

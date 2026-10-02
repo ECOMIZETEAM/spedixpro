@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
   if (!ids.length) return NextResponse.json({ error: 'Nessuna LDV nel reso' }, { status: 400 })
 
   const { data: speds } = await admin.from('spedizioni')
-    .select('id,numero,master_id,cliente_id,dest_provincia,dest_cap,dest_paese,dest_citta,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id,costo_totale,giacenza_reso_addebitato,corrieri(nome_contratto)')
+    .select('id,numero,master_id,cliente_id,dest_provincia,dest_cap,dest_paese,dest_citta,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id,costo_totale,giacenza_reso_addebitato,corrieri(nome_contratto,tipo)')
     .in('id', ids)
 
   // prima linea per ogni discendente
@@ -63,6 +63,10 @@ export async function POST(req: NextRequest) {
   let giaCaricate = 0
   for (const s of (speds || [])) {
     if (giaResi.has(s.id)) { giaCaricate++; continue }
+    // CONDIVISIONE: una gamba-ponte (tipo='moovexpress') si salta. Il reso del condiviso va fatto
+    // gamba-per-gamba sulla catena-fornitore (feature deferita), non con la topologia ad albero di qui;
+    // il costo reale resta sulla gamba dell'owner (corriere reale). Così niente addebito su livelli sbagliati.
+    if ((s as any).corrieri?.tipo === 'moovexpress') continue
     if (s.master_id === mio) {
       if (!s.cliente_id) continue
       if (!clientGroups[s.cliente_id]) clientGroups[s.cliente_id] = []

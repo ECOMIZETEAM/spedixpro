@@ -59,11 +59,16 @@ async function righeCatenaPropria(adminDb: any, mioMasterId: string, voci: any[]
   const cache = new Map<string, { masterId: string; corriereId: string }[]>()
   for (const v of (voci || [])) {
     const { data: sp } = await adminDb.from('spedizioni')
-      .select('id,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta,corrieri(nome_contratto,master_id)')
+      .select('id,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta,corrieri(nome_contratto,master_id,tipo)')
       .eq('id', v.id).maybeSingle()
     const nome = (sp as any)?.corrieri?.nome_contratto || null
     const owner = (sp as any)?.corrieri?.master_id || null
     if (!sp || !nome || !owner) continue
+    // CONDIVISIONE: una gamba-ponte (tipo='moovexpress') NON entra nel tree-walk. Le gambe dello stesso
+    // pacco risalirebbero tutte l'albero fino al master-hub e lo addebiterebbero più volte (doppio reso).
+    // Il reso del condiviso va fatto gamba-per-gamba sulla catena-fornitore (feature deferita); il costo
+    // reale resta sulla gamba dell'owner (corriere reale, non-moovexpress). Qui si salta.
+    if ((sp as any)?.corrieri?.tipo === 'moovexpress') continue
     if (!cache.has(nome)) cache.set(nome, await catenaContratto(adminDb, mioMasterId, owner, nome))
     for (const liv of cache.get(nome)!) {
       righe.push({
