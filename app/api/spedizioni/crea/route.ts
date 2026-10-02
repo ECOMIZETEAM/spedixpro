@@ -27,6 +27,7 @@ import { isZonaDisagiata } from '@/lib/zone-match'
 const zonaCopreDisagiata = (z: string | undefined | null): boolean => !!z && (isZonaDisagiata(z) || /isol/i.test(String(z)))
 import { motivoLimiteCollo } from '@/lib/limiti-collo'
 import { vedeLaRete } from '@/lib/perimetro'
+import { emailAlCorriere } from '@/lib/email-corriere'
 
 
 // La creazione parla con i corrieri: alcuni rispondono subito, altri si prendono qualche secondo
@@ -826,8 +827,12 @@ export async function POST(req: NextRequest) {
         //  - NOTA       → `notes` (SOLO la nota del cliente).
         // stessi colli del preventivo: coi tre lati sempre presenti (vedi sopra)
         label_format: 'PDF', packages: packagesSpedisci,
-        // EMAIL SCHERMO: al provider va SEMPRE l'email di servizio (mai quelle vere di mitt/dest).
-        shipFrom: { ...body.shipFrom, email: EMAIL_PER_CORRIERE }, shipTo: { ...body.shipTo, email: EMAIL_PER_CORRIERE },
+        // EMAIL SCHERMO: al provider va l'email di servizio, mai quelle vere di mittente e destinatario
+        // (le sue notifiche non devono arrivare al cliente finale). ECCEZIONE per contratto, decisa
+        // dall'owner e scritta in lib/email-corriere: su Crono BS gli avvisi del corriere DEVONO arrivare
+        // a mittente e destinatario, quindi li' passano le email vere (se mancano, resta quella di servizio).
+        shipFrom: { ...body.shipFrom, email: emailAlCorriere(corriereRecord.nome_contratto, body.shipFrom?.email) },
+        shipTo: { ...body.shipTo, email: emailAlCorriere(corriereRecord.nome_contratto, body.shipTo?.email) },
         notes: String(body.notes || '').trim() || undefined,
         // Il "×" del contenuto ("1× 3000BX") il fornitore lo stampa in etichetta come "1Ã—": scrive
         // UTF-8 dentro un PDF latin1. Glielo mandiamo gia' come "x" — sull'etichetta la legge il

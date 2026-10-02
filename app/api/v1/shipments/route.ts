@@ -9,6 +9,7 @@ import { erroreCorrierePulito } from '@/lib/errore-corriere'
 import { statoPiano, messaggioBlocco } from '@/lib/limite-piano'
 import { validaCittaCap } from '@/lib/valida-citta'
 import { capHaZonaSpeciale } from '@/lib/cap-speciali'
+import { emailAlCorriere } from '@/lib/email-corriere'
 import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation, spediamoproCreateShipment, spediamoproGetLabel,
   spediamoproWaitForTracking, kgToGrams, cmToMm, euroToCents, centsToEuro,
@@ -270,8 +271,12 @@ export async function POST(req: NextRequest) {
     if (!rate) return errore('Contratto non disponibile per questo corriere')
     const res = await fetch(`${baseUrl}/shipping/create`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
-      // EMAIL SCHERMO: al provider va SEMPRE l'email di servizio (mai quelle vere di mitt/dest).
-      body: JSON.stringify({ carrierCode: rate.carrierCode, contractCode: rate.contractCode, label_format: 'PDF', packages, shipFrom: { ...spedFrom, email: EMAIL_PER_CORRIERE }, shipTo: { ...spedTo, email: EMAIL_PER_CORRIERE }, notes: body.notes || '', insuranceValue: body.insuranceValue || 0, codValue: body.codValue || 0, accessoriServices: [] }),
+      // EMAIL SCHERMO: al provider va l'email di servizio, mai quelle vere (vedi lib/email-corriere).
+      // Su Crono BS fanno eccezione: gli avvisi del corriere devono arrivare a mittente e destinatario.
+      body: JSON.stringify({ carrierCode: rate.carrierCode, contractCode: rate.contractCode, label_format: 'PDF', packages,
+        shipFrom: { ...spedFrom, email: emailAlCorriere(corriere.nome_contratto, body.shipFrom?.email) },
+        shipTo: { ...spedTo, email: emailAlCorriere(corriere.nome_contratto, body.shipTo?.email) },
+        notes: body.notes || '', insuranceValue: body.insuranceValue || 0, codValue: body.codValue || 0, accessoriServices: [] }),
     })
     const text = await res.text(); try { raw = JSON.parse(text) } catch { raw = { error: text } }
     // erroreCorrierePulito: la risposta grezza del provider porta il suo nome e i suoi campi
