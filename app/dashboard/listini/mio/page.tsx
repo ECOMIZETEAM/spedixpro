@@ -30,6 +30,8 @@ const TABS: [string, string][] = [
   ['assicurazione', 'Assicurazione'],
   ['contrassegno', 'Contrassegni'],
   ['accessorio', 'Servizi accessori'],
+  // La sponda la addebita il motore e qui non c'era: stessa mancanza della vista cliente.
+  ['sponda', 'Sponda idraulica'],
   ['giacenza', 'Giacenze'],
   ['ritiro', 'Ritiro'],
 ]
@@ -133,28 +135,81 @@ export default function MioListinoPage() {
   )
 }
 
+// ATTENZIONE: questa tabella esiste IDENTICA in app/cliente/listino/page.tsx (le due viste sono
+// nate copiate, prima di questa modifica). Se tocchi una regola qui, toccala anche la'. Il posto
+// giusto sarebbe un componente solo: non l'ho estratto per non allargare un intervento che riguarda
+// i soldi, ma e' debito, e la prima volta che le due si contraddiranno sara' per questo.
 function SupplTable({ tipo, righe }: { tipo: string; righe: any[] }) {
   if (!righe.length) return <div style={{ fontSize: '12.5px', color: '#9ca3af', padding: '4px 0' }}>Nessuna voce impostata per questo corriere.</div>
+
+  // Sponda: la soglia e' solo il grilletto, poi il prezzo/kg vale su TUTTO il peso fatturato.
+  if (tipo === 'sponda') {
+    const r: any = righe[0] || {}
+    const soglia = Number(r.soglia_kg || 0)
+    const prezzoKg = Number(r.prezzo || 0)
+    if (!(soglia > 0 && prezzoKg > 0)) {
+      return <div style={{ fontSize: '12.5px', color: '#9ca3af', padding: '4px 0' }}>Nessuna sponda idraulica su questo corriere.</div>
+    }
+    const esempio = Math.round(soglia * 1.1)
+    const eurKg = (x: number) => '€ ' + Number(x).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+    return (
+      <div style={{ fontSize: '12.5px', color: '#1a1a1a' }}>
+        <div style={{ marginBottom: '8px' }}>
+          Dai <b>{soglia.toLocaleString('it-IT')} kg</b> in su: <b>{eurKg(prezzoKg)}/kg</b> su tutto il peso fatturato.
+        </div>
+        <div style={{ fontSize: '12px', color: '#666' }}>
+          La soglia è solo il punto da cui scatta: superata, il prezzo al chilo vale per l’intero peso,
+          non per i soli chili oltre la soglia. Esempio: {esempio.toLocaleString('it-IT')} kg
+          → {esempio.toLocaleString('it-IT')} × {eurKg(prezzoKg)} = <b>{eur(esempio * prezzoKg)}</b>.
+        </div>
+      </div>
+    )
+  }
+
   const scaglioni = tipo === 'assicurazione' || tipo === 'contrassegno'
+  const conBanda = righe.some((r: any) => r.peso_min != null || r.peso_max != null)
+  const suDifferenza = righe.some((r: any) => r.calcolo_su === 'differenza' && Number(r.perc || 0) > 0)
   return (
+    <>
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', minWidth: '360px' }}>
       <thead>
         <tr>
           <th style={thL}>{scaglioni ? 'Valore massimo €' : 'Voce'}</th>
+          {conBanda && <th style={th}>Peso</th>}
           <th style={th}>Prezzo fisso €</th>
-          <th style={th}>+% del valore</th>
+          <th style={th}>{suDifferenza ? '+% sull’eccedenza' : '+% del valore'}</th>
         </tr>
       </thead>
       <tbody>
         {righe.map((r: any, j: number) => (
           <tr key={j} style={{ background: j % 2 ? '#fcfcfc' : '#fff' }}>
             <td style={tdL}>{scaglioni ? (r.valore_max != null ? `fino a € ${Number(r.valore_max).toLocaleString('it-IT')}` : '—') : (r.nome || '—')}</td>
+            {conBanda && (
+              <td style={td}>
+                {r.peso_min == null && r.peso_max == null ? 'qualsiasi'
+                  : r.peso_max == null ? `oltre ${r.peso_min} kg`
+                  : r.peso_min == null ? `fino a ${r.peso_max} kg`
+                  : `${r.peso_min}–${r.peso_max} kg`}
+              </td>
+            )}
             <td style={td}>{eur(Number(r.prezzo || 0))}</td>
-            <td style={td}>{pct(Number(r.perc || 0))}</td>
+            <td style={td}>
+              {pct(Number(r.perc || 0))}
+              {Number(r.perc || 0) > 0 && r.calcolo_su === 'differenza' && (
+                <span style={{ fontSize: '10.5px', color: '#8a8a8a' }}> sull’eccedenza</span>
+              )}
+            </td>
           </tr>
         ))}
       </tbody>
     </table>
+    {suDifferenza && (
+      <div style={{ fontSize: '11.5px', color: '#666', marginTop: '8px' }}>
+        Dove indicato, la percentuale si calcola sulla parte che <b>supera</b> il primo scaglione, non
+        sull’intero importo.
+      </div>
+    )}
+    </>
   )
 }
 

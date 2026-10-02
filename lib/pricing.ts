@@ -562,7 +562,11 @@ export async function calcolaPrezzoListino(
 
   if (!miglior) return null
 
-  // Sponda: sopra soglia_kg, +prezzo_kg € per ogni kg oltre la soglia (sul peso fatturato).
+  // Sponda: la soglia e' solo il GRILLETTO. Superata, prezzo_kg si applica a TUTTO il peso
+  // fatturato, non ai soli chili in eccesso — e' la regola che l'editor del master dichiara a chi la
+  // imposta ("soglia 200kg, 0,03 €/kg → 220kg = +6,60"), ed e' quella che fa il conto qui sotto.
+  // Il commento diceva "per ogni kg oltre la soglia": su una spedizione a 100 kg con soglia 50
+  // sarebbe la meta', e chi leggeva questa riga per controllare una fattura trovava un'altra regola.
   let sponda = 0
   try {
     const { data: sp } = await supabase.from('listini_clienti_supplementi')

@@ -30,6 +30,10 @@ const TABS: [string, string][] = [
   ['assicurazione', 'Assicurazione'],
   ['contrassegno', 'Contrassegni'],
   ['accessorio', 'Servizi accessori'],
+  // LA SPONDA SI PAGA E NON SI VEDEVA. E' attiva su 607 listini a 0,04-0,10 €/kg, la addebita il
+  // motore dei prezzi, e qui non esisteva nessuna scheda in cui leggerla: la trovavi solo in
+  // fattura. Il master nel suo editor la vede da sempre.
+  ['sponda', 'Sponda idraulica'],
   ['giacenza', 'Giacenze'],
   ['ritiro', 'Ritiro'],
 ]
@@ -128,26 +132,82 @@ export default function ClienteListinoPage() {
 
 function SupplTable({ tipo, righe }: { tipo: string; righe: any[] }) {
   if (!righe.length) return <div style={{ fontSize: '12.5px', color: '#9ca3af', padding: '4px 0' }}>Nessuna voce impostata per questo corriere.</div>
+
+  // SPONDA: una riga sola, con una regola sua. La soglia e' solo il grilletto — superata, il prezzo
+  // al chilo si applica a TUTTO il peso fatturato, non ai soli chili in eccesso (e' la stessa frase
+  // che l'editor del master mostra a chi la imposta; il motore fa pesoFatturato * prezzo_kg).
+  if (tipo === 'sponda') {
+    const r: any = righe[0] || {}
+    const soglia = Number(r.soglia_kg || 0)
+    const prezzoKg = Number(r.prezzo || 0)
+    if (!(soglia > 0 && prezzoKg > 0)) {
+      return <div style={{ fontSize: '12.5px', color: '#9ca3af', padding: '4px 0' }}>Nessuna sponda idraulica su questo corriere.</div>
+    }
+    const esempio = Math.round(soglia * 1.1)
+    // Il prezzo al chilo e' sotto il centesimo (0,04-0,10 nei listini veri): con i due decimali di
+    // `eur` si leggerebbe "€ 0,04" per valori diversi fra loro. Qui si mostrano fino a quattro.
+    const eurKg = (x: number) => '€ ' + Number(x).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+    return (
+      <div style={{ fontSize: '12.5px', color: '#1a1a1a' }}>
+        <div style={{ marginBottom: '8px' }}>
+          Dai <b>{soglia.toLocaleString('it-IT')} kg</b> in su: <b>{eurKg(prezzoKg)}/kg</b> su tutto il peso fatturato.
+        </div>
+        <div style={{ fontSize: '12px', color: '#666' }}>
+          La soglia è solo il punto da cui scatta: superata, il prezzo al chilo vale per l’intero peso,
+          non per i soli chili oltre la soglia. Esempio: una spedizione da {esempio.toLocaleString('it-IT')} kg
+          paga {esempio.toLocaleString('it-IT')} × {eurKg(prezzoKg)} = <b>{eur(esempio * prezzoKg)}</b>.
+        </div>
+      </div>
+    )
+  }
+
   const scaglioni = tipo === 'assicurazione' || tipo === 'contrassegno'
+  // Si mostrano solo se qualche riga le usa, per non riempire di colonne vuote i listini semplici.
+  const conBanda = righe.some((r: any) => r.peso_min != null || r.peso_max != null)
+  const suDifferenza = righe.some((r: any) => r.calcolo_su === 'differenza' && Number(r.perc || 0) > 0)
   return (
+    <>
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', minWidth: '360px' }}>
       <thead>
         <tr>
           <th style={thL}>{scaglioni ? 'Valore massimo €' : 'Voce'}</th>
+          {conBanda && <th style={th}>Peso</th>}
           <th style={th}>Prezzo fisso €</th>
-          <th style={th}>+% del valore</th>
+          {/* L'intestazione dice ora su COSA cade la percentuale: con calcolo_su='differenza' il
+              motore la applica all'eccedenza oltre il primo scaglione, non al valore pieno. */}
+          <th style={th}>{suDifferenza ? '+% sull’eccedenza' : '+% del valore'}</th>
         </tr>
       </thead>
       <tbody>
         {righe.map((r: any, j: number) => (
           <tr key={j} style={{ background: j % 2 ? '#fcfcfc' : '#fff' }}>
             <td style={tdL}>{scaglioni ? (r.valore_max != null ? `fino a € ${Number(r.valore_max).toLocaleString('it-IT')}` : '—') : (r.nome || '—')}</td>
+            {conBanda && (
+              <td style={td}>
+                {r.peso_min == null && r.peso_max == null ? 'qualsiasi'
+                  : r.peso_max == null ? `oltre ${r.peso_min} kg`
+                  : r.peso_min == null ? `fino a ${r.peso_max} kg`
+                  : `${r.peso_min}–${r.peso_max} kg`}
+              </td>
+            )}
             <td style={td}>{eur(Number(r.prezzo || 0))}</td>
-            <td style={td}>{pct(Number(r.perc || 0))}</td>
+            <td style={td}>
+              {pct(Number(r.perc || 0))}
+              {Number(r.perc || 0) > 0 && r.calcolo_su === 'differenza' && (
+                <span style={{ fontSize: '10.5px', color: '#8a8a8a' }}> sull’eccedenza</span>
+              )}
+            </td>
           </tr>
         ))}
       </tbody>
     </table>
+    {suDifferenza && (
+      <div style={{ fontSize: '11.5px', color: '#666', marginTop: '8px' }}>
+        Dove indicato, la percentuale si calcola sulla parte che <b>supera</b> il primo scaglione, non
+        sull’intero importo.
+      </div>
+    )}
+    </>
   )
 }
 

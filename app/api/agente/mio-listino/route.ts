@@ -69,6 +69,12 @@ export async function GET() {
       prezzo: Number(d?.prezzo_fisso ?? d?.prezzo ?? (s as any).valore ?? 0),
       perc: Number(d?.perc ?? 0),
       calcolo_su: d?.calcolo_su || (s as any).tipo_calcolo || null,
+      // Come nella vista del cliente: la soglia della sponda e la banda di peso degli scaglioni.
+      // Senza, la sponda non si poteva mostrare e due scaglioni con bande diverse erano
+      // indistinguibili. `peso_min`/`peso_max` arrivano spesso come stringa vuota, non come null.
+      soglia_kg: d?.soglia_kg != null ? Number(d.soglia_kg) : null,
+      peso_min: d?.peso_min !== '' && d?.peso_min != null ? Number(d.peso_min) : null,
+      peso_max: d?.peso_max !== '' && d?.peso_max != null ? Number(d.peso_max) : null,
     }
     if (!supplPerCorr.has(cid)) supplPerCorr.set(cid, [])
     supplPerCorr.get(cid)!.push(row)

@@ -81,6 +81,19 @@ export async function GET() {
       valore_max: d?.valore_max != null ? Number(d.valore_max) : null,
       prezzo: Number(d?.prezzo_fisso ?? d?.prezzo ?? (s as any).valore ?? 0),
       perc: Number(d?.perc ?? 0),
+      // TRE DATI CHE IL CLIENTE PAGAVA SENZA VEDERLI.
+      // La tabella mostrava "valore massimo / prezzo fisso / +% del valore" e si fermava li', ma il
+      // motore usa anche questi — e cambiano la cifra, non il contorno:
+      //  - calcolo_su='differenza': la percentuale si applica all'ECCEDENZA oltre il primo scaglione,
+      //    non al valore pieno. Sono 386 righe contrassegno e 378 assicurazione, su centinaia di
+      //    listini: l'intestazione "+% del valore" diceva un'altra cosa.
+      //  - soglia_kg: la sponda idraulica, che non aveva nemmeno una scheda in cui comparire.
+      //  - peso_min/peso_max: due scaglioni con lo stesso valore massimo e bande di peso diverse
+      //    uscivano come due righe identiche con prezzi diversi, senza niente che le distinguesse.
+      calcolo_su: d?.calcolo_su ?? (s as any).tipo_calcolo ?? null,
+      soglia_kg: d?.soglia_kg != null ? Number(d.soglia_kg) : null,
+      peso_min: d?.peso_min !== '' && d?.peso_min != null ? Number(d.peso_min) : null,
+      peso_max: d?.peso_max !== '' && d?.peso_max != null ? Number(d.peso_max) : null,
     }
     if (!supplPerCorr.has(cid)) supplPerCorr.set(cid, [])
     supplPerCorr.get(cid)!.push(row)
