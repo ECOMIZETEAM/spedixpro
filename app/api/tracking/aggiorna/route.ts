@@ -5,6 +5,7 @@ import { spediamoproGetTracking, spediamoproSearchStocks, mapStatoSpediamopro, s
 import { rimborsaAnnulloSpedizione } from '@/lib/annullaSpedizione'
 import { spedisciTrackingStati, mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
 import { notificaCambioStato } from '@/lib/tracking-notifica'
+import { risolviChiaveDispatch } from '@/lib/condivisione-catena'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -450,9 +451,13 @@ export async function GET(req: NextRequest) {
         // api_key del contratto. Il venditore risponde con lo stato della SUA spedizione — GIA' nel nostro
         // vocabolario (lui l'ha già mappato dal corriere reale) — più la cronologia. A più salti la catena
         // resta fresca da sé, perché ogni livello interroga quello sotto e il cron gira su tutte le spedizioni.
-        if (!s.tracking_number || !cred?.api_key) return
+        // CONDIVISIONE (fuga credenziale): la chiave NON si legge dal ponte locale (può essere una copia
+        // colata o azzerata), ma si risale al PRIMO detentore-codice — lo stesso risolutore del dispatch in
+        // creazione. Così il tracking di un sub propagato dopo la copy-guard non resta cieco.
+        const credMv = await risolviChiaveDispatch(admin, s.master_id, corr.nome_contratto)
+        if (!s.tracking_number || !credMv?.api_key) return
         const { trackingMoovexpress } = await import('@/lib/moovexpress')
-        const { stato: mvStato, consegnata: mvConseg, eventi: mvEventi } = await trackingMoovexpress(cred, String(s.tracking_number))
+        const { stato: mvStato, consegnata: mvConseg, eventi: mvEventi } = await trackingMoovexpress(credMv as any, String(s.tracking_number))
         if (mvStato && prioritaStato(mvStato) > prioritaStato(nuovo)) nuovo = mvStato
         if (mvStato === 'in_giacenza') vistaGiacenza = true
         // ...ma se il pacco e' tornato al mittente, quella "consegnata" e' il RITORNO: vince il reso.

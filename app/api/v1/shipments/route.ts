@@ -4,6 +4,7 @@ import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
 import { registraMovimento, descrizioneSpedizione } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
+import { addebitaTreeCondivisione, verificaCreditoCondivisione, risolviChiaveDispatch } from '@/lib/condivisione-catena'
 import { inviaWebhook } from '@/lib/webhooks'
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
 import { statoPiano, messaggioBlocco } from '@/lib/limite-piano'
@@ -185,7 +186,17 @@ export async function POST(req: NextRequest) {
   // Non e' un caso di scuola: 279 spedizioni con contrassegno via API in trenta giorni.
   // Mancava anche CITTA', e senza quella i livelli superiori della catena prezzano il CAP condiviso
   // in modo diverso dal cliente — la stessa spedizione, due zone.
-  const catena = await verificaCreditoCatena(admin, {
+  // CONDIVISIONE: per un ponte (tipo='moovexpress') il gating è sui livelli-ALBERO (CODICE/OWNER li gata
+  // il dispatch del venditore). La vecchia verificaCreditoCatena qui bloccherebbe con "MoovExpress non ha
+  // listino" (sale l'albero fino alla piattaforma). Gli altri corrieri restano IDENTICI.
+  const catena = corriere.tipo === 'moovexpress'
+    ? await verificaCreditoCondivisione(admin, {
+        masterOriginante: masterId, nomeContratto: corriere.nome_contratto,
+        dest: { cap: body.shipTo.postalCode, provincia: body.shipTo.state, citta: body.shipTo.city, paese: body.shipTo.country || 'IT' },
+        packages, contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+        mittCap: (body.shipFrom.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom.state || '').toUpperCase().trim(), mittPaese: 'IT',
+      })
+    : await verificaCreditoCatena(admin, {
     masterDirettoId: masterId, corriereOwnerId: corriere.master_id,
     provincia: body.shipTo.state, packages, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT',
     citta: body.shipTo.city,
@@ -586,8 +597,10 @@ export async function POST(req: NextRequest) {
     // con la api_key ricevuta all'Accetta. Diversamente dai diretti, costoCorrente = W (il prezzo che il
     // venditore addebita): la cascata lo usa come base del ricarico. A più salti funziona da sé (il venditore
     // può essere a sua volta compratore). È questa stessa porta a essere chiamata dal venditore un livello sotto.
-    const credMv = { api_key: cred.api_key, base_url: cred.base_url }
-    if (!credMv.api_key) return errore('Contratto non configurato correttamente')
+    // CONDIVISIONE: chiave di dispatch dal PRIMO detentore-CODICE (via corrieri_condivisi), non dalla copia
+    // colata nel ponte dell'originante. Invariante sui dati veri per i ponti attivi; chiude la fuga.
+    const credMv = await risolviChiaveDispatch(admin, masterId, corriere.nome_contratto)
+    if (!credMv?.api_key) return errore('Contratto non configurato correttamente')
     try {
       const { creaSpedizioneMoovexpress, etichettaMoovexpress } = await import('@/lib/moovexpress')
       const risMv = await creaSpedizioneMoovexpress(credMv, {
@@ -700,7 +713,20 @@ export async function POST(req: NextRequest) {
   // Misurato: 28 spedizioni in perdita su 31, 156,97 euro in trenta giorni, tutte da questa porta.
   // Dal portale, nella identica situazione, 536 spedizioni e 2 sole in perdita per 0,62 euro.
   try {
-    await addebitaCatena(admin, { masterDirettoId: masterId, corriereOwnerId: corriere.master_id, costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city, corriereNome: corriere.nome_contratto, contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0), mittCap: (body.shipFrom.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom.state || '').toUpperCase().trim(), mittPaese: 'IT', numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: null })
+    if (corriere.tipo === 'moovexpress') {
+      // CONDIVISIONE: SOLO i livelli-ALBERO (il resto l'ha addebitato il dispatch del venditore, a ogni
+      // salto). NON addebitaCatena, che risalirebbe l'albero fino all'owner = doppio su credito_proprio.
+      await addebitaTreeCondivisione(admin, {
+        masterOriginante: masterId, nomeContratto: corriere.nome_contratto,
+        dest: { cap: body.shipTo.postalCode, provincia: body.shipTo.state, citta: body.shipTo.city, paese: body.shipTo.country || 'IT' },
+        packages,
+        contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+        mittCap: (body.shipFrom.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom.state || '').toUpperCase().trim(), mittPaese: 'IT',
+        numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: null,
+      })
+    } else {
+      await addebitaCatena(admin, { masterDirettoId: masterId, corriereOwnerId: corriere.master_id, costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city, corriereNome: corriere.nome_contratto, contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0), mittCap: (body.shipFrom.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom.state || '').toUpperCase().trim(), mittPaese: 'IT', numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: null })
+    }
   } catch (e) { console.error('API cascata:', e) }
 
   // Notifica ai webhook del cliente (best-effort: non blocca né fa fallire la creazione)

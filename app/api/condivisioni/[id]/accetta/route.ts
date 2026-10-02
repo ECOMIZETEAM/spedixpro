@@ -91,6 +91,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   // 3) Riga CORRIERE lato compratore (materializzata, attiva=false finché la Fase 4 non la accende).
+  //    proprio=FALSE: un PONTE non è mai detentore del contratto (lo è l'owner reale, tipo!='moovexpress').
+  //    È la regola del trigger `fn_ricalcola_corrieri_proprio` (vedi scripts/regola-contratto-proprio-condivisione.sql),
+  //    che comunque ricalcolerebbe il flag all'insert: metterlo a true qui sarebbe sovrascritto e intanto
+  //    farebbe risultare il ponte "detentore" in costruisciCatena (costo su credito_proprio + catena che si
+  //    ferma = doppio addebito col nuovo flusso). Il gating del credito NON si fa col flag: nel nuovo flusso
+  //    il compratore-CODICE è gatato/addebitato sul suo LEDGER (dispatch lato venditore) e il compratore-ALBERO
+  //    sul credito verso il padre (addebitaTreeCondivisione). L'adeguamento di verificaCreditoCatena per i
+  //    corrieri moovexpress fa parte dell'aggancio ②b (vedi CONDIVISIONE-CHECKLIST sez. F).
   const { data: corrNuovo, error: eC } = await admin.from('corrieri').insert({
     master_id: c.master_id, tipo: 'moovexpress',
     nome_contratto: contratto?.nome_contratto || 'Contratto partner',

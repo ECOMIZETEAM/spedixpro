@@ -4,6 +4,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { spediamoproGetTracking, mapStatoSpediamopro, spediamoproEventiIndicanoReso } from '@/lib/spediamopro'
 import { mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
 import { inviaWebhook } from '@/lib/webhooks'
+import { risolviChiaveDispatch } from '@/lib/condivisione-catena'
 
 // API pubblica MoovExpress — tracking di una spedizione tramite numero di tracking.
 // Auth: Authorization: Bearer <api_key>
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
   const admin = createAdminSupabase()
   // Solo spedizioni del cliente della API key (per tracking_number oppure numero LDV)
   const { data: sped } = await admin.from('spedizioni')
-    .select('id,stato,tracking_number,numero,corriere_id,dest_citta,dest_provincia,raw_response,cliente_id')
+    .select('id,stato,tracking_number,numero,corriere_id,dest_citta,dest_provincia,raw_response,cliente_id,master_id')
     .eq('cliente_id', ctx.clienteId)
     .or(`tracking_number.eq.${trk},numero.eq.${trk}`)
     .limit(1).maybeSingle()
@@ -106,9 +107,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
       // CONDIVISIONE CONTRATTI: si rilancia la domanda al VENDITORE (la sua `/api/v1/tracking`) con la
       // api_key del contratto. Lo stato torna già nel nostro vocabolario; a più salti ogni livello inoltra
       // a quello sotto. Se il venditore non risponde, il catch sotto ripiega sulla cronologia salvata.
-      if (!cred.api_key) return NextResponse.json({ ...base, events: await eventiSalvati() })
+      // CONDIVISIONE (fuga credenziale): la chiave NON si legge dal ponte locale (può essere una copia colata
+      // o azzerata), ma si risale al PRIMO detentore-codice — lo stesso risolutore del dispatch in creazione.
+      const credMv = await risolviChiaveDispatch(admin, sped.master_id, corriere.nome_contratto)
+      if (!credMv?.api_key) return NextResponse.json({ ...base, events: await eventiSalvati() })
       const { trackingMoovexpress } = await import('@/lib/moovexpress')
-      const tr = await trackingMoovexpress(cred as any, String(sped.tracking_number || sped.numero || ''))
+      const tr = await trackingMoovexpress(credMv as any, String(sped.tracking_number || sped.numero || ''))
       const events = (tr.eventi || []).map((e) => ({ timestamp: e.data, status: e.descrizione, location: e.luogo }))
       await persistiStato(tr.stato, events)
       return NextResponse.json({ ...base, status: tr.stato || sped.stato, events: events.length ? events : await eventiSalvati() })

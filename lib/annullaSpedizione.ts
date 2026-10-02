@@ -76,6 +76,16 @@ export async function annullaSpedizioneSulCorriere(
     return { ok: false, reason: 'questo corriere non consente l\'annullo automatico' }
   }
 
+  // CONDIVISIONE (corriere-ponte, tipo='moovexpress'): la spedizione VERA è dal VENDITORE (un'altra gamba
+  // della catena, es. il reale Poste dell'owner) e va fermata lato suo. Finché non c'è la propagazione
+  // dell'annullo al venditore, rispondere ok:true (come faceva il ritorno generico qui sotto) marcherebbe
+  // 'annullata' e RIMBORSEREBBE compratore + catena mentre il pacco continua a viaggiare dal corriere reale
+  // = rimborso a vuoto. Come easyparcel/DVA: ok:false → resta in coda, nessun rimborso a vuoto. La
+  // propagazione dell'annullo al venditore è un pezzo a parte (dispatch dell'annullo).
+  if (corr.tipo === 'moovexpress') {
+    return { ok: false, reason: 'l\'annullo di questo contratto va gestito dall\'assistenza' }
+  }
+
   // GLS diretto: prima della chiusura (CloseWorkDay) la spedizione NON è ancora trasmessa a GLS, quindi
   // annullarla lato Moove è già sicuro (GLS non passa a ritirarla). La si rimuove comunque da GLS con
   // DeleteSped (best-effort) per non lasciare numeri appesi. L'esito NON blocca il rimborso: il modello

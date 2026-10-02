@@ -122,7 +122,12 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
       // Nuovo: copio le impostazioni di contratto (senza mittente: lo imposta il sotto-master).
       const { data: nuovo } = await admin.from('corrieri').insert({
         master_id: subMasterId, nome_contratto: c.nome_contratto, tipo: c.tipo,
-        credenziali: c.credenziali ?? null, settings: settingsContratto(c.settings), attivo: c.attivo ?? true,
+        // FUGA CREDENZIALE: per i PONTI condivisi (tipo='moovexpress') NON si copia la api_key del padre —
+        // altrimenti il sub spedirebbe nei panni del nonno (cross-tenant). Il dispatch dei sub-albero parte
+        // dal primo detentore-CODICE (risolviChiaveDispatch), non dalla chiave del ponte: la copia è inutile
+        // e pericolosa, qui la si azzera. Per gli altri corrieri la copia resta identica.
+        credenziali: c.tipo === 'moovexpress' ? null : (c.credenziali ?? null),
+        settings: settingsContratto(c.settings), attivo: c.attivo ?? true,
       }).select('id').single()
       subId = nuovo?.id
       if (subId) mappaCorrMio.set(key, { id: subId, settings: settingsContratto(c.settings) })

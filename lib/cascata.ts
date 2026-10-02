@@ -48,7 +48,9 @@ export type LivelloCatena = {
 //
 // Il supplemento del fornitore si legge confrontando a pari peso e contratto le spedizioni con e
 // senza: GLS CASERTA 3,60→7,60 (+4,00), GLS Light e Standard Napoli +1,50.
-async function accessoriDelLivello(
+// ESPORTATA: la usa anche l'addebito della condivisione (lib/condivisione-catena.ts) per prezzare gli
+// accessori sui livelli-albero ESATTAMENTE come qui. Stessa funzione = niente due logiche che divergono.
+export async function accessoriDelLivello(
   adminDb: any,
   masterId: string,
   corriereId: string,

@@ -18,6 +18,11 @@ export async function sincronizzaCredenzialiAiDiscendenti(admin: any, ownerCorri
     .select('id,nome_contratto,master_id,credenziali,proprio').eq('id', ownerCorriereId).maybeSingle()
   // Propaga SOLO dal proprietario del contratto.
   if (!c || !(c as any).proprio) return 0
+  // MAI da un PONTE condiviso (tipo='moovexpress'): la sua api_key è la chiave del compratore verso il
+  // venditore, propagarla ai discendenti = la fuga cross-tenant (è così che la chiave di MULTI è finita su 4
+  // sub-master). Il ponte di MULTI è pure proprio=true: senza questa guardia la sync lo prenderebbe. Difesa
+  // sul TIPO, non sul flag `proprio` (inaffidabile sui ponti).
+  if ((c as any).tipo === 'moovexpress') return 0
   const nome = (c as any).nome_contratto
   const ownerMaster = (c as any).master_id
   const cred = (c as any).credenziali
@@ -26,9 +31,12 @@ export async function sincronizzaCredenzialiAiDiscendenti(admin: any, ownerCorri
   const discendenti = (await sottoAlberoMasterIds(admin, ownerMaster)).filter((m: string) => m !== ownerMaster)
   if (!discendenti.length) return 0
 
-  // Solo le COPIE RIVENDUTE (proprio=false) dello STESSO contratto: e' lo stesso account.
+  // Solo le COPIE RIVENDUTE (proprio=false) dello STESSO contratto: e' lo stesso account. ESCLUSI i PONTI
+  // condivisi (tipo='moovexpress'): hanno la LORO chiave (dal canale condivisione), non vanno sovrascritti con
+  // le credenziali del contratto reale (es. MULTI possiede "GLS Light Napoli" spedisci e nel sottoalbero c'è
+  // il ponte omonimo di SPEDIZIONI EXPRESS: un rinnovo lo spezzerebbe).
   const { data: copie } = await admin.from('corrieri')
-    .select('id').eq('nome_contratto', nome).eq('proprio', false).in('master_id', discendenti)
+    .select('id').eq('nome_contratto', nome).eq('proprio', false).neq('tipo', 'moovexpress').in('master_id', discendenti)
   if (!copie?.length) return 0
 
   const ids = copie.map((x: any) => x.id)

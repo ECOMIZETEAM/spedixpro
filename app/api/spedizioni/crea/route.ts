@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
+import { addebitaTreeCondivisione, verificaCreditoCondivisione, risolviChiaveDispatch } from '@/lib/condivisione-catena'
 import { calcolaPrezzoCorriere, calcolaPrezzoCorriereDettaglio, calcolaSupplementiCliente, fattoreVolumeCliente, fattoreVolumeCorriere, calcolaPesoFatturato, calcolaPrezzoListino } from '@/lib/pricing'
 import { isAgente, nomeAgente } from '@/lib/agente'
 import { pudoConfigDaVettore, spediamoproPudoCourier } from '@/lib/punti-poste'
@@ -663,7 +664,18 @@ export async function POST(req: NextRequest) {
     // adminCrea: la catena legge i listini d'acquisto dei master SOPRA, che col token di chi
   // chiama non sono (e non devono essere) leggibili. Con il client dell'utente questa verifica
   // vedeva solo una parte della catena.
-  const catenaCheck = await verificaCreditoCatena(adminCrea, {
+  // CONDIVISIONE: per un corriere-ponte (tipo='moovexpress') la catena NON è l'albero (il detentore sta
+  // sul ramo CODICE): la vecchia verificaCreditoCatena salirebbe l'albero fino alla piattaforma e bloccherebbe
+  // con "MoovExpress non ha listino". Si usa il gating condivisione: gata i livelli-ALBERO sul loro credito
+  // (stessa regola), lascia CODICE/OWNER al dispatch. Gli altri 10 corrieri restano IDENTICI.
+  const catenaCheck = corriereRecord.tipo === 'moovexpress'
+    ? await verificaCreditoCondivisione(adminCrea, {
+        masterOriginante: masterId, nomeContratto: corriereRecord.nome_contratto,
+        dest: { cap: body.shipTo.postalCode, provincia: body.shipTo.state, citta: body.shipTo.city, paese: body.shipTo.country || 'IT' },
+        packages, contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+        serviziAccessori, mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
+      })
+    : await verificaCreditoCatena(adminCrea, {
       masterDirettoId: masterId,
       corriereOwnerId: corriereRecord.master_id,
       provincia: body.shipTo.state,
@@ -3049,8 +3061,12 @@ export async function POST(req: NextRequest) {
     // sé: il venditore può essere a sua volta un compratore, e ogni livello addebita col W del livello sotto.
     // ATTENZIONE: niente annullo via API al volo (lo gestisce il ciclo di vita a webhook) → su insertError si
     // risponde col numero, come gli altri provider senza annullo.
-    const credMv = { api_key: cred.api_key, base_url: cred.base_url }
-    if (!credMv.api_key) {
+    // CONDIVISIONE: la chiave di dispatch NON è quella del ponte dell'ORIGINANTE (può essere una COPIA colata
+    // giù per l'albero = fuga credenziale), ma quella del PRIMO detentore-CODICE risalendo la catena
+    // (risolviChiaveDispatch, via corrieri_condivisi). Verificato sui dati: per i ponti attivi è la STESSA
+    // chiave di oggi, ma non dipende più dalla copia → le copie dei sub si possono bonificare.
+    const credMv = await risolviChiaveDispatch(adminCrea, masterId, corriereRecord.nome_contratto)
+    if (!credMv?.api_key) {
       await stornaPrenotazione()
       return NextResponse.json({ error: 'Contratto non configurato correttamente. Contatta l\'assistenza.' }, { status: 400 })
     }
@@ -3131,18 +3147,21 @@ export async function POST(req: NextRequest) {
 
       await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
       try {
-        await addebitaCatena(adminCrea, {
-          masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
-          // Costo ESTERNO (W tornato dal venditore), come Spedisci.online — non 0 come i diretti.
-          costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages,
-          cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
-          corriereNome: corriereRecord.nome_contratto,
+        // CONDIVISIONE: NON addebitaCatena (farebbe il DOPPIO su credito_proprio risalendo l'albero fino
+        // all'owner). addebitaTreeCondivisione addebita SOLO i livelli-ALBERO sul loro masters.credito; i
+        // livelli CODICE (ledger del venditore) e l'OWNER (credito_proprio) li ha già addebitati il DISPATCH
+        // (la /api/v1 del venditore, a ogni salto). Stesso motore prezzi della cascata (COD/assic/accessori/
+        // mittente/agevolazione/ripiego): vedi lib/condivisione-catena.ts.
+        await addebitaTreeCondivisione(adminCrea, {
+          masterOriginante: masterId, nomeContratto: corriereRecord.nome_contratto,
+          dest: { cap: body.shipTo.postalCode, provincia: body.shipTo.state, citta: body.shipTo.city, paese: body.shipTo.country || 'IT' },
+          packages,
           contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
           serviziAccessori,
           mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
           numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
         })
-      } catch (e) { console.error('[CREA][MOOVEXPRESS] cascata catena:', e) }
+      } catch (e) { console.error('[CREA][MOOVEXPRESS] addebito condivisione:', e) }
 
       after(async () => {
         try {
