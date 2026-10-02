@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { calderoneCache } from '@/lib/cache-memoria'
 
 // STATISTICHE — CLIENTI: analisi per cliente/entità sul CALDERONE (stessa base verificata della pagina
 // Report Guadagno). Il guadagno per cliente = incassato − speso, con la catena corretta: NON più il
@@ -28,15 +29,17 @@ export async function GET(req: NextRequest) {
   const prevDal = new Date(dalD.getTime() - 1 - durata)
 
   const admin = createAdminSupabase()
-  const [cur, prev] = await Promise.all([
-    admin.rpc('calderone_dettaglio_v2', { p_master: M, p_dal: dalD.toISOString(), p_al: alD.toISOString() }),
-    admin.rpc('calderone_dettaglio_v2', { p_master: M, p_dal: prevDal.toISOString(), p_al: prevAl.toISOString() }),
-  ])
-  if (cur.error) return NextResponse.json({ error: cur.error.message }, { status: 500 })
+  let curData: any, prevData: any
+  try {
+    [curData, prevData] = await Promise.all([
+      calderoneCache(admin, M, dalD.toISOString(), alD.toISOString()),
+      calderoneCache(admin, M, prevDal.toISOString(), prevAl.toISOString()),
+    ])
+  } catch (e: any) { return NextResponse.json({ error: e?.message || 'Errore' }, { status: 500 }) }
 
-  const clientiCur = ((cur.data as any)?.perCliente || []).filter((c: any) => !NON_CLIENTI.has(c.nome))
+  const clientiCur = (curData?.perCliente || []).filter((c: any) => !NON_CLIENTI.has(c.nome))
   const prevMap = new Map<string, number>()
-  for (const c of ((prev.data as any)?.perCliente || [])) if (!NON_CLIENTI.has(c.nome)) prevMap.set(c.nome, n(c.ricavi))
+  for (const c of (prevData?.perCliente || [])) if (!NON_CLIENTI.has(c.nome)) prevMap.set(c.nome, n(c.ricavi))
 
   const righe = clientiCur.map((c: any) => ({
     nome: c.nome, spedizioni: n(c.spedizioni), fatturato: r2(n(c.ricavi)), costo: r2(n(c.costi)),

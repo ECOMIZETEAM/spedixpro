@@ -1,6 +1,5 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import DateRangePicker from '@/app/components/DateRangePicker'
 
 const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -33,10 +32,7 @@ export default function StatFatturazionePage() {
             <Kpi label="Da fatturare (fattura mensile)" value={eur(k.daFatturare)} color={VERDE} />
             <Kpi label="Clienti / entità" value={String(k.clienti)} color={NERO} />
           </div>
-          <div style={{ ...card, height: '320px' }}><div style={titolo}>Fatturato per mese</div>
-            <ResponsiveContainer width="100%" height="86%"><BarChart data={d.serieMese}><XAxis dataKey="mese" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip formatter={(v: any) => eur(v)} /><Bar dataKey="fatturato" fill={ARANCIO} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
-          </div>
-          <div style={card}><div style={titolo}>Fatturato per cliente / entità</div>
+          <div style={card}><div style={titolo}>Fatturato per cliente / entità ({d.righe.length})</div>
             <Tabella cols={['Nome', 'Tipo', 'Fatturato']} rows={d.righe.map((r: any) => [r.nome, r.tipo, eur(r.fatturato)])} />
           </div>
         </>

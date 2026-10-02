@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { calderoneCache, conCache } from '@/lib/cache-memoria'
 
 // STATISTICHE — PROFITTO = IL CALDERONE del master, scomposto PER-VOCE, PER-CONTRATTO e PER-CLIENTE.
 // Stessa identica base del "Guadagno Totale" della dashboard (/api/reports/guadagno-totale), ma qui
@@ -39,13 +40,17 @@ export async function GET(req: NextRequest) {
     : new Date().toISOString()
 
   const admin = createAdminSupabase()
-  const [cal, cnt] = await Promise.all([
-    admin.rpc('calderone_dettaglio_v2', { p_master: M, p_dal: dalISO, p_al: alISO }),
-    admin.rpc('guadagno_num_spedizioni_v1', { p_master: M, p_dal: dalISO, p_al: alISO }),
-  ])
-  if (cal.error) return NextResponse.json({ error: cal.error.message }, { status: 500 })
-  const j: any = cal.data || {}
-  const nSped = n(cnt.data)
+  let j: any, nSped: number
+  try {
+    [j, nSped] = await Promise.all([
+      calderoneCache(admin, M, dalISO, alISO),
+      conCache(`numsp:${M}:${dalISO}:${alISO}`, 60_000, async () => {
+        const { data, error } = await admin.rpc('guadagno_num_spedizioni_v1', { p_master: M, p_dal: dalISO, p_al: alISO })
+        if (error) throw new Error(error.message)
+        return n(data)
+      }),
+    ])
+  } catch (e: any) { return NextResponse.json({ error: e?.message || 'Errore' }, { status: 500 }) }
 
   const ric = r2(n(j.totale?.ricavi)), cos = r2(n(j.totale?.costi)), gua = r2(ric - cos)
 

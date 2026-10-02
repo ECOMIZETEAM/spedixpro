@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds, contrattiPossedutiNomi } from '@/lib/rete-masters'
+import { conCache } from '@/lib/cache-memoria'
 
 // STATISTICHE — CORRIERI (sola lettura). Efficienza costi e SLA su TUTTO il sottoalbero del master.
 const n = (x: any) => Number(x || 0)
@@ -19,19 +20,23 @@ export async function GET(req: NextRequest) {
   const alISO = req.nextUrl.searchParams.get('al') ? new Date(req.nextUrl.searchParams.get('al') + 'T23:59:59Z').toISOString() : new Date().toISOString()
 
   const admin = createAdminSupabase()
-  const sub = await sottoAlberoMasterIds(admin, M)
-  // VISIBILITÀ PER CONTRATTO: le statistiche di rete contano SOLO i contratti che il master possiede
-  // (non i privati dei sub). p_contratti null se il master non ha contratti → nessun filtro.
-  const nomiPosseduti = await contrattiPossedutiNomi(admin, M)
   // Costo REALE dai movimenti (target = questo master), non dalla colonna nominale costo_spedizione:
-  // cosi' le RIPESATURE e le rettifiche entrano nel costo del corriere. Aggregazione in SQL (stat_corrieri_v2)
-  // — prima si caricavano in memoria tutte le spedizioni del sottoalbero. SECURITY DEFINER: chiamabile solo
-  // via service_role (revoke da anon/authenticated).
-  const { data: rows, error } = await admin.rpc('stat_corrieri_v2', {
-    p_sub: sub.length ? sub : [M], p_master: M, p_dal: dalISO, p_al: alISO,
-    p_contratti: nomiPosseduti.length ? nomiPosseduti : null,
-  })
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  // cosi' le RIPESATURE e le rettifiche entrano nel costo del corriere. Aggregazione in SQL (stat_corrieri_v2),
+  // SECURITY DEFINER. Cache 60s (vista read-only, pesante sul super-master). VISIBILITÀ PER CONTRATTO: solo
+  // i contratti posseduti dal master (non i privati dei sub); p_contratti null = nessun filtro.
+  let rows: any[]
+  try {
+    rows = await conCache(`corr:${M}:${dalISO}:${alISO}`, 60_000, async () => {
+      const sub = await sottoAlberoMasterIds(admin, M)
+      const nomiPosseduti = await contrattiPossedutiNomi(admin, M)
+      const { data, error } = await admin.rpc('stat_corrieri_v2', {
+        p_sub: sub.length ? sub : [M], p_master: M, p_dal: dalISO, p_al: alISO,
+        p_contratti: nomiPosseduti.length ? nomiPosseduti : null,
+      })
+      if (error) throw new Error(error.message)
+      return data || []
+    })
+  } catch (e: any) { return NextResponse.json({ error: e?.message || 'Errore' }, { status: 500 }) }
 
   let totSped = 0, totConsegnate = 0, totResi = 0, totCosto = 0, totPeso = 0, totTransito = 0, nTransito = 0
   const perCorriere = (rows || []).map((v: any) => {

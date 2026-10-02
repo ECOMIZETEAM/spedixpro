@@ -10,17 +10,17 @@ const primoMese = () => { const d = new Date(); return new Date(d.getFullYear(),
 export default function StatContrassegniPage() {
   const [dal, setDal] = useState(primoMese()); const [al, setAl] = useState(oggi())
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(true)
-  async function carica() { setLoading(true); try { const r = await fetch(`/api/statistiche/contrassegni?dal=${dal}&al=${al}`); const j = await r.json(); setD(j.error ? null : j) } catch { setD(null) } setLoading(false) }
+  async function carica(da = dal, a = al) { setLoading(true); try { const r = await fetch(`/api/statistiche/contrassegni?dal=${da}&al=${a}`); const j = await r.json(); setD(j.error ? null : j) } catch { setD(null) } setLoading(false) }
   useEffect(() => { carica() }, [])  // eslint-disable-line
-  function range(t: string) { const dd = new Date(); let s = new Date(); if (t === 'mese') s = new Date(dd.getFullYear(), dd.getMonth(), 1); else if (t === '7') s.setDate(dd.getDate() - 6); else if (t === '30') s.setDate(dd.getDate() - 29); else if (t === '90') s.setDate(dd.getDate() - 89); else if (t === 'anno') s = new Date(dd.getFullYear(), 0, 1); setDal(s.toISOString().slice(0, 10)); setAl(oggi()) }
+  function range(t: string) { const dd = new Date(); let s = new Date(), e = new Date(); if (t === 'oggi') { } else if (t === 'ieri') { s.setDate(dd.getDate() - 1); e.setDate(dd.getDate() - 1) } else if (t === 'mese') s = new Date(dd.getFullYear(), dd.getMonth(), 1); else if (t === 'mesescorso') { s = new Date(dd.getFullYear(), dd.getMonth() - 1, 1); e = new Date(dd.getFullYear(), dd.getMonth(), 0) } else if (t === '7') s.setDate(dd.getDate() - 6); else if (t === '30') s.setDate(dd.getDate() - 29); else if (t === '90') s.setDate(dd.getDate() - 89); else if (t === 'anno') s = new Date(dd.getFullYear(), 0, 1); const da = s.toISOString().slice(0, 10), a = e.toISOString().slice(0, 10); setDal(da); setAl(a); carica(da, a) }
   const k = d?.kpi
   return (
     <div>
       <h1 style={{ fontSize: '20px', fontWeight: 700, color: NERO, margin: '0 0 2px' }}>Contrassegni &amp; Rischio Finanziario</h1>
-      <p style={{ fontSize: '13px', color: '#8a8a8a', margin: '0 0 16px' }}>Incasso e rimessa contrassegni — tutta la tua rete.</p>
+      <p style={{ fontSize: '13px', color: '#8a8a8a', margin: '0 0 16px' }}>Totale, rimesso e in attesa sono del periodo scelto. <b>Esposizione, invecchiamento e "più vecchi" sono su TUTTO l'aperto a oggi</b> (il rischio vero non dipende dal periodo). Annullati esclusi.</p>
       <div style={card}>
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>{[['mese', 'Questo mese'], ['7', 'Ultimi 7 giorni'], ['30', 'Ultimi 30 giorni'], ['90', 'Ultimi 90 giorni'], ['anno', "Quest'anno"]].map(([t, l]) => <button key={t} onClick={() => range(t)} style={chip}>{l}</button>)}</div>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}><div><label style={lbl}>Data inizio</label><input type="date" value={dal} onChange={e => setDal(e.target.value)} style={inp} /></div><div><label style={lbl}>Data fine</label><input type="date" value={al} onChange={e => setAl(e.target.value)} style={inp} /></div><button onClick={carica} style={btnP}>Filtra</button></div>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>{[['oggi', 'Oggi'], ['ieri', 'Ieri'], ['mese', 'Questo mese'], ['mesescorso', 'Mese scorso'], ['7', 'Ultimi 7 gg'], ['30', 'Ultimi 30 gg'], ['90', 'Ultimi 90 gg'], ['anno', "Quest'anno"]].map(([t, l]) => <button key={t} onClick={() => range(t)} style={chip}>{l}</button>)}</div>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}><div><label style={lbl}>Data inizio</label><input type="date" value={dal} onChange={e => setDal(e.target.value)} style={inp} /></div><div><label style={lbl}>Data fine</label><input type="date" value={al} onChange={e => setAl(e.target.value)} style={inp} /></div><button onClick={() => carica()} style={btnP}>Filtra</button></div>
       </div>
       {loading ? <div style={{ padding: '40px', textAlign: 'center', color: '#999' }}>Caricamento…</div> : !d ? <div style={{ ...card, textAlign: 'center', color: '#999' }}>Nessun dato.</div> : (
         <>
@@ -28,13 +28,13 @@ export default function StatContrassegniPage() {
             <Kpi label="Totale contrassegni" value={eur(k.totale)} color={NERO} big />
             <Kpi label="Rimesso ai clienti" value={eur(k.rimesso)} color={VERDE} />
             <Kpi label="Rimessa in attesa" value={eur(k.inAttesa)} color={ARANCIO} />
-            <Kpi label="Esposizione a rischio" value={eur(k.esposizione)} color={ROSSO} />
+            <Kpi label="Esposizione a rischio (a oggi)" value={eur(k.esposizione)} color={ROSSO} />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }} className="grid2">
             <div style={{ ...card, height: '320px' }}><div style={titolo}>Importo contrassegni per corriere</div>
               <ResponsiveContainer width="100%" height="86%"><BarChart data={d.perCorriere} layout="vertical" margin={{ left: 20 }}><XAxis type="number" tick={{ fontSize: 11 }} /><YAxis type="category" dataKey="corriere" tick={{ fontSize: 10 }} width={130} /><Tooltip formatter={(v: any) => eur(v)} /><Bar dataKey="importo" fill={BLU} radius={[0, 4, 4, 0]} /></BarChart></ResponsiveContainer>
             </div>
-            <div style={{ ...card, height: '320px' }}><div style={titolo}>Invecchiamento contrassegni non rimessi</div>
+            <div style={{ ...card, height: '320px' }}><div style={titolo}>Invecchiamento non rimessi (tutto l'aperto a oggi)</div>
               <ResponsiveContainer width="100%" height="86%"><BarChart data={d.aging}><XAxis dataKey="fascia" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip formatter={(v: any) => eur(v)} /><Bar dataKey="importo" fill={ARANCIO} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
             </div>
           </div>

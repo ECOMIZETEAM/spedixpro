@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds, contrattiPossedutiNomi } from '@/lib/rete-masters'
+import { conCache } from '@/lib/cache-memoria'
 
 // STATISTICHE — CONTRASSEGNI & RISCHIO (sola lettura). Incasso e rimessa contrassegni sul sottoalbero.
 //
@@ -23,13 +24,18 @@ export async function GET(req: NextRequest) {
   const alISO = req.nextUrl.searchParams.get('al') ? new Date(req.nextUrl.searchParams.get('al') + 'T23:59:59Z').toISOString() : new Date().toISOString()
 
   const admin = createAdminSupabase()
-  const sub = await sottoAlberoMasterIds(admin, M)
   // VISIBILITÀ PER CONTRATTO: KPI/aging contrassegni SOLO sui contratti che il master possiede
-  // (non i privati dei sub). null se non ha contratti → nessun filtro.
-  const nomiPosseduti = await contrattiPossedutiNomi(admin, M)
-  const { data: d, error } = await admin.rpc('contrassegni_dettaglio_v2', { p_sub: sub.length ? sub : [M], p_dal: dalISO, p_al: alISO, p_contratti: nomiPosseduti.length ? nomiPosseduti : null })
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  const j: any = d || {}
+  // (non i privati dei sub). null se non ha contratti → nessun filtro. Cache 60s (vista read-only).
+  let j: any
+  try {
+    j = await conCache(`cod:${M}:${dalISO}:${alISO}`, 60_000, async () => {
+      const sub = await sottoAlberoMasterIds(admin, M)
+      const nomiPosseduti = await contrattiPossedutiNomi(admin, M)
+      const { data, error } = await admin.rpc('contrassegni_dettaglio_v2', { p_sub: sub.length ? sub : [M], p_dal: dalISO, p_al: alISO, p_contratti: nomiPosseduti.length ? nomiPosseduti : null })
+      if (error) throw new Error(error.message)
+      return data || {}
+    })
+  } catch (e: any) { return NextResponse.json({ error: e?.message || 'Errore' }, { status: 500 }) }
 
   const k: any = j.kpi || {}
   return NextResponse.json({
