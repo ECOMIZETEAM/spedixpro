@@ -434,11 +434,11 @@ const GLS_TT_ENDPOINT = 'https://infoweb.gls-italy.com/XML/get_xml_track.php'
 // Interroga il T&T GLS per numero spedizione e ritorna le stringhe di stato del tracking PRINCIPALE.
 export async function trackingGls(
   cred: CredenzialiGls, numeroNudo: string, timeoutMs = 15000
-): Promise<{ stati: string[]; raw: string }> {
+): Promise<{ stati: string[]; eventi: { data: string; descrizione: string; luogo: string }[]; raw: string }> {
   const sede = (cred.sigla_sede || '').trim()
   const contratto = (cred.codice_contratto || '').trim()
   const num = String(numeroNudo || '').replace(/\D/g, '')   // il T&T vuole il numero NUDO (solo cifre)
-  if (!sede || !num) return { stati: [], raw: '' }
+  if (!sede || !num) return { stati: [], eventi: [], raw: '' }
   const url = `${GLS_TT_ENDPOINT}?locpartenza=${encodeURIComponent(sede)}&NumSped=${encodeURIComponent(num)}` +
     (contratto ? `&CodCli=${encodeURIComponent(contratto)}` : '')
   const ctrl = new AbortController()
@@ -448,7 +448,7 @@ export async function trackingGls(
     const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/xml, text/xml' } })
     xml = await res.text()
   } catch {
-    return { stati: [], raw: '' }   // rete/timeout: nessun aggiornamento, si riprova al giro dopo
+    return { stati: [], eventi: [], raw: '' }   // rete/timeout: nessun aggiornamento, si riprova al giro dopo
   } finally {
     clearTimeout(t)
   }
@@ -468,7 +468,32 @@ export async function trackingGls(
     const s = m[1].replace(/\s+/g, ' ').trim()
     if (s) stati.push(s)
   }
-  return { stati, raw: xml.substring(0, 2000) }
+  // GLI EVENTI, dallo STESSO blocco da cui escono gli stati — quindi niente rientri e niente
+  // inoltri, per la ragione scritta qui sopra. Il T&T manda le tuple Data/Ora/Luogo/Stato in
+  // sequenza, SENZA un tag che racchiuda l'evento, dalla piu' recente: si chiude un evento quando
+  // arriva <Stato>, usando gli ultimi Data/Ora/Luogo visti, cosi' un campo mancante non sfasa
+  // tutta la lista come farebbe leggerli a gruppi di sei.
+  // Perche' esiste: il ramo GLS del cron leggeva gli stati e non salvava NIENTE in tracking_events.
+  // Era l'unico corriere senza cronologia (02/10/2026: 127 attive e tutte le consegnate, zero
+  // eventi in assoluto) e chi apriva il tracking di una GLS diretta trovava la pagina vuota.
+  const eventi: { data: string; descrizione: string; luogo: string }[] = []
+  let dataEv = '', oraEv = '', luogoEv = ''
+  const reTag = /<(Data|Ora|Luogo|Stato)>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/\1>/gi
+  let ev: RegExpExecArray | null
+  while ((ev = reTag.exec(blocco))) {
+    const nomeTag = ev[1].toLowerCase()
+    const val = ev[2].replace(/\s+/g, ' ').trim()
+    if (nomeTag === 'data') { dataEv = val; continue }
+    if (nomeTag === 'ora') { oraEv = val; continue }
+    if (nomeTag === 'luogo') { luogoEv = val; continue }
+    if (!val) continue
+    // GLS scrive l'anno con DUE cifre (02/10/26) e `istanteDaTesto` ne pretende quattro: senza
+    // allungarlo qui ogni evento GLS finirebbe scartato per data illeggibile. Si tocca solo il
+    // formato di GLS, non la funzione condivisa, che su due cifre non puo' indovinare il secolo.
+    const giorno = dataEv.replace(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2})$/, (_x, g, mm, aa) => `${g}/${mm}/20${aa}`)
+    eventi.push({ data: oraEv ? `${giorno} ${oraEv}` : giorno, descrizione: val, luogo: luogoEv })
+  }
+  return { stati, eventi, raw: xml.substring(0, 2000) }
 }
 
 // Mappa una stringa di stato del T&T GLS (evento <Stato>) allo stato interno. Sullo stampo di

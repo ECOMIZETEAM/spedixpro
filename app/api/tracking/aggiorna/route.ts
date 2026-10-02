@@ -241,7 +241,7 @@ export async function GET(req: NextRequest) {
         const numeroNudo = (s as any).gls_numero
         if (!numeroNudo || !cred?.sigla_sede) return
         const { trackingGls, mapStatoGls } = await import('@/lib/gls')
-        const { stati } = await trackingGls(cred, String(numeroNudo))
+        const { stati, eventi: glsEventi } = await trackingGls(cred, String(numeroNudo))
         for (const str of stati) {
           const m = mapStatoGls(str)
           if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
@@ -249,6 +249,27 @@ export async function GET(req: NextRequest) {
         if (stati.some((str) => mapStatoGls(str) === 'in_giacenza')) vistaGiacenza = true
         // Il reso vince sulla consegna del ritorno (vedi sotto, dove si applica lo stato).
         if (stati.some((str) => mapStatoGls(str) === 'reso_mittente')) nuovo = 'reso_mittente'
+
+        // CRONOLOGIA. Qui non si salvava NIENTE: lo stato avanzava e la pagina del tracking restava
+        // vuota. GLS diretto era l'unico corriere con ZERO eventi in assoluto (02/10/2026: 127
+        // attive e tutte le consegnate), e dall'XML del T&T gli eventi c'erano gia' — si leggeva
+        // solo <Stato> e si buttava via data e luogo. Stesse regole degli altri rami.
+        try {
+          const cambiatoGls = nuovo !== s.stato
+          if (cambiatoGls || budgetCronologie > 0) {
+            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(glsEventi, {
+              data: ['data'],
+              descrizione: ['descrizione'],
+              luogo: ['luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length) {
+              if (!cambiatoGls) budgetCronologie--
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][GLS][EVENTI]', s.numero, e?.message) }
 
       } else if (tipo === 'brt') {
         // BRT DIRETTO: lo stato di consegna si legge da GET /tracking/parcelID/{parcelID} (barcode 18
