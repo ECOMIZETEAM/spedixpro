@@ -84,8 +84,23 @@ export function trovaRateContratto(rates: any[], cred: any): any | null {
 //   - BRT "RESO MITTENTE", senza "al": 4 spedizioni via Spedisci mai passate a reso. In tutto lo
 //     storico la frase compare solo cosi', come evento a se'.
 // Verificato sulla stessa base: le due aggiunte prendono queste due frasi e nient'altro.
+// L'ANNUNCIO NON E' IL FATTO. UPS racconta in anticipo quello che farà — "Il pacco verrà restituito
+// al mittente", "potrebbe essere rispedito al mittente", "è stato rifiutato dal destinatario e sarà
+// restituito al mittente" — e un futuro o un condizionale finiva letto come ritorno già avvenuto.
+// Il pacco a quel punto è ancora lì: marcarlo reso vuol dire addebitare il nolo del ritorno a tutta
+// la catena per un viaggio che non c'è stato. Misurato il 03/10/2026 su tutto lo storico: 12
+// spedizioni con un annuncio di questo tipo, e **5 sono state poi CONSEGNATE** (Ancona, Farsta in
+// Svezia, ...). Addebiti a torto non ne sono partiti per un caso fortunato — una volta consegnata,
+// il cron esclude gli stati terminali e non la riguarda più — non perché qualcosa lo impedisse.
+// Il reso vero arriva dopo, e lo dicono le frasi al passato che restano qui sotto ("in restituzione
+// al mittente", "Resa al mittente", "Abbiamo restituito la spedizione al mittente", "RESO MITTENTE").
+// Verificato sulle 131 frasi distinte dello storico: cambiano SOLO queste 10 (14 eventi), nessun
+// reso compiuto perde il riconoscimento.
+const ANNUNCIO_DI_RESO = /(verr[àa]|verranno|sar[àa]|saranno|potrebbe|potrebbero|potr[àa]|potranno|stiamo per|restituiremo|rispediremo|rinvieremo|in corso di restituzione)[^.;]{0,45}(res[oa]|ritorn\w*|rientr\w*|restitu\w*|respint\w*|rispedit\w*|rinvi\w*)\w*[^.;]{0,25} al mittente/
+
 export function testoIndicaReso(testo: string): boolean {
   const s = (testo || '').toLowerCase()
+  if (ANNUNCIO_DI_RESO.test(s)) return false
   return /(res[oa]|ritorn\w*|rientr\w*|restitu\w*|respint\w*|rispedit\w*|consegn\w*|rinvi\w*) al mittente/.test(s)
     || /(restituit|respint|rispedit|ritornat|rinviat)[oaie] (la spedizione|il pacco|la merce|il collo|i colli) al mittente/.test(s)
     || /\bres[oa] mittente\b/.test(s)
