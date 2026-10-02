@@ -1,4 +1,5 @@
 import { createServerSupabase } from '@/lib/supabase'
+import { gestisceLaRete } from '@/lib/ruoli'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -81,7 +82,9 @@ export async function POST(req: Request) {
   // Ruolo + contesto (best-effort: non deve mai far fallire la chat)
   const { data: utente } = await supabase
     .from('utenti')
-    .select('master_id,cliente_id,masters(nome)')
+    // `ruolo` serve per forza: senza, "e' della rete?" si riduceva a "ha un master_id", che e' vero
+    // anche per clienti, agenti e autisti (vedi il ramo qui sotto).
+    .select('ruolo,master_id,cliente_id,masters(nome)')
     .eq('id', user.id)
     .single()
 
@@ -100,7 +103,15 @@ export async function POST(req: Request) {
         `Spedizioni totali: ${k.spedizioniTotali ?? 'n/d'}; consegnate questo mese: ${k.consegnateMese ?? 'n/d'}; in transito: ${k.inTransito ?? 'n/d'}; in giacenza: ${k.inGiacenza ?? 'n/d'}`,
         `Contrassegni da incassare: € ${Number(k.codDaIncassare || 0).toFixed(2)}`,
       ].join('\n')
-    } else if (utente?.master_id) {
+      // `master_id` NON E' UN PERMESSO (lib/ruoli, lib/perimetro): ce l'hanno anche i 1.700 utenti
+      // cliente, i 34 agenti e i 3 autisti. Con `else if (utente?.master_id)` finivano tutti nel
+      // ramo "master" e si portavano nel contesto del modello i numeri della RETE: clienti,
+      // sotto-master, spedizioni di tutti e i contrassegni da rimettere IN EURO. Il prompt qui
+      // sopra vieta al modello di raccontare la struttura della rete, ma il contesto gliela
+      // consegnava comunque — e l'agente e' un rivenditore esterno, non staff.
+      // Chi non governa la rete resta senza contesto: Moovy risponde lo stesso, solo senza i suoi
+      // dati. Meglio di un assistente che li espone a chi non li deve vedere.
+    } else if (gestisceLaRete(utente) && utente?.master_id) {
       ruolo = 'master'
       const nome = (utente as any)?.masters?.nome || 'n/d'
       const { createAdminSupabase } = await import('@/lib/supabase-admin')

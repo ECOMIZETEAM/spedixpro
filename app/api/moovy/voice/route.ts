@@ -1,5 +1,6 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { gestisceLaRete } from '@/lib/ruoli'
 
 export const runtime = 'nodejs'
 export const maxDuration = 45
@@ -32,7 +33,12 @@ export async function POST(req: Request) {
   const ruolo = (u?.ruolo || '').toLowerCase()
   const isCliente = ruolo === 'cliente' || !!u?.cliente_id
   const isAgente = ruolo === 'agente'
-  const isMaster = !isCliente && !isAgente
+  // CHI COMANDA LA RETE LO DICE lib/ruoli, NON una sottrazione.
+  // Era `!isCliente && !isAgente`, e quel "tutti gli altri" comprendeva l'AUTISTA: diventava un
+  // master, e con "elimina la spedizione <LDV>" arrivava a /api/spedizioni/elimina, che storna il
+  // credito di tutta la catena. Gli autisti in produzione sono 3. La regola e' la stessa di
+  // sempre (master/admin/operatore) ed e' scritta in un posto solo.
+  const isMaster = gestisceLaRete(u)
 
   const body = await req.json().catch(() => ({} as any))
   const messages: any[] = (Array.isArray(body?.messages) ? body.messages : [])

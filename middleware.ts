@@ -16,6 +16,16 @@ const SCRITTURE_AGENTE = [
   '/api/auth/',                       // uscita/sessione
 ]
 
+// SCRITTURE CONSENTITE ALL'AUTISTA: la sua schermata e la sessione, e basta.
+// `/api/autista` serve il giro di consegne e pretende da se' `ruolo === 'autista'`. Fuori da qui
+// l'autista non ha niente da scrivere: non gestisce listini, contrassegni, distinte ne' spedizioni.
+// Moovy NON e' in questa lista di proposito: e' da li' che si arrivava a cancellare una spedizione
+// (lo strumento `elimina_spedizione`), e il suo controllo di ruolo tratta l'autista come un master.
+const SCRITTURE_AUTISTA = [
+  '/api/autista',
+  '/api/auth/',
+]
+
 // CHI NON PAGA PUO' FARE UNA COSA SOLA: PAGARE.
 //
 // Nessuna eccezione, nemmeno per le operazioni che sembrano riguardare i suoi clienti: se un
@@ -86,6 +96,22 @@ export async function middleware(req: NextRequest) {
     }
     if ((u?.ruolo || '').toLowerCase() === 'agente' && !consentita) {
       return NextResponse.json({ error: 'Operazione non consentita: gli agenti hanno accesso in sola lettura.' }, { status: 403 })
+    }
+    // L'AUTISTA, STESSO DISCORSO DELL'AGENTE — e per lo stesso motivo.
+    //
+    // Delle pagine l'autista era gia' fuori (piu' sotto viene rimbalzato su /autista), ma le API no:
+    // il divieto qui sopra guarda solo 'agente', e le rotte che si difendono da sole guardano
+    // `bloccaAgente`, che l'autista non lo nomina. Con la sua sessione e una sola chiamata passava:
+    // 17 rotte avevano quella forma, fra cui /api/spedizioni/elimina, dove l'autorizzazione e'
+    // `sped.master_id === utente.master_id` — vera per lui. Cancellare una spedizione STORNA il
+    // credito di tutta la catena (lib/annullaSpedizione), quindi chi guida poteva muovere i soldi
+    // della rete. In produzione gli autisti sono 3: non era un buco teorico.
+    // Il suo lavoro passa da UNA rotta sola, /api/autista, che pretende ruolo==='autista' e non
+    // mostra ne' prezzi ne' conti; le scansioni del circuito interno le fa il deposito da
+    // /dashboard/tracking, dove lui non entra. Quindi la lista e' corta davvero.
+    if ((u?.ruolo || '').toLowerCase() === 'autista'
+        && !SCRITTURE_AUTISTA.some(p => pathname.startsWith(p))) {
+      return NextResponse.json({ error: 'Operazione non consentita per il profilo autista.' }, { status: 403 })
     }
 
     // ACCOUNT DEMO: prova a tempo, tutto simulato. Due regole, prima del canone:

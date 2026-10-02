@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
+import { gestisceLaRete } from '@/lib/ruoli'
 import { annullaSpedizioneSulCorriere, rimborsaAnnulloSpedizione, trovaOwnerContratto } from '@/lib/annullaSpedizione'
 
 // Cancellazione LDV:
@@ -37,6 +38,14 @@ export async function DELETE(req: NextRequest) {
     if (await clienteNonPuoCancellare(admin, sped.cliente_id))
       return NextResponse.json({ error: MSG_CANCELLAZIONE_VIETATA }, { status: 403 })
   } else {
+    // SECONDA SERRATURA, non un doppione. Il divieto per l'autista sta nel middleware, davanti a
+    // tutte le rotte; qui si ripete perche' questa rotta la si raggiunge anche da dentro il server
+    // (/api/moovy/esegui la chiama con fetch), e per quella strada non e' detto che il middleware
+    // passi. Senza, bastava `sped.master_id === utente.master_id` — vero anche per chi guida — e la
+    // cancellazione storna il credito di TUTTA la catena (rimborsaAnnulloSpedizione).
+    if (!gestisceLaRete(utente)) {
+      return NextResponse.json({ error: 'Operazione non consentita per il tuo profilo.' }, { status: 403 })
+    }
     let autorizzato = sped.master_id === utente?.master_id
     if (!autorizzato && utente?.master_id) {
       let cur: string | null = sped.master_id
