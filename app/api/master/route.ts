@@ -8,7 +8,14 @@ const COLONNE = [
   'iban','banca','intestatario',
   'indirizzo_fatturazione','cap_fatturazione','citta_fatturazione','provincia_fatturazione',
   'indirizzo_operativo','cap_operativo','citta_operativo','provincia_operativo','telefono_operativo',
-  'logo_url','tipo_contratto',
+  'logo_url',
+  // NIENTE 'tipo_contratto' QUI: le condizioni di pagamento (credito a scalare / fattura mensile) le decide
+  // il master SOPRA, dalla scheda del collegato — non chi le subisce. Questa e' la rotta con cui un master
+  // salva il PROPRIO profilo, e la pagina Impostazioni rispedisce tutta la riga che aveva caricato: bastava
+  // salvare il telefono per riscrivere anche il tipo contratto col valore che la pagina aveva in memoria.
+  // Caso vero segnalato il 2/10/2026 (Ecomize Solution): metteva VTS EXPRESS a credito a scalare e "dopo un
+  // po'" tornava a fattura mensile — cioe' quando VTS salvava le sue impostazioni — e senza blocco del
+  // credito il conto andava sotto (-664,25). Protetto anche nel database (fn_master_campi_di_sistema).
   'colore_primario','colore_secondario',
   'impostazioni',   // JSON impostazioni del master (es. formato_stampa etichette)
 ]
