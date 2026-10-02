@@ -1,5 +1,6 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { redirect } from 'next/navigation'
+import { fattoreVolumeCorriere } from '@/lib/pricing'
 import ListinoEditor from './ListinoEditor'
 
 export default async function ModificaListinoPage({
@@ -90,6 +91,14 @@ export default async function ModificaListinoPage({
     }
   }
 
+  // IL MIO DIVISORE DI COSTO per questo corriere: usa la STESSA funzione del motore prezzi
+  // (fattoreVolumeCorriere: override per-corriere → default del listino proprietario → eredità dalla
+  // catena → 5000 solo come ultimissimo ripiego), così l'avviso combacia col calcolo vero, senza
+  // reinventare la risoluzione (che sbagliava i casi senza override e coi più listini).
+  const fattoreCostoMaster = (corriereSelezionato?.id && utente?.master_id)
+    ? await fattoreVolumeCorriere(supabase, utente.master_id, corriereSelezionato.id)
+    : 5000
+
   return (
     <>
     {preventivoId && (
@@ -104,6 +113,7 @@ export default async function ModificaListinoPage({
       corrieriDisponibili={corrieriDisponibiliDaAggiungere||[]}
       corriereSelezionatoId={corriereSelezionato?.id||''}
       fattoreCorriere={fattoreCorriere}
+      fattoreCostoMaster={fattoreCostoMaster}
       zone={zone||[]}
       fasceEsistenti={fasceEsistenti||[]}
       supplementiEsistenti={supplementiEsistenti||[]}

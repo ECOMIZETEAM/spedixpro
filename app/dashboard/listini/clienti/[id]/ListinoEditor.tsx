@@ -40,6 +40,8 @@ interface Props {
   supplementiEsistenti?: any[]
   corrieriDisponibili?: Corriere[]
   fattoreCorriere?: number
+  // Il divisore peso/volume del MIO COSTO su questo corriere: per segnalare se vendo il volume sotto costo.
+  fattoreCostoMaster?: number
   // Il MIO costo per questo corriere, chiave "tipo|peso|zona_id". Serve a segnalare a colpo
   // d'occhio le caselle in cui sto vendendo SOTTO COSTO: in creazione spedizione il blocco
   // c'e' gia', ma sul listino di un sotto-master non avvisava nulla e ce ne si accorgeva mesi
@@ -130,7 +132,7 @@ function buildAccessoriDa(supplementi: any[], fallback: {nome:string;prezzo:numb
   })
 }
 
-export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere, costiMaster }: Props) {
+export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere, fattoreCostoMaster, costiMaster }: Props) {
   const isCorriere = tipoListino === 'corriere'
   const apiAggancio = isCorriere ? '/api/listini/corriere-corrieri' : '/api/listini/cliente-corrieri'
   const basePagina = isCorriere ? '/dashboard/listini/corrieri' : '/dashboard/listini/clienti'
@@ -454,6 +456,22 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
           {saving?'Salvo...':'Salva'}
         </button>
       </div>
+
+      {/* AVVISO VOLUME SOTTO/SOPRA COSTO: il divisore del cliente confrontato col MIO COSTO su questo
+          corriere. Divisore più ALTO = volume più piccolo = più economico → se supera il costo, sui
+          pacchi voluminosi si vende sotto costo. Solo avviso visivo: non cambia nessun calcolo. */}
+      {!isCorriere && !soloPesoReale && fattoreCostoMaster != null && fattoreCostoMaster > 0 && (() => {
+        const dCli = Number(fattore), dCosto = Number(fattoreCostoMaster)
+        if (!(dCli > 0) || Math.abs(dCli - dCosto) < 0.5) return null
+        const sotto = dCli > dCosto
+        return (
+          <div style={{margin:'0 18px 14px', background: sotto?'#fef2f2':'#fffbeb', border:`1px solid ${sotto?'#fecaca':'#fde68a'}`, borderRadius:'8px', padding:'9px 13px', fontSize:'12.5px', color: sotto?'#b91c1c':'#92400e'}}>
+            {sotto
+              ? <>⚠️ <b>Il tuo costo è diviso {dCosto}</b> — a <b>{dCli}</b> il cliente paga MENO volume di quanto ti costa: sui pacchi voluminosi <b>vendi sotto costo</b>. Puoi salvare, ma ci rimetti.</>
+              : <>Il tuo costo è diviso <b>{dCosto}</b> — a <b>{dCli}</b> vendi sopra costo sul volume (ci guadagni).</>}
+          </div>
+        )
+      })()}
 
       {/* Allinea al pavimento (solo listini cliente): compare se questo corriere ha fasce sotto minimo */}
       {!isCorriere && corriereId && (
