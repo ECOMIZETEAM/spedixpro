@@ -72,7 +72,13 @@ export async function abilitaContrattoCondiviso(
   if (!fasceCosto?.length) return { ok: false, reason: `Nessun prezzo di costo per "${corr.nome_contratto}" da cui partire.` }
   const { data: suppCosto } = await admin.from('listini_corrieri_supplementi')
     .select('tipo,descrizione,valore,tipo_calcolo,nome').in('listino_id', costoIds).eq('corriere_id', corriereId)
-  const rigaCosto = ((listiniCosto || []).find((l: any) => l.corriere_id === corriereId) || (listiniCosto || [])[0]) as any
+  // Il fattore volume si prende SOLO dalla riga del venditore per QUESTO corriere. MAI un ripiego su
+  // un'altra riga: il vecchio "|| listiniCosto[0]" pescava il divisore di un CONTRATTO A CASO (es. il
+  // 3333 di una GLS LIGHT finito su Poste Express M, il 6666 di BRT PF su PDB-S) e la propagazione a
+  // cascata lo spargeva su tutta la rete a tutti i livelli — incidente del 1-2/10/2026, 293 righe
+  // corrotte. Se il venditore non ha la riga per questo corriere, fattore = null → eredita il default,
+  // mai il divisore di un altro contratto.
+  const rigaCosto = (listiniCosto || []).find((l: any) => l.corriere_id === corriereId) as any
   const fattore = rigaCosto?.fattore_volume ?? null
 
   const { data: linkC } = await admin.from('listini_clienti_corrieri')
