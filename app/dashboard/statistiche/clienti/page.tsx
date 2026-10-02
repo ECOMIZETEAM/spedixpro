@@ -11,9 +11,9 @@ const primoMese = () => { const d = new Date(); return new Date(d.getFullYear(),
 export default function StatClientiPage() {
   const [dal, setDal] = useState(primoMese()); const [al, setAl] = useState(oggi())
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(true)
-  async function carica() { setLoading(true); try { const r = await fetch(`/api/statistiche/clienti?dal=${dal}&al=${al}`); const j = await r.json(); setD(j.error ? null : j) } catch { setD(null) } setLoading(false) }
+  async function carica(da = dal, a = al) { setLoading(true); try { const r = await fetch(`/api/statistiche/clienti?dal=${da}&al=${a}`); const j = await r.json(); setD(j.error ? null : j) } catch { setD(null) } setLoading(false) }
   useEffect(() => { carica() }, [])  // eslint-disable-line
-  function range(t: string) { const dd = new Date(); let s = new Date(); if (t === 'mese') s = new Date(dd.getFullYear(), dd.getMonth(), 1); else if (t === '7') s.setDate(dd.getDate() - 6); else if (t === '30') s.setDate(dd.getDate() - 29); else if (t === '90') s.setDate(dd.getDate() - 89); else if (t === 'anno') s = new Date(dd.getFullYear(), 0, 1); setDal(s.toISOString().slice(0, 10)); setAl(oggi()) }
+  function range(t: string) { const dd = new Date(); let s = new Date(), e = new Date(); if (t === 'oggi') { } else if (t === 'ieri') { s.setDate(dd.getDate() - 1); e.setDate(dd.getDate() - 1) } else if (t === 'mese') s = new Date(dd.getFullYear(), dd.getMonth(), 1); else if (t === 'mesescorso') { s = new Date(dd.getFullYear(), dd.getMonth() - 1, 1); e = new Date(dd.getFullYear(), dd.getMonth(), 0) } else if (t === '7') s.setDate(dd.getDate() - 6); else if (t === '30') s.setDate(dd.getDate() - 29); else if (t === '90') s.setDate(dd.getDate() - 89); else if (t === 'anno') s = new Date(dd.getFullYear(), 0, 1); const da = s.toISOString().slice(0, 10), a = e.toISOString().slice(0, 10); setDal(da); setAl(a); carica(da, a) }
   const k = d?.kpi
 
   return (
@@ -22,11 +22,11 @@ export default function StatClientiPage() {
       <p style={{ fontSize: '13px', color: '#8a8a8a', margin: '0 0 16px' }}>Fatturato, crescita e abbandono — solo i tuoi clienti e la tua rete diretta.</p>
       <div style={card}>
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
-          {[['mese', 'Questo mese'], ['7', 'Ultimi 7 giorni'], ['30', 'Ultimi 30 giorni'], ['90', 'Ultimi 90 giorni'], ['anno', "Quest'anno"]].map(([t, l]) => <button key={t} onClick={() => range(t)} style={chip}>{l}</button>)}
+          {[['oggi', 'Oggi'], ['ieri', 'Ieri'], ['mese', 'Questo mese'], ['mesescorso', 'Mese scorso'], ['7', 'Ultimi 7 gg'], ['30', 'Ultimi 30 gg'], ['90', 'Ultimi 90 gg'], ['anno', "Quest'anno"]].map(([t, l]) => <button key={t} onClick={() => range(t)} style={chip}>{l}</button>)}
         </div>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div><label style={lbl}>Periodo</label><DateRangePicker dal={dal} al={al} onChange={(d, a) => { setDal(d); setAl(a) }} /></div>
-          <button onClick={carica} style={btnP}>Filtra</button>
+          <button onClick={() => carica()} style={btnP}>Filtra</button>
         </div>
       </div>
       {loading ? <div style={{ padding: '40px', textAlign: 'center', color: '#999' }}>Caricamento…</div> : !d ? <div style={{ ...card, textAlign: 'center', color: '#999' }}>Nessun dato.</div> : (
@@ -45,9 +45,9 @@ export default function StatClientiPage() {
               <ResponsiveContainer width="100%" height="88%"><BarChart data={d.topProfitto} layout="vertical" margin={{ left: 20 }}><XAxis type="number" tick={{ fontSize: 11 }} /><YAxis type="category" dataKey="nome" tick={{ fontSize: 10 }} width={140} /><Tooltip formatter={(v: any) => eur(v)} /><Bar dataKey="profitto" fill={VERDE} radius={[0, 4, 4, 0]} /></BarChart></ResponsiveContainer>
             </div>
           </div>
-          <div style={card}><div style={titolo}>Dettaglio clienti</div>
-            <Tabella cols={['Cliente', 'Sped.', 'Fatturato', 'Costo', 'Profitto', 'Margine', 'Resi', 'Contrassegno', 'Ultima sped.']}
-              rows={d.righe.map((r: any) => [r.nome, r.spedizioni, eur(r.fatturato), eur(r.costo), <span style={{ color: r.profitto >= 0 ? VERDE : '#dc2626', fontWeight: 700 }}>{eur(r.profitto)}</span>, `${r.margine}%`, r.resi, eur(r.contrassegno), r.ultima || '—'])} />
+          <div style={card}><div style={titolo}>Dettaglio clienti ({d.righe.length})</div>
+            <Tabella cols={['Cliente / entità', 'Sped.', 'Incassato', 'Speso', 'Guadagno', 'Margine']}
+              rows={d.righe.map((r: any) => [r.nome, Number(r.spedizioni).toLocaleString('it-IT'), eur(r.fatturato), eur(r.costo), <span style={{ color: r.profitto >= 0 ? VERDE : '#dc2626', fontWeight: 700 }}>{eur(r.profitto)}</span>, `${r.margine}%`])} />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }} className="grid2">
             <div style={card}><div style={titolo}>Clienti in crescita</div>
