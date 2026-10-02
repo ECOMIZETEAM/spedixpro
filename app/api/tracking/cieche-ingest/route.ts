@@ -19,11 +19,15 @@ export const maxDuration = 120
 // bonifica-poste: era la stessa lettura di Poste da un'altra porta. Regola in `statoDaLetturaPoste`.
 // body: { righe: [{ spedizione_id, ldv, tracking: [...] }], soloCronologia? }
 //   (tracking = array `tracking` del full-tracking)
-// soloCronologia: scrive la storia e NON tocca lo stato. Serve al recupero delle consegnate senza
-// cronologia (66.918 al 18/09/2026): li' lo stato e' gia' terminale e va bene com'e'; un reso
-// trovato dentro una storia vecchia farebbe scattare addebiti a catena su migliaia di pacchi tutti
-// insieme, senza che nessuno se ne sia accorto. Prima si riempie la storia, poi si contano i resi
-// veri e si decide con i numeri davanti.
+// soloCronologia: scrive la storia e non fa avanzare lo stato, TRANNE il reso al mittente.
+// Serve al recupero delle consegnate senza cronologia (66.918 al 18/09/2026): li' lo stato e' gia'
+// terminale e va bene com'e'. Il 18/09 si temeva che un reso trovato dentro una storia vecchia
+// facesse scattare addebiti a catena su migliaia di pacchi tutti insieme, e si e' deciso di
+// riempire prima la storia e contare poi, coi numeri davanti.
+// CONTATI il 02/10/2026, a 54.233 cronologie recuperate su 66.918: i resi nascosti sono 35, lo
+// 0,065%, per 644,10 EUR di nolo in tutta la catena. Non migliaia. Quindi il reso si applica
+// subito: un pacco tornato al mittente che resta "consegnata" non fa pagare il reso a nessuno e
+// fa credere al cliente che sia arrivato.
 export async function POST(req: NextRequest) {
   const admin = createAdminSupabase()
   if (!(await autorizzaHarvester(req, admin))) return NextResponse.json({ error: 'Non autorizzato' }, { status: 401 })
@@ -51,12 +55,18 @@ export async function POST(req: NextRequest) {
       { onConflict: 'spedizione_id,data_evento,descrizione,luogo', ignoreDuplicates: true },
     )
     cronologie++
-    const nuovo = soloCronologia ? null : statoDaLetturaPoste(eventi, (sp as any).stato)
+    // Col recupero di una storia vecchia passa SOLO il reso: tutto il resto di quella cronologia
+    // e' il racconto di un viaggio gia' finito, e farebbe tornare indietro uno stato buono.
+    const letto = statoDaLetturaPoste(eventi, (sp as any).stato)
+    const nuovo = soloCronologia && letto !== 'reso_mittente' ? null : letto
     if (nuovo && nuovo !== (sp as any).stato) {
       await admin.from('spedizioni').update({ stato: nuovo }).eq('id', sid)
       avanzati++
       // Anche questa porta scrive lo stato dei contratti Poste: avvisa il cliente come le altre.
-      await notificaCambioStato(admin, sid, nuovo, (sp as any).stato)
+      // Non quando si sta riempiendo una storia vecchia: li' si corregge un archivio di mesi fa,
+      // e una notifica "il tuo pacco e' tornato indietro" per una spedizione di luglio arriva
+      // solo a spaventare. Lo stato corretto lo vede in piattaforma, e il reso lo addebita il cron.
+      if (!soloCronologia) await notificaCambioStato(admin, sid, nuovo, (sp as any).stato)
     }
   }
   return NextResponse.json({ ok: true, cronologie, avanzati, vuote })
