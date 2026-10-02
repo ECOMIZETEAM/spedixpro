@@ -65,7 +65,12 @@ function ContrattiCondivisi({ clienteId }: { clienteId: string }) {
     const res = await fetch(`/api/condivisioni/${data.link.id}/credito-modo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modo }) })
     const d = await res.json().catch(() => ({})); setBusy('')
     if (!res.ok || d?.error) { setMsg(d?.error || 'Errore'); return }
-    setMsg(modo === 'fattura' ? 'Impostato a fattura: il suo conto può andare sotto zero.' : 'Impostato prepagato: il suo conto si ferma a zero.')
+    // Si annuncia il modo RILETTO dall'API, non quello cliccato: se l'update non ha toccato nessuna riga
+    // il messaggio deve dirlo, altrimenti la schermata conferma un cambio che non c'è stato.
+    const salvato = d?.modo || null
+    if (!salvato) { setMsg('Attenzione: la condizione non risulta salvata. Riprova.'); carica(); return }
+    setMsg((salvato === 'fattura' ? 'Impostato a fattura: il suo conto può andare sotto zero.' : 'Impostato prepagato: il suo conto si ferma a zero.')
+      + (d?.avviso ? ' ' + d.avviso : ''))
     carica()
   }
   const bottoneCredito = (modo: string, label: string) => (
