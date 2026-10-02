@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { vedeLaRete } from '@/lib/perimetro'
+
+// LO STAFF LO GESTISCE CHI GOVERNA IL PORTALE, NON CHI CI ENTRA DENTRO.
+// Queste rotte bloccavano il solo ruolo 'agente' e poi usavano la chiave di servizio (che scavalca la
+// RLS), fidandosi del `master_id`. Ma il master_id ce l'hanno anche i 1.696 login CLIENTE: con esso un
+// cliente poteva creare un utente 'admin' sul portale del suo master (con la password che tornava nella
+// risposta), resettare la password del MASTER e leggerla a schermo, e cancellare l'account di accesso
+// del master. Trovato dall'audit del 2/10/2026, verificato sul codice. Il filtro giusto esiste gia' ed
+// e' uno solo: vedeLaRete() lascia passare master/admin/operatore e tiene fuori cliente, agente e autista.
 
 // Lista staff del master: utenti + email/ultimo_accesso da auth
 export async function GET(_req: NextRequest) {
@@ -10,8 +19,7 @@ export async function GET(_req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
   const { data: me } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
-  if (!me?.master_id) return NextResponse.json([])
-  if ((me.ruolo || '').toLowerCase() === 'agente') return NextResponse.json([])   // l'agente non vede lo staff
+  if (!vedeLaRete(me)) return NextResponse.json([])   // cliente, agente e autista non vedono lo staff
 
   const { data: utenti } = await supabase.from('utenti')
     .select('id,nome,cognome,telefono,ruolo,attivo,created_at,listino_agente_id,agente_metodo,agente_valore')
@@ -51,7 +59,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: me } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   if (!me?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
-  if ((me.ruolo || '').toLowerCase() === 'agente') return NextResponse.json({ error: 'Non consentito' }, { status: 403 })
+  if (!vedeLaRete(me)) return NextResponse.json({ error: 'Non consentito' }, { status: 403 })
 
   const body = await req.json()
   const { nome, ruolo, email } = body
@@ -136,7 +144,7 @@ export async function PUT(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: me } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   if (!me?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
-  if ((me.ruolo || '').toLowerCase() === 'agente') return NextResponse.json({ error: 'Non consentito' }, { status: 403 })
+  if (!vedeLaRete(me)) return NextResponse.json({ error: 'Non consentito' }, { status: 403 })
 
   const body = await req.json()
   const { id, resetPassword, nuova_email } = body
@@ -211,7 +219,7 @@ export async function DELETE(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: me } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
-  if ((me?.ruolo || '').toLowerCase() === 'agente') return NextResponse.json({ error: 'Non consentito' }, { status: 403 })
+  if (!vedeLaRete(me)) return NextResponse.json({ error: 'Non consentito' }, { status: 403 })
   const id = req.nextUrl.searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
   const admin = createAdminSupabase()
