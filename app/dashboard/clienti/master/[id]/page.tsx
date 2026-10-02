@@ -76,12 +76,20 @@ export default function ModificaMasterPage() {
     const res = await fetch(`/api/master/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
     const d = await res.json(); setSaving(false)
     if (d.error) { setErrore(d.error); return }
-    setMsg(d.emailInviata ? '✓ Modifiche salvate — credenziali inviate via email' : '✓ Modifiche salvate')
+    // Le condizioni di pagamento si riallineano a quello che l'API ha RILETTO dal database, e il
+    // messaggio le nomina. Prima bastava un "✓ Modifiche salvate" e la tendina restava sul valore
+    // scelto a schermo: su VTS EXPRESS sembrava a credito a scalare mentre nel database era a fattura
+    // mensile, e per mesi nessun blocco è scattato mentre il conto andava a -789,25 €.
+    if (d.tipo_contratto) setM((prec:any) => ({ ...prec, tipo_contratto: d.tipo_contratto }))
+    const cond = d.tipo_contratto ? ` — condizioni: ${String(d.tipo_contratto).replace(/_/g, ' ')}` : ''
+    setMsg(d.emailInviata ? `✓ Modifiche salvate${cond} — credenziali inviate via email` : `✓ Modifiche salvate${cond}`)
     // Cambio listino: l'API ha rimaterializzato i prezzi del sotto-master. Se è rimasto senza tariffe
     // (listino vuoto o errore di copia) l'avviso arriva qui e va mostrato: prima passava inosservato.
     if (d.avvisoListino) setErrore(d.avvisoListino)
     if (d.password) setPasswordMostrata(d.password)
-    if (nuovaEmail.trim()) setM({...m, login_email: nuovaEmail.trim(), email: nuovaEmail.trim()})
+    // Aggiornamento funzionale: con `{...m, …}` questa riga riscriveva lo stato con la copia VECCHIA
+    // e cancellava il tipo_contratto appena riletto dall'API.
+    if (nuovaEmail.trim()) setM((prec:any) => ({...prec, login_email: nuovaEmail.trim(), email: nuovaEmail.trim()}))
     setResetPassword(false)
   }
 

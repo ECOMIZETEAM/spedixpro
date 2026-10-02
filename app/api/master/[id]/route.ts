@@ -107,6 +107,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   }
 
+  // LE CONDIZIONI DI PAGAMENTO SI RILEGGONO DAL DATABASE E TORNANO AL MITTENTE.
+  // Un "✓ Modifiche salvate" non dice che il campo sia cambiato: se la riga non viene toccata (nessun
+  // errore, zero righe aggiornate) la schermata esulta e il valore resta quello di prima. È proprio
+  // quello che è successo su VTS EXPRESS il 2-3/10/2026: dal portale risultava messo a credito a
+  // scalare, nel database era rimasto `fattura_mensile` per mesi — e intanto il conto scendeva a
+  // -789,25 € senza che nessun blocco scattasse, perché a fattura non si blocca niente.
+  // Qui si rilegge il valore vero e la pagina lo mostra: se non è passato, si vede subito.
+  const { data: dopo } = await admin.from('masters').select('tipo_contratto').eq('id', id).maybeSingle()
+
   // RIMATERIALIZZA il listino quando l'assegnazione CAMBIA. Prima la PATCH aggiornava solo il
   // puntatore parent_listino_id senza ricopiare le fasce: il sotto-master restava "tutto a 0"
   // (o col vecchio listino) finché qualcuno non premeva "Risincronizza" a mano. È il buco per cui
@@ -167,5 +176,5 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  return NextResponse.json({ ok: true, emailInviata, ...(avvisoListino ? { avvisoListino } : {}), ...(passwordImpostata ? { password: passwordImpostata } : {}) })
+  return NextResponse.json({ ok: true, emailInviata, tipo_contratto: dopo?.tipo_contratto ?? null, ...(avvisoListino ? { avvisoListino } : {}), ...(passwordImpostata ? { password: passwordImpostata } : {}) })
 }
