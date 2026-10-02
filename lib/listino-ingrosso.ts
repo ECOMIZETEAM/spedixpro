@@ -37,7 +37,10 @@ export async function generaListinoIngrosso(admin: any, opts: {
   if (!fasceCosto?.length) throw new ListinoIngrossoError(`Nessun prezzo di costo per "${corr.nome_contratto}" da cui partire.`)
   const { data: suppCosto } = await admin.from('listini_corrieri_supplementi')
     .select('tipo,descrizione,valore,tipo_calcolo,nome').in('listino_id', costoIds).eq('corriere_id', corriereId)
-  const rigaCosto = ((listiniCosto || []).find((l: any) => l.corriere_id === corriereId) || (listiniCosto || [])[0]) as any
+  // SOLO la riga del venditore per QUESTO corriere: MAI un ripiego su listiniCosto[0] (= un contratto a
+  // caso), che copierebbe il divisore di un altro contratto. Stesso bug gia' corretto in
+  // condivisione-engine (5cb3b842): se manca, fattore = null (eredita il default).
+  const rigaCosto = (listiniCosto || []).find((l: any) => l.corriere_id === corriereId) as any
   const fattoreCosto = rigaCosto?.fattore_volume ?? null
 
   // DESTINAZIONE = un nuovo listino_clienti del venditore (l'ingrosso).
