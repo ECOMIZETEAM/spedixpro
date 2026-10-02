@@ -2,12 +2,21 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { isAgente, clientiAgente } from '@/lib/agente'
+import { vedeLaRete } from '@/lib/ruoli'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
+  // PERIMETRO. Questa e' una rotta del portale MASTER (Resi > Scansiona) e cerca la LDV col client
+  // amministrativo, che scavalca la RLS: l'unico controllo e' quello scritto sotto, "sono il master della
+  // spedizione o un suo antenato". Quel controllo NON e' un permesso per un utente cliente, perche' il
+  // master_id ce l'hanno anche i clienti: per loro passava sempre, e con una LDV qualsiasi del proprio
+  // master (o della sua discendenza) si leggevano mittente, destinatario, citta' e costo delle spedizioni
+  // di un ALTRO cliente. Dentro restano i ruoli che la rete la guardano davvero; l'agente ha la sua
+  // regola subito dopo (solo i suoi clienti). Stessa ragione di lib/perimetro.
+  if (!vedeLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const ldv = req.nextUrl.searchParams.get('ldv')
   if (!ldv) return NextResponse.json({ error: 'LDV obbligatoria' }, { status: 400 })
   // RLS + catena: cerco la LDV su tutta la discendenza (solo discesa)

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
-import { gestisceLaRete } from '@/lib/ruoli'
+import { gestisceLaRete, vedeLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { risaliCatena, destinatarioCod } from '@/lib/contrassegni-catena'
 import { detentoreContratto, nomeContrattoNormalizzato } from '@/lib/contratto-per-nome'
@@ -11,6 +11,12 @@ export async function GET(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
+  // Rotta del portale master. Il solo `master_id` non e' un permesso: senza questa riga un'utenza
+  // cliente si leggeva le distinte contrassegni di TUTTI i clienti del master (importi incassati,
+  // numeri di spedizione, ragioni sociali). Il POST qui sotto era gia' protetto con gestisceLaRete,
+  // il GET no. Il cliente le sue distinte le vede da /api/cliente/contrassegni/*; l'agente resta
+  // dentro, filtrato sui suoi clienti poco piu' sotto.
+  if (!vedeLaRete(utente)) return NextResponse.json([])
   const p = req.nextUrl.searchParams
   const clienteIdRaw = p.get('clienteId')
   // "m:<masterId>" = sotto-master agganciato: le sue distinte hanno target_master_id

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { gestisceLaRete } from '@/lib/ruoli'
+import { gestisceLaRete, vedeLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
@@ -12,6 +12,10 @@ export async function GET(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
+  // Rotta del portale master: il solo filtro `master_id` non e' un permesso (ce l'ha anche il cliente,
+  // che qui si leggerebbe le distinte di resi di TUTTI i clienti del suo master). Il POST sotto era gia'
+  // protetto con gestisceLaRete; questo GET no. L'agente resta dentro, filtrato sui suoi clienti.
+  if (!vedeLaRete(utente)) return NextResponse.json([])
   const clienteIdRaw = req.nextUrl.searchParams.get('cliente_id')
   // "m:<masterId>" = sotto-master agganciato: le sue distinte hanno target_master_id
   const masterSel = clienteIdRaw && clienteIdRaw.startsWith('m:') ? clienteIdRaw.slice(2) : null

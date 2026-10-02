@@ -474,7 +474,13 @@ export async function POST(req: NextRequest) {
   if (!res.ok || r.error) {
     // Diagnostica (solo il MESSAGGIO d'errore del corriere, non il payload coi dati personali): serve a
     // capire perché stamattina i ritiri Spedisci tornano 400. Da rimuovere dopo aver risolto.
-    console.error('[RITIRO] pickup KO', res.status, String(r?.error || '').replace(cred?.password || ' ', '***').slice(0, 220))
+    // La password si nasconde SOLO se c'e': con il pattern vuoto `replace` infilerebbe '***' davanti al
+    // messaggio. Qui c'era un carattere NUL messo al posto della stringa vuota, e un byte NUL rende il
+    // file "binario": ogni grep lo saltava, quindi questa rotta era invisibile alle ricerche (compresi i
+    // controlli sui permessi). Trovato il 3/10/2026 cercando chi scrive la riga del ritiro.
+    const pwd = String(cred?.password || '')
+    const msgKO = String(r?.error || '')
+    console.error('[RITIRO] pickup KO', res.status, (pwd ? msgKO.split(pwd).join('***') : msgKO).slice(0, 220))
     return NextResponse.json({ error: erroreRitiroPulito(r?.error || `Errore ${res.status}`) }, { status: 400 })
   }
 
