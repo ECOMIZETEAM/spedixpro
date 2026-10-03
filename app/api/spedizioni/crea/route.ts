@@ -138,36 +138,21 @@ export async function POST(req: NextRequest) {
   // doppio addebito, ~1.100 € di solo costo corriere): la spedizione parte e ADDEBITA, ma il
   // collegamento all'ordine ("segnato spedito", che lo toglie dalla lista) e' una SECONDA chiamata
   // HTTP separata — se fallisce (rete/timeout, o il lookup best-effort non trova il numero) l'ordine
-  // resta "da spedire" e l'utente lo rispedisce. Il controllo sta QUI, nell'unico punto da cui passano
-  // TUTTE le porte (import file, negozi collegati, spedizione singola), non nelle pagine.
+  // resta "da spedire" e l'utente lo rispedisce. La regola vive in lib/guardia-doppione (una sola),
+  // chiamata da QUESTA porta e dall'API pubblica /api/v1 (che prima la scavalcava: era il buco), col
+  // backstop a livello DB (indice uniq_sped_ordine_attivo_v2) che nessuna rotta puo' aggirare.
   // Si confronta anche il CAP di destinazione: cosi' un riferimento riusato a mano su un'altra
   // destinazione (legittimo) non viene bloccato, ma lo stesso ordine marketplace verso lo stesso
   // indirizzo si'. Le annullate non contano (annullare+rifare e' legittimo).
   {
-    const rifOrd = String(body.rifOrdine || '').trim()
-    // Solo su un rif che e' un VERO id d'ordine (Amazon/Temu/numero): su un'etichetta riusata a mano
-    // ("AMAZON", "g", "EXP 2") si bloccherebbero ordini DIVERSI dello stesso cliente = falso positivo.
-    const { rifOrdineAffidabile } = await import('@/lib/rif-ordine')
-    if (clienteId && rifOrdineAffidabile(rifOrd)) {
-      const capDest = String(body.shipTo?.postalCode || '').trim()
-      // IL CANCELLETTO NON DEVE CONTARE. Lo stesso ordine Shopify arriva "#1019" o "1019" a seconda
-      // di come e' stato creato (e di come lo mandava il portale prima); confrontando alla lettera,
-      // la seconda forma non trovava la prima e il doppione passava. Si cercano entrambe.
-      const rifNudo = rifOrd.replace(/^#/, '')
-      const { data: giaSpedite } = await adminCrea.from('spedizioni')
-        .select('id,numero,stato,cancellata_il')
-        .eq('cliente_id', clienteId).eq('dest_cap', capDest)
-        .in('rif_ordine', Array.from(new Set([rifOrd, rifNudo, '#' + rifNudo])))
-        .limit(5)
-      const attiva = (giaSpedite || []).find((s: any) => !s.cancellata_il
-        && !['annullata', 'annullamento_pending', 'annullamento_manuale'].includes(String(s.stato || '')))
-      if (attiva) {
-        return NextResponse.json({
-          error: `Questo ordine risulta già spedito (spedizione ${attiva.numero}): non ne è stata creata un'altra per evitare il doppione.`,
-          gia_spedito: attiva.numero, gia_spedito_id: attiva.id,
-        }, { status: 409 })
-      }
-    }
+    const { spedizioneDoppioneAttiva, messaggioDoppione } = await import('@/lib/guardia-doppione')
+    const dup = await spedizioneDoppioneAttiva(adminCrea, {
+      clienteId, rifOrdine: body.rifOrdine, destCap: body.shipTo?.postalCode,
+    })
+    if (dup) return NextResponse.json(
+      { error: messaggioDoppione(dup.numero), gia_spedito: dup.numero, gia_spedito_id: dup.id },
+      { status: 409 },
+    )
   }
 
   // NIENTE BLOCCO DELLE SPEDIZIONI. Qui c'era il controllo del piano, che fermava la spedizione

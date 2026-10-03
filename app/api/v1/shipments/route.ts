@@ -10,6 +10,7 @@ import { erroreCorrierePulito } from '@/lib/errore-corriere'
 import { statoPiano, messaggioBlocco } from '@/lib/limite-piano'
 import { validaCittaCap } from '@/lib/valida-citta'
 import { capHaZonaSpeciale } from '@/lib/cap-speciali'
+import { spedizioneDoppioneAttiva, messaggioDoppione } from '@/lib/guardia-doppione'
 import { emailAlCorriere } from '@/lib/email-corriere'
 import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation, spediamoproCreateShipment, spediamoproGetLabel,
@@ -85,6 +86,19 @@ export async function POST(req: NextRequest) {
     .select('master_id,ragione_sociale,listino_cliente_id,tipo_contratto,credito,ledger').eq('id', ctx.clienteId).single()
   if (!cliente?.listino_cliente_id) return NextResponse.json({ error: 'Cliente senza listino' }, { status: 400 })
   const masterId = cliente.master_id
+
+  // ANTI-DOPPIONE. Stessa guardia del portale, qui PRIMA della prenotazione del credito: un ordine
+  // gia' spedito non deve addebitare nulla. Il backstop vero e' l'indice DB (uniq_sped_ordine_attivo_v2),
+  // questo da' solo il 409 pulito a chi integra invece di un errore di vincolo grezzo.
+  {
+    const dup = await spedizioneDoppioneAttiva(admin, {
+      clienteId: ctx.clienteId, rifOrdine: body.rifOrdine, destCap: body.shipTo?.postalCode,
+    })
+    if (dup) return NextResponse.json(
+      { error: messaggioDoppione(dup.numero), gia_spedito: dup.numero, gia_spedito_id: dup.id },
+      { status: 409 },
+    )
+  }
 
   // Nessun blocco per limite o canone: chi si integra e' un CLIENTE, e non deve subire i conti
   // fra noi e il suo master. Il blocco vive nel portale di chi non e' in regola.
