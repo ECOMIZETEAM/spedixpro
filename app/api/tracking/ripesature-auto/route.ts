@@ -43,23 +43,32 @@ async function autorizzato(req: NextRequest): Promise<boolean> {
   return u.master_id === MASTER_DETENTORE   // SOLO MULTIEXPRESS (detentore dei contratti Poste)
 }
 
-// ═══ IN PAUSA PER DECISIONE DI LORENZO (29/09/2026) ═══
-// "metti in pausa le rettifiche one tracking, ti dico io poi quando dovra' riniziare."
-// Il motore non calcola e non crea piu' niente finche' non lo dice lui. La pausa e' in DUE punti
-// apposta: qui dentro e nel cron di vercel.json (tolto). Cosi' non riparte ne' da sola ne' per una
-// chiamata a mano, e riaccenderla e' una scelta esplicita, non una dimenticanza.
+// ═══ FERMO DAL 29/09/2026, RIACCESO IL 03/10/2026 SU RICHIESTA DI LORENZO ═══
+// Era stato messo in pausa ("ti dico io poi quando dovra' riniziare") mentre si sistemava il modo
+// di SCRIVERE le rettifiche: le righe erano illeggibili e sul multicollo il conto era sbagliato.
+// Prima di riaccenderlo, verificato sui dati veri della coda (prova a vuoto su 80 misure, nessuna
+// riga scritta):
+//  * LA FRASE CHE LEGGE IL CLIENTE e' quella nuova, e non sta qui: nasce alla CONFERMA, in
+//    /api/rettifiche POST, che ricostruisce il peso FATTURATO collo per collo col fattore
+//    volumetrico DEL CONTRATTO e aggiunge il perche' quando cambia la base. Esce per esempio
+//    "Rettifica 3UW1UHA279946 (si paga sul peso fatturato: da 4 kg a 6,7 kg — il collo misurato
+//    esce dalla scatola agevolata 50x32x28 cm, quindi ora si paga sul volume)". Perche' funzioni
+//    serve `colli_ripesati` sulla riga: lo scrive creaRettificaDaEsito, ed e' stato controllato
+//    che arrivi pieno. Vedi il commento "IL PESO CHE SI PAGA NON E' LA SOMMA DEI CHILI".
+//  * IL MULTICOLLO NON PASSA DA QUI, ed e' giusto: la coda pretende `colli = 1`, e di multicollo
+//    da scartare non ce n'era nemmeno uno (misurato il 03/10). Una misura sola non e' la
+//    spedizione: i multicollo si riprezzano collo per collo dalla strada dei FILE del fornitore,
+//    con `misure_colli` (vedi app/api/rettifiche/upload e lib/misure-colli.ts), che aspetta di
+//    avere TUTTI i colli prima di addebitare.
+//  * su 80 misure provate, 11 diventano un addebito (media 1,6 EUR) e le altre no, perche' col
+//    listino di quel livello il collo vero costa uguale: quella e' la risposta giusta, non un buco.
+// In coda c'erano 14.229 misure di colli singoli: a 150 per giro ogni 20 minuti si smaltiscono in
+// circa un giorno e mezzo, e le rettifiche nascono IN ATTESA DI CONFERMA — non muovono un euro
+// finche' non le conferma chi le deve girare a valle.
 //
-// COSA CONTINUA A GIRARE, ed e' giusto cosi':
-//  * le MISURE dal Mac (misure.mjs → ripesature_misure): servono alla scheda "Ripesature" del popup
-//    e non addebitano niente;
-//  * le rettifiche che arrivano dai FILE dei fornitori, che sono un'altra strada.
-// Le misure intanto si accumulano in coda (8.115 al 29/09/2026) e NON si perdono: alla riaccensione
-// il motore le lavora dalla piu' vecchia. Le 673 rettifiche gia' create e in attesa di conferma
-// restano dove sono: questa pausa non le tocca e non muove un euro.
-//
-// PER RIACCENDERE: rimettere IN_PAUSA = false e rimettere il cron in vercel.json
-// ({ "path": "/api/tracking/ripesature-auto", "schedule": "*/20 * * * *" }).
-const IN_PAUSA = true
+// PER FERMARLO DI NUOVO: IN_PAUSA = true e via il cron da vercel.json. Il freno va messo in DUE
+// punti apposta, cosi' non riparte ne' da solo ne' per una chiamata a mano.
+const IN_PAUSA = false
 
 export async function GET(req: NextRequest) {
   const admin = createAdminSupabase()

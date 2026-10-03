@@ -100,6 +100,10 @@
       "schedule": "50 * * * *"
     },
     {
+      "path": "/api/tracking/ripesature-auto",
+      "schedule": "*/20 * * * *"
+    },
+    {
       "path": "/api/cron/riallinea-contrassegni-m",
       "schedule": "40 * * * *"
     },
