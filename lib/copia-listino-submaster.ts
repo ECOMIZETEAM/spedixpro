@@ -140,7 +140,11 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
         // altrimenti il sub spedirebbe nei panni del nonno (cross-tenant). Il dispatch dei sub-albero parte
         // dal primo detentore-CODICE (risolviChiaveDispatch), non dalla chiave del ponte: la copia è inutile
         // e pericolosa, qui la si azzera. Per gli altri corrieri la copia resta identica.
-        credenziali: c.tipo === 'moovexpress' ? null : (c.credenziali ?? null),
+        // NB: credenziali è NOT NULL → si usa {} (nessuna credenziale), NON null: null faceva FALLIRE in
+        // SILENZIO l'insert del ponte (null value ... violates not-null) e il contratto-condivisione non si
+        // materializzava MAI sui sub via cascata (bug sistemico, 7 sub su SDA EXPRESS L). {} = stessa
+        // intenzione (nessuna api_key del padre), insert valido, dispatch dalla catena.
+        credenziali: c.tipo === 'moovexpress' ? {} : (c.credenziali ?? {}),
         settings: settingsContratto(c.settings), attivo: c.attivo ?? true,
       }).select('id').single()
       subId = nuovo?.id
