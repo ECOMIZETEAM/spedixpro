@@ -38,6 +38,7 @@ export type CodPerLivello = {
 type RigaSped = {
   id: string
   master_id?: string | null
+  tracking_number?: string | null
   stato_contrassegno?: string | null
   distinta_contrassegno_id?: string | null
   corrieri?: { nome_contratto?: string | null } | null
@@ -51,18 +52,37 @@ export async function statiCodPerLivello(
   if (!ids.length) return out
 
   const mie = new Map<string, any>(), entrate = new Map<string, any>()
+  // CONDIVISIONE (gamba esplosa): le righe-distinta COD puntano alla spedizione ORIGINANTE (una per
+  // tracking), mentre la lista mostra la GAMBA del livello che guarda (gamba-ponte, id diverso). La
+  // chiave di aggancio e' quindi il TRACKING, non l'id della riga. Raccolgo TUTTE le gambe di ogni
+  // tracking e aggancio la distinta per tracking. Per le spedizioni normali (un solo id per tracking)
+  // la chiave coincide col tracking stesso e il comportamento e' identico; fallback all'id se manca il tracking.
+  const trackings = [...new Set(righe.map(r => r.tracking_number).filter(Boolean) as string[])]
+  const trackingByLeg = new Map<string, string>()
+  const legIds = new Set<string>(ids)
+  for (let i = 0; i < trackings.length; i += 150) {
+    const { data: legs } = await adminDb.from('spedizioni')
+      .select('id,tracking_number').in('tracking_number', trackings.slice(i, i + 150))
+    for (const l of (legs || [])) {
+      if ((l as any).tracking_number) trackingByLeg.set((l as any).id, (l as any).tracking_number)
+      legIds.add((l as any).id)
+    }
+  }
+  const chiaveDi = (sid: string) => trackingByLeg.get(sid) || sid
+  const allIds = [...legIds]
   // Chunk PICCOLI + fetchAll: ogni spedizione ha UNA riga di distinta PER LIVELLO della catena,
   // quindi un chunk grande può superare le 1000 righe (cap PostgREST) e perderne pezzi.
-  for (let i = 0; i < ids.length; i += 150) {
+  for (let i = 0; i < allIds.length; i += 150) {
     const rr = await fetchAll(() => adminDb.from('distinte_contrassegni_righe')
       .select('id, spedizione_id, distinte_contrassegni!inner(id,numero,stato,master_id,target_master_id)')
-      .in('spedizione_id', ids.slice(i, i + 150)).order('id', { ascending: true }))
+      .in('spedizione_id', allIds.slice(i, i + 150)).order('id', { ascending: true }))
     for (const r of (rr || [])) {
       const d: any = (r as any).distinte_contrassegni
       const sid = (r as any).spedizione_id
       if (!d || !sid) continue
-      if (d.target_master_id === masterId) entrate.set(sid, d)
-      else if (d.master_id === masterId) mie.set(sid, d)
+      const k = chiaveDi(sid)
+      if (d.target_master_id === masterId) entrate.set(k, d)
+      else if (d.master_id === masterId) mie.set(k, d)
     }
   }
 
@@ -90,7 +110,8 @@ export async function statiCodPerLivello(
     const catena = catenaDi(partenza)
     const iMio = catena.indexOf(masterId), iDet = catena.indexOf(detentore)
     const incassoMio = iMio !== -1 && iDet >= iMio
-    const mia = mie.get(r.id), inEntrata = entrate.get(r.id)
+    const chiaveRiga = r.tracking_number || r.id
+    const mia = mie.get(chiaveRiga), inEntrata = entrate.get(chiaveRiga)
     const riferimento = sonoDetentore ? mia : inEntrata
     let stato: StatoCodLivello = 'in_attesa'
     if (r.stato_contrassegno === 'annullato') stato = 'annullato'      // reso: non si incasserà a nessun livello
