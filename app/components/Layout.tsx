@@ -12,7 +12,7 @@ import { useAppNativa } from '@/lib/app-nativa'
 // always: sempre visibile a chiunque abbia accesso al portale.
 // rete: visibile solo ai master che possono gestire la propria rete di sotto-master.
 type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean }
-type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, external?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean, sub?: NavSub[] }
+type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, external?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean, mioCosto?: boolean, sub?: NavSub[] }
 
 const NAV: NavItem[] = [
   { label: 'Spedizioni', href: '/dashboard/spedizioni', icon: '◫', sub: [
@@ -45,7 +45,7 @@ const NAV: NavItem[] = [
     { label: 'Prezzi POD', href: '/dashboard/assistenza/prezzi-pod', always: true },
   ]},
   { label: 'Circuito interno', href: '/dashboard/tracking', icon: '◎', perm: 'admin.interno.deliveries.out' },
-  { label: 'Il mio listino', href: '/dashboard/listini/mio', icon: '€', agente: true },
+  { label: 'Il mio listino', href: '/dashboard/listini/mio', icon: '€', mioCosto: true },
   { label: 'Listini Prezzi', href: '/dashboard/listini', icon: '€', sub: [
     { label: 'Nuovo Listino', href: '/dashboard/listini/clienti/nuovo', perm: 'admin.pricelists.create' },
     { label: 'Listini Clienti', href: '/dashboard/listini', perm: 'admin.pricelists.index' },
@@ -147,11 +147,14 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   // Un elemento e visibile se: admin/master (isFull), oppure marcato always,
   // oppure ha una chiave permesso attiva. Senza perm e non-full = nascosto (solo admin).
   // Le voci "rete" (gestione sotto-master) richiedono in più il flag gestioneRete.
-  const puoVedere = (x: { href?: string, perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean }) => {
+  const puoVedere = (x: { href?: string, perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean, mioCosto?: boolean }) => {
     if (app && x.href === '/dashboard/abbonamento') return false
     if (x.soloOttimizzaMargini) return ottimizzaMargini   // voce riservata ai master col flag (oggi solo Ecomize LL)
     if (x.soloMultiexpress) return isMultiexpress   // voce riservata a MULTIEXPRESS (Rettifiche automatiche)
     if (x.superMaster) return superMaster       // voce riservata al SUPER master (es. Registro Attività)
+    // "Il mio listino" (il costo assegnato dal referente): agente E sotto-master. Prima era solo-agente
+    // (agente:true), così i sotto-master come Velox/Spedizioni2000 non vedevano nemmeno il link.
+    if (x.mioCosto) return ['agente', 'master', 'admin', 'operatore'].includes(ruolo)
     if (x.agente) return ruolo === 'agente'   // voce esclusiva dell'agente (mai al master)
     if (ruolo === 'agente' && x.agenteOk) return true   // voce concessa anche all'agente (es. Distinte: può chiuderle)
     if (x.rete && !gestioneRete) return false

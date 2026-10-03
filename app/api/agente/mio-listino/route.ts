@@ -7,17 +7,33 @@ export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: u } = await supabase.from('utenti').select('ruolo,listino_agente_id').eq('id', user.id).single()
-  if ((u?.ruolo || '').toLowerCase() !== 'agente') return NextResponse.json({ error: 'Solo agenti' }, { status: 403 })
-  const listinoId = (u as any)?.listino_agente_id
+  const { data: u } = await supabase.from('utenti').select('ruolo,listino_agente_id,master_id').eq('id', user.id).single()
+  const ruolo = (u?.ruolo || '').toLowerCase()
+  // "Il mio listino" = il COSTO assegnato dal referente. Vale per l'AGENTE (listino_agente_id) e per il
+  // SOTTO-MASTER (masters.parent_listino_id). Prima era solo-agente (403): i sotto-master come
+  // Velox/Spedizioni2000 (che accedono come master/admin) vedevano "Nessun listino assegnato" pur
+  // avendo il listino assegnato e materializzato. La RLS tiene il listino del referente sotto il PADRE,
+  // quindi per i sotto-master si legge via ADMIN, scoped al PROPRIO parent_listino_id (nessun id dal client).
+  let listinoId: string | null = null
+  let db: any = supabase
+  if (ruolo === 'agente') {
+    listinoId = (u as any)?.listino_agente_id || null
+  } else if (['master', 'admin', 'operatore'].includes(ruolo)) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    db = createAdminSupabase()
+    const { data: mm } = await db.from('masters').select('parent_listino_id').eq('id', (u as any)?.master_id).maybeSingle()
+    listinoId = (mm as any)?.parent_listino_id || null
+  } else {
+    return NextResponse.json({ error: 'Non disponibile' }, { status: 403 })
+  }
   if (!listinoId) return NextResponse.json({ assegnato: false, corrieri: [] })
 
-  const { data: listino } = await supabase.from('listini_clienti').select('nome,fattore_volume,solo_peso_reale').eq('id', listinoId).maybeSingle()
-  const { data: aggCorr } = await supabase.from('listini_clienti_corrieri').select('corriere_id,fattore_volume').eq('listino_id', listinoId)
+  const { data: listino } = await db.from('listini_clienti').select('nome,fattore_volume,solo_peso_reale').eq('id', listinoId).maybeSingle()
+  const { data: aggCorr } = await db.from('listini_clienti_corrieri').select('corriere_id,fattore_volume').eq('listino_id', listinoId)
   const fattorePerCorr = new Map<string, number>()
   for (const a of (aggCorr || [])) { const fv = parseFloat((a as any)?.fattore_volume); if ((a as any)?.corriere_id && fv > 0) fattorePerCorr.set((a as any).corriere_id, fv) }
 
-  const { data: fasce } = await supabase.from('listini_clienti_fasce')
+  const { data: fasce } = await db.from('listini_clienti_fasce')
     .select('corriere_id,peso_max,prezzo,tipo,fuel,zone(nome),corrieri(nome_contratto,attivo,master_id)')
     .eq('listino_id', listinoId).order('peso_max', { ascending: true })
 
@@ -56,7 +72,7 @@ export async function GET() {
   }
   // SUPPLEMENTI (assicurazione, contrassegno, servizi accessori, giacenze, ritiro…) per corriere.
   const parse = (s: any) => { try { return JSON.parse(s) } catch { return null } }
-  const { data: suppl } = await supabase.from('listini_clienti_supplementi')
+  const { data: suppl } = await db.from('listini_clienti_supplementi')
     .select('corriere_id,tipo,nome,descrizione,valore,tipo_calcolo').eq('listino_id', listinoId)
   const supplPerCorr = new Map<string, any[]>()
   for (const s of (suppl || [])) {
