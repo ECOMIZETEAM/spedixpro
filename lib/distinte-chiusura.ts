@@ -15,6 +15,30 @@ import { chiudiSpedizioniGls, numeroNudoGls } from '@/lib/gls'
 import { raggruppaPerContractCodeSpedisci, trasmettiBorderoSpedisci } from '@/lib/spedisci'
 import { confermaSpedizioniBrt } from '@/lib/brt'
 
+// CONDIVISIONE: una gamba-ponte ('moovexpress') NON ha borderò/manifest da trasmettere — l'handover al
+// corriere vero è già avvenuto all'OWNER alla creazione della LDV (Poste/KSync in fondo alla catena). La
+// distinta del ponte è solo un documento interno: si attesta subito (come FedEx/SDA), senza chiamare
+// nessuno, così non resta "In attesa" per sempre (prima solo la conferma MANUALE la sbloccava; cron e
+// creazione la lasciavano arancio). Guardia tipo==='moovexpress': non tocca gli altri corrieri.
+export async function chiudiDistintaMoovexpress(supabase: any, distintaId: string) {
+  try {
+    const { data: distinta } = await supabase
+      .from('distinte').select('id, corriere_id, bordero_id').eq('id', distintaId).maybeSingle()
+    if (!distinta || !distinta.corriere_id) return { skip: true }
+    if (distinta.bordero_id && !String(distinta.bordero_id).startsWith('ERRORE')) return { skip: true }
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { data: corriere } = await createAdminSupabase()
+      .from('corrieri').select('id, tipo').eq('id', distinta.corriere_id).maybeSingle()
+    if (!corriere || corriere.tipo !== 'moovexpress') return { skip: true }
+    await supabase.from('distinte').update({
+      bordero_id: 'N/A', confermata_vettore: true, data_conferma: new Date().toISOString(),
+    }).eq('id', distintaId)
+    return { ok: true }
+  } catch (e: any) {
+    return { errore: String(e?.message || e) }
+  }
+}
+
 export async function chiudiDistintaMista(supabase: any, distintaId: string) {
   try {
     const { data: distinta } = await supabase

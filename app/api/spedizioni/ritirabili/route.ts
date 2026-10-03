@@ -45,7 +45,10 @@ export async function GET(req: NextRequest) {
 
   // Corrieri con ritiro ON-DEMAND: spedisci.online / spediamopro (pickup provider) e FedEx diretto
   // (Pickup API). GLS/BRT no: la raccolta è con l'accordo standard, non si prenota da qui.
-  const raw = (spedizioni || []).filter((s: any) => ['spedisci', 'spediamopro', 'fedex'].includes(s.corrieri?.tipo))
+  // CONDIVISIONE: una gamba-ponte ('moovexpress') è ritirabile — il ritiro lo prenota l'OWNER reale
+  // (ritiri/crea risolve la gamba owner e usa il suo contratto, es. Poste on-demand). Senza, il contratto
+  // condiviso non compariva nemmeno nel menu ("non mi dà il contratto sul ritiro").
+  const raw = (spedizioni || []).filter((s: any) => ['spedisci', 'spediamopro', 'fedex', 'moovexpress'].includes(s.corrieri?.tipo))
 
   // Risolvo i nomi di master e clienti per il filtro "cliente/master" (solo master)
   const mastMap = new Map<string, string>()

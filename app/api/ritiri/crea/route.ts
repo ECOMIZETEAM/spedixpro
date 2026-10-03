@@ -96,7 +96,9 @@ export async function POST(req: NextRequest) {
   const masterId = primaSped.master_id
   const clienteId = primaSped.cliente_id || null
 
-  const { data: corriere } = await admin.from('corrieri').select('id,tipo,credenziali,settings').eq('id', primaSped.corriere_id).single()
+  // `let`/any: su condivisione il corriere viene RIASSEGNATO all'owner più sotto (il ponte non dispaccia).
+  const _corrRes = await admin.from('corrieri').select('id,tipo,credenziali,settings').eq('id', primaSped.corriere_id).single()
+  let corriere: any = _corrRes.data
   if (!corriere) return NextResponse.json({ error: 'Corriere non trovato' }, { status: 400 })
 
   // CONTRATTI DVA: il ritiro si prenota SOLO insieme alla spedizione, non dopo — il corriere non
@@ -153,7 +155,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, giaPrenotato: true, ritiroId: r?.id || null, pickupId: codiceRitiro })
   }
 
-  const cred = corriere.credenziali as Record<string, string>
+  let cred: any = corriere.credenziali as Record<string, string>
+
+  // CONDIVISIONE: una gamba-ponte ('moovexpress') NON ha dispatch proprio. Il ritiro va prenotato
+  // dall'OWNER reale (la gamba non-ponte dello stesso tracking), col SUO contratto/credenziali. Risolvo
+  // l'owner e faccio girare i rami per-tipo sulla SUA gamba: il ritiro resta intestato all'originante
+  // (masterId/clienteId presi da primaSped sopra); colli/peso e tracking sono gli stessi (stesso pacco).
+  // Senza, un moovexpress cadeva nel ripiego Spedisci (nessun _carrierCode) → "Impossibile recuperare il
+  // corriere". Per l'owner Poste si entra nel ramo poste qui sotto, con credenziali vere.
+  if (corriere.tipo === 'moovexpress' && primaSped.tracking_number) {
+    const { risolviGambeSpedizione } = await import('@/lib/condivisione-catena')
+    const gambe = await risolviGambeSpedizione(admin, primaSped.tracking_number)
+    const owner = gambe.find((g: any) => g.tipo && g.tipo !== 'moovexpress')
+    if (!owner) return NextResponse.json({ error: 'Contratto condiviso: nessun owner reale per prenotare il ritiro.' }, { status: 400 })
+    const { data: spO } = await admin.from('spedizioni').select('corriere_id').eq('id', owner.spedizioneId).maybeSingle()
+    const { data: corrO } = (spO as any)?.corriere_id
+      ? await admin.from('corrieri').select('id,tipo,credenziali,settings').eq('id', (spO as any).corriere_id).maybeSingle()
+      : { data: null as any }
+    if (!corrO) return NextResponse.json({ error: 'Contratto condiviso: corriere dell\'owner non trovato per il ritiro.' }, { status: 400 })
+    corriere = corrO as any
+    cred = ((corrO as any).credenziali || {}) as Record<string, string>
+  }
 
   if (!body.mittNome || !body.mittIndirizzo || !body.mittCitta || !body.mittCap) {
     return NextResponse.json({ error: 'Dati mittente incompleti' }, { status: 400 })

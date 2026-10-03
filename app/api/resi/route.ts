@@ -21,25 +21,34 @@ export async function GET(req: NextRequest) {
   if (!ldv) return NextResponse.json({ error: 'LDV obbligatoria' }, { status: 400 })
   // RLS + catena: cerco la LDV su tutta la discendenza (solo discesa)
   const adminDb = createAdminSupabase()
-  const { data: spedizione } = await adminDb.from('spedizioni')
+  // CONDIVISIONE: una spedizione condivisa è N gambe con lo STESSO tracking_number. Con `.single()` il
+  // match .or(numero,tracking) moriva su "multiple rows" → 404 ("non la fa scansionare"). Prendo TUTTE le
+  // gambe e scelgo quella NEL PERIMETRO di chi scansiona (il suo master o un suo antenato), preferendo
+  // l'ORIGINANTE (numero=tracking pulito) quando è nella sua rete. Per una spedizione normale c'è una riga.
+  const { data: legs } = await adminDb.from('spedizioni')
     .select('id,numero,mitt_nome,dest_nome,dest_citta,colli,costo_totale,stato,tracking_number,cliente_id,master_id,giacenza_reso_addebitato')
     .or(`numero.eq.${ldv},tracking_number.eq.${ldv}`)
-    .single()
+  // Originante prima: così, quando chi scansiona sta sopra la catena, si prende la gamba pulita (ed è da
+  // lì che la cascata reso condivisione riparte comunque, in modo idempotente).
+  const legsOrd = (legs || []).slice().sort((a: any, b: any) =>
+    (b.numero === b.tracking_number ? 1 : 0) - (a.numero === a.tracking_number ? 1 : 0))
+  let spedizione: any = null
+  let idx = -1
+  for (const leg of legsOrd) {
+    let cur: string | null = (leg as any).master_id
+    for (let i = 0; i < 20 && cur; i++) {
+      if (cur === utente?.master_id) { idx = i; spedizione = leg; break }
+      const { data: mm } = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+      cur = (mm as any)?.parent_master_id || null
+    }
+    if (spedizione) break
+  }
   if (!spedizione) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
   // Agente: solo spedizioni di un suo cliente.
   if (isAgente(utente)) {
     const miei = await clientiAgente(supabase, utente)
     if (!spedizione.cliente_id || !miei.includes(spedizione.cliente_id)) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
   }
-  // chi cerca deve essere il master della spedizione o un suo antenato
-  let cur: string | null = spedizione.master_id
-  let idx = -1
-  for (let i = 0; i < 20 && cur; i++) {
-    if (cur === utente?.master_id) { idx = i; break }
-    const { data: mm } = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
-    cur = mm?.parent_master_id || null
-  }
-  if (idx === -1) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 
   // target per la distinta: null se cliente diretto (idx 0), altrimenti il primo master sotto chi cerca
   let targetMasterId: string | null = null
