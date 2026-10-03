@@ -109,12 +109,30 @@ async function salvaCorriere(formData: FormData) {
     // COPIA propagata (proprio=false) del contratto: non deve poter vederne/cambiarne le chiavi.
     // Le impostazioni generali (settings) NON si toccano qui: le gestisce il popup Impostazioni;
     // sovrascriverle con i soli campi di questa form cancellerebbe misure/limiti configurati.
-    const { data: esistente } = await supabase.from('corrieri').select('proprio,settings').eq('id', corriereId).eq('master_id', utente.master_id).maybeSingle()
+    const { data: esistente } = await supabase.from('corrieri').select('proprio,settings,nome_contratto').eq('id', corriereId).eq('master_id', utente.master_id).maybeSingle()
     if (!esistente) redirect('/dashboard/corrieri?error=' + encodeURIComponent('Contratto non trovato'))
     if (!(esistente as any)?.proprio) redirect('/dashboard/corrieri?error=' + encodeURIComponent('Solo il proprietario del contratto puo\' modificarlo'))
     const settingsUniti = { ...((esistente as any)?.settings || {}), ...settings }
+
+    // RINOMINA SICURA DI UN CONTRATTO CONDIVISO: il nome e' la chiave con cui la catena-condivisione
+    // aggancia le copie dei sotto-master (corrieriPerNome). Cambiare solo la propria copia spezzava la
+    // catena (owner non piu' trovato -> costo/COD/reso/rettifiche persi). Propago il nuovo nome a TUTTE
+    // le copie col VECCHIO nome (lo catturo PRIMA dell'update dell'owner). Se la propagazione rifiuta
+    // (nome ambiguo/gia' in uso) NON cambio il nome: tengo il vecchio (catena intatta) e salvo solo
+    // credenziali/settings, avvisando.
+    const oldNome = String((esistente as any)?.nome_contratto || '')
+    const nuovoNome = formData.get('nome_contratto') as string
+    let nomeDaSalvare = nuovoNome
+    let avvisoNome = ''
+    if (oldNome.trim().toLowerCase() !== (nuovoNome || '').trim().toLowerCase()) {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const { propagaNomeContrattoAlleCopie } = await import('@/lib/propaga-nome-contratto')
+      const r = await propagaNomeContrattoAlleCopie(createAdminSupabase(), { oldNome, nuovoNome, ownerMaster: utente.master_id }).catch(() => ({ ok: false, rinominati: 0, motivo: 'errore' }))
+      if (!(r as any).ok) { nomeDaSalvare = oldNome; avvisoNome = (r as any).motivo || 'non rinominabile' }
+    }
+
     const { error } = await supabase.from('corrieri').update({
-      nome_contratto: formData.get('nome_contratto') as string,
+      nome_contratto: nomeDaSalvare,
       credenziali, settings: settingsUniti,
     }).eq('id', corriereId).eq('master_id', utente.master_id).eq('proprio', true)
 
@@ -128,6 +146,8 @@ async function salvaCorriere(formData: FormData) {
       const { sincronizzaCredenzialiAiDiscendenti } = await import('@/lib/propaga-credenziali')
       await sincronizzaCredenzialiAiDiscendenti(createAdminSupabase(), corriereId)
     } catch (e) { console.error('propaga credenziali ai sotto-master:', e) }
+    // Nome rifiutato (contratto condiviso ambiguo): credenziali salvate, nome tenuto al vecchio -> avviso.
+    if (avvisoNome) redirect('/dashboard/corrieri?error=' + encodeURIComponent('Credenziali salvate. Nome NON cambiato (contratto condiviso: ' + avvisoNome + ').'))
     redirect('/dashboard/corrieri?success=corriere_aggiornato')
   } else {
     // CREAZIONE: nuovo corriere
@@ -313,7 +333,7 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
             <div key={name}>
               <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>{label}{opzionale && <span style={{color:'#9ca3af',fontWeight:400}}> (facoltativo)</span>}</label>
               <input name={name} type={inputType} placeholder={placeholder} required={!opzionale}
-                defaultValue={name === 'nome_contratto' ? (corriereEsistente?.nome_contratto || '') : (credenzialiEsistenti[name] || '')}
+                defaultValue={name === 'nome_contratto' ? (corriereEsistente?.nome_contratto || '') : (credenzialiEsistenti[name] ?? settingsEsistenti[name] ?? '')}
                 style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box'}}/>
             </div>
           ))}
