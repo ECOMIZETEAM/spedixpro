@@ -45,7 +45,7 @@ export async function contrattiRimossiSopra(masterId: string | null | undefined)
     visti.add(padre)
 
     const { data: cPadre } = await admin.from('corrieri').select('id,nome_contratto,attivo').eq('master_id', padre)
-    const { data: cFiglio } = await admin.from('corrieri').select('nome_contratto,proprio').eq('master_id', corrente)
+    const { data: cFiglio } = await admin.from('corrieri').select('nome_contratto,proprio,tipo').eq('master_id', corrente)
     const { data: disab } = await admin.from('masters_corrieri_abilitati').select('corriere_id').eq('master_id', corrente).eq('abilitato', false)
     const disabIds = new Set((disab || []).map((r: any) => r.corriere_id))
 
@@ -60,6 +60,12 @@ export async function contrattiRimossiSopra(masterId: string | null | undefined)
     // I contratti EREDITATI dal figlio (proprio!=true) che il padre non offre piu' -> nascosti.
     for (const c of (cFiglio || [])) {
       if ((c as any).proprio === true) continue
+      // CONDIVISIONE: un PONTE (tipo='moovexpress') NON è un contratto ereditato dall'ALBERO: è un contratto
+      // CODICE che il master detiene via `corrieri_condivisi` (non dal padre-albero). La sua disponibilità la
+      // governa il legame-codice / il suo `attivo`, non ciò che offre il padre-albero. Trattarlo come ereditato
+      // lo farebbe sparire appena non è `proprio` (es. dopo il fix del flag detentore: il ponte di MULTI è
+      // proprio=false e la radice non ha quel contratto → "in pausa" a torto). Lo si salta, come i proprio=true.
+      if ((c as any).tipo === 'moovexpress') continue
       const nome = norm((c as any).nome_contratto)
       if (nome && !offerti.has(nome)) bloccati.add(nome)
     }
