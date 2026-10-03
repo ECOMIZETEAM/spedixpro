@@ -1,5 +1,7 @@
-import { calcolaPrezzoListino, calcolaSupplementiCliente, calcolaPesoFatturato, fattoreVolumeCorriere } from '@/lib/pricing'
+import { calcolaPrezzoListino, calcolaSupplementiCliente, calcolaPesoFatturato, fattoreVolumeCorriere, calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
 import { costruisciCatena } from '@/lib/cascata'
+import { risolviCatenaCondivisione } from '@/lib/condivisione-catena'
+import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 import type { Ripesatura } from '@/lib/ripesature'
 
 // COSA DEVE PAGARE OGNUNO, DOPO CHE IL FORNITORE HA RIMISURATO IL COLLO.
@@ -93,9 +95,12 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
       livelli: [],
     }
 
-    const { data: s } = await admin.from('spedizioni')
-      .select('id,cliente_id,master_id,corriere_id,stato,peso_fatturato,peso_reale,peso_volume,dest_provincia,dest_cap,dest_citta,dest_paese,mitt_cap,mitt_provincia,contrassegno,assicurazione,valore_merce,servizi_accessori')
-      .eq('tracking_number', r.ldv).maybeSingle()
+    const { data: legs } = await admin.from('spedizioni')
+      .select('id,cliente_id,master_id,corriere_id,stato,peso_fatturato,peso_reale,peso_volume,dest_provincia,dest_cap,dest_citta,dest_paese,mitt_cap,mitt_provincia,contrassegno,assicurazione,valore_merce,servizi_accessori,numero,tracking_number')
+      .eq('tracking_number', r.ldv)
+    // CONDIVISIONE: più gambe condividono il tracking; prendo l'ORIGINANTE (numero pulito = tracking, è
+    // quella col cliente finale e la catena-fornitore giusta). Spedizione normale = una riga sola.
+    const s: any = (legs || []).find((x: any) => x.numero === x.tracking_number) || (legs || [])[0] || null
     if (!s) return { ...base, motivo: 'spedizione non trovata' }
     if (s.stato === 'annullata') return { ...base, spedizioneId: s.id, motivo: 'spedizione annullata' }
 
@@ -134,9 +139,13 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     // ignorarlo vorrebbe dire chiedergli una seconda volta la stessa differenza. Un addebito ha
     // importo negativo, un accredito positivo, quindi si somma col segno e si gira: una nota di
     // credito ABBASSA quanto risulta pagato, non lo alza.
+    // CONDIVISIONE: i costi dei livelli stanno su GAMBE diverse (stesso tracking): i ledger "(ingrosso)"
+    // e l'owner sono sulle gambe create dal dispatch, non sull'originante. Leggo i movimenti di TUTTE le
+    // gambe, se no i livelli codice/owner risultano "pagato 0" e la differenza esce come prezzo pieno
+    // invece dell'incremento. Per una spedizione normale `legs` è una riga sola → identico a prima.
     const { data: mov } = await admin.from('movimenti')
       .select('importo,cliente_id,master_id,master_target_id,tipo')
-      .eq('spedizione_id', s.id).in('tipo', ['spedizione', 'rettifica'])
+      .in('spedizione_id', (legs || []).map((x: any) => x.id)).in('tipo', ['spedizione', 'rettifica'])
     const quantoPesa = (m: any) => m.tipo === 'spedizione'
       ? Math.abs(Number(m.importo || 0))
       : -Number(m.importo || 0)
@@ -156,7 +165,11 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     }
 
     const { data: corr } = await admin.from('corrieri')
-      .select('id,nome_contratto,master_id').eq('id', s.corriere_id).maybeSingle()
+      .select('id,nome_contratto,master_id,tipo').eq('id', s.corriere_id).maybeSingle()
+    // CONDIVISIONE: pagato per-CLIENTE (non solo il totale): un pacco condiviso ha più movimenti-cliente
+    // (il cliente finale + i ledger "(ingrosso)" dei livelli-codice); servono separati per il riprezzo.
+    const pagatoPerCliente = new Map<string, number>()
+    for (const m of (mov || [])) if (m.cliente_id) pagatoPerCliente.set(m.cliente_id, (pagatoPerCliente.get(m.cliente_id) || 0) + quantoPesa(m))
 
     // ── CLIENTE + MASTER: costruzione dei livelli, opzionalmente su una FASCIA UNICA (zonaForzata) ──
     // Estratta in una funzione così la si può rifare un SECONDO giro forzando 'Italia' quando le zone
@@ -259,11 +272,73 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
       return { livelli, zone, pesoVolumeDopo, motivo, catenaDalBasso, catenaCompleta, bloccato }
     }
 
+    // ── CONDIVISIONE: livelli sulla catena-FORNITORE (non l'albero), senza toccare costruisciCatena
+    // (che serve ai contratti normali). Stesso prezzo della creazione, sul collo RIPESATO: albero →
+    // calcolaPrezzoCorriereDettaglio del livello; codice → listino del cliente-ledger × corriere del
+    // VENDITORE (come /api/v1); owner → corriere reale. differenza = dovuto(ripesato) − pagato(movimenti,
+    // dal ledger per i codice). catenaDalBasso = catena-fornitore → l'upload e la propagazione trovano il
+    // master che carica (prima cadeva "fuori catena" perché l'owner non è nell'albero dell'originante). ──
+    const costruisciLivelliCondivisione = async () => {
+      const catena = await risolviCatenaCondivisione(admin, s.master_id, corr!.nome_contratto)
+      if (!catena.length) return null
+      const { data: nomiM } = await admin.from('masters').select('id,nome').in('id', catena.map(l => l.master))
+      const nomeM = new Map((nomiM || []).map((m: any) => [m.id, m.nome]))
+      const pesoRip = packages.reduce((a, p) => a + (Number(p.weight) || 0), 0) || 1
+      const livelli: LivelloRettifica[] = []
+      let catenaCompleta = true
+      if (s.cliente_id) {
+        const { data: cl } = await admin.from('clienti').select('ragione_sociale,listino_cliente_id').eq('id', s.cliente_id).maybeSingle()
+        let dovuto: number | null = null
+        if ((cl as any)?.listino_cliente_id) {
+          const ris = await calcolaPrezzoListino(admin, { listinoId: (cl as any).listino_cliente_id, corriereId: s.corriere_id, packages, ...dest })
+          if (ris) {
+            const sup = await calcolaSupplementiCliente(admin, { listinoId: (cl as any).listino_cliente_id, corriereId: s.corriere_id, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), valoreMerce: Number(s.valore_merce || 0), nolo: ris.prezzo, pesoReale: Number(s.peso_reale || 0) })
+            if (sup.disponibile) {
+              const acc = Array.isArray(s.servizi_accessori) ? s.servizi_accessori.reduce((a: number, x: any) => a + (Number(x?.importo) || 0), 0) : 0
+              dovuto = arrotonda(ris.prezzo + sup.contrassegno + sup.assicurazione + acc)
+            }
+          } else catenaCompleta = false
+        }
+        const pag = arrotonda(pagatoPerCliente.get(s.cliente_id) || 0)
+        livelli.push({ chi: (cl as any)?.ragione_sociale || 'cliente', clienteId: s.cliente_id, masterId: null, pagato: pag, dovuto, differenza: dovuto == null ? null : arrotonda(dovuto - pag) })
+      }
+      for (const liv of catena) {
+        let dovuto: number | null = null
+        let pag = 0
+        if (liv.ruolo === 'codice' && liv.ledgerClienteId && liv.fornitore) {
+          // Livello-CODICE: prezzato col listino del cliente-ledger contro il corriere del VENDITORE;
+          // pagato = quanto risulta scalato al ledger alla creazione. (L'addebito vero in conferma scala
+          // il ledger — vedi rettifiche/route.ts; qui si calcola solo la differenza.)
+          const { data: lc } = await admin.from('clienti').select('listino_cliente_id').eq('id', liv.ledgerClienteId).maybeSingle()
+          const corrVend = await corriereDiMasterPerNome(admin, liv.fornitore, corr!.nome_contratto)
+          pag = arrotonda(pagatoPerCliente.get(liv.ledgerClienteId) || 0)
+          if ((lc as any)?.listino_cliente_id && corrVend) {
+            const ris = await calcolaPrezzoListino(admin, { listinoId: (lc as any).listino_cliente_id, corriereId: corrVend, packages, ...dest })
+            if (ris) {
+              const sup = await calcolaSupplementiCliente(admin, { listinoId: (lc as any).listino_cliente_id, corriereId: corrVend, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), valoreMerce: Number(s.valore_merce || 0), nolo: ris.prezzo, pesoReale: Number(s.peso_reale || 0) })
+              dovuto = sup.disponibile ? arrotonda(ris.prezzo + sup.contrassegno + sup.assicurazione) : arrotonda(ris.prezzo)
+            } else catenaCompleta = false
+          } else catenaCompleta = false
+        } else {
+          // ALBERO / OWNER: dal listino del livello per il suo corriere (reale per l'owner).
+          pag = arrotonda(pagatoMaster.get(liv.master) || 0)
+          const d = await calcolaPrezzoCorriereDettaglio(admin, { corriereId: liv.corriereId, masterId: liv.master, provincia: dest.provincia, cap: dest.cap, citta: dest.citta, paese: dest.paese, pesoReale: pesoRip, packages, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), mittCap: dest.mittCap, mittProvincia: dest.mittProvincia, mittPaese: dest.mittPaese })
+          if (d && (d as any).totale != null && isFinite((d as any).totale)) dovuto = arrotonda((d as any).totale)
+          else catenaCompleta = false
+        }
+        // masterId = il master del livello (così l'upload/propagazione lo trova per figlio); per i codice
+        // il DENARO va sul ledger ma la rettifica è indirizzata al master, e la conferma risolve il ledger.
+        livelli.push({ chi: String(nomeM.get(liv.master) || liv.master), clienteId: null, masterId: liv.master, pagato: pag, dovuto, differenza: dovuto == null ? null : arrotonda(dovuto - pag) })
+      }
+      return { livelli, zone: [] as (string | null)[], pesoVolumeDopo: null as number | null, motivo: undefined as string | undefined, catenaDalBasso: catena.map(l => l.master), catenaCompleta, bloccato: false }
+    }
+
     // PASSO 1: normale (ogni livello con la sua zona). PASSO 2 (solo se serve): stessa fascia 'Italia'
     // per TUTTI, così non si mescolano zone diverse tra i livelli e non restano bloccati per assenza
     // della fascia disagiata. Si usa il forzato SOLO se sblocca davvero: altrimenti resta il passo 1
     // (identico a oggi -> nessuna regressione sulle spedizioni che gia' funzionano).
-    let res = await costruisciLivelli()
+    // CONDIVISIONE (corriere ponte): catena-fornitore, un passo solo (zone coerenti, stesso contratto).
+    let res = corr?.tipo === 'moovexpress' ? (await costruisciLivelliCondivisione() || await costruisciLivelli()) : await costruisciLivelli()
     const zoneValide = res.zone.filter((z): z is string => !!z)
     const incoerente = new Set(zoneValide).size > 1
     if (res.bloccato || incoerente) {

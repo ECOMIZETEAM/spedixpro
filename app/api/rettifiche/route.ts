@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { registraMovimento } from '@/lib/movimenti'
+import { scendiCodDaSpedizione } from '@/lib/condivisione-catena'
 import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete, vedeLaRete } from '@/lib/ruoli'
 import { fetchAll } from '@/lib/fetch-all'
@@ -390,11 +391,31 @@ export async function POST(req: NextRequest) {
     try {
       if (r.target_master_id) {
         if (!discendenti.has(r.target_master_id)) { await riapriRiga(r, 'destinatario non e\' un master della tua rete'); continue }
-        await registraMovimentoMaster(adminDb, {
-          masterOwnerId: utente!.master_id, masterTargetId: r.target_master_id,
-          tipo: 'rettifica', descrizione: descrizione(r), importo: importoAddebito,
-          riferimento: rifRett, spedizioneId: r.spedizione_id || null, createdBy: user.id,
-        })
+        // CONDIVISIONE: se il salto master→target è un salto-CODICE (corrieri_condivisi), la rettifica
+        // scende sul LEDGER "(ingrosso)" del target (clienti.credito), non su masters.credito — a specchio
+        // della creazione/COD. Risolto al volo dalla gamba (r.spedizione_id = gamba originante, dal calcolo).
+        let ledgerClienteId: string | null = null
+        if (r.spedizione_id) {
+          try {
+            const { data: sp } = await adminDb.from('spedizioni').select('master_id,cliente_id,corrieri(tipo,nome_contratto)').eq('id', r.spedizione_id).maybeSingle()
+            const c: any = Array.isArray((sp as any)?.corrieri) ? (sp as any).corrieri[0] : (sp as any)?.corrieri
+            const dCon = sp ? await scendiCodDaSpedizione(adminDb, { master_id: (sp as any).master_id, cliente_id: (sp as any).cliente_id, corriereTipo: c?.tipo, nomeContratto: c?.nome_contratto }, utente!.master_id!) : null
+            if (dCon && !dCon.fuori && dCon.ledger && dCon.target_master_id === r.target_master_id && dCon.cliente_id) ledgerClienteId = dCon.cliente_id
+          } catch (e) { console.error('[RETTIFICHE] ledger condivisione:', e) }
+        }
+        if (ledgerClienteId) {
+          await registraMovimento(adminDb, {
+            masterId: utente!.master_id, clienteId: ledgerClienteId,
+            tipo: 'rettifica', descrizione: descrizione(r), importo: importoAddebito,
+            riferimento: rifRett, spedizioneId: r.spedizione_id || null, createdBy: user.id,
+          })
+        } else {
+          await registraMovimentoMaster(adminDb, {
+            masterOwnerId: utente!.master_id, masterTargetId: r.target_master_id,
+            tipo: 'rettifica', descrizione: descrizione(r), importo: importoAddebito,
+            riferimento: rifRett, spedizioneId: r.spedizione_id || null, createdBy: user.id,
+          })
+        }
       } else if (r.cliente_id) {
         if (!mieiClienti.has(r.cliente_id)) { await riapriRiga(r, 'il cliente non e\' tuo'); continue }
         await registraMovimento(adminDb, {
