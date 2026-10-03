@@ -1,5 +1,6 @@
 import { fetchAll } from '@/lib/fetch-all'
 import { mappaPrimaLinea } from '@/lib/prima-linea'
+import { scendiCodDaSpedizione } from '@/lib/condivisione-catena'
 
 // Sposta nella SOSTA (`cod_da_caricare`) i contrassegni delle rimesse ACCETTATE, già divisi per
 // destinatario (cliente diretto o prima linea del sotto-master). È la stessa cosa per TUTTI i master
@@ -36,7 +37,7 @@ export async function caricaRimesseInSosta(
     const spedizioni: any[] = []
     for (let i = 0; i < numeri.length; i += 200) {
       const chunk = await fetchAll(() => admin.from('spedizioni')
-        .select('id,master_id,cliente_id,contrassegno,numero')
+        .select('id,master_id,cliente_id,contrassegno,numero,corriere_id,corrieri(tipo,nome_contratto)')
         .in('numero', numeri.slice(i, i + 200)).gt('contrassegno', 0).order('id', { ascending: true }))
       spedizioni.push(...chunk)
     }
@@ -60,6 +61,23 @@ export async function caricaRimesseInSosta(
     const masterMap: Record<string, any[]> = {}
     let senzaDestinatario = 0
     for (const s of daCaricare) {
+      // CONDIVISIONE: se la gamba è su un ponte (tipo='moovexpress'), "chi sta sotto di me" lo dà la
+      // catena-fornitore (corrieri_condivisi), non l'albero. Per i contratti normali dCon è null e si
+      // usa la prima linea d'albero di sempre (guardia a moovexpress: nessuna query se non è un ponte).
+      const corr: any = Array.isArray((s as any).corrieri) ? (s as any).corrieri[0] : (s as any).corrieri
+      const dCon = await scendiCodDaSpedizione(admin,
+        { master_id: s.master_id, cliente_id: s.cliente_id, corriereTipo: corr?.tipo, nomeContratto: corr?.nome_contratto }, mio)
+      if (dCon) {
+        if (dCon.fuori) { senzaDestinatario++; continue }
+        if (dCon.ruolo === 'cliente') {
+          if (!dCon.cliente_id) { senzaDestinatario++; continue }
+          ;(clientiMap[dCon.cliente_id] = clientiMap[dCon.cliente_id] || []).push(s)
+        } else {
+          if (!dCon.target_master_id) { senzaDestinatario++; continue }
+          ;(masterMap[dCon.target_master_id] = masterMap[dCon.target_master_id] || []).push(s)
+        }
+        continue
+      }
       if (s.master_id === mio) {
         if (!s.cliente_id) { senzaDestinatario++; continue }
         ;(clientiMap[s.cliente_id] = clientiMap[s.cliente_id] || []).push(s)

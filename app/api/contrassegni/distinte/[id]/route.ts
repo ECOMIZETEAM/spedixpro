@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { bloccaAgente } from '@/lib/agente'
+import { scendiCodDaSpedizione } from '@/lib/condivisione-catena'
 
 // ELIMINA una distinta contrassegni SBAGLIATA (es. file caricato per errore). Consentito SOLO:
 // - al master proprietario;
@@ -149,7 +150,29 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{id: s
         await registraMovimento(admin, { masterId: dist.master_id, clienteId: dist.cliente_id, tipo: 'contrassegno', descrizione, importo: compensato, riferimento, createdBy: user.id })
         movimentoCredito = true
       } else if (dist.target_master_id) {
-        await registraMovimentoMaster(admin, { masterOwnerId: dist.master_id, masterTargetId: dist.target_master_id, tipo: 'contrassegno', descrizione, importo: compensato, riferimento, createdBy: user.id })
+        // CONDIVISIONE: se il salto master→target è un salto-CODICE (corrieri_condivisi), il COD scende
+        // sul LEDGER "(ingrosso)" del target sotto di me (clienti.credito), NON su masters.credito — a
+        // specchio della creazione. Lo risolvo AL VOLO dalla catena-fornitore della gamba (nessuna
+        // colonna in più). Per i salti d'ALBERO e i contratti normali resta l'accredito su masters.credito.
+        let ledgerClienteId: string | null = null
+        try {
+          const { data: r0 } = await admin.from('distinte_contrassegni_righe').select('spedizione_id').eq('distinta_id', id).limit(1).maybeSingle()
+          if (r0?.spedizione_id) {
+            const { data: sp } = await admin.from('spedizioni').select('master_id,cliente_id,corrieri(tipo,nome_contratto)').eq('id', r0.spedizione_id).maybeSingle()
+            const c: any = Array.isArray((sp as any)?.corrieri) ? (sp as any).corrieri[0] : (sp as any)?.corrieri
+            const dCon = sp ? await scendiCodDaSpedizione(admin,
+              { master_id: (sp as any).master_id, cliente_id: (sp as any).cliente_id, corriereTipo: c?.tipo, nomeContratto: c?.nome_contratto },
+              dist.master_id) : null
+            if (dCon && !dCon.fuori && dCon.ledger && dCon.target_master_id === dist.target_master_id && dCon.cliente_id) {
+              ledgerClienteId = dCon.cliente_id
+            }
+          }
+        } catch (e) { console.error('[COD] ledger condivisione re-resolve:', e) }
+        if (ledgerClienteId) {
+          await registraMovimento(admin, { masterId: dist.master_id, clienteId: ledgerClienteId, tipo: 'contrassegno', descrizione, importo: compensato, riferimento, createdBy: user.id })
+        } else {
+          await registraMovimentoMaster(admin, { masterOwnerId: dist.master_id, masterTargetId: dist.target_master_id, tipo: 'contrassegno', descrizione, importo: compensato, riferimento, createdBy: user.id })
+        }
         movimentoCredito = true
       }
     } catch (e) { console.error('Movimento contrassegno compensato:', e) }

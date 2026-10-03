@@ -106,6 +106,60 @@ export async function risolviCatenaCondivisione(
   return out
 }
 
+/* A CHI SCENDE il COD (o il reso) e su QUALE CONTO, per la CONDIVISIONE. È lo SPECCHIO della creazione:
+ * il contrassegno lo incassa l'owner dal corriere e scende la catena-fornitore UN gradino alla volta,
+ * fino al cliente finale — stesso grafo della spedizione, nessun percorso nuovo (CONDIVISIONE-MODELLO.md
+ * §6 "stessa struttura" + Principio unificante). `catena` = risolviCatenaCondivisione (originante→owner);
+ * `mio` = il master che sta caricando/compensando. `mio` paga il livello IMMEDIATAMENTE SOTTO di sé
+ * (verso l'originante); l'originante paga il CLIENTE. Il conto su cui ACCREDITO è quello con cui quel
+ * livello-sotto paga il suo fornitore: `ledger` (clienti.credito del "(ingrosso)") sui salti CODICE,
+ * `masters.credito` (conto sub-master ESISTENTE) sui salti ALBERO. SOLA LETTURA (è una funzione pura). */
+export interface DestCondivisione {
+  fuori: boolean
+  // chi ACCETTA la rimessa e prosegue la discesa (null = la discesa termina sul cliente finale)
+  target_master_id: string | null
+  // DOVE va il DENARO (clienti.credito): il cliente finale sull'ultimo gradino, il ledger "(ingrosso)"
+  // sui salti CODICE. Sui salti ALBERO è null e si accredita masters.credito del target_master_id.
+  cliente_id: string | null
+  ledger: boolean           // true = cliente_id è un ledger "(ingrosso)" (salto codice), non il cliente finale
+  ruolo: 'albero' | 'codice' | 'cliente' | null
+}
+
+export function destinatarioCodCondivisione(
+  catena: LivelloCondivisione[], mio: string, clienteFinaleId: string | null,
+): DestCondivisione {
+  const idx = catena.findIndex(l => l.master === mio)
+  if (idx === -1) return { fuori: true, target_master_id: null, cliente_id: null, ledger: false, ruolo: null }
+  if (idx === 0) {
+    // l'originante è l'ultimo gradino: paga il CLIENTE finale (clienti.credito), poi la discesa finisce.
+    return { fuori: false, target_master_id: null, cliente_id: clienteFinaleId, ledger: false, ruolo: 'cliente' }
+  }
+  const sotto = catena[idx - 1]   // il livello immediatamente sotto di me, verso l'originante
+  if (sotto.ruolo === 'codice') {
+    // salto CODICE: la rimessa va al MASTER sotto (che accetta e prosegue), ma il DENARO scende sul suo
+    // ledger "(ingrosso)" sotto di me (lo stesso conto con cui lui mi ha pagato la spedizione).
+    return { fuori: false, target_master_id: sotto.master, cliente_id: sotto.ledgerClienteId, ledger: true, ruolo: 'codice' }
+  }
+  // salto ALBERO: accredito il conto sub-master ESISTENTE del livello sotto (masters.credito).
+  return { fuori: false, target_master_id: sotto.master, cliente_id: null, ledger: false, ruolo: 'albero' }
+}
+
+/* COMODO: dato una SPEDIZIONE (la gamba originante) e il master che AGISCE (carica/accetta/compensa),
+ * dice a chi scende il COD e su quale conto, per i contratti CONDIVISI. Ritorna null se NON è un
+ * contratto-ponte → il chiamante usa il percorso ad ALBERO esistente, invariato (guardia a moovexpress).
+ * Un solo punto che costruisce la catena: upload-cod, l'accetta (cod-rimesse) e la compensazione lo
+ * chiamano tutti, così non nasce un secondo modo di camminare la rete. SOLA LETTURA. */
+export async function scendiCodDaSpedizione(
+  admin: any,
+  sped: { master_id: string; cliente_id: string | null; corriereTipo?: string | null; nomeContratto?: string | null },
+  mio: string,
+): Promise<DestCondivisione | null> {
+  if (sped.corriereTipo !== 'moovexpress' || !sped.nomeContratto) return null
+  const catena = await risolviCatenaCondivisione(admin, sped.master_id, sped.nomeContratto)
+  if (!catena.length) return null
+  return destinatarioCodCondivisione(catena, mio, sped.cliente_id)
+}
+
 /* LE GAMBE di una spedizione condivisa, in ordine ORIGINANTE → … → OWNER. Le 3 (o più) righe spedizioni della
  * catena condividono lo STESSO tracking_number (è lo stesso pacco fisico), ma sono master diversi legati da
  * `raw_response.venditore_spedizione_id` (ogni gamba punta alla gamba del suo VENDITORE, quella sotto). Serve a

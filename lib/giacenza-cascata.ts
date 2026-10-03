@@ -1,7 +1,8 @@
 import { registraMovimentoMaster, registraMovimento } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
-import { noloMaster, noloClienteDopoPartenza, applicaServizio, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
+import { noloMaster, noloCliente, noloClienteDopoPartenza, applicaServizio, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
+import { risolviCatenaCondivisione, risolviGambeSpedizione } from '@/lib/condivisione-catena'
 
 // Mappa il "nome" di un supplemento giacenza (sia lato cliente sia lato master) sull'operazione.
 // Es. "Riconsegna al nuovo destinatario" -> riconsegna_nuovo, "Reso al mittente" -> reso.
@@ -153,18 +154,65 @@ export async function addebitaGiacenzaCatena(
  * reso e' gia' stato addebitato da un'altra strada, fn_addebita_resi risponde "gia_addebitato" e
  * non si paga due volte. Vince il primo dei due momenti che arriva.
  */
+// RESO del CONDIVISO: cascata sulla catena-FORNITORE (non l'albero), ogni livello col SUO nolo e sul
+// SUO conto — albero→masters.credito (self/self, come il tree-reso), codice→ledger "(ingrosso)",
+// owner→credito_proprio — a specchio della creazione: il livello-codice è prezzato col listino del
+// cliente-ledger contro il corriere del VENDITORE (lo stesso che fa /api/v1). ANTI-DOPPIO: la cascata
+// parte SEMPRE dalla gamba ORIGINANTE (risolviGambeSpedizione), così tutte le righe puntano al suo
+// spedizione_id e fn_addebita_resi dedup, qualunque gamba abbia innescato il reso. SOLO moovexpress.
+export async function addebitaResoCondivisione(admin: any, spedizioneId: string, nomeContratto: string, daGiacenza = true): Promise<EsitoAddebito> {
+  // Risolvo la gamba ORIGINANTE dal tracking: è da lì che la catena ha senso e lì puntano tutte le righe.
+  const { data: spTrk } = await admin.from('spedizioni').select('tracking_number').eq('id', spedizioneId).maybeSingle()
+  const tracking = (spTrk as any)?.tracking_number
+  const gambe = tracking ? await risolviGambeSpedizione(admin, tracking) : []
+  const originanteId = gambe.length ? gambe[0].spedizioneId : spedizioneId
+  const { data: full } = await admin.from('spedizioni')
+    .select('id,numero,cliente_id,master_id,corriere_id,costo_totale,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta')
+    .eq('id', originanteId).maybeSingle()
+  if (!full) return { addebitato: false, importoCliente: 0 }
+  const catena = await risolviCatenaCondivisione(admin, full.master_id, nomeContratto)
+  if (!catena.length) return { addebitato: false, importoCliente: 0 }
+  const righe: RigaReso[] = []
+  // CLIENTE finale (originante): nolo dal SUO listino cliente (0 se contratto tolto → vedi noloClienteDopoPartenza).
+  if (full.cliente_id) {
+    const { data: cli } = await admin.from('clienti').select('listino_cliente_id').eq('id', full.cliente_id).maybeSingle()
+    righe.push({ spedizione_id: full.id, cliente_id: full.cliente_id, master_owner_id: full.master_id, corriere_id: full.corriere_id,
+      nolo: await noloClienteDopoPartenza(admin, full, (cli as any)?.listino_cliente_id), da_giacenza: daGiacenza })
+  }
+  for (const liv of catena) {
+    if (liv.ruolo === 'codice' && liv.ledgerClienteId && liv.fornitore) {
+      // Livello-CODICE: prezzato come in creazione — listino del cliente-ledger, corriere del VENDITORE.
+      // L'addebito scala il LEDGER (clienti.credito del "(ingrosso)"), non masters.credito.
+      const { data: lc } = await admin.from('clienti').select('listino_cliente_id').eq('id', liv.ledgerClienteId).maybeSingle()
+      const corrVend = await corriereDiMasterPerNome(admin, liv.fornitore, nomeContratto)
+      const nolo = ((lc as any)?.listino_cliente_id && corrVend)
+        ? await noloCliente(admin, { ...full, corriere_id: corrVend }, (lc as any).listino_cliente_id) : null
+      righe.push({ spedizione_id: full.id, cliente_id: liv.ledgerClienteId, master_owner_id: liv.fornitore, corriere_id: corrVend,
+        nolo: nolo ?? 0, da_giacenza: daGiacenza })
+    } else {
+      // ALBERO / OWNER: self/self, nolo dal listino del livello (owner = corriere reale → credito_proprio).
+      righe.push({ spedizione_id: full.id, master_target_id: liv.master, master_owner_id: liv.master, corriere_id: liv.corriereId,
+        nolo: (await noloMaster(admin, liv.master, liv.corriereId, full)) || 0,
+        pagato: await pagatoDaMaster(admin, full.id, liv.master), da_giacenza: daGiacenza })
+    }
+  }
+  try {
+    const esiti = await addebitaResi(admin, righe, null)
+    const cli = esiti.find(e => e.cliente_id === full.cliente_id && e.esito === 'addebitato')
+    return { addebitato: esiti.some(e => e.esito === 'addebitato' || e.esito === 'gia_addebitato'), importoCliente: Number(cli?.importo || 0) }
+  } catch (e) { console.error('Errore addebito reso condivisione:', e); return { addebitato: false, importoCliente: 0 } }
+}
+
 export async function addebitaResoDaTracking(admin: any, spedizioneId: string): Promise<EsitoAddebito> {
   const { data: sp } = await admin.from('spedizioni')
     .select('id,numero,cliente_id,master_id,corriere_id,giacenza_apertura_addebitata,corrieri(nome_contratto,master_id,tipo)')
     .eq('id', spedizioneId).maybeSingle()
   if (!sp) return { addebitato: false, importoCliente: 0 }
   const corr: any = (sp as any).corrieri
-  // CONDIVISIONE: una gamba-ponte (tipo='moovexpress') NON passa di qui. La catena vera non è l'albero:
-  // ogni gamba risalirebbe l'albero fino al master-hub (es. MULTIEXPRESS) e, con più gambe dello stesso
-  // pacco (stesso tracking), lo addebiterebbe PIÙ volte (doppio sul reso). Il reso del condiviso va fatto
-  // gamba-per-gamba sulla catena-fornitore (feature deferita); il costo reale resta sulla gamba dell'owner
-  // (corriere reale, non-moovexpress, che passa di qui normalmente). Qui si salta: niente doppio.
-  if (corr?.tipo === 'moovexpress') return { addebitato: false, importoCliente: 0 }
+  // CONDIVISIONE: una gamba-ponte (tipo='moovexpress') segue la catena-FORNITORE, non l'albero (che
+  // risalirebbe al master-hub e, con più gambe stesso tracking, addebiterebbe doppio). La cascata parte
+  // dalla gamba originante ed è idempotente (vedi addebitaResoCondivisione). Gli altri corrieri: invariato.
+  if (corr?.tipo === 'moovexpress') return addebitaResoCondivisione(admin, spedizioneId, corr?.nome_contratto || '', false)
   return addebitaResoGiacenza(
     admin,
     sp as any,

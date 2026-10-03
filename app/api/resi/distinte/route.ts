@@ -107,6 +107,53 @@ export async function POST(req: NextRequest) {
   let voci = body.voci
   const adminDb = createAdminSupabase()
 
+  // ── RAMO CONDIVISIONE: le voci su un ponte (tipo='moovexpress') seguono la catena-FORNITORE, non
+  // l'albero. Si addebitano con addebitaResoCondivisione (cascata completa a tutti i livelli, sul conto
+  // giusto, idempotente dalla gamba originante), poi si TOLGONO da `voci` così il resto della rotta
+  // (contratti normali) resta byte-identico. Autorizzazione: la gamba dev'essere nel sotto-albero di chi
+  // chiama (o sua), come gli altri rami. ──
+  {
+    const idsAll = (voci || []).map((v: any) => v?.id).filter(Boolean)
+    if (idsAll.length) {
+      const { data: spAll } = await adminDb.from('spedizioni')
+        .select('id,master_id,corrieri(tipo,nome_contratto)').in('id', idsAll)
+      const corrDi = (s: any) => Array.isArray(s?.corrieri) ? s.corrieri[0] : s?.corrieri
+      const bridge = (spAll || []).filter((s: any) => corrDi(s)?.tipo === 'moovexpress')
+      if (bridge.length) {
+        const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+        const rete = new Set<string>([utente!.master_id!, ...await sottoAlberoMasterIds(adminDb, utente!.master_id!)])
+        const bridgeOk = bridge.filter((s: any) => rete.has(s.master_id))
+        const idsBridge = new Set(bridgeOk.map((s: any) => s.id))
+        const vociBridge = (voci || []).filter((v: any) => idsBridge.has(v?.id))
+        const vociBridgeNuove = await escludiGiaInDistinta(adminDb, utente!.master_id!, vociBridge)
+        if (vociBridgeNuove.length) {
+          const { addebitaResoCondivisione } = await import('@/lib/giacenza-cascata')
+          const { count: cC } = await supabase.from('distinte_resi').select('*', { count: 'exact', head: true }).eq('master_id', utente?.master_id)
+          const { data: distC } = await supabase.from('distinte_resi').insert({
+            master_id: utente?.master_id, cliente_id: clienteId || null, target_master_id: targetMasterId || null,
+            numero: (cC || 0) + 1, totale_ldv: vociBridgeNuove.length, totale: 0, voci: vociBridgeNuove, stato: 'chiusa',
+          }).select().single()
+          let totC = 0
+          for (const v of vociBridgeNuove) {
+            const sp = bridgeOk.find((b: any) => b.id === v.id)
+            const nome = corrDi(sp)?.nome_contratto || ''
+            try {
+              const e = await addebitaResoCondivisione(adminDb, v.id, nome, false)
+              totC += Number(e.importoCliente || 0)
+            } catch (err) { console.error('[RESI][CONDIVISIONE] addebito:', err) }
+            // reso_mittente DOPO l'addebito: il trigger fn_reso_da_addebitare non ri-accoda (vede già il
+            // movimento reso) e la cascata non parte due volte; il costo resta scritto una volta sola.
+            await adminDb.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
+          }
+          if (distC) await supabase.from('distinte_resi').update({ totale: totC }).eq('id', distC.id)
+        }
+        // Tolgo le bridge dal flusso ad albero: se non resta nulla, chiudo qui.
+        voci = (voci || []).filter((v: any) => !idsBridge.has(v?.id))
+        if (!voci.length) return NextResponse.json({ success: true, condivisione: bridgeOk.length })
+      }
+    }
+  }
+
   // ── RAMO CATENA: reso verso un master figlio (addebito del prezzo che LUI ha pagato) ──
   if (targetMasterId && !clienteId) {
     // Il master bersaglio arriva dal browser e finora non veniva MAI verificato, mentre tutte le

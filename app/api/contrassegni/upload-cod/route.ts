@@ -4,6 +4,7 @@ import { bloccaAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
 import { risaliCatena, destinatarioCod } from '@/lib/contrassegni-catena'
+import { scendiCodDaSpedizione } from '@/lib/condivisione-catena'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -89,14 +90,14 @@ export async function POST(req: NextRequest) {
 
     // Match ESATTO per primo (usa l'indice su numero → veloce): copre la stragrande maggioranza.
     let { data: spedizione } = await adminDb.from('spedizioni')
-      .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno')
+      .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno,corriere_id,corrieri(tipo,nome_contratto)')
       .eq('numero', ldv)
       .limit(1).maybeSingle()
     if (!spedizione) {
       // Ripiego: match parziale (numero che CONTIENE la LDV). È una scansione, ma gira SOLO sulle
       // righe che l'esatto non ha risolto, non più su tutte.
       const rLike = await adminDb.from('spedizioni')
-        .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno')
+        .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno,corriere_id,corrieri(tipo,nome_contratto)')
         .ilike('numero', `%${ldv}%`)
         .limit(1).maybeSingle()
       spedizione = rLike.data as any
@@ -104,7 +105,7 @@ export async function POST(req: NextRequest) {
     if (!spedizione && /^[A-Za-z0-9_-]+$/.test(ldv)) {
       // Export SpediamoPro: 'Shipment' e' il codice del provider (raw_response.code), non la LDV in elenco.
       const r2 = await adminDb.from('spedizioni')
-        .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno')
+        .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno,corriere_id,corrieri(tipo,nome_contratto)')
         .or(`tracking_number.eq.${ldv},raw_response->>code.eq.${ldv}`)
         .limit(1).maybeSingle()
       spedizione = r2.data as any
@@ -122,8 +123,19 @@ export async function POST(req: NextRequest) {
     // ricarica e NON si riconta come "processata".
     if (giaInSostaSet.has(spedizione.id)) { giaInSostaCount++; continue }
 
-    // Solo discesa: chi carica deve essere il master della spedizione o un antenato
-    const dest = destinatarioCod(await getCatena(spedizione.master_id), masterId, spedizione.cliente_id)
+    // Solo discesa: chi carica deve essere il master della spedizione o un antenato.
+    // CONDIVISIONE: se la gamba è su un ponte (tipo='moovexpress') la catena NON è l'albero ma la
+    // catena-fornitore (corrieri_condivisi) — stesso resolver della creazione, letto a scendere. Senza
+    // questo l'owner reale (es. LOGIXIA) cadrebbe "fuori dalla tua rete". Contratti normali: invariato.
+    const corr: any = Array.isArray((spedizione as any).corrieri) ? (spedizione as any).corrieri[0] : (spedizione as any).corrieri
+    const dCon = await scendiCodDaSpedizione(adminDb,
+      { master_id: spedizione.master_id, cliente_id: spedizione.cliente_id, corriereTipo: corr?.tipo, nomeContratto: corr?.nome_contratto },
+      masterId)
+    // Il ledger del salto-codice NON si memorizza qui: la riga di sosta resta {cliente|target_master},
+    // verso un master (codice o albero) o verso il cliente finale; il ledger lo risolve la compensazione.
+    const dest: { fuori: boolean; cliente_id?: string | null; target_master_id?: string | null } = dCon
+      ? (dCon.fuori ? { fuori: true } : { fuori: false, cliente_id: dCon.ruolo === 'cliente' ? dCon.cliente_id : null, target_master_id: dCon.ruolo === 'cliente' ? null : dCon.target_master_id })
+      : destinatarioCod(await getCatena(spedizione.master_id), masterId, spedizione.cliente_id)
     if (dest.fuori) { segnaErrore(spedizione.numero || ldv, 'fuori dalla tua rete'); continue }
 
     // SPEDIZIONE PROPRIA del master (nessun cliente e nessun sotto-master sotto): il COD è già suo, non
