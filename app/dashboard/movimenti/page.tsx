@@ -51,6 +51,9 @@ export default function MovimentiMasterPage() {
   const [cerca, setCerca] = useFiltriPersistenti('movimenti-master:cerca', '')
   const [corriereFiltro, setCorriereFiltro] = useFiltriPersistenti('movimenti-master:corriere', '')
   const [gruppoFiltro, setGruppoFiltro] = useFiltriPersistenti('movimenti-master:gruppo', '')       // E&A: filtra la lista per portale/sotto-account
+  // CONDIVISIONE: conti selezionabili (rete/albero + un conto-CODICE per fornitore). Vuoto/1 voce = nessun selettore.
+  const [conti, setConti] = useState<{ id: string; label: string }[]>([])
+  const [contoFiltro, setContoFiltro] = useFiltriPersistenti('movimenti-master:conto', 'rete')
   const [perPage, setPerPage] = useFiltriPersistenti('movimenti-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
   const [total, setTotal] = useState(0)
@@ -123,6 +126,7 @@ export default function MovimentiMasterPage() {
         if (cercaDeb) params.set('cerca', cercaDeb)
         if (corriereFiltro) params.set('corriere', corriereFiltro)
         if (gruppoFiltro) params.set('gruppo', gruppoFiltro)
+        params.set('conto', contoFiltro || 'rete')
         const res = await fetch('/api/movimenti/lista?' + params.toString())
         const data = await res.json()
         if (annulla) return
@@ -132,13 +136,14 @@ export default function MovimentiMasterPage() {
           setSaldoCommissioni(data.saldoCommissioni == null ? null : Number(data.saldoCommissioni))
           setTotal(Number(data.total || 0)); setSomma(Number(data.somma || 0))
           if (Array.isArray(data.corrieriDisponibili)) setCorrieriOpts(data.corrieriDisponibili)
+          if (Array.isArray(data.conti)) setConti(data.conti)
           setErr(null)
         } else setErr(data.error || 'Errore nel caricamento')
       } catch { if (!annulla) setErr('Errore di rete') }
       finally { if (!annulla) setLoading(false) }
     })()
     return () => { annulla = true }
-  }, [pagina, perPage, cercaDeb, corriereFiltro, gruppoFiltro])
+  }, [pagina, perPage, cercaDeb, corriereFiltro, gruppoFiltro, contoFiltro])
   useEffect(() => { caricaPortali() }, [])
 
   const corrieri = corrieriOpts
@@ -231,7 +236,7 @@ export default function MovimentiMasterPage() {
       <div style={{...card,marginBottom:'16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px'}}>
         <div style={{display:'flex',gap:'28px',flexWrap:'wrap'}}>
           <div>
-            <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>{saldoProprio!=null?'Credito · conto rete':'Credito disponibile'}</div>
+            <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>{contoFiltro!=='rete'?`Credito · ${conti.find(c=>c.id===contoFiltro)?.label||'fornitore'}`:(saldoProprio!=null?'Credito · conto rete':'Credito disponibile')}</div>
             <div style={{fontSize:'26px',fontWeight:700,color:saldo<0?'#b91c1c':'#15803d',marginTop:'4px'}}>{fmtEuro(saldo)}</div>
           </div>
           {saldoProprio!=null && (
@@ -258,6 +263,14 @@ export default function MovimentiMasterPage() {
               <select value={gruppoFiltro} onChange={e=>{setGruppoFiltro(e.target.value);setPagina(1)}} style={{padding:'6px 8px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',maxWidth:'190px'}}>
                 <option value="">Tutti i gruppi</option>
                 {gruppi.map(g=><option key={g.gruppo} value={g.gruppo}>{g.label}</option>)}
+              </select>
+            </>
+          )}
+          {conti.length > 1 && (
+            <>
+              <span style={{fontSize:'12.5px',color:'#666'}}>Conto</span>
+              <select value={contoFiltro} onChange={e=>{setContoFiltro(e.target.value);setPagina(1)}} style={{padding:'6px 8px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',maxWidth:'190px'}}>
+                {conti.map(c=><option key={c.id} value={c.id}>{c.id==='rete'?c.label:`Fornitore · ${c.label}`}</option>)}
               </select>
             </>
           )}

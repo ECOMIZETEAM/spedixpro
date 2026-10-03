@@ -219,7 +219,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
 
   // Credito del master in topbar (solo staff di rete). All'avvio, a ogni cambio pagina e ogni 2 min:
   // dopo una spedizione o un addebito il numero si aggiorna da solo.
-  const [creditoTop, setCreditoTop] = useState<{ mostra: boolean; rete: number; proprio: number } | null>(null)
+  const [creditoTop, setCreditoTop] = useState<{ mostra: boolean; rete: number; proprio: number; ledger?: { fornitore_master_id: string; fornitore: string; saldo: number }[] } | null>(null)
   useEffect(() => {
     if (!['master', 'admin', 'operatore'].includes(ruolo)) return
     const load = () => fetch('/api/master/credito').then(r => r.json()).then(d => { if (d && d.mostra) setCreditoTop(d) }).catch(() => {})
@@ -397,6 +397,19 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                 </a>
               )
             })()}
+            {/* CONDIVISIONE: conti-CODICE separati (uno per fornitore). Il credito verso un fornitore non-padre
+                vive su un ledger "(ingrosso)" sotto di lui, invisibile a masters.credito: qui una pillola a parte. */}
+            {(creditoTop?.ledger || []).map((lg) => {
+              const pos = Number(lg.saldo || 0) >= 0
+              return (
+                <a key={lg.fornitore_master_id} href="/dashboard/movimenti" title={`Credito verso ${lg.fornitore} — vai ai movimenti`}
+                  style={{display:'flex',alignItems:'center',gap:'6px',textDecoration:'none',background:pos?'#f0fdf4':'#fef2f2',border:`1px solid ${pos?'#bbf7d0':'#fecaca'}`,borderRadius:'8px',padding:'5px 10px'}}>
+                  <span style={{fontSize:'13px'}}>💳</span>
+                  {!isMobile && <span style={{fontSize:'10px',fontWeight:700,textTransform:'uppercase' as const,letterSpacing:'0.4px',color:'#6b7280'}}>{lg.fornitore}</span>}
+                  <span style={{fontSize:'13px',fontWeight:800,color:pos?'#16a34a':'#dc2626',whiteSpace:'nowrap' as const}}>€ {Number(lg.saldo||0).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+                </a>
+              )
+            })}
             {['master', 'admin', 'operatore'].includes(ruolo) && (
               <a href="/dashboard/reports/storico-sms" title="SMS — credito e acquisto"
                 style={{ display: 'flex', alignItems: 'center', gap: '5px', textDecoration: 'none', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: '8px', padding: '5px 10px' }}>

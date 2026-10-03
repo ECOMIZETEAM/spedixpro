@@ -99,6 +99,52 @@ export async function GET(req: NextRequest) {
           : c.tipo === 'spedisci' && ((c.credenziali as any)?.master_domain === gruppo)
       ).map((c: any) => c.id)
     }
+    // CONDIVISIONE (due grafi): oltre al conto ALBERO (masters.credito, movimenti master_target=io), un
+    // master connesso via CODICE ha un conto su un LEDGER "(ingrosso)" sotto ogni FORNITORE (clienti.credito,
+    // movimenti cliente_id=ledger). La RLS li nasconde al master stesso -> admin. La proprieta' si ricava
+    // SOLO da corrieri_condivisi (master=loggato, attiva): il `conto` scelto dal client e' un FORNITORE id,
+    // mappato qui al ledger posseduto — mai un ledgerId/clienteId dal client.
+    const { createAdminSupabase: _adm } = await import('@/lib/supabase-admin')
+    const adminM = _adm()
+    const { data: legamiCod } = await adminM.from('corrieri_condivisi')
+      .select('fornitore_master_id,cliente_ledger_id').eq('master_id', utente.master_id).eq('stato', 'attiva').not('cliente_ledger_id', 'is', null)
+    const ledgerPerForn = new Map<string, string>()
+    for (const l of (legamiCod || [])) {
+      if (l.fornitore_master_id && l.cliente_ledger_id && !ledgerPerForn.has(l.fornitore_master_id)) ledgerPerForn.set(l.fornitore_master_id, l.cliente_ledger_id)
+    }
+    const fornIds = [...ledgerPerForn.keys()]
+    const { data: fornMasters } = fornIds.length ? await adminM.from('masters').select('id,nome').in('id', fornIds) : { data: [] as any[] }
+    const nomeForn = new Map((fornMasters || []).map((f: any) => [f.id, f.nome]))
+    const { data: mioParent } = await adminM.from('masters').select('parent_master_id').eq('id', utente.master_id).maybeSingle()
+    const { data: parentM } = (mioParent as any)?.parent_master_id
+      ? await adminM.from('masters').select('nome').eq('id', (mioParent as any).parent_master_id).maybeSingle() : { data: null as any }
+    // Lista dei conti selezionabili: 'rete' (albero) + uno per fornitore-codice. Per i master senza
+    // legami-codice resta [{rete}] e la pagina non mostra alcun selettore -> comportamento invariato.
+    const conti = [
+      { id: 'rete', label: (parentM as any)?.nome || 'Rete' },
+      ...fornIds.map((fid) => ({ id: fid, label: nomeForn.get(fid) || '—' })),
+    ]
+    const conto = (p.get('conto') || 'rete').trim()
+    const ledgerScelto = conto !== 'rete' && ledgerPerForn.has(conto) ? ledgerPerForn.get(conto)! : null
+
+    // Opzioni del filtro corriere: i nomi contratto sono condivisi in rete → bastano i MIEI.
+    const { data: miei } = await supabase.from('corrieri').select('nome_contratto').eq('master_id', utente.master_id)
+    const corrieriDisponibili = Array.from(new Set((miei || []).map((c: any) => c.nome_contratto).filter(Boolean))).sort()
+
+    if (ledgerScelto) {
+      // CONTO CODICE: movimenti del ledger (cliente_id), saldo da clienti.credito. Via admin (RLS nasconde).
+      const { movimenti, total, somma } = await carica(adminM, 'cliente_id', ledgerScelto)
+      const { data: led } = await adminM.from('clienti').select('credito').eq('id', ledgerScelto).maybeSingle()
+      return NextResponse.json({
+        movimenti: await conCorriere(movimenti),
+        total, somma, page: page || undefined, perPage,
+        corrieriDisponibili, conti, conto,
+        saldo: Number((led as any)?.credito || 0),
+        cliente: `Conto ${nomeForn.get(conto) || ''}`.trim(),
+      })
+    }
+
+    // CONTO RETE (albero): comportamento storico.
     const { movimenti, total, somma } = await carica(supabase, 'master_target_id', utente.master_id)
     const { data: m } = await supabase
       .from('masters').select('credito, nome, credito_proprio, commissioni_moovexpress').eq('id', utente.master_id).single()
@@ -107,13 +153,10 @@ export async function GET(req: NextRequest) {
     // davvero, cosi' per tutti gli altri la pagina resta identica.
     const { haContoProprio } = await import('@/lib/cascata')
     const dueConti = await haContoProprio(utente.master_id)
-    // Opzioni del filtro corriere: i nomi contratto sono condivisi in rete → bastano i MIEI.
-    const { data: miei } = await supabase.from('corrieri').select('nome_contratto').eq('master_id', utente.master_id)
-    const corrieriDisponibili = Array.from(new Set((miei || []).map((c: any) => c.nome_contratto).filter(Boolean))).sort()
     return NextResponse.json({
       movimenti: await conCorriere(movimenti),
       total, somma, page: page || undefined, perPage,
-      corrieriDisponibili,
+      corrieriDisponibili, conti, conto: 'rete',
       saldo: Number(m?.credito || 0),
       saldoProprio: dueConti ? Number((m as any)?.credito_proprio || 0) : undefined,
       // Commissioni MoovExpress accumulate sui contratti propri (0,05 €/spedizione): lista/saldo a
