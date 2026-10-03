@@ -108,6 +108,16 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   const { data: disabRows } = await admin.from('masters_corrieri_abilitati').select('corriere_id').eq('master_id', subMasterId).eq('abilitato', false)
   const disabilitati = new Set((disabRows || []).map((r: any) => r.corriere_id))
   const subDisabIds: string[] = []
+  // CONDIVISIONE — i DUE GRAFI: un ponte del sub alimentato da un legame CODICE (corrieri_condivisi attivo)
+  // prende il suo costo dalla CATENA-FORNITORE (lib/condivisione-propaga propagaCosto), NON dall'albero.
+  // La cascata-albero aggancia per NOME e, senza questa guardia, riscriveva il ponte col prezzo del
+  // padre-albero: Wave (compra da LOGIXIA via codice, ma è figlio-albero di MULTI) mostrava 4,48 = MULTI
+  // +0,10 invece del 4,28 del suo fornitore. I soldi erano giusti (seguono la catena), il listino no.
+  // Verità dei legami = corrieri_condivisi, non parent_master_id (vedi condivisione-catena.ts). Qui
+  // identifico i ponti-acquirente dei legami CODICE attivi del sub e li SALTO: li materializza propagaCosto.
+  const { data: codiceRows } = await admin.from('corrieri_condivisi')
+    .select('corriere_acquirente_id').eq('master_id', subMasterId).eq('stato', 'attiva')
+  const pontiCodice = new Set((codiceRows || []).map((r: any) => r.corriere_acquirente_id).filter(Boolean))
   for (const c of (corrSrc || [])) {
     const key = (c.nome_contratto || '').trim().toLowerCase()
     if (disabilitati.has(c.id)) {
@@ -117,6 +127,10 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
       continue
     }
     const esist: any = mappaCorrMio.get(key)
+    // Ponte codice-alimentato (acquirente di un legame corrieri_condivisi attivo): lo materializza la
+    // catena (propagaCosto), la cascata-albero lo SALTA. Niente mapCorr.set → resta fuori da subCorrIds
+    // e dalla delete-force delle fasce → il costo-catena (es. Wave 4,28) sopravvive, non viene clobberato.
+    if (esist?.id && pontiCodice.has(esist.id)) continue
     let subId = esist?.id
     if (!subId) {
       // Nuovo: copio le impostazioni di contratto (senza mittente: lo imposta il sotto-master).
