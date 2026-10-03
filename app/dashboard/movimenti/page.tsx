@@ -236,7 +236,7 @@ export default function MovimentiMasterPage() {
       <div style={{...card,marginBottom:'16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px'}}>
         <div style={{display:'flex',gap:'28px',flexWrap:'wrap'}}>
           <div>
-            <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>{contoFiltro!=='rete'?`Credito · ${conti.find(c=>c.id===contoFiltro)?.label||'fornitore'}`:(saldoProprio!=null?'Credito · conto rete':'Credito disponibile')}</div>
+            <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>{(()=>{ if(contoFiltro!=='rete') return `Credito · ${conti.find(c=>c.id===contoFiltro)?.label||'fornitore'}`; const rl=conti.find(c=>c.id==='rete')?.label; return rl&&rl!=='Rete'?`Credito · ${rl}`:(saldoProprio!=null?'Credito · conto rete':'Credito disponibile'); })()}</div>
             <div style={{fontSize:'26px',fontWeight:700,color:saldo<0?'#b91c1c':'#15803d',marginTop:'4px'}}>{fmtEuro(saldo)}</div>
           </div>
           {saldoProprio!=null && (

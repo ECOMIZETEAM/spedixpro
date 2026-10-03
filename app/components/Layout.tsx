@@ -219,7 +219,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
 
   // Credito del master in topbar (solo staff di rete). All'avvio, a ogni cambio pagina e ogni 2 min:
   // dopo una spedizione o un addebito il numero si aggiorna da solo.
-  const [creditoTop, setCreditoTop] = useState<{ mostra: boolean; rete: number; proprio: number; ledger?: { fornitore_master_id: string; fornitore: string; saldo: number }[] } | null>(null)
+  const [creditoTop, setCreditoTop] = useState<{ mostra: boolean; rete: number; reteLabel?: string | null; proprio: number; ledger?: { fornitore_master_id: string; fornitore: string; saldo: number }[] } | null>(null)
   useEffect(() => {
     if (!['master', 'admin', 'operatore'].includes(ruolo)) return
     const load = () => fetch('/api/master/credito').then(r => r.json()).then(d => { if (d && d.mostra) setCreditoTop(d) }).catch(() => {})
@@ -392,7 +392,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                 <a href="/dashboard/movimenti" title="Il tuo credito — vai ai movimenti"
                   style={{display:'flex',alignItems:'center',gap:'6px',textDecoration:'none',background:pos?'#f0fdf4':'#fef2f2',border:`1px solid ${pos?'#bbf7d0':'#fecaca'}`,borderRadius:'8px',padding:'5px 10px'}}>
                   <span style={{fontSize:'13px'}}>💳</span>
-                  {!isMobile && <span style={{fontSize:'10px',fontWeight:700,textTransform:'uppercase' as const,letterSpacing:'0.4px',color:'#6b7280'}}>Credito</span>}
+                  {!isMobile && <span style={{fontSize:'10px',fontWeight:700,textTransform:'uppercase' as const,letterSpacing:'0.4px',color:'#6b7280'}}>{creditoTop.reteLabel || 'Credito'}</span>}
                   <span style={{fontSize:'13px',fontWeight:800,color:pos?'#16a34a':'#dc2626',whiteSpace:'nowrap' as const}}>€ {rete.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
                 </a>
               )

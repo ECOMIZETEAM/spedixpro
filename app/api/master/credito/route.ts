@@ -16,7 +16,14 @@ export async function GET() {
   }
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
-  const { data: m } = await admin.from('masters').select('credito,credito_proprio').eq('id', utente.master_id).maybeSingle()
+  const { data: m } = await admin.from('masters').select('credito,credito_proprio,parent_master_id').eq('id', utente.master_id).maybeSingle()
+  // Etichetta del conto RETE: quando ci sono anche conti-codice, "Credito" diventa ambiguo -> si mostra
+  // il nome del livello verso cui va quel conto (il padre in rete, es. MULTIEXPRESS). Senza padre resta "Credito".
+  let reteLabel: string | null = null
+  if ((m as any)?.parent_master_id) {
+    const { data: pm } = await admin.from('masters').select('nome').eq('id', (m as any).parent_master_id).maybeSingle()
+    reteLabel = (pm as any)?.nome || null
+  }
 
   // CONDIVISIONE (due grafi): oltre al credito ALBERO (masters.credito, verso il padre), un master che
   // compra un contratto via CODICE ha il suo conto su un LEDGER "(ingrosso)" sotto il FORNITORE
@@ -54,6 +61,7 @@ export async function GET() {
   return NextResponse.json({
     mostra: true,
     rete: Number((m as any)?.credito || 0),
+    reteLabel,
     proprio: Number((m as any)?.credito_proprio || 0),
     ledger,
   })
