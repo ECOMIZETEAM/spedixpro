@@ -6,7 +6,7 @@ import AssistenzaTicketButton from '@/app/components/AssistenzaTicketButton'
 import DettaglioSpedizione from '@/app/components/DettaglioSpedizione'
 import SchedaRipesatura from '@/app/components/SchedaRipesatura'
 import { fmtPeso } from '@/lib/peso'
-import { ldvProvvisoria } from '@/lib/numero-spedizione'
+import { ldvProvvisoria, numeroMostrato, nomeClientePulito } from '@/lib/numero-spedizione'
 import LdvInElaborazione from '@/app/components/LdvInElaborazione'
 import { dataEventoIt } from '@/lib/tracking-eventi'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
@@ -570,7 +570,7 @@ async function apriTracking(s: any) {
                         {ldvProvvisoria(s.numero)
                           ? <LdvInElaborazione id={s.id} createdAt={s.created_at} onCompletata={()=>carica(pagina)} />
                           : <button onClick={()=>apriTracking(s)} style={{fontWeight:'700',color:'#f97316',background:'none',border:'none',cursor:'pointer',fontSize:'13px',padding:0,textDecoration:'underline'}}>
-                              {s.numero}
+                              {numeroMostrato(s.numero, s.tracking_number)}
                             </button>}
                         {s.ticket && <div><a href={`/cliente/assistenza?ticket=${s.ticket.id}`} title="Ticket aperto su questa spedizione — clicca per aprirlo"
                           style={{display:'inline-flex',alignItems:'center',gap:'3px',marginTop:'4px',background:'#fef3c7',color:'#b45309',border:'1px solid #fde68a',borderRadius:'10px',padding:'1px 7px',fontSize:'10px',fontWeight:700,textDecoration:'none',whiteSpace:'nowrap' as const}}>🎫 ticket aperto</a></div>}
@@ -579,7 +579,7 @@ async function apriTracking(s: any) {
                       </td>
                       <td style={{padding:'9px 12px',fontSize:'12px'}}>
                         <div style={{fontWeight:'500',color:'#1a1a1a'}}>{s.mitt_nome}</div>
-                        {s.clienti?.ragione_sociale&&<div style={{fontSize:'11px',color:'#1a1a1a'}}>{s.clienti.ragione_sociale}</div>}
+                        {s.clienti?.ragione_sociale&&<div style={{fontSize:'11px',color:'#1a1a1a'}}>{nomeClientePulito(s.clienti.ragione_sociale)}</div>}
                       </td>
                       <td style={{padding:'9px 12px'}}>
                         <div style={{color:'#1a1a1a',fontWeight:'500'}}>{s.dest_nome}</div>

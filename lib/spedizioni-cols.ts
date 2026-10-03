@@ -27,8 +27,10 @@ export const SPED_COLS_CLIENTE = SPED_COLS
 // id_ordine_esterno e rif_ordine idem: sono il RIPIEGO della colonna Ordine quando la spedizione non
 // ha un ordine collegato (lista/route.ts). Tolti, il chip si svuotava in silenzio: nessun errore,
 // nessun tipo sbagliato, solo un dato sparito dalla tabella.
-// NIENTE costo_spedizione: sul percorso master non lo legge nessuno (la tabella mostra
-// `costo_mostrato`), e al cliente la rotta lo toglie comunque in fondo.
+// NIENTE costo_spedizione qui: aggiungerlo attiverebbe anche il ramo "proprio" del calcolo costo (oggi
+// morto su questo percorso), cambiando il margine di TUTTI i contratti propri. Per le gambe condivise il
+// costo reale (= costo_spedizione del loro livello) lo prende la rotta con una fetch MIRATA alle sole
+// gambe-ponte, così i contratti normali/propri non cambiano di una virgola.
 export const SPED_COLS_LISTA = [
   'id', 'master_id', 'cliente_id', 'corriere_id',
   'numero', 'tracking_number', 'stato', 'created_at',

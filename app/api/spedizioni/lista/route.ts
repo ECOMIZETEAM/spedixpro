@@ -594,6 +594,20 @@ export async function GET(req: NextRequest) {
       for (const c of (cc || [])) { corrTipo.set((c as any).id, (c as any).tipo); corrProprio.set((c as any).id, !!(c as any).proprio) }
     }
   }
+  // CONDIVISIONE: costo reale delle MIE gambe-ponte (livelli-codice) = il loro costo_spedizione (= W
+  // pagato al fornitore diretto), preso con una fetch MIRATA alle sole gambe-ponte proprie. Non si mette
+  // costo_spedizione nelle colonne generali: attiverebbe il ramo "proprio" del calcolo costo su TUTTI i
+  // contratti propri. Vuota per i master senza condivisione → zero impatto, zero query in più.
+  const costoSpedPonte = new Map<string, number>()
+  if (!light && mineId) {
+    const ponteIds = (spedizioni || [])
+      .filter((s: any) => s.master_id === mineId && corrTipo.get(s.corriere_id) === 'moovexpress')
+      .map((s: any) => s.id)
+    for (let i = 0; i < ponteIds.length; i += 300) {
+      const { data: cs } = await admin.from('spedizioni').select('id,costo_spedizione').in('id', ponteIds.slice(i, i + 300))
+      for (const r of (cs || [])) costoSpedPonte.set((r as any).id, Number((r as any).costo_spedizione) || 0)
+    }
+  }
   segna('tipo-corriere')
   const OLTRE_15GG = Date.now() - 15 * 24 * 60 * 60 * 1000
 
@@ -644,6 +658,14 @@ export async function GET(req: NextRequest) {
     // spedizioni del master (s.master_id === mineId) su un corriere marcato proprio.
     if (prezzo_corriere == null && s.master_id === mineId && corrProprio.get(s.corriere_id) && Number((s as any).costo_spedizione) > 0) {
       prezzo_corriere = Number((s as any).costo_spedizione)
+    }
+    // CONDIVISIONE: una gamba-ponte ('moovexpress') è un livello-CODICE → il suo costo è sul cliente-ledger,
+    // non su un movimento master_target (costoMine assente), e il listino del ponte è sfasato (il ripiego
+    // calcMioCorr dà COSTO/margine FALSO, es. −0,10 su Wave). Il costo VERO di questo livello è il suo
+    // costo_spedizione (= W pagato al fornitore diretto), preso con la fetch MIRATA costoSpedPonte (non si
+    // mette costo_spedizione nelle colonne generali per non attivare il ramo proprio sopra su tutti).
+    if (prezzo_corriere == null && s.master_id === mineId && corrTipo.get(s.corriere_id) === 'moovexpress' && (costoSpedPonte.get(s.id) || 0) > 0) {
+      prezzo_corriere = costoSpedPonte.get(s.id)!
     }
     if (prezzo_corriere == null && calcMioCorr) {
       const nome = (s.corrieri as any)?.nome_contratto

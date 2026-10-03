@@ -42,3 +42,21 @@ export function riferimentoFornitore(numero?: string | null): string {
 export function numeroVisibile(numero?: string | null): string {
   return ldvProvvisoria(numero) ? LDV_IN_ELABORAZIONE : String(numero || '')
 }
+
+// CONDIVISIONE: le gambe FIGLIE di una spedizione condivisa hanno numero = `<tracking>-<suffix8>`, dove il
+// suffisso è un id INTERNO del ledger (serve univoco nel DB: la stessa LDV è inserita a ogni livello). A
+// schermo NON va il suffisso incollato al tracking: va il tracking PULITO, che è già salvato a parte in
+// `tracking_number`. Come per il codice interno SpediamoPro, l'id interno resta nel DB ma non si mostra.
+// Per tutto il resto (provvisori, SpediamoPro, spedizioni normali) vale la regola di sempre.
+// Firma distinta dai compositi SpediamoPro: lì `numero` FINISCE col tracking; qui INIZIA con `tracking-`.
+export function numeroMostrato(numero?: string | null, trackingNumber?: string | null): string {
+  const n = String(numero || ''); const t = String(trackingNumber || '')
+  if (t && n !== t && n.startsWith(t + '-')) return t
+  return numeroVisibile(numero)
+}
+
+// I clienti-ledger della condivisione si chiamano "<Master> (ingrosso)": è una rappresentazione interna
+// del conto all'ingrosso, non va mostrata. A schermo si toglie il suffisso " (ingrosso)".
+export function nomeClientePulito(nome?: string | null): string {
+  return String(nome || '').replace(/\s*\(ingrosso\)\s*$/i, '').trim()
+}
