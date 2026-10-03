@@ -153,6 +153,16 @@ export async function rimborsaAnnulloSpedizione(
   createdBy: string | null
 ): Promise<void> {
   try {
+    // La commissione MoovExpress vive su un CONTO A PARTE (masters.commissioni_moovexpress), non su
+    // credito/credito_proprio: la storna una RPC dedicata, NON il ciclo sotto (che passerebbe da
+    // registra_movimento_master e finirebbe su credito_proprio, il conto sbagliato — ci era gia'
+    // successo). Chiamata PRIMA della guardia di idempotenza e in un try/catch suo: la RPC e'
+    // idempotente di suo (NOT EXISTS), cosi' se un annullo precedente aveva creato i rimborsi ma
+    // fallito lo storno-commissione, qui lo ritenta invece di restare bloccato dalla guardia.
+    try {
+      await admin.rpc('storna_fee_moovexpress', { p_spedizione_id: sped.id, p_numero: sped.numero, p_created_by: createdBy })
+    } catch (e) { console.error('Errore storno commissione MoovExpress su annullo:', e) }
+
     const { data: giaRimborsati } = await admin.from('movimenti')
       .select('id').eq('spedizione_id', sped.id).eq('tipo', 'rimborso').limit(1)
     if (giaRimborsati?.length) return
