@@ -169,6 +169,9 @@ export async function POST(req: NextRequest) {
   try { const { chiudiDistintaBrt } = await import('@/lib/brt'); await chiudiDistintaBrt(_dbChiusura, distinta.id) } catch {}
   try { const { chiudiDistintaFedex } = await import('@/lib/fedex'); await chiudiDistintaFedex(_dbChiusura, distinta.id) } catch {}
   try { const { chiudiDistintaMoovexpress } = await import('@/lib/distinte-chiusura'); await chiudiDistintaMoovexpress(_dbChiusura, distinta.id) } catch {}   // condivisione: la gamba-ponte si auto-attesta
+  // Contratti senza manifest (easyparcel/interno/inpost/poste/dielle): handover alla creazione, nulla
+  // da trasmettere → si attesta subito, altrimenti resta "In attesa" per sempre (erano 8.100+).
+  try { const { chiudiDistintaSenzaManifest } = await import('@/lib/distinte-chiusura'); await chiudiDistintaSenzaManifest(_dbChiusura, distinta.id) } catch {}
   // Distinta MISTA (vettore): la chiusura per-contratto. Le 4 sopra fanno skip (corriere_id null); questa
   // fa skip sulle mono-contratto. Cosi' vale sia il caso normale sia il merge, senza rami separati.
   try { const { chiudiDistintaMista } = await import('@/lib/distinte-chiusura'); await chiudiDistintaMista(_dbChiusura, distinta.id) } catch {}

@@ -39,6 +39,36 @@ export async function chiudiDistintaMoovexpress(supabase: any, distintaId: strin
   }
 }
 
+// Contratti SENZA manifest/borderò giornaliero da trasmettere: l'handover al corriere avviene alla
+// CREAZIONE (il ritiro è prenotato nell'ordine, lo shipment è registrato alla create), non con una
+// chiusura di giornata — easyparcel non ha proprio un endpoint di chiusura. Senza un gestore la loro
+// distinta restava "In attesa" (arancio) per SEMPRE: 8.100+ così, e quel rumore MASCHERAVA i veri
+// fallimenti di chi invece DEVE trasmettere (un GLS/BRT non trasmesso era indistinguibile). Si attesta
+// subito (come FedEx/moovexpress), senza chiamare nessuno.
+// ALLOWLIST ESPLICITA, non "tutti gli altri": un corriere DIRETTO futuro che richiede trasmissione reale
+// non dev'essere mai auto-attestato per sbaglio (merce ignota al corriere mascherata da verde = il
+// contrario del bug, e più pericoloso). Un tipo nuovo resta fuori e lo si gestisce apposta.
+export const TIPI_SENZA_MANIFEST = ['easyparcel', 'interno', 'inpost', 'poste', 'dielle']
+
+export async function chiudiDistintaSenzaManifest(supabase: any, distintaId: string) {
+  try {
+    const { data: distinta } = await supabase
+      .from('distinte').select('id, corriere_id, bordero_id').eq('id', distintaId).maybeSingle()
+    if (!distinta || !distinta.corriere_id) return { skip: true }
+    if (distinta.bordero_id && !String(distinta.bordero_id).startsWith('ERRORE')) return { skip: true }
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { data: corriere } = await createAdminSupabase()
+      .from('corrieri').select('id, tipo').eq('id', distinta.corriere_id).maybeSingle()
+    if (!corriere || !TIPI_SENZA_MANIFEST.includes(corriere.tipo)) return { skip: true }
+    await supabase.from('distinte').update({
+      bordero_id: 'N/A', confermata_vettore: true, data_conferma: new Date().toISOString(),
+    }).eq('id', distintaId)
+    return { ok: true }
+  } catch (e: any) {
+    return { errore: String(e?.message || e) }
+  }
+}
+
 export async function chiudiDistintaMista(supabase: any, distintaId: string) {
   try {
     const { data: distinta } = await supabase
@@ -90,6 +120,12 @@ export async function chiudiDistintaMista(supabase: any, distintaId: string) {
       } else if (corr.tipo === 'fedex') {
         // FedEx auto-conferma alla creazione e il ritiro è programmato a parte sul conto: nessuna
         // trasmissione da fare qui, il gruppo è già "chiuso" lato corriere (come SDA).
+      } else if (TIPI_SENZA_MANIFEST.includes(corr.tipo) || corr.tipo === 'spediamopro' || corr.tipo === 'moovexpress') {
+        // Nessuna trasmissione da fare per questo gruppo: handover alla creazione (easyparcel/interno/
+        // inpost/poste/dielle), bordereau = solo documento (spediamopro), gamba-ponte già attestata
+        // all'owner (moovexpress). Senza questi rami la MISTA cadeva nell'else e bollava ERRORE l'INTERA
+        // distinta anche quando il gruppo del corriere VERO (GLS/BRT/Spedisci) era stato trasmesso:
+        // sono i 51 chiudiDistintaMista in ERRORE (40 easyparcel + 11 spediamopro).
       } else {
         // Difensivo: non deve capitare (il merge e' vincolato a un solo vettore fisico), ma se un tipo
         // non e' gestito lo diciamo forte invece di far finta di aver trasmesso.

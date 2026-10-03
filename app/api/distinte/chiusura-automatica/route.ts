@@ -74,6 +74,9 @@ export async function GET(req: NextRequest) {
       try { const { chiudiDistintaBrt } = await import('@/lib/brt'); await chiudiDistintaBrt(supabase, distinta.id) } catch {}
       try { const { chiudiDistintaFedex } = await import('@/lib/fedex'); await chiudiDistintaFedex(supabase, distinta.id) } catch {}
       try { const { chiudiDistintaMoovexpress } = await import('@/lib/distinte-chiusura'); await chiudiDistintaMoovexpress(supabase, distinta.id) } catch {}   // condivisione: gamba-ponte auto-attestata
+      // Senza manifest (easyparcel/interno/inpost/poste/dielle): il cron era la porta che NON li
+      // attestava → ogni notte nascevano distinte "In attesa" a vita. Ora si attestano subito.
+      try { const { chiudiDistintaSenzaManifest } = await import('@/lib/distinte-chiusura'); await chiudiDistintaSenzaManifest(supabase, distinta.id) } catch {}
     }
   }
   // ── DISTINTE DEI RESI (stesso giro delle 23: chiudo in distinta anche i resi rientrati) ──
