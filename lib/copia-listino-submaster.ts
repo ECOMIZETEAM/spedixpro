@@ -98,7 +98,7 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   //    Le IMPOSTAZIONI DI CONTRATTO (agevolazione peso, misure/volume massimo, scaglioni,
   //    peso reale soglia) si PROPAGANO dal padre; il MITTENTE resta del sotto-master.
   const { data: corrSrc } = corriereIds.length ? await admin.from('corrieri').select('*').in('id', corriereIds) : { data: [] }
-  const { data: corrMiei } = await admin.from('corrieri').select('id,nome_contratto,settings').eq('master_id', subMasterId)
+  const { data: corrMiei } = await admin.from('corrieri').select('id,nome_contratto,settings,proprio').eq('master_id', subMasterId)
   const mappaCorrMio = new Map((corrMiei || []).map((c: any) => [(c.nome_contratto || '').trim().toLowerCase(), c]))
   const mapCorr = new Map<string, string>()
   // Contratti DISABILITATI dal padre per questo sotto-master (masters_corrieri_abilitati.abilitato=false):
@@ -131,6 +131,14 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
     // catena (propagaCosto), la cascata-albero lo SALTA. Niente mapCorr.set → resta fuori da subCorrIds
     // e dalla delete-force delle fasce → il costo-catena (es. Wave 4,28) sopravvive, non viene clobberato.
     if (esist?.id && pontiCodice.has(esist.id)) continue
+    // CONTRATTO PROPRIO del sub: è il SUO contratto vero, il costo se lo mette LUI (non lo riceve da
+    // sopra). La cascata-albero aggancia per NOME e, senza questa guardia, lo riscriveva col prezzo del
+    // padre. Guasto vero: LOGIXIA possiede "SDA EXPRESS L" (proprio) ED è figlia-albero di MULTI che lo
+    // rivende; dopo la rinomina Triangolazioni→"SDA EXPRESS L" i nomi hanno combaciato e la cascata ha
+    // scritto il listino di MULTI (= 4,62 di spedizioni 2000) SOPRA il costo proprio di LOGIXIA (4,28),
+    // mandandola sotto costo su ogni spedizione condivisa. Un contratto proprio lo gestisce solo il suo
+    // owner (POST /api/listini/corrieri): la cascata lo SALTA, come i ponti codice.
+    if (esist?.id && esist.proprio === true) continue
     let subId = esist?.id
     if (!subId) {
       // Nuovo: copio le impostazioni di contratto (senza mittente: lo imposta il sotto-master).
