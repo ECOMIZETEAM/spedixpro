@@ -4,6 +4,7 @@ import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { fetchAll } from '@/lib/fetch-all'
 import { vedeLaRete } from '@/lib/perimetro'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
+import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -43,6 +44,11 @@ export async function GET(req: NextRequest) {
 
   // Agente: solo contrassegni dei suoi clienti (calcolato una volta, fuori dal loop).
   const agIds = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
+  // NASCONDI-FORNITORI (come la lista spedizioni): le gambe a monte (chi mi vende) hanno come cliente un
+  // ledger d'acquisto → fuori. Calcolato una volta (buildBase è sincrona). Serve il service-role per corrieri_condivisi.
+  const { createAdminSupabase: _admCod } = await import('@/lib/supabase-admin')
+  const ledgerNascosti = (utente?.master_id && !isAgente(utente) && utente.ruolo !== 'cliente')
+    ? await ledgerFornitoriDaNascondere(_admCod(), utente.master_id) : []
   const buildBase = () => {
     // Filtro su corrieri (vettore/contratto/visibilità-rete) → il join deve essere INNER.
     const filtroContratti = !!subtreeSel && !!ownedContractNames && ownedContractNames.length > 0
@@ -55,6 +61,7 @@ export async function GET(req: NextRequest) {
       .order('created_at', { ascending: false })
     if (subtreeSel) q = q.in('master_id', subtreeSel)
     else q = q.eq('master_id', utente?.master_id)
+    if (ledgerNascosti.length) q = q.or(`cliente_id.is.null,cliente_id.not.in.(${ledgerNascosti.join(',')})`)
     if (filtroContratti) q = q.in('corrieri.nome_contratto', ownedContractNames as string[])
     if (agIds) q = q.in('cliente_id', agIds)
     if (clienteId) q = q.eq('cliente_id', clienteId)

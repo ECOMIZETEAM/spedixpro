@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -22,6 +23,10 @@ export async function GET(req: NextRequest) {
   if (!subtree.includes((dist as any).master_id)) return NextResponse.json([])
 
   let q = admin.from('spedizioni').select(cols).eq('distinta_id', id).order('created_at', { ascending: true })
+  // NASCONDI-FORNITORI (come lista/contrassegni): niente gambe a monte (cliente = ledger d'acquisto).
+  const ledgerNascosti = !isAgente(utente as any) && utente.ruolo !== 'cliente'
+    ? await ledgerFornitoriDaNascondere(admin, utente.master_id) : []
+  if (ledgerNascosti.length) q = q.or(`cliente_id.is.null,cliente_id.not.in.(${ledgerNascosti.join(',')})`)
   // Agente: solo le spedizioni dei suoi clienti dentro la distinta.
   if (isAgente(utente as any)) q = q.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente as any)))
   const { data } = await q
