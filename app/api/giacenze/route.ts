@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { vedeLaRete } from '@/lib/perimetro'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
+import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
 
 // Elenco giacenze (lista master). La GESTIONE (svincolo/riconsegna/reso/nuovo indirizzo + addebito)
 // NON sta più qui: passa dalla porta unica eseguiSvincolo via /api/giacenze/[id] (dettaglio), il
@@ -69,6 +70,12 @@ export async function GET(req: NextRequest) {
 
   if (subtreeSel) query = query.in('master_id', subtreeSel)
   else query = query.eq('master_id', utente?.master_id)
+  // NASCONDI-FORNITORI (come lista spedizioni): niente giacenze delle gambe a monte (cliente = ledger d'acquisto).
+  if (utente?.master_id && !isAgente(utente) && utente.ruolo !== 'cliente') {
+    const { createAdminSupabase: _admGia } = await import('@/lib/supabase-admin')
+    const ledgerNascosti = await ledgerFornitoriDaNascondere(_admGia(), utente.master_id)
+    if (ledgerNascosti.length) query = query.or(`cliente_id.is.null,cliente_id.not.in.(${ledgerNascosti.join(',')})`)
+  }
   // Rete: solo giacenze su contratti che possiedo (non i privati del sub).
   if (filtroContratti) query = query.in('corrieri.nome_contratto', ownedContractNames as string[])
   // Agente: solo giacenze dei suoi clienti (copre anche l'eventuale ramo rete).

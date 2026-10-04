@@ -39,3 +39,30 @@ export async function ledgerFornitoriDaNascondere(
   }
   return [...nascosti]
 }
+
+// I MASTER-FORNITORI del viewer (chi gli vende, risalendo corrieri_condivisi). Serve dove la cosa da
+// nascondere è un DOCUMENTO del master senza cliente proprio — le DISTINTE: le distinte dei fornitori
+// (Wave, LOGIXIA per MULTI) non vanno mostrate al compratore. Si escludono dai master visibili.
+// NOTA: oggi i fornitori non hanno distinte con gambe REALI proprie (verificato), quindi escludere il
+// master = nascondere solo le distinte "pure fornitore", coerente con la lista spedizioni. Se un domani
+// un fornitore avesse un business proprio in distinta, servirebbe l'esclusione per-distinta (RPC).
+export async function masterFornitoriDaNascondere(
+  admin: { from: (t: string) => any },
+  viewerMasterId: string | null | undefined,
+): Promise<string[]> {
+  if (!viewerMasterId) return []
+  const fornitori = new Set<string>()
+  const visti = new Set<string>([viewerMasterId])
+  let frontier: string[] = [viewerMasterId]
+  for (let i = 0; i < 20 && frontier.length; i++) {
+    const { data } = await admin.from('corrieri_condivisi')
+      .select('fornitore_master_id').in('master_id', frontier).eq('stato', 'attiva')
+    const next: string[] = []
+    for (const r of (data || []) as any[]) {
+      const f = r.fornitore_master_id
+      if (f && !visti.has(f)) { visti.add(f); fornitori.add(f); next.push(f) }
+    }
+    frontier = next
+  }
+  return [...fornitori]
+}

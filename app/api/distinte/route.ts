@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { fetchAll } from '@/lib/fetch-all'
 import { vettoreFisico } from '@/lib/vettore'
+import { masterFornitoriDaNascondere } from '@/lib/gambe-visibilita'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -38,6 +39,12 @@ export async function GET(req: NextRequest) {
       frontier = nuovi
     }
   }
+
+  // NASCONDI-FORNITORI (come lista spedizioni): non mostro le distinte dei miei FORNITORI (chi mi vende).
+  // Oggi sono tutte "pure fornitore" (nessun business proprio in distinta, verificato) → basta escludere i
+  // master-fornitori dai master visibili delle distinte. Il resto (menu vettore) usa la stessa lista.
+  const fornitoriNascosti = isMasterRete ? await masterFornitoriDaNascondere(admin, mine as string) : []
+  const masterIdsDistinte = fornitoriNascosti.length ? masterIds.filter((m: string) => !fornitoriNascosti.includes(m)) : masterIds
 
   const filtroAgente = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
 
@@ -119,7 +126,7 @@ export async function GET(req: NextRequest) {
     const build = () => {
       let q = db.from('distinte')
         .select('*, clienti(ragione_sociale), corrieri(nome_contratto,tipo)')
-        .in('master_id', masterIds.length ? masterIds : noMaster)
+        .in('master_id', masterIdsDistinte.length ? masterIdsDistinte : noMaster)
         .order('created_at', { ascending: false })
       if (filtroAgente) q = q.in('cliente_id', filtroAgente)
       if (dal) q = q.gte('created_at', dal)
@@ -140,7 +147,7 @@ export async function GET(req: NextRequest) {
   const alISO = al ? new Date(al + 'T23:59:59.999Z').toISOString() : null
 
   // Corrieri della rete → mappa vettore (vettoreFisico resta in JS, niente regex in SQL).
-  const corrNet = await fetchAll(() => admin.from('corrieri').select('id,tipo,nome_contratto').in('master_id', masterIds.length ? masterIds : noMaster))
+  const corrNet = await fetchAll(() => admin.from('corrieri').select('id,tipo,nome_contratto').in('master_id', masterIdsDistinte.length ? masterIdsDistinte : noMaster))
   const vettDiCorr = new Map<string, string>()
   for (const c of (corrNet || [])) vettDiCorr.set((c as any).id, vettoreFisico(c as any))
 
@@ -151,7 +158,7 @@ export async function GET(req: NextRequest) {
   }
 
   const { data: res, error } = await admin.rpc('distinte_page_v1', {
-    p_masters: masterIds.length ? masterIds : noMaster,
+    p_masters: masterIdsDistinte.length ? masterIdsDistinte : noMaster,
     p_dal: dalISO, p_al: alISO, p_cerca: cerca,
     p_corr_ids: corrIds, p_cliente_ids: filtroAgente,
     p_page: pageParam, p_perpage: perPage,
