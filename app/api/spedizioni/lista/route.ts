@@ -5,6 +5,7 @@ import { SPED_COLS, SPED_COLS_LISTA } from '@/lib/spedizioni-cols'
 import { creaCalcolatoreListinoCliente, creaCalcolatoreCorriere } from '@/lib/pricing'
 import { fetchAll } from '@/lib/fetch-all'
 import { vettoreFisico } from '@/lib/vettore'
+import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
 
 // L'ordinamento per MARGINE (sotto) calcola sul MOVIMENTI di tutto il periodo filtrato: sul network
 // intero legge molte righe, quindi serve più della finestra breve di default.
@@ -214,6 +215,12 @@ export async function GET(req: NextRequest) {
     if (!nomiVettore.length) nomiVettore = ['__NESSUNO__']
   }
 
+  // ALBERO + NASCONDI-FORNITORI: su una spedizione condivisa un master non vede le gambe di CHI GLI VENDE
+  // (a monte). Quelle hanno come cliente un ledger "(ingrosso)" d'acquisto del master o dei suoi fornitori
+  // (risalendo corrieri_condivisi). Calcolato UNA volta qui (scope async); buildBase è sincrona e lo chiude.
+  const ledgerNascosti = (utente?.master_id && utente.ruolo !== 'cliente' && utente.ruolo !== 'agente')
+    ? await ledgerFornitoriDaNascondere(admin, utente.master_id) : []
+
   // Solo colonne leggere (SPED_COLS): esclusi etichetta_url/raw_response/colli_dettaglio.
   // Costruisco una query FRESCA a ogni chiamata (i builder Supabase sono monouso).
   const buildBase = (contaTotale = false) => {
@@ -239,6 +246,9 @@ export async function GET(req: NextRequest) {
     else if (reteSubtree) q = q.in('master_id', reteSubtree)
     else if (masterIds && masterIds.length > 1) q = q.in('master_id', masterIds)
     else q = q.eq('master_id', utente?.master_id)
+    // NASCONDI-FORNITORI: le gambe a monte (chi mi vende) hanno come cliente un ledger d'acquisto → fuori.
+    // Clienti REALI e spedizioni dirette (cliente_id NULL) restano SEMPRE visibili (per questo l'OR is.null).
+    if (ledgerNascosti.length) q = q.or(`cliente_id.is.null,cliente_id.not.in.(${ledgerNascosti.join(',')})`)
     // Rete: nascondi le spedizioni dei discendenti sui contratti che NON possiedi (privati del sub).
     if (filtroContratti) q = q.in('corrieri.nome_contratto', ownedContractNames as string[])
     if (fClienteEq) q = q.eq('cliente_id', fClienteEq)
