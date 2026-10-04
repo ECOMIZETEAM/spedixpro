@@ -124,8 +124,15 @@ export async function GET() {
       .eq('master_id', masterId).lt('credito', 0).order('credito', { ascending: true }),
     // IL CREDITO DEL MASTER stesso: conto RETE (verso il master sopra) + conto PROPRIO (contratti suoi).
     // Puo' essere negativo — chi fattura va sotto zero ed e' normale (REGOLE.md).
-    admin.from('masters').select('credito,credito_proprio').eq('id', masterId).maybeSingle(),
+    admin.from('masters').select('credito,credito_proprio,parent_master_id').eq('id', masterId).maybeSingle(),
   ])
+  // Nome del referente (il fornitore diretto), come la pill in topbar: il conto RETE ha un nome,
+  // non è "Credito" generico. Se non ha un referente (radice piattaforma) resta null → etichetta neutra.
+  let reteLabel: string | null = null
+  if ((mioCredito as any)?.parent_master_id) {
+    const { data: pm } = await admin.from('masters').select('nome').eq('id', (mioCredito as any).parent_master_id).maybeSingle()
+    reteLabel = (pm as any)?.nome || null
+  }
   // Contatore piano (X/limite) = spedizioni del mese di TUTTA la rete, dalla STESSA RPC (subtree)
   // così coincide con le altre statistiche (niente più discrepanze tipo 98 vs 86).
   const spedMeseRete = (contatori as any)?.spedizioniMese || 0
@@ -139,6 +146,7 @@ export async function GET() {
     creditoMaster: {
       rete: Number((mioCredito as any)?.credito || 0),
       proprio: Number((mioCredito as any)?.credito_proprio || 0),
+      reteLabel,
     },
     daMettereInDistinta: daMettereInDistinta || 0,
     totClienti: c.totClienti||0,

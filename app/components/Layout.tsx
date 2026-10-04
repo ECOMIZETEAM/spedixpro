@@ -152,9 +152,10 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
     if (x.soloOttimizzaMargini) return ottimizzaMargini   // voce riservata ai master col flag (oggi solo Ecomize LL)
     if (x.soloMultiexpress) return isMultiexpress   // voce riservata a MULTIEXPRESS (Rettifiche automatiche)
     if (x.superMaster) return superMaster       // voce riservata al SUPER master (es. Registro Attività)
-    // "Il mio listino" (il costo assegnato dal referente): agente E sotto-master. Prima era solo-agente
-    // (agente:true), così i sotto-master come Velox/Spedizioni2000 non vedevano nemmeno il link.
-    if (x.mioCosto) return ['agente', 'master', 'admin', 'operatore'].includes(ruolo)
+    // "Il mio listino" SOLO agente. Per un MASTER è un percorso in più che confonde: il costo che paga
+    // lo vede già in "Listino Corrieri" (= quello che paga) e il venduto in "Listino Clienti". L'agente
+    // invece non ha "Listino Corrieri", quindi per lui è l'unico modo di vedere il costo del referente.
+    if (x.mioCosto) return ruolo === 'agente'
     if (x.agente) return ruolo === 'agente'   // voce esclusiva dell'agente (mai al master)
     if (ruolo === 'agente' && x.agenteOk) return true   // voce concessa anche all'agente (es. Distinte: può chiuderle)
     if (x.rete && !gestioneRete) return false

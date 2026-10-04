@@ -97,19 +97,23 @@ export default function Dashboard() {
         const bg = pos ? '#f0fdf4' : '#fef2f2'
         const bord = pos ? '#bbf7d0' : '#fecaca'
         const euro = (n:number) => '€ ' + n.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})
+        // Il conto RETE porta il NOME del referente (come la pill in topbar), non "Credito" generico.
+        const nomeRete = (data.creditoMaster.reteLabel || '').trim() || 'Il tuo credito'
+        const lab = {fontSize:'11px',fontWeight:700,textTransform:'uppercase' as const,letterSpacing:'0.6px',color:'#6b7280'}
+        const sub = {fontSize:'11px',color:'#6b7280',marginTop:'3px'}
         return (
-          <div style={{display:'flex',alignItems:'center',gap:'16px',background:bg,border:`1px solid ${bord}`,borderRadius:'10px',padding:'14px 20px',flexWrap:'wrap' as const}}>
-            <div style={{width:'46px',height:'46px',background:'#fff',border:`1px solid ${bord}`,borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'22px'}}>💳</div>
-            <div style={{flex:1,minWidth:'170px'}}>
-              <div style={{fontSize:'11px',fontWeight:700,textTransform:'uppercase' as const,letterSpacing:'0.6px',color:'#6b7280'}}>Il tuo credito</div>
+          <div style={{display:'flex',alignItems:'stretch',gap:'24px',background:bg,border:`1px solid ${bord}`,borderRadius:'10px',padding:'16px 20px',flexWrap:'wrap' as const}}>
+            <div style={{width:'46px',height:'46px',background:'#fff',border:`1px solid ${bord}`,borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'22px',alignSelf:'center'}}>💳</div>
+            <div style={{flex:'1 1 220px',minWidth:'200px'}}>
+              <div style={lab}>{nomeRete}</div>
               <div style={{fontSize:'28px',fontWeight:800,color:col,lineHeight:1.15}}>{euro(rete)}</div>
-              <div style={{fontSize:'11px',color:'#6b7280',marginTop:'2px'}}>{pos ? 'Saldo a tuo credito' : 'Saldo a debito (da saldare/ricaricare)'}</div>
+              <div style={sub}>{pos ? 'Saldo a tuo credito' : 'Saldo a debito (da saldare/ricaricare)'}</div>
             </div>
             {proprio !== 0 && (
-              <div style={{textAlign:'right' as const,minWidth:'150px',borderLeft:`1px solid ${bord}`,paddingLeft:'16px'}}>
-                <div style={{fontSize:'11px',fontWeight:700,textTransform:'uppercase' as const,letterSpacing:'0.6px',color:'#6b7280'}}>Conto proprio</div>
-                <div style={{fontSize:'22px',fontWeight:800,color: proprio>=0?'#16a34a':'#dc2626'}}>{euro(proprio)}</div>
-                <div style={{fontSize:'10px',color:'#9ca3af'}}>contratti tuoi</div>
+              <div style={{flex:'1 1 220px',minWidth:'200px',borderLeft:`1px solid ${bord}`,paddingLeft:'24px'}}>
+                <div style={lab}>Conto proprio</div>
+                <div style={{fontSize:'28px',fontWeight:800,color: proprio>=0?'#16a34a':'#dc2626',lineHeight:1.15}}>{euro(proprio)}</div>
+                <div style={sub}>contratti tuoi</div>
               </div>
             )}
           </div>
