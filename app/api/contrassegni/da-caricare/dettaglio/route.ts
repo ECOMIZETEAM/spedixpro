@@ -44,16 +44,22 @@ export async function GET(req: NextRequest) {
   const ids = tutte.map((r: any) => r.spedizione_id).filter(Boolean)
   const info = new Map<string, any>()
   for (let i = 0; i < ids.length; i += 300) {
-    const { data: sp } = await admin.from('spedizioni').select('id,numero,dest_nome,dest_citta,created_at').in('id', ids.slice(i, i + 300))
+    const { data: sp } = await admin.from('spedizioni').select('id,numero,dest_nome,dest_citta,created_at,contrassegno').in('id', ids.slice(i, i + 300))
     for (const s of (sp || [])) info.set((s as any).id, s)
   }
 
   // Ordino per DATA SPEDIZIONE (recenti prima); a parita' di data, per numero.
   const ordinate = tutte.map((r: any) => {
     const s = info.get(r.spedizione_id) || {}
+    const importo = Number(r.importo) || 0
+    const dichiarato = Number(s.contrassegno) || 0
     return {
       spedizione_id: r.spedizione_id,
-      importo: Number(r.importo) || 0,
+      importo,
+      dichiarato,
+      // COD PARZIALE: il corriere ha incassato MENO del dichiarato → la UI lo segna (celeste) perché
+      // al cliente scenderà solo l'incassato, non il dichiarato.
+      parziale: dichiarato > 0 && importo < dichiarato - 0.01,
       numero: s.numero || '—',
       dest_nome: s.dest_nome || '',
       dest_citta: s.dest_citta || '',

@@ -30,9 +30,19 @@ export async function caricaRimesseInSosta(
 
   try {
     const righeRic = await fetchAll(() => admin.from('distinte_contrassegni_righe')
-      .select('numero_spedizione').in('distinta_id', ricevuteIds).order('id', { ascending: true }))
+      .select('numero_spedizione,importo_cod').in('distinta_id', ricevuteIds).order('id', { ascending: true }))
     const numeri = Array.from(new Set((righeRic || []).map((r: any) => r.numero_spedizione).filter(Boolean)))
     if (!numeri.length) { await annullaClaim(); throw new Error('Nessuna LDV nelle rimesse selezionate') }
+    // Quanto ho DAVVERO ricevuto per spedizione (importo_cod della rimessa). Su un COD PARZIALE è MENO
+    // del dichiarato (spedizioni.contrassegno): il corriere ne ha incassato solo una parte. La sosta —
+    // e quindi quanto scenderà al cliente finale — deve usare l'INCASSATO, non il dichiarato: un master
+    // non può girare al suo cliente più di quanto gli è arrivato. (Bug NN860135352: dichiarato 1143,60,
+    // incassato 143,60 → la coda chiedeva di pagare 1143,60 soldi mai ricevuti.)
+    const codRicevuto = new Map<string, number>()
+    for (const r of (righeRic || []) as any[]) {
+      if (!r.numero_spedizione) continue
+      codRicevuto.set(r.numero_spedizione, (codRicevuto.get(r.numero_spedizione) || 0) + (Number(r.importo_cod) || 0))
+    }
 
     const spedizioni: any[] = []
     for (let i = 0; i < numeri.length; i += 200) {
@@ -90,11 +100,11 @@ export async function caricaRimesseInSosta(
 
     const inSosta: any[] = []
     for (const [clienteId, sped] of Object.entries(clientiMap)) {
-      for (const sp of sped) inSosta.push({ master_id: mio, spedizione_id: sp.id, importo: Number(sp.contrassegno) || 0,
+      for (const sp of sped) inSosta.push({ master_id: mio, spedizione_id: sp.id, importo: codRicevuto.get(sp.numero) ?? (Number(sp.contrassegno) || 0),
         cliente_id: clienteId, target_master_id: null, origine: 'rimessa', origine_id: ricevuteIds[0] || null })
     }
     for (const [flId, sped] of Object.entries(masterMap)) {
-      for (const sp of sped) inSosta.push({ master_id: mio, spedizione_id: sp.id, importo: Number(sp.contrassegno) || 0,
+      for (const sp of sped) inSosta.push({ master_id: mio, spedizione_id: sp.id, importo: codRicevuto.get(sp.numero) ?? (Number(sp.contrassegno) || 0),
         cliente_id: null, target_master_id: flId, origine: 'rimessa', origine_id: ricevuteIds[0] || null })
     }
     let create = 0

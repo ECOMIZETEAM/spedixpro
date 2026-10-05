@@ -473,7 +473,8 @@ export default function DistinteContrassegniPage() {
                                     <span style={{fontFamily:'monospace',color:'#1a1a1a',minWidth:'130px'}}>{s.numero}</span>
                                     <span style={{color:'#374151',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{s.dest_nome}{s.dest_citta?` · ${s.dest_citta}`:''}</span>
                                     <span title="Data spedizione" style={{color:'#9ca3af',fontSize:'11px',whiteSpace:'nowrap' as const,minWidth:'66px',textAlign:'right' as const}}>{s.created_at?new Date(s.created_at).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'}):''}</span>
-                                    <span style={{fontWeight:700,color:'#15803d',whiteSpace:'nowrap' as const,minWidth:'72px',textAlign:'right' as const}}>€ {Number(s.importo).toFixed(2)}</span>
+                                    {s.parziale && <span title={`COD parziale: il corriere ha incassato € ${Number(s.importo).toFixed(2)} sui € ${Number(s.dichiarato).toFixed(2)} dichiarati. Al cliente scende solo l'incassato.`} style={{fontSize:'10px',fontWeight:700,color:'#0369a1',background:'#e0f2fe',border:'1px solid #bae6fd',borderRadius:'4px',padding:'1px 5px',whiteSpace:'nowrap' as const}}>PARZIALE</span>}
+                                    <span style={{fontWeight:700,color: s.parziale ? '#0369a1' : '#15803d',whiteSpace:'nowrap' as const,minWidth:'72px',textAlign:'right' as const}}>€ {Number(s.importo).toFixed(2)}</span>
                                   </label>
                                 </Fragment>
                               )
