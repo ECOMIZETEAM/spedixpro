@@ -741,7 +741,15 @@ export async function GET(req: NextRequest) {
       const stati = await statiCodPerLivello(admin, mineId, codCod as any[])
       for (const r of codCod as any[]) {
         const v = stati.get(r.id)
-        if (v) r.stato_contrassegno = v.stato
+        if (!v) continue
+        r.stato_contrassegno = v.stato
+        // COD PARZIALE: il corriere ha incassato MENO del dichiarato (es. NN860135352: 143,60 su 1143,60).
+        // v.incassato è l'importo della MIA riga-distinta: se < dichiarato la riga è parziale e la UI la
+        // colora in blu invece che verde — al cliente scende solo l'incassato, non il dichiarato.
+        if (v.incassato != null && Number(r.contrassegno) > 0 && v.incassato < Number(r.contrassegno) - 0.01) {
+          r.cod_parziale = true
+          r.cod_incassato = v.incassato
+        }
       }
       // Il filtro contrassegni a DB lavora sullo stato GLOBALE (= del cliente): dopo l'override
       // per-viewer RIFILTRO le righe così un master che filtra "pagato" vede il SUO pagato, non

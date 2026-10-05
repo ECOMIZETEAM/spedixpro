@@ -33,6 +33,9 @@ export type CodPerLivello = {
   inEntrata?: { id: string; numero: number; stato: string }
   /** Posso ancora metterlo in una distinta mia: quei soldi passano da me, non ci è già dentro, non è un reso. */
   selezionabile: boolean
+  /** Quanto ho DAVVERO incassato per questa spedizione (importo_cod della MIA riga-distinta), se c'è.
+   *  Su un COD PARZIALE è MENO del dichiarato (spedizioni.contrassegno): serve alla UI per segnarlo in blu. */
+  incassato?: number
 }
 
 type RigaSped = {
@@ -52,6 +55,10 @@ export async function statiCodPerLivello(
   if (!ids.length) return out
 
   const mie = new Map<string, any>(), entrate = new Map<string, any>()
+  // Incassato per tracking (importo_cod della riga nella MIA distinta / in quella in ENTRATA): su un COD
+  // parziale è meno del dichiarato. Preferisco l'importo della distinta IN ENTRATA (quanto mi è arrivato);
+  // per un detentore — che non ha entrata — vale la sua (quanto gli ha pagato il corriere).
+  const codIncassato = new Map<string, number>()
   // CONDIVISIONE (gamba esplosa): le righe-distinta COD puntano alla spedizione ORIGINANTE (una per
   // tracking), mentre la lista mostra la GAMBA del livello che guarda (gamba-ponte, id diverso). La
   // chiave di aggancio e' quindi il TRACKING, non l'id della riga. Raccolgo TUTTE le gambe di ogni
@@ -74,15 +81,17 @@ export async function statiCodPerLivello(
   // quindi un chunk grande può superare le 1000 righe (cap PostgREST) e perderne pezzi.
   for (let i = 0; i < allIds.length; i += 150) {
     const rr = await fetchAll(() => adminDb.from('distinte_contrassegni_righe')
-      .select('id, spedizione_id, distinte_contrassegni!inner(id,numero,stato,master_id,target_master_id)')
+      .select('id, importo_cod, spedizione_id, distinte_contrassegni!inner(id,numero,stato,master_id,target_master_id)')
       .in('spedizione_id', allIds.slice(i, i + 150)).order('id', { ascending: true }))
     for (const r of (rr || [])) {
       const d: any = (r as any).distinte_contrassegni
       const sid = (r as any).spedizione_id
       if (!d || !sid) continue
       const k = chiaveDi(sid)
-      if (d.target_master_id === masterId) entrate.set(k, d)
-      else if (d.master_id === masterId) mie.set(k, d)
+      const inc = Number((r as any).importo_cod) || 0
+      // L'entrata (quanto mi è arrivato) vince sulla mia; per il detentore c'è solo la sua.
+      if (d.target_master_id === masterId) { entrate.set(k, d); codIncassato.set(k, inc) }
+      else if (d.master_id === masterId) { mie.set(k, d); if (!codIncassato.has(k)) codIncassato.set(k, inc) }
     }
   }
 
@@ -124,6 +133,7 @@ export async function statiCodPerLivello(
       // NON si guarda il colore: da quando il colore dice "ho incassato", un contrassegno che ho già
       // messo in distinta resta grigio finché non mi pagano — ma metterlo in una seconda distinta no.
       selezionabile: incassoMio && !mia && stato !== 'annullato',
+      incassato: codIncassato.get(chiaveRiga),
     })
   }
   return out

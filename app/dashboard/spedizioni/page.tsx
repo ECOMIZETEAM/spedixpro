@@ -44,7 +44,10 @@ function oreAllAnnullo(richiestoAt?: string): string {
 // Colore badge contrassegno, dal punto di vista di CHI GUARDA (lib/contrassegni-stato-livello.ts):
 // grigio = nessuno me l'ha ancora messo in distinta, arancione = distinta che mi riguarda non ancora
 // pagata, verde = incassato da me (il cliente finale vede invece il suo, nel portale cliente)
-function codBadgeStyle(stato?: string) {
+function codBadgeStyle(stato?: string, parziale?: boolean) {
+  // COD PARZIALE vince su tutto: il corriere ha incassato meno del dichiarato, al cliente scende solo
+  // l'incassato. Blu/celeste (NON arancione: quello è lo stato "in lavorazione"; NON verde: non è pieno).
+  if (parziale) return { background:'#e0f2fe', color:'#0369a1' }             // celeste = parziale
   if (stato === 'pagato') return { background:'#dcfce7', color:'#166534' }   // verde
   if (stato === 'in_distinta') return { background:'#ffedd5', color:'#c2410c' } // arancione
   return { background:'#e5e7eb', color:'#4b5563' }                            // grigio
@@ -674,7 +677,7 @@ async function apriTracking(s: any) {
                     { l: '🚚', v: <b style={{color:'#1a1a1a'}}>{s.corrieri?.nome_contratto||'—'}</b> },
                     { l: 'Peso', v: fmtPeso(s) },
                     { l: 'Colli', v: s.colli },
-                    ...(Number(s.contrassegno)>0 ? [{ l: 'Contrassegno', v: <span style={{...codBadgeStyle(s.stato_contrassegno),padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{Number(s.contrassegno).toFixed(2)}</span> }] : []),
+                    ...(Number(s.contrassegno)>0 ? [{ l: 'Contrassegno', v: <span title={s.cod_parziale?`COD parziale: il corriere ha incassato € ${Number(s.cod_incassato).toFixed(2)} sui € ${Number(s.contrassegno).toFixed(2)} dichiarati. Al cliente scende solo l'incassato.`:undefined} style={{...codBadgeStyle(s.stato_contrassegno,s.cod_parziale),padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{Number(s.contrassegno).toFixed(2)}{s.cod_parziale&&<span style={{marginLeft:'3px',fontSize:'9px',fontWeight:'700'}}>PARZIALE</span>}</span> }] : []),
                     ...(s.id_ordine ? [{ l: 'Ordine', v: s.id_ordine }] : []),
                     { l: 'Cliente', v: <span><b style={{color:'#1a1a1a'}}>€ {Number(s.prezzo_cliente ?? s.costo_mostrato ?? s.costo_totale ?? 0).toFixed(2)}</b>{Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span> },
                     { l: 'Costo', v: s.prezzo_corriere!=null?`€ ${Number(s.prezzo_corriere).toFixed(2)}`:'—' },
