@@ -89,6 +89,13 @@ const cm = (v: unknown) => { const n = Math.round(Number(v) || 0); return String
 const ISO_PDB: Record<string, string> = { IT: 'ITA1', ITA: 'ITA1', ITALIA: 'ITA1', '': 'ITA1' }
 const nazione = (v: string | undefined) => ISO_PDB[String(v || '').toUpperCase().trim()] || String(v || 'ITA1').toUpperCase()
 
+// Telefono per Poste/ParcelPilot: SOLO CIFRE. Un numero "normale" scritto con +39, spazi, / o - veniva
+// inoltrato grezzo e il corriere lo RIFIUTAVA ("phone invalid"), mostrando all'utente "Telefono del
+// mittente non valido" (anche quando a essere sbagliato era quello del DESTINATARIO: il messaggio è
+// generico). Come GLS: tengo solo le cifre e le ULTIME 10, così +39/0039 e i separatori spariscono e
+// resta il numero nazionale. Numeri più corti (es. fissi a 9) restano invariati.
+const telPdb = (v?: string) => { const d = String(v || '').replace(/\D/g, ''); return d.length > 10 ? d.slice(-10) : d }
+
 export type KsyncRecapito = {
   ragioneSociale: string
   referente?: string
@@ -110,7 +117,7 @@ function party(r: KsyncRecapito) {
     address: r.indirizzo || '', country: nazione(r.paese), countryName: 'Italia',
     nameSurname: r.ragioneSociale || '', contactName: r.referente || r.ragioneSociale || '',
     province: (r.provincia || '').toUpperCase(), email: r.email || '',
-    phone: r.telefono || '', cellphone: r.cellulare || '', note1: '', note2: '',
+    phone: telPdb(r.telefono), cellphone: telPdb(r.cellulare), note1: '', note2: '',
   }
 }
 
@@ -272,7 +279,7 @@ export async function svincolaKsync(c: KsyncCred, req: { shipmentId: string; rel
   if (req.officeId) body.officeId = req.officeId
   if (req.nuovoIndirizzo) {
     const r = req.nuovoIndirizzo
-    body.address = { item: [{ givenName: r.ragioneSociale || '', surname: '', streetNumber: r.civico || '', streetName: r.indirizzo || '', town: r.citta || '', region: (r.provincia || '').toUpperCase(), postCode: r.cap || '', country: nazione(r.paese), phone: r.telefono || '', email: r.email || '' }] }
+    body.address = { item: [{ givenName: r.ragioneSociale || '', surname: '', streetNumber: r.civico || '', streetName: r.indirizzo || '', town: r.citta || '', region: (r.provincia || '').toUpperCase(), postCode: r.cap || '', country: nazione(r.paese), phone: telPdb(r.telefono), email: r.email || '' }] }
   }
   const { ok, j } = await chiama(c, 'deposits/release', body)
   const esito = String(j?.result?.result || j?.result || '').toUpperCase()
@@ -319,7 +326,7 @@ export async function ritiroPrenotaKsync(c: KsyncCred, req: { bookingType?: stri
       item: [{
         operation: 'I', bookingType: req.bookingType || 'RIT0003', bookingId: '', pickupId: '',
         shipmentId: req.shipmentId || '', customerShipmentId: '',
-        where: { item: [{ givenName: r.ragioneSociale || '', surname: r.referente || '', streetNumber: r.civico || '', streetName: r.indirizzo || '', town: r.citta || '', region: (r.provincia || '').toUpperCase(), postCode: r.cap || '', country: nazione(r.paese), phone: r.telefono || '', email: r.email || '' }] },
+        where: { item: [{ givenName: r.ragioneSociale || '', surname: r.referente || '', streetNumber: r.civico || '', streetName: r.indirizzo || '', town: r.citta || '', region: (r.provincia || '').toUpperCase(), postCode: r.cap || '', country: nazione(r.paese), phone: telPdb(r.telefono), email: r.email || '' }] },
         content,
         pickupDate: req.dataRitiro || '', timeSlot: req.timeSlot || 'AM', note1: req.note || '', note2: '', note3: '',
       }],

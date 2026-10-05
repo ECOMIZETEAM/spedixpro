@@ -173,7 +173,7 @@ export function erroreCorrierePulito(raw: any): string {
   if (/pudo|punto di ritiro|fermopoint|locker/.test(t))
     return 'Il punto di ritiro selezionato non è valido per questo contratto: riscegli il punto di consegna (ogni corriere ha i suoi punti).'
   if (/\bphone\b|telefono/.test(t))
-    return 'Telefono del mittente mancante o non valido: inserisci un numero di telefono (solo cifre) e riprova.'
+    return 'Telefono (mittente o destinatario) mancante o non valido: inserisci un numero valido, solo cifre, e riprova.'
   if (/dimension|misur|measure|\bsize\b|volume|lato|length|width|height|weight|\bpeso\b|\bkg\b|oversiz|too (large|big|heavy)/.test(t)) {
     // NON dire seccamente "fuori misura": il corriere mette una parola tipo "weight/height" anche in
     // errori di VALIDAZIONE che non c'entrano con l'ingombro (verificato: un pacco 23×16×7 da 170g,
