@@ -86,60 +86,33 @@ export async function eDiscendente(adminDb: any, targetId?: string | null, maste
   return false
 }
 
-// I corrieri (per ID) che il master EREDITA da un master sopra: il loro `nome_contratto` è già
-// posseduto da un antenato nella catena. Il prezzo di questi contratti lo decide chi li DETIENE, non
-// chi li rivende — da qui in giù sono di sola lettura. I corrieri PROPRI (nome che NESSUN antenato
-// possiede, es. E&A con BRT/Poste/UPS) restano modificabili. Ritorna un Set di `corrieri.id` ereditati
-// (vuoto = niente di ereditato: tutto proprio).
+// I corrieri (per ID) in SOLA LETTURA per il master: quelli che NON detiene (`corrieri.proprio=false`)
+// — copie di cascata-albero o contratti acquistati in condivisione. Il prezzo di un contratto lo decide
+// chi lo DETIENE (proprio=true), non chi lo rivende. Ritorna un Set di `corrieri.id` di sola lettura
+// (vuoto = tutti propri → tutto modificabile).
 //
-// A differenza di `listinoCorrieriSolaLettura` — che è tutto-o-niente a livello master — questa
-// distingue CONTRATTO PER CONTRATTO: un master misto (possiede i suoi + rivende quelli del padre) può
-// così modificare i propri e vedere-soltanto quelli ereditati, invece di poter toccare tutto perché
-// possiede almeno un contratto suo.
+// PERCHÉ `proprio` e non più albero+nome: la vecchia versione risaliva parent_master_id e marcava sola
+// lettura i contratti con lo stesso NOME di un antenato. Sbaglia sulla condivisione-codice, dove i due
+// grafi vanno in versi OPPOSTI (es. SDA EXPRESS L: LOGIXIA lo DETIENE e lo vende verso l'alto a MULTI,
+// ma nell'albero MULTI sta sopra LOGIXIA): risultato INVERTITO — il rivenditore MULTI poteva modificare
+// e il detentore LOGIXIA era bloccato. `proprio` è l'unico marcatore affidabile del detentore, allineato
+// alla guardia RLS in DB. A livello contratto: un master misto modifica i suoi (proprio=true) e vede-
+// soltanto le copie (proprio=false).
 export async function corrieriEreditatiIds(adminDb: any, masterId: string): Promise<Set<string>> {
   const ereditati = new Set<string>()
   if (!masterId) return ereditati
-  const { data: m } = await adminDb.from('masters').select('parent_master_id,parent_listino_id').eq('id', masterId).maybeSingle()
-  if (!m?.parent_listino_id) return ereditati   // nessun listino assegnato → titolare, niente ereditato
-  const { data: miei } = await adminDb.from('corrieri').select('id,nome_contratto').eq('master_id', masterId)
-  if (!miei?.length) return ereditati
-  // Nomi contratto posseduti dagli ANTENATI (catena parent_master_id)
-  const antenati = new Set<string>()
-  let cur: string | null = m.parent_master_id
-  for (let i = 0; i < 20 && cur; i++) {
-    const { data: ac } = await adminDb.from('corrieri').select('nome_contratto').eq('master_id', cur)
-    for (const c of (ac || [])) { const n = (c.nome_contratto || '').trim().toLowerCase(); if (n) antenati.add(n) }
-    const { data: pm } = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
-    cur = pm?.parent_master_id || null
-  }
-  for (const c of (miei || [])) {
-    const n = (c.nome_contratto || '').trim().toLowerCase()
-    if (n && antenati.has(n)) ereditati.add(c.id)
-  }
+  const { data: miei } = await adminDb.from('corrieri').select('id,proprio').eq('master_id', masterId)
+  for (const c of (miei || [])) { if (!(c as any).proprio) ereditati.add((c as any).id) }
   return ereditati
 }
 
-// Un Listino Corrieri è in SOLA LETTURA per il master se è un rivenditore PURO: ha un listino
-// assegnato dal padre (parent_listino_id) E tutti i suoi contratti sono già posseduti da un
-// antenato (li rivende soltanto). Se invece possiede almeno un contratto ORIGINALE (nome_contratto
-// che nessun antenato ha, es. E&A che detiene BRT/Poste/UPS), è il titolare e può modificare.
+// Banner master-level: il Listino Corrieri è tutto in SOLA LETTURA se il master è un rivenditore PURO,
+// cioè non DETIENE alcun contratto (nessun `corrieri.proprio=true`). Se possiede almeno un contratto
+// proprio è un detentore (anche misto): niente banner, la sola-lettura si decide contratto-per-contratto
+// con corrieriEreditatiIds. Vedi lì il perché di `proprio` al posto di albero+nome.
 export async function listinoCorrieriSolaLettura(adminDb: any, masterId: string): Promise<boolean> {
   if (!masterId) return false
-  const { data: m } = await adminDb.from('masters').select('parent_master_id,parent_listino_id').eq('id', masterId).maybeSingle()
-  if (!m?.parent_listino_id) return false   // nessun listino assegnato → titolare, editabile
-  const { data: miei } = await adminDb.from('corrieri').select('nome_contratto').eq('master_id', masterId)
-  const mieiNomi = (miei || []).map((c: any) => (c.nome_contratto || '').trim().toLowerCase()).filter(Boolean)
-  if (!mieiNomi.length) return true   // nessun corriere proprio → solo rivendita
-  // Nomi contratto posseduti dagli ANTENATI (catena parent_master_id)
-  const antenati = new Set<string>()
-  let cur: string | null = m.parent_master_id
-  for (let i = 0; i < 20 && cur; i++) {
-    const { data: ac } = await adminDb.from('corrieri').select('nome_contratto').eq('master_id', cur)
-    for (const c of (ac || [])) { const n = (c.nome_contratto || '').trim().toLowerCase(); if (n) antenati.add(n) }
-    const { data: pm } = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
-    cur = pm?.parent_master_id || null
-  }
-  // Possiede almeno un contratto originale (non di un antenato) → titolare → editabile
-  const possiedeOriginale = mieiNomi.some((n: string) => !antenati.has(n))
-  return !possiedeOriginale
+  const { data: miei } = await adminDb.from('corrieri').select('proprio').eq('master_id', masterId)
+  if (!miei?.length) return false   // nessun corriere → niente da mostrare
+  return !miei.some((c: any) => c.proprio)   // nessun proprio → rivenditore puro → tutto sola lettura
 }
