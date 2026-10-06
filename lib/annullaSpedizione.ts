@@ -146,7 +146,9 @@ export async function annullaSpedizioneSulCorriere(
 // legato alla LDV crea un rimborso dello STESSO importo, a OGNI livello (cliente + master catena).
 // Include le RETTIFICHE (correzioni di prezzo sotto-costo): all'annullo va rimborsato costo + rettifica,
 // altrimenti il livello resterebbe addebitato della rettifica dopo la cancellazione.
-// Idempotente: se esistono già rimborsi per questa spedizione non li ricrea.
+// Idempotente PER-MOVIMENTO (non per-spedizione): ricrea SOLO i rimborsi mancanti. Così una rettifica
+// arrivata DOPO il primo rimborso viene comunque stornata, e un pacco annullato da una porta vecchia
+// che non aveva mai rimborsato viene finalmente coperto.
 export async function rimborsaAnnulloSpedizione(
   admin: any,
   sped: { id: string; numero: string; dest_nome?: string | null },
@@ -163,12 +165,28 @@ export async function rimborsaAnnulloSpedizione(
       await admin.rpc('storna_fee_moovexpress', { p_spedizione_id: sped.id, p_numero: sped.numero, p_created_by: createdBy })
     } catch (e) { console.error('Errore storno commissione MoovExpress su annullo:', e) }
 
-    const { data: giaRimborsati } = await admin.from('movimenti')
-      .select('id').eq('spedizione_id', sped.id).eq('tipo', 'rimborso').limit(1)
-    if (giaRimborsati?.length) return
+    // IDEMPOTENZA PER-MOVIMENTO. La vecchia guardia "se esiste un qualsiasi rimborso → esci" lasciava
+    // NON stornate le rettifiche/riprezzi arrivati DOPO il primo rimborso (28 pacchi, ~200 EUR a
+    // clienti/master che restavano addebitati su spedizioni annullate) e saltava i pacchi mai rimborsati
+    // da porte vecchie. Ora si confronta ogni addebito col suo rimborso-opposto gia' esistente e si crea
+    // solo cio' che manca. Vale la coppia (ledger-colonna + importo), consumata 1-a-1 per gestire
+    // addebiti identici ripetuti. (L'over-refund da riscrittura in-place dell'importo e' un caso a parte,
+    // chiuso alla radice dal trigger append-only su movimenti.importo: qui non lo si puo' sanare creando
+    // altri rimborsi.)
     const { data: addebiti } = await admin.from('movimenti')
       .select('cliente_id,master_id,master_target_id,importo')
       .eq('spedizione_id', sped.id).in('tipo', ['spedizione', 'rettifica'])
+    if (!addebiti?.length) return
+    const { data: rimbEsistenti } = await admin.from('movimenti')
+      .select('cliente_id,master_id,master_target_id,importo')
+      .eq('spedizione_id', sped.id).eq('tipo', 'rimborso')
+    const chiaveRimb = (cli: any, mo: any, tg: any, imp: number) =>
+      `${cli || ''}|${mo || ''}|${tg || ''}|${imp.toFixed(2)}`
+    const giaFatti = new Map<string, number>()
+    for (const r of (rimbEsistenti || [])) {
+      const k = chiaveRimb(r.cliente_id, r.master_id, r.master_target_id, Number(r.importo || 0))
+      giaFatti.set(k, (giaFatti.get(k) || 0) + 1)
+    }
     const desc = `Rimborso ${sped.numero} - ${sped.dest_nome || ''}`.trim()
     for (const a of (addebiti || [])) {
       // Storno = importo ESATTAMENTE OPPOSTO all'addebito (nega il segno). Così annulla correttamente
@@ -177,6 +195,10 @@ export async function rimborsaAnnulloSpedizione(
       // rettifiche positive raddoppiava invece di annullare, lasciando un residuo a ogni livello.
       const importo = -Number(a.importo || 0)
       if (!(Math.abs(importo) > 0.0001)) continue
+      // Gia' stornato questo addebito? consuma il match 1-a-1 e salta (idempotenza per-movimento).
+      const k = chiaveRimb(a.cliente_id, a.master_id, a.master_target_id, importo)
+      const n = giaFatti.get(k) || 0
+      if (n > 0) { giaFatti.set(k, n - 1); continue }
       try {
         if (a.cliente_id) {
           await registraMovimento(admin, {
