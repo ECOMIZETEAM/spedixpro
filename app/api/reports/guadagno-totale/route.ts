@@ -8,8 +8,9 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 //   Spedizioni — guadagno_spedizioni_serie_v1)
 // + Rettifiche + Rimborsi + Resi + Giacenze + Commissioni + Accessori + Logistica (margine a catena,
 //   PER TIPO, in UNA sola chiamata guadagno_master_serie_v1 — chain-aware e dedup dei self dei sub)
-// + Canone abbonamento (NON nei movimenti: da abbonamenti_pagamenti = incassato come ROOT − pagato come
-//   master; per i rivenditori e' 0, lo incassa l'apex piattaforma).
+// Il CANONE abbonamento NON entra qui (regola Lorenzo 6/10): il Guadagno Totale e' SOLO operativo.
+// L'abbonamento e' overhead/ricavo di piattaforma e si vede nelle sue pagine dedicate, non e' guadagno
+// operativo. Tolto anche dal calderone (calderone_dettaglio_v2), cosi' Guadagno Totale == Profitto.
 //
 // NON si sommano le "card" a schermo una per una: la card "Supplementi" somma per DESCRIZIONE
 // (giacenz/riconsegn/supplement) e ridonda su giacenze+rettifiche (doppio conteggio) — qui si conta PER
@@ -47,15 +48,11 @@ export async function GET(req: NextRequest) {
   const admin = createAdminSupabase()
   const r2 = (x: number) => Math.round(x * 100) / 100
 
-  const [sped, altri, canoneInc, canonePag, consInc, consPag, ingrossoAdj] = await Promise.all([
+  const [sped, altri, consInc, consPag, ingrossoAdj] = await Promise.all([
     // SPEDIZIONI col metodo esatto del Report Spedizioni (data creazione)
     admin.rpc('guadagno_spedizioni_serie_v1', { p_master: M, p_dal: dal, p_al: alEnd, p_per_mese: perMese }),
     // Le altre 7 voci operative, PER TIPO, in un colpo (chain-aware, niente doppi conteggi)
     admin.rpc('guadagno_master_serie_v1', { p_master: M, p_dal: dal, p_al: alEnd, p_per_mese: perMese, p_tipi: TIPI_OPERATIVI }),
-    // Canone: incassato come ROOT (quello che il master incassa dai suoi, se e' lui a fatturare il canone)
-    admin.from('abbonamenti_pagamenti').select('importo').eq('root_id', M).eq('pagato', true).gte('pagato_il', dal).lte('pagato_il', alEnd),
-    // Canone: pagato come master (il proprio canone = costo)
-    admin.from('abbonamenti_pagamenti').select('importo').eq('master_id', M).eq('pagato', true).gte('pagato_il', dal).lte('pagato_il', alEnd),
     // CONSUMABILI (tipo 'consumabile', senza spedizione_id): ricavo = quello che il master addebita
     admin.from('movimenti').select('importo').eq('tipo', 'consumabile').eq('master_id', M).gte('created_at', dal).lte('created_at', alEnd),
     // CONSUMABILI costo = quello che il parent addebita al master
@@ -77,13 +74,11 @@ export async function GET(req: NextRequest) {
   let ricavi = 0, costi = 0
   for (const row of (sped.data || [])) { ricavi += Number((row as any).ricavi || 0); costi += Number((row as any).costi || 0) }
   for (const row of (altri.data || [])) { ricavi += Number((row as any).ricavi || 0); costi += Number((row as any).costi || 0) }
-  const canoneIncassato = (canoneInc.data || []).reduce((s: number, x: any) => s + Number(x.importo || 0), 0)
-  const canonePagato = (canonePag.data || []).reduce((s: number, x: any) => s + Number(x.importo || 0), 0)
   // Consumabili: importi negativi (addebiti) → il ricavo è -importo
   const consIncassato = (consInc.data || []).reduce((s: number, x: any) => s + (-(Number(x.importo || 0))), 0)
   const consPagato = (consPag.data || []).reduce((s: number, x: any) => s + (-(Number(x.importo || 0))), 0)
-  ricavi += canoneIncassato + consIncassato
-  costi += canonePagato + consPagato
+  ricavi += consIncassato
+  costi += consPagato
   // Correzione nodi-codice (ricavo-ponte mancante + costo-ingrosso invisibile). Se la funzione non c'è
   // ancora in DB (ingrossoAdj.error) l'adj resta 0: nessun effetto finché non si applica la migrazione.
   if (!ingrossoAdj.error && ingrossoAdj.data) {
