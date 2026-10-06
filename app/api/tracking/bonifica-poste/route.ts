@@ -74,21 +74,32 @@ export async function GET(req: NextRequest) {
 
   // POSTE DIRETTI: qui si RILEGGE, perché è la fonte dello stato e il pacco deve poter avanzare fino
   // a "consegnata". Rotazione sul meno letto di recente (`tracking_check_at`, che si riscrive sotto).
-  // La dose: 40 per giro × 4 giri l'ora = ~3.800 letture al giorno. Con ~2.000 spedizioni attive su
-  // questi contratti fa due letture al giorno ciascuna, che per un corriere che consegna in 24-48h è
-  // il minimo per non mostrare al cliente lo stato di ieri. Il freno resta: una ogni 1,2s e stop dopo
-  // 6 risposte non-ok di fila (se Poste chiude il rubinetto si riprende al giro dopo).
-  // Gli 'in_lavorazione' appena creati si saltano (< 6 ore): Poste non li ha ancora e sprecano quota.
-  const { data: candPoste } = idsPosteDiretti.length
-    ? await admin.from('spedizioni')
+  // La dose: 40 per giro × 4 giri l'ora = ~3.800 letture al giorno. Il freno resta: una ogni 1,2s e
+  // stop dopo 6 risposte non-ok di fila (se Poste chiude il rubinetto si riprende al giro dopo).
+  // LA DOSE VA DOVE I MOVIMENTI CI SONO. Campionato il 6/10/2026 appena acceso questo ramo: sulle
+  // 'spedita' (consegnate al corriere) poste.it ha movimenti in 1 caso su 3; sulle 'in_lavorazione'
+  // 0 su 6 — sono etichette emesse e non ancora scansionate, e su questo contratto sono la grande
+  // maggioranza (1.772 contro 303). Mescolandole in un'unica rotazione la quota finiva quasi tutta su
+  // LDV che Poste non conosce: 5 giri avevano riempito solo 15 cronologie. Quindi due secchielli:
+  // 30 per giro a chi e' in viaggio (e deve ancora arrivare a "consegnata"), 10 a chi e' ferma in
+  // lavorazione — che cosi' non resta esclusa, perche' qualcuna viene scansionata piu' tardi.
+  const PRESE_IN_CARICO = ['spedita', 'in_transito', 'in_consegna', 'non_consegnato', 'in_giacenza']
+  const pescaPoste = async (stati: string[], quante: number, nonPrimaDi?: number) => {
+    if (!idsPosteDiretti.length) return [] as any[]
+    const { data } = await admin.from('spedizioni')
       .select('id,numero,tracking_number,stato,created_at')
-      .in('corriere_id', idsPosteDiretti).in('stato', ATTIVI)
+      .in('corriere_id', idsPosteDiretti).in('stato', stati)
       .order('tracking_check_at', { ascending: true, nullsFirst: true })
-      .order('id', { ascending: true }).limit(200)
-    : { data: [] as any[] }
-  const listaPoste = (candPoste || [])
-    .filter((c: any) => !(c.stato === 'in_lavorazione' && new Date(c.created_at).getTime() > seiOreFa))
-    .slice(0, 40)
+      .order('id', { ascending: true }).limit(quante * 4)
+    return (data || [])
+      .filter((c: any) => !nonPrimaDi || new Date(c.created_at).getTime() < nonPrimaDi)
+      .slice(0, quante)
+  }
+  const listaPoste = [
+    ...await pescaPoste(PRESE_IN_CARICO, 30),
+    // Gli 'in_lavorazione' appena creati si saltano (< 6 ore): Poste non li ha ancora e sprecano quota.
+    ...await pescaPoste(['in_lavorazione'], 10, seiOreFa),
+  ]
 
   const lista = [...listaPoste, ...listaSpedisci]
   const rileggere = new Set(listaPoste.map((s: any) => s.id))
