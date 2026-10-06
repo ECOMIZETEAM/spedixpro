@@ -10,7 +10,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params
   const admin = createAdminSupabase()
   const { data: s } = await admin.from('spedizioni')
-    .select('id,numero,tracking_number,stato,costo_totale,dest_nome,dest_citta,dest_provincia,dest_cap,dest_paese,peso_reale,colli,contrassegno,note,created_at,cliente_id,corriere_id,corrieri(nome_contratto)')
+    // rif_ordine anche qui: chi si integra legge la lista e poi il dettaglio, e in entrambi i posti
+    // deve poter riagganciare la spedizione all'ordine del proprio gestionale (6/10/2026).
+    .select('id,numero,tracking_number,rif_ordine,stato,costo_totale,dest_nome,dest_citta,dest_provincia,dest_cap,dest_paese,peso_reale,colli,contrassegno,note,created_at,cliente_id,corriere_id,corrieri(nome_contratto)')
     .eq('id', id).maybeSingle()
   if (!s || s.cliente_id !== ctx.clienteId) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
   return NextResponse.json({

@@ -78,7 +78,12 @@ export default function ApiKeysPage() {
           Base URL: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>{base}/api/v1</code><br/>
           Autenticazione: header <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>Authorization: Bearer &lt;api_key&gt;</code><br/>
           Tariffa: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>POST {base}/api/v1/rates</code><br/>
-          Crea spedizione: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>POST {base}/api/v1/shipments</code> — body <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>{'{ packages, shipFrom, shipTo, codValue?, insuranceValue? }'}</code><br/>
+          {/* `rifOrdine` era accettato ma non documentato: chi si integra non sapeva di poterlo mandare,
+              e senza quello non puo' riagganciare la spedizione all'ordine del suo gestionale (ed e' il
+              campo su cui lavora la guardia anti-doppione). */}
+          Crea spedizione: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>POST {base}/api/v1/shipments</code> — body <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>{'{ packages, shipFrom, shipTo, rifOrdine?, codValue?, insuranceValue? }'}</code><br/>
+          <span style={{color:'#666'}}>Manda il tuo numero d&apos;ordine in <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>rifOrdine</code>: torna come <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>rif_ordine</code> in lettura, compare nel portale, e protegge dal doppio invio dello stesso ordine.</span><br/>
+          Elenco spedizioni: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>GET {base}/api/v1/shipments</code> (<code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>?limit=&amp;offset=&amp;stato=</code>)<br/>
           Stato: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>GET {base}/api/v1/shipments/&#123;id&#125;</code> · Etichetta LDV: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>GET {base}/api/v1/shipments/&#123;id&#125;/label</code><br/>
           Annulla (solo se non ancora affidata al corriere): <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>DELETE {base}/api/v1/shipments/&#123;id&#125;</code>
         </div>

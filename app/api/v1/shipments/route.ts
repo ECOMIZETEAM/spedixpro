@@ -38,7 +38,11 @@ export async function GET(req: NextRequest) {
   const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0') || 0)
   const stato = url.searchParams.get('stato')
   let q = admin.from('spedizioni')
-    .select('id,numero,tracking_number,stato,dest_nome,dest_citta,dest_provincia,dest_cap,dest_paese,colli,peso_reale,contrassegno,costo_totale,created_at', { count: 'exact' })
+    // `rif_ordine` = il riferimento d'ordine di chi spedisce (quello che il portale mostra come
+    // "Rif. Ordine"). Chiesto da chi si integra il 6/10/2026: leggevano tracking, destinatario e
+    // stato ma non avevano modo di riagganciare la spedizione all'ordine del proprio gestionale, che
+    // e' il primo motivo per cui si legge questa lista.
+    .select('id,numero,tracking_number,rif_ordine,stato,dest_nome,dest_citta,dest_provincia,dest_cap,dest_paese,colli,peso_reale,contrassegno,costo_totale,created_at', { count: 'exact' })
     .eq('cliente_id', ctx.clienteId).order('created_at', { ascending: false }).range(offset, offset + limit - 1)
   if (stato) q = q.eq('stato', stato)
   const { data, count } = await q
@@ -660,6 +664,14 @@ export async function POST(req: NextRequest) {
     colli: packages.length, peso_reale: pesoReale,
     peso_volume: ris?.peso_volume || null, peso_fatturato: ris?.peso_fatturato || null,
     lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
+    // IL RIFERIMENTO D'ORDINE SI SALVA. Arrivava nel body (`rifOrdine`), veniva passato al corriere e
+    // usato dalla guardia anti-doppione, ma NON finiva nella riga: 21.846 spedizioni create via API
+    // avevano `rif_ordine` a NULL. Due conseguenze vere: chi si integra non poteva riagganciare la
+    // spedizione al proprio ordine (ne' qui ne' nel portale), e soprattutto la guardia
+    // (lib/guardia-doppione) e l'indice uniq_sped_ordine_attivo_v2 confrontano proprio questa
+    // colonna — con NULL non trovavano mai niente, quindi l'API era l'unica porta SENZA protezione
+    // contro il doppio addebito dello stesso ordine (vedi CONTROLLORE-SUPREMO.md).
+    rif_ordine: (body.rifOrdine ? String(body.rifOrdine).trim() : '') || null,
     contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
     tracking_number: numero, etichetta_url: etichettaUrl, colli_dettaglio: colliDettaglio, raw_response: raw, stato: 'in_lavorazione',
     costo_spedizione: costoCorrente, costo_totale: costoCliente, note: body.notes || null, contenuto: body.contenuto || null,
