@@ -171,9 +171,14 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
       for (const [k, v] of Object.entries(settingsContratto(c.settings))) {
         if (attuali[k] === undefined || attuali[k] === null) merged[k] = v
       }
-      // Riattivo (attivo:true) nel caso fosse stato disattivato da una precedente disabilitazione poi
-      // riabilitata -> così ricompare correttamente quando il detentore lo riattiva.
-      await admin.from('corrieri').update({ settings: merged, attivo: true }).eq('id', subId)
+      // NON si forza piu' attivo=true. Una PAUSA messa apposta (un master che spegne un contratto per la
+      // sua rete, es. Ecomize -> "Poste Express M") deve RESTARE in pausa anche quando un listino si
+      // ri-propaga da sopra: prima ogni cambio-listino a monte la RIACCENDEVA (attivo:true), quindi i
+      // sotto continuavano a spedire su un contratto messo in pausa (bug ricorrente, "reinserimento").
+      // Si aggiornano solo le impostazioni; l'attivo resta quello scelto dal sotto-master. La
+      // disponibilita' a valle quando un ANTENATO toglie un contratto e' gia' garantita dal filtro-catena
+      // (lib/contratti-catena.ts) + dal check in creazione, non serve riaccendere qui.
+      await admin.from('corrieri').update({ settings: merged }).eq('id', subId)
     }
     if (subId) mapCorr.set(c.id, subId)
   }
