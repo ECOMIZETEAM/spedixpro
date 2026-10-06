@@ -13,7 +13,7 @@ export async function GET() {
   const { data: cliente } = await supabase.from('clienti').select('listino_cliente_id,master_id').eq('id', id).single()
   if (!cliente?.listino_cliente_id) return NextResponse.json([])
   const { data: agganci } = await supabase.from('listini_clienti_corrieri')
-    .select('corriere_id, corrieri(id,nome_contratto)')
+    .select('corriere_id, corrieri(id,nome_contratto,attivo)')
     .eq('listino_id', cliente.listino_cliente_id)
   // QUELLO CHE IL PADRE NON HA PIU', IL FIGLIO NON PUO' VENDERLO.
   // Un contratto si spegne dalla scheda del cliente o del sotto-master, e l'effetto scende lungo
@@ -29,7 +29,10 @@ export async function GET() {
     // BUG: prima confrontava `sospesi.has(c.id)`, ma il set contiene i NOMI dei contratti (minuscoli),
     // non gli id → sempre falso, il filtro non toglieva nulla e un contratto tolto sopra restava
     // accendibile dal cliente. Ora si confronta per nome, come tutte le altre porte.
-    .filter((c:any) => !sospesoDallaCatena(c.nome_contratto, sospesi))
+    // + `attivo===false`: contratto messo in pausa dal PROPRIO master del cliente (la sua riga è quella
+    // nel listino). La catena guarda solo gli ANTENATI, non il livello del master diretto: senza questo
+    // il contratto in pausa restava visibile/accendibile al cliente. Stesso filtro di /api/cliente/corrieri.
+    .filter((c:any) => c.attivo !== false && !sospesoDallaCatena(c.nome_contratto, sospesi))
   const { data: stati } = await supabase.from('clienti_corrieri_abilitati')
     .select('corriere_id, abilitato, settings').eq('cliente_id', id)
   const mappaAbil = new Map((stati||[]).map((s:any) => [s.corriere_id, s.abilitato]))
