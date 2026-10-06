@@ -12,6 +12,10 @@ import { calderoneCache, conCache } from '@/lib/cache-memoria'
 // Garanzia verificata sui dati veri: Somma(perContratto) == Somma(perCliente) == totale == Guadagno
 // Totale della dashboard, al centesimo (RPC calderone_dettaglio_v2). La vecchia pagina sommava solo 5
 // tipi e contava le spedizioni per data movimento: non combaciava mai e a ottobre perdeva i consumabili.
+// NODI-CODICE (grafo corrieri_condivisi): calderone_dettaglio_v2 azzera il business d'ingrosso (guardia
+// "cm/pc null => azzera", perimetro ALBERO) -> si somma guadagno_ingrosso_adj_v1 al TOTALE e alla voce
+// Spedizioni per ri-combaciare con la dashboard. perContratto/perCliente NON lo includono (l'ingrosso non
+// e' una riga-contratto reale): per i nodi-codice il breakdown somma meno del totale, di proposito.
 const r2 = (x: number) => Math.round(x * 100) / 100
 const n = (x: any) => Number(x || 0)
 const marg = (ric: number, cos: number) => (ric > 0 ? r2(((ric - cos) / ric) * 100) : 0)
@@ -52,10 +56,25 @@ export async function GET(req: NextRequest) {
     ])
   } catch (e: any) { return NextResponse.json({ error: e?.message || 'Errore' }, { status: 500 }) }
 
-  const ric = r2(n(j.totale?.ricavi)), cos = r2(n(j.totale?.costi)), gua = r2(ric - cos)
+  // Adj nodi-codice (stessa funzione del Guadagno Totale) per far combaciare questa pagina con la dashboard.
+  // Resiliente: se la funzione erra/manca, adj=0 e la pagina non cade.
+  let adjRic = 0, adjCos = 0
+  try {
+    const { data: adj, error } = await admin.rpc('guadagno_ingrosso_adj_v1', { p_master: M, p_dal: dalISO, p_al: alISO })
+    if (!error && adj) { const a: any = Array.isArray(adj) ? adj[0] : adj; adjRic = n(a?.ricavi_adj); adjCos = n(a?.costi_adj) }
+  } catch { /* adj resta 0 */ }
 
-  const perVoce = (j.perTipo || [])
-    .map((v: any) => ({ tipo: v.tipo, label: ETICHETTE[v.tipo] || v.tipo, ricavi: r2(n(v.ricavi)), costi: r2(n(v.costi)), guadagno: r2(n(v.ricavi) - n(v.costi)) }))
+  const ric = r2(n(j.totale?.ricavi) + adjRic), cos = r2(n(j.totale?.costi) + adjCos), gua = r2(ric - cos)
+
+  // L'adj entra nella voce "Spedizioni" cosi' Somma(perVoce) == totale anche per i nodi-codice.
+  const perTipoRaw = (j.perTipo || []).map((v: any) => ({ tipo: v.tipo, ricavi: n(v.ricavi), costi: n(v.costi) }))
+  if (adjRic !== 0 || adjCos !== 0) {
+    const sp = perTipoRaw.find((v: any) => v.tipo === 'spedizione')
+    if (sp) { sp.ricavi += adjRic; sp.costi += adjCos }
+    else perTipoRaw.push({ tipo: 'spedizione', ricavi: adjRic, costi: adjCos })
+  }
+  const perVoce = perTipoRaw
+    .map((v: any) => ({ tipo: v.tipo, label: ETICHETTE[v.tipo] || v.tipo, ricavi: r2(v.ricavi), costi: r2(v.costi), guadagno: r2(v.ricavi - v.costi) }))
     .filter((v: any) => v.ricavi !== 0 || v.costi !== 0)
     .sort((a: any, b: any) => b.guadagno - a.guadagno)
 

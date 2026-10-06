@@ -60,13 +60,15 @@ export async function GET(req: NextRequest) {
     admin.from('movimenti').select('importo').eq('tipo', 'consumabile').eq('master_id', M).gte('created_at', dal).lte('created_at', alEnd),
     // CONSUMABILI costo = quello che il parent addebita al master
     admin.from('movimenti').select('importo').eq('tipo', 'consumabile').eq('master_target_id', M).neq('master_id', M).gte('created_at', dal).lte('created_at', alEnd),
-    // CORREZIONE NODI-CODICE (grafo corrieri_condivisi): il costo d'acquisto all'INGROSSO (il ledger su cui
-    // il nodo COMPRA) ha master_target=NULL → invisibile alle RPC sopra, che attribuiscono il costo via
-    // master_target_id; un ACQUIRENTE come MULTIEXPRESS contava il ricavo verso i suoi sub ma NON il costo
-    // verso il fornitore-ponte → Guadagno Totale gonfiato (misurato ~9-13k su 6gg). E il ricavo-vendita del
-    // PONTE (Wave) veniva azzerato dalla guardia della RPC spedizioni. Qui si recuperano entrambi. Vuota
-    // (0/0) per i master NON-codice (zero impatto sui 43). Resiliente: se la funzione non è ancora in DB,
-    // l'errore si ignora e l'adj resta 0 (così il deploy non dipende dall'ordine con la migrazione SQL).
+    // CORREZIONE NODI-CODICE (grafo corrieri_condivisi). Una spedizione d'ingrosso vive su PIU' righe-gamba
+    // legate dal tracking_number (originatrice + gamba-ledger per ogni passaggio). Il costo d'acquisto e il
+    // ricavo-ponte stanno su gambe-ledger dove master_target=NULL, e la RPC spedizioni attribuisce il costo
+    // SOLO via master_target_id=p_master: la sua guardia "cm null OR pc null => azzera entrambi" quindi
+    // CANCELLA del tutto quelle righe (NON le gonfia). Risultato: il ricavo-vendita del PONTE (Wave verso
+    // MULTI) e il margine SDA dell'ACQUIRENTE (MULTI: addebito ai suoi sub meno il costo verso Wave)
+    // sparivano. Qui si recuperano. Verificato sui dati veri 6/10: Wave-vende-a-MULTI = MULTI-paga-Wave al
+    // centesimo (stesso snapshot). Vuota (0/0) per i master NON-codice. Resiliente: se la funzione non è
+    // ancora in DB, l'errore si ignora e l'adj resta 0 (il deploy non dipende dall'ordine con la migrazione).
     admin.rpc('guadagno_ingrosso_adj_v1', { p_master: M, p_dal: dal, p_al: alEnd }),
   ])
   if (sped.error) return NextResponse.json({ error: sped.error.message }, { status: 500 })
