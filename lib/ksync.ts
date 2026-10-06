@@ -171,17 +171,10 @@ export async function creaKsync(c: KsyncCred, dati: KsyncInput): Promise<{ ldv: 
   if (dati.contrassegno) services[dati.codiceContrassegno || 'APT000918'] = { amount: (Number(dati.contrassegno) || 0).toFixed(2), paymentMode: dati.modalitaPagamentoCod || 'CON' }
   if (dati.assicurata && dati.codiceAssicurazione) services[dati.codiceAssicurazione] = { amount: (Number(dati.assicurata) || 0).toFixed(2) }
 
-  const data: any = {
-    // Anche contenuto/note vanno a POSTE: stessa pulizia dei caratteri vietati (una " o una graffa li'
-    // darebbe lo stesso "non ammessi i caratteri escape e simboli speciali").
-    declared, content: pulisciPoste(dati.contenuto), note: pulisciPoste(dati.note),
-    // `services` è OBBLIGATORIO anche senza accessori: omesso del tutto, il server risponde
-    // "Dati obbligatori mancanti: waybills[].data.services" (verificato 24/9). Va sempre presente, anche {}.
-    services,
-    sender: party(dati.mittente), receiver: party(dati.destinatario),
-  }
-
-  const body = {
+  const sender0 = party(dati.mittente)
+  const receiver0 = party(dati.destinatario)
+  // Body della LDV con un dato mittente/destinatario: funzione, così si può RITENTARE variandoli.
+  const costruisciBody = (sender: any, receiver: any) => ({
     costCenterCode: dati.costCenterCode || c.costCenterCode || '',
     paperless: dati.paperless ? 'true' : 'false',
     shipmentDate: dati.shipmentDate || new Date().toISOString(),
@@ -191,15 +184,39 @@ export async function creaKsync(c: KsyncCred, dati: KsyncInput): Promise<{ ldv: 
       clientReferenceId: String(dati.clientReferenceId || '').slice(0, 50),
       printFormat: dati.printFormat || 'A4',
       product: dati.product,
-      data,
+      data: {
+        // Anche contenuto/note vanno a POSTE: stessa pulizia dei caratteri vietati.
+        declared, content: pulisciPoste(dati.contenuto), note: pulisciPoste(dati.note),
+        // `services` è OBBLIGATORIO anche senza accessori: omesso del tutto, "Dati obbligatori
+        // mancanti: waybills[].data.services" (verificato 24/9). Va sempre presente, anche {}.
+        services,
+        sender, receiver,
+      },
     }],
+  })
+  // Estrae l'errore POSTE da una risposta (null = andata bene). PDB lo mette in piu' punti.
+  const erroreDi = (r: { ok: boolean; status: number; j: any }): string | null => {
+    if (!r.ok) return r.j?.result?.errorDescription || `KSync: errore ${r.status}`
+    if (r.j?.result && Number(r.j.result.errorCode) !== 0) return r.j.result.errorDescription || 'KSync: creazione non riuscita'
+    const w = (Array.isArray(r.j?.waybills) ? r.j.waybills : [])[0]
+    if (!w || Number(w.errorCode) !== 0 || !w.code) return w?.errorDescription || 'KSync: LDV non emessa'
+    return null
   }
-  const { ok, status, j } = await chiama(c, 'waybill/create', body)
-  if (!ok) throw new Error(j?.result?.errorDescription || `KSync: errore ${status}`)
-  // Esito generale + esito della singola LDV (PDB mette l'errore in entrambi i punti).
-  if (j?.result && Number(j.result.errorCode) !== 0) throw new Error(j.result.errorDescription || 'KSync: creazione non riuscita')
+
+  let r = await chiama(c, 'waybill/create', costruisciBody(sender0, receiver0))
+  let err = erroreDi(r)
+  // POSTE rifiuta l'email con una SUA regola (piu' severa di un check di formato): a volte boccia email
+  // che paiono valide (es. arrivate dall'import). L'email e' OPZIONALE (le LDV senza email passano), la
+  // consegna no. Quindi se POSTE si lamenta SOLO dell'email, ritento UNA volta SENZA email mittente/
+  // destinatario. Il 1° tentativo e' FALLITO (errore di validazione, nessuna LDV emessa) → nessun
+  // doppione. Copre qualunque email che POSTE non digerisce senza doverne indovinare la regola.
+  if (err && /mail/i.test(err) && (sender0.email || receiver0.email)) {
+    r = await chiama(c, 'waybill/create', costruisciBody({ ...sender0, email: '' }, { ...receiver0, email: '' }))
+    err = erroreDi(r)
+  }
+  if (err) throw new Error(err)
+  const j = r.j
   const w = (Array.isArray(j?.waybills) ? j.waybills : [])[0]
-  if (!w || Number(w.errorCode) !== 0 || !w.code) throw new Error(w?.errorDescription || 'KSync: LDV non emessa')
   const durl = String(w.downloadURL || '')
   return { ldv: String(w.code), downloadUrl: durl.startsWith('http') ? durl : (durl ? `${base(c)}${durl.startsWith('/') ? '' : '/'}${durl}` : ''), raw: j }
 }

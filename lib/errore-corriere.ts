@@ -182,6 +182,11 @@ export function erroreCorrierePulito(raw: any): string {
     const dett = String(raw || '').replace(NOMI_FORNITORI, 'corriere').replace(/https?:\/\/[^\s]+/gi, '').replace(/\s+/g, ' ').trim().slice(0, 140)
     return 'Il corriere ha rifiutato la spedizione (verifica misure, peso e indirizzo, o prova un altro contratto)' + (dett ? `: ${dett}` : '.')
   }
+  // POSTE/PDB: "Mittente/Destinatario (Indirizzo) : Campo obbligatorio!" = un dato MANCA, non è
+  // "sbagliato". Quasi sempre la sede operativa del cliente è incompleta (manca indirizzo/città/CAP):
+  // dirlo preciso evita che il master cerchi un errore di formato dove in realtà manca il dato.
+  if (/obbligator|mandatory|\brequired\b/.test(t) && /mittent|destinat|sender|recipient|indiriz|address/.test(t))
+    return 'Dati del mittente o del destinatario incompleti: completa indirizzo, città, CAP e provincia (per il mittente, nella sede operativa del cliente) e riprova.'
   if (/provinc|state|postal|\bzip\b|address|indiriz|\bcap\b|city|citt|recipient|consignee|sender|destinat|mittent/.test(t))
     return 'Indirizzo non valido: controlla nome, indirizzo, città, provincia e CAP di mittente e destinatario.'
   if (/\bcod\b|cash.?on.?delivery|contrassegn/.test(t))
