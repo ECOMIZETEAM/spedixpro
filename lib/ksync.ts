@@ -96,6 +96,29 @@ const nazione = (v: string | undefined) => ISO_PDB[String(v || '').toUpperCase()
 // resta il numero nazionale. Numeri più corti (es. fissi a 9) restano invariati.
 const telPdb = (v?: string) => { const d = String(v || '').replace(/\D/g, ''); return d.length > 10 ? d.slice(-10) : d }
 
+// Testo per Poste/ParcelPilot (indirizzo, nome, citta…): la LDV RIFIUTA i caratteri escape e alcuni
+// simboli — "Campo obbligatorio! Non sono ammessi i caratteri escape e simboli speciali, come \ " { } ~".
+// Come telPdb per il telefono, li tolgo qui nel punto unico, cosi' un carattere vietato (es. una " o una
+// graffa finita in un indirizzo) non blocca la spedizione. VERIFICATO sui dati veri (SDA EXPRESS L, 6.370
+// LDV emesse dal 4/10): nessuna delle riuscite ha \ " { } ~ (toglierli non cambia nulla di cio' che oggi
+// passa), MENTRE la "/" e' AMMESSA (741 indirizzi con "/" sono passati) → la "/" NON si tocca. Tolgo anche
+// i caratteri di controllo; lo spazio sostituisce (non incolla le parole) e si normalizza. Se dopo resta
+// vuoto e' un dato mancante vero (sede operativa non compilata): la LDV fallira' lecitamente, non e' un bug.
+const pulisciPoste = (v?: string) => String(v ?? '')
+  .replace(/[\u0000-\u001F\u007F]/g, ' ')
+  .replace(/["\\{}~]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+
+// Email per Poste/ParcelPilot: la LDV rifiuta un'email MALFORMATA ("Attenzione l'email mittente/
+// destinatario non e' valida"), ma ACCETTA l'email vuota (verificato: LDV emesse senza email). Quindi se
+// l'email non e' valida la OMETTO (stringa vuota) invece di far fallire tutta la spedizione: la notifica
+// Poste e' un di piu', la consegna no. Prima trimmo gli spazi (POSTE tollera " x@y.it " ma il nostro dato
+// a volte li porta); poi un controllo ASCII rigido ma non piu' stretto di POSTE (che accetta .gov.it,
+// molti punti, maiuscole, fino a 64 char: tutti verificati tra le riuscite).
+const RE_EMAIL_POSTE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
+const emailPoste = (v?: string) => { const e = String(v ?? '').trim(); return RE_EMAIL_POSTE.test(e) ? e : '' }
+
 export type KsyncRecapito = {
   ragioneSociale: string
   referente?: string
@@ -113,10 +136,10 @@ export type KsyncCollo = { peso: number | string; altezza?: number | string; lar
 
 function party(r: KsyncRecapito) {
   return {
-    zipCode: String(r.cap || ''), addressId: '', streetNumber: r.civico || '', city: r.citta || '',
-    address: r.indirizzo || '', country: nazione(r.paese), countryName: 'Italia',
-    nameSurname: r.ragioneSociale || '', contactName: r.referente || r.ragioneSociale || '',
-    province: (r.provincia || '').toUpperCase(), email: r.email || '',
+    zipCode: String(r.cap || ''), addressId: '', streetNumber: pulisciPoste(r.civico), city: pulisciPoste(r.citta),
+    address: pulisciPoste(r.indirizzo), country: nazione(r.paese), countryName: 'Italia',
+    nameSurname: pulisciPoste(r.ragioneSociale), contactName: pulisciPoste(r.referente || r.ragioneSociale),
+    province: (r.provincia || '').toUpperCase(), email: emailPoste(r.email),
     phone: telPdb(r.telefono), cellphone: telPdb(r.cellulare), note1: '', note2: '',
   }
 }
@@ -149,7 +172,9 @@ export async function creaKsync(c: KsyncCred, dati: KsyncInput): Promise<{ ldv: 
   if (dati.assicurata && dati.codiceAssicurazione) services[dati.codiceAssicurazione] = { amount: (Number(dati.assicurata) || 0).toFixed(2) }
 
   const data: any = {
-    declared, content: dati.contenuto || '', note: dati.note || '',
+    // Anche contenuto/note vanno a POSTE: stessa pulizia dei caratteri vietati (una " o una graffa li'
+    // darebbe lo stesso "non ammessi i caratteri escape e simboli speciali").
+    declared, content: pulisciPoste(dati.contenuto), note: pulisciPoste(dati.note),
     // `services` è OBBLIGATORIO anche senza accessori: omesso del tutto, il server risponde
     // "Dati obbligatori mancanti: waybills[].data.services" (verificato 24/9). Va sempre presente, anche {}.
     services,
@@ -279,7 +304,7 @@ export async function svincolaKsync(c: KsyncCred, req: { shipmentId: string; rel
   if (req.officeId) body.officeId = req.officeId
   if (req.nuovoIndirizzo) {
     const r = req.nuovoIndirizzo
-    body.address = { item: [{ givenName: r.ragioneSociale || '', surname: '', streetNumber: r.civico || '', streetName: r.indirizzo || '', town: r.citta || '', region: (r.provincia || '').toUpperCase(), postCode: r.cap || '', country: nazione(r.paese), phone: telPdb(r.telefono), email: r.email || '' }] }
+    body.address = { item: [{ givenName: pulisciPoste(r.ragioneSociale), surname: '', streetNumber: pulisciPoste(r.civico), streetName: pulisciPoste(r.indirizzo), town: pulisciPoste(r.citta), region: (r.provincia || '').toUpperCase(), postCode: r.cap || '', country: nazione(r.paese), phone: telPdb(r.telefono), email: emailPoste(r.email) }] }
   }
   const { ok, j } = await chiama(c, 'deposits/release', body)
   const esito = String(j?.result?.result || j?.result || '').toUpperCase()
@@ -326,7 +351,7 @@ export async function ritiroPrenotaKsync(c: KsyncCred, req: { bookingType?: stri
       item: [{
         operation: 'I', bookingType: req.bookingType || 'RIT0003', bookingId: '', pickupId: '',
         shipmentId: req.shipmentId || '', customerShipmentId: '',
-        where: { item: [{ givenName: r.ragioneSociale || '', surname: r.referente || '', streetNumber: r.civico || '', streetName: r.indirizzo || '', town: r.citta || '', region: (r.provincia || '').toUpperCase(), postCode: r.cap || '', country: nazione(r.paese), phone: telPdb(r.telefono), email: r.email || '' }] },
+        where: { item: [{ givenName: pulisciPoste(r.ragioneSociale), surname: pulisciPoste(r.referente), streetNumber: pulisciPoste(r.civico), streetName: pulisciPoste(r.indirizzo), town: pulisciPoste(r.citta), region: (r.provincia || '').toUpperCase(), postCode: r.cap || '', country: nazione(r.paese), phone: telPdb(r.telefono), email: emailPoste(r.email) }] },
         content,
         pickupDate: req.dataRitiro || '', timeSlot: req.timeSlot || 'AM', note1: req.note || '', note2: '', note3: '',
       }],
