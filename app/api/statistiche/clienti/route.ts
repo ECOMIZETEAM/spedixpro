@@ -41,10 +41,22 @@ export async function GET(req: NextRequest) {
   const prevMap = new Map<string, number>()
   for (const c of (prevData?.perCliente || [])) if (!NON_CLIENTI.has(c.nome)) prevMap.set(c.nome, n(c.ricavi))
 
+  // CORREZIONE NODI-CODICE: la vendita ingrosso (ponte/acquirente) e' azzerata dal calderone -> per un ponte
+  // la pagina Clienti risultava quasi vuota. Compare come riga aggregata "Fatturato ingrosso" (e' un
+  // conto-ledger, non un cliente reale a fattura). Resiliente; vuoto per i master non-codice.
+  let adjRic = 0, adjCos = 0
+  try {
+    const { data: adj } = await admin.rpc('guadagno_ingrosso_adj_v1', { p_master: M, p_dal: dalD.toISOString(), p_al: alD.toISOString() })
+    const a: any = Array.isArray(adj) ? adj?.[0] : adj
+    adjRic = r2(n(a?.ricavi_adj)); adjCos = r2(n(a?.costi_adj))
+  } catch { /* 0 */ }
+
   const righe = clientiCur.map((c: any) => ({
     nome: c.nome, spedizioni: n(c.spedizioni), fatturato: r2(n(c.ricavi)), costo: r2(n(c.costi)),
     profitto: r2(n(c.guadagno)), margine: marg(n(c.ricavi), n(c.costi)),
-  })).sort((a: any, b: any) => b.fatturato - a.fatturato)
+  }))
+  if (adjRic !== 0 || adjCos !== 0) righe.push({ nome: 'Fatturato ingrosso', spedizioni: 0, fatturato: adjRic, costo: adjCos, profitto: r2(adjRic - adjCos), margine: marg(adjRic, adjCos) })
+  righe.sort((a: any, b: any) => b.fatturato - a.fatturato)
 
   const nCli = righe.length
   const totRic = r2(righe.reduce((s: number, r: any) => s + r.fatturato, 0))

@@ -137,6 +137,19 @@ export async function GET(req: NextRequest) {
   const perGiorno = new Map<string, { ricavi: number; costi: number }>()
   for (const row of (serieRows || [])) perGiorno.set((row as any).bucket, { ricavi: Number((row as any).ricavi || 0), costi: Number((row as any).costi || 0) })
 
+  // CORREZIONE NODI-CODICE: guadagno_spedizioni_serie_v1 azzera le gambe-ledger del ponte (guardia cm/pc null),
+  // quindi per un ponte/acquirente la card e il grafico restavano a 0. Si somma l'adj ingrosso PER GIORNO
+  // (versione solo-spedizioni, coerente con l'esclusione degli operativi di questa card). Resiliente: se la
+  // funzione manca/erra, adj=0. Vuota per i master non-codice (zero impatto).
+  try {
+    const { data: adjSerie } = await admin.rpc('guadagno_ingrosso_adj_serie_v1', { p_master: M, p_dal: dal, p_al: alEnd, p_per_mese: perMese })
+    for (const row of (adjSerie || [])) {
+      const cur = perGiorno.get((row as any).bucket) || { ricavi: 0, costi: 0 }
+      cur.ricavi += Number((row as any).ricavi || 0); cur.costi += Number((row as any).costi || 0)
+      perGiorno.set((row as any).bucket, cur)
+    }
+  } catch { /* adj resta 0 */ }
+
   let ricaviTot = 0, costiTot = 0
   for (const v of perGiorno.values()) { ricaviTot += v.ricavi; costiTot += v.costi }
   const ricavi = r2(ricaviTot)

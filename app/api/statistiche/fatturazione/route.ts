@@ -39,6 +39,17 @@ export async function GET(req: NextRequest) {
   const tipoContratto = new Map<string, string>()
   for (const c of (cli?.data || [])) tipoContratto.set((c as any).id, (c as any).tipo_contratto || '')
 
+  // CORREZIONE NODI-CODICE: il fatturato della VENDITA ingrosso (ponte->acquirente, o acquirente->sub su SDA)
+  // e' azzerato dal calderone (gambe-ledger con master_target NULL) -> per un ponte il fatturato usciva ~0
+  // (prima del fix annullo addirittura negativo). Si aggiunge l'adj ingrosso (lato ricavi) al totale e come
+  // riga aggregata. Vuoto per i master non-codice. Resiliente.
+  let fattIngrosso = 0
+  try {
+    const { data: adj } = await admin.rpc('guadagno_ingrosso_adj_v1', { p_master: M, p_dal: dalISO, p_al: alISO })
+    const a: any = Array.isArray(adj) ? adj?.[0] : adj
+    fattIngrosso = r2(n(a?.ricavi_adj))
+  } catch { /* 0 */ }
+
   const perCliente = (calData?.perCliente || [])
   const righe = perCliente
     .map((c: any) => {
@@ -47,9 +58,10 @@ export async function GET(req: NextRequest) {
       return { nome: c.nome, tipo: tipoLabel, fatturato: r2(n(c.ricavi)), _fattMensile: fattMensile }
     })
     .filter((r: any) => r.fatturato !== 0)
-    .sort((a: any, b: any) => b.fatturato - a.fatturato)
+  if (fattIngrosso !== 0) righe.push({ nome: 'Fatturato ingrosso', tipo: 'Ingrosso', fatturato: fattIngrosso, _fattMensile: false })
+  righe.sort((a: any, b: any) => b.fatturato - a.fatturato)
 
-  const fatturatoTot = r2(n(calData?.totale?.ricavi))
+  const fatturatoTot = r2(n(calData?.totale?.ricavi) + fattIngrosso)
   const daFatturare = r2(righe.filter((r: any) => r._fattMensile).reduce((s: number, r: any) => s + r.fatturato, 0))
 
   return NextResponse.json({
