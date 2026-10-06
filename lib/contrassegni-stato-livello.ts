@@ -1,5 +1,6 @@
 import { fetchAll } from '@/lib/fetch-all'
-import { caricaSorgenteCatena, detentoreContrattoCon } from '@/lib/contratto-per-nome'
+import { caricaSorgenteCatena, detentoreContrattoCon, nomeContrattoNormalizzato } from '@/lib/contratto-per-nome'
+import { risolviCatenaCondivisione } from '@/lib/condivisione-catena'
 
 // IL COLORE DEL CONTRASSEGNO, LIVELLO PER LIVELLO: dice se i soldi sono arrivati A ME.
 //
@@ -106,19 +107,44 @@ export async function statiCodPerLivello(
     }
     return catene.get(mid)!
   }
-  const detentori = new Map<string, string>()
+  // CATENA/DETENTORE del contrassegno. Per i contratti CONDIVISI-CODICE (tipo='moovexpress' con legame
+  // corrieri_condivisi) la catena e' INVERTITA rispetto all'albero (il detentore vero — es. LOGIXIA su
+  // SDA EXPRESS L — e' figlio-ALBERO dell'acquirente): risalire parent_master_id dava detentore sbagliato
+  // (= MULTI per OGNI spedizione d'ingrosso, quindi l'acquirente si vedeva verde pagando il sub invece che
+  // incassando dal fornitore). Per QUESTI si usa lo STESSO resolver della creazione (risolviCatenaCondivisione
+  // / corrieri_condivisi). Per TUTTO il resto (diretti/aggregatore/albero) il resolver ad albero e' corretto
+  // e NON si tocca — verificato 6/10 che lo swap cieco spostava il detentore di ~40 contratti aggregatore
+  // (il sub si vedeva detentore al posto di MULTI).
+  const moovSet = new Set<string>()
+  {
+    const { data: mv } = await adminDb.from('corrieri').select('master_id,nome_contratto').eq('tipo', 'moovexpress')
+    for (const c of (mv || [])) moovSet.add((c as any).master_id + '|' + nomeContrattoNormalizzato((c as any).nome_contratto))
+  }
+  const comboCache = new Map<string, { detentore: string; masters: string[]; codice: boolean }>()
+  const risolviCombo = async (partenza: string, nome: string | null) => {
+    const kk = partenza + '|' + (nome || '')
+    const hit = comboCache.get(kk); if (hit) return hit
+    let res: { detentore: string; masters: string[]; codice: boolean }
+    if (nome && moovSet.has(partenza + '|' + nomeContrattoNormalizzato(nome))) {
+      const chain = await risolviCatenaCondivisione(adminDb, partenza, nome)
+      if (chain.length && chain.some(l => l.ruolo === 'codice'))
+        res = { detentore: chain[chain.length - 1].master, masters: chain.map(l => l.master), codice: true }
+      else res = { detentore: (await detentoreContrattoCon(sorgente, partenza, nome)).detentore, masters: catenaDi(partenza), codice: false }
+    } else res = { detentore: (await detentoreContrattoCon(sorgente, partenza, nome)).detentore, masters: catenaDi(partenza), codice: false }
+    comboCache.set(kk, res); return res
+  }
+
   for (const r of righe) {
     const nome = r.corrieri?.nome_contratto || null
     const partenza = r.master_id || masterId
-    const k = partenza + '|' + (nome || '')
-    if (!detentori.has(k)) detentori.set(k, (await detentoreContrattoCon(sorgente, partenza, nome)).detentore)
-    const detentore = detentori.get(k)!
+    const { detentore, masters: catena, codice } = await risolviCombo(partenza, nome)
     const sonoDetentore = detentore === masterId
-    // I soldi passano da me solo se il detentore è me o sta SOPRA di me: sul contratto proprio di un
-    // sotto-master il corriere paga lui, e a me quel contrassegno non arriva mai.
-    const catena = catenaDi(partenza)
-    const iMio = catena.indexOf(masterId), iDet = catena.indexOf(detentore)
-    const incassoMio = iMio !== -1 && iDet >= iMio
+    // I soldi passano da me solo se il detentore è me o sta SOPRA di me (sul contratto proprio di un
+    // sotto-master il corriere paga lui, e a me quel contrassegno non arriva mai). Per la catena-CODICE
+    // "sopra" = verso l'owner: sono nella catena-fornitore (originante→owner).
+    const incassoMio = codice
+      ? catena.includes(masterId)
+      : (catena.indexOf(masterId) !== -1 && catena.indexOf(detentore) >= catena.indexOf(masterId))
     const chiaveRiga = r.tracking_number || r.id
     const mia = mie.get(chiaveRiga), inEntrata = entrate.get(chiaveRiga)
     const riferimento = sonoDetentore ? mia : inEntrata
