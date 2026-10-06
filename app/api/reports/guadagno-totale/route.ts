@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
   const admin = createAdminSupabase()
   const r2 = (x: number) => Math.round(x * 100) / 100
 
-  const [sped, altri, canoneInc, canonePag, consInc, consPag] = await Promise.all([
+  const [sped, altri, canoneInc, canonePag, consInc, consPag, ingrossoAdj] = await Promise.all([
     // SPEDIZIONI col metodo esatto del Report Spedizioni (data creazione)
     admin.rpc('guadagno_spedizioni_serie_v1', { p_master: M, p_dal: dal, p_al: alEnd, p_per_mese: perMese }),
     // Le altre 7 voci operative, PER TIPO, in un colpo (chain-aware, niente doppi conteggi)
@@ -60,6 +60,14 @@ export async function GET(req: NextRequest) {
     admin.from('movimenti').select('importo').eq('tipo', 'consumabile').eq('master_id', M).gte('created_at', dal).lte('created_at', alEnd),
     // CONSUMABILI costo = quello che il parent addebita al master
     admin.from('movimenti').select('importo').eq('tipo', 'consumabile').eq('master_target_id', M).neq('master_id', M).gte('created_at', dal).lte('created_at', alEnd),
+    // CORREZIONE NODI-CODICE (grafo corrieri_condivisi): il costo d'acquisto all'INGROSSO (il ledger su cui
+    // il nodo COMPRA) ha master_target=NULL → invisibile alle RPC sopra, che attribuiscono il costo via
+    // master_target_id; un ACQUIRENTE come MULTIEXPRESS contava il ricavo verso i suoi sub ma NON il costo
+    // verso il fornitore-ponte → Guadagno Totale gonfiato (misurato ~9-13k su 6gg). E il ricavo-vendita del
+    // PONTE (Wave) veniva azzerato dalla guardia della RPC spedizioni. Qui si recuperano entrambi. Vuota
+    // (0/0) per i master NON-codice (zero impatto sui 43). Resiliente: se la funzione non è ancora in DB,
+    // l'errore si ignora e l'adj resta 0 (così il deploy non dipende dall'ordine con la migrazione SQL).
+    admin.rpc('guadagno_ingrosso_adj_v1', { p_master: M, p_dal: dal, p_al: alEnd }),
   ])
   if (sped.error) return NextResponse.json({ error: sped.error.message }, { status: 500 })
   if (altri.error) return NextResponse.json({ error: altri.error.message }, { status: 500 })
@@ -74,6 +82,13 @@ export async function GET(req: NextRequest) {
   const consPagato = (consPag.data || []).reduce((s: number, x: any) => s + (-(Number(x.importo || 0))), 0)
   ricavi += canoneIncassato + consIncassato
   costi += canonePagato + consPagato
+  // Correzione nodi-codice (ricavo-ponte mancante + costo-ingrosso invisibile). Se la funzione non c'è
+  // ancora in DB (ingrossoAdj.error) l'adj resta 0: nessun effetto finché non si applica la migrazione.
+  if (!ingrossoAdj.error && ingrossoAdj.data) {
+    const a: any = Array.isArray(ingrossoAdj.data) ? ingrossoAdj.data[0] : ingrossoAdj.data
+    ricavi += Number(a?.ricavi_adj || 0)
+    costi += Number(a?.costi_adj || 0)
+  }
 
   ricavi = r2(ricavi)
   costi = r2(costi)
