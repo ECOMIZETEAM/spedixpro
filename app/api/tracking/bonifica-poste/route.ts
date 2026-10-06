@@ -1,19 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { prioritaStato } from '@/lib/spedisci'
-import { mappaStatoPoste, statoDaLetturaPoste } from '@/lib/tracking-poste'
+import { statoDaLetturaPoste, leggiTrackingPostePubblico } from '@/lib/tracking-poste'
 import { notificaCambioStato } from '@/lib/tracking-notifica'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
 
-// BONIFICA TEMPORANEA tracking Spedisci: il provider ha chiuso il polling (webhook-only) e le
-// spedizioni gia' in viaggio prima dell'attivazione del webhook hanno il popup vuoto finche' non
-// arriva il prossimo evento. Le LDV Spedisci sono codici POSTE: qui si interroga il tracking
-// PUBBLICO di poste.it a piccole dosi (15 per giro, una ogni ~1.5s) per riempire cronologia e
-// stato. Si esaurisce da sola: quando tutte hanno la cronologia non fa piu' nulla.
-// NB: quota volutamente minuscola per non far scattare il rate-limit di Poste (400 = bloccati).
+// TRACKING DELLE LDV CHE SONO CODICI POSTE, LETTO DAL TRACKING PUBBLICO DI poste.it.
+// Due lavori diversi, stessa fonte e stesso freno (una LDV ogni 1,2s, al massimo 60 per giro — 40 dei
+// Poste diretti + 20 della bonifica: la dose resta piccola per non far scattare il rate-limit di Poste,
+// dove un 400 vuol dire "bloccati". Sessanta letture a 1,2s stanno in 72s, sotto il tetto di 120s).
+//
+// 1) BONIFICA (contratti 'spedisci'): il provider ha chiuso il polling (webhook-only) e le spedizioni
+//    gia' in viaggio prima dell'attivazione del webhook hanno il popup vuoto finche' non arriva il
+//    prossimo evento. Si riempiono quelle SENZA cronologia: si esaurisce da sola.
+//
+// 2) FONTE DELLO STATO (contratti 'poste', i Poste DIRETTI come "SDA EXPRESS L"): qui non c'e' niente
+//    da bonificare, e' l'unica fonte che abbiamo. Il tracking del fornitore risponde `outcome: OK` e
+//    trova la LDV, ma torna `tracking: []` SEMPRE. Queste si RILEGGONO a rotazione, perche' il pacco
+//    deve poter avanzare fino a "consegnata".
 
 // La frase Poste -> stato la decide mappaStatoPoste (lib/tracking-poste.ts): qui c'era una copia
 // quasi identica ma piu' povera, e le due si erano gia' allontanate (le mancavano 'arrivata',
@@ -26,53 +33,81 @@ export async function GET(req: NextRequest) {
   }
   const admin = createAdminSupabase()
 
-  const { data: corr } = await admin.from('corrieri').select('id').eq('tipo', 'spedisci')
-  const corrIds = (corr || []).map((c: any) => c.id)
+  // DUE FAMIGLIE DI CONTRATTI, ENTRAMBE CON LDV CHE SONO CODICI POSTE.
+  //  - 'spedisci': la bonifica storica descritta sopra, che si esaurisce da sé.
+  //  - 'poste' (Poste DIRETTI, es. "SDA EXPRESS L"): qui non è una bonifica, è LA fonte. Il tracking
+  //    del fornitore risponde `OK` ma con la lista eventi SEMPRE VUOTA — provato il 6/10/2026 con
+  //    tutte le varianti dei parametri su un pacco che poste.it dava "in transito". Risultato: 6.249
+  //    spedizioni SDA EXPRESS L con ZERO eventi e lo stato fermo a 'in_lavorazione'/'spedita', e con
+  //    loro tutta la catena sotto (i rivenditori chiedono al venditore, che non sa niente).
+  const { data: corr } = await admin.from('corrieri').select('id,tipo').in('tipo', ['spedisci', 'poste'])
+  const idsSpedisci = (corr || []).filter((c: any) => c.tipo === 'spedisci').map((c: any) => c.id)
+  const idsPosteDiretti = (corr || []).filter((c: any) => c.tipo === 'poste').map((c: any) => c.id)
+  const corrIds = [...idsSpedisci, ...idsPosteDiretti]
   if (!corrIds.length) return NextResponse.json({ ok: true, fatte: 0 })
 
   // Candidate. Includo ANCHE gli 'in_lavorazione' VECCHI: quando il webhook Spedisci non consegna
   // (verificato su amas: ~45% degli eventi non arriva), la spedizione resta ferma su 'in_lavorazione'
   // anche se il corriere l'ha presa in carico da giorni → Poste la conosce e ce la racconta. Gli
   // 'in_lavorazione' FRESCHI (< 2 giorni) li salto: quelli Poste non li ha ancora, sprecherebbero quota.
-  const { data: cand } = await admin.from('spedizioni')
-    .select('id,numero,tracking_number,stato,created_at')
-    .in('corriere_id', corrIds)
-    .in('stato', ['in_lavorazione', 'spedita', 'in_transito', 'in_consegna', 'non_consegnato', 'in_giacenza'])
-    .order('created_at', { ascending: true })
-    .limit(600)
-  if (!cand?.length) return NextResponse.json({ ok: true, fatte: 0 })
-
-  // Solo quelle SENZA cronologia
-  const { data: gia } = await admin.from('tracking_events').select('spedizione_id').in('spedizione_id', cand.map((c: any) => c.id))
-  const conEventi = new Set((gia || []).map((g: any) => g.spedizione_id))
+  const ATTIVI = ['in_lavorazione', 'spedita', 'in_transito', 'in_consegna', 'non_consegnato', 'in_giacenza']
   const dueGiorniFa = Date.now() - 2 * 86400000
+  const seiOreFa = Date.now() - 6 * 3600000
+
+  const { data: cand } = idsSpedisci.length
+    ? await admin.from('spedizioni')
+      .select('id,numero,tracking_number,stato,created_at')
+      .in('corriere_id', idsSpedisci).in('stato', ATTIVI)
+      .order('created_at', { ascending: true }).limit(600)
+    : { data: [] as any[] }
+
+  // SPEDISCI: solo quelle SENZA cronologia (è una bonifica: finita, non fa più nulla).
+  const { data: gia } = cand?.length
+    ? await admin.from('tracking_events').select('spedizione_id').in('spedizione_id', cand.map((c: any) => c.id))
+    : { data: [] as any[] }
+  const conEventi = new Set((gia || []).map((g: any) => g.spedizione_id))
   // Priorita' agli stati piu' avanzati (in consegna prima di spedita): sono i piu' guardati dai clienti
-  const lista = cand.filter((c: any) => !conEventi.has(c.id))
+  const listaSpedisci = (cand || []).filter((c: any) => !conEventi.has(c.id))
     .filter((c: any) => !(c.stato === 'in_lavorazione' && new Date(c.created_at).getTime() > dueGiorniFa))
     .sort((a: any, b: any) => prioritaStato(b.stato) - prioritaStato(a.stato))
-    .slice(0, 40)
-  if (!lista.length) return NextResponse.json({ ok: true, fatte: 0, messaggio: 'bonifica esaurita' })
+    .slice(0, 20)
 
-  let cronologie = 0, stati = 0, vuote = 0
+  // POSTE DIRETTI: qui si RILEGGE, perché è la fonte dello stato e il pacco deve poter avanzare fino
+  // a "consegnata". Rotazione sul meno letto di recente (`tracking_check_at`, che si riscrive sotto).
+  // La dose: 40 per giro × 4 giri l'ora = ~3.800 letture al giorno. Con ~2.000 spedizioni attive su
+  // questi contratti fa due letture al giorno ciascuna, che per un corriere che consegna in 24-48h è
+  // il minimo per non mostrare al cliente lo stato di ieri. Il freno resta: una ogni 1,2s e stop dopo
+  // 6 risposte non-ok di fila (se Poste chiude il rubinetto si riprende al giro dopo).
+  // Gli 'in_lavorazione' appena creati si saltano (< 6 ore): Poste non li ha ancora e sprecano quota.
+  const { data: candPoste } = idsPosteDiretti.length
+    ? await admin.from('spedizioni')
+      .select('id,numero,tracking_number,stato,created_at')
+      .in('corriere_id', idsPosteDiretti).in('stato', ATTIVI)
+      .order('tracking_check_at', { ascending: true, nullsFirst: true })
+      .order('id', { ascending: true }).limit(200)
+    : { data: [] as any[] }
+  const listaPoste = (candPoste || [])
+    .filter((c: any) => !(c.stato === 'in_lavorazione' && new Date(c.created_at).getTime() > seiOreFa))
+    .slice(0, 40)
+
+  const lista = [...listaPoste, ...listaSpedisci]
+  const rileggere = new Set(listaPoste.map((s: any) => s.id))
+  if (!lista.length) return NextResponse.json({ ok: true, fatte: 0, messaggio: 'niente da leggere' })
+
+  let cronologie = 0, stati = 0, vuote = 0, bloccati = 0
   for (const sp of lista) {
     try {
-      const r = await fetch('https://www.poste.it/online/dovequando/DQ-REST/ricercasemplice', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0', 'Origin': 'https://www.poste.it', 'Referer': 'https://www.poste.it/cerca/index.html' },
-        body: JSON.stringify({ tipoRichiedente: 'WEB', codiceSpedizione: sp.tracking_number || sp.numero, periodoRicerca: 6 }),
-      })
-      if (!r.ok) { vuote++; if (vuote >= 6) break; continue }   // 400 in serie = bloccati: stop, riprova al giro dopo
-      const j: any = await r.json().catch(() => null)
-      const evs: any[] = Array.isArray(j?.listaMovimenti) ? j.listaMovimenti : []
-      if (!evs.length) { vuote++; if (vuote >= 6) break; continue }
-      vuote = 0
-      const eventi = evs.map((e: any) => ({
-        stato: mappaStatoPoste(e?.statoLavorazione),
-        descrizione: String(e?.statoLavorazione || '').slice(0, 300),
-        luogo: (String(e?.luogo || '').slice(0, 200)) || null,
-        data_evento: new Date(Number(e?.dataOra) || Date.now()).toISOString(),
-      })).filter((e: any) => e.descrizione)
-      if (!eventi.length) continue
+      // La chiamata e la traduzione delle frasi stanno in lib/tracking-poste (un posto solo: le usa
+      // anche il backfill OneTracking, e due copie si erano gia' allontanate una volta).
+      const { ok, eventi } = await leggiTrackingPostePubblico(String(sp.tracking_number || sp.numero))
+      // Timbro la lettura PRIMA di valutare l'esito, se no una LDV che Poste non conosce ancora
+      // resterebbe in testa alla rotazione e si mangerebbe la quota a ogni giro.
+      if (rileggere.has(sp.id)) await admin.from('spedizioni').update({ tracking_check_at: new Date().toISOString() }).eq('id', sp.id)
+      if (!ok) { bloccati++; if (bloccati >= 6) break; continue }   // 400 in serie = Poste ci ha chiuso: stop, riprova al giro dopo
+      bloccati = 0
+      // Lista vuota = Poste non ha ancora movimenti per quella LDV. Per i POSTE DIRETTI e' normale
+      // (pacco creato ma non ancora scansionato) e NON e' un segnale di blocco: si riprova dopo.
+      if (!eventi.length) { vuote++; continue }
       // Si AGGIUNGE quello che manca, non si riscrive (vedi lib/tracking-eventi): una lettura piu'
       // povera cancellava descrizioni gia' scritte. I doppioni li ferma la chiave unica del database.
       await admin.from('tracking_events').upsert(
@@ -93,8 +128,9 @@ export async function GET(req: NextRequest) {
         await notificaCambioStato(admin, sp.id, nuovo, sp.stato)
       }
     } catch { /* singola LDV: pazienza, riprova al giro dopo */ }
-    await new Promise(res => setTimeout(res, 1500))
+    await new Promise(res => setTimeout(res, 1200))
   }
-  console.log(`[BONIFICA-POSTE] cronologie=${cronologie} stati=${stati} vuote=${vuote} candidate=${lista.length}`)
-  return NextResponse.json({ ok: true, fatte: cronologie, stati, vuote })
+  console.log(`[BONIFICA-POSTE] cronologie=${cronologie} stati=${stati} senza_movimenti=${vuote} bloccati=${bloccati}`
+    + ` candidate=${lista.length} (poste_diretti=${listaPoste.length} spedisci=${listaSpedisci.length})`)
+  return NextResponse.json({ ok: true, fatte: cronologie, stati, vuote, bloccati, poste_diretti: listaPoste.length, spedisci: listaSpedisci.length })
 }

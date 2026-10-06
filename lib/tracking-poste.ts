@@ -40,6 +40,42 @@ export function parseDataPoste(s: string): string {
 
 export interface EventoTracking { stato: string | null; descrizione: string; luogo: string | null; data_evento: string }
 
+// LETTURA DAL TRACKING PUBBLICO DI POSTE.IT (DoveQuando), in un posto solo.
+//
+// Serve a due porte diverse, e la chiamata non puo' vivere in entrambe: la bonifica delle LDV
+// Spedisci (il provider e' passato a webhook-only) e i contratti POSTE DIRETTI, dove il tracking del
+// fornitore risponde `outcome: OK` ma con `tracking: []` SEMPRE — verificato il 6/10/2026 su
+// "SDA EXPRESS L" (6.249 spedizioni, ZERO eventi di cronologia) provando tutte le varianti dei
+// parametri su un pacco che poste.it dava come "in transito". Finche' il fornitore non alimenta i
+// tracciamenti, la fonte dello stato per quei contratti e' questa.
+//
+// `esitoRicerca: '2'` con lista vuota = Poste non ha ancora movimenti per quella LDV (pacco creato
+// ma non ancora scansionato): non e' un errore, si riprova al giro dopo.
+export async function leggiTrackingPostePubblico(ldv: string): Promise<{ ok: boolean; eventi: EventoTracking[] }> {
+  const r = await fetch('https://www.poste.it/online/dovequando/DQ-REST/ricercasemplice', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json', 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0',
+      'Origin': 'https://www.poste.it', 'Referer': 'https://www.poste.it/cerca/index.html',
+    },
+    body: JSON.stringify({ tipoRichiedente: 'WEB', codiceSpedizione: String(ldv), periodoRicerca: 6 }),
+  })
+  // Un 400 in serie vuol dire che Poste ci ha chiuso il rubinetto: chi chiama conta le risposte
+  // non-ok e si ferma (il rate-limit e' il motivo per cui le dosi sono piccole).
+  if (!r.ok) return { ok: false, eventi: [] }
+  const j: any = await r.json().catch(() => null)
+  const movimenti: any[] = Array.isArray(j?.listaMovimenti) ? j.listaMovimenti : []
+  const eventi = movimenti.map((e: any) => ({
+    stato: mappaStatoPoste(e?.statoLavorazione),
+    descrizione: String(e?.statoLavorazione || '').slice(0, 300),
+    // `luogo` NOT NULL in tracking_events: mai null, al massimo stringa vuota (vedi la memoria del
+    // guasto). Qui si tiene null e lo normalizza chi scrive, come faceva la bonifica.
+    luogo: (String(e?.luogo || '').slice(0, 200)) || null,
+    data_evento: new Date(Number(e?.dataOra) || Date.now()).toISOString(),
+  })).filter((e: EventoTracking) => e.descrizione)
+  return { ok: true, eventi }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // ONETRACKING: LA DESCRIZIONE NON ARRIVA PRONTA, VA SCRITTA QUI
 //

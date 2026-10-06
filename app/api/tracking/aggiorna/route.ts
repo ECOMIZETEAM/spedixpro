@@ -384,6 +384,15 @@ export async function GET(req: NextRequest) {
         // POSTE Delivery Business diretto via KSync/ParcelPilot: lo stato si legge da /tracking (formato
         // Poste PDB) con la LDV. Credenziali (clientId/secretId/costCenterCode/ambiente) dalla join. Sul
         // demo l'auth è disabilitata (nessuna credenziale) → si interroga lo stesso. Mappa sulla DESCRIZIONE.
+        //
+        // ATTENZIONE: in PRODUZIONE questo ramo oggi non porta niente. Il fornitore risponde
+        // `outcome: OK`, riconosce la LDV, ma `tracking` e' SEMPRE una lista vuota — provato il
+        // 6/10/2026 su "SDA EXPRESS L" con tutte le varianti dei parametri (lastTracingState S/N/assente,
+        // statusDescription, customerType, costCenterCode) su un pacco che poste.it dava "in transito".
+        // Finche' ParcelPilot non alimenta i tracciamenti, lo stato di questi contratti arriva dal
+        // tracking PUBBLICO di poste.it: lo legge /api/tracking/bonifica-poste (stessa libreria
+        // lib/tracking-poste). Questo ramo resta perche' il giorno in cui il fornitore comincia a
+        // rispondere e' la fonte migliore (eventi del corriere, non pagina pubblica).
         if (!s.tracking_number) return
         if (!cred?.clientId && cred?.ambiente !== 'demo') return
         const { trackingKsync, mapStatoKsync } = await import('@/lib/ksync')
