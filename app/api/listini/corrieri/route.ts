@@ -77,7 +77,12 @@ export async function GET(req: NextRequest) {
     const base: any = (listiniMaster || [])[0]
     const { data: nuovo, error: eIns } = await supabase.from('listini_corrieri').insert({
       master_id: utente?.master_id, corriere_id: corriereSelezionato.id,
-      nome: base?.nome || 'Listino Corrieri',
+      // IL LISTINO SI CHIAMA COME IL SUO CORRIERE, non come il primo listino del master.
+      // Prima copiava base?.nome (= il listino piu' vecchio del master): aprendo l'editor su un
+      // contratto appena creato nasceva una riga intestata col nome di un ALTRO corriere (BRT
+      // EXPRESS W di Wave nato "UPS Europa", 7/10/2026 — base era UPS Europa). Il nome e' solo
+      // cosmetico per il motore (aggancia per corriere_id) ma a schermo sembra un listino sbagliato.
+      nome: corriereSelezionato.nome_contratto || base?.nome || 'Listino Corrieri',
       fattore_volume: base?.fattore_volume ?? 5000, solo_peso_reale: false, attivo: true,
     }).select().single()
     // CORSA fra due caricamenti: se un altro render l'ha appena creato (col vincolo unico
