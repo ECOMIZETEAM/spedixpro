@@ -192,6 +192,22 @@ export async function POST(req: NextRequest) {
       }
       let giaRettificateCount = 0
 
+      // PENALE BRT EXPRESS: mappa spedizione → soglia peso-reale, SOLO per i contratti 'BRT Express' con
+      // soglia attiva. Serve alla regola penale piu' sotto (un collo del servizio ≤5kg che sfora). Per
+      // ora limitata a BRT Express (scelta di Lorenzo 7/10); gli altri contratti a soglia restano invariati.
+      const penalePerSped = new Map<string, { sogliaKg: number }>()
+      for (let i = 0; i < spedEsiti.length; i += 200) {
+        const { data: spc } = await adminRip.from('spedizioni')
+          .select('id, corrieri(nome_contratto, settings)').in('id', spedEsiti.slice(i, i + 200))
+        for (const s of (spc || [])) {
+          const c: any = Array.isArray((s as any).corrieri) ? (s as any).corrieri[0] : (s as any).corrieri
+          if (c?.nome_contratto === 'BRT Express') {
+            const sog = (c.settings as any)?.peso_reale_soglia
+            if (sog?.attivo && Number(sog.kg) > 0) penalePerSped.set((s as any).id, { sogliaKg: Number(sog.kg) })
+          }
+        }
+      }
+
       // ── CARICAMENTO VERO ──
       // Si scrive SOLO se chi carica lo chiede esplicitamente. Il primo giro e' sempre
       // un'anteprima: chi paga guarda i numeri, poi conferma.
@@ -258,9 +274,17 @@ export async function POST(req: NextRequest) {
           // di credito: non si regalano soldi su un pacco che il fornitore ci ha comunque
           // conteggiato. ECCEZIONE: se c'e' un fuori sagoma da recuperare (fs>0) la riga si crea lo
           // stesso, con differenza a zero, per far scendere il supplemento.
-          if (liv.differenza < 0.01 && fs === 0) continue
-          const diffRett = liv.differenza >= 0.01 ? liv.differenza : 0
-          if (e.addebitoFornitore > 0 && diffRett > e.addebitoFornitore * 3) {
+          // PENALE BRT EXPRESS (regola Lorenzo 7/10, SOLO BRT Express): il servizio a soglia peso-reale
+          // (≤5kg) spedito con un collo OLTRE la soglia viene punito dal corriere ~1 €/kg; il riprezzo a
+          // banda normale NON la recupera. Si gira l'INTERO costo fornitore come supplemento fisso, che
+          // cascata invariato fino al cliente che ha sforato — differenza a 0 (non e' un cambio-peso: il
+          // peso_fatturato non si tocca). Verificato su 050187292960523 (5→18,6kg, costo 18,60 = 18,6×1€).
+          const pen = penalePerSped.get(e.spedizioneId)
+          const isPenaleBrt = !!pen && Number(e.pesoDopo || 0) > pen.sogliaKg && Number(e.addebitoFornitore || 0) > 0
+          const fsEff = isPenaleBrt ? Math.round(Number(e.addebitoFornitore) * 100) / 100 : fs
+          if (liv.differenza < 0.01 && fsEff === 0) continue
+          const diffRett = (!isPenaleBrt && liv.differenza >= 0.01) ? liv.differenza : 0
+          if (!isPenaleBrt && e.addebitoFornitore > 0 && diffRett > e.addebitoFornitore * 3) {
             sopraIlTriplo.push({ ldv: e.ldv, costoFornitore: e.addebitoFornitore, differenza: Math.round(diffRett * 100) / 100 })
           }
           daScrivere.push({
@@ -275,12 +299,12 @@ export async function POST(req: NextRequest) {
             // Il volume vero (quello che fa salire il costo): prima era 0 anche sul primo livello,
             // così la sua Rettifica Costi mostrava "0,00" mentre il livello sotto vedeva il volume.
             peso_reale: e.pesoDopo, peso_volume_reale: e.pesoVolumeDopo || 0,
-            costo_iniziale: liv.pagato, costo_finale: liv.dovuto,
-            differenza: -diffRett,   // la colonna e' "quanto restituisco": un addebito e' negativo (0 se solo fuori sagoma)
-            fuori_sagoma: fs,        // supplemento FISSO, si addebita in aggiunta e cascata invariato
+            costo_iniziale: liv.pagato, costo_finale: isPenaleBrt ? liv.pagato : liv.dovuto,
+            differenza: -diffRett,   // la colonna e' "quanto restituisco": un addebito e' negativo (0 se solo fuori sagoma / penale)
+            fuori_sagoma: fsEff,     // supplemento FISSO (o penale BRT ≤5kg sforata): in aggiunta e cascata invariato
             // QUALE supplemento: senza il nome, il movimento del cliente diceva "fuori sagoma"
             // anche quando aveva pagato un super gdo o una consegna su appuntamento.
-            supplementi_nomi: ((rip as any)?.supplementiNomi || []).join(' + ') || null,
+            supplementi_nomi: isPenaleBrt ? 'penale BRT peso reale sforato' : (((rip as any)?.supplementiNomi || []).join(' + ') || null),
             stato: 'da_rettificare',
             rif_fornitore: e.idOrdine,     // l'anti-doppione: indice unico sul database
             // Le misure viaggiano con la riga: servono a chi la ricevera' per riprezzare col
