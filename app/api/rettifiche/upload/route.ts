@@ -305,6 +305,10 @@ export async function POST(req: NextRequest) {
             // QUALE supplemento: senza il nome, il movimento del cliente diceva "fuori sagoma"
             // anche quando aveva pagato un super gdo o una consegna su appuntamento.
             supplementi_nomi: isPenaleBrt ? 'penale BRT peso reale sforato' : (((rip as any)?.supplementiNomi || []).join(' + ') || null),
+            // Il costo che il CORRIERE ci ha addebitato per questa ripesatura: serve alla pagina per
+            // dividere buone (da-girare >= costo) da da-controllare (sotto-recupero). I file-pesi
+            // (es. Velox) non hanno costo fornitore → resta null.
+            costo_fornitore: Math.round(Number(e.addebitoFornitore || 0) * 100) / 100,
             stato: 'da_rettificare',
             rif_fornitore: e.idOrdine,     // l'anti-doppione: indice unico sul database
             // Le misure viaggiano con la riga: servono a chi la ricevera' per riprezzare col

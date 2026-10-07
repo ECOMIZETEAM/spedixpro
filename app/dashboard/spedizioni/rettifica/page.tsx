@@ -13,6 +13,7 @@ export default function RettificaCostiPage() {
   const [confermando, setConfermando] = useState(false)
   const [cerca, setCerca] = useState('')
   const [fileSelezionato, setFileSelezionato] = useState<string>('')
+  const [ricalcolando, setRicalcolando] = useState<string>('')
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -164,6 +165,21 @@ export default function RettificaCostiPage() {
       await caricaRettifiche(fileSelezionato || undefined)
     } else { await dialog.alert({ title: 'Errore', message: data.error || 'Cancellazione fallita.' }) }
   }
+  // RICALCOLA una riga "da controllare" col listino aggiornato: ri-riprezza SOLO quella riga (stesso
+  // motore dell'upload), poi ricarica. Se ora copre il costo fornitore, passa tra le buone. Sulle
+  // penali e' rifiutato lato server (non si recupera col listino).
+  async function ricalcolaRiga(id: string) {
+    setRicalcolando(id)
+    try {
+      const res = await fetch('/api/rettifiche/ricalcola', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
+      const d = await res.json()
+      if (!res.ok) { await dialog.alert({ title: 'Ricalcola', message: d.error || 'Ricalcolo non riuscito.' }); return }
+      await caricaRettifiche(fileSelezionato || undefined)
+      await dialog.alert({ title: 'Ricalcolata', message: d.classe === 'buona'
+        ? 'Ora il da-girare copre il costo fornitore: la riga e\' passata tra le buone.'
+        : `Riprezzata: recuperi € ${Number(d.da_girare).toFixed(2)}, ancora sotto il costo fornitore (mancano € ${Number(d.manca).toFixed(2)}). Aggiorna ancora il listino o decidi di assorbire.` })
+    } finally { setRicalcolando('') }
+  }
   async function confermaRettifiche() {
     if (!selectedIds.length) { await dialog.alert({ title: 'Nessuna selezione', message: 'Seleziona almeno una rettifica.' }); return }
     if (!await dialog.confirm({ title: 'Confermare le rettifiche?', message: 'Confermi le ' + selectedIds.length + ' rettifiche selezionate? Il credito verrà scalato ai clienti.', confirmText: 'Conferma' })) return
@@ -238,10 +254,10 @@ export default function RettificaCostiPage() {
       )
     : rettifiche
 
-  // Un gruppo per destinatario: il master a cui e' indirizzata, oppure il cliente se e' diretto.
-  const gruppi = (() => {
+  // Raggruppa per destinatario (master o cliente), ordinato per addebito. Usato per BUONE e DA CONTROLLARE.
+  const raggruppa = (righe: any[]) => {
     const map = new Map<string, { nome: string; tipo: 'master' | 'cliente'; righe: any[]; totale: number }>()
-    for (const r of rettificheFiltrate) {
+    for (const r of righe) {
       const nome = r.destinatario_nome || '(senza destinatario)'
       const chiave = (r.target_master_id || r.cliente_id || 'x') + '|' + nome
       if (!map.has(chiave)) map.set(chiave, { nome, tipo: (r.destinatario_tipo || 'cliente') as 'master'|'cliente', righe: [], totale: 0 })
@@ -251,7 +267,107 @@ export default function RettificaCostiPage() {
       g.totale += Number(r.differenza || 0) - Number(r.fuori_sagoma || 0)
     }
     return [...map.entries()].sort((a, b) => Math.abs(b[1].totale) - Math.abs(a[1].totale))
-  })()
+  }
+  // BUONE (il da-girare copre il costo fornitore) in alto, DA CONTROLLARE (sotto-recupero) sotto, col
+  // MOTIVO su ogni riga. classe/motivo/manca li calcola la rotta GET (costo_fornitore vs da-girare).
+  const rettBuone = rettificheFiltrate.filter((r: any) => r.classe !== 'da_controllare')
+  const rettCtrl  = rettificheFiltrate.filter((r: any) => r.classe === 'da_controllare')
+  const gruppiBuone = raggruppa(rettBuone)
+  const gruppiCtrl  = raggruppa(rettCtrl)
+  const totaleCtrl  = Math.round(rettCtrl.reduce((s: number, r: any) => s + (Number(r.manca) || 0), 0) * 100) / 100
+
+  // Un gruppo (intestazione + righe) → array di <tr>. Stessa resa per entrambe le sezioni.
+  const renderGruppo = ([chiave, g]: any) => [(
+    <tr key={'g-'+chiave} onClick={()=>setAperti(p=>({...p,[chiave]:!p[chiave]}))}
+      style={{background:'#f3f4f6',cursor:'pointer'}}>
+      <td style={{padding:'9px 10px',borderBottom:'1px solid #d1d5db'}} onClick={e=>e.stopPropagation()}>
+        <input type="checkbox"
+          checked={g.righe.filter((r:any)=>r.stato==='da_rettificare').every((r:any)=>selectedIds.includes(r.id)) && g.righe.some((r:any)=>r.stato==='da_rettificare')}
+          onChange={e=>{
+            const ids = g.righe.filter((r:any)=>r.stato==='da_rettificare').map((r:any)=>r.id)
+            setSelectedIds(prev => e.target.checked ? [...new Set([...prev,...ids])] : prev.filter(i=>!ids.includes(i)))
+          }}/>
+      </td>
+      <td colSpan={9} style={{padding:'9px 10px',borderBottom:'1px solid #d1d5db',fontSize:'12.5px',fontWeight:700,color:'#1a1a1a'}}>
+        <span style={{display:'inline-block',width:'14px',color:'#6b7280'}}>{aperti[chiave]?'▾':'▸'}</span>
+        {g.nome}
+        <span style={{fontWeight:400,color:'#6b7280',marginLeft:'8px'}}>
+          {g.tipo==='master'?'sotto-master':'cliente diretto'} · {g.righe.length} {g.righe.length===1?'rettifica':'rettifiche'}
+        </span>
+        <span style={{float:'right',fontWeight:700,color:g.totale<0?'#dc2626':'#15803d'}}>
+          € {Math.abs(g.totale).toFixed(2)}
+        </span>
+      </td>
+    </tr>
+  ), ...(aperti[chiave] ? g.righe : []).map((r:any)=>{
+    const isSelected = selectedIds.includes(r.id)
+    const diff = Number(r.differenza || 0)
+    // L'addebito vero = ripesatura + supplementi fissi (fuori sagoma / super gdo / penale BRT: in aggiunta).
+    const fs = Number(r.fuori_sagoma || 0)
+    const addebito = Math.round((diff - fs) * 100) / 100
+    const isDaRett = r.stato === 'da_rettificare'
+    const isPenale = String(r.supplementi_nomi||'').toLowerCase().includes('penale')
+    const pIni = Number(r.peso_iniziale)||0, pvIni = Number(r.peso_volume_iniziale)||0
+    const pRe  = Number(r.peso_reale)||0,    pvRe  = Number(r.peso_volume_reale)||0
+    const volIni = r.base_prima ? r.base_prima === 'volume' : pvIni > pIni
+    const volRe  = r.base_dopo  ? r.base_dopo  === 'volume' : pvRe > pRe
+    const cIni = (on:boolean) => ({padding:'8px 10px', color: on?'#1a1a1a':'#b0b4bb', fontWeight: on?700:400})
+    const cRe  = (on:boolean) => ({padding:'8px 10px', color: on?'#dc2626':'#b0b4bb', fontWeight: on?700:400})
+    return (
+      <tr key={r.id} style={{borderBottom:'1px solid #d1d5db',background:isSelected?'#fff7ed':'#fff'}}>
+        <td style={{padding:'8px 10px'}}>
+          {isDaRett && <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(r.id)}/>}
+        </td>
+        <td style={{padding:'8px 10px',color:'#1a1a1a',fontWeight:'500',fontSize:'12px'}}>{r.clienti?.ragione_sociale || (r.masters?.nome ? ('🏢 ' + r.masters.nome) : '—')}</td>
+        <td style={{padding:'8px 10px',color:'#f97316',fontWeight:'600'}}>
+          {r.numero_spedizione}
+          {r.blocco && (
+            <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:600,color:'#b45309',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'4px',padding:'2px 6px',display:'inline-block',whiteSpace:'normal',maxWidth:'260px'}}>
+              ⏸ {r.blocco}
+            </div>
+          )}
+          {r.nota_peso && (
+            <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#1e40af',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'4px',padding:'2px 6px',whiteSpace:'normal',maxWidth:'300px'}}>
+              ⓘ {r.nota_peso}
+            </div>
+          )}
+          {fs > 0 && (
+            <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:600,color:'#7c2d12',background:'#ffedd5',border:'1px solid #fdba74',borderRadius:'4px',padding:'2px 6px',display:'inline-block'}}>
+              + {r.supplementi_nomi || 'fuori sagoma'} € {fs.toFixed(2)}
+            </div>
+          )}
+          {r.classe==='da_controllare' && r.motivo && (
+            <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#92400e',background:'#fffbeb',border:'1px solid #fcd34d',borderRadius:'4px',padding:'3px 7px',whiteSpace:'normal',maxWidth:'380px'}}>
+              ⚠️ {r.motivo}
+              {!isPenale && isDaRett && (
+                <button onClick={()=>ricalcolaRiga(r.id)} disabled={ricalcolando===r.id}
+                  style={{marginLeft:'8px',padding:'2px 9px',background:'#f97316',color:'#fff',border:'none',borderRadius:'4px',fontSize:'10.5px',fontWeight:700,cursor:'pointer',opacity:ricalcolando===r.id?0.6:1}}>
+                  {ricalcolando===r.id?'Ricalcolo…':'🔄 Ricalcola'}
+                </button>
+              )}
+            </div>
+          )}
+        </td>
+        <td style={cIni(!volIni)}>{pIni.toFixed(2)}</td>
+        <td style={cIni(volIni)}>{pvIni.toFixed(2)}</td>
+        <td style={cRe(!volRe)}>{pRe.toFixed(2)}</td>
+        <td style={cRe(volRe)}>{pvRe.toFixed(2)} kg</td>
+        <td style={{padding:'8px 10px',color:'#1a1a1a'}}>{Number(r.costo_iniziale).toFixed(4)}</td>
+        <td style={{padding:'8px 10px',color:'#1a1a1a'}}>{Number(r.costo_finale).toFixed(4)}</td>
+        <td style={{padding:'8px 10px'}}>
+          {r.stato==='ok' ? (
+            <span style={{color:'#16a34a',fontWeight:'700'}}>{addebito.toFixed(4)}</span>
+          ) : addebito !== 0 ? (
+            <span style={{color:addebito<0?'#dc2626':'#16a34a',fontWeight:'700'}}>{addebito.toFixed(4)}</span>
+          ) : (
+            <span style={{color:'#dc2626',fontWeight:'700',display:'flex',alignItems:'center',gap:'4px'}}>
+              Errore! 🔄
+            </span>
+          )}
+        </td>
+      </tr>
+    )
+  })]
 
   return (
     <div>
@@ -378,98 +494,24 @@ export default function RettificaCostiPage() {
                 ))}
               </tr></thead>
               <tbody>
-                {gruppi.flatMap(([chiave, g]) => [(
-                  <tr key={'g-'+chiave} onClick={()=>setAperti(p=>({...p,[chiave]:!p[chiave]}))}
-                    style={{background:'#f3f4f6',cursor:'pointer'}}>
-                    <td style={{padding:'9px 10px',borderBottom:'1px solid #d1d5db'}} onClick={e=>e.stopPropagation()}>
-                      <input type="checkbox"
-                        checked={g.righe.filter((r:any)=>r.stato==='da_rettificare').every((r:any)=>selectedIds.includes(r.id)) && g.righe.some((r:any)=>r.stato==='da_rettificare')}
-                        onChange={e=>{
-                          const ids = g.righe.filter((r:any)=>r.stato==='da_rettificare').map((r:any)=>r.id)
-                          setSelectedIds(prev => e.target.checked ? [...new Set([...prev,...ids])] : prev.filter(i=>!ids.includes(i)))
-                        }}/>
-                    </td>
-                    <td colSpan={9} style={{padding:'9px 10px',borderBottom:'1px solid #d1d5db',fontSize:'12.5px',fontWeight:700,color:'#1a1a1a'}}>
-                      <span style={{display:'inline-block',width:'14px',color:'#6b7280'}}>{aperti[chiave]?'▾':'▸'}</span>
-                      {g.nome}
-                      <span style={{fontWeight:400,color:'#6b7280',marginLeft:'8px'}}>
-                        {g.tipo==='master'?'sotto-master':'cliente diretto'} · {g.righe.length} {g.righe.length===1?'rettifica':'rettifiche'}
-                      </span>
-                      <span style={{float:'right',fontWeight:700,color:g.totale<0?'#dc2626':'#15803d'}}>
-                        € {Math.abs(g.totale).toFixed(2)}
-                      </span>
+                {/* BUONE in alto (il da-girare copre il costo del corriere) — poi DA CONTROLLARE. */}
+                {gruppiBuone.length > 0 && (
+                  <tr key="sez-buone" style={{background:'#dcfce7'}}>
+                    <td colSpan={10} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#166534'}}>
+                      ✅ Buone — il da-girare copre il costo del corriere, pronte da confermare <span style={{fontWeight:600}}>({rettBuone.length})</span>
                     </td>
                   </tr>
-                ), ...(aperti[chiave] ? g.righe : []).map((r:any)=>{
-                  const isSelected = selectedIds.includes(r.id)
-                  const diff = Number(r.differenza || 0)
-                  // L'addebito vero = ripesatura + supplementi fissi (fuori sagoma, non sovrapponibile,
-                  // consegna su appuntamento: in aggiunta). Una riga di solo supplemento ha differenza 0
-                  // ma addebita comunque: va mostrato questo, non uno "0" che sembrerebbe un errore.
-                  const fs = Number(r.fuori_sagoma || 0)
-                  const addebito = Math.round((diff - fs) * 100) / 100
-                  const isDaRett = r.stato === 'da_rettificare'
-                  // SI EVIDENZIA IL PESO SU CUI SI PAGA DAVVERO, non il piu' alto dei due.
-                  // "Il maggiore fra reale e volume" e' falso quando vale l'agevolazione del contratto:
-                  // se il collo sta nella scatola si paga sul REALE anche col volume piu' alto. Cosi' una
-                  // rettifica giusta sembrava un errore — 1UW07WF292297 mostrava "prima 6,89 → ora 6,30"
-                  // con un addebito, mentre prima si pagava su 5,00 kg reali (collo dentro la scatola) e
-                  // ora sul volume 6,30 (misurato mezzo centimetro fuori). La base la dice la rotta, che
-                  // la chiede alla regola unica (pesoSuReale); senza quel dato si torna al vecchio modo.
-                  const pIni = Number(r.peso_iniziale)||0, pvIni = Number(r.peso_volume_iniziale)||0
-                  const pRe  = Number(r.peso_reale)||0,    pvRe  = Number(r.peso_volume_reale)||0
-                  const volIni = r.base_prima ? r.base_prima === 'volume' : pvIni > pIni
-                  const volRe  = r.base_dopo  ? r.base_dopo  === 'volume' : pvRe > pRe
-                  const cIni = (on:boolean) => ({padding:'8px 10px', color: on?'#1a1a1a':'#b0b4bb', fontWeight: on?700:400})
-                  const cRe  = (on:boolean) => ({padding:'8px 10px', color: on?'#dc2626':'#b0b4bb', fontWeight: on?700:400})
-                  return (
-                    <tr key={r.id} style={{borderBottom:'1px solid #d1d5db',background:isSelected?'#fff7ed':'#fff'}}>
-                      <td style={{padding:'8px 10px'}}>
-                        {isDaRett && <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(r.id)}/>}
-                      </td>
-                      <td style={{padding:'8px 10px',color:'#1a1a1a',fontWeight:'500',fontSize:'12px'}}>{r.clienti?.ragione_sociale || (r.masters?.nome ? ('🏢 ' + r.masters.nome) : '—')}</td>
-                      <td style={{padding:'8px 10px',color:'#f97316',fontWeight:'600'}}>
-                        {r.numero_spedizione}
-                        {/* Perche' questa riga non si puo' confermare, scritto qui e non solo dopo
-                            aver premuto Conferma: cosi' non sembra che sia rimasta li' per errore. */}
-                        {r.blocco && (
-                          <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:600,color:'#b45309',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'4px',padding:'2px 6px',display:'inline-block',whiteSpace:'normal',maxWidth:'260px'}}>
-                            ⏸ {r.blocco}
-                          </div>
-                        )}
-                        {/* PERCHE' IL PREZZO CAMBIA QUANDO IL PESO SCENDE: senza questa riga la
-                            rettifica sembra inventata, e chi la riceve la contesta (giustamente). */}
-                        {r.nota_peso && (
-                          <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#1e40af',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'4px',padding:'2px 6px',whiteSpace:'normal',maxWidth:'300px'}}>
-                            ⓘ {r.nota_peso}
-                          </div>
-                        )}
-                        {fs > 0 && (
-                          <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:600,color:'#7c2d12',background:'#ffedd5',border:'1px solid #fdba74',borderRadius:'4px',padding:'2px 6px',display:'inline-block'}}>
-                            + {r.supplementi_nomi || 'fuori sagoma'} € {fs.toFixed(2)}
-                          </div>
-                        )}
-                      </td>
-                      <td style={cIni(!volIni)}>{pIni.toFixed(2)}</td>
-                      <td style={cIni(volIni)}>{pvIni.toFixed(2)}</td>
-                      <td style={cRe(!volRe)}>{pRe.toFixed(2)}</td>
-                      <td style={cRe(volRe)}>{pvRe.toFixed(2)} kg</td>
-                      <td style={{padding:'8px 10px',color:'#1a1a1a'}}>{Number(r.costo_iniziale).toFixed(4)}</td>
-                      <td style={{padding:'8px 10px',color:'#1a1a1a'}}>{Number(r.costo_finale).toFixed(4)}</td>
-                      <td style={{padding:'8px 10px'}}>
-                        {r.stato==='ok' ? (
-                          <span style={{color:'#16a34a',fontWeight:'700'}}>{addebito.toFixed(4)}</span>
-                        ) : addebito !== 0 ? (
-                          <span style={{color:addebito<0?'#dc2626':'#16a34a',fontWeight:'700'}}>{addebito.toFixed(4)}</span>
-                        ) : (
-                          <span style={{color:'#dc2626',fontWeight:'700',display:'flex',alignItems:'center',gap:'4px'}}>
-                            Errore! 🔄
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })])}
+                )}
+                {gruppiBuone.flatMap(renderGruppo)}
+                {gruppiCtrl.length > 0 && (
+                  <tr key="sez-ctrl" style={{background:'#fef3c7'}}>
+                    <td colSpan={10} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#92400e'}}>
+                      ⚠️ Da controllare — qui recuperi MENO del costo del corriere <span style={{fontWeight:600}}>({rettCtrl.length})</span>
+                      {totaleCtrl > 0.01 && <span style={{float:'right'}}>mancano € {totaleCtrl.toFixed(2)}</span>}
+                    </td>
+                  </tr>
+                )}
+                {gruppiCtrl.flatMap(renderGruppo)}
               </tbody>
             </table>
           </div>

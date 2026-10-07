@@ -133,6 +133,29 @@ export async function GET(req: NextRequest) {
       for (const c of (cc || [])) nomi.set(c.id, c.ragione_sociale)
     }
   }
+  // BUONE vs DA CONTROLLARE. Una riga "copre" quando il DA-GIRARE (|differenza| + supplemento fisso)
+  // e' almeno il COSTO FORNITORE che il corriere ci ha addebitato. Sotto = sotto-recupero, col MOTIVO
+  // scritto accanto cosi' il master sa se aggiornare il listino, chiedere le misure, o e' una penale.
+  // costo_fornitore NULL/0 (file-pesi senza costo, es. Velox, o righe caricate prima della colonna) =
+  // sempre buona: non c'e' un costo fornitore da coprire, e' solo un riprezzo.
+  const classeDi = (r: any) => {
+    const daGirare = (-Number(r.differenza || 0)) + Number(r.fuori_sagoma || 0)
+    const costoForn = Number(r.costo_fornitore || 0)
+    if (costoForn <= 0.01 || daGirare >= costoForn - 0.01) return { classe: 'buona', motivo: null, manca: 0 }
+    const manca = Math.round((costoForn - daGirare) * 100) / 100
+    const nomi = String(r.supplementi_nomi || '').toLowerCase()
+    let motivo: string
+    if (nomi.includes('penale')) {
+      motivo = `Penale corriere ${costoForn.toFixed(2)}€ (servizio a peso reale sforato): il riprezzo normale non la recupera. Il Ricalcola NON la sistema — decidi se girare l'intera penale al cliente o assorbirla.`
+    } else {
+      const dims = Array.isArray(r.colli_ripesati) ? r.colli_ripesati : []
+      const senzaMisure = dims.length > 0 && dims.every((c: any) => !((Number(c?.length) || 0) || (Number(c?.width) || 0) || (Number(c?.height) || 0)))
+      motivo = senzaMisure
+        ? `Ripesata sul solo peso (collo senza misure): recuperi ${daGirare.toFixed(2)}€ su ${costoForn.toFixed(2)}€ di costo fornitore (mancano ${manca.toFixed(2)}€). Se il corriere ha contato il volume servono le misure del collo.`
+        : `Listino cliente sotto il costo fornitore: recuperi ${daGirare.toFixed(2)}€ ma il corriere ha addebitato ${costoForn.toFixed(2)}€ (mancano ${manca.toFixed(2)}€). Aggiorna il listino del cliente e premi Ricalcola.`
+    }
+    return { classe: 'da_controllare', motivo, manca }
+  }
   const righe = righeGrezze.map((r: any) => {
     const b = baseDi(r)
     return {
@@ -143,6 +166,7 @@ export async function GET(req: NextRequest) {
       base_prima: b.prima,     // 'reale' | 'volume': su cosa si pagava DAVVERO
       base_dopo: b.dopo,       // e su cosa si paga ora
       nota_peso: b.nota,       // perche' e' cambiato, quando cambia la base
+      ...classeDi(r),          // classe: 'buona'|'da_controllare', motivo, manca (sotto-recupero)
     }
   })
   return NextResponse.json(righe)
