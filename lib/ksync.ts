@@ -174,7 +174,7 @@ export async function creaKsync(c: KsyncCred, dati: KsyncInput): Promise<{ ldv: 
   const sender0 = party(dati.mittente)
   const receiver0 = party(dati.destinatario)
   // Body della LDV con un dato mittente/destinatario: funzione, così si può RITENTARE variandoli.
-  const costruisciBody = (sender: any, receiver: any) => ({
+  const costruisciBody = (sender: any, receiver: any, pf: string = (dati.printFormat || '1011')) => ({
     costCenterCode: dati.costCenterCode || c.costCenterCode || '',
     paperless: dati.paperless ? 'true' : 'false',
     shipmentDate: dati.shipmentDate || new Date().toISOString(),
@@ -182,7 +182,10 @@ export async function creaKsync(c: KsyncCred, dati: KsyncInput): Promise<{ ldv: 
       // Il nostro riferimento interno (es. rif. ordine) → ksync lo mappa su numRifInterno, MAX 50 char
       // (confermato da ParcelPilot 1/10): tronco qui, nel punto unico, così crea e API v1 sono protette.
       clientReferenceId: String(dati.clientReferenceId || '').slice(0, 50),
-      printFormat: dati.printFormat || 'A4',
+      // FORMATO ETICHETTA: default '1011' (10x11, lo stock arrivato per SDA EXPRESS L) invece di 'A4'.
+      // Chi chiama puo' forzarlo (dati.printFormat). Se POSTE bocciasse il formato, piu' sotto c'e' il
+      // fallback ad 'A4' così un prodotto che non supporta '1011' non fa fallire la spedizione.
+      printFormat: pf,
       product: dati.product,
       data: {
         // Anche contenuto/note vanno a POSTE: stessa pulizia dei caratteri vietati.
@@ -203,15 +206,25 @@ export async function creaKsync(c: KsyncCred, dati: KsyncInput): Promise<{ ldv: 
     return null
   }
 
-  let r = await chiama(c, 'waybill/create', costruisciBody(sender0, receiver0))
+  let formatoCorrente = dati.printFormat || '1011'
+  let r = await chiama(c, 'waybill/create', costruisciBody(sender0, receiver0, formatoCorrente))
   let err = erroreDi(r)
+  // FALLBACK FORMATO: '1011' (10x11) e' il default, ma non tutti i prodotti POSTE potrebbero accettarlo.
+  // Se POSTE boccia IL FORMATO, ritento in 'A4' invece di far fallire la spedizione. Il 1° tentativo e'
+  // FALLITO (nessuna LDV emessa) → niente doppione. Rete di sicurezza: '1011' resta quello voluto, A4
+  // scatta solo se il formato viene rifiutato. (Da verificare che '1011' passi su ogni nuovo prodotto Poste.)
+  if (err && formatoCorrente !== 'A4' && /format/i.test(err)) {
+    formatoCorrente = 'A4'
+    r = await chiama(c, 'waybill/create', costruisciBody(sender0, receiver0, formatoCorrente))
+    err = erroreDi(r)
+  }
   // POSTE rifiuta l'email con una SUA regola (piu' severa di un check di formato): a volte boccia email
   // che paiono valide (es. arrivate dall'import). L'email e' OPZIONALE (le LDV senza email passano), la
   // consegna no. Quindi se POSTE si lamenta SOLO dell'email, ritento UNA volta SENZA email mittente/
-  // destinatario. Il 1° tentativo e' FALLITO (errore di validazione, nessuna LDV emessa) → nessun
+  // destinatario (mantenendo il formato corrente). Il 1° tentativo e' FALLITO (nessuna LDV) → nessun
   // doppione. Copre qualunque email che POSTE non digerisce senza doverne indovinare la regola.
   if (err && /mail/i.test(err) && (sender0.email || receiver0.email)) {
-    r = await chiama(c, 'waybill/create', costruisciBody({ ...sender0, email: '' }, { ...receiver0, email: '' }))
+    r = await chiama(c, 'waybill/create', costruisciBody({ ...sender0, email: '' }, { ...receiver0, email: '' }, formatoCorrente))
     err = erroreDi(r)
   }
   if (err) throw new Error(err)
