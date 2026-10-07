@@ -618,6 +618,29 @@ export async function GET(req: NextRequest) {
       for (const r of (cs || [])) costoSpedPonte.set((r as any).id, Number((r as any).costo_spedizione) || 0)
     }
   }
+  // CONDIVISIONE — ACQUIRENTE (vista di chi COMPRA all'ingrosso). Se io compro questa spedizione via
+  // corrieri_condivisi, il mio costo VERO e' quello che pago al fornitore, sulla GAMBA col MIO ledger
+  // d'acquisto (stesso tracking) — NON il mio listino. Senza, la riga ORIGINATRICE di un sotto-master
+  // (master != io, quindi i rami ponte sopra NON scattano) cade su calcMioCorr = il costo del contratto
+  // comprato DIRETTO: es. 282224J033553 mostrava a MULTI COSTO 18,00 di listino e margine -4,98, mentre
+  // paga Wave 11,73 e guadagna +1,29. Vuota per i master senza acquisti-codice → zero impatto.
+  const costoIngrossoAcq = new Map<string, number>()   // originator.id -> costo che pago al fornitore
+  if (!light && mineId && (spedizioni || []).length) {
+    const { data: ccAcq } = await admin.from('corrieri_condivisi')
+      .select('cliente_ledger_id').eq('master_id', mineId).eq('stato', 'attiva')
+    const mieiLedger = Array.from(new Set((ccAcq || []).map((r: any) => r.cliente_ledger_id).filter(Boolean)))
+    if (mieiLedger.length) {
+      const trk = Array.from(new Set((spedizioni || []).map((s: any) => s.tracking_number).filter(Boolean)))
+      const costoPerTrk = new Map<string, number>()
+      for (let i = 0; i < trk.length; i += 300) {
+        const { data: g } = await admin.from('spedizioni')
+          .select('tracking_number,costo_totale')
+          .in('tracking_number', trk.slice(i, i + 300)).in('cliente_id', mieiLedger)
+        for (const r of (g || [])) costoPerTrk.set((r as any).tracking_number, Number((r as any).costo_totale) || 0)
+      }
+      for (const s of (spedizioni || [])) if (s.tracking_number && costoPerTrk.has(s.tracking_number)) costoIngrossoAcq.set(s.id, costoPerTrk.get(s.tracking_number)!)
+    }
+  }
   segna('tipo-corriere')
   const OLTRE_15GG = Date.now() - 15 * 24 * 60 * 60 * 1000
 
@@ -676,6 +699,11 @@ export async function GET(req: NextRequest) {
     // mette costo_spedizione nelle colonne generali per non attivare il ramo proprio sopra su tutti).
     if (prezzo_corriere == null && s.master_id === mineId && corrTipo.get(s.corriere_id) === 'moovexpress' && (costoSpedPonte.get(s.id) || 0) > 0) {
       prezzo_corriere = costoSpedPonte.get(s.id)!
+    }
+    // CONDIVISIONE ACQUIRENTE: se compro questa all'ingrosso, il COSTO VERO e' quello che pago al
+    // fornitore (gamba col mio ledger), non il listino del contratto comprato diretto (calcMioCorr).
+    if (prezzo_corriere == null && (costoIngrossoAcq.get(s.id) || 0) > 0) {
+      prezzo_corriere = costoIngrossoAcq.get(s.id)!
     }
     if (prezzo_corriere == null && calcMioCorr) {
       const nome = (s.corrieri as any)?.nome_contratto
