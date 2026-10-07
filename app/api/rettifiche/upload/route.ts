@@ -459,7 +459,10 @@ export async function POST(req: NextRequest) {
     for (const k in rigaRaw) { riga[String(k).trim().toLowerCase()] = (rigaRaw as any)[k] }
     const ldv = String(riga['ldv'] || riga['n. spedizione'] || riga['numero'] || '').trim()
     // Con raw:false le celle arrivano come testo: un peso scritto "8,5" va letto 8,5 e non 8.
-    const pesoReale = parseFloat(String(riga['peso reale'] || riga['peso_reale'] || riga['pesoreale'] || riga['peso'] || riga['peso volume'] || riga['pesovolume'] || 0).replace(',', '.'))
+    // `new_weight`: formato minimale di Velox = due colonne ldv + peso ripesato, niente volume/misure
+    // (verificato su Poste STANDARD I: 224/331 agganciano). Cade qui (non e' ne' SpediamoPro ne' il
+    // formato a colonne con peso_riscontrato), si riprezza sul solo peso come gli altri file-pesi senza misure.
+    const pesoReale = parseFloat(String(riga['peso reale'] || riga['peso_reale'] || riga['pesoreale'] || riga['peso'] || riga['peso volume'] || riga['pesovolume'] || riga['new_weight'] || riga['new weight'] || riga['newweight'] || 0).replace(',', '.'))
     if (!ldv) continue
     if (!perLdv.has(ldv)) perLdv.set(ldv, [])
     perLdv.get(ldv)!.push(pesoReale)
