@@ -68,7 +68,23 @@ export async function sottoAlberoMasterIds(adminDb: any, rootId: string): Promis
 export async function contrattiPossedutiNomi(adminDb: any, masterId?: string | null): Promise<string[]> {
   if (!masterId) return []
   const { data } = await adminDb.from('corrieri').select('nome_contratto').eq('master_id', masterId)
-  return Array.from(new Set((data || []).map((c: any) => (c.nome_contratto || '').trim()).filter(Boolean)))
+  // Il confronto a valle è SEMPRE contro il valore GREZZO di corrieri.nome_contratto
+  // (q.in('corrieri.nome_contratto', …) in lista/giacenze/distinte/contrassegni/statistiche/dashboard/
+  // reports/ritirabili): il nome va quindi restituito ESATTAMENTE com'è salvato. Il .trim() di prima lo
+  // normalizzava e così un contratto PROPRIO con uno spazio di troppo nel nome ("GLS CASERTA RITIRO ")
+  // non combaciava più nemmeno con le SUE stesse spedizioni, che sparivano dalla vista-rete del detentore
+  // — 252 di Evolution Commerce su MULTIEXPRESS, viste come "GLS" che non si trovavano (8/10/2026).
+  // Tengo ANCHE la forma trimmata: è un SOVRAINSIEME (non nasconde nulla che prima si vedeva) e copre
+  // il caso di una copia del sub con spazi diversi da quelli del detentore.
+  const nomi = new Set<string>()
+  for (const c of (data || [])) {
+    const raw = (c as any).nome_contratto == null ? '' : String((c as any).nome_contratto)
+    const t = raw.trim()
+    if (!t) continue        // nome vuoto o solo-spazi: niente da possedere
+    nomi.add(raw)           // com'è salvato: è così che lo confronta chi filtra
+    nomi.add(t)             // difensivo: copie con spazi ai bordi diversi dal detentore
+  }
+  return Array.from(nomi)
 }
 
 // true se `targetId` sta SOTTO `masterId` nella catena (figlio diretto o più in basso).
