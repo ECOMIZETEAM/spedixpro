@@ -11,7 +11,7 @@ import { useAppNativa } from '@/lib/app-nativa'
 // perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
 // always: sempre visibile a chiunque abbia accesso al portale.
 // rete: visibile solo ai master che possono gestire la propria rete di sotto-master.
-type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean }
+type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean, reteCompleta?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean }
 type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, external?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean, mioCosto?: boolean, sub?: NavSub[] }
 
 const NAV: NavItem[] = [
@@ -62,6 +62,7 @@ const NAV: NavItem[] = [
     { label: 'Nuovo Master', href: '/dashboard/clienti/master/nuovo', rete: true },
     { label: 'Elenco Master', href: '/dashboard/clienti/master', rete: true },
     { label: 'Gerarchia', href: '/dashboard/clienti/gerarchia', rete: true },
+    { label: 'Accessi Rete', href: '/dashboard/clienti/accessi', reteCompleta: true },
   ]},
   // LOGISTICA CONTO TERZI: e' un servizio a se', non un dettaglio dell'anagrafica clienti — la
   // merce del cliente tenuta da noi, con il suo magazzino, il suo listino e i suoi addebiti.
@@ -132,7 +133,7 @@ const NAV: NavItem[] = [
   { label: 'Documentazione', href: 'https://docs.moovexpress.com', icon: '📖', always: true, external: true },
 ]
 
-export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, gestioneRete?: boolean, permessi?: Record<string, boolean>, superMaster?: boolean, isMultiexpress?: boolean, ottimizzaMargini?: boolean } }) {
+export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, gestioneRete?: boolean, permessi?: Record<string, boolean>, superMaster?: boolean, isMultiexpress?: boolean, ottimizzaMargini?: boolean, vedeReteCompleta?: boolean } }) {
   const path = usePathname()
   const isFull = user?.isFull ?? true
   const gestioneRete = user?.gestioneRete ?? false
@@ -141,16 +142,18 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   const superMaster = user?.superMaster ?? false
   const isMultiexpress = user?.isMultiexpress ?? false
   const ottimizzaMargini = user?.ottimizzaMargini ?? false
+  const vedeReteCompleta = user?.vedeReteCompleta ?? false
   // Nell'app la voce Abbonamento non c'è: la pagina è un acquisto per gli store (lib/app-nativa).
   const app = useAppNativa()
 
   // Un elemento e visibile se: admin/master (isFull), oppure marcato always,
   // oppure ha una chiave permesso attiva. Senza perm e non-full = nascosto (solo admin).
   // Le voci "rete" (gestione sotto-master) richiedono in più il flag gestioneRete.
-  const puoVedere = (x: { href?: string, perm?: string, always?: boolean, rete?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean, mioCosto?: boolean }) => {
+  const puoVedere = (x: { href?: string, perm?: string, always?: boolean, rete?: boolean, reteCompleta?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean, mioCosto?: boolean }) => {
     if (app && x.href === '/dashboard/abbonamento') return false
     if (x.soloOttimizzaMargini) return ottimizzaMargini   // voce riservata ai master col flag (oggi solo Ecomize LL)
     if (x.soloMultiexpress) return isMultiexpress   // voce riservata a MULTIEXPRESS (Rettifiche automatiche)
+    if (x.reteCompleta) return vedeReteCompleta   // voce riservata a chi vede l'INTERA rete (root): Accessi Rete
     if (x.superMaster) return superMaster       // voce riservata al SUPER master (es. Registro Attività)
     // "Il mio listino" SOLO agente. Per un MASTER è un percorso in più che confonde: il costo che paga
     // lo vede già in "Listino Corrieri" (= quello che paga) e il venduto in "Listino Clienti". L'agente

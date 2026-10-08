@@ -37,14 +37,18 @@ export default async function Layout({ children }: { children: React.ReactNode }
   let demo = false
   let demoScadenza: string | null = null
   let ottimizzaMargini = false
+  let vedeReteCompleta = false
   if (utente?.master_id) {
-    const { data: m } = await supabase.from('masters').select('logo_url,nome,is_super_master,demo,demo_scadenza,ottimizza_margini').eq('id', utente.master_id).single()
+    const { data: m } = await supabase.from('masters').select('logo_url,nome,is_super_master,demo,demo_scadenza,ottimizza_margini,vede_rete_completa,parent_master_id').eq('id', utente.master_id).single()
     brandLogo = m?.logo_url || null
     brandNome = m?.nome || null
     superMaster = !!m?.is_super_master
     demo = m?.demo === true
     demoScadenza = m?.demo_scadenza || null
     ottimizzaMargini = m?.ottimizza_margini === true
+    // Vede l'INTERA rete: super master, flag esplicito, o vertice senza padre (root). Abilita la
+    // voce "Accessi Rete" (elenco piatto master+clienti con accesso diretto).
+    vedeReteCompleta = !!(m?.is_super_master || m?.vede_rete_completa || m?.parent_master_id === null)
   }
   // Prova demo terminata: fuori dal gestionale, verso la pagina che spiega com'è andata.
   if (demo && demoScadenza && new Date(demoScadenza).getTime() < Date.now()) redirect('/demo-scaduta')
@@ -60,6 +64,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
       // Rettifiche automatiche OneTracking: solo MULTIEXPRESS (detentore PDB), gli altri no.
       isMultiexpress: utente?.master_id === 'a8d42a25-3711-4343-a6df-ee2ba9bbf08b',
       ottimizzaMargini,
+      vedeReteCompleta,
     }}>
       <DialogProvider>
         {demo && demoScadenza && <BannerDemo scadenza={demoScadenza} />}

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { gestisceLaRete } from '@/lib/ruoli'
+import { masterVedeReteCompleta, eDiscendente } from '@/lib/rete-masters'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // La response finale (redirect) DEVE portare i cookie della nuova sessione:
@@ -42,13 +43,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   const { id } = await params
-  const { data: cliente } = await supabase
+  const admin = createAdminSupabase()
+  // Leggo il cliente con l'ADMIN: per entrare in un cliente di un SOTTO-master la sessione (RLS) non
+  // lo vedrebbe. L'autorizzazione e' ESPLICITA qui sotto, non delegata alla RLS.
+  const { data: cliente } = await admin
     .from('clienti').select('id,email,master_id,ragione_sociale').eq('id', id).single()
-  if (!cliente || cliente.master_id !== utente.master_id) {
+  // Consentito se il cliente e' MIO (diretto) oppure se vedo la rete COMPLETA e il cliente sta sotto
+  // di me (un mio discendente). Stessa regola dell'impersona-master, gia' aperta a tutta la
+  // discendenza del vertice: senza, dal portale del root i clienti dei sotto-master erano inaccessibili.
+  let autorizzato = !!cliente && cliente.master_id === utente.master_id
+  if (cliente && !autorizzato
+      && await masterVedeReteCompleta(admin, utente.master_id)
+      && await eDiscendente(admin, cliente.master_id, utente.master_id)) {
+    autorizzato = true
+  }
+  if (!cliente || !autorizzato) {
     return NextResponse.redirect(new URL('/dashboard/clienti?error=non_autorizzato', req.url))
   }
-
-  const admin = createAdminSupabase()
 
   // Account di accesso REALE del cliente (utenti -> auth.users): usiamo l'email effettiva
   // del login, robusta anche se clienti.email è disallineata o non valida, e NON creiamo
