@@ -573,6 +573,10 @@ export default function ImportaOrdiniPage() {
   const gruppi = gruppiStessoDestinatario(ordini.filter(unibile).map(o => ({ id: o.id, chiave: chiaveDi(o) })))
   const gruppoDi = (o: Ordine): string[] | undefined => (unibile(o) ? gruppi.get(chiaveDi(o)) : undefined)
   const quantiDoppi = ordini.filter(o => gruppoDi(o)).length
+  // Conteggio per stato su TUTTI gli ordini (non i filtrati): serve a far vedere dove sono finiti
+  // quelli che il filtro di default ('da_spedire') nasconde. Senza, un ordine andato in 'errore'
+  // (es. "nessuna tariffa verso PL") spariva dalla vista dopo un refresh e sembrava PERSO.
+  const conteggiStato = ordini.reduce((m: Record<string, number>, o) => { m[o.stato] = (m[o.stato] || 0) + 1; return m }, {} as Record<string, number>)
 
   // I file Amazon arrivano in ordine di data: senza un alfabetico i due ordini della stessa persona
   // finiscono lontanissimi nell'elenco, e per trovarli bisogna leggere riga per riga.
@@ -834,12 +838,12 @@ export default function ImportaOrdiniPage() {
               </button>
             )}
             <select value={filtroStato} onChange={e => setFiltroStato(e.target.value)} style={{ ...inp, width: 'auto', minWidth: '150px', padding: '8px 10px' }}>
-              <option value="tutti">Tutti gli stati</option>
-              <option value="da_spedire">Da spedire</option>
-              <option value="spedito">Spedito</option>
-              <option value="errore">Errore</option>
-              <option value="unito">Unito</option>
-              <option value="archiviato">Archiviato</option>
+              <option value="tutti">Tutti gli stati ({ordini.length})</option>
+              <option value="da_spedire">Da spedire{conteggiStato.da_spedire ? ` (${conteggiStato.da_spedire})` : ''}</option>
+              <option value="spedito">Spedito{conteggiStato.spedito ? ` (${conteggiStato.spedito})` : ''}</option>
+              <option value="errore">Errore{conteggiStato.errore ? ` (${conteggiStato.errore})` : ''}</option>
+              <option value="unito">Unito{conteggiStato.unito ? ` (${conteggiStato.unito})` : ''}</option>
+              <option value="archiviato">Archiviato{conteggiStato.archiviato ? ` (${conteggiStato.archiviato})` : ''}</option>
             </select>
             {(q || filtroStato !== 'tutti' || soloDoppi || ordina !== 'data_desc' || fDa || fA) && (
               <button onClick={() => { setQ(''); setFiltroStato('tutti'); setSoloDoppi(false); setOrdina('data_desc'); setFDa(''); setFA('') }}
@@ -861,6 +865,28 @@ export default function ImportaOrdiniPage() {
           <div style={{ padding: '50px', textAlign: 'center' }}>
             <div style={{ fontSize: '40px', marginBottom: '12px' }}>🔍</div>
             <div style={{ fontSize: '14px', fontWeight: 500, color: '#999' }}>Nessun ordine corrisponde ai filtri</div>
+            {/* Gli ordini ci sono ma sono in un altro stato (tipico: uno andato in 'errore' dopo un
+                tentativo fallito, nascosto dal filtro di default 'Da spedire'). Dirlo esplicito + un
+                tasto per vederli: altrimenti il cliente crede di aver PERSO l'ordine dopo un refresh. */}
+            <div style={{ marginTop: '14px', fontSize: '13px', color: '#666' }}>
+              Hai {ordini.length} {ordini.length === 1 ? 'ordine importato' : 'ordini importati'} — non sono persi, sono solo filtrati
+              {Object.keys(conteggiStato).length > 0 && (
+                <> ({['da_spedire', 'errore', 'spedito', 'unito', 'archiviato']
+                  .filter(s => conteggiStato[s]).map(s => `${STATO[s]?.t || s}: ${conteggiStato[s]}`).join(' · ')})</>
+              )}.
+              <div style={{ marginTop: '12px', display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button onClick={() => { setQ(''); setFiltroStato('tutti'); setSoloDoppi(false); setFDa(''); setFA('') }}
+                  style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+                  Mostra tutti
+                </button>
+                {conteggiStato.errore ? (
+                  <button onClick={() => { setQ(''); setFiltroStato('errore'); setSoloDoppi(false); setFDa(''); setFA('') }}
+                    style={{ background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+                    Vedi i {conteggiStato.errore} in errore
+                  </button>
+                ) : null}
+              </div>
+            </div>
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
