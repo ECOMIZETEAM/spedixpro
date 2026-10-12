@@ -166,6 +166,14 @@ export function erroreCorrierePulito(raw: any): string {
   const t = String(raw || '').toLowerCase()
   if (/timed\s*out|timeout|0 bytes received/.test(t))
     return 'Il corriere non ha risposto in tempo (rallentamento momentaneo dei suoi sistemi). Riprova tra qualche istante.'
+  // CREDITO di un conto A MONTE esaurito — tipico della CONDIVISIONE ("Credito insufficiente:
+  // disponibili € X, spedizione € Y", che arriva dal venditore) o del conto-corriere del master
+  // ("120 CREDIT - ... (credito: 0.53, costo: ...)"). Quel saldo è del MASTER/detentore, NON del
+  // cliente: non va MAI mostrato a valle, tantomeno col NUMERO (solo il detentore lo vede, dai suoi
+  // pannelli). Messaggio generico, zero cifre. Il credito PROPRIO del cliente lo gestisce la
+  // creazione a parte (lì sì mostra il suo saldo + "Ricarica"), e NON passa da qui.
+  if (/credito insufficiente|insufficient.*credit|\b120 credit\b|disponibili €/.test(t))
+    return 'Credito del contratto esaurito: contatta il tuo master per la ricarica, poi riprova.'
   // PUNTO DI RITIRO DI UN ALTRO CORRIERE. Ogni corriere ha i suoi codici (Fermopoint IT23558, Locker
   // ITEBO09208P, Ufficio Postale 11017) e non si mescolano: se il punto arriva dalla lista di un
   // contratto diverso, il corriere risponde "nessun PUDO trovato per ID ...". Il messaggio grezzo non
