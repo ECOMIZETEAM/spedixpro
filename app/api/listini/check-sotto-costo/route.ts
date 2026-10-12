@@ -25,6 +25,7 @@ type Riga = {
   descrizione: string
   prezzo_cliente: number; costo_tuo: number; differenza: number
   costo_perc?: number        // supplementi: la percentuale che paghi tu (per adeguare anche la %)
+  corriere_id?: string       // per il deep-link all'editor sul corriere giusto (?corriere=)
   fascia_id?: string; supplemento_id?: string
 }
 
@@ -106,7 +107,7 @@ export async function GET(_req: NextRequest) {
         const prezzo = conFuel((f as any).prezzo, (f as any).fuel)
         if (prezzo >= mioCosto - 0.005) continue
         righe.push({
-          chiave: `f:${(f as any).id}`, fascia_id: (f as any).id,
+          chiave: `f:${(f as any).id}`, fascia_id: (f as any).id, corriere_id: (f as any).corriere_id,
           listino_id: (f as any).listino_id, listino_nome: nomeListino.get((f as any).listino_id) || 'Listino',
           clienti: clientiDi.get((f as any).listino_id) || [],
           corriere: nomeCorr.get((f as any).corriere_id) || '—', zona: nomeZona.get((f as any).zona_id) || '—',
@@ -133,7 +134,7 @@ export async function GET(_req: NextRequest) {
         const sottoPerc = perc < mioS.perc - 0.005
         if (!sottoFisso && !sottoPerc) continue
         righe.push({
-          chiave: `s:${(s as any).id}`, supplemento_id: (s as any).id,
+          chiave: `s:${(s as any).id}`, supplemento_id: (s as any).id, corriere_id: (s as any).corriere_id,
           listino_id: (s as any).listino_id, listino_nome: nomeListino.get((s as any).listino_id) || 'Listino',
           clienti: clientiDi.get((s as any).listino_id) || [],
           corriere: nomeCorr.get((s as any).corriere_id) || '—', zona: (s as any).tipo,
