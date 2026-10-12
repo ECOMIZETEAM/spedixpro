@@ -12,12 +12,15 @@
 //   L'ordine NON restituisce la lettera di vettura: chi si ferma al passo 2 ha una spedizione
 //   pagata e invisibile. Per questo `easyparcelSpedisci` fa i tre passi insieme.
 //
-// NON ESISTE UNA CHIAMATA DI ANNULLO. Verificato sull'intera documentazione: le chiamate sono
-// quotation, order, order-fast, getwaybill, getorder, listorder, tracking, taric-search,
-// newcustomer, addfund, balance, pudo, checkcoupon. Nessuna cancellazione. Conseguenza pratica:
-// una volta passato il passo 2 il credito e' speso e l'annullo va chiesto fuori dal sistema.
-// Chi chiama deve saperlo (vedi `EASYPARCEL_SENZA_ANNULLO`) e NON deve promettere all'utente
-// un annullo automatico che qui non puo' esistere.
+// ANNULLO = STORNO. Dal 10/2026 DVA ha aggiunto la chiamata `richiesta-storno` (verificato live 12/10,
+// prima NON esisteva su tutta la doc). NON e' istantaneo: e' una RICHIESTA — gli operatori DVA la
+// verificano e, se positiva, RIACCREDITANO il costo e cancellano (stato ordine 13 "storno richiesto"
+// -> 9 "cancellato"). Ammesso SOLO se la spedizione e' pagata, da <=1 mese, in stato 2/4/5/6 e SENZA
+// dati di tracking (gia' affidata al vettore = RIFIUTATA: 'tracking_presente'). Conseguenza pratica:
+// NON si rimborsa subito la catena — si richiede lo storno e si rimborsa SOLO a cancellazione
+// confermata da DVA (si segue con `solo_verifica:true`). Vedi `easyparcelStorno`.
+// (Le altre chiamate: quotation, order, order-fast, getwaybill, getorder, listorder, tracking,
+// taric-search, newcustomer, addfund, balance, pudo, checkcoupon.)
 //
 // L'autenticazione e' nel PERCORSO dell'URL, non in un header: /<chiamata>/<APIKEY>.
 // Quindi la chiave finisce nella riga di richiesta: mai loggare l'URL per intero.
@@ -98,6 +101,53 @@ async function chiama(apikey: string, call: string, corpo: any, timeoutMs = 3000
     throw new ErroreEasyparcel(codice, senzaChiave(msg) || `HTTP ${res.status}`, senzaChiave(String(d.errordetails || '')))
   }
   return d
+}
+
+// ── Storno (annullo) — richiesta-storno ──────────────────────────────────────
+// NB: QUESTA chiamata NON usa il campo `call` nel body (a differenza di tutte le altre) e vuole
+// `ordini` (array di id_ordine, max 500) + `solo_verifica`. Con `solo_verifica:true` NON cambia nulla
+// (dice solo se lo storno e' richiedibile) → lo usiamo per la verifica E per seguire l'avanzamento.
+// La chiamata resta result:OK anche se i singoli ordini sono rifiutati: il motivo e' in `esiti[].codice`.
+export type EsitoStorno = {
+  id_ordine: number
+  ammesso: boolean        // passa i controlli automatici
+  richiesto: boolean      // storno effettivamente richiesto (false in solo_verifica)
+  codice: string          // ammesso | tracking_presente | cancellato | gia_richiesto | stato_non_ammesso | non_pagato | oltre_un_mese | non_trovato | contratto_proprio | tracking_non_verificabile | non_aggiornato
+  messaggio: string
+  stato: number           // stato ordine DVA (13=storno richiesto, 9=cancellato)
+  ldv: string
+  tracking: string | null
+}
+export async function easyparcelStorno(apikey: string, ordini: Array<number | string>, soloVerifica: boolean, timeoutMs = 30000): Promise<{ esiti: EsitoStorno[]; ammessi: number; rifiutati: number; richiesti: number; raw: any }> {
+  if (!apikey) throw new ErroreEasyparcel(101, 'chiave del contratto mancante')
+  const ids = ordini.map(x => Number(x)).filter(n => Number.isFinite(n) && n > 0)
+  if (!ids.length) throw new ErroreEasyparcel(110, 'nessun id_ordine valido per lo storno')
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), timeoutMs)
+  let res: Response
+  try {
+    res = await fetch(`${BASE}/richiesta-storno/${apikey}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ordini: ids, solo_verifica: !!soloVerifica }),
+      signal: ctrl.signal,
+    })
+  } catch (e: any) {
+    throw new ErroreEasyparcel(0, e?.name === 'AbortError' ? 'timeout' : String(e?.message || e))
+  } finally { clearTimeout(t) }
+  const testo = await res.text()
+  let d: any; try { d = JSON.parse(testo) } catch { d = null }
+  if (!d) throw new ErroreEasyparcel(0, `risposta non leggibile (HTTP ${res.status})`, testo.slice(0, 200))
+  if (Array.isArray(d) && d.length === 1 && typeof d[0] === 'object') d = d[0]
+  const codice = Number(d.errorcode ?? 0) || 0
+  if (String(d.result || '').toUpperCase() === 'KO') {
+    const senzaChiave = (s: string) => String(s || '').split(apikey).join('***')
+    throw new ErroreEasyparcel(codice, senzaChiave(d.errormessage) || `HTTP ${res.status}`, senzaChiave(String(d.errordetails || '')))
+  }
+  return {
+    esiti: Array.isArray(d.esiti) ? d.esiti : [],
+    ammessi: Number(d.ammessi || 0), rifiutati: Number(d.rifiutati || 0), richiesti: Number(d.richiesti || 0),
+    raw: d,
+  }
 }
 
 // ── SVINCOLO DI UNA SPEDIZIONE IN GIACENZA ──

@@ -53,6 +53,8 @@ export default function Dashboard() {
     'reso_mittente':'Reso al mittente',
     'non_consegnato':'Non consegnato',
     'in_attesa_istruzioni':'In attesa di istruzioni',
+    'annullamento_manuale':'Annullo in corso',
+    'storno_richiesto':'Annullo richiesto',
   }
 
   const pieData = Object.entries(data.statiUltimi30 || {}).map(([stato, count]) => ({

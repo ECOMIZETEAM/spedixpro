@@ -12,7 +12,7 @@ const INDICE_FASE: Record<string, number> = {
   in_giacenza: 2, non_consegnato: 3, reso_mittente: 2, annullamento_pending: 0,
 }
 const STATI_PROBLEMA = new Set(['in_giacenza', 'non_consegnato', 'reso_mittente'])
-const STATI_ANNULLO = new Set(['annullata', 'annullamento_manuale'])
+const STATI_ANNULLO = new Set(['annullata', 'annullamento_manuale', 'storno_richiesto'])
 
 export interface DatiTracking {
   brand: { nome: string; logo: string | null }

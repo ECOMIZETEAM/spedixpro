@@ -31,6 +31,7 @@ export default function ClienteDashboard() {
   const STATI_LABELS: Record<string,string> = {
     'in_lavorazione':'In Lavorazione','spedita':'Spedita','in_transito':'In transito','in_consegna':'In Consegna',
     'consegnata':'Consegnata','in_giacenza':'In Giacenza','reso_mittente':'Reso al mittente','non_consegnato':'Non consegnato','in_attesa_istruzioni':'In attesa di istruzioni',
+    'annullamento_manuale':'Annullo in corso','storno_richiesto':'Annullo richiesto',
   }
   const pieData = Object.entries(data.statiUltimi30 || {}).map(([stato, count]) => ({
     name: STATI_LABELS[stato] || stato.replace(/_/g,' '), value: count as number, color: STATI_COLORS[stato]||'#e5e7eb'

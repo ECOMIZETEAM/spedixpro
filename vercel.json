@@ -32,6 +32,10 @@
       "schedule": "20 * * * *"
     },
     {
+      "path": "/api/spedizioni/storno-dva-cron",
+      "schedule": "10,40 * * * *"
+    },
+    {
       "path": "/api/tracking/bonifica-poste",
       "schedule": "3,18,33,48 * * * *"
     },

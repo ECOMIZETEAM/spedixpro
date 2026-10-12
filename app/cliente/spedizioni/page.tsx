@@ -25,6 +25,7 @@ const STATI: Record<string,{bg:string,color:string,label:string}> = {
   reso_mittente:{bg:'#f3f4f6',color:'#374151',label:'Reso al mittente'},  // grigio scuro
   annullamento_pending:{bg:'#fff7ed',color:'#ea580c',label:'In annullamento'}, // arancio (48h, ripristinabile)
   annullamento_manuale:{bg:'#fef2f2',color:'#b91c1c',label:'Annullo in corso'}, // rosso
+  storno_richiesto:{bg:'#fff7ed',color:'#ea580c',label:'Annullo richiesto'}, // arancio (storno DVA chiesto, in attesa conferma)
   annullata:{bg:'#f5f5f5',color:'#6b7280',label:'Annullata'},             // grigio
   non_consegnato:{bg:'#f3f4f6',color:'#6b7280',label:'Non consegnato'},   // grigio
 }

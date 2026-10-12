@@ -70,6 +70,7 @@ export async function DELETE(req: NextRequest) {
   if (sped.stato === 'annullata') return NextResponse.json({ success: true, already: true })
   if (sped.stato === 'annullamento_pending') return NextResponse.json({ success: true, pending: true })
   if (sped.stato === 'annullamento_manuale') return NextResponse.json({ success: true, manuale: true })
+  if (sped.stato === 'storno_richiesto') return NextResponse.json({ success: true, storno: true, message: 'Annullo già richiesto al corriere: è in verifica.' })
 
   // ── SPEDISCI ONLINE: annullo IMMEDIATO (niente 48h) ──
   const { data: corr } = await admin.from('corrieri').select('tipo,nome_contratto,master_id').eq('id', (sped as any).corriere_id).maybeSingle()
@@ -102,18 +103,32 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true, manuale: true, message: 'Richiesta di annullo inviata: la spedizione è in cancellazione. Verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
   }
 
-  // ── CONTRATTI DVA: il corriere non ha proprio una chiamata di annullo. Metterli in attesa 48h
-  //    sarebbe solo tempo perso e una promessa falsa: dopo due giorni si scoprirebbe comunque che
-  //    va fatto a mano. Vanno subito in coda al detentore del contratto, come per l'altro caso
-  //    non annullabile via API, con un messaggio che dice come stanno le cose. ──
+  // ── CONTRATTI DVA: ora il corriere HA una richiesta di storno (richiesta-storno), asincrona. La
+  //    chiediamo SUBITO. Se DVA la ammette, la spedizione va in 'storno_richiesto' e il credito NON si
+  //    storna ancora: si rimborsa solo quando DVA conferma la cancellazione (cron storno-dva-cron, che
+  //    verifica). Se DVA risulta GIA' cancellata -> annullata + rimborso. Se NON e' stornabile (c'e' gia'
+  //    tracking, oltre un mese, stato non ammesso, contratto proprio) -> coda al DETENTORE come prima.
+  //    DVA rifiuta gia' di suo cio' che non e' stornabile, quindi non si rimborsa mai un pacco in viaggio.
   if (corr?.tipo === 'easyparcel') {
+    const { richiediStornoDva } = await import('@/lib/storno-dva')
+    let r
+    try { r = await richiediStornoDva(admin, sped as any, user.id) }
+    catch (e: any) { r = { azione: 'manuale' as const, codice: 'errore', messaggio: e?.message || 'errore storno' } }
+    if (r.azione === 'gia_cancellato') {
+      after(async () => { try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, [spedizioneId]) } catch (e: any) { console.error('[SHOPIFY][ANNULLO da elimina]', spedizioneId, e?.message) } })
+      return NextResponse.json({ success: true, annullata: true, message: 'Spedizione annullata e credito stornato a tutta la rete.' })
+    }
+    if (r.azione === 'richiesto') {
+      return NextResponse.json({ success: true, storno: true, message: 'Richiesta di annullo inviata al corriere: è in verifica. Il credito verrà stornato a tutta la rete appena il corriere conferma la cancellazione.' })
+    }
+    // non stornabile / errore / transitorio -> coda del DETENTORE (vecchio comportamento), col motivo.
     const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
     const { error: manErr } = await admin.from('spedizioni').update({
       stato: 'annullamento_manuale', stato_precedente: sped.stato, annullamento_owner_id: ownerId,
-      annullamento_richiesto_at: new Date().toISOString(), annullamento_da: user.id, annullamento_errore: null,
+      annullamento_richiesto_at: new Date().toISOString(), annullamento_da: user.id, annullamento_errore: r.messaggio || null,
     }).eq('id', spedizioneId)
     if (manErr) return NextResponse.json({ error: manErr.message }, { status: 400 })
-    return NextResponse.json({ success: true, manuale: true, message: 'Richiesta di annullo inviata: questo corriere non consente la cancellazione automatica, quindi verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
+    return NextResponse.json({ success: true, manuale: true, message: 'Richiesta di annullo inviata: questo corriere non consente la cancellazione automatica in questo caso, quindi verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
   }
 
   // ── GLS / BRT DIRETTI: annullo IMMEDIATO, mai la coda 48h. ──

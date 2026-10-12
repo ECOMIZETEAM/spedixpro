@@ -26,7 +26,9 @@ export async function GET(req: NextRequest) {
     // 'consegnata' esclusa: fra la richiesta e le 48 ore il pacco puo' essere arrivato davvero, e
     // qui non si guarda lo stato ma la richiesta — quindi senza questo filtro il cron rimborsava
     // cliente e catena per merce consegnata. Sul circuito interno succede in poche ore.
-    .not('stato', 'in', '(annullata,annullamento_manuale,consegnata)')
+    // 'storno_richiesto' esclusa: ha gia' lo storno aperto al corriere (DVA) e la chiude il cron
+    // dedicato storno-dva-cron quando DVA conferma. Qui finirebbe nel ramo manuale a vuoto.
+    .not('stato', 'in', '(annullata,annullamento_manuale,consegnata,storno_richiesto)')
     .order('annullamento_richiesto_at', { ascending: true })
     .limit(200)
 
@@ -48,16 +50,34 @@ export async function GET(req: NextRequest) {
     try {
       // Il corriere della spedizione: Spedisci non è annullabile via API (contratto non nostro)
       const { data: corr } = await admin.from('corrieri').select('tipo,nome_contratto,master_id').eq('id', (s as any).corriere_id).maybeSingle()
-      // Anche i contratti DVA: nessun annullo via API (vedi annullaSpedizioneSulCorriere). Qui il
-      // caso si presenta solo per richieste entrate prima di questa modifica, ma va coperto:
-      // altrimenti finirebbero nel ramo automatico e verrebbero rimborsate senza essere annullate.
-      if (corr?.tipo === 'spedisci' || corr?.tipo === 'easyparcel') {
-        // Coda manuale: instrada al DETENTORE del contratto (richiesta via assistenza WhatsApp).
+      // SPEDISCI: nessun annullo via API (contratto non nostro) → coda manuale al DETENTORE.
+      if (corr?.tipo === 'spedisci') {
         const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
         await admin.from('spedizioni').update({
           stato: 'annullamento_manuale', annullamento_owner_id: ownerId, annullamento_errore: null,
         }).eq('id', s.id)
         manuali++
+        continue
+      }
+      // DVA/easyparcel: ora c'e' la richiesta di storno (asincrona). Questo ramo copre solo le
+      // richieste entrate PRIMA di questa modifica (quelle nuove partono gia' da elimina): chiedo
+      // lo storno a DVA. Ammesso → 'storno_richiesto' (lo chiude il cron storno-dva-cron); gia'
+      // cancellato → annullata + rimborso; non stornabile → coda al DETENTORE col motivo.
+      if (corr?.tipo === 'easyparcel') {
+        const { richiediStornoDva } = await import('@/lib/storno-dva')
+        let r
+        try { r = await richiediStornoDva(admin, s as any, (s as any).annullamento_da || null) }
+        catch { r = { azione: 'manuale' as const, codice: 'errore', messaggio: '' } }
+        if (r.azione === 'gia_cancellato') {
+          try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, [s.id]) } catch {}
+          annullate++
+        } else if (r.azione === 'richiesto') {
+          // storno aperto a DVA: in verifica, la chiude storno-dva-cron. Non la conto fra le chiuse.
+        } else {
+          const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
+          await admin.from('spedizioni').update({ stato: 'annullamento_manuale', annullamento_owner_id: ownerId }).eq('id', s.id)
+          manuali++
+        }
         continue
       }
 
