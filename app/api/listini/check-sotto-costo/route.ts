@@ -24,6 +24,7 @@ type Riga = {
   tipo: 'fascia' | 'supplemento'
   descrizione: string
   prezzo_cliente: number; costo_tuo: number; differenza: number
+  costo_perc?: number        // supplementi: la percentuale che paghi tu (per adeguare anche la %)
   fascia_id?: string; supplemento_id?: string
 }
 
@@ -138,7 +139,7 @@ export async function GET(_req: NextRequest) {
           corriere: nomeCorr.get((s as any).corriere_id) || '—', zona: (s as any).tipo,
           tipo: 'supplemento',
           descrizione: `${(s as any).nome}${sottoPerc ? ` (tu ${mioS.perc}%, lui ${perc}%)` : ''}`,
-          prezzo_cliente: val, costo_tuo: mioS.valore, differenza: Math.round((val - mioS.valore) * 100) / 100,
+          prezzo_cliente: val, costo_tuo: mioS.valore, costo_perc: mioS.perc, differenza: Math.round((val - mioS.valore) * 100) / 100,
         })
       }
       if (!data || data.length < 1000) break
@@ -154,11 +155,12 @@ export async function GET(_req: NextRequest) {
 
 // ADEGUA — porta il prezzo del cliente almeno al tuo costo.
 //
-// "Lo paghi 5 e lo vendi a 4: premi Adegua e lo vendi a 5." Con `margine` si puo' aggiungere una
-// percentuale sopra il costo (adegua a costo + X%), perche' vendere esattamente al costo non e'
-// un affare: serve solo a non perderci.
-// Si toccano SOLO le righe che sono davvero sotto: se nel frattempo qualcuno ha gia' alzato il
-// prezzo, quella riga si salta invece di riscriverla.
+// "Lo paghi 3 e lo vendi a 2,90: premi Adegua e non ci perdi piu'." Il margine sopra il costo si
+// sceglie a PERCENTUALE (costo + X%) E/O a VALORE FISSO (costo + 0,50€): es. costo 3 → 3,50 col fisso,
+// 3,30 col 10%. A 0 e 0 va esattamente al costo (pareggio).
+// Si toccano SOLO le righe davvero sotto: se nel frattempo qualcuno ha gia' alzato il prezzo, si salta.
+// Supplementi (reso/assicurazione/contrassegno): sotto costo puo' essere il FISSO e/o la PERCENTUALE
+// — si alzano ENTRAMBI almeno al costo, senza abbassare quello che era gia' sopra.
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -170,8 +172,11 @@ export async function POST(req: NextRequest) {
   const admin = createAdminSupabase()
   const body = await req.json().catch(() => ({} as any))
   const chiavi: string[] = Array.isArray(body?.chiavi) ? body.chiavi : []
-  const margine = Math.max(0, Number(body?.marginePerc) || 0)
+  const marginePerc = Math.max(0, Number(body?.marginePerc) || 0)
+  const margineFisso = Math.max(0, Number(body?.margineFisso) || 0)
   if (!chiavi.length) return NextResponse.json({ error: 'Nessuna riga selezionata' }, { status: 400 })
+  // costo + X% + Y€ (uno, l'altro, o entrambi; a zero = esattamente il costo).
+  const applicaMargine = (costo: number) => Math.round((costo * (1 + marginePerc / 100) + margineFisso) * 100) / 100
 
   // Si rilegge la situazione ADESSO (non ci si fida di quello che aveva a video chi preme).
   const stato = await GET(req as any)
@@ -187,21 +192,32 @@ export async function POST(req: NextRequest) {
   for (const k of chiavi) {
     const r = perChiave.get(k)
     if (!r || !mieiIds.has(r.listino_id)) { saltate++; continue }
-    const nuovo = Math.round(r.costo_tuo * (1 + margine / 100) * 100) / 100
     if (r.tipo === 'fascia' && r.fascia_id) {
+      const nuovo = applicaMargine(Number(r.costo_tuo) || 0)
       // il prezzo si scrive SENZA fuel: il fuel lo aggiunge il motore, come per le altre righe
       const { data: f } = await admin.from('listini_clienti_fasce').select('fuel').eq('id', r.fascia_id).maybeSingle()
       const fuel = Number((f as any)?.fuel) || 0
       const prezzoBase = Math.round((nuovo / (1 + fuel / 100)) * 100) / 100
-      const { error } = await admin.from('listini_clienti_fasce').update({ prezzo: prezzoBase }).eq('id', r.fascia_id)
-      if (!error) fatte++; else saltate++
+      // .select(): conta "adeguata" SOLO se l'update ha davvero toccato una riga (id ancora esistente);
+      // 0 righe NON e' un errore per PostgREST → prima si contava "fatta" a vuoto (falso "adeguato").
+      const { data: upd } = await admin.from('listini_clienti_fasce').update({ prezzo: prezzoBase }).eq('id', r.fascia_id).select('id')
+      if (upd && upd.length) fatte++; else saltate++
     } else if (r.tipo === 'supplemento' && r.supplemento_id) {
-      // l'importo sta in due posti: la colonna e il JSON che legge il pannello (vedi il reso)
-      const { data: s } = await admin.from('listini_clienti_supplementi').select('descrizione,nome').eq('id', r.supplemento_id).maybeSingle()
+      // valore e percentuale stanno nel JSON `descrizione` (letto dal pannello) + la colonna `valore`.
+      // Si alza il FISSO al costo+margine e la PERCENTUALE almeno al costo (+ % se richiesta), MAI si
+      // abbassa quello gia' sopra. Prima si scriveva solo il fisso → i sotto-per-percentuale non si
+      // adeguavano mai (il caso quasi totale).
+      const { data: s } = await admin.from('listini_clienti_supplementi').select('valore,descrizione,nome').eq('id', r.supplemento_id).maybeSingle()
       let d: any = {}; try { d = JSON.parse((s as any)?.descrizione || '{}') } catch { /* non JSON */ }
-      d.prezzo = nuovo; if (d.nome == null) d.nome = (s as any)?.nome
-      const { error } = await admin.from('listini_clienti_supplementi').update({ valore: nuovo, descrizione: JSON.stringify(d) }).eq('id', r.supplemento_id)
-      if (!error) fatte++; else saltate++
+      const curVal = Number((s as any)?.valore) || 0
+      const curPerc = Number(d?.perc) || 0
+      const costoVal = Number(r.costo_tuo) || 0
+      const costoPerc = Number(r.costo_perc) || 0
+      const newVal = curVal < costoVal - 0.005 ? applicaMargine(costoVal) : curVal
+      const newPerc = curPerc < costoPerc - 0.005 ? Math.round(costoPerc * (1 + marginePerc / 100) * 100) / 100 : curPerc
+      d.prezzo = newVal; d.perc = newPerc; if (d.nome == null) d.nome = (s as any)?.nome
+      const { data: upd } = await admin.from('listini_clienti_supplementi').update({ valore: newVal, descrizione: JSON.stringify(d) }).eq('id', r.supplemento_id).select('id')
+      if (upd && upd.length) fatte++; else saltate++
     } else saltate++
   }
   return NextResponse.json({ ok: true, adeguate: fatte, saltate })

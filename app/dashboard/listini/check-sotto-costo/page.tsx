@@ -20,6 +20,7 @@ export default function CheckSottoCosto() {
   const [loading, setLoading] = useState(true)
   const [sel, setSel] = useState<string[]>([])
   const [margine, setMargine] = useState('0')
+  const [tipoMargine, setTipoMargine] = useState<'perc' | 'fisso'>('perc')   // margine sopra il costo: % o €
   const [salvando, setSalvando] = useState(false)
   const [q, setQ] = useState('')
 
@@ -42,18 +43,19 @@ export default function CheckSottoCosto() {
   async function adegua(chiavi: string[]) {
     if (!chiavi.length) return
     const quante = chiavi.length
+    const margTesto = mv > 0 ? (tipoMargine === 'fisso' ? `il tuo costo + ${mv.toFixed(2).replace('.', ',')} €` : `il tuo costo + ${mv}%`) : 'esattamente il tuo costo'
     const ok = await dialog.confirm({
       title: quante === 1 ? 'Adeguare questa riga?' : `Adeguare ${quante} righe?`,
       message: mv > 0
-        ? `Il prezzo al cliente diventa il tuo costo + ${mv}%. Non tocca le righe che nel frattempo qualcuno ha già alzato.`
-        : 'Il prezzo al cliente diventa esattamente il tuo costo: smetti di perderci, senza guadagnarci. Se vuoi un margine, scrivilo qui sopra prima di confermare.',
+        ? `Il prezzo al cliente diventa ${margTesto}. Non tocca le righe che nel frattempo qualcuno ha già alzato.`
+        : 'Il prezzo al cliente diventa esattamente il tuo costo: smetti di perderci, senza guadagnarci. Se vuoi un margine, scrivilo qui sopra (€ o %) prima di confermare.',
       confirmText: 'Adegua',
     })
     if (!ok) return
     setSalvando(true)
     const res = await fetch('/api/listini/check-sotto-costo', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chiavi, marginePerc: mv }),
+      body: JSON.stringify({ chiavi, marginePerc: tipoMargine === 'perc' ? mv : 0, margineFisso: tipoMargine === 'fisso' ? mv : 0 }),
     }).then(r => r.json()).catch(() => null)
     setSalvando(false)
     if (!res || res.error) { await dialog.alert({ title: 'Errore', message: res?.error || 'Non sono riuscito ad adeguare.' }); return }
@@ -100,9 +102,14 @@ export default function CheckSottoCosto() {
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Cerca cliente, listino, contratto, zona…"
               style={{ flex: '1 1 260px', padding: '9px 12px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }} />
-            <label style={{ fontSize: 13, color: '#444' }}>
-              margine sopra il costo{' '}
-              <input value={margine} onChange={e => setMargine(e.target.value)} style={{ width: 64, padding: '7px 8px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }} /> %
+            <label style={{ fontSize: 13, color: '#444', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              margine sopra il costo
+              <input value={margine} onChange={e => setMargine(e.target.value)} style={{ width: 64, padding: '7px 8px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }} />
+              <select value={tipoMargine} onChange={e => setTipoMargine(e.target.value as 'perc' | 'fisso')}
+                style={{ padding: '7px 8px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>
+                <option value="perc">%</option>
+                <option value="fisso">€</option>
+              </select>
             </label>
             <button onClick={() => adegua(filtrate.map(r => r.chiave))} disabled={salvando || !filtrate.length}
               style={{ background: '#1a1a1a', color: '#fff', border: 0, borderRadius: 8, padding: '9px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
