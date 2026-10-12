@@ -43,12 +43,11 @@ export default function CheckSottoCosto() {
   async function adegua(chiavi: string[]) {
     if (!chiavi.length) return
     const quante = chiavi.length
-    const margTesto = mv > 0 ? (tipoMargine === 'fisso' ? `il tuo costo + ${mv.toFixed(2).replace('.', ',')} €` : `il tuo costo + ${mv}%`) : 'esattamente il tuo costo'
+    if (mv <= 0) { await dialog.alert({ title: 'Imposta un aumento', message: 'Scrivi di quanto alzare i prezzi (€ o %) prima di premere Adegua: con 0 non si alza nulla.' }); return }
+    const margTesto = tipoMargine === 'fisso' ? `+ ${mv.toFixed(2).replace('.', ',')} €` : `+ ${mv}%`
     const ok = await dialog.confirm({
-      title: quante === 1 ? 'Adeguare questa riga?' : `Adeguare ${quante} righe?`,
-      message: mv > 0
-        ? `Il prezzo al cliente diventa ${margTesto}. Non tocca le righe che nel frattempo qualcuno ha già alzato.`
-        : 'Il prezzo al cliente diventa esattamente il tuo costo: smetti di perderci, senza guadagnarci. Se vuoi un margine, scrivilo qui sopra (€ o %) prima di confermare.',
+      title: quante === 1 ? 'Alzare questa riga?' : `Alzare ${quante} righe?`,
+      message: `Il prezzo di vendita attuale sale di ${margTesto}, applicato al prezzo di adesso (non lo porta al costo: controlla che superi il tuo costo). Non tocca le righe che qualcuno ha già alzato.`,
       confirmText: 'Adegua',
     })
     if (!ok) return
@@ -75,7 +74,7 @@ export default function CheckSottoCosto() {
       <p style={{ color: '#666', fontSize: 13.5, margin: '0 0 16px', lineHeight: 1.5 }}>
         Le righe dei tuoi listini cliente dove <strong>vendi sotto quello che paghi tu</strong>: zona, fascia di peso,
         reso, assicurazione, contrassegno. Ogni spedizione su una di queste righe ti fa perdere la differenza.
-        Con <strong>Adegua</strong> il prezzo sale almeno al tuo costo — se vuoi, con un margine sopra.
+        Con <strong>Adegua</strong> alzi quei prezzi dell'importo che scegli (€ o %), applicato al prezzo di vendita attuale: controlla che superi il tuo costo (colonna "Paghi").
       </p>
 
       {loading ? <div style={{ color: '#888' }}>Sto controllando i tuoi listini…</div> : totale === 0 ? (
@@ -103,7 +102,7 @@ export default function CheckSottoCosto() {
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Cerca cliente, listino, contratto, zona…"
               style={{ flex: '1 1 260px', padding: '9px 12px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }} />
             <label style={{ fontSize: 13, color: '#444', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              margine sopra il costo
+              alza i prezzi di
               <input value={margine} onChange={e => setMargine(e.target.value)} style={{ width: 64, padding: '7px 8px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }} />
               <select value={tipoMargine} onChange={e => setTipoMargine(e.target.value as 'perc' | 'fisso')}
                 style={{ padding: '7px 8px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>

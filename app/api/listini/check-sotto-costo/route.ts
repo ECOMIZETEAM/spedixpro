@@ -153,14 +153,14 @@ export async function GET(_req: NextRequest) {
   })
 }
 
-// ADEGUA — porta il prezzo del cliente almeno al tuo costo.
+// ADEGUA — ALZA il prezzo di vendita delle righe sotto costo.
 //
-// "Lo paghi 3 e lo vendi a 2,90: premi Adegua e non ci perdi piu'." Il margine sopra il costo si
-// sceglie a PERCENTUALE (costo + X%) E/O a VALORE FISSO (costo + 0,50€): es. costo 3 → 3,50 col fisso,
-// 3,30 col 10%. A 0 e 0 va esattamente al costo (pareggio).
-// Si toccano SOLO le righe davvero sotto: se nel frattempo qualcuno ha gia' alzato il prezzo, si salta.
-// Supplementi (reso/assicurazione/contrassegno): sotto costo puo' essere il FISSO e/o la PERCENTUALE
-// — si alzano ENTRAMBI almeno al costo, senza abbassare quello che era gia' sopra.
+// NON porta al costo: ALZA il prezzo ATTUALE dell'aumento scelto dal master, a VALORE FISSO (+0,50€)
+// E/O PERCENTUALE (+10%), applicato al prezzo di ADESSO. Es. vendi a 2,90: +0,50€ → 3,40; +10% → 3,19.
+// Con 0 e 0 non si alza nulla ("metto 0 = non la alzo"). Si rilegge il prezzo corrente, così due clic
+// non si sommano a sorpresa su un valore vecchio.
+// Supplementi (reso/assicurazione/contrassegno): l'aumento % alza sia il fisso sia la percentuale,
+// l'aumento € solo il fisso (su una percentuale un importo in € non ha senso).
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -175,8 +175,11 @@ export async function POST(req: NextRequest) {
   const marginePerc = Math.max(0, Number(body?.marginePerc) || 0)
   const margineFisso = Math.max(0, Number(body?.margineFisso) || 0)
   if (!chiavi.length) return NextResponse.json({ error: 'Nessuna riga selezionata' }, { status: 400 })
-  // costo + X% + Y€ (uno, l'altro, o entrambi; a zero = esattamente il costo).
-  const applicaMargine = (costo: number) => Math.round((costo * (1 + marginePerc / 100) + margineFisso) * 100) / 100
+  // Nessun aumento scelto = niente da fare ("metto 0 = non la alzo").
+  if (marginePerc === 0 && margineFisso === 0) return NextResponse.json({ error: 'Imposta un aumento (€ o %) maggiore di zero per alzare i prezzi.' }, { status: 400 })
+  // ALZA il prezzo attuale: × (1 + X%) + Y€. alzaPerc solo ×(1+X%) (il fisso € non tocca una percentuale).
+  const alza = (prezzo: number) => Math.round((prezzo * (1 + marginePerc / 100) + margineFisso) * 100) / 100
+  const alzaPerc = (perc: number) => Math.round(perc * (1 + marginePerc / 100) * 100) / 100
 
   // Si rilegge la situazione ADESSO (non ci si fida di quello che aveva a video chi preme).
   const stato = await GET(req as any)
@@ -193,28 +196,23 @@ export async function POST(req: NextRequest) {
     const r = perChiave.get(k)
     if (!r || !mieiIds.has(r.listino_id)) { saltate++; continue }
     if (r.tipo === 'fascia' && r.fascia_id) {
-      const nuovo = applicaMargine(Number(r.costo_tuo) || 0)
-      // il prezzo si scrive SENZA fuel: il fuel lo aggiunge il motore, come per le altre righe
-      const { data: f } = await admin.from('listini_clienti_fasce').select('fuel').eq('id', r.fascia_id).maybeSingle()
+      // si alza il prezzo MOSTRATO (con fuel, quello che vede il master), poi si toglie il fuel per
+      // salvarlo; si rilegge il prezzo di ADESSO così clic ripetuti non si sommano su un valore vecchio
+      const { data: f } = await admin.from('listini_clienti_fasce').select('prezzo,fuel').eq('id', r.fascia_id).maybeSingle()
       const fuel = Number((f as any)?.fuel) || 0
-      const prezzoBase = Math.round((nuovo / (1 + fuel / 100)) * 100) / 100
-      // .select(): conta "adeguata" SOLO se l'update ha davvero toccato una riga (id ancora esistente);
-      // 0 righe NON e' un errore per PostgREST → prima si contava "fatta" a vuoto (falso "adeguato").
+      const attualeConFuel = Math.round((Number((f as any)?.prezzo) || 0) * (1 + fuel / 100) * 100) / 100
+      const prezzoBase = Math.round((alza(attualeConFuel) / (1 + fuel / 100)) * 100) / 100
+      // .select(): conta "alzata" SOLO se l'update ha toccato una riga (id ancora esistente); 0 righe
+      // NON e' un errore per PostgREST → prima si contava "fatta" a vuoto (falso "adeguato").
       const { data: upd } = await admin.from('listini_clienti_fasce').update({ prezzo: prezzoBase }).eq('id', r.fascia_id).select('id')
       if (upd && upd.length) fatte++; else saltate++
     } else if (r.tipo === 'supplemento' && r.supplemento_id) {
       // valore e percentuale stanno nel JSON `descrizione` (letto dal pannello) + la colonna `valore`.
-      // Si alza il FISSO al costo+margine e la PERCENTUALE almeno al costo (+ % se richiesta), MAI si
-      // abbassa quello gia' sopra. Prima si scriveva solo il fisso → i sotto-per-percentuale non si
-      // adeguavano mai (il caso quasi totale).
+      // L'aumento % alza entrambi; l'aumento € solo il fisso.
       const { data: s } = await admin.from('listini_clienti_supplementi').select('valore,descrizione,nome').eq('id', r.supplemento_id).maybeSingle()
       let d: any = {}; try { d = JSON.parse((s as any)?.descrizione || '{}') } catch { /* non JSON */ }
-      const curVal = Number((s as any)?.valore) || 0
-      const curPerc = Number(d?.perc) || 0
-      const costoVal = Number(r.costo_tuo) || 0
-      const costoPerc = Number(r.costo_perc) || 0
-      const newVal = curVal < costoVal - 0.005 ? applicaMargine(costoVal) : curVal
-      const newPerc = curPerc < costoPerc - 0.005 ? Math.round(costoPerc * (1 + marginePerc / 100) * 100) / 100 : curPerc
+      const newVal = alza(Number((s as any)?.valore) || 0)
+      const newPerc = alzaPerc(Number(d?.perc) || 0)
       d.prezzo = newVal; d.perc = newPerc; if (d.nome == null) d.nome = (s as any)?.nome
       const { data: upd } = await admin.from('listini_clienti_supplementi').update({ valore: newVal, descrizione: JSON.stringify(d) }).eq('id', r.supplemento_id).select('id')
       if (upd && upd.length) fatte++; else saltate++
