@@ -3,12 +3,11 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { pavimentoContratto, pavimentoPerPeso } from '@/lib/pavimenti'
 
 // APPLICA i consigli di "Ottimizza margini": aggiunge/allinea nel listino del CLIENTE il corriere
 // indicato al prezzo P (competitivo), così il cliente lo sceglie e il master guadagna di più.
 // Money-safe: verifica SEMPRE lato server (mai fidarsi del payload) proprietà del listino/corriere,
-// che il prezzo NON sia sotto costo e NON sotto il pavimento; salva il valore precedente in
+// che il prezzo NON sia sotto costo; salva il valore precedente in
 // ottimizza_margini_log per l'ANNULLA. Solo master col flag ottimizza_margini.
 async function ctx() {
   const supabase = await createServerSupabase()
@@ -36,11 +35,9 @@ export async function POST(req: NextRequest) {
   const { data: lc } = await admin.from('listini_clienti').select('id,master_id').eq('id', listinoId).maybeSingle()
   if (!lc || (lc as any).master_id !== mio) return NextResponse.json({ error: 'Listino non tuo' }, { status: 403 })
 
-  // Corrieri del master (nome) per pavimento + verifica proprietà.
+  // Corrieri del master (nome) per la verifica di proprietà.
   const { data: corr } = await admin.from('corrieri').select('id,nome_contratto').eq('master_id', mio)
   const nomeCorr = new Map<string, string>((corr || []).map((x: any) => [x.id, x.nome_contratto]))
-  const { data: zone } = await admin.from('zone').select('id,nome').eq('master_id', mio)
-  const nomeZona = new Map<string, string>((zone || []).map((z: any) => [z.id, z.nome]))
   const { data: lcorr } = await admin.from('listini_corrieri').select('id').eq('master_id', mio)
   const costIds = (lcorr || []).map((l: any) => l.id)
 
@@ -61,11 +58,6 @@ export async function POST(req: NextRequest) {
       for (const f of (kf || [])) { const a = Number((f as any).prezzo) * (1 + (Number((f as any).fuel) || 0) / 100); if (costo == null || a < costo) costo = a }
     }
     if (costo != null && prezzo < costo - 0.0001) { errori.push(`${nome}: prezzo sotto costo`); continue }
-
-    // PAVIMENTO: il prezzo non può andare sotto il minimo del contratto (per zona, coi contratti zonati).
-    const bande = await pavimentoContratto(admin, nome, nomeZona.get(zonaId) || null)
-    const min = pavimentoPerPeso(bande, pesoMax)
-    if (min != null && prezzo < min - 0.0001) { errori.push(`${nome}: prezzo sotto pavimento`); continue }
 
     // Fascia già presente?
     const { data: ex } = await admin.from('listini_clienti_fasce').select('id,prezzo').eq('listino_id', listinoId).eq('corriere_id', corriereId).eq('zona_id', zonaId).eq('peso_max', pesoMax).eq('tipo', 'fino_a').maybeSingle()

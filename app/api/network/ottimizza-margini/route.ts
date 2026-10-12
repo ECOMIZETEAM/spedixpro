@@ -4,7 +4,6 @@ import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
-import { pavimentiAttivi, bandeDaMappa, pavimentoPerPeso } from '@/lib/pavimenti'
 
 // OTTIMIZZA MARGINI — solo master col flag `ottimizza_margini` (oggi Ecomize LL). Sola lettura.
 // LOGICA: il corriere lo sceglie il CLIENTE (di solito il più economico per lui). Quindi per far
@@ -34,7 +33,6 @@ export async function GET(_req: NextRequest) {
 
   const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
   const sospesiSopra = await contrattiSospesiSopra(mio)
-  const pav = await pavimentiAttivi(admin)
 
   const { data: corr } = await admin.from('corrieri').select('id,nome_contratto,attivo').eq('master_id', mio)
   const nomeCorr = new Map<string, string>()
@@ -128,9 +126,6 @@ export async function GET(_req: NextRequest) {
           if (!B || co.val < B.cost) B = { cid, nome, cost: co.val, zona_id: kb.zona_id, peso_max: co.peso_max }
         }
         if (!B || Acost == null || B.cost >= Acost - 0.009) continue   // nessun corriere costa meno: già ottimale
-        // il prezzo competitivo P dev'essere ≥ pavimento di B (altrimenti non lo posso mettere a quel prezzo)
-        const min = pavimentoPerPeso(bandeDaMappa(pav, B.nome, zona), w)
-        if (min != null && P < min - 0.0001) continue
         const inListino = !!perCorr.get(B.cid)?.get(zona)
         const uplift = r2(Acost - B.cost); sommaUplift += uplift
         racc.push({

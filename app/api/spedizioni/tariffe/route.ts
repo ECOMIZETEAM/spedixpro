@@ -187,21 +187,6 @@ export async function POST(req: NextRequest) {
     }
   } catch { /* in caso di errore non filtro: meglio mostrare che rompere la pagina */ }
 
-  // PAVIMENTO PREZZO (solo Master->Cliente): una fascia/zona sotto il minimo del contratto non si
-  // vende — sparisce dalle tariffe, così il cliente non la vede e non ci può spedire. NON per il
-  // listino all'ingrosso assegnato a un sotto-master (subMatch = M2M esente); la spedizione propria
-  // del master è già uscita prima (ramo isProprio).
-  if (!subMatch) {
-    try {
-      const { pavimentiAttivi, filtraRisultatiSottoPavimento, clienteEsentePavimento } = await import('@/lib/pavimenti')
-      const adminPav = createAdminSupabase()
-      if (!(await clienteEsentePavimento(adminPav, clienteId))) {
-        const pav = await pavimentiAttivi(adminPav)
-        risultati = filtraRisultatiSottoPavimento(pav, risultati)
-      }
-    } catch { /* mai rompere la pagina per il pavimento */ }
-  }
-
   try { await annotaPuntoPoste(createAdminSupabase(), risultati) } catch { /* i flag punto non bloccano la lista */ }
   return NextResponse.json(soloDomicilio(risultati))
 }
