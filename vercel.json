@@ -36,10 +36,6 @@
       "schedule": "10,40 * * * *"
     },
     {
-      "path": "/api/spedizioni/storno-dva-backlog",
-      "schedule": "*/5 * * * *"
-    },
-    {
       "path": "/api/tracking/bonifica-poste",
       "schedule": "3,18,33,48 * * * *"
     },

@@ -116,39 +116,3 @@ export async function riconciliaStorniDvaCron(admin: any): Promise<{ completate:
   }
   return { completate, inCorso, manuali, errori, totale: speds.length }
 }
-
-// UNA-TANTUM: smaltisce il backlog storico delle LDV DVA finite in coda manuale (annullamento_manuale)
-// chiedendo lo storno a DVA, come se fossero appena cancellate dal portale. richiediStornoDva fa il
-// resto: ammesso -> 'storno_richiesto' (lo chiude poi il cron di riconciliazione); gia' cancellato ->
-// annullata + rimborso; non stornabile -> resta in coda col motivo 'Storno DVA non possibile', cosi' al
-// giro dopo non la si richiede piu' a vuoto. Bounded: `limite` per invocazione (evita i timeout).
-export async function smaltisciCodaManualeDva(admin: any, limite = 150): Promise<{ esaminate: number; richiesti: number; cancellati: number; manuali: number; transitori: number; errori: number; residuo: number }> {
-  const { data: easy } = await admin.from('corrieri').select('id').eq('tipo', 'easyparcel')
-  const easyIds = (easy || []).map((c: any) => c.id)
-  const vuoto = { esaminate: 0, richiesti: 0, cancellati: 0, manuali: 0, transitori: 0, errori: 0, residuo: 0 }
-  if (!easyIds.length) return vuoto
-  // Filtro = coda manuale easyparcel NON gia' bocciata dallo storno (quelle con errore 'Storno DVA...'
-  // sono escluse per non richiamare DVA ogni giro); le transitorie restano dentro e si ritentano.
-  const FILTRO = 'annullamento_errore.is.null,annullamento_errore.not.ilike.Storno DVA non possibile*'
-  const { data: speds } = await admin.from('spedizioni')
-    .select('id,numero,dest_nome,stato,corriere_id,raw_response,annullamento_da')
-    .eq('stato', 'annullamento_manuale').in('corriere_id', easyIds).or(FILTRO)
-    .order('created_at', { ascending: true }).limit(limite)
-  let richiesti = 0, cancellati = 0, manuali = 0, transitori = 0, errori = 0
-  for (const s of speds || []) {
-    try {
-      const r = await richiediStornoDva(admin, s as any, s.annullamento_da || null)
-      if (r.azione === 'richiesto') richiesti++
-      else if (r.azione === 'gia_cancellato') cancellati++
-      else if (r.azione === 'riprovare') transitori++
-      else {
-        manuali++
-        // dati_mancanti non scrive nulla sulla riga: la marco qui, altrimenti rientrerebbe ogni giro.
-        if (r.codice === 'dati_mancanti') await admin.from('spedizioni').update({ annullamento_errore: 'Storno DVA non possibile: id ordine DVA mancante' }).eq('id', s.id)
-      }
-    } catch (e: any) { errori++; console.error('[STORNO-DVA][BACKLOG]', s.numero, e?.message) }
-  }
-  const { count } = await admin.from('spedizioni').select('id', { count: 'exact', head: true })
-    .eq('stato', 'annullamento_manuale').in('corriere_id', easyIds).or(FILTRO)
-  return { esaminate: speds?.length || 0, richiesti, cancellati, manuali, transitori, errori, residuo: count || 0 }
-}
