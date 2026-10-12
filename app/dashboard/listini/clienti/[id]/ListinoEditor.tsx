@@ -4,7 +4,6 @@ import { logoCorriere, serviziAccessoriDefault } from '@/lib/corriere-logo'
 import { setFlash } from '@/lib/flash'
 import { useDialog } from '@/app/components/DialogProvider'
 import EditorMarkupFasce, { type MarkupOut } from '@/app/components/EditorMarkupFasce'
-import AllineaPavimentoEditor from '@/app/components/AllineaPavimentoEditor'
 
 // Input decimale che accetta virgola o punto e valori parziali (es. "0.", "0,5")
 // mentre scrivi, restituendo comunque il NUMERO al parent (nessuna modifica al salvataggio).
@@ -47,6 +46,9 @@ interface Props {
   // c'e' gia', ma sul listino di un sotto-master non avvisava nulla e ce ne si accorgeva mesi
   // dopo guardando i margini (o non ce ne si accorgeva affatto).
   costiMaster?: Record<string, number>
+  // Costo master dei SUPPLEMENTI, chiave "tipo|nome" (minuscolo) → { valore, perc }: per segnalare in
+  // rosso i supplementi (oggi le giacenze) venduti sotto costo, come per le fasce.
+  costiSupplMaster?: Record<string, { valore: number; perc: number }>
 }
 
 const fattori = [
@@ -132,7 +134,7 @@ function buildAccessoriDa(supplementi: any[], fallback: {nome:string;prezzo:numb
   })
 }
 
-export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere, fattoreCostoMaster, costiMaster }: Props) {
+export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere, fattoreCostoMaster, costiMaster, costiSupplMaster }: Props) {
   const isCorriere = tipoListino === 'corriere'
   const apiAggancio = isCorriere ? '/api/listini/corriere-corrieri' : '/api/listini/cliente-corrieri'
   const basePagina = isCorriere ? '/dashboard/listini/corrieri' : '/dashboard/listini/clienti'
@@ -442,6 +444,17 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     whiteSpace:'nowrap' as const
   })
 
+  // SOTTO COSTO dei supplementi (oggi le giacenze): costo master per nome, confronto fisso e percentuale.
+  const giacenzaSotto = (s: { nome: string; prezzo: any; perc: any }) => {
+    const c = costiSupplMaster?.[`giacenza|${String(s.nome || '').toLowerCase().trim()}`]
+    if (!c) return { fisso: false, perc: false, cost: null as null | { valore: number; perc: number } }
+    return { fisso: Number(s.prezzo) < c.valore - 0.005, perc: Number(s.perc) < c.perc - 0.005, cost: c }
+  }
+  // Pallino rosso sui tab: quel tab ha almeno una riga sotto costo?
+  const qualcheFasciaSotto = fasce.some(f => zone.some(z => { const costo = costiMaster?.[`${(f as any).tipo}|${(f as any).peso}|${z.id}`]; const p = parseFloat((f as any).prezzi[z.id] ?? ''); return !zonaBloccata(z.id) && costo != null && p > 0 && p < costo }))
+  const qualcheGiacenzaSotto = giacenzeServizi.some((s: any) => { const g = giacenzaSotto(s); return g.fisso || g.perc })
+  const tabSotto: Record<string, boolean> = { pesi: qualcheFasciaSotto, giacenze: qualcheGiacenzaSotto }
+
   // Corpo dell'editor del contratto aperto (dentro la tendina)
   const editorContratto = (
     <div style={{borderTop:'1px solid #eee'}}>
@@ -473,17 +486,12 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
         )
       })()}
 
-      {/* Allinea al pavimento (solo listini cliente): compare se questo corriere ha fasce sotto minimo */}
-      {!isCorriere && corriereId && (
-        <div style={{ padding: '14px 18px 0' }}>
-          <AllineaPavimentoEditor listinoId={listino.id} corriereNome={corrieri.find(c => c.id === corriereId)?.nome_contratto || ''} />
-        </div>
-      )}
-
       {/* Tabs */}
       <div style={{display:'flex',borderBottom:'1px solid #d1d5db',padding:'0 16px',overflowX:'auto' as const}}>
         {[['pesi','Pesi / Zone'],['assicurazione','Assicurazione'],['contrassegni','Contrassegni'],['servizi','Servizi accessori'],['giacenze','Giacenze'],['ritiro','Ritiro'],['extra','Extra']].map(([k,l])=>(
-          <button key={k} style={tabStyle(k)} onClick={()=>setTab(k)}>{l}</button>
+          <button key={k} style={tabStyle(k)} onClick={()=>setTab(k)}>
+            {l}{tabSotto[k] && <span title="Ci sono righe sotto costo in questa scheda" style={{marginLeft:6,display:'inline-block',width:8,height:8,borderRadius:'50%',background:'#dc2626',verticalAlign:'middle'}} />}
+          </button>
         ))}
       </div>
 
@@ -706,13 +714,19 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
               <th style={{textAlign:'left' as const,padding:'9px 12px',fontWeight:'700',color:'#1a1a1a',borderBottom:'1px solid #d1d5db'}}>+% del valore della spedizione</th>
             </tr></thead>
             <tbody>
-              {giacenzeServizi.map((s,i)=>(
+              {giacenzeServizi.map((s,i)=>{ const g = giacenzaSotto(s); return (
                 <tr key={i} style={{borderBottom:'1px solid #e5e7eb'}}>
-                  <td style={{padding:'8px 12px',color:'#f97316',fontWeight:'500'}}>{s.nome}</td>
-                  <td style={{padding:'8px 12px'}}><NumInput value={s.prezzo} onChange={n=>setGiacenzeServizi(prev=>prev.map((x,idx)=>idx===i?{...x,prezzo:n}:x))} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="0"/></td>
-                  <td style={{padding:'8px 12px'}}><NumInput value={s.perc} onChange={n=>setGiacenzeServizi(prev=>prev.map((x,idx)=>idx===i?{...x,perc:n}:x))} style={{...inp,width:'200px',textAlign:'right' as const}} placeholder="0"/></td>
+                  <td style={{padding:'8px 12px',color:(g.fisso||g.perc)?'#b91c1c':'#f97316',fontWeight:(g.fisso||g.perc)?'700' as const:'500' as const}}>{s.nome}</td>
+                  <td style={{padding:'8px 12px'}}>
+                    <NumInput value={s.prezzo} onChange={n=>setGiacenzeServizi(prev=>prev.map((x,idx)=>idx===i?{...x,prezzo:n}:x))} style={{...inp,width:'120px',textAlign:'right' as const,...(g.fisso?{borderColor:'#dc2626',background:'#fef2f2',color:'#b91c1c',fontWeight:700}:{})}} placeholder="0"/>
+                    {g.fisso && g.cost && <div style={{fontSize:'10px',color:'#dc2626',marginTop:'2px'}}>costo {g.cost.valore.toFixed(2)} €</div>}
+                  </td>
+                  <td style={{padding:'8px 12px'}}>
+                    <NumInput value={s.perc} onChange={n=>setGiacenzeServizi(prev=>prev.map((x,idx)=>idx===i?{...x,perc:n}:x))} style={{...inp,width:'200px',textAlign:'right' as const,...(g.perc?{borderColor:'#dc2626',background:'#fef2f2',color:'#b91c1c',fontWeight:700}:{})}} placeholder="0"/>
+                    {g.perc && g.cost && <div style={{fontSize:'10px',color:'#dc2626',marginTop:'2px'}}>costo {g.cost.perc}%</div>}
+                  </td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
           <div style={{marginTop:'16px',display:'flex',alignItems:'center',gap:'12px',fontSize:'13px'}}>

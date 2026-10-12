@@ -73,6 +73,9 @@ export default async function ModificaListinoPage({
   // segnalare le caselle in cui si sta vendendo sotto costo. Le fasce di TUTTI i contratti stanno
   // sotto i listini del master e si distinguono per corriere_id, quindi si filtra per quello.
   const costiMaster: Record<string, number> = {}
+  // Costo master dei SUPPLEMENTI (per evidenziare in rosso i supplementi sotto costo nell'editor):
+  // chiave "tipo|nome" (minuscolo) → { valore fisso, perc }. Oggi riguarda soprattutto le GIACENZE.
+  const costiSupplMaster: Record<string, { valore: number; perc: number }> = {}
   if (corriereSelezionato?.id && utente?.master_id) {
     const { data: listiniCorr } = await supabase.from('listini_corrieri').select('id').eq('master_id', utente.master_id)
     const idsCorr = (listiniCorr || []).map((l: any) => l.id)
@@ -87,6 +90,18 @@ export default async function ModificaListinoPage({
         // Piu' listini del master possono avere la stessa fascia: si tiene il costo PIU' ALTO,
         // cioe' il caso peggiore. Segnalare troppo poco sarebbe inutile.
         if (!isNaN(p) && (costiMaster[chiave] == null || p > costiMaster[chiave])) costiMaster[chiave] = p
+      }
+      const { data: suppCosto } = await supabase.from('listini_corrieri_supplementi')
+        .select('tipo,nome,valore,descrizione')
+        .in('listino_id', idsCorr)
+        .eq('corriere_id', corriereSelezionato.id)
+      for (const s of suppCosto || []) {
+        let perc = 0; try { perc = Number(JSON.parse((s as any).descrizione || '{}')?.perc) || 0 } catch { /* non JSON */ }
+        const k = `${(s as any).tipo}|${String((s as any).nome || '').toLowerCase().trim()}`
+        const v = Number((s as any).valore) || 0
+        const prev = costiSupplMaster[k]
+        // caso peggiore: fisso e percentuale piu' alti visti (indipendenti)
+        costiSupplMaster[k] = { valore: Math.max(v, prev?.valore || 0), perc: Math.max(perc, prev?.perc || 0) }
       }
     }
   }
@@ -119,6 +134,7 @@ export default async function ModificaListinoPage({
       supplementiEsistenti={supplementiEsistenti||[]}
       clientiAssegnati={clientiAssegnati||[]}
       costiMaster={costiMaster}
+      costiSupplMaster={costiSupplMaster}
       tipoListino="cliente"
     />
     </>
