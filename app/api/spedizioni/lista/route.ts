@@ -312,9 +312,19 @@ export async function GET(req: NextRequest) {
     // In quel caso non si conta qui: il totale esatto lo porta la risposta delle righe (total), che
     // quel filtro l'ha gia' applicato.
     if (filtroCodPerViewer) return NextResponse.json({ total: null, soloConteggio: true, daRighe: true })
-    // Solo il numero: una riga sola richiesta al database, il resto della rotta non viene nemmeno
-    // toccato (niente movimenti, ordini, ticket, calcolatori).
-    const { count } = await buildBase(true).range(0, 0)
+    // Solo il numero: il resto della rotta non viene nemmeno toccato (niente movimenti, ordini,
+    // ticket, calcolatori).
+    // ZERO RIGHE, NON UNA. Con range(0,0) PostgREST contava e in piu' preparava la prima riga
+    // nell'ordine dell'elenco — join, ordinamento sull'intero periodo — per buttarla: la rotta non la
+    // legge. Su MULTIEXPRESS con ricerca per numero erano 814 ms e 337.873 blocchi, di cui 392 ms per
+    // quella riga (misurato il 13/10/2026). Con limit(0) la parte delle righe non viene eseguita e il
+    // conteggio e' lo stesso identico: PostgREST lo calcola a parte dai soli filtri. Provato su
+    // quattro casi veri (master grande a 30 giorni, master su uno stato, ricerca per numero, master
+    // vuoto): totali uguali. Se un giorno limit=0 desse errore o niente totale, si rifa' come prima.
+    let count: number | null = null
+    const zeroRighe = await buildBase(true).limit(0)
+    if (!zeroRighe.error && typeof zeroRighe.count === 'number') count = zeroRighe.count
+    else count = (await buildBase(true).range(0, 0)).count
     segna('solo-conteggio')
     const msC = Date.now() - t0
     if (msC > 500) console.log('[LISTA][TEMPI] soloConteggio', msC + 'ms', 'istanza=' + Math.round(process.uptime()) + 's', '|', tempi.join(' '))
