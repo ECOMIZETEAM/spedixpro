@@ -11,6 +11,7 @@ import { statoPiano, messaggioBlocco } from '@/lib/limite-piano'
 import { validaCittaCap } from '@/lib/valida-citta'
 import { capHaZonaSpeciale } from '@/lib/cap-speciali'
 import { spedizioneDoppioneAttiva, messaggioDoppione } from '@/lib/guardia-doppione'
+import { unColloSolo } from '@/lib/limiti-collo'
 import { emailAlCorriere } from '@/lib/email-corriere'
 import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation, spediamoproCreateShipment, spediamoproGetLabel,
@@ -130,8 +131,9 @@ export async function POST(req: NextRequest) {
   const packages = Array.isArray(body.packages) && body.packages.length
     ? body.packages
     : [{ weight: Number(body.weight) || 1, length: 20, width: 15, height: 10 }]
-  if (packages.length > 1 && (corriere as any).multicollo === false)
-    return NextResponse.json({ error: 'Il contratto non prevede il multicollo' }, { status: 400 })
+  if (packages.length > 1 && unColloSolo(corriere))
+    return NextResponse.json({ error: String((corriere as any)?.settings?.consegna || '') === 'locker'
+      ? 'La consegna al locker accetta un collo solo' : 'Il contratto non prevede il multicollo' }, { status: 400 })
   const pkg = packages[0]
   const pesoReale = packages.reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
 

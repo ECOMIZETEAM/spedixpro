@@ -12,7 +12,7 @@
  *
  * Chi lo modifica tocca ENTRAMBE le porte. */
 
-import { superaLimitiCollo, avvisoFuoriSagoma } from '@/lib/limiti-collo'
+import { superaLimitiCollo, avvisoFuoriSagoma, unColloSolo } from '@/lib/limiti-collo'
 import { entroMisureAgevolate } from '@/lib/agevolazione-misure'
 import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation,
@@ -503,6 +503,8 @@ export async function calcolaTariffeCliente(
     const { pesoVolume: pesoVolumeC, pesoFatturato: pesoFatturatoC } = pesoFatturatoCon(fattorePerCorr.get(corriereId) || fattore)
     // Limite misure per scaglione di PESO REALE: se un collo eccede, il corriere non è disponibile.
     if (superaMisureMax(settsC, pesoReale, tuttiColli)) continue   // collo fuori misura per questo corriere → escluso
+    // Locker con piu' colli: la creazione lo rifiuta (un collo solo), quindi non si propone.
+    if (tuttiColli.length > 1 && unColloSolo({ settings: settsC })) continue
     // Peso su cui si tassa: reale se agevolazione misure (≤50x32x28) OPPURE "peso reale fino a X kg" (≤ soglia); altrimenti volumetrico.
     const _prs = settsC?.peso_reale_soglia
     const _usaRealeSoglia = !!_prs?.attivo && Number(_prs.kg) > 0 && pesoReale <= Number(_prs.kg)

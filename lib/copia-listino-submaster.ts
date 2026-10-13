@@ -14,6 +14,11 @@ import { pontiCodiceDi } from '@/lib/ponti-codice'
 // creazione si ferma con "senza tipo di servizio"): era il motivo per cui i sotto-master non
 // riuscivano a spedire FedEx. tipo_ritiro/test_mode idem. (GLS/BRT tollerano l'assenza col default,
 // per questo non bloccavano.)
+// `consegna` (InPost: 'locker' | 'domicilio') NON e' ancora qui, e manca di proposito. Senza, le copie di
+// "InPost Locker" passano per consegna a domicilio (2-13/10/2026: 139 spedizioni su 139 vendute come
+// locker partite verso casa). Ma aggiungerla accende sulle copie una consegna a locker che in produzione
+// non e' mai partita (0 spedizioni su 275 con un punto): prima una spedizione vera verso un locker dal
+// contratto del detentore, poi la chiave qui insieme al dato sulle copie.
 const CONTRACT_SETTINGS_KEYS = ['agevolazione_peso_reale', 'misure_max', 'misure_scaglioni', 'peso_reale_soglia', 'limite_combinato', 'somma_lati_max', 'peso_max_collo', 'colli_max',
   'tipo_servizio', 'tipo_ritiro', 'test_mode']
 function settingsContratto(src: any): any {

@@ -9,6 +9,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 // due porte, una regola sola.
 import { annotaPuntoPoste, eTariffaAUnPunto, soloCorrieriInCatena } from '@/lib/tariffe-offerte'
 import { motivoGlsNonServe } from '@/lib/gls'
+import { unColloSolo } from '@/lib/limiti-collo'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -87,6 +88,7 @@ export async function POST(req: NextRequest) {
       if (sospesoDallaCatena(corr.nome_contratto, sospesiSopra)) continue   // in pausa da un livello superiore
       if (motivoGlsNonServe(corr, { paese: body.shipTo?.country, cap: capP, contrassegno: body.codValue })) continue   // GLS: nazionale solo Italia, Parcel solo UE senza contrassegno (lib/gls.ts)
       if (superaMisureMax(corr.settings, pesoRealeP, colliP)) continue   // fuori misura per il suo scaglione
+      if (colliP.length > 1 && unColloSolo(corr)) continue   // locker o contratto senza multicollo: la creazione lo rifiuterebbe
       const dett = await calcolaPrezzoCorriereDettaglio(supabase, {
         corriereId: (lc as any).corriere_id, masterId: masterIdP,
         provincia: provinciaP, cap: capP, paese: paeseP, citta: (body.shipTo?.city || ''),

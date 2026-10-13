@@ -46,9 +46,10 @@ export async function POST(req: NextRequest) {
   // finale, ad acquisto gia' fatto.
   // Stessa libreria della creazione: una regola sola, stesso esito da entrambe le porte.
   const pesoRealeTot = packages.reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
-  if (packages.length > 1 && (contratto as any)?.multicollo === false)
-    return NextResponse.json({ error: 'Il contratto non prevede il multicollo' }, { status: 400 })
-  const { motivoLimiteCollo } = await import('@/lib/limiti-collo')
+  const { motivoLimiteCollo, unColloSolo } = await import('@/lib/limiti-collo')
+  if (packages.length > 1 && unColloSolo(contratto))
+    return NextResponse.json({ error: String((contratto as any)?.settings?.consegna || '') === 'locker'
+      ? 'La consegna al locker accetta un collo solo' : 'Il contratto non prevede il multicollo' }, { status: 400 })
   const _motivoLimite = motivoLimiteCollo((contratto as any)?.settings, pesoRealeTot, packages)
   if (_motivoLimite) {
     return NextResponse.json({ error: `Collo non accettato da questo contratto: ${_motivoLimite}.` }, { status: 400 })

@@ -45,6 +45,15 @@ export function superaLimitiCollo(settings: any, pesoReale: number, colli: any[]
   return false
 }
 
+// UN COLLO SOLO: il contratto non accetta il multicollo, oppure consegna a un LOCKER (una cassetta,
+// un pacco; e il prezzo a taglia guarda solo il primo collo). Il secondo caso non si affida al flag
+// `multicollo`: quel flag sta sul contratto del detentore e non scende sulle copie dei sotto-master
+// (13/10/2026: "InPost Locker" di MULTIEXPRESS a un collo, le sue 8 copie col multicollo acceso).
+// Una regola sola per creazione, API e preventivo.
+export function unColloSolo(contratto: any): boolean {
+  return contratto?.multicollo === false || String(contratto?.settings?.consegna || '') === 'locker'
+}
+
 // Spiega A PAROLE quale limite e' stato superato, per dire all'utente cosa correggere invece di un
 // generico "corriere non disponibile". Restituisce null se nessun limite e' superato.
 export function motivoLimiteCollo(settings: any, pesoReale: number, colli: any[]): string | null {

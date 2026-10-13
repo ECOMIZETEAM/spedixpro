@@ -43,7 +43,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.attivo !== undefined) campi.attivo = body.attivo
   if (body.multicollo !== undefined) campi.multicollo = body.multicollo
   if (body.inserimento_ritiri !== undefined) campi.inserimento_ritiri = body.inserimento_ritiri
-  if (body.settings !== undefined) campi.settings = body.settings
+  if (body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings)) {
+    // UNIRE, NON SOSTITUIRE. Il popup "Impostazioni" manda solo i suoi campi (mittente, misure, pesi,
+    // colli) e qui si salvavano al posto dell'intero blocco: ogni salvataggio cancellava le altre
+    // impostazioni del contratto — `consegna` del locker InPost, `tipo_servizio` FedEx (senza, la
+    // creazione si ferma), `somma_lati_max` del PDB (un limite su un fornitore senza annullo).
+    // Trovato il 13/10/2026. Una chiave si spegne mandandola a null, come gia' fa il popup.
+    const { data: attuale, error: eLett } = await supabase.from('corrieri').select('settings').eq('id', id).eq('master_id', utente.master_id).maybeSingle()
+    if (eLett) return NextResponse.json({ error: eLett.message }, { status: 400 })
+    if (!attuale) return NextResponse.json({ error: 'Contratto non trovato o non tuo' }, { status: 404 })
+    campi.settings = { ...((attuale as any).settings || {}), ...body.settings }
+  }
   const { error } = await supabase
     .from('corrieri')
     .update(campi)

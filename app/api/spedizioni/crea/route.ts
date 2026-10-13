@@ -29,7 +29,7 @@ import { isZonaDisagiata } from '@/lib/zone-match'
 // isole. Le zone regionali base (Sicilia/Sardegna/Calabria) NON lo coprono: lì il corriere può ancora
 // addebitare il supplemento disagiata (es. Villasmundo risolve "Sicilia" base 5,64 ma costa 13,60).
 const zonaCopreDisagiata = (z: string | undefined | null): boolean => !!z && (isZonaDisagiata(z) || /isol/i.test(String(z)))
-import { motivoLimiteCollo } from '@/lib/limiti-collo'
+import { motivoLimiteCollo, unColloSolo } from '@/lib/limiti-collo'
 import { vedeLaRete } from '@/lib/perimetro'
 import { emailAlCorriere } from '@/lib/email-corriere'
 import { motivoGlsNonServe, servizioGls } from '@/lib/gls'
@@ -317,9 +317,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Il punto di consegna selezionato appartiene a un altro contratto: riscegli il punto (ogni corriere ha i suoi punti).' }, { status: 400 })
   }
   // *** Controllo misure massime del corriere (settings.misure_max) ***
-  // *** Controllo multicollo ***
-  if (packages.length > 1 && (corriereRecord as any)?.multicollo === false) {
-    return NextResponse.json({ error: 'Il contratto non prevede la funzione multicollo' }, { status: 400 })
+  // *** Controllo multicollo *** (anche il locker: un collo solo, vedi lib/limiti-collo unColloSolo)
+  if (packages.length > 1 && unColloSolo(corriereRecord)) {
+    return NextResponse.json({ error: String((corriereRecord as any)?.settings?.consegna || '') === 'locker'
+      ? 'La consegna al locker accetta un collo solo: spedisci i colli separatamente o scegli la consegna a domicilio.'
+      : 'Il contratto non prevede la funzione multicollo' }, { status: 400 })
   }
   // STESSO METRO DEL PREVENTIVO. Qui i lati si confrontavano ASSE PER ASSE (lunghezza con
   // lunghezza, larghezza con larghezza), mentre il preventivo confronta i lati ORDINATI dal piu'
