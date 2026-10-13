@@ -935,7 +935,7 @@ async function apriTracking(s: any) {
         </div>
       )}
 
-      {dettaglio && <DettaglioSpedizione s={dettaglio} apriCorrezione={correggiOpen} onClose={()=>{setDettaglio(null); setCorreggiOpen(false)}} etichettaHref={`/dashboard/spedizioni/${dettaglio.id}/etichetta`} onModificata={()=>carica(pagina)} />}
+      {dettaglio && <DettaglioSpedizione s={dettaglio} apriCorrezione={correggiOpen} onClose={()=>{setDettaglio(null); setCorreggiOpen(false)}} etichettaHref={dettaglio.stato==='annullata' ? undefined : `/dashboard/spedizioni/${dettaglio.id}/etichetta`} onModificata={()=>carica(pagina)} />}
       {resoModal && (
         <div onClick={()=>!resoBusy&&setResoModal(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'20px'}}>
           <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',padding:'24px',maxWidth:'430px',width:'100%'}}>

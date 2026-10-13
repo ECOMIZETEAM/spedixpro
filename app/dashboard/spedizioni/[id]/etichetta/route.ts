@@ -12,9 +12,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!user) return new NextResponse('Non autenticato', { status: 401 })
   // Lettura sotto RLS: se l'utente non può vedere la spedizione, torna null → 404 (auth per tenant).
   const { data: sped } = await supabase.from('spedizioni')
-    .select('raw_response,tracking_number,numero,etichetta_url,etichetta_path,colli_dettaglio,corriere_id,colli,contenuto,rif_ordine')
+    .select('raw_response,tracking_number,numero,etichetta_url,etichetta_path,colli_dettaglio,corriere_id,colli,contenuto,rif_ordine,stato')
     .eq('id', id).single()
   if (!sped) return new NextResponse('Non trovata', { status: 404 })
+  // Annullata: niente etichetta, come nella stampa singola e in quella in blocco (/api/spedizioni/etichetta).
+  // Il credito e' gia' tornato indietro e su diversi contratti l'annullo non arriva al corriere.
+  if ((sped as any).stato === 'annullata') {
+    return new NextResponse(`
+      <html><body style="font-family:sans-serif;padding:40px;text-align:center">
+        <h2>Spedizione annullata</h2>
+        <p>LDV: ${sped.tracking_number || sped.numero || '—'}</p>
+        <p>L'etichetta non è più valida: non spedire nessun pacco con questa lettera di vettura.</p>
+      </body></html>`, { status: 409, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  }
 
   const { leggiEtichettaCompleta } = await import('@/lib/etichette')
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
