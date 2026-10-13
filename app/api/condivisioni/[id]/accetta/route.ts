@@ -1,22 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { getPermessiUtente } from '@/lib/permessi'
-import { generaApiKey } from '@/lib/api-auth'
-import { propagaCostoCondivisione } from '@/lib/condivisione-propaga'
 import { anagraficaMasterPerLedger } from '@/lib/condivisione-engine'
 import { tipoContrattoDaCreditoModo } from '@/lib/condivisione-credito'
 
-/* ACCETTA una condivisione ricevuta (Fase 3). Il COMPRATORE (acquirente = corrieri_condivisi.master_id)
- * consente, e al consenso si monta la contabilità — riusando i meccanismi esistenti (vedi CONDIVISIONE-
- * CONTRATTI.md e la ricognizione):
- *   1) CLIENTE-LEDGER senza login sotto il VENDITORE, agganciato al listino d'ingrosso (Fase 2);
- *   2) API_KEY per (ledger, contratto del venditore) — è la credenziale che il compratore userà;
- *   3) riga CORRIERE lato compratore tipo='moovexpress' con dentro la key — MATERIALIZZATA ma attiva=false
- *      finché la Fase 4 (lib/moovexpress.ts) non la fa funzionare davvero (niente contratto monco in prod).
- * Commit atomico-in-pratica: la condivisione passa a 'attiva' con guardia WHERE stato='in_attesa' (anti
- * doppio-accetta); se qualcosa fallisce o qualcuno ha già accettato, si smonta ciò che si è creato.
+/* ACCETTA un collegamento ricevuto. Il COMPRATORE (acquirente = corrieri_condivisi.master_id) approva
+ * il collegamento, e al consenso si crea solo il suo CLIENTE-LEDGER sotto il venditore, senza login:
+ * vuoto, niente listino/chiave/corriere. I contratti li condivide poi il venditore assegnando un listino
+ * dalla scheda del collegato (lib/condivisione-engine.ts), senza che il compratore riapprovi ogni volta.
+ * Commit con guardia WHERE stato='in_attesa' (anti doppio-accetta); se qualcuno ha già accettato, si
+ * smonta il ledger appena creato.
  *
- * Nessun motore prezzi/credito toccato: si CREANO righe (cliente/key/corriere), non si addebita nulla.
+ * Il vecchio ramo "per contratto" (condivisione con il contratto scelto all'origine) non c'è più: si
+ * creava solo dal POST di /api/condivisioni, tolto, e montava il ponte senza la regola unica.
  */
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -26,121 +22,33 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const admin = createAdminSupabase()
 
   const { data: c } = await admin.from('corrieri_condivisi')
-    .select('id,corriere_id,master_id,fornitore_master_id,stato,credito_modo,listino_ingrosso_id')
+    .select('id,corriere_id,master_id,fornitore_master_id,stato,credito_modo')
     .eq('id', id).maybeSingle()
   if (!c || c.master_id !== perm.masterId) return NextResponse.json({ error: 'Condivisione non trovata.' }, { status: 404 })
   if (c.stato !== 'in_attesa') return NextResponse.json({ error: 'Questa condivisione è già stata gestita.' }, { status: 409 })
+  if (c.corriere_id) return NextResponse.json({ error: 'Richiesta del vecchio tipo: chiedi al fornitore di collegarti con il codice.' }, { status: 409 })
 
   const { data: compratore } = await admin.from('masters')
     .select('nome,piva,codice_fiscale,pec,telefono,indirizzo,citta,provincia,cap,indirizzo_operativo,citta_operativo,provincia_operativo,cap_operativo')
     .eq('id', c.master_id).maybeSingle()
   const nomeCompratore = compratore?.nome || 'Master'
 
-  // FLUSSO NUOVO — COLLEGAMENTO master↔master (corriere_id NULL): l'approvazione del collegato è SOLO
-  // questa. Si crea solo il CLIENTE-LEDGER (vuoto: niente listino/chiave/corriere); i contratti li abilita
-  // poi il venditore dalla scheda del collegato, senza che lui riapprovi ogni volta (scelta dell'utente).
-  if (!c.corriere_id) {
-    const { data: ledgerL, error: eLL } = await admin.from('clienti').insert({
-      master_id: c.fornitore_master_id,
-      ragione_sociale: `${nomeCompratore} (ingrosso)`,
-      email: `ledger-${c.id}@ledger.moovexpress.app`,
-      codice_cliente: 'LDG-' + c.id.slice(0, 8).toUpperCase(),
-      tipo_contratto: tipoContrattoDaCreditoModo(c.credito_modo),
-      attivo: true, ledger: true,
-      ...anagraficaMasterPerLedger(compratore),   // lo specchio dell'anagrafica del collegato (sola lettura)
-    }).select('id').single()
-    if (eLL || !ledgerL) { console.error('[condivisioni/accetta] ledger-link', eLL); return NextResponse.json({ error: 'Non sono riuscito a preparare il conto.' }, { status: 500 }) }
-    const { data: updL } = await admin.from('corrieri_condivisi')
-      .update({ stato: 'attiva', accettata_il: new Date().toISOString(), cliente_ledger_id: ledgerL.id })
-      .eq('id', id).eq('stato', 'in_attesa').select('id')
-    if (!updL || !updL.length) {
-      await admin.from('clienti').delete().eq('id', ledgerL.id)
-      return NextResponse.json({ error: 'Questo collegamento è già stato gestito.' }, { status: 409 })
-    }
-    return NextResponse.json({ ok: true, collegamento: true })
-  }
-
-  // ── FLUSSO LEGACY (per-contratto): condivisione con contratto già scelto all'origine. ────────────────
-  if (!c.listino_ingrosso_id) return NextResponse.json({ error: 'Manca il listino d’ingrosso: chiedi al fornitore di rifare la condivisione.' }, { status: 400 })
-  const { data: contratto } = await admin.from('corrieri').select('nome_contratto').eq('id', c.corriere_id).maybeSingle()
-
-  // 1) CLIENTE-LEDGER sotto il venditore, SENZA login (niente auth.createUser né riga utenti).
-  //    credito parte da 0 (trigger fn_credito_solo_via_rpc), api_esente=true di default. Email sintetica
-  //    unica dallo share id. tipo_contratto = modo credito scelto sulla condivisione.
-  const { data: ledger, error: eL } = await admin.from('clienti').insert({
+  const { data: ledgerL, error: eLL } = await admin.from('clienti').insert({
     master_id: c.fornitore_master_id,
     ragione_sociale: `${nomeCompratore} (ingrosso)`,
     email: `ledger-${c.id}@ledger.moovexpress.app`,
     codice_cliente: 'LDG-' + c.id.slice(0, 8).toUpperCase(),
     tipo_contratto: tipoContrattoDaCreditoModo(c.credito_modo),
     attivo: true, ledger: true,
-    listino_cliente_id: c.listino_ingrosso_id,
+    ...anagraficaMasterPerLedger(compratore),   // lo specchio dell'anagrafica del collegato (sola lettura)
   }).select('id').single()
-  if (eL || !ledger) { console.error('[condivisioni/accetta] ledger', eL); return NextResponse.json({ error: 'Non sono riuscito a preparare il conto.' }, { status: 500 }) }
-
-  // 2) API_KEY per (ledger, contratto del venditore).
-  const chiave = generaApiKey()
-  const { error: eK } = await admin.from('api_keys').insert({
-    master_id: c.fornitore_master_id, cliente_id: ledger.id, corriere_id: c.corriere_id,
-    chiave, nome: `moovexpress ${nomeCompratore}`.slice(0, 80), attivo: true,
-  })
-  if (eK) {
-    console.error('[condivisioni/accetta] api_key', eK)
-    await admin.from('clienti').delete().eq('id', ledger.id)
-    return NextResponse.json({ error: 'Non sono riuscito a emettere la chiave.' }, { status: 500 })
-  }
-
-  // 3) Riga CORRIERE lato compratore (materializzata, attiva=false finché la Fase 4 non la accende).
-  //    proprio=FALSE: un PONTE non è mai detentore del contratto (lo è l'owner reale, tipo!='moovexpress').
-  //    È la regola del trigger `fn_ricalcola_corrieri_proprio` (vedi scripts/regola-contratto-proprio-condivisione.sql),
-  //    che comunque ricalcolerebbe il flag all'insert: metterlo a true qui sarebbe sovrascritto e intanto
-  //    farebbe risultare il ponte "detentore" in costruisciCatena (costo su credito_proprio + catena che si
-  //    ferma = doppio addebito col nuovo flusso). Il gating del credito NON si fa col flag: nel nuovo flusso
-  //    il compratore-CODICE è gatato/addebitato sul suo LEDGER (dispatch lato venditore) e il compratore-ALBERO
-  //    sul credito verso il padre (addebitaTreeCondivisione). L'adeguamento di verificaCreditoCatena per i
-  //    corrieri moovexpress fa parte dell'aggancio ②b (vedi CONDIVISIONE-CHECKLIST sez. F).
-  const { data: corrNuovo, error: eC } = await admin.from('corrieri').insert({
-    master_id: c.master_id, tipo: 'moovexpress',
-    nome_contratto: contratto?.nome_contratto || 'Contratto partner',
-    credenziali: { api_key: chiave, fornitore_master_id: c.fornitore_master_id, corriere_origine_id: c.corriere_id },
-    settings: {}, multicollo: true, inserimento_ritiri: true, attivo: false, livello: 1, proprio: false,
-  }).select('id').single()
-  if (eC || !corrNuovo) {
-    console.error('[condivisioni/accetta] corriere', eC)
-    await admin.from('api_keys').delete().eq('cliente_id', ledger.id).eq('corriere_id', c.corriere_id)
-    await admin.from('clienti').delete().eq('id', ledger.id)
-    return NextResponse.json({ error: 'Non sono riuscito a creare il contratto.' }, { status: 500 })
-  }
-
-  // 4) COMMIT con guardia anti doppio-accetta: solo se è ANCORA 'in_attesa'.
-  const { data: upd } = await admin.from('corrieri_condivisi')
-    .update({ stato: 'attiva', accettata_il: new Date().toISOString(), cliente_ledger_id: ledger.id, corriere_acquirente_id: corrNuovo.id })
+  if (eLL || !ledgerL) { console.error('[condivisioni/accetta] ledger-link', eLL); return NextResponse.json({ error: 'Non sono riuscito a preparare il conto.' }, { status: 500 }) }
+  const { data: updL } = await admin.from('corrieri_condivisi')
+    .update({ stato: 'attiva', accettata_il: new Date().toISOString(), cliente_ledger_id: ledgerL.id })
     .eq('id', id).eq('stato', 'in_attesa').select('id')
-  if (!upd || !upd.length) {
-    // Qualcun altro ha accettato nel frattempo: smonto tutto ciò che ho creato.
-    await admin.from('corrieri').delete().eq('id', corrNuovo.id)
-    await admin.from('api_keys').delete().eq('cliente_id', ledger.id).eq('corriere_id', c.corriere_id)
-    await admin.from('clienti').delete().eq('id', ledger.id)
-    return NextResponse.json({ error: 'Questa condivisione è già stata gestita.' }, { status: 409 })
+  if (!updL || !updL.length) {
+    await admin.from('clienti').delete().eq('id', ledgerL.id)
+    return NextResponse.json({ error: 'Questo collegamento è già stato gestito.' }, { status: 409 })
   }
-
-  // 5) PROPAGA IL COSTO sul corriere appena materializzato: il compratore deve VEDERE quanto paga (il
-  //    listino d'ingrosso = W) e le ZONE del contratto sul SUO "Listino Corrieri"/"Gestione Zone", o non
-  //    può costruirci sopra il listino clienti (era il buco: corriere acceso ma vuoto). Stessa idea della
-  //    cascata padre→figlio, ma sorgente oltre il ponte API. Best-effort: se fallisce, il corriere resta
-  //    spento e lo si dice, invece di accendere un contratto senza prezzi.
-  let propagazione: any = { ok: false }
-  try { propagazione = await propagaCostoCondivisione(admin, id) }
-  catch (e: any) { console.error('[condivisioni/accetta] propaga', e?.message); propagazione = { ok: false, reason: e?.message } }
-
-  // 6) ACCENDI il corriere solo se il costo è stato propagato (Fase 4 è viva: niente più contratto monco).
-  if (propagazione.ok) {
-    await admin.from('corrieri').update({ attivo: true }).eq('id', corrNuovo.id)
-  }
-
-  return NextResponse.json({
-    ok: true, contratto: contratto?.nome_contratto || 'Contratto partner',
-    attivo: !!propagazione.ok, propagazione,
-    ...(propagazione.ok ? {} : { avviso: 'Contratto accettato ma senza costo: il fornitore deve completare il listino d’ingrosso, poi ri-sincronizza.' }),
-  })
+  return NextResponse.json({ ok: true, collegamento: true })
 }

@@ -1,6 +1,7 @@
 /* Integrazione "moovexpress": un master RIVENDE il contratto di un altro master (vedi
  * CONDIVISIONE-CONTRATTI.md). Quando il COMPRATORE spedisce su un corriere tipo='moovexpress', questo
- * client chiama l'`/api/v1` del VENDITORE con la api_key ricevuta all'Accetta (dentro corrieri.credenziali):
+ * client chiama l'`/api/v1` del VENDITORE con la api_key del collegamento (nasce quando il venditore gli
+ * condivide il contratto, sta dentro corrieri.credenziali):
  * il venditore crea la spedizione VERA sul suo contratto (smistando al fornitore reale — spedisci/brt/…)
  * e torna numero + etichetta + prezzo. Il `prezzo` è ciò che il venditore addebita al compratore-ledger
  * = il COSTO per il compratore (W). È lo stesso schema degli altri provider (lib/spedisci, lib/brt…), ma

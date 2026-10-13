@@ -1,4 +1,5 @@
 import { fetchAll } from '@/lib/fetch-all'
+import { pontiCodiceDi } from '@/lib/ponti-codice'
 
 // Chiavi di IMPOSTAZIONI DI CONTRATTO che si propagano al sotto-master (NON il mittente,
 // che è specifico di ogni master). agevolazione peso, misure/volume massimo, scaglioni misure,
@@ -98,7 +99,7 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   //    Le IMPOSTAZIONI DI CONTRATTO (agevolazione peso, misure/volume massimo, scaglioni,
   //    peso reale soglia) si PROPAGANO dal padre; il MITTENTE resta del sotto-master.
   const { data: corrSrc } = corriereIds.length ? await admin.from('corrieri').select('*').in('id', corriereIds) : { data: [] }
-  const { data: corrMiei } = await admin.from('corrieri').select('id,nome_contratto,settings,proprio').eq('master_id', subMasterId)
+  const { data: corrMiei } = await admin.from('corrieri').select('id,nome_contratto,settings,proprio,tipo').eq('master_id', subMasterId)
   const mappaCorrMio = new Map((corrMiei || []).map((c: any) => [(c.nome_contratto || '').trim().toLowerCase(), c]))
   const mapCorr = new Map<string, string>()
   // Contratti DISABILITATI dal padre per questo sotto-master (masters_corrieri_abilitati.abilitato=false):
@@ -114,12 +115,24 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   // padre-albero: Wave (compra da LOGIXIA via codice, ma è figlio-albero di MULTI) mostrava 4,48 = MULTI
   // +0,10 invece del 4,28 del suo fornitore. I soldi erano giusti (seguono la catena), il listino no.
   // Verità dei legami = corrieri_condivisi, non parent_master_id (vedi condivisione-catena.ts). Qui
-  // identifico i ponti-acquirente dei legami CODICE attivi del sub e li SALTO: li materializza propagaCosto.
-  const { data: codiceRows } = await admin.from('corrieri_condivisi')
-    .select('corriere_acquirente_id').eq('master_id', subMasterId).eq('stato', 'attiva')
-  const pontiCodice = new Set((codiceRows || []).map((r: any) => r.corriere_acquirente_id).filter(Boolean))
+  // identifico i ponti codice del sub (lib/ponti-codice.ts) e SALTO il loro NOME, prima di tutto il resto:
+  // li materializza propagaCosto. Va fatto prima del ramo "disabilitato dal padre", che cerca la riga del
+  // sub per nome: un padre che ha tolto quel contratto al figlio, al primo salvataggio del suo listino
+  // avrebbe spento e svuotato anche il ponte con cui il figlio lo compra da un altro master (GTS →
+  // spedizioni 2000, 13/10/2026). E se il padre lo riabilita, il ramo normale riscriverebbe sul ponte i
+  // prezzi del padre. Il contratto ha un fornitore solo: finché c'è il ponte, è quello.
+  // Se i ponti non si riescono a leggere (si riprova una volta) il sotto-master resta com'è — fin qui si è
+  // solo letto: meglio un giro di propagazione saltato che un ponte spento o riprezzato perché scambiato
+  // per una copia.
+  let ponti: { ids: Set<string>; nomi: Set<string> }
+  try { ponti = await pontiCodiceDi(admin, subMasterId) }
+  catch {
+    try { ponti = await pontiCodiceDi(admin, subMasterId) }
+    catch (e: any) { console.error('[copia-listino]', subMasterId, e?.message); return { ok: false, reason: 'ponti codice non leggibili: sotto-master non toccato' } }
+  }
   for (const c of (corrSrc || [])) {
     const key = (c.nome_contratto || '').trim().toLowerCase()
+    if (ponti.nomi.has(key)) continue
     if (disabilitati.has(c.id)) {
       // Disabilitato dal padre: salto la materializzazione e, se esisteva già, lo rimuovo più sotto.
       const d: any = mappaCorrMio.get(key)
@@ -127,10 +140,6 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
       continue
     }
     const esist: any = mappaCorrMio.get(key)
-    // Ponte codice-alimentato (acquirente di un legame corrieri_condivisi attivo): lo materializza la
-    // catena (propagaCosto), la cascata-albero lo SALTA. Niente mapCorr.set → resta fuori da subCorrIds
-    // e dalla delete-force delle fasce → il costo-catena (es. Wave 4,28) sopravvive, non viene clobberato.
-    if (esist?.id && pontiCodice.has(esist.id)) continue
     // CONTRATTO PROPRIO del sub: è il SUO contratto vero, il costo se lo mette LUI (non lo riceve da
     // sopra). La cascata-albero aggancia per NOME e, senza questa guardia, lo riscriveva col prezzo del
     // padre. Guasto vero: LOGIXIA possiede "SDA EXPRESS L" (proprio) ED è figlia-albero di MULTI che lo
@@ -139,6 +148,14 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
     // mandandola sotto costo su ogni spedizione condivisa. Un contratto proprio lo gestisce solo il suo
     // owner (POST /api/listini/corrieri): la cascata lo SALTA, come i ponti codice.
     if (esist?.id && esist.proprio === true) continue
+    // CLASSE DIVERSA: la riga del sub con quel nome non è una copia di questo contratto. Una riga REALE
+    // (spedisce sull'account del detentore, con le sue credenziali) non diventa la copia di un PONTE del
+    // padre, né il contrario: le si scriverebbero sopra i prezzi dell'altro, e i pacchi partirebbero su
+    // un account diverso da quello pagato. Si salta e lo si segnala: va sistemata a mano.
+    if (esist?.id && (esist.tipo === 'moovexpress') !== (c.tipo === 'moovexpress')) {
+      console.error(`[copia-listino] ${subMasterId}: "${c.nome_contratto}" del sotto-master è di classe diversa da quella del padre, non agganciato`)
+      continue
+    }
     let subId = esist?.id
     if (!subId) {
       // Nuovo: copio le impostazioni di contratto (senza mittente: lo imposta il sotto-master).

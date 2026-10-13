@@ -22,14 +22,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   // Collegamento (flusso nuovo): smonto ogni contratto abilitato = i corrieri moovexpress del compratore
   // che vengono DA ME. disabilitaContrattoCondiviso disattiva (se hanno spedizioni) o rimuove pulito.
+  // Se anche un solo contratto non si smonta, il collegamento NON si chiude: resterebbe un ponte acceso
+  // con la chiave valida su un collegamento "revocato", e la catena dei pagamenti non lo troverebbe più.
   if (!c.corriere_id) {
-    const { data: corrBuyers } = await admin.from('corrieri')
+    const { data: corrBuyers, error: eB } = await admin.from('corrieri')
       .select('id,credenziali').eq('master_id', c.master_id).eq('tipo', 'moovexpress')
+    if (eB) return NextResponse.json({ error: 'Lettura dei contratti del collegato non riuscita: riprova.' }, { status: 500 })
     for (const cb of (corrBuyers || [])) {
       const cred = (cb.credenziali || {}) as any
       if (cred.fornitore_master_id === perm.masterId && cred.corriere_origine_id) {
-        try { await disabilitaContrattoCondiviso(admin, { linkId: id, corriereId: cred.corriere_origine_id }) }
+        let ok = false
+        try { ok = (await disabilitaContrattoCondiviso(admin, { linkId: id, corriereId: cred.corriere_origine_id })).ok }
         catch (e: any) { console.error('[condivisioni/revoca] smonto contratto', e?.message) }
+        if (!ok) return NextResponse.json({ error: 'Non sono riuscito a togliere tutti i contratti condivisi: il collegamento resta aperto, riprova.' }, { status: 500 })
       }
     }
   }

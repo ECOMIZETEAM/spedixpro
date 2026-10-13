@@ -2,9 +2,10 @@ import { fetchAll } from '@/lib/fetch-all'
 
 /* PROPAGAZIONE DEL COSTO DI UNA CONDIVISIONE (CONDIVISIONE-CONTRATTI.md, Fase 4).
  *
- * Quando un master ACCETTA il contratto di un altro (corriere tipo='moovexpress'), il COSTO che paga
- * (il listino d'ingrosso del venditore, = W) e le ZONE del contratto devono comparire sul SUO portale,
- * sul corriere appena materializzato — altrimenti "Listino Corrieri" e "Gestione Zone" sono vuoti e il
+ * Quando un master riceve il contratto di un altro (corriere tipo='moovexpress', condiviso dal venditore
+ * con l'Assegna del listino, lib/condivisione-engine.ts), il COSTO che paga (il listino d'ingrosso del
+ * venditore, = W) e le ZONE del contratto devono comparire sul SUO portale, sul corriere appena
+ * materializzato — altrimenti "Listino Corrieri" e "Gestione Zone" sono vuoti e il
  * compratore non sa quanto paga né può costruirci sopra il listino clienti. È lo stesso effetto della
  * cascata padre→figlio (copiaListinoAlSottoMaster), ma qui la sorgente è OLTRE il ponte API: il listino
  * d'ingrosso è un `listini_clienti` sotto il VENDITORE, agganciato al cliente-ledger e al CORRIERE DEL
@@ -19,23 +20,7 @@ import { fetchAll } from '@/lib/fetch-all'
  * Il costo VERO addebitato alla spedizione resta `ris.prezzo` dall'/api/v1 del venditore (autorevole, nessun
  * disallineamento): questa copia serve a VISIBILITÀ, base del margine nell'editor e risoluzione zona a CAP.
  */
-// Wrapper storico (vecchio modello per-contratto): legge i campi dalla riga corrieri_condivisi.
-export async function propagaCostoCondivisione(admin: any, condivisioneId: string): Promise<{ ok: boolean; reason?: string; zone?: number; fasce?: number }> {
-  const { data: cc } = await admin.from('corrieri_condivisi')
-    .select('id,stato,corriere_id,master_id,listino_ingrosso_id,corriere_acquirente_id,cliente_ledger_id')
-    .eq('id', condivisioneId).maybeSingle()
-  if (!cc) return { ok: false, reason: 'condivisione non trovata' }
-  if (!cc.corriere_acquirente_id) return { ok: false, reason: 'corriere acquirente non ancora materializzato (serve l’Accetta)' }
-  if (!cc.listino_ingrosso_id) return { ok: false, reason: 'manca il listino d’ingrosso' }
-  return propagaCosto(admin, {
-    corriereVenditore: cc.corriere_id as string,
-    corriereAcquirente: cc.corriere_acquirente_id as string,
-    masterAcquirente: cc.master_id as string,
-    listinoIngrosso: cc.listino_ingrosso_id as string,
-  })
-}
-
-/* Cuore della propagazione, con parametri ESPLICITI (lo usa l'abilitazione per-contratto del flusso nuovo:
+/* Cuore della propagazione, con parametri ESPLICITI (lo usa la condivisione per listino assegnato:
  * il listino d'ingrosso è quello del cliente-ledger, che copre più corrieri; qui si propaga UN contratto).
  *   corriereVenditore  = corriere REALE del venditore (sorgente zone + quali fasce dell'ingrosso)
  *   corriereAcquirente = riga moovexpress del compratore (destinazione)

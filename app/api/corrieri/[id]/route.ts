@@ -16,27 +16,17 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
 
-  // BLOCCO: se il contratto è usato da spedizioni/ritiri/distinte non si può eliminare (perderesti lo storico).
-  const usi: [string, string][] = [['spedizioni', 'spedizioni'], ['ritiri', 'ritiri'], ['distinte', 'distinte']]
-  for (const [tab, label] of usi) {
-    const { count } = await admin.from(tab).select('id', { count: 'exact', head: true }).eq('corriere_id', id)
-    if ((count || 0) > 0) {
-      return NextResponse.json({ error: `Contratto usato da ${count} ${label}: non eliminabile (perderesti lo storico). Disattivalo dalle Impostazioni.` }, { status: 400 })
-    }
+  // BLOCCO: se il contratto è usato da spedizioni/ritiri/distinte non si può eliminare (perderesti lo
+  // storico). La configurazione (zone, listini, fasce, supplementi, abilitazioni) cade con lui per i
+  // vincoli del database, nella stessa istruzione: lib/elimina-contratto.ts.
+  const { eliminaContrattiSenzaStorico } = await import('@/lib/elimina-contratto')
+  const r = await eliminaContrattiSenzaStorico(admin, [id])
+  if (!r.ok) {
+    const s = r.storico
+    const uso = s && ([['spedizioni', s.spedizioni], ['ritiri', s.ritiri], ['distinte', s.distinte]] as [string, number][]).find(([, n]) => n > 0)
+    if (uso) return NextResponse.json({ error: `Contratto usato da ${uso[1]} ${uso[0]}: non eliminabile (perderesti lo storico). Disattivalo dalle Impostazioni.` }, { status: 400 })
+    return NextResponse.json({ error: r.reason }, { status: 400 })
   }
-
-  // Rimuovo le dipendenze di CONFIGURAZIONE (FK NO ACTION) prima del corriere.
-  await admin.from('listini_clienti_supplementi').delete().eq('corriere_id', id)
-  await admin.from('listini_clienti_corrieri').delete().eq('corriere_id', id)
-  await admin.from('listini_clienti_fasce').delete().eq('corriere_id', id)
-  await admin.from('listini_corrieri_supplementi').delete().eq('corriere_id', id)
-  await admin.from('listini_corrieri_corrieri').delete().eq('corriere_id', id)
-  await admin.from('listini_corrieri_fasce').delete().eq('corriere_id', id)
-  await admin.from('zone').delete().eq('corriere_id', id)
-
-  // Elimino il corriere (CASCADE su listini_corrieri, abilitati, corrieri_cliente/condivisi).
-  const { error } = await admin.from('corrieri').delete().eq('id', id).eq('master_id', utente.master_id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ success: true })
 }
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

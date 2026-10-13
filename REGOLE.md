@@ -64,7 +64,10 @@ Vivono nel codice, ma in **un punto solo** che tutti chiamano. Modificarle lì v
 | Limiti del collo: misure, peso, colli, scaglioni | `lib/limiti-collo.ts` → `superaLimitiCollo`, `motivoLimiteCollo` |
 | Quale zona rivendica un CAP | `lib/zone-match.ts` → `trovaZoneMatchDett` |
 | Fin dove risale la catena degli addebiti | `lib/giacenza-cascata.ts` → `catenaContratto` (si ferma su `proprio`) |
-| Contratti sospesi da un master più in alto | `lib/contratti-catena.ts` → `contrattiSospesiSopra` |
+| Contratti sospesi da un master più in alto, e perché (in pausa, oppure tolti). Una copia reale la offre solo una riga reale del padre, mai un suo ponte | `lib/contratti-catena.ts` → `contrattiSospesiSopra`, `contrattiRimossiConMotivo` |
+| Quali contratti un master compra da un altro master via codice (ponti codice): il padre-albero non li spegne, non gli riscrive prezzi e zone, non li nasconde per nome | `lib/ponti-codice.ts` → `pontiCodiceDi` |
+| Se un contratto si può condividere con un master collegato. Su un master c'è una riga sola per nome; se il suo master gliel'ha tolto, il collegato lo sostituisce (su conferma coi numeri, solo senza storico, togliendo anche le copie sotto di lui) | `lib/condivisione-engine.ts` → `valutaContrattoPerCompratore`, usata da Assegna, scheda del collegato e riallineamento |
+| Eliminare un contratto: le SUE spedizioni, ritiri e distinte lo bloccano nel database, la configurazione cade in cascata con un DELETE solo. Le copie dei sotto-master non le guarda: vedi sotto | `lib/elimina-contratto.ts` → `eliminaContrattiSenzaStorico` |
 | Il prezzo del reso è solo nolo | `lib/reso-prezzi.ts` |
 | Quali tariffe si possono offrire a un cliente: contratto in catena, contratti "a un punto", locker a taglia | `lib/tariffe-offerte.ts` → `soloCorrieriInCatena`, `annotaPuntoPoste` + `eTariffaAUnPunto`, `contrattiConFasceATaglia` |
 | "Prezzo minore" o "contratto scelto" nelle porte di massa del cliente (import da file, ordini dei negozi) | `app/cliente/anteprima-prezzi.ts` → `scegliTariffa` (la stessa per mostrare e per spedire) |
@@ -125,6 +128,14 @@ Queste sono decisioni del committente, non scelte tecniche. Il codice deve rispe
 
 Da sistemare, e da guardare con sospetto quando si tocca qualcosa lì vicino.
 
+- **Eliminare un contratto guarda solo lo storico della SUA riga, non quello delle copie dei
+  sotto-master.** Caso vero (13 ottobre): il "GLS CASERTA Consegna Diretta" di MULTIEXPRESS ha 0
+  spedizioni sulla sua riga, mentre la copia di GTS ne ha 2.366 in trenta giorni. Se MULTIEXPRESS lo
+  eliminasse dal portale, il ricalcolo di `proprio` farebbe delle copie i detentori: GTS
+  continuerebbe a spedire sull'account di MULTIEXPRESS e la catena dei costi si fermerebbe a GTS,
+  cioè MULTIEXPRESS pagherebbe il corriere senza essere pagato. Succedeva anche prima che
+  l'eliminazione passasse da `lib/elimina-contratto.ts`. Non toccato: bloccarla quando sotto ci
+  sono copie cambia cosa un master può fare dal portale, e va deciso.
 - **Il comune scritto diversamente fa perdere la zona speciale.** Se il comune non combacia con
   nessuno di quelli elencati per quel CAP, la zona speciale non viene rivendicata e si finisce su
   "Italia".

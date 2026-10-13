@@ -5,6 +5,33 @@ Un master può **rivendere un suo contratto a un altro master**, in qualunque po
 per *ogni* master, per ruolo/flag, **mai** inchiodata a un id o a un nome (vedi REGOLE.md e la regola
 "generalità per tutti i master"). Velox↔MULTIEXPRESS è solo il primo collaudo.
 
+## Come funziona oggi (13/10/2026)
+
+Il resto del documento racconta il progetto com'era all'inizio (condivisione per singolo contratto,
+conferma del nome dal codice, accetta che monta il contratto): quella strada **non c'è più**. Oggi:
+
+1. **Collegamento.** Il venditore incolla il codice del compratore (`/api/condivisioni/collega`); il
+   compratore approva da Elenco Master (`/[id]/accetta`), e nasce solo il suo cliente-ledger presso il
+   venditore. È l'unico consenso del compratore.
+2. **Assegna listino.** Dalla scheda del collegato il venditore gli assegna un suo listino, **solo suo**
+   (non usato da clienti, master o agenti): i contratti dentro gli vengono condivisi. Se ne aggiunge
+   altri, **Aggiorna** li attiva. Salvare il listino riporta da solo i costi, ma non crea contratti.
+3. **La regola**, una sola (`lib/condivisione-engine.ts` → `valutaContrattoPerCompratore`): su un
+   master c'è **una riga per nome**. Non si vende un contratto che il compratore ha già (suo, da un altro
+   fornitore, o che il suo master gli offre ancora, anche solo in pausa). Se il suo master gliel'ha
+   **tolto**, il venditore lo può sostituire: l'Assegna mostra coi numeri cosa si toglie (le copie morte
+   del compratore e quelle reali sotto di lui, mai usate per spedire) e chiede conferma; il registro
+   (`audit_log`, azione `condivisione_sostituisce_copie`) dice chi l'ha deciso.
+4. **Il padre-albero non tocca i ponti codice** (`lib/ponti-codice.ts`): la cascata dei listini non li
+   spegne né li riprezza, il Listino Corrieri non li nasconde. Una copia reale la offre solo una riga reale
+   del padre, mai un suo ponte (`lib/contratti-catena.ts`).
+
+Aperti, da sapere prima di far spedire un ponte costruito su un contratto che il venditore **non detiene**
+(una sua copia d'albero, come il GLS di MULTIEXPRESS che GTS vende a spedizioni 2000): la catena-fornitore
+si ferma al venditore, quindi i contrassegni caricati da file e le rettifiche del detentore vero non
+scendono da soli; i resi di una spedizione a più gambe si addebitano due volte (come su SDA EXPRESS L);
+l'etichetta porta l'intestatario del conto del fornitore come mittente.
+
 ## Perché non si tocca l'albero (la scelta di fondo)
 
 La rete è un albero: i contratti **cascano padre→figlio**, e la catena costi/ricavi (`lib/cascata.ts`)

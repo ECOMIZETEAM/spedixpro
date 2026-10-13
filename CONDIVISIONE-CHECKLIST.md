@@ -117,7 +117,8 @@ normali.** Ogni pezzo si verifica **prima/dopo sui dati veri** e si rilascia sol
   di corrieri_condivisi non torna corriere_id (serve per re-sourcing la chiave); (e) chiave spenta/ruotata → errore duro, ma
   romperebbe spedizioni che OGGI passano sulla colata; (f) PERF: una risolviCatena completa per OGNI dispatch su hot path
   ri-entrante (~1500/gg). → Prima: helper `risolviChiaveDispatch` SOLA LETTURA ancorato alla RIGA ESATTA
-  (corrieri_condivisi keyed su corriere_acquirente_id = corriereRecord.id, vedi accetta:114) + **uno SHADOW dedicato alla
+  (corrieri_condivisi keyed su corriere_acquirente_id = corriereRecord.id, vedi il vecchio ramo di accetta, tolto il
+  13/10/2026: oggi un ponte si riconosce con lib/ponti-codice.ts) + **uno SHADOW dedicato alla
   CHIAVE** (oggi NON esiste; run-resolver-shadow.mts valida solo il piano contabile) su 30-90gg di spedizioni moovexpress
   reali, contando quante dipendono dalla chiave colata, PRIMA di toccare il dispatch. Confinare a credMv, mai a `cred`.
 

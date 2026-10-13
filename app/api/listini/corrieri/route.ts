@@ -54,7 +54,16 @@ export async function GET(req: NextRequest) {
   //    nascondeva anche al master (segnalato da "The Shipping Company"). Lo si mostra col flag sospeso_sopra.
   const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
   const _sospesiSopra = await contrattiSospesiSopra(utente?.master_id)
-  const _spentoDalPadre = (c: any) => _disId.has(c.id) || _disNomi.has((c.nome_contratto || '').trim().toLowerCase())
+  // Un PONTE CODICE (il contratto il master lo compra da un altro master via codice) non è "spento dal
+  // padre" anche se si chiama come un contratto che il padre gli ha tolto: è proprio così che lo compra
+  // altrove. Col confronto per nome spariva dal suo Listino Corrieri il costo che paga al fornitore.
+  // Qui si decide solo cosa MOSTRARE: se i ponti non si leggono, la pagina si apre lo stesso.
+  const { pontiCodiceDi } = await import('@/lib/ponti-codice')
+  let _ponti: { ids: Set<string> } = { ids: new Set<string>() }
+  if (_disId.size) {
+    try { _ponti = await pontiCodiceDi(_admin, utente?.master_id) } catch (e: any) { console.error('[listini/corrieri] ponti codice', e?.message) }
+  }
+  const _spentoDalPadre = (c: any) => !_ponti.ids.has(c.id) && (_disId.has(c.id) || _disNomi.has((c.nome_contratto || '').trim().toLowerCase()))
   const _sospesoSopra = (c: any) => sospesoDallaCatena(c.nome_contratto, _sospesiSopra)
   const tuttiICorrieri = (tuttiICorrieriRaw || []).filter((c: any) => !_spentoDalPadre(c))
   const posseduti = new Set((tuttiICorrieri || []).map((c:any) => c.id))

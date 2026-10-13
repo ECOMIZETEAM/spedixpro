@@ -3,9 +3,10 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { getPermessiUtente } from '@/lib/permessi'
 import { disabilitaContrattoCondiviso } from '@/lib/condivisione-engine'
 
-/* Toglie un contratto a un master collegato: spegne/rimuove il corriere sul compratore, revoca la chiave,
- * ripulisce il listino. Lo STORICO non si cancella: se il corriere ha spedizioni, si DISATTIVA. Solo il
- * VENDITORE del link. Il collegamento resta (puoi riabilitare altri contratti).
+/* Toglie un contratto a un master collegato: rimuove il corriere sul compratore (o lo spegne, se ha
+ * spedizioni, ritiri o distinte: lo storico non si cancella), revoca la chiave e toglie il contratto dal
+ * listino d'ingrosso del collegato. Solo il VENDITORE del link. Il collegamento resta: rimettendo il
+ * contratto nel listino e premendo Assegna, torna condiviso.
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const perm = await getPermessiUtente()
@@ -20,5 +21,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const r = await disabilitaContrattoCondiviso(admin, { linkId: id, corriereId })
   if (!r.ok) return NextResponse.json({ error: r.reason || 'Operazione non riuscita.' }, { status: 400 })
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, avviso: r.avviso || null })
 }

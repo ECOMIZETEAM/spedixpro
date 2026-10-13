@@ -205,9 +205,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
   })
 
   // AUTO RE-SYNC CONDIVISIONE: se questo listino è il prezzo d'ingrosso di un master collegato (è il
-  // listino_cliente_id di un cliente-ledger), ri-propaga i costi al suo portale — così ritoccare i prezzi
-  // qui aggiorna da solo il costo mostrato al collegato, senza premere "Ri-sincronizza". L'addebito era già
-  // live. Background, best-effort.
+  // listino_cliente_id di un cliente-ledger), riporta i costi sui contratti che gli sono già condivisi —
+  // così ritoccare i prezzi qui aggiorna da solo il costo mostrato al collegato. NON crea contratti nuovi
+  // né sostituisce le sue copie: salvare un listino lo può anche un operatore, e ricreerebbe un contratto
+  // che il collegato ha tolto. Quelli li attiva un master dalla scheda del collegato (Aggiorna / Assegna).
+  // L'addebito era già live. Background, best-effort.
   after(async () => {
     try {
       const { createAdminSupabase } = await import('@/lib/supabase-admin')

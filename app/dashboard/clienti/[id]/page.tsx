@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
+import { useDialog } from '@/app/components/DialogProvider'
 
 function fmtEuro(n: number) {
   return `€ ${Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -17,10 +18,12 @@ function fmtData(iso: string) {
 }
 
 // Sezione "Contratti condivisi" — compare SOLO sulla scheda di un master collegato (cliente-ledger).
-// Qui il venditore abilita/disabilita i suoi contratti per il collegato: abilitare mette il prezzo W nel
-// listino d'ingrosso, crea la chiave e il corriere sul compratore, e propaga costo/zone. Niente
-// riapprovazione (il consenso è stato dato al collegamento). Il listino poi si rifinisce in Listini Clienti.
+// Il venditore gli assegna un suo listino (Listini Clienti): i contratti dentro vengono condivisi secondo
+// la regola unica (lib/condivisione-engine.ts), e qui si vede contratto per contratto cosa ne è stato —
+// condiviso, da attivare, da sostituire (serve una conferma, coi numeri) o non condiviso, e perché.
+// Niente riapprovazione: il consenso il collegato l'ha dato al collegamento.
 function ContrattiCondivisi({ clienteId }: { clienteId: string }) {
+  const dialog = useDialog()
   const [data, setData] = useState<any>(null)
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState('')
@@ -32,32 +35,61 @@ function ContrattiCondivisi({ clienteId }: { clienteId: string }) {
 
   const listini = data.listini || []
   const corrente = listini.find((l: any) => l.id === data.listino_corrente) || null
-  const shared = (data.contratti || []).filter((c: any) => c.abilitato)
+  const contratti = data.contratti || []
 
-  async function assegna() {
+  // Cosa si toglie, in numeri: solo totali, nessun dettaglio della rete del collegato.
+  const n = (k: number, uno: string, tanti: string) => `${k} ${k === 1 ? uno : tanti}`
+  const descriviSostituzione = (s: any) =>
+    `${s.nome}: ${n(s.copie, 'copia', 'copie')} non più ${s.copie === 1 ? 'attiva' : 'attive'}, con ${n(s.prezzi_vendita, 'prezzo', 'prezzi')} di vendita, ${n(s.prezzi_costo, 'prezzo', 'prezzi')} di costo, ${n(s.zone, 'zona', 'zone')} e ${s.cap} CAP`
+
+  async function assegna(conferma?: string) {
     if (!sel) return
     setBusy('assegna'); setMsg('')
-    const res = await fetch(`/api/condivisioni/${data.link.id}/assegna-listino`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listino_id: sel }) })
+    const res = await fetch(`/api/condivisioni/${data.link.id}/assegna-listino`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listino_id: sel, conferma }) })
     const d = await res.json().catch(() => ({})); setBusy('')
     if (!res.ok || d?.error) { setMsg(d?.error || 'Errore'); return }
+    if (d.serve_conferma) {
+      const parti: string[] = []
+      if ((d.da_confermare || []).length) parti.push(`${data.link.compratore} ha già una versione non più attiva di questi contratti: per darglieli tu se ne toglie quello che resta sul suo portale — ${(d.da_confermare || []).map(descriviSostituzione).join('; ')}. I prezzi tolti restano nel registro.`)
+      if ((d.scoperti || []).length) parti.push(`Questi contratti che gli condividi già non sono nel listino scelto: ${(d.scoperti || []).join(', ')}. Resteranno sul suo portale, ma le sue spedizioni verranno rifiutate finché non li rimetti nel listino o li disabiliti.`)
+      const ok = await dialog.confirm({
+        title: (d.da_confermare || []).length ? 'Sostituire il contratto?' : 'Assegnare questo listino?',
+        message: parti.join(' '),
+        confirmText: (d.da_confermare || []).length ? 'Sostituisci' : 'Assegna', danger: true,
+      })
+      if (ok) return assegna(d.impronta)
+      setMsg('Nessuna modifica.')
+      return
+    }
     const cond = (d.condivisi || []).join(', ')
     const salt = (d.saltati || []).map((s: any) => `${s.nome} (${s.motivo})`).join(', ')
-    setMsg(`Listino assegnato.${cond ? ` Condivisi: ${cond}.` : ''}${salt ? ` Saltati: ${salt}.` : ''}`)
+    setMsg(`Listino assegnato.${cond ? ` Condivisi: ${cond}.` : ''}${salt ? ` Non condivisi: ${salt}.` : ''}`)
     carica()
   }
-  async function disabilita(cid: string) {
-    setBusy(cid); setMsg('')
-    const res = await fetch(`/api/condivisioni/${data.link.id}/disabilita-contratto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ corriere_id: cid }) })
+  async function disabilita(c: any) {
+    const ok = await dialog.confirm({
+      title: `Togliere ${c.nome_contratto} a ${data.link.compratore}?`,
+      message: `Si revoca la sua chiave e il contratto esce dal suo listino d'ingrosso (i prezzi restano nel registro). Dal suo portale sparisce, o resta spento se ci ha già spedito: lo storico non si cancella. Le spedizioni sue e della sua rete su questo contratto si fermano subito.`,
+      confirmText: 'Togli', danger: true,
+    })
+    if (!ok) return
+    setBusy(c.id); setMsg('')
+    const res = await fetch(`/api/condivisioni/${data.link.id}/disabilita-contratto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ corriere_id: c.id }) })
     const d = await res.json().catch(() => ({})); setBusy('')
     if (!res.ok || d?.error) { setMsg(d?.error || 'Errore'); return }
+    setMsg(`${c.nome_contratto} tolto a ${data.link.compratore}.${d?.avviso ? ' ' + d.avviso : ''}`)
     carica()
   }
-  async function risincronizza() {
+  async function aggiorna() {
     setBusy('sync'); setMsg('')
     const res = await fetch(`/api/condivisioni/${data.link.id}/risincronizza`, { method: 'POST' })
     const d = await res.json().catch(() => ({})); setBusy('')
     if (!res.ok || d?.error) { setMsg(d?.error || 'Errore'); return }
-    setMsg(`Costi ri-sincronizzati sul portale del collegato (${d.contratti || 0} contratti).`)
+    const creati = (d.creati || []).join(', ')
+    const daConf = (d.da_confermare || []).join(', ')
+    const salt = (d.saltati || []).map((s: any) => `${s.nome} (${s.motivo})`).join(', ')
+    setMsg(`Costi aggiornati sul portale del collegato (${d.contratti || 0} contratti).${creati ? ` Attivati: ${creati}.` : ''}${daConf ? ` Da sostituire con Assegna: ${daConf}.` : ''}${salt ? ` Non condivisi: ${salt}.` : ''}`)
+    carica()
   }
   async function salvaCredito(modo: string) {
     if (modo === data.credito_modo) return
@@ -79,15 +111,31 @@ function ContrattiCondivisi({ clienteId }: { clienteId: string }) {
       color: data.credito_modo === modo ? '#4f46e5' : '#555', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 700, cursor: 'pointer',
     }}>{label}</button>
   )
+  const badge = (testo: string, colore: string, sfondo: string) => (
+    <span style={{ fontSize: '11px', fontWeight: 700, color: colore, background: sfondo, padding: '2px 8px', borderRadius: '10px' }}>{testo}</span>
+  )
+  const statoContratto = (c: any) => {
+    if (c.stato === 'condiviso') {
+      if (c.ponte === 'disabilitato') return badge('Tolto da te: per ridarglielo rimettilo nel listino e premi Assegna', '#6b7280', '#f3f4f6')
+      if (c.fuori_listino) return badge('Non nel listino: le sue spedizioni vengono rifiutate', '#b45309', '#fffbeb')
+      if (c.ponte === 'in_attesa_costo') return badge('In attesa del costo: correggi il listino e premi Aggiorna', '#b45309', '#fffbeb')
+      if (c.ponte === 'in_pausa') return badge('Condiviso · in pausa dal collegato', '#6b7280', '#f3f4f6')
+      return badge('Condiviso ✓', '#059669', '#ecfdf5')
+    }
+    if (c.stato === 'da_creare') return badge('Da attivare: premi Aggiorna', '#b45309', '#fffbeb')
+    if (c.stato === 'da_sostituire') return badge('Da sostituire: premi Assegna e conferma', '#b45309', '#fffbeb')
+    return badge('Non condiviso', '#6b7280', '#f3f4f6')
+  }
 
   return (
     <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e8e8e8', overflow: 'hidden' }}>
       <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', fontSize: '13px', fontWeight: 700, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '8px' }}>
         🔗 Contratti condivisi con {data.link.compratore}
-        {shared.length > 0 && <button onClick={risincronizza} disabled={busy === 'sync'} title="Dopo aver ritoccato i prezzi del listino, aggiorna il costo mostrato sul portale del collegato" style={{ marginLeft: 'auto', background: '#fff', border: '1px solid #ddd', borderRadius: '6px', padding: '4px 10px', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', color: '#4f46e5' }}>{busy === 'sync' ? '…' : '↻ Ri-sincronizza costi'}</button>}
+        {corrente && <button onClick={aggiorna} disabled={busy === 'sync'} title="Dopo aver ritoccato il listino, aggiorna il costo sul portale del collegato e attiva i contratti aggiunti" style={{ marginLeft: 'auto', background: '#fff', border: '1px solid #ddd', borderRadius: '6px', padding: '4px 10px', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', color: '#4f46e5' }}>{busy === 'sync' ? '…' : '↻ Aggiorna'}</button>}
       </div>
       <div style={{ padding: '12px 16px' }}>
-        {msg && <div style={{ fontSize: '12px', color: (msg.toLowerCase().includes('err') || msg.toLowerCase().includes('salt')) ? '#b45309' : '#15803d', marginBottom: '10px' }}>{msg}</div>}
+        {msg && <div style={{ fontSize: '12px', color: (msg.toLowerCase().includes('err') || msg.toLowerCase().includes('non condivisi') || msg.toLowerCase().includes('da sostituire') || msg.toLowerCase().includes('riprova')) ? '#b45309' : '#15803d', marginBottom: '10px' }}>{msg}</div>}
+        {data.errore_lettura && <div style={{ fontSize: '12px', color: '#b45309', marginBottom: '10px' }}>Non sono riuscito a leggere lo stato dei contratti: ricarica la pagina.</div>}
 
         <div style={{ fontSize: '12.5px', color: '#444', marginBottom: '6px' }}>Condizioni di pagamento <span style={{ color: '#888' }}>(come <b>{data.link.compratore}</b> paga te)</span></div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '14px' }}>
@@ -102,21 +150,23 @@ function ContrattiCondivisi({ clienteId }: { clienteId: string }) {
             <option value="">— scegli un tuo listino —</option>
             {listini.map((l: any) => <option key={l.id} value={l.id}>{l.nome}</option>)}
           </select>
-          <button onClick={assegna} disabled={busy === 'assegna' || !sel} style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', padding: '7px 16px', fontSize: '13px', fontWeight: 700, cursor: (busy === 'assegna' || !sel) ? 'default' : 'pointer', opacity: (busy === 'assegna' || !sel) ? 0.6 : 1 }}>{busy === 'assegna' ? '…' : 'Assegna'}</button>
+          <button onClick={() => assegna()} disabled={busy === 'assegna' || !sel} style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', padding: '7px 16px', fontSize: '13px', fontWeight: 700, cursor: (busy === 'assegna' || !sel) ? 'default' : 'pointer', opacity: (busy === 'assegna' || !sel) ? 0.6 : 1 }}>{busy === 'assegna' ? '…' : 'Assegna'}</button>
           {corrente && <a href={`/dashboard/listini/clienti/${corrente.id}`} className="lst-link" style={{ fontSize: '12px' }}>apri “{corrente.nome}”</a>}
         </div>
-        <div style={{ fontSize: '11.5px', color: '#9ca3af', marginBottom: shared.length ? '14px' : 0 }}>Il listino lo crei in <b>Listini Clienti</b> (coi tuoi prezzi) e lo assegni qui: i contratti dentro vengono condivisi col collegato. I suoi contratti, e quelli che arrivano da lui, vengono saltati da soli.</div>
+        <div style={{ fontSize: '11.5px', color: '#9ca3af', marginBottom: contratti.length ? '14px' : 0 }}>Il listino lo crei in <b>Listini Clienti</b> (coi tuoi prezzi, solo per questo collegato) e lo assegni qui: i contratti dentro vengono condivisi. Se poi ne aggiungi, premi <b>Aggiorna</b>. Non si condivide un contratto che il collegato ha già, o che arriva da lui; se il suo master gliel'ha tolto, lo sostituisci tu.</div>
 
-        {shared.length > 0 && (
+        {contratti.length > 0 && (
           <div>
-            <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '6px' }}>Contratti condivisi ({shared.length})</div>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '6px' }}>Contratti del listino ({contratti.length})</div>
             <div style={{ display: 'grid', gap: '8px' }}>
-              {shared.map((c: any) => (
+              {contratti.map((c: any) => (
                 <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', border: '1px solid #f0f0f0', borderRadius: '8px', padding: '9px 12px' }}>
                   <span style={{ fontSize: '13px', color: '#1a1a1a' }}>{c.tipo && <b style={{ textTransform: 'uppercase' }}>{c.tipo} </b>}{c.nome_contratto}</span>
+                  {c.motivo && <span style={{ fontSize: '11.5px', color: '#9ca3af' }}>— {c.motivo}</span>}
+                  {c.sostituzione && <span style={{ fontSize: '11.5px', color: '#9ca3af' }}>— ne ha {c.sostituzione.copie === 1 ? 'una versione non più attiva' : `${c.sostituzione.copie} versioni non più attive`}, che verranno tolte</span>}
                   <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#059669', background: '#ecfdf5', padding: '2px 8px', borderRadius: '10px' }}>Condiviso ✓</span>
-                    <button onClick={() => disabilita(c.id)} disabled={busy === c.id} style={{ background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>{busy === c.id ? '…' : 'Disabilita'}</button>
+                    {statoContratto(c)}
+                    {c.stato === 'condiviso' && c.ponte !== 'disabilitato' && <button onClick={() => disabilita(c)} disabled={busy === c.id} style={{ background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>{busy === c.id ? '…' : 'Togli'}</button>}
                   </span>
                 </div>
               ))}

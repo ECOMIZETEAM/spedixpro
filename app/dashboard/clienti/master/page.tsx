@@ -175,7 +175,8 @@ function NuoviMaster() {
 
 // Pannello "Collegamenti tra master" (condivisione contratti). Qui si COLLEGA un master col suo codice
 // (lui poi approva) e si APPROVANO le richieste ricevute. Una volta collegato, il master compare in
-// Elenco Clienti col badge "Master collegato": da lì gli si abilitano i contratti e si aggancia il listino.
+// Elenco Clienti col badge "Master collegato": dalla sua scheda gli si assegna il listino, e i contratti
+// dentro gli vengono condivisi.
 function Collegamenti() {
   const dialog = useDialog()
   const [codice, setCodice] = useState<string | null>(null)

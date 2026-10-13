@@ -27,3 +27,18 @@ export async function fetchAll<T = any>(build: () => any, max = 500000): Promise
   }
   return out
 }
+
+// Come fetchAll, ma una pagina che non si legge LANCIA invece di chiudere l'elenco lì: serve dove un
+// elenco incompleto porterebbe a decidere male. La condivisione decide da qui cosa cancellare, e
+// "non sono riuscito a leggere" non deve mai valere "non c'è niente".
+export async function fetchAllStretto<T = any>(build: () => any, max = 500000): Promise<T[]> {
+  const out: T[] = []
+  for (let base = 0; base < max; base += 1000) {
+    const { data, error } = await build().range(base, base + 999)
+    if (error) throw new Error('lettura a pagine non riuscita: ' + error.message)
+    const rows = (data as T[]) || []
+    out.push(...rows)
+    if (rows.length < 1000) break
+  }
+  return out
+}
