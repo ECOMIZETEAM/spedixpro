@@ -35,8 +35,12 @@ export async function GET(req: NextRequest) {
     .order('ultimo_sync', { ascending: true, nullsFirst: true })
     .limit(LOTTO)
 
-  const dal = new Date(Date.now() - GIORNI * 86400000).toISOString().slice(0, 10)
-  const al = new Date().toISOString().slice(0, 10)
+  // Giorni ITALIANI, non UTC: tra mezzanotte e le due il giorno UTC e' ancora ieri, e i negozi che
+  // contano le date nell'ora del negozio (PrestaShop) non davano gli ordini della notte. Per chi passa
+  // da rangeGiorniISO (eBay, Woo) non cambia niente: la fine della finestra e' comunque "adesso".
+  const giornoRoma = (ms: number) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' }).format(new Date(ms))
+  const dal = giornoRoma(Date.now() - GIORNI * 86400000)
+  const al = giornoRoma(Date.now())
 
   let fatte = 0, importati = 0
   const falliti: { negozio: string; errore: string }[] = []

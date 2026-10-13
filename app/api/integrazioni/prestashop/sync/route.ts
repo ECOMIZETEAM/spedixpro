@@ -5,6 +5,10 @@ import { sincronizzaOrdiniPrestashop } from '@/lib/prestashopSync'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+// Un mese di ordini di un negozio grande non sta nel tempo di serie di una funzione: nelle ultime 24
+// ore questa rotta era scaduta due volte (13/10/2026), e chi aveva premuto Sincronizza vedeva solo
+// "Errore di connessione". Stesso tetto del giro automatico.
+export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()

@@ -43,6 +43,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Alcuni ordini non esistono o non sono tuoi' }, { status: 404 })
   }
 
+  // Un ordine che il negozio ha annullato non si unisce a un altro: finirebbe nel pacco del capofila
+  // merce che il compratore non aspetta piu'.
+  const annullati = ordini.filter((o: any) => o.stato === 'annullato')
+  if (annullati.length) {
+    return NextResponse.json({
+      error: `Non unibili: ${annullati.length === 1 ? '1 ordine risulta annullato' : annullati.length + ' ordini risultano annullati'} sul negozio.`,
+    }, { status: 400 })
+  }
+
   const giaPartiti = ordini.filter((o: any) => o.spedizione_id || o.unito_in)
   if (giaPartiti.length) {
     return NextResponse.json({

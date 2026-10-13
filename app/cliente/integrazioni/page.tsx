@@ -148,7 +148,7 @@ export default function IntegrazioniPage() {
       const d = await res.json()
       setConnecting(false)
       if (d.error) { setMsg({ type: 'err', text: d.error }); return }
-      setMsg({ type: 'ok', text: 'PrestaShop collegato con successo' })
+      setMsg({ type: 'ok', text: 'PrestaShop collegato con successo' + (d.avviso ? '. Attenzione: ' + d.avviso : '') })
       setPsForm({ nome_negozio: '', url: '', webservice_key: '' })
       setModal(false); load()
     } catch {
@@ -254,6 +254,12 @@ export default function IntegrazioniPage() {
                     </div>
                     {it.stato === 'errore' && it.errore && (
                       <div style={{ fontSize: '11.5px', color: '#b91c1c', marginTop: '2px' }}>{it.errore}</div>
+                    )}
+                    {/* Negozio collegato e funzionante, ma con qualcosa da sistemare (permessi della
+                        chiave, ultima sincronizzazione non riuscita): prima restava scritto
+                        sull'integrazione e nessuno lo vedeva, perche' si mostrava solo a negozio in errore. */}
+                    {it.stato === 'attivo' && it.piattaforma === 'prestashop' && it.errore && (
+                      <div style={{ fontSize: '11.5px', color: '#b45309', marginTop: '2px', lineHeight: 1.45 }}>⚠ {it.errore}</div>
                     )}
                   </div>
                   <span style={{ fontSize: '11.5px', fontWeight: 600, padding: '3px 9px', borderRadius: '999px', color: s.c, background: s.bg }}>
@@ -406,7 +412,7 @@ export default function IntegrazioniPage() {
                 <input value={psForm.url} onChange={e => setPsForm(v => ({ ...v, url: e.target.value }))} placeholder="https://ilmionegozio.com" style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none', marginBottom: '12px' }} />
                 <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '6px' }}>Webservice Key *</label>
                 <input value={psForm.webservice_key} onChange={e => setPsForm(v => ({ ...v, webservice_key: e.target.value }))} placeholder="Chiave API PrestaShop" style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none' }} />
-                <p style={{ fontSize: '12px', color: '#999', marginTop: '8px', lineHeight: 1.5 }}>La Webservice Key si genera in PrestaShop: Parametri Avanzati &rarr; Webservice &rarr; Aggiungi nuova chiave.</p>
+                <p style={{ fontSize: '12px', color: '#999', marginTop: '8px', lineHeight: 1.5 }}>La Webservice Key si genera in PrestaShop: Parametri Avanzati &rarr; Webservice &rarr; Aggiungi nuova chiave. Permessi da spuntare: <b>Visualizza (GET)</b> su orders, addresses, customers, states, countries, order_states, order_carriers; <b>Modifica (PUT)</b> su order_carriers; <b>Aggiungi (POST)</b> su order_histories.</p>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '18px' }}>
                   <button onClick={() => setStep('platforms')} style={{ background: '#fff', color: '#555', border: '1px solid #ddd', borderRadius: '8px', padding: '9px 16px', fontSize: '13px', cursor: 'pointer' }}>&larr; Indietro</button>
                   <button onClick={connettiPrestashop} disabled={connecting} style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '8px', padding: '9px 20px', fontSize: '13px', fontWeight: 600, cursor: connecting ? 'default' : 'pointer', opacity: connecting ? .6 : 1 }}>{connecting ? 'Verifica…' : 'Collega'}</button>

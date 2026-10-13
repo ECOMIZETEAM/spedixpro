@@ -201,7 +201,11 @@ export default function OrdiniPage() {
       else setMsg('Sincronizzati '+d.importati+' ordini'
         + ((d.spediti!==undefined || d.daSpedire!==undefined)
             ? ' ('+(d.spediti||0)+' già spediti · '+(d.daSpedire||0)+' da spedire)'
-            : (d.letti!==undefined?' (letti '+d.letti+')':'')))
+            : (d.letti!==undefined?' (letti '+d.letti+')':''))
+        // Ordini che il negozio ha annullato o rimborsato dopo l'import: escono dai "Da spedire".
+        + (d.annullati ? ' · '+d.annullati+(d.annullati===1?' annullato':' annullati')+' sul negozio' : '')
+        // Permessi mancanti sulla chiave del negozio: va detto qui, dove si guarda dopo aver premuto.
+        + (d.avviso ? ' — ⚠ '+d.avviso : ''))
       carica()
     } catch { setMsg('Errore di connessione') }
     setSincronizzando(false)
@@ -241,11 +245,11 @@ export default function OrdiniPage() {
   // CHI HA PIU' DI UN ORDINE DA SPEDIRE. Stessa chiave dell'unione: se la pagina la calcolasse a
   // modo suo, proporrebbe accoppiate che poi l'unione rifiuta.
   const gruppi = useMemo(() => gruppiStessoDestinatario(
-    ordini.filter((o:any) => !o.spedizione_id && o.stato !== 'unito')
+    ordini.filter((o:any) => !o.spedizione_id && o.stato !== 'unito' && o.stato !== 'annullato')
       .map((o:any) => ({ id: o.id, chiave: chiaveDestinatario(destinatarioDaEcommerce(o)) }))
   ), [ordini])
   const gruppoDi = (o:any): string[] | undefined =>
-    (!o.spedizione_id && o.stato !== 'unito') ? gruppi.get(chiaveDestinatario(destinatarioDaEcommerce(o))) : undefined
+    (!o.spedizione_id && o.stato !== 'unito' && o.stato !== 'annullato') ? gruppi.get(chiaveDestinatario(destinatarioDaEcommerce(o))) : undefined
   const quantiDoppi = useMemo(() => ordini.filter((o:any) => gruppoDi(o)).length, [ordini, gruppi])
 
   const filtrati = useMemo(()=>{
@@ -330,7 +334,10 @@ export default function OrdiniPage() {
   const ordiniPerId = useMemo(()=>new Map<string,any>(ordini.map((o:any)=>[o.id,o])), [ordini])
   // Fuori i gia' spediti DA NOI (hanno la spedizione collegata) e quelli UNITI a un altro ordine: un
   // ordine assorbito parte dentro il pacco del capofila, spedirlo da solo sarebbe un doppione.
-  const spedibileInMassa = (o:any) => !!o && o.stato !== 'unito' && !(o.stato==='spedito' && o.spedizione_id)
+  // Fuori anche gli ANNULLATI SUL NEGOZIO (annullati o rimborsati dopo che li avevamo importati): in
+  // un invio di massa nessuno li guarda uno per uno, e partirebbe merce per un ordine che non c'e' piu'.
+  // Dalla riga si possono ancora spedire, uno alla volta, se il negoziante sa quello che fa.
+  const spedibileInMassa = (o:any) => !!o && o.stato !== 'unito' && o.stato !== 'annullato' && !(o.stato==='spedito' && o.spedizione_id)
   // Cosa manca per spedirlo da qui (si completa dal modulo «Crea spedizione» della riga).
   function motivoFuoriMassa(o:any): string | null {
     const d = o.destinatario || {}
@@ -482,6 +489,7 @@ export default function OrdiniPage() {
         // sarebbero partiti come un pacco in piu', doppione del capofila. Ora si saltano, e lo si
         // dice: il pulsante conta N selezionati, e senza una riga di spiegazione ne partirebbero N-1.
         if (o && o.stato === 'unito') { errori.push((o.numero_ordine || id)+': unito a un altro ordine, parte col capofila'); continue }
+        if (o && o.stato === 'annullato') { errori.push((o.numero_ordine || id)+': annullato sul negozio, non spedito'); continue }
         if (!spedibileInMassa(o)) continue
         const num = o.numero_ordine || id
         const motivo = motivoFuoriMassa(o)
@@ -746,6 +754,7 @@ export default function OrdiniPage() {
               <option value="">Tutti</option>
               <option value="da_spedire">Da spedire</option>
               <option value="spedito">Spedito</option>
+              {(fStatoEv==='annullato' || ordini.some((o:any)=>o.stato==='annullato')) && <option value="annullato">Annullato sul negozio</option>}
             </select>
           </div>
           <div style={field}><label style={lbl}>Paese</label>
@@ -904,14 +913,14 @@ export default function OrdiniPage() {
                         style={{marginLeft:'6px',background:'#fff7ed',color:'#c2410c',border:'1px solid #fdba74',borderRadius:'999px',padding:'1px 8px',fontSize:'11px',fontWeight:700,cursor:'pointer'}}>
                         {g.length} ordini{tutti?' ✓':''}
                       </button>) })()}<div style={{fontSize:'11px',color:'#999'}}>{d.citta}{d.provincia?' ('+d.provincia+')':''} {d.paese||''}</div></td>
-                    <td style={{...td,borderTop:'none',padding:'9px 12px 3px'}}><span style={{fontSize:'11px',fontWeight:600,padding:'3px 9px',borderRadius:'999px',background:o.stato==='spedito'?'#dcfce7':'#fef3c7',color:o.stato==='spedito'?'#166534':'#92400e'}}>{o.stato==='spedito'?'Spedito':'Da spedire'}</span></td>
+                    <td style={{...td,borderTop:'none',padding:'9px 12px 3px'}}><span title={o.stato==='annullato'?'Sul negozio questo ordine non è più valido (annullato o rimborsato) dopo che era stato importato':undefined} style={{fontSize:'11px',fontWeight:600,padding:'3px 9px',borderRadius:'999px',whiteSpace:'nowrap',background:o.stato==='spedito'?'#dcfce7':o.stato==='annullato'?'#f3f4f6':'#fef3c7',color:o.stato==='spedito'?'#166534':o.stato==='annullato'?'#4b5563':'#92400e'}}>{o.stato==='spedito'?'Spedito':o.stato==='annullato'?'Annullato sul negozio':'Da spedire'}</span></td>
                     <td style={{...td,borderTop:'none',padding:'9px 12px 3px',textAlign:'right',whiteSpace:'nowrap'}}>
                       {/* "Spedito" solo se lo abbiamo spedito NOI (ha la spedizione Moove): allora niente
                           ri-spedizione. Se è "spedito" solo sul marketplace (import eBay dei già-evasi,
                           senza spedizione_id) mostro comunque "Crea spedizione" → si fa l'etichetta e nel
                           form si può modificare l'ordine. */}
                       {(o.stato!=='spedito' || !o.spedizione_id)
-                        ? <button onClick={()=>creaSpedizione(o)} title={o.stato==='spedito'?'Già segnato spedito sul marketplace: crea comunque l\'etichetta e modifica i dati nel form':undefined} style={{background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>Crea spedizione</button>
+                        ? <button onClick={()=>creaSpedizione(o)} title={o.stato==='spedito'?'Già segnato spedito sul marketplace: crea comunque l\'etichetta e modifica i dati nel form':o.stato==='annullato'?'Attenzione: sul negozio questo ordine risulta annullato o rimborsato':undefined} style={{background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>Crea spedizione</button>
                         : <span style={{display:'inline-flex',flexDirection:'column',alignItems:'flex-end',gap:'3px'}}>
                             <span style={{color:'#166534',fontSize:'12px',fontWeight:600}}>✓ Spedito</span>
                             {/* Write-back allo store fallito (es. chiavi negozio in sola lettura): il tracking

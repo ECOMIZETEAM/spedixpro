@@ -1,4 +1,4 @@
-import { psGet, psGetXml, psPutXml, psPostXml, psXml } from '@/lib/prestashop'
+import { psGet, psGetXml, psPutXml, psPostXml, psXml, PS_STATI_DI_SERIE } from '@/lib/prestashop'
 
 // Rimanda il tracking a PrestaShop alla chiusura distinta: imposta tracking_number
 // sull'order_carrier dell'ordine. Best-effort, mai bloccante.
@@ -17,6 +17,8 @@ function impostaTracking(xml: string, tracking: string): string {
   return xml.replace(/<\/order_carrier>/, `${nodo}</order_carrier>`)
 }
 
+type Negozio = { url: string; key: string; shippedId: number; statiSpediti: Set<string> } | null
+
 export async function fulfillSpedizioniPrestashop(db: any, spedizioneIds: string[]) {
   const esiti: any[] = []
   if (!spedizioneIds?.length) return esiti
@@ -24,6 +26,36 @@ export async function fulfillSpedizioniPrestashop(db: any, spedizioneIds: string
     .from('ordini_ecommerce').select('*')
     .in('spedizione_id', spedizioneIds)
     .eq('piattaforma', 'prestashop')
+
+  // Credenziali e stati del negozio UNA volta per negozio, non una per ordine: una distinta con
+  // cinquanta ordini dello stesso negozio rileggeva cinquanta volte lo stesso elenco di stati.
+  const negozi = new Map<string, Negozio>()
+  async function negozioDi(integrazioneId: string): Promise<Negozio> {
+    if (negozi.has(integrazioneId)) return negozi.get(integrazioneId)!
+    let n: Negozio = null
+    const { data: integr } = await db.from('integrazioni').select('credenziali').eq('id', integrazioneId).maybeSingle()
+    const cred = integr?.credenziali as any
+    if (cred?.url && cred?.key) {
+      // Lo stato "spedito" del negozio, fallback id 4 (default PrestaShop). Se gli stati non si
+      // leggono (chiave senza permesso) valgono quelli di serie.
+      let shippedId = 4
+      const statiSpediti = new Set<string>(Object.entries(PS_STATI_DI_SERIE).filter(([, s]) => s.spedito).map(([id]) => id))
+      try {
+        const st = await psGet(cred.url, cred.key, 'order_states?display=full')
+        const stati: any[] = st?.order_states || []
+        if (stati.length) {
+          statiSpediti.clear()
+          for (const x of stati) if (String(x.shipped) === '1') statiSpediti.add(String(x.id))
+          const match = stati.find((x: any) => /spedit|shipped|exp[ée]di|enviad|versand|verzon/i.test(JSON.stringify(x?.name || '')))
+          if (match?.id) shippedId = Number(match.id)
+        }
+      } catch { /* uso il default */ }
+      n = { url: cred.url, key: cred.key, shippedId, statiSpediti }
+    }
+    negozi.set(integrazioneId, n)
+    return n
+  }
+
   for (const ordine of ordini || []) {
     if (ordine.fulfillment_stato === 'ok') continue
     const segna = async (stato: string, errore: string | null) => {
@@ -35,9 +67,8 @@ export async function fulfillSpedizioniPrestashop(db: any, spedizioneIds: string
       const tracking = sped?.tracking_number
       if (!tracking) { await segna('errore', 'tracking number mancante'); continue }
 
-      const { data: integr } = await db.from('integrazioni').select('credenziali').eq('id', ordine.integrazione_id).maybeSingle()
-      const cred = integr?.credenziali as any
-      if (!cred?.url || !cred?.key) { await segna('errore', 'integrazione non trovata'); continue }
+      const cred = await negozioDi(String(ordine.integrazione_id))
+      if (!cred) { await segna('errore', 'integrazione non trovata'); continue }
 
       // 1) trovo l'id dell'order_carrier dell'ordine (lettura JSON: comoda per estrarre l'id)
       const oc = await psGet(cred.url, cred.key, `order_carriers?filter[id_order]=[${ordine.ordine_esterno_id}]`)
@@ -50,18 +81,22 @@ export async function fulfillSpedizioniPrestashop(db: any, spedizioneIds: string
       await psPutXml(cred.url, cred.key, 'order_carriers', carrierId, impostaTracking(xml, String(tracking)))
 
       // 3) Porto l'ordine allo stato "Spedito" (il solo tracking_number non basta a marcare spedito
-      // né ad avvisare il cliente). Cerco lo stato "spedito" del negozio, fallback id 4 (default
-      // PrestaShop). Best-effort: se fallisce, il tracking è comunque passato.
+      // né ad avvisare il cliente). Best-effort: se fallisce, il tracking è comunque passato.
       try {
-        let shippedId = 4
+        // SE IL NEGOZIO L'HA GIA' PORTATO AVANTI, non lo si riporta indietro. Il ritento puo' arrivare
+        // giorni dopo (chiave senza permesso di scrittura sistemata in ritardo): a quel punto l'ordine
+        // puo' essere gia' "Consegnato", e aggiungere "Spedito" lo farebbe tornare indietro e
+        // rimanderebbe al compratore la mail di spedizione. Si aggiunge solo se non e' gia' spedito.
+        let giaSpedito = false
         try {
-          const st = await psGet(cred.url, cred.key, 'order_states?display=full')
-          const match = (st?.order_states || []).find((x: any) => /spedit|shipped|exp[ée]di|enviad|versand|verzon/i.test(JSON.stringify(x?.name || '')))
-          if (match?.id) shippedId = Number(match.id)
-        } catch { /* uso il default */ }
-        await psPostXml(cred.url, cred.key, 'order_histories', psXml('order_history', {
-          id_order: String(ordine.ordine_esterno_id), id_order_state: String(shippedId),
-        }))
+          const ora = await psGet(cred.url, cred.key, `orders?display=[id,current_state]&filter[id]=[${ordine.ordine_esterno_id}]`)
+          giaSpedito = cred.statiSpediti.has(String(ora?.orders?.[0]?.current_state || ''))
+        } catch { /* stato non letto: si procede come prima */ }
+        if (!giaSpedito) {
+          await psPostXml(cred.url, cred.key, 'order_histories', psXml('order_history', {
+            id_order: String(ordine.ordine_esterno_id), id_order_state: String(cred.shippedId),
+          }))
+        }
       } catch { /* stato non aggiornato: il tracking è già stato inviato */ }
 
       await segna('ok', null)
