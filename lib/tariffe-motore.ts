@@ -436,6 +436,34 @@ export async function calcolaTariffeCliente(
   const { contrattiSospesiSopra: _css, sospesoDallaCatena: _sdc } = await import('@/lib/contratti-catena')
   const _sospesiCli = await _css(masterId, adminDb)
 
+  // IL COSTO DEL MASTER SI CHIEDE PER TUTTI I CONTRATTI INSIEME, NON UNO DOPO L'ALTRO.
+  // calcolaPrezzoCorriereDettaglio sono ~10 letture in fila per contratto, e il ciclo qui sotto le
+  // faceva contratto dopo contratto: su un listino da 20 contratti ~200 letture ad aspettarsi a
+  // vicenda prima di rispondere (misurato il 13/10/2026: mediana 265 letture per preventivo, 8,8
+  // contratti quotati a preventivo). Sono letture indipendenti fra loro, che dipendono solo dal
+  // contratto e da dati fissi per tutto il preventivo, e non scrivono niente: si fanno partire a
+  // gruppi di INSIEME. I contratti che il ciclo scarta PRIMA di chiedere il costo (disattivato per il
+  // cliente, in pausa dal proprio master, sospeso a monte) restano fuori anche da qui, con le stesse
+  // tre condizioni nello stesso ordine: non si fa una lettura in piu' di prima. Il ciclo che decide,
+  // conta gli esclusi e riempie `risultati` resta identico e nello stesso ordine: legge dalla mappa.
+  const _daQuotare = Array.from(fascePerCorriere.entries()).filter(([cid, fasceC]) => {
+    if (disabilitati.has(cid)) return false
+    const _c: any = (fasceC[0] as any)?.corrieri
+    if (_c?.attivo === false) return false
+    if (_sdc(_c?.nome_contratto, _sospesiCli)) return false
+    return true
+  }).map(([cid]) => cid)
+  const _costoPerCorr = new Map<string, Awaited<ReturnType<typeof calcolaPrezzoCorriereDettaglio>>>()
+  const INSIEME = 6   // catene di letture per volta: poche, per non fare una raffica sul database
+  for (let i = 0; i < _daQuotare.length; i += INSIEME) {
+    await Promise.all(_daQuotare.slice(i, i + INSIEME).map(async (cid) => {
+      _costoPerCorr.set(cid, await calcolaPrezzoCorriereDettaglio(adminDb, {
+        corriereId: cid, masterId, provincia, cap: capDest, paese: paeseDest, citta: (body.shipTo?.city || ''),
+        pesoReale, packages: tuttiColli, contrassegno: 0, assicurazione: 0,
+      }))
+    }))
+  }
+
   for (const [corriereId, fasceDelCorriere] of fascePerCorriere) {
     if (disabilitati.has(corriereId)) continue   // contratto disattivato per questo cliente/sotto-master
     {
@@ -450,10 +478,8 @@ export async function calcolaTariffeCliente(
     // Client ADMIN: legge il LISTINO CORRIERI, cioe' il costo d'acquisto del master. Con il token
     // del cliente quel listino non e' piu' leggibile (e non deve esserlo: confrontato col suo
     // prezzo darebbe il margine). Il valore serve solo a questo gate, non esce nella risposta.
-    const _costoMaster = await calcolaPrezzoCorriereDettaglio(adminDb, {
-      corriereId, masterId, provincia, cap: capDest, paese: paeseDest, citta: (body.shipTo?.city || ''),
-      pesoReale, packages: tuttiColli, contrassegno: 0, assicurazione: 0,
-    })
+    // Calcolato sopra, in parallelo, con questi stessi identici argomenti (vedi _costoPerCorr).
+    const _costoMaster = _costoPerCorr.get(corriereId) ?? null
     if (!_costoMaster || _costoMaster.totale <= 0) { esclusiQuota++; ultimoErroreQuota = 'listino master mancante per questa zona'; continue }
     const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
     // Peso fatturato con il fattore volume DI QUESTO corriere (override per-corriere).
