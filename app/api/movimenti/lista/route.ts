@@ -32,11 +32,12 @@ export async function GET(req: NextRequest) {
   let corriereIdsGruppo: string[] | null = null
 
   // Query base per (client, colonna target): filtri identici su lista, conteggio e somma.
-  const buildQ = (db: any, col: string, val: string, select = '*', conteggio = false) => {
+  const buildQ = (db: any, col: string, val: string, select = '*', conteggio = false, soloConto?: string) => {
     let sel = select
     if (corriere) sel = `${sel}, spedizioni!inner(corrieri!inner(nome_contratto))`
     else if (corriereIdsGruppo) sel = `${sel}, spedizioni!inner(corriere_id)`
     let q = db.from('movimenti').select(sel, conteggio ? { count: 'exact' } : undefined).eq(col, val)
+    if (soloConto) q = q.eq('conto', soloConto)
     if (cerca) q = q.or(`descrizione.ilike.%${cerca}%,riferimento.ilike.%${cerca}%`)
     if (corriere) q = q.eq('spedizioni.corrieri.nome_contratto', corriere)
     else if (corriereIdsGruppo) q = q.in('spedizioni.corriere_id', corriereIdsGruppo.length ? corriereIdsGruppo : ['00000000-0000-0000-0000-000000000000'])
@@ -44,15 +45,21 @@ export async function GET(req: NextRequest) {
   }
 
   // Carica secondo la modalità: paginata (page>0) o storica completa.
-  const carica = async (db: any, col: string, val: string) => {
+  const carica = async (db: any, col: string, val: string, soloConto?: string) => {
     if (!page) {
-      const movimenti = await fetchAll(() => buildQ(db, col, val).order('created_at', { ascending: false }))
+      const movimenti = await fetchAll(() => buildQ(db, col, val, '*', false, soloConto).order('created_at', { ascending: false }))
       return { movimenti: movimenti || [], total: (movimenti || []).length, somma: null as number | null }
     }
     const from = (page - 1) * perPage
     // SOLO le righe della pagina: niente count:'exact', che rifaceva lo scan del filtro a ogni pagina.
-    const { data } = await buildQ(db, col, val, '*', false)
+    const { data } = await buildQ(db, col, val, '*', false, soloConto)
       .order('created_at', { ascending: false }).range(from, from + perPage - 1)
+    // Col filtro sul conto il totale si conta sulla stessa query: la RPC qui sotto il conto non lo conosce
+    // e conterebbe anche le righe tolte. La somma non la chiede nessuna delle pagine che usano il filtro.
+    if (soloConto) {
+      const { count } = await buildQ(db, col, val, 'id', true, soloConto).limit(0)
+      return { movimenti: data || [], total: Number(count || 0), somma: null as number | null }
+    }
     // TOTALE (serve alla paginazione) + SOMMA in UNA query aggregata sull'indice: prima la somma era
     // un fetchAll di TUTTI gli importi del filtro (per E&A ~64k righe, ~65 viaggi HTTP) ripetuto a
     // OGNI click/keystroke — era la lentezza della lista. La RPC applica gli stessi filtri di buildQ
@@ -197,7 +204,11 @@ export async function GET(req: NextRequest) {
         console.warn('[MOVIMENTI][403] sotto-master', { viewer: utente?.master_id, ruolo: utente?.ruolo, targetId })
         return NextResponse.json({ error: `I movimenti di ${sub?.nome || 'questo master'} sono visibili solo a chi lo ha nella propria rete.` }, { status: 403 })
       }
-      const { movimenti, total, somma } = await carica(admin, 'master_target_id', targetId)
+      // SOLO IL CONTO RETE, cioe' quello fra il padre e il figlio. Il conto "proprio" del figlio (i costi dei
+      // suoi contratti) non e' del padre: e' la regola dei report dal 22/09, e qui non valeva. Il 13/10/2026
+      // MULTIEXPRESS leggeva 38.806 righe del conto proprio di 7 figli, su 27.231 spedizioni che il suo
+      // elenco giustamente non mostra. E il saldo in testa (credito) e' quello del conto rete.
+      const { movimenti, total, somma } = await carica(admin, 'master_target_id', targetId, 'rete')
       return NextResponse.json({ movimenti, total, somma, page: page || undefined, perPage, saldo: Number(sub.credito || 0), cliente: sub.nome || null })
     }
 
@@ -217,7 +228,8 @@ export async function GET(req: NextRequest) {
           cur = pm?.parent_master_id || null
         }
         if (autorizzato) {
-          const { movimenti, total, somma } = await carica(admin, 'master_target_id', clienteId)
+          // Solo il conto rete, come nel ramo "m:" qui sopra.
+          const { movimenti, total, somma } = await carica(admin, 'master_target_id', clienteId, 'rete')
           return NextResponse.json({ movimenti, total, somma, page: page || undefined, perPage, saldo: Number(sub.credito || 0), cliente: sub.nome || null })
         }
       }
