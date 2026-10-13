@@ -16,7 +16,10 @@ export default function ReportRettificheCliente() {
       if (dal) params.set('dal', dal)
       if (al) params.set('al', al)
       const res = await fetch('/api/cliente/reports/rettifiche?' + params.toString())
-      const { righe, master, cliente } = await res.json()
+      const risposta = await res.json().catch(() => ({}))
+      // Un errore non e' "nessuna rettifica": detto cosi', il report sembra pulito quando non e' stato letto.
+      if (!res.ok) { await dialog.alert({ title: 'Report non generato', message: risposta?.error || 'Report non disponibile: riprova tra qualche secondo.' }); setGenerating(false); return }
+      const { righe, master, cliente } = risposta
       if (!righe || !righe.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna rettifica trovata nel periodo.' }); setGenerating(false); return }
       const fmt = formato.toLowerCase()
       if (fmt === 'xlsx' || fmt === 'csv') {

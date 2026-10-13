@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { fetchAll } from '@/lib/fetch-all'
+import { confineGiornoRoma } from '@/lib/date-roma'
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -19,26 +21,44 @@ export async function GET(req: NextRequest) {
   // e la mostrava: su una spedizione da 15,00 col costo master di 4,38 il cliente leggeva 10,62.
   // La rettifica va ricostruita dai numeri DEL CLIENTE: quanto gli e' stato addebitato alla
   // creazione (costo_totale) e quanto gli e' stato addebitato dopo, col movimento di rettifica.
-  let query = supabase.from('spedizioni')
-    .select('id,numero,peso_fatturato,peso_reale,peso_volume,costo_totale,created_at')
-    .eq('cliente_id', clienteId)
-    .order('created_at', { ascending: true })
-  if (dal) query = query.gte('created_at', dal)
-  if (al) query = query.lte('created_at', al + 'T23:59:59')
-  const { data: speds } = await query
-
-  // Rettifiche addebitate a QUESTO cliente, per spedizione (importo negativo = addebito in piu').
-  const ids = (speds || []).map((s: any) => s.id).filter(Boolean)
-  const rettPerSped = new Map<string, number>()
-  for (let i = 0; i < ids.length; i += 300) {
-    const { data: mv } = await supabase.from('movimenti')
-      .select('spedizione_id,importo').eq('tipo', 'rettifica').eq('cliente_id', clienteId)
-      .in('spedizione_id', ids.slice(i, i + 300))
-    for (const m of (mv || [])) {
-      const k = (m as any).spedizione_id
-      rettPerSped.set(k, (rettPerSped.get(k) || 0) + Number((m as any).importo || 0))
-    }
+  // SI PARTE DAI MOVIMENTI DI RETTIFICA DEL PERIODO, non dalle spedizioni create nel periodo. La data e'
+  // quella dell'addebito, la stessa dell'estratto conto: prima una ripesatura di settembre su un pacco di
+  // agosto non stava nel report di settembre. E le spedizioni del periodo si leggevano in una richiesta
+  // sola, quindi oltre la millesima sparivano (13/10/2026: 25 mesi-cliente, 3.478 spedizioni rettificate
+  // non mostrate, 9.151,56 € addebitati). Tutto a blocchi; un blocco non letto e' un errore, non uno zero.
+  const NON_DISPONIBILE = 'Report non disponibile in questo momento: riprova tra qualche secondo.'
+  const dalN = confineGiornoRoma(dal, 'dal'), alN = confineGiornoRoma(al ? al + 'T23:59:59' : null, 'al')
+  let mvPeriodo: any[]
+  try {
+    mvPeriodo = await fetchAll(() => {
+      let q = supabase.from('movimenti')
+        .select('id,spedizione_id,importo,created_at').eq('tipo', 'rettifica').eq('cliente_id', clienteId)
+        .not('spedizione_id', 'is', null)
+        .order('created_at', { ascending: true }).order('id', { ascending: true })
+      if (dalN) q = q.gte('created_at', dalN)
+      if (alN) q = q.lte('created_at', alN)
+      return q
+    }, undefined, { lancia: true })
+  } catch (e: any) {
+    console.error('[CLIENTE][REPORT RETTIFICHE] movimenti non letti:', e?.message || e)
+    return NextResponse.json({ error: NON_DISPONIBILE }, { status: 503 })
   }
+  // Rettifiche addebitate a QUESTO cliente nel periodo, per spedizione (importo negativo = addebito in piu').
+  const rettPerSped = new Map<string, number>()
+  for (const m of mvPeriodo) {
+    const k = (m as any).spedizione_id
+    rettPerSped.set(k, (rettPerSped.get(k) || 0) + Number((m as any).importo || 0))
+  }
+  const ids = Array.from(rettPerSped.keys())
+  const speds: any[] = []
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data: blocco, error: eB } = await supabase.from('spedizioni')
+      .select('id,numero,peso_fatturato,peso_reale,peso_volume,costo_totale,created_at')
+      .eq('cliente_id', clienteId).in('id', ids.slice(i, i + 200))
+    if (eB) { console.error('[CLIENTE][REPORT RETTIFICHE] spedizioni non lette:', eB.message); return NextResponse.json({ error: NON_DISPONIBILE }, { status: 503 }) }
+    speds.push(...(blocco || []))
+  }
+  speds.sort((a: any, b: any) => String(a.created_at).localeCompare(String(b.created_at)))
 
   // Pesi RIPESATI (reale + volumetrico) dalla rettifica. Il volumetrico ripesato è spesso il vero
   // motivo dell'addebito — un pacco di 2 kg reali ma 30 kg volumetrici si rettifica sui 30 kg — e va
