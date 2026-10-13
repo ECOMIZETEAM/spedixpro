@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
+import DettaglioSpedizione from '@/app/components/DettaglioSpedizione'
 
 function fmtEuro(n: number) {
   return `€ ${Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -186,6 +187,7 @@ export default function ClienteProfiloPage() {
   const id = (() => { try { return decodeURIComponent(String(idUrl ?? '')) } catch { return String(idUrl ?? '') } })()
   const [cliente, setCliente] = useState<any>(null)
   const [spedizioni, setSpedizioni] = useState<any[]>([])
+  const [dettaglioSped, setDettaglioSped] = useState<any>(null)
   const [movimenti, setMovimenti] = useState<any[]>([])
   const [paginaMov, setPaginaMov] = useState(1)
   const [primoRender, setPrimoRender] = useState(true)
@@ -492,10 +494,11 @@ export default function ClienteProfiloPage() {
             ):spedizioni.map(s=>(
               <div key={s.id} style={{padding:'10px 16px',borderBottom:'1px solid #f5f5f5'}}>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                  <a href={`/dashboard/spedizioni/${s.id}`} style={{fontWeight:'600',color:'#f97316',textDecoration:'none',fontSize:'13px'}}>{s.numero}</a>
-                  <span style={{fontWeight:'600',fontSize:'13px',color:'#1a1a1a'}}>€{Number(s.costo_totale||0).toFixed(2)}</span>
+                  {/* Prima era un link a /dashboard/spedizioni/<id>, una pagina che non esiste: si apre il dettaglio, come dagli elenchi. */}
+                  <button type="button" onClick={()=>setDettaglioSped(s)} style={{fontWeight:'600',color:'#f97316',background:'none',border:'none',padding:0,cursor:'pointer',textDecoration:'underline',fontSize:'13px'}}>{s.numero}</button>
+                  <span style={{fontWeight:'600',fontSize:'13px',color:'#1a1a1a',...(s.stato==='annullata'?{textDecoration:'line-through',opacity:0.6}:{})}} title={s.stato==='annullata'?'Spedizione annullata: addebito stornato':undefined}>€{Number(s.costo_totale||0).toFixed(2)}</span>
                 </div>
-                <div style={{fontSize:'11px',color:'#1a1a1a',marginTop:'2px'}}>{s.dest_nome} → {s.dest_citta} · {new Date(s.created_at).toLocaleDateString('it-IT')}</div>
+                <div style={{fontSize:'11px',color:'#1a1a1a',marginTop:'2px'}}>{s.dest_nome} → {s.dest_citta} · {new Date(s.created_at).toLocaleDateString('it-IT')}{s.stato==='annullata' && <span style={{color:'#6b7280',fontWeight:600}}> · annullata</span>}</div>
               </div>
             ))}
           </div>
@@ -545,6 +548,7 @@ export default function ClienteProfiloPage() {
           </div>
         </div>
       )}
+      {dettaglioSped && <DettaglioSpedizione s={dettaglioSped} onClose={()=>setDettaglioSped(null)} etichettaHref={dettaglioSped.stato==='annullata' ? undefined : `/dashboard/spedizioni/${dettaglioSped.id}/etichetta`} />}
     </div>
   )
 }
