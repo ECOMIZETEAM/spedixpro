@@ -20,6 +20,7 @@ import { EMAIL_PER_CORRIERE,
 } from '@/lib/spediamopro'
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
 import { normalizzaPaese } from '@/lib/paesi'
+import { glsDirettoFuoriItalia } from '@/lib/gls'
 import { calcolaPrezzoCorriereDettaglio, calcolaPesoFatturato, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente, origineCopertaCap } from '@/lib/pricing'
 // La sigla neutra al posto del tipo del contratto: il nome del sistema tecnico a valle non deve
 // arrivare al browser, nemmeno dentro il JSON (vedi lib/corriere-logo.ts).
@@ -401,6 +402,8 @@ export async function calcolaTariffeCliente(
   }
   const fascePerCorriere = new Map<string, any[]>()
   for (const [cid, fasceC] of tuttePerCorriere) {
+    // GLS diretto: solo Italia, anche se il listino ha una zona estera con le fasce (lib/gls.ts).
+    if (glsDirettoFuoriItalia((fasceC[0]?.corrieri as any)?.tipo, paeseDest)) continue
     let sel = fasceC.filter(f => zoneMatchIds.includes((f.zone as any)?.id))   // 1) zone_cap del corriere
     // 2) fallback per nome SOLO Italia — MA NON se la dest è esclusiva PER QUESTO corriere (isole/
     //    disagiate/sardegna…): lì il corriere senza la zona speciale non deve agganciare via "Italia".

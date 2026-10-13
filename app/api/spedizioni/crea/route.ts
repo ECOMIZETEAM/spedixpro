@@ -31,6 +31,7 @@ const zonaCopreDisagiata = (z: string | undefined | null): boolean => !!z && (is
 import { motivoLimiteCollo } from '@/lib/limiti-collo'
 import { vedeLaRete } from '@/lib/perimetro'
 import { emailAlCorriere } from '@/lib/email-corriere'
+import { glsDirettoFuoriItalia } from '@/lib/gls'
 
 
 // La creazione parla con i corrieri: alcuni rispondono subito, altri si prendono qualche secondo
@@ -223,6 +224,14 @@ export async function POST(req: NextRequest) {
     if (sospesoDallaCatena((corriereRecord as any).nome_contratto, sospesi)) {
       return NextResponse.json({ error: 'Contratto momentaneamente sospeso: spedizione non consentita.' }, { status: 400 })
     }
+  }
+
+  // GLS DIRETTO FUORI DALL'ITALIA: si ferma qui, PRIMA del credito e prima di chiamare GLS. Il
+  // preventivo non lo offre piu', ma questa e' la porta da cui passano tutti — import, ordini dei
+  // negozi, resi, e una pagina aperta da prima del rilascio. Il perche' sta in lib/gls.ts.
+  if (glsDirettoFuoriItalia(corriereRecord.tipo, body.shipTo?.country)) {
+    console.error('[CREA][GLS] destinazione estera su GLS diretto', { corriere: corriereRecord.id, paese: body.shipTo?.country })
+    return NextResponse.json({ error: 'Questo contratto GLS spedisce solo in Italia: per l\'estero scegli un altro corriere.' }, { status: 400 })
   }
 
   // Contenuto OBBLIGATORIO per i servizi internazionali (es. Poste International Plus): serve alla

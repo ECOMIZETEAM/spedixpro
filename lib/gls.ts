@@ -23,6 +23,19 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { testoIndicaReso } from '@/lib/spedisci'
+import { normalizzaPaese } from '@/lib/paesi'
+
+// IL GLS DIRETTO FA SOLO L'ITALIA. AddParcel qui sotto manda a GLS CAP e provincia, ma non il paese:
+// una destinazione estera arriva come se fosse un CAP italiano. Non e' un'ipotesi: dall'8 al 12/10/2026
+// Quick ha creato 7 spedizioni verso Germania, Francia e Lussemburgo sul suo GLS diretto, e GLS le ha
+// rimandate tutte e 7 in "GLS Check" (non instradate, etichetta da rilavorare a mano) — tutte annullate.
+// La piattaforma intanto le aveva quotate e addebitate (poi rimborsate dall'annullo), perche' bastava
+// una zona estera con le fasce per far comparire il contratto. Finche' l'internazionale non e'
+// costruito sul manuale GLS, il contratto non si offre e non si crea fuori dall'Italia. La decisione
+// sta qui, e la chiamano i due preventivi (cliente e spedizione propria del master) e la creazione.
+export function glsDirettoFuoriItalia(tipoContratto: unknown, paeseDestinazione: unknown): boolean {
+  return tipoContratto === 'gls' && normalizzaPaese(paeseDestinazione) !== 'IT'
+}
 
 const GLS_ENDPOINT = 'https://labelservice.gls-italy.com/ilswebservice.asmx'
 const GLS_NS = 'https://labelservice.gls-italy.com/'
