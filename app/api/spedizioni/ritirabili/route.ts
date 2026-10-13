@@ -3,6 +3,15 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds, contrattiPossedutiNomi } from '@/lib/rete-masters'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { ledgerFornitoriDaNascondere, ledgerDoppioniNelPerimetro } from '@/lib/gambe-visibilita'
+import { fetchAll } from '@/lib/fetch-all'
+
+// Corrieri con ritiro ON-DEMAND: spedisci.online / spediamopro (pickup provider) e FedEx diretto
+// (Pickup API). GLS/BRT no: la raccolta è con l'accordo standard, non si prenota da qui.
+// CONDIVISIONE: una gamba-ponte ('moovexpress') è ritirabile — il ritiro lo prenota l'OWNER reale
+// (ritiri/crea risolve la gamba owner e usa il suo contratto, es. Poste on-demand). Senza, il contratto
+// condiviso non compariva nemmeno nel menu ("non mi dà il contratto sul ritiro").
+const TIPI_RITIRO_PRENOTABILE = ['spedisci', 'spediamopro', 'fedex', 'moovexpress']
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -26,29 +35,43 @@ export async function GET(req: NextRequest) {
   // fisicamente ancora dal mittente in attesa di ritiro (caso reale BRT) — escluderle rendeva
   // impossibile prenotare il ritiro il giorno dopo. Restano fuori solo quelle davvero in viaggio
   // (in_transito e oltre).
-  let query = admin
-    .from('spedizioni')
-    .select(`id,numero,dest_nome,dest_citta,colli,peso_reale,corriere_id,cliente_id,master_id,raw_response,created_at,${ownedContractNames && ownedContractNames.length ? 'corrieri!inner(tipo,nome_contratto)' : 'corrieri(tipo,nome_contratto)'}`)
-    .in('master_id', masterIds)
-    .in('stato', ['in_lavorazione', 'spedita'])
-    .is('ritiro_id', null)
-    .order('created_at', { ascending: false })
-    .limit(1000)
+  // IL TIPO DI CORRIERE SI FILTRA NEL DATABASE, PRIMA DEL TETTO, e le gambe dei fornitori non entrano.
+  // Prima si prendevano le 1.000 spedizioni piu' recenti di qualunque corriere e solo dopo si tenevano
+  // quelle col ritiro prenotabile: il 13/10/2026 MULTIEXPRESS vedeva solo quelle create dalle 14:10, con
+  // 301 gambe "(ingrosso)" su 587 righe (lo stesso pacco due volte), e 9.537 spedizioni prenotabili
+  // restavano fuori. La gamba del cliente resta: il ritiro risale da li' al detentore (ritiri/crea).
+  const ledgerNascosti = isCliente ? [] : Array.from(new Set([
+    ...(await ledgerFornitoriDaNascondere(admin, utente.master_id)),
+    ...(await ledgerDoppioniNelPerimetro(admin, masterIds)),
+  ]))
+  const idsAgente = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
+  const costruisci = () => {
+    let query = admin
+      .from('spedizioni')
+      .select('id,numero,dest_nome,dest_citta,colli,peso_reale,corriere_id,cliente_id,master_id,created_at,corrieri!inner(tipo,nome_contratto)')
+      .in('master_id', masterIds)
+      .in('stato', ['in_lavorazione', 'spedita'])
+      .is('ritiro_id', null)
+      .in('corrieri.tipo', TIPI_RITIRO_PRENOTABILE)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
 
-  if (isCliente) query = query.eq('cliente_id', utente.cliente_id)
-  else if (ownedContractNames && ownedContractNames.length) query = query.in('corrieri.nome_contratto', ownedContractNames)
-  // Agente: solo spedizioni dei suoi clienti.
-  if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
+    if (isCliente) query = query.eq('cliente_id', utente.cliente_id)
+    else if (ownedContractNames && ownedContractNames.length) query = query.in('corrieri.nome_contratto', ownedContractNames)
+    if (ledgerNascosti.length) query = query.or(`cliente_id.is.null,cliente_id.not.in.(${ledgerNascosti.join(',')})`)
+    // Agente: solo spedizioni dei suoi clienti.
+    if (idsAgente) query = query.in('cliente_id', idsAgente)
+    return query
+  }
 
-  const { data: spedizioni, error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  // A blocchi, con un tetto alto (la pagina filtra cliente, giorno e LDV nel browser): 10.000 righe sono
+  // giorni di lavoro anche per la rete piu' grande.
+  let spedizioni: any[]
+  try { spedizioni = await fetchAll(costruisci, 10000, { lancia: true }) }
+  catch (e: any) { return NextResponse.json({ error: 'Spedizioni ritirabili non lette: riprova tra qualche secondo.' }, { status: 503 }) }
 
-  // Corrieri con ritiro ON-DEMAND: spedisci.online / spediamopro (pickup provider) e FedEx diretto
-  // (Pickup API). GLS/BRT no: la raccolta è con l'accordo standard, non si prenota da qui.
-  // CONDIVISIONE: una gamba-ponte ('moovexpress') è ritirabile — il ritiro lo prenota l'OWNER reale
-  // (ritiri/crea risolve la gamba owner e usa il suo contratto, es. Poste on-demand). Senza, il contratto
-  // condiviso non compariva nemmeno nel menu ("non mi dà il contratto sul ritiro").
-  const raw = (spedizioni || []).filter((s: any) => ['spedisci', 'spediamopro', 'fedex', 'moovexpress'].includes(s.corrieri?.tipo))
+  // Il tipo di corriere e' gia' filtrato nella query (TIPI_RITIRO_PRENOTABILE, in cima al file).
+  const raw = spedizioni || []
 
   // Risolvo i nomi di master e clienti per il filtro "cliente/master" (solo master)
   const mastMap = new Map<string, string>()
