@@ -52,8 +52,10 @@ export async function GET(req: NextRequest) {
   // SPEDIZIONE ANNULLATA: l'etichetta non si consegna piu'. Il credito e' gia' tornato a tutta la catena,
   // ma su diversi contratti l'annullo non arriva al corriere (InPost, contratti condivisi, code manuali)
   // e quella lettera di vettura resta buona: un pacco spedito con lei lo paga chi detiene il contratto.
-  // Da quando le annullate stanno in elenco (13/10/2026) il pulsante non si mostra; questo e' il blocco
-  // che vale per ogni porta, compresa quella che nascera' domani.
+  // Da quando le annullate stanno in elenco (13/10/2026) il pulsante non si mostra. Lo stesso blocco sta
+  // nelle altre porte che consegnano un'etichetta: stampa in blocco (etichette-bulk), dettaglio del master
+  // (/dashboard/spedizioni/[id]/etichetta) e API (/api/v1/shipments/[id]/label). Una porta nuova lo deve
+  // avere anche lei.
   if ((sped as any).stato === 'annullata') {
     return NextResponse.json({ error: `La spedizione${sped.numero ? ' ' + sped.numero : ''} è annullata: l'etichetta non è più valida e non va stampata.` }, { status: 409 })
   }

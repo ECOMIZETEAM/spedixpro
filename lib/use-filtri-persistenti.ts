@@ -34,7 +34,13 @@ export function useFiltriPersistenti<T>(
   iniziale: T | (() => T),
   opzioni?: { perSempre?: boolean },
 ): [T, Dispatch<SetStateAction<T>>, () => void] {
-  const full = 'flt:' + chiave
+  // CHIAVE NUOVA per il formato nuovo ({ giorno, valore }). Sotto la chiave di prima il codice di prima
+  // leggerebbe l'oggetto come se fosse il valore: dopo un ritorno alla versione precedente, o da una
+  // scheda aperta col programma vecchio, `cerca.trim()` e simili andrebbero in errore e la pagina si
+  // romperebbe. La chiave di prima si legge solo per riprendere le preferenze (perSempre) e poi si toglie.
+  // Il prefisso resta 'flt:<chiave>', cosi' AzzeraFiltri e PuliziaSessione la trovano come le altre.
+  const vecchia = 'flt:' + chiave
+  const full = vecchia + '#giorno'
   const perSempre = !!opzioni?.perSempre
   // Il default si ricalcola ogni volta che serve (mount, azzera, cambio di giorno): con le date dentro,
   // un valore calcolato una volta sola sarebbe di nuovo una data ferma.
@@ -55,17 +61,18 @@ export function useFiltriPersistenti<T>(
     giornoValore.current = oggi
     try {
       const s = window.localStorage.getItem(full)
-      if (s != null) {
-        const x = JSON.parse(s)
-        if (eSalvato<T>(x)) {
-          if (perSempre || x.giorno === oggi) setV(x.valore)
-          else window.localStorage.removeItem(full)
-        } else if (perSempre) {
-          setV(x as T)   // formato di prima (valore nudo): per le preferenze va bene così com'è
-        } else {
-          // Formato di prima, senza giorno: non si sa di quando è, ed è proprio il valore che teneva
-          // fermo l'elenco. Si butta.
-          window.localStorage.removeItem(full)
+      const x = s != null ? JSON.parse(s) : null
+      if (eSalvato<T>(x)) {
+        if (perSempre || x.giorno === oggi) setV(x.valore)
+        else window.localStorage.removeItem(full)
+      } else {
+        // Niente nel formato nuovo: si guarda la chiave di prima (valore nudo, senza giorno). Per le
+        // preferenze va bene cosi' com'e'; per i filtri no — non si sa di quando sono, ed erano proprio
+        // quelli che tenevano fermo l'elenco. In entrambi i casi la chiave di prima si toglie.
+        const v0 = window.localStorage.getItem(vecchia)
+        if (v0 != null) {
+          if (perSempre) setV(JSON.parse(v0) as T)
+          window.localStorage.removeItem(vecchia)
         }
       }
     } catch { /* localStorage non disponibile / JSON rotto: si tiene l'iniziale */ }

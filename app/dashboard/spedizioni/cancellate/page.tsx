@@ -119,7 +119,8 @@ export default function SpedizioniCancellatePage() {
 
   function passaFiltri(s: any) {
     if (filtroCliente && (s.clienti?.ragione_sociale || '') !== filtroCliente) return false
-    const data = new Date(s.updated_at || s.created_at || s.annullamento_richiesto_at)
+    // Data della richiesta d'annullo, come la rotta (periodo=annullo): updated_at si sposta con gli aggiornamenti in blocco.
+    const data = new Date(s.annullamento_richiesto_at || s.updated_at || s.created_at)
     if (dal && data < new Date(dal + 'T00:00:00')) return false
     if (al && data > new Date(al + 'T23:59:59')) return false
     if (cerca) {
@@ -416,7 +417,7 @@ export default function SpedizioniCancellatePage() {
                       <td style={{padding:'9px 12px 3px'}}>
                         <div style={{color:'#1a1a1a',fontWeight:'500'}}>{s.dest_nome}</div>
                       </td>
-                      <td style={{padding:'9px 12px 3px',color:'#666',fontSize:'12px',whiteSpace:'nowrap'}}>{new Date(s.updated_at || s.created_at).toLocaleDateString('it-IT')} {new Date(s.updated_at || s.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</td>
+                      <td style={{padding:'9px 12px 3px',color:'#666',fontSize:'12px',whiteSpace:'nowrap'}}>{new Date(s.annullamento_richiesto_at || s.updated_at || s.created_at).toLocaleDateString('it-IT')} {new Date(s.annullamento_richiesto_at || s.updated_at || s.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</td>
                     </tr>
                     <tr style={{background:'#fff',borderBottom:'2px solid #cbd5e1'}}>
                       <td colSpan={4} style={{padding:'4px 12px 10px 44px',borderTop:'1px solid #f1f2f4'}}>

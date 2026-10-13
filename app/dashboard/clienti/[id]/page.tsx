@@ -496,7 +496,7 @@ export default function ClienteProfiloPage() {
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                   {/* Prima era un link a /dashboard/spedizioni/<id>, una pagina che non esiste: si apre il dettaglio, come dagli elenchi. */}
                   <button type="button" onClick={()=>setDettaglioSped(s)} style={{fontWeight:'600',color:'#f97316',background:'none',border:'none',padding:0,cursor:'pointer',textDecoration:'underline',fontSize:'13px'}}>{s.numero}</button>
-                  <span style={{fontWeight:'600',fontSize:'13px',color:'#1a1a1a',...(s.stato==='annullata'?{textDecoration:'line-through',opacity:0.6}:{})}} title={s.stato==='annullata'?'Spedizione annullata: addebito stornato':undefined}>€{Number(s.costo_totale||0).toFixed(2)}</span>
+                  <span style={{fontWeight:'600',fontSize:'13px',color:'#1a1a1a',...(s.stato==='annullata'?{textDecoration:'line-through',opacity:0.6}:{})}} title={s.stato==='annullata'?'Spedizione annullata':undefined}>€{Number(s.costo_totale||0).toFixed(2)}</span>
                 </div>
                 <div style={{fontSize:'11px',color:'#1a1a1a',marginTop:'2px'}}>{s.dest_nome} → {s.dest_citta} · {new Date(s.created_at).toLocaleDateString('it-IT')}{s.stato==='annullata' && <span style={{color:'#6b7280',fontWeight:600}}> · annullata</span>}</div>
               </div>

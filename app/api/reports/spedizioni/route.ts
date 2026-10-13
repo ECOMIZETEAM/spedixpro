@@ -81,10 +81,10 @@ export async function GET(req: NextRequest) {
   const buildBase = () => {
     const filtroContratti = ownedContractNames.length > 0 && (!!subtreeSel || (!!reteIds && reteIds.length > 1))
     let q = db.from('spedizioni')
-      .select(`${SPED_COLS}, ${fTipoContratto ? 'clienti!inner' : 'clienti'}(ragione_sociale,agente,tipo_contratto), ${(filtroContratti || fContratto) ? 'corrieri!inner(id,nome_contratto)' : 'corrieri(id,nome_contratto)'}`)
+      .select(`${SPED_COLS}, clienti(ragione_sociale,agente,tipo_contratto), ${(filtroContratti || fContratto) ? 'corrieri!inner(id,nome_contratto)' : 'corrieri(id,nome_contratto)'}`)
       .order('created_at', { ascending: false }).order('id', { ascending: false })
     if (fContratto) q = q.eq('corrieri.nome_contratto', fContratto)
-    if (fTipoContratto) q = q.eq('clienti.tipo_contratto', fTipoContratto)
+    // Tipo contratto: NON qui. Va guardato al livello di chi guarda (vedi sotto, dopo la lettura).
     if (subtreeSel) q = q.in('master_id', subtreeSel)
     else if (clienteId) q = q.eq('cliente_id', clienteId).eq('master_id', mine)
     else if (ruolo === 'cliente') q = q.eq('cliente_id', utente?.cliente_id)
@@ -114,7 +114,25 @@ export async function GET(req: NextRequest) {
   }
   // Report COMPLETO: carico a blocchi (il DB tronca a 1000/query), altrimenti i totali/margini
   // sarebbero sbagliati per i master con molte spedizioni. Nessun limite pratico.
-  const spedizioni: any[] = await fetchAll(buildBase)
+  let spedizioni: any[] = await fetchAll(buildBase)
+
+  // TIPO CONTRATTO (credito a scalare / fattura mensile) del DIRETTO di chi guarda: per le spedizioni sue
+  // e' quello del cliente; per quelle della rete e' quello del sotto-master di PRIMA LINEA con lui, non del
+  // cliente finale. Guardato sul cliente finale, il report di MULTIEXPRESS "a credito" metteva dentro
+  // 85.415 spedizioni di sotto-master che con lui sono a fattura mensile; e l'unione con i clienti
+  // scartava le spedizioni di rete senza cliente (849).
+  if (fTipoContratto) {
+    const primeLinee = Array.from(new Set(spedizioni.filter((s: any) => s.master_id !== mine)
+      .map((s: any) => primaLineaId.get(s.master_id) || s.master_id).filter(Boolean))) as string[]
+    const tipoMaster = new Map<string, string | null>()
+    for (let i = 0; i < primeLinee.length; i += 200) {
+      const { data: mm } = await adminDb.from('masters').select('id,tipo_contratto').in('id', primeLinee.slice(i, i + 200))
+      for (const m of (mm || [])) tipoMaster.set((m as any).id, (m as any).tipo_contratto || null)
+    }
+    spedizioni = spedizioni.filter((s: any) => s.master_id === mine
+      ? (s.clienti as any)?.tipo_contratto === fTipoContratto
+      : tipoMaster.get(primaLineaId.get(s.master_id) || s.master_id) === fTipoContratto)
+  }
 
   // FONTE DI VERITÀ = i MOVIMENTI reali (quello che ogni livello ha effettivamente pagato).
   // Non ricalcolo i prezzi: un ricalcolo non replica agevolazioni misure/peso reale, fattore

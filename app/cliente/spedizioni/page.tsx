@@ -603,9 +603,9 @@ async function apriTracking(s: any) {
                     { l: 'Colli', v: s.colli },
                     ...(Number(s.contrassegno)>0 ? [{ l: 'Contrassegno', v: <span style={{...codBadgeStyle(s.stato_contrassegno),padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{Number(s.contrassegno).toFixed(2)}</span> }] : []),
                     ...(s.id_ordine ? [{ l: 'Ordine', v: s.id_ordine }] : []),
-                    // Annullata: il totale e' quello di prima dello storno (il credito e' gia' tornato), quindi barrato.
+                    // Annullata: il totale e' quello della creazione, barrato. Non si scrive "riaccreditato": lo
+                    // stato non lo garantisce (13/10/2026: 12 annullate col cliente ri-addebitato, pacco partito).
                     { l: 'Totale', v: <span style={annullata?{textDecoration:'line-through',opacity:0.6}:undefined}><b style={{color:'#1a1a1a'}}>€ {Number(s.costo_totale||0).toFixed(2)}</b>{Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span> },
-                    ...(annullata ? [{ l: 'Credito', v: <span style={{color:'#6b7280'}} title="Spedizione annullata: l'importo ti e' stato riaccreditato">riaccreditato</span> }] : []),
                   ]
                   return (
                     <Fragment key={s.id}>

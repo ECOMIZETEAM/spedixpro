@@ -47,9 +47,11 @@ export function superaLimitiCollo(settings: any, pesoReale: number, colli: any[]
 
 // UN COLLO SOLO: il contratto non accetta il multicollo, oppure consegna a un LOCKER (una cassetta,
 // un pacco; e il prezzo a taglia guarda solo il primo collo). Il secondo caso non si affida al flag
-// `multicollo`: quel flag sta sul contratto del detentore e non scende sulle copie dei sotto-master
+// `multicollo`, che sta sul contratto del detentore e non scende sulle copie dei sotto-master
 // (13/10/2026: "InPost Locker" di MULTIEXPRESS a un collo, le sue 8 copie col multicollo acceso).
-// Una regola sola per creazione, API e preventivo.
+// ATTENZIONE: oggi sulle copie manca anche `consegna` (non e' fra le chiavi propagate, di proposito: vedi
+// lib/copia-listino-submaster.ts), quindi sulle copie questa regola scattera' solo quando la si accende.
+// Una regola sola per creazione, API, preventivo del portale e preventivo API.
 export function unColloSolo(contratto: any): boolean {
   return contratto?.multicollo === false || String(contratto?.settings?.consegna || '') === 'locker'
 }

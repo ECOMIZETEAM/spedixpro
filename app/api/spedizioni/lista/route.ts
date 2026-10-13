@@ -242,9 +242,11 @@ export async function GET(req: NextRequest) {
     ? await ledgerFornitoriDaNascondere(admin, utente.master_id) : []
   // + i DOPPIONI dentro il perimetro letto (lib/gambe-visibilita.ts): chi legge piu' livelli insieme (la
   // radice) vedeva la stessa spedizione una volta per gamba. Non quando si cerca un numero o un codice:
-  // l'assistenza deve poter ritrovare anche la gamba col suffisso.
+  // l'assistenza deve poter ritrovare anche la gamba col suffisso. Ne' quando si ordina per margine: li'
+  // l'ordine lo decide spedizioni_margine_ids, che questa lista non la riceve, e conteggio e pagine
+  // smetterebbero di tornare (righe scartate dopo, pagine corte).
   const perimetroLetto = subtreeSel || reteSubtree || masterIds
-  const ledgerDoppioni = (utente?.master_id && ruolo !== 'cliente' && ruolo !== 'agente' && !numero && !fCerca && perimetroLetto && perimetroLetto.length > 1)
+  const ledgerDoppioni = (utente?.master_id && ruolo !== 'cliente' && ruolo !== 'agente' && !numero && !fCerca && !ordinaMargine && perimetroLetto && perimetroLetto.length > 1)
     ? await ledgerDoppioniNelPerimetro(admin, perimetroLetto) : []
   const ledgerNascosti = Array.from(new Set([...ledgerFornitori, ...ledgerDoppioni]))
 
@@ -295,12 +297,17 @@ export async function GET(req: NextRequest) {
     if (stato === 'tutti') { /* nessun filtro sullo stato */ }
     else if (stato) q = q.eq('stato', stato)
     else q = q.not('stato', 'in', '(annullata)')
-    // ?periodo=annullo: il periodo cade sulla data dell'ANNULLO (updated_at), quella che la pagina Spedizioni
-    // Cancellate ordina, mostra e rifiltra. Prima cadeva sulla creazione: un annullo di ieri su una
-    // spedizione di 70 giorni fa non compariva. L'elenco resta sulla data di creazione, che e' la sua colonna.
-    const colPeriodo = (p.get('periodo') === 'annullo' && stato === 'annullata') ? 'updated_at' : 'created_at'
-    if (dal) q = q.gte(colPeriodo, dal)
-    if (al) q = q.lte(colPeriodo, al)
+    // ?periodo=annullo (pagina Spedizioni Cancellate): il periodo cade sulla data della RICHIESTA d'annullo,
+    // e solo dove manca sull'ultimo aggiornamento. Prima cadeva sulla creazione: un annullo di ieri su una
+    // spedizione di 70 giorni fa non compariva. Non solo su updated_at: si sposta con ogni aggiornamento in
+    // blocco (64 annulli di luglio con lo stesso updated_at del 18/09). L'elenco resta sulla creazione.
+    if (p.get('periodo') === 'annullo' && stato === 'annullata') {
+      if (dal) q = q.or(`annullamento_richiesto_at.gte.${dal},and(annullamento_richiesto_at.is.null,updated_at.gte.${dal})`)
+      if (al) q = q.or(`annullamento_richiesto_at.lte.${al},and(annullamento_richiesto_at.is.null,updated_at.lte.${al})`)
+    } else {
+      if (dal) q = q.gte('created_at', dal)
+      if (al) q = q.lte('created_at', al)
+    }
     if (numero) q = q.ilike('numero', `%${numero}%`)
     if (destCitta) q = q.ilike('dest_citta', `%${destCitta}%`)
     if (destCap) q = q.ilike('dest_cap', `%${destCap}%`)

@@ -356,7 +356,7 @@ export async function calcolaTariffeCliente(
   // Lettura fallita = stesso esito di una lettura fasce fallita: errore tecnico, non "listino vuoto".
   {
     const idsContratti = Array.from(new Set(fasce.map((f: any) => f.corriere_id).filter(Boolean)))
-    const { data: contratti, error: errContratti } = await adminDb.from('corrieri').select('id,tipo,nome_contratto,attivo,credenziali,settings').in('id', idsContratti as string[])
+    const { data: contratti, error: errContratti } = await adminDb.from('corrieri').select('id,tipo,nome_contratto,attivo,credenziali,settings,multicollo').in('id', idsContratti as string[])
     if (errContratti) {
       console.error('[TARIFFE] lettura contratti fallita', cliente.listino_cliente_id, errContratti.message)
       return { errore: 'Errore tecnico nel calcolo delle tariffe: riprova tra poco. Se persiste contatta l\'assistenza (il listino non c\'entra).', stato: 500 }
@@ -503,8 +503,9 @@ export async function calcolaTariffeCliente(
     const { pesoVolume: pesoVolumeC, pesoFatturato: pesoFatturatoC } = pesoFatturatoCon(fattorePerCorr.get(corriereId) || fattore)
     // Limite misure per scaglione di PESO REALE: se un collo eccede, il corriere non è disponibile.
     if (superaMisureMax(settsC, pesoReale, tuttiColli)) continue   // collo fuori misura per questo corriere → escluso
-    // Locker con piu' colli: la creazione lo rifiuta (un collo solo), quindi non si propone.
-    if (tuttiColli.length > 1 && unColloSolo({ settings: settsC })) continue
+    // Un collo solo (locker, o contratto senza multicollo) con piu' colli: la creazione lo rifiuta, quindi
+    // non si propone. Stesso contratto e stessa regola della creazione (lib/limiti-collo unColloSolo).
+    if (tuttiColli.length > 1 && unColloSolo({ settings: settsC, multicollo: (fasceDelCorriere[0]?.corrieri as any)?.multicollo })) continue
     // Peso su cui si tassa: reale se agevolazione misure (≤50x32x28) OPPURE "peso reale fino a X kg" (≤ soglia); altrimenti volumetrico.
     const _prs = settsC?.peso_reale_soglia
     const _usaRealeSoglia = !!_prs?.attivo && Number(_prs.kg) > 0 && pesoReale <= Number(_prs.kg)

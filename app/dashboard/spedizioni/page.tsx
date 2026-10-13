@@ -741,7 +741,6 @@ async function apriTracking(s: any) {
                     { l: 'Cliente', v: <span style={sbarra}><b style={{color:'#1a1a1a'}}>€ {Number(s.prezzo_cliente ?? s.costo_mostrato ?? s.costo_totale ?? 0).toFixed(2)}</b>{Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span> },
                     { l: 'Costo', v: <span style={sbarra}>{s.prezzo_corriere!=null?`€ ${Number(s.prezzo_corriere).toFixed(2)}`:'—'}</span> },
                     { l: 'Margine', v: <b style={{color:s.margine==null?'#9ca3af':(Number(s.margine)<0?'#dc2626':'#16a34a'),...(sbarra||{})}}>{s.margine!=null?`€ ${Number(s.margine).toFixed(2)}`:'—'}</b> },
-                    ...(annullata ? [{ l: 'Storno', v: <span style={{color:'#6b7280'}} title="Spedizione annullata: l'addebito e' stato stornato a tutta la catena">stornata</span> }] : []),
                     // Rettifica A PARTE: prezzo, costo e margine qui sopra sono solo della spedizione.
                     ...(s.rettifica ? [{ l: 'Rettifica', v: (
                       <span title={`Addebitata al cliente € ${Number(s.rettifica.cliente).toFixed(2)} · pagata € ${Number(s.rettifica.costo).toFixed(2)}`}>
