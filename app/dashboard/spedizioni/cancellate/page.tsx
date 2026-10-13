@@ -47,7 +47,8 @@ export default function SpedizioniCancellatePage() {
       // light=1: questa pagina mostra solo campi base (numero, cliente, destinatario, date, totale) →
       // salta l'arricchimento pesante (movimenti/prezzi/COD/ticket) che su MULTIEXPRESS = migliaia di
       // annullate rendeva il caricamento lentissimo.
-      fetch(`/api/spedizioni/lista?light=1&stato=annullata${dal ? '&dal=' + dal : ''}${al ? '&al=' + al + 'T23:59:59' : ''}`).then(r => r.json()),
+      // periodo=annullo: il periodo vale sulla data dell'annullo, la stessa della colonna "Data" e del filtro qui sotto.
+      fetch(`/api/spedizioni/lista?light=1&stato=annullata&periodo=annullo${dal ? '&dal=' + dal : ''}${al ? '&al=' + al + 'T23:59:59' : ''}`).then(r => r.json()),
       fetch('/api/spedizioni/lista?light=1&stato=annullamento_pending').then(r => r.json()),
       fetch('/api/spedizioni/lista?light=1&stato=annullamento_manuale').then(r => r.json()),
       fetch('/api/spedizioni/annulli-manuali').then(r => r.json()),

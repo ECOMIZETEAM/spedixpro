@@ -284,8 +284,12 @@ export async function GET(req: NextRequest) {
     if (stato === 'tutti') { /* nessun filtro sullo stato */ }
     else if (stato) q = q.eq('stato', stato)
     else q = q.not('stato', 'in', '(annullata)')
-    if (dal) q = q.gte('created_at', dal)
-    if (al) q = q.lte('created_at', al)
+    // ?periodo=annullo: il periodo cade sulla data dell'ANNULLO (updated_at), quella che la pagina Spedizioni
+    // Cancellate ordina, mostra e rifiltra. Prima cadeva sulla creazione: un annullo di ieri su una
+    // spedizione di 70 giorni fa non compariva. L'elenco resta sulla data di creazione, che e' la sua colonna.
+    const colPeriodo = (p.get('periodo') === 'annullo' && stato === 'annullata') ? 'updated_at' : 'created_at'
+    if (dal) q = q.gte(colPeriodo, dal)
+    if (al) q = q.lte(colPeriodo, al)
     if (numero) q = q.ilike('numero', `%${numero}%`)
     if (destCitta) q = q.ilike('dest_citta', `%${destCitta}%`)
     if (destCap) q = q.ilike('dest_cap', `%${destCap}%`)
