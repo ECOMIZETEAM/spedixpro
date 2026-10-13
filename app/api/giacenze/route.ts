@@ -4,6 +4,8 @@ import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { vedeLaRete } from '@/lib/perimetro'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
 import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
+import { fetchAll } from '@/lib/fetch-all'
+import { confineGiornoRoma } from '@/lib/date-roma'
 
 // Elenco giacenze (lista master). La GESTIONE (svincolo/riconsegna/reso/nuovo indirizzo + addebito)
 // NON sta più qui: passa dalla porta unica eseguiSvincolo via /api/giacenze/[id] (dettaglio), il
@@ -63,34 +65,47 @@ export async function GET(req: NextRequest) {
   // Colonne LEGGERE (SPED_COLS): niente etichetta_url/raw_response/colli_dettaglio (~300 KB/riga di
   // blob PDF/base64). Includono già tutti i campi giacenza_* che la pagina usa. Era `*`: su una rete
   // con molte giacenze la lista trasferiva decine di MB → "veramente lenta". La rotta cliente lo faceva già.
-  let query = db.from('spedizioni')
-    .select(`${SPED_COLS}, clienti(ragione_sociale), ${filtroContratti ? 'corrieri!inner(nome_contratto)' : 'corrieri(nome_contratto)'}`)
-    .not('giacenza_data', 'is', null)
-    .order('giacenza_data', { ascending: false })
-
-  if (subtreeSel) query = query.in('master_id', subtreeSel)
-  else query = query.eq('master_id', utente?.master_id)
-  // NASCONDI-FORNITORI (come lista spedizioni): niente giacenze delle gambe a monte (cliente = ledger d'acquisto).
+  // Le parti asincrone del perimetro si calcolano PRIMA: la query si ricostruisce a ogni blocco.
+  let ledgerNascosti: string[] = []
   if (utente?.master_id && !isAgente(utente) && utente.ruolo !== 'cliente') {
     const { createAdminSupabase: _admGia } = await import('@/lib/supabase-admin')
-    const ledgerNascosti = await ledgerFornitoriDaNascondere(_admGia(), utente.master_id)
-    if (ledgerNascosti.length) query = query.or(`cliente_id.is.null,cliente_id.not.in.(${ledgerNascosti.join(',')})`)
+    ledgerNascosti = await ledgerFornitoriDaNascondere(_admGia(), utente.master_id)
   }
-  // Rete: solo giacenze su contratti che possiedo (non i privati del sub).
-  if (filtroContratti) query = query.in('corrieri.nome_contratto', ownedContractNames as string[])
-  // Agente: solo giacenze dei suoi clienti (copre anche l'eventuale ramo rete).
-  if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
-  if (clienteId) query = query.eq('cliente_id', clienteId)
-  // 'aperta' = in attesa di istruzioni: le giacenze appena rilevate hanno giacenza_stato NULL
-  // (il rilevamento valorizza solo giacenza_data) -> il confronto esatto le escludeva dal filtro.
-  if (stato === 'aperta') query = query.or('giacenza_stato.eq.aperta,giacenza_stato.is.null')
-  else if (stato) query = query.eq('giacenza_stato', stato)
-  // Filtro per la data di ENTRATA in giacenza (giacenza_data), non per la data di spedizione
-  // (created_at): una giacenza può nascere oggi da una spedizione creata giorni fa, e col filtro
-  // su created_at (default oggi) non compariva. Fallback su created_at per righe legacy senza data.
-  if (dal) query = query.or(`giacenza_data.gte.${dal},and(giacenza_data.is.null,created_at.gte.${dal})`)
-  if (al) query = query.or(`giacenza_data.lte.${al}T23:59:59,and(giacenza_data.is.null,created_at.lte.${al}T23:59:59)`)
+  const idsAgente = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
+  // Giorni di Roma (lib/date-roma.ts): in UTC il giorno cominciava alle 2 di notte.
+  const dalN = confineGiornoRoma(dal, 'dal'), alN = confineGiornoRoma(al ? al + 'T23:59:59' : null, 'al')
 
-  const { data } = await query
+  const costruisci = () => {
+    let query = db.from('spedizioni')
+      .select(`${SPED_COLS}, clienti(ragione_sociale), ${filtroContratti ? 'corrieri!inner(nome_contratto)' : 'corrieri(nome_contratto)'}`)
+      .not('giacenza_data', 'is', null)
+      .order('giacenza_data', { ascending: false })
+      .order('id', { ascending: false })   // spareggio: a blocchi le righe con la stessa data non si ripetono ne' si perdono
+
+    if (subtreeSel) query = query.in('master_id', subtreeSel)
+    else query = query.eq('master_id', utente?.master_id)
+    // NASCONDI-FORNITORI (come lista spedizioni): niente giacenze delle gambe a monte (cliente = ledger d'acquisto).
+    if (ledgerNascosti.length) query = query.or(`cliente_id.is.null,cliente_id.not.in.(${ledgerNascosti.join(',')})`)
+    // Rete: solo giacenze su contratti che possiedo (non i privati del sub).
+    if (filtroContratti) query = query.in('corrieri.nome_contratto', ownedContractNames as string[])
+    // Agente: solo giacenze dei suoi clienti (copre anche l'eventuale ramo rete).
+    if (idsAgente) query = query.in('cliente_id', idsAgente)
+    if (clienteId) query = query.eq('cliente_id', clienteId)
+    // 'aperta' = in attesa di istruzioni: le giacenze appena rilevate hanno giacenza_stato NULL
+    // (il rilevamento valorizza solo giacenza_data) -> il confronto esatto le escludeva dal filtro.
+    if (stato === 'aperta') query = query.or('giacenza_stato.eq.aperta,giacenza_stato.is.null')
+    else if (stato) query = query.eq('giacenza_stato', stato)
+    // Filtro per la data di ENTRATA in giacenza (giacenza_data), non per la data di spedizione
+    // (created_at): una giacenza può nascere oggi da una spedizione creata giorni fa, e col filtro
+    // su created_at (default oggi) non compariva. Fallback su created_at per righe legacy senza data.
+    if (dalN) query = query.or(`giacenza_data.gte.${dalN},and(giacenza_data.is.null,created_at.gte.${dalN})`)
+    if (alN) query = query.or(`giacenza_data.lte.${alN},and(giacenza_data.is.null,created_at.lte.${alN})`)
+    return query
+  }
+
+  // A BLOCCHI, non in una richiesta sola: il database ne restituisce al massimo 1.000 e le altre
+  // sparivano senza avviso. Il 13/10/2026 MoovExpress ne vedeva 1.000 su 2.437 (34 ancora da gestire
+  // fra le invisibili), MULTIEXPRESS 1.000 su 2.225.
+  const data = await fetchAll(costruisci)
   return NextResponse.json(data || [])
 }
