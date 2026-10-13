@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import { giornoRoma } from '@/lib/date-roma'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -23,8 +24,8 @@ export default function ReportSpedizioniPage() {
   const [intest, setIntest] = useState<any>({ nome: '', indirizzo: '', email: '', piva: '', logo_url: null })
   const [filtri, setFiltri] = useState({
     clienteId: '', tipoContratto: '', vettore: '', contratto: '',
-    dal: new Date().toISOString().split('T')[0],
-    al: new Date().toISOString().split('T')[0],
+    dal: giornoRoma(),
+    al: giornoRoma(),
     agente: '', provincia: '', stato: '', contrassegno: '', formato: 'PDF',
     suddivisione: '', fatturazione: '', canale: '', statoContrassegno: '',
     // CONTENUTO del file, scelta INDIPENDENTE dalla suddivisione (prima erano incollate: file unico
@@ -55,6 +56,8 @@ export default function ReportSpedizioniPage() {
     const t: string[] = ['periodo=' + (filtri.dal||'') + '→' + (filtri.al||'')]
     if (filtri.clienteId) { const c = clienti.find((x:any)=>x.id===filtri.clienteId); t.push('cliente=' + String(c?.ragione_sociale||filtri.clienteId).replace(/\s+/g,'_')) }
     if (filtri.vettore) t.push('vettore=' + filtri.vettore)
+    if (filtri.contratto) t.push('contratto=' + filtri.contratto.replace(/\s+/g,'_'))
+    if (filtri.tipoContratto) t.push('tipo_contratto=' + filtri.tipoContratto)
     if (filtri.agente) t.push('agente=' + filtri.agente.replace(/\s+/g,'_'))
     if (filtri.provincia) t.push('provincia=' + filtri.provincia)
     if (filtri.stato) t.push('stato=' + filtri.stato)
@@ -88,6 +91,9 @@ export default function ReportSpedizioniPage() {
       if (filtri.fatturazione) params.set('fatturazione', filtri.fatturazione)
       if (filtri.canale) params.set('canale', filtri.canale)
       if (filtri.statoContrassegno) params.set('statoContrassegno', filtri.statoContrassegno)
+      // Contratto e Tipo Contratto stavano a schermo ma non partivano: il report usciva con tutto.
+      if (filtri.contratto) params.set('contratto', filtri.contratto)
+      if (filtri.tipoContratto) params.set('tipoContratto', filtri.tipoContratto)
       // Solo spedizioni: le rettifiche hanno il loro report (Report Rettifiche).
       params.set('rettifiche', 'escluse')
 

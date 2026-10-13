@@ -4,6 +4,7 @@ import { SPED_COLS } from '@/lib/spedizioni-cols'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { creaCalcolatoreListinoCliente, creaCalcolatoreCorriere } from '@/lib/pricing'
 import { fetchAll } from '@/lib/fetch-all'
+import { confineGiornoRoma } from '@/lib/date-roma'
 
 // Report spedizioni dal punto di vista del MASTER LOGGATO (report margine):
 // - "Tutti" (nessun cliente selezionato) → tutta la sua rete (sotto-albero).
@@ -28,8 +29,13 @@ export async function GET(req: NextRequest) {
   const clienteIdRaw = eCliente ? null : p.get('clienteId')
   const masterSel = clienteIdRaw && clienteIdRaw.startsWith('m:') ? clienteIdRaw.slice(2) : null
   const clienteId = masterSel ? null : clienteIdRaw
-  const stato = p.get('stato'); const dal = p.get('dal'); const al = p.get('al')
+  const stato = p.get('stato')
+  // Giorni di Roma, come l'elenco: in UTC le spedizioni fra mezzanotte e le 2 finivano nel giorno prima.
+  const dal = confineGiornoRoma(p.get('dal'), 'dal'); const al = confineGiornoRoma(p.get('al'), 'al')
   const contrassegno = p.get('contrassegno'); const provincia = p.get('provincia')
+  // Contratto e Tipo contratto (del cliente: credito a scalare / fattura mensile) erano a schermo ma
+  // non arrivavano mai qui: il report usciva con tutti i contratti e tutti i clienti, senza dirlo.
+  const fContratto = p.get('contratto'); const fTipoContratto = p.get('tipoContratto')
   const ruolo = ruoloUtente
   const mine = utente?.master_id
   const isMaster = ruolo !== 'cliente' && ruolo !== 'agente' && !!mine
@@ -75,8 +81,10 @@ export async function GET(req: NextRequest) {
   const buildBase = () => {
     const filtroContratti = ownedContractNames.length > 0 && (!!subtreeSel || (!!reteIds && reteIds.length > 1))
     let q = db.from('spedizioni')
-      .select(`${SPED_COLS}, clienti(ragione_sociale,agente), ${filtroContratti ? 'corrieri!inner(id,nome_contratto)' : 'corrieri(id,nome_contratto)'}`)
+      .select(`${SPED_COLS}, ${fTipoContratto ? 'clienti!inner' : 'clienti'}(ragione_sociale,agente,tipo_contratto), ${(filtroContratti || fContratto) ? 'corrieri!inner(id,nome_contratto)' : 'corrieri(id,nome_contratto)'}`)
       .order('created_at', { ascending: false }).order('id', { ascending: false })
+    if (fContratto) q = q.eq('corrieri.nome_contratto', fContratto)
+    if (fTipoContratto) q = q.eq('clienti.tipo_contratto', fTipoContratto)
     if (subtreeSel) q = q.in('master_id', subtreeSel)
     else if (clienteId) q = q.eq('cliente_id', clienteId).eq('master_id', mine)
     else if (ruolo === 'cliente') q = q.eq('cliente_id', utente?.cliente_id)
