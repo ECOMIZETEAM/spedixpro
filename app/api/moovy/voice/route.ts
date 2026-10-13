@@ -124,6 +124,9 @@ export async function POST(req: Request) {
       const ldv = String(args.ldv || '').trim()
       const sped = await trovaSped(admin, ldv, u, isCliente, isAgente, supabase)
       if (!sped) return json({ reply: `Non ho trovato la spedizione ${ldv} tra le tue.` })
+      // Una GAMBA di un contratto condiviso non si elimina da qui: l'annullo di una gamba sola storna solo
+      // quel livello e lascia addebitati gli altri. Si annulla dalla spedizione del cliente, nell'elenco.
+      if (eGamba(sped.numero)) return json({ reply: `La ${sped.numero} è una parte di una spedizione su contratto condiviso: l'annullo si fa dalla spedizione del cliente, nell'elenco spedizioni.` })
       const desc = `Eliminare la spedizione ${sped.numero} per ${sped.dest_nome || 'destinatario'}?`
       return json({ reply: `Confermi: ${desc}`, pendingAction: { azione: 'elimina_spedizione', spedizioneId: sped.id, numero: sped.numero, descrizione: desc } })
     }
@@ -142,18 +145,27 @@ async function riformula(groq: any, messages: any[], call: any, risultato: strin
   } catch { return risultato }
 }
 
+// Riga-gamba di un contratto condiviso: stesso tracking, numero col suffisso (es. 282224J002093-1d6ac50d).
+function eGamba(numero: string | null | undefined): boolean { return /-[0-9a-f]{8}$/.test(String(numero || '')) }
+
 async function trovaSped(admin: any, ldv: string, u: any, isCliente: boolean, isAgente: boolean, supabase: any) {
+  // La LDV entra in un filtro or(): virgole e parentesi lo romperebbero.
+  ldv = String(ldv || '').replace(/[,()"\\]/g, '').trim()
   if (!ldv) return null
-  let q = admin.from('spedizioni').select('id,numero,dest_nome,stato,cliente_id,master_id').or(`numero.eq.${ldv},tracking_number.eq.${ldv}`)
-  const { data } = await q.limit(1).maybeSingle()
-  if (!data) return null
+  // TUTTE le righe con quella LDV, non la prima a caso: su un pacco condiviso ce n'e' una per gamba, e la
+  // prima trovata era la gamba 140 volte su 201 (13/10/2026) — al cliente rispondeva "non trovata", al
+  // master mostrava la gamba e ne proponeva l'eliminazione. Prima la riga che non e' una gamba.
+  const { data: righe } = await admin.from('spedizioni').select('id,numero,dest_nome,stato,cliente_id,master_id')
+    .or(`numero.eq.${ldv},tracking_number.eq.${ldv}`).limit(10)
+  if (!righe?.length) return null
+  const ordinate = [...righe].sort((a: any, b: any) => Number(eGamba(a.numero)) - Number(eGamba(b.numero)))
   // scope: cliente = sue; master/agente = rete (agente solo suoi clienti)
-  if (isCliente) { if (data.cliente_id !== u.cliente_id) return null; return data }
+  if (isCliente) return ordinate.find((r: any) => r.cliente_id === u.cliente_id) || null
   const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
   const sub = await sottoAlberoMasterIds(admin, u.master_id)
-  if (!sub.includes(data.master_id)) return null
-  if (isAgente) { const { clientiAgente } = await import('@/lib/agente'); const miei = await clientiAgente(supabase, u); if (!data.cliente_id || !miei.includes(data.cliente_id)) return null }
-  return data
+  let visibili = ordinate.filter((r: any) => sub.includes(r.master_id))
+  if (isAgente) { const { clientiAgente } = await import('@/lib/agente'); const miei = await clientiAgente(supabase, u); visibili = visibili.filter((r: any) => r.cliente_id && miei.includes(r.cliente_id)) }
+  return visibili[0] || null
 }
 
 async function trovaTarget(admin: any, masterId: string, nome: string): Promise<{ id: string; nome: string; tipo: 'cliente' | 'master' } | null> {
