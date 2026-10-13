@@ -6,10 +6,14 @@ import { creaCalcolatoreListinoCliente, creaCalcolatoreCorriere } from '@/lib/pr
 import { fetchAll } from '@/lib/fetch-all'
 import { vettoreFisico } from '@/lib/vettore'
 import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
+import { confineGiornoRoma } from '@/lib/date-roma'
+import { vedeLaRete } from '@/lib/ruoli'
 
 // L'ordinamento per MARGINE (sotto) calcola sul MOVIMENTI di tutto il periodo filtrato: sul network
 // intero legge molte righe, quindi serve più della finestra breve di default.
 export const maxDuration = 60
+
+const ELENCO_NON_DISPONIBILE = 'Elenco non disponibile in questo momento: riprova tra qualche secondo.'
 
 export async function GET(req: NextRequest) {
   // TEMPI: una riga sola in fondo, con i ms di ogni fase. Serve a sapere DOVE va il tempo in
@@ -40,8 +44,11 @@ export async function GET(req: NextRequest) {
   const masterSel = clienteIdRaw && clienteIdRaw.startsWith('m:') ? clienteIdRaw.slice(2) : null
   const clienteId = masterSel ? null : clienteIdRaw
   const stato = p.get('stato')
-  const dal = p.get('dal')
-  const al = p.get('al')
+  // GIORNI DI ROMA. Le pagine mandano '2026-10-13' e '2026-10-13T23:59:59', e il database li leggeva in
+  // UTC: le spedizioni fatte fra mezzanotte e le 2 italiane finivano nel giorno prima (lib/date-roma.ts).
+  // Un istante gia' completo (con fuso) passa com'e'.
+  const dal = confineGiornoRoma(p.get('dal'), 'dal')
+  const al = confineGiornoRoma(p.get('al'), 'al')
   const numero = p.get('numero')
   const destCitta = p.get('dest_citta')
   const destCap = p.get('dest_cap')
@@ -130,7 +137,16 @@ export async function GET(req: NextRequest) {
   // memoria dopo l'override, paginando lì. Cliente/agente vedono lo stato globale → filtro a DB, come prima.
   const filtroCodPerViewer = !!fStatoContr && !!utente?.master_id && ruolo !== 'cliente' && ruolo !== 'agente'
   const isMasterRete = ruolo !== 'cliente' && ruolo !== 'agente' && !clienteIdRaw && agenteClienteIds === null
+  // CHI NON VEDE LA RETE NON LEGGE L'ELENCO. L'autista ha la sua rotta (/api/autista) e qui riceveva
+  // l'elenco della rete con costi e margini: il divieto del middleware vale per le scritture, e questa
+  // rotta lo trattava da master (verificato il 13/10/2026).
+  if (ruolo !== 'cliente' && !vedeLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   let db: any = supabase
+  // L'OPERATORE (lo staff del master) vede quello che vede il suo master. La regola per riga sulle
+  // spedizioni ammette solo master e admin: col client dell'utente il suo elenco usciva VUOTO quando il
+  // master non ha sotto-master, e la scheda cliente sempre (con i sotto-master si passa gia' dal client
+  // di servizio). Il perimetro e' scritto a mano in ogni ramo di buildBase (master_id / cliente_id).
+  if (ruolo === 'operatore') db = admin
   let masterIds: string[] | null = null
   let subtreeSel: string[] | null = null  // sotto-albero del sotto-master selezionato
   let reteSubtree: string[] | null = null // filtro rete (paginato): sotto-albero DENTRO la mia rete
@@ -261,7 +277,12 @@ export async function GET(req: NextRequest) {
     // la accetta, quindi qualcuno deve andare a cancellarla a mano sul portale). Prima sparivano
     // anche quelle: 415 spedizioni il 25/09, 150 su DVA — il pacco era ancora vivo presso il
     // fornitore, poteva partire ed essere consegnato, ma chi l'aveva richiesta non la vedeva piu'.
-    if (stato && stato !== 'tutti') q = q.eq('stato', stato)
+    // stato=tutti = TUTTE, annullate comprese: e' quello che chiedono gli elenchi di master e cliente
+    // (Lorenzo, 13/10/2026: "su elenco ci devono stare tutte, anche le annullate"; prima "Tutti" le
+    // nascondeva e la ricerca per numero non trovava una spedizione annullata). Senza stato resta il
+    // comportamento di prima, su cui contano i report (giacenze, resi, contrassegni).
+    if (stato === 'tutti') { /* nessun filtro sullo stato */ }
+    else if (stato) q = q.eq('stato', stato)
     else q = q.not('stato', 'in', '(annullata)')
     if (dal) q = q.gte('created_at', dal)
     if (al) q = q.lte('created_at', al)
@@ -324,7 +345,16 @@ export async function GET(req: NextRequest) {
     let count: number | null = null
     const zeroRighe = await buildBase(true).limit(0)
     if (!zeroRighe.error && typeof zeroRighe.count === 'number') count = zeroRighe.count
-    else count = (await buildBase(true).range(0, 0)).count
+    else {
+      const unaRiga = await buildBase(true).range(0, 0)
+      // Se non si riesce a contare si dice, non si risponde 0: zero e' un numero, e sotto la tabella
+      // diventava "0 risultati" (la pagina, senza totale, tiene l'ultimo che conosce).
+      if (unaRiga.error) {
+        console.error('[LISTA] conteggio non riuscito:', unaRiga.error.message)
+        return NextResponse.json({ error: 'Conteggio non disponibile in questo momento.' }, { status: 503 })
+      }
+      count = unaRiga.count
+    }
     segna('solo-conteggio')
     const msC = Date.now() - t0
     if (msC > 500) console.log('[LISTA][TEMPI] soloConteggio', msC + 'ms', 'istanza=' + Math.round(process.uptime()) + 's', '|', tempi.join(' '))
@@ -363,6 +393,10 @@ export async function GET(req: NextRequest) {
     const { data: ord, error: errOrd } = await admin.rpc('spedizioni_margine_ids', {
       p_mine: utente!.master_id, p_masters: perimetroRpc,
       p_dal: dal || null, p_al: al || null,
+      // ATTENZIONE: la RPC tratta 'tutti' come null, cioe' "tutte tranne le annullate" (verificato il
+      // 13/10/2026: stesso totale con null e con 'tutti'). Va bene cosi': l'ordine per margine serve a
+      // stanare il sotto costo e un'annullata non ha margine. Per questo gli elenchi, quando si ordina
+      // per margine, non chiedono 'tutti': il loro conteggio resta quello di queste righe.
       p_stato: (stato && stato !== 'tutti') ? stato : null,
       p_cliente: clienteId || fClienteEq || null,
       p_contratti: contrattiRpc,
@@ -374,28 +408,49 @@ export async function GET(req: NextRequest) {
       // Lento, ma nessuno resta senza lista per un ordinamento.
       console.error('[LISTA] ordine per margine dal DB non riuscito, ripiego sul calcolo in memoria:', errOrd?.message)
       margineDaDb = false
-      spedizioni = await fetchAll(buildBase)
+      try { spedizioni = await fetchAll(buildBase, undefined, { lancia: true }) }
+      catch (e: any) {
+        console.error('[LISTA] elenco non letto (ripiego margine):', e?.message || e)
+        return NextResponse.json({ error: ELENCO_NON_DISPONIBILE }, { status: 503 })
+      }
       segna('margine-ripiego(' + spedizioni.length + ')')
     } else {
       const idsOrd = (ord as any[]).map((r: any) => r.id)
       totalePaginato = contaTot ? Number((ord as any[])[0]?.totale || 0) : -1
       // Le righe si rileggono con la query di SEMPRE (stessi filtri, stesse colonne): se per qualunque
       // motivo un id non li passasse, sparisce invece di comparire per sbaglio.
-      const { data: righeOrd } = idsOrd.length ? await buildBase().in('id', idsOrd) : { data: [] as any[] }
+      const { data: righeOrd, error: errRighe } = idsOrd.length ? await buildBase().in('id', idsOrd) : { data: [] as any[], error: null }
+      if (errRighe) {
+        console.error('[LISTA] righe dell\'ordine per margine non lette:', errRighe.message)
+        return NextResponse.json({ error: ELENCO_NON_DISPONIBILE }, { status: 503 })
+      }
       const perId = new Map((righeOrd || []).map((r: any) => [r.id, r]))
       spedizioni = idsOrd.map((id: string) => perId.get(id)).filter(Boolean)
       segna('margine-db(' + spedizioni.length + '/' + totalePaginato + ')')
     }
   } else if (paged && !filtroCodPerViewer && !ordinaMargine) {
     const from = (pageParam - 1) * perPage
-    const { data, count } = await buildBase(contaTot).range(from, from + perPage - 1)
+    const { data, count, error } = await buildBase(contaTot).range(from, from + perPage - 1)
+    // UN ERRORE NON E' UN ELENCO VUOTO. Prima la rotta rispondeva 200 con zero righe e la pagina
+    // scriveva "Nessuna spedizione trovata": la frase che fa pensare a spedizioni sparite.
+    if (error) {
+      console.error('[LISTA] pagina non letta:', error.message)
+      return NextResponse.json({ error: ELENCO_NON_DISPONIBILE }, { status: 503 })
+    }
     spedizioni = data || []
     totalePaginato = contaTot ? (count || 0) : -1   // -1 = non richiesto: la pagina usa quello che ha già
     segna(contaTot ? 'query+conteggio' : 'query')
   } else {
     // Legacy (array completo) O filtro contrassegni del master: prendo tutto il candidato COD e
     // pagino in memoria DOPO l'override per-livello (più sotto), così i due stati non divergono.
-    spedizioni = await fetchAll(buildBase)
+    // Gli elenchi paginati sanno mostrare un errore: per loro un blocco non letto ferma tutto invece
+    // di dare un elenco a meta'. Le pagine che vogliono l'array restano come prima.
+    try {
+      spedizioni = await fetchAll(buildBase, undefined, { lancia: paged })
+    } catch (e: any) {
+      console.error('[LISTA] elenco non letto:', e?.message || e)
+      return NextResponse.json({ error: ELENCO_NON_DISPONIBILE }, { status: 503 })
+    }
     segna('query-tutto(' + spedizioni.length + ')')
   }
 
@@ -794,7 +849,10 @@ export async function GET(req: NextRequest) {
       // quello del cliente. (Il totale paginato resta quello del filtro DB: approssimazione nota.)
       if (fStatoContr === 'pagato') rowsOut = rows.filter((r: any) => r.stato_contrassegno === 'pagato')
       else if (fStatoContr === 'in_attesa') rowsOut = rows.filter((r: any) => r.stato_contrassegno === 'in_distinta')
-      else if (fStatoContr === 'da_pagare') rowsOut = rows.filter((r: any) => Number(r.contrassegno) > 0 && !['in_distinta', 'pagato'].includes(String(r.stato_contrassegno || '')))
+      // 'annullato' (pacco reso o spedizione annullata) non si incassera' mai: fuori dai "da pagare",
+      // come gia' nel filtro a database qui sopra. Mancava solo qui, nel ramo del master: MULTIEXPRESS
+      // si vedeva 787 contrassegni annullati su 5.451 "da pagare" (57.070 €, misurato il 13/10/2026).
+      else if (fStatoContr === 'da_pagare') rowsOut = rows.filter((r: any) => Number(r.contrassegno) > 0 && !['in_distinta', 'pagato', 'annullato'].includes(String(r.stato_contrassegno || '')))
     }
   }
 

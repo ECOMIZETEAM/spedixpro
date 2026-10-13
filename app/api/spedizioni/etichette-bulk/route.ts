@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
 
   const ruolo = (utente?.ruolo || '').toLowerCase()
   // Campi extra per l'eventuale "riepilogo ordine" (packing slip) da anteporre alle etichette.
-  const cols = 'id,numero,etichetta_url,etichetta_path,raw_response,colli_dettaglio,cliente_id,master_id,created_at,rif_ordine,rif_destinatario,contenuto,colli,peso_reale,peso_fatturato,contrassegno,dest_nome,dest_indirizzo,dest_citta,dest_cap,dest_provincia,dest_paese,dest_telefono,mitt_nome,corriere_id,corrieri(nome_contratto,tipo)'
+  const cols = 'id,numero,stato,etichetta_url,etichetta_path,raw_response,colli_dettaglio,cliente_id,master_id,created_at,rif_ordine,rif_destinatario,contenuto,colli,peso_reale,peso_fatturato,contrassegno,dest_nome,dest_indirizzo,dest_citta,dest_cap,dest_provincia,dest_paese,dest_telefono,mitt_nome,corriere_id,corrieri(nome_contratto,tipo)'
   let spedizioni: any[] | null = null
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
@@ -58,6 +58,26 @@ export async function POST(req: NextRequest) {
   }
 
   for (const s of spedizioni || []) {
+    // ANNULLATA: al posto dell'etichetta un foglio che lo dice. Il credito e' gia' tornato indietro e su
+    // diversi contratti l'annullo non arriva al corriere: quella lettera di vettura resta buona, e il
+    // pacco spedito con lei lo paga chi detiene il contratto (stesso blocco della stampa singola).
+    if ((s as any).stato === 'annullata') {
+      try {
+        const pg = pdfMerged.addPage([283, 425])
+        pg.drawText('SPEDIZIONE ANNULLATA', { x: 20, y: 360, size: 14, font: fontBold })
+        pg.drawText(String(s.numero || ''), { x: 20, y: 335, size: 12, font })
+        for (const [i, riga] of [
+          'Questa spedizione e\' stata annullata:',
+          'la sua etichetta non e\' piu\' valida.',
+          '',
+          'Non spedire nessun pacco con questa',
+          'lettera di vettura.',
+        ].entries()) {
+          pg.drawText(riga, { x: 20, y: 300 - i * 18, size: 10, font })
+        }
+      } catch (e) { console.error('Errore foglio annullata:', e) }
+      continue
+    }
     // Etichette da stampare per questa spedizione. Sul MULTICOLLO ce n'e' una per collo; sul
     // monocollo il collo non la porta (sarebbe una copia identica) e si usa quella della spedizione.
     // ATTENZIONE: il ripiego DEVE dipendere dall'aver trovato o no delle etichette, non dal solo

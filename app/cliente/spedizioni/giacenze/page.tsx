@@ -3,6 +3,7 @@ import { useState, useEffect, Fragment } from 'react'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
+import { giornoRoma, giorniFaRoma } from '@/lib/date-roma'
 import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
 import BadgeFiltri from '@/app/components/BadgeFiltri'
 
@@ -19,8 +20,8 @@ function filtriDefault() {
     clienteId:'', vettore:'', contratto:'',
     // Default AMPIO (ultimo anno): le giacenze aperte/svincolate vanno viste tutte, non solo di oggi.
     // Il server filtra per giacenza_data (entrata in giacenza).
-    dal: new Date(Date.now() - 365*24*60*60*1000).toISOString().split('T')[0],
-    al: new Date().toISOString().split('T')[0],
+    dal: giorniFaRoma(365),
+    al: giornoRoma(),
     stato:''
   }
 }
@@ -30,13 +31,13 @@ export default function GiacenzePage() {
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useFiltriPersistenti('giacenze-cliente:cerca', '')
-  const [perPage, setPerPage] = useFiltriPersistenti('giacenze-cliente:perPage', 10)
+  const [perPage, setPerPage] = useFiltriPersistenti('giacenze-cliente:perPage', 10, { perSempre: true })
   const [pagina, setPagina] = useState(1)
   const [modal, setModal] = useState<any>(null)
   const [istruzioni, setIstruzioni] = useState('')
   const [elaborando, setElaborando] = useState(false)
   const [esito, setEsito] = useState<any>(null)
-  const [filtri, setFiltri] = useFiltriPersistenti('giacenze-cliente:filtri', filtriDefault())
+  const [filtri, setFiltri] = useFiltriPersistenti('giacenze-cliente:filtri', filtriDefault)
   const filtriAttivi = filtriToccati(filtri, filtriDefault())
   const attivo = (k: string) => filtriAttivi.has(k)
 

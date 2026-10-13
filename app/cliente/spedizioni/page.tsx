@@ -10,6 +10,7 @@ import { ldvProvvisoria, numeroMostrato, nomeClientePulito } from '@/lib/numero-
 import LdvInElaborazione from '@/app/components/LdvInElaborazione'
 import { dataEventoIt } from '@/lib/tracking-eventi'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
+import { giornoRoma, giorniFaRoma } from '@/lib/date-roma'
 
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
@@ -49,14 +50,16 @@ function codBadgeStyle(stato?: string) {
 // Default: ultimi 30 giorni (come l'elenco master). Con dal/al VUOTI si caricava PRIMA tutto lo
 // storico (lento), poi il DateRangePicker auto-impostava oggi-oggi e partiva un SECONDO caricamento:
 // all'apertura si vedeva "oggi" nel filtro ma la lista con tutto (e in caso di race restava così).
-const _oggiISO = new Date().toISOString().slice(0, 10)
-const _da30ISO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-const FILTRI_DEFAULT = {
-  clienteId:'', negozio:'', vettore:'', contratto:'', stato:'', id_ordine:'',
-  numero:'', dal:_da30ISO, al:_oggiISO, contrassegno:'', stato_contrassegni:'',
-  assicurazione:'', dest_citta:'', dest_cap:'', contenuto:'', fatturato:'', agente:'',
-  // Ordinamento colonna (vuoto = data più recente), applicato a DB su tutto il periodo filtrato.
-  ordina:'', dir:'desc'
+// FUNZIONE e giorno di Roma, come nell'elenco master: da costante del modulo "oggi" restava il giorno
+// in cui il browser aveva caricato la pagina (vedi lib/use-filtri-persistenti.ts).
+function filtriDefault() {
+  return {
+    clienteId:'', negozio:'', vettore:'', contratto:'', stato:'', id_ordine:'',
+    numero:'', dal:giorniFaRoma(30), al:giornoRoma(), contrassegno:'', stato_contrassegni:'',
+    assicurazione:'', dest_citta:'', dest_cap:'', contenuto:'', fatturato:'', agente:'',
+    // Ordinamento colonna (vuoto = data più recente), applicato a DB su tutto il periodo filtrato.
+    ordina:'', dir:'desc'
+  }
 }
 const ORDINABILE: Record<string,string> = {
   'N. Spedizione':'numero', 'Destinatario':'destinatario', 'Corriere':'vettore', 'Peso':'peso',
@@ -77,7 +80,7 @@ export default function SpedizioniPage() {
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useFiltriPersistenti('spedizioni-cliente:cerca', '')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [perPage, setPerPage] = useFiltriPersistenti('spedizioni-cliente:perPage', 10)
+  const [perPage, setPerPage] = useFiltriPersistenti('spedizioni-cliente:perPage', 10, { perSempre: true })
   const [pagina, setPagina] = useState(1)
   const [totale, setTotale] = useState(0)   // conteggio TOTALE dal server (paginazione server-side)
   const [contrattiCliente, setContrattiCliente] = useState<string[]>([])
@@ -87,9 +90,9 @@ export default function SpedizioniPage() {
   const [trackingLoading, setTrackingLoading] = useState(false)
   const [trackingTab, setTrackingTab] = useState<'tracking'|'colli'|'ripesature'>('tracking')
   const [eliminando, setEliminando] = useState<string|null>(null)
-  const [filtri, setFiltri, azzeraFiltri] = useFiltriPersistenti('spedizioni-cliente:filtri', FILTRI_DEFAULT)
+  const [filtri, setFiltri, azzeraFiltri] = useFiltriPersistenti('spedizioni-cliente:filtri', filtriDefault)
   // I filtri che ho toccato (diversi dal default): il contatore e le caselle accese partono da qui.
-  const filtriAttivi = filtriToccati(filtri, FILTRI_DEFAULT)
+  const filtriAttivi = filtriToccati(filtri, filtriDefault())
   const attivo = (k: string) => filtriAttivi.has(k)
   const [resoModal, setResoModal] = useState(false)
   const [resoBusy, setResoBusy] = useState(false)
@@ -112,6 +115,8 @@ export default function SpedizioniPage() {
   // la tabella non si svuota mai durante il caricamento (spinner solo al primissimo giro).
   const cacheRef = useRef<Map<string, { rows: any[]; total: number }>>(new Map())
   const seqRef = useRef(0)
+  const [errore, setErrore] = useState('')
+  const erroreRef = useRef('')
   const prevFiltriRef = useRef<any>(null)
   useEffect(() => {
     const TESTO = ['numero', 'id_ordine', 'dest_citta', 'dest_cap', 'contenuto']
@@ -138,7 +143,9 @@ export default function SpedizioniPage() {
       if (filtri.al) q.set('al', filtri.al + 'T23:59:59')
     }
     if (cerca.trim()) q.set('cerca', cerca.trim())
-    for (const k of ['stato','contratto','vettore','negozio','id_ordine','contrassegno','stato_contrassegni','assicurazione','fatturato','dest_citta','dest_cap','contenuto'] as const) {
+    // "Tutti" = TUTTE, annullate comprese (Lorenzo, 13/10/2026): senza stato la rotta le nasconde.
+    q.set('stato', filtri.stato || 'tutti')
+    for (const k of ['contratto','vettore','negozio','id_ordine','contrassegno','stato_contrassegni','assicurazione','fatturato','dest_citta','dest_cap','contenuto'] as const) {
       const v = (filtri as any)[k]
       if (v) q.set(k, v)
     }
@@ -153,12 +160,15 @@ export default function SpedizioniPage() {
   // apre davvero quella pagina, la chiamata vera riconta e riscrive righe e totale, come prima.
   async function fetchPagina(paginaReq: number, totaleNoto?: number): Promise<{ rows: any[]; total: number } | null> {
     try {
-      const res = await fetch('/api/spedizioni/lista?' + buildParams(paginaReq).toString() + (totaleNoto !== undefined ? '&conta=0' : ''))
-      const data = await res.json()
-      if (!Array.isArray(data?.rows)) return null
+      const prefetch = totaleNoto !== undefined
+      const res = await fetch('/api/spedizioni/lista?' + buildParams(paginaReq).toString() + (prefetch ? '&conta=0' : ''))
+      const data = await res.json().catch(() => null)
+      // Un errore non e' un elenco vuoto: prima diventava "Nessuna spedizione trovata". Il messaggio lo
+      // scrive solo la chiamata vera: un precaricamento fallito non deve parlare per la pagina aperta.
+      if (!res.ok || !Array.isArray(data?.rows)) { if (!prefetch) erroreRef.current = data?.error || 'Elenco non caricato: riprova tra qualche secondo.'; return null }
       const total = typeof data?.total === 'number' ? data.total : (totaleNoto ?? 0)
       return { rows: data.rows, total: Number(total) || 0 }
-    } catch { return null }
+    } catch { if (totaleNoto === undefined) erroreRef.current = 'Elenco non caricato: controlla la connessione e riprova.'; return null }
   }
 
   async function carica(paginaReq: number) {
@@ -171,8 +181,8 @@ export default function SpedizioniPage() {
     if (fresh) {
       cacheRef.current.set(k, fresh)
       if (cacheRef.current.size > 40) cacheRef.current.delete(cacheRef.current.keys().next().value as string)
-      if (seq === seqRef.current) { setSpedizioni(fresh.rows); setSpedizioniFiltrate(fresh.rows); setTotale(fresh.total); setLoading(false) }
-    } else if (seq === seqRef.current) setLoading(false)
+      if (seq === seqRef.current) { setSpedizioni(fresh.rows); setSpedizioniFiltrate(fresh.rows); setTotale(fresh.total); setLoading(false); setErrore('') }
+    } else if (seq === seqRef.current) { setLoading(false); setErrore(erroreRef.current || 'Elenco non caricato: riprova tra qualche secondo.') }
     // PREFETCH della pagina successiva: quando clicchi "Successivo" è già in memoria.
     const tot = fresh?.total ?? hit?.total ?? 0
     if (paginaReq * perPage < tot) {
@@ -210,9 +220,12 @@ export default function SpedizioniPage() {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id])
   }
 
+  // Le annullate si vedono ma non si selezionano: la loro etichetta non vale piu' e non deve finire in
+  // una stampa di gruppo o in un reso (stesso blocco nelle rotte, vedi l'elenco master).
+  const selezionabili = spedizioniPaginate.filter((s:any)=>s.stato!=='annullata')
   function toggleAll() {
-    if (selectedIds.length===spedizioniPaginate.length) setSelectedIds([])
-    else setSelectedIds(spedizioniPaginate.map(s=>s.id))
+    if (selectedIds.length===selezionabili.length) setSelectedIds([])
+    else setSelectedIds(selezionabili.map(s=>s.id))
   }
 
   const [stampandoId, setStampandoId] = useState('')
@@ -524,20 +537,39 @@ async function apriTracking(s: any) {
           </div>
         </div>
 
+        {errore && spedizioniVisibili.length > 0 && (
+          <div style={{background:'#fef2f2',borderBottom:'1px solid #fecaca',padding:'8px 16px',fontSize:'12px',color:'#b91c1c'}}>
+            ⚠️ {errore} Stai vedendo l&apos;ultimo elenco caricato. <button onClick={ricarica} style={{marginLeft:'6px',background:'none',border:'none',color:'#b91c1c',fontWeight:700,textDecoration:'underline',cursor:'pointer',fontSize:'12px'}}>Riprova</button>
+          </div>
+        )}
         {loading && !spedizioniPaginate.length ? (
           <div style={{padding:'60px',textAlign:'center' as const,color:'#1a1a1a'}}>Caricamento...</div>
         ) : !spedizioniVisibili.length ? (
-          <div style={{padding:'60px',textAlign:'center' as const,color:'#1a1a1a'}}>
-            <div style={{fontSize:'36px',marginBottom:'12px'}}>📦</div>
-            <div style={{fontWeight:'500'}}>Nessuna spedizione trovata</div>
-          </div>
+          errore ? (
+            <div style={{padding:'60px',textAlign:'center' as const,color:'#b91c1c'}}>
+              <div style={{fontSize:'36px',marginBottom:'12px'}}>⚠️</div>
+              <div style={{fontWeight:'600'}}>{errore}</div>
+              <button onClick={ricarica} style={{...btnFiltri,marginTop:'14px'}}>Riprova</button>
+            </div>
+          ) : (
+            <div style={{padding:'60px',textAlign:'center' as const,color:'#1a1a1a'}}>
+              <div style={{fontSize:'36px',marginBottom:'12px'}}>📦</div>
+              <div style={{fontWeight:'500'}}>Nessuna spedizione trovata</div>
+              {/* Il periodo va detto: l'elenco filtra sulla data di CREAZIONE, i movimenti sulla loro. */}
+              {!(filtri.numero||'').trim() && filtri.dal && filtri.al && (
+                <div style={{fontSize:'12px',color:'#6b7280',marginTop:'6px'}}>
+                  Create dal {filtri.dal.split('-').reverse().join('/')} al {filtri.al.split('-').reverse().join('/')}{(filtriAttivi.size > (attivo('data') ? 1 : 0) || !!cerca.trim()) ? ', con i filtri accesi' : ''}.
+                </div>
+              )}
+            </div>
+          )
         ) : (
           <div style={{overflowX:'auto' as const}}>
             <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
               <thead>
                 <tr style={{background:'#f9fafb'}}>
                   <th style={{padding:'9px 12px',borderBottom:'1px solid #d1d5db',width:'36px'}}>
-                    <input type="checkbox" checked={selectedIds.length===spedizioniPaginate.length&&spedizioniPaginate.length>0} onChange={toggleAll}/>
+                    <input type="checkbox" checked={selectedIds.length===selezionabili.length&&selezionabili.length>0} onChange={toggleAll}/>
                   </th>
                   {['N. Spedizione','Cliente','Destinatario','Data e Ora','Stato','Azioni'].map(h=>{
                     const key = ORDINABILE[h]
@@ -557,6 +589,7 @@ async function apriTracking(s: any) {
                 {spedizioniPaginate.map(s => {
                   const st = STATI[s.stato] || STATI['annullata']
                   const isSelected = selectedIds.includes(s.id)
+                  const annullata = s.stato === 'annullata'
                   // Valori della SECONDA riga (corriere/peso/colli/contrassegno/ordine/totale), come array così
                   // i divisori verticali saltano i campi assenti (contrassegno/ordine) senza lasciare linee a vuoto.
                   const secItems: { l: any; v: any }[] = [
@@ -565,13 +598,15 @@ async function apriTracking(s: any) {
                     { l: 'Colli', v: s.colli },
                     ...(Number(s.contrassegno)>0 ? [{ l: 'Contrassegno', v: <span style={{...codBadgeStyle(s.stato_contrassegno),padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{Number(s.contrassegno).toFixed(2)}</span> }] : []),
                     ...(s.id_ordine ? [{ l: 'Ordine', v: s.id_ordine }] : []),
-                    { l: 'Totale', v: <span><b style={{color:'#1a1a1a'}}>€ {Number(s.costo_totale||0).toFixed(2)}</b>{Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span> },
+                    // Annullata: il totale e' quello di prima dello storno (il credito e' gia' tornato), quindi barrato.
+                    { l: 'Totale', v: <span style={annullata?{textDecoration:'line-through',opacity:0.6}:undefined}><b style={{color:'#1a1a1a'}}>€ {Number(s.costo_totale||0).toFixed(2)}</b>{Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span> },
+                    ...(annullata ? [{ l: 'Credito', v: <span style={{color:'#6b7280'}} title="Spedizione annullata: l'importo ti e' stato riaccreditato">riaccreditato</span> }] : []),
                   ]
                   return (
                     <Fragment key={s.id}>
                     <tr style={{background:isSelected?'#fff7ed':'#fff'}}>
                       <td style={{padding:'9px 12px 3px'}}>
-                        <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(s.id)}/>
+                        <input type="checkbox" checked={isSelected} disabled={annullata} title={annullata?'Spedizione annullata: non si stampa e non si usa per un reso':undefined} onChange={()=>toggleSelect(s.id)}/>
                       </td>
                       <td style={{padding:'9px 12px'}}>
                         {ldvProvvisoria(s.numero)
@@ -603,11 +638,11 @@ async function apriTracking(s: any) {
                       </td>
                       <td style={{padding:'9px 12px 3px'}}>
                         <div style={{display:'flex',gap:'4px'}}>
-                          <button onClick={()=>stampaEtichetta(s.id)} disabled={stampandoId===s.id}
-                            style={{padding:'4px 8px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}} title={zplOn?'Stampa etichetta su Zebra (ZPL)':'Scarica etichetta PDF'}>{stampandoId===s.id?'⏳':'🖨️'}</button>
+                          {!annullata && <button onClick={()=>stampaEtichetta(s.id)} disabled={stampandoId===s.id}
+                            style={{padding:'4px 8px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}} title={zplOn?'Stampa etichetta su Zebra (ZPL)':'Scarica etichetta PDF'}>{stampandoId===s.id?'⏳':'🖨️'}</button>}
                           <button onClick={()=>setDettaglio(s)} title="Vedi dettagli spedizione" style={{padding:'4px 8px',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',fontSize:'14px',border:'1px solid #bfdbfe',cursor:'pointer'}}>👁</button>
 
-                          {s.stato==='annullamento_pending' ? (
+                          {annullata ? null : s.stato==='annullamento_pending' ? (
                             <button onClick={()=>ripristina(s.id,s.numero)} disabled={eliminando===s.id}
                               style={{padding:'4px 10px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'12px',fontWeight:'700',border:'1px solid #fed7aa',cursor:'pointer',whiteSpace:'nowrap',opacity:eliminando===s.id?0.5:1}} title="Ripristina spedizione">↩︎ Ripristina</button>
                           ) : s.no_annullo_15gg ? (

@@ -4,6 +4,7 @@ import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import BarraAvanzamento from '@/app/components/BarraAvanzamento'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
+import { giornoRoma } from '@/lib/date-roma'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
@@ -19,8 +20,8 @@ import BadgeFiltri from '@/app/components/BadgeFiltri'
 function filtriDefault() {
   return {
     clienteId:'', stato:'',
-    dal: new Date().toISOString().split('T')[0],
-    al: new Date().toISOString().split('T')[0],
+    dal: giornoRoma(),
+    al: giornoRoma(),
   }
 }
 
@@ -48,7 +49,7 @@ export default function DistinteContrassegniPage() {
   const [righePag, setRighePag] = useState<{metodo:string,importo:string}[]>([{metodo:'',importo:''},{metodo:'',importo:''}])
   const [confermando, setConfermando] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-  const [filtri, setFiltri] = useFiltriPersistenti('contrassegni-distinte-master:filtri', filtriDefault())
+  const [filtri, setFiltri] = useFiltriPersistenti('contrassegni-distinte-master:filtri', filtriDefault)
   const filtriAttivi = filtriToccati(filtri, filtriDefault())
   const attivo = (k: string) => filtriAttivi.has(k)
 

@@ -6,8 +6,15 @@
 // prima). Se è piena, le pagine successive partono in PARALLELO a gruppi di 4: prima erano tutte
 // sequenziali → con le liste grandi (migliaia di righe) si sommavano i round-trip uno dietro
 // l'altro. Semantica identica: output in ordine, stop alla prima pagina corta/errore.
-export async function fetchAll<T = any>(build: () => any, max = 500000): Promise<T[]> {
+//
+// `lancia: true` = un blocco non letto e' un ERRORE, non la fine dei dati. Senza, un errore del
+// database restituisce [] o un elenco a meta' e chi legge non puo' distinguerlo da "non c'e' altro":
+// e' cosi' che un guasto diventava "Nessuna spedizione trovata" (distinte di un cliente, 13/10/2026).
+// Opzionale perche' molti chiamanti usano il risultato cosi' com'e': si accende dove l'errore si sa mostrare.
+export async function fetchAll<T = any>(build: () => any, max = 500000, opzioni?: { lancia?: boolean }): Promise<T[]> {
+  const lancia = !!opzioni?.lancia
   const { data: prima, error: e0 } = await build().range(0, 999)
+  if (e0 && lancia) throw new Error('fetchAll: primo blocco non letto: ' + (e0.message || e0))
   if (e0 || !prima?.length) return []
   const out: T[] = [...(prima as T[])]
   if (prima.length < 1000) return out
@@ -18,6 +25,7 @@ export async function fetchAll<T = any>(build: () => any, max = 500000): Promise
     )
     let fine = false
     for (const r of results) {
+      if (r?.error && lancia) throw new Error('fetchAll: blocco non letto: ' + (r.error.message || r.error))
       if (r?.error) { fine = true; break }
       const rows = (r?.data as T[]) || []
       out.push(...rows)

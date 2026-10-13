@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
   // Carico le spedizioni originali NEL PERIMETRO di chi chiede (cliente: le proprie; master: la sua
   // rete; agente: solo i suoi clienti). Solo così creerò resi di spedizioni che può davvero vedere.
   let q = admin.from('spedizioni').select(
-    'id,numero,corriere_id,cliente_id,master_id,contenuto,valore_merce,assicurazione,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,' +
+    'id,numero,stato,corriere_id,cliente_id,master_id,contenuto,valore_merce,assicurazione,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,' +
     'mitt_nome,mitt_indirizzo,mitt_citta,mitt_provincia,mitt_cap,mitt_paese,mitt_email,mitt_telefono,' +
     'dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_email,dest_telefono'
   ).in('id', ids)
@@ -68,6 +68,10 @@ export async function POST(req: NextRequest) {
   const errori: any[] = []
 
   for (const o of originali as any[]) {
+    // Un'andata ANNULLATA non e' mai partita: non c'e' niente da far tornare, e il reso sarebbe una
+    // spedizione vera, addebitata. Da quando le annullate stanno in elenco si possono vedere accanto
+    // alle altre: questo e' il blocco che vale anche fuori dalla pagina.
+    if (o.stato === 'annullata') { errori.push({ originale: o.numero, error: 'Spedizione annullata: non è mai partita, non serve un reso.' }); continue }
     // Provincia mittente del reso = provincia del DESTINATARIO originale (che ora spedisce). crea la
     // pretende: se sull'originale manca, non possiamo prezzare/creare → errore chiaro per quella riga.
     if (!String(o.dest_provincia || '').trim()) { errori.push({ originale: o.numero, error: 'Manca la provincia del destinatario originale: non posso creare il reso.' }); continue }

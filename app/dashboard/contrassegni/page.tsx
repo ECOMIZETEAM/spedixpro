@@ -4,6 +4,7 @@ import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
+import { giornoRoma } from '@/lib/date-roma'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -43,8 +44,8 @@ import BadgeFiltri from '@/app/components/BadgeFiltri'
 function filtriDefault() {
   return {
     numero:'', clienteId:'', vettore:'', contratto:'', statoSpedizione:'', statoContrassegno:'',
-    dal: new Date().toISOString().split('T')[0],
-    al: new Date().toISOString().split('T')[0],
+    dal: giornoRoma(),
+    al: giornoRoma(),
   }
 }
 
@@ -56,10 +57,10 @@ export default function ListaContrassegniPage() {
   const [loading, setLoading] = useState(true)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [cerca, setCerca] = useFiltriPersistenti('contrassegni-master:cerca', '')
-  const [perPage, setPerPage] = useFiltriPersistenti('contrassegni-master:perPage', 10)
+  const [perPage, setPerPage] = useFiltriPersistenti('contrassegni-master:perPage', 10, { perSempre: true })
   const [pagina, setPagina] = useState(1)
   const [creandoDistinta, setCreandoDistinta] = useState(false)
-  const [filtri, setFiltri] = useFiltriPersistenti('contrassegni-master:filtri', filtriDefault())
+  const [filtri, setFiltri] = useFiltriPersistenti('contrassegni-master:filtri', filtriDefault)
   const filtriAttivi = filtriToccati(filtri, filtriDefault())
   const attivo = (k: string) => filtriAttivi.has(k)
 

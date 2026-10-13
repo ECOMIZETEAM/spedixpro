@@ -29,9 +29,9 @@ export default function ElencoRitiriPage() {
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useFiltriPersistenti('ritiri-elenco-master:cerca', '')
-  const [perPage, setPerPage] = useFiltriPersistenti('ritiri-elenco-master:perPage', 10)
+  const [perPage, setPerPage] = useFiltriPersistenti('ritiri-elenco-master:perPage', 10, { perSempre: true })
   const [pagina, setPagina] = useState(1)
-  const [filtri, setFiltri] = useFiltriPersistenti('ritiri-elenco-master:filtri', filtriDefault())
+  const [filtri, setFiltri] = useFiltriPersistenti('ritiri-elenco-master:filtri', filtriDefault)
   const filtriAttivi = filtriToccati(filtri, filtriDefault())
   const attivo = (k: string) => filtriAttivi.has(k)
 

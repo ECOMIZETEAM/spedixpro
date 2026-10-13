@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, Fragment } from 'react'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
+import { giornoRoma, giorniFaRoma } from '@/lib/date-roma'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import SelectCercabile from '@/app/components/SelectCercabile'
 
@@ -17,8 +18,9 @@ import { useDialog } from '@/app/components/DialogProvider'
 import { riferimentoFornitore } from '@/lib/numero-spedizione'
 // Default: ultimi 60 giorni di annullate (le code pending/manuali restano complete: sono attive e
 // poche). Prima si scaricavano e arricchivano TUTTE le annullate di sempre -> pagina sempre piu' lenta.
-const _oggiC = new Date().toISOString().slice(0, 10)
-const _da60C = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+// Funzioni e non costanti del modulo, giorno di Roma: vedi lib/use-filtri-persistenti.ts (periodo congelato).
+const _oggiC = () => giornoRoma()
+const _da60C = () => giorniFaRoma(60)
 // Etichettina della SECONDA riga (valori sotto): piccola e tenue, non deve pesare.
 const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
 export default function SpedizioniCancellatePage() {
@@ -33,7 +35,7 @@ export default function SpedizioniCancellatePage() {
   const [filtroCliente, setFiltroCliente, azzeraCliente] = useFiltriPersistenti('spedizioni-cancellate-master:cliente', '')
   const [dal, setDal, azzeraDal] = useFiltriPersistenti('spedizioni-cancellate-master:dal', _da60C)
   const [al, setAl, azzeraAl] = useFiltriPersistenti('spedizioni-cancellate-master:al', _oggiC)
-  const [perPage, setPerPage] = useFiltriPersistenti('spedizioni-cancellate-master:perPage', 10)
+  const [perPage, setPerPage] = useFiltriPersistenti('spedizioni-cancellate-master:perPage', 10, { perSempre: true })
   const [pagina, setPagina] = useState(1)
   const [paginaPending, setPaginaPending] = useState(1)   // paginazione sezione "in attesa di annullo"
   const [paginaCoda, setPaginaCoda] = useState(1)         // paginazione coda annulli del detentore

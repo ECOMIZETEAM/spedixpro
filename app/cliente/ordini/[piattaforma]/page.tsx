@@ -6,6 +6,7 @@ import DateRangePicker from '@/app/components/DateRangePicker'
 import { useDialog } from '@/app/components/DialogProvider'
 import PagaConCarta from '@/app/cliente/PagaConCarta'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
+import { giornoRoma, giorniFaRoma } from '@/lib/date-roma'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 import { useAnteprimaPrezzi, chiediPrezzi, scegliTariffa, euro, eUnRifiuto, testoDelRifiuto, type RigaPrezzo } from '@/app/cliente/anteprima-prezzi'
 
@@ -78,7 +79,7 @@ export default function OrdiniPage() {
   const [fSpA, setFSpA] = useFiltriPersistenti('ordini-cliente:spA', '')
 
   const [search, setSearch] = useFiltriPersistenti('ordini-cliente:cerca', '')
-  const [perPage, setPerPage] = useFiltriPersistenti('ordini-cliente:perPage', 10)
+  const [perPage, setPerPage] = useFiltriPersistenti('ordini-cliente:perPage', 10, { perSempre: true })
   const [page, setPage] = useState(1)
   const [sel, setSel] = useState<Record<string,boolean>>({})
   const [sort, setSort] = useState<{k:string,d:1|-1}|null>(null)
@@ -181,8 +182,9 @@ export default function OrdiniPage() {
       // oggi; "ultimi 30 giorni" -> quelli. Se non hai scelto date, default agli ultimi 30 giorni,
       // cosi' il primo sync non parte vuoto. (Prima si mandava un'unione fissa >=30gg che ignorava il
       // selettore: mettere "oggi" scaricava comunque tutto il mese.)
-      const trentaGiorniFa = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
-      const oggi = new Date().toISOString().slice(0, 10)
+      // Giorno di Roma: in UTC fra mezzanotte e le 2 "oggi" era ancora ieri.
+      const trentaGiorniFa = giorniFaRoma(30)
+      const oggi = giornoRoma()
       const res = await fetch('/api/integrazioni/'+piattaforma+'/sync', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({

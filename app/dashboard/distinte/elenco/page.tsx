@@ -25,7 +25,7 @@ export default function ElencoDistintePage() {
   const [fVettore, setFVettore] = useFiltriPersistenti('distinte-elenco-master:vettore', '')
   const [fContratto, setFContratto] = useFiltriPersistenti('distinte-elenco-master:contratto', '')
   const [selezionate, setSelezionate] = useState<Set<string>>(new Set())
-  const [perPage, setPerPage] = useFiltriPersistenti('distinte-elenco-master:perPage', 10)
+  const [perPage, setPerPage] = useFiltriPersistenti('distinte-elenco-master:perPage', 10, { perSempre: true })
   const [pagina, setPagina] = useState(1)
 
   // Cerca con debounce: niente una chiamata a ogni tasto; una nuova ricerca riparte da pagina 1.

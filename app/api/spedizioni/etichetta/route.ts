@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
 
   const { data: sped } = await supabase
     .from('spedizioni')
-    .select('etichetta_url, etichetta_path, colli_dettaglio, cliente_id, master_id, numero, raw_response, corriere_id, colli, rif_ordine, contenuto')
+    .select('etichetta_url, etichetta_path, colli_dettaglio, cliente_id, master_id, numero, raw_response, corriere_id, colli, rif_ordine, contenuto, stato')
     .eq('id', id)
     .single()
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
@@ -47,6 +47,15 @@ export async function GET(req: NextRequest) {
   if (isAgente(utente as any)) {
     const miei = await clientiAgente(supabase, utente as any)
     if (!sped.cliente_id || !miei.includes(sped.cliente_id)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  }
+
+  // SPEDIZIONE ANNULLATA: l'etichetta non si consegna piu'. Il credito e' gia' tornato a tutta la catena,
+  // ma su diversi contratti l'annullo non arriva al corriere (InPost, contratti condivisi, code manuali)
+  // e quella lettera di vettura resta buona: un pacco spedito con lei lo paga chi detiene il contratto.
+  // Da quando le annullate stanno in elenco (13/10/2026) il pulsante non si mostra; questo e' il blocco
+  // che vale per ogni porta, compresa quella che nascera' domani.
+  if ((sped as any).stato === 'annullata') {
+    return NextResponse.json({ error: `La spedizione${sped.numero ? ' ' + sped.numero : ''} è annullata: l'etichetta non è più valida e non va stampata.` }, { status: 409 })
   }
 
   // Riepilogo ordine (se il cliente lo ha attivato): viene ANTEPOSTO all'etichetta quando è un PDF.

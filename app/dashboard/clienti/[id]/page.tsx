@@ -269,7 +269,8 @@ export default function ClienteProfiloPage() {
     // (movimenti 205k, ordini, resi, ticket, pricing) per poi buttarne via tutto tranne 10. Il ramo
     // paginato risponde { rows, total, ... } (oggetto, non array): si legge d.rows — con fallback
     // all'array legacy, così non si rompe se un domani cambia forma.
-    fetch(`/api/spedizioni/lista?clienteId=${id}&page=1&perPage=10`).then(r => r.json()).then(d => {
+    // stato=tutti: le ultime 10 sono le ultime 10, annullate comprese (come nell'elenco).
+    fetch(`/api/spedizioni/lista?clienteId=${id}&page=1&perPage=10&stato=tutti`).then(r => r.json()).then(d => {
       setSpedizioni(Array.isArray(d?.rows) ? d.rows : (Array.isArray(d) ? d.slice(0, 10) : []))
     })
   }, [id])

@@ -54,7 +54,7 @@ export default function MovimentiMasterPage() {
   // CONDIVISIONE: conti selezionabili (rete/albero + un conto-CODICE per fornitore). Vuoto/1 voce = nessun selettore.
   const [conti, setConti] = useState<{ id: string; label: string }[]>([])
   const [contoFiltro, setContoFiltro] = useFiltriPersistenti('movimenti-master:conto', 'rete')
-  const [perPage, setPerPage] = useFiltriPersistenti('movimenti-master:perPage', 10)
+  const [perPage, setPerPage] = useFiltriPersistenti('movimenti-master:perPage', 10, { perSempre: true })
   const [pagina, setPagina] = useState(1)
   const [total, setTotal] = useState(0)
   const [somma, setSomma] = useState(0)
