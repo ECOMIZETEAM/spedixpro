@@ -383,6 +383,27 @@ export type DettaglioCorriere = {
 // Se corriereId è passato, usa le fasce di quel corriere; altrimenti prende
 // il primo corriere disponibile per la zona (il più economico non è garantito:
 // prende quello con la fascia valida più bassa). Ritorna null se non calcolabile.
+// IL CONTRATTO SI LEGGE UNA VOLTA, NON UNA PER FASCIA.
+// Chiesto come relazione incorporata (`corrieri(...)` nella select delle fasce), PostgREST ricopiava
+// l'oggetto del contratto su OGNI fascia: su un listino da 925 fasce e 20 contratti erano 464 KB di
+// impostazioni ripetute contro 10 KB lette una volta, e meta' del tempo della query (31,6 ms contro
+// 14,4, risposta da 867 a 401 KB; misurato il 13/10/2026). Qui le fasce arrivano senza, e il contratto
+// si riattacca in memoria su `f.corrieri`: stesso oggetto di prima (null se il contratto non c'e' o non
+// e' leggibile da quel client, come faceva la relazione), ma UNO per contratto e condiviso fra le sue
+// fasce — chi lo riceve non lo deve modificare (verificato: nessuno lo fa).
+// false = lettura dei contratti fallita: il chiamante la tratta come fasce non lette.
+export async function attaccaCorrieri(db: any, fasce: any[], colonne: string): Promise<boolean> {
+  const ids = Array.from(new Set(fasce.map((f: any) => f.corriere_id).filter(Boolean)))
+  const perId = new Map<string, any>()
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await db.from('corrieri').select(colonne).in('id', ids.slice(i, i + 200))
+    if (error) return false
+    for (const c of (data || [])) perId.set((c as any).id, c)
+  }
+  for (const f of fasce) (f as any).corrieri = perId.get((f as any).corriere_id) ?? null
+  return true
+}
+
 export async function calcolaPrezzoListino(
   supabase: any,
   params: {
@@ -436,11 +457,14 @@ export async function calcolaPrezzoListino(
   // "in coda" sparivano dal calcolo. Tiebreaker `id` per paginazione stabile (peso_max non è univoco).
   const fasce = await fetchAll(() => supabase
     .from('listini_clienti_fasce')
-    .select('*, zone(id,nome,su_mittente), corrieri(id,tipo,nome_contratto,settings)')
+    .select('*, zone(id,nome,su_mittente)')
     .eq('listino_id', listinoId)
     .order('peso_max', { ascending: true }).order('id', { ascending: true }))
 
   if (!fasce?.length) return null
+  // Il contratto si legge una volta, non una per fascia (vedi attaccaCorrieri). Lettura fallita =
+  // come fasce non lette: prima un errore sulla relazione incorporata faceva fallire tutta la query.
+  if (!(await attaccaCorrieri(supabase, fasce, 'id,tipo,nome_contratto,settings'))) return null
 
   // 1) Match via zone_cap (CAP esatto > provincia > jolly), ristretto alle zone del listino.
   //    Mappa zona->corriere: i tier si applicano PER CORRIERE (il CAP esatto di un corriere non

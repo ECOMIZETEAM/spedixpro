@@ -320,7 +320,7 @@ export async function calcolaTariffeCliente(
   // solo se piena. Tiebreaker `id` per una paginazione stabile (peso_max non è univoco).
   const buildFasce = () => adminDb
     .from('listini_clienti_fasce')
-    .select('*, zone(id,nome,su_mittente), corrieri(id,tipo,nome_contratto,attivo,credenziali,settings)')
+    .select('*, zone(id,nome,su_mittente)')
     .eq('listino_id', cliente.listino_cliente_id)
     .order('peso_max', { ascending: true }).order('id', { ascending: true })
   const { data: fasce0, error: errFasce } = await buildFasce().range(0, 999)
@@ -347,6 +347,22 @@ export async function calcolaTariffeCliente(
   }
   if (!fasce?.length) {
     return { errore: 'Listino vuoto — configura le fasce prezzi', stato: 400 }
+  }
+
+  // IL CONTRATTO UNA VOLTA PER ID, NON RICOPIATO SU OGNI FASCIA (stessa ragione di attaccaCorrieri in
+  // lib/pricing: su un listino grande erano centinaia di KB di impostazioni e credenziali ripetute in
+  // ogni risposta). La lettura resta scritta qui, sul client di servizio, perche' porta le credenziali:
+  // la guardia della build (scripts/controlla-credenziali.mjs) deve continuare a vederla.
+  // Lettura fallita = stesso esito di una lettura fasce fallita: errore tecnico, non "listino vuoto".
+  {
+    const idsContratti = Array.from(new Set(fasce.map((f: any) => f.corriere_id).filter(Boolean)))
+    const { data: contratti, error: errContratti } = await adminDb.from('corrieri').select('id,tipo,nome_contratto,attivo,credenziali,settings').in('id', idsContratti as string[])
+    if (errContratti) {
+      console.error('[TARIFFE] lettura contratti fallita', cliente.listino_cliente_id, errContratti.message)
+      return { errore: 'Errore tecnico nel calcolo delle tariffe: riprova tra poco. Se persiste contatta l\'assistenza (il listino non c\'entra).', stato: 500 }
+    }
+    const perId = new Map<string, any>((contratti || []).map((c: any) => [c.id, c]))
+    for (const f of fasce as any[]) f.corrieri = perId.get(f.corriere_id) ?? null
   }
 
   // Match zona via zone_cap (CAP esatto > provincia > jolly), ristretto alle zone del listino.
