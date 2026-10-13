@@ -146,12 +146,18 @@ export default function SpedizioniPage() {
     return q
   }
 
-  async function fetchPagina(paginaReq: number): Promise<{ rows: any[]; total: number } | null> {
+  // totaleNoto: lo passa SOLO il precaricamento della pagina dopo. Il conteggio esatto e' il 98% del
+  // costo di questa chiamata (271 ms su 275 sul cliente piu' grande, 13/10/2026) e il precaricamento
+  // lo rifaceva identico, coi filtri della pagina appena contata meno di un secondo prima: chiede le
+  // righe con &conta=0 (la rotta risponde total:null) e tiene il totale appena ricevuto. Quando si
+  // apre davvero quella pagina, la chiamata vera riconta e riscrive righe e totale, come prima.
+  async function fetchPagina(paginaReq: number, totaleNoto?: number): Promise<{ rows: any[]; total: number } | null> {
     try {
-      const res = await fetch('/api/spedizioni/lista?' + buildParams(paginaReq).toString())
+      const res = await fetch('/api/spedizioni/lista?' + buildParams(paginaReq).toString() + (totaleNoto !== undefined ? '&conta=0' : ''))
       const data = await res.json()
       if (!Array.isArray(data?.rows)) return null
-      return { rows: data.rows, total: Number(data?.total) || 0 }
+      const total = typeof data?.total === 'number' ? data.total : (totaleNoto ?? 0)
+      return { rows: data.rows, total: Number(total) || 0 }
     } catch { return null }
   }
 
@@ -171,7 +177,7 @@ export default function SpedizioniPage() {
     const tot = fresh?.total ?? hit?.total ?? 0
     if (paginaReq * perPage < tot) {
       const kn = buildParams(paginaReq + 1).toString()
-      if (!cacheRef.current.has(kn)) fetchPagina(paginaReq + 1).then(d => { if (d) cacheRef.current.set(kn, d) })
+      if (!cacheRef.current.has(kn)) fetchPagina(paginaReq + 1, tot).then(d => { if (d) cacheRef.current.set(kn, d) })
     }
   }
 
