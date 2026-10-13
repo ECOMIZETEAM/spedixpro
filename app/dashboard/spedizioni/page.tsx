@@ -109,6 +109,13 @@ export default function SpedizioniPage() {
   // I filtri che ho toccato (diversi dal default): il contatore e le caselle accese partono da qui.
   const filtriAttivi = filtriToccati(filtri, filtriDefault())
   const attivo = (k: string) => filtriAttivi.has(k)
+  // Un CODICE scritto in Cerca (lettera di vettura, tracking, numero d'ordine: una parola, almeno 8
+  // caratteri, almeno una cifra) si cerca su tutto lo storico, come il campo N. Spedizione: dentro il
+  // periodo una LDV piu' vecchia risultava "non trovata" (41% delle spedizioni fuori dai 30 giorni).
+  // Un nome resta nel periodo: senza date costerebbe una scansione di tutto lo storico.
+  const cercaCodice = /^[A-Za-z0-9-]{8,}$/.test(cerca.trim()) && /\d/.test(cerca.trim())
+  // La casella Cerca filtra come le altre: si accende e conta (prima restava grigia e fuori dal numero).
+  const nFiltriAccesi = filtriAttivi.size + (cerca.trim() ? 1 : 0)
   const [resoModal, setResoModal] = useState(false)
   const [resoBusy, setResoBusy] = useState(false)
   const [resoOpts, setResoOpts] = useState({ assicura: false, ritiro: false, dataRitiro: '', orarioRitiro: 'mattina' })
@@ -131,6 +138,7 @@ export default function SpedizioniPage() {
   const seqRef = useRef(0)
   const [errore, setErrore] = useState('')
   const erroreRef = useRef('')
+  const kfCorrenteRef = useRef('')   // chiave dei filtri dell'ultimo caricamento (vedi fetchTotale)
   const prevFiltriRef = useRef<any>(null)
   useEffect(() => {
     const TESTO = ['numero', 'id_ordine', 'dest_citta', 'dest_cap', 'contenuto']
@@ -156,7 +164,7 @@ export default function SpedizioniPage() {
     if (num) {
       // ricerca per numero su tutto lo storico: NIENTE filtro data
       q.set('numero', num)
-    } else {
+    } else if (!cercaCodice) {
       if (filtri.dal) q.set('dal', filtri.dal)
       if (filtri.al) q.set('al', filtri.al + 'T23:59:59')
     }
@@ -227,12 +235,16 @@ export default function SpedizioniPage() {
       if (data?.total == null) return
       const tot = Number(data.total) || 0
       totaliRef.current.set(kf, tot)
-      setTotale(tot)
+      // Solo se i filtri sono ancora quelli: un conteggio lento di un filtro vecchio non deve scrivere il
+      // suo numero sotto le righe nuove. Il confronto passa da un ref, non da chiaveFiltri(): qui dentro
+      // quella funzione e' del render di partenza e darebbe sempre la stessa chiave.
+      if (kf === kfCorrenteRef.current) setTotale(tot)
     } catch { /* il totale resta quello noto: la tabella funziona lo stesso */ }
   }
 
   async function carica(paginaReq: number) {
     const k = buildParams(paginaReq).toString()
+    kfCorrenteRef.current = chiaveFiltri()
     const seq = ++seqRef.current
     fetchTotale()   // parte in parallelo: la tabella non lo aspetta
     const hit = cacheRef.current.get(k)
@@ -496,7 +508,7 @@ async function apriTracking(s: any) {
 
       {/* FILTRI */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
-        <div style={{fontWeight:'700',color:'#1a1a1a',marginBottom:'10px',fontSize:'12px'}}>▼ Filtri<BadgeFiltri n={filtriAttivi.size} /></div>
+        <div style={{fontWeight:'700',color:'#1a1a1a',marginBottom:'10px',fontSize:'12px'}}>▼ Filtri<BadgeFiltri n={nFiltriAccesi} /></div>
 
         {/* Riga 1 */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr 1fr',gap:'8px',marginBottom:'8px'}}>
@@ -654,7 +666,8 @@ async function apriTracking(s: any) {
               <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Cerca:</span>
               <input value={cerca} onChange={e=>setCerca(e.target.value)}
                 placeholder="N. spedizione o destinatario..."
-                style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',width:'220px',color:'#1a1a1a',background:'#fff'}}/>
+                title={cercaCodice ? 'Codice: si cerca su tutto lo storico, senza date' : 'Un nome si cerca nel periodo scelto; un codice (LDV, tracking, ordine) su tutto lo storico'}
+                style={stileFiltro({padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',width:'220px',color:'#1a1a1a',background:'#fff'}, !!cerca.trim())}/>
             </div>
           </div>
         </div>
@@ -680,7 +693,7 @@ async function apriTracking(s: any) {
               {/* IL PERIODO VA DETTO. L'elenco filtra sulla data di CREAZIONE della spedizione, la lista
                   movimenti sulla data del MOVIMENTO: una rettifica di settembre su una spedizione di
                   luglio sta nei movimenti di settembre e nell'elenco di luglio (segnalazione del 13/10). */}
-              {!(filtri.numero||'').trim() && filtri.dal && filtri.al && (
+              {!(filtri.numero||'').trim() && !cercaCodice && filtri.dal && filtri.al && (
                 <div style={{fontSize:'12px',color:'#6b7280',marginTop:'6px'}}>
                   Create dal {filtri.dal.split('-').reverse().join('/')} al {filtri.al.split('-').reverse().join('/')}{(filtriAttivi.size > (attivo('data') ? 1 : 0) || !!cerca.trim()) ? ', con i filtri accesi' : ''}.
                 </div>

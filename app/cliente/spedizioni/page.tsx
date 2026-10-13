@@ -94,6 +94,10 @@ export default function SpedizioniPage() {
   // I filtri che ho toccato (diversi dal default): il contatore e le caselle accese partono da qui.
   const filtriAttivi = filtriToccati(filtri, filtriDefault())
   const attivo = (k: string) => filtriAttivi.has(k)
+  // Un CODICE in Cerca (LDV, tracking, ordine: una parola, 8+ caratteri, almeno una cifra) si cerca su
+  // tutto lo storico, come N. Spedizione; un nome resta nel periodo (vedi l'elenco master).
+  const cercaCodice = /^[A-Za-z0-9-]{8,}$/.test(cerca.trim()) && /\d/.test(cerca.trim())
+  const nFiltriAccesi = filtriAttivi.size + (cerca.trim() ? 1 : 0)
   const [resoModal, setResoModal] = useState(false)
   const [resoBusy, setResoBusy] = useState(false)
   const [resoOpts, setResoOpts] = useState({ assicura: false, ritiro: false, dataRitiro: '', orarioRitiro: 'mattina' })
@@ -138,7 +142,7 @@ export default function SpedizioniPage() {
     const num = (filtri.numero || '').trim()
     if (num) {
       q.set('numero', num)   // ricerca su tutto lo storico, niente filtro data
-    } else {
+    } else if (!cercaCodice) {
       if (filtri.dal) q.set('dal', filtri.dal)
       if (filtri.al) q.set('al', filtri.al + 'T23:59:59')
     }
@@ -384,7 +388,7 @@ async function apriTracking(s: any) {
 
       {/* FILTRI */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
-        <div style={{fontWeight:'700',color:'#1a1a1a',marginBottom:'10px',fontSize:'12px'}}>▼ Filtri<BadgeFiltri n={filtriAttivi.size} /></div>
+        <div style={{fontWeight:'700',color:'#1a1a1a',marginBottom:'10px',fontSize:'12px'}}>▼ Filtri<BadgeFiltri n={nFiltriAccesi} /></div>
 
         {/* Riga 1 */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr 1fr',gap:'8px',marginBottom:'8px'}}>
@@ -532,7 +536,8 @@ async function apriTracking(s: any) {
               <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Cerca:</span>
               <input value={cerca} onChange={e=>setCerca(e.target.value)}
                 placeholder="N. spedizione o destinatario..."
-                style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',width:'220px',color:'#1a1a1a',background:'#fff'}}/>
+                title={cercaCodice ? 'Codice: si cerca su tutto lo storico, senza date' : 'Un nome si cerca nel periodo scelto; un codice (LDV, tracking, ordine) su tutto lo storico'}
+                style={stileFiltro({padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',width:'220px',color:'#1a1a1a',background:'#fff'}, !!cerca.trim())}/>
             </div>
           </div>
         </div>
@@ -556,7 +561,7 @@ async function apriTracking(s: any) {
               <div style={{fontSize:'36px',marginBottom:'12px'}}>📦</div>
               <div style={{fontWeight:'500'}}>Nessuna spedizione trovata</div>
               {/* Il periodo va detto: l'elenco filtra sulla data di CREAZIONE, i movimenti sulla loro. */}
-              {!(filtri.numero||'').trim() && filtri.dal && filtri.al && (
+              {!(filtri.numero||'').trim() && !cercaCodice && filtri.dal && filtri.al && (
                 <div style={{fontSize:'12px',color:'#6b7280',marginTop:'6px'}}>
                   Create dal {filtri.dal.split('-').reverse().join('/')} al {filtri.al.split('-').reverse().join('/')}{(filtriAttivi.size > (attivo('data') ? 1 : 0) || !!cerca.trim()) ? ', con i filtri accesi' : ''}.
                 </div>

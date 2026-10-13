@@ -35,7 +35,9 @@ export async function GET(req: NextRequest) {
   let agenteClienteIds: string[] | null = null
   if ((utente?.ruolo || '').toLowerCase() === 'agente') {
     const nomeAg = (((utente as any)?.nome || '') + ' ' + ((utente as any)?.cognome || '')).trim()
-    const { data: cl } = await supabase.from('clienti').select('id').eq('master_id', utente?.master_id).eq('agente', nomeAg)
+    const { data: cl, error: eCl } = await supabase.from('clienti').select('id').eq('master_id', utente?.master_id).eq('agente', nomeAg)
+    // Senza la lista dei suoi clienti l'agente vedrebbe un elenco vuoto, presentato come "nessuna spedizione".
+    if (eCl) return NextResponse.json({ error: ELENCO_NON_DISPONIBILE }, { status: 503 })
     agenteClienteIds = (cl || []).map((c: any) => c.id)
   }
   const p = req.nextUrl.searchParams
@@ -184,7 +186,9 @@ export async function GET(req: NextRequest) {
     masterIds = [mine]
     // La volumetria della rete sotto un master risale sempre a lui (tutti i livelli).
     // UNA sola query sui masters (tabella piccola) invece di una per livello: il BFS resta identico.
-    const { data: tuttiM } = await adminDb.from('masters').select('id,nome,parent_master_id')
+    const { data: tuttiM, error: eM } = await adminDb.from('masters').select('id,nome,parent_master_id')
+    // Senza l'albero il master vedrebbe solo le sue spedizioni, come se la rete non avesse spedito.
+    if (eM) return NextResponse.json({ error: ELENCO_NON_DISPONIBILE }, { status: 503 })
     const figliDi = new Map<string, any[]>()
     for (const m of (tuttiM || [])) {
       const p = (m as any).parent_master_id
