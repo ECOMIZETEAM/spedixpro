@@ -81,26 +81,6 @@ export async function GET(req: NextRequest) {
         continue
       }
 
-      // CONTRATTO CONDIVISO: annullo sul portale di TUTTE le gambe, con storno (lib/annullo-condivise.ts).
-      // Prima finiva qui sotto: il ponte rispondeva "va gestito dall'assistenza" e la spedizione tornava
-      // attiva, addebitata. Se il pacco e' gia' preso in carico, resta il comportamento di prima.
-      if (corr?.tipo === 'moovexpress') {
-        const { annullaCondivisaDopo48h } = await import('@/lib/annullo-condivise')
-        const r = await annullaCondivisaDopo48h(admin, s as any)
-        if (r.esito === 'annullata') {
-          try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, [s.id]) } catch {}
-          annullate++
-        } else {
-          await admin.from('spedizioni').update({
-            stato: (s as any).stato_precedente || 'in_lavorazione',
-            annullamento_richiesto_at: null,
-            annullamento_errore: `Annullo non eseguito: ${r.motivo}`,
-          }).eq('id', s.id)
-          rifiutate++
-        }
-        continue
-      }
-
       const esito = await annullaSpedizioneSulCorriere(admin, s as any)
       if (esito.ok) {
         await admin.from('spedizioni').update({ stato: 'annullata', annullamento_errore: null }).eq('id', s.id)

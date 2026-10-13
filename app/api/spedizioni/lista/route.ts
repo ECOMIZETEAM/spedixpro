@@ -245,8 +245,11 @@ export async function GET(req: NextRequest) {
   // l'assistenza deve poter ritrovare anche la gamba col suffisso. Ne' quando si ordina per margine: li'
   // l'ordine lo decide spedizioni_margine_ids, che questa lista non la riceve, e conteggio e pagine
   // smetterebbero di tornare (righe scartate dopo, pagine corte).
+  // Un nome cercato in Cerca NON riapre le gambe: solo un codice (una parola, 8+ caratteri, una cifra —
+  // la stessa regola delle pagine elenco).
+  const cercaECodice = !!fCerca && /^[A-Za-z0-9-]{8,}$/.test(fCerca.trim()) && /\d/.test(fCerca)
   const perimetroLetto = subtreeSel || reteSubtree || masterIds
-  const ledgerDoppioni = (utente?.master_id && ruolo !== 'cliente' && ruolo !== 'agente' && !numero && !fCerca && !ordinaMargine && perimetroLetto && perimetroLetto.length > 1)
+  const ledgerDoppioni = (utente?.master_id && ruolo !== 'cliente' && ruolo !== 'agente' && !numero && !cercaECodice && !ordinaMargine && perimetroLetto && perimetroLetto.length > 1)
     ? await ledgerDoppioniNelPerimetro(admin, perimetroLetto) : []
   const ledgerNascosti = Array.from(new Set([...ledgerFornitori, ...ledgerDoppioni]))
 

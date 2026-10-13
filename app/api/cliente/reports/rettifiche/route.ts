@@ -82,7 +82,9 @@ export async function GET(req: NextRequest) {
   const righe = (speds || [])
     .map((s: any) => {
       const costoIniziale = Number(s.costo_totale || 0)          // addebitato alla creazione
-      const rettifica = Math.abs(rettPerSped.get(s.id) || 0)     // conguaglio successivo
+      // Conguaglio successivo COL SUO SEGNO: positivo = addebitato in piu', negativo = restituito (il movimento
+      // di un addebito e' negativo). Col valore assoluto uno storno usciva come addebito (29 casi da luglio).
+      const rettifica = Math.round(-(rettPerSped.get(s.id) || 0) * 100) / 100
       const pr = pesiRett.get(s.id)
       const pesoReale = pr?.reale || Number(s.peso_reale || 0)
       const pesoVolReale = pr?.volume || 0
@@ -102,6 +104,6 @@ export async function GET(req: NextRequest) {
     })
     // Un report di RETTIFICHE mostra le spedizioni rettificate: senza conguaglio non c'e' nulla da
     // dire, e prima l'elenco usciva pieno di righe con una differenza che era il margine del master.
-    .filter((r: any) => r.differenza > 0)
+    .filter((r: any) => Math.abs(r.differenza) >= 0.01)
   return NextResponse.json({ righe, master: master || {}, cliente: { ragione_sociale: cliente?.ragione_sociale || '' } })
 }

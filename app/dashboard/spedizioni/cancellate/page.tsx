@@ -132,8 +132,10 @@ export default function SpedizioniCancellatePage() {
     }
     return true
   }
-  // I filtri agiscono su tutte le sezioni della pagina
-  const visibili = spedizioni.filter(passaFiltri)
+  // I filtri agiscono su tutte le sezioni della pagina. Le annullate in ordine di RICHIESTA d'annullo, la
+  // data che la colonna mostra e su cui cade il periodo (la rotta le manda ordinate per ultimo aggiornamento).
+  const dataAnnullo = (s: any) => String(s.annullamento_richiesto_at || s.updated_at || s.created_at || '')
+  const visibili = spedizioni.filter(passaFiltri).sort((a: any, b: any) => dataAnnullo(b).localeCompare(dataAnnullo(a)))
   const pendingVis = pending.filter(passaFiltri)
   const manualiVis = manualiAltri.filter(passaFiltri)
   const codaOwnerVis = codaOwner.filter(passaFiltri)   // anche la coda annulli segue ricerca/cliente/date
@@ -393,7 +395,7 @@ export default function SpedizioniCancellatePage() {
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
               <thead>
                 <tr style={{background:'#f9fafb'}}>
-                  {['N. Spedizione','Cliente','Destinatario','Data'].map(h=>(
+                  {['N. Spedizione','Cliente','Destinatario','Richiesta annullo'].map(h=>(
                     <th key={h} style={{textAlign:'left',padding:'9px 12px',fontSize:'11px',fontWeight:'700',textTransform:'uppercase',letterSpacing:'0.4px',color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap'}}>{h}</th>
                   ))}
                 </tr>
