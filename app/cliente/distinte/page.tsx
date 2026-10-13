@@ -9,10 +9,15 @@ export default function ListaDistinteCliente() {
   const [busy, setBusy] = useState('')
   const [perPagina, setPerPagina] = useState(10)
   const [pagina, setPagina] = useState(1)
+  const [errore, setErrore] = useState('')
   useEffect(() => { carica() }, [])
   function carica() {
     setLoading(true)
-    fetch('/api/cliente/distinte/lista').then(r=>r.json()).then(d=>{setDistinte(Array.isArray(d)?d:[]);setLoading(false)}).catch(()=>setLoading(false))
+    fetch('/api/cliente/distinte/lista').then(r=>r.json().catch(()=>null)).then(d=>{
+      if (Array.isArray(d)) { setDistinte(d); setErrore('') }
+      else setErrore(d?.error || 'Distinte non caricate: riprova tra qualche secondo.')
+      setLoading(false)
+    }).catch(()=>{ setErrore('Distinte non caricate: controlla la connessione e riprova.'); setLoading(false) })
   }
   const visibili = distinte.filter(d => !cerca || d.numero?.toLowerCase().includes(cerca.toLowerCase()) || (d.contratto||'').toLowerCase().includes(cerca.toLowerCase()))
   const totPagine = Math.max(1, Math.ceil(visibili.length / perPagina))
@@ -100,6 +105,9 @@ export default function ListaDistinteCliente() {
         <div style={{padding:'10px 16px',fontSize:'12px',color:'#1a1a1a'}}>Mostra{' '}<select value={perPagina} onChange={e=>{setPerPagina(Number(e.target.value));setPagina(1)}} style={{padding:'4px 8px',border:'1px solid #d1d5db',borderRadius:'5px',color:'#1a1a1a'}}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option></select>{' '}elementi</div>
         {loading ? (
           <div style={{padding:'40px',textAlign:'center',color:'#999',fontSize:'13px'}}>Caricamento...</div>
+        ) : errore ? (
+          // Un errore non e' "nessuna distinta": detto cosi', il cliente pensa di averle perse.
+          <div style={{padding:'40px',textAlign:'center',color:'#b91c1c',fontSize:'13px'}}>⚠️ {errore} <button onClick={carica} style={{marginLeft:'6px',background:'none',border:'none',color:'#b91c1c',fontWeight:700,textDecoration:'underline',cursor:'pointer',fontSize:'13px'}}>Riprova</button></div>
         ) : !visibili.length ? (
           <div style={{padding:'40px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessuna distinta creata</div>
         ) : (

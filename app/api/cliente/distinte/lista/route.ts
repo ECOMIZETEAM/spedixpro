@@ -44,10 +44,26 @@ export async function GET() {
   const nuovoAgg = (): Agg => ({ n: 0, colli: 0, contrassegni: 0, peso: 0, costo: 0 })
   const perDistinta = new Map<string, Agg>()
   if (idsDistinte.length) {
-    const speds = await fetchAll(() => supabase
-      .from('spedizioni')
-      .select('distinta_id,costo_totale,contrassegno,colli,peso_fatturato,peso_reale')
-      .in('distinta_id', idsDistinte))
+    // A BLOCCHI DI 200. Tutti gli id in un solo .in() finiscono nell'indirizzo della richiesta: con
+    // 1.612 distinte (un cliente vero, 13/10/2026) erano ~62.000 caratteri, il gateway rispondeva
+    // 520 e fetchAll tornava vuoto senza dirlo — ogni distinta mostrava 0 spedizioni e 0 euro.
+    // E un blocco non letto e' un errore, non uno zero: la pagina lo dice invece di mostrare conti sbagliati.
+    const blocchi: string[][] = []
+    for (let i = 0; i < idsDistinte.length; i += 200) blocchi.push(idsDistinte.slice(i, i + 200))
+    const speds: any[] = []
+    try {
+      for (let i = 0; i < blocchi.length; i += 4) {
+        const letti = await Promise.all(blocchi.slice(i, i + 4).map(b => fetchAll(() => supabase
+          .from('spedizioni')
+          .select('distinta_id,costo_totale,contrassegno,colli,peso_fatturato,peso_reale')
+          .in('distinta_id', b)
+          .order('id', { ascending: true }), undefined, { lancia: true })))
+        for (const l of letti) speds.push(...l)
+      }
+    } catch (e: any) {
+      console.error('[CLIENTE][DISTINTE] spedizioni delle distinte non lette:', e?.message || e)
+      return NextResponse.json({ error: 'Distinte non disponibili in questo momento: riprova tra qualche secondo.' }, { status: 503 })
+    }
     for (const s of speds || []) {
       const k = (s as any).distinta_id
       if (!k) continue
