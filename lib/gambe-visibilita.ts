@@ -40,6 +40,23 @@ export async function ledgerFornitoriDaNascondere(
   return [...nascosti]
 }
 
+// I DOPPIONI DENTRO IL PERIMETRO. La regola qui sopra guarda il viewer: nasconde le gambe di chi VENDE a lui.
+// Ma chi legge piu' livelli insieme (la radice, che vede tutto l'albero) trova anche le gambe fra DUE master
+// entrambi nel suo perimetro — Wave che vende a MULTI, LOGIXIA che vende a Wave — e cosi' la stessa
+// spedizione compariva una volta per gamba: +49,7% di righe a ottobre 2026 nell'elenco della radice.
+// Qui si prendono i ledger dei legami il cui ACQUIRENTE sta nel perimetro letto: la sua riga (o quella del
+// suo cliente) e' gia' in elenco, la gamba del fornitore verso di lui e' un doppione. Per un master che
+// legge solo il suo albero il risultato coincide con quello di sopra (MULTIEXPRESS: stessi due ledger).
+export async function ledgerDoppioniNelPerimetro(
+  admin: { from: (t: string) => any },
+  perimetroMasterIds: string[] | null | undefined,
+): Promise<string[]> {
+  if (!perimetroMasterIds?.length) return []
+  const { data } = await admin.from('corrieri_condivisi')
+    .select('cliente_ledger_id').in('master_id', perimetroMasterIds).eq('stato', 'attiva')
+  return Array.from(new Set(((data || []) as any[]).map(r => r.cliente_ledger_id).filter(Boolean)))
+}
+
 // I MASTER-FORNITORI del viewer (chi gli vende, risalendo corrieri_condivisi). Serve dove la cosa da
 // nascondere è un DOCUMENTO del master senza cliente proprio — le DISTINTE: le distinte dei fornitori
 // (Wave, LOGIXIA per MULTI) non vanno mostrate al compratore. Si escludono dai master visibili.

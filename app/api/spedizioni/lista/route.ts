@@ -5,7 +5,7 @@ import { SPED_COLS, SPED_COLS_LISTA } from '@/lib/spedizioni-cols'
 import { creaCalcolatoreListinoCliente, creaCalcolatoreCorriere } from '@/lib/pricing'
 import { fetchAll } from '@/lib/fetch-all'
 import { vettoreFisico } from '@/lib/vettore'
-import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
+import { ledgerFornitoriDaNascondere, ledgerDoppioniNelPerimetro } from '@/lib/gambe-visibilita'
 import { confineGiornoRoma } from '@/lib/date-roma'
 import { vedeLaRete } from '@/lib/ruoli'
 
@@ -238,8 +238,15 @@ export async function GET(req: NextRequest) {
   // ALBERO + NASCONDI-FORNITORI: su una spedizione condivisa un master non vede le gambe di CHI GLI VENDE
   // (a monte). Quelle hanno come cliente un ledger "(ingrosso)" d'acquisto del master o dei suoi fornitori
   // (risalendo corrieri_condivisi). Calcolato UNA volta qui (scope async); buildBase è sincrona e lo chiude.
-  const ledgerNascosti = (utente?.master_id && utente.ruolo !== 'cliente' && utente.ruolo !== 'agente')
+  const ledgerFornitori = (utente?.master_id && utente.ruolo !== 'cliente' && utente.ruolo !== 'agente')
     ? await ledgerFornitoriDaNascondere(admin, utente.master_id) : []
+  // + i DOPPIONI dentro il perimetro letto (lib/gambe-visibilita.ts): chi legge piu' livelli insieme (la
+  // radice) vedeva la stessa spedizione una volta per gamba. Non quando si cerca un numero o un codice:
+  // l'assistenza deve poter ritrovare anche la gamba col suffisso.
+  const perimetroLetto = subtreeSel || reteSubtree || masterIds
+  const ledgerDoppioni = (utente?.master_id && ruolo !== 'cliente' && ruolo !== 'agente' && !numero && !fCerca && perimetroLetto && perimetroLetto.length > 1)
+    ? await ledgerDoppioniNelPerimetro(admin, perimetroLetto) : []
+  const ledgerNascosti = Array.from(new Set([...ledgerFornitori, ...ledgerDoppioni]))
 
   // Solo colonne leggere (SPED_COLS): esclusi etichetta_url/raw_response/colli_dettaglio.
   // Costruisco una query FRESCA a ogni chiamata (i builder Supabase sono monouso).
