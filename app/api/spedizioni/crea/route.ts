@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import { addebitaTreeCondivisione, verificaCreditoCondivisione, risolviChiaveDispatch } from '@/lib/condivisione-catena'
-import { calcolaPrezzoCorriere, calcolaPrezzoCorriereDettaglio, calcolaSupplementiCliente, fattoreVolumeCliente, fattoreVolumeCorriere, calcolaPesoFatturato, calcolaPrezzoListino } from '@/lib/pricing'
+import { calcolaPrezzoCorriere, calcolaPrezzoCorriereDettaglio, calcolaSupplementiCliente, fattoreVolumeCliente, fattoreVolumeCorriere, calcolaPesoFatturato, calcolaPrezzoListino, type RisultatoPrezzo } from '@/lib/pricing'
 import { isAgente, nomeAgente } from '@/lib/agente'
 import { pudoConfigDaVettore, spediamoproPudoCourier } from '@/lib/punti-poste'
 import { EMAIL_PER_CORRIERE,
@@ -365,6 +365,11 @@ export async function POST(req: NextRequest) {
   // (che potrebbe arrivare da un preventivo stale o dalla creazione manuale del master).
   // calcolaPrezzoListino (con le zone esclusive del master tra le candidate) ritorna il corriere solo
   // se ha davvero una fascia per la destinazione: se torna un ALTRO corriere (o null), è escluso.
+  // Il risultato del cancello e' ANCHE il nolo del prezzo qui sotto: stessi argomenti uno per uno
+  // (listino, contratto, destinazione con citta', colli, mittente). Si passa a prezzoClienteDaListino
+  // invece di ricalcolarlo da capo (13/10/2026: era tutta la lettura del listino fatta due volte di
+  // fila, a ogni spedizione). undefined = cancello non eseguito (estero): li' si calcola come prima.
+  let noloDelCancello: RisultatoPrezzo | undefined
   if (!isProprio && cliente?.listino_cliente_id && (body.shipTo.country || 'IT').toUpperCase() === 'IT') {
     const risCli = await calcolaPrezzoListino(adminCrea, {
       listinoId: cliente.listino_cliente_id, corriereId: corriereRecord.id,
@@ -376,6 +381,7 @@ export async function POST(req: NextRequest) {
     if (!risCli || risCli.corriere_id !== corriereRecord.id) {
       return NextResponse.json({ error: 'Destinazione in zona disagiata: nessun prezzo a listino per questo corriere. Spedizione non consentita — scegli un altro corriere o aggiungi la fascia della zona al listino.' }, { status: 400 })
     }
+    noloDelCancello = risCli
   }
 
   // *** PREZZO AL CLIENTE CALCOLATO DAL SERVER ***
@@ -405,6 +411,7 @@ export async function POST(req: NextRequest) {
       mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state,
       contrassegno: body.codValue, assicurazione: body.insuranceValue, valoreMerce: body.valoreMerce,
       serviziAccessori,
+      noloGiaCalcolato: noloDelCancello,
     })
     if (!esitoPrezzo.ok) {
       return NextResponse.json({ error: 'Destinazione non coperta dal listino per questo contratto: spedizione non creabile.' }, { status: 400 })

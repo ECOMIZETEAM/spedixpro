@@ -27,7 +27,7 @@
  * NON decide se il contratto e' OFFRIBILE a quel cliente (disattivato, in pausa, a un punto, fuori
  * catena...): quelli sono cancelli del motore del preventivo e della creazione. Qui si risponde a
  * una domanda sola: con QUESTO contratto, per QUESTA spedizione, il listino quanto fa pagare. */
-import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
+import { calcolaPrezzoListino, calcolaSupplementiCliente, type RisultatoPrezzo } from '@/lib/pricing'
 
 export type EsitoPrezzoCliente =
   | {
@@ -66,13 +66,18 @@ export async function prezzoClienteDaListino(
     assicurazione?: number | string | null
     valoreMerce?: number | string | null
     serviziAccessori?: { nome: string; importo?: number }[] | null
+    // Il nolo GIA' calcolato da chi chiama con questi stessi identici dati: la creazione lo chiede un
+    // istante prima per il cancello della zona senza prezzo, con gli stessi argomenti uno per uno.
+    // Ricalcolarlo voleva dire rifare tutte le letture del listino una seconda volta, di fila.
+    // Assente = si calcola qui, come sempre (l'anteprima, l'estero dove il cancello non gira).
+    noloGiaCalcolato?: RisultatoPrezzo | null
   },
 ): Promise<EsitoPrezzoCliente> {
   // Peso reale = SOMMA di tutti i colli: e' la banda di peso su cui si sceglie lo scaglione del
   // contrassegno (la commissione di alcuni corrieri dipende dal peso).
   const pesoReale = (Array.isArray(p.packages) ? p.packages : []).reduce((s: number, c: any) => s + (parseFloat(c?.weight) || 0), 0) || 1
 
-  const risPrezzo = await calcolaPrezzoListino(db, {
+  const risPrezzo = p.noloGiaCalcolato !== undefined ? p.noloGiaCalcolato : await calcolaPrezzoListino(db, {
     listinoId: p.listinoId, corriereId: p.corriereId,
     provincia: p.provincia, cap: p.cap,
     paese: p.paese || 'IT', citta: p.citta as any, packages: p.packages,

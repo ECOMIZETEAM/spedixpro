@@ -487,6 +487,14 @@ export async function calcolaPrezzoListino(
   }
   const fascePerCorriere = new Map<string, any[]>()
   for (const [cId, fasceC] of tuttePerCorr) {
+    // CONTRATTO RICHIESTO: gli altri non possono cambiare la risposta. Piu' sotto si usano solo
+    // `fascePerCorriere.get(params.corriereId)` e `mittByCorr.get(params.corriereId)`, e se il
+    // richiesto manca o viene escluso si esce con null comunque. Valutare anche gli altri costava
+    // 1-3 letture in fila per contratto (origine coperta, supplemento mittente) per poi scartarli:
+    // su un listino da 20 contratti 19-57 letture buttate a ogni creazione, addebito, anteprima e
+    // chiamata API (misurato il 13/10/2026). Le zone di match e le esclusive restano calcolate su
+    // tutto il listino, sopra, come prima. Senza corriereId non cambia niente.
+    if (params.corriereId && cId !== params.corriereId) continue
     // COPERTURA A CAP (InPost, Domicilio e Locker): CAP coperti in partenza E a destinazione.
     const cRec: any = fasceC[0]?.corrieri
     const soloCapCoperti = cRec?.tipo === 'inpost' || !!(cRec?.settings as any)?.solo_cap_coperti
