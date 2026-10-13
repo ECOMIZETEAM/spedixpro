@@ -7,6 +7,11 @@ import { useDialog } from '@/app/components/DialogProvider'
 import PagaConCarta from '@/app/cliente/PagaConCarta'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
+import { useAnteprimaPrezzi, chiediPrezzi, scegliTariffa, euro, eUnRifiuto, testoDelRifiuto, type RigaPrezzo } from '@/app/cliente/anteprima-prezzi'
+
+// Il prezzo si calcola per gli ordini della pagina a schermo e per quelli selezionati, fino a questo
+// tetto: chi seleziona centinaia di ordini vede il totale sui primi, e al clic si prezzano tutti.
+const PREZZI_SELEZIONATI = 200
 
 const NOMI: Record<string,string> = { shopify:'Shopify', prestashop:'PrestaShop', woocommerce:'WooCommerce' }
 const ACCENT = '#f97316'
@@ -84,6 +89,13 @@ export default function OrdiniPage() {
   const [corrieri, setCorrieri] = useState<any[]>([])
   const [articoliCat, setArticoliCat] = useState<any[]>([])   // catalogo SKU -> peso/misure
   const [pacchi, setPacchi] = useState<any[]>([])             // pacchi predefiniti (SKU -> scatola)
+  // Per l'anteprima del prezzo: si calcola solo quando catalogo, pacchi e mittente sono arrivati.
+  const [articoliPronti, setArticoliPronti] = useState(false)
+  const [pacchiPronti, setPacchiPronti] = useState(false)
+  const [mittente, setMittente] = useState<{ cap: string; provincia: string } | null>(null)
+  // 'incompleto' (mancano CAP o provincia della sede operativa) e 'fallito' (lettura non riuscita)
+  // si dicono in due modi diversi: nel secondo caso il profilo puo' essere a posto.
+  const [statoMittente, setStatoMittente] = useState<'attesa' | 'ok' | 'incompleto' | 'fallito'>('attesa')
 
   // IL NEGOZIO SELEZIONATO DEVE ESSERE DI QUESTA PIATTAFORMA.
   //
@@ -119,9 +131,21 @@ export default function OrdiniPage() {
     setLoading(false)
   }
   useEffect(()=>{ carica() }, [piattaforma])
+  // Il mittente entra nel prezzo (supplemento di origine). Gli stessi due campi della sede operativa
+  // che «Spedisci selezionati» mette nel mittente della spedizione.
+  function leggiMittente() {
+    setStatoMittente('attesa')
+    fetch('/api/cliente/dati').then(r=>r.json()).then(c=>{
+      if (!c || c.error) throw new Error('lettura mittente')
+      const cap=c.so_cap||'', provincia=c.so_provincia||''
+      setMittente(cap&&provincia?{cap,provincia}:null)
+      setStatoMittente(cap&&provincia?'ok':'incompleto')
+    }).catch(()=>setStatoMittente('fallito'))
+  }
   useEffect(()=>{
-    fetch('/api/cliente/articoli').then(r=>r.json()).then(d=>setArticoliCat(Array.isArray(d)?d:[])).catch(()=>{})
-    fetch('/api/cliente/pacchi').then(r=>r.json()).then(d=>setPacchi(Array.isArray(d)?d:[])).catch(()=>{})
+    fetch('/api/cliente/articoli').then(r=>r.json()).then(d=>setArticoliCat(Array.isArray(d)?d:[])).catch(()=>{}).finally(()=>setArticoliPronti(true))
+    fetch('/api/cliente/pacchi').then(r=>r.json()).then(d=>setPacchi(Array.isArray(d)?d:[])).catch(()=>{}).finally(()=>setPacchiPronti(true))
+    leggiMittente()
   }, [])
 
   // SKU -> peso/misure (catalogo articoli) e SKU -> pacco (scatola). eBay/PrestaShop arrivano con
@@ -137,11 +161,13 @@ export default function OrdiniPage() {
     let peso = (art && Number(art.peso)>0) ? Number(art.peso)
       : (pacco && Number(pacco.peso)>0) ? Number(pacco.peso)
       : (arts.reduce((s:number,a:any)=>s+(Number(a.grammi)||0)*(Number(a.quantita)||1),0)/1000)
-    if (!(peso>0)) peso = 1
+    // Nessuna fonte per il peso (ne' catalogo, ne' pacco, ne' grammi dal negozio): si spedisce su 1 kg.
+    const pesoStimato = !(peso>0)
+    if (pesoStimato) peso = 1
     const box = pacco ? {l:pacco.lunghezza,w:pacco.larghezza,h:pacco.altezza}
       : (art && (Number(art.lunghezza)||Number(art.larghezza)||Number(art.altezza))) ? {l:art.lunghezza,w:art.larghezza,h:art.altezza}
       : {l:20,w:15,h:10}
-    return { peso: Math.max(0.01, peso), l:Number(box.l)||20, w:Number(box.w)||15, h:Number(box.h)||10 }
+    return { peso: Math.max(0.01, peso), l:Number(box.l)||20, w:Number(box.w)||15, h:Number(box.h)||10, pesoStimato }
   }
   useEffect(()=>{ fetch('/api/cliente/corrieri').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d?.corrieri)?d.corrieri:[])).catch(()=>{}) }, [])
 
@@ -295,6 +321,108 @@ export default function OrdiniPage() {
   const [creditoKO, setCreditoKO] = useState<{ mancante: number; costo: number; credito: number } | null>(null)
   const lottoRef = useRef<{ preparati: any[]; errori: string[]; shipFrom: any; cliId: string } | null>(null)
 
+  // ── ANTEPRIMA DEL PREZZO DI SPEDIZIONE ──────────────────────────────────────────────────────
+  // Il prezzo si vedeva solo dopo aver spedito. Ora per ogni ordine a schermo (e per quelli
+  // selezionati) si mostra quanto verra' addebitato col contratto scelto in «Spedisci con».
+  //
+  // CHI SI SPEDISCE DA QUI, e chi no — una regola sola per l'anteprima e per «Spedisci selezionati»:
+  // se fossero due, il totale mostrato conterebbe ordini che poi il pulsante salta.
+  const ordiniPerId = useMemo(()=>new Map<string,any>(ordini.map((o:any)=>[o.id,o])), [ordini])
+  // Fuori i gia' spediti DA NOI (hanno la spedizione collegata) e quelli UNITI a un altro ordine: un
+  // ordine assorbito parte dentro il pacco del capofila, spedirlo da solo sarebbe un doppione.
+  const spedibileInMassa = (o:any) => !!o && o.stato !== 'unito' && !(o.stato==='spedito' && o.spedizione_id)
+  // Cosa manca per spedirlo da qui (si completa dal modulo «Crea spedizione» della riga).
+  function motivoFuoriMassa(o:any): string | null {
+    const d = o.destinatario || {}
+    if (!d.nome || !d.indirizzo || !d.citta || !d.cap) return 'destinatario incompleto'
+    // TELEFONO DEL DESTINATARIO: si dice PRIMA, non a meta' lotto.
+    //
+    // Diversi corrieri lo pretendono (senza, la creazione risponde 400) perche' serve al fattorino
+    // per la consegna. Il negozio online quasi mai lo rende obbligatorio alla cassa, quindi
+    // l'ordine arriva senza. Finora il controllo scattava solo a spedizione gia' avviata: il
+    // cliente vedeva un errore secco su una riga a meta' di un lotto, senza capire cosa fare.
+    // Qui si dice cosa manca e dove metterlo: il pulsante "Crea spedizione" della riga apre il
+    // modulo gia' compilato, e li' il numero si aggiunge a mano.
+    if (String(d.telefono||'').replace(/[^0-9]/g,'').length < 6) return 'manca il telefono del destinatario (il corriere lo richiede) — usa "Crea spedizione" sulla riga e aggiungilo'
+    return null
+  }
+  // Tutto cio' che entra nel prezzo di un ordine. Da QUESTO oggetto nascono sia la riga
+  // dell'anteprima sia destinazione e collo mandati alla creazione.
+  function rigaPrezzoDi(o:any): RigaPrezzo {
+    const d = o.destinatario || {}
+    const rp = risolviPeso(o)   // peso+misure dal catalogo SKU/pacco (fallback grammi/1kg)
+    const arts = Array.isArray(o.articoli)?o.articoli:[]
+    return {
+      id: o.id,
+      cap: d.cap, citta: d.citta, provincia: d.provincia||'', paese: d.paese||'IT',
+      collo: { length:rp.l, width:rp.w, height:rp.h, weight:rp.peso },
+      contrassegno: codDaOrdine(o),
+      haContenuto: !!arts.map((a:any)=>a.nome).join(', ').slice(0,100).trim(),
+    }
+  }
+  const prezzabile = (o:any) => spedibileInMassa(o) && !motivoFuoriMassa(o)
+  const selezionatiPrezzabili = Object.keys(sel).filter(id=>sel[id]).map(id=>ordiniPerId.get(id)).filter((o:any)=>o && prezzabile(o))
+  // L'ordine di questo elenco e' l'ordine in cui i prezzi vengono chiesti: PRIMA la pagina a schermo
+  // (e' quella che il cliente sta guardando), poi il resto dei selezionati.
+  const daPrezzare: any[] = []
+  const inAnteprima = new Set<string>()
+  for (const o of pagina) { if (prezzabile(o)) { inAnteprima.add(o.id); daPrezzare.push(o) } }
+  // Il TOTALE si fa sui primi PREZZI_SELEZIONATI selezionati, sempre gli stessi qualunque pagina sia
+  // a schermo: un totale che cambia girando pagina, a selezione ferma, non e' un totale.
+  const nelTotale = new Set<string>()
+  for (const o of selezionatiPrezzabili.slice(0, PREZZI_SELEZIONATI)) {
+    nelTotale.add(o.id)
+    if (!inAnteprima.has(o.id)) { inAnteprima.add(o.id); daPrezzare.push(o) }
+  }
+  // Peso e misure arrivano da catalogo e pacchi, il mittente dal profilo: finche' non ci sono tutti
+  // non si calcola, altrimenti uscirebbe un prezzo su 1 kg che un attimo dopo cambia da solo.
+  const anteprimaPronta = !loading && articoliPronti && pacchiPronti && !!mittente
+  const anteprima = useAnteprimaPrezzi(daPrezzare.map(rigaPrezzoDi), mittente, anteprimaPronta && !spedendo)
+
+  // TOTALE dei selezionati col contratto scelto. E' la somma di cio' che e' a schermo: al clic i
+  // prezzi vengono ricalcolati e, se sono cambiati, lo si chiede prima di spedire.
+  let totaleSpedizioni = 0, selInCalcolo = 0, selSenzaPrezzo = 0
+  for (const o of selezionatiPrezzabili) {
+    if (!nelTotale.has(o.id)) continue
+    const e = anteprima.leggi(rigaPrezzoDi(o))
+    if (!e || e.stato === 'calcolo') { selInCalcolo++; continue }
+    const t = e.stato === 'ok' ? scegliTariffa(e.tariffe, spedisciCon) : null
+    if (t) totaleSpedizioni += t.prezzo; else selSenzaPrezzo++
+  }
+  totaleSpedizioni = Math.round(totaleSpedizioni*100)/100
+  const selFuoriTotale = selezionatiPrezzabili.length - nelTotale.size
+
+  // La voce «Costo spedizione» nella seconda riga dell'ordine. null = niente da mostrare.
+  function costoSpedizione(o:any): any {
+    if (!spedibileInMassa(o)) return null
+    const motivo = motivoFuoriMassa(o)
+    if (motivo) return <span title={motivo} style={{color:'#b45309'}}>{motivo.split(' — ')[0].split(' (')[0]}</span>
+    if (!anteprimaPronta) return null   // il motivo, se c'e', e' scritto accanto al totale
+    const rp = rigaPrezzoDi(o)
+    const e = anteprima.leggi(rp)
+    if (!e || e.stato === 'calcolo') return <span style={{color:'#9ca3af'}}>calcolo…</span>
+    // Il motivo si mostra PER INTERO: nel messaggio sulla citta' la parte utile e' in fondo (i nomi
+    // giusti per quel CAP), e un taglio la lascerebbe solo nel suggerimento al passaggio.
+    if (e.stato === 'errore') return (
+      <span style={{color:'#b45309'}}>
+        {e.errore}
+        {e.riprovabile ? <>{' '}<button onClick={()=>anteprima.riprova([o.id])} disabled={spedendo} style={{background:'none',border:'none',padding:0,color:'#ea580c',fontWeight:600,fontSize:'inherit',cursor:'pointer',textDecoration:'underline'}}>Riprova</button></> : null}
+      </span>
+    )
+    const t = scegliTariffa(e.tariffe, spedisciCon)
+    const elenco = e.tariffe.map(x=>x.nome+'  '+euro(x.prezzo)).join('\n')
+    if (!t) return <span title={'Con il contratto scelto questo ordine non si può spedire.\nDisponibili per questo ordine:\n'+elenco} style={{color:'#b91c1c',fontWeight:600}}>non disponibile con il contratto scelto</span>
+    const c = rp.collo
+    return (
+      <span title={'Calcolato su '+c.weight+' kg, '+c.length+'×'+c.width+'×'+c.height+' cm.\nÈ l\'importo che ti verrà addebitato alla creazione. Se il corriere rileva peso o misure diversi può seguire un conguaglio.'
+        + (e.tariffe.length>1 ? '\n\nTutti i contratti per questo ordine:\n'+elenco : '')}>
+        <span style={{fontWeight:700,color:'#1a1a1a'}}>{euro(t.prezzo)}</span>
+        <span style={{color:'#6b7280',marginLeft:'6px'}}>{t.nome}</span>
+        {risolviPeso(o).pesoStimato && <span style={{color:'#b45309',marginLeft:'6px'}}>· su 1 kg: peso non indicato</span>}
+      </span>
+    )
+  }
+
   // CONTRASSEGNO dall'ordine del marketplace: eBay = paymentMethod CASH_ON_DELIVERY/PICKUP;
   // Woo = payment_method 'cod'; PrestaShop = modulo cashondelivery. Importo = totale ordine.
   function codDaOrdine(o:any): number {
@@ -334,56 +462,102 @@ export default function OrdiniPage() {
         setSpedendo(false); return
       }
 
-      // ── PRE-PASSAGGIO: calcolo tariffe e scelgo il corriere per TUTTO il lotto una volta sola.
-      //    Serve il TOTALE del lotto (per il pagamento unico) e a non richiedere le tariffe due
-      //    volte (il ciclo di creazione riusa queste scelte). Le righe scartate finiscono in `errori`.
-      const preparati: any[] = []
-      let fatte = 0
+      // ── PRE-PASSAGGIO: i prezzi di TUTTO il lotto, RICALCOLATI ORA, e il contratto di ogni ordine.
+      //    Serve il TOTALE del lotto (per il pagamento unico) e a chiedere i prezzi una volta sola
+      //    (il ciclo di creazione riusa queste scelte). Le righe scartate finiscono in `errori`.
+      //
+      //    Si ricalcola anche se i prezzi sono gia' a schermo: nel frattempo possono essere cambiati
+      //    listino, contratti in pausa, dati dell'ordine — e la creazione addebita il MAGGIORE fra il
+      //    suo calcolo e l'importo che riceve da qui, quindi un prezzo di qualche minuto fa
+      //    resterebbe addebitato. I prezzi vengono dalla stessa funzione con cui la creazione
+      //    addebita (lib/anteprima-prezzi.ts): prima passavano dal preventivo, che e' un altro calcolo.
+      const daSpedire: { id:string; o:any; num:string; arts:any[]; rp:RigaPrezzo }[] = []
       for (const id of ids) {
-        const o = ordini.find(x=>x.id===id)
-        // Salta solo i GIÀ SPEDITI DA NOI (hanno la spedizione Moove collegata). Un ordine "spedito"
-        // solo sul marketplace (es. import eBay dei già-evasi: stato spedito ma senza spedizione_id) va
-        // comunque spedibile — l'ha segnato spedito il venditore, non l'abbiamo spedito noi.
-        if (!o || (o.stato==='spedito' && o.spedizione_id)) continue
-        const d = o.destinatario || {}
+        const o = ordiniPerId.get(id)
+        // Salta i GIÀ SPEDITI DA NOI (hanno la spedizione Moove collegata) e gli UNITI. Un ordine
+        // "spedito" solo sul marketplace (es. import eBay dei già-evasi: stato spedito ma senza
+        // spedizione_id) va comunque spedibile — l'ha segnato spedito il venditore, non l'abbiamo
+        // spedito noi.
+        // Gli UNITI prima non erano distinti: selezionati (col filtro di evasione su «Tutti»)
+        // sarebbero partiti come un pacco in piu', doppione del capofila. Ora si saltano, e lo si
+        // dice: il pulsante conta N selezionati, e senza una riga di spiegazione ne partirebbero N-1.
+        if (o && o.stato === 'unito') { errori.push((o.numero_ordine || id)+': unito a un altro ordine, parte col capofila'); continue }
+        if (!spedibileInMassa(o)) continue
         const num = o.numero_ordine || id
-        fatte++
-        setMsg('Calcolo tariffe '+fatte+'/'+ids.length+'…')
-        if (!d.nome || !d.indirizzo || !d.citta || !d.cap) { errori.push(num+': destinatario incompleto'); continue }
-        // TELEFONO DEL DESTINATARIO: si dice PRIMA, non a meta' lotto.
-        //
-        // Diversi corrieri lo pretendono (senza, la creazione risponde 400) perche' serve al fattorino
-        // per la consegna. Il negozio online quasi mai lo rende obbligatorio alla cassa, quindi
-        // l'ordine arriva senza. Finora il controllo scattava solo a spedizione gia' avviata: il
-        // cliente vedeva un errore secco su una riga a meta' di un lotto, senza capire cosa fare.
-        // Qui si dice cosa manca e dove metterlo: il pulsante "Crea spedizione" della riga apre il
-        // modulo gia' compilato, e li' il numero si aggiunge a mano.
-        if (String(d.telefono||'').replace(/[^0-9]/g,'').length < 6) {
-          errori.push(num+': manca il telefono del destinatario (il corriere lo richiede) — usa "Crea spedizione" sulla riga e aggiungilo')
-          continue
+        const motivo = motivoFuoriMassa(o)
+        if (motivo) { errori.push(num+': '+motivo); continue }
+        daSpedire.push({ id, o, num, arts: Array.isArray(o.articoli)?o.articoli:[], rp: rigaPrezzoDi(o) })
+      }
+      setMsg('Calcolo prezzi 0/'+daSpedire.length+'…')
+      const mittentePrezzi = { cap: shipFrom.postalCode, provincia: shipFrom.state }
+      // Il mittente e' appena stato RILETTO dal profilo: se e' diverso da quello con cui la pagina
+      // si era aperta (sede cambiata o completata nel frattempo), da qui in poi vale questo. Senza,
+      // i prezzi rimessi a schermo qui sotto verrebbero scartati (sono firmati col mittente nuovo,
+      // la pagina li cercherebbe col vecchio) e l'avviso "indirizzo di partenza" resterebbe.
+      if (!mittente || mittente.cap !== mittentePrezzi.cap || mittente.provincia !== mittentePrezzi.provincia) {
+        setMittente(mittentePrezzi); setStatoMittente('ok')
+      }
+      let prezzi: Awaited<ReturnType<typeof chiediPrezzi>>
+      try {
+        prezzi = await chiediPrezzi(daSpedire.map(x=>x.rp), mittentePrezzi,
+          (fatte, tutte)=>setMsg('Calcolo prezzi '+fatte+'/'+tutte+'…'))
+      } catch (e: any) {
+        // Un inciampo di rete non deve far saltare gli ordini: ci si ferma prima di toccarli.
+        // Se invece il server ha RIFIUTATO (es. inserimento non consentito a questo cliente) si
+        // mostra il suo motivo: "riprova tra poco" manderebbe il cliente a riprovare per niente.
+        setMsg((eUnRifiuto(e) ? testoDelRifiuto(e) : 'Non sono riuscito a calcolare i prezzi: riprova tra poco.')+' Nessuna spedizione è stata creata.')
+        setSpedendo(false); return
+      }
+
+      const preparati: any[] = []
+      // Ordini il cui prezzo (o contratto) e' diverso da quello che il cliente aveva a schermo.
+      const cambiati: string[] = []
+      for (const x of daSpedire) {
+        const esito = prezzi.get(x.id)
+        if (!esito || !esito.tariffe.length) { errori.push(x.num+': '+(esito?.errore || 'nessuna tariffa')); continue }
+        const t = scegliTariffa(esito.tariffe, spedisciCon)
+        if (!t) { errori.push(x.num+': corriere scelto non disponibile per questa destinazione'); continue }
+
+        const visto = anteprima.leggi(x.rp)
+        const tVista = visto?.stato === 'ok' ? scegliTariffa(visto.tariffe, spedisciCon) : null
+        if (tVista && (tVista.corriere_id !== t.corriere_id || Math.abs(tVista.prezzo - t.prezzo) >= 0.005)) {
+          cambiati.push(x.num+': da '+euro(tVista.prezzo)+' a '+euro(t.prezzo)+(tVista.corriere_id !== t.corriere_id ? ' con '+t.nome : ''))
         }
-        const arts = Array.isArray(o.articoli)?o.articoli:[]
-        const rp = risolviPeso(o)   // peso+misure dal catalogo SKU/pacco (fallback grammi/1kg)
-        const packages = [{ length:rp.l, width:rp.w, height:rp.h, weight:rp.peso }]
-        const shipTo = { name:d.nome, company:'', street1:d.indirizzo, street2:'', city:d.citta, state:d.provincia||'', postalCode:d.cap, country:d.paese||'IT', phone:d.telefono||'', email:d.email||'' }
-        const tarRes = await fetch('/api/spedizioni/tariffe', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ clienteId:cli.id, packages, shipFrom, shipTo, notes:'', insuranceValue:0, codValue: codDaOrdine(o) })
-        }).then(r=>r.json()).catch(()=>null)
-        if (!Array.isArray(tarRes) || !tarRes.length) { errori.push(num+': nessuna tariffa'); continue }
-        let t = null
-        if (spedisciCon && spedisciCon!=='auto') {
-          t = tarRes.find((x:any)=>x.corriere_id===spedisciCon || x._corriere_id===spedisciCon)
-          if (!t) { errori.push(num+': corriere scelto non disponibile per questa destinazione'); continue }
-        }
-        if (!t) t = tarRes[0]
-        preparati.push({ id, o, num, arts, rp, packages, shipTo, t })
+
+        // Destinazione e collo vengono dallo STESSO oggetto usato per l'anteprima (rigaPrezzoDi): cio'
+        // che e' stato prezzato e' cio' che si spedisce.
+        const d = x.o.destinatario || {}
+        const c = x.rp.collo
+        const shipTo = { name:d.nome, company:'', street1:d.indirizzo, street2:'', city:x.rp.citta, state:x.rp.provincia, postalCode:x.rp.cap, country:x.rp.paese, phone:d.telefono||'', email:d.email||'' }
+        preparati.push({ id:x.id, o:x.o, num:x.num, arts:x.arts, rp:{ peso:c.weight, l:c.length, w:c.width, h:c.height }, packages:[c], shipTo, t })
+      }
+      // I prezzi appena ricalcolati tornano a schermo (il confronto qui sopra e' gia' fatto, su
+      // quelli che il cliente vedeva): se da qui si esce senza spedire — Annulla, credito
+      // insufficiente — elenco e totale devono mostrare questi, non quelli di prima.
+      anteprima.registra(daSpedire.map(x=>x.rp), mittentePrezzi, prezzi)
+
+      // IL PREZZO E' CAMBIATO RISPETTO A QUELLO MOSTRATO: si chiede prima di addebitare.
+      if (cambiati.length) {
+        const prosegui = await dialog.confirm({
+          title: cambiati.length === 1 ? 'Un prezzo è cambiato' : cambiati.length+' prezzi sono cambiati',
+          message: (
+            <div>
+              Rispetto a quanto vedevi in elenco, il prezzo aggiornato è diverso:
+              <ul style={{margin:'8px 0 0',paddingLeft:'18px'}}>
+                {cambiati.slice(0,8).map((c,i)=><li key={i}>{c}</li>)}
+                {cambiati.length>8 ? <li>… e altri {cambiati.length-8}</li> : null}
+              </ul>
+            </div>
+          ),
+          confirmText: 'Spedisci ai prezzi aggiornati',
+        })
+        if (!prosegui) { setMsg(''); setSpedendo(false); return }
       }
 
       // ── TOTALE del lotto e CANCELLO credito: come il server, il blocco vale SOLO per il credito a
       //    scalare (chi fattura a mensile va sotto zero ed è normale). Se non basta, chiedo UN
       //    pagamento per il mancante e riprovo il lotto — senza ricalcolare le tariffe.
-      const totale = Math.round(preparati.reduce((s,p)=>s+(parseFloat(p.t.total_price)||0),0)*100)/100
+      const totale = Math.round(preparati.reduce((s,p)=>s+(Number(p.t.prezzo)||0),0)*100)/100
       const credito = Number(cli?.credito||0)
       if (preparati.length && String(cli?.tipo_contratto||'')==='credito_scalare' && credito < totale) {
         lottoRef.current = { preparati, errori, shipFrom, cliId: cli.id }
@@ -420,8 +594,12 @@ export default function OrdiniPage() {
         const creaRes = await fetch('/api/spedizioni/crea', {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({
-            clienteId:cliId, carrierCode:t.carrierCode, contractCode:t.contractCode, totalPrice:t.total_price,
-            _corriere_id: t._corriere_id || t.corriere_id || null, _spediamopro_quotation: t._spediamopro_quotation || null,
+            // L'importo e' quello appena calcolato dal server con la funzione dell'addebito: la
+            // creazione lo ricalcola comunque e addebita il maggiore dei due, che ora coincidono.
+            // (Qui si mandavano anche sigla e codice contratto del preventivo e una quotazione: la
+            // creazione non li legge, usa solo l'id del contratto.)
+            clienteId:cliId, totalPrice:Number(t.prezzo).toFixed(2),
+            _corriere_id: t.corriere_id,
             packages, colliDettaglio:[{lunghezza:String(rp.l),larghezza:String(rp.w),altezza:String(rp.h)}],
             // La nota dell'ordine e il numero COM'E' SCRITTO SUL NEGOZIO (cancelletto compreso):
             // stessi valori del percorso "Crea spedizione", che e' la stessa azione fatta su una riga
@@ -601,6 +779,24 @@ export default function OrdiniPage() {
             <option value="no">No</option><option value="si">Sì</option>
           </select>
           <div style={{flex:1}}/>
+          {/* PERCHE' NON SI VEDONO I PREZZI: va detto in chiaro, non in un suggerimento al passaggio. */}
+          {!loading && ordini.length>0 && statoMittente==='incompleto' && (
+            <span style={{fontSize:'13px',color:'#b45309'}}>Per vedere i prezzi serve l'indirizzo di partenza del tuo magazzino (CAP e provincia): scrivi al tuo referente per farlo completare.</span>
+          )}
+          {!loading && ordini.length>0 && statoMittente==='fallito' && (
+            <span style={{fontSize:'13px',color:'#b45309'}}>
+              Non sono riuscito a leggere il tuo indirizzo di partenza, quindi i prezzi non sono calcolati.{' '}
+              <button onClick={leggiMittente} style={{background:'none',border:'none',padding:0,color:'#ea580c',fontWeight:600,fontSize:'13px',cursor:'pointer',textDecoration:'underline'}}>Riprova</button>
+            </span>
+          )}
+          {anteprimaPronta && selezionatiPrezzabili.length>0 && (
+            <span style={{fontSize:'13px',color:'#6b7280'}}>
+              Totale spedizione previsto <b style={{color:'#1a1a1a'}}>{euro(totaleSpedizioni)}</b>
+              {selInCalcolo>0 ? <span style={{color:'#9ca3af'}}> (calcolo in corso…)</span> : null}
+              {selSenzaPrezzo>0 ? <span style={{color:'#b45309'}}> · {selSenzaPrezzo} senza prezzo</span> : null}
+              {selFuoriTotale>0 ? <span style={{color:'#9ca3af'}}> · sui primi {PREZZI_SELEZIONATI}: {selFuoriTotale} ordini non inclusi</span> : null}
+            </span>
+          )}
           <button onClick={spedisciSelezionati} disabled={spedendo} style={{opacity:spedendo?.6:1,background:'#f97316',color:'#fff',border:'none',borderRadius:'8px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>Spedisci selezionati{nSel>0?' ('+nSel+')':''}</button>
           <button onClick={unisciSelezionati} disabled={unendo} style={{opacity:unendo?.6:1,background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'8px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>{unendo?'Unione…':'Unisci selezionati'}{nSel>1?' ('+nSel+')':''}</button>
           <button onClick={cancellaSelezionati} style={{background:'#dc2626',color:'#fff',border:'none',borderRadius:'8px',padding:'9px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>Cancella selezionati</button>
@@ -662,6 +858,7 @@ export default function OrdiniPage() {
                   const isSel = !!sel[o.id]
                   const arts = Array.isArray(o.articoli)?o.articoli:[]
                   const cod = codDaOrdine(o)
+                  const costoSped = costoSpedizione(o)
                   // Valori della SECONDA riga (articoli/importi/tags), come array così i divisori verticali
                   // saltano i campi assenti (tags/n.spedizione) senza lasciare linee a vuoto.
                   const secItems: { l:any; v:any }[] = [
@@ -689,6 +886,8 @@ export default function OrdiniPage() {
                           pagato). Prima non si diceva niente e l'ordine partiva come prepagato: chi
                           spediva scopriva di non aver incassato a consegna avvenuta. */}
                       {cod===0 && ['pending','unpaid','partially_paid','authorized'].includes(String(o.stato_pagamento||'')) && <span title={"Il negozio non indica il metodo di pagamento di quest'ordine, e risulta non pagato. Se e' in contrassegno l'importo NON viene applicato da solo: apri \u00ab Crea spedizione \u00bb su questa riga e scrivilo a mano, altrimenti il pacco parte come prepagato e non incassi niente alla consegna."} style={{marginLeft:'6px',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fffbeb',color:'#b45309',border:'1px solid #fde68a',cursor:'help'}}>contrassegno? da verificare</span>}</span> },
+                    // Quanto costera' spedirlo, PRIMA di spedire. "Totale" qui sopra e' il valore della merce.
+                    ...(costoSped != null ? [{ l:'Costo spedizione', v:costoSped }] : []),
                     ...(getTags(o) ? [{ l:'Tags', v:<span style={{color:'#6b7280'}}>{getTags(o)}</span> }] : []),
                     ...(o.data_spedizione ? [{ l:'Spedito il', v:<span style={{color:'#6b7280'}}>{fmtData(o.data_spedizione)}</span> }] : []),
                     ...(o.spedizione_id ? [{ l:'N. Spedizione', v:<span style={{color:'#6b7280'}}>{String(o.spedizione_id).slice(0,8)}</span> }] : []),

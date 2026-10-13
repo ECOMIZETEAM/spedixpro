@@ -73,10 +73,17 @@ export type EsitoTariffe =
 
 export async function calcolaTariffeCliente(
   supabase: any,
-  ctx: { cliente: any; clienteId: string | null; subMatch: string | null },
+  // `admin` e' FACOLTATIVO e chi non lo passa non cambia di una virgola: resta il client di
+  // servizio di sempre. Lo passa solo l'anteprima dei prezzi di import e ordini
+  // (lib/anteprima-prezzi.ts), che deve prezzare venti righe dello stesso cliente e gli da' un
+  // client con memoria (lib/db-memoria.ts): stesse letture, fatte una volta invece di venti.
+  ctx: { cliente: any; clienteId: string | null; subMatch: string | null; admin?: any },
   body: any,
 ): Promise<EsitoTariffe> {
   const { cliente, clienteId, subMatch } = ctx
+  // Il tipo resta quello del client di servizio: senza, tutto cio' che si legge da qui diventa `any`
+  // e il controllo dei tipi smette di vedere le righe del listino.
+  const adminMotore: ReturnType<typeof createAdminSupabase> = ctx.admin || createAdminSupabase()
 
   // Mappa impostazioni per-contratto del cliente (contrassegno abilitato o no)
   const codRichiesto = Number(body.codValue || 0) > 0
@@ -307,7 +314,7 @@ export async function calcolaTariffeCliente(
   // troncamento i corrieri "in coda" (es. aggiunti da poco) sparivano dalla lista → tariffa mancante.
   // Prima pagina DA SOLA per distinguere ERRORE tecnico da listino vuoto (vedi nota sotto); si continua
   // solo se piena. Tiebreaker `id` per una paginazione stabile (peso_max non è univoco).
-  const buildFasce = () => createAdminSupabase()
+  const buildFasce = () => adminMotore
     .from('listini_clienti_fasce')
     .select('*, zone(id,nome,su_mittente), corrieri(id,tipo,nome_contratto,attivo,credenziali,settings)')
     .eq('listino_id', cliente.listino_cliente_id)
@@ -421,7 +428,7 @@ export async function calcolaTariffeCliente(
   // contratto sospeso veniva quotato col suo prezzo, l'utente lo sceglieva, compilava tutto e
   // riceveva l'errore solo alla creazione. Peggio del problema di partenza.
   const { contrattiSospesiSopra: _css, sospesoDallaCatena: _sdc } = await import('@/lib/contratti-catena')
-  const _sospesiCli = await _css(masterId)
+  const _sospesiCli = await _css(masterId, adminMotore)
 
   for (const [corriereId, fasceDelCorriere] of fascePerCorriere) {
     if (disabilitati.has(corriereId)) continue   // contratto disattivato per questo cliente/sotto-master
@@ -437,7 +444,7 @@ export async function calcolaTariffeCliente(
     // Client ADMIN: legge il LISTINO CORRIERI, cioe' il costo d'acquisto del master. Con il token
     // del cliente quel listino non e' piu' leggibile (e non deve esserlo: confrontato col suo
     // prezzo darebbe il margine). Il valore serve solo a questo gate, non esce nella risposta.
-    const _costoMaster = await calcolaPrezzoCorriereDettaglio(createAdminSupabase(), {
+    const _costoMaster = await calcolaPrezzoCorriereDettaglio(adminMotore, {
       corriereId, masterId, provincia, cap: capDest, paese: paeseDest, citta: (body.shipTo?.city || ''),
       pesoReale, packages: tuttiColli, contrassegno: 0, assicurazione: 0,
     })
@@ -468,7 +475,7 @@ export async function calcolaTariffeCliente(
     const sponda = calcolaSponda(corriereId, pesoPerFascia)
     // Supplemento ORIGINE (zona mittente disagiato) di QUESTO corriere. 0 se non configurato.
     const mittSupp = await supplementoMittente(
-      createAdminSupabase(),
+      adminMotore,
       fasce.filter((f: any) => (f.corrieri as any)?.id === corriereId),
       { cap: body.shipFrom?.postalCode, provincia: body.shipFrom?.state, paese: 'IT' },
       pesoPerFascia,

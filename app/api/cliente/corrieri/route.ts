@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { eContrattoPuntoPoste, spediamoproPudoCourier } from '@/lib/punti-poste'
+import { annotaPuntoPoste, contrattiConFasceATaglia, eTariffaAUnPunto } from '@/lib/tariffe-offerte'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,18 +49,32 @@ export async function GET() {
   }
 
   // Flag "punto" (consegna a PuntoPoste/Ufficio Postale/Fermopoint/Locker): questi contratti richiedono
-  // di scegliere il punto e NON vanno nell'import di massa. Lo capisco solo dalle credenziali (vettore
-  // DVA / service_id SpediamoPro), che stanno fuori dal grant del cliente → le leggo con la service-role
-  // e ritorno SOLO il booleano, mai il provider (vedi CLAUDE.md: i nomi dei fornitori non escono).
+  // di scegliere il punto e NON vanno nell'import di massa. Lo si capisce solo dalle credenziali e
+  // dalle impostazioni del contratto, che stanno fuori dal grant del cliente → le legge la
+  // service-role e di qui esce SOLO il booleano, mai il provider (vedi CLAUDE.md: i nomi dei
+  // fornitori non escono).
+  //
+  // IL CRITERIO E' QUELLO DELL'ANTEPRIMA DEI PREZZI, le stesse funzioni (lib/tariffe-offerte.ts):
+  // annotaPuntoPoste + eTariffaAUnPunto, piu' i contratti con fasce a taglia (i locker che si
+  // riconoscono solo dal listino: sulle copie dei sotto-master l'impostazione "locker" e' vuota).
+  // Qui c'era un'espressione sua, scritta in linea (vettore e service_id dalle credenziali), che
+  // non conosceva i locker: l'InPost Locker restava in tendina. Per tutto il resto le due strade
+  // danno lo stesso esito (misurato il 13/10/2026 su tutti i 798 contratti, con l'espressione in
+  // linea piu' il locker dichiarato: 147 a un punto per entrambe, zero differenze) — ma erano due
+  // copie, e una tendina che propone un contratto che l'anteprima non offre vuol dire "non
+  // disponibile con il contratto scelto" su ogni riga e, al clic, un lotto intero segnato in errore.
   const ids = Array.from(map.keys())
   if (ids.length) {
+    const admin = createAdminSupabase()
+    // Le due letture sono indipendenti: se una fallisce, i flag dell'altra restano.
     try {
-      const { data: creds } = await createAdminSupabase().from('corrieri').select('id,credenziali').in('id', ids)
-      for (const r of creds || []) {
-        const cr = (r as any).credenziali || {}
-        const punto = eContrattoPuntoPoste(cr.vettore) || !!spediamoproPudoCourier(cr.service_id)
-        const v = map.get((r as any).id); if (v) v.punto = punto
-      }
+      const aTaglia = await contrattiConFasceATaglia(admin, cliente.listino_cliente_id)
+      for (const id of aTaglia) { const v = map.get(id); if (v) v.punto = true }
+    } catch { /* se il flag non si calcola, meglio mostrarli che nasconderli per errore */ }
+    try {
+      const lista = ids.map(id => ({ _corriere_id: id }))
+      await annotaPuntoPoste(admin, lista)
+      for (const x of lista) if (eTariffaAUnPunto(x)) { const v = map.get(x._corriere_id); if (v) v.punto = true }
     } catch { /* se il flag non si calcola, meglio mostrarli che nasconderli per errore */ }
   }
 

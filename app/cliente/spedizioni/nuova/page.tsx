@@ -307,7 +307,8 @@ export default function NuovaSpedizioneCliente() {
         shipTo:{name:dest.nome,company:'',street1:dest.indirizzo,street2:'',city:dest.citta,state:dest.provincia,postalCode:dest.cap,country:dest.paese,phone:dest.telefono,email:dest.email},
         notes:dest.note, insuranceValue:+assicurazione, codValue:+contrassegno,
         // Creazione MANUALE: qui il punto lo si sceglie → mostro anche i contratti "a un punto".
-        // Import/marketplace NON passano questo flag → niente contratti a punto col prezzo più basso.
+        // Import e ordini dei negozi non passano da questa rotta: hanno la loro
+        // (/api/cliente/anteprima-prezzi), che i contratti a punto li esclude sempre.
         includiPunto: true
       })
     })

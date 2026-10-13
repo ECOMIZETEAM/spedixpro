@@ -4,37 +4,10 @@ import { calcolaTariffeCliente, ZONE_MAP, PAESI, superaMisureMax, descriviLimiti
 import { calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
 import { siglaContratto } from '@/lib/corriere-logo'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { pudoConfigDaVettore, spediamoproPudoCourier } from '@/lib/punti-poste'
-
-// Marca le tariffe dei contratti "PuntoPoste" (PDB-P2H/P2TAB/P2UP) coi flag _deposito (il mittente
-// sceglie dove depositare: Ufficio Postale/Punto Poste) e _consegna_punto (tipologia RTZ/FMP del punto
-// di consegna, o assente per P2H a casa). Così il form sa cosa mostrare. Il vettore sta nelle
-// credenziali (service_role): lookup via admin. Nessun segreto esce (solo i flag).
-async function annotaPuntoPoste(admin: any, risultati: any[]) {
-  const ids = [...new Set(risultati.map((r: any) => r._corriere_id).filter(Boolean))]
-  if (!ids.length) return
-  const { data: corr } = await admin.from('corrieri').select('id,tipo,credenziali,settings').in('id', ids)
-  const perId = new Map<string, any>((corr || []).map((c: any) => [c.id, c]))
-  for (const r of risultati) {
-    const c = perId.get(r._corriere_id); if (!c) continue
-    const cred = c.credenziali || {}
-    if (c.tipo === 'inpost' && (c.settings as any)?.consegna === 'locker') {
-      // InPost LOCKER: consegna a un LOCKER/PUDO (non a domicilio). Flag distinto dal PuntoPoste perché
-      // usa il SUO selettore (InpostLockerPicker) e la SUA ricerca punti. Il Domicilio InPost (stesso
-      // tipo, senza consegna=locker) resta consegna a casa e NON mostra alcun punto.
-      r._inpost_locker = true
-    } else if (c.tipo === 'spediamopro') {
-      // SpediamoPro: SOLO consegna a un punto (deliveryPudo), nessun deposito. _consegna_punto = il
-      // corriere per la ricerca punti (brt/inpost/sda). Serve al form per mostrare il selettore-punto.
-      const courier = spediamoproPudoCourier(cred.service_id)
-      if (courier) r._consegna_punto = courier
-    } else {
-      const cfg = pudoConfigDaVettore(cred.vettore)
-      if (cfg.deposito) r._deposito = true
-      if (cfg.consegnaTipologia) r._consegna_punto = cfg.consegnaTipologia
-    }
-  }
-}
+// I flag "a un punto" e il cancello della catena stavano scritti qui. Ora sono in
+// lib/tariffe-offerte.ts, perche' li usa anche l'anteprima dei prezzi di import e ordini dei negozi:
+// due porte, una regola sola.
+import { annotaPuntoPoste, eTariffaAUnPunto, soloCorrieriInCatena } from '@/lib/tariffe-offerte'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -44,11 +17,14 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   // CONTRATTI "A UN PUNTO" (PuntoPoste/Ufficio Postale/Fermopoint/Locker): richiedono di SCEGLIERE un
   // punto (o un deposito) che esiste solo nella creazione manuale. Vanno quindi ESCLUSI di default dalle
-  // tariffe, così le porte che scelgono in automatico "il prezzo più basso" (import da file, ordini
-  // marketplace) non li assegnano mai per errore mandando un pacco a un punto. Solo la creazione manuale
-  // passa includiPunto:true (lì il punto lo si sceglie). Default-safe: una porta nuova non li vede.
+  // tariffe, così una porta che sceglie in automatico "il prezzo più basso" non li assegna mai per
+  // errore mandando un pacco a un punto. Solo la creazione manuale passa includiPunto:true (lì il
+  // punto lo si sceglie). Default-safe: una porta nuova che chiama questa rotta non li vede.
+  // Le porte di massa del cliente (import da file, ordini dei negozi) NON passano più da qui: usano
+  // /api/cliente/anteprima-prezzi, che applica lo stesso cancello (eTariffaAUnPunto, in
+  // lib/tariffe-offerte.ts). Chi deve proteggerle da un nuovo tipo di contratto a punto guarda lì.
   const includiPunto = body?.includiPunto === true
-  const soloDomicilio = (r: any[]) => includiPunto ? r : r.filter((x: any) => !x._deposito && !x._consegna_punto && !x._inpost_locker)
+  const soloDomicilio = (r: any[]) => includiPunto ? r : r.filter((x: any) => !eTariffaAUnPunto(x))
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
 
   // Spedizione PER CONTO DI UN SOTTO-MASTER (clienteId = "m:<id>"): la trattiamo come un cliente,
@@ -140,7 +116,7 @@ export async function POST(req: NextRequest) {
     }
     if (!risultati.length) return NextResponse.json({ error: 'Nessuna tariffa dal listino corriere per questa destinazione' }, { status: 400 })
     risultati.sort((a, b) => Number(a.total_price) - Number(b.total_price))
-    await annotaPuntoPoste(createAdminSupabase(), risultati)
+    try { await annotaPuntoPoste(createAdminSupabase(), risultati) } catch { /* i flag punto non bloccano la lista */ }
     return NextResponse.json(soloDomicilio(risultati))
   }
 
@@ -167,24 +143,7 @@ export async function POST(req: NextRequest) {
   // poi vederseli rifiutare con "Corriere non disponibile per questo master".
   let risultati: any[] = Array.isArray(esito.risultati) ? esito.risultati : []
   try {
-    const admin = createAdminSupabase()
-    const ids = [...new Set(risultati.map((r: any) => r._corriere_id).filter(Boolean))]
-    if (ids.length && cliente?.master_id) {
-      const { data: corr } = await admin.from('corrieri').select('id,master_id').in('id', ids)
-      const masterDiCorr = new Map((corr || []).map((c: any) => [c.id, c.master_id]))
-      const catena = new Set<string>()
-      let cur: string | null = cliente.master_id
-      for (let i = 0; i < 20 && cur; i++) {
-        catena.add(cur)
-        const { data: mm } = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
-        cur = mm?.parent_master_id || null
-      }
-      risultati = risultati.filter((r: any) => {
-        if (!r._corriere_id) return true            // senza id non si può verificare: si lascia (raro)
-        const mid = masterDiCorr.get(r._corriere_id)
-        return !!mid && catena.has(mid)
-      })
-    }
+    risultati = await soloCorrieriInCatena(createAdminSupabase(), risultati, cliente?.master_id)
   } catch { /* in caso di errore non filtro: meglio mostrare che rompere la pagina */ }
 
   try { await annotaPuntoPoste(createAdminSupabase(), risultati) } catch { /* i flag punto non bloccano la lista */ }

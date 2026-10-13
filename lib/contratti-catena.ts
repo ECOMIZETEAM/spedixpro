@@ -24,11 +24,15 @@
 // Nota sul client: service role perche' l'RLS sui corrieri (master_id IN mia_rete_master()) nasconde le
 // righe dei master superiori. Uso legittimo: si legge solo nome/attivo/aggancio/flag degli ANTENATI, e il
 // risultato puo' unicamente TOGLIERE contratti.
-export async function contrattiRimossiSopra(masterId: string | null | undefined): Promise<Set<string>> {
+// `db` e' FACOLTATIVO: chi non lo passa usa il client di servizio di sempre. Lo passa l'anteprima
+// dei prezzi (lib/anteprima-prezzi.ts) per far fare queste letture — uguali per tutte le righe di
+// uno stesso cliente — una volta sola (lib/db-memoria.ts). Deve restare un client di SERVIZIO: con
+// il token di un utente l'RLS nasconde i master superiori e l'elenco uscirebbe vuoto.
+export async function contrattiRimossiSopra(masterId: string | null | undefined, db?: any): Promise<Set<string>> {
   const bloccati = new Set<string>()
   if (!masterId) return bloccati
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
-  const admin = createAdminSupabase()
+  const admin = db || createAdminSupabase()
   const norm = (s: any) => String(s || '').trim().toLowerCase()
 
   let corrente: string | null = masterId
@@ -79,8 +83,8 @@ export async function contrattiRimossiSopra(masterId: string | null | undefined)
 
 // Retro-compatibile: ora copre TUTTI E TRE i casi (pausa + disattiva + eliminato), non solo la pausa.
 // Le ~12 porte che gia' chiamano contrattiSospesiSopra/sospesoDallaCatena beneficiano senza modifiche.
-export async function contrattiSospesiSopra(masterId: string | null | undefined): Promise<Set<string>> {
-  return contrattiRimossiSopra(masterId)
+export async function contrattiSospesiSopra(masterId: string | null | undefined, db?: any): Promise<Set<string>> {
+  return contrattiRimossiSopra(masterId, db)
 }
 
 // true se questo contratto e' fuori uso per colpa di un livello superiore.

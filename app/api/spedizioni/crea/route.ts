@@ -19,8 +19,10 @@ import { EMAIL_PER_CORRIERE,
 // Il sanificatore dei messaggi del corriere ora sta in lib/errore-corriere.ts: lo usano anche
 // l'API pubblica e la conferma distinte, che prima rimandavano il testo grezzo del provider.
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
-import { validaCittaCap, normalizzaCittaUfficiale } from '@/lib/valida-citta'
-import { capHaZonaSpeciale } from '@/lib/cap-speciali'
+// Con quale citta' si prezza e quanto paga il cliente: due decisioni che stavano scritte qui dentro
+// e che ora condivide l'anteprima dei prezzi (import e ordini dei negozi). Una regola, due porte.
+import { cittaPerLaSpedizione } from '@/lib/citta-spedizione'
+import { prezzoClienteDaListino } from '@/lib/prezzo-cliente'
 import { isZonaDisagiata } from '@/lib/zone-match'
 // La zona di vendita "copre" il supplemento disagiata/isola SOLO se è una zona disagiata/periferica o
 // isole. Le zone regionali base (Sicilia/Sardegna/Calabria) NON lo coprono: lì il corriere può ancora
@@ -246,21 +248,22 @@ export async function POST(req: NextRequest) {
   // quel CAP ha davvero una zona speciale — così una frazione valida o una città su CAP normale
   // (che comunque prezza Italia, senza perdita) NON viene fermata. Chi spedisce corregge o seleziona
   // dall'elenco (l'autocomplete /api/comuni è già nel form). Solo Italia; l'estero non si valida.
+  //
+  // LA DECISIONE STA IN lib/citta-spedizione.ts, non piu' qui: la prende anche l'anteprima dei
+  // prezzi di import e ordini dei negozi. Finche' stava solo qui, il prezzo calcolato PRIMA di
+  // spedire usava la citta' grezza e questo punto quella corretta: stesso ordine, due prezzi
+  // (13/10/2026, CAP 87051: 6,12 calcolati, 13,65 addebitati).
+  //   IMPORT (città dal negozio, non "scritta a mano" → non si può selezionare): si NORMALIZZA al
+  //   nome ufficiale quando il CAP è di UN SOLO comune (senza ambiguità). Se il CAP è condiviso e la
+  //   città non combacia con nessuno, non si può decidere → si blocca anche l'import (errore sul
+  //   singolo ordine, mostrato nella pagina ordini). Manuale: si blocca sempre (deve correggere/selezionare).
   {
-    const vc = validaCittaCap(body.shipTo?.postalCode, body.shipTo?.city, body.shipTo?.country)
-    if (vc.validabile && !vc.ok && await capHaZonaSpeciale(body.shipTo?.postalCode)) {
-      // IMPORT (città dal negozio, non "scritta a mano" → non si può selezionare): si NORMALIZZA al
-      // nome ufficiale quando il CAP è di UN SOLO comune (senza ambiguità). Se il CAP è condiviso e la
-      // città non combacia con nessuno, non si può decidere → si blocca anche l'import (errore sul
-      // singolo ordine, mostrato nella pagina ordini). Manuale: si blocca sempre (deve correggere/selezionare).
-      const norm = body._daImport ? normalizzaCittaUfficiale(body.shipTo?.postalCode, body.shipTo?.city, body.shipTo?.country) : null
-      if (norm) {
-        body.shipTo.city = norm   // prosegue col nome ufficiale: la zona speciale ora aggancia
-      } else {
-        const suggeriti = vc.noti.slice(0, 6).join(', ')
-        return NextResponse.json({ error: `Città "${String(body.shipTo?.city).trim()}" non riconosciuta per il CAP ${String(body.shipTo?.postalCode).trim()}. Selezionala dall'elenco o scrivila correttamente${suggeriti ? ` (per questo CAP: ${suggeriti})` : ''}. È una zona con tariffa speciale: un nome errato la farebbe prezzare come destinazione normale.` }, { status: 400 })
-      }
-    }
+    const cd = await cittaPerLaSpedizione({
+      cap: body.shipTo?.postalCode, citta: body.shipTo?.city, paese: body.shipTo?.country,
+      daImport: !!body._daImport,
+    })
+    if (!cd.ok) return NextResponse.json({ error: cd.errore }, { status: 400 })
+    if (cd.normalizzata) body.shipTo.city = cd.citta   // prosegue col nome ufficiale: la zona speciale ora aggancia
   }
 
   const packages = body.packages || [{ length: 20, width: 15, height: 10, weight: 1 }]
@@ -385,48 +388,32 @@ export async function POST(req: NextRequest) {
   // browser. Cosi' l'abuso "pago meno" e' chiuso, mentre resta possibile un prezzo piu' alto
   // deciso legittimamente a monte (accessori, maggiorazioni del master): non si cambia in silenzio
   // la fatturazione di chi oggi addebita correttamente.
+  //
+  // IL CALCOLO STA IN lib/prezzo-cliente.ts, non piu' qui: e' la stessa funzione che usa
+  // l'anteprima dei prezzi di import e ordini dei negozi. Finche' stava scritto solo qui, chi
+  // voleva mostrare "quanto pagherai" prima di spedire passava dal calcolo del preventivo, che e'
+  // un altro e non sempre da' lo stesso numero. Ora chi mostra e chi addebita chiamano la stessa
+  // riga di codice (nolo + fuel + sponda + origine, contrassegno, assicurazione, accessori riletti
+  // dal listino: nessun importo mandato dal browser viene creduto).
   let prezzoServerCliente = 0
   let zonaCliente: string | undefined
   if (!isProprio && cliente?.listino_cliente_id) {
-    const risPrezzo = await calcolaPrezzoListino(adminCrea, {
+    const esitoPrezzo = await prezzoClienteDaListino(adminCrea, {
       listinoId: cliente.listino_cliente_id, corriereId: corriereRecord.id,
       provincia: body.shipTo.state, cap: body.shipTo.postalCode,
-      paese: body.shipTo.country || 'IT', citta: body.shipTo.city, packages,
-      mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
+      paese: body.shipTo.country, citta: body.shipTo.city, packages,
+      mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state,
+      contrassegno: body.codValue, assicurazione: body.insuranceValue, valoreMerce: body.valoreMerce,
+      serviziAccessori,
     })
-    if (!risPrezzo) {
+    if (!esitoPrezzo.ok) {
       return NextResponse.json({ error: 'Destinazione non coperta dal listino per questo contratto: spedizione non creabile.' }, { status: 400 })
     }
-    const suppPrezzo = await calcolaSupplementiCliente(adminCrea, {
-      listinoId: cliente.listino_cliente_id, corriereId: corriereRecord.id,
-      contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
-      valoreMerce: Number(body.valoreMerce || 0), nolo: risPrezzo.prezzo, pesoReale,
-    })
-    // Servizi accessori RICALCOLATI lato SERVER: non fidarsi dell'importo mandato dal browser. Rileggo le
-    // righe accessorie del listino cliente per QUESTO corriere e riapplico prezzo + perc% del NOLO
-    // (risPrezzo.prezzo = nolo+fuel+sponda, la stessa base del frontend). Un accessorio non a listino → 0.
-    // Cosi' il prezzo server include gli accessori reali: "pago meno sull'extra" o "extra inventato" non passano.
-    let accessoriServer = 0
-    if (serviziAccessori && serviziAccessori.length) {
-      const { data: accRows } = await adminCrea.from('listini_clienti_supplementi')
-        .select('nome,descrizione,valore').eq('listino_id', cliente.listino_cliente_id)
-        .eq('corriere_id', corriereRecord.id).eq('tipo', 'accessorio')
-      const mappaAcc = new Map<string, { prezzo: number; perc: number }>()
-      for (const s of (accRows || [])) {
-        let d: any = null; try { d = JSON.parse((s as any).descrizione) } catch {}
-        const nome = String((s as any).nome || d?.nome || '').trim().toLowerCase()
-        if (nome) mappaAcc.set(nome, { prezzo: Number(d?.prezzo ?? (s as any).valore ?? 0) || 0, perc: Number(d?.perc ?? 0) || 0 })
-      }
-      // Riscrivo gli importi con quelli AUTOREVOLI (base nolo): cosi' anche lo storico non e' del browser.
-      serviziAccessori = serviziAccessori.map((v: any) => {
-        const m = mappaAcc.get(String(v.nome || '').trim().toLowerCase())
-        const importo = m ? Math.round((m.prezzo + (m.perc / 100) * risPrezzo.prezzo) * 100) / 100 : 0
-        return { nome: v.nome, importo }
-      })
-      accessoriServer = serviziAccessori.reduce((s: number, v: any) => s + (Number(v.importo) || 0), 0)
-    }
-    prezzoServerCliente = Math.round((risPrezzo.prezzo + suppPrezzo.contrassegno + suppPrezzo.assicurazione + accessoriServer) * 100) / 100
-    zonaCliente = risPrezzo.zona
+    // Gli accessori tornano con l'importo AUTOREVOLE del listino: e' quello che si salva sulla
+    // spedizione, cosi' anche lo storico non e' del browser.
+    if (esitoPrezzo.accessori) serviziAccessori = esitoPrezzo.accessori
+    prezzoServerCliente = esitoPrezzo.prezzo
+    zonaCliente = esitoPrezzo.zona
     const dichiarato = parseFloat(body.totalPrice) || 0
     if (dichiarato > 0 && dichiarato < prezzoServerCliente - 0.01) {
       console.warn('[CREA][PREZZO] importo dichiarato inferiore al listino, uso il listino', {
