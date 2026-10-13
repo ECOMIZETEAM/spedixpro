@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useAppNativa } from '@/lib/app-nativa'
+import { leggiCondiviso } from '@/lib/richiesta-condivisa'
 
 // AVVISO SUL PIANO, in cima a ogni pagina del portale.
 //
@@ -39,7 +40,8 @@ export default function BannerPiano({ linkUpgrade = null }: { linkUpgrade?: stri
 
   useEffect(() => {
     let vivo = true
-    const carica = () => fetch('/api/piano/stato').then(r => r.json()).then(d => { if (vivo) setS(d) }).catch(() => {})
+    // CongelatoGate chiede la stessa rotta nello stesso istante: una richiesta sola (lib/richiesta-condivisa).
+    const carica = () => leggiCondiviso('/api/piano/stato').then(d => { if (vivo) setS(d) }).catch(() => {})
     carica()
     // Il piano puo' sbloccarsi mentre uno sta lavorando (upgrade fatto da un'altra scheda, o dal
     // master sopra): senza un ricontrollo periodico resterebbe il banner rosso di prima.

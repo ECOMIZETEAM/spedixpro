@@ -16,7 +16,13 @@ export default function Dashboard() {
     // ISTANTANEA: mostro subito l'ultima dashboard vista in questa sessione (sessionStorage) e la
     // riverifico in background — i numeri si aggiornano da soli appena arriva la risposta fresca.
     try { const c = sessionStorage.getItem('dash_master_v1'); if (c) { setData(JSON.parse(c)); setLoading(false) } } catch {}
-    const carica = () => fetch('/api/dashboard', { cache: 'no-store' }).then(r=>r.json()).then(d=>{ if (vivo && d && !d.error) { setData(d); setLoading(false); try { sessionStorage.setItem('dash_master_v1', JSON.stringify(d)) } catch {} } else if (vivo) setLoading(false) }).catch(()=>{ if (vivo) setLoading(false) })
+    // UNA RICHIESTA, NON DUE, AL RITORNO SULLA SCHEDA. 'visibilitychange' e 'focus' scattano insieme e
+    // partivano due /api/dashboard identiche nello stesso istante (tre funzioni della home + sette letture
+    // ciascuna): il 17% delle chiamate (285 su 1.647, 13/10/2026). Una seconda partenza entro un secondo
+    // porterebbe gli stessi numeri: non parte. A tempo e non a bandierina, cosi' una richiesta rimasta
+    // appesa non ferma gli aggiornamenti successivi.
+    let ultimoAvvio = 0
+    const carica = () => { const adesso = Date.now(); if (adesso - ultimoAvvio < 1000) return; ultimoAvvio = adesso; return fetch('/api/dashboard', { cache: 'no-store' }).then(r=>r.json()).then(d=>{ if (vivo && d && !d.error) { setData(d); setLoading(false); try { sessionStorage.setItem('dash_master_v1', JSON.stringify(d)) } catch {} } else if (vivo) setLoading(false) }).catch(()=>{ if (vivo) setLoading(false) }) }
     carica()
     // Ogni 2 min e SOLO a scheda visibile (prima ogni 20s sempre: con le schede lasciate aperte le
     // RPC dashboard dominavano il carico DB). Al ritorno sulla pagina c'è già il refresh immediato.

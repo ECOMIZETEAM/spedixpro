@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { leggiCondiviso } from '@/lib/richiesta-condivisa'
 
 // La campanella legge /api/notifiche/mie e le divide in TAB per categoria, così i "Spedizione
 // consegnata" (ad alto volume) non affogano gli AVVISI importanti del master. Il pallino conta solo
@@ -39,8 +40,10 @@ export default function CampanellaNotifiche() {
 
   useEffect(() => { try { setVistoAl(localStorage.getItem(VISTE_KEY) || '') } catch {} }, [])
 
+  // leggiCondiviso: sulla home cliente il riquadro avvisi chiede la stessa rotta nello stesso istante;
+  // la seconda richiesta si aggancia alla prima finche' e' in volo (lib/richiesta-condivisa).
   const carica = () => {
-    fetch('/api/notifiche/mie').then(r => r.json())
+    leggiCondiviso('/api/notifiche/mie')
       .then(d => setLista(Array.isArray(d) ? d : []))
       .catch(() => {})
   }

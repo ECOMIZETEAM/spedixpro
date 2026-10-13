@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { useAppNativa, ABBONAMENTO_NON_IN_APP } from '@/lib/app-nativa'
+import { leggiCondiviso } from '@/lib/richiesta-condivisa'
 
 const ACCENT = '#f97316'
 
@@ -24,7 +25,8 @@ export default function CongelatoGate() {
 
   async function carica() {
     try {
-      const d = await (await fetch('/api/piano/stato')).json()
+      // BannerPiano chiede la stessa rotta nello stesso istante: una richiesta sola (lib/richiesta-condivisa).
+      const d = await leggiCondiviso('/api/piano/stato')
       setS(d?.congelato || d?.oltreLimite ? d : null)
     } catch { }
   }

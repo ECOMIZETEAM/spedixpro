@@ -2,17 +2,25 @@
 import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
 import DestinazioniWidget from '@/app/components/DestinazioniWidget'
+import { leggiCondiviso } from '@/lib/richiesta-condivisa'
 export default function ClienteDashboard() {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [notifiche, setNotifiche] = useState<any[]>([])
   useEffect(() => {
     let vivo = true
-    fetch('/api/notifiche/mie').then(r=>r.json()).then(d=>{ if (vivo) setNotifiche(Array.isArray(d)?d:[]) }).catch(()=>{})
+    // Stessa rotta della campanella, che parte nello stesso istante: una richiesta sola (lib/richiesta-condivisa).
+    leggiCondiviso('/api/notifiche/mie').then(d=>{ if (vivo) setNotifiche(Array.isArray(d)?d:[]) }).catch(()=>{})
     // ISTANTANEA: mostro subito l'ultima dashboard vista in questa sessione (sessionStorage) e la
     // riverifico in background — i numeri si aggiornano da soli appena arriva la risposta fresca.
     try { const c = sessionStorage.getItem('dash_cliente_v1'); if (c) { setData(JSON.parse(c)); setLoading(false) } } catch {}
-    const carica = () => fetch('/api/cliente/dashboard', { cache: 'no-store' }).then(r=>r.json()).then(d=>{ if (vivo && d && !d.error) { setData(d); setLoading(false); try { sessionStorage.setItem('dash_cliente_v1', JSON.stringify(d)) } catch {} } else if (vivo) setLoading(false) }).catch(()=>{ if (vivo) setLoading(false) })
+    // UNA RICHIESTA, NON DUE, AL RITORNO SULLA SCHEDA. Il browser lancia insieme 'visibilitychange' e
+    // 'focus', e partivano due /api/cliente/dashboard identiche a pochi millisecondi: il 19,5% delle
+    // chiamate (log del 12-13/10/2026: 1.020 su 5.208, 245 utenti). Una seconda partenza entro un secondo
+    // dalla prima porterebbe gli stessi numeri: non parte. A tempo e non a bandierina, cosi' una
+    // richiesta rimasta appesa non ferma gli aggiornamenti successivi.
+    let ultimoAvvio = 0
+    const carica = () => { const adesso = Date.now(); if (adesso - ultimoAvvio < 1000) return; ultimoAvvio = adesso; return fetch('/api/cliente/dashboard', { cache: 'no-store' }).then(r=>r.json()).then(d=>{ if (vivo && d && !d.error) { setData(d); setLoading(false); try { sessionStorage.setItem('dash_cliente_v1', JSON.stringify(d)) } catch {} } else if (vivo) setLoading(false) }).catch(()=>{ if (vivo) setLoading(false) }) }
     carica()
     // Ogni 2 min e SOLO a scheda visibile (prima: ogni 20s sempre → 3 RPC a giro, ~44% del carico DB
     // con le schede lasciate aperte). Al ritorno sul tab c'è già il refresh immediato (onFocus).
