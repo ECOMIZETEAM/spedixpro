@@ -130,6 +130,7 @@ async function prezzaRiga(ctx: ContestoAnteprima, riga: RigaDaPrezzare, aTaglia:
     if (await internoEsclusivoViola(ctx.dbAdmin, {
       cliente: ctx.cliente, corriereSceltoTipo: r._corriere_tipo,
       provincia: riga.provincia, cap: riga.cap, citta: cd.citta, paese: riga.paese || 'IT', packages,
+      mittCap: ctx.mittente.cap, mittProvincia: ctx.mittente.provincia,
     })) continue
 
     const pz = await prezzoClienteDaListino(ctx.dbAdmin, {

@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import { addebitaTreeCondivisione, verificaCreditoCondivisione, risolviChiaveDispatch } from '@/lib/condivisione-catena'
-import { calcolaPrezzoCorriere, calcolaPrezzoCorriereDettaglio, calcolaSupplementiCliente, fattoreVolumeCliente, fattoreVolumeCorriere, calcolaPesoFatturato, calcolaPrezzoListino, type RisultatoPrezzo } from '@/lib/pricing'
+import { calcolaPrezzoCorriere, calcolaPrezzoCorriereDettaglio, calcolaSupplementiCliente, fattoreVolumeCliente, fattoreVolumeCorriere, calcolaPesoFatturato, calcolaPrezzoListino, motivoPartenzaNonCoperta, type RisultatoPrezzo } from '@/lib/pricing'
 import { isAgente, nomeAgente } from '@/lib/agente'
 import { pudoConfigDaVettore, spediamoproPudoCourier } from '@/lib/punti-poste'
 import { EMAIL_PER_CORRIERE,
@@ -377,6 +377,7 @@ export async function POST(req: NextRequest) {
       cliente, corriereSceltoTipo: (corriereRecord as any)?.tipo,
       provincia: body.shipTo.state, cap: body.shipTo.postalCode, citta: body.shipTo.city,
       paese: body.shipTo.country || 'IT', packages,
+      mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state,
     })
     if (viola) return NextResponse.json({ error: 'Per questa destinazione è previsto solo il circuito interno: seleziona il corriere interno.' }, { status: 400 })
   }
@@ -403,6 +404,8 @@ export async function POST(req: NextRequest) {
       mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
     })
     if (!risCli || risCli.corriere_id !== corriereRecord.id) {
+      const partenza = await motivoPartenzaNonCoperta(adminCrea, corriereRecord, { cap: body.shipFrom.postalCode, provincia: body.shipFrom.state })
+      if (partenza) return NextResponse.json({ error: partenza }, { status: 400 })
       return NextResponse.json({ error: 'Destinazione in zona disagiata: nessun prezzo a listino per questo corriere. Spedizione non consentita — scegli un altro corriere o aggiungi la fascia della zona al listino.' }, { status: 400 })
     }
     noloDelCancello = risCli

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
-import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
+import { calcolaPrezzoListino, calcolaSupplementiCliente, motivoPartenzaNonCoperta } from '@/lib/pricing'
 import { registraMovimento, descrizioneSpedizione } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import { addebitaTreeCondivisione, verificaCreditoCondivisione, risolviChiaveDispatch } from '@/lib/condivisione-catena'
@@ -166,7 +166,10 @@ export async function POST(req: NextRequest) {
     packages, corriereId: ctx.corriereId,
     mittCap: (body.shipFrom.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom.state || '').toUpperCase().trim(), mittPaese: 'IT',
   })
-  if (!ris) return NextResponse.json({ error: 'Destinazione non coperta dal listino per questo contratto (zona non prezzata): spedizione non creabile con questo corriere.' }, { status: 400 })
+  if (!ris) {
+    const partenza = await motivoPartenzaNonCoperta(admin, corriere, { cap: body.shipFrom.postalCode, provincia: body.shipFrom.state })
+    return NextResponse.json({ error: partenza || 'Destinazione non coperta dal listino per questo contratto (zona non prezzata): spedizione non creabile con questo corriere.' }, { status: 400 })
+  }
 
   // Supplementi contrassegno/assicurazione dal listino cliente (stessa logica del portale)
   const supp = await calcolaSupplementiCliente(admin, {

@@ -8,6 +8,9 @@ import { calcolaPrezzoListino } from '@/lib/pricing'
 // le spedizioni: portale master, portale cliente, API v1). "Coperta" = il corriere interno del master è
 // ABILITATO per il cliente e ha una fascia a listino per quella destinazione (esattamente ciò che lo fa
 // comparire tra le tariffe): se l'interno non copre quel comune, la regola non scatta e restano tutti.
+// Il MITTENTE fa parte della copertura: un interno vale solo se anche la partenza è nei suoi CAP. Senza
+// mittente qui, un cliente che parte da fuori zona si vedeva vietare BRT/Poste ("solo l'interno") e
+// l'interno stesso escluso dal prezzo: nessun corriere. Per questo il mittente è obbligatorio nel tipo.
 //
 // Ritorna true se la spedizione VIOLA la regola (interno esclusivo attivo, destinazione coperta
 // dall'interno, ma il corriere scelto NON è l'interno) → il chiamante blocca. Solo Italia: il circuito
@@ -22,6 +25,8 @@ export async function internoEsclusivoViola(
     citta?: string
     paese?: string
     packages: any[]
+    mittCap: string | null | undefined
+    mittProvincia: string | null | undefined
   }
 ): Promise<boolean> {
   const c = params.cliente
@@ -49,6 +54,7 @@ export async function internoEsclusivoViola(
     const ris = await calcolaPrezzoListino(admin, {
       listinoId: c.listino_cliente_id, corriereId: it.id,
       provincia: params.provincia, cap: params.cap, paese: 'IT', citta: params.citta, packages: params.packages,
+      mittCap: params.mittCap || '', mittProvincia: params.mittProvincia || '', mittPaese: 'IT',
     })
     if (ris) return true   // l'interno copre questa destinazione e si sta usando un altro corriere → viola
   }

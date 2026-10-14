@@ -21,7 +21,7 @@ import { EMAIL_PER_CORRIERE,
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
 import { normalizzaPaese } from '@/lib/paesi'
 import { motivoGlsNonServe, servizioGls } from '@/lib/gls'
-import { calcolaPrezzoCorriereDettaglio, calcolaPesoFatturato, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente, origineCopertaCap } from '@/lib/pricing'
+import { calcolaPrezzoCorriereDettaglio, calcolaPesoFatturato, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente, origineCopertaCap, soloCapCoperti } from '@/lib/pricing'
 // La sigla neutra al posto del tipo del contratto: il nome del sistema tecnico a valle non deve
 // arrivare al browser, nemmeno dentro il JSON (vedi lib/corriere-logo.ts).
 import { siglaContratto, marchioCorriere } from '@/lib/corriere-logo'
@@ -425,16 +425,15 @@ export async function calcolaTariffeCliente(
     // 2) fallback per nome SOLO Italia — MA NON se la dest è esclusiva PER QUESTO corriere (isole/
     //    disagiate/sardegna…): lì il corriere senza la zona speciale non deve agganciare via "Italia".
     //    L'esclusione è per-corriere: un CAP disagiato per BRT non toglie il jolly a Poste.
-    //    E NON per i corrieri a COPERTURA-CAP (InPost): fuori dai CAP coperti = non coperto = escluso.
-    const cRec: any = fasceC[0]?.corrieri
-    const soloCapCoperti = cRec?.tipo === 'inpost' || !!(cRec?.settings as any)?.solo_cap_coperti
-    if (!sel.length && !isEstero && !corrieriEsclusi.has(cid) && !soloCapCoperti) {
+    //    E NON per i corrieri a COPERTURA-CAP (InPost, interni): fuori dai CAP coperti = non coperto = escluso.
+    const coperturaCap = soloCapCoperti(fasceC[0]?.corrieri as any)
+    if (!sel.length && !isEstero && !corrieriEsclusi.has(cid) && !coperturaCap) {
       sel = fasceC.filter(f => (f.zone as any)?.nome === zonaNome)
       if (!sel.length) sel = fasceC.filter(f => (f.zone as any)?.nome === 'Italia')
     }
-    // ORIGINE (InPost, Domicilio e Locker): i CAP coperti valgono anche in PARTENZA → se il mittente è
-    // noto ma fuori copertura, il corriere non si mostra (stessa regola della destinazione).
-    if (sel.length && soloCapCoperti && !(await origineCopertaCap(supabase, cid, { cap: body.shipFrom?.postalCode, provincia: body.shipFrom?.state, paese: 'IT' }))) sel = []
+    // ORIGINE (InPost Domicilio e Locker, interni): i CAP coperti valgono anche in PARTENZA → se il
+    // mittente è noto ma fuori copertura, il corriere non si mostra (stessa regola della destinazione).
+    if (sel.length && coperturaCap && !(await origineCopertaCap(supabase, cid, { cap: body.shipFrom?.postalCode, provincia: body.shipFrom?.state, paese: 'IT' }))) sel = []
     if (sel.length) fascePerCorriere.set(cid, sel)   // altrimenti il corriere non copre la destinazione -> escluso
   }
 
