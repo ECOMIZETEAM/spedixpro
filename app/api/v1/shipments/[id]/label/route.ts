@@ -16,7 +16,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // leggiEtichettaCompleta sa dove vive il PDF (Storage o base64) ED è MULTICOLLO: su una spedizione
   // a più colli unisce tutte le etichette in un unico PDF, così chi si integra via API non riceve il
   // solo primo collo. Prima usava leggiEtichetta (singola) e non leggeva nemmeno colli_dettaglio.
-  const et = await leggiEtichettaCompleta(admin, s as any)
+  // SDA EXPRESS L esce com'e' arrivata da Poste (resaSda:false): da qui la catena della condivisione
+  // scarica l'etichetta e la SALVA sulla riga del compratore (lib/moovexpress). Servita gia' riscritta,
+  // il cliente finale avrebbe avuto la resa coi dati della gamba a monte invece che della sua riga, e
+  // rileggerla per riscriverla cancellava i codici (provato il 13/10). La resa pulita la fa il portale
+  // di chi stampa, sulla sua riga; chi si integra via API riceve la stessa 1011 di sempre.
+  const et = await leggiEtichettaCompleta(admin, s as any, { resaSda: false })
   if (!et) return NextResponse.json({ error: 'Etichetta non disponibile' }, { status: 404 })
   return new NextResponse(et.buffer as any, {
     headers: {

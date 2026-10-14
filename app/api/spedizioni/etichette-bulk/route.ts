@@ -46,6 +46,17 @@ export async function POST(req: NextRequest) {
   const font = await pdfMerged.embedFont(StandardFonts.Helvetica)
   const fontBold = await pdfMerged.embedFont(StandardFonts.HelveticaBold)
 
+  // Resa pulita SDA EXPRESS L: dipende da chi stampa (vedi resaSdaAdatta), quindi si chiede una volta
+  // sola per tutta la stampa, e solo se nella selezione c'e' una SDA.
+  let resaSdaChiStampa: boolean | null = null
+  const resaSda = async () => {
+    if (resaSdaChiStampa === null) {
+      const { resaSdaAdatta } = await import('@/lib/formato-etichetta')
+      resaSdaChiStampa = await resaSdaAdatta(admin, utente as any)
+    }
+    return resaSdaChiStampa
+  }
+
   for (const s of spedizioni || []) {
     // Etichette da stampare per questa spedizione. Sul MULTICOLLO ce n'e' una per collo; sul
     // monocollo il collo non la porta (sarebbe una copia identica) e si usa quella della spedizione.
@@ -73,8 +84,22 @@ export async function POST(req: NextRequest) {
     // della spedizione al posto loro. Le etichette uguali su piu' colli restano scartate (una volta per
     // chiave qui, e comunque per BYTE piu' sotto: e' l'unica difesa che regge quando le chiavi sono
     // percorsi diversi dello stesso documento).
-    const { sorgentiEtichettePerStampa } = await import('@/lib/etichette')
-    const sorgenti: Array<{ url?: string; bytes?: Uint8Array }> = await sorgentiEtichettePerStampa(admin, s as any)
+    const { sorgentiEtichettePerStampa, leggiEtichettaCompleta, contrattoSdaExpressL } = await import('@/lib/etichette')
+    let sorgenti: Array<{ url?: string; bytes?: Uint8Array }> = []
+
+    // SDA EXPRESS L (Poste Delivery Business): la 1011 di Poste e' ruotata/accavallata e la si
+    // ri-rende nel layout pulito, COPIANDO i codici originali. Si passa dalla STESSA lettura della
+    // stampa singola: unisce i colli in un PDF e li riscrive insieme, ognuno col SUO numero di collo
+    // (diverso da quello della spedizione, ed e' quello del codice a barre). Riscritti qui uno per uno,
+    // un'etichetta per collo avrebbe stampato su ogni collo il numero della spedizione.
+    if (contrattoSdaExpressL(_corr)) {
+      try {
+        const et = await leggiEtichettaCompleta(admin, s as any, { resaSda })
+        if (et?.mime === 'application/pdf') sorgenti = [{ bytes: new Uint8Array(et.buffer) }]
+      } catch (e) { console.error('[ETICHETTE-BULK][SDA]', e) }
+    }
+    // Tutti gli altri, e SDA se la lettura qui sopra non ha dato un PDF: la lettura per colli.
+    if (!sorgenti.length) sorgenti = await sorgentiEtichettePerStampa(admin, s as any)
 
     // RIPIEGO GLS: se non c'e' ancora nessuna etichetta (ne' inline ne' Storage) e la spedizione e' GLS
     // proprietaria, il PDF puo' non essere stato salvato alla creazione (GLS lo genera in ritardo dopo

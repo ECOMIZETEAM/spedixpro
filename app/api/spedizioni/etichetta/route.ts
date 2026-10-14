@@ -80,14 +80,15 @@ export async function GET(req: NextRequest) {
   {
     const { leggiEtichettaCompleta } = await import('@/lib/etichette')
     const { createAdminSupabase: _admL } = await import('@/lib/supabase-admin')
+    const { formatoStampaUtente, applicaFormatoEtichetta, resaSdaAdatta } = await import('@/lib/formato-etichetta')
     const _adminFmt = _admL()
-    const et = await leggiEtichettaCompleta(_adminFmt, sped as any)
+    // Resa pulita SDA EXPRESS L solo se il modo di stampare di chi stampa la regge (vedi resaSdaAdatta).
+    const et = await leggiEtichettaCompleta(_adminFmt, sped as any, { resaSda: () => resaSdaAdatta(_adminFmt, utente as any) })
     if (et) {
       let out = et.mime === 'application/pdf' ? await conRiepilogo(et.buffer) : et.buffer
       // FORMATO DI STAMPA scelto da chi stampa (cliente→suo, master→suo). Solo sui PDF; ZPL/immagini
       // restano com'è. Assente = nativo del corriere (nessun cambiamento per chi non ha scelto).
       if (et.mime === 'application/pdf') {
-        const { formatoStampaUtente, applicaFormatoEtichetta } = await import('@/lib/formato-etichetta')
         const fmt = await formatoStampaUtente(_adminFmt, utente as any)
         if (fmt) out = Buffer.from(await applicaFormatoEtichetta(out, fmt))
       }

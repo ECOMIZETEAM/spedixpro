@@ -21,25 +21,42 @@ export function formatoValido(v: any): boolean {
   return typeof v === 'string' && v in DIMENSIONI
 }
 
-// Formato scelto da CHI STAMPA: il cliente usa il suo, il master (o agente/staff) usa quello del master.
-// Ritorna null (= nativo) se non è stato salvato un formato valido — così gli esistenti restano invariati.
-export async function formatoStampaUtente(
-  admin: any,
-  utente: { ruolo?: string | null; cliente_id?: string | null; master_id?: string | null } | null
-): Promise<string | null> {
+type ChiStampa = { ruolo?: string | null; cliente_id?: string | null; master_id?: string | null } | null
+
+// Impostazioni di stampa di CHI STAMPA: il cliente usa le sue, il master (o agente/staff) quelle del master.
+async function impostazioniStampa(admin: any, utente: ChiStampa): Promise<any | null> {
+  if (utente?.ruolo === 'cliente' && utente.cliente_id) {
+    const { data } = await admin.from('clienti').select('impostazioni').eq('id', utente.cliente_id).maybeSingle()
+    return data?.impostazioni || null
+  }
+  if (utente?.master_id) {
+    const { data } = await admin.from('masters').select('impostazioni').eq('id', utente.master_id).maybeSingle()
+    return data?.impostazioni || null
+  }
+  return null
+}
+
+// Formato scelto da CHI STAMPA. Ritorna null (= nativo) se non è stato salvato un formato valido — così
+// gli esistenti restano invariati.
+export async function formatoStampaUtente(admin: any, utente: ChiStampa): Promise<string | null> {
   try {
-    if (utente?.ruolo === 'cliente' && utente.cliente_id) {
-      const { data } = await admin.from('clienti').select('impostazioni').eq('id', utente.cliente_id).maybeSingle()
-      const f = data?.impostazioni?.formato_stampa
-      return formatoValido(f) ? f : null
-    }
-    if (utente?.master_id) {
-      const { data } = await admin.from('masters').select('impostazioni').eq('id', utente.master_id).maybeSingle()
-      const f = data?.impostazioni?.formato_stampa
-      return formatoValido(f) ? f : null
-    }
+    const f = (await impostazioniStampa(admin, utente))?.formato_stampa
+    return formatoValido(f) ? f : null
   } catch { /* su qualsiasi errore: nativo */ }
   return null
+}
+
+// La resa pulita SDA EXPRESS L e' ORIZZONTALE (14,8x10,5 cm). Chi stampa col formato 10x11/10x15 del
+// portale (qui sotto: 'contain' senza ruotare) o con la Zebra (lib/zebra-print: adatta a 10 cm) la
+// riceverebbe al 67,5%, con le barre dei codici a righe sotto i 2 punti di una termica a 203 dpi: in
+// simulazione il CAP non si leggeva piu' (13/10), la 1011 si'. A loro resta la 1011 di Poste, che nasce
+// per quel rotolo. Su 4x6 senza formato la resa e' stata letta dal corriere col codice a barre (12/10).
+// Nel dubbio (errore) la 1011.
+export async function resaSdaAdatta(admin: any, utente: ChiStampa): Promise<boolean> {
+  try {
+    const imp = await impostazioniStampa(admin, utente)
+    return !(imp?.zpl_abilita === 'si' || imp?.formato_stampa === '10x11' || imp?.formato_stampa === '10x15')
+  } catch { return false }
 }
 
 // Ritorna il PDF ri-formattato, o gli stessi byte se il formato è nativo/assente/non-PDF.

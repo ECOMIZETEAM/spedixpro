@@ -19,7 +19,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { leggiEtichettaCompleta } = await import('@/lib/etichette')
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
-  let et = await leggiEtichettaCompleta(admin, sped as any)
+  // Resa pulita SDA EXPRESS L con la stessa regola della stampa dall'elenco: chi stampa su rotolo col
+  // formato del portale o con la Zebra riceve la 1011 anche da qui.
+  const resaSda = async () => {
+    const { resaSdaAdatta } = await import('@/lib/formato-etichetta')
+    const { data: utente } = await supabase.from('utenti').select('ruolo, cliente_id, master_id').eq('id', user.id).single()
+    return resaSdaAdatta(admin, utente as any)
+  }
+  let et = await leggiEtichettaCompleta(admin, sped as any, { resaSda })
 
   // Ripiego GLS on-demand: l'etichetta del contratto proprio può non essere pronta subito dopo la
   // creazione (GLS la genera con un attimo di ritardo). Se manca, la si scarica ORA e la si salva —

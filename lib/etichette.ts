@@ -209,16 +209,50 @@ export async function sorgentiEtichettePerStampa(
   return et ? [{ bytes: new Uint8Array(et.buffer) }] : []
 }
 
+// SDA EXPRESS L arriva al cliente su DUE tipi di contratto con lo stesso nome: 'poste' (quello di
+// LOGIXIA, che crea la LDV) e 'moovexpress' (la condivisione: decine di master lo rivendono). La riga
+// che il cliente scarica sta sul contratto condiviso; su 'poste' ci sono solo le gambe interne, che
+// nessun cliente apre (13/10: 11.934 righe cliente in una settimana, tutte su 'moovexpress'). Guardando
+// solo 'poste' la nuova resa non arrivava a nessuno. L'etichetta e' la stessa 1011 in entrambi i casi.
+export function contrattoSdaExpressL(corr: { tipo?: string | null; nome_contratto?: string | null } | null | undefined): boolean {
+  return (corr?.tipo === 'poste' || corr?.tipo === 'moovexpress')
+    && String(corr?.nome_contratto || '').trim().toUpperCase() === 'SDA EXPRESS L'
+}
+
+// INTERRUTTORE della resa pulita SDA EXPRESS L. PER SPEGNERLA: false e rilascio; da quel momento
+// tutte le porte servono di nuovo la 1011 di Poste (il PDF salvato non e' mai stato toccato).
+const RESA_SDA_ATTIVA = true
+
 export async function leggiEtichettaCompleta(
   admin: any,
-  sped: { etichetta_path?: string | null; etichetta_url?: string | null; colli_dettaglio?: any; raw_response?: any; corriere_id?: string | null; rif_ordine?: string | null; contenuto?: string | null; master_id?: string | null }
+  sped: { etichetta_path?: string | null; etichetta_url?: string | null; colli_dettaglio?: any; raw_response?: any; corriere_id?: string | null; rif_ordine?: string | null; contenuto?: string | null; master_id?: string | null; numero?: string | null },
+  // resaSda: la resa pulita SDA EXPRESS L va CHIESTA, e la chiedono solo le porte di stampa (true, o una
+  // funzione che decide in base a chi stampa: la si chiama solo se il contratto e' SDA). Senza, esce la
+  // 1011 com'e' arrivata da Poste: un punto nuovo che salva l'etichetta e dimentica l'opzione salva
+  // l'originale, non una resa. L'API v1 non la chiede: da li' la catena della condivisione scarica
+  // l'etichetta e la SALVA sulla riga del compratore (lib/moovexpress).
+  opz: { resaSda?: boolean | (() => Promise<boolean>) } = {}
 ): Promise<EtichettaLetta | null> {
   const et = await leggiEtichettaGrezza(admin, sped)
+  const resaChiesta = RESA_SDA_ATTIVA && !!opz.resaSda
   // Il gate NON guarda piu' solo rif_ordine/contenuto: su Spedisci si riscrive anche il nome del
   // mittente in etichetta, che dipende dal master e non da quei due campi.
-  if (et && et.mime === 'application/pdf' && sped?.corriere_id && (sped.rif_ordine || sped.contenuto || sped.master_id)) {
+  const perFornitori = !!(sped?.rif_ordine || sped?.contenuto || sped?.master_id)
+  // SDA EXPRESS L non ha bisogno di nessuno dei tre: i suoi dati li legge dalla riga, col numero. Il
+  // dettaglio spedizione non legge master_id: legata a quel gate, una spedizione senza rif e senza
+  // contenuto sarebbe uscita da li' con la 1011 storta e dal portale con quella pulita.
+  if (et && et.mime === 'application/pdf' && sped?.corriere_id && (perFornitori || (resaChiesta && sped.numero))) {
     try {
-      const { data: corr } = await admin.from('corrieri').select('tipo').eq('id', sped.corriere_id).maybeSingle()
+      const { data: corr } = await admin.from('corrieri').select('tipo, nome_contratto').eq('id', sped.corriere_id).maybeSingle()
+      // SDA EXPRESS L (Poste Delivery Business): la 1011 che torna da Poste e' ruotata e coi campi
+      // accavallati. La ri-rendiamo nel layout pulito approvato, COPIANDO i codici originali (restano
+      // quelli di SDA, scansionabili). Qualunque problema → torna l'etichetta ORIGINALE (vedi sotto).
+      if (resaChiesta && contrattoSdaExpressL(corr) && (typeof opz.resaSda === 'function' ? await opz.resaSda() : true)) {
+        const { riscriviEtichettaSdaExpressL, datiEtichettaSda } = await import('@/lib/etichetta-sda')
+        const dati = await datiEtichettaSda(admin, sped.numero)
+        if (dati) return { ...et, buffer: await riscriviEtichettaSdaExpressL(et.buffer, dati) }
+      }
+      if (!perFornitori) return et
       if ((corr as any)?.tipo === 'spediamopro') {
         const { riscriviEtichettaSpediamopro, codiceProviderSpediamopro } = await import('@/lib/etichetta-spediamopro')
         return { ...et, buffer: await riscriviEtichettaSpediamopro(et.buffer, {
