@@ -33,8 +33,80 @@ import { normalizzaPaese } from '@/lib/paesi'
 // una zona estera con le fasce per far comparire il contratto. Finche' l'internazionale non e'
 // costruito sul manuale GLS, il contratto non si offre e non si crea fuori dall'Italia. La decisione
 // sta qui, e la chiamano i due preventivi (cliente e spedizione propria del master) e la creazione.
-export function glsDirettoFuoriItalia(tipoContratto: unknown, paeseDestinazione: unknown): boolean {
-  return tipoContratto === 'gls' && normalizzaPaese(paeseDestinazione) !== 'IT'
+//
+// L'ESTERO E' UN ALTRO SERVIZIO GLS, NON UN'ALTRA DESTINAZIONE DELLO STESSO. Nel <Parcel> c'e'
+// TipoSpedizione: N = nazionale (il default, quello che GLS assume se il tag manca) e P = Parcel,
+// cioe' internazionale. Percio' il servizio sta nel CONTRATTO (settings.tipo_spedizione = 'P'), non
+// nella destinazione: un contratto nazionale serve solo l'Italia, un contratto Parcel solo l'estero.
+// Il primo Parcel e' "Q GLS NL STANDARD Europa" di Quick (14/10/2026): stesse credenziali del
+// nazionale, servizio diverso.
+export type ServizioGls = 'N' | 'P'
+export function servizioGls(settings: unknown): ServizioGls {
+  return (settings as any)?.tipo_spedizione === 'P' ? 'P' : 'N'
+}
+
+// IL PAESE DEL PARCEL VA NEL TAG <Provincia>, con la sigla GLS del paese: non c'e' un tag "nazione".
+// Fonte: manuale GLS MU162 rev.22 (05/07/2022), par. 6.1 "Tag <Provincia> (sigla sede paesi
+// internazionali)" e tabella AddParcel ("Provincia / Codice Stato"). Le sigle coincidono con l'ISO
+// 3166 tranne due (Liechtenstein LC, Turchia TK), che pero' sono extra-UE e qui non entrano.
+// SOLO PAESI UE: per l'extra-UE (Svizzera, Norvegia, Regno Unito, Serbia, Turchia, Andorra…) GLS
+// vuole i dati doganali (Incoterm, fattura doganale, valore, categoria, nazione d'origine), che non
+// mandiamo: senza, il pacco si ferma in dogana. L'Islanda nell'elenco GLS non c'e' proprio.
+const SIGLA_GLS_PARCEL_UE: Record<string, string> = {
+  AT: 'AT', BE: 'BE', BG: 'BG', CY: 'CY', CZ: 'CZ', DE: 'DE', DK: 'DK', EE: 'EE', ES: 'ES', FI: 'FI',
+  FR: 'FR', GR: 'GR', HR: 'HR', HU: 'HU', IE: 'IE', LT: 'LT', LU: 'LU', LV: 'LV', MT: 'MT', NL: 'NL',
+  PL: 'PL', PT: 'PT', RO: 'RO', SE: 'SE', SI: 'SI', SK: 'SK',
+}
+// Territori di paesi UE FUORI dall'area doganale e IVA dell'Unione: anche li' servirebbero i dati
+// doganali. Si riconoscono dal CAP (la zona "Spagna" del listino copre anche le Canarie).
+const TERRITORI_FUORI_DOGANA_UE: Array<[string, RegExp, string]> = [
+  ['ES', /^(35|38)\d{3}$/, 'le Canarie'], ['ES', /^51\d{3}$/, 'Ceuta'], ['ES', /^52\d{3}$/, 'Melilla'],
+  // Francia: 971-978 e 984-989 sono oltremare. I 980xx sono Monaco, che col CAP francese sta nel
+  // territorio doganale dell'Unione e va servito.
+  ['FR', /^9(7[1-8]|8[4-9])\d{2}$/, 'i territori francesi d\'oltremare'], ['FI', /^22\d{3}$/, 'le isole Åland'],
+  ['DE', /^27498$/, 'Helgoland'], ['DE', /^78266$/, 'Büsingen'], ['GR', /^6308[67]$/, 'il Monte Athos'],
+]
+function capPulito(cap: unknown): string {
+  return String(cap ?? '').replace(/\s+/g, '').toUpperCase()
+}
+// CAP del Parcel: GLS lo vuole alfanumerico di massimo 7 caratteri. Il prefisso del paese ("LT-") e
+// il trattino si tolgono SOLO se il CAP non ci sta: un portoghese "1000-001" troncato a 7 diventava
+// "1000-00" (meta' dei CAP portoghesi nei nostri dati ha questa forma), mentre i CAP che ci stanno
+// (polacco "00-950", lettone "LV-1050", olandese senza spazio) restano come sono. Se anche cosi'
+// supera i 7, erroreParcelGls ferma la spedizione: un CAP tagliato non arriva a destinazione.
+function capParcel(cap: unknown): string {
+  const c = capPulito(cap)
+  return c.length > 7 ? c.replace(/^[A-Z]{1,3}-/, '').replace(/-/g, '') : c
+}
+
+// Perche' un contratto GLS Parcel NON puo' servire quella destinazione (null = la serve).
+export function motivoParcelNonServito(paeseDestinazione: unknown, cap: unknown): string | null {
+  const paese = normalizzaPaese(paeseDestinazione)
+  if (paese === 'IT') return 'Questo contratto GLS spedisce solo all\'estero: per l\'Italia scegli il contratto nazionale.'
+  if (!SIGLA_GLS_PARCEL_UE[paese]) return `Questo contratto GLS non spedisce verso ${paese}: fuori dall'Unione europea servono i dati doganali.`
+  const c = capPulito(cap).replace(/^[A-Z]{1,3}-/, '')   // "ES-35001" e' comunque le Canarie
+  const territorio = TERRITORI_FUORI_DOGANA_UE.find(([p, re]) => p === paese && re.test(c))
+  if (territorio) return `Questo contratto GLS non spedisce verso ${territorio[2]}: sono fuori dall'area doganale dell'Unione europea.`
+  return null
+}
+
+// PERCHE' UN CONTRATTO GLS DIRETTO NON PUO' FARE QUESTA SPEDIZIONE (null = la puo' fare). E' la regola
+// unica: la chiamano i due preventivi (per non mostrarlo) e la creazione (per fermarlo prima del
+// credito). Dentro c'e' solo cio' che si sa gia' al momento del prezzo: destinazione e contrassegno.
+// Il contrassegno sul Parcel GLS lo vuole con numero e data fattura e su un collo solo (manuale
+// MU162): non lo mandiamo, quindi il contratto non si offre a chi lo chiede.
+export function motivoGlsNonServe(
+  corriere: { tipo?: unknown; settings?: unknown } | null | undefined,
+  dest: { paese?: unknown; cap?: unknown; contrassegno?: unknown },
+): string | null {
+  if (corriere?.tipo !== 'gls') return null
+  if (servizioGls(corriere.settings) !== 'P') {
+    return normalizzaPaese(dest.paese) !== 'IT' ? 'Questo contratto GLS spedisce solo in Italia: per l\'estero scegli un altro corriere.' : null
+  }
+  const motivo = motivoParcelNonServito(dest.paese, dest.cap)
+  if (motivo) return motivo
+  if (Number(dest.contrassegno || 0) > 0) return 'Il contrassegno non e\' disponibile su GLS Europa: toglilo o scegli un altro corriere.'
+  return null
 }
 
 const GLS_ENDPOINT = 'https://labelservice.gls-italy.com/ilswebservice.asmx'
@@ -70,6 +142,15 @@ export type ParcelGls = {
   // (è l'opposto della regola "email schermo corriere"): lo decide il ramo crea, non questa libreria.
   email?: string                 // <Email> destinatario (max 70)
   cellulare?: string             // <Cellulare1> destinatario (GLS vuole le ultime 10 cifre)
+  // PARCEL (estero, contratto con settings.tipo_spedizione = 'P'). Manuale MU162 rev.22: per il
+  // Parcel sono obbligatori Bda, PersonaRiferimento e TelefonoDestinatario; il paese va in
+  // <Provincia> come sigla GLS; non si usano Notespedizione, TipoPorto e i servizi accessori
+  // (solo il 31 FlexDelivery). Il contrassegno vuole numero e data fattura e un collo solo: non lo
+  // mandiamo, e creaSpedizioneGls rifiuta un Parcel che lo chiede.
+  tipoSpedizione?: ServizioGls
+  paese?: string                 // ISO 3166 del paese di destinazione (solo Parcel)
+  personaRiferimento?: string    // <PersonaRiferimento> (max 50)
+  telefono?: string              // <TelefonoDestinatario> (solo cifre, max 16)
 }
 
 // NOME servizio accessorio (come sta a listino/nel form) → CODICE GLS ServiziAccessori (tabella GLS,
@@ -146,8 +227,10 @@ export function costruisciXmlInfoParcel(cred: CredenzialiGls, p: ParcelGls): str
     tag('CodiceClienteGls', cred.user_webservice) +
     tag('PasswordClienteGls', cred.password_webservice)
   const pesi = (p.pesiColli && p.pesiColli.length) ? p.pesiColli : [1]
+  const parcel = p.tipoSpedizione === 'P'
   const parcels = pesi.map((peso, idx) => {
     const primo = idx === 0
+    if (parcel) return `<Parcel>${campiParcel(cred, p, peso, idx)}</Parcel>`
     const campi = [
       tag('CodiceContrattoGls', cred.codice_contratto),
       tag('RagioneSociale', (p.ragioneSociale || '').substring(0, 70)),
@@ -177,6 +260,55 @@ export function costruisciXmlInfoParcel(cred: CredenzialiGls, p: ParcelGls): str
   return `<Info>${info}${parcels}</Info>`
 }
 
+// UN COLLO PARCEL (estero). I campi obbligatori del Parcel — TipoSpedizione, Bda, PersonaRiferimento,
+// TelefonoDestinatario — vanno su OGNI <Parcel>: per GLS ogni tag e' un collo da validare, e i colli
+// con lo stesso destinatario confluiscono nella stessa spedizione (aggregazione di default). Il
+// destinatario e' lo stesso su tutti, quindi la spedizione resta una.
+// GeneraPdf: sul nazionale non lo mandiamo (default 0 = solo XML, l'etichetta si prende dopo con
+// GetPdfBySped). Sul Parcel GLS rifiuta il default — prova del 14/10/2026 sul contratto di Quick:
+// nessuna spedizione creata, NoteSpedizione "Valore tag GeneraPdf non ammesso." — quindi 4
+// (etichetta subito nella risposta, e resta richiamabile con GetPdfBySped), con il
+// ContatoreProgressivo che il manuale vuole univoco per collo e diverso da zero.
+function campiParcel(cred: CredenzialiGls, p: ParcelGls, peso: number, idx: number): string {
+  const primo = idx === 0
+  const telefono = String(p.telefono || '').replace(/\D/g, '').slice(-16)
+  const contatore = String(100000000 + ((Date.now() * 10 + idx) % 900000000))
+  return [
+    tag('CodiceContrattoGls', cred.codice_contratto),
+    tag('RagioneSociale', (p.ragioneSociale || '').substring(0, 70)),
+    tag('Indirizzo', (p.indirizzo || '').substring(0, 70)),
+    tag('Localita', (p.localita || '').substring(0, 50)),
+    tag('Zipcode', capParcel(p.cap)),        // estero: alfanumerico, max 7 (oltre, erroreParcelGls ferma)
+    tag('Provincia', SIGLA_GLS_PARCEL_UE[normalizzaPaese(p.paese)] || ''),   // il PAESE, non la provincia
+    tag('Colli', '1'),
+    tag('PesoReale', pesoIt(peso)),
+    tag('TipoSpedizione', 'P'),
+    tag('Bda', String(p.bda || '').substring(0, 11)),
+    tag('PersonaRiferimento', (p.personaRiferimento || p.ragioneSociale || '').substring(0, 50)),
+    tag('TelefonoDestinatario', telefono),
+    tag('GeneraPdf', '4'),
+    tag('ContatoreProgressivo', contatore),
+    primo && p.assicurazione && p.assicurazione > 0 ? tag('Assicurazione', euroIt(p.assicurazione)) : '',
+    // Niente Cellulare1 sul Parcel: la regola del nazionale (ultime 10 cifre, per togliere il +39)
+    // storpia un cellulare estero ("+33 6 12 34 56 78" diventava 3612345678, un numero italiano).
+    // Il numero completo viaggia gia' in TelefonoDestinatario, che sul Parcel e' obbligatorio.
+    primo && p.email && p.email.includes('@') ? tag('Email', p.email.trim().substring(0, 70)) : '',
+  ].filter(Boolean).join('')
+}
+
+// Cosa impedisce di mandare a GLS un Parcel (null = si puo'). Si controlla PRIMA di chiamare GLS:
+// GLS su questi casi o rifiuta con un errore generico, o — peggio — crea la spedizione senza il dato.
+export function erroreParcelGls(p: ParcelGls): string | null {
+  if (p.tipoSpedizione !== 'P') return null
+  const motivo = motivoParcelNonServito(p.paese, p.cap)
+  if (motivo) return motivo
+  if (p.importoContrassegno && p.importoContrassegno > 0) return 'Il contrassegno non e\' disponibile su GLS Europa.'
+  if (String(p.telefono || '').replace(/\D/g, '').length < 6) return 'Per GLS Europa serve il telefono del destinatario.'
+  if (!String(p.bda || '').trim()) return 'Per GLS Europa serve un riferimento della spedizione.'
+  if (!capParcel(p.cap) || capParcel(p.cap).length > 7) return 'CAP del destinatario non valido per GLS Europa (al massimo 7 caratteri).'
+  return null
+}
+
 // Chiamata SOAP 1.1: `innerBody` è già il contenuto interno di <Operazione xmlns=...>…</Operazione>.
 async function chiamaGls(operazione: string, innerBody: string, timeoutMs = 20000): Promise<string> {
   const body =
@@ -202,6 +334,9 @@ async function chiamaGls(operazione: string, innerBody: string, timeoutMs = 2000
 
 // Crea una spedizione GLS. Torna il NumeroSpedizione (o l'errore GLS).
 export async function creaSpedizioneGls(cred: CredenzialiGls, parcel: ParcelGls): Promise<RisultatoGls> {
+  // Parcel incompleto: non si chiama GLS (nessun collo creato, niente da annullare).
+  const erroreParcel = erroreParcelGls(parcel)
+  if (erroreParcel) return { numeroSpedizione: null, tracking: null, siglaMittente: null, siglaSedeDestino: null, glsCheck: false, numeroColli: 0, pdfBase64: null, errore: erroreParcel, raw: '' }
   const xml = costruisciXmlInfoParcel(cred, parcel)
   let soap: string
   try {
@@ -388,7 +523,9 @@ export async function recuperaEtichettaGlsSalvando(
   if (!cred.sigla_sede || !cred.user_webservice || !cred.password_webservice) return null
 
   const nColli = Math.max(1, Math.round(Number(sped.colli) || 1))
-  const et = await etichetteGls(cred, numeroBare, nColli)
+  // Sul Parcel l'etichetta si e' presa (prova del 14/10/2026) passando anche il riferimento Bda, che
+  // la creazione salva in raw_response.bda solo per le Parcel: le nazionali restano come prima.
+  const et = await etichetteGls(cred, numeroBare, nColli, raw.parcel && raw.bda ? { bda: String(raw.bda) } : undefined)
   if (!et.etichette.length) return null
 
   // Unione multicollo (una pagina per collo), come alla creazione; mono-collo = diretta.
@@ -506,6 +643,51 @@ export async function trackingGls(
     const giorno = dataEv.replace(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2})$/, (_x, g, mm, aa) => `${g}/${mm}/20${aa}`)
     eventi.push({ data: oraEv ? `${giorno} ${oraEv}` : giorno, descrizione: val, luogo: luogoEv })
   }
+
+  // PARCEL INOLTRATA ALL'ESTERO (manuale MU40 rev.8.1, par. 2.7): per ogni collo GLS aggiunge un
+  // <ColloInternazionale> con il numero internazionale e gli eventi del tratto estero in
+  // <TRACKINGINT>, presi dal tracking della Holding GLS. Il blocco <TRACKING> qui sopra copre solo il
+  // tratto italiano, fino all'hub internazionale: la CONSEGNA al destinatario estero la dice solo il
+  // tratto estero. Percio' sul Parcel una "consegnata" del tratto italiano non conta (potrebbe essere
+  // la consegna all'hub o al partner), e contano gli stati dei colli internazionali.
+  // Le spedizioni nazionali questo blocco non ce l'hanno: per loro non cambia niente. Rientri e inoltri
+  // si tolgono prima di cercarlo, per la stessa ragione per cui sopra si legge solo il primo <TRACKING>.
+  const xmlAndata = xml.replace(/<SPEDIZIONEDIRIENTRO>[\s\S]*?<\/SPEDIZIONEDIRIENTRO>/gi, '')
+    .replace(/<SPEDIZIONEDINOLTRO>[\s\S]*?<\/SPEDIZIONEDINOLTRO>/gi, '')
+  const colliEsteri = Array.from(xmlAndata.matchAll(/<ColloInternazionale>([\s\S]*?)<\/ColloInternazionale>/gi)).map(m => m[1])
+  if (colliEsteri.length) {
+    const statiPerCollo: string[][] = []
+    for (const collo of colliEsteri) {
+      const statiCollo: string[] = []
+      let d = '', o = '', l = ''
+      const reInt = /<(Data|Ora|Luogo|Stato)>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/\1>/gi
+      let x: RegExpExecArray | null
+      while ((x = reInt.exec(collo))) {
+        const nome = x[1].toLowerCase()
+        const val = x[2].replace(/\s+/g, ' ').trim()
+        if (nome === 'data') { d = val; continue }
+        if (nome === 'ora') { o = val; continue }
+        if (nome === 'luogo') { l = val; continue }
+        if (!val) continue
+        statiCollo.push(val)
+        const giorno = d.replace(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2})$/, (_x, g, mm, aa) => `${g}/${mm}/20${aa}`)
+        eventi.push({ data: o ? `${giorno} ${o}` : giorno, descrizione: val, luogo: l })
+      }
+      statiPerCollo.push(statiCollo)
+    }
+    // Il cron prende lo stato piu' avanzato fra tutti quelli che riceve: con un solo elenco, il
+    // primo collo consegnato chiudeva come consegnata una spedizione con altri colli ancora in
+    // viaggio. La consegna passa solo se ce l'hanno TUTTI i colli esteri.
+    // La giacenza estera resta in cronologia ma non diventa stato: in_giacenza vuol dire addebito
+    // automatico, e i testi del tratto estero non li abbiamo ancora visti su una Parcel vera.
+    const tuttiConsegnati = statiPerCollo.every(sc => sc.some(s => mapStatoGls(s) === 'consegnata'))
+    const statiEsteri = statiPerCollo.flat().filter(s => {
+      const m = mapStatoGls(s)
+      return m !== 'in_giacenza' && (m !== 'consegnata' || tuttiConsegnati)
+    })
+    const statiItalia = stati.filter(s => mapStatoGls(s) !== 'consegnata')
+    return { stati: [...statiItalia, ...statiEsteri], eventi, raw: xml.substring(0, 2000) }
+  }
   return { stati, eventi, raw: xml.substring(0, 2000) }
 }
 
@@ -532,5 +714,21 @@ export function mapStatoGls(testo: string): string | null {
   if (/in transito|partita dalla sede|arrivata nella sede|smistament|hub|inoltrat|in viaggio/.test(s)) return 'in_transito'
   // 7) SPEDITA / presa in carico (inclusa "creata dal mittente", che testoIndicaReso NON matcha apposta).
   if (/creata dal mittente|registrata nei nostri sistemi|ritiro effettuato|presa in carico|affidata a gls|spedit|accettat/.test(s)) return 'spedita'
+  // 8) TRATTO ESTERO di una Parcel (<TRACKINGINT>): sono i testi della Holding GLS e possono arrivare in
+  //    inglese. Stanno IN FONDO apposta: le frasi italiane del nazionale si fermano ai punti sopra e qui
+  //    non arrivano, quindi il nazionale non cambia. NON ANCORA VISTI su una Parcel vera (la prima e'
+  //    da seguire): per questo si mappa solo l'evidente, e la giacenza estera NON si mappa — vorrebbe
+  //    dire addebitarla in automatico senza averne mai letto il testo. Prima i negativi e gli annunci,
+  //    poi la consegna: "could not be delivered" e "expected to be delivered" contengono "delivered".
+  //    La consegna si riconosce SOLO in forma affermativa: GLS scrive "is loaded on the GLS delivery
+  //    vehicle to be delivered in the course of the day" (in consegna) e "It cannot be delivered
+  //    as…" / "has not been delivered" (mancata consegna), e con un generico /delivered/ tutte e tre
+  //    diventavano "consegnata", che e' uno stato finale (il cron non la rilegge piu').
+  if (/parcel ?shop|parcel ?locker|pick-?up point/.test(s)) return 'in_consegna'
+  if (/not (be |been )?delivered|cannot be delivered|undeliverable/.test(s)) return 'non_consegnato'
+  if (/to be delivered|will be delivered|delivery vehicle|out for delivery/.test(s)) return 'in_consegna'
+  if (/\b(has|have) been delivered\b|\bwas delivered\b|\bdelivered to\b/.test(s)) return 'consegnata'
+  if (/in transit|parcel cent(er|re)|has left|has reached/.test(s)) return 'in_transito'
+  if (/handed over to gls|data (has been )?(received|transmitted)/.test(s)) return 'spedita'
   return null
 }

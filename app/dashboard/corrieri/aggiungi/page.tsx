@@ -40,6 +40,9 @@ async function salvaCorriere(formData: FormData) {
     credenziali.password_webservice = formData.get('password_webservice') as string || ''
     credenziali.codice_contratto = formData.get('codice_contratto') as string || ''
     settings.tipo_collo = formData.get('tipo_collo') as string || 'Normale'
+    // Nazionale (Italia) o Parcel (Europa): e' un altro servizio GLS con le stesse credenziali, e
+    // decide dove il contratto puo' spedire (lib/gls.ts, servizioGls).
+    settings.tipo_spedizione = formData.get('tipo_spedizione') === 'P' ? 'P' : 'N'
   } else if (tipo === 'sda') {
     credenziali.utente = formData.get('utente') as string || ''
     credenziali.password = formData.get('password') as string || ''
@@ -351,12 +354,21 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
             </>
           )}
           {tipo === 'gls' && (
-            <div>
-              <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Tipo Collo</label>
-              <select name="tipo_collo" defaultValue={settingsEsistenti.tipo_collo || 'Normale'} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
-                <option>Normale</option><option>Fragile</option>
-              </select>
-            </div>
+            <>
+              <div>
+                <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Tipo Collo</label>
+                <select name="tipo_collo" defaultValue={settingsEsistenti.tipo_collo || 'Normale'} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
+                  <option>Normale</option><option>Fragile</option>
+                </select>
+              </div>
+              <div>
+                <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Tipo spedizione</label>
+                <select name="tipo_spedizione" defaultValue={settingsEsistenti.tipo_spedizione === 'P' ? 'P' : 'N'} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
+                  <option value="N">Nazionale (solo Italia)</option>
+                  <option value="P">Parcel Europa (solo estero UE)</option>
+                </select>
+              </div>
+            </>
           )}
           {tipo === 'sda' && (
             <div>

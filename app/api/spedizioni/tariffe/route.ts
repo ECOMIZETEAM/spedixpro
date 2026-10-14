@@ -8,7 +8,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 // lib/tariffe-offerte.ts, perche' li usa anche l'anteprima dei prezzi di import e ordini dei negozi:
 // due porte, una regola sola.
 import { annotaPuntoPoste, eTariffaAUnPunto, soloCorrieriInCatena } from '@/lib/tariffe-offerte'
-import { glsDirettoFuoriItalia } from '@/lib/gls'
+import { motivoGlsNonServe } from '@/lib/gls'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
       const corr: any = (lc as any).corrieri
       if (!corr || corr.attivo === false) continue
       if (sospesoDallaCatena(corr.nome_contratto, sospesiSopra)) continue   // in pausa da un livello superiore
-      if (glsDirettoFuoriItalia(corr.tipo, body.shipTo?.country)) continue   // GLS diretto: solo Italia (lib/gls.ts)
+      if (motivoGlsNonServe(corr, { paese: body.shipTo?.country, cap: capP, contrassegno: body.codValue })) continue   // GLS: nazionale solo Italia, Parcel solo UE senza contrassegno (lib/gls.ts)
       if (superaMisureMax(corr.settings, pesoRealeP, colliP)) continue   // fuori misura per il suo scaglione
       const dett = await calcolaPrezzoCorriereDettaglio(supabase, {
         corriereId: (lc as any).corriere_id, masterId: masterIdP,

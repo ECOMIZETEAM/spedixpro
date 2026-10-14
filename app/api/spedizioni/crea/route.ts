@@ -32,7 +32,7 @@ const zonaCopreDisagiata = (z: string | undefined | null): boolean => !!z && (is
 import { motivoLimiteCollo } from '@/lib/limiti-collo'
 import { vedeLaRete } from '@/lib/perimetro'
 import { emailAlCorriere } from '@/lib/email-corriere'
-import { glsDirettoFuoriItalia } from '@/lib/gls'
+import { motivoGlsNonServe, servizioGls } from '@/lib/gls'
 
 
 // La creazione parla con i corrieri: alcuni rispondono subito, altri si prendono qualche secondo
@@ -227,12 +227,26 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // GLS DIRETTO FUORI DALL'ITALIA: si ferma qui, PRIMA del credito e prima di chiamare GLS. Il
-  // preventivo non lo offre piu', ma questa e' la porta da cui passano tutti — import, ordini dei
-  // negozi, resi, e una pagina aperta da prima del rilascio. Il perche' sta in lib/gls.ts.
-  if (glsDirettoFuoriItalia(corriereRecord.tipo, body.shipTo?.country)) {
-    console.error('[CREA][GLS] destinazione estera su GLS diretto', { corriere: corriereRecord.id, paese: body.shipTo?.country })
-    return NextResponse.json({ error: 'Questo contratto GLS spedisce solo in Italia: per l\'estero scegli un altro corriere.' }, { status: 400 })
+  // GLS DIRETTO CHE NON PUO' FARE QUESTA SPEDIZIONE: si ferma qui, PRIMA del credito e prima di
+  // chiamare GLS. Il nazionale non va all'estero; il Parcel (Europa) non va in Italia, ne' fuori
+  // dall'UE, ne' con il contrassegno. Il preventivo non li offre (stessa regola), ma questa e' la
+  // porta da cui passano tutti — import, ordini dei negozi, resi, e una pagina aperta da prima del
+  // rilascio. Il perche' sta in lib/gls.ts.
+  {
+    const motivoGls = motivoGlsNonServe(corriereRecord, { paese: body.shipTo?.country, cap: body.shipTo?.postalCode, contrassegno: body.codValue })
+    if (motivoGls) {
+      console.error('[CREA][GLS] spedizione non servita dal contratto', { corriere: corriereRecord.id, paese: body.shipTo?.country, motivo: motivoGls })
+      return NextResponse.json({ error: motivoGls }, { status: 400 })
+    }
+  }
+  // GLS EUROPA: quello che il preventivo non puo' sapere, perche' si sceglie dopo il prezzo. I servizi
+  // accessori sul Parcel GLS non li accetta (solo FlexDelivery, manuale MU162) e il telefono del
+  // destinatario e' obbligatorio.
+  if (corriereRecord.tipo === 'gls' && servizioGls(corriereRecord.settings) === 'P') {
+    const no = serviziAccessori?.length ? 'I servizi accessori non sono disponibili su GLS Europa: toglili o scegli un altro corriere.'
+      : String(body.shipTo?.phone || '').replace(/\D/g, '').length < 6 ? 'Per GLS Europa serve il telefono del destinatario.'
+      : null
+    if (no) return NextResponse.json({ error: no }, { status: 400 })
   }
 
   // Contenuto OBBLIGATORIO per i servizi internazionali (es. Poste International Plus): serve alla
@@ -1996,7 +2010,17 @@ export async function POST(req: NextRequest) {
       }
       const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
 
-      const bda = (body.rifOrdine ? String(body.rifOrdine) : '').trim().substring(0, 20) || undefined
+      // GLS EUROPA (Parcel, settings.tipo_spedizione = 'P'): per GLS il riferimento (Bda) e'
+      // obbligatorio, quindi se l'ordine non ne ha uno se ne genera uno univoco; paese, telefono e
+      // persona di riferimento li mette lib/gls. Contrassegno e servizi accessori sono gia' stati
+      // fermati prima del credito (sul Parcel GLS non li accetta).
+      // Sul Parcel GLS tiene 11 caratteri: si taglia QUI, cosi' AddParcel e GetPdfBySped ricevono lo
+      // stesso valore (l'etichetta si cerca anche per Bda).
+      const parcelGls = servizioGls(corriereRecord.settings) === 'P'
+      const _rif = (body.rifOrdine ? String(body.rifOrdine) : '').trim()
+      const bda = parcelGls
+        ? (_rif.substring(0, 11) || 'MX' + Date.now().toString(36).toUpperCase().slice(-9))
+        : (_rif.substring(0, 20) || undefined)
       // MULTICOLLO: un peso per collo (GLS crea un <Parcel> per collo). Contrassegno/assicurazione
       // vanno solo sul primo collo (li mette lib/gls).
       const pesiColli = packages.map((p: any) => parseFloat(p?.weight) || 1)
@@ -2038,6 +2062,10 @@ export async function POST(req: NextRequest) {
         // mascherato: il mascheramento con l'email di servizio è solo nel ramo SpediamoPro).
         email: fdsAttivo ? (body.shipTo.email || undefined) : undefined,
         cellulare: fdsAttivo ? (body.shipTo.phone || undefined) : undefined,
+        ...(parcelGls ? {
+          tipoSpedizione: 'P' as const, paese: body.shipTo.country,
+          personaRiferimento: body.shipTo.name, telefono: body.shipTo.phone,
+        } : {}),
       })
 
       if (!ris.numeroSpedizione) {
@@ -2092,7 +2120,7 @@ export async function POST(req: NextRequest) {
         colli_dettaglio: colliDettaglio,
         // Si conserva il numero NUDO (serve a GetPdfBySped/DeleteSped/CloseWorkDay) accanto al
         // tracking mostrato, più le sigle sede e il flag GLS Check.
-        raw_response: { _gls: true, numero: numeroBare, tracking: numeroFinale, siglaMittente: ris.siglaMittente, siglaSedeDestino: ris.siglaSedeDestino, glsCheck: ris.glsCheck },
+        raw_response: { _gls: true, numero: numeroBare, tracking: numeroFinale, siglaMittente: ris.siglaMittente, siglaSedeDestino: ris.siglaSedeDestino, glsCheck: ris.glsCheck, ...(parcelGls ? { parcel: true, bda } : {}) },
         stato: 'in_lavorazione',
         costo_spedizione: costoCorrente, costo_totale: costoCliente,
         servizi_accessori: serviziAccessori,

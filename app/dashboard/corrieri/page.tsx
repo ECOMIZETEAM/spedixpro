@@ -136,7 +136,11 @@ export default function CorrieriPage() {
       body: JSON.stringify({
         multicollo: popup.multicollo,
         inserimento_ritiri: popup.inserimento_ritiri,
-        settings: nuoviSettings(null),
+        // Si parte dalle impostazioni ATTUALI del contratto, non da zero: la PATCH le salva al posto
+        // dell'intero blocco, e ogni salvataggio di questo popup cancellava le chiavi che non sono
+        // sue — tipo_spedizione (un GLS Europa tornava nazionale senza avviso), tipo_collo,
+        // flex_delivery, tipo_servizio FedEx, consegna InPost. L'elenco le carica tutte.
+        settings: nuoviSettings(corrieri.find(x => x.id === popup.id)?.settings),
       })
     })
     setCorrieri(prev => prev.map(c => c.id === popup.id ? { ...c, multicollo: popup.multicollo, inserimento_ritiri: popup.inserimento_ritiri, settings: nuoviSettings(c.settings) } : c))

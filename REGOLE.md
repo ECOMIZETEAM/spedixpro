@@ -74,7 +74,7 @@ Vivono nel codice, ma in **un punto solo** che tutti chiamano. Modificarle lì v
 | Quali tariffe si possono offrire a un cliente: contratto in catena, contratti "a un punto", locker a taglia | `lib/tariffe-offerte.ts` → `soloCorrieriInCatena`, `annotaPuntoPoste` + `eTariffaAUnPunto`, `contrattiConFasceATaglia` |
 | "Prezzo minore" o "contratto scelto" nelle porte di massa del cliente (import da file, ordini dei negozi) | `app/cliente/anteprima-prezzi.ts` → `scegliTariffa` (la stessa per mostrare e per spedire) |
 | Il prezzo mostrato PRIMA di spedire nelle porte di massa | `lib/anteprima-prezzi.ts` → `prezziPerRighe`: elenco dei contratti dal motore del preventivo, cifra dalla funzione dell'addebito |
-| Il GLS diretto spedisce solo in Italia (a GLS non arriva il paese: l'estero torna "GLS Check") | `lib/gls.ts` → `glsDirettoFuoriItalia`, chiamata dai due preventivi (cliente e spedizione propria del master) e dalla creazione, prima del credito. L'API pubblica non crea GLS diretto per niente |
+| Cosa puo' fare un contratto GLS diretto: il nazionale solo l'Italia; il Parcel (`settings.tipo_spedizione = 'P'`, "GLS Europa") solo i paesi UE, fuori dai territori extra-doganali (Canarie, oltremare…) e senza contrassegno | `lib/gls.ts` → `motivoGlsNonServe`, chiamata dai due preventivi (cliente e spedizione propria del master) e dalla creazione, prima del credito. Servizi accessori e telefono del Parcel si controllano solo in creazione (si scelgono dopo il prezzo). L'API pubblica non crea GLS diretto per niente |
 
 Due funzioni nate il 13 ottobre **non** stanno in questa tabella, perché hanno ancora un doppione
 (vedi sotto, «Ancora scritte in più posti»): `lib/citta-spedizione.ts` → `cittaPerLaSpedizione` e

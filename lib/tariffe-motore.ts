@@ -20,7 +20,7 @@ import { EMAIL_PER_CORRIERE,
 } from '@/lib/spediamopro'
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
 import { normalizzaPaese } from '@/lib/paesi'
-import { glsDirettoFuoriItalia } from '@/lib/gls'
+import { motivoGlsNonServe, servizioGls } from '@/lib/gls'
 import { calcolaPrezzoCorriereDettaglio, calcolaPesoFatturato, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente, origineCopertaCap } from '@/lib/pricing'
 // La sigla neutra al posto del tipo del contratto: il nome del sistema tecnico a valle non deve
 // arrivare al browser, nemmeno dentro il JSON (vedi lib/corriere-logo.ts).
@@ -418,8 +418,9 @@ export async function calcolaTariffeCliente(
   }
   const fascePerCorriere = new Map<string, any[]>()
   for (const [cid, fasceC] of tuttePerCorriere) {
-    // GLS diretto: solo Italia, anche se il listino ha una zona estera con le fasce (lib/gls.ts).
-    if (glsDirettoFuoriItalia((fasceC[0]?.corrieri as any)?.tipo, paeseDest)) continue
+    // GLS diretto: il nazionale solo in Italia, il Parcel solo all'estero UE e senza contrassegno,
+    // qualunque zona abbia il listino (lib/gls.ts).
+    if (motivoGlsNonServe(fasceC[0]?.corrieri as any, { paese: paeseDest, cap: capDest, contrassegno: body.codValue })) continue
     let sel = fasceC.filter(f => zoneMatchIds.includes((f.zone as any)?.id))   // 1) zone_cap del corriere
     // 2) fallback per nome SOLO Italia — MA NON se la dest è esclusiva PER QUESTO corriere (isole/
     //    disagiate/sardegna…): lì il corriere senza la zona speciale non deve agganciare via "Italia".
@@ -562,7 +563,8 @@ export async function calcolaTariffeCliente(
       // GLS 24 sull'etichetta — vedi codiceServizioSpedisci in corriere-logo). Sugli altri rivenditori
       // (DVA/SpediamoPro/Poste via spedisci) l'API non li invia → non si offrono: sarebbe una promessa che
       // il cliente paga e al corriere non arriva.
-      accessori_disponibili: (corriere?.tipo === 'gls' || corriere?.tipo === 'brt'
+      // Il GLS Parcel (Europa) no: sull'estero GLS accetta solo FlexDelivery (manuale MU162).
+      accessori_disponibili: ((corriere?.tipo === 'gls' && servizioGls(corriere?.settings) !== 'P') || corriere?.tipo === 'brt'
         || (corriere?.tipo === 'spedisci' && marchioCorriere(corriere?.nome_contratto || '') === 'GLS'))
         ? (accessoriPerCorriere.get(corriereId) || []) : [],
       _corriere_tipo: siglaContratto(corriere?.tipo),
