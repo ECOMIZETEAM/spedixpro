@@ -128,10 +128,11 @@ export function indirizzoEtichetta(via: string, presso: string, max: number): st
   return v
 }
 
-export function sanitizzaIndirizzoSp(a: SpediamoproAddress, opts?: { emailObbligatoria?: boolean }): SpediamoproAddress {
+export function sanitizzaIndirizzoSp(a: SpediamoproAddress, opts?: { emailObbligatoria?: boolean; emailVera?: boolean }): SpediamoproAddress {
   const phone = pulisciTel(a?.phone)
-  // SEMPRE l'email schermo: ogni payload costruito qui è diretto al provider.
-  const email = EMAIL_PER_CORRIERE
+  // L'email schermo: ogni payload costruito qui è diretto al provider. Unica eccezione `emailVera`
+  // (consegna a un PUNTO, vedi spediamoproCreateShipment): si tiene l'email ricevuta se valida.
+  const email = (opts?.emailVera && pulisciEmail(a?.email)) || EMAIL_PER_CORRIERE
   const out: any = { ...a }
   // Normalizzo i testi che finiscono STAMPATI in etichetta: nome, indirizzo, citta'. Un punto solo,
   // vale per tutte le porte (portale, /api/v1, ritiri), perche' tutte passano di qui.
@@ -278,7 +279,14 @@ export async function spediamoproCreateShipment(
   const payloadAccept = JSON.stringify({
       parcels: params.parcels.map(p => ({ type: 0, weight: p.weight, length: p.length, width: p.width, height: p.height })),
       sender: sanitizzaIndirizzoSp(params.sender, { emailObbligatoria: true }),
-      consignee: sanitizzaIndirizzoSp(params.consignee, { emailObbligatoria: true }),
+      // CONSEGNA A UN PUNTO (Fermopoint BRT / Locker InPost): il codice per ritirare il pacco o aprire
+      // l'armadietto lo genera e lo manda il CORRIERE all'email del destinatario, e l'API non lo
+      // restituisce. Con l'email schermo il destinatario non lo riceve mai. GUASTO VERO: dal 12/09 il
+      // ramo di creazione metteva l'email vera, ma questa funzione la riscriveva sempre con quella
+      // schermo; il 14/10 i clienti BRT Fermopoint hanno segnalato che il PIN non arrivava (52 su 52
+      // Fermopoint e 54 su 54 Locker partiti con l'email schermo). La regola sta qui, dove passano
+      // tutte le creazioni SpediamoPro, non nel chiamante.
+      consignee: sanitizzaIndirizzoSp(params.consignee, { emailObbligatoria: true, emailVera: !!params.deliveryPudo }),
       quotation: {
         service: params.quotation.service,
         expectedDeliveryDate: params.quotation.expectedDeliveryDate,
