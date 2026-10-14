@@ -421,9 +421,9 @@ export async function POST(req: NextRequest) {
         let ledgerClienteId: string | null = null
         if (r.spedizione_id) {
           try {
-            const { data: sp } = await adminDb.from('spedizioni').select('master_id,cliente_id,corrieri(tipo,nome_contratto)').eq('id', r.spedizione_id).maybeSingle()
+            const { data: sp } = await adminDb.from('spedizioni').select('master_id,cliente_id,corriere_id,corrieri(tipo,nome_contratto)').eq('id', r.spedizione_id).maybeSingle()
             const c: any = Array.isArray((sp as any)?.corrieri) ? (sp as any).corrieri[0] : (sp as any)?.corrieri
-            const dCon = sp ? await scendiCodDaSpedizione(adminDb, { master_id: (sp as any).master_id, cliente_id: (sp as any).cliente_id, corriereTipo: c?.tipo, nomeContratto: c?.nome_contratto }, utente!.master_id!) : null
+            const dCon = sp ? await scendiCodDaSpedizione(adminDb, { master_id: (sp as any).master_id, cliente_id: (sp as any).cliente_id, corriereTipo: c?.tipo, nomeContratto: c?.nome_contratto, corriereId: (sp as any).corriere_id }, utente!.master_id!) : null
             if (dCon && !dCon.fuori && dCon.ledger && dCon.target_master_id === r.target_master_id && dCon.cliente_id) ledgerClienteId = dCon.cliente_id
           } catch (e) { console.error('[RETTIFICHE] ledger condivisione:', e) }
         }

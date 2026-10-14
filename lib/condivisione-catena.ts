@@ -32,6 +32,9 @@ export interface LivelloCondivisione {
   ledgerClienteId: string | null   // valorizzato SOLO se conto='ledger' (il cliente-ledger sotto il fornitore)
   corriereId: string          // il corriere (reale o ponte) di questo livello — serve a prezzare il suo costo
   ruolo: 'albero' | 'codice' | 'owner'
+  // La riga del fornitore da cui questo livello compra (null per l'owner). Valorizzata solo dalla fila
+  // dei puntatori (catenaDaCorriere): chi la trova non deve più cercarla per nome.
+  corriereFornitoreId?: string | null
 }
 
 const normNome = (s: any) => String(s || '').trim().toLowerCase()
@@ -106,6 +109,51 @@ export async function risolviCatenaCondivisione(
   return out
 }
 
+/* LA FILA DEL CONTRATTO LETTA DAI PUNTATORI (corrieri.fornitore_corriere_id, 14/10/2026): stessa forma di
+ * risolviCatenaCondivisione, ma parte dalla RIGA corrieri della gamba e segue "da chi lo compro" fino al
+ * detentore, invece di ricostruire la catena per nome lungo l'albero. È la regola di Lorenzo: MULTI vende
+ * a GTS che rivende a spedizioni 2000, lineare. Per nome la catena di quel ponte si fermava a GTS (la sua
+ * copia d'albero ha un account vero, e il resolver la prendeva per detentore): MULTI, che incassa i
+ * contrassegni da GLS e riceve i suoi pesi, risultava "fuori dalla tua rete" e "fuori catena".
+ * Su tutti i ponti di SDA EXPRESS L la fila coincide con quella per nome (verificato riga per riga il 14/10).
+ * Ogni salto porta il SUO conto: collegamento → ledger del collegamento con cui è stato comprato (anche se
+ * poi revocato: i pacchi partiti allora si chiudono su quel conto), albero → conto verso il padre.
+ * Fila interrotta (la riga da cui comprava è stata cancellata) o lettura non riuscita → la catena per nome,
+ * che è quella di ieri. */
+export async function catenaDaCorriere(
+  admin: any, corriereId: string, ripiego?: { master: string; nomeContratto: string },
+): Promise<LivelloCondivisione[]> {
+  const { data, error } = await admin.rpc('catena_contratto', { p_corriere_id: corriereId })
+  if (error) {
+    console.error('[condivisione-catena] fila dai puntatori non leggibile:', corriereId, error.message)
+    if (ripiego) return risolviCatenaCondivisione(admin, ripiego.master, ripiego.nomeContratto)
+    throw new Error('catena del contratto non leggibile')
+  }
+  const fila = (data || []) as any[]
+  if (!fila.length || fila[fila.length - 1].salto !== 'detentore') {
+    // Fila interrotta: una riga a monte è stata cancellata. Per i soldi dei pacchi già partiti si fa come
+    // ieri (catena per nome, che regge un ponte orfano), invece di lasciare un reso o un contrassegno senza
+    // nessuno che lo paghi. La sentinella (controllo_catena_contratti) la segnala.
+    console.error('[condivisione-catena] fila del contratto interrotta, uso la catena per nome:', corriereId)
+    return ripiego ? risolviCatenaCondivisione(admin, ripiego.master, ripiego.nomeContratto) : []
+  }
+  const out: LivelloCondivisione[] = []
+  for (let i = 0; i < fila.length; i++) {
+    const r = fila[i], su = fila[i + 1]
+    if (r.salto === 'detentore') {
+      out.push({ master: r.master_id, fornitore: null, conto: (await eVertice(admin, r.master_id)) ? 'credito' : 'credito_proprio',
+        ledgerClienteId: null, corriereId: r.corriere_id, corriereFornitoreId: null, ruolo: 'owner' })
+    } else if (r.salto === 'collegamento') {
+      out.push({ master: r.master_id, fornitore: su.master_id, conto: 'ledger', ledgerClienteId: r.ledger_cliente_id || null,
+        corriereId: r.corriere_id, corriereFornitoreId: su.corriere_id, ruolo: 'codice' })
+    } else {
+      out.push({ master: r.master_id, fornitore: su.master_id, conto: 'credito', ledgerClienteId: null,
+        corriereId: r.corriere_id, corriereFornitoreId: su.corriere_id, ruolo: 'albero' })
+    }
+  }
+  return out
+}
+
 /* A CHI SCENDE il COD (o il reso) e su QUALE CONTO, per la CONDIVISIONE. È lo SPECCHIO della creazione:
  * il contrassegno lo incassa l'owner dal corriere e scende la catena-fornitore UN gradino alla volta,
  * fino al cliente finale — stesso grafo della spedizione, nessun percorso nuovo (CONDIVISIONE-MODELLO.md
@@ -151,11 +199,15 @@ export function destinatarioCodCondivisione(
  * chiamano tutti, così non nasce un secondo modo di camminare la rete. SOLA LETTURA. */
 export async function scendiCodDaSpedizione(
   admin: any,
-  sped: { master_id: string; cliente_id: string | null; corriereTipo?: string | null; nomeContratto?: string | null },
+  sped: { master_id: string; cliente_id: string | null; corriereTipo?: string | null; nomeContratto?: string | null; corriereId?: string | null },
   mio: string,
 ): Promise<DestCondivisione | null> {
   if (sped.corriereTipo !== 'moovexpress' || !sped.nomeContratto) return null
-  const catena = await risolviCatenaCondivisione(admin, sped.master_id, sped.nomeContratto)
+  // Con la riga della gamba si legge la fila dei puntatori (una copia d'albero rivenduta a codice arriva
+  // fino al detentore vero); senza, la catena per nome di prima.
+  const catena = sped.corriereId
+    ? await catenaDaCorriere(admin, sped.corriereId, { master: sped.master_id, nomeContratto: sped.nomeContratto })
+    : await risolviCatenaCondivisione(admin, sped.master_id, sped.nomeContratto)
   if (!catena.length) return null
   return destinatarioCodCondivisione(catena, mio, sped.cliente_id)
 }
@@ -175,18 +227,41 @@ export interface GambaSpedizione {
   venditoreSpedizioneId: string | null
 }
 
+const COLONNE_GAMBA = 'id,master_id,numero,tracking_number,raw_response,corrieri(tipo)'
+const comeGamba = (s: any): GambaSpedizione => ({
+  spedizioneId: s.id,
+  masterId: s.master_id,
+  numero: s.numero,
+  tipo: (Array.isArray(s.corrieri) ? s.corrieri[0]?.tipo : s.corrieri?.tipo) || '',
+  venditoreSpedizioneId: (s.raw_response || {}).venditore_spedizione_id || null,
+})
+
 export async function risolviGambeSpedizione(admin: any, tracking: string): Promise<GambaSpedizione[]> {
   if (!tracking) return []
-  const { data } = await admin.from('spedizioni')
-    .select('id,master_id,numero,raw_response,corrieri(tipo)')
-    .eq('tracking_number', tracking)
-  const legs: GambaSpedizione[] = (data || []).map((s: any) => ({
-    spedizioneId: s.id,
-    masterId: s.master_id,
-    numero: s.numero,
-    tipo: (Array.isArray(s.corrieri) ? s.corrieri[0]?.tipo : s.corrieri?.tipo) || '',
-    venditoreSpedizioneId: (s.raw_response || {}).venditore_spedizione_id || null,
-  }))
+  const { data } = await admin.from('spedizioni').select(COLONNE_GAMBA).eq('tracking_number', tracking)
+  return ordinaGambe((data || []).map(comeGamba))
+}
+
+/* Le gambe di MOLTI pacchi in una lettura sola (tracking → gambe, stesso ordine di risolviGambeSpedizione):
+ * per le distinte e le liste, dove una lettura per riga allunga una richiesta che l'operatore poi riclicca. */
+export async function gambePerTracking(admin: any, trackings: string[]): Promise<Map<string, GambaSpedizione[]>> {
+  const out = new Map<string, GambaSpedizione[]>()
+  const unici = [...new Set((trackings || []).filter(Boolean))]
+  const perTrk = new Map<string, GambaSpedizione[]>()
+  for (let i = 0; i < unici.length; i += 150) {
+    const { data, error } = await admin.from('spedizioni').select(COLONNE_GAMBA).in('tracking_number', unici.slice(i, i + 150))
+    if (error) throw new Error('gambe dei pacchi non leggibili: ' + error.message)
+    for (const s of (data || [])) {
+      const k = (s as any).tracking_number
+      if (!perTrk.has(k)) perTrk.set(k, [])
+      perTrk.get(k)!.push(comeGamba(s))
+    }
+  }
+  for (const [k, legs] of perTrk) out.set(k, ordinaGambe(legs))
+  return out
+}
+
+function ordinaGambe(legs: GambaSpedizione[]): GambaSpedizione[] {
   if (legs.length <= 1) return legs
   const byId = new Map(legs.map(l => [l.spedizioneId, l]))
   const indicati = new Set(legs.map(l => l.venditoreSpedizioneId).filter(Boolean) as string[])

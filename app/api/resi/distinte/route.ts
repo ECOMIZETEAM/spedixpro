@@ -116,9 +116,22 @@ export async function POST(req: NextRequest) {
     const idsAll = (voci || []).map((v: any) => v?.id).filter(Boolean)
     if (idsAll.length) {
       const { data: spAll } = await adminDb.from('spedizioni')
-        .select('id,master_id,corrieri(tipo,nome_contratto)').in('id', idsAll)
+        .select('id,master_id,tracking_number,corrieri(tipo,nome_contratto)').in('id', idsAll)
       const corrDi = (s: any) => Array.isArray(s?.corrieri) ? s.corrieri[0] : s?.corrieri
-      const bridge = (spAll || []).filter((s: any) => corrDi(s)?.tipo === 'moovexpress')
+      // Anche la gamba del VENDITORE di un pacco condiviso (non è un ponte: es. LOGIXIA su SDA EXPRESS L,
+      // GTS sul GLS che rivende a spedizioni 2000) va per questa strada: il reso è del pacco, e la catena
+      // si addebita una volta sola dalla gamba originante. Per l'albero sarebbe stato il secondo addebito.
+      // Le gambe di tutte le voci in una lettura sola: una per voce allungava una richiesta che va già in
+      // timeout sulle distinte lunghe (vedi escludiGiaInDistinta).
+      const { gambePerTracking } = await import('@/lib/condivisione-catena')
+      const nonPonti = (spAll || []).filter((s: any) => corrDi(s)?.tipo !== 'moovexpress' && s.tracking_number)
+      const gambeDi = await gambePerTracking(adminDb, nonPonti.map((s: any) => s.tracking_number))
+      const gambaVenditore = new Set<string>()
+      for (const s of nonPonti as any[]) {
+        const gambe = gambeDi.get(s.tracking_number) || []
+        if (gambe.length > 1 && gambe[0].spedizioneId !== s.id && gambe[0].tipo === 'moovexpress') gambaVenditore.add(s.id)
+      }
+      const bridge = (spAll || []).filter((s: any) => corrDi(s)?.tipo === 'moovexpress' || gambaVenditore.has(s.id))
       if (bridge.length) {
         const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
         const rete = new Set<string>([utente!.master_id!, ...await sottoAlberoMasterIds(adminDb, utente!.master_id!)])
@@ -126,30 +139,40 @@ export async function POST(req: NextRequest) {
         const idsBridge = new Set(bridgeOk.map((s: any) => s.id))
         const vociBridge = (voci || []).filter((v: any) => idsBridge.has(v?.id))
         const vociBridgeNuove = await escludiGiaInDistinta(adminDb, utente!.master_id!, vociBridge)
+        let distC: any = null
         if (vociBridgeNuove.length) {
-          const { addebitaResoCondivisione } = await import('@/lib/giacenza-cascata')
+          const { addebitaResoCondivisione, totaleResoAddebitato } = await import('@/lib/giacenza-cascata')
           const { count: cC } = await supabase.from('distinte_resi').select('*', { count: 'exact', head: true }).eq('master_id', utente?.master_id)
-          const { data: distC } = await supabase.from('distinte_resi').insert({
+          const { data: nuova } = await supabase.from('distinte_resi').insert({
             master_id: utente?.master_id, cliente_id: clienteId || null, target_master_id: targetMasterId || null,
             numero: (cC || 0) + 1, totale_ldv: vociBridgeNuove.length, totale: 0, voci: vociBridgeNuove, stato: 'chiusa',
           }).select().single()
-          let totC = 0
+          distC = nuova
           for (const v of vociBridgeNuove) {
             const sp = bridgeOk.find((b: any) => b.id === v.id)
             const nome = corrDi(sp)?.nome_contratto || ''
             try {
-              const e = await addebitaResoCondivisione(adminDb, v.id, nome, false)
-              totC += Number(e.importoCliente || 0)
+              await addebitaResoCondivisione(adminDb, v.id, nome, false)
             } catch (err) { console.error('[RESI][CONDIVISIONE] addebito:', err) }
             // reso_mittente DOPO l'addebito: il trigger fn_reso_da_addebitare non ri-accoda (vede già il
             // movimento reso) e la cascata non parte due volte; il costo resta scritto una volta sola.
             await adminDb.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
           }
+          // TOTALE = quanto ha pagato il destinatario di QUESTA distinta (il suo cliente, o il master sotto),
+          // letto dai movimenti: per la gamba del venditore non è il prezzo del cliente finale di un'altra
+          // rete (che a LOGIXIA non va mostrato), e vale anche se il reso era già addebitato dal tracking.
+          const totC = await totaleResoAddebitato(adminDb, vociBridgeNuove.map((v: any) => v.id),
+            clienteId ? { clienteId } : { masterTargetId: targetMasterId || null })
           if (distC) await supabase.from('distinte_resi').update({ totale: totC }).eq('id', distC.id)
         }
-        // Tolgo le bridge dal flusso ad albero: se non resta nulla, chiudo qui.
+        // Tolgo le bridge dal flusso ad albero: se non resta nulla, chiudo qui, rispondendo come gli altri rami
+        // (numero della distinta, oppure 409 se erano tutte già in una distinta di reso).
         voci = (voci || []).filter((v: any) => !idsBridge.has(v?.id))
-        if (!voci.length) return NextResponse.json({ success: true, condivisione: bridgeOk.length })
+        if (!voci.length) {
+          if (!vociBridgeNuove.length) return NextResponse.json({ error: 'Queste LDV sono già in una distinta di reso' }, { status: 409 })
+          if (!distC) return NextResponse.json({ error: 'Reso addebitato, ma la distinta non si è registrata: riprova, le LDV non verranno riaddebitate.' }, { status: 500 })
+          return NextResponse.json({ id: distC.id, numero: distC.numero })
+        }
       }
     }
   }

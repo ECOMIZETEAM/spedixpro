@@ -1,6 +1,6 @@
 import { fetchAll } from '@/lib/fetch-all'
 import { caricaSorgenteCatena, detentoreContrattoCon, nomeContrattoNormalizzato } from '@/lib/contratto-per-nome'
-import { risolviCatenaCondivisione } from '@/lib/condivisione-catena'
+import { risolviCatenaCondivisione, catenaDaCorriere } from '@/lib/condivisione-catena'
 
 // IL COLORE DEL CONTRASSEGNO, LIVELLO PER LIVELLO: dice se i soldi sono arrivati A ME.
 //
@@ -45,6 +45,7 @@ type RigaSped = {
   tracking_number?: string | null
   stato_contrassegno?: string | null
   distinta_contrassegno_id?: string | null
+  corriere_id?: string | null
   corrieri?: { nome_contratto?: string | null } | null
 }
 
@@ -121,12 +122,16 @@ export async function statiCodPerLivello(
     for (const c of (mv || [])) moovSet.add((c as any).master_id + '|' + nomeContrattoNormalizzato((c as any).nome_contratto))
   }
   const comboCache = new Map<string, { detentore: string; masters: string[]; codice: boolean }>()
-  const risolviCombo = async (partenza: string, nome: string | null) => {
-    const kk = partenza + '|' + (nome || '')
+  const risolviCombo = async (partenza: string, nome: string | null, corriereId: string | null) => {
+    const kk = partenza + '|' + (nome || '') + '|' + (corriereId || '')
     const hit = comboCache.get(kk); if (hit) return hit
     let res: { detentore: string; masters: string[]; codice: boolean }
     if (nome && moovSet.has(partenza + '|' + nomeContrattoNormalizzato(nome))) {
-      const chain = await risolviCatenaCondivisione(adminDb, partenza, nome)
+      // Con la riga della gamba, la fila dei puntatori: un ponte comprato da una copia d'albero arriva fino
+      // al detentore vero (MULTI per il GLS che GTS rivende a spedizioni 2000), non si ferma al venditore.
+      const chain = corriereId
+        ? await catenaDaCorriere(adminDb, corriereId, { master: partenza, nomeContratto: nome })
+        : await risolviCatenaCondivisione(adminDb, partenza, nome)
       if (chain.length && chain.some(l => l.ruolo === 'codice'))
         res = { detentore: chain[chain.length - 1].master, masters: chain.map(l => l.master), codice: true }
       else res = { detentore: (await detentoreContrattoCon(sorgente, partenza, nome)).detentore, masters: catenaDi(partenza), codice: false }
@@ -137,7 +142,7 @@ export async function statiCodPerLivello(
   for (const r of righe) {
     const nome = r.corrieri?.nome_contratto || null
     const partenza = r.master_id || masterId
-    const { detentore, masters: catena, codice } = await risolviCombo(partenza, nome)
+    const { detentore, masters: catena, codice } = await risolviCombo(partenza, nome, r.corriere_id || null)
     const sonoDetentore = detentore === masterId
     // I soldi passano da me solo se il detentore è me o sta SOPRA di me (sul contratto proprio di un
     // sotto-master il corriere paga lui, e a me quel contrassegno non arriva mai). Per la catena-CODICE

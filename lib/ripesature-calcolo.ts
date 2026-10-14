@@ -1,6 +1,6 @@
 import { calcolaPrezzoListino, calcolaSupplementiCliente, calcolaPesoFatturato, fattoreVolumeCorriere, calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
 import { costruisciCatena } from '@/lib/cascata'
-import { risolviCatenaCondivisione } from '@/lib/condivisione-catena'
+import { catenaDaCorriere } from '@/lib/condivisione-catena'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 import type { Ripesatura } from '@/lib/ripesature'
 
@@ -279,7 +279,9 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     // dal ledger per i codice). catenaDalBasso = catena-fornitore → l'upload e la propagazione trovano il
     // master che carica (prima cadeva "fuori catena" perché l'owner non è nell'albero dell'originante). ──
     const costruisciLivelliCondivisione = async () => {
-      const catena = await risolviCatenaCondivisione(admin, s.master_id, corr!.nome_contratto)
+      // La fila del contratto dai puntatori, dalla riga della gamba originante: chi carica il file del
+      // fornitore (il detentore vero) ci sta dentro anche quando il ponte è comprato da una copia d'albero.
+      const catena = await catenaDaCorriere(admin, s.corriere_id, { master: s.master_id, nomeContratto: corr!.nome_contratto })
       if (!catena.length) return null
       const { data: nomiM } = await admin.from('masters').select('id,nome').in('id', catena.map(l => l.master))
       const nomeM = new Map((nomiM || []).map((m: any) => [m.id, m.nome]))
@@ -310,7 +312,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           // pagato = quanto risulta scalato al ledger alla creazione. (L'addebito vero in conferma scala
           // il ledger — vedi rettifiche/route.ts; qui si calcola solo la differenza.)
           const { data: lc } = await admin.from('clienti').select('listino_cliente_id').eq('id', liv.ledgerClienteId).maybeSingle()
-          const corrVend = await corriereDiMasterPerNome(admin, liv.fornitore, corr!.nome_contratto)
+          const corrVend = liv.corriereFornitoreId || await corriereDiMasterPerNome(admin, liv.fornitore, corr!.nome_contratto)
           pag = arrotonda(pagatoPerCliente.get(liv.ledgerClienteId) || 0)
           if ((lc as any)?.listino_cliente_id && corrVend) {
             const ris = await calcolaPrezzoListino(admin, { listinoId: (lc as any).listino_cliente_id, corriereId: corrVend, packages, ...dest })

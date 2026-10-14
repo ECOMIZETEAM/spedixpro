@@ -5,6 +5,7 @@ import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { noloClienteDopoPartenza, noloMaster, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
+import { gambePerTracking } from '@/lib/condivisione-catena'
 
 // Il master accetta un RESO ricevuto dalla rete e lo PROPAGA:
 // - spedizioni dei propri clienti -> distinta reso verso il cliente (addebito nolo)
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
   if (!ids.length) return NextResponse.json({ error: 'Nessuna LDV nel reso' }, { status: 400 })
 
   const { data: speds } = await admin.from('spedizioni')
-    .select('id,numero,master_id,cliente_id,dest_provincia,dest_cap,dest_paese,dest_citta,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id,costo_totale,giacenza_reso_addebitato,corrieri(nome_contratto,tipo)')
+    .select('id,numero,tracking_number,master_id,cliente_id,dest_provincia,dest_cap,dest_paese,dest_citta,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id,costo_totale,giacenza_reso_addebitato,corrieri(nome_contratto,tipo)')
     .in('id', ids)
 
   // prima linea per ogni discendente
@@ -61,12 +62,19 @@ export async function POST(req: NextRequest) {
   const clientGroups: Record<string, any[]> = {}
   const masterGroups: Record<string, any[]> = {}
   let giaCaricate = 0
+  const gambeDi = await gambePerTracking(admin, (speds || []).map((s: any) => s.tracking_number))
   for (const s of (speds || [])) {
     if (giaResi.has(s.id)) { giaCaricate++; continue }
     // CONDIVISIONE: una gamba-ponte (tipo='moovexpress') si salta. Il reso del condiviso va fatto
     // gamba-per-gamba sulla catena-fornitore (feature deferita), non con la topologia ad albero di qui;
     // il costo reale resta sulla gamba dell'owner (corriere reale). Così niente addebito su livelli sbagliati.
     if ((s as any).corrieri?.tipo === 'moovexpress') continue
+    // Lo stesso per la gamba del VENDITORE di un pacco condiviso (es. GTS sul GLS che rivende a spedizioni
+    // 2000, cliente = il ledger del compratore): il reso del pacco lo addebita una volta la catena dalla gamba
+    // originante (lib/giacenza-cascata.ts). Qui sarebbe stato un secondo addebito al ledger, su un'altra riga
+    // che l'anti-doppio del database non riconosce come lo stesso pacco.
+    const gambe = (s as any).tracking_number ? (gambeDi.get((s as any).tracking_number) || []) : []
+    if (gambe.length > 1 && gambe[0].spedizioneId !== s.id && gambe[0].tipo === 'moovexpress') continue
     if (s.master_id === mio) {
       if (!s.cliente_id) continue
       if (!clientGroups[s.cliente_id]) clientGroups[s.cliente_id] = []

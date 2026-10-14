@@ -158,10 +158,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{id: s
         try {
           const { data: r0 } = await admin.from('distinte_contrassegni_righe').select('spedizione_id').eq('distinta_id', id).limit(1).maybeSingle()
           if (r0?.spedizione_id) {
-            const { data: sp } = await admin.from('spedizioni').select('master_id,cliente_id,corrieri(tipo,nome_contratto)').eq('id', r0.spedizione_id).maybeSingle()
+            const { data: sp } = await admin.from('spedizioni').select('master_id,cliente_id,corriere_id,corrieri(tipo,nome_contratto)').eq('id', r0.spedizione_id).maybeSingle()
             const c: any = Array.isArray((sp as any)?.corrieri) ? (sp as any).corrieri[0] : (sp as any)?.corrieri
             const dCon = sp ? await scendiCodDaSpedizione(admin,
-              { master_id: (sp as any).master_id, cliente_id: (sp as any).cliente_id, corriereTipo: c?.tipo, nomeContratto: c?.nome_contratto },
+              { master_id: (sp as any).master_id, cliente_id: (sp as any).cliente_id, corriereTipo: c?.tipo, nomeContratto: c?.nome_contratto, corriereId: (sp as any).corriere_id },
               dist.master_id) : null
             if (dCon && !dCon.fuori && dCon.ledger && dCon.target_master_id === dist.target_master_id && dCon.cliente_id) {
               ledgerClienteId = dCon.cliente_id

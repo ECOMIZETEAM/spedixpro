@@ -2,7 +2,7 @@ import { registraMovimentoMaster, registraMovimento } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 import { noloMaster, noloCliente, noloClienteDopoPartenza, applicaServizio, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
-import { risolviCatenaCondivisione, risolviGambeSpedizione } from '@/lib/condivisione-catena'
+import { catenaDaCorriere, risolviGambeSpedizione, gambePerTracking } from '@/lib/condivisione-catena'
 
 // Mappa il "nome" di un supplemento giacenza (sia lato cliente sia lato master) sull'operazione.
 // Es. "Riconsegna al nuovo destinatario" -> riconsegna_nuovo, "Reso al mittente" -> reso.
@@ -170,7 +170,8 @@ export async function addebitaResoCondivisione(admin: any, spedizioneId: string,
     .select('id,numero,cliente_id,master_id,corriere_id,costo_totale,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta')
     .eq('id', originanteId).maybeSingle()
   if (!full) return { addebitato: false, importoCliente: 0 }
-  const catena = await risolviCatenaCondivisione(admin, full.master_id, nomeContratto)
+  // La fila del contratto dai puntatori, dalla riga della gamba originante: lineare fino al detentore vero.
+  const catena = await catenaDaCorriere(admin, full.corriere_id, { master: full.master_id, nomeContratto })
   if (!catena.length) return { addebitato: false, importoCliente: 0 }
   const righe: RigaReso[] = []
   // CLIENTE finale (originante): nolo dal SUO listino cliente (0 se contratto tolto → vedi noloClienteDopoPartenza).
@@ -184,7 +185,7 @@ export async function addebitaResoCondivisione(admin: any, spedizioneId: string,
       // Livello-CODICE: prezzato come in creazione — listino del cliente-ledger, corriere del VENDITORE.
       // L'addebito scala il LEDGER (clienti.credito del "(ingrosso)"), non masters.credito.
       const { data: lc } = await admin.from('clienti').select('listino_cliente_id').eq('id', liv.ledgerClienteId).maybeSingle()
-      const corrVend = await corriereDiMasterPerNome(admin, liv.fornitore, nomeContratto)
+      const corrVend = liv.corriereFornitoreId || await corriereDiMasterPerNome(admin, liv.fornitore, nomeContratto)
       const nolo = ((lc as any)?.listino_cliente_id && corrVend)
         ? await noloCliente(admin, { ...full, corriere_id: corrVend }, (lc as any).listino_cliente_id) : null
       righe.push({ spedizione_id: full.id, cliente_id: liv.ledgerClienteId, master_owner_id: liv.fornitore, corriere_id: corrVend,
@@ -229,9 +230,30 @@ export async function addebitaResoDaTracking(admin: any, spedizioneId: string): 
  */
 async function addebitaResoGiacenza(admin: any, sped: SpedGiac, corriereNome: string | null, corriereOwnerId: string | null, daGiacenza = true): Promise<EsitoAddebito> {
   const { data: full } = await admin.from('spedizioni')
-    .select('id,numero,cliente_id,master_id,corriere_id,costo_totale,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta')
+    .select('id,numero,tracking_number,cliente_id,master_id,corriere_id,costo_totale,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta')
     .eq('id', sped.id).maybeSingle()
   if (!full) return { addebitato: false, importoCliente: 0 }
+  // UN RESO È UN EVENTO DEL PACCO, NON DELLA RIGA. Un pacco condiviso ha più gambe con lo stesso tracking:
+  // quella del venditore che detiene il contratto (es. LOGIXIA su SDA EXPRESS L, tipo 'poste', cliente =
+  // il ledger di chi gliel'ha comprato) non è un ponte e passava di qui, risalendo l'albero, mentre la
+  // gamba originante addebitava la stessa catena: due addebiti per pacco. Dall'8 al 14/10, 27 resi su 28,
+  // +118,68 € a Wave (ingrosso) e +105,44 € a LOGIXIA. L'anti-doppio del database è per spedizione_id e
+  // non poteva vederlo. Ora una gamba che non è l'originante passa dalla catena della gamba originante:
+  // tutte le righe puntano alla sua spedizione_id e fn_addebita_resi addebita una volta sola, qualunque
+  // gamba arrivi prima (tracking, svincolo della giacenza).
+  // L'importo che si riporta è quello pagato dal cliente di QUESTA gamba (per LOGIXIA il ledger di Wave),
+  // letto dal movimento: non quello del cliente finale della gamba originante, che è il prezzo di un'altra
+  // rete e al venditore a monte non va mostrato. Se dalla gamba originante non si addebita niente (nessuna
+  // catena) si resta sull'albero di questa gamba, come prima.
+  if (full.tracking_number) {
+    const gambe = await risolviGambeSpedizione(admin, full.tracking_number)
+    if (gambe.length > 1 && gambe[0].spedizioneId !== full.id && gambe[0].tipo === 'moovexpress') {
+      const e = await addebitaResoCondivisione(admin, gambe[0].spedizioneId, corriereNome || '', daGiacenza)
+      if (e.addebitato) {
+        return { addebitato: true, importoCliente: full.cliente_id ? await totaleResoAddebitato(admin, [full.id], { clienteId: full.cliente_id }) : 0 }
+      }
+    }
+  }
   const righe: RigaReso[] = []
 
   if (full.cliente_id) {
@@ -275,6 +297,39 @@ async function addebitaResoGiacenza(admin: any, sped: SpedGiac, corriereNome: st
 }
 
 export type EsitoAddebito = { addebitato: boolean; importoCliente: number }
+
+/**
+ * QUANTO HA PAGATO UN SOGGETTO PER IL RESO di queste spedizioni, letto dai movimenti già scritti. Serve alle
+ * distinte di reso, che mostrano un totale e non addebitano niente. Per un pacco condiviso l'addebito sta
+ * sulla gamba ORIGINANTE (vedi addebitaResoGiacenza), quindi una riga che è la gamba del venditore si
+ * cerca lì: prima la distinta di LOGIXIA verso "Wave ship (ingrosso)" sarebbe uscita a 0 € (come già le
+ * distinte di Wave verso "MULTIEXPRESS (ingrosso)") pur avendo il ledger pagato.
+ */
+export async function totaleResoAddebitato(
+  admin: any, spedizioneIds: string[], pagatore: { clienteId?: string | null; masterTargetId?: string | null },
+): Promise<number> {
+  if (!spedizioneIds.length || (!pagatore.clienteId && !pagatore.masterTargetId)) return 0
+  const righe: any[] = []
+  for (let i = 0; i < spedizioneIds.length; i += 300) {
+    const { data } = await admin.from('spedizioni').select('id,tracking_number').in('id', spedizioneIds.slice(i, i + 300))
+    righe.push(...(data || []))
+  }
+  const gambe = await gambePerTracking(admin, righe.map(r => r.tracking_number))
+  const dove = new Set<string>()
+  for (const r of righe) {
+    const g = r.tracking_number ? gambe.get(r.tracking_number) : null
+    dove.add(g && g.length > 1 && g[0].tipo === 'moovexpress' ? g[0].spedizioneId : r.id)
+  }
+  const ids = [...dove]
+  let totale = 0
+  for (let i = 0; i < ids.length; i += 300) {
+    let q = admin.from('movimenti').select('importo').eq('tipo', 'reso').in('spedizione_id', ids.slice(i, i + 300))
+    q = pagatore.clienteId ? q.eq('cliente_id', pagatore.clienteId) : q.eq('master_target_id', pagatore.masterTargetId)
+    const { data } = await q
+    totale += (data || []).reduce((s: number, m: any) => s + Math.abs(Number(m.importo || 0)), 0)
+  }
+  return Math.round(totale * 100) / 100
+}
 
 /**
  * I livelli che pagano, dal master diretto fino al DETENTORE REALE del contratto (il master piu'

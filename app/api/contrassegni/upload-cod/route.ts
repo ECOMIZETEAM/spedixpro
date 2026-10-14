@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
     // questo l'owner reale (es. LOGIXIA) cadrebbe "fuori dalla tua rete". Contratti normali: invariato.
     const corr: any = Array.isArray((spedizione as any).corrieri) ? (spedizione as any).corrieri[0] : (spedizione as any).corrieri
     const dCon = await scendiCodDaSpedizione(adminDb,
-      { master_id: spedizione.master_id, cliente_id: spedizione.cliente_id, corriereTipo: corr?.tipo, nomeContratto: corr?.nome_contratto },
+      { master_id: spedizione.master_id, cliente_id: spedizione.cliente_id, corriereTipo: corr?.tipo, nomeContratto: corr?.nome_contratto, corriereId: spedizione.corriere_id },
       masterId)
     // Il ledger del salto-codice NON si memorizza qui: la riga di sosta resta {cliente|target_master},
     // verso un master (codice o albero) o verso il cliente finale; il ledger lo risolve la compensazione.

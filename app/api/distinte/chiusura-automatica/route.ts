@@ -121,9 +121,10 @@ export async function GET(req: NextRequest) {
         const righe = gruppiResi[key]
         // TOTALE = quanto e' GIA' stato addebitato AL CLIENTE (movimento reso con cliente_id): si somma
         // cio' che la coda ha gia' scritto, per mostrarlo in distinta. Nessun addebito parte da qui.
-        const { data: movs } = await supabase.from('movimenti')
-          .select('importo').eq('tipo', 'reso').eq('cliente_id', clienteId).in('spedizione_id', righe.map(r => r.id))
-        const totale = (movs || []).reduce((s: number, m: any) => s + Math.abs(Number(m.importo || 0)), 0)
+        // Per un pacco condiviso l'addebito sta sulla gamba originante, anche quando la riga in distinta e'
+        // la gamba del venditore (LOGIXIA verso "Wave ship (ingrosso)"): lo cerca totaleResoAddebitato.
+        const { totaleResoAddebitato } = await import('@/lib/giacenza-cascata')
+        const totale = await totaleResoAddebitato(supabase, righe.map(r => r.id), { clienteId })
         const numero = (maxNumPerMaster.get(masterId) || 0) + 1
         maxNumPerMaster.set(masterId, numero)
         const { error: errR } = await supabase.from('distinte_resi').insert({

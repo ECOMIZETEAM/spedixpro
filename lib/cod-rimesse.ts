@@ -76,7 +76,7 @@ export async function caricaRimesseInSosta(
       // usa la prima linea d'albero di sempre (guardia a moovexpress: nessuna query se non è un ponte).
       const corr: any = Array.isArray((s as any).corrieri) ? (s as any).corrieri[0] : (s as any).corrieri
       const dCon = await scendiCodDaSpedizione(admin,
-        { master_id: s.master_id, cliente_id: s.cliente_id, corriereTipo: corr?.tipo, nomeContratto: corr?.nome_contratto }, mio)
+        { master_id: s.master_id, cliente_id: s.cliente_id, corriereTipo: corr?.tipo, nomeContratto: corr?.nome_contratto, corriereId: s.corriere_id }, mio)
       if (dCon) {
         if (dCon.fuori) { senzaDestinatario++; continue }
         if (dCon.ruolo === 'cliente') {
