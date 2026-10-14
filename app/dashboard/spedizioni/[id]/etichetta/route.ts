@@ -19,8 +19,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { leggiEtichettaCompleta } = await import('@/lib/etichette')
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
-  // Resa pulita SDA EXPRESS L con la stessa regola della stampa dall'elenco: chi stampa su rotolo col
-  // formato del portale o con la Zebra riceve la 1011 anche da qui.
+  // Resa pulita SDA EXPRESS L con la stessa regola della stampa dall'elenco: chi stampa con la Zebra
+  // riceve la 1011 anche da qui.
   const resaSda = async () => {
     const { resaSdaAdatta } = await import('@/lib/formato-etichetta')
     const { data: utente } = await supabase.from('utenti').select('ruolo, cliente_id, master_id').eq('id', user.id).single()

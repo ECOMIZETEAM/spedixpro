@@ -1,4 +1,4 @@
-import { PDFDocument } from 'pdf-lib'
+import { PDFDocument, degrees } from 'pdf-lib'
 
 // FORMATO DI STAMPA delle etichette (impostazione per-cliente/per-master `impostazioni.formato_stampa`).
 // I corrieri restituiscono un PDF nel LORO formato (di norma un'etichetta ~10,5×15 cm, non A4). Qui si
@@ -46,16 +46,14 @@ export async function formatoStampaUtente(admin: any, utente: ChiStampa): Promis
   return null
 }
 
-// La resa pulita SDA EXPRESS L e' ORIZZONTALE (14,8x10,5 cm). Chi stampa col formato 10x11/10x15 del
-// portale (qui sotto: 'contain' senza ruotare) o con la Zebra (lib/zebra-print: adatta a 10 cm) la
-// riceverebbe al 67,5%, con le barre dei codici a righe sotto i 2 punti di una termica a 203 dpi: in
-// simulazione il CAP non si leggeva piu' (13/10), la 1011 si'. A loro resta la 1011 di Poste, che nasce
-// per quel rotolo. Su 4x6 senza formato la resa e' stata letta dal corriere col codice a barre (12/10).
-// Nel dubbio (errore) la 1011.
+// La resa pulita SDA EXPRESS L e' ORIZZONTALE (14,8x10,5 cm). Con la Zebra (lib/zebra-print: adatta la
+// pagina a 10 cm) uscirebbe al 67,5%, con le barre dei codici a righe sotto i 2 punti di una termica a
+// 203 dpi: in simulazione il CAP non si leggeva piu' (13/10), la 1011 si'. A chi stampa in ZPL resta la
+// 1011 di Poste. Tutti gli altri formati la ricevono (vedi applicaFormatoEtichetta). Nel dubbio la 1011.
 export async function resaSdaAdatta(admin: any, utente: ChiStampa): Promise<boolean> {
   try {
     const imp = await impostazioniStampa(admin, utente)
-    return !(imp?.zpl_abilita === 'si' || imp?.formato_stampa === '10x11' || imp?.formato_stampa === '10x15')
+    return imp?.zpl_abilita !== 'si'
   } catch { return false }
 }
 
@@ -71,6 +69,16 @@ export async function applicaFormatoEtichetta(pdfBytes: Uint8Array | Buffer, for
     const pagine = await out.embedPages(indici.map(i => src.getPage(i)))
     for (const emb of pagine) {
       const pw = emb.width, ph = emb.height
+      // Resa pulita SDA EXPRESS L (420x298,1, orizzontale). Rimpicciolita 'contain' dentro un foglio da
+      // 10 cm scendeva al 67,5% e il barcode del CAP non si leggeva piu' (simulazione 13/10). Il formato
+      // 10x11 e' l'etichetta "nostra": esce com'e', 14,8x10,5. Sul 10x15 la si gira di 90 gradi e riempie
+      // il foglio al 95% (la misura con cui il corriere l'ha letta su 4x6, 12/10). L'A4 resta 'contain'.
+      if (Math.abs(pw - 420) < 1 && Math.abs(ph - 298.1) < 1 && (formato === '10x11' || formato === '10x15')) {
+        if (formato === '10x11') { out.addPage([pw, ph]).drawPage(emb, { x: 0, y: 0 }); continue }
+        const scala = Math.min(tw / ph, th / pw), w = ph * scala, h = pw * scala
+        out.addPage([tw, th]).drawPage(emb, { x: (tw - w) / 2 + w, y: (th - h) / 2, xScale: scala, yScale: scala, rotate: degrees(90) })
+        continue
+      }
       // "contain": scala per stare TUTTA dentro il foglio, mantenendo le proporzioni (niente barcode
       // deformati). Centrata. Se la pagina è più piccola del foglio non la si ingrandisce oltre 1x per
       // non sgranare, tranne quando serve per riempire il lato corto (scala comunque a fit).

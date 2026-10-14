@@ -36,6 +36,9 @@ export type DatiEtichettaSda = {
   rifOrdine: string      // RIF:  (riferimento ordine)
   mitt: string[]         // [telefono, nome, indirizzo, "CAP CITTA (PR)"]
   dest: string[]
+  contrassegnoAtteso: boolean // la riga dice contrassegno: la pagina DEVE portarne importo e pagamento
+  contrassegno: { importo: string; lettere: string; pagamento: string } | null // come lo scrive Poste
+  prodottoCod: boolean   // "Extra Large – CONTRASSEGNO": Poste lo scrive su OGNI collo, l'importo solo sul primo
 }
 
 type Bbox = { x: number; y: number; w: number; h: number }
@@ -107,7 +110,19 @@ async function datiPerCollo(page: any, base: DatiEtichettaSda, i: number, N: num
   const dimP = near(/HxLxP/i, /^\d+x\d+x\d+$/i)
   let hxlxp = base.hxlxp
   if (dimP) { const p = dimP.split('x'); if (p.length === 3) hxlxp = `${p[1]}x${p[0]}x${p[2]}` } // L×A×P → A×L×P
-  return { ...base, riquadro, ldv: ldvP || base.ldv, peso: pesoP || base.peso, hxlxp, colli: N === 1 ? '1' : `${i}/${N}` }
+  // CONTRASSEGNO come lo scrive Poste: ogni voce ha il valore nella sua stessa colonna (x), piu' in basso
+  // ("Importo in Euro" → "55.0", "Importo in lettere" → "cinquantacinque/00", "Pagamento" → "Contanti").
+  const colonna = (labelRe: RegExp, valRe: RegExp): string | null => {
+    const lab = items.find(x => labelRe.test(x.str.trim())); if (!lab) return null
+    return items.find(x => x !== lab && Math.abs(x.transform[4] - lab.transform[4]) < 3 && x.transform[5] < lab.transform[5] && valRe.test(x.str.trim()))?.str.trim() || null
+  }
+  const importo = colonna(/^Importo in Euro$/i, /^\d+([.,]\d+)?$/)
+  const lettere = colonna(/^Importo in lettere$/i, /\/\d{2}$/)
+  const pagamento = colonna(/^Pagamento$/i, /\S/)
+  const contrassegno = importo && lettere && pagamento
+    ? { importo: Number(importo.replace(',', '.')).toFixed(2).replace('.', ','), lettere, pagamento } : null
+  const prodottoCod = items.some(x => /Extra Large\s*[–-]\s*CONTRASSEGNO/i.test(x.str))
+  return { ...base, riquadro, contrassegno, prodottoCod, ldv: ldvP || base.ldv, peso: pesoP || base.peso, hxlxp, colli: N === 1 ? '1' : `${i}/${N}` }
 }
 
 // Disegna UNA pagina etichetta in `out`, copiando i codici dalla pagina sorgente `srcPage`.
@@ -159,7 +174,7 @@ async function disegnaPagina(out: any, srcPage: any, codici: { dmG: Bbox; dmP: B
   T(rqEt === 'CAP' ? 41.7 : centra(rqEt), 261.3, 18.75, bold, rqEt, rgb(1, 1, 1))
   T(rqEt === 'CAP' && rqVal.length === 5 ? 35.4 : centra(rqVal), 241.8, 18.75, bold, rqVal, rgb(1, 1, 1))
   T(109.5, 220.8, 4.80, reg, 'Data:'); T(130.5, 220.8, 4.80, reg, dati.data); T(165.1, 220.8, 4.80, bold, 'Rif. sped.')
-  T(108.7, 209.6, 6.60, bold, 'Extra Large')
+  T(108.7, 209.6, 6.60, bold, dati.contrassegno || dati.prodottoCod ? 'Extra Large – CONTRASSEGNO' : 'Extra Large')
   T(113.2, 195.3, 6.00, bold, 'Mittente'); T(152.9, 195.3, 6.00, reg, dati.mitt[0])
   fit(113.2, 187.1, 6.00, reg, dati.mitt[1], 223); fit(113.2, 178.1, 6.00, reg, dati.mitt[2], 223); fit(113.2, 169.8, 6.00, reg, dati.mitt[3], 223)
   T(113.2, 154.8, 6.00, bold, 'Destinatario'); T(164.6, 154.8, 6.00, reg, dati.dest[0])
@@ -171,6 +186,16 @@ async function disegnaPagina(out: any, srcPage: any, codici: { dmG: Bbox; dmP: B
   T(214.2, 93.3, 4.80, bold, 'Peso(KG)'); T(220.4, 85.8, 4.80, reg, dati.peso)
   T(263.2, 93.3, 4.80, bold, 'COLLI'); T(269.1, 85.8, 4.80, reg, dati.colli)
   T(303.3, 93.3, 4.80, bold, 'HxLxP(cm)'); T(302.8, 85.8, 6.00, reg, dati.hxlxp)
+  // Contrassegno nel riquadro vuoto sotto la riga della LDV (y 37,5-82,1): chi consegna deve vedere
+  // a colpo d'occhio che c'e' da incassare e quanto.
+  if (dati.contrassegno) {
+    const c = dati.contrassegno
+    page.drawRectangle({ x: 110.2, y: 69.5, width: 228.0, height: 12.6, color: rgb(0, 0, 0) })
+    T(113.2, 73.2, 7.20, bold, 'SPEDIZIONE IN CONTRASSEGNO', rgb(1, 1, 1))
+    T(113.2, 53.5, 6.00, reg, 'Importo in Euro'); T(165.0, 51.5, 16.0, bold, c.importo)
+    fit(113.2, 42.0, 6.00, reg, `Importo in lettere: ${c.lettere}`, 140)
+    T(258.0, 53.5, 6.00, reg, 'Pagamento'); fit(258.0, 44.0, 7.20, bold, c.pagamento, 78)
+  }
   T(109.5, 31.1, 4.80, reg, 'Per effetto della consegna della spedizione a Poste Italiane, il mittente accetta le Condizioni Generali di')
   T(109.5, 22.8, 4.80, reg, 'Contratto presenti su www.poste.it')
   page.drawText(dati.ldv, { x: 103.5, y: 69.3, size: 7.5, font: reg, rotate: degrees(90) })
@@ -203,6 +228,12 @@ export async function riscriviEtichettaSdaExpressL(buffer: Buffer, dati: DatiEti
       const datiPag = await datiPerCollo(pj, dati, i + 1, N)
       pagine.push({ src: srcDoc.getPage(i), codici, datiPag })
     }
+    // Mai un contrassegno senza importo scritto: Poste lo stampa sul primo collo (sugli altri solo
+    // "CONTRASSEGNO" accanto al prodotto). Se la riga lo dice e il primo collo non lo porta, la 1011.
+    if (dati.contrassegnoAtteso && !(pagine[0]?.datiPag.contrassegno && pagine.every(p => p.datiPag.prodottoCod))) {
+      console.info('[RESA-SDA] originale: contrassegno non letto', dati.ldv)
+      return buffer
+    }
     const out = await PDFDocument.create(); out.registerFontkit(fontkit as any)
     // subset: solo i glifi usati. Interi, i due Liberation Sans aggiungevano ~280KB a ogni etichetta,
     // e nella stampa in blocco ogni etichetta e' un documento a se' (nessuna condivisione tra loro).
@@ -222,18 +253,14 @@ export async function riscriviEtichettaSdaExpressL(buffer: Buffer, dati: DatiEti
 
 // Costruisce i dati CONDIVISI del layout dalla riga spedizione (fonte autorevole, pulita). Indirizzi
 // MAIUSCOLI come nel riferimento; telefono numerico. LDV, peso, misure, colli e riquadro nero vengono poi
-// sovrascritti pagina per pagina da datiPerCollo. Torna null (= resta la 1011) se manca il minimo
-// indispensabile o se la spedizione e' in contrassegno.
+// sovrascritti pagina per pagina da datiPerCollo, come il contrassegno (importo e pagamento li scrive
+// Poste). Torna null (= resta la 1011) se manca il minimo indispensabile.
 export async function datiEtichettaSda(admin: any, numero: string | null | undefined): Promise<DatiEtichettaSda | null> {
   if (!numero) return null
   const { data: s } = await admin.from('spedizioni')
     .select('numero,created_at,colli,peso_reale,altezza,larghezza,lunghezza,note,contenuto,rif_ordine,contrassegno,dest_cap,dest_nome,dest_indirizzo,dest_presso,dest_citta,dest_provincia,dest_telefono,mitt_cap,mitt_nome,mitt_indirizzo,mitt_presso,mitt_citta,mitt_provincia,mitt_telefono')
     .eq('numero', numero).maybeSingle()
   if (!s || !String(s.dest_cap || '').trim()) return null
-  // CONTRASSEGNO: la 1011 stampa "Extra Large – CONTRASSEGNO", l'importo in cifre e in lettere e il modo
-  // di pagamento; il layout pulito quel blocco non ce l'ha (492 spedizioni in 7 giorni, 13/10). Finche'
-  // non c'e', il contrassegno resta sulla 1011: il corriere deve leggere che c'e' da incassare.
-  if (Number(s.contrassegno || 0) > 0) return null
   const U = (t: any) => String(t || '').toUpperCase()
   // Il c/o l'API v1 lo tiene in *_presso e lo accoda all'indirizzo che arriva a Poste: la 1011 stampa
   // "VIA ... C/O <presso>". Sulle gambe interne e' gia' dentro l'indirizzo: non lo si ripete.
@@ -257,5 +284,8 @@ export async function datiEtichettaSda(admin: any, numero: string | null | undef
     rifOrdine: String(s.rif_ordine || '').trim(),
     mitt: [String(s.mitt_telefono || ''), U(s.mitt_nome), U(conPresso(s.mitt_indirizzo, s.mitt_presso)), `${String(s.mitt_cap || '').trim()} ${U(s.mitt_citta)} (${U(s.mitt_provincia)})`.trim()],
     dest: [String(s.dest_telefono || ''), U(s.dest_nome), U(conPresso(s.dest_indirizzo, s.dest_presso)), `${cap} ${U(s.dest_citta)} (${U(s.dest_provincia)})`.trim()],
+    contrassegnoAtteso: Number(s.contrassegno || 0) > 0,
+    contrassegno: null,
+    prodottoCod: false,
   }
 }
