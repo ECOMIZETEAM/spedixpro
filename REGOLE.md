@@ -38,7 +38,9 @@ Qui non serve ricordarsene: il database le applica da solo, da qualunque strada 
 | Un pacco non scarica due volte lo stesso articolo | indice unico `uniq_artmov_sped_articolo` |
 | Se la spedizione salta, la merce rientra | trigger `trg_articoli_rientro` (annullo effettivo e reso, **non** il pending) |
 | ...e rientra una volta sola | indice unico parziale `uniq_artmov_rientro` |
-| Chi detiene un contratto | colonna `corrieri.proprio` — dichiarato, non dedotto dal nome |
+| Chi detiene un contratto, oggi | colonna `corrieri.proprio`, ricalcolata da `fn_ricalcola_corrieri_proprio` per albero e nome ESATTO: due contratti diversi con lo stesso nome li confonde (le 2 'GLS CASERTA' di GTS). La sostituisce, per ultima, la riga senza fornitore (sotto) |
+| Da chi compra ogni master un contratto, e quale contratto è (il CODICE): una fila lineare, non l'albero | colonne `corrieri.fornitore_corriere_id`, `collegamento_id`, `contratto_id` (14/10/2026), tenute dal trigger `trg_corrieri_catena_contratto`; lettura `catena_contratto(corriere_id)`, sentinella `controllo_catena_contratti()` (vuota = sano). Fase 1: nessun codice le legge ancora. Script e regole: `scripts/contratto-codice-catena.sql` |
+| Dal portale non si dichiara "propria" una copia, né si cambia da chi si compra, il tipo o il master di un contratto | stesso trigger: con un PATCH diretto un master poteva segnare propria la sua copia e smettere di pagare chi gliela vende |
 | Contatori spedizioni, audit sui listini | trigger `trg_conta_spedizione`, `trg_audit` |
 | Il pacchetto API si consuma **solo** con le API | trigger `fn_conta_spedizione_cliente` filtra `canale = 'api'` |
 | Chi paga le API non se lo decide da solo | trigger `trg_api_solo_piattaforma` su `clienti` (campi `api_*`: solo chiave di servizio) |
@@ -136,6 +138,10 @@ Da sistemare, e da guardare con sospetto quando si tocca qualcosa lì vicino.
   cioè MULTIEXPRESS pagherebbe il corriere senza essere pagato. Succedeva anche prima che
   l'eliminazione passasse da `lib/elimina-contratto.ts`. Non toccato: bloccarla quando sotto ci
   sono copie cambia cosa un master può fare dal portale, e va deciso.
+  Dal 14/10 il fatto almeno resta scritto: le copie tengono il puntatore alla riga cancellata e il
+  codice del contratto, e `controllo_catena_contratti()` le elenca in `fornitore_cancellato`. Quando i
+  lettori passeranno ai puntatori, una fila interrotta va trattata come contratto sospeso, mai come
+  contratto proprio.
 - **Il comune scritto diversamente fa perdere la zona speciale.** Se il comune non combacia con
   nessuno di quelli elencati per quel CAP, la zona speciale non viene rivendicata e si finisce su
   "Italia".
