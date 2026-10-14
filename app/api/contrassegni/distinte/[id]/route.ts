@@ -111,6 +111,39 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{id: s
     return NextResponse.json({ error: `L'importo (€${paidThis.toFixed(2)}) supera il residuo da saldare (€${residuo.toFixed(2)})` }, { status: 400 })
   }
 
+  // DOVE VA LA COMPENSAZIONE verso un master, deciso PRIMA di segnare pagata la distinta. Su un salto a
+  // collegamento (chi mi compra il contratto a codice) il contrassegno scende sul suo LEDGER presso di me;
+  // sull'albero sul suo conto di sotto-master. Se il destinatario non sta sotto di me nell'albero e il ledger
+  // non si riesce a leggere, non si muove niente: col ripiego sul conto d'albero si accreditava il conto
+  // master di chi mi compra a codice (Wave → MULTIEXPRESS), un conto che con me non ha niente a che fare.
+  let ledgerCompensazione: string | null = null
+  if (dist.target_master_id && righe.some(p => p.metodo === 'compensata')) {
+    try {
+      const { data: r0 } = await admin.from('distinte_contrassegni_righe').select('spedizione_id').eq('distinta_id', id)
+        .order('id', { ascending: true }).limit(1).maybeSingle()
+      if (r0?.spedizione_id) {
+        const { data: sp } = await admin.from('spedizioni').select('master_id,cliente_id,corriere_id,corrieri(tipo,nome_contratto)').eq('id', r0.spedizione_id).maybeSingle()
+        const c: any = Array.isArray((sp as any)?.corrieri) ? (sp as any).corrieri[0] : (sp as any)?.corrieri
+        const dCon = sp ? await scendiCodDaSpedizione(admin,
+          { master_id: (sp as any).master_id, cliente_id: (sp as any).cliente_id, corriereTipo: c?.tipo, nomeContratto: c?.nome_contratto, corriereId: (sp as any).corriere_id },
+          dist.master_id) : null
+        if (dCon && !dCon.fuori && dCon.ledger && dCon.target_master_id === dist.target_master_id && dCon.cliente_id) {
+          ledgerCompensazione = dCon.cliente_id
+        }
+      }
+    } catch (e) { console.error('[COD] ledger condivisione re-resolve:', e) }
+    if (!ledgerCompensazione) {
+      let sotto = false
+      let cur: string | null = dist.target_master_id
+      for (let i = 0; i < 20 && cur; i++) {
+        const { data: m }: any = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+        cur = m?.parent_master_id || null
+        if (cur === dist.master_id) { sotto = true; break }
+      }
+      if (!sotto) return NextResponse.json({ error: 'Il destinatario compra questo contratto da te a codice, ma il suo conto non si è potuto leggere: riprova. Nessun pagamento registrato.' }, { status: 409 })
+    }
+  }
+
   const nuovoPagato = Math.round((giaPagato + paidThis) * 100) / 100
   const saldata = nuovoPagato >= totale - 0.02
   // Es. "bonifico €50.00" (parziale) o "bonifico €30.00 + compensata €20.00"
@@ -150,24 +183,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{id: s
         await registraMovimento(admin, { masterId: dist.master_id, clienteId: dist.cliente_id, tipo: 'contrassegno', descrizione, importo: compensato, riferimento, createdBy: user.id })
         movimentoCredito = true
       } else if (dist.target_master_id) {
-        // CONDIVISIONE: se il salto master→target è un salto-CODICE (corrieri_condivisi), il COD scende
-        // sul LEDGER "(ingrosso)" del target sotto di me (clienti.credito), NON su masters.credito — a
-        // specchio della creazione. Lo risolvo AL VOLO dalla catena-fornitore della gamba (nessuna
-        // colonna in più). Per i salti d'ALBERO e i contratti normali resta l'accredito su masters.credito.
-        let ledgerClienteId: string | null = null
-        try {
-          const { data: r0 } = await admin.from('distinte_contrassegni_righe').select('spedizione_id').eq('distinta_id', id).limit(1).maybeSingle()
-          if (r0?.spedizione_id) {
-            const { data: sp } = await admin.from('spedizioni').select('master_id,cliente_id,corriere_id,corrieri(tipo,nome_contratto)').eq('id', r0.spedizione_id).maybeSingle()
-            const c: any = Array.isArray((sp as any)?.corrieri) ? (sp as any).corrieri[0] : (sp as any)?.corrieri
-            const dCon = sp ? await scendiCodDaSpedizione(admin,
-              { master_id: (sp as any).master_id, cliente_id: (sp as any).cliente_id, corriereTipo: c?.tipo, nomeContratto: c?.nome_contratto, corriereId: (sp as any).corriere_id },
-              dist.master_id) : null
-            if (dCon && !dCon.fuori && dCon.ledger && dCon.target_master_id === dist.target_master_id && dCon.cliente_id) {
-              ledgerClienteId = dCon.cliente_id
-            }
-          }
-        } catch (e) { console.error('[COD] ledger condivisione re-resolve:', e) }
+        // Il conto lo si è deciso sopra, prima di segnare pagata la distinta (ledger su un salto a codice).
+        const ledgerClienteId = ledgerCompensazione
         if (ledgerClienteId) {
           await registraMovimento(admin, { masterId: dist.master_id, clienteId: ledgerClienteId, tipo: 'contrassegno', descrizione, importo: compensato, riferimento, createdBy: user.id })
         } else {

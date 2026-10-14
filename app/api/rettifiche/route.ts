@@ -414,7 +414,6 @@ export async function POST(req: NextRequest) {
 
     try {
       if (r.target_master_id) {
-        if (!discendenti.has(r.target_master_id)) { await riapriRiga(r, 'destinatario non e\' un master della tua rete'); continue }
         // CONDIVISIONE: se il salto master→target è un salto-CODICE (corrieri_condivisi), la rettifica
         // scende sul LEDGER "(ingrosso)" del target (clienti.credito), non su masters.credito — a specchio
         // della creazione/COD. Risolto al volo dalla gamba (r.spedizione_id = gamba originante, dal calcolo).
@@ -427,6 +426,13 @@ export async function POST(req: NextRequest) {
             if (dCon && !dCon.fuori && dCon.ledger && dCon.target_master_id === r.target_master_id && dCon.cliente_id) ledgerClienteId = dCon.cliente_id
           } catch (e) { console.error('[RETTIFICHE] ledger condivisione:', e) }
         }
+        // IL DESTINATARIO DEVE STARE SOTTO DI ME: nell'albero, oppure — su un contratto condiviso — come chi
+        // mi compra questo contratto nella fila del pacco (salto a collegamento: si paga sul suo ledger, e la
+        // fila la calcola il server dalla spedizione, non la riga). La sola guardia ad albero respingeva ogni
+        // salto a codice — Wave non sta sotto LOGIXIA, MULTI è il padre di Wave, spedizioni 2000 e GTS sono
+        // fratelli — quindi la rettifica tornava aperta con "non è un master della tua rete" e il venditore
+        // restava col costo del fornitore. Senza ledger risolto un compratore fuori dall'albero non passa.
+        if (!discendenti.has(r.target_master_id) && !ledgerClienteId) { await riapriRiga(r, 'destinatario non e\' un master della tua rete'); continue }
         if (ledgerClienteId) {
           await registraMovimento(adminDb, {
             masterId: utente!.master_id, clienteId: ledgerClienteId,

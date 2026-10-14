@@ -69,11 +69,20 @@ export async function addebitaGiacenzaCatena(
   const conServizio = params.conServizio !== false
   const admin = createAdminSupabase()
 
-  // Detentore REALE del contratto: il master più in alto che possiede lo stesso nome_contratto.
+  // Detentore REALE del contratto: il master più in alto che possiede lo stesso nome_contratto, ma la salita
+  // si FERMA alla prima riga dichiarata propria (come catenaContratto e la cascata delle spedizioni). Senza
+  // questo stop la gamba di LOGIXIA su SDA EXPRESS L (contratto suo, proprio=true) saliva fino al ponte
+  // omonimo di MULTIEXPRESS, suo padre d'albero, e lo addebitava da falso detentore. Sui contratti normali
+  // non cambia niente: l'unica riga propria con un omonimo nel padre è quella di LOGIXIA (14/10).
   let ownerReale = params.corriereOwnerId
   {
     let cur: string | null = params.corriereOwnerId
     for (let i = 0; i < 20 && cur; i++) {
+      const curCid = await corriereDiMasterPerNome(admin, cur, params.corriereNome)
+      if (curCid) {
+        const { data: cc }: any = await admin.from('corrieri').select('proprio').eq('id', curCid).maybeSingle()
+        if (cc?.proprio) { ownerReale = cur; break }
+      }
       const { data: mm }: any = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
       const parent: string | null = mm?.parent_master_id || null
       if (!parent) break
@@ -393,7 +402,82 @@ async function prezzoGiacenzaClienteListino(admin: any, clienteId: string, corri
   return { apertura, servizio }
 }
 
-type SpedGiac = { id: string; numero: string; cliente_id: string | null; master_id: string; corriere_id: string; giacenza_apertura_addebitata?: boolean }
+type SpedGiac = { id: string; numero: string; cliente_id: string | null; master_id: string; corriere_id: string; giacenza_apertura_addebitata?: boolean; tracking_number?: string | null }
+
+/**
+ * APERTURA GIACENZA DI UN PACCO CONDIVISO: un evento del PACCO, addebitato una volta sola dalla gamba
+ * originante lungo la fila del contratto (corrieri.fornitore_corriere_id), come la spedizione.
+ *
+ * Prima la addebitava la sola gamba del venditore che detiene il contratto (LOGIXIA su SDA EXPRESS L,
+ * tipo 'poste'), salendo l'ALBERO per nome senza fermarsi al detentore: trovava il ponte omonimo di
+ * MULTIEXPRESS (suo padre d'albero, che però compra da Wave) e lo addebitava come falso detentore —
+ * 92 aperture dall'8 al 14/10, −46,00 € — mentre il cliente finale e il master originante non pagavano
+ * mai (130,50 € e 124,50 € sugli stessi pacchi, coi prezzi dei loro listini). Le gambe-ponte venivano
+ * saltate di proposito ("feature deferita"): eccola.
+ *
+ * Chi paga, e su che conto, è lo specchio della creazione:
+ *  - il cliente finale: l'apertura del SUO listino, sul contratto con cui ha spedito;
+ *  - salto a collegamento: il compratore paga il venditore sul suo ledger, al prezzo che il venditore
+ *    fa a quel ledger (listino del ledger × contratto del venditore);
+ *  - salto d'albero e detentore: ognuno la SUA apertura, dal suo listino corrieri, sul suo conto
+ *    (come addebitaGiacenzaCatena per i contratti normali).
+ * Tutte le voci stanno sulla gamba originante: è lì che il pacco si guarda e si ricostruisce.
+ *
+ * L'ordine conta, perché sui movimenti di giacenza il database non ha un anti-doppio:
+ *  1. il PIANO (fila e prezzi) si calcola tutto in lettura. Fila interrotta o non leggibile, o un salto a
+ *     collegamento senza ledger o senza la riga del venditore → errore prima di scrivere: la riga resta in
+ *     coda. Niente ripiego sulla catena per nome: lì i salti a collegamento non hanno il ledger e finirebbero
+ *     sul conto del master (MULTIEXPRESS di nuovo falso detentore);
+ *  2. poi si PRENDE il segno su tutte le gambe del pacco (solo quelle ancora libere, con l'errore
+ *     controllato): se non si riesce non si è scritto niente; se un'altra gamba l'aveva già, ci si ferma;
+ *  3. solo allora si scrivono i movimenti. Un livello che non riesce non ferma gli altri (come la cascata
+ *     normale) e resta nei log; non viene mai riscritto due volte.
+ */
+async function addebitaAperturaGiacenzaCondivisione(admin: any, idsGambe: string[], originanteId: string): Promise<void> {
+  const { data: o, error: eO } = await admin.from('spedizioni')
+    .select('id,numero,cliente_id,master_id,corriere_id').eq('id', originanteId).maybeSingle()
+  if (eO || !o) throw new Error('gamba originante non leggibile')
+  const catena = await catenaDaCorriere(admin, o.corriere_id)
+  if (!catena.length) throw new Error('fila del contratto interrotta: apertura giacenza rimandata')
+  const descr = `Apertura giacenza ${o.numero}`
+
+  type Voce = { cliente?: { masterId: string; clienteId: string }; master?: string; importo: number }
+  const piano: Voce[] = []
+  if (o.cliente_id) {
+    const pr = await prezzoGiacenzaClienteListino(admin, o.cliente_id, o.corriere_id, 'riconsegna')
+    if (pr.apertura > 0) piano.push({ cliente: { masterId: o.master_id, clienteId: o.cliente_id }, importo: pr.apertura })
+  }
+  for (const liv of catena) {
+    if (liv.ruolo === 'codice') {
+      if (!liv.ledgerClienteId || !liv.fornitore || !liv.corriereFornitoreId) throw new Error(`salto a collegamento senza ledger (${liv.master}): apertura giacenza rimandata`)
+      const pr = await prezzoGiacenzaClienteListino(admin, liv.ledgerClienteId, liv.corriereFornitoreId, 'riconsegna')
+      if (pr.apertura > 0) piano.push({ cliente: { masterId: liv.fornitore, clienteId: liv.ledgerClienteId }, importo: pr.apertura })
+    } else {
+      const pr = await prezzoGiacenzaMaster(admin, liv.corriereId, 'riconsegna')
+      if (pr.apertura > 0) piano.push({ master: liv.master, importo: pr.apertura })
+    }
+  }
+
+  const { data: presi, error: eSegno } = await admin.from('spedizioni').update({ giacenza_apertura_addebitata: true })
+    .in('id', idsGambe).eq('giacenza_apertura_addebitata', false).select('id')
+  if (eSegno) throw new Error('segno di apertura non scritto: ' + eSegno.message)
+  if ((presi || []).length !== idsGambe.length) {
+    // Una gamba era già segnata fra la lettura e adesso: l'apertura del pacco l'ha già presa qualcun altro.
+    return
+  }
+
+  for (const v of piano) {
+    try {
+      if (v.cliente) {
+        await registraMovimento(admin, { masterId: v.cliente.masterId, clienteId: v.cliente.clienteId, tipo: 'giacenza',
+          descrizione: descr, importo: -Math.abs(v.importo), riferimento: o.numero, spedizioneId: o.id })
+      } else if (v.master) {
+        await registraMovimentoMaster(admin, { masterOwnerId: v.master, masterTargetId: v.master, tipo: 'giacenza',
+          descrizione: descr, riferimento: o.numero, importo: -Math.abs(v.importo), spedizioneId: o.id, createdBy: null })
+      }
+    } catch (e) { console.error(`Errore apertura giacenza (condiviso) ${o.numero}:`, e) }
+  }
+}
 
 /**
  * APERTURA giacenza — addebitata all'ENTRATA in giacenza (dal cron): il cliente paga subito
@@ -404,9 +488,28 @@ export async function addebitaAperturaGiacenza(sped: SpedGiac): Promise<void> {
   if (sped.giacenza_apertura_addebitata) return
   const admin = createAdminSupabase()
   const { data: corr } = await admin.from('corrieri').select('master_id,nome_contratto,tipo').eq('id', sped.corriere_id).maybeSingle()
-  // CONDIVISIONE: gamba-ponte (tipo='moovexpress') → salto. Le gambe dello stesso pacco risalgono tutte
-  // l'albero fino al master-hub e lo addebiterebbero più volte (doppio apertura giacenza). Il costo reale
-  // resta sulla gamba dell'owner (corriere reale); la giacenza del condiviso va gamba-per-gamba (feature deferita).
+  // UNA GIACENZA È UN EVENTO DEL PACCO, NON DELLA RIGA: per un pacco condiviso (più gambe, la prima un
+  // ponte) si addebita una volta, dalla gamba originante, qualunque gamba arrivi in coda per prima, e si
+  // segnano tutte le gambe, così le altre righe in coda non rifanno niente. Se una gamba risulta già
+  // addebitata (col calcolo di prima) non si addebita di nuovo. Le letture qui devono riuscire: una gamba
+  // del venditore letta male tornerebbe alla cascata per albero, cioè al falso detentore.
+  {
+    let trk: string | null | undefined = (sped as any).tracking_number
+    if (trk === undefined) {
+      const { data: t, error: eT } = await admin.from('spedizioni').select('tracking_number').eq('id', sped.id).maybeSingle()
+      if (eT) throw new Error('spedizione non leggibile: ' + eT.message)
+      trk = (t as any)?.tracking_number || null
+    }
+    const gambe = trk ? ((await gambePerTracking(admin, [trk])).get(trk) || []) : []
+    if (gambe.length > 1 && gambe[0].tipo === 'moovexpress') {
+      const ids = gambe.map(g => g.spedizioneId)
+      const { data: gia, error: eGia } = await admin.from('spedizioni').select('id').in('id', ids).eq('giacenza_apertura_addebitata', true)
+      if (eGia) throw new Error('gambe del pacco non leggibili: ' + eGia.message)
+      if (!(gia || []).length) await addebitaAperturaGiacenzaCondivisione(admin, ids, gambe[0].spedizioneId)
+      return
+    }
+  }
+  // Ponte senza altre gambe (dati incompleti): niente catena da cui addebitare, come prima.
   if ((corr as any)?.tipo === 'moovexpress') return
   if (sped.cliente_id) {
     const pr = await prezzoGiacenzaClienteListino(admin, sped.cliente_id, sped.corriere_id, 'riconsegna')

@@ -4,7 +4,7 @@ import { bloccaAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
 import { risaliCatena, destinatarioCod } from '@/lib/contrassegni-catena'
-import { scendiCodDaSpedizione } from '@/lib/condivisione-catena'
+import { scendiCodDaSpedizione, risolviGambeSpedizione } from '@/lib/condivisione-catena'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -111,6 +111,24 @@ export async function POST(req: NextRequest) {
       spedizione = r2.data as any
     }
     if (!spedizione) { segnaErrore(ldv, 'non trovata a sistema'); continue }
+    // Trovata per RIPIEGO (non per numero esatto): se è la gamba di un venditore di un pacco condiviso
+    // (stesso tracking, numero col suffisso), si riporta alla gamba ORIGINANTE. Il contrassegno è del pacco,
+    // e anticipo, rimesse e anti-doppio lavorano tutti sull'originante: su un'altra gamba si sarebbe pagato
+    // per albero e una seconda volta sulla fila.
+    if ((spedizione as any).numero !== ldv) {
+      const { data: trk } = await adminDb.from('spedizioni').select('tracking_number').eq('id', spedizione.id).maybeSingle()
+      const t = (trk as any)?.tracking_number
+      if (t) {
+        const g = await risolviGambeSpedizione(adminDb, t)
+        if (g.length > 1 && g[0].tipo === 'moovexpress' && g[0].spedizioneId !== spedizione.id) {
+          const { data: o } = await adminDb.from('spedizioni')
+            .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno,corriere_id,corrieri(tipo,nome_contratto)')
+            .eq('id', g[0].spedizioneId).maybeSingle()
+          if (!o) { segnaErrore(ldv, 'pacco condiviso: gamba originante non leggibile'); continue }
+          spedizione = o as NonNullable<typeof spedizione>
+        }
+      }
+    }
 
     // Doppione nello STESSO file → la seconda riga si salta (un contrassegno si paga UNA volta).
     if (vistiInFile.has(spedizione.id)) { doppioniFile++; continue }

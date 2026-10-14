@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
   let giacenzeAddebitate = 0
   try {
     const { data: coda } = await admin.from('giacenze_da_addebitare')
-      .select('spedizione_id, tentativi, spedizioni(id,numero,cliente_id,master_id,corriere_id,giacenza_apertura_addebitata)')
+      .select('spedizione_id, tentativi, spedizioni(id,numero,cliente_id,master_id,corriere_id,tracking_number,giacenza_apertura_addebitata)')
       .lt('tentativi', 5).limit(200)
     if (coda?.length) {
       const { addebitaAperturaGiacenza } = await import('@/lib/giacenza-cascata')

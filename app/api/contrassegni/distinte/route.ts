@@ -5,6 +5,10 @@ import { gestisceLaRete, vedeLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { risaliCatena, destinatarioCod } from '@/lib/contrassegni-catena'
 import { detentoreContratto, nomeContrattoNormalizzato } from '@/lib/contratto-per-nome'
+import { gambePerTracking, catenaDaCorriere, destinatarioCodCondivisione, type LivelloCondivisione } from '@/lib/condivisione-catena'
+
+// Una selezione grande di contrassegni condivisi legge la fila di ogni contratto: non deve scadere a metà.
+export const maxDuration = 300
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -89,9 +93,40 @@ export async function POST(req: NextRequest) {
   const spedizioni: any[] = []
   for (let i = 0; i < spedizioneIds.length; i += 300) {
     const { data } = await admin.from('spedizioni')
-      .select('id,master_id,cliente_id,corriere_id,contrassegno,numero,stato_contrassegno,distinta_contrassegno_id')
+      .select('id,master_id,cliente_id,corriere_id,contrassegno,numero,stato_contrassegno,distinta_contrassegno_id,tracking_number')
       .in('id', spedizioneIds.slice(i, i + 300)).gt('contrassegno', 0)
     spedizioni.push(...(data || []))
+  }
+
+  // PACCHI CONDIVISI: il contrassegno è del PACCO, non della riga. Un pacco condiviso ha più gambe (la
+  // prima un ponte, poi quelle dei venditori fino al detentore) e il file del corriere e le rimesse
+  // lavorano sulla gamba ORIGINANTE. Qui una gamba del venditore (LOGIXIA su SDA EXPRESS L, GTS sul GLS che
+  // rivende a spedizioni 2000: cliente = il ledger del compratore) diventava una "distinta al cliente" verso
+  // quel ledger, e il file o la rimessa successivi pagavano lo stesso contrassegno una seconda volta, su
+  // un'altra riga che l'anti-doppio per livello non riconosce. E l'albero non è la fila: MULTI che anticipava
+  // il ponte di spedizioni 2000 pagava 2000 saltando GTS, da cui 2000 lo compra. Ora ogni gamba si riporta
+  // all'originante e il destinatario è il livello sotto di me nella fila del contratto, col suo conto.
+  const condivise = new Map<string, any>()   // id della riga scelta → riga originante (con contratto)
+  {
+    let gambeDi: Awaited<ReturnType<typeof gambePerTracking>>
+    try { gambeDi = await gambePerTracking(admin, spedizioni.map(s => s.tracking_number).filter(Boolean)) }
+    catch { return NextResponse.json({ error: 'Lettura delle spedizioni non riuscita: riprova. Nessuna distinta creata.' }, { status: 500 }) }
+    const origIds = new Set<string>()
+    for (const s of spedizioni) {
+      const g = s.tracking_number ? (gambeDi.get(s.tracking_number) || []) : []
+      if (g.length > 1 && g[0].tipo === 'moovexpress') origIds.add(g[0].spedizioneId)
+    }
+    if (origIds.size) {
+      const { data: orig, error: eO } = await admin.from('spedizioni')
+        .select('id,master_id,cliente_id,corriere_id,contrassegno,numero,stato_contrassegno,distinta_contrassegno_id,tracking_number,corrieri(tipo,nome_contratto)')
+        .in('id', [...origIds])
+      if (eO) return NextResponse.json({ error: 'Contrassegni condivisi non leggibili: riprova.' }, { status: 500 })
+      const perTrk = new Map((orig || []).map((o: any) => [o.tracking_number, o]))
+      for (const s of spedizioni) {
+        const o = s.tracking_number ? perTrk.get(s.tracking_number) : null
+        if (o) condivise.set(s.id, o)
+      }
+    }
   }
 
   const escluse: { numero: string; motivo: string }[] = []
@@ -103,8 +138,37 @@ export async function POST(req: NextRequest) {
     if (!catene.has(mid)) catene.set(mid, await risaliCatena(admin, mid))
     return catene.get(mid)!
   }
-  const versoCliente: any[] = [], versoRete: { s: any; target: string; catena: string[] }[] = []
-  for (const s of spedizioni) {
+  const versoCliente: any[] = [], versoRete: { s: any; target: string; catena: string[]; fila?: boolean; ledger?: boolean }[] = []
+  const pacchiVisti = new Set<string>()
+  // La fila di un contratto è la stessa per tutti i suoi pacchi: si legge una volta per corriere.
+  const file = new Map<string, LivelloCondivisione[]>()
+  for (const scelta of spedizioni) {
+    const o = condivise.get(scelta.id)
+    if (o) {
+      if (pacchiVisti.has(o.id)) continue          // due gambe dello stesso pacco nella stessa selezione
+      pacchiVisti.add(o.id)
+      const c: any = Array.isArray(o.corrieri) ? o.corrieri[0] : o.corrieri
+      if (!file.has(o.corriere_id)) {
+        try { file.set(o.corriere_id, await catenaDaCorriere(admin, o.corriere_id, { master: o.master_id, nomeContratto: c?.nome_contratto || '' })) }
+        catch { escludi(scelta, 'contratto non leggibile, riprova'); continue }
+      }
+      const d = destinatarioCodCondivisione(file.get(o.corriere_id)!, mio, o.cliente_id)
+      if (d.fuori) { escludi(scelta, 'fuori dalla tua rete'); continue }
+      if (d.ruolo !== 'cliente') {
+        if (!d.target_master_id) { escludi(scelta, 'nessun livello sotto di te in questo contratto'); continue }
+        versoRete.push({ s: o, target: d.target_master_id, catena: [], fila: true, ledger: d.ledger })
+        continue
+      }
+      // Verso il cliente paga solo il master del pacco: la riga è del cliente, che alcune colonne le può
+      // riscrivere, e "primo della fila" deve voler dire davvero "il pacco è mio".
+      if (o.master_id !== mio) { escludi(scelta, 'fuori dalla tua rete'); continue }
+      if (!d.cliente_id) { escludi(scelta, 'spedizione tua, senza cliente: non c\'è nessuno da pagare'); continue }
+      if (o.stato_contrassegno === 'annullato') { escludi(scelta, 'reso: il contrassegno non si incasserà'); continue }
+      if (o.distinta_contrassegno_id || (o.stato_contrassegno && o.stato_contrassegno !== 'in_attesa')) { escludi(scelta, 'già in distinta o pagato'); continue }
+      versoCliente.push(o)
+      continue
+    }
+    const s = scelta
     const catena = await catenaDi(s.master_id)
     const dest = destinatarioCod(catena, mio, s.cliente_id)
     if (dest.fuori) { escludi(s, 'fuori dalla tua rete'); continue }
@@ -155,10 +219,20 @@ export async function POST(req: NextRequest) {
       return detentori.get(k)!
     }
     const nomiMaster = new Map<string, string>()
-    for (const { s, target, catena } of versoRete) {
+    for (const { s, target, catena, fila, ledger } of versoRete) {
       if (giaMie.has(s.id)) { escludi(s, 'già in una tua distinta'); continue }
       if (inSosta.has(s.id)) { escludi(s, 'già arrivato col file del corriere: caricalo da Distinte contrassegni'); continue }
       if (s.stato_contrassegno === 'annullato') { escludi(s, 'reso: il contrassegno non si incasserà'); continue }
+      // Pacco condiviso: la fila del contratto dice già che i soldi passano da me (sto fra il detentore e
+      // chi mi compra), il controllo sul detentore per nome qui sotto non serve e sbaglierebbe.
+      if (fila) {
+        // Un salto a collegamento (si paga sul ledger) e uno d'albero verso lo stesso master non vanno nella
+        // stessa distinta: la compensazione sceglie un conto solo per tutta la distinta.
+        const k = (ledger ? 'l:' : 'm:') + target
+        if (!gruppi.has(k)) gruppi.set(k, [])
+        gruppi.get(k)!.push(s)
+        continue
+      }
       const c = s.corriere_id ? corr.get(s.corriere_id) : null
       if (!c) { escludi(s, 'contratto non trovato'); continue }
       const det = await detentoreDi(c)
