@@ -10,6 +10,7 @@ import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation,
   spediamoproCreateShipment,
   telValidoSp,
+  emailValidaSp,
   spediamoproGetLabel,
   normalizzaEtichetta,
   spediamoproWaitForTracking,
@@ -1011,6 +1012,13 @@ export async function POST(req: NextRequest) {
       if (pudoCourierSp && !String(body.puntoArrivo || '').trim()) {
         await stornaPrenotazione()
         return NextResponse.json({ error: 'Seleziona il punto di consegna (Fermopoint / Locker).' }, { status: 400 })
+      }
+      // Il codice per ritirare il pacco (PIN Fermopoint, apertura Locker) il corriere lo manda all'EMAIL
+      // del destinatario: senza, il pacco arriva al punto e nessuno lo puo' ritirare. Si ferma qui, prima
+      // di comprare, come per il punto mancante. Al 14/10 ne erano partite 9 su 108 senza email.
+      if (consegnaAlPuntoSp && !emailValidaSp(body.shipTo?.email)) {
+        await stornaPrenotazione()
+        return NextResponse.json({ error: "Inserisci l'email del destinatario: per la consegna al punto il corriere gli manda lì il codice per ritirare il pacco." }, { status: 400 })
       }
       if (consegnaAlPuntoSp && paSp) {
         if (paSp.indirizzo) consignee.address = String(paSp.indirizzo).substring(0, 35)

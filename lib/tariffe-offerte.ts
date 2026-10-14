@@ -43,6 +43,9 @@ export async function annotaPuntoPoste(admin: any, risultati: any[]) {
       // corriere per la ricerca punti (brt/inpost/sda). Serve al form per mostrare il selettore-punto.
       const courier = spediamoproPudoCourier(cred.service_id)
       if (courier) r._consegna_punto = courier
+      // Qui il codice di ritiro arriva al destinatario per email: il form la chiede prima di comprare
+      // (il server ricontrolla, vedi il ramo spediamopro di /api/spedizioni/crea).
+      if (courier) r._email_obbligatoria = true
     } else {
       const cfg = pudoConfigDaVettore(cred.vettore)
       if (cfg.deposito) r._deposito = true

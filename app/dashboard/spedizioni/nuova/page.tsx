@@ -32,7 +32,7 @@ function iconaCorriere(nome:string): string | null {
 }
 
 interface Cliente { id:string; ragione_sociale:string; so_indirizzo:string|null;so_citta:string|null; so_provincia:string|null; so_cap:string|null; email:string; telefono:string|null }
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string;zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; corriere_nome?:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; avviso_fuori_sagoma?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; _spedisci_assegno?:boolean; _spediamopro_quotation?:any; _deposito?:boolean; _consegna_punto?:string; _inpost_locker?:boolean }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string;zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; corriere_nome?:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; avviso_fuori_sagoma?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; _spedisci_assegno?:boolean; _spediamopro_quotation?:any; _deposito?:boolean; _consegna_punto?:string; _email_obbligatoria?:boolean; _inpost_locker?:boolean }
 interface Collo { lunghezza:string; larghezza:string; altezza:string; peso?:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -407,6 +407,8 @@ export default function NuovaSpedizionePage() {
     // PuntoPoste: blocca prima di comprare se manca il deposito o il punto di consegna (il server ricontrolla).
     if (selected._deposito && !depositoTipo) { setErrore('Scegli dove depositare il pacco (Ufficio Postale o Punto Poste).'); setVista('contratto'); return }
     if (selected._consegna_punto && !puntoArrivo) { setErrore('Seleziona il punto di consegna (PuntoPoste o Ufficio Postale).'); setVista('contratto'); return }
+    // Fermopoint/Locker: il codice di ritiro arriva al destinatario per EMAIL (il server ricontrolla).
+    if (selected._email_obbligatoria && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dest.email.trim())) { setErrore("Inserisci l'email del destinatario: per la consegna al punto il corriere gli manda lì il codice per ritirare il pacco."); setVista('dati'); return }
     if (selected._inpost_locker && !inpostPunto) { setErrore('Seleziona il locker InPost dove sarà consegnato il pacco.'); setVista('contratto'); return }
     setCreating(true)
     const res = await fetch('/api/spedizioni/crea', {
@@ -724,7 +726,7 @@ export default function NuovaSpedizionePage() {
               </div>
               )}
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'12px'}}>
-                <div><label style={lbl}>Email</label><input value={dest.email} onChange={e=>setDest({...dest,email:e.target.value})} style={inp}/></div>
+                <div><label style={lbl}>Email{selected?._email_obbligatoria ? ' *' : ''}</label><input value={dest.email} onChange={e=>setDest({...dest,email:e.target.value})} style={inp}/></div>
                 <div><label style={lbl}>Telefono</label><input value={dest.telefono} onChange={e=>setDest({...dest,telefono:e.target.value})} style={inp}/></div>
               </div>
               {codAlert && (

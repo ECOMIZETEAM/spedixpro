@@ -148,6 +148,10 @@ export function sanitizzaIndirizzoSp(a: SpediamoproAddress, opts?: { emailObblig
 // che SpediamoPro esige, e dare un errore CHIARO invece del 422 tecnico.
 export function telValidoSp(v: any): boolean { const d = String(v ?? '').replace(/[^0-9]/g, ''); return d.length >= 6 && d.length <= 15 }
 
+// Email valida per SpediamoPro? Stesso criterio di pulisciEmail, cioe' di quella che arriva davvero al
+// corriere. Serve sulle consegne a un PUNTO, dove il codice di ritiro viaggia per email.
+export function emailValidaSp(v: any): boolean { return !!pulisciEmail(v) }
+
 export interface SpediamoproParcel {
   weight: number
   length: number
