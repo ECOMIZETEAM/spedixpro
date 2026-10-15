@@ -30,3 +30,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     },
   })
 }
+
+// ANCHE IN POST, identica: stessa chiave, stessi controlli, stesso PDF. La strada documentata resta GET.
+// Il portale di CONTORNO SRL chiede l'etichetta in POST sulle spedizioni Poste (in GET sulle SDA):
+// Next rispondeva 405 senza corpo, e il loro portale salvava quel vuoto come .pdf, che Acrobat non
+// apre. 55 spedizioni su 55 dal 24/09/2026, mai un'etichetta arrivata. Una lettura in POST non
+// scrive niente, quindi accettarla non apre nulla di nuovo.
+export const POST = GET
