@@ -25,6 +25,11 @@ type Fatta = { id: string; numero: number; destinatario: string; contratto: stri
 
 // Il gruppo e' a chi va la distinta (il cliente, oppure il sotto-master per le spedizioni della sua rete)
 // piu' il contratto.
+// Codici che non sono mai una LDV: il CAP dell'etichetta SDA/Poste (5 cifre + "0000") e le letture
+// troppo corte (nessun numero di spedizione ha meno di 9 caratteri; le letture sbagliate della fotocamera
+// sono spesso di 6-8 cifre). Il lettore li ignora e continua a cercare la LDV nello stesso fotogramma.
+const nonELdv = (c: string) => { const s = c.trim(); return s.length < 9 || /^\d{5}0000$/.test(s) }
+
 const chiaveGruppo = (v: Voce) => (v.target_master_id ? 'm:' + v.target_master_id : 'c:' + v.cliente_id) + '|' + (v.contratto || '')
 const destinatario = (v: Voce) => v.target_master_id ? (v.target_master_nome || 'Sotto-master') : (v.cliente_nome || 'Cliente')
 
@@ -44,6 +49,9 @@ export default function ScansionaResiPage() {
   const [fatte, setFatte] = useState<Fatta[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
   const occupato = useRef(false)
+  // Una lettura arrivata mentre il server risponde alla precedente: si tiene e si cerca subito dopo,
+  // invece di perderla (prima: una lettura del CAP in corso faceva cadere quella della LDV).
+  const inAttesa = useRef<{ codici: string[]; manuale: boolean } | null>(null)
   const vociRef = useRef<Voce[]>([])
   const audio = useRef<AudioContext | null>(null)
   const touch = useRef(false)
@@ -88,7 +96,8 @@ export default function ScansionaResiPage() {
   }
 
   const cerca = useCallback(async (codici: string[], manuale: boolean) => {
-    if (!codici.length || occupato.current) return
+    if (!codici.length) return
+    if (occupato.current) { inAttesa.current = { codici, manuale }; return }
     occupato.current = true; setCercando(true)
     try {
       const qs = manuale ? `ldv=${encodeURIComponent(codici[0])}` : codici.map(c => `codice=${encodeURIComponent(c)}`).join('&')
@@ -121,8 +130,12 @@ export default function ScansionaResiPage() {
     } finally {
       occupato.current = false; setCercando(false)
       if (manuale && !touch.current) inputRef.current?.focus()
+      const dopo = inAttesa.current
+      if (dopo) { inAttesa.current = null; setTimeout(() => cercaRef.current(dopo.codici, dopo.manuale), 0) }
     }
   }, [])
+  const cercaRef = useRef(cerca)
+  cercaRef.current = cerca
 
   const onCodici = useCallback((codici: string[]) => { cerca(codici, false) }, [cerca])
 
@@ -208,7 +221,8 @@ export default function ScansionaResiPage() {
         </div>
         {fotocamera && (
           <div style={{ marginTop: '12px', borderRadius: '10px', overflow: 'hidden', background: '#000' }}>
-            <LettoreCodici continuo onCodici={onCodici} altezzaMax="42dvh" />
+            <LettoreCodici continuo onCodici={onCodici} scarta={nonELdv} altezzaMax="42dvh"
+              avvisoScartati="Questo è il codice del CAP: avvicina il telefono al codice della LDV (barre più fitte)" />
           </div>
         )}
         {(esito || cercando) && (
