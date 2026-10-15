@@ -79,7 +79,13 @@ export async function POST(req: NextRequest) {
     }
   }
   if (azione === 'chiudi') {
-    await supabase.from('spedizioni').update({ giacenza_stato: 'chiusa' }).eq('id', spedizioneId)
+    // Col client di SERVIZIO, sulla spedizione gia' verificata come sua qui sopra. Con la sessione
+    // dipendeva dal permesso di UPDATE che il database lascia al cliente su tutte le sue spedizioni,
+    // permesso che va tolto (con quel token si riscrivevano direttamente stato e importi); e l'esito
+    // non era controllato: "success" anche se non cambiava niente.
+    const { error: eChiudi } = await createAdminSupabase().from('spedizioni')
+      .update({ giacenza_stato: 'chiusa' }).eq('id', spedizione.id).eq('cliente_id', clienteId)
+    if (eChiudi) return NextResponse.json({ error: 'Chiusura non riuscita' }, { status: 500 })
     return NextResponse.json({ success: true })
   }
   return NextResponse.json({ error: 'Azione non valida' }, { status: 400 })

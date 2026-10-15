@@ -70,6 +70,9 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
+  // Il cliente ha la sua rotta (/api/cliente/distinte/crea). Qui non c'era nessun controllo di ruolo:
+  // chiamandola a mano un cliente creava una distinta e agganciava spedizioni con la sua sessione.
+  if ((utente?.ruolo || '').toLowerCase() === 'cliente') return NextResponse.json({ error: 'Non consentito' }, { status: 403 })
   const body = await req.json()
   const { spedizioniIds, clienteId, corriereId, vettore } = body
   if (!spedizioniIds?.length) return NextResponse.json({ error: 'Nessuna spedizione selezionata' }, { status: 400 })

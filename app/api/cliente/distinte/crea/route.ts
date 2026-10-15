@@ -38,10 +38,16 @@ export async function POST(req: NextRequest) {
     .single()
   if (errIns || !distinta) return NextResponse.json({ error: 'Errore creazione distinta' }, { status: 500 })
   const validIds = valide.map(s => s.id)
-  const { error: errUpd } = await supabase.from('spedizioni').update({ distinta_id: distinta.id }).in('id', validIds)
+  // Aggancio col client di SERVIZIO, ristretto alle spedizioni del cliente appena rilette qui sopra.
+  // Con la sessione del cliente queste due scritture dipendevano dal permesso di UPDATE che il
+  // database gli lascia su tutte le sue spedizioni, e con quel permesso chiunque abbia il suo token
+  // puo' riscrivere direttamente stato, importi e destinatario. Il permesso va tolto; senza questo
+  // spostamento la distinta sarebbe nata vuota senza errori (PostgREST risponde 204 anche con 0 righe).
+  const adminAggancio = createAdminSupabase()
+  const { error: errUpd } = await adminAggancio.from('spedizioni').update({ distinta_id: distinta.id }).in('id', validIds).eq('cliente_id', clienteId)
   // Distinta = consegnate al corriere → "spedita" (solo le "in lavorazione", per non sovrascrivere
   // in_transito/consegnata). Così si distinguono in elenco dalle etichette create dopo.
-  await supabase.from('spedizioni').update({ stato: 'spedita' }).in('id', validIds).eq('stato', 'in_lavorazione')
+  await adminAggancio.from('spedizioni').update({ stato: 'spedita' }).in('id', validIds).eq('cliente_id', clienteId).eq('stato', 'in_lavorazione')
   if (errUpd) return NextResponse.json({ error: 'Errore aggancio spedizioni' }, { status: 500 })
   // Distinta chiusa: rimanda il tracking ai marketplace collegati (best-effort). UNICA porta:
   // fulfillMarketplace applica la guardia "mai evadere col numero provvisorio" per TUTTE le piattaforme.
