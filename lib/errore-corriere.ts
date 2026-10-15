@@ -164,6 +164,17 @@ export function erroreTrackingPulito(raw: any): string {
 // (SpediamoPro/Spedisci.online) né il testo grezzo dell'API. Deduce la causa dai keyword.
 export function erroreCorrierePulito(raw: any): string {
   const t = String(raw || '').toLowerCase()
+  // CARATTERE NON AMMESSO (POSTE: "Mittente : Campo obbligatorio! Non sono ammessi i caratteri escape e
+  // simboli speciali"). Va PRIMA della regola "Campo obbligatorio": il 15/10/2026 un trattino lungo nel
+  // nome mittente arrivava al cliente come "Indirizzo non valido" e lo mandava a ricontrollare CAP e
+  // provincia, che erano giusti. Sulle SDA EXPRESS L l'errore attraversa due salti di condivisione e ogni
+  // salto lo ritraduce: il testo qui sotto contiene di proposito "simboli speciali" e mittente/destinatario,
+  // cosi' al salto dopo esce identico invece di degradare.
+  if (/simboli speciali|caratteri escape/.test(t)) {
+    const mitt = /mittent|sender/.test(t), dest = /destinat|recipient|consignee/.test(t)
+    const chi = mitt && !dest ? 'del mittente' : dest && !mitt ? 'del destinatario' : 'di mittente o destinatario'
+    return `Il nome o l'indirizzo ${chi} contiene un carattere che il corriere non accetta: riscrivilo a mano con lettere, numeri e punteggiatura semplice (senza simboli speciali) e riprova.`
+  }
   if (/timed\s*out|timeout|0 bytes received/.test(t))
     return 'Il corriere non ha risposto in tempo (rallentamento momentaneo dei suoi sistemi). Riprova tra qualche istante.'
   // CREDITO di un conto A MONTE esaurito — tipico della CONDIVISIONE ("Credito insufficiente:
@@ -193,7 +204,9 @@ export function erroreCorrierePulito(raw: any): string {
   // POSTE/PDB: "Mittente/Destinatario (Indirizzo) : Campo obbligatorio!" = un dato MANCA, non è
   // "sbagliato". Quasi sempre la sede operativa del cliente è incompleta (manca indirizzo/città/CAP):
   // dirlo preciso evita che il master cerchi un errore di formato dove in realtà manca il dato.
-  if (/obbligator|mandatory|\brequired\b/.test(t) && /mittent|destinat|sender|recipient|indiriz|address/.test(t))
+  // "incomplet" riconosce il messaggio qui sotto quando torna indietro da un salto di condivisione: senza,
+  // al salto dopo diventava "Indirizzo non valido".
+  if (/obbligator|mandatory|\brequired\b|incomplet/.test(t) && /mittent|destinat|sender|recipient|indiriz|address/.test(t))
     return 'Dati del mittente o del destinatario incompleti: completa indirizzo, città, CAP e provincia (per il mittente, nella sede operativa del cliente) e riprova.'
   if (/provinc|state|postal|\bzip\b|address|indiriz|\bcap\b|city|citt|recipient|consignee|sender|destinat|mittent/.test(t))
     return 'Indirizzo non valido: controlla nome, indirizzo, città, provincia e CAP di mittente e destinatario.'

@@ -104,8 +104,17 @@ const telPdb = (v?: string) => { const d = String(v || '').replace(/\D/g, ''); r
 // passa), MENTRE la "/" e' AMMESSA (741 indirizzi con "/" sono passati) → la "/" NON si tocca. Tolgo anche
 // i caratteri di controllo; lo spazio sostituisce (non incolla le parole) e si normalizza. Se dopo resta
 // vuoto e' un dato mancante vero (sede operativa non compilata): la LDV fallira' lecitamente, non e' un bug.
+// CARATTERI TIPOGRAFICI: stesso rifiuto, ma POSTE non li elenca. Il 15/10/2026 un cliente non riusciva a
+// spedire perche' il nome mittente era "PROFUMO DEL LEGNO – HOLZDUFT" (trattino lungo); il giorno prima,
+// senza trattino, era partito. Sui dati di 30 giorni: su 55.415 LDV POSTE nessuna ha l'apostrofo curvo ’
+// o il trattino lungo –, mentre sugli altri corrieri il ’ c'e' nel 2,7% delle spedizioni (sarebbero
+// ~1.500). Li converto negli equivalenti semplici, che POSTE accetta ("'" in 4.801 LDV, "-" in 1.874);
+// le virgolette curve fanno la fine della " dritta. Accentate e umlaut invece passano: non si toccano.
 const pulisciPoste = (v?: string) => String(v ?? '')
   .replace(/[\u0000-\u001F\u007F]/g, ' ')
+  .replace(/[\u2013\u2014]/g, '-')
+  .replace(/[\u2018\u2019]/g, "'")
+  .replace(/[\u201C\u201D]/g, ' ')
   .replace(/["\\{}~]/g, ' ')
   .replace(/\s+/g, ' ')
   .trim()
