@@ -432,8 +432,12 @@ export default function RettificaCostiPage() {
           ) : addebito !== 0 ? (
             <span style={{color:addebito<0?'#dc2626':'#16a34a',fontWeight:'700'}}>{addebito.toFixed(4)}</span>
           ) : (
-            <span style={{color:'#dc2626',fontWeight:'700',display:'flex',alignItems:'center',gap:'4px'}}>
-              Errore! 🔄
+            // A ZERO E' VOLUTA: questo livello non deve niente, ma piu' sotto qualcuno si' (qualcunoSottoDeve),
+            // e la riga serve a far arrivare la rettifica fin li'. Prima uno zero non poteva nascere e qui si
+            // scriveva "Errore!": il 15/10 Wave le ha viste cosi' e sembrava un guasto.
+            <span title="Questo livello non deve niente, ma più sotto qualcuno sì: confermala insieme alle altre, serve a far arrivare la rettifica fin lì. Non viene scalato nulla."
+              style={{color:'#475569',fontWeight:'700'}}>
+              {addebito.toFixed(4)} <span style={{fontWeight:500,fontSize:'10.5px'}}>· passa a chi sta sotto</span>
             </span>
           )}
         </td>
