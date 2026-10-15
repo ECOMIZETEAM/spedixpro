@@ -4,6 +4,7 @@ import { logoCorriere, serviziAccessoriDefault } from '@/lib/corriere-logo'
 import { setFlash } from '@/lib/flash'
 import { useDialog } from '@/app/components/DialogProvider'
 import EditorMarkupFasce, { type MarkupOut } from '@/app/components/EditorMarkupFasce'
+import { peggioreSuNolo, type Nolo } from '@/lib/sotto-costo-formule'
 
 // Input decimale che accetta virgola o punto e valori parziali (es. "0.", "0,5")
 // mentre scrivi, restituendo comunque il NUMERO al parent (nessuna modifica al salvataggio).
@@ -49,6 +50,9 @@ interface Props {
   // Costo master dei SUPPLEMENTI, chiave "tipo|nome" (minuscolo) → { valore, perc }: per segnalare in
   // rosso i supplementi (oggi le giacenze) venduti sotto costo, come per le fasce.
   costiSupplMaster?: Record<string, { valore: number; perc: number }>
+  // Il mio NOLO per fascia (col fuel), chiave "tipo|peso|zona_id": giacenze e accessori si pagano
+  // fisso + % del nolo, quindi il confronto si fa su questa base, fascia per fascia.
+  costiNoloMaster?: Record<string, number>
 }
 
 const fattori = [
@@ -134,7 +138,7 @@ function buildAccessoriDa(supplementi: any[], fallback: {nome:string;prezzo:numb
   })
 }
 
-export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere, fattoreCostoMaster, costiMaster, costiSupplMaster }: Props) {
+export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere, fattoreCostoMaster, costiMaster, costiSupplMaster, costiNoloMaster }: Props) {
   const isCorriere = tipoListino === 'corriere'
   const apiAggancio = isCorriere ? '/api/listini/corriere-corrieri' : '/api/listini/cliente-corrieri'
   const basePagina = isCorriere ? '/dashboard/listini/corrieri' : '/dashboard/listini/clienti'
@@ -444,16 +448,37 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     whiteSpace:'nowrap' as const
   })
 
-  // SOTTO COSTO dei supplementi (oggi le giacenze): costo master per nome, confronto fisso e percentuale.
-  const giacenzaSotto = (s: { nome: string; prezzo: any; perc: any }) => {
-    const c = costiSupplMaster?.[`giacenza|${String(s.nome || '').toLowerCase().trim()}`]
-    if (!c) return { fisso: false, perc: false, cost: null as null | { valore: number; perc: number } }
-    return { fisso: Number(s.prezzo) < c.valore - 0.005, perc: Number(s.perc) < c.perc - 0.005, cost: c }
+  // SOTTO COSTO di giacenze e accessori: si pagano fisso + % del NOLO, quindi si confronta il totale,
+  // fascia per fascia (lib/sotto-costo-formule.ts, la stessa regola del Check Sotto Costo). Prima si
+  // confrontava il fisso col fisso e la % con la %: "0 € + 100%" contro "2 € + 0%" era rosso anche
+  // se il cliente paga sempre il nolo intero (Wave, 15/10).
+  const noliEditor = useMemo(() => {
+    const out: Nolo[] = []
+    for (const f of fasce) for (const z of zone) {
+      if (zonaBloccata(z.id)) continue
+      const p = parseFloat((f as any).prezzi[z.id] ?? '')
+      const c = costiNoloMaster?.[`${(f as any).tipo}|${(f as any).peso}|${z.id}`]
+      if (!(p > 0) || c == null) continue
+      out.push({ cliente: Math.round(p * (1 + (parseFloat((f as any).fuel ?? '') || 0) / 100) * 100) / 100, costo: c, etichetta: `${z.nome} fino a ${(f as any).peso} kg` })
+    }
+    return out
+  }, [fasce, zone, costiNoloMaster, guardiaCosti, zoneMasterPossiede])
+  const servizioSotto = (tipo: 'giacenza' | 'accessorio', s: { nome: string; prezzo: any; perc: any }) => {
+    const cost = costiSupplMaster?.[`${tipo}|${String(s.nome || '').toLowerCase().trim()}`] || null
+    const p = cost ? peggioreSuNolo({ valore: Number(s.prezzo) || 0, perc: Number(s.perc) || 0 }, cost, noliEditor) : null
+    return { sotto: !!p && p.differenza < -0.005, p, cost }
   }
+  const costoApertura = costiSupplMaster?.['giacenza_apertura|apertura dossier giacenza']
+  const aperturaSotto = !!costoApertura && costoApertura.valore > 0 && (Number(aperturaGiacenza) || 0) < costoApertura.valore - 0.005
+  const eurE = (n: number) => Number(n).toFixed(2).replace('.', ',')
+  const notaSotto = (g: ReturnType<typeof servizioSotto>) => g.sotto && g.cost && g.p
+    ? <div style={{fontSize:'10px',color:'#dc2626',marginTop:'2px',fontWeight:400}}>paghi {eurE(g.cost.valore)} € + {g.cost.perc}% del nolo: perdi fino a {eurE(-g.p.differenza)} € ({g.p.etichetta})</div>
+    : null
   // Pallino rosso sui tab: quel tab ha almeno una riga sotto costo?
   const qualcheFasciaSotto = fasce.some(f => zone.some(z => { const costo = costiMaster?.[`${(f as any).tipo}|${(f as any).peso}|${z.id}`]; const p = parseFloat((f as any).prezzi[z.id] ?? ''); return !zonaBloccata(z.id) && costo != null && p > 0 && p < costo }))
-  const qualcheGiacenzaSotto = giacenzeServizi.some((s: any) => { const g = giacenzaSotto(s); return g.fisso || g.perc })
-  const tabSotto: Record<string, boolean> = { pesi: qualcheFasciaSotto, giacenze: qualcheGiacenzaSotto }
+  const qualcheGiacenzaSotto = aperturaSotto || giacenzeServizi.some((s: any) => servizioSotto('giacenza', s).sotto)
+  const qualcheAccessorioSotto = serviziAccessori.some((s: any) => servizioSotto('accessorio', s).sotto)
+  const tabSotto: Record<string, boolean> = { pesi: qualcheFasciaSotto, giacenze: qualcheGiacenzaSotto, servizi: qualcheAccessorioSotto }
 
   // Corpo dell'editor del contratto aperto (dentro la tendina)
   const editorContratto = (
@@ -690,14 +715,14 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
               <th style={{width:'40px',borderBottom:'1px solid #d1d5db'}}></th>
             </tr></thead>
             <tbody>
-              {serviziAccessori.map((s,i)=>(
+              {serviziAccessori.map((s,i)=>{ const g = servizioSotto('accessorio', s); const rosso = g.sotto ? {borderColor:'#dc2626',background:'#fef2f2',color:'#b91c1c',fontWeight:700} : {}; return (
                 <tr key={i} style={{borderBottom:'1px solid #e5e7eb'}}>
-                  <td style={{padding:'8px 12px'}}><input value={s.nome||''} onChange={e=>setServiziAccessori(prev=>prev.map((x,idx)=>idx===i?{...x,nome:e.target.value}:x))} style={{...inp,width:'260px',color:'#f97316',fontWeight:'500'}} placeholder="Nome servizio (es. Consegna al piano)"/></td>
-                  <td style={{padding:'8px 12px'}}><NumInput value={s.prezzo} onChange={n=>setServiziAccessori(prev=>prev.map((x,idx)=>idx===i?{...x,prezzo:n}:x))} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="0"/></td>
-                  <td style={{padding:'8px 12px'}}><NumInput value={s.perc} onChange={n=>setServiziAccessori(prev=>prev.map((x,idx)=>idx===i?{...x,perc:n}:x))} style={{...inp,width:'200px',textAlign:'right' as const}} placeholder="0"/></td>
+                  <td style={{padding:'8px 12px'}}><input value={s.nome||''} onChange={e=>setServiziAccessori(prev=>prev.map((x,idx)=>idx===i?{...x,nome:e.target.value}:x))} style={{...inp,width:'260px',color:g.sotto?'#b91c1c':'#f97316',fontWeight:g.sotto?'700':'500'}} placeholder="Nome servizio (es. Consegna al piano)"/>{notaSotto(g)}</td>
+                  <td style={{padding:'8px 12px'}}><NumInput value={s.prezzo} onChange={n=>setServiziAccessori(prev=>prev.map((x,idx)=>idx===i?{...x,prezzo:n}:x))} style={{...inp,width:'120px',textAlign:'right' as const,...rosso}} placeholder="0"/></td>
+                  <td style={{padding:'8px 12px'}}><NumInput value={s.perc} onChange={n=>setServiziAccessori(prev=>prev.map((x,idx)=>idx===i?{...x,perc:n}:x))} style={{...inp,width:'200px',textAlign:'right' as const,...rosso}} placeholder="0"/></td>
                   <td style={{padding:'8px 12px',textAlign:'center' as const}}><button onClick={()=>setServiziAccessori(prev=>prev.filter((_,idx)=>idx!==i))} title="Rimuovi voce" style={{background:'none',border:'none',color:'#dc2626',fontSize:'16px',cursor:'pointer',lineHeight:1,padding:0}}>×</button></td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
           <button onClick={()=>setServiziAccessori(prev=>[...prev,{nome:'',prezzo:0,perc:0}])} style={{marginTop:'10px',background:'none',border:'none',color:'#f97316',fontSize:'13px',fontWeight:'600',cursor:'pointer',padding:0}}>+ Aggiungi servizio</button>
@@ -714,16 +739,14 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
               <th style={{textAlign:'left' as const,padding:'9px 12px',fontWeight:'700',color:'#1a1a1a',borderBottom:'1px solid #d1d5db'}}>+% del valore della spedizione</th>
             </tr></thead>
             <tbody>
-              {giacenzeServizi.map((s,i)=>{ const g = giacenzaSotto(s); return (
+              {giacenzeServizi.map((s,i)=>{ const g = servizioSotto('giacenza', s); const rosso = g.sotto ? {borderColor:'#dc2626',background:'#fef2f2',color:'#b91c1c',fontWeight:700} : {}; return (
                 <tr key={i} style={{borderBottom:'1px solid #e5e7eb'}}>
-                  <td style={{padding:'8px 12px',color:(g.fisso||g.perc)?'#b91c1c':'#f97316',fontWeight:(g.fisso||g.perc)?'700' as const:'500' as const}}>{s.nome}</td>
+                  <td style={{padding:'8px 12px',color:g.sotto?'#b91c1c':'#f97316',fontWeight:g.sotto?'700' as const:'500' as const}}>{s.nome}{notaSotto(g)}</td>
                   <td style={{padding:'8px 12px'}}>
-                    <NumInput value={s.prezzo} onChange={n=>setGiacenzeServizi(prev=>prev.map((x,idx)=>idx===i?{...x,prezzo:n}:x))} style={{...inp,width:'120px',textAlign:'right' as const,...(g.fisso?{borderColor:'#dc2626',background:'#fef2f2',color:'#b91c1c',fontWeight:700}:{})}} placeholder="0"/>
-                    {g.fisso && g.cost && <div style={{fontSize:'10px',color:'#dc2626',marginTop:'2px'}}>costo {g.cost.valore.toFixed(2)} €</div>}
+                    <NumInput value={s.prezzo} onChange={n=>setGiacenzeServizi(prev=>prev.map((x,idx)=>idx===i?{...x,prezzo:n}:x))} style={{...inp,width:'120px',textAlign:'right' as const,...rosso}} placeholder="0"/>
                   </td>
                   <td style={{padding:'8px 12px'}}>
-                    <NumInput value={s.perc} onChange={n=>setGiacenzeServizi(prev=>prev.map((x,idx)=>idx===i?{...x,perc:n}:x))} style={{...inp,width:'200px',textAlign:'right' as const,...(g.perc?{borderColor:'#dc2626',background:'#fef2f2',color:'#b91c1c',fontWeight:700}:{})}} placeholder="0"/>
-                    {g.perc && g.cost && <div style={{fontSize:'10px',color:'#dc2626',marginTop:'2px'}}>costo {g.cost.perc}%</div>}
+                    <NumInput value={s.perc} onChange={n=>setGiacenzeServizi(prev=>prev.map((x,idx)=>idx===i?{...x,perc:n}:x))} style={{...inp,width:'200px',textAlign:'right' as const,...rosso}} placeholder="0"/>
                   </td>
                 </tr>
               )})}
@@ -731,7 +754,8 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
           </table>
           <div style={{marginTop:'16px',display:'flex',alignItems:'center',gap:'12px',fontSize:'13px'}}>
             <label style={{color:'#1a1a1a',fontWeight:'600'}}>Apertura dossier giacenza: <span style={{color:'#dc2626'}}>*</span></label>
-            <NumInput value={aperturaGiacenza} onChange={setAperturaGiacenza} style={{...inp,width:'80px',textAlign:'right' as const}} placeholder="0"/>
+            <NumInput value={aperturaGiacenza} onChange={setAperturaGiacenza} style={{...inp,width:'80px',textAlign:'right' as const,...(aperturaSotto?{borderColor:'#dc2626',background:'#fef2f2',color:'#b91c1c',fontWeight:700}:{})}} placeholder="0"/>
+            {aperturaSotto && costoApertura && <span style={{fontSize:'11px',color:'#dc2626'}}>costo {eurE(costoApertura.valore)} €</span>}
           </div>
           <div style={{fontSize:'11px',color:'#f97316',marginTop:'4px'}}>* Il costo sarà addebitato solo nella fase di svincolo da parte del cliente</div>
         </div>

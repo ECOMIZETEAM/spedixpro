@@ -3,6 +3,9 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { rilevaSottoCosto } from '@/lib/sotto-costo'
+import { parseScaglioniSupp } from '@/lib/pricing'
+import { chiaveServizioGiacenza } from '@/lib/sotto-costo-formule'
 
 // CHECK SOTTO COSTO — quello che vendi ai tuoi clienti sotto quello che paghi tu.
 //
@@ -17,18 +20,6 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 //
 // Sola lettura. L'adeguamento e' nella POST.
 
-type Riga = {
-  chiave: string
-  listino_id: string; listino_nome: string; clienti: string[]
-  corriere: string; zona: string
-  tipo: 'fascia' | 'supplemento'
-  descrizione: string
-  prezzo_cliente: number; costo_tuo: number; differenza: number
-  costo_perc?: number        // supplementi: la percentuale che paghi tu (per adeguare anche la %)
-  corriere_id?: string       // per il deep-link all'editor sul corriere giusto (?corriere=)
-  fascia_id?: string; supplemento_id?: string
-}
-
 export async function GET(_req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -36,117 +27,8 @@ export async function GET(_req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente as any); if (_bloccoAg) return _bloccoAg
   if (!utente?.master_id || !gestisceLaRete(utente)) return NextResponse.json({ righe: [], totale: 0 })
-  const mio = utente.master_id
-  const admin = createAdminSupabase()
-
-  // I MIEI COSTI: listino corriere del master, per corriere+zona+fascia. Col fuel dentro, perche'
-  // e' quello che pago davvero.
-  const { data: mieiCorrieri } = await admin.from('corrieri').select('id,nome_contratto').eq('master_id', mio)
-  const corrIds = (mieiCorrieri || []).map((c: any) => c.id)
-  if (!corrIds.length) return NextResponse.json({ righe: [], totale: 0 })
-  const nomeCorr = new Map<string, string>((mieiCorrieri || []).map((c: any) => [c.id, c.nome_contratto || 'Contratto']))
-
-  const { data: zone } = await admin.from('zone').select('id,nome,corriere_id').in('corriere_id', corrIds)
-  const nomeZona = new Map<string, string>((zone || []).map((z: any) => [z.id, z.nome || 'Zona']))
-
-  const conFuel = (prezzo: any, fuel: any) => {
-    const p = Number(prezzo) || 0, f = Number(fuel) || 0
-    return Math.round(p * (1 + f / 100) * 100) / 100
-  }
-
-  const costoFascia = new Map<string, number>()   // corriere|zona|peso_max -> costo mio
-  for (let i = 0; i < corrIds.length; i += 50) {
-    for (let da = 0; ; da += 1000) {
-      const { data } = await admin.from('listini_corrieri_fasce')
-        .select('corriere_id,zona_id,peso_max,prezzo,fuel').in('corriere_id', corrIds.slice(i, i + 50))
-        .order('id').range(da, da + 999)
-      for (const f of (data || [])) costoFascia.set(`${(f as any).corriere_id}|${(f as any).zona_id}|${(f as any).peso_max}`, conFuel((f as any).prezzo, (f as any).fuel))
-      if (!data || data.length < 1000) break
-    }
-  }
-  const costoSupp = new Map<string, { valore: number; perc: number }>()   // corriere|tipo|nome -> quanto pago
-  for (let i = 0; i < corrIds.length; i += 50) {
-    for (let da = 0; ; da += 1000) {
-      const { data } = await admin.from('listini_corrieri_supplementi')
-        .select('corriere_id,tipo,nome,valore,descrizione').in('corriere_id', corrIds.slice(i, i + 50))
-        .order('id').range(da, da + 999)
-      for (const s of (data || [])) {
-        let perc = 0; try { perc = Number(JSON.parse((s as any).descrizione || '{}')?.perc) || 0 } catch { /* non JSON */ }
-        costoSupp.set(`${(s as any).corriere_id}|${(s as any).tipo}|${String((s as any).nome || '').toLowerCase().trim()}`, { valore: Number((s as any).valore) || 0, perc })
-      }
-      if (!data || data.length < 1000) break
-    }
-  }
-
-  // I MIEI LISTINI CLIENTE (solo quelli assegnati a clienti veri: quelli dei sotto-master sono
-  // all'ingrosso e li governa un'altra logica).
-  const { data: listini } = await admin.from('listini_clienti').select('id,nome').eq('master_id', mio)
-  const nomeListino = new Map<string, string>((listini || []).map((l: any) => [l.id, l.nome || 'Listino']))
-  const ids = [...nomeListino.keys()]
-  if (!ids.length) return NextResponse.json({ righe: [], totale: 0 })
-  const clientiDi = new Map<string, string[]>()
-  for (let i = 0; i < ids.length; i += 100) {
-    const { data } = await admin.from('clienti').select('ragione_sociale,listino_cliente_id').in('listino_cliente_id', ids.slice(i, i + 100))
-    for (const c of (data || [])) {
-      const k = (c as any).listino_cliente_id
-      if (!clientiDi.has(k)) clientiDi.set(k, [])
-      clientiDi.get(k)!.push((c as any).ragione_sociale || '—')
-    }
-  }
-
-  const righe: Riga[] = []
-  // ── FASCE: stessa zona, stessa fascia di peso ──
-  for (let i = 0; i < ids.length; i += 50) {
-    for (let da = 0; ; da += 1000) {
-      const { data } = await admin.from('listini_clienti_fasce')
-        .select('id,listino_id,corriere_id,zona_id,peso_max,prezzo,fuel').in('listino_id', ids.slice(i, i + 50))
-        .order('id').range(da, da + 999)
-      for (const f of (data || [])) {
-        const mioCosto = costoFascia.get(`${(f as any).corriere_id}|${(f as any).zona_id}|${(f as any).peso_max}`)
-        if (mioCosto == null) continue          // fascia che non ho: non ho un costo da confrontare
-        const prezzo = conFuel((f as any).prezzo, (f as any).fuel)
-        if (prezzo >= mioCosto - 0.005) continue
-        righe.push({
-          chiave: `f:${(f as any).id}`, fascia_id: (f as any).id, corriere_id: (f as any).corriere_id,
-          listino_id: (f as any).listino_id, listino_nome: nomeListino.get((f as any).listino_id) || 'Listino',
-          clienti: clientiDi.get((f as any).listino_id) || [],
-          corriere: nomeCorr.get((f as any).corriere_id) || '—', zona: nomeZona.get((f as any).zona_id) || '—',
-          tipo: 'fascia', descrizione: `fino a ${(f as any).peso_max} kg`,
-          prezzo_cliente: prezzo, costo_tuo: mioCosto, differenza: Math.round((prezzo - mioCosto) * 100) / 100,
-        })
-      }
-      if (!data || data.length < 1000) break
-    }
-  }
-  // ── SUPPLEMENTI: reso, assicurazione, contrassegno, giacenza… stesso nome, stesso contratto ──
-  for (let i = 0; i < ids.length; i += 50) {
-    for (let da = 0; ; da += 1000) {
-      const { data } = await admin.from('listini_clienti_supplementi')
-        .select('id,listino_id,corriere_id,tipo,nome,valore,descrizione').in('listino_id', ids.slice(i, i + 50))
-        .order('id').range(da, da + 999)
-      for (const s of (data || [])) {
-        const mioS = costoSupp.get(`${(s as any).corriere_id}|${(s as any).tipo}|${String((s as any).nome || '').toLowerCase().trim()}`)
-        if (!mioS) continue
-        let perc = 0; try { perc = Number(JSON.parse((s as any).descrizione || '{}')?.perc) || 0 } catch { /* non JSON */ }
-        const val = Number((s as any).valore) || 0
-        // sotto costo se il fisso E la percentuale non arrivano a quello che pago io
-        const sottoFisso = val < mioS.valore - 0.005
-        const sottoPerc = perc < mioS.perc - 0.005
-        if (!sottoFisso && !sottoPerc) continue
-        righe.push({
-          chiave: `s:${(s as any).id}`, supplemento_id: (s as any).id, corriere_id: (s as any).corriere_id,
-          listino_id: (s as any).listino_id, listino_nome: nomeListino.get((s as any).listino_id) || 'Listino',
-          clienti: clientiDi.get((s as any).listino_id) || [],
-          corriere: nomeCorr.get((s as any).corriere_id) || '—', zona: (s as any).tipo,
-          tipo: 'supplemento',
-          descrizione: `${(s as any).nome}${sottoPerc ? ` (tu ${mioS.perc}%, lui ${perc}%)` : ''}`,
-          prezzo_cliente: val, costo_tuo: mioS.valore, costo_perc: mioS.perc, differenza: Math.round((val - mioS.valore) * 100) / 100,
-        })
-      }
-      if (!data || data.length < 1000) break
-    }
-  }
-  righe.sort((a, b) => a.differenza - b.differenza)
+  // La rilevazione sta in lib/sotto-costo.ts: ogni supplemento col calcolo con cui si addebita.
+  const righe = await rilevaSottoCosto(createAdminSupabase(), utente.master_id)
   return NextResponse.json({
     righe: righe.slice(0, 2000),
     totale: righe.length,
@@ -161,7 +43,8 @@ export async function GET(_req: NextRequest) {
 // Con 0 e 0 non si alza nulla ("metto 0 = non la alzo"). Si rilegge il prezzo corrente, così due clic
 // non si sommano a sorpresa su un valore vecchio.
 // Supplementi (reso/assicurazione/contrassegno): l'aumento % alza sia il fisso sia la percentuale,
-// l'aumento € solo il fisso (su una percentuale un importo in € non ha senso).
+// l'aumento € solo il fisso (su una percentuale un importo in € non ha senso). Una riga che manca
+// nel listino del cliente si crea, partendo da quello che il cliente paga oggi senza riga.
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -182,17 +65,16 @@ export async function POST(req: NextRequest) {
   const alza = (prezzo: number) => Math.round((prezzo * (1 + marginePerc / 100) + margineFisso) * 100) / 100
   const alzaPerc = (perc: number) => Math.round(perc * (1 + marginePerc / 100) * 100) / 100
 
-  // Si rilegge la situazione ADESSO (non ci si fida di quello che aveva a video chi preme).
-  const stato = await GET(req as any)
-  const dati: any = await stato.json()
-  const perChiave = new Map<string, any>((dati?.righe || []).map((r: any) => [r.chiave, r]))
+  // Si rilegge la situazione ADESSO (non ci si fida di quello che aveva a video chi preme). Tutte le
+  // righe, non le prime 2.000 che la GET manda alla pagina: "Adegua tutte" deve arrivare in fondo.
+  const perChiave = new Map<string, any>((await rilevaSottoCosto(admin, mio)).map(r => [r.chiave, r]))
 
   // I LISTINI DEVONO ESSERE MIEI. Qui si scrive con la chiave di servizio, che salta le regole per
   // riga: l'appartenenza si ricontrolla a mano, come nelle altre porte.
   const { data: miei } = await admin.from('listini_clienti').select('id').eq('master_id', mio)
   const mieiIds = new Set((miei || []).map((l: any) => l.id))
 
-  let fatte = 0, saltate = 0
+  let fatte = 0, saltate = 0, invariate = 0
   for (const k of chiavi) {
     const r = perChiave.get(k)
     if (!r || !mieiIds.has(r.listino_id)) { saltate++; continue }
@@ -208,16 +90,53 @@ export async function POST(req: NextRequest) {
       const { data: upd } = await admin.from('listini_clienti_fasce').update({ prezzo: prezzoBase }).eq('id', r.fascia_id).select('id')
       if (upd && upd.length) fatte++; else saltate++
     } else if (r.tipo === 'supplemento' && r.supplemento_id) {
-      // valore e percentuale stanno nel JSON `descrizione` (letto dal pannello) + la colonna `valore`.
-      // L'aumento % alza entrambi; l'aumento € solo il fisso.
-      const { data: s } = await admin.from('listini_clienti_supplementi').select('valore,descrizione,nome').eq('id', r.supplemento_id).maybeSingle()
-      let d: any = {}; try { d = JSON.parse((s as any)?.descrizione || '{}') } catch { /* non JSON */ }
-      const newVal = alza(Number((s as any)?.valore) || 0)
-      const newPerc = alzaPerc(Number(d?.perc) || 0)
-      d.prezzo = newVal; d.perc = newPerc; if (d.nome == null) d.nome = (s as any)?.nome
-      const { data: upd } = await admin.from('listini_clienti_supplementi').update({ valore: newVal, descrizione: JSON.stringify(d) }).eq('id', r.supplemento_id).select('id')
+      const { data: s } = await admin.from('listini_clienti_supplementi').select('id,tipo,valore,descrizione,nome').eq('id', r.supplemento_id).maybeSingle()
+      if (!s) { saltate++; continue }
+      let d: any = {}; try { d = JSON.parse((s as any).descrizione || '{}') || {} } catch { /* non JSON */ }
+      let agg: any, prima: number, dopo: number, primaP = 0, dopoP = 0
+      if (s.tipo === 'contrassegno' || s.tipo === 'assicurazione') {
+        // Lo scaglione si addebita da `prezzo_fisso` del JSON (parseScaglioniSupp). Prima qui si
+        // scrivevano `valore` e `prezzo`: l'addebito non li leggeva, e "adeguato" non cambiava niente.
+        const sc = parseScaglioniSupp([s], s.tipo)[0]
+        prima = sc.prezzo_fisso; dopo = alza(prima); primaP = sc.perc; dopoP = alzaPerc(primaP)
+        d.prezzo_fisso = String(dopo); if (dopoP > 0) d.perc = String(dopoP)
+        agg = { valore: dopo, descrizione: JSON.stringify(d) }
+      } else if (['giacenza_apertura', 'sponda', 'ritiro'].includes(s.tipo)) {
+        // un importo solo, nella colonna `valore`: la descrizione (soglia della sponda, % del ritiro) resta
+        prima = Number(s.valore) || 0; dopo = alza(prima)
+        agg = { valore: dopo }
+      } else {
+        // giacenze e accessori: fisso + % del nolo. L'accessorio si addebita dal `prezzo` del JSON se
+        // c'e' (lib/cascata.ts, lib/prezzo-cliente.ts), la giacenza dalla colonna `valore`.
+        prima = s.tipo === 'accessorio' ? (Number(d?.prezzo ?? s.valore ?? 0) || 0) : (Number(s.valore) || 0)
+        dopo = alza(prima); primaP = Number(d?.perc) || 0; dopoP = alzaPerc(primaP)
+        d.prezzo = dopo; d.perc = dopoP; if (d.nome == null) d.nome = s.nome
+        agg = { valore: dopo, descrizione: JSON.stringify(d) }
+      }
+      // Una riga a 0 € con un aumento in % resta a 0: non e' "adeguata", va detto al master.
+      if (dopo === prima && dopoP === primaP) { invariate++; continue }
+      const { data: upd } = await admin.from('listini_clienti_supplementi').update(agg).eq('id', s.id).select('id')
       if (upd && upd.length) fatte++; else saltate++
+    } else if (r.tipo === 'supplemento' && r.manca) {
+      // RIGA ASSENTE nel listino del cliente: oggi il cliente paga il predefinito (zero, o il nolo
+      // intero per il reso). Si alza quello, come una riga che c'e', e la si crea.
+      const m = r.manca
+      const dopo = alza(Number(m.valore) || 0), dopoP = alzaPerc(Number(m.perc) || 0)
+      if (dopo === (Number(m.valore) || 0) && dopoP === (Number(m.perc) || 0)) { invariate++; continue }
+      // Nel frattempo qualcuno puo' averla creata (un altro clic, l'editor): niente doppioni.
+      const { data: esistenti } = await admin.from('listini_clienti_supplementi').select('nome')
+        .eq('listino_id', r.listino_id).eq('corriere_id', r.corriere_id).eq('tipo', m.tipo)
+      const stessa = (nome: string) => m.tipo !== 'giacenza'
+        || (chiaveServizioGiacenza(m.nome) ? chiaveServizioGiacenza(nome) === chiaveServizioGiacenza(m.nome) : String(nome || '').toLowerCase().trim() === String(m.nome).toLowerCase().trim())
+      if ((esistenti || []).some((x: any) => stessa(x.nome))) { saltate++; continue }
+      const riga = m.tipo === 'giacenza'
+        ? { tipo: 'giacenza', nome: m.nome, valore: dopo, tipo_calcolo: 'fisso', descrizione: JSON.stringify({ nome: m.nome, prezzo: dopo, perc: dopoP }) }
+        : m.tipo === 'giacenza_apertura'
+          ? { tipo: 'giacenza_apertura', nome: 'Apertura dossier giacenza', valore: dopo, tipo_calcolo: 'fisso' }
+          : { tipo: 'sponda', nome: 'Sponda', valore: dopo, tipo_calcolo: 'per_kg', descrizione: JSON.stringify({ soglia_kg: m.soglia_kg }) }
+      const { data: ins } = await admin.from('listini_clienti_supplementi').insert({ listino_id: r.listino_id, corriere_id: r.corriere_id, ...riga }).select('id')
+      if (ins && ins.length) fatte++; else saltate++
     } else saltate++
   }
-  return NextResponse.json({ ok: true, adeguate: fatte, saltate })
+  return NextResponse.json({ ok: true, adeguate: fatte, saltate, invariate })
 }

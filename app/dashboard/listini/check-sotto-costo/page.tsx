@@ -60,7 +60,7 @@ export default function CheckSottoCosto() {
     if (!res || res.error) { await dialog.alert({ title: 'Errore', message: res?.error || 'Non sono riuscito ad adeguare.' }); return }
     await dialog.alert({
       title: 'Fatto',
-      message: `${res.adeguate} righe adeguate.${res.saltate ? ` ${res.saltate} saltate: erano già a posto o non sono tue.` : ''}`,
+      message: `${res.adeguate} righe adeguate.${res.invariate ? ` ${res.invariate} non sono cambiate: sono a 0 € e un aumento in % su zero resta zero, per quelle usa un aumento in €.` : ''}${res.saltate ? ` ${res.saltate} saltate: erano già a posto o non sono tue.` : ''}`,
     })
     carica()
   }
@@ -73,7 +73,8 @@ export default function CheckSottoCosto() {
       <h1 style={{ fontSize: 22, fontWeight: 800, margin: '0 0 4px' }}>Check sotto costo</h1>
       <p style={{ color: '#666', fontSize: 13.5, margin: '0 0 16px', lineHeight: 1.5 }}>
         Le righe dei tuoi listini cliente dove <strong>vendi sotto quello che paghi tu</strong>: zona, fascia di peso,
-        reso, assicurazione, contrassegno. Ogni spedizione su una di queste righe ti fa perdere la differenza.
+        giacenze, servizi accessori, assicurazione, contrassegno, anche le voci che nel listino del cliente mancano (e quindi
+        lui non paga). Giacenze e servizi si confrontano col nolo vero, fascia per fascia: vedi il caso peggiore.
         Con <strong>Adegua</strong> alzi quei prezzi dell'importo che scegli (€ o %), applicato al prezzo di vendita attuale: controlla che superi il tuo costo (colonna "Paghi").
       </p>
 

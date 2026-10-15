@@ -76,12 +76,14 @@ export default async function ModificaListinoPage({
   // Costo master dei SUPPLEMENTI (per evidenziare in rosso i supplementi sotto costo nell'editor):
   // chiave "tipo|nome" (minuscolo) → { valore fisso, perc }. Oggi riguarda soprattutto le GIACENZE.
   const costiSupplMaster: Record<string, { valore: number; perc: number }> = {}
+  // Il mio NOLO per fascia, col fuel: e' la base su cui si pagano giacenze e accessori a percentuale.
+  const costiNoloMaster: Record<string, number> = {}
   if (corriereSelezionato?.id && utente?.master_id) {
     const { data: listiniCorr } = await supabase.from('listini_corrieri').select('id').eq('master_id', utente.master_id)
     const idsCorr = (listiniCorr || []).map((l: any) => l.id)
     if (idsCorr.length) {
       const { data: fasceCosto } = await supabase.from('listini_corrieri_fasce')
-        .select('zona_id,peso_max,prezzo,tipo')
+        .select('zona_id,peso_max,prezzo,tipo,fuel')
         .in('listino_id', idsCorr)
         .eq('corriere_id', corriereSelezionato.id)
       for (const f of fasceCosto || []) {
@@ -90,18 +92,23 @@ export default async function ModificaListinoPage({
         // Piu' listini del master possono avere la stessa fascia: si tiene il costo PIU' ALTO,
         // cioe' il caso peggiore. Segnalare troppo poco sarebbe inutile.
         if (!isNaN(p) && (costiMaster[chiave] == null || p > costiMaster[chiave])) costiMaster[chiave] = p
+        const n = Math.round(p * (1 + (Number((f as any).fuel) || 0) / 100) * 100) / 100
+        if (!isNaN(n) && (costiNoloMaster[chiave] == null || n > costiNoloMaster[chiave])) costiNoloMaster[chiave] = n
       }
       const { data: suppCosto } = await supabase.from('listini_corrieri_supplementi')
-        .select('tipo,nome,valore,descrizione')
+        .select('id,tipo,nome,valore,descrizione')
         .in('listino_id', idsCorr)
         .eq('corriere_id', corriereSelezionato.id)
+        .order('id', { ascending: true })
       for (const s of suppCosto || []) {
-        let perc = 0; try { perc = Number(JSON.parse((s as any).descrizione || '{}')?.perc) || 0 } catch { /* non JSON */ }
-        const k = `${(s as any).tipo}|${String((s as any).nome || '').toLowerCase().trim()}`
-        const v = Number((s as any).valore) || 0
-        const prev = costiSupplMaster[k]
-        // caso peggiore: fisso e percentuale piu' alti visti (indipendenti)
-        costiSupplMaster[k] = { valore: Math.max(v, prev?.valore || 0), perc: Math.max(perc, prev?.perc || 0) }
+        let d: any = {}; try { d = JSON.parse((s as any).descrizione || '{}') || {} } catch { /* non JSON */ }
+        const k = `${(s as any).tipo}|${String((s as any).nome || d?.nome || '').toLowerCase().trim()}`
+        // La PRIMA riga per id, come la legge l'addebito (prezzoGiacenzaMaster, accessori in
+        // lib/cascata.ts), e come il Check Sotto Costo: se no editor e Check direbbero cose diverse.
+        // L'accessorio si paga dal `prezzo` del JSON se c'e'.
+        if (costiSupplMaster[k]) continue
+        const v = (s as any).tipo === 'accessorio' ? (Number(d?.prezzo ?? (s as any).valore ?? 0) || 0) : (Number((s as any).valore) || 0)
+        costiSupplMaster[k] = { valore: v, perc: Number(d?.perc) || 0 }
       }
     }
   }
@@ -135,6 +142,7 @@ export default async function ModificaListinoPage({
       clientiAssegnati={clientiAssegnati||[]}
       costiMaster={costiMaster}
       costiSupplMaster={costiSupplMaster}
+      costiNoloMaster={costiNoloMaster}
       tipoListino="cliente"
     />
     </>
