@@ -3,6 +3,9 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { isAgente, clientiAgente } from '@/lib/agente'
 import { fetchAll } from '@/lib/fetch-all'
+import { vedeLaRete } from '@/lib/ruoli'
+import { eDiscendente } from '@/lib/rete-masters'
+import { senzaNomiFornitori } from '@/lib/corriere-logo'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,7 +28,9 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ righe: [], master: {}, cliente: {} })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
   const masterId = utente?.master_id
-  if (!masterId || (utente?.ruolo || '').toLowerCase() === 'cliente') {
+  // Prima bastava "non essere cliente", e passava anche l'autista. Lo storico dei crediti e' del
+  // portale del master (master, admin, operatore) e dell'agente, che pero' vede solo i suoi clienti.
+  if (!masterId || !vedeLaRete(utente)) {
     return NextResponse.json({ righe: [], master: {}, cliente: {} })
   }
 
@@ -59,12 +64,17 @@ export async function GET(req: NextRequest) {
   if (masterSel) {
     // Sotto-master agganciato: accrediti sul SUO credito, fatti da me.
     if (isAgente(utente)) return NextResponse.json({ righe: [], master: master || {}, cliente: {} })
+    // Il sotto-master deve stare SOTTO di me. Prima si controllava solo che esistesse: con l'id di un
+    // master qualunque, anche di un'altra rete, si leggevano accrediti e saldo suoi (la lettura e' con
+    // la chiave di servizio, quindi la RLS non faceva da rete). Stesso controllo di Consumabili.
     const { data: sub } = await admin.from('masters').select('id,nome,parent_master_id').eq('id', masterSel).maybeSingle()
-    if (!sub) return NextResponse.json({ righe: [], master: master || {}, cliente: {} })
+    if (!sub || !(await eDiscendente(admin, masterSel, masterId))) return NextResponse.json({ righe: [], master: master || {}, cliente: {} })
     intestazione = sub.nome || 'Sotto-master'
+    // Solo il conto RETE, cioe' il credito che il sotto-master tiene presso la mia rete. Sul conto
+    // 'proprio' stanno i rimborsi dei SUOI contratti, che col mio storico non c'entrano.
     const mv = await fetchAll(() => {
       let q = admin.from('movimenti').select('created_at,tipo,descrizione,riferimento,importo,saldo_dopo')
-        .eq('master_target_id', masterSel).gt('importo', 0)
+        .eq('master_target_id', masterSel).gt('importo', 0).or('conto.is.null,conto.neq.proprio')
       if (dal) q = q.gte('created_at', dal)
       if (finePeriodo) q = q.lte('created_at', finePeriodo)
       return q.order('created_at', { ascending: false }).order('id', { ascending: true })
@@ -92,14 +102,18 @@ export async function GET(req: NextRequest) {
   }
 
   righe.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+  // Il credito residuo dei clienti lo vede solo lo staff del master: all'agente no, come in Lista
+  // Movimenti e in Consumabili. Gli accrediti restano, il saldo dopo ciascuno no.
+  const nascondiSaldo = isAgente(utente)
   const out = righe.map((r: any) => ({
     data: r.created_at,
     cliente: r.cliente,
     tipo: ETICHETTA[r.tipo] || r.tipo,
-    descrizione: r.descrizione || '',
-    riferimento: r.riferimento || '',
+    // All'agente senza i nomi dei fornitori tecnici scritti a mano nelle descrizioni.
+    descrizione: nascondiSaldo ? senzaNomiFornitori(r.descrizione) : (r.descrizione || ''),
+    riferimento: nascondiSaldo ? senzaNomiFornitori(r.riferimento) : (r.riferimento || ''),
     importo: Number(r.importo) || 0,
-    saldo_dopo: r.saldo_dopo == null ? null : Number(r.saldo_dopo),
+    saldo_dopo: nascondiSaldo || r.saldo_dopo == null ? null : Number(r.saldo_dopo),
   }))
   const totale = Math.round(out.reduce((s, r) => s + r.importo, 0) * 100) / 100
 

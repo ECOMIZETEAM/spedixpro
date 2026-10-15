@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
 
   // Spedizioni dei suoi clienti nel periodo (escluse le annullate).
   const speds = await fetchAll(() => supabase.from('spedizioni')
-    .select('id,cliente_id,corriere_id,lunghezza,larghezza,altezza,peso_reale,dest_provincia,dest_cap,dest_paese,dest_citta,contrassegno,assicurazione,costo_totale,costo_spedizione,stato,created_at')
+    .select('id,cliente_id,corriere_id,lunghezza,larghezza,altezza,peso_reale,dest_provincia,dest_cap,dest_paese,dest_citta,contrassegno,assicurazione,costo_totale,stato,created_at')
     .in('cliente_id', clienteIds)
     .gte('created_at', dal).lte('created_at', alEnd)
     .not('stato', 'in', '(annullata)')
@@ -79,10 +79,12 @@ export async function GET(req: NextRequest) {
   let ricavi = 0, costi = 0
   for (const s of (speds || [])) {
     const ric = pagatoCliente.has((s as any).id) ? pagatoCliente.get((s as any).id)! : Number((s as any).costo_totale || 0)
-    // Costo agente dal listino agente; se quel corriere non è nel listino, uso il costo reale
-    // (costo_spedizione) invece di 0, altrimenti l'intero prezzo verrebbe contato come margine.
+    // Costo agente dal listino agente. Se il suo listino non copre quel contratto la spedizione vale
+    // margine 0 (costo = quanto ha pagato il cliente): 0 di costo gonfierebbe il margine, e il ripiego
+    // di prima su costo_spedizione mostrava all'agente il costo di chi sta SOPRA il suo master (nei
+    // giorni con una sola spedizione, il valore esatto).
     const cAg = calcCosto(s)?.totale
-    const cos = (cAg != null) ? cAg : Number((s as any).costo_spedizione || 0)
+    const cos = (cAg != null) ? cAg : ric
     ricavi += ric; costi += cos
     acc((s as any).created_at, 'ricavi', ric)
     acc((s as any).created_at, 'costi', cos)

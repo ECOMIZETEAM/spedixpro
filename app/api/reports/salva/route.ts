@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { BUCKET_RISERVATI, linkReport } from '@/lib/file-riservati'
+import { BUCKET_RISERVATI, linkReport, percorsoSicuro } from '@/lib/file-riservati'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -17,9 +17,12 @@ export async function POST(req: NextRequest) {
   if (!fileBase64 && !pathCaricato) return NextResponse.json({ error: 'File mancante' }, { status: 400 })
 
   const admin = createAdminSupabase()
-  const contentType = formato === 'pdf' ? 'application/pdf'
-    : formato === 'csv' ? 'text/csv'
-    : formato === 'zip' ? 'application/zip'
+  // Alcune pagine mandano 'PDF' maiuscolo: confrontato cosi' com'era, quei PDF finivano salvati come
+  // fogli Excel (43 fra Rettifiche e Ricariche) e /api/file li serviva da scaricare invece che da aprire.
+  const fmt = String(formato || '').toLowerCase()
+  const contentType = fmt === 'pdf' ? 'application/pdf'
+    : fmt === 'csv' ? 'text/csv'
+    : fmt === 'zip' ? 'application/zip'
     : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
   let path: string
@@ -28,7 +31,9 @@ export async function POST(req: NextRequest) {
     // IL PERCORSO ARRIVA DA FUORI: deve stare nella cartella di CHI CHIEDE. Senza questo controllo
     // si potrebbe intestarsi il file di un altro master scrivendone il percorso a mano.
     path = String(pathCaricato)
-    if (!path.startsWith(utente?.master_id + '/')) {
+    // Anche i ".." vanno fuori: "<mio>/../<altro>/f" comincia con la mia cartella ma, scaricato,
+    // porta al file dell'altro.
+    if (!path.startsWith(utente?.master_id + '/') || !percorsoSicuro(path)) {
       return NextResponse.json({ error: 'Percorso non valido' }, { status: 403 })
     }
     // E deve esistere davvero: una riga che punta al nulla e' peggio di nessuna riga.
@@ -41,13 +46,26 @@ export async function POST(req: NextRequest) {
   } else {
     const buffer = Buffer.from(fileBase64.split(',').pop() || fileBase64, 'base64')
     peso = buffer.length
-    path = utente?.master_id + '/' + Date.now() + '_' + (nomeFile || 'report')
+    // Il nome arriva dal browser: si tiene solo cio' che e' un nome di file, come in upload-url.
+    // Prima passava com'era, e il caricamento e' con la chiave di servizio e sovrascrive: un nome
+    // come "x/../../../loghi/<file>" usciva dalla cartella del master, e anche dal bucket (i ".."
+    // si risolvono nell'indirizzo prima che la richiesta parta), e scriveva sopra loghi o etichette.
+    const pulito = String(nomeFile || 'report').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120)
+    path = utente?.master_id + '/' + Date.now() + '_' + pulito
     const { error: upErr } = await admin.storage.from(BUCKET_RISERVATI).upload(path, buffer, { contentType, upsert: true })
     if (upErr) return NextResponse.json({ error: upErr.message }, { status: 400 })
   }
 
-  // Un sotto-master selezionato arriva come "m:<id>": non è un cliente_id valido (uuid) -> null
-  const clienteIdValido = (typeof clienteId === 'string' && clienteId.startsWith('m:')) ? null : (clienteId || utente?.cliente_id || null)
+  // Un sotto-master selezionato arriva come "m:<id>": non è un cliente_id valido (uuid) -> null.
+  // L'id arriva dal browser: il cliente puo' intestare il report solo a se stesso, lo staff solo a
+  // un cliente del proprio master. Prima si prendeva com'era e una riga finiva sotto un cliente altrui.
+  let clienteIdValido: string | null = null
+  if (utente?.cliente_id) {
+    clienteIdValido = utente.cliente_id
+  } else if (typeof clienteId === 'string' && clienteId && !clienteId.startsWith('m:')) {
+    const { data: suo } = await admin.from('clienti').select('id').eq('id', clienteId).eq('master_id', utente?.master_id).maybeSingle()
+    clienteIdValido = suo?.id || null
+  }
   const { data: rec, error } = await admin.from('reports_generati').insert({
     master_id: utente?.master_id,
     cliente_id: clienteIdValido,

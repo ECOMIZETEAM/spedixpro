@@ -129,7 +129,9 @@ export async function GET(req: NextRequest) {
   const perPeriodo = (q: any) => {
     if (dal) q = q.gte('created_at', dal)
     if (al) q = q.lte('created_at', al + 'T23:59:59')
-    return q.in('tipo', TIPI_SPESA).order('created_at', { ascending: false })
+    // Secondo ordine sull'id: fetchAll legge a pagine, e righe con lo stesso istante cambiavano
+    // posto fra una pagina e l'altra (doppie o perse).
+    return q.in('tipo', TIPI_SPESA).order('created_at', { ascending: false }).order('id', { ascending: false })
   }
 
   // Storia di un SOTTO-MASTER (clienteId = "m:<id>"): dai movimenti tra master.
@@ -139,8 +141,12 @@ export async function GET(req: NextRequest) {
     const targetMasterId = clienteIdRaw.slice(2)
     const { data: sub } = await admin.from('masters').select('id,parent_master_id,nome').eq('id', targetMasterId).maybeSingle()
     if (!sub || !(await eDiscendente(admin, targetMasterId, utente?.master_id))) return NextResponse.json([])
+    // Solo il conto RETE, cioe' le spese che il sotto-master ha verso la mia rete. Sul conto 'proprio'
+    // stanno giacenze e resi dei SUOI contratti, che io non gli ho mai addebitato: MULTI, scegliendo
+    // LOGIXIA, vedeva 123 giacenze e 57 resi (283 €) di LOGIXIA verso se stessa (1-14/10/2026).
     const righe = await senzaStornate(await fetchAll(() => perPeriodo(admin.from('movimenti')
-      .select('id,tipo,descrizione,importo,saldo_dopo,created_at,spedizione_id').eq('master_target_id', targetMasterId))))
+      .select('id,tipo,descrizione,importo,saldo_dopo,created_at,spedizione_id').eq('master_target_id', targetMasterId)
+      .or('conto.is.null,conto.neq.proprio'))))
     return NextResponse.json(righe.map((m: any) => riga(m, sub.nome)))
   }
 

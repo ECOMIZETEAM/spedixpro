@@ -16,6 +16,8 @@ export async function GET(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome,listino_agente_id').eq('id', user.id).single()
   const p = req.nextUrl.searchParams
   const ruoloUtente = (utente?.ruolo || '').toLowerCase()
+  // L'autista lavora solo da /api/autista: qui valeva come master (rete, costi, prezzi corriere).
+  if (ruoloUtente === 'autista') return NextResponse.json([])
   // UN CLIENTE VEDE SOLO LE PROPRIE SPEDIZIONI, QUALUNQUE COSA CHIEDA.
   //
   // Il perimetro lo decideva il parametro ?clienteId. Passando "m:<id>" si finiva nel ramo della
@@ -209,15 +211,15 @@ export async function GET(req: NextRequest) {
   }
 
   const rows = (spedizioni || []).map((s: any) => {
-    // PREZZO CORRIERE = quello che ho pagato IO (mio movimento reale). Per l'agente = suo listino;
-    // se il listino agente non copre quel corriere, ripiego sul costo reale (non 0, che gonfierebbe il margine).
-    // AGENTE SENZA LISTINO ASSEGNATO: non ha un costo suo, e il ripiego finiva sul costo del
-    // MASTER — che gli mostra il margine del master ed e' proprio il dato che non deve vedere.
-    // Meglio nessun numero che un numero di qualcun altro.
+    // PREZZO CORRIERE = quello che ho pagato IO (mio movimento reale). Per l'agente = suo listino.
+    // AGENTE SENZA LISTINO, o col listino che non copre quel contratto: non ha un costo suo, e il
+    // ripiego finiva su costo_spedizione — il costo di chi sta SOPRA (per Andrea Mollica coincideva
+    // con quello di MULTIEXPRESS, due livelli sopra il suo master, su tutte le 579 spedizioni di
+    // ottobre). E' proprio il dato che non deve vedere. Meglio nessun numero che uno di qualcun altro.
     const agenteSenzaListino = isAgente(utente) && !calcAgente
     const hoMioCosto = !calcAgente && !agenteSenzaListino && costoMine.has(s.id)
     let prezzo_corriere: number | null = calcAgente
-      ? (calcAgente(s)?.totale ?? (Number(s.costo_spedizione || 0) || null))
+      ? (calcAgente(s)?.totale ?? null)
       : (hoMioCosto ? costoMine.get(s.id)! : null)
     if (prezzo_corriere == null && calcMioCorr && !calcAgente && !agenteSenzaListino) {
       const nome = (s.corrieri as any)?.nome_contratto
@@ -283,32 +285,6 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(rows)
 }
 
-export async function POST(req: NextRequest) {
-  const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,nome').eq('id', user.id).single()
-  const body = await req.json()
-
-  // I NOMI DELLE COLONNE SONO QUELLI VERI.
-  // Qui si scriveva su utente_nome, stato e size: tre colonne che nella tabella non esistono (sono
-  // utente, status e size_bytes). Ogni salvataggio finiva in errore 42703, e siccome le pagine non
-  // guardano la risposta il master vedeva il file scaricarsi e poi non trovava nulla nell'elenco
-  // dei report. E' questo il "non me li fa fare": il report si faceva, non si registrava.
-  const { data: report, error } = await supabase.from('reports_generati').insert({
-    master_id: utente?.master_id,
-    tipo: body.tipo || 'spedizioni',
-    formato: body.formato || 'pdf',
-    filtri: typeof body.filtri === 'string' ? body.filtri : JSON.stringify(body.filtri || {}),
-    utente: ((utente as any)?.nome || '').trim() || 'Utente',
-    status: 'disponibile',
-    size_bytes: null,
-    created_by: user.id,
-  }).select().single()
-
-  if (error) {
-    console.error('[REPORT] registrazione non riuscita:', error.message)
-    return NextResponse.json({ error: error.message }, { status: 400 })
-  }
-  return NextResponse.json({ id: report.id })
-}
+// Qui c'era una POST che registrava un report SENZA file: nessuna pagina la chiamava piu' (i report
+// si salvano da /api/reports/salva, col file), e restava solo una porta per mettere righe vuote
+// nell'elenco del master, aperta a chiunque fosse loggato. Tolta.

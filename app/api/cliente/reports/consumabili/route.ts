@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
+import { senzaNomiFornitori } from '@/lib/corriere-logo'
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -47,7 +48,9 @@ export async function GET(req: NextRequest) {
       // negativo e abbassa il totale invece di gonfiarlo.
       const importo = -(Number(m.importo || 0))
       return {
-        descrizione: m.descrizione || '',
+        // Senza i nomi dei fornitori tecnici scritti a mano da alcuni master ("Addebito rettifiche
+        // spedisci.online ..."): il documento va al cliente. Nel database restano come sono.
+        descrizione: senzaNomiFornitori(m.descrizione),
         quantita: 1,
         costoUnita: importo,
         costoTotale: importo,

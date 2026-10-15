@@ -73,7 +73,10 @@ export async function GET(req: NextRequest) {
   // come ha chiesto il flusso nuovo (niente pagina condivisioni a parte). Isolato: è un clienti del
   // venditore (RLS per master_id); l'agente non lo vede. corrieri_condivisi è solo service-role.
   let ledgerOut: any[] = []
-  if (!isAgente(utente) && utente?.master_id) {
+  // Solo chi governa la rete. Prima la condizione era "non agente e con un master_id", e il master_id
+  // ce l'hanno anche i clienti: i 546 utenti cliente di Velox, GTS e Wave ricevevano i conti
+  // "(ingrosso)" del loro master, con credito, email, P.IVA e telefono (letti con la chiave di servizio).
+  if (vedeLaRete(utente)) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const admin = createAdminSupabase()
     const { data: ledgers } = await admin.from('clienti')

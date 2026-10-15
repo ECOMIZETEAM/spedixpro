@@ -46,6 +46,9 @@ export async function GET(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+  // L'autista lavora solo da /api/autista: qui finiva nel ramo del master e leggeva i ritiri di
+  // tutta la rete. Il middleware ferma le sue scritture, non le letture.
+  if ((utente?.ruolo || '').toLowerCase() === 'autista') return NextResponse.json([])
   const p = req.nextUrl.searchParams
   const clienteIdRaw = p.get('clienteId')
   // "m:<masterId>" = sotto-master agganciato (trattato come cliente): i suoi ritiri
@@ -106,11 +109,25 @@ export async function GET(req: NextRequest) {
   }
   const db: any = masterFilter.length > 1 ? admin : supabase
 
+  // VISIBILITA' PER CONTRATTO POSSEDUTO, come nell'Elenco spedizioni: dei sotto-master si vedono i
+  // ritiri sui contratti che possiedo o rivendo, non quelli sui loro contratti privati. Senza, MULTI
+  // vedeva 1.891 ritiri in due settimane fatti da Velox, GTS e altri sui contratti loro (14/10/2026).
+  // Le mie righe stanno sempre sui miei contratti, quindi il filtro non le tocca.
+  let posseduti: string[] | null = null
+  if (utente?.master_id && masterFilter.some((id) => id !== utente.master_id)) {
+    const { contrattiPossedutiNomi } = await import('@/lib/rete-masters')
+    const nn = await contrattiPossedutiNomi(admin, utente.master_id)
+    posseduti = nn.length ? nn : null
+  }
+
   const build = () => {
     let q = db.from('ritiri')
-      .select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
+      .select(`*, clienti(ragione_sociale), ${posseduti ? 'corrieri!inner(nome_contratto)' : 'corrieri(nome_contratto)'}`)
       .in('master_id', masterFilter)
-      .order('created_at', { ascending: false })
+      // Secondo ordine sull'id: fetchAll legge a pagine, e con lo stesso created_at le righe
+      // cambiavano posto fra una pagina e l'altra (doppie o perse).
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+    if (posseduti) q = q.in('corrieri.nome_contratto', posseduti)
     if (clienteId) q = q.eq('cliente_id', clienteId)
     if (codRitiro) q = q.ilike('cod_ritiro', '%' + codRitiro + '%')
     if (dal) q = q.gte('created_at', dal)

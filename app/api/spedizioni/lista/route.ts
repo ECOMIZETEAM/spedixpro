@@ -28,6 +28,9 @@ export async function GET(req: NextRequest) {
   segna('auth')
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome,listino_agente_id').eq('id', user.id).single()
   segna('utente')
+  // L'autista lavora solo da /api/autista. Qui, non essendo ne' cliente ne' agente, finiva nel ramo
+  // del master: tutta la rete, con costi e margini. Il middleware ferma le sue scritture, non le letture.
+  if ((utente?.ruolo || '').toLowerCase() === 'autista') return NextResponse.json({ error: 'Non consentito' }, { status: 403 })
   let agenteClienteIds: string[] | null = null
   if ((utente?.ruolo || '').toLowerCase() === 'agente') {
     const nomeAg = (((utente as any)?.nome || '') + ' ' + ((utente as any)?.cognome || '')).trim()

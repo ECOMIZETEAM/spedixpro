@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { partecipanteTicket } from '@/lib/ticket-accesso'
-import { BUCKET_RISERVATI, pathDaUrl, nomeDaPath } from '@/lib/file-riservati'
+import { BUCKET_RISERVATI, pathDaUrl, nomeDaPath, percorsoSicuro } from '@/lib/file-riservati'
 
 // L'UNICA porta d'uscita per report, allegati dei ticket e POD.
 //
@@ -22,6 +22,10 @@ function inline(mime: string) {
 }
 
 async function servi(admin: any, path: string) {
+  // Vale per tutte le strade (report, ticket, POD): un percorso che esce dal bucket non si serve.
+  if (!percorsoSicuro(path)) {
+    return NextResponse.json({ error: 'Percorso non valido' }, { status: 400 })
+  }
   const { data, error } = await admin.storage.from(BUCKET_RISERVATI).download(path)
   if (error || !data) {
     console.error('[FILE] non scaricabile', path, error?.message)
@@ -56,10 +60,16 @@ export async function GET(req: NextRequest) {
   // Se non ne ha diritto la riga semplicemente non esiste per lui.
   if (reportId) {
     const { data: rep } = await supabase.from('reports_generati')
-      .select('id,file_path,file_url').eq('id', reportId).maybeSingle()
+      .select('id,master_id,file_path,file_url').eq('id', reportId).maybeSingle()
     if (!rep) return NextResponse.json({ error: 'Report non trovato' }, { status: 404 })
     const path = pathDaUrl(rep.file_path || rep.file_url)
     if (!path) return NextResponse.json({ error: 'File non disponibile' }, { status: 404 })
+    // Il file di un report sta SEMPRE nella cartella del master della riga (cosi' lo scrive salva).
+    // La riga pero' la puo' toccare anche chi non e' staff: senza questo controllo, un file_path
+    // scritto a mano diventava la chiave per scaricare report e allegati di chiunque.
+    if (!rep.master_id || !path.startsWith(rep.master_id + '/')) {
+      return NextResponse.json({ error: 'File non disponibile' }, { status: 404 })
+    }
     return servi(admin, path)
   }
 

@@ -126,6 +126,29 @@ export function isProviderTecnico(tipo?: string | null): boolean {
   return PROVIDER_TECNICI.includes(String(tipo || '').toLowerCase())
 }
 
+// I NOMI DEI FORNITORI TECNICI DENTRO UN TESTO LIBERO. Le descrizioni dei movimenti le scrivono anche
+// a mano i master ("Addebito rettifiche spedisci.online 10.09.2026", "Trasferimento piattaforma
+// spedisci online", "Reso ... (spedisci.online)"): nel database restano come sono — lo storico non
+// si riscrive — ma verso clienti e agenti escono senza il nome. Al 15/10/2026 erano 141 righe nei
+// Consumabili di 80 clienti e 293 nella loro Lista movimenti.
+// NON ci sono "dielle" e "dva", e "spediamo" vale solo con "pro": nelle descrizioni delle spedizioni
+// c'e' il destinatario, e "DIELLE SRL", "Dielle Car Tech", "c/o NOI SPEDIAMO" sono clienti veri.
+const NOMI_FORNITORI = /\b(?:spedisci[\s.\-]*on[\s\-]*line|spedisci|spediamo[\s\-]*pro|easy[\s\-]*parcel)\b/gi
+export function senzaNomiFornitori(testo?: string | null): string {
+  if (!testo) return ''
+  const t = String(testo)
+  const senza = t.replace(NOMI_FORNITORI, '')
+  if (senza === t) return t
+  return senza
+    .replace(/\(\s*\)/g, '')            // "(spedisci.online)" lasciava "()"
+    .replace(/\s+([.,;:)])/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/[\s·\-–—:,]+$/g, '')
+    // "TRASFERIMENTO DA SPEDISCI ON LINE" restava "TRASFERIMENTO DA"
+    .replace(/\s+(?:da|dal|dalla|su|sul|sulla|di|del|della|per|in)$/i, '')
+    .trim()
+}
+
 // SIGLA NEUTRA da mandare al browser al posto del tipo del contratto. Il tipo e' il nome del
 // sistema tecnico a valle e non deve uscire da qui: non basta non stamparlo a schermo, perche'
 // chiunque apra gli strumenti per sviluppatori legge la risposta JSON. Le pagine mostrano gia'

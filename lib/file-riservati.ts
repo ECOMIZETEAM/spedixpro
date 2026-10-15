@@ -29,6 +29,19 @@ export function pathDaUrl(v: string | null | undefined): string | null {
   return s.replace(/^\/+/, '')
 }
 
+// Un percorso che resta DENTRO il bucket. Il client dello storage lo mette nell'indirizzo cosi'
+// com'e', e l'indirizzo risolve i pezzi "." e ".." (anche scritti "%2e%2e") e tratta "\" come "/"
+// prima che la richiesta parta: "x/../../etichette/..." scaricava o sovrascriveva, con la chiave di
+// servizio, file di un altro bucket. Si guarda pezzo per pezzo perche' nei nomi veri i puntini
+// doppi ci sono ("WhatsApp_Image_..._10.40..jpg") e vanno lasciati passare.
+export function percorsoSicuro(path: string | null | undefined): boolean {
+  if (!path || path.includes('\\') || path.startsWith('/')) return false
+  return path.split('/').every((pezzo) => {
+    const p = pezzo.toLowerCase().replace(/%2e/g, '.')
+    return p !== '.' && p !== '..'
+  })
+}
+
 // Link da mettere nelle pagine al posto dell'URL pubblico.
 export function linkAllegato(ticketId: string | null | undefined, urlOPath: string | null | undefined): string {
   const p = pathDaUrl(urlOPath)

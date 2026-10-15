@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
+import { senzaNomiFornitori } from '@/lib/corriere-logo'
 export const dynamic = 'force-dynamic'
 
 // Lista movimenti con PAGINAZIONE SERVER (?page=1&perPage=25): i target grandi hanno migliaia di
@@ -17,6 +18,9 @@ export async function GET(req: NextRequest) {
 
   // L'agente non vede movimenti/credito (dati del master).
   if ((utente?.ruolo || '').toLowerCase() === 'agente') return NextResponse.json({ error: 'Non disponibile per gli agenti.' }, { status: 403 })
+  // Nemmeno l'autista: qui finiva nel ramo del master, e con "m:<id>" leggeva movimenti e credito
+  // dei sotto-master del suo master. Il middleware ferma le sue scritture, non le letture.
+  if ((utente?.ruolo || '').toLowerCase() === 'autista') return NextResponse.json({ error: 'Non disponibile.' }, { status: 403 })
 
   const p = req.nextUrl.searchParams
   const self = p.get('self')
@@ -233,7 +237,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: errore }, { status: 403 })
     }
   }
-  const { movimenti, total, somma } = await carica(supabase, 'cliente_id', clienteId!)
+  const { movimenti: grezzi, total, somma } = await carica(supabase, 'cliente_id', clienteId!)
+  // Al cliente le descrizioni arrivano senza i nomi dei fornitori tecnici, che alcuni master hanno
+  // scritto a mano ("TRASFERIMENTO DA SPEDISCI ON LINE"). Nel database restano come sono.
+  const movimenti = utente?.ruolo === 'cliente'
+    ? (grezzi || []).map((m: any) => ({
+        ...m,
+        descrizione: m.descrizione == null ? m.descrizione : senzaNomiFornitori(m.descrizione),
+        riferimento: m.riferimento == null ? m.riferimento : senzaNomiFornitori(m.riferimento),
+      }))
+    : grezzi
   const { data: cli } = await supabase
     .from('clienti').select('credito, ragione_sociale').eq('id', clienteId!).single()
   return NextResponse.json({
