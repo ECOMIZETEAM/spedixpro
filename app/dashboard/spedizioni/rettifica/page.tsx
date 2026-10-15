@@ -127,11 +127,16 @@ export default function RettificaCostiPage() {
         let incomplete = data.misureIncomplete || 0, inPiu = data.colliInPiu || 0
         // Create a zero: a chi le riceve non costano niente, servono a chi sta sotto (vedi qualcunoSottoDeve).
         let aZero = data.passateAZero || 0
+        // Righe del file che non sono spedizioni del portale: il file del corriere copre tutto il
+        // contratto, anche le spedizioni fatte altrove (GLS di MULTI, 15/10: 2.657 su 3.232).
+        let nonTrovate = data.totali?.nonTrovate || 0
         const senzaMisure = data.senzaMisure || 0   // conta su tutto il file: non si somma a ogni pezzo
         // Righe dove si chiede alla rete piu' del triplo di quanto ha addebitato il corriere: succede
         // quando il collo dichiarato era molto piu' piccolo del vero. Non e' un errore, ma chi paga
         // deve vederle prima di confermare.
         let sopra: any[] = data.sopraIlTriplo || []
+        // Senza costo del fornitore: rettifiche oltre il triplo di quanto era stato pagato (e almeno 20 €).
+        let sopraPagato: any[] = data.sopraIlTriploPagato || []
         let supEuro = data.supplementiEuro || 0
         let supIgnoti: string[] = data.supplementiSenzaTariffa || []
         let da = (data.da || 0) + (data.quante || 0)
@@ -147,8 +152,8 @@ export default function RettificaCostiPage() {
           const d2 = await r2.json()
           if (d2?.error) break
           creati += d2.creato || 0; gia += d2.giaCaricate || 0; fornitore += d2.costoFornitoreScalato || 0
-          attesa += d2.attesaMisure || 0; sopra = sopra.concat(d2.sopraIlTriplo || [])
-          incomplete += d2.misureIncomplete || 0; inPiu += d2.colliInPiu || 0; aZero += d2.passateAZero || 0
+          attesa += d2.attesaMisure || 0; sopra = sopra.concat(d2.sopraIlTriplo || []); sopraPagato = sopraPagato.concat(d2.sopraIlTriploPagato || [])
+          incomplete += d2.misureIncomplete || 0; inPiu += d2.colliInPiu || 0; aZero += d2.passateAZero || 0; nonTrovate += d2.totali?.nonTrovate || 0
           supEuro += d2.supplementiEuro || 0; supIgnoti = supIgnoti.concat(d2.supplementiSenzaTariffa || [])
           const avanti = (d2.da || 0) + (d2.quante || 0)
           // Se il segnaposto non si muove il file non finirebbe mai di essere chiesto: meglio
@@ -173,12 +178,14 @@ export default function RettificaCostiPage() {
           message: `Create ${creati} rettifiche su ${totale} spedizioni nel file.`
             + (aZero ? ` Di queste, ${aZero} sono a zero: a chi le riceve non costano niente, ma sotto di lui qualcuno deve ancora pagare la differenza — confermale insieme alle altre, servono a farla arrivare fin lì.` : '')
             + (gia ? ` ${gia} erano già state caricate da un file precedente e sono state saltate.` : '')
+            + (nonTrovate ? ` ${nonTrovate} righe del file non corrispondono a spedizioni del portale (fatte altrove, o annullate) e sono state saltate.` : '')
             + (fornitore ? ` Il conto del fornitore, € ${fornitore.toFixed(2)}, è stato scalato dal tuo credito: è la fattura che hai già ricevuto.` : '')
             + (attesa ? ` ${attesa} spedizioni con più colli sono in attesa delle misure collo per collo e NON sono state addebitate: le misure si leggono stanotte, ricarica lo stesso file domani e si caricheranno per intero.` : '')
             + (incomplete ? ` ${incomplete} spedizioni hanno misure solo per una parte dei colli e NON sono state addebitate: entreranno col prossimo file del fornitore, quando avrà misurato tutti i colli.` : '')
             + (inPiu ? ` ${inPiu} spedizioni hanno nel file più righe dei colli spediti: NON sono state addebitate, vanno controllate.` : '')
             + (senzaMisure ? ` ${senzaMisure} spedizioni del file non hanno nessuna misura rilevata e sono state saltate.` : '')
             + (sopra.length ? ` Attenzione: ${sopra.length} rettifiche chiedono più del triplo di quanto ha addebitato il corriere (il collo dichiarato era molto più piccolo del vero) — per esempio ${sopra[0].ldv}, € ${Number(sopra[0].costoFornitore).toFixed(2)} di costo contro € ${Number(sopra[0].differenza).toFixed(2)} da girare. Controllale prima di confermare.` : '')
+            + (sopraPagato.length ? ` Attenzione: ${sopraPagato.length} rettifiche chiedono più del triplo di quanto era stato pagato — ${sopraPagato.slice(0, 5).map((x: any) => `${x.ldv} (pagata € ${Number(x.pagato).toFixed(2)}, ora € ${Number(x.differenza).toFixed(2)} in più)`).join(', ')}${sopraPagato.length > 5 ? ' e altre' : ''}. Possono essere vere o un errore del corriere: controllale prima di confermare.` : '')
             + (supEuro ? ` Compresi € ${supEuro.toFixed(2)} di supplementi fissi (fuori sagoma, non sovrapponibile, consegna su appuntamento), che scendono invariati.` : '')
             + (supIgnoti.length ? ` Il corriere ha addebitato anche ${Array.from(new Set(supIgnoti)).join(' e ')}: di questi non conosciamo la tariffa, il costo resta a noi e NON è stato girato — vanno chiesti al corriere.` : '')
             + ' Scegli a chi girarle e premi Conferma: fino a quel momento non viene scalato nulla a loro.',

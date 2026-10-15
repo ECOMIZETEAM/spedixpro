@@ -38,7 +38,7 @@ export type Ripesatura = {
   supplementiSenzaTariffa?: string[]// riconosciuti ma senza importo certo: si segnalano, non si indovinano
   reso?: boolean            // il testo contiene "reso": il cliente non lo paga qui (flusso reso a parte)
   // ── Solo per il formato "Andamento giornaliero XL" di Poste (dichiarato/rilevato per collo) ──
-  formato?: 'xl'
+  formato?: 'xl' | 'pesi'
   colliNonRilevati?: number         // righe della LDV senza nessuna misura: la spedizione e' incompleta
   colliPesoDaDichiarato?: number[]  // indici dei colli con le misure ma senza il peso (bilancia a 0)
   pesiDichiaratiFile?: number[]     // peso dichiarato di ogni collo come lo scrive il file (2 decimali)
@@ -133,7 +133,7 @@ export function sembraRipesatureSP(righe: any[]): boolean {
 export function sembraRipesature(righe: any[]): boolean {
   const r = normalizza((righe || [])[0] || {})
   const colonne = 'idordine' in r && 'ldv' in r && ('misureriscontrate' in r || 'pesoriscontrato' in r)
-  return colonne || sembraRipesatureSP(righe) || sembraRipesatureXL(righe)
+  return colonne || sembraRipesatureSP(righe) || sembraRipesatureXL(righe) || sembraRipesaturePesi(righe)
 }
 
 // ── FORMATO "ANDAMENTO GIORNALIERO XL" DI POSTE (lo manda LOGIXIA per SDA EXPRESS L) ──
@@ -197,6 +197,51 @@ function leggiRipesatureXL(righe: any[]): { righe: Ripesatura[]; scartate: numbe
   return { righe: out, scartate, totaleFornitore: 0, senzaMisure: tutte.length - out.length }
 }
 
+// ── FILE DEI SOLI PESI: due colonne, la lettera di vettura e il peso (GLS di MULTI, Velox, SDA) ──
+//
+// Prima finivano nel vecchio ramo dei pesi, che lavorava tutto il file in UNA richiesta e cercava
+// ogni LDV con un "contiene" su tutta la tabella spedizioni (~1 secondo l'una): il file GLS di MULTI
+// del 15/10 (3.232 righe) non poteva finire nei 300 secondi e la pagina diceva solo "errore" — come gia'
+// "rettifiche gls 2909.csv" (947 righe, zero rettifiche). Ora passano dal motore delle rettifiche, a
+// pacchetti: pagato dai movimenti, catena vera, contratti condivisi.
+// SOLO i file fatti di quelle due colonne: uno con altre colonne non si indovina, resta com'era.
+const CHIAVI_LDV = ['ldv', 'nspedizione', 'numero']
+const CHIAVI_PESO = ['peso', 'pesoreale', 'newweight']
+export function sembraRipesaturePesi(righe: any[]): boolean {
+  const chiavi = new Set<string>()
+  for (const r of (righe || []).slice(0, 50)) {
+    for (const [k, v] of Object.entries(normalizza(r))) if (String(v ?? '').trim()) chiavi.add(k)
+  }
+  return chiavi.size === 2
+    && CHIAVI_LDV.filter(k => chiavi.has(k)).length === 1
+    && CHIAVI_PESO.filter(k => chiavi.has(k)).length === 1
+}
+
+// Un collo solo col peso del file e senza misure: e' quello che il file dice. Se la spedizione ha piu'
+// colli, la rotta divide il peso sui colli dichiarati (lib/ripesature-pesi). La stessa LDV con due pesi
+// diversi non si indovina: si scarta, come faceva il ramo vecchio.
+function leggiRipesaturePesi(righe: any[]): { righe: Ripesatura[]; scartate: number; totaleFornitore: number } {
+  const perLdv = new Map<string, number[]>()
+  let scartate = 0
+  for (const grezza of (righe || [])) {
+    const c = normalizza(grezza)
+    const ldv = String(c.ldv ?? c.nspedizione ?? c.numero ?? '').trim()
+    const peso = kg(c.peso ?? c.pesoreale ?? c.newweight)
+    if (!ldv || !(peso > 0)) { scartate++; continue }
+    perLdv.set(ldv, [...(perLdv.get(ldv) || []), peso])
+  }
+  const out: Ripesatura[] = []
+  for (const [ldv, pesi] of perLdv) {
+    if (new Set(pesi.map(p => p.toFixed(3))).size > 1) { scartate++; continue }
+    out.push({
+      idOrdine: ldv, idVerifiche: [], ldv, addebitoFornitore: 0,
+      colli: [{ peso: pesi[0], lunghezza: 0, larghezza: 0, altezza: 0 }],
+      dataChiusura: '', mittente: '', destinatario: '', formato: 'pesi',
+    })
+  }
+  return { righe: out, scartate, totaleFornitore: 0 }
+}
+
 // Parser del formato TRANSAZIONI SpediamoPro: ogni riga = una spedizione (i 6A... sono distinti).
 function leggiRipesatureSP(righe: any[]): { righe: Ripesatura[]; scartate: number; totaleFornitore: number } {
   const out: Ripesatura[] = []
@@ -248,6 +293,8 @@ export function leggiRipesature(righe: any[]): { righe: Ripesatura[]; scartate: 
   if (sembraRipesatureSP(righe)) return leggiRipesatureSP(righe)
   // Formato "Andamento giornaliero XL" di Poste: una riga per collo, raggruppate per LDV madre.
   if (sembraRipesatureXL(righe)) return leggiRipesatureXL(righe)
+  // File dei soli pesi (LDV + peso): un peso per spedizione, nessuna misura.
+  if (sembraRipesaturePesi(righe)) return leggiRipesaturePesi(righe)
   const gruppi = new Map<string, Ripesatura>()
   let scartate = 0
   for (const grezza of (righe || [])) {

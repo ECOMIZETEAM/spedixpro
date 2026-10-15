@@ -5,6 +5,7 @@ import { gestisceLaRete } from '@/lib/ruoli'
 import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
 import { createAdminSupabase, createAdminSupabaseConMemoria } from '@/lib/supabase-admin'
 import { controllaColliXL } from '@/lib/ripesature-xl'
+import { colliDalPesoTotale } from '@/lib/ripesature-pesi'
 
 
 // Risale la catena dei master: [masterId, padre, nonno, ...]
@@ -173,6 +174,8 @@ export async function POST(req: NextRequest) {
       // addebitate, si saltano qui — il perche' e' in ripesature-xl.
       const { daSaltare: xlDaSaltare, misureIncomplete, colliInPiu } = await controllaColliXL(adminRip, nuove)
       const daCalcolare = xlDaSaltare.size ? nuove.filter(r => !xlDaSaltare.has(r.ldv)) : nuove
+      // File dei soli pesi: sui multicollo il peso del file si divide sui colli dichiarati.
+      await colliDalPesoTotale(adminRip, daCalcolare)
 
       // Il flag fuori sagoma / reso vive sulla Ripesatura letta dal file; l'esito del motore porta
       // solo idOrdine → si rimappa qui per sapere, riga per riga, se aggiungere il supplemento fisso
@@ -238,6 +241,10 @@ export async function POST(req: NextRequest) {
         // un errore (succede quando il cliente ha dichiarato scatole molto piu' piccole del vero e
         // il fornitore ci ha addebitato poco), ma chi carica deve vederle prima di confermare.
         const sopraIlTriplo: { ldv: string; costoFornitore: number; differenza: number }[] = []
+        // Senza costo del fornitore (file dei soli pesi, file XL) il confronto si fa con quanto era stato
+        // PAGATO: GLS ha scritto 691 kg su un pacco pagato 4,04 (NN668512857, 15/10) e ne usciva una
+        // rettifica da 282 euro. Puo' essere vera o un errore del corriere: chi carica deve vederla prima.
+        const sopraIlTriploPagato: { ldv: string; pagato: number; differenza: number }[] = []
         for (const e of esiti) {
           if (!e.trovata || !e.spedizioneId) continue
           // Già rettificata (OneTracking o import precedente) → non se ne crea una seconda.
@@ -299,6 +306,9 @@ export async function POST(req: NextRequest) {
           const diffRett = (!isPenaleBrt && liv.differenza >= 0.01) ? liv.differenza : 0
           if (!isPenaleBrt && e.addebitoFornitore > 0 && diffRett > e.addebitoFornitore * 3) {
             sopraIlTriplo.push({ ldv: e.ldv, costoFornitore: e.addebitoFornitore, differenza: Math.round(diffRett * 100) / 100 })
+          }
+          if (!isPenaleBrt && !(e.addebitoFornitore > 0) && diffRett >= 20 && diffRett > Number(liv.pagato || 0) * 3) {
+            sopraIlTriploPagato.push({ ldv: e.ldv, pagato: Number(liv.pagato || 0), differenza: Math.round(diffRett * 100) / 100 })
           }
           daScrivere.push({
             master_id: myMaster, file_id: creaturaFile,
@@ -455,6 +465,7 @@ export async function POST(req: NextRequest) {
           // piu' righe che colli (da guardare a mano), e — per tutto il file — LDV senza nessuna misura.
           misureIncomplete, colliInPiu, senzaMisure: lette.senzaMisure || 0,
           sopraIlTriplo: sopraIlTriplo.slice(0, 50),
+          sopraIlTriploPagato: sopraIlTriploPagato.slice(0, 50),
           fuoriSagoma: (fetta as any[]).filter(r => Number(r.supplementi || 0) > 0).length,   // righe con un supplemento che ora cascata
           supplementiEuro: Math.round((fetta as any[]).reduce((a, r) => a + Number(r.supplementi || 0), 0) * 100) / 100,
           // Voci che il fornitore addebita ma di cui non conosciamo la tariffa: il costo lo paghiamo,
