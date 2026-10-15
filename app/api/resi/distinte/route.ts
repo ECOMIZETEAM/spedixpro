@@ -42,6 +42,20 @@ export async function GET(req: NextRequest) {
     const nomi = new Map((ms || []).map((m: any) => [m.id, m.nome]))
     for (const d of lista) if ((d as any).target_master_id) (d as any).sottomaster = nomi.get((d as any).target_master_id) || null
   }
+  // Le prime tre LDV che l'elenco mostra: fino al 15/10 il cron delle 23 salvava nelle voci solo l'id, e
+  // la colonna diceva "+3" senza numeri. Il numero si legge dalla spedizione, senza toccare la distinta.
+  const senzaNumero = [...new Set(lista.flatMap((d: any) => (Array.isArray(d.voci) ? d.voci.slice(0, 3) : [])
+    .filter((v: any) => v?.id && !v?.numero).map((v: any) => v.id)))]
+  if (senzaNumero.length) {
+    const numeroDi = new Map<string, string>()
+    for (let i = 0; i < senzaNumero.length; i += 300) {
+      const { data: ss } = await supabase.from('spedizioni').select('id,numero').in('id', senzaNumero.slice(i, i + 300))
+      for (const s of (ss || [])) numeroDi.set((s as any).id, (s as any).numero)
+    }
+    for (const d of lista as any[]) {
+      if (Array.isArray(d.voci)) d.voci = d.voci.map((v: any, i: number) => (i < 3 && v?.id && !v?.numero && numeroDi.has(v.id)) ? { ...v, numero: numeroDi.get(v.id) } : v)
+    }
+  }
   return NextResponse.json(lista)
 }
 
@@ -220,8 +234,7 @@ export async function POST(req: NextRequest) {
     const numeroM = (cM||0) + 1
     // Il totale della distinta di RETE = quanto viene ADDEBITATO al sotto-master (il prezzo che
     // LUI aveva pagato), NON il prezzo del cliente finale: ogni livello vede il proprio prezzo.
-    // Si calcola voce per voce nel loop e si scrive alla fine (il 'totale' della UI e' a prezzo cliente).
-    let totaleCatena = 0
+    // Si legge dai movimenti alla fine (vedi sotto), non dagli esiti di questo addebito.
     const { data: distintaM, error: errM } = await supabase.from('distinte_resi').insert({
       master_id: utente?.master_id, cliente_id: null, target_master_id: targetMasterId,
       numero: numeroM, totale_ldv: (voci||[]).length, totale: 0, voci, stato: 'chiusa',
@@ -248,10 +261,15 @@ export async function POST(req: NextRequest) {
       })
     }
     try {
-      for (const e of await addebitaResi(adminDb, righe, user.id)) totaleCatena += Number(e.importo || 0)
+      await addebitaResi(adminDb, righe, user.id)
       // ...e la catena di chi scansiona, dal suo livello fino al detentore del contratto.
       await addebitaResi(adminDb, await righeCatenaPropria(adminDb, utente!.master_id!, voci), user.id)
     } catch (e) { console.error('Errore addebito reso master:', e) }
+    // TOTALE = quanto ha pagato il sotto-master, letto dai movimenti. Sommando gli esiti di questo
+    // addebito, un reso gia' addebitato dalla coda del tracking ("gia_addebitato", senza importo)
+    // finiva in distinta a 0 pur essendo stato pagato.
+    const { totaleResoAddebitato } = await import('@/lib/giacenza-cascata')
+    const totaleCatena = await totaleResoAddebitato(adminDb, (voci || []).map((v: any) => v.id), { masterTargetId: targetMasterId })
     await supabase.from('distinte_resi').update({ totale: totaleCatena }).eq('id', distintaM.id)
     return NextResponse.json({ id: distintaM.id, numero: numeroM })
   }
@@ -304,12 +322,15 @@ export async function POST(req: NextRequest) {
   }).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
-  let totaleReso = 0
   try {
-    for (const e of await addebitaResi(adminDb, righeCli, user.id)) totaleReso += Number(e.importo || 0)
+    await addebitaResi(adminDb, righeCli, user.id)
     // ...e la catena dei master, dal master del cliente fino al detentore del contratto.
     await addebitaResi(adminDb, await righeCatenaPropria(adminDb, utente!.master_id!, voci), user.id)
   } catch (e) { console.error('Errore addebito reso cliente:', e) }
+  // TOTALE = quanto ha pagato il cliente, letto dai movimenti (stesso motivo del ramo catena sopra:
+  // il reso spesso l'ha gia' addebitato la coda del tracking, e l'esito di qui non ha importo).
+  const { totaleResoAddebitato } = await import('@/lib/giacenza-cascata')
+  const totaleReso = await totaleResoAddebitato(adminDb, (voci || []).map((v: any) => v.id), { clienteId })
   await supabase.from('distinte_resi').update({ totale: totaleReso }).eq('id', distinta.id)
   return NextResponse.json({ id: distinta.id, numero })
 }

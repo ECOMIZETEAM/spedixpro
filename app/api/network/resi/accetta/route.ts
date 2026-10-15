@@ -88,6 +88,7 @@ export async function POST(req: NextRequest) {
   }
 
   let create = 0
+  const { totaleResoAddebitato } = await import('@/lib/giacenza-cascata')
   const vociDi = (arr: any[]) => arr.map(s => voci.find(v => v.id === s.id) || { id: s.id, numero: s.numero })
   const nextNum = async () => {
     const { count } = await admin.from('distinte_resi').select('id', { count: 'exact', head: true }).eq('master_id', mio)
@@ -97,7 +98,6 @@ export async function POST(req: NextRequest) {
   // ── Gruppi CLIENTE: addebito nolo al cliente ──
   for (const [clienteId, arr] of Object.entries(clientGroups)) {
     const { data: cli } = await admin.from('clienti').select('listino_cliente_id').eq('id', clienteId).single()
-    let totale = 0
     const numero = await nextNum()
     const { data: dist } = await admin.from('distinte_resi').insert({
       master_id: mio, cliente_id: clienteId, numero, totale_ldv: arr.length, totale: 0, voci: vociDi(arr), stato: 'chiusa',
@@ -115,15 +115,17 @@ export async function POST(req: NextRequest) {
     // La percentuale, la guardia contro il doppio addebito (compreso il reso già pagato allo
     // svincolo giacenza) e la scrittura di tutte le voci in una transazione: le fa il database.
     try {
-      for (const e of await addebitaResi(admin, righe, user.id)) totale += Number(e.importo || 0)
+      await addebitaResi(admin, righe, user.id)
     } catch (e) { console.error('Errore addebito reso cliente:', e) }
+    // TOTALE = quanto ha pagato il cliente, dai movimenti: un reso gia' addebitato dalla coda del
+    // tracking torna "gia_addebitato" senza importo, e la distinta usciva a 0.
+    const totale = await totaleResoAddebitato(admin, arr.map(s => s.id), { clienteId })
     await admin.from('distinte_resi').update({ totale }).eq('id', dist.id)
     create++
   }
 
   // ── Gruppi SOTTO-MASTER (prima linea): addebito il prezzo che LUI ha pagato ──
   for (const [flId, arr] of Object.entries(masterGroups)) {
-    let totale = 0
     const numero = await nextNum()
     const { data: dist } = await admin.from('distinte_resi').insert({
       master_id: mio, cliente_id: null, target_master_id: flId, numero, totale_ldv: arr.length, totale: 0, voci: vociDi(arr), stato: 'chiusa',
@@ -141,8 +143,9 @@ export async function POST(req: NextRequest) {
       })
     }
     try {
-      for (const e of await addebitaResi(admin, righe, user.id)) totale += Number(e.importo || 0)
+      await addebitaResi(admin, righe, user.id)
     } catch (e) { console.error('Errore addebito reso sotto-master:', e) }
+    const totale = await totaleResoAddebitato(admin, arr.map(s => s.id), { masterTargetId: flId })
     await admin.from('distinte_resi').update({ totale }).eq('id', dist.id)
     create++
   }

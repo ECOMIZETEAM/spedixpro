@@ -1,7 +1,7 @@
 import { spediamoproSearchStocks, spediamoproReleaseStock } from '@/lib/spediamopro'
 import { erroreSvincoloPulito } from '@/lib/errore-corriere'
 import { registraMovimento } from '@/lib/movimenti'
-import { addebitaServizioGiacenza } from '@/lib/giacenza-cascata'
+import { addebitaServizioGiacenza, totaleResoAddebitato } from '@/lib/giacenza-cascata'
 
 // LA PORTA UNICA DELLO SVINCOLO. La usano tutte le strade — il portale (GiacenzaDettaglio →
 // conferma_svincolo), l'svincolo massivo, l'API v1 — così la regola che decide CHI PAGA COSA e che
@@ -171,14 +171,12 @@ export async function eseguiSvincolo(
   // ADDEBITO: solo il servizio scelto (l'apertura è già stata addebitata all'ENTRATA in giacenza).
   // Il RESO non guarda giacenza_addebito_effettuato (un pacco può finire in giacenza due volte).
   let resoAddebitato = false
-  let importoResoCliente = 0
   if (rich.operazione === 'reso') {
     const esito = await addebitaServizioGiacenza(
       { id, numero: sped.numero, cliente_id: sped.cliente_id, master_id: sped.master_id, corriere_id: sped.corriere_id },
       'reso', 0,
     )
     resoAddebitato = esito.addebitato
-    importoResoCliente = esito.importoCliente
   }
   if (!sped.giacenza_addebito_effettuato) {
     if (rich.operazione !== 'reso') {
@@ -205,9 +203,11 @@ export async function eseguiSvincolo(
     if (!gia.has(id)) {
       const { count } = await admin.from('distinte_resi').select('id', { count: 'exact', head: true }).eq('master_id', sped.master_id)
       numeroDistintaReso = (count || 0) + 1
+      // Il totale dai movimenti, come tutte le distinte di reso: se il reso era gia' stato addebitato
+      // (dalla coda del tracking), l'esito dello svincolo non ha importo e la distinta usciva a 0.
       await admin.from('distinte_resi').insert({
         master_id: sped.master_id, cliente_id: sped.cliente_id, numero: numeroDistintaReso,
-        totale_ldv: 1, totale: importoResoCliente,
+        totale_ldv: 1, totale: await totaleResoAddebitato(admin, [id], { clienteId: sped.cliente_id }),
         voci: [{ id, numero: sped.numero }], stato: 'chiusa',
       })
     }

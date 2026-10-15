@@ -89,7 +89,7 @@ export async function GET(req: NextRequest) {
     // Resi rientrati (stato reso_mittente) di un cliente, non ancora in una distinta_resi, ultimi 30gg.
     // Le proprie del master (cliente_id NULL) non hanno flusso di distinta reso, come nel POST manuale.
     const { data: resi } = await supabase.from('spedizioni')
-      .select('id,master_id,cliente_id')
+      .select('id,numero,master_id,cliente_id')
       .eq('stato', 'reso_mittente')
       .not('cliente_id', 'is', null)
       .not('master_id', 'is', null)
@@ -129,7 +129,9 @@ export async function GET(req: NextRequest) {
         maxNumPerMaster.set(masterId, numero)
         const { error: errR } = await supabase.from('distinte_resi').insert({
           master_id: masterId, cliente_id: clienteId, numero,
-          totale_ldv: righe.length, totale, voci: righe.map(r => ({ id: r.id })), stato: 'chiusa',
+          // Il numero accanto all'id, come nelle distinte di reso nate dalle altre porte: l'elenco, la pagina
+          // Rete e il portale cliente mostrano le LDV leggendolo da qui (solo l'id = "+3" senza numeri).
+          totale_ldv: righe.length, totale, voci: righe.map(r => ({ id: r.id, numero: r.numero })), stato: 'chiusa',
         })
         if (!errR) distinteResiCreate++
       }

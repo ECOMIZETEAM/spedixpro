@@ -317,27 +317,52 @@ export type EsitoAddebito = { addebitato: boolean; importoCliente: number }
 export async function totaleResoAddebitato(
   admin: any, spedizioneIds: string[], pagatore: { clienteId?: string | null; masterTargetId?: string | null },
 ): Promise<number> {
-  if (!spedizioneIds.length || (!pagatore.clienteId && !pagatore.masterTargetId)) return 0
+  const { origineDi, importoDi } = await resoAddebitatoPerOrigine(admin, spedizioneIds, pagatore)
+  // Due gambe dello stesso pacco nella stessa distinta sono UN reso: si conta una volta.
+  const totale = [...new Set(origineDi.values())].reduce((s, o) => s + (importoDi.get(o) || 0), 0)
+  return Math.round(totale * 100) / 100
+}
+
+/**
+ * Lo stesso conto, riga per riga: quanto ha pagato quel soggetto per il reso di OGNI spedizione della
+ * distinta. Serve al dettaglio e al PDF, che finora leggevano il costo dalle voci salvate: il cron delle 23
+ * nelle voci scrive solo l'id (righe vuote a 0,00), e la scansione ci scrive il costo dell'ANDATA
+ * (costo_totale), che col reso non c'entra.
+ */
+export async function resoAddebitatoPerSpedizione(
+  admin: any, spedizioneIds: string[], pagatore: { clienteId?: string | null; masterTargetId?: string | null },
+): Promise<Map<string, number>> {
+  const { origineDi, importoDi } = await resoAddebitatoPerOrigine(admin, spedizioneIds, pagatore)
+  const out = new Map<string, number>()
+  for (const [id, o] of origineDi) out.set(id, Math.round((importoDi.get(o) || 0) * 100) / 100)
+  return out
+}
+
+async function resoAddebitatoPerOrigine(
+  admin: any, spedizioneIds: string[], pagatore: { clienteId?: string | null; masterTargetId?: string | null },
+): Promise<{ origineDi: Map<string, string>; importoDi: Map<string, number> }> {
+  const origineDi = new Map<string, string>()
+  const importoDi = new Map<string, number>()
+  if (!spedizioneIds.length || (!pagatore.clienteId && !pagatore.masterTargetId)) return { origineDi, importoDi }
   const righe: any[] = []
   for (let i = 0; i < spedizioneIds.length; i += 300) {
     const { data } = await admin.from('spedizioni').select('id,tracking_number').in('id', spedizioneIds.slice(i, i + 300))
     righe.push(...(data || []))
   }
   const gambe = await gambePerTracking(admin, righe.map(r => r.tracking_number))
-  const dove = new Set<string>()
   for (const r of righe) {
     const g = r.tracking_number ? gambe.get(r.tracking_number) : null
-    dove.add(g && g.length > 1 && g[0].tipo === 'moovexpress' ? g[0].spedizioneId : r.id)
+    origineDi.set(r.id, g && g.length > 1 && g[0].tipo === 'moovexpress' ? g[0].spedizioneId : r.id)
   }
-  const ids = [...dove]
-  let totale = 0
+  const ids = [...new Set(origineDi.values())]
   for (let i = 0; i < ids.length; i += 300) {
-    let q = admin.from('movimenti').select('importo').eq('tipo', 'reso').in('spedizione_id', ids.slice(i, i + 300))
-    q = pagatore.clienteId ? q.eq('cliente_id', pagatore.clienteId) : q.eq('master_target_id', pagatore.masterTargetId)
+    let q = admin.from('movimenti').select('spedizione_id,importo').eq('tipo', 'reso').in('spedizione_id', ids.slice(i, i + 300))
+    // Verso un master contano solo le SUE righe (cliente_id vuoto), mai quelle di un cliente.
+    q = pagatore.clienteId ? q.eq('cliente_id', pagatore.clienteId) : q.eq('master_target_id', pagatore.masterTargetId).is('cliente_id', null)
     const { data } = await q
-    totale += (data || []).reduce((s: number, m: any) => s + Math.abs(Number(m.importo || 0)), 0)
+    for (const m of (data || [])) importoDi.set(m.spedizione_id, (importoDi.get(m.spedizione_id) || 0) + Math.abs(Number(m.importo || 0)))
   }
-  return Math.round(totale * 100) / 100
+  return { origineDi, importoDi }
 }
 
 /**

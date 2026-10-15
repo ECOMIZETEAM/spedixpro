@@ -23,7 +23,7 @@ export default function DettaglioDistintaReso() {
     doc.text('N Dist. reso ' + dist.numero + ' del ' + dataD, 105, 18, { align: 'center' })
     let totale = 0
     const body = vv.map((v: any) => {
-      const cr = Number(v.costo_reso || v.costo_totale || 0); totale += cr
+      const cr = Number(v.reso_addebitato || 0); totale += cr
       return [v.numero || '', v.mitt_nome || '', (v.dest_nome || '') + ', ' + (v.dest_citta || ''), Number(v.peso_reale || v.peso || 0).toFixed(0), '0', v.colli || 1, Number(v.contrassegno || 0).toFixed(2) + ' €', cr.toFixed(2) + ' €']
     })
     autoTable(doc, {
@@ -81,7 +81,7 @@ export default function DettaglioDistintaReso() {
                   <td style={td}>{Number(v.peso_reale || v.peso || 0).toFixed(2)}</td>
                   <td style={td}>{v.colli || 1}</td>
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>{v.data_scansione ? new Date(v.data_scansione).toLocaleDateString('it-IT') : '-'}</td>
-                  <td style={td}>{Number(v.costo_reso || v.costo_totale || 0).toFixed(2)} EUR</td>
+                  <td style={td}>{Number(v.reso_addebitato || 0).toFixed(2)} EUR</td>
                 </tr>
               ))}
             </tbody>
