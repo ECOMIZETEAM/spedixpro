@@ -3,9 +3,11 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { risolviPrezzoPod } from '@/lib/pod-prezzo'
 
-// Anteprima del costo di una POD PRIMA di aprirla: il cliente digita la LDV e sa subito quanto paga.
-// Il prezzo definitivo resta quello BLOCCATO al momento dell'apertura (tickets.pod_prezzo): questa e'
-// solo l'anteprima. Il cliente vede solo le PROPRIE spedizioni.
+// Anteprima del costo di una POD PRIMA di aprirla: il cliente indica la LDV e sa subito quanto paga
+// (dipende dal vettore della spedizione: BRT ha il suo prezzo, SDA il suo, dal listino POD del
+// master) e se la puo' chiedere: la POD e' la prova di CONSEGNA, si chiede solo a pacco consegnato.
+// Accettando questa cifra il cliente apre la richiesta e la paga subito (app/api/assistenza/apri,
+// che ricontrolla tutto: questa e' solo l'anteprima). Il cliente vede solo le PROPRIE spedizioni.
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -19,15 +21,16 @@ export async function GET(req: NextRequest) {
   const admin = createAdminSupabase()
   // Solo una LDV univoca e del cliente: se ambigua o non sua, niente anteprima (nessun prezzo trapela).
   const { data: sps } = await admin.from('spedizioni')
-    .select('id,cliente_id,master_id,corriere_id').ilike('numero', ldv).limit(2)
+    .select('id,cliente_id,master_id,corriere_id,stato').ilike('numero', ldv).limit(2)
   if (!sps || sps.length !== 1 || (sps[0] as any).cliente_id !== u.cliente_id) {
     return NextResponse.json({ trovata: false })
   }
   const sp = sps[0] as any
+  if (sp.stato !== 'consegnata') return NextResponse.json({ trovata: true, consegnata: false })
   const prezzo = await risolviPrezzoPod(admin, {
     masterId: u.master_id,          // il master del cliente e' chi addebita
     clienteId: u.cliente_id,
     corriereId: sp.corriere_id,
   })
-  return NextResponse.json({ trovata: true, prezzo })
+  return NextResponse.json({ trovata: true, consegnata: true, prezzo })
 }

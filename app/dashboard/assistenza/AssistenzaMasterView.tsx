@@ -493,7 +493,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     <div style={{ marginBottom: '10px', textAlign: 'center', fontSize: '12px', fontWeight: 700, color: sel.pod_addebitato_il ? '#15803d' : '#c2410c' }}>
                       {sel.pod_addebitato_il
                         ? `✓ Addebitati ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))} al cliente per questa POD.`
-                        : `Inviando la POD verranno addebitati ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))} al cliente.`}
+                        : `Inviando la POD, o un qualsiasi allegato in chat, verranno addebitati ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))} al cliente.`}
                     </div>
                   )}
                   {sel.pod_url && !podFile && <div style={{ marginBottom: '10px', textAlign: 'center' }}><a href={linkAllegato(sel.id, sel.pod_url)} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD già inviata</a></div>}

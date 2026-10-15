@@ -1,5 +1,6 @@
 'use client'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import PodCosto, { type StatoPodCosto } from '@/app/components/PodCosto'
 
 // Icona assistenza (accanto al cestino della LDV): apre un popup dove si sceglie
 // tra "Apertura ticket" e "Richiesta POD"; poi si compila e si invia. La LDV è
@@ -16,6 +17,9 @@ export default function AssistenzaTicketButton({ ldv, spedizioneId }: { ldv: str
   const [drag, setDrag] = useState(false)
   const [inviando, setInviando] = useState(false)
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
+  const [podStato, setPodStato] = useState<StatoPodCosto>({ pronta: false, prezzo: null })
+  const [podVer, setPodVer] = useState(0)   // ricarica la cifra se il server risponde che e' cambiata
+  const inviandoRef = useRef(false)          // un doppio clic non apre (e non fa pagare) due richieste
 
   function chiudi() { setOpen(false); setModo(''); setDesc(''); setFiles([]); setMsg(null) }
 
@@ -27,18 +31,28 @@ export default function AssistenzaTicketButton({ ldv, spedizioneId }: { ldv: str
 
   async function invia() {
     if (modo === 'ticket' && !desc.trim()) { setMsg({ t: 'err', x: 'Inserisci una descrizione del problema' }); return }
+    if (modo === 'pod' && !podStato.pronta) return
+    if (inviandoRef.current) return
+    inviandoRef.current = true
     setInviando(true); setMsg(null)
+    const consenso = modo === 'pod' && podStato.prezzo != null ? { accetto_addebito: true, prezzo_accettato: podStato.prezzo } : {}
     const r = await fetch('/api/assistenza/apri', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ oggetto: ldv, messaggio: desc, categoria: modo, allegati: modo === 'ticket' ? files : [], spedizione_id: spedizioneId || null }),
-    })
-    const j = await r.json(); setInviando(false)
-    if (j.error) { setMsg({ t: 'err', x: j.error }); return }
-    setMsg({ t: 'ok', x: modo === 'pod' ? 'Richiesta POD inviata! La trovi in Assistenza.' : 'Segnalazione inviata! La trovi in Assistenza.' })
+      body: JSON.stringify({ oggetto: ldv, messaggio: desc, categoria: modo, allegati: modo === 'ticket' ? files : [], spedizione_id: spedizioneId || null, ...consenso }),
+    }).catch(() => null)
+    const j = r ? await r.json().catch(() => ({ error: 'Risposta non valida dal server' })) : { error: 'Errore di rete: riprova' }
+    inviandoRef.current = false
+    setInviando(false)
+    if (j.error) { if (r?.status === 409) setPodVer(v => v + 1); setMsg({ t: 'err', x: j.error }); return }
+    const pagata = modo === 'pod' && Number(j.pod_addebitato) > 0 ? ` Addebitati ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(j.pod_addebitato))}.` : ''
+    setMsg({ t: 'ok', x: modo === 'pod' ? 'Richiesta POD inviata!' + pagata + ' La trovi in Assistenza.' : 'Segnalazione inviata! La trovi in Assistenza.' })
     setTimeout(() => chiudi(), 1100)
   }
 
   const btn = { padding: '9px 16px', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }
+  // Dopo l'invio riuscito resta fermo fino alla chiusura: un secondo clic finiva sul "hai gia' una
+  // richiesta aperta" e copriva la conferma.
+  const bloccato = inviando || msg?.t === 'ok' || (modo === 'pod' && !podStato.pronta)
 
   return (
     <>
@@ -84,10 +98,12 @@ export default function AssistenzaTicketButton({ ldv, spedizioneId }: { ldv: str
                   </div>}
                 </div>}
                 {modo === 'pod' && <div style={{ fontSize: '13px', color: '#555' }}>Confermi la richiesta della POD per la LDV <b>{ldv}</b>?</div>}
+                {/* Costo e consenso, come nella pagina Assistenza → POD: la POD si paga all'apertura. */}
+                {modo === 'pod' && <PodCosto key={podVer} ldv={ldv} onStato={setPodStato} />}
                 {msg && <div style={{ padding: '8px 12px', borderRadius: '6px', fontSize: '12.5px', color: '#fff', background: msg.t === 'ok' ? '#16a34a' : '#dc2626' }}>{msg.x}</div>}
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
                   <button onClick={() => { setModo(''); setMsg(null) }} style={{ padding: '9px 16px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: '#1a1a1a' }}>← Indietro</button>
-                  <button disabled={inviando} onClick={invia} style={{ ...btn, background: modo === 'pod' ? '#2563eb' : '#f97316', color: '#fff', opacity: inviando ? 0.7 : 1 }}>{inviando ? 'Invio…' : (modo === 'pod' ? 'Inoltra richiesta POD' : 'Invia segnalazione')}</button>
+                  <button disabled={bloccato} onClick={invia} style={{ ...btn, background: modo === 'pod' ? '#2563eb' : '#f97316', color: '#fff', opacity: bloccato ? 0.5 : 1, cursor: bloccato ? 'not-allowed' : 'pointer' }}>{inviando ? 'Invio…' : (modo === 'pod' ? 'Inoltra richiesta POD' : 'Invia segnalazione')}</button>
                 </div>
               </div>
             )}

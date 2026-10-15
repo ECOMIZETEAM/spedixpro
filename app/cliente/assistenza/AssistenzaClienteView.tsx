@@ -4,6 +4,7 @@ import { fileToAllegato, preparaAllegatoChat } from '@/app/components/fileAllega
 import { AllegatoChat } from '@/app/components/AllegatoChat'
 // Allegati e POD escono da /api/file, che verifica chi li sta scaricando (lib/file-riservati.ts).
 import { linkAllegato } from '@/lib/file-riservati'
+import PodCosto, { type StatoPodCosto } from '@/app/components/PodCosto'
 
 const STATI: Record<string, { label: string; bg: string; color: string }> = {
   aperto: { label: 'Aperto', bg: '#fff7ed', color: '#ea580c' },
@@ -30,19 +31,12 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
   const [pagina, setPagina] = useState(1)
   const [nuoviIds, setNuoviIds] = useState<Set<string>>(new Set())
   const inputRef = useRef<HTMLInputElement>(null)
-  // Anteprima del costo POD mentre il cliente digita la LDV: lo sa PRIMA di aprire la richiesta.
-  const [podPrezzo, setPodPrezzo] = useState<{ trovata: boolean; prezzo?: number } | null>(null)
-  useEffect(() => {
-    if (!isPod) return
-    const ldv = nuovo.oggetto.trim()
-    if (ldv.length < 4) { setPodPrezzo(null); return }
-    let vivo = true
-    const h = setTimeout(async () => {
-      const d = await fetch('/api/assistenza/pod-prezzo?ldv=' + encodeURIComponent(ldv)).then(r => r.json()).catch(() => null)
-      if (vivo) setPodPrezzo(d && typeof d.trovata === 'boolean' ? d : null)
-    }, 400)
-    return () => { vivo = false; clearTimeout(h) }
-  }, [nuovo.oggetto, isPod])
+  // Costo POD e consenso mentre il cliente digita la LDV (app/components/PodCosto): lo sa e lo accetta
+  // PRIMA di aprire la richiesta, che si paga all'apertura. podVer ricarica la cifra se il server
+  // risponde che e' cambiata.
+  const [podStato, setPodStato] = useState<StatoPodCosto>({ pronta: false, prezzo: null })
+  const [podVer, setPodVer] = useState(0)
+  const inviandoRef = useRef(false)   // un doppio clic non apre (e non fa pagare) due richieste
   // Chat modale
   const [chat, setChat] = useState<any>(null)         // { ticket, messaggi }
   const [chatLoad, setChatLoad] = useState(false)
@@ -129,17 +123,23 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
     if (!isPod && !nuovo.contenuto.trim()) { setMsg({ t: 'err', x: 'Inserisci il contenuto del collo' }); return }
     if (!isPod && !nuovo.imballaggio.trim()) { setMsg({ t: 'err', x: 'Inserisci il tipo di imballaggio' }); return }
     if (!isPod && !nuovo.messaggio.trim()) { setMsg({ t: 'err', x: 'Inserisci il messaggio' }); return }
+    if (isPod && !podStato.pronta) { setMsg({ t: 'err', x: 'Controlla la spedizione e, se la POD ha un costo, accettalo.' }); return }
+    if (inviandoRef.current) return
+    inviandoRef.current = true
     setSalvando(true); setMsg(null)
     // Contenuto e imballaggio viaggiano IN TESTA al messaggio (nessun campo DB nuovo): il master li vede
     // subito nel primo messaggio del ticket. Solo per i ticket, non per le richieste POD.
     const messaggioFinale = isPod ? nuovo.messaggio
       : `Contenuto: ${nuovo.contenuto.trim()}\nImballaggio: ${nuovo.imballaggio.trim()}\n\n${nuovo.messaggio.trim()}`
-    const r = await fetch('/api/assistenza/apri', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oggetto: nuovo.oggetto, messaggio: messaggioFinale, categoria, allegati: isPod ? [] : files }) })
-    const j = await r.json()
+    const consenso = isPod && podStato.prezzo != null ? { accetto_addebito: true, prezzo_accettato: podStato.prezzo } : {}
+    const r = await fetch('/api/assistenza/apri', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oggetto: nuovo.oggetto, messaggio: messaggioFinale, categoria, allegati: isPod ? [] : files, ...consenso }) }).catch(() => null)
+    const j = r ? await r.json().catch(() => ({ error: 'Risposta non valida dal server' })) : { error: 'Errore di rete: riprova' }
+    inviandoRef.current = false
     setSalvando(false)
-    if (j.error) { setMsg({ t: 'err', x: j.error }); return }
+    if (j.error) { if (r?.status === 409) setPodVer(v => v + 1); setMsg({ t: 'err', x: j.error }); return }
+    const pagata = isPod && Number(j.pod_addebitato) > 0 ? ` Addebitati ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(j.pod_addebitato))}.` : ''
     setNuovo({ oggetto: '', messaggio: '', contenuto: '', imballaggio: '' }); setFiles([])
-    setMsg({ t: 'ok', x: isPod ? 'Richiesta POD inviata!' : 'Richiesta inviata! La trovi qui sotto con lo stato.' })
+    setMsg({ t: 'ok', x: isPod ? 'Richiesta POD inviata!' + pagata : 'Richiesta inviata! La trovi qui sotto con lo stato.' })
     carica()
   }
 
@@ -166,15 +166,7 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
         {msg && <div style={{ padding: '9px 12px', borderRadius: '6px', marginBottom: '12px', fontSize: '12.5px', color: '#fff', background: msg.t === 'ok' ? '#16a34a' : '#dc2626' }}>{msg.x}</div>}
         <div style={{ marginBottom: '12px' }}><label style={lbl}>LDV</label><input value={nuovo.oggetto} onChange={e => setNuovo(n => ({ ...n, oggetto: e.target.value }))} placeholder="Numero LDV della spedizione" style={inp} /></div>
 
-        {isPod && podPrezzo?.trovata && (
-          <div style={{ marginBottom: '12px', padding: '9px 12px', borderRadius: '6px', fontSize: '12.5px', fontWeight: 600,
-            background: (podPrezzo.prezzo || 0) > 0 ? '#fff7ed' : '#f0fdf4', color: (podPrezzo.prezzo || 0) > 0 ? '#c2410c' : '#15803d',
-            border: `1px solid ${(podPrezzo.prezzo || 0) > 0 ? '#fed7aa' : '#bbf7d0'}` }}>
-            {(podPrezzo.prezzo || 0) > 0
-              ? `Questa richiesta POD ha un costo di ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(podPrezzo.prezzo || 0)}, addebitato quando riceverai la prova di consegna.`
-              : 'Questa richiesta POD è gratuita.'}
-          </div>
-        )}
+        {isPod && <PodCosto key={podVer} ldv={nuovo.oggetto} onStato={setPodStato} />}
 
         {!isPod && <>
           <div style={{ marginBottom: '12px' }}><label style={lbl}>Contenuto <span style={{ color: '#dc2626', fontWeight: 700 }}>* obbligatorio</span></label><input value={nuovo.contenuto} onChange={e => setNuovo(n => ({ ...n, contenuto: e.target.value }))} placeholder="Cosa c'era nel collo (es. 2 vasi in ceramica)" style={inp} /></div>
@@ -205,7 +197,7 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
           </div>
         </>}
 
-        <button disabled={salvando} onClick={invia} style={{ padding: '10px 22px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Invio…' : (isPod ? 'Inoltra richiesta POD' : 'Invia ticket')}</button>
+        <button disabled={salvando || (isPod && !podStato.pronta)} onClick={invia} style={{ padding: '10px 22px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: salvando || (isPod && !podStato.pronta) ? 'not-allowed' : 'pointer', opacity: salvando || (isPod && !podStato.pronta) ? 0.5 : 1 }}>{salvando ? 'Invio…' : (isPod ? 'Inoltra richiesta POD' : 'Invia ticket')}</button>
       </div>
 
       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>

@@ -6,6 +6,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { partecipanteTicket as partecipante, posizioneCatena, messaggioVisibileCatena, mascheraCatena, assegnatoPer, risolviNomiAttuali } from '@/lib/ticket-accesso'
 import { BUCKET_RISERVATI } from '@/lib/file-riservati'
 import { caricaAllegatiTicket } from '@/lib/allegati-ticket'
+import { addebitaPod } from '@/lib/pod-addebito'
 
 // GET: dettaglio ticket + thread messaggi (chat). Accessibile a entrambe le parti.
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -83,7 +84,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
   const { id } = await params
   const admin = createAdminSupabase()
-  const { data: t } = await admin.from('tickets').select('id,stato,cliente_id,owner_master_id,aperto_master_id,tipo_apertura,aperto_da,rete_master_ids,rete_non_letti,inoltrato_a_master_id,assegnazioni').eq('id', id).maybeSingle()
+  const { data: t } = await admin.from('tickets').select('id,stato,categoria,cliente_id,owner_master_id,aperto_master_id,tipo_apertura,aperto_da,rete_master_ids,rete_non_letti,inoltrato_a_master_id,assegnazioni').eq('id', id).maybeSingle()
   if (!t) return NextResponse.json({ error: 'Ticket non trovato' }, { status: 404 })
   const ruolo = await partecipante(utente, t)
   if (!ruolo) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
@@ -156,6 +157,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     upd.assegnazioni = { ...((t.assegnazioni as any) || {}), [mid]: { id: user.id, nome: nomePersona } }
   }
   await admin.from('tickets').update(upd).eq('id', id)
+  // RICHIESTA POD: un file che l'assistenza manda al cliente in chat E' la POD, e si paga come dal
+  // tasto "Carica POD" (lib/pod-addebito, una volta sola). Dal 15/10/2026 la POD si paga gia'
+  // all'apertura: qui serve alle richieste aperte prima e se quell'addebito non e' riuscito. Solo i
+  // messaggi che il cliente riceve: quelli interni della rete no. Sui ticket gli allegati restano gratis.
+  if (t.categoria === 'pod' && ruolo === 'master' && visibilita === 'pubblico' && allegatiOut.length) {
+    await addebitaPod(admin, id, user.id)
+  }
   return NextResponse.json({ success: true })
 }
 
@@ -175,7 +183,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const body = await req.json()
   const admin = createAdminSupabase()
 
-  const { data: t } = await admin.from('tickets').select('owner_master_id,rete_master_ids,rete_non_letti,assegnazioni,categoria,cliente_id,spedizione_id,oggetto,pod_prezzo,pod_addebitato_il').eq('id', id).maybeSingle()
+  const { data: t } = await admin.from('tickets').select('owner_master_id,rete_master_ids,rete_non_letti,assegnazioni').eq('id', id).maybeSingle()
   if (!t) return NextResponse.json({ error: 'Ticket non trovato' }, { status: 404 })
   const inCatena = Array.isArray(t.rete_master_ids) && t.rete_master_ids.includes(masterId)
   const sonoOwner = t.owner_master_id === masterId
@@ -245,35 +253,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
   }
 
-  // ADDEBITO POD: caricando la POD, il cliente paga la cifra BLOCCATA all'apertura (tickets.pod_prezzo).
-  // Addebita il MASTER OWNER (chi ha la relazione col cliente e il listino POD), non chi la carica in
-  // catena. Una sola volta (guardia pod_addebitato_il). NON blocca mai la POD: e' un diritto del cliente
-  // — se l'addebito fallisce, la POD parte comunque e l'addebito resta "da fare" (timestamp nullo).
-  if (upd.pod_url && t.categoria === 'pod' && t.cliente_id && !t.pod_addebitato_il) {
-    const prezzo = Number(t.pod_prezzo) || 0
-    if (prezzo > 0) {
-      try {
-        const { registraMovimento } = await import('@/lib/movimenti')
-        const ldv = String(t.oggetto || '').trim().slice(0, 40)
-        await registraMovimento(admin, {
-          masterId: t.owner_master_id,
-          clienteId: t.cliente_id,
-          tipo: 'rettifica',                       // stessa convenzione dei POD storici; entra nell'estratto conto
-          descrizione: 'POD ' + ldv,
-          importo: -prezzo,                        // addebito
-          riferimento: ldv || null,
-          spedizioneId: t.spedizione_id || null,
-          createdBy: user.id,
-        })
-        upd.pod_addebitato_il = new Date().toISOString()
-      } catch (e: any) {
-        console.error('[POD][ADDEBITO] fallito, POD consegnata comunque — ticket', id, e?.message)
-      }
-    } else {
-      upd.pod_addebitato_il = new Date().toISOString()   // POD gratuita: nessun movimento, ma marcata evasa
-    }
-  }
-
   // Agire su un ticket non ancora preso (in lavorazione, risolto o POD caricata) vale come prenderlo
   // in carico per il PROPRIO livello, se nessuno del proprio master l'ha già preso.
   if (sonoOwner && (upd.stato === 'in_lavorazione' || upd.stato === 'risolto' || upd.pod_url) && !((t.assegnazioni as any)?.[masterId])) {
@@ -282,5 +261,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const { error } = await admin.from('tickets').update(upd).eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  // ADDEBITO POD (lib/pod-addebito): dopo che la POD e' salvata, mai prima — se il salvataggio
+  // fallisce il cliente non l'ha ricevuta e non deve pagarla.
+  if (upd.pod_url) await addebitaPod(admin, id, user.id)
   return NextResponse.json({ success: true })
 }

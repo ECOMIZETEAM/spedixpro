@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 // Listino POD del master: quanto paga il cliente per ogni richiesta di prova di consegna.
 // Regole a PRIORITA' (dalla piu' specifica): cliente+contratto > cliente+vettore > cliente >
 // contratto > vettore > predefinito.
-// Il cliente vede il prezzo all'apertura della richiesta; l'addebito parte quando il master carica la POD.
+// Il cliente vede il prezzo prima di aprire la richiesta, lo accetta e lo paga subito all'apertura
+// (dal 15/10/2026; prima si pagava quando il master caricava la POD). Solo su spedizioni consegnate.
 //
 // 23/09: si scelgono PIU' contratti in una volta (prima uno alla volta: con 38 contratti significava
 // rifare 38 volte la stessa regola) e si puo' prezzare un VETTORE intero — "tutti i GLS 2 €" — che
@@ -254,7 +255,8 @@ export default function PrezziPodPage() {
           Decidi quanto paga il cliente per ogni richiesta di prova di consegna. Vale la regola più specifica:
           <b> cliente + contratto</b> batte <b>cliente + vettore</b>, che batte <b>cliente</b>, che batte <b>contratto</b>,
           che batte <b>vettore</b>, che batte il <b>predefinito</b>.
-          Senza nessuna regola la POD è gratuita. Il cliente vede il prezzo già all'apertura; l'addebito parte quando carichi la POD.
+          Senza nessuna regola la POD è gratuita. Il cliente vede il prezzo prima di aprire la richiesta, lo accetta e gli viene
+          addebitato subito, all'apertura. La POD si può chiedere solo per spedizioni consegnate.
         </p>
       </div>
 

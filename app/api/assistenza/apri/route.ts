@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { BUCKET_RISERVATI } from '@/lib/file-riservati'
+import { addebitaPod } from '@/lib/pod-addebito'
 
 // Apertura di un ticket di assistenza.
 // - Cliente: il ticket va al proprio master (owner = master del cliente).
@@ -75,10 +76,11 @@ export async function POST(req: NextRequest) {
     return (await sottoAlberoMasterIds(admin, masterId)).includes(sp.master_id)
   }
   let spCorriereId: string | null = null   // corriere della spedizione collegata: serve per il prezzo POD
+  let spStato: string | null = null        // stato della spedizione collegata: la POD solo se consegnata
   const spedIdIn = String(body?.spedizione_id || '').trim()
   if (spedIdIn) {
-    const { data: sp } = await admin.from('spedizioni').select('id,cliente_id,master_id,corriere_id').eq('id', spedIdIn).maybeSingle()
-    if (await autorizzatoSp(sp)) { record.spedizione_id = (sp as any).id; spCorriereId = (sp as any).corriere_id || null }
+    const { data: sp } = await admin.from('spedizioni').select('id,cliente_id,master_id,corriere_id,stato').eq('id', spedIdIn).maybeSingle()
+    if (await autorizzatoSp(sp)) { record.spedizione_id = (sp as any).id; spCorriereId = (sp as any).corriere_id || null; spStato = (sp as any).stato || null }
   }
   // Fallback: nessun id esplicito ma l'oggetto è una LDV → collega solo se combacia UNA sola
   // spedizione autorizzata (evita ambiguità se due master hanno numeri simili).
@@ -86,21 +88,47 @@ export async function POST(req: NextRequest) {
     const ldv = oggetto.trim()
     if (ldv.length >= 4 && ldv.length <= 40) {
       // case-insensitive: l'oggetto può essere minuscolo (es. 1uw07wf…), il numero è maiuscolo.
-      const { data: sps } = await admin.from('spedizioni').select('id,cliente_id,master_id,corriere_id').ilike('numero', ldv).limit(2)
-      if (sps && sps.length === 1 && await autorizzatoSp(sps[0])) { record.spedizione_id = (sps[0] as any).id; spCorriereId = (sps[0] as any).corriere_id || null }
+      const { data: sps } = await admin.from('spedizioni').select('id,cliente_id,master_id,corriere_id,stato').ilike('numero', ldv).limit(2)
+      if (sps && sps.length === 1 && await autorizzatoSp(sps[0])) { record.spedizione_id = (sps[0] as any).id; spCorriereId = (sps[0] as any).corriere_id || null; spStato = (sps[0] as any).stato || null }
     }
   }
 
-  // PREZZO POD BLOCCATO ALL'APERTURA: la POD di un cliente costa quanto dice il listino POD del suo
-  // master (lib/pod-prezzo). Si congela qui, così il cliente lo sa PRIMA e un cambio di listino non lo
-  // sorprende; l'addebito effettivo (alla stessa cifra) avviene quando il master carica la POD.
-  if (categoria === 'pod' && record.cliente_id && record.spedizione_id) {
+  // POD = PROVA DI CONSEGNA: si chiede solo su una spedizione riconosciuta e CONSEGNATA, chiunque la
+  // apra (cliente, o master verso la sua linea superiore). Decisione del committente, 15/10/2026: prima
+  // passava qualunque LDV, e l'assistenza chiudeva a mano richieste su pacchi in giacenza, in transito
+  // o mai affidati (TK-04649, TK-05441, TK-05902, TK-06002).
+  if (categoria === 'pod') {
+    if (!record.spedizione_id) {
+      return NextResponse.json({ error: 'Non troviamo questa LDV tra le tue spedizioni: controlla il numero.' }, { status: 400 })
+    }
+    if (spStato !== 'consegnata') {
+      return NextResponse.json({ error: 'La POD (prova di consegna) si può chiedere solo per una spedizione consegnata: questa non risulta ancora consegnata.' }, { status: 400 })
+    }
+  }
+
+  // PREZZO POD, PAGATO ALL'APERTURA: la POD di un cliente costa quanto dice il listino POD del suo
+  // master (lib/pod-prezzo: dipende dal vettore della spedizione). Il cliente lo vede prima
+  // (api/assistenza/pod-prezzo), lo ACCETTA aprendo la richiesta e lo paga subito, qui sotto dopo la
+  // creazione (decisione del committente, 15/10/2026: prima si pagava alla consegna della POD, e una
+  // POD mandata come allegato in chat arrivava gratis). La cifra accettata dev'essere quella di adesso:
+  // se il listino e' cambiato fra l'anteprima e l'invio si rifiuta e si mostra la nuova, invece di
+  // addebitare una cifra diversa da quella che il cliente ha visto.
+  if (categoria === 'pod' && record.cliente_id) {
     const { risolviPrezzoPod } = await import('@/lib/pod-prezzo')
     record.pod_prezzo = await risolviPrezzoPod(admin, {
       masterId: record.owner_master_id,
       clienteId: record.cliente_id,
       corriereId: spCorriereId,
     })
+    if (record.pod_prezzo > 0) {
+      const cifra = new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(record.pod_prezzo)
+      if (body?.accetto_addebito !== true) {
+        return NextResponse.json({ error: `Per aprire la richiesta devi accettare l'addebito di ${cifra}.`, pod_prezzo: record.pod_prezzo }, { status: 409 })
+      }
+      if (!(Math.abs(Number(body?.prezzo_accettato) - record.pod_prezzo) < 0.005)) {
+        return NextResponse.json({ error: `Il costo della POD è cambiato: ora è ${cifra}. Controlla e conferma di nuovo.`, pod_prezzo: record.pod_prezzo }, { status: 409 })
+      }
+    }
   }
 
   // ── UNA RICHIESTA APERTA PER SPEDIZIONE: se chi apre ha già una richiesta 'aperta'/'in_lavorazione'
@@ -160,5 +188,8 @@ export async function POST(req: NextRequest) {
       allegati: allegatiOut.length ? allegatiOut : null,
     })
   }
-  return NextResponse.json({ success: true, id: data?.id, codice: data?.codice, pod_prezzo: record.pod_prezzo ?? null })
+  // ADDEBITO ALL'APERTURA (lib/pod-addebito, una volta sola). Se non riesce, la richiesta resta "da
+  // addebitare" e si riprova quando l'assistenza manda la POD: aprirla non si blocca per questo.
+  const podAddebitato = categoria === 'pod' && record.cliente_id && data?.id ? await addebitaPod(admin, data.id, user.id) : 0
+  return NextResponse.json({ success: true, id: data?.id, codice: data?.codice, pod_prezzo: record.pod_prezzo ?? null, pod_addebitato: podAddebitato })
 }
