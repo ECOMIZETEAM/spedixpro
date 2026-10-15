@@ -9,7 +9,7 @@
 // Usato dal ledger a cascata (STEP 4.5) per sapere quanto paga ogni master
 // della catena col proprio listino ereditato.
 
-import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster, filtraCapCondiviso, rigaValePerCitta } from '@/lib/zone-match'
+import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster, filtraCapCondiviso, rigaValePerCitta, righeConPrefissoZona } from '@/lib/zone-match'
 import { fetchAll } from '@/lib/fetch-all'
 import { entroMisureAgevolate, pesoSuReale } from '@/lib/agevolazione-misure'
 
@@ -507,7 +507,7 @@ export async function calcolaPrezzoListino(
   // supplemento si calcola a parte, sul mittente, dopo aver scelto il corriere.
   const isMittL = (zid: string | undefined) => !!zid && (fasce as any[]).some((f: any) => (f.zone as any)?.id === zid && (f.zone as any)?.su_mittente)
   const corrIdsListino = Array.from(new Set<string>(fasce.map((f: any) => (f.corrieri as any)?.id).filter(Boolean)))
-  const esclMaster = (await zoneEsclusiveMaster(supabase, corrIdsListino, params.cap)).filter((z: any) => !isMittL(z.id))
+  const esclMaster = (await zoneEsclusiveMaster(supabase, corrIdsListino, params.cap, params.paese)).filter((z: any) => !isMittL(z.id))
   const candidateZonaIds = Array.from(new Set<string>([
     ...fasce.filter((f: any) => !(f.zone as any)?.su_mittente).map((f: any) => (f.zone as any)?.id).filter(Boolean),
     ...esclMaster.map((z) => z.id),
@@ -779,7 +779,7 @@ export async function calcolaPrezzoCorriereDettaglio(
   // Zone ESCLUSIVE del corriere (isole/disagiate/…), anche se questo listino NON le prezza: servono
   // a NON far cadere su "Italia" una destinazione esclusiva (es. 30126 disagiata) quando manca la
   // fascia speciale → il corriere semplicemente non copre quella destinazione (niente sotto-costo).
-  const esclZone = (await zoneEsclusiveMaster(supabase, [corriereId], params.cap)).filter((z: any) => !isMitt(z.id))
+  const esclZone = (await zoneEsclusiveMaster(supabase, [corriereId], params.cap, params.paese)).filter((z: any) => !isMitt(z.id))
   const esclCorr = new Map<string, string>()
   for (const z of esclZone) esclCorr.set(z.id, z.corriere_id)
   const zonaCorr = new Map<string, string>()
@@ -972,9 +972,12 @@ export async function calcolaSupplementiCliente(
 // che matchZona usa quando il CAP esatto non c'e'. Senza elenco — o con troppi CAP, es. un report su
 // tutto il mese — si legge tutto come prima: meglio una query grossa che mille piccole.
 function zoneCapMirate(q: any, cap?: string[] | null) {
-  const lista = Array.from(new Set((cap || [])
-    .map(c => String(c || '').trim())
-    .filter(c => /^[A-Za-z0-9-]{1,10}$/.test(c))))
+  const grezzi = (cap || []).map(c => String(c || '').trim())
+  const lista = Array.from(new Set(grezzi.filter(c => /^[A-Za-z0-9-]{1,10}$/.test(c))))
+  // CAP portoghesi: anche il prefisso di 4 cifre, su cui le zone PT possono essere scritte (vedi
+  // capPrefissoZona in zone-match: stessa forma, spazio compreso). Le righe di altri paesi lette in
+  // piu' le scarta il match, che filtra per paese.
+  for (const c of grezzi) { const m = /^(\d{4})[-\s]?\d{3}$/.exec(c); if (m && !lista.includes(m[1])) lista.push(m[1]) }
   if (!lista.length || lista.length > 200) return q
   return q.or(`cap.is.null,cap.eq.*,cap.in.(${lista.join(',')})`)
 }
@@ -1043,6 +1046,7 @@ async function creaCalcolatoreCorriereBase(
 
   function matchZona(paese: string, provincia: string, cap: string, cand: string[], citta?: string): string[] {
     let rows = (zcByPaese.get((paese || 'IT').toUpperCase()) || []).filter((r: any) => cand.includes(r.zona_id))
+    rows = righeConPrefissoZona(rows, paese, cap)   // Portogallo: zona per le prime 4 cifre (zone-match)
     rows = filtraCapCondiviso(rows, cap, citta)   // CAP condivisi: la riga di un ALTRO comune non aggancia
     let m = rows.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap)
     // Una riga che nomina un COMUNE vale solo per quel comune (vedi rigaValePerCitta in zone-match):
@@ -1179,6 +1183,7 @@ async function creaCalcolatoreListinoClienteBase(
   }
   function matchZona(paese: string, provincia: string, cap: string, cand: string[], citta?: string): string[] {
     let rows = (zcByPaese.get((paese || 'IT').toUpperCase()) || []).filter((r: any) => cand.includes(r.zona_id))
+    rows = righeConPrefissoZona(rows, paese, cap)   // Portogallo: zona per le prime 4 cifre (zone-match)
     rows = filtraCapCondiviso(rows, cap, citta)   // CAP condivisi: la riga di un ALTRO comune non aggancia
     let m = rows.filter((r: any) => r.cap && r.cap !== '*' && r.cap === cap)
     // Una riga che nomina un COMUNE vale solo per quel comune (vedi rigaValePerCitta in zone-match):

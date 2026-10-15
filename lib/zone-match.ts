@@ -22,6 +22,27 @@ export type DestZona = { paese?: string; provincia?: string; cap?: string; citta
 // righe-con-città: righe invariate.) Condiviso col matching batch di lib/pricing.
 const nrmCitta = (s: any) => (s || '').toString().toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9]/g, '')
 
+// IL PORTOGALLO SI ZONA SULLE PRIME 4 CIFRE DEL CAP. Il CAP portoghese e' NNNN-NNN (o NNNNNNN, scritto
+// in tutti e due i modi nei nostri ordini) e le zone del corriere lo dividono per le prime 4: Madeira
+// 9000-9399, Azzorre 9400-9999. Il match confronta il CAP per UGUAGLIANZA, quindi una zona per
+// prefisso non si poteva scrivere (1000 suffissi per ogni prefisso) e i file a intervallo
+// ("PT 9000-9399") non scattavano mai: le isole finivano sul prezzo del continente.
+// Qui una riga zone_cap a 4 cifre di una destinazione PT diventa una riga del CAP della destinazione:
+// da li' in poi vale come un CAP esatto e i tier del match restano quelli di sempre. Per gli altri
+// paesi non cambia niente, e al 15/10/2026 nessuna riga PT a 4 cifre esisteva prima di questa regola.
+export function capPrefissoZona(paese: unknown, cap: unknown): string | null {
+  if (String(paese ?? '').toUpperCase().trim() !== 'PT') return null
+  const c = String(cap ?? '').trim()
+  const m = /^(\d{4})(?:[-\s]?\d{3})?$/.exec(c)
+  return m && m[1] !== c ? m[1] : null
+}
+export function righeConPrefissoZona<T extends { cap?: any }>(righe: T[], paese: unknown, cap: unknown): T[] {
+  const prefisso = capPrefissoZona(paese, cap)
+  if (!prefisso) return righe
+  const c = String(cap).trim()
+  return righe.map(r => (r.cap === prefisso ? { ...r, cap: c } : r))
+}
+
 // UNA RIGA CHE NOMINA UN COMUNE VALE SOLO PER QUEL COMUNE.
 // Il match per PROVINCIA (secondo criterio, quando il CAP non combacia) guardava solo la provincia
 // e ignorava del tutto la colonna `citta`. Cosi' una riga come "VE / * / BURANO" — messa li' per
@@ -125,14 +146,15 @@ export async function trovaZoneMatchDett(
   // superavano le 1000 righe (limite PostgREST) e alcune zone (es. il jolly "Italia" di
   // un corriere) venivano troncate -> quel corriere spariva dalle tariffe. Filtrando sul
   // cap il numero di righe resta minimo e non si tronca mai. (Nessuna riga usa cap NULL.)
-  const capFilter = Array.from(new Set([cap, '*'].filter((v) => v != null && v !== undefined))) as string[]
+  // (+ il prefisso di 4 cifre per il Portogallo, vedi capPrefissoZona)
+  const capFilter = Array.from(new Set([cap, capPrefissoZona(paese, cap), '*'].filter((v) => v != null && v !== undefined))) as string[]
   const { data: zc } = await supabase
     .from('zone_cap')
     .select('zona_id,provincia,cap,citta')
     .eq('paese', paese)
     .in('zona_id', ids)
     .in('cap', capFilter)
-  let righe = zc || []
+  let righe: any[] = righeConPrefissoZona((zc || []) as any[], paese, cap)
 
   righe = filtraCapCondiviso(righe, cap, (dest as any).citta)
 
@@ -312,7 +334,7 @@ export function isZonaDisagiata(nome: string | null | undefined): boolean {
 // zona va tra le candidate (per caricare le righe) e nella mappa esclCorr (esclusione PER-CORRIERE).
 // NB: NON vanno messe nella mappa zona->corriere di MATCH, così non creano tariffe "gratis".
 export async function zoneEsclusiveMaster(
-  supabase: any, corriereIds: string[], cap?: string | null
+  supabase: any, corriereIds: string[], cap?: string | null, paese?: string | null
 ): Promise<Array<{ id: string; corriere_id: string }>> {
   const ids = Array.from(new Set((corriereIds || []).filter(Boolean)))
   if (!ids.length) return []
@@ -337,6 +359,16 @@ export async function zoneEsclusiveMaster(
       .select('id,corriere_id,su_mittente, zone_cap!inner(cap)')
       .in('corriere_id', ids).eq('zone_cap.cap', c)
     for (const z of (perCap || [])) if (!(z as any).su_mittente) out.set((z as any).id, (z as any).corriere_id)
+    // Portogallo: la zona puo' elencare il CAP per le prime 4 cifre (vedi capPrefissoZona). Senza
+    // questa ricerca il COSTO trovava Madeira e il PREZZO di un listino senza Madeira ripiegava sul
+    // continente: proprio la vendita sotto costo che questa regola esiste per impedire. Solo righe PT.
+    const prefisso = capPrefissoZona(paese, c)
+    if (prefisso) {
+      const { data: perPrefisso } = await supabase.from('zone')
+        .select('id,corriere_id,su_mittente, zone_cap!inner(cap,paese)')
+        .in('corriere_id', ids).eq('zone_cap.cap', prefisso).eq('zone_cap.paese', 'PT')
+      for (const z of (perPrefisso || [])) if (!(z as any).su_mittente) out.set((z as any).id, (z as any).corriere_id)
+    }
   }
   return Array.from(out, ([id, corriere_id]) => ({ id, corriere_id }))
 }
