@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+import LettoreCodici from '@/app/components/LettoreCodici'
 
 // LA SCHERMATA DELL'AUTISTA.
 //
@@ -7,9 +8,9 @@ import { useState, useEffect, useRef } from 'react'
 // al prossimo. Niente prezzi, niente clienti, niente conti — a chi guida non servono, e la
 // schermata si usa con una mano sola mentre si tiene un pacco con l'altra.
 //
-// La lettura col codice a barre c'e' dove il telefono la sa fare (Android): dove non c'e', si
-// tocca il pacco dall'elenco, che e' comunque il modo piu' veloce quando il pacco ce l'hai in
-// mano e sai a chi va.
+// La lettura col codice a barre funziona su Android e iPhone (vedi app/components/LettoreCodici); in
+// alternativa si tocca il pacco dall'elenco, che e' comunque il modo piu' veloce quando il pacco ce
+// l'hai in mano e sai a chi va.
 
 const ARANCIO = '#f97316'
 const NERO = '#1a1a1a'
@@ -358,88 +359,15 @@ function Consegna({ sped, inCorso, onIndietro, onConferma }: {
   )
 }
 
-// LETTURA DEL CODICE A BARRE.
-// Dove il telefono la sa fare da solo si usa quella: nessuna libreria da scaricare, nessun
-// permesso in piu' di quello della fotocamera. Dove non c'e' (oggi iPhone) si scrive il numero,
-// che con l'elenco davanti resta comunque piu' veloce che cercare.
+// LETTURA DEL CODICE A BARRE: il lettore e' quello comune del portale (app/components/LettoreCodici),
+// lo stesso dei resi. Qui si ferma alla prima lettura e apre la consegna; sotto resta il numero a mano.
 function Lettore({ onLetto }: { onLetto: (codice: string) => void }) {
-  const video = useRef<HTMLVideoElement>(null)
-  const [errore, setErrore] = useState('')
   const [manuale, setManuale] = useState('')
-  const [supportato, setSupportato] = useState(true)
-
-  // LEGGERE I CODICI DEVE FUNZIONARE ANCHE SU IPHONE.
-  //
-  // Prima si usava solo BarcodeDetector, che e' una funzione del browser: su Android c'e', su
-  // Safari iOS NO. Quando mancava, la schermata si arrendeva e diceva "questo telefono non legge i
-  // codici: scrivi il numero" — cioe' TUTTI gli autisti con iPhone hanno sempre digitato a mano,
-  // consegna per consegna. Non era un telefono difettoso: era una scelta mia che non copriva i
-  // telefoni che usano davvero.
-  //
-  // Ora: dove BarcodeDetector c'e' si usa quello, che e' nativo e piu' rapido; dove non c'e' si
-  // decodifica l'immagine da soli. La fotocamera si apre allo stesso modo, cambia solo chi legge.
-  useEffect(() => {
-    let stream: MediaStream | null = null
-    let fermo = false
-    let controlli: { stop: () => void } | null = null
-
-    const avvia = async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-        if (video.current) { video.current.srcObject = stream; await video.current.play() }
-      } catch {
-        setErrore('Non riesco ad accedere alla fotocamera. Controlla il permesso nel telefono.')
-        return
-      }
-
-      const D = (window as any).BarcodeDetector
-      if (D) {
-        const detector = new D({ formats: ['code_128', 'code_39', 'ean_13', 'qr_code'] })
-        const cerca = async () => {
-          if (fermo || !video.current) return
-          try {
-            const trovati = await detector.detect(video.current)
-            if (trovati?.length) {
-              const v = String(trovati[0].rawValue || '').trim()
-              if (v) { fermo = true; onLetto(v); return }
-            }
-          } catch { /* fotogramma non leggibile: si riprova col prossimo */ }
-          requestAnimationFrame(cerca)
-        }
-        requestAnimationFrame(cerca)
-        return
-      }
-
-      // Il ripiego che fa funzionare gli iPhone. Si carica solo qui, quando serve davvero: e' un
-      // pezzo pesante e non ha senso farlo scaricare a chi ha gia' il lettore nativo.
-      try {
-        const { BrowserMultiFormatReader } = await import('@zxing/browser')
-        const lettore = new BrowserMultiFormatReader()
-        controlli = await lettore.decodeFromVideoElement(video.current!, (risultato) => {
-          if (fermo || !risultato) return
-          const v = String(risultato.getText() || '').trim()
-          if (v) { fermo = true; controlli?.stop(); onLetto(v) }
-        })
-      } catch {
-        // Nemmeno il ripiego parte: resta la scrittura a mano, che ora almeno si vede.
-        setSupportato(false)
-      }
-    }
-    avvia()
-
-    return () => { fermo = true; controlli?.stop(); stream?.getTracks().forEach(t => t.stop()) }
-  }, [onLetto])
 
   return (
     <div style={{ margin: '12px 14px 0', background: '#000', borderRadius: '14px', overflow: 'hidden' }}>
-      {supportato && !errore && (
-        <video ref={video} playsInline muted style={{ width: '100%', display: 'block', maxHeight: '46dvh', objectFit: 'cover' }} />
-      )}
+      <LettoreCodici onCodici={(codici) => onLetto(codici[0])} />
       <div style={{ padding: '13px 15px', background: '#18181b' }}>
-        {errore && <div style={{ color: '#fca5a5', fontSize: '13.5px', marginBottom: '10px' }}>{errore}</div>}
-        {!supportato && <div style={{ color: '#a1a1aa', fontSize: '13.5px', marginBottom: '10px' }}>
-          Questo telefono non legge i codici dalla fotocamera: scrivi il numero.
-        </div>}
         <div style={{ display: 'flex', gap: '8px' }}>
           <input value={manuale} onChange={e => setManuale(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && manuale.trim()) onLetto(manuale.trim()) }}
