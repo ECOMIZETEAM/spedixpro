@@ -2275,6 +2275,16 @@ export async function POST(req: NextRequest) {
       })
 
       if (!ris.parcelID) {
+        // Il rifiuto di BRT veniva solo tradotto per l'utente e non restava scritto da nessuna parte:
+        // il 15/10/2026 una prova di Wave sul suo BRT è stata rifiutata e il motivo non si è più potuto
+        // sapere (la stessa prova, rifatta un quarto d'ora dopo, è passata). Come per Spedisci, si logga
+        // (solo server) il messaggio vero di BRT col contratto e la destinazione.
+        console.error('[CREA][BRT] create rifiutata', {
+          contratto: corriereRecord.nome_contratto,
+          dest: `${body.shipTo?.postalCode || ''} ${body.shipTo?.city || ''} ${body.shipTo?.state || ''}`.trim(),
+          errore: ris.errore,
+          raw: String(ris.raw || '').slice(0, 400),
+        })
         await stornaPrenotazione()
         return NextResponse.json({ error: erroreCorrierePulito(ris.errore || 'BRT: creazione non riuscita') }, { status: 400 })
       }
