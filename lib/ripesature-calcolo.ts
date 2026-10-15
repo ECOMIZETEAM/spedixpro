@@ -67,6 +67,23 @@ export type EsitoRipesatura = {
 
 const arrotonda = (n: number) => Math.round(n * 100) / 100
 
+// QUALCUNO SOTTO DEVE ANCORA PAGARE? Un livello puo' aver gia' pagato il giusto (differenza zero)
+// mentre chi sta sotto di lui no: il cliente ha fasce piu' fitte, o il sotto-master all'origine aveva
+// pagato meno di quanto pagava il suo padre. Se la rettifica si fermasse al livello a zero, chi sta
+// sotto non potrebbe piu' chiedere niente ai suoi. Sul file di LOGIXIA del 12/10/2026: 319 spedizioni
+// ferme gia' al primo passo (325,59 euro che i sotto-master non recuperavano dai loro clienti) e 3
+// ferme a meta' catena. Scelta di Lorenzo (15/10): in questi casi la rettifica scende lo stesso, A
+// ZERO per chi non deve niente, e chi sta sotto la riprezza col suo listino come le altre.
+export function qualcunoSottoDeve(esito: EsitoRipesatura, figlio: string | null): boolean {
+  if (!figlio) return false                       // il figlio e' il cliente: sotto non c'e' nessuno
+  const cat = esito.catenaDalBasso || []
+  const i = cat.indexOf(figlio)
+  if (i < 0) return false
+  const sotto = new Set(cat.slice(0, i))          // i master piu' in basso del figlio
+  return (esito.livelli || []).some(l => l.differenza != null && l.differenza >= 0.01
+    && (l.masterId ? sotto.has(l.masterId) : !!l.clienteId))
+}
+
 // QUANTE RIGHE ALLA VOLTA. Ogni riga e' un conto a se' e fa SOLO LETTURE (spedizione, movimenti,
 // contratto, cliente, listini, catena): una non sa nulla dell'altra, quindi farne otto insieme non
 // cambia un centesimo — cambia solo il tempo. Misurato il 29/09/2026 su 20 righe vere: 6,33 s a riga

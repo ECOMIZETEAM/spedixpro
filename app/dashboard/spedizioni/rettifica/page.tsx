@@ -125,6 +125,8 @@ export default function RettificaCostiPage() {
         // File XL di Poste: spedizioni con colli non ancora misurati (si caricano col prossimo file,
         // che e' cumulativo), con piu' righe che colli (da guardare), e LDV senza nessuna misura.
         let incomplete = data.misureIncomplete || 0, inPiu = data.colliInPiu || 0
+        // Create a zero: a chi le riceve non costano niente, servono a chi sta sotto (vedi qualcunoSottoDeve).
+        let aZero = data.passateAZero || 0
         const senzaMisure = data.senzaMisure || 0   // conta su tutto il file: non si somma a ogni pezzo
         // Righe dove si chiede alla rete piu' del triplo di quanto ha addebitato il corriere: succede
         // quando il collo dichiarato era molto piu' piccolo del vero. Non e' un errore, ma chi paga
@@ -146,7 +148,7 @@ export default function RettificaCostiPage() {
           if (d2?.error) break
           creati += d2.creato || 0; gia += d2.giaCaricate || 0; fornitore += d2.costoFornitoreScalato || 0
           attesa += d2.attesaMisure || 0; sopra = sopra.concat(d2.sopraIlTriplo || [])
-          incomplete += d2.misureIncomplete || 0; inPiu += d2.colliInPiu || 0
+          incomplete += d2.misureIncomplete || 0; inPiu += d2.colliInPiu || 0; aZero += d2.passateAZero || 0
           supEuro += d2.supplementiEuro || 0; supIgnoti = supIgnoti.concat(d2.supplementiSenzaTariffa || [])
           const avanti = (d2.da || 0) + (d2.quante || 0)
           // Se il segnaposto non si muove il file non finirebbe mai di essere chiesto: meglio
@@ -169,6 +171,7 @@ export default function RettificaCostiPage() {
         await dialog.alert({
           title: 'Rettifiche create',
           message: `Create ${creati} rettifiche su ${totale} spedizioni nel file.`
+            + (aZero ? ` Di queste, ${aZero} sono a zero: a chi le riceve non costano niente, ma sotto di lui qualcuno deve ancora pagare la differenza — confermale insieme alle altre, servono a farla arrivare fin lì.` : '')
             + (gia ? ` ${gia} erano già state caricate da un file precedente e sono state saltate.` : '')
             + (fornitore ? ` Il conto del fornitore, € ${fornitore.toFixed(2)}, è stato scalato dal tuo credito: è la fattura che hai già ricevuto.` : '')
             + (attesa ? ` ${attesa} spedizioni con più colli sono in attesa delle misure collo per collo e NON sono state addebitate: le misure si leggono stanotte, ricarica lo stesso file domani e si caricheranno per intero.` : '')

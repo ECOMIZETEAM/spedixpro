@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
   {
     const { sembraRipesature, sembraRipesatureSP, leggiRipesature } = await import('@/lib/ripesature')
     if (sembraRipesature(righe || [])) {
-      const { calcolaRipesature } = await import('@/lib/ripesature-calcolo')
+      const { calcolaRipesature, qualcunoSottoDeve } = await import('@/lib/ripesature-calcolo')
       const lette = leggiRipesature(righe || [])
       if (!lette.righe.length) return NextResponse.json({ error: 'Il file non contiene ripesature leggibili' }, { status: 400 })
 
@@ -233,7 +233,7 @@ export async function POST(req: NextRequest) {
           creaturaFile = fileRip?.id || null
         }
         const daScrivere: any[] = []
-        let fuoriCatena = 0, resoSaltate = 0, attesaMisure = 0
+        let fuoriCatena = 0, resoSaltate = 0, attesaMisure = 0, passateAZero = 0
         // Righe dove la differenza chiesta alla rete supera di molto il costo del fornitore: non e'
         // un errore (succede quando il cliente ha dichiarato scatole molto piu' piccole del vero e
         // il fornitore ci ha addebitato poco), ma chi carica deve vederle prima di confermare.
@@ -291,7 +291,11 @@ export async function POST(req: NextRequest) {
           const pen = penalePerSped.get(e.spedizioneId)
           const isPenaleBrt = !!pen && Number(e.pesoDopo || 0) > pen.sogliaKg && Number(e.addebitoFornitore || 0) > 0
           const fsEff = isPenaleBrt ? Math.round(Number(e.addebitoFornitore) * 100) / 100 : fs
-          if (liv.differenza < 0.01 && fsEff === 0) continue
+          // A ZERO MA NON FERMA: il figlio non deve niente, ma qualcuno sotto di lui si' (vedi
+          // qualcunoSottoDeve). La riga nasce a zero cosi' la catena prosegue e chi sta sotto la gira ai suoi.
+          const aZero = liv.differenza < 0.01 && fsEff === 0
+          if (aZero && !qualcunoSottoDeve(e, figlio)) continue
+          if (aZero) passateAZero++
           const diffRett = (!isPenaleBrt && liv.differenza >= 0.01) ? liv.differenza : 0
           if (!isPenaleBrt && e.addebitoFornitore > 0 && diffRett > e.addebitoFornitore * 3) {
             sopraIlTriplo.push({ ldv: e.ldv, costoFornitore: e.addebitoFornitore, differenza: Math.round(diffRett * 100) / 100 })
@@ -308,7 +312,9 @@ export async function POST(req: NextRequest) {
             // Il volume vero (quello che fa salire il costo): prima era 0 anche sul primo livello,
             // così la sua Rettifica Costi mostrava "0,00" mentre il livello sotto vedeva il volume.
             peso_reale: e.pesoDopo, peso_volume_reale: e.pesoVolumeDopo || 0,
-            costo_iniziale: liv.pagato, costo_finale: isPenaleBrt ? liv.pagato : liv.dovuto,
+            // A zero il costo resta quello pagato: col listino del figlio potrebbe uscire anche piu' basso,
+            // e mostrarlo sembrerebbe un rimborso che non c'e'.
+            costo_iniziale: liv.pagato, costo_finale: (isPenaleBrt || aZero) ? liv.pagato : liv.dovuto,
             differenza: -diffRett,   // la colonna e' "quanto restituisco": un addebito e' negativo (0 se solo fuori sagoma / penale)
             fuori_sagoma: fsEff,     // supplemento FISSO (o penale BRT ≤5kg sforata): in aggiunta e cascata invariato
             // QUALE supplemento: senza il nome, il movimento del cliente diceva "fuori sagoma"
@@ -444,6 +450,7 @@ export async function POST(req: NextRequest) {
           giaRettificate: giaRettificateCount,   // già fatte da OneTracking/import: saltate (no doppio)
           fuoriCatena, costoFornitoreScalato: Math.round(fornitoreScalato * 100) / 100,
           attesaMisure,                      // multicollo senza misure: in coda, si caricano al prossimo giro
+          passateAZero,                      // create a zero: al figlio non costano, servono a chi sta sotto
           // Formato XL di Poste: spedizioni con colli non misurati (in attesa del prossimo file), con
           // piu' righe che colli (da guardare a mano), e — per tutto il file — LDV senza nessuna misura.
           misureIncomplete, colliInPiu, senzaMisure: lette.senzaMisure || 0,

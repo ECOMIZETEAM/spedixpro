@@ -101,8 +101,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, assorbite: righe.length, inAttesaSopra: attesaLdv.length })
   }
 
-  const { calcolaRipesature } = await import('@/lib/ripesature-calcolo')
-  let create = 0
+  const { calcolaRipesature, qualcunoSottoDeve } = await import('@/lib/ripesature-calcolo')
+  let create = 0, aZero = 0
   const saltate: { ldv: string; perche: string }[] = []
   // SCARTO PULITO ≠ problema. Quando il collo ripesato cade nello STESSO scaglione/blocco del
   // listino del cliente dell'addebito originale, riprezzato dà lo stesso identico prezzo (o meno):
@@ -195,8 +195,14 @@ export async function POST(req: NextRequest) {
       // Il listino del figlio prezza il collo (differenza != null) ma riprezzando esce <= 0: stesso
       // scaglione dell'addebito, il cliente pagherebbe uguale. Niente da recuperare → SCARTO pulito
       // (assorbita), non un avviso: non ha senso dire "alza la fascia" (la fascia c'è, è la stessa).
-      scartate.push({ ldv: r.numero_spedizione, perche: 'il cliente pagherebbe uguale col suo listino (stesso scaglione di peso): niente da recuperare' }); idAzzerate.push(r.id); continue
+      // TRANNE se sotto il figlio qualcuno deve ancora pagare: allora la figlia nasce A ZERO, cosi' la
+      // catena prosegue (vedi qualcunoSottoDeve). Il 15/10 Wave ne aveva scartate 2 cosi', e Velox e i
+      // suoi clienti non potevano piu' essere rettificati.
+      if (!qualcunoSottoDeve(esito, figlio)) {
+        scartate.push({ ldv: r.numero_spedizione, perche: 'il cliente pagherebbe uguale col suo listino (stesso scaglione di peso): niente da recuperare' }); idAzzerate.push(r.id); continue
+      }
     }
+    const soloPassaggio = !reweighGirabile && fs === 0
     // reweighGirabile garantisce già differenza != null, ma TS non lo propaga: fisso a numero.
     const diffFiglia = reweighGirabile && liv.differenza != null ? liv.differenza : 0
 
@@ -206,7 +212,9 @@ export async function POST(req: NextRequest) {
       target_master_id: figlio,
       peso_iniziale: esito.pesoRealePrima, peso_volume_iniziale: esito.pesoVolumePrima,   // dichiarato: reale + volumetrico
       peso_reale: esito.pesoDopo, peso_volume_reale: esito.pesoVolumeDopo,   // il volume, cosi' si vede perche' il costo sale
-      costo_iniziale: liv.pagato, costo_finale: liv.dovuto ?? liv.pagato,   // dovuto null (collo oltre fascia, solo fuori sagoma) → pari a pagato, differenza 0
+      // dovuto null (collo oltre fascia, solo fuori sagoma) → pari a pagato, differenza 0. A zero per
+      // passaggio: resta quello pagato, un dovuto piu' basso sembrerebbe un rimborso che non c'e'.
+      costo_iniziale: liv.pagato, costo_finale: soloPassaggio ? liv.pagato : (liv.dovuto ?? liv.pagato),
       differenza: -diffFiglia,            // la colonna e' "quanto restituisco": un addebito e' negativo (0 se solo fuori sagoma)
       fuori_sagoma: fs,                   // il supplemento fisso scende INVARIATO, NON si riprezza
       supplementi_nomi: (r as any).supplementi_nomi || null,   // e col nome, altrimenti sotto si legge "fuori sagoma" per tutto
@@ -215,6 +223,7 @@ export async function POST(req: NextRequest) {
       origine_rettifica_id: r.id,         // l'anti-doppione: si propaga una volta sola
     })
     daScrivere[daScrivere.length - 1]._riga = r    // serve solo qui sotto, per dire chi e' andata
+    daScrivere[daScrivere.length - 1]._aZero = soloPassaggio
   }
 
   // OTTO SCRITTURE ALLA VOLTA. Righe diverse, spedizioni diverse: non si pestano i piedi, e il
@@ -225,10 +234,10 @@ export async function POST(req: NextRequest) {
       while (i < daScrivere.length) {
         const riga = daScrivere[i++]
         const r = riga._riga
-        const { _riga, ...daInserire } = riga
+        const { _riga, _aZero, ...daInserire } = riga
         const { error } = await adminDb.from('rettifiche').insert(daInserire)
         // 23505 = l'indice unico ha respinto una seconda propagazione della stessa riga. Voluto.
-        if (!error) { create++; idFatte.push(r.id) }
+        if (!error) { create++; if (riga._aZero) aZero++; idFatte.push(r.id) }
         else if (error.code === '23505') { saltate.push({ ldv: r.numero_spedizione, perche: 'gia\' propagata' }); idFatte.push(r.id) }
         else { console.error('[RETTIFICHE][PROPAGA]', r.numero_spedizione, error.message); saltate.push({ ldv: r.numero_spedizione, perche: 'non riuscita' }) }
       }
@@ -247,7 +256,7 @@ export async function POST(req: NextRequest) {
 
   const ritentabili = righe.length - idFatte.length - idAzzerate.length
   return NextResponse.json({
-    ok: true, create, nonPropagate: saltate.length, ritentabili,
+    ok: true, create, aZero, nonPropagate: saltate.length, ritentabili,
     // NON troncato più a 20: chi deve sistemare le saltate (misure mancanti, listino sotto, catena)
     // deve poterle vedere TUTTE, altrimenti oltre la ventesima "spariscono" e sembrano perse.
     dettaglio: saltate,

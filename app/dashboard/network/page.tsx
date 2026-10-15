@@ -114,7 +114,7 @@ export default function NetworkRicevutiPage() {
       // ritorni (186 richieste per 2.228 rettifiche). Cinquanta stanno dentro il tempo massimo della
       // richiesta (~30 s contro i 300 concessi) e la barra continua a muoversi.
       const BATCH = 50
-      let create = 0, nonProp = 0, giaDecise = 0, inAttesa = 0, scart = 0
+      let create = 0, nonProp = 0, giaDecise = 0, inAttesa = 0, scart = 0, aZero = 0
       const dettaglio: any[] = []
       setAvanz({ k: b.k, fatti: 0, totale: ids.length, da: Date.now() })
       for (let i = 0; i < ids.length; i += BATCH) {
@@ -127,12 +127,14 @@ export default function NetworkRicevutiPage() {
         // "In attesa sopra" NON è un errore: la 404 con inAttesaSopra dice solo che quel lotto era tutto
         // da confermare più in alto → si conta e si continua. Ci si ferma solo su un errore vero.
         if (d.error && !d.inAttesaSopra) { setMsg('Errore: ' + d.error); break }
-        create += d.create || 0; nonProp += d.nonPropagate || 0; giaDecise += d.giaDecise || 0; inAttesa += d.inAttesaSopra || 0; scart += Array.isArray(d.scartate) ? d.scartate.length : 0
+        create += d.create || 0; aZero += d.aZero || 0; nonProp += d.nonPropagate || 0; giaDecise += d.giaDecise || 0; inAttesa += d.inAttesaSopra || 0; scart += Array.isArray(d.scartate) ? d.scartate.length : 0
         if (Array.isArray(d.dettaglio)) dettaglio.push(...d.dettaglio)
         setAvanz(a => a ? { ...a, fatti: Math.min(i + BATCH, ids.length) } : a)
       }
       const parti: string[] = []
       if (create > 0) parti.push(`✓ Accettate ${create}: sono in Spedizioni › Rettifica Costi, divise per cliente e sotto-master — da lì scegli a chi caricarle (fino ad allora non scende niente a nessuno).`)
+      // A zero: il livello sotto non deve niente, ma chi sta sotto di lui si'. Si dice perche' esistono.
+      if (aZero > 0) parti.push(`✓ Di queste, ${aZero} sono a zero: a chi le riceve non costano niente, ma più sotto qualcuno deve ancora pagare la differenza — caricale insieme alle altre, servono a farla arrivare fin lì.`)
       // Scartate = il cliente pagherebbe uguale (stesso scaglione): niente da recuperare. NON è un
       // problema né una perdita da sistemare — si dice con calma, non fra gli avvisi ⚠️.
       if (scart) parti.push(`✓ ${scart} scartate: col suo listino il cliente pagherebbe uguale (stesso scaglione di peso) — niente da recuperare, niente da fare.`)
