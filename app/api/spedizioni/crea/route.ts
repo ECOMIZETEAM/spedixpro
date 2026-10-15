@@ -2073,6 +2073,16 @@ export async function POST(req: NextRequest) {
 
       if (!ris.numeroSpedizione) {
         // AddParcel non ha creato nulla: niente da annullare, si libera la prenotazione.
+        // Il rifiuto di GLS, come quello di BRT, veniva solo tradotto per l'utente: il motivo vero non
+        // restava scritto da nessuna parte (vedi il ramo BRT, caso Wave del 15/10/2026). Si logga solo
+        // server; la risposta SOAP passa coperta su ogni tag Password*, per non scrivere mai una
+        // credenziale nei log anche se GLS dovesse rimandarla indietro.
+        console.error('[CREA][GLS] create rifiutata', {
+          contratto: corriereRecord.nome_contratto,
+          dest: `${body.shipTo?.postalCode || ''} ${body.shipTo?.city || ''} ${body.shipTo?.state || ''} ${body.shipTo?.country || ''}`.trim(),
+          errore: ris.errore,
+          raw: String(ris.raw || '').replace(/(Password\w*(?:&gt;|>))[^<&]*/gi, '$1***').slice(0, 400),
+        })
         await stornaPrenotazione()
         return NextResponse.json({ error: erroreCorrierePulito(ris.errore || 'GLS: creazione non riuscita') }, { status: 400 })
       }
