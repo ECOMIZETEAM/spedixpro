@@ -37,6 +37,11 @@ export type Ripesatura = {
   supplementiNomi?: string[]        // quali sono, per scriverlo nella descrizione del movimento
   supplementiSenzaTariffa?: string[]// riconosciuti ma senza importo certo: si segnalano, non si indovinano
   reso?: boolean            // il testo contiene "reso": il cliente non lo paga qui (flusso reso a parte)
+  // ── Solo per il formato "Andamento giornaliero XL" di Poste (dichiarato/rilevato per collo) ──
+  formato?: 'xl'
+  colliNonRilevati?: number         // righe della LDV senza nessuna misura: la spedizione e' incompleta
+  colliPesoDaDichiarato?: number[]  // indici dei colli con le misure ma senza il peso (bilancia a 0)
+  pesiDichiaratiFile?: number[]     // peso dichiarato di ogni collo come lo scrive il file (2 decimali)
 }
 
 const euro = (v: any) => {
@@ -128,7 +133,68 @@ export function sembraRipesatureSP(righe: any[]): boolean {
 export function sembraRipesature(righe: any[]): boolean {
   const r = normalizza((righe || [])[0] || {})
   const colonne = 'idordine' in r && 'ldv' in r && ('misureriscontrate' in r || 'pesoriscontrato' in r)
-  return colonne || sembraRipesatureSP(righe)
+  return colonne || sembraRipesatureSP(righe) || sembraRipesatureXL(righe)
+}
+
+// ── FORMATO "ANDAMENTO GIORNALIERO XL" DI POSTE (lo manda LOGIXIA per SDA EXPRESS L) ──
+//
+// Colonne: LDV_MADRE, DICHIARATO PESO/LARGHEZZA/PROFONDITA/ALTEZZA, RILEVATO PESO/LARGHEZZA/
+// PROFONDITA/ALTEZZA, IMPORTO CONTRASSEGNO, IMPORTO ASSICURAZIONE. Nessun importo di rettifica: il
+// file dice solo cosa e' stato dichiarato e cosa ha misurato il corriere, il conto lo fa il motore.
+// Il primo caricamento (13/10/2026, "rilevazioni al091026.csv", 7.292 righe) era finito nel ramo dei
+// pesi con zero spedizioni lette e nessun messaggio: queste colonne non le riconosceva nessuno.
+//
+// UNA RIGA E' UN COLLO. Verificato sul file del 12/10/2026 (6.958 LDV): le 227 LDV con piu' righe
+// hanno tante righe quanti colli in 225 casi, meno righe in 2, MAI di piu'; il dichiarato di ogni
+// riga coincide col dettaglio colli di quel collo. Il file mette i colli in piu' in un blocco in
+// cima e la riga "principale" piu' sotto (282224J028839 sta alle righe 11, 12 e 524): si raggruppa
+// per LDV su tutto il foglio, mai per righe vicine. Non si tolgono le righe uguali (8 LDV hanno
+// scatole identiche al decimale e sono colli veri) e non si prende la misura piu' alta: quella e' la
+// regola delle riletture di UN collo su OneTracking, qui farebbe perdere 252 euro su 312.
+export function sembraRipesatureXL(righe: any[]): boolean {
+  // Le prime righe possono non avere le celle RILEVATO (vuote, e il lettore le omette): si guarda
+  // l'insieme delle colonne delle prime cinquanta, non la sola prima riga.
+  const chiavi = new Set<string>()
+  for (const r of (righe || []).slice(0, 50)) for (const k of Object.keys(normalizza(r))) chiavi.add(k)
+  return chiavi.has('ldvmadre') && chiavi.has('rilevatopeso')
+    && chiavi.has('rilevatolarghezza') && chiavi.has('rilevatoaltezza')
+    && (chiavi.has('rilevatoprofondita') || chiavi.has('rilevatoprofondit'))   // "PROFONDITÀ" senza l'accento
+}
+
+function leggiRipesatureXL(righe: any[]): { righe: Ripesatura[]; scartate: number; totaleFornitore: number; senzaMisure: number } {
+  const gruppi = new Map<string, Ripesatura>()
+  let scartate = 0
+  for (const grezza of (righe || [])) {
+    const c = normalizza(grezza)
+    const ldv = String(c.ldvmadre ?? '').trim().toUpperCase()
+    if (!ldv) { scartate++; continue }
+    const g: Ripesatura = gruppi.get(ldv) || {
+      idOrdine: ldv, idVerifiche: [], ldv, addebitoFornitore: 0, colli: [],
+      dataChiusura: '', mittente: '', destinatario: '',
+      formato: 'xl', colliNonRilevati: 0, colliPesoDaDichiarato: [], pesiDichiaratiFile: [],
+    }
+    gruppi.set(ldv, g)
+    const peso = kg(c.rilevatopeso)
+    const mis = { lunghezza: kg(c.rilevatoprofondita ?? c.rilevatoprofondit), larghezza: kg(c.rilevatolarghezza), altezza: kg(c.rilevatoaltezza) }
+    const haMisure = mis.lunghezza > 0 && mis.larghezza > 0 && mis.altezza > 0
+    // COLLO NON MISURATO (celle vuote o tutte a zero): non e' un collo da zero chili. Se lo si
+    // passasse cosi', su un multicollo farebbe da contrappeso agli altri e si chiederebbe meno del
+    // dovuto; e una volta creata la rettifica l'anti-doppio impedirebbe di completarla col file
+    // successivo. Si conta, e la rotta mette in attesa la spedizione intera.
+    if (peso <= 0 && !haMisure) { g.colliNonRilevati = (g.colliNonRilevati || 0) + 1; continue }
+    // MISURE SENZA PESO (la bilancia del nastro scrive 0): il volume c'e', il peso no. Si tiene il
+    // peso DICHIARATO di quel collo, cosi' il collo non pesa mai piu' di come e' partito e l'unico
+    // aumento possibile viene dal volume misurato. La rotta lo sostituisce col valore pieno del
+    // dettaglio colli: il file lo arrotonda a 2 decimali (20 kg in 3 colli = 6,67 + 6,67 + 6,67 =
+    // 20,01, che passa di fascia).
+    if (peso <= 0) g.colliPesoDaDichiarato!.push(g.colli.length)
+    g.pesiDichiaratiFile!.push(kg(c.dichiaratopeso))
+    g.colli.push({ peso: peso > 0 ? peso : kg(c.dichiaratopeso), ...(haMisure ? mis : { lunghezza: 0, larghezza: 0, altezza: 0 }) })
+  }
+  // Le LDV senza nemmeno un collo misurato non dicono niente: si scartano qui.
+  const tutte = [...gruppi.values()]
+  const out = tutte.filter(r => r.colli.length > 0)
+  return { righe: out, scartate, totaleFornitore: 0, senzaMisure: tutte.length - out.length }
 }
 
 // Parser del formato TRANSAZIONI SpediamoPro: ogni riga = una spedizione (i 6A... sono distinti).
@@ -177,9 +243,11 @@ function leggiRipesatureSP(righe: any[]): { righe: Ripesatura[]; scartate: numbe
   return { righe: out, scartate, totaleFornitore: out.reduce((s, r) => s + r.addebitoFornitore, 0) }
 }
 
-export function leggiRipesature(righe: any[]): { righe: Ripesatura[]; scartate: number; totaleFornitore: number } {
+export function leggiRipesature(righe: any[]): { righe: Ripesatura[]; scartate: number; totaleFornitore: number; senzaMisure?: number } {
   // Formato TRANSAZIONI SpediamoPro (dato nel testo): parser dedicato.
   if (sembraRipesatureSP(righe)) return leggiRipesatureSP(righe)
+  // Formato "Andamento giornaliero XL" di Poste: una riga per collo, raggruppate per LDV madre.
+  if (sembraRipesatureXL(righe)) return leggiRipesatureXL(righe)
   const gruppi = new Map<string, Ripesatura>()
   let scartate = 0
   for (const grezza of (righe || [])) {

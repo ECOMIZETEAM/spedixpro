@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
-import { createAdminSupabase } from '@/lib/supabase-admin'
+import { createAdminSupabase, createAdminSupabaseConMemoria } from '@/lib/supabase-admin'
 
 // Riprezzare una spedizione vuol dire ricostruire tutta la sua catena: su un blocco intero sono
 // centinaia di viaggi al database.
@@ -135,7 +135,8 @@ export async function POST(req: NextRequest) {
   // Si riusa lo STESSO motore del caricamento del file: ricostruisce la catena, legge dai
   // movimenti quello che ogni livello ha gia' pagato — rettifiche comprese, cosi' la stessa
   // differenza non si chiede due volte — e riprezza il collo vero a ogni livello col suo listino.
-  const esiti = await calcolaRipesature(adminDb, lavorabili.map((r: any) => ({
+  // Client CON MEMORIA (nuovo a ogni richiesta): listini e zone una volta per blocco, non una per riga.
+  const esiti = await calcolaRipesature(createAdminSupabaseConMemoria(), lavorabili.map((r: any) => ({
     idOrdine: r.rif_fornitore || r.id, idVerifiche: [], ldv: r.numero_spedizione,
     addebitoFornitore: 0,
     colli: (r.colli_ripesati as any[]).map((c: any) => ({

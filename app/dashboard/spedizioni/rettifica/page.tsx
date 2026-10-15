@@ -56,6 +56,38 @@ export default function RettificaCostiPage() {
       const { utils, read } = await import('xlsx')
       const buffer = await file.arrayBuffer()
       const wb = read(buffer)
+      // DOVE SONO I DATI. Di norma il primo foglio con l'intestazione nella prima riga. Il file di
+      // Poste "Andamento giornaliero XL" (lo carica LOGIXIA per SDA EXPRESS L) no: il primo foglio
+      // ("PDB") e' vuoto, i dati stanno nel secondo e l'intestazione e' alla settima riga, sotto un
+      // titolo. Letto come gli altri dava zero spedizioni e nessun messaggio — e' successo il 13/10.
+      // Si cerca la cella LDV_MADRE nelle prime righe di ogni foglio: se c'e', si legge da li' e si
+      // mandano solo le colonne che servono (il foglio PDB ne ha 48, con dati personali). Se non
+      // c'e', si fa esattamente come prima, cosi' gli altri file non cambiano. Si leggono TUTTI i
+      // fogli che ce l'hanno: oggi il PDB e' vuoto, ma se avesse righe sarebbero misure vere di altre
+      // spedizioni, e il motore prezza ognuna sul suo contratto.
+      const norm = (v: any) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+      const COLONNE_XL = new Set(['ldvmadre', 'dichiaratopeso', 'rilevatopeso', 'rilevatolarghezza', 'rilevatoprofondita', 'rilevatoprofondit', 'rilevatoaltezza'])
+      let righeXL: any[] | null = null
+      for (const nome of wb.SheetNames) {
+        const foglio = wb.Sheets[nome]
+        if (!foglio?.['!ref']) continue
+        const area = utils.decode_range(foglio['!ref'])
+        let rigaIntestazione = -1
+        for (let r = area.s.r; r <= Math.min(area.e.r, area.s.r + 30) && rigaIntestazione < 0; r++) {
+          for (let c = area.s.c; c <= area.e.c; c++) {
+            const cella = foglio[utils.encode_cell({ r, c })]
+            if (cella && norm(cella.w ?? cella.v) === 'ldvmadre') { rigaIntestazione = r; break }
+          }
+        }
+        if (rigaIntestazione < 0) continue
+        const lette = utils.sheet_to_json(foglio, { raw: false, range: rigaIntestazione, defval: '' }) as any[]
+        const ridotte = lette.map(riga => {
+          const o: any = {}
+          for (const k of Object.keys(riga)) if (COLONNE_XL.has(norm(k))) o[k] = riga[k]
+          return o
+        }).filter(o => Object.keys(o).some(k => norm(k) === 'ldvmadre' && String(o[k]).trim()))
+        righeXL = [...(righeXL || []), ...ridotte]
+      }
       const ws = wb.Sheets[wb.SheetNames[0]]
       // SI LEGGONO I TESTI, NON I NUMERI GIA' INTERPRETATI.
       //
@@ -65,7 +97,11 @@ export default function RettificaCostiPage() {
       // e nessun errore da nessuna parte.
       // Con raw:false arriva la cella com'e' scritta e i separatori li interpretiamo noi, che
       // sappiamo quali colonne usano la virgola (gli euro) e quali il punto (i chili).
-      const righe = utils.sheet_to_json(ws, { raw: false })
+      const righe = righeXL ?? utils.sheet_to_json(ws, { raw: false })
+      // Il file XL si manda a pacchetti da DUECENTO (gli altri restano a cinquanta): a ogni
+      // richiesta viaggia il file intero (7.291 righe, un mega), e quasi meta' delle spedizioni non
+      // si ricalcola nemmeno (misurate non piu' grandi dell'addebitato). Con cinquanta erano 136 viaggi.
+      const quante = righeXL ? 200 : 50
       const res = await fetch('/api/rettifiche/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -73,7 +109,7 @@ export default function RettificaCostiPage() {
         // ~0,8 s a riga invece di 6,3: con pacchetti da 15 il tempo se ne andava nelle andate e
         // ritorni (67 per mille lettere di vettura). Cinquanta stanno abbondantemente dentro il
         // tempo massimo della richiesta e la barra continua a muoversi.
-        body: JSON.stringify({ nomeFile: file.name, righe, da: 0, quante: 50 })
+        body: JSON.stringify({ nomeFile: file.name, righe, da: 0, quante })
       })
       const data = await res.json()
       if (data?.tipo === 'ripesature') {
@@ -86,6 +122,10 @@ export default function RettificaCostiPage() {
         // Multicollo senza misure collo per collo: NON addebitate (sarebbe meno del dovuto, e
         // l'anti-doppione impedirebbe di correggerle dopo). Le legge il giro di stanotte.
         let attesa = data.attesaMisure || 0
+        // File XL di Poste: spedizioni con colli non ancora misurati (si caricano col prossimo file,
+        // che e' cumulativo), con piu' righe che colli (da guardare), e LDV senza nessuna misura.
+        let incomplete = data.misureIncomplete || 0, inPiu = data.colliInPiu || 0
+        const senzaMisure = data.senzaMisure || 0   // conta su tutto il file: non si somma a ogni pezzo
         // Righe dove si chiede alla rete piu' del triplo di quanto ha addebitato il corriere: succede
         // quando il collo dichiarato era molto piu' piccolo del vero. Non e' un errore, ma chi paga
         // deve vederle prima di confermare.
@@ -100,12 +140,13 @@ export default function RettificaCostiPage() {
         while (!finito && da < totale) {
           const r2 = await fetch('/api/rettifiche/upload', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nomeFile: file.name, righe, da, quante: 50, fileId }),
+            body: JSON.stringify({ nomeFile: file.name, righe, da, quante, fileId }),
           })
           const d2 = await r2.json()
           if (d2?.error) break
           creati += d2.creato || 0; gia += d2.giaCaricate || 0; fornitore += d2.costoFornitoreScalato || 0
           attesa += d2.attesaMisure || 0; sopra = sopra.concat(d2.sopraIlTriplo || [])
+          incomplete += d2.misureIncomplete || 0; inPiu += d2.colliInPiu || 0
           supEuro += d2.supplementiEuro || 0; supIgnoti = supIgnoti.concat(d2.supplementiSenzaTariffa || [])
           const avanti = (d2.da || 0) + (d2.quante || 0)
           // Se il segnaposto non si muove il file non finirebbe mai di essere chiesto: meglio
@@ -131,6 +172,9 @@ export default function RettificaCostiPage() {
             + (gia ? ` ${gia} erano già state caricate da un file precedente e sono state saltate.` : '')
             + (fornitore ? ` Il conto del fornitore, € ${fornitore.toFixed(2)}, è stato scalato dal tuo credito: è la fattura che hai già ricevuto.` : '')
             + (attesa ? ` ${attesa} spedizioni con più colli sono in attesa delle misure collo per collo e NON sono state addebitate: le misure si leggono stanotte, ricarica lo stesso file domani e si caricheranno per intero.` : '')
+            + (incomplete ? ` ${incomplete} spedizioni hanno misure solo per una parte dei colli e NON sono state addebitate: entreranno col prossimo file del fornitore, quando avrà misurato tutti i colli.` : '')
+            + (inPiu ? ` ${inPiu} spedizioni hanno nel file più righe dei colli spediti: NON sono state addebitate, vanno controllate.` : '')
+            + (senzaMisure ? ` ${senzaMisure} spedizioni del file non hanno nessuna misura rilevata e sono state saltate.` : '')
             + (sopra.length ? ` Attenzione: ${sopra.length} rettifiche chiedono più del triplo di quanto ha addebitato il corriere (il collo dichiarato era molto più piccolo del vero) — per esempio ${sopra[0].ldv}, € ${Number(sopra[0].costoFornitore).toFixed(2)} di costo contro € ${Number(sopra[0].differenza).toFixed(2)} da girare. Controllale prima di confermare.` : '')
             + (supEuro ? ` Compresi € ${supEuro.toFixed(2)} di supplementi fissi (fuori sagoma, non sovrapponibile, consegna su appuntamento), che scendono invariati.` : '')
             + (supIgnoti.length ? ` Il corriere ha addebitato anche ${Array.from(new Set(supIgnoti)).join(' e ')}: di questi non conosciamo la tariffa, il costo resta a noi e NON è stato girato — vanno chiesti al corriere.` : '')
@@ -139,6 +183,24 @@ export default function RettificaCostiPage() {
         return
       }
       setAvanz(null)
+      // MAI IN SILENZIO. Un file che non si riesce a leggere, o in cui non si trova nessuna
+      // spedizione, compariva in "File processati" con tutti zeri e nessun messaggio: chi carica
+      // pensava di aver fatto (LOGIXIA, 13/10/2026, 7.292 righe e zero lette).
+      if (data?.error) {
+        await dialog.alert({ title: 'File non caricato', message: String(data.error) })
+      } else if (data.success && !(Number(data.nProcessate) > 0)) {
+        await dialog.alert({
+          title: 'Nessuna spedizione riconosciuta',
+          message: `Nel file (${righe.length} righe) non è stata riconosciuta nessuna spedizione. Controlla che sia l'export giusto e che non siano state rinominate o tolte colonne.`,
+        })
+      } else if (data.success && !(Number(data.nTrovate) > 0)) {
+        // Lette ma tutte scartate: gia' rettificate, annullate, non trovate o fuori dalla propria
+        // rete. Qui il file e' giusto: dire "controlla l'export" farebbe cercare l'errore nel posto sbagliato.
+        await dialog.alert({
+          title: 'Nessuna nuova rettifica',
+          message: `Lette ${Number(data.nProcessate)} spedizioni, nessuna da rettificare: sono già rettificate, annullate, non trovate o fuori dalla tua rete.`,
+        })
+      }
       if (data.success) {
         await caricaFiles()
         // Anche il file dei pesi: accumula tutte le pendenti, non solo quelle appena caricate.

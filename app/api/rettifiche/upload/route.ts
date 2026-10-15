@@ -3,7 +3,8 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
-import { createAdminSupabase } from '@/lib/supabase-admin'
+import { createAdminSupabase, createAdminSupabaseConMemoria } from '@/lib/supabase-admin'
+import { controllaColliXL } from '@/lib/ripesature-xl'
 
 
 // Risale la catena dei master: [masterId, padre, nonno, ...]
@@ -167,6 +168,12 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // Formato XL di Poste (lo carica LOGIXIA): una riga per collo. Le spedizioni con colli non
+      // ancora misurati, con piu' righe che colli, o misurate non piu' grandi di come le abbiamo
+      // addebitate, si saltano qui — il perche' e' in ripesature-xl.
+      const { daSaltare: xlDaSaltare, misureIncomplete, colliInPiu } = await controllaColliXL(adminRip, nuove)
+      const daCalcolare = xlDaSaltare.size ? nuove.filter(r => !xlDaSaltare.has(r.ldv)) : nuove
+
       // Il flag fuori sagoma / reso vive sulla Ripesatura letta dal file; l'esito del motore porta
       // solo idOrdine → si rimappa qui per sapere, riga per riga, se aggiungere il supplemento fisso
       // o se saltarla (reso).
@@ -175,7 +182,9 @@ export async function POST(req: NextRequest) {
       // Spezzando il lavoro a pacchetti da quindici avevo lasciato il totale sul pacchetto: a
       // schermo usciva 33,54 invece di 356,35 — cioe' la somma degli ultimi quindici.
       const costoFornitoreTotale = Math.round(lette.righe.reduce((s, r) => s + r.addebitoFornitore, 0) * 100) / 100
-      const esiti = await calcolaRipesature(adminRip, nuove)
+      // Client CON MEMORIA, nuovo a ogni richiesta: zone, listini e contratti si leggono una volta
+      // per pacchetto invece che una per spedizione (lib/supabase-admin). Spedizioni e movimenti freschi.
+      const esiti = await calcolaRipesature(createAdminSupabaseConMemoria(), daCalcolare)
 
       // ── ANTI-DOPPIO PER SPEDIZIONE ── salta le spedizioni che hanno GIÀ una rettifica viva
       // (confermata o da_rettificare), da OneTracking o da un import precedente. Il dedup su
@@ -435,6 +444,9 @@ export async function POST(req: NextRequest) {
           giaRettificate: giaRettificateCount,   // già fatte da OneTracking/import: saltate (no doppio)
           fuoriCatena, costoFornitoreScalato: Math.round(fornitoreScalato * 100) / 100,
           attesaMisure,                      // multicollo senza misure: in coda, si caricano al prossimo giro
+          // Formato XL di Poste: spedizioni con colli non misurati (in attesa del prossimo file), con
+          // piu' righe che colli (da guardare a mano), e — per tutto il file — LDV senza nessuna misura.
+          misureIncomplete, colliInPiu, senzaMisure: lette.senzaMisure || 0,
           sopraIlTriplo: sopraIlTriplo.slice(0, 50),
           fuoriSagoma: (fetta as any[]).filter(r => Number(r.supplementi || 0) > 0).length,   // righe con un supplemento che ora cascata
           supplementiEuro: Math.round((fetta as any[]).reduce((a, r) => a + Number(r.supplementi || 0), 0) * 100) / 100,
