@@ -9,9 +9,10 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 120
 
 // TRACKING DELLE LDV CHE SONO CODICI POSTE, LETTO DAL TRACKING PUBBLICO DI poste.it.
-// Due lavori diversi, stessa fonte e stesso freno (una LDV ogni 1,2s, al massimo 60 per giro — 40 dei
-// Poste diretti + 20 della bonifica: la dose resta piccola per non far scattare il rate-limit di Poste,
-// dove un 400 vuol dire "bloccati". Sessanta letture a 1,2s stanno in 72s, sotto il tetto di 120s).
+// Tre lavori, stessa fonte e stesso freno (una LDV ogni 1,2s, al massimo 70 per giro — 40 dei Poste
+// diretti + 10 annullate in sorveglianza + 20 della bonifica: la dose resta piccola per non far scattare
+// il rate-limit di Poste, dove un 400 vuol dire "bloccati". Settanta letture a 1,2s stanno in 84s, sotto
+// il tetto di 120s).
 //
 // 1) BONIFICA (contratti 'spedisci'): il provider ha chiuso il polling (webhook-only) e le spedizioni
 //    gia' in viaggio prima dell'attivazione del webhook hanno il popup vuoto finche' non arriva il
@@ -101,11 +102,27 @@ export async function GET(req: NextRequest) {
     ...await pescaPoste(['in_lavorazione'], 10, seiOreFa),
   ]
 
-  const lista = [...listaPoste, ...listaSpedisci]
-  const rileggere = new Set(listaPoste.map((s: any) => s.id))
+  // 3) SORVEGLIANZA DEGLI ANNULLI POSTE (lib/annullo-poste). POSTE non ha l'annullo via API: un pacco
+  //    annullato sul portale ha la LDV ancora buona, e se il cliente lo affida al corriere parte lo stesso.
+  //    Per 30 giorni lo si rilegge qui — la gamba del detentore, che e' quella col codice Poste: fuori da
+  //    questa lettura un pacco 'annullata' non lo guarda piu' nessuno — e se risulta in movimento si
+  //    riaddebita a ogni livello.
+  const { GIORNI_SORVEGLIANZA, STATI_PARTITA, gambePaccoPoste, riaddebitaPaccoPartito } = await import('@/lib/annullo-poste')
+  const inizioSorveglianza = new Date(Date.now() - (GIORNI_SORVEGLIANZA + 2) * 86400000).toISOString()
+  const { data: annullatePoste } = idsPosteDiretti.length
+    ? await admin.from('spedizioni')
+      .select('id,numero,tracking_number,stato,created_at')
+      .in('corriere_id', idsPosteDiretti).eq('stato', 'annullata').gte('annullamento_richiesto_at', inizioSorveglianza)
+      .order('tracking_check_at', { ascending: true, nullsFirst: true })
+      .order('id', { ascending: true }).limit(10)
+    : { data: [] as any[] }
+  const sorvegliate = new Set((annullatePoste || []).map((s: any) => s.id))
+
+  const lista = [...listaPoste, ...(annullatePoste || []), ...listaSpedisci]
+  const rileggere = new Set([...listaPoste, ...(annullatePoste || [])].map((s: any) => s.id))
   if (!lista.length) return NextResponse.json({ ok: true, fatte: 0, messaggio: 'niente da leggere' })
 
-  let cronologie = 0, stati = 0, vuote = 0, bloccati = 0
+  let cronologie = 0, stati = 0, vuote = 0, bloccati = 0, riaddebitati = 0
   for (const sp of lista) {
     try {
       // La chiamata e la traduzione delle frasi stanno in lib/tracking-poste (un posto solo: le usa
@@ -130,18 +147,32 @@ export async function GET(req: NextRequest) {
       // Qui, se poste.it diceva giacenza, si datava giacenza_data: il database la metteva in coda di
       // addebito e il cliente riceveva l'avviso, su un pacco che il fornitore non aveva in giacenza.
       // La giacenza la apre solo il fornitore (vedi statoDaLetturaPoste).
-      const nuovo = statoDaLetturaPoste(eventi, sp.stato)
-      if (nuovo && nuovo !== sp.stato) {
-        await admin.from('spedizioni').update({ stato: nuovo }).eq('id', sp.id)
-        stati++
-        // Il cambio stato dei contratti Poste (via Spedisci) lo scrive QUI: qui va anche avvisato il
-        // cliente, come fa la cron aggiorna per i fornitori diretti (prima non partiva → Edit Shop 23/9).
-        await notificaCambioStato(admin, sp.id, nuovo, sp.stato)
+      if (sorvegliate.has(sp.id)) {
+        // Annullata in sorveglianza: lo stato non si tocca qui (resta 'annullata'), decide il riaddebito.
+        const mosso = eventi.filter((e: any) => e.stato && STATI_PARTITA.includes(e.stato))
+        if (mosso.length) {
+          const gambe = await gambePaccoPoste(admin, sp.tracking_number)
+          if (gambe) {
+            const quando = mosso.map((e: any) => e.data_evento).filter(Boolean).sort()[0] || null
+            await riaddebitaPaccoPartito(admin, gambe, { stato: statoDaLetturaPoste(eventi, 'spedita') || 'in_transito', quando })
+            riaddebitati++
+            console.warn('[BONIFICA-POSTE] annullata ma affidata al corriere, riaddebitata:', sp.numero)
+          }
+        }
+      } else {
+        const nuovo = statoDaLetturaPoste(eventi, sp.stato)
+        if (nuovo && nuovo !== sp.stato) {
+          await admin.from('spedizioni').update({ stato: nuovo }).eq('id', sp.id)
+          stati++
+          // Il cambio stato dei contratti Poste (via Spedisci) lo scrive QUI: qui va anche avvisato il
+          // cliente, come fa la cron aggiorna per i fornitori diretti (prima non partiva → Edit Shop 23/9).
+          await notificaCambioStato(admin, sp.id, nuovo, sp.stato)
+        }
       }
     } catch { /* singola LDV: pazienza, riprova al giro dopo */ }
     await new Promise(res => setTimeout(res, 1200))
   }
-  console.log(`[BONIFICA-POSTE] cronologie=${cronologie} stati=${stati} senza_movimenti=${vuote} bloccati=${bloccati}`
+  console.log(`[BONIFICA-POSTE] cronologie=${cronologie} stati=${stati} senza_movimenti=${vuote} bloccati=${bloccati} riaddebitati=${riaddebitati}`
     + ` candidate=${lista.length} (poste_diretti=${listaPoste.length} spedisci=${listaSpedisci.length})`)
-  return NextResponse.json({ ok: true, fatte: cronologie, stati, vuote, bloccati, poste_diretti: listaPoste.length, spedisci: listaSpedisci.length })
+  return NextResponse.json({ ok: true, fatte: cronologie, stati, vuote, bloccati, riaddebitati, poste_diretti: listaPoste.length, annullate_sorvegliate: sorvegliate.size, spedisci: listaSpedisci.length })
 }

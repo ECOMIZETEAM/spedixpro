@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
   // così processo anche quelle il cui stato è stato riportato indietro da altri processi.
   // Il ripristino (undo) azzera annullamento_richiesto_at, quindi le ripristinate sono escluse.
   const { data: pendenti } = await admin.from('spedizioni')
-    .select('id,numero,dest_nome,corriere_id,raw_response,tracking_number,stato_precedente,annullamento_da,stato')
+    .select('id,numero,dest_nome,corriere_id,raw_response,tracking_number,stato_precedente,annullamento_da,annullamento_richiesto_at,stato')
     .not('annullamento_richiesto_at', 'is', null)
     .lte('annullamento_richiesto_at', soglia)
     // 'consegnata' esclusa: fra la richiesta e le 48 ore il pacco puo' essere arrivato davvero, e
@@ -50,6 +50,29 @@ export async function GET(req: NextRequest) {
     try {
       // Il corriere della spedizione: Spedisci non è annullabile via API (contratto non nostro)
       const { data: corr } = await admin.from('corrieri').select('tipo,nome_contratto,master_id').eq('id', (s as any).corriere_id).maybeSingle()
+      // POSTE DIRETTO (SDA EXPRESS L, anche quando il cliente la compra da un ponte di condivisione):
+      // POSTE non ha l'annullo via API, quindi si annulla sul portale tutto il pacco e lo si sorveglia
+      // 30 giorni (vedi lib/annullo-poste). Prima qui il ponte rispondeva "va gestito dall'assistenza" e
+      // la richiesta tornava indietro col cliente addebitato: non se ne chiudeva nessuna.
+      if (corr?.tipo === 'moovexpress' || corr?.tipo === 'poste') {
+        const { gambePaccoPoste, paccoPartito, annullaPaccoPoste } = await import('@/lib/annullo-poste')
+        const gambe = await gambePaccoPoste(admin, (s as any).tracking_number)
+        if (gambe) {
+          // Gia' affidato al corriere: non c'e' niente da annullare, la spedizione resta addebitata.
+          if ((await paccoPartito(admin, gambe)).partito) {
+            await admin.from('spedizioni').update({
+              stato: (s as any).stato_precedente || 'in_lavorazione',
+              annullamento_richiesto_at: null,
+              annullamento_errore: 'Non annullata: il pacco risulta già affidato al corriere.',
+            }).eq('id', s.id)
+            rifiutate++
+            continue
+          }
+          await annullaPaccoPoste(admin, gambe, { richiestoAt: (s as any).annullamento_richiesto_at, da: (s as any).annullamento_da || null })
+          annullate++
+          continue
+        }
+      }
       // SPEDISCI: nessun annullo via API (contratto non nostro) → coda manuale al DETENTORE.
       if (corr?.tipo === 'spedisci') {
         const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
