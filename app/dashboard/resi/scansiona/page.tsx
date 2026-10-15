@@ -15,12 +15,12 @@ const NERO = '#1a1a1a'
 const CHIAVE_BOZZA = 'moov_scansiona_resi_v1'
 
 type Voce = {
-  id: string; numero: string; mitt_nome?: string; dest_nome?: string; dest_citta?: string; colli?: number
+  id: string; numero: string; mitt_nome?: string; dest_nome?: string; dest_citta?: string; colli?: number; stato?: string | null
   cliente_id: string | null; cliente_nome: string | null
   target_master_id: string | null; target_master_nome: string | null
   contratto: string | null; gia_addebitato_giacenza?: boolean; data_scansione: string
 }
-type Esito = { tipo: 'ok' | 'err' | 'info'; testo: string }
+type Esito = { tipo: 'ok' | 'err' | 'info' | 'avviso'; testo: string }
 type Fatta = { id: string; numero: number; destinatario: string; contratto: string; ldv: number }
 
 // Il gruppo e' a chi va la distinta (il cliente, oppure il sotto-master per le spedizioni della sua rete)
@@ -29,6 +29,16 @@ type Fatta = { id: string; numero: number; destinatario: string; contratto: stri
 // troppo corte (nessun numero di spedizione ha meno di 9 caratteri; le letture sbagliate della fotocamera
 // sono spesso di 6-8 cifre). Il lettore li ignora e continua a cercare la LDV nello stesso fotogramma.
 const nonELdv = (c: string) => { const s = c.trim(); return s.length < 9 || /^\d{5}0000$/.test(s) }
+
+// PACCO NON ANCORA PARTITO O ANNULLATO: il reso si registra lo stesso (regola di Lorenzo, 15/10/2026), ma
+// chi scansiona deve saperlo, perche' il reso si paga. Caso d'origine: Wave ha letto 282343J010467 di SMAV,
+// creata la mattina stessa e ancora in lavorazione. "spedita" invece vuol dire gia' in distinta o presa
+// in carico dal corriere: partita.
+function avvisoStato(stato?: string | null): string | null {
+  if (stato === 'in_lavorazione') return 'non ancora partita (in lavorazione)'
+  if (stato === 'annullata' || stato === 'annullamento_pending' || stato === 'annullamento_manuale' || stato === 'storno_richiesto') return 'spedizione annullata'
+  return null
+}
 
 const chiaveGruppo = (v: Voce) => (v.target_master_id ? 'm:' + v.target_master_id : 'c:' + v.cliente_id) + '|' + (v.contratto || '')
 const destinatario = (v: Voce) => v.target_master_id ? (v.target_master_nome || 'Sotto-master') : (v.cliente_nome || 'Cliente')
@@ -115,14 +125,20 @@ export default function ScansionaResiPage() {
         setEsito({ tipo: 'err', testo: `${d.numero} è una spedizione propria senza cliente: non va in una distinta di reso` }); suona(false); return
       }
       const v: Voce = {
-        id: d.id, numero: d.numero, mitt_nome: d.mitt_nome, dest_nome: d.dest_nome, dest_citta: d.dest_citta, colli: d.colli,
+        id: d.id, numero: d.numero, mitt_nome: d.mitt_nome, dest_nome: d.dest_nome, dest_citta: d.dest_citta, colli: d.colli, stato: d.stato || null,
         cliente_id: d.cliente_id || null, cliente_nome: d.cliente_nome || null,
         target_master_id: d.target_master_id || null, target_master_nome: d.target_master_nome || null,
         contratto: d.contratto || null, gia_addebitato_giacenza: !!d.gia_addebitato_giacenza,
         data_scansione: new Date().toISOString(),
       }
       setVoci(prev => prev.some(x => x.id === v.id) ? prev : [v, ...prev])
-      setEsito({ tipo: 'ok', testo: `${v.numero} · ${destinatario(v)} · ${v.contratto || 'contratto ?'}` + (v.gia_addebitato_giacenza ? ' — già addebitato allo svincolo, non verrà riaddebitato' : '') })
+      const avviso = avvisoStato(v.stato)
+      setEsito({
+        tipo: avviso ? 'avviso' : 'ok',
+        testo: `${v.numero} · ${destinatario(v)} · ${v.contratto || 'contratto ?'}`
+          + (avviso ? ` — attenzione: ${avviso}. Si può registrare come reso lo stesso.` : '')
+          + (v.gia_addebitato_giacenza ? ' — già addebitato allo svincolo, non verrà riaddebitato' : ''),
+      })
       suona(true)
       if (manuale) setLdv('')
     } catch {
@@ -168,11 +184,14 @@ export default function ScansionaResiPage() {
   }
 
   async function registra(chiavi: string[]) {
-    const n = vociRef.current.filter(v => chiavi.includes(chiaveGruppo(v))).length
+    const scelte = vociRef.current.filter(v => chiavi.includes(chiaveGruppo(v)))
+    const n = scelte.length
     if (!n) return
+    const segnalate = scelte.filter(v => avvisoStato(v.stato))
     const ok = await dialog.confirm({
       title: chiavi.length > 1 ? `Registrare ${n} resi?` : `Registrare ${n} ${n === 1 ? 'reso' : 'resi'}?`,
-      message: `${chiavi.length > 1 ? `Si creano ${chiavi.length} distinte, una per cliente e contratto. ` : ''}Le spedizioni passano a "reso al mittente" e il reso viene addebitato a chi riceve la distinta (quelli già addebitati non si riaddebitano).`,
+      message: `${chiavi.length > 1 ? `Si creano ${chiavi.length} distinte, una per cliente e contratto. ` : ''}Le spedizioni passano a "reso al mittente" e il reso viene addebitato a chi riceve la distinta (quelli già addebitati non si riaddebitano).`
+        + (segnalate.length ? ` Attenzione: ${segnalate.length === 1 ? '1 spedizione non è ancora partita o è annullata' : `${segnalate.length} spedizioni non sono ancora partite o sono annullate`} (${segnalate.slice(0, 5).map(v => v.numero).join(', ')}${segnalate.length > 5 ? '…' : ''}): il reso viene addebitato lo stesso.` : ''),
       confirmText: 'Registra',
     })
     if (!ok) return
@@ -189,7 +208,10 @@ export default function ScansionaResiPage() {
     if (ok) setVoci([])
   }
 
-  const coloreEsito = esito?.tipo === 'ok' ? { bg: '#f0fdf4', bd: '#bbf7d0', fg: '#15803d' } : esito?.tipo === 'err' ? { bg: '#fef2f2', bd: '#fecaca', fg: '#dc2626' } : { bg: '#f8fafc', bd: '#e2e8f0', fg: '#475569' }
+  const coloreEsito = esito?.tipo === 'ok' ? { bg: '#f0fdf4', bd: '#bbf7d0', fg: '#15803d' }
+    : esito?.tipo === 'err' ? { bg: '#fef2f2', bd: '#fecaca', fg: '#dc2626' }
+    : esito?.tipo === 'avviso' ? { bg: '#fffbeb', bd: '#fcd34d', fg: '#92400e' }
+    : { bg: '#f8fafc', bd: '#e2e8f0', fg: '#475569' }
   const card = { background: '#fff', borderRadius: '10px', border: '1px solid #d1d5db', marginBottom: '14px' }
 
   return (
@@ -275,6 +297,11 @@ export default function ScansionaResiPage() {
                   {v.mitt_nome ? `da ${v.mitt_nome} · ` : ''}{v.colli || 1} {Number(v.colli || 1) === 1 ? 'collo' : 'colli'} · {new Date(v.data_scansione).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
                   {v.gia_addebitato_giacenza && <span style={{ marginLeft: '6px', color: '#b45309', fontWeight: 600 }}>già addebitato allo svincolo</span>}
                 </div>
+                {avvisoStato(v.stato) && (
+                  <div style={{ marginTop: '3px', display: 'inline-block', fontSize: '11.5px', fontWeight: 700, color: '#92400e', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: '5px', padding: '1px 7px' }}>
+                    {avvisoStato(v.stato)}
+                  </div>
+                )}
               </div>
               <button onClick={() => setVoci(prev => prev.filter(x => x.id !== v.id))} disabled={registrando} aria-label={`Togli ${v.numero}`}
                 style={{ padding: '6px 10px', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '6px', fontSize: '13px', cursor: 'pointer' }}>✕</button>
