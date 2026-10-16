@@ -6,6 +6,7 @@ import DateRangePicker from '@/app/components/DateRangePicker'
 import { useDialog } from '@/app/components/DialogProvider'
 import PagaConCarta from '@/app/cliente/PagaConCarta'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
+import { numeriOrdine, numeroOrdineCorrisponde } from '@/lib/numero-ordine-negozio'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 import { useAnteprimaPrezzi, chiediPrezzi, scegliTariffa, euro, eUnRifiuto, testoDelRifiuto, type RigaPrezzo } from '@/app/cliente/anteprima-prezzi'
 
@@ -260,7 +261,8 @@ export default function OrdiniPage() {
       if (fStatoPag && o.stato_pagamento !== fStatoPag) return false
       if (fStatoEv && o.stato !== fStatoEv) return false
       if (fPaese && d.paese !== fPaese) return false
-      if (fNum && !String(o.numero_ordine||'').toLowerCase().includes(fNum.toLowerCase())) return false
+      // Su PrestaShop vale anche l'ID numerico, non solo il riferimento a lettere.
+      if (fNum && !numeroOrdineCorrisponde(o, piattaforma, fNum)) return false
       if (fSku) {
         const arts = Array.isArray(o.articoli)?o.articoli:[]
         if (!arts.some((a:any)=>String(a.sku||'').toLowerCase().includes(fSku.toLowerCase()))) return false
@@ -280,7 +282,7 @@ export default function OrdiniPage() {
         if (fSpA && ts > new Date(fSpA).getTime()+86400000) return false
       }
       if (search) {
-        const blob = (o.numero_ordine+' '+(d.nome||'')+' '+(d.citta||'')+' '+(d.email||'')).toLowerCase()
+        const blob = (numeriOrdine(o, piattaforma).join(' ')+' '+(d.nome||'')+' '+(d.citta||'')+' '+(d.email||'')).toLowerCase()
         if (!blob.includes(search.toLowerCase())) return false
       }
       return true
@@ -302,7 +304,7 @@ export default function OrdiniPage() {
     return arr
   // fStoreValido, non fStore: l'elenco negozi arriva DOPO i filtri, quindi la validita' dell'id puo'
   // cambiare senza che fStore si muova. Con la dipendenza sbagliata il filtro resterebbe indietro.
-  }, [ordini, fStoreValido, fStatoPag, fStatoEv, fPaese, fNum, fSku, fTags, fArch, fDa, fA, fSpDa, fSpA, search, sort, soloDoppi, gruppi])
+  }, [ordini, piattaforma, fStoreValido, fStatoPag, fStatoEv, fPaese, fNum, fSku, fTags, fArch, fDa, fA, fSpDa, fSpA, search, sort, soloDoppi, gruppi])
 
   const totale = filtrati.length
   const nPagine = Math.max(1, Math.ceil(totale/perPage))
