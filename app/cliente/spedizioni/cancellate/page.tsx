@@ -15,6 +15,7 @@ export default function SpedizioniCancellateClientePage() {
   const dialog = useDialog()
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [pending, setPending] = useState<any[]>([])
+  const [storni, setStorni] = useState<any[]>([])
   const [manuali, setManuali] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [cerca, setCerca] = useState('')
@@ -28,9 +29,13 @@ export default function SpedizioniCancellateClientePage() {
       fetch('/api/spedizioni/lista?stato=annullata').then(r => r.json()),
       fetch('/api/spedizioni/lista?stato=annullamento_pending').then(r => r.json()),
       fetch('/api/spedizioni/lista?stato=annullamento_manuale').then(r => r.json()),
-    ]).then(([ann, pen, man]) => {
+      // Annullo gia' chiesto al corriere, in attesa della sua conferma: senza questa riga la spedizione
+      // cancellata non compariva da nessuna parte di questa pagina finche' il corriere non confermava.
+      fetch('/api/spedizioni/lista?stato=storno_richiesto').then(r => r.json()),
+    ]).then(([ann, pen, man, sto]) => {
       setSpedizioni(Array.isArray(ann) ? ann : [])
       setPending(Array.isArray(pen) ? pen : [])
+      setStorni(Array.isArray(sto) ? sto : [])
       setManuali(Array.isArray(man) ? man : [])
       setLoading(false)
     }).catch(() => setLoading(false))
@@ -55,10 +60,11 @@ export default function SpedizioniCancellateClientePage() {
   const paginaCorr = Math.min(pagina, totalePagine)
   const paginate = visibili.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
 
-  // Sezione "in attesa di annullo": pending + manuali, paginati 10 per pagina.
+  // Sezione "in attesa di annullo": pending + storni chiesti al corriere + manuali, paginati 10 per pagina.
   const PENDING_PER_PAGE = 10
   const pendingCombinati = [
     ...pending.map((s: any) => ({ s, tipo: 'p' as const })),
+    ...storni.map((s: any) => ({ s, tipo: 's' as const })),
     ...manuali.map((s: any) => ({ s, tipo: 'm' as const })),
   ]
   const totPagPending = Math.max(1, Math.ceil(pendingCombinati.length / PENDING_PER_PAGE))
@@ -77,12 +83,12 @@ export default function SpedizioniCancellateClientePage() {
       {/* SEZIONE PENDING (in attesa di annullo, 48h) */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #fed7aa',overflow:'hidden',marginBottom:'16px'}}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #fde4cf',background:'#fff7ed'}}>
-          <span style={{fontSize:'13px',fontWeight:'700',color:'#ea580c'}}>In attesa di annullo <span style={{color:'#9a3412',fontWeight:'400',fontSize:'12px'}}>({pending.length + manuali.length})</span></span>
+          <span style={{fontSize:'13px',fontWeight:'700',color:'#ea580c'}}>In attesa di annullo <span style={{color:'#9a3412',fontWeight:'400',fontSize:'12px'}}>({pending.length + storni.length + manuali.length})</span></span>
           <span style={{display:'block',marginTop:'2px',fontSize:'12px',color:'#9a3412'}}>La richiesta di annullo viene inviata al corriere dopo 48 ore. Entro questo tempo puoi ripristinare la spedizione.</span>
         </div>
         {loading ? (
           <div style={{padding:'20px',textAlign:'center',color:'#bbb',fontSize:'13px'}}>Caricamento…</div>
-        ) : (!pending.length && !manuali.length) ? (
+        ) : (!pending.length && !storni.length && !manuali.length) ? (
           <div style={{padding:'20px',textAlign:'center',color:'#bbb',fontSize:'13px'}}>Nessuna spedizione in attesa di annullo.</div>
         ) : (
           <div style={{overflowX:'auto'}}>
@@ -105,6 +111,16 @@ export default function SpedizioniCancellateClientePage() {
                       </tr>
                     )
                   })()
+                ) : tipo === 's' ? (
+                  // Niente "Ripristina": la richiesta e' gia' dal corriere e non si ritira.
+                  <tr key={s.id} style={{borderBottom:'1px solid #fdece0'}}>
+                    <td style={{padding:'10px 16px'}}><span style={{fontWeight:'600',color:'#f97316'}}>{s.numero}</span></td>
+                    <td style={{padding:'10px 14px',color:'#333'}}>{s.dest_nome} · {s.dest_citta}</td>
+                    <td style={{padding:'10px 14px',color:'#9a3412',fontSize:'12px',whiteSpace:'nowrap'}} colSpan={2}
+                      title="Il credito viene stornato appena il corriere conferma la cancellazione.">
+                      Richiesto al corriere{s.annullamento_richiesto_at ? ` il ${new Date(s.annullamento_richiesto_at).toLocaleDateString('it-IT')}` : ''}: in verifica
+                    </td>
+                  </tr>
                 ) : (
                   <tr key={s.id} style={{borderBottom:'1px solid #fdece0'}}>
                     <td style={{padding:'10px 16px'}}><span style={{fontWeight:'600',color:'#f97316'}}>{s.numero}</span></td>

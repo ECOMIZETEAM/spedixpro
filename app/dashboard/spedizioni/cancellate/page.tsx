@@ -25,6 +25,7 @@ export default function SpedizioniCancellatePage() {
   const dialog = useDialog()
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [pending, setPending] = useState<any[]>([])
+  const [storni, setStorni] = useState<any[]>([])     // annullo gia' chiesto al corriere, in attesa della sua conferma
   const [manuali, setManuali] = useState<any[]>([])   // annullo manuale in sola lettura (nel mio ambito)
   const [codaOwner, setCodaOwner] = useState<any[]>([]) // annulli Spedisci che DEVO richiedere io (detentore)
   const [loading, setLoading] = useState(true)
@@ -49,9 +50,14 @@ export default function SpedizioniCancellatePage() {
       fetch('/api/spedizioni/lista?light=1&stato=annullamento_pending').then(r => r.json()),
       fetch('/api/spedizioni/lista?light=1&stato=annullamento_manuale').then(r => r.json()),
       fetch('/api/spedizioni/annulli-manuali').then(r => r.json()),
-    ]).then(([ann, pen, man, coda]) => {
+      // Sui contratti che hanno la richiesta di storno l'annullo parte SUBITO e la spedizione resta in
+      // 'storno_richiesto' finche' il corriere non conferma: senza questa riga spariva sia dall'elenco
+      // delle attese sia dalle annullate (96 il 16/10), e chi l'aveva cancellata non la ritrovava.
+      fetch('/api/spedizioni/lista?light=1&stato=storno_richiesto').then(r => r.json()),
+    ]).then(([ann, pen, man, coda, sto]) => {
       setSpedizioni(Array.isArray(ann) ? ann : [])
       setPending(Array.isArray(pen) ? pen : [])
+      setStorni(Array.isArray(sto) ? sto : [])
       setManuali(Array.isArray(man) ? man : [])
       setCodaOwner(Array.isArray(coda) ? coda : [])
       setLoading(false)
@@ -111,7 +117,7 @@ export default function SpedizioniCancellatePage() {
 
   // Elenco clienti presenti in TUTTA la pagina (pending + manuali + annullate) per il filtro a tendina
   const clientiFiltro = Array.from(new Set(
-    [...spedizioni, ...pending, ...manualiAltri, ...codaOwner].map(s => s.clienti?.ragione_sociale).filter(Boolean)
+    [...spedizioni, ...pending, ...storni, ...manualiAltri, ...codaOwner].map(s => s.clienti?.ragione_sociale).filter(Boolean)
   )).sort()
 
   function passaFiltri(s: any) {
@@ -131,6 +137,7 @@ export default function SpedizioniCancellatePage() {
   // I filtri agiscono su tutte le sezioni della pagina
   const visibili = spedizioni.filter(passaFiltri)
   const pendingVis = pending.filter(passaFiltri)
+  const storniVis = storni.filter(passaFiltri)
   const manualiVis = manualiAltri.filter(passaFiltri)
   const codaOwnerVis = codaOwner.filter(passaFiltri)   // anche la coda annulli segue ricerca/cliente/date
   // Coda del detentore a pagine da 10: su E&A sono oltre cento e uscivano tutte insieme,
@@ -151,10 +158,11 @@ export default function SpedizioniCancellatePage() {
   const paginaCorr = Math.min(pagina, totalePagine)
   const visibiliPaginate = visibili.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
 
-  // Sezione "in attesa di annullo": pending + manuali insieme, paginati 10 per pagina.
+  // Sezione "in attesa di annullo": pending + storni chiesti al corriere + manuali, paginati 10 per pagina.
   const PENDING_PER_PAGE = 10
   const pendingCombinati = [
     ...pendingVis.map((s: any) => ({ s, tipo: 'p' as const })),
+    ...storniVis.map((s: any) => ({ s, tipo: 's' as const })),
     ...manualiVis.map((s: any) => ({ s, tipo: 'm' as const })),
   ]
   const totPagPending = Math.max(1, Math.ceil(pendingCombinati.length / PENDING_PER_PAGE))
@@ -308,12 +316,12 @@ export default function SpedizioniCancellatePage() {
       {/* SEZIONE PENDING (in attesa di annullo, 48h) + annulli manuali in gestione */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #fed7aa',overflow:'hidden',marginBottom:'16px'}}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #fde4cf',background:'#fff7ed'}}>
-          <span style={{fontSize:'13px',fontWeight:'700',color:'#ea580c'}}>In attesa di annullo <span style={{color:'#9a3412',fontWeight:'400',fontSize:'12px'}}>({pendingVis.length + manualiVis.length})</span></span>
+          <span style={{fontSize:'13px',fontWeight:'700',color:'#ea580c'}}>In attesa di annullo <span style={{color:'#9a3412',fontWeight:'400',fontSize:'12px'}}>({pendingVis.length + storniVis.length + manualiVis.length})</span></span>
           <span style={{display:'block',marginTop:'2px',fontSize:'12px',color:'#9a3412'}}>La richiesta di annullo viene inviata al corriere dopo 48 ore. Entro questo tempo puoi ripristinare la spedizione.</span>
         </div>
         {loading ? (
           <div style={{padding:'20px',textAlign:'center',color:'#999',fontSize:'13px'}}>Caricamento…</div>
-        ) : (!pendingVis.length && !manualiVis.length) ? (
+        ) : (!pendingVis.length && !storniVis.length && !manualiVis.length) ? (
           <div style={{padding:'20px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessuna spedizione in attesa di annullo.</div>
         ) : (
           <div style={{overflowX:'auto'}}>
@@ -337,6 +345,18 @@ export default function SpedizioniCancellatePage() {
                       </tr>
                     )
                   })()
+                ) : tipo === 's' ? (
+                  // Niente "Ripristina": la richiesta e' gia' dal corriere e non si ritira. Lo storno del
+                  // credito arriva da solo quando il corriere conferma (cron storno-dva-cron).
+                  <tr key={s.id} style={{borderBottom:'1px solid #fdece0'}}>
+                    <td style={{padding:'9px 16px',fontWeight:'700',color:'#1a1a1a'}}>{s.numero}</td>
+                    <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{s.clienti?.ragione_sociale || '-'}</td>
+                    <td style={{padding:'9px 12px',color:'#1a1a1a'}}>{s.dest_nome} · {s.dest_citta}</td>
+                    <td style={{padding:'9px 12px',color:'#9a3412',fontSize:'12px',whiteSpace:'nowrap'}} colSpan={2}
+                      title="Il credito viene stornato appena il corriere conferma la cancellazione.">
+                      Richiesto al corriere{s.annullamento_richiesto_at ? ` il ${new Date(s.annullamento_richiesto_at).toLocaleDateString('it-IT')}` : ''}: in verifica
+                    </td>
+                  </tr>
                 ) : (
                   <tr key={s.id} style={{borderBottom:'1px solid #fdece0'}}>
                     <td style={{padding:'9px 16px',fontWeight:'700',color:'#1a1a1a'}}>{s.numero}</td>
