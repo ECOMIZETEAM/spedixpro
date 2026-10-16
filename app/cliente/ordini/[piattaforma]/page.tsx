@@ -908,7 +908,9 @@ export default function OrdiniPage() {
                   <tr style={{background:isSel?'#fff7ed':'#fff'}}>
                     <td style={{...td,borderTop:'none',padding:'9px 12px 3px'}}><input type="checkbox" checked={isSel} onChange={()=>toggleUno(o.id)} style={{accentColor:ACCENT,width:'16px',height:'16px'}}/></td>
                     <td style={{...td,borderTop:'none',padding:'9px 12px 3px',color:'#6b7280',whiteSpace:'nowrap'}}>{fmtData(getData(o))}</td>
-                    <td style={{...td,borderTop:'none',padding:'9px 12px 3px',fontWeight:600}}>{o.numero_ordine}</td>
+                    {/* PrestaShop: sotto il riferimento a lettere anche l'ID numerico, quello che il negoziante vede
+                        nel back office e con cui cerca. Non se coincide ("#94529" e' gia' l'ID). */}
+                    <td style={{...td,borderTop:'none',padding:'9px 12px 3px',fontWeight:600}}>{o.numero_ordine}{piattaforma==='prestashop' && o.ordine_esterno_id && String(o.numero_ordine||'').replace(/^#/,'')!==String(o.ordine_esterno_id) && <div style={{fontSize:'11px',color:'#999',fontWeight:400}}>ID {o.ordine_esterno_id}</div>}</td>
                     <td style={{...td,borderTop:'none',padding:'9px 12px 3px'}}>{d.nome||'—'}{(()=>{ const g=gruppoDi(o); if(!g) return null; const tutti=g.every(id=>sel[id]); return (
                       <button onClick={()=>setSel(prev=>{ const n={...prev}; g.forEach(id=>{ if(tutti) delete n[id]; else n[id]=true }); return n })}
                         title={tutti?'Togli la selezione':'Seleziona tutti i suoi ordini, poi premi Unisci'}
