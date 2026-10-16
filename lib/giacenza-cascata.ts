@@ -2,7 +2,8 @@ import { registraMovimentoMaster, registraMovimento } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 import { noloMaster, noloCliente, noloClienteDopoPartenza, applicaServizio, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
-import { catenaDaCorriere, risolviGambeSpedizione, gambePerTracking } from '@/lib/condivisione-catena'
+import { catenaDaCorriere, risolviGambeSpedizione, gambePerTracking, type GambaSpedizione } from '@/lib/condivisione-catena'
+import { leggiPrezzi, calcolaCosti, noloClienteSpedizione } from '@/lib/giacenza-prezzi'
 
 // Mappa il "nome" di un supplemento giacenza (sia lato cliente sia lato master) sull'operazione.
 // Es. "Riconsegna al nuovo destinatario" -> riconsegna_nuovo, "Reso al mittente" -> reso.
@@ -458,16 +459,18 @@ type SpedGiac = { id: string; numero: string; cliente_id: string | null; master_
  *  3. solo allora si scrivono i movimenti. Un livello che non riesce non ferma gli altri (come la cascata
  *     normale) e resta nei log; non viene mai riscritto due volte.
  */
-async function addebitaAperturaGiacenzaCondivisione(admin: any, idsGambe: string[], originanteId: string): Promise<void> {
+export type VoceGiacenza = { cliente?: { masterId: string; clienteId: string }; master?: string; importo: number }
+
+// IL PIANO dell'apertura di un pacco condiviso, solo letture: chi paga e quanto. Separato dalla scrittura
+// perche' serve anche a rimettere in regola le aperture addebitate col calcolo di prima (8-14/10): si
+// confronta il piano con quello che e' stato davvero addebitato, senza una seconda copia della regola.
+export async function pianoAperturaGiacenzaCondivisione(admin: any, originanteId: string): Promise<{ o: any; piano: VoceGiacenza[] }> {
   const { data: o, error: eO } = await admin.from('spedizioni')
     .select('id,numero,cliente_id,master_id,corriere_id').eq('id', originanteId).maybeSingle()
   if (eO || !o) throw new Error('gamba originante non leggibile')
   const catena = await catenaDaCorriere(admin, o.corriere_id)
   if (!catena.length) throw new Error('fila del contratto interrotta: apertura giacenza rimandata')
-  const descr = `Apertura giacenza ${o.numero}`
-
-  type Voce = { cliente?: { masterId: string; clienteId: string }; master?: string; importo: number }
-  const piano: Voce[] = []
+  const piano: VoceGiacenza[] = []
   if (o.cliente_id) {
     const pr = await prezzoGiacenzaClienteListino(admin, o.cliente_id, o.corriere_id, 'riconsegna')
     if (pr.apertura > 0) piano.push({ cliente: { masterId: o.master_id, clienteId: o.cliente_id }, importo: pr.apertura })
@@ -482,6 +485,12 @@ async function addebitaAperturaGiacenzaCondivisione(admin: any, idsGambe: string
       if (pr.apertura > 0) piano.push({ master: liv.master, importo: pr.apertura })
     }
   }
+  return { o, piano }
+}
+
+async function addebitaAperturaGiacenzaCondivisione(admin: any, idsGambe: string[], originanteId: string): Promise<void> {
+  const { o, piano } = await pianoAperturaGiacenzaCondivisione(admin, originanteId)
+  const descr = `Apertura giacenza ${o.numero}`
 
   const { data: presi, error: eSegno } = await admin.from('spedizioni').update({ giacenza_apertura_addebitata: true })
     .in('id', idsGambe).eq('giacenza_apertura_addebitata', false).select('id')
@@ -553,6 +562,96 @@ export async function addebitaAperturaGiacenza(sped: SpedGiac): Promise<void> {
 }
 
 /**
+ * SERVIZIO GIACENZA DI UN PACCO CONDIVISO (riconsegna, riconsegna a nuovo destinatario) allo svincolo.
+ * Come l'apertura qui sopra: un evento del PACCO, addebitato una volta sola dalla gamba originante lungo
+ * la fila del contratto, qualunque gamba sia stata svincolata (il cliente in fondo o un master della fila).
+ *
+ * Prima si saltava ("feature deferita"): su un pacco condiviso lo svincolo non addebitava il servizio a
+ * nessuno — ne' al cliente, ne' alla fila fino al detentore, che il corriere invece lo paga.
+ *
+ * Chi paga, specchio della creazione (e del reso condiviso, addebitaResoCondivisione):
+ *  - il cliente finale: il servizio del SUO listino, quello congelato nella richiesta se la richiesta e'
+ *    nata sulla sua gamba; se e' nata sulla gamba di un master, ricalcolato sulla gamba originante (il
+ *    prezzo della richiesta era quello di un altro "cliente": il ledger di quella gamba);
+ *  - salto a collegamento: il ledger paga il venditore, col listino del ledger sul contratto del venditore,
+ *    fisso + percentuale sul nolo — lo stesso calcolo del cliente (lib/giacenza-prezzi);
+ *  - salto d'albero e detentore: ognuno il SUO servizio, fisso + percentuale sul SUO nolo, come
+ *    addebitaGiacenzaCatena (anche a 0, perche' l'operazione resti visibile nei suoi movimenti).
+ * Il reso NON passa di qui: lo addebita addebitaResoCondivisione (database, una volta per pacco).
+ *
+ * Ordine come l'apertura: piano tutto in lettura (fila interrotta = errore prima di scrivere), poi il
+ * segno giacenza_addebito_effettuato su TUTTE le gambe ancora libere (se un'altra gamba l'aveva gia', ci
+ * si ferma: il servizio del pacco l'ha gia' pagato qualcuno), solo allora i movimenti.
+ */
+// IL PIANO, solo letture (chi paga e quanto). Esportato perche' lo svincolo lo calcola PRIMA di parlare
+// col corriere: se la fila non si legge ci si ferma senza aver mandato niente (altrimenti il corriere
+// riceveva l'istruzione e nessuno pagava il servizio).
+export async function pianoServizioGiacenzaCondivisione(
+  admin: any, gambe: GambaSpedizione[], operazione: string, opz: { richiestaSpedizioneId: string; importoServizioCliente: number },
+): Promise<{ o: any; piano: VoceGiacenza[] }> {
+  const originanteId = gambe[0].spedizioneId
+  const { data: o, error: eO } = await admin.from('spedizioni')
+    .select('id,numero,cliente_id,master_id,corriere_id,costo_totale,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta')
+    .eq('id', originanteId).maybeSingle()
+  if (eO || !o) throw new Error('gamba originante non leggibile: servizio giacenza non addebitato')
+  const catena = await catenaDaCorriere(admin, o.corriere_id)
+  if (!catena.length) throw new Error('fila del contratto interrotta: servizio giacenza non addebitato')
+  const piano: VoceGiacenza[] = []
+  if (o.cliente_id) {
+    let imp = Number(opz.importoServizioCliente) || 0
+    if (opz.richiestaSpedizioneId !== o.id) {
+      imp = calcolaCosti(operazione, await leggiPrezzi(admin, o), o, await noloClienteSpedizione(admin, o)).costo_servizio
+    }
+    if (imp > 0) piano.push({ cliente: { masterId: o.master_id, clienteId: o.cliente_id }, importo: imp })
+  }
+  for (const liv of catena) {
+    if (liv.ruolo === 'codice') {
+      if (!liv.ledgerClienteId || !liv.fornitore || !liv.corriereFornitoreId) throw new Error(`salto a collegamento senza ledger (${liv.master}): servizio giacenza non addebitato`)
+      const sp = { ...o, cliente_id: liv.ledgerClienteId, corriere_id: liv.corriereFornitoreId }
+      const imp = calcolaCosti(operazione, await leggiPrezzi(admin, sp), sp, await noloClienteSpedizione(admin, sp)).costo_servizio
+      if (imp > 0) piano.push({ cliente: { masterId: liv.fornitore, clienteId: liv.ledgerClienteId }, importo: imp })
+    } else {
+      const pr = await prezzoGiacenzaMaster(admin, liv.corriereId, operazione)
+      let servizio = pr.servizio
+      if (pr.perc > 0) {
+        const nolo = await noloMaster(admin, liv.master, liv.corriereId, o)
+        if (nolo != null) servizio = applicaServizio({ valore: pr.servizio, perc: pr.perc }, nolo)
+      }
+      piano.push({ master: liv.master, importo: servizio })
+    }
+  }
+  return { o, piano }
+}
+
+async function addebitaServizioGiacenzaCondivisione(
+  admin: any, gambe: GambaSpedizione[], operazione: string, opz: { richiestaSpedizioneId: string; importoServizioCliente: number },
+): Promise<EsitoAddebito> {
+  const { o, piano } = await pianoServizioGiacenzaCondivisione(admin, gambe, operazione, opz)
+  const descr = `${OP_LABEL[operazione] || operazione} ${o.numero}`
+
+  const ids = gambe.map(g => g.spedizioneId)
+  const { data: presi, error: eSegno } = await admin.from('spedizioni').update({ giacenza_addebito_effettuato: true })
+    .in('id', ids).or('giacenza_addebito_effettuato.is.null,giacenza_addebito_effettuato.eq.false').select('id')
+  if (eSegno) throw new Error('segno del servizio giacenza non scritto: ' + eSegno.message)
+  if ((presi || []).length !== ids.length) return { addebitato: false, importoCliente: 0 }
+
+  let importoCliente = 0
+  for (const v of piano) {
+    try {
+      if (v.cliente) {
+        await registraMovimento(admin, { masterId: v.cliente.masterId, clienteId: v.cliente.clienteId, tipo: 'giacenza',
+          descrizione: descr, importo: -Math.abs(v.importo), riferimento: o.numero, spedizioneId: o.id })
+        if (v.cliente.clienteId === o.cliente_id) importoCliente = v.importo
+      } else if (v.master) {
+        await registraMovimentoMaster(admin, { masterOwnerId: v.master, masterTargetId: v.master, tipo: 'giacenza',
+          descrizione: descr, riferimento: o.numero, importo: -Math.abs(v.importo), spedizioneId: o.id, createdBy: null })
+      }
+    } catch (e) { console.error(`Errore servizio giacenza (condiviso) ${o.numero}:`, e) }
+  }
+  return { addebitato: true, importoCliente }
+}
+
+/**
  * SERVIZIO giacenza — addebitato allo SVINCOLO in base all'operazione scelta (riconsegna/reso/…):
  * il cliente paga l'importo (congelato nella richiesta) e la spesa risale la rete (ogni master
  * paga il SUO servizio). L'apertura NON si tocca qui (già addebitata all'entrata).
@@ -560,9 +659,23 @@ export async function addebitaAperturaGiacenza(sped: SpedGiac): Promise<void> {
 export async function addebitaServizioGiacenza(sped: SpedGiac, operazione: string, importoServizioCliente: number): Promise<EsitoAddebito> {
   const admin = createAdminSupabase()
   const { data: corr } = await admin.from('corrieri').select('master_id,nome_contratto,tipo').eq('id', sped.corriere_id).maybeSingle()
-  // CONDIVISIONE: gamba-ponte (tipo='moovexpress') → salto (sia reso sia servizio): la catena-fornitore va
-  // fatta gamba-per-gamba (feature deferita), non con il tree-walk che addebiterebbe il master-hub più volte.
-  // Il costo reale resta sulla gamba dell'owner (corriere reale, che passa di qui normalmente).
+  // PACCO CONDIVISO (piu' gambe, la prima un ponte): il servizio e il reso sono eventi del PACCO, e si
+  // addebitano dalla gamba originante lungo la fila, qualunque gamba sia stata svincolata. Prima qui la
+  // gamba-ponte usciva senza addebitare niente, e la gamba del detentore risaliva l'albero da sola.
+  {
+    let trk: string | null | undefined = (sped as any).tracking_number
+    if (trk === undefined) {
+      const { data: t, error: eT } = await admin.from('spedizioni').select('tracking_number').eq('id', sped.id).maybeSingle()
+      if (eT) throw new Error('spedizione non leggibile: ' + eT.message)
+      trk = (t as any)?.tracking_number || null
+    }
+    const gambe = trk ? ((await gambePerTracking(admin, [trk])).get(trk) || []) : []
+    if (gambe.length > 1 && gambe[0].tipo === 'moovexpress') {
+      if (operazione === 'reso') return addebitaResoCondivisione(admin, gambe[0].spedizioneId, corr?.nome_contratto || '', true)
+      return addebitaServizioGiacenzaCondivisione(admin, gambe, operazione, { richiestaSpedizioneId: sped.id, importoServizioCliente })
+    }
+  }
+  // Ponte senza altre gambe (dati incompleti): niente fila da cui addebitare, come prima.
   if ((corr as any)?.tipo === 'moovexpress') return { addebitato: false, importoCliente: 0 }
 
   // IL RESO NON PASSA DA QUI: lo decide il database (fn_addebita_resi), cosi' costa uguale che
