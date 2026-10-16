@@ -28,12 +28,22 @@ export async function GET(req: NextRequest) {
   const _cron = bloccaCronNonAutorizzato(req); if (_cron) return _cron
   const admin = createAdminSupabase()
 
+  // Il caso DOPO l'annullo: le SDA EXPRESS L annullate sul portale (POSTE non ha l'annullo via API) che
+  // risultano partite lo stesso si riaddebitano a ogni livello. La regola e' in lib/annullo-poste; qui
+  // si chiama ogni ora, sugli eventi gia' scritti da qualunque fonte (OneTracking, poste.it).
+  let sorveglianza: any = null
+  try {
+    const { sorvegliaAnnullatePoste } = await import('@/lib/annullo-poste')
+    const r = await sorvegliaAnnullatePoste(admin)
+    sorveglianza = { pacchi: r.pacchi, partiti: r.partiti, riaddebitati: r.riaddebitati }
+  } catch (e: any) { console.error('[ANNULLI][SORVEGLIANZA-POSTE]', e?.message) }
+
   const { data: coda } = await admin.from('spedizioni')
     .select('id,numero,stato,stato_precedente')
     .in('stato', ['annullamento_pending', 'annullamento_manuale'])
     .limit(3000)
   const ids = (coda || []).map((s: any) => s.id)
-  if (!ids.length) return NextResponse.json({ ok: true, esaminate: 0, ripristinate: 0 })
+  if (!ids.length) return NextResponse.json({ ok: true, esaminate: 0, ripristinate: 0, sorveglianza })
 
   const partite = new Set<string>()
   for (let i = 0; i < ids.length; i += 300) {
@@ -63,5 +73,5 @@ export async function GET(req: NextRequest) {
     else { ripristinate++; console.warn('[ANNULLI][RECUPERO] partita → ripristinata:', (s as any).numero) }
   }
 
-  return NextResponse.json({ ok: true, esaminate: ids.length, partite: partite.size, ripristinate, errori })
+  return NextResponse.json({ ok: true, esaminate: ids.length, partite: partite.size, ripristinate, errori, sorveglianza })
 }

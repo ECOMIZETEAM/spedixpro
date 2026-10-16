@@ -15,9 +15,10 @@
 // Un posto solo per tre porte: il cron delle 48 ore (annullamenti-cron), la sorveglianza (bonifica-poste,
 // che legge poste.it) e lo script dell'arretrato.
 
-import { risolviGambeSpedizione, type GambaSpedizione } from '@/lib/condivisione-catena'
+import { risolviGambeSpedizione, gambePerTracking, type GambaSpedizione } from '@/lib/condivisione-catena'
 import { rimborsaAnnulloSpedizione } from '@/lib/annullaSpedizione'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
+import { statoDaLetturaPoste } from '@/lib/tracking-poste'
 
 // "Il pacco e' nelle mani del corriere". "spedita" da sola NON conta: su questi contratti e' spesso solo
 // la LDV accettata, senza scansione. Stesso elenco della guardia della coda d'annullo nel tracking
@@ -136,4 +137,61 @@ export async function riaddebitaPaccoPartito(
   const { data: art } = await admin.from('articoli_movimenti').select('spedizione_id').in('spedizione_id', ids).limit(1)
   if (art?.length) console.warn('[ANNULLO-POSTE] riaddebitato un pacco con articoli di magazzino rientrati: la giacenza va riallineata a mano', gambe[0]?.numero)
   return { piano, gambe: annullate.length }
+}
+
+// SORVEGLIANZA DAI FATTI GIA' SCRITTI. Il tracking delle SDA EXPRESS L non arriva da una fonte sola: lo
+// sweep OneTracking dal Mac (tre volte al giorno, la fonte che regge davvero) e bonifica-poste da poste.it,
+// che Poste blocca quasi a ogni giro dopo una ventina di letture (log del 15-16/10: bloccati=6 sempre).
+// Quindi la decisione non dipende da chi legge: qui si guardano gli eventi di movimento gia' scritti su
+// QUALSIASI gamba dei pacchi annullati negli ultimi 30 giorni, e se ce n'e' uno il pacco si riaddebita.
+// Gira ogni ora da annulli-recupero-cron. Nessuna chiamata esterna: solo letture, poi il riaddebito.
+export async function sorvegliaAnnullatePoste(admin: any, opz: { simula?: boolean } = {}): Promise<{ pacchi: number; partiti: number; riaddebitati: number; piano: RiaddebitoPianificato[] }> {
+  const inizio = new Date(Date.now() - (GIORNI_SORVEGLIANZA + 2) * 86400000).toISOString()
+  // Qualunque gamba annullata nella finestra, non solo quella del detentore: gli annulli fatti a mano prima
+  // di questa libreria (5-6/10) hanno la data solo sulla gamba del cliente. I pacchi senza una gamba POSTE
+  // (ponti verso altri corrieri) li scarta piu' sotto il controllo sulle gambe.
+  const { data: corr } = await admin.from('corrieri').select('id').in('tipo', ['poste', 'moovexpress'])
+  const corrIds = (corr || []).map((c: any) => c.id)
+  const vuoto = { pacchi: 0, partiti: 0, riaddebitati: 0, piano: [] as RiaddebitoPianificato[] }
+  if (!corrIds.length) return vuoto
+  const trk = new Set<string>()
+  for (let da = 0; ; da += 1000) {
+    const { data, error } = await admin.from('spedizioni').select('tracking_number')
+      .in('corriere_id', corrIds).eq('stato', 'annullata').gte('annullamento_richiesto_at', inizio)
+      .not('tracking_number', 'is', null).order('id').range(da, da + 999)
+    if (error) throw new Error('annullate in sorveglianza non leggibili: ' + error.message)
+    for (const r of (data || [])) trk.add(String(r.tracking_number))
+    if (!data || data.length < 1000) break
+  }
+  if (!trk.size) return vuoto
+  const gambeDi = await gambePerTracking(admin, [...trk])
+  const ids = [...gambeDi.values()].flat().map(g => g.spedizioneId)
+  const eventi = new Map<string, { stato: string; data_evento: string | null }[]>()
+  for (let i = 0; i < ids.length; i += 300) {
+    const { data, error } = await admin.from('tracking_events').select('spedizione_id,stato,data_evento')
+      .in('spedizione_id', ids.slice(i, i + 300)).in('stato', STATI_PARTITA)
+    if (error) throw new Error('eventi delle annullate non leggibili: ' + error.message)
+    for (const e of (data || [])) {
+      if (!eventi.has(e.spedizione_id)) eventi.set(e.spedizione_id, [])
+      eventi.get(e.spedizione_id)!.push({ stato: e.stato, data_evento: e.data_evento || null })
+    }
+  }
+  let partiti = 0, riaddebitati = 0
+  const piano: RiaddebitoPianificato[] = []
+  for (const gambe of gambeDi.values()) {
+    if (!gambe.some(g => g.tipo === 'poste')) continue
+    const ev = gambe.flatMap(g => eventi.get(g.spedizioneId) || [])
+    if (!ev.length) continue
+    partiti++
+    const quando = ev.map(e => e.data_evento).filter(Boolean).sort()[0] || null
+    // Lo stato vero dalla stessa regola delle letture Poste: solo avanti, reso che vince, MAI giacenza
+    // (la apre solo il fornitore). Se gli eventi dicono solo giacenza, il pacco e' comunque in viaggio.
+    const r = await riaddebitaPaccoPartito(admin, gambe, { stato: statoDaLetturaPoste(ev, 'spedita') || 'in_transito', quando }, { simula: opz.simula })
+    piano.push(...r.piano)
+    if (r.gambe) {
+      riaddebitati++
+      if (!opz.simula) console.warn('[ANNULLO-POSTE] annullata ma affidata al corriere, riaddebitata:', gambe[0]?.numero)
+    }
+  }
+  return { pacchi: [...gambeDi.values()].filter(g => g.some(x => x.tipo === 'poste')).length, partiti, riaddebitati, piano }
 }

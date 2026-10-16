@@ -118,7 +118,13 @@ export async function GET(req: NextRequest) {
     : { data: [] as any[] }
   const sorvegliate = new Set((annullatePoste || []).map((s: any) => s.id))
 
-  const lista = [...listaPoste, ...(annullatePoste || []), ...listaSpedisci]
+  // Le annullate si MESCOLANO alle attive, una ogni quattro: Poste ci blocca quasi a ogni giro dopo una
+  // ventina di letture (bloccati=6 in tutti i giri del 15-16/10), e messe in coda non venivano mai lette.
+  const mescolata: any[] = []
+  const daSorvegliare = [...(annullatePoste || [])]
+  listaPoste.forEach((s: any, i: number) => { mescolata.push(s); if (i % 4 === 3 && daSorvegliare.length) mescolata.push(daSorvegliare.shift()) })
+  mescolata.push(...daSorvegliare)
+  const lista = [...mescolata, ...listaSpedisci]
   const rileggere = new Set([...listaPoste, ...(annullatePoste || [])].map((s: any) => s.id))
   if (!lista.length) return NextResponse.json({ ok: true, fatte: 0, messaggio: 'niente da leggere' })
 
