@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
+import { trovaOwnerContratto } from '@/lib/annullaSpedizione'
 
 // Dettaglio/stato di una spedizione creata via API
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -27,7 +28,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 // Annulla una spedizione creata via API — SOLO se ancora "in_lavorazione".
 // Come la UI: va in ATTESA 48h (annullamento_pending); l'annullo al corriere + storno
-// avvengono dopo, via cron. Niente annullata immediata.
+// avvengono dopo, via cron. Niente annullata immediata. Eccezione, come nella UI: i contratti DVA
+// chiedono lo storno SUBITO e restano in 'storno_richiesto' finche' il corriere non conferma.
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
@@ -45,10 +47,39 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return NextResponse.json({ error: MSG_CANCELLAZIONE_VIETATA }, { status: 403 })
   if (sped.stato === 'annullata') return NextResponse.json({ success: true, already: true })
   if (sped.stato === 'annullamento_pending') return NextResponse.json({ success: true, pending: true })
+  if (sped.stato === 'storno_richiesto') return NextResponse.json({ success: true, stato: 'storno_richiesto', message: 'Annullamento già richiesto al corriere: è in verifica.' })
+  if (sped.stato === 'annullamento_manuale') return NextResponse.json({ success: true, stato: 'annullamento_manuale', message: 'Annullamento già in gestione.' })
 
   // REGOLA API: annullabile solo finché è in lavorazione (non ancora data al corriere).
   if (sped.stato !== 'in_lavorazione') {
     return NextResponse.json({ error: 'Spedizione già affidata al corriere: non annullabile via API' }, { status: 409 })
+  }
+
+  // CONTRATTI DVA: stesso ramo di spedizioni/elimina. Prima anche dall'API si aspettavano le 48 ore e
+  // solo dopo il cron chiedeva lo storno: altre 48 ore di etichetta valida, senza motivo, prima che
+  // la richiesta arrivasse a chi la deve lavorare. Il rimborso resta alla conferma del corriere.
+  const { data: corr } = await admin.from('corrieri').select('tipo,nome_contratto,master_id').eq('id', sped.corriere_id).maybeSingle()
+  if (corr?.tipo === 'easyparcel') {
+    const { richiediStornoDva } = await import('@/lib/storno-dva')
+    const { data: rr } = await admin.from('spedizioni').select('raw_response').eq('id', id).maybeSingle()
+    let r
+    try { r = await richiediStornoDva(admin, { ...sped, raw_response: rr?.raw_response } as any, null) }
+    catch (e: any) { r = { azione: 'manuale' as const, codice: 'errore', messaggio: e?.message || 'errore storno' } }
+    if (r.azione === 'gia_cancellato') {
+      after(async () => { try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, [id]) } catch (e: any) { console.error('[SHOPIFY][ANNULLO da api v1]', id, e?.message) } })
+      return NextResponse.json({ success: true, stato: 'annullata', message: 'Spedizione annullata e credito stornato.' })
+    }
+    if (r.azione === 'richiesto') {
+      return NextResponse.json({ success: true, stato: 'storno_richiesto', message: 'Annullamento richiesto al corriere: è in verifica. Il credito viene stornato appena il corriere conferma la cancellazione.' })
+    }
+    // Non stornabile / errore / transitorio -> coda del DETENTORE col motivo, come dal portale.
+    const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
+    const { error: manErr } = await admin.from('spedizioni').update({
+      stato: 'annullamento_manuale', stato_precedente: sped.stato, annullamento_owner_id: ownerId,
+      annullamento_richiesto_at: new Date().toISOString(), annullamento_da: null, annullamento_errore: r.messaggio || null,
+    }).eq('id', id)
+    if (manErr) return NextResponse.json({ error: manErr.message }, { status: 400 })
+    return NextResponse.json({ success: true, stato: 'annullamento_manuale', message: 'Annullamento richiesto: verrà completato dall\'assistenza e il credito stornato alla conferma.' })
   }
 
   // STESSA regola della UI: la cancellazione va in ATTESA 48h (annullamento_pending), poi il cron

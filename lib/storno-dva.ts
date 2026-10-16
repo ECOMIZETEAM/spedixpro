@@ -54,6 +54,9 @@ export async function richiediStornoDva(admin: any, sped: SpedStorno, createdBy:
   if (!e) return { azione: 'manuale', codice: 'nessun_esito', messaggio: 'DVA senza esito' }
   if (e.codice === 'cancellato') { await annullaERimborsa(admin, sped, createdBy || sped.annullamento_da || null); return { azione: 'gia_cancellato', codice: e.codice, messaggio: e.messaggio } }
   if (e.codice === 'ammesso' || e.codice === 'gia_richiesto') {
+    // "Ammesso" ma NON registrato: e' successo a 5 spedizioni (13-16/10) che DVA, riletto, dava senza
+    // richiesta. Resta comunque 'storno_richiesto': e' il cron a rimandarla (vedi riconciliaStorniDvaCron).
+    if (e.codice === 'ammesso' && e.richiesto === false) console.warn('[STORNO-DVA] ammesso ma non registrato da DVA:', sped.numero, e.id_ordine, 'stato DVA', e.stato)
     await admin.from('spedizioni').update({ stato: 'storno_richiesto', annullamento_richiesto_at: new Date().toISOString(), annullamento_da: createdBy || sped.annullamento_da || null, annullamento_errore: null }).eq('id', sped.id)
     return { azione: 'richiesto', codice: e.codice, messaggio: e.messaggio }
   }
@@ -79,24 +82,29 @@ export async function riconciliaStornoDva(admin: any, sped: SpedStorno): Promise
 }
 
 // CRON: riconcilia TUTTE le 'storno_richiesto'. Batch solo_verifica (500/chiamata, per apikey) -> su
-// 'cancellato' annullata + rimborso; 'gia_richiesto'/'ammesso' resta in attesa (ma >GIORNI_TIMEOUT ->
-// manuale per revisione); altro codice -> manuale. Ritorna i conteggi. Niente storni NUOVI (solo verifica).
+// 'cancellato' annullata + rimborso; 'gia_richiesto' resta in attesa; altro codice -> manuale. Oltre
+// GIORNI_TIMEOUT dalla richiesta -> manuale per revisione. Ritorna i conteggi.
+// 'ammesso' in verifica vuol dire che DVA la richiesta NON ce l'ha (stato 6, non 13): il 16/10 erano 5
+// su 96, e aspettarle non serviva a niente — nessuno a DVA le avrebbe mai lavorate, e dopo 10 giorni
+// finivano in coda manuale con l'etichetta ancora valida. Si RIMANDA la richiesta. annullamento_richiesto_at
+// resta quello della prima: il timeout conta da li', cosi' i rinvii hanno un termine.
 const GIORNI_TIMEOUT = 10
-export async function riconciliaStorniDvaCron(admin: any): Promise<{ completate: number; inCorso: number; manuali: number; errori: number; totale: number }> {
+export async function riconciliaStorniDvaCron(admin: any): Promise<{ completate: number; inCorso: number; rimandate: number; manuali: number; errori: number; totale: number }> {
   const { data: speds } = await admin.from('spedizioni')
     .select('id,numero,dest_nome,corriere_id,raw_response,annullamento_da,annullamento_richiesto_at')
     .eq('stato', 'storno_richiesto').limit(2000)
-  if (!speds?.length) return { completate: 0, inCorso: 0, manuali: 0, errori: 0, totale: 0 }
+  if (!speds?.length) return { completate: 0, inCorso: 0, rimandate: 0, manuali: 0, errori: 0, totale: 0 }
   const corrIds = [...new Set(speds.map((s: any) => s.corriere_id))]
   const { data: corrs } = await admin.from('corrieri').select('id,tipo,credenziali').in('id', corrIds)
   const apikeyDi = new Map<string, string>()
   for (const c of corrs || []) if ((c as any).tipo === 'easyparcel') { const k = ((c as any).credenziali)?.apikey; if (k) apikeyDi.set((c as any).id, k) }
   const perAk = new Map<string, { sped: any; id: number }[]>()
   for (const s of speds) { const io = idOrdineEasyparcel(s.raw_response); const ak = apikeyDi.get(s.corriere_id); if (io && ak) (perAk.get(ak) || perAk.set(ak, []).get(ak)!).push({ sped: s, id: io }) }
-  let completate = 0, inCorso = 0, manuali = 0, errori = 0
+  let completate = 0, inCorso = 0, rimandate = 0, manuali = 0, errori = 0
   for (const [ak, arr] of perAk) {
     for (let i = 0; i < arr.length; i += 500) {
       const chunk = arr.slice(i, i + 500)
+      const daRimandare: { sped: any; id: number }[] = []
       try {
         const r = await easyparcelStorno(ak, chunk.map(x => x.id), true)
         const byId = new Map(chunk.map(x => [x.id, x.sped]))
@@ -106,13 +114,28 @@ export async function riconciliaStorniDvaCron(admin: any): Promise<{ completate:
           else if (e.codice === 'gia_richiesto' || e.codice === 'ammesso') {
             const giorni = s.annullamento_richiesto_at ? (Date.now() - new Date(s.annullamento_richiesto_at).getTime()) / 864e5 : 0
             if (giorni > GIORNI_TIMEOUT) { await admin.from('spedizioni').update({ stato: 'annullamento_manuale', annullamento_errore: `Storno DVA non confermato dopo ${GIORNI_TIMEOUT} giorni: da verificare.` }).eq('id', s.id); manuali++ }
+            else if (e.codice === 'ammesso') daRimandare.push({ sped: s, id: e.id_ordine })
             else inCorso++
           } else {
             await admin.from('spedizioni').update({ stato: 'annullamento_manuale', annullamento_errore: `Storno non completato: ${e.messaggio}`.slice(0, 200) }).eq('id', s.id); manuali++
           }
         }
-      } catch (e: any) { errori += chunk.length; console.error('[STORNO-DVA][CRON] batch:', e?.message) }
+      } catch (e: any) { errori += chunk.length; console.error('[STORNO-DVA][CRON] batch:', e?.message); continue }
+      if (!daRimandare.length) continue
+      // Rinvio vero (solo_verifica=false), stesse regole di richiediStornoDva: niente rimborso finche'
+      // DVA non risulta 'cancellato'.
+      try {
+        const r = await easyparcelStorno(ak, daRimandare.map(x => x.id), false)
+        const byId = new Map(daRimandare.map(x => [x.id, x.sped]))
+        for (const e of r.esiti) {
+          const s = byId.get(e.id_ordine); if (!s) continue
+          if (e.codice === 'cancellato') { await annullaERimborsa(admin, s, s.annullamento_da || null); completate++ }
+          else if (e.codice === 'ammesso' || e.codice === 'gia_richiesto') { rimandate++; console.log('[STORNO-DVA][CRON] richiesta rimandata:', s.numero, e.id_ordine, 'registrata:', e.richiesto, 'stato DVA', e.stato) }
+          else if (TRANSITORIO.has(e.codice)) inCorso++
+          else { await admin.from('spedizioni').update({ stato: 'annullamento_manuale', annullamento_errore: `Storno non completato: ${e.messaggio}`.slice(0, 200) }).eq('id', s.id); manuali++ }
+        }
+      } catch (e: any) { errori += daRimandare.length; console.error('[STORNO-DVA][CRON] rinvio:', e?.message) }
     }
   }
-  return { completate, inCorso, manuali, errori, totale: speds.length }
+  return { completate, inCorso, rimandate, manuali, errori, totale: speds.length }
 }
