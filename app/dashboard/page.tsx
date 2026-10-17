@@ -6,6 +6,7 @@ import GuadagnoChart from '@/app/components/GuadagnoChart'
 import BannerSms from '@/app/components/BannerSms'
 import GuadagnoAgente from '@/app/components/GuadagnoAgente'
 import DestinazioniWidget from '@/app/components/DestinazioniWidget'
+import ResiReteWidget from '@/app/components/ResiReteWidget'
 
 export default function Dashboard() {
   const [data, setData] = useState<any>(null)
@@ -287,6 +288,9 @@ export default function Dashboard() {
           <div style={{fontSize:'11px',color:'#999',marginTop:'4px'}}>{data.topCliente?.n ? `${Number(data.topCliente.n).toLocaleString()} spedizioni` : 'nessun dato'}</div>
         </div>
       </div>
+
+      {/* Resi della rete: i clienti con troppi resi (truffe, clienti in difficolta'), vedi ResiReteWidget */}
+      <ResiReteWidget />
 
       {/* Grafici */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))',gap:'16px'}}>

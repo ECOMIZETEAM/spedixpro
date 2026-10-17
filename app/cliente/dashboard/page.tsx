@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
 import DestinazioniWidget from '@/app/components/DestinazioniWidget'
+import ResiClienteBlocco from '@/app/components/ResiClienteBlocco'
 import { leggiCondiviso } from '@/lib/richiesta-condivisa'
 export default function ClienteDashboard() {
   const [data, setData] = useState<any>(null)
@@ -147,6 +148,8 @@ export default function ClienteDashboard() {
           <div style={{...kpiValue,fontSize:'20px',color:Number(data.codDaIncassare)>0?'#ea580c':'#1a1a1a'}}>€ {Number(data.codDaIncassare||0).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
         </div>
       </div>
+      {/* La percentuale dei propri resi (stessi colori che vede il master), ultimi 90 giorni */}
+      <ResiClienteBlocco />
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:'16px'}}>
         <div style={card}>
           <div style={cardH}>Statistiche</div>

@@ -37,6 +37,7 @@ const NAV: NavItem[] = [
   { label: 'Resi', href: '/dashboard/resi', icon: '↺', sub: [
     { label: 'Scansiona Resi', href: '/dashboard/resi/scansiona', perm: 'admin.renderlist.scan' },
     { label: 'Elenco Distinte Resi', href: '/dashboard/resi/distinte', perm: 'admin.renderlist.index' },
+    { label: 'Analisi Resi', href: '/dashboard/resi/analisi', perm: 'admin.renderlist.index' },
   ]},
   { label: 'Dal mio network', href: '/dashboard/network', icon: '⊛', perm: 'admin.interno.deliveries.in' },
   { label: 'Assistenza Clienti', icon: '☏', always: true, sub: [
