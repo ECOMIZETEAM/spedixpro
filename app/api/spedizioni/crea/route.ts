@@ -2302,12 +2302,32 @@ export async function POST(req: NextRequest) {
       // su brt.it). Il parcelID (18) e' l'id del COLLO e resta in raw_response.parcelID per l'API tracking.
       const numeroFinale = ris.trackingByParcelID || ris.parcelID
 
+      // MITTENTE STAMPATO. BRT scrive nella casella mittente l'intestatario del CONTO, non il mittente
+      // della spedizione: sul BRT di Wave ship ogni pacco usciva "WAVESHIP LLC EIN", anche quello di un
+      // suo cliente. Solo sui contratti con settings.etichetta_mittente_spedizione (oggi solo quello di
+      // Wave) la riga diventa il mittente vero, collo per collo prima di unire le etichette. L'impostazione
+      // si legge dal contratto del DETENTORE (contratto_id): le copie dei sotto-master non la portano, ma
+      // il conto BRT è lo stesso. Mai bloccante: la spedizione esiste già su BRT, qualunque intoppo qui
+      // lascia l'etichetta di BRT com'è.
+      let etichetteBrt = ris.etichette
+      try {
+        const { data: ccBrt } = await adminCrea.from('corrieri').select('contratto_id').eq('id', corriereRecord.id).maybeSingle()
+        const radiceBrt = (ccBrt as any)?.contratto_id || corriereRecord.id
+        const settRadiceBrt = radiceBrt === corriereRecord.id ? corriereRecord.settings
+          : (await adminCrea.from('corrieri').select('settings').eq('id', radiceBrt).maybeSingle()).data?.settings
+        if ((settRadiceBrt as any)?.etichetta_mittente_spedizione === true && etichetteBrt.length) {
+          const { mittenteEtichettaBrt } = await import('@/lib/etichetta-brt')
+          const opzMitt = { nome: body.shipFrom?.name, provincia: body.shipFrom?.state, destinatario: body.shipTo?.name }
+          etichetteBrt = await Promise.all(etichetteBrt.map(b => mittenteEtichettaBrt(b, opzMitt)))
+        }
+      } catch (e) { console.error('[CREA][BRT] mittente etichetta:', e) }
+
       // L'etichetta BRT torna GIÀ nella create (una per collo): niente chiamata separata come il GLS.
       let etichettaUrl: string | null = null
-      const etichettePerCollo = ris.etichette.map(b => `data:application/pdf;base64,${b}`)
-      if (ris.etichette.length) {
+      const etichettePerCollo = etichetteBrt.map(b => `data:application/pdf;base64,${b}`)
+      if (etichetteBrt.length) {
         const { unisciEtichette } = await import('@/lib/easyparcel')
-        const merged = ris.etichette.length > 1 ? await unisciEtichette(ris.etichette) : ris.etichette[0]
+        const merged = etichetteBrt.length > 1 ? await unisciEtichette(etichetteBrt) : etichetteBrt[0]
         etichettaUrl = merged ? `data:application/pdf;base64,${merged}` : (etichettePerCollo[0] || null)
       }
 
